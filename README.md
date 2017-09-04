@@ -1,7 +1,16 @@
-#xylang
-一种语言设想
+# The XyLang Programming Language
+XyLang is an open source programming language that makes programming easy and simple.
 
-1. 数量极少并且都经过简化的语法设计。
-2. 表达规律统一，编写阅读都容易。
-3. 直观、稳定、简单。
-4. 借助CLR，支持大多数需求场景。
+This is the main source code repository for XyLang. It contains the compiler, standard library, and documentation.
+
+## Features
++ Grammar is few and simplified, only 18 keywords.
++ It is easy to write and read.
++ With CLR, most scenes can be supported.
++ It can be translated into other languages as an portable language.
+
+## Getting Started
+Read ["Start"] from The [Book].
+
+["Start"]: https://naxy.me
+[Book]: https://naxy.me
