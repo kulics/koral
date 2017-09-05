@@ -31,8 +31,8 @@
     //无参数无返回值函数
     invr b2c = () -> ()
     {
-        A;
-        B;
+        doSomeThingA();
+        doSomeThingB();
     };
 
     //无名称完整函数，函数第一个括号为元组参数，箭头后的为元组返回值
@@ -58,47 +58,47 @@
     jg x
     {
         0...6 ->
-            A;
+            doSomeThingA();
         14 ->
-            B;
+            doSomeThingB();
         _ -> //缺省执行，省略的话找不到匹配会自动跳出
-            C;
+            doSomeThingC();
     };
 
     //当参数的结果只有bool时，相当于if，只当true时才执行
     jg 1+1 != 2
     {
-        A;
+        doSomeThingA();
     };
 
     //当没有参数时，只执行条件为true的语句，代替if-elseif-else
     jg
     {
         1+1 != 2 -> 
-            A;
+            doSomeThingA();
         3-3 > 0 -> 
-            B;
+            doSomeThingB();
     };
 
     // Loop，如果不需要获取值，箭头部分可以省略
     lp array -> item
     {
-        A;
-        B;
+        doSomeThingA();
+        doSomeThingB();
     };
 
     //范围循环
     lp 0...num
     {
-        A;
-        B;
+        doSomeThingA();
+        doSomeThingB();
     };
 
     //当没有参数时，无限循环
     lp
     {
-        A;
-        B;
+        doSomeThingA();
+        doSomeThingB();
         jg a > b 
         {
             brk; //使用brk跳出循环
@@ -119,13 +119,13 @@
     {
         cry = () -> () 
         {
-            A;
-            B;
+            doSomeThingA();
+            doSomeThingB();
         };
         sleep = () -> ()
         {
-            A;
-            B;
+            doSomeThingA();
+            doSomeThingB();
         };
     };
 
@@ -138,8 +138,8 @@
     {
         sleep = () -> ()
         {
-            A;
-            B;
+            doSomeThingA();
+            doSomeThingB();
         };
     };
 
@@ -207,7 +207,7 @@
     // Defer function
     dfr
     {
-        A;
+        doSomeThingA();
     };
 
     // Declare an Excption Function
@@ -235,8 +235,8 @@
     vr task = $(in:number) -> (out:number)
     {
         // Use .. to make a function to await
-        .. A; 
-        B;
-        .. C; 
+        .. doSomeThingA(); 
+        doSomeThingB();
+        .. doSomeThingC(); 
         out = in;
     };
