@@ -1,6 +1,5 @@
 # The XyLang Programming Language
-XyLang is an open source programming language that makes programming easy and simple.
-
+XyLang is an open source programming language that makes programming easy and simple.  
 This is the main source code repository for XyLang. It contains the compiler, standard library, and documentation.
 
 ## Features
@@ -14,3 +13,27 @@ Read ["Start"] from The [Book].
 
 ["Start"]: https://naxy.me
 [Book]: https://naxy.me
+
+## Quick Preview
+    xpt Main;
+
+    mpt System;
+
+    invr main = () -> ()  
+    {
+        vr greetings = ["Hello", "Hola", "Bonjour",
+                     "Ciao", "こんにちは", "안녕하세요",
+                     "Cześć", "Olá", "Здравствуйте",
+                     "Chào bạn", "您好"];
+        lp greetings -> (num, geeting)
+        {
+            print(greeting);
+            jg num 
+            {
+                0...10 ->
+                    println();
+                _ ->
+                    rpt "Something Wrong";
+            }
+        };
+    };
