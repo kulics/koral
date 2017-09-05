@@ -1,35 +1,32 @@
 # Grammar Overview
-    //导出
-    xpt A;
+    // Export
+    xpt Overview;
 
-    //导入
-    mpt B;
+    // Import
+    mpt System;
 
-    //变量和不变量声明都必须要初始化
-    //变量，当可以明确判断类型时，:type 可以省略。例如 vr a = "10";
+    // Variable，当可以明确判断类型时，:type 可以省略。例如 vr a = "10";
     vr a = "10" :string;
     vr c = 1.2 :number;
     vr d = true :bool;
 
-    //不变量，同上可省略
+    // Invariable
     invr e = 2;
 
-    //数组
+    // Array
     vr arr = [1,2,3,4,5] :[number];
-    //空数组创建 []:[number] 等价于 List<number>{}
     print( arr[0] ); //使用下标获取
 
-    //字典，前面为key，后面为value
+    // Dictionary, 前面为key，后面为value
     vr dic = ["1":false, "2":true] :[string:bool];
-    //空字典创建 []:[string:bool] 等价于 Dictionary<string,bool>{}
     print( dic["1"] ); //使用key获取
 
-    //元组
-    vr tuple1 = (1, 2) :(number, number); //等价于 Tuple<number,number>{}
-    vr tuple2 = (a:1, b:2);
+    // Tuple
+    vr tpl1 = (1, 2) :(number, number); 
+    vr tpl2 = (a:1, b:2);
 
-    //函数
-    vr e = (number) -> (number){} :(number)->(number); //等价于 Function<number><number>{}
+    // Function
+    vr e = (number) -> (number){} :(number)->(number); 
 
     //无参数无返回值函数
     invr b2c = () -> ()
@@ -57,7 +54,7 @@
     //使用 _ 舍弃返回值，必须要接收返回值
     _ = a2b(x:3, y:"test");
 
-    //判断，符合条件的箭头内容被执行，然后自动跳出，无法手动控制
+    // Judge，符合条件的箭头内容被执行，然后自动跳出，无法手动控制
     jg x
     {
         0...6 ->
@@ -83,7 +80,7 @@
             B;
     };
 
-    //遍历循环，如果不需要获取值，箭头部分可以省略
+    // Loop，如果不需要获取值，箭头部分可以省略
     lp array -> item
     {
         A;
@@ -109,8 +106,7 @@
         };
     };
 
-    //pkg，ptcl中，vr、invr、fnc首字母大写表示public，小写表示private
-    //包头，属性集合，只能定义一次
+    // Package Head，属性集合，只能定义一次
     pkg hd Animal //hd只支持vr 非函数类型
     {
         type = "";
@@ -118,7 +114,7 @@
         name = "";
     };
 
-    //包片段，方法集合，可以定义多次，只要方法不存在重名
+    // Package Fragment，方法集合，可以定义多次，只要方法不存在重名
     pkg frg Animal //frg只支持vr 函数类型
     {
         cry = () -> () 
@@ -147,14 +143,14 @@
         };
     };
 
-    //组合包，通过引入来复用属性和方法
+    //Combine Package，通过引入来复用属性和方法
     pkg hd Dog
     {
         ~Animal; //引入包
         type = ""; //重名自动覆盖，这会代替包原本的属性
         ~Pet;    //当包的属性名称唯一时，编译器自动继承。否则不能通过同名直接使用，要么通过子属性访问，要么手动指定名称。
         name~Pet.name; //手动重新指定继承
-        //实现协议变量
+        // Implement protocol property
         ~Run
         {
             speed = 0;
@@ -168,7 +164,7 @@
             slf.Animal.cry(); //手动重载方法，slf用来指定自身
         };
         sleep~Pet.sleep; //手动重新指定继承
-        //实现Run协议
+        // Implement protocol method
         ~Run
         {
             move = (s: (number) -> (string) )  -> ()
@@ -181,7 +177,7 @@
         };
     };
 
-    //协议，由包实现
+    // Protocol, implemented by package
     ptcl Run
     {
         vr speed = 0; //协议支持变量，在包头中实现
@@ -193,51 +189,54 @@
         vr move = (s: (number) -> (string)) -> (){}; //协议的方法，在包片段中实现
     };
 
-    //创建对象
+    // Create an object
     vr d1 = Dog{};
-    //设置对象属性
+    // Calling object property
     d1.name = "Tiny";
-    //调用对象方法
+    // Calling object method
     d1.cry();
     _ = d1.breath();
 
-    //使用匿名函数
+    // Lambda Function
     d1.move(s: _(time:number) -> (txt:string)
     { 
         invr t = time;
         txt = t :string + "ok";
     });
 
-    //延时任务
+    // Defer function
     dfr
     {
         A;
     };
 
+    // Declare an Excption Function
     vr readFile = (url:string) -> (data:string)
     {
         jg url.length < 1
         {
-            rpt ErrorInput("URL is none"); //报告某个错误
+            // Report some error
+            rpt ErrorInput("URL is none"); 
         };
         data = url;
     };
 
-    //异常检查
+    // Check, listen the Excption Function
     chk
     {
         readFile(url:"./test.xy");
     }
-    -> ErrorInput //捕获问题，可以在后面继续添加，或者省略全部
+    -> ErrorInput // Catch the report
     {
         slf.exit(0);
     };
 
-    //异步方法声明
+    // Use $ to declare async function
     vr task = $(in:number) -> (out:number)
     {
-        .. A; //异步等待
+        // Use .. to make a function to await
+        .. A; 
         B;
-        .. C; //异步等待
+        .. C; 
         out = in;
     };

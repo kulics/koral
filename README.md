@@ -9,7 +9,7 @@ This is the main source code repository for XyLang. It contains the compiler, st
 + It can be translated into other languages as an portable language.
 
 ## Getting Started
-Read ["Start"]() from The [Book]().
+Read detail from The [Book]().
 
 ## Quick Preview
     xpt Main;
