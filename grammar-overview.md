@@ -6,12 +6,12 @@
     mpt System;
 
     // Variable，当可以明确判断类型时，:type 可以省略。例如 vr a = "10";
-    vr a = "10" :string;
-    vr c = 1.2 :number;
-    vr d = true :bool;
+    vr str = "10" :string;
+    vr num = 1.2 :number;
+    vr bl = true :bool;
 
     // Invariable
-    invr e = 2;
+    invr pi = 3.141592653;
 
     // Array
     vr arr = [1,2,3,4,5] :[number];
@@ -26,24 +26,24 @@
     vr tpl2 = (a:1, b:2);
 
     // Function
-    vr e = (number) -> (number){} :(number)->(number); 
+    vr fn = (number) -> (number){} :(number)->(number); 
 
     //无参数无返回值函数
-    invr b2c = () -> ()
+    invr doSomeThingVoid = () -> ()
     {
         doSomeThingA();
         doSomeThingB();
     };
 
     //无名称完整函数，函数第一个括号为元组参数，箭头后的为元组返回值
-    invr c2d = (number, string) -> (number, string)
+    invr doSomeThingNoName = (number, string) -> (number, string)
     {
         rcv (x, y);  //使用rcv来接收参数
         rtn (x, y);  //使用rtn来返回结果
     };
 
     //带名称完整函数，返回值如参数一样，会自动初始化。
-    invr a2b = (x:number, y:string) -> (a:number, b:string)
+    invr doSomeThingHaveName = (x:number, y:string) -> (a:number, b:string)
     {
         a = x;
         b = y;
