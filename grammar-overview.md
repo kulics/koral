@@ -1,8 +1,8 @@
 # Grammar Overview
-    // Export
+    // Export Space
     xpt Overview;
 
-    // Import
+    // Import Space
     mpt System;
 
     // Variable，当可以明确判断类型时，:type 可以省略。例如 vr a = "10";
