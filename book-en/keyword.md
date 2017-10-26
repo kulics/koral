@@ -10,7 +10,7 @@ jg -> judge
 
 lp -> loop  
 brk -> break  
-cnt -> continue  
+fl -> fall  
 
 rcv -> receive  
 rtn -> return

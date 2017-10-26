@@ -10,7 +10,7 @@ jg -> judge 判断
 
 lp -> loop 循环  
 brk -> break 跳出  
-cnt -> continue 继续  
+fl -> fall 继续向下执行  
 
 rcv -> receive 接收  
 rtn -> return 返回
