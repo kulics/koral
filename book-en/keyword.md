@@ -16,8 +16,8 @@ rcv -> receive
 rtn -> return
 
 pkg -> package  
-h -> header  
-s -> section  
+hd -> header  
+sct -> section  
 slf -> self
 
 ptcl -> protocol

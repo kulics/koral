@@ -16,8 +16,8 @@ rcv -> receive 接收
 rtn -> return 返回
 
 pkg -> package 包  
-h -> header 开头  
-s -> section 段落  
+hd -> header 开头  
+sct -> section 段落  
 slf -> self 自身
 
 ptcl -> protocol 协议
