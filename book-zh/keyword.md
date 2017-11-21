@@ -25,7 +25,6 @@ ptcl -> protocol 协议
 dfr -> defer 延迟执行
 
 chk -> check 检查异常  
-rpt -> report 报告异常
 
 ## 原始类型
 nil 空  
