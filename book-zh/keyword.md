@@ -7,13 +7,11 @@ vr -> variable 变量
 invr -> invariable 不变量  
 
 jg -> judge 判断  
+cs -> case 条件
 
 lp -> loop 循环  
 brk -> break 跳出  
 fl -> fall 继续向下执行  
-
-rcv -> receive 接收  
-rtn -> return 返回
 
 pkg -> package 包  
 hd -> header 开头  
