@@ -3,8 +3,7 @@
 xpt -> export 导出  
 mpt -> import 导入  
 
-vr -> variable 变量  
-invr -> invariable 不变量  
+df -> define 定义  
 
 jg -> judge 判断  
 cs -> case 条件  
@@ -19,8 +18,6 @@ s -> section 段落
 slf -> self 自身  
 
 ptcl -> protocol 协议  
-
-dfr -> defer 延迟执行  
 
 chk -> check 检查异常  
 
