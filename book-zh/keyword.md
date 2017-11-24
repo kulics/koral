@@ -12,10 +12,7 @@ lp -> loop 循环
 brk -> break 跳出  
 fl -> fall 继续向下执行  
 
-pkg -> package 包  
 slf -> self 自身  
-
-ptcl -> protocol 协议  
 
 chk -> check 检查异常  
 

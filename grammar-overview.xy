@@ -118,19 +118,33 @@ lp
     };
 };
 
-// Package
+// Package，最基础的类型，类型就是自己
 df package = #{}:#{};
 
-// Package，属性集合，只能定义一次
-df Animal = # // 只支持variable 非函数类型
+// Package，只支持 variable 类型，通常用来包装数据
+df Animal = # 
 {
     type = "";
     age = 0;
     name = "";
 };
 
-// Package extension，方法集合，可以定义多次，只要方法不存在重名
-df Animal = # <- Animal  // 只支持variable 函数类型
+// 也支持包装方法
+df Pet = # 
+{
+    name = "";
+
+    sleep = () -> ()
+    {
+        // 可以通过slf来访问内部属性或方法
+        print(slf.name);
+        doSomeThingA();
+        doSomeThingB();
+    };
+};
+
+// RePackage ，对某个包重新打包，只允许使用这种方式覆盖同名包，可以用来扩展方法
+df Animal = # <- Animal  
 {
     cry = () -> () 
     {
@@ -144,30 +158,16 @@ df Animal = # <- Animal  // 只支持variable 函数类型
     };
 };
 
-// 也可以使用合并写法
-df Pet = # 
-{
-    name = "";
-    <- slf
-    {
-        sleep = () -> ()
-        {
-            doSomeThingA();
-            doSomeThingB();
-        };
-    };
-};
-
 // Protocol, implemented by package
-df Run = ptcl 
+df Run = <-> 
 {
-    df &speed = 0; // 协议支持变量，在包头中实现
-    df HIGHSPEED = 10;   // 协议的不变量，必须在协议中初始化，作为公共属性给任意地方使用，只读
-    df breath = () -> (string) // 协议的不变量方法，必须在协议中初始化，作为公共方法给任意地方使用，只读
+    &speed = 0; // 可变量，导入的包必须实现定义
+    HIGHSPEED = 10;   // 不可变量，必须在协议中初始化，作为公共属性给任意地方使用，只读
+    breath = () -> (string) // 不可变方法，必须在协议中初始化，作为公共方法给任意地方使用，只读
     {
         -> "ha";
     };
-    df &move = (s: (number) -> (string)) -> (){}; // 协议的方法，在包片段中实现
+    &move = (s: (number) -> (string)) -> (){}; // 可变方法，导入的包必须实现定义
 };
 
 // Combine Package，通过引入来复用属性和方法
@@ -177,11 +177,6 @@ df Dog = #
     type = ""; // 重名自动覆盖，这会代替包原本的属性
     <- Pet;    // 当包的属性名称唯一时，编译器自动继承。否则不能通过同名直接使用，要么通过子属性访问，要么手动指定名称。
     name <- Pet.name; // 手动重新指定继承
-    // Implement protocol property
-    <- Run
-    {
-        speed = 0;
-    };
 };
 
 df Dog = # <- Dog
@@ -191,9 +186,11 @@ df Dog = # <- Dog
         slf.Animal.cry(); // 手动重载方法，slf用来指定自身
     };
     sleep <- Pet.sleep; // 手动重新指定继承
-    // Implement protocol method
+    // Implement protocol
     <- Run
     {
+        speed = 0;
+
         move = (s: (number) -> (string) )  -> ()
         {
             df t = 5000/Run.HIGHSPEED; // 调用协议公开常量
