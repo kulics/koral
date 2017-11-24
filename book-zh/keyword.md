@@ -2,9 +2,6 @@
 ## 命令
 df -> define 定义  
 
-xpt -> export 导出  
-mpt -> import 导入  
-
 jg -> judge 判断  
 cs -> case 条件  
 
