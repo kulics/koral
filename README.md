@@ -12,25 +12,29 @@ This is the main source code repository for XyLang. It contains the compiler, st
 Read detail from The [Book]().
 
 ## Quick Preview
-    xpt Main;
+    --> Main;
 
-    mpt System;
+    <-- System;
 
-    invr main = () -> ()  
+    main => () -> ()  
     {
-        vr greetings = ["Hello", "Hola", "Bonjour",
+        greetings => ["Hello", "Hola", "Bonjour",
                      "Ciao", "こんにちは", "안녕하세요",
                      "Cześć", "Olá", "Здравствуйте",
                      "Chào bạn", "您好"];
-        lp greetings -> (num, geeting)
+        @ greetings <- (num, greeting)
         {
             print(greeting);
-            jg num 
+            ? num 
             {
-                0...10 ->
-                    println();
-                _ ->
-                    rpt "Something Wrong";
-            }
+                ~? 0...10 
+                {
+                    println(num, greeting);
+                };
+                ~? _
+                {
+                    println("More ", num, greeting);
+                };
+            };
         };
     };
