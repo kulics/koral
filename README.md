@@ -29,11 +29,11 @@ Read detail from The [Book]().
             {
                 ~? 0...10 
                 {
-                    println(num, greeting);
+                    println(" in 0-10");
                 };
                 ~? _
                 {
-                    println("More ", num, greeting);
+                    println(" over 10");
                 };
             };
         };
