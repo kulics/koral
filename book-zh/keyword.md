@@ -13,6 +13,6 @@ result 结果类型，包含(code,data)
     [T] = XyArray<T>
     [T:T] = XyDictionary<T,T>
     (T...) = XyTuple{T...}
-    (T...) -> (T...) = XyFunction<T...><T...>
+    $(T...)~(T...) = XyFunction<T...><T...>
     #{T...} = XyPackage{T...}
     <->{T...} = XyProtocol{T...}
