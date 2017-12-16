@@ -7,7 +7,6 @@ bool 布尔
 true 真  
 false 假  
 any 任意类型  
-result 结果类型，包含(code,data)
 
 ## 隐藏类型
     [T] = XyArray<T>
