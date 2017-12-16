@@ -14,4 +14,4 @@ any 任意类型
     (T...) = XyTuple{T...}
     $(T...)~(T...) = XyFunction<T...><T...>
     #{T...} = XyPackage{T...}
-    <->{T...} = XyProtocol{T...}
+    |{T...} = XyProtocol{T...}
