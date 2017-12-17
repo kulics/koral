@@ -12,22 +12,22 @@ This is the main source code repository for XyLang. It contains the compiler, st
 Read detail from The [Book]().
 
 ## Quick Preview
-    --> Main;
+    |> Main;
 
-    <-- System;
+    <| System;
 
-    main => () -> ()  
+    Main => $()~()  
     {
         greetings => ["Hello", "Hola", "Bonjour",
                      "Ciao", "こんにちは", "안녕하세요",
                      "Cześć", "Olá", "Здравствуйте",
                      "Chào bạn", "您好"];
-        @ greetings <- (num, greeting)
+        @ greetings ~ (num, greeting)
         {
             print(greeting);
             ? num 
             {
-                ~? 0...10 
+                ~? 0..10 
                 {
                     println(" in 0-10");
                 };
