@@ -34,6 +34,7 @@ Read detail from The [Book]().
                 ~? _
                 {
                     println(" over 10");
+                    ->;
                 };
             };
         };
