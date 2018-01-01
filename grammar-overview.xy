@@ -1,260 +1,275 @@
 // Grammar Overview
 
 // Export Space
-|> Overview;
-
-// Import Space
-<| System;
-
-// Define, Invariable，当可以明确判断类型时，:type 可以省略。例如 a => "10";
-str => "10" :string;
-num => 1.2 :number;
-bl => true :bool;
-
-// Variable
-&date => 20171111;
-
-// Array
-arr => [1,2,3,4,5] :[number];
-print( arr[0] ); // 使用下标获取
-
-// Dictionary, 前面为key，后面为value
-dic => ["1":false, "2":true] :[string:bool];
-print( dic["1"] ); // 使用key获取
-
-// Tuple
-tpl1 => (1, 2) :(number, number); 
-tpl2 => (a:1, b:2);
-
-// Function
-fn => $(number)~(number){} :$(number)~(number); 
-
-// Function with no params no return
-doSomeThingVoid => $
+|> XyLang.Demo
 {
-    doSomeThingA();
-    doSomeThingB();
-};
-
-// Full Function with no name, the part of before wave is params, the part of behind wave is returns.
-doSomeThingNoName => $(number, string)~(number, string)
-{
-    <- (x, y);  // use <- to receive params
-    -> (x, y);  // use -> to return results
-};
-
-// Full Function with name, the returns will be auto init as params.
-doSomeThingHaveName => $(x:number, y:string)~(a:number, b:string)
-{
-    a = x;
-    b = y;
-    // if you do not need clear exit, you can pass the ->
-};
-
-b2c();
-// 使用 _ 舍弃返回值，必须要接收返回值
-_ => a2b(x:3, y:"test");
-
-// Judge，符合条件的匹配内容被执行，然后自动跳出，无法手动控制
-? x
-{
-    // catch condition
-    ~? 0..6 
+    // Import Space
+    <| 
     {
-        doSomeThingA();
+        System;
+        IO.File;
     };
-    ~? 14 
+
+    main => $
     {
-        doSomeThingB();
-    };
-    ~? _ // 缺省执行，省略的话找不到匹配会自动跳出
-    {
-        doSomeThingC();
-    };
-};
+        // Define, Invariable，当可以明确判断类型时，:type 可以省略。例如 a => "10";
+        str => "10" :string;
+        num => 1.2 :number;
+        bl => true :bool;
 
-// 当参数的结果只有bool时，相当于if，只当true时才执行
-? 1+1 != 2
-{
-    doSomeThingA();
-}
-~? // 相当于else，也可以用来判断绑定为空的情况
-{
-    doSomeThingB();
-};
+        // Variable
+        &date => 20171111;
 
-// 当没有参数时，只执行条件为true的语句，代替if-elseif-else
-?
-{
-    ~? 1+1 != 2 
-    {
-        doSomeThingA();
-    };
-    ~? 3-3 > 0 
-    {
-        doSomeThingB();
-    };
-};
+        // Array
+        arr => [1,2,3,4,5] :[number];
+        print( arr[0] ); // 使用下标获取
 
-// Loop, use ~ to take out single item 
-@ array ~ item
-{
-    doSomeThingA();
-    doSomeThingB();
-};
+        // Dictionary, 前面为key，后面为value
+        dic => ["1":false, "2":true] :[string:bool];
+        print( dic["1"] ); // 使用key获取
 
-// 范围循环，如果不需要获取值，波浪部分可以省略
-@ 0..num
-{
-    doSomeThingA();
-    doSomeThingB();
-};
+        // Tuple
+        tpl1 => (1, 2) :(number, number); 
+        tpl2 => (a:1, b:2);
 
-// 当没有参数时，无限循环
-@
-{
-    doSomeThingA();
-    doSomeThingB();
-    ? a > b 
-    {
-        ~@; // jump out loop
-    };
-};
+        // Function
+        fn => $(number)~(number){} :$(number)~(number); 
 
-// Package，最基础的类型，类型就是自己
-pkg => #{}:#{};
-
-// Package，只支持 variable 类型，通常用来包装数据
-Animal => # 
-{
-    Type => "";
-    Age => 0;
-    Name => "";
-};
-
-// 也支持包装方法
-Pet => # 
-{
-    Name => "";
-
-    Sleep => $
-    {
-        // 可以通过 ^ 来访问包自身属性或方法
-        print( ^.name );
-        doSomeThingA();
-        doSomeThingB();
-    };
-};
-
-// ReDefine ，对某个包扩展，只允许使用这种方式覆盖同名包，可以用来扩展属性或方法
-Animal <= #  
-{
-    Cry => $
-    {
-        doSomeThingA();
-        doSomeThingB();
-    };
-    Sleep => $
-    {
-        doSomeThingA();
-        doSomeThingB();
-    };
-};
-
-// Protocol, implemented by package
-Run => | 
-{
-    &Speed => 0; // 可变量，导入的包必须实现定义
-    HIGHSPEED => 10;   // 不可变量，必须在协议中初始化，作为公共属性给任意地方使用，只读
-    Breath => $()~(string) // 不可变方法，必须在协议中初始化，作为公共方法给任意地方使用，只读
-    {
-        -> "ha";
-    };
-    &Move => $(s:$(number)~(string))~(){}; // 可变方法，导入的包必须实现定义
-};
-
-// Combine Package，通过引入来复用属性和方法
-Dog => # 
-{
-    ~# Animal; // 引入包
-    Type => ""; // 重名自动覆盖，这会代替包原本的属性
-    ~# Pet;    // 当包的属性名称唯一时，编译器自动继承。否则不能通过同名直接使用，要么通过子属性访问，要么手动指定名称。
-    Name => ^.Pet.Name; // 手动重新指定继承
-};
-
-Dog <= #
-{
-    Cry => $ // 若包有重名，自动覆盖
-    {
-        ^.Animal.Cry(); // 手动重载方法
-    };
-    Sleep => ^.Pet.Sleep; // 手动重新指定继承
-    // Implement protocol
-    ~| Run
-    {
-        Speed => 0;
-
-        Move => $(s: $(number)~(string) )~()
+        // Function with no params no return
+        doSomeThingVoid => $
         {
-            t => 5000/Run.HIGHSPEED; // 调用协议公开常量
-            txt => s(time: t);
-            print(txt);
-            Run.Breath(); // 调用协议公开方法
+            doSomeThingA();
+            doSomeThingB();
         };
+
+        // Full Function with no name, the part of before wave is params, the part of behind wave is returns.
+        doSomeThingNoName => $(number, string)~(number, string)
+        {
+            <- (x, y);  // use <- to receive params
+            -> (x, y);  // use -> to return results
+        };
+
+        // Full Function with name, the returns will be auto init as params.
+        doSomeThingHaveName => $(x:number, y:string)~(a:number, b:string)
+        {
+            a = x;
+            b = y;
+            // if you do not need clear exit, you can pass the ->
+        };
+
+        b2c();
+        // 使用 _ 舍弃返回值，必须要接收返回值
+        _ => a2b(x:3, y:"test");
+
+        // Judge，符合条件的匹配内容被执行，然后自动跳出，无法手动控制
+        ? x
+        {
+            // catch condition
+            ~? 0..6 
+            {
+                doSomeThingA();
+            };
+            ~? 14 
+            {
+                doSomeThingB();
+            };
+            ~? _ // 缺省执行，省略的话找不到匹配会自动跳出
+            {
+                doSomeThingC();
+            };
+        };
+
+        // 当参数的结果只有bool时，相当于if，只当true时才执行
+        ? 1+1 != 2
+        {
+            doSomeThingA();
+        }
+        ~? // 相当于else
+        {
+            doSomeThingB();
+        };
+
+        // 当没有参数时，只执行条件为true的语句，代替if-elseif-else
+        ?
+        {
+            ~? 1+1 != 2 
+            {
+                doSomeThingA();
+            };
+            ~? 3-3 > 0 
+            {
+                doSomeThingB();
+            };
+        };
+
+        // Loop, use ~ to take out single item 
+        @ array ~ item
+        {
+            doSomeThingA();
+            doSomeThingB();
+        };
+
+        // 范围循环，如果不需要获取值，波浪部分可以省略
+        @ 0..num
+        {
+            doSomeThingA();
+            doSomeThingB();
+        };
+
+        // 当没有参数时，无限循环
+        @
+        {
+            doSomeThingA();
+            doSomeThingB();
+            ? a > b 
+            {
+                ~@; // jump out loop
+            };
+        };
+
+        // Package，最基础的类型，类型就是自己
+        pkg => #{}:#{};
+
+        // Package，只支持 variable 类型，通常用来包装数据
+        Animal => # 
+        {
+            Type => "";
+            Age => 0;
+            Name => "";
+        };
+
+        // 也支持包装方法
+        Pet => # 
+        {
+            Name => "";
+
+            // 私有方法，不能被重包装
+            _makeName => $
+            {
+                ^.Name = RadomString(); 
+            };
+
+            Sleep => $
+            {
+                // 可以通过 ^ 来访问包自身属性或方法
+                print( ^.name );
+                doSomeThingA();
+                doSomeThingB();
+            };
+        };
+
+        // ReDefine ，对某个包扩展，只允许使用这种方式覆盖同名包，可以用来扩展属性或方法
+        Animal <= #  
+        {
+            Cry => $
+            {
+                doSomeThingA();
+                doSomeThingB();
+            };
+            Sleep => $
+            {
+                doSomeThingA();
+                doSomeThingB();
+            };
+        };
+
+        // Protocol, implemented by package
+        Run => | 
+        {
+            &Speed => 0; // 可变量，导入的包必须实现定义
+            HIGHSPEED => 10;   // 不可变量，必须在协议中初始化，作为公共属性给任意地方使用，只读
+            Breath => $()~(string) // 不可变方法，必须在协议中初始化，作为公共方法给任意地方使用，只读
+            {
+                -> "ha";
+            };
+            &Move => $(s:$(number)~(string))~(){}; // 可变方法，导入的包必须实现定义
+        };
+
+        // Combine Package，通过引入来复用属性和方法
+        Dog => # 
+        {
+            ~# Animal; // 引入包
+            Type => ""; // 重名自动覆盖，这会代替包原本的属性
+            ~# Pet;    // 当包的属性名称唯一时，编译器自动继承。否则不能通过同名直接使用，要么通过子属性访问，要么手动指定名称。
+            Name => ^.Pet.Name; // 手动重新指定继承
+        };
+
+        Dog <= #
+        {
+            Cry => $ // 若包有重名，自动覆盖
+            {
+                ^.Animal.Cry(); // 手动重载方法
+            };
+            Sleep => ^.Pet.Sleep; // 手动重新指定继承
+            // Implement protocol
+            ~| Run
+            {
+                Speed => 0;
+
+                Move => $(s: $(number)~(string) )~()
+                {
+                    t => 5000/Run.HIGHSPEED; // 调用协议公开常量
+                    txt => s(time: t);
+                    print(txt);
+                    Run.Breath(); // 调用协议公开方法
+                };
+            };
+        };
+
+        // Create an object
+        d1 => Dog{};
+        // Calling object property
+        d1.Name = "Tiny";
+        // Calling object method
+        d1.Cry();
+
+        // Lambda Function
+        d1.Move(s: $(time:number)~(txt:string)
+        { 
+            t => time;
+            txt = t :string + "ok";
+        });
+
+        // Use ! to declare an Excption Function, the returns will wrap in Excption automatically
+        readFile => $(url:string)~(f:file)!
+        {
+            ? url.length < 1
+            {
+                // Report some error
+                ~! IOErr("URL is none"); 
+            };
+            -> System.IO.ReadFile(url:url);
+        };
+
+        // Check, listen the Excption Function
+        !
+        {
+            f => readFile(url:"./test.xy");
+        }
+        ~ IOErr // Catch the report
+        {
+            <- err;
+            print(err);
+        }
+        ~! // Finally to do
+        {
+            ? f != nil
+            {
+                f.Close();
+            };
+        };
+
+        // Use ~$ to declare Async Function
+        task => $(in:number)~(out:number)
+        {
+            // make a function to await
+            ~$ doSomeThingA(); 
+            doSomeThingB();
+            ~$ doSomeThingC(); 
+            out = in;
+        };
+
+        x => task(in: 6);
     };
+  
 };
-
-// Create an object
-d1 => Dog{};
-// Calling object property
-d1.Name = "Tiny";
-// Calling object method
-d1.Cry();
-
-// Lambda Function
-d1.Move(s: $(time:number)~(txt:string)
-{ 
-    t => time;
-    txt = t :string + "ok";
-});
-
-// Use ! to declare an Excption Function, the returns will wrap in Excption automatically
-readFile => $(url:string)~(f:file)!
-{
-    ? url.length < 1
-    {
-        // Report some error
-        ~! IOErr("URL is none"); 
-    };
-    -> System.IO.ReadFile(url:url);
-};
-
-// Check, listen the Excption Function
-!
-{
-    f => readFile(url:"./test.xy");
-}
-~ IOErr // Catch the report
-{
-    <- err;
-    print(err);
-}
-~! // Finally to do
-{
-    ? f != nil
-    {
-        f.Close();
-    };
-};
-
-// Use ~$ to declare Async Function
-task => $(in:number)~(out:number)
-{
-    // make a function to await
-    ~$ doSomeThingA(); 
-    doSomeThingB();
-    ~$ doSomeThingC(); 
-    out = in;
-};
-
-x => task(in: 6);
