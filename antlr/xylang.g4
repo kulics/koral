@@ -25,25 +25,33 @@ Terminate : ';';
 Define : '=>';
 Redefine: '<=';
 
-Import : '<--';
-Export : '-->';
+Import : '<:';
+Export : ':>';
 
 Self : '^';
 
 ArrowRight : '->';
 ArrowLeft : '<-';
 
-Judge : '?';
 JudgeSub : '~?';
+Judge : '?';
 
-Loop : '@';
 LoopSub : '~@';
+Loop : '@';
 
-Excption : '!';
 ExcptionSub : '~!';
+Excption : '!';
 
-Function : '$';
 FunctionSub : '~$';
+Function : '$';
+
+PackageSub : '~#';
+Package : '#';
+
+ProtocolSub : '~|';
+Protocol : '|';
+
+Wave : '~';
 
 ID   : [a-zA-Z]+;
 Number  : [0-9]+('.'([0-9]+)?)?
