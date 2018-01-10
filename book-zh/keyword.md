@@ -2,7 +2,7 @@
 ## 原始类型
 nil 空  
 number 数字  
-string 字符串  
+text 文本  
 bool 布尔  
 true 真  
 false 假  
