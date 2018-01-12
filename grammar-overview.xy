@@ -158,25 +158,35 @@
         // 可以通过参数标记，让包支持构造方法，默认可以省略
         Image => # (number,number,text)
         {
-            width => 0;
-            height => 0;
-            source => "";
+            // 私有属性，不能被外部访问，也不能被重包装
+            _width => 0;
+            _height => 0;
+            _source => "";
 
-            // 构造方法，私有方法，不能被重包装
-            _init => $ 
+            // 构造方法
+            init => $ 
             {
-                <- (width,height,source);
+                // 接收构造参数
+                <- (_width, _height, _source);
             };
         };
 
-        // ReDefine ，对某个包扩展，只允许使用这种方式覆盖同名包，可以用来扩展属性或方法
-        View <= #  
+        // ReDefine ，对某个包扩展，只允许使用这种方式覆盖同名包，可以用来扩展属性或方法，也可以重载构造方法
+        View <= # (number,number,text)
         {
+            init => $ 
+            {
+                // 重载构造必须要调用原始构造方法
+                ^.init();
+                <- (Width,Height,Source);
+            };
+
             Show => $
             {
                 doSomeThingA();
                 doSomeThingB();
             };
+
             Hide => $
             {
                 doSomeThingA();
@@ -185,13 +195,13 @@
         };
 
         // Protocol, implemented by package
-        Run => | 
+        Animation => | 
         {
             &Speed => 0; // 可变量，导入的包必须实现定义
-            HIGHSPEED => 10;   // 不可变量，必须在协议中初始化，作为公共属性给任意地方使用，只读
-            Breath => $()~(text) // 不可变方法，必须在协议中初始化，作为公共方法给任意地方使用，只读
+            TopSpeed => 20;   // 不可变量，必须在协议中初始化，作为公共属性给任意地方使用，只读
+            Clear => $()~(text) // 不可变方法，必须在协议中初始化，作为公共方法给任意地方使用，只读
             {
-                -> "ha";
+                -> "Done";
             };
             &Move => $(s:$(number)~(text))~(){}; // 可变方法，导入的包必须实现定义
         };
@@ -199,10 +209,10 @@
         // Combine Package，通过引入来复用属性和方法
         ImageButton => # 
         {
-            ~# Animal; // 引入包
-            Type => ""; // 重名自动覆盖，这会代替包原本的属性
-            ~# Pet;    // 当包的属性名称唯一时，编译器自动继承。否则不能通过同名直接使用，要么通过子属性访问，要么手动指定名称。
-            Name => ^.Pet.Name; // 手动重新指定继承
+            ~# View; // 引入包
+            Title => ""; // 重名自动覆盖，这会代替包原本的属性
+            ~# Button;    // 当包的属性名称唯一时，编译器自动继承。否则不能通过同名直接使用，要么通过子属性访问，要么手动指定名称。
+            Background => ^.Button.Background; // 手动重新指定继承
         };
 
         ImageButton <= #
@@ -211,31 +221,34 @@
             {
                 ^.View.Show(); // 手动重载方法
             };
-            Sleep => ^.Pet.Sleep; // 手动重新指定继承
+            Click => ^.Button.Click; // 手动重新指定继承
             // Implement protocol
-            ~| Run
+            ~| Animation
             {
-                Speed => 0;
+                Speed => 2;
 
                 Move => $(s: $(number)~(text) )~()
                 {
-                    t => 5000/Run.HIGHSPEED; // 调用协议公开常量
-                    txt => s(time: t);
+                    t => 5000/Animation.TopSpeed; // calling protocol public invariable
+                    txt => s(t);
                     print(txt);
-                    Run.Breath(); // 调用协议公开方法
+                    play();
+                    Animation.Clear(); // calling protocol public method
                 };
             };
         };
 
-        // Create an object
-        d1 => ImageButton();
+        // Create an package object
+        ib => ImageButton();
         // Calling object property
-        d1.Title = "Dog";
+        ib.Title = "OK";
         // Calling object method
-        d1.Show();
+        ib.Show();
+        // Create an object with params
+        img => Image(30, 20, "./icon.png");
 
         // Lambda Function
-        d1.Move(s: $(time:number)~(txt:text)
+        ib.Move(s: $(time:number)~(txt:text)
         { 
             t => time;
             txt = t :text + "ok";
@@ -249,7 +262,7 @@
                 // Report some error
                 ~! IOErr("URL is none"); 
             };
-            -> System.IO.ReadFile(url:url);
+            f = System.IO.ReadFile(url:url);
         };
 
         // Check, listen the Excption Function
