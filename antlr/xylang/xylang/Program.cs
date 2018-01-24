@@ -12,7 +12,30 @@ namespace xylang
         static void Main(string[] args)
         {
             //string input = @"Int = 1*2*3;";
-            var input = @" i => 128; b => 12; c => 4;";
+            var input = @"
+:> demo 
+{ 
+    <: 
+    {   
+        System;
+        Antlr4;
+    }; 
+
+    Program => # 
+    { 
+        i => 128.687;  
+        b => 12;  
+        c => 4; 
+        
+        Main => $ number ~ y
+        {
+            i => 128.687;  
+            b => 12;  
+            c => 4; 
+        };
+    }; 
+};
+";
 
             var stream = new AntlrInputStream(input);
             var lexer = new GrammarLexer(stream);

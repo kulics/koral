@@ -23,22 +23,84 @@ namespace xylang
             return result;
         }
 
-        public override object VisitDefine([NotNull] GrammarParser.DefineContext context)
+        public override object VisitExportStatement([NotNull] GrammarParser.ExportStatementContext context)
         {
-            return "var " + context.ID().GetText() + " = " + context.INT().GetText() + context.Terminate().GetText();
+            var obj = "namespace " + context.ID().GetText() + @"
+" + context.BlockLeft().GetText() + @"
+";
+            foreach (var item in context.statement())
+            {
+                obj += VisitStatement(item);
+            }
+            obj += context.BlockRight().GetText() + context.Terminate().GetText() + @"
+";
+            return obj;
         }
 
-        public override object VisitMulDiv([NotNull] GrammarParser.MulDivContext context)
+        public override object VisitImportStatement([NotNull] GrammarParser.ImportStatementContext context)
         {
-            //return base.VisitMulDiv(context);
-            return VisitAtom(context.atom(0)) + "mul and div";
+            var obj = "";
+
+            foreach (var item in context.nameSpaceStatement())
+            {
+                obj += "using " + VisitNameSpaceStatement(item) + @"
+";
+            }
+            return obj;
         }
 
-        public override object VisitAtom([NotNull] GrammarParser.AtomContext context)
+        public override object VisitNameSpaceStatement([NotNull] GrammarParser.NameSpaceStatementContext context)
         {
-
-            return "hello world";
+            var obj = context.ID().GetText() + context.Terminate().GetText();
+            return obj;
         }
+
+        public override object VisitPackageStatement([NotNull] GrammarParser.PackageStatementContext context)
+        {
+            var obj = "class " + context.ID().GetText() + @"
+" + context.BlockLeft().GetText() + @"
+";
+            foreach (var item in context.statement())
+            {
+                obj += VisitStatement(item);
+            }
+            obj += context.BlockRight().GetText() + context.Terminate().GetText() + @"
+";
+            return obj;
+        }
+
+        public override object VisitFunctionStatement([NotNull] GrammarParser.FunctionStatementContext context)
+        {
+            var obj = "void " + context.ID().GetText() + "(double " + context.basicType(0).GetText() + ")" + @"
+" + context.BlockLeft().GetText() + @"
+";
+            foreach (var item in context.statement())
+            {
+                obj += VisitStatement(item);
+            }
+            obj += context.BlockRight().GetText() + @"
+";
+            return obj;
+        }
+
+        public override object VisitInvariableStatement([NotNull] GrammarParser.InvariableStatementContext context)
+        {
+            var obj = "double " + context.ID().GetText() + " = " + context.Number().GetText() + context.Terminate().GetText() + @"
+";
+            return obj;
+        }
+
+        //public override object VisitMulDiv([NotNull] GrammarParser.MulDivContext context)
+        //{
+        //    //return base.VisitMulDiv(context);
+        //    return VisitAtom(context.atom(0)) + "mul and div";
+        //}
+
+        //public override object VisitAtom([NotNull] GrammarParser.AtomContext context)
+        //{
+
+        //    return "hello world";
+        //}
 
         //public override object VisitPrint([NotNull] GrammarParser.PrintContext context)
         //{
@@ -116,3 +178,4 @@ namespace xylang
         //}
     }
 }
+
