@@ -1,24 +1,37 @@
 // Define a grammar called Hello
 grammar Grammar;
 
-prog : stat+;
+program : statement+;
 
-stats : (stat ';')* ; // match zero or more ';'-terminatedstatements
+//stats : (statement ';')* ; // match zero or more ';'-terminatedstatements
 
-exprList : expr (',' expr)* ;
+//exprList : expr (',' expr)* ;
 
-stat : expr             # printExpr
-     | ID '=' expr      # assign
-     | 'print(' ID ')'  # print
+statement : define              
+	  | expression
+	  | NEWLINE
      ;
 
-expr : <assoc=right> expr '^' expr # power
-     | expr op=(Mul|Div) expr   # MulDiv
-     | expr op=(Add|Sub) expr   # AddSub
-     | sign=(Add|Sub)?Number       # number
-     | ID                       # id
-     | '(' expr ')'             # parens
-     ;
+define:
+ID Define INT Terminate
+;
+		  
+
+//print:
+//'print' '[' expr ']' ';';
+
+expression : 
+	mulDiv ((Add|Sub) mulDiv)* 
+;
+
+mulDiv: 
+	atom ((Mul|Div) atom)* 
+;
+
+atom: '(' expression ')'
+	  | INT
+	  | ID
+;
 
 Terminate : ';';
 
@@ -53,9 +66,11 @@ Protocol : '|';
 
 Wave : '~';
 
-ID   : [a-zA-Z]+;
-Number  : [0-9]+('.'([0-9]+)?)?
-        | [0-9]+;
+ID   : [a-zA-Z]+; // 标识符，由多个字母组成
+INT : '0'..'9' + ;  // 整数
+//Number  : [0-9]+('.'([0-9]+)?)?
+//        | [0-9]+; // 数字
+NEWLINE:'\r' ? '\n' ; 
 
 Mul  : '*';
 Div  : '/';
@@ -65,4 +80,6 @@ Sub  : '-';
 Comment : '/*' .*? '*/' -> skip;
 CommentLine : '//' .*? '\r'? '\n' -> skip;
 
-WS   : [ \t\r\n]+ -> skip;
+WS : ' ' -> skip;
+
+//WS   : [ \t\r\n]+ -> skip; // 空白， 后面的->skip表示antlr4在分析语言的文本时，符合这个规则的词法将被无视
