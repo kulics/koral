@@ -11,6 +11,7 @@ statement :
  exportStatement
 | importStatement
 | packageStatement
+| functionMainStatement
 | functionStatement
 | invariableStatement
 ;
@@ -50,26 +51,40 @@ packageStatement:
 ID Define Package BlockLeft (statement)* BlockRight Terminate
 ;
 
-functionStatement:
-ID Define Function basicType Wave basicType BlockLeft (statement)* BlockRight Terminate
+functionMainStatement:
+Main Define Function BlockLeft (statement)* BlockRight Terminate
 ;
 
+functionStatement:
+ID Define Function parameterClause Wave basicType BlockLeft (statement)* BlockRight Terminate
+;
+
+parameterClause : '(' parameterList ')'  ;
+parameterList : basicType? (',' basicType)* ;
+
 invariableStatement:
-ID Define Number Terminate
+ID Define dataStatement Terminate
 ;
 
 nameSpaceStatement:
-ID Terminate Package
+ID Terminate
 ;
 
 blockStatement:
 BlockLeft (statement)* BlockRight
 ;
 
+dataStatement:
+t=Number
+| t=Text
+| t=True
+| t=False
+;
+
 basicType:
-num='number'
-| txt='text'
-| bl='bool'
+t=TypeNumber
+| t=TypeText
+| t=TypeBool
 ;
 
 Terminate : ';';
@@ -108,11 +123,19 @@ Protocol : '|';
 
 Wave : '~';
 
-ID   : [a-zA-Z]+; // 标识符，由多个字母组成
+TypeNumber: 'number';
+TypeText: 'text';
+TypeBool: 'bool';
+True: 'true';
+False: 'false';
+
+Main: 'Main';
+
 //INT : '0'..'9' + ;  // 整数
 Number  : [0-9]+('.'([0-9]+)?)?
         | [0-9]+; // 数字
-NEWLINE:'\r' ? '\n' ; 
+Text: '"' (~[\\\r\n])*? '"'; //文本
+ID   : [a-zA-Z]+; // 标识符，由多个字母组成
 
 Mul  : '*';
 Div  : '/';

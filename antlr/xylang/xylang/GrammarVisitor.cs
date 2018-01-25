@@ -69,9 +69,9 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitFunctionStatement([NotNull] GrammarParser.FunctionStatementContext context)
+        public override object VisitFunctionMainStatement([NotNull] GrammarParser.FunctionMainStatementContext context)
         {
-            var obj = "void " + context.ID().GetText() + "(double " + context.basicType(0).GetText() + ")" + @"
+            var obj = "static void " + context.Main().GetText() + "(string[] args)" + @"
 " + context.BlockLeft().GetText() + @"
 ";
             foreach (var item in context.statement())
@@ -83,12 +83,102 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitInvariableStatement([NotNull] GrammarParser.InvariableStatementContext context)
+        public override object VisitFunctionStatement([NotNull] GrammarParser.FunctionStatementContext context)
         {
-            var obj = "double " + context.ID().GetText() + " = " + context.Number().GetText() + context.Terminate().GetText() + @"
+            var obj = "void " + context.ID().GetText() + VisitParameterClause(context.parameterClause()) + @"
+" + context.BlockLeft().GetText() + @"
+";
+            foreach (var item in context.statement())
+            {
+                obj += VisitStatement(item);
+            }
+            obj += context.BlockRight().GetText() + @"
 ";
             return obj;
         }
+
+        public override object VisitParameterClause([NotNull] GrammarParser.ParameterClauseContext context)
+        {
+            var obj = "( ";
+            //if (context.parameterList().Length > 0)
+            //{
+            obj += VisitParameterList(context.parameterList());
+            //}
+            obj += " )";
+            return obj;
+        }
+
+        public override object VisitParameterList([NotNull] GrammarParser.ParameterListContext context)
+        {
+            var obj = "";
+            if (context.ChildCount > 0)
+            {
+                obj += VisitBasicType(context.basicType(0)) + " p";
+            }
+            return obj;
+        }
+
+        public override object VisitInvariableStatement([NotNull] GrammarParser.InvariableStatementContext context)
+        {
+            var r = (Result)VisitDataStatement(context.dataStatement());
+            var obj = r.data + " " + context.ID().GetText() + " = " + r.text + context.Terminate().GetText() + @"
+";
+            return obj;
+        }
+
+        public class Result
+        {
+            public object data { get; set; }
+            public string text { get; set; }
+        }
+
+        public override object VisitDataStatement([NotNull] GrammarParser.DataStatementContext context)
+        {
+            var r = new Result();
+            if (context.t.Type == GrammarParser.Number)
+            {
+                r.data = "double";
+                r.text = context.Number().GetText();
+            }
+            else if (context.t.Type == GrammarParser.Text)
+            {
+                r.data = "string";
+                r.text = context.Text().GetText();
+            }
+            else if (context.t.Type == GrammarParser.True)
+            {
+                r.data = "bool";
+                r.text = context.True().GetText();
+            }
+            else if (context.t.Type == GrammarParser.False)
+            {
+                r.data = "bool";
+                r.text = context.False().GetText();
+            }
+            return r;
+        }
+
+        public override object VisitBasicType([NotNull] GrammarParser.BasicTypeContext context)
+        {
+            var obj = "";
+            switch (context.t.Type)
+            {
+                case GrammarParser.TypeNumber:
+                    obj = "double";
+                    break;
+                case GrammarParser.TypeText:
+                    obj = "string";
+                    break;
+                case GrammarParser.TypeBool:
+                    obj = "bool";
+                    break;
+                default:
+                    obj = "object";
+                    break;
+            }
+            return obj;
+        }
+
 
         //public override object VisitMulDiv([NotNull] GrammarParser.MulDivContext context)
         //{
@@ -149,31 +239,6 @@ namespace xylang
         //    {
         //        obj = left - right;
         //    }
-        //    return obj;
-        //}
-
-        //public override object VisitPrimary([NotNull] GrammarParser.PrimaryContext context)
-        //{
-        //    //if (context.ChildCount == 1)
-        //    //{
-        //    //var c = context.GetChild(0);
-        //    //if (c is TinyScriptParser.VariableExpressionContext)
-        //    //{
-        //    //    return VisitVariableExpression(context.variableExpression());
-        //    //}
-        //    //var num = context.numericLiteral().GetText().Replace("_", "");
-        //    //var b = OpBuilder.GetOpBuilder(typeof(decimal), context, _builder);
-        //    //b.LoadNum(num);
-        //    //return typeof(decimal);
-        //    //}
-        //    //return VisitExpr(context.expr());
-        //    var obj = context.GetText();
-        //    return obj;
-        //}
-
-        //public override object VisitNumber([NotNull] GrammarParser.NumberContext context)
-        //{
-        //    var obj = context.GetText();
         //    return obj;
         //}
     }

@@ -11,27 +11,29 @@ namespace xylang
     {
         static void Main(string[] args)
         {
-            //string input = @"Int = 1*2*3;";
             var input = @"
 :> demo 
 { 
     <: 
     {   
         System;
-        Antlr4;
     }; 
 
     Program => # 
     { 
         i => 128.687;  
-        b => 12;  
-        c => 4; 
+        b => ""12"";  
+        c => true; 
         
-        Main => $ number ~ y
+        Main => $ 
         {
-            i => 128.687;  
+            i => ""128.687"";  
             b => 12;  
-            c => 4; 
+            c => false; 
+        };
+
+        Square => $ (text)~number
+        {
         };
     }; 
 };
