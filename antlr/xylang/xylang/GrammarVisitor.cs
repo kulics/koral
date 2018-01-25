@@ -25,15 +25,12 @@ namespace xylang
 
         public override object VisitExportStatement([NotNull] GrammarParser.ExportStatementContext context)
         {
-            var obj = "namespace " + context.ID().GetText() + @"
-" + context.BlockLeft().GetText() + @"
-";
+            var obj = "namespace " + context.ID().GetText() + context.BlockLeft().GetText();
             foreach (var item in context.statement())
             {
                 obj += VisitStatement(item);
             }
-            obj += context.BlockRight().GetText() + context.Terminate().GetText() + @"
-";
+            obj += context.BlockRight().GetText() + context.Terminate().GetText();
             return obj;
         }
 
@@ -43,8 +40,7 @@ namespace xylang
 
             foreach (var item in context.nameSpaceStatement())
             {
-                obj += "using " + VisitNameSpaceStatement(item) + @"
-";
+                obj += "using " + VisitNameSpaceStatement(item);
             }
             return obj;
         }
@@ -57,43 +53,34 @@ namespace xylang
 
         public override object VisitPackageStatement([NotNull] GrammarParser.PackageStatementContext context)
         {
-            var obj = "class " + context.ID().GetText() + @"
-" + context.BlockLeft().GetText() + @"
-";
+            var obj = "class " + context.ID().GetText() + context.BlockLeft().GetText();
             foreach (var item in context.statement())
             {
                 obj += VisitStatement(item);
             }
-            obj += context.BlockRight().GetText() + context.Terminate().GetText() + @"
-";
+            obj += context.BlockRight().GetText() + context.Terminate().GetText();
             return obj;
         }
 
         public override object VisitFunctionMainStatement([NotNull] GrammarParser.FunctionMainStatementContext context)
         {
-            var obj = "static void " + context.Main().GetText() + "(string[] args)" + @"
-" + context.BlockLeft().GetText() + @"
-";
+            var obj = "static void " + context.Main().GetText() + "(string[] args)" + context.BlockLeft().GetText();
             foreach (var item in context.statement())
             {
                 obj += VisitStatement(item);
             }
-            obj += context.BlockRight().GetText() + @"
-";
+            obj += context.BlockRight().GetText();
             return obj;
         }
 
         public override object VisitFunctionStatement([NotNull] GrammarParser.FunctionStatementContext context)
         {
-            var obj = "void " + context.ID().GetText() + VisitParameterClause(context.parameterClause()) + @"
-" + context.BlockLeft().GetText() + @"
-";
+            var obj = "void " + context.ID().GetText() + VisitParameterClause(context.parameterClause()) + context.BlockLeft().GetText();
             foreach (var item in context.statement())
             {
                 obj += VisitStatement(item);
             }
-            obj += context.BlockRight().GetText() + @"
-";
+            obj += context.BlockRight().GetText();
             return obj;
         }
 
@@ -121,8 +108,18 @@ namespace xylang
         public override object VisitInvariableStatement([NotNull] GrammarParser.InvariableStatementContext context)
         {
             var r = (Result)VisitDataStatement(context.dataStatement());
-            var obj = r.data + " " + context.ID().GetText() + " = " + r.text + context.Terminate().GetText() + @"
-";
+            var obj = r.data + " " + context.ID().GetText() + " = " + r.text + context.Terminate().GetText();
+            return obj;
+        }
+
+        public override object VisitLoopStatement([NotNull] GrammarParser.LoopStatementContext context)
+        {
+            var obj = "for (double i =" + context.Number(0).GetText()+ "; i<" +context.Number(1).GetText() + ";i++)" + context.BlockLeft().GetText();
+            foreach (var item in context.statement())
+            {
+                obj += VisitStatement(item);
+            }
+            obj += context.BlockRight().GetText() + context.Terminate().GetText();
             return obj;
         }
 

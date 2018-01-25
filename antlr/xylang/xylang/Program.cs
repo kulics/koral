@@ -34,6 +34,10 @@ namespace xylang
 
         Square => $ (text)~number
         {
+            @ 0 .. 600
+            {
+                j => 1;
+            };
         };
     }; 
 };

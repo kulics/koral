@@ -14,6 +14,7 @@ statement :
 | functionMainStatement
 | functionStatement
 | invariableStatement
+| loopStatement
 ;
 
 //defineStatement:
@@ -64,6 +65,10 @@ parameterList : basicType? (',' basicType)* ;
 
 invariableStatement:
 ID Define dataStatement Terminate
+;
+
+loopStatement:
+Loop Number '..' Number BlockLeft (statement)* BlockRight Terminate
 ;
 
 nameSpaceStatement:
@@ -131,9 +136,9 @@ False: 'false';
 
 Main: 'Main';
 
-//INT : '0'..'9' + ;  // 整数
-Number  : [0-9]+('.'([0-9]+)?)?
-        | [0-9]+; // 数字
+
+Number :DIGIT+ ('.' DIGIT+)?; // 数字
+fragment DIGIT : [0-9] ;             // match single digit
 Text: '"' (~[\\\r\n])*? '"'; //文本
 ID   : [a-zA-Z]+; // 标识符，由多个字母组成
 
