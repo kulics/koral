@@ -22,18 +22,18 @@ statement :
 
 printStatement:'print' '(' Text ')' Terminate;
 
-//expression : 
-//	mulDiv ((Add|Sub) mulDiv)* 
-//;
+expression : 
+	mulDiv ((Add|Sub) mulDiv)* 
+;
 
-//mulDiv: 
-//	atom ((Mul|Div) atom)* 
-//;
+mulDiv: 
+	atom ((Mul|Div) atom)* 
+;
 
-//atom: '(' expression ')'
-//	  | INT
-//	  | ID
-//;
+atom: '(' expression ')'
+	  | Number
+	  | ID
+;
 
 // 导出命名空间
 exportStatement:
@@ -86,6 +86,10 @@ ID Terminate
 blockStatement:
 BlockLeft (statement)* BlockRight
 ;
+
+assign: ID '=' expression
+;
+
 // 基础数据
 dataStatement:
 t=Number
