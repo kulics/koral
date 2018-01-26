@@ -25,12 +25,12 @@ namespace xylang
 
         public override object VisitExportStatement([NotNull] GrammarParser.ExportStatementContext context)
         {
-            var obj = "namespace " + context.ID().GetText() + context.BlockLeft().GetText();
+            var obj = "namespace " + context.ID().GetText() + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach (var item in context.statement())
             {
                 obj += VisitStatement(item);
             }
-            obj += context.BlockRight().GetText() + context.Terminate().GetText();
+            obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
             return obj;
         }
 
@@ -40,7 +40,7 @@ namespace xylang
 
             foreach (var item in context.nameSpaceStatement())
             {
-                obj += "using " + VisitNameSpaceStatement(item);
+                obj += "using " + VisitNameSpaceStatement(item) + Wrap;
             }
             return obj;
         }
@@ -53,34 +53,34 @@ namespace xylang
 
         public override object VisitPackageStatement([NotNull] GrammarParser.PackageStatementContext context)
         {
-            var obj = "class " + context.ID().GetText() + context.BlockLeft().GetText();
+            var obj = "class " + context.ID().GetText() + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach (var item in context.statement())
             {
                 obj += VisitStatement(item);
             }
-            obj += context.BlockRight().GetText() + context.Terminate().GetText();
+            obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
             return obj;
         }
 
         public override object VisitFunctionMainStatement([NotNull] GrammarParser.FunctionMainStatementContext context)
         {
-            var obj = "static void " + context.Main().GetText() + "(string[] args)" + context.BlockLeft().GetText();
+            var obj = "static void " + context.Main().GetText() + "(string[] args)" + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach (var item in context.statement())
             {
                 obj += VisitStatement(item);
             }
-            obj += context.BlockRight().GetText();
+            obj += context.BlockRight().GetText() + Wrap;
             return obj;
         }
 
         public override object VisitFunctionStatement([NotNull] GrammarParser.FunctionStatementContext context)
         {
-            var obj = "void " + context.ID().GetText() + VisitParameterClause(context.parameterClause()) + context.BlockLeft().GetText();
+            var obj = "void " + context.ID().GetText() + VisitParameterClause(context.parameterClause()) + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach (var item in context.statement())
             {
                 obj += VisitStatement(item);
             }
-            obj += context.BlockRight().GetText();
+            obj += context.BlockRight().GetText() + Wrap;
             return obj;
         }
 
@@ -108,42 +108,43 @@ namespace xylang
         public override object VisitInvariableStatement([NotNull] GrammarParser.InvariableStatementContext context)
         {
             var r = (Result)VisitDataStatement(context.dataStatement());
-            var obj = r.data + " " + context.ID().GetText() + " = " + r.text + context.Terminate().GetText();
+            var obj = r.data + " " + context.ID().GetText() + " = " + r.text + context.Terminate().GetText() + Wrap;
             return obj;
         }
 
         public override object VisitLoopStatement([NotNull] GrammarParser.LoopStatementContext context)
         {
-            var obj = "for (double i =" + context.Number(0).GetText() + "; i<" + context.Number(1).GetText() + ";i++)" + context.BlockLeft().GetText();
+            var obj = "for (double i =" + context.Number(0).GetText() + "; i<" + context.Number(1).GetText() + ";i++)" 
+                + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach (var item in context.statement())
             {
                 obj += VisitStatement(item);
             }
-            obj += context.BlockRight().GetText() + context.Terminate().GetText();
+            obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
             return obj;
         }
 
         public override object VisitJudgeWithElseStatement([NotNull] GrammarParser.JudgeWithElseStatementContext context)
         {
-            var obj = VisitJudgeBaseStatement(context.judgeBaseStatement()) + " else " + context.BlockLeft().GetText();
+            var obj = VisitJudgeBaseStatement(context.judgeBaseStatement()) + Wrap + " else " + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach (var item in context.statement())
             {
                 obj += VisitStatement(item);
             }
-            obj += context.BlockRight().GetText() + context.Terminate().GetText();
+            obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
             return obj;
         }
 
         public override object VisitJudgeStatement([NotNull] GrammarParser.JudgeStatementContext context)
         {
-            var obj = VisitJudgeBaseStatement(context.judgeBaseStatement()) + context.Terminate().GetText();
+            var obj = VisitJudgeBaseStatement(context.judgeBaseStatement()) + context.Terminate().GetText() + Wrap;
             return obj;
         }
 
         public override object VisitJudgeBaseStatement([NotNull] GrammarParser.JudgeBaseStatementContext context)
         {
             var b = (Result)VisitBool(context.@bool());
-            var obj = "if (" + b.text + ")" + context.BlockLeft().GetText();
+            var obj = "if (" + b.text + ")" + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach (var item in context.statement())
             {
                 obj += VisitStatement(item);
@@ -152,9 +153,11 @@ namespace xylang
             return obj;
         }
 
+        const string Wrap = "\r\n";
+
         public override object VisitPrintStatement([NotNull] GrammarParser.PrintStatementContext context)
         {
-            var obj = "Console.WriteLine(" + context.Text().GetText() + ")" + context.Terminate().GetText();
+            var obj = "Console.WriteLine(" + context.Text().GetText() + ")" + context.Terminate().GetText() + Wrap;
             return obj;
         }
 
