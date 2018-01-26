@@ -114,7 +114,7 @@ namespace xylang
 
         public override object VisitLoopStatement([NotNull] GrammarParser.LoopStatementContext context)
         {
-            var obj = "for (double i =" + context.Number(0).GetText()+ "; i<" +context.Number(1).GetText() + ";i++)" + context.BlockLeft().GetText();
+            var obj = "for (double i =" + context.Number(0).GetText() + "; i<" + context.Number(1).GetText() + ";i++)" + context.BlockLeft().GetText();
             foreach (var item in context.statement())
             {
                 obj += VisitStatement(item);
@@ -123,10 +123,61 @@ namespace xylang
             return obj;
         }
 
+        public override object VisitJudgeWithElseStatement([NotNull] GrammarParser.JudgeWithElseStatementContext context)
+        {
+            var obj = VisitJudgeBaseStatement(context.judgeBaseStatement()) + " else " + context.BlockLeft().GetText();
+            foreach (var item in context.statement())
+            {
+                obj += VisitStatement(item);
+            }
+            obj += context.BlockRight().GetText() + context.Terminate().GetText();
+            return obj;
+        }
+
+        public override object VisitJudgeStatement([NotNull] GrammarParser.JudgeStatementContext context)
+        {
+            var obj = VisitJudgeBaseStatement(context.judgeBaseStatement()) + context.Terminate().GetText();
+            return obj;
+        }
+
+        public override object VisitJudgeBaseStatement([NotNull] GrammarParser.JudgeBaseStatementContext context)
+        {
+            var b = (Result)VisitBool(context.@bool());
+            var obj = "if (" + b.text + ")" + context.BlockLeft().GetText();
+            foreach (var item in context.statement())
+            {
+                obj += VisitStatement(item);
+            }
+            obj += context.BlockRight().GetText();
+            return obj;
+        }
+
+        public override object VisitPrintStatement([NotNull] GrammarParser.PrintStatementContext context)
+        {
+            var obj = "Console.WriteLine(" + context.Text().GetText() + ")" + context.Terminate().GetText();
+            return obj;
+        }
+
         public class Result
         {
             public object data { get; set; }
             public string text { get; set; }
+        }
+
+        public override object VisitBool([NotNull] GrammarParser.BoolContext context)
+        {
+            var r = new Result();
+            if (context.t.Type == GrammarParser.True)
+            {
+                r.data = "bool";
+                r.text = context.True().GetText();
+            }
+            else if (context.t.Type == GrammarParser.False)
+            {
+                r.data = "bool";
+                r.text = context.False().GetText();
+            }
+            return r;
         }
 
         public override object VisitDataStatement([NotNull] GrammarParser.DataStatementContext context)

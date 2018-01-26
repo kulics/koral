@@ -14,7 +14,10 @@ statement :
 | functionMainStatement
 | functionStatement
 | invariableStatement
+| judgeWithElseStatement
+| judgeStatement
 | loopStatement
+| printStatement
 ;
 
 //defineStatement:
@@ -23,8 +26,7 @@ statement :
 //;
 		  
 
-//print:
-//'print' '[' expr ']' ';';
+printStatement:'print' '(' Text ')' Terminate;
 
 //expression : 
 //	mulDiv ((Add|Sub) mulDiv)* 
@@ -67,6 +69,18 @@ invariableStatement:
 ID Define dataStatement Terminate
 ;
 
+judgeWithElseStatement:
+judgeBaseStatement JudgeSub BlockLeft (statement)* BlockRight Terminate
+;
+
+judgeStatement:
+judgeBaseStatement Terminate
+;
+
+judgeBaseStatement:
+Judge bool BlockLeft (statement)* BlockRight
+;
+
 loopStatement:
 Loop Number '..' Number BlockLeft (statement)* BlockRight Terminate
 ;
@@ -91,6 +105,8 @@ t=TypeNumber
 | t=TypeText
 | t=TypeBool
 ;
+
+bool:t=True|t=False;
 
 Terminate : ';';
 

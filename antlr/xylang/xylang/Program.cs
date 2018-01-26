@@ -27,16 +27,30 @@ namespace xylang
         
         Main => $ 
         {
+            print(""main function"");
             i => ""128.687"";  
             b => 12;  
             c => false; 
+            ? true
+            {
+                j => false;
+                print(""judge"");
+            };
         };
 
         Square => $ (text)~number
         {
             @ 0 .. 600
             {
-                j => 1;
+                print(""loop"");
+                ? true
+                {
+                    j => false;
+                }
+                ~?
+                {
+                    j => true;
+                };
             };
         };
     }; 
@@ -58,3 +72,42 @@ namespace xylang
         }
     }
 }
+
+
+namespace demo
+{
+    using System;
+    class Program
+    {
+        double i = 128.687;
+        string b = "12";
+        bool c = true;
+        static void Main(string[] args)
+        {
+            Console.WriteLine("main function");
+            string i = "128.687";
+            double b = 12;
+            bool c = false;
+            if (true)
+            {
+                bool j = false;
+                Console.WriteLine("judge");
+            };
+        }
+        void Square(string p)
+        {
+            for (double i = 0; i < 600; i++)
+            {
+                Console.WriteLine("loop");
+                if (true)
+                {
+                    bool j = false;
+                }
+                else
+                {
+                    bool j = true;
+                };
+            };
+        }
+    };
+};
