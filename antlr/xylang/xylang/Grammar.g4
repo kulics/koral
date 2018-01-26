@@ -18,13 +18,7 @@ statement :
 | judgeStatement
 | loopStatement
 | printStatement
-;
-
-//defineStatement:
-//ID Define Number Terminate # defineInvariable
-//| ID Define Package blockStatement Terminate # definePackage
-//;
-		  
+;		  
 
 printStatement:'print' '(' Text ')' Terminate;
 
@@ -41,50 +35,50 @@ printStatement:'print' '(' Text ')' Terminate;
 //	  | ID
 //;
 
-
+// 导出命名空间
 exportStatement:
 Export ID BlockLeft (statement)* BlockRight Terminate
 ;
-
+// 导入命名空间
 importStatement:
 Import BlockLeft (nameSpaceStatement)* BlockRight Terminate
 ;
-
+// 定义包
 packageStatement:
 ID Define Package BlockLeft (statement)* BlockRight Terminate
 ;
-
+// 主函数
 functionMainStatement:
 Main Define Function BlockLeft (statement)* BlockRight Terminate
 ;
-
+// 函数
 functionStatement:
 ID Define Function parameterClause Wave basicType BlockLeft (statement)* BlockRight Terminate
 ;
 
 parameterClause : '(' parameterList ')'  ;
 parameterList : basicType? (',' basicType)* ;
-
+// 定义不变量
 invariableStatement:
 ID Define dataStatement Terminate
 ;
-
+// 有else的判断
 judgeWithElseStatement:
 judgeBaseStatement JudgeSub BlockLeft (statement)* BlockRight Terminate
 ;
-
+// 判断
 judgeStatement:
 judgeBaseStatement Terminate
 ;
-
+// 判断基础
 judgeBaseStatement:
 Judge bool BlockLeft (statement)* BlockRight
 ;
-
+// 循环
 loopStatement:
 Loop Number '..' Number BlockLeft (statement)* BlockRight Terminate
 ;
-
+// 命名空间
 nameSpaceStatement:
 ID Terminate
 ;
@@ -92,20 +86,20 @@ ID Terminate
 blockStatement:
 BlockLeft (statement)* BlockRight
 ;
-
+// 基础数据
 dataStatement:
 t=Number
 | t=Text
 | t=True
 | t=False
 ;
-
+// 基础类型名
 basicType:
 t=TypeNumber
 | t=TypeText
 | t=TypeBool
 ;
-
+// bool值
 bool:t=True|t=False;
 
 Terminate : ';';
@@ -154,7 +148,7 @@ Main: 'Main';
 
 
 Number :DIGIT+ ('.' DIGIT+)?; // 数字
-fragment DIGIT : [0-9] ;             // match single digit
+fragment DIGIT : [0-9] ;             // 单个数字
 Text: '"' (~[\\\r\n])*? '"'; //文本
 ID   : [a-zA-Z]+; // 标识符，由多个字母组成
 
@@ -163,8 +157,8 @@ Div  : '/';
 Add  : '+';
 Sub  : '-';
 
-Comment : '/*' .*? '*/' -> skip;
-CommentLine : '//' .*? '\r'? '\n' -> skip;
+Comment : '/*' .*? '*/' -> skip; // 结构注释
+CommentLine : '//' .*? '\r'? '\n' -> skip; // 行注释
 
 //WS : ' ' -> skip;
 
