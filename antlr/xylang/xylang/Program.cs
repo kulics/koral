@@ -84,6 +84,10 @@ namespace demo
         bool c = true;
         static void Main(string[] args)
         {
+            new Program().init(args);
+        }
+        void init(string[] args)
+        {
             Console.WriteLine("main function");
             string i = "128.687";
             double b = 12;

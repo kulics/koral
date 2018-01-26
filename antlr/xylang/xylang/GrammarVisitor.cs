@@ -56,6 +56,12 @@ namespace xylang
             var obj = "class " + context.ID().GetText() + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach (var item in context.statement())
             {
+                if (item.GetChild(0).GetType() == typeof(GrammarParser.FunctionMainStatementContext))
+                {
+                    obj += "static void Main(string[] args)" + Wrap + context.BlockLeft().GetText() + Wrap;
+                    obj += "new " + context.ID().GetText() + "().init(args);" + Wrap;
+                    obj += context.BlockRight().GetText() + Wrap;
+                }
                 obj += VisitStatement(item);
             }
             obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
@@ -64,7 +70,7 @@ namespace xylang
 
         public override object VisitFunctionMainStatement([NotNull] GrammarParser.FunctionMainStatementContext context)
         {
-            var obj = "static void " + context.Main().GetText() + "(string[] args)" + Wrap + context.BlockLeft().GetText() + Wrap;
+            var obj = "void init(string[] args)" + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach (var item in context.statement())
             {
                 obj += VisitStatement(item);
@@ -114,7 +120,7 @@ namespace xylang
 
         public override object VisitLoopStatement([NotNull] GrammarParser.LoopStatementContext context)
         {
-            var obj = "for (double i =" + context.Number(0).GetText() + "; i<" + context.Number(1).GetText() + ";i++)" 
+            var obj = "for (double i =" + context.Number(0).GetText() + "; i<" + context.Number(1).GetText() + ";i++)"
                 + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach (var item in context.statement())
             {
