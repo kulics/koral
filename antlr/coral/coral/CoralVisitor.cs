@@ -1,32 +1,29 @@
-﻿using System;
+﻿using Antlr4.Runtime.Misc;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Antlr4.Runtime.Misc;
-using xylang;
 
-namespace xylang
+namespace coral
 {
-    class GrammarVisitor : GrammarBaseVisitor<object>
+    class CoralVisitor : CoralBaseVisitor<object>
     {
-        Dictionary<string, object> memory = new Dictionary<string, object>();
-
-        public override object VisitProgram([NotNull] GrammarParser.ProgramContext context)
+        public override object VisitProgram([NotNull] CoralParser.ProgramContext context)
         {
             var list = context.statement();
             var result = "";
-            foreach (var item in list)
+            foreach(var item in list)
             {
                 result += VisitStatement(item);
             }
             return result;
         }
 
-        public override object VisitExportStatement([NotNull] GrammarParser.ExportStatementContext context)
+        public override object VisitExportStatement([NotNull] CoralParser.ExportStatementContext context)
         {
             var obj = "namespace " + context.ID().GetText() + Wrap + context.BlockLeft().GetText() + Wrap;
-            foreach (var item in context.statement())
+            foreach(var item in context.statement())
             {
                 obj += VisitStatement(item);
             }
@@ -34,29 +31,29 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitImportStatement([NotNull] GrammarParser.ImportStatementContext context)
+        public override object VisitImportStatement([NotNull] CoralParser.ImportStatementContext context)
         {
             var obj = "";
 
-            foreach (var item in context.nameSpaceStatement())
+            foreach(var item in context.nameSpaceStatement())
             {
                 obj += "using " + VisitNameSpaceStatement(item) + Wrap;
             }
             return obj;
         }
 
-        public override object VisitNameSpaceStatement([NotNull] GrammarParser.NameSpaceStatementContext context)
+        public override object VisitNameSpaceStatement([NotNull] CoralParser.NameSpaceStatementContext context)
         {
             var obj = context.ID().GetText() + context.Terminate().GetText();
             return obj;
         }
 
-        public override object VisitPackageStatement([NotNull] GrammarParser.PackageStatementContext context)
+        public override object VisitPackageStatement([NotNull] CoralParser.PackageStatementContext context)
         {
             var obj = "class " + context.ID().GetText() + Wrap + context.BlockLeft().GetText() + Wrap;
-            foreach (var item in context.statement())
+            foreach(var item in context.statement())
             {
-                if (item.GetChild(0).GetType() == typeof(GrammarParser.FunctionMainStatementContext))
+                if(item.GetChild(0).GetType() == typeof(CoralParser.FunctionMainStatementContext))
                 {
                     obj += "static void Main(string[] args)" + Wrap + context.BlockLeft().GetText() + Wrap;
                     obj += "new " + context.ID().GetText() + "().init(args);" + Wrap;
@@ -68,10 +65,10 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitFunctionMainStatement([NotNull] GrammarParser.FunctionMainStatementContext context)
+        public override object VisitFunctionMainStatement([NotNull] CoralParser.FunctionMainStatementContext context)
         {
             var obj = "void init(string[] args)" + Wrap + context.BlockLeft().GetText() + Wrap;
-            foreach (var item in context.statement())
+            foreach(var item in context.statement())
             {
                 obj += VisitStatement(item);
             }
@@ -79,10 +76,10 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitFunctionStatement([NotNull] GrammarParser.FunctionStatementContext context)
+        public override object VisitFunctionStatement([NotNull] CoralParser.FunctionStatementContext context)
         {
             var obj = "void " + context.ID().GetText() + VisitParameterClause(context.parameterClause()) + Wrap + context.BlockLeft().GetText() + Wrap;
-            foreach (var item in context.statement())
+            foreach(var item in context.statement())
             {
                 obj += VisitStatement(item);
             }
@@ -90,7 +87,7 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitParameterClause([NotNull] GrammarParser.ParameterClauseContext context)
+        public override object VisitParameterClause([NotNull] CoralParser.ParameterClauseContext context)
         {
             var obj = "( ";
             //if (context.parameterList().Length > 0)
@@ -101,28 +98,28 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitParameterList([NotNull] GrammarParser.ParameterListContext context)
+        public override object VisitParameterList([NotNull] CoralParser.ParameterListContext context)
         {
             var obj = "";
-            if (context.ChildCount > 0)
+            if(context.ChildCount > 0)
             {
                 obj += VisitBasicType(context.basicType(0)) + " p";
             }
             return obj;
         }
 
-        public override object VisitInvariableStatement([NotNull] GrammarParser.InvariableStatementContext context)
+        public override object VisitInvariableStatement([NotNull] CoralParser.InvariableStatementContext context)
         {
             var r = (Result)VisitDataStatement(context.dataStatement());
             var obj = r.data + " " + context.ID().GetText() + " = " + r.text + context.Terminate().GetText() + Wrap;
             return obj;
         }
 
-        public override object VisitLoopStatement([NotNull] GrammarParser.LoopStatementContext context)
+        public override object VisitLoopStatement([NotNull] CoralParser.LoopStatementContext context)
         {
             var obj = "for (double i =" + context.Number(0).GetText() + "; i<" + context.Number(1).GetText() + ";i++)"
                 + Wrap + context.BlockLeft().GetText() + Wrap;
-            foreach (var item in context.statement())
+            foreach(var item in context.statement())
             {
                 obj += VisitStatement(item);
             }
@@ -130,10 +127,10 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitJudgeWithElseStatement([NotNull] GrammarParser.JudgeWithElseStatementContext context)
+        public override object VisitJudgeWithElseStatement([NotNull] CoralParser.JudgeWithElseStatementContext context)
         {
             var obj = VisitJudgeBaseStatement(context.judgeBaseStatement()) + Wrap + " else " + Wrap + context.BlockLeft().GetText() + Wrap;
-            foreach (var item in context.statement())
+            foreach(var item in context.statement())
             {
                 obj += VisitStatement(item);
             }
@@ -141,17 +138,17 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitJudgeStatement([NotNull] GrammarParser.JudgeStatementContext context)
+        public override object VisitJudgeStatement([NotNull] CoralParser.JudgeStatementContext context)
         {
             var obj = VisitJudgeBaseStatement(context.judgeBaseStatement()) + context.Terminate().GetText() + Wrap;
             return obj;
         }
 
-        public override object VisitJudgeBaseStatement([NotNull] GrammarParser.JudgeBaseStatementContext context)
+        public override object VisitJudgeBaseStatement([NotNull] CoralParser.JudgeBaseStatementContext context)
         {
             var b = (Result)VisitBool(context.@bool());
             var obj = "if (" + b.text + ")" + Wrap + context.BlockLeft().GetText() + Wrap;
-            foreach (var item in context.statement())
+            foreach(var item in context.statement())
             {
                 obj += VisitStatement(item);
             }
@@ -161,7 +158,7 @@ namespace xylang
 
         const string Wrap = "\r\n";
 
-        public override object VisitPrintStatement([NotNull] GrammarParser.PrintStatementContext context)
+        public override object VisitPrintStatement([NotNull] CoralParser.PrintStatementContext context)
         {
             var obj = "Console.WriteLine(" + context.Text().GetText() + ")" + context.Terminate().GetText() + Wrap;
             return obj;
@@ -173,15 +170,15 @@ namespace xylang
             public string text { get; set; }
         }
 
-        public override object VisitBool([NotNull] GrammarParser.BoolContext context)
+        public override object VisitBool([NotNull] CoralParser.BoolContext context)
         {
             var r = new Result();
-            if (context.t.Type == GrammarParser.True)
+            if(context.t.Type == CoralParser.True)
             {
                 r.data = "bool";
                 r.text = context.True().GetText();
             }
-            else if (context.t.Type == GrammarParser.False)
+            else if(context.t.Type == CoralParser.False)
             {
                 r.data = "bool";
                 r.text = context.False().GetText();
@@ -189,25 +186,25 @@ namespace xylang
             return r;
         }
 
-        public override object VisitDataStatement([NotNull] GrammarParser.DataStatementContext context)
+        public override object VisitDataStatement([NotNull] CoralParser.DataStatementContext context)
         {
             var r = new Result();
-            if (context.t.Type == GrammarParser.Number)
+            if(context.t.Type == CoralParser.Number)
             {
                 r.data = "double";
                 r.text = context.Number().GetText();
             }
-            else if (context.t.Type == GrammarParser.Text)
+            else if(context.t.Type == CoralParser.Text)
             {
                 r.data = "string";
                 r.text = context.Text().GetText();
             }
-            else if (context.t.Type == GrammarParser.True)
+            else if(context.t.Type == CoralParser.True)
             {
                 r.data = "bool";
                 r.text = context.True().GetText();
             }
-            else if (context.t.Type == GrammarParser.False)
+            else if(context.t.Type == CoralParser.False)
             {
                 r.data = "bool";
                 r.text = context.False().GetText();
@@ -215,18 +212,18 @@ namespace xylang
             return r;
         }
 
-        public override object VisitBasicType([NotNull] GrammarParser.BasicTypeContext context)
+        public override object VisitBasicType([NotNull] CoralParser.BasicTypeContext context)
         {
             var obj = "";
-            switch (context.t.Type)
+            switch(context.t.Type)
             {
-                case GrammarParser.TypeNumber:
+                case CoralParser.TypeNumber:
                     obj = "double";
                     break;
-                case GrammarParser.TypeText:
+                case CoralParser.TypeText:
                     obj = "string";
                     break;
-                case GrammarParser.TypeBool:
+                case CoralParser.TypeBool:
                     obj = "bool";
                     break;
                 default:
@@ -237,40 +234,40 @@ namespace xylang
         }
 
 
-        //public override object VisitMulDiv([NotNull] GrammarParser.MulDivContext context)
+        //public override object VisitMulDiv([NotNull] CoralParser.MulDivContext context)
         //{
         //    //return base.VisitMulDiv(context);
         //    return VisitAtom(context.atom(0)) + "mul and div";
         //}
 
-        //public override object VisitAtom([NotNull] GrammarParser.AtomContext context)
+        //public override object VisitAtom([NotNull] CoralParser.AtomContext context)
         //{
 
         //    return "hello world";
         //}
 
-        //public override object VisitPrint([NotNull] GrammarParser.PrintContext context)
+        //public override object VisitPrint([NotNull] CoralParser.PrintContext context)
         //{
         //    var obj = VisitExpr(context.expr());
         //    return obj;
         //}
 
-        //public override object VisitId([NotNull] GrammarParser.IdContext context)
+        //public override object VisitId([NotNull] CoralParser.IdContext context)
         //{
         //    return base.VisitId(context);
         //}
 
-        //public override object VisitMulDiv([NotNull] GrammarParser.MulDivContext context)
+        //public override object VisitMulDiv([NotNull] CoralParser.MulDivContext context)
         //{
         //    double left = Convert.ToDouble(Visit(context.primary(0)));
         //    double right = Convert.ToDouble(Visit(context.primary(1)));
 
         //    object obj = new object();
-        //    if (context.op.Type == GrammarParser.Mul)
+        //    if (context.op.Type == CoralParser.Mul)
         //    {
         //        obj = left * right;
         //    }
-        //    else if (context.op.Type == GrammarParser.Div)
+        //    else if (context.op.Type == CoralParser.Div)
         //    {
         //        if (right == 0)
         //        {
@@ -282,17 +279,17 @@ namespace xylang
         //    return obj;
         //}
 
-        //public override object VisitAddSub([NotNull] GrammarParser.AddSubContext context)
+        //public override object VisitAddSub([NotNull] CoralParser.AddSubContext context)
         //{
         //    double left = Convert.ToDouble(Visit(context.mulDiv(0)));
         //    double right = Convert.ToDouble(Visit(context.mulDiv(1)));
 
         //    object obj = new object();
-        //    if (context.op.Type == GrammarParser.Add)
+        //    if (context.op.Type == CoralParser.Add)
         //    {
         //        obj = left + right;
         //    }
-        //    else if (context.op.Type == GrammarParser.Sub)
+        //    else if (context.op.Type == CoralParser.Sub)
         //    {
         //        obj = left - right;
         //    }
@@ -300,4 +297,3 @@ namespace xylang
         //}
     }
 }
-

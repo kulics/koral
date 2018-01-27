@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace xylang
+namespace coral
 {
     class Program
     {
@@ -58,12 +58,12 @@ namespace xylang
 ";
 
             var stream = new AntlrInputStream(input);
-            var lexer = new GrammarLexer(stream);
+            var lexer = new CoralLexer(stream);
             var tokens = new CommonTokenStream(lexer);
-            var parser = new GrammarParser(tokens) { BuildParseTree = true };
+            var parser = new CoralParser(tokens) { BuildParseTree = true };
             var tree = parser.program();
 
-            var visitor = new GrammarVisitor();
+            var visitor = new CoralVisitor();
             var result = visitor.Visit(tree);
 
             Console.WriteLine(tree.ToStringTree(parser));
@@ -72,46 +72,3 @@ namespace xylang
         }
     }
 }
-
-
-namespace demo
-{
-    using System;
-    class Program
-    {
-        double i = 128.687;
-        string b = "12";
-        bool c = true;
-        static void Main(string[] args)
-        {
-            new Program().init(args);
-        }
-        void init(string[] args)
-        {
-            Console.WriteLine("main function");
-            string i = "128.687";
-            double b = 12;
-            bool c = false;
-            if (true)
-            {
-                bool j = false;
-                Console.WriteLine("judge");
-            };
-        }
-        void Square(string p)
-        {
-            for (double i = 0; i < 600; i++)
-            {
-                Console.WriteLine("loop");
-                if (true)
-                {
-                    bool j = false;
-                }
-                else
-                {
-                    bool j = true;
-                };
-            };
-        }
-    };
-};

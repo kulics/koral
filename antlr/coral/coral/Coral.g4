@@ -1,5 +1,4 @@
-// Define a grammar called Hello
-grammar Grammar;
+ï»¿grammar Coral;
 
 program : statement+;
 
@@ -35,50 +34,50 @@ atom: '(' expression ')'
 	  | ID
 ;
 
-// µ¼³öÃüÃû¿Õ¼ä
+// å¯¼å‡ºå‘½åç©ºé—´
 exportStatement:
 Export ID BlockLeft (statement)* BlockRight Terminate
 ;
-// µ¼ÈëÃüÃû¿Õ¼ä
+// å¯¼å…¥å‘½åç©ºé—´
 importStatement:
 Import BlockLeft (nameSpaceStatement)* BlockRight Terminate
 ;
-// ¶¨Òå°ü
+// å®šä¹‰åŒ…
 packageStatement:
 ID Define Package BlockLeft (statement)* BlockRight Terminate
 ;
-// Ö÷º¯Êý
+// ä¸»å‡½æ•°
 functionMainStatement:
 Main Define Function BlockLeft (statement)* BlockRight Terminate
 ;
-// º¯Êý
+// å‡½æ•°
 functionStatement:
 ID Define Function parameterClause Wave basicType BlockLeft (statement)* BlockRight Terminate
 ;
 
 parameterClause : '(' parameterList ')'  ;
 parameterList : basicType? (',' basicType)* ;
-// ¶¨Òå²»±äÁ¿
+// å®šä¹‰ä¸å˜é‡
 invariableStatement:
 ID Define dataStatement Terminate
 ;
-// ÓÐelseµÄÅÐ¶Ï
+// æœ‰elseçš„åˆ¤æ–­
 judgeWithElseStatement:
 judgeBaseStatement JudgeSub BlockLeft (statement)* BlockRight Terminate
 ;
-// ÅÐ¶Ï
+// åˆ¤æ–­
 judgeStatement:
 judgeBaseStatement Terminate
 ;
-// ÅÐ¶Ï»ù´¡
+// åˆ¤æ–­åŸºç¡€
 judgeBaseStatement:
 Judge bool BlockLeft (statement)* BlockRight
 ;
-// Ñ­»·
+// å¾ªçŽ¯
 loopStatement:
 Loop Number '..' Number BlockLeft (statement)* BlockRight Terminate
 ;
-// ÃüÃû¿Õ¼ä
+// å‘½åç©ºé—´
 nameSpaceStatement:
 ID Terminate
 ;
@@ -90,20 +89,20 @@ BlockLeft (statement)* BlockRight
 assign: ID '=' expression
 ;
 
-// »ù´¡Êý¾Ý
+// åŸºç¡€æ•°æ®
 dataStatement:
 t=Number
 | t=Text
 | t=True
 | t=False
 ;
-// »ù´¡ÀàÐÍÃû
+// åŸºç¡€ç±»åž‹å
 basicType:
 t=TypeNumber
 | t=TypeText
 | t=TypeBool
 ;
-// boolÖµ
+// boolå€¼
 bool:t=True|t=False;
 
 Terminate : ';';
@@ -151,19 +150,19 @@ False: 'false';
 Main: 'Main';
 
 
-Number :DIGIT+ ('.' DIGIT+)?; // Êý×Ö
-fragment DIGIT : [0-9] ;             // µ¥¸öÊý×Ö
-Text: '"' (~[\\\r\n])*? '"'; //ÎÄ±¾
-ID   : [a-zA-Z]+; // ±êÊ¶·û£¬ÓÉ¶à¸ö×ÖÄ¸×é³É
+Number :DIGIT+ ('.' DIGIT+)?; // æ•°å­—
+fragment DIGIT : [0-9] ;             // å•ä¸ªæ•°å­—
+Text: '"' (~[\\\r\n])*? '"'; //æ–‡æœ¬
+ID   : [a-zA-Z]+; // æ ‡è¯†ç¬¦ï¼Œç”±å¤šä¸ªå­—æ¯ç»„æˆ
 
 Mul  : '*';
 Div  : '/';
 Add  : '+';
 Sub  : '-';
 
-Comment : '/*' .*? '*/' -> skip; // ½á¹¹×¢ÊÍ
-CommentLine : '//' .*? '\r'? '\n' -> skip; // ÐÐ×¢ÊÍ
+Comment : '/*' .*? '*/' -> skip; // ç»“æž„æ³¨é‡Š
+CommentLine : '//' .*? '\r'? '\n' -> skip; // è¡Œæ³¨é‡Š
 
 //WS : ' ' -> skip;
 
-WS   : [ \t\r\n]+ -> skip; // ¿Õ°×£¬ ºóÃæµÄ->skip±íÊ¾antlr4ÔÚ·ÖÎöÓïÑÔµÄÎÄ±¾Ê±£¬·ûºÏÕâ¸ö¹æÔòµÄ´Ê·¨½«±»ÎÞÊÓ
+WS   : [ \t\r\n]+ -> skip; // ç©ºç™½ï¼Œ åŽé¢çš„->skipè¡¨ç¤ºantlr4åœ¨åˆ†æžè¯­è¨€çš„æ–‡æœ¬æ—¶ï¼Œç¬¦åˆè¿™ä¸ªè§„åˆ™çš„è¯æ³•å°†è¢«æ— è§†
