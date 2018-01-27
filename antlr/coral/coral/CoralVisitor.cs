@@ -178,14 +178,17 @@ namespace coral
             {
                 if(context.GetChild(1).GetType() == typeof(CoralParser.JudgeContext))
                 {
+                    // todo 如果左右不是bool类型值，报错
                     r.data = "bool";
                 }
                 else if(context.GetChild(1).GetType() == typeof(CoralParser.AddContext))
                 {
+                    // todo 如果左右不是number或text类型值，报错
                     r.data = "double";
                 }
                 else if(context.GetChild(1).GetType() == typeof(CoralParser.MulContext))
                 {
+                    // todo 如果左右不是number类型值，报错
                     r.data = "double";
                 }
                 var e1 = (Result)Visit(context.GetChild(0));
