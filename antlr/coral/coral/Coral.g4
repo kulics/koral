@@ -36,7 +36,7 @@ atom: '(' expression ')'
 
 // 导出命名空间
 exportStatement:
-Export ID BlockLeft (statement)* BlockRight Terminate
+Export nameSpace BlockLeft (statement)* BlockRight Terminate
 ;
 // 导入命名空间
 importStatement:
@@ -79,7 +79,7 @@ Loop Number '..' Number BlockLeft (statement)* BlockRight Terminate
 ;
 // 命名空间
 nameSpaceStatement:
-ID Terminate
+nameSpace Terminate
 ;
 
 blockStatement:
@@ -87,6 +87,11 @@ BlockLeft (statement)* BlockRight
 ;
 
 assign: ID '=' expression
+;
+
+nameSpace:
+NameSpace
+| ID
 ;
 
 // 基础数据
@@ -102,6 +107,7 @@ t=TypeNumber
 | t=TypeText
 | t=TypeBool
 ;
+
 // bool值
 bool:t=True|t=False;
 
@@ -149,10 +155,10 @@ False: 'false';
 
 Main: 'Main';
 
-
 Number :DIGIT+ ('.' DIGIT+)?; // 数字
 fragment DIGIT : [0-9] ;             // 单个数字
 Text: '"' (~[\\\r\n])*? '"'; //文本
+NameSpace: ID ('.'ID)+;
 ID   : [a-zA-Z]+; // 标识符，由多个字母组成
 
 Mul  : '*';

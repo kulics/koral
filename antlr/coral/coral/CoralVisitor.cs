@@ -22,7 +22,7 @@ namespace coral
 
         public override object VisitExportStatement([NotNull] CoralParser.ExportStatementContext context)
         {
-            var obj = "namespace " + context.ID().GetText() + Wrap + context.BlockLeft().GetText() + Wrap;
+            var obj = "namespace " + VisitNameSpace(context.nameSpace()) + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.statement())
             {
                 obj += VisitStatement(item);
@@ -44,8 +44,13 @@ namespace coral
 
         public override object VisitNameSpaceStatement([NotNull] CoralParser.NameSpaceStatementContext context)
         {
-            var obj = context.ID().GetText() + context.Terminate().GetText();
+            var obj = VisitNameSpace(context.nameSpace()) + context.Terminate().GetText();
             return obj;
+        }
+
+        public override object VisitNameSpace([NotNull] CoralParser.NameSpaceContext context)
+        {
+            return context.GetChild(0).GetText();
         }
 
         public override object VisitPackageStatement([NotNull] CoralParser.PackageStatementContext context)

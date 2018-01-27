@@ -17,6 +17,7 @@ namespace coral
     <: 
     {   
         System;
+        System.Linq;
     }; 
 
     Program => # 
@@ -69,6 +70,11 @@ namespace coral
             Console.WriteLine(tree.ToStringTree(parser));
             Console.WriteLine(result);
             Console.ReadKey();
+        }
+
+        (int,int) Tuple((int,int) x)
+        {
+            return x;
         }
     }
 }
