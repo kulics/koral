@@ -46,7 +46,8 @@ namespace coral
                 print(""loop"");
                 ? true
                 {
-                    j => false;
+                    j => 1+1*3*9/8;
+                    j = j + 5 +(j +8);
                 }
                 ~?
                 {
@@ -72,9 +73,5 @@ namespace coral
             Console.ReadKey();
         }
 
-        (int,int) Tuple((int,int) x)
-        {
-            return x;
-        }
     }
 }

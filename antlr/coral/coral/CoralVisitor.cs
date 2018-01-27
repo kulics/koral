@@ -9,6 +9,8 @@ namespace coral
 {
     class CoralVisitor : CoralBaseVisitor<object>
     {
+        const string Wrap = "\r\n";
+
         public override object VisitProgram([NotNull] CoralParser.ProgramContext context)
         {
             var list = context.statement();
@@ -113,13 +115,6 @@ namespace coral
             return obj;
         }
 
-        public override object VisitInvariableStatement([NotNull] CoralParser.InvariableStatementContext context)
-        {
-            var r = (Result)VisitDataStatement(context.dataStatement());
-            var obj = r.data + " " + context.ID().GetText() + " = " + r.text + context.Terminate().GetText() + Wrap;
-            return obj;
-        }
-
         public override object VisitLoopStatement([NotNull] CoralParser.LoopStatementContext context)
         {
             var obj = "for (double i =" + context.Number(0).GetText() + "; i<" + context.Number(1).GetText() + ";i++)"
@@ -161,7 +156,79 @@ namespace coral
             return obj;
         }
 
-        const string Wrap = "\r\n";
+        public override object VisitInvariableStatement([NotNull] CoralParser.InvariableStatementContext context)
+        {
+            var r = (Result)VisitExpression(context.expression());
+            var obj = r.data + " " + context.ID().GetText() + " = " + r.text + context.Terminate().GetText() + Wrap;
+            return obj;
+        }
+
+        public override object VisitAssignStatement([NotNull] CoralParser.AssignStatementContext context)
+        {
+            var r = (Result)VisitExpression(context.expression());
+            var obj = context.ID().GetText() + " = " + r.text + context.Terminate().GetText() + Wrap;
+            return obj;
+        }
+
+        public override object VisitExpression([NotNull] CoralParser.ExpressionContext context)
+        {
+            var count = context.ChildCount;
+            var r = new Result();
+            if(count == 3)
+            {
+                if(context.GetChild(1).GetType() == typeof(CoralParser.JudgeContext))
+                {
+                    r.data = "bool";
+                }
+                else if(context.GetChild(1).GetType() == typeof(CoralParser.AddContext))
+                {
+                    r.data = "double";
+                }
+                else if(context.GetChild(1).GetType() == typeof(CoralParser.MulContext))
+                {
+                    r.data = "double";
+                }
+                var e1 = (Result)Visit(context.GetChild(0));
+                var op = Visit(context.GetChild(1));
+                var e2 = (Result)Visit(context.GetChild(2));
+                r.text = e1.text + op + e2.text;
+            }
+            else if(count == 1)
+            {
+                r = (Result)Visit(context.GetChild(0));
+            }
+            return r;
+        }
+
+        public override object VisitJudge([NotNull] CoralParser.JudgeContext context)
+        {
+            return context.op.Text;
+        }
+
+        public override object VisitAdd([NotNull] CoralParser.AddContext context)
+        {
+            return context.op.Text;
+        }
+
+        public override object VisitMul([NotNull] CoralParser.MulContext context)
+        {
+            return context.op.Text;
+        }
+
+        public override object VisitPrimaryExpression([NotNull] CoralParser.PrimaryExpressionContext context)
+        {
+            if(context.ChildCount == 1)
+            {
+                var c = context.GetChild(0);
+                if(c is CoralParser.DataStatementContext)
+                {
+                    return VisitDataStatement(context.dataStatement());
+                }
+                return new Result { text = context.ID().GetText(), data = "double" };
+            }
+            var r = (Result)VisitExpression(context.expression());
+            return new Result { text = "(" + r.text + ")", data = r.data };
+        }
 
         public override object VisitPrintStatement([NotNull] CoralParser.PrintStatementContext context)
         {
