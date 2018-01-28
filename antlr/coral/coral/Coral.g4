@@ -48,8 +48,6 @@ loopStatement:Loop Number '..' Number BlockLeft (statement)* BlockRight Terminat
 // 命名空间
 nameSpaceStatement:nameSpace Terminate;
 
-blockStatement:BlockLeft (statement)* BlockRight;
-
 // 定义不变量
 invariableStatement:ID Define expression Terminate;
 // 赋值
