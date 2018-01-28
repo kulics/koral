@@ -22,18 +22,17 @@
 
         // Array
         arr => [1,2,3,4,5] :[number];
-        print( arr[0] ); // 使用下标获取
+        print( t: arr[0] ); // 使用下标获取
 
         // Dictionary, 前面为key，后面为value
         dic => ["1":false, "2":true] :[text:bool];
-        print( dic["1"] ); // 使用key获取
+        print( t: dic["1"] ); // 使用key获取
 
         // Tuple
-        tpl1 => (1, 2) :(number, number); 
-        tpl2 => (a:1, b:2);
+        tpl => (a:1, b:2) :(number, number);
 
         // Function
-        fn => $(number)~(number){} :$(number)~(number); 
+        fn => $(in:number)~(out:number){} :$(number)~(number); 
 
         // Function with no params no return
         doSomeThingVoid => $
@@ -42,26 +41,27 @@
             doSomeThingB();
         };
 
-        // Full Function with no name, the part of before wave is params, the part of behind wave is returns.
-        doSomeThingNoName => $(number, text)~(number, text)
+        // Full Function with in params and out params
+        doSomeThingWithParams => $(x:number, y:text)~(a:number, b:text)
         {
-            <- (x, y);  // use <- to receive params
-            -> (x, y);  // use -> to return results
-        };
-
-        // Full Function with name, the returns will be auto init as params.
-        doSomeThingHaveName => $(x:number, y:text)~(a:number, b:text)
-        {
-            a = x;
-            b = y;
-            // if you do not need clear exit, you can pass the ->
+            -> (x, y);
         };
 
         b2c();
         // 使用 _ 舍弃返回值，必须要接收返回值
         _ => a2b(x:3, y:"test");
 
-        // Judge，符合条件的匹配内容被执行，然后自动跳出，无法手动控制
+        // Judge，当表达式的结果只有bool时，相当于if，只当true时才执行
+        ? 1+1 != 2
+        {
+            doSomeThingA();
+        }
+        ~? // 相当于else
+        {
+            doSomeThingB();
+        };
+
+        // 当表达式的结果为其它类型时，符合条件的匹配内容被执行，然后自动跳出，无法手动控制
         ? x
         {
             // catch condition
@@ -76,29 +76,6 @@
             ~? _ // 缺省执行，省略的话找不到匹配会自动跳出
             {
                 doSomeThingC();
-            };
-        };
-
-        // 当参数的结果只有bool时，相当于if，只当true时才执行
-        ? 1+1 != 2
-        {
-            doSomeThingA();
-        }
-        ~? // 相当于else
-        {
-            doSomeThingB();
-        };
-
-        // 当没有参数时，只执行条件为true的语句，代替if-elseif-else
-        ?
-        {
-            ~? 1+1 != 2 
-            {
-                doSomeThingA();
-            };
-            ~? 3-3 > 0 
-            {
-                doSomeThingB();
             };
         };
 
@@ -149,14 +126,14 @@
             Click => $
             {
                 // 可以通过 ^ 来访问包自身属性或方法
-                print( ^.Title );
+                print( t: ^.Title );
                 doSomeThingA();
                 doSomeThingB();
             };
         };
 
         // 可以通过参数标记，让包支持构造方法，默认可以省略
-        Image => # (number,number,text)
+        Image => # (w:number,h:number,s:text)
         {
             // 私有属性，不能被外部访问，也不能被重包装
             _width => 0;
@@ -167,16 +144,16 @@
             init => $ 
             {
                 // 接收构造参数
-                <- (_width, _height, _source);
+                (_width, _height, _source) = (w,h,s);
             };
         };
 
         // ReDefine ，对某个包扩展，只允许使用这种方式覆盖同名包，可以用来扩展属性、方法、构造方法
-        View <= # (number,number,text)
+        View <= # (w:number,h:number,s:text)
         {
             init => $ 
             {
-                <- (Width,Height,Source);
+                (Width,Height,Source) = (w,h,s);
                 // 重载构造也支持调用原始构造方法，通常不需要
                 ^.init();
             };
@@ -199,7 +176,7 @@
         {
             &Speed => 0; // 可变量，导入的包必须实现定义
             TopSpeed => 20;   // 不可变量，必须在协议中初始化，作为公共属性给任意地方使用，只读
-            Clear => $()~(text) // 不可变方法，必须在协议中初始化，作为公共方法给任意地方使用，只读
+            Clear => $()~(t:text) // 不可变方法，必须在协议中初始化，作为公共方法给任意地方使用，只读
             {
                 -> "Done";
             };
@@ -231,7 +208,7 @@
                 {
                     t => 5000/Animation.TopSpeed; // calling protocol public invariable
                     txt => s(t);
-                    print(txt);
+                    print( t: txt);
                     play();
                     Animation.Clear(); // calling protocol public method
                 };
@@ -245,13 +222,12 @@
         // Calling object method
         ib.Show();
         // Create an object with params
-        img => Image(30, 20, "./icon.png");
+        img => Image(w:30, h:20, s:"./icon.png");
 
         // Lambda Function
         ib.Move(s: $(time:number)~(txt:text)
         { 
-            t => time;
-            txt = t :text + "ok";
+            -> (time :text + "ok");
         });
 
         // Use ! to declare an Excption Function, the returns will wrap in Excption automatically
@@ -260,7 +236,7 @@
             ? url.length < 1
             {
                 // Report some error
-                ~! IOErr("URL is none"); 
+                ~! IOErr(t:"URL is none"); 
             };
             f = System.IO.ReadFile(url:url);
         };
@@ -270,10 +246,9 @@
         {
             f => readFile(url:"./test.xy");
         }
-        ~ IOErr // Catch the report
+        ~ IOErr err // Catch the report
         {
-            <- err;
-            print(err);
+            print(t:err);
         }
         ~! // Finally to do
         {
@@ -290,10 +265,26 @@
             ~$ doSomeThingA(); 
             doSomeThingB();
             ~$ doSomeThingC(); 
-            out = in;
+            -> in;
         };
 
         x => task(in: 6);
+
+        // 值传递
+        hello => ? isSun
+        {
+            // 使用 <- 将值传递给左边
+            <- "nice day";
+        }
+        ~?
+        {
+            <- "bad day";
+        };
+
+        hellos => @ weatherHistory ~ day
+        {
+            // 在循环中使用，可以将值插入给外部数组
+            <- day.hello;
+        }; 
     };
-  
 };
