@@ -51,7 +51,7 @@ namespace coral
                 }
                 ~?
                 {
-                    j => true;
+                    j => (5>3)||false;
                 };
             };
         };
@@ -72,6 +72,5 @@ namespace coral
             Console.WriteLine(result);
             Console.ReadKey();
         }
-
     }
 }
