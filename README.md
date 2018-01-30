@@ -19,7 +19,7 @@ Read detail from The [Book]().
             System;
         }
 
-        main => $  
+        Main => $  
         {
             greetings => ["Hello", "Hola", "Bonjour",
                         "Ciao", "こんにちは", "안녕하세요",
@@ -30,11 +30,11 @@ Read detail from The [Book]().
                 print(greeting);
                 ? num 
                 {
-                    ~? 0..10 
+                    ~ 0..10 
                     {
                         println(" in 0-10");
                     };
-                    ~? _
+                    ~ _
                     {
                         println(" over 10");
                         ->;
