@@ -17,6 +17,7 @@ statement :
 | judgeWithElseStatement
 | judgeStatement
 | loopStatement
+| loopInfiniteStatement
 | printStatement
 | assignStatement
 | expressionStatement
@@ -35,12 +36,12 @@ functionMainStatement:Main Define Function BlockLeft (statement)* BlockRight Ter
 // 函数
 functionStatement:ID Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (statement)* BlockRight Terminate;
 // 返回
-returnStatement: ArrowRight expressionList Terminate;
-
+returnStatement: ArrowRight tuple Terminate;
+// 入参
 parameterClauseIn : '(' parameter? (',' parameter)*  ')'  ;
-
+// 出参
 parameterClauseOut : '(' parameter? (',' parameter)*  ')'  ;
-
+// 参数结构
 parameter : ID ':' basicType;
 
 // 有else的判断
@@ -50,7 +51,9 @@ judgeStatement:judgeBaseStatement Terminate;
 // 判断基础
 judgeBaseStatement:Judge expression BlockLeft (statement)* BlockRight;
 // 循环
-loopStatement:Loop Number '..' Number BlockLeft (statement)* BlockRight Terminate;
+loopStatement:Loop Number ('..' Number)? '..' Number Wave ID BlockLeft (statement)* BlockRight Terminate;
+// 无限循环
+loopInfiniteStatement:Loop BlockLeft (statement)* BlockRight Terminate;
 // 命名空间
 nameSpaceStatement:nameSpace Terminate;
 
@@ -71,7 +74,8 @@ ID
 // 表达式
 expression:
 primaryExpression
-| ID expressionList // 函数调用
+| ID tuple // 函数调用
+| expressionList // 表达式列表
 | expression call expression // 链式调用
 | expression judge expression // 判断型表达式
 | expression add expression // 和型表达式
@@ -79,6 +83,8 @@ primaryExpression
 ;
 
 expressionList : '(' (expression (',' expression)*)? ')'; // 参数列表
+
+tuple : '(' (ID ':' expression (',' ID ':' expression)* )? ')'; // 元组
 
 nameSpace:ID ('.'ID)* ;
 

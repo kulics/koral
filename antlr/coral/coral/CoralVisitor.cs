@@ -109,8 +109,27 @@ namespace coral
 
         public override object VisitReturnStatement([NotNull] CoralParser.ReturnStatementContext context)
         {
-            var r = Visit(context.expressionList());
+            var r = Visit(context.tuple());
             return "return " + r + context.Terminate().GetText() + Wrap;
+        }
+
+        public override object VisitTuple([NotNull] CoralParser.TupleContext context)
+        {
+            var obj = "("; 
+            for(int i = 0; i < context.expression().Length; i++)
+            {
+                var r = (Result)Visit(context.expression(i));
+                if(i == 0)
+                {
+                    obj += r.text;
+                }
+                else
+                {
+                    obj += ", " + r.text;
+                }
+            }
+            obj += ")";
+            return obj;
         }
 
         public override object VisitExpressionList([NotNull] CoralParser.ExpressionListContext context)
@@ -188,8 +207,43 @@ namespace coral
 
         public override object VisitLoopStatement([NotNull] CoralParser.LoopStatementContext context)
         {
-            var obj = "for (double i =" + context.Number(0).GetText() + "; i<" + context.Number(1).GetText() + ";i++)"
-                + Wrap + context.BlockLeft().GetText() + Wrap;
+            var obj = "";
+            double from, to, step;
+            if (context.Number().Length == 2)
+            {
+                from = Convert.ToDouble(context.Number(0).GetText());
+                to = Convert.ToDouble(context.Number(1).GetText());
+                step = 1;
+            }
+            else
+            {
+                from = Convert.ToDouble(context.Number(0).GetText());
+                to = Convert.ToDouble(context.Number(2).GetText());
+                step = Convert.ToDouble(context.Number(1).GetText());
+            }
+            obj += "for (double @" + context.ID().GetText() + " = " + from.ToString() + ";";
+            if (from <= to)
+            {
+                obj += "@" + context.ID().GetText() + "<" + to.ToString() + ";";
+                obj += "@" + context.ID().GetText() + "+=" + step.ToString() + ")";
+            }
+            else
+            {
+                obj += "@" + context.ID().GetText() + ">" + to.ToString() + ";";
+                obj += "@" + context.ID().GetText() + "-=" + step.ToString() + ")";
+            }
+            obj += Wrap + context.BlockLeft().GetText() + Wrap;
+            foreach(var item in context.statement())
+            {
+                obj += Visit(item);
+            }
+            obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
+            return obj;
+        }
+
+        public override object VisitLoopInfiniteStatement([NotNull] CoralParser.LoopInfiniteStatementContext context)
+        {
+            var obj = "while (true)"+ Wrap + context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.statement())
             {
                 obj += Visit(item);
@@ -256,9 +310,9 @@ namespace coral
             if(count == 2)
             {
                 r.data = "double";
-                r.text = "@" + context.ID().GetText() + Visit(context.expressionList());
+                r.text = "@" + context.ID().GetText() + Visit(context.tuple());
             }
-            if(count == 3)
+            else if(count == 3)
             {
                 if(context.GetChild(1).GetType() == typeof(CoralParser.CallContext))
                 {
