@@ -24,10 +24,10 @@ namespace coral
 
         public override object VisitExportStatement([NotNull] CoralParser.ExportStatementContext context)
         {
-            var obj = "namespace " + VisitNameSpace(context.nameSpace()) + Wrap + context.BlockLeft().GetText() + Wrap;
+            var obj = "namespace " + Visit(context.nameSpace()) + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.statement())
             {
-                obj += VisitStatement(item);
+                obj += Visit(item);
             }
             obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
             return obj;
@@ -39,34 +39,46 @@ namespace coral
 
             foreach(var item in context.nameSpaceStatement())
             {
-                obj += "using " + VisitNameSpaceStatement(item) + Wrap;
+                obj += "using " + Visit(item) + Wrap;
             }
             return obj;
         }
 
         public override object VisitNameSpaceStatement([NotNull] CoralParser.NameSpaceStatementContext context)
         {
-            var obj = VisitNameSpace(context.nameSpace()) + context.Terminate().GetText();
+            var obj = Visit(context.nameSpace()) + context.Terminate().GetText();
             return obj;
         }
 
         public override object VisitNameSpace([NotNull] CoralParser.NameSpaceContext context)
         {
-            return context.GetChild(0).GetText();
+            var obj = "";
+            for(int i = 0; i < context.ID().Length; i++)
+            {
+                if(i == 0)
+                {
+                    obj += "@" + context.ID(i);
+                }
+                else
+                {
+                    obj += ".@" + context.ID(i);
+                }
+            }
+            return obj;
         }
 
         public override object VisitPackageStatement([NotNull] CoralParser.PackageStatementContext context)
         {
-            var obj = "class " + context.ID().GetText() + Wrap + context.BlockLeft().GetText() + Wrap;
+            var obj = "class @" + context.ID().GetText() + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.statement())
             {
                 if(item.GetChild(0).GetType() == typeof(CoralParser.FunctionMainStatementContext))
                 {
                     obj += "static void Main(string[] args)" + Wrap + context.BlockLeft().GetText() + Wrap;
-                    obj += "new " + context.ID().GetText() + "().init(args);" + Wrap;
+                    obj += "new @" + context.ID().GetText() + "().init(args);" + Wrap;
                     obj += context.BlockRight().GetText() + Wrap;
                 }
-                obj += VisitStatement(item);
+                obj += Visit(item);
             }
             obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
             return obj;
@@ -77,7 +89,7 @@ namespace coral
             var obj = "void init(string[] args)" + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.statement())
             {
-                obj += VisitStatement(item);
+                obj += Visit(item);
             }
             obj += context.BlockRight().GetText() + Wrap;
             return obj;
@@ -85,34 +97,93 @@ namespace coral
 
         public override object VisitFunctionStatement([NotNull] CoralParser.FunctionStatementContext context)
         {
-            var obj = "void " + context.ID().GetText() + VisitParameterClause(context.parameterClause()) + Wrap + context.BlockLeft().GetText() + Wrap;
+            var obj = Visit(context.parameterClauseOut()) + " @" + context.ID().GetText()
+                + Visit(context.parameterClauseIn()) + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.statement())
             {
-                obj += VisitStatement(item);
+                obj += Visit(item);
             }
             obj += context.BlockRight().GetText() + Wrap;
             return obj;
         }
 
-        public override object VisitParameterClause([NotNull] CoralParser.ParameterClauseContext context)
+        public override object VisitReturnStatement([NotNull] CoralParser.ReturnStatementContext context)
+        {
+            var r = Visit(context.expressionList());
+            return "return " + r + context.Terminate().GetText() + Wrap;
+        }
+
+        public override object VisitExpressionList([NotNull] CoralParser.ExpressionListContext context)
+        {
+            var obj = "(";
+            for(int i = 0; i < context.expression().Length; i++)
+            {
+                var r = (Result)Visit(context.expression(i));
+                if(i == 0)
+                {
+                    obj += r.text;
+                }
+                else
+                {
+                    obj += ", " + r.text;
+                }
+            }
+            obj += ")";
+            return obj;
+        }
+
+        public override object VisitParameterClauseIn([NotNull] CoralParser.ParameterClauseInContext context)
         {
             var obj = "( ";
-            //if (context.parameterList().Length > 0)
-            //{
-            obj += VisitParameterList(context.parameterList());
-            //}
+
+            for(int i = 0; i < context.parameter().Length; i++)
+            {
+                if(i == 0)
+                {
+                    obj += Visit(context.parameter(0));
+                }
+                else
+                {
+                    obj += ", " + Visit(context.parameter(i));
+                }
+            }
             obj += " )";
             return obj;
         }
 
-        public override object VisitParameterList([NotNull] CoralParser.ParameterListContext context)
+        public override object VisitParameterClauseOut([NotNull] CoralParser.ParameterClauseOutContext context)
         {
             var obj = "";
-            if(context.ChildCount > 0)
+            if(context.parameter().Length == 0)
             {
-                obj += VisitBasicType(context.basicType(0)) + " p";
+                obj += "void";
+            }
+            else if(context.parameter().Length == 1)
+            {
+                obj += Visit(context.parameter(0).basicType());
+            }
+            if(context.parameter().Length > 1)
+            {
+                obj += "( ";
+                for(int i = 0; i < context.parameter().Length; i++)
+                {
+                    if(i == 0)
+                    {
+                        obj += Visit(context.parameter(0));
+                    }
+                    else
+                    {
+                        obj += ", " + Visit(context.parameter(i));
+                    }
+                }
+                obj += " )";
             }
             return obj;
+        }
+
+        public override object VisitParameter([NotNull] CoralParser.ParameterContext context)
+        {
+            return Visit(context.basicType()) + " @" + context.ID().GetText();
         }
 
         public override object VisitLoopStatement([NotNull] CoralParser.LoopStatementContext context)
@@ -121,7 +192,7 @@ namespace coral
                 + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.statement())
             {
-                obj += VisitStatement(item);
+                obj += Visit(item);
             }
             obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
             return obj;
@@ -129,10 +200,10 @@ namespace coral
 
         public override object VisitJudgeWithElseStatement([NotNull] CoralParser.JudgeWithElseStatementContext context)
         {
-            var obj = VisitJudgeBaseStatement(context.judgeBaseStatement()) + Wrap + " else " + Wrap + context.BlockLeft().GetText() + Wrap;
+            var obj = Visit(context.judgeBaseStatement()) + Wrap + " else " + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.statement())
             {
-                obj += VisitStatement(item);
+                obj += Visit(item);
             }
             obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
             return obj;
@@ -140,17 +211,17 @@ namespace coral
 
         public override object VisitJudgeStatement([NotNull] CoralParser.JudgeStatementContext context)
         {
-            var obj = VisitJudgeBaseStatement(context.judgeBaseStatement()) + context.Terminate().GetText() + Wrap;
+            var obj = Visit(context.judgeBaseStatement()) + context.Terminate().GetText() + Wrap;
             return obj;
         }
 
         public override object VisitJudgeBaseStatement([NotNull] CoralParser.JudgeBaseStatementContext context)
         {
-            var b = (Result)VisitBool(context.@bool());
+            var b = (Result)Visit(context.expression());
             var obj = "if (" + b.text + ")" + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.statement())
             {
-                obj += VisitStatement(item);
+                obj += Visit(item);
             }
             obj += context.BlockRight().GetText();
             return obj;
@@ -158,25 +229,42 @@ namespace coral
 
         public override object VisitInvariableStatement([NotNull] CoralParser.InvariableStatementContext context)
         {
-            var r = (Result)VisitExpression(context.expression());
-            var obj = r.data + " " + context.ID().GetText() + " = " + r.text + context.Terminate().GetText() + Wrap;
+            var r1 = (Result)Visit(context.expression(0));
+            var r2 = (Result)Visit(context.expression(1));
+            var obj = r2.data + " " + r1.text + " = " + r2.text + context.Terminate().GetText() + Wrap;
             return obj;
         }
 
         public override object VisitAssignStatement([NotNull] CoralParser.AssignStatementContext context)
         {
-            var r = (Result)VisitExpression(context.expression());
-            var obj = context.ID().GetText() + " = " + r.text + context.Terminate().GetText() + Wrap;
+            var r1 = (Result)Visit(context.expression(0));
+            var r2 = (Result)Visit(context.expression(1));
+            var obj = r1.text + " = " + r2.text + context.Terminate().GetText() + Wrap;
             return obj;
+        }
+
+        public override object VisitExpressionStatement([NotNull] CoralParser.ExpressionStatementContext context)
+        {
+            var r = (Result)Visit(context.expression());
+            return r.text + context.Terminate().GetText() + Wrap;
         }
 
         public override object VisitExpression([NotNull] CoralParser.ExpressionContext context)
         {
             var count = context.ChildCount;
             var r = new Result();
+            if(count == 2)
+            {
+                r.data = "double";
+                r.text = "@" + context.ID().GetText() + Visit(context.expressionList());
+            }
             if(count == 3)
             {
-                if(context.GetChild(1).GetType() == typeof(CoralParser.JudgeContext))
+                if(context.GetChild(1).GetType() == typeof(CoralParser.CallContext))
+                {
+                    r.data = "double";
+                }
+                else if(context.GetChild(1).GetType() == typeof(CoralParser.JudgeContext))
                 {
                     // todo 如果左右不是bool类型值，报错
                     r.data = "bool";
@@ -203,6 +291,11 @@ namespace coral
             return r;
         }
 
+        public override object VisitCall([NotNull] CoralParser.CallContext context)
+        {
+            return context.op.Text;
+        }
+
         public override object VisitJudge([NotNull] CoralParser.JudgeContext context)
         {
             return context.op.Text;
@@ -225,11 +318,11 @@ namespace coral
                 var c = context.GetChild(0);
                 if(c is CoralParser.DataStatementContext)
                 {
-                    return VisitDataStatement(context.dataStatement());
+                    return Visit(context.dataStatement());
                 }
-                return new Result { text = context.ID().GetText(), data = "double" };
+                return new Result { text = "@" + context.ID().GetText(), data = "double" };
             }
-            var r = (Result)VisitExpression(context.expression());
+            var r = (Result)Visit(context.expression());
             return new Result { text = "(" + r.text + ")", data = r.data };
         }
 

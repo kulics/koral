@@ -12,12 +12,14 @@ statement :
 | packageStatement
 | functionMainStatement
 | functionStatement
+| returnStatement
 | invariableStatement
 | judgeWithElseStatement
 | judgeStatement
 | loopStatement
 | printStatement
 | assignStatement
+| expressionStatement
 ;		  
 
 printStatement:'print' '(' Text ')' Terminate;
@@ -31,27 +33,33 @@ packageStatement:ID Define Package BlockLeft (statement)* BlockRight Terminate;
 // 主函数
 functionMainStatement:Main Define Function BlockLeft (statement)* BlockRight Terminate;
 // 函数
-functionStatement:ID Define Function parameterClause Wave basicType BlockLeft (statement)* BlockRight Terminate;
+functionStatement:ID Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (statement)* BlockRight Terminate;
+// 返回
+returnStatement: ArrowRight expressionList Terminate;
 
-parameterClause : '(' parameterList ')'  ;
+parameterClauseIn : '(' parameter? (',' parameter)*  ')'  ;
 
-parameterList : basicType? (',' basicType)* ;
+parameterClauseOut : '(' parameter? (',' parameter)*  ')'  ;
+
+parameter : ID ':' basicType;
 
 // 有else的判断
 judgeWithElseStatement:judgeBaseStatement JudgeSub BlockLeft (statement)* BlockRight Terminate;
 // 判断
 judgeStatement:judgeBaseStatement Terminate;
 // 判断基础
-judgeBaseStatement:Judge bool BlockLeft (statement)* BlockRight;
+judgeBaseStatement:Judge expression BlockLeft (statement)* BlockRight;
 // 循环
 loopStatement:Loop Number '..' Number BlockLeft (statement)* BlockRight Terminate;
 // 命名空间
 nameSpaceStatement:nameSpace Terminate;
 
 // 定义不变量
-invariableStatement:ID Define expression Terminate;
+invariableStatement:expression Define expression Terminate;
 // 赋值
-assignStatement: ID '=' expression Terminate;
+assignStatement: expression '=' expression Terminate;
+
+expressionStatement: expression Terminate;
 
 // 基础表达式
 primaryExpression: 
@@ -63,18 +71,16 @@ ID
 // 表达式
 expression:
 primaryExpression
-// 判断型表达式
-| expression judge expression
-// 和型表达式
-| expression add expression
-// 积型表达式
-| expression mul expression
+| ID expressionList // 函数调用
+| expression call expression // 链式调用
+| expression judge expression // 判断型表达式
+| expression add expression // 和型表达式
+| expression mul expression // 积型表达式
 ;
 
-nameSpace:
-NameSpace
-| ID
-;
+expressionList : '(' (expression (',' expression)*)? ')'; // 参数列表
+
+nameSpace:ID ('.'ID)* ;
 
 // 基础数据
 dataStatement:
@@ -96,6 +102,7 @@ bool:t=True|t=False;
 judge : op=('||' | '&&' | '==' | '!=' | '<' | '>');
 add : op=('+' | '-');
 mul : op=('*' | '/');
+call : op='.';
 
 Terminate : ';';
 
@@ -144,8 +151,7 @@ Main: 'Main';
 Number :DIGIT+ ('.' DIGIT+)?; // 数字
 fragment DIGIT : [0-9] ;             // 单个数字
 Text: '"' (~[\\\r\n])*? '"'; //文本
-NameSpace: ID ('.'ID)+;
-ID   : [a-zA-Z]+; // 标识符，由多个字母组成
+ID   : [a-zA-Z] [a-zA-Z0-9]*; // 标识符，由多个字母组成
 
 Comment : '/*' .*? '*/' -> skip; // 结构注释
 CommentLine : '//' .*? '\r'? '\n' -> skip; // 行注释

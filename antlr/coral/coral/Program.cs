@@ -32,19 +32,21 @@ namespace coral
             i => ""128.687"";  
             b => 12;  
             c => false; 
-            ? true
+            ? 1+1 == 2
             {
                 j => false;
                 print(""judge"");
             };
+            (x,y) => Square(""testcall"");
+            b.ToString().ToString();
         };
 
-        Square => $ (text)~number
+        Square => $ (str:text)~(out1:number,out2:number)
         {
             @ 0 .. 600
             {
                 print(""loop"");
-                ? true
+                ? 1+1 != 2
                 {
                     j => 1+1*3*9/8;
                     j = j + 5 +(j +8);
@@ -54,6 +56,7 @@ namespace coral
                     j => (5>3)||false;
                 };
             };
+            -> (1,2);
         };
     }; 
 };
@@ -74,3 +77,4 @@ namespace coral
         }
     }
 }
+
