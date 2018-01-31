@@ -36,7 +36,7 @@ functionMainStatement:Main Define Function BlockLeft (statement)* BlockRight Ter
 // 函数
 functionStatement:ID Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (statement)* BlockRight Terminate;
 // 返回
-returnStatement: ArrowRight tuple Terminate;
+returnStatement: ArrowRight expressionList Terminate;
 // 入参
 parameterClauseIn : '(' parameter? (',' parameter)*  ')'  ;
 // 出参

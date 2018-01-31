@@ -109,7 +109,7 @@ namespace coral
 
         public override object VisitReturnStatement([NotNull] CoralParser.ReturnStatementContext context)
         {
-            var r = Visit(context.tuple());
+            var r = Visit(context.expressionList());
             return "return " + r + context.Terminate().GetText() + Wrap;
         }
 
