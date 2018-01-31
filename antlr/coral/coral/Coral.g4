@@ -51,9 +51,11 @@ judgeStatement:judgeBaseStatement Terminate;
 // 判断基础
 judgeBaseStatement:Judge expression BlockLeft (statement)* BlockRight;
 // 循环
-loopStatement:Loop Number ('..' Number)? '..' Number Wave ID BlockLeft (statement)* BlockRight Terminate;
+loopStatement:Loop iteratorStatement Wave ID BlockLeft (statement)* BlockRight Terminate;
 // 无限循环
 loopInfiniteStatement:Loop BlockLeft (statement)* BlockRight Terminate;
+// 迭代器
+iteratorStatement:Number '..' Number '..' Number | Number '..' Number;
 // 命名空间
 nameSpaceStatement:nameSpace Terminate;
 

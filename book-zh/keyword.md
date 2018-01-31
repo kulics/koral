@@ -11,7 +11,6 @@ any 任意类型
 ## 隐藏类型
     [T] = XyArray<T>
     [T:T] = XyDictionary<T,T>
-    (T...) = XyTuple{T...}
     $(T...)~(T...) = XyFunction<T...><T...>
     #{T...} = XyPackage{T...}
     |{T...} = XyProtocol{T...}

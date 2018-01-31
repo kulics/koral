@@ -37,13 +37,13 @@ namespace coral
                 j => false;
                 print(""judge"");
             };
-            (x,y) => Square(""testcall"");
+            (x,y) => Square(str:""testcall"");
             b.ToString().ToString();
         };
 
         Square => $ (str:text)~(out1:number,out2:number)
         {
-            @ 0 .. 600
+            @ 0..600 ~ i
             {
                 print(""loop"");
                 ? 1+1 != 2
@@ -77,4 +77,3 @@ namespace coral
         }
     }
 }
-
