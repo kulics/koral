@@ -25,6 +25,7 @@ namespace coral
         i => 128.687;  
         b => ""12"";  
         c => true; 
+        _PriName => "" program "";
         
         Main => $ 
         {
@@ -59,6 +60,7 @@ namespace coral
             };
             -> (1,2);
         };
+        _Result => # {};
     }; 
 };
 ";
@@ -69,7 +71,7 @@ namespace coral
             var parser = new CoralParser(tokens) { BuildParseTree = true };
             var tree = parser.program();
 
-            var visitor = new CoralVisitor();
+            var visitor = new CoralVisitorBase();
             var result = visitor.Visit(tree);
 
             Console.WriteLine(tree.ToStringTree(parser));

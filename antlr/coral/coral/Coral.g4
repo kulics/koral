@@ -6,35 +6,34 @@ program : statement+;
 
 //exprList : expr (',' expr)* ;
 
-statement :
- exportStatement
-| importStatement
-| packageStatement
-| functionMainStatement
-| functionStatement
-| returnStatement
-| invariableStatement
-| judgeWithElseStatement
-| judgeStatement
-| loopStatement
-| loopInfiniteStatement
-| printStatement
-| assignStatement
-| expressionStatement
-;		  
+statement :exportStatement;		  
 
 printStatement:'print' '(' Text ')' Terminate;
 
 // 导出命名空间
-exportStatement:Export nameSpace BlockLeft (statement)* BlockRight Terminate;
+exportStatement:Export nameSpace BlockLeft (exportSupportStatement)* BlockRight Terminate;
+// 导出命名空间支持的语句
+exportSupportStatement:
+importStatement
+|packageStatement
+;
 // 导入命名空间
 importStatement:Import BlockLeft (nameSpaceStatement)* BlockRight Terminate;
 // 定义包
-packageStatement:id Define Package BlockLeft (statement)* BlockRight Terminate;
+packageStatement:id Define Package BlockLeft (packageSupportStatement)* BlockRight Terminate;
+// 包支持的语句
+packageSupportStatement:
+packageStatement
+|packageInvariableStatement
+|functionMainStatement
+|functionStatement
+;
+// 定义不变量
+packageInvariableStatement:expression Define expression Terminate;
 // 主函数
-functionMainStatement:Main Define Function BlockLeft (statement)* BlockRight Terminate;
+functionMainStatement:Main Define Function BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 函数
-functionStatement:id Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (statement)* BlockRight Terminate;
+functionStatement:id Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 返回
 returnStatement: ArrowRight expressionList Terminate;
 // 入参
@@ -43,17 +42,42 @@ parameterClauseIn : '(' parameter? (',' parameter)*  ')'  ;
 parameterClauseOut : '(' parameter? (',' parameter)*  ')'  ;
 // 参数结构
 parameter : id ':' basicType;
+// 函数支持的语句
+functionSupportStatement:
+ returnStatement
+| invariableStatement
+| printStatement
+| judgeWithElseStatement
+| judgeStatement
+| loopStatement
+| loopInfiniteStatement
+| printStatement
+| assignStatement
+| expressionStatement
+;
 
+logicStatement:
+ returnStatement
+| invariableStatement
+| printStatement
+| judgeWithElseStatement
+| judgeStatement
+| loopStatement
+| loopInfiniteStatement
+| printStatement
+| assignStatement
+| expressionStatement
+;
 // 有else的判断
-judgeWithElseStatement:judgeBaseStatement JudgeSub BlockLeft (statement)* BlockRight Terminate;
+judgeWithElseStatement:judgeBaseStatement JudgeSub BlockLeft (logicStatement)* BlockRight Terminate;
 // 判断
 judgeStatement:judgeBaseStatement Terminate;
 // 判断基础
-judgeBaseStatement:Judge expression BlockLeft (statement)* BlockRight;
+judgeBaseStatement:Judge expression BlockLeft (logicStatement)* BlockRight;
 // 循环
-loopStatement:Loop iteratorStatement Wave id BlockLeft (statement)* BlockRight Terminate;
+loopStatement:Loop iteratorStatement Wave id BlockLeft (logicStatement)* BlockRight Terminate;
 // 无限循环
-loopInfiniteStatement:Loop BlockLeft (statement)* BlockRight Terminate;
+loopInfiniteStatement:Loop BlockLeft (logicStatement)* BlockRight Terminate;
 // 迭代器
 iteratorStatement:Number '..' Number '..' Number | Number '..' Number;
 // 命名空间
