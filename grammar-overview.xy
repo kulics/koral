@@ -10,277 +10,274 @@
         IO.File;
     };
 
-    Program => #
+    Main => $
     {
-        Main => $
+        // Define, Invariable，当可以明确判断类型时，:type 可以省略。例如 a => "10";
+        str => "10" :text;
+        num => 1.2 :number;
+        bl => true :bool;
+
+        // Variable
+        &date => 20171111;
+
+        // Array
+        arr => [1,2,3,4,5] :[number];
+        print( t: arr[0] ); // 使用下标获取
+
+        // Dictionary, 前面为key，后面为value
+        dic => ["1":false, "2":true] :[text:bool];
+        print( t: dic["1"] ); // 使用key获取
+
+        // Function
+        fn => $(in:number)~(out:number){} :$(number)~(number); 
+
+        // Function with no params no return
+        doSomeThingVoid => $
         {
-            // Define, Invariable，当可以明确判断类型时，:type 可以省略。例如 a => "10";
-            str => "10" :text;
-            num => 1.2 :number;
-            bl => true :bool;
-
-            // Variable
-            &date => 20171111;
-
-            // Array
-            arr => [1,2,3,4,5] :[number];
-            print( t: arr[0] ); // 使用下标获取
-
-            // Dictionary, 前面为key，后面为value
-            dic => ["1":false, "2":true] :[text:bool];
-            print( t: dic["1"] ); // 使用key获取
-
-            // Function
-            fn => $(in:number)~(out:number){} :$(number)~(number); 
-
-            // Function with no params no return
-            doSomeThingVoid => $
-            {
-                doSomeThingA();
-                doSomeThingB();
-            };
-
-            // Full Function with in params and out params
-            doSomeThingWithParams => $(x:number, y:text)~(a:number, b:text)
-            {
-                -> (x, y);
-            };
-
-            b2c();
-            // 使用 _ 舍弃返回值，必须要接收返回值
-            _ => a2b(x:3, y:"test");
-
-            // Judge，当表达式的结果只有bool时，相当于if，只当true时才执行
-            ? 1+1 != 2
-            {
-                doSomeThingA();
-            }
-            ~? // 相当于else
-            {
-                doSomeThingB();
-            };
-
-            // 当表达式的结果为其它类型时，符合条件的匹配内容被执行，无分号的会继续向下执行，有分号的会跳出
-            ? x
-            {
-                // catch condition
-                ~ 0..6 
-                {
-                    doSomeThingA();
-                }
-                ~ 14 
-                {
-                    doSomeThingB();
-                };
-                ~ _ // 缺省执行，省略的话找不到匹配会自动跳出
-                {
-                    doSomeThingC();
-                };
-            };
-
-            // Loop, use ~ to take out single item 
-            @ array ~ item
-            {
-                doSomeThingA();
-                doSomeThingB();
-            };
-
-            // 迭代器(from..step..to)，step可以省略，默认逐次+1，省略后为0..100
-            @ 0..2..100 ~ index
-            {
-                doSomeThingA();
-                doSomeThingB();
-            };
-
-            // 当没有参数时，无限循环
-            @
-            {
-                doSomeThingA();
-                doSomeThingB();
-                ? a > b 
-                {
-                    ~@; // jump out loop
-                };
-            };
-
-            // Package，最基础的类型，类型就是自己
-            pkg => #{}:#{};
-
-            // Package，只支持 variable 类型，通常用来包装数据
-            View => # 
-            {
-                Width => 0;
-                Height => 0;
-                Background => "";
-            };
-
-            // 也支持包装方法
-            Button => # 
-            {
-                Width => 0;
-                Height => 0;
-                Background => "";
-                Title => "";
-
-                Click => $
-                {
-                    // 可以通过 ^ 来访问包自身属性或方法
-                    print( t: ^.Title );
-                    doSomeThingA();
-                    doSomeThingB();
-                };
-            };
-
-            // 可以通过参数标记，让包支持构造方法，默认可以省略
-            Image => #~(w:number,h:number,s:text)
-            {
-                // 私有属性，不能被外部访问，也不能被重包装
-                _width => 0;
-                _height => 0;
-                _source => "";
-
-                // 构造方法
-                init => $ 
-                {
-                    // 接收构造参数
-                    (_width, _height, _source) = (w,h,s);
-                };
-            };
-
-            // ReDefine ，对某个包扩展，只允许使用这种方式覆盖同名包，可以用来扩展属性、方法、构造方法
-            View <= #~(w:number,h:number,s:text)
-            {
-                init => $ 
-                {
-                    (Width,Height,Source) = (w,h,s);
-                    // 重载构造也支持调用原始构造方法，通常不需要
-                    ^.init();
-                };
-
-                Show => $
-                {
-                    doSomeThingA();
-                    doSomeThingB();
-                };
-
-                Hide => $
-                {
-                    doSomeThingA();
-                    doSomeThingB();
-                };
-            };
-
-            // Protocol, implemented by package
-            Animation => | 
-            {
-                &Speed => 0; // 可变量，导入的包必须实现定义
-                TopSpeed => 20;   // 不可变量，必须在协议中初始化，作为公共属性给任意地方使用，只读
-                Clear => $()~(t:text) // 不可变方法，必须在协议中初始化，作为公共方法给任意地方使用，只读
-                {
-                    -> "Done";
-                };
-                &Move => $(s:$(number)~(text))~(){}; // 可变方法，导入的包必须实现定义
-            };
-
-            // Combine Package，通过引入来复用属性和方法
-            ImageButton => # 
-            {
-                ~# View; // 引入包，如果只有一个引入，那就相当于继承这个包
-                Title => ""; // 重名自动覆盖，这会代替包原本的属性
-                ~# Button;    // 多个引用，如果有重名属性或方法，只会继承排序靠前的，剩余的只能通过子属性访问或手动绑定
-                Background => ^.Button.Background; // 可以手动重新指定继承
-            };
-
-            ImageButton <= #
-            {
-                Show => $ // 若包有重名，自动覆盖
-                {
-                    ^.View.Show(); // 手动重载方法
-                };
-                Click => ^.Button.Click; // 手动重新指定继承
-                // Implement protocol
-                ~| Animation
-                {
-                    Speed => 2;
-
-                    Move => $(s: $(number)~(text) )~()
-                    {
-                        t => 5000/Animation.TopSpeed; // calling protocol public invariable
-                        txt => s(t);
-                        print( t: txt);
-                        play();
-                        Animation.Clear(); // calling protocol public method
-                    };
-                };
-            };
-
-            // Create an package object
-            ib => ImageButton~();
-            // Calling object property
-            ib.Title = "OK";
-            // Calling object method
-            ib.Show();
-            // Create an object with params
-            img => Image~(w:30, h:20, s:"./icon.png");
-            
-            // Lambda Function
-            ib.Move(s: $(time:number)~(txt:text)
-            { 
-                -> (time :text + "ok");
-            });
-
-            // Use ~! to declare an Excption
-            readFile => $(url:text)~(f:file)
-            {
-                ? url.length < 1
-                {
-                    // Throw some error
-                    ~! IOErr(t:"URL is none"); 
-                };
-                f = System.IO.ReadFile(url:url);
-            };
-
-            // Check, listen the Excption Function
-            f => !readFile(url:"./test.xy") ~ err
-            {
-                // Catch the report
-                ? err == IOErr
-                {
-                    releaseFile(f);
-                };
-            };
-
-            // Use ~$ to declare Async Function
-            task => $(in:number)~(out:number)
-            {
-                // make a function to await
-                ~$ doSomeThingA(); 
-                doSomeThingB();
-                ~$ doSomeThingC(); 
-                -> in;
-            };
-
-            x => task(in: 6);
-    
-            // 值传递，只有在有明确接收对象（定义、赋值、函数调用）中才有效
-            hello => ? isSun
-            {
-                // 使用 <- 将值传递给左边
-                <- "nice day";
-            }
-            ~?
-            {
-                <- "bad day";
-            };
-
-            hellos => @ weatherHistory ~ day
-            {
-                ? day.isSun
-                {
-                    // 在循环中使用，可以将值插入给外部数组
-                    <- day.hello;
-                };
-            }; 
+            doSomeThingA();
+            doSomeThingB();
         };
+
+        // Full Function with in params and out params
+        doSomeThingWithParams => $(x:number, y:text)~(a:number, b:text)
+        {
+            -> (x, y);
+        };
+
+        b2c();
+        // 使用 _ 舍弃返回值，必须要接收返回值
+        _ => a2b(x:3, y:"test");
+
+        // Judge，当表达式的结果只有bool时，相当于if，只当true时才执行
+        ? 1+1 != 2
+        {
+            doSomeThingA();
+        }
+        ~? // 相当于else
+        {
+            doSomeThingB();
+        };
+
+        // 当表达式的结果为其它类型时，符合条件的匹配内容被执行，无分号的会继续向下执行，有分号的会跳出
+        ? x
+        {
+            // catch condition
+            ~ 0..6 
+            {
+                doSomeThingA();
+            }
+            ~ 14 
+            {
+                doSomeThingB();
+            };
+            ~ _ // 缺省执行，省略的话找不到匹配会自动跳出
+            {
+                doSomeThingC();
+            };
+        };
+
+        // Loop, use ~ to take out single item 
+        @ array ~ item
+        {
+            doSomeThingA();
+            doSomeThingB();
+        };
+
+        // 迭代器(from..step..to)，step可以省略，默认逐次+1，省略后为0..100
+        @ 0..2..100 ~ index
+        {
+            doSomeThingA();
+            doSomeThingB();
+        };
+
+        // 当没有参数时，无限循环
+        @
+        {
+            doSomeThingA();
+            doSomeThingB();
+            ? a > b 
+            {
+                ~@; // jump out loop
+            };
+        };
+
+        // Package，最基础的类型，类型就是自己
+        pkg => #{}:#{};
+
+        // Package，只支持 variable 类型，通常用来包装数据
+        View => # 
+        {
+            Width => 0;
+            Height => 0;
+            Background => "";
+        };
+
+        // 也支持包装方法
+        Button => # 
+        {
+            Width => 0;
+            Height => 0;
+            Background => "";
+            Title => "";
+
+            Click => $
+            {
+                // 可以通过 ^ 来访问包自身属性或方法
+                print( t: ^.Title );
+                doSomeThingA();
+                doSomeThingB();
+            };
+        };
+
+        // 可以通过参数标记，让包支持构造方法，默认可以省略
+        Image => #~(w:number,h:number,s:text)
+        {
+            // 私有属性，不能被外部访问，也不能被重包装
+            _width => 0;
+            _height => 0;
+            _source => "";
+
+            // 构造方法
+            init => $ 
+            {
+                // 接收构造参数
+                (_width, _height, _source) = (w,h,s);
+            };
+        };
+
+        // ReDefine ，对某个包扩展，只允许使用这种方式覆盖同名包，可以用来扩展属性、方法、构造方法
+        View <= #~(w:number,h:number,s:text)
+        {
+            init => $ 
+            {
+                (Width,Height,Source) = (w,h,s);
+                // 重载构造也支持调用原始构造方法，通常不需要
+                ^.init();
+            };
+
+            Show => $
+            {
+                doSomeThingA();
+                doSomeThingB();
+            };
+
+            Hide => $
+            {
+                doSomeThingA();
+                doSomeThingB();
+            };
+        };
+
+        // Protocol, implemented by package
+        Animation => | 
+        {
+            &Speed => 0; // 可变量，导入的包必须实现定义
+            TopSpeed => 20;   // 不可变量，必须在协议中初始化，作为公共属性给任意地方使用，只读
+            Clear => $()~(t:text) // 不可变方法，必须在协议中初始化，作为公共方法给任意地方使用，只读
+            {
+                -> "Done";
+            };
+            &Move => $(s:$(number)~(text))~(){}; // 可变方法，导入的包必须实现定义
+        };
+
+        // Combine Package，通过引入来复用属性和方法
+        ImageButton => # 
+        {
+            ~# View; // 引入包，如果只有一个引入，那就相当于继承这个包
+            Title => ""; // 重名自动覆盖，这会代替包原本的属性
+            ~# Button;    // 多个引用，如果有重名属性或方法，只会继承排序靠前的，剩余的只能通过子属性访问或手动绑定
+            Background => ^.Button.Background; // 可以手动重新指定继承
+        };
+
+        ImageButton <= #
+        {
+            Show => $ // 若包有重名，自动覆盖
+            {
+                ^.View.Show(); // 手动重载方法
+            };
+            Click => ^.Button.Click; // 手动重新指定继承
+            // Implement protocol
+            ~| Animation
+            {
+                Speed => 2;
+
+                Move => $(s: $(number)~(text) )~()
+                {
+                    t => 5000/Animation.TopSpeed; // calling protocol public invariable
+                    txt => s(t);
+                    print( t: txt);
+                    play();
+                    Animation.Clear(); // calling protocol public method
+                };
+            };
+        };
+
+        // Create an package object
+        ib => ImageButton~();
+        // Calling object property
+        ib.Title = "OK";
+        // Calling object method
+        ib.Show();
+        // Create an object with params
+        img => Image~(w:30, h:20, s:"./icon.png");
+        
+        // Lambda Function
+        ib.Move(s: $(time:number)~(txt:text)
+        { 
+            -> (time :text + "ok");
+        });
+
+        // Use ~! to declare an Excption
+        readFile => $(url:text)~(f:file)
+        {
+            ? url.length < 1
+            {
+                // Throw some error
+                ~! IOErr(t:"URL is none"); 
+            };
+            f = System.IO.ReadFile(url:url);
+        };
+
+        // Check, listen the Excption Function
+        f => !readFile(url:"./test.xy") ~ err
+        {
+            // Catch the report
+            ? err == IOErr
+            {
+                releaseFile(f);
+            };
+        };
+
+        // Use ~$ to declare Async Function
+        task => $(in:number)~(out:number)
+        {
+            // make a function to await
+            ~$ doSomeThingA(); 
+            doSomeThingB();
+            ~$ doSomeThingC(); 
+            -> in;
+        };
+
+        x => task(in: 6);
+
+        // 值传递，只有在有明确接收对象（定义、赋值、函数调用）中才有效
+        hello => ? isSun
+        {
+            // 使用 <- 将值传递给左边
+            <- "nice day";
+        }
+        ~?
+        {
+            <- "bad day";
+        };
+
+        hellos => @ weatherHistory ~ day
+        {
+            ? day.isSun
+            {
+                // 在循环中使用，可以将值插入给外部数组
+                <- day.hello;
+            };
+        }; 
     };
 };
