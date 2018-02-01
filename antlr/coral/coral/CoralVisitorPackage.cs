@@ -15,12 +15,6 @@ namespace coral
             var obj = id.permission + " class " + id.text + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.packageSupportStatement())
             {
-                if(item.GetChild(0).GetType() == typeof(CoralParser.FunctionMainStatementContext))
-                {
-                    obj += "static void Main(string[] args)" + Wrap + context.BlockLeft().GetText() + Wrap;
-                    obj += "new " + id.text + "().init(args);" + Wrap;
-                    obj += context.BlockRight().GetText() + Wrap;
-                }
                 obj += Visit(item);
             }
             obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
@@ -35,15 +29,5 @@ namespace coral
             return obj;
         }
 
-        public override object VisitFunctionMainStatement([NotNull] CoralParser.FunctionMainStatementContext context)
-        {
-            var obj = "void init(string[] args)" + Wrap + context.BlockLeft().GetText() + Wrap;
-            foreach(var item in context.functionSupportStatement())
-            {
-                obj += Visit(item);
-            }
-            obj += context.BlockRight().GetText() + Wrap;
-            return obj;
-        }
     }
 }

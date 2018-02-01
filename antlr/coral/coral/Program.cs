@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace coral
 {
-    class Program
+    static class Program
     {
         static void Main(string[] args)
         {
@@ -20,28 +20,28 @@ namespace coral
         System.Linq;
     }; 
 
+    Main => $ 
+    {
+        print(""main function"");
+        i => ""128.687"";  
+        b => 12;  
+        c => false; 
+        ? 1+1 == 2
+        {
+            j => false;
+            print(""judge"");
+        };
+        b.ToString().ToString();
+        p => Program~();
+        (x,y) => p.Square(str:""testcall"");
+    };
+
     Program => # 
     { 
         i => 128.687;  
         b => ""12"";  
         c => true; 
         _PriName => "" program "";
-        
-        Main => $ 
-        {
-            print(""main function"");
-            i => ""128.687"";  
-            b => 12;  
-            c => false; 
-            ? 1+1 == 2
-            {
-                j => false;
-                print(""judge"");
-            };
-            (x,y) => Square(str:""testcall"");
-            b.ToString().ToString();
-            p => Program~();
-        };
 
         Square => $ (str:text)~(out1:number,out2:number)
         {

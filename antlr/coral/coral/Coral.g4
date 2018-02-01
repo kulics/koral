@@ -16,22 +16,22 @@ exportStatement:Export nameSpace BlockLeft (exportSupportStatement)* BlockRight 
 exportSupportStatement:
 importStatement
 |packageStatement
+|functionMainStatement
 ;
 // 导入命名空间
 importStatement:Import BlockLeft (nameSpaceStatement)* BlockRight Terminate;
+// 主函数
+functionMainStatement:Main Define Function BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义包
 packageStatement:id Define Package BlockLeft (packageSupportStatement)* BlockRight Terminate;
 // 包支持的语句
 packageSupportStatement:
 packageStatement
 |packageInvariableStatement
-|functionMainStatement
 |functionStatement
 ;
 // 定义不变量
 packageInvariableStatement:expression Define expression Terminate;
-// 主函数
-functionMainStatement:Main Define Function BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 函数
 functionStatement:id Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 返回

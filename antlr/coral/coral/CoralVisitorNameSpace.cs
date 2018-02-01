@@ -54,5 +54,20 @@ namespace coral
             }
             return obj;
         }
+
+        public override object VisitFunctionMainStatement([NotNull] CoralParser.FunctionMainStatementContext context)
+        {
+            var obj = "static class @ProgramMain" + Wrap + context.BlockLeft().GetText() + Wrap;
+
+            obj += "static void Main(string[] args)" + Wrap + context.BlockLeft().GetText() + Wrap;
+            foreach(var item in context.functionSupportStatement())
+            {
+                obj += Visit(item);
+            }
+            obj += context.BlockRight().GetText() + Wrap;
+
+            obj += context.BlockRight().GetText() + Wrap;
+            return obj;
+        }
     }
 }
