@@ -30,11 +30,11 @@ exportStatement:Export nameSpace BlockLeft (statement)* BlockRight Terminate;
 // 导入命名空间
 importStatement:Import BlockLeft (nameSpaceStatement)* BlockRight Terminate;
 // 定义包
-packageStatement:ID Define Package BlockLeft (statement)* BlockRight Terminate;
+packageStatement:id Define Package BlockLeft (statement)* BlockRight Terminate;
 // 主函数
 functionMainStatement:Main Define Function BlockLeft (statement)* BlockRight Terminate;
 // 函数
-functionStatement:ID Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (statement)* BlockRight Terminate;
+functionStatement:id Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (statement)* BlockRight Terminate;
 // 返回
 returnStatement: ArrowRight expressionList Terminate;
 // 入参
@@ -42,7 +42,7 @@ parameterClauseIn : '(' parameter? (',' parameter)*  ')'  ;
 // 出参
 parameterClauseOut : '(' parameter? (',' parameter)*  ')'  ;
 // 参数结构
-parameter : ID ':' basicType;
+parameter : id ':' basicType;
 
 // 有else的判断
 judgeWithElseStatement:judgeBaseStatement JudgeSub BlockLeft (statement)* BlockRight Terminate;
@@ -51,7 +51,7 @@ judgeStatement:judgeBaseStatement Terminate;
 // 判断基础
 judgeBaseStatement:Judge expression BlockLeft (statement)* BlockRight;
 // 循环
-loopStatement:Loop iteratorStatement Wave ID BlockLeft (statement)* BlockRight Terminate;
+loopStatement:Loop iteratorStatement Wave id BlockLeft (statement)* BlockRight Terminate;
 // 无限循环
 loopInfiniteStatement:Loop BlockLeft (statement)* BlockRight Terminate;
 // 迭代器
@@ -68,7 +68,8 @@ expressionStatement: expression Terminate;
 
 // 基础表达式
 primaryExpression: 
-t=(ID|Self)
+id
+| t=Self
 | dataStatement
 | '(' expression ')'
 ;
@@ -76,7 +77,7 @@ t=(ID|Self)
 // 表达式
 expression:
 primaryExpression
-| ID tuple // 函数调用
+| id tuple // 函数调用
 | nameSpace wave tuple
 | expressionList // 表达式列表
 | expression call expression // 链式调用
@@ -87,9 +88,9 @@ primaryExpression
 
 expressionList : '(' (expression (',' expression)*)? ')'; // 参数列表
 
-tuple : '(' (ID ':' expression (',' ID ':' expression)* )? ')'; // 元组
+tuple : '(' (id ':' expression (',' id ':' expression)* )? ')'; // 元组
 
-nameSpace:ID ('.'ID)* ;
+nameSpace:id ('.'id)* ;
 
 // 基础数据
 dataStatement:
@@ -113,6 +114,8 @@ add : op=('+' | '-');
 mul : op=('*' | '/');
 call : op='.';
 wave : op='~';
+
+id: op=(IDPublic|IDPrivate);
 
 Terminate : ';';
 
@@ -161,7 +164,8 @@ Main: 'Main';
 Number :DIGIT+ ('.' DIGIT+)?; // 数字
 fragment DIGIT : [0-9] ;             // 单个数字
 Text: '"' (~[\\\r\n])*? '"'; //文本
-ID   : [a-zA-Z] [a-zA-Z0-9]*; // 标识符，由多个字母组成
+IDPrivate : '_' [a-zA-Z0-9]*; // 私有标识符
+IDPublic  : [a-zA-Z] [a-zA-Z0-9]*; // 公有标识符
 
 Comment : '/*' .*? '*/' -> skip; // 结构注释
 CommentLine : '//' .*? '\r'? '\n' -> skip; // 行注释
