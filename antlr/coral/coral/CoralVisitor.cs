@@ -58,11 +58,11 @@ namespace coral
                 var id = (Result)Visit(context.id(i));
                 if(i == 0)
                 {
-                    obj += "@" + id.text;
+                    obj += "" + id.text;
                 }
                 else
                 {
-                    obj += ".@" + id.text;
+                    obj += "." + id.text;
                 }
             }
             return obj;
@@ -70,14 +70,14 @@ namespace coral
 
         public override object VisitPackageStatement([NotNull] CoralParser.PackageStatementContext context)
         {
-            var id = (Result)Visit(context.id(i));
-            var obj = id.permission + " class @" + id.text + Wrap + context.BlockLeft().GetText() + Wrap;
+            var id = (Result)Visit(context.id());
+            var obj = id.permission + " class " + id.text + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.statement())
             {
                 if(item.GetChild(0).GetType() == typeof(CoralParser.FunctionMainStatementContext))
                 {
                     obj += "static void Main(string[] args)" + Wrap + context.BlockLeft().GetText() + Wrap;
-                    obj += "new @" + id.text + "().init(args);" + Wrap;
+                    obj += "new " + id.text + "().init(args);" + Wrap;
                     obj += context.BlockRight().GetText() + Wrap;
                 }
                 obj += Visit(item);
@@ -100,7 +100,7 @@ namespace coral
         public override object VisitFunctionStatement([NotNull] CoralParser.FunctionStatementContext context)
         {
             var id = (Result)Visit(context.id());
-            var obj = id.permission + Visit(context.parameterClauseOut()) + " @" + id.text
+            var obj = id.permission + Visit(context.parameterClauseOut()) + id.text
                 + Visit(context.parameterClauseIn()) + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.statement())
             {
@@ -209,7 +209,7 @@ namespace coral
         public override object VisitParameter([NotNull] CoralParser.ParameterContext context)
         {
             var id = (Result)Visit(context.id());
-            return Visit(context.basicType()) + " @" + id.text;
+            return Visit(context.basicType()) + id.text;
         }
 
         public class Iterator
@@ -243,16 +243,16 @@ namespace coral
             var obj = "";
             var id = (Result)Visit(context.id());
             var it = (Iterator)Visit(context.iteratorStatement());
-            obj += "for (double @" + id.text + " = " + it.from.ToString() + ";";
+            obj += "for (double " + id.text + " = " + it.from.ToString() + ";";
             if(it.from <= it.to)
             {
-                obj += "@" + id.text + "<" + it.to.ToString() + ";";
-                obj += "@" + id.text + "+=" + it.step.ToString() + ")";
+                obj += id.text + "<" + it.to.ToString() + ";";
+                obj += id.text + "+=" + it.step.ToString() + ")";
             }
             else
             {
-                obj += "@" + id.text + ">" + it.to.ToString() + ";";
-                obj += "@" + id.text + "-=" + it.step.ToString() + ")";
+                obj += id.text + ">" + it.to.ToString() + ";";
+                obj += id.text + "-=" + it.step.ToString() + ")";
             }
             obj += Wrap + context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.statement())
@@ -333,7 +333,7 @@ namespace coral
             {
                 r.data = "var";
                 var id = (Result)Visit(context.id());
-                r.text = "@" + id.text + Visit(context.tuple());
+                r.text = id.text + Visit(context.tuple());
             }
             else if(count == 3)
             {
@@ -408,11 +408,14 @@ namespace coral
                 {
                     return Visit(context.dataStatement());
                 }
+                else if(c is CoralParser.IdContext)
+                {
+                    return Visit(context.id());
+                }
                 else if(context.t.Type == CoralParser.Self)
                 {
                     return new Result { text = "this", data = "var" };
                 }
-                return Visit(context.id());
             }
             var r = (Result)Visit(context.expression());
             return new Result { text = "(" + r.text + ")", data = r.data };
@@ -420,7 +423,7 @@ namespace coral
 
         public override object VisitId([NotNull] CoralParser.IdContext context)
         {
-            if(context.t.Type == CoralParser.IDPublic)
+            if(context.op.Type == CoralParser.IDPublic)
             {
                 return new Result { text = "@" + context.op.Text, data = "double", permission = "public"};
             }
