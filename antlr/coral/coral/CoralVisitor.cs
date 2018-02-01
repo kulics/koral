@@ -115,7 +115,7 @@ namespace coral
 
         public override object VisitTuple([NotNull] CoralParser.TupleContext context)
         {
-            var obj = "("; 
+            var obj = "(";
             for(int i = 0; i < context.expression().Length; i++)
             {
                 var r = (Result)Visit(context.expression(i));
@@ -239,7 +239,7 @@ namespace coral
             var obj = "";
             var it = (Iterator)Visit(context.iteratorStatement());
             obj += "for (double @" + context.ID().GetText() + " = " + it.from.ToString() + ";";
-            if (it.from <= it.to)
+            if(it.from <= it.to)
             {
                 obj += "@" + context.ID().GetText() + "<" + it.to.ToString() + ";";
                 obj += "@" + context.ID().GetText() + "+=" + it.step.ToString() + ")";
@@ -260,7 +260,7 @@ namespace coral
 
         public override object VisitLoopInfiniteStatement([NotNull] CoralParser.LoopInfiniteStatementContext context)
         {
-            var obj = "while (true)"+ Wrap + context.BlockLeft().GetText() + Wrap;
+            var obj = "while (true)" + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.statement())
             {
                 obj += Visit(item);
@@ -350,6 +350,12 @@ namespace coral
                     // todo 如果左右不是number类型值，报错
                     r.data = "double";
                 }
+                else if(context.GetChild(1).GetType() == typeof(CoralParser.WaveContext))
+                {
+                    r.data = "var";
+                    r.text = "new " + Visit(context.GetChild(0)) + Visit(context.GetChild(2));
+                    return r;
+                }
                 var e1 = (Result)Visit(context.GetChild(0));
                 var op = Visit(context.GetChild(1));
                 var e2 = (Result)Visit(context.GetChild(2));
@@ -363,6 +369,11 @@ namespace coral
         }
 
         public override object VisitCall([NotNull] CoralParser.CallContext context)
+        {
+            return context.op.Text;
+        }
+
+        public override object VisitWave([NotNull] CoralParser.WaveContext context)
         {
             return context.op.Text;
         }

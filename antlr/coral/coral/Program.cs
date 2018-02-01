@@ -39,6 +39,7 @@ namespace coral
             };
             (x,y) => Square(str:""testcall"");
             b.ToString().ToString();
+            p => Program~();
         };
 
         Square => $ (str:text)~(out1:number,out2:number)
@@ -77,4 +78,3 @@ namespace coral
         }
     }
 }
-

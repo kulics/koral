@@ -77,6 +77,7 @@ t=(ID|Self)
 expression:
 primaryExpression
 | ID tuple // 函数调用
+| nameSpace wave tuple
 | expressionList // 表达式列表
 | expression call expression // 链式调用
 | expression judge expression // 判断型表达式
@@ -111,6 +112,7 @@ judge : op=('||' | '&&' | '==' | '!=' | '<' | '>');
 add : op=('+' | '-');
 mul : op=('*' | '/');
 call : op='.';
+wave : op='~';
 
 Terminate : ';';
 
