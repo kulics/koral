@@ -46,7 +46,7 @@ namespace coral
             @ 0..600 ~ i
             {
                 print(""loop"");
-                ? 1+1 != 2
+                ? ^.c
                 {
                     j => 1+1*3*9/8;
                     j = j + 5 +(j +8);
@@ -77,3 +77,4 @@ namespace coral
         }
     }
 }
+

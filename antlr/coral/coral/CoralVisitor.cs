@@ -391,6 +391,10 @@ namespace coral
                 {
                     return Visit(context.dataStatement());
                 }
+                if(context.t.Type == CoralParser.Self)
+                {
+                    return new Result { text = "this", data = "var" };
+                }
                 return new Result { text = "@" + context.ID().GetText(), data = "double" };
             }
             var r = (Result)Visit(context.expression());

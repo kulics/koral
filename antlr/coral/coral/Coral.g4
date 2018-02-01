@@ -68,7 +68,7 @@ expressionStatement: expression Terminate;
 
 // 基础表达式
 primaryExpression: 
-ID
+t=(ID|Self)
 | dataStatement
 | '(' expression ')'
 ;
