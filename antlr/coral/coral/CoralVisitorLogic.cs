@@ -71,6 +71,11 @@ namespace coral
             return obj;
         }
 
+        public override object VisitLoopJumpStatement([NotNull] CoralParser.LoopJumpStatementContext context)
+        {
+            return "break" + context.Terminate().GetText() + Wrap;
+        }
+
         public override object VisitJudgeWithElseStatement([NotNull] CoralParser.JudgeWithElseStatementContext context)
         {
             var obj = Visit(context.judgeBaseStatement()) + Wrap + " else " + Wrap + context.BlockLeft().GetText() + Wrap;

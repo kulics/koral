@@ -67,6 +67,7 @@ logicStatement:
 | judgeStatement
 | loopStatement
 | loopInfiniteStatement
+| loopJumpStatement
 | printStatement
 | assignStatement
 | expressionStatement
@@ -81,6 +82,8 @@ judgeBaseStatement:Judge expression BlockLeft (logicStatement)* BlockRight;
 loopStatement:Loop iteratorStatement Wave id BlockLeft (logicStatement)* BlockRight Terminate;
 // 无限循环
 loopInfiniteStatement:Loop BlockLeft (logicStatement)* BlockRight Terminate;
+// 跳出循环
+loopJumpStatement:LoopSub Terminate;
 // 迭代器
 iteratorStatement:Number '..' Number '..' Number | Number '..' Number;
 // 命名空间

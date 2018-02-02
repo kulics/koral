@@ -56,6 +56,7 @@ namespace coral
                 ~?
                 {
                     j => (5>3)||false;
+                    ~@;
                 };
             };
             -> (1,2);
