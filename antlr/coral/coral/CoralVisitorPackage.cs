@@ -13,9 +13,23 @@ namespace coral
         {
             var id = (Result)Visit(context.id());
             var obj = id.permission + " class " + id.text + Wrap + context.BlockLeft().GetText() + Wrap;
+            var hasInit = false;
             foreach(var item in context.packageSupportStatement())
             {
-                obj += Visit(item);
+                // 处理构造函数
+                if(item.GetChild(0).GetType() == typeof(CoralParser.PackageInitStatementContext))
+                {
+                    if(!hasInit && !context.parameterClauseIn().IsEmpty)
+                    {
+                        obj += "public " + id.text + Visit(context.parameterClauseIn());
+                        obj += Visit(item);
+                        hasInit = true;
+                    }
+                }
+                else
+                {
+                    obj += Visit(item);
+                }
             }
             obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
             return obj;
@@ -29,5 +43,16 @@ namespace coral
             return obj;
         }
 
+
+        public override object VisitPackageInitStatement([NotNull] CoralParser.PackageInitStatementContext context)
+        {
+            var obj = context.BlockLeft().GetText() + Wrap;
+            foreach(var item in context.functionSupportStatement())
+            {
+                obj += Visit(item);
+            }
+            obj += context.BlockRight().GetText() + Wrap;
+            return obj;
+        }
     }
 }

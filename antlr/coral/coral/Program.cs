@@ -60,7 +60,13 @@ namespace coral
             };
             -> (1,2);
         };
-        _Result => # {};
+        _Result => #~(name:text) 
+        {
+            ~^ => $
+            {
+                t => name;
+            };
+        };
     }; 
 };
 ";

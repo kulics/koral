@@ -23,13 +23,16 @@ importStatement:Import BlockLeft (nameSpaceStatement)* BlockRight Terminate;
 // 主函数
 functionMainStatement:Main Define Function BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义包
-packageStatement:id Define Package BlockLeft (packageSupportStatement)* BlockRight Terminate;
+packageStatement:id Define Package (Wave parameterClauseIn)? BlockLeft (packageSupportStatement)* BlockRight Terminate;
 // 包支持的语句
 packageSupportStatement:
 packageStatement
 |packageInvariableStatement
+|packageInitStatement
 |functionStatement
 ;
+// 包构造方法
+packageInitStatement:SelfSub Define Function BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义不变量
 packageInvariableStatement:expression Define expression Terminate;
 // 函数
@@ -152,6 +155,7 @@ Redefine: '<=';
 Import : '<:';
 Export : ':>';
 
+SelfSub : '~^';
 Self : '^';
 
 ArrowRight : '->';
