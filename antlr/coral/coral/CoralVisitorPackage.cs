@@ -54,5 +54,50 @@ namespace coral
             obj += context.BlockRight().GetText() + Wrap;
             return obj;
         }
+
+        public override object VisitProtocolStatement([NotNull] CoralParser.ProtocolStatementContext context)
+        {
+            var id = (Result)Visit(context.id());
+            var obj = "";
+            obj += id.permission + " interface " + id.text + context.BlockLeft().GetText() + Wrap;
+            foreach(var item in context.protocolSupportStatement())
+            {
+                obj += Visit(item);
+            }
+            obj += context.BlockRight().GetText() + Wrap;
+            return obj;
+        }
+
+        public override object VisitProtocolInvariableStatement([NotNull] CoralParser.ProtocolInvariableStatementContext context)
+        {
+            var r1 = (Result)Visit(context.expression(0));
+            var r2 = (Result)Visit(context.expression(1));
+            var obj = "";
+            if(r1.permission == "public")
+            {
+                obj += r2.data + " " + r1.text + " {get;set;} " + Wrap;
+            }
+            //r1.permission + " " + r2.data + " " + r1.text + " = " + r2.text + context.Terminate().GetText() + Wrap;
+            return obj;
+        }
+
+        public override object VisitProtocolFunctionStatement([NotNull] CoralParser.ProtocolFunctionStatementContext context)
+        {
+            var id = (Result)Visit(context.id());
+            var obj = "";
+            if(id.permission == "public")
+            {
+                obj += Visit(context.parameterClauseOut()) + id.text
+                + Visit(context.parameterClauseIn()) + context.Terminate().GetText() + Wrap;
+            }
+            //var obj = id.permission + Visit(context.parameterClauseOut()) + id.text
+            //    + Visit(context.parameterClauseIn()) + Wrap + context.BlockLeft().GetText() + Wrap;
+            //foreach(var item in context.functionSupportStatement())
+            //{
+            //    obj += Visit(item);
+            //}
+            //obj += context.BlockRight().GetText() + Wrap;
+            return obj;
+        }
     }
 }

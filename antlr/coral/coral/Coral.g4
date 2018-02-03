@@ -16,6 +16,7 @@ exportStatement:Export nameSpace BlockLeft (exportSupportStatement)* BlockRight 
 exportSupportStatement:
 importStatement
 |packageStatement
+|protocolStatement
 |functionMainStatement
 ;
 // 导入命名空间
@@ -29,6 +30,7 @@ packageSupportStatement:
 packageStatement
 |packageInvariableStatement
 |packageInitStatement
+|protocolStatement
 |functionStatement
 ;
 // 包构造方法
@@ -58,6 +60,18 @@ functionSupportStatement:
 | assignStatement
 | expressionStatement
 ;
+// 协议
+protocolStatement: id Define Protocol BlockLeft (protocolSupportStatement)* BlockRight Terminate;
+// 协议支持的语句
+protocolSupportStatement:
+protocolStatement
+|protocolInvariableStatement
+|protocolFunctionStatement
+;
+// 定义不变量
+protocolInvariableStatement:expression Define expression Terminate;
+// 函数
+protocolFunctionStatement:id Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 
 logicStatement:
  returnStatement

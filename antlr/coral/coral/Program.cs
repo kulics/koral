@@ -7,8 +7,19 @@ using System.Threading.Tasks;
 
 namespace coral
 {
+    interface helper
+    {
+        int X { get; set; }
+    }
+
+    class help : helper
+    {
+        public int X { get; set; }
+    }
+
     static class Program
     {
+
         static void Main(string[] args)
         {
             var input = @"
@@ -69,6 +80,12 @@ namespace coral
             };
         };
     }; 
+
+    Helper => |
+    {
+        b => 0;
+        c => $(x:number)~(y:number){};
+    };
 };
 ";
 
