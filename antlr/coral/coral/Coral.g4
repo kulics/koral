@@ -193,8 +193,8 @@ Function : '$';
 PackageSub : '~#';
 Package : '#';
 
-ProtocolSub : '~|';
-Protocol : '|';
+ProtocolSub : '~&';
+Protocol : '&';
 
 Wave : '~';
 

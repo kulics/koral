@@ -99,7 +99,7 @@ namespace coral
         public override object VisitParameter([NotNull] CoralParser.ParameterContext context)
         {
             var id = (Result)Visit(context.id());
-            return Visit(context.basicType()) + id.text;
+            return Visit(context.basicType()) + " " + id.text;
         }
     }
 }

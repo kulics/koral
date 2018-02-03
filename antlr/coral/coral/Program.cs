@@ -1,105 +1,53 @@
 ﻿using Antlr4.Runtime;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
 namespace coral
 {
-    interface helper
-    {
-        int X { get; set; }
-    }
-
-    class help : helper
-    {
-        public int X { get; set; }
-    }
-
     static class Program
     {
-
         static void Main(string[] args)
         {
-            var input = @"
-:> demo 
-{ 
-    <: 
-    {   
-        System;
-        System.Linq;
-    }; 
+            var path = @".\";
 
-    Main => $ 
-    {
-        print(""main function"");
-        i => ""128.687"";  
-        b => 12;  
-        c => false; 
-        ? 1+1 == 2
-        {
-            j => false;
-            print(""judge"");
-        };
-        b.ToString().ToString();
-        p => Program~();
-        (x,y) => p.Square(str:""testcall"");
-    };
+            //获取相对路径下所有文件
+            var files = Directory.GetFiles(path, "*.xy");
 
-    Program => # 
-    { 
-        i => 128.687;  
-        b => ""12"";  
-        c => true; 
-        _PriName => "" program "";
-
-        Square => $ (str:text)~(out1:number,out2:number)
-        {
-            @ 0..600 ~ i
+            foreach(var file in files)
             {
-                print(""loop"");
-                ? ^.c
+                // c#文件流读文件
+                using(FileStream fsRead = new FileStream(file, FileMode.Open))
                 {
-                    j => 1+1*3*9/8;
-                    j = j + 5 +(j +8);
+                    var fsLen = (int)fsRead.Length;
+                    var heByte = new byte[fsLen];
+                    var r = fsRead.Read(heByte, 0, heByte.Length);
+                    var input = Encoding.UTF8.GetString(heByte);
+
+                    var stream = new AntlrInputStream(input);
+                    var lexer = new CoralLexer(stream);
+                    var tokens = new CommonTokenStream(lexer);
+                    var parser = new CoralParser(tokens) { BuildParseTree = true };
+                    var tree = parser.program();
+
+                    var visitor = new CoralVisitorBase();
+                    var result = visitor.Visit(tree);
+
+                    //Console.WriteLine(tree.ToStringTree(parser));
+                    Console.WriteLine(result);
+
+                    // C#文件流写文件,使用覆盖模式
+                    var resByte = Encoding.UTF8.GetBytes(result.ToString());  //转换为字节
+                    using(var fsWrite = new FileStream(@".\" + file.Substring(0, file.Length - 3) + ".cs", FileMode.Create))
+                    {
+                        fsWrite.Write(resByte, 0, resByte.Length);
+                    };
                 }
-                ~?
-                {
-                    j => (5>3)||false;
-                    ~@;
-                };
-            };
-            -> (1,2);
-        };
-        _Result => #~(name:text) 
-        {
-            ~^ => $
-            {
-                t => name;
-            };
-        };
-    }; 
+            }
 
-    Helper => |
-    {
-        b => 0;
-        c => $(x:number)~(y:number){};
-    };
-};
-";
-
-            var stream = new AntlrInputStream(input);
-            var lexer = new CoralLexer(stream);
-            var tokens = new CommonTokenStream(lexer);
-            var parser = new CoralParser(tokens) { BuildParseTree = true };
-            var tree = parser.program();
-
-            var visitor = new CoralVisitorBase();
-            var result = visitor.Visit(tree);
-
-            Console.WriteLine(tree.ToStringTree(parser));
-            Console.WriteLine(result);
             Console.ReadKey();
         }
     }
