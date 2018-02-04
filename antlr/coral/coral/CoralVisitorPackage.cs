@@ -59,11 +59,26 @@ namespace coral
         {
             var id = (Result)Visit(context.id());
             var obj = "";
-            obj += id.permission + " interface " + id.text + context.BlockLeft().GetText() + Wrap;
+            var staticProtocol = "";
+            var interfaceProtocol = "";
             foreach(var item in context.protocolSupportStatement())
             {
-                obj += Visit(item);
+                var r = (Result)Visit(item);
+                if(r.permission == "public")
+                {
+                    interfaceProtocol += r.text;
+                }
+                else
+                {
+                    staticProtocol += r.text;
+                }
             }
+            obj += "public interface @Interface" + id.text.Substring(1) + Wrap + context.BlockLeft().GetText() + Wrap;
+            obj += interfaceProtocol;
+            obj += context.BlockRight().GetText() + Wrap;
+
+            obj += "public static class " + id.text + Wrap + context.BlockLeft().GetText() + Wrap;
+            obj += staticProtocol;
             obj += context.BlockRight().GetText() + Wrap;
             return obj;
         }
@@ -72,32 +87,42 @@ namespace coral
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
-            var obj = "";
+            var r = new Result();
             if(r1.permission == "public")
             {
-                obj += r2.data + " " + r1.text + " {get;set;} " + Wrap;
+                r.permission = "public";
+                r.text += r2.data + " " + r1.text + " {get;set;} " + Wrap;
             }
-            //r1.permission + " " + r2.data + " " + r1.text + " = " + r2.text + context.Terminate().GetText() + Wrap;
-            return obj;
+            else
+            {
+                r.permission = "private";
+                r.text += "public const " + r2.data + " " + r1.text + " = " + r2.text + context.Terminate().GetText() + Wrap;
+            }
+            return r;
         }
 
         public override object VisitProtocolFunctionStatement([NotNull] CoralParser.ProtocolFunctionStatementContext context)
         {
             var id = (Result)Visit(context.id());
-            var obj = "";
+            var r = new Result();
             if(id.permission == "public")
             {
-                obj += Visit(context.parameterClauseOut()) + id.text
+                r.permission = "public";
+                r.text += Visit(context.parameterClauseOut()) + id.text
                 + Visit(context.parameterClauseIn()) + context.Terminate().GetText() + Wrap;
             }
-            //var obj = id.permission + Visit(context.parameterClauseOut()) + id.text
-            //    + Visit(context.parameterClauseIn()) + Wrap + context.BlockLeft().GetText() + Wrap;
-            //foreach(var item in context.functionSupportStatement())
-            //{
-            //    obj += Visit(item);
-            //}
-            //obj += context.BlockRight().GetText() + Wrap;
-            return obj;
+            else
+            {
+                r.permission = "private";
+                r.text += "public static " + Visit(context.parameterClauseOut()) + id.text
+                + Visit(context.parameterClauseIn()) + Wrap + context.BlockLeft().GetText() + Wrap;
+                foreach(var item in context.functionSupportStatement())
+                {
+                    r.text += Visit(item);
+                }
+                r.text += context.BlockRight().GetText() + Wrap;
+            }
+            return r;
         }
     }
 }

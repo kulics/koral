@@ -45,7 +45,7 @@ namespace coral
             {
                 if(context.GetChild(1).GetType() == typeof(CoralParser.CallContext))
                 {
-                    r.data = "double";
+                    r.data = "var";
                 }
                 else if(context.GetChild(1).GetType() == typeof(CoralParser.JudgeContext))
                 {
@@ -64,7 +64,7 @@ namespace coral
                 }
                 else if(context.GetChild(1).GetType() == typeof(CoralParser.WaveContext))
                 {
-                    r.data = "var";
+                    r.data = Visit(context.GetChild(0));
                     r.text = "new " + Visit(context.GetChild(0)) + Visit(context.GetChild(2));
                     return r;
                 }
