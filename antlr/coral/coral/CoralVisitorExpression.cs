@@ -13,7 +13,7 @@ namespace coral
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
-            var obj = r2.data + " " + r1.text + " = " + r2.text + context.Terminate().GetText() + Wrap;
+            var obj = "var " + r1.text + " = " + r2.text + context.Terminate().GetText() + Wrap;
             return obj;
         }
 

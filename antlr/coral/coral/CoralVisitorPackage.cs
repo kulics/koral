@@ -67,7 +67,7 @@ namespace coral
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
-            var obj = r1.permission + " " + r2.data + " " + r1.text + " = " + r2.text + context.Terminate().GetText() + Wrap;
+            var obj = r1.permission + " " + r2.data + " " + r1.text + " {get;set;} = " + r2.text + context.Terminate().GetText() + Wrap;
             return obj;
         }
 
@@ -93,6 +93,11 @@ namespace coral
                     var fn = (Function)Visit(item);
                     obj += fn.@out + " @Interface" + id.text.Substring(1) + "." + fn.ID + " " + fn.@in + Wrap + fn.body;
                 }
+                else if(item.GetChild(0) is CoralParser.ImplementVariableStatementContext)
+                {
+                    var vr = (Variable)Visit(item);
+                    obj += "public " + vr.type + " @Interface"+ id.text.Substring(1) + "."+ vr.ID + " {get;set;} = " + vr.body;
+                } 
             }
             var r = new Result();
             r.data = id.text;
@@ -100,9 +105,22 @@ namespace coral
             return r;
         }
 
+        class Variable
+        {
+            public string type;
+            public string ID;
+            public string body;
+        }
+
         public override object VisitImplementVariableStatement([NotNull] CoralParser.ImplementVariableStatementContext context)
         {
-            return base.VisitImplementVariableStatement(context);
+            var vr = new Variable();
+            var r1 = (Result)Visit(context.expression(0));
+            var r2 = (Result)Visit(context.expression(1));
+            vr.ID = r1.text;
+            vr.type = (string)r2.data;
+            vr.body = r2.text + context.Terminate().GetText() + Wrap;
+            return vr;
         }
 
         class Function
