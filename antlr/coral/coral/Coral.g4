@@ -31,6 +31,7 @@ packageStatement
 |packageInvariableStatement
 |packageInitStatement
 |protocolStatement
+|protocolImplementStatement
 |functionStatement
 ;
 // 包构造方法
@@ -72,6 +73,17 @@ protocolStatement
 protocolInvariableStatement:expression Define expression Terminate;
 // 函数
 protocolFunctionStatement:id Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+// 协议实现支持的语句
+protocolImplementSupportStatement:
+implementVariableStatement
+|implementFunctionStatement
+;
+// 实现协议
+protocolImplementStatement:ProtocolSub id BlockLeft (protocolImplementSupportStatement)* BlockRight Terminate;
+// 变量实现
+implementVariableStatement:expression Define expression Terminate;
+// 函数实现
+implementFunctionStatement:id Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 
 logicStatement:
  returnStatement

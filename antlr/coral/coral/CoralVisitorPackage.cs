@@ -12,12 +12,13 @@ namespace coral
         public override object VisitPackageStatement([NotNull] CoralParser.PackageStatementContext context)
         {
             var id = (Result)Visit(context.id());
-            var obj = id.permission + " class " + id.text + Wrap + context.BlockLeft().GetText() + Wrap;
+            var obj = "";
             var hasInit = false;
+            var implements = new List<string>();
             foreach(var item in context.packageSupportStatement())
             {
                 // 处理构造函数
-                if(item.GetChild(0).GetType() == typeof(CoralParser.PackageInitStatementContext))
+                if(item.GetChild(0) is CoralParser.PackageInitStatementContext)
                 {
                     if(!hasInit && !context.parameterClauseIn().IsEmpty)
                     {
@@ -26,12 +27,39 @@ namespace coral
                         hasInit = true;
                     }
                 }
+                else if(item.GetChild(0) is CoralParser.ProtocolImplementStatementContext)
+                {
+                    var r = (Result)Visit(item);
+                    var ptclId = r.data.ToString();
+                    implements.Add("@Interface" + ptclId.Substring(1));
+                    obj += "public @Interface" + ptclId.Substring(1) + " " + ptclId + " { get { return this as @Interface"
+                        + ptclId.Substring(1) + ";}}" + Wrap;
+                    obj += r.text;
+                }
                 else
                 {
                     obj += Visit(item);
                 }
             }
             obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
+            var header = id.permission + " class " + id.text;
+            if(implements.Count > 0)
+            {
+                header += ":";
+                for(int i = 0; i < implements.Count; i++)
+                {
+                    if(i == 0)
+                    {
+                        header += implements[i];
+                    }
+                    else
+                    {
+                        header += ", " + implements[i];
+                    }
+                }
+            }
+            header += Wrap + context.BlockLeft().GetText() + Wrap;
+            obj = header + obj;
             return obj;
         }
 
@@ -43,7 +71,6 @@ namespace coral
             return obj;
         }
 
-
         public override object VisitPackageInitStatement([NotNull] CoralParser.PackageInitStatementContext context)
         {
             var obj = context.BlockLeft().GetText() + Wrap;
@@ -53,6 +80,53 @@ namespace coral
             }
             obj += context.BlockRight().GetText() + Wrap;
             return obj;
+        }
+
+        public override object VisitProtocolImplementStatement([NotNull] CoralParser.ProtocolImplementStatementContext context)
+        {
+            var id = (Result)Visit(context.id());
+            var obj = "";
+            foreach(var item in context.protocolImplementSupportStatement())
+            {
+                if(item.GetChild(0) is CoralParser.ImplementFunctionStatementContext)
+                {
+                    var fn = (Function)Visit(item);
+                    obj += fn.@out + " @Interface" + id.text.Substring(1) + "." + fn.ID + " " + fn.@in + Wrap + fn.body;
+                }
+            }
+            var r = new Result();
+            r.data = id.text;
+            r.text = obj;
+            return r;
+        }
+
+        public override object VisitImplementVariableStatement([NotNull] CoralParser.ImplementVariableStatementContext context)
+        {
+            return base.VisitImplementVariableStatement(context);
+        }
+
+        class Function
+        {
+            public string ID;
+            public string @in;
+            public string @out;
+            public string body;
+        }
+
+        public override object VisitImplementFunctionStatement([NotNull] CoralParser.ImplementFunctionStatementContext context)
+        {
+            var fn = new Function();
+            var id = (Result)Visit(context.id());
+            fn.ID = id.text;
+            fn.@in = (string)Visit(context.parameterClauseIn());
+            fn.@out = (string)Visit(context.parameterClauseOut());
+            fn.body = context.BlockLeft().GetText() + Wrap;
+            foreach(var item in context.functionSupportStatement())
+            {
+                fn.body += Visit(item);
+            }
+            fn.body += context.BlockRight().GetText() + Wrap;
+            return fn;
         }
 
         public override object VisitProtocolStatement([NotNull] CoralParser.ProtocolStatementContext context)
