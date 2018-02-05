@@ -48,6 +48,11 @@ parameterClauseIn : '(' parameter? (',' parameter)*  ')'  ;
 parameterClauseOut : '(' parameter? (',' parameter)*  ')'  ;
 // 参数结构
 parameter : id ':' basicType;
+// 检查
+checkStatement: Check expression Wave id BlockLeft (functionSupportStatement)* BlockRight Terminate;
+// 报告错误
+reportStatement: CheckSub (expression)? Terminate;
+
 // 函数支持的语句
 functionSupportStatement:
  returnStatement
@@ -60,6 +65,8 @@ functionSupportStatement:
 | printStatement
 | assignStatement
 | expressionStatement
+| checkStatement
+| reportStatement
 ;
 // 协议
 protocolStatement: id Define Protocol BlockLeft (protocolSupportStatement)* BlockRight Terminate;
@@ -196,8 +203,8 @@ Judge : '?';
 LoopSub : '~@';
 Loop : '@';
 
-ExcptionSub : '~!';
-Excption : '!';
+CheckSub : '~!';
+Check : '!';
 
 FunctionSub : '~$';
 Function : '$';

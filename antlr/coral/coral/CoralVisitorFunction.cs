@@ -12,7 +12,7 @@ namespace coral
         public override object VisitFunctionStatement([NotNull] CoralParser.FunctionStatementContext context)
         {
             var id = (Result)Visit(context.id());
-            var obj = id.permission + Visit(context.parameterClauseOut()) + id.text
+            var obj = id.permission + " " + Visit(context.parameterClauseOut()) + id.text
                 + Visit(context.parameterClauseIn()) + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.functionSupportStatement())
             {
@@ -100,6 +100,32 @@ namespace coral
         {
             var id = (Result)Visit(context.id());
             return Visit(context.basicType()) + " " + id.text;
+        }
+
+        public override object VisitCheckStatement([NotNull] CoralParser.CheckStatementContext context)
+        {
+            var obj = "";
+            var expr = (Result)Visit(context.expression());
+            var ID = (Result)Visit(context.id());
+            obj += "try " + context.BlockLeft().GetText() + Wrap + expr.text + context.Terminate().GetText() + Wrap;
+            obj += context.BlockRight().GetText() + " catch(Exception " + ID.text + ")" + Wrap + context.BlockLeft().GetText() + Wrap;
+            foreach(var item in context.functionSupportStatement())
+            {
+                obj += Visit(item);
+            }
+            obj += context.BlockRight().GetText() + Wrap;
+            return obj;
+        }
+
+        public override object VisitReportStatement([NotNull] CoralParser.ReportStatementContext context)
+        {
+            var obj = "";
+            if(context.expression() != null)
+            {
+                var r = (Result)Visit(context.expression());
+                obj += r.text;
+            }
+            return "throw " + obj + context.Terminate().GetText() + Wrap;
         }
     }
 }
