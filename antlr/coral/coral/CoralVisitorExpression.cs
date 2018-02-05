@@ -9,7 +9,7 @@ namespace coral
 {
     partial class CoralVisitorBase
     {
-        public override object VisitInvariableStatement([NotNull] CoralParser.InvariableStatementContext context)
+        public override object VisitVariableStatement([NotNull] CoralParser.VariableStatementContext context)
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));

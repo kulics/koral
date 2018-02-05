@@ -28,7 +28,7 @@ packageStatement:id Define Package (Wave parameterClauseIn)? BlockLeft (packageS
 // 包支持的语句
 packageSupportStatement:
 packageStatement
-|packageInvariableStatement
+|packageVariableStatement
 |packageInitStatement
 |protocolStatement
 |protocolImplementStatement
@@ -36,8 +36,8 @@ packageStatement
 ;
 // 包构造方法
 packageInitStatement:SelfSub Define Function BlockLeft (functionSupportStatement)* BlockRight Terminate;
-// 定义不变量
-packageInvariableStatement:expression Define expression Terminate;
+// 定义变量
+packageVariableStatement:expression Define expression Terminate;
 // 函数
 functionStatement:id Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 返回
@@ -51,7 +51,7 @@ parameter : id ':' basicType;
 // 函数支持的语句
 functionSupportStatement:
  returnStatement
-| invariableStatement
+| variableStatement
 | printStatement
 | judgeWithElseStatement
 | judgeStatement
@@ -66,11 +66,11 @@ protocolStatement: id Define Protocol BlockLeft (protocolSupportStatement)* Bloc
 // 协议支持的语句
 protocolSupportStatement:
 protocolStatement
-|protocolInvariableStatement
+|protocolVariableStatement
 |protocolFunctionStatement
 ;
-// 定义不变量
-protocolInvariableStatement:expression Define expression Terminate;
+// 定义变量
+protocolVariableStatement:expression Define expression Terminate;
 // 函数
 protocolFunctionStatement:id Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 协议实现支持的语句
@@ -87,7 +87,7 @@ implementFunctionStatement:id Define Function parameterClauseIn Wave parameterCl
 
 logicStatement:
  returnStatement
-| invariableStatement
+| variableStatement
 | printStatement
 | judgeWithElseStatement
 | judgeStatement
@@ -115,8 +115,8 @@ iteratorStatement:Number '..' Number '..' Number | Number '..' Number;
 // 命名空间
 nameSpaceStatement:nameSpace Terminate;
 
-// 定义不变量
-invariableStatement:expression Define expression Terminate;
+// 定义变量
+variableStatement:expression Define expression Terminate;
 // 赋值
 assignStatement: expression '=' expression Terminate;
 

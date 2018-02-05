@@ -63,7 +63,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitPackageInvariableStatement([NotNull] CoralParser.PackageInvariableStatementContext context)
+        public override object VisitPackageVariableStatement([NotNull] CoralParser.PackageVariableStatementContext context)
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
@@ -175,7 +175,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitProtocolInvariableStatement([NotNull] CoralParser.ProtocolInvariableStatementContext context)
+        public override object VisitProtocolVariableStatement([NotNull] CoralParser.ProtocolVariableStatementContext context)
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
