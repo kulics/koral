@@ -12,7 +12,7 @@ namespace coral
         public override object VisitFunctionStatement([NotNull] CoralParser.FunctionStatementContext context)
         {
             var id = (Result)Visit(context.id());
-            var obj = id.permission + " " + Visit(context.parameterClauseOut()) + id.text
+            var obj = id.permission + " " + Visit(context.parameterClauseOut()) + " " + id.text
                 + Visit(context.parameterClauseIn()) + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.functionSupportStatement())
             {
@@ -75,7 +75,7 @@ namespace coral
             }
             else if(context.parameter().Length == 1)
             {
-                obj += Visit(context.parameter(0).basicType());
+                obj += Visit(context.parameter(0).type());
             }
             if(context.parameter().Length > 1)
             {
@@ -99,7 +99,7 @@ namespace coral
         public override object VisitParameter([NotNull] CoralParser.ParameterContext context)
         {
             var id = (Result)Visit(context.id());
-            return Visit(context.basicType()) + " " + id.text;
+            return Visit(context.type()) + " " + id.text;
         }
 
         public override object VisitCheckStatement([NotNull] CoralParser.CheckStatementContext context)

@@ -47,7 +47,7 @@ parameterClauseIn : '(' parameter? (',' parameter)*  ')'  ;
 // 出参
 parameterClauseOut : '(' parameter? (',' parameter)*  ')'  ;
 // 参数结构
-parameter : id ':' basicType;
+parameter : id ':' type;
 // 检查
 checkStatement: Check expression Wave id BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 报告错误
@@ -162,8 +162,18 @@ t=Number
 | t=True
 | t=False
 ;
+// 类型
+type:
+typeArray
+| typeDictinary
+| typeBasic
+;
+
+typeArray : '[' type ']' ;
+typeDictinary :  '[' type ':' type ']';
+
 // 基础类型名
-basicType:
+typeBasic:
 t=TypeNumber
 | t=TypeText
 | t=TypeBool

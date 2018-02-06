@@ -164,7 +164,21 @@ namespace coral
             return r;
         }
 
-        public override object VisitBasicType([NotNull] CoralParser.BasicTypeContext context)
+        public override object VisitTypeArray([NotNull] CoralParser.TypeArrayContext context)
+        {
+            var obj = "";
+            obj += " List<" + Visit(context.type()) + "> ";
+            return obj;
+        }
+
+        public override object VisitTypeDictinary([NotNull] CoralParser.TypeDictinaryContext context)
+        {
+            var obj = "";
+            obj += " Dictionary<" + Visit(context.type(0)) + "," + Visit(context.type(1)) + "> ";
+            return obj;
+        }
+
+        public override object VisitTypeBasic([NotNull] CoralParser.TypeBasicContext context)
         {
             var obj = "";
             switch(context.t.Type)
