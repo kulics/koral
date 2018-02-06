@@ -14,6 +14,7 @@ namespace coral
             var id = (Result)Visit(context.id());
             var obj = "";
             var hasInit = false;
+            var extend = "";
             var implements = new List<string>();
             foreach(var item in context.packageSupportStatement())
             {
@@ -36,6 +37,10 @@ namespace coral
                         + ptclId.Substring(1) + ";}}" + Wrap;
                     obj += r.text;
                 }
+                else if(item.GetChild(0) is CoralParser.PackageExtendContext)
+                {
+                    extend = (string)Visit(item);
+                }
                 else
                 {
                     obj += Visit(item);
@@ -43,12 +48,18 @@ namespace coral
             }
             obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
             var header = id.permission + " class " + id.text;
-            if(implements.Count > 0)
+            if(implements.Count > 0 || extend.Length > 0)
             {
                 header += ":";
+                var b = false;
+                if(extend.Length > 0)
+                {
+                    header += extend;
+                    b = true;
+                }
                 for(int i = 0; i < implements.Count; i++)
                 {
-                    if(i == 0)
+                    if(i == 0 && !b)
                     {
                         header += implements[i];
                     }
@@ -73,19 +84,8 @@ namespace coral
 
         public override object VisitPackageExtend([NotNull] CoralParser.PackageExtendContext context)
         {
-            var pkg = (string)Visit(context.nameSpace());
-            var index = pkg.LastIndexOf(".");
-            var id = "";
-            if(index > 0)
-            {
-                id = pkg.Substring(index);
-            }
-            else
-            {
-                id = pkg;
-            }
-            var obj = "public " + pkg + " " + id + " {get;set;} = new " + pkg + "()" + Wrap;
-            return obj;
+            var pkg = (string)Visit(context.nameSpace()); ;
+            return pkg;
         }
 
         public override object VisitPackageInitStatement([NotNull] CoralParser.PackageInitStatementContext context)
