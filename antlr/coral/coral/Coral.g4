@@ -148,17 +148,22 @@ id
 expression:
 primaryExpression
 | id tuple // 函数调用
-| nameSpace wave tuple
-| expressionList // 表达式列表
+| nameSpace wave tuple // 新建包
+| expressionList // 表达式列
+| array // 数组
 | expression call expression // 链式调用
 | expression judge expression // 判断型表达式
 | expression add expression // 和型表达式
 | expression mul expression // 积型表达式
 ;
 
-expressionList : '(' (expression (',' expression)*)? ')'; // 参数列表
+expressionList : '(' (expression (',' expression)*)? ')'; // 表达式列
 
 tuple : '(' (id ':' expression (',' id ':' expression)* )? ')'; // 元组
+
+array : '[' (expression (',' expression)*)? ']'; // 数组
+
+dictionary : '[' (expression (',' expression)*)? ']'; // 字典
 
 nameSpace:id ('.'id)* ;
 

@@ -127,6 +127,28 @@ namespace coral
             return new Result { text = "(" + r.text + ")", data = r.data };
         }
 
+        public override object VisitExpressionList([NotNull] CoralParser.ExpressionListContext context)
+        {
+            var r = new Result();
+            var obj = "(";
+            for(int i = 0; i < context.expression().Length; i++)
+            {
+                var temp = (Result)Visit(context.expression(i));
+                if(i == 0)
+                {
+                    obj += temp.text;
+                }
+                else
+                {
+                    obj += ", " + temp.text;
+                }
+            }
+            obj += ")";
+            r.text = obj;
+            r.data = "var";
+            return r;
+        }
+
         public override object VisitId([NotNull] CoralParser.IdContext context)
         {
             if(context.op.Type == CoralParser.IDPublic)
@@ -138,6 +160,33 @@ namespace coral
                 return new Result { text = "@" + context.op.Text, data = "double", permission = "private" };
             }
         }
+
+        public override object VisitArray([NotNull] CoralParser.ArrayContext context)
+        {
+            var type = "";
+            var result = new Result();
+            for(int i = 0; i < context.expression().Length; i++)
+            {
+                var r = (Result)Visit(context.expression(i));
+                if(i == 0)
+                {
+                    type = (string)r.data;
+                    result.text += r.text;
+                }
+                else
+                {
+                    if(type != (string)r.data)
+                    {
+                        type = "object";
+                    }
+                    result.text += "," + r.text;
+                }
+            }
+            result.data = "List<" + type + ">";
+            result.text = "new List<" + type + ">(){" + result.text + "}";
+            return result;
+        }
+
         public override object VisitDataStatement([NotNull] CoralParser.DataStatementContext context)
         {
             var r = new Result();

@@ -22,28 +22,6 @@ namespace coral
             return result;
         }
 
-        public override object VisitExpressionList([NotNull] CoralParser.ExpressionListContext context)
-        {
-            var r = new Result();
-            var obj = "(";
-            for(int i = 0; i < context.expression().Length; i++)
-            {
-                var temp = (Result)Visit(context.expression(i));
-                if(i == 0)
-                {
-                    obj += temp.text;
-                }
-                else
-                {
-                    obj += ", " + temp.text;
-                }
-            }
-            obj += ")";
-            r.text = obj;
-            r.data = "var";
-            return r;
-        }
-
         public override object VisitPrintStatement([NotNull] CoralParser.PrintStatementContext context)
         {
             var obj = "Console.WriteLine(" + context.Text().GetText() + ")" + context.Terminate().GetText() + Wrap;
