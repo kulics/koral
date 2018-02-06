@@ -30,6 +30,7 @@ packageSupportStatement:
 packageStatement
 |packageVariableStatement
 |packageInitStatement
+|packageExtend
 |protocolStatement
 |protocolImplementStatement
 |functionStatement
@@ -38,6 +39,8 @@ packageStatement
 packageInitStatement:SelfSub Define Function BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义变量
 packageVariableStatement:expression Define expression Terminate;
+// 定义引入
+packageExtend: PackageSub nameSpace Terminate;
 // 函数
 functionStatement:id Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 返回

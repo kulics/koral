@@ -71,6 +71,23 @@ namespace coral
             return obj;
         }
 
+        public override object VisitPackageExtend([NotNull] CoralParser.PackageExtendContext context)
+        {
+            var pkg = (string)Visit(context.nameSpace());
+            var index = pkg.LastIndexOf(".");
+            var id = "";
+            if(index > 0)
+            {
+                id = pkg.Substring(index);
+            }
+            else
+            {
+                id = pkg;
+            }
+            var obj = "public " + pkg + " " + id + " {get;set;} = new " + pkg + "()" + Wrap;
+            return obj;
+        }
+
         public override object VisitPackageInitStatement([NotNull] CoralParser.PackageInitStatementContext context)
         {
             var obj = context.BlockLeft().GetText() + Wrap;
@@ -96,8 +113,8 @@ namespace coral
                 else if(item.GetChild(0) is CoralParser.ImplementVariableStatementContext)
                 {
                     var vr = (Variable)Visit(item);
-                    obj += "public " + vr.type + " @Interface"+ id.text.Substring(1) + "."+ vr.ID + " {get;set;} = " + vr.body;
-                } 
+                    obj += "public " + vr.type + " @Interface" + id.text.Substring(1) + "." + vr.ID + " {get;set;} = " + vr.body;
+                }
             }
             var r = new Result();
             r.data = id.text;
