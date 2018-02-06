@@ -151,6 +151,7 @@ primaryExpression
 | nameSpace wave tuple // 新建包
 | expressionList // 表达式列
 | array // 数组
+| dictionary // 字典
 | expression call expression // 链式调用
 | expression judge expression // 判断型表达式
 | expression add expression // 和型表达式
@@ -163,7 +164,9 @@ tuple : '(' (id ':' expression (',' id ':' expression)* )? ')'; // 元组
 
 array : '[' (expression (',' expression)*)? ']'; // 数组
 
-dictionary : '[' (expression (',' expression)*)? ']'; // 字典
+dictionary : '[' (dictionaryElement (',' dictionaryElement)*)? ']'; // 字典
+
+dictionaryElement: expression ':' expression; // 字典元素
 
 nameSpace:id ('.'id)* ;
 
