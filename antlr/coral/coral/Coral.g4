@@ -61,8 +61,8 @@ functionSupportStatement:
 | judgeWithElseStatement
 | judgeStatement
 | loopStatement
+| loopEachStatement
 | loopInfiniteStatement
-| printStatement
 | assignStatement
 | expressionStatement
 | checkStatement
@@ -99,11 +99,13 @@ logicStatement:
 | judgeWithElseStatement
 | judgeStatement
 | loopStatement
+| loopEachStatement
 | loopInfiniteStatement
 | loopJumpStatement
-| printStatement
 | assignStatement
 | expressionStatement
+| checkStatement
+| reportStatement
 ;
 // 有else的判断
 judgeWithElseStatement:judgeBaseStatement JudgeSub BlockLeft (logicStatement)* BlockRight Terminate;
@@ -113,6 +115,8 @@ judgeStatement:judgeBaseStatement Terminate;
 judgeBaseStatement:Judge expression BlockLeft (logicStatement)* BlockRight;
 // 循环
 loopStatement:Loop iteratorStatement Wave id BlockLeft (logicStatement)* BlockRight Terminate;
+// 集合循环
+loopEachStatement:Loop expression Wave id BlockLeft (logicStatement)* BlockRight Terminate;
 // 无限循环
 loopInfiniteStatement:Loop BlockLeft (logicStatement)* BlockRight Terminate;
 // 跳出循环

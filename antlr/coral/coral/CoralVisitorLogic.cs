@@ -71,6 +71,21 @@ namespace coral
             return obj;
         }
 
+        public override object VisitLoopEachStatement([NotNull] CoralParser.LoopEachStatementContext context)
+        {
+            var obj = "";
+            var id = (Result)Visit(context.id());
+            var arr = (Result)Visit(context.expression());
+            obj += "foreach (var " + id.text + " in " + arr.text + ")";
+            obj += Wrap + context.BlockLeft().GetText() + Wrap;
+            foreach(var item in context.logicStatement())
+            {
+                obj += Visit(item);
+            }
+            obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
+            return obj;
+        }
+
         public override object VisitLoopJumpStatement([NotNull] CoralParser.LoopJumpStatementContext context)
         {
             return "break" + context.Terminate().GetText() + Wrap;

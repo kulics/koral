@@ -54,7 +54,6 @@ namespace coral
                     }
                 }
             }
-
             Console.ReadKey();
         }
     }
