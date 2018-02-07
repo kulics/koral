@@ -148,7 +148,7 @@ id
 expression:
 primaryExpression
 | id tuple // 函数调用
-| nameSpace wave tuple // 新建包
+| type wave tuple // 新建包
 | expressionList // 表达式列
 | array // 数组
 | dictionary // 字典
@@ -185,6 +185,7 @@ type:
 typeArray
 | typeDictinary
 | typeBasic
+| nameSpace
 ;
 
 typeArray : '[' type ']' ;
