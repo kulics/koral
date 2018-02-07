@@ -15,6 +15,7 @@ namespace coral
             var obj = "";
             var hasInit = false;
             var extend = "";
+            var hasExtend = false;
             var implements = new List<string>();
             foreach(var item in context.packageSupportStatement())
             {
@@ -39,7 +40,11 @@ namespace coral
                 }
                 else if(item.GetChild(0) is CoralParser.PackageExtendContext)
                 {
-                    extend = (string)Visit(item);
+                    if(!hasExtend)
+                    {
+                        extend = (string)Visit(item);
+                        hasExtend = true;
+                    }
                 }
                 else
                 {
