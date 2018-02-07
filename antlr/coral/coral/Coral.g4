@@ -61,6 +61,7 @@ functionSupportStatement:
  returnStatement
 | variableStatement
 | printStatement
+| judgeCaseStatement
 | judgeWithElseStatement
 | judgeStatement
 | loopStatement
@@ -99,6 +100,7 @@ logicStatement:
  returnStatement
 | variableStatement
 | printStatement
+| judgeCaseStatement
 | judgeWithElseStatement
 | judgeStatement
 | loopStatement
@@ -110,6 +112,10 @@ logicStatement:
 | checkStatement
 | reportStatement
 ;
+// 条件判断
+judgeCaseStatement: Judge expression BlockLeft (caseStatement)+ BlockRight Terminate;
+// 条件声明
+caseStatement: Wave expression BlockLeft (logicStatement)* BlockRight Terminate;
 // 有else的判断
 judgeWithElseStatement:judgeBaseStatement JudgeSub BlockLeft (logicStatement)* BlockRight Terminate;
 // 判断

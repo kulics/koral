@@ -91,6 +91,34 @@ namespace coral
             return "break" + context.Terminate().GetText() + Wrap;
         }
 
+        public override object VisitJudgeCaseStatement([NotNull] CoralParser.JudgeCaseStatementContext context)
+        {
+            var obj = "";
+            var expr = (Result)Visit(context.expression());
+            obj += "switch (" + expr.text + ")" + Wrap + context.BlockLeft().GetText() + Wrap;
+            foreach(var item in context.caseStatement())
+            {
+                var r = (string)Visit(item);
+                obj += r + Wrap;
+            }
+            obj += context.BlockRight().GetText() + Wrap;
+            return obj;
+        }
+
+        public override object VisitCaseStatement([NotNull] CoralParser.CaseStatementContext context)
+        {
+            var obj = "";
+            var expr = (Result)Visit(context.expression());
+            obj += "case " + expr.text + ":" + Wrap;
+            foreach(var item in context.logicStatement())
+            {
+                var r = (string)Visit(item);
+                obj += r;
+            }
+            obj += "break;";
+            return obj;
+        }
+
         public override object VisitJudgeWithElseStatement([NotNull] CoralParser.JudgeWithElseStatementContext context)
         {
             var obj = Visit(context.judgeBaseStatement()) + Wrap + " else " + Wrap + context.BlockLeft().GetText() + Wrap;
