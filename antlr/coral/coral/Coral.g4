@@ -36,7 +36,7 @@ packageStatement
 |functionStatement
 ;
 // 包构造方法
-packageInitStatement:SelfSub Define Function BlockLeft (functionSupportStatement)* BlockRight Terminate;
+packageInitStatement:PackageSub BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义变量
 packageVariableStatement:expression Define expression Terminate;
 // 定义引入
