@@ -37,9 +37,19 @@ namespace coral
             var r = new Result();
             if(count == 2)
             {
-                r.data = "var";
-                var id = (Result)Visit(context.id());
-                r.text = id.text + Visit(context.tuple());
+                if(context.GetChild(0) is CoralParser.IdContext)
+                {
+                    r.data = "var";
+                    var id = (Result)Visit(context.id());
+                    r.text = id.text + Visit(context.tuple());
+                }
+                else if(context.GetChild(1) is CoralParser.ReadElementContext)
+                {
+                    var ex = (Result)Visit(context.GetChild(0));
+                    var read = (string)Visit(context.GetChild(1));
+                    r.data = ex.data;
+                    r.text = ex.text + read;
+                }
             }
             else if(count == 3)
             {
@@ -236,6 +246,17 @@ namespace coral
             result.value = (string)r2.data;
             result.text = "{" + r1.text + "," + r2.text + "}";
             return result;
+        }
+
+        public override object VisitReadElement([NotNull] CoralParser.ReadElementContext context)
+        {
+            var obj = "";
+            foreach(var item in context.expression())
+            {
+                var r = (Result)Visit(item);
+                obj += "[" + r.text + "]";
+            }
+            return obj;
         }
 
         public override object VisitDataStatement([NotNull] CoralParser.DataStatementContext context)
