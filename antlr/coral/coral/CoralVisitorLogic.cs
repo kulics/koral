@@ -115,24 +115,28 @@ namespace coral
                 var r = (string)Visit(item);
                 obj += r;
             }
-            obj += "break;";
-            return obj;
-        }
-
-        public override object VisitJudgeWithElseStatement([NotNull] CoralParser.JudgeWithElseStatementContext context)
-        {
-            var obj = Visit(context.judgeBaseStatement()) + Wrap + " else " + Wrap + context.BlockLeft().GetText() + Wrap;
-            foreach(var item in context.logicStatement())
-            {
-                obj += Visit(item);
-            }
-            obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
+            obj += "break" + context.Terminate().GetText();
             return obj;
         }
 
         public override object VisitJudgeStatement([NotNull] CoralParser.JudgeStatementContext context)
         {
-            var obj = Visit(context.judgeBaseStatement()) + context.Terminate().GetText() + Wrap;
+            var obj = "";
+            for(int i = 0; i < context.judgeBaseStatement().Length; i++)
+            {
+                if(i == 0)
+                {
+                    obj += Visit(context.judgeBaseStatement(i));
+                }
+                else
+                {
+                    obj += "else " + Visit(context.judgeBaseStatement(i));
+                }
+            }
+            if(context.judgeElseStatement() != null)
+            {
+                obj += Visit(context.judgeElseStatement());
+            }
             return obj;
         }
 
@@ -144,7 +148,18 @@ namespace coral
             {
                 obj += Visit(item);
             }
-            obj += context.BlockRight().GetText();
+            obj += context.BlockRight().GetText() + Wrap;
+            return obj;
+        }
+
+        public override object VisitJudgeElseStatement([NotNull] CoralParser.JudgeElseStatementContext context)
+        {
+            var obj = "else " + Wrap + context.BlockLeft().GetText() + Wrap;
+            foreach(var item in context.logicStatement())
+            {
+                obj += Visit(item);
+            }
+            obj += context.BlockRight().GetText() + Wrap;
             return obj;
         }
     }
