@@ -189,39 +189,52 @@ namespace coral
 
         public override object VisitDictionary([NotNull] CoralParser.DictionaryContext context)
         {
-            var type = "";
+            var key = "";
+            var value = "";
             var result = new Result();
             for(int i = 0; i < context.dictionaryElement().Length; i++)
             {
-                var r = (Result)Visit(context.dictionaryElement(i));
+                var r = (DicEle)Visit(context.dictionaryElement(i));
                 if(i == 0)
                 {
-                    type = (string)r.data;
+                    key = r.key;
+                    value = r.value;
                     result.text += r.text;
                 }
                 else
                 {
-                    if(type != (string)r.data)
+                    if(key != r.key)
                     {
-                        type = "object,object";
+                        key = "object";
+                    }
+                    if(value != r.value)
+                    {
+                        value = "object";
                     }
                     result.text += "," + r.text;
                 }
             }
+            var type = key + "," + value;
             result.data = "Dictionary<" + type + ">";
             result.text = "new Dictionary<" + type + ">(){" + result.text + "}";
             return result;
+        }
+
+        class DicEle
+        {
+            public string key;
+            public string value;
+            public string text;
         }
 
         public override object VisitDictionaryElement([NotNull] CoralParser.DictionaryElementContext context)
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
-            var result = new Result();
-            var key = r1.data;
-            var value = r2.data;
+            var result = new DicEle();
+            result.key = (string)r1.data;
+            result.value = (string)r2.data;
             result.text = "{" + r1.text + "," + r2.text + "}";
-            result.data = key + "," + value;
             return result;
         }
 
