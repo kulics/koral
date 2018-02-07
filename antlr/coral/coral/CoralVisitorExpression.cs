@@ -163,7 +163,7 @@ namespace coral
 
         public override object VisitArray([NotNull] CoralParser.ArrayContext context)
         {
-            var type = "";
+            var type = "object";
             var result = new Result();
             for(int i = 0; i < context.expression().Length; i++)
             {
@@ -189,8 +189,8 @@ namespace coral
 
         public override object VisitDictionary([NotNull] CoralParser.DictionaryContext context)
         {
-            var key = "";
-            var value = "";
+            var key = "object";
+            var value = "object";
             var result = new Result();
             for(int i = 0; i < context.dictionaryElement().Length; i++)
             {
