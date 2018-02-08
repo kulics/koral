@@ -8,8 +8,6 @@ program : statement+;
 
 statement :exportStatement;		  
 
-printStatement:'print' '(' Text ')' Terminate;
-
 // 导出命名空间
 exportStatement:Export nameSpace BlockLeft (exportSupportStatement)* BlockRight Terminate;
 // 导出命名空间支持的语句
@@ -110,6 +108,8 @@ logicStatement:
 | checkStatement
 | reportStatement
 ;
+// 打印
+printStatement:'print' '(' expression ')' Terminate;
 // 条件判断
 judgeCaseStatement: Judge expression BlockLeft (caseStatement)+ BlockRight Terminate;
 // 条件声明
@@ -186,12 +186,14 @@ t=Number
 ;
 // 类型
 type:
-typeArray
+typeProtocol
+| typeArray
 | typeDictinary
 | typeBasic
 | nameSpace
 ;
 
+typeProtocol : Protocol nameSpace;
 typeArray : '[' type ']' ;
 typeDictinary :  '[' type ':' type ']';
 
@@ -207,7 +209,7 @@ bool:t=True|t=False;
 
 judge : op=('||' | '&&' | '==' | '!=' | '<' | '>');
 add : op=('+' | '-');
-mul : op=('*' | '/');
+mul : op=('*' | '/' | '%');
 call : op='.';
 wave : op='~';
 

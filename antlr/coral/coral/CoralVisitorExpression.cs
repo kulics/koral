@@ -285,6 +285,13 @@ namespace coral
             return r;
         }
 
+        public override object VisitTypeProtocol([NotNull] CoralParser.TypeProtocolContext context)
+        {
+            var ns = (string)Visit(context.nameSpace());
+            var obj = "@Interface" + ns.Substring(1);
+            return obj;
+        }
+
         public override object VisitTypeArray([NotNull] CoralParser.TypeArrayContext context)
         {
             var obj = "";
@@ -321,3 +328,4 @@ namespace coral
         }
     }
 }
+

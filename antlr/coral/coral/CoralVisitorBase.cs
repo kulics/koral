@@ -24,7 +24,8 @@ namespace coral
 
         public override object VisitPrintStatement([NotNull] CoralParser.PrintStatementContext context)
         {
-            var obj = "Console.WriteLine(" + context.Text().GetText() + ")" + context.Terminate().GetText() + Wrap;
+            var r = (Result)Visit(context.expression());
+            var obj = "Console.WriteLine(" + r.text + ")" + context.Terminate().GetText() + Wrap;
             return obj;
         }
 
