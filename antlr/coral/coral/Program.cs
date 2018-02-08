@@ -39,7 +39,7 @@ namespace coral
                         var result = visitor.Visit(tree);
 
                         //Console.WriteLine(tree.ToStringTree(parser));
-                        Console.WriteLine(result);
+                        //Console.WriteLine(result);
 
                         // C#文件流写文件,使用覆盖模式
                         var resByte = Encoding.UTF8.GetBytes(result.ToString());  //转换为字节
@@ -54,6 +54,7 @@ namespace coral
                     }
                 }
             }
+            Console.WriteLine("Compiled is completed");
             Console.ReadKey();
         }
     }
