@@ -144,6 +144,7 @@ expressionStatement: expression Terminate;
 primaryExpression: 
 id
 | t=Self
+| t=Discard
 | dataStatement
 | '(' expression ')'
 ;
@@ -260,9 +261,10 @@ False: 'false';
 
 Number :DIGIT+ ('.' DIGIT+)?; // 数字
 fragment DIGIT : [0-9] ;             // 单个数字
-Text: '"' (~[\\\r\n])*? '"'; //文本
-IDPrivate : '_' [a-zA-Z0-9]*; // 私有标识符
+Text: '"' (~[\\\r\n])*? '"'; // 文本
+IDPrivate : '_' [a-zA-Z0-9]+; // 私有标识符
 IDPublic  : [a-zA-Z] [a-zA-Z0-9]*; // 公有标识符
+Discard : '_'; // 匿名变量
 
 Comment : '/*' .*? '*/' -> skip; // 结构注释
 CommentLine : '//' .*? '\r'? '\n' -> skip; // 行注释

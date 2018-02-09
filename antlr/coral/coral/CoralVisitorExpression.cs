@@ -132,6 +132,10 @@ namespace coral
                 {
                     return new Result { text = "this", data = "var" };
                 }
+                else if (context.t.Type == CoralParser.Discard)
+                {
+                    return new Result { text = "_", data = "var" };
+                }
             }
             var r = (Result)Visit(context.expression());
             return new Result { text = "(" + r.text + ")", data = r.data };
