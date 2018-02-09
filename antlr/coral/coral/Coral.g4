@@ -20,7 +20,7 @@ importStatement
 // 导入命名空间
 importStatement:Import BlockLeft (nameSpaceStatement)* BlockRight Terminate;
 // 主函数
-functionMainStatement:Main Define Function BlockLeft (functionSupportStatement)* BlockRight Terminate;
+functionMainStatement:Function BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义包
 packageStatement:id Define Package (Wave parameterClauseIn)? BlockLeft (packageSupportStatement)* BlockRight Terminate;
 // 包支持的语句
@@ -257,8 +257,6 @@ TypeText: 'text';
 TypeBool: 'bool';
 True: 'true';
 False: 'false';
-
-Main: 'Main';
 
 Number :DIGIT+ ('.' DIGIT+)?; // 数字
 fragment DIGIT : [0-9] ;             // 单个数字
