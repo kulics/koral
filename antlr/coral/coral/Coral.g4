@@ -112,8 +112,12 @@ logicStatement:
 printStatement:'print' '(' expression ')' Terminate;
 // 条件判断
 judgeCaseStatement: Judge expression BlockLeft (caseStatement)+ BlockRight Terminate;
+// 缺省条件声明
+caseDefaultStatement: Wave Discard BlockLeft (logicStatement)* BlockRight Terminate;
 // 条件声明
-caseStatement: Wave expression BlockLeft (logicStatement)* BlockRight Terminate;
+caseExprStatement: Wave expression BlockLeft (logicStatement)* BlockRight Terminate;
+// 判断条件声明
+caseStatement: caseDefaultStatement|caseExprStatement;
 // 判断
 judgeStatement:(judgeBaseStatement)+ (judgeElseStatement)? Terminate;
 // 判断基础

@@ -105,7 +105,20 @@ namespace coral
             return obj;
         }
 
-        public override object VisitCaseStatement([NotNull] CoralParser.CaseStatementContext context)
+        public override object VisitCaseDefaultStatement([NotNull] CoralParser.CaseDefaultStatementContext context)
+        {
+            var obj = "";
+            obj += "default:" + Wrap;
+            foreach(var item in context.logicStatement())
+            {
+                var r = (string)Visit(item);
+                obj += r;
+            }
+            obj += "break" + context.Terminate().GetText();
+            return obj;
+        }
+
+        public override object VisitCaseExprStatement([NotNull] CoralParser.CaseExprStatementContext context)
         {
             var obj = "";
             var expr = (Result)Visit(context.expression());
@@ -116,6 +129,12 @@ namespace coral
                 obj += r;
             }
             obj += "break" + context.Terminate().GetText();
+            return obj;
+        }
+
+        public override object VisitCaseStatement([NotNull] CoralParser.CaseStatementContext context)
+        {
+            var obj = (string)Visit(context.GetChild(0));
             return obj;
         }
 
