@@ -144,7 +144,7 @@ namespace coral
                 else if(item.GetChild(0) is CoralParser.ImplementVariableStatementContext)
                 {
                     var vr = (Variable)Visit(item);
-                    obj += "public " + vr.type + " " + ptclPre + "@Interface" + ptclName.Substring(1) + "." + vr.ID + " {get;set;} = " + vr.body;
+                    obj += vr.type + " " + ptclPre + "@Interface" + ptclName.Substring(1) + "." + vr.ID + " {get;set;} = " + vr.body;
                 }
             }
             var r = new Result();
@@ -248,7 +248,7 @@ namespace coral
             if(id.permission == "public")
             {
                 r.permission = "public";
-                r.text += Visit(context.parameterClauseOut()) + id.text
+                r.text += Visit(context.parameterClauseOut()) + " " + id.text
                 + Visit(context.parameterClauseIn()) + context.Terminate().GetText() + Wrap;
             }
             else
