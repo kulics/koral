@@ -188,6 +188,7 @@ t=Number
 | t=Text
 | t=True
 | t=False
+| t=Nil
 ;
 // 类型
 type:
@@ -204,7 +205,8 @@ typeDictinary :  '[' type ':' type ']';
 
 // 基础类型名
 typeBasic:
-t=TypeNumber
+t=TypeAny
+| t=TypeNumber
 | t=TypeText
 | t=TypeBool
 ;
@@ -257,11 +259,13 @@ Protocol : '&';
 
 Wave : '~';
 
+TypeAny : 'any';
 TypeNumber: 'number';
 TypeText: 'text';
 TypeBool: 'bool';
 True: 'true';
 False: 'false';
+Nil : 'nil';
 
 Number :DIGIT+ ('.' DIGIT+)?; // 数字
 fragment DIGIT : [0-9] ;             // 单个数字

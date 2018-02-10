@@ -132,7 +132,7 @@ namespace coral
                 {
                     return new Result { text = "this", data = "var" };
                 }
-                else if (context.t.Type == CoralParser.Discard)
+                else if(context.t.Type == CoralParser.Discard)
                 {
                     return new Result { text = "_", data = "var" };
                 }
@@ -286,6 +286,11 @@ namespace coral
                 r.data = "bool";
                 r.text = context.False().GetText();
             }
+            else if(context.t.Type == CoralParser.Nil)
+            {
+                r.data = "object";
+                r.text = "null";
+            }
             return r;
         }
 
@@ -323,6 +328,9 @@ namespace coral
                     break;
                 case CoralParser.TypeBool:
                     obj = "bool";
+                    break;
+                case CoralParser.TypeAny:
+                    obj = "object";
                     break;
                 default:
                     obj = "object";
