@@ -87,7 +87,7 @@ implementVariableStatement
 |implementFunctionStatement
 ;
 // 实现协议
-protocolImplementStatement:id Define ProtocolSub nameSpace BlockLeft (protocolImplementSupportStatement)* BlockRight Terminate;
+protocolImplementStatement:ProtocolSub nameSpace BlockLeft (protocolImplementSupportStatement)* BlockRight Terminate;
 // 变量实现
 implementVariableStatement:expression Define expression Terminate;
 // 函数实现

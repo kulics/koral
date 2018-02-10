@@ -39,7 +39,7 @@ namespace coral
             {
                 if(context.GetChild(0) is CoralParser.IdContext)
                 {
-                    r.data1 = "var";
+                    r.data = "var";
                     var id = (Result)Visit(context.id());
                     r.text = id.text + Visit(context.tuple());
                 }
@@ -47,7 +47,7 @@ namespace coral
                 {
                     var ex = (Result)Visit(context.GetChild(0));
                     var read = (string)Visit(context.GetChild(1));
-                    r.data1 = ex.data1;
+                    r.data = ex.data;
                     r.text = ex.text + read;
                 }
             }
@@ -55,26 +55,26 @@ namespace coral
             {
                 if(context.GetChild(1).GetType() == typeof(CoralParser.CallContext))
                 {
-                    r.data1 = "var";
+                    r.data = "var";
                 }
                 else if(context.GetChild(1).GetType() == typeof(CoralParser.JudgeContext))
                 {
                     // todo 如果左右不是bool类型值，报错
-                    r.data1 = "bool";
+                    r.data = "bool";
                 }
                 else if(context.GetChild(1).GetType() == typeof(CoralParser.AddContext))
                 {
                     // todo 如果左右不是number或text类型值，报错
-                    r.data1 = "double";
+                    r.data = "double";
                 }
                 else if(context.GetChild(1).GetType() == typeof(CoralParser.MulContext))
                 {
                     // todo 如果左右不是number类型值，报错
-                    r.data1 = "double";
+                    r.data = "double";
                 }
                 else if(context.GetChild(1).GetType() == typeof(CoralParser.WaveContext))
                 {
-                    r.data1 = Visit(context.GetChild(0));
+                    r.data = Visit(context.GetChild(0));
                     r.text = "new " + Visit(context.GetChild(0)) + Visit(context.GetChild(2));
                     return r;
                 }
@@ -130,15 +130,15 @@ namespace coral
                 }
                 else if(context.t.Type == CoralParser.Self)
                 {
-                    return new Result { text = "this", data1 = "var" };
+                    return new Result { text = "this", data = "var" };
                 }
                 else if(context.t.Type == CoralParser.Discard)
                 {
-                    return new Result { text = "_", data1 = "var" };
+                    return new Result { text = "_", data = "var" };
                 }
             }
             var r = (Result)Visit(context.expression());
-            return new Result { text = "(" + r.text + ")", data1 = r.data1 };
+            return new Result { text = "(" + r.text + ")", data = r.data };
         }
 
         public override object VisitExpressionList([NotNull] CoralParser.ExpressionListContext context)
@@ -159,7 +159,7 @@ namespace coral
             }
             obj += ")";
             r.text = obj;
-            r.data1 = "var";
+            r.data = "var";
             return r;
         }
 
@@ -167,11 +167,11 @@ namespace coral
         {
             if(context.op.Type == CoralParser.IDPublic)
             {
-                return new Result { text = "@" + context.op.Text, data1 = "double", permission = "public" };
+                return new Result { text = "@" + context.op.Text, data = "double", permission = "public" };
             }
             else
             {
-                return new Result { text = "@" + context.op.Text, data1 = "double", permission = "private" };
+                return new Result { text = "@" + context.op.Text, data = "double", permission = "private" };
             }
         }
 
@@ -184,19 +184,19 @@ namespace coral
                 var r = (Result)Visit(context.expression(i));
                 if(i == 0)
                 {
-                    type = (string)r.data1;
+                    type = (string)r.data;
                     result.text += r.text;
                 }
                 else
                 {
-                    if(type != (string)r.data1)
+                    if(type != (string)r.data)
                     {
                         type = "object";
                     }
                     result.text += "," + r.text;
                 }
             }
-            result.data1 = "List<" + type + ">";
+            result.data = "List<" + type + ">";
             result.text = "new List<" + type + ">(){" + result.text + "}";
             return result;
         }
@@ -229,7 +229,7 @@ namespace coral
                 }
             }
             var type = key + "," + value;
-            result.data1 = "Dictionary<" + type + ">";
+            result.data = "Dictionary<" + type + ">";
             result.text = "new Dictionary<" + type + ">(){" + result.text + "}";
             return result;
         }
@@ -246,8 +246,8 @@ namespace coral
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
             var result = new DicEle();
-            result.key = (string)r1.data1;
-            result.value = (string)r2.data1;
+            result.key = (string)r1.data;
+            result.value = (string)r2.data;
             result.text = "{" + r1.text + "," + r2.text + "}";
             return result;
         }
@@ -268,27 +268,27 @@ namespace coral
             var r = new Result();
             if(context.t.Type == CoralParser.Number)
             {
-                r.data1 = "double";
+                r.data = "double";
                 r.text = context.Number().GetText();
             }
             else if(context.t.Type == CoralParser.Text)
             {
-                r.data1 = "string";
+                r.data = "string";
                 r.text = context.Text().GetText();
             }
             else if(context.t.Type == CoralParser.True)
             {
-                r.data1 = "bool";
+                r.data = "bool";
                 r.text = context.True().GetText();
             }
             else if(context.t.Type == CoralParser.False)
             {
-                r.data1 = "bool";
+                r.data = "bool";
                 r.text = context.False().GetText();
             }
             else if(context.t.Type == CoralParser.Nil)
             {
-                r.data1 = "object";
+                r.data = "object";
                 r.text = "null";
             }
             return r;

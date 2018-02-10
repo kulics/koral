@@ -33,8 +33,7 @@ namespace coral
                 {
                     // 处理协议实现
                     var r = (Result)Visit(item);
-                    var ptclId = r.data1.ToString();
-                    var ptcl = r.data2.ToString();
+                    var ptcl = r.data.ToString();
                     var ptclPre = "";
                     var ptclName = "";
                     if(ptcl.LastIndexOf('.') > 0)
@@ -47,7 +46,7 @@ namespace coral
                         ptclName = ptcl;
                     }
                     implements.Add(ptclPre + "@Interface" + ptclName.Substring(1));
-                    obj += "public " + ptclPre + "@Interface" + ptclName.Substring(1) + " " + ptclId +
+                    obj += "public " + ptclPre + "@Interface" + ptclName.Substring(1) + " " + ptclName +
                         " { get { return this as " + ptclPre + "@Interface"
                         + ptclName.Substring(1) + ";}}" + Wrap;
                     obj += r.text;
@@ -97,7 +96,7 @@ namespace coral
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
-            var obj = r1.permission + " " + r2.data1 + " " + r1.text + " {get;set;} = " + r2.text + context.Terminate().GetText() + Wrap;
+            var obj = r1.permission + " " + r2.data + " " + r1.text + " {get;set;} = " + r2.text + context.Terminate().GetText() + Wrap;
             return obj;
         }
 
@@ -120,7 +119,6 @@ namespace coral
 
         public override object VisitProtocolImplementStatement([NotNull] CoralParser.ProtocolImplementStatementContext context)
         {
-            var id = (Result)Visit(context.id());
             var ptcl = (string)Visit(context.nameSpace());
             var ptclPre = "";
             var ptclName = "";
@@ -150,8 +148,7 @@ namespace coral
                 }
             }
             var r = new Result();
-            r.data1 = id.text;
-            r.data2 = ptcl;
+            r.data = ptcl;
             r.text = obj;
             return r;
         }
@@ -169,7 +166,7 @@ namespace coral
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
             vr.ID = r1.text;
-            vr.type = (string)r2.data1;
+            vr.type = (string)r2.data;
             vr.body = r2.text + context.Terminate().GetText() + Wrap;
             return vr;
         }
@@ -234,12 +231,12 @@ namespace coral
             if(r1.permission == "public")
             {
                 r.permission = "public";
-                r.text += r2.data1 + " " + r1.text + " {get;set;} " + Wrap;
+                r.text += r2.data + " " + r1.text + " {get;set;} " + Wrap;
             }
             else
             {
                 r.permission = "private";
-                r.text += "public const " + r2.data1 + " " + r1.text + " = " + r2.text + context.Terminate().GetText() + Wrap;
+                r.text += "public const " + r2.data + " " + r1.text + " = " + r2.text + context.Terminate().GetText() + Wrap;
             }
             return r;
         }

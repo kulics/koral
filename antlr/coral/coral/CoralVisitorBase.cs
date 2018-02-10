@@ -31,8 +31,7 @@ namespace coral
 
         public class Result
         {
-            public object data1 { get; set; }
-            public object data2 { get; set; }
+            public object data { get; set; }
             public string text { get; set; }
             public string permission { get; set; }
         }
@@ -42,12 +41,12 @@ namespace coral
             var r = new Result();
             if(context.t.Type == CoralParser.True)
             {
-                r.data1 = "bool";
+                r.data = "bool";
                 r.text = context.True().GetText();
             }
             else if(context.t.Type == CoralParser.False)
             {
-                r.data1 = "bool";
+                r.data = "bool";
                 r.text = context.False().GetText();
             }
             return r;
