@@ -19,7 +19,7 @@ Read detail from The [Book]().
             System;
         }
 
-        Main => $  
+        $  
         {
             greetings => ["Hello", "Hola", "Bonjour",
                         "Ciao", "こんにちは", "안녕하세요",
