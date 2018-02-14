@@ -144,7 +144,7 @@ namespace coral
         public override object VisitExpressionList([NotNull] CoralParser.ExpressionListContext context)
         {
             var r = new Result();
-            var obj = "(";
+            var obj = "";
             for(int i = 0; i < context.expression().Length; i++)
             {
                 var temp = (Result)Visit(context.expression(i));
@@ -157,7 +157,6 @@ namespace coral
                     obj += ", " + temp.text;
                 }
             }
-            obj += ")";
             r.text = obj;
             r.data = "var";
             return r;
@@ -232,6 +231,15 @@ namespace coral
             result.data = "Dictionary<" + type + ">";
             result.text = "new Dictionary<" + type + ">(){" + result.text + "}";
             return result;
+        }
+
+        public override object VisitVariableList([NotNull] CoralParser.VariableListContext context)
+        {
+            var newR = new Result();
+            var r = (Result)Visit(context.expressionList());
+            newR.text += "(" + r.text + ")";
+            newR.data = "var";
+            return newR;
         }
 
         class DicEle

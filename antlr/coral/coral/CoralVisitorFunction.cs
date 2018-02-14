@@ -25,7 +25,7 @@ namespace coral
         public override object VisitReturnStatement([NotNull] CoralParser.ReturnStatementContext context)
         {
             var r = (Result)Visit(context.expressionList());
-            return "return " + r.text + context.Terminate().GetText() + Wrap;
+            return "return (" + r.text + ")" + context.Terminate().GetText() + Wrap;
         }
 
         public override object VisitTuple([NotNull] CoralParser.TupleContext context)

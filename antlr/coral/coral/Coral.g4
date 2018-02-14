@@ -22,7 +22,7 @@ importStatement:Import BlockLeft (nameSpaceStatement)* BlockRight Terminate;
 // 主函数
 functionMainStatement:Function BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义包
-packageStatement:id Define Package (Wave parameterClauseIn)? BlockLeft (packageSupportStatement)* BlockRight Terminate;
+packageStatement:(attribute)? id Define Package (Wave parameterClauseIn)? BlockLeft (packageSupportStatement)* BlockRight Terminate;
 // 包支持的语句
 packageSupportStatement:
 packageStatement
@@ -36,13 +36,13 @@ packageStatement
 // 包构造方法
 packageInitStatement:PackageSub BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义变量
-packageVariableStatement:expression Define expression Terminate;
+packageVariableStatement:(attribute)? expression Define expression Terminate;
 // 定义引入
 packageExtend: PackageSub nameSpace Terminate;
 // 函数
 functionStatement:id Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 返回
-returnStatement: ArrowRight expressionList Terminate;
+returnStatement: ArrowRight '(' (expressionList)? ')' Terminate;
 // 入参
 parameterClauseIn : '(' parameter? (',' parameter)*  ')'  ;
 // 出参
@@ -53,6 +53,8 @@ parameter : id ':' type;
 checkStatement: Check expression Wave id BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 报告错误
 reportStatement: CheckSub (expression)? Terminate;
+// 属性
+attribute: '\\' expressionList '\\';
 
 // 函数支持的语句
 functionSupportStatement:
@@ -158,9 +160,9 @@ expression:
 primaryExpression
 | id tuple // 函数调用
 | type wave tuple // 新建包
-| expressionList // 表达式列
 | array // 数组
 | dictionary // 字典
+| variableList // 变量列
 | expression readElement // 访问元素
 | expression call expression // 链式调用
 | expression judge expression // 判断型表达式
@@ -168,9 +170,11 @@ primaryExpression
 | expression mul expression // 积型表达式
 ;
 
-expressionList : '(' (expression (',' expression)*)? ')'; // 表达式列
+expressionList : expression (',' expression)* ; // 表达式列
 
 tuple : '(' (id ':' expression (',' id ':' expression)* )? ')'; // 元组
+
+variableList : '(' expressionList ')' ; // 变量列
 
 array : '[' (expression (',' expression)*)? ']'; // 数组
 
@@ -180,7 +184,7 @@ dictionaryElement: expression ':' expression; // 字典元素
 
 readElement : ('['expression ']')+ ;
 
-nameSpace:id ('.'id)* ;
+nameSpace: id ('.' id)* ;
 
 // 基础数据
 dataStatement:

@@ -65,7 +65,12 @@ namespace coral
                 }
             }
             obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
-            var header = id.permission + " class " + id.text;
+            var header = "";
+            if(context.attribute() != null)
+            {
+                header += Visit(context.attribute());
+            }
+            header += id.permission + " class " + id.text;
             if(implements.Count > 0 || extend.Length > 0)
             {
                 header += ":";
@@ -87,6 +92,7 @@ namespace coral
                     }
                 }
             }
+
             header += Wrap + context.BlockLeft().GetText() + Wrap;
             obj = header + obj;
             return obj;
@@ -96,7 +102,20 @@ namespace coral
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
-            var obj = r1.permission + " " + r2.data + " " + r1.text + " {get;set;} = " + r2.text + context.Terminate().GetText() + Wrap;
+            var obj = "";
+            if(context.attribute() != null)
+            {
+                obj += Visit(context.attribute());
+            }
+            obj += r1.permission + " " + r2.data + " " + r1.text + " {get;set;} = " + r2.text + context.Terminate().GetText() + Wrap;
+            return obj;
+        }
+
+        public override object VisitAttribute([NotNull] CoralParser.AttributeContext context)
+        {
+            var obj = "";
+            var r = (Result)Visit(context.expressionList());
+            obj += "[" + r.text + "]";
             return obj;
         }
 
