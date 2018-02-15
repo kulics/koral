@@ -36,19 +36,30 @@ namespace coral
                     var ptcl = r.data.ToString();
                     var ptclPre = "";
                     var ptclName = "";
+                    var originPtclName = "";
                     if(ptcl.LastIndexOf('.') > 0)
                     {
                         ptclPre = ptcl.Substring(0, ptcl.LastIndexOf('.') + 1);
                         ptclName = ptcl.Substring(ptcl.LastIndexOf('.') + 1);
+                        originPtclName = ptclName;
+                        if(ptclName.IndexOf('@') >= 0)
+                        {
+                            ptclName = ptclName.Substring(ptclName.IndexOf('@') + 1);
+                        }
                     }
                     else
                     {
+                        originPtclName = ptcl;
                         ptclName = ptcl;
+                        if(ptclName.IndexOf('@') >= 0)
+                        {
+                            ptclName = ptclName.Substring(ptclName.IndexOf('@') + 1);
+                        }
                     }
-                    implements.Add(ptclPre + "@Interface" + ptclName.Substring(1));
-                    obj += "public " + ptclPre + "@Interface" + ptclName.Substring(1) + " " + ptclName +
-                        " { get { return this as " + ptclPre + "@Interface"
-                        + ptclName.Substring(1) + ";}}" + Wrap;
+                    implements.Add(ptclPre + "Interface" + ptclName);
+                    obj += "public " + ptclPre + "Interface" + ptclName + " " + originPtclName +
+                        " { get { return this as " + ptclPre + "Interface"
+                        + ptclName + ";}}" + Wrap;
                     obj += r.text;
                 }
                 else if(item.GetChild(0) is CoralParser.PackageExtendContext)
@@ -146,10 +157,18 @@ namespace coral
             {
                 ptclPre = ptcl.Substring(0, ptcl.LastIndexOf('.') + 1);
                 ptclName = ptcl.Substring(ptcl.LastIndexOf('.') + 1);
+                if(ptclName.IndexOf('@') >= 0)
+                {
+                    ptclName = ptclName.Substring(ptclName.IndexOf('@') + 1);
+                }
             }
             else
             {
                 ptclName = ptcl;
+                if(ptclName.IndexOf('@') >= 0)
+                {
+                    ptclName = ptclName.Substring(ptclName.IndexOf('@') + 1);
+                }
             }
 
             var obj = "";
@@ -158,12 +177,12 @@ namespace coral
                 if(item.GetChild(0) is CoralParser.ImplementFunctionStatementContext)
                 {
                     var fn = (Function)Visit(item);
-                    obj += fn.@out + " " + ptclPre + "@Interface" + ptclName.Substring(1) + "." + fn.ID + " " + fn.@in + Wrap + fn.body;
+                    obj += fn.@out + " " + ptclPre + "Interface" + ptclName + "." + fn.ID + " " + fn.@in + Wrap + fn.body;
                 }
                 else if(item.GetChild(0) is CoralParser.ImplementVariableStatementContext)
                 {
                     var vr = (Variable)Visit(item);
-                    obj += vr.type + " " + ptclPre + "@Interface" + ptclName.Substring(1) + "." + vr.ID + " {get;set;} = " + vr.body;
+                    obj += vr.type + " " + ptclPre + "Interface" + ptclName + "." + vr.ID + " {get;set;} = " + vr.body;
                 }
             }
             var r = new Result();
@@ -220,6 +239,11 @@ namespace coral
             var obj = "";
             var staticProtocol = "";
             var interfaceProtocol = "";
+            var ptclName = id.text;
+            if(ptclName.IndexOf('@') >= 0)
+            {
+                ptclName = ptclName.Substring(ptclName.IndexOf('@') + 1);
+            }
             foreach(var item in context.protocolSupportStatement())
             {
                 var r = (Result)Visit(item);
@@ -232,7 +256,7 @@ namespace coral
                     staticProtocol += r.text;
                 }
             }
-            obj += "public interface @Interface" + id.text.Substring(1) + Wrap + context.BlockLeft().GetText() + Wrap;
+            obj += "public interface Interface" + ptclName + Wrap + context.BlockLeft().GetText() + Wrap;
             obj += interfaceProtocol;
             obj += context.BlockRight().GetText() + Wrap;
 
@@ -273,7 +297,7 @@ namespace coral
             else
             {
                 r.permission = "private";
-                r.text += "public static " + Visit(context.parameterClauseOut()) + id.text
+                r.text += "public static " + Visit(context.parameterClauseOut()) + " " + id.text
                 + Visit(context.parameterClauseIn()) + Wrap + context.BlockLeft().GetText() + Wrap;
                 foreach(var item in context.functionSupportStatement())
                 {

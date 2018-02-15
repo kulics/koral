@@ -164,14 +164,22 @@ namespace coral
 
         public override object VisitId([NotNull] CoralParser.IdContext context)
         {
+            var r = new Result();
             if(context.op.Type == CoralParser.IDPublic)
             {
-                return new Result { text = "@" + context.op.Text, data = "double", permission = "public" };
+                r.permission = "public";
             }
             else
             {
-                return new Result { text = "@" + context.op.Text, data = "double", permission = "private" };
+                r.permission = "private";
             }
+            r.data = "var";
+            if(keywords.IndexOf(context.op.Text) >= 0)
+            {
+                r.text += "@";
+            }
+            r.text += context.op.Text;
+            return r;
         }
 
         public override object VisitArray([NotNull] CoralParser.ArrayContext context)
@@ -311,12 +319,20 @@ namespace coral
             {
                 ptclPre = ptcl.Substring(0, ptcl.LastIndexOf('.') + 1);
                 ptclName = ptcl.Substring(ptcl.LastIndexOf('.') + 1);
+                if(ptclName.IndexOf('@') >= 0)
+                {
+                    ptclName = ptclName.Substring(ptclName.IndexOf('@') + 1);
+                }
             }
             else
             {
                 ptclName = ptcl;
+                if(ptclName.IndexOf('@') >= 0)
+                {
+                    ptclName = ptclName.Substring(ptclName.IndexOf('@') + 1);
+                }
             }
-            var obj = ptclPre + "@Interface" + ptclName.Substring(1);
+            var obj = ptclPre + "Interface" + ptclName;
             return obj;
         }
 
@@ -357,6 +373,17 @@ namespace coral
             }
             return obj;
         }
+
+        List<string> keywords = new List<string> {
+        "abstract", "as", "base", "bool", "break" , "byte", "case" , "catch",
+        "char","checked","class","const","continue","decimal","default","delegate","do","double","else",
+        "enum","event","explicit","extern","false","finally","fixed","float","for","foreach","goto",
+        "if","implicit","in","int","interface","internal","is","lock","long","namespace","new","null",
+        "object","operator","out","override","params","private","protected","public","readonly","ref",
+        "return","sbyte","sealed","short","sizeof","stackalloc","static","string","struct","switch",
+        "this","throw","true","try","typeof","uint","ulong","unchecked","unsafe","ushort","using",
+        "virtual","void","volatile","while"
+        };
     }
 }
 

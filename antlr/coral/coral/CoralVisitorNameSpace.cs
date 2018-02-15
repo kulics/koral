@@ -57,7 +57,7 @@ namespace coral
 
         public override object VisitFunctionMainStatement([NotNull] CoralParser.FunctionMainStatementContext context)
         {
-            var obj = "static class @ProgramMain" + Wrap + context.BlockLeft().GetText() + Wrap;
+            var obj = "static class XyProgramMain" + Wrap + context.BlockLeft().GetText() + Wrap;
 
             obj += "static void Main(string[] args)" + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.functionSupportStatement())
