@@ -77,7 +77,9 @@ parameterClauseOut : '(' parameter? (',' parameter)*  ')'  ;
 // 参数结构
 parameter : id ':' type;
 // 检查
-checkStatement: Check expression Wave id BlockLeft (functionSupportStatement)* BlockRight Terminate;
+checkStatement: Check BlockLeft (functionSupportStatement)* BlockRight checkErrorStatement Terminate;
+// 错误处理
+checkErrorStatement:Wave id BlockLeft (functionSupportStatement)* BlockRight;
 // 报告错误
 reportStatement: CheckSub (expression)? Terminate;
 
