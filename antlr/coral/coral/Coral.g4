@@ -31,46 +31,17 @@ packageStatement
 |packageExtend
 |protocolStatement
 |protocolImplementStatement
-|functionStatement
+|packageFunctionStatement
 ;
 // 包构造方法
 packageInitStatement:PackageSub BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义变量
 packageVariableStatement:(attribute)? expression Define expression Terminate;
+// 函数
+packageFunctionStatement:id Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义引入
 packageExtend: PackageSub nameSpace Terminate;
-// 函数
-functionStatement:id Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
-// 返回
-returnStatement: ArrowRight '(' (expressionList)? ')' Terminate;
-// 入参
-parameterClauseIn : '(' parameter? (',' parameter)*  ')'  ;
-// 出参
-parameterClauseOut : '(' parameter? (',' parameter)*  ')'  ;
-// 参数结构
-parameter : id ':' type;
-// 检查
-checkStatement: Check expression Wave id BlockLeft (functionSupportStatement)* BlockRight Terminate;
-// 报告错误
-reportStatement: CheckSub (expression)? Terminate;
-// 属性
-attribute: '\\' expressionList '\\';
 
-// 函数支持的语句
-functionSupportStatement:
- returnStatement
-| variableStatement
-| printStatement
-| judgeCaseStatement
-| judgeStatement
-| loopStatement
-| loopEachStatement
-| loopInfiniteStatement
-| assignStatement
-| expressionStatement
-| checkStatement
-| reportStatement
-;
 // 协议
 protocolStatement: id Define Protocol BlockLeft (protocolSupportStatement)* BlockRight Terminate;
 // 协议支持的语句
@@ -94,6 +65,38 @@ protocolImplementStatement:ProtocolSub nameSpace BlockLeft (protocolImplementSup
 implementVariableStatement:expression Define expression Terminate;
 // 函数实现
 implementFunctionStatement:id Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+
+// 函数
+functionStatement:id Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+// 返回
+returnStatement: ArrowRight '(' (expressionList)? ')' Terminate;
+// 入参
+parameterClauseIn : '(' parameter? (',' parameter)*  ')'  ;
+// 出参
+parameterClauseOut : '(' parameter? (',' parameter)*  ')'  ;
+// 参数结构
+parameter : id ':' type;
+// 检查
+checkStatement: Check expression Wave id BlockLeft (functionSupportStatement)* BlockRight Terminate;
+// 报告错误
+reportStatement: CheckSub (expression)? Terminate;
+
+// 函数支持的语句
+functionSupportStatement:
+ returnStatement
+| variableStatement
+| printStatement
+| judgeCaseStatement
+| judgeStatement
+| loopStatement
+| loopEachStatement
+| loopInfiniteStatement
+| assignStatement
+| expressionStatement
+| checkStatement
+| reportStatement
+| functionStatement
+;
 
 logicStatement:
  returnStatement
@@ -171,6 +174,8 @@ primaryExpression
 ;
 
 expressionList : expression (',' expression)* ; // 表达式列
+
+attribute: '\\' expressionList '\\'; // 属性
 
 tuple : '(' (id ':' expression (',' id ':' expression)* )? ')'; // 元组
 

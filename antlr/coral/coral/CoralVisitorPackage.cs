@@ -136,6 +136,19 @@ namespace coral
             return pkg;
         }
 
+        public override object VisitPackageFunctionStatement([NotNull] CoralParser.PackageFunctionStatementContext context)
+        {
+            var id = (Result)Visit(context.id());
+            var obj = id.permission + " " + Visit(context.parameterClauseOut()) + " " + id.text
+                + Visit(context.parameterClauseIn()) + Wrap + context.BlockLeft().GetText() + Wrap;
+            foreach(var item in context.functionSupportStatement())
+            {
+                obj += Visit(item);
+            }
+            obj += context.BlockRight().GetText() + Wrap;
+            return obj;
+        }
+
         public override object VisitPackageInitStatement([NotNull] CoralParser.PackageInitStatementContext context)
         {
             var obj = context.BlockLeft().GetText() + Wrap;
