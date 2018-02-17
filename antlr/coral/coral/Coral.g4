@@ -145,7 +145,7 @@ iteratorStatement:Number '..' Number '..' Number | Number '..' Number;
 nameSpaceStatement:nameSpace Terminate;
 
 // 定义变量
-variableStatement:expression Define expression Terminate;
+variableStatement: expression Define expression Terminate;
 // 赋值
 assignStatement: expression '=' expression Terminate;
 
@@ -189,7 +189,7 @@ dictionary : '[' (dictionaryElement (',' dictionaryElement)*)? ']'; // 字典
 
 dictionaryElement: expression ':' expression; // 字典元素
 
-readElement : ('['expression ']')+ ;
+readElement : ('[' expression ']')+ ;
 
 nameSpace: id ('.' id)* ;
 
