@@ -167,6 +167,7 @@ primaryExpression
 | callPkg // 新建包
 | array // 数组
 | dictionary // 字典
+| lambda // 匿名函数
 | variableList // 变量列
 | expression readElement // 访问元素
 | expression call expression // 链式调用
@@ -201,6 +202,11 @@ templateDefine: '<' id (',' id)* '>';
 
 templateCall: '<' type (',' type)* '>';
 
+lambda : Function lambdaIn Wave lambdaOut;
+
+lambdaIn : '(' (id (',' id)* )? ')'  ;
+lambdaOut : '(' (functionSupportStatement)* ')'  ;
+
 // 基础数据
 dataStatement:
 t=Number
@@ -216,12 +222,17 @@ typeProtocol
 | typeDictinary
 | typeBasic
 | typePackage
+| typeFunction
 ;
 
 typeProtocol : Protocol nameSpace;
 typeArray : '[' type ']' ;
 typeDictinary :  '[' type ':' type ']';
 typePackage : nameSpace (templateCall)? ;
+typeFunction : Function typeFunctionParameterClause Wave typeFunctionParameterClause;
+
+// 函数类型参数
+typeFunctionParameterClause : '(' (id ':' type (',' id ':' type)* )? ')'  ;
 
 // 基础类型名
 typeBasic:
@@ -241,8 +252,6 @@ call : op='.';
 wave : op='~';
 
 id: op=(IDPublic|IDPrivate);
-
-
 
 Terminate : ';';
 

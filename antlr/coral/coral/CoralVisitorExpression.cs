@@ -354,66 +354,40 @@ namespace coral
             return r;
         }
 
-        public override object VisitTypeProtocol([NotNull] CoralParser.TypeProtocolContext context)
+        public override object VisitLambda([NotNull] CoralParser.LambdaContext context)
         {
-            var ptcl = (string)Visit(context.nameSpace());
-            var ptclPre = "";
-            var ptclName = "";
-            if(ptcl.LastIndexOf('.') > 0)
+            var r = new Result();
+            r.data = "var";
+            r.text += "(" + Visit(context.lambdaIn()) + ")";
+            r.text += "=>";
+            r.text += "{" + Visit(context.lambdaOut()) + "}";
+            return r;
+        }
+
+        public override object VisitLambdaIn([NotNull] CoralParser.LambdaInContext context)
+        {
+            var obj = "";
+            for(int i = 0; i < context.id().Length; i++)
             {
-                ptclPre = ptcl.Substring(0, ptcl.LastIndexOf('.') + 1);
-                ptclName = ptcl.Substring(ptcl.LastIndexOf('.') + 1);
-                if(ptclName.IndexOf('@') >= 0)
+                var r = (Result)Visit(context.id(i));
+                if(i == 0)
                 {
-                    ptclName = ptclName.Substring(ptclName.IndexOf('@') + 1);
+                    obj += r.text;
+                }
+                else
+                {
+                    obj += ", " + r.text;
                 }
             }
-            else
+            return obj;
+        }
+
+        public override object VisitLambdaOut([NotNull] CoralParser.LambdaOutContext context)
+        {
+            var obj = "";
+            foreach(var item in context.functionSupportStatement())
             {
-                ptclName = ptcl;
-                if(ptclName.IndexOf('@') >= 0)
-                {
-                    ptclName = ptclName.Substring(ptclName.IndexOf('@') + 1);
-                }
-            }
-            var obj = ptclPre + "Interface" + ptclName;
-            return obj;
-        }
-
-        public override object VisitTypeArray([NotNull] CoralParser.TypeArrayContext context)
-        {
-            var obj = "";
-            obj += " List<" + Visit(context.type()) + "> ";
-            return obj;
-        }
-
-        public override object VisitTypeDictinary([NotNull] CoralParser.TypeDictinaryContext context)
-        {
-            var obj = "";
-            obj += " Dictionary<" + Visit(context.type(0)) + "," + Visit(context.type(1)) + "> ";
-            return obj;
-        }
-
-        public override object VisitTypeBasic([NotNull] CoralParser.TypeBasicContext context)
-        {
-            var obj = "";
-            switch(context.t.Type)
-            {
-                case CoralParser.TypeNumber:
-                    obj = "double";
-                    break;
-                case CoralParser.TypeText:
-                    obj = "string";
-                    break;
-                case CoralParser.TypeBool:
-                    obj = "bool";
-                    break;
-                case CoralParser.TypeAny:
-                    obj = "object";
-                    break;
-                default:
-                    obj = "object";
-                    break;
+                obj += Visit(item);
             }
             return obj;
         }
