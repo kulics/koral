@@ -12,8 +12,13 @@ namespace coral
         public override object VisitFunctionStatement([NotNull] CoralParser.FunctionStatementContext context)
         {
             var id = (Result)Visit(context.id());
-            var obj = Visit(context.parameterClauseOut()) + " " + id.text
-                + Visit(context.parameterClauseIn()) + Wrap + context.BlockLeft().GetText() + Wrap;
+            var obj = Visit(context.parameterClauseOut()) + " " + id.text;
+            // 泛型
+            if(context.templateDefine() != null)
+            {
+                obj += Visit(context.templateDefine());
+            }
+            obj += Visit(context.parameterClauseIn()) + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.functionSupportStatement())
             {
                 obj += Visit(item);

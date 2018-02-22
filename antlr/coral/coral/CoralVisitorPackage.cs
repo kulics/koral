@@ -57,6 +57,10 @@ namespace coral
                         }
                     }
                     implements.Add(ptclPre + "Interface" + ptclName);
+                    if(originPtclName.IndexOf("<") >= 0)
+                    {
+                        originPtclName = originPtclName.Substring(0, originPtclName.IndexOf("<"));
+                    }
                     obj += "public " + ptclPre + "Interface" + ptclName + " " + originPtclName +
                         " { get { return this as " + ptclPre + "Interface"
                         + ptclName + ";}}" + Wrap;
@@ -82,6 +86,11 @@ namespace coral
                 header += Visit(context.attribute());
             }
             header += id.permission + " class " + id.text;
+            // 泛型
+            if(context.templateDefine() != null)
+            {
+                header += Visit(context.templateDefine());
+            }
             if(implements.Count > 0 || extend.Length > 0)
             {
                 header += ":";
@@ -139,8 +148,13 @@ namespace coral
         public override object VisitPackageFunctionStatement([NotNull] CoralParser.PackageFunctionStatementContext context)
         {
             var id = (Result)Visit(context.id());
-            var obj = id.permission + " " + Visit(context.parameterClauseOut()) + " " + id.text
-                + Visit(context.parameterClauseIn()) + Wrap + context.BlockLeft().GetText() + Wrap;
+            var obj = id.permission + " " + Visit(context.parameterClauseOut()) + " " + id.text;
+            // 泛型
+            if(context.templateDefine() != null)
+            {
+                obj += Visit(context.templateDefine());
+            }
+            obj += Visit(context.parameterClauseIn()) + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.functionSupportStatement())
             {
                 obj += Visit(item);
@@ -183,7 +197,12 @@ namespace coral
                     ptclName = ptclName.Substring(ptclName.IndexOf('@') + 1);
                 }
             }
-
+            // 泛型
+            if(context.templateCall() != null)
+            {
+                ptcl += Visit(context.templateCall());
+                ptclName += Visit(context.templateCall());
+            }
             var obj = "";
             foreach(var item in context.protocolImplementSupportStatement())
             {
@@ -235,6 +254,11 @@ namespace coral
             var fn = new Function();
             var id = (Result)Visit(context.id());
             fn.ID = id.text;
+            // 泛型
+            if(context.templateDefine() != null)
+            {
+                fn.ID += Visit(context.templateDefine());
+            }
             fn.@in = (string)Visit(context.parameterClauseIn());
             fn.@out = (string)Visit(context.parameterClauseOut());
             fn.body = context.BlockLeft().GetText() + Wrap;
@@ -269,11 +293,23 @@ namespace coral
                     staticProtocol += r.text;
                 }
             }
-            obj += "public interface Interface" + ptclName + Wrap + context.BlockLeft().GetText() + Wrap;
+            obj += "public interface Interface" + ptclName;
+            // 泛型
+            if(context.templateDefine() != null)
+            {
+                obj += Visit(context.templateDefine());
+            }
+            obj += Wrap + context.BlockLeft().GetText() + Wrap;
             obj += interfaceProtocol;
             obj += context.BlockRight().GetText() + Wrap;
 
-            obj += "public static class " + id.text + Wrap + context.BlockLeft().GetText() + Wrap;
+            obj += "public static class " + id.text;
+            // 泛型
+            if(context.templateDefine() != null)
+            {
+                obj += Visit(context.templateDefine());
+            }
+            obj += Wrap + context.BlockLeft().GetText() + Wrap;
             obj += staticProtocol;
             obj += context.BlockRight().GetText() + Wrap;
             return obj;
@@ -304,14 +340,24 @@ namespace coral
             if(id.permission == "public")
             {
                 r.permission = "public";
-                r.text += Visit(context.parameterClauseOut()) + " " + id.text
-                + Visit(context.parameterClauseIn()) + context.Terminate().GetText() + Wrap;
+                r.text += Visit(context.parameterClauseOut()) + " " + id.text;
+                // 泛型
+                if(context.templateDefine() != null)
+                {
+                    r.text += Visit(context.templateDefine());
+                }
+                r.text += Visit(context.parameterClauseIn()) + context.Terminate().GetText() + Wrap;
             }
             else
             {
                 r.permission = "private";
-                r.text += "public static " + Visit(context.parameterClauseOut()) + " " + id.text
-                + Visit(context.parameterClauseIn()) + Wrap + context.BlockLeft().GetText() + Wrap;
+                r.text += "public static " + Visit(context.parameterClauseOut()) + " " + id.text;
+                // 泛型
+                if(context.templateDefine() != null)
+                {
+                    r.text += Visit(context.templateDefine());
+                }
+                r.text += Visit(context.parameterClauseIn()) + Wrap + context.BlockLeft().GetText() + Wrap;
                 foreach(var item in context.functionSupportStatement())
                 {
                     r.text += Visit(item);

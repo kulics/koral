@@ -22,7 +22,7 @@ importStatement:Import BlockLeft (nameSpaceStatement)* BlockRight Terminate;
 // 主函数
 functionMainStatement:Function BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义包
-packageStatement:(attribute)? id Define Package (Wave parameterClauseIn)? BlockLeft (packageSupportStatement)* BlockRight Terminate;
+packageStatement:(attribute)? id (templateDefine)? Define Package (Wave parameterClauseIn)? BlockLeft (packageSupportStatement)* BlockRight Terminate;
 // 包支持的语句
 packageSupportStatement:
 packageStatement
@@ -38,12 +38,12 @@ packageInitStatement:PackageSub BlockLeft (functionSupportStatement)* BlockRight
 // 定义变量
 packageVariableStatement:(attribute)? expression Define expression Terminate;
 // 函数
-packageFunctionStatement:id Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+packageFunctionStatement:id (templateDefine)? Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义引入
 packageExtend: PackageSub nameSpace Terminate;
 
 // 协议
-protocolStatement: id Define Protocol BlockLeft (protocolSupportStatement)* BlockRight Terminate;
+protocolStatement: id (templateDefine)? Define Protocol BlockLeft (protocolSupportStatement)* BlockRight Terminate;
 // 协议支持的语句
 protocolSupportStatement:
 protocolStatement
@@ -53,21 +53,21 @@ protocolStatement
 // 定义变量
 protocolVariableStatement:expression Define expression Terminate;
 // 函数
-protocolFunctionStatement:id Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+protocolFunctionStatement:id (templateDefine)? Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 协议实现支持的语句
 protocolImplementSupportStatement:
 implementVariableStatement
 |implementFunctionStatement
 ;
 // 实现协议
-protocolImplementStatement:ProtocolSub nameSpace BlockLeft (protocolImplementSupportStatement)* BlockRight Terminate;
+protocolImplementStatement:ProtocolSub nameSpace (templateCall)? BlockLeft (protocolImplementSupportStatement)* BlockRight Terminate;
 // 变量实现
 implementVariableStatement:expression Define expression Terminate;
 // 函数实现
-implementFunctionStatement:id Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+implementFunctionStatement:id (templateDefine)? Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 
 // 函数
-functionStatement:id Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+functionStatement:id (templateDefine)? Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 返回
 returnStatement: ArrowRight '(' (expressionList)? ')' Terminate;
 // 入参
@@ -163,8 +163,8 @@ id
 // 表达式
 expression:
 primaryExpression
-| id tuple // 函数调用
-| type wave tuple // 新建包
+| callFunc // 函数调用
+| callPkg // 新建包
 | array // 数组
 | dictionary // 字典
 | variableList // 变量列
@@ -183,6 +183,10 @@ tuple : '(' (id ':' expression (',' id ':' expression)* )? ')'; // 元组
 
 variableList : '(' expressionList ')' ; // 变量列
 
+callFunc: id (templateCall)? tuple; // 函数调用
+
+callPkg: type wave tuple; // 新建包
+
 array : '[' (expression (',' expression)*)? ']'; // 数组
 
 dictionary : '[' (dictionaryElement (',' dictionaryElement)*)? ']'; // 字典
@@ -192,6 +196,10 @@ dictionaryElement: expression ':' expression; // 字典元素
 readElement : ('[' expression ']')+ ;
 
 nameSpace: id ('.' id)* ;
+
+templateDefine: '<' id (',' id)* '>';
+
+templateCall: '<' type (',' type)* '>';
 
 // 基础数据
 dataStatement:
@@ -207,12 +215,13 @@ typeProtocol
 | typeArray
 | typeDictinary
 | typeBasic
-| nameSpace
+| typePackage
 ;
 
 typeProtocol : Protocol nameSpace;
 typeArray : '[' type ']' ;
 typeDictinary :  '[' type ':' type ']';
+typePackage : nameSpace (templateCall)? ;
 
 // 基础类型名
 typeBasic:
@@ -232,6 +241,8 @@ call : op='.';
 wave : op='~';
 
 id: op=(IDPublic|IDPrivate);
+
+
 
 Terminate : ';';
 

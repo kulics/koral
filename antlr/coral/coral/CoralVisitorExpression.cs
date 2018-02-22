@@ -37,13 +37,7 @@ namespace coral
             var r = new Result();
             if(count == 2)
             {
-                if(context.GetChild(0) is CoralParser.IdContext)
-                {
-                    r.data = "var";
-                    var id = (Result)Visit(context.id());
-                    r.text = id.text + Visit(context.tuple());
-                }
-                else if(context.GetChild(1) is CoralParser.ReadElementContext)
+                if(context.GetChild(1) is CoralParser.ReadElementContext)
                 {
                     var ex = (Result)Visit(context.GetChild(0));
                     var read = (string)Visit(context.GetChild(1));
@@ -71,12 +65,6 @@ namespace coral
                 {
                     // todo 如果左右不是number类型值，报错
                     r.data = "double";
-                }
-                else if(context.GetChild(1).GetType() == typeof(CoralParser.WaveContext))
-                {
-                    r.data = Visit(context.GetChild(0));
-                    r.text = "new " + Visit(context.GetChild(0)) + Visit(context.GetChild(2));
-                    return r;
                 }
                 var e1 = (Result)Visit(context.GetChild(0));
                 var op = Visit(context.GetChild(1));
@@ -165,6 +153,7 @@ namespace coral
         public override object VisitId([NotNull] CoralParser.IdContext context)
         {
             var r = new Result();
+            r.data = "var";
             if(context.op.Type == CoralParser.IDPublic)
             {
                 r.permission = "public";
@@ -173,12 +162,67 @@ namespace coral
             {
                 r.permission = "private";
             }
-            r.data = "var";
             if(keywords.IndexOf(context.op.Text) >= 0)
             {
                 r.text += "@";
             }
             r.text += context.op.Text;
+            return r;
+        }
+
+        public override object VisitTemplateDefine([NotNull] CoralParser.TemplateDefineContext context)
+        {
+            var obj = "";
+            obj += "<";
+            for(int i = 0; i < context.id().Length; i++)
+            {
+                if(i > 0)
+                {
+                    obj += ",";
+                }
+                var r = (Result)Visit(context.id(i));
+                obj += r.text;
+            }
+            obj += ">";
+            return obj;
+        }
+
+        public override object VisitTemplateCall([NotNull] CoralParser.TemplateCallContext context)
+        {
+            var obj = "";
+            obj += "<";
+            for(int i = 0; i < context.type().Length; i++)
+            {
+                if(i > 0)
+                {
+                    obj += ",";
+                }
+                var r = Visit(context.type(i));
+                obj += r;
+            }
+            obj += ">";
+            return obj;
+        }
+
+        public override object VisitCallFunc([NotNull] CoralParser.CallFuncContext context)
+        {
+            var r = new Result();
+            r.data = "var";
+            var id = (Result)Visit(context.id());
+            r.text += id.text;
+            if(context.templateCall() != null)
+            {
+                r.text += Visit(context.templateCall());
+            }
+            r.text += Visit(context.tuple());
+            return r;
+        }
+
+        public override object VisitCallPkg([NotNull] CoralParser.CallPkgContext context)
+        {
+            var r = new Result();
+            r.data = Visit(context.type());
+            r.text = "new " + Visit(context.type()) + Visit(context.tuple());
             return r;
         }
 
