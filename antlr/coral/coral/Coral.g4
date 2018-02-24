@@ -169,6 +169,7 @@ primaryExpression
 | dictionary // 字典
 | lambda // 匿名函数
 | variableList // 变量列
+| typeConvert // 类型转换
 | expression readElement // 访问元素
 | expression call expression // 链式调用
 | expression judge expression // 判断型表达式
@@ -187,6 +188,8 @@ variableList : '(' expressionList ')' ; // 变量列
 callFunc: id (templateCall)? tuple; // 函数调用
 
 callPkg: type wave tuple; // 新建包
+
+typeConvert: type ':' expression; // 类型转换
 
 array : '[' (expression (',' expression)*)? ']'; // 数组
 

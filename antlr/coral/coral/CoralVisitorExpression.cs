@@ -285,6 +285,16 @@ namespace coral
             return result;
         }
 
+        public override object VisitTypeConvert([NotNull] CoralParser.TypeConvertContext context)
+        {
+            var r = new Result();
+            var data = Visit(context.type());
+            var expr = (Result)Visit(context.expression());
+            r.data = data;
+            r.text = "(" + data + ")" + expr.text;
+            return r;
+        }
+
         public override object VisitVariableList([NotNull] CoralParser.VariableListContext context)
         {
             var newR = new Result();
