@@ -66,6 +66,22 @@ namespace coral
                     // todo 如果左右不是number类型值，报错
                     r.data = "double";
                 }
+                else if(context.GetChild(1).GetType() == typeof(CoralParser.AsContext))
+                {
+                    var expr = (Result)Visit(context.GetChild(0));
+                    var type = (string)Visit(context.GetChild(2));
+                    r.data = type;
+                    r.text = expr.text + " as " + type;
+                    return r;
+                }
+                else if(context.GetChild(1).GetType() == typeof(CoralParser.IsContext))
+                {
+                    var expr = (Result)Visit(context.GetChild(0));
+                    var type = (string)Visit(context.GetChild(2));
+                    r.data = "bool";
+                    r.text = expr.text + " is " + type;
+                    return r;
+                }
                 var e1 = (Result)Visit(context.GetChild(0));
                 var op = Visit(context.GetChild(1));
                 var e2 = (Result)Visit(context.GetChild(2));
@@ -283,16 +299,6 @@ namespace coral
             result.data = "Dictionary<" + type + ">";
             result.text = "new Dictionary<" + type + ">(){" + result.text + "}";
             return result;
-        }
-
-        public override object VisitTypeConvert([NotNull] CoralParser.TypeConvertContext context)
-        {
-            var r = new Result();
-            var data = Visit(context.type());
-            var expr = (Result)Visit(context.expression());
-            r.data = data;
-            r.text = "(" + data + ")" + expr.text;
-            return r;
         }
 
         public override object VisitVariableList([NotNull] CoralParser.VariableListContext context)
