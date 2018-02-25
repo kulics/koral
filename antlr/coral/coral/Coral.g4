@@ -165,6 +165,7 @@ expression:
 primaryExpression
 | callFunc // 函数调用
 | callPkg // 新建包
+| callAwait // 异步调用
 | array // 数组
 | dictionary // 字典
 | lambda // 匿名函数
@@ -190,6 +191,8 @@ variableList : '(' expressionList ')' ; // 变量列
 callFunc: id (templateCall)? tuple; // 函数调用
 
 callPkg: type wave tuple; // 新建包
+
+callAwait: FunctionSub expression; // 异步调用
 
 array : '[' (expression (',' expression)*)? ']'; // 数组
 

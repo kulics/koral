@@ -242,6 +242,15 @@ namespace coral
             return r;
         }
 
+        public override object VisitCallAwait([NotNull] CoralParser.CallAwaitContext context)
+        {
+            var r = new Result();
+            var expr = (Result)Visit(context.expression());
+            r.data = "var";
+            r.text = "await " + expr.text;
+            return r;
+        }
+
         public override object VisitArray([NotNull] CoralParser.ArrayContext context)
         {
             var type = "object";
