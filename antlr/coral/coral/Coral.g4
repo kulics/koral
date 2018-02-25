@@ -210,7 +210,7 @@ lambda : Function lambdaIn Wave lambdaOut;
 lambdaIn : '(' (id (',' id)* )? ')'  ;
 lambdaOut : '(' (functionSupportStatement)* ')'  ;
 
-empty : 'empty(' type ')'; // 类型空初始化
+empty : '~<' type '>'; // 类型空初始化
 
 // 基础数据
 dataStatement:
