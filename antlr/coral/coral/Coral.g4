@@ -169,6 +169,7 @@ primaryExpression
 | dictionary // 字典
 | lambda // 匿名函数
 | variableList // 变量列
+| empty // 类型空初始化
 | expression as type // 类型转换
 | expression is type // 类型判断
 | expression readElement // 访问元素
@@ -208,6 +209,8 @@ lambda : Function lambdaIn Wave lambdaOut;
 
 lambdaIn : '(' (id (',' id)* )? ')'  ;
 lambdaOut : '(' (functionSupportStatement)* ')'  ;
+
+empty : 'empty(' type ')'; // 类型空初始化
 
 // 基础数据
 dataStatement:

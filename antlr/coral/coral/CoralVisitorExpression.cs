@@ -408,6 +408,15 @@ namespace coral
             return obj;
         }
 
+        public override object VisitEmpty([NotNull] CoralParser.EmptyContext context)
+        {
+            var r = new Result();
+            var type = Visit(context.type());
+            r.data = type;
+            r.text = "default(" + type + ")";
+            return r;
+        }
+
         List<string> keywords = new List<string> {
         "abstract", "as", "base", "bool", "break" , "byte", "case" , "catch",
         "char","checked","class","const","continue","decimal","default","delegate","do","double","else",
