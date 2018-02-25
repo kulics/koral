@@ -54,7 +54,7 @@ namespace coral
                     }
                 }
             }
-            Console.WriteLine("Compiled is completed");
+            Console.WriteLine("Completed");
             Console.ReadKey();
         }
     }
