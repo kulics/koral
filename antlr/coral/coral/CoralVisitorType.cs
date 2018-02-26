@@ -35,6 +35,25 @@ namespace coral
             return obj;
         }
 
+        public override object VisitTypeTuple([NotNull] CoralParser.TypeTupleContext context)
+        {
+            var obj = "";
+            obj += "(";
+            for(int i = 0; i < context.type().Length; i++)
+            {
+                if(i == 0)
+                {
+                    obj += Visit(context.type(i));
+                }
+                else
+                {
+                    obj += "," + Visit(context.type(i));
+                }
+            }
+            obj += ")";
+            return obj;
+        }
+
         public override object VisitTypeArray([NotNull] CoralParser.TypeArrayContext context)
         {
             var obj = "";

@@ -87,7 +87,6 @@ reportStatement: CheckSub (expression)? Terminate;
 functionSupportStatement:
  returnStatement
 | variableStatement
-| printStatement
 | judgeCaseStatement
 | judgeStatement
 | loopStatement
@@ -103,7 +102,6 @@ functionSupportStatement:
 logicStatement:
  returnStatement
 | variableStatement
-| printStatement
 | judgeCaseStatement
 | judgeStatement
 | loopStatement
@@ -115,8 +113,6 @@ logicStatement:
 | checkStatement
 | reportStatement
 ;
-// 打印
-printStatement:'print' '(' expression ')' Terminate;
 // 条件判断
 judgeCaseStatement: Judge expression BlockLeft (caseStatement)+ BlockRight Terminate;
 // 缺省条件声明
@@ -226,6 +222,7 @@ t=Number
 // 类型
 type:
 typeProtocol
+| typeTuple
 | typeArray
 | typeDictinary
 | typeBasic
@@ -234,6 +231,7 @@ typeProtocol
 ;
 
 typeProtocol : Protocol nameSpace;
+typeTuple : '(' type (',' type)+ ')';
 typeArray : '[' type ']' ;
 typeDictinary :  '[' type ':' type ']';
 typePackage : nameSpace (templateCall)? ;
