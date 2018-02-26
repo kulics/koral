@@ -363,6 +363,11 @@ namespace coral
         {
             var r = new Result();
             r.data = "var";
+            // 异步
+            if(context.t.Type == CoralParser.FunctionAsync)
+            {
+                r.text += "async ";
+            }
             r.text += "(" + Visit(context.lambdaIn()) + ")";
             r.text += "=>";
             r.text += "{" + Visit(context.lambdaOut()) + "}";

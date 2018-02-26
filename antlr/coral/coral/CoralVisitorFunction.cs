@@ -12,7 +12,21 @@ namespace coral
         public override object VisitFunctionStatement([NotNull] CoralParser.FunctionStatementContext context)
         {
             var id = (Result)Visit(context.id());
-            var obj = Visit(context.parameterClauseOut()) + " " + id.text;
+            var obj = "";
+            // 异步
+            if(context.t.Type == CoralParser.FunctionAsync)
+            {
+                var pout = (string)Visit(context.parameterClauseOut());
+                if(pout != "void")
+                {
+                    pout = "Task<" + pout + ">";
+                }
+                obj += " async " + pout + " " + id.text;
+            }
+            else
+            {
+                obj += Visit(context.parameterClauseOut()) + " " + id.text;
+            }
             // 泛型
             if(context.templateDefine() != null)
             {

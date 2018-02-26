@@ -148,7 +148,22 @@ namespace coral
         public override object VisitPackageFunctionStatement([NotNull] CoralParser.PackageFunctionStatementContext context)
         {
             var id = (Result)Visit(context.id());
-            var obj = id.permission + " " + Visit(context.parameterClauseOut()) + " " + id.text;
+            var obj = "";
+            // 异步
+            if(context.t.Type == CoralParser.FunctionAsync)
+            {
+                var pout = (string)Visit(context.parameterClauseOut());
+                if(pout != "void")
+                {
+                    pout = "Task<" + pout + ">";
+                }
+                obj += id.permission + " async " + pout + " " + id.text;
+            }
+            else
+            {
+                obj += id.permission + " " + Visit(context.parameterClauseOut()) + " " + id.text;
+            }
+
             // 泛型
             if(context.templateDefine() != null)
             {
@@ -260,7 +275,20 @@ namespace coral
                 fn.ID += Visit(context.templateDefine());
             }
             fn.@in = (string)Visit(context.parameterClauseIn());
-            fn.@out = (string)Visit(context.parameterClauseOut());
+            // 异步
+            if(context.t.Type == CoralParser.FunctionAsync)
+            {
+                var pout = (string)Visit(context.parameterClauseOut());
+                if(pout != "void")
+                {
+                    pout = "Task<" + pout + ">";
+                }
+                fn.@out = " async " + pout;
+            }
+            else
+            {
+                fn.@out = (string)Visit(context.parameterClauseOut());
+            }
             fn.body = context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.functionSupportStatement())
             {
@@ -340,7 +368,20 @@ namespace coral
             if(id.permission == "public")
             {
                 r.permission = "public";
-                r.text += Visit(context.parameterClauseOut()) + " " + id.text;
+                // 异步
+                if(context.t.Type == CoralParser.FunctionAsync)
+                {
+                    var pout = (string)Visit(context.parameterClauseOut());
+                    if(pout != "void")
+                    {
+                        pout = "Task<" + pout + ">";
+                    }
+                    r.text += pout + " " + id.text;
+                }
+                else
+                {
+                    r.text += Visit(context.parameterClauseOut()) + " " + id.text;
+                }
                 // 泛型
                 if(context.templateDefine() != null)
                 {
@@ -351,7 +392,20 @@ namespace coral
             else
             {
                 r.permission = "private";
-                r.text += "public static " + Visit(context.parameterClauseOut()) + " " + id.text;
+                // 异步
+                if(context.t.Type == CoralParser.FunctionAsync)
+                {
+                    var pout = (string)Visit(context.parameterClauseOut());
+                    if(pout != "void")
+                    {
+                        pout = "Task<" + pout + ">";
+                    }
+                    r.text += "public static async " + pout + " " + id.text;
+                }
+                else
+                {
+                    r.text += "public static " + Visit(context.parameterClauseOut()) + " " + id.text;
+                }
                 // 泛型
                 if(context.templateDefine() != null)
                 {

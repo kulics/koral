@@ -38,7 +38,7 @@ packageInitStatement:PackageSub BlockLeft (functionSupportStatement)* BlockRight
 // 定义变量
 packageVariableStatement:(attribute)? expression Define expression Terminate;
 // 函数
-packageFunctionStatement:id (templateDefine)? Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+packageFunctionStatement:id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义引入
 packageExtend: PackageSub nameSpace Terminate;
 
@@ -53,7 +53,7 @@ protocolStatement
 // 定义变量
 protocolVariableStatement:expression Define expression Terminate;
 // 函数
-protocolFunctionStatement:id (templateDefine)? Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+protocolFunctionStatement:id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 协议实现支持的语句
 protocolImplementSupportStatement:
 implementVariableStatement
@@ -64,10 +64,10 @@ protocolImplementStatement:ProtocolSub nameSpace (templateCall)? BlockLeft (prot
 // 变量实现
 implementVariableStatement:expression Define expression Terminate;
 // 函数实现
-implementFunctionStatement:id (templateDefine)? Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+implementFunctionStatement:id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 
 // 函数
-functionStatement:id (templateDefine)? Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+functionStatement:id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 返回
 returnStatement: ArrowRight '(' (expressionList)? ')' Terminate;
 // 入参
@@ -188,7 +188,7 @@ callFunc: id (templateCall)? tuple; // 函数调用
 
 callPkg: type wave tuple; // 新建包
 
-callAwait: FunctionSub expression; // 异步调用
+callAwait: FunctionAsync expression; // 异步调用
 
 array : '[' (expression (',' expression)*)? ']'; // 数组
 
@@ -204,7 +204,7 @@ templateDefine: '<' id (',' id)* '>';
 
 templateCall: '<' type (',' type)* '>';
 
-lambda : Function lambdaIn Wave lambdaOut;
+lambda : t=(Function|FunctionAsync) lambdaIn Wave lambdaOut;
 
 lambdaIn : '(' (id (',' id)* )? ')'  ;
 lambdaOut : '(' (functionSupportStatement)* ')'  ;
@@ -288,7 +288,7 @@ Loop : '@';
 CheckSub : '~!';
 Check : '!';
 
-FunctionSub : '~$';
+FunctionAsync : '.$';
 Function : '$';
 
 PackageSub : '~#';

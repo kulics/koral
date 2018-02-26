@@ -51,7 +51,7 @@ namespace coral
 
             if(keywords.IndexOf(r.text) >= 0)
             {
-                r.text += "@";
+                r.text = "@" + r.text;
             }
             return r;
         }
