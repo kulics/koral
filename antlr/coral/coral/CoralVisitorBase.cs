@@ -22,13 +22,6 @@ namespace coral
             return result;
         }
 
-        public override object VisitPrintStatement([NotNull] CoralParser.PrintStatementContext context)
-        {
-            var r = (Result)Visit(context.expression());
-            var obj = "Console.WriteLine(" + r.text + ")" + context.Terminate().GetText() + Wrap;
-            return obj;
-        }
-
         public class Result
         {
             public object data { get; set; }
