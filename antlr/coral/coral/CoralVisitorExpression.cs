@@ -166,26 +166,6 @@ namespace coral
             return r;
         }
 
-        public override object VisitId([NotNull] CoralParser.IdContext context)
-        {
-            var r = new Result();
-            r.data = "var";
-            if(context.op.Type == CoralParser.IDPublic)
-            {
-                r.permission = "public";
-            }
-            else
-            {
-                r.permission = "private";
-            }
-            if(keywords.IndexOf(context.op.Text) >= 0)
-            {
-                r.text += "@";
-            }
-            r.text += context.op.Text;
-            return r;
-        }
-
         public override object VisitTemplateDefine([NotNull] CoralParser.TemplateDefineContext context)
         {
             var obj = "";

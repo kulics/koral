@@ -259,7 +259,8 @@ mul : op=('*' | '/' | '%');
 call : op='.';
 wave : op='~';
 
-id: op=(IDPublic|IDPrivate);
+id: op=(IDPublic|IDPrivate)
+|typeBasic;
 
 Terminate : ';';
 

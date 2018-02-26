@@ -29,6 +29,33 @@ namespace coral
             public string permission { get; set; }
         }
 
+        public override object VisitId([NotNull] CoralParser.IdContext context)
+        {
+            var r = new Result();
+            r.data = "var";
+            if(context.typeBasic() != null)
+            {
+                r.permission = "public";
+                r.text += Visit(context.typeBasic());
+            }
+            else if(context.op.Type == CoralParser.IDPublic)
+            {
+                r.permission = "public";
+                r.text += context.op.Text;
+            }
+            else if(context.op.Type == CoralParser.IDPrivate)
+            {
+                r.permission = "private";
+                r.text += context.op.Text;
+            }
+
+            if(keywords.IndexOf(r.text) >= 0)
+            {
+                r.text += "@";
+            }
+            return r;
+        }
+
         public override object VisitBool([NotNull] CoralParser.BoolContext context)
         {
             var r = new Result();
@@ -44,6 +71,6 @@ namespace coral
             }
             return r;
         }
-        
+
     }
 }
