@@ -411,6 +411,16 @@ namespace xylang
             return r;
         }
 
+        public override object VisitPlusMinus([NotNull] XyParser.PlusMinusContext context)
+        {
+            var r = new Result();
+            var expr = (Result)Visit(context.expression());
+            var op = Visit(context.add());
+            r.data = expr.data;
+            r.text = op + expr.text;
+            return r;
+        }
+
         List<string> keywords = new List<string> {
         "abstract", "as", "base", "bool", "break" , "byte", "case" , "catch",
         "char","checked","class","const","continue","decimal","default","delegate","do","double","else",
