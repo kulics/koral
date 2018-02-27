@@ -5,16 +5,16 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace coral
+namespace xylang
 {
-    partial class CoralVisitorBase
+    partial class XyLangVisitor
     {
-        public override object VisitFunctionStatement([NotNull] CoralParser.FunctionStatementContext context)
+        public override object VisitFunctionStatement([NotNull] XyParser.FunctionStatementContext context)
         {
             var id = (Result)Visit(context.id());
             var obj = "";
             // 异步
-            if(context.t.Type == CoralParser.FunctionAsync)
+            if(context.t.Type == XyParser.FunctionAsync)
             {
                 var pout = (string)Visit(context.parameterClauseOut());
                 if(pout != "void")
@@ -41,13 +41,13 @@ namespace coral
             return obj;
         }
 
-        public override object VisitReturnStatement([NotNull] CoralParser.ReturnStatementContext context)
+        public override object VisitReturnStatement([NotNull] XyParser.ReturnStatementContext context)
         {
             var r = (Result)Visit(context.expressionList());
             return "return (" + r.text + ")" + context.Terminate().GetText() + Wrap;
         }
 
-        public override object VisitTuple([NotNull] CoralParser.TupleContext context)
+        public override object VisitTuple([NotNull] XyParser.TupleContext context)
         {
             var obj = "(";
             for(int i = 0; i < context.expression().Length; i++)
@@ -66,7 +66,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitParameterClauseIn([NotNull] CoralParser.ParameterClauseInContext context)
+        public override object VisitParameterClauseIn([NotNull] XyParser.ParameterClauseInContext context)
         {
             var obj = "( ";
 
@@ -85,7 +85,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitParameterClauseOut([NotNull] CoralParser.ParameterClauseOutContext context)
+        public override object VisitParameterClauseOut([NotNull] XyParser.ParameterClauseOutContext context)
         {
             var obj = "";
             if(context.parameter().Length == 0)
@@ -115,13 +115,13 @@ namespace coral
             return obj;
         }
 
-        public override object VisitParameter([NotNull] CoralParser.ParameterContext context)
+        public override object VisitParameter([NotNull] XyParser.ParameterContext context)
         {
             var id = (Result)Visit(context.id());
             return Visit(context.type()) + " " + id.text;
         }
 
-        public override object VisitCheckStatement([NotNull] CoralParser.CheckStatementContext context)
+        public override object VisitCheckStatement([NotNull] XyParser.CheckStatementContext context)
         {
             var obj = "";
             obj += "try " + context.BlockLeft().GetText() + Wrap;
@@ -134,7 +134,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitCheckErrorStatement([NotNull] CoralParser.CheckErrorStatementContext context)
+        public override object VisitCheckErrorStatement([NotNull] XyParser.CheckErrorStatementContext context)
         {
             var obj = "";
             var ID = (Result)Visit(context.id());
@@ -147,7 +147,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitReportStatement([NotNull] CoralParser.ReportStatementContext context)
+        public override object VisitReportStatement([NotNull] XyParser.ReportStatementContext context)
         {
             var obj = "";
             if(context.expression() != null)

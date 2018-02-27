@@ -5,11 +5,11 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace coral
+namespace xylang
 {
-    partial class CoralVisitorBase
+    partial class XyLangVisitor
     {
-        public override object VisitPackageStatement([NotNull] CoralParser.PackageStatementContext context)
+        public override object VisitPackageStatement([NotNull] XyParser.PackageStatementContext context)
         {
             var id = (Result)Visit(context.id());
             var obj = "";
@@ -19,7 +19,7 @@ namespace coral
             var implements = new List<string>();
             foreach(var item in context.packageSupportStatement())
             {
-                if(item.GetChild(0) is CoralParser.PackageInitStatementContext)
+                if(item.GetChild(0) is XyParser.PackageInitStatementContext)
                 {
                     // 处理构造函数
                     if(!hasInit && !context.parameterClauseIn().IsEmpty)
@@ -29,7 +29,7 @@ namespace coral
                         hasInit = true;
                     }
                 }
-                else if(item.GetChild(0) is CoralParser.ProtocolImplementStatementContext)
+                else if(item.GetChild(0) is XyParser.ProtocolImplementStatementContext)
                 {
                     // 处理协议实现
                     var r = (Result)Visit(item);
@@ -66,7 +66,7 @@ namespace coral
                         + ptclName + ";}}" + Wrap;
                     obj += r.text;
                 }
-                else if(item.GetChild(0) is CoralParser.PackageExtendContext)
+                else if(item.GetChild(0) is XyParser.PackageExtendContext)
                 {
                     if(!hasExtend)
                     {
@@ -118,7 +118,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitPackageVariableStatement([NotNull] CoralParser.PackageVariableStatementContext context)
+        public override object VisitPackageVariableStatement([NotNull] XyParser.PackageVariableStatementContext context)
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
@@ -131,7 +131,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitAttribute([NotNull] CoralParser.AttributeContext context)
+        public override object VisitAttribute([NotNull] XyParser.AttributeContext context)
         {
             var obj = "";
             var r = (Result)Visit(context.expressionList());
@@ -139,18 +139,18 @@ namespace coral
             return obj;
         }
 
-        public override object VisitPackageExtend([NotNull] CoralParser.PackageExtendContext context)
+        public override object VisitPackageExtend([NotNull] XyParser.PackageExtendContext context)
         {
             var pkg = (string)Visit(context.nameSpace()); ;
             return pkg;
         }
 
-        public override object VisitPackageFunctionStatement([NotNull] CoralParser.PackageFunctionStatementContext context)
+        public override object VisitPackageFunctionStatement([NotNull] XyParser.PackageFunctionStatementContext context)
         {
             var id = (Result)Visit(context.id());
             var obj = "";
             // 异步
-            if(context.t.Type == CoralParser.FunctionAsync)
+            if(context.t.Type == XyParser.FunctionAsync)
             {
                 var pout = (string)Visit(context.parameterClauseOut());
                 if(pout != "void")
@@ -178,7 +178,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitPackageInitStatement([NotNull] CoralParser.PackageInitStatementContext context)
+        public override object VisitPackageInitStatement([NotNull] XyParser.PackageInitStatementContext context)
         {
             var obj = context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.functionSupportStatement())
@@ -189,7 +189,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitProtocolImplementStatement([NotNull] CoralParser.ProtocolImplementStatementContext context)
+        public override object VisitProtocolImplementStatement([NotNull] XyParser.ProtocolImplementStatementContext context)
         {
             var ptcl = (string)Visit(context.nameSpace());
             var ptclPre = "";
@@ -221,12 +221,12 @@ namespace coral
             var obj = "";
             foreach(var item in context.protocolImplementSupportStatement())
             {
-                if(item.GetChild(0) is CoralParser.ImplementFunctionStatementContext)
+                if(item.GetChild(0) is XyParser.ImplementFunctionStatementContext)
                 {
                     var fn = (Function)Visit(item);
                     obj += fn.@out + " " + ptclPre + "Interface" + ptclName + "." + fn.ID + " " + fn.@in + Wrap + fn.body;
                 }
-                else if(item.GetChild(0) is CoralParser.ImplementVariableStatementContext)
+                else if(item.GetChild(0) is XyParser.ImplementVariableStatementContext)
                 {
                     var vr = (Variable)Visit(item);
                     obj += vr.type + " " + ptclPre + "Interface" + ptclName + "." + vr.ID + " {get;set;} = " + vr.body;
@@ -245,7 +245,7 @@ namespace coral
             public string body;
         }
 
-        public override object VisitImplementVariableStatement([NotNull] CoralParser.ImplementVariableStatementContext context)
+        public override object VisitImplementVariableStatement([NotNull] XyParser.ImplementVariableStatementContext context)
         {
             var vr = new Variable();
             var r1 = (Result)Visit(context.expression(0));
@@ -264,7 +264,7 @@ namespace coral
             public string body;
         }
 
-        public override object VisitImplementFunctionStatement([NotNull] CoralParser.ImplementFunctionStatementContext context)
+        public override object VisitImplementFunctionStatement([NotNull] XyParser.ImplementFunctionStatementContext context)
         {
             var fn = new Function();
             var id = (Result)Visit(context.id());
@@ -276,7 +276,7 @@ namespace coral
             }
             fn.@in = (string)Visit(context.parameterClauseIn());
             // 异步
-            if(context.t.Type == CoralParser.FunctionAsync)
+            if(context.t.Type == XyParser.FunctionAsync)
             {
                 var pout = (string)Visit(context.parameterClauseOut());
                 if(pout != "void")
@@ -298,7 +298,7 @@ namespace coral
             return fn;
         }
 
-        public override object VisitProtocolStatement([NotNull] CoralParser.ProtocolStatementContext context)
+        public override object VisitProtocolStatement([NotNull] XyParser.ProtocolStatementContext context)
         {
             var id = (Result)Visit(context.id());
             var obj = "";
@@ -343,7 +343,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitProtocolVariableStatement([NotNull] CoralParser.ProtocolVariableStatementContext context)
+        public override object VisitProtocolVariableStatement([NotNull] XyParser.ProtocolVariableStatementContext context)
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
@@ -361,7 +361,7 @@ namespace coral
             return r;
         }
 
-        public override object VisitProtocolFunctionStatement([NotNull] CoralParser.ProtocolFunctionStatementContext context)
+        public override object VisitProtocolFunctionStatement([NotNull] XyParser.ProtocolFunctionStatementContext context)
         {
             var id = (Result)Visit(context.id());
             var r = new Result();
@@ -369,7 +369,7 @@ namespace coral
             {
                 r.permission = "public";
                 // 异步
-                if(context.t.Type == CoralParser.FunctionAsync)
+                if(context.t.Type == XyParser.FunctionAsync)
                 {
                     var pout = (string)Visit(context.parameterClauseOut());
                     if(pout != "void")
@@ -393,7 +393,7 @@ namespace coral
             {
                 r.permission = "private";
                 // 异步
-                if(context.t.Type == CoralParser.FunctionAsync)
+                if(context.t.Type == XyParser.FunctionAsync)
                 {
                     var pout = (string)Visit(context.parameterClauseOut());
                     if(pout != "void")

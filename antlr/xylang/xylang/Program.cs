@@ -6,7 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace coral
+namespace xylang
 {
     static class Program
     {
@@ -30,12 +30,12 @@ namespace coral
                         var input = Encoding.UTF8.GetString(heByte);
 
                         var stream = new AntlrInputStream(input);
-                        var lexer = new CoralLexer(stream);
+                        var lexer = new XyLexer(stream);
                         var tokens = new CommonTokenStream(lexer);
-                        var parser = new CoralParser(tokens) { BuildParseTree = true };
+                        var parser = new XyParser(tokens) { BuildParseTree = true };
                         var tree = parser.program();
 
-                        var visitor = new CoralVisitorBase();
+                        var visitor = new XyLangVisitor();
                         var result = visitor.Visit(tree);
 
                         //Console.WriteLine(tree.ToStringTree(parser));

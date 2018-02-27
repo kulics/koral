@@ -5,11 +5,11 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace coral
+namespace xylang
 {
-    partial class CoralVisitorBase
+    partial class XyLangVisitor
     {
-        public override object VisitExportStatement([NotNull] CoralParser.ExportStatementContext context)
+        public override object VisitExportStatement([NotNull] XyParser.ExportStatementContext context)
         {
             var obj = "namespace " + Visit(context.nameSpace()) + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.exportSupportStatement())
@@ -20,7 +20,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitImportStatement([NotNull] CoralParser.ImportStatementContext context)
+        public override object VisitImportStatement([NotNull] XyParser.ImportStatementContext context)
         {
             var obj = "";
 
@@ -31,13 +31,13 @@ namespace coral
             return obj;
         }
 
-        public override object VisitNameSpaceStatement([NotNull] CoralParser.NameSpaceStatementContext context)
+        public override object VisitNameSpaceStatement([NotNull] XyParser.NameSpaceStatementContext context)
         {
             var obj = Visit(context.nameSpace()) + context.Terminate().GetText();
             return obj;
         }
 
-        public override object VisitNameSpace([NotNull] CoralParser.NameSpaceContext context)
+        public override object VisitNameSpace([NotNull] XyParser.NameSpaceContext context)
         {
             var obj = "";
             for(int i = 0; i < context.id().Length; i++)
@@ -55,7 +55,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitFunctionMainStatement([NotNull] CoralParser.FunctionMainStatementContext context)
+        public override object VisitFunctionMainStatement([NotNull] XyParser.FunctionMainStatementContext context)
         {
             var obj = "static class XyProgramMain" + Wrap + context.BlockLeft().GetText() + Wrap;
 

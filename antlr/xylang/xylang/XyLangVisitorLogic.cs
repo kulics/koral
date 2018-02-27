@@ -5,9 +5,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace coral
+namespace xylang
 {
-    partial class CoralVisitorBase
+    partial class XyLangVisitor
     {
         public class Iterator
         {
@@ -16,7 +16,7 @@ namespace coral
             public double step { get; set; }
         }
 
-        public override object VisitIteratorStatement([NotNull] CoralParser.IteratorStatementContext context)
+        public override object VisitIteratorStatement([NotNull] XyParser.IteratorStatementContext context)
         {
             var it = new Iterator();
             var i = context.Number();
@@ -35,7 +35,7 @@ namespace coral
             return it;
         }
 
-        public override object VisitLoopStatement([NotNull] CoralParser.LoopStatementContext context)
+        public override object VisitLoopStatement([NotNull] XyParser.LoopStatementContext context)
         {
             var obj = "";
             var id = (Result)Visit(context.id());
@@ -60,7 +60,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitLoopInfiniteStatement([NotNull] CoralParser.LoopInfiniteStatementContext context)
+        public override object VisitLoopInfiniteStatement([NotNull] XyParser.LoopInfiniteStatementContext context)
         {
             var obj = "while (true)" + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.logicStatement())
@@ -71,7 +71,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitLoopEachStatement([NotNull] CoralParser.LoopEachStatementContext context)
+        public override object VisitLoopEachStatement([NotNull] XyParser.LoopEachStatementContext context)
         {
             var obj = "";
             var id = (Result)Visit(context.id());
@@ -86,12 +86,12 @@ namespace coral
             return obj;
         }
 
-        public override object VisitLoopJumpStatement([NotNull] CoralParser.LoopJumpStatementContext context)
+        public override object VisitLoopJumpStatement([NotNull] XyParser.LoopJumpStatementContext context)
         {
             return "break" + context.Terminate().GetText() + Wrap;
         }
 
-        public override object VisitJudgeCaseStatement([NotNull] CoralParser.JudgeCaseStatementContext context)
+        public override object VisitJudgeCaseStatement([NotNull] XyParser.JudgeCaseStatementContext context)
         {
             var obj = "";
             var expr = (Result)Visit(context.expression());
@@ -105,7 +105,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitCaseDefaultStatement([NotNull] CoralParser.CaseDefaultStatementContext context)
+        public override object VisitCaseDefaultStatement([NotNull] XyParser.CaseDefaultStatementContext context)
         {
             var obj = "";
             obj += "default:" + Wrap;
@@ -118,7 +118,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitCaseExprStatement([NotNull] CoralParser.CaseExprStatementContext context)
+        public override object VisitCaseExprStatement([NotNull] XyParser.CaseExprStatementContext context)
         {
             var obj = "";
             var expr = (Result)Visit(context.expression());
@@ -132,13 +132,13 @@ namespace coral
             return obj;
         }
 
-        public override object VisitCaseStatement([NotNull] CoralParser.CaseStatementContext context)
+        public override object VisitCaseStatement([NotNull] XyParser.CaseStatementContext context)
         {
             var obj = (string)Visit(context.GetChild(0));
             return obj;
         }
 
-        public override object VisitJudgeStatement([NotNull] CoralParser.JudgeStatementContext context)
+        public override object VisitJudgeStatement([NotNull] XyParser.JudgeStatementContext context)
         {
             var obj = "";
             for(int i = 0; i < context.judgeBaseStatement().Length; i++)
@@ -159,7 +159,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitJudgeBaseStatement([NotNull] CoralParser.JudgeBaseStatementContext context)
+        public override object VisitJudgeBaseStatement([NotNull] XyParser.JudgeBaseStatementContext context)
         {
             var b = (Result)Visit(context.expression());
             var obj = "if (" + b.text + ")" + Wrap + context.BlockLeft().GetText() + Wrap;
@@ -171,7 +171,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitJudgeElseStatement([NotNull] CoralParser.JudgeElseStatementContext context)
+        public override object VisitJudgeElseStatement([NotNull] XyParser.JudgeElseStatementContext context)
         {
             var obj = "else " + Wrap + context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.logicStatement())

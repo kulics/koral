@@ -5,11 +5,11 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace coral
+namespace xylang
 {
-    partial class CoralVisitorBase
+    partial class XyLangVisitor
     {
-        public override object VisitVariableStatement([NotNull] CoralParser.VariableStatementContext context)
+        public override object VisitVariableStatement(XyParser.VariableStatementContext context)
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
@@ -17,7 +17,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitAssignStatement([NotNull] CoralParser.AssignStatementContext context)
+        public override object VisitAssignStatement(XyParser.AssignStatementContext context)
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
@@ -25,19 +25,19 @@ namespace coral
             return obj;
         }
 
-        public override object VisitExpressionStatement([NotNull] CoralParser.ExpressionStatementContext context)
+        public override object VisitExpressionStatement([NotNull] XyParser.ExpressionStatementContext context)
         {
             var r = (Result)Visit(context.expression());
             return r.text + context.Terminate().GetText() + Wrap;
         }
 
-        public override object VisitExpression([NotNull] CoralParser.ExpressionContext context)
+        public override object VisitExpression([NotNull] XyParser.ExpressionContext context)
         {
             var count = context.ChildCount;
             var r = new Result();
             if(count == 2)
             {
-                if(context.GetChild(1) is CoralParser.ReadElementContext)
+                if(context.GetChild(1) is XyParser.ReadElementContext)
                 {
                     var ex = (Result)Visit(context.GetChild(0));
                     var read = (string)Visit(context.GetChild(1));
@@ -47,26 +47,26 @@ namespace coral
             }
             else if(count == 3)
             {
-                if(context.GetChild(1).GetType() == typeof(CoralParser.CallContext))
+                if(context.GetChild(1).GetType() == typeof(XyParser.CallContext))
                 {
                     r.data = "var";
                 }
-                else if(context.GetChild(1).GetType() == typeof(CoralParser.JudgeContext))
+                else if(context.GetChild(1).GetType() == typeof(XyParser.JudgeContext))
                 {
                     // todo 如果左右不是bool类型值，报错
                     r.data = "bool";
                 }
-                else if(context.GetChild(1).GetType() == typeof(CoralParser.AddContext))
+                else if(context.GetChild(1).GetType() == typeof(XyParser.AddContext))
                 {
                     // todo 如果左右不是number或text类型值，报错
                     r.data = "double";
                 }
-                else if(context.GetChild(1).GetType() == typeof(CoralParser.MulContext))
+                else if(context.GetChild(1).GetType() == typeof(XyParser.MulContext))
                 {
                     // todo 如果左右不是number类型值，报错
                     r.data = "double";
                 }
-                else if(context.GetChild(1).GetType() == typeof(CoralParser.AsContext))
+                else if(context.GetChild(1).GetType() == typeof(XyParser.AsContext))
                 {
                     var expr = (Result)Visit(context.GetChild(0));
                     var type = (string)Visit(context.GetChild(2));
@@ -74,7 +74,7 @@ namespace coral
                     r.text = expr.text + " as " + type;
                     return r;
                 }
-                else if(context.GetChild(1).GetType() == typeof(CoralParser.IsContext))
+                else if(context.GetChild(1).GetType() == typeof(XyParser.IsContext))
                 {
                     var expr = (Result)Visit(context.GetChild(0));
                     var type = (string)Visit(context.GetChild(2));
@@ -94,49 +94,49 @@ namespace coral
             return r;
         }
 
-        public override object VisitCall([NotNull] CoralParser.CallContext context)
+        public override object VisitCall([NotNull] XyParser.CallContext context)
         {
             return context.op.Text;
         }
 
-        public override object VisitWave([NotNull] CoralParser.WaveContext context)
+        public override object VisitWave([NotNull] XyParser.WaveContext context)
         {
             return context.op.Text;
         }
 
-        public override object VisitJudge([NotNull] CoralParser.JudgeContext context)
+        public override object VisitJudge([NotNull] XyParser.JudgeContext context)
         {
             return context.op.Text;
         }
 
-        public override object VisitAdd([NotNull] CoralParser.AddContext context)
+        public override object VisitAdd([NotNull] XyParser.AddContext context)
         {
             return context.op.Text;
         }
 
-        public override object VisitMul([NotNull] CoralParser.MulContext context)
+        public override object VisitMul([NotNull] XyParser.MulContext context)
         {
             return context.op.Text;
         }
 
-        public override object VisitPrimaryExpression([NotNull] CoralParser.PrimaryExpressionContext context)
+        public override object VisitPrimaryExpression([NotNull] XyParser.PrimaryExpressionContext context)
         {
             if(context.ChildCount == 1)
             {
                 var c = context.GetChild(0);
-                if(c is CoralParser.DataStatementContext)
+                if(c is XyParser.DataStatementContext)
                 {
                     return Visit(context.dataStatement());
                 }
-                else if(c is CoralParser.IdContext)
+                else if(c is XyParser.IdContext)
                 {
                     return Visit(context.id());
                 }
-                else if(context.t.Type == CoralParser.Self)
+                else if(context.t.Type == XyParser.Self)
                 {
                     return new Result { text = "this", data = "var" };
                 }
-                else if(context.t.Type == CoralParser.Discard)
+                else if(context.t.Type == XyParser.Discard)
                 {
                     return new Result { text = "_", data = "var" };
                 }
@@ -145,7 +145,7 @@ namespace coral
             return new Result { text = "(" + r.text + ")", data = r.data };
         }
 
-        public override object VisitExpressionList([NotNull] CoralParser.ExpressionListContext context)
+        public override object VisitExpressionList([NotNull] XyParser.ExpressionListContext context)
         {
             var r = new Result();
             var obj = "";
@@ -166,7 +166,7 @@ namespace coral
             return r;
         }
 
-        public override object VisitTemplateDefine([NotNull] CoralParser.TemplateDefineContext context)
+        public override object VisitTemplateDefine([NotNull] XyParser.TemplateDefineContext context)
         {
             var obj = "";
             obj += "<";
@@ -183,7 +183,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitTemplateCall([NotNull] CoralParser.TemplateCallContext context)
+        public override object VisitTemplateCall([NotNull] XyParser.TemplateCallContext context)
         {
             var obj = "";
             obj += "<";
@@ -200,7 +200,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitCallFunc([NotNull] CoralParser.CallFuncContext context)
+        public override object VisitCallFunc([NotNull] XyParser.CallFuncContext context)
         {
             var r = new Result();
             r.data = "var";
@@ -214,7 +214,7 @@ namespace coral
             return r;
         }
 
-        public override object VisitCallPkg([NotNull] CoralParser.CallPkgContext context)
+        public override object VisitCallPkg([NotNull] XyParser.CallPkgContext context)
         {
             var r = new Result();
             r.data = Visit(context.type());
@@ -222,7 +222,7 @@ namespace coral
             return r;
         }
 
-        public override object VisitCallAwait([NotNull] CoralParser.CallAwaitContext context)
+        public override object VisitCallAwait([NotNull] XyParser.CallAwaitContext context)
         {
             var r = new Result();
             var expr = (Result)Visit(context.expression());
@@ -231,7 +231,7 @@ namespace coral
             return r;
         }
 
-        public override object VisitArray([NotNull] CoralParser.ArrayContext context)
+        public override object VisitArray([NotNull] XyParser.ArrayContext context)
         {
             var type = "object";
             var result = new Result();
@@ -257,7 +257,7 @@ namespace coral
             return result;
         }
 
-        public override object VisitDictionary([NotNull] CoralParser.DictionaryContext context)
+        public override object VisitDictionary([NotNull] XyParser.DictionaryContext context)
         {
             var key = "object";
             var value = "object";
@@ -290,7 +290,7 @@ namespace coral
             return result;
         }
 
-        public override object VisitVariableList([NotNull] CoralParser.VariableListContext context)
+        public override object VisitVariableList([NotNull] XyParser.VariableListContext context)
         {
             var newR = new Result();
             var r = (Result)Visit(context.expressionList());
@@ -306,7 +306,7 @@ namespace coral
             public string text;
         }
 
-        public override object VisitDictionaryElement([NotNull] CoralParser.DictionaryElementContext context)
+        public override object VisitDictionaryElement([NotNull] XyParser.DictionaryElementContext context)
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
@@ -317,7 +317,7 @@ namespace coral
             return result;
         }
 
-        public override object VisitReadElement([NotNull] CoralParser.ReadElementContext context)
+        public override object VisitReadElement([NotNull] XyParser.ReadElementContext context)
         {
             var obj = "";
             foreach(var item in context.expression())
@@ -328,30 +328,30 @@ namespace coral
             return obj;
         }
 
-        public override object VisitDataStatement([NotNull] CoralParser.DataStatementContext context)
+        public override object VisitDataStatement([NotNull] XyParser.DataStatementContext context)
         {
             var r = new Result();
-            if(context.t.Type == CoralParser.Number)
+            if(context.t.Type == XyParser.Number)
             {
                 r.data = "double";
                 r.text = context.Number().GetText();
             }
-            else if(context.t.Type == CoralParser.Text)
+            else if(context.t.Type == XyParser.Text)
             {
                 r.data = "string";
                 r.text = context.Text().GetText();
             }
-            else if(context.t.Type == CoralParser.True)
+            else if(context.t.Type == XyParser.True)
             {
                 r.data = "bool";
                 r.text = context.True().GetText();
             }
-            else if(context.t.Type == CoralParser.False)
+            else if(context.t.Type == XyParser.False)
             {
                 r.data = "bool";
                 r.text = context.False().GetText();
             }
-            else if(context.t.Type == CoralParser.Nil)
+            else if(context.t.Type == XyParser.Nil)
             {
                 r.data = "object";
                 r.text = "null";
@@ -359,12 +359,12 @@ namespace coral
             return r;
         }
 
-        public override object VisitLambda([NotNull] CoralParser.LambdaContext context)
+        public override object VisitLambda([NotNull] XyParser.LambdaContext context)
         {
             var r = new Result();
             r.data = "var";
             // 异步
-            if(context.t.Type == CoralParser.FunctionAsync)
+            if(context.t.Type == XyParser.FunctionAsync)
             {
                 r.text += "async ";
             }
@@ -374,7 +374,7 @@ namespace coral
             return r;
         }
 
-        public override object VisitLambdaIn([NotNull] CoralParser.LambdaInContext context)
+        public override object VisitLambdaIn([NotNull] XyParser.LambdaInContext context)
         {
             var obj = "";
             for(int i = 0; i < context.id().Length; i++)
@@ -392,7 +392,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitLambdaOut([NotNull] CoralParser.LambdaOutContext context)
+        public override object VisitLambdaOut([NotNull] XyParser.LambdaOutContext context)
         {
             var obj = "";
             foreach(var item in context.functionSupportStatement())
@@ -402,7 +402,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitEmpty([NotNull] CoralParser.EmptyContext context)
+        public override object VisitEmpty([NotNull] XyParser.EmptyContext context)
         {
             var r = new Result();
             var type = Visit(context.type());
@@ -423,4 +423,3 @@ namespace coral
         };
     }
 }
-

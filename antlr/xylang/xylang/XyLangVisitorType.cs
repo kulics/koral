@@ -5,11 +5,11 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace coral
+namespace xylang
 {
-    partial class CoralVisitorBase
+    partial class XyLangVisitor
     {
-        public override object VisitTypeProtocol([NotNull] CoralParser.TypeProtocolContext context)
+        public override object VisitTypeProtocol([NotNull] XyParser.TypeProtocolContext context)
         {
             var ptcl = (string)Visit(context.nameSpace());
             var ptclPre = "";
@@ -35,7 +35,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitTypeTuple([NotNull] CoralParser.TypeTupleContext context)
+        public override object VisitTypeTuple([NotNull] XyParser.TypeTupleContext context)
         {
             var obj = "";
             obj += "(";
@@ -54,21 +54,21 @@ namespace coral
             return obj;
         }
 
-        public override object VisitTypeArray([NotNull] CoralParser.TypeArrayContext context)
+        public override object VisitTypeArray([NotNull] XyParser.TypeArrayContext context)
         {
             var obj = "";
             obj += " List<" + Visit(context.type()) + "> ";
             return obj;
         }
 
-        public override object VisitTypeDictinary([NotNull] CoralParser.TypeDictinaryContext context)
+        public override object VisitTypeDictinary([NotNull] XyParser.TypeDictinaryContext context)
         {
             var obj = "";
             obj += " Dictionary<" + Visit(context.type(0)) + "," + Visit(context.type(1)) + "> ";
             return obj;
         }
 
-        public override object VisitTypePackage([NotNull] CoralParser.TypePackageContext context)
+        public override object VisitTypePackage([NotNull] XyParser.TypePackageContext context)
         {
             var obj = "";
             obj += Visit(context.nameSpace());
@@ -79,7 +79,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitTypeFunction([NotNull] CoralParser.TypeFunctionContext context)
+        public override object VisitTypeFunction([NotNull] XyParser.TypeFunctionContext context)
         {
             var obj = "";
             var @in = (string)Visit(context.typeFunctionParameterClause(0));
@@ -120,7 +120,7 @@ namespace coral
             return obj;
         }
 
-        public override object VisitTypeFunctionParameterClause([NotNull] CoralParser.TypeFunctionParameterClauseContext context)
+        public override object VisitTypeFunctionParameterClause([NotNull] XyParser.TypeFunctionParameterClauseContext context)
         {
             var obj = "";
             for(int i = 0; i < context.type().Length; i++)
@@ -138,21 +138,21 @@ namespace coral
             return obj;
         }
 
-        public override object VisitTypeBasic([NotNull] CoralParser.TypeBasicContext context)
+        public override object VisitTypeBasic([NotNull] XyParser.TypeBasicContext context)
         {
             var obj = "";
             switch(context.t.Type)
             {
-                case CoralParser.TypeNumber:
+                case XyParser.TypeNumber:
                     obj = "double";
                     break;
-                case CoralParser.TypeText:
+                case XyParser.TypeText:
                     obj = "string";
                     break;
-                case CoralParser.TypeBool:
+                case XyParser.TypeBool:
                     obj = "bool";
                     break;
-                case CoralParser.TypeAny:
+                case XyParser.TypeAny:
                     obj = "object";
                     break;
                 default:

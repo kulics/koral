@@ -5,13 +5,13 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace coral
+namespace xylang
 {
-    partial class CoralVisitorBase : CoralBaseVisitor<object>
+    partial class XyLangVisitor : XyBaseVisitor<object>
     {
         const string Wrap = "\r\n";
 
-        public override object VisitProgram([NotNull] CoralParser.ProgramContext context)
+        public override object VisitProgram([NotNull] XyParser.ProgramContext context)
         {
             var list = context.statement();
             var result = "";
@@ -29,7 +29,7 @@ namespace coral
             public string permission { get; set; }
         }
 
-        public override object VisitId([NotNull] CoralParser.IdContext context)
+        public override object VisitId([NotNull] XyParser.IdContext context)
         {
             var r = new Result();
             r.data = "var";
@@ -38,12 +38,12 @@ namespace coral
                 r.permission = "public";
                 r.text += Visit(context.typeBasic());
             }
-            else if(context.op.Type == CoralParser.IDPublic)
+            else if(context.op.Type == XyParser.IDPublic)
             {
                 r.permission = "public";
                 r.text += context.op.Text;
             }
-            else if(context.op.Type == CoralParser.IDPrivate)
+            else if(context.op.Type == XyParser.IDPrivate)
             {
                 r.permission = "private";
                 r.text += context.op.Text;
@@ -56,21 +56,20 @@ namespace coral
             return r;
         }
 
-        public override object VisitBool([NotNull] CoralParser.BoolContext context)
+        public override object VisitBool([NotNull] XyParser.BoolContext context)
         {
             var r = new Result();
-            if(context.t.Type == CoralParser.True)
+            if(context.t.Type == XyParser.True)
             {
                 r.data = "bool";
                 r.text = context.True().GetText();
             }
-            else if(context.t.Type == CoralParser.False)
+            else if(context.t.Type == XyParser.False)
             {
                 r.data = "bool";
                 r.text = context.False().GetText();
             }
             return r;
         }
-
     }
 }

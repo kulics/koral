@@ -1,4 +1,4 @@
-﻿grammar Coral;
+﻿grammar Xy;
 
 program : statement+;
 

@@ -5,11 +5,11 @@ using System.Runtime.InteropServices;
 // 有关程序集的一般信息由以下
 // 控制。更改这些特性值可修改
 // 与程序集关联的信息。
-[assembly: AssemblyTitle("coral")]
+[assembly: AssemblyTitle("xylang")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
-[assembly: AssemblyProduct("coral")]
+[assembly: AssemblyProduct("xylang")]
 [assembly: AssemblyCopyright("Copyright ©  2018")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
@@ -20,7 +20,7 @@ using System.Runtime.InteropServices;
 [assembly: ComVisible(false)]
 
 // 如果此项目向 COM 公开，则下列 GUID 用于类型库的 ID
-[assembly: Guid("e5a2ce4e-ff1b-43b9-ba2a-2156fb2c9744")]
+[assembly: Guid("a8ba9c39-d81d-4503-9fdc-c1c69843467a")]
 
 // 程序集的版本信息由下列四个值组成: 
 //
