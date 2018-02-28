@@ -143,7 +143,7 @@ nameSpaceStatement:nameSpace Terminate;
 // 定义变量
 variableStatement: expression Define expression Terminate;
 // 赋值
-assignStatement: expression '=' expression Terminate;
+assignStatement: expression assign expression Terminate;
 
 expressionStatement: expression Terminate;
 
@@ -257,6 +257,7 @@ bool:t=True|t=False;
 as : op='!:';
 is : op='?:';
 judge : op=('||' | '&&' | '==' | '!=' | '<' | '>');
+assign : op=('=' | '+=' | '-=' | '*=' | '/=' | '%=');
 add : op=('+' | '-');
 mul : op=('*' | '/' | '%');
 call : op='.';

@@ -21,8 +21,13 @@ namespace xylang
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
-            var obj = r1.text + " = " + r2.text + context.Terminate().GetText() + Wrap;
+            var obj = r1.text + Visit(context.assign()) + r2.text + context.Terminate().GetText() + Wrap;
             return obj;
+        }
+
+        public override object VisitAssign([NotNull] XyParser.AssignContext context)
+        {
+            return context.op.Text;
         }
 
         public override object VisitExpressionStatement([NotNull] XyParser.ExpressionStatementContext context)
