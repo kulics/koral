@@ -81,9 +81,9 @@ namespace xylang
             }
             obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
             var header = "";
-            if(context.attribute() != null)
+            if(context.annotation() != null)
             {
-                header += Visit(context.attribute());
+                header += Visit(context.annotation());
             }
             header += id.permission + " class " + id.text;
             // 泛型
@@ -123,15 +123,15 @@ namespace xylang
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
             var obj = "";
-            if(context.attribute() != null)
+            if(context.annotation() != null)
             {
-                obj += Visit(context.attribute());
+                obj += Visit(context.annotation());
             }
             obj += r1.permission + " " + r2.data + " " + r1.text + " {get;set;} = " + r2.text + context.Terminate().GetText() + Wrap;
             return obj;
         }
 
-        public override object VisitAttribute([NotNull] XyParser.AttributeContext context)
+        public override object VisitAnnotation([NotNull] XyParser.AnnotationContext context)
         {
             var obj = "";
             var r = (Result)Visit(context.expressionList());

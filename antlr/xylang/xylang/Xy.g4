@@ -22,7 +22,7 @@ importStatement:Import BlockLeft (nameSpaceStatement)* BlockRight Terminate;
 // 主函数
 functionMainStatement:Function BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义包
-packageStatement:(attribute)? id (templateDefine)? Define Package (Wave parameterClauseIn)? BlockLeft (packageSupportStatement)* BlockRight Terminate;
+packageStatement:(annotation)? id (templateDefine)? Define Package (Wave parameterClauseIn)? BlockLeft (packageSupportStatement)* BlockRight Terminate;
 // 包支持的语句
 packageSupportStatement:
 packageStatement
@@ -36,7 +36,7 @@ packageStatement
 // 包构造方法
 packageInitStatement:PackageSub BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义变量
-packageVariableStatement:(attribute)? expression Define expression Terminate;
+packageVariableStatement:(annotation)? expression Define expression Terminate;
 // 函数
 packageFunctionStatement:id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义引入
@@ -180,7 +180,7 @@ primaryExpression
 
 expressionList : expression (',' expression)* ; // 表达式列
 
-attribute: '\\' expressionList '\\'; // 属性
+annotation: '\\*' expressionList '*\\'; // 注解
 
 tuple : '(' (id ':' expression (',' id ':' expression)* )? ')'; // 元组
 
