@@ -426,6 +426,15 @@ namespace xylang
             return r;
         }
 
+        public override object VisitNegate([NotNull] XyParser.NegateContext context)
+        {
+            var r = new Result();
+            var expr = (Result)Visit(context.expression());
+            r.data = expr.data;
+            r.text = "!" + expr.text;
+            return r;
+        }
+
         List<string> keywords = new List<string> {
         "abstract", "as", "base", "bool", "break" , "byte", "case" , "catch",
         "char","checked","class","const","continue","decimal","default","delegate","do","double","else",

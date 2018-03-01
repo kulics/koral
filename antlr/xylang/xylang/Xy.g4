@@ -168,6 +168,7 @@ primaryExpression
 | variableList // 变量列
 | empty // 类型空初始化
 | plusMinus // 正负处理
+| negate // 取反
 | expression as type // 类型转换
 | expression is type // 类型判断
 | expression readElement // 访问元素
@@ -213,6 +214,8 @@ lambdaOut : '(' (functionSupportStatement)* ')'  ;
 empty : '~<' type '>'; // 类型空初始化
 
 plusMinus : add expression;
+
+negate : '~~' expression;
 
 // 基础数据
 dataStatement:
