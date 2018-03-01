@@ -11,26 +11,26 @@ namespace xylang
     {
         public class Iterator
         {
-            public double from { get; set; }
-            public double to { get; set; }
-            public double step { get; set; }
+            public Result from { get; set; }
+            public Result to { get; set; }
+            public Result step { get; set; }
         }
 
         public override object VisitIteratorStatement([NotNull] XyParser.IteratorStatementContext context)
         {
             var it = new Iterator();
-            var i = context.Number();
-            if(context.Number().Length == 2)
+            var i = context.expression();
+            if(context.expression().Length == 2)
             {
-                it.from = Convert.ToDouble(context.Number(0).GetText());
-                it.to = Convert.ToDouble(context.Number(1).GetText());
-                it.step = 1;
+                it.from = (Result)Visit(context.expression(0));
+                it.to = (Result)Visit(context.expression(1));
+                it.step = new Result { data = "double", text = "1" };
             }
             else
             {
-                it.from = Convert.ToDouble(context.Number(0).GetText());
-                it.to = Convert.ToDouble(context.Number(2).GetText());
-                it.step = Convert.ToDouble(context.Number(1).GetText());
+                it.from = (Result)Visit(context.expression(0));
+                it.to = (Result)Visit(context.expression(2));
+                it.step = (Result)Visit(context.expression(1));
             }
             return it;
         }
@@ -40,17 +40,9 @@ namespace xylang
             var obj = "";
             var id = (Result)Visit(context.id());
             var it = (Iterator)Visit(context.iteratorStatement());
-            obj += "for (double " + id.text + " = " + it.from.ToString() + ";";
-            if(it.from <= it.to)
-            {
-                obj += id.text + "<" + it.to.ToString() + ";";
-                obj += id.text + "+=" + it.step.ToString() + ")";
-            }
-            else
-            {
-                obj += id.text + ">" + it.to.ToString() + ";";
-                obj += id.text + "-=" + it.step.ToString() + ")";
-            }
+            obj += "for (var " + id.text + " = " + it.from.text + ";";
+            obj += id.text + "<" + it.to.text + ";";
+            obj += id.text + "+=" + it.step.text + ")";
             obj += Wrap + context.BlockLeft().GetText() + Wrap;
             foreach(var item in context.logicStatement())
             {

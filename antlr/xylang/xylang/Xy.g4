@@ -136,7 +136,7 @@ loopInfiniteStatement:Loop BlockLeft (logicStatement)* BlockRight Terminate;
 // 跳出循环
 loopJumpStatement:LoopSub Terminate;
 // 迭代器
-iteratorStatement:Number '..' Number '..' Number | Number '..' Number;
+iteratorStatement:expression '..' expression '..' expression | expression '..' expression;
 // 命名空间
 nameSpaceStatement:nameSpace Terminate;
 
