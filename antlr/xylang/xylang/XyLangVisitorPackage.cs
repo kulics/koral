@@ -22,7 +22,7 @@ namespace xylang
                 if(item.GetChild(0) is XyParser.PackageInitStatementContext)
                 {
                     // 处理构造函数
-                    if(!hasInit && !context.parameterClauseIn().IsEmpty)
+                    if(!hasInit)
                     {
                         obj += "public " + id.text + Visit(context.parameterClauseIn());
                         obj += Visit(item);
@@ -78,6 +78,10 @@ namespace xylang
                 {
                     obj += Visit(item);
                 }
+            }
+            if(!hasInit)
+            {
+                obj = "public " + id.text + Visit(context.parameterClauseIn()) + "{}" + obj;
             }
             obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
             var header = "";
