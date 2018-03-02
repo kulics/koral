@@ -16,7 +16,7 @@ Eventually making XyLang with very few grammar, only the presence of symbols on 
 + Support for compilation to .Net platform, with .Net framework and library resources, we can use this language in a very wide range of scenarios.
 
 ## Getting Started
-Read detail from The [Book]().  
+Read detail from The [Book](./book-en/introduction.md).  
 阅读 [语言说明文档](./book-zh/介绍.md)。
 
 ## Quick Preview
@@ -36,14 +36,14 @@ Read detail from The [Book]().
                         "Chào bạn", "您好"];
             @ greetings ~ item
             {
-                print(item);
+                print(value: item);
                 ? item ~ 0..8 
                 {
-                    print(" in 0-8");
+                    print(value: " in 0-8");
                 }
                 ~ _
                 {
-                    print(" over 10");
+                    print(value: " over 10");
                     ~@;
                 };
             };
