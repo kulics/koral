@@ -4,7 +4,9 @@ XyLang is an open source, simple, friendly programming language.
 This is the main source code repository for XyLang. It contains the compiler, standard library, and documentation.
 
 The language is designed to improve reading performance and reduce the grammatical burden so that users can focus their real attention on business needs.
+
 Therefore, we abandon many subtle grammatical features, retaining only the most used part, and enhance its versatility.
+
 Eventually making XyLang with very few grammar, only the presence of symbols on the keyboard instead of keywords is sufficient to express all the logic.
 
 ## Features
