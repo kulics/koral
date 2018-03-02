@@ -14,7 +14,7 @@ Eventually making XyLang with very few grammar, only the presence of symbols on 
 + Support for compilation to .Net platform, with .Net framework and library resources, we can use this language in a very wide range of scenarios.
 
 ## Getting Started
-Read detail from The [Book]().
+Read detail from The [Book]().  
 阅读 [语言说明文档](./book-zh/介绍.md)。
 
 ## Quick Preview
