@@ -1,12 +1,17 @@
 # The XyLang Programming Language
-XyLang is an open source programming language that makes programming easy and simple.  
+XyLang is an open source, the pursuit of easy-to-use programming language.  
+
 This is the main source code repository for XyLang. It contains the compiler, standard library, and documentation.
 
+The language is designed to improve reading performance and reduce the grammatical burden so that users can focus their real attention on business needs.
+Therefore, we abandon many subtle grammatical features, retaining only the most used part, and enhance its versatility.
+Eventually making XyLang with very few grammar, only the presence of symbols on the keyboard instead of keywords is sufficient to express all the logic.
+
 ## Features
-+ Grammar is few and simplified, no keywords.
-+ It is easy to write and read.
-+ With CLR, most scenes can be supported.
-+ It can be translated into other languages as an portable language.
++ Focus on writing and reading..
++ Less grammar, no keywords.
++ Clear semantics, a logic of only one expression.
++ Support for compilation to .Net platform, with .Net framework and library resources, we can use this language in a very wide range of scenarios.
 
 ## Getting Started
 Read detail from The [Book]().
@@ -25,20 +30,17 @@ Read detail from The [Book]().
                         "Ciao", "こんにちは", "안녕하세요",
                         "Cześć", "Olá", "Здравствуйте",
                         "Chào bạn", "您好"];
-            @ greetings ~ (num, greeting)
+            @ greetings ~ item
             {
-                print(greeting);
-                ? num 
+                print(item);
+                ? item ~ 0..8 
                 {
-                    ~ 0..10 
-                    {
-                        println(" in 0-10");
-                    };
-                    ~ _
-                    {
-                        println(" over 10");
-                        ->;
-                    };
+                    print(" in 0-8");
+                }
+                ~ _
+                {
+                    print(" over 10");
+                    ~@;
                 };
             };
         };
