@@ -15,8 +15,10 @@ Eventually making XyLang with very few grammar, only the presence of symbols on 
 
 ## Getting Started
 Read detail from The [Book]().
+阅读 [语言说明文档](./book-zh/介绍.md)。
 
 ## Quick Preview
+
     :> Main
     {
         <: 
