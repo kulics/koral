@@ -1,0 +1,309 @@
+// Grammar Overview
+
+// Export Space
+:> XyLang.Demo
+{
+    // Import Space
+    <: 
+    {
+        System;
+        IO.File;
+    };
+
+    $
+    {
+        // Define, Variable，一般情况下编译器会自动判断类型
+        str => "10"; // text
+        num => 1.2; // number
+        bl => true; // bool
+
+        // Array
+        arr => [1,2,3,4,5]; // [number]
+        print( t: arr[0] ); // 使用下标获取
+        arrEmpty => [text]~(); // 创建空数组
+
+        // Dictionary, 前面为key，后面为value
+        dic => ["1":false, "2":true]; //[text:bool]
+        print( t: dic["1"] ); // 使用key获取
+        dicEmpty => [text:number]~(); // 创建空字典
+
+        // Function
+        fn => $(in:number)~(out:number){}; // $(number)~(number) 
+
+        // Function with no params no return
+        doSomeThingVoid => $ ()~()
+        {
+            doSomeThingA();
+            doSomeThingB();
+        };
+
+        // Full Function with in params and out params
+        doSomeThingWithParams => $(x:number, y:text)~(a:number, b:text)
+        {
+            -> (x, y);
+        };
+
+        b2c();
+        // 使用 _ 舍弃返回值，必须要接收返回值
+        _ => a2b(x:3, y:"test");
+
+        // Judge，当表达式的结果只有bool时，相当于if，只当true时才执行
+        ? 1+1 != 2
+        {
+            doSomeThingA();
+        }
+        ~? // 相当于else
+        {
+            doSomeThingB();
+        };
+
+        // 当表达式的结果为其它类型时，符合条件的匹配内容被执行
+        ? x ~ 0..6 
+        {
+            doSomeThingA();
+        }
+        ~ 14 
+        {
+            doSomeThingB();
+        }
+        ~ _ // 缺省执行，省略的话找不到匹配会自动跳出
+        {
+            doSomeThingC();
+        };
+
+        // Loop, use ~ to take out single item 
+        @ array ~ item
+        {
+            doSomeThingA();
+            doSomeThingB();
+        };
+
+        // 迭代器(from..step..to)，step可以省略，默认逐次+1，省略后为0..100
+        @ 0..2..100 ~ index
+        {
+            doSomeThingA();
+            doSomeThingB();
+        };
+
+        // 当没有参数时，无限循环
+        @
+        {
+            doSomeThingA();
+            doSomeThingB();
+            ? a > b 
+            {
+                ~@; // jump out loop
+            };
+        };
+
+        // Package，最基础的类型，类型就是自己
+        pkg => #~(){};
+
+        // Package，只支持 variable 类型，通常用来包装数据
+        View => #~()
+        {
+            Width => 0;
+            Height => 0;
+            Background => "";
+        };
+
+        // 也支持包装方法
+        Button => #~()
+        {
+            Width => 0;
+            Height => 0;
+            Background => "";
+            Title => "";
+
+            Click => $ ()~()
+            {
+                // 可以通过 ^ 来访问包自身属性或方法
+                print( t: ^.Title );
+                doSomeThingA();
+                doSomeThingB();
+            };
+        };
+
+        // 可以通过参数标记，让包支持构造方法，默认可以省略
+        Image => #~(w:number,h:number,s:text)
+        {
+            // 私有属性，不能被外部访问，也不能被重包装
+            _width => 0;
+            _height => 0;
+            _source => "";
+
+            // 构造方法
+            ~#
+            {
+                // 接收构造参数
+                (_width, _height, _source) = (w,h,s);
+            };
+        };
+
+        // ReDefine ，对某个包扩展，只允许使用这种方式覆盖同名包，可以用来扩展属性、方法、构造方法
+        View <= #~(w:number, h:number, s:text)
+        {
+            ~#
+            {
+                (Width,Height,Source) = (w,h,s);
+            };
+
+            Show => $ ()~()
+            {
+                doSomeThingA();
+                doSomeThingB();
+            };
+
+            Hide => $ ()~()
+            {
+                doSomeThingA();
+                doSomeThingB();
+            };
+        };
+
+        // Protocol, implemented by package
+        Animation => & 
+        {
+            Speed => 0; // 需求变量，导入的包必须实现定义
+            Move => $(s: number)~(){}; // 需求方法，导入的包必须实现定义
+            _TopSpeed => 20;   // 协议自有属性，作为公共可访问常量使用
+            _Clear => $()~(t:text) // 协议自有方法，作为公共可访问函数使用
+            {
+                -> ("Done");
+            };
+        };
+
+        // Combine Package，通过引入来复用属性和方法
+        ImageButton => #~()
+        {
+            ~# View; // 直接继承，只在c#中有效，不建议使用，将来不实现为c#后会去除
+            Title => ""; // 重名自动覆盖，这会代替包原本的属性
+            Button => Button~();    // 通过包含其它包，来组合新的包使用
+        };
+
+        ImageButton <= #~()
+        {
+            // Implement protocol
+            ~& Animation
+            {
+                Speed => 2;
+
+                Move => $( s: number )~()
+                {
+                    t => 5000/Animation.TopSpeed; // calling protocol public invariable
+                    play(speed: s + t );
+                    Animation.Clear(); // calling protocol public method
+                };
+            };
+        };
+
+        // Create an package object
+        ib => ImageButton~();
+        // Calling object property
+        ib.Title = "OK";
+        // Calling object method
+        ib.Button.Show();
+        // Calling object protocol
+        ib.Animation.Move( s: 6 );
+
+        // Create an object with params
+        img => Image~(w:30, h:20, s:"./icon.png");
+
+        // 可以使用 ?: 判断类型，使用 !: 来转换包类型
+        ? ib ?: ImageButton
+        {
+            (ib !: View).Show();
+        };
+
+        // Use ~! to declare an Excption
+        readFile => $(url: text)~(f: file)
+        {
+            ? url.length < 1
+            {
+                // Throw some error
+                ~! IOErr(t:"URL is none"); 
+            };
+            f = System.IO.ReadFile(url: url);
+        };
+
+        // Check, listen the Excption Function
+        ! 
+        {
+            f => readFile(url: "./test.xy");
+        }
+        ~ err 
+        {
+            // Catch the report
+            ? err == IOErr
+            {
+                releaseFile(f);
+            };
+        };
+
+        // Use .$ to declare Async Function
+        task => .$(in:number)~(out:number)
+        {
+            // make a function to await
+            .$ doSomeThingA(); 
+            doSomeThingB();
+            .$ doSomeThingC(); 
+            -> (in);
+        };
+
+        x => task(in: 6);
+
+        // 值传递，只有在有明确接收对象（定义、赋值、函数调用）中才有效
+        hello => ? isSun
+        {
+            // 使用 <- 将值传递给左边
+            <- "nice day";
+        }
+        ~?
+        {
+            <- "bad day";
+        };
+
+        hellos => @ weatherHistory ~ day
+        {
+            ? day.isSun
+            {
+                // 在循环中使用，可以将值插入给外部数组
+                <- day.hello;
+            };
+        }; 
+
+        // Attribute 
+        \*Table("user")*\
+        User => #
+        {
+            \*Column("id"), Required, Key*\
+            Id => "";
+            \*Column("nick_name"), Required*\ 
+            NickName => "";
+            \*Column("time_update"), Required*\ 
+            TimeUpdate => 0;
+        };
+
+        // Generic package
+        Table<T> => #~()
+        {
+            data => ~<T>; // 泛型只能使用~<>创建空值
+
+            setData => $ (d: T)
+            {
+                data = d;
+            };
+        };
+        // Generic function
+        Add<T> => $(x1:T,x2:T)~(y:T)
+        {
+            -> (x1 + x2);
+        };
+
+        // Lambda Function
+        arr.select(bool: it > 2 );
+        // arr.select(bool: $(it)~(it > 2) );
+        arr.each(do: it + 2 );
+        // arr.each(do: $(it)~(it + 2) );
+    };
+};
