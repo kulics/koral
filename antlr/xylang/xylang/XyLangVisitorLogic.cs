@@ -87,13 +87,13 @@ namespace xylang
         {
             var obj = "";
             var expr = (Result)Visit(context.expression());
-            obj += "switch (" + expr.text + ")" + Wrap + context.BlockLeft().GetText() + Wrap;
+            obj += "switch (" + expr.text + ")" + Wrap + "{" + Wrap;
             foreach(var item in context.caseStatement())
             {
                 var r = (string)Visit(item);
                 obj += r + Wrap;
             }
-            obj += context.BlockRight().GetText() + Wrap;
+            obj += "}" + Wrap;
             return obj;
         }
 
@@ -106,7 +106,7 @@ namespace xylang
                 var r = (string)Visit(item);
                 obj += r;
             }
-            obj += "break" + context.Terminate().GetText();
+            obj += "break;";
             return obj;
         }
 
@@ -120,7 +120,7 @@ namespace xylang
                 var r = (string)Visit(item);
                 obj += r;
             }
-            obj += "break" + context.Terminate().GetText();
+            obj += "break;";
             return obj;
         }
 

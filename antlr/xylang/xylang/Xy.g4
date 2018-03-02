@@ -2,10 +2,6 @@
 
 program : statement+;
 
-//stats : (statement ';')* ; // match zero or more ';'-terminatedstatements
-
-//exprList : expr (',' expr)* ;
-
 statement :exportStatement;		  
 
 // 导出命名空间
@@ -114,11 +110,11 @@ logicStatement:
 | reportStatement
 ;
 // 条件判断
-judgeCaseStatement: Judge expression BlockLeft (caseStatement)+ BlockRight Terminate;
+judgeCaseStatement: Judge expression (caseStatement)+ Terminate;
 // 缺省条件声明
-caseDefaultStatement: Wave Discard BlockLeft (logicStatement)* BlockRight Terminate;
+caseDefaultStatement: Wave Discard BlockLeft (logicStatement)* BlockRight;
 // 条件声明
-caseExprStatement: Wave expression BlockLeft (logicStatement)* BlockRight Terminate;
+caseExprStatement: Wave expression BlockLeft (logicStatement)* BlockRight;
 // 判断条件声明
 caseStatement: caseDefaultStatement|caseExprStatement;
 // 判断
