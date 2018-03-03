@@ -48,7 +48,7 @@ E.g:
         // correct
         Async => .$()~(Out: number)
         {
-            .$ Task.Delay(5000); // Wait for a while
+            .$ Task.Delay(5000); // wait for a while
             -> (12);
         };
         // wrong
@@ -67,11 +67,11 @@ E.g:
 
     Async => .$()~()
     {
-        .$ Task.Delay(5000); // Wait for a while
+        .$ Task.Delay(5000); // wait for a while
     };
 
-    .$ Async(); // Correct
+    .$ Async(); // correct
 
-    task => Async(); // Correct, got the Task
+    task => Async(); // correct, got the Task
 
 ### [Next Chapter](generic.md)

@@ -77,7 +77,7 @@ When we call the function, we need to fill the brackets with the identifier in t
 E.g:
 
     sell => $(price: number, name: text)~(){}; 
-    // Define two functions into the parameters
+    // define two functions into the parameters
 
     sell(price: 1.99, name: "cola"); 
     // fill in the data that meets the requirements as defined
@@ -109,15 +109,15 @@ The difference is that for multiple return values ​​we have to wrap each ide
 E.g:
 
     (n, c) => topSell(); 
-    // Define the returned two values ​​for n and c
+    // define the returned two values ​​for n and c
     (n, c) = topSell(); 
-    // Overrides the returned two values ​​to n and c
+    // overrides the returned two values ​​to n and c
 
 You can use the definition or assignment statement to get the return value of the function to use, you can also use the nested function to another function.
 
 E.g:
 
-    Console.WriteLine(value: topSell()); // Print two values
+    Console.WriteLine(value: topSell()); // print two values
 
 If there is only one return value, the brackets can be taken without.
 
@@ -137,7 +137,7 @@ If indeed all the return values ​​are not needed, we can also just write a `
 
 E.g:
 
-    _ = topSell(); // For _ , assignment and definition are equivalent
+    _ = topSell(); // for _ , assignment and definition are equivalent
 
 ## Function In Parameter
 If we want part of the function defined by the external, and only perform the rest of the internal logic, such as some set traversal for a collection of functions, then we can use the function parameters to accomplish this goal.
