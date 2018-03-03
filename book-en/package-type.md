@@ -51,7 +51,7 @@ Very simple, we only need to use `.` syntax, we can summon the attributes we nee
 E.g:
 
     Console.WriteLine(value: Peter.Name); 
-    // Print the name of a student
+    // print the name of a student
 
 To change the value of the property is the same, it is equivalent to a nested identifier. We can directly use the assignment statement to change the value.
 
@@ -153,7 +153,7 @@ E.g:
         Number => "";
         Class => 0;
         Grade => 0;
-        KungFu => false; // Kung fu students
+        KungFu => false; // kung fu students
     };
 
 No, no repeatable definition of data so elegant, we can reuse student attributes, with an additional kung fu attributes on it.
@@ -164,8 +164,8 @@ E.g:
 
     ChinaStudent => #~()
     {
-        Student => Student~(); // Include student attributes in it
-        KungFu => false; // Kung fu students
+        Student => Student~(); // include student attributes in it
+        KungFu => false; // kung fu students
     };
 
 This way you can use generic attributes via student attributes in Chinese students.
@@ -174,7 +174,7 @@ E.g:
 
     Chen => ChinaStudent~();
     Console.WriteLine(value: Chen.Student.Name);
-    // Of course, since there is no assignment, nothing is output
+    // of course, since there is no assignment, nothing is output
 
 By combining layers after layer, you are free to assemble whatever you want to describe.
 
