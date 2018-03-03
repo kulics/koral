@@ -89,7 +89,7 @@ E.g:
         ...
         GetGirlFirend => $()~(name: text)
         {
-            -> (^._ GirlFirend);
+            -> (^._GirlFirend);
         };
     };
 
