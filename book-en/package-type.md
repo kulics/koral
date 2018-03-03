@@ -126,9 +126,9 @@ E.g:
         {
             ^.Name = name; ^.Number = number;
             // calculate the class
-            ^.Class = GetSubText(data: number, from: 4, to: 3);
+            ^.Class = GetSubText(data: number, from: 2, to: 3);
             // calculate the grade
-            ^.Grade = GetSubText(data: number, from: 6, to: 5);
+            ^.Grade = GetSubText(data: number, from: 0, to: 1);
         };
     };
 
