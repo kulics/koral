@@ -62,7 +62,7 @@ E.g:
 
     @
     {
-        ~@; / / Nothing out of the implementation of the jump out
+        ~@; // Nothing out of the implementation of the jump out
     };
 
 In addition to the infinite loop, jump out can also be used in other cycles.
