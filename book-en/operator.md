@@ -72,6 +72,6 @@ E.g:
     a => 1 + 9% 5 * 5-8 / 9 == 5;
     b => (1 + (9% 5 * 5) - (8/9)) == 5;
 
-obviously……
+Obviously……
 
 ### [Next Chapter](collection-type.md)
