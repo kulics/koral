@@ -74,7 +74,7 @@ We can use .Net built-in `Console.WriteLine ()` function printout, it can displa
 
 E.g:
 
-    Console.WriteLine (value: "Hello world") // Output Hello world
+    Console.WriteLine(value: "Hello world") // Output Hello world
 
 ## Comment
 Our comments are very similar to the C language, with single-line comment starting with two backslashes `//`:
@@ -127,12 +127,12 @@ However, in practical projects, the use of partition will effectively improve th
 
 E.g:
 
-    a.b (x: number, y: number) .c (fn: $ () ~ (x: number) {-> (2 + 1);}) d = 1 + 3 * 5/4;
+    a.b(x:number,y:number).c(fn:$()~(x:number){->(2+1);}).d=1+3*5/4;
 
-    a.b (x: number, y: number)
-    .c (fn: $ () ~ (x: number)
+    a.b(x: number, y: number)
+    .c(fn: $()~(x: number)
     {
         -> (2 + 1);
-    }). d = 1 + 3 * 5/4;
+    }).d = 1 + 3 * 5 / 4;
 
 ### [Next Chapter](basic-type.md)

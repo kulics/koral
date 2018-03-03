@@ -1,50 +1,77 @@
-# Operators
-    = 赋值
+# Operator
+An operator is a notation that tells a compiler to perform a specific mathematical or logical operation.
 
-    + 加
-    - 减
-    * 乘
-    / 除
-    % 取余
+We can easily understand the mathematical notation in mathematics, but the programming language has its own differences.
 
-    == 相等
-    != 不等
-    > 大于
-    < 小于
-    >= 大于或等于
-    <= 小于或等于
+## Arithmetic Operator
+Arithmetic operators are mainly used for numerical operations on data types, most of which are in line with the expectations in mathematics.
 
-    ... 范围遍历
+E.g:
 
-    ! 取反
-    && 与
-    || 或
+    a => 4;
+    b => 2;
+    c => a + b; // + add
+    c = a - b; // - subtract
+    c = a * b; // * multiply
+    c = a / b; // / divide
+    c = a % b; // % take the remainder, meaning the remainder after the divisibility, the result here is 2
 
-    ; 语句分割
-    _ 匿名声明，用作创建匿名变量、声明匿名函数、声明匿名参数、缺省声明
-    : 语义推导，用作名称指定、类型指定、类型转换
-    . 指向库、包、协议内元素或方法
-    , 间隔，有顺序关系的才使用这个
-    -> 指向声明，用作函数声明、条件声明、遍历取值声明
-    ～ 引入推导，用作结构体继承、协议继承
-    $ 异步声明，用作函数异步特性声明
-    .. 表示异步等待
+In addition to numbers, there are other types that support arithmetic operations, such as `text`, which can be used to combine two paragraphs of text.
 
-    {} 语句块、函数体、结构体
-    () 元组
-    [] 数组、字典
-    <> 模板、泛型
-    "" 字符串
+E.g:
 
-    // 注释
-    /* 注释头
-    */ 注释尾
+    a => "hello";
+    b => "world";
+    c => a + " " + b; // c is `hello world`
 
+## Judgment Operator
+Judgment operator is mainly used in the judgment statement, used to calculate the relationship between the two data, the result is expected to be true, not expected to be false.
 
-    \ 转义字符
-    / 
-    &
-    #
-    @
-    `
-    ''
+E.g:
+
+    a => 4;
+    b => 2;
+    c => a == b; // == equal to
+    c = a != b;  // != not equal
+    c = a > b;   // > greater than
+    c = a < b;   // < less than
+
+## Logical Operator
+Logical operators are also used primarily in judgment statements for logic operations (AND, OR, NOT).
+
+E.g:
+
+    a => true;
+    b => false;
+    c => a && b; // && and, both true at the same time
+    c = a || b;  // || or, one of them is true
+    c = ~~ a;    // ~~ not, boolean negation
+
+## Assignment Operator
+Assignment operator is mainly used to assign the right data to the left identifier, you can also attach some shortcut.
+
+E.g:
+
+    a => 0;
+    a = 1;  // = the simplest assignment
+    a += 1; // += add first and then assign
+    a -= 1; // -= subtract first and then assign
+    a *= 1; // *= multiply first and then assign
+    a /= 1; // /= divide first and then assign
+    a %= 1; // %= take remainder first and than assignment
+
+## Braces
+Sometimes we need to do a mix of multiple data operations within a single statement, which involves priority issues.
+
+At this time we can use `()` to distinguish between priorities, the parentheses will be given priority to the implementation of the operation.
+
+Proposal to use more brackets to express our operation, which is very helpful for the reading of the code.
+
+E.g:
+
+    a => 1 + 9% 5 * 5-8 / 9 == 5;
+    b => (1 + (9% 5 * 5) - (8/9)) == 5;
+
+obviously……
+
+### [Next Chapter](collection-type.md)
