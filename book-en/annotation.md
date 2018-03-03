@@ -7,8 +7,8 @@ Annotation need to use namespace
         System.ComponentModel.DataAnnotations.Schema;
         System.ComponentModel.DataAnnotations;
 
-## Annotation Statement
-As opposed to the comment block, we simply wrap the tagged content with the `\*` and `*`.
+## Annotation Declaration
+As opposed to the comment block, we simply wrap the tagged content with the `\*` and `*\`.
 Note that it is valid before the identifier.
 
 Let's take a look at the database data for how to use annotations.
