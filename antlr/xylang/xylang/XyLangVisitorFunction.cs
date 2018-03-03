@@ -21,6 +21,10 @@ namespace xylang
                 {
                     pout = "Task<" + pout + ">";
                 }
+                else
+                {
+                    pout = "Task";
+                }
                 obj += " async " + pout + " " + id.text;
             }
             else
