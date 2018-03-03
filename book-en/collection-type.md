@@ -86,8 +86,8 @@ E.g:
 The difference is that with the array, if the assignment is a non-existent index, it will not be wrong, the value will be given directly to the new key.
 ### Common operation
 
-    dic.Add("d", 11); // Add index by method
-    dic.Remove("c"); / / delete the specified index element
+    dic.Add("d", 11); // add index by method
+    dic.Remove("c");  // delete the specified index element
     length => dic.Count; // length
 
 ### [Next Chapter](judgment.md)
