@@ -161,6 +161,10 @@ namespace xylang
                 {
                     pout = "Task<" + pout + ">";
                 }
+                else
+                {
+                    pout = "Task";
+                }
                 obj += id.permission + " async " + pout + " " + id.text;
             }
             else
@@ -287,6 +291,10 @@ namespace xylang
                 {
                     pout = "Task<" + pout + ">";
                 }
+                else
+                {
+                    pout = "Task";
+                }
                 fn.@out = " async " + pout;
             }
             else
@@ -380,6 +388,10 @@ namespace xylang
                     {
                         pout = "Task<" + pout + ">";
                     }
+                    else
+                    {
+                        pout = "Task";
+                    }
                     r.text += pout + " " + id.text;
                 }
                 else
@@ -403,6 +415,10 @@ namespace xylang
                     if(pout != "void")
                     {
                         pout = "Task<" + pout + ">";
+                    }
+                    else
+                    {
+                        pout = "Task";
                     }
                     r.text += "public static async " + pout + " " + id.text;
                 }
