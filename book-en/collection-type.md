@@ -38,12 +38,12 @@ If we need to change one of the elements in the array, we can access that elemen
 
 E.g:
 
-    arr [0] = 5;
+    arr[0] = 5;
     
 Note that we can only access the index of the existing data, if not exist, there will be an error.
 ### Common operation
     
-    arr.Add (1); // added to the end
+    arr.Add(1); // added to the end
     arr.Insert(2, 3); // insert element 3 to index 2
     arr.RemoveAt(1); // delete the specified location element
     length => arr.Count; // length
