@@ -90,4 +90,4 @@ The difference is that with the array, if the assignment is a non-existent index
     dic.Remove("c"); / / delete the specified index element
     length => dic.Count; // length
 
-### [Next Chapter](Judgment.md)
+### [Next Chapter](judgment.md)
