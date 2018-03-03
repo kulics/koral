@@ -19,7 +19,7 @@ Eventually making XyLang with very few grammar, only the presence of symbols on 
 1. [Basic Type](basic-type.md)
 1. [Operator](operator.md)
 1. [Collection Type](collection-type.md)
-1. [Judge](judge.md)
+1. [Judgment](judgment.md)
 1. [Loop](loop.md)
 1. [Function Type](function-type.md)
 1. [Package Type](package-type.md)
