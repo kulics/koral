@@ -10,7 +10,7 @@ E.g:
     arr => [1, 2, 3, 4, 5];
     @ arr ~ i
     {
-        Console.WriteLine(value: i); // Print each number
+        Console.WriteLine(value: i); // print each number
     };
 
 `~` Followed by an identifier, this identifier is the current take value in collection, this identifier is valid only in the current cycle. So we do not need to define an identifier externally.
@@ -25,7 +25,7 @@ E.g:
 
     @ 0..100 ~ i
     {
-        Console.WriteLine(value: i); // Print each number
+        Console.WriteLine(value: i); // print each number
     };
 
 It should be noted that the meaning of `0..100` is read from` 0` to `100` one by one, that is, a total execution of` 101` times. Iterator will be executed until the last number is completed, rather than an early end.
@@ -62,7 +62,7 @@ E.g:
 
     @
     {
-        ~@; // Nothing out of the implementation of the jump out
+        ~@; // jump out
     };
 
 In addition to the infinite loop, jump out can also be used in other cycles.
