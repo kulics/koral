@@ -117,7 +117,7 @@ Identifier is the variable, function, package, protocol, etc. specified name. Th
 
 In particular, in packages and protocols, properties and method names that begin with the underscore (_) are considered private and the rest are considered public.
 ## Keyword
-no.
+none.
 
 Yes, you are not mistaken, we do not have keywords. So you can use any character as your identifier, regardless of conflict issues.
 ## Space and Wrap
