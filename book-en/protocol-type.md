@@ -43,7 +43,7 @@ E.g:
             Do => $()~()
             {
                 SpendTime(hours: 1); // spent an hour
-                ^.HomeWork.Count = ^.HomeWork.Count - 1; // completed one
+                ^.HomeWork.Count -= 1; // completed one
             };
         };
     };

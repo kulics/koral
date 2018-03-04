@@ -14,7 +14,7 @@ E.g:
 
     ReadFile => $(name: text)~()
     {
-        ? name.Length == 0
+        ? name.Length = 0
         {
             ~! Exception~(message: "something wrong");
         };

@@ -255,8 +255,8 @@ bool:t=True|t=False;
 
 as : op='!:';
 is : op='?:';
-judge : op=('||' | '&&' | '==' | '!=' | '<' | '>');
-assign : op=('=' | '+=' | '-=' | '*=' | '/=' | '%=');
+judge : op=('||' | '&&' | '=' | '!=' | '<' | '>');
+assign : op=(Assign | '+=' | '-=' | '*=' | '/=' | '%=');
 add : op=('+' | '-');
 mul : op=('*' | '/' | '%');
 call : op='.';
@@ -271,7 +271,7 @@ BlockLeft : '{';
 BlockRight : '}';
 
 Define : '=>';
-Redefine: '<=';
+Assign: '<=';
 
 Import : '<:';
 Export : ':>';

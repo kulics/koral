@@ -11,10 +11,10 @@ E.g:
     a => 4;
     b => 2;
     c => a + b; // + add
-    c = a - b; // - subtract
-    c = a * b; // * multiply
-    c = a / b; // / divide
-    c = a % b; // % take the remainder, meaning the remainder after the divisibility, the result here is 2
+    c <= a - b; // - subtract
+    c <= a * b; // * multiply
+    c <= a / b; // / divide
+    c <= a % b; // % take the remainder, meaning the remainder after the divisibility, the result here is 2
 
 In addition to numbers, there are other types that support arithmetic operations, such as `text`, which can be used to combine two paragraphs of text.
 
@@ -31,10 +31,10 @@ E.g:
 
     a => 4;
     b => 2;
-    c => a == b; // == equal to
-    c = a != b;  // != not equal
-    c = a > b;   // > greater than
-    c = a < b;   // < less than
+    c => a = b;   // = equal to
+    c <= a != b;  // != not equal
+    c <= a > b;   // > greater than
+    c <= a < b;   // < less than
 
 ## Logical Operator
 Logical operators are also used primarily in judgment statements for logic operations (AND, OR, NOT).
@@ -43,9 +43,9 @@ E.g:
 
     a => true;
     b => false;
-    c => a && b; // && and, both true at the same time
-    c = a || b;  // || or, one of them is true
-    c = ~~ a;    // ~~ not, boolean negation
+    c => a && b;  // && and, both true at the same time
+    c <= a || b;  // || or, one of them is true
+    c <= ~~ a;    // ~~ not, boolean negation
 
 ## Assignment Operator
 Assignment operator is mainly used to assign the right data to the left identifier, you can also attach some shortcut.
@@ -53,7 +53,7 @@ Assignment operator is mainly used to assign the right data to the left identifi
 E.g:
 
     a => 0;
-    a = 1;  // = the simplest assignment
+    a <= 1; // <= the simplest assignment
     a += 1; // += add first and then assign
     a -= 1; // -= subtract first and then assign
     a *= 1; // *= multiply first and then assign
@@ -69,8 +69,8 @@ Proposal to use more brackets to express our operation, which is very helpful fo
 
 E.g:
 
-    a => 1 + 9% 5 * 5-8 / 9 == 5;
-    b => (1 + (9% 5 * 5) - (8/9)) == 5;
+    a => 1 + 9% 5 * 5-8 / 9 = 5;
+    b => (1 + (9% 5 * 5) - (8/9)) = 5;
 
 Obviously……
 

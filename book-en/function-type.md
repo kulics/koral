@@ -110,7 +110,7 @@ E.g:
 
     (n, c) => topSell(); 
     // define the returned two values ​​for n and c
-    (n, c) = topSell(); 
+    (n, c) <= topSell(); 
     // overrides the returned two values ​​to n and c
 
 You can use the definition or assignment statement to get the return value of the function to use, you can also use the nested function to another function.
@@ -137,7 +137,7 @@ If indeed all the return values ​​are not needed, we can also just write a `
 
 E.g:
 
-    _ = topSell(); // for _ , assignment and definition are equivalent
+    _ <= topSell(); // for _ , assignment and definition are equivalent
 
 ## Function In Parameter
 If we want part of the function defined by the external, and only perform the rest of the internal logic, such as some set traversal for a collection of functions, then we can use the function parameters to accomplish this goal.

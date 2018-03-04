@@ -27,6 +27,10 @@ namespace xylang
 
         public override object VisitAssign([NotNull] XyParser.AssignContext context)
         {
+            if(context.op.Type == XyParser.Assign)
+            {
+                return "=";
+            }
             return context.op.Text;
         }
 
@@ -111,6 +115,10 @@ namespace xylang
 
         public override object VisitJudge([NotNull] XyParser.JudgeContext context)
         {
+            if(context.op.Text == "=")
+            {
+                return "==";
+            }
             return context.op.Text;
         }
 
