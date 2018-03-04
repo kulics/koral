@@ -137,7 +137,7 @@ This gives us a package with constructors, and when we create a new student, cla
 E.g:
 
     Peter => Student~(name: "Peter", number: "060233");
-    Console.WriteLine(value: Peter.Class); // Print out 2
+    Console.WriteLine(value: Peter.Class); // print out 2
 
 It should be noted that a package can only support one constructor, we recommend to maintain the simplicity of the structure, a stable package easier to be used by the caller,
 

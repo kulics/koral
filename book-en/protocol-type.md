@@ -100,7 +100,7 @@ We can use the auxiliary notation `&` in the parameter type of a function to mar
 
 E.g:
 
-    DoHomeWork => $(student: &HomeWork) ~ ()
+    DoHomeWork => $(student: &HomeWork)~()
     {
         student.Do(); // because the protocol has been marked, we can use the protocol method
     };
