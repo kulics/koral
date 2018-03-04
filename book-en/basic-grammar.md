@@ -69,13 +69,16 @@ In the examples that follow, we are by default implemented in the main entry fun
 In particular, there can be only one main entry function in a namespace because the entry must be unique.
 
 More details about the function will be explained in later chapters.
-## Print
-We can use .Net built-in `Console.WriteLine ()` function printout, it can display data or text messages to the console for use.
+## Display information
+We use the program in order to obtain some useful information, so we need a feature to browse information, this feature can be display, print or output.
+
+If we write a console program, we can use .Net built-in `Console.WriteLine ()` function, it can display data or text information to the console for us to browse.
 
 E.g:
 
-    Console.WriteLine(value: "Hello world") // Output Hello world
+     Console.WriteLine(value: "Hello world"); // output Hello world
 
+In the following examples, we will all use the console as a presentation environment.
 ## Comment
 Our comments are very similar to the C language, with single-line comment starting with two backslashes `//`:
 

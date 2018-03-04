@@ -22,7 +22,7 @@ E.g:
 
     a => "hello";
     b => "world";
-    c => a + " " + b; // c is `hello world`
+    c => a + " " + b; // c is "hello world"
 
 ## Judgment Operator
 Judgment operator is mainly used in the judgment statement, used to calculate the relationship between the two data, the result is expected to be true, not expected to be false.
