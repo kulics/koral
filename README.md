@@ -12,7 +12,7 @@ Eventually making XyLang with very few grammar, only the presence of symbols on 
 ## Features
 + Focus on writing and reading..
 + Less grammar, no keywords.
-+ Clear semantics, a logic of only one expression.
++ Clear semantics, one logic corresponds to only one expression.
 + Support for compilation to .Net platform, with .Net framework and library resources, we can use this language in a very wide range of scenarios.
 
 ## Getting Started
