@@ -38,7 +38,7 @@ If we need to change one of the elements in the array, we can access that elemen
 
 E.g:
 
-    arr[0] = 5;
+    arr[0] <= 5;
     
 Note that we can only access the index of the existing data, if not exist, there will be an error.
 ### Common operation
@@ -81,7 +81,7 @@ Like arrays, we can also use assignment statements to change to elements.
 
 E.g:
 
-    dic["b"] = 5;
+    dic["b"] <= 5;
     
 The difference is that with the array, if the assignment is a non-existent index, it will not be wrong, the value will be given directly to the new key.
 ### Common operation

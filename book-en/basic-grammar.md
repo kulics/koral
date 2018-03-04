@@ -99,11 +99,11 @@ This creates an identifier for the name on the left and assigns the data on the 
 Once an identifier is created, its data type will not be changed in the valid area.
 
 ## Assignment
-Just like a normal programming language, we only need to use the `=` statement to assign the data on the right to the identifier on the left.
+Unlike a normal programming language, we need to use the `<=` statement to assign the data on the right to the identifier on the left.
 
 E.g:
 
-    a = 2;
+    a <= 2;
 
 But the definition is not the same, the left side of the assignment can only be an identifier that has been defined, otherwise the assignment statement does not hold.
 ## Identifier
@@ -127,12 +127,12 @@ However, in practical projects, the use of partition will effectively improve th
 
 E.g:
 
-    a.b(x:number,y:number).c(fn:$()~(x:number){->(2+1);}).d=1+3*5/4;
+    a.b(x:number,y:number).c(fn:$()~(x:number){->(2+1);}).d<=1+3*5/4;
 
     a.b(x: number, y: number)
     .c(fn: $()~(x: number)
     {
         -> (2 + 1);
-    }).d = 1 + 3 * 5 / 4;
+    }).d <= 1 + 3 * 5 / 4;
 
 ### [Next Chapter](basic-type.md)

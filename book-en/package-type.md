@@ -57,8 +57,8 @@ To change the value of the property is the same, it is equivalent to a nested id
 
 E.g:
 
-    Peter.Name = "Peter"; Peter.Number = "060233";
-    Peter.Class = 2; Peter.Grade = 6;
+    Peter.Name <= "Peter"; Peter.Number <= "060233";
+    Peter.Class <= 2; Peter.Grade <= 6;
 
 ## Private Property
 Anyone has some little secret, Peter is the same, maybe he hid a secret little girl's name and did not want others to know.
@@ -124,11 +124,11 @@ E.g:
         ...
         ~#
         {
-            ^.Name = name; ^.Number = number;
+            ^.Name <= name; ^.Number <= number;
             // calculate the class
-            ^.Class = GetSubText(data: number, from: 2, to: 3);
+            ^.Class <= GetSubText(data: number, from: 2, to: 3);
             // calculate the grade
-            ^.Grade = GetSubText(data: number, from: 0, to: 1);
+            ^.Grade <= GetSubText(data: number, from: 0, to: 1);
         };
     };
 

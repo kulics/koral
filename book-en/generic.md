@@ -31,7 +31,7 @@ E.g:
         Add => $(item: T)~() // add a generic data into the array
         {
             Items.Insert(key: Length, value: item);
-            Length + = 1;
+            Length += 1;
         };
     };
 
