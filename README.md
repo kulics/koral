@@ -36,14 +36,14 @@ Read detail from The [Book](./book-en/introduction.md).
                         "Chào bạn", "您好"];
             @ greetings ~ item
             {
-                print(value: item);
+                print(item);
                 ? item ~ 0..8 
                 {
-                    print(value: " in 0-8");
+                    print(" in 0-8");
                 }
                 ~ _
                 {
-                    print(value: " over 10");
+                    print(" over 10");
                     ~@;
                 };
             };
