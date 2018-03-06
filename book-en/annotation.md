@@ -15,14 +15,14 @@ Let's take a look at the database data for how to use annotations.
 
 E.g:
 
-        \*Table(name: "test")*\
+        \*Table("test")*\
         Annotation => #~()
         {
-                \*Key, Column(name: "id")*\
+                \*Key, Column("id")*\
                 Id => "";
-                \*Column(name: "name")*\
+                \*Column("name")*\
                 Name => "";
-                \*Column(name: "data")*\
+                \*Column("data")*\
                 Data => "";
         };
 

@@ -20,17 +20,17 @@ E.g:
 
     Array<T> => #~()
     {
-        Items => Storage~(type: T); // create storage
+        Items => Storage~(T); // create storage
         Length => 0;
 
         Get => $(index: number)~(item: T) // get a generic data
         {
-            -> (Items.Get(key: index));
+            -> (Items.Get(index));
         };
 
         Add => $(item: T)~() // add a generic data into the array
         {
-            Items.Insert(key: Length, value: item);
+            Items.Insert(Length, item);
             Length += 1;
         };
     };

@@ -60,21 +60,6 @@ namespace xylang
                 {
                     r.data = "var";
                 }
-                else if(context.GetChild(1).GetType() == typeof(XyParser.JudgeContext))
-                {
-                    // todo 如果左右不是bool类型值，报错
-                    r.data = "bool";
-                }
-                else if(context.GetChild(1).GetType() == typeof(XyParser.AddContext))
-                {
-                    // todo 如果左右不是number或text类型值，报错
-                    r.data = "double";
-                }
-                else if(context.GetChild(1).GetType() == typeof(XyParser.MulContext))
-                {
-                    // todo 如果左右不是number类型值，报错
-                    r.data = "double";
-                }
                 else if(context.GetChild(1).GetType() == typeof(XyParser.AsContext))
                 {
                     var expr = (Result)Visit(context.GetChild(0));
@@ -94,6 +79,28 @@ namespace xylang
                 var e1 = (Result)Visit(context.GetChild(0));
                 var op = Visit(context.GetChild(1));
                 var e2 = (Result)Visit(context.GetChild(2));
+                if(context.GetChild(1).GetType() == typeof(XyParser.JudgeContext))
+                {
+                    // todo 如果左右不是bool类型值，报错
+                    r.data = "bool";
+                }
+                else if(context.GetChild(1).GetType() == typeof(XyParser.AddContext))
+                {
+                    // todo 如果左右不是number或text类型值，报错
+                    if((string)e1.data == "string" || (string)e2.data == "string")
+                    {
+                        r.data = "string";
+                    }
+                    else
+                    {
+                        r.data = "double";
+                    }
+                }
+                else if(context.GetChild(1).GetType() == typeof(XyParser.MulContext))
+                {
+                    // todo 如果左右不是number类型值，报错
+                    r.data = "double";
+                }
                 r.text = e1.text + op + e2.text;
             }
             else if(count == 1)
@@ -223,7 +230,7 @@ namespace xylang
             {
                 r.text += Visit(context.templateCall());
             }
-            r.text += Visit(context.tuple());
+            r.text += ((Result)Visit(context.tuple())).text;
             return r;
         }
 
@@ -231,7 +238,7 @@ namespace xylang
         {
             var r = new Result();
             r.data = Visit(context.type());
-            r.text = "new " + Visit(context.type()) + Visit(context.tuple());
+            r.text = "new " + Visit(context.type()) + ((Result)Visit(context.tuple())).text;
             return r;
         }
 
@@ -301,15 +308,6 @@ namespace xylang
             result.data = "Dictionary<" + type + ">";
             result.text = "new Dictionary<" + type + ">(){" + result.text + "}";
             return result;
-        }
-
-        public override object VisitVariableList([NotNull] XyParser.VariableListContext context)
-        {
-            var newR = new Result();
-            var r = (Result)Visit(context.expressionList());
-            newR.text += "(" + r.text + ")";
-            newR.data = "var";
-            return newR;
         }
 
         class DicEle
@@ -383,7 +381,7 @@ namespace xylang
             }
             r.text += "(" + Visit(context.lambdaIn()) + ")";
             r.text += "=>";
-            r.text += "{" + Visit(context.lambdaOut()) + "}";
+            r.text += "" + Visit(context.lambdaOut()) + "";
             return r;
         }
 
@@ -408,10 +406,7 @@ namespace xylang
         public override object VisitLambdaOut([NotNull] XyParser.LambdaOutContext context)
         {
             var obj = "";
-            foreach(var item in context.functionSupportStatement())
-            {
-                obj += Visit(item);
-            }
+            obj += ((Result)Visit(context.expressionList())).text;
             return obj;
         }
 

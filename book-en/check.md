@@ -16,7 +16,7 @@ E.g:
     {
         ? name.Length = 0
         {
-            ~! Exception~(message: "something wrong");
+            ~! Exception~("something wrong");
         };
     };
 
@@ -28,11 +28,11 @@ E.g:
 
     !
     {
-        ReadFile(name: "temp.txt");
+        ReadFile("temp.txt");
     }
     ~ err
     {
-        Console.WriteLine(value: err.message);
+        Console.WriteLine(err.message);
     };
 
 Here, the `!` Block represents all the functional logic under inspection, `~ err` means that the erroneous data is defined as the identifier `err`, which acts like a in parameter.

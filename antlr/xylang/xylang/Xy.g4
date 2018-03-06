@@ -161,7 +161,7 @@ primaryExpression
 | array // 数组
 | dictionary // 字典
 | lambda // 匿名函数
-| variableList // 变量列
+| tuple // 元组
 | empty // 类型空初始化
 | plusMinus // 正负处理
 | negate // 取反
@@ -174,13 +174,11 @@ primaryExpression
 | expression mul expression // 积型表达式
 ;
 
+tuple : '(' (expression (',' expression)* )? ')'; // 元组
+
 expressionList : expression (',' expression)* ; // 表达式列
 
 annotation: '\\*' expressionList '*\\'; // 注解
-
-tuple : '(' (id ':' expression (',' id ':' expression)* )? ')'; // 元组
-
-variableList : '(' expressionList ')' ; // 变量列
 
 callFunc: id (templateCall)? tuple; // 函数调用
 
@@ -204,8 +202,8 @@ templateCall: '<' type (',' type)* '>';
 
 lambda : t=(Function|FunctionAsync) lambdaIn Wave lambdaOut;
 
-lambdaIn : '(' (id (',' id)* )? ')'  ;
-lambdaOut : '(' (functionSupportStatement)* ')'  ;
+lambdaIn : '(' (id (',' id)* )? ')';
+lambdaOut : '(' expressionList ')';
 
 empty : '~<' type '>'; // 类型空初始化
 
