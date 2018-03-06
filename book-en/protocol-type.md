@@ -1,7 +1,10 @@
 # Protocol Type
-The protocol defines the methods and properties necessary to implement a particular feature.
+In reality, we often use the protocol to specify some specific rules, so that people or things can do things according to the expected rules.
+We often need to do this in programming languages as well. This feature is the protocol.
 
-Arbitrary packages that fulfill all the protocol requirements can be considered as including this protocol.
+The protocol specifies the methods and properties necessary to implement a particular feature, allowing the package to comply.
+
+Our package can introduce the protocol we need, just like signing an protocol, and then declare all the properties required by the protocol, so that we think the package signed the protocol.
 ## Definition
 We only need to use the symbol `&` to define a protocol.
 
@@ -9,9 +12,9 @@ E.g:
 
     Protocol => &{};
 
-This is an empty agreement.
+This is an empty protocol.
 
-Next, let's try to design a difficult task that students need to accomplish ... homework.
+Next, let's design a difficult task that students need to accomplish ... homework.
 
 E.g:
 
@@ -25,7 +28,7 @@ The protocol for this job has two properties, one is the number of homework and 
 
 The protocol properties defined and package properties defined in exactly the same way.
 
-Unlike a package, the assignment of these properties defines only the role of the specified type, so there is no need for truly valid values ​​or function content.
+Unlike a package, the definition of the protocol properties do not need specific values or function content, only need to determine the type.
 
 Next, let's have the students implement the protocol.
 ## Contains the protocol
@@ -56,11 +59,9 @@ Let's explain what this section of the protocol contains:
 1. We have written the actual values ​​and functions for each of the two properties of the protocol, so that these two properties become one of the valid sub-properties of `Student`.
 1. We did something inside `Do` and reduced the total number of jobs by calling the `HomeWork` property.
 
-Note that the protocol properties are properties, we can not achieve in a package of two protocols of the same name, nor can there be other properties or methods and protocols with the same name.
+Note that the protocol properties are properties, we can not achieve in a package of two protocols of the same name, nor can there be other properties or methods and protocols with the same name. 
 
-Because you can not have two properties of the same name, this can create unnecessary ambiguity.
-
-However, properties of different names are allowed, so the protocol of different names contains the same name.
+However, the protocol of different names can contains the properties of same names.
 
 ## Use Protocol
 With the protocol included, we can use the student bundle that owns the protocol.
@@ -81,7 +82,7 @@ Let's think back and forth about the role of an protocol that has the same set o
 
 This makes it unnecessary for protocol makers to be concerned with how packages follow the protocol, and they can be used in the same way by knowing that they all follow.
 
-So we can create a wide variety of students, all of whom follow the same protocol, and we can use the protocol without discrimination.
+Now we can create a wide variety of students, all of whom follow the same protocol, and we can use the protocol feature without discrimination.
 
 E.g:
 
@@ -177,10 +178,10 @@ E.g:
     func => $(hw: &HomeWork)~()
     {
         // judge type
-        ? hw ?: ChinaStudent
+        ? hw ?: ChineseStudent
         {
             // convert to chinese student data
-            cs => hw !: ChinaStudent;
+            cs => hw !: ChineseStudent;
         };
     };
 

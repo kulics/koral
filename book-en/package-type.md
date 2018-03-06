@@ -70,7 +70,7 @@ E.g:
     Student => #~()
     {
         ...
-        _GirlFirend => "";
+        _GirlFirend => ""; // The identifier beginning with this '_' is private
     };
 
 That's right, if you remember the definition of identifiers, this is how private identifiers are defined, and private identifiers can not be accessed by outsiders.
@@ -147,7 +147,7 @@ Now let us play our imagination, we want a customized package for Chinese studen
 
 E.g:
 
-    ChinaStudent => #~()
+    ChineseStudent => #~()
     {
         Name => "";
         Number => "";
@@ -162,7 +162,7 @@ We need to use a combination of this feature, but not so complicated, just creat
 
 E.g:
 
-    ChinaStudent => #~()
+    ChineseStudent => #~()
     {
         Student => Student~(); // include student attributes in it
         KungFu => false; // kung fu students
@@ -172,7 +172,7 @@ This way you can use generic attributes via student attributes in Chinese studen
 
 E.g:
 
-    Chen => ChinaStudent~();
+    Chen => ChineseStudent~();
     Console.WriteLine(Chen.Student.Name);
     // of course, since there is no assignment, nothing is output
 
