@@ -48,13 +48,13 @@ E.g:
         // correct
         Async => .$()~(Out: number)
         {
-            .$ Task.Delay(time: 5000); // wait for a while
+            .$ Task.Delay(5000); // wait for a while
             -> (12);
         };
         // wrong
         Async => $()~(out: number)
         {
-            .$ Task.Delay(time: 5000); // can not be declared
+            .$ Task.Delay(5000); // can not be declared
             -> (12);
         };
 
@@ -67,7 +67,7 @@ E.g:
 
     Async => .$()~()
     {
-        .$ Task.Delay(time: 5000); // wait for a while
+        .$ Task.Delay(5000); // wait for a while
     };
 
     .$ Async(); // correct

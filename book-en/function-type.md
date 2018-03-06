@@ -20,7 +20,7 @@ E.g:
 
 This defines a function with the identifier `function`.
 
-Note that the function can be defined in the package and protocol, you can also define the function inside the function. When you define a function in a function, the intrinsic does not have a public property and belongs only to the private function of the current function.
+Note that the function can be defined in the package and protocol, you can also define inside the function. When you define a function in a function, the intrinsic does not have a public property and belongs only to the private function of the current function.
 ## Call
 Unlike the main entrance function can not be called, conventional functions can be used to call identifier, we only need to add `()` behind the identifier can use the function.
 
@@ -77,15 +77,11 @@ When we call the function, we need to fill the brackets with the identifier in t
 E.g:
 
     sell => $(price: number, name: text)~(){}; 
-    // define two functions into the parameters
+    // define one function with two in parameter
 
-    sell(price: 1.99, name: "cola"); 
+    sell(1.99, "cola"); 
     // fill in the data that meets the requirements as defined
 
-As with most other languages, it is mandatory that the identifier when the function is called is unambiguous and can not be omitted.
-The benefit of this design is that you can get information about each parameter directly based on the name of the identifier while reading the code. Although the cost is longer code to express, but the cost is very worth it.
-
-Therefore, we recommend that any parameter can use more meaningful identifiers.
 ### Out Parameters
 Similar to in parameters, out parameters also need to be clearly defined with an identifier, which makes it easier for callers to access the function's role information.
 
@@ -96,8 +92,6 @@ E.g:
         ...
         -> ("cola", many);
     };
-
-The difference is that we do not need to use identifier when we use the return statement, because the parameters of a function is already clear, the function designer does not need to do the same thing on each return statement.
 
 ### The use of the return
 So how do we get the return value of a function?
@@ -117,7 +111,7 @@ You can use the definition or assignment statement to get the return value of th
 
 E.g:
 
-    Console.WriteLine(value: topSell()); // print two values
+    Console.WriteLine(topSell()); // print two values
 
 If there is only one return value, the brackets can be taken without.
 
@@ -150,7 +144,7 @@ E.g:
     {
         @ 1..10 ~ i
         {
-            func(item: i);
+            func(i);
         };
     };
 
@@ -162,26 +156,28 @@ E.g:
 
     print => $(item: number)~()
     {
-        Console.WriteLine(value: item);
+        Console.WriteLine(item);
     };
 
-    each1To10(func: print);
+    each1To10(print);
 
 So, we executed the `print` function in the loop inside `each1To10`.
 
 Function In Parameter only require the same type of function parameters, do not require the same name of the parameters.
 
-## Anonymous Function
-As the above way to define a function and then imported into use sometimes appear more verbose, because we just want to perform a function only, not necessarily to define a function to provide to other places to use.
+## Lambda Expression
+As the above way to define a function and then imported into use sometimes appear more verbose, because we just want to perform a little function only, not necessarily to define a function to provide to other places to use.
 
-At this point we can use the syntax of anonymous functions to reduce the pain of our naming.
+At this point we can use the syntax of Lambda Expression to reduce the pain of our naming.
 
 Because function arguments are already defined at the time of declaration, we can use simplified syntax to express them.
 
 E.g:
 
-    each1To10(func: $(item)~( Console.WriteLine(value: item); ));
+    each1To10($(item)~( Console.WriteLine(item) ));
+    findAll($(it)~(it>7));
+    order($(it)~(it.time));
 
-Very simple, and the difference between the expression of the function type is that the input only need to declare the identifier, and the parameter is used to include the body of the function.
+Very simple, and the difference between the expression of the function type is that the input only need to declare the identifier, and the parameter is used to include one expression.
 
 ### [Next Chapter](package-type.md)

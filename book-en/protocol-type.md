@@ -42,7 +42,7 @@ E.g:
 
             Do => $()~()
             {
-                SpendTime(hours: 1); // spent an hour
+                SpendTime(1); // spent an hour
                 ^.HomeWork.Count -= 1; // completed one
             };
         };
@@ -68,11 +68,11 @@ With the protocol included, we can use the student bundle that owns the protocol
 E.g:
 
     Peter => Student~();
-    Console.WriteLine(value: Peter.HomeWork.Count);
+    Console.WriteLine(Peter.HomeWork.Count);
     // print 999999, too much
     Peter.HomeWork.Do();
     // did a homework
-    Console.WriteLine(value: Peter.HomeWork.Count);
+    Console.WriteLine(Peter.HomeWork.Count);
     // print 999998, or too much
 
 If this is the case, there is no advantage in defining these two properties directly in the package.
@@ -105,20 +105,20 @@ E.g:
         student.Do(); // because the protocol has been marked, we can use the protocol method
     };
     // Now we can make it easier for every student to do their homework
-    DoHomeWork(student: StudentA.HomeWork);
-    DoHomeWork(student: StudentB.HomeWork);
-    DoHomeWork(student: StudentC.HomeWork);
+    DoHomeWork(StudentA.HomeWork);
+    DoHomeWork(StudentB.HomeWork);
+    DoHomeWork(StudentC.HomeWork);
 
 Of course, it is better to put these students in an array so that we can use loops to handle these repetitive tasks.
 
 E.g:
 
     Arr => [&HomeWork]~();
-    Arr.Add(value: StudentA.HomeWork);
+    Arr.Add(StudentA.HomeWork);
     ... // stuffed many, many students
     @ Arr ~ Student
     {
-        DoHomeWork(student: Student);
+        DoHomeWork(Student);
     };
 
 ╮ (¯ ▽ ¯) ╭
@@ -152,14 +152,14 @@ E.g:
         ...
         Do => $()~()
         {
-            SpendTime(hours: HomeWork._NeedHours); // spent the value provided by the protocol
+            SpendTime(HomeWork._NeedHours); // spent the value provided by the protocol
             ...
         };
     };
     ...
     @ Arr ~ Student
     {
-        HomeWork._DoHomeWork(student: Student);
+        HomeWork._DoHomeWork(Student);
     };
 
 ╮ (¯ ▽ ¯) ╭

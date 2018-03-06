@@ -50,7 +50,7 @@ Very simple, we only need to use `.` syntax, we can summon the attributes we nee
 
 E.g:
 
-    Console.WriteLine(value: Peter.Name); 
+    Console.WriteLine(Peter.Name); 
     // print the name of a student
 
 To change the value of the property is the same, it is equivalent to a nested identifier. We can directly use the assignment statement to change the value.
@@ -103,7 +103,7 @@ With this function, we can get the private property by calling the function.
 
 E.g:
 
-    Console.WriteLine(value: Peter.GetGirlFirend());
+    Console.WriteLine(Peter.GetGirlFirend());
     // printed the name of a girlfriend of a puppy love student
 
 As with data attributes, functions can also be private identifiers, and functions that use private identifiers also mean that only the packet can access itself.
@@ -126,9 +126,9 @@ E.g:
         {
             ^.Name <= name; ^.Number <= number;
             // calculate the class
-            ^.Class <= GetSubText(data: number, from: 2, to: 3);
+            ^.Class <= GetSubText(number, 2, 3);
             // calculate the grade
-            ^.Grade <= GetSubText(data: number, from: 0, to: 1);
+            ^.Grade <= GetSubText(number, 0, 1);
         };
     };
 
@@ -136,8 +136,8 @@ This gives us a package with constructors, and when we create a new student, cla
 
 E.g:
 
-    Peter => Student~(name: "Peter", number: "060233");
-    Console.WriteLine(value: Peter.Class); // print out 2
+    Peter => Student~("Peter", "060233");
+    Console.WriteLine(Peter.Class); // print out 2
 
 It should be noted that a package can only support one constructor, we recommend to maintain the simplicity of the structure, a stable package easier to be used by the caller,
 
@@ -173,7 +173,7 @@ This way you can use generic attributes via student attributes in Chinese studen
 E.g:
 
     Chen => ChinaStudent~();
-    Console.WriteLine(value: Chen.Student.Name);
+    Console.WriteLine(Chen.Student.Name);
     // of course, since there is no assignment, nothing is output
 
 By combining layers after layer, you are free to assemble whatever you want to describe.

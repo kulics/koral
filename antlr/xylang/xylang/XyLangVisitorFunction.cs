@@ -67,7 +67,8 @@ namespace xylang
                 }
             }
             obj += ")";
-            return obj;
+            var result = new Result { data = "var", text = obj };
+            return result;
         }
 
         public override object VisitParameterClauseIn([NotNull] XyParser.ParameterClauseInContext context)

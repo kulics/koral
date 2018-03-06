@@ -10,14 +10,14 @@ E.g:
     arr => [1, 2, 3, 4, 5];
     @ arr ~ i
     {
-        Console.WriteLine(value: i); // print each number
+        Console.WriteLine(i); // print each number
     };
 
 `~` Followed by an identifier, this identifier is the current take value in collection, this identifier is valid only in the current cycle. So we do not need to define an identifier externally.
 
 This can be thought of as a `foreach` structure relative to other languages.
 ## Iterator Loop
-There are times when we do not necessarily have a collection, but we just need to take a number like `0` to `100`. We just have an iterator syntax to accomplish such a task.
+There are times when we do not necessarily have a collection, but we just need to take numbers like `0` to `100`. We have an iterator syntax to accomplish such a task.
 
 Iterators can loop from the start point to the end point, using the `..` symbol between the two numbers.
 
@@ -25,7 +25,7 @@ E.g:
 
     @ 0..100 ~ i
     {
-        Console.WriteLine(value: i); // print each number
+        Console.WriteLine(i); // print each number
     };
 
 It should be noted that the meaning of `0..100` is read from` 0` to `100` one by one, that is, a total execution of` 101` times. Iterator will be executed until the last number is completed, rather than an early end.

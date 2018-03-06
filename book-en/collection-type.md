@@ -30,7 +30,7 @@ If we need to access one of the elements in the array we can access it with the 
 
 E.g:
 
-    Console.WriteLine(value: arr[1]);
+    Console.WriteLine(arr[1]);
 
 It should be noted that in the programming language, most of the array starting index is from `0`,` identifier [0] `is the first element obtained, the subsequent elements and so on.
 ### Change the element
@@ -43,9 +43,9 @@ E.g:
 Note that we can only access the index of the existing data, if not exist, there will be an error.
 ### Common operation
     
-    arr.Add(value: 1); // added to the end
-    arr.Insert(index: 2, value: 3); // insert element 3 to index 2
-    arr.RemoveAt(index: 1); // delete the specified location element
+    arr.Add(1); // added to the end
+    arr.Insert(2, 3); // insert element 3 to index 2
+    arr.RemoveAt(1); // delete the specified location element
     length => arr.Count; // length
 
 ## Dictionary
@@ -74,7 +74,7 @@ Like an array, we can also use indexes to access data directly.
 
 E.g:
 
-    Console.WriteLine(value: dic["a"]);
+    Console.WriteLine(dic["a"]);
 
 ### Change the element
 Like arrays, we can also use assignment statements to change to elements.
@@ -86,8 +86,8 @@ E.g:
 The difference is that with the array, if the assignment is a non-existent index, it will not be wrong, the value will be given directly to the new key.
 ### Common operation
 
-    dic.Add(key: "d", value: 11); // add index by method
-    dic.Remove(key: "c");  // delete the specified index element
+    dic.Add("d", 11); // add index by method
+    dic.Remove("c");  // delete the specified index element
     length => dic.Count; // length
 
 ### [Next Chapter](judgment.md)
