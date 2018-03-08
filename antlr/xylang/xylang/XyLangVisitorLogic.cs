@@ -173,5 +173,31 @@ namespace xylang
             obj += context.BlockRight().GetText() + Wrap;
             return obj;
         }
+
+        public override object VisitLinq([NotNull] XyParser.LinqContext context)
+        {
+            var r = new Result();
+            r.data = "var";
+            foreach(var item in context.linqItem())
+            {
+                r.text += (string)Visit(item) + " ";
+            }
+            r.text = "(" + r.text + ")";
+            return r;
+        }
+
+        public override object VisitLinqItem([NotNull] XyParser.LinqItemContext context)
+        {
+            if(context.expression() != null)
+            {
+                return ((Result)Visit(context.expression())).text;
+            }
+            return (string)Visit(context.linqKeyword());
+        }
+
+        public override object VisitLinqKeyword([NotNull] XyParser.LinqKeywordContext context)
+        {
+            return context.k.Text;
+        }
     }
 }

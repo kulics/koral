@@ -89,7 +89,7 @@ namespace xylang
             {
                 header += Visit(context.annotation());
             }
-            header += id.permission + " class " + id.text;
+            header += id.permission + " partial class " + id.text;
             // 泛型
             if(context.templateDefine() != null)
             {
@@ -333,7 +333,7 @@ namespace xylang
                     staticProtocol += r.text;
                 }
             }
-            obj += "public interface Interface" + ptclName;
+            obj += "public partial interface Interface" + ptclName;
             // 泛型
             if(context.templateDefine() != null)
             {
@@ -343,7 +343,7 @@ namespace xylang
             obj += interfaceProtocol;
             obj += context.BlockRight().GetText() + Wrap;
 
-            obj += "public static class " + id.text;
+            obj += "public static partial class " + id.text;
             // 泛型
             if(context.templateDefine() != null)
             {
