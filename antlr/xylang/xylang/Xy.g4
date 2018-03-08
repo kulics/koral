@@ -72,12 +72,6 @@ parameterClauseIn : '(' parameter? (',' parameter)*  ')'  ;
 parameterClauseOut : '(' parameter? (',' parameter)*  ')'  ;
 // 参数结构
 parameter : id ':' type;
-// 检查
-checkStatement: Check BlockLeft (functionSupportStatement)* BlockRight checkErrorStatement Terminate;
-// 错误处理
-checkErrorStatement:Wave id BlockLeft (functionSupportStatement)* BlockRight;
-// 报告错误
-reportStatement: CheckSub (expression)? Terminate;
 
 // 函数支持的语句
 functionSupportStatement:
@@ -89,6 +83,7 @@ functionSupportStatement:
 | loopInfiniteStatement
 | assignStatement
 | expressionStatement
+| checkWatchStatement
 | checkStatement
 | reportStatement
 | functionStatement
@@ -104,6 +99,7 @@ logicStatement:
 | loopInfiniteStatement
 | loopJumpStatement
 | expressionStatement
+| checkWatchStatement
 | checkStatement
 | reportStatement
 | variableStatement
@@ -131,6 +127,14 @@ loopEachStatement:Loop expression Wave id BlockLeft (logicStatement)* BlockRight
 loopInfiniteStatement:Loop BlockLeft (logicStatement)* BlockRight Terminate;
 // 跳出循环
 loopJumpStatement:LoopSub Terminate;
+// 看守
+checkWatchStatement: CheckWatch callPkg Wave id BlockLeft (functionSupportStatement)* BlockRight Terminate;
+// 检查
+checkStatement: Check BlockLeft (functionSupportStatement)* BlockRight checkErrorStatement Terminate;
+// 错误处理
+checkErrorStatement:Wave id BlockLeft (functionSupportStatement)* BlockRight;
+// 报告错误
+reportStatement: CheckSub (expression)? Terminate;
 // 迭代器
 iteratorStatement:expression '..' expression '..' expression | expression '..' expression;
 // 命名空间
@@ -164,6 +168,7 @@ primaryExpression
 | dictionary // 字典
 | lambda // lambda表达式
 | function // 函数
+| package // 匿名包
 | tuple // 元组
 | empty // 类型空初始化
 | plusMinus // 正负处理
@@ -214,6 +219,8 @@ lambda : t=(Function|FunctionAsync) lambdaIn Wave lambdaOut;
 
 lambdaIn : '(' (id (',' id)* )? ')';
 lambdaOut : '(' expressionList ')';
+
+package: Package pkgAssign; // 匿名包
 
 function : t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 
@@ -305,6 +312,7 @@ Judge : '?';
 LoopSub : '~@';
 Loop : '@';
 
+CheckWatch : '.!';
 CheckSub : '~!';
 Check : '!';
 

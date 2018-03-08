@@ -256,6 +256,14 @@ namespace xylang
             return obj;
         }
 
+        public override object VisitPackage([NotNull] XyParser.PackageContext context)
+        {
+            var r = new Result();
+            r.data = "var";
+            r.text = "new" + (string)Visit(context.pkgAssign());
+            return r;
+        }
+
         public override object VisitCallAwait([NotNull] XyParser.CallAwaitContext context)
         {
             var r = new Result();
