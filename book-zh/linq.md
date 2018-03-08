@@ -10,6 +10,8 @@
 
 关于更多 LINQ 的细节说明可以到以下网址阅读。
 
+[微软文档](https://docs.microsoft.com/zh-cn/dotnet/csharp/programming-guide/concepts/linq/getting-started-with-linq)
+
 ## 声明
 在这门语言里，因为没有关键字的设计，所以我们需要使用特殊方法来标记 LINQ 语句。
 
