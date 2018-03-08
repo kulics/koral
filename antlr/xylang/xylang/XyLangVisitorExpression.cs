@@ -60,22 +60,6 @@ namespace xylang
                 {
                     r.data = "var";
                 }
-                else if(context.GetChild(1).GetType() == typeof(XyParser.AsContext))
-                {
-                    var expr = (Result)Visit(context.GetChild(0));
-                    var type = (string)Visit(context.GetChild(2));
-                    r.data = type;
-                    r.text = expr.text + " as " + type;
-                    return r;
-                }
-                else if(context.GetChild(1).GetType() == typeof(XyParser.IsContext))
-                {
-                    var expr = (Result)Visit(context.GetChild(0));
-                    var type = (string)Visit(context.GetChild(2));
-                    r.data = "bool";
-                    r.text = expr.text + " is " + type;
-                    return r;
-                }
                 var e1 = (Result)Visit(context.GetChild(0));
                 var op = Visit(context.GetChild(1));
                 var e2 = (Result)Visit(context.GetChild(2));
@@ -239,7 +223,37 @@ namespace xylang
             var r = new Result();
             r.data = Visit(context.type());
             r.text = "new " + Visit(context.type()) + ((Result)Visit(context.tuple())).text;
+            if(context.pkgAssign() != null)
+            {
+                r.text += Visit(context.pkgAssign());
+            }
             return r;
+        }
+
+        public override object VisitPkgAssign([NotNull] XyParser.PkgAssignContext context)
+        {
+            var obj = "";
+            obj += "{";
+            for(int i = 0; i < context.pkgAssignElement().Length; i++)
+            {
+                if(i == 0)
+                {
+                    obj += Visit(context.pkgAssignElement(i));
+                }
+                else
+                {
+                    obj += "," + Visit(context.pkgAssignElement(i));
+                }
+            }
+            obj += "}";
+            return obj;
+        }
+
+        public override object VisitPkgAssignElement([NotNull] XyParser.PkgAssignElementContext context)
+        {
+            var obj = "";
+            obj += Visit(context.nameSpace()) + " = " + ((Result)Visit(context.expression())).text;
+            return obj;
         }
 
         public override object VisitCallAwait([NotNull] XyParser.CallAwaitContext context)
@@ -367,6 +381,24 @@ namespace xylang
                 r.data = "object";
                 r.text = "null";
             }
+            return r;
+        }
+
+        public override object VisitFunction([NotNull] XyParser.FunctionContext context)
+        {
+            var r = new Result();
+            // 异步
+            if(context.t.Type == XyParser.FunctionAsync)
+            {
+                r.text += " async ";
+            }
+            r.text += Visit(context.parameterClauseIn()) + " => " + context.BlockLeft().GetText() + Wrap;
+            foreach(var item in context.functionSupportStatement())
+            {
+                r.text += Visit(item);
+            }
+            r.text += context.BlockRight().GetText() + Wrap;
+            r.data = "var";
             return r;
         }
 

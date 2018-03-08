@@ -38,6 +38,11 @@ namespace xylang
                 r.permission = "public";
                 r.text += Visit(context.typeBasic());
             }
+            else if(context.linqKeyword() != null)
+            {
+                r.permission = "public";
+                r.text += Visit(context.linqKeyword());
+            }
             else if(context.op.Type == XyParser.IDPublic)
             {
                 r.permission = "public";
@@ -48,6 +53,7 @@ namespace xylang
                 r.permission = "private";
                 r.text += context.op.Text;
             }
+
 
             if(keywords.IndexOf(r.text) >= 0)
             {
@@ -69,6 +75,26 @@ namespace xylang
                 r.data = "bool";
                 r.text = context.False().GetText();
             }
+            return r;
+        }
+
+        public override object VisitCallAs([NotNull] XyParser.CallAsContext context)
+        {
+            var r = new Result();
+            var expr = (Result)Visit(context.expression());
+            var type = (string)Visit(context.type());
+            r.data = type;
+            r.text = "((" + type + ")" + expr.text + ")";
+            return r;
+        }
+
+        public override object VisitCallIs([NotNull] XyParser.CallIsContext context)
+        {
+            var r = new Result();
+            var expr = (Result)Visit(context.expression());
+            var type = (string)Visit(context.type());
+            r.data = "bool";
+            r.text = "(" + expr.text + " is " + type + ")";
             return r;
         }
     }

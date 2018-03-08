@@ -22,29 +22,29 @@ packageStatement:(annotation)? id (templateDefine)? Define Package Wave paramete
 // 包支持的语句
 packageSupportStatement:
 packageStatement
-|packageVariableStatement
 |packageInitStatement
 |packageExtend
 |protocolStatement
 |protocolImplementStatement
 |packageFunctionStatement
+|packageVariableStatement
 ;
 // 包构造方法
 packageInitStatement:PackageSub BlockLeft (functionSupportStatement)* BlockRight Terminate;
-// 定义变量
-packageVariableStatement:(annotation)? expression Define expression Terminate;
 // 函数
 packageFunctionStatement:id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义引入
 packageExtend: PackageSub nameSpace Terminate;
+// 定义变量
+packageVariableStatement:(annotation)? expression Define expression Terminate;
 
 // 协议
 protocolStatement: id (templateDefine)? Define Protocol BlockLeft (protocolSupportStatement)* BlockRight Terminate;
 // 协议支持的语句
 protocolSupportStatement:
 protocolStatement
-|protocolVariableStatement
 |protocolFunctionStatement
+|protocolVariableStatement
 ;
 // 定义变量
 protocolVariableStatement:expression Define expression Terminate;
@@ -52,8 +52,8 @@ protocolVariableStatement:expression Define expression Terminate;
 protocolFunctionStatement:id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 协议实现支持的语句
 protocolImplementSupportStatement:
-implementVariableStatement
-|implementFunctionStatement
+implementFunctionStatement
+|implementVariableStatement
 ;
 // 实现协议
 protocolImplementStatement:ProtocolSub nameSpace (templateCall)? BlockLeft (protocolImplementSupportStatement)* BlockRight Terminate;
@@ -65,7 +65,7 @@ implementFunctionStatement:id (templateDefine)? Define t=(Function|FunctionAsync
 // 函数
 functionStatement:id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 返回
-returnStatement: ArrowRight '(' (expressionList)? ')' Terminate;
+returnStatement: ArrowRight tuple Terminate;
 // 入参
 parameterClauseIn : '(' parameter? (',' parameter)*  ')'  ;
 // 出参
@@ -82,7 +82,6 @@ reportStatement: CheckSub (expression)? Terminate;
 // 函数支持的语句
 functionSupportStatement:
  returnStatement
-| variableStatement
 | judgeCaseStatement
 | judgeStatement
 | loopStatement
@@ -93,21 +92,22 @@ functionSupportStatement:
 | checkStatement
 | reportStatement
 | functionStatement
+| variableStatement
 ;
 
 logicStatement:
  returnStatement
-| variableStatement
 | judgeCaseStatement
 | judgeStatement
 | loopStatement
 | loopEachStatement
 | loopInfiniteStatement
 | loopJumpStatement
-| assignStatement
 | expressionStatement
 | checkStatement
 | reportStatement
+| variableStatement
+| assignStatement
 ;
 // 条件判断
 judgeCaseStatement: Judge expression (caseStatement)+ Terminate;
@@ -158,15 +158,17 @@ primaryExpression
 | callFunc // 函数调用
 | callPkg // 新建包
 | callAwait // 异步调用
+| callIs // 类型判断
+| callAs // 类型转换
 | array // 数组
 | dictionary // 字典
-| lambda // 匿名函数
+| lambda // lambda表达式
+| function // 函数
 | tuple // 元组
 | empty // 类型空初始化
 | plusMinus // 正负处理
 | negate // 取反
-| expression as type // 类型转换
-| expression is type // 类型判断
+| linq // 联合查询
 | expression readElement // 访问元素
 | expression call expression // 链式调用
 | expression judge expression // 判断型表达式
@@ -182,7 +184,15 @@ annotation: '\\*' expressionList '*\\'; // 注解
 
 callFunc: id (templateCall)? tuple; // 函数调用
 
-callPkg: type wave tuple; // 新建包
+callPkg: type wave tuple (pkgAssign)?; // 新建包
+
+pkgAssign: BlockLeft (pkgAssignElement (',' pkgAssignElement)*)? BlockRight; // 简化赋值
+
+pkgAssignElement: nameSpace ':' expression; // 简化赋值元素
+
+callIs: type is '(' expression ')'; // 类型判断
+
+callAs: type as '(' expression ')';	// 类型转换
 
 callAwait: FunctionAsync expression; // 异步调用
 
@@ -205,11 +215,19 @@ lambda : t=(Function|FunctionAsync) lambdaIn Wave lambdaOut;
 lambdaIn : '(' (id (',' id)* )? ')';
 lambdaOut : '(' expressionList ')';
 
+function : t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
+
 empty : '~<' type '>'; // 类型空初始化
 
 plusMinus : add expression;
 
 negate : '~~' expression;
+
+linq: '`' (linqItem)+  '`';
+
+linqItem: linqKeyword|expression;
+
+linqKeyword: k=('from'|'where'|'select'|'group'|'into'|'orderby'|'join'|'let'|'in'|'on'|'equals'|'by'|'ascending'|'descending') ;
 
 // 基础数据
 dataStatement:
@@ -251,8 +269,8 @@ t=TypeAny
 // bool值
 bool:t=True|t=False;
 
-as : op='!:';
-is : op='?:';
+as : op='!';
+is : op='?';
 judge : op=('||' | '&&' | '=' | '!=' | '<' | '>');
 assign : op=(Assign | '+=' | '-=' | '*=' | '/=' | '%=');
 add : op=('+' | '-');
@@ -261,7 +279,8 @@ call : op='.';
 wave : op='~';
 
 id: op=(IDPublic|IDPrivate)
-|typeBasic;
+|typeBasic
+|linqKeyword;
 
 Terminate : ';';
 
@@ -311,8 +330,8 @@ Nil : 'nil';
 Number :DIGIT+ ('.' DIGIT+)?; // 数字
 fragment DIGIT : [0-9] ;             // 单个数字
 Text: '"' (~[\\\r\n])*? '"'; // 文本
-IDPrivate : '_' [a-zA-Z0-9]+; // 私有标识符
-IDPublic  : [a-zA-Z] [a-zA-Z0-9]*; // 公有标识符
+IDPrivate : '_' [a-zA-Z0-9_]+; // 私有标识符
+IDPublic  : [a-zA-Z] [a-zA-Z0-9_]*; // 公有标识符
 Discard : '_'; // 匿名变量
 
 Comment : '/*' .*? '*/' -> skip; // 结构注释

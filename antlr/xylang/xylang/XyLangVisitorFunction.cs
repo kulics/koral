@@ -47,8 +47,12 @@ namespace xylang
 
         public override object VisitReturnStatement([NotNull] XyParser.ReturnStatementContext context)
         {
-            var r = (Result)Visit(context.expressionList());
-            return "return (" + r.text + ")" + context.Terminate().GetText() + Wrap;
+            var r = (Result)Visit(context.tuple());
+            if(r.text == "()")
+            {
+                r.text = "";
+            }
+            return "return " + r.text + "" + context.Terminate().GetText() + Wrap;
         }
 
         public override object VisitTuple([NotNull] XyParser.TupleContext context)
