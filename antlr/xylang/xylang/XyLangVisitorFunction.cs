@@ -129,42 +129,5 @@ namespace xylang
             var id = (Result)Visit(context.id());
             return Visit(context.type()) + " " + id.text;
         }
-
-        public override object VisitCheckStatement([NotNull] XyParser.CheckStatementContext context)
-        {
-            var obj = "";
-            obj += "try " + context.BlockLeft().GetText() + Wrap;
-            foreach(var item in context.functionSupportStatement())
-            {
-                obj += Visit(item);
-            }
-            obj += context.BlockRight().GetText() + Wrap;
-            obj += Visit(context.checkErrorStatement()) + Wrap;
-            return obj;
-        }
-
-        public override object VisitCheckErrorStatement([NotNull] XyParser.CheckErrorStatementContext context)
-        {
-            var obj = "";
-            var ID = (Result)Visit(context.id());
-            obj += "catch(Exception " + ID.text + ")" + Wrap + context.BlockLeft().GetText() + Wrap;
-            foreach(var item in context.functionSupportStatement())
-            {
-                obj += Visit(item);
-            }
-            obj += context.BlockRight().GetText();
-            return obj;
-        }
-
-        public override object VisitReportStatement([NotNull] XyParser.ReportStatementContext context)
-        {
-            var obj = "";
-            if(context.expression() != null)
-            {
-                var r = (Result)Visit(context.expression());
-                obj += r.text;
-            }
-            return "throw " + obj + context.Terminate().GetText() + Wrap;
-        }
     }
 }
