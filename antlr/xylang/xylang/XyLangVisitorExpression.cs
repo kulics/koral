@@ -75,6 +75,10 @@ namespace xylang
                     {
                         r.data = "string";
                     }
+                    else if((string)e1.data == "int" && (string)e2.data == "int")
+                    {
+                        r.data = "int";
+                    }
                     else
                     {
                         r.data = "double";
@@ -83,7 +87,14 @@ namespace xylang
                 else if(context.GetChild(1).GetType() == typeof(XyParser.MulContext))
                 {
                     // todo 如果左右不是number类型值，报错
-                    r.data = "double";
+                    if((string)e1.data == "int" && (string)e2.data == "int")
+                    {
+                        r.data = "int";
+                    }
+                    else
+                    {
+                        r.data = "double";
+                    }
                 }
                 r.text = e1.text + op + e2.text;
             }
@@ -364,10 +375,15 @@ namespace xylang
         public override object VisitDataStatement([NotNull] XyParser.DataStatementContext context)
         {
             var r = new Result();
-            if(context.t.Type == XyParser.Number)
+            if(context.t.Type == XyParser.Float)
             {
                 r.data = "double";
-                r.text = context.Number().GetText();
+                r.text = context.Float().GetText();
+            }
+            else if(context.t.Type == XyParser.Integer)
+            {
+                r.data = "int";
+                r.text = context.Integer().GetText();
             }
             else if(context.t.Type == XyParser.Text)
             {

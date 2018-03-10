@@ -224,7 +224,8 @@ linqKeyword: k=('from'|'where'|'select'|'group'|'into'|'orderby'|'join'|'let'|'i
 
 // 基础数据
 dataStatement:
-t=Number
+t=Float
+| t=Integer
 | t=Text
 | t=True
 | t=False
@@ -254,7 +255,8 @@ typeFunctionParameterClause : '(' (id ':' type (',' id ':' type)* )? ')'  ;
 // 基础类型名
 typeBasic:
 t=TypeAny
-| t=TypeNumber
+| t=TypeInteger
+| t=TypeFloat
 | t=TypeText
 | t=TypeBool
 ;
@@ -314,14 +316,16 @@ Protocol : '&';
 Wave : '~';
 
 TypeAny : 'any';
-TypeNumber: 'number';
+TypeInteger: 'integer';
+TypeFloat: 'float';
 TypeText: 'text';
 TypeBool: 'bool';
 True: 'true';
 False: 'false';
 Nil : 'nil';
 
-Number :DIGIT+ ('.' DIGIT+)?; // 数字
+Float: Integer '.' DIGIT+ ; // 浮点数
+Integer : DIGIT+ ; // 整数
 fragment DIGIT : [0-9] ;             // 单个数字
 Text: '"' (~[\\\r\n])*? '"'; // 文本
 IDPrivate : '_' [a-zA-Z0-9_]+; // 私有标识符
