@@ -44,10 +44,7 @@ namespace xylang
             obj += id.text + "<" + it.to.text + ";";
             obj += id.text + "+=" + it.step.text + ")";
             obj += Wrap + context.BlockLeft().GetText() + Wrap;
-            foreach(var item in context.logicStatement())
-            {
-                obj += Visit(item);
-            }
+            obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
             return obj;
         }
@@ -55,10 +52,7 @@ namespace xylang
         public override object VisitLoopInfiniteStatement([NotNull] XyParser.LoopInfiniteStatementContext context)
         {
             var obj = "while (true)" + Wrap + context.BlockLeft().GetText() + Wrap;
-            foreach(var item in context.logicStatement())
-            {
-                obj += Visit(item);
-            }
+            obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
             return obj;
         }
@@ -70,10 +64,7 @@ namespace xylang
             var arr = (Result)Visit(context.expression());
             obj += "foreach (var " + id.text + " in " + arr.text + ")";
             obj += Wrap + context.BlockLeft().GetText() + Wrap;
-            foreach(var item in context.logicStatement())
-            {
-                obj += Visit(item);
-            }
+            obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
             return obj;
         }
@@ -101,11 +92,7 @@ namespace xylang
         {
             var obj = "";
             obj += "default:" + Wrap;
-            foreach(var item in context.logicStatement())
-            {
-                var r = (string)Visit(item);
-                obj += r;
-            }
+            obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += "break;";
             return obj;
         }
@@ -115,11 +102,7 @@ namespace xylang
             var obj = "";
             var expr = (Result)Visit(context.expression());
             obj += "case " + expr.text + ":" + Wrap;
-            foreach(var item in context.logicStatement())
-            {
-                var r = (string)Visit(item);
-                obj += r;
-            }
+            obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += "break;";
             return obj;
         }
@@ -155,10 +138,7 @@ namespace xylang
         {
             var b = (Result)Visit(context.expression());
             var obj = "if (" + b.text + ")" + Wrap + context.BlockLeft().GetText() + Wrap;
-            foreach(var item in context.logicStatement())
-            {
-                obj += Visit(item);
-            }
+            obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += context.BlockRight().GetText() + Wrap;
             return obj;
         }
@@ -166,10 +146,7 @@ namespace xylang
         public override object VisitJudgeElseStatement([NotNull] XyParser.JudgeElseStatementContext context)
         {
             var obj = "else " + Wrap + context.BlockLeft().GetText() + Wrap;
-            foreach(var item in context.logicStatement())
-            {
-                obj += Visit(item);
-            }
+            obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += context.BlockRight().GetText() + Wrap;
             return obj;
         }
@@ -178,10 +155,7 @@ namespace xylang
         {
             var obj = "";
             obj += "try " + context.BlockLeft().GetText() + Wrap;
-            foreach(var item in context.functionSupportStatement())
-            {
-                obj += Visit(item);
-            }
+            obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += context.BlockRight().GetText() + Wrap;
             obj += Visit(context.checkErrorStatement()) + Wrap;
             return obj;
@@ -192,10 +166,7 @@ namespace xylang
             var obj = "";
             var ID = (Result)Visit(context.id());
             obj += "catch(Exception " + ID.text + ")" + Wrap + context.BlockLeft().GetText() + Wrap;
-            foreach(var item in context.functionSupportStatement())
-            {
-                obj += Visit(item);
-            }
+            obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += context.BlockRight().GetText();
             return obj;
         }
@@ -211,17 +182,10 @@ namespace xylang
             return "throw " + obj + context.Terminate().GetText() + Wrap;
         }
 
-        public override object VisitCheckWatchStatement([NotNull] XyParser.CheckWatchStatementContext context)
+        public override object VisitCheckDeferStatement([NotNull] XyParser.CheckDeferStatementContext context)
         {
             var obj = "";
-            var r = (Result)Visit(context.callPkg());
-            var id = (Result)Visit(context.id());
-            obj += "using(var " + id.text + " = " + r.text + ")" + Wrap + context.BlockLeft().GetText() + Wrap;
-            foreach(var item in context.functionSupportStatement())
-            {
-                obj += Visit(item);
-            }
-            obj += context.BlockRight().GetText() + Wrap;
+            obj += ProcessFunctionSupport(context.functionSupportStatement());
             return obj;
         }
 

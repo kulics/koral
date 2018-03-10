@@ -178,10 +178,7 @@ namespace xylang
                 obj += Visit(context.templateDefine());
             }
             obj += Visit(context.parameterClauseIn()) + Wrap + context.BlockLeft().GetText() + Wrap;
-            foreach(var item in context.functionSupportStatement())
-            {
-                obj += Visit(item);
-            }
+            obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += context.BlockRight().GetText() + Wrap;
             return obj;
         }
@@ -189,10 +186,7 @@ namespace xylang
         public override object VisitPackageInitStatement([NotNull] XyParser.PackageInitStatementContext context)
         {
             var obj = context.BlockLeft().GetText() + Wrap;
-            foreach(var item in context.functionSupportStatement())
-            {
-                obj += Visit(item);
-            }
+            obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += context.BlockRight().GetText() + Wrap;
             return obj;
         }
@@ -302,10 +296,7 @@ namespace xylang
                 fn.@out = (string)Visit(context.parameterClauseOut());
             }
             fn.body = context.BlockLeft().GetText() + Wrap;
-            foreach(var item in context.functionSupportStatement())
-            {
-                fn.body += Visit(item);
-            }
+            fn.body += ProcessFunctionSupport(context.functionSupportStatement());
             fn.body += context.BlockRight().GetText() + Wrap;
             return fn;
         }
@@ -432,10 +423,7 @@ namespace xylang
                     r.text += Visit(context.templateDefine());
                 }
                 r.text += Visit(context.parameterClauseIn()) + Wrap + context.BlockLeft().GetText() + Wrap;
-                foreach(var item in context.functionSupportStatement())
-                {
-                    r.text += Visit(item);
-                }
+                r.text += ProcessFunctionSupport(context.functionSupportStatement());
                 r.text += context.BlockRight().GetText() + Wrap;
             }
             return r;

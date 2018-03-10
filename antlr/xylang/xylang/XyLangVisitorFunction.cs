@@ -37,10 +37,7 @@ namespace xylang
                 obj += Visit(context.templateDefine());
             }
             obj += Visit(context.parameterClauseIn()) + Wrap + context.BlockLeft().GetText() + Wrap;
-            foreach(var item in context.functionSupportStatement())
-            {
-                obj += Visit(item);
-            }
+            obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += context.BlockRight().GetText() + Wrap;
             return obj;
         }
@@ -128,6 +125,35 @@ namespace xylang
         {
             var id = (Result)Visit(context.id());
             return Visit(context.type()) + " " + id.text;
+        }
+
+
+        public string ProcessFunctionSupport(XyParser.FunctionSupportStatementContext[] items)
+        {
+            var obj = "";
+            var content = "";
+            var defer = new List<string>();
+            foreach(var item in items)
+            {
+                if(item.GetChild(0) is XyParser.CheckDeferStatementContext)
+                {
+                    defer.Add((string)Visit(item));
+                    content += "try" + Wrap + "{";
+                }
+                else
+                {
+                    content += Visit(item);
+                }
+            }
+            if(defer.Count > 0)
+            {
+                for(int i = defer.Count - 1; i >= 0; i--)
+                {
+                    content += "}" + Wrap + "finally" + Wrap + "{" + defer[i] + "}";
+                }
+            }
+            obj += content;
+            return obj;
         }
     }
 }

@@ -401,10 +401,7 @@ namespace xylang
                 r.text += " async ";
             }
             r.text += Visit(context.parameterClauseIn()) + " => " + context.BlockLeft().GetText() + Wrap;
-            foreach(var item in context.functionSupportStatement())
-            {
-                r.text += Visit(item);
-            }
+            r.text += ProcessFunctionSupport(context.functionSupportStatement());
             r.text += context.BlockRight().GetText() + Wrap;
             r.data = "var";
             return r;

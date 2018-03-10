@@ -60,10 +60,7 @@ namespace xylang
             var obj = "static class XyProgramMain" + Wrap + context.BlockLeft().GetText() + Wrap;
 
             obj += "static void Main(string[] args)" + Wrap + context.BlockLeft().GetText() + Wrap;
-            foreach(var item in context.functionSupportStatement())
-            {
-                obj += Visit(item);
-            }
+            obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += context.BlockRight().GetText() + Wrap;
 
             obj += context.BlockRight().GetText() + Wrap;
