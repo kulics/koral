@@ -3,9 +3,9 @@
 In this language, any expression must be attributed to the statement.
 
 The basic form of the statement is:
-
-    StatementContent;
-
+```
+StatementContent;
+```
 A statement must be terminated by a distinct `;` and often `{}` is used to wrap the contents of a qualified statement.
 ## Export Namespace
 All content in this language can only be defined in the namespace so that content can be efficiently divided into distinct blocks for management. You can define it freely in a separate namespace without undue restrictions on naming.
@@ -13,12 +13,12 @@ All content in this language can only be defined in the namespace so that conten
 We can use the `:>` statement to define a region's namespace.
 
 E.g:
-
-    :> Demo
-    {
-        ...
-    };
-
+```
+:> Demo
+{
+    ...
+};
+```
 The meaning of this statement is the contents of `{}` will be marked `Demo` in the namespace, so the content naming is limited to the area without having to consider naming conflicts outside the area.
 
 At the same time the external area can import `Demo` to use the contents of which, we will then understand how to import.
@@ -28,16 +28,16 @@ Note that only the import, main entry, package, and protocol statements are supp
 We can use the `<:` statement to import other namespaces, libraries, frameworks into a namespace, which we can only use within namespaces.
 
 E.g:
-
-    :> Demo
+```
+:> Demo
+{
+    <:
     {
-        <:
-        {
-            System;
-            System.Collections.Generic;
-        };
+        System;
+        System.Collections.Generic;
     };
-
+};
+```
 This imports the `System` and` Generic` libraries into the `Demo` namespace, and then you can use them in the program.
 
 Within curly braces, you can write multiple import statements whose order does not affect the import functionality.
@@ -47,21 +47,21 @@ As you may have noticed, in this language, you often start with the symbol, wrap
 We need to define a main entry to let the program know where to start. The main entry through a fixed single symbol `$` statement, and must be valid at the top of the namespace.
 
 E.g:
-
-    :> Demo
+```
+:> Demo
+{
+    <:
     {
-        <:
-        {
-            System;
-            System.Collections.Generic;
-        };
-
-        $
-        {
-            ...
-        };
+        System;
+        System.Collections.Generic;
     };
 
+    $
+    {
+        ...
+    };
+};
+```
 The main entry function here is defined at the top of the namespace and is a function with no arguments and no return value. It is automatically recognized as the main entry and the main entry function is executed when the program is started, so we simply write the function main entry function can be.
 
 In the examples that follow, we are by default implemented in the main entry function, so we will not overplay this part of the code.
@@ -75,28 +75,28 @@ We use the program in order to obtain some useful information, so we need a feat
 If we write a console program, we can use .Net built-in `Console.WriteLine ()` function, it can display data or text information to the console for us to browse.
 
 E.g:
-
-     Console.WriteLine("Hello world"); // output Hello world
-
+```
+Console.WriteLine("Hello world"); // output Hello world
+```
 In the following examples, we will all use the console as a presentation environment.
 ## Comment
 Our comments are very similar to the C language, with single-line comment starting with two backslashes `//`:
-
-    // single-line comment
-
+```
+// single-line comment
+```
 Block comment begin with `/ *` and end with `* /`:
-
-    / * multi-line
-    comment * /
-
+```
+/ * multi-line
+comment * /
+```
 Comment do not belong to the statement, so do not need to end with `;`, comment is only used to provide additional information to the user, and will not be really compiled into the executable program.
 ## Definition
 We can bind the type or data to the specified name using the `=>` statement.
 
 E.g:
-
-    a => 1;
-
+```
+a => 1;
+```
 This creates an identifier for the name on the left and assigns the data on the right to it. In most cases, we do not need to explicitly specify the type of data, and the compiler automatically deduces the type for the data.
 
 Once an identifier is created, its data type will not be changed in the valid area.
@@ -105,9 +105,9 @@ Once an identifier is created, its data type will not be changed in the valid ar
 Unlike a normal programming language, we need to use the `<=` statement to assign the data on the right to the identifier on the left.
 
 E.g:
-
-    a <= 2;
-
+```
+a <= 2;
+```
 But the definition is not the same, the left side of the assignment can only be an identifier that has been defined, otherwise the assignment statement does not hold.
 ## Identifier
 Identifier is the variable, function, package, protocol, etc. specified name. The letters that make up the identifier all have a certain norm, and the naming convention of the identifier in this language is as follows:
@@ -129,13 +129,13 @@ By default, both spaces and newlines are ignored by the compiler.
 However, in practical projects, the use of partition will effectively improve the reading effect of the code, so we strongly recommend that you use the partition reasonably to improve the source code expression.
 
 E.g:
+```
+a.b(x,y).c(fn:$()~(x:integer){->(2+1);}).d<=1+3*5/4;
 
-    a.b(x,y).c(fn:$()~(x:number){->(2+1);}).d<=1+3*5/4;
-
-    a.b(x, y)
-    .c(fn: $()~(x: number)
-    {
-        -> (2 + 1);
-    }).d <= 1 + 3 * 5 / 4;
-
+a.b(x, y)
+.c(fn: $()~(x: integer)
+{
+    -> (2 + 1);
+}).d <= 1 + 3 * 5 / 4;
+```
 ### [Next Chapter](basic-type.md)

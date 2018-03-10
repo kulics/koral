@@ -28,4 +28,5 @@ Eventually making XyLang with very few grammar, only the presence of symbols on 
 1. [Asynchronous](asynchronous.md)
 1. [Generic](generic.md)
 1. [Annotation](annotation.md)
+1. [LINQ](linq.md)
 1. [Namespace](namesapce.md)

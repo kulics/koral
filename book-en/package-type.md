@@ -8,23 +8,23 @@ Obviously, this feature for package data, called package.
 We can use the `#~()` symbol to define a package that has nothing.
 
 E.g:
-
-    Package => #~(){};
-
+```
+Package => #~(){};
+```
 Of course, we hope more is to be able to pack a few data, for example, a name, student number, class, grade attributes of students.
 We can define these data in the same way we define normal identifiers.
 
 E.g:
-
-    Student => #~()
-    {
-        Name => "";
-        Number => "";
-        Class => 0;
-        Grade => 0;
-    };
-
-So we get a student bag with these data attributes. This student bag now becomes a usable type like `number, text, bool`.
+```
+Student => #~()
+{
+    Name => "";
+    Number => "";
+    Class => 0;
+    Grade => 0;
+};
+```
+So we get a student bag with these data attributes. This student bag now becomes a usable type like `integer, text, bool`.
 
 Unlike our original base type can only store one data, the student package can store name, student number, class, grade data.
 
@@ -34,9 +34,9 @@ This is very much like the concept of assembling different parts together in our
 So how do we create a new package? As always, all of our types can be created using the type-creation syntax.
 
 E.g:
-
-    Peter => Student~();
-
+```
+Peter => Student~();
+```
 This create a `Peter` identifier. All the properties of this student are initialized to `"", "", 0,0` as set in the definition.
 
 Let us recall that our base type, collection types can be created using the type-creation syntax, in fact they are all packages.
@@ -49,30 +49,62 @@ Now that we have a `Peter`, how do we use the attributes inside?
 Very simple, we only need to use `.` syntax, we can summon the attributes we need.
 
 E.g:
-
-    Console.WriteLine(Peter.Name); 
-    // print the name of a student
-
+```
+Console.WriteLine(Peter.Name); 
+// print the name of a student
+```
 To change the value of the property is the same, it is equivalent to a nested identifier. We can directly use the assignment statement to change the value.
 
 E.g:
+```
+Peter.Name <= "Peter"; Peter.Number <= "060233";
+Peter.Class <= 2; Peter.Grade <= 6;
+```
+## Simplify creation
+Creating a new package like the one above, and then loading the data one by one, is very cumbersome. We can use a simplified syntax to configure.
+Just add `{}` to the creation grammar to use the `key:value` method to quickly load data. Separate multiple data with `,`.
 
-    Peter.Name <= "Peter"; Peter.Number <= "060233";
-    Peter.Class <= 2; Peter.Grade <= 6;
+E.g:
+```
+Peter => Student~()
+{
+     Name:"Peter", Number:"060233",
+     Class:2, Grade:6
+};
+```
 
+So the fingers are not so sour.
+
+## Anonymous Package
+If we only want to wrap some data directly, instead of defining the package first and then using it, is it like an anonymous function?
+
+Of course, with simplified functionality, we can use the `#` flag.
+
+E.g:
+```
+Peter => #
+{
+     Name:"Peter", Number:"060233",
+     Class:2, Grade:6
+};
+```
+
+This directly creates a `Peter` data that we can use directly, but we cannot change this data.
+
+Since the anonymous package is not a package of a clear type, we only recommend it for use on occasional occasions, such as LINQ.
 ## Private Property
 Anyone has some little secret, Peter is the same, maybe he hid a secret little girl's name and did not want others to know.
 
 We can define private properties to store properties that we do not want to be accessed by the outside world.
 
 E.g:
-
-    Student => #~()
-    {
-        ...
-        _GirlFirend => ""; // The identifier beginning with this '_' is private
-    };
-
+```
+Student => #~()
+{
+    ...
+    _GirlFirend => ""; // The identifier beginning with this '_' is private
+};
+```
 That's right, if you remember the definition of identifiers, this is how private identifiers are defined, and private identifiers can not be accessed by outsiders.
 
 Therefore, we can define a `Peter`, nor can we get or modify the value via `Peter._GirlFirend`.
@@ -83,16 +115,16 @@ Then the private properties of this package can not be accessed, and can not be 
 We can use the definition method learned in the function section directly defined in the package.
 
 E.g:
-
-    Student => #~()
+```
+Student => #~()
+{
+    ...
+    GetGirlFirend => $()~(name: text)
     {
-        ...
-        GetGirlFirend => $()~(name: text)
-        {
-            -> (^._GirlFirend);
-        };
+        -> (^._GirlFirend);
     };
-
+};
+```
 Because the function is part of the package, and the function can call data or functionality, we can define a method for getting the private property.
 
 The `^` used here to declare the package itself, so you can easily access their own properties. This can be thought of as `this | self` in other languages.
@@ -102,10 +134,10 @@ Through the function properties, we can get to the private property, you can als
 With this function, we can get the private property by calling the function.
 
 E.g:
-
-    Console.WriteLine(Peter.GetGirlFirend());
-    // printed the name of a girlfriend of a puppy love student
-
+```
+Console.WriteLine(Peter.GetGirlFirend());
+// printed the name of a girlfriend of a puppy love student
+```
 As with data attributes, functions can also be private identifiers, and functions that use private identifiers also mean that only the packet can access itself.
 
 ## Construct
@@ -118,27 +150,27 @@ This can be achieved using regular functions, but why not use the built-in const
 Add parameters in the definition, and write the definition of the constructor, which only needs the auxiliary symbol `~#` can do it.
 
 E.g:
-
-    Student => #~(name: text, number: text)
+```
+Student => #~(name: text, number: text)
+{
+    ...
+    ~#
     {
-        ...
-        ~#
-        {
-            ^.Name <= name; ^.Number <= number;
-            // calculate the class
-            ^.Class <= GetSubText(number, 2, 3);
-            // calculate the grade
-            ^.Grade <= GetSubText(number, 0, 1);
-        };
+        ^.Name <= name; ^.Number <= number;
+        // calculate the class
+        ^.Class <= GetSubText(number, 2, 3);
+        // calculate the grade
+        ^.Grade <= GetSubText(number, 0, 1);
     };
-
+};
+```
 This gives us a package with constructors, and when we create a new student, class and grade data are automatically generated.
 
 E.g:
-
-    Peter => Student~("Peter", "060233");
-    Console.WriteLine(Peter.Class); // print out 2
-
+```
+Peter => Student~("Peter", "060233");
+Console.WriteLine(Peter.Class); // print out 2
+```
 It should be noted that a package can only support one constructor, we recommend to maintain the simplicity of the structure, a stable package easier to be used by the caller,
 
 If you really have more construction requirements, you can use regular functions to accomplish this requirement.
@@ -146,36 +178,36 @@ If you really have more construction requirements, you can use regular functions
 Now let us play our imagination, we want a customized package for Chinese students how to define it?
 
 E.g:
-
-    ChineseStudent => #~()
-    {
-        Name => "";
-        Number => "";
-        Class => 0;
-        Grade => 0;
-        KungFu => false; // kung fu students
-    };
-
+```
+ChineseStudent => #~()
+{
+    Name => "";
+    Number => "";
+    Class => 0;
+    Grade => 0;
+    KungFu => false; // kung fu students
+};
+```
 No, no repeatable definition of data so elegant, we can reuse student attributes, with an additional kung fu attributes on it.
 
 We need to use a combination of this feature, but not so complicated, just created a student attribute only.
 
 E.g:
-
-    ChineseStudent => #~()
-    {
-        Student => Student~(); // include student attributes in it
-        KungFu => false; // kung fu students
-    };
-
+```
+ChineseStudent => #~()
+{
+    Student => Student~(); // include student attributes in it
+    KungFu => false; // kung fu students
+};
+```
 This way you can use generic attributes via student attributes in Chinese students.
 
 E.g:
-
-    Chen => ChineseStudent~();
-    Console.WriteLine(Chen.Student.Name);
-    // of course, since there is no assignment, nothing is output
-
+```
+Chen => ChineseStudent~();
+Console.WriteLine(Chen.Student.Name);
+// of course, since there is no assignment, nothing is output
+```
 By combining layers after layer, you are free to assemble whatever you want to describe.
 
 ### [Next Chapter](protocol-type.md)
