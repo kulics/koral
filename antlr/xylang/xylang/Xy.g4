@@ -81,54 +81,40 @@ functionSupportStatement:
 | loopStatement
 | loopEachStatement
 | loopInfiniteStatement
-| assignStatement
-| expressionStatement
-| checkWatchStatement
+| loopJumpStatement
+| checkDeferStatement
 | checkStatement
 | reportStatement
 | functionStatement
 | variableStatement
+| assignStatement
+| expressionStatement
 ;
 
-logicStatement:
- returnStatement
-| judgeCaseStatement
-| judgeStatement
-| loopStatement
-| loopEachStatement
-| loopInfiniteStatement
-| loopJumpStatement
-| expressionStatement
-| checkWatchStatement
-| checkStatement
-| reportStatement
-| variableStatement
-| assignStatement
-;
 // 条件判断
 judgeCaseStatement: Judge expression (caseStatement)+ Terminate;
 // 缺省条件声明
-caseDefaultStatement: Wave Discard BlockLeft (logicStatement)* BlockRight;
+caseDefaultStatement: Wave Discard BlockLeft (functionSupportStatement)* BlockRight;
 // 条件声明
-caseExprStatement: Wave expression BlockLeft (logicStatement)* BlockRight;
+caseExprStatement: Wave expression BlockLeft (functionSupportStatement)* BlockRight;
 // 判断条件声明
 caseStatement: caseDefaultStatement|caseExprStatement;
 // 判断
 judgeStatement:(judgeBaseStatement)+ (judgeElseStatement)? Terminate;
 // 判断基础
-judgeBaseStatement:Judge expression BlockLeft (logicStatement)* BlockRight;
+judgeBaseStatement:Judge expression BlockLeft (functionSupportStatement)* BlockRight;
 // else 判断
-judgeElseStatement:JudgeSub BlockLeft (logicStatement)* BlockRight;
+judgeElseStatement:JudgeSub BlockLeft (functionSupportStatement)* BlockRight;
 // 循环
-loopStatement:Loop iteratorStatement Wave id BlockLeft (logicStatement)* BlockRight Terminate;
+loopStatement:Loop iteratorStatement Wave id BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 集合循环
-loopEachStatement:Loop expression Wave id BlockLeft (logicStatement)* BlockRight Terminate;
+loopEachStatement:Loop expression Wave id BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 无限循环
-loopInfiniteStatement:Loop BlockLeft (logicStatement)* BlockRight Terminate;
+loopInfiniteStatement:Loop BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 跳出循环
 loopJumpStatement:LoopSub Terminate;
 // 看守
-checkWatchStatement: CheckWatch callPkg Wave id BlockLeft (functionSupportStatement)* BlockRight Terminate;
+checkDeferStatement: CheckDefer BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 检查
 checkStatement: Check BlockLeft (functionSupportStatement)* BlockRight checkErrorStatement Terminate;
 // 错误处理
@@ -312,7 +298,7 @@ Judge : '?';
 LoopSub : '~@';
 Loop : '@';
 
-CheckWatch : '.!';
+CheckDefer : '.!';
 CheckSub : '~!';
 Check : '!';
 
