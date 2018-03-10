@@ -143,8 +143,11 @@ namespace xylang
             var obj = "";
             switch(context.t.Type)
             {
-                case XyParser.TypeNumber:
+                case XyParser.TypeFloat:
                     obj = "double";
+                    break;
+                case XyParser.TypeInteger:
+                    obj = "int";
                     break;
                 case XyParser.TypeText:
                     obj = "string";
