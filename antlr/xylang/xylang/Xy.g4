@@ -244,8 +244,8 @@ typeProtocol
 
 typeProtocol : Protocol nameSpace;
 typeTuple : '(' type (',' type)+ ')';
-typeArray : '[' type ']' ;
-typeDictinary :  '[' type ':' type ']';
+typeArray : '[' ']' type;
+typeDictinary :  '[' type ']' type;
 typePackage : nameSpace (templateCall)? ;
 typeFunction : Function typeFunctionParameterClause Wave typeFunctionParameterClause;
 

@@ -114,7 +114,7 @@ Of course, it is better to put these students in an array so that we can use loo
 
 E.g:
 ```
-Arr => [&HomeWork]~();
+Arr => []&HomeWork~();
 Arr.Add(StudentA.HomeWork);
 ... // stuffed many, many students
 @ Arr ~ Student
