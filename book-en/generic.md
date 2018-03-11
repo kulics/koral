@@ -60,7 +60,7 @@ ArrNumber => Array<integer>~(); // pass in the number type
 ```
 So we have an array of number types, is like this:
 ```
-ArrNumber => [integer]~();
+ArrNumber => []integer~();
 ```
 ## Supported Types
 We can use generics in packages, functions, and protocol types.

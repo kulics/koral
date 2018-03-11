@@ -21,9 +21,11 @@ This will create a `integer` type array containing` 1` to `5`.
 
 If you need an empty array of definite type, you can create it using the type-creation syntax.
 
+The array type is represented by `[]type`, where `[]` is a one-dimensional array, so multidimensional arrays can be represented as `[][][]type`.
+
 For example we need a text array:
 ```
-arrText => [text]~();
+arrText => []text~();
 ```
 ### Visit
 If we need to access one of the elements in the array we can access it with the `identifier[index]`.
@@ -65,9 +67,15 @@ This will create a `text: integer` type dictionary containing` a, b, c` entries.
 
 If you need a clear dictionary of empty dictionaries, you can also create it using the type-creation syntax.
 
+The dictionary type is represented by `[type]type` and `[type]` represents a one-dimensional dictionary, so the nested dictionary can be represented as `[type][type][type]type`.
+
+This is almost the same as the above array representation method. Yes, arrays and dictionaries essentially use the index to locate the set of data. `[]` Represents a type of the index.
+
+Since arrays only support numeric indexes, you can omit the `[integer]` tag. We can extend `[integer]type` to achieve consistent array types, but we usually don't need to do that (time is money. friend!).
+
 E.g:
 ```
-dicNumNum => [integer: integer]~();
+dicNumNum => [integer]integer~();
 ```
 ### Visit
 Like an array, we can also use indexes to access data directly.
