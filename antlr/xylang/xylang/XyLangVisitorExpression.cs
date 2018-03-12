@@ -272,6 +272,14 @@ namespace xylang
             {
                 r.text += Visit(context.pkgAssign());
             }
+            if(context.arrayAssign() != null)
+            {
+                r.text += Visit(context.arrayAssign());
+            }
+            if(context.dictionaryAssign() != null)
+            {
+                r.text += Visit(context.dictionaryAssign());
+            }
             return r;
         }
 
@@ -288,6 +296,46 @@ namespace xylang
                 else
                 {
                     obj += "," + Visit(context.pkgAssignElement(i));
+                }
+            }
+            obj += "}";
+            return obj;
+        }
+
+        public override object VisitArrayAssign([NotNull] XyParser.ArrayAssignContext context)
+        {
+            var obj = "";
+            obj += "{";
+            for(int i = 0; i < context.expression().Length; i++)
+            {
+                var r = (Result)Visit(context.expression(i));
+                if(i == 0)
+                {
+                    obj += r.text;
+                }
+                else
+                {
+                    obj += "," + r.text;
+                }
+            }
+            obj += "}";
+            return obj;
+        }
+
+        public override object VisitDictionaryAssign([NotNull] XyParser.DictionaryAssignContext context)
+        {
+            var obj = "";
+            obj += "{";
+            for(int i = 0; i < context.dictionaryElement().Length; i++)
+            {
+                var r = (DicEle)Visit(context.dictionaryElement(i));
+                if(i == 0)
+                {
+                    obj += r.text;
+                }
+                else
+                {
+                    obj += "," + r.text;
                 }
             }
             obj += "}";
