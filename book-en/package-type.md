@@ -24,7 +24,7 @@ Student => #~()
     Grade => 0;
 };
 ```
-So we get a student bag with these data attributes. This student bag now becomes a usable type like `integer, text, bool`.
+So we get a student bag with these data attributes. This student bag now becomes a usable type like `i32, txt, bool`.
 
 Unlike our original base type can only store one data, the student package can store name, student number, class, grade data.
 
@@ -75,6 +75,13 @@ Peter => Student~()
 
 So the fingers are not so sour.
 
+Similarly, the way the collection is created is actually a simplified creation, so we can also create arrays and dictionaries like this.
+
+E.g:
+```
+Array => []i32~()[ 1, 2, 3, 4, 5 ];
+Dictionary => [txt]i32~()[ "1":1, "2":2, "3":3 ];
+```
 ## Anonymous Package
 If we only want to wrap some data directly, instead of defining the package first and then using it, is it like an anonymous function?
 

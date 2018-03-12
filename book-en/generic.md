@@ -23,7 +23,7 @@ Array<T> => #~()
     Items => Storage~(T); // create storage
     Length => 0;
 
-    Get => $(index: integer)~(item: T) // get a generic data
+    Get => $(index: i32)~(item: T) // get a generic data
     {
         -> (Items.Get(index));
     };
