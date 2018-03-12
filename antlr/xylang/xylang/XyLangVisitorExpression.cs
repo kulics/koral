@@ -44,17 +44,7 @@ namespace xylang
         {
             var count = context.ChildCount;
             var r = new Result();
-            if(count == 2)
-            {
-                if(context.GetChild(1) is XyParser.ReadElementContext)
-                {
-                    var ex = (Result)Visit(context.GetChild(0));
-                    var read = (string)Visit(context.GetChild(1));
-                    r.data = ex.data;
-                    r.text = ex.text + read;
-                }
-            }
-            else if(count == 3)
+            if(count == 3)
             {
                 if(context.GetChild(1).GetType() == typeof(XyParser.CallContext))
                 {
@@ -63,6 +53,11 @@ namespace xylang
                 var e1 = (Result)Visit(context.GetChild(0));
                 var op = Visit(context.GetChild(1));
                 var e2 = (Result)Visit(context.GetChild(2));
+                if(context.GetChild(2).GetChild(0) is XyParser.CallElementContext)
+                {
+                    r.text = e1.text + e2.text;
+                    return r;
+                }
                 if(context.GetChild(1).GetType() == typeof(XyParser.JudgeContext))
                 {
                     // todo 如果左右不是bool类型值，报错
@@ -215,6 +210,13 @@ namespace xylang
             return obj;
         }
 
+        public override object VisitCallElement([NotNull] XyParser.CallElementContext context)
+        {
+            var r = (Result)Visit(context.expression());
+            r.text = "[" + r.text + "]";
+            return r;
+        }
+
         public override object VisitCallFunc([NotNull] XyParser.CallFuncContext context)
         {
             var r = new Result();
@@ -282,6 +284,32 @@ namespace xylang
             r.data = "var";
             r.text = "await " + expr.text;
             return r;
+        }
+
+        public override object VisitSharpArray([NotNull] XyParser.SharpArrayContext context)
+        {
+            var type = "var";
+            var result = new Result();
+            for(int i = 0; i < context.expression().Length; i++)
+            {
+                var r = (Result)Visit(context.expression(i));
+                if(i == 0)
+                {
+                    type = (string)r.data;
+                    result.text += r.text;
+                }
+                else
+                {
+                    if(type != (string)r.data)
+                    {
+                        type = "object";
+                    }
+                    result.text += "," + r.text;
+                }
+            }
+            result.data = type + "[]";
+            result.text = "new []{" + result.text + "}";
+            return result;
         }
 
         public override object VisitArray([NotNull] XyParser.ArrayContext context)
@@ -359,17 +387,6 @@ namespace xylang
             result.value = (string)r2.data;
             result.text = "{" + r1.text + "," + r2.text + "}";
             return result;
-        }
-
-        public override object VisitReadElement([NotNull] XyParser.ReadElementContext context)
-        {
-            var obj = "";
-            foreach(var item in context.expression())
-            {
-                var r = (Result)Visit(item);
-                obj += "[" + r.text + "]";
-            }
-            return obj;
         }
 
         public override object VisitDataStatement([NotNull] XyParser.DataStatementContext context)
