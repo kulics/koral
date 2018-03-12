@@ -15,9 +15,9 @@ We only need to use `[]` to enclose the data we need, and to split each data wit
 
 E.g:
 ```
-arr => [1,2,3,4,5];
+arr => [ 1,2,3,4,5 ];
 ```
-This will create a `integer` type array containing` 1` to `5`.
+This will create a `i32` type array containing` 1` to `5`.
 
 If you need an empty array of definite type, you can create it using the type-creation syntax.
 
@@ -25,14 +25,23 @@ The array type is represented by `[]type`, where `[]` is a one-dimensional array
 
 For example we need a text array:
 ```
-arrText => []text~();
+arrText => []txt~();
 ```
-### Visit
-If we need to access one of the elements in the array we can access it with the `identifier[index]`.
+#### .NET Arrays
+If we need to use the `.Net` native array type, we can use `[#]type` to represent it.
 
 E.g:
 ```
-Console.WriteLine(arr[1]);
+arrInt => [#]i32~();
+arrInt <= [#][1,2,3,4,5];
+// corresponds to C#'s int[]
+```
+### Visit
+If we need to access one of the elements in the array we can access it with the `identifier.[index]`.
+
+E.g:
+```
+Console.WriteLine( arr.[1] );
 ```
 It should be noted that in the programming language, most of the array starting index is from `0`,` identifier [0] `is the first element obtained, the subsequent elements and so on.
 ### Change the element
@@ -40,7 +49,7 @@ If we need to change one of the elements in the array, we can access that elemen
 
 E.g:
 ```
-arr[0] <= 5;
+arr.[0] <= 5;
 ```
 Note that we can only access the index of the existing data, if not exist, there will be an error.
 ### Common operation
@@ -63,7 +72,7 @@ E.g:
 ```
 dic => ["a": 1, "b": 2, "c": 3];
 ```
-This will create a `text: integer` type dictionary containing` a, b, c` entries.
+This will create a `txt:i32` type dictionary containing` a, b, c` entries.
 
 If you need a clear dictionary of empty dictionaries, you can also create it using the type-creation syntax.
 
@@ -71,25 +80,25 @@ The dictionary type is represented by `[type]type` and `[type]` represents a one
 
 This is almost the same as the above array representation method. Yes, arrays and dictionaries essentially use the index to locate the set of data. `[]` Represents a type of the index.
 
-Since arrays only support numeric indexes, you can omit the `[integer]` tag. We can extend `[integer]type` to achieve consistent array types, but we usually don't need to do that (time is money. friend!).
+Since arrays only support numeric indexes, you can omit the `[i32]` tag. We can extend `[i32]type` to achieve consistent array types, but we usually don't need to do that (time is money. friend!).
 
 E.g:
 ```
-dicNumNum => [integer]integer~();
+dicNumNum => [i32]i32~();
 ```
 ### Visit
 Like an array, we can also use indexes to access data directly.
 
 E.g:
 ```
-Console.WriteLine(dic["a"]);
+Console.WriteLine( dic.["a"] );
 ```
 ### Change the element
 Like arrays, we can also use assignment statements to change to elements.
 
 E.g:
 ```
-dic["b"] <= 5;
+dic.["b"] <= 5;
 ```
 The difference is that with the array, if the assignment is a non-existent index, it will not be wrong, the value will be given directly to the new key.
 ### Common operation

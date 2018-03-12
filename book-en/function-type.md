@@ -35,12 +35,12 @@ Very simple, we only need to use `identifier: type` declare the parameters.
 
 E.g:
 ```
-func => $(x: integer)~(y: integer)
+func => $(x: i32)~(y: i32)
 {
     -> (x * x);
 };
 ```
-The meaning of this function is to accept an input `integer` parameter `x` and a `integer` parameter `y`.
+The meaning of this function is to accept an input `i32` parameter `x` and a `i32` parameter `y`.
 
 This is very similar to what? Yes, in fact, the parameters and dictionary functions are almost the same, the parameters just tell the function, we need to use this type of data, marked by the identifier to match. Therefore, the expression of the same parameters and dictionaries will help us to understand.
 
@@ -76,7 +76,7 @@ When we call the function, we need to fill the brackets with the identifier in t
 
 E.g:
 ```
-sell => $(price: integer, name: text)~(){}; 
+sell => $(price: i32, name: txt)~(){}; 
 // define one function with two in parameter
 
 sell(1.99, "cola"); 
@@ -87,7 +87,7 @@ Similar to in parameters, out parameters also need to be clearly defined with an
 
 E.g:
 ```
-topSell => $()~(name: text, count: integer)
+topSell => $()~(name: txt, count: i32)
 {
     ...
     -> ("cola", many);
@@ -140,7 +140,7 @@ Function In Parameter no special definition of way, just replace the type of the
 
 E.g:
 ```
-each1To10 => $(func: $(item: integer)~())~()
+each1To10 => $(func: $(item: i32)~())~()
 {
     @ 1..10 ~ i
     {
@@ -154,7 +154,7 @@ So that we can pass the details of the processing to the externally passed `func
 
 E.g:
 ```
-print => $(item: integer)~()
+print => $(item: i32)~()
 {
     Console.WriteLine(item);
 };
@@ -170,13 +170,13 @@ As the above way to define a function and then imported into use sometimes appea
 
 At this point we can use the syntax of Lambda Expression to reduce the pain of our naming.
 
-Because function arguments are already defined at the time of declaration, we can use simplified syntax to express them.
+Because function arguments are already defined at the time of declaration, we can use simplified syntax `$ ->` to express them, which means define the input parameter identifier and return an expression directly.
 
 E.g:
 ```
-each1To10($(item)~( Console.WriteLine(item) ));
-findAll($(it)~(it>7));
-order($(it)~(it.time));
+each1To10( $item -> Console.WriteLine(item) );
+findAll( $it -> it>7 );
+order( $it -> it.time );
 ```
 Very simple, and the difference between the expression of the function type is that the input only need to declare the identifier, and the parameter is used to include one expression.
 ## Lambda Function
@@ -184,7 +184,7 @@ Unlike the above simplified method, we can also write a complete function direct
 
 E.g:
 ```
-each1To10( $(item:integer)~()
+each1To10( $(item:i32)~()
 {
      Console.WriteLine(item);
 });

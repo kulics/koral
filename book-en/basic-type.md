@@ -4,49 +4,70 @@ We only need three simple basic types, we can do most of the work.
 ## integer
 Since our current computer architecture is better at calculating integers, a separate integer type helps to increase the efficiency of the program.
 
-In this language, the default integer is the `integer` type, which is a 32-bit signed integer type data.
+In this language, the default integer is the `i32` type, which is a 32-bit signed integer type data.
 
 E.g:
 ```
-3987349
+integer => 3987349; 
 ```
-Its size range is
+
+If we need integers of other numeric ranges, other types can also be used. All supported integer types are shown in the following table.
 ```
--2,147,483,648 ~ 2,147,483,647
+i8      // 8-bit signed     -128 to 127
+u8      // 8-bit unsigned   0 to 255
+i6      // 16-bit signed    -32,768 to 32,767
+u16     // 16-bit unsigned  0 to 65,535
+i32     // 32-bit signed    -2,147,483,648 to 2,147,483,647
+u32     // 32-bit unsigned  0 to 4,294,967,295
+i64     // 64-bit signed    -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807
+u64     // 64-bit unsigned  0 to 18,446,744,073,709,551,615
+```
+## Type Conversion
+Since the default integer is `i32`, how do we use other types of integers?
+
+We can use type conversion to change the number to the type we need, just use the `type!()` syntax.
+
+E.g:
+```
+integer8 => i8!(16);
 ```
 ## float 
 Integers do not meet our digital needs, and we often need to deal with decimals.
 
-In this language, the default decimal is `float`, which is a 64-bit double-precision floating-point data.
+In this language, the default decimal is `f64`, which is a 64-bit double-precision floating-point data.
 
 E.g:
 ```
-855.544
-0.3141592653
+float => 855.544; 
+float <= 0.3141592653;
 ```
-Its size range is
-```
--1.79769313486232E+308 ~ 1.79769313486232E+308
-```
-This is a very large number range, so there is little need to worry about the scope issue.
-
 Note that due to the special nature of computer-calculated floating-point numbers, there are certain accuracy issues in floating-point number operations, so the sensitivity-sensitive requirements should consider special handling.
+
+All supported floating-point types are as follows:
+```
+f32 // 32-bit   ±1.5e−45 to ±3.4e38
+f64 // 64-bit   ±5.0e−324 to ±1.7e308
+```
 ### text
-We are not living in a world of numbers alone, so we also need to use text to display the information we need. This type is `text`.
+We are not living in a world of numbers alone, so we also need to use text to display the information we need. 
+
+In this language, the default text is the `txt` type, which is an unlimited-length character array data.
 
 You only need to use `""` package a text content, it will be recognized as a text value.
 
 E.g:
 ```
-"Hello world!"
+string => "Hello world!";
 ```
-## bool
-`bool` are logical values ​​because they can only be true or false. It is often used to assist in judging logic.
+## boolean
+boolean are logical values ​​because they can only be true or false. It is often used to assist in judging logic.
+
+In this language, the default boolean is the type `bool`, which is a type that has only true and false values.
 
 E.g:
 ```
-true // true
-false // false
+boolean => true;  // true  
+boolean <= false; // false  
 ```
 ## any
 In particular, sometimes you need a type that can be any type to assist in the completion of the function, so it is `any`.
@@ -71,7 +92,7 @@ At this time we can use the null create method `~<>` to specify a null value tha
 
 E.g:
 ```
-x => ~<integer>;
+x => ~<i32>;
 y => ~<Student>;
 ```
 More details on generics can be found in the generic section.

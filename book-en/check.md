@@ -12,7 +12,7 @@ We can declare an exception data using `~!` Anywhere in the function.
 
 E.g:
 ```
-ReadFile => $(name: text)~()
+ReadFile => $(name: txt)~()
 {
     ? name.Length = 0
     {
