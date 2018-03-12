@@ -61,6 +61,13 @@ namespace xylang
             return obj;
         }
 
+        public override object VisitTypeSharpArray([NotNull] XyParser.TypeSharpArrayContext context)
+        {
+            var obj = "";
+            obj += Visit(context.type()) + "[]";
+            return obj;
+        }
+
         public override object VisitTypeDictinary([NotNull] XyParser.TypeDictinaryContext context)
         {
             var obj = "";
@@ -143,11 +150,35 @@ namespace xylang
             var obj = "";
             switch(context.t.Type)
             {
-                case XyParser.TypeFloat:
-                    obj = "double";
+                case XyParser.TypeI8:
+                    obj = "sbyte";
                     break;
-                case XyParser.TypeInteger:
+                case XyParser.TypeU8:
+                    obj = "byte";
+                    break;
+                case XyParser.TypeI16:
+                    obj = "short";
+                    break;
+                case XyParser.TypeU16:
+                    obj = "ushort";
+                    break;
+                case XyParser.TypeI32:
                     obj = "int";
+                    break;
+                case XyParser.TypeU32:
+                    obj = "uint";
+                    break;
+                case XyParser.TypeI64:
+                    obj = "long";
+                    break;
+                case XyParser.TypeU64:
+                    obj = "ulong";
+                    break;
+                case XyParser.TypeF32:
+                    obj = "float";
+                    break;
+                case XyParser.TypeF64:
+                    obj = "double";
                     break;
                 case XyParser.TypeText:
                     obj = "string";

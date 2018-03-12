@@ -145,11 +145,13 @@ id
 // 表达式
 expression:
 primaryExpression
+| callElement // 访问元素
 | callFunc // 函数调用
 | callPkg // 新建包
 | callAwait // 异步调用
 | callIs // 类型判断
 | callAs // 类型转换
+| sharpArray // c#数组
 | array // 数组
 | dictionary // 字典
 | lambda // lambda表达式
@@ -160,7 +162,6 @@ primaryExpression
 | plusMinus // 正负处理
 | negate // 取反
 | linq // 联合查询
-| expression readElement // 访问元素
 | expression call expression // 链式调用
 | expression judge expression // 判断型表达式
 | expression add expression // 和型表达式
@@ -187,13 +188,15 @@ callAs: type as '(' expression ')';	// 类型转换
 
 callAwait: FunctionAsync expression; // 异步调用
 
-array : '[' (expression (',' expression)*)? ']'; // 数组
+array : '[' ']' BlockLeft (expression (',' expression)*)? BlockRight; // 数组
 
-dictionary : '[' (dictionaryElement (',' dictionaryElement)*)? ']'; // 字典
+sharpArray : '[' '#' ']' BlockLeft (expression (',' expression)*)? BlockRight; // c#数组
+
+dictionary : '[' ']' BlockLeft (dictionaryElement (',' dictionaryElement)*)? BlockRight; // 字典
 
 dictionaryElement: expression ':' expression; // 字典元素
 
-readElement : ('[' expression ']')+ ;
+callElement : '[' expression ']';
 
 nameSpace: id ('.' id)* ;
 
@@ -236,6 +239,7 @@ type:
 typeProtocol
 | typeTuple
 | typeArray
+| typeSharpArray
 | typeDictinary
 | typeBasic
 | typePackage
@@ -245,6 +249,7 @@ typeProtocol
 typeProtocol : Protocol nameSpace;
 typeTuple : '(' type (',' type)+ ')';
 typeArray : '[' ']' type;
+typeSharpArray :'[' '#' ']' type;
 typeDictinary :  '[' type ']' type;
 typePackage : nameSpace (templateCall)? ;
 typeFunction : Function typeFunctionParameterClause Wave typeFunctionParameterClause;
@@ -255,8 +260,16 @@ typeFunctionParameterClause : '(' (id ':' type (',' id ':' type)* )? ')'  ;
 // 基础类型名
 typeBasic:
 t=TypeAny
-| t=TypeInteger
-| t=TypeFloat
+| t=TypeI8
+| t=TypeU8
+| t=TypeI16
+| t=TypeU16
+| t=TypeI32
+| t=TypeU32
+| t=TypeI64
+| t=TypeU64
+| t=TypeF32
+| t=TypeF64
 | t=TypeText
 | t=TypeBool
 ;
@@ -316,9 +329,17 @@ Protocol : '&';
 Wave : '~';
 
 TypeAny : 'any';
-TypeInteger: 'integer';
-TypeFloat: 'float';
-TypeText: 'text';
+TypeI8: 'i8';
+TypeU8: 'u8';
+TypeI16: 'i16';
+TypeU16: 'u16';
+TypeI32: 'i32';
+TypeU32: 'u32';
+TypeI64: 'i64';
+TypeU64: 'u64';
+TypeF32: 'f32';
+TypeF64: 'f64';
+TypeText: 'txt';
 TypeBool: 'bool';
 True: 'true';
 False: 'false';
