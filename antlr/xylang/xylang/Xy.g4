@@ -215,10 +215,10 @@ templateDefine: '<' id (',' id)* '>';
 
 templateCall: '<' type (',' type)* '>';
 
-lambda : t=(Function|FunctionAsync) lambdaIn Wave lambdaOut;
+lambda : t=(Function|FunctionAsync) lambdaIn ArrowRight lambdaOut;
 
-lambdaIn : '(' (id (',' id)* )? ')';
-lambdaOut : '(' expressionList ')';
+lambdaIn : (id (',' id)* )? ;
+lambdaOut : expressionList ;
 
 package: Package pkgAssign; // 匿名包
 
