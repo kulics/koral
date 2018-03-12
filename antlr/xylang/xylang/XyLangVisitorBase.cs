@@ -27,6 +27,7 @@ namespace xylang
             public object data { get; set; }
             public string text { get; set; }
             public string permission { get; set; }
+            public bool isIndex { get; set; }
         }
 
         public override object VisitId([NotNull] XyParser.IdContext context)

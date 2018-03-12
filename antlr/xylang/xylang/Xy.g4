@@ -145,7 +145,6 @@ id
 // 表达式
 expression:
 primaryExpression
-| callElement // 访问元素
 | callFunc // 函数调用
 | callPkg // 新建包
 | callAwait // 异步调用
@@ -162,10 +161,18 @@ primaryExpression
 | plusMinus // 正负处理
 | negate // 取反
 | linq // 联合查询
-| expression call expression // 链式调用
+| expression call callExpression // 链式调用
 | expression judge expression // 判断型表达式
 | expression add expression // 和型表达式
 | expression mul expression // 积型表达式
+;
+
+callExpression:
+callElement // 访问元素
+| callFunc // 函数调用
+| callPkg // 新建包
+| id // id
+| callExpression call callExpression // 链式调用
 ;
 
 tuple : '(' (expression (',' expression)* )? ')'; // 元组
@@ -188,11 +195,11 @@ callAs: type as '(' expression ')';	// 类型转换
 
 callAwait: FunctionAsync expression; // 异步调用
 
-array : '[' ']' BlockLeft (expression (',' expression)*)? BlockRight; // 数组
+array : '[' (expression (',' expression)*)? ']'; // 数组
 
-sharpArray : '[' '#' ']' BlockLeft (expression (',' expression)*)? BlockRight; // c#数组
+sharpArray : '[' '#' ']' '[' (expression (',' expression)*)? ']'; // c#数组
 
-dictionary : '[' ']' BlockLeft (dictionaryElement (',' dictionaryElement)*)? BlockRight; // 字典
+dictionary :  '[' (dictionaryElement (',' dictionaryElement)*)?  ']'; // 字典
 
 dictionaryElement: expression ':' expression; // 字典元素
 

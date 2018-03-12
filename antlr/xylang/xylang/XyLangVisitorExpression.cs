@@ -46,17 +46,17 @@ namespace xylang
             var r = new Result();
             if(count == 3)
             {
-                if(context.GetChild(1).GetType() == typeof(XyParser.CallContext))
-                {
-                    r.data = "var";
-                }
                 var e1 = (Result)Visit(context.GetChild(0));
                 var op = Visit(context.GetChild(1));
                 var e2 = (Result)Visit(context.GetChild(2));
-                if(context.GetChild(2).GetChild(0) is XyParser.CallElementContext)
+                if(context.GetChild(1).GetType() == typeof(XyParser.CallContext))
                 {
-                    r.text = e1.text + e2.text;
-                    return r;
+                    r.data = "var";
+                    if(((Result)Visit(context.GetChild(2))).isIndex)
+                    {
+                        r.text = e1.text + e2.text;
+                        return r;
+                    }
                 }
                 if(context.GetChild(1).GetType() == typeof(XyParser.JudgeContext))
                 {
@@ -96,6 +96,38 @@ namespace xylang
             else if(count == 1)
             {
                 r = (Result)Visit(context.GetChild(0));
+            }
+            return r;
+        }
+
+        public override object VisitCallExpression([NotNull] XyParser.CallExpressionContext context)
+        {
+            var count = context.ChildCount;
+            var r = new Result();
+            if(count == 3)
+            {
+                var e1 = (Result)Visit(context.GetChild(0));
+                var op = Visit(context.GetChild(1));
+                var e2 = (Result)Visit(context.GetChild(2));
+                if(context.GetChild(0).GetChild(0) is XyParser.CallElementContext)
+                {
+                    r.isIndex = true;
+                }
+                if(context.GetChild(2).GetChild(0) is XyParser.CallElementContext)
+                {
+                    r.isIndex = true;
+                    r.text = e1.text + e2.text;
+                    return r;
+                }
+                r.text = e1.text + op + e2.text;
+            }
+            else if(count == 1)
+            {
+                r = (Result)Visit(context.GetChild(0));
+                if(context.GetChild(0) is XyParser.CallElementContext)
+                {
+                    r.isIndex = true;
+                }
             }
             return r;
         }
