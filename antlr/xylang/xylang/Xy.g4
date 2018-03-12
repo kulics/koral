@@ -183,11 +183,15 @@ annotation: '\\*' expressionList '*\\'; // 注解
 
 callFunc: id (templateCall)? tuple; // 函数调用
 
-callPkg: type wave tuple (pkgAssign)?; // 新建包
+callPkg: type wave tuple (pkgAssign|arrayAssign|dictionaryAssign)?; // 新建包
 
 pkgAssign: BlockLeft (pkgAssignElement (',' pkgAssignElement)*)? BlockRight; // 简化赋值
 
 pkgAssignElement: nameSpace ':' expression; // 简化赋值元素
+
+arrayAssign: '[' (expression (',' expression)*)? ']';
+
+dictionaryAssign: '[' (dictionaryElement (',' dictionaryElement)*)?  ']';
 
 callIs: type is '(' expression ')'; // 类型判断
 
