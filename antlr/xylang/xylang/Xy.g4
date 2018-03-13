@@ -122,7 +122,7 @@ checkErrorStatement:Wave id BlockLeft (functionSupportStatement)* BlockRight;
 // 报告错误
 reportStatement: CheckSub (expression)? Terminate;
 // 迭代器
-iteratorStatement:expression '..' expression '..' expression | expression '..' expression;
+iteratorStatement:expression '<.' expression '<.' expression | expression '<.' expression;
 // 命名空间
 nameSpaceStatement:nameSpace Terminate;
 
