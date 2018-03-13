@@ -88,12 +88,12 @@ Sometimes, maybe we do not need to specify a specific value, but only want to cr
 
 Especially when using generics, you can not create directly using type constructs.
 
-At this time we can use the null create method `~<>` to specify a null value that contains a type.
+At this time we can use the null create method `~:` to specify a null value that contains a type.
 
 E.g:
 ```
-x => ~<i32>;
-y => ~<Student>;
+x => ~:i32;
+y => ~:Student;
 ```
 More details on generics can be found in the generic section.
 
