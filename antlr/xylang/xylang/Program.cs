@@ -13,10 +13,16 @@ namespace xylang
         static void Main(string[] args)
         {
             var path = @".\";
+            Compiled(path);
 
+            Console.WriteLine("Completed");
+            Console.ReadKey();
+        }
+
+        static void Compiled(string path)
+        {
             //获取相对路径下所有文件
             var files = Directory.GetFiles(path, "*.xy");
-
             foreach(var file in files)
             {
                 // c#文件流读文件
@@ -38,9 +44,6 @@ namespace xylang
                         var visitor = new XyLangVisitor();
                         var result = visitor.Visit(tree);
 
-                        //Console.WriteLine(tree.ToStringTree(parser));
-                        //Console.WriteLine(result);
-
                         // C#文件流写文件,使用覆盖模式
                         var resByte = Encoding.UTF8.GetBytes(result.ToString());  //转换为字节
                         using(var fsWrite = new FileStream(@".\" + file.Substring(0, file.Length - 3) + ".cs", FileMode.Create))
@@ -54,8 +57,12 @@ namespace xylang
                     }
                 }
             }
-            Console.WriteLine("Completed");
-            Console.ReadKey();
+
+            var folders = Directory.GetDirectories(path);
+            foreach(var folder in folders)
+            {
+                Compiled(folder);
+            }
         }
     }
 }
