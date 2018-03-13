@@ -39,7 +39,7 @@ So we define a package that supports generics, `T` is a generic x, in fact it ca
 
 Generic brackets, like parameters, support multiple generations, for example: `<T, H, Q>`.
 
-After the generic is defined, `T` is treated as a real type within the area of ​​the package, and then we can use it in a variety of desired types just as `integer` does.
+After the generic is defined, `T` is treated as a real type within the area of ​​the package, and then we can use it in a variety of desired types just as `i32` does.
 
 Note that because generics are typed at run time, the compiler can not infer generic constructor methods. We can only use the empty type constructor to construct generic data.
 
@@ -47,7 +47,7 @@ E.g:
 ```
 Package<T> => #~()
 {
-    Item => ~<T>; / / initialized a null value of the generic data
+    Item => ~:T; / / initialized a null value of the generic data
 };
 ```
 So how do we use generics?
