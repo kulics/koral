@@ -224,7 +224,7 @@ package: Package pkgAssign; // 匿名包
 
 function : t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 
-empty : '~<' type '>'; // 类型空初始化
+empty : '~:' type; // 类型空初始化
 
 plusMinus : add expression;
 
