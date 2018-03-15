@@ -34,36 +34,18 @@ namespace xylang
                     // 处理协议实现
                     var r = (Result)Visit(item);
                     var ptcl = r.data.ToString();
-                    var ptclPre = "";
-                    var ptclName = "";
-                    var originPtclName = "";
-                    if(ptcl.LastIndexOf('.') > 0)
+                    implements.Add(ptcl);
+                    var pName = ptcl;
+                    if(pName.LastIndexOf(".") > 0)
                     {
-                        ptclPre = ptcl.Substring(0, ptcl.LastIndexOf('.') + 1);
-                        ptclName = ptcl.Substring(ptcl.LastIndexOf('.') + 1);
-                        originPtclName = ptclName;
-                        if(ptclName.IndexOf('@') >= 0)
-                        {
-                            ptclName = ptclName.Substring(ptclName.IndexOf('@') + 1);
-                        }
+                        pName = pName.Substring(pName.LastIndexOf("."));
                     }
-                    else
+                    if(pName.IndexOf("<") > 0)
                     {
-                        originPtclName = ptcl;
-                        ptclName = ptcl;
-                        if(ptclName.IndexOf('@') >= 0)
-                        {
-                            ptclName = ptclName.Substring(ptclName.IndexOf('@') + 1);
-                        }
+                        pName = pName.Substring(0, pName.LastIndexOf("<"));
                     }
-                    implements.Add(ptclPre + "Interface" + ptclName);
-                    if(originPtclName.IndexOf("<") >= 0)
-                    {
-                        originPtclName = originPtclName.Substring(0, originPtclName.IndexOf("<"));
-                    }
-                    obj += "public " + ptclPre + "Interface" + ptclName + " " + originPtclName +
-                        " { get { return this as " + ptclPre + "Interface"
-                        + ptclName + ";}}" + Wrap;
+                    obj += "public " + ptcl + " " + pName +
+                        " { get { return this as " + ptcl + ";}}" + Wrap;
                     obj += r.text;
                 }
                 else if(item.GetChild(0) is XyParser.PackageExtendContext)
@@ -221,31 +203,10 @@ namespace xylang
         public override object VisitProtocolImplementStatement([NotNull] XyParser.ProtocolImplementStatementContext context)
         {
             var ptcl = (string)Visit(context.nameSpace());
-            var ptclPre = "";
-            var ptclName = "";
-            var x = ptcl.LastIndexOf('.');
-            if(ptcl.LastIndexOf('.') > 0)
-            {
-                ptclPre = ptcl.Substring(0, ptcl.LastIndexOf('.') + 1);
-                ptclName = ptcl.Substring(ptcl.LastIndexOf('.') + 1);
-                if(ptclName.IndexOf('@') >= 0)
-                {
-                    ptclName = ptclName.Substring(ptclName.IndexOf('@') + 1);
-                }
-            }
-            else
-            {
-                ptclName = ptcl;
-                if(ptclName.IndexOf('@') >= 0)
-                {
-                    ptclName = ptclName.Substring(ptclName.IndexOf('@') + 1);
-                }
-            }
             // 泛型
             if(context.templateCall() != null)
             {
                 ptcl += Visit(context.templateCall());
-                ptclName += Visit(context.templateCall());
             }
             var obj = "";
             foreach(var item in context.protocolImplementSupportStatement())
@@ -253,12 +214,12 @@ namespace xylang
                 if(item.GetChild(0) is XyParser.ImplementFunctionStatementContext)
                 {
                     var fn = (Function)Visit(item);
-                    obj += fn.@out + " " + ptclPre + "Interface" + ptclName + "." + fn.ID + " " + fn.@in + Wrap + fn.body;
+                    obj += fn.@out + " " + ptcl + "." + fn.ID + " " + fn.@in + Wrap + fn.body;
                 }
                 else if(item.GetChild(0) is XyParser.ImplementVariableStatementContext)
                 {
                     var vr = (Variable)Visit(item);
-                    obj += vr.type + " " + ptclPre + "Interface" + ptclName + "." + vr.ID + " {get;set;} = " + vr.body;
+                    obj += vr.type + " " + ptcl + "." + vr.ID + " {get;set;} = " + vr.body;
                 }
             }
             var r = new Result();
@@ -342,30 +303,18 @@ namespace xylang
         {
             var id = (Result)Visit(context.id());
             var obj = "";
-            var staticProtocol = "";
             var interfaceProtocol = "";
             var ptclName = id.text;
             if(context.annotation() != null)
             {
                 obj += Visit(context.annotation());
             }
-            if(ptclName.IndexOf('@') >= 0)
-            {
-                ptclName = ptclName.Substring(ptclName.IndexOf('@') + 1);
-            }
             foreach(var item in context.protocolSupportStatement())
             {
                 var r = (Result)Visit(item);
-                if(r.permission == "public")
-                {
-                    interfaceProtocol += r.text;
-                }
-                else
-                {
-                    staticProtocol += r.text;
-                }
+                interfaceProtocol += r.text;
             }
-            obj += "public partial interface Interface" + ptclName;
+            obj += "public partial interface " + ptclName;
             // 泛型
             if(context.templateDefine() != null)
             {
@@ -373,16 +322,6 @@ namespace xylang
             }
             obj += Wrap + context.BlockLeft().GetText() + Wrap;
             obj += interfaceProtocol;
-            obj += context.BlockRight().GetText() + Wrap;
-
-            obj += "public static partial class " + id.text;
-            // 泛型
-            if(context.templateDefine() != null)
-            {
-                obj += Visit(context.templateDefine());
-            }
-            obj += Wrap + context.BlockLeft().GetText() + Wrap;
-            obj += staticProtocol;
             obj += context.BlockRight().GetText() + Wrap;
             return obj;
         }
@@ -396,16 +335,8 @@ namespace xylang
             {
                 r.text += Visit(context.annotation());
             }
-            if(r1.permission == "public")
-            {
-                r.permission = "public";
-                r.text += r2.data + " " + r1.text + " {get;set;} " + Wrap;
-            }
-            else
-            {
-                r.permission = "private";
-                r.text += "public const " + r2.data + " " + r1.text + " = " + r2.text + context.Terminate().GetText() + Wrap;
-            }
+            r.permission = "public";
+            r.text += r2.data + " " + r1.text + " {get;set;} " + Wrap;
             return r;
         }
 
@@ -417,64 +348,31 @@ namespace xylang
             {
                 r.text += Visit(context.annotation());
             }
-            if(id.permission == "public")
+            r.permission = "public";
+            // 异步
+            if(context.t.Type == XyParser.FunctionAsync)
             {
-                r.permission = "public";
-                // 异步
-                if(context.t.Type == XyParser.FunctionAsync)
+                var pout = (string)Visit(context.parameterClauseOut());
+                if(pout != "void")
                 {
-                    var pout = (string)Visit(context.parameterClauseOut());
-                    if(pout != "void")
-                    {
-                        pout = "Task<" + pout + ">";
-                    }
-                    else
-                    {
-                        pout = "Task";
-                    }
-                    r.text += pout + " " + id.text;
+                    pout = "Task<" + pout + ">";
                 }
                 else
                 {
-                    r.text += Visit(context.parameterClauseOut()) + " " + id.text;
+                    pout = "Task";
                 }
-                // 泛型
-                if(context.templateDefine() != null)
-                {
-                    r.text += Visit(context.templateDefine());
-                }
-                r.text += Visit(context.parameterClauseIn()) + context.Terminate().GetText() + Wrap;
+                r.text += pout + " " + id.text;
             }
             else
             {
-                r.permission = "private";
-                // 异步
-                if(context.t.Type == XyParser.FunctionAsync)
-                {
-                    var pout = (string)Visit(context.parameterClauseOut());
-                    if(pout != "void")
-                    {
-                        pout = "Task<" + pout + ">";
-                    }
-                    else
-                    {
-                        pout = "Task";
-                    }
-                    r.text += "public static async " + pout + " " + id.text;
-                }
-                else
-                {
-                    r.text += "public static " + Visit(context.parameterClauseOut()) + " " + id.text;
-                }
-                // 泛型
-                if(context.templateDefine() != null)
-                {
-                    r.text += Visit(context.templateDefine());
-                }
-                r.text += Visit(context.parameterClauseIn()) + Wrap + context.BlockLeft().GetText() + Wrap;
-                r.text += ProcessFunctionSupport(context.functionSupportStatement());
-                r.text += context.BlockRight().GetText() + Wrap;
+                r.text += Visit(context.parameterClauseOut()) + " " + id.text;
             }
+            // 泛型
+            if(context.templateDefine() != null)
+            {
+                r.text += Visit(context.templateDefine());
+            }
+            r.text += Visit(context.parameterClauseIn()) + context.Terminate().GetText() + Wrap;
             return r;
         }
     }

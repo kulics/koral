@@ -11,27 +11,7 @@ namespace xylang
     {
         public override object VisitTypeProtocol([NotNull] XyParser.TypeProtocolContext context)
         {
-            var ptcl = (string)Visit(context.nameSpace());
-            var ptclPre = "";
-            var ptclName = "";
-            if(ptcl.LastIndexOf('.') > 0)
-            {
-                ptclPre = ptcl.Substring(0, ptcl.LastIndexOf('.') + 1);
-                ptclName = ptcl.Substring(ptcl.LastIndexOf('.') + 1);
-                if(ptclName.IndexOf('@') >= 0)
-                {
-                    ptclName = ptclName.Substring(ptclName.IndexOf('@') + 1);
-                }
-            }
-            else
-            {
-                ptclName = ptcl;
-                if(ptclName.IndexOf('@') >= 0)
-                {
-                    ptclName = ptclName.Substring(ptclName.IndexOf('@') + 1);
-                }
-            }
-            var obj = ptclPre + "Interface" + ptclName;
+            var obj = (string)Visit(context.nameSpace());
             return obj;
         }
 
