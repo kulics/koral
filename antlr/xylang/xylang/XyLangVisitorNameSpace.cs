@@ -56,7 +56,20 @@ namespace xylang
             {
                 obj += Visit(context.annotation());
             }
-            obj += "using " + Visit(context.nameSpace()) + context.Terminate().GetText();
+            if(context.callNamespace() != null)
+            {
+                var ns = (string)Visit(context.nameSpace());
+                obj += "using static " + ns;
+                if(ns.LastIndexOf(".") >= 0)
+                {
+                    ns = ns.Substring(ns.LastIndexOf("."));
+                }
+                obj += "." + ns + context.Terminate().GetText();
+            }
+            else
+            {
+                obj += "using " + Visit(context.nameSpace()) + context.Terminate().GetText();
+            }
             return obj;
         }
 
