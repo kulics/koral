@@ -98,5 +98,13 @@ namespace xylang
             r.text = "(" + expr.text + " is " + type + ")";
             return r;
         }
+
+        public override object VisitAnnotation([NotNull] XyParser.AnnotationContext context)
+        {
+            var obj = "";
+            var r = (Result)Visit(context.expressionList());
+            obj += "[" + r.text + "]";
+            return obj;
+        }
     }
 }
