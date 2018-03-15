@@ -12,11 +12,20 @@ importStatement
 |packageStatement
 |protocolStatement
 |functionMainStatement
+|namespaceFunctionStatement
+|namespaceVariableStatement
+|namespaceInvariableStatement
 ;
 // 导入命名空间
 importStatement:Import BlockLeft (nameSpaceStatement)* BlockRight Terminate;
 // 主函数
 functionMainStatement:Function BlockLeft (functionSupportStatement)* BlockRight Terminate;
+// 命名空间变量
+namespaceVariableStatement:(annotation)? expression Define expression Terminate;
+// 命名空间常量
+namespaceInvariableStatement:(annotation)? expression '==' expression Terminate;
+// 命名空间函数
+namespaceFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义包
 packageStatement:(annotation)? id (templateDefine)? Define Package Wave parameterClauseIn BlockLeft (packageSupportStatement)* BlockRight Terminate;
 // 包支持的语句
