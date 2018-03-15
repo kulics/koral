@@ -27,19 +27,24 @@ packageStatement
 |protocolStatement
 |protocolImplementStatement
 |packageFunctionStatement
+|packagePropertyFunctionStatement
 |packageVariableStatement
 ;
 // 包构造方法
-packageInitStatement:PackageSub BlockLeft (functionSupportStatement)* BlockRight Terminate;
+packageInitStatement:(annotation)? PackageSub BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 函数
-packageFunctionStatement:id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+packageFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义引入
 packageExtend: PackageSub nameSpace Terminate;
 // 定义变量
 packageVariableStatement:(annotation)? expression Define expression Terminate;
+// 定义属性方法
+packagePropertyFunctionStatement: (annotation)? id Define '^' type (propertyFunctionStatement)+ Terminate;
+// 定义子方法
+propertyFunctionStatement: Wave id BlockLeft (functionSupportStatement)* BlockRight;
 
 // 协议
-protocolStatement: id (templateDefine)? Define Protocol BlockLeft (protocolSupportStatement)* BlockRight Terminate;
+protocolStatement:(annotation)? id (templateDefine)? Define Protocol BlockLeft (protocolSupportStatement)* BlockRight Terminate;
 // 协议支持的语句
 protocolSupportStatement:
 protocolStatement
@@ -47,9 +52,9 @@ protocolStatement
 |protocolVariableStatement
 ;
 // 定义变量
-protocolVariableStatement:expression Define expression Terminate;
+protocolVariableStatement:(annotation)? expression Define expression Terminate;
 // 函数
-protocolFunctionStatement:id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+protocolFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 协议实现支持的语句
 protocolImplementSupportStatement:
 implementFunctionStatement
@@ -58,9 +63,9 @@ implementFunctionStatement
 // 实现协议
 protocolImplementStatement:ProtocolSub nameSpace (templateCall)? BlockLeft (protocolImplementSupportStatement)* BlockRight Terminate;
 // 变量实现
-implementVariableStatement:expression Define expression Terminate;
+implementVariableStatement:(annotation)? expression Define expression Terminate;
 // 函数实现
-implementFunctionStatement:id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+implementFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 
 // 函数
 functionStatement:id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
@@ -71,7 +76,7 @@ parameterClauseIn : '(' parameter? (',' parameter)*  ')'  ;
 // 出参
 parameterClauseOut : '(' parameter? (',' parameter)*  ')'  ;
 // 参数结构
-parameter : id ':' type;
+parameter :(annotation)? id ':' type;
 
 // 函数支持的语句
 functionSupportStatement:
@@ -124,7 +129,7 @@ reportStatement: CheckSub (expression)? Terminate;
 // 迭代器
 iteratorStatement:expression '<.' expression '<.' expression | expression '<.' expression;
 // 命名空间
-nameSpaceStatement:nameSpace Terminate;
+nameSpaceStatement:(annotation)? nameSpace Terminate;
 
 // 定义变量
 variableStatement: expression Define expression Terminate;

@@ -26,14 +26,19 @@ namespace xylang
 
             foreach(var item in context.nameSpaceStatement())
             {
-                obj += "using " + Visit(item) + Wrap;
+                obj += Visit(item) + Wrap;
             }
             return obj;
         }
 
         public override object VisitNameSpaceStatement([NotNull] XyParser.NameSpaceStatementContext context)
         {
-            var obj = Visit(context.nameSpace()) + context.Terminate().GetText();
+            var obj = "";
+            if(context.annotation() != null)
+            {
+                obj += Visit(context.annotation());
+            }
+            obj += "using " + Visit(context.nameSpace()) + context.Terminate().GetText();
             return obj;
         }
 

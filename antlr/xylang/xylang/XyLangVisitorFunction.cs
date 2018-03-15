@@ -124,7 +124,13 @@ namespace xylang
         public override object VisitParameter([NotNull] XyParser.ParameterContext context)
         {
             var id = (Result)Visit(context.id());
-            return Visit(context.type()) + " " + id.text;
+            var obj = "";
+            if(context.annotation() != null)
+            {
+                obj += Visit(context.annotation());
+            }
+            obj += Visit(context.type()) + " " + id.text;
+            return obj;
         }
 
 

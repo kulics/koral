@@ -135,11 +135,34 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitAnnotation([NotNull] XyParser.AnnotationContext context)
+        public override object VisitPackagePropertyFunctionStatement([NotNull] XyParser.PackagePropertyFunctionStatementContext context)
         {
             var obj = "";
-            var r = (Result)Visit(context.expressionList());
-            obj += "[" + r.text + "]";
+            if(context.annotation() != null)
+            {
+                obj += Visit(context.annotation());
+            }
+            var id = (Result)Visit(context.id());
+            var type = (string)Visit(context.type());
+            obj += id.permission + " " + type + " " + id.text + "{";
+            foreach(var item in context.propertyFunctionStatement())
+            {
+                obj += Visit(item);
+            }
+            obj += "}" + Wrap;
+            return obj;
+        }
+
+        public override object VisitPropertyFunctionStatement([NotNull] XyParser.PropertyFunctionStatementContext context)
+        {
+            var obj = "";
+            var id = (Result)Visit(context.id());
+            obj += id.text + "{";
+            foreach(var item in context.functionSupportStatement())
+            {
+                obj += Visit(item);
+            }
+            obj += "}" + Wrap;
             return obj;
         }
 
@@ -153,6 +176,10 @@ namespace xylang
         {
             var id = (Result)Visit(context.id());
             var obj = "";
+            if(context.annotation() != null)
+            {
+                obj += Visit(context.annotation());
+            }
             // 异步
             if(context.t.Type == XyParser.FunctionAsync)
             {
@@ -245,6 +272,7 @@ namespace xylang
             public string type;
             public string ID;
             public string body;
+            public string annotation;
         }
 
         public override object VisitImplementVariableStatement([NotNull] XyParser.ImplementVariableStatementContext context)
@@ -255,6 +283,10 @@ namespace xylang
             vr.ID = r1.text;
             vr.type = (string)r2.data;
             vr.body = r2.text + context.Terminate().GetText() + Wrap;
+            if(context.annotation() != null)
+            {
+                vr.annotation = (string)Visit(context.annotation());
+            }
             return vr;
         }
 
@@ -264,12 +296,17 @@ namespace xylang
             public string @in;
             public string @out;
             public string body;
+            public string annotation;
         }
 
         public override object VisitImplementFunctionStatement([NotNull] XyParser.ImplementFunctionStatementContext context)
         {
             var fn = new Function();
             var id = (Result)Visit(context.id());
+            if(context.annotation() != null)
+            {
+                fn.annotation = (string)Visit(context.annotation());
+            }
             fn.ID = id.text;
             // 泛型
             if(context.templateDefine() != null)
@@ -308,6 +345,10 @@ namespace xylang
             var staticProtocol = "";
             var interfaceProtocol = "";
             var ptclName = id.text;
+            if(context.annotation() != null)
+            {
+                obj += Visit(context.annotation());
+            }
             if(ptclName.IndexOf('@') >= 0)
             {
                 ptclName = ptclName.Substring(ptclName.IndexOf('@') + 1);
@@ -351,6 +392,10 @@ namespace xylang
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
             var r = new Result();
+            if(context.annotation() != null)
+            {
+                r.text += Visit(context.annotation());
+            }
             if(r1.permission == "public")
             {
                 r.permission = "public";
@@ -368,6 +413,10 @@ namespace xylang
         {
             var id = (Result)Visit(context.id());
             var r = new Result();
+            if(context.annotation() != null)
+            {
+                r.text += Visit(context.annotation());
+            }
             if(id.permission == "public")
             {
                 r.permission = "public";
