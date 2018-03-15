@@ -18,6 +18,10 @@ importStatement
 ;
 // 导入命名空间
 importStatement:Import BlockLeft (nameSpaceStatement)* BlockRight Terminate;
+// 命名空间
+nameSpaceStatement:(annotation)? (callNamespace)? nameSpace Terminate;
+// 省略调用名称
+callNamespace: '..';
 // 主函数
 functionMainStatement:Function BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 命名空间变量
@@ -137,8 +141,6 @@ checkErrorStatement:Wave id BlockLeft (functionSupportStatement)* BlockRight;
 reportStatement: CheckSub (expression)? Terminate;
 // 迭代器
 iteratorStatement:expression '<.' expression '<.' expression | expression '<.' expression;
-// 命名空间
-nameSpaceStatement:(annotation)? nameSpace Terminate;
 
 // 定义变量
 variableStatement: expression Define expression Terminate;
