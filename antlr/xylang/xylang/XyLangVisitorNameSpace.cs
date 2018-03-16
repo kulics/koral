@@ -14,7 +14,7 @@ namespace xylang
             var nameSpace = (string)Visit(context.nameSpace());
             if(nameSpace.LastIndexOf(".") >= 0)
             {
-                nameSpace = nameSpace.Substring(nameSpace.LastIndexOf("."));
+                nameSpace = nameSpace.Substring(nameSpace.LastIndexOf(".")+1);
             }
             var obj = "";
             obj += "namespace " + Visit(context.nameSpace()) + Wrap + context.BlockLeft().GetText() + Wrap;

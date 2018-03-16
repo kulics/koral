@@ -54,7 +54,7 @@ packageVariableStatement:(annotation)? expression Define expression Terminate;
 // 定义属性方法
 packagePropertyFunctionStatement: (annotation)? id Define '^' type (propertyFunctionStatement)+ Terminate;
 // 定义子方法
-propertyFunctionStatement: Wave id BlockLeft (functionSupportStatement)* BlockRight;
+propertyFunctionStatement: '~' id BlockLeft (functionSupportStatement)* BlockRight;
 
 // 协议
 protocolStatement:(annotation)? id (templateDefine)? Define Protocol BlockLeft (protocolSupportStatement)* BlockRight Terminate;
