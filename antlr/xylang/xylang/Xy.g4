@@ -40,7 +40,8 @@ packageStatement
 |protocolStatement
 |protocolImplementStatement
 |packageFunctionStatement
-|packagePropertyFunctionStatement
+|packagePropertyStatement
+|packagePropertyEmptyStatement
 |packageVariableStatement
 ;
 // 包构造方法
@@ -51,10 +52,12 @@ packageFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|F
 packageExtend: PackageSub nameSpace Terminate;
 // 定义变量
 packageVariableStatement:(annotation)? expression Define expression Terminate;
-// 定义属性方法
-packagePropertyFunctionStatement: (annotation)? id Define '^' type (propertyFunctionStatement)+ Terminate;
+// 定义属性
+packagePropertyStatement: (annotation)? id Define '^' type BlockLeft (packagePropertySubStatement)+ BlockRight Terminate;
 // 定义子方法
-propertyFunctionStatement: '~' id BlockLeft (functionSupportStatement)* BlockRight;
+packagePropertySubStatement: op=('=>'|'<='|'+='|'-=') BlockLeft (functionSupportStatement)* BlockRight Terminate;
+// 定义空属性
+packagePropertyEmptyStatement:(annotation)? id Define '^' type Terminate;
 
 // 协议
 protocolStatement:(annotation)? id (templateDefine)? Define Protocol BlockLeft (protocolSupportStatement)* BlockRight Terminate;
@@ -62,24 +65,28 @@ protocolStatement:(annotation)? id (templateDefine)? Define Protocol BlockLeft (
 protocolSupportStatement:
 protocolStatement
 |protocolFunctionStatement
-|protocolVariableStatement
+|protocolPropertyStatement
 ;
 // 定义变量
-protocolVariableStatement:(annotation)? expression Define expression Terminate;
+protocolPropertyStatement:(annotation)? id Define '^' type BlockLeft (protocolPropertySubStatement)+ BlockRight Terminate;
+// 定义子方法
+protocolPropertySubStatement: op=('=>'|'<='|'+='|'-=') Terminate;
 // 函数
 protocolFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 协议实现支持的语句
 protocolImplementSupportStatement:
 implementFunctionStatement
-|implementVariableStatement
+|implementPropertyStatement
+|implementEventStatement
 ;
 // 实现协议
 protocolImplementStatement:ProtocolSub nameSpace (templateCall)? BlockLeft (protocolImplementSupportStatement)* BlockRight Terminate;
 // 变量实现
-implementVariableStatement:(annotation)? expression Define expression Terminate;
+implementPropertyStatement:(annotation)? id Define '^' type BlockLeft (packagePropertySubStatement)+ BlockRight Terminate;
 // 函数实现
 implementFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
-
+// 事件实现
+implementEventStatement: id Define '#!' nameSpace Terminate;
 // 函数
 functionStatement:id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 返回

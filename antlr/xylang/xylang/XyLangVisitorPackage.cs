@@ -113,11 +113,24 @@ namespace xylang
             {
                 obj += Visit(context.annotation());
             }
-            obj += r1.permission + " " + r2.data + " " + r1.text + " {get;set;} = " + r2.text + context.Terminate().GetText() + Wrap;
+            obj += " private " + r2.data + " " + r1.text + " = " + r2.text + context.Terminate().GetText() + Wrap;
             return obj;
         }
 
-        public override object VisitPackagePropertyFunctionStatement([NotNull] XyParser.PackagePropertyFunctionStatementContext context)
+        public override object VisitPackagePropertyEmptyStatement([NotNull] XyParser.PackagePropertyEmptyStatementContext context)
+        {
+            var obj = "";
+            if(context.annotation() != null)
+            {
+                obj += Visit(context.annotation());
+            }
+            var id = (Result)Visit(context.id());
+            var type = (string)Visit(context.type());
+            obj += id.permission + " " + type + " " + id.text + "{get;set;}" + Wrap;
+            return obj;
+        }
+
+        public override object VisitPackagePropertyStatement([NotNull] XyParser.PackagePropertyStatementContext context)
         {
             var obj = "";
             if(context.annotation() != null)
@@ -127,7 +140,7 @@ namespace xylang
             var id = (Result)Visit(context.id());
             var type = (string)Visit(context.type());
             obj += id.permission + " " + type + " " + id.text + "{";
-            foreach(var item in context.propertyFunctionStatement())
+            foreach(var item in context.packagePropertySubStatement())
             {
                 obj += Visit(item);
             }
@@ -135,11 +148,28 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitPropertyFunctionStatement([NotNull] XyParser.PropertyFunctionStatementContext context)
+        public override object VisitPackagePropertySubStatement([NotNull] XyParser.PackagePropertySubStatementContext context)
         {
             var obj = "";
-            var id = (Result)Visit(context.id());
-            obj += id.text + "{";
+            var id = "";
+            switch(context.op.Text)
+            {
+                case "=>":
+                    id = " get ";
+                    break;
+                case "<=":
+                    id = " set ";
+                    break;
+                case "+=":
+                    id = " add ";
+                    break;
+                case "-=":
+                    id = " remove ";
+                    break;
+                default:
+                    break;
+            }
+            obj += id + "{";
             foreach(var item in context.functionSupportStatement())
             {
                 obj += Visit(item);
@@ -216,16 +246,29 @@ namespace xylang
                     var fn = (Function)Visit(item);
                     obj += fn.@out + " " + ptcl + "." + fn.ID + " " + fn.@in + Wrap + fn.body;
                 }
-                else if(item.GetChild(0) is XyParser.ImplementVariableStatementContext)
+                else if(item.GetChild(0) is XyParser.ImplementPropertyStatementContext)
                 {
                     var vr = (Variable)Visit(item);
-                    obj += vr.type + " " + ptcl + "." + vr.ID + " {get;set;} = " + vr.body;
+                    obj += vr.type + " " + ptcl + "." + vr.ID + " " + vr.body;
+                }
+                else if(item.GetChild(0) is XyParser.ImplementEventStatementContext)
+                {
+                    obj += Visit(item);
                 }
             }
             var r = new Result();
             r.data = ptcl;
             r.text = obj;
             return r;
+        }
+
+        public override object VisitImplementEventStatement([NotNull] XyParser.ImplementEventStatementContext context)
+        {
+            var obj = "";
+            var id = (Result)Visit(context.id());
+            var nameSpace = Visit(context.nameSpace());
+            obj += "public event " + nameSpace + " " + id.text + context.Terminate().GetText() + Wrap;
+            return obj;
         }
 
         class Variable
@@ -236,14 +279,21 @@ namespace xylang
             public string annotation;
         }
 
-        public override object VisitImplementVariableStatement([NotNull] XyParser.ImplementVariableStatementContext context)
+        public override object VisitImplementPropertyStatement([NotNull] XyParser.ImplementPropertyStatementContext context)
         {
+            var id = (Result)Visit(context.id());
+            var type = (string)Visit(context.type());
+            var body = "{";
+            foreach(var item in context.packagePropertySubStatement())
+            {
+                body += Visit(item);
+            }
+            body += "}" + Wrap;
+
             var vr = new Variable();
-            var r1 = (Result)Visit(context.expression(0));
-            var r2 = (Result)Visit(context.expression(1));
-            vr.ID = r1.text;
-            vr.type = (string)r2.data;
-            vr.body = r2.text + context.Terminate().GetText() + Wrap;
+            vr.ID = id.text;
+            vr.type = type;
+            vr.body = body + context.Terminate().GetText() + Wrap;
             if(context.annotation() != null)
             {
                 vr.annotation = (string)Visit(context.annotation());
@@ -326,18 +376,47 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitProtocolVariableStatement([NotNull] XyParser.ProtocolVariableStatementContext context)
+        public override object VisitProtocolPropertyStatement([NotNull] XyParser.ProtocolPropertyStatementContext context)
         {
-            var r1 = (Result)Visit(context.expression(0));
-            var r2 = (Result)Visit(context.expression(1));
+            var id = (Result)Visit(context.id());
             var r = new Result();
             if(context.annotation() != null)
             {
                 r.text += Visit(context.annotation());
             }
             r.permission = "public";
-            r.text += r2.data + " " + r1.text + " {get;set;} " + Wrap;
+
+            var type = (string)Visit(context.type());
+            r.text += type + " " + id.text + "{";
+            foreach(var item in context.protocolPropertySubStatement())
+            {
+                r.text += Visit(item);
+            }
+            r.text += "}" + Wrap;
             return r;
+        }
+
+        public override object VisitProtocolPropertySubStatement([NotNull] XyParser.ProtocolPropertySubStatementContext context)
+        {
+            var obj = "";
+            switch(context.op.Text)
+            {
+                case "=>":
+                    obj = "get";
+                    break;
+                case "<=":
+                    obj = "set";
+                    break;
+                case "+=":
+                    obj = "add";
+                    break;
+                case "-=":
+                    obj = "remove";
+                    break;
+                default:
+                    break;
+            }
+            return obj;
         }
 
         public override object VisitProtocolFunctionStatement([NotNull] XyParser.ProtocolFunctionStatementContext context)

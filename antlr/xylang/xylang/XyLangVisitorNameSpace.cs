@@ -164,7 +164,7 @@ namespace xylang
             {
                 obj += Visit(context.annotation());
             }
-            obj += r1.permission + " static " + r2.data + " " + r1.text + " {get;set;} = " + r2.text + context.Terminate().GetText() + Wrap;
+            obj += " private static " + r2.data + " " + r1.text + " = " + r2.text + context.Terminate().GetText() + Wrap;
             return obj;
         }
     }
