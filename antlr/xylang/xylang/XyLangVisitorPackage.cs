@@ -402,16 +402,16 @@ namespace xylang
             switch(context.op.Text)
             {
                 case "=>":
-                    obj = "get";
+                    obj = "get" + context.Terminate().GetText();
                     break;
                 case "<=":
-                    obj = "set";
+                    obj = "set" + context.Terminate().GetText();
                     break;
                 case "+=":
-                    obj = "add";
+                    obj = "add" + context.Terminate().GetText();
                     break;
                 case "-=":
-                    obj = "remove";
+                    obj = "remove" + context.Terminate().GetText();
                     break;
                 default:
                     break;
