@@ -15,6 +15,8 @@ importStatement
 |namespaceFunctionStatement
 |namespaceVariableStatement
 |namespaceInvariableStatement
+|namespacePropertyStatement
+|namespacePropertyEmptyStatement
 ;
 // 导入命名空间
 importStatement:Import BlockLeft (nameSpaceStatement)* BlockRight Terminate;
@@ -28,6 +30,12 @@ functionMainStatement:Function BlockLeft (functionSupportStatement)* BlockRight 
 namespaceVariableStatement:(annotation)? expression Define expression Terminate;
 // 命名空间常量
 namespaceInvariableStatement:(annotation)? expression '==' expression Terminate;
+// 定义属性
+namespacePropertyStatement: (annotation)? id Define '^' type BlockLeft (namespacePropertySubStatement)+ BlockRight Terminate;
+// 定义子方法
+namespacePropertySubStatement: op=('=>'|'<='|'+='|'-=') BlockLeft (functionSupportStatement)* BlockRight Terminate;
+// 定义空属性
+namespacePropertyEmptyStatement:(annotation)? id Define '^' type Terminate;
 // 命名空间函数
 namespaceFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义包

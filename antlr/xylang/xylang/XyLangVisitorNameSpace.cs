@@ -167,5 +167,66 @@ namespace xylang
             obj += " private static " + r2.data + " " + r1.text + " = " + r2.text + context.Terminate().GetText() + Wrap;
             return obj;
         }
+
+        public override object VisitNamespacePropertyEmptyStatement([NotNull] XyParser.NamespacePropertyEmptyStatementContext context)
+        {
+            var obj = "";
+            if(context.annotation() != null)
+            {
+                obj += Visit(context.annotation());
+            }
+            var id = (Result)Visit(context.id());
+            var type = (string)Visit(context.type());
+            obj += id.permission + " static " + type + " " + id.text + "{get;set;}" + Wrap;
+            return obj;
+        }
+
+        public override object VisitNamespacePropertyStatement([NotNull] XyParser.NamespacePropertyStatementContext context)
+        {
+            var obj = "";
+            if(context.annotation() != null)
+            {
+                obj += Visit(context.annotation());
+            }
+            var id = (Result)Visit(context.id());
+            var type = (string)Visit(context.type());
+            obj += id.permission + " static " + type + " " + id.text + "{";
+            foreach(var item in context.namespacePropertySubStatement())
+            {
+                obj += Visit(item);
+            }
+            obj += "}" + Wrap;
+            return obj;
+        }
+
+        public override object VisitNamespacePropertySubStatement([NotNull] XyParser.NamespacePropertySubStatementContext context)
+        {
+            var obj = "";
+            var id = "";
+            switch(context.op.Text)
+            {
+                case "=>":
+                    id = " get ";
+                    break;
+                case "<=":
+                    id = " set ";
+                    break;
+                case "+=":
+                    id = " add ";
+                    break;
+                case "-=":
+                    id = " remove ";
+                    break;
+                default:
+                    break;
+            }
+            obj += id + "{";
+            foreach(var item in context.functionSupportStatement())
+            {
+                obj += Visit(item);
+            }
+            obj += "}" + Wrap;
+            return obj;
+        }
     }
 }
