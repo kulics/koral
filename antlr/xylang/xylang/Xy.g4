@@ -66,23 +66,29 @@ protocolSupportStatement:
 protocolStatement
 |protocolFunctionStatement
 |protocolPropertyStatement
+|protocolPropertyEmptyStatement
 ;
-// 定义变量
+// 定义属性
 protocolPropertyStatement:(annotation)? id Define '^' type BlockLeft (protocolPropertySubStatement)+ BlockRight Terminate;
 // 定义子方法
 protocolPropertySubStatement: op=('=>'|'<='|'+='|'-=') Terminate;
+// 定义空属性
+protocolPropertyEmptyStatement: (annotation)? id Define '^' type Terminate;
 // 函数
 protocolFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 协议实现支持的语句
 protocolImplementSupportStatement:
 implementFunctionStatement
 |implementPropertyStatement
+|implementPropertyEmptyStatement
 |implementEventStatement
 ;
 // 实现协议
 protocolImplementStatement:ProtocolSub nameSpace (templateCall)? BlockLeft (protocolImplementSupportStatement)* BlockRight Terminate;
-// 变量实现
+// 属性实现
 implementPropertyStatement:(annotation)? id Define '^' type BlockLeft (packagePropertySubStatement)+ BlockRight Terminate;
+// 空属性实现
+implementPropertyEmptyStatement: (annotation)? id Define '^' type Terminate;
 // 函数实现
 implementFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 事件实现

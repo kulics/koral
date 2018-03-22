@@ -255,6 +255,11 @@ namespace xylang
                 {
                     obj += Visit(item);
                 }
+                else if(item.GetChild(0) is XyParser.ImplementPropertyEmptyStatementContext)
+                {
+                    var vr = (Variable)Visit(item);
+                    obj += vr.type + " " + ptcl + "." + vr.ID + " " + vr.body;
+                }
             }
             var r = new Result();
             r.data = ptcl;
@@ -269,6 +274,22 @@ namespace xylang
             var nameSpace = Visit(context.nameSpace());
             obj += "public event " + nameSpace + " " + id.text + context.Terminate().GetText() + Wrap;
             return obj;
+        }
+
+        public override object VisitImplementPropertyEmptyStatement([NotNull] XyParser.ImplementPropertyEmptyStatementContext context)
+        {
+            var id = (Result)Visit(context.id());
+            var type = (string)Visit(context.type());
+
+            var vr = new Variable();
+            vr.ID = id.text;
+            vr.type = type;
+            vr.body = "{get;set;}" + Wrap;
+            if(context.annotation() != null)
+            {
+                vr.annotation = (string)Visit(context.annotation());
+            }
+            return vr;
         }
 
         class Variable
@@ -293,7 +314,7 @@ namespace xylang
             var vr = new Variable();
             vr.ID = id.text;
             vr.type = type;
-            vr.body = body + context.Terminate().GetText() + Wrap;
+            vr.body = body + Wrap;
             if(context.annotation() != null)
             {
                 vr.annotation = (string)Visit(context.annotation());
@@ -374,6 +395,19 @@ namespace xylang
             obj += interfaceProtocol;
             obj += context.BlockRight().GetText() + Wrap;
             return obj;
+        }
+
+        public override object VisitProtocolPropertyEmptyStatement([NotNull] XyParser.ProtocolPropertyEmptyStatementContext context)
+        {
+            var r = new Result();
+            if(context.annotation() != null)
+            {
+                r.text += Visit(context.annotation());
+            }
+            var id = (Result)Visit(context.id());
+            var type = (string)Visit(context.type());
+            r.text += type + " " + id.text + "{get;set;}" + Wrap;
+            return r;
         }
 
         public override object VisitProtocolPropertyStatement([NotNull] XyParser.ProtocolPropertyStatementContext context)
