@@ -160,7 +160,7 @@ namespace xylang
                 case XyParser.TypeF64:
                     obj = "double";
                     break;
-                case XyParser.TypeText:
+                case XyParser.TypeStr:
                     obj = "string";
                     break;
                 case XyParser.TypeBool:
