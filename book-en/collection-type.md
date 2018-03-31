@@ -23,9 +23,9 @@ If you need an empty array of definite type, you can create it using the type-cr
 
 The array type is represented by `[]type`, where `[]` is a one-dimensional array, so multidimensional arrays can be represented as `[][][]type`.
 
-For example we need a text array:
+For example we need a string array:
 ```
-arrText => []txt~();
+arrString => []str~();
 ```
 #### .NET Arrays
 If we need to use the `.Net` native array type, we can use `[#]type` to represent it.
@@ -64,7 +64,7 @@ A dictionary is a collection of disparate data of the same type. Each value of a
 
 Unlike the data items in an array, the data items in the dictionary do not have a specific order. We need to access the data through identifier (key), which is largely the same way we use dictionary literals in the real world.
 
-Dictionary keys can only use `integer` and` text` types.
+Dictionary keys can only use `integer` and` string` types.
 ### Definition
 Similar to arrays, dictionaries also use the `[]` definition, except that the array type is a combination of `key` and` value`, separated by `:`.
 
@@ -72,7 +72,7 @@ E.g:
 ```
 dic => ["a": 1, "b": 2, "c": 3];
 ```
-This will create a `txt:i32` type dictionary containing` a, b, c` entries.
+This will create a `str:i32` type dictionary containing` a, b, c` entries.
 
 If you need a clear dictionary of empty dictionaries, you can also create it using the type-creation syntax.
 

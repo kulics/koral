@@ -24,7 +24,7 @@ Student => #~()
     Grade => 0;
 };
 ```
-So we get a student bag with these data attributes. This student bag now becomes a usable type like `i32, txt, bool`.
+So we get a student bag with these data attributes. This student bag now becomes a usable type like `i32, str, bool`.
 
 Unlike our original base type can only store one data, the student package can store name, student number, class, grade data.
 

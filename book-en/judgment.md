@@ -53,7 +53,7 @@ i => 3;
 ```
 This can be considered as an `if elseif else` structure relative to other languages.
 # Condition Judgment
-When the judgment value is the other identified basic type (`text, number`), the statement can enter the inner multi-condition matching, we can use the auxiliary symbol `~` to match the conditions to perform the corresponding logic, so it will only execute the statement that matched successfully.
+When the judgment value is the other identified basic type (`string, integer`), the statement can enter the inner multi-condition matching, we can use the auxiliary symbol `~` to match the conditions to perform the corresponding logic, so it will only execute the statement that matched successfully.
 
 E.g:
 ```

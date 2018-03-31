@@ -48,12 +48,12 @@ All supported floating-point types are as follows:
 f32 // 32-bit   ±1.5e−45 to ±3.4e38
 f64 // 64-bit   ±5.0e−324 to ±1.7e308
 ```
-### text
+### string
 We are not living in a world of numbers alone, so we also need to use text to display the information we need. 
 
-In this language, the default text is the `txt` type, which is an unlimited-length character array data.
+In this language, the default text is the `str` type, which is an unlimited-length character array data.
 
-You only need to use `""` package a text content, it will be recognized as a text value.
+You only need to use `""` package a text content, it will be recognized as a string value.
 
 E.g:
 ```
