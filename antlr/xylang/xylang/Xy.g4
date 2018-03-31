@@ -318,7 +318,7 @@ t=TypeAny
 | t=TypeU64
 | t=TypeF32
 | t=TypeF64
-| t=TypeText
+| t=TypeStr
 | t=TypeBool
 ;
 
@@ -387,7 +387,7 @@ TypeI64: 'i64';
 TypeU64: 'u64';
 TypeF32: 'f32';
 TypeF64: 'f64';
-TypeText: 'txt';
+TypeStr: 'str';
 TypeBool: 'bool';
 True: 'true';
 False: 'false';
