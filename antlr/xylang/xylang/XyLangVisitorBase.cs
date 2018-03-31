@@ -37,7 +37,7 @@ namespace xylang
             if(context.typeBasic() != null)
             {
                 r.permission = "public";
-                r.text += Visit(context.typeBasic());
+                r.text += context.typeBasic().GetText();
             }
             else if(context.linqKeyword() != null)
             {
@@ -54,7 +54,6 @@ namespace xylang
                 r.permission = "private";
                 r.text += context.op.Text;
             }
-
 
             if(keywords.IndexOf(r.text) >= 0)
             {
