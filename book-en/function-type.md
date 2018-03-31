@@ -76,7 +76,7 @@ When we call the function, we need to fill the brackets with the identifier in t
 
 E.g:
 ```
-sell => $(price: i32, name: txt)~(){}; 
+sell => $(price: i32, name: str)~(){}; 
 // define one function with two in parameter
 
 sell(1.99, "cola"); 
@@ -87,7 +87,7 @@ Similar to in parameters, out parameters also need to be clearly defined with an
 
 E.g:
 ```
-topSell => $()~(name: txt, count: i32)
+topSell => $()~(name: str, count: i32)
 {
     ...
     -> ("cola", many);
