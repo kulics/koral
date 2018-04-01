@@ -161,7 +161,7 @@ checkErrorStatement:Wave id BlockLeft (functionSupportStatement)* BlockRight;
 // 报告错误
 reportStatement: CheckSub (expression)? Terminate;
 // 迭代器
-iteratorStatement:expression '<.' expression '<.' expression | expression '<.' expression;
+iteratorStatement: '[' expression Wave expression Terminate expression ']' | '[' expression Wave expression ']';
 
 // 定义变量
 variableStatement: expression Define expression Terminate;
