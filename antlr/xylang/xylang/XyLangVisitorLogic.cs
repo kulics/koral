@@ -29,8 +29,8 @@ namespace xylang
             else
             {
                 it.from = (Result)Visit(context.expression(0));
-                it.to = (Result)Visit(context.expression(2));
-                it.step = (Result)Visit(context.expression(1));
+                it.to = (Result)Visit(context.expression(1));
+                it.step = (Result)Visit(context.expression(2));
             }
             return it;
         }

@@ -19,24 +19,24 @@ This can be thought of as a `foreach` structure relative to other languages.
 ## Iterator Loop
 There are times when we do not necessarily have a collection, but we just need to take numbers like `0` to `100`. We have an iterator syntax to accomplish such a task.
 
-Iterators can loop from the start point to the end point, using the `<.` symbol between the two numbers.
+Iterators can loop from the start point to the end point, we use the collection expression, using the `~` symbol between the two numbers.
 
 E.g:
 ```
-@ 0 <. 100 ~ i
+@ [0 ~ 100] ~ i
 {
     Console.WriteLine(i); // print each number
 };
 ```
-It should be noted that the meaning of `0 <. 100` is read from` 0` to `100` one by one, that is, a total execution of` 101` times. Iterator will be executed until the last number is completed, rather than an early end.
+It should be noted that the meaning of `0 ~ 100` is read from` 0` to `100` one by one, that is, a total execution of` 101` times. Iterator will be executed until the last number is completed, rather than an early end.
 
-So if we need to do it a hundred times, we can use `0 <. 99` or` 1 <. 100`, remembering this difference.
+So if we need to do it a hundred times, we can use `0 ~ 99` or` 1 ~ 100`, remembering this difference.
 
-By default, iterators add `1` to each interval. If we need to take every other number, we can add a step-by-step condition, just insert a number between the start point and the end point.
+By default, iterators add `1` to each interval. If we need to take every other number, we can add a step-by-step condition, just insert `;` and a number behind the start point and the end point.
 
 E.g:
 ```
-@ 0 <. 2 <. 100 ~ i
+@ [0 ~ 100; 2] ~ i
 {
     ...
 };
