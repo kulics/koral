@@ -182,6 +182,7 @@ id
 // 表达式
 expression:
 primaryExpression
+| callSelf // 调用自己
 | callFunc // 函数调用
 | callPkg // 新建包
 | callAwait // 异步调用
@@ -203,6 +204,8 @@ primaryExpression
 | expression add expression // 和型表达式
 | expression mul expression // 积型表达式
 ;
+
+callSelf: '..' callExpression;
 
 callExpression:
 callElement // 访问元素
@@ -349,8 +352,7 @@ Assign: '<=';
 Import : '<:';
 Export : ':>';
 
-SelfSub : '~^';
-Self : '^';
+Self : '..';
 
 ArrowRight : '->';
 ArrowLeft : '<-';

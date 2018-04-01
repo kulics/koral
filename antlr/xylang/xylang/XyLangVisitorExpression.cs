@@ -100,6 +100,22 @@ namespace xylang
             return r;
         }
 
+        public override object VisitCallSelf([NotNull] XyParser.CallSelfContext context)
+        {
+            var r = new Result();
+            r.data = "var";
+            var e1 = "this";
+            var op = ".";
+            var e2 = (Result)Visit(context.GetChild(1));
+            if(((Result)Visit(context.GetChild(1))).isIndex)
+            {
+                r.text = e1 + e2.text;
+                return r;
+            }
+            r.text = e1 + op + e2.text;
+            return r;
+        }
+
         public override object VisitCallExpression([NotNull] XyParser.CallExpressionContext context)
         {
             var count = context.ChildCount;
