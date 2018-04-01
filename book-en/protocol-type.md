@@ -46,7 +46,7 @@ Student => #~()
         Do => $()~()
         {
             SpendTime(1); // spent an hour
-            ^.HomeWork.Count -= 1; // completed one
+            ..HomeWork.Count -= 1; // completed one
         };
     };
 };

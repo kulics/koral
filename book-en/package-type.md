@@ -128,13 +128,13 @@ Student => #~()
     ...
     GetGirlFirend => $()~(name: text)
     {
-        -> (^._GirlFirend);
+        -> (.._GirlFirend);
     };
 };
 ```
 Because the function is part of the package, and the function can call data or functionality, we can define a method for getting the private property.
 
-The `^` used here to declare the package itself, so you can easily access their own properties. This can be thought of as `this | self` in other languages.
+The `..` used here to declare the package itself, so you can easily access their own properties. This can be thought of as `this | self` in other languages.
 
 Through the function properties, we can get to the private property, you can also easily according to business needs to deal with other data in the package.
 
@@ -163,11 +163,11 @@ Student => #~(name: text, number: text)
     ...
     ~#
     {
-        ^.Name <= name; ^.Number <= number;
+        ..Name <= name; ..Number <= number;
         // calculate the class
-        ^.Class <= GetSubText(number, 2, 3);
+        ..Class <= GetSubText(number, 2, 3);
         // calculate the grade
-        ^.Grade <= GetSubText(number, 0, 1);
+        ..Grade <= GetSubText(number, 0, 1);
     };
 };
 ```
