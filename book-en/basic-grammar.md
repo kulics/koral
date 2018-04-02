@@ -126,6 +126,8 @@ E.g:
 ```
 j == 2; 
 ```
+
+Note that invariable data can only be defined within the namespace.
 ## Identifier
 Identifier is the variable, function, package, protocol, etc. specified name. The letters that make up the identifier all have a certain norm, and the naming convention of the identifier in this language is as follows:
 
