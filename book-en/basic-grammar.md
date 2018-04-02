@@ -109,6 +109,23 @@ E.g:
 a <= 2;
 ```
 But the definition is not the same, the left side of the assignment can only be an identifier that has been defined, otherwise the assignment statement does not hold.
+## Variable data
+We can define variable data very easily, and types that are not marked with special symbols are variable data.
+
+E.g:
+```
+i => 1; 
+```
+
+It should be noted that variable data cannot be called externally and can only be used within a defined range. Can be considered private.
+
+## Invariable data
+We can also define invariable data, just define it with `==`.
+
+E.g:
+```
+j == 2; 
+```
 ## Identifier
 Identifier is the variable, function, package, protocol, etc. specified name. The letters that make up the identifier all have a certain norm, and the naming convention of the identifier in this language is as follows:
 
