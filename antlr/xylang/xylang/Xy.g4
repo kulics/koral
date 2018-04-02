@@ -2,7 +2,7 @@
 
 program : statement+;
 
-statement :exportStatement;		  
+statement :exportStatement | sharpExportStatement;		  
 
 // 导出命名空间
 exportStatement:Export nameSpace BlockLeft (exportSupportStatement)* BlockRight Terminate;
@@ -17,6 +17,13 @@ importStatement
 |namespaceInvariableStatement
 |namespacePropertyStatement
 |namespacePropertyEmptyStatement
+;
+// dotnet 命名空间
+sharpExportStatement: '#>' nameSpace BlockLeft (sharpExportSupportStatement)* BlockRight Terminate;
+sharpExportSupportStatement:
+importStatement
+|packageStatement
+|protocolStatement
 ;
 // 导入命名空间
 importStatement:Import BlockLeft (nameSpaceStatement)* BlockRight Terminate;
