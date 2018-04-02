@@ -14,7 +14,7 @@ namespace xylang
             var nameSpace = (string)Visit(context.nameSpace());
             if(nameSpace.LastIndexOf(".") >= 0)
             {
-                nameSpace = nameSpace.Substring(nameSpace.LastIndexOf(".")+1);
+                nameSpace = nameSpace.Substring(nameSpace.LastIndexOf(".") + 1);
             }
             var obj = "";
             obj += "namespace " + Visit(context.nameSpace()) + Wrap + context.BlockLeft().GetText() + Wrap;
@@ -34,6 +34,20 @@ namespace xylang
             obj += "public static partial class " + nameSpace + Wrap + context.BlockLeft().GetText() + Wrap;
             obj += content;
             obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
+            obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
+            return obj;
+        }
+
+        public override object VisitSharpExportStatement([NotNull] XyParser.SharpExportStatementContext context)
+        {
+            var obj = "";
+            obj += "namespace " + Visit(context.nameSpace()) + Wrap + context.BlockLeft().GetText() + Wrap;
+
+            foreach(var item in context.sharpExportSupportStatement())
+            {
+                obj += Visit(item);
+            }
+
             obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
             return obj;
         }
