@@ -37,7 +37,7 @@ Read detail from The [Book](./book-en/introduction.md).
             @ greetings ~ item
             {
                 print(item);
-                ? item ~ 0..8 
+                ? item ~ [0~8] 
                 {
                     print(" in 0-8");
                 }
@@ -54,13 +54,10 @@ Read detail from The [Book](./book-en/introduction.md).
 1. 2017.07 ~ 2018.03 
     1. Design syntax.
     1. Completed translator to C # compiler.
-    1. Release v0.1 .
 1. 2018.03 ~ 2019.03
     1. Rewrite all xy projects using xylang.
     1. Develop vscode syntax plugin.
     1. Compiler features improvements (identifier records, cross-file references, project compilation).
-    1. Release v0.2.
 1. 2019.03 ~ 2020.03
     1. Compile to CIL or LLVM.
     1. Increase the standard library.
-    1. Release v0.3.
