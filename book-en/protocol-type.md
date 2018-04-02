@@ -20,7 +20,7 @@ E.g:
 ```
 HomeWork => &
 {
-    Count => 0;
+    Count => ^i32;
     Do => $()~(){};
 };
 ```
@@ -41,7 +41,7 @@ Student => #~()
     ...
     ~& HomeWork
     {
-        Count => 999999; // many, many homeworks
+        Count => ^i32; 
 
         Do => $()~()
         {
@@ -68,7 +68,7 @@ With the protocol included, we can use the student bundle that owns the protocol
 
 E.g:
 ```
-Peter => Student~();
+Peter => Student~(){Count:999999};
 Console.WriteLine(Peter.HomeWork.Count);
 // print 999999, too much
 Peter.HomeWork.Do();
@@ -124,47 +124,6 @@ Arr.Add(StudentA.HomeWork);
 ```
 ╮ (¯ ▽ ¯) ╭
 Perfect
-## Private Property
-Similar to the actual protocol, the protocol can also have some public resources for everyone to use.
-
-In our language, this can be some public data or public method, just because these properties are already constrained when the protocol is written, so they are immutable.
-
-We only need to define the private property can provide these public resources.
-
-E.g:
-```
-HomeWork => &
-{
-    ...
-    _NeedHours => 1; // can not be modified
-    _DoHomeWork => $(student: &HomeWork)~()
-    {
-        Student.Do();
-    };
-};
-```
-So that we have two public properties, we can now call these properties directly using the protocol name, just like identifiers, and let's transform some of the previous code.
-
-E.g:
-```
-...
-~& HomeWork
-{
-    ...
-    Do => $()~()
-    {
-        SpendTime(HomeWork._NeedHours); // spent the value provided by the protocol
-        ...
-    };
-};
-...
-@ Arr ~ Student
-{
-    HomeWork._DoHomeWork(Student);
-};
-```
-╮ (¯ ▽ ¯) ╭
-Perfect again
 
 ## Type Convert
 Because packet types can be converted to protocol types, the original type of data can not be judge during use.

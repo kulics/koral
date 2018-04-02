@@ -22,6 +22,7 @@ Eventually making XyLang with very few grammar, only the presence of symbols on 
 1. [Judgment](judgment.md)
 1. [Loop](loop.md)
 1. [Function Type](function-type.md)
+1. [Control Type](control-type.md)
 1. [Package Type](package-type.md)
 1. [Protocol Type](protocol-type.md)
 1. [Check](check.md)

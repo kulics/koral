@@ -18,10 +18,10 @@ E.g:
 ```
 Student => #~()
 {
-    Name => "";
-    Number => "";
-    Class => 0;
-    Grade => 0;
+    Name => ^str;
+    Number => ^str;
+    Class => ^i32;
+    Grade => ^i32;
 };
 ```
 So we get a student bag with these data attributes. This student bag now becomes a usable type like `i32, str, bool`.
@@ -80,7 +80,7 @@ Similarly, the way the collection is created is actually a simplified creation, 
 E.g:
 ```
 Array => []i32~()[ 1, 2, 3, 4, 5 ];
-Dictionary => [txt]i32~()[ "1":1, "2":2, "3":3 ];
+Dictionary => [str]i32~()[ "1":1, "2":2, "3":3 ];
 ```
 ## Anonymous Package
 If we only want to wrap some data directly, instead of defining the package first and then using it, is it like an anonymous function?
@@ -109,7 +109,7 @@ E.g:
 Student => #~()
 {
     ...
-    _GirlFirend => ""; // The identifier beginning with this '_' is private
+    _GirlFirend => ^str; // The identifier beginning with this '_' is private
 };
 ```
 That's right, if you remember the definition of identifiers, this is how private identifiers are defined, and private identifiers can not be accessed by outsiders.
@@ -126,7 +126,7 @@ E.g:
 Student => #~()
 {
     ...
-    GetGirlFirend => $()~(name: text)
+    GetGirlFirend => $()~(name: str)
     {
         -> (.._GirlFirend);
     };
@@ -158,7 +158,7 @@ Add parameters in the definition, and write the definition of the constructor, w
 
 E.g:
 ```
-Student => #~(name: text, number: text)
+Student => #~(name: str, number: str)
 {
     ...
     ~#
@@ -188,11 +188,11 @@ E.g:
 ```
 ChineseStudent => #~()
 {
-    Name => "";
-    Number => "";
-    Class => 0;
-    Grade => 0;
-    KungFu => false; // kung fu students
+    Name => ^str;
+    Number => ^str;
+    Class => ^i32;
+    Grade => ^i32;
+    KungFu => ^bool; // kung fu students
 };
 ```
 No, no repeatable definition of data so elegant, we can reuse student attributes, with an additional kung fu attributes on it.
@@ -203,8 +203,8 @@ E.g:
 ```
 ChineseStudent => #~()
 {
-    Student => Student~(); // include student attributes in it
-    KungFu => false; // kung fu students
+    Student => ^Student; // include student attributes in it
+    KungFu => ^bool; // kung fu students
 };
 ```
 This way you can use generic attributes via student attributes in Chinese students.

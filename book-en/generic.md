@@ -21,7 +21,7 @@ E.g:
 Array<T> => #~()
 {
     Items => Storage~(T); // create storage
-    Length => 0;
+    Length => ^i32;
 
     Get => $(index: i32)~(item: T) // get a generic data
     {
