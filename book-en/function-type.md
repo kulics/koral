@@ -189,4 +189,4 @@ each1To10( $(item:i32)~()
      Console.WriteLine(item);
 });
 ```
-### [Next Chapter](package-type.md)
+### [Next Chapter](control-type.md)
