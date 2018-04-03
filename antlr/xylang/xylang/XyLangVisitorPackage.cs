@@ -117,7 +117,7 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitPackagePropertyEmptyStatement([NotNull] XyParser.PackagePropertyEmptyStatementContext context)
+        public override object VisitPackageControlEmptyStatement([NotNull] XyParser.PackageControlEmptyStatementContext context)
         {
             var obj = "";
             if(context.annotation() != null)
@@ -130,7 +130,7 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitPackagePropertyStatement([NotNull] XyParser.PackagePropertyStatementContext context)
+        public override object VisitPackageControlStatement([NotNull] XyParser.PackageControlStatementContext context)
         {
             var obj = "";
             if(context.annotation() != null)
@@ -140,7 +140,7 @@ namespace xylang
             var id = (Result)Visit(context.id());
             var type = (string)Visit(context.type());
             obj += id.permission + " " + type + " " + id.text + "{";
-            foreach(var item in context.packagePropertySubStatement())
+            foreach(var item in context.packageControlSubStatement())
             {
                 obj += Visit(item);
             }
@@ -148,7 +148,7 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitPackagePropertySubStatement([NotNull] XyParser.PackagePropertySubStatementContext context)
+        public override object VisitPackageControlSubStatement([NotNull] XyParser.PackageControlSubStatementContext context)
         {
             var obj = "";
             var id = "";
@@ -246,7 +246,7 @@ namespace xylang
                     var fn = (Function)Visit(item);
                     obj += fn.@out + " " + ptcl + "." + fn.ID + " " + fn.@in + Wrap + fn.body;
                 }
-                else if(item.GetChild(0) is XyParser.ImplementPropertyStatementContext)
+                else if(item.GetChild(0) is XyParser.ImplementControlStatementContext)
                 {
                     var vr = (Variable)Visit(item);
                     obj += vr.type + " " + ptcl + "." + vr.ID + " " + vr.body;
@@ -255,7 +255,7 @@ namespace xylang
                 {
                     obj += Visit(item);
                 }
-                else if(item.GetChild(0) is XyParser.ImplementPropertyEmptyStatementContext)
+                else if(item.GetChild(0) is XyParser.ImplementControlEmptyStatementContext)
                 {
                     var vr = (Variable)Visit(item);
                     obj += vr.type + " " + ptcl + "." + vr.ID + " " + vr.body;
@@ -276,7 +276,7 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitImplementPropertyEmptyStatement([NotNull] XyParser.ImplementPropertyEmptyStatementContext context)
+        public override object VisitImplementControlEmptyStatement([NotNull] XyParser.ImplementControlEmptyStatementContext context)
         {
             var id = (Result)Visit(context.id());
             var type = (string)Visit(context.type());
@@ -300,12 +300,12 @@ namespace xylang
             public string annotation;
         }
 
-        public override object VisitImplementPropertyStatement([NotNull] XyParser.ImplementPropertyStatementContext context)
+        public override object VisitImplementControlStatement([NotNull] XyParser.ImplementControlStatementContext context)
         {
             var id = (Result)Visit(context.id());
             var type = (string)Visit(context.type());
             var body = "{";
-            foreach(var item in context.packagePropertySubStatement())
+            foreach(var item in context.packageControlSubStatement())
             {
                 body += Visit(item);
             }
@@ -397,7 +397,7 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitProtocolPropertyEmptyStatement([NotNull] XyParser.ProtocolPropertyEmptyStatementContext context)
+        public override object VisitProtocolControlEmptyStatement([NotNull] XyParser.ProtocolControlEmptyStatementContext context)
         {
             var r = new Result();
             if(context.annotation() != null)
@@ -410,7 +410,7 @@ namespace xylang
             return r;
         }
 
-        public override object VisitProtocolPropertyStatement([NotNull] XyParser.ProtocolPropertyStatementContext context)
+        public override object VisitProtocolControlStatement([NotNull] XyParser.ProtocolControlStatementContext context)
         {
             var id = (Result)Visit(context.id());
             var r = new Result();
@@ -422,7 +422,7 @@ namespace xylang
 
             var type = (string)Visit(context.type());
             r.text += type + " " + id.text + "{";
-            foreach(var item in context.protocolPropertySubStatement())
+            foreach(var item in context.protocolControlSubStatement())
             {
                 r.text += Visit(item);
             }
@@ -430,7 +430,7 @@ namespace xylang
             return r;
         }
 
-        public override object VisitProtocolPropertySubStatement([NotNull] XyParser.ProtocolPropertySubStatementContext context)
+        public override object VisitProtocolControlSubStatement([NotNull] XyParser.ProtocolControlSubStatementContext context)
         {
             var obj = "";
             switch(context.op.Text)

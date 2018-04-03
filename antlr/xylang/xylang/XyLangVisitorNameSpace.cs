@@ -182,7 +182,7 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitNamespacePropertyEmptyStatement([NotNull] XyParser.NamespacePropertyEmptyStatementContext context)
+        public override object VisitNamespaceControlEmptyStatement([NotNull] XyParser.NamespaceControlEmptyStatementContext context)
         {
             var obj = "";
             if(context.annotation() != null)
@@ -195,7 +195,7 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitNamespacePropertyStatement([NotNull] XyParser.NamespacePropertyStatementContext context)
+        public override object VisitNamespaceControlStatement([NotNull] XyParser.NamespaceControlStatementContext context)
         {
             var obj = "";
             if(context.annotation() != null)
@@ -205,7 +205,7 @@ namespace xylang
             var id = (Result)Visit(context.id());
             var type = (string)Visit(context.type());
             obj += id.permission + " static " + type + " " + id.text + "{";
-            foreach(var item in context.namespacePropertySubStatement())
+            foreach(var item in context.namespaceControlSubStatement())
             {
                 obj += Visit(item);
             }
@@ -213,7 +213,7 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitNamespacePropertySubStatement([NotNull] XyParser.NamespacePropertySubStatementContext context)
+        public override object VisitNamespaceControlSubStatement([NotNull] XyParser.NamespaceControlSubStatementContext context)
         {
             var obj = "";
             var id = "";
