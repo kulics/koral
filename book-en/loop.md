@@ -43,6 +43,16 @@ E.g:
 ```
 So every interval is not `1` but `2`, empathy we can set other numbers.
 
+That being the case, we can also reverse it in reverse order, as long as we use negative conditions for each step.
+
+E.g:
+```
+@ [100 ~ 0; -1] ~ i
+{
+     ... // from 100 to 0
+};
+```
+
 This can be considered as a `for` structure relative to other languages.
 ## Infinite Loop
 At other times, we may need an infinite loop. Very easy, we just need to do without data.
