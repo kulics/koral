@@ -41,7 +41,7 @@ namespace xylang
             var id = (Result)Visit(context.id());
             var it = (Iterator)Visit(context.iteratorStatement());
             obj += "for (var " + id.text + " = " + it.from.text + ";";
-            obj += id.text + "<" + it.to.text + ";";
+            obj += id.text + "!=" + it.to.text + "+" + it.step.text + ";";
             obj += id.text + "+=" + it.step.text + ")";
             obj += Wrap + context.BlockLeft().GetText() + Wrap;
             obj += ProcessFunctionSupport(context.functionSupportStatement());
