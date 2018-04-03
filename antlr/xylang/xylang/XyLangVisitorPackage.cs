@@ -222,6 +222,23 @@ namespace xylang
             return obj;
         }
 
+        public override object VisitPackageOverrideFunctionStatement([NotNull] XyParser.PackageOverrideFunctionStatementContext context)
+        {
+            var id = (Result)Visit(context.id());
+            var obj = "";
+            if(context.annotation() != null)
+            {
+                obj += Visit(context.annotation());
+            }
+
+            obj += "protected override " + Visit(context.parameterClauseOut()) + " " + id.text;
+
+            obj += Visit(context.parameterClauseIn()) + Wrap + context.BlockLeft().GetText() + Wrap;
+            obj += ProcessFunctionSupport(context.functionSupportStatement());
+            obj += context.BlockRight().GetText() + Wrap;
+            return obj;
+        }
+
         public override object VisitPackageInitStatement([NotNull] XyParser.PackageInitStatementContext context)
         {
             var obj = context.BlockLeft().GetText() + Wrap;

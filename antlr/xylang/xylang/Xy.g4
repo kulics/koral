@@ -55,6 +55,7 @@ packageStatement
 |protocolStatement
 |protocolImplementStatement
 |packageFunctionStatement
+|packageOverrideFunctionStatement
 |packageControlStatement
 |packageControlEmptyStatement
 |packageVariableStatement
@@ -63,6 +64,8 @@ packageStatement
 packageInitStatement:(annotation)? PackageSub BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 函数
 packageFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+// 重载函数
+packageOverrideFunctionStatement:(annotation)? id Define '#$' parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义引入
 packageExtend: PackageSub nameSpace Terminate;
 // 定义变量
