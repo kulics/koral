@@ -66,7 +66,7 @@ Unlike the data items in an array, the data items in the dictionary do not have 
 
 Dictionary keys can only use `integer` and` string` types.
 ### Definition
-Similar to arrays, dictionaries also use the `[]` definition, except that the array type is a combination of `key` and` value`, separated by `:`.
+Similar to arrays, dictionaries also use the `[]` definition, except that the dictionaries type is a combination of `key` and` value`, separated by `:`.
 
 E.g:
 ```

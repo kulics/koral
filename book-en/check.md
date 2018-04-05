@@ -118,7 +118,7 @@ E.g:
 Func => $()~()
 {
     ...
-    @ 0..5 ~ index
+    @ [0~5] ~ index
     {
         // does not affect the logic outside the loop
         .! { Console.WriteLine(index + 1); };
