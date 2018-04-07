@@ -76,7 +76,7 @@ namespace xylang
                 obj += "using static " + ns;
                 if(ns.LastIndexOf(".") >= 0)
                 {
-                    ns = ns.Substring(ns.LastIndexOf("."));
+                    ns = ns.Substring(ns.LastIndexOf(".") + 1);
                 }
                 obj += "." + ns + context.Terminate().GetText();
             }
