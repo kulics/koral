@@ -20,11 +20,9 @@ If we want to set a fetch operation, we can add extra code block definitions aft
 E.g:
 ```
 Number => ^i32
+~get // means get, equivalent to getter in other languages
 {
-    => // means get, equivalent to getter in other languages
-    {
-        -> (7); // only returns 7
-    };
+    -> (7); // only returns 7
 };
 ```
 In this way, number has a special method to get the value. When calling number, it will execute the internal logic.
@@ -36,12 +34,10 @@ With the above example, we naturally can think of how to deal with set operation
 E.g:
 ```
 Number => ^i32
+...
+~set // means set, equivalent to setter in other languages
 {
-    ...
-    <= // means set, equivalent to setter in other languages
-    {
-        // ? ? ? Who should give the value? ? ?
-    };
+    // ? ? ? Who should give the value? ? ?
 };
 ```
 Yes, this raises the question that control types are used to control operations and cannot be used to store data when implementing operations.
@@ -52,11 +48,9 @@ E.g:
 _number => 0;
 
 Number => ^i32
+~set
 {
-    <=
-    {
-        _number <= value; // value represents the value of the input
-    };
+    _number <= value; // value represents the value of the input
 };
 ```
 
@@ -67,15 +61,13 @@ A complete example of reading and writing is as follows:
 _number => 0;
 
 Number => ^i32
+~get
 {
-    =>
-    {
-        -> (_number);
-    };
-    <=
-    {
-        _number <= value; // value represents the value of the input
-    };
+    -> (_number);
+};
+~set
+{
+    _number <= value; // value represents the value of the input
 };
 ```
 

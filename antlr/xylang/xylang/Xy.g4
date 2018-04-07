@@ -38,9 +38,9 @@ namespaceVariableStatement:(annotation)? expression Define expression Terminate;
 // 命名空间常量
 namespaceInvariableStatement:(annotation)? expression '==' expression Terminate;
 // 定义控制
-namespaceControlStatement: (annotation)? id Define '^' type BlockLeft (namespaceControlSubStatement)+ BlockRight Terminate;
+namespaceControlStatement: (annotation)? id Define '^' type (namespaceControlSubStatement)+ Terminate;
 // 定义子方法
-namespaceControlSubStatement: op=('=>'|'<='|'+='|'-=') BlockLeft (functionSupportStatement)* BlockRight Terminate;
+namespaceControlSubStatement: Wave id BlockLeft (functionSupportStatement)* BlockRight;
 // 定义空控制
 namespaceControlEmptyStatement:(annotation)? id Define '^' type Terminate;
 // 命名空间函数
@@ -71,9 +71,9 @@ packageExtend: PackageSub type Terminate;
 // 定义变量
 packageVariableStatement:(annotation)? expression Define expression Terminate;
 // 定义控制
-packageControlStatement: (annotation)? id Define '^' type BlockLeft (packageControlSubStatement)+ BlockRight Terminate;
+packageControlStatement: (annotation)? id Define '^' type (packageControlSubStatement)+ Terminate;
 // 定义子方法
-packageControlSubStatement: op=('=>'|'<='|'+='|'-=') BlockLeft (functionSupportStatement)* BlockRight Terminate;
+packageControlSubStatement: Wave id BlockLeft (functionSupportStatement)* BlockRight;
 // 定义空控制
 packageControlEmptyStatement:(annotation)? id Define '^' type Terminate;
 
@@ -87,9 +87,9 @@ protocolStatement
 |protocolControlEmptyStatement
 ;
 // 定义控制
-protocolControlStatement:(annotation)? id Define '^' type BlockLeft (protocolControlSubStatement)+ BlockRight Terminate;
+protocolControlStatement:(annotation)? id Define '^' type (protocolControlSubStatement)+ Terminate;
 // 定义子方法
-protocolControlSubStatement: op=('=>'|'<='|'+='|'-=') Terminate;
+protocolControlSubStatement: Wave id;
 // 定义空控制
 protocolControlEmptyStatement: (annotation)? id Define '^' type Terminate;
 // 函数
@@ -104,7 +104,7 @@ implementFunctionStatement
 // 实现协议
 protocolImplementStatement:ProtocolSub nameSpace (templateCall)? BlockLeft (protocolImplementSupportStatement)* BlockRight Terminate;
 // 控制实现
-implementControlStatement:(annotation)? id Define '^' type BlockLeft (packageControlSubStatement)+ BlockRight Terminate;
+implementControlStatement:(annotation)? id Define '^' type (packageControlSubStatement)+ Terminate;
 // 空控制实现
 implementControlEmptyStatement: (annotation)? id Define '^' type Terminate;
 // 函数实现

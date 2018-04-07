@@ -217,23 +217,7 @@ namespace xylang
         {
             var obj = "";
             var id = "";
-            switch(context.op.Text)
-            {
-                case "=>":
-                    id = " get ";
-                    break;
-                case "<=":
-                    id = " set ";
-                    break;
-                case "+=":
-                    id = " add ";
-                    break;
-                case "-=":
-                    id = " remove ";
-                    break;
-                default:
-                    break;
-            }
+            id = GetControlSub(context.id().GetText());
             obj += id + "{";
             foreach(var item in context.functionSupportStatement())
             {
@@ -241,6 +225,34 @@ namespace xylang
             }
             obj += "}" + Wrap;
             return obj;
+        }
+
+        public string GetControlSub(string id)
+        {
+            switch(id)
+            {
+                case "get":
+                    id = " get ";
+                    break;
+                case "set":
+                    id = " set ";
+                    break;
+                case "_get":
+                    id = " private get ";
+                    break;
+                case "_set":
+                    id = " private set ";
+                    break;
+                case "add":
+                    id = " add ";
+                    break;
+                case "remove":
+                    id = " remove ";
+                    break;
+                default:
+                    break;
+            }
+            return id;
         }
     }
 }
