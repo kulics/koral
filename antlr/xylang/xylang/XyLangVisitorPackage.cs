@@ -152,23 +152,7 @@ namespace xylang
         {
             var obj = "";
             var id = "";
-            switch(context.op.Text)
-            {
-                case "=>":
-                    id = " get ";
-                    break;
-                case "<=":
-                    id = " set ";
-                    break;
-                case "+=":
-                    id = " add ";
-                    break;
-                case "-=":
-                    id = " remove ";
-                    break;
-                default:
-                    break;
-            }
+            id = GetControlSub(context.id().GetText());
             obj += id + "{";
             foreach(var item in context.functionSupportStatement())
             {
@@ -450,23 +434,7 @@ namespace xylang
         public override object VisitProtocolControlSubStatement([NotNull] XyParser.ProtocolControlSubStatementContext context)
         {
             var obj = "";
-            switch(context.op.Text)
-            {
-                case "=>":
-                    obj = "get" + context.Terminate().GetText();
-                    break;
-                case "<=":
-                    obj = "set" + context.Terminate().GetText();
-                    break;
-                case "+=":
-                    obj = "add" + context.Terminate().GetText();
-                    break;
-                case "-=":
-                    obj = "remove" + context.Terminate().GetText();
-                    break;
-                default:
-                    break;
-            }
+            obj = GetControlSub(context.id().GetText()) + ";";
             return obj;
         }
 
