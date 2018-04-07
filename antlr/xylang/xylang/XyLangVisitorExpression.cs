@@ -129,9 +129,12 @@ namespace xylang
                 {
                     r.isIndex = true;
                 }
+                else
+                {
+                    r.isIndex = false;
+                }
                 if(context.GetChild(2).GetChild(0) is XyParser.CallElementContext)
                 {
-                    r.isIndex = true;
                     r.text = e1.text + e2.text;
                     return r;
                 }

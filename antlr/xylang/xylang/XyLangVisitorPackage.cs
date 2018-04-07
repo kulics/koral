@@ -180,7 +180,7 @@ namespace xylang
 
         public override object VisitPackageExtend([NotNull] XyParser.PackageExtendContext context)
         {
-            var pkg = (string)Visit(context.nameSpace()); ;
+            var pkg = (string)Visit(context.type()); ;
             return pkg;
         }
 

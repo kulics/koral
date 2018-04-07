@@ -67,7 +67,7 @@ packageFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|F
 // 重载函数
 packageOverrideFunctionStatement:(annotation)? id Define '#$' parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义引入
-packageExtend: PackageSub nameSpace Terminate;
+packageExtend: PackageSub type Terminate;
 // 定义变量
 packageVariableStatement:(annotation)? expression Define expression Terminate;
 // 定义控制
