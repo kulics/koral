@@ -57,6 +57,18 @@ namespace xylang
                         r.text = e1.text + e2.text;
                         return r;
                     }
+                    else if(context.GetChild(2).GetChild(0) is XyParser.CallAsContext)
+                    {
+                        r.data = e2.data;
+                        r.text = "((" + e2.text + ")" + e1.text + ")";
+                        return r;
+                    }
+                    else if(context.GetChild(2).GetChild(0) is XyParser.CallIsContext)
+                    {
+                        r.data = e2.data;
+                        r.text = "(" + e1.text + " is " + e2.text + ")";
+                        return r;
+                    }
                 }
                 if(context.GetChild(1).GetType() == typeof(XyParser.JudgeContext))
                 {
@@ -136,6 +148,18 @@ namespace xylang
                 if(context.GetChild(2).GetChild(0) is XyParser.CallElementContext)
                 {
                     r.text = e1.text + e2.text;
+                    return r;
+                }
+                else if(context.GetChild(2).GetChild(0) is XyParser.CallAsContext)
+                {
+                    r.data = e2.data;
+                    r.text = "((" + e2.text + ")" + e1.text + ")";
+                    return r;
+                }
+                else if(context.GetChild(2).GetChild(0) is XyParser.CallIsContext)
+                {
+                    r.data = e2.data;
+                    r.text = "(" + e1.text + " is " + e2.text + ")";
                     return r;
                 }
                 r.text = e1.text + op + e2.text;
@@ -528,7 +552,7 @@ namespace xylang
         {
             var r = new Result();
             // 异步
-            if(context.t.Type == XyParser.FunctionAsync)
+            if(context.t.Type == XyParser.FunctionSub)
             {
                 r.text += " async ";
             }
@@ -544,7 +568,7 @@ namespace xylang
             var r = new Result();
             r.data = "var";
             // 异步
-            if(context.t.Type == XyParser.FunctionAsync)
+            if(context.t.Type == XyParser.FunctionSub)
             {
                 r.text += "async ";
             }
