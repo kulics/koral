@@ -81,20 +81,18 @@ namespace xylang
         public override object VisitCallAs([NotNull] XyParser.CallAsContext context)
         {
             var r = new Result();
-            var expr = (Result)Visit(context.expression());
             var type = (string)Visit(context.type());
             r.data = type;
-            r.text = "((" + type + ")" + expr.text + ")";
+            r.text = type;
             return r;
         }
 
         public override object VisitCallIs([NotNull] XyParser.CallIsContext context)
         {
             var r = new Result();
-            var expr = (Result)Visit(context.expression());
             var type = (string)Visit(context.type());
             r.data = "bool";
-            r.text = "(" + expr.text + " is " + type + ")";
+            r.text = type;
             return r;
         }
 

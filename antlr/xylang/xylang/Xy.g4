@@ -38,15 +38,15 @@ namespaceVariableStatement:(annotation)? expression Define expression Terminate;
 // 命名空间常量
 namespaceInvariableStatement:(annotation)? expression '==' expression Terminate;
 // 定义控制
-namespaceControlStatement: (annotation)? id Define '^' type (namespaceControlSubStatement)+ Terminate;
+namespaceControlStatement: (annotation)? id Define Control type (namespaceControlSubStatement)+ Terminate;
 // 定义子方法
 namespaceControlSubStatement: Wave id BlockLeft (functionSupportStatement)* BlockRight;
 // 定义空控制
-namespaceControlEmptyStatement:(annotation)? id Define '^' type Terminate;
+namespaceControlEmptyStatement:(annotation)? id Define Control type Terminate;
 // 命名空间函数
-namespaceFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+namespaceFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionSub) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义包
-packageStatement:(annotation)? id (templateDefine)? Define Package Wave parameterClauseIn BlockLeft (packageSupportStatement)* BlockRight Terminate;
+packageStatement:(annotation)? id (templateDefine)? Define Package parameterClauseIn BlockLeft (packageSupportStatement)* BlockRight Terminate;
 // 包支持的语句
 packageSupportStatement:
 packageStatement
@@ -63,7 +63,7 @@ packageStatement
 // 包构造方法
 packageInitStatement:(annotation)? PackageSub BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 函数
-packageFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+packageFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionSub) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 重载函数
 packageOverrideFunctionStatement:(annotation)? id Define '#$' parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义引入
@@ -71,11 +71,11 @@ packageExtend: PackageSub type Terminate;
 // 定义变量
 packageVariableStatement:(annotation)? expression Define expression Terminate;
 // 定义控制
-packageControlStatement: (annotation)? id Define '^' type (packageControlSubStatement)+ Terminate;
+packageControlStatement: (annotation)? id Define Control type (packageControlSubStatement)+ Terminate;
 // 定义子方法
 packageControlSubStatement: Wave id BlockLeft (functionSupportStatement)* BlockRight;
 // 定义空控制
-packageControlEmptyStatement:(annotation)? id Define '^' type Terminate;
+packageControlEmptyStatement:(annotation)? id Define Control type Terminate;
 
 // 协议
 protocolStatement:(annotation)? id (templateDefine)? Define Protocol BlockLeft (protocolSupportStatement)* BlockRight Terminate;
@@ -87,13 +87,13 @@ protocolStatement
 |protocolControlEmptyStatement
 ;
 // 定义控制
-protocolControlStatement:(annotation)? id Define '^' type (protocolControlSubStatement)+ Terminate;
+protocolControlStatement:(annotation)? id Define Control type (protocolControlSubStatement)+ Terminate;
 // 定义子方法
 protocolControlSubStatement: Wave id;
 // 定义空控制
-protocolControlEmptyStatement: (annotation)? id Define '^' type Terminate;
+protocolControlEmptyStatement: (annotation)? id Define Control type Terminate;
 // 函数
-protocolFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+protocolFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionSub) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 协议实现支持的语句
 protocolImplementSupportStatement:
 implementFunctionStatement
@@ -104,15 +104,15 @@ implementFunctionStatement
 // 实现协议
 protocolImplementStatement:ProtocolSub nameSpace (templateCall)? BlockLeft (protocolImplementSupportStatement)* BlockRight Terminate;
 // 控制实现
-implementControlStatement:(annotation)? id Define '^' type (packageControlSubStatement)+ Terminate;
+implementControlStatement:(annotation)? id Define Control type (packageControlSubStatement)+ Terminate;
 // 空控制实现
-implementControlEmptyStatement: (annotation)? id Define '^' type Terminate;
+implementControlEmptyStatement: (annotation)? id Define Control type Terminate;
 // 函数实现
-implementFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+implementFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionSub) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 事件实现
 implementEventStatement: id Define '#!' nameSpace Terminate;
 // 函数
-functionStatement:id (templateDefine)? Define t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+functionStatement:id (templateDefine)? Define t=(Function|FunctionSub) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 返回
 returnStatement: ArrowRight tuple Terminate;
 // 入参
@@ -163,13 +163,13 @@ loopInfiniteStatement:Loop BlockLeft (functionSupportStatement)* BlockRight Term
 // 跳出循环
 loopJumpStatement:LoopSub Terminate;
 // 看守
-checkDeferStatement: CheckDefer BlockLeft (functionSupportStatement)* BlockRight Terminate;
+checkDeferStatement: CheckSub BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 检查
 checkStatement: Check BlockLeft (functionSupportStatement)* BlockRight checkErrorStatement Terminate;
 // 错误处理
 checkErrorStatement:Wave id BlockLeft (functionSupportStatement)* BlockRight;
 // 报告错误
-reportStatement: CheckSub (expression)? Terminate;
+reportStatement: CheckReport (expression)? Terminate;
 // 迭代器
 iteratorStatement: '[' expression Wave expression Terminate expression ']' | '[' expression Wave expression ']';
 
@@ -195,9 +195,8 @@ primaryExpression
 | callSelf // 调用自己
 | callFunc // 函数调用
 | callPkg // 新建包
+| getType // 获取类型
 | callAwait // 异步调用
-| callIs // 类型判断
-| callAs // 类型转换
 | sharpArray // c#数组
 | array // 数组
 | dictionary // 字典
@@ -219,6 +218,8 @@ callSelf: '..' callExpression;
 
 callExpression:
 callElement // 访问元素
+| callIs // 类型判断
+| callAs // 类型转换
 | callFunc // 函数调用
 | callPkg // 新建包
 | id // id
@@ -231,9 +232,11 @@ expressionList : expression (',' expression)* ; // 表达式列
 
 annotation: '\\*' expressionList '*\\'; // 注解
 
-callFunc: id (templateCall)? tuple; // 函数调用
+callFunc: id (templateCall)? call tuple; // 函数调用
 
-callPkg: type wave tuple (pkgAssign|arrayAssign|dictionaryAssign)?; // 新建包
+callPkg: '#' type call tuple (pkgAssign|arrayAssign|dictionaryAssign)?; // 新建包
+
+getType: '#' type;
 
 pkgAssign: BlockLeft (pkgAssignElement (',' pkgAssignElement)*)? BlockRight; // 简化赋值
 
@@ -243,11 +246,11 @@ arrayAssign: '[' (expression (',' expression)*)? ']';
 
 dictionaryAssign: '[' (dictionaryElement (',' dictionaryElement)*)?  ']';
 
-callIs: type is '(' expression ')'; // 类型判断
+callIs: is type; // 类型判断
 
-callAs: type as '(' expression ')';	// 类型转换
+callAs: as type; // 类型转换
 
-callAwait: FunctionAsync expression; // 异步调用
+callAwait: FunctionSub expression; // 异步调用
 
 array : '[' (expression (',' expression)*)? ']'; // 数组
 
@@ -265,14 +268,14 @@ templateDefine: '<' id (',' id)* '>';
 
 templateCall: '<' type (',' type)* '>';
 
-lambda : t=(Function|FunctionAsync) lambdaIn ArrowRight lambdaOut;
+lambda : t=(Function|FunctionSub) lambdaIn ArrowRight lambdaOut;
 
 lambdaIn : (id (',' id)* )? ;
 lambdaOut : expressionList ;
 
 package: Package pkgAssign; // 匿名包
 
-function : t=(Function|FunctionAsync) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
+function : t=(Function|FunctionSub) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 
 empty : '~:' type; // 类型空初始化
 
@@ -373,12 +376,14 @@ Judge : '?';
 LoopSub : '~@';
 Loop : '@';
 
-CheckDefer : '.!';
+CheckReport : '!~' ;
 CheckSub : '~!';
 Check : '!';
 
-FunctionAsync : '.$';
+FunctionSub : '~$';
 Function : '$';
+
+Control : '^';
 
 PackageSub : '~#';
 Package : '#';

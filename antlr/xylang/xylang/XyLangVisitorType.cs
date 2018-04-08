@@ -34,6 +34,14 @@ namespace xylang
             return obj;
         }
 
+        public override object VisitGetType([NotNull] XyParser.GetTypeContext context)
+        {
+            var r = new Result();
+            r.data = "System.Type";
+            r.text = "typeof(" + Visit(context.type()) + ")";
+            return r;
+        }
+
         public override object VisitTypeArray([NotNull] XyParser.TypeArrayContext context)
         {
             var obj = "";
