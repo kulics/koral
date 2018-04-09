@@ -27,7 +27,9 @@ namespace xylang
             public object data { get; set; }
             public string text { get; set; }
             public string permission { get; set; }
-            public bool isIndex { get; set; }
+            public string callType { get; set; }
+            public int bracketTime { get; set; }
+            public bool isCall { get; set; }
         }
 
         public override object VisitId([NotNull] XyParser.IdContext context)
@@ -83,7 +85,7 @@ namespace xylang
             var r = new Result();
             var type = (string)Visit(context.type());
             r.data = type;
-            r.text = type;
+            r.text = " as " + type + ")";
             return r;
         }
 
@@ -92,7 +94,7 @@ namespace xylang
             var r = new Result();
             var type = (string)Visit(context.type());
             r.data = "bool";
-            r.text = type;
+            r.text = " is " + type + ")";
             return r;
         }
 
