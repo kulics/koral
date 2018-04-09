@@ -52,22 +52,30 @@ namespace xylang
                 if(context.GetChild(1).GetType() == typeof(XyParser.CallContext))
                 {
                     r.data = "var";
-                    if(((Result)Visit(context.GetChild(2))).isIndex)
+                    for(int i = 0; i < e2.bracketTime; i++)
                     {
-                        r.text = e1.text + e2.text;
-                        return r;
+                        r.text += "(";
                     }
-                    else if(context.GetChild(2).GetChild(0) is XyParser.CallAsContext)
+                    var tar = ((Result)Visit(context.GetChild(2)));
+                    switch(tar.callType)
                     {
-                        r.data = e2.data;
-                        r.text = "((" + e2.text + ")" + e1.text + ")";
-                        return r;
-                    }
-                    else if(context.GetChild(2).GetChild(0) is XyParser.CallIsContext)
-                    {
-                        r.data = e2.data;
-                        r.text = "(" + e1.text + " is " + e2.text + ")";
-                        return r;
+                        case "element":
+                            r.text = e1.text + e2.text;
+                            return r;
+                        case "as":
+                        case "is":
+                            r.data = e2.data;
+                            if(tar.isCall)
+                            {
+                                r.text += e1.text + e2.text;
+                            }
+                            else
+                            {
+                                r.text += e1.text + op + e2.text;
+                            }
+                            return r;
+                        default:
+                            break;
                     }
                 }
                 if(context.GetChild(1).GetType() == typeof(XyParser.JudgeContext))
@@ -119,7 +127,7 @@ namespace xylang
             var e1 = "this";
             var op = ".";
             var e2 = (Result)Visit(context.GetChild(1));
-            if(((Result)Visit(context.GetChild(1))).isIndex)
+            if(((Result)Visit(context.GetChild(1))).callType == "element")
             {
                 r.text = e1 + e2.text;
                 return r;
@@ -139,11 +147,13 @@ namespace xylang
                 var e2 = (Result)Visit(context.GetChild(2));
                 if(context.GetChild(0).GetChild(0) is XyParser.CallElementContext)
                 {
-                    r.isIndex = true;
+                    r.callType = "element";
                 }
-                else
+                r.isCall = e1.isCall;
+                r.callType = e1.callType;
+                if(e1.bracketTime > 0)
                 {
-                    r.isIndex = false;
+                    r.bracketTime += e1.bracketTime;
                 }
                 if(context.GetChild(2).GetChild(0) is XyParser.CallElementContext)
                 {
@@ -152,14 +162,18 @@ namespace xylang
                 }
                 else if(context.GetChild(2).GetChild(0) is XyParser.CallAsContext)
                 {
+                    r.callType = "as";
                     r.data = e2.data;
-                    r.text = "((" + e2.text + ")" + e1.text + ")";
+                    r.text = e1.text + e2.text;
+                    r.bracketTime = e1.bracketTime + 1;
                     return r;
                 }
                 else if(context.GetChild(2).GetChild(0) is XyParser.CallIsContext)
                 {
+                    r.callType = "is";
                     r.data = e2.data;
-                    r.text = "(" + e1.text + " is " + e2.text + ")";
+                    r.text = e1.text + e2.text;
+                    r.bracketTime = e1.bracketTime + 1;
                     return r;
                 }
                 r.text = e1.text + op + e2.text;
@@ -169,7 +183,19 @@ namespace xylang
                 r = (Result)Visit(context.GetChild(0));
                 if(context.GetChild(0) is XyParser.CallElementContext)
                 {
-                    r.isIndex = true;
+                    r.callType = "element";
+                }
+                else if(context.GetChild(0) is XyParser.CallAsContext)
+                {
+                    r.callType = "as";
+                    r.bracketTime++;
+                    r.isCall = true;
+                }
+                else if(context.GetChild(0) is XyParser.CallIsContext)
+                {
+                    r.callType = "is";
+                    r.bracketTime++;
+                    r.isCall = true;
                 }
             }
             return r;
