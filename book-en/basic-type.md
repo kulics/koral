@@ -22,15 +22,17 @@ u32     // 32-bit unsigned  0 to 4,294,967,295
 i64     // 64-bit signed    -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807
 u64     // 64-bit unsigned  0 to 18,446,744,073,709,551,615
 ```
-## Type Conversion
+## Basic Type Conversion
 Since the default integer is `i32`, how do we use other types of integers?
 
-We can use type conversion to change the number to the type we need, just use the `type!()` syntax.
+We can use type conversion to change the number to the type we need, just use the `type()` syntax.
 
 E.g:
 ```
-integer8 => i8!(16);
+integer8 => i8(16);
 ```
+
+Note that, the basic type conversion is only valid for the base type.
 ## float 
 Integers do not meet our digital needs, and we often need to deal with decimals.
 

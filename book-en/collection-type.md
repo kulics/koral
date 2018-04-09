@@ -25,14 +25,14 @@ The array type is represented by `[]type`, where `[]` is a one-dimensional array
 
 For example we need a string array:
 ```
-arrString => []str~();
+arrString => #[]str.();
 ```
 #### .NET Arrays
 If we need to use the `.Net` native array type, we can use `[#]type` to represent it.
 
 E.g:
 ```
-arrInt => [#]i32~();
+arrInt => [#]i32.();
 arrInt <= [#][1,2,3,4,5];
 // corresponds to C#'s int[]
 ```
@@ -41,7 +41,7 @@ If we need to access one of the elements in the array we can access it with the 
 
 E.g:
 ```
-Console.WriteLine( arr.[1] );
+Console.WriteLine.( arr.[1] );
 ```
 It should be noted that in the programming language, most of the array starting index is from `0`,` identifier [0] `is the first element obtained, the subsequent elements and so on.
 ### Change the element
@@ -54,9 +54,9 @@ arr.[0] <= 5;
 Note that we can only access the index of the existing data, if not exist, there will be an error.
 ### Common operation
 ```
-arr.Add(1); // added to the end
-arr.Insert(2, 3); // insert element 3 to index 2
-arr.RemoveAt(1); // delete the specified location element
+arr.Add.(1); // added to the end
+arr.Insert.(2, 3); // insert element 3 to index 2
+arr.RemoveAt.(1); // delete the specified location element
 length => arr.Count; // length
 ```
 ## Dictionary
@@ -84,14 +84,14 @@ Since arrays only support numeric indexes, you can omit the `[i32]` tag. We can 
 
 E.g:
 ```
-dicNumNum => [i32]i32~();
+dicNumNum => #[i32]i32.();
 ```
 ### Visit
 Like an array, we can also use indexes to access data directly.
 
 E.g:
 ```
-Console.WriteLine( dic.["a"] );
+Console.WriteLine.( dic.["a"] );
 ```
 ### Change the element
 Like arrays, we can also use assignment statements to change to elements.
@@ -103,8 +103,8 @@ dic.["b"] <= 5;
 The difference is that with the array, if the assignment is a non-existent index, it will not be wrong, the value will be given directly to the new key.
 ### Common operation
 ```
-dic.Add("d", 11); // add index by method
-dic.Remove("c");  // delete the specified index element
+dic.Add.("d", 11); // add index by method
+dic.Remove.("c");  // delete the specified index element
 length => dic.Count; // length
 ```
 ### [Next Chapter](judgment.md)
