@@ -197,6 +197,7 @@ primaryExpression
 | callPkg // 新建包
 | getType // 获取类型
 | callAwait // 异步调用
+| basicConvert // 基础数据转化
 | sharpArray // c#数组
 | array // 数组
 | dictionary // 字典
@@ -251,6 +252,8 @@ callIs: is type ':'?; // 类型判断
 callAs: as type ':'?; // 类型转换
 
 callAwait: FunctionSub expression; // 异步调用
+
+basicConvert: typeBasic '(' expression ')'; // 基础数据转换
 
 array : '[' (expression (',' expression)*)? ']'; // 数组
 

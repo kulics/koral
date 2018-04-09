@@ -657,6 +657,16 @@ namespace xylang
             return r;
         }
 
+        public override object VisitBasicConvert([NotNull] XyParser.BasicConvertContext context)
+        {
+            var r = new Result();
+            var expr = (Result)Visit(context.expression());
+            var type = (string)Visit(context.typeBasic());
+            r.data = type;
+            r.text = "((" + type + ")" + expr.text + ")";
+            return r;
+        }
+
         List<string> keywords = new List<string> {
         "abstract", "as", "base", "bool", "break" , "byte", "case" , "catch",
         "char","checked","class","const","continue","decimal","default","delegate","do","double","else",
