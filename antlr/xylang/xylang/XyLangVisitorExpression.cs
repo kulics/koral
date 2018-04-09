@@ -56,8 +56,7 @@ namespace xylang
                     {
                         r.text += "(";
                     }
-                    var tar = ((Result)Visit(context.GetChild(2)));
-                    switch(tar.callType)
+                    switch(e2.callType)
                     {
                         case "element":
                             r.text = e1.text + e2.text;
@@ -65,7 +64,7 @@ namespace xylang
                         case "as":
                         case "is":
                             r.data = e2.data;
-                            if(tar.isCall)
+                            if(e2.isCall)
                             {
                                 r.text += e1.text + e2.text;
                             }
@@ -127,10 +126,29 @@ namespace xylang
             var e1 = "this";
             var op = ".";
             var e2 = (Result)Visit(context.GetChild(1));
-            if(((Result)Visit(context.GetChild(1))).callType == "element")
+            for(int i = 0; i < e2.bracketTime; i++)
             {
-                r.text = e1 + e2.text;
-                return r;
+                r.text += "(";
+            }
+            switch(e2.callType)
+            {
+                case "element":
+                    r.text = e1 + e2.text;
+                    return r;
+                case "as":
+                case "is":
+                    r.data = e2.data;
+                    if(e2.isCall)
+                    {
+                        r.text += e1 + e2.text;
+                    }
+                    else
+                    {
+                        r.text += e1 + op + e2.text;
+                    }
+                    return r;
+                default:
+                    break;
             }
             r.text = e1 + op + e2.text;
             return r;
