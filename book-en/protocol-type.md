@@ -36,7 +36,7 @@ We can include this protocol in the package we need, using the auxiliary symbols
 
 E.g:
 ```
-Student => #~()
+Student => #()
 {
     ...
     ~& HomeWork
@@ -68,12 +68,12 @@ With the protocol included, we can use the student bundle that owns the protocol
 
 E.g:
 ```
-Peter => Student~(){Count:999999};
-Console.WriteLine(Peter.HomeWork.Count);
+Peter => #Student.(){Count:999999};
+Console.WriteLine.(Peter.HomeWork.Count);
 // print 999999, too much
-Peter.HomeWork.Do();
+Peter.HomeWork.Do.();
 // did a homework
-Console.WriteLine(Peter.HomeWork.Count);
+Console.WriteLine.(Peter.HomeWork.Count);
 // print 999998, or too much
 ```
 If this is the case, there is no advantage in defining these two properties directly in the package.
@@ -87,13 +87,13 @@ Now we can create a wide variety of students, all of whom follow the same protoc
 E.g:
 ```
 // create three different types of student packages
-StudentA => ChineseStudent~();
-StudentB => AmericaStudent~();
-StudentC => JapanStudent~();
+StudentA => #ChineseStudent.();
+StudentB => #AmericaStudent.();
+StudentC => #JapanStudent.();
 // let them do homework separately
-StudentA.HomeWork.Do();
-StudentB.HomeWork.Do();
-StudentC.HomeWork.Do();
+StudentA.HomeWork.Do.();
+StudentB.HomeWork.Do.();
+StudentC.HomeWork.Do.();
 ```
 More efficient approach is to write this function into the function, let the function to help us repeatedly call the function of the protocol.
 
@@ -103,23 +103,23 @@ E.g:
 ```
 DoHomeWork => $(student: &HomeWork)~()
 {
-    student.Do(); // because the protocol has been marked, we can use the protocol method
+    student.Do.(); // because the protocol has been marked, we can use the protocol method
 };
 // Now we can make it easier for every student to do their homework
-DoHomeWork(StudentA.HomeWork);
-DoHomeWork(StudentB.HomeWork);
-DoHomeWork(StudentC.HomeWork);
+DoHomeWork.(StudentA.HomeWork);
+DoHomeWork.(StudentB.HomeWork);
+DoHomeWork.(StudentC.HomeWork);
 ```
 Of course, it is better to put these students in an array so that we can use loops to handle these repetitive tasks.
 
 E.g:
 ```
-Arr => []&HomeWork~();
-Arr.Add(StudentA.HomeWork);
+Arr => #[]&HomeWork.();
+Arr.Add.(StudentA.HomeWork);
 ... // stuffed many, many students
 @ Arr ~ Student
 {
-    DoHomeWork(Student);
+    DoHomeWork.(Student);
 };
 ```
 ╮ (¯ ▽ ¯) ╭
@@ -130,20 +130,27 @@ Because packet types can be converted to protocol types, the original type of da
 
 But sometimes we need to get the original type of data to handle, we can use type judgment to help us accomplish this.
 
-We can use `type?()` To judge the type of data, using `type!()` To convert the data to our type.
+We can use `.?type` To judge the type of data, using `.!type` To convert the data to our type.
 
 E.g:
 ```
 func => $(hw :&HomeWork)~()
 {
     // judge type
-    ? ChineseStudent?(hw) 
+    ? hw.?ChineseStudent 
     {
         // convert to chinese student data
-        cs => ChineseStudent!(hw);
+        cs => hw.!ChineseStudent;
     };
 };
 ```
-Note that if the type can not be converted correctly, it will cause a program exception.
+Note that if the type can not be converted correctly, it will return a nil value.
+
+If we need to continue using chained syntax after conversion, we can use `:` to cut off the type name.
+
+E.g:
+```
+Result => hw.!ChineseStudent:.Count;
+```
 
 ### [Next Chapter](check.md)

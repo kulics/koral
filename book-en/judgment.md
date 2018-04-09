@@ -7,7 +7,7 @@ E.g:
 ```
 ? true
 {
-    Console.WriteLine("true"); // true
+    Console.WriteLine.("true"); // true
 };
 ```
 # Boolean Judgment

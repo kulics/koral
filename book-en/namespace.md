@@ -31,7 +31,7 @@ E.g:
     $
     {
         // print something
-        Console.WriteLine( space.GetSomething() );
+        Console.WriteLine.( space.GetSomething.() );
     };
 };
 ```
@@ -50,7 +50,7 @@ E.g:
     $
     {
         // print something
-        Console.WriteLine( GetSomething() );
+        Console.WriteLine.( GetSomething.() );
     };
 };
 ```
@@ -71,9 +71,9 @@ E.g:
 
     $
     {
-        System.Console.WriteLine(""); // don't need System
+        System.Console.WriteLine.(""); // don't need System
 
-        Console.WriteLine(""); // can be used directly
+        Console.WriteLine.(""); // can be used directly
     };
 };
 ```
@@ -93,7 +93,7 @@ E.g:
         ...
     };
 
-    PageDemo => #~()
+    PageDemo => #()
     {
         ...
     };

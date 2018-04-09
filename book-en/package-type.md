@@ -5,18 +5,18 @@ Therefore, we need a feature that can wrap data of different attributes to bette
 
 Obviously, this feature for package data, called package.
 ## Definition
-We can use the `#~()` symbol to define a package that has nothing.
+We can use the `#()` symbol to define a package that has nothing.
 
 E.g:
 ```
-Package => #~(){};
+Package => #(){};
 ```
 Of course, we hope more is to be able to pack a few data, for example, a name, student number, class, grade attributes of students.
 We can define these data in the same way we define normal identifiers.
 
 E.g:
 ```
-Student => #~()
+Student => #()
 {
     Name => ^str;
     Number => ^str;
@@ -35,7 +35,7 @@ So how do we create a new package? As always, all of our types can be created us
 
 E.g:
 ```
-Peter => Student~();
+Peter => #Student.();
 ```
 This create a `Peter` identifier. All the properties of this student are initialized to `"", "", 0,0` as set in the definition.
 
@@ -50,7 +50,7 @@ Very simple, we only need to use `.` syntax, we can summon the attributes we nee
 
 E.g:
 ```
-Console.WriteLine(Peter.Name); 
+Console.WriteLine.(Peter.Name); 
 // print the name of a student
 ```
 To change the value of the property is the same, it is equivalent to a nested identifier. We can directly use the assignment statement to change the value.
@@ -66,7 +66,7 @@ Just add `{}` to the creation grammar to use the `key:value` method to quickly l
 
 E.g:
 ```
-Peter => Student~()
+Peter => #Student.()
 {
      Name:"Peter", Number:"060233",
      Class:2, Grade:6
@@ -79,8 +79,8 @@ Similarly, the way the collection is created is actually a simplified creation, 
 
 E.g:
 ```
-Array => []i32~()[ 1, 2, 3, 4, 5 ];
-Dictionary => [str]i32~()[ "1":1, "2":2, "3":3 ];
+Array => #[]i32.()[ 1, 2, 3, 4, 5 ];
+Dictionary => #[str]i32.()[ "1":1, "2":2, "3":3 ];
 ```
 ## Anonymous Package
 If we only want to wrap some data directly, instead of defining the package first and then using it, is it like an anonymous function?
@@ -106,7 +106,7 @@ We can define private properties to store properties that we do not want to be a
 
 E.g:
 ```
-Student => #~()
+Student => #()
 {
     ...
     _GirlFirend => ^str; // The identifier beginning with this '_' is private
@@ -123,7 +123,7 @@ We can use the definition method learned in the function section directly define
 
 E.g:
 ```
-Student => #~()
+Student => #()
 {
     ...
     GetGirlFirend => $()~(name: str)
@@ -142,7 +142,7 @@ With this function, we can get the private property by calling the function.
 
 E.g:
 ```
-Console.WriteLine(Peter.GetGirlFirend());
+Console.WriteLine.(Peter.GetGirlFirend.());
 // printed the name of a girlfriend of a puppy love student
 ```
 As with data attributes, functions can also be private identifiers, and functions that use private identifiers also mean that only the packet can access itself.
@@ -158,7 +158,7 @@ Add parameters in the definition, and write the definition of the constructor, w
 
 E.g:
 ```
-Student => #~(name: str, number: str)
+Student => #(name: str, number: str)
 {
     ...
     ~#
@@ -175,8 +175,8 @@ This gives us a package with constructors, and when we create a new student, cla
 
 E.g:
 ```
-Peter => Student~("Peter", "060233");
-Console.WriteLine(Peter.Class); // print out 2
+Peter => #Student.("Peter", "060233");
+Console.WriteLine.(Peter.Class); // print out 2
 ```
 It should be noted that a package can only support one constructor, we recommend to maintain the simplicity of the structure, a stable package easier to be used by the caller,
 
@@ -186,7 +186,7 @@ Now let us play our imagination, we want a customized package for Chinese studen
 
 E.g:
 ```
-ChineseStudent => #~()
+ChineseStudent => #()
 {
     Name => ^str;
     Number => ^str;
@@ -201,7 +201,7 @@ We need to use a combination of this feature, but not so complicated, just creat
 
 E.g:
 ```
-ChineseStudent => #~()
+ChineseStudent => #()
 {
     Student => ^Student; // include student attributes in it
     KungFu => ^bool; // kung fu students
@@ -211,8 +211,8 @@ This way you can use generic attributes via student attributes in Chinese studen
 
 E.g:
 ```
-Chen => ChineseStudent~();
-Console.WriteLine(Chen.Student.Name);
+Chen => #ChineseStudent.();
+Console.WriteLine.(Chen.Student.Name);
 // of course, since there is no assignment, nothing is output
 ```
 By combining layers after layer, you are free to assemble whatever you want to describe.

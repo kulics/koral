@@ -18,19 +18,19 @@ This is a simplified implementation.
 
 E.g:
 ```
-Array<T> => #~()
+Array<T> => #()
 {
-    Items => Storage~(T); // create storage
+    Items => #Storage.(T); // create storage
     Length => ^i32;
 
     Get => $(index: i32)~(item: T) // get a generic data
     {
-        -> (Items.Get(index));
+        -> (Items.Get.(index));
     };
 
     Add => $(item: T)~() // add a generic data into the array
     {
-        Items.Insert(Length, item);
+        Items.Insert.(Length, item);
         Length += 1;
     };
 };
@@ -45,7 +45,7 @@ Note that because generics are typed at run time, the compiler can not infer gen
 
 E.g:
 ```
-Package<T> => #~()
+Package<T> => #()
 {
     Item => ~:T; / / initialized a null value of the generic data
 };
@@ -56,11 +56,11 @@ Very simple, and we can use the same statement, but called when the need to impo
 
 E.g:
 ```
-ArrNumber => Array<integer>~(); // pass in the number type
+ArrNumber => #Array<integer>.(); // pass in the number type
 ```
 So we have an array of number types, is like this:
 ```
-ArrNumber => []integer~();
+ArrNumber => #[]integer.();
 ```
 ## Supported Types
 We can use generics in packages, functions, and protocol types.
