@@ -246,9 +246,9 @@ arrayAssign: '[' (expression (',' expression)*)? ']';
 
 dictionaryAssign: '[' (dictionaryElement (',' dictionaryElement)*)?  ']';
 
-callIs: is type; // 类型判断
+callIs: is type ':'?; // 类型判断
 
-callAs: as type; // 类型转换
+callAs: as type ':'?; // 类型转换
 
 callAwait: FunctionSub expression; // 异步调用
 
