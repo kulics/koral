@@ -253,7 +253,7 @@ callAs: as type ':'?; // 类型转换
 
 callAwait: FunctionSub expression; // 异步调用
 
-basicConvert: typeBasic '(' expression ')'; // 基础数据转换
+basicConvert: Check typeBasic '(' expression ')'; // 基础数据转换
 
 array : '[' (expression (',' expression)*)? ']'; // 数组
 
