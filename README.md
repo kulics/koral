@@ -20,36 +20,43 @@ Read detail from The [Book](./book-en/introduction.md).
 阅读 [语言说明文档](./book-zh/介绍.md)。
 
 ## Quick Preview
-
-    :> Main
+```
+// export
+:> Main
+{
+    // import
+    <: 
     {
-        <: 
-        {
-            System;
-        }
+        System;
+    }
 
-        $  
+    // main function
+    $  
+    {
+        // array
+        greetings => ["Hello", "Hola", "Bonjour",
+                    "Ciao", "こんにちは", "안녕하세요",
+                    "Cześć", "Olá", "Здравствуйте",
+                    "Chào bạn", "您好"];
+        // for-each
+        @ greetings ~ item
         {
-            greetings => ["Hello", "Hola", "Bonjour",
-                        "Ciao", "こんにちは", "안녕하세요",
-                        "Cześć", "Olá", "Здравствуйте",
-                        "Chào bạn", "您好"];
-            @ greetings ~ item
+            // call function
+            print.(item);
+            // if-switch
+            ? item ~ [0~8] 
             {
-                print(item);
-                ? item ~ [0~8] 
-                {
-                    print(" in 0-8");
-                }
-                ~ _
-                {
-                    print(" over 10");
-                    ~@;
-                };
+                print.(" in 0-8");
+            }
+            ~ _
+            {
+                print.(" over 10");
+                ~@;
             };
         };
     };
-
+};
+```
 ## Roadmap
 1. 2017.07 ~ 2018.03 
     1. Design syntax.
