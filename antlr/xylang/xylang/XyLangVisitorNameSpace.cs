@@ -70,7 +70,7 @@ namespace xylang
             {
                 obj += Visit(context.annotation());
             }
-            if(context.callNamespace() != null)
+            if(context.callEllipsis() != null)
             {
                 var ns = (string)Visit(context.nameSpace());
                 obj += "using static " + ns;
@@ -88,6 +88,24 @@ namespace xylang
         }
 
         public override object VisitNameSpace([NotNull] XyParser.NameSpaceContext context)
+        {
+            var obj = "";
+            for(int i = 0; i < context.id().Length; i++)
+            {
+                var id = (Result)Visit(context.id(i));
+                if(i == 0)
+                {
+                    obj += "" + id.text;
+                }
+                else
+                {
+                    obj += "." + id.text;
+                }
+            }
+            return obj;
+        }
+
+        public override object VisitName([NotNull] XyParser.NameContext context)
         {
             var obj = "";
             for(int i = 0; i < context.id().Length; i++)
