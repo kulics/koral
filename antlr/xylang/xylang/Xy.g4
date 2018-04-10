@@ -5,7 +5,7 @@ program : statement+;
 statement :exportStatement | sharpExportStatement;		  
 
 // 导出命名空间
-exportStatement:Export nameSpace BlockLeft (exportSupportStatement)* BlockRight Terminate;
+exportStatement: nameSpace Export BlockLeft (exportSupportStatement)* BlockRight Terminate;
 // 导出命名空间支持的语句
 exportSupportStatement:
 importStatement
@@ -19,7 +19,7 @@ importStatement
 |namespaceControlEmptyStatement
 ;
 // dotnet 命名空间
-sharpExportStatement: '#>' nameSpace BlockLeft (sharpExportSupportStatement)* BlockRight Terminate;
+sharpExportStatement: nameSpace '#>' BlockLeft (sharpExportSupportStatement)* BlockRight Terminate;
 sharpExportSupportStatement:
 importStatement
 |packageStatement
@@ -28,9 +28,9 @@ importStatement
 // 导入命名空间
 importStatement:Import BlockLeft (nameSpaceStatement)* BlockRight Terminate;
 // 命名空间
-nameSpaceStatement:(annotation)? (callNamespace)? nameSpace Terminate;
+nameSpaceStatement:(annotation)? (callEllipsis)? nameSpace Terminate;
 // 省略调用名称
-callNamespace: '..';
+callEllipsis: '..';
 // 主函数
 functionMainStatement:Function BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 命名空间变量
@@ -209,6 +209,7 @@ primaryExpression
 | plusMinus // 正负处理
 | negate // 取反
 | linq // 联合查询
+| callNamespace // 调用命名空间
 | expression call callExpression // 链式调用
 | expression judge expression // 判断型表达式
 | expression add expression // 和型表达式
@@ -216,6 +217,7 @@ primaryExpression
 ;
 
 callSelf: '..' callExpression;
+callNamespace: nameSpace callExpression?;
 
 callExpression:
 callElement // 访问元素
@@ -231,7 +233,7 @@ tuple : '(' (expression (',' expression)* )? ')'; // 元组
 
 expressionList : expression (',' expression)* ; // 表达式列
 
-annotation: '\\*' expressionList '*\\'; // 注解
+annotation: '\\\\' expressionList | '\\*' expressionList '*\\' ; // 注解
 
 callFunc: id (templateCall)? call tuple; // 函数调用
 
@@ -241,15 +243,15 @@ getType: '#' type;
 
 pkgAssign: BlockLeft (pkgAssignElement (',' pkgAssignElement)*)? BlockRight; // 简化赋值
 
-pkgAssignElement: nameSpace ':' expression; // 简化赋值元素
+pkgAssignElement: name Assign expression; // 简化赋值元素
 
 arrayAssign: '[' (expression (',' expression)*)? ']';
 
 dictionaryAssign: '[' (dictionaryElement (',' dictionaryElement)*)?  ']';
 
-callIs: is type ':'?; // 类型判断
+callIs: is type; // 类型判断
 
-callAs: as type ':'?; // 类型转换
+callAs: as type; // 类型转换
 
 callAwait: FunctionSub expression; // 异步调用
 
@@ -265,7 +267,9 @@ dictionaryElement: expression ':' expression; // 字典元素
 
 callElement : '[' expression ']';
 
-nameSpace: id ('.' id)* ;
+nameSpace: id (NameSpace id)* ;
+
+name: id (call id)* ;
 
 templateDefine: '<' id (',' id)* '>';
 
@@ -280,7 +284,7 @@ package: Package pkgAssign; // 匿名包
 
 function : t=(Function|FunctionSub) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 
-empty : '~:' type; // 类型空初始化
+empty : '#' '(' type ')'; // 类型空初始化
 
 plusMinus : add expression;
 
@@ -346,7 +350,7 @@ bool:t=True|t=False;
 
 as : op='!';
 is : op='?';
-judge : op=('||' | '&&' | '=' | '!=' | '<' | '>');
+judge : op=('||' | '&&' | '?=' | '!=' | '<' | '>');
 assign : op=(Assign | '+=' | '-=' | '*=' | '/=' | '%=');
 add : op=('+' | '-');
 mul : op=('*' | '/' | '%');
@@ -362,11 +366,12 @@ Terminate : ';';
 BlockLeft : '{';
 BlockRight : '}';
 
-Define : '=>';
-Assign: '<=';
+Define : ':';
+Assign: '=';
 
 Import : '<:';
 Export : ':>';
+NameSpace : '::';
 
 Self : '..';
 

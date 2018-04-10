@@ -231,7 +231,7 @@ namespace xylang
 
         public override object VisitJudge([NotNull] XyParser.JudgeContext context)
         {
-            if(context.op.Text == "=")
+            if(context.op.Text == "?=")
             {
                 return "==";
             }
@@ -327,6 +327,22 @@ namespace xylang
             }
             obj += ">";
             return obj;
+        }
+
+        public override object VisitCallNamespace([NotNull] XyParser.CallNamespaceContext context)
+        {
+            var r = new Result();
+            r.data = "var";
+            var obj = (string)Visit(context.nameSpace());
+            r.text = obj;
+            if(context.callExpression() != null)
+            {
+                var expr = (Result)Visit(context.callExpression());
+                r.data = expr.data;
+                r.text += expr.text;
+            }
+
+            return r;
         }
 
         public override object VisitCallElement([NotNull] XyParser.CallElementContext context)
@@ -432,7 +448,7 @@ namespace xylang
         public override object VisitPkgAssignElement([NotNull] XyParser.PkgAssignElementContext context)
         {
             var obj = "";
-            obj += Visit(context.nameSpace()) + " = " + ((Result)Visit(context.expression())).text;
+            obj += Visit(context.name()) + " = " + ((Result)Visit(context.expression())).text;
             return obj;
         }
 
