@@ -53,6 +53,8 @@ namespace xylang
                     }
                     catch(Exception err)
                     {
+                        Console.Write("compile error at ");
+                        Console.WriteLine(path + file);
                         Console.WriteLine(err);
                     }
                 }
