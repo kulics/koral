@@ -209,15 +209,13 @@ primaryExpression
 | plusMinus // 正负处理
 | negate // 取反
 | linq // 联合查询
-| callNamespace // 调用命名空间
-| expression call callExpression // 链式调用
+| expression (call|'::') callExpression // 链式调用
 | expression judge expression // 判断型表达式
 | expression add expression // 和型表达式
 | expression mul expression // 积型表达式
 ;
 
 callSelf: '..' callExpression;
-callNamespace: nameSpace callExpression?;
 
 callExpression:
 callElement // 访问元素

@@ -329,22 +329,6 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitCallNamespace([NotNull] XyParser.CallNamespaceContext context)
-        {
-            var r = new Result();
-            r.data = "var";
-            var obj = (string)Visit(context.nameSpace());
-            r.text = obj;
-            if(context.callExpression() != null)
-            {
-                var expr = (Result)Visit(context.callExpression());
-                r.data = expr.data;
-                r.text += expr.text;
-            }
-
-            return r;
-        }
-
         public override object VisitCallElement([NotNull] XyParser.CallElementContext context)
         {
             var r = (Result)Visit(context.expression());
