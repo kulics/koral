@@ -233,7 +233,7 @@ namespace xylang
 
         public override object VisitProtocolImplementStatement([NotNull] XyParser.ProtocolImplementStatementContext context)
         {
-            var ptcl = (string)Visit(context.nameSpace());
+            var ptcl = (string)Visit(context.nameSpaceItem());
             // 泛型
             if(context.templateCall() != null)
             {
@@ -272,7 +272,7 @@ namespace xylang
         {
             var obj = "";
             var id = (Result)Visit(context.id());
-            var nameSpace = Visit(context.nameSpace());
+            var nameSpace = Visit(context.nameSpaceItem());
             obj += "public event " + nameSpace + " " + id.text + context.Terminate().GetText() + Wrap;
             return obj;
         }

@@ -11,7 +11,7 @@ namespace xylang
     {
         public override object VisitTypeProtocol([NotNull] XyParser.TypeProtocolContext context)
         {
-            var obj = (string)Visit(context.nameSpace());
+            var obj = (string)Visit(context.typePackage());
             return obj;
         }
 
@@ -66,7 +66,7 @@ namespace xylang
         public override object VisitTypePackage([NotNull] XyParser.TypePackageContext context)
         {
             var obj = "";
-            obj += Visit(context.nameSpace());
+            obj += Visit(context.nameSpaceItem());
             if(context.templateCall() != null)
             {
                 obj += Visit(context.templateCall());
