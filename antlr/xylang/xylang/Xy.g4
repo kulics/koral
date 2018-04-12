@@ -2,55 +2,55 @@
 
 program : statement+;
 
-statement :exportStatement | sharpExportStatement;		  
+statement :exportStatement;		  
 
 // 导出命名空间
-exportStatement: nameSpace Export BlockLeft (exportSupportStatement)* BlockRight Terminate;
+exportStatement: nameSpace ':>' BlockLeft (exportSupportStatement)* BlockRight Terminate;
 // 导出命名空间支持的语句
 exportSupportStatement:
 importStatement
-|packageStatement
-|protocolStatement
-|functionMainStatement
-|namespaceFunctionStatement
-|namespaceVariableStatement
-|namespaceInvariableStatement
-|namespaceControlStatement
-|namespaceControlEmptyStatement
-;
-// dotnet 命名空间
-sharpExportStatement: nameSpace '#>' BlockLeft (sharpExportSupportStatement)* BlockRight Terminate;
-sharpExportSupportStatement:
-importStatement
+|nspackageStatement
 |packageStatement
 |protocolStatement
 ;
 // 导入命名空间
-importStatement:Import BlockLeft (nameSpaceStatement)* BlockRight Terminate;
+importStatement:'<:' BlockLeft (nameSpaceStatement)* BlockRight Terminate;
 // 命名空间
 nameSpaceStatement:(annotation)? (callEllipsis)? nameSpace Terminate;
 // 省略调用名称
 callEllipsis: '..';
+
+// 无构造包
+nspackageStatement: (annotation)? id (templateDefine)? Define Package BlockLeft (nspackageSupportStatement)* BlockRight Terminate;
+
+nspackageSupportStatement:
+functionMainStatement
+|nspackageFunctionStatement
+|nspackageVariableStatement
+|nspackageInvariableStatement
+|nspackageControlStatement
+|nspackageControlEmptyStatement
+;
+
 // 主函数
 functionMainStatement:Function BlockLeft (functionSupportStatement)* BlockRight Terminate;
-// 命名空间变量
-namespaceVariableStatement:(annotation)? expression Define expression Terminate;
-// 命名空间常量
-namespaceInvariableStatement:(annotation)? expression '==' expression Terminate;
+// 无构造包变量
+nspackageVariableStatement:(annotation)? expression Define expression Terminate;
+// 无构造包常量
+nspackageInvariableStatement:(annotation)? expression '==' expression Terminate;
 // 定义控制
-namespaceControlStatement: (annotation)? id Define Control type (namespaceControlSubStatement)+ Terminate;
+nspackageControlStatement: (annotation)? id Define Control type (nspackageControlSubStatement)+ Terminate;
 // 定义子方法
-namespaceControlSubStatement: Wave id BlockLeft (functionSupportStatement)* BlockRight;
+nspackageControlSubStatement: Wave id BlockLeft (functionSupportStatement)* BlockRight;
 // 定义空控制
-namespaceControlEmptyStatement:(annotation)? id Define Control type Terminate;
-// 命名空间函数
-namespaceFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionSub) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+nspackageControlEmptyStatement:(annotation)? id Define Control type Terminate;
+// 无构造包函数
+nspackageFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionSub) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义包
 packageStatement:(annotation)? id (templateDefine)? Define Package parameterClauseIn BlockLeft (packageSupportStatement)* BlockRight Terminate;
 // 包支持的语句
 packageSupportStatement:
-packageStatement
-|packageInitStatement
+packageInitStatement
 |packageExtend
 |protocolStatement
 |protocolImplementStatement
@@ -102,7 +102,7 @@ implementFunctionStatement
 |implementEventStatement
 ;
 // 实现协议
-protocolImplementStatement:ProtocolSub nameSpace (templateCall)? BlockLeft (protocolImplementSupportStatement)* BlockRight Terminate;
+protocolImplementStatement:ProtocolSub nameSpaceItem (templateCall)? BlockLeft (protocolImplementSupportStatement)* BlockRight Terminate;
 // 控制实现
 implementControlStatement:(annotation)? id Define Control type (packageControlSubStatement)+ Terminate;
 // 空控制实现
@@ -110,7 +110,7 @@ implementControlEmptyStatement: (annotation)? id Define Control type Terminate;
 // 函数实现
 implementFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionSub) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 事件实现
-implementEventStatement: id Define '#!' nameSpace Terminate;
+implementEventStatement: id Define '#!' nameSpaceItem Terminate;
 // 函数
 functionStatement:id (templateDefine)? Define t=(Function|FunctionSub) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 返回
@@ -193,6 +193,7 @@ id
 expression:
 primaryExpression
 | callSelf // 调用自己
+| callNameSpace // 调用命名空间
 | callFunc // 函数调用
 | callPkg // 新建包
 | getType // 获取类型
@@ -209,13 +210,14 @@ primaryExpression
 | plusMinus // 正负处理
 | negate // 取反
 | linq // 联合查询
-| expression (call|'::') callExpression // 链式调用
+| expression call callExpression // 链式调用
 | expression judge expression // 判断型表达式
 | expression add expression // 和型表达式
 | expression mul expression // 积型表达式
 ;
 
 callSelf: '..' callExpression;
+callNameSpace: ('~:' id)? (':' id)* call callExpression;
 
 callExpression:
 callElement // 访问元素
@@ -265,7 +267,9 @@ dictionaryElement: expression ':' expression; // 字典元素
 
 callElement : '[' expression ']';
 
-nameSpace: id (NameSpace id)* ;
+nameSpace: id (':' id)*;
+
+nameSpaceItem: (('~:' id)? (':' id)* call)? id;
 
 name: id (call id)* ;
 
@@ -315,12 +319,12 @@ typeProtocol
 | typeFunction
 ;
 
-typeProtocol : Protocol nameSpace;
+typeProtocol : Protocol typePackage;
 typeTuple : '(' type (',' type)+ ')';
 typeArray : '[' ']' type;
 typeSharpArray :'[' '#' ']' type;
 typeDictinary :  '[' type ']' type;
-typePackage : nameSpace (templateCall)? ;
+typePackage : nameSpaceItem (templateCall)? ;
 typeFunction : Function typeFunctionParameterClause Wave typeFunctionParameterClause;
 
 // 函数类型参数
@@ -366,10 +370,6 @@ BlockRight : '}';
 
 Define : ':';
 Assign: '=';
-
-Import : '<:';
-Export : ':>';
-NameSpace : '::';
 
 Self : '..';
 

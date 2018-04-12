@@ -11,43 +11,13 @@ namespace xylang
     {
         public override object VisitExportStatement([NotNull] XyParser.ExportStatementContext context)
         {
-            var nameSpace = (string)Visit(context.nameSpace());
-            if(nameSpace.LastIndexOf(".") >= 0)
-            {
-                nameSpace = nameSpace.Substring(nameSpace.LastIndexOf(".") + 1);
-            }
             var obj = "";
             obj += "namespace " + Visit(context.nameSpace()) + Wrap + context.BlockLeft().GetText() + Wrap;
 
-            var content = "";
             foreach(var item in context.exportSupportStatement())
-            {
-                if(item.GetChild(0) is XyParser.ImportStatementContext)
-                {
-                    obj += Visit(item);
-                }
-                else
-                {
-                    content += Visit(item);
-                }
-            }
-            obj += "public static partial class " + nameSpace + Wrap + context.BlockLeft().GetText() + Wrap;
-            obj += content;
-            obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
-            obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
-            return obj;
-        }
-
-        public override object VisitSharpExportStatement([NotNull] XyParser.SharpExportStatementContext context)
-        {
-            var obj = "";
-            obj += "namespace " + Visit(context.nameSpace()) + Wrap + context.BlockLeft().GetText() + Wrap;
-
-            foreach(var item in context.sharpExportSupportStatement())
             {
                 obj += Visit(item);
             }
-
             obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
             return obj;
         }
@@ -105,6 +75,24 @@ namespace xylang
             return obj;
         }
 
+        public override object VisitNameSpaceItem([NotNull] XyParser.NameSpaceItemContext context)
+        {
+            var obj = "";
+            for(int i = 0; i < context.id().Length; i++)
+            {
+                var id = (Result)Visit(context.id(i));
+                if(i == 0)
+                {
+                    obj += "" + id.text;
+                }
+                else
+                {
+                    obj += "." + id.text;
+                }
+            }
+            return obj;
+        }
+
         public override object VisitName([NotNull] XyParser.NameContext context)
         {
             var obj = "";
@@ -123,6 +111,32 @@ namespace xylang
             return obj;
         }
 
+        public override object VisitNspackageStatement([NotNull] XyParser.NspackageStatementContext context)
+        {
+            var id = (Result)Visit(context.id());
+            var obj = "";
+            foreach(var item in context.nspackageSupportStatement())
+            {
+                obj += Visit(item);
+            }
+            obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
+            var header = "";
+            if(context.annotation() != null)
+            {
+                header += Visit(context.annotation());
+            }
+            header += id.permission + " static partial class " + id.text;
+            // 泛型
+            if(context.templateDefine() != null)
+            {
+                header += Visit(context.templateDefine());
+            }
+
+            header += Wrap + context.BlockLeft().GetText() + Wrap;
+            obj = header + obj;
+            return obj;
+        }
+
         public override object VisitFunctionMainStatement([NotNull] XyParser.FunctionMainStatementContext context)
         {
             var obj = "";
@@ -136,7 +150,7 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitNamespaceFunctionStatement([NotNull] XyParser.NamespaceFunctionStatementContext context)
+        public override object VisitNspackageFunctionStatement([NotNull] XyParser.NspackageFunctionStatementContext context)
         {
             var id = (Result)Visit(context.id());
             var obj = "";
@@ -174,7 +188,7 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitNamespaceInvariableStatement([NotNull] XyParser.NamespaceInvariableStatementContext context)
+        public override object VisitNspackageInvariableStatement([NotNull] XyParser.NspackageInvariableStatementContext context)
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
@@ -187,7 +201,7 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitNamespaceVariableStatement([NotNull] XyParser.NamespaceVariableStatementContext context)
+        public override object VisitNspackageVariableStatement([NotNull] XyParser.NspackageVariableStatementContext context)
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
@@ -200,7 +214,7 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitNamespaceControlEmptyStatement([NotNull] XyParser.NamespaceControlEmptyStatementContext context)
+        public override object VisitNspackageControlEmptyStatement([NotNull] XyParser.NspackageControlEmptyStatementContext context)
         {
             var obj = "";
             if(context.annotation() != null)
@@ -213,7 +227,7 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitNamespaceControlStatement([NotNull] XyParser.NamespaceControlStatementContext context)
+        public override object VisitNspackageControlStatement([NotNull] XyParser.NspackageControlStatementContext context)
         {
             var obj = "";
             if(context.annotation() != null)
@@ -223,7 +237,7 @@ namespace xylang
             var id = (Result)Visit(context.id());
             var type = (string)Visit(context.type());
             obj += id.permission + " static " + type + " " + id.text + "{";
-            foreach(var item in context.namespaceControlSubStatement())
+            foreach(var item in context.nspackageControlSubStatement())
             {
                 obj += Visit(item);
             }
@@ -231,7 +245,7 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitNamespaceControlSubStatement([NotNull] XyParser.NamespaceControlSubStatementContext context)
+        public override object VisitNspackageControlSubStatement([NotNull] XyParser.NspackageControlSubStatementContext context)
         {
             var obj = "";
             var id = "";

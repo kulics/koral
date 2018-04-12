@@ -154,6 +154,55 @@ namespace xylang
             return r;
         }
 
+        public override object VisitCallNameSpace([NotNull] XyParser.CallNameSpaceContext context)
+        {
+            var obj = "";
+            for(int i = 0; i < context.id().Length; i++)
+            {
+                var id = (Result)Visit(context.id(i));
+                if(i == 0)
+                {
+                    obj += "" + id.text;
+                }
+                else
+                {
+                    obj += "." + id.text;
+                }
+            }
+
+            var r = new Result();
+            r.data = "var";
+            var e1 = obj;
+            var op = ".";
+            var e2 = (Result)Visit(context.GetChild(1));
+            for(int i = 0; i < e2.bracketTime; i++)
+            {
+                r.text += "(";
+            }
+            switch(e2.callType)
+            {
+                case "element":
+                    r.text = e1 + e2.text;
+                    return r;
+                case "as":
+                case "is":
+                    r.data = e2.data;
+                    if(e2.isCall)
+                    {
+                        r.text += e1 + e2.text;
+                    }
+                    else
+                    {
+                        r.text += e1 + op + e2.text;
+                    }
+                    return r;
+                default:
+                    break;
+            }
+            r.text = e1 + op + e2.text;
+            return r;
+        }
+
         public override object VisitCallExpression([NotNull] XyParser.CallExpressionContext context)
         {
             var count = context.ChildCount;
