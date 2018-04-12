@@ -44,11 +44,14 @@ namespace xylang
             {
                 var ns = (string)Visit(context.nameSpace());
                 obj += "using static " + ns;
-                if(ns.LastIndexOf(".") >= 0)
+                if(context.id() != null)
                 {
-                    ns = ns.Substring(ns.LastIndexOf(".") + 1);
+                    var r = (Result)Visit(context.id());
+
+                    obj += "." + r.text;
                 }
-                obj += "." + ns + context.Terminate().GetText();
+
+                obj += context.Terminate().GetText();
             }
             else
             {
@@ -140,11 +143,12 @@ namespace xylang
         public override object VisitFunctionMainStatement([NotNull] XyParser.FunctionMainStatementContext context)
         {
             var obj = "";
-
+            obj += "static class XyLangMainFunctionEnter " + Wrap + context.BlockLeft().GetText() + Wrap;
             obj += "static void Main(string[] args)" + Wrap + context.BlockLeft().GetText() + Wrap;
             obj += "MainAsync(args).GetAwaiter().GetResult();" + Wrap + context.BlockRight().GetText() + Wrap;
             obj += "static async Task MainAsync(string[] args)" + Wrap + context.BlockLeft().GetText() + Wrap;
             obj += ProcessFunctionSupport(context.functionSupportStatement());
+            obj += context.BlockRight().GetText() + Wrap;
             obj += context.BlockRight().GetText() + Wrap;
 
             return obj;

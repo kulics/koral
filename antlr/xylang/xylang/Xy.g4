@@ -9,6 +9,7 @@ exportStatement: nameSpace ':>' BlockLeft (exportSupportStatement)* BlockRight T
 // 导出命名空间支持的语句
 exportSupportStatement:
 importStatement
+|functionMainStatement
 |nspackageStatement
 |packageStatement
 |protocolStatement
@@ -16,7 +17,7 @@ importStatement
 // 导入命名空间
 importStatement:'<:' BlockLeft (nameSpaceStatement)* BlockRight Terminate;
 // 命名空间
-nameSpaceStatement:(annotation)? (callEllipsis)? nameSpace Terminate;
+nameSpaceStatement:(annotation)? (callEllipsis)? (nameSpace)? (call id)? Terminate;
 // 省略调用名称
 callEllipsis: '..';
 
@@ -24,8 +25,7 @@ callEllipsis: '..';
 nspackageStatement: (annotation)? id (templateDefine)? Define Package BlockLeft (nspackageSupportStatement)* BlockRight Terminate;
 
 nspackageSupportStatement:
-functionMainStatement
-|nspackageFunctionStatement
+nspackageFunctionStatement
 |nspackageVariableStatement
 |nspackageInvariableStatement
 |nspackageControlStatement
@@ -204,7 +204,7 @@ primaryExpression
 | dictionary // 字典
 | lambda // lambda表达式
 | function // 函数
-| package // 匿名包
+| pkgAnonymous // 匿名包
 | tuple // 元组
 | empty // 类型空初始化
 | plusMinus // 正负处理
@@ -282,7 +282,11 @@ lambda : t=(Function|FunctionSub) lambdaIn ArrowRight lambdaOut;
 lambdaIn : (id (',' id)* )? ;
 lambdaOut : expressionList ;
 
-package: Package pkgAssign; // 匿名包
+pkgAnonymous: Package pkgAnonymousAssign; // 匿名包
+
+pkgAnonymousAssign: BlockLeft (pkgAnonymousAssignElement (',' pkgAnonymousAssignElement)*)? BlockRight; // 简化赋值
+
+pkgAnonymousAssignElement: name ':' expression; // 简化赋值元素
 
 function : t=(Function|FunctionSub) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 
