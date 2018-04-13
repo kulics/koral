@@ -150,12 +150,12 @@ namespace xylang
                 header += Visit(context.annotation());
             }
             header += id.permission + " enum " + id.text;
-            header += Wrap + context.BlockLeft().GetText() + Wrap;
-            foreach(var item in context.enumSupportStatement())
+            header += Wrap + "{" + Wrap;
+            for(int i = 0; i < context.enumSupportStatement().Length; i++)
             {
-                obj += Visit(item);
+                obj += Visit(context.enumSupportStatement(i));
             }
-            obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
+            obj += "}" + context.Terminate().GetText() + Wrap;
             obj = header + obj;
             return obj;
         }

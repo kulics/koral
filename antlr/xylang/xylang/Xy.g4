@@ -22,9 +22,9 @@ nameSpaceStatement:(annotation)? (callEllipsis)? (nameSpace)? (call id)? Termina
 // 省略调用名称
 callEllipsis: '..';
 // 枚举
-enumStatement: (annotation)? id Define '[' '.' ']' BlockLeft (enumSupportStatement)* BlockRight Terminate;
+enumStatement: (annotation)? id Define Package '[' enumSupportStatement (',' enumSupportStatement)* ']' Terminate;
 
-enumSupportStatement: id ('=' (add)? Integer)? ',';
+enumSupportStatement: id ('=' (add)? Integer)?;
 
 // 无构造包
 nspackageStatement: (annotation)? id (templateDefine)? Define Package BlockLeft (nspackageSupportStatement)* BlockRight Terminate;
