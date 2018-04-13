@@ -140,6 +140,41 @@ namespace xylang
             return obj;
         }
 
+        public override object VisitEnumStatement([NotNull] XyParser.EnumStatementContext context)
+        {
+            var obj = "";
+            var id = (Result)Visit(context.id());
+            var header = "";
+            if(context.annotation() != null)
+            {
+                header += Visit(context.annotation());
+            }
+            header += id.permission + " enum " + id.text;
+            header += Wrap + context.BlockLeft().GetText() + Wrap;
+            foreach(var item in context.enumSupportStatement())
+            {
+                obj += Visit(item);
+            }
+            obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
+            obj = header + obj;
+            return obj;
+        }
+
+        public override object VisitEnumSupportStatement([NotNull] XyParser.EnumSupportStatementContext context)
+        {
+            var id = (Result)Visit(context.id());
+            if(context.Integer() != null)
+            {
+                var op = "";
+                if(context.add() != null)
+                {
+                    op = (string)Visit(context.add());
+                }
+                id.text += " = " + op + context.Integer().GetText();
+            }
+            return id.text + ",";
+        }
+
         public override object VisitFunctionMainStatement([NotNull] XyParser.FunctionMainStatementContext context)
         {
             var obj = "";

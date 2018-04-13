@@ -13,6 +13,7 @@ importStatement
 |nspackageStatement
 |packageStatement
 |protocolStatement
+|enumStatement
 ;
 // 导入命名空间
 importStatement:'<:' BlockLeft (nameSpaceStatement)* BlockRight Terminate;
@@ -20,6 +21,10 @@ importStatement:'<:' BlockLeft (nameSpaceStatement)* BlockRight Terminate;
 nameSpaceStatement:(annotation)? (callEllipsis)? (nameSpace)? (call id)? Terminate;
 // 省略调用名称
 callEllipsis: '..';
+// 枚举
+enumStatement: (annotation)? id Define '[''.'']' BlockLeft (enumSupportStatement)* BlockRight Terminate;
+
+enumSupportStatement: id ('=' (add)? Integer)? ',';
 
 // 无构造包
 nspackageStatement: (annotation)? id (templateDefine)? Define Package BlockLeft (nspackageSupportStatement)* BlockRight Terminate;
