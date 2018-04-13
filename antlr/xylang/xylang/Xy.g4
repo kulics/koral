@@ -22,7 +22,7 @@ nameSpaceStatement:(annotation)? (callEllipsis)? (nameSpace)? (call id)? Termina
 // 省略调用名称
 callEllipsis: '..';
 // 枚举
-enumStatement: (annotation)? id Define '[''.'']' BlockLeft (enumSupportStatement)* BlockRight Terminate;
+enumStatement: (annotation)? id Define '[' '.' ']' BlockLeft (enumSupportStatement)* BlockRight Terminate;
 
 enumSupportStatement: id ('=' (add)? Integer)? ',';
 
@@ -42,7 +42,7 @@ functionMainStatement:Function BlockLeft (functionSupportStatement)* BlockRight 
 // 无构造包变量
 nspackageVariableStatement:(annotation)? expression Define expression Terminate;
 // 无构造包常量
-nspackageInvariableStatement:(annotation)? expression '==' expression Terminate;
+nspackageInvariableStatement:(annotation)? expression ':=' expression Terminate;
 // 定义控制
 nspackageControlStatement: (annotation)? id Define Control type (nspackageControlSubStatement)+ Terminate;
 // 定义子方法
