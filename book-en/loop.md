@@ -7,7 +7,7 @@ If we happen to have a collection that can be an array, a dictionary, or a piece
 
 E.g:
 ```
-arr => [1, 2, 3, 4, 5];
+arr : [1, 2, 3, 4, 5];
 @ arr ~ i
 {
     Console.WriteLine.(i); // print each number

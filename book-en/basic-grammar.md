@@ -14,7 +14,7 @@ We can use the `:>` statement to define a region's namespace.
 
 E.g:
 ```
-:> Demo
+Demo :>
 {
     ...
 };
@@ -29,7 +29,7 @@ We can use the `<:` statement to import other namespaces, libraries, frameworks 
 
 E.g:
 ```
-:> Demo
+Demo :>
 {
     <:
     {
@@ -48,7 +48,7 @@ We need to define a main entry to let the program know where to start. The main 
 
 E.g:
 ```
-:> Demo
+Demo :>
 {
     <:
     {
@@ -91,22 +91,22 @@ comment * /
 ```
 Comment do not belong to the statement, so do not need to end with `;`, comment is only used to provide additional information to the user, and will not be really compiled into the executable program.
 ## Definition
-We can bind the type or data to the specified name using the `=>` statement.
+We can bind the type or data to the specified name using the `:` statement.
 
 E.g:
 ```
-a => 1;
+a : 1;
 ```
 This creates an identifier for the name on the left and assigns the data on the right to it. In most cases, we do not need to explicitly specify the type of data, and the compiler automatically deduces the type for the data.
 
 Once an identifier is created, its data type will not be changed in the valid area.
 
 ## Assignment
-Unlike a normal programming language, we need to use the `<=` statement to assign the data on the right to the identifier on the left.
+Like a normal programming language, we need to use the `=` statement to assign the data on the right to the identifier on the left.
 
 E.g:
 ```
-a <= 2;
+a = 2;
 ```
 But the definition is not the same, the left side of the assignment can only be an identifier that has been defined, otherwise the assignment statement does not hold.
 ## Variable data
@@ -114,20 +114,20 @@ We can define variable data very easily, and types that are not marked with spec
 
 E.g:
 ```
-i => 1; 
+i : 1; 
 ```
 
 It should be noted that variable data cannot be called externally and can only be used within a defined range. Can be considered private.
 
 ## Invariable data
-We can also define invariable data, just define it with `==`.
+We can also define invariable data, just define it with `:=`.
 
 E.g:
 ```
-j == 2; 
+j := 2; 
 ```
 
-Note that invariable data can only be defined within the namespace.
+Note that invariable data can only be defined within the package without initial.
 ## Identifier
 Identifier is the variable, function, package, protocol, etc. specified name. The letters that make up the identifier all have a certain norm, and the naming convention of the identifier in this language is as follows:
 
@@ -149,12 +149,12 @@ However, in practical projects, the use of partition will effectively improve th
 
 E.g:
 ```
-a.b.(x,y).c.(fn:$()~(x:i32){->(2+1);}).d<=1+3*5/4;
+a.b.(x,y).c.(fn:$()~(x:i32){->(2+1);}).d=1+3*5/4;
 
 a.b.(x, y)
 .c.(fn: $()~(x: i32)
 {
     -> (2 + 1);
-}).d <= 1 + 3 * 5 / 4;
+}).d = 1 + 3 * 5 / 4;
 ```
 ### [Next Chapter](basic-type.md)

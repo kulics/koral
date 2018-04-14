@@ -22,7 +22,7 @@ Read detail from The [Book](./book-en/introduction.md).
 ## Quick Preview
 ```
 // export
-:> Main
+Main :>
 {
     // import
     <: 
@@ -34,7 +34,7 @@ Read detail from The [Book](./book-en/introduction.md).
     $  
     {
         // array
-        greetings => ["Hello", "Hola", "Bonjour",
+        greetings: ["Hello", "Hola", "Bonjour",
                     "Ciao", "こんにちは", "안녕하세요",
                     "Cześć", "Olá", "Здравствуйте",
                     "Chào bạn", "您好"];

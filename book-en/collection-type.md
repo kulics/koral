@@ -15,7 +15,7 @@ We only need to use `[]` to enclose the data we need, and to split each data wit
 
 E.g:
 ```
-arr => [ 1,2,3,4,5 ];
+arr : [ 1,2,3,4,5 ];
 ```
 This will create a `i32` type array containing` 1` to `5`.
 
@@ -25,15 +25,15 @@ The array type is represented by `[]type`, where `[]` is a one-dimensional array
 
 For example we need a string array:
 ```
-arrString => #[]str.();
+arrString : #[]str.();
 ```
 #### .NET Arrays
 If we need to use the `.Net` native array type, we can use `[#]type` to represent it.
 
 E.g:
 ```
-arrInt => [#]i32.();
-arrInt <= [#][1,2,3,4,5];
+arrInt : [#]i32.();
+arrInt = [#][1,2,3,4,5];
 // corresponds to C#'s int[]
 ```
 ### Visit
@@ -49,7 +49,7 @@ If we need to change one of the elements in the array, we can access that elemen
 
 E.g:
 ```
-arr.[0] <= 5;
+arr.[0] = 5;
 ```
 Note that we can only access the index of the existing data, if not exist, there will be an error.
 ### Common operation
@@ -57,7 +57,7 @@ Note that we can only access the index of the existing data, if not exist, there
 arr.Add.(1); // added to the end
 arr.Insert.(2, 3); // insert element 3 to index 2
 arr.RemoveAt.(1); // delete the specified location element
-length => arr.Count; // length
+length : arr.Count; // length
 ```
 ## Dictionary
 A dictionary is a collection of disparate data of the same type. Each value of a dictionary is associated with a unique key, which is used as an identifier for this value data in the dictionary.
@@ -70,7 +70,7 @@ Similar to arrays, dictionaries also use the `[]` definition, except that the di
 
 E.g:
 ```
-dic => ["a": 1, "b": 2, "c": 3];
+dic : ["a": 1, "b": 2, "c": 3];
 ```
 This will create a `str:i32` type dictionary containing` a, b, c` entries.
 
@@ -84,7 +84,7 @@ Since arrays only support numeric indexes, you can omit the `[i32]` tag. We can 
 
 E.g:
 ```
-dicNumNum => #[i32]i32.();
+dicNumNum : #[i32]i32.();
 ```
 ### Visit
 Like an array, we can also use indexes to access data directly.
@@ -98,13 +98,13 @@ Like arrays, we can also use assignment statements to change to elements.
 
 E.g:
 ```
-dic.["b"] <= 5;
+dic.["b"] = 5;
 ```
 The difference is that with the array, if the assignment is a non-existent index, it will not be wrong, the value will be given directly to the new key.
 ### Common operation
 ```
 dic.Add.("d", 11); // add index by method
 dic.Remove.("c");  // delete the specified index element
-length => dic.Count; // length
+length : dic.Count; // length
 ```
 ### [Next Chapter](judgment.md)
