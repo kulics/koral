@@ -146,4 +146,4 @@ func : $(hw :&HomeWork)~()
 ```
 Note that if the type can not be converted correctly, it will return a nil value.
 
-### [Next Chapter](check.md)
+### [Next Chapter](enumeration-type.md)
