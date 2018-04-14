@@ -13,7 +13,7 @@ We only need to use `$()~()` to define a function, the first parenthesis is in p
 
 E.g:
 ```
-function => $()~()
+function : $()~()
 {
     ...
 };
@@ -35,7 +35,7 @@ Very simple, we only need to use `identifier: type` declare the parameters.
 
 E.g:
 ```
-func => $(x: i32)~(y: i32)
+func : $(x: i32)~(y: i32)
 {
     -> (x * x);
 };
@@ -76,7 +76,7 @@ When we call the function, we need to fill the brackets with the identifier in t
 
 E.g:
 ```
-sell => $(price: i32, name: str)~(){}; 
+sell : $(price: i32, name: str)~(){}; 
 // define one function with two in parameter
 
 sell.(1.99, "cola"); 
@@ -87,7 +87,7 @@ Similar to in parameters, out parameters also need to be clearly defined with an
 
 E.g:
 ```
-topSell => $()~(name: str, count: i32)
+topSell : $()~(name: str, count: i32)
 {
     ...
     -> ("cola", many);
@@ -102,9 +102,9 @@ The difference is that for multiple return values ​​we have to wrap each ide
 
 E.g:
 ```
-(n, c) => topSell.(); 
+(n, c) : topSell.(); 
 // define the returned two values ​​for n and c
-(n, c) <= topSell.(); 
+(n, c) = topSell.(); 
 // overrides the returned two values ​​to n and c
 ```
 You can use the definition or assignment statement to get the return value of the function to use, you can also use the nested function to another function.
@@ -125,13 +125,13 @@ But sometimes, as a caller, we do not necessarily need all the return values, bu
 
 E.g:
 ```
-name, _ => topSell.();
+name, _ : topSell.();
 ```
 If indeed all the return values ​​are not needed, we can also just write a `_` to discard all. But why would need to call such a function? Maybe we should review the code again.
 
 E.g:
 ```
-_ <= topSell.(); // for _ , assignment and definition are equivalent
+_ = topSell.(); // for _ , assignment and definition are equivalent
 ```
 ## Function In Parameter
 If we want part of the function defined by the external, and only perform the rest of the internal logic, such as some set traversal for a collection of functions, then we can use the function parameters to accomplish this goal.
@@ -140,7 +140,7 @@ Function In Parameter no special definition of way, just replace the type of the
 
 E.g:
 ```
-each1To10 => $(func: $(item: i32)~())~()
+each1To10 : $(func: $(item: i32)~())~()
 {
     @ [1~10] ~ i
     {
@@ -154,7 +154,7 @@ So that we can pass the details of the processing to the externally passed `func
 
 E.g:
 ```
-print => $(item: i32)~()
+print : $(item: i32)~()
 {
     Console.WriteLine.(item);
 };

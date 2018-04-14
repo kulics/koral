@@ -8,22 +8,26 @@ System.ComponentModel.DataAnnotations.Schema;
 System.ComponentModel.DataAnnotations;
 ```
 ## Annotation Declaration
-As opposed to the comment block, we simply wrap the tagged content with the `\*` and `*\`.
+As opposed to the comment block, we simply wrap the tagged content with the `\*` and `*\`, or use the `\\` tag line directly.
+
 Note that it is valid before the identifier.
 
 Let's take a look at the database data for how to use annotations.
 
 E.g:
 ```
-\*Table.("test")*\
-Annotation => #~()
+\\ Table.("test")
+Annotation : #~()
 {
-        \*Key, Column.("id")*\
-        Id => ^str;
-        \*Column.("name")*\
-        Name => ^str;
-        \*Column.("data")*\
-        Data => ^str;
+        \*
+        Key,
+        Column.("id")
+        *\
+        Id : ^str;
+        \\ Column.("name")
+        Name : ^str;
+        \\ Column.("data")
+        Data : ^str;
 };
 ```
 We declare an annotation package that annotates the table name `test`, the primary key `id`, the field `name`, and the field `data`.

@@ -8,7 +8,7 @@ In this language, the default integer is the `i32` type, which is a 32-bit signe
 
 E.g:
 ```
-integer => 3987349; 
+integer : 3987349; 
 ```
 
 If we need integers of other numeric ranges, other types can also be used. All supported integer types are shown in the following table.
@@ -29,7 +29,7 @@ We can use type conversion to change the number to the type we need, just use th
 
 E.g:
 ```
-integer8 => !i8(16);
+integer8 : !i8(16);
 ```
 
 Note that, the basic type conversion is only valid for the base type.
@@ -40,8 +40,8 @@ In this language, the default decimal is `f64`, which is a 64-bit double-precisi
 
 E.g:
 ```
-float => 855.544; 
-float <= 0.3141592653;
+float : 855.544; 
+float = 0.3141592653;
 ```
 Note that due to the special nature of computer-calculated floating-point numbers, there are certain accuracy issues in floating-point number operations, so the sensitivity-sensitive requirements should consider special handling.
 
@@ -59,7 +59,7 @@ You only need to use `""` package a text content, it will be recognized as a str
 
 E.g:
 ```
-string => "Hello world!";
+string : "Hello world!";
 ```
 ## boolean
 boolean are logical values ​​because they can only be true or false. It is often used to assist in judging logic.
@@ -68,8 +68,8 @@ In this language, the default boolean is the type `bool`, which is a type that h
 
 E.g:
 ```
-boolean => true;  // true  
-boolean <= false; // false  
+boolean : true;  // true  
+boolean = false; // false  
 ```
 ## any
 In particular, sometimes you need a type that can be any type to assist in the completion of the function, so it is `any`.
@@ -90,12 +90,12 @@ Sometimes, maybe we do not need to specify a specific value, but only want to cr
 
 Especially when using generics, you can not create directly using type constructs.
 
-At this time we can use the null create method `~:` to specify a null value that contains a type.
+At this time we can use the null create method `#(type)` to specify a null value that contains a type.
 
 E.g:
 ```
-x => ~:i32;
-y => ~:Student;
+x => #(i32);
+y => #(Student);
 ```
 More details on generics can be found in the generic section.
 
