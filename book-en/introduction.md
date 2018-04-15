@@ -25,6 +25,7 @@ Eventually making XyLang with very few grammar, only the presence of symbols on 
 1. [Control Type](control-type.md)
 1. [Package Type](package-type.md)
 1. [Protocol Type](protocol-type.md)
+1. [Enumeration Type](enumeration-type.md)
 1. [Check](check.md)
 1. [Asynchronous](asynchronous.md)
 1. [Generic](generic.md)
