@@ -62,14 +62,14 @@ Peter.Class = 2; Peter.Grade = 6;
 ```
 ## Simplify creation
 Creating a new package like the one above, and then loading the data one by one, is very cumbersome. We can use a simplified syntax to configure.
-Just add `{}` to the creation grammar to use the `key:value` method to quickly load data. Separate multiple data with `,`.
+Just add `{}` to the creation grammar to use the `key=value` method to quickly load data. Separate multiple data with `,`.
 
 E.g:
 ```
 Peter : #Student.()
 {
-     Name:"Peter", Number:"060233",
-     Class:2, Grade:6
+     Name="Peter", Number="060233",
+     Class=2, Grade=6
 };
 ```
 
