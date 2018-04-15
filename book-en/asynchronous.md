@@ -3,7 +3,7 @@ Thread is defined as the execution path of the program. Each thread defines a un
 
 Because computer processors have computational bottlenecks, we can not get everything going in a single-line-by-line fashion, and we often need to use asynchronous parallelism to solve computational problems in order to increase processing capacity.
 
-.Net platform has its own thread library `System.Threading`, more about the use of the thread can query the relevant interface.
+.Net platform has its own thread library `System:Threading`, more about the use of the thread can query the relevant interface.
 
 Here we talk about how to deal with the thread more easily, that is, asynchronous processing.
 
@@ -11,7 +11,7 @@ In other languages ​​it can be considered `async/await` for asynchronous pro
 
 Asynchronous need to import the namespace
 ```
-System.Threading.Tasks;
+System:Threading:Tasks;
 ```
 ## Asynchronous Declaration
 So how to declare a function asynchronously? Add `~` on it.

@@ -3,13 +3,13 @@ When encapsulating common components, many times our packages, methods, and prot
 
 For example, we now need a collection that supports adding, deleting, and reading, and we hope that any type can be used, we can package a generic package.
 
-As you may recall, our collection uses the `System.Collections.Generic;` namespace, which is generic.
+As you may recall, our collection uses the `System:Collections:Generic;` namespace, which is generic.
 
 Our arrays and dictionaries are actually generics.
 
 Again, we need to import generic namespaces to use generics.
 ```
-System.Collections.Generic;
+System:Collections:Generic;
 ```
 ## Statement and Use
 Let's see how we can use generics to implement an array. We just use the `<>` sign after the identifier to enclose the generation of the type.

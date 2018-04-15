@@ -5,7 +5,7 @@ Our built-in collection types are two types of arrays and dictionaries.
 
 Collections need to use namespaces
 ```
-System.Collections.Generic;
+System:Collections:Generic;
 ```
 ## Array
 Array use ordered lists to store multiple values ​​of the same type. The same value can appear more than once in different places in an array.

@@ -34,7 +34,7 @@ Demo :>
     <:
     {
         System;
-        System.Collections.Generic;
+        System:Collections:Generic;
     };
 };
 ```
@@ -53,7 +53,7 @@ Demo :>
     <:
     {
         System;
-        System.Collections.Generic;
+        System:Collections:Generic;
     };
 
     $
