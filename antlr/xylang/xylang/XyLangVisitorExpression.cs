@@ -756,7 +756,7 @@ namespace xylang
             var expr = (Result)Visit(context.expression());
             var type = (string)Visit(context.typeBasic());
             r.data = type;
-            r.text = "((" + type + ")" + expr.text + ")";
+            r.text = "((" + type + ")" + "(" + expr.text + "))";
             return r;
         }
 
