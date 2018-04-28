@@ -289,9 +289,9 @@ lambdaOut : expressionList ;
 
 pkgAnonymous: Package pkgAnonymousAssign; // 匿名包
 
-pkgAnonymousAssign: BlockLeft (pkgAnonymousAssignElement (',' pkgAnonymousAssignElement)*)? BlockRight; // 简化赋值
+pkgAnonymousAssign: BlockLeft (pkgAnonymousAssignElement)* BlockRight; // 简化赋值
 
-pkgAnonymousAssignElement: name ':' expression; // 简化赋值元素
+pkgAnonymousAssignElement: name ':' expression Terminate; // 简化赋值元素
 
 function : t=(Function|FunctionSub) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 
