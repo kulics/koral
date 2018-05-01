@@ -85,14 +85,16 @@ Dictionary : #[str]i32.()[ "1":1, "2":2, "3":3 ];
 ## Anonymous Package
 If we only want to wrap some data directly, instead of defining the package first and then using it, is it like an anonymous function?
 
-Of course, with simplified functionality, we can use the `#` flag.
+Of course, we can use `#` directly.
 
 E.g:
 ```
 Peter : #
 {
-     Name:"Peter", Number:"060233",
-     Class:2, Grade:6
+    Name:"Peter";
+    Number:"060233";
+    Class:2;
+    Grade:6;
 };
 ```
 
