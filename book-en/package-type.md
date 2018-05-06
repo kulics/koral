@@ -156,14 +156,15 @@ We hope that given a name and student number, class and grade information will b
 
 This can be achieved using regular functions, but why not use the built-in constructor?
 
-Add parameters in the definition, and write the definition of the constructor, which only needs the auxiliary symbol `~#` can do it.
+Add parameters in the definition, and write the definition of the constructor, which only needs the auxiliary symbol `..$` can do it.
 
 E.g:
 ```
 Student : #(name: str, number: str)
 {
     ...
-    ~#
+
+    ..$
     {
         ..Name = name; ..Number = number;
         // calculate the class

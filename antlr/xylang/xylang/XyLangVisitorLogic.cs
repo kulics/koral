@@ -51,7 +51,7 @@ namespace xylang
 
         public override object VisitLoopInfiniteStatement([NotNull] XyParser.LoopInfiniteStatementContext context)
         {
-            var obj = "while (true)" + Wrap + context.BlockLeft().GetText() + Wrap;
+            var obj = "for (;;)" + Wrap + context.BlockLeft().GetText() + Wrap;
             obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
             return obj;
