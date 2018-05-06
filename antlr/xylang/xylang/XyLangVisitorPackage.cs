@@ -225,7 +225,12 @@ namespace xylang
 
         public override object VisitPackageInitStatement([NotNull] XyParser.PackageInitStatementContext context)
         {
-            var obj = context.BlockLeft().GetText() + Wrap;
+            var strBase = "";
+            if(context.tuple() != null)
+            {
+                strBase = " :base "+ ((Result)Visit(context.tuple())).text;
+            }
+            var obj = strBase + context.BlockLeft().GetText() + Wrap;
             obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += context.BlockRight().GetText() + Wrap;
             return obj;

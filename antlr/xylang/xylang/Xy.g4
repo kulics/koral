@@ -66,11 +66,11 @@ packageInitStatement
 |packageVariableStatement
 ;
 // 包构造方法
-packageInitStatement:(annotation)? PackageSub BlockLeft (functionSupportStatement)* BlockRight Terminate;
+packageInitStatement:(annotation)? Self Function tuple? BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 函数
 packageFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionSub) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 重载函数
-packageOverrideFunctionStatement:(annotation)? id Define '#$' parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+packageOverrideFunctionStatement:(annotation)? Self id Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义引入
 packageExtend: PackageSub type Terminate;
 // 定义变量
