@@ -9,6 +9,14 @@ namespace xylang
 {
     partial class XyLangVisitor
     {
+        public override object VisitExtend([NotNull] XyParser.ExtendContext context)
+        {
+            var r = new Result();
+            r.data = Visit(context.type());
+            r.text = (Visit(context.tuple()) as Result).text;
+            return r;
+        }
+
         public override object VisitPackageStatement([NotNull] XyParser.PackageStatementContext context)
         {
             var id = (Result)Visit(context.id());
@@ -17,6 +25,13 @@ namespace xylang
             var extend = "";
             var hasExtend = false;
             var implements = new List<string>();
+
+            if(context.extend() != null)
+            {
+                extend = (string)((Result)Visit(context.extend())).data;
+                hasExtend = true;
+            }
+
             foreach(var item in context.packageSupportStatement())
             {
                 if(item.GetChild(0) is XyParser.PackageInitStatementContext)
@@ -25,6 +40,10 @@ namespace xylang
                     if(!hasInit)
                     {
                         obj += "public " + id.text + Visit(context.parameterClauseIn());
+                        if(context.extend() != null)
+                        {
+                            obj += " :base " + ((Result)Visit(context.extend())).text;
+                        }
                         obj += Visit(item);
                         hasInit = true;
                     }
@@ -50,11 +69,11 @@ namespace xylang
                 }
                 else if(item.GetChild(0) is XyParser.PackageExtendContext)
                 {
-                    if(!hasExtend)
-                    {
-                        extend = (string)Visit(item);
-                        hasExtend = true;
-                    }
+                    //if(!hasExtend)
+                    //{
+                    //    extend = (string)Visit(item);
+                    //    hasExtend = true;
+                    //}
                 }
                 else
                 {
@@ -63,7 +82,12 @@ namespace xylang
             }
             if(!hasInit)
             {
-                obj = "public " + id.text + Visit(context.parameterClauseIn()) + "{}" + obj;
+                var init = "public " + id.text + Visit(context.parameterClauseIn());
+                if(context.extend() != null)
+                {
+                    init += " :base " + ((Result)Visit(context.extend())).text;
+                }
+                obj = init + "{}" + obj;
             }
             obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
             var header = "";
@@ -225,12 +249,7 @@ namespace xylang
 
         public override object VisitPackageInitStatement([NotNull] XyParser.PackageInitStatementContext context)
         {
-            var strBase = "";
-            if(context.tuple() != null)
-            {
-                strBase = " :base "+ ((Result)Visit(context.tuple())).text;
-            }
-            var obj = strBase + context.BlockLeft().GetText() + Wrap;
+            var obj = context.BlockLeft().GetText() + Wrap;
             obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += context.BlockRight().GetText() + Wrap;
             return obj;

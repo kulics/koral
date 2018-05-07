@@ -52,7 +52,9 @@ nspackageControlEmptyStatement:(annotation)? id Define Control type Terminate;
 // 无构造包函数
 nspackageFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionSub) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义包
-packageStatement:(annotation)? id (templateDefine)? Define Package parameterClauseIn BlockLeft (packageSupportStatement)* BlockRight Terminate;
+packageStatement:(annotation)? id (templateDefine)? Define Package parameterClauseIn (extend)? BlockLeft (packageSupportStatement)* BlockRight Terminate;
+// 继承
+extend: Wave type tuple;
 // 包支持的语句
 packageSupportStatement:
 packageInitStatement
@@ -66,7 +68,7 @@ packageInitStatement
 |packageVariableStatement
 ;
 // 包构造方法
-packageInitStatement:(annotation)? Self Function tuple? BlockLeft (functionSupportStatement)* BlockRight Terminate;
+packageInitStatement:(annotation)? Self Function BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 函数
 packageFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionSub) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 重载函数
