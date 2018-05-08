@@ -240,7 +240,13 @@ tuple : '(' (expression (',' expression)* )? ')'; // 元组
 
 expressionList : expression (',' expression)* ; // 表达式列
 
-annotation: '\\\\' expressionList | '\\*' expressionList '*\\' ; // 注解
+annotation: '\\\\' (id ':')? annotationList | '\\*' (id ':')? annotationList '*\\' ; // 注解
+
+annotationList: annotationItem (',' annotationItem)*;
+
+annotationItem: id ('{' annotationAssign (',' annotationAssign)* '}')? ;
+
+annotationAssign: (id '=')? expression ;
 
 callFunc: id (templateCall)? call tuple; // 函数调用
 
