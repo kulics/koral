@@ -9,6 +9,7 @@ System:ComponentModel:DataAnnotations;
 ```
 ## Annotation Declaration
 As opposed to the comment block, we simply wrap the tagged content with the `\*` and `*\`, or use the `\\` tag line directly.
+If the annotation item has sub-properties, you only need to use the `{}` package. If you need to specify the specified property, use the `id = data` assignment as in the simplified construction of the package.
 
 Note that it is valid before the identifier.
 
@@ -16,17 +17,17 @@ Let's take a look at the database data for how to use annotations.
 
 E.g:
 ```
-\\ Table.("test")
-Annotation : #~()
+\\ Table{"test"}
+Annotation : #()
 {
         \*
         Key,
-        Column.("id")
+        Column{"id"}
         *\
         Id : ^str;
-        \\ Column.("name")
+        \\ Column{"name"}
         Name : ^str;
-        \\ Column.("data")
+        \\ Column{"data"}
         Data : ^str;
 };
 ```
