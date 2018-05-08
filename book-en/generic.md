@@ -77,7 +77,7 @@ Protocol<T> : &
     Test<T> : $(in: T)~(){};
 };
 
-Implement : #~()
+Implement : #()
 {
     ~& Protocol<Implement>
     {
