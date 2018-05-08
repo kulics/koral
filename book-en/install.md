@@ -8,6 +8,6 @@ At this stage you need to create a separate `C#` project, you can run these `.cs
 After the iteration, we optimize the automated compilation to perform this part of the function, which may eventually be compiled directly into `CIL` and` LLVM` to generate direct binary executables.
 
 Run Package:
-<https://github.com/kulics/xylang/releases/tag/v0.6>
+<https://github.com/kulics/xylang/releases/tag/v0.7>
 
 ### [Next Chapter](basic-grammar.md)
