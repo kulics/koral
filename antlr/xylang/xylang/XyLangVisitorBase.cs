@@ -101,8 +101,66 @@ namespace xylang
         public override object VisitAnnotation([NotNull] XyParser.AnnotationContext context)
         {
             var obj = "";
-            var r = (Result)Visit(context.expressionList());
-            obj += "[" + r.text + "]";
+            var id = "";
+            if(context.id() != null)
+            {
+                id = ((Result)Visit(context.id())).text + ":";
+            }
+
+            var r = (string)Visit(context.annotationList());
+            obj += "[" + id + r + "]";
+            return obj;
+        }
+
+        public override object VisitAnnotationList([NotNull] XyParser.AnnotationListContext context)
+        {
+            var obj = "";
+            for(int i = 0; i < context.annotationItem().Length; i++)
+            {
+                if(i > 0)
+                {
+                    obj += "," + Visit(context.annotationItem(i));
+                }
+                else
+                {
+                    obj += Visit(context.annotationItem(i));
+                }
+            }
+            return obj;
+        }
+
+        public override object VisitAnnotationItem([NotNull] XyParser.AnnotationItemContext context)
+        {
+            var obj = "";
+            obj += ((Result)Visit(context.id())).text;
+            for(int i = 0; i < context.annotationAssign().Length; i++)
+            {
+                if(i > 0)
+                {
+                    obj += "," + Visit(context.annotationAssign(i));
+                }
+                else
+                {
+                    obj += "(" + Visit(context.annotationAssign(i));
+                }
+            }
+            if(context.annotationAssign().Length > 0)
+            {
+                obj += ")";
+            }
+            return obj;
+        }
+
+        public override object VisitAnnotationAssign([NotNull] XyParser.AnnotationAssignContext context)
+        {
+            var obj = "";
+            var id = "";
+            if(context.id() != null)
+            {
+                id = ((Result)Visit(context.id())).text + "=";
+            }
+            var r = (Result)Visit(context.expression());
+            obj = id + r.text;
             return obj;
         }
     }
