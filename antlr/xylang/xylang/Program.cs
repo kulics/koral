@@ -12,11 +12,16 @@ namespace xylang
     {
         static void Main(string[] args)
         {
-            var path = @".\";
-            Compiled(path);
+            //args = new[] { "build" };
 
-            Console.WriteLine("Completed");
-            Console.ReadKey();
+            if(args.Length > 0 && args[0] == "build")
+            {
+                var path = @".\";
+                Compiled(path);
+
+                Console.WriteLine("Completed");
+                Console.ReadKey();
+            }
         }
 
         static void Compiled(string path)
