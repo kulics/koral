@@ -14,14 +14,14 @@ namespace xylang
         {
             //args = new[] { "build" };
 
-            if(args.Length > 0 && args[0] == "build")
-            {
+            //if(args.Length > 0 && args[0] == "build")
+            //{
                 var path = @".\";
                 Compiled(path);
 
                 Console.WriteLine("Completed");
                 Console.ReadKey();
-            }
+            //}
         }
 
         static void Compiled(string path)
