@@ -10,14 +10,24 @@ namespace xylang
 {
     static class Program
     {
+		static string readPath;
+
         static void Main(string[] args)
         {
-            //args = new[] { "build" };
+			// 检查系统平台，区分路径字符
+			var os = Environment.OSVersion.Platform;
+			if (os==PlatformID.Unix||os==PlatformID.MacOSX)
+			{
+				readPath = @"./";
+			}else{
+				readPath = @".\";
+			}
+
+			//args = new[] { "build" };
 
             //if(args.Length > 0 && args[0] == "build")
             //{
-                var path = @".\";
-                Compiled(path);
+                Compiled(readPath);
 
                 Console.WriteLine("Completed");
                 Console.ReadKey();
@@ -51,7 +61,7 @@ namespace xylang
 
                         // C#文件流写文件,使用覆盖模式
                         var resByte = Encoding.UTF8.GetBytes(result.ToString());  //转换为字节
-                        using(var fsWrite = new FileStream(@".\" + file.Substring(0, file.Length - 3) + ".cs", FileMode.Create))
+						using(var fsWrite = new FileStream(readPath + file.Substring(0, file.Length - 3) + ".cs", FileMode.Create))
                         {
                             fsWrite.Write(resByte, 0, resByte.Length);
                         };
