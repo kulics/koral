@@ -21,15 +21,10 @@ Read detail from The [Book](./book-en/introduction.md).
 
 ## Quick Preview
 ```
-// export
-Main :>
+// namespace
+Main :
+~System
 {
-    // import
-    <: 
-    {
-        System;
-    }
-
     // main function
     $  
     {
