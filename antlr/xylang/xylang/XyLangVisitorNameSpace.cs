@@ -14,6 +14,11 @@ namespace xylang
             var obj = "";
             obj += "namespace " + Visit(context.nameSpace()) + Wrap + context.BlockLeft().GetText() + Wrap;
 
+            if (context.importStatement()!=null)
+            {
+                obj += Visit(context.importStatement());
+            }
+
             foreach(var item in context.exportSupportStatement())
             {
                 obj += Visit(item);
@@ -51,11 +56,11 @@ namespace xylang
                     obj += "." + r.text;
                 }
 
-                obj += context.Terminate().GetText();
+                obj += ";";
             }
             else
             {
-                obj += "using " + Visit(context.nameSpace()) + context.Terminate().GetText();
+                obj += "using " + Visit(context.nameSpace()) + ";";
             }
             return obj;
         }
