@@ -224,7 +224,7 @@ primaryExpression
 ;
 
 callSelf: '..' callExpression;
-callNameSpace: ('~:' id)? (':' id)* call callExpression;
+callNameSpace: id ('\\' id)* call callExpression;
 
 callExpression:
 callElement // 访问元素
@@ -280,9 +280,9 @@ dictionaryElement: expression ':' expression; // 字典元素
 
 callElement : '[' expression ']';
 
-nameSpace: id (':' id)*;
+nameSpace: id ('\\' id)*;
 
-nameSpaceItem: (('~:' id)? (':' id)* call)? id;
+nameSpaceItem: (id ('\\' id)* call)? id;
 
 name: id (call id)* ;
 
