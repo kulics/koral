@@ -5,20 +5,19 @@ program : statement+;
 statement :exportStatement;		  
 
 // 导出命名空间
-exportStatement: nameSpace ':>' BlockLeft (exportSupportStatement)* BlockRight Terminate;
+exportStatement: nameSpace Define (importStatement)? BlockLeft (exportSupportStatement)* BlockRight Terminate;
 // 导出命名空间支持的语句
 exportSupportStatement:
-importStatement
-|functionMainStatement
+functionMainStatement
 |nspackageStatement
 |packageStatement
 |protocolStatement
 |enumStatement
 ;
 // 导入命名空间
-importStatement:'<:' BlockLeft (nameSpaceStatement)* BlockRight Terminate;
+importStatement: (nameSpaceStatement)*;
 // 命名空间
-nameSpaceStatement:(annotation)? (callEllipsis)? (nameSpace)? (call id)? Terminate;
+nameSpaceStatement: Wave (annotation)? (callEllipsis)? (nameSpace)? (call id)?;
 // 省略调用名称
 callEllipsis: '..';
 // 枚举
