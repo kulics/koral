@@ -10,11 +10,11 @@ A statement must be terminated by a distinct `;` and often `{}` is used to wrap 
 ## Export Namespace
 All content in this language can only be defined in the namespace so that content can be efficiently divided into distinct blocks for management. You can define it freely in a separate namespace without undue restrictions on naming.
 
-We can use the `:>` statement to define a region's namespace.
+We can use the `:` statement to define a region's namespace.
 
 E.g:
 ```
-Demo :>
+Demo :
 {
     ...
 };
@@ -23,39 +23,30 @@ The meaning of this statement is the contents of `{}` will be marked `Demo` in t
 
 At the same time the external area can import `Demo` to use the contents of which, we will then understand how to import.
 
-Note that only the import, main entry, package, and protocol statements are supported in the namespace, and these identifiers must be public.
+Note that only the main entry, package, and protocol statements are supported in the namespace, and these identifiers must be public.
 ## Import Namespace
-We can use the `<:` statement to import other namespaces, libraries, frameworks into a namespace, which we can only use within namespaces.
+We can use the `~` statement to import other namespaces, libraries, frameworks into a namespace.
 
 E.g:
 ```
-Demo :>
+Demo :
+~System
+~System\Collections\Generic
 {
-    <:
-    {
-        System;
-        System:Collections:Generic;
-    };
 };
 ```
 This imports the `System` and` Generic` libraries into the `Demo` namespace, and then you can use them in the program.
 
-Within curly braces, you can write multiple import statements whose order does not affect the import functionality.
-
-As you may have noticed, in this language, you often start with the symbol, wrap the content with `{}`, and use `;` to end the statement, which is a very important expression of the language that unifies the expression of the statement, In most cases you only need one of the distinguished symbols to complete the parsing and writing of statements.
+Within before braces, you can write multiple import statements whose order does not affect the import functionality.
 ## Main Entry
 We need to define a main entry to let the program know where to start. The main entry through a fixed single symbol `$` statement, and must be valid at the top of the namespace.
 
 E.g:
 ```
-Demo :>
+Demo :
+~System
+~System\Collections\Generic
 {
-    <:
-    {
-        System;
-        System:Collections:Generic;
-    };
-
     $
     {
         ...
@@ -69,6 +60,8 @@ In the examples that follow, we are by default implemented in the main entry fun
 In particular, there can be only one main entry function in a namespace because the entry must be unique.
 
 More details about the function will be explained in later chapters.
+
+As you may have noticed, in this language, you often start with the symbol, wrap the content with `{}`, and use `;` to end the statement, which is a very important expression of the language that unifies the expression of the statement, In most cases you only need one of the distinguished symbols to complete the parsing and writing of statements.
 ## Display information
 We use the program in order to obtain some useful information, so we need a feature to browse information, this feature can be display, print or output.
 

@@ -4,11 +4,11 @@ Namespace are designed to provide a way to separate a set of names from other na
 ## Export
 To make it easier for us to manage the code, we must write our code in a namespace. We can expose it to external use through public attributes, or use private attributes to complete only our own business.
 
-Exported names can be nested in a loop so that functions can be split as effectively as folders, multiple namespaces need to be separated by `:`.
+Exported names can be nested in a loop so that functions can be split as effectively as folders, multiple namespaces need to be separated by `\`.
 
 E.g:
 ```
-name:space :>
+name\space :
 {
     space : #
     {
@@ -24,13 +24,9 @@ We can use other namespace contents through the import function. The namespace c
 
 E.g:
 ```
-import :>
+import :
+~name\space
 {
-    <:
-    {
-        name:space;
-    };
-
     $
     {
         // print something
@@ -43,13 +39,9 @@ If we don't want to use no construct package names every time we call content, w
 
 E.g:
 ```
-import :>
+import :
+~..name\space.space
 {
-    <:
-    {
-        .. name:space.space;
-    };
-
     $
     {
         // print something
@@ -59,15 +51,15 @@ import :>
 ```
 This eliminates the need to call `space` every time.
 ## Temporary Import
-We can use the `~:` syntax to use the namespace directly without importing it.
+We can use the namespace directly to call function without importing it.
 
 E.g:
 ```
-demo :>
+demo :
 {
     $
     {
-        ~:System.Console.WriteLine.(""); // can be used directly
+        System.Console.WriteLine.(""); // can be used directly
     };
 };
 ```
