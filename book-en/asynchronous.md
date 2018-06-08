@@ -11,7 +11,7 @@ In other languages ​​it can be considered `async/await` for asynchronous pro
 
 Asynchronous need to import the namespace
 ```
-System:Threading:Tasks;
+System\Threading\Tasks
 ```
 ## Asynchronous Declaration
 So how to declare a function asynchronously? Add `~` on it.
