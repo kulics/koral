@@ -223,7 +223,7 @@ primaryExpression
 ;
 
 callSelf: '..' callExpression;
-callNameSpace: id ('\\' id)* call callExpression;
+callNameSpace: ('\\' id)+ call callExpression;
 
 callExpression:
 callElement // 访问元素
@@ -281,7 +281,7 @@ callElement : '[' expression ']';
 
 nameSpace: id ('\\' id)*;
 
-nameSpaceItem: (id ('\\' id)* call)? id;
+nameSpaceItem: (('\\' id)+ call)? id;
 
 name: id (call id)* ;
 
@@ -368,7 +368,7 @@ bool:t=True|t=False;
 
 as : op='!';
 is : op='?';
-judge : op=('||' | '&&' | '?=' | '!=' | '<' | '>');
+judge : op=('||' | '&&' | '==' | '~=' | '<' | '>' | '<=' | '>=');
 assign : op=(Assign | '+=' | '-=' | '*=' | '/=' | '%=');
 add : op=('+' | '-');
 mul : op=('*' | '/' | '%');

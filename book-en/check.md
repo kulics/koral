@@ -14,7 +14,7 @@ E.g:
 ```
 ReadFile : $(name: str)~()
 {
-    ? name.Length ?= 0
+    ? name.Length == 0
     {
         !~ #Exception.("something wrong");
     };

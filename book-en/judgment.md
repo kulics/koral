@@ -34,15 +34,15 @@ This is a useful rule, and we can make a continuous judgment like this.
 E.g:
 ```
 i : 3;
-? i ?= 0
+? i == 0
 {
     ...
 }
-? i ?= 1
+? i == 1
 {
     ...
 }
-? i ?= 2
+? i == 2
 {
     ...
 }

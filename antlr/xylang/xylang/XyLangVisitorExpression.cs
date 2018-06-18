@@ -280,9 +280,9 @@ namespace xylang
 
         public override object VisitJudge([NotNull] XyParser.JudgeContext context)
         {
-            if(context.op.Text == "?=")
+            if(context.op.Text == "~=")
             {
-                return "==";
+                return "!=";
             }
             return context.op.Text;
         }
