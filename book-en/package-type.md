@@ -189,7 +189,7 @@ Since anonymous packages can be used in logic to directly define a data package 
 
 E.g:
 ```
-NameSpace :>
+NameSpace :
 {
      School : #
      {
