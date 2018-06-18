@@ -59,7 +59,7 @@ demo :
 {
     $
     {
-        System.Console.WriteLine.(""); // can be used directly
+        \System.Console.WriteLine.(""); // can be used directly
     };
 };
 ```
