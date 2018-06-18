@@ -31,10 +31,12 @@ E.g:
 ```
 a : 4;
 b : 2;
-c : a ?= b;  // ?= equal to
-c = a != b;  // != not equal
+c : a == b;  // == equal to
+c = a ~= b;  // ~= not equal
 c = a > b;   // > greater than
+c = a >= b;  // >= greater than or equal
 c = a < b;   // < less than
+c = a <= b;  // <= less than or equal
 ```
 ## Logical Operator
 Logical operators are also used primarily in judgment statements for logic operations (AND, OR, NOT).
@@ -69,8 +71,8 @@ Proposal to use more brackets to express our operation, which is very helpful fo
 
 E.g:
 ```
-a : 1+9%5*5-8/9?=5;
-b : (1 + (9 % 5 * 5) - (8 / 9)) ?= 5; 
+a : 1+9%5*5-8/9==5;
+b : (1 + (9 % 5 * 5) - (8 / 9)) == 5; 
 ```
 Obviously……
 
