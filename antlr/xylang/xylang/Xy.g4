@@ -171,9 +171,9 @@ loopJumpStatement:LoopSub Terminate;
 // 看守
 checkDeferStatement: CheckSub BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 检查
-checkStatement: Check BlockLeft (functionSupportStatement)* BlockRight checkErrorStatement Terminate;
+checkStatement: Check BlockLeft (functionSupportStatement)* BlockRight checkErrorStatement+ Terminate;
 // 错误处理
-checkErrorStatement:Wave id BlockLeft (functionSupportStatement)* BlockRight;
+checkErrorStatement:Wave id Define type BlockLeft (functionSupportStatement)* BlockRight;
 // 报告错误
 reportStatement: CheckReport (expression)? Terminate;
 // 迭代器

@@ -157,7 +157,10 @@ namespace xylang
             obj += "try " + context.BlockLeft().GetText() + Wrap;
             obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += context.BlockRight().GetText() + Wrap;
-            obj += Visit(context.checkErrorStatement()) + Wrap;
+            foreach(var item in context.checkErrorStatement())
+            {
+                obj += Visit(item) + Wrap;
+            }
             return obj;
         }
 
@@ -165,7 +168,8 @@ namespace xylang
         {
             var obj = "";
             var ID = (Result)Visit(context.id());
-            obj += "catch(Exception " + ID.text + ")" + Wrap + context.BlockLeft().GetText() + Wrap;
+            var Type = (String)Visit(context.type());
+            obj += "catch( "+ Type + " " + ID.text + ")" + Wrap + context.BlockLeft().GetText() + Wrap;
             obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += context.BlockRight().GetText();
             return obj;
