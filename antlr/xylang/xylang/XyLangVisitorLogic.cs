@@ -168,8 +168,13 @@ namespace xylang
         {
             var obj = "";
             var ID = (Result)Visit(context.id());
-            var Type = (String)Visit(context.type());
-            obj += "catch( "+ Type + " " + ID.text + ")" + Wrap + context.BlockLeft().GetText() + Wrap;
+            var Type = "Exception";
+            if(context.type() != null)
+            {
+                Type = (String)Visit(context.type());
+            }
+
+            obj += "catch( " + Type + " " + ID.text + ")" + Wrap + context.BlockLeft().GetText() + Wrap;
             obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += context.BlockRight().GetText();
             return obj;
