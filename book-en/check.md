@@ -51,19 +51,15 @@ E.g:
 ```
 So how do we distinguish between different types of anomalies?
 
-Very simple, we have got the error, so at any time through the type of judgment to deal with.
+Very simple, we can specify the type after the identifier.
 
 E.g:
 ```
-~ e
+~ e : IOException
 {
-    ? e.?Exception
-    {
-        ...
-    };
+    ...
 };
 ```
-More complicated to use sub-conditional judgment statement to continue processing.
 
 ## Check Defer
 If we have a function that we hope can be handled regardless of whether the program is normal or abnormal, such as the release of critical resources, we can use the check defer feature.
