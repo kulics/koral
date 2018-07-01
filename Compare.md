@@ -767,3 +767,70 @@ f : $(x: &Nameable)~()
     print.("Name is " + x.name.());
 };
 ```
+## Implement
+### Swift
+```
+class Dog: Nameable, Weight
+{
+    func name() -> String
+    {
+        return "Dag"
+    }
+
+    func getWeight() -> Int
+    {
+        return 30
+    }
+}
+```
+### Kotlin
+```
+class Dog: Nameable, Weight
+{
+    override fun name(): String
+    {
+        return "Dag"
+    }
+
+    override fun getWeight(): Int
+    {
+        return 30
+    }
+}
+```
+### C#
+```
+class Dog: Nameable, Weight
+{
+    public string name()
+    {
+        return "Dag";
+    }
+
+    public int getWeight() 
+    {
+        return 30;
+    }
+}
+```
+### XyLang
+```
+Dog : #()
+{
+    ~&Nameable
+    {
+        name : $()~(n:str)
+        {
+            -> ("Dag");
+        };
+    };
+
+    ~&Weight
+    {
+        getWeight : $()~(w:i32)
+        {
+            -> (30);
+        };
+    };
+};
+```
