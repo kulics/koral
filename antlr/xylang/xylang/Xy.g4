@@ -135,6 +135,7 @@ functionSupportStatement:
 | judgeStatement
 | loopStatement
 | loopEachStatement
+| loopCaseStatement
 | loopInfiniteStatement
 | loopJumpStatement
 | checkDeferStatement
@@ -164,6 +165,8 @@ judgeElseStatement:JudgeSub BlockLeft (functionSupportStatement)* BlockRight;
 loopStatement:Loop iteratorStatement Wave id BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 集合循环
 loopEachStatement:Loop expression Wave id BlockLeft (functionSupportStatement)* BlockRight Terminate;
+// 条件循环
+loopCaseStatement:Loop expression BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 无限循环
 loopInfiniteStatement:Loop BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 跳出循环

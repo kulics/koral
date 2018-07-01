@@ -69,6 +69,17 @@ namespace xylang
             return obj;
         }
 
+        public override object VisitLoopCaseStatement([NotNull] XyParser.LoopCaseStatementContext context)
+        {
+            var obj = "";
+            var expr = (Result)Visit(context.expression());
+            obj += "for ( ;" + expr.text + ";)";
+            obj += Wrap + context.BlockLeft().GetText() + Wrap;
+            obj += ProcessFunctionSupport(context.functionSupportStatement());
+            obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
+            return obj;
+        }
+
         public override object VisitLoopJumpStatement([NotNull] XyParser.LoopJumpStatementContext context)
         {
             return "break" + context.Terminate().GetText() + Wrap;
