@@ -61,6 +61,25 @@ E.g:
 ```
 string : "Hello world!";
 ```
+## mark string
+Many times we need to insert other content into a string. How do we usually do it?
+
+E.g:
+```
+title : "Year:";
+content : 2018;
+string : "Hello world! " + title + content.ToString.() ;
+// Hello world! Year:2018
+```
+
+This of course does not affect the functionality, but we can use a more intuitive and convenient way.
+That's the mark string. Just wrap the content with `/""/`, and use `{}` to mark the content in the content.
+
+E.g:
+```
+string : /"Hello world! {title} {content}"/;
+// Hello world! Year:2018
+```
 ## boolean
 boolean are logical values ​​because they can only be true or false. It is often used to assist in judging logic.
 
