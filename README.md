@@ -72,7 +72,7 @@ print("Hello, world!")
 ```
 #### Kotlin
 ```
-print("Hello, world!")
+println("Hello, world!")
 ```
 #### XyLang
 ```
