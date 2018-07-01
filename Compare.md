@@ -152,7 +152,7 @@ for (int index = 1; index <= 5; index++)
 ```
 @ [ 1~5 ] ~ index
 {
-    print.(!str(index) + " times 5 is " + !str(index * 5));
+    print.(/"{index} times 5 is {index * 5}"/);
 };
 // 1 times 5 is 5
 // 2 times 5 is 10
@@ -266,7 +266,7 @@ greet("Bob", "Tuesday");
 ```
 greet : $(name: str, day: str)~(r:str) 
 {
-    -> ("Hello " + name + ", today is " + day + ".");
+    -> (/"Hello {name}, today is {day}."/);
 };
 greet.("Bob", "Tuesday");
 ```
@@ -385,7 +385,7 @@ Shape:#()
     numberOfSides : 0;
     simpleDescription : $()~(s:str) 
     {
-        -> ("A shape with " + !str(numberOfSides) + " sides.");
+        -> (/"A shape with {numberOfSides} sides."/);
     };
 };
 ```
@@ -444,8 +444,7 @@ class Square: NamedShape {
     }
 
     override func simpleDescription() -> String {
-        return "A square with sides of length " +
-	       sideLength + "."
+        return "A square with sides of length \(sideLength)."
     }
 }
 
@@ -513,8 +512,7 @@ class Square: NamedShape
 
     public override string simpleDescription() 
     {
-        return "A square with sides of length " +
-	       sideLength + ".";
+        return $"A square with sides of length {sideLength}.";
     }
 }
 
@@ -535,7 +533,7 @@ NamedShape :#(name: str) {
 
     simpleDescription: $()~(s:str) 
     {
-        -> ("A shape with " + !str(numberOfSides) + " sides.");
+        -> (/"A shape with {numberOfSides} sides."/);
     };
 };
 
@@ -556,8 +554,7 @@ Square: #(sideLength: f64, name: str)~NamedShape(name:str)
 
     ..simpleDescription: $()~(s:str) 
     {
-        -> ("A square with sides of length " +
-	       !str(sideLength) + ".");
+        -> (/"A square with sides of length {sideLength}."/);
     };
 };
 
@@ -720,8 +717,8 @@ foreach (var current in someObjects)
     movie : current.!Movie;
     ? movie ~= nil
     {
-        print.("Movie: '" + movie.name + "', " +
-            "dir. " + movie.director);
+        print.(/"Movie: '{movie.name}', " +
+            "dir. {movie.director}"/);
     };
 };
 ```
