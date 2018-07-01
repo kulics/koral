@@ -76,7 +76,7 @@ println("Hello, world!")
 ```
 #### C#
 ```
-Console.Write("Hello, world!");
+Console.WriteLine("Hello, world!");
 ```
 #### XyLang
 ```
