@@ -443,7 +443,7 @@ test.simpleDescription()
 #### XyLang
 ```
 NamedShape :#(name: str) {
-    numberOfSides: ^i32
+    numberOfSides: ^i32;
     name: ^str~get;
 
     ..$ 
