@@ -373,7 +373,7 @@ var shapeDescription = shape.simpleDescription()
 #### XyLang
 ```
 shape : #Shape.();
-shape.numberOfSides = 7
+shape.numberOfSides = 7;
 shapeDescription : shape.simpleDescription.();
 ```
 ### Subclass
