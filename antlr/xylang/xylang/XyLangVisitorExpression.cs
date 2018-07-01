@@ -634,7 +634,12 @@ namespace xylang
         public override object VisitDataStatement([NotNull] XyParser.DataStatementContext context)
         {
             var r = new Result();
-            if(context.t.Type == XyParser.Float)
+            if(context.markText() != null)
+            {
+                r.data = "string";
+                r.text = "$" + Visit(context.markText());
+            }
+            else if(context.t.Type == XyParser.Float)
             {
                 r.data = "double";
                 r.text = context.Float().GetText();
@@ -665,6 +670,11 @@ namespace xylang
                 r.text = "null";
             }
             return r;
+        }
+
+        public override object VisitMarkText([NotNull] XyParser.MarkTextContext context)
+        {
+            return context.Text().GetText();
         }
 
         public override object VisitFunction([NotNull] XyParser.FunctionContext context)

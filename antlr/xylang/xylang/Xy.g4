@@ -319,13 +319,17 @@ linqKeyword: k=('from'|'where'|'select'|'group'|'into'|'orderby'|'join'|'let'|'i
 
 // 基础数据
 dataStatement:
-t=Float
+markText
+| t=Float
 | t=Integer
 | t=Text
 | t=True
 | t=False
 | t=Nil
 ;
+
+markText: '/' t=Text '/';
+
 // 类型
 type:
 typeProtocol
