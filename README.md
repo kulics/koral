@@ -74,6 +74,10 @@ print("Hello, world!")
 ```
 println("Hello, world!")
 ```
+#### C#
+```
+Console.Write("Hello, world!");
+```
 #### XyLang
 ```
 print.("Hello, world!");
@@ -91,6 +95,12 @@ var myVariable = 42
 myVariable = 50
 val myConstant = 42
 ```
+#### C#
+```
+var myVariable = 42;
+myVariable = 50;
+const int myConstant = 42;
+```
 #### XyLang
 ```
 myVariable : 42;
@@ -105,6 +115,10 @@ let explicitDouble: Double = 70
 #### Kotlin
 ```
 val explicitDouble: Double = 70.0
+```
+#### C#
+```
+double explicitDouble = 70;
 ```
 #### XyLang
 ```
@@ -125,6 +139,13 @@ Double Float
 Boolean 
 String
 ```
+#### C#
+```
+int short long byte 
+double float 
+bool 
+string
+```
 #### XyLang
 ```
 i32 i16 i64 i8 
@@ -135,21 +156,27 @@ str
 ### Type Coercion
 #### Swift
 ```
-let label = "The width is "
-let width = 94
-let widthLabel = label + String(width)
+let f = 6.0
+let i = 94
+let count = i + Int(f)
 ```
 #### Kotlin
 ```
-val label = "The width is "
-val width = 94
-val widthLabel = label + width
+val f = 6.0
+val i = 94
+val count:Int = i + f
+```
+#### C#
+```
+double f = 6;
+int i = 94;
+int count = i + (int)f;
 ```
 #### XyLang
 ```
-label : "The width is ";
-width : 94;
-widthLabel : label + !str(width);
+f : 6.0;
+i : 94;
+count : i + !i32(f);
 ```
 ### Inclusive Range Operator
 #### Swift
@@ -167,6 +194,18 @@ for index in 1...5 {
 ```
 for (index in 1..5) {
     println("$index times 5 is ${index * 5}")
+}
+// 1 times 5 is 5
+// 2 times 5 is 10
+// 3 times 5 is 15
+// 4 times 5 is 20
+// 5 times 5 is 25
+```
+#### C#
+```
+for (int index = 1; index <= 5; index++) 
+{
+    Console.Write($"{index} times 5 is {index * 5}");
 }
 // 1 times 5 is 5
 // 2 times 5 is 10
@@ -199,6 +238,12 @@ val shoppingList = arrayOf("catfish", "water",
     "tulips", "blue paint")
 shoppingList[1] = "bottle of water"
 ```
+#### C#
+```
+var shoppingList = new List<string>(){"catfish", "water",
+    "tulips", "blue paint"};
+shoppingList[1] = "bottle of water";
+```
 #### XyLang
 ```
 shoppingList : ["catfish", "water",
@@ -222,6 +267,14 @@ val occupations = mutableMapOf(
 )
 occupations["Jayne"] = "Public Relations"
 ```
+#### C#
+```
+var occupations = new Dictionary<string,string>(){
+    {"Malcolm", "Captain"},
+    {"Kaylee", "Mechanic"}
+};
+occupations["Jayne"] = "Public Relations";
+```
 #### XyLang
 ```
 occupations : [
@@ -240,6 +293,11 @@ let emptyDictionary = [String: Float]()
 ```
 val emptyArray = arrayOf<String>()
 val emptyMap = mapOf<String, Float>()
+```
+#### C#
+```
+var emptyArray = new List<string>();
+var emptyDictionary = new Dictionary<string, float>();
 ```
 #### XyLang
 ```
@@ -261,6 +319,14 @@ fun greet(name: String, day: String): String {
 }
 greet("Bob", "Tuesday")
 ```
+#### C#
+```
+string greet(string name, string day) 
+{
+    return $"Hello {name}, today is {day}.";
+}
+greet("Bob", "Tuesday");
+```
 #### XyLang
 ```
 greet : $(name: str, day: str)~(r:str) 
@@ -281,6 +347,13 @@ func getGasPrices() -> (Double, Double, Double) {
 data class GasPrices(val a: Double, val b: Double,
      val c: Double)
 fun getGasPrices() = GasPrices(3.59, 3.69, 3.79)
+```
+#### C#
+```
+(double, double, double) getGasPrices() 
+{
+    return (3.59, 3.69, 3.79);
+}
 ```
 #### XyLang
 ```
@@ -315,6 +388,19 @@ increment(7)
 // makeIncrementer can also be written in a shorter way:
 fun makeIncrementer() = fun(number: Int) = 1 + number
 ```
+#### C#
+```
+Func<int,int> makeIncrementer() 
+{
+    int addOne(int number) 
+    {
+        return 1 + number;
+    }
+    return addOne;
+}
+Func<int,int> increment = makeIncrementer();
+increment(7);
+```
 #### XyLang
 ```
 makeIncrementer:$()~(fn: $(n:i32)~(n:i32)) 
@@ -346,6 +432,17 @@ class Shape {
         "A shape with $numberOfSides sides."
 }
 ```
+#### C#
+```
+class Shape 
+{
+    public int numberOfSides = 0;
+    public string simpleDescription() 
+    {
+        return $"A shape with {numberOfSides} sides.";
+    }
+}
+```
 #### XyLang
 ```
 Shape:#()
@@ -369,6 +466,12 @@ var shapeDescription = shape.simpleDescription()
 var shape = Shape()
 shape.numberOfSides = 7
 var shapeDescription = shape.simpleDescription()
+```
+#### C#
+```
+var shape = new Shape();
+shape.numberOfSides = 7;
+var shapeDescription = shape.simpleDescription();
 ```
 #### XyLang
 ```
@@ -440,6 +543,50 @@ val test = Square(BigDecimal("5.2"), "square")
 test.area()
 test.simpleDescription()
 ```
+#### C#
+```
+class NamedShape 
+{
+    public int numberOfSides = 0;
+    public string name {get;}
+
+    public NamedShape(string name) 
+    {
+        this.name = name;
+    }
+
+    public virtual string simpleDescription() 
+    {
+        return $"A shape with {numberOfSides} sides.";
+    }
+}
+
+class Square: NamedShape 
+{
+    double sideLength;
+
+    public Square(double sideLength, string name):base(name) 
+    {
+        this.sideLength = sideLength;
+        this.numberOfSides = 4;
+    }
+
+    public double area() 
+    {
+        return sideLength * sideLength;
+    }
+
+    public override string simpleDescription() 
+    {
+        return "A square with sides of length " +
+	       sideLength + ".";
+    }
+}
+
+var test = new Square(5.2, "square");
+test.area();
+test.simpleDescription();
+```
 #### XyLang
 ```
 NamedShape :#(name: str) {
@@ -510,6 +657,22 @@ for (item in library) {
     }
 }
 ```
+#### C#
+```
+var movieCount = 0;
+var songCount = 0;
+
+foreach (var item in library) 
+{
+    if (item is Movie) 
+    {
+        movieCount++;
+    } else if (item is Song) 
+    {
+        songCount++;
+    }
+}
+```
 #### XyLang
 ```
 movieCount : 0;
@@ -519,11 +682,11 @@ songCount : 0;
 {
     ? item.?Movie 
     {
-        movieCount += 1
+        movieCount += 1;
     }
     ? item.?Song 
     {
-        songCount += 1
+        songCount += 1;
     };
 };
 ```
@@ -548,6 +711,30 @@ when (nb) {
     in 11..99 -> println("double digits")
     in 100..999 -> println("triple digits")
     else -> println("four or more digits")
+}
+```
+#### C#
+```
+var nb = 42;
+switch (nb) 
+{
+    case int x when x <= 7 && x >=0: 
+    case 8:
+    case 9:
+        Console.WriteLine("single digit");
+        break;
+    case 10: 
+        Console.WriteLine("double digits");
+        break;
+    case int x when x >=11 && x <=99: 
+        Console.WriteLine("double digits");
+        break;
+    case int x when x >= 100 && x <= 999: 
+        Console.WriteLine("triple digits");
+        break;
+    default: 
+        Console.WriteLine("four or more digits");
+        break;
 }
 ```
 #### XyLang
@@ -579,6 +766,17 @@ for (current in someObjects) {
     }
 }
 ```
+#### C#
+```
+foreach (var current in someObjects) 
+{
+    if (current is Movie movie) 
+    {
+        Console.WriteLine($"Movie: '{movie.name}', " +
+            "dir. {movie.director}")
+    }
+}
+```
 #### XyLang
 ```
 @ someObjects ~ current 
@@ -586,7 +784,7 @@ for (current in someObjects) {
     movie : current.!Movie;
     ? movie ~= nil
     {
-        print.("Movie: " + movie.name + ", " +
+        print.("Movie: '" + movie.name + "', " +
             "dir. " + movie.director);
     };
 };
@@ -610,6 +808,18 @@ interface Nameable {
 
 fun f(x: Nameable) {
     println("Name is " + x.name())
+}
+```
+#### C#
+```
+interface Nameable 
+{
+    string name();
+}
+
+void f(Nameable x) 
+{
+    Console.WriteLine("Name is " + x.name());
 }
 ```
 #### XyLang
