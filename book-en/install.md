@@ -12,6 +12,6 @@ In the future, we will provide executable packages that are compiled for differe
 It is now recommended to use the .NET Core runtime to use this language. For ease of use, you can create custom command line commands for use on your own system.
 
 Run Package:
-<https://github.com/kulics/xylang/releases/tag/v0.8.2>
+<https://github.com/kulics/xylang/releases/tag/v0.8.3>
 
 ### [Next Chapter](basic-grammar.md)
