@@ -49,7 +49,7 @@ nspackageControlSubStatement: Wave id BlockLeft (functionSupportStatement)* Bloc
 // 定义空控制
 nspackageControlEmptyStatement:(annotation)? id Define Control type Terminate;
 // 无构造包函数
-nspackageFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionSub) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+nspackageFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionSub) parameterClauseIn ArrowRight parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义包
 packageStatement:(annotation)? id (templateDefine)? Define Package parameterClauseIn (extend)? BlockLeft (packageSupportStatement)* BlockRight Terminate;
 // 继承
@@ -57,7 +57,6 @@ extend: ':' type tuple;
 // 包支持的语句
 packageSupportStatement:
 packageInitStatement
-|packageExtend
 |protocolStatement
 |protocolImplementStatement
 |packageFunctionStatement
@@ -69,11 +68,9 @@ packageInitStatement
 // 包构造方法
 packageInitStatement:(annotation)? Self Function BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 函数
-packageFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionSub) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+packageFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionSub) parameterClauseIn ArrowRight parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 重载函数
-packageOverrideFunctionStatement:(annotation)? Self id Define Function parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
-// 定义引入
-packageExtend: PackageSub type Terminate;
+packageOverrideFunctionStatement:(annotation)? Self id Define Function parameterClauseIn ArrowRight parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义变量
 packageVariableStatement:(annotation)? expression Define expression Terminate;
 // 定义控制
@@ -99,7 +96,7 @@ protocolControlSubStatement: Wave id;
 // 定义空控制
 protocolControlEmptyStatement: (annotation)? id Define Control type Terminate;
 // 函数
-protocolFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionSub) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+protocolFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionSub) parameterClauseIn ArrowRight parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 协议实现支持的语句
 protocolImplementSupportStatement:
 implementFunctionStatement
@@ -114,13 +111,13 @@ implementControlStatement:(annotation)? id Define Control type (packageControlSu
 // 空控制实现
 implementControlEmptyStatement: (annotation)? id Define Control type Terminate;
 // 函数实现
-implementFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionSub) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+implementFunctionStatement:(annotation)? id (templateDefine)? Define t=(Function|FunctionSub) parameterClauseIn ArrowRight parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 事件实现
 implementEventStatement: id Define '#!' nameSpaceItem Terminate;
 // 函数
-functionStatement:id (templateDefine)? Define t=(Function|FunctionSub) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+functionStatement:id (templateDefine)? Define t=(Function|FunctionSub) parameterClauseIn ArrowRight parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 返回
-returnStatement: ArrowRight tuple Terminate;
+returnStatement: ArrowLeft tuple Terminate;
 // 入参
 parameterClauseIn : '(' parameter? (',' parameter)*  ')'  ;
 // 出参
@@ -292,7 +289,7 @@ templateDefine: '<' id (',' id)* '>';
 
 templateCall: '<' type (',' type)* '>';
 
-lambda : t=(Function|FunctionSub) lambdaIn ArrowRight lambdaOut;
+lambda : t=(Function|FunctionSub) lambdaIn ArrowLeft lambdaOut;
 
 lambdaIn : (id (',' id)* )? ;
 lambdaOut : expressionList ;
@@ -303,7 +300,7 @@ pkgAnonymousAssign: BlockLeft (pkgAnonymousAssignElement)* BlockRight; // 简化
 
 pkgAnonymousAssignElement: name ':' expression Terminate; // 简化赋值元素
 
-function : t=(Function|FunctionSub) parameterClauseIn Wave parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
+function : t=(Function|FunctionSub) parameterClauseIn ArrowRight parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 
 empty : '#' '(' type ')'; // 类型空初始化
 
@@ -348,7 +345,7 @@ typeArray : '[' ']' type;
 typeSharpArray :'[' '#' ']' type;
 typeDictinary :  '[' type ']' type;
 typePackage : nameSpaceItem (templateCall)? ;
-typeFunction : Function typeFunctionParameterClause Wave typeFunctionParameterClause;
+typeFunction : Function typeFunctionParameterClause ArrowRight typeFunctionParameterClause;
 
 // 函数类型参数
 typeFunctionParameterClause : '(' (id ':' type (',' id ':' type)* )? ')'  ;
