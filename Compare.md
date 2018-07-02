@@ -264,7 +264,7 @@ greet("Bob", "Tuesday");
 ```
 ### XyLang
 ```
-greet : $(name: str, day: str)~(r:str) 
+greet: $(name: str, day: str)~(r:str) 
 {
     -> (/"Hello {name}, today is {day}."/);
 };
@@ -292,7 +292,7 @@ fun getGasPrices() = GasPrices(3.59, 3.69, 3.79)
 ```
 ### XyLang
 ```
-getGasPrices:$()~(a:f64, b:f64, c:f64) 
+getGasPrices: $()~(a:f64, b:f64, c:f64) 
 {
     -> (3.59, 3.69, 3.79);
 };
@@ -338,9 +338,9 @@ increment(7);
 ```
 ### XyLang
 ```
-makeIncrementer:$()~(fn: $(n:i32)~(n:i32)) 
+makeIncrementer: $()~(fn: $(n:i32)~(n:i32)) 
 {
-    addOne:$(number:i32)~(number:i32) 
+    addOne: $(number:i32)~(number:i32) 
     {
         -> (1 + number);
     };
@@ -380,7 +380,7 @@ class Shape
 ```
 ### XyLang
 ```
-Shape:#()
+Shape: #()
 {
     numberOfSides : 0;
     simpleDescription : $()~(s:str) 
@@ -522,7 +522,7 @@ test.simpleDescription();
 ```
 ### XyLang
 ```
-NamedShape :#(name: str) {
+NamedShape: #(name: str) {
     numberOfSides: ^i32;
     name: ^str~get;
 
@@ -537,12 +537,14 @@ NamedShape :#(name: str) {
     };
 };
 
-Square: #(sideLength: f64, name: str)~NamedShape(name:str)
+Square: #(sideLength: f64, name: str)
 {
+    namedShape: ^NamedShape;
     sideLength: ^f64;
 
     ..$() 
     {
+        ..namedShape = #NamedShape.(name);
         ..sideLength = sideLength;
         ..numberOfSides = 4;
     };
@@ -552,7 +554,7 @@ Square: #(sideLength: f64, name: str)~NamedShape(name:str)
         -> (sideLength * sideLength);
     };
 
-    ..simpleDescription: $()~(s:str) 
+    simpleDescription: $()~(s:str) 
     {
         -> (/"A square with sides of length {sideLength}."/);
     };
