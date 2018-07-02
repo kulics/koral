@@ -264,9 +264,9 @@ greet("Bob", "Tuesday");
 ```
 ### XyLang
 ```
-greet: $(name: str, day: str)~(r:str) 
+greet: $(name: str, day: str)->(r:str) 
 {
-    -> (/"Hello {name}, today is {day}."/);
+    <- (/"Hello {name}, today is {day}."/);
 };
 greet.("Bob", "Tuesday");
 ```
@@ -292,9 +292,9 @@ fun getGasPrices() = GasPrices(3.59, 3.69, 3.79)
 ```
 ### XyLang
 ```
-getGasPrices: $()~(a:f64, b:f64, c:f64) 
+getGasPrices: $()->(a:f64, b:f64, c:f64) 
 {
-    -> (3.59, 3.69, 3.79);
+    <- (3.59, 3.69, 3.79);
 };
 ```
 ## Function Type
@@ -338,13 +338,13 @@ increment(7);
 ```
 ### XyLang
 ```
-makeIncrementer: $()~(fn: $(n:i32)~(n:i32)) 
+makeIncrementer: $()->(fn: $(n:i32)->(n:i32)) 
 {
-    addOne: $(number:i32)~(number:i32) 
+    addOne: $(number:i32)->(number:i32) 
     {
-        -> (1 + number);
+        <- (1 + number);
     };
-    -> (addOne);
+    <- (addOne);
 };
 increment : makeIncrementer.();
 increment.(7);
@@ -383,9 +383,9 @@ class Shape
 Shape: #()
 {
     numberOfSides : 0;
-    simpleDescription : $()~(s:str) 
+    simpleDescription : $()->(s:str) 
     {
-        -> (/"A shape with {numberOfSides} sides."/);
+        <- (/"A shape with {numberOfSides} sides."/);
     };
 };
 ```
@@ -531,9 +531,9 @@ NamedShape: #(name: str) {
         ..name = name;
     };
 
-    simpleDescription: $()~(s:str) 
+    simpleDescription: $()->(s:str) 
     {
-        -> (/"A shape with {numberOfSides} sides."/);
+        <- (/"A shape with {numberOfSides} sides."/);
     };
 };
 
@@ -549,14 +549,14 @@ Square: #(sideLength: f64, name: str)
         ..numberOfSides = 4;
     };
 
-    area: $()~(f:f64) 
+    area: $()->(f:f64) 
     {
-        -> (sideLength * sideLength);
+        <- (sideLength * sideLength);
     };
 
-    simpleDescription: $()~(s:str) 
+    simpleDescription: $()->(s:str) 
     {
-        -> (/"A square with sides of length {sideLength}."/);
+        <- (/"A square with sides of length {sideLength}."/);
     };
 };
 
@@ -761,10 +761,10 @@ void f(Nameable x)
 ```
 Nameable : & 
 {
-    name: $()~(s:str){};
+    name: $()->(s:str){};
 };
 
-f : $(x: &Nameable)~() 
+f : $(x: &Nameable)->() 
 {
     print.("Name is " + x.name.());
 };
@@ -821,17 +821,17 @@ Dog : #()
 {
     ~& Nameable
     {
-        name : $()~(n:str)
+        name : $()->(n:str)
         {
-            -> ("Dag");
+            <- ("Dag");
         };
     };
 
     ~& Weight
     {
-        getWeight : $()~(w:i32)
+        getWeight : $()->(w:i32)
         {
-            -> (30);
+            <- (30);
         };
     };
 };
