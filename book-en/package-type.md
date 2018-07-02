@@ -128,9 +128,9 @@ E.g:
 Student : #()
 {
     ...
-    GetGirlFirend : $()~(name: str)
+    GetGirlFirend : $()->(name: str)
     {
-        -> (.._GirlFirend);
+        <- (.._GirlFirend);
     };
 };
 ```
@@ -191,21 +191,21 @@ E.g:
 ```
 NameSpace :
 {
-     School : #
-     {
-         Name := "XySchool";
+    School : #
+    {
+        Name := "XySchool";
 
-         WellCome : $(name:str)~(hi:str)
-         {
-             -> ("well come to " + name);
-         };
-     };
+        WellCome : $(name:str)->(hi:str)
+        {
+            <- ("well come to " + name);
+        };
+    };
 
-     $
-     {
-         School.WellCome.(School.Name);
-         // well come to XySchool
-     };
+    $
+    {
+        School.WellCome.(School.Name);
+        // well come to XySchool
+    };
 };
 ```
 ## Combination

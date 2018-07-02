@@ -23,12 +23,12 @@ Array<T> : #()
     Items : #Storage.(T); // create storage
     Length : ^i32;
 
-    Get : $(index: i32)~(item: T) // get a generic data
+    Get : $(index: i32)->(item: T) // get a generic data
     {
-        -> (Items.Get.(index));
+        <- (Items.Get.(index));
     };
 
-    Add : $(item: T)~() // add a generic data into the array
+    Add : $(item: T)->() // add a generic data into the array
     {
         Items.Insert.(Length, item);
         Length += 1;
@@ -67,21 +67,21 @@ We can use generics in packages, functions, and protocol types.
 
 E.g:
 ```
-Func<T> : $(data: T)~(data: T)
+Func<T> : $(data: T)->(data: T)
 {
-    -> (data);
+    <- (data);
 };
 
 Protocol<T> : &
 {
-    Test<T> : $(in: T)~(){};
+    Test<T> : $(in: T)->(){};
 };
 
 Implement : #()
 {
     ~& Protocol<Implement>
     {
-        Test<Implement> : $(in: Implement)~(){};
+        Test<Implement> : $(in: Implement)->(){};
     };
 };
 ```

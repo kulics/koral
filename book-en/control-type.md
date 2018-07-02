@@ -22,7 +22,7 @@ E.g:
 Number : ^i32
 ~get // means get, equivalent to getter in other languages
 {
-    -> (7); // only returns 7
+    <- (7); // only returns 7
 };
 ```
 In this way, number has a special method to get the value. When calling number, it will execute the internal logic.
@@ -63,7 +63,7 @@ _number : 0;
 Number : ^i32
 ~get
 {
-    -> (_number);
+    <- (_number);
 };
 ~set
 {

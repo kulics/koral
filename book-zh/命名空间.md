@@ -12,9 +12,9 @@ name\space :
 {
     space : #
     {
-        GetSomething : $()~(content:str)
+        GetSomething : $()->(content:str)
         {
-            -> ("something");
+            <- ("something");
         };
     };
 };

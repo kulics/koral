@@ -20,7 +20,7 @@ That's right, it's really add `~` on it.
 
 E.g:
 ```
-Async : ~$()~(out: i32){-> (12);};
+Async : ~$()->(out: i32){<- (12);};
 ```
 Once a method has been declared as an async method, the compiler will automatically put a `Task<>` wrapper around the return value, and the method will be executed asynchronously.
 
@@ -46,16 +46,16 @@ Asynchronous wait can only be used in asynchronous declared functions.
 E.g:
 ```
 // correct
-Async : ~$()~(out: i32)
+Async : ~$()->(out: i32)
 {
     ~$ Task.Delay.(5000); // wait for a while
-    -> (12);
+    <- (12);
 };
 // wrong
-Async : $()~(out: i32)
+Async : $()->(out: i32)
 {
     ~$ Task.Delay.(5000); // can not be declared
-    -> (12);
+    <- (12);
 };
 ```
 ## Empty return value
@@ -65,7 +65,7 @@ We can choose to wait for no data, or we can choose not to wait for data.
 
 E.g:
 ```
-Async : ~$()~()
+Async : ~$()->()
 {
     ~$ Task.Delay.(5000); // wait for a while
 };

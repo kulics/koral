@@ -21,7 +21,7 @@ E.g:
 HomeWork : &
 {
     Count : ^i32;
-    Do : $()~(){};
+    Do : $()->(){};
 };
 ```
 The protocol for this job has two properties, one is the number of homework and the other is the function to do homework.
@@ -43,7 +43,7 @@ Student : #()
     {
         Count : ^i32; 
 
-        Do : $()~()
+        Do : $()->()
         {
             SpendTime(1); // spent an hour
             ..HomeWork.Count -= 1; // completed one
@@ -101,7 +101,7 @@ We can use the auxiliary notation `&` in the parameter type of a function to mar
 
 E.g:
 ```
-DoHomeWork : $(student: &HomeWork)~()
+DoHomeWork : $(student: &HomeWork)->()
 {
     student.Do.(); // because the protocol has been marked, we can use the protocol method
 };
@@ -134,7 +134,7 @@ We can use `.?type` To judge the type of data, using `.!type` To convert the dat
 
 E.g:
 ```
-func : $(hw :&HomeWork)~()
+func : $(hw :&HomeWork)->()
 {
     // judge type
     ? hw.?ChineseStudent 

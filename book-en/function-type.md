@@ -9,11 +9,11 @@ Before we have seen the main entrance function, it is only defined using the sym
 
 The main entry function is a special case, in fact, the conventional functions of this language must explicitly declare the identifier, in parameters and out parameters.
 
-We only need to use `$()~()` to define a function, the first parenthesis is in parameters, the second parenthesis is out parameters.
+We only need to use `$()->()` to define a function, the first parenthesis is in parameters, the second parenthesis is out parameters.
 
 E.g:
 ```
-function : $()~()
+function : $()->()
 {
     ...
 };
@@ -35,9 +35,9 @@ Very simple, we only need to use `identifier: type` declare the parameters.
 
 E.g:
 ```
-func : $(x: i32)~(y: i32)
+func : $(x: i32)->(y: i32)
 {
-    -> (x * x);
+    <- (x * x);
 };
 ```
 The meaning of this function is to accept an input `i32` parameter `x` and a `i32` parameter `y`.
@@ -46,13 +46,13 @@ This is very similar to what? Yes, in fact, the parameters and dictionary functi
 
 The first parentheses is the in parameter, the second parenthesis is the out parameter. There is no limit to the number of parameters in brackets, but there are strict requirements on the order and type.
 ### Return
-Here, even if you do not know, roughly you can guess that `->` should be a return-related statement.
+Here, even if you do not know, roughly you can guess that `<-` should be a return-related statement.
 
-Yes, we only need to use `->` can specify a clear return statement, the return of the brackets can be filled in need to return the data, separated by commas.
+Yes, we only need to use `<-` can specify a clear return statement, the return of the brackets can be filled in need to return the data, separated by commas.
 
 E.g:
 ```
--> (1, 2, 3, "Hello");
+<- (1, 2, 3, "Hello");
 ```
 This will return `1, 2, 3, 'Hello'` four values.
 
@@ -60,7 +60,7 @@ And we call the same method expression, we also need to use the full brackets to
 
 E.g:
 ```
--> ();
+<- ();
 ```
 The purpose of such a design in order to maintain the integrity of the grammar.
 
@@ -76,7 +76,7 @@ When we call the function, we need to fill the brackets with the identifier in t
 
 E.g:
 ```
-sell : $(price: i32, name: str)~(){}; 
+sell : $(price: i32, name: str)->(){}; 
 // define one function with two in parameter
 
 sell.(1.99, "cola"); 
@@ -87,10 +87,10 @@ Similar to in parameters, out parameters also need to be clearly defined with an
 
 E.g:
 ```
-topSell : $()~(name: str, count: i32)
+topSell : $()->(name: str, count: i32)
 {
     ...
-    -> ("cola", many);
+    <- ("cola", many);
 };
 ```
 ### The use of the return
@@ -140,7 +140,7 @@ Function In Parameter no special definition of way, just replace the type of the
 
 E.g:
 ```
-each1To10 : $(func: $(item: i32)~())~()
+each1To10 : $(func: $(item: i32)->())->()
 {
     @ [1~10] ~ i
     {
@@ -154,7 +154,7 @@ So that we can pass the details of the processing to the externally passed `func
 
 E.g:
 ```
-print : $(item: i32)~()
+print : $(item: i32)->()
 {
     Console.WriteLine.(item);
 };
@@ -170,13 +170,13 @@ As the above way to define a function and then imported into use sometimes appea
 
 At this point we can use the syntax of Lambda Expression to reduce the pain of our naming.
 
-Because function arguments are already defined at the time of declaration, we can use simplified syntax `$ ->` to express them, which means define the input parameter identifier and return an expression directly.
+Because function arguments are already defined at the time of declaration, we can use simplified syntax `$ <-` to express them, which means define the input parameter identifier and return an expression directly.
 
 E.g:
 ```
-each1To10.( $item -> Console.WriteLine.(item) );
-findAll.( $it -> it>7 );
-order.( $it -> it.time );
+each1To10.( $item <- Console.WriteLine.(item) );
+findAll.( $it <- it>7 );
+order.( $it <- it.time );
 ```
 Very simple, and the difference between the expression of the function type is that the input only need to declare the identifier, and the parameter is used to include one expression.
 ## Lambda Function
@@ -184,7 +184,7 @@ Unlike the above simplified method, we can also write a complete function direct
 
 E.g:
 ```
-each1To10.( $(item:i32)~()
+each1To10.( $(item:i32)->()
 {
      Console.WriteLine.(item);
 });
