@@ -817,7 +817,7 @@ class Dog: Nameable, Weight
 ```
 Dog : #()
 {
-    ~&Nameable
+    ~& Nameable
     {
         name : $()~(n:str)
         {
@@ -825,7 +825,7 @@ Dog : #()
         };
     };
 
-    ~&Weight
+    ~& Weight
     {
         getWeight : $()~(w:i32)
         {
