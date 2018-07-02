@@ -67,14 +67,6 @@ namespace xylang
                         " { get { return this as " + ptcl + ";}}" + Wrap;
                     obj += r.text;
                 }
-                else if(item.GetChild(0) is XyParser.PackageExtendContext)
-                {
-                    //if(!hasExtend)
-                    //{
-                    //    extend = (string)Visit(item);
-                    //    hasExtend = true;
-                    //}
-                }
                 else
                 {
                     obj += Visit(item);
@@ -184,12 +176,6 @@ namespace xylang
             }
             obj += "}" + Wrap;
             return obj;
-        }
-
-        public override object VisitPackageExtend([NotNull] XyParser.PackageExtendContext context)
-        {
-            var pkg = (string)Visit(context.type()); ;
-            return pkg;
         }
 
         public override object VisitPackageFunctionStatement([NotNull] XyParser.PackageFunctionStatementContext context)
