@@ -142,12 +142,12 @@ However, in practical projects, the use of partition will effectively improve th
 
 E.g:
 ```
-a.b.(x,y).c.(fn:$()~(x:i32){->(2+1);}).d=1+3*5/4;
+a.b.(x,y).c.(fn:$()->(x:i32){<-(2+1);}).d=1+3*5/4;
 
 a.b.(x, y)
-.c.(fn: $()~(x: i32)
+.c.(fn: $()->(x: i32)
 {
-    -> (2 + 1);
+    <- (2 + 1);
 }).d = 1 + 3 * 5 / 4;
 ```
 ### [Next Chapter](basic-type.md)
