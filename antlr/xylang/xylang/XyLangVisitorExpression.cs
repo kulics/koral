@@ -681,7 +681,7 @@ namespace xylang
         {
             var r = new Result();
             // 异步
-            if(context.t.Type == XyParser.FunctionSub)
+            if(context.t.Type == XyParser.FlowRight)
             {
                 r.text += " async ";
             }
@@ -697,7 +697,7 @@ namespace xylang
             var r = new Result();
             r.data = "var";
             // 异步
-            if(context.t.Type == XyParser.FunctionSub)
+            if(context.t.Type == XyParser.FlowLeft)
             {
                 r.text += "async ";
             }
