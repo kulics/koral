@@ -118,19 +118,45 @@ namespace xylang
         public override object VisitTypeFunctionParameterClause([NotNull] XyParser.TypeFunctionParameterClauseContext context)
         {
             var obj = "";
-            for(int i = 0; i < context.type().Length; i++)
+            var lastType = "";
+            var temp = new List<string>();
+            for(int i = context.typeParameter().Length - 1; i >= 0; i--)
             {
-                var r = (string)Visit(context.type(i));
-                if(i == 0)
+                Parameter p = (Parameter)Visit(context.typeParameter(i));
+                if(p.type != null)
                 {
-                    obj += r;
+                    lastType = p.type;
                 }
                 else
                 {
-                    obj += ", " + r;
+                    p.type = lastType;
+                }
+                temp.Add($"{p.type}");
+            }
+            for(int i = temp.Count - 1; i >= 0; i--)
+            {
+                if(i == temp.Count - 1)
+                {
+                    obj += temp[i];
+                }
+                else
+                {
+                    obj += $", {temp[i]}";
                 }
             }
             return obj;
+        }
+
+        public override object VisitTypeParameter([NotNull] XyParser.TypeParameterContext context)
+        {
+            var p = new Parameter();
+            p.id = ((Result)Visit(context.id())).text;
+            if(context.type() != null)
+            {
+                p.type = (string)Visit(context.type());
+            }
+
+            return p;
         }
 
         public override object VisitTypeBasic([NotNull] XyParser.TypeBasicContext context)
