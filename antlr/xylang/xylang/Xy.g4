@@ -348,7 +348,9 @@ typePackage : nameSpaceItem (templateCall)? ;
 typeFunction : Function typeFunctionParameterClause ArrowRight typeFunctionParameterClause;
 
 // 函数类型参数
-typeFunctionParameterClause : '(' (id ':' type (',' id ':' type)* )? ')'  ;
+typeFunctionParameterClause : '(' typeParameter? (',' typeParameter)*  ')';
+// 参数结构
+typeParameter :id (':' type)?;
 
 // 基础类型名
 typeBasic:

@@ -81,7 +81,7 @@ namespace xylang
             for(int i = context.parameter().Length - 1; i >= 0; i--)
             {
                 Parameter p = (Parameter)Visit(context.parameter(i));
-                if (p.type != "")
+                if(p.type != null)
                 {
                     lastType = p.type;
                 }
@@ -92,9 +92,9 @@ namespace xylang
 
                 temp.Add($"{p.annotation} {p.type} {p.id}");
             }
-            for (int i = temp.Count - 1; i >= 0; i--)
+            for(int i = temp.Count - 1; i >= 0; i--)
             {
-                if (i == temp.Count - 1)
+                if(i == temp.Count - 1)
                 {
                     obj += temp[i];
                 }
@@ -125,10 +125,10 @@ namespace xylang
                 obj += "( ";
                 var lastType = "";
                 var temp = new List<string>();
-                for (int i = context.parameter().Length - 1; i >= 0; i--)
+                for(int i = context.parameter().Length - 1; i >= 0; i--)
                 {
                     Parameter p = (Parameter)Visit(context.parameter(i));
-                    if (p.type != "")
+                    if(p.type != null)
                     {
                         lastType = p.type;
                     }
@@ -138,9 +138,9 @@ namespace xylang
                     }
                     temp.Add($"{p.annotation} {p.type} {p.id}");
                 }
-                for (int i = temp.Count - 1; i >= 0; i--)
+                for(int i = temp.Count - 1; i >= 0; i--)
                 {
-                    if (i == temp.Count - 1)
+                    if(i == temp.Count - 1)
                     {
                         obj += temp[i];
                     }
@@ -157,7 +157,7 @@ namespace xylang
         public class Parameter
         {
             public string id { get; set; }
-            public string type { get; set; } 
+            public string type { get; set; }
             public string annotation { get; set; }
         }
 
@@ -169,7 +169,7 @@ namespace xylang
             {
                 p.annotation = (string)Visit(context.annotation());
             }
-            if (context.type() != null)
+            if(context.type() != null)
             {
                 p.type = (string)Visit(context.type());
             }
