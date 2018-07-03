@@ -264,7 +264,7 @@ greet("Bob", "Tuesday");
 ```
 ### XyLang
 ```
-greet: $(name: str, day: str)->(r:str) 
+greet: $(name, day: str)->(r:str) 
 {
     <- (/"Hello {name}, today is {day}."/);
 };
@@ -292,7 +292,7 @@ fun getGasPrices() = GasPrices(3.59, 3.69, 3.79)
 ```
 ### XyLang
 ```
-getGasPrices: $()->(a:f64, b:f64, c:f64) 
+getGasPrices: $()->(a, b, c:f64) 
 {
     <- (3.59, 3.69, 3.79);
 };
