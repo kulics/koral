@@ -338,7 +338,7 @@ increment(7);
 ```
 ### XyLang
 ```
-makeIncrementer: $()->(fn: $(i32)->(i32)) 
+makeIncrementer: $()->(fn: $(in:i32)->(out:i32)) 
 {
     addOne: $(number:i32)->(number:i32) 
     {
