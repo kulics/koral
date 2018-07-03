@@ -76,17 +76,34 @@ namespace xylang
         {
             var obj = "( ";
 
-            for(int i = 0; i < context.parameter().Length; i++)
+            var lastType = "";
+            var temp = new List<string>();
+            for(int i = context.parameter().Length - 1; i >= 0; i--)
             {
-                if(i == 0)
+                Parameter p = (Parameter)Visit(context.parameter(i));
+                if (p.type != "")
                 {
-                    obj += Visit(context.parameter(0));
+                    lastType = p.type;
                 }
                 else
                 {
-                    obj += ", " + Visit(context.parameter(i));
+                    p.type = lastType;
+                }
+
+                temp.Add($"{p.annotation} {p.type} {p.id}");
+            }
+            for (int i = temp.Count - 1; i >= 0; i--)
+            {
+                if (i == temp.Count - 1)
+                {
+                    obj += temp[i];
+                }
+                else
+                {
+                    obj += $", {temp[i]}";
                 }
             }
+
             obj += " )";
             return obj;
         }
@@ -100,20 +117,36 @@ namespace xylang
             }
             else if(context.parameter().Length == 1)
             {
-                obj += Visit(context.parameter(0).type());
+                Parameter p = (Parameter)Visit(context.parameter(0));
+                obj += p.type;
             }
             if(context.parameter().Length > 1)
             {
                 obj += "( ";
-                for(int i = 0; i < context.parameter().Length; i++)
+                var lastType = "";
+                var temp = new List<string>();
+                for (int i = context.parameter().Length - 1; i >= 0; i--)
                 {
-                    if(i == 0)
+                    Parameter p = (Parameter)Visit(context.parameter(i));
+                    if (p.type != "")
                     {
-                        obj += Visit(context.parameter(0));
+                        lastType = p.type;
                     }
                     else
                     {
-                        obj += ", " + Visit(context.parameter(i));
+                        p.type = lastType;
+                    }
+                    temp.Add($"{p.annotation} {p.type} {p.id}");
+                }
+                for (int i = temp.Count - 1; i >= 0; i--)
+                {
+                    if (i == temp.Count - 1)
+                    {
+                        obj += temp[i];
+                    }
+                    else
+                    {
+                        obj += $", {temp[i]}";
                     }
                 }
                 obj += " )";
@@ -121,16 +154,27 @@ namespace xylang
             return obj;
         }
 
+        public class Parameter
+        {
+            public string id { get; set; }
+            public string type { get; set; } 
+            public string annotation { get; set; }
+        }
+
         public override object VisitParameter([NotNull] XyParser.ParameterContext context)
         {
-            var id = (Result)Visit(context.id());
-            var obj = "";
+            var p = new Parameter();
+            p.id = ((Result)Visit(context.id())).text;
             if(context.annotation() != null)
             {
-                obj += Visit(context.annotation());
+                p.annotation = (string)Visit(context.annotation());
             }
-            obj += Visit(context.type()) + " " + id.text;
-            return obj;
+            if (context.type() != null)
+            {
+                p.type = (string)Visit(context.type());
+            }
+
+            return p;
         }
 
 
