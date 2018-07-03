@@ -14,7 +14,7 @@ namespace xylang
             var id = (Result)Visit(context.id());
             var obj = "";
             // 异步
-            if(context.t.Type == XyParser.FunctionSub)
+            if(context.t.Type == XyParser.FlowRight)
             {
                 var pout = (string)Visit(context.parameterClauseOut());
                 if(pout != "void")

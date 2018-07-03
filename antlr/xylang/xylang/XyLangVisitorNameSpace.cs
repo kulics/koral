@@ -203,7 +203,7 @@ namespace xylang
                 obj += Visit(context.annotation());
             }
             // 异步
-            if(context.t.Type == XyParser.FunctionSub)
+            if(context.t.Type == XyParser.FlowRight)
             {
                 var pout = (string)Visit(context.parameterClauseOut());
                 if(pout != "void")

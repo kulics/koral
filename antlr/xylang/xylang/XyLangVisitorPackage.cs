@@ -187,7 +187,7 @@ namespace xylang
                 obj += Visit(context.annotation());
             }
             // 异步
-            if(context.t.Type == XyParser.FunctionSub)
+            if(context.t.Type == XyParser.FlowRight)
             {
                 var pout = (string)Visit(context.parameterClauseOut());
                 if(pout != "void")
@@ -358,7 +358,7 @@ namespace xylang
             }
             fn.@in = (string)Visit(context.parameterClauseIn());
             // 异步
-            if(context.t.Type == XyParser.FunctionSub)
+            if(context.t.Type == XyParser.FlowRight)
             {
                 var pout = (string)Visit(context.parameterClauseOut());
                 if(pout != "void")
@@ -458,7 +458,7 @@ namespace xylang
             }
             r.permission = "public";
             // 异步
-            if(context.t.Type == XyParser.FunctionSub)
+            if(context.t.Type == XyParser.FlowRight)
             {
                 var pout = (string)Visit(context.parameterClauseOut());
                 if(pout != "void")
