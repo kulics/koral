@@ -45,6 +45,16 @@ The meaning of this function is to accept an input `i32` parameter `x` and a `i3
 This is very similar to what? Yes, in fact, the parameters and dictionary functions are almost the same, the parameters just tell the function, we need to use this type of data, marked by the identifier to match. Therefore, the expression of the same parameters and dictionaries will help us to understand.
 
 The first parentheses is the in parameter, the second parenthesis is the out parameter. There is no limit to the number of parameters in brackets, but there are strict requirements on the order and type.
+## Parameter shorthand
+If we need several consecutive parameters of the same type, we can simply write the type, just write the type in the last parameter of the same type.
+
+E.g:
+```
+Func : $(a, b, c:i32, d:str)->(a:str, b, c, d:i32)
+{
+    <- (d, a, b, c);
+};
+```
 ### Return
 Here, even if you do not know, roughly you can guess that `<-` should be a return-related statement.
 
