@@ -53,7 +53,7 @@ nspackageFunctionStatement:(annotation)? id (templateDefine)? Define Function pa
 // 定义包
 packageStatement:(annotation)? id (templateDefine)? Define Package parameterClauseIn (extend)? BlockLeft (packageSupportStatement)* BlockRight Terminate;
 // 继承
-extend: ':' type tuple;
+extend: '~' type tuple;
 // 包支持的语句
 packageSupportStatement:
 packageInitStatement
