@@ -68,7 +68,7 @@ packageInitStatement
 |packageVariableStatement
 ;
 // 包构造方法
-packageInitStatement:(annotation)? Self Function BlockLeft (functionSupportStatement)* BlockRight Terminate;
+packageInitStatement:(annotation)? Package BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 函数
 packageFunctionStatement:(annotation)? id (templateDefine)? Define Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 重载函数
