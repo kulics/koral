@@ -236,8 +236,8 @@ var emptyDictionary = new Dictionary<string, float>();
 ```
 ### XyLang
 ```
-emptyArray : #[]str.();
-emptyMap : #[str]f32.();
+emptyArray : []str.{};
+emptyMap : [str]f32.{};
 ```
 ## Functions
 ### Swift
@@ -338,7 +338,7 @@ increment(7);
 ```
 ### XyLang
 ```
-makeIncrementer: $()->(fn: $(in:i32)->(out:i32)) 
+makeIncrementer: $()->(fn:(in:i32)->(out:i32)) 
 {
     addOne: $(number:i32)->(number:i32) 
     {
@@ -380,7 +380,7 @@ class Shape
 ```
 ### XyLang
 ```
-Shape: #()
+Shape: #{}
 {
     numberOfSides : 0;
     simpleDescription : $()->(s:str) 
@@ -410,7 +410,7 @@ var shapeDescription = shape.simpleDescription();
 ```
 ### XyLang
 ```
-shape : #Shape.();
+shape : Shape.{};
 shape.numberOfSides = 7;
 shapeDescription : shape.simpleDescription.();
 ```
@@ -522,11 +522,11 @@ test.simpleDescription();
 ```
 ### XyLang
 ```
-NamedShape: #(name: str) {
+NamedShape: #{name: str} {
     numberOfSides: ^i32;
     name: ^str~get;
 
-    ..$ 
+    #
     {
         ..name = name;
     };
@@ -537,14 +537,14 @@ NamedShape: #(name: str) {
     };
 };
 
-Square: #(sideLength: f64, name: str)
+Square: #{sideLength: f64, name: str}
 {
     namedShape: ^NamedShape;
     sideLength: ^f64;
 
-    ..$() 
+    # 
     {
-        ..namedShape = #NamedShape.(name);
+        ..namedShape = NamedShape.{name};
         ..sideLength = sideLength;
         ..numberOfSides = 4;
     };
@@ -560,7 +560,7 @@ Square: #(sideLength: f64, name: str)
     };
 };
 
-test : #Square.(5.2, "square");
+test : Square.{5.2, "square"};
 test.area.();
 test.simpleDescription.();
 ```
@@ -764,7 +764,7 @@ Nameable : &
     name: $()->(s:str){};
 };
 
-f : $(x: &Nameable)->() 
+f : $(x: Nameable)->() 
 {
     print.("Name is " + x.name.());
 };
@@ -817,7 +817,7 @@ class Dog: Nameable, Weight
 ```
 ### XyLang
 ```
-Dog : #()
+Dog : #{}
 {
     ~& Nameable
     {
