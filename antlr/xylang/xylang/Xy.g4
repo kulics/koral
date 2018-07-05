@@ -51,9 +51,11 @@ nspackageControlEmptyStatement:(annotation)? id Define Control type Terminate;
 // 无构造包函数
 nspackageFunctionStatement:(annotation)? id (templateDefine)? Define Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义包
-packageStatement:(annotation)? id (templateDefine)? Define Package parameterClauseIn (extend)? BlockLeft (packageSupportStatement)* BlockRight Terminate;
+packageStatement:(annotation)? id (templateDefine)? Define Package parameterClausePackage (extend)? BlockLeft (packageSupportStatement)* BlockRight Terminate;
 // 继承
-extend: '~' type tuple;
+extend: '~' type '{' expressionList? '}';
+// 入参
+parameterClausePackage : '{' parameter? (',' parameter)*  '}'  ;
 // 包支持的语句
 packageSupportStatement:
 packageInitStatement
@@ -249,17 +251,17 @@ annotationAssign: (id '=')? expression ;
 
 callFunc: id (templateCall)? call tuple; // 函数调用
 
-callPkg: '#' type call tuple (pkgAssign|arrayAssign|dictionaryAssign)?; // 新建包
+callPkg: type call '{' expressionList? ( '...' (pkgAssign|arrayAssign|dictionaryAssign))? '}'; // 新建包
 
 getType: '??' type;
 
-pkgAssign: BlockLeft (pkgAssignElement (',' pkgAssignElement)*)? BlockRight; // 简化赋值
+pkgAssign: (pkgAssignElement (',' pkgAssignElement)*)? ; // 简化赋值
 
 pkgAssignElement: name Assign expression; // 简化赋值元素
 
-arrayAssign: '[' (expression (',' expression)*)? ']';
+arrayAssign: (expression (',' expression)*)? ;
 
-dictionaryAssign: '[' (dictionaryElement (',' dictionaryElement)*)?  ']';
+dictionaryAssign: (dictionaryElement (',' dictionaryElement)*)? ;
 
 callIs: is type; // 类型判断
 
