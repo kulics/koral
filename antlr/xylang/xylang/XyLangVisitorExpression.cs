@@ -403,7 +403,12 @@ namespace xylang
         {
             var r = new Result();
             r.data = Visit(context.type());
-            r.text = "new " + Visit(context.type()) + ((Result)Visit(context.tuple())).text;
+            var param = "";
+            if(context.expressionList()!=null)
+            {
+                param = ((Result)Visit(context.expressionList())).text;
+            }
+            r.text = $"new {Visit(context.type())} ( {param} )";
             if(context.pkgAssign() != null)
             {
                 r.text += Visit(context.pkgAssign());

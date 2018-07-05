@@ -13,7 +13,12 @@ namespace xylang
         {
             var r = new Result();
             r.data = Visit(context.type());
-            r.text = (Visit(context.tuple()) as Result).text;
+            r.text += "(";
+            if(context.expressionList() != null)
+            {
+                r.text += (Visit(context.expressionList()) as Result).text;
+            }
+            r.text += ")";
             return r;
         }
 
@@ -39,7 +44,7 @@ namespace xylang
                     // 处理构造函数
                     if(!hasInit)
                     {
-                        obj += "public " + id.text + Visit(context.parameterClauseIn());
+                        obj += "public " + id.text + Visit(context.parameterClausePackage());
                         if(context.extend() != null)
                         {
                             obj += " :base " + ((Result)Visit(context.extend())).text;
@@ -74,7 +79,7 @@ namespace xylang
             }
             if(!hasInit)
             {
-                var init = "public " + id.text + Visit(context.parameterClauseIn());
+                var init = "public " + id.text + Visit(context.parameterClausePackage());
                 if(context.extend() != null)
                 {
                     init += " :base " + ((Result)Visit(context.extend())).text;
@@ -117,6 +122,42 @@ namespace xylang
 
             header += Wrap + context.BlockLeft().GetText() + Wrap;
             obj = header + obj;
+            return obj;
+        }
+
+        public override object VisitParameterClausePackage([NotNull] XyParser.ParameterClausePackageContext context)
+        {
+            var obj = "( ";
+
+            var lastType = "";
+            var temp = new List<string>();
+            for(int i = context.parameter().Length - 1; i >= 0; i--)
+            {
+                Parameter p = (Parameter)Visit(context.parameter(i));
+                if(p.type != null)
+                {
+                    lastType = p.type;
+                }
+                else
+                {
+                    p.type = lastType;
+                }
+
+                temp.Add($"{p.annotation} {p.type} {p.id}");
+            }
+            for(int i = temp.Count - 1; i >= 0; i--)
+            {
+                if(i == temp.Count - 1)
+                {
+                    obj += temp[i];
+                }
+                else
+                {
+                    obj += $", {temp[i]}";
+                }
+            }
+
+            obj += " )";
             return obj;
         }
 
