@@ -251,7 +251,7 @@ callFunc: id (templateCall)? call tuple; // 函数调用
 
 callPkg: '#' type call tuple (pkgAssign|arrayAssign|dictionaryAssign)?; // 新建包
 
-getType: '#' type;
+getType: '??' type;
 
 pkgAssign: BlockLeft (pkgAssignElement (',' pkgAssignElement)*)? BlockRight; // 简化赋值
 
@@ -302,7 +302,7 @@ pkgAnonymousAssignElement: name ':' expression Terminate; // 简化赋值元素
 
 function : Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 
-empty : '#' '(' type ')'; // 类型空初始化
+empty : (Package|Protocol|Function) type; // 类型空初始化
 
 plusMinus : add expression;
 
@@ -329,23 +329,23 @@ markText: '/' t=Text '/';
 
 // 类型
 type:
-typeProtocol
-| typeTuple
+typeTuple
 | typeArray
 | typeSharpArray
 | typeDictinary
 | typeBasic
 | typePackage
 | typeFunction
+//| typeProtocol
 ;
 
-typeProtocol : Protocol typePackage;
+//typeProtocol : typePackage;
 typeTuple : '(' type (',' type)+ ')';
 typeArray : '[' ']' type;
 typeSharpArray :'[' '#' ']' type;
 typeDictinary :  '[' type ']' type;
 typePackage : nameSpaceItem (templateCall)? ;
-typeFunction : Function typeFunctionParameterClause ArrowRight typeFunctionParameterClause;
+typeFunction : typeFunctionParameterClause ArrowRight typeFunctionParameterClause;
 
 // 函数类型参数
 typeFunctionParameterClause : '(' typeParameter? (',' typeParameter)*  ')';
