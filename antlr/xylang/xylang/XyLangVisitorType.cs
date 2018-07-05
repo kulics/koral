@@ -9,11 +9,11 @@ namespace xylang
 {
     partial class XyLangVisitor
     {
-        public override object VisitTypeProtocol([NotNull] XyParser.TypeProtocolContext context)
-        {
-            var obj = (string)Visit(context.typePackage());
-            return obj;
-        }
+        //public override object VisitTypeProtocol([NotNull] XyParser.TypeProtocolContext context)
+        //{
+        //    var obj = (string)Visit(context.typePackage());
+        //    return obj;
+        //}
 
         public override object VisitTypeTuple([NotNull] XyParser.TypeTupleContext context)
         {
