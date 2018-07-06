@@ -36,7 +36,7 @@ We can include this protocol in the package we need, using the auxiliary symbols
 
 E.g:
 ```
-Student : #()
+Student : #{}
 {
     ...
     ~& HomeWork
@@ -68,7 +68,7 @@ With the protocol included, we can use the student bundle that owns the protocol
 
 E.g:
 ```
-Peter : #Student.(){Count:999999};
+Peter : Student.{ ...Count=999999 };
 Console.WriteLine.(Peter.HomeWork.Count);
 // print 999999, too much
 Peter.HomeWork.Do.();
@@ -87,9 +87,9 @@ Now we can create a wide variety of students, all of whom follow the same protoc
 E.g:
 ```
 // create three different types of student packages
-StudentA : #ChineseStudent.();
-StudentB : #AmericaStudent.();
-StudentC : #JapanStudent.();
+StudentA : ChineseStudent.{};
+StudentB : AmericaStudent.{};
+StudentC : JapanStudent.{};
 // let them do homework separately
 StudentA.HomeWork.Do.();
 StudentB.HomeWork.Do.();
@@ -97,13 +97,11 @@ StudentC.HomeWork.Do.();
 ```
 More efficient approach is to write this function into the function, let the function to help us repeatedly call the function of the protocol.
 
-We can use the auxiliary notation `&` in the parameter type of a function to mark a parameter as a package that owns the protocol, so that the package's protocol can be passed in.
-
 E.g:
 ```
-DoHomeWork : $(student: &HomeWork)->()
+DoHomeWork : $(student: HomeWork)->()
 {
-    student.Do.(); // because the protocol has been marked, we can use the protocol method
+    student.Do.(); 
 };
 // Now we can make it easier for every student to do their homework
 DoHomeWork.(StudentA.HomeWork);
@@ -114,7 +112,7 @@ Of course, it is better to put these students in an array so that we can use loo
 
 E.g:
 ```
-Arr : #[]&HomeWork.();
+Arr : []HomeWork.{};
 Arr.Add.(StudentA.HomeWork);
 ... // stuffed many, many students
 @ Arr ~ Student
@@ -134,7 +132,7 @@ We can use `.?type` To judge the type of data, using `.!type` To convert the dat
 
 E.g:
 ```
-func : $(hw :&HomeWork)->()
+func : $(hw :HomeWork)->()
 {
     // judge type
     ? hw.?ChineseStudent 

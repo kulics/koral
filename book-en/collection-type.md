@@ -25,7 +25,7 @@ The array type is represented by `[]type`, where `[]` is a one-dimensional array
 
 For example we need a string array:
 ```
-arrString : #[]str.();
+arrString : []str.{};
 ```
 #### .NET Arrays
 If we need to use the `.Net` native array type, we can use `[#]type` to represent it.
@@ -84,7 +84,7 @@ Since arrays only support numeric indexes, you can omit the `[i32]` tag. We can 
 
 E.g:
 ```
-dicNumNum : #[i32]i32.();
+dicNumNum : [i32]i32.{};
 ```
 ### Visit
 Like an array, we can also use indexes to access data directly.
