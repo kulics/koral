@@ -18,9 +18,9 @@ This is a simplified implementation.
 
 E.g:
 ```
-Array<T> : #()
+Array<T> : #{}
 {
-    Items : #Storage.(T); // create storage
+    Items : Storage.{T}; // create storage
     Length : ^i32;
 
     Get : $(index: i32)->(item: T) // get a generic data
@@ -45,9 +45,9 @@ Note that because generics are typed at run time, the compiler can not infer gen
 
 E.g:
 ```
-Package<T> : #()
+Package<T> : #{}
 {
-    Item : #(T); / / initialized a null value of the generic data
+    Item : #T; / / initialized a null value of the generic data
 };
 ```
 So how do we use generics?
@@ -56,11 +56,11 @@ Very simple, and we can use the same statement, but called when the need to impo
 
 E.g:
 ```
-ArrNumber : #Array<integer>.(); // pass in the number type
+ArrNumber : Array<i32>.{}; // pass in the number type
 ```
 So we have an array of number types, is like this:
 ```
-ArrNumber : #[]integer.();
+ArrNumber : []i32.{};
 ```
 ## Supported Types
 We can use generics in packages, functions, and protocol types.
@@ -77,7 +77,7 @@ Protocol<T> : &
     Test<T> : $(in: T)->(){};
 };
 
-Implement : #()
+Implement : #{}
 {
     ~& Protocol<Implement>
     {

@@ -146,11 +146,11 @@ _ = topSell.(); // for _ , assignment and definition are equivalent
 ## Function In Parameter
 If we want part of the function defined by the external, and only perform the rest of the internal logic, such as some set traversal for a collection of functions, then we can use the function parameters to accomplish this goal.
 
-Function In Parameter no special definition of way, just replace the type of the function parameters, do not need to define the contents of the function.
+Function In Parameter no special definition of way, just replace the type of the function parameters, do not need to define the contents of the function, and do not need use `$`.
 
 E.g:
 ```
-each1To10 : $(func: $(item: i32)->())->()
+each1To10 : $(func: (item: i32)->())->()
 {
     @ [1~10] ~ i
     {
