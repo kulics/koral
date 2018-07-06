@@ -25,11 +25,11 @@ u64     // 64-bit unsigned  0 to 18,446,744,073,709,551,615
 ## Basic Type Conversion
 Since the default integer is `i32`, how do we use other types of integers?
 
-We can use type conversion to change the number to the type we need, just use the `!type()` syntax.
+We can use type conversion to change the number to the type we need, just use the `!.(data:type)` syntax.
 
 E.g:
 ```
-integer8 : !i8(16);
+integer8 : !.(16:i8);
 ```
 
 Note that, the basic type conversion is only valid for the base type.
