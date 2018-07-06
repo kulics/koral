@@ -57,7 +57,7 @@ double explicitDouble = 70;
 ```
 ### XyLang
 ```
-explicitDouble : !f64(70.0);
+explicitDouble : !.(70:f64);
 ```
 ## Basic Types
 ### Swift
@@ -111,7 +111,7 @@ int count = i + (int)f;
 ```
 f : 6.0;
 i : 94;
-count : i + !i32(f);
+count : i + !.(f:i32);
 ```
 ## Inclusive Range Operator
 ### Swift
