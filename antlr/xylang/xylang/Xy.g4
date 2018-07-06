@@ -253,7 +253,7 @@ callFunc: id (templateCall)? call tuple; // 函数调用
 
 callPkg: type call '{' expressionList? ( '...' (pkgAssign|arrayAssign|dictionaryAssign))? '}'; // 新建包
 
-getType: '??' type;
+getType: '?' call '(' type ')';
 
 pkgAssign: (pkgAssignElement (',' pkgAssignElement)*)? ; // 简化赋值
 
@@ -269,7 +269,7 @@ callAs: as type; // 类型转换
 
 callAwait: FlowLeft expression; // 异步调用
 
-basicConvert: Check typeBasic '(' expression ')'; // 基础数据转换
+basicConvert: Check call '(' expression ':' typeBasic ')'; // 基础数据转换
 
 array : '[' (expression (',' expression)*)? ']'; // 数组
 
