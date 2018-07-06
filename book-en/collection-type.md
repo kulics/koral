@@ -32,7 +32,7 @@ If we need to use the `.Net` native array type, we can use `[#]type` to represen
 
 E.g:
 ```
-arrInt : [#]i32.();
+arrInt : [#]i32.{};
 arrInt = [#][1,2,3,4,5];
 // corresponds to C#'s int[]
 ```
