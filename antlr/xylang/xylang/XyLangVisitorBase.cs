@@ -10,6 +10,11 @@ namespace xylang
     partial class XyLangVisitor : XyBaseVisitor<object>
     {
         const string Wrap = "\r\n";
+        const string Any = "object";
+        const string I32 = "int";
+        const string F64 = "double";
+        const string Bool = "bool";
+        const string Str = "string";
 
         public override object VisitProgram([NotNull] XyParser.ProgramContext context)
         {
@@ -69,12 +74,12 @@ namespace xylang
             var r = new Result();
             if(context.t.Type == XyParser.True)
             {
-                r.data = "bool";
+                r.data = Bool;
                 r.text = context.True().GetText();
             }
             else if(context.t.Type == XyParser.False)
             {
-                r.data = "bool";
+                r.data = Bool;
                 r.text = context.False().GetText();
             }
             return r;
@@ -93,7 +98,7 @@ namespace xylang
         {
             var r = new Result();
             var type = (string)Visit(context.type());
-            r.data = "bool";
+            r.data = Bool;
             r.text = " is " + type + ")";
             return r;
         }
