@@ -24,7 +24,7 @@ namespace xylang
             {
                 it.from = (Result)Visit(context.expression(0));
                 it.to = (Result)Visit(context.expression(1));
-                it.step = new Result { data = "int", text = "1" };
+                it.step = new Result { data = I32, text = "1" };
             }
             else
             {

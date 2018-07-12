@@ -177,7 +177,7 @@ namespace xylang
                     obj = "ushort";
                     break;
                 case XyParser.TypeI32:
-                    obj = "int";
+                    obj = I32;
                     break;
                 case XyParser.TypeU32:
                     obj = "uint";
@@ -192,19 +192,19 @@ namespace xylang
                     obj = "float";
                     break;
                 case XyParser.TypeF64:
-                    obj = "double";
+                    obj = F64;
                     break;
                 case XyParser.TypeStr:
-                    obj = "string";
+                    obj = Str;
                     break;
                 case XyParser.TypeBool:
-                    obj = "bool";
+                    obj = Bool;
                     break;
                 case XyParser.TypeAny:
-                    obj = "object";
+                    obj = Any;
                     break;
                 default:
-                    obj = "object";
+                    obj = Any;
                     break;
             }
             return obj;

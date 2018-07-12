@@ -80,34 +80,34 @@ namespace xylang
                 if(context.GetChild(1).GetType() == typeof(XyParser.JudgeContext))
                 {
                     // todo 如果左右不是bool类型值，报错
-                    r.data = "bool";
+                    r.data = Bool;
                 }
                 else if(context.GetChild(1).GetType() == typeof(XyParser.AddContext))
                 {
                     // todo 如果左右不是number或text类型值，报错
-                    if((string)e1.data == "string" || (string)e2.data == "string")
+                    if((string)e1.data == Str || (string)e2.data == Str)
                     {
-                        r.data = "string";
+                        r.data = Str;
                     }
-                    else if((string)e1.data == "int" && (string)e2.data == "int")
+                    else if((string)e1.data == I32 && (string)e2.data == I32)
                     {
-                        r.data = "int";
+                        r.data = I32;
                     }
                     else
                     {
-                        r.data = "double";
+                        r.data = F64;
                     }
                 }
                 else if(context.GetChild(1).GetType() == typeof(XyParser.MulContext))
                 {
                     // todo 如果左右不是number类型值，报错
-                    if((string)e1.data == "int" && (string)e2.data == "int")
+                    if((string)e1.data == I32 && (string)e2.data == I32)
                     {
-                        r.data = "int";
+                        r.data = I32;
                     }
                     else
                     {
-                        r.data = "double";
+                        r.data = I32;
                     }
                 }
                 r.text = e1.text + op + e2.text;
@@ -587,8 +587,8 @@ namespace xylang
 
         public override object VisitDictionary([NotNull] XyParser.DictionaryContext context)
         {
-            var key = "object";
-            var value = "object";
+            var key = Any;
+            var value = Any;
             var result = new Result();
             for(int i = 0; i < context.dictionaryElement().Length; i++)
             {
@@ -603,11 +603,11 @@ namespace xylang
                 {
                     if(key != r.key)
                     {
-                        key = "object";
+                        key = Any;
                     }
                     if(value != r.value)
                     {
-                        value = "object";
+                        value = Any;
                     }
                     result.text += "," + r.text;
                 }
@@ -641,37 +641,37 @@ namespace xylang
             var r = new Result();
             if(context.markText() != null)
             {
-                r.data = "string";
+                r.data = Str;
                 r.text = "$" + Visit(context.markText());
             }
             else if(context.t.Type == XyParser.Float)
             {
-                r.data = "double";
-                r.text = context.Float().GetText();
+                r.data = F64;
+                r.text = $"{context.Float().GetText()}";
             }
             else if(context.t.Type == XyParser.Integer)
             {
-                r.data = "int";
-                r.text = context.Integer().GetText();
+                r.data = I32;
+                r.text = $"{context.Integer().GetText()}";
             }
             else if(context.t.Type == XyParser.Text)
             {
-                r.data = "string";
+                r.data = Str;
                 r.text = context.Text().GetText();
             }
             else if(context.t.Type == XyParser.True)
             {
-                r.data = "bool";
-                r.text = context.True().GetText();
+                r.data = Bool;
+                r.text = $"{context.True().GetText()}";
             }
             else if(context.t.Type == XyParser.False)
             {
-                r.data = "bool";
-                r.text = context.False().GetText();
+                r.data = Bool;
+                r.text = $"{context.False().GetText()}";
             }
             else if(context.t.Type == XyParser.Nil)
             {
-                r.data = "object";
+                r.data = Any;
                 r.text = "null";
             }
             return r;
