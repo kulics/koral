@@ -41,7 +41,7 @@ functionMainStatement:Function BlockLeft (functionSupportStatement)* BlockRight 
 // 无构造包变量
 nspackageVariableStatement:(annotation)? expression Define expression Terminate;
 // 无构造包常量
-nspackageInvariableStatement:(annotation)? expression ':=' expression Terminate;
+nspackageInvariableStatement:(annotation)? expression ':==' expression Terminate;
 // 定义控制
 nspackageControlStatement: (annotation)? id Define Control type (nspackageControlSubStatement)+ Terminate;
 // 定义子方法
@@ -175,7 +175,7 @@ checkDeferStatement: CheckSub BlockLeft (functionSupportStatement)* BlockRight T
 // 检查
 checkStatement: Check BlockLeft (functionSupportStatement)* BlockRight checkErrorStatement+ Terminate;
 // 错误处理
-checkErrorStatement:Wave id (Define type)? BlockLeft (functionSupportStatement)* BlockRight;
+checkErrorStatement:Wave id (Declared type)? BlockLeft (functionSupportStatement)* BlockRight;
 // 报告错误
 reportStatement: CheckReport (expression)? Terminate;
 // 迭代器
@@ -392,7 +392,8 @@ Terminate : ';';
 BlockLeft : '{';
 BlockRight : '}';
 
-Define : ':';
+Define : ':=';
+Declared : ':' ;
 Assign: '=';
 
 Self : '..';
