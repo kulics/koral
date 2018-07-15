@@ -17,6 +17,23 @@ namespace xylang
             return obj;
         }
 
+        public override object VisitVariableDeclaredStatement([NotNull] XyParser.VariableDeclaredStatementContext context)
+        {
+            var obj = "";
+            var Type = (string)Visit(context.type());
+            var r1 = (Result)Visit(context.expression(0));
+            if (context.expression().Length == 2)
+            {
+                var r2 = (Result)Visit(context.expression(1));
+                obj = $"{Type} {r1.text} = {r2.text} {context.Terminate().GetText()} {Wrap}";
+            }
+            else
+            {
+                obj = $"{Type} {r1.text} {context.Terminate().GetText()} {Wrap}";
+            }
+            return obj;
+        }
+
         public override object VisitAssignStatement(XyParser.AssignStatementContext context)
         {
             var r1 = (Result)Visit(context.expression(0));

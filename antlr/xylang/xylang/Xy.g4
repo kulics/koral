@@ -142,6 +142,7 @@ functionSupportStatement:
 | reportStatement
 | functionStatement
 | variableStatement
+| variableDeclaredStatement
 | assignStatement
 | expressionStatement
 ;
@@ -183,6 +184,8 @@ iteratorStatement: '[' expression Wave expression Terminate expression ']' | '['
 
 // 定义变量
 variableStatement: expression Define expression Terminate;
+// 声明变量
+variableDeclaredStatement: expression Declared type (Assign expression)? Terminate;
 // 赋值
 assignStatement: expression assign expression Terminate;
 
