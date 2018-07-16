@@ -38,9 +38,9 @@ const int myConstant = 42;
 ```
 ### XyLang
 ```
-myVariable := 42;
+myVariable : 42;
 myVariable = 50;
-myConstant :== 42;
+myConstant := 42;
 ```
 ## Explicit Types
 ### Swift
@@ -57,7 +57,7 @@ double explicitDouble = 70;
 ```
 ### XyLang
 ```
-explicitDouble : f64 = 70;
+explicitDouble #f64 : 70;
 ```
 ## Basic Types
 ### Swift
@@ -111,7 +111,7 @@ int count = i + (int)f;
 ```
 f : 6.0;
 i : 94;
-count : i + !.(f:i32);
+count : i + !.(f#i32);
 ```
 ## Inclusive Range Operator
 ### Swift
@@ -181,7 +181,7 @@ shoppingList[1] = "bottle of water";
 ```
 ### XyLang
 ```
-shoppingList := ["catfish", "water",
+shoppingList :["catfish", "water",
     "tulips", "blue paint"];
 shoppingList.[1] = "bottle of water";
 ```
@@ -212,7 +212,7 @@ occupations["Jayne"] = "Public Relations";
 ```
 ### XyLang
 ```
-occupations := [
+occupations : [
     "Malcolm": "Captain",
     "Kaylee": "Mechanic"
 ];
@@ -236,8 +236,8 @@ var emptyDictionary = new Dictionary<string, float>();
 ```
 ### XyLang
 ```
-emptyArray := []str.{};
-emptyMap := [str]f32.{};
+emptyArray : []str.{};
+emptyMap : [str]f32.{};
 ```
 ## Functions
 ### Swift
@@ -264,7 +264,7 @@ greet("Bob", "Tuesday");
 ```
 ### XyLang
 ```
-greet := $(name, day: str)->(r:str) 
+greet : $(name, day #str)->(r #str) 
 {
     <- (/"Hello {name}, today is {day}."/);
 };
@@ -292,7 +292,7 @@ fun getGasPrices() = GasPrices(3.59, 3.69, 3.79)
 ```
 ### XyLang
 ```
-getGasPrices := $()->(a, b, c:f64) 
+getGasPrices : $()->(a, b, c #f64) 
 {
     <- (3.59, 3.69, 3.79);
 };
@@ -338,9 +338,9 @@ increment(7);
 ```
 ### XyLang
 ```
-makeIncrementer := $()->(fn:(in:i32)->(out:i32)) 
+makeIncrementer : $()->(fn $(in #i32)->(out #i32)) 
 {
-    addOne := $(number:i32)->(number:i32) 
+    addOne : $(number #i32)->(number #i32) 
     {
         <- (1 + number);
     };
@@ -380,10 +380,10 @@ class Shape
 ```
 ### XyLang
 ```
-Shape := #{}
+Shape : #{}
 {
-    numberOfSides := 0;
-    simpleDescription := $()->(s:str) 
+    numberOfSides : 0;
+    simpleDescription : $()->(s #str) 
     {
         <- (/"A shape with {numberOfSides} sides."/);
     };
@@ -410,9 +410,9 @@ var shapeDescription = shape.simpleDescription();
 ```
 ### XyLang
 ```
-shape := Shape.{};
+shape : Shape.{};
 shape.numberOfSides = 7;
-shapeDescription := shape.simpleDescription.();
+shapeDescription : shape.simpleDescription.();
 ```
 ## Subclass
 ### Swift
@@ -522,7 +522,7 @@ test.simpleDescription();
 ```
 ### XyLang
 ```
-NamedShape := #{name: str} {
+NamedShape : #{name #str} {
     numberOfSides : ^i32;
     name : ^str~get;
 
@@ -531,13 +531,13 @@ NamedShape := #{name: str} {
         ..name = name;
     };
 
-    simpleDescription := $()->(s:str) 
+    simpleDescription : $()->(s #str) 
     {
         <- (/"A shape with {numberOfSides} sides."/);
     };
 };
 
-Square := #{sideLength: f64, name: str}
+Square : #{sideLength #f64, name #str}
 {
     namedShape : ^NamedShape;
     sideLength : ^f64;
@@ -549,18 +549,18 @@ Square := #{sideLength: f64, name: str}
         ..numberOfSides = 4;
     };
 
-    area := $()->(f:f64) 
+    area : $()->(f #f64) 
     {
         <- (sideLength * sideLength);
     };
 
-    simpleDescription := $()->(s:str) 
+    simpleDescription : $()->(s #str) 
     {
         <- (/"A square with sides of length {sideLength}."/);
     };
 };
 
-test := Square.{5.2, "square"};
+test : Square.{5.2, "square"};
 test.area.();
 test.simpleDescription.();
 ```
@@ -610,8 +610,8 @@ foreach (var item in library)
 ```
 ### XyLang
 ```
-movieCount := 0;
-songCount := 0;
+movieCount : 0;
+songCount : 0;
 
 @ library ~ item 
 {
@@ -674,7 +674,7 @@ switch (nb)
 ```
 ### XyLang
 ```
-nb := 42;
+nb : 42;
 ? nb 
 ~ [0~7],8,9 { print.("single digit"); }
 ~ 10 { print.("double digits"); }
@@ -759,12 +759,12 @@ void f(Nameable x)
 ```
 ### XyLang
 ```
-Nameable := & 
+Nameable : & 
 {
-    name: $()->(s:str){};
+    name $()->(s #str);
 };
 
-f := $(x: Nameable)->() 
+f : $(x &Nameable)->() 
 {
     print.("Name is " + x.name.());
 };
@@ -817,11 +817,11 @@ class Dog: Nameable, Weight
 ```
 ### XyLang
 ```
-Dog := #{}
+Dog : #{}
 {
     ~& Nameable
     {
-        name := $()->(n:str)
+        name : $()->(n #str)
         {
             <- ("Dag");
         };
@@ -829,7 +829,7 @@ Dog := #{}
 
     ~& Weight
     {
-        getWeight := $()->(w:i32)
+        getWeight : $()->(w #i32)
         {
             <- (30);
         };
