@@ -22,14 +22,14 @@ Read detail from The [Book](./book-en/introduction.md).
 ## Quick Preview
 ```
 // namespace
-Main :
+Main
 ~System
 {
     // main function
     $  
     {
         // array
-        greetings : ["Hello", "Hola", "Bonjour",
+        greetings := ["Hello", "Hola", "Bonjour",
                     "Ciao", "こんにちは", "안녕하세요",
                     "Cześć", "Olá", "Здравствуйте",
                     "Chào bạn", "您好"];
