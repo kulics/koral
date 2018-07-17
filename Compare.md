@@ -111,7 +111,7 @@ int count = i + (int)f;
 ```
 f := 6.0;
 i := 94;
-count := i + !.(f#i32);
+count := i + !.(f: i32);
 ```
 ## Inclusive Range Operator
 ### Swift
@@ -150,7 +150,7 @@ for (int index = 1; index <= 5; index++)
 ```
 ### XyLang
 ```
-@ [ 1~5 ] ~ index
+@ [ 1 ~ 5 ] ~ index
 {
     print.(/"{index} times 5 is {index * 5}"/);
 };
@@ -522,7 +522,8 @@ test.simpleDescription();
 ```
 ### XyLang
 ```
-NamedShape #{name #str} {
+NamedShape #{name #str} 
+{
     numberOfSides ^i32;
     name ^str~get;
 
@@ -761,7 +762,7 @@ void f(Nameable x)
 ```
 Nameable & 
 {
-    name $()->(s #str);
+    name $()->(s: str){};
 };
 
 f $(x: Nameable)->() 
@@ -819,7 +820,7 @@ class Dog: Nameable, Weight
 ```
 Dog #{}
 {
-    ~& Nameable
+    & Nameable
     {
         name $()->(n: str)
         {
@@ -827,7 +828,7 @@ Dog #{}
         };
     };
 
-    ~& Weight
+    & Weight
     {
         getWeight $()->(w: i32)
         {
