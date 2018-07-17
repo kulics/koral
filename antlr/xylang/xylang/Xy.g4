@@ -5,7 +5,7 @@ program : statement+;
 statement :exportStatement;		  
 
 // 导出命名空间
-exportStatement: nameSpace Define (importStatement)? BlockLeft (exportSupportStatement)* BlockRight Terminate;
+exportStatement: nameSpace (importStatement)? BlockLeft (exportSupportStatement)* BlockRight Terminate;
 // 导出命名空间支持的语句
 exportSupportStatement:
 functionMainStatement
@@ -21,12 +21,12 @@ nameSpaceStatement: Wave (annotation)? (callEllipsis)? (nameSpace)? (call id)?;
 // 省略调用名称
 callEllipsis: '..';
 // 枚举
-enumStatement: (annotation)? id Define Package '[' enumSupportStatement (',' enumSupportStatement)* ']' Terminate;
+enumStatement: (annotation)? id Package '[' enumSupportStatement (',' enumSupportStatement)* ']' Terminate;
 
 enumSupportStatement: id ('=' (add)? Integer)?;
 
 // 无构造包
-nspackageStatement: (annotation)? id (templateDefine)? Define Package BlockLeft (nspackageSupportStatement)* BlockRight Terminate;
+nspackageStatement: (annotation)? id (templateDefine)? Package BlockLeft (nspackageSupportStatement)* BlockRight Terminate;
 
 nspackageSupportStatement:
 nspackageFunctionStatement
@@ -43,15 +43,15 @@ nspackageVariableStatement:(annotation)? expression Define expression Terminate;
 // 无构造包常量
 nspackageInvariableStatement:(annotation)? expression ':==' expression Terminate;
 // 定义控制
-nspackageControlStatement: (annotation)? id Define Control type (nspackageControlSubStatement)+ Terminate;
+nspackageControlStatement: (annotation)? id Control type (nspackageControlSubStatement)+ Terminate;
 // 定义子方法
 nspackageControlSubStatement: Wave id BlockLeft (functionSupportStatement)* BlockRight;
 // 定义空控制
-nspackageControlEmptyStatement:(annotation)? id Define Control type Terminate;
+nspackageControlEmptyStatement:(annotation)? id Control type Terminate;
 // 无构造包函数
-nspackageFunctionStatement:(annotation)? id (templateDefine)? Define Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+nspackageFunctionStatement:(annotation)? id (templateDefine)? Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义包
-packageStatement:(annotation)? id (templateDefine)? Define Package parameterClausePackage (extend)? BlockLeft (packageSupportStatement)* BlockRight Terminate;
+packageStatement:(annotation)? id (templateDefine)? Package parameterClausePackage (extend)? BlockLeft (packageSupportStatement)* BlockRight Terminate;
 // 继承
 extend: '~' type '{' expressionList? '}';
 // 入参
@@ -70,20 +70,20 @@ packageInitStatement
 // 包构造方法
 packageInitStatement:(annotation)? Package BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 函数
-packageFunctionStatement:(annotation)? id (templateDefine)? Define Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+packageFunctionStatement:(annotation)? id (templateDefine)? Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 重载函数
-packageOverrideFunctionStatement:(annotation)? Self id Define Function parameterClauseIn ArrowRight parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+packageOverrideFunctionStatement:(annotation)? Self id Function parameterClauseIn ArrowRight parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义变量
 packageVariableStatement:(annotation)? expression Define expression Terminate;
 // 定义控制
-packageControlStatement: (annotation)? id Define Control type (packageControlSubStatement)+ Terminate;
+packageControlStatement: (annotation)? id Control type (packageControlSubStatement)+ Terminate;
 // 定义子方法
 packageControlSubStatement: Wave id BlockLeft (functionSupportStatement)* BlockRight;
 // 定义空控制
-packageControlEmptyStatement:(annotation)? id Define Control type Terminate;
+packageControlEmptyStatement:(annotation)? id Control type Terminate;
 
 // 协议
-protocolStatement:(annotation)? id (templateDefine)? Define Protocol BlockLeft (protocolSupportStatement)* BlockRight Terminate;
+protocolStatement:(annotation)? id (templateDefine)? Protocol BlockLeft (protocolSupportStatement)* BlockRight Terminate;
 // 协议支持的语句
 protocolSupportStatement:
 protocolStatement
@@ -92,13 +92,13 @@ protocolStatement
 |protocolControlEmptyStatement
 ;
 // 定义控制
-protocolControlStatement:(annotation)? id Define Control type (protocolControlSubStatement)+ Terminate;
+protocolControlStatement:(annotation)? id Control type (protocolControlSubStatement)+ Terminate;
 // 定义子方法
 protocolControlSubStatement: Wave id;
 // 定义空控制
-protocolControlEmptyStatement: (annotation)? id Define Control type Terminate;
+protocolControlEmptyStatement: (annotation)? id Control type Terminate;
 // 函数
-protocolFunctionStatement:(annotation)? id (templateDefine)? Define Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+protocolFunctionStatement:(annotation)? id (templateDefine)? Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 协议实现支持的语句
 protocolImplementSupportStatement:
 implementFunctionStatement
@@ -109,15 +109,15 @@ implementFunctionStatement
 // 实现协议
 protocolImplementStatement:ProtocolSub nameSpaceItem (templateCall)? BlockLeft (protocolImplementSupportStatement)* BlockRight Terminate;
 // 控制实现
-implementControlStatement:(annotation)? id Define Control type (packageControlSubStatement)+ Terminate;
+implementControlStatement:(annotation)? id Control type (packageControlSubStatement)+ Terminate;
 // 空控制实现
-implementControlEmptyStatement: (annotation)? id Define Control type Terminate;
+implementControlEmptyStatement: (annotation)? id Control type Terminate;
 // 函数实现
-implementFunctionStatement:(annotation)? id (templateDefine)? Define Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+implementFunctionStatement:(annotation)? id (templateDefine)? Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 事件实现
-implementEventStatement: id Define '#!' nameSpaceItem Terminate;
+implementEventStatement: id '#!' nameSpaceItem Terminate;
 // 函数
-functionStatement:id (templateDefine)? Define Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+functionStatement:id (templateDefine)? Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 返回
 returnStatement: ArrowLeft tuple Terminate;
 // 入参
@@ -176,7 +176,7 @@ checkDeferStatement: CheckSub BlockLeft (functionSupportStatement)* BlockRight T
 // 检查
 checkStatement: Check BlockLeft (functionSupportStatement)* BlockRight checkErrorStatement+ Terminate;
 // 错误处理
-checkErrorStatement:Wave id (type)? BlockLeft (functionSupportStatement)* BlockRight;
+checkErrorStatement:Wave id (Declared type)? BlockLeft (functionSupportStatement)* BlockRight;
 // 报告错误
 reportStatement: CheckReport (expression)? Terminate;
 // 迭代器
@@ -185,7 +185,7 @@ iteratorStatement: '[' expression Wave expression Terminate expression ']' | '['
 // 定义变量
 variableStatement: expression Define expression Terminate;
 // 声明变量
-variableDeclaredStatement: expression type (Define expression)? Terminate;
+variableDeclaredStatement: expression Declared type (Assign expression)? Terminate;
 // 赋值
 assignStatement: expression assign expression Terminate;
 
@@ -303,7 +303,7 @@ pkgAnonymous: Package pkgAnonymousAssign; // 匿名包
 
 pkgAnonymousAssign: BlockLeft (pkgAnonymousAssignElement)* BlockRight; // 简化赋值
 
-pkgAnonymousAssignElement: name ':' expression Terminate; // 简化赋值元素
+pkgAnonymousAssignElement: name ':=' expression Terminate; // 简化赋值元素
 
 function : Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 
@@ -395,7 +395,8 @@ Terminate : ';';
 BlockLeft : '{';
 BlockRight : '}';
 
-Define : ':';
+Define : ':=';
+Declared : ':';
 Assign: '=';
 
 Self : '..';
