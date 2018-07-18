@@ -297,7 +297,9 @@ templateCall: '<' type (',' type)* '>';
 lambda : Function lambdaIn t=(ArrowLeft|FlowLeft) lambdaOut;
 
 lambdaIn : (id (',' id)* )? ;
-lambdaOut : expressionList ;
+lambdaOut : 
+expressionList 
+| BlockLeft (functionSupportStatement)* BlockRight;
 
 pkgAnonymous: Package pkgAnonymousAssign; // 匿名包
 

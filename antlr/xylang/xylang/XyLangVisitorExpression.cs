@@ -750,7 +750,15 @@ namespace xylang
         public override object VisitLambdaOut([NotNull] XyParser.LambdaOutContext context)
         {
             var obj = "";
-            obj += ((Result)Visit(context.expressionList())).text;
+            if (context.expressionList() != null)
+            {
+                obj += ((Result)Visit(context.expressionList())).text;
+            }
+            else
+            {
+                obj += "{" + ProcessFunctionSupport(context.functionSupportStatement()) + "}";
+            }
+
             return obj;
         }
 
