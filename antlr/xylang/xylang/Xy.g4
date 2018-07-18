@@ -107,7 +107,7 @@ implementFunctionStatement
 |implementEventStatement
 ;
 // 实现协议
-protocolImplementStatement:ProtocolSub nameSpaceItem (templateCall)? BlockLeft (protocolImplementSupportStatement)* BlockRight Terminate;
+protocolImplementStatement:Protocol nameSpaceItem (templateCall)? BlockLeft (protocolImplementSupportStatement)* BlockRight Terminate;
 // 控制实现
 implementControlStatement:(annotation)? id Control type (packageControlSubStatement)+ Terminate;
 // 空控制实现
