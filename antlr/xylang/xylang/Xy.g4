@@ -280,7 +280,7 @@ sharpArray : '[' '#' ']' '[' (expression (',' expression)*)? ']'; // c#数组
 
 dictionary :  '[' (dictionaryElement (',' dictionaryElement)*)?  ']'; // 字典
 
-dictionaryElement: expression ':' expression; // 字典元素
+dictionaryElement: expression '->' expression; // 字典元素
 
 callElement : '[' expression ']';
 

@@ -213,8 +213,8 @@ occupations["Jayne"] = "Public Relations";
 ### XyLang
 ```
 occupations := [
-    "Malcolm": "Captain",
-    "Kaylee": "Mechanic"
+    "Malcolm"->"Captain",
+    "Kaylee"->"Mechanic"
 ];
 occupations.["Jayne"] = "Public Relations";
 ```
