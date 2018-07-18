@@ -189,6 +189,18 @@ findAll.( $it <- it>7 );
 order.( $it <- it.time );
 ```
 Very simple, and the difference between the expression of the function type is that the input only need to declare the identifier, and the parameter is used to include one expression.
+
+If an expression is not enough, you can also return a function.
+
+E.g:
+```
+Each.( $it <-
+{
+    Console.WriteLine.(1);
+    Console.WriteLine.(2);
+    Console.WriteLine.(3);
+});
+```
 ## Lambda Function
 Unlike the above simplified method, we can also write a complete function directly, just as we define the function.
 
