@@ -9,7 +9,7 @@ Our arrays and dictionaries are actually generics.
 
 Again, we need to import generic namespaces to use generics.
 ```
-System:Collections:Generic
+System\Collections\Generic
 ```
 ## Statement and Use
 Let's see how we can use generics to implement an array. We just use the `<>` sign after the identifier to enclose the generation of the type.

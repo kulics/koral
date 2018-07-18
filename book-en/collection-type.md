@@ -70,7 +70,7 @@ Similar to arrays, dictionaries also use the `[]` definition, except that the di
 
 E.g:
 ```
-dic : ["a"->1, "b"->2, "c"->3];
+dic := ["a"->1, "b"->2, "c"->3];
 ```
 This will create a `str->i32` type dictionary containing` a, b, c` entries.
 
