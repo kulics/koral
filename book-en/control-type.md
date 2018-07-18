@@ -8,9 +8,9 @@ If we don't need to define a specific control method for a while, we only need t
 
 E.g:
 ```
-Number : ^i32;
+Number ^i32;
 ```
-This defines a control data with no extra methods. It is similar to `number : 0;` except that it has built-in default control methods and is initialized to null.
+This defines a control data with no extra methods. It is similar to `number: i32;` except that it has built-in default control methods and is initialized to null.
 
 We can use it directly like normal data.
 
@@ -19,7 +19,7 @@ If we want to set a fetch operation, we can add extra code block definitions aft
 
 E.g:
 ```
-Number : ^i32
+Number ^i32
 ~get // means get, equivalent to getter in other languages
 {
     <- (7); // only returns 7
@@ -33,7 +33,7 @@ With the above example, we naturally can think of how to deal with set operation
 
 E.g:
 ```
-Number : ^i32
+Number ^i32
 ...
 ~set // means set, equivalent to setter in other languages
 {
@@ -45,9 +45,9 @@ So we need to use another type of data to use the control type.
 
 E.g:
 ```
-_number : 0;
+_number := 0;
 
-Number : ^i32
+Number ^i32
 ~set
 {
     _number = value; // value represents the value of the input
@@ -58,9 +58,9 @@ Note that this control data has only one set method, then it only supports set o
 
 A complete example of reading and writing is as follows:
 ```
-_number : 0;
+_number := 0;
 
-Number : ^i32
+Number ^i32
 ~get
 {
     <- (_number);
