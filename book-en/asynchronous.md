@@ -3,7 +3,7 @@ Thread is defined as the execution path of the program. Each thread defines a un
 
 Because computer processors have computational bottlenecks, we can not get everything going in a single-line-by-line fashion, and we often need to use asynchronous parallelism to solve computational problems in order to increase processing capacity.
 
-.Net platform has its own thread library `System:Threading`, more about the use of the thread can query the relevant interface.
+.Net platform has its own thread library `System\Threading`, more about the use of the thread can query the relevant interface.
 
 Here we talk about how to deal with the thread more easily, that is, asynchronous processing.
 
@@ -20,7 +20,7 @@ That's right, it's really use `~>` on it.
 
 E.g:
 ```
-Async : $()~>(out: i32)
+Async $()~>(out: i32)
 {
     <- (12);
 };
@@ -31,7 +31,7 @@ Normal direct call will only get a `Task` data.
 
 E.g:
 ```
-result : Async.(); // result is a Task data
+result := Async.(); // result is a Task data
 ```
 Let's see how to make it asynchronously waiting for execution.
 ## Asynchronous Wait
@@ -39,7 +39,7 @@ As with the declaration, we only need to use `<~` to declare the wait asynchrono
 
 E.g:
 ```
-result : <~ Async.();
+result := <~ Async.();
 ...
 ```
 After declare, the program execution here will temporarily stop the back of the function, until the async function is completed, the `out` value assigned to` result`, and then continue to execute.
@@ -49,13 +49,13 @@ Asynchronous wait can only be used in asynchronous declared functions.
 E.g:
 ```
 // correct
-Async : $()~>(out: i32)
+Async $()~>(out: i32)
 {
     <~ Task.Delay.(5000); // wait for a while
     <- (12);
 };
 // wrong
-Async : $()->(out: i32)
+Async $()->(out: i32)
 {
     <~ Task.Delay.(5000); // can not be declared
     <- (12);
@@ -68,14 +68,14 @@ We can choose to wait for no data, or we can choose not to wait for data.
 
 E.g:
 ```
-Async : $()~>()
+Async $()~>()
 {
     <~ Task.Delay.(5000); // wait for a while
 };
 
 <~ Async.(); // correct
 
-task : Async.(); // correct, got the Task
+task := Async.(); // correct, got the Task
 ```
 ## Lambda
 For lambda, we can also use asynchronous, just use `<~`.

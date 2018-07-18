@@ -10,11 +10,11 @@ A statement must be terminated by a distinct `;` and often `{}` is used to wrap 
 ## Export Namespace
 All content in this language can only be defined in the namespace so that content can be efficiently divided into distinct blocks for management. You can define it freely in a separate namespace without undue restrictions on naming.
 
-We can use the `:` statement to define a region's namespace.
+We can use the `{}` statement to define a region's namespace.
 
 E.g:
 ```
-Demo :
+Demo
 {
     ...
 };
@@ -29,7 +29,7 @@ We can use the `~` statement to import other namespaces, libraries, frameworks i
 
 E.g:
 ```
-Demo :
+Demo
 ~System
 ~System\Collections\Generic
 {
@@ -43,7 +43,7 @@ We need to define a main entry to let the program know where to start. The main 
 
 E.g:
 ```
-Demo :
+Demo
 ~System
 ~System\Collections\Generic
 {
@@ -84,13 +84,13 @@ comment * /
 ```
 Comment do not belong to the statement, so do not need to end with `;`, comment is only used to provide additional information to the user, and will not be really compiled into the executable program.
 ## Definition
-We can bind the type or data to the specified name using the `:` statement.
+We can create new variable using the `:type` statement.
 
 E.g:
 ```
-a : 1;
+a : i32;
 ```
-This creates an identifier for the name on the left and assigns the data on the right to it. In most cases, we do not need to explicitly specify the type of data, and the compiler automatically deduces the type for the data.
+This will create an identifier for the name on the left and define it as the type on the right, in which case the identifier is a null value.
 
 Once an identifier is created, its data type will not be changed in the valid area.
 
@@ -102,22 +102,32 @@ E.g:
 a = 2;
 ```
 But the definition is not the same, the left side of the assignment can only be an identifier that has been defined, otherwise the assignment statement does not hold.
+## Automatic derivation
+In most cases, you can use the simpler automatic derivation syntax `:=`, we don't need to explicitly specify the type of data, the compiler will automatically infer the type for the data.
+
+E.g:
+```
+b := 10;
+```
+
+This defines the new variable `b`, which is equal to `10` and is automatically derived as an `i32` type.
+
 ## Variable data
 We can define variable data very easily, and types that are not marked with special symbols are variable data.
 
 E.g:
 ```
-i : 1; 
+i := 1; 
 ```
 
 It should be noted that variable data cannot be called externally and can only be used within a defined range. Can be considered private.
 
 ## Invariable data
-We can also define invariable data, just define it with `:=`.
+We can also define invariable data, just define it with `:==`.
 
 E.g:
 ```
-j := 2; 
+j :== 2; 
 ```
 
 Note that invariable data can only be defined within the package without initial.
@@ -142,10 +152,10 @@ However, in practical projects, the use of partition will effectively improve th
 
 E.g:
 ```
-a.b.(x,y).c.(fn:()->(x:i32){<-(2+1);}).d=1+3*5/4;
+a.b.(x,y).c.(fn:$()->(x:i32){<-(2+1);}).d=1+3*5/4;
 
 a.b.(x, y)
-.c.(fn: ()->(x: i32)
+.c.(fn: $()->(x: i32)
 {
     <- (2 + 1);
 }).d = 1 + 3 * 5 / 4;

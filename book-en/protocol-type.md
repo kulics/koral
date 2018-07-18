@@ -10,7 +10,7 @@ We only need to use the symbol `&` to define a protocol.
 
 E.g:
 ```
-Protocol : &{};
+Protocol &{};
 ```
 This is an empty protocol.
 
@@ -18,10 +18,10 @@ Next, let's design a difficult task that students need to accomplish ... homewor
 
 E.g:
 ```
-HomeWork : &
+HomeWork &
 {
-    Count : ^i32;
-    Do : $()->(){};
+    Count ^i32;
+    Do $()->(){};
 };
 ```
 The protocol for this job has two properties, one is the number of homework and the other is the function to do homework.
@@ -32,18 +32,18 @@ Unlike a package, the definition of the protocol properties do not need specific
 
 Next, let's have the students implement the protocol.
 ## Contains the protocol
-We can include this protocol in the package we need, using the auxiliary symbols `~&` and the protocol name.
+We can include this protocol in the package we need, using the symbols `&` and the protocol name.
 
 E.g:
 ```
-Student : #{}
+Student #{}
 {
     ...
-    ~& HomeWork
+    & HomeWork
     {
-        Count : ^i32; 
+        Count ^i32; 
 
-        Do : $()->()
+        Do $()->()
         {
             SpendTime(1); // spent an hour
             ..HomeWork.Count -= 1; // completed one
@@ -68,7 +68,7 @@ With the protocol included, we can use the student bundle that owns the protocol
 
 E.g:
 ```
-Peter : Student.{ ...Count=999999 };
+Peter := Student.{ ...Count=999999 };
 Console.WriteLine.(Peter.HomeWork.Count);
 // print 999999, too much
 Peter.HomeWork.Do.();
@@ -87,9 +87,9 @@ Now we can create a wide variety of students, all of whom follow the same protoc
 E.g:
 ```
 // create three different types of student packages
-StudentA : ChineseStudent.{};
-StudentB : AmericaStudent.{};
-StudentC : JapanStudent.{};
+StudentA := ChineseStudent.{};
+StudentB := AmericaStudent.{};
+StudentC := JapanStudent.{};
 // let them do homework separately
 StudentA.HomeWork.Do.();
 StudentB.HomeWork.Do.();
@@ -99,7 +99,7 @@ More efficient approach is to write this function into the function, let the fun
 
 E.g:
 ```
-DoHomeWork : $(student: HomeWork)->()
+DoHomeWork $(student: HomeWork)->()
 {
     student.Do.(); 
 };
@@ -112,7 +112,7 @@ Of course, it is better to put these students in an array so that we can use loo
 
 E.g:
 ```
-Arr : []HomeWork.{};
+Arr := []HomeWork.{};
 Arr.Add.(StudentA.HomeWork);
 ... // stuffed many, many students
 @ Arr ~ Student
@@ -132,13 +132,13 @@ We can use `.?type` To judge the type of data, using `.!type` To convert the dat
 
 E.g:
 ```
-func : $(hw :HomeWork)->()
+func $(hw :HomeWork)->()
 {
     // judge type
     ? hw.?ChineseStudent 
     {
         // convert to chinese student data
-        cs : hw.!ChineseStudent;
+        cs := hw.!ChineseStudent;
     };
 };
 ```

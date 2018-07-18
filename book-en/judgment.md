@@ -15,7 +15,7 @@ When the judgment value is only `bool`, the statement is executed only if it is 
 
 E.g:
 ```
-b : false;
+b := false;
 ? b
 {
     ... // since b is false, it will never enter this branch
@@ -33,7 +33,7 @@ This is a useful rule, and we can make a continuous judgment like this.
 
 E.g:
 ```
-i : 3;
+i := 3;
 ? i == 0
 {
     ...

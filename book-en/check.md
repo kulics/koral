@@ -12,7 +12,7 @@ We can declare an exception data using `!~` Anywhere in the function.
 
 E.g:
 ```
-ReadFile : $(name: str)->()
+ReadFile $(name: str)->()
 {
     ? name.Length == 0
     {
@@ -68,9 +68,9 @@ Quite simply, using `~!` can declare a statement that checks the delay.
 
 E.g:
 ```
-Func : $()->()
+Func $()->()
 {
-    File : ReadFile.("./somecode.xy");
+    File := ReadFile.("./somecode.xy");
     ~!
     {
         file.Release.();
@@ -111,7 +111,7 @@ The effective scope of the check delay is only the current one-level statement b
 
 E.g:
 ```
-Func : $()->()
+Func $()->()
 {
     ...
     @ [0~5] ~ index

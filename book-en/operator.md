@@ -8,9 +8,9 @@ Arithmetic operators are mainly used for numerical operations on data types, mos
 
 E.g:
 ```
-a : 4;
-b : 2;
-c : a + b; // + add
+a := 4;
+b := 2;
+c := a + b; // + add
 c = a - b; // - subtract
 c = a * b; // * multiply
 c = a / b; // / divide
@@ -20,18 +20,18 @@ In addition to numbers, there are other types that support arithmetic operations
 
 E.g:
 ```
-a : "hello";
-b : "world";
-c : a + " " + b; // c is "hello world"
+a := "hello";
+b := "world";
+c := a + " " + b; // c is "hello world"
 ```
 ## Judgment Operator
 Judgment operator is mainly used in the judgment statement, used to calculate the relationship between the two data, the result is expected to be true, not expected to be false.
 
 E.g:
 ```
-a : 4;
-b : 2;
-c : a == b;  // == equal to
+a := 4;
+b := 2;
+c := a == b;  // == equal to
 c = a ~= b;  // ~= not equal
 c = a > b;   // > greater than
 c = a >= b;  // >= greater than or equal
@@ -43,9 +43,9 @@ Logical operators are also used primarily in judgment statements for logic opera
 
 E.g:
 ```
-a : true;
-b : false;
-c : a && b;  // && and, both true at the same time
+a := true;
+b := false;
+c := a && b;  // && and, both true at the same time
 c = a || b;  // || or, one of them is true
 c = ~~ a;    // ~~ not, boolean negation
 ```
@@ -54,7 +54,7 @@ Assignment operator is mainly used to assign the right data to the left identifi
 
 E.g:
 ```
-a : 0;
+a := 0;
 a = 1;  // = the simplest assignment
 a += 1; // += add first and then assign
 a -= 1; // -= subtract first and then assign
@@ -71,8 +71,8 @@ Proposal to use more brackets to express our operation, which is very helpful fo
 
 E.g:
 ```
-a : 1+9%5*5-8/9==5;
-b : (1 + (9 % 5 * 5) - (8 / 9)) == 5; 
+a := 1+9%5*5-8/9==5;
+b := (1 + (9 % 5 * 5) - (8 / 9)) == 5; 
 ```
 Obviously……
 

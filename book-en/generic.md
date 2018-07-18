@@ -18,17 +18,17 @@ This is a simplified implementation.
 
 E.g:
 ```
-Array<T> : #{}
+Array<T> #{}
 {
-    Items : Storage.{T}; // create storage
-    Length : ^i32;
+    Items := Storage.{T}; // create storage
+    Length ^i32;
 
-    Get : $(index: i32)->(item: T) // get a generic data
+    Get $(index: i32)->(item: T) // get a generic data
     {
         <- (Items.Get.(index));
     };
 
-    Add : $(item: T)->() // add a generic data into the array
+    Add $(item: T)->() // add a generic data into the array
     {
         Items.Insert.(Length, item);
         Length += 1;
@@ -45,9 +45,9 @@ Note that because generics are typed at run time, the compiler can not infer gen
 
 E.g:
 ```
-Package<T> : #{}
+Package<T> #{}
 {
-    Item : #T; / / initialized a null value of the generic data
+    Item := nil.(T); / / initialized a null value of the generic data
 };
 ```
 So how do we use generics?
@@ -56,32 +56,32 @@ Very simple, and we can use the same statement, but called when the need to impo
 
 E.g:
 ```
-ArrNumber : Array<i32>.{}; // pass in the number type
+ArrNumber := Array<i32>.{}; // pass in the number type
 ```
 So we have an array of number types, is like this:
 ```
-ArrNumber : []i32.{};
+ArrNumber := []i32.{};
 ```
 ## Supported Types
 We can use generics in packages, functions, and protocol types.
 
 E.g:
 ```
-Func<T> : $(data: T)->(data: T)
+Func<T> $(data: T)->(data: T)
 {
     <- (data);
 };
 
-Protocol<T> : &
+Protocol<T> &
 {
-    Test<T> : $(in: T)->(){};
+    Test<T> $(in: T)->(){};
 };
 
-Implement : #{}
+Implement #{}
 {
-    ~& Protocol<Implement>
+    & Protocol<Implement>
     {
-        Test<Implement> : $(in: Implement)->(){};
+        Test<Implement> $(in: Implement)->(){};
     };
 };
 ```

@@ -5,15 +5,15 @@ We only need to wrap the identifier with a `#` and a set.
 
 E.g:
 ```
-Color: #[Red, Green, Blue];
+Color #[Red, Green, Blue];
 ```
-The enumeration assigns values to the identifiers in order, and finally gets a collection of `Red:0, Green:1, Blue:2`.
+The enumeration assigns values to the identifiers in order, and finally gets a collection of `Red->0, Green->1, Blue->2`.
 
 In this way, we don't need to care about their values when we use them, and we can mark the business we need to handle.
 
 E.g:
 ```
-c : randomColor.(); // Get a random color
+c := randomColor.(); // Get a random color
 c ~ Color.Red
 {
      ...
@@ -34,7 +34,7 @@ If necessary, we can also assign a value to a single identifier. If not specifie
 
 E.g:
 ```
-Number: #
+Number #
 [
     a = 1,    // 1
     b,        // 2

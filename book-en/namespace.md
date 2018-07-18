@@ -8,11 +8,11 @@ Exported names can be nested in a loop so that functions can be split as effecti
 
 E.g:
 ```
-name\space :
+name\space
 {
-    space : #
+    space #
     {
-        GetSomething : $()->(content:str)
+        GetSomething $()->(content:str)
         {
             <- ("something");
         };
@@ -24,7 +24,7 @@ We can use other namespace contents through the import function. The namespace c
 
 E.g:
 ```
-import :
+import
 ~name\space
 {
     $
@@ -39,7 +39,7 @@ If we don't want to use no construct package names every time we call content, w
 
 E.g:
 ```
-import :
+import
 ~..name\space.space
 {
     $
@@ -55,7 +55,7 @@ We can use the namespace directly to call function without importing it.
 
 E.g:
 ```
-demo :
+demo
 {
     $
     {

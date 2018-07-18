@@ -9,7 +9,7 @@ We can use the `#{}` symbol to define a package that has nothing.
 
 E.g:
 ```
-Package : #{}
+Package #{}
 {
 };
 ```
@@ -18,12 +18,12 @@ We can define these data in the same way we define normal identifiers.
 
 E.g:
 ```
-Student : #{}
+Student #{}
 {
-    Name : ^str;
-    Number : ^str;
-    Class : ^i32;
-    Grade : ^i32;
+    Name ^str;
+    Number ^str;
+    Class ^i32;
+    Grade ^i32;
 };
 ```
 So we get a student bag with these data attributes. This student bag now becomes a usable type like `i32, str, bool`.
@@ -37,7 +37,7 @@ So how do we create a new package? As always, all of our types can be created us
 
 E.g:
 ```
-Peter : Student.{};
+Peter := Student.{};
 ```
 This create a `Peter` identifier. All the properties of this student are initialized to `"", "", 0,0` as set in the definition.
 
@@ -68,7 +68,7 @@ Just add `...` to the creation grammar to use the `key=value` method to quickly 
 
 E.g:
 ```
-Peter : Student.{
+Peter := Student.{
     ...Name="Peter", Number="060233",
     Class=2, Grade=6
 };
@@ -80,8 +80,8 @@ Similarly, the way the collection is created is actually a simplified creation, 
 
 E.g:
 ```
-Array : []i32.{ ...1, 2, 3, 4, 5 };
-Dictionary : [str]i32.{ ..."1":1, "2":2, "3":3 };
+Array := []i32.{ ...1, 2, 3, 4, 5 };
+Dictionary := [str]i32.{ ..."1"->1, "2"->2, "3"->3 };
 ```
 ## Anonymous Package
 If we only want to wrap some data directly, instead of defining the package first and then using it, is it like an anonymous function?
@@ -90,12 +90,12 @@ Of course, we can use `#` directly.
 
 E.g:
 ```
-Peter : #
+Peter := #
 {
-    Name:"Peter";
-    Number:"060233";
-    Class:2;
-    Grade:6;
+    Name := "Peter";
+    Number := "060233";
+    Class := 2;
+    Grade := 6;
 };
 ```
 
@@ -109,10 +109,10 @@ We can define private properties to store properties that we do not want to be a
 
 E.g:
 ```
-Student : #{}
+Student #{}
 {
     ...
-    _GirlFirend : ^str; // The identifier beginning with this '_' is private
+    _GirlFirend ^str; // The identifier beginning with this '_' is private
 };
 ```
 That's right, if you remember the definition of identifiers, this is how private identifiers are defined, and private identifiers can not be accessed by outsiders.
@@ -126,10 +126,10 @@ We can use the definition method learned in the function section directly define
 
 E.g:
 ```
-Student : #{}
+Student #{}
 {
     ...
-    GetGirlFirend : $()->(name: str)
+    GetGirlFirend $()->(name: str)
     {
         <- (.._GirlFirend);
     };
@@ -161,7 +161,7 @@ Add parameters in the definition, and write the definition of the constructor, w
 
 E.g:
 ```
-Student : #{name: str, number: str}
+Student #{name: str, number: str}
 {
     ...
 
@@ -179,7 +179,7 @@ This gives us a package with constructors, and when we create a new student, cla
 
 E.g:
 ```
-Peter : Student.{"Peter", "060233"};
+Peter := Student.{"Peter", "060233"};
 Console.WriteLine.(Peter.Class); // print out 2
 ```
 
@@ -187,7 +187,7 @@ If you need to use both constructors and simplified creations, you can do so.
 
 E.g:
 ```
-Peter : Student.{"Peter", "060233" ... Name="New Peter"};
+Peter := Student.{"Peter", "060233" ... Name="New Peter"};
 ```
 
 It should be noted that a package can only support one constructor, we recommend to maintain the simplicity of the structure, a stable package easier to be used by the caller,
@@ -198,13 +198,13 @@ Since anonymous packages can be used in logic to directly define a data package 
 
 E.g:
 ```
-NameSpace :
+NameSpace
 {
-    School : #
+    School #
     {
         Name := "XySchool";
 
-        WellCome : $(name:str)->(hi:str)
+        WellCome $(name:str)->(hi:str)
         {
             <- ("well come to " + name);
         };
@@ -222,13 +222,13 @@ Now let us play our imagination, we want a customized package for Chinese studen
 
 E.g:
 ```
-ChineseStudent : #{}
+ChineseStudent #{}
 {
-    Name : ^str;
-    Number : ^str;
-    Class : ^i32;
-    Grade : ^i32;
-    KungFu : ^bool; // kung fu students
+    Name ^str;
+    Number ^str;
+    Class ^i32;
+    Grade ^i32;
+    KungFu ^bool; // kung fu students
 };
 ```
 No, no repeatable definition of data so elegant, we can reuse student attributes, with an additional kung fu attributes on it.
@@ -237,17 +237,17 @@ We need to use a combination of this feature, but not so complicated, just creat
 
 E.g:
 ```
-ChineseStudent : #{}
+ChineseStudent #{}
 {
-    Student : ^Student; // include student attributes in it
-    KungFu : ^bool; // kung fu students
+    Student ^Student; // include student attributes in it
+    KungFu ^bool; // kung fu students
 };
 ```
 This way you can use generic attributes via student attributes in Chinese students.
 
 E.g:
 ```
-Chen : ChineseStudent.{};
+Chen := ChineseStudent.{};
 Console.WriteLine.(Chen.Student.Name);
 // of course, since there is no assignment, nothing is output
 ```
