@@ -294,12 +294,20 @@ namespace xylang
             var obj = "";
             var id = "";
             id = GetControlSub(context.id().GetText());
-            obj += id + "{";
-            foreach(var item in context.functionSupportStatement())
+            if (context.functionSupportStatement().Length>0)
             {
-                obj += Visit(item);
+                obj += id + "{";
+                foreach (var item in context.functionSupportStatement())
+                {
+                    obj += Visit(item);
+                }
+                obj += "}" + Wrap;
             }
-            obj += "}" + Wrap;
+            else
+            {
+                obj += id + ";";
+            }
+
             return obj;
         }
 

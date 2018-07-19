@@ -45,7 +45,7 @@ nspackageInvariableStatement:(annotation)? expression ':==' expression Terminate
 // 定义控制
 nspackageControlStatement: (annotation)? id Control type (nspackageControlSubStatement)+ Terminate;
 // 定义子方法
-nspackageControlSubStatement: Wave id BlockLeft (functionSupportStatement)* BlockRight;
+nspackageControlSubStatement: Wave id (BlockLeft (functionSupportStatement)* BlockRight)?;
 // 定义空控制
 nspackageControlEmptyStatement:(annotation)? id Control type Terminate;
 // 无构造包函数
@@ -78,7 +78,7 @@ packageVariableStatement:(annotation)? expression Define expression Terminate;
 // 定义控制
 packageControlStatement: (annotation)? id Control type (packageControlSubStatement)+ Terminate;
 // 定义子方法
-packageControlSubStatement: Wave id BlockLeft (functionSupportStatement)* BlockRight;
+packageControlSubStatement: Wave id (BlockLeft (functionSupportStatement)* BlockRight)?;
 // 定义空控制
 packageControlEmptyStatement:(annotation)? id Control type Terminate;
 
