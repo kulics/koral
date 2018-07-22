@@ -241,7 +241,7 @@ namespace xylang
             {
                 obj += Visit(context.annotation());
             }
-            obj += r1.permission + " const " + r2.data + " " + r1.text + " = " + r2.text + context.Terminate().GetText() + Wrap;
+            obj += $"{r1.permission} const {r2.data} {r1.text} = {r2.text} {Terminate} {Wrap}";
             return obj;
         }
 
@@ -254,20 +254,7 @@ namespace xylang
             {
                 obj += Visit(context.annotation());
             }
-            obj += " private static " + r2.data + " " + r1.text + " = " + r2.text + context.Terminate().GetText() + Wrap;
-            return obj;
-        }
-
-        public override object VisitNspackageControlEmptyStatement([NotNull] XyParser.NspackageControlEmptyStatementContext context)
-        {
-            var obj = "";
-            if(context.annotation() != null)
-            {
-                obj += Visit(context.annotation());
-            }
-            var id = (Result)Visit(context.id());
-            var type = (string)Visit(context.type());
-            obj += id.permission + " static " + type + " " + id.text + "{get;set;}" + Wrap;
+            obj += $"{r1.permission} static { r2.data} {r1.text} {{ get;set; }} = {r2.text} {Terminate} {Wrap}";
             return obj;
         }
 

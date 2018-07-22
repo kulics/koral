@@ -33,7 +33,6 @@ nspackageFunctionStatement
 |nspackageVariableStatement
 |nspackageInvariableStatement
 |nspackageControlStatement
-|nspackageControlEmptyStatement
 ;
 
 // 主函数
@@ -43,11 +42,9 @@ nspackageVariableStatement:(annotation)? expression Define expression Terminate;
 // 无构造包常量
 nspackageInvariableStatement:(annotation)? expression ':==' expression Terminate;
 // 定义控制
-nspackageControlStatement: (annotation)? id Control type (nspackageControlSubStatement)+ Terminate;
+nspackageControlStatement: (annotation)? id Declared type (nspackageControlSubStatement)* (Assign expression)? Terminate;
 // 定义子方法
-nspackageControlSubStatement: Wave id (BlockLeft (functionSupportStatement)* BlockRight)?;
-// 定义空控制
-nspackageControlEmptyStatement:(annotation)? id Control type Terminate;
+nspackageControlSubStatement: Control id (BlockLeft (functionSupportStatement)* BlockRight)?;
 // 无构造包函数
 nspackageFunctionStatement:(annotation)? id (templateDefine)? Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义包

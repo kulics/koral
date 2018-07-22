@@ -9,6 +9,7 @@ namespace xylang
 {
     partial class XyLangVisitor : XyBaseVisitor<object>
     {
+        const string Terminate = ";";
         const string Wrap = "\r\n";
         const string Any = "object";
         const string I32 = "int";
