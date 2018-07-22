@@ -77,33 +77,27 @@ protocolSupportStatement:
 protocolStatement
 |protocolFunctionStatement
 |protocolControlStatement
-|protocolControlEmptyStatement
 ;
 // 定义控制
-protocolControlStatement:(annotation)? id Control type (protocolControlSubStatement)+ Terminate;
+protocolControlStatement:(annotation)? id Declared type (protocolControlSubStatement)* Terminate;
 // 定义子方法
-protocolControlSubStatement: Wave id;
-// 定义空控制
-protocolControlEmptyStatement: (annotation)? id Control type Terminate;
+protocolControlSubStatement: Control id;
 // 函数
 protocolFunctionStatement:(annotation)? id (templateDefine)? Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 协议实现支持的语句
 protocolImplementSupportStatement:
 implementFunctionStatement
 |implementControlStatement
-|implementControlEmptyStatement
 |implementEventStatement
 ;
 // 实现协议
 protocolImplementStatement:Protocol nameSpaceItem (templateCall)? BlockLeft (protocolImplementSupportStatement)* BlockRight Terminate;
 // 控制实现
-implementControlStatement:(annotation)? id Control type (packageControlSubStatement)+ Terminate;
-// 空控制实现
-implementControlEmptyStatement: (annotation)? id Control type Terminate;
+implementControlStatement:(annotation)? id (Define expression|Declared type (Assign expression)?) (packageControlSubStatement)* Terminate;
 // 函数实现
 implementFunctionStatement:(annotation)? id (templateDefine)? Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 事件实现
-implementEventStatement: id '#!' nameSpaceItem Terminate;
+implementEventStatement: id '^!' nameSpaceItem Terminate;
 // 函数
 functionStatement:id (templateDefine)? Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 返回

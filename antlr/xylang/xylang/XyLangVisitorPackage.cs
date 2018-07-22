@@ -310,11 +310,6 @@ namespace xylang
                 {
                     obj += Visit(item);
                 }
-                else if(item.GetChild(0) is XyParser.ImplementControlEmptyStatementContext)
-                {
-                    var vr = (Variable)Visit(item);
-                    obj += vr.type + " " + ptcl + "." + vr.ID + " " + vr.body;
-                }
             }
             var r = new Result();
             r.data = ptcl;
@@ -331,22 +326,6 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitImplementControlEmptyStatement([NotNull] XyParser.ImplementControlEmptyStatementContext context)
-        {
-            var id = (Result)Visit(context.id());
-            var type = (string)Visit(context.type());
-
-            var vr = new Variable();
-            vr.ID = id.text;
-            vr.type = type;
-            vr.body = "{get;set;}" + Wrap;
-            if(context.annotation() != null)
-            {
-                vr.annotation = (string)Visit(context.annotation());
-            }
-            return vr;
-        }
-
         class Variable
         {
             public string type;
@@ -358,13 +337,36 @@ namespace xylang
         public override object VisitImplementControlStatement([NotNull] XyParser.ImplementControlStatementContext context)
         {
             var id = (Result)Visit(context.id());
-            var type = (string)Visit(context.type());
-            var body = "{";
-            foreach(var item in context.packageControlSubStatement())
+            var type = "";
+            if (context.type() != null)
             {
-                body += Visit(item);
+                type = (string)Visit(context.type());
             }
-            body += "}" + Wrap;
+            else
+            {
+                var r2 = (Result)Visit(context.expression());
+                type = (string)r2.data;
+            }
+
+            var body = "";
+            if (context.packageControlSubStatement().Length > 0)
+            {
+                body += "{";
+                foreach (var item in context.packageControlSubStatement())
+                {
+                    body += Visit(item);
+                }
+                body += "}" + Wrap;
+            }
+            else
+            {
+                body += "{ get; set;}" + Wrap;
+            }
+            if (context.expression() != null)
+            {
+                var r2 = (Result)Visit(context.expression());
+                body += $" = {r2.text} {Terminate} {Wrap}";
+            }
 
             var vr = new Variable();
             vr.ID = id.text;
@@ -452,19 +454,6 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitProtocolControlEmptyStatement([NotNull] XyParser.ProtocolControlEmptyStatementContext context)
-        {
-            var r = new Result();
-            if(context.annotation() != null)
-            {
-                r.text += Visit(context.annotation());
-            }
-            var id = (Result)Visit(context.id());
-            var type = (string)Visit(context.type());
-            r.text += type + " " + id.text + "{get;set;}" + Wrap;
-            return r;
-        }
-
         public override object VisitProtocolControlStatement([NotNull] XyParser.ProtocolControlStatementContext context)
         {
             var id = (Result)Visit(context.id());
@@ -476,12 +465,20 @@ namespace xylang
             r.permission = "public";
 
             var type = (string)Visit(context.type());
-            r.text += type + " " + id.text + "{";
-            foreach(var item in context.protocolControlSubStatement())
+            r.text += type + " " + id.text;
+            if (context.protocolControlSubStatement().Length >0)
             {
-                r.text += Visit(item);
+                r.text += " {";
+                foreach (var item in context.protocolControlSubStatement())
+                {
+                    r.text += Visit(item);
+                }
+                r.text += "}" + Wrap;
             }
-            r.text += "}" + Wrap;
+            else
+            {
+                r.text += " { get; set; }" + Wrap;
+            }
             return r;
         }
 

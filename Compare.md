@@ -524,8 +524,8 @@ test.simpleDescription();
 ```
 NamedShape #{name #str} 
 {
-    numberOfSides ^i32;
-    name ^str~get;
+    numberOfSides: i32;
+    name: str^get;
 
     #
     {
@@ -540,8 +540,8 @@ NamedShape #{name #str}
 
 Square #{sideLength: f64, name: str}
 {
-    namedShape ^NamedShape;
-    sideLength ^f64;
+    namedShape: NamedShape;
+    sideLength: f64;
 
     # 
     {
