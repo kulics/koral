@@ -44,7 +44,7 @@ namespace xylang
 
         public override object VisitAssign([NotNull] XyParser.AssignContext context)
         {
-            if(context.op.Type == XyParser.Assign)
+            if (context.op.Type == XyParser.Assign)
             {
                 return "=";
             }
@@ -61,19 +61,19 @@ namespace xylang
         {
             var count = context.ChildCount;
             var r = new Result();
-            if(count == 3)
+            if (count == 3)
             {
                 var e1 = (Result)Visit(context.GetChild(0));
                 var op = Visit(context.GetChild(1));
                 var e2 = (Result)Visit(context.GetChild(2));
-                if(context.GetChild(1).GetType() == typeof(XyParser.CallContext))
+                if (context.GetChild(1).GetType() == typeof(XyParser.CallContext))
                 {
                     r.data = "var";
-                    for(int i = 0; i < e2.bracketTime; i++)
+                    for (int i = 0; i < e2.bracketTime; i++)
                     {
                         r.text += "(";
                     }
-                    switch(e2.callType)
+                    switch (e2.callType)
                     {
                         case "element":
                             r.text = e1.text + e2.text;
@@ -81,7 +81,7 @@ namespace xylang
                         case "as":
                         case "is":
                             r.data = e2.data;
-                            if(e2.isCall)
+                            if (e2.isCall)
                             {
                                 r.text += e1.text + e2.text;
                             }
@@ -94,19 +94,19 @@ namespace xylang
                             break;
                     }
                 }
-                if(context.GetChild(1).GetType() == typeof(XyParser.JudgeContext))
+                if (context.GetChild(1).GetType() == typeof(XyParser.JudgeContext))
                 {
                     // todo 如果左右不是bool类型值，报错
                     r.data = Bool;
                 }
-                else if(context.GetChild(1).GetType() == typeof(XyParser.AddContext))
+                else if (context.GetChild(1).GetType() == typeof(XyParser.AddContext))
                 {
                     // todo 如果左右不是number或text类型值，报错
-                    if((string)e1.data == Str || (string)e2.data == Str)
+                    if ((string)e1.data == Str || (string)e2.data == Str)
                     {
                         r.data = Str;
                     }
-                    else if((string)e1.data == I32 && (string)e2.data == I32)
+                    else if ((string)e1.data == I32 && (string)e2.data == I32)
                     {
                         r.data = I32;
                     }
@@ -115,10 +115,10 @@ namespace xylang
                         r.data = F64;
                     }
                 }
-                else if(context.GetChild(1).GetType() == typeof(XyParser.MulContext))
+                else if (context.GetChild(1).GetType() == typeof(XyParser.MulContext))
                 {
                     // todo 如果左右不是number类型值，报错
-                    if((string)e1.data == I32 && (string)e2.data == I32)
+                    if ((string)e1.data == I32 && (string)e2.data == I32)
                     {
                         r.data = I32;
                     }
@@ -129,7 +129,7 @@ namespace xylang
                 }
                 r.text = e1.text + op + e2.text;
             }
-            else if(count == 1)
+            else if (count == 1)
             {
                 r = (Result)Visit(context.GetChild(0));
             }
@@ -143,11 +143,11 @@ namespace xylang
             var e1 = "this";
             var op = ".";
             var e2 = (Result)Visit(context.GetChild(1));
-            for(int i = 0; i < e2.bracketTime; i++)
+            for (int i = 0; i < e2.bracketTime; i++)
             {
                 r.text += "(";
             }
-            switch(e2.callType)
+            switch (e2.callType)
             {
                 case "element":
                     r.text = e1 + e2.text;
@@ -155,7 +155,7 @@ namespace xylang
                 case "as":
                 case "is":
                     r.data = e2.data;
-                    if(e2.isCall)
+                    if (e2.isCall)
                     {
                         r.text += e1 + e2.text;
                     }
@@ -174,10 +174,10 @@ namespace xylang
         public override object VisitCallNameSpace([NotNull] XyParser.CallNameSpaceContext context)
         {
             var obj = "";
-            for(int i = 0; i < context.id().Length; i++)
+            for (int i = 0; i < context.id().Length; i++)
             {
                 var id = (Result)Visit(context.id(i));
-                if(i == 0)
+                if (i == 0)
                 {
                     obj += "" + id.text;
                 }
@@ -192,11 +192,11 @@ namespace xylang
             var e1 = obj;
             var op = ".";
             var e2 = (Result)Visit(context.callExpression());
-            for(int i = 0; i < e2.bracketTime; i++)
+            for (int i = 0; i < e2.bracketTime; i++)
             {
                 r.text += "(";
             }
-            switch(e2.callType)
+            switch (e2.callType)
             {
                 case "element":
                     r.text = e1 + e2.text;
@@ -204,7 +204,7 @@ namespace xylang
                 case "as":
                 case "is":
                     r.data = e2.data;
-                    if(e2.isCall)
+                    if (e2.isCall)
                     {
                         r.text += e1 + e2.text;
                     }
@@ -224,27 +224,27 @@ namespace xylang
         {
             var count = context.ChildCount;
             var r = new Result();
-            if(count == 3)
+            if (count == 3)
             {
                 var e1 = (Result)Visit(context.GetChild(0));
                 var op = Visit(context.GetChild(1));
                 var e2 = (Result)Visit(context.GetChild(2));
-                if(context.GetChild(0).GetChild(0) is XyParser.CallElementContext)
+                if (context.GetChild(0).GetChild(0) is XyParser.CallElementContext)
                 {
                     r.callType = "element";
                 }
                 r.isCall = e1.isCall;
                 r.callType = e1.callType;
-                if(e1.bracketTime > 0)
+                if (e1.bracketTime > 0)
                 {
                     r.bracketTime += e1.bracketTime;
                 }
-                if(context.GetChild(2).GetChild(0) is XyParser.CallElementContext)
+                if (context.GetChild(2).GetChild(0) is XyParser.CallElementContext)
                 {
                     r.text = e1.text + e2.text;
                     return r;
                 }
-                else if(context.GetChild(2).GetChild(0) is XyParser.CallAsContext)
+                else if (context.GetChild(2).GetChild(0) is XyParser.CallAsContext)
                 {
                     r.callType = "as";
                     r.data = e2.data;
@@ -252,7 +252,7 @@ namespace xylang
                     r.bracketTime = e1.bracketTime + 1;
                     return r;
                 }
-                else if(context.GetChild(2).GetChild(0) is XyParser.CallIsContext)
+                else if (context.GetChild(2).GetChild(0) is XyParser.CallIsContext)
                 {
                     r.callType = "is";
                     r.data = e2.data;
@@ -262,20 +262,20 @@ namespace xylang
                 }
                 r.text = e1.text + op + e2.text;
             }
-            else if(count == 1)
+            else if (count == 1)
             {
                 r = (Result)Visit(context.GetChild(0));
-                if(context.GetChild(0) is XyParser.CallElementContext)
+                if (context.GetChild(0) is XyParser.CallElementContext)
                 {
                     r.callType = "element";
                 }
-                else if(context.GetChild(0) is XyParser.CallAsContext)
+                else if (context.GetChild(0) is XyParser.CallAsContext)
                 {
                     r.callType = "as";
                     r.bracketTime++;
                     r.isCall = true;
                 }
-                else if(context.GetChild(0) is XyParser.CallIsContext)
+                else if (context.GetChild(0) is XyParser.CallIsContext)
                 {
                     r.callType = "is";
                     r.bracketTime++;
@@ -297,7 +297,7 @@ namespace xylang
 
         public override object VisitJudge([NotNull] XyParser.JudgeContext context)
         {
-            if(context.op.Text == "~=")
+            if (context.op.Text == "~=")
             {
                 return "!=";
             }
@@ -316,22 +316,22 @@ namespace xylang
 
         public override object VisitPrimaryExpression([NotNull] XyParser.PrimaryExpressionContext context)
         {
-            if(context.ChildCount == 1)
+            if (context.ChildCount == 1)
             {
                 var c = context.GetChild(0);
-                if(c is XyParser.DataStatementContext)
+                if (c is XyParser.DataStatementContext)
                 {
                     return Visit(context.dataStatement());
                 }
-                else if(c is XyParser.IdContext)
+                else if (c is XyParser.IdContext)
                 {
                     return Visit(context.id());
                 }
-                else if(context.t.Type == XyParser.Self)
+                else if (context.t.Type == XyParser.Self)
                 {
                     return new Result { text = "this", data = "var" };
                 }
-                else if(context.t.Type == XyParser.Discard)
+                else if (context.t.Type == XyParser.Discard)
                 {
                     return new Result { text = "_", data = "var" };
                 }
@@ -344,10 +344,10 @@ namespace xylang
         {
             var r = new Result();
             var obj = "";
-            for(int i = 0; i < context.expression().Length; i++)
+            for (int i = 0; i < context.expression().Length; i++)
             {
                 var temp = (Result)Visit(context.expression(i));
-                if(i == 0)
+                if (i == 0)
                 {
                     obj += temp.text;
                 }
@@ -365,9 +365,9 @@ namespace xylang
         {
             var obj = "";
             obj += "<";
-            for(int i = 0; i < context.id().Length; i++)
+            for (int i = 0; i < context.id().Length; i++)
             {
-                if(i > 0)
+                if (i > 0)
                 {
                     obj += ",";
                 }
@@ -382,9 +382,9 @@ namespace xylang
         {
             var obj = "";
             obj += "<";
-            for(int i = 0; i < context.type().Length; i++)
+            for (int i = 0; i < context.type().Length; i++)
             {
-                if(i > 0)
+                if (i > 0)
                 {
                     obj += ",";
                 }
@@ -408,7 +408,7 @@ namespace xylang
             r.data = "var";
             var id = (Result)Visit(context.id());
             r.text += id.text;
-            if(context.templateCall() != null)
+            if (context.templateCall() != null)
             {
                 r.text += Visit(context.templateCall());
             }
@@ -421,20 +421,20 @@ namespace xylang
             var r = new Result();
             r.data = Visit(context.type());
             var param = "";
-            if(context.expressionList()!=null)
+            if (context.expressionList() != null)
             {
                 param = ((Result)Visit(context.expressionList())).text;
             }
             r.text = $"new {Visit(context.type())} ( {param} )";
-            if(context.pkgAssign() != null)
+            if (context.pkgAssign() != null)
             {
                 r.text += Visit(context.pkgAssign());
             }
-            if(context.arrayAssign() != null)
+            if (context.arrayAssign() != null)
             {
                 r.text += Visit(context.arrayAssign());
             }
-            if(context.dictionaryAssign() != null)
+            if (context.dictionaryAssign() != null)
             {
                 r.text += Visit(context.dictionaryAssign());
             }
@@ -445,9 +445,9 @@ namespace xylang
         {
             var obj = "";
             obj += "{";
-            for(int i = 0; i < context.pkgAssignElement().Length; i++)
+            for (int i = 0; i < context.pkgAssignElement().Length; i++)
             {
-                if(i == 0)
+                if (i == 0)
                 {
                     obj += Visit(context.pkgAssignElement(i));
                 }
@@ -464,10 +464,10 @@ namespace xylang
         {
             var obj = "";
             obj += "{";
-            for(int i = 0; i < context.expression().Length; i++)
+            for (int i = 0; i < context.expression().Length; i++)
             {
                 var r = (Result)Visit(context.expression(i));
-                if(i == 0)
+                if (i == 0)
                 {
                     obj += r.text;
                 }
@@ -484,10 +484,10 @@ namespace xylang
         {
             var obj = "";
             obj += "{";
-            for(int i = 0; i < context.dictionaryElement().Length; i++)
+            for (int i = 0; i < context.dictionaryElement().Length; i++)
             {
                 var r = (DicEle)Visit(context.dictionaryElement(i));
-                if(i == 0)
+                if (i == 0)
                 {
                     obj += r.text;
                 }
@@ -519,9 +519,9 @@ namespace xylang
         {
             var obj = "";
             obj += "{";
-            for(int i = 0; i < context.pkgAnonymousAssignElement().Length; i++)
+            for (int i = 0; i < context.pkgAnonymousAssignElement().Length; i++)
             {
-                if(i == 0)
+                if (i == 0)
                 {
                     obj += Visit(context.pkgAnonymousAssignElement(i));
                 }
@@ -554,17 +554,17 @@ namespace xylang
         {
             var type = "var";
             var result = new Result();
-            for(int i = 0; i < context.expression().Length; i++)
+            for (int i = 0; i < context.expression().Length; i++)
             {
                 var r = (Result)Visit(context.expression(i));
-                if(i == 0)
+                if (i == 0)
                 {
                     type = (string)r.data;
                     result.text += r.text;
                 }
                 else
                 {
-                    if(type != (string)r.data)
+                    if (type != (string)r.data)
                     {
                         type = "object";
                     }
@@ -580,17 +580,17 @@ namespace xylang
         {
             var type = "object";
             var result = new Result();
-            for(int i = 0; i < context.expression().Length; i++)
+            for (int i = 0; i < context.expression().Length; i++)
             {
                 var r = (Result)Visit(context.expression(i));
-                if(i == 0)
+                if (i == 0)
                 {
                     type = (string)r.data;
                     result.text += r.text;
                 }
                 else
                 {
-                    if(type != (string)r.data)
+                    if (type != (string)r.data)
                     {
                         type = "object";
                     }
@@ -607,10 +607,10 @@ namespace xylang
             var key = Any;
             var value = Any;
             var result = new Result();
-            for(int i = 0; i < context.dictionaryElement().Length; i++)
+            for (int i = 0; i < context.dictionaryElement().Length; i++)
             {
                 var r = (DicEle)Visit(context.dictionaryElement(i));
-                if(i == 0)
+                if (i == 0)
                 {
                     key = r.key;
                     value = r.value;
@@ -618,11 +618,11 @@ namespace xylang
                 }
                 else
                 {
-                    if(key != r.key)
+                    if (key != r.key)
                     {
                         key = Any;
                     }
-                    if(value != r.value)
+                    if (value != r.value)
                     {
                         value = Any;
                     }
@@ -656,37 +656,37 @@ namespace xylang
         public override object VisitDataStatement([NotNull] XyParser.DataStatementContext context)
         {
             var r = new Result();
-            if(context.markText() != null)
+            if (context.markText() != null)
             {
                 r.data = Str;
                 r.text = "$" + Visit(context.markText());
             }
-            else if(context.t.Type == XyParser.Float)
+            else if (context.t.Type == XyParser.Float)
             {
                 r.data = F64;
                 r.text = $"{context.Float().GetText()}";
             }
-            else if(context.t.Type == XyParser.Integer)
+            else if (context.t.Type == XyParser.Integer)
             {
                 r.data = I32;
                 r.text = $"{context.Integer().GetText()}";
             }
-            else if(context.t.Type == XyParser.Text)
+            else if (context.t.Type == XyParser.Text)
             {
                 r.data = Str;
                 r.text = context.Text().GetText();
             }
-            else if(context.t.Type == XyParser.True)
+            else if (context.t.Type == XyParser.True)
             {
                 r.data = Bool;
                 r.text = $"{context.True().GetText()}";
             }
-            else if(context.t.Type == XyParser.False)
+            else if (context.t.Type == XyParser.False)
             {
                 r.data = Bool;
                 r.text = $"{context.False().GetText()}";
             }
-            else if(context.t.Type == XyParser.Nil)
+            else if (context.t.Type == XyParser.Nil)
             {
                 r.data = Any;
                 r.text = "null";
@@ -703,7 +703,7 @@ namespace xylang
         {
             var r = new Result();
             // 异步
-            if(context.t.Type == XyParser.FlowRight)
+            if (context.t.Type == XyParser.FlowRight)
             {
                 r.text += " async ";
             }
@@ -719,7 +719,7 @@ namespace xylang
             var r = new Result();
             r.data = "var";
             // 异步
-            if(context.t.Type == XyParser.FlowLeft)
+            if (context.t.Type == XyParser.FlowLeft)
             {
                 r.text += "async ";
             }
@@ -732,10 +732,10 @@ namespace xylang
         public override object VisitLambdaIn([NotNull] XyParser.LambdaInContext context)
         {
             var obj = "";
-            for(int i = 0; i < context.id().Length; i++)
+            for (int i = 0; i < context.id().Length; i++)
             {
                 var r = (Result)Visit(context.id(i));
-                if(i == 0)
+                if (i == 0)
                 {
                     obj += r.text;
                 }
@@ -800,15 +800,20 @@ namespace xylang
             return r;
         }
 
-        List<string> keywords = new List<string> {
-        "abstract", "as", "base", "bool", "break" , "byte", "case" , "catch",
-        "char","checked","class","const","continue","decimal","default","delegate","do","double","else",
-        "enum","event","explicit","extern","false","finally","fixed","float","for","foreach","goto",
-        "if","implicit","in","int","interface","internal","is","lock","long","namespace","new","null",
-        "object","operator","out","override","params","private","protected","public","readonly","ref",
-        "return","sbyte","sealed","short","sizeof","stackalloc","static","string","struct","switch",
-        "this","throw","true","try","typeof","uint","ulong","unchecked","unsafe","ushort","using",
-        "virtual","void","volatile","while"
-        };
+        List<string> keywords
+        {
+            get
+            {
+                return new List<string> {   "abstract", "as", "base", "bool", "break" , "byte", "case" , "catch",
+                        "char","checked","class","const","continue","decimal","default","delegate","do","double","else",
+                        "enum","event","explicit","extern","false","finally","fixed","float","for","foreach","goto",
+                        "if","implicit","in","int","interface","internal","is","lock","long","namespace","new","null",
+                        "object","operator","out","override","params","private","protected","public","readonly","ref",
+                        "return","sbyte","sealed","short","sizeof","stackalloc","static","string","struct","switch",
+                        "this","throw","true","try","typeof","uint","ulong","unchecked","unsafe","ushort","using",
+                        "virtual","void","volatile","while"
+                };
+            }
+        }
     }
 }

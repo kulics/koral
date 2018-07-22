@@ -32,17 +32,14 @@ nspackageSupportStatement:
 nspackageFunctionStatement
 |nspackageVariableStatement
 |nspackageInvariableStatement
-|nspackageControlStatement
 ;
 
 // 主函数
 functionMainStatement:Function BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 无构造包变量
-nspackageVariableStatement:(annotation)? expression Define expression Terminate;
+nspackageVariableStatement:(annotation)? expression (Define expression|Declared type (Assign expression)?) (nspackageControlSubStatement)* Terminate;
 // 无构造包常量
-nspackageInvariableStatement:(annotation)? expression ':==' expression Terminate;
-// 定义控制
-nspackageControlStatement: (annotation)? id Declared type (nspackageControlSubStatement)* (Assign expression)? Terminate;
+nspackageInvariableStatement:(annotation)? expression (Declared type '==' | ':==') expression Terminate;
 // 定义子方法
 nspackageControlSubStatement: Control id (BlockLeft (functionSupportStatement)* BlockRight)?;
 // 无构造包函数
@@ -60,8 +57,6 @@ packageInitStatement
 |protocolImplementStatement
 |packageFunctionStatement
 |packageOverrideFunctionStatement
-|packageControlStatement
-|packageControlEmptyStatement
 |packageVariableStatement
 ;
 // 包构造方法
@@ -71,13 +66,9 @@ packageFunctionStatement:(annotation)? id (templateDefine)? Function parameterCl
 // 重载函数
 packageOverrideFunctionStatement:(annotation)? Self id Function parameterClauseIn ArrowRight parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 定义变量
-packageVariableStatement:(annotation)? expression Define expression Terminate;
-// 定义控制
-packageControlStatement: (annotation)? id Control type (packageControlSubStatement)+ Terminate;
+packageVariableStatement:(annotation)? expression (Define expression|Declared type (Assign expression)?) (packageControlSubStatement)* Terminate;
 // 定义子方法
-packageControlSubStatement: Wave id (BlockLeft (functionSupportStatement)* BlockRight)?;
-// 定义空控制
-packageControlEmptyStatement:(annotation)? id Control type Terminate;
+packageControlSubStatement: Control id (BlockLeft (functionSupportStatement)* BlockRight)?;
 
 // 协议
 protocolStatement:(annotation)? id (templateDefine)? Protocol BlockLeft (protocolSupportStatement)* BlockRight Terminate;

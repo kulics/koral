@@ -164,44 +164,39 @@ namespace xylang
         public override object VisitPackageVariableStatement([NotNull] XyParser.PackageVariableStatementContext context)
         {
             var r1 = (Result)Visit(context.expression(0));
-            var r2 = (Result)Visit(context.expression(1));
+            var typ = "";
+            if (context.type() != null)
+            {
+                typ = (string)Visit(context.type());
+            }
+            else
+            {
+                var r2 = (Result)Visit(context.expression(1));
+                typ = (string)r2.data;
+            }
             var obj = "";
-            if(context.annotation() != null)
+            if (context.annotation() != null)
             {
                 obj += Visit(context.annotation());
             }
-            obj += " private " + r2.data + " " + r1.text + " = " + r2.text + context.Terminate().GetText() + Wrap;
-            return obj;
-        }
-
-        public override object VisitPackageControlEmptyStatement([NotNull] XyParser.PackageControlEmptyStatementContext context)
-        {
-            var obj = "";
-            if(context.annotation() != null)
+            if (context.packageControlSubStatement().Length > 0)
             {
-                obj += Visit(context.annotation());
+                obj += $"{r1.permission} {typ} {r1.text} {{";
+                foreach (var item in context.packageControlSubStatement())
+                {
+                    obj += Visit(item);
+                }
+                obj += $"}} {Wrap}";
             }
-            var id = (Result)Visit(context.id());
-            var type = (string)Visit(context.type());
-            obj += id.permission + " " + type + " " + id.text + "{get;set;}" + Wrap;
-            return obj;
-        }
-
-        public override object VisitPackageControlStatement([NotNull] XyParser.PackageControlStatementContext context)
-        {
-            var obj = "";
-            if(context.annotation() != null)
+            else
             {
-                obj += Visit(context.annotation());
+                obj += $"{r1.permission} {typ} {r1.text} {{ get;set; }} {Wrap}";
             }
-            var id = (Result)Visit(context.id());
-            var type = (string)Visit(context.type());
-            obj += id.permission + " " + type + " " + id.text + "{";
-            foreach(var item in context.packageControlSubStatement())
+            if (context.expression(1) != null)
             {
-                obj += Visit(item);
+                var r2 = (Result)Visit(context.expression(1));
+                obj += $" = {r2.text} {Terminate} {Wrap}";
             }
-            obj += "}" + Wrap;
             return obj;
         }
 

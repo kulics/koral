@@ -236,43 +236,61 @@ namespace xylang
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
+            var typ = "";
+            if (context.type() != null)
+            {
+                typ = (string)Visit(context.type());
+            }
+            else
+            {
+                typ = (string)r2.data;
+            }
+
             var obj = "";
             if(context.annotation() != null)
             {
                 obj += Visit(context.annotation());
             }
-            obj += $"{r1.permission} const {r2.data} {r1.text} = {r2.text} {Terminate} {Wrap}";
+            obj += $"{r1.permission} static {typ} {r1.text} {{ get  {{ return {r2.text} {Terminate} }} }} {Wrap}";
             return obj;
         }
 
         public override object VisitNspackageVariableStatement([NotNull] XyParser.NspackageVariableStatementContext context)
         {
             var r1 = (Result)Visit(context.expression(0));
-            var r2 = (Result)Visit(context.expression(1));
+            var typ = "";
+            if (context.type() != null)
+            {
+                typ = (string)Visit(context.type());
+            }
+            else if (context.expression().Length == 2)
+            {
+                var r2 = (Result)Visit(context.expression(1));
+                typ = (string)r2.data;
+            }
             var obj = "";
             if(context.annotation() != null)
             {
                 obj += Visit(context.annotation());
             }
-            obj += $"{r1.permission} static { r2.data} {r1.text} {{ get;set; }} = {r2.text} {Terminate} {Wrap}";
-            return obj;
-        }
-
-        public override object VisitNspackageControlStatement([NotNull] XyParser.NspackageControlStatementContext context)
-        {
-            var obj = "";
-            if(context.annotation() != null)
+            if (context.nspackageControlSubStatement().Length >0)
             {
-                obj += Visit(context.annotation());
+                obj += $"{r1.permission} static {typ} {r1.text} {{";
+                foreach (var item in context.nspackageControlSubStatement())
+                {
+                    obj += Visit(item);
+                }
+                obj += $"}} {Wrap}";
             }
-            var id = (Result)Visit(context.id());
-            var type = (string)Visit(context.type());
-            obj += id.permission + " static " + type + " " + id.text + "{";
-            foreach(var item in context.nspackageControlSubStatement())
+            else
             {
-                obj += Visit(item);
+                obj += $"{r1.permission} static {typ} {r1.text} {{ get;set; }} {Wrap}";
             }
-            obj += "}" + Wrap;
+            if (context.expression().Length == 2)
+            {
+                var r2 = (Result)Visit(context.expression(1));
+                obj += $" = {r2.text} {Terminate} {Wrap}";
+            }
             return obj;
         }
 
