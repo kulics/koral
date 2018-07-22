@@ -57,7 +57,7 @@ double explicitDouble = 70;
 ```
 ### XyLang
 ```
-explicitDouble :f64 = 70;
+explicitDouble: f64 = 70;
 ```
 ## Basic Types
 ### Swift
@@ -522,7 +522,7 @@ test.simpleDescription();
 ```
 ### XyLang
 ```
-NamedShape #{name #str} 
+NamedShape #{name: str} 
 {
     numberOfSides: i32;
     name: str^get;
