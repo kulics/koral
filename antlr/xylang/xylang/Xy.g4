@@ -142,7 +142,7 @@ judgeStatement:(judgeBaseStatement)+ (judgeElseStatement)? Terminate;
 // 判断基础
 judgeBaseStatement:Judge expression BlockLeft (functionSupportStatement)* BlockRight;
 // else 判断
-judgeElseStatement:JudgeSub BlockLeft (functionSupportStatement)* BlockRight;
+judgeElseStatement:Judge BlockLeft (functionSupportStatement)* BlockRight;
 // 循环
 loopStatement:Loop iteratorStatement Wave id BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 集合循环
