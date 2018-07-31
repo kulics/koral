@@ -230,7 +230,7 @@ annotation: '\\\\' (id ':')? annotationList | '\\*' (id ':')? annotationList '*\
 
 annotationList: annotationItem (',' annotationItem)*;
 
-annotationItem: id ('{' annotationAssign (',' annotationAssign)* '}')? ;
+annotationItem: id ('.' '{' annotationAssign (',' annotationAssign)* '}')? ;
 
 annotationAssign: (id '=')? expression ;
 
