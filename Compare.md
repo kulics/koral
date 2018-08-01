@@ -138,7 +138,7 @@ int count = i + (int)f;
 ```
 f := 6.0;
 i := 94;
-count := i + !.(f: i32);
+count := i + i32.(f);
 ```
 ## Inclusive Range Operator
 ### Swift

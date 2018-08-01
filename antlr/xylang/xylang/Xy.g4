@@ -185,13 +185,13 @@ id
 // 表达式
 expression:
 primaryExpression
+| basicConvert // 基础数据转化
 | callSelf // 调用自己
 | callNameSpace // 调用命名空间
 | callFunc // 函数调用
 | callPkg // 新建包
 | getType // 获取类型
 | callAwait // 异步调用
-| basicConvert // 基础数据转化
 | sharpArray // c#数组
 | array // 数组
 | dictionary // 字典
@@ -221,6 +221,8 @@ callElement // 访问元素
 | id // id
 | callExpression call callExpression // 链式调用
 ;
+
+basicConvert: typeBasic call '(' expression ')'; // 基础数据转换
 
 tuple : '(' (expression (',' expression)* )? ')'; // 元组
 
@@ -253,8 +255,6 @@ callIs: is type; // 类型判断
 callAs: as type; // 类型转换
 
 callAwait: FlowLeft expression; // 异步调用
-
-basicConvert: Check call '(' expression ':' typeBasic ')'; // 基础数据转换
 
 array : '[' (expression (',' expression)*)? ']'; // 数组
 
