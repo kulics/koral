@@ -64,5 +64,5 @@ Main
     1. Compile to CIL or LLVM.
     1. Increase the standard library.
 ## Compare
-Compare with C#, Kotlin, Swift.
+Compare with C#, Go, Kotlin, Swift.
 Read detail from [Here](./Compare.md).  

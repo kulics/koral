@@ -9,6 +9,10 @@ print("Hello, world!")
 ```
 println("Hello, world!")
 ```
+### Go
+```
+print("Hello, world!")
+```
 ### C#
 ```
 Console.WriteLine("Hello, world!");
@@ -30,6 +34,12 @@ var myVariable = 42
 myVariable = 50
 val myConstant = 42
 ```
+### Go
+```
+myVariable := 42
+myVariable = 50
+const myConstant = 42
+```
 ### C#
 ```
 var myVariable = 42;
@@ -50,6 +60,10 @@ let explicitDouble: Double = 70
 ### Kotlin
 ```
 val explicitDouble: Double = 70.0
+```
+### Go
+```
+var explicitDouble float64 = 70.0
 ```
 ### C#
 ```
@@ -73,6 +87,13 @@ Int Short Long Byte
 Double Float 
 Boolean 
 String
+```
+### Go
+```
+int32 int16 int64 int8 
+float64 float32 
+bool 
+string
 ```
 ### C#
 ```
@@ -101,6 +122,12 @@ val f = 6.0
 val i = 94
 val count:Int = i + f
 ```
+### Go
+```
+f := 6.0
+i := 94
+count := i + int(f)
+```
 ### C#
 ```
 double f = 6;
@@ -119,22 +146,18 @@ count := i + !.(f: i32);
 for index in 1...5 {
     print("\(index) times 5 is \(index * 5)")
 }
-// 1 times 5 is 5
-// 2 times 5 is 10
-// 3 times 5 is 15
-// 4 times 5 is 20
-// 5 times 5 is 25
 ```
 ### Kotlin
 ```
 for (index in 1..5) {
     println("$index times 5 is ${index * 5}")
 }
-// 1 times 5 is 5
-// 2 times 5 is 10
-// 3 times 5 is 15
-// 4 times 5 is 20
-// 5 times 5 is 25
+```
+### Go
+```
+for index := 0; index <= 5; index++  {
+    fmt.Printf("%d times 5 is %d", i, i*5)
+}
 ```
 ### C#
 ```
@@ -142,11 +165,6 @@ for (int index = 1; index <= 5; index++)
 {
     Console.Write($"{index} times 5 is {index * 5}");
 }
-// 1 times 5 is 5
-// 2 times 5 is 10
-// 3 times 5 is 15
-// 4 times 5 is 20
-// 5 times 5 is 25
 ```
 ### XyLang
 ```
@@ -154,11 +172,6 @@ for (int index = 1; index <= 5; index++)
 {
     print.(/"{index} times 5 is {index * 5}"/);
 };
-// 1 times 5 is 5
-// 2 times 5 is 10
-// 3 times 5 is 15
-// 4 times 5 is 20
-// 5 times 5 is 25
 ```
 ## Arrays
 ### Swift
@@ -171,6 +184,12 @@ shoppingList[1] = "bottle of water"
 ```
 val shoppingList = arrayOf("catfish", "water",
     "tulips", "blue paint")
+shoppingList[1] = "bottle of water"
+```
+### Go
+```
+var shoppingList = []string{"catfish", "water",
+    "tulips", "blue paint"}
 shoppingList[1] = "bottle of water"
 ```
 ### C#
@@ -202,6 +221,14 @@ val occupations = mutableMapOf(
 )
 occupations["Jayne"] = "Public Relations"
 ```
+### Go
+```
+var occupations = map[string]string{
+    "Malcolm": "Captain",
+    "Kaylee": "Mechanic",
+}
+occupations["Jayne"] = "Public Relations"
+```
 ### C#
 ```
 var occupations = new Dictionary<string,string>(){
@@ -229,6 +256,13 @@ let emptyDictionary = [String: Float]()
 val emptyArray = arrayOf<String>()
 val emptyMap = mapOf<String, Float>()
 ```
+### Go
+```
+var (
+    emptyArray []string
+    emptyMap = make(map[string]float)
+)
+```
 ### C#
 ```
 var emptyArray = new List<string>();
@@ -237,7 +271,7 @@ var emptyDictionary = new Dictionary<string, float>();
 ### XyLang
 ```
 emptyArray := []str.{};
-emptyMap := [str]f32.{};
+emptyDictionary := [str]f32.{};
 ```
 ## Functions
 ### Swift
@@ -251,6 +285,13 @@ greet("Bob", "Tuesday")
 ```
 fun greet(name: String, day: String): String {
     return "Hello $name, today is $day."
+}
+greet("Bob", "Tuesday")
+```
+### Go
+```
+func greet(name, day string) string {
+    return fmt.Sprintf("Hello %v, today is %v.", name, day)
 }
 greet("Bob", "Tuesday")
 ```
@@ -282,6 +323,12 @@ func getGasPrices() -> (Double, Double, Double) {
 data class GasPrices(val a: Double, val b: Double,
      val c: Double)
 fun getGasPrices() = GasPrices(3.59, 3.69, 3.79)
+```
+### Go
+```
+func getGasPrices() (float64, float64, float64) {
+    return 3.59, 3.69, 3.79
+}
 ```
 ### C#
 ```
@@ -322,6 +369,17 @@ increment(7)
 
 // makeIncrementer can also be written in a shorter way:
 fun makeIncrementer() = fun(number: Int) = 1 + number
+```
+### Go
+```
+func makeIncrementer() func(int) int {
+    addOne := func (number int) int {
+        return 1 + number
+    }
+    return addOne
+}
+increment := makeIncrementer()
+increment(7)
 ```
 ### C#
 ```
@@ -367,6 +425,15 @@ class Shape {
         "A shape with $numberOfSides sides."
 }
 ```
+### Go
+```
+type Shape struct {
+    numberOfSides int
+}
+func (p *Shape) simpleDescription() string {
+    return fmt.Sprintf("A shape with %d sides.", p.numberOfSides)
+}
+```
 ### C#
 ```
 class Shape 
@@ -401,6 +468,12 @@ var shapeDescription = shape.simpleDescription()
 var shape = Shape()
 shape.numberOfSides = 7
 var shapeDescription = shape.simpleDescription()
+```
+### Go
+```
+shape := new(Shape)
+shape.numberOfSides = 7
+shapeDescription := shape.simpleDescription()
 ```
 ### C#
 ```
@@ -476,6 +549,42 @@ class Square(var sideLength: BigDecimal, name: String) :
 val test = Square(BigDecimal("5.2"), "square")
 test.area()
 test.simpleDescription()
+```
+### Go
+```
+type NamedShape struct {
+    numberOfSides int
+    name string
+}
+func NewNamedShape(name string) *NamedShape {
+    return &NamedShape{
+        name: name,
+    }
+}
+func (p *NamedShape) SimpleDescription() string {
+    return fmt.Sprintf("A shape with %d sides.", p.numberOfSides)
+}
+
+type Square struct {
+    *NamedShape
+    sideLength float64
+}
+func NewSquare(sideLength float64, name string) *Square {
+    return &Square{
+        NamedShape: NewNamedShape(name),
+        sideLength: sideLength,
+    }
+}
+func (p *Square) Area() float64 {
+    return p.sideLength * p.sideLength
+}
+func (p *Square) SimpleDescription() string {
+    return fmt.Sprintf("A square with sides of length %d.", p.sideLength)
+}
+
+a := NewSquare(5.2, "square")
+a.Area()
+a.SimpleDescription()
 ```
 ### C#
 ```
@@ -592,6 +701,19 @@ for (item in library) {
     }
 }
 ```
+### Go
+```
+var movieCount = 0
+var songCount = 0
+
+for _, item := range(library) {
+    if _, ok := item.(Movie); ok {
+        movieCount++
+    } else if _, ok := item.(Song); ok {
+        songCount++
+    }
+}
+```
 ### C#
 ```
 var movieCount = 0;
@@ -702,6 +824,14 @@ for (current in someObjects) {
     }
 }
 ```
+### Go
+```
+for object := range someObjects {
+    if movie,ok := object.(Movie); ok {
+        fmt.Printf("Movie: '%s', dir. %s", movie.name, movie.director)
+    }
+}
+```
 ### C#
 ```
 foreach (var current in someObjects) 
@@ -746,6 +876,16 @@ fun f(x: Nameable) {
     println("Name is " + x.name())
 }
 ```
+### Go
+```
+type Nameabler interface {
+    func Name() string
+}
+
+func F(x Nameable) {
+    fmt.Println("Name is " + x.Name())
+}
+```
 ### C#
 ```
 interface Nameable 
@@ -777,7 +917,7 @@ class Dog: Nameable, Weight
 {
     func name() -> String
     {
-        return "Dag"
+        return "Dog"
     }
 
     func getWeight() -> Int
@@ -792,7 +932,7 @@ class Dog: Nameable, Weight
 {
     override fun name(): String
     {
-        return "Dag"
+        return "Dog"
     }
 
     override fun getWeight(): Int
@@ -801,13 +941,25 @@ class Dog: Nameable, Weight
     }
 }
 ```
+### Go
+```
+type Dog struct {}
+// Implement Nameable
+func (p *Dog) Name() string {
+    return "Dog"
+}
+// Implement Weight
+func (p *Dog) GetWeight() int {
+    return 30
+}
+```
 ### C#
 ```
 class Dog: Nameable, Weight
 {
     public string name()
     {
-        return "Dag";
+        return "Dog";
     }
 
     public int getWeight() 
@@ -824,7 +976,7 @@ Dog #{}
     {
         name $()->(n: str)
         {
-            <- ("Dag");
+            <- ("Dog");
         };
     };
 
