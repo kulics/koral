@@ -155,7 +155,7 @@ for (index in 1..5) {
 ```
 ### Go
 ```
-for index := 0; index <= 5; index++  {
+for index := 1; index <= 5; index++  {
     fmt.Printf("%d times 5 is %d", i, i*5)
 }
 ```
@@ -188,7 +188,7 @@ shoppingList[1] = "bottle of water"
 ```
 ### Go
 ```
-var shoppingList = []string{"catfish", "water",
+shoppingList := []string{"catfish", "water",
     "tulips", "blue paint"}
 shoppingList[1] = "bottle of water"
 ```
@@ -223,7 +223,7 @@ occupations["Jayne"] = "Public Relations"
 ```
 ### Go
 ```
-var occupations = map[string]string{
+occupations := map[string]string{
     "Malcolm": "Captain",
     "Kaylee": "Mechanic",
 }
