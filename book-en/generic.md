@@ -21,7 +21,7 @@ E.g:
 Array<T> #{}
 {
     Items := Storage.{T}; // create storage
-    Length ^i32;
+    Length :i32?;
 
     Get $(index: i32)->(item: T) // get a generic data
     {
@@ -47,7 +47,7 @@ E.g:
 ```
 Package<T> #{}
 {
-    Item := nil.(T); / / initialized a null value of the generic data
+    Item := null.(T); / / initialized a null value of the generic data
 };
 ```
 So how do we use generics?

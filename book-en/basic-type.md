@@ -25,11 +25,11 @@ u64     // 64-bit unsigned  0 to 18,446,744,073,709,551,615
 ## Basic Type Conversion
 Since the default integer is `i32`, how do we use other types of integers?
 
-We can use type conversion to change the number to the type we need, just use the `!.(data:type)` syntax.
+We can use type conversion to change the number to the type we need, just use the `type.(data)` syntax.
 
 E.g:
 ```
-integer8 := !.(16:i8);
+integer8 := i8.(16);
 ```
 
 Note that, the basic type conversion is only valid for the base type.
@@ -97,25 +97,43 @@ E.g:
 ```
 any // any type
 ```
-## nil
-Similarly, sometimes you will need a value that can be any nil value to assist in the completion of the function, so it is `nil`.
+## nullable type
+All types in this language can't be null by default, which can avoid null problems to a great extent.
+If a type is defined but not assigned, it will not be used.
 
 E.g:
 ```
-nil // empty value
+a: i32;
+b := a; // error, no assignment to a
+```
+
+If you have to use a type with null values in some cases, you can use a nullable type.
+Just add `?` after any type, which is a nullable type.
+
+E.g:
+```
+a:i32?;
+b := a; // b assigns an empty i32
+```
+## null
+We will need a value that can be any null value, so it is `null`.
+
+E.g:
+```
+null // empty value
 ```
 ## Create a null value with type
 Sometimes, maybe we do not need to specify a specific value, but only want to create a type of default.
 
 Especially when using generics, you can not create directly using type constructs.
 
-At this time we can use the null create method `nil.(type)` to specify a null value that contains a type.
+At this time we can use the null create method `null.(type)` to specify a null value that contains a type.
 
 E.g:
 ```
-x := nil.(i64);
-y := nil.(protocol);
-z := nil.(()->());
+x := null.(i64?);
+y := null.(protocol?);
+z := null.(()->()?);
 ```
 More details on generics can be found in the generic section.
 

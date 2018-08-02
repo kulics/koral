@@ -20,7 +20,7 @@ E.g:
 ```
 HomeWork &
 {
-    Count ^i32;
+    Count :i32;
     Do $()->(){};
 };
 ```
@@ -41,7 +41,7 @@ Student #{}
     ...
     & HomeWork
     {
-        Count ^i32; 
+        Count :i32; 
 
         Do $()->()
         {
