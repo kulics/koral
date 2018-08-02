@@ -20,10 +20,10 @@ E.g:
 ```
 Student #{}
 {
-    Name ^str;
-    Number ^str;
-    Class ^i32;
-    Grade ^i32;
+    Name :str = "";
+    Number :str = "";
+    Class :i32 = 0;
+    Grade :i32 = 0;
 };
 ```
 So we get a student bag with these data attributes. This student bag now becomes a usable type like `i32, str, bool`.
@@ -112,7 +112,7 @@ E.g:
 Student #{}
 {
     ...
-    _GirlFirend ^str; // The identifier beginning with this '_' is private
+    _GirlFirend :str; // The identifier beginning with this '_' is private
 };
 ```
 That's right, if you remember the definition of identifiers, this is how private identifiers are defined, and private identifiers can not be accessed by outsiders.
@@ -224,11 +224,11 @@ E.g:
 ```
 ChineseStudent #{}
 {
-    Name ^str;
-    Number ^str;
-    Class ^i32;
-    Grade ^i32;
-    KungFu ^bool; // kung fu students
+    Name :str = "";
+    Number :str = "";
+    Class :i32 = 0;
+    Grade :i32 = 0;
+    KungFu :bool = false; // kung fu students
 };
 ```
 No, no repeatable definition of data so elegant, we can reuse student attributes, with an additional kung fu attributes on it.
@@ -239,8 +239,8 @@ E.g:
 ```
 ChineseStudent #{}
 {
-    Student ^Student; // include student attributes in it
-    KungFu ^bool; // kung fu students
+    Student :Student?; // include student attributes in it
+    KungFu :bool?; // kung fu students
 };
 ```
 This way you can use generic attributes via student attributes in Chinese students.

@@ -11,7 +11,7 @@ E.g:
 };
 ```
 # Boolean Judgment
-When the judgment value is only `bool`, the statement is executed only if it is `true`. If we also need to handle `false` at the same time, then we can use the auxiliary notation` ~? `To declare another statement.
+When the judgment value is only `bool`, the statement is executed only if it is `true`. If we also need to handle `false` at the same time, then we can use the auxiliary notation `?` To declare another statement.
 
 E.g:
 ```
@@ -20,12 +20,12 @@ b := false;
 {
     ... // since b is false, it will never enter this branch
 }
-~?
+?
 {
     ... // handle false
 };
 ```
-As you may have noticed, yes, there is no `;` between `?` And `~?`.
+As you may have noticed, yes, there is no `;` between `?` And `?`.
 
 Looking back at our definition, any statement ends with `;`, so when it's not, it's not deemed to be over but will continue.
 
@@ -46,7 +46,7 @@ i := 3;
 {
     ...
 }
-~?
+?
 {
     ...
 };
