@@ -686,7 +686,7 @@ namespace xylang
                 r.data = Bool;
                 r.text = $"{context.False().GetText()}";
             }
-            else if (context.t.Type == XyParser.Nil)
+            else if (context.t.Type == XyParser.Null)
             {
                 r.data = Any;
                 r.text = "null";

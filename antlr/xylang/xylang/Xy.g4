@@ -291,7 +291,7 @@ pkgAnonymousAssignElement: name ':=' expression Terminate; // 简化赋值元素
 
 function : Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 
-empty : Nil call '(' type ')'; // 类型空初始化
+empty : Null call '(' type ')'; // 类型空初始化
 
 plusMinus : add expression;
 
@@ -311,13 +311,13 @@ markText
 | t=Text
 | t=True
 | t=False
-| t=Nil
+| t=Null
 ;
 
 markText: '/' t=Text '/';
 
 // 类型
-type:
+typeNotNull:
 typeTuple
 | typeArray
 | typeSharpArray
@@ -325,10 +325,11 @@ typeTuple
 | typeBasic
 | typePackage
 | typeFunction
-//| typeProtocol
 ;
 
-//typeProtocol : typePackage;
+typeNullable : typeNotNull '?';
+type : typeNotNull | typeNullable;
+
 typeTuple : '(' type (',' type)+ ')';
 typeArray : '[' ']' type;
 typeSharpArray :'[' '#' ']' type;
@@ -429,7 +430,7 @@ TypeStr: 'str';
 TypeBool: 'bool';
 True: 'true';
 False: 'false';
-Nil : 'nil';
+Null : 'null';
 
 Float: Integer '.' DIGIT+ ; // 浮点数
 Integer : DIGIT+ ; // 整数
