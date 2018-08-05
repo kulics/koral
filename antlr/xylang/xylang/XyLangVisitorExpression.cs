@@ -9,11 +9,19 @@ namespace xylang
 {
     partial class XyLangVisitor
     {
+        public override object VisitVariableUseStatement([NotNull] XyParser.VariableUseStatementContext context)
+        {
+            var r1 = (Result)Visit(context.expression(0));
+            var r2 = (Result)Visit(context.expression(1));
+            var obj = $"var {r1.text} = {r2.text}";
+            return obj;
+        }
+
         public override object VisitVariableStatement(XyParser.VariableStatementContext context)
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
-            var obj = "var " + r1.text + " = " + r2.text + context.Terminate().GetText() + Wrap;
+            var obj = $"var {r1.text} = {r2.text} {context.Terminate().GetText()} {Wrap}";
             return obj;
         }
 

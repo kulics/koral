@@ -177,29 +177,52 @@ namespace xylang
             return p;
         }
 
+        class Lazy
+        {
+            public bool isDefer { get; set; }
+            public string content { get; set; }
+
+            public Lazy(bool isDefer, string content)
+            {
+                this.isDefer = isDefer;
+                this.content = content;
+            }
+        }
 
         public string ProcessFunctionSupport(XyParser.FunctionSupportStatementContext[] items)
         {
             var obj = "";
             var content = "";
-            var defer = new List<string>();
+            var lazy = new List<Lazy>();
             foreach(var item in items)
             {
                 if(item.GetChild(0) is XyParser.CheckDeferStatementContext)
                 {
-                    defer.Add((string)Visit(item));
+                    lazy.Add(new Lazy(true, (string)Visit(item)));
                     content += "try" + Wrap + "{";
+                }
+                else if (item.GetChild(0) is XyParser.VariableUseStatementContext)
+                {
+                    lazy.Add(new Lazy(false, "}"));
+                    content += $"using ({(string)Visit(item)}) {{ {Wrap}";
                 }
                 else
                 {
                     content += Visit(item);
                 }
             }
-            if(defer.Count > 0)
+            if(lazy.Count > 0)
             {
-                for(int i = defer.Count - 1; i >= 0; i--)
+                for(int i = lazy.Count - 1; i >= 0; i--)
                 {
-                    content += "}" + Wrap + "finally" + Wrap + "{" + defer[i] + "}";
+                    if (lazy[i].isDefer)
+                    {
+                        content += $"}} {Wrap} finally {Wrap} {{  {lazy[i].content} }}";
+                    }
+                    else
+                    {
+                        content += "}";
+                    }
                 }
             }
             obj += content;

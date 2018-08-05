@@ -126,6 +126,7 @@ functionSupportStatement:
 | variableStatement
 | variableDeclaredStatement
 | assignStatement
+| variableUseStatement
 | expressionStatement
 ;
 
@@ -170,6 +171,8 @@ variableStatement: expression Define expression Terminate;
 variableDeclaredStatement: expression Declared type (Assign expression)? Terminate;
 // 赋值
 assignStatement: expression assign expression Terminate;
+// 定义回收变量
+variableUseStatement: expression Use expression Terminate;
 
 expressionStatement: expression Terminate;
 
@@ -383,6 +386,7 @@ BlockRight : '}';
 Define : ':=';
 Declared : ':';
 Assign: '=';
+Use : '!=';
 
 Self : '..';
 
