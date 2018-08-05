@@ -160,7 +160,7 @@ checkStatement: Check BlockLeft (functionSupportStatement)* BlockRight checkErro
 // 错误处理
 checkErrorStatement:id (Declared type)? BlockLeft (functionSupportStatement)* BlockRight;
 // 报告错误
-reportStatement: CheckReport (expression)? Terminate;
+reportStatement: Check call '(' (expression)? ')' Terminate;
 // 迭代器
 iteratorStatement: '[' expression Wave expression Terminate expression ']' | '[' expression Wave expression ']';
 
@@ -398,7 +398,6 @@ Judge : '?';
 LoopSub : '~@';
 Loop : '@';
 
-CheckReport : '!~' ;
 CheckSub : '~!';
 Check : '!';
 
