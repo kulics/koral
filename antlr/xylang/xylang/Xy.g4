@@ -295,7 +295,7 @@ empty : Null call '(' type ')'; // 类型空初始化
 
 plusMinus : add expression;
 
-negate : '~~' expression;
+negate : '~' expression;
 
 linq: '`' (linqItem)+  '`';
 
