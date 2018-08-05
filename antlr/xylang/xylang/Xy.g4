@@ -158,7 +158,7 @@ checkDeferStatement: CheckSub BlockLeft (functionSupportStatement)* BlockRight T
 // 检查
 checkStatement: Check BlockLeft (functionSupportStatement)* BlockRight checkErrorStatement+ Terminate;
 // 错误处理
-checkErrorStatement:Wave id (Declared type)? BlockLeft (functionSupportStatement)* BlockRight;
+checkErrorStatement:id (Declared type)? BlockLeft (functionSupportStatement)* BlockRight;
 // 报告错误
 reportStatement: CheckReport (expression)? Terminate;
 // 迭代器
