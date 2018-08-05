@@ -47,7 +47,7 @@ nspackageFunctionStatement:(annotation)? id (templateDefine)? Function parameter
 // 定义包
 packageStatement:(annotation)? id (templateDefine)? Package parameterClausePackage (extend)? BlockLeft (packageSupportStatement)* BlockRight Terminate;
 // 继承
-extend: '~' type '{' expressionList? '}';
+extend: ':' type '{' expressionList? '}';
 // 入参
 parameterClausePackage : '{' parameter? (',' parameter)*  '}'  ;
 // 包支持的语句
