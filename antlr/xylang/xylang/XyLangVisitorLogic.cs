@@ -38,11 +38,15 @@ namespace xylang
         public override object VisitLoopStatement([NotNull] XyParser.LoopStatementContext context)
         {
             var obj = "";
-            var id = (Result)Visit(context.id());
+            var id = "it";
+            if (context.id() != null)
+            {
+                id = ((Result)Visit(context.id())).text;
+            }
             var it = (Iterator)Visit(context.iteratorStatement());
-            obj += "for (var " + id.text + " = " + it.from.text + ";";
-            obj += id.text + "!=" + it.to.text + "+" + it.step.text + ";";
-            obj += id.text + "+=" + it.step.text + ")";
+            obj += "for (var " + id + " = " + it.from.text + ";";
+            obj += id + "!=" + it.to.text + "+" + it.step.text + ";";
+            obj += id + "+=" + it.step.text + ")";
             obj += Wrap + context.BlockLeft().GetText() + Wrap;
             obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
@@ -60,9 +64,13 @@ namespace xylang
         public override object VisitLoopEachStatement([NotNull] XyParser.LoopEachStatementContext context)
         {
             var obj = "";
-            var id = (Result)Visit(context.id());
+            var id = "it";
+            if (context.id() != null)
+            {
+                id = ((Result)Visit(context.id())).text;
+            }
             var arr = (Result)Visit(context.expression());
-            obj += "foreach (var " + id.text + " in " + arr.text + ")";
+            obj += "foreach (var " + id + " in " + arr.text + ")";
             obj += Wrap + context.BlockLeft().GetText() + Wrap;
             obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;

@@ -144,9 +144,9 @@ judgeBaseStatement:Judge expression BlockLeft (functionSupportStatement)* BlockR
 // else 判断
 judgeElseStatement:Judge BlockLeft (functionSupportStatement)* BlockRight;
 // 循环
-loopStatement:Loop iteratorStatement Wave id BlockLeft (functionSupportStatement)* BlockRight Terminate;
+loopStatement:iteratorStatement call Loop (id)? BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 集合循环
-loopEachStatement:Loop expression Wave id BlockLeft (functionSupportStatement)* BlockRight Terminate;
+loopEachStatement:expression call Loop (id)? BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 条件循环
 loopCaseStatement:Loop expression BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 无限循环
