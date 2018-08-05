@@ -240,7 +240,7 @@ callFunc: id (templateCall)? call tuple; // 函数调用
 
 callPkg: type call '{' expressionList? ( '...' (pkgAssign|arrayAssign|dictionaryAssign))? '}'; // 新建包
 
-getType: ':' call '(' type ')';
+getType: Judge call '(' (expression|':' type) ')';
 
 pkgAssign: (pkgAssignElement (',' pkgAssignElement)*)? ; // 简化赋值
 

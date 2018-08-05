@@ -43,7 +43,14 @@ namespace xylang
         {
             var r = new Result();
             r.data = "System.Type";
-            r.text = "typeof(" + Visit(context.type()) + ")";
+            if (context.type() is null)
+            {
+                r.text = $"{((Result)Visit(context.expression())).text} .GetType()";
+            }
+            else
+            {
+                r.text = $"typeof( { Visit(context.type())} )";
+            }
             return r;
         }
 
