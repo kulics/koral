@@ -119,8 +119,22 @@ namespace xylang
         public override object VisitCaseExprStatement([NotNull] XyParser.CaseExprStatementContext context)
         {
             var obj = "";
-            var expr = (Result)Visit(context.expression());
-            obj += "case " + expr.text + ":" + Wrap;
+            if (context.type() is null)
+            {
+                var expr = (Result)Visit(context.expression());
+                obj += $"case {expr.text} :{Wrap}";
+            }
+            else
+            {
+                var id = "it";
+                if (context.id()!=null)
+                {
+                    id = ((Result)Visit(context.id())).text;
+                }
+                var type = (string)Visit(context.type());
+                obj += $"case {type} {id} :{Wrap}";
+            }
+
             obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += "break;";
             return obj;

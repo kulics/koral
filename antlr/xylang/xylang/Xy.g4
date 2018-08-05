@@ -130,11 +130,11 @@ functionSupportStatement:
 ;
 
 // 条件判断
-judgeCaseStatement: Judge expression (caseStatement)+ Terminate;
+judgeCaseStatement: expression call Judge (caseStatement)+ Terminate;
 // 缺省条件声明
-caseDefaultStatement: Wave Discard BlockLeft (functionSupportStatement)* BlockRight;
+caseDefaultStatement: Discard BlockLeft (functionSupportStatement)* BlockRight;
 // 条件声明
-caseExprStatement: Wave expression BlockLeft (functionSupportStatement)* BlockRight;
+caseExprStatement: (expression| (id)? ':' type) BlockLeft (functionSupportStatement)* BlockRight;
 // 判断条件声明
 caseStatement: caseDefaultStatement|caseExprStatement;
 // 判断
@@ -240,7 +240,7 @@ callFunc: id (templateCall)? call tuple; // 函数调用
 
 callPkg: type call '{' expressionList? ( '...' (pkgAssign|arrayAssign|dictionaryAssign))? '}'; // 新建包
 
-getType: '?' call '(' type ')';
+getType: ':' call '(' type ')';
 
 pkgAssign: (pkgAssignElement (',' pkgAssignElement)*)? ; // 简化赋值
 
@@ -362,8 +362,8 @@ t=TypeAny
 // bool值
 bool:t=True|t=False;
 
-as : op='!';
-is : op='?';
+as : op='!:';
+is : op='?:';
 judge : op=('||' | '&&' | '==' | '~=' | '<' | '>' | '<=' | '>=');
 assign : op=(Assign | '+=' | '-=' | '*=' | '/=' | '%=');
 add : op=('+' | '-');
