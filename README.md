@@ -34,16 +34,16 @@ Main
                     "Cześć", "Olá", "Здравствуйте",
                     "Chào bạn", "您好"];
         // for-each
-        @ greetings ~ item
+        greetings.@
         {
             // call function
-            print.(item);
-            // if-switch
-            ? item ~ [0~8] 
+            print.(it);
+            // match
+            it.? [0~8] 
             {
                 print.(" in 0-8");
             }
-            ~ _
+            _
             {
                 print.(" over 10");
                 ~@;

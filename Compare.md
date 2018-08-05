@@ -168,9 +168,9 @@ for (int index = 1; index <= 5; index++)
 ```
 ### XyLang
 ```
-@ [ 1 ~ 5 ] ~ index
+[ 1 ~ 5 ].@
 {
-    print.(/"{index} times 5 is {index * 5}"/);
+    print.(/"{it} times 5 is {it * 5}"/);
 };
 ```
 ## Arrays
@@ -736,13 +736,14 @@ foreach (var item in library)
 movieCount := 0;
 songCount := 0;
 
-@ library ~ item 
+library.@ 
 {
-    ? item.?Movie 
+    it.?
+    :Movie 
     {
         movieCount += 1;
     }
-    ? item.?Song 
+    :Song 
     {
         songCount += 1;
     };
@@ -798,12 +799,12 @@ switch (nb)
 ### XyLang
 ```
 nb := 42;
-? nb 
-~ [0~7],8,9 { print.("single digit"); }
-~ 10 { print.("double digits"); }
-~ [11~99] { print.("double digits"); }
-~ [100~999] { print.("triple digits"); }
-~ _ { print.("four or more digits"); };
+nb.?  
+[0~7],8,9 { print.("single digit"); }
+10 { print.("double digits"); }
+[11~99] { print.("double digits"); }
+[100~999] { print.("triple digits"); }
+_ { print.("four or more digits"); };
 ```
 ## Downcasting
 ### Swift
@@ -845,10 +846,9 @@ foreach (var current in someObjects)
 ```
 ### XyLang
 ```
-@ someObjects ~ current 
+someObjects.@ 
 {
-    movie := current.!Movie;
-    ? movie ~= nil
+    it.? movie:Movie
     {
         print.(/"Movie: '{movie.name}', " +
             "dir. {movie.director}"/);
