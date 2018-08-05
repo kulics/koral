@@ -14,11 +14,6 @@ namespace xylang
             var obj = "";
             obj += "namespace " + Visit(context.nameSpace()) + Wrap + context.BlockLeft().GetText() + Wrap;
 
-            if (context.importStatement()!=null)
-            {
-                obj += Visit(context.importStatement());
-            }
-
             foreach(var item in context.exportSupportStatement())
             {
                 obj += Visit(item);
