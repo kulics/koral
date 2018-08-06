@@ -25,7 +25,7 @@ Read detail from The [Book](./book-en/introduction.md).
 {
     :> System; // import namespace
 
-    $     // main function  
+    $ // main function  
     {
         // array
         greetings := ["Hello", "Hola", "Bonjour",
