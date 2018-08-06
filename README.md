@@ -21,23 +21,21 @@ Read detail from The [Book](./book-en/introduction.md).
 
 ## Quick Preview
 ```
-// namespace
-Main
-~System
+<: Main // export namespace
 {
-    // main function
-    $  
+    :> System; // import namespace
+
+    $     // main function  
     {
         // array
         greetings := ["Hello", "Hola", "Bonjour",
                     "Ciao", "こんにちは", "안녕하세요",
                     "Cześć", "Olá", "Здравствуйте",
                     "Chào bạn", "您好"];
-        // for-each
-        greetings.@
+                    
+        greetings.@ // for-each
         {
-            // call function
-            print.(it);
+            print.(it); // call function
             // match
             it.? [0~8] 
             {

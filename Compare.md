@@ -647,14 +647,12 @@ NamedShape #{name: str}
     };
 };
 
-Square #{sideLength: f64, name: str}
+Square #{sideLength: f64, name: str}:NamedShape{name}
 {
-    namedShape: NamedShape;
     sideLength: f64;
 
     # 
     {
-        ..namedShape = NamedShape.{name};
         ..sideLength = sideLength;
         ..numberOfSides = 4;
     };
