@@ -3,17 +3,26 @@ Sometimes, we may need to execute the same code multiple times.
 
 Under normal circumstances, the statement is executed in order, the first statement in the function first, followed by the second statement, and so on.
 ## Collection Loop
-If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can iterate through the collection using the `@` symbol and take each element using the helper `~`.
+If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can use the `.@ id` statement to iterate over the collection, taking each element out of `id`.
 
 E.g:
 ```
 arr := [1, 2, 3, 4, 5];
-@ arr ~ i
+arr.@ item
 {
-    Console.WriteLine.(i); // print each number
+    Console.WriteLine.(item); // print each number
 };
 ```
-`~` Followed by an identifier, this identifier is the current take value in collection, this identifier is valid only in the current cycle. So we do not need to define an identifier externally.
+The identifier followed by `@` is the currently fetched value, which is valid only for the current loop. So we don't need to define an identifier externally.
+If we don't want to define additional identifiers, we can omit them. The default is `it`.
+
+E.g:
+```
+Arr.@
+{
+     Console.WriteLine.(it); // print each number
+};
+```
 
 This can be thought of as a `foreach` structure relative to other languages.
 ## Iterator Loop
@@ -23,9 +32,9 @@ Iterators can loop from the start point to the end point, we use the collection 
 
 E.g:
 ```
-@ [0 ~ 100] ~ i
+[0 ~ 100].@
 {
-    Console.WriteLine.(i); // print each number
+    Console.WriteLine.(it); // print each number
 };
 ```
 It should be noted that the meaning of `0 ~ 100` is read from` 0` to `100` one by one, that is, a total execution of` 101` times. Iterator will be executed until the last number is completed, rather than an early end.
@@ -36,7 +45,7 @@ By default, iterators add `1` to each interval. If we need to take every other n
 
 E.g:
 ```
-@ [0 ~ 100; 2] ~ i
+[0 ~ 100; 2].@
 {
     ...
 };
@@ -47,7 +56,7 @@ That being the case, we can also reverse it in reverse order, as long as we use 
 
 E.g:
 ```
-@ [100 ~ 0; -1] ~ i
+[100 ~ 0; -1].@
 {
      ... // from 100 to 0
 };
@@ -55,7 +64,7 @@ E.g:
 
 This can be considered as a `for` structure relative to other languages.
 ## Infinite Loop
-At other times, we may need an infinite loop. Very easy, we just need to do without data.
+At other times, we may need an infinite loop. Very easy, we only need to use the `@` statement..
 
 E.g:
 ```
@@ -90,4 +99,5 @@ i := 0;
      i += 1;
 };
 ```
+
 ### [Next Chapter](function-type.md)

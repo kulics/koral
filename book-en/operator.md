@@ -47,7 +47,7 @@ a := true;
 b := false;
 c := a && b;  // && and, both true at the same time
 c = a || b;  // || or, one of them is true
-c = ~~ a;    // ~~ not, boolean negation
+c = ~ a;    // ~ not, boolean negation
 ```
 ## Assignment Operator
 Assignment operator is mainly used to assign the right data to the left identifier, you can also attach some shortcut.

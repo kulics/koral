@@ -10,11 +10,11 @@ A statement must be terminated by a distinct `;` and often `{}` is used to wrap 
 ## Export Namespace
 All content in this language can only be defined in the namespace so that content can be efficiently divided into distinct blocks for management. You can define it freely in a separate namespace without undue restrictions on naming.
 
-We can use the `{}` statement to define a region's namespace.
+We can use the `<: id {}` statement to define a region's namespace.
 
 E.g:
 ```
-Demo
+<: Demo
 {
     ...
 };
@@ -25,28 +25,26 @@ At the same time the external area can import `Demo` to use the contents of whic
 
 Note that only the main entry, package, and protocol statements are supported in the namespace, and these identifiers must be public.
 ## Import Namespace
-We can use the `~` statement to import other namespaces, libraries, frameworks into a namespace.
+We can use the `:>` statement to import other namespaces, libraries, frameworks into a namespace.
 
 E.g:
 ```
-Demo
-~System
-~System\Collections\Generic
+<: Demo
 {
+    :> System, System\Collections\Generic;
 };
 ```
 This imports the `System` and` Generic` libraries into the `Demo` namespace, and then you can use them in the program.
 
-Within before braces, you can write multiple import statements whose order does not affect the import functionality.
+You can write multiple import statements that are separated by `,` and their order does not affect the import function.
 ## Main Entry
 We need to define a main entry to let the program know where to start. The main entry through a fixed single symbol `$` statement, and must be valid at the top of the namespace.
 
 E.g:
 ```
-Demo
-~System
-~System\Collections\Generic
+<: Demo
 {
+    :> System;
     $
     {
         ...
