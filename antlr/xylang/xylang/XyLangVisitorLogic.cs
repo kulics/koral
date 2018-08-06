@@ -135,7 +135,7 @@ namespace xylang
                 obj += $"case {type} {id} :{Wrap}";
             }
 
-            obj += ProcessFunctionSupport(context.functionSupportStatement());
+            obj += $"{{ {ProcessFunctionSupport(context.functionSupportStatement())} }}";
             obj += "break;";
             return obj;
         }
