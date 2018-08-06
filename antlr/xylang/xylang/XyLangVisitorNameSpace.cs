@@ -246,7 +246,15 @@ namespace xylang
             {
                 obj += Visit(context.annotation());
             }
-            obj += $"{r1.permission} static {typ} {r1.text} {{ get  {{ return {r2.text} {Terminate} }} }} {Wrap}";
+            if (r2.text.StartsWith('$') && r2.text.EndsWith('"'))
+            {
+                obj += $"{r1.permission} readonly static {typ} {r1.text} = {r2.text} {Terminate} {Wrap}";
+            }
+            else
+            {
+                obj += $"{r1.permission} const {typ} {r1.text} = {r2.text} {Terminate} {Wrap}";
+            }
+
             return obj;
         }
 
