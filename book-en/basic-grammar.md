@@ -37,6 +37,9 @@ E.g:
 This imports the `System` and` Generic` libraries into the `Demo` namespace, and then you can use them in the program.
 
 You can write multiple import statements that are separated by `,` and their order does not affect the import function.
+
+For more details on namespaces, please see [Namespace](namespace.md)
+
 ## Main Entry
 We need to define a main entry to let the program know where to start. The main entry through a fixed single symbol `$` statement, and must be valid at the top of the namespace.
 
