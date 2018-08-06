@@ -246,7 +246,7 @@ namespace xylang
             {
                 obj += Visit(context.annotation());
             }
-            if (r2.text.StartsWith('$') && r2.text.EndsWith('"'))
+            if (r2.text.StartsWith('$') || r2.text.Substring(0,3) == ("new"))
             {
                 obj += $"{r1.permission} readonly static {typ} {r1.text} = {r2.text} {Terminate} {Wrap}";
             }
