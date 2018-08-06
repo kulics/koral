@@ -58,9 +58,9 @@ Read detail from The [Book](./book-en/introduction.md).
     1. Rewrite all xy projects using xylang.
     1. Develop vscode syntax plugin.
     1. Compiler features improvements (identifier records, cross-file references, project compilation).
-1. 2019.03 ~ 2020.03
+1. 2019.03 ~ 2021.03
     1. Compile to CIL or LLVM.
-    1. Increase the standard library.
+    1. Improved compilation capabilities and support for language server protocols.
 ## Compare
 Compare with C#, Go, Kotlin, Swift.
 Read detail from [Here](./Compare.md).  
