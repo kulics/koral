@@ -53,15 +53,15 @@ i := 3;
 ```
 This can be considered as an `if elseif else` structure relative to other languages.
 # Condition Judgment
-When the judgment value is the other identified basic type (`string, integer`), the statement can enter the inner multi-condition matching, we can use the auxiliary symbol `~` to match the conditions to perform the corresponding logic, so it will only execute the statement that matched successfully.
+If we need to judge an identifier, we can use the `.?` statement, the statement implements multiple conditional matching, and the matching condition is used to execute the corresponding logic, so that it will only execute the statement with successful matching.
 
 E.g:
 ```
-? i ~ 1
+i.? 1
 {
     ...
 }
-~ 2
+2
 {
     ...
 };
@@ -75,15 +75,15 @@ What if you need a default condition to execute logic? We can use an anonymous i
 
 E.g:
 ```
-? i ~ 1
+i.? 1
 {
     ...
 }
-~ 2
+2
 {
     ...
 }
-~ _
+_
 {
     ...
 };
@@ -92,4 +92,32 @@ In this case can not match, it will go to the default processing area to execute
 
 This can be thought of as the `switch case default` structure relative to other languages.
 
+### Pattern Matching
+Conditional judgment can do more, for example, we need to judge the type of the identifier,
+You can use the `id:type` syntax to match types, `id` can be omitted, and the default is `it`.
+
+E.g:
+```
+x.?
+:i32 // When i32
+{
+     Console.Write.(it);
+}
+content:str // when str
+{
+     Console.Write.(content);
+}
+null // When it is null
+{
+     Console.Write.("null");
+}; 
+```
+### Get type
+If we need to explicitly get the type value, we can use the `?.()` syntax to get it.
+
+E.g:
+```
+?.(expr); // Get the expression type value
+?.(:type); // Get the type value directly by type
+```
 ### [Next Chapter](loop.md)

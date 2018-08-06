@@ -8,7 +8,7 @@ Exported names can be nested in a loop so that functions can be split as effecti
 
 E.g:
 ```
-name\space
+<: name\space
 {
     space #
     {
@@ -24,9 +24,9 @@ We can use other namespace contents through the import function. The namespace c
 
 E.g:
 ```
-import
-~name\space
+<: import
 {
+    :> name\space;
     $
     {
         // print something
@@ -39,9 +39,10 @@ If we don't want to use no construct package names every time we call content, w
 
 E.g:
 ```
-import
-~..name\space.space
+<: import
 {
+    :> ..name\space.space;
+    
     $
     {
         // print something

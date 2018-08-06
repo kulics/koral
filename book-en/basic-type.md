@@ -103,7 +103,7 @@ If a type is defined but not assigned, it will not be used.
 
 E.g:
 ```
-a: i32;
+a : i32;
 b := a; // error, no assignment to a
 ```
 
@@ -112,7 +112,7 @@ Just add `?` after any type, which is a nullable type.
 
 E.g:
 ```
-a:i32?;
+a : i32?;
 b := a; // b assigns an empty i32
 ```
 ## null

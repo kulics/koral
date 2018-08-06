@@ -8,7 +8,7 @@ The program may experience a variety of exceptions.
 Abnormal can not be completely avoided, but we can choose some means to help us to check and report anomalies.
 
 ## Report Exception
-We can declare an exception data using `!~` Anywhere in the function.
+We can declare an exception data using `!.()` Anywhere in the function.
 
 E.g:
 ```
@@ -16,13 +16,13 @@ ReadFile $(name: str)->()
 {
     ? name.Length == 0
     {
-        !~ Exception.{"something wrong"};
+        !.(Exception.{"something wrong"});
     };
 };
 ```
 So we declare an exception, the exception is `something wrong`, and once an external caller has used a `name` of an invalid length, the exception is reported up until it is processed or ignored.
 ## Check Exception
-We can use the `!` And the auxiliary symbol `~` to check for blocks that may be abnormal when the function is called.
+We can use the `!` to check for blocks that may be abnormal when the function is called.
 
 E.g:
 ```
@@ -30,12 +30,12 @@ E.g:
 {
     ReadFile.("temp.txt");
 }
-~ err
+err
 {
     Console.WriteLine.(err.message);
 };
 ```
-Here, the `!` Block represents all the functional logic under inspection, `~ err` means that the erroneous data is defined as the identifier `err`, which acts like a in parameter.
+Here, the `!` Block represents all the functional logic under inspection, `err` means that the erroneous data is defined as the identifier `err`, which acts like a in parameter.
 
 Once an exception occurs in the read file function, `err` is checked and the print function is executed. If not, everything is normal and does not go into the exception handling section.
 
@@ -44,9 +44,9 @@ Similarly, the check logic is also inside the function, so if there is an except
 E.g:
 ```
 ...
-~ err
+err
 {
-    !~ err;
+    !.(err);
 };
 ```
 So how do we distinguish between different types of anomalies?
@@ -55,7 +55,7 @@ Very simple, we can specify the type after the identifier.
 
 E.g:
 ```
-~ e : IOException
+e : IOException
 {
     ...
 };
@@ -114,14 +114,23 @@ E.g:
 Func $()->()
 {
     ...
-    @ [0~5] ~ index
+    [0~5].@
     {
         // does not affect the logic outside the loop
-        ~! { Console.WriteLine.(index + 1); };
-        Console.WriteLine.(index);
+        ~! { Console.WriteLine.(it + 1); };
+        Console.WriteLine.(it);
     };
     ...
 };
+```
+
+### Automatic Release
+For packages that implement the automatic release protocol, we can use the '!= ' syntax to define variables so that they are automatically released when the function completes.
+
+E.g:
+``` 
+Res != Fileresource.{ "/test.xy"};
+...
 ```
 
 ### [Next Chapter](asynchronous.md)

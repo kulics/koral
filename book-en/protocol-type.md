@@ -6,11 +6,11 @@ The protocol specifies the methods and properties necessary to implement a parti
 
 Our package can introduce the protocol we need, just like signing an protocol, and then declare all the properties required by the protocol, so that we think the package signed the protocol.
 ## Definition
-We only need to use the symbol `&` to define a protocol.
+We only need to use the symbol `%` to define a protocol.
 
 E.g:
 ```
-Protocol &{};
+Protocol %{};
 ```
 This is an empty protocol.
 
@@ -18,7 +18,7 @@ Next, let's design a difficult task that students need to accomplish ... homewor
 
 E.g:
 ```
-HomeWork &
+HomeWork %
 {
     Count :i32;
     Do $()->(){};
@@ -32,14 +32,14 @@ Unlike a package, the definition of the protocol properties do not need specific
 
 Next, let's have the students implement the protocol.
 ## Contains the protocol
-We can include this protocol in the package we need, using the symbols `&` and the protocol name.
+We can include this protocol in the package we need, using the symbols `%` and the protocol name.
 
 E.g:
 ```
 Student #{}
 {
     ...
-    & HomeWork
+    % HomeWork
     {
         Count :i32; 
 
@@ -115,9 +115,9 @@ E.g:
 Arr := []HomeWork.{};
 Arr.Add.(StudentA.HomeWork);
 ... // stuffed many, many students
-@ Arr ~ Student
+Arr.@
 {
-    DoHomeWork.(Student);
+    DoHomeWork.(it);
 };
 ```
 ╮ (¯ ▽ ¯) ╭
@@ -128,20 +128,20 @@ Because packet types can be converted to protocol types, the original type of da
 
 But sometimes we need to get the original type of data to handle, we can use type judgment to help us accomplish this.
 
-We can use `.?type` To judge the type of data, using `.!type` To convert the data to our type.
+We can use `.?:type` To judge the type of data, using `.!:type` To convert the data to our type.
 
 E.g:
 ```
 func $(hw :HomeWork)->()
 {
     // judge type
-    ? hw.?ChineseStudent 
+    ? hw.?:ChineseStudent 
     {
         // convert to chinese student data
-        cs := hw.!ChineseStudent;
+        cs := hw.!:ChineseStudent;
     };
 };
 ```
-Note that if the type can not be converted correctly, it will return a nil value.
+Note that if the type can not be converted correctly, it will return a `null` value.
 
 ### [Next Chapter](enumeration-type.md)
