@@ -110,9 +110,9 @@ namespace xylang
         public override object VisitCaseDefaultStatement([NotNull] XyParser.CaseDefaultStatementContext context)
         {
             var obj = "";
-            obj += "default:" + Wrap;
+            obj += "default:{" + Wrap;
             obj += ProcessFunctionSupport(context.functionSupportStatement());
-            obj += "break;";
+            obj += "}break;";
             return obj;
         }
 
