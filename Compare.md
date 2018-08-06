@@ -898,7 +898,7 @@ void f(Nameable x)
 ```
 ### XyLang
 ```
-Nameable & 
+Nameable % 
 {
     name $()->(s: str){};
 };
@@ -970,7 +970,7 @@ class Dog: Nameable, Weight
 ```
 Dog #{}
 {
-    & Nameable
+    % Nameable
     {
         name $()->(n: str)
         {
@@ -978,7 +978,7 @@ Dog #{}
         };
     };
 
-    & Weight
+    % Weight
     {
         getWeight $()->(w: i32)
         {
