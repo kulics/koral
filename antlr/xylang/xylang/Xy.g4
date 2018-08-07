@@ -260,11 +260,11 @@ callAs: as type; // 类型转换
 
 callAwait: FlowLeft expression; // 异步调用
 
-array : '[' (expression (',' expression)*)? ']'; // 数组
+array : '[' (expression (',' expression)*)? (':' typeArray)? ']'; // 数组
 
-sharpArray : '[' '#' ']' '[' (expression (',' expression)*)? ']'; // c#数组
+sharpArray : '[' '#' ']' '[' (expression (',' expression)*)? (':' typeSharpArray)? ']'; // c#数组
 
-dictionary :  '[' (dictionaryElement (',' dictionaryElement)*)?  ']'; // 字典
+dictionary :  '[' (dictionaryElement (',' dictionaryElement)*)? (':' typeDictionary)? ']'; // 字典
 
 dictionaryElement: expression '->' expression; // 字典元素
 
@@ -325,7 +325,7 @@ typeNotNull:
 typeTuple
 | typeArray
 | typeSharpArray
-| typeDictinary
+| typeDictionary
 | typeBasic
 | typePackage
 | typeFunction
@@ -337,7 +337,7 @@ type : typeNotNull | typeNullable;
 typeTuple : '(' type (',' type)+ ')';
 typeArray : '[' ']' type;
 typeSharpArray :'[' '#' ']' type;
-typeDictinary :  '[' type ']' type;
+typeDictionary :  '[' type ']' type;
 typePackage : nameSpaceItem (templateCall)? ;
 typeFunction : typeFunctionParameterClause ArrowRight typeFunctionParameterClause;
 

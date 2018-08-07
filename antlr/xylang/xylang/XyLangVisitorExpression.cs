@@ -579,8 +579,16 @@ namespace xylang
                     result.text += "," + r.text;
                 }
             }
-            result.data = type + "[]";
-            result.text = "new []{" + result.text + "}";
+            if (context.typeSharpArray() != null)
+            {
+                result.data = (string)Visit(context.typeSharpArray());
+            }
+            else
+            {
+                result.data = type + "[]";
+            }
+
+            result.text = $"new []{{ {result.text} }}";
             return result;
         }
 
@@ -605,8 +613,16 @@ namespace xylang
                     result.text += "," + r.text;
                 }
             }
-            result.data = "List<" + type + ">";
-            result.text = "new List<" + type + ">(){" + result.text + "}";
+            if (context.typeArray() != null)
+            {
+                result.data = (string)Visit(context.typeArray());
+            }
+            else
+            {
+                result.data = "List<" + type + ">";
+            }
+
+            result.text = $"new {result.data}(){{ {result.text} }}";
             return result;
         }
 
@@ -638,8 +654,16 @@ namespace xylang
                 }
             }
             var type = key + "," + value;
-            result.data = "Dictionary<" + type + ">";
-            result.text = "new Dictionary<" + type + ">(){" + result.text + "}";
+            if (context.typeDictionary() != null)
+            {
+                result.data = (string)Visit(context.typeDictionary());
+            }
+            else
+            {
+                result.data = "Dictionary<" + type + ">";
+            }
+
+            result.text = $"new {result.data}(){{ {result.text} }}";
             return result;
         }
 

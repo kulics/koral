@@ -68,7 +68,7 @@ namespace xylang
             return obj;
         }
 
-        public override object VisitTypeDictinary([NotNull] XyParser.TypeDictinaryContext context)
+        public override object VisitTypeDictionary([NotNull] XyParser.TypeDictionaryContext context)
         {
             var obj = "";
             obj += " Dictionary<" + Visit(context.type(0)) + "," + Visit(context.type(1)) + "> ";

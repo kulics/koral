@@ -19,13 +19,15 @@ arr := [ 1,2,3,4,5 ];
 ```
 This will create a `i32` type array containing` 1` to `5`.
 
-If you need an empty array of definite type, you can create it using the type-creation syntax.
+If you need an array of explicit types, you can create them using type tags or type creation syntax.
 
 The array type is represented by `[]type`, where `[]` is a one-dimensional array, so multidimensional arrays can be represented as `[][][]type`.
 
 For example we need a string array:
 ```
-arrString := []str.{};
+arr := ["1,"2","3" :[]str]; // tag type
+arr2 := [:[]str]; // empty array
+arr3 := []str.{}; // type creation
 ```
 #### .NET Arrays
 If we need to use the `.Net` native array type, we can use `[#]type` to represent it.
@@ -74,7 +76,7 @@ dic := ["a"->1, "b"->2, "c"->3];
 ```
 This will create a `str->i32` type dictionary containing` a, b, c` entries.
 
-If you need a clear dictionary of empty dictionaries, you can also create it using the type-creation syntax.
+If you need an explicit type of dictionary, you can also create it using type tags or type creation syntax.
 
 The dictionary type is represented by `[type]type` and `[type]` represents a one-dimensional dictionary, so the nested dictionary can be represented as `[type][type][type]type`.
 
@@ -84,7 +86,8 @@ Since arrays only support numeric indexes, you can omit the `[i32]` tag. We can 
 
 E.g:
 ```
-dicNumNum := [i32]i32.{};
+dicNumNum := [:[i32]i32];
+dicNumNum2 := [i32]i32.{};
 ```
 ### Visit
 Like an array, we can also use indexes to access data directly.
