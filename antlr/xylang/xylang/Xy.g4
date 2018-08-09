@@ -36,7 +36,7 @@ nspackageFunctionStatement
 ;
 
 // 主函数
-functionMainStatement:'Main' BlockLeft (functionSupportStatement)* BlockRight Terminate;
+functionMainStatement:'Main' BlockLeft (functionSupportStatement)* BlockRight;
 // 无构造包变量
 nspackageVariableStatement:(annotation)? expression (Define expression|Declared type (Assign expression)?) (nspackageControlSubStatement)* Terminate;
 // 无构造包常量
@@ -46,7 +46,7 @@ nspackageControlSubStatement: Control id (BlockLeft (functionSupportStatement)* 
 // 无构造包函数
 nspackageFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 // 定义包
-packageStatement:(annotation)? id (templateDefine)? Package parameterClausePackage (extend)? BlockLeft (packageSupportStatement)* BlockRight Terminate;
+packageStatement:(annotation)? id (templateDefine)? parameterClausePackage (extend)? ArrowRight BlockLeft (packageSupportStatement)* BlockRight;
 // 继承
 extend: ':' type '{' expressionList? '}';
 // 入参
