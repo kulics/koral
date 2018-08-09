@@ -22,7 +22,7 @@ nameSpaceStatement: (annotation)? (callEllipsis)? (nameSpace)? (call id)?;
 // 省略调用名称
 callEllipsis: '..';
 // 枚举
-enumStatement: (annotation)? id Package '[' enumSupportStatement (',' enumSupportStatement)* ']' Terminate;
+enumStatement: (annotation)? id '[' enumSupportStatement (',' enumSupportStatement)* ']';
 
 enumSupportStatement: id ('=' (add)? Integer)?;
 

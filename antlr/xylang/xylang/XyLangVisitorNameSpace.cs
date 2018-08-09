@@ -155,7 +155,7 @@ namespace xylang
             {
                 obj += Visit(context.enumSupportStatement(i));
             }
-            obj += "}" + context.Terminate().GetText() + Wrap;
+            obj += "}" + Terminate + Wrap;
             obj = header + obj;
             return obj;
         }
