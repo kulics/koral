@@ -521,7 +521,7 @@ namespace xylang
             {
                 r.text += Visit(context.templateDefine());
             }
-            r.text += Visit(context.parameterClauseIn()) + context.Terminate().GetText() + Wrap;
+            r.text += Visit(context.parameterClauseIn()) + ";" + Wrap;
             return r;
         }
     }

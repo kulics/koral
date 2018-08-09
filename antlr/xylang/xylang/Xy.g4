@@ -44,7 +44,7 @@ nspackageInvariableStatement:(annotation)? expression (Declared type '==' | ':==
 // 定义子方法
 nspackageControlSubStatement: Control id (BlockLeft (functionSupportStatement)* BlockRight)?;
 // 无构造包函数
-nspackageFunctionStatement:(annotation)? id (templateDefine)? Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+nspackageFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 // 定义包
 packageStatement:(annotation)? id (templateDefine)? Package parameterClausePackage (extend)? BlockLeft (packageSupportStatement)* BlockRight Terminate;
 // 继承
@@ -63,9 +63,9 @@ packageInitStatement
 // 包构造方法
 packageInitStatement:(annotation)? Package BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 函数
-packageFunctionStatement:(annotation)? id (templateDefine)? Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+packageFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 // 重载函数
-packageOverrideFunctionStatement:(annotation)? Self id Function parameterClauseIn ArrowRight parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+packageOverrideFunctionStatement:(annotation)? Self id parameterClauseIn ArrowRight parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 // 定义变量
 packageVariableStatement:(annotation)? expression (Define expression|Declared type (Assign expression)?) (packageControlSubStatement)* Terminate;
 // 定义子方法
@@ -84,7 +84,7 @@ protocolControlStatement:(annotation)? id Declared type (protocolControlSubState
 // 定义子方法
 protocolControlSubStatement: Control id;
 // 函数
-protocolFunctionStatement:(annotation)? id (templateDefine)? Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+protocolFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 // 协议实现支持的语句
 protocolImplementSupportStatement:
 implementFunctionStatement
@@ -96,11 +96,11 @@ protocolImplementStatement:Protocol nameSpaceItem (templateCall)? BlockLeft (pro
 // 控制实现
 implementControlStatement:(annotation)? id (Define expression|Declared type (Assign expression)?) (packageControlSubStatement)* Terminate;
 // 函数实现
-implementFunctionStatement:(annotation)? id (templateDefine)? Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+implementFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 // 事件实现
 implementEventStatement: id '^!' nameSpaceItem Terminate;
 // 函数
-functionStatement:id (templateDefine)? Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate;
+functionStatement:id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 // 返回
 returnStatement: ArrowLeft tuple Terminate;
 // 入参
@@ -293,7 +293,7 @@ pkgAnonymousAssign: BlockLeft (pkgAnonymousAssignElement)* BlockRight; // 简化
 
 pkgAnonymousAssignElement: name ':=' expression Terminate; // 简化赋值元素
 
-function : Function parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
+function : parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 
 empty : Null call '(' type ')'; // 类型空初始化
 
