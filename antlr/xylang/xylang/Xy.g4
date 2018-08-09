@@ -36,7 +36,7 @@ nspackageFunctionStatement
 ;
 
 // 主函数
-functionMainStatement:Function BlockLeft (functionSupportStatement)* BlockRight Terminate;
+functionMainStatement:'Main' BlockLeft (functionSupportStatement)* BlockRight Terminate;
 // 无构造包变量
 nspackageVariableStatement:(annotation)? expression (Define expression|Declared type (Assign expression)?) (nspackageControlSubStatement)* Terminate;
 // 无构造包常量
