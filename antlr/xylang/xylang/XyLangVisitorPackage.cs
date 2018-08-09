@@ -86,7 +86,7 @@ namespace xylang
                 }
                 obj = init + "{}" + obj;
             }
-            obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
+            obj += context.BlockRight().GetText() + Terminate + Wrap;
             var header = "";
             if(context.annotation() != null)
             {
@@ -521,7 +521,7 @@ namespace xylang
             {
                 r.text += Visit(context.templateDefine());
             }
-            r.text += Visit(context.parameterClauseIn()) + ";" + Wrap;
+            r.text += Visit(context.parameterClauseIn()) + Terminate + Wrap;
             return r;
         }
     }
