@@ -18,7 +18,7 @@ namespace xylang
             {
                 obj += Visit(item);
             }
-            obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
+            obj += context.BlockRight().GetText() + Wrap;
             return obj;
         }
 
