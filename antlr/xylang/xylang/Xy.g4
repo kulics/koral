@@ -72,7 +72,7 @@ packageVariableStatement:(annotation)? expression (Define expression|Declared ty
 packageControlSubStatement: Control id (BlockLeft (functionSupportStatement)* BlockRight)?;
 
 // 协议
-protocolStatement:(annotation)? id (templateDefine)? Protocol BlockLeft (protocolSupportStatement)* BlockRight Terminate;
+protocolStatement:(annotation)? id (templateDefine)? ArrowLeft BlockLeft (protocolSupportStatement)* BlockRight;
 // 协议支持的语句
 protocolSupportStatement:
 protocolStatement
@@ -92,7 +92,7 @@ implementFunctionStatement
 |implementEventStatement
 ;
 // 实现协议
-protocolImplementStatement:Protocol nameSpaceItem (templateCall)? BlockLeft (protocolImplementSupportStatement)* BlockRight Terminate;
+protocolImplementStatement:ArrowLeft nameSpaceItem (templateCall)? BlockLeft (protocolImplementSupportStatement)* BlockRight;
 // 控制实现
 implementControlStatement:(annotation)? id (Define expression|Declared type (Assign expression)?) (packageControlSubStatement)* Terminate;
 // 函数实现
