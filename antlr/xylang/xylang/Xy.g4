@@ -72,7 +72,7 @@ packageVariableStatement:(annotation)? expression (Define expression|Declared ty
 packageControlSubStatement: Control id (BlockLeft (functionSupportStatement)* BlockRight)?;
 
 // 协议
-protocolStatement:(annotation)? id (templateDefine)? ArrowLeft BlockLeft (protocolSupportStatement)* BlockRight;
+protocolStatement:(annotation)? id (templateDefine)? ArrowRight BlockLeft (protocolSupportStatement)* BlockRight;
 // 协议支持的语句
 protocolSupportStatement:
 protocolStatement
