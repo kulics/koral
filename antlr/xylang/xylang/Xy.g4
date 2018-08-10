@@ -13,6 +13,7 @@ importStatement
 |nspackageStatement
 |packageStatement
 |protocolStatement
+|protocolImplementStatement
 |enumStatement
 ;
 // 导入命名空间
@@ -54,8 +55,6 @@ parameterClausePackage : '{' parameter? (',' parameter)*  '}'  ;
 // 包支持的语句
 packageSupportStatement:
 packageInitStatement
-|protocolStatement
-|protocolImplementStatement
 |packageFunctionStatement
 |packageOverrideFunctionStatement
 |packageVariableStatement
@@ -92,7 +91,7 @@ implementFunctionStatement
 |implementEventStatement
 ;
 // 实现协议
-protocolImplementStatement:ArrowLeft nameSpaceItem (templateCall)? BlockLeft (protocolImplementSupportStatement)* BlockRight;
+protocolImplementStatement: id '+=' nameSpaceItem (templateCall)? BlockLeft (protocolImplementSupportStatement)* BlockRight;
 // 控制实现
 implementControlStatement:(annotation)? id (Define expression|Declared type (Assign expression)?) (packageControlSubStatement)* Terminate;
 // 函数实现

@@ -29,7 +29,6 @@ namespace xylang
             var hasInit = false;
             var extend = "";
             var hasExtend = false;
-            var implements = new List<string>();
 
             if(context.extend() != null)
             {
@@ -52,25 +51,6 @@ namespace xylang
                         obj += Visit(item);
                         hasInit = true;
                     }
-                }
-                else if(item.GetChild(0) is XyParser.ProtocolImplementStatementContext)
-                {
-                    // 处理协议实现
-                    var r = (Result)Visit(item);
-                    var ptcl = r.data.ToString();
-                    implements.Add(ptcl);
-                    var pName = ptcl;
-                    if(pName.LastIndexOf(".") > 0)
-                    {
-                        pName = pName.Substring(pName.LastIndexOf("."));
-                    }
-                    if(pName.IndexOf("<") > 0)
-                    {
-                        pName = pName.Substring(0, pName.LastIndexOf("<"));
-                    }
-                    obj += "public " + ptcl + " " + pName +
-                        " { get { return this as " + ptcl + ";}}" + Wrap;
-                    obj += r.text;
                 }
                 else
                 {
@@ -98,25 +78,12 @@ namespace xylang
             {
                 header += Visit(context.templateDefine());
             }
-            if(implements.Count > 0 || extend.Length > 0)
+            if(extend.Length > 0)
             {
                 header += ":";
-                var b = false;
                 if(extend.Length > 0)
                 {
                     header += extend;
-                    b = true;
-                }
-                for(int i = 0; i < implements.Count; i++)
-                {
-                    if(i == 0 && !b)
-                    {
-                        header += implements[i];
-                    }
-                    else
-                    {
-                        header += ", " + implements[i];
-                    }
                 }
             }
 
@@ -287,13 +254,32 @@ namespace xylang
 
         public override object VisitProtocolImplementStatement([NotNull] XyParser.ProtocolImplementStatementContext context)
         {
+            var id = (Result)Visit(context.id());
+
+            var obj = "";
+            obj += id.permission + " partial class " + id.text;
+
             var ptcl = (string)Visit(context.nameSpaceItem());
             // 泛型
             if(context.templateCall() != null)
             {
                 ptcl += Visit(context.templateCall());
             }
-            var obj = "";
+
+            obj += $":{ptcl} {Wrap} {BlockLeft} {Wrap}";
+
+            var pName = ptcl;
+            if (pName.LastIndexOf(".") > 0)
+            {
+                pName = pName.Substring(pName.LastIndexOf("."));
+            }
+            if (pName.IndexOf("<") > 0)
+            {
+                pName = pName.Substring(0, pName.LastIndexOf("<"));
+            }
+            obj += "public " + ptcl + " " + pName +
+                " { get { return this as " + ptcl + ";}}" + Wrap;
+
             foreach(var item in context.protocolImplementSupportStatement())
             {
                 if(item.GetChild(0) is XyParser.ImplementFunctionStatementContext)
@@ -311,10 +297,8 @@ namespace xylang
                     obj += Visit(item);
                 }
             }
-            var r = new Result();
-            r.data = ptcl;
-            r.text = obj;
-            return r;
+            obj += $"{BloclRight} {Terminate} {Wrap}";
+            return obj;
         }
 
         public override object VisitImplementEventStatement([NotNull] XyParser.ImplementEventStatementContext context)
