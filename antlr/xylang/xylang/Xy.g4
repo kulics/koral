@@ -5,7 +5,7 @@ program : statement+;
 statement :exportStatement;		  
 
 // 导出命名空间
-exportStatement: ArrowLeft nameSpace BlockLeft (exportSupportStatement)* BlockRight;
+exportStatement: nameSpace BlockLeft (exportSupportStatement)* BlockRight;
 // 导出命名空间支持的语句
 exportSupportStatement:
 importStatement
@@ -16,7 +16,7 @@ importStatement
 |enumStatement
 ;
 // 导入命名空间
-importStatement: ArrowRight nameSpaceStatement (',' nameSpaceStatement)* Terminate;
+importStatement: '..' nameSpaceStatement (',' nameSpaceStatement)* Terminate;
 // 命名空间
 nameSpaceStatement: (annotation)? (callEllipsis)? (nameSpace)? (call id)?;
 // 省略调用名称
