@@ -22,6 +22,19 @@ namespace xylang
             return r;
         }
 
+        public override object VisitPackageExtensionStatement([NotNull] XyParser.PackageExtensionStatementContext context)
+        {
+            var id = (Result)Visit(context.id());
+            var obj = "";
+            obj += $"{id.permission} partial class {id.text} {BlockLeft} {Wrap}";
+            foreach (var item in context.packageExtensionSupportStatement())
+            {
+                obj += Visit(item);
+            }
+            obj += BlockRight + Terminate + Wrap;
+            return obj;
+        }
+
         public override object VisitPackageStatement([NotNull] XyParser.PackageStatementContext context)
         {
             var id = (Result)Visit(context.id());
@@ -64,15 +77,15 @@ namespace xylang
                 {
                     init += " :base " + ((Result)Visit(context.extend())).text;
                 }
-                obj = init + "{}" + obj;
+                obj = init + BlockLeft + BlockRight + obj;
             }
-            obj += context.BlockRight().GetText() + Terminate + Wrap;
+            obj += BlockRight + Terminate + Wrap;
             var header = "";
             if(context.annotation() != null)
             {
                 header += Visit(context.annotation());
             }
-            header += id.permission + " partial class " + id.text;
+            header += $"{id.permission} partial class {id.text}";
             // 泛型
             if(context.templateDefine() != null)
             {
@@ -87,7 +100,7 @@ namespace xylang
                 }
             }
 
-            header += Wrap + context.BlockLeft().GetText() + Wrap;
+            header += Wrap + BlockLeft + Wrap;
             obj = header + obj;
             return obj;
         }
@@ -297,7 +310,7 @@ namespace xylang
                     obj += Visit(item);
                 }
             }
-            obj += $"{BloclRight} {Terminate} {Wrap}";
+            obj += $"{BlockRight} {Terminate} {Wrap}";
             return obj;
         }
 
