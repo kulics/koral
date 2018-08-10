@@ -16,6 +16,8 @@ namespace xylang
         const string F64 = "double";
         const string Bool = "bool";
         const string Str = "string";
+        const string BlockLeft = "{";
+        const string BloclRight = "}";
 
         public override object VisitProgram([NotNull] XyParser.ProgramContext context)
         {
