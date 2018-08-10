@@ -12,6 +12,7 @@ importStatement
 |functionMainStatement
 |nspackageStatement
 |packageStatement
+|packageExtensionStatement
 |protocolStatement
 |protocolImplementStatement
 |enumStatement
@@ -55,7 +56,6 @@ parameterClausePackage : '{' parameter? (',' parameter)*  '}'  ;
 // 包支持的语句
 packageSupportStatement:
 packageInitStatement
-|packageFunctionStatement
 |packageOverrideFunctionStatement
 |packageVariableStatement
 ;
@@ -69,7 +69,10 @@ packageOverrideFunctionStatement:(annotation)? Self id parameterClauseIn ArrowRi
 packageVariableStatement:(annotation)? expression (Define expression|Declared type (Assign expression)?) (packageControlSubStatement)* Terminate;
 // 定义子方法
 packageControlSubStatement: Control id (BlockLeft (functionSupportStatement)* BlockRight)?;
-
+// 包扩展
+packageExtensionStatement: id (templateDefine)? '+=' BlockLeft (packageExtensionSupportStatement)* BlockRight;
+// 包扩展支持的语句
+packageExtensionSupportStatement: packageFunctionStatement;
 // 协议
 protocolStatement:(annotation)? id (templateDefine)? ArrowRight BlockLeft (protocolSupportStatement)* BlockRight;
 // 协议支持的语句
