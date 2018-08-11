@@ -19,7 +19,7 @@ Console.WriteLine("Hello, world!");
 ```
 ### XyLang
 ```
-print.("Hello, world!");
+print.("Hello, world!")
 ```
 ## Variables And Constants
 ### Swift
@@ -48,9 +48,9 @@ const int myConstant = 42;
 ```
 ### XyLang
 ```
-myVariable := 42;
-myVariable = 50;
-myConstant :== 42;
+myVariable := 42
+myVariable = 50
+myConstant :== 42
 ```
 ## Explicit Types
 ### Swift
@@ -71,7 +71,7 @@ double explicitDouble = 70;
 ```
 ### XyLang
 ```
-explicitDouble: f64 = 70;
+explicitDouble: f64 = 70
 ```
 ## Basic Types
 ### Swift
@@ -136,9 +136,9 @@ int count = i + (int)f;
 ```
 ### XyLang
 ```
-f := 6.0;
-i := 94;
-count := i + i32.(f);
+f := 6.0
+i := 94
+count := i + i32.(f)
 ```
 ## Inclusive Range Operator
 ### Swift
@@ -170,8 +170,8 @@ for (int index = 1; index <= 5; index++)
 ```
 [ 1 ~ 5 ].@
 {
-    print.(/"{it} times 5 is {it * 5}"/);
-};
+    print.(/"{it} times 5 is {it * 5}"/)
+}
 ```
 ## Arrays
 ### Swift
@@ -201,8 +201,8 @@ shoppingList[1] = "bottle of water";
 ### XyLang
 ```
 shoppingList := ["catfish", "water",
-    "tulips", "blue paint"];
-shoppingList.[1] = "bottle of water";
+    "tulips", "blue paint"]
+shoppingList.[1] = "bottle of water"
 ```
 ## Maps
 ### Swift
@@ -242,8 +242,8 @@ occupations["Jayne"] = "Public Relations";
 occupations := [
     "Malcolm"->"Captain",
     "Kaylee"->"Mechanic"
-];
-occupations.["Jayne"] = "Public Relations";
+]
+occupations.["Jayne"] = "Public Relations"
 ```
 ## Empty Collections
 ### Swift
@@ -270,8 +270,8 @@ var emptyDictionary = new Dictionary<string, float>();
 ```
 ### XyLang
 ```
-emptyArray := [ :[]str];
-emptyDictionary := [ :[str]f32];
+emptyArray := [ :[]str]
+emptyDictionary := [ :[str]f32]
 ```
 ## Functions
 ### Swift
@@ -305,11 +305,11 @@ greet("Bob", "Tuesday");
 ```
 ### XyLang
 ```
-greet $(name, day: str)->(r: str) 
+greet (name, day: str)->(r: str) 
 {
-    <- (/"Hello {name}, today is {day}."/);
-};
-greet.("Bob", "Tuesday");
+    <- (/"Hello {name}, today is {day}."/)
+}
+greet.("Bob", "Tuesday")
 ```
 ## Tuple Return
 ### Swift
@@ -339,10 +339,10 @@ func getGasPrices() (float64, float64, float64) {
 ```
 ### XyLang
 ```
-getGasPrices $()->(a, b, c: f64) 
+getGasPrices ()->(a, b, c: f64) 
 {
-    <- (3.59, 3.69, 3.79);
-};
+    <- (3.59, 3.69, 3.79)
+}
 ```
 ## Function Type
 ### Swift
@@ -396,16 +396,16 @@ increment(7);
 ```
 ### XyLang
 ```
-makeIncrementer $()->(fn: (in: i32)->(out: i32)) 
+makeIncrementer ()->(fn: (in: i32)->(out: i32)) 
 {
-    addOne $(number: i32)->(number: i32) 
+    addOne (number: i32)->(number: i32) 
     {
-        <- (1 + number);
-    };
-    <- (addOne);
+        <- (1 + number)
+    }
+    <- (addOne)
 };
-increment := makeIncrementer.();
-increment.(7);
+increment := makeIncrementer.()
+increment.(7)
 ```
 ## Classes Declaration
 ### Swift
@@ -447,14 +447,14 @@ class Shape
 ```
 ### XyLang
 ```
-Shape #{}
+Shape {}->
 {
-    numberOfSides := 0;
-    simpleDescription $()->(s: str) 
+    numberOfSides := 0
+    simpleDescription ()->(s: str) 
     {
-        <- (/"A shape with {numberOfSides} sides."/);
-    };
-};
+        <- (/"A shape with {numberOfSides} sides."/)
+    }
+}
 ```
 ## Classes Usage
 ### Swift
@@ -483,9 +483,9 @@ var shapeDescription = shape.simpleDescription();
 ```
 ### XyLang
 ```
-shape := Shape.{};
-shape.numberOfSides = 7;
-shapeDescription := shape.simpleDescription.();
+shape := Shape.{}
+shape.numberOfSides = 7
+shapeDescription := shape.simpleDescription.()
 ```
 ## Subclass
 ### Swift
@@ -631,46 +631,46 @@ test.simpleDescription();
 ```
 ### XyLang
 ```
-NamedShape #{name: str} 
+NamedShape {name: str}->
 {
-    numberOfSides: i32 = 0;
-    name: str^get;
+    numberOfSides: i32 = 0
+    name: str^get
 
-    #
+    ..
     {
-        ..name = name;
-    };
+        ..name = name
+    }
 
     simpleDescription $()->(s: str) 
     {
-        <- (/"A shape with {numberOfSides} sides."/);
-    };
-};
+        <- (/"A shape with {numberOfSides} sides."/)
+    }
+}
 
-Square #{sideLength: f64, name: str}:NamedShape{name}
+Square {sideLength: f64, name: str}:NamedShape{name}->
 {
-    sideLength: f64;
+    sideLength: f64
 
-    # 
+    .. 
     {
-        ..sideLength = sideLength;
-        ..numberOfSides = 4;
-    };
+        ..sideLength = sideLength
+        ..numberOfSides = 4
+    }
 
-    area $()->(f: f64) 
+    area ()->(f: f64) 
     {
-        <- (sideLength * sideLength);
-    };
+        <- (sideLength * sideLength)
+    }
 
-    simpleDescription $()->(s: str) 
+    simpleDescription ()->(s: str) 
     {
-        <- (/"A square with sides of length {sideLength}."/);
-    };
-};
+        <- (/"A square with sides of length {sideLength}."/)
+    }
+}
 
-test := Square.{5.2, "square"};
-test.area.();
-test.simpleDescription.();
+test := Square.{5.2, "square"}
+test.area.()
+test.simpleDescription.()
 ```
 ## Checking Type
 ### Swift
@@ -731,21 +731,21 @@ foreach (var item in library)
 ```
 ### XyLang
 ```
-movieCount := 0;
-songCount := 0;
+movieCount := 0
+songCount := 0
 
 library.@ 
 {
     it.?
     :Movie 
     {
-        movieCount += 1;
+        movieCount += 1
     }
     :Song 
     {
-        songCount += 1;
-    };
-};
+        songCount += 1
+    }
+}
 ```
 ## Pattern Matching
 ### Swift
@@ -796,13 +796,13 @@ switch (nb)
 ```
 ### XyLang
 ```
-nb := 42;
+nb := 42
 nb.?  
-[0~7],8,9 { print.("single digit"); }
-10 { print.("double digits"); }
-[11~99] { print.("double digits"); }
-[100~999] { print.("triple digits"); }
-_ { print.("four or more digits"); };
+[0~7],8,9 { print.("single digit") }
+10 { print.("double digits") }
+[11~99] { print.("double digits") }
+[100~999] { print.("triple digits") }
+_ { print.("four or more digits") }
 ```
 ## Downcasting
 ### Swift
@@ -849,9 +849,9 @@ someObjects.@
     it.? movie:Movie
     {
         print.(/"Movie: '{movie.name}', " +
-            "dir. {movie.director}"/);
-    };
-};
+            "dir. {movie.director}"/)
+    }
+}
 ```
 ## Protocol
 ### Swift
@@ -898,15 +898,15 @@ void f(Nameable x)
 ```
 ### XyLang
 ```
-Nameable % 
+Nameable ->
 {
-    name $()->(s: str){};
-};
+    name ()->(s: str){}
+}
 
-f $(x: Nameable)->() 
+f (x: Nameable)->() 
 {
-    print.("Name is " + x.name.());
-};
+    print.("Name is " + x.name.())
+}
 ```
 ## Implement
 ### Swift
@@ -968,22 +968,19 @@ class Dog: Nameable, Weight
 ```
 ### XyLang
 ```
-Dog #{}
+Dog += Nameable
 {
-    % Nameable
+    name ()->(n: str)
     {
-        name $()->(n: str)
-        {
-            <- ("Dog");
-        };
-    };
+        <- ("Dog")
+    }
+}
 
-    % Weight
+Dog += Weight
+{
+    getWeight ()->(w: i32)
     {
-        getWeight $()->(w: i32)
-        {
-            <- (30);
-        };
-    };
-};
+        <- (30)
+    }
+}
 ```

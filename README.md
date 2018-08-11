@@ -21,34 +21,34 @@ Read detail from The [Book](./book-en/introduction.md).
 
 ## Quick Preview
 ```
-<: Main // export namespace
+HelloWorld // export namespace
 {
-    :> System; // import namespace
+    .. System // import namespace
 
-    $ // main function  
+    Main () // main function  
     {
         // array
         greetings := ["Hello", "Hola", "Bonjour",
                     "Ciao", "こんにちは", "안녕하세요",
                     "Cześć", "Olá", "Здравствуйте",
-                    "Chào bạn", "您好"];
+                    "Chào bạn", "您好"]
                     
         greetings.@ // for-each
         {
-            print.(it); // call function
+            print.(it) // call function
             // match
             it.? [0~8] 
             {
-                print.(" in 0-8");
+                print.(" in 0-8")
             }
             _
             {
-                print.(" over 10");
-                ~@;
-            };
-        };
-    };
-};
+                print.(" over 10")
+                ~@
+            }
+        }
+    }
+}
 ```
 ## Roadmap
 1. 2017.07 ~ 2018.03 
