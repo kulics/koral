@@ -641,7 +641,7 @@ NamedShape {name: str}->
         ..name = name
     }
 
-    simpleDescription $()->(s: str) 
+    simpleDescription ()->(s: str) 
     {
         <- (/"A shape with {numberOfSides} sides."/)
     }
