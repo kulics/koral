@@ -47,17 +47,17 @@ namespace xylang
             obj += "for (var " + id + " = " + it.from.text + ";";
             obj += id + "!=" + it.to.text + "+" + it.step.text + ";";
             obj += id + "+=" + it.step.text + ")";
-            obj += Wrap + context.BlockLeft().GetText() + Wrap;
+            obj += $"{Wrap} {BlockLeft} {Wrap}";
             obj += ProcessFunctionSupport(context.functionSupportStatement());
-            obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
+            obj += $"{BlockRight} {Terminate} {Wrap}";
             return obj;
         }
 
         public override object VisitLoopInfiniteStatement([NotNull] XyParser.LoopInfiniteStatementContext context)
         {
-            var obj = "for (;;)" + Wrap + context.BlockLeft().GetText() + Wrap;
+            var obj = $"for (;;) {Wrap} {BlockLeft} {Wrap}";
             obj += ProcessFunctionSupport(context.functionSupportStatement());
-            obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
+            obj += $"{BlockRight} {Terminate} {Wrap}";
             return obj;
         }
 
@@ -70,10 +70,10 @@ namespace xylang
                 id = ((Result)Visit(context.id())).text;
             }
             var arr = (Result)Visit(context.expression());
-            obj += "foreach (var " + id + " in " + arr.text + ")";
-            obj += Wrap + context.BlockLeft().GetText() + Wrap;
+            obj += $"foreach (var {id} in {arr.text})";
+            obj += $"{Wrap} {BlockLeft} {Wrap}";
             obj += ProcessFunctionSupport(context.functionSupportStatement());
-            obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
+            obj += $"{BlockRight} {Terminate} {Wrap}";
             return obj;
         }
 
@@ -81,36 +81,36 @@ namespace xylang
         {
             var obj = "";
             var expr = (Result)Visit(context.expression());
-            obj += "for ( ;" + expr.text + ";)";
-            obj += Wrap + context.BlockLeft().GetText() + Wrap;
+            obj += $"for ( ;{expr.text} ;)";
+            obj += $"{Wrap} {BlockLeft} {Wrap}";
             obj += ProcessFunctionSupport(context.functionSupportStatement());
-            obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
+            obj += $"{BlockRight} {Terminate} {Wrap}";
             return obj;
         }
 
         public override object VisitLoopJumpStatement([NotNull] XyParser.LoopJumpStatementContext context)
         {
-            return "break" + context.Terminate().GetText() + Wrap;
+            return $"break {Terminate} {Wrap}";
         }
 
         public override object VisitJudgeCaseStatement([NotNull] XyParser.JudgeCaseStatementContext context)
         {
             var obj = "";
             var expr = (Result)Visit(context.expression());
-            obj += "switch (" + expr.text + ")" + Wrap + "{" + Wrap;
+            obj += $"switch ({expr.text}) {Wrap} {{ {Wrap}";
             foreach(var item in context.caseStatement())
             {
                 var r = (string)Visit(item);
                 obj += r + Wrap;
             }
-            obj += "}" + Wrap;
+            obj += $"}} {Wrap}";
             return obj;
         }
 
         public override object VisitCaseDefaultStatement([NotNull] XyParser.CaseDefaultStatementContext context)
         {
             var obj = "";
-            obj += "default:{" + Wrap;
+            obj += $"default:{{ {Wrap}";
             obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += "}break;";
             return obj;
@@ -170,26 +170,26 @@ namespace xylang
         public override object VisitJudgeBaseStatement([NotNull] XyParser.JudgeBaseStatementContext context)
         {
             var b = (Result)Visit(context.expression());
-            var obj = "if (" + b.text + ")" + Wrap + context.BlockLeft().GetText() + Wrap;
+            var obj = $"if ( {b.text} ) {Wrap} {BlockLeft} {Wrap}";
             obj += ProcessFunctionSupport(context.functionSupportStatement());
-            obj += context.BlockRight().GetText() + Wrap;
+            obj += $"{BlockRight} {Wrap}";
             return obj;
         }
 
         public override object VisitJudgeElseStatement([NotNull] XyParser.JudgeElseStatementContext context)
         {
-            var obj = "else " + Wrap + context.BlockLeft().GetText() + Wrap;
+            var obj = $"else {Wrap} {BlockLeft} {Wrap}";
             obj += ProcessFunctionSupport(context.functionSupportStatement());
-            obj += context.BlockRight().GetText() + Wrap;
+            obj += $"{BlockRight}{Wrap}";
             return obj;
         }
 
         public override object VisitCheckStatement([NotNull] XyParser.CheckStatementContext context)
         {
             var obj = "";
-            obj += "try " + context.BlockLeft().GetText() + Wrap;
+            obj += $"try {BlockLeft} {Wrap}";
             obj += ProcessFunctionSupport(context.functionSupportStatement());
-            obj += context.BlockRight().GetText() + Wrap;
+            obj += BlockRight + Wrap;
             foreach(var item in context.checkErrorStatement())
             {
                 obj += Visit(item) + Wrap;
@@ -207,9 +207,9 @@ namespace xylang
                 Type = (String)Visit(context.type());
             }
 
-            obj += "catch( " + Type + " " + ID.text + ")" + Wrap + context.BlockLeft().GetText() + Wrap;
+            obj += $"catch( {Type} {ID.text} ){Wrap + BlockLeft + Wrap} ";
             obj += ProcessFunctionSupport(context.functionSupportStatement());
-            obj += context.BlockRight().GetText();
+            obj += BlockRight;
             return obj;
         }
 
@@ -221,7 +221,7 @@ namespace xylang
                 var r = (Result)Visit(context.expression());
                 obj += r.text;
             }
-            return "throw " + obj + context.Terminate().GetText() + Wrap;
+            return $"throw {obj + Terminate + Wrap}";
         }
 
         public override object VisitCheckDeferStatement([NotNull] XyParser.CheckDeferStatementContext context)
@@ -239,7 +239,7 @@ namespace xylang
             {
                 r.text += (string)Visit(item) + " ";
             }
-            r.text = "(" + r.text + ")";
+            r.text = $"({r.text})";
             return r;
         }
 

@@ -12,13 +12,13 @@ namespace xylang
         public override object VisitExportStatement([NotNull] XyParser.ExportStatementContext context)
         {
             var obj = "";
-            obj += "namespace " + Visit(context.nameSpace()) + Wrap + context.BlockLeft().GetText() + Wrap;
+            obj += $"namespace {Visit(context.nameSpace()) + Wrap + BlockLeft + Wrap}";
 
             foreach(var item in context.exportSupportStatement())
             {
                 obj += Visit(item);
             }
-            obj += context.BlockRight().GetText() + Wrap;
+            obj += BlockRight + Wrap;
             return obj;
         }
 
@@ -51,11 +51,11 @@ namespace xylang
                     obj += "." + r.text;
                 }
 
-                obj += ";";
+                obj += Terminate;
             }
             else
             {
-                obj += "using " + Visit(context.nameSpace()) + ";";
+                obj += "using " + Visit(context.nameSpace()) + Terminate;
             }
             return obj;
         }
@@ -122,7 +122,7 @@ namespace xylang
             {
                 obj += Visit(item);
             }
-            obj += context.BlockRight().GetText() + context.Terminate().GetText() + Wrap;
+            obj += BlockRight + Terminate + Wrap;
             var header = "";
             if(context.annotation() != null)
             {
@@ -135,7 +135,7 @@ namespace xylang
                 header += Visit(context.templateDefine());
             }
 
-            header += Wrap + context.BlockLeft().GetText() + Wrap;
+            header += Wrap + BlockLeft + Wrap;
             obj = header + obj;
             return obj;
         }
@@ -150,12 +150,12 @@ namespace xylang
                 header += Visit(context.annotation());
             }
             header += id.permission + " enum " + id.text;
-            header += Wrap + "{" + Wrap;
+            header += Wrap + BlockLeft + Wrap;
             for(int i = 0; i < context.enumSupportStatement().Length; i++)
             {
                 obj += Visit(context.enumSupportStatement(i));
             }
-            obj += "}" + Terminate + Wrap;
+            obj += BlockRight + Terminate + Wrap;
             obj = header + obj;
             return obj;
         }
@@ -178,14 +178,12 @@ namespace xylang
         public override object VisitFunctionMainStatement([NotNull] XyParser.FunctionMainStatementContext context)
         {
             var obj = "";
-            obj += "static class XyLangMainFunctionEnter " + Wrap + context.BlockLeft().GetText() + Wrap;
-            obj += "static void Main(string[] args)" + Wrap + context.BlockLeft().GetText() + Wrap;
-            obj += "MainAsync(args).GetAwaiter().GetResult();" + Wrap + context.BlockRight().GetText() + Wrap;
-            obj += "static async Task MainAsync(string[] args)" + Wrap + context.BlockLeft().GetText() + Wrap;
-            obj += ProcessFunctionSupport(context.functionSupportStatement());
-            obj += context.BlockRight().GetText() + Wrap;
-            obj += context.BlockRight().GetText() + Wrap;
-
+            obj += $"static class XyLangMainFunctionEnter {Wrap + BlockLeft + Wrap} " +
+                $"static void Main(string[] args) {Wrap + BlockLeft + Wrap} " +
+                $"MainAsync(args).GetAwaiter().GetResult(); {Wrap + BlockRight + Wrap}" +
+                $"static async Task MainAsync(string[] args) {Wrap + BlockLeft + Wrap}" +
+                $"{ProcessFunctionSupport(context.functionSupportStatement())}" +
+                $"{BlockRight + Wrap}{BlockRight + Wrap}";
             return obj;
         }
 
@@ -221,9 +219,9 @@ namespace xylang
             {
                 obj += Visit(context.templateDefine());
             }
-            obj += Visit(context.parameterClauseIn()) + Wrap + context.BlockLeft().GetText() + Wrap;
+            obj += Visit(context.parameterClauseIn()) + Wrap + BlockLeft + Wrap;
             obj += ProcessFunctionSupport(context.functionSupportStatement());
-            obj += context.BlockRight().GetText() + Wrap;
+            obj += BlockRight + Wrap;
             return obj;
         }
 
@@ -304,12 +302,12 @@ namespace xylang
             id = GetControlSub(context.id().GetText());
             if (context.functionSupportStatement().Length>0)
             {
-                obj += id + "{";
+                obj += id + BlockLeft;
                 foreach (var item in context.functionSupportStatement())
                 {
                     obj += Visit(item);
                 }
-                obj += "}" + Wrap;
+                obj += BlockRight + Wrap;
             }
             else
             {

@@ -36,9 +36,9 @@ namespace xylang
             {
                 obj += Visit(context.templateDefine());
             }
-            obj += Visit(context.parameterClauseIn()) + Wrap + context.BlockLeft().GetText() + Wrap;
+            obj += $"{Visit(context.parameterClauseIn())} {Wrap} {BlockLeft} {Wrap}";
             obj += ProcessFunctionSupport(context.functionSupportStatement());
-            obj += context.BlockRight().GetText() + Wrap;
+            obj += BlockRight + Wrap;
             return obj;
         }
 
@@ -49,7 +49,7 @@ namespace xylang
             {
                 r.text = "";
             }
-            return "return " + r.text + "" + context.Terminate().GetText() + Wrap;
+            return $"return {r.text} {Terminate} {Wrap}";
         }
 
         public override object VisitTuple([NotNull] XyParser.TupleContext context)
@@ -199,7 +199,7 @@ namespace xylang
                 if(item.GetChild(0) is XyParser.CheckDeferStatementContext)
                 {
                     lazy.Add(new Lazy(true, (string)Visit(item)));
-                    content += "try" + Wrap + "{";
+                    content += $"try {Wrap} {{";
                 }
                 else if (item.GetChild(0) is XyParser.VariableUseStatementContext)
                 {

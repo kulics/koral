@@ -5,7 +5,7 @@ program : statement+;
 statement :exportStatement;		  
 
 // 导出命名空间
-exportStatement: nameSpace BlockLeft (exportSupportStatement)* BlockRight;
+exportStatement: nameSpace BlockLeft (exportSupportStatement)* BlockRight Terminate?;
 // 导出命名空间支持的语句
 exportSupportStatement:
 importStatement
@@ -18,13 +18,13 @@ importStatement
 |enumStatement
 ;
 // 导入命名空间
-importStatement: '..' nameSpaceStatement (',' nameSpaceStatement)* Terminate;
+importStatement: '..' nameSpaceStatement (',' nameSpaceStatement)* Terminate?;
 // 命名空间
 nameSpaceStatement: (annotation)? (callEllipsis)? (nameSpace)? (call id)?;
 // 省略调用名称
 callEllipsis: '..';
 // 枚举
-enumStatement: (annotation)? id '[' enumSupportStatement (',' enumSupportStatement)* ']';
+enumStatement: (annotation)? id '[' enumSupportStatement (',' enumSupportStatement)* ']' Terminate?;
 
 enumSupportStatement: id ('=' (add)? Integer)?;
 
@@ -38,7 +38,7 @@ nspackageFunctionStatement
 ;
 
 // 主函数
-functionMainStatement:'Main' BlockLeft (functionSupportStatement)* BlockRight;
+functionMainStatement:'Main' BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 无构造包变量
 nspackageVariableStatement:(annotation)? expression (Define expression|Declared type (Assign expression)?) (nspackageControlSubStatement)* Terminate;
 // 无构造包常量
@@ -60,21 +60,21 @@ packageInitStatement
 |packageVariableStatement
 ;
 // 包构造方法
-packageInitStatement:(annotation)? '..' BlockLeft (functionSupportStatement)* BlockRight;
+packageInitStatement:(annotation)? '..' BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 函数
-packageFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
+packageFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 重载函数
-packageOverrideFunctionStatement:(annotation)? Self id parameterClauseIn ArrowRight parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
+packageOverrideFunctionStatement:(annotation)? Self id parameterClauseIn ArrowRight parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 定义变量
-packageVariableStatement:(annotation)? expression (Define expression|Declared type (Assign expression)?) (packageControlSubStatement)* Terminate;
+packageVariableStatement:(annotation)? expression (Define expression|Declared type (Assign expression)?) (packageControlSubStatement)* Terminate?;
 // 定义子方法
 packageControlSubStatement: Control id (BlockLeft (functionSupportStatement)* BlockRight)?;
 // 包扩展
-packageExtensionStatement: id (templateDefine)? '+=' BlockLeft (packageExtensionSupportStatement)* BlockRight;
+packageExtensionStatement: id (templateDefine)? '+=' BlockLeft (packageExtensionSupportStatement)* BlockRight Terminate?;
 // 包扩展支持的语句
 packageExtensionSupportStatement: packageFunctionStatement;
 // 协议
-protocolStatement:(annotation)? id (templateDefine)? ArrowRight BlockLeft (protocolSupportStatement)* BlockRight;
+protocolStatement:(annotation)? id (templateDefine)? ArrowRight BlockLeft (protocolSupportStatement)* BlockRight Terminate?;
 // 协议支持的语句
 protocolSupportStatement:
 protocolStatement
@@ -82,11 +82,11 @@ protocolStatement
 |protocolControlStatement
 ;
 // 定义控制
-protocolControlStatement:(annotation)? id Declared type (protocolControlSubStatement)* Terminate;
+protocolControlStatement:(annotation)? id Declared type (protocolControlSubStatement)* Terminate?;
 // 定义子方法
 protocolControlSubStatement: Control id;
 // 函数
-protocolFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
+protocolFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 协议实现支持的语句
 protocolImplementSupportStatement:
 implementFunctionStatement
@@ -94,17 +94,17 @@ implementFunctionStatement
 |implementEventStatement
 ;
 // 实现协议
-protocolImplementStatement: id '+=' nameSpaceItem (templateCall)? BlockLeft (protocolImplementSupportStatement)* BlockRight;
+protocolImplementStatement: id '+=' nameSpaceItem (templateCall)? BlockLeft (protocolImplementSupportStatement)* BlockRight Terminate?;
 // 控制实现
-implementControlStatement:(annotation)? id (Define expression|Declared type (Assign expression)?) (packageControlSubStatement)* Terminate;
+implementControlStatement:(annotation)? id (Define expression|Declared type (Assign expression)?) (packageControlSubStatement)* Terminate?;
 // 函数实现
-implementFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
+implementFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 事件实现
-implementEventStatement: id '^!' nameSpaceItem Terminate;
+implementEventStatement: id '^!' nameSpaceItem Terminate?;
 // 函数
-functionStatement:id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
+functionStatement:id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 返回
-returnStatement: ArrowLeft tuple Terminate;
+returnStatement: ArrowLeft tuple Terminate?;
 // 入参
 parameterClauseIn : '(' parameter? (',' parameter)*  ')'  ;
 // 出参
@@ -134,7 +134,7 @@ functionSupportStatement:
 ;
 
 // 条件判断
-judgeCaseStatement: expression call Judge (caseStatement)+ Terminate;
+judgeCaseStatement: expression call Judge (caseStatement)+ Terminate?;
 // 缺省条件声明
 caseDefaultStatement: Discard BlockLeft (functionSupportStatement)* BlockRight;
 // 条件声明
@@ -142,42 +142,42 @@ caseExprStatement: (expression| (id)? ':' type) BlockLeft (functionSupportStatem
 // 判断条件声明
 caseStatement: caseDefaultStatement|caseExprStatement;
 // 判断
-judgeStatement:(judgeBaseStatement)+ (judgeElseStatement)? Terminate;
+judgeStatement:(judgeBaseStatement)+ (judgeElseStatement)? Terminate?;
 // 判断基础
 judgeBaseStatement:Judge expression BlockLeft (functionSupportStatement)* BlockRight;
 // else 判断
 judgeElseStatement:Judge BlockLeft (functionSupportStatement)* BlockRight;
 // 循环
-loopStatement:iteratorStatement call Loop (id)? BlockLeft (functionSupportStatement)* BlockRight Terminate;
+loopStatement:iteratorStatement call Loop (id)? BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 集合循环
-loopEachStatement:expression call Loop (id)? BlockLeft (functionSupportStatement)* BlockRight Terminate;
+loopEachStatement:expression call Loop (id)? BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 条件循环
-loopCaseStatement:Loop expression BlockLeft (functionSupportStatement)* BlockRight Terminate;
+loopCaseStatement:Loop expression BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 无限循环
-loopInfiniteStatement:Loop BlockLeft (functionSupportStatement)* BlockRight Terminate;
+loopInfiniteStatement:Loop BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 跳出循环
-loopJumpStatement:LoopSub Terminate;
+loopJumpStatement:LoopSub Terminate?;
 // 看守
-checkDeferStatement: CheckSub BlockLeft (functionSupportStatement)* BlockRight Terminate;
+checkDeferStatement: CheckSub BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 检查
-checkStatement: Check BlockLeft (functionSupportStatement)* BlockRight checkErrorStatement+ Terminate;
+checkStatement: Check BlockLeft (functionSupportStatement)* BlockRight checkErrorStatement+ Terminate?;
 // 错误处理
 checkErrorStatement:id (Declared type)? BlockLeft (functionSupportStatement)* BlockRight;
 // 报告错误
-reportStatement: Check call '(' (expression)? ')' Terminate;
+reportStatement: Check call '(' (expression)? ')' Terminate?;
 // 迭代器
 iteratorStatement: '[' expression Wave expression Terminate expression ']' | '[' expression Wave expression ']';
 
 // 定义变量
-variableStatement: expression Define expression Terminate;
+variableStatement: expression Define expression Terminate?;
 // 声明变量
-variableDeclaredStatement: expression Declared type (Assign expression)? Terminate;
+variableDeclaredStatement: expression Declared type (Assign expression)? Terminate?;
 // 赋值
-assignStatement: expression assign expression Terminate;
+assignStatement: expression assign expression Terminate?;
 // 定义回收变量
-variableUseStatement: expression Use expression Terminate;
+variableUseStatement: expression Use expression Terminate?;
 
-expressionStatement: expression Terminate;
+expressionStatement: expression Terminate?;
 
 // 基础表达式
 primaryExpression: 
