@@ -2,12 +2,12 @@
 
 program : statement+;
 
-statement :exportStatement;		  
+statement :exportSharpStatement;		  
 
 // 导出命名空间
-exportStatement: nameSpace BlockLeft (exportSupportStatement)* BlockRight Terminate?;
+exportSharpStatement: nameSpace BlockLeft (exportSharpSupportStatement)* BlockRight Terminate?;
 // 导出命名空间支持的语句
-exportSupportStatement:
+exportSharpSupportStatement:
 importStatement
 |functionMainStatement
 |nspackageStatement
