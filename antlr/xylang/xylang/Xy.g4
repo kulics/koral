@@ -47,9 +47,9 @@ nspackageControlSubStatement: Control id (BlockLeft (functionSupportStatement)* 
 // 无构造包函数
 nspackageFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 // 定义包
-packageStatement:(annotation)? id (templateDefine)? parameterClausePackage (extend)? ArrowRight BlockLeft (packageSupportStatement)* BlockRight;
+packageStatement:(annotation)? id (templateDefine)? parameterClausePackage ArrowRight (extend)? BlockLeft (packageSupportStatement)* BlockRight;
 // 继承
-extend: ':' type '{' expressionList? '}';
+extend: type call '{' expressionList? '}';
 // 入参
 parameterClausePackage : '{' parameter? (',' parameter)*  '}'  ;
 // 包支持的语句
