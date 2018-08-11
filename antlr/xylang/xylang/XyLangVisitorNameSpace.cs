@@ -40,7 +40,7 @@ namespace xylang
             {
                 obj += Visit(context.annotation());
             }
-            if(context.callEllipsis() != null)
+            if(context.id() != null)
             {
                 var ns = (string)Visit(context.nameSpace());
                 obj += "using static " + ns;
