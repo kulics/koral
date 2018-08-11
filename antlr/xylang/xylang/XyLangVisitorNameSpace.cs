@@ -22,6 +22,37 @@ namespace xylang
             return obj;
         }
 
+        public override object VisitExportStatement([NotNull] XyParser.ExportStatementContext context)
+        {
+            var obj = "";
+            var name = (string)Visit(context.nameSpace());
+            obj += $"namespace {name + Wrap + BlockLeft + Wrap}";
+
+            var className = name;
+            if (name.LastIndexOf('.') > 0)
+            {
+                name = className.Substring(name.LastIndexOf('.'));
+            }
+
+            var content = "";
+            foreach (var item in context.exportSupportStatement())
+            {
+                if (item.GetChild(0) is XyParser.ImportStatementContext)
+                {
+                    obj += Visit(item);
+                }
+                else
+                {
+                    content += Visit(item);
+                }
+            }
+            obj += $"public static class {name} {BlockLeft + Wrap}";
+            obj += content;
+            obj += BlockRight + Terminate + Wrap;
+            obj += BlockRight + Wrap;
+            return obj;
+        }
+
         public override object VisitImportStatement([NotNull] XyParser.ImportStatementContext context)
         {
             var obj = "";
@@ -178,12 +209,11 @@ namespace xylang
         public override object VisitFunctionMainStatement([NotNull] XyParser.FunctionMainStatementContext context)
         {
             var obj = "";
-            obj += $"static class XyLangMainFunctionEnter {Wrap + BlockLeft + Wrap} " +
-                $"static void Main(string[] args) {Wrap + BlockLeft + Wrap} " +
+            obj += $"static void Main(string[] args) {Wrap + BlockLeft + Wrap} " +
                 $"MainAsync(args).GetAwaiter().GetResult(); {Wrap + BlockRight + Wrap}" +
                 $"static async Task MainAsync(string[] args) {Wrap + BlockLeft + Wrap}" +
                 $"{ProcessFunctionSupport(context.functionSupportStatement())}" +
-                $"{BlockRight + Wrap}{BlockRight + Wrap}";
+                $"{BlockRight + Wrap}";
             return obj;
         }
 

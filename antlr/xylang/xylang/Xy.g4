@@ -1,12 +1,12 @@
 ﻿grammar Xy;
 
-program : statement+;
+program: statement+;
 
-statement :exportSharpStatement;		  
+statement: exportSharpStatement|exportStatement;		  
 
-// 导出命名空间
-exportSharpStatement: nameSpace BlockLeft (exportSharpSupportStatement)* BlockRight Terminate?;
-// 导出命名空间支持的语句
+// 导出dotnet命名空间
+exportSharpStatement: nameSpace '#' BlockLeft (exportSharpSupportStatement)* BlockRight Terminate?;
+// 导出dotnet命名空间支持的语句
 exportSharpSupportStatement:
 importStatement
 |functionMainStatement
@@ -17,6 +17,23 @@ importStatement
 |protocolImplementStatement
 |enumStatement
 ;
+
+// 导出命名空间
+exportStatement: nameSpace BlockLeft (exportSupportStatement)* BlockRight Terminate?;
+// 导出命名空间支持的语句
+exportSupportStatement:
+importStatement
+|functionMainStatement
+|nspackageFunctionStatement
+|nspackageVariableStatement
+|nspackageInvariableStatement
+|packageStatement
+|packageExtensionStatement
+|protocolStatement
+|protocolImplementStatement
+|enumStatement
+;
+
 // 导入命名空间
 importStatement: '..' nameSpaceStatement (',' nameSpaceStatement)* Terminate?;
 // 命名空间
@@ -28,7 +45,7 @@ enumStatement: (annotation)? id '[' enumSupportStatement (',' enumSupportStateme
 enumSupportStatement: id ('=' (add)? Integer)?;
 
 // 无构造包
-nspackageStatement: (annotation)? id (templateDefine)? Package BlockLeft (nspackageSupportStatement)* BlockRight Terminate;
+nspackageStatement: (annotation)? id (templateDefine)? '_' ArrowRight BlockLeft (nspackageSupportStatement)* BlockRight Terminate?;
 
 nspackageSupportStatement:
 nspackageFunctionStatement
