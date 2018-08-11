@@ -20,9 +20,8 @@ importStatement
 // 导入命名空间
 importStatement: '..' nameSpaceStatement (',' nameSpaceStatement)* Terminate?;
 // 命名空间
-nameSpaceStatement: (annotation)? (callEllipsis)? (nameSpace)? (call id)?;
-// 省略调用名称
-callEllipsis: '..';
+nameSpaceStatement: (annotation)? (nameSpace)? (call id)?;
+
 // 枚举
 enumStatement: (annotation)? id '[' enumSupportStatement (',' enumSupportStatement)* ']' Terminate?;
 
