@@ -280,7 +280,7 @@ callAwait: FlowLeft expression; // 异步调用
 
 array : '[' (expression (',' expression)*)? (':' typeArray)? ']'; // 数组
 
-sharpArray : '[' '#' ']' '[' (expression (',' expression)*)? (':' typeSharpArray)? ']'; // c#数组
+sharpArray : '#' '[' (expression (',' expression)*)? (':' typeSharpArray)? ']'; // c#数组
 
 dictionary :  '[' (dictionaryElement (',' dictionaryElement)*)? (':' typeDictionary)? ']'; // 字典
 
@@ -305,11 +305,11 @@ lambdaOut :
 expressionList 
 | BlockLeft (functionSupportStatement)* BlockRight;
 
-pkgAnonymous: Package pkgAnonymousAssign; // 匿名包
+pkgAnonymous: '_' pkgAnonymousAssign; // 匿名包
 
 pkgAnonymousAssign: BlockLeft (pkgAnonymousAssignElement)* BlockRight; // 简化赋值
 
-pkgAnonymousAssignElement: name ':=' expression Terminate; // 简化赋值元素
+pkgAnonymousAssignElement: name ':=' expression Terminate?; // 简化赋值元素
 
 function : parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 
@@ -354,7 +354,7 @@ type : typeNotNull | typeNullable;
 
 typeTuple : '(' type (',' type)+ ')';
 typeArray : '[' ']' type;
-typeSharpArray :'[' '#' ']' type;
+typeSharpArray : '#' type;
 typeDictionary :  '[' type ']' type;
 typePackage : nameSpaceItem (templateCall)? ;
 typeFunction : typeFunctionParameterClause ArrowRight typeFunctionParameterClause;
