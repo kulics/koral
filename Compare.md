@@ -647,7 +647,7 @@ NamedShape {name: str}->
     }
 }
 
-Square {sideLength: f64, name: str}:NamedShape{name}->
+Square {sideLength: f64, name: str}-> NamedShape.{name}
 {
     sideLength: f64
 
