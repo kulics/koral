@@ -282,9 +282,9 @@ templateDefine: '<' id (',' id)* '>';
 
 templateCall: '<' type (',' type)* '>';
 
-lambda : Function lambdaIn t=(ArrowLeft|FlowLeft) lambdaOut;
+lambda : lambdaIn t=(ArrowLeft|FlowLeft) lambdaOut;
 
-lambdaIn : (id (',' id)* )? ;
+lambdaIn : id | '(' (id (',' id)* )? ')' ;
 lambdaOut : 
 expressionList 
 | BlockLeft (functionSupportStatement)* BlockRight;
