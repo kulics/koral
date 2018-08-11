@@ -9,12 +9,12 @@ namespace xylang
 {
     partial class XyLangVisitor
     {
-        public override object VisitExportStatement([NotNull] XyParser.ExportStatementContext context)
+        public override object VisitExportSharpStatement([NotNull] XyParser.ExportSharpStatementContext context)
         {
             var obj = "";
             obj += $"namespace {Visit(context.nameSpace()) + Wrap + BlockLeft + Wrap}";
 
-            foreach(var item in context.exportSupportStatement())
+            foreach(var item in context.exportSharpSupportStatement())
             {
                 obj += Visit(item);
             }
