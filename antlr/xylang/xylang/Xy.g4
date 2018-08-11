@@ -354,7 +354,7 @@ type : typeNotNull | typeNullable;
 
 typeTuple : '(' type (',' type)+ ')';
 typeArray : '[' ']' type;
-typeSharpArray : '#' type;
+typeSharpArray : '[' '#' ']' type;
 typeDictionary :  '[' type ']' type;
 typePackage : nameSpaceItem (templateCall)? ;
 typeFunction : typeFunctionParameterClause ArrowRight typeFunctionParameterClause;
