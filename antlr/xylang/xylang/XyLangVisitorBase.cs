@@ -18,6 +18,8 @@ namespace xylang
         const string Str = "string";
         const string BlockLeft = "{";
         const string BlockRight = "}";
+        const string True = "true";
+        const string False = "false";
 
         public override object VisitProgram([NotNull] XyParser.ProgramContext context)
         {
@@ -78,12 +80,12 @@ namespace xylang
             if(context.t.Type == XyParser.True)
             {
                 r.data = Bool;
-                r.text = context.True().GetText();
+                r.text = True;
             }
             else if(context.t.Type == XyParser.False)
             {
                 r.data = Bool;
-                r.text = context.False().GetText();
+                r.text = False;
             }
             return r;
         }

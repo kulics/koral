@@ -21,7 +21,7 @@ namespace xylang
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
-            var obj = $"var {r1.text} = {r2.text} {context.Terminate().GetText()} {Wrap}";
+            var obj = $"var {r1.text} = {r2.text} {Terminate} {Wrap}";
             return obj;
         }
 
@@ -33,11 +33,11 @@ namespace xylang
             if (context.expression().Length == 2)
             {
                 var r2 = (Result)Visit(context.expression(1));
-                obj = $"{Type} {r1.text} = {r2.text} {context.Terminate().GetText()} {Wrap}";
+                obj = $"{Type} {r1.text} = {r2.text} {Terminate} {Wrap}";
             }
             else
             {
-                obj = $"{Type} {r1.text} {context.Terminate().GetText()} {Wrap}";
+                obj = $"{Type} {r1.text} {Terminate} {Wrap}";
             }
             return obj;
         }
@@ -46,7 +46,7 @@ namespace xylang
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
-            var obj = r1.text + Visit(context.assign()) + r2.text + context.Terminate().GetText() + Wrap;
+            var obj = r1.text + Visit(context.assign()) + r2.text + Terminate + Wrap;
             return obj;
         }
 
@@ -62,7 +62,7 @@ namespace xylang
         public override object VisitExpressionStatement([NotNull] XyParser.ExpressionStatementContext context)
         {
             var r = (Result)Visit(context.expression());
-            return r.text + context.Terminate().GetText() + Wrap;
+            return r.text + Terminate + Wrap;
         }
 
         public override object VisitExpression([NotNull] XyParser.ExpressionContext context)
@@ -739,9 +739,9 @@ namespace xylang
             {
                 r.text += " async ";
             }
-            r.text += Visit(context.parameterClauseIn()) + " => " + context.BlockLeft().GetText() + Wrap;
+            r.text += Visit(context.parameterClauseIn()) + " => " + BlockLeft + Wrap;
             r.text += ProcessFunctionSupport(context.functionSupportStatement());
-            r.text += context.BlockRight().GetText() + Wrap;
+            r.text += BlockRight + Wrap;
             r.data = "var";
             return r;
         }

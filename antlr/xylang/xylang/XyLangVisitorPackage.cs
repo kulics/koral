@@ -161,21 +161,21 @@ namespace xylang
             }
             if (context.packageControlSubStatement().Length > 0)
             {
-                obj += $"{r1.permission} {typ} {r1.text} {{";
+                obj += $"{r1.permission} {typ} {r1.text + BlockLeft}";
                 foreach (var item in context.packageControlSubStatement())
                 {
                     obj += Visit(item);
                 }
-                obj += $"}} {Wrap}";
+                obj += BlockRight + Wrap;
             }
             else
             {
-                obj += $"{r1.permission} {typ} {r1.text} {{ get;set; }} {Wrap}";
+                obj += $"{r1.permission} {typ} {r1.text +BlockLeft} get;set; {BlockRight+Wrap}";
             }
             if (context.expression(1) != null)
             {
                 var r2 = (Result)Visit(context.expression(1));
-                obj += $" = {r2.text} {Terminate} {Wrap}";
+                obj += $" = {r2.text+Terminate+Wrap}";
             }
             return obj;
         }
@@ -187,16 +187,16 @@ namespace xylang
             id = GetControlSub(context.id().GetText());
             if (context.functionSupportStatement().Length>0)
             {
-                obj += id + "{";
+                obj += id + BlockLeft;
                 foreach (var item in context.functionSupportStatement())
                 {
                     obj += Visit(item);
                 }
-                obj += "}" + Wrap;
+                obj += BlockRight + Wrap;
             }
             else
             {
-                obj += id + ";";
+                obj += id + Terminate;
             }
 
             return obj;
@@ -234,9 +234,9 @@ namespace xylang
             {
                 obj += Visit(context.templateDefine());
             }
-            obj += Visit(context.parameterClauseIn()) + Wrap + context.BlockLeft().GetText() + Wrap;
+            obj += Visit(context.parameterClauseIn()) + Wrap + BlockLeft + Wrap;
             obj += ProcessFunctionSupport(context.functionSupportStatement());
-            obj += context.BlockRight().GetText() + Wrap;
+            obj += BlockRight + Wrap;
             return obj;
         }
 
@@ -251,17 +251,17 @@ namespace xylang
 
             obj += "protected override " + Visit(context.parameterClauseOut()) + " " + id.text;
 
-            obj += Visit(context.parameterClauseIn()) + Wrap + context.BlockLeft().GetText() + Wrap;
+            obj += Visit(context.parameterClauseIn()) + Wrap + BlockLeft + Wrap;
             obj += ProcessFunctionSupport(context.functionSupportStatement());
-            obj += context.BlockRight().GetText() + Wrap;
+            obj += BlockRight + Wrap;
             return obj;
         }
 
         public override object VisitPackageInitStatement([NotNull] XyParser.PackageInitStatementContext context)
         {
-            var obj = context.BlockLeft().GetText() + Wrap;
+            var obj = BlockLeft + Wrap;
             obj += ProcessFunctionSupport(context.functionSupportStatement());
-            obj += context.BlockRight().GetText() + Wrap;
+            obj += BlockRight + Wrap;
             return obj;
         }
 
@@ -319,7 +319,7 @@ namespace xylang
             var obj = "";
             var id = (Result)Visit(context.id());
             var nameSpace = Visit(context.nameSpaceItem());
-            obj += "public event " + nameSpace + " " + id.text + context.Terminate().GetText() + Wrap;
+            obj += $"public event {nameSpace} {id.text + Terminate + Wrap}";
             return obj;
         }
 
@@ -348,12 +348,12 @@ namespace xylang
             var body = "";
             if (context.packageControlSubStatement().Length > 0)
             {
-                body += "{";
+                body += BlockLeft;
                 foreach (var item in context.packageControlSubStatement())
                 {
                     body += Visit(item);
                 }
-                body += "}" + Wrap;
+                body += BlockRight + Wrap;
             }
             else
             {
@@ -418,9 +418,9 @@ namespace xylang
             {
                 fn.@out = (string)Visit(context.parameterClauseOut());
             }
-            fn.body = context.BlockLeft().GetText() + Wrap;
+            fn.body = BlockLeft + Wrap;
             fn.body += ProcessFunctionSupport(context.functionSupportStatement());
-            fn.body += context.BlockRight().GetText() + Wrap;
+            fn.body += BlockRight + Wrap;
             return fn;
         }
 
@@ -445,9 +445,9 @@ namespace xylang
             {
                 obj += Visit(context.templateDefine());
             }
-            obj += Wrap + context.BlockLeft().GetText() + Wrap;
+            obj += Wrap + BlockLeft + Wrap;
             obj += interfaceProtocol;
-            obj += context.BlockRight().GetText() + Wrap;
+            obj += BlockRight + Wrap;
             return obj;
         }
 
@@ -482,7 +482,7 @@ namespace xylang
         public override object VisitProtocolControlSubStatement([NotNull] XyParser.ProtocolControlSubStatementContext context)
         {
             var obj = "";
-            obj = GetControlSub(context.id().GetText()) + ";";
+            obj = GetControlSub(context.id().GetText()) + Terminate;
             return obj;
         }
 
