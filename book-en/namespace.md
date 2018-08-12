@@ -8,47 +8,45 @@ Exported names can be nested in a loop so that functions can be split as effecti
 
 E.g:
 ```
-<: name\space
+name\space
 {
-    space #
+    GetSomething ()->(content:str)
     {
-        GetSomething $()->(content:str)
-        {
-            <- ("something");
-        };
-    };
-};
+        <- ("something")
+    }
+}
 ```
 ## Import
 We can use other namespace contents through the import function. The namespace content can be called directly after import.
 
 E.g:
 ```
-<: import
+import
 {
-    :> name\space;
-    $
+    .. name\space
+
+    Main ()
     {
         // print something
-        Console.WriteLine.( space.GetSomething.() );
-    };
-};
+        Console.WriteLine.( space.GetSomething.() )
+    }
+}
 ```
 ## Simplify Import
-If we don't want to use no construct package names every time we call content, we can use a simplified syntax, adding `..` when importing.
+If we don't want to use the namespace name to call the content every time, we can use the simplified syntax to add `.LastName` to the import.
 
 E.g:
 ```
-<: import
+import
 {
-    :> ..name\space.space;
+    .. name\space.space
     
-    $
+    Main ()
     {
         // print something
-        Console.WriteLine.( GetSomething.() );
-    };
-};
+        Console.WriteLine.( GetSomething.() )
+    }
+}
 ```
 This eliminates the need to call `space` every time.
 ## Temporary Import
@@ -58,9 +56,11 @@ E.g:
 ```
 demo
 {
-    $
+    Main ()
     {
-        \System.Console.WriteLine.(""); // can be used directly
-    };
-};
+        \System.Console.WriteLine.("")   // can be used directly
+    }
+}
 ```
+
+## [Complete Example](../example.xy)

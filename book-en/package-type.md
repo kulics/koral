@@ -5,26 +5,26 @@ Therefore, we need a feature that can wrap data of different attributes to bette
 
 Obviously, this feature for package data, called package.
 ## Definition
-We can use the `#{}` symbol to define a package that has nothing.
+We can use the `id {}-> {};` statement to define a package that has nothing.
 
 E.g:
 ```
-Package #{}
+Package {}->
 {
-};
+}
 ```
 Of course, we hope more is to be able to pack a few data, for example, a name, student number, class, grade attributes of students.
 We can define these data in the same way we define normal identifiers.
 
 E.g:
 ```
-Student #{}
+Student {}->
 {
-    Name :str = "";
-    Number :str = "";
-    Class :i32 = 0;
-    Grade :i32 = 0;
-};
+    Name :str = ""
+    Number :str = ""
+    Class :i32 = 0
+    Grade :i32 = 0
+}
 ```
 So we get a student bag with these data attributes. This student bag now becomes a usable type like `i32, str, bool`.
 
@@ -37,7 +37,7 @@ So how do we create a new package? As always, all of our types can be created us
 
 E.g:
 ```
-Peter := Student.{};
+Peter := Student.{}
 ```
 This create a `Peter` identifier. All the properties of this student are initialized to `"", "", 0,0` as set in the definition.
 
@@ -52,15 +52,17 @@ Very simple, we only need to use `.` syntax, we can summon the attributes we nee
 
 E.g:
 ```
-Console.WriteLine.(Peter.Name); 
+Console.WriteLine.(Peter.Name)
 // print the name of a student
 ```
 To change the value of the property is the same, it is equivalent to a nested identifier. We can directly use the assignment statement to change the value.
 
 E.g:
 ```
-Peter.Name = "Peter"; Peter.Number = "060233";
-Peter.Class = 2; Peter.Grade = 6;
+Peter.Name = "Peter" 
+Peter.Number = "060233"
+Peter.Class = 2
+Peter.Grade = 6
 ```
 ## Simplify creation
 Creating a new package like the one above, and then loading the data one by one, is very cumbersome. We can use a simplified syntax to configure.
@@ -71,7 +73,7 @@ E.g:
 Peter := Student.{
     ...Name="Peter", Number="060233",
     Class=2, Grade=6
-};
+}
 ```
 
 So the fingers are not so sour.
@@ -80,23 +82,23 @@ Similarly, the way the collection is created is actually a simplified creation, 
 
 E.g:
 ```
-Array := []i32.{ ...1, 2, 3, 4, 5 };
-Dictionary := [str]i32.{ ..."1"->1, "2"->2, "3"->3 };
+Array := []i32.{ ...1, 2, 3, 4, 5 }
+Dictionary := [str]i32.{ ..."1"->1, "2"->2, "3"->3 }
 ```
 ## Anonymous Package
 If we only want to wrap some data directly, instead of defining the package first and then using it, is it like an anonymous function?
 
-Of course, we can use `#` directly.
+Of course, we can use `_` directly.
 
 E.g:
 ```
-Peter := #
+Peter := _
 {
-    Name := "Peter";
-    Number := "060233";
-    Class := 2;
-    Grade := 6;
-};
+    Name := "Peter"
+    Number := "060233"
+    Class := 2
+    Grade := 6
+}
 ```
 
 This directly creates a `Peter` data that we can use directly, but we cannot change this data.
@@ -109,11 +111,11 @@ We can define private properties to store properties that we do not want to be a
 
 E.g:
 ```
-Student #{}
+Student {}->
 {
     ...
-    _GirlFirend :str; // The identifier beginning with this '_' is private
-};
+    _GirlFirend :str    // The identifier beginning with this '_' is private
+}
 ```
 That's right, if you remember the definition of identifiers, this is how private identifiers are defined, and private identifiers can not be accessed by outsiders.
 
@@ -121,21 +123,21 @@ Therefore, we can define a `Peter`, nor can we get or modify the value via `Pete
 
 Then the private properties of this package can not be accessed, and can not be modified, what is the use? Do not worry, there is another attribute package.
 
-## Function Property
-We can use the definition method learned in the function section directly defined in the package.
+## Extension Function
+If we need to make this package come with a function that makes it easy to manipulate, we can't define it directly in the package.
+We need to use the extension statement `id += {};` to make the package add extension functions.
 
 E.g:
 ```
-Student #{}
+Student += 
 {
-    ...
-    GetGirlFirend $()->(name: str)
+    GetGirlFirend ()->(name:str)
     {
-        <- (.._GirlFirend);
-    };
-};
+        <- (.._GirlFirend)
+    }
+}
 ```
-Because the function is part of the package, and the function can call data or functionality, we can define a method for getting the private property.
+Because the extension function is part of the package, and the function can call data or functionality, we can define a method for getting the private property.
 
 The `..` used here to declare the package itself, so you can easily access their own properties. This can be thought of as `this | self` in other languages.
 
@@ -145,7 +147,7 @@ With this function, we can get the private property by calling the function.
 
 E.g:
 ```
-Console.WriteLine.(Peter.GetGirlFirend.());
+Console.WriteLine.( Peter.GetGirlFirend.() )
 // printed the name of a girlfriend of a puppy love student
 ```
 As with data attributes, functions can also be private identifiers, and functions that use private identifiers also mean that only the packet can access itself.
@@ -157,79 +159,57 @@ We hope that given a name and student number, class and grade information will b
 
 This can be achieved using regular functions, but why not use the built-in constructor?
 
-Add parameters in the definition, and write the definition of the constructor, which only needs the auxiliary symbol `#` can do it.
+Add parameters at the time of definition, and write the definition of the constructor, which only needs the `.. {};` statement.
 
 E.g:
 ```
-Student #{name: str, number: str}
+Student {name, number: str}->
 {
     ...
 
-    #
+    ..
     {
-        ..Name = name; ..Number = number;
+        ..Name = name
+        ..Number = number
         // calculate the class
-        ..Class = GetSubText(number, 2, 3);
+        ..Class = GetSubText(number, 2, 3)
         // calculate the grade
-        ..Grade = GetSubText(number, 0, 1);
-    };
-};
+        ..Grade = GetSubText(number, 0, 1)
+    }
+}
 ```
 This gives us a package with constructors, and when we create a new student, class and grade data are automatically generated.
 
 E.g:
 ```
-Peter := Student.{"Peter", "060233"};
-Console.WriteLine.(Peter.Class); // print out 2
+Peter := Student.{"Peter", "060233"}
+Console.WriteLine.(Peter.Class)     // print out 2
 ```
 
 If you need to use both constructors and simplified creations, you can do so.
 
 E.g:
 ```
-Peter := Student.{"Peter", "060233" ... Name="New Peter"};
+Peter := Student.{"Peter", "060233" ... Name="New Peter"}
 ```
 
 It should be noted that a package can only support one constructor, we recommend to maintain the simplicity of the structure, a stable package easier to be used by the caller,
 
 If you really have more construction requirements, you can use regular functions to accomplish this requirement.
-## No Construct Packages
-Since anonymous packages can be used in logic to directly define a data package that does not need to be constructed, we can also define an unstructured package in the namespace to facilitate the use of data and functions.
 
-E.g:
-```
-NameSpace
-{
-    School #
-    {
-        Name := "XySchool";
-
-        WellCome $(name:str)->(hi:str)
-        {
-            <- ("well come to " + name);
-        };
-    };
-
-    $
-    {
-        School.WellCome.(School.Name);
-        // well come to XySchool
-    };
-};
-```
 ## Combination
 Now let us play our imagination, we want a customized package for Chinese students how to define it?
 
 E.g:
 ```
-ChineseStudent #{}
+ChineseStudent {}->
 {
-    Name :str = "";
-    Number :str = "";
-    Class :i32 = 0;
-    Grade :i32 = 0;
-    KungFu :bool = false; // kung fu students
-};
+    Name :str = ""
+    Number :str = ""
+    Class :i32 = 0
+    Grade :i32 = 0
+    KungFu :bool = false    // kung fu students
+}
 ```
 No, no repeatable definition of data so elegant, we can reuse student attributes, with an additional kung fu attributes on it.
 
@@ -237,20 +217,64 @@ We need to use a combination of this feature, but not so complicated, just creat
 
 E.g:
 ```
-ChineseStudent #{}
+ChineseStudent {}->
 {
-    Student :Student?; // include student attributes in it
-    KungFu :bool?; // kung fu students
-};
+    Student :Student?   // include student attributes in it
+    KungFu :bool?       // kung fu students
+}
 ```
 This way you can use generic attributes via student attributes in Chinese students.
 
 E.g:
 ```
-Chen := ChineseStudent.{};
-Console.WriteLine.(Chen.Student.Name);
+Chen := ChineseStudent.{}
+Console.WriteLine.(Chen.Student.Name)
 // of course, since there is no assignment, nothing is output
 ```
 By combining layers after layer, you are free to assemble whatever you want to describe.
 
 ### [Next Chapter](protocol-type.md)
+
+## Example of this chapter
+```
+Demo
+{
+    .. System
+
+    Main ()
+    {
+        a := S.{...A=5,B=12}
+        b := PKG.{"hello", 64, a}
+        Console.WriteLine.( b.Z.A )
+        Console.WriteLine.( b.Print.() )
+    }
+
+    S {}->
+    {
+        A := 0
+        B := 0
+    }
+
+    PKG {x:str,y:i32,z:S}->
+    {
+        X := ""
+        Y := 0
+        Z := S.{}
+
+        ..
+        {
+            X = x
+            Y = y
+            Z = z
+        }
+    }
+
+    PKG +=
+    {
+        Print ()-(a:str)
+        {
+            <- ( /"X {Y}"/ )
+        }
+    }
+}
+```

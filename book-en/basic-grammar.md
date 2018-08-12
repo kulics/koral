@@ -6,18 +6,22 @@ The basic form of the statement is:
 ```
 StatementContent;
 ```
-A statement must be terminated by a distinct `;` and often `{}` is used to wrap the contents of a qualified statement.
+A statement can end with a clear `;`, and often uses `{}` to wrap the contents of a qualified statement.
+
+In particular, ``` in this language is not required. Most of the time, it can be omitted, and it needs to be declared only when the semantics are not clear.
+
+In the following content, we will omit `;` by default.
 ## Export Namespace
 All content in this language can only be defined in the namespace so that content can be efficiently divided into distinct blocks for management. You can define it freely in a separate namespace without undue restrictions on naming.
 
-We can use the `<: id {}` statement to define a region's namespace.
+We can use the `id {};` statement to define a region's namespace.
 
 E.g:
 ```
-<: Demo
+Demo
 {
     ...
-};
+}
 ```
 The meaning of this statement is the contents of `{}` will be marked `Demo` in the namespace, so the content naming is limited to the area without having to consider naming conflicts outside the area.
 
@@ -25,14 +29,14 @@ At the same time the external area can import `Demo` to use the contents of whic
 
 Note that only the main entry, package, and protocol statements are supported in the namespace, and these identifiers must be public.
 ## Import Namespace
-We can use the `:>` statement to import other namespaces, libraries, frameworks into a namespace.
+We can use the `.. id,id,id;` statement to import other namespaces, libraries, frameworks into a namespace.
 
 E.g:
 ```
-<: Demo
+Demo
 {
-    :> System, System\Collections\Generic;
-};
+    .. System, System\Collections\Generic
+}
 ```
 This imports the `System` and` Generic` libraries into the `Demo` namespace, and then you can use them in the program.
 
@@ -41,18 +45,19 @@ You can write multiple import statements that are separated by `,` and their ord
 For more details on namespaces, please see [Namespace](namespace.md)
 
 ## Main Entry
-We need to define a main entry to let the program know where to start. The main entry through a fixed single symbol `$` statement, and must be valid at the top of the namespace.
+We need to define a main entry to let the program know where to start. The main entry is declared with a fixed statement `Main () {};` and must be valid at the top level of the namespace.
 
 E.g:
 ```
-<: Demo
+Demo
 {
-    :> System;
-    $
+    .. System
+    
+    Main ()
     {
         ...
-    };
-};
+    }
+}
 ```
 The main entry function here is defined at the top of the namespace and is a function with no arguments and no return value. It is automatically recognized as the main entry and the main entry function is executed when the program is started, so we simply write the function main entry function can be.
 
@@ -62,7 +67,6 @@ In particular, there can be only one main entry function in a namespace because 
 
 More details about the function will be explained in later chapters.
 
-As you may have noticed, in this language, you often start with the symbol, wrap the content with `{}`, and use `;` to end the statement, which is a very important expression of the language that unifies the expression of the statement, In most cases you only need one of the distinguished symbols to complete the parsing and writing of statements.
 ## Display information
 We use the program in order to obtain some useful information, so we need a feature to browse information, this feature can be display, print or output.
 
@@ -70,7 +74,7 @@ If we write a console program, we can use .Net built-in `Console.WriteLine.()` f
 
 E.g:
 ```
-Console.WriteLine.("Hello world"); // output Hello world
+Console.WriteLine.("Hello world")    // output Hello world
 ```
 In the following examples, we will all use the console as a presentation environment.
 ## Comment
@@ -85,40 +89,47 @@ comment * /
 ```
 Comment do not belong to the statement, so do not need to end with `;`, comment is only used to provide additional information to the user, and will not be really compiled into the executable program.
 ## Definition
-We can create new variable using the `:type` statement.
+We can create new variable using the `id:type;` statement.
 
 E.g:
 ```
-a : i32;
+a : i32
 ```
 This will create an identifier for the name on the left and define it as the type on the right, in which case the identifier is a null value.
 
 Once an identifier is created, its data type will not be changed in the valid area.
 
 ## Assignment
-Like a normal programming language, we need to use the `=` statement to assign the data on the right to the identifier on the left.
+Like a normal programming language, we need to use the `id = value;` statement to assign the data on the right to the identifier on the left.
 
 E.g:
 ```
-a = 2;
+a = 2
 ```
 But the definition is not the same, the left side of the assignment can only be an identifier that has been defined, otherwise the assignment statement does not hold.
 ## Automatic derivation
-In most cases, you can use the simpler automatic derivation syntax `:=`, we don't need to explicitly specify the type of data, the compiler will automatically infer the type for the data.
+In most cases, you can use the simpler automatic derivation syntax `id := value;`, we don't need to explicitly specify the type of data, the compiler will automatically infer the type for the data.
 
 E.g:
 ```
-b := 10;
+b := 10
 ```
 
 This defines the new variable `b`, which is equal to `10` and is automatically derived as an `i32` type.
 
+If we don't want automatic derivation, we can also use the write statement definition to mark the type we need.
+
+E.g:
+```
+b :i16 = 10
+```
 ## Variable data
 We can define variable data very easily, and types that are not marked with special symbols are variable data.
 
 E.g:
 ```
-i := 1; 
+i := 1          // can be changed
+j :i32 = 1      // do not use automatic derivation
 ```
 
 It should be noted that variable data cannot be called externally and can only be used within a defined range. Can be considered private.
@@ -128,7 +139,8 @@ We can also define invariable data, just define it with `:==`.
 
 E.g:
 ```
-j :== 2; 
+i :== 2         // cannot be changed
+j :i32 == 3     // do not use automatic derivation
 ```
 
 Note that invariable data can only be defined within the package without initial.
@@ -153,12 +165,28 @@ However, in practical projects, the use of partition will effectively improve th
 
 E.g:
 ```
-a.b.(x,y).c.(fn:$()->(x:i32){<-(2+1);}).d=1+3*5/4;
+a.b.(x,y).c.(fn:()->(x:i32){<-(2+1)}).d=1+3*5/4
 
 a.b.(x, y)
-.c.(fn: $()->(x: i32)
+.c.(fn: ()->(x: i32)
 {
-    <- (2 + 1);
-}).d = 1 + 3 * 5 / 4;
+    <- (2 + 1)
+}).d = 1 + 3 * 5 / 4
 ```
 ### [Next Chapter](basic-type.md)
+
+## Example of this chapter
+```
+Demo
+{
+    .. System
+
+    Main ()
+    {
+        a : i32
+        a = 5
+        b := 6
+        c :i8 = 1
+    }
+}
+```

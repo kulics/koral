@@ -6,11 +6,13 @@ The protocol specifies the methods and properties necessary to implement a parti
 
 Our package can introduce the protocol we need, just like signing an protocol, and then declare all the properties required by the protocol, so that we think the package signed the protocol.
 ## Definition
-We only need to use the symbol `%` to define a protocol.
+We only need to use the symbol `id -> {};` to define a protocol.
 
 E.g:
 ```
-Protocol %{};
+Protocol ->
+{
+}
 ```
 This is an empty protocol.
 
@@ -18,11 +20,11 @@ Next, let's design a difficult task that students need to accomplish ... homewor
 
 E.g:
 ```
-HomeWork %
+HomeWork ->
 {
-    Count :i32;
-    Do $()->(){};
-};
+    Count :i32
+    Do ()->(){}
+}
 ```
 The protocol for this job has two properties, one is the number of homework and the other is the function to do homework.
 
@@ -31,25 +33,21 @@ The protocol properties defined and package properties defined in exactly the sa
 Unlike a package, the definition of the protocol properties do not need specific values or function content, only need to determine the type.
 
 Next, let's have the students implement the protocol.
-## Contains the protocol
-We can include this protocol in the package we need, using the symbols `%` and the protocol name.
+## Implement the protocol
+Similar to the extension function, we can implement this protocol by using the `id += protocol {};` statement in the required package.
 
 E.g:
 ```
-Student #{}
+Student += HomeWork
 {
-    ...
-    % HomeWork
-    {
-        Count :i32; 
+    Count :i32
 
-        Do $()->()
-        {
-            SpendTime(1); // spent an hour
-            ..HomeWork.Count -= 1; // completed one
-        };
-    };
-};
+    Do ()->()
+    {
+        SpendTime(1)            // spent an hour
+        ..HomeWork.Count -= 1   // completed one
+    }
+}
 ```
 Our student homework is really hard ...
 
@@ -68,12 +66,12 @@ With the protocol included, we can use the student bundle that owns the protocol
 
 E.g:
 ```
-Peter := Student.{ ...Count=999999 };
-Console.WriteLine.(Peter.HomeWork.Count);
+Peter := Student.{ ...Count=999999 }
+Console.WriteLine.( Peter.HomeWork.Count )
 // print 999999, too much
-Peter.HomeWork.Do.();
+Peter.HomeWork.Do.()
 // did a homework
-Console.WriteLine.(Peter.HomeWork.Count);
+Console.WriteLine.(Peter.HomeWork.Count)
 // print 999998, or too much
 ```
 If this is the case, there is no advantage in defining these two properties directly in the package.
@@ -87,38 +85,38 @@ Now we can create a wide variety of students, all of whom follow the same protoc
 E.g:
 ```
 // create three different types of student packages
-StudentA := ChineseStudent.{};
-StudentB := AmericaStudent.{};
-StudentC := JapanStudent.{};
+StudentA := ChineseStudent.{}
+StudentB := AmericaStudent.{}
+StudentC := JapanStudent.{}
 // let them do homework separately
-StudentA.HomeWork.Do.();
-StudentB.HomeWork.Do.();
-StudentC.HomeWork.Do.();
+StudentA.HomeWork.Do.()
+StudentB.HomeWork.Do.()
+StudentC.HomeWork.Do.()
 ```
 More efficient approach is to write this function into the function, let the function to help us repeatedly call the function of the protocol.
 
 E.g:
 ```
-DoHomeWork $(student: HomeWork)->()
+DoHomeWork (student: HomeWork)->()
 {
-    student.Do.(); 
-};
+    student.Do.()
+}
 // Now we can make it easier for every student to do their homework
-DoHomeWork.(StudentA.HomeWork);
-DoHomeWork.(StudentB.HomeWork);
-DoHomeWork.(StudentC.HomeWork);
+DoHomeWork.(StudentA.HomeWork)
+DoHomeWork.(StudentB.HomeWork)
+DoHomeWork.(StudentC.HomeWork)
 ```
 Of course, it is better to put these students in an array so that we can use loops to handle these repetitive tasks.
 
 E.g:
 ```
-Arr := []HomeWork.{};
-Arr.Add.(StudentA.HomeWork);
+Arr := []HomeWork.{}
+Arr.Add.( StudentA.HomeWork )
 ... // stuffed many, many students
 Arr.@
 {
-    DoHomeWork.(it);
-};
+    DoHomeWork.(it)
+}
 ```
 ╮ (¯ ▽ ¯) ╭
 Perfect
@@ -128,20 +126,64 @@ Because packet types can be converted to protocol types, the original type of da
 
 But sometimes we need to get the original type of data to handle, we can use type judgment to help us accomplish this.
 
-We can use `.?:type` To judge the type of data, using `.!:type` To convert the data to our type.
+We can use `value.?:type` To judge the type of data, using `value.!:type` To convert the data to our type.
 
 E.g:
 ```
-func $(hw :HomeWork)->()
+func (hw :HomeWork)->()
 {
     // judge type
     ? hw.?:ChineseStudent 
     {
         // convert to chinese student data
-        cs := hw.!:ChineseStudent;
-    };
-};
+        cs := hw.!:ChineseStudent
+    }
+}
 ```
 Note that if the type can not be converted correctly, it will return a `null` value.
 
 ### [Next Chapter](enumeration-type.md)
+
+## Example of this chapter
+```
+Demo
+{
+    .. System
+
+    Main ()
+    {
+        S := B.{}
+        B.A.Do.()
+        C.( B.A )
+    }
+
+    A ->
+    {
+        X : i32
+        Do ()->() {}
+    }
+
+    B {}->
+    {
+        Y := 5
+    }
+
+    B += A
+    {
+        X := 0
+        Do ()->() 
+        {
+            ...A.X += 1
+        }
+    }
+
+    C (a:A)->()
+    {
+        a.Do.()
+        ? a.?:B 
+        {
+            Console.WriteLine.( a.!:B.Y )
+        }
+    }
+}
+```
