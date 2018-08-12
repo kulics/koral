@@ -31,7 +31,7 @@ namespace xylang
             var className = name;
             if (name.LastIndexOf('.') > 0)
             {
-                name = className.Substring(name.LastIndexOf('.'));
+                name = className.Substring(name.LastIndexOf('.')+1);
             }
 
             var content = "";
