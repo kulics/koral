@@ -8,7 +8,7 @@ StatementContent;
 ```
 A statement can end with a clear `;`, and often uses `{}` to wrap the contents of a qualified statement.
 
-In particular, ``` in this language is not required. Most of the time, it can be omitted, and it needs to be declared only when the semantics are not clear.
+In particular, `;` in this language is not required. Most of the time, it can be omitted, and it needs to be declared only when the semantics are not clear.
 
 In the following content, we will omit `;` by default.
 ## Export Namespace
@@ -148,12 +148,12 @@ Note that invariable data can only be defined within the package without initial
 Identifier is the variable, function, package, protocol, etc. specified name. The letters that make up the identifier all have a certain norm, and the naming convention of the identifier in this language is as follows:
 
 1. Case sensitive, Myname and myname are two different identifiers;
-1. The first character of an identifier can start with an underscore (_) or a letter, but it can not be a number;
-1. Other characters in the identifier can be underlined (_), letters, or numbers.
+1. The first character of an identifier can start with an underscore `_` or a letter, but it can not be a number;
+1. Other characters in the identifier can be underlined `_`, letters, or numbers.
 1. Within the same `{}`, you can not define more than two identifiers of the same name.
 1. In different `{}`, you can define the identifier of the duplicate name, the language will give priority to the identifier defined in the current range.
 
-In particular, in packages and protocols, properties and method names that begin with the underscore (_) are considered private and the rest are considered public.
+In particular, in packages and protocols, properties and method names that begin with the underscore `_` are considered private and the rest are considered public.
 ## Keyword
 none.
 
