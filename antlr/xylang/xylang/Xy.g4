@@ -278,11 +278,11 @@ callAs: as type; // 类型转换
 
 callAwait: FlowLeft expression; // 异步调用
 
-array : '[' (expression (',' expression)*)? (':' typeArray)? ']'; // 数组
+array : '[' (expression (',' expression)*)? (':' type)? ']'; // 数组
 
-sharpArray : '#' '[' (expression (',' expression)*)? (':' typeSharpArray)? ']'; // c#数组
+sharpArray : '#' '[' (expression (',' expression)*)? (':' type)? ']'; // c#数组
 
-dictionary :  '[' (dictionaryElement (',' dictionaryElement)*)? (':' typeDictionary)? ']'; // 字典
+dictionary :  '[' (dictionaryElement (',' dictionaryElement)*)? (':' type '->' type)? ']'; // 字典
 
 dictionaryElement: expression '->' expression; // 字典元素
 

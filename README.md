@@ -10,7 +10,7 @@ Therefore, we abandon many subtle grammatical features, retaining only the most 
 Eventually making XyLang with very few grammar, only the presence of symbols on the keyboard instead of keywords is sufficient to express all the logic.
 
 ## Features
-+ Focus on writing and reading..
++ Focus on writing and reading.
 + Less grammar, no keywords.
 + Clear semantics, one logic corresponds to only one expression.
 + Support for compilation to .NET platform, with .NET framework and library resources, we can use this language in a very wide range of scenarios.
