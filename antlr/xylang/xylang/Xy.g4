@@ -56,9 +56,9 @@ nspackageFunctionStatement
 // 主函数
 functionMainStatement:'Main' parameterClauseIn BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 无构造包变量
-nspackageVariableStatement:(annotation)? expression (Define expression|Declared type (Assign expression)?) (nspackageControlSubStatement)* Terminate;
+nspackageVariableStatement:(annotation)? expression (Define expression|Declared type (Assign expression)?) (nspackageControlSubStatement)* Terminate?;
 // 无构造包常量
-nspackageInvariableStatement:(annotation)? expression (Declared type '==' | ':==') expression Terminate;
+nspackageInvariableStatement:(annotation)? expression (Declared type '==' | ':==') expression Terminate?;
 // 定义子方法
 nspackageControlSubStatement: Control id (BlockLeft (functionSupportStatement)* BlockRight)?;
 // 无构造包函数
