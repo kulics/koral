@@ -19,6 +19,9 @@ name\space
 ## Import
 We can use other namespace contents through the import function. The namespace content can be called directly after import.
 
+It should be noted that the top-level function, the top-level variable, and the top-level constant will be installed as an object with the current file name as the host container.
+So by default you need to use a filename to access across the namespace, where the file name is `Demo`.
+
 E.g:
 ```
 import
@@ -28,7 +31,30 @@ import
     Main ()
     {
         // print something
-        Console.WriteLine.( space.GetSomething.() )
+        Console.WriteLine.( Demo.GetSomething.() )
+    }
+}
+```
+
+If we need to specify the name of the host container, we can specify it using `::name`.
+
+E.g:
+```
+name\space::helper
+{
+    GetSomething ()->(content:str)
+    {
+        <- ("something")
+    }
+}
+
+import
+{
+    .. name\space
+
+    Main ()
+    {
+        Console.WriteLine.( helper.GetSomething.() )
     }
 }
 ```
@@ -39,7 +65,7 @@ E.g:
 ```
 import
 {
-    .. name\space.space
+    .. name\space.Demo
     
     Main ()
     {
@@ -58,7 +84,8 @@ demo
 {
     Main ()
     {
-        \System.Console.WriteLine.("")   // can be used directly
+        // can be used directly
+        Console.WriteLine.( \name\space.Demo.GetSomething.() )   
     }
 }
 ```
