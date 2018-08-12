@@ -19,14 +19,14 @@
 
 例如：
 ```
-Linq $()->()
+Linq ()->()
 {
-    numbers := [ 0, 1, 2, 3, 4, 5, 6 ];
+    numbers := [ 0, 1, 2, 3, 4, 5, 6 ]
     arr := `from num in numbers
             where (num % 2) == 0
             orderby num descending
-            select num`;
-};
+            select num`
+}
 ```
 
 ### [下一章](命名空间.md)

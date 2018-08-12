@@ -1,5 +1,5 @@
 # XyLang Programming Language
-XyLang is a simpler and more friendly .NET programming language.  
+XyLang is a concise open source .NET programming language. 
 
 The language is designed to improve reading performance and reduce the grammatical burden so that users can focus their real attention on business needs.
 

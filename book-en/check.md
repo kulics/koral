@@ -12,28 +12,28 @@ We can declare an exception data using `!.()` Anywhere in the function.
 
 E.g:
 ```
-ReadFile $(name: str)->()
+ReadFile (name: str)->()
 {
     ? name.Length == 0
     {
-        !.(Exception.{"something wrong"});
-    };
-};
+        !.( Exception.{"something wrong"} )
+    }
+}
 ```
 So we declare an exception, the exception is `something wrong`, and once an external caller has used a `name` of an invalid length, the exception is reported up until it is processed or ignored.
 ## Check Exception
-We can use the `!` to check for blocks that may be abnormal when the function is called.
+We can use the `! {} id {};` statement to check for blocks that may have exceptions when calling a function.
 
 E.g:
 ```
 !
 {
-    ReadFile.("temp.txt");
+    ReadFile.("temp.txt")
 }
 err
 {
-    Console.WriteLine.(err.message);
-};
+    Console.WriteLine.(err.message)
+}
 ```
 Here, the `!` Block represents all the functional logic under inspection, `err` means that the erroneous data is defined as the identifier `err`, which acts like a in parameter.
 
@@ -46,8 +46,8 @@ E.g:
 ...
 err
 {
-    !.(err);
-};
+    !.(err)
+}
 ```
 So how do we distinguish between different types of anomalies?
 
@@ -58,25 +58,25 @@ E.g:
 e : IOException
 {
     ...
-};
+}
 ```
 
 ## Check Defer
 If we have a function that we hope can be handled regardless of whether the program is normal or abnormal, such as the release of critical resources, we can use the check defer feature.
 
-Quite simply, using `~!` can declare a statement that checks the delay.
+Quite simply, using `~! {};` can declare a statement that checks the delay.
 
 E.g:
 ```
-Func $()->()
+Func ()->()
 {
-    File := ReadFile.("./somecode.xy");
+    File := ReadFile.("./somecode.xy")
     ~!
     {
-        file.Release.();
-    };
+        file.Release.()
+    }
     ...
-};
+}
 ```
 So we declare the `file.Release.();` statement that releases the file. This statement will not be executed immediately, but will wait for the function to be called before exiting.
 
@@ -89,9 +89,9 @@ E.g:
 ...
 ~!
 {
-    file.Release.();
-    <- (); // error, cannot use return statement
-};
+    file.Release.()
+    <- ()    // error, cannot use return statement
+}
 ```
 
 ### Check Defer Order
@@ -99,9 +99,9 @@ In particular, if more than one `~!` is used in a statement block, the final exe
 
 E.g:
 ```
-~! { Console.WriteLine.("1"); };
-~! { Console.WriteLine.("2"); };
-~! { Console.WriteLine.("3"); };
+~! { Console.WriteLine.("1") }
+~! { Console.WriteLine.("2") }
+~! { Console.WriteLine.("3") }
 
 // final display 3 2 1
 ```
@@ -111,17 +111,17 @@ The effective scope of the check delay is only the current one-level statement b
 
 E.g:
 ```
-Func $()->()
+Func ()->()
 {
     ...
     [0~5].@
     {
         // does not affect the logic outside the loop
-        ~! { Console.WriteLine.(it + 1); };
-        Console.WriteLine.(it);
-    };
+        ~! { Console.WriteLine.(it + 1); }
+        Console.WriteLine.(it)
+    }
     ...
-};
+}
 ```
 
 ### Automatic Release
@@ -129,8 +129,48 @@ For packages that implement the automatic release protocol, we can use the '!= '
 
 E.g:
 ``` 
-Res != Fileresource.{ "/test.xy"};
+Res != Fileresource.{ "/test.xy"}
 ...
 ```
 
 ### [Next Chapter](asynchronous.md)
+
+## Example of this chapter
+```
+Demo
+{
+    .. System
+
+    Main ()
+    {
+        ! 
+        {
+            x := 1 * 1
+        }
+        err : IOException 
+        {
+            !.(err)
+        }
+
+        x != Defer.{}
+        ~!
+        {
+            x.str = "defer"
+            Console.WriteLine.(x.content)
+        }
+    }
+
+    Defer {} ->
+    {
+        content :str
+    }
+
+    Defer += IDisposable
+    {
+        Dispose ()->()
+        {
+            ..content = null
+        }
+    }
+}
+```

@@ -8,7 +8,7 @@ In this language, the default integer is the `i32` type, which is a 32-bit signe
 
 E.g:
 ```
-integer := 3987349; 
+integer := 3987349
 ```
 
 If we need integers of other numeric ranges, other types can also be used. All supported integer types are shown in the following table.
@@ -25,11 +25,11 @@ u64     // 64-bit unsigned  0 to 18,446,744,073,709,551,615
 ## Basic Type Conversion
 Since the default integer is `i32`, how do we use other types of integers?
 
-We can use type conversion to change the number to the type we need, just use the `type.(data)` syntax.
+We can use type conversion to change the number to the type we need, just use the `type.(value)` syntax.
 
 E.g:
 ```
-integer8 := i8.(16);
+integer8 := i8.(16)
 ```
 
 Note that, the basic type conversion is only valid for the base type.
@@ -40,8 +40,8 @@ In this language, the default decimal is `f64`, which is a 64-bit double-precisi
 
 E.g:
 ```
-float := 855.544; 
-float = 0.3141592653;
+float := 855.544
+float = 0.3141592653
 ```
 Note that due to the special nature of computer-calculated floating-point numbers, there are certain accuracy issues in floating-point number operations, so the sensitivity-sensitive requirements should consider special handling.
 
@@ -59,16 +59,16 @@ You only need to use `""` package a text content, it will be recognized as a str
 
 E.g:
 ```
-string := "Hello world!";
+string := "Hello world!"
 ```
 ## mark string
 Many times we need to insert other content into a string. How do we usually do it?
 
 E.g:
 ```
-title := "Year:";
-content := 2018;
-string := "Hello world! " + title + content.ToString.() ;
+title := "Year:"
+content := 2018
+string := "Hello world! " + title + content.ToString.()
 // Hello world! Year:2018
 ```
 
@@ -77,8 +77,16 @@ That's the mark string. Just wrap the content with `/""/`, and use `{}` to mark 
 
 E.g:
 ```
-string := /"Hello world! {title} {content}"/;
+string := /"Hello world! {title} {content}"/
 // Hello world! Year:2018
+```
+
+If you need to use `{` and `}` in the mark string, you only need to use `{{` and `}}`.
+
+E.g:
+```
+string := /"This is block {{ and }}"/
+// This is block { and }
 ```
 ## boolean
 boolean are logical values ​​because they can only be true or false. It is often used to assist in judging logic.
@@ -87,8 +95,8 @@ In this language, the default boolean is the type `bool`, which is a type that h
 
 E.g:
 ```
-boolean := true;  // true  
-boolean = false; // false  
+boolean := true  // true  
+boolean = false  // false  
 ```
 ## any
 In particular, sometimes you need a type that can be any type to assist in the completion of the function, so it is `any`.
@@ -103,8 +111,8 @@ If a type is defined but not assigned, it will not be used.
 
 E.g:
 ```
-a : i32;
-b := a; // error, no assignment to a
+a : i32
+b := a   // error, no assignment to a
 ```
 
 If you have to use a type with null values in some cases, you can use a nullable type.
@@ -112,8 +120,8 @@ Just add `?` after any type, which is a nullable type.
 
 E.g:
 ```
-a : i32?;
-b := a; // b assigns an empty i32
+a : i32?
+b := a   // b assigns an empty i32
 ```
 ## null
 We will need a value that can be any null value, so it is `null`.
@@ -131,10 +139,31 @@ At this time we can use the null create method `null.(type)` to specify a null v
 
 E.g:
 ```
-x := null.(i64?);
-y := null.(protocol?);
-z := null.(()->()?);
+x := null.(i64?)
+y := null.(protocol?)
+z := null.(()->()?)
 ```
 More details on generics can be found in the generic section.
 
 ### [Next Chapter](operator.md)
+
+## Example of this chapter
+```
+Demo
+{
+    .. System
+
+    Main ()
+    {
+        a := 123
+        b := i64.(a)
+        c := 123.456
+        d := "hello"
+        c := /"{d} world"/
+        e := true
+        f :any = false
+        g :i32? = null
+        h := null.(i32?) 
+    }
+}
+```

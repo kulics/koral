@@ -5,40 +5,40 @@ Often we will package a series of tasks that need to be reused as functions for 
 
 In practical engineering practice, given a definite input, the function that will surely return exactly to the output is considered to be a better design. Therefore, it is recommended to maintain functional independence as much as possible.
 ## Definition
-Before we have seen the main entrance function, it is only defined using the symbol `$`.
+We have seen the main entry function before, it only uses the fixed statement `Main () {};` to define.
 
 The main entry function is a special case, in fact, the conventional functions of this language must explicitly declare the identifier, in parameters and out parameters.
 
-We only need to use `$()->()` to define a function, the first parenthesis is in parameters, the second parenthesis is out parameters.
+We only need to use `id ()->() {};` to define a function, the first parenthesis is in parameters, the second parenthesis is out parameters.
 
 E.g:
 ```
-function $()->()
+function ()->()
 {
     ...
-};
+}
 ```
 This defines a function with the identifier `function`.
 
-Note that the function can be defined in the package and protocol, you can also define inside the function. When you define a function in a function, the intrinsic does not have a public property and belongs only to the private function of the current function.
+It should be noted that functions can be defined in namespaces, packages, protocols, or inside functions. When defining a function in a function, the internal function does not have a public property and belongs only to the private function of the current function.
 ## Call
-Unlike the main entrance function can not be called, conventional functions can be used to call identifier, we only need to add `.()` behind the identifier can use the function.
+Unlike the main entry function, which cannot be called, regular functions can be called with an identifier. We only need to use the `id.()` statement to use the wrapped function.
 
 E.g:
 ```
-function.(); // call function
+function.()  // call function
 ```
 ## Parameter
 Although functions can perform specific functions without any parameters, more often we need to be able to accept some input data, or to return data, or both, which requires parameters to help us accomplish task.
 
-Very simple, we only need to use `identifier: type` declare the parameters.
+Very simple, we only need to use `id:type` declare the parameters.
 
 E.g:
 ```
-func $(x: i32)->(y: i32)
+func (x:i32)->(y:i32)
 {
-    <- (x * x);
-};
+    <- (x * 2)
+}
 ```
 The meaning of this function is to accept an input `i32` parameter `x` and a `i32` parameter `y`.
 
@@ -50,10 +50,10 @@ If we need several consecutive parameters of the same type, we can simply write 
 
 E.g:
 ```
-Func $(a, b, c:i32, d:str)->(a:str, b, c, d:i32)
+func (a, b, c:i32, d:str)->(a:str, b, c, d:i32)
 {
-    <- (d, a, b, c);
-};
+    <- (d, a, b, c)
+}
 ```
 ### Return
 Here, even if you do not know, roughly you can guess that `<-` should be a return-related statement.
@@ -62,7 +62,7 @@ Yes, we only need to use `<-` can specify a clear return statement, the return o
 
 E.g:
 ```
-<- (1, 2, 3, "Hello");
+<- (1, 2, 3, "Hello")
 ```
 This will return `1, 2, 3, 'Hello'` four values.
 
@@ -70,7 +70,7 @@ And we call the same method expression, we also need to use the full brackets to
 
 E.g:
 ```
-<- ();
+<- ()
 ```
 The purpose of such a design in order to maintain the integrity of the grammar.
 
@@ -86,22 +86,22 @@ When we call the function, we need to fill the brackets with the identifier in t
 
 E.g:
 ```
-sell $(price: i32, name: str)->(){}; 
 // define one function with two in parameter
-
-sell.(1.99, "cola"); 
+sell (price: i32, name: str)->(){}
 // fill in the data that meets the requirements as defined
+sell.(1.99, "cola")
+
 ```
 ### Out Parameters
 Similar to in parameters, out parameters also need to be clearly defined with an identifier, which makes it easier for callers to access the function's role information.
 
 E.g:
 ```
-topSell $()->(name: str, count: i32)
+topSell ()->(name: str, count: i32)
 {
     ...
-    <- ("cola", many);
-};
+    <- ("cola", many)
+}
 ```
 ### The use of the return
 So how do we get the return value of a function?
@@ -112,16 +112,16 @@ The difference is that for multiple return values ​​we have to wrap each ide
 
 E.g:
 ```
-(n, c) := topSell.(); 
+(n, c) := topSell.()
 // define the returned two values ​​for n and c
-(n, c) = topSell.(); 
+(n, c) = topSell.()
 // overrides the returned two values ​​to n and c
 ```
 You can use the definition or assignment statement to get the return value of the function to use, you can also use the nested function to another function.
 
 E.g:
 ```
-Console.WriteLine.(topSell.()); // print two values
+Console.WriteLine.( topSell.() )    // print two values
 ```
 If there is only one return value, the brackets can be taken without.
 
@@ -129,34 +129,34 @@ Note that if you call a function with a return value is not allowed to not recei
 
 E.g:
 ```
-topSell.(); // error, did not explicitly receive the return value
+topSell.()  // error, did not explicitly receive the return value
 ```
 But sometimes, as a caller, we do not necessarily need all the return values, but this time we can use the anonymous identifier `_` to help us drop the data. Just need to write it in the corresponding position.
 
 E.g:
 ```
-name, _ := topSell.();
+name, _ := topSell.()
 ```
 If indeed all the return values ​​are not needed, we can also just write a `_` to discard all. But why would need to call such a function? Maybe we should review the code again.
 
 E.g:
 ```
-_ = topSell.(); // for _ , assignment and definition are equivalent
+_ = topSell.()  // for _ , assignment and definition are equivalent
 ```
 ## Function In Parameter
 If we want part of the function defined by the external, and only perform the rest of the internal logic, such as some set traversal for a collection of functions, then we can use the function parameters to accomplish this goal.
 
-Function In Parameter no special definition of way, just replace the type of the function parameters, do not need to define the contents of the function, and do not need use `$`.
+Function In Parameter no special definition of way, just replace the type of the function parameters, do not need to define the contents of the function.
 
 E.g:
 ```
-each1To10 $(func: (item: i32)->())->()
+each1To10 (func: (item: i32)->() )->()
 {
     [1~10].@ 
     {
-        func.(it);
-    };
-};
+        func.(it)
+    }
+}
 ```
 We define a function named `func`, whose type is a function of only `item`.
 
@@ -164,12 +164,12 @@ So that we can pass the details of the processing to the externally passed `func
 
 E.g:
 ```
-print $(item: i32)->()
+print (item: i32)->()
 {
-    Console.WriteLine.(item);
-};
+    Console.WriteLine.(item)
+}
 
-each1To10.(print);
+each1To10.(print)
 ```
 So, we executed the `print` function in the loop inside `each1To10`.
 
@@ -180,35 +180,81 @@ As the above way to define a function and then imported into use sometimes appea
 
 At this point we can use the syntax of Lambda Expression to reduce the pain of our naming.
 
-Because function arguments are already defined at the time of declaration, we can use simplified syntax `$ <-` to express them, which means define the input parameter identifier and return an expression directly.
+Since the function argument is already determined at the time of declaration, we can use the simplified syntax `(id, id) <- expression` to express it. It means defining the argument identifier and returning an expression directly.
+
+When `id` has only one, you can omit `()`.
 
 E.g:
 ```
-each1To10.( $item <- Console.WriteLine.(item) );
-findAll.( $it <- it>7 );
-order.( $it <- it.time );
+each1To10.( it <- Console.WriteLine.(it) )
+findAll.( it <- it > 7 )
+order.( it <- it.time )
+take.( (a, b) <- a + b )
 ```
 Very simple, and the difference between the expression of the function type is that the input only need to declare the identifier, and the parameter is used to include one expression.
 
-If an expression is not enough, you can also return a function.
+If an expression is not enough, you can also return a function, just use the `{}` declaration.
 
 E.g:
 ```
-Each.( $it <-
+Each.( it <-
 {
-    Console.WriteLine.(1);
-    Console.WriteLine.(2);
-    Console.WriteLine.(3);
-});
+    Console.WriteLine.(1)
+    Console.WriteLine.(2)
+    Console.WriteLine.(3)
+})
 ```
 ## Lambda Function
 Unlike the above simplified method, we can also write a complete function directly, just as we define the function.
 
 E.g:
 ```
-each1To10.( $(item:i32)->()
+each1To10.( (item:i32)->()
 {
-     Console.WriteLine.(item);
-});
+     Console.WriteLine.(item)
+})
 ```
 ### [Next Chapter](control-type.md)
+
+## Example of this chapter
+```
+Demo
+{
+    .. System
+
+    Main ()
+    {
+        A.()
+        B.(1,2,3)
+        x := C.()
+        D.( ()<- Console.WriteLine.("D") )
+        E.( it <- Console.WriteLine.(it) )
+        E.( (a:i32)->()
+        {
+            Console.WriteLine.(it)
+        })
+    }
+
+    A ()->(){}
+
+    B (a,b,c :i32)->(){}
+
+    C ()->(a:i32)
+    {
+        <- (1024)
+    }
+
+    D (fn: ()-() )->()
+    {
+        fn.()
+    }
+
+    E (fn: (a:i32)->() )->()
+    {
+        [1~20].@
+        {
+            fn.(it)
+        }
+    }
+}
+```

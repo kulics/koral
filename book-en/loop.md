@@ -3,15 +3,15 @@ Sometimes, we may need to execute the same code multiple times.
 
 Under normal circumstances, the statement is executed in order, the first statement in the function first, followed by the second statement, and so on.
 ## Collection Loop
-If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can use the `.@ id` statement to iterate over the collection, taking each element out of `id`.
+If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can use the `value.@ id {};` statement to iterate over the collection, taking each element out of `id`.
 
 E.g:
 ```
-arr := [1, 2, 3, 4, 5];
+arr := [1, 2, 3, 4, 5]
 arr.@ item
 {
-    Console.WriteLine.(item); // print each number
-};
+    Console.WriteLine.(item)     // print each number
+}
 ```
 The identifier followed by `@` is the currently fetched value, which is valid only for the current loop. So we don't need to define an identifier externally.
 If we don't want to define additional identifiers, we can omit them. The default is `it`.
@@ -20,7 +20,7 @@ E.g:
 ```
 Arr.@
 {
-     Console.WriteLine.(it); // print each number
+     Console.WriteLine.(it)     // print each number
 };
 ```
 
@@ -34,8 +34,8 @@ E.g:
 ```
 [0 ~ 100].@
 {
-    Console.WriteLine.(it); // print each number
-};
+    Console.WriteLine.(it)      // print each number
+}
 ```
 It should be noted that the meaning of `0 ~ 100` is read from` 0` to `100` one by one, that is, a total execution of` 101` times. Iterator will be executed until the last number is completed, rather than an early end.
 
@@ -58,20 +58,20 @@ E.g:
 ```
 [100 ~ 0; -1].@
 {
-     ... // from 100 to 0
-};
+     ...    // from 100 to 0
+}
 ```
 
 This can be considered as a `for` structure relative to other languages.
 ## Infinite Loop
-At other times, we may need an infinite loop. Very easy, we only need to use the `@` statement..
+At other times, we may need an infinite loop. Very easy, we only need to use the `@ {};` statement..
 
 E.g:
 ```
 @
 {
     ... // never jump out
-};
+}
 ```
 This can be thought of as a while while for other languages.
 ## Jump Out
@@ -81,8 +81,8 @@ E.g:
 ```
 @
 {
-    ~@; // jump out
-};
+    ~@  // jump out
+}
 ```
 In addition to the infinite loop, jump out can also be used in other cycles.
 
@@ -93,11 +93,44 @@ Add a condition to it.
 
 E.g:
 ```
-i := 0;
+i := 0
 @ i < 6
 {
-     i += 1;
-};
+     i += 1
+}
 ```
 
 ### [Next Chapter](function-type.md)
+
+## Example of this chapter
+```
+Demo
+{
+    .. System
+
+    Main ()
+    {
+        arr := [1,2,3,4,5]
+        arr.@ 
+        {
+            Console.WriteLine.(it)
+        }
+
+        [1 ~ 50].@ i
+        {
+            Console.WriteLine.(i)
+        }
+
+        [100 ~ 0 ; -1].@ i
+        {
+            Console.WriteLine.(i)
+        }
+
+        x := 0
+        @ x <= 10
+        {
+            x += 1
+        }
+    }
+}
+```
