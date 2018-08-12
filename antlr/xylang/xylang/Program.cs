@@ -11,6 +11,7 @@ namespace xylang
     static class Program
     {
 		static string readPath;
+        static string pathLine;
 
         static void Main(string[] args)
         {
@@ -19,9 +20,12 @@ namespace xylang
 			if (os==PlatformID.Unix||os==PlatformID.MacOSX)
 			{
 				readPath = @"./";
-			}else{
+                pathLine = @"/";
+            }
+            else{
 				readPath = @".\";
-			}
+                pathLine = @"\";
+            }
 
 			//args = new[] { "build" };
 
@@ -56,7 +60,18 @@ namespace xylang
                         var parser = new XyParser(tokens) { BuildParseTree = true };
                         var tree = parser.program();
 
-                        var visitor = new XyLangVisitor();
+                        var fileName = "";
+                        if (file.LastIndexOf(pathLine)>0)
+                        {
+                            var index = file.LastIndexOf(pathLine);
+                            fileName = file.Substring(index + 1, file.Length - (index+1) - 3);
+                        }
+                        else
+                        {
+                            fileName = file.Substring(0, file.Length - 3);
+                        }
+                        
+                        var visitor = new XyLangVisitor() { FileName = fileName };
                         var result = visitor.Visit(tree);
 
                         // C#文件流写文件,使用覆盖模式

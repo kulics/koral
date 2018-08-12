@@ -9,6 +9,8 @@ namespace xylang
 {
     partial class XyLangVisitor : XyBaseVisitor<object>
     {
+        public string FileName { get; set; }
+
         const string Terminate = ";";
         const string Wrap = "\r\n";
         const string Any = "object";
