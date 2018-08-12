@@ -26,7 +26,13 @@ namespace xylang
         {
             var id = (Result)Visit(context.id());
             var obj = "";
-            obj += $"{id.permission} partial class {id.text} {BlockLeft} {Wrap}";
+            obj += $"{id.permission} partial class {id.text}";
+            // 泛型
+            if(context.templateDefine() != null)
+            {
+                obj += Visit(context.templateDefine());
+            }
+            obj += BlockLeft + Wrap;
             foreach (var item in context.packageExtensionSupportStatement())
             {
                 obj += Visit(item);
