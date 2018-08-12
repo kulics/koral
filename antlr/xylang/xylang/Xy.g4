@@ -2,24 +2,10 @@
 
 program: statement+;
 
-statement: exportSharpStatement|exportStatement;		  
-
-// 导出dotnet命名空间
-exportSharpStatement: nameSpace '#' BlockLeft (exportSharpSupportStatement)* BlockRight Terminate?;
-// 导出dotnet命名空间支持的语句
-exportSharpSupportStatement:
-importStatement
-|functionMainStatement
-|nspackageStatement
-|packageStatement
-|packageExtensionStatement
-|protocolStatement
-|protocolImplementStatement
-|enumStatement
-;
+statement: exportStatement;
 
 // 导出命名空间
-exportStatement: nameSpace BlockLeft (exportSupportStatement)* BlockRight Terminate?;
+exportStatement: nameSpace ('::' id)? BlockLeft (exportSupportStatement)* BlockRight Terminate?;
 // 导出命名空间支持的语句
 exportSupportStatement:
 importStatement
@@ -43,15 +29,6 @@ nameSpaceStatement: (annotation)? (nameSpace)? (call id)?;
 enumStatement: (annotation)? id '[' enumSupportStatement (',' enumSupportStatement)* ']' Terminate?;
 
 enumSupportStatement: id ('=' (add)? Integer)?;
-
-// 无构造包
-nspackageStatement: (annotation)? id (templateDefine)? '_' ArrowRight BlockLeft (nspackageSupportStatement)* BlockRight Terminate?;
-
-nspackageSupportStatement:
-nspackageFunctionStatement
-|nspackageVariableStatement
-|nspackageInvariableStatement
-;
 
 // 主函数
 functionMainStatement:'Main' parameterClauseIn BlockLeft (functionSupportStatement)* BlockRight Terminate?;

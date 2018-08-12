@@ -9,46 +9,47 @@ namespace xylang
 {
     partial class XyLangVisitor
     {
-        public override object VisitExportSharpStatement([NotNull] XyParser.ExportSharpStatementContext context)
-        {
-            var obj = "";
-            obj += $"namespace {Visit(context.nameSpace()) + Wrap + BlockLeft + Wrap}";
-
-            foreach(var item in context.exportSharpSupportStatement())
-            {
-                obj += Visit(item);
-            }
-            obj += BlockRight + Wrap;
-            return obj;
-        }
-
         public override object VisitExportStatement([NotNull] XyParser.ExportStatementContext context)
         {
             var obj = "";
+            var hasStatic = false;
             var name = (string)Visit(context.nameSpace());
             obj += $"namespace {name + Wrap + BlockLeft + Wrap}";
 
-            var className = name;
-            if (name.LastIndexOf('.') > 0)
-            {
-                name = className.Substring(name.LastIndexOf('.')+1);
-            }
-
-            var content = "";
+            var unStatic = "";
+            var Static = "";
             foreach (var item in context.exportSupportStatement())
             {
-                if (item.GetChild(0) is XyParser.ImportStatementContext)
+                switch (item.GetChild(0))
                 {
-                    obj += Visit(item);
-                }
-                else
-                {
-                    content += Visit(item);
+                    case XyParser.ImportStatementContext _:
+                        obj += Visit(item);
+                        break;
+                    case XyParser.FunctionMainStatementContext _:
+                    case XyParser.NspackageFunctionStatementContext _:
+                    case XyParser.NspackageVariableStatementContext _:
+                    case XyParser.NspackageInvariableStatementContext _:
+                        Static += Visit(item);
+                        hasStatic = true;
+                        break;
+                    default:
+                        unStatic += Visit(item);
+                        break;
                 }
             }
-            obj += $"public static partial class {name} {BlockLeft + Wrap}";
-            obj += content;
-            obj += BlockRight + Terminate + Wrap;
+            if (hasStatic)
+            {
+                var staticName = FileName;
+                if (context.id()!=null)
+                {
+                    staticName = (Visit(context.id()) as Result).text;
+                }
+                obj += $"using static {staticName + Terminate + Wrap}";
+                obj += $"public static partial class {staticName} {BlockLeft + Wrap}";
+                obj += Static;
+                obj += BlockRight + Terminate + Wrap;
+            }
+            obj += unStatic;
             obj += BlockRight + Wrap;
             return obj;
         }
@@ -142,32 +143,6 @@ namespace xylang
                     obj += "." + id.text;
                 }
             }
-            return obj;
-        }
-
-        public override object VisitNspackageStatement([NotNull] XyParser.NspackageStatementContext context)
-        {
-            var id = (Result)Visit(context.id());
-            var obj = "";
-            foreach(var item in context.nspackageSupportStatement())
-            {
-                obj += Visit(item);
-            }
-            obj += BlockRight + Terminate + Wrap;
-            var header = "";
-            if(context.annotation() != null)
-            {
-                header += Visit(context.annotation());
-            }
-            header += id.permission + " static partial class " + id.text;
-            // 泛型
-            if(context.templateDefine() != null)
-            {
-                header += Visit(context.templateDefine());
-            }
-
-            header += Wrap + BlockLeft + Wrap;
-            obj = header + obj;
             return obj;
         }
 
