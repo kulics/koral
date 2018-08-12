@@ -46,7 +46,7 @@ namespace xylang
                     content += Visit(item);
                 }
             }
-            obj += $"public static class {name} {BlockLeft + Wrap}";
+            obj += $"public static partial class {name} {BlockLeft + Wrap}";
             obj += content;
             obj += BlockRight + Terminate + Wrap;
             obj += BlockRight + Wrap;
