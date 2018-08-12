@@ -271,7 +271,7 @@ Demo
 
     PKG +=
     {
-        Print ()-(a:str)
+        Print ()->(a:str)
         {
             <- ( /"X {Y}"/ )
         }
