@@ -579,9 +579,9 @@ namespace xylang
                     result.text += "," + r.text;
                 }
             }
-            if (context.typeSharpArray() != null)
+            if (context.type() != null)
             {
-                result.data = (string)Visit(context.typeSharpArray());
+                result.data = $"{(string)Visit(context.type())}[]";
             }
             else
             {
@@ -613,13 +613,13 @@ namespace xylang
                     result.text += "," + r.text;
                 }
             }
-            if (context.typeArray() != null)
+            if (context.type() != null)
             {
-                result.data = (string)Visit(context.typeArray());
+                result.data = $"List<{(string)Visit(context.type())}>";
             }
             else
             {
-                result.data = "List<" + type + ">";
+                result.data = $"List<{type}>";
             }
 
             result.text = $"new {result.data}(){{ {result.text} }}";
@@ -654,9 +654,9 @@ namespace xylang
                 }
             }
             var type = key + "," + value;
-            if (context.typeDictionary() != null)
+            if (context.type().Length > 0)
             {
-                result.data = (string)Visit(context.typeDictionary());
+                result.data = $"Dictionary<{(string)Visit(context.type(0))},{(string)Visit(context.type(1))}>";
             }
             else
             {

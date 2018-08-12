@@ -270,8 +270,8 @@ var emptyDictionary = new Dictionary<string, float>();
 ```
 ### XyLang
 ```
-emptyArray := [ :[]str]
-emptyDictionary := [ :[str]f32]
+emptyArray := [ :str]
+emptyDictionary := [ :str->f32]
 ```
 ## Functions
 ### Swift
