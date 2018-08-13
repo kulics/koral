@@ -22,7 +22,7 @@ ReadFile (name: str)->()
 ```
 So we declare an exception, the exception is `something wrong`, and once an external caller has used a `name` of an invalid length, the exception is reported up until it is processed or ignored.
 ## Check Exception
-We can use the `! {} id {};` statement to check for blocks that may have exceptions when calling a function.
+We can use the `! {} id {}` statement to check for blocks that may have exceptions when calling a function.
 
 E.g:
 ```
@@ -64,7 +64,7 @@ e : IOException
 ## Check Defer
 If we have a function that we hope can be handled regardless of whether the program is normal or abnormal, such as the release of critical resources, we can use the check defer feature.
 
-Quite simply, using `~! {};` can declare a statement that checks the delay.
+Quite simply, using `~! {}` can declare a statement that checks the delay.
 
 E.g:
 ```
@@ -78,7 +78,7 @@ Func ()->()
     ...
 }
 ```
-So we declare the `file.Release.();` statement that releases the file. This statement will not be executed immediately, but will wait for the function to be called before exiting.
+So we declare the `file.Release.()` statement that releases the file. This statement will not be executed immediately, but will wait for the function to be called before exiting.
 
 With check defer, we can safely handle certain tasks without having to worry about how the function exits.
 
