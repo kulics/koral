@@ -11,7 +11,8 @@ E.g:
 }
 ```
 # Boolean Judgment
-When the judgment value is only `bool`, the statement is executed only if it is `true`. If we also need to handle `false` at the same time, then we can use the auxiliary notation `? value {}` To declare another statement.
+When the judgment value is only `bool`, the statement is executed only if it is `true`. 
+If we also need to handle `false` at the same time, then we can use the auxiliary notation `? value {}` to continue declare another statement.
 
 E.g:
 ```
@@ -25,13 +26,8 @@ b := false
     ... // handle false
 }
 ```
-As you may have noticed, yes, there is no `;` between `?` And `?`.
 
-Looking back at our definition, any statement ends with `;`, so when it's not, it's not deemed to be over but will continue.
-
-We only need to add `;` when we need to explicitly break.
-
-This is a useful rule, and we can make a continuous judgment like this.
+We can also insert more judgments in the middle, and the language will automatically implement them as continuous processing.
 
 E.g:
 ```
@@ -48,11 +44,22 @@ i := 3
 {
     ...
 }
-?
+```
+
+If we have a special interrupt, we can add a clear `;` to the place where it is needed.
+
+E.g:
+```
+? i == 0
 {
-    ...
+     ...
+};
+? i == 1
+{
+     ...
 }
 ```
+
 This can be considered as an `if elseif else` structure relative to other languages.
 # Condition Judgment
 If we need to judge an identifier, we can use the `id.?{};` statement, the statement implements multiple conditional matching, and the matching condition is used to execute the corresponding logic, so that it will only execute the statement with successful matching.

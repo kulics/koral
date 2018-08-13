@@ -6,11 +6,16 @@ The basic form of the statement is:
 ```
 StatementContent;
 ```
-A statement can end with a clear `;`, and often uses `{}` to wrap the contents of a qualified statement.
+In this language, the grammar rules are clear, and each statement has a clear end.
+So in most cases, we can omit the `;` used to end, this symbol is optional, for every statement.
 
-In particular, `;` in this language is not required. Most of the time, it can be omitted, and it needs to be declared only when the semantics are not clear.
+So we prefer to write like this:
+```
+StatementContent // auto end
+StatementContent
+```
 
-In the following content, we will omit `;` by default.
+In the following content, we will omit the `;` at the end of the statement by default.
 ## Export Namespace
 All content in this language can only be defined in the namespace so that content can be efficiently divided into distinct blocks for management. You can define it freely in a separate namespace without undue restrictions on naming.
 
