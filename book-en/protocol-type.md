@@ -6,7 +6,7 @@ The protocol specifies the methods and properties necessary to implement a parti
 
 Our package can introduce the protocol we need, just like signing an protocol, and then declare all the properties required by the protocol, so that we think the package signed the protocol.
 ## Definition
-We only need to use the symbol `id -> {};` to define a protocol.
+We only need to use the symbol `id -> {}` to define a protocol.
 
 E.g:
 ```
@@ -34,7 +34,7 @@ Unlike a package, the definition of the protocol properties do not need specific
 
 Next, let's have the students implement the protocol.
 ## Implement the protocol
-Similar to the extension function, we can implement this protocol by using the `id += protocol {};` statement in the required package.
+Similar to the extension function, we can implement this protocol by using the `id += protocol {}` statement in the required package.
 
 E.g:
 ```

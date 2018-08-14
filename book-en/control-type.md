@@ -4,7 +4,7 @@ The control type is a block of code that encapsulates data operations.
 Usually we will encapsulate some data control processes into control types so that there is no need to perform additional methods when using data.
 
 ## Simple Definition
-If we don't need to define a specific control method for a while, we only need to use `id:type;` to define a control type.
+If we don't need to define a specific control method for a while, we only need to use `id:type` to define a control type.
 
 E.g:
 ```

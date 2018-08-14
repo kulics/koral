@@ -5,7 +5,7 @@ Therefore, we need a feature that can wrap data of different attributes to bette
 
 Obviously, this feature for package data, called package.
 ## Definition
-We can use the `id {}-> {};` statement to define a package that has nothing.
+We can use the `id {}-> {}` statement to define a package that has nothing.
 
 E.g:
 ```
@@ -125,7 +125,7 @@ Then the private properties of this package can not be accessed, and can not be 
 
 ## Extension Function
 If we need to make this package come with a function that makes it easy to manipulate, we can't define it directly in the package.
-We need to use the extension statement `id += {};` to make the package add extension functions.
+We need to use the extension statement `id += {}` to make the package add extension functions.
 
 E.g:
 ```
@@ -159,7 +159,7 @@ We hope that given a name and student number, class and grade information will b
 
 This can be achieved using regular functions, but why not use the built-in constructor?
 
-Add parameters at the time of definition, and write the definition of the constructor, which only needs the `.. {};` statement.
+Add parameters at the time of definition, and write the definition of the constructor, which only needs the `.. {}` statement.
 
 E.g:
 ```
