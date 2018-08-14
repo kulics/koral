@@ -1,7 +1,7 @@
 # Judgment
 The judgment statement executes the program by setting one or more conditions, executes the specified statement if the condition is true, and executes the otherwise specified statement if the condition is false.
 
-We only need to use the `? value {};` to declare the judgment statement, according to the following value into the corresponding area.
+We only need to use the `? value {}` to declare the judgment statement, according to the following value into the corresponding area.
 
 E.g:
 ```
@@ -62,7 +62,7 @@ E.g:
 
 This can be considered as an `if elseif else` structure relative to other languages.
 # Condition Judgment
-If we need to judge an identifier, we can use the `id.?{};` statement, the statement implements multiple conditional matching, and the matching condition is used to execute the corresponding logic, so that it will only execute the statement with successful matching.
+If we need to judge an identifier, we can use the `id.?{}` statement, the statement implements multiple conditional matching, and the matching condition is used to execute the corresponding logic, so that it will only execute the statement with successful matching.
 
 E.g:
 ```
@@ -103,7 +103,7 @@ This can be thought of as the `switch case default` structure relative to other 
 
 ### Pattern Matching
 Conditional judgment can do more, for example, we need to judge the type of the identifier,
-You can use the `value.?id:type{};` syntax to match types, `id` can be omitted, and the default is `it`.
+You can use the `value.?id:type{}` syntax to match types, `id` can be omitted, and the default is `it`.
 
 E.g:
 ```

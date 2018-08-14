@@ -19,7 +19,7 @@ In the following content, we will omit the `;` at the end of the statement by de
 ## Export Namespace
 All content in this language can only be defined in the namespace so that content can be efficiently divided into distinct blocks for management. You can define it freely in a separate namespace without undue restrictions on naming.
 
-We can use the `id {};` statement to define a region's namespace.
+We can use the `id {}` statement to define a region's namespace.
 
 E.g:
 ```
@@ -34,7 +34,7 @@ At the same time the external area can import `Demo` to use the contents of whic
 
 Note that only the main entry, package, and protocol statements are supported in the namespace, and these identifiers must be public.
 ## Import Namespace
-We can use the `.. id,id,id;` statement to import other namespaces, libraries, frameworks into a namespace.
+We can use the `.. id,id,id` statement to import other namespaces, libraries, frameworks into a namespace.
 
 E.g:
 ```
@@ -50,7 +50,7 @@ You can write multiple import statements that are separated by `,` and their ord
 For more details on namespaces, please see [Namespace](namespace.md)
 
 ## Main Entry
-We need to define a main entry to let the program know where to start. The main entry is declared with a fixed statement `Main () {};` and must be valid at the top level of the namespace.
+We need to define a main entry to let the program know where to start. The main entry is declared with a fixed statement `Main () {}` and must be valid at the top level of the namespace.
 
 E.g:
 ```
@@ -92,9 +92,9 @@ Block comment begin with `/ *` and end with `* /`:
 / * multi-line
 comment * /
 ```
-Comment do not belong to the statement, so do not need to end with `;`, comment is only used to provide additional information to the user, and will not be really compiled into the executable program.
+comment is only used to provide additional information to the user, and will not be really compiled into the executable program.
 ## Definition
-We can create new variable using the `id:type;` statement.
+We can create new variable using the `id:type` statement.
 
 E.g:
 ```
@@ -105,7 +105,7 @@ This will create an identifier for the name on the left and define it as the typ
 Once an identifier is created, its data type will not be changed in the valid area.
 
 ## Assignment
-Like a normal programming language, we need to use the `id = value;` statement to assign the data on the right to the identifier on the left.
+Like a normal programming language, we need to use the `id = value` statement to assign the data on the right to the identifier on the left.
 
 E.g:
 ```
@@ -113,7 +113,7 @@ a = 2
 ```
 But the definition is not the same, the left side of the assignment can only be an identifier that has been defined, otherwise the assignment statement does not hold.
 ## Automatic derivation
-In most cases, you can use the simpler automatic derivation syntax `id := value;`, we don't need to explicitly specify the type of data, the compiler will automatically infer the type for the data.
+In most cases, you can use the simpler automatic derivation syntax `id := value`, we don't need to explicitly specify the type of data, the compiler will automatically infer the type for the data.
 
 E.g:
 ```
