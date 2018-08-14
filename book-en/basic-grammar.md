@@ -92,7 +92,7 @@ Block comment begin with `/ *` and end with `* /`:
 / * multi-line
 comment * /
 ```
-comment is only used to provide additional information to the user, and will not be really compiled into the executable program.
+Comment is only used to provide additional information to the user, and will not be really compiled into the executable program.
 ## Definition
 We can create new variable using the `id:type` statement.
 
