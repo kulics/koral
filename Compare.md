@@ -640,7 +640,9 @@ NamedShape {name: str}->
     {
         ..name = name
     }
-
+}
+NamedShape +=
+{
     simpleDescription ()->(s: str) 
     {
         <- (/"A shape with {numberOfSides} sides."/)
@@ -656,7 +658,9 @@ Square {sideLength: f64, name: str}-> NamedShape.{name}
         ..sideLength = sideLength
         ..numberOfSides = 4
     }
-
+}
+Square +=
+{
     area ()->(f: f64) 
     {
         <- (sideLength * sideLength)
