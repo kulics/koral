@@ -1,7 +1,7 @@
 # Enumeration
 Enumerations are a set of integer constants with independent names. Usually can be used to mark some types of business data, to facilitate the judgment process.
 ## Definition
-We only need to use the `id [id, id, id, id]; ` statement.
+We only need to use the `id [id, id, id, id]` statement.
 
 E.g:
 ```
