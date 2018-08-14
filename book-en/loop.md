@@ -3,7 +3,7 @@ Sometimes, we may need to execute the same code multiple times.
 
 Under normal circumstances, the statement is executed in order, the first statement in the function first, followed by the second statement, and so on.
 ## Collection Loop
-If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can use the `value.@ id {};` statement to iterate over the collection, taking each element out of `id`.
+If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can use the `value.@ id {}` statement to iterate over the collection, taking each element out of `id`.
 
 E.g:
 ```
@@ -21,7 +21,7 @@ E.g:
 Arr.@
 {
      Console.WriteLine.(it)     // print each number
-};
+}
 ```
 
 This can be thought of as a `foreach` structure relative to other languages.
@@ -48,7 +48,7 @@ E.g:
 [0 ~ 100; 2].@
 {
     ...
-};
+}
 ```
 So every interval is not `1` but `2`, empathy we can set other numbers.
 

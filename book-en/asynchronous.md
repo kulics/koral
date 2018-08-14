@@ -35,7 +35,7 @@ result := Async.()   // result is a Task data
 ```
 Let's see how to make it asynchronously waiting for execution.
 ## Asynchronous Wait
-As with the declaration, we only need to use `<~ function.();` to declare the wait asynchronous function.
+As with the declaration, we only need to use `<~ function.()` to declare the wait asynchronous function.
 
 E.g:
 ```

@@ -5,11 +5,11 @@ Often we will package a series of tasks that need to be reused as functions for 
 
 In practical engineering practice, given a definite input, the function that will surely return exactly to the output is considered to be a better design. Therefore, it is recommended to maintain functional independence as much as possible.
 ## Definition
-We have seen the main entry function before, it only uses the fixed statement `Main () {};` to define.
+We have seen the main entry function before, it only uses the fixed statement `Main () {}` to define.
 
 The main entry function is a special case, in fact, the conventional functions of this language must explicitly declare the identifier, in parameters and out parameters.
 
-We only need to use `id ()->() {};` to define a function, the first parenthesis is in parameters, the second parenthesis is out parameters.
+We only need to use `id ()->() {}` to define a function, the first parenthesis is in parameters, the second parenthesis is out parameters.
 
 E.g:
 ```
