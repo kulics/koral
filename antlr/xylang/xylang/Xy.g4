@@ -45,7 +45,11 @@ packageStatement:(annotation)? id (templateDefine)? parameterClausePackage Arrow
 // 继承
 extend: type call '{' expressionList? '}';
 // 入参
-parameterClausePackage : '{' parameter? (',' parameter)*  '}'  ;
+parameterClausePackage : '{' parameterPackage? (',' parameterPackage)*  '}'  ;
+// 构造参数
+parameterPackage : parameter|parameterSelf;
+// 参数结构
+parameterSelf : (annotation)? '..' id (':' type)?;
 // 包支持的语句
 packageSupportStatement:
 packageInitStatement
