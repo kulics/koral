@@ -493,15 +493,9 @@ var shapeDescription = shape.simpleDescription()
 ## Subclass
 ### XyLang
 ```
-NamedShape {name: str}->
+NamedShape {..name: str}->
 {
     numberOfSides: i32 = 0
-    name: str^get
-
-    ..
-    {
-        ..name = name
-    }
 }
 NamedShape +=
 {
@@ -511,13 +505,10 @@ NamedShape +=
     }
 }
 
-Square {sideLength: f64, name: str}-> NamedShape.{name}
+Square {..sideLength: f64, name: str}-> NamedShape.{name}
 {
-    sideLength: f64
-
     .. 
     {
-        ..sideLength = sideLength
         ..numberOfSides = 4
     }
 }
@@ -528,7 +519,7 @@ Square +=
         <- (sideLength * sideLength)
     }
 
-    simpleDescription ()->(s: str) 
+    ..simpleDescription ()->(s: str) 
     {
         <- (/"A square with sides of length {sideLength}."/)
     }

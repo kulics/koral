@@ -159,17 +159,38 @@ namespace xylang
             public string id { get; set; }
             public string type { get; set; }
             public string annotation { get; set; }
+            public string permission { get; set; }
         }
 
         public override object VisitParameter([NotNull] XyParser.ParameterContext context)
         {
             var p = new Parameter();
-            p.id = ((Result)Visit(context.id())).text;
+            var id = (Result)Visit(context.id());
+            p.id = id.text;
+            p.permission = id.permission;
             if(context.annotation() != null)
             {
                 p.annotation = (string)Visit(context.annotation());
             }
             if(context.type() != null)
+            {
+                p.type = (string)Visit(context.type());
+            }
+
+            return p;
+        }
+
+        public override object VisitParameterSelf([NotNull] XyParser.ParameterSelfContext context)
+        {
+            var p = new Parameter();
+            var id = (Result)Visit(context.id());
+            p.id = id.text;
+            p.permission = id.permission;
+            if (context.annotation() != null)
+            {
+                p.annotation = (string)Visit(context.annotation());
+            }
+            if (context.type() != null)
             {
                 p.type = (string)Visit(context.type());
             }

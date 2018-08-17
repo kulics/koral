@@ -186,6 +186,18 @@ Peter := Student.{"Peter", "060233"}
 Console.WriteLine.(Peter.Class)     // print out 2
 ```
 
+Can the declaration be simpler, such as defining properties directly in the construct?
+Of course, we can mark the constructor parameter `..`, and the compiler will automatically generate the relevant variables.
+
+E.g:
+```
+// automatically generate the attributes Name and Number , which is equivalent to the previous example
+Student {..Name, ..Number:str}->
+{
+     ...
+}
+```
+
 If you need to use both constructors and simplified creations, you can do so.
 
 E.g:
