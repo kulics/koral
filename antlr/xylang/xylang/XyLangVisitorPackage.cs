@@ -46,29 +46,38 @@ namespace xylang
             var id = (Result)Visit(context.id());
             var obj = "";
             var hasInit = false;
+            var Init = "";
             var extend = "";
-            var hasExtend = false;
 
             if(context.extend() != null)
             {
                 extend = (string)((Result)Visit(context.extend())).data;
-                hasExtend = true;
             }
-
-            foreach(var item in context.packageSupportStatement())
+            // 获取构造数据
+            var paramConstructor = (ParameterPackage)Visit(context.parameterClausePackage());
+            Init += "public " + id.text + paramConstructor.content;
+            // 加载继承
+            if (context.extend() != null)
+            {
+                Init += " :base " + ((Result)Visit(context.extend())).text;
+            }
+            Init += BlockLeft;
+            // 提前写好自动变量
+            foreach (var self in paramConstructor.paramSelf)
+            {
+                Init += $"this.{self.id} = {self.id}; {Wrap}";
+                obj += $"{self.annotation} {self.permission} {self.type} {self.id} {{ get; set; }}";
+            }
+            foreach (var item in context.packageSupportStatement())
             {
                 if(item.GetChild(0) is XyParser.PackageInitStatementContext)
                 {
                     // 处理构造函数
                     if(!hasInit)
                     {
-                        obj += "public " + id.text + Visit(context.parameterClausePackage());
-                        if(context.extend() != null)
-                        {
-                            obj += " :base " + ((Result)Visit(context.extend())).text;
-                        }
-                        obj += Visit(item);
+                        Init += Visit(item) + BlockRight;
                         hasInit = true;
+                        obj = Init + obj;
                     }
                 }
                 else
@@ -78,12 +87,8 @@ namespace xylang
             }
             if(!hasInit)
             {
-                var init = "public " + id.text + Visit(context.parameterClausePackage());
-                if(context.extend() != null)
-                {
-                    init += " :base " + ((Result)Visit(context.extend())).text;
-                }
-                obj = init + BlockLeft + BlockRight + obj;
+                Init += BlockRight;
+                obj = Init + obj;
             }
             obj += BlockRight + Terminate + Wrap;
             var header = "";
@@ -111,15 +116,26 @@ namespace xylang
             return obj;
         }
 
+        class ParameterPackage
+        {
+            public string content { get; set; }
+            public List<Parameter> paramSelf { get; set; } = new List<Parameter>();
+        }
+
         public override object VisitParameterClausePackage([NotNull] XyParser.ParameterClausePackageContext context)
         {
+            var param = new ParameterPackage();
             var obj = "( ";
 
             var lastType = "";
             var temp = new List<string>();
-            for(int i = context.parameter().Length - 1; i >= 0; i--)
+            for(int i = context.parameterPackage().Length - 1; i >= 0; i--)
             {
-                Parameter p = (Parameter)Visit(context.parameter(i));
+                Parameter p = (Parameter)Visit(context.parameterPackage(i));
+                if (context.parameterPackage(i).GetChild(0) is XyParser.ParameterSelfContext)
+                {
+                    param.paramSelf.Add(p);
+                }
                 if(p.type != null)
                 {
                     lastType = p.type;
@@ -144,7 +160,8 @@ namespace xylang
             }
 
             obj += " )";
-            return obj;
+            param.content = obj;
+            return param;
         }
 
         public override object VisitPackageVariableStatement([NotNull] XyParser.PackageVariableStatementContext context)
@@ -265,10 +282,7 @@ namespace xylang
 
         public override object VisitPackageInitStatement([NotNull] XyParser.PackageInitStatementContext context)
         {
-            var obj = BlockLeft + Wrap;
-            obj += ProcessFunctionSupport(context.functionSupportStatement());
-            obj += BlockRight + Wrap;
-            return obj;
+            return ProcessFunctionSupport(context.functionSupportStatement());
         }
 
         public override object VisitProtocolImplementStatement([NotNull] XyParser.ProtocolImplementStatementContext context)
