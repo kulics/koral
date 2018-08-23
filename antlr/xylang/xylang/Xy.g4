@@ -163,7 +163,7 @@ checkErrorStatement:id (Declared type)? BlockLeft (functionSupportStatement)* Bl
 // 报告错误
 reportStatement: Check call '(' (expression)? ')' Terminate?;
 // 迭代器
-iteratorStatement: '[' expression Wave expression Terminate expression ']' | '[' expression Wave expression ']';
+iteratorStatement: '[' expression op=('<<'|'>>') expression Terminate expression ']' | '[' expression op=('<<'|'>>') expression ']';
 
 // 定义变量
 variableStatement: expression Define expression Terminate?;

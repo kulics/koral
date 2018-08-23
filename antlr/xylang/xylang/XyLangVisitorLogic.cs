@@ -14,12 +14,15 @@ namespace xylang
             public Result from { get; set; }
             public Result to { get; set; }
             public Result step { get; set; }
+            public bool op { get; set; }
         }
 
         public override object VisitIteratorStatement([NotNull] XyParser.IteratorStatementContext context)
         {
             var it = new Iterator();
             var i = context.expression();
+
+            it.op = context.op.Text == ">>";
             if(context.expression().Length == 2)
             {
                 it.from = (Result)Visit(context.expression(0));
@@ -44,9 +47,18 @@ namespace xylang
                 id = ((Result)Visit(context.id())).text;
             }
             var it = (Iterator)Visit(context.iteratorStatement());
-            obj += "for (var " + id + " = " + it.from.text + ";";
-            obj += id + "!=" + it.to.text + "+" + it.step.text + ";";
-            obj += id + "+=" + it.step.text + ")";
+            obj += $"for (var {id} = {it.from.text};";
+            if (it.op)
+            {
+                obj += $"{id} >= {it.to.text};";
+                obj += $"{id} -= {it.step.text})";
+            }
+            else
+            {
+                obj += $"{id} <= {it.to.text};";
+                obj += $"{id} += {it.step.text})";
+            }
+
             obj += $"{Wrap} {BlockLeft} {Wrap}";
             obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += $"{BlockRight} {Terminate} {Wrap}";
