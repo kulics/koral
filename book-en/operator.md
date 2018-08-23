@@ -45,8 +45,8 @@ E.g:
 ```
 a := true
 b := false
-c := a && b     // && and, both true at the same time
-c = a || b      // || or, one of them is true
+c := a & b     // & and, both true at the same time
+c = a | b      // | or, one of them is true
 c = ~ a         // ~ not, boolean negation
 ```
 ## Assignment Operator
