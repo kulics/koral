@@ -309,6 +309,14 @@ namespace xylang
             {
                 return "!=";
             }
+            else if (context.op.Text == "&")
+            {
+                return "&&";
+            }
+            else if (context.op.Text == "|")
+            {
+                return "||";
+            }
             return context.op.Text;
         }
 
