@@ -6,9 +6,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace xylang
+namespace XyLang.Compile
 {
-    static class Program
+    static class Compiler
     {
 		static string readPath;
         static string pathLine;

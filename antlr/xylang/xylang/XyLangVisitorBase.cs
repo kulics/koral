@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace xylang
+namespace XyLang.Compile
 {
     partial class XyLangVisitor : XyBaseVisitor<object>
     {
