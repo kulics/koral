@@ -3,27 +3,20 @@ When encapsulating common components, many times our packages, methods, and prot
 
 For example, we now need a collection that supports adding, deleting, and reading, and we hope that any type can be used, we can package a generic package.
 
-As you may recall, our collection uses the `System\Collections\Generic` namespace, which is generic.
-
-Our arrays and dictionaries are actually generics.
-
-Again, we need to import generic namespaces to use generics.
-```
-System\Collections\Generic
-```
+Our lists and dictionaries are actually implemented using generics.
 ## Statement and Use
-Let's see how we can use generics to implement an array. We just use the `<>` sign after the identifier to enclose the generation of the type.
+Let's see how we can use generics to implement an List. We just use the `<>` sign after the identifier to enclose the generation of the type.
 
 This is a simplified implementation.
 
 E.g:
 ```
-Array<T> {}->
+List<T> {}->
 {
     Items := Storage.{T}    // 创建存储
     Length :i32?
 }
-Array<T> +=
+List<T> +=
 {
     Get (index:i32)->(item:T)  // 获取某个泛型数据
     {
@@ -58,12 +51,13 @@ Very simple, and we can use the same statement, but called when the need to impo
 
 E.g:
 ```
-ArrNumber := Array<i32>.{}  // pass in the number type
+ListNumber := List<i32>.{}  // pass in the number type
 ```
-So we have an array of number types, is like this:
+So we have an List of number types, is like this:
 ```
-ArrNumber := []i32.{}
+ListNumber := []i32.{}
 ```
+Yes, in fact, our list and dictionary syntax are syntactic sugar, the actual types are `lst` and `dic`.
 ## Supported Types
 We can use generics in packages, functions, and protocol types.
 

@@ -1,20 +1,18 @@
 ﻿using Antlr4.Runtime.Misc;
-using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace XyLang.Compile
 {
-    partial class XyLangVisitor
+    internal partial class XyLangVisitor
     {
         public override object VisitExtend([NotNull] XyParser.ExtendContext context)
         {
-            var r = new Result();
-            r.data = Visit(context.type());
+            var r = new Result
+            {
+                data = Visit(context.type())
+            };
             r.text += "(";
-            if(context.expressionList() != null)
+            if (context.expressionList() != null)
             {
                 r.text += (Visit(context.expressionList()) as Result).text;
             }
@@ -28,7 +26,7 @@ namespace XyLang.Compile
             var obj = "";
             obj += $"{id.permission} partial class {id.text}";
             // 泛型
-            if(context.templateDefine() != null)
+            if (context.templateDefine() != null)
             {
                 obj += Visit(context.templateDefine());
             }
@@ -49,7 +47,7 @@ namespace XyLang.Compile
             var Init = "";
             var extend = "";
 
-            if(context.extend() != null)
+            if (context.extend() != null)
             {
                 extend = (string)((Result)Visit(context.extend())).data;
             }
@@ -70,10 +68,10 @@ namespace XyLang.Compile
             }
             foreach (var item in context.packageSupportStatement())
             {
-                if(item.GetChild(0) is XyParser.PackageInitStatementContext)
+                if (item.GetChild(0) is XyParser.PackageInitStatementContext)
                 {
                     // 处理构造函数
-                    if(!hasInit)
+                    if (!hasInit)
                     {
                         Init += Visit(item) + BlockRight;
                         hasInit = true;
@@ -85,27 +83,27 @@ namespace XyLang.Compile
                     obj += Visit(item);
                 }
             }
-            if(!hasInit)
+            if (!hasInit)
             {
                 Init += BlockRight;
                 obj = Init + obj;
             }
             obj += BlockRight + Terminate + Wrap;
             var header = "";
-            if(context.annotation() != null)
+            if (context.annotation() != null)
             {
                 header += Visit(context.annotation());
             }
             header += $"{id.permission} partial class {id.text}";
             // 泛型
-            if(context.templateDefine() != null)
+            if (context.templateDefine() != null)
             {
                 header += Visit(context.templateDefine());
             }
-            if(extend.Length > 0)
+            if (extend.Length > 0)
             {
                 header += ":";
-                if(extend.Length > 0)
+                if (extend.Length > 0)
                 {
                     header += extend;
                 }
@@ -116,7 +114,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        class ParameterPackage
+        private class ParameterPackage
         {
             public string content { get; set; }
             public List<Parameter> paramSelf { get; set; } = new List<Parameter>();
@@ -129,14 +127,14 @@ namespace XyLang.Compile
 
             var lastType = "";
             var temp = new List<string>();
-            for(int i = context.parameterPackage().Length - 1; i >= 0; i--)
+            for (int i = context.parameterPackage().Length - 1; i >= 0; i--)
             {
                 Parameter p = (Parameter)Visit(context.parameterPackage(i));
                 if (context.parameterPackage(i).GetChild(0) is XyParser.ParameterSelfContext)
                 {
                     param.paramSelf.Add(p);
                 }
-                if(p.type != null)
+                if (p.type != null)
                 {
                     lastType = p.type;
                 }
@@ -147,9 +145,9 @@ namespace XyLang.Compile
 
                 temp.Add($"{p.annotation} {p.type} {p.id}");
             }
-            for(int i = temp.Count - 1; i >= 0; i--)
+            for (int i = temp.Count - 1; i >= 0; i--)
             {
-                if(i == temp.Count - 1)
+                if (i == temp.Count - 1)
                 {
                     obj += temp[i];
                 }
@@ -193,12 +191,12 @@ namespace XyLang.Compile
             }
             else
             {
-                obj += $"{r1.permission} {typ} {r1.text +BlockLeft} get;set; {BlockRight+Wrap}";
+                obj += $"{r1.permission} {typ} {r1.text + BlockLeft} get;set; {BlockRight + Wrap}";
             }
             if (context.expression(1) != null)
             {
                 var r2 = (Result)Visit(context.expression(1));
-                obj += $" = {r2.text+Terminate+Wrap}";
+                obj += $" = {r2.text + Terminate + Wrap}";
             }
             return obj;
         }
@@ -208,7 +206,7 @@ namespace XyLang.Compile
             var obj = "";
             var id = "";
             id = GetControlSub(context.id().GetText());
-            if (context.functionSupportStatement().Length>0)
+            if (context.functionSupportStatement().Length > 0)
             {
                 obj += id + BlockLeft;
                 foreach (var item in context.functionSupportStatement())
@@ -229,23 +227,23 @@ namespace XyLang.Compile
         {
             var id = (Result)Visit(context.id());
             var obj = "";
-            if(context.annotation() != null)
+            if (context.annotation() != null)
             {
                 obj += Visit(context.annotation());
             }
             // 异步
-            if(context.t.Type == XyParser.FlowRight)
+            if (context.t.Type == XyParser.FlowRight)
             {
                 var pout = (string)Visit(context.parameterClauseOut());
-                if(pout != "void")
+                if (pout != "void")
                 {
-                    pout = "Task<" + pout + ">";
+                    pout = $"{Task}<{pout}>";
                 }
                 else
                 {
-                    pout = "Task";
+                    pout = Task;
                 }
-                obj += id.permission + " async " + pout + " " + id.text;
+                obj += $"{id.permission} async {pout} {id.text}";
             }
             else
             {
@@ -253,7 +251,7 @@ namespace XyLang.Compile
             }
 
             // 泛型
-            if(context.templateDefine() != null)
+            if (context.templateDefine() != null)
             {
                 obj += Visit(context.templateDefine());
             }
@@ -267,7 +265,7 @@ namespace XyLang.Compile
         {
             var id = (Result)Visit(context.id());
             var obj = "";
-            if(context.annotation() != null)
+            if (context.annotation() != null)
             {
                 obj += Visit(context.annotation());
             }
@@ -294,7 +292,7 @@ namespace XyLang.Compile
 
             var ptcl = (string)Visit(context.nameSpaceItem());
             // 泛型
-            if(context.templateCall() != null)
+            if (context.templateCall() != null)
             {
                 ptcl += Visit(context.templateCall());
             }
@@ -313,19 +311,19 @@ namespace XyLang.Compile
             obj += "public " + ptcl + " " + pName +
                 " { get { return this as " + ptcl + ";}}" + Wrap;
 
-            foreach(var item in context.protocolImplementSupportStatement())
+            foreach (var item in context.protocolImplementSupportStatement())
             {
-                if(item.GetChild(0) is XyParser.ImplementFunctionStatementContext)
+                if (item.GetChild(0) is XyParser.ImplementFunctionStatementContext)
                 {
                     var fn = (Function)Visit(item);
                     obj += fn.@out + " " + ptcl + "." + fn.ID + " " + fn.@in + Wrap + fn.body;
                 }
-                else if(item.GetChild(0) is XyParser.ImplementControlStatementContext)
+                else if (item.GetChild(0) is XyParser.ImplementControlStatementContext)
                 {
                     var vr = (Variable)Visit(item);
                     obj += vr.type + " " + ptcl + "." + vr.ID + " " + vr.body;
                 }
-                else if(item.GetChild(0) is XyParser.ImplementEventStatementContext)
+                else if (item.GetChild(0) is XyParser.ImplementEventStatementContext)
                 {
                     obj += Visit(item);
                 }
@@ -343,7 +341,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        class Variable
+        private class Variable
         {
             public string type;
             public string ID;
@@ -385,18 +383,20 @@ namespace XyLang.Compile
                 body += $" = {r2.text} {Terminate} {Wrap}";
             }
 
-            var vr = new Variable();
-            vr.ID = id.text;
-            vr.type = type;
-            vr.body = body + Wrap;
-            if(context.annotation() != null)
+            var vr = new Variable
+            {
+                ID = id.text,
+                type = type,
+                body = body + Wrap
+            };
+            if (context.annotation() != null)
             {
                 vr.annotation = (string)Visit(context.annotation());
             }
             return vr;
         }
 
-        class Function
+        private class Function
         {
             public string ID;
             public string @in;
@@ -409,28 +409,28 @@ namespace XyLang.Compile
         {
             var fn = new Function();
             var id = (Result)Visit(context.id());
-            if(context.annotation() != null)
+            if (context.annotation() != null)
             {
                 fn.annotation = (string)Visit(context.annotation());
             }
             fn.ID = id.text;
             // 泛型
-            if(context.templateDefine() != null)
+            if (context.templateDefine() != null)
             {
                 fn.ID += Visit(context.templateDefine());
             }
             fn.@in = (string)Visit(context.parameterClauseIn());
             // 异步
-            if(context.t.Type == XyParser.FlowRight)
+            if (context.t.Type == XyParser.FlowRight)
             {
                 var pout = (string)Visit(context.parameterClauseOut());
-                if(pout != "void")
+                if (pout != "void")
                 {
-                    pout = "Task<" + pout + ">";
+                    pout = $"{Task}<{pout}>";
                 }
                 else
                 {
-                    pout = "Task";
+                    pout = Task;
                 }
                 fn.@out = " async " + pout;
             }
@@ -450,18 +450,18 @@ namespace XyLang.Compile
             var obj = "";
             var interfaceProtocol = "";
             var ptclName = id.text;
-            if(context.annotation() != null)
+            if (context.annotation() != null)
             {
                 obj += Visit(context.annotation());
             }
-            foreach(var item in context.protocolSupportStatement())
+            foreach (var item in context.protocolSupportStatement())
             {
                 var r = (Result)Visit(item);
                 interfaceProtocol += r.text;
             }
             obj += "public partial interface " + ptclName;
             // 泛型
-            if(context.templateDefine() != null)
+            if (context.templateDefine() != null)
             {
                 obj += Visit(context.templateDefine());
             }
@@ -475,7 +475,7 @@ namespace XyLang.Compile
         {
             var id = (Result)Visit(context.id());
             var r = new Result();
-            if(context.annotation() != null)
+            if (context.annotation() != null)
             {
                 r.text += Visit(context.annotation());
             }
@@ -483,7 +483,7 @@ namespace XyLang.Compile
 
             var type = (string)Visit(context.type());
             r.text += type + " " + id.text;
-            if (context.protocolControlSubStatement().Length >0)
+            if (context.protocolControlSubStatement().Length > 0)
             {
                 r.text += " {";
                 foreach (var item in context.protocolControlSubStatement())
@@ -510,22 +510,22 @@ namespace XyLang.Compile
         {
             var id = (Result)Visit(context.id());
             var r = new Result();
-            if(context.annotation() != null)
+            if (context.annotation() != null)
             {
                 r.text += Visit(context.annotation());
             }
             r.permission = "public";
             // 异步
-            if(context.t.Type == XyParser.FlowRight)
+            if (context.t.Type == XyParser.FlowRight)
             {
                 var pout = (string)Visit(context.parameterClauseOut());
-                if(pout != "void")
+                if (pout != "void")
                 {
-                    pout = "Task<" + pout + ">";
+                    pout = $"{Task}<{pout}>";
                 }
                 else
                 {
-                    pout = "Task";
+                    pout = Task;
                 }
                 r.text += pout + " " + id.text;
             }
@@ -534,7 +534,7 @@ namespace XyLang.Compile
                 r.text += Visit(context.parameterClauseOut()) + " " + id.text;
             }
             // 泛型
-            if(context.templateDefine() != null)
+            if (context.templateDefine() != null)
             {
                 r.text += Visit(context.templateDefine());
             }

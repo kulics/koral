@@ -40,10 +40,12 @@ E.g:
 ```
 Demo
 {
-    .. System, System\Collections\Generic
+    .. System, XyLang\Library
 }
 ```
-This imports the `System` and` Generic` libraries into the `Demo` namespace, and then you can use them in the program.
+This imports the `System` and` Library` libraries into the `Demo` namespace, and then you can use them in the program.
+
+It's important to note that most of XyLang's functionality is included in the Library, so we have to import this namespace to ensure proper use of XyLang.
 
 You can write multiple import statements that are separated by `,` and their order does not affect the import function.
 
@@ -56,7 +58,7 @@ E.g:
 ```
 Demo
 {
-    .. System
+    .. System, XyLang\Library
     
     Main ()
     {

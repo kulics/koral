@@ -1,13 +1,8 @@
 ﻿using Antlr4.Runtime.Misc;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace XyLang.Compile
 {
-    partial class XyLangVisitor
+    internal partial class XyLangVisitor
     {
         public override object VisitExportStatement([NotNull] XyParser.ExportStatementContext context)
         {
@@ -40,7 +35,7 @@ namespace XyLang.Compile
             if (hasStatic)
             {
                 var staticName = FileName;
-                if (context.id()!=null)
+                if (context.id() != null)
                 {
                     staticName = (Visit(context.id()) as Result).text;
                 }
@@ -58,7 +53,7 @@ namespace XyLang.Compile
         {
             var obj = "";
 
-            foreach(var item in context.nameSpaceStatement())
+            foreach (var item in context.nameSpaceStatement())
             {
                 obj += Visit(item) + Wrap;
             }
@@ -68,15 +63,15 @@ namespace XyLang.Compile
         public override object VisitNameSpaceStatement([NotNull] XyParser.NameSpaceStatementContext context)
         {
             var obj = "";
-            if(context.annotation() != null)
+            if (context.annotation() != null)
             {
                 obj += Visit(context.annotation());
             }
-            if(context.id() != null)
+            if (context.id() != null)
             {
                 var ns = (string)Visit(context.nameSpace());
                 obj += "using static " + ns;
-                if(context.id() != null)
+                if (context.id() != null)
                 {
                     var r = (Result)Visit(context.id());
 
@@ -95,10 +90,10 @@ namespace XyLang.Compile
         public override object VisitNameSpace([NotNull] XyParser.NameSpaceContext context)
         {
             var obj = "";
-            for(int i = 0; i < context.id().Length; i++)
+            for (int i = 0; i < context.id().Length; i++)
             {
                 var id = (Result)Visit(context.id(i));
-                if(i == 0)
+                if (i == 0)
                 {
                     obj += "" + id.text;
                 }
@@ -113,10 +108,10 @@ namespace XyLang.Compile
         public override object VisitNameSpaceItem([NotNull] XyParser.NameSpaceItemContext context)
         {
             var obj = "";
-            for(int i = 0; i < context.id().Length; i++)
+            for (int i = 0; i < context.id().Length; i++)
             {
                 var id = (Result)Visit(context.id(i));
-                if(i == 0)
+                if (i == 0)
                 {
                     obj += "" + id.text;
                 }
@@ -131,10 +126,10 @@ namespace XyLang.Compile
         public override object VisitName([NotNull] XyParser.NameContext context)
         {
             var obj = "";
-            for(int i = 0; i < context.id().Length; i++)
+            for (int i = 0; i < context.id().Length; i++)
             {
                 var id = (Result)Visit(context.id(i));
-                if(i == 0)
+                if (i == 0)
                 {
                     obj += "" + id.text;
                 }
@@ -151,13 +146,13 @@ namespace XyLang.Compile
             var obj = "";
             var id = (Result)Visit(context.id());
             var header = "";
-            if(context.annotation() != null)
+            if (context.annotation() != null)
             {
                 header += Visit(context.annotation());
             }
             header += id.permission + " enum " + id.text;
             header += Wrap + BlockLeft + Wrap;
-            for(int i = 0; i < context.enumSupportStatement().Length; i++)
+            for (int i = 0; i < context.enumSupportStatement().Length; i++)
             {
                 obj += Visit(context.enumSupportStatement(i));
             }
@@ -169,10 +164,10 @@ namespace XyLang.Compile
         public override object VisitEnumSupportStatement([NotNull] XyParser.EnumSupportStatementContext context)
         {
             var id = (Result)Visit(context.id());
-            if(context.Integer() != null)
+            if (context.Integer() != null)
             {
                 var op = "";
-                if(context.add() != null)
+                if (context.add() != null)
                 {
                     op = (string)Visit(context.add());
                 }
@@ -186,7 +181,7 @@ namespace XyLang.Compile
             var obj = "";
             obj += $"static void Main(string[] args) {Wrap + BlockLeft + Wrap} " +
                 $"MainAsync(args).GetAwaiter().GetResult(); {Wrap + BlockRight + Wrap}" +
-                $"static async Task MainAsync(string[] args) {Wrap + BlockLeft + Wrap}" +
+                $"static async {Task} MainAsync(string[] args) {Wrap + BlockLeft + Wrap}" +
                 $"{ProcessFunctionSupport(context.functionSupportStatement())}" +
                 $"{BlockRight + Wrap}";
             return obj;
@@ -196,31 +191,31 @@ namespace XyLang.Compile
         {
             var id = (Result)Visit(context.id());
             var obj = "";
-            if(context.annotation() != null)
+            if (context.annotation() != null)
             {
                 obj += Visit(context.annotation());
             }
             // 异步
-            if(context.t.Type == XyParser.FlowRight)
+            if (context.t.Type == XyParser.FlowRight)
             {
                 var pout = (string)Visit(context.parameterClauseOut());
-                if(pout != "void")
+                if (pout != "void")
                 {
-                    pout = "Task<" + pout + ">";
+                    pout = $"{Task}<{pout}>";
                 }
                 else
                 {
-                    pout = "Task";
+                    pout = Task;
                 }
-                obj += id.permission + " async static " + pout + " " + id.text;
+                obj += $"{id.permission} async static {pout} {id.text}";
             }
             else
             {
-                obj += id.permission + " static " + Visit(context.parameterClauseOut()) + " " + id.text;
+                obj += $"{id.permission} static {Visit(context.parameterClauseOut())} {id.text}";
             }
 
             // 泛型
-            if(context.templateDefine() != null)
+            if (context.templateDefine() != null)
             {
                 obj += Visit(context.templateDefine());
             }
@@ -245,11 +240,11 @@ namespace XyLang.Compile
             }
 
             var obj = "";
-            if(context.annotation() != null)
+            if (context.annotation() != null)
             {
                 obj += Visit(context.annotation());
             }
-            if (r2.text.StartsWith('$') || r2.text.Substring(0,3) == ("new"))
+            if (r2.text.StartsWith('$') || r2.text.Substring(0, 3) == ("new"))
             {
                 obj += $"{r1.permission} readonly static {typ} {r1.text} = {r2.text} {Terminate} {Wrap}";
             }
@@ -275,11 +270,11 @@ namespace XyLang.Compile
                 typ = (string)r2.data;
             }
             var obj = "";
-            if(context.annotation() != null)
+            if (context.annotation() != null)
             {
                 obj += Visit(context.annotation());
             }
-            if (context.nspackageControlSubStatement().Length >0)
+            if (context.nspackageControlSubStatement().Length > 0)
             {
                 obj += $"{r1.permission} static {typ} {r1.text} {{";
                 foreach (var item in context.nspackageControlSubStatement())
@@ -305,7 +300,7 @@ namespace XyLang.Compile
             var obj = "";
             var id = "";
             id = GetControlSub(context.id().GetText());
-            if (context.functionSupportStatement().Length>0)
+            if (context.functionSupportStatement().Length > 0)
             {
                 obj += id + BlockLeft;
                 foreach (var item in context.functionSupportStatement())
@@ -324,7 +319,7 @@ namespace XyLang.Compile
 
         public string GetControlSub(string id)
         {
-            switch(id)
+            switch (id)
             {
                 case "get":
                     id = " get ";

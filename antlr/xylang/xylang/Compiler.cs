@@ -1,51 +1,49 @@
 ﻿using Antlr4.Runtime;
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
 
 namespace XyLang.Compile
 {
-    static class Compiler
+    internal static class Compiler
     {
-		static string readPath;
-        static string pathLine;
+        private static string readPath;
+        private static string pathLine;
 
-        static void Main(string[] args)
+        private static void Main(string[] args)
         {
-			// 检查系统平台，区分路径字符
-			var os = Environment.OSVersion.Platform;
-			if (os==PlatformID.Unix||os==PlatformID.MacOSX)
-			{
-				readPath = @"./";
+            // 检查系统平台，区分路径字符
+            var os = Environment.OSVersion.Platform;
+            if (os == PlatformID.Unix || os == PlatformID.MacOSX)
+            {
+                readPath = @"./";
                 pathLine = @"/";
             }
-            else{
-				readPath = @".\";
+            else
+            {
+                readPath = @".\";
                 pathLine = @"\";
             }
 
-			//args = new[] { "build" };
+            //args = new[] { "build" };
 
             //if(args.Length > 0 && args[0] == "build")
             //{
-                Compiled(readPath);
+            Compiled(readPath);
 
-                Console.WriteLine("Completed");
-                Console.ReadKey();
+            Console.WriteLine("Completed");
+            Console.ReadKey();
             //}
         }
 
-        static void Compiled(string path)
+        private static void Compiled(string path)
         {
             //获取相对路径下所有文件
             var files = Directory.GetFiles(path, "*.xy");
-            foreach(var file in files)
+            foreach (var file in files)
             {
                 // c#文件流读文件
-                using(FileStream fsRead = new FileStream(file, FileMode.Open))
+                using (FileStream fsRead = new FileStream(file, FileMode.Open))
                 {
                     try
                     {
@@ -61,27 +59,27 @@ namespace XyLang.Compile
                         var tree = parser.program();
 
                         var fileName = "";
-                        if (file.LastIndexOf(pathLine)>0)
+                        if (file.LastIndexOf(pathLine) > 0)
                         {
                             var index = file.LastIndexOf(pathLine);
-                            fileName = file.Substring(index + 1, file.Length - (index+1) - 3);
+                            fileName = file.Substring(index + 1, file.Length - (index + 1) - 3);
                         }
                         else
                         {
                             fileName = file.Substring(0, file.Length - 3);
                         }
-                        
+
                         var visitor = new XyLangVisitor() { FileName = fileName };
                         var result = visitor.Visit(tree);
 
                         // C#文件流写文件,使用覆盖模式
                         var resByte = Encoding.UTF8.GetBytes(result.ToString());  //转换为字节
-						using(var fsWrite = new FileStream(readPath + file.Substring(0, file.Length - 3) + ".cs", FileMode.Create))
+                        using (var fsWrite = new FileStream(readPath + file.Substring(0, file.Length - 3) + ".cs", FileMode.Create))
                         {
                             fsWrite.Write(resByte, 0, resByte.Length);
                         };
                     }
-                    catch(Exception err)
+                    catch (Exception err)
                     {
                         Console.Write("compile error at ");
                         Console.WriteLine(path + file);
@@ -91,7 +89,7 @@ namespace XyLang.Compile
             }
 
             var folders = Directory.GetDirectories(path);
-            foreach(var folder in folders)
+            foreach (var folder in folders)
             {
                 Compiled(folder);
             }
