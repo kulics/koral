@@ -1,13 +1,9 @@
 ﻿using Antlr4.Runtime.Misc;
-using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace XyLang.Compile
 {
-    partial class XyLangVisitor
+    internal partial class XyLangVisitor
     {
         public override object VisitVariableUseStatement([NotNull] XyParser.VariableUseStatementContext context)
         {
@@ -146,8 +142,10 @@ namespace XyLang.Compile
 
         public override object VisitCallSelf([NotNull] XyParser.CallSelfContext context)
         {
-            var r = new Result();
-            r.data = "var";
+            var r = new Result
+            {
+                data = "var"
+            };
             var e1 = "this";
             var op = ".";
             var e2 = (Result)Visit(context.GetChild(1));
@@ -195,8 +193,10 @@ namespace XyLang.Compile
                 }
             }
 
-            var r = new Result();
-            r.data = "var";
+            var r = new Result
+            {
+                data = "var"
+            };
             var e1 = obj;
             var op = ".";
             var e2 = (Result)Visit(context.callExpression());
@@ -420,8 +420,10 @@ namespace XyLang.Compile
 
         public override object VisitCallFunc([NotNull] XyParser.CallFuncContext context)
         {
-            var r = new Result();
-            r.data = "var";
+            var r = new Result
+            {
+                data = "var"
+            };
             var id = (Result)Visit(context.id());
             r.text += id.text;
             if (context.templateCall() != null)
@@ -434,8 +436,10 @@ namespace XyLang.Compile
 
         public override object VisitCallPkg([NotNull] XyParser.CallPkgContext context)
         {
-            var r = new Result();
-            r.data = Visit(context.type());
+            var r = new Result
+            {
+                data = Visit(context.type())
+            };
             var param = "";
             if (context.expressionList() != null)
             {
@@ -525,9 +529,11 @@ namespace XyLang.Compile
 
         public override object VisitPkgAnonymous([NotNull] XyParser.PkgAnonymousContext context)
         {
-            var r = new Result();
-            r.data = "var";
-            r.text = "new" + (string)Visit(context.pkgAnonymousAssign());
+            var r = new Result
+            {
+                data = "var",
+                text = "new" + (string)Visit(context.pkgAnonymousAssign())
+            };
             return r;
         }
 
@@ -623,11 +629,11 @@ namespace XyLang.Compile
             }
             if (context.type() != null)
             {
-                result.data = $"List<{(string)Visit(context.type())}>";
+                result.data = $"{List}<{(string)Visit(context.type())}>";
             }
             else
             {
-                result.data = $"List<{type}>";
+                result.data = $"{List}<{type}>";
             }
 
             result.text = $"new {result.data}(){{ {result.text} }}";
@@ -664,18 +670,18 @@ namespace XyLang.Compile
             var type = key + "," + value;
             if (context.type().Length > 0)
             {
-                result.data = $"Dictionary<{(string)Visit(context.type(0))},{(string)Visit(context.type(1))}>";
+                result.data = $"{Dictionary}<{(string)Visit(context.type(0))},{(string)Visit(context.type(1))}>";
             }
             else
             {
-                result.data = "Dictionary<" + type + ">";
+                result.data = $"{Dictionary}<{type}>";
             }
 
             result.text = $"new {result.data}(){{ {result.text} }}";
             return result;
         }
 
-        class DicEle
+        private class DicEle
         {
             public string key;
             public string value;
@@ -686,10 +692,12 @@ namespace XyLang.Compile
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
-            var result = new DicEle();
-            result.key = (string)r1.data;
-            result.value = (string)r2.data;
-            result.text = "{" + r1.text + "," + r2.text + "}";
+            var result = new DicEle
+            {
+                key = (string)r1.data,
+                value = (string)r2.data,
+                text = "{" + r1.text + "," + r2.text + "}"
+            };
             return result;
         }
 
@@ -756,8 +764,10 @@ namespace XyLang.Compile
 
         public override object VisitLambda([NotNull] XyParser.LambdaContext context)
         {
-            var r = new Result();
-            r.data = "var";
+            var r = new Result
+            {
+                data = "var"
+            };
             // 异步
             if (context.t.Type == XyParser.FlowLeft)
             {
@@ -840,11 +850,7 @@ namespace XyLang.Compile
             return r;
         }
 
-        List<string> keywords
-        {
-            get
-            {
-                return new List<string> {   "abstract", "as", "base", "bool", "break" , "byte", "case" , "catch",
+        private List<string> keywords => new List<string> {   "abstract", "as", "base", "bool", "break" , "byte", "case" , "catch",
                         "char","checked","class","const","continue","decimal","default","delegate","do","double","else",
                         "enum","event","explicit","extern","false","finally","fixed","float","for","foreach","goto",
                         "if","implicit","in","int","interface","internal","is","lock","long","namespace","new","null",
@@ -853,7 +859,5 @@ namespace XyLang.Compile
                         "this","throw","true","try","typeof","uint","ulong","unchecked","unsafe","ushort","using",
                         "virtual","void","volatile","while"
                 };
-            }
-        }
     }
 }

@@ -1,38 +1,34 @@
 ﻿using Antlr4.Runtime.Misc;
-using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace XyLang.Compile
 {
-    partial class XyLangVisitor
+    internal partial class XyLangVisitor
     {
         public override object VisitFunctionStatement([NotNull] XyParser.FunctionStatementContext context)
         {
             var id = (Result)Visit(context.id());
             var obj = "";
             // 异步
-            if(context.t.Type == XyParser.FlowRight)
+            if (context.t.Type == XyParser.FlowRight)
             {
                 var pout = (string)Visit(context.parameterClauseOut());
-                if(pout != "void")
+                if (pout != "void")
                 {
-                    pout = "Task<" + pout + ">";
+                    pout = $"{Task}<{pout}>";
                 }
                 else
                 {
-                    pout = "Task";
+                    pout = Task;
                 }
-                obj += " async " + pout + " " + id.text;
+                obj += $" async {pout} {id.text}";
             }
             else
             {
                 obj += Visit(context.parameterClauseOut()) + " " + id.text;
             }
             // 泛型
-            if(context.templateDefine() != null)
+            if (context.templateDefine() != null)
             {
                 obj += Visit(context.templateDefine());
             }
@@ -45,7 +41,7 @@ namespace XyLang.Compile
         public override object VisitReturnStatement([NotNull] XyParser.ReturnStatementContext context)
         {
             var r = (Result)Visit(context.tuple());
-            if(r.text == "()")
+            if (r.text == "()")
             {
                 r.text = "";
             }
@@ -55,10 +51,10 @@ namespace XyLang.Compile
         public override object VisitTuple([NotNull] XyParser.TupleContext context)
         {
             var obj = "(";
-            for(int i = 0; i < context.expression().Length; i++)
+            for (int i = 0; i < context.expression().Length; i++)
             {
                 var r = (Result)Visit(context.expression(i));
-                if(i == 0)
+                if (i == 0)
                 {
                     obj += r.text;
                 }
@@ -78,10 +74,10 @@ namespace XyLang.Compile
 
             var lastType = "";
             var temp = new List<string>();
-            for(int i = context.parameter().Length - 1; i >= 0; i--)
+            for (int i = context.parameter().Length - 1; i >= 0; i--)
             {
                 Parameter p = (Parameter)Visit(context.parameter(i));
-                if(p.type != null)
+                if (p.type != null)
                 {
                     lastType = p.type;
                 }
@@ -92,9 +88,9 @@ namespace XyLang.Compile
 
                 temp.Add($"{p.annotation} {p.type} {p.id}");
             }
-            for(int i = temp.Count - 1; i >= 0; i--)
+            for (int i = temp.Count - 1; i >= 0; i--)
             {
-                if(i == temp.Count - 1)
+                if (i == temp.Count - 1)
                 {
                     obj += temp[i];
                 }
@@ -111,24 +107,24 @@ namespace XyLang.Compile
         public override object VisitParameterClauseOut([NotNull] XyParser.ParameterClauseOutContext context)
         {
             var obj = "";
-            if(context.parameter().Length == 0)
+            if (context.parameter().Length == 0)
             {
                 obj += "void";
             }
-            else if(context.parameter().Length == 1)
+            else if (context.parameter().Length == 1)
             {
                 Parameter p = (Parameter)Visit(context.parameter(0));
                 obj += p.type;
             }
-            if(context.parameter().Length > 1)
+            if (context.parameter().Length > 1)
             {
                 obj += "( ";
                 var lastType = "";
                 var temp = new List<string>();
-                for(int i = context.parameter().Length - 1; i >= 0; i--)
+                for (int i = context.parameter().Length - 1; i >= 0; i--)
                 {
                     Parameter p = (Parameter)Visit(context.parameter(i));
-                    if(p.type != null)
+                    if (p.type != null)
                     {
                         lastType = p.type;
                     }
@@ -138,9 +134,9 @@ namespace XyLang.Compile
                     }
                     temp.Add($"{p.annotation} {p.type} {p.id}");
                 }
-                for(int i = temp.Count - 1; i >= 0; i--)
+                for (int i = temp.Count - 1; i >= 0; i--)
                 {
-                    if(i == temp.Count - 1)
+                    if (i == temp.Count - 1)
                     {
                         obj += temp[i];
                     }
@@ -168,11 +164,11 @@ namespace XyLang.Compile
             var id = (Result)Visit(context.id());
             p.id = id.text;
             p.permission = id.permission;
-            if(context.annotation() != null)
+            if (context.annotation() != null)
             {
                 p.annotation = (string)Visit(context.annotation());
             }
-            if(context.type() != null)
+            if (context.type() != null)
             {
                 p.type = (string)Visit(context.type());
             }
@@ -198,7 +194,7 @@ namespace XyLang.Compile
             return p;
         }
 
-        class Lazy
+        private class Lazy
         {
             public bool isDefer { get; set; }
             public string content { get; set; }
@@ -215,9 +211,9 @@ namespace XyLang.Compile
             var obj = "";
             var content = "";
             var lazy = new List<Lazy>();
-            foreach(var item in items)
+            foreach (var item in items)
             {
-                if(item.GetChild(0) is XyParser.CheckDeferStatementContext)
+                if (item.GetChild(0) is XyParser.CheckDeferStatementContext)
                 {
                     lazy.Add(new Lazy(true, (string)Visit(item)));
                     content += $"try {Wrap} {{";
@@ -232,9 +228,9 @@ namespace XyLang.Compile
                     content += Visit(item);
                 }
             }
-            if(lazy.Count > 0)
+            if (lazy.Count > 0)
             {
-                for(int i = lazy.Count - 1; i >= 0; i--)
+                for (int i = lazy.Count - 1; i >= 0; i--)
                 {
                     if (lazy[i].isDefer)
                     {

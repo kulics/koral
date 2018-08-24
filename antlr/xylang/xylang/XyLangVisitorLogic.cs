@@ -1,13 +1,8 @@
 ﻿using Antlr4.Runtime.Misc;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace XyLang.Compile
 {
-    partial class XyLangVisitor
+    internal partial class XyLangVisitor
     {
         public class Iterator
         {
@@ -23,7 +18,7 @@ namespace XyLang.Compile
             var i = context.expression();
 
             it.op = context.op.Text == ">>";
-            if(context.expression().Length == 2)
+            if (context.expression().Length == 2)
             {
                 it.from = (Result)Visit(context.expression(0));
                 it.to = (Result)Visit(context.expression(1));
@@ -110,7 +105,7 @@ namespace XyLang.Compile
             var obj = "";
             var expr = (Result)Visit(context.expression());
             obj += $"switch ({expr.text}) {Wrap} {{ {Wrap}";
-            foreach(var item in context.caseStatement())
+            foreach (var item in context.caseStatement())
             {
                 var r = (string)Visit(item);
                 obj += r + Wrap;
@@ -139,7 +134,7 @@ namespace XyLang.Compile
             else
             {
                 var id = "it";
-                if (context.id()!=null)
+                if (context.id() != null)
                 {
                     id = ((Result)Visit(context.id())).text;
                 }
@@ -161,9 +156,9 @@ namespace XyLang.Compile
         public override object VisitJudgeStatement([NotNull] XyParser.JudgeStatementContext context)
         {
             var obj = "";
-            for(int i = 0; i < context.judgeBaseStatement().Length; i++)
+            for (int i = 0; i < context.judgeBaseStatement().Length; i++)
             {
-                if(i == 0)
+                if (i == 0)
                 {
                     obj += Visit(context.judgeBaseStatement(i));
                 }
@@ -172,7 +167,7 @@ namespace XyLang.Compile
                     obj += "else " + Visit(context.judgeBaseStatement(i));
                 }
             }
-            if(context.judgeElseStatement() != null)
+            if (context.judgeElseStatement() != null)
             {
                 obj += Visit(context.judgeElseStatement());
             }
@@ -202,7 +197,7 @@ namespace XyLang.Compile
             obj += $"try {BlockLeft} {Wrap}";
             obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += BlockRight + Wrap;
-            foreach(var item in context.checkErrorStatement())
+            foreach (var item in context.checkErrorStatement())
             {
                 obj += Visit(item) + Wrap;
             }
@@ -214,9 +209,9 @@ namespace XyLang.Compile
             var obj = "";
             var ID = (Result)Visit(context.id());
             var Type = "Exception";
-            if(context.type() != null)
+            if (context.type() != null)
             {
-                Type = (String)Visit(context.type());
+                Type = (string)Visit(context.type());
             }
 
             obj += $"catch( {Type} {ID.text} ){Wrap + BlockLeft + Wrap} ";
@@ -228,7 +223,7 @@ namespace XyLang.Compile
         public override object VisitReportStatement([NotNull] XyParser.ReportStatementContext context)
         {
             var obj = "";
-            if(context.expression() != null)
+            if (context.expression() != null)
             {
                 var r = (Result)Visit(context.expression());
                 obj += r.text;
@@ -245,9 +240,11 @@ namespace XyLang.Compile
 
         public override object VisitLinq([NotNull] XyParser.LinqContext context)
         {
-            var r = new Result();
-            r.data = "var";
-            foreach(var item in context.linqItem())
+            var r = new Result
+            {
+                data = "var"
+            };
+            foreach (var item in context.linqItem())
             {
                 r.text += (string)Visit(item) + " ";
             }
@@ -257,7 +254,7 @@ namespace XyLang.Compile
 
         public override object VisitLinqItem([NotNull] XyParser.LinqItemContext context)
         {
-            if(context.expression() != null)
+            if (context.expression() != null)
             {
                 return ((Result)Visit(context.expression())).text;
             }

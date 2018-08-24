@@ -1,33 +1,31 @@
 ﻿using Antlr4.Runtime.Misc;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace XyLang.Compile
 {
-    partial class XyLangVisitor : XyBaseVisitor<object>
+    internal partial class XyLangVisitor : XyBaseVisitor<object>
     {
         public string FileName { get; set; }
 
-        const string Terminate = ";";
-        const string Wrap = "\r\n";
-        const string Any = "object";
-        const string I32 = "int";
-        const string F64 = "double";
-        const string Bool = "bool";
-        const string Str = "string";
-        const string BlockLeft = "{";
-        const string BlockRight = "}";
-        const string True = "true";
-        const string False = "false";
+        private const string Terminate = ";";
+        private const string Wrap = "\r\n";
+        private const string Any = "object";
+        private const string I32 = "int";
+        private const string F64 = "double";
+        private const string Bool = "bool";
+        private const string Str = "string";
+        private const string BlockLeft = "{";
+        private const string BlockRight = "}";
+        private const string True = "true";
+        private const string False = "false";
+        private const string Task = "System.Threading.Tasks.Task";
+        const string List = "lst";
+        const string Dictionary = "dic";
 
         public override object VisitProgram([NotNull] XyParser.ProgramContext context)
         {
             var list = context.statement();
             var result = "";
-            foreach(var item in list)
+            foreach (var item in list)
             {
                 result += VisitStatement(item);
             }
@@ -46,30 +44,32 @@ namespace XyLang.Compile
 
         public override object VisitId([NotNull] XyParser.IdContext context)
         {
-            var r = new Result();
-            r.data = "var";
-            if(context.typeBasic() != null)
+            var r = new Result
+            {
+                data = "var"
+            };
+            if (context.typeBasic() != null)
             {
                 r.permission = "public";
                 r.text += context.typeBasic().GetText();
             }
-            else if(context.linqKeyword() != null)
+            else if (context.linqKeyword() != null)
             {
                 r.permission = "public";
                 r.text += Visit(context.linqKeyword());
             }
-            else if(context.op.Type == XyParser.IDPublic)
+            else if (context.op.Type == XyParser.IDPublic)
             {
                 r.permission = "public";
                 r.text += context.op.Text;
             }
-            else if(context.op.Type == XyParser.IDPrivate)
+            else if (context.op.Type == XyParser.IDPrivate)
             {
                 r.permission = "private";
                 r.text += context.op.Text;
             }
 
-            if(keywords.IndexOf(r.text) >= 0)
+            if (keywords.IndexOf(r.text) >= 0)
             {
                 r.text = "@" + r.text;
             }
@@ -79,12 +79,12 @@ namespace XyLang.Compile
         public override object VisitBool([NotNull] XyParser.BoolContext context)
         {
             var r = new Result();
-            if(context.t.Type == XyParser.True)
+            if (context.t.Type == XyParser.True)
             {
                 r.data = Bool;
                 r.text = True;
             }
-            else if(context.t.Type == XyParser.False)
+            else if (context.t.Type == XyParser.False)
             {
                 r.data = Bool;
                 r.text = False;
@@ -114,7 +114,7 @@ namespace XyLang.Compile
         {
             var obj = "";
             var id = "";
-            if(context.id() != null)
+            if (context.id() != null)
             {
                 id = ((Result)Visit(context.id())).text + ":";
             }
@@ -127,9 +127,9 @@ namespace XyLang.Compile
         public override object VisitAnnotationList([NotNull] XyParser.AnnotationListContext context)
         {
             var obj = "";
-            for(int i = 0; i < context.annotationItem().Length; i++)
+            for (int i = 0; i < context.annotationItem().Length; i++)
             {
-                if(i > 0)
+                if (i > 0)
                 {
                     obj += "," + Visit(context.annotationItem(i));
                 }
@@ -145,9 +145,9 @@ namespace XyLang.Compile
         {
             var obj = "";
             obj += ((Result)Visit(context.id())).text;
-            for(int i = 0; i < context.annotationAssign().Length; i++)
+            for (int i = 0; i < context.annotationAssign().Length; i++)
             {
-                if(i > 0)
+                if (i > 0)
                 {
                     obj += "," + Visit(context.annotationAssign(i));
                 }
@@ -156,7 +156,7 @@ namespace XyLang.Compile
                     obj += "(" + Visit(context.annotationAssign(i));
                 }
             }
-            if(context.annotationAssign().Length > 0)
+            if (context.annotationAssign().Length > 0)
             {
                 obj += ")";
             }
@@ -167,7 +167,7 @@ namespace XyLang.Compile
         {
             var obj = "";
             var id = "";
-            if(context.id() != null)
+            if (context.id() != null)
             {
                 id = ((Result)Visit(context.id())).text + "=";
             }

@@ -9,10 +9,7 @@ Here we talk about how to deal with the thread more easily, that is, asynchronou
 
 In other languages ​​it can be considered `async/await` for asynchronous programming end-solutions.
 
-Asynchronous need to import the namespace
-```
-System\Threading\Tasks
-```
+The task data type we use here is `tsk`.
 ## Asynchronous Declaration
 So how to declare a function asynchronously? Use `~>` on it.
 
@@ -25,9 +22,9 @@ Async ()~>(out: i32)
     <- (12)
 }
 ```
-Once a method has been declared as an async method, the compiler will automatically put a `Task<>` wrapper around the return value, and the method will be executed asynchronously.
+Once a method has been declared as an async method, the compiler will automatically put a `tsk<>` wrapper around the return value, and the method will be executed asynchronously.
 
-Normal direct call will only get a `Task` data.
+Normal direct call will only get a `tsk` data.
 
 E.g:
 ```
@@ -51,18 +48,18 @@ E.g:
 // correct
 Async ()~>(out: i32)
 {
-    <~ Task.Delay.(5000)     // wait for a while
+    <~ tsk.Delay.(5000)     // wait for a while
     <- (12)
 }
 // wrong
 Async ()->(out: i32)
 {
-    <~ Task.Delay.(5000)     // can not be declared
+    <~ tsk.Delay.(5000)     // can not be declared
     <- (12)
 }
 ```
 ## Empty return value
-If the asynchronous function does not return a value, it will also return a `Task` data, the same as the external call can wait.
+If the asynchronous function does not return a value, it will also return a `tsk` data, the same as the external call can wait.
 
 We can choose to wait for no data, or we can choose not to wait for data.
 
@@ -70,7 +67,7 @@ E.g:
 ```
 Async ()~>()
 {
-    <~ Task.Delay.(5000)    // wait for a while
+    <~ tsk.Delay.(5000)    // wait for a while
 }
 
 <~ Async.()  // correct

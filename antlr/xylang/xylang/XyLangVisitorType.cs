@@ -1,13 +1,9 @@
 ﻿using Antlr4.Runtime.Misc;
-using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace XyLang.Compile
 {
-    partial class XyLangVisitor
+    internal partial class XyLangVisitor
     {
         public override object VisitTypeNullable([NotNull] XyParser.TypeNullableContext context)
         {
@@ -24,9 +20,9 @@ namespace XyLang.Compile
         {
             var obj = "";
             obj += "(";
-            for(int i = 0; i < context.type().Length; i++)
+            for (int i = 0; i < context.type().Length; i++)
             {
-                if(i == 0)
+                if (i == 0)
                 {
                     obj += Visit(context.type(i));
                 }
@@ -41,8 +37,10 @@ namespace XyLang.Compile
 
         public override object VisitGetType([NotNull] XyParser.GetTypeContext context)
         {
-            var r = new Result();
-            r.data = "System.Type";
+            var r = new Result
+            {
+                data = "System.Type"
+            };
             if (context.type() is null)
             {
                 r.text = $"{((Result)Visit(context.expression())).text} .GetType()";
@@ -57,7 +55,7 @@ namespace XyLang.Compile
         public override object VisitTypeArray([NotNull] XyParser.TypeArrayContext context)
         {
             var obj = "";
-            obj += " List<" + Visit(context.type()) + "> ";
+            obj += $" {List}<{ Visit(context.type())}> ";
             return obj;
         }
 
@@ -71,7 +69,7 @@ namespace XyLang.Compile
         public override object VisitTypeDictionary([NotNull] XyParser.TypeDictionaryContext context)
         {
             var obj = "";
-            obj += " Dictionary<" + Visit(context.type(0)) + "," + Visit(context.type(1)) + "> ";
+            obj += $" {Dictionary}<{ Visit(context.type(0))},{Visit(context.type(1))}> ";
             return obj;
         }
 
@@ -79,7 +77,7 @@ namespace XyLang.Compile
         {
             var obj = "";
             obj += Visit(context.nameSpaceItem());
-            if(context.templateCall() != null)
+            if (context.templateCall() != null)
             {
                 obj += Visit(context.templateCall());
             }
@@ -91,9 +89,9 @@ namespace XyLang.Compile
             var obj = "";
             var @in = (string)Visit(context.typeFunctionParameterClause(0));
             var @out = (string)Visit(context.typeFunctionParameterClause(1));
-            if(@out.Length == 0)
+            if (@out.Length == 0)
             {
-                if(@in.Length == 0)
+                if (@in.Length == 0)
                 {
                     obj += "Action";
                 }
@@ -106,11 +104,11 @@ namespace XyLang.Compile
             }
             else
             {
-                if(@out.IndexOf(",") >= 0)
+                if (@out.IndexOf(",") >= 0)
                 {
                     @out = "(" + @out + ")";
                 }
-                if(@in.Length == 0)
+                if (@in.Length == 0)
                 {
                     obj += "Func<";
                     obj += @out;
@@ -132,10 +130,10 @@ namespace XyLang.Compile
             var obj = "";
             var lastType = "";
             var temp = new List<string>();
-            for(int i = context.typeParameter().Length - 1; i >= 0; i--)
+            for (int i = context.typeParameter().Length - 1; i >= 0; i--)
             {
                 Parameter p = (Parameter)Visit(context.typeParameter(i));
-                if(p.type != null)
+                if (p.type != null)
                 {
                     lastType = p.type;
                 }
@@ -145,9 +143,9 @@ namespace XyLang.Compile
                 }
                 temp.Add($"{p.type}");
             }
-            for(int i = temp.Count - 1; i >= 0; i--)
+            for (int i = temp.Count - 1; i >= 0; i--)
             {
-                if(i == temp.Count - 1)
+                if (i == temp.Count - 1)
                 {
                     obj += temp[i];
                 }
@@ -161,9 +159,11 @@ namespace XyLang.Compile
 
         public override object VisitTypeParameter([NotNull] XyParser.TypeParameterContext context)
         {
-            var p = new Parameter();
-            p.id = ((Result)Visit(context.id())).text;
-            if(context.type() != null)
+            var p = new Parameter
+            {
+                id = ((Result)Visit(context.id())).text
+            };
+            if (context.type() != null)
             {
                 p.type = (string)Visit(context.type());
             }
@@ -174,7 +174,7 @@ namespace XyLang.Compile
         public override object VisitTypeBasic([NotNull] XyParser.TypeBasicContext context)
         {
             var obj = "";
-            switch(context.t.Type)
+            switch (context.t.Type)
             {
                 case XyParser.TypeI8:
                     obj = "sbyte";
