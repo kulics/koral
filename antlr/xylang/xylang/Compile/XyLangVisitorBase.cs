@@ -75,10 +75,19 @@ namespace XyLang.Compile
                 r.permission = "public";
                 r.text += Visit(context.linqKeyword());
             }
+            else if (context.sharpId() != null)
+            {
+                r.permission = "public";
+                r.text += Visit(context.sharpId());
+            }
             else if (context.op.Type == XyParser.IDPublic)
             {
                 r.permission = "public";
                 r.text += context.op.Text;
+                if (keywords.IndexOf(r.text) >= 0)
+                {
+                    r.text = "@" + r.text;
+                }
             }
             else if (context.op.Type == XyParser.IDPrivate)
             {
@@ -86,11 +95,12 @@ namespace XyLang.Compile
                 r.text += context.op.Text;
             }
 
-            if (keywords.IndexOf(r.text) >= 0)
-            {
-                r.text = "@" + r.text;
-            }
             return r;
+        }
+
+        public override object VisitSharpId([NotNull] XyParser.SharpIdContext context)
+        {
+            return context.IDPublic().GetText();
         }
 
         public override object VisitBool([NotNull] XyParser.BoolContext context)

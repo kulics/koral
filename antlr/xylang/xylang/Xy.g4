@@ -373,7 +373,10 @@ wave : op='~';
 
 id: op=(IDPublic|IDPrivate)
 |typeBasic
-|linqKeyword;
+|linqKeyword
+|sharpId;
+
+sharpId: '#' IDPublic;
 
 Terminate : ';';
 
