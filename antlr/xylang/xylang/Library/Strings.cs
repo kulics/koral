@@ -2,11 +2,11 @@
 
 namespace XyLang.Library
 {
-    public class str
+    public class Str
     {
         private string v;
-        public str() { }
-        public str(object o)
+        public Str() { }
+        public Str(object o)
         {
             switch (o)
             {
@@ -33,19 +33,19 @@ namespace XyLang.Library
             }
         }
 
-        public static implicit operator str(string it) { return new str(it); }
-        public static implicit operator string(str it) { return it.v; }
+        public static implicit operator Str(string it) { return new Str(it); }
+        public static implicit operator string(Str it) { return it.v; }
 
-        public static str operator +(str a, str b) { return new str(a.v + b.v); }
+        public static Str operator +(Str a, Str b) { return new Str(a.v + b.v); }
 
-        public static bool operator ==(str a, str b) { return a.v == b.v; }
-        public static bool operator !=(str a, str b) { return a.v != b.v; }
+        public static bool operator ==(Str a, Str b) { return a.v == b.v; }
+        public static bool operator !=(Str a, Str b) { return a.v != b.v; }
 
         public override bool Equals(object o)
         {
-            if (o is str)
+            if (o is Str)
             {
-                str b = (str)o;
+                Str b = (Str)o;
                 return v == b.v;
             }
             else
@@ -54,7 +54,7 @@ namespace XyLang.Library
             }
         }
 
-        public bool Equals(str b) { return b != null && v == b.v; }
+        public bool Equals(Str b) { return b != null && v == b.v; }
 
         public override int GetHashCode() { return v.GetHashCode(); }
 
@@ -74,18 +74,18 @@ namespace XyLang.Library
         }
 #endif
 
-        public str ToStr() { return ToString(); }
-        public str ToStr(str format) { return ToString(format); }
+        public Str ToStr() { return ToString(); }
+        public Str ToStr(Str format) { return ToString(format); }
 
-        public i8 ToI8() { return new i8(v); }
-        public i16 ToI16() { return new i16(v); }
-        public i32 ToI32() { return new i32(v); }
-        public i64 ToI64() { return new i64(v); }
-        public u8 ToU8() { return new u8(v); }
-        public u16 ToU16() { return new u16(v); }
-        public u32 ToU32() { return new u32(v); }
-        public u64 ToU64() { return new u64(v); }
-        public f32 ToF32() { return new f32(v); }
-        public f64 ToF64() { return new f64(v); }
+        public I8 ToI8() { return new I8(v); }
+        public I16 ToI16() { return new I16(v); }
+        public I32 ToI32() { return new I32(v); }
+        public I64 ToI64() { return new I64(v); }
+        public U8 ToU8() { return new U8(v); }
+        public U16 ToU16() { return new U16(v); }
+        public U32 ToU32() { return new U32(v); }
+        public U64 ToU64() { return new U64(v); }
+        public F32 ToF32() { return new F32(v); }
+        public F64 ToF64() { return new F64(v); }
     }
 }

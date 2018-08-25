@@ -2,11 +2,11 @@
 
 namespace XyLang.Library
 {
-    public class i8
+    public class I8
     {
         private sbyte v;
-        public i8() { }
-        public i8(object o)
+        public I8() { }
+        public I8(object o)
         {
             switch (o)
             {
@@ -14,27 +14,27 @@ namespace XyLang.Library
                 case short _:
                 case int _:
                 case long _:
-                case i8 _:
-                case i16 _:
-                case i32 _:
-                case i64 _:
+                case I8 _:
+                case I16 _:
+                case I32 _:
+                case I64 _:
 
                 case byte _:
                 case ushort _:
                 case uint _:
                 case ulong _:
-                case u8 _:
-                case u16 _:
-                case u32 _:
-                case u64 _:
+                case U8 _:
+                case U16 _:
+                case U32 _:
+                case U64 _:
 
                 case float _:
                 case double _:
-                case f32 _:
-                case f64 _:
+                case F32 _:
+                case F64 _:
 
                 case string _:
-                case str _:
+                case Str _:
                     v = Convert.ToSByte(o);
                     break;
                 default:
@@ -42,27 +42,27 @@ namespace XyLang.Library
             }
         }
 
-        public static implicit operator i8(sbyte it) { return new i8(it); }
-        public static implicit operator sbyte(i8 it) { return it.v; }
+        public static implicit operator I8(sbyte it) { return new I8(it); }
+        public static implicit operator sbyte(I8 it) { return it.v; }
 
-        public static i8 operator +(i8 a, i8 b) { return new i8(a.v + b.v); }
-        public static i8 operator -(i8 a, i8 b) { return new i8(a.v - b.v); }
-        public static i8 operator *(i8 a, i8 b) { return new i8(a.v * b.v); }
-        public static i8 operator /(i8 a, i8 b) { return new i8(a.v / b.v); }
-        public static i8 operator %(i8 a, i8 b) { return new i8(a.v % b.v); }
+        public static I8 operator +(I8 a, I8 b) { return new I8(a.v + b.v); }
+        public static I8 operator -(I8 a, I8 b) { return new I8(a.v - b.v); }
+        public static I8 operator *(I8 a, I8 b) { return new I8(a.v * b.v); }
+        public static I8 operator /(I8 a, I8 b) { return new I8(a.v / b.v); }
+        public static I8 operator %(I8 a, I8 b) { return new I8(a.v % b.v); }
 
-        public static bool operator <(i8 a, i8 b) { return a.v < b.v; }
-        public static bool operator <=(i8 a, i8 b) { return a.v <= b.v; }
-        public static bool operator >(i8 a, i8 b) { return a.v > b.v; }
-        public static bool operator >=(i8 a, i8 b) { return a.v >= b.v; }
-        public static bool operator ==(i8 a, i8 b) { return a.v == b.v; }
-        public static bool operator !=(i8 a, i8 b) { return a.v != b.v; }
+        public static bool operator <(I8 a, I8 b) { return a.v < b.v; }
+        public static bool operator <=(I8 a, I8 b) { return a.v <= b.v; }
+        public static bool operator >(I8 a, I8 b) { return a.v > b.v; }
+        public static bool operator >=(I8 a, I8 b) { return a.v >= b.v; }
+        public static bool operator ==(I8 a, I8 b) { return a.v == b.v; }
+        public static bool operator !=(I8 a, I8 b) { return a.v != b.v; }
 
         public override bool Equals(object o)
         {
-            if (o is i8)
+            if (o is I8)
             {
-                i8 b = (i8)o;
+                I8 b = (I8)o;
                 return v == b.v;
             }
             else
@@ -71,7 +71,7 @@ namespace XyLang.Library
             }
         }
 
-        public bool Equals(i8 b) { return b != null && v == b.v; }
+        public bool Equals(I8 b) { return b != null && v == b.v; }
 
         public override int GetHashCode() { return v.GetHashCode(); }
 
@@ -91,26 +91,26 @@ namespace XyLang.Library
         }
 #endif
 
-        public str ToStr() { return ToString(); }
-        public str ToStr(str format) { return ToString(format); }
+        public Str ToStr() { return ToString(); }
+        public Str ToStr(Str format) { return ToString(format); }
 
-        public i8 ToI8() { return new i8(v); }
-        public i16 ToI16() { return new i16(v); }
-        public i32 ToI32() { return new i32(v); }
-        public i64 ToI64() { return new i64(v); }
-        public u8 ToU8() { return new u8(v); }
-        public u16 ToU16() { return new u16(v); }
-        public u32 ToU32() { return new u32(v); }
-        public u64 ToU64() { return new u64(v); }
-        public f32 ToF32() { return new f32(v); }
-        public f64 ToF64() { return new f64(v); }
+        public I8 ToI8() { return new I8(v); }
+        public I16 ToI16() { return new I16(v); }
+        public I32 ToI32() { return new I32(v); }
+        public I64 ToI64() { return new I64(v); }
+        public U8 ToU8() { return new U8(v); }
+        public U16 ToU16() { return new U16(v); }
+        public U32 ToU32() { return new U32(v); }
+        public U64 ToU64() { return new U64(v); }
+        public F32 ToF32() { return new F32(v); }
+        public F64 ToF64() { return new F64(v); }
     }
 
-    public class i16
+    public class I16
     {
         private short v;
-        public i16() { }
-        public i16(object o)
+        public I16() { }
+        public I16(object o)
         {
             switch (o)
             {
@@ -118,27 +118,27 @@ namespace XyLang.Library
                 case short _:
                 case int _:
                 case long _:
-                case i8 _:
-                case i16 _:
-                case i32 _:
-                case i64 _:
+                case I8 _:
+                case I16 _:
+                case I32 _:
+                case I64 _:
 
                 case byte _:
                 case ushort _:
                 case uint _:
                 case ulong _:
-                case u8 _:
-                case u16 _:
-                case u32 _:
-                case u64 _:
+                case U8 _:
+                case U16 _:
+                case U32 _:
+                case U64 _:
 
                 case float _:
                 case double _:
-                case f32 _:
-                case f64 _:
+                case F32 _:
+                case F64 _:
 
                 case string _:
-                case str _:
+                case Str _:
                     v = Convert.ToInt16(o);
                     break;
                 default:
@@ -146,27 +146,27 @@ namespace XyLang.Library
             }
         }
 
-        public static implicit operator i16(short it) { return new i16(it); }
-        public static implicit operator short(i16 it) { return it.v; }
+        public static implicit operator I16(short it) { return new I16(it); }
+        public static implicit operator short(I16 it) { return it.v; }
 
-        public static i16 operator +(i16 a, i16 b) { return new i16(a.v + b.v); }
-        public static i16 operator -(i16 a, i16 b) { return new i16(a.v - b.v); }
-        public static i16 operator *(i16 a, i16 b) { return new i16(a.v * b.v); }
-        public static i16 operator /(i16 a, i16 b) { return new i16(a.v / b.v); }
-        public static i16 operator %(i16 a, i16 b) { return new i16(a.v % b.v); }
+        public static I16 operator +(I16 a, I16 b) { return new I16(a.v + b.v); }
+        public static I16 operator -(I16 a, I16 b) { return new I16(a.v - b.v); }
+        public static I16 operator *(I16 a, I16 b) { return new I16(a.v * b.v); }
+        public static I16 operator /(I16 a, I16 b) { return new I16(a.v / b.v); }
+        public static I16 operator %(I16 a, I16 b) { return new I16(a.v % b.v); }
 
-        public static bool operator <(i16 a, i16 b) { return a.v < b.v; }
-        public static bool operator <=(i16 a, i16 b) { return a.v <= b.v; }
-        public static bool operator >(i16 a, i16 b) { return a.v > b.v; }
-        public static bool operator >=(i16 a, i16 b) { return a.v >= b.v; }
-        public static bool operator ==(i16 a, i16 b) { return a.v == b.v; }
-        public static bool operator !=(i16 a, i16 b) { return a.v != b.v; }
+        public static bool operator <(I16 a, I16 b) { return a.v < b.v; }
+        public static bool operator <=(I16 a, I16 b) { return a.v <= b.v; }
+        public static bool operator >(I16 a, I16 b) { return a.v > b.v; }
+        public static bool operator >=(I16 a, I16 b) { return a.v >= b.v; }
+        public static bool operator ==(I16 a, I16 b) { return a.v == b.v; }
+        public static bool operator !=(I16 a, I16 b) { return a.v != b.v; }
 
         public override bool Equals(object o)
         {
-            if (o is i16)
+            if (o is I16)
             {
-                i16 b = (i16)o;
+                I16 b = (I16)o;
                 return v == b.v;
             }
             else
@@ -175,7 +175,7 @@ namespace XyLang.Library
             }
         }
 
-        public bool Equals(i16 b) { return b != null && v == b.v; }
+        public bool Equals(I16 b) { return b != null && v == b.v; }
 
         public override int GetHashCode() { return v.GetHashCode(); }
 
@@ -197,26 +197,26 @@ namespace XyLang.Library
             return v.ToString(format, provider);
         }
 #endif
-        public str ToStr() { return ToString(); }
-        public str ToStr(str format) { return ToString(format); }
+        public Str ToStr() { return ToString(); }
+        public Str ToStr(Str format) { return ToString(format); }
 
-        public i8 ToI8() { return new i8(v); }
-        public i16 ToI16() { return new i16(v); }
-        public i32 ToI32() { return new i32(v); }
-        public i64 ToI64() { return new i64(v); }
-        public u8 ToU8() { return new u8(v); }
-        public u16 ToU16() { return new u16(v); }
-        public u32 ToU32() { return new u32(v); }
-        public u64 ToU64() { return new u64(v); }
-        public f32 ToF32() { return new f32(v); }
-        public f64 ToF64() { return new f64(v); }
+        public I8 ToI8() { return new I8(v); }
+        public I16 ToI16() { return new I16(v); }
+        public I32 ToI32() { return new I32(v); }
+        public I64 ToI64() { return new I64(v); }
+        public U8 ToU8() { return new U8(v); }
+        public U16 ToU16() { return new U16(v); }
+        public U32 ToU32() { return new U32(v); }
+        public U64 ToU64() { return new U64(v); }
+        public F32 ToF32() { return new F32(v); }
+        public F64 ToF64() { return new F64(v); }
     }
 
-    public class i32
+    public class I32
     {
         private int v;
-        public i32() { }
-        public i32(object o)
+        public I32() { }
+        public I32(object o)
         {
             switch (o)
             {
@@ -224,27 +224,27 @@ namespace XyLang.Library
                 case short _:
                 case int _:
                 case long _:
-                case i8 _:
-                case i16 _:
-                case i32 _:
-                case i64 _:
+                case I8 _:
+                case I16 _:
+                case I32 _:
+                case I64 _:
 
                 case byte _:
                 case ushort _:
                 case uint _:
                 case ulong _:
-                case u8 _:
-                case u16 _:
-                case u32 _:
-                case u64 _:
+                case U8 _:
+                case U16 _:
+                case U32 _:
+                case U64 _:
 
                 case float _:
                 case double _:
-                case f32 _:
-                case f64 _:
+                case F32 _:
+                case F64 _:
 
                 case string _:
-                case str _:
+                case Str _:
                     v = Convert.ToInt32(o);
                     break;
                 default:
@@ -252,27 +252,27 @@ namespace XyLang.Library
             }
         }
 
-        public static implicit operator i32(int it) { return new i32(it); }
-        public static implicit operator int(i32 it) { return it.v; }
+        public static implicit operator I32(int it) { return new I32(it); }
+        public static implicit operator int(I32 it) { return it.v; }
 
-        public static i32 operator +(i32 a, i32 b) { return new i32(a.v + b.v); }
-        public static i32 operator -(i32 a, i32 b) { return new i32(a.v - b.v); }
-        public static i32 operator *(i32 a, i32 b) { return new i32(a.v * b.v); }
-        public static i32 operator /(i32 a, i32 b) { return new i32(a.v / b.v); }
-        public static i32 operator %(i32 a, i32 b) { return new i32(a.v % b.v); }
+        public static I32 operator +(I32 a, I32 b) { return new I32(a.v + b.v); }
+        public static I32 operator -(I32 a, I32 b) { return new I32(a.v - b.v); }
+        public static I32 operator *(I32 a, I32 b) { return new I32(a.v * b.v); }
+        public static I32 operator /(I32 a, I32 b) { return new I32(a.v / b.v); }
+        public static I32 operator %(I32 a, I32 b) { return new I32(a.v % b.v); }
 
-        public static bool operator <(i32 a, i32 b) { return a.v < b.v; }
-        public static bool operator <=(i32 a, i32 b) { return a.v <= b.v; }
-        public static bool operator >(i32 a, i32 b) { return a.v > b.v; }
-        public static bool operator >=(i32 a, i32 b) { return a.v >= b.v; }
-        public static bool operator ==(i32 a, i32 b) { return a.v == b.v; }
-        public static bool operator !=(i32 a, i32 b) { return a.v != b.v; }
+        public static bool operator <(I32 a, I32 b) { return a.v < b.v; }
+        public static bool operator <=(I32 a, I32 b) { return a.v <= b.v; }
+        public static bool operator >(I32 a, I32 b) { return a.v > b.v; }
+        public static bool operator >=(I32 a, I32 b) { return a.v >= b.v; }
+        public static bool operator ==(I32 a, I32 b) { return a.v == b.v; }
+        public static bool operator !=(I32 a, I32 b) { return a.v != b.v; }
 
         public override bool Equals(object o)
         {
-            if (o is i32)
+            if (o is I32)
             {
-                i32 b = (i32)o;
+                I32 b = (I32)o;
                 return v == b.v;
             }
             else
@@ -281,7 +281,7 @@ namespace XyLang.Library
             }
         }
 
-        public bool Equals(i32 b) { return b != null && v == b.v; }
+        public bool Equals(I32 b) { return b != null && v == b.v; }
 
         public override int GetHashCode() { return v.GetHashCode(); }
 
@@ -300,26 +300,26 @@ namespace XyLang.Library
             return v.ToString(format, provider);
         }
 #endif
-        public str ToStr() { return ToString(); }
-        public str ToStr(str format) { return ToString(format); }
+        public Str ToStr() { return ToString(); }
+        public Str ToStr(Str format) { return ToString(format); }
 
-        public i8 ToI8() { return new i8(v); }
-        public i16 ToI16() { return new i16(v); }
-        public i32 ToI32() { return new i32(v); }
-        public i64 ToI64() { return new i64(v); }
-        public u8 ToU8() { return new u8(v); }
-        public u16 ToU16() { return new u16(v); }
-        public u32 ToU32() { return new u32(v); }
-        public u64 ToU64() { return new u64(v); }
-        public f32 ToF32() { return new f32(v); }
-        public f64 ToF64() { return new f64(v); }
+        public I8 ToI8() { return new I8(v); }
+        public I16 ToI16() { return new I16(v); }
+        public I32 ToI32() { return new I32(v); }
+        public I64 ToI64() { return new I64(v); }
+        public U8 ToU8() { return new U8(v); }
+        public U16 ToU16() { return new U16(v); }
+        public U32 ToU32() { return new U32(v); }
+        public U64 ToU64() { return new U64(v); }
+        public F32 ToF32() { return new F32(v); }
+        public F64 ToF64() { return new F64(v); }
     }
 
-    public class i64
+    public class I64
     {
         private long v;
-        public i64() { }
-        public i64(object o)
+        public I64() { }
+        public I64(object o)
         {
             switch (o)
             {
@@ -327,27 +327,27 @@ namespace XyLang.Library
                 case short _:
                 case int _:
                 case long _:
-                case i8 _:
-                case i16 _:
-                case i32 _:
-                case i64 _:
+                case I8 _:
+                case I16 _:
+                case I32 _:
+                case I64 _:
 
                 case byte _:
                 case ushort _:
                 case uint _:
                 case ulong _:
-                case u8 _:
-                case u16 _:
-                case u32 _:
-                case u64 _:
+                case U8 _:
+                case U16 _:
+                case U32 _:
+                case U64 _:
 
                 case float _:
                 case double _:
-                case f32 _:
-                case f64 _:
+                case F32 _:
+                case F64 _:
 
                 case string _:
-                case str _:
+                case Str _:
                     v = Convert.ToInt64(o);
                     break;
                 default:
@@ -355,27 +355,27 @@ namespace XyLang.Library
             }
         }
 
-        public static implicit operator i64(long it) { return new i64(it); }
-        public static implicit operator long(i64 it) { return it.v; }
+        public static implicit operator I64(long it) { return new I64(it); }
+        public static implicit operator long(I64 it) { return it.v; }
 
-        public static i64 operator +(i64 a, i64 b) { return new i64(a.v + b.v); }
-        public static i64 operator -(i64 a, i64 b) { return new i64(a.v - b.v); }
-        public static i64 operator *(i64 a, i64 b) { return new i64(a.v * b.v); }
-        public static i64 operator /(i64 a, i64 b) { return new i64(a.v / b.v); }
-        public static i64 operator %(i64 a, i64 b) { return new i64(a.v % b.v); }
+        public static I64 operator +(I64 a, I64 b) { return new I64(a.v + b.v); }
+        public static I64 operator -(I64 a, I64 b) { return new I64(a.v - b.v); }
+        public static I64 operator *(I64 a, I64 b) { return new I64(a.v * b.v); }
+        public static I64 operator /(I64 a, I64 b) { return new I64(a.v / b.v); }
+        public static I64 operator %(I64 a, I64 b) { return new I64(a.v % b.v); }
 
-        public static bool operator <(i64 a, i64 b) { return a.v < b.v; }
-        public static bool operator <=(i64 a, i64 b) { return a.v <= b.v; }
-        public static bool operator >(i64 a, i64 b) { return a.v > b.v; }
-        public static bool operator >=(i64 a, i64 b) { return a.v >= b.v; }
-        public static bool operator ==(i64 a, i64 b) { return a.v == b.v; }
-        public static bool operator !=(i64 a, i64 b) { return a.v != b.v; }
+        public static bool operator <(I64 a, I64 b) { return a.v < b.v; }
+        public static bool operator <=(I64 a, I64 b) { return a.v <= b.v; }
+        public static bool operator >(I64 a, I64 b) { return a.v > b.v; }
+        public static bool operator >=(I64 a, I64 b) { return a.v >= b.v; }
+        public static bool operator ==(I64 a, I64 b) { return a.v == b.v; }
+        public static bool operator !=(I64 a, I64 b) { return a.v != b.v; }
 
         public override bool Equals(object o)
         {
-            if (o is i64)
+            if (o is I64)
             {
-                i64 b = (i64)o;
+                I64 b = (I64)o;
                 return v == b.v;
             }
             else
@@ -384,7 +384,7 @@ namespace XyLang.Library
             }
         }
 
-        public bool Equals(i64 b) { return b != null && v == b.v; }
+        public bool Equals(I64 b) { return b != null && v == b.v; }
 
         public override int GetHashCode() { return v.GetHashCode(); }
 
@@ -403,18 +403,18 @@ namespace XyLang.Library
             return v.ToString(format, provider);
         }
 #endif
-        public str ToStr() { return ToString(); }
-        public str ToStr(str format) { return ToString(format); }
+        public Str ToStr() { return ToString(); }
+        public Str ToStr(Str format) { return ToString(format); }
 
-        public i8 ToI8() { return new i8(v); }
-        public i16 ToI16() { return new i16(v); }
-        public i32 ToI32() { return new i32(v); }
-        public i64 ToI64() { return new i64(v); }
-        public u8 ToU8() { return new u8(v); }
-        public u16 ToU16() { return new u16(v); }
-        public u32 ToU32() { return new u32(v); }
-        public u64 ToU64() { return new u64(v); }
-        public f32 ToF32() { return new f32(v); }
-        public f64 ToF64() { return new f64(v); }
+        public I8 ToI8() { return new I8(v); }
+        public I16 ToI16() { return new I16(v); }
+        public I32 ToI32() { return new I32(v); }
+        public I64 ToI64() { return new I64(v); }
+        public U8 ToU8() { return new U8(v); }
+        public U16 ToU16() { return new U16(v); }
+        public U32 ToU32() { return new U32(v); }
+        public U64 ToU64() { return new U64(v); }
+        public F32 ToF32() { return new F32(v); }
+        public F64 ToF64() { return new F64(v); }
     }
 }
