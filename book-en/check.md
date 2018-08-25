@@ -12,7 +12,7 @@ We can declare an exception data using `!.()` Anywhere in the function.
 
 E.g:
 ```
-ReadFile (name: str)->()
+ReadFile (name: Str)->()
 {
     ? name.Length == 0
     {
@@ -114,7 +114,7 @@ E.g:
 Func ()->()
 {
     ...
-    [0~5].@
+    [0<<5].@
     {
         // does not affect the logic outside the loop
         ~! { Console.WriteLine.(it + 1) }
@@ -155,14 +155,14 @@ Demo
         x != Defer.{}
         ~!
         {
-            x.str = "defer"
+            x.content = "defer"
             Console.WriteLine.(x.content)
         }
     }
 
     Defer {} ->
     {
-        content :str
+        content :Str
     }
 
     Defer += IDisposable

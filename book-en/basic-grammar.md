@@ -100,7 +100,7 @@ We can create new variable using the `id:type` statement.
 
 E.g:
 ```
-a : i32
+a : I32
 ```
 This will create an identifier for the name on the left and define it as the type on the right, in which case the identifier is a null value.
 
@@ -122,13 +122,13 @@ E.g:
 b := 10
 ```
 
-This defines the new variable `b`, which is equal to `10` and is automatically derived as an `i32` type.
+This defines the new variable `b`, which is equal to `10` and is automatically derived as an `I32` type.
 
 If we don't want automatic derivation, we can also use the write statement definition to mark the type we need.
 
 E.g:
 ```
-b :i16 = 10
+b :I16 = 10
 ```
 ## Variable data
 We can define variable data very easily, and types that are not marked with special symbols are variable data.
@@ -136,7 +136,7 @@ We can define variable data very easily, and types that are not marked with spec
 E.g:
 ```
 i := 1          // can be changed
-j :i32 = 1      // do not use automatic derivation
+j :I32 = 1      // do not use automatic derivation
 ```
 
 It should be noted that variable data cannot be called externally and can only be used within a defined range. Can be considered private.
@@ -147,7 +147,7 @@ We can also define invariable data, just define it with `:==`.
 E.g:
 ```
 i :== 2         // cannot be changed
-j :i32 == 3     // do not use automatic derivation
+j :I32 == 3     // do not use automatic derivation
 ```
 
 Note that invariable data can only be defined within the package without initial.
@@ -172,10 +172,10 @@ However, in practical projects, the use of partition will effectively improve th
 
 E.g:
 ```
-a.b.(x,y).c.(fn:()->(x:i32){<-(2+1)}).d=1+3*5/4
+a.b.(x,y).c.(fn:()->(x:I32){<-(2+1)}).d=1+3*5/4
 
 a.b.(x, y)
-.c.(fn: ()->(x: i32)
+.c.(fn: ()->(x: I32)
 {
     <- (2 + 1)
 }).d = 1 + 3 * 5 / 4
@@ -190,10 +190,10 @@ Demo
 
     Main ()
     {
-        a : i32
+        a : I32
         a = 5
         b := 6
-        c :i8 = 1
+        c :I8 = 1
     }
 }
 ```

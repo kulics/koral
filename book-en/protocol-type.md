@@ -22,7 +22,7 @@ E.g:
 ```
 HomeWork ->
 {
-    Count :i32
+    Count :I32
     Do ()->(){}
 }
 ```
@@ -40,7 +40,7 @@ E.g:
 ```
 Student += HomeWork
 {
-    Count :i32
+    Count :I32
 
     Do ()->()
     {
@@ -159,7 +159,7 @@ Demo
 
     A ->
     {
-        X : i32
+        X : I32
         Do ()->() {}
     }
 

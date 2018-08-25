@@ -10,7 +10,7 @@ E.g:
 ```
 name\space
 {
-    GetSomething ()->(content:str)
+    GetSomething ()->(content:Str)
     {
         <- ("something")
     }
@@ -42,7 +42,7 @@ E.g:
 ```
 name\space::helper
 {
-    GetSomething ()->(content:str)
+    GetSomething ()->(content:Str)
     {
         <- ("something")
     }
