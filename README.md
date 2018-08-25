@@ -37,7 +37,7 @@ HelloWorld // export namespace
         {
             print.(it) // call function
             // match
-            it.? [0~8] 
+            it.? [ 0 << 8 ] 
             {
                 print.(" in 0-8")
             }

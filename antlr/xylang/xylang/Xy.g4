@@ -188,7 +188,6 @@ id
 // 表达式
 expression:
 primaryExpression
-| basicConvert // 基础数据转化
 | callSelf // 调用自己
 | callNameSpace // 调用命名空间
 | callFunc // 函数调用
@@ -224,8 +223,6 @@ callElement // 访问元素
 | id // id
 | callExpression call callExpression // 链式调用
 ;
-
-basicConvert: typeBasic call '(' expression ')'; // 基础数据转换
 
 tuple : '(' (expression (',' expression)* )? ')'; // 元组
 
@@ -418,19 +415,19 @@ Protocol : '%';
 
 Wave : '~';
 
-TypeAny : 'any';
-TypeI8: 'i8';
-TypeU8: 'u8';
-TypeI16: 'i16';
-TypeU16: 'u16';
-TypeI32: 'i32';
-TypeU32: 'u32';
-TypeI64: 'i64';
-TypeU64: 'u64';
-TypeF32: 'f32';
-TypeF64: 'f64';
-TypeStr: 'str';
-TypeBool: 'bool';
+TypeAny : 'Any';
+TypeI8: 'I8';
+TypeU8: 'U8';
+TypeI16: 'I16';
+TypeU16: 'U16';
+TypeI32: 'I32';
+TypeU32: 'U32';
+TypeI64: 'I64';
+TypeU64: 'U64';
+TypeF32: 'F32';
+TypeF64: 'F64';
+TypeStr: 'Str';
+TypeBool: 'Bool';
 True: 'true';
 False: 'false';
 Null : 'null';
