@@ -250,6 +250,47 @@ namespace XyLang.Compile
             }
             else
             {
+                switch (typ)
+                {
+                    case I8:
+                        typ = "ubyte";
+                        break;
+                    case I16:
+                        typ = "short";
+                        break;
+                    case I32:
+                        typ = "int";
+                        break;
+                    case I64:
+                        typ = "long";
+                        break;
+
+                    case U8:
+                        typ = "byte";
+                        break;
+                    case U16:
+                        typ = "ushort";
+                        break;
+                    case U32:
+                        typ = "uint";
+                        break;
+                    case U64:
+                        typ = "ulong";
+                        break;
+
+                    case F32:
+                        typ = "float";
+                        break;
+                    case F64:
+                        typ = "double";
+                        break;
+
+                    case Str:
+                        typ = "string";
+                        break;
+                    default:
+                        break;
+                }
                 obj += $"{r1.permission} const {typ} {r1.text} = {r2.text} {Terminate} {Wrap}";
             }
 

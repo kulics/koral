@@ -8,18 +8,35 @@ namespace XyLang.Compile
 
         private const string Terminate = ";";
         private const string Wrap = "\r\n";
+
         private const string Any = "object";
-        private const string I32 = "int";
-        private const string F64 = "double";
+
+        private const string I8 = "i8";
+        private const string I16 = "i16";
+        private const string I32 = "i32";
+        private const string I64 = "i64";
+
+        private const string U8 = "u8";
+        private const string U16 = "u16";
+        private const string U32 = "u32";
+        private const string U64 = "u64";
+
+        private const string F32 = "f32";
+        private const string F64 = "f64";
+
         private const string Bool = "bool";
-        private const string Str = "string";
-        private const string BlockLeft = "{";
-        private const string BlockRight = "}";
         private const string True = "true";
         private const string False = "false";
+
+        private const string Str = "str";
+        private const string List = "lst";
+        private const string Dictionary = "dic";
+
+        private const string BlockLeft = "{";
+        private const string BlockRight = "}";
+
         private const string Task = "System.Threading.Tasks.Task";
-        const string List = "lst";
-        const string Dictionary = "dic";
+
 
         public override object VisitProgram([NotNull] XyParser.ProgramContext context)
         {
