@@ -8,7 +8,7 @@ If we don't need to define a specific control method for a while, we only need t
 
 E.g:
 ```
-Number :i32
+Number :I32
 ```
 This defines a control data with no additional methods, and it has a built-in default control method.
 
@@ -17,7 +17,7 @@ If we want to set a get operation, we can add `^` and extra code block definitio
 
 E.g:
 ```
-Number :i32
+Number :I32
 ^get    // means get, equivalent to getter in other languages
 {
     <- (7)  // only returns 7
@@ -31,7 +31,7 @@ With the above example, we naturally can think of how to deal with set operation
 
 E.g:
 ```
-Number :i32
+Number :I32
 ...
 ^set    // means set, equivalent to setter in other languages
 {
@@ -45,7 +45,7 @@ E.g:
 ```
 _number := 0
 
-Number :i32
+Number :I32
 ^set
 {
     _number = value  // value represents the value of the input
@@ -58,7 +58,7 @@ A complete example of reading and writing is as follows:
 ```
 _number := 0
 
-Number :i32
+Number :I32
 ^get
 {
     <- (_number)
@@ -89,11 +89,11 @@ Demo
         Console.WriteLine.(c)
     }
 
-    a : i32
+    a : I32
     ^get { <- (3) }
     
     b := 0
-    c : i32
+    c : I32
     ^get { <- (b) }
     ^set { b = value }
 }

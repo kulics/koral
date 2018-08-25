@@ -12,17 +12,17 @@ E.g:
 ```
 list := [ 1,2,3,4,5 ]
 ```
-This will create a `i32` type List containing` 1` to `5`.
+This will create a `I32` type List containing` 1` to `5`.
 
 If you need an List of explicit types, you can create them using type tags or type creation syntax.
 
 The List type is represented by `[]type`, where `[]` is a one-dimensional List, so multidimensional lists can be represented as `[][][]type`.
 
-For example we need a string List:
+For example we need a string list:
 ```
-list := ["1,"2","3" :str]    // tag type
-list2 := [:str]              // empty List
-list3 := []str.{}            // type creation
+list := ["1,"2","3" :Str]    // tag type
+list2 := [:Str]              // empty List
+list3 := []Str.{}            // type creation
 ```
 #### .NET lists
 If we need to use the `.Net` native List type, we can use `[#]type` to represent it.
@@ -30,7 +30,7 @@ It can also be created directly using `#[]`.
 
 E.g:
 ```
-listInt := [#]i32.{}
+listInt := [#]I32.{}
 listInt = #[1,2,3,4,5]
 // corresponds to C#'s int[]
 ```
@@ -70,7 +70,7 @@ E.g:
 ```
 dictionary := ["a"->1, "b"->2, "c"->3]
 ```
-This will create a `str->i32` type dictionary containing` a, b, c` entries.
+This will create a `Str->I32` type dictionary containing` a, b, c` entries.
 
 If you need an explicit type of dictionary, you can also create it using type tags or type creation syntax.
 
@@ -78,12 +78,12 @@ The dictionary type is represented by `[type]type` and `[type]` represents a one
 
 This is almost the same as the above List representation method. Yes, lists and dictionaries essentially use the index to locate the set of data. `[]` Represents a type of the index.
 
-Since lists only support numeric indexes, you can omit the `[i32]` tag. We can extend `[i32]type` to achieve consistent List types, but we usually don't need to do that (time is money. friend!).
+Since lists only support numeric indexes, you can omit the `[I32]` tag. We can extend `[I32]type` to achieve consistent List types, but we usually don't need to do that (time is money. friend!).
 
 E.g:
 ```
-dictionaryNumNum := [:i32->i32]
-dictionaryNumNum2 := [i32]i32.{}
+dictionaryNumNum := [:I32->I32]
+dictionaryNumNum2 := [I32]I32.{}
 ```
 ### Visit
 Like an List, we can also use indexes to access data directly.
@@ -118,12 +118,12 @@ Demo
     {
         list1 := [1,2,3,4,5]
         list1 += 6
-        list2 :[]i8 = [1,2,1,2 :i8]
+        list2 :[]I8 = [1,2,1,2 :I8]
         list3 := #[1,2,3]
 
         dictionary1 := ["a"->1, "b"->2, "c"->3]
         dictionary1.["d"] = 4
-        dictionary2 :[i8]i8 = [1->1,2->2,3->3 :i8->i8]
+        dictionary2 :[I8]I8 = [1->1,2->2,3->3 :I8->I8]
     }
 }
 ```

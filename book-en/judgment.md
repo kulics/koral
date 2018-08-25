@@ -11,7 +11,7 @@ E.g:
 }
 ```
 # Boolean Judgment
-When the judgment value is only `bool`, the statement is executed only if it is `true`. 
+When the judgment value is only `Bool`, the statement is executed only if it is `true`. 
 If we also need to handle `false` at the same time, then we can use the auxiliary notation `? value {}` to continue declare another statement.
 
 E.g:
@@ -108,7 +108,7 @@ You can use the `value.?id:type{}` syntax to match types, `id` can be omitted, a
 E.g:
 ```
 x.?
-:i32 // When i32
+:I32 // When I32
 {
      Console.Write.(it)
 }
@@ -157,7 +157,7 @@ Demo
         { Console.WriteLine.("not find") }
 
         Console.WriteLine.( ?.(b) )
-        Console.WriteLine.( ?.(:i32) )
+        Console.WriteLine.( ?.(:I32) )
     }
 }
 ```

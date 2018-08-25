@@ -20,13 +20,13 @@ E.g:
 ```
 Student {}->
 {
-    Name :str = ""
-    Number :str = ""
-    Class :i32 = 0
-    Grade :i32 = 0
+    Name :Str = ""
+    Number :Str = ""
+    Class :I32 = 0
+    Grade :I32 = 0
 }
 ```
-So we get a student bag with these data attributes. This student bag now becomes a usable type like `i32, str, bool`.
+So we get a student bag with these data attributes. This student bag now becomes a usable type like `I32, Str, Bool`.
 
 Unlike our original base type can only store one data, the student package can store name, student number, class, grade data.
 
@@ -82,8 +82,8 @@ Similarly, the way the collection is created is actually a simplified creation, 
 
 E.g:
 ```
-Array := []i32.{ ...1, 2, 3, 4, 5 }
-Dictionary := [str]i32.{ ..."1"->1, "2"->2, "3"->3 }
+Array := []I32.{ ...1, 2, 3, 4, 5 }
+Dictionary := [Str]I32.{ ..."1"->1, "2"->2, "3"->3 }
 ```
 ## Anonymous Package
 If we only want to wrap some data directly, instead of defining the package first and then using it, is it like an anonymous function?
@@ -114,7 +114,7 @@ E.g:
 Student {}->
 {
     ...
-    _GirlFirend :str    // The identifier beginning with this '_' is private
+    _GirlFirend :Str    // The identifier beginning with this '_' is private
 }
 ```
 That's right, if you remember the definition of identifiers, this is how private identifiers are defined, and private identifiers can not be accessed by outsiders.
@@ -131,7 +131,7 @@ E.g:
 ```
 Student += 
 {
-    GetGirlFirend ()->(name:str)
+    GetGirlFirend ()->(name:Str)
     {
         <- (.._GirlFirend)
     }
@@ -163,7 +163,7 @@ Add parameters at the time of definition, and write the definition of the constr
 
 E.g:
 ```
-Student {name, number: str}->
+Student {name, number: Str}->
 {
     ...
 
@@ -192,7 +192,7 @@ Of course, we can mark the constructor parameter `..`, and the compiler will aut
 E.g:
 ```
 // automatically generate the attributes Name and Number , which is equivalent to the previous example
-Student {..Name, ..Number:str}->
+Student {..Name, ..Number:Str}->
 {
      ...
 }
@@ -216,11 +216,11 @@ E.g:
 ```
 ChineseStudent {}->
 {
-    Name :str = ""
-    Number :str = ""
-    Class :i32 = 0
-    Grade :i32 = 0
-    KungFu :bool = false    // kung fu students
+    Name :Str = ""
+    Number :Str = ""
+    Class :I32 = 0
+    Grade :I32 = 0
+    KungFu :Bool = false    // kung fu students
 }
 ```
 No, no repeatable definition of data so elegant, we can reuse student attributes, with an additional kung fu attributes on it.
@@ -232,7 +232,7 @@ E.g:
 ChineseStudent {}->
 {
     Student :Student?   // include student attributes in it
-    KungFu :bool?       // kung fu students
+    KungFu :Bool?       // kung fu students
 }
 ```
 This way you can use generic attributes via student attributes in Chinese students.
@@ -267,7 +267,7 @@ Demo
         B := 0
     }
 
-    PKG {x:str,y:i32,z:S}->
+    PKG {x:Str,y:I32,z:S}->
     {
         X := ""
         Y := 0
@@ -283,7 +283,7 @@ Demo
 
     PKG +=
     {
-        Print ()->(a:str)
+        Print ()->(a:Str)
         {
             <- ( /"X {Y}"/ )
         }

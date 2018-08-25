@@ -14,11 +14,11 @@ E.g:
 List<T> {}->
 {
     Items := Storage.{T}    // 创建存储
-    Length :i32?
+    Length :I32?
 }
 List<T> +=
 {
-    Get (index:i32)->(item:T)  // 获取某个泛型数据
+    Get (index:I32)->(item:T)  // 获取某个泛型数据
     {
         <- (Items.Get.(index))
     }
@@ -34,7 +34,7 @@ So we define a package that supports generics, `T` is a generic x, in fact it ca
 
 Generic brackets, like parameters, support multiple generations, for example: `<T, H, Q>`.
 
-After the generic is defined, `T` is treated as a real type within the area of ​​the package, and then we can use it in a variety of desired types just as `i32` does.
+After the generic is defined, `T` is treated as a real type within the area of ​​the package, and then we can use it in a variety of desired types just as `I32` does.
 
 Note that because generics are typed at run time, the compiler can not infer generic constructor methods. We can only use the empty type constructor to construct generic data.
 
@@ -51,13 +51,13 @@ Very simple, and we can use the same statement, but called when the need to impo
 
 E.g:
 ```
-ListNumber := List<i32>.{}  // pass in the number type
+ListNumber := List<I32>.{}  // pass in the number type
 ```
 So we have an List of number types, is like this:
 ```
-ListNumber := []i32.{}
+ListNumber := []I32.{}
 ```
-Yes, in fact, our list and dictionary syntax are syntactic sugar, the actual types are `lst` and `dic`.
+Yes, in fact, our list and dictionary syntax are syntactic sugar, the actual types are `Lst` and `Dic`.
 ## Supported Types
 We can use generics in packages, functions, and protocol types.
 

@@ -35,12 +35,12 @@ Very simple, we only need to use `id:type` declare the parameters.
 
 E.g:
 ```
-func (x:i32)->(y:i32)
+func (x:I32)->(y:I32)
 {
     <- (x * 2)
 }
 ```
-The meaning of this function is to accept an input `i32` parameter `x` and a `i32` parameter `y`.
+The meaning of this function is to accept an input `I32` parameter `x` and a `I32` parameter `y`.
 
 This is very similar to what? Yes, in fact, the parameters and dictionary functions are almost the same, the parameters just tell the function, we need to use this type of data, marked by the identifier to match. Therefore, the expression of the same parameters and dictionaries will help us to understand.
 
@@ -50,7 +50,7 @@ If we need several consecutive parameters of the same type, we can simply write 
 
 E.g:
 ```
-func (a, b, c:i32, d:str)->(a:str, b, c, d:i32)
+func (a, b, c:I32, d:Str)->(a:Str, b, c, d:I32)
 {
     <- (d, a, b, c)
 }
@@ -87,7 +87,7 @@ When we call the function, we need to fill the brackets with the identifier in t
 E.g:
 ```
 // define one function with two in parameter
-sell (price: i32, name: str)->(){}
+sell (price: I32, name: Str)->(){}
 // fill in the data that meets the requirements as defined
 sell.(1.99, "cola")
 
@@ -97,7 +97,7 @@ Similar to in parameters, out parameters also need to be clearly defined with an
 
 E.g:
 ```
-topSell ()->(name: str, count: i32)
+topSell ()->(name: Str, count: I32)
 {
     ...
     <- ("cola", many)
@@ -150,7 +150,7 @@ Function In Parameter no special definition of way, just replace the type of the
 
 E.g:
 ```
-each1To10 (func: (item: i32)->() )->()
+each1To10 (func: (item: I32)->() )->()
 {
     [1~10].@ 
     {
@@ -164,7 +164,7 @@ So that we can pass the details of the processing to the externally passed `func
 
 E.g:
 ```
-print (item: i32)->()
+print (item: I32)->()
 {
     Console.WriteLine.(item)
 }
@@ -209,7 +209,7 @@ Unlike the above simplified method, we can also write a complete function direct
 
 E.g:
 ```
-each1To10.( (item:i32)->()
+each1To10.( (item:I32)->()
 {
      Console.WriteLine.(item)
 })
@@ -229,7 +229,7 @@ Demo
         x := C.()
         D.( ()<- Console.WriteLine.("D") )
         E.( it <- Console.WriteLine.(it) )
-        E.( (a:i32)->()
+        E.( (a:I32)->()
         {
             Console.WriteLine.(it)
         })
@@ -237,9 +237,9 @@ Demo
 
     A ()->(){}
 
-    B (a,b,c :i32)->(){}
+    B (a,b,c :I32)->(){}
 
-    C ()->(a:i32)
+    C ()->(a:I32)
     {
         <- (1024)
     }
@@ -249,7 +249,7 @@ Demo
         fn.()
     }
 
-    E (fn: (a:i32)->() )->()
+    E (fn: (a:I32)->() )->()
     {
         [1<<20].@
         {
