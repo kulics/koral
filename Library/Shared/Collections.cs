@@ -4,7 +4,8 @@ namespace XyLang.Library
 {
     public class Lst<T> : List<T>
     {
-        public Lst() : base() { }
+        public Lst() { }
+        public Lst(T[] v) : base(v) { }
         public Lst(IEnumerable<T> collection) : base(collection) { }
         public Lst(int capacity) : base(capacity) { }
 
