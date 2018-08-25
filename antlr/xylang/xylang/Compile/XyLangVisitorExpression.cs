@@ -445,7 +445,7 @@ namespace XyLang.Compile
             {
                 param = ((Result)Visit(context.expressionList())).text;
             }
-            r.text = $"new {Visit(context.type())} ( {param} )";
+            r.text = $"(new {Visit(context.type())}({param})";
             if (context.pkgAssign() != null)
             {
                 r.text += Visit(context.pkgAssign());
@@ -458,6 +458,7 @@ namespace XyLang.Compile
             {
                 r.text += Visit(context.dictionaryAssign());
             }
+            r.text += ")";
             return r;
         }
 
@@ -602,7 +603,7 @@ namespace XyLang.Compile
                 result.data = type + "[]";
             }
 
-            result.text = $"new []{{ {result.text} }}";
+            result.text = $"(new []{{ {result.text} }})";
             return result;
         }
 
@@ -636,7 +637,7 @@ namespace XyLang.Compile
                 result.data = $"{List}<{type}>";
             }
 
-            result.text = $"new {result.data}(){{ {result.text} }}";
+            result.text = $"(new {result.data}(){{ {result.text} }})";
             return result;
         }
 
@@ -677,7 +678,7 @@ namespace XyLang.Compile
                 result.data = $"{Dictionary}<{type}>";
             }
 
-            result.text = $"new {result.data}(){{ {result.text} }}";
+            result.text = $"(new {result.data}(){{ {result.text} }})";
             return result;
         }
 

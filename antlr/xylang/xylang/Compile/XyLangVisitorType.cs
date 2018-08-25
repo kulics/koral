@@ -9,10 +9,10 @@ namespace XyLang.Compile
         {
             var obj = "";
             obj = Visit(context.typeNotNull()) as string;
-            if (context.typeNotNull().GetChild(0) is XyParser.TypeBasicContext && obj != "object" && obj != "string")
-            {
-                obj += "?";
-            }
+            //if (context.typeNotNull().GetChild(0) is XyParser.TypeBasicContext && obj != "object" && obj != "string")
+            //{
+            //    obj += "?";
+            //}
             return obj;
         }
 
@@ -177,31 +177,31 @@ namespace XyLang.Compile
             switch (context.t.Type)
             {
                 case XyParser.TypeI8:
-                    obj = "sbyte";
+                    obj = I8;
                     break;
                 case XyParser.TypeU8:
-                    obj = "byte";
+                    obj = U8;
                     break;
                 case XyParser.TypeI16:
-                    obj = "short";
+                    obj = I16;
                     break;
                 case XyParser.TypeU16:
-                    obj = "ushort";
+                    obj = U16;
                     break;
                 case XyParser.TypeI32:
                     obj = I32;
                     break;
                 case XyParser.TypeU32:
-                    obj = "uint";
+                    obj = U32;
                     break;
                 case XyParser.TypeI64:
-                    obj = "long";
+                    obj = I64;
                     break;
                 case XyParser.TypeU64:
-                    obj = "ulong";
+                    obj = U64;
                     break;
                 case XyParser.TypeF32:
-                    obj = "float";
+                    obj = F32;
                     break;
                 case XyParser.TypeF64:
                     obj = F64;
