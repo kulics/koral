@@ -152,7 +152,7 @@ E.g:
 ```
 each1To10 (func: (item: I32)->() )->()
 {
-    [1~10].@ 
+    [1<<10].@ 
     {
         func.(it)
     }
@@ -220,7 +220,7 @@ each1To10.( (item:I32)->()
 ```
 Demo
 {
-    .. System
+    .. System, XyLang\Library
 
     Main ()
     {

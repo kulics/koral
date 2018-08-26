@@ -79,7 +79,7 @@ Most of the time, we can use only simple definitions to complete the task, becau
 ```
 Demo
 {
-    .. System
+    .. System, XyLang\Library
 
     Main ()
     {
