@@ -139,7 +139,7 @@ Res != Fileresource.{ "/test.xy"}
 ```
 Demo
 {
-    .. System
+    .. System, XyLang\Library
 
     Main ()
     {

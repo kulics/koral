@@ -151,7 +151,7 @@ More details on generics can be found in the generic section.
 ```
 Demo
 {
-    .. System
+    .. System, XyLang\Library
 
     Main ()
     {
