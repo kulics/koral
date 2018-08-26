@@ -75,6 +75,8 @@ namespace XyLang.Library
 
         public override int GetHashCode() => v.GetHashCode();
 
+        public TypeCode GetTypeCode() => v.GetTypeCode();
+
         public override string ToString() => v.ToString();
 
         public string ToString(string format) => v.ToString(format);
@@ -173,6 +175,8 @@ namespace XyLang.Library
 
         public override int GetHashCode() => v.GetHashCode();
 
+        public TypeCode GetTypeCode() => v.GetTypeCode();
+
         public override string ToString() => v.ToString();
 
         public string ToString(string format) => v.ToString(format);
@@ -200,30 +204,14 @@ namespace XyLang.Library
     }
     public class F32Converter : JsonConverter<F32>
     {
-        public override void WriteJson(JsonWriter writer, F32 value, JsonSerializer serializer)
-        {
-            writer.WriteValue(value.ToString());
-        }
+        public override void WriteJson(JsonWriter writer, F32 value, JsonSerializer serializer) => writer.WriteValue(value);
 
-        public override F32 ReadJson(JsonReader reader, Type objectType, F32 existingValue, bool hasExistingValue, JsonSerializer serializer)
-        {
-            string s = (string)reader.Value;
-
-            return new F32(s);
-        }
+        public override F32 ReadJson(JsonReader reader, Type objectType, F32 existingValue, bool hasExistingValue, JsonSerializer serializer) => new F32((float)reader.Value);
     }
     public class F64Converter : JsonConverter<F64>
     {
-        public override void WriteJson(JsonWriter writer, F64 value, JsonSerializer serializer)
-        {
-            writer.WriteValue(value.ToString());
-        }
+        public override void WriteJson(JsonWriter writer, F64 value, JsonSerializer serializer) => writer.WriteValue(value);
 
-        public override F64 ReadJson(JsonReader reader, Type objectType, F64 existingValue, bool hasExistingValue, JsonSerializer serializer)
-        {
-            string s = (string)reader.Value;
-
-            return new F64(s);
-        }
+        public override F64 ReadJson(JsonReader reader, Type objectType, F64 existingValue, bool hasExistingValue, JsonSerializer serializer) => new F64((double)reader.Value);
     }
 }
