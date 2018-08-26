@@ -100,7 +100,54 @@ namespace XyLang.Compile
 
         public override object VisitSharpId([NotNull] XyParser.SharpIdContext context)
         {
-            return context.IDPublic().GetText();
+            var sharptype = context.typeBasic().GetText();
+            switch (sharptype)
+            {
+                case I8:
+                    sharptype = "sbyte";
+                    break;
+                case I16:
+                    sharptype = "short";
+                    break;
+                case I32:
+                    sharptype = "int";
+                    break;
+                case I64:
+                    sharptype = "long";
+                    break;
+
+                case U8:
+                    sharptype = "byte";
+                    break;
+                case U16:
+                    sharptype = "ushort";
+                    break;
+                case U32:
+                    sharptype = "uint";
+                    break;
+                case U64:
+                    sharptype = "ulong";
+                    break;
+
+                case F32:
+                    sharptype = "float";
+                    break;
+                case F64:
+                    sharptype = "double";
+                    break;
+
+                case Bool:
+                    sharptype = "bool";
+                    break;
+
+                case Str:
+                    sharptype = "string";
+                    break;
+
+                default:
+                    break;
+            }
+            return sharptype;
         }
 
         public override object VisitBool([NotNull] XyParser.BoolContext context)
