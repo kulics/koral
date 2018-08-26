@@ -135,7 +135,7 @@ E.g:
 ```
 Demo
 {
-    .. System
+    .. System, XyLang\Library
 
     Main ()
     {
