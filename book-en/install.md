@@ -11,9 +11,9 @@ In the future, we will provide executable packages that are compiled for differe
 
 It is now recommended to use the .NET Core runtime to use this language. For ease of use, you can create custom command line commands for use on your own system.
 
-`XyLang` needs to use some of the language library features, so you need to refer to `xylang.dll` in your project to use the library.
+`XyLang` needs to use some of the language library features, so you need to refer to `XyLang.Library.dll` in your project to use the library.
 
 Run Package:
-<https://github.com/kulics/xylang/releases/tag/v0.17>
+<https://github.com/kulics/xylang/releases/tag/v0.17.1>
 
 ### [Next Chapter](basic-grammar.md)
