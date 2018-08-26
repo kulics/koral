@@ -376,7 +376,7 @@ id: op=(IDPublic|IDPrivate)
 |linqKeyword
 |sharpId;
 
-sharpId: '#' IDPublic;
+sharpId: '#' typeBasic;
 
 Terminate : ';';
 
