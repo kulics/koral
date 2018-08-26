@@ -43,6 +43,8 @@ namespace XyLang.Library
                     throw new Exception("not support type");
             }
         }
+        public I8(Str value, I32 fromBase) => v = Convert.ToSByte(value, fromBase);
+        public Str ToBase(I32 fromBase) => Convert.ToString(v, fromBase);
 
         public static implicit operator I8(sbyte it) => new I8(it);
         public static implicit operator sbyte(I8 it) => it.v;
@@ -75,6 +77,8 @@ namespace XyLang.Library
         public bool Equals(I8 b) => b != null && v == b.v;
 
         public override int GetHashCode() => v.GetHashCode();
+
+        public TypeCode GetTypeCode() => v.GetTypeCode();
 
         public override string ToString() => v.ToString();
 
@@ -143,6 +147,8 @@ namespace XyLang.Library
                     throw new Exception("not support type");
             }
         }
+        public I16(Str value, I32 fromBase) => v = Convert.ToInt16(value, fromBase);
+        public Str ToBase(I32 fromBase) => Convert.ToString(v, fromBase);
 
         public static implicit operator I16(short it) => new I16(it);
         public static implicit operator short(I16 it) => it.v;
@@ -175,6 +181,8 @@ namespace XyLang.Library
         public bool Equals(I16 b) => b != null && v == b.v;
 
         public override int GetHashCode() => v.GetHashCode();
+
+        public TypeCode GetTypeCode() => v.GetTypeCode();
 
         public override string ToString() => v.ToString();
 
@@ -242,6 +250,8 @@ namespace XyLang.Library
                     throw new Exception("not support type");
             }
         }
+        public I32(Str value, I32 fromBase) => v = Convert.ToInt32(value, fromBase);
+        public Str ToBase(I32 fromBase) => Convert.ToString(v, fromBase);
 
         public static implicit operator I32(int it) => new I32(it);
         public static implicit operator int(I32 it) => it.v;
@@ -343,6 +353,8 @@ namespace XyLang.Library
                     throw new Exception("not support type");
             }
         }
+        public I64(Str value, I32 fromBase) => v = Convert.ToInt64(value, fromBase);
+        public Str ToBase(I32 fromBase) => Convert.ToString(v, fromBase);
 
         public static implicit operator I64(long it) => new I64(it);
         public static implicit operator long(I64 it) => it.v;
@@ -376,6 +388,8 @@ namespace XyLang.Library
 
         public override int GetHashCode() => v.GetHashCode();
 
+        public TypeCode GetTypeCode() => v.GetTypeCode();
+
         public override string ToString() => v.ToString();
 
         public string ToString(string format) => v.ToString(format);
@@ -403,58 +417,26 @@ namespace XyLang.Library
     }
     public class I8Converter : JsonConverter<I8>
     {
-        public override void WriteJson(JsonWriter writer, I8 value, JsonSerializer serializer)
-        {
-            writer.WriteValue(value.ToString());
-        }
+        public override void WriteJson(JsonWriter writer, I8 value, JsonSerializer serializer) => writer.WriteValue(value);
 
-        public override I8 ReadJson(JsonReader reader, Type objectType, I8 existingValue, bool hasExistingValue, JsonSerializer serializer)
-        {
-            string s = (string)reader.Value;
-
-            return new I8(s);
-        }
+        public override I8 ReadJson(JsonReader reader, Type objectType, I8 existingValue, bool hasExistingValue, JsonSerializer serializer) => new I8((sbyte)reader.Value);
     }
     public class I16Converter : JsonConverter<I16>
     {
-        public override void WriteJson(JsonWriter writer, I16 value, JsonSerializer serializer)
-        {
-            writer.WriteValue(value.ToString());
-        }
+        public override void WriteJson(JsonWriter writer, I16 value, JsonSerializer serializer) => writer.WriteValue(value);
 
-        public override I16 ReadJson(JsonReader reader, Type objectType, I16 existingValue, bool hasExistingValue, JsonSerializer serializer)
-        {
-            string s = (string)reader.Value;
-
-            return new I16(s);
-        }
+        public override I16 ReadJson(JsonReader reader, Type objectType, I16 existingValue, bool hasExistingValue, JsonSerializer serializer) => new I16((short)reader.Value);
     }
-    public class I32Converter: JsonConverter<I32>
+    public class I32Converter : JsonConverter<I32>
     {
-        public override void WriteJson(JsonWriter writer, I32 value, JsonSerializer serializer)
-        {
-            writer.WriteValue(value.ToString());
-        }
+        public override void WriteJson(JsonWriter writer, I32 value, JsonSerializer serializer) => writer.WriteValue(value);
 
-        public override I32 ReadJson(JsonReader reader, Type objectType, I32 existingValue, bool hasExistingValue, JsonSerializer serializer)
-        {
-            string s = (string)reader.Value;
-
-            return new I32(s);
-        }
+        public override I32 ReadJson(JsonReader reader, Type objectType, I32 existingValue, bool hasExistingValue, JsonSerializer serializer) => new I32((int)reader.Value);
     }
     public class I64Converter : JsonConverter<I64>
     {
-        public override void WriteJson(JsonWriter writer, I64 value, JsonSerializer serializer)
-        {
-            writer.WriteValue(value.ToString());
-        }
+        public override void WriteJson(JsonWriter writer, I64 value, JsonSerializer serializer) => writer.WriteValue(value);
 
-        public override I64 ReadJson(JsonReader reader, Type objectType, I64 existingValue, bool hasExistingValue, JsonSerializer serializer)
-        {
-            string s = (string)reader.Value;
-
-            return new I64(s);
-        }
+        public override I64 ReadJson(JsonReader reader, Type objectType, I64 existingValue, bool hasExistingValue, JsonSerializer serializer) => new I64((long)reader.Value);
     }
 }

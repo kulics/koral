@@ -94,6 +94,15 @@ namespace XyLang.Library
         public F32 ToF32() => new F32(v);
         public F64 ToF64() => new F64(v);
 
+        public I8 ToI8FromBase(I32 fromBase) => new I8(v, fromBase);
+        public I16 ToI16FromBase(I32 fromBase) => new I16(v, fromBase);
+        public I32 ToI32FromBase(I32 fromBase) => new I32(v, fromBase);
+        public I64 ToI64FromBase(I32 fromBase) => new I64(v, fromBase);
+        public U8 ToU8FromBase(I32 fromBase) => new U8(v, fromBase);
+        public U16 ToU16FromBase(I32 fromBase) => new U16(v, fromBase);
+        public U32 ToU32FromBase(I32 fromBase) => new U32(v, fromBase);
+        public U64 ToU64FromBase(I32 fromBase) => new U64(v, fromBase);
+
         public int CompareTo(object obj) => v.CompareTo(obj.ToString());
 
         public I32 FirstIndexOf(Str value, StringComparison comparisonType = StringComparison.Ordinal) => v.IndexOf(value, comparisonType);
@@ -111,7 +120,7 @@ namespace XyLang.Library
         public Str Remove(I32 startIndex) => v.Remove(startIndex);
         public Str Remove(I32 startIndex, I32 count) => v.Remove(startIndex, count);
 
-        public Str Replace(Str oldValue, Str newValue) => v.Replace(oldValue, newValue);
+        public Str Replace(Str oldValue, Str newValue) => v.Replace(oldValue ?? "", newValue ?? "");
 
         public bool StartsWith(Str value) => v.StartsWith(value);
         public bool StartsWith(Str value, StringComparison comparisonType) => v.StartsWith(value, comparisonType);
@@ -134,16 +143,8 @@ namespace XyLang.Library
 
     public class StrConverter : JsonConverter<Str>
     {
-        public override void WriteJson(JsonWriter writer, Str value, JsonSerializer serializer)
-        {
-            writer.WriteValue(value.ToString());
-        }
+        public override void WriteJson(JsonWriter writer, Str value, JsonSerializer serializer) => writer.WriteValue(value);
 
-        public override Str ReadJson(JsonReader reader, Type objectType, Str existingValue, bool hasExistingValue, JsonSerializer serializer)
-        {
-            string s = (string)reader.Value;
-
-            return new Str(s);
-        }
+        public override Str ReadJson(JsonReader reader, Type objectType, Str existingValue, bool hasExistingValue, JsonSerializer serializer) => new Str((string)reader.Value);
     }
 }

@@ -43,6 +43,8 @@ namespace XyLang.Library
                     throw new Exception("not support type");
             }
         }
+        public U8(Str value, I32 fromBase) => v = Convert.ToByte(value, fromBase);
+        public Str ToBase(I32 fromBase) => Convert.ToString(v, fromBase);
 
         public static implicit operator U8(byte it) => new U8(it);
         public static implicit operator byte(U8 it) => it.v;
@@ -75,6 +77,8 @@ namespace XyLang.Library
         public bool Equals(U8 b) => b != null && v == b.v;
 
         public override int GetHashCode() => v.GetHashCode();
+
+        public TypeCode GetTypeCode() => v.GetTypeCode();
 
         public override string ToString() => v.ToString();
 
@@ -142,6 +146,8 @@ namespace XyLang.Library
                     throw new Exception("not support type");
             }
         }
+        public U16(Str value, I32 fromBase) => v = Convert.ToUInt16(value, fromBase);
+        public Str ToBase(I32 fromBase) => Convert.ToString(v, fromBase);
 
         public static implicit operator U16(ushort it) => new U16(it);
         public static implicit operator ushort(U16 it) => it.v;
@@ -174,6 +180,8 @@ namespace XyLang.Library
         public bool Equals(U16 b) => b != null && v == b.v;
 
         public override int GetHashCode() => v.GetHashCode();
+
+        public TypeCode GetTypeCode() => v.GetTypeCode();
 
         public override string ToString() => v.ToString();
 
@@ -241,6 +249,8 @@ namespace XyLang.Library
                     throw new Exception("not support type");
             }
         }
+        public U32(Str value, I32 fromBase) => v = Convert.ToUInt32(value, fromBase);
+        public Str ToBase(I32 fromBase) => Convert.ToString(v, fromBase);
 
         public static implicit operator U32(uint it) => new U32(it);
         public static implicit operator uint(U32 it) => it.v;
@@ -273,6 +283,8 @@ namespace XyLang.Library
         public bool Equals(U32 b) => b != null && v == b.v;
 
         public override int GetHashCode() => v.GetHashCode();
+
+        public TypeCode GetTypeCode() => v.GetTypeCode();
 
         public override string ToString() => v.ToString();
 
@@ -340,6 +352,8 @@ namespace XyLang.Library
                     throw new Exception("not support type");
             }
         }
+        public U64(Str value, I32 fromBase) => v = Convert.ToUInt64(value, fromBase);
+        public Str ToBase(I32 fromBase) => Convert.ToString((long)v, fromBase);
 
         public static implicit operator U64(ulong it) => new U64(it);
         public static implicit operator ulong(U64 it) => it.v;
@@ -373,6 +387,8 @@ namespace XyLang.Library
 
         public override int GetHashCode() => v.GetHashCode();
 
+        public TypeCode GetTypeCode() => v.GetTypeCode();
+
         public override string ToString() => v.ToString();
 
         public string ToString(string format) => v.ToString(format);
@@ -400,58 +416,26 @@ namespace XyLang.Library
     }
     public class U8Converter : JsonConverter<U8>
     {
-        public override void WriteJson(JsonWriter writer, U8 value, JsonSerializer serializer)
-        {
-            writer.WriteValue(value.ToString());
-        }
+        public override void WriteJson(JsonWriter writer, U8 value, JsonSerializer serializer) => writer.WriteValue(value);
 
-        public override U8 ReadJson(JsonReader reader, Type objectType, U8 existingValue, bool hasExistingValue, JsonSerializer serializer)
-        {
-            string s = (string)reader.Value;
-
-            return new U8(s);
-        }
+        public override U8 ReadJson(JsonReader reader, Type objectType, U8 existingValue, bool hasExistingValue, JsonSerializer serializer) => new U8((byte)reader.Value);
     }
     public class U16Converter : JsonConverter<U16>
     {
-        public override void WriteJson(JsonWriter writer, U16 value, JsonSerializer serializer)
-        {
-            writer.WriteValue(value.ToString());
-        }
+        public override void WriteJson(JsonWriter writer, U16 value, JsonSerializer serializer) => writer.WriteValue(value);
 
-        public override U16 ReadJson(JsonReader reader, Type objectType, U16 existingValue, bool hasExistingValue, JsonSerializer serializer)
-        {
-            string s = (string)reader.Value;
-
-            return new U16(s);
-        }
+        public override U16 ReadJson(JsonReader reader, Type objectType, U16 existingValue, bool hasExistingValue, JsonSerializer serializer) => new U16((ushort)reader.Value);
     }
     public class U32Converter : JsonConverter<U32>
     {
-        public override void WriteJson(JsonWriter writer, U32 value, JsonSerializer serializer)
-        {
-            writer.WriteValue(value.ToString());
-        }
+        public override void WriteJson(JsonWriter writer, U32 value, JsonSerializer serializer) => writer.WriteValue(value);
 
-        public override U32 ReadJson(JsonReader reader, Type objectType, U32 existingValue, bool hasExistingValue, JsonSerializer serializer)
-        {
-            string s = (string)reader.Value;
-
-            return new U32(s);
-        }
+        public override U32 ReadJson(JsonReader reader, Type objectType, U32 existingValue, bool hasExistingValue, JsonSerializer serializer) => new U32((uint)reader.Value);
     }
     public class U64Converter : JsonConverter<U64>
     {
-        public override void WriteJson(JsonWriter writer, U64 value, JsonSerializer serializer)
-        {
-            writer.WriteValue(value.ToString());
-        }
+        public override void WriteJson(JsonWriter writer, U64 value, JsonSerializer serializer) => writer.WriteValue(value);
 
-        public override U64 ReadJson(JsonReader reader, Type objectType, U64 existingValue, bool hasExistingValue, JsonSerializer serializer)
-        {
-            string s = (string)reader.Value;
-
-            return new U64(s);
-        }
+        public override U64 ReadJson(JsonReader reader, Type objectType, U64 existingValue, bool hasExistingValue, JsonSerializer serializer) => new U64((ulong)reader.Value);
     }
 }
