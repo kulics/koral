@@ -1,7 +1,21 @@
-﻿using Antlr4.Runtime.Misc;
+﻿using Antlr4.Runtime;
+using Antlr4.Runtime.Misc;
+using System;
 
 namespace XyLang.Compile
 {
+    internal class XyLangErrorListener : BaseErrorListener
+    {
+        public override void SyntaxError([NotNull] IRecognizer recognizer, [Nullable] IToken offendingSymbol, int line, int charPositionInLine, [NotNull] string msg, [Nullable] RecognitionException e)
+        {
+            base.SyntaxError(recognizer, offendingSymbol, line, charPositionInLine, msg, e);
+            Console.WriteLine("------Syntax Error------");
+            Console.WriteLine($"Line: {line}  Column: {charPositionInLine}");
+            Console.WriteLine($"OffendingSymbol: {offendingSymbol.Text}");
+            Console.WriteLine($"Message: {msg}");
+        }
+    }
+
     internal partial class XyLangVisitor : XyBaseVisitor<object>
     {
         public string FileName { get; set; }
@@ -36,7 +50,6 @@ namespace XyLang.Compile
         private const string BlockRight = "}";
 
         private const string Task = "System.Threading.Tasks.Task";
-
 
         public override object VisitProgram([NotNull] XyParser.ProgramContext context)
         {
