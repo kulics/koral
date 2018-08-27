@@ -78,6 +78,13 @@ namespace XyLang.Compile
             {
                 data = "var"
             };
+            // 提前退出
+            if (context.sharpId() != null)
+            {
+                r.permission = "public";
+                r.text += Visit(context.sharpId());
+                return r;
+            }
             if (context.typeBasic() != null)
             {
                 r.permission = "public";
@@ -88,19 +95,10 @@ namespace XyLang.Compile
                 r.permission = "public";
                 r.text += Visit(context.linqKeyword());
             }
-            else if (context.sharpId() != null)
-            {
-                r.permission = "public";
-                r.text += Visit(context.sharpId());
-            }
             else if (context.op.Type == XyParser.IDPublic)
             {
                 r.permission = "public";
                 r.text += context.op.Text;
-                if (keywords.IndexOf(r.text) >= 0)
-                {
-                    r.text = "@" + r.text;
-                }
             }
             else if (context.op.Type == XyParser.IDPrivate)
             {
@@ -108,6 +106,12 @@ namespace XyLang.Compile
                 r.text += context.op.Text;
             }
 
+            if (keywords.Exists(t => t == r.text))
+            {
+                r.text = "@" + r.text;
+            }
+
+            var b = r.text;
             return r;
         }
 

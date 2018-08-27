@@ -220,6 +220,37 @@ namespace XyLang.Compile
             return obj;
         }
 
+        public override object VisitCheckSingleStatement([NotNull] XyParser.CheckSingleStatementContext context)
+        {
+            var obj = "";
+            obj += $"try {BlockLeft} {Wrap}";
+            obj += Visit(context.checkSingleSupportStatement());
+            obj += BlockRight + Wrap;
+            obj += Visit(context.checkSingleErrorStatement());
+            return obj;
+        }
+
+        public override object VisitCheckSingleErrorStatement([NotNull] XyParser.CheckSingleErrorStatementContext context)
+        {
+            var obj = "";
+            var ID = "it";
+            if (context.id() != null)
+            {
+                ID = (Visit(context.id()) as Result).text;
+            }
+
+            var Type = "Exception";
+            if (context.type() != null)
+            {
+                Type = (string)Visit(context.type());
+            }
+
+            obj += $"catch( {Type} {ID} ){Wrap + BlockLeft + Wrap} ";
+            obj += ProcessFunctionSupport(context.functionSupportStatement());
+            obj += BlockRight;
+            return obj;
+        }
+
         public override object VisitReportStatement([NotNull] XyParser.ReportStatementContext context)
         {
             var obj = "";
