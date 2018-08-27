@@ -56,7 +56,6 @@ namespace XyLang.Compile
                         var lexer = new XyLexer(stream);
                         var tokens = new CommonTokenStream(lexer);
                         var parser = new XyParser(tokens) { BuildParseTree = true };
-                        parser.ErrorHandler = new BailErrorStrategy();
                         parser.RemoveErrorListeners();
                         parser.AddErrorListener(new XyLangErrorListener());
 

@@ -121,6 +121,7 @@ functionSupportStatement:
 | loopJumpStatement
 | checkDeferStatement
 | checkStatement
+| checkSingleStatement
 | reportStatement
 | functionStatement
 | variableStatement
@@ -160,6 +161,13 @@ checkDeferStatement: CheckSub BlockLeft (functionSupportStatement)* BlockRight T
 checkStatement: Check BlockLeft (functionSupportStatement)* BlockRight checkErrorStatement+ Terminate?;
 // 错误处理
 checkErrorStatement:id (Declared type)? BlockLeft (functionSupportStatement)* BlockRight;
+// 单语句处理
+checkSingleStatement: checkSingleSupportStatement call Check checkSingleErrorStatement Terminate?;
+// 单处理支持语句
+checkSingleSupportStatement: assignStatement | expressionStatement;
+// 错误处理
+checkSingleErrorStatement:(id)? (Declared type)? BlockLeft (functionSupportStatement)* BlockRight;
+
 // 报告错误
 reportStatement: Check call '(' (expression)? ')' Terminate?;
 // 迭代器
