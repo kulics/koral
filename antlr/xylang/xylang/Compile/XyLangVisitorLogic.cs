@@ -194,43 +194,50 @@ namespace XyLang.Compile
         public override object VisitCheckStatement([NotNull] XyParser.CheckStatementContext context)
         {
             var obj = "";
-            obj += $"try {BlockLeft} {Wrap}";
-            obj += ProcessFunctionSupport(context.functionSupportStatement());
-            obj += BlockRight + Wrap;
-            foreach (var item in context.checkErrorStatement())
+            if (context.expression() != null)
             {
-                obj += Visit(item) + Wrap;
+                obj += $"try {BlockLeft} {Wrap}";
+                obj += Visit(context.expression());
             }
+            else
+            {
+                var v = (variableExpression)Visit(context.variableExpression());
+                if (v.type != null)
+                {
+                    obj += $"{v.type} {v.id}{Terminate}";
+                }
+                obj += $"try {BlockLeft} {Wrap}";
+                obj += $"{v.id} = {v.expr}{Terminate}";
+            }
+
+            obj += BlockRight + Wrap;
+            obj += Visit(context.checkErrorStatement());
             return obj;
+        }
+
+        private class variableExpression
+        {
+            public string type;
+            public string id;
+            public string expr;
+        }
+
+        public override object VisitVariableExpression([NotNull] XyParser.VariableExpressionContext context)
+        {
+            var v = new variableExpression();
+            if (context.type() != null)
+            {
+                v.type = (string)Visit(context.type());
+            }
+
+            var r1 = (Result)Visit(context.expression(0));
+            var r2 = (Result)Visit(context.expression(1));
+            v.id = r1.text;
+            v.expr = r2.text;
+            return v;
         }
 
         public override object VisitCheckErrorStatement([NotNull] XyParser.CheckErrorStatementContext context)
-        {
-            var obj = "";
-            var ID = (Result)Visit(context.id());
-            var Type = "Exception";
-            if (context.type() != null)
-            {
-                Type = (string)Visit(context.type());
-            }
-
-            obj += $"catch( {Type} {ID.text} ){Wrap + BlockLeft + Wrap} ";
-            obj += ProcessFunctionSupport(context.functionSupportStatement());
-            obj += BlockRight;
-            return obj;
-        }
-
-        public override object VisitCheckSingleStatement([NotNull] XyParser.CheckSingleStatementContext context)
-        {
-            var obj = "";
-            obj += $"try {BlockLeft} {Wrap}";
-            obj += Visit(context.checkSingleSupportStatement());
-            obj += BlockRight + Wrap;
-            obj += Visit(context.checkSingleErrorStatement());
-            return obj;
-        }
-
-        public override object VisitCheckSingleErrorStatement([NotNull] XyParser.CheckSingleErrorStatementContext context)
         {
             var obj = "";
             var ID = "it";

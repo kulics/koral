@@ -169,6 +169,10 @@ namespace XyLang.Compile
                     sharptype = "string";
                     break;
 
+                case Any:
+                    sharptype = "object";
+                    break;
+
                 default:
                     break;
             }

@@ -121,7 +121,6 @@ functionSupportStatement:
 | loopJumpStatement
 | checkDeferStatement
 | checkStatement
-| checkSingleStatement
 | reportStatement
 | functionStatement
 | variableStatement
@@ -156,17 +155,13 @@ loopInfiniteStatement:Loop BlockLeft (functionSupportStatement)* BlockRight Term
 // 跳出循环
 loopJumpStatement:ArrowLeft Loop Terminate?;
 // 看守
-checkDeferStatement: CheckSub BlockLeft (functionSupportStatement)* BlockRight Terminate?;
+checkDeferStatement: Check BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 检查
-checkStatement: Check BlockLeft (functionSupportStatement)* BlockRight checkErrorStatement+ Terminate?;
+checkStatement: (variableExpression | expression) call Check checkErrorStatement Terminate?;
+// 变量表达式
+variableExpression: expression (Declared type)? Assign expression;
 // 错误处理
-checkErrorStatement:id (Declared type)? BlockLeft (functionSupportStatement)* BlockRight;
-// 单语句处理
-checkSingleStatement: checkSingleSupportStatement call Check checkSingleErrorStatement Terminate?;
-// 单处理支持语句
-checkSingleSupportStatement: assignStatement | expressionStatement;
-// 错误处理
-checkSingleErrorStatement:(id)? (Declared type)? BlockLeft (functionSupportStatement)* BlockRight;
+checkErrorStatement:(id)? (Declared type)? BlockLeft (functionSupportStatement)* BlockRight;
 
 // 报告错误
 reportStatement: Check call '(' (expression)? ')' Terminate?;
@@ -408,7 +403,6 @@ Judge : '?';
 
 Loop : '@';
 
-CheckSub : '~!';
 Check : '!';
 
 Control : '^';
