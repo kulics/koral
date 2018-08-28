@@ -17,10 +17,10 @@ namespace XyLang.Compile
         {
             base.SyntaxError(recognizer, offendingSymbol, line, charPositionInLine, msg, e);
             Console.WriteLine("------Syntax Error------");
+            Console.WriteLine($"File: {FileDir}");
             Console.WriteLine($"Line: {line}  Column: {charPositionInLine}");
             Console.WriteLine($"OffendingSymbol: {offendingSymbol.Text}");
             Console.WriteLine($"Message: {msg}");
-            Console.WriteLine($"File At: {FileDir}");
         }
     }
 
