@@ -75,13 +75,13 @@ E.g:
 ```
 This can be thought of as a while while for other languages.
 ## Jump Out
-So how to jump out of infinite loop? We can use the auxiliary symbol `~@` to jump out.
+So how to jump out of infinite loop? We can use the `<- @` statement to jump out.
 
 E.g:
 ```
 @
 {
-    ~@  // jump out
+    <- @  // jump out
 }
 ```
 In addition to the infinite loop, jump out can also be used in other cycles.

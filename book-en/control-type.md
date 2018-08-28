@@ -13,12 +13,12 @@ Number :I32
 This defines a control data with no additional methods, and it has a built-in default control method.
 
 ## Get Operation
-If we want to set a get operation, we can add `^` and extra code block definitions later.
+If we want to set a get operation, we can add `.Ctrl {}` later to define.
 
 E.g:
 ```
 Number :I32
-^get    // means get, equivalent to getter in other languages
+.get    // means get, equivalent to getter in other languages
 {
     <- (7)  // only returns 7
 }
@@ -33,7 +33,7 @@ E.g:
 ```
 Number :I32
 ...
-^set    // means set, equivalent to setter in other languages
+.set    // means set, equivalent to setter in other languages
 {
     // ? ? ? Who should give the value? ? ?
 }
@@ -46,24 +46,25 @@ E.g:
 _number := 0
 
 Number :I32
-^set
+...
+.set
 {
     _number = value  // value represents the value of the input
 }
 ```
 
-Note that this control data has only one set method, then it only supports set operation, and the caller cannot get its value.
+Note that the setting method cannot exist separately and must exist at the same time as the getter method.
 
 A complete example of reading and writing is as follows:
 ```
 _number := 0
 
 Number :I32
-^get
+.get
 {
     <- (_number)
 }
-^set
+.set
 {
     _number = value  // value represents the value of the input
 }
@@ -90,11 +91,11 @@ Demo
     }
 
     a : I32
-    ^get { <- (3) }
+    .get { <- (3) }
     
     b := 0
     c : I32
-    ^get { <- (b) }
-    ^set { b = value }
+    .get { <- (b) }
+    .set { b = value }
 }
 ```
