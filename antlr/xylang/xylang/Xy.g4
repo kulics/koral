@@ -303,7 +303,7 @@ empty : Null call '(' type ')'; // 类型空初始化
 
 plusMinus : add expression;
 
-negate : '~' expression;
+negate : wave expression;
 
 linq: '`' (linqItem)+  '`';
 
@@ -412,8 +412,6 @@ CheckSub : '~!';
 Check : '!';
 
 Control : '^';
-
-Wave : '~';
 
 TypeAny : 'Any';
 TypeI8: 'I8';
