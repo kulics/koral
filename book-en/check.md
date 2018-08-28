@@ -60,7 +60,21 @@ e : IOException
     ...
 }
 ```
+Sometimes we need to check one by one, is there a simpler expression?
+Yes, for assignment statements and expression statements, we can check later with `.! id:type { }`.
+`id` can be omitted, the default is `it`.  
+ `:type` can also be omitted, the default is `Exception`.
 
+E.g:
+```
+FuncA.().! err {
+     !.(err)
+}
+a : I32
+a = FuncB.().! {
+     !.(it)
+}
+```
 ## Check Defer
 If we have a function that we hope can be handled regardless of whether the program is normal or abnormal, such as the release of critical resources, we can use the check defer feature.
 

@@ -1,7 +1,21 @@
-﻿using Antlr4.Runtime.Misc;
+﻿using Antlr4.Runtime;
+using Antlr4.Runtime.Misc;
+using System;
 
 namespace XyLang.Compile
 {
+    internal class XyLangErrorListener : BaseErrorListener
+    {
+        public override void SyntaxError([NotNull] IRecognizer recognizer, [Nullable] IToken offendingSymbol, int line, int charPositionInLine, [NotNull] string msg, [Nullable] RecognitionException e)
+        {
+            base.SyntaxError(recognizer, offendingSymbol, line, charPositionInLine, msg, e);
+            Console.WriteLine("------Syntax Error------");
+            Console.WriteLine($"Line: {line}  Column: {charPositionInLine}");
+            Console.WriteLine($"OffendingSymbol: {offendingSymbol.Text}");
+            Console.WriteLine($"Message: {msg}");
+        }
+    }
+
     internal partial class XyLangVisitor : XyBaseVisitor<object>
     {
         public string FileName { get; set; }
@@ -37,7 +51,6 @@ namespace XyLang.Compile
 
         private const string Task = "System.Threading.Tasks.Task";
 
-
         public override object VisitProgram([NotNull] XyParser.ProgramContext context)
         {
             var list = context.statement();
@@ -65,6 +78,13 @@ namespace XyLang.Compile
             {
                 data = "var"
             };
+            // 提前退出
+            if (context.sharpId() != null)
+            {
+                r.permission = "public";
+                r.text += Visit(context.sharpId());
+                return r;
+            }
             if (context.typeBasic() != null)
             {
                 r.permission = "public";
@@ -75,19 +95,10 @@ namespace XyLang.Compile
                 r.permission = "public";
                 r.text += Visit(context.linqKeyword());
             }
-            else if (context.sharpId() != null)
-            {
-                r.permission = "public";
-                r.text += Visit(context.sharpId());
-            }
             else if (context.op.Type == XyParser.IDPublic)
             {
                 r.permission = "public";
                 r.text += context.op.Text;
-                if (keywords.IndexOf(r.text) >= 0)
-                {
-                    r.text = "@" + r.text;
-                }
             }
             else if (context.op.Type == XyParser.IDPrivate)
             {
@@ -95,6 +106,12 @@ namespace XyLang.Compile
                 r.text += context.op.Text;
             }
 
+            if (keywords.Exists(t => t == r.text))
+            {
+                r.text = "@" + r.text;
+            }
+
+            var b = r.text;
             return r;
         }
 
