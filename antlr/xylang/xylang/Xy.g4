@@ -97,7 +97,7 @@ implementControlStatement:(annotation)? id (Define expression|Declared type (Ass
 // 函数实现
 implementFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 事件实现
-implementEventStatement: id '#!' nameSpaceItem Terminate?;
+implementEventStatement: id '#Event' nameSpaceItem Terminate?;
 // 函数
 functionStatement:id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 返回
