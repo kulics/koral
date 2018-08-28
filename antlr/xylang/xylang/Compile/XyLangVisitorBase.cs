@@ -6,6 +6,13 @@ namespace XyLang.Compile
 {
     internal class XyLangErrorListener : BaseErrorListener
     {
+        string FileDir { get; set; }
+
+        public XyLangErrorListener(string FileDir)
+        {
+            this.FileDir = FileDir;
+        }
+
         public override void SyntaxError([NotNull] IRecognizer recognizer, [Nullable] IToken offendingSymbol, int line, int charPositionInLine, [NotNull] string msg, [Nullable] RecognitionException e)
         {
             base.SyntaxError(recognizer, offendingSymbol, line, charPositionInLine, msg, e);
@@ -13,6 +20,7 @@ namespace XyLang.Compile
             Console.WriteLine($"Line: {line}  Column: {charPositionInLine}");
             Console.WriteLine($"OffendingSymbol: {offendingSymbol.Text}");
             Console.WriteLine($"Message: {msg}");
+            Console.WriteLine($"File At: {FileDir}");
         }
     }
 
