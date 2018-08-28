@@ -37,7 +37,7 @@ nspackageVariableStatement:(annotation)? expression (Define expression|Declared 
 // 无构造包常量
 nspackageInvariableStatement:(annotation)? expression (Declared type '==' | ':==') expression Terminate?;
 // 定义子方法
-nspackageControlSubStatement: Control id (BlockLeft (functionSupportStatement)* BlockRight)?;
+nspackageControlSubStatement: id '(' ')' (BlockLeft (functionSupportStatement)* BlockRight)?;
 // 无构造包函数
 nspackageFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 // 定义包
@@ -65,7 +65,7 @@ packageOverrideFunctionStatement:(annotation)? Self id parameterClauseIn ArrowRi
 // 定义变量
 packageVariableStatement:(annotation)? expression (Define expression|Declared type (Assign expression)?) (packageControlSubStatement)* Terminate?;
 // 定义子方法
-packageControlSubStatement: Control id (BlockLeft (functionSupportStatement)* BlockRight)?;
+packageControlSubStatement: id '(' ')' (BlockLeft (functionSupportStatement)* BlockRight)?;
 // 包扩展
 packageExtensionStatement: id (templateDefine)? '+=' BlockLeft (packageExtensionSupportStatement)* BlockRight Terminate?;
 // 包扩展支持的语句
@@ -81,7 +81,7 @@ protocolStatement
 // 定义控制
 protocolControlStatement:(annotation)? id Declared type (protocolControlSubStatement)* Terminate?;
 // 定义子方法
-protocolControlSubStatement: Control id;
+protocolControlSubStatement: id '(' ')';
 // 函数
 protocolFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 协议实现支持的语句
@@ -97,7 +97,7 @@ implementControlStatement:(annotation)? id (Define expression|Declared type (Ass
 // 函数实现
 implementFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 事件实现
-implementEventStatement: id '^!' nameSpaceItem Terminate?;
+implementEventStatement: id '#!' nameSpaceItem Terminate?;
 // 函数
 functionStatement:id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 返回
@@ -404,8 +404,6 @@ Judge : '?';
 Loop : '@';
 
 Check : '!';
-
-Control : '^';
 
 TypeAny : 'Any';
 TypeI8: 'I8';
