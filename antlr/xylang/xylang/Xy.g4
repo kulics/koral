@@ -154,7 +154,7 @@ loopCaseStatement:Loop expression BlockLeft (functionSupportStatement)* BlockRig
 // 无限循环
 loopInfiniteStatement:Loop BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 跳出循环
-loopJumpStatement:LoopSub Terminate?;
+loopJumpStatement:ArrowLeft Loop Terminate?;
 // 看守
 checkDeferStatement: CheckSub BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 检查
@@ -406,7 +406,6 @@ FlowLeft : '<~';
 
 Judge : '?';
 
-LoopSub : '~@';
 Loop : '@';
 
 CheckSub : '~!';
