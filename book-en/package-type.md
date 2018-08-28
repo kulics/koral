@@ -267,17 +267,13 @@ Demo
         B := 0
     }
 
-    PKG {x:Str,y:I32,z:S}->
+    PKG {x:Str, ..Y:I32, ..Z:S}->
     {
         X := ""
-        Y := 0
-        Z := S.{}
 
         ..
         {
             X = x
-            Y = y
-            Z = z
         }
     }
 
