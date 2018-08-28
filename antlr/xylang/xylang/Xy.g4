@@ -37,7 +37,7 @@ nspackageVariableStatement:(annotation)? expression (Define expression|Declared 
 // 无构造包常量
 nspackageInvariableStatement:(annotation)? expression (Declared type '==' | ':==') expression Terminate?;
 // 定义子方法
-nspackageControlSubStatement: call id '(' ')' (BlockLeft (functionSupportStatement)* BlockRight)?;
+nspackageControlSubStatement: call id BlockLeft (functionSupportStatement)* BlockRight;
 // 无构造包函数
 nspackageFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 // 定义包
@@ -65,7 +65,7 @@ packageOverrideFunctionStatement:(annotation)? Self id parameterClauseIn ArrowRi
 // 定义变量
 packageVariableStatement:(annotation)? expression (Define expression|Declared type (Assign expression)?) (packageControlSubStatement)* Terminate?;
 // 定义子方法
-packageControlSubStatement: call id '(' ')' (BlockLeft (functionSupportStatement)* BlockRight)?;
+packageControlSubStatement: call id BlockLeft (functionSupportStatement)* BlockRight;
 // 包扩展
 packageExtensionStatement: id (templateDefine)? '+=' BlockLeft (packageExtensionSupportStatement)* BlockRight Terminate?;
 // 包扩展支持的语句
@@ -81,7 +81,7 @@ protocolStatement
 // 定义控制
 protocolControlStatement:(annotation)? id Declared type (protocolControlSubStatement)* Terminate?;
 // 定义子方法
-protocolControlSubStatement: call id '(' ')';
+protocolControlSubStatement: call id BlockLeft BlockRight;
 // 函数
 protocolFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 协议实现支持的语句
