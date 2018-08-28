@@ -404,7 +404,6 @@ ArrowLeft : '<-';
 FlowRight : '~>';
 FlowLeft : '<~';
 
-JudgeSub : '~?';
 Judge : '?';
 
 LoopSub : '~@';
@@ -413,16 +412,7 @@ Loop : '@';
 CheckSub : '~!';
 Check : '!';
 
-FunctionSub : '~$';
-Function : '$';
-
 Control : '^';
-
-PackageSub : '~#';
-Package : '#';
-
-ProtocolSub : '~%';
-Protocol : '%';
 
 Wave : '~';
 
