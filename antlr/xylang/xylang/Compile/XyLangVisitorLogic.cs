@@ -197,7 +197,7 @@ namespace XyLang.Compile
             if (context.expression() != null)
             {
                 obj += $"try {BlockLeft} {Wrap}";
-                obj += Visit(context.expression());
+                obj += (Visit(context.expression())as Result).text + Terminate;
             }
             else
             {
