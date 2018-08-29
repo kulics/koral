@@ -44,7 +44,7 @@ HelloWorld // export namespace
             _
             {
                 print.(" over 10")
-                ~@
+                <- @
             }
         }
     }
