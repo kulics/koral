@@ -126,7 +126,7 @@ Because packet types can be converted to protocol types, the original type of da
 
 But sometimes we need to get the original type of data to handle, we can use type judgment to help us accomplish this.
 
-We can use `value.?:type` To judge the type of data, using `value.!:type` To convert the data to our type.
+We can use `value.?:type` To judge the type of data, using `value.?=type` To convert the data to our type.
 
 E.g:
 ```
@@ -136,7 +136,7 @@ func (hw :HomeWork)->()
     ? hw.?:ChineseStudent 
     {
         // convert to chinese student data
-        cs := hw.!:ChineseStudent
+        cs := hw.?=ChineseStudent
     }
 }
 ```
@@ -182,7 +182,7 @@ Demo
         a.Do.()
         ? a.?:B 
         {
-            Console.WriteLine.( a.!:B.Y )
+            Console.WriteLine.( a.?=B.Y )
         }
     }
 }
