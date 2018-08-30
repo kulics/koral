@@ -43,7 +43,7 @@ nspackageFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn 
 // 定义包
 packageStatement:(annotation)? id (templateDefine)? parameterClausePackage ArrowRight (extend)? BlockLeft (packageSupportStatement)* BlockRight;
 // 继承
-extend: type call '{' expressionList? '}';
+extend: type '{' expressionList? '}';
 // 入参
 parameterClausePackage : '{' parameterPackage? (',' parameterPackage)*  '}'  ;
 // 构造参数
