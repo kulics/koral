@@ -14,6 +14,6 @@ It is now recommended to use the .NET Core runtime to use this language. For eas
 `XyLang` needs to use some of the language library features, so you need to refer to `XyLang.Library.dll` in your project to use the library.
 
 Run Package:
-<https://github.com/kulics/xylang/releases/tag/v0.18>
+<https://github.com/kulics/xylang/releases/tag/v0.18.1>
 
 ### [Next Chapter](basic-grammar.md)
