@@ -505,7 +505,7 @@ NamedShape +=
     }
 }
 
-Square {..sideLength: F64, name: Str}-> NamedShape.{name}
+Square {..sideLength: F64, name: Str}-> NamedShape {name}
 {
     .. 
     {
