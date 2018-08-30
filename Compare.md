@@ -809,8 +809,8 @@ someObjects.@
 {
     it.? movie:Movie
     {
-        print.(/"Movie: '{movie.name}', " +
-            "dir. {movie.director}"/)
+        print.(/"Movie: '{movie.name}', "/ +
+            /"dir. {movie.director}"/)
     }
 }
 ```
@@ -821,7 +821,7 @@ foreach (var current in someObjects)
     if (current is Movie movie) 
     {
         Console.WriteLine($"Movie: '{movie.name}', " +
-            "dir. {movie.director}")
+            $"dir. {movie.director}")
     }
 }
 ```
