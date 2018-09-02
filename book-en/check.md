@@ -48,6 +48,69 @@ Func.().! {
      !.(it)
 }
 ```
+## Fragment
+If we come across something that always needs to be declared repeatedly, such as a continuous check, it always returns the same content.
+
+E.g:
+```
+Do1.().! {
+    Log.(it.msg)
+    !.(it)
+}
+Do2.().! {
+    Log.(it.msg)
+    !.(it)
+}
+Do3.().! {
+    Log.(it.msg)
+    !.(it)
+}
+```
+
+This way of writing is very tedious and worthless.
+
+We can use fragment statements to optimize this content, using `id () {}` to declare the fragment statement, the preceding parentheses are arguments.
+
+E.g:
+```
+CheckError (it:Exception)
+{
+    Log.(it.msg)
+    !.(it)
+}
+```
+
+Declaring a fragment statement does not produce any code. The fragment statement is only populated into the location when it is called, which is equivalent to automating the generation of code, which is different from the function.
+
+Use `-> id` to use the fragment statement, now we can handle the above example.
+
+E.g:
+```
+Do1.().! -> CheckError
+Do2.().! -> CheckError
+Do3.().! -> CheckError
+```
+
+This seems to be much easier.
+
+Fragment statements can greatly reduce the amount of rewritten code, making our work easier, not only for handling errors, but also for general logic.
+
+E.g:
+```
+a := 0
+Handle ()
+{
+    a *= a
+    Print.(a)
+}
+a += 1
+-> Handle
+a += 5
+-> Handle
+a += 7
+-> Handle
+```
+
 ## Check Defer
 If we have a function that we hope can be handled regardless of whether the program is normal or abnormal, such as the release of critical resources, we can use the check defer feature.
 
