@@ -70,7 +70,7 @@ namespace XyLang.Compile
 
         public override object VisitParameterClauseIn([NotNull] XyParser.ParameterClauseInContext context)
         {
-            var obj = "( ";
+            var obj = "(";
 
             var lastType = "";
             var temp = new List<string>();
@@ -100,7 +100,7 @@ namespace XyLang.Compile
                 }
             }
 
-            obj += " )";
+            obj += ")";
             return obj;
         }
 
@@ -206,11 +206,14 @@ namespace XyLang.Compile
             }
         }
 
+        private Stack<Handle> stackHandle = new Stack<Handle>();
+
         public string ProcessFunctionSupport(XyParser.FunctionSupportStatementContext[] items)
         {
             var obj = "";
             var content = "";
             var lazy = new List<Lazy>();
+            var handleCount = 0;
             foreach (var item in items)
             {
                 if (item.GetChild(0) is XyParser.CheckDeferStatementContext)
@@ -222,6 +225,11 @@ namespace XyLang.Compile
                 {
                     lazy.Add(new Lazy(false, "}"));
                     content += $"using ({(string)Visit(item)}) {{ {Wrap}";
+                }
+                else if (item.GetChild(0) is XyParser.HandleStatementContext)
+                {
+                    stackHandle.Push(Visit(item) as Handle);
+                    handleCount += 1;
                 }
                 else
                 {
@@ -243,6 +251,11 @@ namespace XyLang.Compile
                 }
             }
             obj += content;
+            // 移除栈
+            for (int i = 0; i < handleCount; i++)
+            {
+                stackHandle.Pop();
+            }
             return obj;
         }
     }

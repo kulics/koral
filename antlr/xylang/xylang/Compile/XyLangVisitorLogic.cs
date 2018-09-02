@@ -197,7 +197,7 @@ namespace XyLang.Compile
             if (context.expression() != null)
             {
                 obj += $"try {BlockLeft} {Wrap}";
-                obj += (Visit(context.expression())as Result).text + Terminate;
+                obj += (Visit(context.expression()) as Result).text + Terminate;
             }
             else
             {
@@ -211,7 +211,32 @@ namespace XyLang.Compile
             }
 
             obj += BlockRight + Wrap;
-            obj += Visit(context.checkErrorStatement());
+            if (context.checkErrorStatement() != null)
+            {
+                obj += Visit(context.checkErrorStatement()) + Terminate + Wrap;
+            }
+            else
+            {
+                var id = (Visit(context.id()) as Result).text;
+                foreach (var item in stackHandle)
+                {
+                    if (item.id == id)
+                    {
+                        obj += "catch";
+                        if (item.param == "()")
+                        {
+                            obj += "(Exception it)";
+                        }
+                        else
+                        {
+                            obj += item.param;
+                        }
+                        obj += $"{Wrap}{{{item.text}}}{Terminate}{Wrap}";
+                        break;
+                    }
+                }
+            }
+
             return obj;
         }
 
@@ -273,6 +298,47 @@ namespace XyLang.Compile
         {
             var obj = "";
             obj += ProcessFunctionSupport(context.functionSupportStatement());
+            return obj;
+        }
+
+        private class Handle
+        {
+            public string id;
+            public string param;
+            public string text;
+        }
+
+        public override object VisitHandleStatement([NotNull] XyParser.HandleStatementContext context)
+        {
+            var res = new Handle
+            {
+                id = (Visit(context.id()) as Result).text,
+                param = (Visit(context.parameterClauseIn()) as string)
+            };
+            foreach (var item in context.functionSupportStatement())
+            {
+                res.text += (string)Visit(item);
+            }
+            return res;
+        }
+
+        public override object VisitCallHandleStatement([NotNull] XyParser.CallHandleStatementContext context)
+        {
+            var id = (Visit(context.id()) as Result).text;
+            var obj = "";
+            foreach (var item in stackHandle)
+            {
+                if (item.id == id)
+                {
+                    obj = item.text;
+                    break;
+                }
+            }
+            if (obj == "")
+            {
+                throw new System.Exception("did not find handle");
+            }
+
             return obj;
         }
 

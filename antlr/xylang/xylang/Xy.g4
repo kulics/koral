@@ -122,6 +122,8 @@ functionSupportStatement:
 | checkDeferStatement
 | checkStatement
 | reportStatement
+| handleStatement
+| callHandleStatement
 | functionStatement
 | variableStatement
 | variableDeclaredStatement
@@ -157,7 +159,7 @@ loopJumpStatement:ArrowLeft Loop Terminate?;
 // 看守
 checkDeferStatement: Check BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 检查
-checkStatement: (variableExpression | expression) call Check checkErrorStatement Terminate?;
+checkStatement: (variableExpression | expression) call Check (ArrowRight id | checkErrorStatement) Terminate?;
 // 变量表达式
 variableExpression: expression (Declared type)? Assign expression;
 // 错误处理
@@ -165,6 +167,10 @@ checkErrorStatement:(id)? (Declared type)? BlockLeft (functionSupportStatement)*
 
 // 报告错误
 reportStatement: Check call '(' (expression)? ')' Terminate?;
+// 片段处理
+handleStatement: id parameterClauseIn BlockLeft (functionSupportStatement)* BlockRight Terminate?;
+// 调用处理
+callHandleStatement:ArrowRight id Terminate?;
 // 迭代器
 iteratorStatement: '[' expression op=('<<'|'>>') expression Terminate expression ']' | '[' expression op=('<<'|'>>') expression ']';
 
