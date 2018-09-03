@@ -168,7 +168,7 @@ checkErrorStatement:(id)? (Declared type)? BlockLeft (functionSupportStatement)*
 // 报告错误
 reportStatement: Check call '(' (expression)? ')' Terminate?;
 // 片段处理
-handleStatement: id parameterClauseIn BlockLeft (functionSupportStatement)* BlockRight Terminate?;
+handleStatement: id parameterClauseIn ArrowRight BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 调用处理
 callHandleStatement:ArrowRight id Terminate?;
 // 迭代器

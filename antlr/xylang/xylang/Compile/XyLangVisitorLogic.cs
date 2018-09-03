@@ -336,7 +336,7 @@ namespace XyLang.Compile
             }
             if (obj == "")
             {
-                throw new System.Exception("did not find handle");
+                throw new System.Exception($"did not find handle {id}");
             }
 
             return obj;

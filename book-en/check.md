@@ -69,11 +69,11 @@ Do3.().! {
 
 This way of writing is very tedious and worthless.
 
-We can use fragment statements to optimize this content, using `id () {}` to declare the fragment statement, the preceding parentheses are arguments.
+We can use fragment statements to optimize this content, using `id () -> {}` to declare the fragment statement, the preceding parentheses are arguments.
 
 E.g:
 ```
-CheckError (it:Exception)
+CheckError (it:Exception) ->
 {
     Log.(it.msg)
     !.(it)
@@ -98,7 +98,7 @@ Fragment statements can greatly reduce the amount of rewritten code, making our 
 E.g:
 ```
 a := 0
-Handle ()
+Handle () ->
 {
     a *= a
     Print.(a)
