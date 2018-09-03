@@ -222,15 +222,7 @@ namespace XyLang.Compile
                 {
                     if (item.id == id)
                     {
-                        obj += "catch";
-                        if (item.param == "()")
-                        {
-                            obj += "(Exception it)";
-                        }
-                        else
-                        {
-                            obj += item.param;
-                        }
+                        obj += $"catch {item.param}";
                         obj += $"{Wrap}{{{item.text}}}{Terminate}{Wrap}";
                         break;
                     }
