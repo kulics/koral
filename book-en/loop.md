@@ -24,6 +24,16 @@ Arr.@
 }
 ```
 
+If we need to fetch the index and value at the same time, we can replace `id` with the `index -> value` syntax, which is valid for both the list and the dictionary.
+
+E.g:
+```
+arr.@ i -> v
+{
+     Console.WriteLine.(/"{i}:{v}"/)
+}
+```
+
 This can be thought of as a `foreach` structure relative to other languages.
 ## Iterator Loop
 There are times when we do not necessarily have a collection, but we just need to take numbers like `0` to `100`. We have an iterator syntax to accomplish such a task.
