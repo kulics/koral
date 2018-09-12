@@ -149,7 +149,7 @@ judgeElseStatement:Judge BlockLeft (functionSupportStatement)* BlockRight;
 // 循环
 loopStatement:iteratorStatement call Loop (id)? BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 集合循环
-loopEachStatement:expression call Loop (id)? BlockLeft (functionSupportStatement)* BlockRight Terminate?;
+loopEachStatement:expression call Loop ((id ArrowRight)? id)? BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 条件循环
 loopCaseStatement:Loop expression BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 无限循环
