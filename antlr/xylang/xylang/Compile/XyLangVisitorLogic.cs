@@ -71,13 +71,20 @@ namespace XyLang.Compile
         public override object VisitLoopEachStatement([NotNull] XyParser.LoopEachStatementContext context)
         {
             var obj = "";
+            var arr = (Visit(context.expression()) as Result);
+            var target = arr.text;
             var id = "it";
-            if (context.id() != null)
+            if (context.id().Length == 2)
             {
-                id = ((Result)Visit(context.id())).text;
+                target += ".ForEachWithIndex()";
+                id = $"({((Result)Visit(context.id(0))).text},{((Result)Visit(context.id(1))).text})";
             }
-            var arr = (Result)Visit(context.expression());
-            obj += $"foreach (var {id} in {arr.text})";
+            else if (context.id().Length == 1)
+            {
+                id = ((Result)Visit(context.id(0))).text;
+            }
+
+            obj += $"foreach (var {id} in {target})";
             obj += $"{Wrap} {BlockLeft} {Wrap}";
             obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += $"{BlockRight} {Terminate} {Wrap}";

@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace XyLang.Library
 {
@@ -177,5 +179,11 @@ namespace XyLang.Library
         public static U16 ToU16FromBase(this string it, I32 fromBase) => new U16(it, fromBase);
         public static U32 ToU32FromBase(this string it, I32 fromBase) => new U32(it, fromBase);
         public static U64 ToU64FromBase(this string it, I32 fromBase) => new U64(it, fromBase);
+
+        public static IEnumerable<(int index, T item)> ForEachWithIndex<T>(this IEnumerable<T> self)
+   => self.Select((item, index) => (index, item));
+
+        public static IEnumerable<(TKey, TValue)> ForEachWithIndex<TKey, TValue>(this IEnumerable<KeyValuePair<TKey, TValue>> self)
+   => self.Select((item) => (item.Key, item.Value));
     }
 }
