@@ -62,6 +62,13 @@ namespace XyLang.Library
         public static bool operator ==(U8 a, U8 b) => a.v == b.v;
         public static bool operator !=(U8 a, U8 b) => a.v != b.v;
 
+        public U8 AND(U8 it) => new U8(v & it);
+        public U8 OR(U8 it) => new U8(v | it);
+        public U8 XOR(U8 it) => new U8(v ^ it);
+        public U8 NOT() => new U8(~v);
+        public U8 LFT(int it) => new U8(v << it);
+        public U8 RHT(int it) => new U8(v >> it);
+
         public override bool Equals(object o)
         {
             if (o is U8 b)
@@ -164,6 +171,13 @@ namespace XyLang.Library
         public static bool operator >=(U16 a, U16 b) => a.v >= b.v;
         public static bool operator ==(U16 a, U16 b) => a.v == b.v;
         public static bool operator !=(U16 a, U16 b) => a.v != b.v;
+
+        public U16 AND(U16 it) => new U16(v & it);
+        public U16 OR(U16 it) => new U16(v | it);
+        public U16 XOR(U16 it) => new U16(v ^ it);
+        public U16 NOT() => new U16(~v);
+        public U16 LFT(int it) => new U16(v << it);
+        public U16 RHT(int it) => new U16(v >> it);
 
         public override bool Equals(object o)
         {
@@ -268,6 +282,13 @@ namespace XyLang.Library
         public static bool operator ==(U32 a, U32 b) => a.v == b.v;
         public static bool operator !=(U32 a, U32 b) => a.v != b.v;
 
+        public U32 AND(U32 it) => new U32(v & it);
+        public U32 OR(U32 it) => new U32(v | it);
+        public U32 XOR(U32 it) => new U32(v ^ it);
+        public U32 NOT() => new U32(~v);
+        public U32 LFT(int it) => new U32(v << it);
+        public U32 RHT(int it) => new U32(v >> it);
+
         public override bool Equals(object o)
         {
             if (o is U32 b)
@@ -370,6 +391,13 @@ namespace XyLang.Library
         public static bool operator >=(U64 a, U64 b) => a.v >= b.v;
         public static bool operator ==(U64 a, U64 b) => a.v == b.v;
         public static bool operator !=(U64 a, U64 b) => a.v != b.v;
+
+        public U64 AND(U64 it) => new U64(v & it);
+        public U64 OR(U64 it) => new U64(v | it);
+        public U64 XOR(U64 it) => new U64(v ^ it);
+        public U64 NOT() => new U64(~v);
+        public U64 LFT(int it) => new U64(v << it);
+        public U64 RHT(int it) => new U64(v >> it);
 
         public override bool Equals(object o)
         {
