@@ -62,6 +62,13 @@ namespace XyLang.Library
         public static bool operator ==(I8 a, I8 b) => a.v == b.v;
         public static bool operator !=(I8 a, I8 b) => a.v != b.v;
 
+        public I8 AND(I8 it) => new I8(v & it);
+        public I8 OR(I8 it) => new I8(v | it);
+        public I8 XOR(I8 it) => new I8(v ^ it);
+        public I8 NOT() => new I8(~v);
+        public I8 LFT(int it) => new I8(v << it);
+        public I8 RHT(int it) => new I8(v >> it);
+
         public override bool Equals(object o)
         {
             if (o is I8 b)
@@ -166,6 +173,13 @@ namespace XyLang.Library
         public static bool operator ==(I16 a, I16 b) => a.v == b.v;
         public static bool operator !=(I16 a, I16 b) => a.v != b.v;
 
+        public I16 AND(I16 it) => new I16(v & it);
+        public I16 OR(I16 it) => new I16(v | it);
+        public I16 XOR(I16 it) => new I16(v ^ it);
+        public I16 NOT() => new I16(~v);
+        public I16 LFT(int it) => new I16(v << it);
+        public I16 RHT(int it) => new I16(v >> it);
+
         public override bool Equals(object o)
         {
             if (o is I16 b)
@@ -269,6 +283,13 @@ namespace XyLang.Library
         public static bool operator ==(I32 a, I32 b) => a.v == b.v;
         public static bool operator !=(I32 a, I32 b) => a.v != b.v;
 
+        public I32 AND(I32 it) => new I32(v & it);
+        public I32 OR(I32 it) => new I32(v | it);
+        public I32 XOR(I32 it) => new I32(v ^ it);
+        public I32 NOT() => new I32(~v);
+        public I32 LFT(int it) => new I32(v << it);
+        public I32 RHT(int it) => new I32(v >> it);
+
         public override bool Equals(object o)
         {
             if (o is I32 b)
@@ -371,6 +392,13 @@ namespace XyLang.Library
         public static bool operator >=(I64 a, I64 b) => a.v >= b.v;
         public static bool operator ==(I64 a, I64 b) => a.v == b.v;
         public static bool operator !=(I64 a, I64 b) => a.v != b.v;
+
+        public I64 AND(I64 it) => new I64(v & it);
+        public I64 OR(I64 it) => new I64(v | it);
+        public I64 XOR(I64 it) => new I64(v ^ it);
+        public I64 NOT() => new I64(~v);
+        public I64 LFT(int it) => new I64(v << it);
+        public I64 RHT(int it) => new I64(v >> it);
 
         public override bool Equals(object o)
         {

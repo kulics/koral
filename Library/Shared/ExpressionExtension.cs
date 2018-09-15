@@ -21,6 +21,12 @@ namespace XyLang.Library
         public static F32 ToF32(this sbyte it) => new F32(it);
         public static F64 ToF64(this sbyte it) => new F64(it);
 
+        public static I8 AND(this sbyte it, sbyte v) => new I8(it & v);
+        public static I8 OR(this sbyte it, sbyte v) => new I8(it | v);
+        public static I8 XOR(this sbyte it, sbyte v) => new I8(it ^ v);
+        public static I8 NOT(this sbyte it) => new I8(~it);
+        public static I8 LFT(this sbyte it, int v) => new I8(it << v);
+        public static I8 RHT(this sbyte it, int v) => new I8(it >> v);
         // byte
         public static Str ToStr(this byte it) => it.ToString();
         public static Str ToStr(this byte it, Str format) => it.ToString(format);
@@ -35,6 +41,13 @@ namespace XyLang.Library
         public static U64 ToU64(this byte it) => new U64(it);
         public static F32 ToF32(this byte it) => new F32(it);
         public static F64 ToF64(this byte it) => new F64(it);
+
+        public static U8 AND(this byte it, byte v) => new U8(it & v);
+        public static U8 OR(this byte it, byte v) => new U8(it | v);
+        public static U8 XOR(this byte it, byte v) => new U8(it ^ v);
+        public static U8 NOT(this byte it) => new U8(~it);
+        public static U8 LFT(this byte it, int v) => new U8(it << v);
+        public static U8 RHT(this byte it, int v) => new U8(it >> v);
 
         // short
         public static Str ToStr(this short it) => it.ToString();
@@ -51,6 +64,13 @@ namespace XyLang.Library
         public static F32 ToF32(this short it) => new F32(it);
         public static F64 ToF64(this short it) => new F64(it);
 
+        public static I16 AND(this short it, short v) => new I16(it & v);
+        public static I16 OR(this short it, short v) => new I16(it | v);
+        public static I16 XOR(this short it, short v) => new I16(it ^ v);
+        public static I16 NOT(this short it) => new I16(~it);
+        public static I16 LFT(this short it, int v) => new I16(it << v);
+        public static I16 RHT(this short it, int v) => new I16(it >> v);
+
         // ushort
         public static Str ToStr(this ushort it) => it.ToString();
         public static Str ToStr(this ushort it, Str format) => it.ToString(format);
@@ -65,6 +85,13 @@ namespace XyLang.Library
         public static U64 ToU64(this ushort it) => new U64(it);
         public static F32 ToF32(this ushort it) => new F32(it);
         public static F64 ToF64(this ushort it) => new F64(it);
+
+        public static U16 AND(this ushort it, ushort v) => new U16(it & v);
+        public static U16 OR(this ushort it, ushort v) => new U16(it | v);
+        public static U16 XOR(this ushort it, ushort v) => new U16(it ^ v);
+        public static U16 NOT(this ushort it) => new U16(~it);
+        public static U16 LFT(this ushort it, int v) => new U16(it << v);
+        public static U16 RHT(this ushort it, int v) => new U16(it >> v);
 
         // int
         public static Str ToStr(this int it) => it.ToString();
@@ -81,6 +108,13 @@ namespace XyLang.Library
         public static F32 ToF32(this int it) => new F32(it);
         public static F64 ToF64(this int it) => new F64(it);
 
+        public static I32 AND(this int it, int v) => new I32(it & v);
+        public static I32 OR(this int it, int v) => new I32(it | v);
+        public static I32 XOR(this int it, int v) => new I32(it ^ v);
+        public static I32 NOT(this int it) => new I32(~it);
+        public static I32 LFT(this int it, int v) => new I32(it << v);
+        public static I32 RHT(this int it, int v) => new I32(it >> v);
+
         // uint
         public static Str ToStr(this uint it) => it.ToString();
         public static Str ToStr(this uint it, Str format) => it.ToString(format);
@@ -95,6 +129,13 @@ namespace XyLang.Library
         public static U64 ToU64(this uint it) => new U64(it);
         public static F32 ToF32(this uint it) => new F32(it);
         public static F64 ToF64(this uint it) => new F64(it);
+
+        public static U32 AND(this uint it, uint v) => new U32(it & v);
+        public static U32 OR(this uint it, uint v) => new U32(it | v);
+        public static U32 XOR(this uint it, uint v) => new U32(it ^ v);
+        public static U32 NOT(this uint it) => new U32(~it);
+        public static U32 LFT(this uint it, int v) => new U32(it << v);
+        public static U32 RHT(this uint it, int v) => new U32(it >> v);
 
         // long
         public static Str ToStr(this long it) => it.ToString();
@@ -111,6 +152,13 @@ namespace XyLang.Library
         public static F32 ToF32(this long it) => new F32(it);
         public static F64 ToF64(this long it) => new F64(it);
 
+        public static I64 AND(this long it, long v) => new I64(it & v);
+        public static I64 OR(this long it, long v) => new I64(it | v);
+        public static I64 XOR(this long it, long v) => new I64(it ^ v);
+        public static I64 NOT(this long it) => new I64(~it);
+        public static I64 LFT(this long it, int v) => new I64(it << v);
+        public static I64 RHT(this long it, int v) => new I64(it >> v);
+
         // ulong
         public static Str ToStr(this ulong it) => it.ToString();
         public static Str ToStr(this ulong it, Str format) => it.ToString(format);
@@ -125,6 +173,13 @@ namespace XyLang.Library
         public static U64 ToU64(this ulong it) => new U64(it);
         public static F32 ToF32(this ulong it) => new F32(it);
         public static F64 ToF64(this ulong it) => new F64(it);
+
+        public static U64 AND(this ulong it, ulong v) => new U64(it & v);
+        public static U64 OR(this ulong it, ulong v) => new U64(it | v);
+        public static U64 XOR(this ulong it, ulong v) => new U64(it ^ v);
+        public static U64 NOT(this ulong it) => new U64(~it);
+        public static U64 LFT(this ulong it, int v) => new U64(it << v);
+        public static U64 RHT(this ulong it, int v) => new U64(it >> v);
 
         // float
         public static Str ToStr(this float it) => it.ToString();
