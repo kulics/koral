@@ -172,9 +172,9 @@ Student {name, number: Str}->
         ..Name = name
         ..Number = number
         // calculate the class
-        ..Class = GetSubText(number, 2, 3)
+        ..Class = GetSubText.(number, 2, 3)
         // calculate the grade
-        ..Grade = GetSubText(number, 0, 1)
+        ..Grade = GetSubText.(number, 0, 1)
     }
 }
 ```
