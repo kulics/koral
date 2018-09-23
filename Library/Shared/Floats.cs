@@ -15,31 +15,23 @@ namespace XyLang.Library
                 case short _:
                 case int _:
                 case long _:
-                case I8 _:
-                case I16 _:
-                case I32 _:
-                case I64 _:
 
                 case byte _:
                 case ushort _:
                 case uint _:
                 case ulong _:
-                case U8 _:
-                case U16 _:
-                case U32 _:
-                case U64 _:
 
                 case float _:
                 case double _:
-                case F32 _:
-                case F64 _:
 
                 case char _:
-                case Chr _:
 
                 case string _:
-                case Str _:
                     v = Convert.ToSingle(o);
+                    break;
+
+                case IXyValue i:
+                    v = i.ToF32();
                     break;
                 default:
                     throw new Exception("not support type");
@@ -84,6 +76,7 @@ namespace XyLang.Library
         public string ToString(string format) => v.ToString(format);
 
         public float ToValue() => v;
+        public object ToAny() => v;
     }
 
     public class F64 : IXyValue
@@ -98,31 +91,23 @@ namespace XyLang.Library
                 case short _:
                 case int _:
                 case long _:
-                case I8 _:
-                case I16 _:
-                case I32 _:
-                case I64 _:
 
                 case byte _:
                 case ushort _:
                 case uint _:
                 case ulong _:
-                case U8 _:
-                case U16 _:
-                case U32 _:
-                case U64 _:
 
                 case float _:
                 case double _:
-                case F32 _:
-                case F64 _:
 
                 case char _:
-                case Chr _:
 
                 case string _:
-                case Str _:
                     v = Convert.ToDouble(o);
+                    break;
+
+                case IXyValue i:
+                    v = i.ToF64();
                     break;
                 default:
                     throw new Exception("not support type");
@@ -167,6 +152,7 @@ namespace XyLang.Library
         public string ToString(string format) => v.ToString(format);
 
         public double ToValue() => v;
+        public object ToAny() => v;
     }
     public class F32Converter : JsonConverter<F32>
     {

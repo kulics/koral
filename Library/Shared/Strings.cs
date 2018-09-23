@@ -19,7 +19,7 @@ namespace XyLang.Library
 
         public Chr this[int index] { get => v[index]; }
 
-        public IEnumerator<Chr> GetEnumerator() => GetEnumerator();
+        public IEnumerator<Chr> GetEnumerator() => new StrEnumerator(this);
 
         IEnumerator IEnumerable.GetEnumerator() => new StrEnumerator(this);
 
@@ -155,6 +155,7 @@ namespace XyLang.Library
         public Str TrimStart() => v.TrimStart();
 
         public string ToValue() => v;
+        public object ToAny() => v;
     }
 
     [JsonConverter(typeof(ChrConverter))]
@@ -170,31 +171,23 @@ namespace XyLang.Library
                 case short _:
                 case int _:
                 case long _:
-                case I8 _:
-                case I16 _:
-                case I32 _:
-                case I64 _:
 
                 case byte _:
                 case ushort _:
                 case uint _:
                 case ulong _:
-                case U8 _:
-                case U16 _:
-                case U32 _:
-                case U64 _:
 
                 case float _:
                 case double _:
-                case F32 _:
-                case F64 _:
 
                 case char _:
-                case Chr _:
 
                 case string _:
-                case Str _:
                     v = Convert.ToChar(o);
+                    break;
+
+                case IXyValue i:
+                    v = i.ToChr();
                     break;
                 default:
                     throw new Exception("not support type");
@@ -228,6 +221,9 @@ namespace XyLang.Library
 
         public override string ToString() => v.ToString();
         public string ToString(string format) => v.ToString();
+
+        public char ToValue() => v;
+        public object ToAny() => v;
     }
 
     public class StrConverter : JsonConverter<Str>

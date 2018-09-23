@@ -4,7 +4,11 @@ using System.Linq;
 
 namespace XyLang.Library
 {
-    public interface IXyValue { string ToString(string format); }
+    public interface IXyValue 
+    { 
+        string ToString(string format);
+        object ToAny();
+    }
 
     public static class ExpressionExtension
     {
@@ -12,16 +16,17 @@ namespace XyLang.Library
         public static Str ToStr(this object it) => it.ToString();
         // IXyValue
         public static Str ToStr(this IXyValue it, Str format) => it.ToString(format);
-        public static I8 ToI8(this IXyValue it) => new I8(it);
-        public static I16 ToI16(this IXyValue it) => new I16(it);
-        public static I32 ToI32(this IXyValue it) => new I32(it);
-        public static I64 ToI64(this IXyValue it) => new I64(it);
-        public static U8 ToU8(this IXyValue it) => new U8(it);
-        public static U16 ToU16(this IXyValue it) => new U16(it);
-        public static U32 ToU32(this IXyValue it) => new U32(it);
-        public static U64 ToU64(this IXyValue it) => new U64(it);
-        public static F32 ToF32(this IXyValue it) => new F32(it);
-        public static F64 ToF64(this IXyValue it) => new F64(it);
+        public static Chr ToChr(this IXyValue it) => new Chr(it.ToAny());
+        public static I8 ToI8(this IXyValue it) => new I8(it.ToAny());
+        public static I16 ToI16(this IXyValue it) => new I16(it.ToAny());
+        public static I32 ToI32(this IXyValue it) => new I32(it.ToAny());
+        public static I64 ToI64(this IXyValue it) => new I64(it.ToAny());
+        public static U8 ToU8(this IXyValue it) => new U8(it.ToAny());
+        public static U16 ToU16(this IXyValue it) => new U16(it.ToAny());
+        public static U32 ToU32(this IXyValue it) => new U32(it.ToAny());
+        public static U64 ToU64(this IXyValue it) => new U64(it.ToAny());
+        public static F32 ToF32(this IXyValue it) => new F32(it.ToAny());
+        public static F64 ToF64(this IXyValue it) => new F64(it.ToAny());
         // sbyte
         public static Str ToStr(this sbyte it, Str format) => it.ToString(format);
         public static Str ToBase(this sbyte it, I32 fromBase) => Convert.ToString(it, fromBase);
