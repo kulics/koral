@@ -16,31 +16,23 @@ namespace XyLang.Library
                 case short _:
                 case int _:
                 case long _:
-                case I8 _:
-                case I16 _:
-                case I32 _:
-                case I64 _:
 
                 case byte _:
                 case ushort _:
                 case uint _:
                 case ulong _:
-                case U8 _:
-                case U16 _:
-                case U32 _:
-                case U64 _:
 
                 case float _:
                 case double _:
-                case F32 _:
-                case F64 _:
 
                 case char _:
-                case Chr _:
 
                 case string _:
-                case Str _:
                     v = Convert.ToSByte(o);
+                    break;
+
+                case IXyValue i:
+                    v = i.ToI8();
                     break;
                 default:
                     throw new Exception("not support type");
@@ -94,6 +86,7 @@ namespace XyLang.Library
         public string ToString(string format) => v.ToString(format);
 
         public sbyte ToValue() => v;
+        public object ToAny() => v;
     }
 
     [JsonConverter(typeof(I16Converter))]
@@ -109,31 +102,23 @@ namespace XyLang.Library
                 case short _:
                 case int _:
                 case long _:
-                case I8 _:
-                case I16 _:
-                case I32 _:
-                case I64 _:
 
                 case byte _:
                 case ushort _:
                 case uint _:
                 case ulong _:
-                case U8 _:
-                case U16 _:
-                case U32 _:
-                case U64 _:
 
                 case float _:
                 case double _:
-                case F32 _:
-                case F64 _:
 
                 case char _:
-                case Chr _:
 
                 case string _:
-                case Str _:
                     v = Convert.ToInt16(o);
+                    break;
+
+                case IXyValue i:
+                    v = i.ToI16();
                     break;
                 default:
                     throw new Exception("not support type");
@@ -187,6 +172,7 @@ namespace XyLang.Library
         public string ToString(string format) => v.ToString(format);
 
         public short ToValue() => v;
+        public object ToAny() => v;
     }
 
     [JsonConverter(typeof(I32Converter))]
@@ -202,31 +188,23 @@ namespace XyLang.Library
                 case short _:
                 case int _:
                 case long _:
-                case I8 _:
-                case I16 _:
-                case I32 _:
-                case I64 _:
 
                 case byte _:
                 case ushort _:
                 case uint _:
                 case ulong _:
-                case U8 _:
-                case U16 _:
-                case U32 _:
-                case U64 _:
 
                 case float _:
                 case double _:
-                case F32 _:
-                case F64 _:
 
                 case char _:
-                case Chr _:
 
                 case string _:
-                case Str _:
                     v = Convert.ToInt32(o);
+                    break;
+
+                case IXyValue i:
+                    v = i.ToI32();
                     break;
                 default:
                     throw new Exception("not support type");
@@ -280,6 +258,7 @@ namespace XyLang.Library
         public string ToString(string format) => v.ToString(format);
 
         public int ToValue() => v;
+        public object ToAny() => v;
     }
 
     [JsonConverter(typeof(I64Converter))]
@@ -295,31 +274,23 @@ namespace XyLang.Library
                 case short _:
                 case int _:
                 case long _:
-                case I8 _:
-                case I16 _:
-                case I32 _:
-                case I64 _:
 
                 case byte _:
                 case ushort _:
                 case uint _:
                 case ulong _:
-                case U8 _:
-                case U16 _:
-                case U32 _:
-                case U64 _:
 
                 case float _:
                 case double _:
-                case F32 _:
-                case F64 _:
 
                 case char _:
-                case Chr _:
 
                 case string _:
-                case Str _:
                     v = Convert.ToInt64(o);
+                    break;
+
+                case IXyValue i:
+                    v = i.ToI64();
                     break;
                 default:
                     throw new Exception("not support type");
@@ -373,6 +344,7 @@ namespace XyLang.Library
         public string ToString(string format) => v.ToString(format);
 
         public long ToValue() => v;
+        public object ToAny() => v;
     }
     public class I8Converter : JsonConverter<I8>
     {
