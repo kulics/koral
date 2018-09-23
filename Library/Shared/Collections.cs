@@ -10,8 +10,6 @@ namespace XyLang.Library
         public Lst(IEnumerable<T> collection) : base(collection) { }
         public Lst(I32 capacity) : base(capacity) { }
 
-        public Str ToStr() => ToString();
-
         public static Lst<T> operator +(Lst<T> L, T R)
         {
             var list = new Lst<T>();
@@ -87,8 +85,6 @@ namespace XyLang.Library
         public Dic(int capacity) : base(capacity) { }
         public Dic(IDictionary<TKey, TValue> dictionary, IEqualityComparer<TKey> comparer) : base(dictionary, comparer) { }
         public Dic(int capacity, IEqualityComparer<TKey> comparer) : base(capacity, comparer) { }
-
-        public Str ToStr() => ToString();
 
         public static Dic<TKey, TValue> operator +(Dic<TKey, TValue> L, Dic<TKey, TValue> R)
         {
