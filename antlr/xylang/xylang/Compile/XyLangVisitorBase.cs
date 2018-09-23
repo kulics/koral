@@ -50,6 +50,7 @@ namespace XyLang.Compile
         private const string True = "true";
         private const string False = "false";
 
+        private const string Chr = "Chr";
         private const string Str = "Str";
         private const string List = "Lst";
         private const string Dictionary = "Dic";
@@ -165,6 +166,9 @@ namespace XyLang.Compile
                     sharptype = "bool";
                     break;
 
+                case Chr:
+                    sharptype = "char";
+                    break;
                 case Str:
                     sharptype = "string";
                     break;

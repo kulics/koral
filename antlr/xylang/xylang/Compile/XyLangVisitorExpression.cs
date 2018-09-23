@@ -725,6 +725,11 @@ namespace XyLang.Compile
                 r.data = Str;
                 r.text = context.Text().GetText();
             }
+            else if (context.t.Type == XyParser.Char)
+            {
+                r.data = Chr;
+                r.text = context.Char().GetText();
+            }
             else if (context.t.Type == XyParser.True)
             {
                 r.data = Bool;

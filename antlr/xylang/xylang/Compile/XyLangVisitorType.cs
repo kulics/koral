@@ -206,6 +206,9 @@ namespace XyLang.Compile
                 case XyParser.TypeF64:
                     obj = F64;
                     break;
+                case XyParser.TypeChr:
+                    obj = Chr;
+                    break;
                 case XyParser.TypeStr:
                     obj = Str;
                     break;

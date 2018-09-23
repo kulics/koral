@@ -318,6 +318,7 @@ markText
 | t=Float
 | t=Integer
 | t=Text
+| t=Char
 | t=True
 | t=False
 | t=Null
@@ -364,6 +365,7 @@ t=TypeAny
 | t=TypeU64
 | t=TypeF32
 | t=TypeF64
+| t=TypeChr
 | t=TypeStr
 | t=TypeBool
 ;
@@ -422,6 +424,7 @@ TypeI64: 'I64';
 TypeU64: 'U64';
 TypeF32: 'F32';
 TypeF64: 'F64';
+TypeChr: 'Chr';
 TypeStr: 'Str';
 TypeBool: 'Bool';
 True: 'true';
@@ -432,6 +435,7 @@ Float: Integer '.' DIGIT+ ; // 浮点数
 Integer : DIGIT+ ; // 整数
 fragment DIGIT : [0-9] ;             // 单个数字
 Text: '"' (~[\\\r\n])*? '"'; // 文本
+Char: '\'' (~[\\\r\n])*? '\''; // 单字符
 IDPrivate : '_' [a-zA-Z0-9_]+; // 私有标识符
 IDPublic  : [a-zA-Z] [a-zA-Z0-9_]*; // 公有标识符
 Discard : '_'; // 匿名变量
