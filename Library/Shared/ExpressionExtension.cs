@@ -4,10 +4,25 @@ using System.Linq;
 
 namespace XyLang.Library
 {
+    public interface IXyValue { string ToString(string format); }
+
     public static class ExpressionExtension
     {
+        // object 
+        public static Str ToStr(this object it) => it.ToString();
+        // IXyValue
+        public static Str ToStr(this IXyValue it, Str format) => it.ToString(format);
+        public static I8 ToI8(this IXyValue it) => new I8(it);
+        public static I16 ToI16(this IXyValue it) => new I16(it);
+        public static I32 ToI32(this IXyValue it) => new I32(it);
+        public static I64 ToI64(this IXyValue it) => new I64(it);
+        public static U8 ToU8(this IXyValue it) => new U8(it);
+        public static U16 ToU16(this IXyValue it) => new U16(it);
+        public static U32 ToU32(this IXyValue it) => new U32(it);
+        public static U64 ToU64(this IXyValue it) => new U64(it);
+        public static F32 ToF32(this IXyValue it) => new F32(it);
+        public static F64 ToF64(this IXyValue it) => new F64(it);
         // sbyte
-        public static Str ToStr(this sbyte it) => it.ToString();
         public static Str ToStr(this sbyte it, Str format) => it.ToString(format);
         public static Str ToBase(this sbyte it, I32 fromBase) => Convert.ToString(it, fromBase);
         public static I8 ToI8(this sbyte it) => new I8(it);
@@ -28,7 +43,6 @@ namespace XyLang.Library
         public static I8 LFT(this sbyte it, int v) => new I8(it << v);
         public static I8 RHT(this sbyte it, int v) => new I8(it >> v);
         // byte
-        public static Str ToStr(this byte it) => it.ToString();
         public static Str ToStr(this byte it, Str format) => it.ToString(format);
         public static Str ToBase(this byte it, I32 fromBase) => Convert.ToString(it, fromBase);
         public static I8 ToI8(this byte it) => new I8(it);
@@ -50,7 +64,6 @@ namespace XyLang.Library
         public static U8 RHT(this byte it, int v) => new U8(it >> v);
 
         // short
-        public static Str ToStr(this short it) => it.ToString();
         public static Str ToStr(this short it, Str format) => it.ToString(format);
         public static Str ToBase(this short it, I32 fromBase) => Convert.ToString(it, fromBase);
         public static I8 ToI8(this short it) => new I8(it);
@@ -72,7 +85,6 @@ namespace XyLang.Library
         public static I16 RHT(this short it, int v) => new I16(it >> v);
 
         // ushort
-        public static Str ToStr(this ushort it) => it.ToString();
         public static Str ToStr(this ushort it, Str format) => it.ToString(format);
         public static Str ToBase(this ushort it, I32 fromBase) => Convert.ToString(it, fromBase);
         public static I8 ToI8(this ushort it) => new I8(it);
@@ -94,7 +106,6 @@ namespace XyLang.Library
         public static U16 RHT(this ushort it, int v) => new U16(it >> v);
 
         // int
-        public static Str ToStr(this int it) => it.ToString();
         public static Str ToStr(this int it, Str format) => it.ToString(format);
         public static Str ToBase(this int it, I32 fromBase) => Convert.ToString(it, fromBase);
         public static I8 ToI8(this int it) => new I8(it);
@@ -116,7 +127,6 @@ namespace XyLang.Library
         public static I32 RHT(this int it, int v) => new I32(it >> v);
 
         // uint
-        public static Str ToStr(this uint it) => it.ToString();
         public static Str ToStr(this uint it, Str format) => it.ToString(format);
         public static Str ToBase(this uint it, I32 fromBase) => Convert.ToString(it, fromBase);
         public static I8 ToI8(this uint it) => new I8(it);
@@ -138,7 +148,6 @@ namespace XyLang.Library
         public static U32 RHT(this uint it, int v) => new U32(it >> v);
 
         // long
-        public static Str ToStr(this long it) => it.ToString();
         public static Str ToStr(this long it, Str format) => it.ToString(format);
         public static Str ToBase(this long it, I32 fromBase) => Convert.ToString(it, fromBase);
         public static I8 ToI8(this long it) => new I8(it);
@@ -160,7 +169,6 @@ namespace XyLang.Library
         public static I64 RHT(this long it, int v) => new I64(it >> v);
 
         // ulong
-        public static Str ToStr(this ulong it) => it.ToString();
         public static Str ToStr(this ulong it, Str format) => it.ToString(format);
         public static Str ToBase(this ulong it, I32 fromBase) => Convert.ToString((long)it, fromBase);
         public static I8 ToI8(this ulong it) => new I8(it);
@@ -182,7 +190,6 @@ namespace XyLang.Library
         public static U64 RHT(this ulong it, int v) => new U64(it >> v);
 
         // float
-        public static Str ToStr(this float it) => it.ToString();
         public static Str ToStr(this float it, Str format) => it.ToString(format);
         public static I8 ToI8(this float it) => new I8(it);
         public static I16 ToI16(this float it) => new I16(it);
@@ -196,7 +203,6 @@ namespace XyLang.Library
         public static F64 ToF64(this float it) => new F64(it);
 
         // double
-        public static Str ToStr(this double it) => it.ToString();
         public static Str ToStr(this double it, Str format) => it.ToString(format);
         public static I8 ToI8(this double it) => new I8(it);
         public static I16 ToI16(this double it) => new I16(it);
@@ -209,12 +215,39 @@ namespace XyLang.Library
         public static F32 ToF32(this double it) => new F32(it);
         public static F64 ToF64(this double it) => new F64(it);
 
+        // Char
+        public static Str ToStr(this char it, Str format) => it.ToString();
+        public static I8 ToI8(this char it) => new I8(it);
+        public static I16 ToI16(this char it) => new I16(it);
+        public static I32 ToI32(this char it) => new I32(it);
+        public static I64 ToI64(this char it) => new I64(it);
+        public static U8 ToU8(this char it) => new U8(it);
+        public static U16 ToU16(this char it) => new U16(it);
+        public static U32 ToU32(this char it) => new U32(it);
+        public static U64 ToU64(this char it) => new U64(it);
+        public static F32 ToF32(this char it) => new F32(it);
+        public static F64 ToF64(this char it) => new F64(it);
+
+        public static Chr ToLower(this char it) => char.ToLower(it);
+        public static Chr ToUpper(this char it) => char.ToUpper(it);
+
+        public static bool IsLower(this char it) => char.IsLower(it);
+        public static bool IsUpper(this char it) => char.IsUpper(it);
+
+        public static bool IsLetter(this char it) => char.IsLetter(it);
+        public static bool IsDigit(this char it) => char.IsDigit(it);
+        public static bool IsLetterOrDigit(this char it) => char.IsLetterOrDigit(it);
+
+        public static bool IsNumber(this char it) => char.IsNumber(it);
+        public static bool IsSymbol(this char it) => char.IsSymbol(it);
+        public static bool IsWhiteSpace(this char it) => char.IsWhiteSpace(it);
+        public static bool IsControl(this char it) => char.IsControl(it);
+
         // String
         public static bool NotEmpty(this string it) => !it.IsEmpty();
         public static bool IsEmpty(this string it) => string.IsNullOrEmpty(it);
 
-        public static Str ToStr(this string it) => it.ToString();
-        public static Str ToStr(this string it, Str format) => it.ToString();
+        public static Str ToStr(this string it, Str format) => it;
         public static I8 ToI8(this string it) => new I8(it);
         public static I16 ToI16(this string it) => new I16(it);
         public static I32 ToI32(this string it) => new I32(it);

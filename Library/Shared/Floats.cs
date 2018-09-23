@@ -3,7 +3,7 @@ using System;
 
 namespace XyLang.Library
 {
-    public class F32
+    public class F32 : IXyValue
     {
         private float v;
         public F32() { }
@@ -33,6 +33,9 @@ namespace XyLang.Library
                 case double _:
                 case F32 _:
                 case F64 _:
+
+                case char _:
+                case Chr _:
 
                 case string _:
                 case Str _:
@@ -78,32 +81,12 @@ namespace XyLang.Library
         public TypeCode GetTypeCode() => v.GetTypeCode();
 
         public override string ToString() => v.ToString();
-
         public string ToString(string format) => v.ToString(format);
-
-#if !UNITY_FLASH
-        public string ToString(IFormatProvider provider) => v.ToString(provider);
-
-        public string ToString(string format, IFormatProvider provider) => v.ToString(format, provider);
-#endif
-        public Str ToStr() => ToString();
-        public Str ToStr(Str format) => ToString(format);
-
-        public I8 ToI8() => new I8(v);
-        public I16 ToI16() => new I16(v);
-        public I32 ToI32() => new I32(v);
-        public I64 ToI64() => new I64(v);
-        public U8 ToU8() => new U8(v);
-        public U16 ToU16() => new U16(v);
-        public U32 ToU32() => new U32(v);
-        public U64 ToU64() => new U64(v);
-        public F32 ToF32() => new F32(v);
-        public F64 ToF64() => new F64(v);
 
         public float ToValue() => v;
     }
 
-    public class F64
+    public class F64 : IXyValue
     {
         private double v;
         public F64() { }
@@ -133,6 +116,9 @@ namespace XyLang.Library
                 case double _:
                 case F32 _:
                 case F64 _:
+
+                case char _:
+                case Chr _:
 
                 case string _:
                 case Str _:
@@ -178,40 +164,18 @@ namespace XyLang.Library
         public TypeCode GetTypeCode() => v.GetTypeCode();
 
         public override string ToString() => v.ToString();
-
         public string ToString(string format) => v.ToString(format);
-
-#if !UNITY_FLASH
-        public string ToString(IFormatProvider provider) => v.ToString(provider);
-
-        public string ToString(string format, IFormatProvider provider) => v.ToString(format, provider);
-#endif
-        public Str ToStr() => ToString();
-        public Str ToStr(Str format) => ToString(format);
-
-        public I8 ToI8() => new I8(v);
-        public I16 ToI16() => new I16(v);
-        public I32 ToI32() => new I32(v);
-        public I64 ToI64() => new I64(v);
-        public U8 ToU8() => new U8(v);
-        public U16 ToU16() => new U16(v);
-        public U32 ToU32() => new U32(v);
-        public U64 ToU64() => new U64(v);
-        public F32 ToF32() => new F32(v);
-        public F64 ToF64() => new F64(v);
 
         public double ToValue() => v;
     }
     public class F32Converter : JsonConverter<F32>
     {
         public override void WriteJson(JsonWriter writer, F32 value, JsonSerializer serializer) => writer.WriteValue(value);
-
         public override F32 ReadJson(JsonReader reader, Type objectType, F32 existingValue, bool hasExistingValue, JsonSerializer serializer) => new F32((float)reader.Value);
     }
     public class F64Converter : JsonConverter<F64>
     {
         public override void WriteJson(JsonWriter writer, F64 value, JsonSerializer serializer) => writer.WriteValue(value);
-
         public override F64 ReadJson(JsonReader reader, Type objectType, F64 existingValue, bool hasExistingValue, JsonSerializer serializer) => new F64((double)reader.Value);
     }
 }

@@ -1,42 +1,65 @@
 ﻿using Newtonsoft.Json;
 using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 
 namespace XyLang.Library
 {
     [JsonConverter(typeof(StrConverter))]
-    public class Str : IComparable
+    public class Str : IComparable, IEnumerable<Chr>, IXyValue
     {
         private string v = "";
         public Str() { }
         public Str(object o)
         {
-            switch (o)
-            {
-                case sbyte _:
-                case short _:
-                case int _:
-                case long _:
-
-                case byte _:
-                case ushort _:
-                case uint _:
-                case ulong _:
-
-                case float _:
-                case double _:
-                    v = o.ToString();
-                    break;
-
-                case string s:
-                    v = s;
-                    break;
-                default:
-                    throw new Exception("not support type");
-            }
+            v = o.ToString();
         }
 
-        public Str this[int index] { get => v[index].ToString(); }
+        public Chr this[int index] { get => v[index]; }
+
+        public IEnumerator<Chr> GetEnumerator() => GetEnumerator();
+
+        IEnumerator IEnumerable.GetEnumerator() => new StrEnumerator(this);
+
+        class StrEnumerator : IEnumerator<Chr>
+        {
+            private Str _collection;
+            private int curIndex;
+            public Chr Current { get; private set; }
+
+            public StrEnumerator(Str collection)
+            {
+                _collection = collection;
+                curIndex = -1;
+                Current = default(Chr);
+            }
+
+            object IEnumerator.Current
+            {
+                get { return Current; }
+            }
+
+            void IDisposable.Dispose() { }
+
+            public bool MoveNext()
+            {
+                //Avoids going beyond the end of the collection.
+                if (++curIndex >= _collection.Count)
+                {
+                    return false;
+                }
+                else
+                {
+                    // Set current box to next item in collection.
+                    Current = _collection[curIndex];
+                }
+                return true;
+            }
+
+            public void Reset() { curIndex = -1; }
+        }
 
         public I32 Count => v.Length;
         public bool IsEmpty => string.IsNullOrEmpty(v);
@@ -68,20 +91,11 @@ namespace XyLang.Library
 
         public TypeCode GetTypeCode() => v.GetTypeCode();
 
-        public override string ToString() => v.ToString();
+        public override string ToString() => v;
 
-        public string ToString(string format) => v.ToString();
+        public string ToString(string format) => v;
 
-#if !UNITY_FLASH
-        public string ToString(IFormatProvider provider) => v.ToString(provider);
-
-        public string ToString(string format, IFormatProvider provider) => v.ToString();
-
-#endif
         public bool Contains(Str value) => v.Contains(value);
-
-        public Str ToStr() => ToString();
-        public Str ToStr(Str format) => ToString(format);
 
         public I8 ToI8() => new I8(v);
         public I16 ToI16() => new I16(v);
@@ -122,6 +136,8 @@ namespace XyLang.Library
 
         public Str Replace(Str oldValue, Str newValue) => v.Replace(oldValue ?? "", newValue ?? "");
 
+        public Str Reverse() => new string(v.Reverse().ToArray());
+
         public bool StartsWith(Str value) => v.StartsWith(value);
         public bool StartsWith(Str value, StringComparison comparisonType) => v.StartsWith(value, comparisonType);
 
@@ -141,10 +157,88 @@ namespace XyLang.Library
         public string ToValue() => v;
     }
 
+    [JsonConverter(typeof(ChrConverter))]
+    public class Chr : IComparable, IXyValue
+    {
+        private char v;
+        public Chr() { }
+        public Chr(object o)
+        {
+            switch (o)
+            {
+                case sbyte _:
+                case short _:
+                case int _:
+                case long _:
+                case I8 _:
+                case I16 _:
+                case I32 _:
+                case I64 _:
+
+                case byte _:
+                case ushort _:
+                case uint _:
+                case ulong _:
+                case U8 _:
+                case U16 _:
+                case U32 _:
+                case U64 _:
+
+                case float _:
+                case double _:
+                case F32 _:
+                case F64 _:
+
+                case char _:
+                case Chr _:
+
+                case string _:
+                case Str _:
+                    v = Convert.ToChar(o);
+                    break;
+                default:
+                    throw new Exception("not support type");
+            }
+        }
+
+        public static implicit operator Chr(char it) => new Chr(it);
+        public static implicit operator char(Chr it) => it.v;
+
+        public int CompareTo(object obj) => v.CompareTo(obj.ToString());
+
+        public Chr MaxValue { get => char.MaxValue; }
+        public Chr MinValue { get => char.MinValue; }
+
+        public Chr ToLower() => char.ToLower(v);
+        public Chr ToUpper() => char.ToUpper(v);
+
+        public bool IsLower() => char.IsLower(v);
+        public bool IsUpper() => char.IsUpper(v);
+
+        public bool IsLetter() => char.IsLetter(v);
+        public bool IsDigit() => char.IsDigit(v);
+        public bool IsLetterOrDigit() => char.IsLetterOrDigit(v);
+
+        public bool IsNumber() => char.IsNumber(v);
+        public bool IsSymbol() => char.IsSymbol(v);
+        public bool IsWhiteSpace() => char.IsWhiteSpace(v);
+        public bool IsControl() => char.IsControl(v);
+
+        public double GetNumericValue() => char.GetNumericValue(v);
+
+        public override string ToString() => v.ToString();
+        public string ToString(string format) => v.ToString();
+    }
+
     public class StrConverter : JsonConverter<Str>
     {
         public override void WriteJson(JsonWriter writer, Str value, JsonSerializer serializer) => writer.WriteValue(value);
-
         public override Str ReadJson(JsonReader reader, Type objectType, Str existingValue, bool hasExistingValue, JsonSerializer serializer) => new Str((string)reader.Value);
+    }
+
+    public class ChrConverter : JsonConverter<Chr>
+    {
+        public override void WriteJson(JsonWriter writer, Chr value, JsonSerializer serializer) => writer.WriteValue(value);
+        public override Chr ReadJson(JsonReader reader, Type objectType, Chr existingValue, bool hasExistingValue, JsonSerializer serializer) => new Chr((char)reader.Value);
     }
 }
