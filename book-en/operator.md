@@ -62,6 +62,19 @@ a *= 1  // *= multiply first and then assign
 a /= 1  // /= divide first and then assign
 a %= 1  // %= take remainder first and than assignment
 ```
+## Bit Operation
+In this language, no special symbols are set for bit operations, and function operations are used to perform bit operations.
+
+E.g:
+```
+a := 1
+a.AND.(1)   // bitwise AND
+a.OR.(1)    // bitwise OR
+a.XOR.(1)   // bitwise XOR
+a.NOT.()    // bitwise Invert
+a.LFT.(1)   // left shift 
+a.RHT.(1)   // right shift
+```
 ## Braces
 Sometimes we need to do a mix of multiple data operations within a single statement, which involves priority issues.
 
