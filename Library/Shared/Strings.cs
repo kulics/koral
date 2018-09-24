@@ -62,6 +62,7 @@ namespace XyLang.Library
         }
 
         public I32 Count => v.Length;
+        public I32 LastIndex => Count - 1;
         public bool IsEmpty => string.IsNullOrEmpty(v);
         public bool NotEmpty => !IsEmpty;
 
@@ -128,6 +129,21 @@ namespace XyLang.Library
         public I32 LastIndexOf(Str value, I32 startIndex, I32 count, StringComparison comparisonType = StringComparison.Ordinal) => v.LastIndexOf(value, startIndex, count, comparisonType);
 
         public Str[] Split(Str[] separator, StringSplitOptions options = StringSplitOptions.None) => Array.ConvertAll(v.Split(Array.ConvertAll(separator, s => s.v), options), s => new Str(s));
+        public Str Slice(I32 startIndex, I32 endIndex)
+        {
+            if (startIndex == null && endIndex == null)
+            {
+                return this;
+            }
+            else if (endIndex == null)
+            {
+                return Substring(startIndex, LastIndex - startIndex);
+            }
+            else // (startIndex == null)
+            {
+                return Substring(0, LastIndex - endIndex);
+            }
+        }
 
         public Str Normalize(NormalizationForm normalizationForm = NormalizationForm.FormC) => v.Normalize(normalizationForm);
 
