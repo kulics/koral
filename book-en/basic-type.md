@@ -15,7 +15,7 @@ If we need integers of other numeric ranges, other types can also be used. All s
 ```
 I8      // 8-bit signed     -128 to 127
 U8      // 8-bit unsigned   0 to 255
-I16      // 16-bit signed    -32,768 to 32,767
+I16     // 16-bit signed    -32,768 to 32,767
 U16     // 16-bit unsigned  0 to 65,535
 I32     // 32-bit signed    -2,147,483,648 to 2,147,483,647
 U32     // 32-bit unsigned  0 to 4,294,967,295
@@ -50,6 +50,18 @@ All supported floating-point types are as follows:
 F32 // 32-bit   ±1.5e−45 to ±3.4e38
 F64 // 64-bit   ±5.0e−324 to ±1.7e308
 ```
+## Character
+Computers usually use a specific number to encode characters, so a type is needed to express the characters. This is the `Chr` type.
+
+It can only be a single character, and it only represents the correspondence between a certain character and a number, so it is a character and a number.
+
+You only need to wrap a character with `''`, it will be recognized as a character value.
+
+E.g:
+```
+char := 'x'
+char2 := '8'
+```
 ### String
 We are not living in a world of numbers alone, so we also need to use text to display the information we need. 
 
@@ -61,6 +73,8 @@ E.g:
 ```
 string := "Hello world!"
 ```
+
+It should be noted that a string is a type consisting of multiple characters, so in fact the string is a fixed-order list, and there is a correspondence between the two. Many times we can process strings as if they were lists.
 ## Mark String
 Many times we need to insert other content into a string. How do we usually do it?
 
