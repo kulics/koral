@@ -3,12 +3,12 @@ using System;
 
 namespace XyLang.Library
 {
-    [JsonConverter(typeof(I8Converter))]
-    public class I8: IXyValue
+    [JsonConverter(typeof(i8Converter))]
+    public class i8: iXyValue
     {
         private sbyte v;
-        public I8() { }
-        public I8(object o)
+        public i8() { }
+        public i8(object o)
         {
             switch (o)
             {
@@ -31,42 +31,42 @@ namespace XyLang.Library
                     v = Convert.ToSByte(o);
                     break;
 
-                case IXyValue i:
-                    v = i.ToI8();
+                case iXyValue i:
+                    v = i.toI8();
                     break;
                 default:
                     throw new Exception("not support type");
             }
         }
-        public I8(Str value, I32 fromBase) => v = Convert.ToSByte(value, fromBase);
-        public Str ToBase(I32 fromBase) => Convert.ToString(v, fromBase);
+        public i8(str value, i32 fromBase) => v = Convert.ToSByte(value, fromBase);
+        public str toBase(i32 fromBase) => Convert.ToString(v, fromBase);
 
-        public static implicit operator I8(sbyte it) => new I8(it);
-        public static implicit operator sbyte(I8 it) => it.v;
+        public static implicit operator i8(sbyte it) => new i8(it);
+        public static implicit operator sbyte(i8 it) => it.v;
 
-        public static I8 operator +(I8 a, I8 b) => new I8(a.v + b.v);
-        public static I8 operator -(I8 a, I8 b) => new I8(a.v - b.v);
-        public static I8 operator *(I8 a, I8 b) => new I8(a.v * b.v);
-        public static I8 operator /(I8 a, I8 b) => new I8(a.v / b.v);
-        public static I8 operator %(I8 a, I8 b) => new I8(a.v % b.v);
+        public static i8 operator +(i8 a, i8 b) => new i8(a.v + b.v);
+        public static i8 operator -(i8 a, i8 b) => new i8(a.v - b.v);
+        public static i8 operator *(i8 a, i8 b) => new i8(a.v * b.v);
+        public static i8 operator /(i8 a, i8 b) => new i8(a.v / b.v);
+        public static i8 operator %(i8 a, i8 b) => new i8(a.v % b.v);
 
-        public static bool operator <(I8 a, I8 b) => a.v < b.v;
-        public static bool operator <=(I8 a, I8 b) => a.v <= b.v;
-        public static bool operator >(I8 a, I8 b) => a.v > b.v;
-        public static bool operator >=(I8 a, I8 b) => a.v >= b.v;
-        public static bool operator ==(I8 a, I8 b) => a.v == b.v;
-        public static bool operator !=(I8 a, I8 b) => a.v != b.v;
+        public static bool operator <(i8 a, i8 b) => a.v < b.v;
+        public static bool operator <=(i8 a, i8 b) => a.v <= b.v;
+        public static bool operator >(i8 a, i8 b) => a.v > b.v;
+        public static bool operator >=(i8 a, i8 b) => a.v >= b.v;
+        public static bool operator ==(i8 a, i8 b) => a.v == b.v;
+        public static bool operator !=(i8 a, i8 b) => a.v != b.v;
 
-        public I8 AND(I8 it) => new I8(v & it);
-        public I8 OR(I8 it) => new I8(v | it);
-        public I8 XOR(I8 it) => new I8(v ^ it);
-        public I8 NOT() => new I8(~v);
-        public I8 LFT(int it) => new I8(v << it);
-        public I8 RHT(int it) => new I8(v >> it);
+        public i8 and(i8 it) => new i8(v & it);
+        public i8 or(i8 it) => new i8(v | it);
+        public i8 xor(i8 it) => new i8(v ^ it);
+        public i8 not() => new i8(~v);
+        public i8 lft(int it) => new i8(v << it);
+        public i8 rht(int it) => new i8(v >> it);
 
         public override bool Equals(object o)
         {
-            if (o is I8 b)
+            if (o is i8 b)
             {
                 return v == b.v;
             }
@@ -76,7 +76,7 @@ namespace XyLang.Library
             }
         }
 
-        public bool Equals(I8 b) => b != null && v == b.v;
+        public bool Equals(i8 b) => b != null && v == b.v;
 
         public override int GetHashCode() => v.GetHashCode();
 
@@ -85,16 +85,16 @@ namespace XyLang.Library
         public override string ToString() => v.ToString();
         public string ToString(string format) => v.ToString(format);
 
-        public sbyte ToValue() => v;
-        public object ToAny() => v;
+        public sbyte toValue() => v;
+        public object toAny() => v;
     }
 
-    [JsonConverter(typeof(I16Converter))]
-    public class I16 : IXyValue
+    [JsonConverter(typeof(i16Converter))]
+    public class i16 : iXyValue
     {
         private short v;
-        public I16() { }
-        public I16(object o)
+        public i16() { }
+        public i16(object o)
         {
             switch (o)
             {
@@ -117,42 +117,42 @@ namespace XyLang.Library
                     v = Convert.ToInt16(o);
                     break;
 
-                case IXyValue i:
-                    v = i.ToI16();
+                case iXyValue i:
+                    v = i.toI16();
                     break;
                 default:
                     throw new Exception("not support type");
             }
         }
-        public I16(Str value, I32 fromBase) => v = Convert.ToInt16(value, fromBase);
-        public Str ToBase(I32 fromBase) => Convert.ToString(v, fromBase);
+        public i16(str value, i32 fromBase) => v = Convert.ToInt16(value, fromBase);
+        public str toBase(i32 fromBase) => Convert.ToString(v, fromBase);
 
-        public static implicit operator I16(short it) => new I16(it);
-        public static implicit operator short(I16 it) => it.v;
+        public static implicit operator i16(short it) => new i16(it);
+        public static implicit operator short(i16 it) => it.v;
 
-        public static I16 operator +(I16 a, I16 b) => new I16(a.v + b.v);
-        public static I16 operator -(I16 a, I16 b) => new I16(a.v - b.v);
-        public static I16 operator *(I16 a, I16 b) => new I16(a.v * b.v);
-        public static I16 operator /(I16 a, I16 b) => new I16(a.v / b.v);
-        public static I16 operator %(I16 a, I16 b) => new I16(a.v % b.v);
+        public static i16 operator +(i16 a, i16 b) => new i16(a.v + b.v);
+        public static i16 operator -(i16 a, i16 b) => new i16(a.v - b.v);
+        public static i16 operator *(i16 a, i16 b) => new i16(a.v * b.v);
+        public static i16 operator /(i16 a, i16 b) => new i16(a.v / b.v);
+        public static i16 operator %(i16 a, i16 b) => new i16(a.v % b.v);
 
-        public static bool operator <(I16 a, I16 b) => a.v < b.v;
-        public static bool operator <=(I16 a, I16 b) => a.v <= b.v;
-        public static bool operator >(I16 a, I16 b) => a.v > b.v;
-        public static bool operator >=(I16 a, I16 b) => a.v >= b.v;
-        public static bool operator ==(I16 a, I16 b) => a.v == b.v;
-        public static bool operator !=(I16 a, I16 b) => a.v != b.v;
+        public static bool operator <(i16 a, i16 b) => a.v < b.v;
+        public static bool operator <=(i16 a, i16 b) => a.v <= b.v;
+        public static bool operator >(i16 a, i16 b) => a.v > b.v;
+        public static bool operator >=(i16 a, i16 b) => a.v >= b.v;
+        public static bool operator ==(i16 a, i16 b) => a.v == b.v;
+        public static bool operator !=(i16 a, i16 b) => a.v != b.v;
 
-        public I16 AND(I16 it) => new I16(v & it);
-        public I16 OR(I16 it) => new I16(v | it);
-        public I16 XOR(I16 it) => new I16(v ^ it);
-        public I16 NOT() => new I16(~v);
-        public I16 LFT(int it) => new I16(v << it);
-        public I16 RHT(int it) => new I16(v >> it);
+        public i16 and(i16 it) => new i16(v & it);
+        public i16 or(i16 it) => new i16(v | it);
+        public i16 xor(i16 it) => new i16(v ^ it);
+        public i16 not() => new i16(~v);
+        public i16 lft(int it) => new i16(v << it);
+        public i16 rht(int it) => new i16(v >> it);
 
         public override bool Equals(object o)
         {
-            if (o is I16 b)
+            if (o is i16 b)
             {
                 return v == b.v;
             }
@@ -162,7 +162,7 @@ namespace XyLang.Library
             }
         }
 
-        public bool Equals(I16 b) => b != null && v == b.v;
+        public bool Equals(i16 b) => b != null && v == b.v;
 
         public override int GetHashCode() => v.GetHashCode();
 
@@ -171,16 +171,16 @@ namespace XyLang.Library
         public override string ToString() => v.ToString();
         public string ToString(string format) => v.ToString(format);
 
-        public short ToValue() => v;
-        public object ToAny() => v;
+        public short toValue() => v;
+        public object toAny() => v;
     }
 
-    [JsonConverter(typeof(I32Converter))]
-    public class I32 : IXyValue
+    [JsonConverter(typeof(i32Converter))]
+    public class i32 : iXyValue
     {
         private int v;
-        public I32() { }
-        public I32(object o)
+        public i32() { }
+        public i32(object o)
         {
             switch (o)
             {
@@ -203,42 +203,42 @@ namespace XyLang.Library
                     v = Convert.ToInt32(o);
                     break;
 
-                case IXyValue i:
-                    v = i.ToI32();
+                case iXyValue i:
+                    v = i.toI32();
                     break;
                 default:
                     throw new Exception("not support type");
             }
         }
-        public I32(Str value, I32 fromBase) => v = Convert.ToInt32(value, fromBase);
-        public Str ToBase(I32 fromBase) => Convert.ToString(v, fromBase);
+        public i32(str value, i32 fromBase) => v = Convert.ToInt32(value, fromBase);
+        public str toBase(i32 fromBase) => Convert.ToString(v, fromBase);
 
-        public static implicit operator I32(int it) => new I32(it);
-        public static implicit operator int(I32 it) => it.v;
+        public static implicit operator i32(int it) => new i32(it);
+        public static implicit operator int(i32 it) => it.v;
 
-        public static I32 operator +(I32 a, I32 b) => new I32(a.v + b.v);
-        public static I32 operator -(I32 a, I32 b) => new I32(a.v - b.v);
-        public static I32 operator *(I32 a, I32 b) => new I32(a.v * b.v);
-        public static I32 operator /(I32 a, I32 b) => new I32(a.v / b.v);
-        public static I32 operator %(I32 a, I32 b) => new I32(a.v % b.v);
+        public static i32 operator +(i32 a, i32 b) => new i32(a.v + b.v);
+        public static i32 operator -(i32 a, i32 b) => new i32(a.v - b.v);
+        public static i32 operator *(i32 a, i32 b) => new i32(a.v * b.v);
+        public static i32 operator /(i32 a, i32 b) => new i32(a.v / b.v);
+        public static i32 operator %(i32 a, i32 b) => new i32(a.v % b.v);
 
-        public static bool operator <(I32 a, I32 b) => a.v < b.v;
-        public static bool operator <=(I32 a, I32 b) => a.v <= b.v;
-        public static bool operator >(I32 a, I32 b) => a.v > b.v;
-        public static bool operator >=(I32 a, I32 b) => a.v >= b.v;
-        public static bool operator ==(I32 a, I32 b) => a.v == b.v;
-        public static bool operator !=(I32 a, I32 b) => a.v != b.v;
+        public static bool operator <(i32 a, i32 b) => a.v < b.v;
+        public static bool operator <=(i32 a, i32 b) => a.v <= b.v;
+        public static bool operator >(i32 a, i32 b) => a.v > b.v;
+        public static bool operator >=(i32 a, i32 b) => a.v >= b.v;
+        public static bool operator ==(i32 a, i32 b) => a.v == b.v;
+        public static bool operator !=(i32 a, i32 b) => a.v != b.v;
 
-        public I32 AND(I32 it) => new I32(v & it);
-        public I32 OR(I32 it) => new I32(v | it);
-        public I32 XOR(I32 it) => new I32(v ^ it);
-        public I32 NOT() => new I32(~v);
-        public I32 LFT(int it) => new I32(v << it);
-        public I32 RHT(int it) => new I32(v >> it);
+        public i32 and(i32 it) => new i32(v & it);
+        public i32 or(i32 it) => new i32(v | it);
+        public i32 xor(i32 it) => new i32(v ^ it);
+        public i32 not() => new i32(~v);
+        public i32 lft(int it) => new i32(v << it);
+        public i32 rht(int it) => new i32(v >> it);
 
         public override bool Equals(object o)
         {
-            if (o is I32 b)
+            if (o is i32 b)
             {
                 return v == b.v;
             }
@@ -248,7 +248,7 @@ namespace XyLang.Library
             }
         }
 
-        public bool Equals(I32 b) => b != null && v == b.v;
+        public bool Equals(i32 b) => b != null && v == b.v;
 
         public override int GetHashCode() => v.GetHashCode();
 
@@ -257,16 +257,16 @@ namespace XyLang.Library
         public override string ToString() => v.ToString();
         public string ToString(string format) => v.ToString(format);
 
-        public int ToValue() => v;
-        public object ToAny() => v;
+        public int toValue() => v;
+        public object toAny() => v;
     }
 
-    [JsonConverter(typeof(I64Converter))]
-    public class I64 : IXyValue
+    [JsonConverter(typeof(i64Converter))]
+    public class i64 : iXyValue
     {
         private long v;
-        public I64() { }
-        public I64(object o)
+        public i64() { }
+        public i64(object o)
         {
             switch (o)
             {
@@ -289,42 +289,42 @@ namespace XyLang.Library
                     v = Convert.ToInt64(o);
                     break;
 
-                case IXyValue i:
-                    v = i.ToI64();
+                case iXyValue i:
+                    v = i.toI64();
                     break;
                 default:
                     throw new Exception("not support type");
             }
         }
-        public I64(Str value, I32 fromBase) => v = Convert.ToInt64(value, fromBase);
-        public Str ToBase(I32 fromBase) => Convert.ToString(v, fromBase);
+        public i64(str value, i32 fromBase) => v = Convert.ToInt64(value, fromBase);
+        public str toBase(i32 fromBase) => Convert.ToString(v, fromBase);
 
-        public static implicit operator I64(long it) => new I64(it);
-        public static implicit operator long(I64 it) => it.v;
+        public static implicit operator i64(long it) => new i64(it);
+        public static implicit operator long(i64 it) => it.v;
 
-        public static I64 operator +(I64 a, I64 b) => new I64(a.v + b.v);
-        public static I64 operator -(I64 a, I64 b) => new I64(a.v - b.v);
-        public static I64 operator *(I64 a, I64 b) => new I64(a.v * b.v);
-        public static I64 operator /(I64 a, I64 b) => new I64(a.v / b.v);
-        public static I64 operator %(I64 a, I64 b) => new I64(a.v % b.v);
+        public static i64 operator +(i64 a, i64 b) => new i64(a.v + b.v);
+        public static i64 operator -(i64 a, i64 b) => new i64(a.v - b.v);
+        public static i64 operator *(i64 a, i64 b) => new i64(a.v * b.v);
+        public static i64 operator /(i64 a, i64 b) => new i64(a.v / b.v);
+        public static i64 operator %(i64 a, i64 b) => new i64(a.v % b.v);
 
-        public static bool operator <(I64 a, I64 b) => a.v < b.v;
-        public static bool operator <=(I64 a, I64 b) => a.v <= b.v;
-        public static bool operator >(I64 a, I64 b) => a.v > b.v;
-        public static bool operator >=(I64 a, I64 b) => a.v >= b.v;
-        public static bool operator ==(I64 a, I64 b) => a.v == b.v;
-        public static bool operator !=(I64 a, I64 b) => a.v != b.v;
+        public static bool operator <(i64 a, i64 b) => a.v < b.v;
+        public static bool operator <=(i64 a, i64 b) => a.v <= b.v;
+        public static bool operator >(i64 a, i64 b) => a.v > b.v;
+        public static bool operator >=(i64 a, i64 b) => a.v >= b.v;
+        public static bool operator ==(i64 a, i64 b) => a.v == b.v;
+        public static bool operator !=(i64 a, i64 b) => a.v != b.v;
 
-        public I64 AND(I64 it) => new I64(v & it);
-        public I64 OR(I64 it) => new I64(v | it);
-        public I64 XOR(I64 it) => new I64(v ^ it);
-        public I64 NOT() => new I64(~v);
-        public I64 LFT(int it) => new I64(v << it);
-        public I64 RHT(int it) => new I64(v >> it);
+        public i64 and(i64 it) => new i64(v & it);
+        public i64 or(i64 it) => new i64(v | it);
+        public i64 xor(i64 it) => new i64(v ^ it);
+        public i64 not() => new i64(~v);
+        public i64 lft(int it) => new i64(v << it);
+        public i64 rht(int it) => new i64(v >> it);
 
         public override bool Equals(object o)
         {
-            if (o is I64 b)
+            if (o is i64 b)
             {
                 return v == b.v;
             }
@@ -334,7 +334,7 @@ namespace XyLang.Library
             }
         }
 
-        public bool Equals(I64 b) => b != null && v == b.v;
+        public bool Equals(i64 b) => b != null && v == b.v;
 
         public override int GetHashCode() => v.GetHashCode();
 
@@ -343,27 +343,27 @@ namespace XyLang.Library
         public override string ToString() => v.ToString();
         public string ToString(string format) => v.ToString(format);
 
-        public long ToValue() => v;
-        public object ToAny() => v;
+        public long toValue() => v;
+        public object toAny() => v;
     }
-    public class I8Converter : JsonConverter<I8>
+    public class i8Converter : JsonConverter<i8>
     {
-        public override void WriteJson(JsonWriter writer, I8 value, JsonSerializer serializer) => writer.WriteValue(value);
-        public override I8 ReadJson(JsonReader reader, Type objectType, I8 existingValue, bool hasExistingValue, JsonSerializer serializer) => new I8((sbyte)reader.Value);
+        public override void WriteJson(JsonWriter writer, i8 value, JsonSerializer serializer) => writer.WriteValue(value);
+        public override i8 ReadJson(JsonReader reader, Type objectType, i8 existingValue, bool hasExistingValue, JsonSerializer serializer) => new i8((sbyte)reader.Value);
     }
-    public class I16Converter : JsonConverter<I16>
+    public class i16Converter : JsonConverter<i16>
     {
-        public override void WriteJson(JsonWriter writer, I16 value, JsonSerializer serializer) => writer.WriteValue(value);
-        public override I16 ReadJson(JsonReader reader, Type objectType, I16 existingValue, bool hasExistingValue, JsonSerializer serializer) => new I16((short)reader.Value);
+        public override void WriteJson(JsonWriter writer, i16 value, JsonSerializer serializer) => writer.WriteValue(value);
+        public override i16 ReadJson(JsonReader reader, Type objectType, i16 existingValue, bool hasExistingValue, JsonSerializer serializer) => new i16((short)reader.Value);
     }
-    public class I32Converter : JsonConverter<I32>
+    public class i32Converter : JsonConverter<i32>
     {
-        public override void WriteJson(JsonWriter writer, I32 value, JsonSerializer serializer) => writer.WriteValue(value);
-        public override I32 ReadJson(JsonReader reader, Type objectType, I32 existingValue, bool hasExistingValue, JsonSerializer serializer) => new I32((int)reader.Value);
+        public override void WriteJson(JsonWriter writer, i32 value, JsonSerializer serializer) => writer.WriteValue(value);
+        public override i32 ReadJson(JsonReader reader, Type objectType, i32 existingValue, bool hasExistingValue, JsonSerializer serializer) => new i32((int)reader.Value);
     }
-    public class I64Converter : JsonConverter<I64>
+    public class i64Converter : JsonConverter<i64>
     {
-        public override void WriteJson(JsonWriter writer, I64 value, JsonSerializer serializer) => writer.WriteValue(value);
-        public override I64 ReadJson(JsonReader reader, Type objectType, I64 existingValue, bool hasExistingValue, JsonSerializer serializer) => new I64((long)reader.Value);
+        public override void WriteJson(JsonWriter writer, i64 value, JsonSerializer serializer) => writer.WriteValue(value);
+        public override i64 ReadJson(JsonReader reader, Type objectType, i64 existingValue, bool hasExistingValue, JsonSerializer serializer) => new i64((long)reader.Value);
     }
 }

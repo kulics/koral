@@ -3,11 +3,11 @@ using System;
 
 namespace XyLang.Library
 {
-    public class F32 : IXyValue
+    public class f32 : iXyValue
     {
         private float v;
-        public F32() { }
-        public F32(object o)
+        public f32() { }
+        public f32(object o)
         {
             switch (o)
             {
@@ -30,33 +30,33 @@ namespace XyLang.Library
                     v = Convert.ToSingle(o);
                     break;
 
-                case IXyValue i:
-                    v = i.ToF32();
+                case iXyValue i:
+                    v = i.toF32();
                     break;
                 default:
                     throw new Exception("not support type");
             }
         }
 
-        public static implicit operator F32(float it) => new F32(it);
-        public static implicit operator float(F32 it) => it.v;
+        public static implicit operator f32(float it) => new f32(it);
+        public static implicit operator float(f32 it) => it.v;
 
-        public static F32 operator +(F32 a, F32 b) => new F32(a.v + b.v);
-        public static F32 operator -(F32 a, F32 b) => new F32(a.v - b.v);
-        public static F32 operator *(F32 a, F32 b) => new F32(a.v * b.v);
-        public static F32 operator /(F32 a, F32 b) => new F32(a.v / b.v);
-        public static F32 operator %(F32 a, F32 b) => new F32(a.v % b.v);
+        public static f32 operator +(f32 a, f32 b) => new f32(a.v + b.v);
+        public static f32 operator -(f32 a, f32 b) => new f32(a.v - b.v);
+        public static f32 operator *(f32 a, f32 b) => new f32(a.v * b.v);
+        public static f32 operator /(f32 a, f32 b) => new f32(a.v / b.v);
+        public static f32 operator %(f32 a, f32 b) => new f32(a.v % b.v);
 
-        public static bool operator <(F32 a, F32 b) => a.v < b.v;
-        public static bool operator <=(F32 a, F32 b) => a.v <= b.v;
-        public static bool operator >(F32 a, F32 b) => a.v > b.v;
-        public static bool operator >=(F32 a, F32 b) => a.v >= b.v;
-        public static bool operator ==(F32 a, F32 b) => a.v == b.v;
-        public static bool operator !=(F32 a, F32 b) => a.v != b.v;
+        public static bool operator <(f32 a, f32 b) => a.v < b.v;
+        public static bool operator <=(f32 a, f32 b) => a.v <= b.v;
+        public static bool operator >(f32 a, f32 b) => a.v > b.v;
+        public static bool operator >=(f32 a, f32 b) => a.v >= b.v;
+        public static bool operator ==(f32 a, f32 b) => a.v == b.v;
+        public static bool operator !=(f32 a, f32 b) => a.v != b.v;
 
         public override bool Equals(object o)
         {
-            if (o is F32 b)
+            if (o is f32 b)
             {
                 return v == b.v;
             }
@@ -66,7 +66,7 @@ namespace XyLang.Library
             }
         }
 
-        public bool Equals(F32 b) => b != null && v == b.v;
+        public bool Equals(f32 b) => b != null && v == b.v;
 
         public override int GetHashCode() => v.GetHashCode();
 
@@ -75,15 +75,15 @@ namespace XyLang.Library
         public override string ToString() => v.ToString();
         public string ToString(string format) => v.ToString(format);
 
-        public float ToValue() => v;
-        public object ToAny() => v;
+        public float toValue() => v;
+        public object toAny() => v;
     }
 
-    public class F64 : IXyValue
+    public class f64 : iXyValue
     {
         private double v;
-        public F64() { }
-        public F64(object o)
+        public f64() { }
+        public f64(object o)
         {
             switch (o)
             {
@@ -106,33 +106,33 @@ namespace XyLang.Library
                     v = Convert.ToDouble(o);
                     break;
 
-                case IXyValue i:
-                    v = i.ToF64();
+                case iXyValue i:
+                    v = i.toF64();
                     break;
                 default:
                     throw new Exception("not support type");
             }
         }
 
-        public static implicit operator F64(double it) => new F64(it);
-        public static implicit operator double(F64 it) => it.v;
+        public static implicit operator f64(double it) => new f64(it);
+        public static implicit operator double(f64 it) => it.v;
 
-        public static F64 operator +(F64 a, F64 b) => new F64(a.v + b.v);
-        public static F64 operator -(F64 a, F64 b) => new F64(a.v - b.v);
-        public static F64 operator *(F64 a, F64 b) => new F64(a.v * b.v);
-        public static F64 operator /(F64 a, F64 b) => new F64(a.v / b.v);
-        public static F64 operator %(F64 a, F64 b) => new F64(a.v % b.v);
+        public static f64 operator +(f64 a, f64 b) => new f64(a.v + b.v);
+        public static f64 operator -(f64 a, f64 b) => new f64(a.v - b.v);
+        public static f64 operator *(f64 a, f64 b) => new f64(a.v * b.v);
+        public static f64 operator /(f64 a, f64 b) => new f64(a.v / b.v);
+        public static f64 operator %(f64 a, f64 b) => new f64(a.v % b.v);
 
-        public static bool operator <(F64 a, F64 b) => a.v < b.v;
-        public static bool operator <=(F64 a, F64 b) => a.v <= b.v;
-        public static bool operator >(F64 a, F64 b) => a.v > b.v;
-        public static bool operator >=(F64 a, F64 b) => a.v >= b.v;
-        public static bool operator ==(F64 a, F64 b) => a.v == b.v;
-        public static bool operator !=(F64 a, F64 b) => a.v != b.v;
+        public static bool operator <(f64 a, f64 b) => a.v < b.v;
+        public static bool operator <=(f64 a, f64 b) => a.v <= b.v;
+        public static bool operator >(f64 a, f64 b) => a.v > b.v;
+        public static bool operator >=(f64 a, f64 b) => a.v >= b.v;
+        public static bool operator ==(f64 a, f64 b) => a.v == b.v;
+        public static bool operator !=(f64 a, f64 b) => a.v != b.v;
 
         public override bool Equals(object o)
         {
-            if (o is F64 b)
+            if (o is f64 b)
             {
                 return v == b.v;
             }
@@ -142,7 +142,7 @@ namespace XyLang.Library
             }
         }
 
-        public bool Equals(F64 b) => b != null && v == b.v;
+        public bool Equals(f64 b) => b != null && v == b.v;
 
         public override int GetHashCode() => v.GetHashCode();
 
@@ -151,17 +151,17 @@ namespace XyLang.Library
         public override string ToString() => v.ToString();
         public string ToString(string format) => v.ToString(format);
 
-        public double ToValue() => v;
-        public object ToAny() => v;
+        public double toValue() => v;
+        public object toAny() => v;
     }
-    public class F32Converter : JsonConverter<F32>
+    public class f32Converter : JsonConverter<f32>
     {
-        public override void WriteJson(JsonWriter writer, F32 value, JsonSerializer serializer) => writer.WriteValue(value);
-        public override F32 ReadJson(JsonReader reader, Type objectType, F32 existingValue, bool hasExistingValue, JsonSerializer serializer) => new F32((float)reader.Value);
+        public override void WriteJson(JsonWriter writer, f32 value, JsonSerializer serializer) => writer.WriteValue(value);
+        public override f32 ReadJson(JsonReader reader, Type objectType, f32 existingValue, bool hasExistingValue, JsonSerializer serializer) => new f32((float)reader.Value);
     }
-    public class F64Converter : JsonConverter<F64>
+    public class f64Converter : JsonConverter<f64>
     {
-        public override void WriteJson(JsonWriter writer, F64 value, JsonSerializer serializer) => writer.WriteValue(value);
-        public override F64 ReadJson(JsonReader reader, Type objectType, F64 existingValue, bool hasExistingValue, JsonSerializer serializer) => new F64((double)reader.Value);
+        public override void WriteJson(JsonWriter writer, f64 value, JsonSerializer serializer) => writer.WriteValue(value);
+        public override f64 ReadJson(JsonReader reader, Type objectType, f64 existingValue, bool hasExistingValue, JsonSerializer serializer) => new f64((double)reader.Value);
     }
 }
