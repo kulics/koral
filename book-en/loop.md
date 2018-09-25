@@ -10,7 +10,7 @@ E.g:
 arr := [1, 2, 3, 4, 5]
 arr.@ item
 {
-    Console.WriteLine.(item)     // print each number
+    cmd.print.(item)     // print each number
 }
 ```
 The identifier followed by `@` is the currently fetched value, which is valid only for the current loop. So we don't need to define an identifier externally.
@@ -20,7 +20,7 @@ E.g:
 ```
 Arr.@
 {
-     Console.WriteLine.(it)     // print each number
+     cmd.print.(it)     // print each number
 }
 ```
 
@@ -30,7 +30,7 @@ E.g:
 ```
 arr.@ i -> v
 {
-     Console.WriteLine.(/"{i}:{v}"/)
+     cmd.print.(/"{i}:{v}"/)
 }
 ```
 
@@ -44,7 +44,7 @@ E.g:
 ```
 [0 << 100].@
 {
-    Console.WriteLine.(it)      // print each number
+    cmd.print.(it)      // print each number
 }
 ```
 It should be noted that the meaning of `0 << 100` is read from` 0` to `100` one by one, that is, a total execution of` 101` times. Iterator will be executed until the last number is completed, rather than an early end.
@@ -118,22 +118,22 @@ Demo
 {
     .. System, XyLang\Library
 
-    Main ()
+    main ()
     {
         arr := [1,2,3,4,5]
         arr.@ 
         {
-            Console.WriteLine.(it)
+            cmd.print.(it)
         }
 
         [1 << 50].@ i
         {
-            Console.WriteLine.(i)
+            cmd.print.(i)
         }
 
         [100 >> 0 ; 2].@ i
         {
-            Console.WriteLine.(i)
+            cmd.print.(i)
         }
 
         x := 0

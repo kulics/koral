@@ -7,11 +7,11 @@ E.g:
 ```
 ? true
 {
-    Console.WriteLine.("true")  // true
+    cmd.print.("true")  // true
 }
 ```
 # Boolean Judgment
-When the judgment value is only `Bool`, the statement is executed only if it is `true`. 
+When the judgment value is only `bl`, the statement is executed only if it is `true`. 
 If we also need to handle `false` at the same time, then we can use the auxiliary notation `? value {}` to continue declare another statement.
 
 E.g:
@@ -108,7 +108,7 @@ You can use the `value.?id:type{}` syntax to match types, `id` can be omitted, a
 E.g:
 ```
 x.?
-:I32 // When I32
+:i32 // When i32
 {
      Console.Write.(it)
 }
@@ -137,27 +137,27 @@ Demo
 {
     .. System, XyLang\Library
 
-    Main ()
+    main ()
     {
         a := 5
         ? a == 2
-        { Console.WriteLine.(2) }
+        { cmd.print.(2) }
         ? a == 4
-        { Console.WriteLine.(4) }
+        { cmd.print.(4) }
         ?
-        { Console.WriteLine.("not find") }
+        { cmd.print.("not find") }
 
         b := 7
         b.?
         5
-        { Console.WriteLine.(5) }
+        { cmd.print.(5) }
         7
-        { Console.WriteLine.(7) }
+        { cmd.print.(7) }
         _
-        { Console.WriteLine.("not find") }
+        { cmd.print.("not find") }
 
-        Console.WriteLine.( ?.(b) )
-        Console.WriteLine.( ?.(:I32) )
+        cmd.print.( ?.(b) )
+        cmd.print.( ?.(:i32) )
     }
 }
 ```

@@ -13,20 +13,20 @@ E.g:
 ```
 List<T> {}->
 {
-    Items := Storage.{T}    // 创建存储
-    Length :I32?
+    items := Storage.{T}    // 创建存储
+    length :i32?
 }
 List<T> +=
 {
-    Get (index:I32)->(item:T)  // 获取某个泛型数据
+    get (index:i32)->(item:T)  // 获取某个泛型数据
     {
-        <- (Items.Get.(index))
+        <- (items.get.(index))
     }
 
-    Add (item:T)->()    //将一个泛型数据添加进数组
+    add (item:T)->()    //将一个泛型数据添加进数组
     {
-        Items.Insert.(Length, item)
-        Length += 1
+        items.insert.(length, item)
+        length += 1
     }
 }
 ```
@@ -34,7 +34,7 @@ So we define a package that supports generics, `T` is a generic x, in fact it ca
 
 Generic brackets, like parameters, support multiple generations, for example: `<T, H, Q>`.
 
-After the generic is defined, `T` is treated as a real type within the area of ​​the package, and then we can use it in a variety of desired types just as `I32` does.
+After the generic is defined, `T` is treated as a real type within the area of ​​the package, and then we can use it in a variety of desired types just as `i32` does.
 
 Note that because generics are typed at run time, the compiler can not infer generic constructor methods. We can only use the empty type constructor to construct generic data.
 
@@ -42,7 +42,7 @@ E.g:
 ```
 Package<T> {}->
 {
-    Item := null.(T)    // initialized a null value of the generic data
+    item := null.(T)    // initialized a null value of the generic data
 }
 ```
 So how do we use generics?
@@ -51,11 +51,11 @@ Very simple, and we can use the same statement, but called when the need to impo
 
 E.g:
 ```
-ListNumber := List<I32>.{}  // pass in the number type
+ListNumber := List<i32>.{}  // pass in the number type
 ```
 So we have an List of number types, is like this:
 ```
-ListNumber := []I32.{}
+ListNumber := []i32.{}
 ```
 Yes, in fact, our list and dictionary syntax are syntactic sugar, the actual types are `Lst` and `Dic`.
 ## Supported Types
@@ -70,12 +70,12 @@ Func<T> (data: T)->(data: T)
 
 Protocol<T> ->
 {
-    Test<T> (in: T)->(){}
+    test<T> (in: T)->(){}
 }
 
 Implement += Protocol<Implement>
 {
-    Test<Implement> (in: Implement)->(){}
+    test<Implement> (in: Implement)->(){}
 }
 ```
 ### [Next Chapter](annotation.md)

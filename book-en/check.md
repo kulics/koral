@@ -12,7 +12,7 @@ We can declare an exception data using `!.()` Anywhere in the function.
 
 E.g:
 ```
-ReadFile (name: Str)->()
+readFile (name: str)->()
 {
     ? name.Length == 0
     {
@@ -29,9 +29,9 @@ We can use the `.! id:type {}` statement to check for exceptions when using assi
 
 E.g:
 ```
-f: File = ReadFile.("temp.txt").! err: Exception
+f: file = readFile.("temp.txt").! err: Exception
 {
-     Console.WriteLine.(err.message)
+    cmd.print.(err.message)
 }
 ```
 When an exception occurs, the program enters the `!` block, and `err` is the exception identifier. We can get the exception information or perform other operations.
@@ -73,7 +73,7 @@ We can use fragment statements to optimize this content, using `id () -> {}` to 
 
 E.g:
 ```
-CheckError (it:Exception) ->
+checkError (it:Exception) ->
 {
     Log.(it.msg)
     !.(it)
@@ -86,9 +86,9 @@ Use `-> id` to use the fragment statement, now we can handle the above example.
 
 E.g:
 ```
-Do1.().! -> CheckError
-Do2.().! -> CheckError
-Do3.().! -> CheckError
+Do1.().! -> checkError
+Do2.().! -> checkError
+Do3.().! -> checkError
 ```
 
 This seems to be much easier.
@@ -101,7 +101,7 @@ a := 0
 Handle () ->
 {
     a *= a
-    Print.(a)
+    cmd.print.(a)
 }
 a += 1
 -> Handle
@@ -120,15 +120,15 @@ E.g:
 ```
 Func ()->()
 {
-    File := ReadFile.("./somecode.xy")
+    File := readFile.("./somecode.xy")
     !
     {
-        file.Release.()
+        file.release.()
     }
     ...
 }
 ```
-So we declare the `file.Release.()` statement that releases the file. This statement will not be executed immediately, but will wait for the function to be called before exiting.
+So we declare the `file.release.()` statement that releases the file. This statement will not be executed immediately, but will wait for the function to be called before exiting.
 
 With check defer, we can safely handle certain tasks without having to worry about how the function exits.
 
@@ -139,7 +139,7 @@ E.g:
 ...
 !
 {
-    file.Release.()
+    file.release.()
     <- ()    // error, cannot use return statement
 }
 ```
@@ -149,9 +149,9 @@ In particular, if multiple deferred statements are used in a single statement bl
 
 E.g:
 ```
-! { Console.WriteLine.("1") }
-! { Console.WriteLine.("2") }
-! { Console.WriteLine.("3") }
+! { cmd.print.("1") }
+! { cmd.print.("2") }
+! { cmd.print.("3") }
 
 // final display 3 2 1
 ```
@@ -167,19 +167,19 @@ Func ()->()
     [0<<5].@
     {
         // does not affect the logic outside the loop
-        ! { Console.WriteLine.(it + 1) }
-        Console.WriteLine.(it)
+        ! { cmd.print.(it + 1) }
+        cmd.print.(it)
     }
     ...
 }
 ```
 
-### Automatic Release
+### Automatic release
 For packages that implement the automatic release protocol, we can use the '!= ' syntax to define variables so that they are automatically released when the function completes.
 
 E.g:
 ``` 
-Res != Fileresource.{ "/test.xy"}
+Res != fileResource.{ "/test.xy"}
 ...
 ```
 
@@ -191,9 +191,9 @@ Demo
 {
     .. System, XyLang\Library
 
-    Main ()
+    main ()
     {
-        x: I32 = (1 * 1).! err 
+        x: i32 = (1 * 1).! err 
         {
             !.(err)
         }
@@ -202,13 +202,13 @@ Demo
         !
         {
             x.content = "defer"
-            Console.WriteLine.(x.content)
+            cmd.print.(x.content)
         }
     }
 
     Defer {} ->
     {
-        content :Str
+        content :str
     }
 
     Defer += IDisposable

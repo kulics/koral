@@ -51,10 +51,10 @@ Demo
 {
     .. System, XyLang\Library
 
-    Main ()
+    main ()
     {
-        Console.WriteLine.( A.Z )
-        Console.WriteLine.( B.Z )
+        cmd.print.( A.Z )
+        cmd.print.( B.Z )
     }
 
     A [X, Y, Z]

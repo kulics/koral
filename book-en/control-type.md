@@ -8,16 +8,16 @@ If we don't need to define a specific control method for a while, we only need t
 
 E.g:
 ```
-Number :I32
+Number :i32
 ```
 This defines a control data with no additional methods, and it has a built-in default control method.
 
 ## Get Operation
-If we want to set a get operation, we can add `.Ctrl {}` later to define.
+If we want to set a get operation, we can add `.ctrl {}` later to define.
 
 E.g:
 ```
-Number :I32
+Number :i32
 .get    // means get, equivalent to getter in other languages
 {
     <- (7)  // only returns 7
@@ -31,7 +31,7 @@ With the above example, we naturally can think of how to deal with set operation
 
 E.g:
 ```
-Number :I32
+Number :i32
 ...
 .set    // means set, equivalent to setter in other languages
 {
@@ -45,7 +45,7 @@ E.g:
 ```
 _number := 0
 
-Number :I32
+Number :i32
 ...
 .set
 {
@@ -59,7 +59,7 @@ A complete example of reading and writing is as follows:
 ```
 _number := 0
 
-Number :I32
+Number :i32
 .get
 {
     <- (_number)
@@ -82,7 +82,7 @@ Demo
 {
     .. System, XyLang\Library
 
-    Main ()
+    main ()
     {
         Console.WriteLine.(a)
         c = 5
@@ -90,11 +90,11 @@ Demo
         Console.WriteLine.(c)
     }
 
-    a : I32
+    a : i32
     .get { <- (3) }
     
     b := 0
-    c : I32
+    c : i32
     .get { <- (b) }
     .set { b = value }
 }

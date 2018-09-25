@@ -9,7 +9,7 @@ Here we talk about how to deal with the thread more easily, that is, asynchronou
 
 In other languages ​​it can be considered `async/await` for asynchronous programming end-solutions.
 
-The task data type we use here is `Tsk`.
+The task data type we use here is `tsk`.
 ## Asynchronous Declaration
 So how to declare a function asynchronously? Use `~>` on it.
 
@@ -17,18 +17,18 @@ That's right, it's really use `~>` on it.
 
 E.g:
 ```
-Async ()~>(out: I32)
+async ()~>(out: i32)
 {
     <- (12)
 }
 ```
-Once a method has been declared as an async method, the compiler will automatically put a `Tsk<>` wrapper around the return value, and the method will be executed asynchronously.
+Once a method has been declared as an async method, the compiler will automatically put a `tsk<>` wrapper around the return value, and the method will be executed asynchronously.
 
-Normal direct call will only get a `Tsk` data.
+Normal direct call will only get a `tsk` data.
 
 E.g:
 ```
-result := Async.()   // result is a Task data
+result := async.()   // result is a Task data
 ```
 Let's see how to make it asynchronously waiting for execution.
 ## Asynchronous Wait
@@ -36,7 +36,7 @@ As with the declaration, we only need to use `<~ function.()` to declare the wai
 
 E.g:
 ```
-result := <~ Async.()
+result := <~ async.()
 ...
 ```
 After declare, the program execution here will temporarily stop the back of the function, until the async function is completed, the `out` value assigned to` result`, and then continue to execute.
@@ -46,33 +46,33 @@ Asynchronous wait can only be used in asynchronous declared functions.
 E.g:
 ```
 // correct
-Async ()~>(out: I32)
+async ()~>(out: i32)
 {
-    <~ Tsk.Delay.(5000)     // wait for a while
+    <~ tsks.delay.(5000)     // wait for a while
     <- (12)
 }
 // wrong
-Async ()->(out: I32)
+async ()->(out: i32)
 {
-    <~ Tsk.Delay.(5000)     // can not be declared
+    <~ tsks.delay.(5000)     // can not be declared
     <- (12)
 }
 ```
 ## Empty return value
-If the asynchronous function does not return a value, it will also return a `Tsk` data, the same as the external call can wait.
+If the asynchronous function does not return a value, it will also return a `tsk` data, the same as the external call can wait.
 
 We can choose to wait for no data, or we can choose not to wait for data.
 
 E.g:
 ```
-Async ()~>()
+async ()~>()
 {
-    <~ Tsk.Delay.(5000)    // wait for a while
+    <~ tsks.delay.(5000)    // wait for a while
 }
 
-<~ Async.()  // correct
+<~ async.()  // correct
 
-task := Async.()    // correct, got the Task
+task := async.()    // correct, got the Task
 ```
 ## Lambda
 For lambda, we can also use asynchronous, just use `<~`.
