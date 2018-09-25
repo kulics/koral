@@ -273,10 +273,10 @@ namespace XyLang.Library
         public static u32 toU32FromBase(this string it, i32 fromBase) => new u32(it, fromBase);
         public static u64 toU64FromBase(this string it, i32 fromBase) => new u64(it, fromBase);
 
-        public static IEnumerable<(int index, T item)> ForEachWithIndex<T>(this IEnumerable<T> self)
+        public static IEnumerable<(int index, T item)> xyRange<T>(this IEnumerable<T> self)
    => self.Select((item, index) => (index, item));
 
-        public static IEnumerable<(TKey, TValue)> ForEachWithIndex<TKey, TValue>(this IEnumerable<KeyValuePair<TKey, TValue>> self)
+        public static IEnumerable<(TKey, TValue)> xyRange<TKey, TValue>(this IEnumerable<KeyValuePair<TKey, TValue>> self)
    => self.Select((item) => (item.Key, item.Value));
     }
 }
