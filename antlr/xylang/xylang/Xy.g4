@@ -31,7 +31,7 @@ enumStatement: (annotation)? id '[' enumSupportStatement (',' enumSupportStateme
 enumSupportStatement: id ('=' (add)? Integer)?;
 
 // 主函数
-functionMainStatement:'Main' parameterClauseIn BlockLeft (functionSupportStatement)* BlockRight Terminate?;
+functionMainStatement:'main' parameterClauseIn BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 无构造包变量
 nspackageVariableStatement:(annotation)? expression (Define expression|Declared type (Assign expression)?) (nspackageControlSubStatement)* Terminate?;
 // 无构造包常量
@@ -413,20 +413,20 @@ Loop : '@';
 
 Check : '!';
 
-TypeAny : 'Any';
-TypeI8: 'I8';
-TypeU8: 'U8';
-TypeI16: 'I16';
-TypeU16: 'U16';
-TypeI32: 'I32';
-TypeU32: 'U32';
-TypeI64: 'I64';
-TypeU64: 'U64';
-TypeF32: 'F32';
-TypeF64: 'F64';
-TypeChr: 'Chr';
-TypeStr: 'Str';
-TypeBool: 'Bool';
+TypeAny : 'any';
+TypeI8: 'i8';
+TypeU8: 'u8';
+TypeI16: 'i16';
+TypeU16: 'u16';
+TypeI32: 'i32';
+TypeU32: 'u32';
+TypeI64: 'i64';
+TypeU64: 'u64';
+TypeF32: 'f32';
+TypeF64: 'f64';
+TypeChr: 'chr';
+TypeStr: 'str';
+TypeBool: 'bl';
 True: 'true';
 False: 'false';
 Null : 'null';
