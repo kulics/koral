@@ -3,7 +3,7 @@
 ## Hello World
 ### XyLang
 ```
-print.("Hello, world!")
+cmd.print.("Hello, world!")
 ```
 ### C#
 ```
@@ -55,7 +55,7 @@ let myConstant = 42
 ## Explicit Types
 ### XyLang
 ```
-explicitDouble: F64 = 70
+explicitDouble: f64 = 70
 ```
 ### C#
 ```
@@ -76,10 +76,10 @@ let explicitDouble: Double = 70
 ## Basic Types
 ### XyLang
 ```
-I32 I16 I64 I8 
-F64 F32 
-Bool 
-Str
+i32 i16 i64 i8 
+f64 f32 
+bl 
+str
 ```
 ### C#
 ```
@@ -114,7 +114,7 @@ String
 ```
 f := 6.0
 i := 94
-count := i + f.ToI32.()
+count := i + f.toI32.()
 ```
 ### C#
 ```
@@ -145,7 +145,7 @@ let count = i + Int(f)
 ```
 [ 1 << 5 ].@
 {
-    print.(/"{it} times 5 is {it * 5}"/)
+    cmd.print.(/"{it} times 5 is {it * 5}"/)
 }
 ```
 ### C#
@@ -248,8 +248,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### XyLang
 ```
-emptyArray := [ :Str]
-emptyDictionary := [ :Str->F32]
+emptyArray := [ :str]
+emptyDictionary := [ :str->f32]
 ```
 ### C#
 ```
@@ -276,7 +276,7 @@ let emptyDictionary = [String: Float]()
 ## Functions
 ### XyLang
 ```
-greet (name, day: Str)->(r: Str) 
+greet (name, day: str)->(r: str) 
 {
     <- (/"Hello {name}, today is {day}."/)
 }
@@ -314,7 +314,7 @@ greet("Bob", "Tuesday")
 ## Tuple Return
 ### XyLang
 ```
-getGasPrices ()->(a, b, c: F64) 
+getGasPrices ()->(a, b, c: f64) 
 {
     <- (3.59, 3.69, 3.79)
 }
@@ -347,9 +347,9 @@ func getGasPrices() -> (Double, Double, Double) {
 ## Function Type
 ### XyLang
 ```
-makeIncrementer ()->(fn: (in: I32)->(out: I32)) 
+makeIncrementer ()->(fn: (in: i32)->(out: i32)) 
 {
-    addOne (number: I32)->(number: I32) 
+    addOne (number: i32)->(number: i32) 
     {
         <- (1 + number)
     }
@@ -416,7 +416,7 @@ Shape {}->
 }
 Shape +=
 {
-    simpleDescription ()->(s: Str) 
+    simpleDescription ()->(s: str) 
     {
         <- (/"A shape with {numberOfSides} sides."/)
     }
@@ -493,19 +493,19 @@ var shapeDescription = shape.simpleDescription()
 ## Subclass
 ### XyLang
 ```
-NamedShape {..name: Str}->
+NamedShape {..name: str}->
 {
-    numberOfSides: I32 = 0
+    numberOfSides: i32 = 0
 }
 NamedShape +=
 {
-    simpleDescription ()->(s: Str) 
+    simpleDescription ()->(s: str) 
     {
         <- (/"A shape with {numberOfSides} sides."/)
     }
 }
 
-Square {..sideLength: F64, name: Str}-> NamedShape {name}
+Square {..sideLength: f64, name: str}-> NamedShape {name}
 {
     .. 
     {
@@ -514,12 +514,12 @@ Square {..sideLength: F64, name: Str}-> NamedShape {name}
 }
 Square +=
 {
-    area ()->(f: F64) 
+    area ()->(f: f64) 
     {
         <- (sideLength * sideLength)
     }
 
-    ..simpleDescription ()->(s: Str) 
+    ..simpleDescription ()->(s: str) 
     {
         <- (/"A square with sides of length {sideLength}."/)
     }
@@ -856,7 +856,7 @@ for current in someObjects {
 ```
 Nameable ->
 {
-    name ()->(s: Str){}
+    name ()->(s: str){}
 }
 
 f (x: Nameable)->() 
@@ -911,7 +911,7 @@ func f(x: Nameable) {
 ```
 Dog += Nameable
 {
-    name ()->(n: Str)
+    name ()->(n: str)
     {
         <- ("Dog")
     }
@@ -919,7 +919,7 @@ Dog += Nameable
 
 Dog += Weight
 {
-    getWeight ()->(w: I32)
+    getWeight ()->(w: i32)
     {
         <- (30)
     }

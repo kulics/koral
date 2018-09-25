@@ -25,7 +25,7 @@ HelloWorld // export namespace
 {
     .. System // import namespace
 
-    Main () // main function  
+    main () // main function  
     {
         // array
         greetings := ["Hello", "Hola", "Bonjour",
@@ -35,15 +35,15 @@ HelloWorld // export namespace
                     
         greetings.@ // for-each
         {
-            print.(it) // call function
+            cmd.print.(it) // call function
             // match
             it.? [ 0 << 8 ] 
             {
-                print.(" in 0-8")
+                cmd.print.(" in 0-8")
             }
             _
             {
-                print.(" over 10")
+                cmd.print.(" over 10")
                 <- @
             }
         }
