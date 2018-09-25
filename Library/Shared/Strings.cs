@@ -7,33 +7,33 @@ using System.Text;
 
 namespace XyLang.Library
 {
-    [JsonConverter(typeof(StrConverter))]
-    public class Str : IComparable, IEnumerable<Chr>, IXyValue
+    [JsonConverter(typeof(strConverter))]
+    public class str : IComparable, IEnumerable<chr>, iXyValue
     {
         private string v = "";
-        public Str() { }
-        public Str(object o)
+        public str() { }
+        public str(object o)
         {
             v = o.ToString();
         }
 
-        public Chr this[int index] { get => v[index]; }
+        public chr this[int index] { get => v[index]; }
 
-        public IEnumerator<Chr> GetEnumerator() => new StrEnumerator(this);
+        public IEnumerator<chr> GetEnumerator() => new StrEnumerator(this);
 
         IEnumerator IEnumerable.GetEnumerator() => new StrEnumerator(this);
 
-        class StrEnumerator : IEnumerator<Chr>
+        class StrEnumerator : IEnumerator<chr>
         {
-            private Str _collection;
+            private str _collection;
             private int curIndex;
-            public Chr Current { get; private set; }
+            public chr Current { get; private set; }
 
-            public StrEnumerator(Str collection)
+            public StrEnumerator(str collection)
             {
                 _collection = collection;
                 curIndex = -1;
-                Current = default(Chr);
+                Current = default(chr);
             }
 
             object IEnumerator.Current
@@ -46,7 +46,7 @@ namespace XyLang.Library
             public bool MoveNext()
             {
                 //Avoids going beyond the end of the collection.
-                if (++curIndex >= _collection.Count)
+                if (++curIndex >= _collection.count)
                 {
                     return false;
                 }
@@ -61,22 +61,22 @@ namespace XyLang.Library
             public void Reset() { curIndex = -1; }
         }
 
-        public I32 Count => v.Length;
-        public I32 LastIndex => Count - 1;
-        public bool IsEmpty => string.IsNullOrEmpty(v);
-        public bool NotEmpty => !IsEmpty;
+        public i32 count => v.Length;
+        public i32 lastIndex => count - 1;
+        public bool isEmpty => string.IsNullOrEmpty(v);
+        public bool notEmpty => !isEmpty;
 
-        public static implicit operator Str(string it) => new Str(it);
-        public static implicit operator string(Str it) => it.v;
+        public static implicit operator str(string it) => new str(it);
+        public static implicit operator string(str it) => it.v;
 
-        public static Str operator +(Str a, Str b) => new Str(a.v + b.v);
+        public static str operator +(str a, str b) => new str(a.v + b.v);
 
-        public static bool operator ==(Str a, Str b) => a.v == b.v;
-        public static bool operator !=(Str a, Str b) => a.v != b.v;
+        public static bool operator ==(str a, str b) => a.v == b.v;
+        public static bool operator !=(str a, str b) => a.v != b.v;
 
         public override bool Equals(object o)
         {
-            if (o is Str b)
+            if (o is str b)
             {
                 return v == b.v;
             }
@@ -86,7 +86,7 @@ namespace XyLang.Library
             }
         }
 
-        public bool Equals(Str b) => b != null && v == b.v;
+        public bool Equals(str b) => b != null && v == b.v;
 
         public override int GetHashCode() => v.GetHashCode();
 
@@ -96,40 +96,40 @@ namespace XyLang.Library
 
         public string ToString(string format) => v;
 
-        public bool Contains(Str value) => v.Contains(value);
+        public bool contains(str value) => v.Contains(value);
 
-        public I8 ToI8() => new I8(v);
-        public I16 ToI16() => new I16(v);
-        public I32 ToI32() => new I32(v);
-        public I64 ToI64() => new I64(v);
-        public U8 ToU8() => new U8(v);
-        public U16 ToU16() => new U16(v);
-        public U32 ToU32() => new U32(v);
-        public U64 ToU64() => new U64(v);
-        public F32 ToF32() => new F32(v);
-        public F64 ToF64() => new F64(v);
+        public i8 toI8() => new i8(v);
+        public i16 toI16() => new i16(v);
+        public i32 toI32() => new i32(v);
+        public i64 toI64() => new i64(v);
+        public u8 toU8() => new u8(v);
+        public u16 toU16() => new u16(v);
+        public u32 toU32() => new u32(v);
+        public u64 toU64() => new u64(v);
+        public f32 toF32() => new f32(v);
+        public f64 toF64() => new f64(v);
 
-        public I8 ToI8FromBase(I32 fromBase) => new I8(v, fromBase);
-        public I16 ToI16FromBase(I32 fromBase) => new I16(v, fromBase);
-        public I32 ToI32FromBase(I32 fromBase) => new I32(v, fromBase);
-        public I64 ToI64FromBase(I32 fromBase) => new I64(v, fromBase);
-        public U8 ToU8FromBase(I32 fromBase) => new U8(v, fromBase);
-        public U16 ToU16FromBase(I32 fromBase) => new U16(v, fromBase);
-        public U32 ToU32FromBase(I32 fromBase) => new U32(v, fromBase);
-        public U64 ToU64FromBase(I32 fromBase) => new U64(v, fromBase);
+        public i8 toI8FromBase(i32 fromBase) => new i8(v, fromBase);
+        public i16 toI16FromBase(i32 fromBase) => new i16(v, fromBase);
+        public i32 toI32FromBase(i32 fromBase) => new i32(v, fromBase);
+        public i64 toI64FromBase(i32 fromBase) => new i64(v, fromBase);
+        public u8 toU8FromBase(i32 fromBase) => new u8(v, fromBase);
+        public u16 toU16FromBase(i32 fromBase) => new u16(v, fromBase);
+        public u32 toU32FromBase(i32 fromBase) => new u32(v, fromBase);
+        public u64 toU64FromBase(i32 fromBase) => new u64(v, fromBase);
 
         public int CompareTo(object obj) => v.CompareTo(obj.ToString());
 
-        public I32 FirstIndexOf(Str value, StringComparison comparisonType = StringComparison.Ordinal) => v.IndexOf(value, comparisonType);
-        public I32 FirstIndexOf(Str value, I32 startIndex, StringComparison comparisonType = StringComparison.Ordinal) => v.IndexOf(value, startIndex, comparisonType);
-        public I32 FirstIndexOf(Str value, I32 startIndex, I32 count, StringComparison comparisonType = StringComparison.Ordinal) => v.IndexOf(value, startIndex, count, comparisonType);
+        public i32 firstIndexOf(str value, StringComparison comparisonType = StringComparison.Ordinal) => v.IndexOf(value, comparisonType);
+        public i32 firstIndexOf(str value, i32 startIndex, StringComparison comparisonType = StringComparison.Ordinal) => v.IndexOf(value, startIndex, comparisonType);
+        public i32 firstIndexOf(str value, i32 startIndex, i32 count, StringComparison comparisonType = StringComparison.Ordinal) => v.IndexOf(value, startIndex, count, comparisonType);
 
-        public I32 LastIndexOf(Str value, StringComparison comparisonType = StringComparison.Ordinal) => v.LastIndexOf(value, comparisonType);
-        public I32 LastIndexOf(Str value, I32 startIndex, StringComparison comparisonType = StringComparison.Ordinal) => v.LastIndexOf(value, startIndex, comparisonType);
-        public I32 LastIndexOf(Str value, I32 startIndex, I32 count, StringComparison comparisonType = StringComparison.Ordinal) => v.LastIndexOf(value, startIndex, count, comparisonType);
+        public i32 lastIndexOf(str value, StringComparison comparisonType = StringComparison.Ordinal) => v.LastIndexOf(value, comparisonType);
+        public i32 lastIndexOf(str value, i32 startIndex, StringComparison comparisonType = StringComparison.Ordinal) => v.LastIndexOf(value, startIndex, comparisonType);
+        public i32 lastIndexOf(str value, i32 startIndex, i32 count, StringComparison comparisonType = StringComparison.Ordinal) => v.LastIndexOf(value, startIndex, count, comparisonType);
 
-        public Str[] Split(Str[] separator, StringSplitOptions options = StringSplitOptions.None) => Array.ConvertAll(v.Split(Array.ConvertAll(separator, s => s.v), options), s => new Str(s));
-        public Str Slice(I32 startIndex, I32 endIndex)
+        public str[] split(str[] separator, StringSplitOptions options = StringSplitOptions.None) => Array.ConvertAll(v.Split(Array.ConvertAll(separator, s => s.v), options), s => new str(s));
+        public str slice(i32 startIndex, i32 endIndex)
         {
             if (startIndex == null && endIndex == null)
             {
@@ -137,49 +137,49 @@ namespace XyLang.Library
             }
             else if (endIndex == null)
             {
-                return Substring(startIndex, LastIndex - startIndex);
+                return substring(startIndex, lastIndex - startIndex);
             }
             else // (startIndex == null)
             {
-                return Substring(0, LastIndex - endIndex);
+                return substring(0, lastIndex - endIndex);
             }
         }
 
-        public Str Normalize(NormalizationForm normalizationForm = NormalizationForm.FormC) => v.Normalize(normalizationForm);
+        public str normalize(NormalizationForm normalizationForm = NormalizationForm.FormC) => v.Normalize(normalizationForm);
 
-        public Str Remove(I32 startIndex) => v.Remove(startIndex);
-        public Str Remove(I32 startIndex, I32 count) => v.Remove(startIndex, count);
+        public str remove(i32 startIndex) => v.Remove(startIndex);
+        public str remove(i32 startIndex, i32 count) => v.Remove(startIndex, count);
 
-        public Str Replace(Str oldValue, Str newValue) => v.Replace(oldValue ?? "", newValue ?? "");
+        public str replace(str oldValue, str newValue) => v.Replace(oldValue ?? "", newValue ?? "");
 
-        public Str Reverse() => new string(v.Reverse().ToArray());
+        public str reverse() => new string(v.Reverse().ToArray());
 
-        public bool StartsWith(Str value) => v.StartsWith(value);
-        public bool StartsWith(Str value, StringComparison comparisonType) => v.StartsWith(value, comparisonType);
+        public bool startsWith(str value) => v.StartsWith(value);
+        public bool startsWith(str value, StringComparison comparisonType) => v.StartsWith(value, comparisonType);
 
-        public bool EndsWith(Str value) => v.EndsWith(value);
-        public bool EndsWith(Str value, StringComparison comparisonType) => v.EndsWith(value, comparisonType);
+        public bool endsWith(str value) => v.EndsWith(value);
+        public bool endsWith(str value, StringComparison comparisonType) => v.EndsWith(value, comparisonType);
 
-        public Str Substring(I32 startIndex) => v.Substring(startIndex);
-        public Str Substring(I32 startIndex, I32 count) => v.Substring(startIndex, count);
+        public str substring(i32 startIndex) => v.Substring(startIndex);
+        public str substring(i32 startIndex, i32 count) => v.Substring(startIndex, count);
 
-        public Str ToUpper() => v.ToUpper();
-        public Str ToLower() => v.ToLower();
+        public str toUpper() => v.ToUpper();
+        public str toLower() => v.ToLower();
 
-        public Str Trim() => v.Trim();
-        public Str TrimEnd() => v.TrimEnd();
-        public Str TrimStart() => v.TrimStart();
+        public str trim() => v.Trim();
+        public str trimEnd() => v.TrimEnd();
+        public str trimStart() => v.TrimStart();
 
-        public string ToValue() => v;
-        public object ToAny() => v;
+        public string toValue() => v;
+        public object toAny() => v;
     }
 
-    [JsonConverter(typeof(ChrConverter))]
-    public class Chr : IComparable, IXyValue
+    [JsonConverter(typeof(chrConverter))]
+    public class chr : IComparable, iXyValue
     {
         private char v;
-        public Chr() { }
-        public Chr(object o)
+        public chr() { }
+        public chr(object o)
         {
             switch (o)
             {
@@ -202,55 +202,55 @@ namespace XyLang.Library
                     v = Convert.ToChar(o);
                     break;
 
-                case IXyValue i:
-                    v = i.ToChr();
+                case iXyValue i:
+                    v = i.toChr();
                     break;
                 default:
                     throw new Exception("not support type");
             }
         }
 
-        public static implicit operator Chr(char it) => new Chr(it);
-        public static implicit operator char(Chr it) => it.v;
+        public static implicit operator chr(char it) => new chr(it);
+        public static implicit operator char(chr it) => it.v;
 
         public int CompareTo(object obj) => v.CompareTo(obj.ToString());
 
-        public Chr MaxValue { get => char.MaxValue; }
-        public Chr MinValue { get => char.MinValue; }
+        public chr maxValue { get => char.MaxValue; }
+        public chr minValue { get => char.MinValue; }
 
-        public Chr ToLower() => char.ToLower(v);
-        public Chr ToUpper() => char.ToUpper(v);
+        public chr toLower() => char.ToLower(v);
+        public chr toUpper() => char.ToUpper(v);
 
-        public bool IsLower() => char.IsLower(v);
-        public bool IsUpper() => char.IsUpper(v);
+        public bool isLower() => char.IsLower(v);
+        public bool isUpper() => char.IsUpper(v);
 
-        public bool IsLetter() => char.IsLetter(v);
-        public bool IsDigit() => char.IsDigit(v);
-        public bool IsLetterOrDigit() => char.IsLetterOrDigit(v);
+        public bool isLetter() => char.IsLetter(v);
+        public bool isDigit() => char.IsDigit(v);
+        public bool isLetterOrDigit() => char.IsLetterOrDigit(v);
 
-        public bool IsNumber() => char.IsNumber(v);
-        public bool IsSymbol() => char.IsSymbol(v);
-        public bool IsWhiteSpace() => char.IsWhiteSpace(v);
-        public bool IsControl() => char.IsControl(v);
+        public bool isNumber() => char.IsNumber(v);
+        public bool isSymbol() => char.IsSymbol(v);
+        public bool isWhiteSpace() => char.IsWhiteSpace(v);
+        public bool isControl() => char.IsControl(v);
 
-        public double GetNumericValue() => char.GetNumericValue(v);
+        public double getNumericValue() => char.GetNumericValue(v);
 
         public override string ToString() => v.ToString();
         public string ToString(string format) => v.ToString();
 
-        public char ToValue() => v;
-        public object ToAny() => v;
+        public char toValue() => v;
+        public object toAny() => v;
     }
 
-    public class StrConverter : JsonConverter<Str>
+    public class strConverter : JsonConverter<str>
     {
-        public override void WriteJson(JsonWriter writer, Str value, JsonSerializer serializer) => writer.WriteValue(value);
-        public override Str ReadJson(JsonReader reader, Type objectType, Str existingValue, bool hasExistingValue, JsonSerializer serializer) => new Str((string)reader.Value);
+        public override void WriteJson(JsonWriter writer, str value, JsonSerializer serializer) => writer.WriteValue(value);
+        public override str ReadJson(JsonReader reader, Type objectType, str existingValue, bool hasExistingValue, JsonSerializer serializer) => new str((string)reader.Value);
     }
 
-    public class ChrConverter : JsonConverter<Chr>
+    public class chrConverter : JsonConverter<chr>
     {
-        public override void WriteJson(JsonWriter writer, Chr value, JsonSerializer serializer) => writer.WriteValue(value);
-        public override Chr ReadJson(JsonReader reader, Type objectType, Chr existingValue, bool hasExistingValue, JsonSerializer serializer) => new Chr((char)reader.Value);
+        public override void WriteJson(JsonWriter writer, chr value, JsonSerializer serializer) => writer.WriteValue(value);
+        public override chr ReadJson(JsonReader reader, Type objectType, chr existingValue, bool hasExistingValue, JsonSerializer serializer) => new chr((char)reader.Value);
     }
 }

@@ -4,274 +4,274 @@ using System.Linq;
 
 namespace XyLang.Library
 {
-    public interface IXyValue 
+    public interface iXyValue 
     { 
         string ToString(string format);
-        object ToAny();
+        object toAny();
     }
 
     public static class ExpressionExtension
     {
         // object 
-        public static Str ToStr(this object it) => it.ToString();
+        public static str toStr(this object it) => it.ToString();
         // IXyValue
-        public static Str ToStr(this IXyValue it, Str format) => it.ToString(format);
-        public static Chr ToChr(this IXyValue it) => new Chr(it.ToAny());
-        public static I8 ToI8(this IXyValue it) => new I8(it.ToAny());
-        public static I16 ToI16(this IXyValue it) => new I16(it.ToAny());
-        public static I32 ToI32(this IXyValue it) => new I32(it.ToAny());
-        public static I64 ToI64(this IXyValue it) => new I64(it.ToAny());
-        public static U8 ToU8(this IXyValue it) => new U8(it.ToAny());
-        public static U16 ToU16(this IXyValue it) => new U16(it.ToAny());
-        public static U32 ToU32(this IXyValue it) => new U32(it.ToAny());
-        public static U64 ToU64(this IXyValue it) => new U64(it.ToAny());
-        public static F32 ToF32(this IXyValue it) => new F32(it.ToAny());
-        public static F64 ToF64(this IXyValue it) => new F64(it.ToAny());
+        public static str toStr(this iXyValue it, str format) => it.ToString(format);
+        public static chr toChr(this iXyValue it) => new chr(it.toAny());
+        public static i8 toI8(this iXyValue it) => new i8(it.toAny());
+        public static i16 toI16(this iXyValue it) => new i16(it.toAny());
+        public static i32 toI32(this iXyValue it) => new i32(it.toAny());
+        public static i64 toI64(this iXyValue it) => new i64(it.toAny());
+        public static u8 toU8(this iXyValue it) => new u8(it.toAny());
+        public static u16 toU16(this iXyValue it) => new u16(it.toAny());
+        public static u32 toU32(this iXyValue it) => new u32(it.toAny());
+        public static u64 toU64(this iXyValue it) => new u64(it.toAny());
+        public static f32 toF32(this iXyValue it) => new f32(it.toAny());
+        public static f64 toF64(this iXyValue it) => new f64(it.toAny());
         // sbyte
-        public static Str ToStr(this sbyte it, Str format) => it.ToString(format);
-        public static Str ToBase(this sbyte it, I32 fromBase) => Convert.ToString(it, fromBase);
-        public static I8 ToI8(this sbyte it) => new I8(it);
-        public static I16 ToI16(this sbyte it) => new I16(it);
-        public static I32 ToI32(this sbyte it) => new I32(it);
-        public static I64 ToI64(this sbyte it) => new I64(it);
-        public static U8 ToU8(this sbyte it) => new U8(it);
-        public static U16 ToU16(this sbyte it) => new U16(it);
-        public static U32 ToU32(this sbyte it) => new U32(it);
-        public static U64 ToU64(this sbyte it) => new U64(it);
-        public static F32 ToF32(this sbyte it) => new F32(it);
-        public static F64 ToF64(this sbyte it) => new F64(it);
+        public static str toStr(this sbyte it, str format) => it.ToString(format);
+        public static str toBase(this sbyte it, i32 fromBase) => Convert.ToString(it, fromBase);
+        public static i8 toI8(this sbyte it) => new i8(it);
+        public static i16 toI16(this sbyte it) => new i16(it);
+        public static i32 toI32(this sbyte it) => new i32(it);
+        public static i64 toI64(this sbyte it) => new i64(it);
+        public static u8 toU8(this sbyte it) => new u8(it);
+        public static u16 toU16(this sbyte it) => new u16(it);
+        public static u32 toU32(this sbyte it) => new u32(it);
+        public static u64 toU64(this sbyte it) => new u64(it);
+        public static f32 toF32(this sbyte it) => new f32(it);
+        public static f64 toF64(this sbyte it) => new f64(it);
 
-        public static I8 AND(this sbyte it, sbyte v) => new I8(it & v);
-        public static I8 OR(this sbyte it, sbyte v) => new I8(it | v);
-        public static I8 XOR(this sbyte it, sbyte v) => new I8(it ^ v);
-        public static I8 NOT(this sbyte it) => new I8(~it);
-        public static I8 LFT(this sbyte it, int v) => new I8(it << v);
-        public static I8 RHT(this sbyte it, int v) => new I8(it >> v);
+        public static i8 and(this sbyte it, sbyte v) => new i8(it & v);
+        public static i8 or(this sbyte it, sbyte v) => new i8(it | v);
+        public static i8 xor(this sbyte it, sbyte v) => new i8(it ^ v);
+        public static i8 not(this sbyte it) => new i8(~it);
+        public static i8 lft(this sbyte it, int v) => new i8(it << v);
+        public static i8 rht(this sbyte it, int v) => new i8(it >> v);
         // byte
-        public static Str ToStr(this byte it, Str format) => it.ToString(format);
-        public static Str ToBase(this byte it, I32 fromBase) => Convert.ToString(it, fromBase);
-        public static I8 ToI8(this byte it) => new I8(it);
-        public static I16 ToI16(this byte it) => new I16(it);
-        public static I32 ToI32(this byte it) => new I32(it);
-        public static I64 ToI64(this byte it) => new I64(it);
-        public static U8 ToU8(this byte it) => new U8(it);
-        public static U16 ToU16(this byte it) => new U16(it);
-        public static U32 ToU32(this byte it) => new U32(it);
-        public static U64 ToU64(this byte it) => new U64(it);
-        public static F32 ToF32(this byte it) => new F32(it);
-        public static F64 ToF64(this byte it) => new F64(it);
+        public static str toStr(this byte it, str format) => it.ToString(format);
+        public static str toBase(this byte it, i32 fromBase) => Convert.ToString(it, fromBase);
+        public static i8 toI8(this byte it) => new i8(it);
+        public static i16 toI16(this byte it) => new i16(it);
+        public static i32 toI32(this byte it) => new i32(it);
+        public static i64 toI64(this byte it) => new i64(it);
+        public static u8 toU8(this byte it) => new u8(it);
+        public static u16 toU16(this byte it) => new u16(it);
+        public static u32 toU32(this byte it) => new u32(it);
+        public static u64 toU64(this byte it) => new u64(it);
+        public static f32 toF32(this byte it) => new f32(it);
+        public static f64 toF64(this byte it) => new f64(it);
 
-        public static U8 AND(this byte it, byte v) => new U8(it & v);
-        public static U8 OR(this byte it, byte v) => new U8(it | v);
-        public static U8 XOR(this byte it, byte v) => new U8(it ^ v);
-        public static U8 NOT(this byte it) => new U8(~it);
-        public static U8 LFT(this byte it, int v) => new U8(it << v);
-        public static U8 RHT(this byte it, int v) => new U8(it >> v);
+        public static u8 and(this byte it, byte v) => new u8(it & v);
+        public static u8 or(this byte it, byte v) => new u8(it | v);
+        public static u8 xor(this byte it, byte v) => new u8(it ^ v);
+        public static u8 not(this byte it) => new u8(~it);
+        public static u8 lft(this byte it, int v) => new u8(it << v);
+        public static u8 rht(this byte it, int v) => new u8(it >> v);
 
         // short
-        public static Str ToStr(this short it, Str format) => it.ToString(format);
-        public static Str ToBase(this short it, I32 fromBase) => Convert.ToString(it, fromBase);
-        public static I8 ToI8(this short it) => new I8(it);
-        public static I16 ToI16(this short it) => new I16(it);
-        public static I32 ToI32(this short it) => new I32(it);
-        public static I64 ToI64(this short it) => new I64(it);
-        public static U8 ToU8(this short it) => new U8(it);
-        public static U16 ToU16(this short it) => new U16(it);
-        public static U32 ToU32(this short it) => new U32(it);
-        public static U64 ToU64(this short it) => new U64(it);
-        public static F32 ToF32(this short it) => new F32(it);
-        public static F64 ToF64(this short it) => new F64(it);
+        public static str toStr(this short it, str format) => it.ToString(format);
+        public static str toBase(this short it, i32 fromBase) => Convert.ToString(it, fromBase);
+        public static i8 toI8(this short it) => new i8(it);
+        public static i16 toI16(this short it) => new i16(it);
+        public static i32 toI32(this short it) => new i32(it);
+        public static i64 toI64(this short it) => new i64(it);
+        public static u8 toU8(this short it) => new u8(it);
+        public static u16 toU16(this short it) => new u16(it);
+        public static u32 toU32(this short it) => new u32(it);
+        public static u64 toU64(this short it) => new u64(it);
+        public static f32 toF32(this short it) => new f32(it);
+        public static f64 toF64(this short it) => new f64(it);
 
-        public static I16 AND(this short it, short v) => new I16(it & v);
-        public static I16 OR(this short it, short v) => new I16(it | v);
-        public static I16 XOR(this short it, short v) => new I16(it ^ v);
-        public static I16 NOT(this short it) => new I16(~it);
-        public static I16 LFT(this short it, int v) => new I16(it << v);
-        public static I16 RHT(this short it, int v) => new I16(it >> v);
+        public static i16 and(this short it, short v) => new i16(it & v);
+        public static i16 or(this short it, short v) => new i16(it | v);
+        public static i16 xor(this short it, short v) => new i16(it ^ v);
+        public static i16 not(this short it) => new i16(~it);
+        public static i16 lft(this short it, int v) => new i16(it << v);
+        public static i16 rht(this short it, int v) => new i16(it >> v);
 
         // ushort
-        public static Str ToStr(this ushort it, Str format) => it.ToString(format);
-        public static Str ToBase(this ushort it, I32 fromBase) => Convert.ToString(it, fromBase);
-        public static I8 ToI8(this ushort it) => new I8(it);
-        public static I16 ToI16(this ushort it) => new I16(it);
-        public static I32 ToI32(this ushort it) => new I32(it);
-        public static I64 ToI64(this ushort it) => new I64(it);
-        public static U8 ToU8(this ushort it) => new U8(it);
-        public static U16 ToU16(this ushort it) => new U16(it);
-        public static U32 ToU32(this ushort it) => new U32(it);
-        public static U64 ToU64(this ushort it) => new U64(it);
-        public static F32 ToF32(this ushort it) => new F32(it);
-        public static F64 ToF64(this ushort it) => new F64(it);
+        public static str toStr(this ushort it, str format) => it.ToString(format);
+        public static str toBase(this ushort it, i32 fromBase) => Convert.ToString(it, fromBase);
+        public static i8 toI8(this ushort it) => new i8(it);
+        public static i16 toI16(this ushort it) => new i16(it);
+        public static i32 toI32(this ushort it) => new i32(it);
+        public static i64 toI64(this ushort it) => new i64(it);
+        public static u8 toU8(this ushort it) => new u8(it);
+        public static u16 toU16(this ushort it) => new u16(it);
+        public static u32 toU32(this ushort it) => new u32(it);
+        public static u64 toU64(this ushort it) => new u64(it);
+        public static f32 toF32(this ushort it) => new f32(it);
+        public static f64 toF64(this ushort it) => new f64(it);
 
-        public static U16 AND(this ushort it, ushort v) => new U16(it & v);
-        public static U16 OR(this ushort it, ushort v) => new U16(it | v);
-        public static U16 XOR(this ushort it, ushort v) => new U16(it ^ v);
-        public static U16 NOT(this ushort it) => new U16(~it);
-        public static U16 LFT(this ushort it, int v) => new U16(it << v);
-        public static U16 RHT(this ushort it, int v) => new U16(it >> v);
+        public static u16 and(this ushort it, ushort v) => new u16(it & v);
+        public static u16 or(this ushort it, ushort v) => new u16(it | v);
+        public static u16 xor(this ushort it, ushort v) => new u16(it ^ v);
+        public static u16 not(this ushort it) => new u16(~it);
+        public static u16 lft(this ushort it, int v) => new u16(it << v);
+        public static u16 rht(this ushort it, int v) => new u16(it >> v);
 
         // int
-        public static Str ToStr(this int it, Str format) => it.ToString(format);
-        public static Str ToBase(this int it, I32 fromBase) => Convert.ToString(it, fromBase);
-        public static I8 ToI8(this int it) => new I8(it);
-        public static I16 ToI16(this int it) => new I16(it);
-        public static I32 ToI32(this int it) => new I32(it);
-        public static I64 ToI64(this int it) => new I64(it);
-        public static U8 ToU8(this int it) => new U8(it);
-        public static U16 ToU16(this int it) => new U16(it);
-        public static U32 ToU32(this int it) => new U32(it);
-        public static U64 ToU64(this int it) => new U64(it);
-        public static F32 ToF32(this int it) => new F32(it);
-        public static F64 ToF64(this int it) => new F64(it);
+        public static str toStr(this int it, str format) => it.ToString(format);
+        public static str toBase(this int it, i32 fromBase) => Convert.ToString(it, fromBase);
+        public static i8 toI8(this int it) => new i8(it);
+        public static i16 toI16(this int it) => new i16(it);
+        public static i32 toI32(this int it) => new i32(it);
+        public static i64 toI64(this int it) => new i64(it);
+        public static u8 toU8(this int it) => new u8(it);
+        public static u16 toU16(this int it) => new u16(it);
+        public static u32 toU32(this int it) => new u32(it);
+        public static u64 toU64(this int it) => new u64(it);
+        public static f32 toF32(this int it) => new f32(it);
+        public static f64 toF64(this int it) => new f64(it);
 
-        public static I32 AND(this int it, int v) => new I32(it & v);
-        public static I32 OR(this int it, int v) => new I32(it | v);
-        public static I32 XOR(this int it, int v) => new I32(it ^ v);
-        public static I32 NOT(this int it) => new I32(~it);
-        public static I32 LFT(this int it, int v) => new I32(it << v);
-        public static I32 RHT(this int it, int v) => new I32(it >> v);
+        public static i32 and(this int it, int v) => new i32(it & v);
+        public static i32 or(this int it, int v) => new i32(it | v);
+        public static i32 xor(this int it, int v) => new i32(it ^ v);
+        public static i32 not(this int it) => new i32(~it);
+        public static i32 lft(this int it, int v) => new i32(it << v);
+        public static i32 rht(this int it, int v) => new i32(it >> v);
 
         // uint
-        public static Str ToStr(this uint it, Str format) => it.ToString(format);
-        public static Str ToBase(this uint it, I32 fromBase) => Convert.ToString(it, fromBase);
-        public static I8 ToI8(this uint it) => new I8(it);
-        public static I16 ToI16(this uint it) => new I16(it);
-        public static I32 ToI32(this uint it) => new I32(it);
-        public static I64 ToI64(this uint it) => new I64(it);
-        public static U8 ToU8(this uint it) => new U8(it);
-        public static U16 ToU16(this uint it) => new U16(it);
-        public static U32 ToU32(this uint it) => new U32(it);
-        public static U64 ToU64(this uint it) => new U64(it);
-        public static F32 ToF32(this uint it) => new F32(it);
-        public static F64 ToF64(this uint it) => new F64(it);
+        public static str toStr(this uint it, str format) => it.ToString(format);
+        public static str toBase(this uint it, i32 fromBase) => Convert.ToString(it, fromBase);
+        public static i8 toI8(this uint it) => new i8(it);
+        public static i16 toI16(this uint it) => new i16(it);
+        public static i32 toI32(this uint it) => new i32(it);
+        public static i64 toI64(this uint it) => new i64(it);
+        public static u8 toU8(this uint it) => new u8(it);
+        public static u16 toU16(this uint it) => new u16(it);
+        public static u32 toU32(this uint it) => new u32(it);
+        public static u64 toU64(this uint it) => new u64(it);
+        public static f32 toF32(this uint it) => new f32(it);
+        public static f64 toF64(this uint it) => new f64(it);
 
-        public static U32 AND(this uint it, uint v) => new U32(it & v);
-        public static U32 OR(this uint it, uint v) => new U32(it | v);
-        public static U32 XOR(this uint it, uint v) => new U32(it ^ v);
-        public static U32 NOT(this uint it) => new U32(~it);
-        public static U32 LFT(this uint it, int v) => new U32(it << v);
-        public static U32 RHT(this uint it, int v) => new U32(it >> v);
+        public static u32 and(this uint it, uint v) => new u32(it & v);
+        public static u32 or(this uint it, uint v) => new u32(it | v);
+        public static u32 xor(this uint it, uint v) => new u32(it ^ v);
+        public static u32 not(this uint it) => new u32(~it);
+        public static u32 lft(this uint it, int v) => new u32(it << v);
+        public static u32 rht(this uint it, int v) => new u32(it >> v);
 
         // long
-        public static Str ToStr(this long it, Str format) => it.ToString(format);
-        public static Str ToBase(this long it, I32 fromBase) => Convert.ToString(it, fromBase);
-        public static I8 ToI8(this long it) => new I8(it);
-        public static I16 ToI16(this long it) => new I16(it);
-        public static I32 ToI32(this long it) => new I32(it);
-        public static I64 ToI64(this long it) => new I64(it);
-        public static U8 ToU8(this long it) => new U8(it);
-        public static U16 ToU16(this long it) => new U16(it);
-        public static U32 ToU32(this long it) => new U32(it);
-        public static U64 ToU64(this long it) => new U64(it);
-        public static F32 ToF32(this long it) => new F32(it);
-        public static F64 ToF64(this long it) => new F64(it);
+        public static str toStr(this long it, str format) => it.ToString(format);
+        public static str toBase(this long it, i32 fromBase) => Convert.ToString(it, fromBase);
+        public static i8 toI8(this long it) => new i8(it);
+        public static i16 toI16(this long it) => new i16(it);
+        public static i32 toI32(this long it) => new i32(it);
+        public static i64 toI64(this long it) => new i64(it);
+        public static u8 toU8(this long it) => new u8(it);
+        public static u16 toU16(this long it) => new u16(it);
+        public static u32 toU32(this long it) => new u32(it);
+        public static u64 toU64(this long it) => new u64(it);
+        public static f32 toF32(this long it) => new f32(it);
+        public static f64 toF64(this long it) => new f64(it);
 
-        public static I64 AND(this long it, long v) => new I64(it & v);
-        public static I64 OR(this long it, long v) => new I64(it | v);
-        public static I64 XOR(this long it, long v) => new I64(it ^ v);
-        public static I64 NOT(this long it) => new I64(~it);
-        public static I64 LFT(this long it, int v) => new I64(it << v);
-        public static I64 RHT(this long it, int v) => new I64(it >> v);
+        public static i64 and(this long it, long v) => new i64(it & v);
+        public static i64 or(this long it, long v) => new i64(it | v);
+        public static i64 xor(this long it, long v) => new i64(it ^ v);
+        public static i64 not(this long it) => new i64(~it);
+        public static i64 lft(this long it, int v) => new i64(it << v);
+        public static i64 rht(this long it, int v) => new i64(it >> v);
 
         // ulong
-        public static Str ToStr(this ulong it, Str format) => it.ToString(format);
-        public static Str ToBase(this ulong it, I32 fromBase) => Convert.ToString((long)it, fromBase);
-        public static I8 ToI8(this ulong it) => new I8(it);
-        public static I16 ToI16(this ulong it) => new I16(it);
-        public static I32 ToI32(this ulong it) => new I32(it);
-        public static I64 ToI64(this ulong it) => new I64(it);
-        public static U8 ToU8(this ulong it) => new U8(it);
-        public static U16 ToU16(this ulong it) => new U16(it);
-        public static U32 ToU32(this ulong it) => new U32(it);
-        public static U64 ToU64(this ulong it) => new U64(it);
-        public static F32 ToF32(this ulong it) => new F32(it);
-        public static F64 ToF64(this ulong it) => new F64(it);
+        public static str toStr(this ulong it, str format) => it.ToString(format);
+        public static str toBase(this ulong it, i32 fromBase) => Convert.ToString((long)it, fromBase);
+        public static i8 toI8(this ulong it) => new i8(it);
+        public static i16 toI16(this ulong it) => new i16(it);
+        public static i32 toI32(this ulong it) => new i32(it);
+        public static i64 toI64(this ulong it) => new i64(it);
+        public static u8 toU8(this ulong it) => new u8(it);
+        public static u16 toU16(this ulong it) => new u16(it);
+        public static u32 toU32(this ulong it) => new u32(it);
+        public static u64 toU64(this ulong it) => new u64(it);
+        public static f32 toF32(this ulong it) => new f32(it);
+        public static f64 toF64(this ulong it) => new f64(it);
 
-        public static U64 AND(this ulong it, ulong v) => new U64(it & v);
-        public static U64 OR(this ulong it, ulong v) => new U64(it | v);
-        public static U64 XOR(this ulong it, ulong v) => new U64(it ^ v);
-        public static U64 NOT(this ulong it) => new U64(~it);
-        public static U64 LFT(this ulong it, int v) => new U64(it << v);
-        public static U64 RHT(this ulong it, int v) => new U64(it >> v);
+        public static u64 and(this ulong it, ulong v) => new u64(it & v);
+        public static u64 or(this ulong it, ulong v) => new u64(it | v);
+        public static u64 xor(this ulong it, ulong v) => new u64(it ^ v);
+        public static u64 not(this ulong it) => new u64(~it);
+        public static u64 lft(this ulong it, int v) => new u64(it << v);
+        public static u64 rht(this ulong it, int v) => new u64(it >> v);
 
         // float
-        public static Str ToStr(this float it, Str format) => it.ToString(format);
-        public static I8 ToI8(this float it) => new I8(it);
-        public static I16 ToI16(this float it) => new I16(it);
-        public static I32 ToI32(this float it) => new I32(it);
-        public static I64 ToI64(this float it) => new I64(it);
-        public static U8 ToU8(this float it) => new U8(it);
-        public static U16 ToU16(this float it) => new U16(it);
-        public static U32 ToU32(this float it) => new U32(it);
-        public static U64 ToU64(this float it) => new U64(it);
-        public static F32 ToF32(this float it) => new F32(it);
-        public static F64 ToF64(this float it) => new F64(it);
+        public static str toStr(this float it, str format) => it.ToString(format);
+        public static i8 toI8(this float it) => new i8(it);
+        public static i16 toI16(this float it) => new i16(it);
+        public static i32 toI32(this float it) => new i32(it);
+        public static i64 toI64(this float it) => new i64(it);
+        public static u8 toU8(this float it) => new u8(it);
+        public static u16 toU16(this float it) => new u16(it);
+        public static u32 toU32(this float it) => new u32(it);
+        public static u64 toU64(this float it) => new u64(it);
+        public static f32 toF32(this float it) => new f32(it);
+        public static f64 toF64(this float it) => new f64(it);
 
         // double
-        public static Str ToStr(this double it, Str format) => it.ToString(format);
-        public static I8 ToI8(this double it) => new I8(it);
-        public static I16 ToI16(this double it) => new I16(it);
-        public static I32 ToI32(this double it) => new I32(it);
-        public static I64 ToI64(this double it) => new I64(it);
-        public static U8 ToU8(this double it) => new U8(it);
-        public static U16 ToU16(this double it) => new U16(it);
-        public static U32 ToU32(this double it) => new U32(it);
-        public static U64 ToU64(this double it) => new U64(it);
-        public static F32 ToF32(this double it) => new F32(it);
-        public static F64 ToF64(this double it) => new F64(it);
+        public static str toStr(this double it, str format) => it.ToString(format);
+        public static i8 toI8(this double it) => new i8(it);
+        public static i16 toI16(this double it) => new i16(it);
+        public static i32 toI32(this double it) => new i32(it);
+        public static i64 toI64(this double it) => new i64(it);
+        public static u8 toU8(this double it) => new u8(it);
+        public static u16 toU16(this double it) => new u16(it);
+        public static u32 toU32(this double it) => new u32(it);
+        public static u64 toU64(this double it) => new u64(it);
+        public static f32 toF32(this double it) => new f32(it);
+        public static f64 toF64(this double it) => new f64(it);
 
         // Char
-        public static Str ToStr(this char it, Str format) => it.ToString();
-        public static I8 ToI8(this char it) => new I8(it);
-        public static I16 ToI16(this char it) => new I16(it);
-        public static I32 ToI32(this char it) => new I32(it);
-        public static I64 ToI64(this char it) => new I64(it);
-        public static U8 ToU8(this char it) => new U8(it);
-        public static U16 ToU16(this char it) => new U16(it);
-        public static U32 ToU32(this char it) => new U32(it);
-        public static U64 ToU64(this char it) => new U64(it);
-        public static F32 ToF32(this char it) => new F32(it);
-        public static F64 ToF64(this char it) => new F64(it);
+        public static str toStr(this char it, str format) => it.ToString();
+        public static i8 toI8(this char it) => new i8(it);
+        public static i16 toI16(this char it) => new i16(it);
+        public static i32 toI32(this char it) => new i32(it);
+        public static i64 toI64(this char it) => new i64(it);
+        public static u8 toU8(this char it) => new u8(it);
+        public static u16 toU16(this char it) => new u16(it);
+        public static u32 toU32(this char it) => new u32(it);
+        public static u64 toU64(this char it) => new u64(it);
+        public static f32 toF32(this char it) => new f32(it);
+        public static f64 toF64(this char it) => new f64(it);
 
-        public static Chr ToLower(this char it) => char.ToLower(it);
-        public static Chr ToUpper(this char it) => char.ToUpper(it);
+        public static chr toLower(this char it) => char.ToLower(it);
+        public static chr toUpper(this char it) => char.ToUpper(it);
 
-        public static bool IsLower(this char it) => char.IsLower(it);
-        public static bool IsUpper(this char it) => char.IsUpper(it);
+        public static bool isLower(this char it) => char.IsLower(it);
+        public static bool isUpper(this char it) => char.IsUpper(it);
 
-        public static bool IsLetter(this char it) => char.IsLetter(it);
-        public static bool IsDigit(this char it) => char.IsDigit(it);
-        public static bool IsLetterOrDigit(this char it) => char.IsLetterOrDigit(it);
+        public static bool isLetter(this char it) => char.IsLetter(it);
+        public static bool isDigit(this char it) => char.IsDigit(it);
+        public static bool isLetterOrDigit(this char it) => char.IsLetterOrDigit(it);
 
-        public static bool IsNumber(this char it) => char.IsNumber(it);
-        public static bool IsSymbol(this char it) => char.IsSymbol(it);
-        public static bool IsWhiteSpace(this char it) => char.IsWhiteSpace(it);
-        public static bool IsControl(this char it) => char.IsControl(it);
+        public static bool isNumber(this char it) => char.IsNumber(it);
+        public static bool isSymbol(this char it) => char.IsSymbol(it);
+        public static bool isWhiteSpace(this char it) => char.IsWhiteSpace(it);
+        public static bool isControl(this char it) => char.IsControl(it);
 
         // String
-        public static bool NotEmpty(this string it) => !it.IsEmpty();
-        public static bool IsEmpty(this string it) => string.IsNullOrEmpty(it);
+        public static bool notEmpty(this string it) => !it.isEmpty();
+        public static bool isEmpty(this string it) => string.IsNullOrEmpty(it);
 
-        public static Str ToStr(this string it, Str format) => it;
-        public static I8 ToI8(this string it) => new I8(it);
-        public static I16 ToI16(this string it) => new I16(it);
-        public static I32 ToI32(this string it) => new I32(it);
-        public static I64 ToI64(this string it) => new I64(it);
-        public static U8 ToU8(this string it) => new U8(it);
-        public static U16 ToU16(this string it) => new U16(it);
-        public static U32 ToU32(this string it) => new U32(it);
-        public static U64 ToU64(this string it) => new U64(it);
-        public static F32 ToF32(this string it) => new F32(it);
-        public static F64 ToF64(this string it) => new F64(it);
+        public static str toStr(this string it, str format) => it;
+        public static i8 toI8(this string it) => new i8(it);
+        public static i16 toI16(this string it) => new i16(it);
+        public static i32 toI32(this string it) => new i32(it);
+        public static i64 toI64(this string it) => new i64(it);
+        public static u8 toU8(this string it) => new u8(it);
+        public static u16 toU16(this string it) => new u16(it);
+        public static u32 toU32(this string it) => new u32(it);
+        public static u64 toU64(this string it) => new u64(it);
+        public static f32 toF32(this string it) => new f32(it);
+        public static f64 toF64(this string it) => new f64(it);
 
-        public static I8 ToI8FromBase(this string it, I32 fromBase) => new I8(it, fromBase);
-        public static I16 ToI16FromBase(this string it, I32 fromBase) => new I16(it, fromBase);
-        public static I32 ToI32FromBase(this string it, I32 fromBase) => new I32(it, fromBase);
-        public static I64 ToI64FromBase(this string it, I32 fromBase) => new I64(it, fromBase);
-        public static U8 ToU8FromBase(this string it, I32 fromBase) => new U8(it, fromBase);
-        public static U16 ToU16FromBase(this string it, I32 fromBase) => new U16(it, fromBase);
-        public static U32 ToU32FromBase(this string it, I32 fromBase) => new U32(it, fromBase);
-        public static U64 ToU64FromBase(this string it, I32 fromBase) => new U64(it, fromBase);
+        public static i8 toI8FromBase(this string it, i32 fromBase) => new i8(it, fromBase);
+        public static i16 toI16FromBase(this string it, i32 fromBase) => new i16(it, fromBase);
+        public static i32 toI32FromBase(this string it, i32 fromBase) => new i32(it, fromBase);
+        public static i64 toI64FromBase(this string it, i32 fromBase) => new i64(it, fromBase);
+        public static u8 toU8FromBase(this string it, i32 fromBase) => new u8(it, fromBase);
+        public static u16 toU16FromBase(this string it, i32 fromBase) => new u16(it, fromBase);
+        public static u32 toU32FromBase(this string it, i32 fromBase) => new u32(it, fromBase);
+        public static u64 toU64FromBase(this string it, i32 fromBase) => new u64(it, fromBase);
 
         public static IEnumerable<(int index, T item)> ForEachWithIndex<T>(this IEnumerable<T> self)
    => self.Select((item, index) => (index, item));

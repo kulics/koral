@@ -3,32 +3,32 @@ using System.Collections.Generic;
 
 namespace XyLang.Library
 {
-    public class Lst<T> : List<T>
+    public class lst<T> : List<T>
     {
-        public Lst() { }
-        public Lst(T[] v) : base(v) { }
-        public Lst(IEnumerable<T> collection) : base(collection) { }
-        public Lst(I32 capacity) : base(capacity) { }
+        public lst() { }
+        public lst(T[] v) : base(v) { }
+        public lst(IEnumerable<T> collection) : base(collection) { }
+        public lst(i32 capacity) : base(capacity) { }
 
-        public static Lst<T> operator +(Lst<T> L, T R)
+        public static lst<T> operator +(lst<T> L, T R)
         {
-            var list = new Lst<T>();
+            var list = new lst<T>();
             list.AddRange(L);
             list.Add(R);
             return list;
         }
 
-        public static Lst<T> operator +(Lst<T> L, Lst<T> R)
+        public static lst<T> operator +(lst<T> L, lst<T> R)
         {
-            var list = new Lst<T>();
+            var list = new lst<T>();
             list.AddRange(L);
             list.AddRange(R);
             return list;
         }
 
-        public static Lst<T> operator +(T L, Lst<T> R)
+        public static lst<T> operator +(T L, lst<T> R)
         {
-            var list = new Lst<T>
+            var list = new lst<T>
             {
                 L
             };
@@ -36,23 +36,26 @@ namespace XyLang.Library
             return list;
         }
 
-        public static Lst<T> operator -(Lst<T> L, int R)
+        public static lst<T> operator -(lst<T> L, int R)
         {
-            var list = new Lst<T>();
+            var list = new lst<T>();
             list.AddRange(L);
             list.RemoveAt(R);
             return list;
         }
 
-        public T First => NotEmpty ? this[0] : default(T);
-        public T Last => NotEmpty ? this[Count - 1] : default(T);
-        public I32 LastIndex => Count - 1;
+        public T first => notEmpty ? this[0] : default(T);
+        public T last => notEmpty ? this[Count - 1] : default(T);
+        public i32 lastIndex => Count - 1;
 
-        public bool IsEmpty => !NotEmpty;
-        public bool NotEmpty => Count > 0;
+        public bool isEmpty => !notEmpty;
+        public bool notEmpty => Count > 0;
 
-        public Lst<T> SubList(I32 startIndex, I32 count) => base.GetRange(startIndex, count) as Lst<T>;
-        public Lst<T> Slice(I32 startIndex, I32 endIndex)
+        public i32 count => Count;
+        public i32 capacity => Capacity;
+
+        public lst<T> subList(i32 startIndex, i32 count) => base.GetRange(startIndex, count) as lst<T>;
+        public lst<T> slice(i32 startIndex, i32 endIndex)
         {
             if (startIndex == null && endIndex == null)
             {
@@ -60,35 +63,43 @@ namespace XyLang.Library
             }
             else if (endIndex == null)
             {
-                return SubList(startIndex, LastIndex - startIndex);
+                return subList(startIndex, lastIndex - startIndex);
             }
             else // (startIndex == null)
             {
-                return SubList(0, LastIndex - endIndex);
+                return subList(0, lastIndex - endIndex);
             }
         }
-        public I32 FirstIndexOf(T item) => base.IndexOf(item);
-        public new I32 LastIndexOf(T item) => base.LastIndexOf(item);
+        public i32 firstIndexOf(T item) => base.IndexOf(item);
+        public new i32 lastIndexOf(T item) => base.LastIndexOf(item);
 
-        public T FindFirst(Predicate<T> match) => base.Find(match);
-        public new T FindLast(Predicate<T> match) => base.FindLast(match);
-        public new Lst<T> FindAll(Predicate<T> match) => base.FindAll(match) as Lst<T>;
-        public I32 FindFirstIndex(Predicate<T> match) => base.FindIndex(match);
-        public new I32 FindLastIndex(Predicate<T> match) => base.FindLastIndex(match);
+        public T findFirst(Predicate<T> match) => base.Find(match);
+        public new T findLast(Predicate<T> match) => base.FindLast(match);
+        public new lst<T> findAll(Predicate<T> match) => base.FindAll(match) as lst<T>;
+        public i32 findFirstIndex(Predicate<T> match) => base.FindIndex(match);
+        public new i32 findLastIndex(Predicate<T> match) => base.FindLastIndex(match);
+
+        public void add(T item) => Add(item);
+        public void addRange(IEnumerable<T> collection) => AddRange(collection);
+        public void remove(T item) => Remove(item);
+
+        public void clear() => Clear();
+        public bool has(T item) => Contains(item);
+
     }
 
-    public class Dic<TKey, TValue> : Dictionary<TKey, TValue>
+    public class dic<TKey, TValue> : Dictionary<TKey, TValue>
     {
-        public Dic() : base() { }
-        public Dic(IDictionary<TKey, TValue> dictionary) : base(dictionary) { }
-        public Dic(IEqualityComparer<TKey> comparer) : base(comparer) { }
-        public Dic(int capacity) : base(capacity) { }
-        public Dic(IDictionary<TKey, TValue> dictionary, IEqualityComparer<TKey> comparer) : base(dictionary, comparer) { }
-        public Dic(int capacity, IEqualityComparer<TKey> comparer) : base(capacity, comparer) { }
+        public dic() : base() { }
+        public dic(IDictionary<TKey, TValue> dictionary) : base(dictionary) { }
+        public dic(IEqualityComparer<TKey> comparer) : base(comparer) { }
+        public dic(int capacity) : base(capacity) { }
+        public dic(IDictionary<TKey, TValue> dictionary, IEqualityComparer<TKey> comparer) : base(dictionary, comparer) { }
+        public dic(int capacity, IEqualityComparer<TKey> comparer) : base(capacity, comparer) { }
 
-        public static Dic<TKey, TValue> operator +(Dic<TKey, TValue> L, Dic<TKey, TValue> R)
+        public static dic<TKey, TValue> operator +(dic<TKey, TValue> L, dic<TKey, TValue> R)
         {
-            var dic = new Dic<TKey, TValue>();
+            var dic = new dic<TKey, TValue>();
             foreach (var item in L)
             {
                 dic.Add(item.Key, item.Value);
@@ -100,9 +111,9 @@ namespace XyLang.Library
             return dic;
         }
 
-        public static Dic<TKey, TValue> operator -(Dic<TKey, TValue> L, TKey R)
+        public static dic<TKey, TValue> operator -(dic<TKey, TValue> L, TKey R)
         {
-            var dic = new Dic<TKey, TValue>();
+            var dic = new dic<TKey, TValue>();
             foreach (var item in L)
             {
                 dic.Add(item.Key, item.Value);
@@ -111,7 +122,16 @@ namespace XyLang.Library
             return dic;
         }
 
-        public bool IsEmpty => !NotEmpty;
-        public bool NotEmpty => Count > 0;
+        public bool hasKey(TKey key) => ContainsKey(key);
+        public bool hasValue(TValue value) => ContainsValue(value);
+
+        public bool isEmpty => !notEmpty;
+        public bool notEmpty => Count > 0;
+
+        public i32 count => Count;
+
+        public void add(TKey key, TValue value) => Add(key, value);
+        public bool remove(TKey key) => Remove(key);
+        public void clear() => Clear();
     }
 }
