@@ -82,10 +82,18 @@ namespace XyLang.Library
         public void add(T item) => Add(item);
         public void addRange(IEnumerable<T> collection) => AddRange(collection);
         public void remove(T item) => Remove(item);
-
+        public void removeAll(Predicate<T> match) => RemoveAll(match);
+        public void insert(i32 index, T item) => Insert(index, item);
+        public void insertRange(i32 index, IEnumerable<T> collection) => InsertRange(index, collection);
+        public void removeAt(i32 index) => RemoveAt(index);
+        public void removeRange(i32 index, i32 count) => RemoveRange(index, count);
         public void clear() => Clear();
         public bool has(T item) => Contains(item);
 
+        public bool exists(Predicate<T> match) => Exists(match);
+        public T[] toArray() => ToArray();
+        public void reverse() => Reverse();
+        public void sort(Comparison<T> comparison) => Sort(comparison);
     }
 
     public class dic<TKey, TValue> : Dictionary<TKey, TValue>
