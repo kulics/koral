@@ -68,12 +68,12 @@ In this language, no special symbols are set for bit operations, and function op
 E.g:
 ```
 a := 1
-a.AND.(1)   // bitwise AND
-a.OR.(1)    // bitwise OR
-a.XOR.(1)   // bitwise XOR
-a.NOT.()    // bitwise Invert
-a.LFT.(1)   // left shift 
-a.RHT.(1)   // right shift
+a.and.(1)   // bitwise AND
+a.or.(1)    // bitwise OR
+a.xor.(1)   // bitwise XOR
+a.not.()    // bitwise Invert
+a.lft.(1)   // left shift 
+a.rht.(1)   // right shift
 ```
 ## Braces
 Sometimes we need to do a mix of multiple data operations within a single statement, which involves priority issues.

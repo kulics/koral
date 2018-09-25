@@ -10,7 +10,7 @@ E.g:
 ```
 name\space
 {
-    GetSomething ()->(content:Str)
+    getSomething ()->(content:str)
     {
         <- ("something")
     }
@@ -28,10 +28,10 @@ import
 {
     .. name\space
 
-    Main ()
+    main ()
     {
         // print something
-        Console.WriteLine.( Demo.GetSomething.() )
+        cmd.print.( Demo.getSomething.() )
     }
 }
 ```
@@ -42,7 +42,7 @@ E.g:
 ```
 name\space::helper
 {
-    GetSomething ()->(content:Str)
+    getSomething ()->(content:str)
     {
         <- ("something")
     }
@@ -52,9 +52,9 @@ import
 {
     .. name\space
 
-    Main ()
+    main ()
     {
-        Console.WriteLine.( helper.GetSomething.() )
+        cmd.print.( helper.getSomething.() )
     }
 }
 ```
@@ -67,10 +67,10 @@ import
 {
     .. name\space.Demo
     
-    Main ()
+    main ()
     {
         // print something
-        Console.WriteLine.( GetSomething.() )
+        cmd.print.( getSomething.() )
     }
 }
 ```
@@ -82,10 +82,10 @@ E.g:
 ```
 demo
 {
-    Main ()
+    main ()
     {
         // can be used directly
-        Console.WriteLine.( \name\space.Demo.GetSomething.() )   
+        cmd.print.( \name\space.Demo.getSomething.() )   
     }
 }
 ```

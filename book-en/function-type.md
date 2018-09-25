@@ -5,7 +5,7 @@ Often we will package a series of tasks that need to be reused as functions for 
 
 In practical engineering practice, given a definite input, the function that will surely return exactly to the output is considered to be a better design. Therefore, it is recommended to maintain functional independence as much as possible.
 ## Definition
-We have seen the main entry function before, it only uses the fixed statement `Main () {}` to define.
+We have seen the main entry function before, it only uses the fixed statement `main () {}` to define.
 
 The main entry function is a special case, in fact, the conventional functions of this language must explicitly declare the identifier, in parameters and out parameters.
 
@@ -35,12 +35,12 @@ Very simple, we only need to use `id:type` declare the parameters.
 
 E.g:
 ```
-func (x:I32)->(y:I32)
+func (x:i32)->(y:i32)
 {
     <- (x * 2)
 }
 ```
-The meaning of this function is to accept an input `I32` parameter `x` and a `I32` parameter `y`.
+The meaning of this function is to accept an input `i32` parameter `x` and a `i32` parameter `y`.
 
 This is very similar to what? Yes, in fact, the parameters and dictionary functions are almost the same, the parameters just tell the function, we need to use this type of data, marked by the identifier to match. Therefore, the expression of the same parameters and dictionaries will help us to understand.
 
@@ -50,7 +50,7 @@ If we need several consecutive parameters of the same type, we can simply write 
 
 E.g:
 ```
-func (a, b, c:I32, d:Str)->(a:Str, b, c, d:I32)
+func (a, b, c:i32, d:str)->(a:str, b, c, d:i32)
 {
     <- (d, a, b, c)
 }
@@ -87,7 +87,7 @@ When we call the function, we need to fill the brackets with the identifier in t
 E.g:
 ```
 // define one function with two in parameter
-sell (price: I32, name: Str)->(){}
+sell (price: i32, name: str)->(){}
 // fill in the data that meets the requirements as defined
 sell.(1.99, "cola")
 
@@ -97,7 +97,7 @@ Similar to in parameters, out parameters also need to be clearly defined with an
 
 E.g:
 ```
-topSell ()->(name: Str, count: I32)
+topSell ()->(name: str, count: i32)
 {
     ...
     <- ("cola", many)
@@ -121,7 +121,7 @@ You can use the definition or assignment statement to get the return value of th
 
 E.g:
 ```
-Console.WriteLine.( topSell.() )    // print two values
+cmd.print.( topSell.() )    // print two values
 ```
 If there is only one return value, the brackets can be taken without.
 
@@ -150,7 +150,7 @@ Function In Parameter no special definition of way, just replace the type of the
 
 E.g:
 ```
-each1To10 (func: (item: I32)->() )->()
+each1To10 (func: (item: i32)->() )->()
 {
     [1<<10].@ 
     {
@@ -164,9 +164,9 @@ So that we can pass the details of the processing to the externally passed `func
 
 E.g:
 ```
-print (item: I32)->()
+print (item: i32)->()
 {
-    Console.WriteLine.(item)
+    cmd.print.(item)
 }
 
 each1To10.(print)
@@ -186,7 +186,7 @@ When `id` has only one, you can omit `()`.
 
 E.g:
 ```
-each1To10.( it <- Console.WriteLine.(it) )
+each1To10.( it <- cmd.print.(it) )
 findAll.( it <- it > 7 )
 order.( it <- it.time )
 take.( (a, b) <- a + b )
@@ -199,9 +199,9 @@ E.g:
 ```
 Each.( it <-
 {
-    Console.WriteLine.(1)
-    Console.WriteLine.(2)
-    Console.WriteLine.(3)
+    cmd.print.(1)
+    cmd.print.(2)
+    cmd.print.(3)
 })
 ```
 ## Lambda Function
@@ -209,9 +209,9 @@ Unlike the above simplified method, we can also write a complete function direct
 
 E.g:
 ```
-each1To10.( (item:I32)->()
+each1To10.( (item:i32)->()
 {
-     Console.WriteLine.(item)
+     cmd.print.(item)
 })
 ```
 ### [Next Chapter](control-type.md)
@@ -222,24 +222,24 @@ Demo
 {
     .. System, XyLang\Library
 
-    Main ()
+    main ()
     {
         A.()
         B.(1,2,3)
         x := C.()
-        D.( ()<- Console.WriteLine.("D") )
-        E.( it <- Console.WriteLine.(it) )
-        E.( (a:I32)->()
+        D.( ()<- cmd.print.("D") )
+        E.( it <- cmd.print.(it) )
+        E.( (a:i32)->()
         {
-            Console.WriteLine.(it)
+            cmd.print.(it)
         })
     }
 
     A ()->(){}
 
-    B (a,b,c :I32)->(){}
+    B (a,b,c :i32)->(){}
 
-    C ()->(a:I32)
+    C ()->(a:i32)
     {
         <- (1024)
     }
@@ -249,7 +249,7 @@ Demo
         fn.()
     }
 
-    E (fn: (a:I32)->() )->()
+    E (fn: (a:i32)->() )->()
     {
         [1<<20].@
         {

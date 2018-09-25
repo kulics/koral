@@ -52,7 +52,7 @@ You can write multiple import statements that are separated by `,` and their ord
 For more details on namespaces, please see [Namespace](namespace.md)
 
 ## Main Entry
-We need to define a main entry to let the program know where to start. The main entry is declared with a fixed statement `Main () {}` and must be valid at the top level of the namespace.
+We need to define a main entry to let the program know where to start. The main entry is declared with a fixed statement `main () {}` and must be valid at the top level of the namespace.
 
 E.g:
 ```
@@ -60,7 +60,7 @@ Demo
 {
     .. System, XyLang\Library
     
-    Main ()
+    main ()
     {
         ...
     }
@@ -77,11 +77,11 @@ More details about the function will be explained in later chapters.
 ## Display information
 We use the program in order to obtain some useful information, so we need a feature to browse information, this feature can be display, print or output.
 
-If we write a console program, we can use .Net built-in `Console.WriteLine.()` function, it can display data or text information to the console for us to browse.
+If we write a console program, we can use `cmd.print.()` function, it can display data or text information to the console for us to browse.
 
 E.g:
 ```
-Console.WriteLine.("Hello world")    // output Hello world
+cmd.print.("Hello world")    // output Hello world
 ```
 In the following examples, we will all use the console as a presentation environment.
 ## Comment
@@ -100,7 +100,7 @@ We can create new variable using the `id:type` statement.
 
 E.g:
 ```
-a : I32
+a : i32
 ```
 This will create an identifier for the name on the left and define it as the type on the right, in which case the identifier is a null value.
 
@@ -122,13 +122,13 @@ E.g:
 b := 10
 ```
 
-This defines the new variable `b`, which is equal to `10` and is automatically derived as an `I32` type.
+This defines the new variable `b`, which is equal to `10` and is automatically derived as an `i32` type.
 
 If we don't want automatic derivation, we can also use the write statement definition to mark the type we need.
 
 E.g:
 ```
-b :I16 = 10
+b :i16 = 10
 ```
 ## Variable data
 We can define variable data very easily, and types that are not marked with special symbols are variable data.
@@ -136,7 +136,7 @@ We can define variable data very easily, and types that are not marked with spec
 E.g:
 ```
 i := 1          // can be changed
-j :I32 = 1      // do not use automatic derivation
+j :i32 = 1      // do not use automatic derivation
 ```
 
 It should be noted that variable data cannot be called externally and can only be used within a defined range. Can be considered private.
@@ -147,7 +147,7 @@ We can also define invariable data, just define it with `:==`.
 E.g:
 ```
 i :== 2         // cannot be changed
-j :I32 == 3     // do not use automatic derivation
+j :i32 == 3     // do not use automatic derivation
 ```
 
 Note that invariable data can only be defined within the package without initial.
@@ -172,10 +172,10 @@ However, in practical projects, the use of partition will effectively improve th
 
 E.g:
 ```
-a.b.(x,y).c.(fn:()->(x:I32){<-(2+1)}).d=1+3*5/4
+a.b.(x,y).c.(fn:()->(x:i32){<-(2+1)}).d=1+3*5/4
 
 a.b.(x, y)
-.c.(fn: ()->(x: I32)
+.c.(fn: ()->(x: i32)
 {
     <- (2 + 1)
 }).d = 1 + 3 * 5 / 4
@@ -188,12 +188,12 @@ Demo
 {
     .. System, XyLang\Library
 
-    Main ()
+    main ()
     {
-        a : I32
+        a : i32
         a = 5
         b := 6
-        c :I8 = 1
+        c :i8 = 1
     }
 }
 ```
