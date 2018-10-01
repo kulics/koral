@@ -145,7 +145,7 @@ let count = i + Int(f)
 ```
 [ 1 << 5 ].@
 {
-    cmd.print.(/"{it} times 5 is {it * 5}"/)
+    cmd.print.("{it} times 5 is {it * 5}")
 }
 ```
 ### C#
@@ -278,7 +278,7 @@ let emptyDictionary = [String: Float]()
 ```
 greet (name, day: str)->(r: str) 
 {
-    <- (/"Hello {name}, today is {day}."/)
+    <- ("Hello {name}, today is {day}.")
 }
 greet.("Bob", "Tuesday")
 ```
@@ -418,7 +418,7 @@ Shape +=
 {
     simpleDescription ()->(s: str) 
     {
-        <- (/"A shape with {numberOfSides} sides."/)
+        <- ("A shape with {numberOfSides} sides.")
     }
 }
 ```
@@ -501,7 +501,7 @@ NamedShape +=
 {
     simpleDescription ()->(s: str) 
     {
-        <- (/"A shape with {numberOfSides} sides."/)
+        <- ("A shape with {numberOfSides} sides.")
     }
 }
 
@@ -521,7 +521,7 @@ Square +=
 
     ..simpleDescription ()->(s: str) 
     {
-        <- (/"A square with sides of length {sideLength}."/)
+        <- ("A square with sides of length {sideLength}.")
     }
 }
 
@@ -809,8 +809,8 @@ someObjects.@
 {
     it.? movie:Movie
     {
-        print.(/"Movie: '{movie.name}', "/ +
-            /"dir. {movie.director}"/)
+        print.("Movie: '{movie.name}', " +
+            "dir. {movie.director}")
     }
 }
 ```

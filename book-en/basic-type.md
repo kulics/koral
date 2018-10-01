@@ -75,7 +75,7 @@ string := "Hello world!"
 ```
 
 It should be noted that a string is a type consisting of multiple characters, so in fact the string is a fixed-order list, and there is a correspondence between the two. Many times we can process strings as if they were lists.
-## Mark String
+## String Template
 Many times we need to insert other content into a string. How do we usually do it?
 
 E.g:
@@ -86,20 +86,20 @@ string := "Hello world! " + title + content.toStr.()
 // Hello world! Year:2018
 ```
 
-This of course does not affect the functionality, but we can use a more intuitive and convenient way.
-That's the mark string. Just wrap the content with `/""/`, and use `{}` to mark the content in the content.
+This of course does not affect the functionality, but we can use a more intuitive and convenient way, that is string templates.
+We use `{}` to mark the code segment directly in the content, and the language will automatically insert the element into the string.
 
 E.g:
 ```
-string := /"Hello world! {title} {content}"/
+string := "Hello world! {title} {content}"
 // Hello world! Year:2018
 ```
 
-If you need to use `{` and `}` in the mark string, you only need to use `{{` and `}}`.
+If you need to use `{` and `}` in the string, you only need to use `{{` and `}}`.
 
 E.g:
 ```
-string := /"This is block {{ and }}"/
+string := "This is block {{ and }}"
 // This is block { and }
 ```
 ## Boolean
@@ -173,7 +173,7 @@ Demo
         b := a.toI64.()
         c := 123.456
         d := "hello"
-        c := /"{d} world"/
+        c := "{d} world"
         e := true
         f :any = false
         g :i32? = null
