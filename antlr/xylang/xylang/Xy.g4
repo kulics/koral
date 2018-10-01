@@ -314,8 +314,7 @@ linqKeyword: k=('from'|'where'|'select'|'group'|'into'|'orderby'|'join'|'let'|'i
 
 // 基础数据
 dataStatement:
-markText
-| t=Float
+t=Float
 | t=Integer
 | t=Text
 | t=Char
@@ -323,8 +322,6 @@ markText
 | t=False
 | t=Null
 ;
-
-markText: '/' t=Text '/';
 
 // 类型
 typeNotNull:
