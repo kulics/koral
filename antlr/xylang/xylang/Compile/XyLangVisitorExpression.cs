@@ -705,12 +705,7 @@ namespace XyLang.Compile
         public override object VisitDataStatement([NotNull] XyParser.DataStatementContext context)
         {
             var r = new Result();
-            if (context.markText() != null)
-            {
-                r.data = Str;
-                r.text = "$" + Visit(context.markText());
-            }
-            else if (context.t.Type == XyParser.Float)
+            if (context.t.Type == XyParser.Float)
             {
                 r.data = F64;
                 r.text = $"{context.Float().GetText()}";
@@ -723,7 +718,9 @@ namespace XyLang.Compile
             else if (context.t.Type == XyParser.Text)
             {
                 r.data = Str;
-                r.text = context.Text().GetText();
+                var text = context.Text().GetText();
+                if (text.Contains("{")) text = "$" + text;
+                r.text = text;
             }
             else if (context.t.Type == XyParser.Char)
             {
@@ -746,11 +743,6 @@ namespace XyLang.Compile
                 r.text = "null";
             }
             return r;
-        }
-
-        public override object VisitMarkText([NotNull] XyParser.MarkTextContext context)
-        {
-            return context.Text().GetText();
         }
 
         public override object VisitFunction([NotNull] XyParser.FunctionContext context)
