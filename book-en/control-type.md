@@ -13,14 +13,16 @@ Number :i32
 This defines a control data with no additional methods, and it has a built-in default control method.
 
 ## Get Operation
-If we want to set a get operation, we can add `.ctrl {}` later to define.
+If we want to set a get operation, we can add `{ ctrl{} }` later to define.
 
 E.g:
 ```
 Number :i32
-.get    // means get, equivalent to getter in other languages
 {
-    <- (7)  // only returns 7
+    get    // means get, equivalent to getter in other languages
+    {
+        <- (7)  // only returns 7
+    }
 }
 ```
 In this way, number has a special method to get the value. When calling number, it will execute the internal logic.
@@ -32,10 +34,12 @@ With the above example, we naturally can think of how to deal with set operation
 E.g:
 ```
 Number :i32
-...
-.set    // means set, equivalent to setter in other languages
 {
-    // ? ? ? Who should give the value? ? ?
+    ...
+    set    // means set, equivalent to setter in other languages
+    {
+        // ? ? ? Who should give the value? ? ?
+    }
 }
 ```
 Yes, this raises the question that control types are used to control operations and cannot be used to store data when implementing operations.
@@ -46,10 +50,12 @@ E.g:
 _number := 0
 
 Number :i32
-...
-.set
 {
-    _number = value  // value represents the value of the input
+    ...
+    set
+    {
+        _number = value  // value represents the value of the input
+    }
 }
 ```
 
@@ -60,13 +66,15 @@ A complete example of reading and writing is as follows:
 _number := 0
 
 Number :i32
-.get
 {
-    <- (_number)
-}
-.set
-{
-    _number = value  // value represents the value of the input
+    get
+    {
+        <- (_number)
+    }
+    set
+    {
+        _number = value  // value represents the value of the input
+    }
 }
 ```
 
@@ -84,18 +92,22 @@ Demo
 
     main ()
     {
-        Console.WriteLine.(a)
+        cmd.print.(a)
         c = 5
-        Console.WriteLine.(b)
-        Console.WriteLine.(c)
+        cmd.print.(b)
+        cmd.print.(c)
     }
 
     a : i32
-    .get { <- (3) }
+    {
+        get { <- (3) }
+    }
     
     b := 0
     c : i32
-    .get { <- (b) }
-    .set { b = value }
+    {
+        get { <- (b) }
+        set { b = value }
+    }
 }
 ```
