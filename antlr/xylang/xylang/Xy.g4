@@ -334,7 +334,7 @@ typeTuple
 | typeFunction
 ;
 
-typeNullable : typeNotNull '?';
+typeNullable : typeNotNull '|' Null;
 type : typeNotNull | typeNullable;
 
 typeTuple : '(' type (',' type)+ ')';

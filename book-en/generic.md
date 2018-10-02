@@ -14,7 +14,7 @@ E.g:
 List<T> {}->
 {
     items := Storage.{T}    // 创建存储
-    length :i32?
+    length := 0
 }
 List<T> +=
 {
