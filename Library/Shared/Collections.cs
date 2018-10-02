@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace XyLang.Library
 {
@@ -54,8 +55,18 @@ namespace XyLang.Library
         public i32 count => Count;
         public i32 capacity => Capacity;
 
-        public lst<T> subList(i32 startIndex, i32 count) => base.GetRange(startIndex, count) as lst<T>;
-        public lst<T> slice(i32 startIndex, i32 endIndex)
+        public lst<T> subList(i32 startIndex, i32 endIndex) //=> GetRange(startIndex, count) as lst<T>;
+        {
+            var temp = new lst<T>();
+            int currIndex = startIndex;
+            while (currIndex <= endIndex)
+            {
+                temp += this[currIndex];
+                currIndex++;
+            }
+            return temp;
+        }
+        public lst<T> slice(i32 startIndex, i32 endIndex, bl order)
         {
             if (startIndex == null && endIndex == null)
             {
@@ -63,21 +74,21 @@ namespace XyLang.Library
             }
             else if (endIndex == null)
             {
-                return subList(startIndex, lastIndex - startIndex);
+                return subList(startIndex, lastIndex);
             }
             else // (startIndex == null)
             {
-                return subList(0, lastIndex - endIndex);
+                return subList(0, endIndex);
             }
         }
-        public i32 firstIndexOf(T item) => base.IndexOf(item);
-        public new i32 lastIndexOf(T item) => base.LastIndexOf(item);
+        public i32 firstIndexOf(T item) => IndexOf(item);
+        public new i32 lastIndexOf(T item) => LastIndexOf(item);
 
-        public T findFirst(Predicate<T> match) => base.Find(match);
-        public new T findLast(Predicate<T> match) => base.FindLast(match);
-        public new lst<T> findAll(Predicate<T> match) => base.FindAll(match) as lst<T>;
-        public i32 findFirstIndex(Predicate<T> match) => base.FindIndex(match);
-        public new i32 findLastIndex(Predicate<T> match) => base.FindLastIndex(match);
+        public T findFirst(Predicate<T> match) => Find(match);
+        public new T findLast(Predicate<T> match) => FindLast(match);
+        public new lst<T> findAll(Func<T,bool> match) => this.Where(match) as lst<T>;
+        public i32 findFirstIndex(Predicate<T> match) => FindIndex(match);
+        public new i32 findLastIndex(Predicate<T> match) => FindLastIndex(match);
 
         public void add(T item) => Add(item);
         public void addRange(IEnumerable<T> collection) => AddRange(collection);

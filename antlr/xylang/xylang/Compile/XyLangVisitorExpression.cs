@@ -413,9 +413,40 @@ namespace XyLang.Compile
 
         public override object VisitCallElement([NotNull] XyParser.CallElementContext context)
         {
+            if (context.expression() == null)
+            {
+                return new Result { text = (string)Visit(context.slice()) };
+            }
             var r = (Result)Visit(context.expression());
             r.text = "[" + r.text + "]";
             return r;
+        }
+
+        public override object VisitSlice([NotNull] XyParser.SliceContext context)
+        {
+            return (string)Visit(context.GetChild(0));
+        }
+
+        public override object VisitSliceFull([NotNull] XyParser.SliceFullContext context)
+        {
+            var order = context.op.Text == "<<" ? "true": "false";
+            var expr1 = (Result)Visit(context.expression(0));
+            var expr2 = (Result)Visit(context.expression(1));
+            return $".slice({expr1.text}, {expr2.text}, {order})";
+        }
+
+        public override object VisitSliceStart([NotNull] XyParser.SliceStartContext context)
+        {
+            var order = context.op.Text == "<<" ? "true" : "false";
+            var expr = (Result)Visit(context.expression());
+            return $".slice({expr.text}, null, {order})";
+        }
+
+        public override object VisitSliceEnd([NotNull] XyParser.SliceEndContext context)
+        {
+            var order = context.op.Text == "<<" ? "true" : "false";
+            var expr = (Result)Visit(context.expression());
+            return $".slice(null, {expr.text}, {order})";
         }
 
         public override object VisitCallFunc([NotNull] XyParser.CallFuncContext context)
