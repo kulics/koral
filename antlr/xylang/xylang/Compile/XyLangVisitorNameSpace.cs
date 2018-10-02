@@ -179,9 +179,7 @@ namespace XyLang.Compile
         public override object VisitFunctionMainStatement([NotNull] XyParser.FunctionMainStatementContext context)
         {
             var obj = "";
-            obj += $"static void Main(string[] args) {Wrap + BlockLeft + Wrap} " +
-                $"MainAsync(args).GetAwaiter().GetResult(); {Wrap + BlockRight + Wrap}" +
-                $"static async {Task} MainAsync(string[] args) {Wrap + BlockLeft + Wrap}" +
+            obj += $"static async {Task} Main(string[] args) {Wrap + BlockLeft + Wrap} " +
                 $"{ProcessFunctionSupport(context.functionSupportStatement())}" +
                 $"{BlockRight + Wrap}";
             return obj;
