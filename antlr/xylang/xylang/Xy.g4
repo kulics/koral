@@ -273,7 +273,13 @@ dictionary :  '[' (dictionaryElement (',' dictionaryElement)*)? (':' type '->' t
 
 dictionaryElement: expression '->' expression; // 字典元素
 
-callElement : '[' expression ']';
+callElement : '[' (expression | slice) ']';
+
+slice: sliceFull | sliceStart | sliceEnd;
+
+sliceFull: expression op=('<<'|'>>') expression; 
+sliceStart: expression op=('<<'|'>>');
+sliceEnd: op=('<<'|'>>') expression; 
 
 nameSpace: id ('\\' id)*;
 
