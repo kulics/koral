@@ -71,12 +71,13 @@ namespace XyLang.Library
 
         public static str operator +(str a, str b) => new str(a.v + b.v);
 
-        public static bool operator ==(str a, str b) => a.v == b.v;
-        public static bool operator !=(str a, str b) => a.v != b.v;
-
         public override bool Equals(object o)
         {
-            if (o is str b)
+            if (o == null)
+            {
+                return this == null;
+            }
+            else if (o is str b)
             {
                 return v == b.v;
             }
@@ -212,6 +213,24 @@ namespace XyLang.Library
 
         public static implicit operator chr(char it) => new chr(it);
         public static implicit operator char(chr it) => it.v;
+
+        public override bool Equals(object o)
+        {
+            if (o == null)
+            {
+                return this == null;
+            }
+            else if (o is chr b)
+            {
+                return v == b.v;
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        public bool Equals(chr b) => b != null && v == b.v;
 
         public int CompareTo(object obj) => v.CompareTo(obj.ToString());
 
