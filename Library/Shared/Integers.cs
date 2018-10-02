@@ -54,8 +54,6 @@ namespace XyLang.Library
         public static bool operator <=(i8 a, i8 b) => a.v <= b.v;
         public static bool operator >(i8 a, i8 b) => a.v > b.v;
         public static bool operator >=(i8 a, i8 b) => a.v >= b.v;
-        public static bool operator ==(i8 a, i8 b) => a.v == b.v;
-        public static bool operator !=(i8 a, i8 b) => a.v != b.v;
 
         public i8 and(i8 it) => new i8(v & it);
         public i8 or(i8 it) => new i8(v | it);
@@ -66,7 +64,11 @@ namespace XyLang.Library
 
         public override bool Equals(object o)
         {
-            if (o is i8 b)
+            if (o == null)
+            {
+                return this == null;
+            }
+            else if (o is i8 b)
             {
                 return v == b.v;
             }
@@ -140,8 +142,6 @@ namespace XyLang.Library
         public static bool operator <=(i16 a, i16 b) => a.v <= b.v;
         public static bool operator >(i16 a, i16 b) => a.v > b.v;
         public static bool operator >=(i16 a, i16 b) => a.v >= b.v;
-        public static bool operator ==(i16 a, i16 b) => a.v == b.v;
-        public static bool operator !=(i16 a, i16 b) => a.v != b.v;
 
         public i16 and(i16 it) => new i16(v & it);
         public i16 or(i16 it) => new i16(v | it);
@@ -152,7 +152,11 @@ namespace XyLang.Library
 
         public override bool Equals(object o)
         {
-            if (o is i16 b)
+            if (o == null)
+            {
+                return this == null;
+            }
+            else if (o is i16 b)
             {
                 return v == b.v;
             }
@@ -226,8 +230,6 @@ namespace XyLang.Library
         public static bool operator <=(i32 a, i32 b) => a.v <= b.v;
         public static bool operator >(i32 a, i32 b) => a.v > b.v;
         public static bool operator >=(i32 a, i32 b) => a.v >= b.v;
-        public static bool operator ==(i32 a, i32 b) => a.v == b.v;
-        public static bool operator !=(i32 a, i32 b) => a.v != b.v;
 
         public i32 and(i32 it) => new i32(v & it);
         public i32 or(i32 it) => new i32(v | it);
@@ -238,7 +240,11 @@ namespace XyLang.Library
 
         public override bool Equals(object o)
         {
-            if (o is i32 b)
+            if (o == null)
+            {
+                return this == null;
+            }
+            else if (o is i32 b)
             {
                 return v == b.v;
             }
@@ -312,8 +318,6 @@ namespace XyLang.Library
         public static bool operator <=(i64 a, i64 b) => a.v <= b.v;
         public static bool operator >(i64 a, i64 b) => a.v > b.v;
         public static bool operator >=(i64 a, i64 b) => a.v >= b.v;
-        public static bool operator ==(i64 a, i64 b) => a.v == b.v;
-        public static bool operator !=(i64 a, i64 b) => a.v != b.v;
 
         public i64 and(i64 it) => new i64(v & it);
         public i64 or(i64 it) => new i64(v | it);
@@ -324,7 +328,11 @@ namespace XyLang.Library
 
         public override bool Equals(object o)
         {
-            if (o is i64 b)
+            if (o == null)
+            {
+                return this == null;
+            }
+            else if (o is i64 b)
             {
                 return v == b.v;
             }

@@ -51,12 +51,14 @@ namespace XyLang.Library
         public static bool operator <=(f32 a, f32 b) => a.v <= b.v;
         public static bool operator >(f32 a, f32 b) => a.v > b.v;
         public static bool operator >=(f32 a, f32 b) => a.v >= b.v;
-        public static bool operator ==(f32 a, f32 b) => a.v == b.v;
-        public static bool operator !=(f32 a, f32 b) => a.v != b.v;
 
         public override bool Equals(object o)
         {
-            if (o is f32 b)
+            if (o == null)
+            {
+                return this == null;
+            }
+            else if (o is f32 b)
             {
                 return v == b.v;
             }
@@ -127,12 +129,14 @@ namespace XyLang.Library
         public static bool operator <=(f64 a, f64 b) => a.v <= b.v;
         public static bool operator >(f64 a, f64 b) => a.v > b.v;
         public static bool operator >=(f64 a, f64 b) => a.v >= b.v;
-        public static bool operator ==(f64 a, f64 b) => a.v == b.v;
-        public static bool operator !=(f64 a, f64 b) => a.v != b.v;
 
         public override bool Equals(object o)
         {
-            if (o is f64 b)
+            if (o == null)
+            {
+                return this == null;
+            }
+            else if (o is f64 b)
             {
                 return v == b.v;
             }
