@@ -130,11 +130,11 @@ b := a   // error, no assignment to a
 ```
 
 If you have to use a type with null values in some cases, you can use a nullable type.
-Just add `?` after any type, which is a nullable type.
+Just add `|null` after any type, which is a nullable type.
 
 E.g:
 ```
-a : i32?
+a : i32|null
 b := a   // b assigns an empty i32
 ```
 ## null
@@ -153,9 +153,9 @@ At this time we can use the null create method `null.(type)` to specify a null v
 
 E.g:
 ```
-x := null.(i64?)
-y := null.(Protocol?)
-z := null.(()->()?)
+x := null.(i64)
+y := null.(Protocol)
+z := null.(()->())
 ```
 More details on generics can be found in the generic section.
 
@@ -176,8 +176,8 @@ Demo
         c := "{d} world"
         e := true
         f :any = false
-        g :i32? = null
-        h := null.(i32?) 
+        g :i32|null = null
+        h := null.(i32) 
     }
 }
 ```
