@@ -10,9 +10,10 @@ exportStatement: nameSpace ('::' id)? BlockLeft (exportSupportStatement)* BlockR
 exportSupportStatement:
 importStatement
 |functionMainStatement
-|nspackageFunctionStatement
-|nspackageVariableStatement
-|nspackageInvariableStatement
+|namespaceFunctionStatement
+|namespaceVariableStatement
+|namespaceInvariableStatement
+|namespaceConstantStatement
 |packageStatement
 |packageExtensionStatement
 |protocolStatement
@@ -32,14 +33,16 @@ enumSupportStatement: id ('=' (add)? Integer)?;
 
 // 主函数
 functionMainStatement:'main' parameterClauseIn BlockLeft (functionSupportStatement)* BlockRight Terminate?;
-// 无构造包变量
-nspackageVariableStatement:(annotation)? expression (Define expression|Declared type (Assign expression)?) (BlockLeft (nspackageControlSubStatement)* BlockRight)? Terminate?;
-// 无构造包常量
-nspackageInvariableStatement:(annotation)? expression (Declared type '==' | ':==') expression Terminate?;
+// 命名空间变量
+namespaceVariableStatement:(annotation)? expression (Define expression|Declared type (Assign expression)?) (BlockLeft (namespaceControlSubStatement)* BlockRight)? Terminate?;
+// 命名空间不变量
+namespaceInvariableStatement:(annotation)? expression (Declared type '==' | ':==') expression Terminate?;
+// 命名空间常量
+namespaceConstantStatement: (annotation)? id (Declared type)? expression Terminate?;
 // 定义子方法
-nspackageControlSubStatement: id BlockLeft (functionSupportStatement)* BlockRight;
-// 无构造包函数
-nspackageFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
+namespaceControlSubStatement: id BlockLeft (functionSupportStatement)* BlockRight;
+// 命名空间函数
+namespaceFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 // 定义包
 packageStatement:(annotation)? id (templateDefine)? parameterClausePackage ArrowRight (extend)? BlockLeft (packageSupportStatement)* BlockRight;
 // 继承

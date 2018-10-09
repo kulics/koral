@@ -21,9 +21,10 @@ namespace XyLang.Compile
                         obj += Visit(item);
                         break;
                     case XyParser.FunctionMainStatementContext _:
-                    case XyParser.NspackageFunctionStatementContext _:
-                    case XyParser.NspackageVariableStatementContext _:
-                    case XyParser.NspackageInvariableStatementContext _:
+                    case XyParser.NamespaceFunctionStatementContext _:
+                    case XyParser.NamespaceVariableStatementContext _:
+                    case XyParser.NamespaceInvariableStatementContext _:
+                    case XyParser.NamespaceConstantStatementContext _:
                         Static += Visit(item);
                         hasStatic = true;
                         break;
@@ -185,7 +186,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitNspackageFunctionStatement([NotNull] XyParser.NspackageFunctionStatementContext context)
+        public override object VisitNamespaceFunctionStatement([NotNull] XyParser.NamespaceFunctionStatementContext context)
         {
             var id = (Result)Visit(context.id());
             var obj = "";
@@ -223,7 +224,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitNspackageInvariableStatement([NotNull] XyParser.NspackageInvariableStatementContext context)
+        public override object VisitNamespaceInvariableStatement([NotNull] XyParser.NamespaceInvariableStatementContext context)
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
@@ -242,60 +243,76 @@ namespace XyLang.Compile
             {
                 obj += Visit(context.annotation());
             }
-            if (r2.text.StartsWith('$') || (r2.text.Length >= 5 && r2.text.Substring(0, 5) == ("(new ")))
-            {
-                obj += $"{r1.permission} readonly static {typ} {r1.text} = {r2.text} {Terminate} {Wrap}";
-            }
-            else
-            {
-                switch (typ)
-                {
-                    case I8:
-                        typ = "ubyte";
-                        break;
-                    case I16:
-                        typ = "short";
-                        break;
-                    case I32:
-                        typ = "int";
-                        break;
-                    case I64:
-                        typ = "long";
-                        break;
-
-                    case U8:
-                        typ = "byte";
-                        break;
-                    case U16:
-                        typ = "ushort";
-                        break;
-                    case U32:
-                        typ = "uint";
-                        break;
-                    case U64:
-                        typ = "ulong";
-                        break;
-
-                    case F32:
-                        typ = "float";
-                        break;
-                    case F64:
-                        typ = "double";
-                        break;
-
-                    case Str:
-                        typ = "string";
-                        break;
-                    default:
-                        break;
-                }
-                obj += $"{r1.permission} const {typ} {r1.text} = {r2.text} {Terminate} {Wrap}";
-            }
+            obj += $"{r1.permission} readonly static {typ} {r1.text} = {r2.text} {Terminate} {Wrap}";
 
             return obj;
         }
 
-        public override object VisitNspackageVariableStatement([NotNull] XyParser.NspackageVariableStatementContext context)
+        public override object VisitNamespaceConstantStatement([NotNull] XyParser.NamespaceConstantStatementContext context)
+        {
+            var id = (Result)Visit(context.id());
+            var expr = (Result)Visit(context.expression());
+            var typ = "";
+            if (context.type() != null)
+            {
+                typ = (string)Visit(context.type());
+            }
+            else
+            {
+                typ = (string)expr.data;
+            }
+
+            var obj = "";
+            if (context.annotation() != null)
+            {
+                obj += Visit(context.annotation());
+            }
+            switch (typ)
+            {
+                case I8:
+                    typ = "ubyte";
+                    break;
+                case I16:
+                    typ = "short";
+                    break;
+                case I32:
+                    typ = "int";
+                    break;
+                case I64:
+                    typ = "long";
+                    break;
+
+                case U8:
+                    typ = "byte";
+                    break;
+                case U16:
+                    typ = "ushort";
+                    break;
+                case U32:
+                    typ = "uint";
+                    break;
+                case U64:
+                    typ = "ulong";
+                    break;
+
+                case F32:
+                    typ = "float";
+                    break;
+                case F64:
+                    typ = "double";
+                    break;
+
+                case Str:
+                    typ = "string";
+                    break;
+                default:
+                    break;
+            }
+            obj += $"{id.permission} const {typ} {id.text} = {expr.text} {Terminate} {Wrap}";
+            return obj;
+        }
+
+        public override object VisitNamespaceVariableStatement([NotNull] XyParser.NamespaceVariableStatementContext context)
         {
             var r1 = (Result)Visit(context.expression(0));
             var typ = "";
@@ -313,10 +330,10 @@ namespace XyLang.Compile
             {
                 obj += Visit(context.annotation());
             }
-            if (context.nspackageControlSubStatement().Length > 0)
+            if (context.namespaceControlSubStatement().Length > 0)
             {
                 obj += $"{r1.permission} static {typ} {r1.text} {{";
-                foreach (var item in context.nspackageControlSubStatement())
+                foreach (var item in context.namespaceControlSubStatement())
                 {
                     obj += Visit(item);
                 }
@@ -334,7 +351,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitNspackageControlSubStatement([NotNull] XyParser.NspackageControlSubStatementContext context)
+        public override object VisitNamespaceControlSubStatement([NotNull] XyParser.NamespaceControlSubStatementContext context)
         {
             var obj = "";
             var id = "";
