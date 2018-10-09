@@ -26,7 +26,7 @@ print("Hello, world!")
 ```
 myVariable := 42
 myVariable = 50
-myConstant :== 42
+myConstant 42
 ```
 ### C#
 ```

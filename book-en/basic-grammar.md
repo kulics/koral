@@ -142,12 +142,21 @@ j :i32 = 1      // do not use automatic derivation
 It should be noted that variable data cannot be called externally and can only be used within a defined range. Can be considered private.
 
 ## Invariable data
-We can also define invariable data, just define it with `:==`.
+We can also define invariable data that must be assigned at the time of definition and cannot be changed afterwards, using `id :== value`.
 
 E.g:
 ```
 i :== 2         // cannot be changed
 j :i32 == 3     // do not use automatic derivation
+```
+
+## Constant
+Constants are languages that are determined at compile time and are unchangeable. Only a special type of the underlying type is supported. Use `id :type value` to define it, and `:type` can usually be omitted.
+
+E.g:
+```
+i 2         // automatic derivation
+j :i32 3    // do not use automatic derivation
 ```
 
 Note that invariable data can only be defined within the package without initial.
