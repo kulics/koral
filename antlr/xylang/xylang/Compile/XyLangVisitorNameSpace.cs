@@ -4,22 +4,21 @@ namespace XyLang.Compile
 {
     internal partial class XyLangVisitor
     {
-        public override object VisitExportStatement([NotNull] XyParser.ExportStatementContext context)
+        public override object VisitStatement([NotNull] XyParser.StatementContext context)
         {
             var obj = "";
-            var hasStatic = false;
-            var name = (string)Visit(context.nameSpace());
-            obj += $"namespace {name + Wrap + BlockLeft + Wrap}";
+            var ns = (Namespace)Visit(context.exportStatement());
+
+            obj += $"namespace {ns.name + Wrap + BlockLeft + Wrap}";
+            obj += ns.imports + Wrap;
 
             var unStatic = "";
             var Static = "";
-            foreach (var item in context.exportSupportStatement())
+            var hasStatic = false;
+            foreach (var item in context.namespaceSupportStatement())
             {
                 switch (item.GetChild(0))
                 {
-                    case XyParser.ImportStatementContext _:
-                        obj += Visit(item);
-                        break;
                     case XyParser.FunctionMainStatementContext _:
                     case XyParser.NamespaceFunctionStatementContext _:
                     case XyParser.NamespaceVariableStatementContext _:
@@ -35,13 +34,8 @@ namespace XyLang.Compile
             }
             if (hasStatic)
             {
-                var staticName = FileName;
-                if (context.id() != null)
-                {
-                    staticName = (Visit(context.id()) as Result).text;
-                }
-                obj += $"using static {staticName + Terminate + Wrap}";
-                obj += $"public static partial class {staticName} {BlockLeft + Wrap}";
+                obj += $"using static {ns.staticName + Terminate + Wrap}";
+                obj += $"public static partial class {ns.staticName} {BlockLeft + Wrap}";
                 obj += Static;
                 obj += BlockRight + Terminate + Wrap;
             }
@@ -50,18 +44,31 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitImportStatement([NotNull] XyParser.ImportStatementContext context)
+        class Namespace 
         {
-            var obj = "";
+            public string name;
+            public string staticName;
+            public string imports;
+        }
 
-            foreach (var item in context.nameSpaceStatement())
+        public override object VisitExportStatement([NotNull] XyParser.ExportStatementContext context)
+        {
+            var obj = new Namespace();
+            obj.name = (string)Visit(context.nameSpace());
+
+            obj.staticName = FileName;
+            if (context.id() != null)
             {
-                obj += Visit(item) + Wrap;
+                obj.staticName = (Visit(context.id()) as Result).text;
+            }
+            foreach(var item in context.importStatement())
+            {
+                obj.imports += (string)Visit(item);
             }
             return obj;
         }
 
-        public override object VisitNameSpaceStatement([NotNull] XyParser.NameSpaceStatementContext context)
+        public override object VisitImportStatement([NotNull] XyParser.ImportStatementContext context)
         {
             var obj = "";
             if (context.annotation() != null)
@@ -85,6 +92,7 @@ namespace XyLang.Compile
             {
                 obj += "using " + Visit(context.nameSpace()) + Terminate;
             }
+            obj += Wrap;
             return obj;
         }
 

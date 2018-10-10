@@ -2,14 +2,16 @@
 
 program: statement+;
 
-statement: exportStatement;
+statement: exportStatement namespaceSupportStatement*;
 
 // 导出命名空间
-exportStatement: nameSpace ('::' id)? BlockLeft (exportSupportStatement)* BlockRight Terminate?;
-// 导出命名空间支持的语句
-exportSupportStatement:
-importStatement
-|functionMainStatement
+exportStatement: nameSpace ('::' id)? BlockLeft (importStatement)* BlockRight Terminate?;
+
+// 导入命名空间
+importStatement: (annotation)? nameSpace (call id)? Terminate?;
+
+namespaceSupportStatement:
+functionMainStatement
 |namespaceFunctionStatement
 |namespaceVariableStatement
 |namespaceInvariableStatement
@@ -20,11 +22,6 @@ importStatement
 |protocolImplementStatement
 |enumStatement
 ;
-
-// 导入命名空间
-importStatement: '..' nameSpaceStatement (',' nameSpaceStatement)* Terminate?;
-// 命名空间
-nameSpaceStatement: (annotation)? (nameSpace)? (call id)?;
 
 // 枚举
 enumStatement: (annotation)? id '[' enumSupportStatement (',' enumSupportStatement)* ']' Terminate?;

@@ -23,29 +23,29 @@ Read detail from The [Book](./book-en/introduction.md).
 ```
 HelloWorld // export namespace
 {
-    .. System // import namespace
+    System // import namespace
+}
 
-    main () // main function  
+main () // main function  
+{
+    // array
+    greetings := ["Hello", "Hola", "Bonjour",
+                "Ciao", "こんにちは", "안녕하세요",
+                "Cześć", "Olá", "Здравствуйте",
+                "Chào bạn", "您好"]
+                
+    greetings.@ // for-each
     {
-        // array
-        greetings := ["Hello", "Hola", "Bonjour",
-                    "Ciao", "こんにちは", "안녕하세요",
-                    "Cześć", "Olá", "Здравствуйте",
-                    "Chào bạn", "您好"]
-                    
-        greetings.@ // for-each
+        cmd.print.(it) // call function
+        // match
+        it.? [ 0 << 8 ] 
         {
-            cmd.print.(it) // call function
-            // match
-            it.? [ 0 << 8 ] 
-            {
-                cmd.print.(" in 0-8")
-            }
-            _
-            {
-                cmd.print.(" over 10")
-                <- @
-            }
+            cmd.print.(" in 0-8")
+        }
+        _
+        {
+            cmd.print.(" over 10")
+            <- @
         }
     }
 }
