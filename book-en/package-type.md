@@ -251,38 +251,39 @@ By combining layers after layer, you are free to assemble whatever you want to d
 ```
 Demo
 {
-    .. System, XyLang\Library
+    System
+    XyLang\Library
+}
 
-    main ()
+main ()
+{
+    a := S.{...A=5,B=12}
+    b := PKG.{"hello", 64, a}
+    cmd.print.( b.Z.A )
+    cmd.print.( b.Print.() )
+}
+
+S {}->
+{
+    A := 0
+    B := 0
+}
+
+PKG {x:str, ..Y:i32, ..Z:S}->
+{
+    X := ""
+    
+    ..
     {
-        a := S.{...A=5,B=12}
-        b := PKG.{"hello", 64, a}
-        cmd.print.( b.Z.A )
-        cmd.print.( b.Print.() )
+        X = x
     }
+}
 
-    S {}->
+PKG +=
+{
+    Print ()->(a:str)
     {
-        A := 0
-        B := 0
-    }
-
-    PKG {x:str, ..Y:i32, ..Z:S}->
-    {
-        X := ""
-
-        ..
-        {
-            X = x
-        }
-    }
-
-    PKG +=
-    {
-        Print ()->(a:str)
-        {
-            <- ( /"X {Y}"/ )
-        }
+        <- ( /"X {Y}"/ )
     }
 }
 ```

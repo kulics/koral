@@ -88,26 +88,27 @@ Most of the time, we can use only simple definitions to complete the task, becau
 ```
 Demo
 {
-    .. System, XyLang\Library
+    System
+    XyLang\Library
+}
 
-    main ()
-    {
-        cmd.print.(a)
-        c = 5
-        cmd.print.(b)
-        cmd.print.(c)
-    }
+main ()
+{
+    cmd.print.(a)
+    c = 5
+    cmd.print.(b)
+    cmd.print.(c)
+}
 
-    a : i32
-    {
-        get { <- (3) }
-    }
-    
-    b := 0
-    c : i32
-    {
-        get { <- (b) }
-        set { b = value }
-    }
+a : i32
+{
+    get { <- (3) }
+}
+
+b := 0
+c : i32
+{
+    get { <- (b) }
+    set { b = value }
 }
 ```
