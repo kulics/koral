@@ -85,10 +85,10 @@ Our comments are very similar to the C language, with single-line comment starti
 ```
 // single-line comment
 ```
-Block comment begin with `/ *` and end with `* /`:
+Block comment begin with `/*` and end with `*/`:
 ```
-/ * multi-line
-comment * /
+/* multi-line
+comment */
 ```
 Comment is only used to provide additional information to the user, and will not be really compiled into the executable program.
 ## Definition
