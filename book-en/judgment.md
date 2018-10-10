@@ -135,29 +135,30 @@ E.g:
 ```
 Demo
 {
-    .. System, XyLang\Library
+    System
+    XyLang\Library
+}
 
-    main ()
-    {
-        a := 5
-        ? a == 2
-        { cmd.print.(2) }
-        ? a == 4
-        { cmd.print.(4) }
-        ?
-        { cmd.print.("not find") }
+main ()
+{
+    a := 5
+    ? a == 2
+    { cmd.print.(2) }
+    ? a == 4
+    { cmd.print.(4) }
+    ?
+    { cmd.print.("not find") }
 
-        b := 7
-        b.?
-        5
-        { cmd.print.(5) }
-        7
-        { cmd.print.(7) }
-        _
-        { cmd.print.("not find") }
+    b := 7
+    b.?
+    5
+    { cmd.print.(5) }
+    7
+    { cmd.print.(7) }
+    _
+    { cmd.print.("not find") }
 
-        cmd.print.( ?.(b) )
-        cmd.print.( ?.(:i32) )
-    }
+    cmd.print.( ?.(b) )
+    cmd.print.( ?.(:i32) )
 }
 ```

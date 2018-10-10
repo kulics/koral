@@ -8,12 +8,11 @@ Exported names can be nested in a loop so that functions can be split as effecti
 
 E.g:
 ```
-name\space
+name\space{}
+
+getSomething ()->(content:str)
 {
-    getSomething ()->(content:str)
-    {
-        <- ("something")
-    }
+    <- ("something")
 }
 ```
 ## Import
@@ -24,15 +23,12 @@ So by default you need to use a filename to access across the namespace, where t
 
 E.g:
 ```
-import
-{
-    .. name\space
+run { name\space }
 
-    main ()
-    {
-        // print something
-        cmd.print.( Demo.getSomething.() )
-    }
+main ()
+{
+    // 打印 something
+    cmd.print.( Demo.getSomething.() )
 }
 ```
 
@@ -40,22 +36,20 @@ If we need to specify the name of the host container, we can specify it using `:
 
 E.g:
 ```
-name\space::helper
+name\space::helper {}
+
+getSomething ()->(content:str)
 {
-    getSomething ()->(content:str)
-    {
-        <- ("something")
-    }
+    <- ("something")
 }
 
-import
-{
-    .. name\space
+------------------------
 
-    main ()
-    {
-        cmd.print.( helper.getSomething.() )
-    }
+run{ name\space }
+
+main ()
+{
+    cmd.print.( helper.getSomething.() )
 }
 ```
 ## Simplify Import
@@ -63,15 +57,12 @@ If we don't want to use the namespace name to call the content every time, we ca
 
 E.g:
 ```
-import
+run{ name\space.Demo }
+
+main ()
 {
-    .. name\space.Demo
-    
-    main ()
-    {
-        // print something
-        cmd.print.( getSomething.() )
-    }
+    // 打印 something
+    cmd.print.( getSomething.() )
 }
 ```
 This eliminates the need to call `space` every time.
@@ -80,13 +71,12 @@ We can use the namespace directly to call function without importing it.
 
 E.g:
 ```
-demo
+demo {}
+
+main ()
 {
-    main ()
-    {
-        // can be used directly
-        cmd.print.( \name\space.Demo.getSomething.() )   
-    }
+    // 直接使用即可
+    cmd.print.( \name\space.Demo.getSomething.() )    
 }
 ```
 

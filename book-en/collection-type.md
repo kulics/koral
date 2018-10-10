@@ -112,18 +112,19 @@ length := dictionary.count     // length
 ```
 Demo
 {
-    .. System, XyLang\Library
+    System
+    XyLang\Library
+}
 
-    main ()
-    {
-        list1 := [1,2,3,4,5]
-        list1 += 6
-        list2 :[]i8 = [1,2,1,2 :i8]
-        list3 := #[1,2,3]
+main ()
+{
+    list1 := [1,2,3,4,5]
+    list1 += 6
+    list2 :[]i8 = [1,2,1,2 :i8]
+    list3 := #[1,2,3]
 
-        dictionary1 := ["a"->1, "b"->2, "c"->3]
-        dictionary1.["d"] = 4
-        dictionary2 :[i8]i8 = [1->1,2->2,3->3 :i8->i8]
-    }
+    dictionary1 := ["a"->1, "b"->2, "c"->3]
+    dictionary1.["d"] = 4
+    dictionary2 :[i8]i8 = [1->1,2->2,3->3 :i8->i8]
 }
 ```

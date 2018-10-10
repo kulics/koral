@@ -116,31 +116,32 @@ i := 0
 ```
 Demo
 {
-    .. System, XyLang\Library
+    System
+    XyLang\Library
+}
 
-    main ()
+main ()
+{
+    arr := [1,2,3,4,5]
+    arr.@ 
     {
-        arr := [1,2,3,4,5]
-        arr.@ 
-        {
-            cmd.print.(it)
-        }
+        cmd.print.(it)
+    }
 
-        [1 << 50].@ i
-        {
-            cmd.print.(i)
-        }
+    [1 << 50].@ i
+    {
+        cmd.print.(i)
+    }
 
-        [100 >> 0 ; 2].@ i
-        {
-            cmd.print.(i)
-        }
+    [100 >> 0; 2].@ i
+    {
+        cmd.print.(i)
+    }
 
-        x := 0
-        @ x <= 10
-        {
-            x += 1
-        }
+    x := 0
+    @ x <= 10
+    {
+        x += 1
     }
 }
 ```

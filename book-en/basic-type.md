@@ -165,19 +165,20 @@ More details on generics can be found in the generic section.
 ```
 Demo
 {
-    .. System, XyLang\Library
+    System
+    XyLang\Library
+}
 
-    main ()
-    {
-        a := 123
-        b := a.toI64.()
-        c := 123.456
-        d := "hello"
-        c := "{d} world"
-        e := true
-        f :any = false
-        g :i32|null = null
-        h := null.(i32) 
-    }
+main ()
+{
+    a := 123
+    b := a.toI64.()
+    c := 123.456
+    d := "hello"
+    c := "{d} world"
+    e := true
+    f :any = false
+    g :i32|null = null
+    h := null.(i32) 
 }
 ```

@@ -220,41 +220,42 @@ each1To10.( (item:i32)->()
 ```
 Demo
 {
-    .. System, XyLang\Library
+    System
+    XyLang\Library
+}
 
-    main ()
+main ()
+{
+    A.()
+    B.(1,2,3)
+    x := C.()
+    D.( ()<- cmd.print.("D") )
+    E.( it <- cmd.print.(it) )
+    E.( (a:i32)->()
     {
-        A.()
-        B.(1,2,3)
-        x := C.()
-        D.( ()<- cmd.print.("D") )
-        E.( it <- cmd.print.(it) )
-        E.( (a:i32)->()
-        {
-            cmd.print.(it)
-        })
-    }
+        cmd.print.(it)
+    })
+}
 
-    A ()->(){}
+A ()->(){}
 
-    B (a,b,c :i32)->(){}
+B (a,b,c :i32)->(){}
 
-    C ()->(a:i32)
+C ()->(a:i32)
+{
+    <- (1024)
+}
+
+D (fn: ()->() )->()
+{
+    fn.()
+}
+
+E (fn: (a:i32)->() )->()
+{
+    [1<<20].@
     {
-        <- (1024)
-    }
-
-    D (fn: ()->() )->()
-    {
-        fn.()
-    }
-
-    E (fn: (a:i32)->() )->()
-    {
-        [1<<20].@
-        {
-            fn.(it)
-        }
+        fn.(it)
     }
 }
 ```

@@ -189,34 +189,35 @@ Res != fileResource.{ "/test.xy"}
 ```
 Demo
 {
-    .. System, XyLang\Library
+    System
+    XyLang\Library
+}
 
-    main ()
+main ()
+{
+    x: i32 = (1 * 1).! err 
     {
-        x: i32 = (1 * 1).! err 
-        {
-            !.(err)
-        }
-
-        x != Defer.{}
-        !
-        {
-            x.content = "defer"
-            cmd.print.(x.content)
-        }
+        !.(err)
     }
 
-    Defer {} ->
+    x != Defer.{}
+    !
     {
-        content :str
+        x.content = "defer"
+        cmd.print.(x.content)
     }
+}
 
-    Defer += IDisposable
+Defer {} ->
+{
+    content :str
+}
+
+Defer += IDisposable
+{
+    Dispose ()->()
     {
-        Dispose ()->()
-        {
-            ..content = null
-        }
+        ..content = null
     }
 }
 ```

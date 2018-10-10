@@ -49,15 +49,16 @@ Number
 ```
 Demo
 {
-    .. System, XyLang\Library
-
-    main ()
-    {
-        cmd.print.( A.Z )
-        cmd.print.( B.Z )
-    }
-
-    A [X, Y, Z]
-    B [X, Y=0, Z]
+    System
+    XyLang\Library
 }
+
+main ()
+{
+    cmd.print.( A.Z )
+    cmd.print.( B.Z )
+}
+
+A [X, Y, Z]
+B [X, Y=0, Z]
 ```

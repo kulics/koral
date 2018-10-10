@@ -148,42 +148,43 @@ Note that if the type can not be converted correctly, it will return a `null` va
 ```
 Demo
 {
-    .. System, XyLang\Library
+    System
+    XyLang\Library
+}
 
-    main ()
+main ()
+{
+    S := B.{}
+    B.A.do.()
+    C.( B.A )
+}
+
+A ->
+{
+    X : i32
+    do ()->() {}
+}
+
+B {}->
+{
+    Y := 5
+}
+
+B += A
+{
+    X := 0
+    do ()->() 
     {
-        S := B.{}
-        B.A.do.()
-        C.( B.A )
+        ..A.X += 1
     }
+}
 
-    A ->
+C (a:A)->()
+{
+    a.do.()
+    ? a.?:B 
     {
-        X : i32
-        do ()->() {}
-    }
-
-    B {}->
-    {
-        Y := 5
-    }
-
-    B += A
-    {
-        X := 0
-        do ()->() 
-        {
-            ..A.X += 1
-        }
-    }
-
-    C (a:A)->()
-    {
-        a.do.()
-        ? a.?:B 
-        {
-            cmd.print.( a.?=B.Y )
-        }
+        cmd.print.( a.?=B.Y )
     }
 }
 ```

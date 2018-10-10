@@ -19,35 +19,31 @@ In the following content, we will omit the `;` at the end of the statement by de
 ## Export Namespace
 All content in this language can only be defined in the namespace so that content can be efficiently divided into distinct blocks for management. You can define it freely in a separate namespace without undue restrictions on naming.
 
-We can use the `id {}` statement to define a region's namespace.
+We can use the `id {}` statement to define the namespace of the current file.
 
 E.g:
 ```
-Demo
-{
-    ...
-}
+Demo {}
 ```
-The meaning of this statement is the contents of `{}` will be marked `Demo` in the namespace, so the content naming is limited to the area without having to consider naming conflicts outside the area.
+The meaning of this statement is to mark the content tag in the current code file as `Demo`, so that the content naming inside is limited to the area, and it is not necessary to consider naming conflicts with the outside of the area.
 
 At the same time the external area can import `Demo` to use the contents of which, we will then understand how to import.
-
-Note that only the main entry, package, and protocol statements are supported in the namespace, and these identifiers must be public.
 ## Import Namespace
-We can use the `.. id,id,id` statement to import other namespaces, libraries, frameworks into a namespace.
+We can use the `id` statement in the `{}` of the export statement to import other namespaces, libraries, and frameworks into a namespace.
 
 E.g:
 ```
-Demo
+Demo 
 {
-    .. System, XyLang\Library
+    System
+    XyLang\Library
 }
 ```
 This imports the `System` and` Library` libraries into the `Demo` namespace, and then you can use them in the program.
 
 It's important to note that most of XyLang's functionality is included in the Library, so we have to import this namespace to ensure proper use of XyLang.
 
-You can write multiple import statements that are separated by `,` and their order does not affect the import function.
+You can write multiple import statements that their order does not affect the import function.
 
 For more details on namespaces, please see [Namespace](namespace.md)
 
@@ -56,14 +52,14 @@ We need to define a main entry to let the program know where to start. The main 
 
 E.g:
 ```
-Demo
+Demo 
 {
-    .. System, XyLang\Library
-    
-    main ()
-    {
-        ...
-    }
+    System
+    XyLang\Library
+}
+
+main ()
+{
 }
 ```
 The main entry function here is defined at the top of the namespace and is a function with no arguments and no return value. It is automatically recognized as the main entry and the main entry function is executed when the program is started, so we simply write the function main entry function can be.
@@ -195,14 +191,15 @@ a.b.(x, y)
 ```
 Demo
 {
-    .. System, XyLang\Library
+    System
+    XyLang\Library
+}
 
-    main ()
-    {
-        a : i32
-        a = 5
-        b := 6
-        c :i8 = 1
-    }
+main ()
+{
+    a : i32
+    a = 5
+    b := 6
+    c :i8 = 1
 }
 ```
