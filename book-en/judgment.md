@@ -110,15 +110,15 @@ E.g:
 x.?
 :i32 // When i32
 {
-     Console.Write.(it)
+     cmd.print.(it)
 }
 content:str // when str
 {
-     Console.Write.(content)
+     cmd.print.(content)
 }
 null // When it is null
 {
-     Console.Write.("null")
+     cmd.print.("null")
 }
 ```
 ### Get type
