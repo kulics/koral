@@ -264,7 +264,7 @@ namespace XyLang.Compile
         public override object VisitCheckErrorStatement([NotNull] XyParser.CheckErrorStatementContext context)
         {
             var obj = "";
-            var ID = "it";
+            var ID = "ex";
             if (context.id() != null)
             {
                 ID = (Visit(context.id()) as Result).text;
