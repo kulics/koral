@@ -111,7 +111,7 @@ Of course, it is better to put these students in an array so that we can use loo
 E.g:
 ```
 Arr := []homeWork.{}
-Arr.Add.( StudentA.homeWork )
+Arr.add.( StudentA.homeWork )
 ... // stuffed many, many students
 Arr.@
 {
