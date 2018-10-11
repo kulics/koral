@@ -24,17 +24,17 @@ readFile (name: str)->()
 So we declare an exception, the exception description is `something wrong`, once the external caller uses the illegal length of `name`, the function will be forced to abort, report the exception up and hand it to the caller.
 ## Check Exception
 We can use the `.! id:type {}` statement to check for exceptions when using assignment statements or expression statements.
-`id` can be omitted, the default is `it`.
+`id` can be omitted, the default is `ex`.
 `:type` can also be omitted, the default is `Exception`.
 
 E.g:
 ```
-f: file = readFile.("temp.txt").! err: Exception
+f: file = readFile.("temp.txt").! e: Exception
 {
-    cmd.print.(err.message)
+    cmd.print.(e.message)
 }
 ```
-When an exception occurs, the program enters the `!` block, and `err` is the exception identifier. We can get the exception information or perform other operations.
+When an exception occurs, the program enters the `!` block, and `e` is the exception identifier. We can get the exception information or perform other operations.
 
 If there are no exceptions, the logic of the exception handling block will not be entered.
 
@@ -45,7 +45,7 @@ E.g:
 Func.().! {
      // can be returned manually
      // <- ()
-     !.(it)
+     !.(ex)
 }
 ```
 ## Fragment
@@ -54,16 +54,16 @@ If we come across something that always needs to be declared repeatedly, such as
 E.g:
 ```
 Do1.().! {
-    Log.(it.msg)
-    !.(it)
+    Log.(ex.msg)
+    !.(ex)
 }
 Do2.().! {
-    Log.(it.msg)
-    !.(it)
+    Log.(ex.msg)
+    !.(ex)
 }
 Do3.().! {
-    Log.(it.msg)
-    !.(it)
+    Log.(ex.msg)
+    !.(ex)
 }
 ```
 
@@ -73,10 +73,10 @@ We can use fragment statements to optimize this content, using `id () -> {}` to 
 
 E.g:
 ```
-checkError (it:Exception) ->
+checkError (e:Exception) ->
 {
-    Log.(it.msg)
-    !.(it)
+    Log.(e.msg)
+    !.(e)
 }
 ```
 
@@ -195,9 +195,9 @@ Demo
 
 main ()
 {
-    x: i32 = (1 * 1).! err 
+    x: i32 = (1 * 1).! e 
     {
-        !.(err)
+        !.(e)
     }
 
     x != Defer.{}
