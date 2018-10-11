@@ -40,11 +40,11 @@ main () // main function
         // match
         it.? [ 0 << 8 ] 
         {
-            cmd.print.(" in 0-8")
+            cmd.print.(" in 0-8 ")
         }
         _
         {
-            cmd.print.(" over 10")
+            cmd.print.(" others ")
             <- @
         }
     }
