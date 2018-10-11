@@ -30,7 +30,7 @@ E.g:
 ```
 arr.@ i -> v
 {
-     cmd.print.(/"{i}:{v}"/)
+     cmd.print.("{i}:{v}")
 }
 ```
 
