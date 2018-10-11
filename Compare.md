@@ -354,7 +354,7 @@ makeIncrementer ()->(fn: (in: i32)->(out: i32))
         <- (1 + number)
     }
     <- (addOne)
-};
+}
 increment := makeIncrementer.()
 increment.(7)
 ```
@@ -474,7 +474,7 @@ var shapeDescription = shape.simpleDescription();
 ```
 ### Go
 ```
-shape := new(Shape)
+shape := Shape{}
 shape.numberOfSides = 7
 shapeDescription := shape.simpleDescription()
 ```
