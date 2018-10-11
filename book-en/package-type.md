@@ -231,8 +231,8 @@ E.g:
 ```
 chineseStudent {}->
 {
-    student :student?   // include student attributes in it
-    kungfu :bl?       // kung fu students
+    student :student|null   // include student attributes in it
+    kungfu :bl|null       // kung fu students
 }
 ```
 This way you can use generic attributes via student attributes in Chinese students.
