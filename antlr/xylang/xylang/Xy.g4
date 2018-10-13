@@ -237,7 +237,7 @@ tuple : '(' (expression (',' expression)* )? ')'; // 元组
 
 expressionList : expression (',' expression)* ; // 表达式列
 
-annotation: '\\\\' (id ':')? annotationList | '\\*' (id ':')? annotationList '*\\' ; // 注解
+annotation: '[' (id ':')? annotationList ']' ; // 注解
 
 annotationList: annotationItem (',' annotationItem)*;
 
