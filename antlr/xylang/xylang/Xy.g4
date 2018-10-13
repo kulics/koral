@@ -203,7 +203,6 @@ primaryExpression
 | callPkg // 新建包
 | getType // 获取类型
 | callAwait // 异步调用
-| sharpArray // c#数组
 | array // 数组
 | dictionary // 字典
 | lambda // lambda表达式
@@ -265,11 +264,9 @@ callAs: as type; // 类型转换
 
 callAwait: FlowLeft expression; // 异步调用
 
-array : '[' (expression (',' expression)*)? (':' type)? ']'; // 数组
+array : '{' (expression (',' expression)*)? (':' type)? '}'; // 数组
 
-sharpArray : '#' '[' (expression (',' expression)*)? (':' type)? ']'; // c#数组
-
-dictionary :  '[' (dictionaryElement (',' dictionaryElement)*)? (':' type '->' type)? ']'; // 字典
+dictionary :  '{' (dictionaryElement (',' dictionaryElement)*)? (':' type '->' type)? '}'; // 字典
 
 dictionaryElement: expression '->' expression; // 字典元素
 
