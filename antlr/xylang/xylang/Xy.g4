@@ -1,4 +1,4 @@
-grammar Xy;
+﻿grammar Xy;
 
 program: statement+;
 
@@ -336,6 +336,7 @@ typeTuple
 | typeArray
 | typeDictionary
 | typeBasic
+| typeSharp
 | typePackage
 | typeFunction
 ;
@@ -373,6 +374,9 @@ t=TypeAny
 | t=TypeBool
 ;
 
+// c# 类型
+typeSharp: t=('sbyte'|'short'|'int'|'long'|'byte'|'ushort'|'uint'|'ulong'|'float'|'double'|'bool'|'char'|'string');
+
 // bool值
 bool:t=True|t=False;
 
@@ -387,10 +391,7 @@ wave : op='~';
 
 id: op=(IDPublic|IDPrivate)
 |typeBasic
-|linqKeyword
-|sharpId;
-
-sharpId: '#' typeBasic;
+|linqKeyword;
 
 Terminate : ';';
 
