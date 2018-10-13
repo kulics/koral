@@ -295,9 +295,9 @@ lambdaOut :
 expressionList 
 | BlockLeft (functionSupportStatement)* BlockRight;
 
-pkgAnonymous: '_' pkgAnonymousAssign; // 匿名包
+pkgAnonymous: pkgAnonymousAssign; // 匿名包
 
-pkgAnonymousAssign: BlockLeft (pkgAnonymousAssignElement)* BlockRight; // 简化赋值
+pkgAnonymousAssign: BlockLeft (pkgAnonymousAssignElement)+ BlockRight; // 简化赋值
 
 pkgAnonymousAssignElement: name ':=' expression Terminate?; // 简化赋值元素
 
