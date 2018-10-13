@@ -604,40 +604,6 @@ namespace XyLang.Compile
             return r;
         }
 
-        public override object VisitSharpArray([NotNull] XyParser.SharpArrayContext context)
-        {
-            var type = "var";
-            var result = new Result();
-            for (int i = 0; i < context.expression().Length; i++)
-            {
-                var r = (Result)Visit(context.expression(i));
-                if (i == 0)
-                {
-                    type = (string)r.data;
-                    result.text += r.text;
-                }
-                else
-                {
-                    if (type != (string)r.data)
-                    {
-                        type = "object";
-                    }
-                    result.text += "," + r.text;
-                }
-            }
-            if (context.type() != null)
-            {
-                result.data = $"{(string)Visit(context.type())}[]";
-            }
-            else
-            {
-                result.data = type + "[]";
-            }
-
-            result.text = $"(new []{{ {result.text} }})";
-            return result;
-        }
-
         public override object VisitArray([NotNull] XyParser.ArrayContext context)
         {
             var type = "object";
