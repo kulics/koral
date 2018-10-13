@@ -1,4 +1,4 @@
-﻿grammar Xy;
+grammar Xy;
 
 program: statement+;
 
@@ -265,7 +265,7 @@ callAs: as type; // 类型转换
 
 callAwait: FlowLeft expression; // 异步调用
 
-array : '{' '|' (expression (',' expression)*)? (':' type)? '|' '}'; // 数组
+array : '{|' (expression (',' expression)*)? (':' type)? '|}'; // 数组
 
 list : '{' (expression (',' expression)*)? (':' type)? '}'; // 列表
 
@@ -312,11 +312,11 @@ plusMinus : add expression;
 
 negate : wave expression;
 
-linq: '`' (linqItem)+  '`';
+linq: 'from' expression (linqItem)+ k=('by'|'select') expression;
 
-linqItem: linqKeyword|expression;
+linqItem: linqKeyword | expression;
 
-linqKeyword: k=('from'|'where'|'select'|'group'|'into'|'orderby'|'join'|'let'|'in'|'on'|'equals'|'by'|'ascending'|'descending') ;
+linqKeyword: k=('where'|'select'|'group'|'into'|'orderby'|'join'|'let'|'in'|'on'|'equals'|'by'|'ascending'|'descending') ;
 
 // 基础数据
 dataStatement:

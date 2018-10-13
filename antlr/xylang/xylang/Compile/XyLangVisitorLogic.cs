@@ -347,11 +347,12 @@ namespace XyLang.Compile
             {
                 data = "var"
             };
+            r.text += "from " + ((Result)Visit(context.expression(0))).text + " ";
             foreach (var item in context.linqItem())
             {
                 r.text += (string)Visit(item) + " ";
             }
-            r.text = $"({r.text})";
+            r.text += context.k.Text + " " + ((Result)Visit(context.expression(1))).text;
             return r;
         }
 
