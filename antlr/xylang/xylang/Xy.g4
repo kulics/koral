@@ -172,7 +172,7 @@ handleStatement: id parameterClauseIn ArrowRight BlockLeft (functionSupportState
 // 调用处理
 callHandleStatement:ArrowRight id Terminate?;
 // 迭代器
-iteratorStatement: '[' expression op=('<<'|'>>') expression Terminate expression ']' | '[' expression op=('<<'|'>>') expression ']';
+iteratorStatement: '[' expression op=('<'|'<='|'>'|'>=') expression Terminate expression ']' | '[' expression op=('<'|'<='|'>'|'>=') expression ']';
 
 // 定义变量
 variableStatement: expression Define expression Terminate?;
