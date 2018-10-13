@@ -52,14 +52,14 @@ namespace XyLang.Compile
             return r;
         }
 
-        public override object VisitTypeArray([NotNull] XyParser.TypeArrayContext context)
+        public override object VisitTypeList([NotNull] XyParser.TypeListContext context)
         {
             var obj = "";
             obj += $" {List}<{ Visit(context.type())}> ";
             return obj;
         }
 
-        public override object VisitTypeSharpArray([NotNull] XyParser.TypeSharpArrayContext context)
+        public override object VisitTypeArray([NotNull] XyParser.TypeArrayContext context)
         {
             var obj = "";
             obj += Visit(context.type()) + "[]";

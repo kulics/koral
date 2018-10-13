@@ -204,6 +204,7 @@ primaryExpression
 | getType // 获取类型
 | callAwait // 异步调用
 | array // 数组
+| list // 列表
 | dictionary // 字典
 | lambda // lambda表达式
 | function // 函数
@@ -246,7 +247,7 @@ annotationAssign: (id '=')? expression ;
 
 callFunc: id (templateCall)? call tuple; // 函数调用
 
-callPkg: type call '{' expressionList? ( '...' (pkgAssign|arrayAssign|dictionaryAssign))? '}'; // 新建包
+callPkg: type call '{' expressionList? ( '...' (pkgAssign|listAssign|dictionaryAssign))? '}'; // 新建包
 
 getType: Judge call '(' (expression|':' type) ')';
 
@@ -254,7 +255,7 @@ pkgAssign: (pkgAssignElement (',' pkgAssignElement)*)? ; // 简化赋值
 
 pkgAssignElement: name Assign expression; // 简化赋值元素
 
-arrayAssign: (expression (',' expression)*)? ;
+listAssign: (expression (',' expression)*)? ;
 
 dictionaryAssign: (dictionaryElement (',' dictionaryElement)*)? ;
 
@@ -264,7 +265,9 @@ callAs: as type; // 类型转换
 
 callAwait: FlowLeft expression; // 异步调用
 
-array : '{' (expression (',' expression)*)? (':' type)? '}'; // 数组
+array : '{' '|' (expression (',' expression)*)? (':' type)? '|' '}'; // 数组
+
+list : '{' (expression (',' expression)*)? (':' type)? '}'; // 列表
 
 dictionary :  '{' (dictionaryElement (',' dictionaryElement)*)? (':' type '->' type)? '}'; // 字典
 
@@ -329,8 +332,8 @@ t=Float
 // 类型
 typeNotNull:
 typeTuple
+| typeList
 | typeArray
-| typeSharpArray
 | typeDictionary
 | typeBasic
 | typePackage
@@ -341,8 +344,8 @@ typeNullable : typeNotNull '|' Null;
 type : typeNotNull | typeNullable;
 
 typeTuple : '(' type (',' type)+ ')';
-typeArray : '[' ']' type;
-typeSharpArray : '[' '#' ']' type;
+typeList : '[' ']' type;
+typeArray : '[' '|' ']' type;
 typeDictionary :  '[' type ']' type;
 typePackage : nameSpaceItem (templateCall)? ;
 typeFunction : typeFunctionParameterClause ArrowRight typeFunctionParameterClause;
