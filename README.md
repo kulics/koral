@@ -28,17 +28,17 @@ HelloWorld // export namespace
 
 main () // main function  
 {
-    // array
-    greetings := ["Hello", "Hola", "Bonjour",
+    // list
+    greetings := {"Hello", "Hola", "Bonjour",
                 "Ciao", "こんにちは", "안녕하세요",
                 "Cześć", "Olá", "Здравствуйте",
-                "Chào bạn", "您好"]
+                "Chào bạn", "您好"}
                 
     greetings.@ // for-each
     {
         cmd.print.(it) // call function
         // match
-        it.? [ 0 << 8 ] 
+        it.? [ 0 <= 8 ] 
         {
             cmd.print.(" in 0-8 ")
         }

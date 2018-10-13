@@ -143,7 +143,7 @@ let count = i + Int(f)
 ## Inclusive Range Operator
 ### XyLang
 ```
-[ 1 << 5 ].@
+[ 1 <= 5 ].@
 {
     cmd.print.("{it} times 5 is {it * 5}")
 }
@@ -176,8 +176,8 @@ for index in 1...5 {
 ## Arrays
 ### XyLang
 ```
-shoppingList := ["catfish", "water",
-    "tulips", "blue paint"]
+shoppingList := {"catfish", "water",
+    "tulips", "blue paint"}
 shoppingList.[1] = "bottle of water"
 ```
 ### C#
@@ -207,10 +207,10 @@ shoppingList[1] = "bottle of water"
 ## Maps
 ### XyLang
 ```
-occupations := [
+occupations := {
     "Malcolm"->"Captain",
     "Kaylee"->"Mechanic"
-]
+}
 occupations.["Jayne"] = "Public Relations"
 ```
 ### C#
@@ -248,8 +248,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### XyLang
 ```
-emptyArray := [ :str]
-emptyDictionary := [ :str->f32]
+emptyArray := { :str}
+emptyDictionary := { :str->f32}
 ```
 ### C#
 ```
@@ -750,10 +750,10 @@ for item in library {
 ```
 nb := 42
 nb.?  
-[0<<7],8,9 { print.("single digit") }
+[0<=7],8,9 { print.("single digit") }
 10 { print.("double digits") }
-[11<<99] { print.("double digits") }
-[100<<999] { print.("triple digits") }
+[11<=99] { print.("double digits") }
+[100<=999] { print.("triple digits") }
 _ { print.("four or more digits") }
 ```
 ### C#
