@@ -481,9 +481,9 @@ namespace XyLang.Compile
             {
                 r.text += Visit(context.pkgAssign());
             }
-            if (context.arrayAssign() != null)
+            if (context.listAssign() != null)
             {
-                r.text += Visit(context.arrayAssign());
+                r.text += Visit(context.listAssign());
             }
             if (context.dictionaryAssign() != null)
             {
@@ -512,7 +512,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitArrayAssign([NotNull] XyParser.ArrayAssignContext context)
+        public override object VisitListAssign([NotNull] XyParser.ListAssignContext context)
         {
             var obj = "";
             obj += "{";
@@ -605,6 +605,40 @@ namespace XyLang.Compile
         }
 
         public override object VisitArray([NotNull] XyParser.ArrayContext context)
+        {
+            var type = "var";
+            var result = new Result();
+            for (int i = 0; i < context.expression().Length; i++)
+            {
+                var r = (Result)Visit(context.expression(i));
+                if (i == 0)
+                {
+                    type = (string)r.data;
+                    result.text += r.text;
+                }
+                else
+                {
+                    if (type != (string)r.data)
+                    {
+                        type = "object";
+                    }
+                    result.text += "," + r.text;
+                }
+            }
+            if (context.type() != null)
+            {
+                result.data = $"{(string)Visit(context.type())}[]";
+            }
+            else
+            {
+                result.data = type + "[]";
+            }
+
+            result.text = $"(new {result.data}{{ {result.text} }})";
+            return result;
+        }
+
+        public override object VisitList([NotNull] XyParser.ListContext context)
         {
             var type = "object";
             var result = new Result();
