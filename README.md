@@ -21,23 +21,23 @@ Read detail from The [Book](./book-en/introduction.md).
 
 ## Quick Preview
 ```
-HelloWorld // export namespace
+HelloWorld # export namespace
 {
-    System // import namespace
+    System # import namespace
 }
 
-main () // main function  
+main () # main function  
 {
-    // list
+    # list
     greetings := {"Hello", "Hola", "Bonjour",
                 "Ciao", "こんにちは", "안녕하세요",
                 "Cześć", "Olá", "Здравствуйте",
                 "Chào bạn", "您好"}
                 
-    greetings.@ // for-each
+    greetings.@ # for-each
     {
-        cmd.print.(it) // call function
-        // match
+        cmd.print.(it) # call function
+        # match
         it.? [ 0 <= 8 ] 
         {
             cmd.print.(" in 0-8 ")
