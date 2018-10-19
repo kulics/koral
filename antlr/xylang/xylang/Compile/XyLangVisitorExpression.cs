@@ -429,24 +429,84 @@ namespace XyLang.Compile
 
         public override object VisitSliceFull([NotNull] XyParser.SliceFullContext context)
         {
-            var order = context.op.Text == "<<" ? "true": "false";
+            var order = "";
+            var attach = "";
+            switch (context.op.Text)
+            {
+                case "<=":
+                    order = "true";
+                    attach = "true";
+                    break;
+                case "<":
+                    order = "true";
+                    break;
+                case ">=":
+                    order = "false";
+                    attach = "true";
+                    break;
+                case ">":
+                    order = "false";
+                    break;
+                default:
+                    break;
+            }
             var expr1 = (Result)Visit(context.expression(0));
             var expr2 = (Result)Visit(context.expression(1));
-            return $".slice({expr1.text}, {expr2.text}, {order})";
+            return $".slice({expr1.text}, {expr2.text}, {order}, {attach})";
         }
 
         public override object VisitSliceStart([NotNull] XyParser.SliceStartContext context)
         {
-            var order = context.op.Text == "<<" ? "true" : "false";
+            var order = "";
+            var attach = "";
+            switch (context.op.Text)
+            {
+                case "<=":
+                    order = "true";
+                    attach = "true";
+                    break;
+                case "<":
+                    order = "true";
+                    break;
+                case ">=":
+                    order = "false";
+                    attach = "true";
+                    break;
+                case ">":
+                    order = "false";
+                    break;
+                default:
+                    break;
+            }
             var expr = (Result)Visit(context.expression());
-            return $".slice({expr.text}, null, {order})";
+            return $".slice({expr.text}, null, {order}, {attach})";
         }
 
         public override object VisitSliceEnd([NotNull] XyParser.SliceEndContext context)
         {
-            var order = context.op.Text == "<<" ? "true" : "false";
+            var order = "";
+            var attach = "false";
+            switch (context.op.Text)
+            {
+                case "<=":
+                    order = "true";
+                    attach = "true";
+                    break;
+                case "<":
+                    order = "true";
+                    break;
+                case ">=":
+                    order = "false";
+                    attach = "true";
+                    break;
+                case ">":
+                    order = "false";
+                    break;
+                default:
+                    break;
+            }
             var expr = (Result)Visit(context.expression());
-            return $".slice(null, {expr.text}, {order})";
+            return $".slice(null, {expr.text}, {order}, {attach})";
         }
 
         public override object VisitCallFunc([NotNull] XyParser.CallFuncContext context)
