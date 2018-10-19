@@ -66,7 +66,7 @@ namespace XyLang.Library
             }
             return temp;
         }
-        public lst<T> slice(i32 startIndex, i32 endIndex, bl order)
+        public lst<T> slice(i32 startIndex, i32 endIndex, bool order = true, bool attach = true)
         {
             if (startIndex == null && endIndex == null)
             {
@@ -74,11 +74,25 @@ namespace XyLang.Library
             }
             else if (endIndex == null)
             {
-                return subList(startIndex, lastIndex);
+                if (attach)
+                {
+                    return subList(startIndex, lastIndex);
+                }
+                else
+                {
+                    return subList(startIndex, lastIndex-1);
+                }
             }
             else // (startIndex == null)
             {
-                return subList(0, endIndex);
+                if (attach)
+                {
+                    return subList(0, endIndex);
+                }
+                else
+                {
+                    return subList(0, endIndex-1);
+                }
             }
         }
         public i32 firstIndexOf(T item) => IndexOf(item);

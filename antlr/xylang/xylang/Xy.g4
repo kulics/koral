@@ -277,9 +277,9 @@ callElement : '[' (expression | slice) ']';
 
 slice: sliceFull | sliceStart | sliceEnd;
 
-sliceFull: expression op=('<<'|'>>') expression; 
-sliceStart: expression op=('<<'|'>>');
-sliceEnd: op=('<<'|'>>') expression; 
+sliceFull: expression op=('<'|'<='|'>'|'>=') expression; 
+sliceStart: expression op=('<'|'<='|'>'|'>=');
+sliceEnd: op=('<'|'<='|'>'|'>=') expression; 
 
 nameSpace: id ('\\' id)*;
 

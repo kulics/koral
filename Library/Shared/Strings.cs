@@ -164,6 +164,8 @@ namespace XyLang.Library
         public str substring(i32 startIndex) => v.Substring(startIndex);
         public str substring(i32 startIndex, i32 count) => v.Substring(startIndex, count);
 
+        public str join(str j) => string.Join(j, v);
+
         public str toUpper() => v.ToUpper();
         public str toLower() => v.ToLower();
 
