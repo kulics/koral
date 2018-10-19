@@ -27,16 +27,16 @@ run { name\space }
 
 main ()
 {
-    // 打印 something
+    # 打印 something
     cmd.print.( Demo.getSomething.() )
 }
 ```
 
-If we need to specify the name of the host container, we can specify it using `::name`.
+If we need to specify the name of the host container, we can specify it using `=name`.
 
 E.g:
 ```
-name\space::helper {}
+name\space=helper {}
 
 getSomething ()->(content:str)
 {
@@ -61,7 +61,7 @@ run{ name\space.Demo }
 
 main ()
 {
-    // 打印 something
+    # 打印 something
     cmd.print.( getSomething.() )
 }
 ```
@@ -75,7 +75,7 @@ demo {}
 
 main ()
 {
-    // 直接使用即可
+    # 直接使用即可
     cmd.print.( \name\space.Demo.getSomething.() )    
 }
 ```

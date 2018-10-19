@@ -13,19 +13,17 @@
 [微软文档](https://docs.microsoft.com/zh-cn/dotnet/csharp/programming-guide/concepts/linq/getting-started-with-linq)
 
 ## 声明
-在这门语言里，因为没有关键字的设计，所以我们需要使用特殊方法来标记 LINQ 语句。
-
-我们可以使用 **\`** **\`** 来包裹一段语句，这样就可以在里面使用查询关键字了。
+我们可以像C#一样使用Linq进行查询。
 
 例如：
 ```
 linq ()->()
 {
-    numbers := [ 0, 1, 2, 3, 4, 5, 6 ]
-    arr := `from num in numbers
+    numbers := { 0, 1, 2, 3, 4, 5, 6 }
+    arr := from num in numbers
             where (num % 2) == 0
             orderby num descending
-            select num`
+            select num
 }
 ```
 

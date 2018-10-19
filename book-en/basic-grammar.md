@@ -11,7 +11,7 @@ So in most cases, we can omit the `;` used to end, this symbol is optional, for 
 
 So we prefer to write like this:
 ```
-StatementContent // auto end
+StatementContent # auto end
 StatementContent
 ```
 
@@ -77,18 +77,13 @@ If we write a console program, we can use `cmd.print.()` function, it can displa
 
 E.g:
 ```
-cmd.print.("Hello world")    // output Hello world
+cmd.print.("Hello world")    # output Hello world
 ```
 In the following examples, we will all use the console as a presentation environment.
 ## Comment
-Our comments are very similar to the C language, with single-line comment starting with two backslashes `//`:
+Single-line comment starting with `#`:
 ```
-// single-line comment
-```
-Block comment begin with `/*` and end with `*/`:
-```
-/* multi-line
-comment */
+# single-line comment
 ```
 Comment is only used to provide additional information to the user, and will not be really compiled into the executable program.
 ## Definition
@@ -131,8 +126,8 @@ We can define variable data very easily, and types that are not marked with spec
 
 E.g:
 ```
-i := 1          // can be changed
-j :i32 = 1      // do not use automatic derivation
+i := 1          # can be changed
+j :i32 = 1      # do not use automatic derivation
 ```
 
 It should be noted that variable data cannot be called externally and can only be used within a defined range. Can be considered private.
@@ -142,8 +137,8 @@ We can also define invariable data that must be assigned at the time of definiti
 
 E.g:
 ```
-i :== 2         // cannot be changed
-j :i32 == 3     // do not use automatic derivation
+i :== 2         # cannot be changed
+j :i32 == 3     # do not use automatic derivation
 ```
 
 ## Constant
@@ -151,8 +146,8 @@ Constants are languages that are determined at compile time and are unchangeable
 
 E.g:
 ```
-i 2         // automatic derivation
-j :i32 3    // do not use automatic derivation
+i 2         # automatic derivation
+j :i32 3    # do not use automatic derivation
 ```
 
 Note that invariable data can only be defined within the package without initial.

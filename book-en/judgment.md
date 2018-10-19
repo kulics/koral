@@ -7,7 +7,7 @@ E.g:
 ```
 ? true
 {
-    cmd.print.("true")  // true
+    cmd.print.("true")  # true
 }
 ```
 # Boolean Judgment
@@ -19,11 +19,11 @@ E.g:
 b := false
 ? b
 {
-    ... // since b is false, it will never enter this branch
+    ... # since b is false, it will never enter this branch
 }
 ?
 {
-    ... // handle false
+    ... # handle false
 }
 ```
 
@@ -108,15 +108,15 @@ You can use the `value.?id:type{}` syntax to match types, `id` can be omitted, a
 E.g:
 ```
 x.?
-:i32 // When i32
+:i32 # When i32
 {
      cmd.print.(it)
 }
-content:str // when str
+content:str # when str
 {
      cmd.print.(content)
 }
-null // When it is null
+null # When it is null
 {
      cmd.print.("null")
 }
@@ -126,8 +126,8 @@ If we need to explicitly get the type value, we can use the `?.(id)` or `?.(:typ
 
 E.g:
 ```
-?.(expr)    // Get the expression type value
-?.(:type)   // Get the type value directly by type
+?.(expr)    # Get the expression type value
+?.(:type)   # Get the type value directly by type
 ```
 ### [Next Chapter](loop.md)
 

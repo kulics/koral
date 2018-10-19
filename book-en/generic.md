@@ -13,17 +13,17 @@ E.g:
 ```
 List<T> {}->
 {
-    items := Storage.{T}    // 创建存储
+    items := Storage.{T}    # 创建存储
     length := 0
 }
 List<T> +=
 {
-    get (index:i32)->(item:T)  // 获取某个泛型数据
+    get (index:i32)->(item:T)  # 获取某个泛型数据
     {
         <- (items.get.(index))
     }
 
-    add (item:T)->()    //将一个泛型数据添加进数组
+    add (item:T)->()    #将一个泛型数据添加进数组
     {
         items.insert.(length, item)
         length += 1
@@ -42,7 +42,7 @@ E.g:
 ```
 Package<T> {}->
 {
-    item := null.(T)    // initialized a null value of the generic data
+    item := null.(T)    # initialized a null value of the generic data
 }
 ```
 So how do we use generics?
@@ -51,13 +51,13 @@ Very simple, and we can use the same statement, but called when the need to impo
 
 E.g:
 ```
-ListNumber := List<i32>.{}  // pass in the number type
+ListNumber := List<i32>.{}  # pass in the number type
 ```
 So we have an List of number types, is like this:
 ```
 ListNumber := []i32.{}
 ```
-Yes, in fact, our list and dictionary syntax are syntactic sugar, the actual types are `Lst` and `Dic`.
+Yes, in fact, our list and dictionary syntax are syntactic sugar, the actual types are `lst` and `dic`.
 ## Supported Types
 We can use generics in packages, functions, and protocol types.
 

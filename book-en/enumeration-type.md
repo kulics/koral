@@ -13,7 +13,7 @@ In this way, we don't need to care about their values when we use them, and we c
 
 E.g:
 ```
-c := randomColor.()     // Get a random color
+c := randomColor.()     # Get a random color
 c.? Color.Red
 {
      ...
@@ -36,10 +36,10 @@ E.g:
 ```
 Number 
 [
-    a = 1,    // 1
-    b,        // 2
-    c = 1,    // 1
-    d         // 2
+    a = 1,    # 1
+    b,        # 2
+    c = 1,    # 1
+    d         # 2
 ]
 ```
 

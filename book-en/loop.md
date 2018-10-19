@@ -7,10 +7,10 @@ If we happen to have a collection that can be an array, a dictionary, or a piece
 
 E.g:
 ```
-arr := [1, 2, 3, 4, 5]
+arr := {1, 2, 3, 4, 5}
 arr.@ item
 {
-    cmd.print.(item)     // print each number
+    cmd.print.(item)     # print each number
 }
 ```
 The identifier followed by `@` is the currently fetched value, which is valid only for the current loop. So we don't need to define an identifier externally.
@@ -20,7 +20,7 @@ E.g:
 ```
 Arr.@
 {
-     cmd.print.(it)     // print each number
+     cmd.print.(it)     # print each number
 }
 ```
 
@@ -38,39 +38,40 @@ This can be thought of as a `foreach` structure relative to other languages.
 ## Iterator Loop
 There are times when we do not necessarily have a collection, but we just need to take numbers like `0` to `100`. We have an iterator syntax to accomplish such a task.
 
-Iterators can loop from the start point to the end point, we use the collection expression, using the `<<` symbol between the two numbers.
+Iterators can loop from the start point to the end point, we use the collection expression, using the `<=` symbol between the two numbers.
 
 E.g:
 ```
-[0 << 100].@
+[0 <= 100].@
 {
-    cmd.print.(it)      // print each number
+    cmd.print.(it)      # print each number
 }
 ```
-It should be noted that the meaning of `0 << 100` is read from` 0` to `100` one by one, that is, a total execution of` 101` times. Iterator will be executed until the last number is completed, rather than an early end.
+It should be noted that the meaning of `0 <= 100` is read from` 0` to `100` one by one, that is, a total execution of` 101` times. Iterator will be executed until the last number is completed, rather than an early end.
 
-So if we need to do it a hundred times, we can use `0 << 99` or` 1 << 100`, remembering this difference.
+So if we need to do it a hundred times, we can use `0 < 99` or` 1 <= 100-1`, remembering this difference.
 
 By default, iterators add `1` to each interval. If we need to take every other number, we can add a step-by-step condition, just insert `;` and a number behind the start point and the end point.
 
 E.g:
 ```
-[0 << 100; 2].@
+[0 <= 100; 2].@
 {
     ...
 }
 ```
 So every interval is not `1` but `2`, empathy we can set other numbers.
 
-We can also reverse it in reverse order, as long as we use `>>`.
+We can also reverse it in reverse order, as long as we use `>=`.
 
 E.g:
 ```
-[100 >> 0].@
+[100 >= 0].@
 {
-     ...    // from 100 to 0
+     ...    # from 100 to 0
 }
 ```
+For the same reason, if you don't want to reach the last one, you can use `100 > 0`.
 
 This can be considered as a `for` structure relative to other languages.
 ## Infinite Loop
@@ -80,7 +81,7 @@ E.g:
 ```
 @
 {
-    ... // never jump out
+    ... # never jump out
 }
 ```
 This can be thought of as a while while for other languages.
@@ -91,7 +92,7 @@ E.g:
 ```
 @
 {
-    <- @  // jump out
+    <- @  # jump out
 }
 ```
 In addition to the infinite loop, jump out can also be used in other cycles.
@@ -122,18 +123,18 @@ Demo
 
 main ()
 {
-    arr := [1,2,3,4,5]
+    arr := {1,2,3,4,5}
     arr.@ 
     {
         cmd.print.(it)
     }
 
-    [1 << 50].@ i
+    [1 <= 50].@ i
     {
         cmd.print.(i)
     }
 
-    [100 >> 0; 2].@ i
+    [100 >= 0; 2].@ i
     {
         cmd.print.(i)
     }

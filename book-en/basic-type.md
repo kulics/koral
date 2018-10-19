@@ -13,14 +13,14 @@ integer := 3987349
 
 If we need integers of other numeric ranges, other types can also be used. All supported integer types are shown in the following table.
 ```
-i8      // 8-bit signed     -128 to 127
-u8      // 8-bit unsigned   0 to 255
-i16     // 16-bit signed    -32,768 to 32,767
-u16     // 16-bit unsigned  0 to 65,535
-i32     // 32-bit signed    -2,147,483,648 to 2,147,483,647
-u32     // 32-bit unsigned  0 to 4,294,967,295
-i64     // 64-bit signed    -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807
-u64     // 64-bit unsigned  0 to 18,446,744,073,709,551,615
+i8      # 8-bit signed     -128 to 127
+u8      # 8-bit unsigned   0 to 255
+i16     # 16-bit signed    -32,768 to 32,767
+u16     # 16-bit unsigned  0 to 65,535
+i32     # 32-bit signed    -2,147,483,648 to 2,147,483,647
+u32     # 32-bit unsigned  0 to 4,294,967,295
+i64     # 64-bit signed    -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807
+u64     # 64-bit unsigned  0 to 18,446,744,073,709,551,615
 ```
 ## Basic Type Conversion
 Since the default integer is `i32`, how do we use other types of integers?
@@ -47,8 +47,8 @@ Note that due to the special nature of computer-calculated floating-point number
 
 All supported floating-point types are as follows:
 ```
-f32 // 32-bit   ±1.5e−45 to ±3.4e38
-f64 // 64-bit   ±5.0e−324 to ±1.7e308
+f32     # 32-bit   ±1.5e−45 to ±3.4e38
+f64     # 64-bit   ±5.0e−324 to ±1.7e308
 ```
 ## Character
 Computers usually use a specific number to encode characters, so a type is needed to express the characters. This is the `chr` type.
@@ -83,7 +83,7 @@ E.g:
 title := "Year:"
 content := 2018
 string := "Hello world! " + title + content.toStr.()
-// Hello world! Year:2018
+# Hello world! Year:2018
 ```
 
 This of course does not affect the functionality, but we can use a more intuitive and convenient way, that is string templates.
@@ -92,7 +92,7 @@ We use `{}` to mark the code segment directly in the content, and the language w
 E.g:
 ```
 string := "Hello world! {title} {content}"
-// Hello world! Year:2018
+# Hello world! Year:2018
 ```
 
 If you need to use `{` and `}` in the string, you only need to use `{{` and `}}`.
@@ -100,7 +100,7 @@ If you need to use `{` and `}` in the string, you only need to use `{{` and `}}`
 E.g:
 ```
 string := "This is block {{ and }}"
-// This is block { and }
+# This is block { and }
 ```
 ## Boolean
 boolean are logical values ​​because they can only be true or false. It is often used to assist in judging logic.
@@ -109,15 +109,15 @@ In this language, the default boolean is the type `bl`, which is a type that has
 
 E.g:
 ```
-boolean := true  // true  
-boolean = false  // false  
+boolean := true     # true  
+boolean = false     # false  
 ```
 ## Any
 In particular, sometimes you need a type that can be any type to assist in the completion of the function, so it is `any`.
 
 E.g:
 ```
-a :any = 1 // any type
+a :any = 1  # any type
 ```
 ## Nullable Type
 All types in this language can't be null by default, which can avoid null problems to a great extent.
@@ -126,7 +126,7 @@ If a type is defined but not assigned, it will not be used.
 E.g:
 ```
 a : i32
-b := a   // error, no assignment to a
+b := a   # error, no assignment to a
 ```
 
 If you have to use a type with null values in some cases, you can use a nullable type.
@@ -135,14 +135,14 @@ Just add `|null` after any type, which is a nullable type.
 E.g:
 ```
 a : i32|null
-b := a   // b assigns an empty i32
+b := a   # b assigns an empty i32
 ```
 ## null
 We will need a value that can be any null value, so it is `null`.
 
 E.g:
 ```
-null // empty value
+null # empty value
 ```
 ## Create a null value with type
 Sometimes, maybe we do not need to specify a specific value, but only want to create a type of default.

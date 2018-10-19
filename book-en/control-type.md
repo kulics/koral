@@ -19,9 +19,9 @@ E.g:
 ```
 Number :i32
 {
-    get    // means get, equivalent to getter in other languages
+    get    # means get, equivalent to getter in other languages
     {
-        <- (7)  // only returns 7
+        <- (7)  # only returns 7
     }
 }
 ```
@@ -36,9 +36,9 @@ E.g:
 Number :i32
 {
     ...
-    set    // means set, equivalent to setter in other languages
+    set    # means set, equivalent to setter in other languages
     {
-        // ? ? ? Who should give the value? ? ?
+        # ? ? ? Who should give the value? ? ?
     }
 }
 ```
@@ -54,7 +54,7 @@ Number :i32
     ...
     set
     {
-        _number = value  // value represents the value of the input
+        _number = value  # value represents the value of the input
     }
 }
 ```
@@ -73,7 +73,7 @@ Number :i32
     }
     set
     {
-        _number = value  // value represents the value of the input
+        _number = value  # value represents the value of the input
     }
 }
 ```
