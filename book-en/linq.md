@@ -10,22 +10,20 @@ The following are the important features of LINQ.
 
 More details on LINQ can be read at the following URL.
 
-[Microsoft Documentation](https://docs.microsoft.com/en-us/dotnet/csharp/programming-guide/concepts/linq/getting-started-with-linq)
+[Microsoft Documentation](https:#docs.microsoft.com/en-us/dotnet/csharp/programming-guide/concepts/linq/getting-started-with-linq)
 
 ## Statement
-In this language, because there is no design for keywords, we need to use special methods to mark LINQ statements.
-
-We can use **\`** **\`** to wrap a statement so that we can use query keywords in it.
+We can use Linq to query like C#.
 
 E.g:
 ```
 linq ()->()
 {
-    Numbers := [ 0, 1, 2, 3, 4, 5, 6 ]
-    Arr := `from num in numbers
-            Where (num % 2) == 0
-            Orderby num descending
-            Select num`
+    numbers := { 0, 1, 2, 3, 4, 5, 6 }
+    arr := from num in numbers
+            where (num % 2) == 0
+            orderby num descending
+            select num
 }
 ```
 

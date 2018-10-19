@@ -44,8 +44,8 @@ student += homeWork
 
     do ()->()
     {
-        SpendTime.(1)            // spent an hour
-        ..homeWork.count -= 1   // completed one
+        SpendTime.(1)            # spent an hour
+        ..homeWork.count -= 1   # completed one
     }
 }
 ```
@@ -68,11 +68,11 @@ E.g:
 ```
 Peter := student.{ ...count=999999 }
 cmd.print.( Peter.homeWork.count )
-// print 999999, too much
+# print 999999, too much
 Peter.homeWork.do.()
-// did a homework
+# did a homework
 cmd.print.(Peter.homeWork.count)
-// print 999998, or too much
+# print 999998, or too much
 ```
 If this is the case, there is no advantage in defining these two properties directly in the package.
 
@@ -84,11 +84,11 @@ Now we can create a wide variety of students, all of whom follow the same protoc
 
 E.g:
 ```
-// create three different types of student packages
+# create three different types of student packages
 StudentA := chineseStudent.{}
 StudentB := americaStudent.{}
 StudentC := japanStudent.{}
-// let them do homework separately
+# let them do homework separately
 StudentA.homeWork.do.()
 StudentB.homeWork.do.()
 StudentC.homeWork.do.()
@@ -101,7 +101,7 @@ doHomeWork (student: homeWork)->()
 {
     student.do.()
 }
-// Now we can make it easier for every student to do their homework
+# Now we can make it easier for every student to do their homework
 doHomeWork.(StudentA.homeWork)
 doHomeWork.(StudentB.homeWork)
 doHomeWork.(StudentC.homeWork)
@@ -112,7 +112,7 @@ E.g:
 ```
 Arr := []homeWork.{}
 Arr.add.( StudentA.homeWork )
-... // stuffed many, many students
+... # stuffed many, many students
 Arr.@
 {
     doHomeWork.(it)
@@ -132,10 +132,10 @@ E.g:
 ```
 func (hw :homeWork)->()
 {
-    // judge type
+    # judge type
     ? hw.?:chineseStudent 
     {
-        // convert to chinese student data
+        # convert to chinese student data
         cs := hw.?=chineseStudent
     }
 }

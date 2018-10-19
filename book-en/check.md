@@ -43,8 +43,8 @@ In general, we can make early returns or data processing in exception handling. 
 E.g:
 ```
 Func.().! {
-     // can be returned manually
-     // <- ()
+     # can be returned manually
+     # <- ()
      !.(ex)
 }
 ```
@@ -140,7 +140,7 @@ E.g:
 !
 {
     file.release.()
-    <- ()    // error, cannot use return statement
+    <- ()    # error, cannot use return statement
 }
 ```
 
@@ -153,7 +153,7 @@ E.g:
 ! { cmd.print.("2") }
 ! { cmd.print.("3") }
 
-// final display 3 2 1
+# final display 3 2 1
 ```
 
 ### Checking Defer Scope
@@ -164,9 +164,9 @@ E.g:
 Func ()->()
 {
     ...
-    [0<<5].@
+    [0<=5].@
     {
-        // does not affect the logic outside the loop
+        # does not affect the logic outside the loop
         ! { cmd.print.(it + 1) }
         cmd.print.(it)
     }

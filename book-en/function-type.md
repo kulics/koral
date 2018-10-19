@@ -26,7 +26,7 @@ Unlike the main entry function, which cannot be called, regular functions can be
 
 E.g:
 ```
-function.()  // call function
+function.()  # call function
 ```
 ## Parameter
 Although functions can perform specific functions without any parameters, more often we need to be able to accept some input data, or to return data, or both, which requires parameters to help us accomplish task.
@@ -86,9 +86,9 @@ When we call the function, we need to fill the brackets with the identifier in t
 
 E.g:
 ```
-// define one function with two in parameter
+# define one function with two in parameter
 sell (price: i32, name: str)->(){}
-// fill in the data that meets the requirements as defined
+# fill in the data that meets the requirements as defined
 sell.(1.99, "cola")
 
 ```
@@ -113,15 +113,15 @@ The difference is that for multiple return values ​​we have to wrap each ide
 E.g:
 ```
 (n, c) := topSell.()
-// define the returned two values ​​for n and c
+# define the returned two values ​​for n and c
 (n, c) = topSell.()
-// overrides the returned two values ​​to n and c
+# overrides the returned two values ​​to n and c
 ```
 You can use the definition or assignment statement to get the return value of the function to use, you can also use the nested function to another function.
 
 E.g:
 ```
-cmd.print.( topSell.() )    // print two values
+cmd.print.( topSell.() )    # print two values
 ```
 If there is only one return value, the brackets can be taken without.
 
@@ -129,7 +129,7 @@ Note that if you call a function with a return value is not allowed to not recei
 
 E.g:
 ```
-topSell.()  // error, did not explicitly receive the return value
+topSell.()  # error, did not explicitly receive the return value
 ```
 But sometimes, as a caller, we do not necessarily need all the return values, but this time we can use the anonymous identifier `_` to help us drop the data. Just need to write it in the corresponding position.
 
@@ -141,7 +141,7 @@ If indeed all the return values ​​are not needed, we can also just write a `
 
 E.g:
 ```
-_ = topSell.()  // for _ , assignment and definition are equivalent
+_ = topSell.()  # for _ , assignment and definition are equivalent
 ```
 ## Function In Parameter
 If we want part of the function defined by the external, and only perform the rest of the internal logic, such as some set traversal for a collection of functions, then we can use the function parameters to accomplish this goal.
@@ -152,7 +152,7 @@ E.g:
 ```
 each1To10 (func: (item: i32)->() )->()
 {
-    [1<<10].@ 
+    [1<=10].@ 
     {
         func.(it)
     }
@@ -253,7 +253,7 @@ D (fn: ()->() )->()
 
 E (fn: (a:i32)->() )->()
 {
-    [1<<20].@
+    [1<=20].@
     {
         fn.(it)
     }

@@ -28,7 +28,7 @@ Normal direct call will only get a `tsk` data.
 
 E.g:
 ```
-result := async.()   // result is a Task data
+result := async.()   # result is a Task data
 ```
 Let's see how to make it asynchronously waiting for execution.
 ## Asynchronous Wait
@@ -45,16 +45,16 @@ Asynchronous wait can only be used in asynchronous declared functions.
 
 E.g:
 ```
-// correct
+# correct
 async ()~>(out: i32)
 {
-    <~ tsks.delay.(5000)     // wait for a while
+    <~ tsks.delay.(5000)     # wait for a while
     <- (12)
 }
-// wrong
+# wrong
 async ()->(out: i32)
 {
-    <~ tsks.delay.(5000)     // can not be declared
+    <~ tsks.delay.(5000)     # can not be declared
     <- (12)
 }
 ```
@@ -67,12 +67,12 @@ E.g:
 ```
 async ()~>()
 {
-    <~ tsks.delay.(5000)    // wait for a while
+    <~ tsks.delay.(5000)    # wait for a while
 }
 
-<~ async.()  // correct
+<~ async.()  # correct
 
-task := async.()    // correct, got the Task
+task := async.()    # correct, got the Task
 ```
 ## Lambda
 For lambda, we can also use asynchronous, just use `<~`.

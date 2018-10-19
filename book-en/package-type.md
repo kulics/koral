@@ -53,7 +53,7 @@ Very simple, we only need to use `.` syntax, we can summon the attributes we nee
 E.g:
 ```
 cmd.print.(Peter.name)
-// print the name of a student
+# print the name of a student
 ```
 To change the value of the property is the same, it is equivalent to a nested identifier. We can directly use the assignment statement to change the value.
 
@@ -88,11 +88,11 @@ Dictionary := [str]i32.{ ..."1"->1, "2"->2, "3"->3 }
 ## Anonymous Package
 If we only want to wrap some data directly, instead of defining the package first and then using it, is it like an anonymous function?
 
-Of course, we can use `_` directly.
+Of course, we can use the `{}` package directly, the same syntax as the collection, only the elements inside have different syntax.
 
 E.g:
 ```
-Peter := _
+Peter := 
 {
     name := "Peter"
     number := "060233"
@@ -114,7 +114,7 @@ E.g:
 student {}->
 {
     ...
-    _girlFirend :str    // The identifier beginning with this '_' is private
+    _girlFirend :str    # The identifier beginning with this '_' is private
 }
 ```
 That's right, if you remember the definition of identifiers, this is how private identifiers are defined, and private identifiers can not be accessed by outsiders.
@@ -148,7 +148,7 @@ With this function, we can get the private property by calling the function.
 E.g:
 ```
 cmd.print.( Peter.getGirlFirend.() )
-// printed the name of a girlfriend of a puppy love student
+# printed the name of a girlfriend of a puppy love student
 ```
 As with data attributes, functions can also be private identifiers, and functions that use private identifiers also mean that only the packet can access itself.
 
@@ -171,9 +171,9 @@ student {name, number: str}->
     {
         ..name = name
         ..number = number
-        // calculate the class
+        # calculate the class
         ..class = GetSubText.(number, 2, 3)
-        // calculate the grade
+        # calculate the grade
         ..grade = GetSubText.(number, 0, 1)
     }
 }
@@ -183,7 +183,7 @@ This gives us a package with constructors, and when we create a new student, cla
 E.g:
 ```
 Peter := student.{"Peter", "060233"}
-cmd.print.(Peter.class)     // print out 2
+cmd.print.(Peter.class)     # print out 2
 ```
 
 Can the declaration be simpler, such as defining properties directly in the construct?
@@ -191,7 +191,7 @@ Of course, we can mark the constructor parameter `..`, and the compiler will aut
 
 E.g:
 ```
-// automatically generate the attributes name and number , which is equivalent to the previous example
+# automatically generate the attributes name and number , which is equivalent to the previous example
 student {..name, ..number:str}->
 {
      ...
@@ -220,7 +220,7 @@ chineseStudent {}->
     number :str = ""
     class :i32 = 0
     grade :i32 = 0
-    kungfu :bl = false    // kung fu students
+    kungfu :bl = false    # kung fu students
 }
 ```
 No, no repeatable definition of data so elegant, we can reuse student attributes, with an additional kung fu attributes on it.
@@ -231,8 +231,8 @@ E.g:
 ```
 chineseStudent {}->
 {
-    student :student|null   // include student attributes in it
-    kungfu :bl|null       // kung fu students
+    student :student|null   # include student attributes in it
+    kungfu :bl|null         # kung fu students
 }
 ```
 This way you can use generic attributes via student attributes in Chinese students.
@@ -241,7 +241,7 @@ E.g:
 ```
 Chen := chineseStudent.{}
 cmd.print.(Chen.student.name)
-// of course, since there is no assignment, nothing is output
+# of course, since there is no assignment, nothing is output
 ```
 By combining layers after layer, you are free to assemble whatever you want to describe.
 
@@ -283,7 +283,7 @@ PKG +=
 {
     Print ()->(a:str)
     {
-        <- ( /"X {Y}"/ )
+        <- ( "X {Y}" )
     }
 }
 ```
