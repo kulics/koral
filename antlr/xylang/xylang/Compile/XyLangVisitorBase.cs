@@ -97,6 +97,12 @@ namespace XyLang.Compile
                 r.permission = "public";
                 r.text += Visit(context.linqKeyword());
             }
+            else if (context.specialId() != null)
+            {
+                var oriR = (Result)Visit(context.specialId());
+                r.permission = oriR.permission;
+                r.text += "@" + oriR.text;
+            }
             else if (context.op.Type == XyParser.IDPublic)
             {
                 r.permission = "public";
@@ -108,13 +114,12 @@ namespace XyLang.Compile
                 r.text += context.op.Text;
             }
 
-            if (keywords.Exists(t => t == r.text))
-            {
-                r.text = "@" + r.text;
-            }
-
-            var b = r.text;
             return r;
+        }
+
+        public override object VisitSpecialId([NotNull] XyParser.SpecialIdContext context)
+        {
+            return (Result)Visit(context.id());
         }
 
         public override object VisitBool([NotNull] XyParser.BoolContext context)

@@ -224,11 +224,5 @@ namespace XyLang.Compile
             }
             return obj;
         }
-
-        public override object VisitTypeSharp([NotNull] XyParser.TypeSharpContext context)
-        {
-            return context.t.Text;
-        }
-
     }
 }
