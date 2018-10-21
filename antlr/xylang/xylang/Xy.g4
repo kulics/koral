@@ -291,12 +291,13 @@ templateDefine: '<' id (',' id)* '>';
 
 templateCall: '<' type (',' type)* '>';
 
-lambda : lambdaIn t=(ArrowLeft|FlowLeft) lambdaOut;
+lambda : '$' (lambdaIn)? t=(ArrowRight|FlowRight) expressionList 
+| '$' BlockLeft (lambdaIn)? t=(ArrowRight|FlowRight) (functionSupportStatement)* BlockRight
+| lambdaShort;
 
-lambdaIn : id | '(' (id (',' id)* )? ')' ;
-lambdaOut : 
-expressionList 
-| BlockLeft (functionSupportStatement)* BlockRight;
+lambdaIn : id (',' id)*;
+
+lambdaShort : '$' expressionList;
 
 pkgAnonymous: pkgAnonymousAssign; // 匿名包
 
@@ -316,7 +317,7 @@ linq: 'from' expression (linqItem)+ k=('by'|'select') expression;
 
 linqItem: linqKeyword | expression;
 
-linqKeyword: k=('from'|'where'|'select'|'group'|'into'|'orderby'|'join'|'let'|'in'|'on'|'equals'|'by'|'ascending'|'descending') ;
+linqKeyword: k=('where'|'select'|'group'|'into'|'orderby'|'join'|'let'|'in'|'on'|'equals'|'by'|'ascending'|'descending') ;
 
 // 基础数据
 dataStatement:
