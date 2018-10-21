@@ -237,7 +237,7 @@ tuple : '(' (expression (',' expression)* )? ')'; // 元组
 
 expressionList : expression (',' expression)* ; // 表达式列
 
-annotation: '[' (id ':')? annotationList ']' ; // 注解
+annotation: '`' (id ':')? annotationList '`' ; // 注解
 
 annotationList: annotationItem (',' annotationItem)*;
 
@@ -316,7 +316,7 @@ linq: 'from' expression (linqItem)+ k=('by'|'select') expression;
 
 linqItem: linqKeyword | expression;
 
-linqKeyword: k=('where'|'select'|'group'|'into'|'orderby'|'join'|'let'|'in'|'on'|'equals'|'by'|'ascending'|'descending') ;
+linqKeyword: k=('from'|'where'|'select'|'group'|'into'|'orderby'|'join'|'let'|'in'|'on'|'equals'|'by'|'ascending'|'descending') ;
 
 // 基础数据
 dataStatement:
