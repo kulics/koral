@@ -336,7 +336,6 @@ typeTuple
 | typeArray
 | typeDictionary
 | typeBasic
-| typeSharp
 | typePackage
 | typeFunction
 ;
@@ -374,9 +373,6 @@ t=TypeAny
 | t=TypeBool
 ;
 
-// c# 类型
-typeSharp: t=('sbyte'|'short'|'int'|'long'|'byte'|'ushort'|'uint'|'ulong'|'float'|'double'|'bool'|'char'|'string');
-
 // bool值
 bool:t=True|t=False;
 
@@ -389,9 +385,12 @@ mul : op=('*' | '/' | '%');
 call : op='.';
 wave : op='~';
 
+specialId : '`' id '`';
+
 id: op=(IDPublic|IDPrivate)
 |typeBasic
-|linqKeyword;
+|linqKeyword
+|specialId; // 强制转译id，适配关键字用
 
 Terminate : ';';
 

@@ -929,7 +929,7 @@ namespace XyLang.Compile
             return r;
         }
 
-        private List<string> keywords => new List<string> {   "abstract", "as", "base", "bool", "break" , "byte", "case" , "catch",
+        private readonly List<string> keywords = new List<string> {   "abstract", "as", "base", "bool", "break" , "byte", "case" , "catch",
                         "char","checked","class","const","continue","decimal","default","delegate","do","double","else",
                         "enum","event","explicit","extern","false","finally","fixed","float","for","foreach","goto",
                         "if","implicit","in","int","interface","internal","is","lock","long","namespace","new","null",
