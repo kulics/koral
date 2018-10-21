@@ -97,6 +97,7 @@ namespace XyLang.Compile
                 r.permission = "public";
                 r.text += Visit(context.linqKeyword());
             }
+
             else if (context.specialId() != null)
             {
                 var oriR = (Result)Visit(context.specialId());
@@ -113,6 +114,11 @@ namespace XyLang.Compile
                 r.permission = "private";
                 r.text += context.op.Text;
             }
+            //else if (context.op.Text == "from")
+            //{
+            //    r.permission = "public";
+            //    r.text += "from";
+            //}
 
             return r;
         }

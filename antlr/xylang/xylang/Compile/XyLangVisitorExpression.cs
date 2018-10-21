@@ -857,14 +857,33 @@ namespace XyLang.Compile
             {
                 data = "var"
             };
+            if (context.lambdaShort()!= null)
+            {
+                r.text += Visit(context.lambdaShort());
+                return r;
+            }
             // 异步
-            if (context.t.Type == XyParser.FlowLeft)
+            if (context.t.Type == XyParser.FlowRight)
             {
                 r.text += "async ";
             }
-            r.text += "(" + Visit(context.lambdaIn()) + ")";
+            r.text += "(";
+            if (context.lambdaIn() != null)
+            {
+                r.text += Visit(context.lambdaIn());
+            }
+            r.text += ")";
             r.text += "=>";
-            r.text += "" + Visit(context.lambdaOut()) + "";
+
+            if (context.expressionList() != null)
+            {
+                r.text += ((Result)Visit(context.expressionList())).text;
+            }
+            else
+            {
+                r.text += "{" + ProcessFunctionSupport(context.functionSupportStatement()) + "}";
+            }
+
             return r;
         }
 
@@ -886,18 +905,10 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitLambdaOut([NotNull] XyParser.LambdaOutContext context)
+        public override object VisitLambdaShort([NotNull] XyParser.LambdaShortContext context)
         {
-            var obj = "";
-            if (context.expressionList() != null)
-            {
-                obj += ((Result)Visit(context.expressionList())).text;
-            }
-            else
-            {
-                obj += "{" + ProcessFunctionSupport(context.functionSupportStatement()) + "}";
-            }
-
+            var obj = "(it) => ";
+            obj += ((Result)Visit(context.expressionList())).text;
             return obj;
         }
 
