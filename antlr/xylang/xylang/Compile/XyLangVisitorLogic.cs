@@ -362,10 +362,20 @@ namespace XyLang.Compile
             {
                 return ((Result)Visit(context.expression())).text;
             }
-            return (string)Visit(context.linqKeyword());
+            return (string)Visit(context.linqBodyKeyword());
         }
 
         public override object VisitLinqKeyword([NotNull] XyParser.LinqKeywordContext context)
+        {
+            return Visit(context.GetChild(0));
+        }
+
+        public override object VisitLinqHeadKeyword([NotNull] XyParser.LinqHeadKeywordContext context)
+        {
+            return context.k.Text;
+        }
+
+        public override object VisitLinqBodyKeyword([NotNull] XyParser.LinqBodyKeywordContext context)
         {
             return context.k.Text;
         }
