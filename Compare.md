@@ -807,7 +807,7 @@ switch nb {
 ```
 someObjects.@ 
 {
-    it.? movie:Movie
+    ea.? movie:Movie
     {
         print.("Movie: '{movie.name}', " +
             "dir. {movie.director}")
