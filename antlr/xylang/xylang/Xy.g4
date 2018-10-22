@@ -388,12 +388,9 @@ mul : op=('*' | '/' | '%');
 call : op='.';
 wave : op='~';
 
-specialId : '`' id '`';
-
 id: op=(IDPublic|IDPrivate)
 |typeBasic
-|linqKeyword
-|specialId; // 强制转译id，适配关键字用
+|linqKeyword;
 
 Terminate : ';';
 
