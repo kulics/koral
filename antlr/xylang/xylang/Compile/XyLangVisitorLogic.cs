@@ -36,7 +36,7 @@ namespace XyLang.Compile
         public override object VisitLoopStatement([NotNull] XyParser.LoopStatementContext context)
         {
             var obj = "";
-            var id = "it";
+            var id = "ea";
             if (context.id() != null)
             {
                 id = ((Result)Visit(context.id())).text;
@@ -73,7 +73,7 @@ namespace XyLang.Compile
             var obj = "";
             var arr = (Visit(context.expression()) as Result);
             var target = arr.text;
-            var id = "it";
+            var id = "ea";
             if (context.id().Length == 2)
             {
                 target += ".xyRange()";
