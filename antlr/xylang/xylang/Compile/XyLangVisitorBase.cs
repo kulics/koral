@@ -97,13 +97,6 @@ namespace XyLang.Compile
                 r.permission = "public";
                 r.text += Visit(context.linqKeyword());
             }
-
-            else if (context.specialId() != null)
-            {
-                var oriR = (Result)Visit(context.specialId());
-                r.permission = oriR.permission;
-                r.text += "@" + oriR.text;
-            }
             else if (context.op.Type == XyParser.IDPublic)
             {
                 r.permission = "public";
@@ -114,18 +107,12 @@ namespace XyLang.Compile
                 r.permission = "private";
                 r.text += context.op.Text;
             }
-            //else if (context.op.Text == "from")
-            //{
-            //    r.permission = "public";
-            //    r.text += "from";
-            //}
 
+            if (keywords.Exists(t => t == r.text))
+            {
+                r.text = "@" + r.text;
+            }
             return r;
-        }
-
-        public override object VisitSpecialId([NotNull] XyParser.SpecialIdContext context)
-        {
-            return (Result)Visit(context.id());
         }
 
         public override object VisitBool([NotNull] XyParser.BoolContext context)
