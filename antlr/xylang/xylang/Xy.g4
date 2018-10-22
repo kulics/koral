@@ -313,11 +313,13 @@ plusMinus : add expression;
 
 negate : wave expression;
 
-linq: 'from' expression (linqItem)+ k=('by'|'select') expression;
+linq: linqHeadKeyword expression (linqItem)+ k=('by'|'select') expression;
 
-linqItem: linqKeyword | expression;
+linqItem: linqBodyKeyword | expression;
 
-linqKeyword: k=('where'|'select'|'group'|'into'|'orderby'|'join'|'let'|'in'|'on'|'equals'|'by'|'ascending'|'descending') ;
+linqKeyword: linqHeadKeyword | linqBodyKeyword ;
+linqHeadKeyword: k='from';
+linqBodyKeyword: k=('where'|'select'|'group'|'into'|'orderby'|'join'|'let'|'in'|'on'|'equals'|'by'|'ascending'|'descending') ;
 
 // 基础数据
 dataStatement:
