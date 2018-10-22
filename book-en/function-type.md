@@ -178,32 +178,25 @@ Function In Parameter only require the same type of function parameters, do not 
 ## Lambda Expression
 As the above way to define a function and then imported into use sometimes appear more verbose, because we just want to perform a little function only, not necessarily to define a function to provide to other places to use.
 
-At this point we can use the syntax of Lambda Expression to reduce the pain of our naming.
+At this point we can use the syntax of the Lambda expression to simplify our code.
 
-Since the function argument is already determined at the time of declaration, we can use the simplified syntax `(id, id) <- expression` to express it. It means defining the argument identifier and returning an expression directly.
+Since the function argument is already determined at the time of declaration, we can use the simplified syntax `${id, id -> statements}` to express it, which means defining the argument identifier and executing the function statement.
 
-When `id` has only one, you can omit `()`.
+If there is only one single return value statement, you can omit `{}` and use `$id, id -> expression`.
 
-E.g:
-```
-each1To10.( it <- cmd.print.(it) )
-findAll.( it <- it > 7 )
-order.( it <- it.time )
-take.( (a, b) <- a + b )
-```
-Very simple, and the difference between the expression of the function type is that the input only need to declare the identifier, and the parameter is used to include one expression.
-
-If an expression is not enough, you can also return a function, just use the `{}` declaration.
+If there is one and only one parameter at the same time, the identifier part can be omitted. The default identifier is `it`, using `$expression`.
 
 E.g:
 ```
-Each.( it <-
-{
-    cmd.print.(1)
-    cmd.print.(2)
-    cmd.print.(3)
+foreach.( ${ it ->
+     Cmd.print.(it)
+     Cmd.print.(it * it)
+     Cmd.print.(it % 2)
 })
+take.( $a, b -> a + b )
+findAll.( $it > 7 )
 ```
+Very simple, the difference from the expression of a function type is that you only need to declare the parameter identifier and execution logic, and neither the type nor the return value need to be declared.
 ## Lambda Function
 Unlike the above simplified method, we can also write a complete function directly, just as we define the function.
 
@@ -229,8 +222,8 @@ main ()
     A.()
     B.(1,2,3)
     x := C.()
-    D.( ()<- cmd.print.("D") )
-    E.( it <- cmd.print.(it) )
+    D.( $-> cmd.print.("D") )
+    E.( $cmd.print.(it) )
     E.( (a:i32)->()
     {
         cmd.print.(it)

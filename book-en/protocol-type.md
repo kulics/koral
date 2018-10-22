@@ -115,7 +115,7 @@ Arr.add.( StudentA.homeWork )
 ... # stuffed many, many students
 Arr.@
 {
-    doHomeWork.(it)
+    doHomeWork.(ea)
 }
 ```
 ╮ (¯ ▽ ¯) ╭
