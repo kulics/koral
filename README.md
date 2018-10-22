@@ -36,15 +36,15 @@ main () # main function
                 
     greetings.@ # for-each
     {
-        cmd.print.(it) # call function
         # match
-        it.? [ 0 <= 8 ] 
+        ea.? [ 0 <= 8 ] 
         {
-            cmd.print.(" in 0-8 ")
+            cmd.print.(ea) # call function
         }
         _
         {
-            cmd.print.(" others ")
+            # lambda
+            cmd.print.( greetings.map.($it.count > 4) )
             <- @
         }
     }

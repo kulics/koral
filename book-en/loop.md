@@ -14,13 +14,13 @@ arr.@ item
 }
 ```
 The identifier followed by `@` is the currently fetched value, which is valid only for the current loop. So we don't need to define an identifier externally.
-If we don't want to define additional identifiers, we can omit them. The default is `it`.
+If we don't want to define additional identifiers, we can omit them. The default is `ea`.
 
 E.g:
 ```
 Arr.@
 {
-     cmd.print.(it)     # print each number
+     cmd.print.(ea)     # print each number
 }
 ```
 
@@ -44,7 +44,7 @@ E.g:
 ```
 [0 <= 100].@
 {
-    cmd.print.(it)      # print each number
+    cmd.print.(ea)      # print each number
 }
 ```
 It should be noted that the meaning of `0 <= 100` is read from` 0` to `100` one by one, that is, a total execution of` 101` times. Iterator will be executed until the last number is completed, rather than an early end.
@@ -126,7 +126,7 @@ main ()
     arr := {1,2,3,4,5}
     arr.@ 
     {
-        cmd.print.(it)
+        cmd.print.(ea)
     }
 
     [1 <= 50].@ i
