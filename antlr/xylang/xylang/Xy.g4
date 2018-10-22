@@ -196,7 +196,8 @@ id
 
 // 表达式
 expression:
-primaryExpression
+linq // 联合查询
+| primaryExpression
 | callSelf // 调用自己
 | callNameSpace // 调用命名空间
 | callFunc // 函数调用
@@ -213,7 +214,6 @@ primaryExpression
 | empty // 类型空初始化
 | plusMinus // 正负处理
 | negate // 取反
-| linq // 联合查询
 | expression call callExpression // 链式调用
 | expression judge expression // 判断型表达式
 | expression add expression // 和型表达式
