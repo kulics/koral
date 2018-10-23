@@ -167,8 +167,8 @@ Func ()->()
     [0<=5].@
     {
         # does not affect the logic outside the loop
-        ! { cmd.print.(it + 1) }
-        cmd.print.(it)
+        ! { cmd.print.(ea + 1) }
+        cmd.print.(ea)
     }
     ...
 }
