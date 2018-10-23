@@ -66,12 +66,12 @@ Peter.grade = 6
 ```
 ## Simplify creation
 Creating a new package like the one above, and then loading the data one by one, is very cumbersome. We can use a simplified syntax to configure.
-Just add `...` to the creation grammar to use the `key=value` method to quickly load data. Separate multiple data with `,`.
+Just add `<-` to the creation grammar to use the `key=value` method to quickly load data. Separate multiple data with `,`.
 
 E.g:
 ```
-Peter := student.{
-    ...name="Peter", number="060233",
+Peter := student.{ <-
+    name="Peter", number="060233",
     class=2, grade=6
 }
 ```
@@ -82,8 +82,8 @@ Similarly, the way the collection is created is actually a simplified creation, 
 
 E.g:
 ```
-Array := []i32.{ ...1, 2, 3, 4, 5 }
-Dictionary := [str]i32.{ ..."1"->1, "2"->2, "3"->3 }
+Array := []i32.{ <- 1, 2, 3, 4, 5 }
+Dictionary := [str]i32.{ <- "1"->1, "2"->2, "3"->3 }
 ```
 ## Anonymous Package
 If we only want to wrap some data directly, instead of defining the package first and then using it, is it like an anonymous function?
@@ -202,7 +202,7 @@ If you need to use both constructors and simplified creations, you can do so.
 
 E.g:
 ```
-Peter := student.{"Peter", "060233" ... name="New Peter"}
+Peter := student.{"Peter", "060233" <- name="New Peter"}
 ```
 
 It should be noted that a package can only support one constructor, we recommend to maintain the simplicity of the structure, a stable package easier to be used by the caller,
@@ -257,7 +257,7 @@ Demo
 
 main ()
 {
-    a := S.{...A=5,B=12}
+    a := S.{ <- A=5,B=12}
     b := PKG.{"hello", 64, a}
     cmd.print.( b.Z.A )
     cmd.print.( b.Print.() )
