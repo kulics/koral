@@ -27,7 +27,7 @@ run { name\space }
 
 main ()
 {
-    # 打印 something
+    # print something
     cmd.print.( Demo.getSomething.() )
 }
 ```
@@ -61,7 +61,7 @@ run{ name\space.Demo }
 
 main ()
 {
-    # 打印 something
+    # print something
     cmd.print.( getSomething.() )
 }
 ```
@@ -75,7 +75,7 @@ demo {}
 
 main ()
 {
-    # 直接使用即可
+    # use it directly
     cmd.print.( \name\space.Demo.getSomething.() )    
 }
 ```
