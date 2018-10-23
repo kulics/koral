@@ -66,7 +66,7 @@ With the protocol included, we can use the student bundle that owns the protocol
 
 E.g:
 ```
-Peter := student.{ ...count=999999 }
+Peter := student.{ <-count=999999 }
 cmd.print.( Peter.homeWork.count )
 # print 999999, too much
 Peter.homeWork.do.()
