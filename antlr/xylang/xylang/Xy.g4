@@ -247,7 +247,7 @@ annotationAssign: (id '=')? expression ;
 
 callFunc: id (templateCall)? call tuple; // 函数调用
 
-callPkg: type call '{' expressionList? ( '...' (pkgAssign|listAssign|dictionaryAssign))? '}'; // 新建包
+callPkg: type call '{' expressionList? ( ArrowLeft (pkgAssign|listAssign|dictionaryAssign))? '}'; // 新建包
 
 getType: Judge call '(' (expression|':' type) ')';
 
