@@ -44,7 +44,7 @@ main () # main function
         _
         {
             # lambda
-            cmd.print.( greetings.map.($it.count > 4) )
+            cmd.print.( greetings.filter.($it.count > 4) )
             <- @
         }
     }
