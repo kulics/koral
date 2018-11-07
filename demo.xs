@@ -1,7 +1,7 @@
 demo
 {
     System
-    Xs\Library
+    Library
 }
 
 main ()

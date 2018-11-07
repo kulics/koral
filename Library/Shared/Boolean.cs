@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace Xs.Library
+namespace Library
 {
     public class bl : iXsValue
     {

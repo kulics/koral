@@ -1,16 +1,19 @@
 ﻿using Antlr4.Runtime.Misc;
+using System;
 using System.Collections.Generic;
+using System.Text;
+using static Compiler.XsParser;
 
-namespace XyLang.Compile
+namespace Compiler
 {
-    internal partial class XyLangVisitor
+    internal partial class Visitor
     {
-        public override object VisitFunctionStatement([NotNull] XyParser.FunctionStatementContext context)
+        public override object VisitFunctionStatement([NotNull] FunctionStatementContext context)
         {
             var id = (Result)Visit(context.id());
             var obj = "";
             // 异步
-            if (context.t.Type == XyParser.FlowRight)
+            if (context.t.Type == FlowRight)
             {
                 var pout = (string)Visit(context.parameterClauseOut());
                 if (pout != "void")
@@ -38,7 +41,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitReturnStatement([NotNull] XyParser.ReturnStatementContext context)
+        public override object VisitReturnStatement([NotNull] ReturnStatementContext context)
         {
             var r = (Result)Visit(context.tuple());
             if (r.text == "()")
@@ -48,7 +51,7 @@ namespace XyLang.Compile
             return $"return {r.text} {Terminate} {Wrap}";
         }
 
-        public override object VisitTuple([NotNull] XyParser.TupleContext context)
+        public override object VisitTuple([NotNull] TupleContext context)
         {
             var obj = "(";
             for (int i = 0; i < context.expression().Length; i++)
@@ -68,7 +71,7 @@ namespace XyLang.Compile
             return result;
         }
 
-        public override object VisitParameterClauseIn([NotNull] XyParser.ParameterClauseInContext context)
+        public override object VisitParameterClauseIn([NotNull] ParameterClauseInContext context)
         {
             var obj = "(";
 
@@ -104,7 +107,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitParameterClauseOut([NotNull] XyParser.ParameterClauseOutContext context)
+        public override object VisitParameterClauseOut([NotNull] ParameterClauseOutContext context)
         {
             var obj = "";
             if (context.parameter().Length == 0)
@@ -158,7 +161,7 @@ namespace XyLang.Compile
             public string permission { get; set; }
         }
 
-        public override object VisitParameter([NotNull] XyParser.ParameterContext context)
+        public override object VisitParameter([NotNull] ParameterContext context)
         {
             var p = new Parameter();
             var id = (Result)Visit(context.id());
@@ -176,7 +179,7 @@ namespace XyLang.Compile
             return p;
         }
 
-        public override object VisitParameterSelf([NotNull] XyParser.ParameterSelfContext context)
+        public override object VisitParameterSelf([NotNull] ParameterSelfContext context)
         {
             var p = new Parameter();
             var id = (Result)Visit(context.id());
@@ -208,7 +211,7 @@ namespace XyLang.Compile
 
         private Stack<Handle> stackHandle = new Stack<Handle>();
 
-        public string ProcessFunctionSupport(XyParser.FunctionSupportStatementContext[] items)
+        public string ProcessFunctionSupport(FunctionSupportStatementContext[] items)
         {
             var obj = "";
             var content = "";
@@ -216,17 +219,17 @@ namespace XyLang.Compile
             var handleCount = 0;
             foreach (var item in items)
             {
-                if (item.GetChild(0) is XyParser.CheckDeferStatementContext)
+                if (item.GetChild(0) is CheckDeferStatementContext)
                 {
                     lazy.Add(new Lazy(true, (string)Visit(item)));
                     content += $"try {Wrap} {{";
                 }
-                else if (item.GetChild(0) is XyParser.VariableUseStatementContext)
+                else if (item.GetChild(0) is VariableUseStatementContext)
                 {
                     lazy.Add(new Lazy(false, "}"));
                     content += $"using ({(string)Visit(item)}) {{ {Wrap}";
                 }
-                else if (item.GetChild(0) is XyParser.HandleStatementContext)
+                else if (item.GetChild(0) is HandleStatementContext)
                 {
                     stackHandle.Push(Visit(item) as Handle);
                     handleCount += 1;

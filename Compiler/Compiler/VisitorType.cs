@@ -1,22 +1,25 @@
 ﻿using Antlr4.Runtime.Misc;
+using System;
 using System.Collections.Generic;
+using System.Text;
+using static Compiler.XsParser;
 
-namespace XyLang.Compile
+namespace Compiler
 {
-    internal partial class XyLangVisitor
+    internal partial class Visitor
     {
-        public override object VisitTypeNullable([NotNull] XyParser.TypeNullableContext context)
+        public override object VisitTypeNullable([NotNull] TypeNullableContext context)
         {
             var obj = "";
             obj = Visit(context.typeNotNull()) as string;
-            //if (context.typeNotNull().GetChild(0) is XyParser.TypeBasicContext && obj != "object" && obj != "string")
+            //if (context.typeNotNull().GetChild(0) is TypeBasicContext && obj != "object" && obj != "string")
             //{
             //    obj += "?";
             //}
             return obj;
         }
 
-        public override object VisitTypeTuple([NotNull] XyParser.TypeTupleContext context)
+        public override object VisitTypeTuple([NotNull] TypeTupleContext context)
         {
             var obj = "";
             obj += "(";
@@ -35,7 +38,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitGetType([NotNull] XyParser.GetTypeContext context)
+        public override object VisitGetType([NotNull] GetTypeContext context)
         {
             var r = new Result
             {
@@ -52,28 +55,28 @@ namespace XyLang.Compile
             return r;
         }
 
-        public override object VisitTypeList([NotNull] XyParser.TypeListContext context)
+        public override object VisitTypeList([NotNull] TypeListContext context)
         {
             var obj = "";
-            obj += $" {List}<{ Visit(context.type())}> ";
+            obj += $" {lst}<{ Visit(context.type())}> ";
             return obj;
         }
 
-        public override object VisitTypeArray([NotNull] XyParser.TypeArrayContext context)
+        public override object VisitTypeArray([NotNull] TypeArrayContext context)
         {
             var obj = "";
             obj += Visit(context.type()) + "[]";
             return obj;
         }
 
-        public override object VisitTypeDictionary([NotNull] XyParser.TypeDictionaryContext context)
+        public override object VisitTypeDictionary([NotNull] TypeDictionaryContext context)
         {
             var obj = "";
-            obj += $" {Dictionary}<{ Visit(context.type(0))},{Visit(context.type(1))}> ";
+            obj += $" {dic}<{ Visit(context.type(0))},{Visit(context.type(1))}> ";
             return obj;
         }
 
-        public override object VisitTypePackage([NotNull] XyParser.TypePackageContext context)
+        public override object VisitTypePackage([NotNull] TypePackageContext context)
         {
             var obj = "";
             obj += Visit(context.nameSpaceItem());
@@ -84,7 +87,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitTypeFunction([NotNull] XyParser.TypeFunctionContext context)
+        public override object VisitTypeFunction([NotNull] TypeFunctionContext context)
         {
             var obj = "";
             var @in = (string)Visit(context.typeFunctionParameterClause(0));
@@ -125,7 +128,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitTypeFunctionParameterClause([NotNull] XyParser.TypeFunctionParameterClauseContext context)
+        public override object VisitTypeFunctionParameterClause([NotNull] TypeFunctionParameterClauseContext context)
         {
             var obj = "";
             var lastType = "";
@@ -157,7 +160,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitTypeParameter([NotNull] XyParser.TypeParameterContext context)
+        public override object VisitTypeParameter([NotNull] TypeParameterContext context)
         {
             var p = new Parameter
             {
@@ -171,51 +174,51 @@ namespace XyLang.Compile
             return p;
         }
 
-        public override object VisitTypeBasic([NotNull] XyParser.TypeBasicContext context)
+        public override object VisitTypeBasic([NotNull] TypeBasicContext context)
         {
             var obj = "";
             switch (context.t.Type)
             {
-                case XyParser.TypeI8:
-                    obj = I8;
+                case TypeI8:
+                    obj = i8;
                     break;
-                case XyParser.TypeU8:
-                    obj = U8;
+                case TypeU8:
+                    obj = u8;
                     break;
-                case XyParser.TypeI16:
-                    obj = I16;
+                case TypeI16:
+                    obj = i16;
                     break;
-                case XyParser.TypeU16:
-                    obj = U16;
+                case TypeU16:
+                    obj = u16;
                     break;
-                case XyParser.TypeI32:
-                    obj = I32;
+                case TypeI32:
+                    obj = i32;
                     break;
-                case XyParser.TypeU32:
-                    obj = U32;
+                case TypeU32:
+                    obj = u32;
                     break;
-                case XyParser.TypeI64:
-                    obj = I64;
+                case TypeI64:
+                    obj = i64;
                     break;
-                case XyParser.TypeU64:
-                    obj = U64;
+                case TypeU64:
+                    obj = u64;
                     break;
-                case XyParser.TypeF32:
-                    obj = F32;
+                case TypeF32:
+                    obj = f32;
                     break;
-                case XyParser.TypeF64:
-                    obj = F64;
+                case TypeF64:
+                    obj = f64;
                     break;
-                case XyParser.TypeChr:
-                    obj = Chr;
+                case TypeChr:
+                    obj = chr;
                     break;
-                case XyParser.TypeStr:
-                    obj = Str;
+                case TypeStr:
+                    obj = str;
                     break;
-                case XyParser.TypeBool:
-                    obj = Bool;
+                case TypeBool:
+                    obj = bl;
                     break;
-                case XyParser.TypeAny:
+                case TypeAny:
                     obj = Any;
                     break;
                 default:

@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 
-namespace Xs.Library
+namespace Library
 {
     [JsonConverter(typeof(strConverter))]
     public class str : IComparable, IEnumerable<chr>, iXsValue
