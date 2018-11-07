@@ -308,6 +308,10 @@ testLoop ()->()
     {
         Console.Write.(ea)
         Console.Write.(", ")
+        ? ea == 6 
+        {
+            -> @
+        }
     }
     cmd.print.("")
     @
