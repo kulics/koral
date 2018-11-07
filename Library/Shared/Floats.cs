@@ -1,7 +1,7 @@
 ﻿using Newtonsoft.Json;
 using System;
 
-namespace Xs.Library
+namespace Library
 {
     public class f32 : iXsValue
     {

@@ -1,11 +1,14 @@
 ﻿using Antlr4.Runtime.Misc;
+using System;
 using System.Collections.Generic;
+using System.Text;
+using static Compiler.XsParser;
 
-namespace XyLang.Compile
+namespace Compiler
 {
-    internal partial class XyLangVisitor
+    internal partial class Visitor
     {
-        public override object VisitExtend([NotNull] XyParser.ExtendContext context)
+        public override object VisitExtend([NotNull] ExtendContext context)
         {
             var r = new Result
             {
@@ -20,7 +23,7 @@ namespace XyLang.Compile
             return r;
         }
 
-        public override object VisitPackageExtensionStatement([NotNull] XyParser.PackageExtensionStatementContext context)
+        public override object VisitPackageExtensionStatement([NotNull] PackageExtensionStatementContext context)
         {
             var id = (Result)Visit(context.id());
             var obj = "";
@@ -39,7 +42,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitPackageStatement([NotNull] XyParser.PackageStatementContext context)
+        public override object VisitPackageStatement([NotNull] PackageStatementContext context)
         {
             var id = (Result)Visit(context.id());
             var obj = "";
@@ -68,7 +71,7 @@ namespace XyLang.Compile
             }
             foreach (var item in context.packageSupportStatement())
             {
-                if (item.GetChild(0) is XyParser.PackageInitStatementContext)
+                if (item.GetChild(0) is PackageInitStatementContext)
                 {
                     // 处理构造函数
                     if (!hasInit)
@@ -120,7 +123,7 @@ namespace XyLang.Compile
             public List<Parameter> paramSelf { get; set; } = new List<Parameter>();
         }
 
-        public override object VisitParameterClausePackage([NotNull] XyParser.ParameterClausePackageContext context)
+        public override object VisitParameterClausePackage([NotNull] ParameterClausePackageContext context)
         {
             var param = new ParameterPackage();
             var obj = "( ";
@@ -130,7 +133,7 @@ namespace XyLang.Compile
             for (int i = context.parameterPackage().Length - 1; i >= 0; i--)
             {
                 Parameter p = (Parameter)Visit(context.parameterPackage(i));
-                if (context.parameterPackage(i).GetChild(0) is XyParser.ParameterSelfContext)
+                if (context.parameterPackage(i).GetChild(0) is ParameterSelfContext)
                 {
                     param.paramSelf.Add(p);
                 }
@@ -162,7 +165,7 @@ namespace XyLang.Compile
             return param;
         }
 
-        public override object VisitPackageVariableStatement([NotNull] XyParser.PackageVariableStatementContext context)
+        public override object VisitPackageVariableStatement([NotNull] PackageVariableStatementContext context)
         {
             var r1 = (Result)Visit(context.expression(0));
             var typ = "";
@@ -201,7 +204,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitPackageControlSubStatement([NotNull] XyParser.PackageControlSubStatementContext context)
+        public override object VisitPackageControlSubStatement([NotNull] PackageControlSubStatementContext context)
         {
             var obj = "";
             var id = "";
@@ -223,7 +226,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitPackageFunctionStatement([NotNull] XyParser.PackageFunctionStatementContext context)
+        public override object VisitPackageFunctionStatement([NotNull] PackageFunctionStatementContext context)
         {
             var id = (Result)Visit(context.id());
             var obj = "";
@@ -232,7 +235,7 @@ namespace XyLang.Compile
                 obj += Visit(context.annotation());
             }
             // 异步
-            if (context.t.Type == XyParser.FlowRight)
+            if (context.t.Type == FlowRight)
             {
                 var pout = (string)Visit(context.parameterClauseOut());
                 if (pout != "void")
@@ -261,7 +264,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitPackageOverrideFunctionStatement([NotNull] XyParser.PackageOverrideFunctionStatementContext context)
+        public override object VisitPackageOverrideFunctionStatement([NotNull] PackageOverrideFunctionStatementContext context)
         {
             var id = (Result)Visit(context.id());
             var obj = "";
@@ -278,12 +281,12 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitPackageInitStatement([NotNull] XyParser.PackageInitStatementContext context)
+        public override object VisitPackageInitStatement([NotNull] PackageInitStatementContext context)
         {
             return ProcessFunctionSupport(context.functionSupportStatement());
         }
 
-        public override object VisitProtocolImplementStatement([NotNull] XyParser.ProtocolImplementStatementContext context)
+        public override object VisitProtocolImplementStatement([NotNull] ProtocolImplementStatementContext context)
         {
             var id = (Result)Visit(context.id());
 
@@ -313,17 +316,17 @@ namespace XyLang.Compile
 
             foreach (var item in context.protocolImplementSupportStatement())
             {
-                if (item.GetChild(0) is XyParser.ImplementFunctionStatementContext)
+                if (item.GetChild(0) is ImplementFunctionStatementContext)
                 {
                     var fn = (Function)Visit(item);
                     obj += fn.@out + " " + ptcl + "." + fn.ID + " " + fn.@in + Wrap + fn.body;
                 }
-                else if (item.GetChild(0) is XyParser.ImplementControlStatementContext)
+                else if (item.GetChild(0) is ImplementControlStatementContext)
                 {
                     var vr = (Variable)Visit(item);
                     obj += vr.type + " " + ptcl + "." + vr.ID + " " + vr.body;
                 }
-                else if (item.GetChild(0) is XyParser.ImplementEventStatementContext)
+                else if (item.GetChild(0) is ImplementEventStatementContext)
                 {
                     obj += Visit(item);
                 }
@@ -332,7 +335,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitImplementEventStatement([NotNull] XyParser.ImplementEventStatementContext context)
+        public override object VisitImplementEventStatement([NotNull] ImplementEventStatementContext context)
         {
             var obj = "";
             var id = (Result)Visit(context.id());
@@ -349,7 +352,7 @@ namespace XyLang.Compile
             public string annotation;
         }
 
-        public override object VisitImplementControlStatement([NotNull] XyParser.ImplementControlStatementContext context)
+        public override object VisitImplementControlStatement([NotNull] ImplementControlStatementContext context)
         {
             var id = (Result)Visit(context.id());
             var type = "";
@@ -405,7 +408,7 @@ namespace XyLang.Compile
             public string annotation;
         }
 
-        public override object VisitImplementFunctionStatement([NotNull] XyParser.ImplementFunctionStatementContext context)
+        public override object VisitImplementFunctionStatement([NotNull] ImplementFunctionStatementContext context)
         {
             var fn = new Function();
             var id = (Result)Visit(context.id());
@@ -421,7 +424,7 @@ namespace XyLang.Compile
             }
             fn.@in = (string)Visit(context.parameterClauseIn());
             // 异步
-            if (context.t.Type == XyParser.FlowRight)
+            if (context.t.Type == FlowRight)
             {
                 var pout = (string)Visit(context.parameterClauseOut());
                 if (pout != "void")
@@ -444,7 +447,7 @@ namespace XyLang.Compile
             return fn;
         }
 
-        public override object VisitProtocolStatement([NotNull] XyParser.ProtocolStatementContext context)
+        public override object VisitProtocolStatement([NotNull] ProtocolStatementContext context)
         {
             var id = (Result)Visit(context.id());
             var obj = "";
@@ -471,7 +474,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitProtocolControlStatement([NotNull] XyParser.ProtocolControlStatementContext context)
+        public override object VisitProtocolControlStatement([NotNull] ProtocolControlStatementContext context)
         {
             var id = (Result)Visit(context.id());
             var r = new Result();
@@ -499,14 +502,14 @@ namespace XyLang.Compile
             return r;
         }
 
-        public override object VisitProtocolControlSubStatement([NotNull] XyParser.ProtocolControlSubStatementContext context)
+        public override object VisitProtocolControlSubStatement([NotNull] ProtocolControlSubStatementContext context)
         {
             var obj = "";
             obj = GetControlSub(context.id().GetText()) + Terminate;
             return obj;
         }
 
-        public override object VisitProtocolFunctionStatement([NotNull] XyParser.ProtocolFunctionStatementContext context)
+        public override object VisitProtocolFunctionStatement([NotNull] ProtocolFunctionStatementContext context)
         {
             var id = (Result)Visit(context.id());
             var r = new Result();
@@ -516,7 +519,7 @@ namespace XyLang.Compile
             }
             r.permission = "public";
             // 异步
-            if (context.t.Type == XyParser.FlowRight)
+            if (context.t.Type == FlowRight)
             {
                 var pout = (string)Visit(context.parameterClauseOut());
                 if (pout != "void")

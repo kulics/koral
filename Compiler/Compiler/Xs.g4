@@ -1,4 +1,4 @@
-﻿grammar Xy;
+﻿grammar Xs;
 
 program: statement+;
 

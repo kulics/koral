@@ -1,11 +1,14 @@
 ﻿using Antlr4.Runtime.Misc;
+using System;
 using System.Collections.Generic;
+using System.Text;
+using static Compiler.XsParser;
 
-namespace XyLang.Compile
+namespace Compiler
 {
-    internal partial class XyLangVisitor
+    internal partial class Visitor
     {
-        public override object VisitVariableUseStatement([NotNull] XyParser.VariableUseStatementContext context)
+        public override object VisitVariableUseStatement([NotNull] VariableUseStatementContext context)
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
@@ -13,7 +16,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitVariableStatement(XyParser.VariableStatementContext context)
+        public override object VisitVariableStatement(VariableStatementContext context)
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
@@ -21,7 +24,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitVariableDeclaredStatement([NotNull] XyParser.VariableDeclaredStatementContext context)
+        public override object VisitVariableDeclaredStatement([NotNull] VariableDeclaredStatementContext context)
         {
             var obj = "";
             var Type = (string)Visit(context.type());
@@ -38,7 +41,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitAssignStatement(XyParser.AssignStatementContext context)
+        public override object VisitAssignStatement(AssignStatementContext context)
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
@@ -46,22 +49,22 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitAssign([NotNull] XyParser.AssignContext context)
+        public override object VisitAssign([NotNull] AssignContext context)
         {
-            if (context.op.Type == XyParser.Assign)
+            if (context.op.Type == Assign)
             {
                 return "=";
             }
             return context.op.Text;
         }
 
-        public override object VisitExpressionStatement([NotNull] XyParser.ExpressionStatementContext context)
+        public override object VisitExpressionStatement([NotNull] ExpressionStatementContext context)
         {
             var r = (Result)Visit(context.expression());
             return r.text + Terminate + Wrap;
         }
 
-        public override object VisitExpression([NotNull] XyParser.ExpressionContext context)
+        public override object VisitExpression([NotNull] ExpressionContext context)
         {
             var count = context.ChildCount;
             var r = new Result();
@@ -70,7 +73,7 @@ namespace XyLang.Compile
                 var e1 = (Result)Visit(context.GetChild(0));
                 var op = Visit(context.GetChild(1));
                 var e2 = (Result)Visit(context.GetChild(2));
-                if (context.GetChild(1).GetType() == typeof(XyParser.CallContext))
+                if (context.GetChild(1).GetType() == typeof(CallContext))
                 {
                     r.data = "var";
                     for (int i = 0; i < e2.bracketTime; i++)
@@ -98,37 +101,37 @@ namespace XyLang.Compile
                             break;
                     }
                 }
-                if (context.GetChild(1).GetType() == typeof(XyParser.JudgeContext))
+                if (context.GetChild(1).GetType() == typeof(JudgeContext))
                 {
                     // todo 如果左右不是bool类型值，报错
-                    r.data = Bool;
+                    r.data = bl;
                 }
-                else if (context.GetChild(1).GetType() == typeof(XyParser.AddContext))
+                else if (context.GetChild(1).GetType() == typeof(AddContext))
                 {
                     // todo 如果左右不是number或text类型值，报错
-                    if ((string)e1.data == Str || (string)e2.data == Str)
+                    if ((string)e1.data == str || (string)e2.data == str)
                     {
-                        r.data = Str;
+                        r.data = str;
                     }
-                    else if ((string)e1.data == I32 && (string)e2.data == I32)
+                    else if ((string)e1.data == i32 && (string)e2.data == i32)
                     {
-                        r.data = I32;
+                        r.data = i32;
                     }
                     else
                     {
-                        r.data = F64;
+                        r.data = f64;
                     }
                 }
-                else if (context.GetChild(1).GetType() == typeof(XyParser.MulContext))
+                else if (context.GetChild(1).GetType() == typeof(MulContext))
                 {
                     // todo 如果左右不是number类型值，报错
-                    if ((string)e1.data == I32 && (string)e2.data == I32)
+                    if ((string)e1.data == i32 && (string)e2.data == i32)
                     {
-                        r.data = I32;
+                        r.data = i32;
                     }
                     else
                     {
-                        r.data = I32;
+                        r.data = i32;
                     }
                 }
                 r.text = e1.text + op + e2.text;
@@ -140,7 +143,7 @@ namespace XyLang.Compile
             return r;
         }
 
-        public override object VisitCallSelf([NotNull] XyParser.CallSelfContext context)
+        public override object VisitCallSelf([NotNull] CallSelfContext context)
         {
             var r = new Result
             {
@@ -177,7 +180,7 @@ namespace XyLang.Compile
             return r;
         }
 
-        public override object VisitCallNameSpace([NotNull] XyParser.CallNameSpaceContext context)
+        public override object VisitCallNameSpace([NotNull] CallNameSpaceContext context)
         {
             var obj = "";
             for (int i = 0; i < context.id().Length; i++)
@@ -228,7 +231,7 @@ namespace XyLang.Compile
             return r;
         }
 
-        public override object VisitCallExpression([NotNull] XyParser.CallExpressionContext context)
+        public override object VisitCallExpression([NotNull] CallExpressionContext context)
         {
             var count = context.ChildCount;
             var r = new Result();
@@ -237,7 +240,7 @@ namespace XyLang.Compile
                 var e1 = (Result)Visit(context.GetChild(0));
                 var op = Visit(context.GetChild(1));
                 var e2 = (Result)Visit(context.GetChild(2));
-                if (context.GetChild(0).GetChild(0) is XyParser.CallElementContext)
+                if (context.GetChild(0).GetChild(0) is CallElementContext)
                 {
                     r.callType = "element";
                 }
@@ -247,12 +250,12 @@ namespace XyLang.Compile
                 {
                     r.bracketTime += e1.bracketTime;
                 }
-                if (context.GetChild(2).GetChild(0) is XyParser.CallElementContext)
+                if (context.GetChild(2).GetChild(0) is CallElementContext)
                 {
                     r.text = e1.text + e2.text;
                     return r;
                 }
-                else if (context.GetChild(2).GetChild(0) is XyParser.CallAsContext)
+                else if (context.GetChild(2).GetChild(0) is CallAsContext)
                 {
                     r.callType = "as";
                     r.data = e2.data;
@@ -260,7 +263,7 @@ namespace XyLang.Compile
                     r.bracketTime = e1.bracketTime + 1;
                     return r;
                 }
-                else if (context.GetChild(2).GetChild(0) is XyParser.CallIsContext)
+                else if (context.GetChild(2).GetChild(0) is CallIsContext)
                 {
                     r.callType = "is";
                     r.data = e2.data;
@@ -273,17 +276,17 @@ namespace XyLang.Compile
             else if (count == 1)
             {
                 r = (Result)Visit(context.GetChild(0));
-                if (context.GetChild(0) is XyParser.CallElementContext)
+                if (context.GetChild(0) is CallElementContext)
                 {
                     r.callType = "element";
                 }
-                else if (context.GetChild(0) is XyParser.CallAsContext)
+                else if (context.GetChild(0) is CallAsContext)
                 {
                     r.callType = "as";
                     r.bracketTime++;
                     r.isCall = true;
                 }
-                else if (context.GetChild(0) is XyParser.CallIsContext)
+                else if (context.GetChild(0) is CallIsContext)
                 {
                     r.callType = "is";
                     r.bracketTime++;
@@ -293,17 +296,17 @@ namespace XyLang.Compile
             return r;
         }
 
-        public override object VisitCall([NotNull] XyParser.CallContext context)
+        public override object VisitCall([NotNull] CallContext context)
         {
             return context.op.Text;
         }
 
-        public override object VisitWave([NotNull] XyParser.WaveContext context)
+        public override object VisitWave([NotNull] WaveContext context)
         {
             return context.op.Text;
         }
 
-        public override object VisitJudge([NotNull] XyParser.JudgeContext context)
+        public override object VisitJudge([NotNull] JudgeContext context)
         {
             if (context.op.Text == "~=")
             {
@@ -320,34 +323,34 @@ namespace XyLang.Compile
             return context.op.Text;
         }
 
-        public override object VisitAdd([NotNull] XyParser.AddContext context)
+        public override object VisitAdd([NotNull] AddContext context)
         {
             return context.op.Text;
         }
 
-        public override object VisitMul([NotNull] XyParser.MulContext context)
+        public override object VisitMul([NotNull] MulContext context)
         {
             return context.op.Text;
         }
 
-        public override object VisitPrimaryExpression([NotNull] XyParser.PrimaryExpressionContext context)
+        public override object VisitPrimaryExpression([NotNull] PrimaryExpressionContext context)
         {
             if (context.ChildCount == 1)
             {
                 var c = context.GetChild(0);
-                if (c is XyParser.DataStatementContext)
+                if (c is DataStatementContext)
                 {
                     return Visit(context.dataStatement());
                 }
-                else if (c is XyParser.IdContext)
+                else if (c is IdContext)
                 {
                     return Visit(context.id());
                 }
-                else if (context.t.Type == XyParser.Self)
+                else if (context.t.Type == Self)
                 {
                     return new Result { text = "this", data = "var" };
                 }
-                else if (context.t.Type == XyParser.Discard)
+                else if (context.t.Type == Discard)
                 {
                     return new Result { text = "_", data = "var" };
                 }
@@ -356,7 +359,7 @@ namespace XyLang.Compile
             return new Result { text = "(" + r.text + ")", data = r.data };
         }
 
-        public override object VisitExpressionList([NotNull] XyParser.ExpressionListContext context)
+        public override object VisitExpressionList([NotNull] ExpressionListContext context)
         {
             var r = new Result();
             var obj = "";
@@ -377,7 +380,7 @@ namespace XyLang.Compile
             return r;
         }
 
-        public override object VisitTemplateDefine([NotNull] XyParser.TemplateDefineContext context)
+        public override object VisitTemplateDefine([NotNull] TemplateDefineContext context)
         {
             var obj = "";
             obj += "<";
@@ -394,7 +397,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitTemplateCall([NotNull] XyParser.TemplateCallContext context)
+        public override object VisitTemplateCall([NotNull] TemplateCallContext context)
         {
             var obj = "";
             obj += "<";
@@ -411,7 +414,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitCallElement([NotNull] XyParser.CallElementContext context)
+        public override object VisitCallElement([NotNull] CallElementContext context)
         {
             if (context.expression() == null)
             {
@@ -422,12 +425,12 @@ namespace XyLang.Compile
             return r;
         }
 
-        public override object VisitSlice([NotNull] XyParser.SliceContext context)
+        public override object VisitSlice([NotNull] SliceContext context)
         {
             return (string)Visit(context.GetChild(0));
         }
 
-        public override object VisitSliceFull([NotNull] XyParser.SliceFullContext context)
+        public override object VisitSliceFull([NotNull] SliceFullContext context)
         {
             var order = "";
             var attach = "";
@@ -455,7 +458,7 @@ namespace XyLang.Compile
             return $".slice({expr1.text}, {expr2.text}, {order}, {attach})";
         }
 
-        public override object VisitSliceStart([NotNull] XyParser.SliceStartContext context)
+        public override object VisitSliceStart([NotNull] SliceStartContext context)
         {
             var order = "";
             var attach = "";
@@ -482,7 +485,7 @@ namespace XyLang.Compile
             return $".slice({expr.text}, null, {order}, {attach})";
         }
 
-        public override object VisitSliceEnd([NotNull] XyParser.SliceEndContext context)
+        public override object VisitSliceEnd([NotNull] SliceEndContext context)
         {
             var order = "";
             var attach = "false";
@@ -509,7 +512,7 @@ namespace XyLang.Compile
             return $".slice(null, {expr.text}, {order}, {attach})";
         }
 
-        public override object VisitCallFunc([NotNull] XyParser.CallFuncContext context)
+        public override object VisitCallFunc([NotNull] CallFuncContext context)
         {
             var r = new Result
             {
@@ -525,7 +528,7 @@ namespace XyLang.Compile
             return r;
         }
 
-        public override object VisitCallPkg([NotNull] XyParser.CallPkgContext context)
+        public override object VisitCallPkg([NotNull] CallPkgContext context)
         {
             var r = new Result
             {
@@ -553,7 +556,7 @@ namespace XyLang.Compile
             return r;
         }
 
-        public override object VisitPkgAssign([NotNull] XyParser.PkgAssignContext context)
+        public override object VisitPkgAssign([NotNull] PkgAssignContext context)
         {
             var obj = "";
             obj += "{";
@@ -572,7 +575,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitListAssign([NotNull] XyParser.ListAssignContext context)
+        public override object VisitListAssign([NotNull] ListAssignContext context)
         {
             var obj = "";
             obj += "{";
@@ -592,7 +595,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitDictionaryAssign([NotNull] XyParser.DictionaryAssignContext context)
+        public override object VisitDictionaryAssign([NotNull] DictionaryAssignContext context)
         {
             var obj = "";
             obj += "{";
@@ -612,14 +615,14 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitPkgAssignElement([NotNull] XyParser.PkgAssignElementContext context)
+        public override object VisitPkgAssignElement([NotNull] PkgAssignElementContext context)
         {
             var obj = "";
             obj += Visit(context.name()) + " = " + ((Result)Visit(context.expression())).text;
             return obj;
         }
 
-        public override object VisitPkgAnonymous([NotNull] XyParser.PkgAnonymousContext context)
+        public override object VisitPkgAnonymous([NotNull] PkgAnonymousContext context)
         {
             var r = new Result
             {
@@ -629,7 +632,7 @@ namespace XyLang.Compile
             return r;
         }
 
-        public override object VisitPkgAnonymousAssign([NotNull] XyParser.PkgAnonymousAssignContext context)
+        public override object VisitPkgAnonymousAssign([NotNull] PkgAnonymousAssignContext context)
         {
             var obj = "";
             obj += "{";
@@ -648,14 +651,14 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitPkgAnonymousAssignElement([NotNull] XyParser.PkgAnonymousAssignElementContext context)
+        public override object VisitPkgAnonymousAssignElement([NotNull] PkgAnonymousAssignElementContext context)
         {
             var obj = "";
             obj += Visit(context.name()) + " = " + ((Result)Visit(context.expression())).text;
             return obj;
         }
 
-        public override object VisitCallAwait([NotNull] XyParser.CallAwaitContext context)
+        public override object VisitCallAwait([NotNull] CallAwaitContext context)
         {
             var r = new Result();
             var expr = (Result)Visit(context.expression());
@@ -664,7 +667,7 @@ namespace XyLang.Compile
             return r;
         }
 
-        public override object VisitArray([NotNull] XyParser.ArrayContext context)
+        public override object VisitArray([NotNull] ArrayContext context)
         {
             var type = "var";
             var result = new Result();
@@ -698,7 +701,7 @@ namespace XyLang.Compile
             return result;
         }
 
-        public override object VisitList([NotNull] XyParser.ListContext context)
+        public override object VisitList([NotNull] ListContext context)
         {
             var type = "object";
             var result = new Result();
@@ -721,18 +724,18 @@ namespace XyLang.Compile
             }
             if (context.type() != null)
             {
-                result.data = $"{List}<{(string)Visit(context.type())}>";
+                result.data = $"{lst}<{(string)Visit(context.type())}>";
             }
             else
             {
-                result.data = $"{List}<{type}>";
+                result.data = $"{lst}<{type}>";
             }
 
             result.text = $"(new {result.data}(){{ {result.text} }})";
             return result;
         }
 
-        public override object VisitDictionary([NotNull] XyParser.DictionaryContext context)
+        public override object VisitDictionary([NotNull] DictionaryContext context)
         {
             var key = Any;
             var value = Any;
@@ -762,11 +765,11 @@ namespace XyLang.Compile
             var type = key + "," + value;
             if (context.type().Length > 0)
             {
-                result.data = $"{Dictionary}<{(string)Visit(context.type(0))},{(string)Visit(context.type(1))}>";
+                result.data = $"{dic}<{(string)Visit(context.type(0))},{(string)Visit(context.type(1))}>";
             }
             else
             {
-                result.data = $"{Dictionary}<{type}>";
+                result.data = $"{dic}<{type}>";
             }
 
             result.text = $"(new {result.data}(){{ {result.text} }})";
@@ -780,7 +783,7 @@ namespace XyLang.Compile
             public string text;
         }
 
-        public override object VisitDictionaryElement([NotNull] XyParser.DictionaryElementContext context)
+        public override object VisitDictionaryElement([NotNull] DictionaryElementContext context)
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
@@ -793,42 +796,42 @@ namespace XyLang.Compile
             return result;
         }
 
-        public override object VisitDataStatement([NotNull] XyParser.DataStatementContext context)
+        public override object VisitDataStatement([NotNull] DataStatementContext context)
         {
             var r = new Result();
-            if (context.t.Type == XyParser.Float)
+            if (context.t.Type == Float)
             {
-                r.data = F64;
+                r.data = f64;
                 r.text = $"{context.Float().GetText()}";
             }
-            else if (context.t.Type == XyParser.Integer)
+            else if (context.t.Type == Integer)
             {
-                r.data = I32;
+                r.data = i32;
                 r.text = $"{context.Integer().GetText()}";
             }
-            else if (context.t.Type == XyParser.Text)
+            else if (context.t.Type == Text)
             {
-                r.data = Str;
+                r.data = str;
                 var text = context.Text().GetText();
                 if (text.Contains("{")) text = "$" + text;
                 r.text = text;
             }
-            else if (context.t.Type == XyParser.Char)
+            else if (context.t.Type == XsParser.Char)
             {
-                r.data = Chr;
+                r.data = chr;
                 r.text = context.Char().GetText();
             }
-            else if (context.t.Type == XyParser.True)
+            else if (context.t.Type == XsParser.True)
             {
-                r.data = Bool;
+                r.data = bl;
                 r.text = $"{context.True().GetText()}";
             }
-            else if (context.t.Type == XyParser.False)
+            else if (context.t.Type == XsParser.False)
             {
-                r.data = Bool;
+                r.data = bl;
                 r.text = $"{context.False().GetText()}";
             }
-            else if (context.t.Type == XyParser.Null)
+            else if (context.t.Type == Null)
             {
                 r.data = Any;
                 r.text = "null";
@@ -836,11 +839,11 @@ namespace XyLang.Compile
             return r;
         }
 
-        public override object VisitFunction([NotNull] XyParser.FunctionContext context)
+        public override object VisitFunction([NotNull] FunctionContext context)
         {
             var r = new Result();
             // 异步
-            if (context.t.Type == XyParser.FlowRight)
+            if (context.t.Type == FlowRight)
             {
                 r.text += " async ";
             }
@@ -851,19 +854,19 @@ namespace XyLang.Compile
             return r;
         }
 
-        public override object VisitLambda([NotNull] XyParser.LambdaContext context)
+        public override object VisitLambda([NotNull] LambdaContext context)
         {
             var r = new Result
             {
                 data = "var"
             };
-            if (context.lambdaShort()!= null)
+            if (context.lambdaShort() != null)
             {
                 r.text += Visit(context.lambdaShort());
                 return r;
             }
             // 异步
-            if (context.t.Type == XyParser.FlowRight)
+            if (context.t.Type == FlowRight)
             {
                 r.text += "async ";
             }
@@ -887,7 +890,7 @@ namespace XyLang.Compile
             return r;
         }
 
-        public override object VisitLambdaIn([NotNull] XyParser.LambdaInContext context)
+        public override object VisitLambdaIn([NotNull] LambdaInContext context)
         {
             var obj = "";
             for (int i = 0; i < context.id().Length; i++)
@@ -905,14 +908,14 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitLambdaShort([NotNull] XyParser.LambdaShortContext context)
+        public override object VisitLambdaShort([NotNull] LambdaShortContext context)
         {
             var obj = "(it) => ";
             obj += ((Result)Visit(context.expressionList())).text;
             return obj;
         }
 
-        public override object VisitEmpty([NotNull] XyParser.EmptyContext context)
+        public override object VisitEmpty([NotNull] EmptyContext context)
         {
             var r = new Result();
             var type = Visit(context.type());
@@ -921,7 +924,7 @@ namespace XyLang.Compile
             return r;
         }
 
-        public override object VisitPlusMinus([NotNull] XyParser.PlusMinusContext context)
+        public override object VisitPlusMinus([NotNull] PlusMinusContext context)
         {
             var r = new Result();
             var expr = (Result)Visit(context.expression());
@@ -931,7 +934,7 @@ namespace XyLang.Compile
             return r;
         }
 
-        public override object VisitNegate([NotNull] XyParser.NegateContext context)
+        public override object VisitNegate([NotNull] NegateContext context)
         {
             var r = new Result();
             var expr = (Result)Visit(context.expression());

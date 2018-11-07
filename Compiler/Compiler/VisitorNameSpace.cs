@@ -1,10 +1,14 @@
 ﻿using Antlr4.Runtime.Misc;
+using System;
+using System.Collections.Generic;
+using System.Text;
+using static Compiler.XsParser;
 
-namespace XyLang.Compile
+namespace Compiler
 {
-    internal partial class XyLangVisitor
+    internal partial class Visitor
     {
-        public override object VisitStatement([NotNull] XyParser.StatementContext context)
+        public override object VisitStatement([NotNull] StatementContext context)
         {
             var obj = "";
             var ns = (Namespace)Visit(context.exportStatement());
@@ -19,11 +23,11 @@ namespace XyLang.Compile
             {
                 switch (item.GetChild(0))
                 {
-                    case XyParser.FunctionMainStatementContext _:
-                    case XyParser.NamespaceFunctionStatementContext _:
-                    case XyParser.NamespaceVariableStatementContext _:
-                    case XyParser.NamespaceInvariableStatementContext _:
-                    case XyParser.NamespaceConstantStatementContext _:
+                    case FunctionMainStatementContext _:
+                    case NamespaceFunctionStatementContext _:
+                    case NamespaceVariableStatementContext _:
+                    case NamespaceInvariableStatementContext _:
+                    case NamespaceConstantStatementContext _:
                         Static += Visit(item);
                         hasStatic = true;
                         break;
@@ -44,14 +48,14 @@ namespace XyLang.Compile
             return obj;
         }
 
-        class Namespace 
+        class Namespace
         {
             public string name;
             public string staticName;
             public string imports;
         }
 
-        public override object VisitExportStatement([NotNull] XyParser.ExportStatementContext context)
+        public override object VisitExportStatement([NotNull] ExportStatementContext context)
         {
             var obj = new Namespace();
             obj.name = (string)Visit(context.nameSpace());
@@ -61,14 +65,14 @@ namespace XyLang.Compile
             {
                 obj.staticName = (Visit(context.id()) as Result).text;
             }
-            foreach(var item in context.importStatement())
+            foreach (var item in context.importStatement())
             {
                 obj.imports += (string)Visit(item);
             }
             return obj;
         }
 
-        public override object VisitImportStatement([NotNull] XyParser.ImportStatementContext context)
+        public override object VisitImportStatement([NotNull] ImportStatementContext context)
         {
             var obj = "";
             if (context.annotation() != null)
@@ -96,7 +100,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitNameSpace([NotNull] XyParser.NameSpaceContext context)
+        public override object VisitNameSpace([NotNull] NameSpaceContext context)
         {
             var obj = "";
             for (int i = 0; i < context.id().Length; i++)
@@ -114,7 +118,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitNameSpaceItem([NotNull] XyParser.NameSpaceItemContext context)
+        public override object VisitNameSpaceItem([NotNull] NameSpaceItemContext context)
         {
             var obj = "";
             for (int i = 0; i < context.id().Length; i++)
@@ -132,7 +136,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitName([NotNull] XyParser.NameContext context)
+        public override object VisitName([NotNull] NameContext context)
         {
             var obj = "";
             for (int i = 0; i < context.id().Length; i++)
@@ -150,7 +154,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitEnumStatement([NotNull] XyParser.EnumStatementContext context)
+        public override object VisitEnumStatement([NotNull] EnumStatementContext context)
         {
             var obj = "";
             var id = (Result)Visit(context.id());
@@ -170,7 +174,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitEnumSupportStatement([NotNull] XyParser.EnumSupportStatementContext context)
+        public override object VisitEnumSupportStatement([NotNull] EnumSupportStatementContext context)
         {
             var id = (Result)Visit(context.id());
             if (context.Integer() != null)
@@ -185,7 +189,7 @@ namespace XyLang.Compile
             return id.text + ",";
         }
 
-        public override object VisitFunctionMainStatement([NotNull] XyParser.FunctionMainStatementContext context)
+        public override object VisitFunctionMainStatement([NotNull] FunctionMainStatementContext context)
         {
             var obj = "";
             obj += $"static async {Task} Main(string[] args) {Wrap + BlockLeft + Wrap} " +
@@ -194,7 +198,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitNamespaceFunctionStatement([NotNull] XyParser.NamespaceFunctionStatementContext context)
+        public override object VisitNamespaceFunctionStatement([NotNull] NamespaceFunctionStatementContext context)
         {
             var id = (Result)Visit(context.id());
             var obj = "";
@@ -203,7 +207,7 @@ namespace XyLang.Compile
                 obj += Visit(context.annotation());
             }
             // 异步
-            if (context.t.Type == XyParser.FlowRight)
+            if (context.t.Type == FlowRight)
             {
                 var pout = (string)Visit(context.parameterClauseOut());
                 if (pout != "void")
@@ -232,7 +236,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitNamespaceInvariableStatement([NotNull] XyParser.NamespaceInvariableStatementContext context)
+        public override object VisitNamespaceInvariableStatement([NotNull] NamespaceInvariableStatementContext context)
         {
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
@@ -256,7 +260,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitNamespaceConstantStatement([NotNull] XyParser.NamespaceConstantStatementContext context)
+        public override object VisitNamespaceConstantStatement([NotNull] NamespaceConstantStatementContext context)
         {
             var id = (Result)Visit(context.id());
             var expr = (Result)Visit(context.expression());
@@ -277,40 +281,40 @@ namespace XyLang.Compile
             }
             switch (typ)
             {
-                case I8:
+                case i8:
                     typ = "ubyte";
                     break;
-                case I16:
+                case i16:
                     typ = "short";
                     break;
-                case I32:
+                case i32:
                     typ = "int";
                     break;
-                case I64:
+                case i64:
                     typ = "long";
                     break;
 
-                case U8:
+                case u8:
                     typ = "byte";
                     break;
-                case U16:
+                case u16:
                     typ = "ushort";
                     break;
-                case U32:
+                case u32:
                     typ = "uint";
                     break;
-                case U64:
+                case u64:
                     typ = "ulong";
                     break;
 
-                case F32:
+                case f32:
                     typ = "float";
                     break;
-                case F64:
+                case f64:
                     typ = "double";
                     break;
 
-                case Str:
+                case str:
                     typ = "string";
                     break;
                 default:
@@ -320,7 +324,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitNamespaceVariableStatement([NotNull] XyParser.NamespaceVariableStatementContext context)
+        public override object VisitNamespaceVariableStatement([NotNull] NamespaceVariableStatementContext context)
         {
             var r1 = (Result)Visit(context.expression(0));
             var typ = "";
@@ -359,7 +363,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitNamespaceControlSubStatement([NotNull] XyParser.NamespaceControlSubStatementContext context)
+        public override object VisitNamespaceControlSubStatement([NotNull] NamespaceControlSubStatementContext context)
         {
             var obj = "";
             var id = "";

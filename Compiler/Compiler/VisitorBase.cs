@@ -1,14 +1,17 @@
 ﻿using Antlr4.Runtime;
 using Antlr4.Runtime.Misc;
 using System;
+using System.Collections.Generic;
+using System.Text;
+using static Compiler.XsParser;
 
-namespace XyLang.Compile
+namespace Compiler
 {
-    internal class XyLangErrorListener : BaseErrorListener
+    internal class ErrorListener : BaseErrorListener
     {
         string FileDir { get; set; }
 
-        public XyLangErrorListener(string FileDir)
+        public ErrorListener(string FileDir)
         {
             this.FileDir = FileDir;
         }
@@ -24,7 +27,7 @@ namespace XyLang.Compile
         }
     }
 
-    internal partial class XyLangVisitor : XyBaseVisitor<object>
+    internal partial class Visitor : XsBaseVisitor<object>
     {
         public string FileName { get; set; }
 
@@ -33,34 +36,34 @@ namespace XyLang.Compile
 
         private const string Any = "object";
 
-        private const string I8 = "i8";
-        private const string I16 = "i16";
-        private const string I32 = "i32";
-        private const string I64 = "i64";
+        private const string i8 = "i8";
+        private const string i16 = "i16";
+        private const string i32 = "i32";
+        private const string i64 = "i64";
 
-        private const string U8 = "u8";
-        private const string U16 = "u16";
-        private const string U32 = "u32";
-        private const string U64 = "u64";
+        private const string u8 = "u8";
+        private const string u16 = "u16";
+        private const string u32 = "u32";
+        private const string u64 = "u64";
 
-        private const string F32 = "f32";
-        private const string F64 = "f64";
+        private const string f32 = "f32";
+        private const string f64 = "f64";
 
-        private const string Bool = "bl";
-        private const string True = "true";
-        private const string False = "false";
+        private const string bl = "bl";
+        private const string t = "true";
+        private const string f = "false";
 
-        private const string Chr = "chr";
-        private const string Str = "str";
-        private const string List = "lst";
-        private const string Dictionary = "dic";
+        private const string chr = "chr";
+        private const string str = "str";
+        private const string lst = "lst";
+        private const string dic = "dic";
 
         private const string BlockLeft = "{";
         private const string BlockRight = "}";
 
         private const string Task = "System.Threading.Tasks.Task";
 
-        public override object VisitProgram([NotNull] XyParser.ProgramContext context)
+        public override object VisitProgram([NotNull] ProgramContext context)
         {
             var list = context.statement();
             var result = "";
@@ -81,7 +84,7 @@ namespace XyLang.Compile
             public bool isCall { get; set; }
         }
 
-        public override object VisitId([NotNull] XyParser.IdContext context)
+        public override object VisitId([NotNull] IdContext context)
         {
             var r = new Result
             {
@@ -97,12 +100,12 @@ namespace XyLang.Compile
                 r.permission = "public";
                 r.text += Visit(context.linqKeyword());
             }
-            else if (context.op.Type == XyParser.IDPublic)
+            else if (context.op.Type == IDPublic)
             {
                 r.permission = "public";
                 r.text += context.op.Text;
             }
-            else if (context.op.Type == XyParser.IDPrivate)
+            else if (context.op.Type == IDPrivate)
             {
                 r.permission = "private";
                 r.text += context.op.Text;
@@ -115,23 +118,23 @@ namespace XyLang.Compile
             return r;
         }
 
-        public override object VisitBool([NotNull] XyParser.BoolContext context)
+        public override object VisitBool([NotNull] BoolContext context)
         {
             var r = new Result();
-            if (context.t.Type == XyParser.True)
+            if (context.t.Type == True)
             {
-                r.data = Bool;
-                r.text = True;
+                r.data = bl;
+                r.text = t;
             }
-            else if (context.t.Type == XyParser.False)
+            else if (context.t.Type == False)
             {
-                r.data = Bool;
-                r.text = False;
+                r.data = bl;
+                r.text = f;
             }
             return r;
         }
 
-        public override object VisitCallAs([NotNull] XyParser.CallAsContext context)
+        public override object VisitCallAs([NotNull] CallAsContext context)
         {
             var r = new Result();
             var type = (string)Visit(context.type());
@@ -140,16 +143,16 @@ namespace XyLang.Compile
             return r;
         }
 
-        public override object VisitCallIs([NotNull] XyParser.CallIsContext context)
+        public override object VisitCallIs([NotNull] CallIsContext context)
         {
             var r = new Result();
             var type = (string)Visit(context.type());
-            r.data = Bool;
+            r.data = bl;
             r.text = " is " + type + ")";
             return r;
         }
 
-        public override object VisitAnnotation([NotNull] XyParser.AnnotationContext context)
+        public override object VisitAnnotation([NotNull] AnnotationContext context)
         {
             var obj = "";
             var id = "";
@@ -163,7 +166,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitAnnotationList([NotNull] XyParser.AnnotationListContext context)
+        public override object VisitAnnotationList([NotNull] AnnotationListContext context)
         {
             var obj = "";
             for (int i = 0; i < context.annotationItem().Length; i++)
@@ -180,7 +183,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitAnnotationItem([NotNull] XyParser.AnnotationItemContext context)
+        public override object VisitAnnotationItem([NotNull] AnnotationItemContext context)
         {
             var obj = "";
             obj += ((Result)Visit(context.id())).text;
@@ -202,7 +205,7 @@ namespace XyLang.Compile
             return obj;
         }
 
-        public override object VisitAnnotationAssign([NotNull] XyParser.AnnotationAssignContext context)
+        public override object VisitAnnotationAssign([NotNull] AnnotationAssignContext context)
         {
             var obj = "";
             var id = "";

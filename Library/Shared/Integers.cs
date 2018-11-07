@@ -1,7 +1,7 @@
 ﻿using Newtonsoft.Json;
 using System;
 
-namespace Xs.Library
+namespace Library
 {
     [JsonConverter(typeof(i8Converter))]
     public class i8: iXsValue

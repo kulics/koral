@@ -3,7 +3,7 @@ using System;
 using System.IO;
 using System.Text;
 
-namespace XyLang.Compile
+namespace Compiler
 {
     internal static class Compiler
     {
@@ -39,7 +39,7 @@ namespace XyLang.Compile
         private static void Compiled(string path)
         {
             //获取相对路径下所有文件
-            var files = Directory.GetFiles(path, "*.xy");
+            var files = Directory.GetFiles(path, "*.xs");
             foreach (var file in files)
             {
                 // c#文件流读文件
@@ -53,11 +53,11 @@ namespace XyLang.Compile
                         var input = Encoding.UTF8.GetString(heByte);
 
                         var stream = new AntlrInputStream(input);
-                        var lexer = new XyLexer(stream);
+                        var lexer = new XsLexer(stream);
                         var tokens = new CommonTokenStream(lexer);
-                        var parser = new XyParser(tokens) { BuildParseTree = true };
+                        var parser = new XsParser(tokens) { BuildParseTree = true };
                         parser.RemoveErrorListeners();
-                        parser.AddErrorListener(new XyLangErrorListener(file));
+                        parser.AddErrorListener(new ErrorListener(file));
 
                         var tree = parser.program();
 
@@ -72,7 +72,7 @@ namespace XyLang.Compile
                             fileName = file.Substring(0, file.Length - 3);
                         }
 
-                        var visitor = new XyLangVisitor() { FileName = fileName };
+                        var visitor = new Visitor() { FileName = fileName };
                         var result = visitor.Visit(tree);
 
                         // C#文件流写文件,使用覆盖模式

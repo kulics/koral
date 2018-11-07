@@ -1,6 +1,6 @@
 demo=run
 {
-    Xs\Library
+    Library
     System
     System\IO
     System\Linq
