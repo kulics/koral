@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace XyLang.Library
+namespace Xs.Library
 {
     public static class cmd
     {

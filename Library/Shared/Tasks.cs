@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace XyLang.Library
+namespace Xs.Library
 {
     public class tsk : Task
     {

@@ -1,8 +1,8 @@
 ﻿using System;
 
-namespace XyLang.Library
+namespace Xs.Library
 {
-    public class bl : iXyValue
+    public class bl : iXsValue
     {
         private bool v;
 
