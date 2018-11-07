@@ -110,6 +110,8 @@ i := 0
      i += 1
 }
 ```
+## Continue
+If you only need to jump out of the current loop, use the `-> @` statement.
 
 ### [Next Chapter](function-type.md)
 
@@ -118,7 +120,7 @@ i := 0
 Demo
 {
     System
-    XyLang\Library
+    Library
 }
 
 main ()

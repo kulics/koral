@@ -1,11 +1,11 @@
-# XyLang Programming Language
-XyLang is a concise open source .NET programming language. 
+# Xs Programming Language
+Xs is a concise open source .NET programming language. 
 
 The language is designed to improve reading performance and reduce the grammatical burden so that users can focus their real attention on business needs.
 
 Therefore, we abandon many subtle grammatical features, retaining only the most used part, and enhance its versatility.
 
-Eventually making XyLang with very few grammar, only the presence of symbols on the keyboard instead of keywords is sufficient to express all the logic. 
+Eventually making Xs with very few grammar, only the presence of symbols on the keyboard instead of keywords is sufficient to express all the logic. 
 
 ## Features
 + Focus on writing and reading..

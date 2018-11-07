@@ -112,7 +112,7 @@ length := dictionary.count     # length
 Demo
 {
     System
-    XyLang\Library
+    Library
 }
 
 main ()

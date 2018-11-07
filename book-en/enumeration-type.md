@@ -50,7 +50,7 @@ Number
 Demo
 {
     System
-    XyLang\Library
+    Library
 }
 
 main ()

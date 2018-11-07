@@ -36,12 +36,12 @@ E.g:
 Demo 
 {
     System
-    XyLang\Library
+    Library
 }
 ```
 This imports the `System` and` Library` libraries into the `Demo` namespace, and then you can use them in the program.
 
-It's important to note that most of XyLang's functionality is included in the Library, so we have to import this namespace to ensure proper use of XyLang.
+It's important to note that most of Xs's functionality is included in the Library, so we have to import this namespace to ensure proper use of Xs.
 
 You can write multiple import statements that their order does not affect the import function.
 
@@ -55,7 +55,7 @@ E.g:
 Demo 
 {
     System
-    XyLang\Library
+    Library
 }
 
 main ()
@@ -187,7 +187,7 @@ a.b.(x, y)
 Demo
 {
     System
-    XyLang\Library
+    Library
 }
 
 main ()

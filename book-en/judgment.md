@@ -136,7 +136,7 @@ E.g:
 Demo
 {
     System
-    XyLang\Library
+    Library
 }
 
 main ()
