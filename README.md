@@ -23,7 +23,7 @@ Read detail from The [Book](./book-en/introduction.md).
 ```
 HelloWorld # export namespace
 {
-    System # import namespace
+    Library # import namespace
 }
 
 main () # main function  
