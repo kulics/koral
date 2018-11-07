@@ -1,13 +1,13 @@
-# The XyLang Programming Language
-XyLang is a concise open source .NET programming language. 
+# The Xs Programming Language
+Xs is a concise open source .NET programming language. 
 
-This is the main source code repository for XyLang. It contains the compiler, and documentation.
+This is the main source code repository for Xs. It contains the compiler, and documentation.
 
 The language is designed to improve reading performance and reduce the grammatical burden so that users can focus their real attention on business needs.
 
 Therefore, we abandon many subtle grammatical features, retaining only the most used part, and enhance its versatility.
 
-Eventually making XyLang with very few grammar, only the presence of symbols on the keyboard instead of keywords is sufficient to express all the logic.
+Eventually making Xs with very few grammar, only the presence of symbols on the keyboard instead of keywords is sufficient to express all the logic.
 
 ## Features
 + Focus on writing and reading.
@@ -55,7 +55,7 @@ main () # main function
     1. Design syntax.
     1. Completed translator to C # compiler.
 1. 2018.03 ~ 2019.03
-    1. Rewrite all xy projects using xylang.
+    1. Rewrite all xylaga projects using Xs.
     1. Develop vscode syntax plugin.
     1. Compiler features improvements (identifier records, cross-file references, project compilation).
 1. 2019.03 ~ 2021.03

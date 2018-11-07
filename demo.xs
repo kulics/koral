@@ -1,9 +1,9 @@
 demo
 {
     System
-    XyLang\Library
+    Xs\Library
 }
-    
+
 main ()
 {
     n0 := node.{0}
