@@ -111,6 +111,11 @@ namespace Compiler
             return $"break {Terminate} {Wrap}";
         }
 
+        public override object VisitLoopContinueStatement([NotNull] LoopContinueStatementContext context)
+        {
+            return $"continue {Terminate} {Wrap}";
+        }
+
         public override object VisitJudgeCaseStatement([NotNull] JudgeCaseStatementContext context)
         {
             var obj = "";

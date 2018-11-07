@@ -119,6 +119,7 @@ functionSupportStatement:
 | loopCaseStatement
 | loopInfiniteStatement
 | loopJumpStatement
+| loopContinueStatement
 | checkDeferStatement
 | checkStatement
 | reportStatement
@@ -156,6 +157,8 @@ loopCaseStatement:Loop expression BlockLeft (functionSupportStatement)* BlockRig
 loopInfiniteStatement:Loop BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 跳出循环
 loopJumpStatement:ArrowLeft Loop Terminate?;
+// 跳出当前循环
+loopContinueStatement:ArrowRight Loop Terminate?;
 // 看守
 checkDeferStatement: Check BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 检查
