@@ -5,10 +5,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 
-namespace XyLang.Library
+namespace Xs.Library
 {
     [JsonConverter(typeof(strConverter))]
-    public class str : IComparable, IEnumerable<chr>, iXyValue
+    public class str : IComparable, IEnumerable<chr>, iXsValue
     {
         private string v = "";
         public str() { }
@@ -178,7 +178,7 @@ namespace XyLang.Library
     }
 
     [JsonConverter(typeof(chrConverter))]
-    public class chr : IComparable, iXyValue
+    public class chr : IComparable, iXsValue
     {
         private char v;
         public chr() { }
@@ -205,7 +205,7 @@ namespace XyLang.Library
                     v = Convert.ToChar(o);
                     break;
 
-                case iXyValue i:
+                case iXsValue i:
                     v = i.toChr();
                     break;
                 default:

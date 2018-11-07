@@ -1,10 +1,10 @@
 ﻿using Newtonsoft.Json;
 using System;
 
-namespace XyLang.Library
+namespace Xs.Library
 {
     [JsonConverter(typeof(i8Converter))]
-    public class i8: iXyValue
+    public class i8: iXsValue
     {
         private sbyte v;
         public i8() { }
@@ -31,7 +31,7 @@ namespace XyLang.Library
                     v = Convert.ToSByte(o);
                     break;
 
-                case iXyValue i:
+                case iXsValue i:
                     v = i.toI8();
                     break;
                 default:
@@ -92,7 +92,7 @@ namespace XyLang.Library
     }
 
     [JsonConverter(typeof(i16Converter))]
-    public class i16 : iXyValue
+    public class i16 : iXsValue
     {
         private short v;
         public i16() { }
@@ -119,7 +119,7 @@ namespace XyLang.Library
                     v = Convert.ToInt16(o);
                     break;
 
-                case iXyValue i:
+                case iXsValue i:
                     v = i.toI16();
                     break;
                 default:
@@ -180,7 +180,7 @@ namespace XyLang.Library
     }
 
     [JsonConverter(typeof(i32Converter))]
-    public class i32 : iXyValue
+    public class i32 : iXsValue
     {
         private int v;
         public i32() { }
@@ -207,7 +207,7 @@ namespace XyLang.Library
                     v = Convert.ToInt32(o);
                     break;
 
-                case iXyValue i:
+                case iXsValue i:
                     v = i.toI32();
                     break;
                 default:
@@ -268,7 +268,7 @@ namespace XyLang.Library
     }
 
     [JsonConverter(typeof(i64Converter))]
-    public class i64 : iXyValue
+    public class i64 : iXsValue
     {
         private long v;
         public i64() { }
@@ -295,7 +295,7 @@ namespace XyLang.Library
                     v = Convert.ToInt64(o);
                     break;
 
-                case iXyValue i:
+                case iXsValue i:
                     v = i.toI64();
                     break;
                 default:

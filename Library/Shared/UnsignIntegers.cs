@@ -1,10 +1,10 @@
 ﻿using Newtonsoft.Json;
 using System;
 
-namespace XyLang.Library
+namespace Xs.Library
 {
     [JsonConverter(typeof(u8Converter))]
-    public class u8 : iXyValue
+    public class u8 : iXsValue
     {
         private byte v;
         public u8() { }
@@ -31,7 +31,7 @@ namespace XyLang.Library
                     v = Convert.ToByte(o);
                     break;
 
-                case iXyValue i:
+                case iXsValue i:
                     v = i.toU8();
                     break;
                 default:
@@ -92,7 +92,7 @@ namespace XyLang.Library
     }
 
     [JsonConverter(typeof(u16Converter))]
-    public class u16 : iXyValue
+    public class u16 : iXsValue
     {
         private ushort v;
         public u16() { }
@@ -119,7 +119,7 @@ namespace XyLang.Library
                     v = Convert.ToUInt16(o);
                     break;
 
-                case iXyValue i:
+                case iXsValue i:
                     v = i.toU16();
                     break;
                 default:
@@ -180,7 +180,7 @@ namespace XyLang.Library
     }
 
     [JsonConverter(typeof(u32Converter))]
-    public class u32 : iXyValue
+    public class u32 : iXsValue
     {
         private uint v;
         public u32() { }
@@ -207,7 +207,7 @@ namespace XyLang.Library
                     v = Convert.ToUInt32(o);
                     break;
 
-                case iXyValue i:
+                case iXsValue i:
                     v = i.toU32();
                     break;
                 default:
@@ -268,7 +268,7 @@ namespace XyLang.Library
     }
 
     [JsonConverter(typeof(u64Converter))]
-    public class u64 : iXyValue
+    public class u64 : iXsValue
     {
         private ulong v;
         public u64() { }
@@ -295,7 +295,7 @@ namespace XyLang.Library
                     v = Convert.ToUInt64(o);
                     break;
 
-                case iXyValue i:
+                case iXsValue i:
                     v = i.toU64();
                     break;
                 default:

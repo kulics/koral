@@ -1,9 +1,9 @@
 ﻿using Newtonsoft.Json;
 using System;
 
-namespace XyLang.Library
+namespace Xs.Library
 {
-    public class f32 : iXyValue
+    public class f32 : iXsValue
     {
         private float v;
         public f32() { }
@@ -30,7 +30,7 @@ namespace XyLang.Library
                     v = Convert.ToSingle(o);
                     break;
 
-                case iXyValue i:
+                case iXsValue i:
                     v = i.toF32();
                     break;
                 default:
@@ -81,7 +81,7 @@ namespace XyLang.Library
         public object toAny() => v;
     }
 
-    public class f64 : iXyValue
+    public class f64 : iXsValue
     {
         private double v;
         public f64() { }
@@ -108,7 +108,7 @@ namespace XyLang.Library
                     v = Convert.ToDouble(o);
                     break;
 
-                case iXyValue i:
+                case iXsValue i:
                     v = i.toF64();
                     break;
                 default:

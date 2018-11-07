@@ -2,9 +2,9 @@
 using System.Collections.Generic;
 using System.Linq;
 
-namespace XyLang.Library
+namespace Xs.Library
 {
-    public interface iXyValue 
+    public interface iXsValue 
     { 
         string ToString(string format);
         object toAny();
@@ -15,18 +15,18 @@ namespace XyLang.Library
         // object 
         public static str toStr(this object it) => it.ToString();
         // IXyValue
-        public static str toStr(this iXyValue it, str format) => it.ToString(format);
-        public static chr toChr(this iXyValue it) => new chr(it.toAny());
-        public static i8 toI8(this iXyValue it) => new i8(it.toAny());
-        public static i16 toI16(this iXyValue it) => new i16(it.toAny());
-        public static i32 toI32(this iXyValue it) => new i32(it.toAny());
-        public static i64 toI64(this iXyValue it) => new i64(it.toAny());
-        public static u8 toU8(this iXyValue it) => new u8(it.toAny());
-        public static u16 toU16(this iXyValue it) => new u16(it.toAny());
-        public static u32 toU32(this iXyValue it) => new u32(it.toAny());
-        public static u64 toU64(this iXyValue it) => new u64(it.toAny());
-        public static f32 toF32(this iXyValue it) => new f32(it.toAny());
-        public static f64 toF64(this iXyValue it) => new f64(it.toAny());
+        public static str toStr(this iXsValue it, str format) => it.ToString(format);
+        public static chr toChr(this iXsValue it) => new chr(it.toAny());
+        public static i8 toI8(this iXsValue it) => new i8(it.toAny());
+        public static i16 toI16(this iXsValue it) => new i16(it.toAny());
+        public static i32 toI32(this iXsValue it) => new i32(it.toAny());
+        public static i64 toI64(this iXsValue it) => new i64(it.toAny());
+        public static u8 toU8(this iXsValue it) => new u8(it.toAny());
+        public static u16 toU16(this iXsValue it) => new u16(it.toAny());
+        public static u32 toU32(this iXsValue it) => new u32(it.toAny());
+        public static u64 toU64(this iXsValue it) => new u64(it.toAny());
+        public static f32 toF32(this iXsValue it) => new f32(it.toAny());
+        public static f64 toF64(this iXsValue it) => new f64(it.toAny());
         // sbyte
         public static str toStr(this sbyte it, str format) => it.ToString(format);
         public static str toBase(this sbyte it, i32 fromBase) => Convert.ToString(it, fromBase);

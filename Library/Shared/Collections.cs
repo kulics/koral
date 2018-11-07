@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 
-namespace XyLang.Library
+namespace Xs.Library
 {
     public class lst<T> : List<T>
     {
