@@ -252,7 +252,7 @@ By combining layers after layer, you are free to assemble whatever you want to d
 Demo
 {
     System
-    XyLang\Library
+    Library
 }
 
 main ()

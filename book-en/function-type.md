@@ -214,7 +214,7 @@ each1To10.( (item:i32)->()
 Demo
 {
     System
-    XyLang\Library
+    Library
 }
 
 main ()

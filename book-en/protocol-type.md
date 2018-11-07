@@ -149,7 +149,7 @@ Note that if the type can not be converted correctly, it will return a `null` va
 Demo
 {
     System
-    XyLang\Library
+    Library
 }
 
 main ()

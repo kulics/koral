@@ -80,4 +80,4 @@ main ()
 }
 ```
 
-## [Complete Example](../example.xy)
+## [Complete Example](../example.xs)
