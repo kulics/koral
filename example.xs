@@ -1,6 +1,6 @@
 demo=run
 {
-    XyLang\Library
+    Xs\Library
     System
     System\IO
     System\Linq

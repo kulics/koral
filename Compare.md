@@ -1,7 +1,7 @@
 
 # Compare
 ## Hello World
-### XyLang
+### Xs
 ```
 cmd.print.("Hello, world!")
 ```
@@ -22,7 +22,7 @@ println("Hello, world!")
 print("Hello, world!")
 ```
 ## Variables And Constants
-### XyLang
+### Xs
 ```
 myVariable := 42
 myVariable = 50
@@ -53,7 +53,7 @@ myVariable = 50
 let myConstant = 42
 ```
 ## Explicit Types
-### XyLang
+### Xs
 ```
 explicitDouble: f64 = 70
 ```
@@ -74,7 +74,7 @@ val explicitDouble: Double = 70.0
 let explicitDouble: Double = 70
 ```
 ## Basic Types
-### XyLang
+### Xs
 ```
 i32 i16 i64 i8 
 f64 f32 
@@ -110,7 +110,7 @@ Bool
 String
 ```
 ## Type Coercion
-### XyLang
+### Xs
 ```
 f := 6.0
 i := 94
@@ -141,7 +141,7 @@ let i = 94
 let count = i + Int(f)
 ```
 ## Inclusive Range Operator
-### XyLang
+### Xs
 ```
 [ 1 <= 5 ].@
 {
@@ -174,7 +174,7 @@ for index in 1...5 {
 }
 ```
 ## Arrays
-### XyLang
+### Xs
 ```
 shoppingList := {"catfish", "water",
     "tulips", "blue paint"}
@@ -205,7 +205,7 @@ var shoppingList = ["catfish", "water",
 shoppingList[1] = "bottle of water"
 ```
 ## Maps
-### XyLang
+### Xs
 ```
 occupations := {
     "Malcolm"->"Captain",
@@ -246,7 +246,7 @@ var occupations = [
 occupations["Jayne"] = "Public Relations"
 ```
 ## Empty Collections
-### XyLang
+### Xs
 ```
 emptyArray := { :str}
 emptyDictionary := { :str->f32}
@@ -274,7 +274,7 @@ let emptyArray = [String]()
 let emptyDictionary = [String: Float]()
 ```
 ## Functions
-### XyLang
+### Xs
 ```
 greet (name, day: str)->(r: str) 
 {
@@ -312,7 +312,7 @@ func greet(_ name: String,_ day: String) -> String {
 greet("Bob", "Tuesday")
 ```
 ## Tuple Return
-### XyLang
+### Xs
 ```
 getGasPrices ()->(a, b, c: f64) 
 {
@@ -345,7 +345,7 @@ func getGasPrices() -> (Double, Double, Double) {
 }
 ```
 ## Function Type
-### XyLang
+### Xs
 ```
 makeIncrementer ()->(fn: (in: i32)->(out: i32)) 
 {
@@ -408,7 +408,7 @@ let increment = makeIncrementer()
 increment(7)
 ```
 ## Classes Declaration
-### XyLang
+### Xs
 ```
 Shape {}->
 {
@@ -460,7 +460,7 @@ class Shape {
 }
 ```
 ## Classes Usage
-### XyLang
+### Xs
 ```
 shape := Shape.{}
 shape.numberOfSides = 7
@@ -491,7 +491,7 @@ shape.numberOfSides = 7
 var shapeDescription = shape.simpleDescription()
 ```
 ## Subclass
-### XyLang
+### Xs
 ```
 NamedShape {..name: str}->
 {
@@ -671,7 +671,7 @@ test.area()
 test.simpleDescription()
 ```
 ## Checking Type
-### XyLang
+### Xs
 ```
 movieCount := 0
 songCount := 0
@@ -746,7 +746,7 @@ for item in library {
 }
 ```
 ## Pattern Matching
-### XyLang
+### Xs
 ```
 nb := 42
 nb.?  
@@ -803,7 +803,7 @@ switch nb {
 }
 ```
 ## Downcasting
-### XyLang
+### Xs
 ```
 someObjects.@ 
 {
@@ -852,7 +852,7 @@ for current in someObjects {
 }
 ```
 ## Protocol
-### XyLang
+### Xs
 ```
 Nameable ->
 {
@@ -907,7 +907,7 @@ func f(x: Nameable) {
 }
 ```
 ## Implement
-### XyLang
+### Xs
 ```
 Dog += Nameable
 {
