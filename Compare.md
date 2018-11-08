@@ -145,7 +145,7 @@ let count = i + Int(f)
 ```
 [ 1 <= 5 ].@
 {
-    cmd.print.("{it} times 5 is {it * 5}")
+    cmd.print.("{ea} times 5 is {ea * 5}")
 }
 ```
 ### C#
@@ -678,7 +678,7 @@ songCount := 0
 
 library.@ 
 {
-    it.?
+    ea.?
     :Movie 
     {
         movieCount += 1
