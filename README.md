@@ -21,28 +21,23 @@ Read detail from The [Book](./book-en/introduction.md).
 
 ## Quick Preview
 ```
-HelloWorld # export namespace
-{
+# export namespace
+HelloWorld {
     Library # import namespace
 }
-
-main () # main function  
-{
+# main function
+main () {
     # list
     greetings := {"Hello", "Hola", "Bonjour",
                 "Ciao", "こんにちは", "안녕하세요",
                 "Cześć", "Olá", "Здравствуйте",
                 "Chào bạn", "您好"}
-                
-    greetings.@ # for-each
-    {
+    # for-each  
+    greetings.@ {
         # match
-        ea.? [ 0 <= 8 ] 
-        {
+        ea.? [ 0 <= 8 ] {
             cmd.print.(ea) # call function
-        }
-        _
-        {
+        } _ {
             # lambda
             cmd.print.( greetings.filter.($it.count > 4) )
             <- @
