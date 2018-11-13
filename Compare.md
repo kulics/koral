@@ -143,8 +143,7 @@ let count = i + Int(f)
 ## Inclusive Range Operator
 ### Xs
 ```
-[ 1 <= 5 ].@
-{
+[ 1 <= 5 ].@ {
     cmd.print.("{ea} times 5 is {ea * 5}")
 }
 ```
@@ -276,8 +275,7 @@ let emptyDictionary = [String: Float]()
 ## Functions
 ### Xs
 ```
-greet (name, day: str)->(r: str) 
-{
+greet (name, day: str)->(r: str) {
     <- ("Hello {name}, today is {day}.")
 }
 greet.("Bob", "Tuesday")
@@ -314,8 +312,7 @@ greet("Bob", "Tuesday")
 ## Tuple Return
 ### Xs
 ```
-getGasPrices ()->(a, b, c: f64) 
-{
+getGasPrices ()->(a, b, c: f64) {
     <- (3.59, 3.69, 3.79)
 }
 ```
@@ -347,10 +344,8 @@ func getGasPrices() -> (Double, Double, Double) {
 ## Function Type
 ### Xs
 ```
-makeIncrementer ()->(fn: (in: i32)->(out: i32)) 
-{
-    addOne (number: i32)->(number: i32) 
-    {
+makeIncrementer ()->(fn: (in: i32)->(out: i32)) {
+    addOne (number: i32)->(number: i32) {
         <- (1 + number)
     }
     <- (addOne)
@@ -410,14 +405,11 @@ increment(7)
 ## Classes Declaration
 ### Xs
 ```
-Shape {}->
-{
+Shape {}-> {
     numberOfSides := 0
 }
-Shape +=
-{
-    simpleDescription ()->(s: str) 
-    {
+Shape += {
+    simpleDescription ()->(s: str) {
         <- ("A shape with {numberOfSides} sides.")
     }
 }
@@ -493,34 +485,26 @@ var shapeDescription = shape.simpleDescription()
 ## Subclass
 ### Xs
 ```
-NamedShape {..name: str}->
-{
+NamedShape {..name: str}-> {
     numberOfSides: i32 = 0
 }
-NamedShape +=
-{
-    simpleDescription ()->(s: str) 
-    {
+NamedShape += {
+    simpleDescription ()->(s: str) {
         <- ("A shape with {numberOfSides} sides.")
     }
 }
 
-Square {..sideLength: f64, name: str}-> NamedShape {name}
-{
-    .. 
-    {
+Square {..sideLength: f64, name: str}-> NamedShape {name} {
+    .. {
         ..numberOfSides = 4
     }
 }
-Square +=
-{
-    area ()->(f: f64) 
-    {
+Square += {
+    area ()->(f: f64) {
         <- (sideLength * sideLength)
     }
 
-    ..simpleDescription ()->(s: str) 
-    {
+    ..simpleDescription ()->(s: str) {
         <- ("A square with sides of length {sideLength}.")
     }
 }
@@ -676,15 +660,10 @@ test.simpleDescription()
 movieCount := 0
 songCount := 0
 
-library.@ 
-{
-    ea.?
-    :Movie 
-    {
+library.@ {
+    ea.? :Movie {
         movieCount += 1
-    }
-    :Song 
-    {
+    } :Song {
         songCount += 1
     }
 }
@@ -805,10 +784,8 @@ switch nb {
 ## Downcasting
 ### Xs
 ```
-someObjects.@ 
-{
-    ea.? movie:Movie
-    {
+someObjects.@ {
+    ea.? movie:Movie {
         print.("Movie: '{movie.name}', " +
             "dir. {movie.director}")
     }
@@ -854,13 +831,11 @@ for current in someObjects {
 ## Protocol
 ### Xs
 ```
-Nameable ->
-{
+Nameable -> {
     name ()->(s: str){}
 }
 
-f (x: Nameable)->() 
-{
+f (x: Nameable)->() {
     print.("Name is " + x.name.())
 }
 ```
@@ -909,18 +884,14 @@ func f(x: Nameable) {
 ## Implement
 ### Xs
 ```
-Dog += Nameable
-{
-    name ()->(n: str)
-    {
+Dog += Nameable {
+    name ()->(n: str) {
         <- ("Dog")
     }
 }
 
-Dog += Weight
-{
-    getWeight ()->(w: i32)
-    {
+Dog += Weight {
+    getWeight ()->(w: i32) {
         <- (30)
     }
 }
