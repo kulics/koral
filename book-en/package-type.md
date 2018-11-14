@@ -9,8 +9,7 @@ We can use the `id {}-> {}` statement to define a package that has nothing.
 
 E.g:
 ```
-package {}->
-{
+package {}-> {
 }
 ```
 Of course, we hope more is to be able to pack a few data, for example, a name, student number, class, grade attributes of students.
@@ -18,8 +17,7 @@ We can define these data in the same way we define normal identifiers.
 
 E.g:
 ```
-student {}->
-{
+student {}-> {
     name :str = ""
     number :str = ""
     class :i32 = 0
@@ -92,8 +90,7 @@ Of course, we can use the `{}` package directly, the same syntax as the collecti
 
 E.g:
 ```
-Peter := 
-{
+Peter := {
     name := "Peter"
     number := "060233"
     class := 2
@@ -111,8 +108,7 @@ We can define private properties to store properties that we do not want to be a
 
 E.g:
 ```
-student {}->
-{
+student {}-> {
     ...
     _girlFirend :str    # The identifier beginning with this '_' is private
 }
@@ -129,10 +125,8 @@ We need to use the extension statement `id += {}` to make the package add extens
 
 E.g:
 ```
-student += 
-{
-    getGirlFirend ()->(name:str)
-    {
+student += {
+    getGirlFirend ()->(name:str) {
         <- (.._girlFirend)
     }
 }
@@ -163,12 +157,10 @@ Add parameters at the time of definition, and write the definition of the constr
 
 E.g:
 ```
-student {name, number: str}->
-{
+student {name, number: str}-> {
     ...
 
-    ..
-    {
+    .. {
         ..name = name
         ..number = number
         # calculate the class
@@ -192,8 +184,7 @@ Of course, we can mark the constructor parameter `..`, and the compiler will aut
 E.g:
 ```
 # automatically generate the attributes name and number , which is equivalent to the previous example
-student {..name, ..number:str}->
-{
+student {..name, ..number:str}-> {
      ...
 }
 ```
@@ -214,8 +205,7 @@ Now let us play our imagination, we want a customized package for Chinese studen
 
 E.g:
 ```
-chineseStudent {}->
-{
+chineseStudent {}-> {
     name :str = ""
     number :str = ""
     class :i32 = 0
@@ -229,8 +219,7 @@ We need to use a combination of this feature, but not so complicated, just creat
 
 E.g:
 ```
-chineseStudent {}->
-{
+chineseStudent {}-> {
     student :student|null   # include student attributes in it
     kungfu :bl|null         # kung fu students
 }
@@ -249,40 +238,33 @@ By combining layers after layer, you are free to assemble whatever you want to d
 
 ## Example of this chapter
 ```
-Demo
-{
+Demo {
     System
     Library
 }
 
-main ()
-{
+main () {
     a := S.{ <- A=5,B=12}
     b := PKG.{"hello", 64, a}
     cmd.print.( b.Z.A )
     cmd.print.( b.Print.() )
 }
 
-S {}->
-{
+S {}-> {
     A := 0
     B := 0
 }
 
-PKG {x:str, ..Y:i32, ..Z:S}->
-{
+PKG {x:str, ..Y:i32, ..Z:S}-> {
     X := ""
     
-    ..
-    {
+    .. {
         X = x
     }
 }
 
-PKG +=
-{
-    Print ()->(a:str)
-    {
+PKG += {
+    Print ()->(a:str) {
         <- ( "X {Y}" )
     }
 }

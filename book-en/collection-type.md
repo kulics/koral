@@ -109,14 +109,12 @@ length := dictionary.count     # length
 
 ## Example of this chapter
 ```
-Demo
-{
+Demo {
     System
     Library
 }
 
-main ()
-{
+main () {
     list1 := {1,2,3,4,5}
     list1 += 6
     list2 :[]i8 = {1,2,1,2 :i8}

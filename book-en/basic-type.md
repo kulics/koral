@@ -163,14 +163,12 @@ More details on generics can be found in the generic section.
 
 ## Example of this chapter
 ```
-Demo
-{
+Demo {
     System
     Library
 }
 
-main ()
-{
+main () {
     a := 123
     b := a.toI64.()
     c := 123.456

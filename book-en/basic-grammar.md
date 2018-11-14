@@ -33,8 +33,7 @@ We can use the `id` statement in the `{}` of the export statement to import othe
 
 E.g:
 ```
-Demo 
-{
+Demo {
     System
     Library
 }
@@ -52,14 +51,12 @@ We need to define a main entry to let the program know where to start. The main 
 
 E.g:
 ```
-Demo 
-{
+Demo {
     System
     Library
 }
 
-main ()
-{
+main () {
 }
 ```
 The main entry function here is defined at the top of the namespace and is a function with no arguments and no return value. It is automatically recognized as the main entry and the main entry function is executed when the program is started, so we simply write the function main entry function can be.
@@ -175,8 +172,7 @@ E.g:
 a.b.(x,y).c.(fn:()->(x:i32){<-(2+1)}).d=1+3*5/4
 
 a.b.(x, y)
-.c.(fn: ()->(x: i32)
-{
+.c.(fn: ()->(x: i32) {
     <- (2 + 1)
 }).d = 1 + 3 * 5 / 4
 ```
@@ -184,14 +180,12 @@ a.b.(x, y)
 
 ## Example of this chapter
 ```
-Demo
-{
+Demo {
     System
     Library
 }
 
-main ()
-{
+main () {
     a : i32
     a = 5
     b := 6

@@ -5,8 +5,7 @@ We only need to use the `? value {}` to declare the judgment statement, accordin
 
 E.g:
 ```
-? true
-{
+? true {
     cmd.print.("true")  # true
 }
 ```
@@ -17,12 +16,9 @@ If we also need to handle `false` at the same time, then we can use the auxiliar
 E.g:
 ```
 b := false
-? b
-{
+? b {
     ... # since b is false, it will never enter this branch
-}
-?
-{
+} ? {
     ... # handle false
 }
 ```
@@ -32,16 +28,11 @@ We can also insert more judgments in the middle, and the language will automatic
 E.g:
 ```
 i := 3
-? i == 0
-{
+? i == 0 {
     ...
-}
-? i == 1
-{
+} ? i == 1 {
     ...
-}
-? i == 2
-{
+} ? i == 2 {
     ...
 }
 ```
@@ -50,12 +41,10 @@ If we have a special interrupt, we can add a clear `;` to the place where it is 
 
 E.g:
 ```
-? i == 0
-{
+? i == 0 {
      ...
 };
-? i == 1
-{
+? i == 1 {
      ...
 }
 ```
@@ -66,12 +55,9 @@ If we need to judge an identifier, we can use the `id.?{}` statement, the statem
 
 E.g:
 ```
-i.? 1
-{
+i.? 1 {
     ...
-}
-2
-{
+} 2 {
     ...
 }
 ```
@@ -84,16 +70,11 @@ What if you need a default condition to execute logic? We can use an anonymous i
 
 E.g:
 ```
-i.? 1
-{
+i.? 1 {
     ...
-}
-2
-{
+} 2 {
     ...
-}
-_
-{
+} _ {
     ...
 }
 ```
@@ -107,17 +88,11 @@ You can use the `value.?id:type{}` syntax to match types, `id` can be omitted, a
 
 E.g:
 ```
-x.?
-:i32 # When i32
-{
+x.? :i32 {          # When i32
      cmd.print.(it)
-}
-content:str # when str
-{
+} content:str {     # when str
      cmd.print.(content)
-}
-null # When it is null
-{
+} null {            # When it is null
      cmd.print.("null")
 }
 ```
@@ -133,30 +108,21 @@ E.g:
 
 ## Example of this chapter
 ```
-Demo
-{
+Demo {
     System
     Library
 }
 
-main ()
-{
+main () {
     a := 5
-    ? a == 2
-    { cmd.print.(2) }
-    ? a == 4
-    { cmd.print.(4) }
-    ?
-    { cmd.print.("not find") }
+    ? a == 2 { cmd.print.(2) }
+    ? a == 4 { cmd.print.(4) }
+    ? { cmd.print.("not find") }
 
     b := 7
-    b.?
-    5
-    { cmd.print.(5) }
-    7
-    { cmd.print.(7) }
-    _
-    { cmd.print.("not find") }
+    b.? 5 { cmd.print.(5) }
+    7 { cmd.print.(7) }
+    _ { cmd.print.("not find") }
 
     cmd.print.( ?.(b) )
     cmd.print.( ?.(:i32) )
