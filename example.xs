@@ -148,6 +148,9 @@ testIf ()->() {
     } _ {
         cmd.print.("else")
     }
+    ? x == 5 {
+        cmd.print.("yes")
+    }
 }
 
 testArray ()->() {
