@@ -172,16 +172,10 @@ namespace Compiler
         public override object VisitJudgeStatement([NotNull] JudgeStatementContext context)
         {
             var obj = "";
-            for (int i = 0; i < context.judgeBaseStatement().Length; i++)
+            obj += Visit(context.judgeIfStatement());
+            foreach (var it in context.judgeElseIfStatement())
             {
-                if (i == 0)
-                {
-                    obj += Visit(context.judgeBaseStatement(i));
-                }
-                else
-                {
-                    obj += "else " + Visit(context.judgeBaseStatement(i));
-                }
+                obj += Visit(it);
             }
             if (context.judgeElseStatement() != null)
             {
@@ -190,10 +184,19 @@ namespace Compiler
             return obj;
         }
 
-        public override object VisitJudgeBaseStatement([NotNull] JudgeBaseStatementContext context)
+        public override object VisitJudgeIfStatement([NotNull] JudgeIfStatementContext context)
         {
             var b = (Result)Visit(context.expression());
             var obj = $"if ( {b.text} ) {Wrap} {BlockLeft} {Wrap}";
+            obj += ProcessFunctionSupport(context.functionSupportStatement());
+            obj += $"{BlockRight} {Wrap}";
+            return obj;
+        }
+
+        public override object VisitJudgeElseIfStatement([NotNull] JudgeElseIfStatementContext context)
+        {
+            var b = (Result)Visit(context.expression());
+            var obj = $"else if ( {b.text} ) {Wrap} {BlockLeft} {Wrap}";
             obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += $"{BlockRight} {Wrap}";
             return obj;

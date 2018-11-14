@@ -143,9 +143,9 @@ testIf ()->() {
     x := 5
     ? x == 2 {
         cmd.print.(2)
-    } ? x == 3 {
+    } x == 3 {
         cmd.print.(3)
-    } ? {
+    } _ {
         cmd.print.("else")
     }
 }
