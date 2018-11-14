@@ -11,14 +11,15 @@ E.g:
 ```
 # Boolean Judgment
 When the judgment value is only `bl`, the statement is executed only if it is `true`. 
-If we also need to handle `false` at the same time, then we can use the auxiliary notation `? value {}` to continue declare another statement.
+If we need to deal with other situations at the same time, we can continue to declare another processing statement after using `value {}`.
+If you only need `false`, use `_ {}` to declare it.
 
 E.g:
 ```
 b := false
 ? b {
     ... # since b is false, it will never enter this branch
-} ? {
+} _ {
     ... # handle false
 }
 ```
@@ -30,22 +31,10 @@ E.g:
 i := 3
 ? i == 0 {
     ...
-} ? i == 1 {
+} i == 1 {
     ...
-} ? i == 2 {
+} i == 2 {
     ...
-}
-```
-
-If we have a special interrupt, we can add a clear `;` to the place where it is needed.
-
-E.g:
-```
-? i == 0 {
-     ...
-};
-? i == 1 {
-     ...
 }
 ```
 
@@ -115,14 +104,22 @@ Demo {
 
 main () {
     a := 5
-    ? a == 2 { cmd.print.(2) }
-    ? a == 4 { cmd.print.(4) }
-    ? { cmd.print.("not find") }
+    ? a == 2 { 
+        cmd.print.(2) 
+    } a == 4 { 
+        cmd.print.(4) 
+    } _ { 
+        cmd.print.("not find") 
+    }
 
     b := 7
-    b.? 5 { cmd.print.(5) }
-    7 { cmd.print.(7) }
-    _ { cmd.print.("not find") }
+    b.? 5 { 
+        cmd.print.(5) 
+    } 7 { 
+        cmd.print.(7) 
+    } _ { 
+        cmd.print.("not find") 
+    }
 
     cmd.print.( ?.(b) )
     cmd.print.( ?.(:i32) )
