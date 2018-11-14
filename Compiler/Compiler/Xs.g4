@@ -142,11 +142,15 @@ caseExprStatement: (expression| (id)? ':' type) BlockLeft (functionSupportStatem
 // 判断条件声明
 caseStatement: caseDefaultStatement|caseExprStatement;
 // 判断
-judgeStatement:(judgeBaseStatement)+ (judgeElseStatement)? Terminate?;
-// 判断基础
-judgeBaseStatement:Judge expression BlockLeft (functionSupportStatement)* BlockRight;
+judgeStatement:
+judgeIfStatement (judgeElseIfStatement)* judgeElseStatement Terminate?
+| judgeIfStatement (judgeElseIfStatement)* Terminate?;
 // else 判断
-judgeElseStatement:Judge BlockLeft (functionSupportStatement)* BlockRight;
+judgeElseStatement:Discard BlockLeft (functionSupportStatement)* BlockRight;
+// if 判断
+judgeIfStatement:Judge expression BlockLeft (functionSupportStatement)* BlockRight;
+// else if 判断
+judgeElseIfStatement: expression BlockLeft (functionSupportStatement)* BlockRight;
 // 循环
 loopStatement:iteratorStatement call Loop (id)? BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 集合循环
