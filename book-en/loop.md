@@ -8,8 +8,7 @@ If we happen to have a collection that can be an array, a dictionary, or a piece
 E.g:
 ```
 arr := {1, 2, 3, 4, 5}
-arr.@ item
-{
+arr.@ item {
     cmd.print.(item)     # print each number
 }
 ```
@@ -18,8 +17,7 @@ If we don't want to define additional identifiers, we can omit them. The default
 
 E.g:
 ```
-Arr.@
-{
+Arr.@ {
      cmd.print.(ea)     # print each number
 }
 ```
@@ -28,8 +26,7 @@ If we need to fetch the index and value at the same time, we can replace `id` wi
 
 E.g:
 ```
-arr.@ i -> v
-{
+arr.@ i -> v {
      cmd.print.("{i}:{v}")
 }
 ```
@@ -42,8 +39,7 @@ Iterators can loop from the start point to the end point, we use the collection 
 
 E.g:
 ```
-[0 <= 100].@
-{
+[0 <= 100].@ {
     cmd.print.(ea)      # print each number
 }
 ```
@@ -55,8 +51,7 @@ By default, iterators add `1` to each interval. If we need to take every other n
 
 E.g:
 ```
-[0 <= 100; 2].@
-{
+[0 <= 100; 2].@ {
     ...
 }
 ```
@@ -66,8 +61,7 @@ We can also reverse it in reverse order, as long as we use `>=`.
 
 E.g:
 ```
-[100 >= 0].@
-{
+[100 >= 0].@ {
      ...    # from 100 to 0
 }
 ```
@@ -79,8 +73,7 @@ At other times, we may need an infinite loop. Very easy, we only need to use the
 
 E.g:
 ```
-@
-{
+@ {
     ... # never jump out
 }
 ```
@@ -90,8 +83,7 @@ So how to jump out of infinite loop? We can use the `<- @` statement to jump out
 
 E.g:
 ```
-@
-{
+@ {
     <- @  # jump out
 }
 ```
@@ -105,8 +97,7 @@ Add a condition to it.
 E.g:
 ```
 i := 0
-@ i < 6
-{
+@ i < 6 {
      i += 1
 }
 ```
@@ -117,33 +108,27 @@ If you only need to jump out of the current loop, use the `-> @` statement.
 
 ## Example of this chapter
 ```
-Demo
-{
+Demo {
     System
     Library
 }
 
-main ()
-{
+main () {
     arr := {1,2,3,4,5}
-    arr.@ 
-    {
+    arr.@ {
         cmd.print.(ea)
     }
 
-    [1 <= 50].@ i
-    {
+    [1 <= 50].@ i {
         cmd.print.(i)
     }
 
-    [100 >= 0; 2].@ i
-    {
+    [100 >= 0; 2].@ i {
         cmd.print.(i)
     }
 
     x := 0
-    @ x <= 10
-    {
+    @ x <= 10 {
         x += 1
     }
 }

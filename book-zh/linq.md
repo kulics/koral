@@ -17,8 +17,7 @@
 
 例如：
 ```
-linq ()->()
-{
+linq ()->() {
     numbers := { 0, 1, 2, 3, 4, 5, 6 }
     arr := from num in numbers
             where (num % 2) == 0

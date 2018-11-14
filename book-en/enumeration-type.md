@@ -14,16 +14,11 @@ In this way, we don't need to care about their values when we use them, and we c
 E.g:
 ```
 c := randomColor.()     # Get a random color
-c.? Color.Red
-{
+c.? Color.Red {
      ...
-}
-Color.Green
-{
+} Color.Green {
      ...
-}
-Color.Blue
-{
+} Color.Blue {
      ...
 }
 ```
@@ -34,8 +29,7 @@ If necessary, we can also assign a value to a single identifier. If not specifie
 
 E.g:
 ```
-Number 
-[
+Number [
     a = 1,    # 1
     b,        # 2
     c = 1,    # 1
@@ -47,14 +41,12 @@ Number
 
 ## Example of this chapter
 ```
-Demo
-{
+Demo {
     System
     Library
 }
 
-main ()
-{
+main () {
     cmd.print.( A.Z )
     cmd.print.( B.Z )
 }

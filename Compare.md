@@ -926,30 +926,24 @@ func (p *Dog) GetWeight() int {
 ```
 ### Kotlin
 ```
-class Dog: Nameable, Weight
-{
-    override fun name(): String
-    {
+class Dog: Nameable, Weight {
+    override fun name(): String {
         return "Dog"
     }
 
-    override fun getWeight(): Int
-    {
+    override fun getWeight(): Int {
         return 30
     }
 }
 ```
 ### Swift
 ```
-class Dog: Nameable, Weight
-{
-    func name() -> String
-    {
+class Dog: Nameable, Weight {
+    func name() -> String {
         return "Dog"
     }
 
-    func getWeight() -> Int
-    {
+    func getWeight() -> Int {
         return 30
     }
 }

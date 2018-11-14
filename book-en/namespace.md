@@ -10,8 +10,7 @@ E.g:
 ```
 name\space{}
 
-getSomething ()->(content:str)
-{
+getSomething ()->(content:str) {
     <- ("something")
 }
 ```
@@ -25,8 +24,7 @@ E.g:
 ```
 run { name\space }
 
-main ()
-{
+main () {
     # print something
     cmd.print.( Demo.getSomething.() )
 }
@@ -38,8 +36,7 @@ E.g:
 ```
 name\space=helper {}
 
-getSomething ()->(content:str)
-{
+getSomething ()->(content:str) {
     <- ("something")
 }
 
@@ -47,8 +44,7 @@ getSomething ()->(content:str)
 
 run{ name\space }
 
-main ()
-{
+main () {
     cmd.print.( helper.getSomething.() )
 }
 ```
@@ -59,8 +55,7 @@ E.g:
 ```
 run{ name\space.Demo }
 
-main ()
-{
+main () {
     # print something
     cmd.print.( getSomething.() )
 }
@@ -73,8 +68,7 @@ E.g:
 ```
 demo {}
 
-main ()
-{
+main () {
     # use it directly
     cmd.print.( \name\space.Demo.getSomething.() )    
 }

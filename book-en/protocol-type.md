@@ -10,8 +10,7 @@ We only need to use the symbol `id -> {}` to define a protocol.
 
 E.g:
 ```
-protocol ->
-{
+protocol -> {
 }
 ```
 This is an empty protocol.
@@ -20,8 +19,7 @@ Next, let's design a difficult task that students need to accomplish ... homewor
 
 E.g:
 ```
-homeWork ->
-{
+homeWork -> {
     count :i32
     do ()->(){}
 }
@@ -38,12 +36,10 @@ Similar to the extension function, we can implement this protocol by using the `
 
 E.g:
 ```
-student += homeWork
-{
+student += homeWork {
     count :i32
 
-    do ()->()
-    {
+    do ()->() {
         SpendTime.(1)            # spent an hour
         ..homeWork.count -= 1   # completed one
     }
@@ -97,8 +93,7 @@ More efficient approach is to write this function into the function, let the fun
 
 E.g:
 ```
-doHomeWork (student: homeWork)->()
-{
+doHomeWork (student: homeWork)->() {
     student.do.()
 }
 # Now we can make it easier for every student to do their homework
@@ -113,8 +108,7 @@ E.g:
 Arr := []homeWork.{}
 Arr.add.( StudentA.homeWork )
 ... # stuffed many, many students
-Arr.@
-{
+Arr.@ {
     doHomeWork.(ea)
 }
 ```
@@ -130,11 +124,9 @@ We can use `value.?:type` To judge the type of data, using `value.?=type` To con
 
 E.g:
 ```
-func (hw :homeWork)->()
-{
+func (hw :homeWork)->() {
     # judge type
-    ? hw.?:chineseStudent 
-    {
+    ? hw.?:chineseStudent {
         # convert to chinese student data
         cs := hw.?=chineseStudent
     }
@@ -146,44 +138,36 @@ Note that if the type can not be converted correctly, it will return a `null` va
 
 ## Example of this chapter
 ```
-Demo
-{
+Demo {
     System
     Library
 }
 
-main ()
-{
+main () {
     S := B.{}
     B.A.do.()
     C.( B.A )
 }
 
-A ->
-{
+A -> {
     X : i32
     do ()->() {}
 }
 
-B {}->
-{
+B {}-> {
     Y := 5
 }
 
-B += A
-{
+B += A {
     X := 0
-    do ()->() 
-    {
+    do ()->() {
         ..A.X += 1
     }
 }
 
-C (a:A)->()
-{
+C (a:A)->() {
     a.do.()
-    ? a.?:B 
-    {
+    ? a.?:B {
         cmd.print.( a.?=B.Y )
     }
 }

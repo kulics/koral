@@ -12,10 +12,8 @@ We can declare an exception data using `!.()` Anywhere in the function.
 
 E.g:
 ```
-readFile (name: str)->()
-{
-    ? name.Length == 0
-    {
+readFile (name: str)->() {
+    ? name.Length == 0 {
         !.( Exception.{"something wrong"} )
     }
     ...
@@ -29,8 +27,7 @@ We can use the `.! id:type {}` statement to check for exceptions when using assi
 
 E.g:
 ```
-f: file = readFile.("temp.txt").! e: Exception
-{
+f: file = readFile.("temp.txt").! e: Exception {
     cmd.print.(e.message)
 }
 ```
@@ -73,8 +70,7 @@ We can use fragment statements to optimize this content, using `id () -> {}` to 
 
 E.g:
 ```
-checkError (e:Exception) ->
-{
+checkError (e:Exception) -> {
     Log.(e.msg)
     !.(e)
 }
@@ -98,8 +94,7 @@ Fragment statements can greatly reduce the amount of rewritten code, making our 
 E.g:
 ```
 a := 0
-Handle () ->
-{
+Handle () -> {
     a *= a
     cmd.print.(a)
 }
@@ -118,11 +113,9 @@ Quite simply, using `! {}` can declare a statement that checks the delay.
 
 E.g:
 ```
-Func ()->()
-{
+Func ()->() {
     File := readFile.("./somecode.xy")
-    !
-    {
+    ! {
         file.release.()
     }
     ...
@@ -137,8 +130,7 @@ Note that because the check defer is performed before the function exits and the
 E.g:
 ```
 ...
-!
-{
+! {
     file.release.()
     <- ()    # error, cannot use return statement
 }
@@ -161,11 +153,9 @@ The effective scope of the check delay is only the current one-level statement b
 
 E.g:
 ```
-Func ()->()
-{
+Func ()->() {
     ...
-    [0<=5].@
-    {
+    [0<=5].@ {
         # does not affect the logic outside the loop
         ! { cmd.print.(ea + 1) }
         cmd.print.(ea)
@@ -187,36 +177,29 @@ Res != fileResource.{ "/test.xy"}
 
 ## Example of this chapter
 ```
-Demo
-{
+Demo {
     System
     Library
 }
 
-main ()
-{
-    x: i32 = (1 * 1).! e 
-    {
+main () {
+    x: i32 = (1 * 1).! e {
         !.(e)
     }
 
     x != Defer.{}
-    !
-    {
+    ! {
         x.content = "defer"
         cmd.print.(x.content)
     }
 }
 
-Defer {} ->
-{
+Defer {} -> {
     content :str
 }
 
-Defer += IDisposable
-{
-    Dispose ()->()
-    {
+Defer += IDisposable {
+    Dispose ()->() {
         ..content = null
     }
 }

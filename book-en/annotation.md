@@ -18,8 +18,7 @@ Let's take a look at the database data for how to use annotations.
 E.g:
 ```
 `Table.{"test"}`
-annotation {}->
-{
+annotation {}-> {
         `Key,Column.{"id"}`
         id :str = ""
         `Column.{"name"}`

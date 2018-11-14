@@ -17,10 +17,8 @@ If we want to set a get operation, we can add `{ ctrl{} }` later to define.
 
 E.g:
 ```
-Number :i32
-{
-    get    # means get, equivalent to getter in other languages
-    {
+Number :i32 {
+    get {   # means get, equivalent to getter in other languages
         <- (7)  # only returns 7
     }
 }
@@ -33,11 +31,9 @@ With the above example, we naturally can think of how to deal with set operation
 
 E.g:
 ```
-Number :i32
-{
+Number :i32 {
     ...
-    set    # means set, equivalent to setter in other languages
-    {
+    set {   # means set, equivalent to setter in other languages
         # ? ? ? Who should give the value? ? ?
     }
 }
@@ -49,11 +45,9 @@ E.g:
 ```
 _number := 0
 
-Number :i32
-{
+Number :i32 {
     ...
-    set
-    {
+    set {
         _number = value  # value represents the value of the input
     }
 }
@@ -65,14 +59,11 @@ A complete example of reading and writing is as follows:
 ```
 _number := 0
 
-Number :i32
-{
-    get
-    {
+Number :i32 {
+    get {
         <- (_number)
     }
-    set
-    {
+    set {
         _number = value  # value represents the value of the input
     }
 }
@@ -86,28 +77,24 @@ Most of the time, we can use only simple definitions to complete the task, becau
 
 ## Example of this chapter
 ```
-Demo
-{
+Demo {
     System
     Library
 }
 
-main ()
-{
+main () {
     cmd.print.(a)
     c = 5
     cmd.print.(b)
     cmd.print.(c)
 }
 
-a : i32
-{
+a : i32 {
     get { <- (3) }
 }
 
 b := 0
-c : i32
-{
+c : i32 {
     get { <- (b) }
     set { b = value }
 }

@@ -13,8 +13,7 @@ We only need to use `id ()->() {}` to define a function, the first parenthesis i
 
 E.g:
 ```
-function ()->()
-{
+function ()->() {
     ...
 }
 ```
@@ -35,8 +34,7 @@ Very simple, we only need to use `id:type` declare the parameters.
 
 E.g:
 ```
-func (x:i32)->(y:i32)
-{
+func (x:i32)->(y:i32) {
     <- (x * 2)
 }
 ```
@@ -50,8 +48,7 @@ If we need several consecutive parameters of the same type, we can simply write 
 
 E.g:
 ```
-func (a, b, c:i32, d:str)->(a:str, b, c, d:i32)
-{
+func (a, b, c:i32, d:str)->(a:str, b, c, d:i32) {
     <- (d, a, b, c)
 }
 ```
@@ -97,8 +94,7 @@ Similar to in parameters, out parameters also need to be clearly defined with an
 
 E.g:
 ```
-topSell ()->(name: str, count: i32)
-{
+topSell ()->(name: str, count: i32) {
     ...
     <- ("cola", many)
 }
@@ -150,10 +146,8 @@ Function In Parameter no special definition of way, just replace the type of the
 
 E.g:
 ```
-each1To10 (func: (item: i32)->() )->()
-{
-    [1<=10].@ 
-    {
+each1To10 (func: (item: i32)->() )->() {
+    [1<=10].@ {
         func.(ea)
     }
 }
@@ -164,8 +158,7 @@ So that we can pass the details of the processing to the externally passed `func
 
 E.g:
 ```
-print (item: i32)->()
-{
+print (item: i32)->() {
     cmd.print.(item)
 }
 
@@ -202,8 +195,7 @@ Unlike the above simplified method, we can also write a complete function direct
 
 E.g:
 ```
-each1To10.( (item:i32)->()
-{
+each1To10.( (item:i32)->() {
      cmd.print.(item)
 })
 ```
@@ -211,21 +203,18 @@ each1To10.( (item:i32)->()
 
 ## Example of this chapter
 ```
-Demo
-{
+Demo {
     System
     Library
 }
 
-main ()
-{
+main () {
     A.()
     B.(1,2,3)
     x := C.()
     D.( $-> cmd.print.("D") )
     E.( $cmd.print.(it) )
-    E.( (a:i32)->()
-    {
+    E.( (a:i32)->() {
         cmd.print.(it)
     })
 }
@@ -234,18 +223,15 @@ A ()->(){}
 
 B (a,b,c :i32)->(){}
 
-C ()->(a:i32)
-{
+C ()->(a:i32) {
     <- (1024)
 }
 
-D (fn: ()->() )->()
-{
+D (fn: ()->() )->() {
     fn.()
 }
 
-E (fn: (a:i32)->() )->()
-{
+E (fn: (a:i32)->() )->() {
     [1<=20].@
     {
         fn.(ea)
