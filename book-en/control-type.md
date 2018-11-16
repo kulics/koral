@@ -82,7 +82,7 @@ Demo {
     Library
 }
 
-main () {
+Main ()->() {
     cmd.print.(a)
     c = 5
     cmd.print.(b)

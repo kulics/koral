@@ -24,7 +24,7 @@ E.g:
 ```
 run { name\space }
 
-main () {
+Main ()->() {
     # print something
     cmd.print.( Demo.getSomething.() )
 }
@@ -44,7 +44,7 @@ getSomething ()->(content:str) {
 
 run{ name\space }
 
-main () {
+Main ()->() {
     cmd.print.( helper.getSomething.() )
 }
 ```
@@ -55,7 +55,7 @@ E.g:
 ```
 run{ name\space.Demo }
 
-main () {
+Main ()->() {
     # print something
     cmd.print.( getSomething.() )
 }
@@ -68,7 +68,7 @@ E.g:
 ```
 demo {}
 
-main () {
+Main ()->() {
     # use it directly
     cmd.print.( \name\space.Demo.getSomething.() )    
 }

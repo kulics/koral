@@ -46,7 +46,7 @@ Demo {
     Library
 }
 
-main () {
+Main ()->() {
     cmd.print.( A.Z )
     cmd.print.( B.Z )
 }

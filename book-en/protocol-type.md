@@ -143,7 +143,7 @@ Demo {
     Library
 }
 
-main () {
+Main ()->() {
     S := B.{}
     B.A.do.()
     C.( B.A )

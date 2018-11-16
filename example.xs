@@ -8,7 +8,7 @@ demo=run {
 }
 
 # main function
-main () {
+Main ()~>() {
     cmd.print.("main function")
     # run test
     testSharpType.()

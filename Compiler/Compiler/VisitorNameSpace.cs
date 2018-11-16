@@ -23,7 +23,6 @@ namespace Compiler
             {
                 switch (item.GetChild(0))
                 {
-                    case FunctionMainStatementContext _:
                     case NamespaceFunctionStatementContext _:
                     case NamespaceVariableStatementContext _:
                     case NamespaceInvariableStatementContext _:
@@ -187,15 +186,6 @@ namespace Compiler
                 id.text += " = " + op + context.Integer().GetText();
             }
             return id.text + ",";
-        }
-
-        public override object VisitFunctionMainStatement([NotNull] FunctionMainStatementContext context)
-        {
-            var obj = "";
-            obj += $"static async {Task} Main(string[] args) {Wrap + BlockLeft + Wrap} " +
-                $"{ProcessFunctionSupport(context.functionSupportStatement())}" +
-                $"{BlockRight + Wrap}";
-            return obj;
         }
 
         public override object VisitNamespaceFunctionStatement([NotNull] NamespaceFunctionStatementContext context)

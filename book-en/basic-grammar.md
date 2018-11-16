@@ -47,7 +47,8 @@ You can write multiple import statements that their order does not affect the im
 For more details on namespaces, please see [Namespace](namespace.md)
 
 ## Main Entry
-We need to define a main entry to let the program know where to start. The main entry is declared with a fixed statement `main () {}` and must be valid at the top level of the namespace.
+We need to define a main entry to let the program know where to start. The main entry is declared with a function `Main ()->() {}` and must be valid at the top level of the namespace.  
+Depending on the target platform, the main entry may be declared differently, and the main function of C# is used here by default.
 
 E.g:
 ```
@@ -56,7 +57,7 @@ Demo {
     Library
 }
 
-main () {
+Main ()->() {
 }
 ```
 The main entry function here is defined at the top of the namespace and is a function with no arguments and no return value. It is automatically recognized as the main entry and the main entry function is executed when the program is started, so we simply write the function main entry function can be.
@@ -185,7 +186,7 @@ Demo {
     Library
 }
 
-main () {
+Main ()->() {
     a : i32
     a = 5
     b := 6

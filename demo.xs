@@ -3,7 +3,7 @@ demo {
     Library
 }
 
-main () {
+Main ()->() {
     n0 := node.{0}
     n1 := node.{1}
     n2 := node.{2}

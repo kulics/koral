@@ -182,7 +182,7 @@ Demo {
     Library
 }
 
-main () {
+Main ()->() {
     x: i32 = (1 * 1).! e {
         !.(e)
     }
