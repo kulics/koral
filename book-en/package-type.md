@@ -243,7 +243,7 @@ Demo {
     Library
 }
 
-main () {
+Main ()->() {
     a := S.{ <- A=5,B=12}
     b := PKG.{"hello", 64, a}
     cmd.print.( b.Z.A )

@@ -102,7 +102,7 @@ Demo {
     Library
 }
 
-main () {
+Main ()->() {
     a := 5
     ? a == 2 { 
         cmd.print.(2) 

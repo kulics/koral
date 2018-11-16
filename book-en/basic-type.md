@@ -168,7 +168,7 @@ Demo {
     Library
 }
 
-main () {
+Main ()->() {
     a := 123
     b := a.toI64.()
     c := 123.456

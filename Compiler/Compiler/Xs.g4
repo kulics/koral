@@ -11,8 +11,7 @@ exportStatement: nameSpace ('=' id)? BlockLeft (importStatement)* BlockRight Ter
 importStatement: (annotation)? nameSpace (call id)? Terminate?;
 
 namespaceSupportStatement:
-functionMainStatement
-|namespaceFunctionStatement
+namespaceFunctionStatement
 |namespaceVariableStatement
 |namespaceInvariableStatement
 |namespaceConstantStatement
@@ -28,8 +27,6 @@ enumStatement: (annotation)? id '[' enumSupportStatement (',' enumSupportStateme
 
 enumSupportStatement: id ('=' (add)? Integer)?;
 
-// 主函数
-functionMainStatement:'main' parameterClauseIn BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 命名空间变量
 namespaceVariableStatement:(annotation)? expression (Define expression|Declared type (Assign expression)?) (BlockLeft (namespaceControlSubStatement)* BlockRight)? Terminate?;
 // 命名空间不变量

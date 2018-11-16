@@ -26,7 +26,7 @@ HelloWorld {
     Library # import namespace
 }
 # main function
-main () {
+Main ()->() {
     # list
     greetings := {"Hello", "Hola", "Bonjour",
                 "Ciao", "こんにちは", "안녕하세요",
