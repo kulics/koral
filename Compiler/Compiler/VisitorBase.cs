@@ -36,25 +36,25 @@ namespace Compiler
 
         private const string Any = "object";
 
-        private const string i8 = "i8";
-        private const string i16 = "i16";
-        private const string i32 = "i32";
-        private const string i64 = "i64";
+        private const string i8 = "System.SByte";
+        private const string i16 = "System.Int16";
+        private const string i32 = "System.Int32";
+        private const string i64 = "System.Int64";
 
-        private const string u8 = "u8";
-        private const string u16 = "u16";
-        private const string u32 = "u32";
-        private const string u64 = "u64";
+        private const string u8 = "System.Byte";
+        private const string u16 = "System.UInt16";
+        private const string u32 = "System.UInt32";
+        private const string u64 = "System.UInt64";
 
-        private const string f32 = "f32";
-        private const string f64 = "f64";
-
-        private const string bl = "bl";
+        private const string f32 = "System.Single";
+        private const string f64 = "System.Double";
+        
+        private const string bl = "System.Boolean";
         private const string t = "true";
         private const string f = "false";
 
-        private const string chr = "chr";
-        private const string str = "str";
+        private const string chr = "System.Char";
+        private const string str = "System.String";
         private const string lst = "lst";
         private const string dic = "dic";
 

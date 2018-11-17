@@ -28,8 +28,8 @@ namespace Library
         public TaskStatus status => Status;
         public void start() => Start();
         public void start(TaskScheduler scheduler) => Start(scheduler);
-        public bool wait(i32 millisecondsTimeout) => Wait(millisecondsTimeout);
-        public bool wait(i32 millisecondsTimeout, CancellationToken cancellationToken) => Wait(millisecondsTimeout, cancellationToken);
+        public bool wait(int millisecondsTimeout) => Wait(millisecondsTimeout);
+        public bool wait(int millisecondsTimeout, CancellationToken cancellationToken) => Wait(millisecondsTimeout, cancellationToken);
         public void wait() => Wait();
     }
 
@@ -51,8 +51,8 @@ namespace Library
         public static Task<Task> whenAny(IEnumerable<Task> tasks) => Task.WhenAny(tasks);
         public static Task<Task> whenAny(params Task[] tasks) => Task.WhenAny(tasks);
 
-        public static Task delay(i32 millisecondsDelay) => Task.Delay(millisecondsDelay);
-        public static Task delay(i32 millisecondsDelay, CancellationToken cancellationToken) => Task.Delay(millisecondsDelay, cancellationToken);
+        public static Task delay(int millisecondsDelay) => Task.Delay(millisecondsDelay);
+        public static Task delay(int millisecondsDelay, CancellationToken cancellationToken) => Task.Delay(millisecondsDelay, cancellationToken);
     }
 
     public class tsk<TResult> : Task<TResult>
@@ -78,8 +78,8 @@ namespace Library
         public TaskStatus status => Status;
         public void start() => Start();
         public void start(TaskScheduler scheduler) => Start(scheduler);
-        public bool wait(i32 millisecondsTimeout) => Wait(millisecondsTimeout);
-        public bool wait(i32 millisecondsTimeout, CancellationToken cancellationToken) => Wait(millisecondsTimeout, cancellationToken);
+        public bool wait(int millisecondsTimeout) => Wait(millisecondsTimeout);
+        public bool wait(int millisecondsTimeout, CancellationToken cancellationToken) => Wait(millisecondsTimeout, cancellationToken);
         public void wait() => Wait();
     }
 }

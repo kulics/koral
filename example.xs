@@ -90,11 +90,11 @@ testOperator ()->() {
 }
 
 testString ()->() {
-    text := "love xy"
+    text := "love xs"
     txt : str = text
     txt.@ {
         ? ea == 'e' {
-            cmd.print.("love xy")
+            cmd.print.("love xs")
         }
     }
 }
