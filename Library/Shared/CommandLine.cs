@@ -14,7 +14,7 @@ namespace Library
             Console.WriteLine();
         }
 
-        public static str read() => Console.ReadLine();
+        public static string read() => Console.ReadLine();
 
         public static void clear() => Console.Clear();
     }

@@ -9,7 +9,7 @@ namespace Library
         public lst() { }
         public lst(T[] v) : base(v) { }
         public lst(IEnumerable<T> collection) : base(collection) { }
-        public lst(i32 capacity) : base(capacity) { }
+        public lst(int capacity) : base(capacity) { }
 
         public static lst<T> operator +(lst<T> L, T R)
         {
@@ -47,15 +47,15 @@ namespace Library
 
         public T first => notEmpty ? this[0] : default(T);
         public T last => notEmpty ? this[Count - 1] : default(T);
-        public i32 lastIndex => Count - 1;
+        public int lastIndex => Count - 1;
 
         public bool isEmpty => !notEmpty;
         public bool notEmpty => Count > 0;
 
-        public i32 count => Count;
-        public i32 capacity => Capacity;
+        public int count => Count;
+        public int capacity => Capacity;
 
-        public lst<T> subList(i32 startIndex, i32 endIndex) //=> GetRange(startIndex, count) as lst<T>;
+        public lst<T> subList(int startIndex, int endIndex) //=> GetRange(startIndex, count) as lst<T>;
         {
             var temp = new lst<T>();
             int currIndex = startIndex;
@@ -66,7 +66,7 @@ namespace Library
             }
             return temp;
         }
-        public lst<T> slice(i32 startIndex, i32 endIndex, bool order = true, bool attach = true)
+        public lst<T> slice(int? startIndex, int? endIndex, bool order = true, bool attach = true)
         {
             if (startIndex == null && endIndex == null)
             {
@@ -76,42 +76,42 @@ namespace Library
             {
                 if (attach)
                 {
-                    return subList(startIndex, lastIndex);
+                    return subList(startIndex??0, lastIndex);
                 }
                 else
                 {
-                    return subList(startIndex, lastIndex-1);
+                    return subList(startIndex??0, lastIndex-1);
                 }
             }
             else // (startIndex == null)
             {
                 if (attach)
                 {
-                    return subList(0, endIndex);
+                    return subList(0, endIndex??0);
                 }
                 else
                 {
-                    return subList(0, endIndex-1);
+                    return subList(0, endIndex??0-1);
                 }
             }
         }
-        public i32 firstIndexOf(T item) => IndexOf(item);
-        public new i32 lastIndexOf(T item) => LastIndexOf(item);
+        public int firstIndexOf(T item) => IndexOf(item);
+        public new int lastIndexOf(T item) => LastIndexOf(item);
 
         public T findFirst(Predicate<T> match) => Find(match);
         public new T findLast(Predicate<T> match) => FindLast(match);
         public new lst<T> findAll(Func<T,bool> match) => this.Where(match) as lst<T>;
-        public i32 findFirstIndex(Predicate<T> match) => FindIndex(match);
-        public new i32 findLastIndex(Predicate<T> match) => FindLastIndex(match);
+        public int findFirstIndex(Predicate<T> match) => FindIndex(match);
+        public new int findLastIndex(Predicate<T> match) => FindLastIndex(match);
 
         public void add(T item) => Add(item);
         public void addRange(IEnumerable<T> collection) => AddRange(collection);
         public void remove(T item) => Remove(item);
         public void removeAll(Predicate<T> match) => RemoveAll(match);
-        public void insert(i32 index, T item) => Insert(index, item);
-        public void insertRange(i32 index, IEnumerable<T> collection) => InsertRange(index, collection);
-        public void removeAt(i32 index) => RemoveAt(index);
-        public void removeRange(i32 index, i32 count) => RemoveRange(index, count);
+        public void insert(int index, T item) => Insert(index, item);
+        public void insertRange(int index, IEnumerable<T> collection) => InsertRange(index, collection);
+        public void removeAt(int index) => RemoveAt(index);
+        public void removeRange(int index, int count) => RemoveRange(index, count);
         public void clear() => Clear();
         public bool has(T item) => Contains(item);
 
@@ -161,7 +161,7 @@ namespace Library
         public bool isEmpty => !notEmpty;
         public bool notEmpty => Count > 0;
 
-        public i32 count => Count;
+        public int count => Count;
 
         public void add(TKey key, TValue value) => Add(key, value);
         public bool remove(TKey key) => Remove(key);
