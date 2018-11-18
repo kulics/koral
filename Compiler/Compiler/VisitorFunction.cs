@@ -219,12 +219,7 @@ namespace Compiler
             var handleCount = 0;
             foreach (var item in items)
             {
-                if (item.GetChild(0) is CheckDeferStatementContext)
-                {
-                    lazy.Add(new Lazy(true, (string)Visit(item)));
-                    content += $"try {Wrap} {{";
-                }
-                else if (item.GetChild(0) is VariableUseStatementContext)
+                if (item.GetChild(0) is VariableUseStatementContext)
                 {
                     lazy.Add(new Lazy(false, "}"));
                     content += $"using ({(string)Visit(item)}) {{ {Wrap}";
