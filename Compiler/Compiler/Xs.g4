@@ -123,7 +123,6 @@ functionSupportStatement:
 | variableStatement
 | variableDeclaredStatement
 | assignStatement
-| variableUseStatement
 | expressionStatement
 ;
 
@@ -158,11 +157,16 @@ loopJumpStatement:ArrowLeft Loop Terminate?;
 // 跳出当前循环
 loopContinueStatement:ArrowRight Loop Terminate?;
 // 检查
-checkStatement: (variableExpression | expression) call Check (ArrowRight id | checkErrorStatement) Terminate?;
-// 变量表达式
-variableExpression: expression (Declared type)? Assign expression;
+checkStatement: 
+Check usingExpression BlockLeft (functionSupportStatement)* BlockRight Terminate?
+|Check (usingExpression)? BlockLeft (functionSupportStatement)* BlockRight (checkErrorStatement)* checkFinallyStatment Terminate?
+|Check (usingExpression)? BlockLeft (functionSupportStatement)* BlockRight (checkErrorStatement)+ Terminate?;
+// 定义变量
+usingExpression: expression (Define|Declared type Assign) expression;
 // 错误处理
-checkErrorStatement:(id)? (Declared type)? BlockLeft (functionSupportStatement)* BlockRight;
+checkErrorStatement:(id|Declared type) BlockLeft (functionSupportStatement)* BlockRight;
+// 最终执行
+checkFinallyStatment: Discard BlockLeft (functionSupportStatement)* BlockRight;
 
 // 报告错误
 reportStatement: Check call '(' (expression)? ')' Terminate?;
@@ -170,13 +174,11 @@ reportStatement: Check call '(' (expression)? ')' Terminate?;
 iteratorStatement: '[' expression op=('<'|'<='|'>'|'>=') expression Terminate expression ']' | '[' expression op=('<'|'<='|'>'|'>=') expression ']';
 
 // 定义变量
-variableStatement: expression Define expression Terminate?;
+variableStatement: expression (Define|Declared type Assign) expression Terminate?;
 // 声明变量
-variableDeclaredStatement: expression Declared type (Assign expression)? Terminate?;
+variableDeclaredStatement: expression Declared type Terminate?;
 // 赋值
 assignStatement: expression assign expression Terminate?;
-// 定义回收变量
-variableUseStatement: expression Use expression Terminate?;
 
 expressionStatement: expression Terminate?;
 
@@ -395,7 +397,6 @@ BlockRight : '}';
 Define : ':=';
 Declared : ':';
 Assign: '=';
-Use : '!=';
 
 Self : '..';
 

@@ -1,7 +1,4 @@
 ﻿using Antlr4.Runtime.Misc;
-using System;
-using System.Collections.Generic;
-using System.Text;
 using static Compiler.XsParser;
 
 namespace Compiler
@@ -212,65 +209,52 @@ namespace Compiler
 
         public override object VisitCheckStatement([NotNull] CheckStatementContext context)
         {
+            if (context.checkErrorStatement().Length == 0 && context.checkFinallyStatment() == null)
+            {
+                var obj = "using (";
+                obj += Visit(context.usingExpression()) + ")" + BlockLeft + Wrap;
+                obj += ProcessFunctionSupport(context.functionSupportStatement());
+                obj += BlockRight + Wrap;
+                return obj;
+            }
+            else
+            {
+                var obj = $"try {BlockLeft} {Wrap}";
+                obj += ProcessFunctionSupport(context.functionSupportStatement());
+                obj += BlockRight + Wrap;
+                foreach (var item in context.checkErrorStatement())
+                {
+                    obj += Visit(item) + Wrap;
+                }
+
+                if (context.checkFinallyStatment() != null)
+                {
+                    obj += Visit(context.checkFinallyStatment());
+                }
+                if (context.usingExpression() != null)
+                {
+                    obj = $"using ({ Visit(context.usingExpression())}) {BlockLeft} {Wrap} {obj} ";
+                    obj += BlockRight + Wrap;
+                }
+                return obj;
+            }
+        }
+
+        public override object VisitUsingExpression([NotNull] UsingExpressionContext context)
+        {
             var obj = "";
-            if (context.expression() != null)
-            {
-                obj += $"try {BlockLeft} {Wrap}";
-                obj += (Visit(context.expression()) as Result).text + Terminate;
-            }
-            else
-            {
-                var v = (variableExpression)Visit(context.variableExpression());
-                if (v.type != null)
-                {
-                    obj += $"{v.type} {v.id}{Terminate}";
-                }
-                obj += $"try {BlockLeft} {Wrap}";
-                obj += $"{v.id} = {v.expr}{Terminate}";
-            }
-
-            obj += BlockRight + Wrap;
-            if (context.checkErrorStatement() != null)
-            {
-                obj += Visit(context.checkErrorStatement()) + Terminate + Wrap;
-            }
-            else
-            {
-                var id = (Visit(context.id()) as Result).text;
-                foreach (var item in stackHandle)
-                {
-                    if (item.id == id)
-                    {
-                        obj += $"catch {item.param}";
-                        obj += $"{Wrap}{{{item.text}}}{Terminate}{Wrap}";
-                        break;
-                    }
-                }
-            }
-
-            return obj;
-        }
-
-        private class variableExpression
-        {
-            public string type;
-            public string id;
-            public string expr;
-        }
-
-        public override object VisitVariableExpression([NotNull] VariableExpressionContext context)
-        {
-            var v = new variableExpression();
-            if (context.type() != null)
-            {
-                v.type = (string)Visit(context.type());
-            }
-
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
-            v.id = r1.text;
-            v.expr = r2.text;
-            return v;
+            if (context.type() != null)
+            {
+                var Type = (string)Visit(context.type());
+                obj = $"{Type} {r1.text} = {r2.text}";
+            }
+            else
+            {
+                obj = $"var {r1.text} = {r2.text}";
+            }
+            return obj;
         }
 
         public override object VisitCheckErrorStatement([NotNull] CheckErrorStatementContext context)
@@ -294,6 +278,14 @@ namespace Compiler
             return obj;
         }
 
+        public override object VisitCheckFinallyStatment([NotNull] CheckFinallyStatmentContext context)
+        {
+            var obj = $"finally {Wrap} {BlockLeft} {Wrap}";
+            obj += ProcessFunctionSupport(context.functionSupportStatement());
+            obj += $"{BlockRight}{Wrap}";
+            return obj;
+        }
+
         public override object VisitReportStatement([NotNull] ReportStatementContext context)
         {
             var obj = "";
@@ -303,13 +295,6 @@ namespace Compiler
                 obj += r.text;
             }
             return $"throw {obj + Terminate + Wrap}";
-        }
-
-        private class Handle
-        {
-            public string id;
-            public string param;
-            public string text;
         }
 
         public override object VisitLinq([NotNull] LinqContext context)
