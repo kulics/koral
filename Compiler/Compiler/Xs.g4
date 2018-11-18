@@ -117,7 +117,6 @@ functionSupportStatement:
 | loopInfiniteStatement
 | loopJumpStatement
 | loopContinueStatement
-| checkDeferStatement
 | checkStatement
 | reportStatement
 | functionStatement
@@ -158,8 +157,6 @@ loopInfiniteStatement:Loop BlockLeft (functionSupportStatement)* BlockRight Term
 loopJumpStatement:ArrowLeft Loop Terminate?;
 // 跳出当前循环
 loopContinueStatement:ArrowRight Loop Terminate?;
-// 看守
-checkDeferStatement: Check BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 检查
 checkStatement: (variableExpression | expression) call Check (ArrowRight id | checkErrorStatement) Terminate?;
 // 变量表达式

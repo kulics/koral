@@ -305,13 +305,6 @@ namespace Compiler
             return $"throw {obj + Terminate + Wrap}";
         }
 
-        public override object VisitCheckDeferStatement([NotNull] CheckDeferStatementContext context)
-        {
-            var obj = "";
-            obj += ProcessFunctionSupport(context.functionSupportStatement());
-            return obj;
-        }
-
         private class Handle
         {
             public string id;
