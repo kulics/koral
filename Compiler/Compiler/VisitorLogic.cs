@@ -319,40 +319,6 @@ namespace Compiler
             public string text;
         }
 
-        public override object VisitHandleStatement([NotNull] HandleStatementContext context)
-        {
-            var res = new Handle
-            {
-                id = (Visit(context.id()) as Result).text,
-                param = (Visit(context.parameterClauseIn()) as string)
-            };
-            foreach (var item in context.functionSupportStatement())
-            {
-                res.text += (string)Visit(item);
-            }
-            return res;
-        }
-
-        public override object VisitCallHandleStatement([NotNull] CallHandleStatementContext context)
-        {
-            var id = (Visit(context.id()) as Result).text;
-            var obj = "";
-            foreach (var item in stackHandle)
-            {
-                if (item.id == id)
-                {
-                    obj = item.text;
-                    break;
-                }
-            }
-            if (obj == "")
-            {
-                throw new System.Exception($"did not find handle {id}");
-            }
-
-            return obj;
-        }
-
         public override object VisitLinq([NotNull] LinqContext context)
         {
             var r = new Result

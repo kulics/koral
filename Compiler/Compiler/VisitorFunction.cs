@@ -229,11 +229,6 @@ namespace Compiler
                     lazy.Add(new Lazy(false, "}"));
                     content += $"using ({(string)Visit(item)}) {{ {Wrap}";
                 }
-                else if (item.GetChild(0) is HandleStatementContext)
-                {
-                    stackHandle.Push(Visit(item) as Handle);
-                    handleCount += 1;
-                }
                 else
                 {
                     content += Visit(item);
