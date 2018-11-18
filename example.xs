@@ -26,7 +26,6 @@ Main ()~>() {
     testCheck.()
     testTypeConvert.()
     testEmpty.()
-    cmd.print.(testDefer.().str)
     testLambda.()
     _ = <~ testAsync.()
 
@@ -100,20 +99,20 @@ testString ()->() {
 }
 
 testNullable ()->() {
-    a: i32|null = null
+    a: i32|null = 1
     b: str|null = null
-    c: any|null = null
+    c: obj|null = null
     d: app|null = null
 }
 
 testTypeConvert ()->() {
     x := app.{}
-    y := x.?=program
+    y := x.?!program
     z1 := (12.34).toF32.()
     z2 := z1.toI64.()
     cmd.print.( z2 )
     cmd.print.( y.?:program )
-    cmd.print.( x.?=program.running )
+    cmd.print.( x.?!program.running )
     cmd.print.( ?.(:program) )
     cmd.print.( ?.(x) )
 }
@@ -125,7 +124,7 @@ testEmpty ()->() {
 }
 
 testSwitch ()->() {
-    x :any = 3
+    x :obj = 3
     x.? 1 {
         cmd.print.(1)
     } :str {
@@ -190,58 +189,27 @@ testDictionary ()->() {
     }
     dicSN -= "k1"
     dicEmpty := {:str->i32}
-    dicType := {1->"v1" :i32->any}
+    dicType := {1->"v1" :i32->obj}
     cmd.print.(dicSN.["k2"])
 }
 
 testCheck ()->() {
-    x: i32 = (1 * 1).! e:IOException {
-        !.(e)
-    }
-    y: i32 = (1 + 1).! {
-        !.(ex)
-    }
-
-    handle (e:Exception) -> { 
-        !.(e)  
-    }
-    z: i32 = (1 + 1).! -> handle 
-}
-
-testDefer ()->(out: defer) {
-    x != defer.{}
-    ! {
-        x.str += "defer 2"
-    }
-    x.str = "3"
-    ! {
-        x.str += "defer 4"
-    }
-    x.str += "5"
-    [0<=3].@ {
-        ! {
-            x.str += "defer 6"
+    z :defer = null
+    ! z2 := defer.{} {
+        z = defer.{}
+        ! z3 := defer.{} {
+            x := 1 * 1
         }
-        x.str += "7"
+        y := 1 + 1
+    } :IOException {
+        !.(ex)
+    } e {
+        !.(e)
+    } _ {
+        ? z ~= null {
+            z.IDisposable.Dispose.()
+        }
     }
-    <- (x)
-}
-
-testHandle ()->() {
-    a := 0
-    handle () -> {
-        a += 11
-    }
-    handle2 () -> {
-        a += 22
-    }
-    a.? 0 {
-        handle3 () -> { a += 33 }
-        -> handle2
-        -> handle3
-    }
-    -> handle
-    -> handle2
 }
 
 testLoop ()->() {
