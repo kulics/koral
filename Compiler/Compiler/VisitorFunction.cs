@@ -1,7 +1,5 @@
 ﻿using Antlr4.Runtime.Misc;
-using System;
 using System.Collections.Generic;
-using System.Text;
 using static Compiler.XsParser;
 
 namespace Compiler
@@ -197,57 +195,12 @@ namespace Compiler
             return p;
         }
 
-        private class Lazy
-        {
-            public bool isDefer { get; set; }
-            public string content { get; set; }
-
-            public Lazy(bool isDefer, string content)
-            {
-                this.isDefer = isDefer;
-                this.content = content;
-            }
-        }
-
-        private Stack<Handle> stackHandle = new Stack<Handle>();
-
         public string ProcessFunctionSupport(FunctionSupportStatementContext[] items)
         {
             var obj = "";
-            var content = "";
-            var lazy = new List<Lazy>();
-            var handleCount = 0;
             foreach (var item in items)
             {
-                if (item.GetChild(0) is VariableUseStatementContext)
-                {
-                    lazy.Add(new Lazy(false, "}"));
-                    content += $"using ({(string)Visit(item)}) {{ {Wrap}";
-                }
-                else
-                {
-                    content += Visit(item);
-                }
-            }
-            if (lazy.Count > 0)
-            {
-                for (int i = lazy.Count - 1; i >= 0; i--)
-                {
-                    if (lazy[i].isDefer)
-                    {
-                        content += $"}} {Wrap} finally {Wrap} {{  {lazy[i].content} }}";
-                    }
-                    else
-                    {
-                        content += "}";
-                    }
-                }
-            }
-            obj += content;
-            // 移除栈
-            for (int i = 0; i < handleCount; i++)
-            {
-                stackHandle.Pop();
+                obj += Visit(item);
             }
             return obj;
         }

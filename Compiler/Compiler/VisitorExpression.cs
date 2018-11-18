@@ -1,26 +1,25 @@
 ﻿using Antlr4.Runtime.Misc;
-using System;
 using System.Collections.Generic;
-using System.Text;
 using static Compiler.XsParser;
 
 namespace Compiler
 {
     internal partial class Visitor
     {
-        public override object VisitVariableUseStatement([NotNull] VariableUseStatementContext context)
-        {
-            var r1 = (Result)Visit(context.expression(0));
-            var r2 = (Result)Visit(context.expression(1));
-            var obj = $"var {r1.text} = {r2.text}";
-            return obj;
-        }
-
         public override object VisitVariableStatement(VariableStatementContext context)
         {
+            var obj = "";
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
-            var obj = $"var {r1.text} = {r2.text} {Terminate} {Wrap}";
+            if (context.type() != null)
+            {
+                var Type = (string)Visit(context.type());
+                obj = $"{Type} {r1.text} = {r2.text} {Terminate} {Wrap}";
+            }
+            else
+            {
+                obj = $"var {r1.text} = {r2.text} {Terminate} {Wrap}";
+            }
             return obj;
         }
 
@@ -28,16 +27,8 @@ namespace Compiler
         {
             var obj = "";
             var Type = (string)Visit(context.type());
-            var r1 = (Result)Visit(context.expression(0));
-            if (context.expression().Length == 2)
-            {
-                var r2 = (Result)Visit(context.expression(1));
-                obj = $"{Type} {r1.text} = {r2.text} {Terminate} {Wrap}";
-            }
-            else
-            {
-                obj = $"{Type} {r1.text} {Terminate} {Wrap}";
-            }
+            var r = (Result)Visit(context.expression());
+            obj = $"{Type} {r.text} {Terminate} {Wrap}";
             return obj;
         }
 
@@ -813,7 +804,11 @@ namespace Compiler
             {
                 r.data = str;
                 var text = context.Text().GetText();
-                if (text.Contains("{")) text = "$" + text;
+                if (text.Contains("{"))
+                {
+                    text = "$" + text;
+                }
+
                 r.text = text;
             }
             else if (context.t.Type == XsParser.Char)
