@@ -9,6 +9,10 @@ namespace Library
     {
         // object 
         public static string toStr(this object it) => it.ToString();
+        public static T to<T>(this object it)
+        {
+            return (T)it;
+        }
         public static bool @is<T>(this object it)
         {
             return it is T;

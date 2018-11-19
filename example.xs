@@ -110,7 +110,7 @@ testTypeConvert ()->() {
     y := x.as<program>()
     z1 := (12.34).toF32()
     z2 := z1.toI64()
-    cmd.print( z2 )
+    cmd.print( z2.to<obj>().to<i64>() )
     cmd.print( y.is<program>() )
     cmd.print( x.as<program>().running )
     cmd.print( ?(:program) )
@@ -118,9 +118,9 @@ testTypeConvert ()->() {
 }
 
 testEmpty ()->() {
-    x := null.(program)
-    y := null.(protocol)
-    z := null.((a:i32)->(b:i32))
+    x := null(program)
+    y := null(protocol)
+    z := null((a:i32)->(b:i32))
 }
 
 testSwitch ()->() {

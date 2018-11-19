@@ -301,7 +301,7 @@ pkgAnonymousAssignElement: name ':=' expression Terminate?; // 简化赋值元�
 
 function : '_' parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 
-empty : Null call '(' type ')'; // 类型空初始化
+empty : Null '(' type ')'; // 类型空初始化
 
 plusMinus : add expression;
 
