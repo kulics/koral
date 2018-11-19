@@ -57,28 +57,28 @@ node {..value :i32}-> {
 }
 
 PreorderTraverse (node:node|null)->() {
-    node.? null { <- () }
+    ? node -> null { <- () }
     cmd.print(node.value)
     PreorderTraverse(node.left)
     PreorderTraverse(node.right)
 }
 
 PostorderTraverse (node:node|null)->() {
-    node.? null { <- () }
+    ? node -> null { <- () }
     PreorderTraverse(node.left)
     PreorderTraverse(node.right)
     cmd.print(node.value)
 }
 
 MiddleorderTraverse (node:node|null)->() {
-    node.? null { <- () }
+    ? node -> null { <- () }
     PreorderTraverse(node.left)
     cmd.print(node.value)
     PreorderTraverse(node.right)
 }
 
 InverseNode (node:node|null)->(node:node|null) {
-    node.? null { <- (null); }
+    ? node -> null { <- (null) }
     node.left = InverseNode(node.left)
     node.right = InverseNode(node.right)
 

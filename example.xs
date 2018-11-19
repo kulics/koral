@@ -107,12 +107,12 @@ testNullable ()->() {
 
 testTypeConvert ()->() {
     x := app{}
-    y := x.?!program
+    y := x.as<program>()
     z1 := (12.34).toF32()
     z2 := z1.toI64()
     cmd.print( z2 )
-    cmd.print( y.?:program )
-    cmd.print( x.?!program.running )
+    cmd.print( y.is<program>() )
+    cmd.print( x.as<program>().running )
     cmd.print( ?(:program) )
     cmd.print( ?(x) )
 }
@@ -125,7 +125,7 @@ testEmpty ()->() {
 
 testSwitch ()->() {
     x :obj = 3
-    x.? 1 {
+    ? x -> 1 {
         cmd.print(1)
     } :str {
         cmd.print("string")
