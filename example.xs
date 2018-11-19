@@ -99,7 +99,7 @@ testString ()->() {
 }
 
 testNullable ()->() {
-    a: i32|null = 1
+    a: i32|null = null
     b: str|null = null
     c: obj|null = null
     d: app|null = null
