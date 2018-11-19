@@ -39,7 +39,7 @@ Main ()->() {
             cmd.print(ea) # call function
         } _ {
             # lambda
-            cmd.print( greetings.filter.($it.count > 4) )
+            cmd.print( greetings.filter($it.count > 4) )
             <- @
         }
     }

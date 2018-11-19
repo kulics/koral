@@ -91,7 +91,7 @@ testOperator ()->() {
 testString ()->() {
     text := "love xs"
     txt : str = text
-    txt.@ {
+    @ [txt] {
         ? ea == 'e' {
             cmd.print("love xs")
         }
@@ -165,13 +165,13 @@ testArray ()->() {
     arrEmpty := _{:i32}
     arrType := _{1,2,3:i8}
     array : [|]i32 = _{|1,2,3 :i32|}
-    arrNumber.@ {
+    @ [arrNumber] {
         cmd.print(ea)
     }
-    arrNumber.@ item {
+    @ [arrNumber] item {
         cmd.print(item)
     }
-    arrNumber.@ i -> v {
+    @ [arrNumber] i -> v {
         cmd.print(i)
         cmd.print(v)
     }
@@ -183,7 +183,7 @@ testDictionary ()->() {
     empty := [str]i32{}
     dicSN := _{"k1"->1,"k2"->2}
     dicSN += _{"k3"->3}
-    dicSN.@ k -> v {
+    @ [dicSN] k -> v {
         cmd.print(k)
         cmd.print(v)
     }
@@ -214,19 +214,19 @@ testCheck ()->() {
 
 testLoop ()->() {
     cmd.print(" 0 to 10")
-    [0 <= 10].@ {
+    @ [0 <= 10] {
         Console.Write(ea)
         Console.Write(", ")
     }
     cmd.print("")
     cmd.print(" 0 to 8 step 2")
-    [0 < 8; 2].@ {
+    @ [0 < 8; 2] {
         Console.Write(ea)
         Console.Write(", ")
     }
     cmd.print("")
     cmd.print(" 8 to 2 step 2")
-    [8 > 0; 2].@ {
+    @ [8 > 0; 2] {
         Console.Write(ea)
         Console.Write(", ")
         ? ea == 6 {
