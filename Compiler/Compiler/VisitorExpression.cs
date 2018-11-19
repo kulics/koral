@@ -72,31 +72,6 @@ namespace Compiler
                 var e1 = (Result)Visit(context.GetChild(0));
                 var op = Visit(context.GetChild(1));
                 var e2 = (Result)Visit(context.GetChild(2));
-                if (context.GetChild(1).GetType() == typeof(CallContext))
-                {
-                    r.data = "var";
-                    for (int i = 0; i < e2.bracketTime; i++)
-                    {
-                        r.text += "(";
-                    }
-                    switch (e2.callType)
-                    {
-                        case "as":
-                        case "is":
-                            r.data = e2.data;
-                            if (e2.isCall)
-                            {
-                                r.text += e1.text + e2.text;
-                            }
-                            else
-                            {
-                                r.text += e1.text + op + e2.text;
-                            }
-                            return r;
-                        default:
-                            break;
-                    }
-                }
                 if (context.GetChild(1).GetType() == typeof(JudgeContext))
                 {
                     // todo 如果左右不是bool类型值，报错
@@ -148,27 +123,6 @@ namespace Compiler
             var e1 = "this";
             var op = ".";
             var e2 = (Result)Visit(context.GetChild(1));
-            for (int i = 0; i < e2.bracketTime; i++)
-            {
-                r.text += "(";
-            }
-            switch (e2.callType)
-            {
-                case "as":
-                case "is":
-                    r.data = e2.data;
-                    if (e2.isCall)
-                    {
-                        r.text += e1 + e2.text;
-                    }
-                    else
-                    {
-                        r.text += e1 + op + e2.text;
-                    }
-                    return r;
-                default:
-                    break;
-            }
             r.text = e1 + op + e2.text;
             return r;
         }
@@ -196,30 +150,6 @@ namespace Compiler
             var e1 = obj;
             var op = ".";
             var e2 = (Result)Visit(context.callExpression());
-            for (int i = 0; i < e2.bracketTime; i++)
-            {
-                r.text += "(";
-            }
-            switch (e2.callType)
-            {
-                case "element":
-                    r.text = e1 + e2.text;
-                    return r;
-                case "as":
-                case "is":
-                    r.data = e2.data;
-                    if (e2.isCall)
-                    {
-                        r.text += e1 + e2.text;
-                    }
-                    else
-                    {
-                        r.text += e1 + op + e2.text;
-                    }
-                    return r;
-                default:
-                    break;
-            }
             r.text = e1 + op + e2.text;
             return r;
         }
@@ -233,50 +163,11 @@ namespace Compiler
                 var e1 = (Result)Visit(context.GetChild(0));
                 var op = Visit(context.GetChild(1));
                 var e2 = (Result)Visit(context.GetChild(2));
-                r.isCall = e1.isCall;
-                r.callType = e1.callType;
-                if (e1.bracketTime > 0)
-                {
-                    r.bracketTime += e1.bracketTime;
-                }
-                if (context.GetChild(2).GetChild(0) is CallElementContext)
-                {
-                    r.text = e1.text + e2.text;
-                    return r;
-                }
-                else if (context.GetChild(2).GetChild(0) is CallAsContext)
-                {
-                    r.callType = "as";
-                    r.data = e2.data;
-                    r.text = e1.text + e2.text;
-                    r.bracketTime = e1.bracketTime + 1;
-                    return r;
-                }
-                else if (context.GetChild(2).GetChild(0) is CallIsContext)
-                {
-                    r.callType = "is";
-                    r.data = e2.data;
-                    r.text = e1.text + e2.text;
-                    r.bracketTime = e1.bracketTime + 1;
-                    return r;
-                }
                 r.text = e1.text + op + e2.text;
             }
             else if (count == 1)
             {
                 r = (Result)Visit(context.GetChild(0));
-                if (context.GetChild(0) is CallAsContext)
-                {
-                    r.callType = "as";
-                    r.bracketTime++;
-                    r.isCall = true;
-                }
-                else if (context.GetChild(0) is CallIsContext)
-                {
-                    r.callType = "is";
-                    r.bracketTime++;
-                    r.isCall = true;
-                }
             }
             return r;
         }

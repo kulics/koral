@@ -223,8 +223,6 @@ callNameSpace: ('\\' id)+ call callExpression;
 
 callExpression:
 callElement // 访问元素
-| callIs // 类型判断
-| callAs // 类型转换
 | callFunc // 函数调用
 | callPkg //
 | id // id
@@ -260,10 +258,6 @@ pkgAssignElement: name Assign expression; // 简化赋值元素
 listAssign: (expression (',' expression)*)? ;
 
 dictionaryAssign: (dictionaryElement (',' dictionaryElement)*)? ;
-
-callIs: is type; // 类型判断
-
-callAs: as type; // 类型转换
 
 callAwait: FlowLeft expression; // 异步调用
 

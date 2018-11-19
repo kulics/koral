@@ -79,9 +79,6 @@ namespace Compiler
             public object data { get; set; }
             public string text { get; set; }
             public string permission { get; set; }
-            public string callType { get; set; }
-            public int bracketTime { get; set; }
-            public bool isCall { get; set; }
         }
 
         public override object VisitId([NotNull] IdContext context)
@@ -131,24 +128,6 @@ namespace Compiler
                 r.data = bl;
                 r.text = f;
             }
-            return r;
-        }
-
-        public override object VisitCallAs([NotNull] CallAsContext context)
-        {
-            var r = new Result();
-            var type = (string)Visit(context.type());
-            r.data = type;
-            r.text = " as " + type + ")";
-            return r;
-        }
-
-        public override object VisitCallIs([NotNull] CallIsContext context)
-        {
-            var r = new Result();
-            var type = (string)Visit(context.type());
-            r.data = bl;
-            r.text = " is " + type + ")";
             return r;
         }
 
