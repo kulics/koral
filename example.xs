@@ -9,34 +9,34 @@ demo=run {
 
 # main function
 Main ()~>() {
-    cmd.print.("main function")
+    cmd.print("main function")
     # run test
-    testSharpType.()
-    testOperator.()
-    testString.()
-    testSwitch.()
-    testIf.()
-    testArray.()
-    testDictionary.()
-    testLoop.()
-    (x, _) := testFunc.("testcall")
-    _ = testFuncParams.(1, 2, (a,b,c: i32, d: i8)->(z: str, a,b,c: i32) {
+    testSharpType()
+    testOperator()
+    testString()
+    testSwitch()
+    testIf()
+    testArray()
+    testDictionary()
+    testLoop()
+    x := testFunc("testcall")
+    _ = testFuncParams(1, 2, _(a,b,c: i32, d: i8)->(z: str, a,b,c: i32) {
         <- ("",a,b,c)
     })
-    testCheck.()
-    testTypeConvert.()
-    testEmpty.()
-    testLambda.()
-    _ = <~ testAsync.()
+    testCheck()
+    testTypeConvert()
+    testEmpty()
+    testLambda()
+    _ = <~ testAsync()
 
-    p := app.{}
+    p := app{}
 
-    _ = p.protocol.c.(1)
-    testInterface.(p.protocol)
+    _ = p.protocol.c(1)
+    testInterface(p.protocol)
 
-    p.testFuncTemplate<i32,str>.(1, "2").testPackage.()
+    p.testFuncTemplate<i32,str>(1, "2").testPackage()
     
-    cmd.read.()
+    cmd.read()
 }
 
 staticX := 0
@@ -84,8 +84,8 @@ testOperator ()->() {
     c = true | false
     c = true & false
     d := 11
-    d = d.and.(1).or.(2).xor.(3).not.().lft.(1).rht.(2)
-    cmd.print.(b.toStr.())
+    d = d.and(1).or(2).xor(3).not().lft(1).rht(2)
+    cmd.print(b.toStr())
 }
 
 testString ()->() {
@@ -93,7 +93,7 @@ testString ()->() {
     txt : str = text
     txt.@ {
         ? ea == 'e' {
-            cmd.print.("love xs")
+            cmd.print("love xs")
         }
     }
 }
@@ -106,15 +106,15 @@ testNullable ()->() {
 }
 
 testTypeConvert ()->() {
-    x := app.{}
+    x := app{}
     y := x.?!program
-    z1 := (12.34).toF32.()
-    z2 := z1.toI64.()
-    cmd.print.( z2 )
-    cmd.print.( y.?:program )
-    cmd.print.( x.?!program.running )
-    cmd.print.( ?.(:program) )
-    cmd.print.( ?.(x) )
+    z1 := (12.34).toF32()
+    z2 := z1.toI64()
+    cmd.print( z2 )
+    cmd.print( y.?:program )
+    cmd.print( x.?!program.running )
+    cmd.print( ?(:program) )
+    cmd.print( ?(x) )
 }
 
 testEmpty ()->() {
@@ -126,114 +126,114 @@ testEmpty ()->() {
 testSwitch ()->() {
     x :obj = 3
     x.? 1 {
-        cmd.print.(1)
+        cmd.print(1)
     } :str {
-        cmd.print.("string")
+        cmd.print("string")
     } :i32 {
-        cmd.print.("int")
+        cmd.print("int")
     } null {
-        cmd.print.("null")
+        cmd.print("null")
     } _ {
-        cmd.print.("default")
+        cmd.print("default")
     }
 }
 
 testIf ()->() {
     x := 5
     ? x == 2 {
-        cmd.print.(2)
+        cmd.print(2)
     } x == 3 {
-        cmd.print.(3)
+        cmd.print(3)
     } _ {
-        cmd.print.("else")
+        cmd.print("else")
     }
     ? x == 5 {
-        cmd.print.("yes")
+        cmd.print("yes")
     }
 }
 
 testArray ()->() {
-    arrSingle := {1}
-    arrNumber := {1,2,5,6,8,4}
+    arrSingle := _{1}
+    arrNumber := _{1,2,5,6,8,4}
     arrNumber = 0 + arrNumber
     arrNumber += 3 + 7
     arrNumber -= 6
-    take := arrNumber.[0]
-    take = inPackageArray.{}.arr.[2]
-    arrObj := {"123", 432, app.{}}
-    arrArr := {{1,1,1},{1,1,1}}
-    arrEmpty := {:i32}
-    arrType := {1,2,3:i8}
-    array : [|]i32 = {|1,2,3 :i32|}
+    take := arrNumber[0]
+    take = inPackageArray{}.arr[2]
+    arrObj := _{"123", 432, app{}}
+    arrArr := _{_{1,1,1},_{1,1,1}}
+    arrEmpty := _{:i32}
+    arrType := _{1,2,3:i8}
+    array : [|]i32 = _{|1,2,3 :i32|}
     arrNumber.@ {
-        cmd.print.(ea)
+        cmd.print(ea)
     }
     arrNumber.@ item {
-        cmd.print.(item)
+        cmd.print(item)
     }
     arrNumber.@ i -> v {
-        cmd.print.(i)
-        cmd.print.(v)
+        cmd.print(i)
+        cmd.print(v)
     }
-    slice := arrNumber.[0<=]
-    slice2 := arrNumber.[<3]
+    slice := arrNumber[0<=]
+    slice2 := arrNumber[<3]
 }
 
 testDictionary ()->() {
-    empty := [str]i32.{}
-    dicSN := {"k1"->1,"k2"->2}
-    dicSN += {"k3"->3}
+    empty := [str]i32{}
+    dicSN := _{"k1"->1,"k2"->2}
+    dicSN += _{"k3"->3}
     dicSN.@ k -> v {
-        cmd.print.(k)
-        cmd.print.(v)
+        cmd.print(k)
+        cmd.print(v)
     }
     dicSN -= "k1"
-    dicEmpty := {:str->i32}
-    dicType := {1->"v1" :i32->obj}
-    cmd.print.(dicSN.["k2"])
+    dicEmpty := _{:str->i32}
+    dicType := _{1->"v1" :i32->obj}
+    cmd.print(dicSN["k2"])
 }
 
 testCheck ()->() {
     z :defer = null
-    ! z2 := defer.{} {
-        z = defer.{}
-        ! z3 := defer.{} {
+    ! z2 := defer{} {
+        z = defer{}
+        ! z3 := defer{} {
             x := 1 * 1
         }
         y := 1 + 1
     } :IOException {
-        !.(ex)
+        !(ex)
     } e {
-        !.(e)
+        !(e)
     } _ {
         ? z ~= null {
-            z.IDisposable.Dispose.()
+            z.IDisposable.Dispose()
         }
     }
 }
 
 testLoop ()->() {
-    cmd.print.(" 0 to 10")
+    cmd.print(" 0 to 10")
     [0 <= 10].@ {
-        Console.Write.(ea)
-        Console.Write.(", ")
+        Console.Write(ea)
+        Console.Write(", ")
     }
-    cmd.print.("")
-    cmd.print.(" 0 to 8 step 2")
+    cmd.print("")
+    cmd.print(" 0 to 8 step 2")
     [0 < 8; 2].@ {
-        Console.Write.(ea)
-        Console.Write.(", ")
+        Console.Write(ea)
+        Console.Write(", ")
     }
-    cmd.print.("")
-    cmd.print.(" 8 to 2 step 2")
+    cmd.print("")
+    cmd.print(" 8 to 2 step 2")
     [8 > 0; 2].@ {
-        Console.Write.(ea)
-        Console.Write.(", ")
+        Console.Write(ea)
+        Console.Write(", ")
         ? ea == 6 {
             -> @
         }
     }
-    cmd.print.("")
+    cmd.print("")
     @ {
         <- @
     }
@@ -242,12 +242,12 @@ testLoop ()->() {
 testFunc (s: str)->(out1: str, out2: i32) {
     s = s + "test"
     i := 1+1*3*9/8
-    out2 := i + 5 +(i +8)
+    out2 := i + 5 + (i +8)
     # func in func
     InFunc ()->() {
         <- ()
     }
-    InFunc.()
+    InFunc()
 
     <- (s, i)
 }
@@ -257,41 +257,41 @@ testFuncParams (a,b: i32, fn: (a,b,c: i32, d: i8)->(z: str, a,b,c: i32))->(a: i3
 }
 
 testAsync ()~>(x:i32,y:i32,z:str) {
-    <~ tsks.delay.(5000)
+    <~ tsks.delay(5000)
     async1 ()~>() {
-        <~ tsks.delay.(5000)
+        <~ tsks.delay(5000)
     }
-    <~ async1.()
+    <~ async1()
     
     <- (1, 2, "123")
 }
 
 testLambda ()->() {
     test1 (fn: (i1: i32, i2: i32)->(o1: i32, o2: i32))->() {
-        (o1, o2) := fn.(1, 2)
+        (o1,o2) := fn(1, 2)
     }
-    test1.( $i1,i2->(i1,i2) )
+    test1( $i1,i2->(i1,i2) )
 
     test2 (fn: ()->(o1: i32))->() {
-        o1 := fn.()
+        o1 := fn()
     }
-    test2.( $->1 )
+    test2( $->1 )
 
     test3 (fn: (it: i32)->())->() {
-        fn.(1)
+        fn(1)
     }
-    test3.( (it:i32)~>(){
-        <~ tsks.delay.(5000)
-        cmd.print.(it)
+    test3( _(it:i32)~>(){
+        <~ tsks.delay(5000)
+        cmd.print(it)
     })
-    test3.( ${ it ~>
-        <~ tsks.delay.(5000)
-        cmd.print.(it)
+    test3( ${ it ~>
+        <~ tsks.delay(5000)
+        cmd.print(it)
     })
 }
 
 testLinq ()->() {
-    numbers :=  {0, 1, 2, 3, 4, 5, 6}
+    numbers :=  _{0, 1, 2, 3, 4, 5, 6}
     arr := from num in numbers where (num % 2) == 0 
     orderby num descending select num
 }
@@ -302,7 +302,7 @@ inPackageArray {} -> {
     arr :[]i32
 
     .. {
-        arr = {1,2,3,4,5,6,7}
+        arr = _{1,2,3,4,5,6,7}
     }
 }
 
@@ -319,20 +319,20 @@ app {}-> program{} {
     d := 128.687
     b := "12"
     c := true
-    arr := {1,1,1,1}
+    arr := _{1,1,1,1}
     _PriName := " program "
     _b := 5
 } 
 
 app += {
     testPackage ()->() {
-        item := program.{<- Name = "new program",running = true}
-        item2 := {
+        item := program{<- Name = "new program",running = true}
+        item2 := _{
             Name := "new program"
             running := true
         }
-        item3 := []i32.{<- 1,2,3,4,5}
-        item4 := [str]i32.{<- "1"->1,"2"->2,"3"->3}
+        item3 := []i32{<- 1,2,3,4,5}
+        item4 := [str]i32{<- "1"->1,"2"->2,"3"->3}
     }
 
     testFuncTemplate<T1,T2> (data1: T1, data2: T2)->(data: app) {
@@ -351,12 +351,12 @@ app += protocol {
     }
 
     d ()~>(x: i32) {
-        <~ tsks.delay.(5000)
+        <~ tsks.delay(5000)
         <- (3)
     }
 
     e ()~>() {
-        <~ tsks.delay.(5000)
+        <~ tsks.delay(5000)
     }
 
     f :str
@@ -399,13 +399,13 @@ protocol -> {
     f :str
 }
 
-`Table.{"test"}`
+`Table{"test"}`
 testAnnotation {}-> {
-    `Key, Column.{"id"}`
+    `Key, Column{"id"}`
     Id :str|null
-    `Column.{"nick_name"}`
+    `Column{"nick_name"}`
     NickName :str|null
-    `Column.{"profile"}`
+    `Column{"profile"}`
     Profile :str|null
 }
 
