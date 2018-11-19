@@ -12,10 +12,12 @@ namespace Compiler
         {
             var obj = "";
             obj = Visit(context.typeNotNull()) as string;
-            //if (context.typeNotNull().GetChild(0) is TypeBasicContext && obj != "object" && obj != "string")
-            //{
-            //    obj += "?";
-            //}
+            if (context.typeNotNull().GetChild(0) is TypeBasicContext && 
+                context.typeNotNull().GetChild(0).GetText() != "obj" &&
+                 context.typeNotNull().GetChild(0).GetText() != "str")
+            {
+                obj += "?";
+            }
             return obj;
         }
 
