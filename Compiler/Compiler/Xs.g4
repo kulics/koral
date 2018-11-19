@@ -127,7 +127,7 @@ functionSupportStatement:
 ;
 
 // 条件判断
-judgeCaseStatement: expression call Judge (caseStatement)+ Terminate?;
+judgeCaseStatement: Judge expression ArrowRight (caseStatement)+ Terminate?;
 // 缺省条件声明
 caseDefaultStatement: Discard BlockLeft (functionSupportStatement)* BlockRight;
 // 条件声明
