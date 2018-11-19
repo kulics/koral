@@ -143,7 +143,7 @@ let count = i + Int(f)
 ## Inclusive Range Operator
 ### Xs
 ```
-[ 1 <= 5 ].@ {
+@ [ 1 <= 5 ] {
     cmd.print("{ea} times 5 is {ea * 5}")
 }
 ```
@@ -660,8 +660,8 @@ test.simpleDescription()
 movieCount := 0
 songCount := 0
 
-library.@ {
-    ea.? :Movie {
+@ [library] {
+    ? ea -> :Movie {
         movieCount += 1
     } :Song {
         songCount += 1
@@ -728,7 +728,7 @@ for item in library {
 ### Xs
 ```
 nb := 42
-nb.?  
+? nb ->  
 [0<=7],8,9 { print("single digit") }
 10 { print("double digits") }
 [11<=99] { print("double digits") }
@@ -784,8 +784,8 @@ switch nb {
 ## Downcasting
 ### Xs
 ```
-someObjects.@ {
-    ea.? movie:Movie {
+@ [someObjects] {
+    ? ea -> movie:Movie {
         print("Movie: '{movie.name}', " +
             "dir. {movie.director}")
     }

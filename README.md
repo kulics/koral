@@ -33,9 +33,9 @@ Main ()->() {
                 "Cześć", "Olá", "Здравствуйте",
                 "Chào bạn", "您好"}
     # for-each  
-    greetings.@ {
+    @ [greetings] {
         # match
-        ea.? [ 0 <= 8 ] {
+        ? ea -> [ 0 <= 8 ] {
             cmd.print(ea) # call function
         } _ {
             # lambda
