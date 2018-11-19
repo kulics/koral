@@ -3,7 +3,7 @@
 ## Hello World
 ### Xs
 ```
-cmd.print.("Hello, world!")
+cmd.print("Hello, world!")
 ```
 ### C#
 ```
@@ -114,7 +114,7 @@ String
 ```
 f := 6.0
 i := 94
-count := i + f.toI32.()
+count := i + f.toI32()
 ```
 ### C#
 ```
@@ -144,7 +144,7 @@ let count = i + Int(f)
 ### Xs
 ```
 [ 1 <= 5 ].@ {
-    cmd.print.("{ea} times 5 is {ea * 5}")
+    cmd.print("{ea} times 5 is {ea * 5}")
 }
 ```
 ### C#
@@ -175,7 +175,7 @@ for index in 1...5 {
 ## Arrays
 ### Xs
 ```
-shoppingList := {"catfish", "water",
+shoppingList := _{"catfish", "water",
     "tulips", "blue paint"}
 shoppingList.[1] = "bottle of water"
 ```
@@ -206,7 +206,7 @@ shoppingList[1] = "bottle of water"
 ## Maps
 ### Xs
 ```
-occupations := {
+occupations := _{
     "Malcolm"->"Captain",
     "Kaylee"->"Mechanic"
 }
@@ -247,8 +247,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Xs
 ```
-emptyArray := { :str}
-emptyDictionary := { :str->f32}
+emptyArray := _{ :str}
+emptyDictionary := _{ :str->f32}
 ```
 ### C#
 ```
@@ -278,7 +278,7 @@ let emptyDictionary = [String: Float]()
 greet (name, day: str)->(r: str) {
     <- ("Hello {name}, today is {day}.")
 }
-greet.("Bob", "Tuesday")
+greet("Bob", "Tuesday")
 ```
 ### C#
 ```
@@ -350,8 +350,8 @@ makeIncrementer ()->(fn: (in: i32)->(out: i32)) {
     }
     <- (addOne)
 }
-increment := makeIncrementer.()
-increment.(7)
+increment := makeIncrementer()
+increment(7)
 ```
 ### C#
 ```
@@ -454,9 +454,9 @@ class Shape {
 ## Classes Usage
 ### Xs
 ```
-shape := Shape.{}
+shape := Shape{}
 shape.numberOfSides = 7
-shapeDescription := shape.simpleDescription.()
+shapeDescription := shape.simpleDescription()
 ```
 ### C#
 ```
@@ -509,9 +509,9 @@ Square += {
     }
 }
 
-test := Square.{5.2, "square"}
-test.area.()
-test.simpleDescription.()
+test := Square{5.2, "square"}
+test.area()
+test.simpleDescription()
 ```
 ### C#
 ```
@@ -729,11 +729,11 @@ for item in library {
 ```
 nb := 42
 nb.?  
-[0<=7],8,9 { print.("single digit") }
-10 { print.("double digits") }
-[11<=99] { print.("double digits") }
-[100<=999] { print.("triple digits") }
-_ { print.("four or more digits") }
+[0<=7],8,9 { print("single digit") }
+10 { print("double digits") }
+[11<=99] { print("double digits") }
+[100<=999] { print("triple digits") }
+_ { print("four or more digits") }
 ```
 ### C#
 ```
@@ -786,7 +786,7 @@ switch nb {
 ```
 someObjects.@ {
     ea.? movie:Movie {
-        print.("Movie: '{movie.name}', " +
+        print("Movie: '{movie.name}', " +
             "dir. {movie.director}")
     }
 }
@@ -836,7 +836,7 @@ Nameable -> {
 }
 
 f (x: Nameable)->() {
-    print.("Name is " + x.name.())
+    print("Name is " + x.name())
 }
 ```
 ### C#

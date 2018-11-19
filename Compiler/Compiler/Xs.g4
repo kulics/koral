@@ -123,7 +123,7 @@ functionSupportStatement:
 | variableStatement
 | variableDeclaredStatement
 | assignStatement
-| expressionStatement
+| execFuncStatement
 ;
 
 // 条件判断
@@ -169,7 +169,7 @@ checkErrorStatement:(id|Declared type) BlockLeft (functionSupportStatement)* Blo
 checkFinallyStatment: Discard BlockLeft (functionSupportStatement)* BlockRight;
 
 // 报告错误
-reportStatement: Check call '(' (expression)? ')' Terminate?;
+reportStatement: Check '(' (expression)? ')' Terminate?;
 // 迭代器
 iteratorStatement: '[' expression op=('<'|'<='|'>'|'>=') expression Terminate expression ']' | '[' expression op=('<'|'<='|'>'|'>=') expression ']';
 
@@ -180,7 +180,7 @@ variableDeclaredStatement: expression Declared type Terminate?;
 // 赋值
 assignStatement: expression assign expression Terminate?;
 
-expressionStatement: expression Terminate?;
+execFuncStatement: FlowLeft? (expression '.')? callFunc Terminate?;
 
 // 基础表达式
 primaryExpression: 
@@ -198,6 +198,7 @@ linq // 联合查询
 | callSelf // 调用自己
 | callNameSpace // 调用命名空间
 | callFunc // 函数调用
+| callElement //调用元素
 | callPkg // 新建包
 | getType // 获取类型
 | callAwait // 异步调用
@@ -225,12 +226,14 @@ callElement // 访问元素
 | callIs // 类型判断
 | callAs // 类型转换
 | callFunc // 函数调用
-| callPkg // 新建包
+| callPkg //
 | id // id
 | callExpression call callExpression // 链式调用
 ;
 
 tuple : '(' (expression (',' expression)* )? ')'; // 元组
+
+tupleExpression : '(' expression (',' expression)*  ')'; // 元组
 
 expressionList : expression (',' expression)* ; // 表达式列
 
@@ -238,15 +241,17 @@ annotation: '`' (id ':')? annotationList '`' ; // 注解
 
 annotationList: annotationItem (',' annotationItem)*;
 
-annotationItem: id ('.' '{' annotationAssign (',' annotationAssign)* '}')? ;
+annotationItem: id ( '{' annotationAssign (',' annotationAssign)* '}')? ;
 
 annotationAssign: (id '=')? expression ;
 
-callFunc: id (templateCall)? call tuple; // 函数调用
+callFunc: id (templateCall)? tuple; // 函数调用
 
-callPkg: type call '{' expressionList? ( ArrowLeft (pkgAssign|listAssign|dictionaryAssign))? '}'; // 新建包
+callElement : id '[' (expression | slice) ']';
 
-getType: Judge call '(' (expression|':' type) ')';
+callPkg: type '{' expressionList? ( ArrowLeft (pkgAssign|listAssign|dictionaryAssign))? '}'; // 新建包
+
+getType: Judge '(' (expression|':' type) ')';
 
 pkgAssign: (pkgAssignElement (',' pkgAssignElement)*)? ; // 简化赋值
 
@@ -262,15 +267,13 @@ callAs: as type; // 类型转换
 
 callAwait: FlowLeft expression; // 异步调用
 
-array : '{|' (expression (',' expression)*)? (':' type)? '|}'; // 数组
+array : '_{|' (expression (',' expression)*)? (':' type)? '|}'; // 数组
 
-list : '{' (expression (',' expression)*)? (':' type)? '}'; // 列表
+list : '_{' (expression (',' expression)*)? (':' type)? '}'; // 列表
 
-dictionary :  '{' (dictionaryElement (',' dictionaryElement)*)? (':' type '->' type)? '}'; // 字典
+dictionary :  '_{' (dictionaryElement (',' dictionaryElement)*)? (':' type '->' type)? '}'; // 字典
 
 dictionaryElement: expression '->' expression; // 字典元素
-
-callElement : '[' (expression | slice) ']';
 
 slice: sliceFull | sliceStart | sliceEnd;
 
@@ -298,11 +301,11 @@ lambdaShort : '$' expressionList;
 
 pkgAnonymous: pkgAnonymousAssign; // 匿名包
 
-pkgAnonymousAssign: BlockLeft (pkgAnonymousAssignElement)+ BlockRight; // 简化赋值
+pkgAnonymousAssign: '_{' (pkgAnonymousAssignElement)+ BlockRight; // 简化赋值
 
 pkgAnonymousAssignElement: name ':=' expression Terminate?; // 简化赋值元素
 
-function : parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
+function : '_' parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 
 empty : Null call '(' type ')'; // 类型空初始化
 

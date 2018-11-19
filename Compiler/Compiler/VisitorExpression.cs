@@ -49,10 +49,18 @@ namespace Compiler
             return context.op.Text;
         }
 
-        public override object VisitExpressionStatement([NotNull] ExpressionStatementContext context)
+        public override object VisitExecFuncStatement([NotNull] ExecFuncStatementContext context)
         {
-            var r = (Result)Visit(context.expression());
-            return r.text + Terminate + Wrap;
+            var obj = ((Result)Visit(context.callFunc())).text;
+            if (context.expression() != null)
+            {
+                obj = ((Result)Visit(context.expression())).text + "." + obj;
+            }
+            if (context.FlowLeft() != null)
+            {
+                obj = "await " + obj;
+            }
+            return obj + Terminate + Wrap;
         }
 
         public override object VisitExpression([NotNull] ExpressionContext context)
@@ -73,9 +81,6 @@ namespace Compiler
                     }
                     switch (e2.callType)
                     {
-                        case "element":
-                            r.text = e1.text + e2.text;
-                            return r;
                         case "as":
                         case "is":
                             r.data = e2.data;
@@ -149,9 +154,6 @@ namespace Compiler
             }
             switch (e2.callType)
             {
-                case "element":
-                    r.text = e1 + e2.text;
-                    return r;
                 case "as":
                 case "is":
                     r.data = e2.data;
@@ -231,10 +233,6 @@ namespace Compiler
                 var e1 = (Result)Visit(context.GetChild(0));
                 var op = Visit(context.GetChild(1));
                 var e2 = (Result)Visit(context.GetChild(2));
-                if (context.GetChild(0).GetChild(0) is CallElementContext)
-                {
-                    r.callType = "element";
-                }
                 r.isCall = e1.isCall;
                 r.callType = e1.callType;
                 if (e1.bracketTime > 0)
@@ -267,11 +265,7 @@ namespace Compiler
             else if (count == 1)
             {
                 r = (Result)Visit(context.GetChild(0));
-                if (context.GetChild(0) is CallElementContext)
-                {
-                    r.callType = "element";
-                }
-                else if (context.GetChild(0) is CallAsContext)
+                if (context.GetChild(0) is CallAsContext)
                 {
                     r.callType = "as";
                     r.bracketTime++;
@@ -407,12 +401,13 @@ namespace Compiler
 
         public override object VisitCallElement([NotNull] CallElementContext context)
         {
+            var id = (Result)Visit(context.id());
             if (context.expression() == null)
             {
-                return new Result { text = (string)Visit(context.slice()) };
+                return new Result { text = id.text + (string)Visit(context.slice()) };
             }
             var r = (Result)Visit(context.expression());
-            r.text = "[" + r.text + "]";
+            r.text = id.text + "[" + r.text + "]";
             return r;
         }
 

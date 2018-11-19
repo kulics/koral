@@ -28,7 +28,7 @@ HelloWorld {
 # main function
 Main ()->() {
     # list
-    greetings := {"Hello", "Hola", "Bonjour",
+    greetings := _{"Hello", "Hola", "Bonjour",
                 "Ciao", "こんにちは", "안녕하세요",
                 "Cześć", "Olá", "Здравствуйте",
                 "Chào bạn", "您好"}
@@ -36,10 +36,10 @@ Main ()->() {
     greetings.@ {
         # match
         ea.? [ 0 <= 8 ] {
-            cmd.print.(ea) # call function
+            cmd.print(ea) # call function
         } _ {
             # lambda
-            cmd.print.( greetings.filter.($it.count > 4) )
+            cmd.print( greetings.filter.($it.count > 4) )
             <- @
         }
     }
