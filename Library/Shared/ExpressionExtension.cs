@@ -9,7 +9,11 @@ namespace Library
     {
         // object 
         public static string toStr(this object it) => it.ToString();
-        public static T to<T>(this object it) where T : class
+        public static bool @is<T>(this object it)
+        {
+            return it is T;
+        }
+        public static T @as<T>(this object it) where T : class
         {
             return it as T;
         }
