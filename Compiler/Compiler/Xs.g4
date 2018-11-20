@@ -5,10 +5,10 @@ program: statement+;
 statement: exportStatement namespaceSupportStatement*;
 
 // 导出命名空间
-exportStatement: nameSpace ('=' id)? BlockLeft (importStatement)* BlockRight Terminate?;
+exportStatement: nameSpace ('=' id)? BlockLeft (importStatement|NEWLINE)* BlockRight Terminate?;
 
 // 导入命名空间
-importStatement: (annotation)? nameSpace (call id)? Terminate?;
+importStatement: (annotationSupport)? nameSpace (call id)? Terminate?;
 
 namespaceSupportStatement:
 namespaceFunctionStatement
@@ -20,25 +20,26 @@ namespaceFunctionStatement
 |protocolStatement
 |protocolImplementStatement
 |enumStatement
+ | NEWLINE
 ;
 
 // 枚举
-enumStatement: (annotation)? id '[' enumSupportStatement (',' enumSupportStatement)* ']' Terminate?;
+enumStatement: (annotationSupport)? id '[' enumSupportStatement (',' enumSupportStatement | NEWLINE)* ']' Terminate?;
 
 enumSupportStatement: id ('=' (add)? Integer)?;
 
 // 命名空间变量
-namespaceVariableStatement:(annotation)? expression (Define expression|Declared type (Assign expression)?) (BlockLeft (namespaceControlSubStatement)* BlockRight)? Terminate?;
+namespaceVariableStatement:(annotationSupport)? expression (Define expression|Declared type (Assign expression)?) (BlockLeft (namespaceControlSubStatement | NEWLINE)* BlockRight)? Terminate?;
 // 命名空间不变量
-namespaceInvariableStatement:(annotation)? expression (Declared type '==' | ':==') expression Terminate?;
+namespaceInvariableStatement:(annotationSupport)? expression (Declared type '==' | ':==') expression Terminate?;
 // 命名空间常量
-namespaceConstantStatement: (annotation)? id (Declared type)? expression Terminate?;
+namespaceConstantStatement: (annotationSupport)? id (Declared type)? expression Terminate?;
 // 定义子方法
 namespaceControlSubStatement: id BlockLeft (functionSupportStatement)* BlockRight;
 // 命名空间函数
-namespaceFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
+namespaceFunctionStatement:(annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 // 定义包
-packageStatement:(annotation)? id (templateDefine)? parameterClausePackage ArrowRight (extend)? BlockLeft (packageSupportStatement)* BlockRight;
+packageStatement:(annotationSupport)? id (templateDefine)? parameterClausePackage ArrowRight (extend)? BlockLeft (packageSupportStatement)* BlockRight;
 // 继承
 extend: type '{' expressionList? '}';
 // 入参
@@ -46,53 +47,56 @@ parameterClausePackage : '{' parameterPackage? (',' parameterPackage)*  '}'  ;
 // 构造参数
 parameterPackage : parameter|parameterSelf;
 // 参数结构
-parameterSelf : (annotation)? '..' id (':' type)?;
+parameterSelf : (annotationSupport)? '..' id (':' type)?;
 // 包支持的语句
 packageSupportStatement:
 packageInitStatement
 |packageOverrideFunctionStatement
 |packageVariableStatement
+ | NEWLINE
 ;
 // 包构造方法
-packageInitStatement:(annotation)? '..' BlockLeft (functionSupportStatement)* BlockRight Terminate?;
+packageInitStatement:(annotationSupport)? '..' BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 函数
-packageFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate?;
+packageFunctionStatement:(annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 重载函数
-packageOverrideFunctionStatement:(annotation)? Self id parameterClauseIn ArrowRight parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate?;
+packageOverrideFunctionStatement:(annotationSupport)? Self id parameterClauseIn ArrowRight parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 定义变量
-packageVariableStatement:(annotation)? expression (Define expression|Declared type (Assign expression)?) (BlockLeft (packageControlSubStatement)* BlockRight)? Terminate?;
+packageVariableStatement:(annotationSupport)? expression (Define expression|Declared type (Assign expression)?) (BlockLeft (packageControlSubStatement | NEWLINE)* BlockRight)? Terminate?;
 // 定义子方法
 packageControlSubStatement: id BlockLeft (functionSupportStatement)* BlockRight;
 // 包扩展
 packageExtensionStatement: id (templateDefine)? '+=' BlockLeft (packageExtensionSupportStatement)* BlockRight Terminate?;
 // 包扩展支持的语句
-packageExtensionSupportStatement: packageFunctionStatement;
+packageExtensionSupportStatement: 
+packageFunctionStatement
+ | NEWLINE;
 // 协议
-protocolStatement:(annotation)? id (templateDefine)? ArrowRight BlockLeft (protocolSupportStatement)* BlockRight Terminate?;
+protocolStatement:(annotationSupport)? id (templateDefine)? ArrowRight BlockLeft (protocolSupportStatement | NEWLINE)* BlockRight Terminate?;
 // 协议支持的语句
 protocolSupportStatement:
-protocolStatement
-|protocolFunctionStatement
+protocolFunctionStatement
 |protocolControlStatement
 ;
 // 定义控制
-protocolControlStatement:(annotation)? id Declared type (BlockLeft (protocolControlSubStatement)* BlockRight)? Terminate?;
+protocolControlStatement:(annotationSupport)? id Declared type (BlockLeft (protocolControlSubStatement | NEWLINE)* BlockRight)? Terminate?;
 // 定义子方法
 protocolControlSubStatement: id BlockLeft BlockRight;
 // 函数
-protocolFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate?;
+protocolFunctionStatement:(annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 协议实现支持的语句
 protocolImplementSupportStatement:
 implementFunctionStatement
 |implementControlStatement
 |implementEventStatement
+|NEWLINE
 ;
 // 实现协议
-protocolImplementStatement: id '+=' nameSpaceItem (templateCall)? BlockLeft (protocolImplementSupportStatement)* BlockRight Terminate?;
+protocolImplementStatement: id '+=' nameSpaceItem (templateCall)? BlockLeft (protocolImplementSupportStatement)* NEWLINE* BlockRight Terminate?;
 // 控制实现
-implementControlStatement:(annotation)? id (Define expression|Declared type (Assign expression)?) (BlockLeft (packageControlSubStatement)* BlockRight)? Terminate?;
+implementControlStatement:(annotationSupport)? id (Define expression|Declared type (Assign expression)?) (BlockLeft (packageControlSubStatement | NEWLINE)* BlockRight)? Terminate?;
 // 函数实现
-implementFunctionStatement:(annotation)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate?;
+implementFunctionStatement:(annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 事件实现
 implementEventStatement: id 'event' nameSpaceItem Terminate?;
 // 函数
@@ -104,7 +108,7 @@ parameterClauseIn : '(' parameter? (',' parameter)*  ')'  ;
 // 出参
 parameterClauseOut : '(' parameter? (',' parameter)*  ')'  ;
 // 参数结构
-parameter :(annotation)? id (':' type)?;
+parameter :(annotationSupport)? id (':' type)?;
 
 // 函数支持的语句
 functionSupportStatement:
@@ -124,6 +128,7 @@ functionSupportStatement:
 | variableDeclaredStatement
 | assignStatement
 | execFuncStatement
+| NEWLINE
 ;
 
 // 条件判断
@@ -164,7 +169,7 @@ Check usingExpression BlockLeft (functionSupportStatement)* BlockRight Terminate
 // 定义变量
 usingExpression: expression (Define|Declared type Assign) expression;
 // 错误处理
-checkErrorStatement:(id|Declared type) BlockLeft (functionSupportStatement)* BlockRight;
+checkErrorStatement:(id|Declared type|id Declared type) BlockLeft (functionSupportStatement)* BlockRight;
 // 最终执行
 checkFinallyStatment: Discard BlockLeft (functionSupportStatement)* BlockRight;
 
@@ -234,6 +239,8 @@ tuple : '(' (expression (',' expression)* )? ')'; // 元组
 tupleExpression : '(' expression (',' expression)*  ')'; // 元组
 
 expressionList : expression (',' expression)* ; // 表达式列
+
+annotationSupport: annotation NEWLINE*;
 
 annotation: '`' (id ':')? annotationList '`' ; // 注解
 
@@ -439,6 +446,7 @@ Discard : '_'; // 匿名变量
 // Comment : '/*' .*? '*/' -> skip; // 结构注释
 CommentLine : '#' .*? '\r'? '\n' -> skip; // 行注释
 
-//WS : ' ' -> skip;
+NEWLINE: '\r'? '\n'; 
+//WS : (' ' |'\t' |'\n' |'\r' )+ -> skip ;
 
 WS   : [ \t\r\n]+ -> skip; // 空白， 后面的->skip表示antlr4在分析语言的文本时，符合这个规则的词法将被无视

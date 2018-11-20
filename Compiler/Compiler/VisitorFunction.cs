@@ -165,9 +165,9 @@ namespace Compiler
             var id = (Result)Visit(context.id());
             p.id = id.text;
             p.permission = id.permission;
-            if (context.annotation() != null)
+            if (context.annotationSupport() != null)
             {
-                p.annotation = (string)Visit(context.annotation());
+                p.annotation = (string)Visit(context.annotationSupport());
             }
             if (context.type() != null)
             {
@@ -183,9 +183,9 @@ namespace Compiler
             var id = (Result)Visit(context.id());
             p.id = id.text;
             p.permission = id.permission;
-            if (context.annotation() != null)
+            if (context.annotationSupport() != null)
             {
-                p.annotation = (string)Visit(context.annotation());
+                p.annotation = (string)Visit(context.annotationSupport());
             }
             if (context.type() != null)
             {
