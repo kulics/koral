@@ -74,9 +74,9 @@ namespace Compiler
         public override object VisitImportStatement([NotNull] ImportStatementContext context)
         {
             var obj = "";
-            if (context.annotation() != null)
+            if (context.annotationSupport() != null)
             {
-                obj += Visit(context.annotation());
+                obj += Visit(context.annotationSupport());
             }
             if (context.id() != null)
             {
@@ -158,9 +158,9 @@ namespace Compiler
             var obj = "";
             var id = (Result)Visit(context.id());
             var header = "";
-            if (context.annotation() != null)
+            if (context.annotationSupport() != null)
             {
-                header += Visit(context.annotation());
+                header += Visit(context.annotationSupport());
             }
             header += id.permission + " enum " + id.text;
             header += Wrap + BlockLeft + Wrap;
@@ -192,9 +192,9 @@ namespace Compiler
         {
             var id = (Result)Visit(context.id());
             var obj = "";
-            if (context.annotation() != null)
+            if (context.annotationSupport() != null)
             {
-                obj += Visit(context.annotation());
+                obj += Visit(context.annotationSupport());
             }
             // 异步
             if (context.t.Type == FlowRight)
@@ -241,9 +241,9 @@ namespace Compiler
             }
 
             var obj = "";
-            if (context.annotation() != null)
+            if (context.annotationSupport() != null)
             {
-                obj += Visit(context.annotation());
+                obj += Visit(context.annotationSupport());
             }
             obj += $"{r1.permission} readonly static {typ} {r1.text} = {r2.text} {Terminate} {Wrap}";
 
@@ -265,9 +265,9 @@ namespace Compiler
             }
 
             var obj = "";
-            if (context.annotation() != null)
+            if (context.annotationSupport() != null)
             {
-                obj += Visit(context.annotation());
+                obj += Visit(context.annotationSupport());
             }
             switch (typ)
             {
@@ -328,9 +328,9 @@ namespace Compiler
                 typ = (string)r2.data;
             }
             var obj = "";
-            if (context.annotation() != null)
+            if (context.annotationSupport() != null)
             {
-                obj += Visit(context.annotation());
+                obj += Visit(context.annotationSupport());
             }
             if (context.namespaceControlSubStatement().Length > 0)
             {

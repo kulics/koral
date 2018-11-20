@@ -93,9 +93,9 @@ namespace Compiler
             }
             obj += BlockRight + Terminate + Wrap;
             var header = "";
-            if (context.annotation() != null)
+            if (context.annotationSupport() != null)
             {
-                header += Visit(context.annotation());
+                header += Visit(context.annotationSupport());
             }
             header += $"{id.permission} partial class {id.text}";
             // 泛型
@@ -179,9 +179,9 @@ namespace Compiler
                 typ = (string)r2.data;
             }
             var obj = "";
-            if (context.annotation() != null)
+            if (context.annotationSupport() != null)
             {
-                obj += Visit(context.annotation());
+                obj += Visit(context.annotationSupport());
             }
             if (context.packageControlSubStatement().Length > 0)
             {
@@ -230,9 +230,9 @@ namespace Compiler
         {
             var id = (Result)Visit(context.id());
             var obj = "";
-            if (context.annotation() != null)
+            if (context.annotationSupport() != null)
             {
-                obj += Visit(context.annotation());
+                obj += Visit(context.annotationSupport());
             }
             // 异步
             if (context.t.Type == FlowRight)
@@ -268,9 +268,9 @@ namespace Compiler
         {
             var id = (Result)Visit(context.id());
             var obj = "";
-            if (context.annotation() != null)
+            if (context.annotationSupport() != null)
             {
-                obj += Visit(context.annotation());
+                obj += Visit(context.annotationSupport());
             }
 
             obj += "protected override " + Visit(context.parameterClauseOut()) + " " + id.text;
@@ -392,9 +392,9 @@ namespace Compiler
                 type = type,
                 body = body + Wrap
             };
-            if (context.annotation() != null)
+            if (context.annotationSupport() != null)
             {
-                vr.annotation = (string)Visit(context.annotation());
+                vr.annotation = (string)Visit(context.annotationSupport());
             }
             return vr;
         }
@@ -412,9 +412,9 @@ namespace Compiler
         {
             var fn = new Function();
             var id = (Result)Visit(context.id());
-            if (context.annotation() != null)
+            if (context.annotationSupport() != null)
             {
-                fn.annotation = (string)Visit(context.annotation());
+                fn.annotation = (string)Visit(context.annotationSupport());
             }
             fn.ID = id.text;
             // 泛型
@@ -453,9 +453,9 @@ namespace Compiler
             var obj = "";
             var interfaceProtocol = "";
             var ptclName = id.text;
-            if (context.annotation() != null)
+            if (context.annotationSupport() != null)
             {
-                obj += Visit(context.annotation());
+                obj += Visit(context.annotationSupport());
             }
             foreach (var item in context.protocolSupportStatement())
             {
@@ -478,9 +478,9 @@ namespace Compiler
         {
             var id = (Result)Visit(context.id());
             var r = new Result();
-            if (context.annotation() != null)
+            if (context.annotationSupport() != null)
             {
-                r.text += Visit(context.annotation());
+                r.text += Visit(context.annotationSupport());
             }
             r.permission = "public";
 
@@ -513,9 +513,9 @@ namespace Compiler
         {
             var id = (Result)Visit(context.id());
             var r = new Result();
-            if (context.annotation() != null)
+            if (context.annotationSupport() != null)
             {
-                r.text += Visit(context.annotation());
+                r.text += Visit(context.annotationSupport());
             }
             r.permission = "public";
             // 异步
