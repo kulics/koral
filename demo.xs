@@ -87,7 +87,7 @@ InverseNode (node:node|null)->(node:node|null) {
 }
 
 Swap (list:[]i32, i, j:i32)->() {
-    (list[i], list[j]) = (list[j], list[i])
+    _(list[i], list[j]) = _(list[j], list[i])
 }
 
 SimpleSort (list:[]i32)->() {

@@ -736,11 +736,47 @@ namespace Compiler
             {
                 r.text += " async ";
             }
-            r.text += Visit(context.parameterClauseIn()) + " => " + BlockLeft + Wrap;
+            r.text += Visit(context.anonymousParameterClauseIn()) + " => " + BlockLeft + Wrap;
             r.text += ProcessFunctionSupport(context.functionSupportStatement());
             r.text += BlockRight + Wrap;
             r.data = "var";
             return r;
+        }
+
+        public override object VisitAnonymousParameterClauseIn([NotNull] AnonymousParameterClauseInContext context)
+        {
+            var obj = "(";
+
+            var lastType = "";
+            var temp = new List<string>();
+            for (int i = context.parameter().Length - 1; i >= 0; i--)
+            {
+                Parameter p = (Parameter)Visit(context.parameter(i));
+                if (p.type != null)
+                {
+                    lastType = p.type;
+                }
+                else
+                {
+                    p.type = lastType;
+                }
+
+                temp.Add($"{p.annotation} {p.type} {p.id}");
+            }
+            for (int i = temp.Count - 1; i >= 0; i--)
+            {
+                if (i == temp.Count - 1)
+                {
+                    obj += temp[i];
+                }
+                else
+                {
+                    obj += $", {temp[i]}";
+                }
+            }
+
+            obj += ")";
+            return obj;
         }
 
         public override object VisitLambda([NotNull] LambdaContext context)
