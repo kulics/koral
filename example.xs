@@ -29,6 +29,8 @@ Main ()~>() {
     testLambda()
     _ = <~ testAsync()
 
+    y := testTuple_(1).toStr()
+
     p := app{}
 
     _ = p.protocol.c(1)
@@ -46,6 +48,10 @@ staticG :i64
 staticP :str {
     get { <- (staticY) }
     set { staticY = value }
+}
+
+testTuple_ (i:i32)->(v:str) {
+    <- ("tuple")
 }
 
 testSharpType ()->() {
@@ -108,7 +114,7 @@ testNullable ()->() {
 testTypeConvert ()->() {
     x := app{}
     y := x.as<program>()
-    z1 := (12.34).toF32()
+    z1 := _(12.34).toF32()
     z2 := z1.toI64()
     cmd.print( z2.to<obj>().to<i64>() )
     cmd.print( y.is<program>() )
@@ -242,7 +248,7 @@ testLoop ()->() {
 testFunc (s: str)->(out1: str, out2: i32) {
     s = s + "test"
     i := 1+1*3*9/8
-    out2 := i + 5 + (i +8)
+    out2 := i + 5 + _(i +8)
     # func in func
     InFunc ()->() {
         <- ()
@@ -268,9 +274,9 @@ testAsync ()~>(x:i32,y:i32,z:str) {
 
 testLambda ()->() {
     test1 (fn: (i1: i32, i2: i32)->(o1: i32, o2: i32))->() {
-        (o1,o2) := fn(1, 2)
+        _(o1,o2) := fn(1, 2)
     }
-    test1( $i1,i2->(i1,i2) )
+    test1( $i1,i2-> _(i1,i2) )
 
     test2 (fn: ()->(o1: i32))->() {
         o1 := fn()

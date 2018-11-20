@@ -69,6 +69,26 @@ namespace Compiler
             return result;
         }
 
+        public override object VisitTupleExpression([NotNull] TupleExpressionContext context)
+        {
+            var obj = "(";
+            for (int i = 0; i < context.expression().Length; i++)
+            {
+                var r = (Result)Visit(context.expression(i));
+                if (i == 0)
+                {
+                    obj += r.text;
+                }
+                else
+                {
+                    obj += ", " + r.text;
+                }
+            }
+            obj += ")";
+            var result = new Result { data = "var", text = obj };
+            return result;
+        }
+
         public override object VisitParameterClauseIn([NotNull] ParameterClauseInContext context)
         {
             var obj = "(";
