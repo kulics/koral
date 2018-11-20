@@ -185,7 +185,7 @@ variableDeclaredStatement: expression Declared type Terminate?;
 // 赋值
 assignStatement: expression assign expression Terminate?;
 
-execFuncStatement: FlowLeft? (expression '.')? callFunc Terminate?;
+execFuncStatement: FlowLeft? (expression call|('\\' id)+ call)? callFunc Terminate?;
 
 // 基础表达式
 primaryExpression: 
