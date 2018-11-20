@@ -55,6 +55,14 @@ namespace Compiler
             if (context.expression() != null)
             {
                 obj = ((Result)Visit(context.expression())).text + "." + obj;
+            } else if (context.id().Length > 0 )
+            {
+                var id = "";
+                foreach (var item in context.id())
+                {
+                    id += (Visit(item) as Result).text + ".";
+                }
+                obj = id + obj;
             }
             if (context.FlowLeft() != null)
             {
