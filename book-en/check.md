@@ -21,17 +21,21 @@ readFile (name: str)->() {
 ```
 So we declare an exception, the exception description is `something wrong`, once the external caller uses the illegal length of `name`, the function will be forced to abort, report the exception up and hand it to the caller.
 ## Check Exception
-We can use the `.! id:type {}` statement to check for exceptions when using assignment statements or expression statements.
+We can use the `! {}` statement to check for exceptions and `id:type {}` to handle exceptions.  
 `id` can be omitted, the default is `ex`.
-`:type` can also be omitted, the default is `Exception`.
+`:type` can also be omitted, the default is `Exception`, but both can only omit one at the same time.
 
 E.g:
 ```
-f: file = readFile("temp.txt").! e: Exception {
+! {
+    f := readFile("temp.txt")
+} :IOException {
+    !(ex)
+} e {
     cmd.print(e.message)
 }
 ```
-When an exception occurs, the program enters the `!` block, and `e` is the exception identifier. We can get the exception information or perform other operations.
+When an exception occurs, the program enters the error process block, and `e` is the exception identifier. We can get the exception information or perform other operations.
 
 If there are no exceptions, the logic of the exception handling block will not be entered.
 
@@ -39,84 +43,30 @@ In general, we can make early returns or data processing in exception handling. 
 
 E.g:
 ```
-Func().! {
+! {
+    Func()
+} ex {
      # can be returned manually
      # <- ()
      !(ex)
 }
 ```
-## Fragment
-If we come across something that always needs to be declared repeatedly, such as a continuous check, it always returns the same content.
-
-E.g:
-```
-Do1().! {
-    Log(ex.msg)
-    !(ex)
-}
-Do2().! {
-    Log(ex.msg)
-    !(ex)
-}
-Do3().! {
-    Log(ex.msg)
-    !(ex)
-}
-```
-
-This way of writing is very tedious and worthless.
-
-We can use fragment statements to optimize this content, using `id () -> {}` to declare the fragment statement, the preceding parentheses are arguments.
-
-E.g:
-```
-checkError (e:Exception) -> {
-    Log(e.msg)
-    !(e)
-}
-```
-
-Declaring a fragment statement does not produce any code. The fragment statement is only populated into the location when it is called, which is equivalent to automating the generation of code, which is different from the function.
-
-Use `-> id` to use the fragment statement, now we can handle the above example.
-
-E.g:
-```
-Do1().! -> checkError
-Do2().! -> checkError
-Do3().! -> checkError
-```
-
-This seems to be much easier.
-
-Fragment statements can greatly reduce the amount of rewritten code, making our work easier, not only for handling errors, but also for general logic.
-
-E.g:
-```
-a := 0
-Handle () -> {
-    a *= a
-    cmd.print(a)
-}
-a += 1
--> Handle
-a += 5
--> Handle
-a += 7
--> Handle
-```
 
 ## Check Defer
 If we have a function that we hope can be handled regardless of whether the program is normal or abnormal, such as the release of critical resources, we can use the check defer feature.
 
-Quite simply, using `! {}` can declare a statement that checks the delay.
+Quite simply, using `_ {}` at the end of the check can declare a statement that checks for delays.
 
 E.g:
 ```
-Func ()->() {
-    File := readFile("./somecode.xy")
+func ()->() {
+    file: File
     ! {
-        file.release()
+        file = readFile("./somecode.xs")
+    } _ {
+        ? file ~= null {
+            file.release()
+        }
     }
     ...
 }
@@ -130,37 +80,9 @@ Note that because the check defer is performed before the function exits and the
 E.g:
 ```
 ...
-! {
+_ {
     file.release()
     <- ()    # error, cannot use return statement
-}
-```
-
-### Check Defer Order
-In particular, if multiple deferred statements are used in a single statement block, the final execution is performed one by one in reverse order. This is because the deferred statements are all executed last, so the first declaration will be executed last, so multiple deferred statements will be executed in the reverse order of the declaration.
-
-E.g:
-```
-! { cmd.print("1") }
-! { cmd.print("2") }
-! { cmd.print("3") }
-
-# final display 3 2 1
-```
-
-### Checking Defer Scope
-The effective scope of the check delay is only the current one-level statement block, which is very helpful for us to control the execution area.
-
-E.g:
-```
-Func ()->() {
-    ...
-    [0<=5].@ {
-        # does not affect the logic outside the loop
-        ! { cmd.print(ea + 1) }
-        cmd.print(ea)
-    }
-    ...
 }
 ```
 
@@ -169,7 +91,9 @@ For packages that implement the automatic release protocol, we can use the '!= '
 
 E.g:
 ``` 
-Res != fileResource{ "/test.xy"}
+! res := FileResource{"/test.xs"} {
+    ...
+}
 ...
 ```
 
@@ -183,14 +107,22 @@ Demo {
 }
 
 Main ()->() {
-    x: i32 = (1 * 1).! e {
+    ! {
+        x: i32 = (1 * 1)
+    } e {
         !(e)
     }
 
-    x != Defer{}
-    ! {
+    x := Defer{}
+    ! y := Defer{} {
         x.content = "defer"
         cmd.print(x.content)
+    } ex {
+        !(ex)
+    } _ {
+        ? x ~= null {
+            x.IDisposable.Dispose()
+        }
     }
 }
 
@@ -200,7 +132,7 @@ Defer {} -> {
 
 Defer += IDisposable {
     Dispose ()->() {
-        ..content = null
+        ..content = ""
     }
 }
 ```
