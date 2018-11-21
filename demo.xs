@@ -148,7 +148,7 @@ Partition (list:[]i32, low, high:i32)->(position:i32) {
 }
 
 FilterList (list:[]i32, fn:(take:i32)->(act:bl))->(l:[]i32) {
-    filter := _{:i32}
+    filter := []i32{}
 
     @ [list] {
         ? fn(ea) {

@@ -168,9 +168,9 @@ testArray ()->() {
     take = inPackageArray{}.arr[2]
     arrObj := _{"123", 432, app{}}
     arrArr := _{_{1,1,1},_{1,1,1}}
-    arrEmpty := _{:i32}
-    arrType := _{1,2,3:i8}
-    array : [|]i32 = _{|1,2,3 :i32|}
+    arrEmpty := []i32{}
+    arrType := _{1,2,3}
+    array : [|]i32 = _{|1,2,3|}
     @ [arrNumber] {
         cmd.print(ea)
     }
@@ -194,8 +194,6 @@ testDictionary ()->() {
         cmd.print(v)
     }
     dicSN -= "k1"
-    dicEmpty := _{:str->i32}
-    dicType := _{1->"v1" :i32->obj}
     cmd.print(dicSN["k2"])
 }
 
