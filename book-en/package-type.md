@@ -86,11 +86,11 @@ Dictionary := [str]i32{ <- "1"->1, "2"->2, "3"->3 }
 ## Anonymous Package
 If we only want to wrap some data directly, instead of defining the package first and then using it, is it like an anonymous function?
 
-Of course, we can use the `{}` package directly, the same syntax as the collection, only the elements inside have different syntax.
+Of course, we can use the `_{}` package directly, the same syntax as the collection, only the elements inside have different syntax.
 
 E.g:
 ```
-Peter := {
+Peter := _{
     name := "Peter"
     number := "060233"
     class := 2

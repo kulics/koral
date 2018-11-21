@@ -108,9 +108,9 @@ The difference is that for multiple return values ​​we have to wrap each ide
 
 E.g:
 ```
-(n, c) := topSell()
+_(n, c) := topSell()
 # define the returned two values ​​for n and c
-(n, c) = topSell()
+_(n, c) = topSell()
 # overrides the returned two values ​​to n and c
 ```
 You can use the definition or assignment statement to get the return value of the function to use, you can also use the nested function to another function.
@@ -147,7 +147,7 @@ Function In Parameter no special definition of way, just replace the type of the
 E.g:
 ```
 each1To10 (func: (item: i32)->() )->() {
-    [1<=10].@ {
+    @ [1<=10] {
         func(ea)
     }
 }
@@ -191,11 +191,11 @@ findAll( $it > 7 )
 ```
 Very simple, the difference from the expression of a function type is that you only need to declare the parameter identifier and execution logic, and neither the type nor the return value need to be declared.
 ## Lambda Function
-Unlike the above simplified method, we can also write a complete function directly, just as we define the function.
+Unlike the above simplified method, we can also write a complete function directly, just as we define the function, but you need add `_` to the front .
 
 E.g:
 ```
-each1To10( (item:i32)->() {
+each1To10( _(item:i32)->() {
      cmd.print(item)
 })
 ```
@@ -214,7 +214,7 @@ Main ()->() {
     x := C()
     D( $-> cmd.print("D") )
     E( $cmd.print(it) )
-    E( (a:i32)->() {
+    E( _(a:i32)->() {
         cmd.print(it)
     })
 }
@@ -232,7 +232,7 @@ D (fn: ()->() )->() {
 }
 
 E (fn: (a:i32)->() )->() {
-    [1<=20].@
+    @ [1<=20]
     {
         fn(ea)
     }

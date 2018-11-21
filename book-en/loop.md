@@ -3,12 +3,12 @@ Sometimes, we may need to execute the same code multiple times.
 
 Under normal circumstances, the statement is executed in order, the first statement in the function first, followed by the second statement, and so on.
 ## Collection Loop
-If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can use the `value.@ id {}` statement to iterate over the collection, taking each element out of `id`.
+If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can use the `@ [value] id {}` statement to iterate over the collection, taking each element out of `id`.
 
 E.g:
 ```
-arr := {1, 2, 3, 4, 5}
-arr.@ item {
+arr := _{1, 2, 3, 4, 5}
+@ [arr] item {
     cmd.print(item)     # print each number
 }
 ```
@@ -17,7 +17,7 @@ If we don't want to define additional identifiers, we can omit them. The default
 
 E.g:
 ```
-@ [Arr] {
+@ [arr] {
      cmd.print(ea)     # print each number
 }
 ```
@@ -26,7 +26,7 @@ If we need to fetch the index and value at the same time, we can replace `id` wi
 
 E.g:
 ```
-arr.@ i -> v {
+@ [arr] i -> v {
      cmd.print("{i}:{v}")
 }
 ```
@@ -39,7 +39,7 @@ Iterators can loop from the start point to the end point, we use the collection 
 
 E.g:
 ```
-[0 <= 100].@ {
+@ [0 <= 100] {
     cmd.print(ea)      # print each number
 }
 ```
@@ -51,7 +51,7 @@ By default, iterators add `1` to each interval. If we need to take every other n
 
 E.g:
 ```
-[0 <= 100; 2].@ {
+@ [0 <= 100; 2] {
     ...
 }
 ```
@@ -61,7 +61,7 @@ We can also reverse it in reverse order, as long as we use `>=`.
 
 E.g:
 ```
-[100 >= 0].@ {
+@ [100 >= 0] {
      ...    # from 100 to 0
 }
 ```
@@ -114,16 +114,16 @@ Demo {
 }
 
 Main ()->() {
-    arr := {1,2,3,4,5}
-    arr.@ {
+    arr := _{1,2,3,4,5}
+    @ [arr] {
         cmd.print(ea)
     }
 
-    [1 <= 50].@ i {
+    @ [1 <= 50] i {
         cmd.print(i)
     }
 
-    [100 >= 0; 2].@ i {
+    @ [100 >= 0; 2] i {
         cmd.print(i)
     }
 
