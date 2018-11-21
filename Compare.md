@@ -247,8 +247,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Xs
 ```
-emptyArray := _{ :str}
-emptyDictionary := _{ :str->f32}
+emptyArray := []str{}
+emptyDictionary := [str]f32{}
 ```
 ### C#
 ```

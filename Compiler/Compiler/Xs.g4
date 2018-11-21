@@ -262,11 +262,11 @@ dictionaryAssign: (dictionaryElement (',' dictionaryElement)*)? ;
 
 callAwait: FlowLeft expression; // 异步调用
 
-array : '_{|' (expression (',' expression)*)? (':' type)? '|}'; // 数组
+array : '_{|' (expression (',' expression)*)? '|}'; // 数组
 
-list : '_{' (expression (',' expression)*)? (':' type)? '}'; // 列表
+list : '_{' (expression (',' expression)*)? '}'; // 列表
 
-dictionary :  '_{' (dictionaryElement (',' dictionaryElement)*)? (':' type '->' type)? '}'; // 字典
+dictionary :  '_{' (dictionaryElement (',' dictionaryElement)*)? '}'; // 字典
 
 dictionaryElement: expression '->' expression; // 字典元素
 

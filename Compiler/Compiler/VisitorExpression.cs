@@ -573,15 +573,7 @@ namespace Compiler
                     result.text += "," + r.text;
                 }
             }
-            if (context.type() != null)
-            {
-                result.data = $"{(string)Visit(context.type())}[]";
-            }
-            else
-            {
-                result.data = type + "[]";
-            }
-
+            result.data = type + "[]";
             result.text = $"(new {result.data}{{ {result.text} }})";
             return result;
         }
@@ -607,15 +599,7 @@ namespace Compiler
                     result.text += "," + r.text;
                 }
             }
-            if (context.type() != null)
-            {
-                result.data = $"{lst}<{(string)Visit(context.type())}>";
-            }
-            else
-            {
-                result.data = $"{lst}<{type}>";
-            }
-
+            result.data = $"{lst}<{type}>";
             result.text = $"(new {result.data}(){{ {result.text} }})";
             return result;
         }
@@ -648,15 +632,7 @@ namespace Compiler
                 }
             }
             var type = key + "," + value;
-            if (context.type().Length > 0)
-            {
-                result.data = $"{dic}<{(string)Visit(context.type(0))},{(string)Visit(context.type(1))}>";
-            }
-            else
-            {
-                result.data = $"{dic}<{type}>";
-            }
-
+            result.data = $"{dic}<{type}>";
             result.text = $"(new {result.data}(){{ {result.text} }})";
             return result;
         }
