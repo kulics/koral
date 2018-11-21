@@ -12,15 +12,15 @@ This is a simplified implementation.
 E.g:
 ```
 List<T> {}-> {
-    items := Storage{T}    # 创建存储
+    items := Storage{T}    # create storage
     length := 0
 }
 List<T> += {
-    get (index:i32)->(item:T) { # 获取某个泛型数据 
+    get (index:i32)->(item:T) { # get some T item
         <- ( items.get( index ) )
     }
 
-    add (item:T)->() {   #将一个泛型数据添加进数组
+    add (item:T)->() {   # add a T item to List
         items.insert(length, item)
         length += 1
     }
@@ -46,7 +46,7 @@ Very simple, and we can use the same statement, but called when the need to impo
 
 E.g:
 ```
-ListNumber := lst<i32>{}  # pass in the number type
+ListNumber := List<i32>{}  # pass in the number type
 ```
 So we have an List of number types, is like this:
 ```
