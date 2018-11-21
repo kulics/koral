@@ -18,9 +18,9 @@
 例如：
 ```
 linq ()->() {
-    numbers := { 0, 1, 2, 3, 4, 5, 6 }
+    numbers := _{ 0, 1, 2, 3, 4, 5, 6 }
     arr := from num in numbers
-            where (num % 2) == 0
+            where _(num % 2) == 0
             orderby num descending
             select num
 }

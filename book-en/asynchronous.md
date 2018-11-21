@@ -27,15 +27,15 @@ Normal direct call will only get a `tsk` data.
 
 E.g:
 ```
-result := async.()   # result is a Task data
+result := async()   # result is a Task data
 ```
 Let's see how to make it asynchronously waiting for execution.
 ## Asynchronous Wait
-As with the declaration, we only need to use `<~ function.()` to declare the wait asynchronous function.
+As with the declaration, we only need to use `<~ function()` to declare the wait asynchronous function.
 
 E.g:
 ```
-result := <~ async.()
+result := <~ async()
 ...
 ```
 After declare, the program execution here will temporarily stop the back of the function, until the async function is completed, the `out` value assigned to` result`, and then continue to execute.
@@ -46,12 +46,12 @@ E.g:
 ```
 # correct
 async ()~>(out: i32) {
-    <~ tsks.delay.(5000)     # wait for a while
+    <~ tsks.delay(5000)     # wait for a while
     <- (12)
 }
 # wrong
 async ()->(out: i32) {
-    <~ tsks.delay.(5000)     # can not be declared
+    <~ tsks.delay(5000)     # can not be declared
     <- (12)
 }
 ```
@@ -63,18 +63,18 @@ We can choose to wait for no data, or we can choose not to wait for data.
 E.g:
 ```
 async ()~>() {
-    <~ tsks.delay.(5000)    # wait for a while
+    <~ tsks.delay(5000)    # wait for a while
 }
 
-<~ async.()  # correct
+<~ async()  # correct
 
-task := async.()    # correct, got the Task
+task := async()    # correct, got the Task
 ```
 ## Lambda
 For lambda, we can also use asynchronous, just use `~>`.
 
 E.g:
 ```
-_ = arr.filter.( $it ~> it > 5)
+_ = arr.filter( $it ~> it > 5 )
 ```
 ### [Next Chapter](generic.md)

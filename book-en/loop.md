@@ -9,7 +9,7 @@ E.g:
 ```
 arr := {1, 2, 3, 4, 5}
 arr.@ item {
-    cmd.print.(item)     # print each number
+    cmd.print(item)     # print each number
 }
 ```
 The identifier followed by `@` is the currently fetched value, which is valid only for the current loop. So we don't need to define an identifier externally.
@@ -17,8 +17,8 @@ If we don't want to define additional identifiers, we can omit them. The default
 
 E.g:
 ```
-Arr.@ {
-     cmd.print.(ea)     # print each number
+@ [Arr] {
+     cmd.print(ea)     # print each number
 }
 ```
 
@@ -27,7 +27,7 @@ If we need to fetch the index and value at the same time, we can replace `id` wi
 E.g:
 ```
 arr.@ i -> v {
-     cmd.print.("{i}:{v}")
+     cmd.print("{i}:{v}")
 }
 ```
 
@@ -40,7 +40,7 @@ Iterators can loop from the start point to the end point, we use the collection 
 E.g:
 ```
 [0 <= 100].@ {
-    cmd.print.(ea)      # print each number
+    cmd.print(ea)      # print each number
 }
 ```
 It should be noted that the meaning of `0 <= 100` is read from` 0` to `100` one by one, that is, a total execution of` 101` times. Iterator will be executed until the last number is completed, rather than an early end.
@@ -116,15 +116,15 @@ Demo {
 Main ()->() {
     arr := {1,2,3,4,5}
     arr.@ {
-        cmd.print.(ea)
+        cmd.print(ea)
     }
 
     [1 <= 50].@ i {
-        cmd.print.(i)
+        cmd.print(i)
     }
 
     [100 >= 0; 2].@ i {
-        cmd.print.(i)
+        cmd.print(i)
     }
 
     x := 0

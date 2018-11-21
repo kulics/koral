@@ -83,10 +83,10 @@ Demo {
 }
 
 Main ()->() {
-    cmd.print.(a)
+    cmd.print(a)
     c = 5
-    cmd.print.(b)
-    cmd.print.(c)
+    cmd.print(b)
+    cmd.print(c)
 }
 
 a : i32 {

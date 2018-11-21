@@ -6,53 +6,51 @@ Our built-in collection types are two types of lists and dictionaries.
 List use ordered lists to store multiple values ​​of the same type. The same value can appear more than once in different places in an List.
     
 ### Definition
-We only need to use `{ e1,e2,e3:type }` syntax to enclose the data we need, and to split each data with `,` to create an List. In most cases, the data type can be automatically inferred by the language, therefore `:type` can be omitted..
+We only need to use `_{ e1,e2,e3 }` syntax to enclose the data we need, and to split each data with `,` to create an List. In most cases, the data type can be automatically inferred by the language.
 
 E.g:
 ```
-list := { 1,2,3,4,5 }
+list := _{ 1,2,3,4,5 }
 ```
 This will create a `i32` type List containing` 1` to `5`.
 
-If you need an List of explicit types, you can create them using type tags or type creation syntax.
+If you need an List of explicit types, you can create them using type creation syntax.
 
 The List type is represented by `[]type`, where `[]` is a one-dimensional List, so multidimensional lists can be represented as `[][][]type`.
 
 For example we need a string list:
 ```
-list := {"1,"2","3" :str}    # tag type
-list2 := {:str}              # empty List
-list3 := []str.{}            # type creation
+list := []str{}         # empty List
 ```
 #### Array
 If we need to use the native Array type, we can use `[|]type` to represent it.
-It can also be created directly using `{|e1,e2,e3:type|}`.
+It can also be created directly using `_{|e1,e2,e3|}`.
 
 E.g:
 ```
-arr := [|]i32.{}
-arr2 = {|1,2,3,4,5|}
+arr := [|]i32{}
+arr2 = _{|1,2,3,4,5|}
 ```
 ### Visit
-If we need to access one of the elements in the List we can access it with the `identifier.[index]`.
+If we need to access one of the elements in the List we can access it with the `identifier[index]`.
 
 E.g:
 ```
-cmd.print.( list.[1] )
+cmd.print( list[1] )
 ```
-It should be noted that in the programming language, most of the List starting index is from `0`,` identifier [0] `is the first element obtained, the subsequent elements and so on.
+It should be noted that in the programming language, most of the List starting index is from `0`,` identifier[0] `is the first element obtained, the subsequent elements and so on.
 ### Change the element
 If we need to change one of the elements in the List, we can access that element directly, using an assignment statement to change it.
 
 E.g:
 ```
-list.[0] = 5
+list[0] = 5
 ```
 Note that we can only access the index of the existing data, if not exist, there will be an error.
 ### Common operation
 ```
 list += 1                # added to the end
-list.insert.(2, 3)       # insert element 3 to index 2
+list.insert(2, 3)       # insert element 3 to index 2
 list -= 1                # delete the specified location element
 length := list.count     # length
 ```
@@ -63,45 +61,40 @@ Unlike the data items in an List, the data items in the dictionary do not have a
 
 dictionary keys can only use `integer` and` string` types.
 ### Definition
-Similar to lists, dictionaries also use the `{}` definition, except that the dictionaries type is a combination of `key` and` value`, separated by `->`.
+Similar to lists, dictionaries also use the `_{}` definition, except that the dictionaries type is a combination of `key` and` value`, separated by `->`.
 
 E.g:
 ```
-dictionary := {"a"->1, "b"->2, "c"->3}
+dictionary := _{"a"->1, "b"->2, "c"->3}
 ```
 This will create a `str->i32` type dictionary containing` a, b, c` entries.
 
-If you need an explicit type of dictionary, you can also create it using type tags or type creation syntax.
+If you need an explicit type of dictionary, you can also create it using type creation syntax.
 
 The dictionary type is represented by `[type]type` and `[type]` represents a one-dimensional dictionary, so the nested dictionary can be represented as `[type][type][type]type`.
 
-This is almost the same as the above List representation method. Yes, lists and dictionaries essentially use the index to locate the set of data. `[]` Represents a type of the index.
-
-Since lists only support numeric indexes, you can omit the `[i32]` tag. We can extend `[i32]type` to achieve consistent List types, but we usually don't need to do that (time is money. friend!).
-
 E.g:
 ```
-dictionaryNumNum := { :i32->i32}
-dictionaryNumNum2 := [i32]i32.{}
+dictionaryNumNum := [i32]i32{} # Empty
 ```
 ### Visit
 Like an List, we can also use indexes to access data directly.
 
 E.g:
 ```
-cmd.print.( dictionary.["a"] )
+cmd.print( dictionary["a"] )
 ```
 ### Change the element
 Like lists, we can also use assignment statements to change to elements.
 
 E.g:
 ```
-dictionary.["b"] = 5
+dictionary["b"] = 5
 ```
 The difference is that with the List, if the assignment is a non-existent index, it will not be wrong, the value will be given directly to the new key.
 ### Common operation
 ```
-dictionary += {"d"->11}        # add index by method
+dictionary += _{"d"->11}        # add index by method
 dictionary -= "c"              # delete the specified index element
 length := dictionary.count     # length
 ```
@@ -115,13 +108,13 @@ Demo {
 }
 
 Main ()->() {
-    list1 := {1,2,3,4,5}
+    list1 := _{1,2,3,4,5}
     list1 += 6
-    list2 :[]i8 = {1,2,1,2 :i8}
-    list3 := {|1,2,3|}
+    list2 := []i8{<- 1,2,1,2}
+    list3 := _{|1,2,3|}
 
-    dictionary1 := {"a"->1, "b"->2, "c"->3}
-    dictionary1.["d"] = 4
-    dictionary2 :[i8]i8 = {1->1,2->2,3->3 :i8->i8}
+    dictionary1 := _{"a"->1, "b"->2, "c"->3}
+    dictionary1["d"] = 4
+    dictionary2 := [i8]i8{<- 1->1,2->2,3->3}
 }
 ```

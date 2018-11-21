@@ -9,7 +9,7 @@ System\ComponentModel\DataAnnotations
 ```
 ## Annotation Declaration
 We only need to wrap the tag content with ``.  
-If the annotation item has sub-properties, you only need to use the `.{}` package. If you need to specify the specified property, use the `id = data` assignment as in the simplified construction of the package.
+If the annotation item has sub-properties, you only need to use the `{}` package. If you need to specify the specified property, use the `id = data` assignment as in the simplified construction of the package.
 
 Note that it is valid before the identifier.
 
@@ -17,13 +17,13 @@ Let's take a look at the database data for how to use annotations.
 
 E.g:
 ```
-`Table.{"test"}`
+`Table{"test"}`
 annotation {}-> {
-        `Key,Column.{"id"}`
+        `Key,Column{"id"}`
         id :str = ""
-        `Column.{"name"}`
+        `Column{"name"}`
         name :str = ""
-        `Column.{"data"}`
+        `Column{"data"}`
         data :str = ""
 }
 ```

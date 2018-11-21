@@ -13,8 +13,8 @@ In this way, we don't need to care about their values when we use them, and we c
 
 E.g:
 ```
-c := randomColor.()     # Get a random color
-c.? Color.Red {
+c := randomColor()     # Get a random color
+? c -> Color.Red {
      ...
 } Color.Green {
      ...
@@ -47,8 +47,8 @@ Demo {
 }
 
 Main ()->() {
-    cmd.print.( A.Z )
-    cmd.print.( B.Z )
+    cmd.print( A.Z )
+    cmd.print( B.Z )
 }
 
 A [X, Y, Z]
