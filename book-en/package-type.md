@@ -35,7 +35,7 @@ So how do we create a new package? As always, all of our types can be created us
 
 E.g:
 ```
-Peter := student.{}
+Peter := student{}
 ```
 This create a `Peter` identifier. All the properties of this student are initialized to `"", "", 0,0` as set in the definition.
 
@@ -50,7 +50,7 @@ Very simple, we only need to use `.` syntax, we can summon the attributes we nee
 
 E.g:
 ```
-cmd.print.(Peter.name)
+cmd.print(Peter.name)
 # print the name of a student
 ```
 To change the value of the property is the same, it is equivalent to a nested identifier. We can directly use the assignment statement to change the value.
@@ -68,7 +68,7 @@ Just add `<-` to the creation grammar to use the `key=value` method to quickly l
 
 E.g:
 ```
-Peter := student.{ <-
+Peter := student{ <-
     name="Peter", number="060233",
     class=2, grade=6
 }
@@ -80,8 +80,8 @@ Similarly, the way the collection is created is actually a simplified creation, 
 
 E.g:
 ```
-Array := []i32.{ <- 1, 2, 3, 4, 5 }
-Dictionary := [str]i32.{ <- "1"->1, "2"->2, "3"->3 }
+Array := []i32{ <- 1, 2, 3, 4, 5 }
+Dictionary := [str]i32{ <- "1"->1, "2"->2, "3"->3 }
 ```
 ## Anonymous Package
 If we only want to wrap some data directly, instead of defining the package first and then using it, is it like an anonymous function?
@@ -141,7 +141,7 @@ With this function, we can get the private property by calling the function.
 
 E.g:
 ```
-cmd.print.( Peter.getGirlFirend.() )
+cmd.print( Peter.getGirlFirend() )
 # printed the name of a girlfriend of a puppy love student
 ```
 As with data attributes, functions can also be private identifiers, and functions that use private identifiers also mean that only the packet can access itself.
@@ -164,9 +164,9 @@ student {name, number: str}-> {
         ..name = name
         ..number = number
         # calculate the class
-        ..class = GetSubText.(number, 2, 3)
+        ..class = GetSubText(number, 2, 3)
         # calculate the grade
-        ..grade = GetSubText.(number, 0, 1)
+        ..grade = GetSubText(number, 0, 1)
     }
 }
 ```
@@ -174,8 +174,8 @@ This gives us a package with constructors, and when we create a new student, cla
 
 E.g:
 ```
-Peter := student.{"Peter", "060233"}
-cmd.print.(Peter.class)     # print out 2
+Peter := student{"Peter", "060233"}
+cmd.print(Peter.class)     # print out 2
 ```
 
 Can the declaration be simpler, such as defining properties directly in the construct?
@@ -193,7 +193,7 @@ If you need to use both constructors and simplified creations, you can do so.
 
 E.g:
 ```
-Peter := student.{"Peter", "060233" <- name="New Peter"}
+Peter := student{"Peter", "060233" <- name="New Peter"}
 ```
 
 It should be noted that a package can only support one constructor, we recommend to maintain the simplicity of the structure, a stable package easier to be used by the caller,
@@ -228,8 +228,8 @@ This way you can use generic attributes via student attributes in Chinese studen
 
 E.g:
 ```
-Chen := chineseStudent.{}
-cmd.print.(Chen.student.name)
+Chen := chinesestudent{}
+cmd.print(Chen.student.name)
 # of course, since there is no assignment, nothing is output
 ```
 By combining layers after layer, you are free to assemble whatever you want to describe.
@@ -244,10 +244,10 @@ Demo {
 }
 
 Main ()->() {
-    a := S.{ <- A=5,B=12}
-    b := PKG.{"hello", 64, a}
-    cmd.print.( b.Z.A )
-    cmd.print.( b.Print.() )
+    a := S{ <- A=5,B=12}
+    b := PKG{"hello", 64, a}
+    cmd.print( b.Z.A )
+    cmd.print( b.Print() )
 }
 
 S {}-> {

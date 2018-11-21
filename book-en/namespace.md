@@ -26,7 +26,7 @@ run { name\space }
 
 Main ()->() {
     # print something
-    cmd.print.( Demo.getSomething.() )
+    cmd.print( Demo.getSomething() )
 }
 ```
 
@@ -45,7 +45,7 @@ getSomething ()->(content:str) {
 run{ name\space }
 
 Main ()->() {
-    cmd.print.( helper.getSomething.() )
+    cmd.print( helper.getSomething() )
 }
 ```
 ## Simplify Import
@@ -57,7 +57,7 @@ run{ name\space.Demo }
 
 Main ()->() {
     # print something
-    cmd.print.( getSomething.() )
+    cmd.print( getSomething() )
 }
 ```
 This eliminates the need to call `space` every time.
@@ -70,7 +70,7 @@ demo {}
 
 Main ()->() {
     # use it directly
-    cmd.print.( \name\space.Demo.getSomething.() )    
+    cmd.print( \name\space.Demo.getSomething() )    
 }
 ```
 

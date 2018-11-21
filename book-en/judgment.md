@@ -6,7 +6,7 @@ We only need to use the `? value {}` to declare the judgment statement, accordin
 E.g:
 ```
 ? true {
-    cmd.print.("true")  # true
+    cmd.print("true")  # true
 }
 ```
 # Boolean Judgment
@@ -78,20 +78,20 @@ You can use the `value.?id:type{}` syntax to match types, `id` can be omitted, a
 E.g:
 ```
 x.? :i32 {          # When i32
-     cmd.print.(it)
+     cmd.print(it)
 } content:str {     # when str
-     cmd.print.(content)
+     cmd.print(content)
 } null {            # When it is null
-     cmd.print.("null")
+     cmd.print("null")
 }
 ```
 ### Get type
-If we need to explicitly get the type value, we can use the `?.(id)` or `?.(:type)` syntax to get it.
+If we need to explicitly get the type value, we can use the `?(id)` or `?(:type)` syntax to get it.
 
 E.g:
 ```
-?.(expr)    # Get the expression type value
-?.(:type)   # Get the type value directly by type
+?(expr)    # Get the expression type value
+?(:type)   # Get the type value directly by type
 ```
 ### [Next Chapter](loop.md)
 
@@ -105,23 +105,23 @@ Demo {
 Main ()->() {
     a := 5
     ? a == 2 { 
-        cmd.print.(2) 
+        cmd.print(2) 
     } a == 4 { 
-        cmd.print.(4) 
+        cmd.print(4) 
     } _ { 
-        cmd.print.("not find") 
+        cmd.print("not find") 
     }
 
     b := 7
     b.? 5 { 
-        cmd.print.(5) 
+        cmd.print(5) 
     } 7 { 
-        cmd.print.(7) 
+        cmd.print(7) 
     } _ { 
-        cmd.print.("not find") 
+        cmd.print("not find") 
     }
 
-    cmd.print.( ?.(b) )
-    cmd.print.( ?.(:i32) )
+    cmd.print( ?(b) )
+    cmd.print( ?(:i32) )
 }
 ```

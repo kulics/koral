@@ -40,7 +40,7 @@ student += homeWork {
     count :i32
 
     do ()->() {
-        SpendTime.(1)            # spent an hour
+        SpendTime(1)            # spent an hour
         ..homeWork.count -= 1   # completed one
     }
 }
@@ -62,12 +62,12 @@ With the protocol included, we can use the student bundle that owns the protocol
 
 E.g:
 ```
-Peter := student.{ <-count=999999 }
-cmd.print.( Peter.homeWork.count )
+Peter := student{ <-count=999999 }
+cmd.print( Peter.homeWork.count )
 # print 999999, too much
-Peter.homeWork.do.()
+Peter.homeWork.do()
 # did a homework
-cmd.print.(Peter.homeWork.count)
+cmd.print(Peter.homeWork.count)
 # print 999998, or too much
 ```
 If this is the case, there is no advantage in defining these two properties directly in the package.
@@ -81,35 +81,35 @@ Now we can create a wide variety of students, all of whom follow the same protoc
 E.g:
 ```
 # create three different types of student packages
-StudentA := chineseStudent.{}
-StudentB := americaStudent.{}
-StudentC := japanStudent.{}
+StudentA := chinesestudent{}
+StudentB := americastudent{}
+StudentC := japanstudent{}
 # let them do homework separately
-StudentA.homeWork.do.()
-StudentB.homeWork.do.()
-StudentC.homeWork.do.()
+StudentA.homeWork.do()
+StudentB.homeWork.do()
+StudentC.homeWork.do()
 ```
 More efficient approach is to write this function into the function, let the function to help us repeatedly call the function of the protocol.
 
 E.g:
 ```
 doHomeWork (student: homeWork)->() {
-    student.do.()
+    student.do()
 }
 # Now we can make it easier for every student to do their homework
-doHomeWork.(StudentA.homeWork)
-doHomeWork.(StudentB.homeWork)
-doHomeWork.(StudentC.homeWork)
+doHomeWork(StudentA.homeWork)
+doHomeWork(StudentB.homeWork)
+doHomeWork(StudentC.homeWork)
 ```
 Of course, it is better to put these students in an array so that we can use loops to handle these repetitive tasks.
 
 E.g:
 ```
-Arr := []homeWork.{}
-Arr.add.( StudentA.homeWork )
+Arr := []homeWork{}
+Arr.add( StudentA.homeWork )
 ... # stuffed many, many students
-Arr.@ {
-    doHomeWork.(ea)
+@ [Arr] {
+    doHomeWork(ea)
 }
 ```
 ╮ (¯ ▽ ¯) ╭
@@ -120,15 +120,15 @@ Because packet types can be converted to protocol types, the original type of da
 
 But sometimes we need to get the original type of data to handle, we can use type judgment to help us accomplish this.
 
-We can use `value.?:type` To judge the type of data, using `value.?=type` To convert the data to our type.
+We can use `value.is<type>()` To judge the type of data, using `value.as<type>()` To convert the data to our type.
 
 E.g:
 ```
 func (hw :homeWork)->() {
     # judge type
-    ? hw.?:chineseStudent {
+    ? hw.is<chineseStudent>() {
         # convert to chinese student data
-        cs := hw.?=chineseStudent
+        cs := hw.as<chineseStudent>()
     }
 }
 ```
@@ -144,9 +144,9 @@ Demo {
 }
 
 Main ()->() {
-    S := B.{}
-    B.A.do.()
-    C.( B.A )
+    S := B{}
+    B.A.do()
+    C( B.A )
 }
 
 A -> {
@@ -166,9 +166,9 @@ B += A {
 }
 
 C (a:A)->() {
-    a.do.()
-    ? a.?:B {
-        cmd.print.( a.?=B.Y )
+    a.do()
+    ? a.is<B>() {
+        cmd.print( a.as<B>().Y )
     }
 }
 ```

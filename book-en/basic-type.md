@@ -25,14 +25,16 @@ u64     # 64-bit unsigned  0 to 18,446,744,073,709,551,615
 ## Basic Type Conversion
 Since the default integer is `i32`, how do we use other types of integers?
 
-We can use type conversion to change the number to the type we need, just use the `ToType` method.
+We can use type conversion to change the number to the type we need, just use the `toType` method.
 
 E.g:
 ```
-integer8 := (16).toI8.()
+integer8 := _(16).toI8()
 ```
 
-Note that, the basic type conversion is only valid for the base type.
+Note that, the basic type conversion function is only valid for the base type.
+
+If you need all types of casts, use the `to<Type>` method, which crashes against incompatible types, so use it with caution.
 ## Float 
 Integers do not meet our digital needs, and we often need to deal with decimals.
 
@@ -82,7 +84,7 @@ E.g:
 ```
 title := "Year:"
 content := 2018
-string := "Hello world! " + title + content.toStr.()
+string := "Hello world! " + title + content.toStr()
 # Hello world! Year:2018
 ```
 
@@ -112,12 +114,12 @@ E.g:
 boolean := true     # true  
 boolean = false     # false  
 ```
-## Any
-In particular, sometimes you need a type that can be any type to assist in the completion of the function, so it is `any`.
+## Object
+In particular, sometimes you need a type that can be any object to assist in the completion of the function, so it is `obj`.
 
 E.g:
 ```
-a :any = 1  # any type
+a :obj = 1  # any type
 ```
 ## Nullable Type
 All types in this language can't be null by default, which can avoid null problems to a great extent.
@@ -149,13 +151,13 @@ Sometimes, maybe we do not need to specify a specific value, but only want to cr
 
 Especially when using generics, you can not create directly using type conStructs.
 
-At this time we can use the null create method `null.(type)` to specify a null value that contains a type.
+At this time we can use the null create method `null(type)` to specify a null value that contains a type.
 
 E.g:
 ```
-x := null.(i64)
-y := null.(Protocol)
-z := null.(()->())
+x := null( i64 )
+y := null( Protocol )
+z := null( ()->() )
 ```
 More details on generics can be found in the generic section.
 
@@ -170,13 +172,13 @@ Demo {
 
 Main ()->() {
     a := 123
-    b := a.toI64.()
+    b := a.toI64()
     c := 123.456
     d := "hello"
     c := "{d} world"
     e := true
-    f :any = false
+    f :obj = false
     g :i32|null = null
-    h := null.(i32) 
+    h := null( i32 ) 
 }
 ```

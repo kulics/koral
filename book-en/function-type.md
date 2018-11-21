@@ -21,11 +21,11 @@ This defines a function with the identifier `function`.
 
 It should be noted that functions can be defined in namespaces, packages, protocols, or inside functions. When defining a function in a function, the internal function does not have a public property and belongs only to the private function of the current function.
 ## Call
-Unlike the main entry function, which cannot be called, regular functions can be called with an identifier. We only need to use the `id.()` statement to use the wrapped function.
+Unlike the main entry function, which cannot be called, regular functions can be called with an identifier. We only need to use the `id()` statement to use the wrapped function.
 
 E.g:
 ```
-function.()  # call function
+function()  # call function
 ```
 ## Parameter
 Although functions can perform specific functions without any parameters, more often we need to be able to accept some input data, or to return data, or both, which requires parameters to help us accomplish task.
@@ -86,7 +86,7 @@ E.g:
 # define one function with two in parameter
 sell (price: i32, name: str)->(){}
 # fill in the data that meets the requirements as defined
-sell.(1.99, "cola")
+sell(1.99, "cola")
 
 ```
 ### Out Parameters
@@ -108,16 +108,16 @@ The difference is that for multiple return values ​​we have to wrap each ide
 
 E.g:
 ```
-(n, c) := topSell.()
+(n, c) := topSell()
 # define the returned two values ​​for n and c
-(n, c) = topSell.()
+(n, c) = topSell()
 # overrides the returned two values ​​to n and c
 ```
 You can use the definition or assignment statement to get the return value of the function to use, you can also use the nested function to another function.
 
 E.g:
 ```
-cmd.print.( topSell.() )    # print two values
+cmd.print( topSell() )    # print two values
 ```
 If there is only one return value, the brackets can be taken without.
 
@@ -125,19 +125,19 @@ Note that if you call a function with a return value is not allowed to not recei
 
 E.g:
 ```
-topSell.()  # error, did not explicitly receive the return value
+topSell()  # error, did not explicitly receive the return value
 ```
 But sometimes, as a caller, we do not necessarily need all the return values, but this time we can use the anonymous identifier `_` to help us drop the data. Just need to write it in the corresponding position.
 
 E.g:
 ```
-name, _ := topSell.()
+name, _ := topSell()
 ```
 If indeed all the return values ​​are not needed, we can also just write a `_` to discard all. But why would need to call such a function? Maybe we should review the code again.
 
 E.g:
 ```
-_ = topSell.()  # for _ , assignment and definition are equivalent
+_ = topSell()  # for _ , assignment and definition are equivalent
 ```
 ## Function In Parameter
 If we want part of the function defined by the external, and only perform the rest of the internal logic, such as some set traversal for a collection of functions, then we can use the function parameters to accomplish this goal.
@@ -148,7 +148,7 @@ E.g:
 ```
 each1To10 (func: (item: i32)->() )->() {
     [1<=10].@ {
-        func.(ea)
+        func(ea)
     }
 }
 ```
@@ -159,10 +159,10 @@ So that we can pass the details of the processing to the externally passed `func
 E.g:
 ```
 print (item: i32)->() {
-    cmd.print.(item)
+    cmd.print(item)
 }
 
-each1To10.(print)
+each1To10(print)
 ```
 So, we executed the `print` function in the loop inside `each1To10`.
 
@@ -181,13 +181,13 @@ If there is one and only one parameter at the same time, the identifier part can
 
 E.g:
 ```
-foreach.( ${ it ->
-     Cmd.print.(it)
-     Cmd.print.(it * it)
-     Cmd.print.(it % 2)
+foreach( ${ it ->
+     cmd.print(it)
+     cmd.print(it * it)
+     cmd.print(it % 2)
 })
-take.( $a, b -> a + b )
-findAll.( $it > 7 )
+take( $a, b -> a + b )
+findAll( $it > 7 )
 ```
 Very simple, the difference from the expression of a function type is that you only need to declare the parameter identifier and execution logic, and neither the type nor the return value need to be declared.
 ## Lambda Function
@@ -195,8 +195,8 @@ Unlike the above simplified method, we can also write a complete function direct
 
 E.g:
 ```
-each1To10.( (item:i32)->() {
-     cmd.print.(item)
+each1To10( (item:i32)->() {
+     cmd.print(item)
 })
 ```
 ### [Next Chapter](control-type.md)
@@ -209,13 +209,13 @@ Demo {
 }
 
 Main ()->() {
-    A.()
-    B.(1,2,3)
-    x := C.()
-    D.( $-> cmd.print.("D") )
-    E.( $cmd.print.(it) )
-    E.( (a:i32)->() {
-        cmd.print.(it)
+    A()
+    B(1,2,3)
+    x := C()
+    D( $-> cmd.print("D") )
+    E( $cmd.print(it) )
+    E( (a:i32)->() {
+        cmd.print(it)
     })
 }
 
@@ -228,13 +228,13 @@ C ()->(a:i32) {
 }
 
 D (fn: ()->() )->() {
-    fn.()
+    fn()
 }
 
 E (fn: (a:i32)->() )->() {
     [1<=20].@
     {
-        fn.(ea)
+        fn(ea)
     }
 }
 ```

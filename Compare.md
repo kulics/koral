@@ -177,7 +177,7 @@ for index in 1...5 {
 ```
 shoppingList := _{"catfish", "water",
     "tulips", "blue paint"}
-shoppingList.[1] = "bottle of water"
+shoppingList[1] = "bottle of water"
 ```
 ### C#
 ```
@@ -210,7 +210,7 @@ occupations := _{
     "Malcolm"->"Captain",
     "Kaylee"->"Mechanic"
 }
-occupations.["Jayne"] = "Public Relations"
+occupations["Jayne"] = "Public Relations"
 ```
 ### C#
 ```
@@ -691,9 +691,9 @@ var movieCount = 0
 var songCount = 0
 
 for _, item := range(library) {
-    if _, ok := item.(Movie); ok {
+    if _, ok := item(Movie); ok {
         movieCount++
-    } else if _, ok := item.(Song); ok {
+    } else if _, ok := item(Song); ok {
         songCount++
     }
 }
@@ -805,7 +805,7 @@ foreach (var current in someObjects)
 ### Go
 ```
 for object := range someObjects {
-    if movie,ok := object.(Movie); ok {
+    if movie,ok := object(Movie); ok {
         fmt.Printf("Movie: '%s', dir. %s", movie.name, movie.director)
     }
 }

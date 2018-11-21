@@ -71,11 +71,11 @@ More details about the function will be explained in later chapters.
 ## Display information
 We use the program in order to obtain some useful information, so we need a feature to browse information, this feature can be display, print or output.
 
-If we write a console program, we can use `cmd.print.()` function, it can display data or text information to the console for us to browse.
+If we write a console program, we can use `cmd.print()` function, it can display data or text information to the console for us to browse.
 
 E.g:
 ```
-cmd.print.("Hello world")    # output Hello world
+cmd.print("Hello world")    # output Hello world
 ```
 In the following examples, we will all use the console as a presentation environment.
 ## Comment
@@ -170,10 +170,9 @@ However, in practical projects, the use of partition will effectively improve th
 
 E.g:
 ```
-a.b.(x,y).c.(fn:()->(x:i32){<-(2+1)}).d=1+3*5/4
+a.b(x,y).c(fn:_()->(x:i32){<-(2+1)}).d=1+3*5/4
 
-a.b.(x, y)
-.c.(fn: ()->(x: i32) {
+a.b(x, y).c(fn: _()->(x: i32) {
     <- (2 + 1)
 }).d = 1 + 3 * 5 / 4
 ```
