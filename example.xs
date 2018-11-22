@@ -292,6 +292,8 @@ testLambda ()->() {
         <~ tsks.delay(5000)
         cmd.print(it)
     })
+    test4(fn: (it:i32)->(v:i32))->(){ fn(18) }
+    test4($it+1)
 }
 
 testLinq ()->() {
