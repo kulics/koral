@@ -52,33 +52,33 @@ Main ()->() {
 }
 
 node {..value :i32}-> {
-    left :node|null
-    right :node|null
+    left :node|nil
+    right :node|nil
 }
 
-PreorderTraverse (node:node|null)->() {
-    ? node -> null { <- () }
+PreorderTraverse (node:node|nil)->() {
+    ? node -> nil { <- () }
     cmd.print(node.value)
     PreorderTraverse(node.left)
     PreorderTraverse(node.right)
 }
 
-PostorderTraverse (node:node|null)->() {
-    ? node -> null { <- () }
+PostorderTraverse (node:node|nil)->() {
+    ? node -> nil { <- () }
     PreorderTraverse(node.left)
     PreorderTraverse(node.right)
     cmd.print(node.value)
 }
 
-MiddleorderTraverse (node:node|null)->() {
-    ? node -> null { <- () }
+MiddleorderTraverse (node:node|nil)->() {
+    ? node -> nil { <- () }
     PreorderTraverse(node.left)
     cmd.print(node.value)
     PreorderTraverse(node.right)
 }
 
-InverseNode (node:node|null)->(node:node|null) {
-    ? node -> null { <- (null) }
+InverseNode (node:node|nil)->(node:node|nil) {
+    ? node -> nil { <- (nil) }
     node.left = InverseNode(node.left)
     node.right = InverseNode(node.right)
 
