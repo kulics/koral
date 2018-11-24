@@ -55,7 +55,8 @@ namespace Compiler
             if (context.expression() != null)
             {
                 obj = ((Result)Visit(context.expression())).text + "." + obj;
-            } else if (context.id().Length > 0 )
+            }
+            else if (context.id().Length > 0)
             {
                 var id = "";
                 foreach (var item in context.id())
@@ -114,6 +115,14 @@ namespace Compiler
                     }
                 }
                 r.text = e1.text + op + e2.text;
+            }
+            else if (count == 2)
+            {
+                r = (Result)Visit(context.GetChild(0));
+                if (context.op.Type == XsParser.Judge)
+                {
+                    r.text += "?";
+                }
             }
             else if (count == 1)
             {
@@ -301,6 +310,10 @@ namespace Compiler
         public override object VisitCallElement([NotNull] CallElementContext context)
         {
             var id = (Result)Visit(context.id());
+            if (context.op?.Type == XsParser.Judge)
+            {
+                id.text += "?";
+            }
             if (context.expression() == null)
             {
                 return new Result { text = id.text + (string)Visit(context.slice()) };

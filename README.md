@@ -36,10 +36,10 @@ Main ()->() {
     @ [greetings] {
         # match
         ? ea -> [ 0 <= 8 ] {
-            cmd.print(ea) # call function
+            cmd.prt(ea) # call function
         } _ {
             # lambda
-            cmd.print( greetings.filter($it.count > 4) )
+            cmd.prt( greetings.filter($it.count > 4) )
             <- @
         }
     }

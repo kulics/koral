@@ -21,15 +21,15 @@ Main ()->() {
     n2.left = n5
     n2.right = n6
 
-    cmd.print("Pre Order Traverse")
+    cmd.prt("Pre Order Traverse")
     PreorderTraverse(n0)
-    cmd.print("Middle Order Traverse")
+    cmd.prt("Middle Order Traverse")
     MiddleorderTraverse(n0)
-    cmd.print("Post Order Traverse")
+    cmd.prt("Post Order Traverse")
     PostorderTraverse(n0)
 
     n0 = InverseNode(n0)
-    cmd.print("Inverse node")
+    cmd.prt("Inverse node")
     PreorderTraverse(n0)
 
     arr := _{9,1,5,8,3,7,4,6,2}
@@ -39,45 +39,45 @@ Main ()->() {
     arr = _{9,1,5,8,3,7,4,6,2}
     QuickSort(arr)
 
-    cmd.print("Filter Array")
+    cmd.prt("Filter Array")
     arr = FilterList(arr, $it > 4)
-    @ [arr] { cmd.print(ea) }
+    @ [arr] { cmd.prt(ea) }
 
-    cmd.print("oop")
+    cmd.prt("oop")
     app := App{"test", "Windows"}
     app.Start()
     app.Stop()
     Shutdown(app)
-    cmd.read()
+    cmd.rd()
 }
 
 node {..value :i32}-> {
-    left :node|nil
-    right :node|nil
+    left :node?
+    right :node?
 }
 
-PreorderTraverse (node:node|nil)->() {
+PreorderTraverse (node:node?)->() {
     ? node -> nil { <- () }
-    cmd.print(node.value)
+    cmd.prt(node.value)
     PreorderTraverse(node.left)
     PreorderTraverse(node.right)
 }
 
-PostorderTraverse (node:node|nil)->() {
+PostorderTraverse (node:node?)->() {
     ? node -> nil { <- () }
     PreorderTraverse(node.left)
     PreorderTraverse(node.right)
-    cmd.print(node.value)
+    cmd.prt(node.value)
 }
 
-MiddleorderTraverse (node:node|nil)->() {
+MiddleorderTraverse (node:node?)->() {
     ? node -> nil { <- () }
     PreorderTraverse(node.left)
-    cmd.print(node.value)
+    cmd.prt(node.value)
     PreorderTraverse(node.right)
 }
 
-InverseNode (node:node|nil)->(node:node|nil) {
+InverseNode (node:node?)->(node:node?) {
     ? node -> nil { <- (nil) }
     node.left = InverseNode(node.left)
     node.right = InverseNode(node.right)
@@ -86,12 +86,12 @@ InverseNode (node:node|nil)->(node:node|nil) {
     <- (temp)
 }
 
-Swap (list:[]i32, i, j:i32)->() {
+Swap (list:[i32], i, j:i32)->() {
     _(list[i], list[j]) = _(list[j], list[i])
 }
 
-SimpleSort (list:[]i32)->() {
-    cmd.print("Simple Sort")
+SimpleSort (list:[i32])->() {
+    cmd.prt("Simple Sort")
     @ [0 < list.count] i {
         @ [i+1 < list.count] j {
             ? list[i] > list[j] {
@@ -99,11 +99,11 @@ SimpleSort (list:[]i32)->() {
             }
         }
     }
-    @ [list] { cmd.print(ea) }
+    @ [list] { cmd.prt(ea) }
 }
 
-BubbleSort (list:[]i32)->() {
-    cmd.print("Bubble Sort")
+BubbleSort (list:[i32])->() {
+    cmd.prt("Bubble Sort")
     @ [0 < list.count] i {
         @ [list.count-2 >= i] j {
             ? list[j] > list[j+1] {
@@ -111,16 +111,16 @@ BubbleSort (list:[]i32)->() {
             }
         }
     }
-    @ [list] { cmd.print(ea) }
+    @ [list] { cmd.prt(ea) }
 }
 
-QuickSort (list:[]i32)->() {
-    cmd.print("Quick Sort")
+QuickSort (list:[i32])->() {
+    cmd.prt("Quick Sort")
     QSort(list,0,list.count-1)
-    @ [list] { cmd.print(ea) }
+    @ [list] { cmd.prt(ea) }
 }
 
-QSort (list:[]i32, low, high:i32)->() {
+QSort (list:[i32], low, high:i32)->() {
     pivot := 0
     ? low < high {
         pivot = Partition(list,low,high)
@@ -130,7 +130,7 @@ QSort (list:[]i32, low, high:i32)->() {
     }
 }
 
-Partition (list:[]i32, low, high:i32)->(position:i32) {
+Partition (list:[i32], low, high:i32)->(position:i32) {
     pivotkey := list[low]
     
     @ low < high {
@@ -147,8 +147,8 @@ Partition (list:[]i32, low, high:i32)->(position:i32) {
     <- (low)
 }
 
-FilterList (list:[]i32, fn:(take:i32)->(act:bl))->(l:[]i32) {
-    filter := []i32{}
+FilterList (list:[i32], fn:(take:i32)->(act:bl))->(l:[i32]) {
+    filter := [i32]{}
 
     @ [list] {
         ? fn(ea) {
@@ -168,12 +168,12 @@ Program {..Name:str}-> {
 
 Program += {
     Start ()->() {
-        cmd.print("Start")
+        cmd.prt("Start")
         .._running = true
     }
 
     Stop ()->() {
-        cmd.print("Stop")
+        cmd.prt("Stop")
         .._running = false
     }
 }
@@ -184,7 +184,7 @@ Control -> {
 
 Program += Control {
     Shutdown ()->() {
-        cmd.print("Shutdown")
+        cmd.prt("Shutdown")
         .._running = false
     }
 }

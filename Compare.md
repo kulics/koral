@@ -3,7 +3,7 @@
 ## Hello World
 ### Xs
 ```
-cmd.print("Hello, world!")
+cmd.prt("Hello, world!")
 ```
 ### C#
 ```
@@ -144,7 +144,7 @@ let count = i + Int(f)
 ### Xs
 ```
 @ [ 1 <= 5 ] {
-    cmd.print("{ea} times 5 is {ea * 5}")
+    cmd.prt("{ea} times 5 is {ea * 5}")
 }
 ```
 ### C#
@@ -247,8 +247,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Xs
 ```
-emptyArray := []str{}
-emptyDictionary := [str]f32{}
+emptyArray := [str]{}
+emptyDictionary := [str->f32]{}
 ```
 ### C#
 ```
@@ -728,12 +728,17 @@ for item in library {
 ### Xs
 ```
 nb := 42
-? nb ->  
-[0<=7],8,9 { print("single digit") }
-10 { print("double digits") }
-[11<=99] { print("double digits") }
-[100<=999] { print("triple digits") }
-_ { print("four or more digits") }
+? nb -> [0<=7],8,9 { 
+    cmd.prt("single digit") 
+} 10 { 
+    cmd.prt("double digits") 
+} [11<=99] { 
+    cmd.prt("double digits") 
+} [100<=999] { 
+    cmd.prt("triple digits") 
+} _ { 
+    cmd.prt("four or more digits") 
+}
 ```
 ### C#
 ```
@@ -786,7 +791,7 @@ switch nb {
 ```
 @ [someObjects] {
     ? ea -> movie:Movie {
-        print("Movie: '{movie.name}', " +
+        cmd.prt("Movie: '{movie.name}', " +
             "dir. {movie.director}")
     }
 }
