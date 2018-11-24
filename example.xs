@@ -9,7 +9,7 @@ demo=run {
 
 # main function
 Main ()~>() {
-    cmd.print("main function")
+    cmd.prt("main function")
     # run test
     testSharpType()
     testOperator()
@@ -38,7 +38,7 @@ Main ()~>() {
 
     p.testFuncTemplate<i32,str>(1, "2").testPackage()
     
-    cmd.read()
+    cmd.rd()
 }
 
 staticX := 0
@@ -91,7 +91,7 @@ testOperator ()->() {
     c = true & false
     d := 11
     d = d.and(1).or(2).xor(3).not().lft(1).rht(2)
-    cmd.print(b.toStr())
+    cmd.prt(b.toStr())
 }
 
 testString ()->() {
@@ -99,7 +99,7 @@ testString ()->() {
     txt : str = text
     @ [txt] {
         ? ea == 'e' {
-            cmd.print("love xs")
+            cmd.prt("love xs")
         }
     }
 }
@@ -116,11 +116,11 @@ testTypeConvert ()->() {
     y := x.as<program>()
     z1 := _(12.34).toF32()
     z2 := z1.toI64()
-    cmd.print( z2.to<obj>().to<i64>() )
-    cmd.print( y.is<program>() )
-    cmd.print( x.as<program>().running )
-    cmd.print( ?(:program) )
-    cmd.print( ?(x) )
+    cmd.prt( z2.to<obj>().to<i64>() )
+    cmd.prt( y.is<program>() )
+    cmd.prt( x.as<program>().running )
+    cmd.prt( ?(:program) )
+    cmd.prt( ?(x) )
 }
 
 testDefault ()->() {
@@ -132,29 +132,29 @@ testDefault ()->() {
 testSwitch ()->() {
     x :obj = 3
     ? x -> 1 {
-        cmd.print(1)
+        cmd.prt(1)
     } :str {
-        cmd.print("string")
+        cmd.prt("string")
     } :i32 {
-        cmd.print("int")
+        cmd.prt("int")
     } nil {
-        cmd.print("nil")
+        cmd.prt("nil")
     } _ {
-        cmd.print("default")
+        cmd.prt("default")
     }
 }
 
 testIf ()->() {
     x := 5
     ? x == 2 {
-        cmd.print(2)
+        cmd.prt(2)
     } x == 3 {
-        cmd.print(3)
+        cmd.prt(3)
     } _ {
-        cmd.print("else")
+        cmd.prt("else")
     }
     ? x == 5 {
-        cmd.print("yes")
+        cmd.prt("yes")
     }
 }
 
@@ -172,14 +172,14 @@ testArray ()->() {
     arrType := _{1,2,3}
     array : [|]i32 = _{|1,2,3|}
     @ [arrNumber] {
-        cmd.print(ea)
+        cmd.prt(ea)
     }
     @ [arrNumber] item {
-        cmd.print(item)
+        cmd.prt(item)
     }
     @ [arrNumber] i -> v {
-        cmd.print(i)
-        cmd.print(v)
+        cmd.prt(i)
+        cmd.prt(v)
     }
     slice := arrNumber[0<=]
     slice2 := arrNumber[<3]
@@ -190,11 +190,11 @@ testDictionary ()->() {
     dicSN := _{"k1"->1,"k2"->2}
     dicSN += _{"k3"->3}
     @ [dicSN] k -> v {
-        cmd.print(k)
-        cmd.print(v)
+        cmd.prt(k)
+        cmd.prt(v)
     }
     dicSN -= "k1"
-    cmd.print(dicSN["k2"])
+    cmd.prt(dicSN["k2"])
 }
 
 testCheck ()->() {
@@ -221,27 +221,24 @@ testCheck ()->() {
 }
 
 testLoop ()->() {
-    cmd.print(" 0 to 10")
+    cmd.prt(" 0 to 10")
     @ [0 <= 10] {
-        Console.Write(ea)
-        Console.Write(", ")
+        cmd.prt(ea, ", ", "")
     }
-    cmd.print("")
-    cmd.print(" 0 to 8 step 2")
+    cmd.prt(" ")
+    cmd.prt(" 0 to 8 step 2")
     @ [0 < 8; 2] {
-        Console.Write(ea)
-        Console.Write(", ")
+        cmd.prt(ea, ", ", "")
     }
-    cmd.print("")
-    cmd.print(" 8 to 2 step 2")
+    cmd.prt(" ")
+    cmd.prt(" 8 to 2 step 2")
     @ [8 > 0; 2] {
-        Console.Write(ea)
-        Console.Write(", ")
+        cmd.prt(ea, ", ", "")
         ? ea == 6 {
             -> @
         }
     }
-    cmd.print("")
+    cmd.prt(" ")
     @ {
         <- @
     }
@@ -290,11 +287,11 @@ testLambda ()->() {
     }
     test3( _(it:i32)~>(){
         <~ tsks.delay(5000)
-        cmd.print(it)
+        cmd.prt(it)
     })
     test3( ${ it ~>
         <~ tsks.delay(5000)
-        cmd.print(it)
+        cmd.prt(it)
     })
     test4(fn: (it:i32)->(v:i32))->(){ fn(18) }
     test4($it+1)

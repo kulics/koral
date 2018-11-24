@@ -376,8 +376,6 @@ t=TypeAny
 // bool值
 bool:t=True|t=False;
 
-as : op='?!';
-is : op='?:';
 judge : op=('|' | '&' | '==' | '~=' | '<' | '>' | '<=' | '>=');
 assign : op=(Assign | '+=' | '-=' | '*=' | '/=' | '%=');
 add : op=('+' | '-');
