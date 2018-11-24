@@ -204,10 +204,14 @@ testCheck ()->() {
         ! z3 := defer{} {
             x := 1 * 1
         }
-        y := 1 + 1
-    } :IOException {
+        ! {
+            y := 1 + 1
+        } -> {
+            !(ex)
+        }
+    } -> :IOException {
         !(ex)
-    } e {
+    } e:Exception {
         !(e)
     } _ {
         ? z ~= null {
