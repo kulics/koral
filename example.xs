@@ -163,7 +163,7 @@ testIf ()->() {
 testArray ()->() {
     arrSingle := _{1}
     arrNumber := _{1,2,5,6,8,4}
-    arrNumber = 0 + arrNumber
+    arrNumber = arrNumber + 0
     arrNumber += 3 + 7
     arrNumber -= 6
     take := arrNumber[0]
