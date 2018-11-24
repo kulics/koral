@@ -95,9 +95,7 @@ testOperator ()->() {
 }
 
 testString ()->() {
-    text := "love xs"
-    txt : str = text
-    @ [txt] {
+    @ ["love xs"] {
         ? ea == 'e' {
             cmd.prt("love xs")
         }
@@ -105,10 +103,10 @@ testString ()->() {
 }
 
 testNullable ()->() {
-    a: i32! = 1
-    a!.toStr()
+    a: i32? = 1
+    a?.toStr()
     b: str? = nil
-    b?.toStr()
+    b!.toStr()
     c: obj? = nil
     d: app! = nil
     e: [i32?]? = [i32?]?{<-0}
