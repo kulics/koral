@@ -431,7 +431,7 @@ TypeStr: 'str';
 TypeBool: 'bl';
 True: 'true';
 False: 'false';
-Null : 'null';
+Null : 'nil';
 
 Float: Integer '.' DIGIT+ ; // 浮点数
 Integer : DIGIT+ ; // 整数

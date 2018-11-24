@@ -105,10 +105,10 @@ testString ()->() {
 }
 
 testNullable ()->() {
-    a: i32|null = null
-    b: str|null = null
-    c: obj|null = null
-    d: app|null = null
+    a: i32|nil = nil
+    b: str|nil = nil
+    c: obj|nil = nil
+    d: app|nil = nil
 }
 
 testTypeConvert ()->() {
@@ -124,9 +124,9 @@ testTypeConvert ()->() {
 }
 
 testEmpty ()->() {
-    x := null(program)
-    y := null(protocol)
-    z := null((a:i32)->(b:i32))
+    x := nil(program)
+    y := nil(protocol)
+    z := nil((a:i32)->(b:i32))
 }
 
 testSwitch ()->() {
@@ -137,8 +137,8 @@ testSwitch ()->() {
         cmd.print("string")
     } :i32 {
         cmd.print("int")
-    } null {
-        cmd.print("null")
+    } nil {
+        cmd.print("nil")
     } _ {
         cmd.print("default")
     }
@@ -198,7 +198,7 @@ testDictionary ()->() {
 }
 
 testCheck ()->() {
-    z :defer = null
+    z :defer = nil
     ! z2 := defer{} {
         z = defer{}
         ! z3 := defer{} {
@@ -214,7 +214,7 @@ testCheck ()->() {
     } e:Exception {
         !(e)
     } _ {
-        ? z ~= null {
+        ? z ~= nil {
             z.IDisposable.Dispose()
         }
     }
@@ -392,10 +392,10 @@ testImplementTemplate += testProtocolTemplate<testImplementTemplate> {
 }
 
 program {}-> {
-    Name :str|null
-    running :bl|null
+    Name :str|nil
+    running :bl|nil
 
-    Property :str|null {
+    Property :str|nil {
         get { <- (Name) }
         set { Name = value }
     }
@@ -412,11 +412,11 @@ protocol -> {
 `Table{"test"}`
 testAnnotation {}-> {
     `Key, Column{"id"}`
-    Id :str|null
+    Id :str|nil
     `Column{"nick_name"}`
-    NickName :str|null
+    NickName :str|nil
     `Column{"profile"}`
-    Profile :str|null
+    Profile :str|nil
 }
 
 testEnum [Ok, Err = -1]
