@@ -25,7 +25,7 @@ Main ()~>() {
     })
     testCheck()
     testTypeConvert()
-    testEmpty()
+    testDefault()
     testLambda()
     _ = <~ testAsync()
 
@@ -123,10 +123,10 @@ testTypeConvert ()->() {
     cmd.print( ?(x) )
 }
 
-testEmpty ()->() {
-    x := nil(program)
-    y := nil(protocol)
-    z := nil((a:i32)->(b:i32))
+testDefault ()->() {
+    x := typ.def<program>()
+    y := typ.def<protocol>()
+    z := typ.def<(a:i32)->(b:i32)>()
 }
 
 testSwitch ()->() {

@@ -210,7 +210,6 @@ linq // 联合查询
 | function // 函数
 | pkgAnonymous // 匿名包
 | tupleExpression //元组表达式
-| empty // 类型空初始化
 | plusMinus // 正负处理
 | negate // 取反
 | expression call callExpression // 链式调用
@@ -306,8 +305,6 @@ function : anonymousParameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOu
 anonymousParameterClauseIn : '_(' parameter? (',' parameter)*  ')'  ;
 
 tupleExpression : '_(' expression (',' expression)*  ')'; // 元组
-
-empty : Null '(' type ')'; // 类型空初始化
 
 plusMinus : add expression;
 

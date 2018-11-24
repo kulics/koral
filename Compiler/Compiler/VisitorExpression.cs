@@ -816,15 +816,6 @@ namespace Compiler
             return obj;
         }
 
-        public override object VisitEmpty([NotNull] EmptyContext context)
-        {
-            var r = new Result();
-            var type = Visit(context.type());
-            r.data = type;
-            r.text = "default(" + type + ")";
-            return r;
-        }
-
         public override object VisitPlusMinus([NotNull] PlusMinusContext context)
         {
             var r = new Result();
