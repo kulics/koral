@@ -105,10 +105,14 @@ testString ()->() {
 }
 
 testNullable ()->() {
-    a: i32|nil = nil
-    b: str|nil = nil
-    c: obj|nil = nil
-    d: app|nil = nil
+    a: i32! = 1
+    a!.toStr()
+    b: str? = nil
+    b?.toStr()
+    c: obj? = nil
+    d: app! = nil
+    e: [i32?]? = [i32?]?{<-0}
+    e?[0]?.toStr()?.toStr()
 }
 
 testTypeConvert ()->() {
@@ -124,9 +128,9 @@ testTypeConvert ()->() {
 }
 
 testDefault ()->() {
-    x := typ.def<program>()
-    y := typ.def<protocol>()
-    z := typ.def<(a:i32)->(b:i32)>()
+    x := lib.def<program>()
+    y := lib.def<protocol>()
+    z := lib.def<(a:i32)->(b:i32)>()
 }
 
 testSwitch ()->() {
@@ -168,9 +172,9 @@ testArray ()->() {
     take = inPackageArray{}.arr[2]
     arrObj := _{"123", 432, app{}}
     arrArr := _{_{1,1,1},_{1,1,1}}
-    arrEmpty := []i32{}
+    arrEmpty := [i32]{}
     arrType := _{1,2,3}
-    array : [|]i32 = _{|1,2,3|}
+    array : [|i32|] = _{|1,2,3|}
     @ [arrNumber] {
         cmd.prt(ea)
     }
@@ -186,7 +190,7 @@ testArray ()->() {
 }
 
 testDictionary ()->() {
-    empty := [str]i32{}
+    empty := [str->i32]{}
     dicSN := _{"k1"->1,"k2"->2}
     dicSN += _{"k3"->3}
     @ [dicSN] k -> v {
@@ -247,7 +251,7 @@ testLoop ()->() {
 testFunc (s: str)->(out1: str, out2: i32) {
     s = s + "test"
     i := 1+1*3*9/8
-    out2 := i + 5 + _(i +8)
+    out2 := i + 5 + _(i + 8)
     # func in func
     InFunc ()->() {
         <- ()
@@ -306,7 +310,7 @@ testLinq ()->() {
 testInterface (in: protocol)->() {}
 
 inPackageArray {} -> {
-    arr :[]i32
+    arr :[i32]
 
     .. {
         arr = _{1,2,3,4,5,6,7}
@@ -338,8 +342,8 @@ app += {
             Name := "new program"
             running := true
         }
-        item3 := []i32{<- 1,2,3,4,5}
-        item4 := [str]i32{<- "1"->1,"2"->2,"3"->3}
+        item3 := [i32]{<- 1,2,3,4,5}
+        item4 := [str->i32]{<- "1"->1,"2"->2,"3"->3}
     }
 
     testFuncTemplate<T1,T2> (data1: T1, data2: T2)->(data: app) {
@@ -389,10 +393,10 @@ testImplementTemplate += testProtocolTemplate<testImplementTemplate> {
 }
 
 program {}-> {
-    Name :str|nil
-    running :bl|nil
+    Name :str?
+    running :bl?
 
-    Property :str|nil {
+    Property :str? {
         get { <- (Name) }
         set { Name = value }
     }
@@ -409,11 +413,11 @@ protocol -> {
 `Table{"test"}`
 testAnnotation {}-> {
     `Key, Column{"id"}`
-    Id :str|nil
+    Id :str?
     `Column{"nick_name"}`
-    NickName :str|nil
+    NickName :str?
     `Column{"profile"}`
-    Profile :str|nil
+    Profile :str?
 }
 
 testEnum [Ok, Err = -1]

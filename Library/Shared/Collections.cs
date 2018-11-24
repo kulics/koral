@@ -13,34 +13,23 @@ namespace Library
 
         public static lst<T> operator +(lst<T> L, T R)
         {
-            var list = new lst<T>();
-            list.AddRange(L);
-            list.Add(R);
+            var list = new lst<T>(L)
+            {
+                R
+            };
             return list;
         }
 
         public static lst<T> operator +(lst<T> L, lst<T> R)
         {
-            var list = new lst<T>();
-            list.AddRange(L);
-            list.AddRange(R);
-            return list;
-        }
-
-        public static lst<T> operator +(T L, lst<T> R)
-        {
-            var list = new lst<T>
-            {
-                L
-            };
+            var list = new lst<T>(L);
             list.AddRange(R);
             return list;
         }
 
         public static lst<T> operator -(lst<T> L, int R)
         {
-            var list = new lst<T>();
-            list.AddRange(L);
+            var list = new lst<T>(L);
             list.RemoveAt(R);
             return list;
         }
@@ -76,22 +65,22 @@ namespace Library
             {
                 if (attach)
                 {
-                    return subList(startIndex??0, lastIndex);
+                    return subList(startIndex ?? 0, lastIndex);
                 }
                 else
                 {
-                    return subList(startIndex??0, lastIndex-1);
+                    return subList(startIndex ?? 0, lastIndex - 1);
                 }
             }
             else // (startIndex == null)
             {
                 if (attach)
                 {
-                    return subList(0, endIndex??0);
+                    return subList(0, endIndex ?? 0);
                 }
                 else
                 {
-                    return subList(0, endIndex??0-1);
+                    return subList(0, endIndex ?? 0 - 1);
                 }
             }
         }
@@ -100,7 +89,7 @@ namespace Library
 
         public T findFirst(Predicate<T> match) => Find(match);
         public new T findLast(Predicate<T> match) => FindLast(match);
-        public new lst<T> findAll(Func<T,bool> match) => this.Where(match) as lst<T>;
+        public new lst<T> findAll(Func<T, bool> match) => this.Where(match) as lst<T>;
         public int findFirstIndex(Predicate<T> match) => FindIndex(match);
         public new int findLastIndex(Predicate<T> match) => FindLastIndex(match);
 
@@ -132,11 +121,7 @@ namespace Library
 
         public static dic<TKey, TValue> operator +(dic<TKey, TValue> L, dic<TKey, TValue> R)
         {
-            var dic = new dic<TKey, TValue>();
-            foreach (var item in L)
-            {
-                dic.Add(item.Key, item.Value);
-            }
+            var dic = new dic<TKey, TValue>(L);
             foreach (var item in R)
             {
                 dic.Add(item.Key, item.Value);
@@ -146,11 +131,7 @@ namespace Library
 
         public static dic<TKey, TValue> operator -(dic<TKey, TValue> L, TKey R)
         {
-            var dic = new dic<TKey, TValue>();
-            foreach (var item in L)
-            {
-                dic.Add(item.Key, item.Value);
-            }
+            var dic = new dic<TKey, TValue>(L);
             dic.Remove(R);
             return dic;
         }

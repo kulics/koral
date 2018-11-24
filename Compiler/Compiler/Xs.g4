@@ -216,6 +216,7 @@ linq // 联合查询
 | expression judge expression // 判断型表达式
 | expression add expression // 和型表达式
 | expression mul expression // 积型表达式
+| expression op=(Judge|Check) // 可空判断
 ;
 
 callSelf: '..' callExpression;
@@ -245,7 +246,7 @@ annotationAssign: (id '=')? expression ;
 
 callFunc: id (templateCall)? tuple; // 函数调用
 
-callElement : id '[' (expression | slice) ']';
+callElement : id op=(Judge|Check)? '[' (expression | slice) ']';
 
 callPkg: type '{' expressionList? ( ArrowLeft (pkgAssign|listAssign|dictionaryAssign))? '}'; // 新建包
 
@@ -340,13 +341,13 @@ typeTuple
 | typeFunction
 ;
 
-typeNullable : typeNotNull '|' Null;
+typeNullable : typeNotNull (Judge|Check);
 type : typeNotNull | typeNullable;
 
 typeTuple : '(' type (',' type)+ ')';
-typeList : '[' ']' type;
-typeArray : '[' '|' ']' type;
-typeDictionary :  '[' type ']' type;
+typeList : '[' type ']';
+typeArray : '[' '|' type '|' ']';
+typeDictionary :  '[' type ArrowRight type ']';
 typePackage : nameSpaceItem (templateCall)? ;
 typeFunction : typeFunctionParameterClause ArrowRight typeFunctionParameterClause;
 
