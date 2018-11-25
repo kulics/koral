@@ -146,11 +146,11 @@ judgeIfStatement:Judge expression BlockLeft (functionSupportStatement)* BlockRig
 // else if 判断
 judgeElseIfStatement: expression BlockLeft (functionSupportStatement)* BlockRight;
 // 循环
-loopStatement:Loop iteratorStatement (id)? BlockLeft (functionSupportStatement)* BlockRight Terminate?;
+loopStatement:Loop (id ArrowLeft)? iteratorStatement BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 集合循环
-loopEachStatement:Loop '[' expression ']' ((id ArrowRight)? id)? BlockLeft (functionSupportStatement)* BlockRight Terminate?;
+loopEachStatement:Loop ((id ArrowRight)? id ArrowLeft)?  expression BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 条件循环
-loopCaseStatement:Loop expression BlockLeft (functionSupportStatement)* BlockRight Terminate?;
+loopCaseStatement:Loop Judge expression BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 无限循环
 loopInfiniteStatement:Loop BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 跳出循环

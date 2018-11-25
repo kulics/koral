@@ -660,7 +660,7 @@ test.simpleDescription()
 movieCount := 0
 songCount := 0
 
-@ [library] {
+@ library {
     ? ea -> :Movie {
         movieCount += 1
     } :Song {
@@ -789,7 +789,7 @@ switch nb {
 ## Downcasting
 ### Xs
 ```
-@ [someObjects] {
+@ someObjects {
     ? ea -> movie:Movie {
         cmd.prt("Movie: '{movie.name}', " +
             "dir. {movie.director}")

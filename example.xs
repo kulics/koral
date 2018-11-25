@@ -95,7 +95,7 @@ testOperator ()->() {
 }
 
 testString ()->() {
-    @ ["love xs"] {
+    @ "love xs" {
         ? ea == 'e' {
             cmd.prt("love xs")
         }
@@ -173,13 +173,13 @@ testArray ()->() {
     arrEmpty := [i32]{}
     arrType := _{1,2,3}
     array : [|i32|] = _{|1,2,3|}
-    @ [arrNumber] {
+    @ arrNumber {
         cmd.prt(ea)
     }
-    @ [arrNumber] item {
+    @ item <- arrNumber {
         cmd.prt(item)
     }
-    @ [arrNumber] i -> v {
+    @ i->v <- arrNumber {
         cmd.prt(i)
         cmd.prt(v)
     }
@@ -191,7 +191,7 @@ testDictionary ()->() {
     empty := [str->i32]{}
     dicSN := _{"k1"->1,"k2"->2}
     dicSN += _{"k3"->3}
-    @ [dicSN] k -> v {
+    @ k->v <- dicSN {
         cmd.prt(k)
         cmd.prt(v)
     }
@@ -199,33 +199,10 @@ testDictionary ()->() {
     cmd.prt(dicSN["k2"])
 }
 
-testCheck ()->() {
-    z :defer = nil
-    ! z2 := defer{} {
-        z = defer{}
-        ! z3 := defer{} {
-            x := 1 * 1
-        }
-        ! {
-            y := 1 + 1
-        } -> {
-            !(ex)
-        }
-    } -> :IOException {
-        !(ex)
-    } e:Exception {
-        !(e)
-    } _ {
-        ? z ~= nil {
-            z.IDisposable.Dispose()
-        }
-    }
-}
-
 testLoop ()->() {
     cmd.prt(" 0 to 10")
-    @ [0 <= 10] {
-        cmd.prt(ea, ", ", "")
+    @ i <- [0 <= 10] {
+        cmd.prt(i, ", ", "")
     }
     cmd.prt(" ")
     cmd.prt(" 0 to 8 step 2")
@@ -244,6 +221,11 @@ testLoop ()->() {
     @ {
         <- @
     }
+    a := 0
+    b := 8
+    @ ? a < b {
+        a += 1
+    }
 }
 
 testFunc (s: str)->(out1: str, out2: i32) {
@@ -261,16 +243,6 @@ testFunc (s: str)->(out1: str, out2: i32) {
 
 testFuncParams (a,b: i32, fn: (a,b,c: i32, d: i8)->(z: str, a,b,c: i32))->(a: i32, b,c: str) {
     <- (0,"", "")
-}
-
-testAsync ()~>(x:i32,y:i32,z:str) {
-    <~ tsks.delay(5000)
-    async1 ()~>() {
-        <~ tsks.delay(5000)
-    }
-    <~ async1()
-    
-    <- (1, 2, "123")
 }
 
 testLambda ()->() {
@@ -297,6 +269,39 @@ testLambda ()->() {
     })
     test4(fn: (it:i32)->(v:i32))->(){ fn(18) }
     test4($it+1)
+}
+
+testCheck ()->() {
+    z :defer = nil
+    ! z2 := defer{} {
+        z = defer{}
+        ! z3 := defer{} {
+            x := 1 * 1
+        }
+        ! {
+            y := 1 + 1
+        } -> {
+            !(ex)
+        }
+    } -> :IOException {
+        !(ex)
+    } e:Exception {
+        !(e)
+    } _ {
+        ? z ~= nil {
+            z.IDisposable.Dispose()
+        }
+    }
+}
+
+testAsync ()~>(x:i32,y:i32,z:str) {
+    <~ tsks.delay(5000)
+    async1 ()~>() {
+        <~ tsks.delay(5000)
+    }
+    <~ async1()
+    
+    <- (1, 2, "123")
 }
 
 testLinq ()->() {
