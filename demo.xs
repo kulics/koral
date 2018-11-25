@@ -41,7 +41,7 @@ Main ()->() {
 
     cmd.prt("Filter Array")
     arr = FilterList(arr, $it > 4)
-    @ [arr] { cmd.prt(ea) }
+    @ arr { cmd.prt(ea) }
 
     cmd.prt("oop")
     app := App{"test", "Windows"}
@@ -92,32 +92,32 @@ Swap (list:[i32], i, j:i32)->() {
 
 SimpleSort (list:[i32])->() {
     cmd.prt("Simple Sort")
-    @ [0 < list.count] i {
-        @ [i+1 < list.count] j {
+    @ i <- [0 < list.count] {
+        @ j <- [i+1 < list.count] {
             ? list[i] > list[j] {
                 Swap(list, i , j)
             }
         }
     }
-    @ [list] { cmd.prt(ea) }
+    @ list { cmd.prt(ea) }
 }
 
 BubbleSort (list:[i32])->() {
     cmd.prt("Bubble Sort")
-    @ [0 < list.count] i {
-        @ [list.count-2 >= i] j {
+    @ i <- [0 < list.count] {
+        @ j <- [list.count-2 >= i] {
             ? list[j] > list[j+1] {
                 Swap(list, j , j+1)
             }
         }
     }
-    @ [list] { cmd.prt(ea) }
+    @ list { cmd.prt(ea) }
 }
 
 QuickSort (list:[i32])->() {
     cmd.prt("Quick Sort")
     QSort(list,0,list.count-1)
-    @ [list] { cmd.prt(ea) }
+    @ list { cmd.prt(ea) }
 }
 
 QSort (list:[i32], low, high:i32)->() {
@@ -133,12 +133,12 @@ QSort (list:[i32], low, high:i32)->() {
 Partition (list:[i32], low, high:i32)->(position:i32) {
     pivotkey := list[low]
     
-    @ low < high {
-        @ low<high & list[high] >= pivotkey {
+    @ ? low < high {
+        @ ? low<high & list[high] >= pivotkey {
             high -= 1
         }
         Swap(list, low , high)
-        @ low<high & list[low] <= pivotkey {
+        @ ? low<high & list[low] <= pivotkey {
             low += 1
         }
         Swap(list, low , high)
@@ -150,7 +150,7 @@ Partition (list:[i32], low, high:i32)->(position:i32) {
 FilterList (list:[i32], fn:(take:i32)->(act:bl))->(l:[i32]) {
     filter := [i32]{}
 
-    @ [list] {
+    @ list {
         ? fn(ea) {
             filter += ea
         }
