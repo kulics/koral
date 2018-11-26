@@ -79,8 +79,8 @@ Peter := student{ <-
 
 例如：
 ```
-Array := []i32{ <- 1, 2, 3, 4, 5 }
-Dictionary := [str]i32{ <- "1"->1, "2"->2, "3"->3 }
+Array := [i32]{ <- 1, 2, 3, 4, 5 }
+Dictionary := [str->i32]{ <- "1"->1, "2"->2, "3"->3 }
 ```
 ## 匿名包
 如果我们只想直接包裹某些数据使用，而不是先定义包再使用，像匿名函数那样可以吗？
@@ -219,8 +219,8 @@ chineseStudent {}-> {
 例如：
 ```
 chineseStudent {}-> {
-    student :student|null   # 将学生属性包含其中
-    kungfu :bl|null         # 不会功夫的学生
+    student :student?   # 将学生属性包含其中
+    kungfu :bl?         # 不会功夫的学生
 }
 ```
 这样你就可以通过中国学生里的学生属性来使用通用属性。

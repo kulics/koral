@@ -91,7 +91,7 @@ E.g:
 ```
 a : i32
 ```
-This will create an identifier for the name on the left and define it as the type on the right, in which case the identifier is a null value.
+This will create an identifier for the name on the left and define it as the type on the right, in which case the identifier is a nil value.
 
 Once an identifier is created, its data type will not be changed in the valid area.
 

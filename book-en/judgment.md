@@ -81,8 +81,8 @@ E.g:
      cmd.print(it)
 } content:str {     # when str
      cmd.print(content)
-} null {            # When it is null
-     cmd.print("null")
+} nil {            # When it is nil
+     cmd.print("nil")
 }
 ```
 ### Get type

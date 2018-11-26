@@ -103,10 +103,10 @@ doHomeWork(StudentC.homeWork)
 
 例如：
 ```
-Arr := []homeWork{}
-Arr.add( StudentA.homeWork )
+arr := [homeWork]{}
+arr.add( StudentA.homeWork )
 ... # 塞进很多很多学生
-@ [Arr] {
+@ arr {
     doHomeWork(ea)
 }
 ```
@@ -130,7 +130,7 @@ func (hw:homeWork)->() {
     }
 }
 ```
-需要注意的是，如果不能正确地转换类型，会得到一个`null`结果。
+需要注意的是，如果不能正确地转换类型，会得到一个`nil`结果。
 
 ### [下一章](enumeration-type.md)
 

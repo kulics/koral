@@ -3,21 +3,20 @@ Sometimes, we may need to execute the same code multiple times.
 
 Under normal circumstances, the statement is executed in order, the first statement in the function first, followed by the second statement, and so on.
 ## Collection Loop
-If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can use the `@ [value] id {}` statement to iterate over the collection, taking each element out of `id`.
+If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can use the `@ id <- value {}` statement to iterate over the collection, taking each element out of `id`.
 
 E.g:
 ```
 arr := _{1, 2, 3, 4, 5}
-@ [arr] item {
+@ item <- arr {
     cmd.print(item)     # print each number
 }
 ```
-The identifier followed by `@` is the currently fetched value, which is valid only for the current loop. So we don't need to define an identifier externally.
 If we don't want to define additional identifiers, we can omit them. The default is `ea`.
 
 E.g:
 ```
-@ [arr] {
+@ arr {
      cmd.print(ea)     # print each number
 }
 ```
@@ -26,7 +25,7 @@ If we need to fetch the index and value at the same time, we can replace `id` wi
 
 E.g:
 ```
-@ [arr] i -> v {
+@ i -> v <- arr  {
      cmd.print("{i}:{v}")
 }
 ```
@@ -92,12 +91,12 @@ In addition to the infinite loop, jump out can also be used in other cycles.
 Note that if you jump out of a multi-nested loop, it will only jump out the loop closest to it.
 ## Conditional Loop
 What if we need a loop that just judges a certain condition?
-Add a condition to it.
+Add a condition `?` to it.
 
 E.g:
 ```
 i := 0
-@ i < 6 {
+@ ? i < 6 {
      i += 1
 }
 ```
@@ -115,20 +114,20 @@ Demo {
 
 Main ()->() {
     arr := _{1,2,3,4,5}
-    @ [arr] {
+    @ arr {
         cmd.print(ea)
     }
 
-    @ [1 <= 50] i {
+    @ i <- [1 <= 50] {
         cmd.print(i)
     }
 
-    @ [100 >= 0; 2] i {
+    @ i <- [100 >= 0; 2] {
         cmd.print(i)
     }
 
     x := 0
-    @ x <= 10 {
+    @ ? x <= 10 {
         x += 1
     }
 }

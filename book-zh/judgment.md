@@ -79,10 +79,10 @@ i := 3
 ```
 ? x -> :i32 {          # 是否 i32
     cmd.print(it)
-} content:str {     # 是否str
+} content:str {     # 是否 str
     cmd.print(content)
-} null {            # 是否为null
-    cmd.print("null")
+} nil {            # 是否为 nil
+    cmd.print("nil")
 }
 ```
 ### 获取类型

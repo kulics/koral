@@ -21,17 +21,17 @@ readFile (name:str)->() {
 ```
 这样我们就声明了一个异常，异常说明是`something wrong`，一旦外部调用者使用了不合法长度的`name`，这个函数就会被强制中止，将这个异常向上报告，交给调用者处理。
 ## 检查异常
-我们可以使用`! {}`语句来检查异常，使用 `id:type {}` 来处理异常。
+我们可以使用`! {}`语句来检查异常，使用 `-> id:type {} id:type {}` 来处理异常。
 `id`可以省略，默认为`ex`。   
-`:type`也可以省略，默认为`Exception`，但两者只能同时省略一个。
+如果只需处理统一的异常，可以使用 `-> {}`。
 
 例如：
 ```
 ! {
     f := readFile("temp.txt")
-} :IOException {
+} -> :IOException {
     !(ex)
-} e {
+} e:Exception {
     cmd.print(e.message)
 }
 ```
@@ -45,7 +45,7 @@ readFile (name:str)->() {
 ```
 ! {
     Func()
-} ex {
+} -> {
     # 可以手动中止
     # <- () 
     !(ex)
@@ -64,7 +64,7 @@ func ()->() {
     ! {
         file = readFile("./somecode.xs")
     } _ {
-        ? file ~= null {
+        ? file ~= nil {
             file.release()
         }
     }
@@ -109,18 +109,18 @@ Demo {
 Main ()->() {
     ! {
         x: i32 = (1 * 1)
-    } e {
-        !(e)
+    } -> {
+        !(ex)
     }
 
     x := Defer{}
     ! y := Defer{} {
         x.content = "defer"
         cmd.print(x.content)
-    } ex {
-        !(ex)
+    } -> e:Exception {
+        !(e)
     } _ {
-        ? x ~= null {
+        ? x ~= nil {
             x.IDisposable.Dispose()
         }
     }
