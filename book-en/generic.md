@@ -32,12 +32,23 @@ Generic brackets, like parameters, support multiple generations, for example: `<
 
 After the generic is defined, `T` is treated as a real type within the area of ​​the package, and then we can use it in a variety of desired types just as `i32` does.
 
-Note that because generics are typed at run time, the compiler can not infer generic constructor methods. We can only use the empty type constructor to construct generic data.
+Note that because generics are typed at run time, the compiler can not infer generic constructor methods. We can only use the default value create method to construct generic data.
+
+We can use the default value create method `lib.def<type>()` to specify a default value that contains a type.
+
+E.g:
+```
+x := lib.def<i64>()
+y := lib.def<Protocol>()
+z := lib.def<()->()>()
+```
+
+This way we can use it in generics.
 
 E.g:
 ```
 Package<T> {}-> {
-    item := lib.def<T>()    # initialized a nil value of the generic data
+    item := lib.def<T>()    # initialized a default value of the generic data
 }
 ```
 So how do we use generics?

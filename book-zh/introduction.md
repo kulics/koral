@@ -11,6 +11,8 @@ Xs 是一个简洁的开源 .NET 编程语言。
 - 支持编译到 .NET 平台，借助 .NET 的框架和库资源，我们可以在非常广泛的场景下使用这门语言。
 
 ## 目录
+---
+### 入门
 1. [安装与使用](install.md)
 1. [基础语法](basic-grammar.md)
 1. [基础类型](basic-type.md)
@@ -19,8 +21,11 @@ Xs 是一个简洁的开源 .NET 编程语言。
 1. [判断](judgment.md)
 1. [循环](loop.md)
 1. [函数类型](function-type.md)
-1. [控制类型](control-type.md)
 1. [包类型](package-type.md)
+1. [命名空间](namespace.md)
+---
+### 进阶
+1. [控制类型](control-type.md)
 1. [协议类型](protocol-type.md)
 1. [枚举类型](enumeration-type.md)
 1. [检查](check.md)
@@ -28,4 +33,4 @@ Xs 是一个简洁的开源 .NET 编程语言。
 1. [泛型](generic.md)
 1. [注解](annotation.md)
 1. [LINQ](linq.md)
-1. [命名空间](namespace.md)
+1. [可选类型](optional-type.md)

@@ -220,8 +220,8 @@ We need to use a combination of this feature, but not so complicated, just creat
 E.g:
 ```
 chineseStudent {}-> {
-    student :student?   # include student attributes in it
-    kungfu :bl?         # kung fu students
+    student := student{}   # include student attributes in it
+    kungfu := false        # no kung fu
 }
 ```
 This way you can use generic attributes via student attributes in Chinese students.
@@ -234,7 +234,7 @@ cmd.print(Chen.student.name)
 ```
 By combining layers after layer, you are free to assemble whatever you want to describe.
 
-### [Next Chapter](protocol-type.md)
+### [Next Chapter](namespace.md)
 
 ## Example of this chapter
 ```

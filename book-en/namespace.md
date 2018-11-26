@@ -74,4 +74,5 @@ Main ()->() {
 }
 ```
 
+## [Back to index](./introduction.md)
 ## [Complete Example](../example.xs)

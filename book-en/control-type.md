@@ -73,7 +73,7 @@ Only when we need to implement the details of the operation need to deal with co
 
 Most of the time, we can use only simple definitions to complete the task, because there is no special operation, so it built its own value without our extra processing.
 
-### [Next Chapter](package-type.md)
+### [Next Chapter](protocol-type.md)
 
 ## Example of this chapter
 ```
