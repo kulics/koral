@@ -14,6 +14,7 @@ Main ()~>() {
     testSharpType()
     testOperator()
     testString()
+    testOptional()
     testSwitch()
     testIf()
     testArray()
@@ -102,10 +103,10 @@ testString ()->() {
     }
 }
 
-testNullable ()->() {
+testOptional ()->() {
     a: i32? = 1
     a?.toStr()
-    b: str? = nil
+    b: str? = ""
     b!.toStr()
     c: obj? = nil
     d: app! = nil
