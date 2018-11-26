@@ -17,7 +17,7 @@ Eventually making Xs with very few grammar, only the presence of symbols on the 
 
 ## Getting Started
 Read detail from The [Book](./book-en/introduction.md).  
-阅读 [语言说明文档](./book-zh/介绍.md)。
+阅读 [语言说明文档](./book-zh/introduction.md)。
 
 ## Quick Preview
 ```

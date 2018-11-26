@@ -78,4 +78,4 @@ task := async()    # 正确，获取了 Task
 ```
 _ = arr.filter( $it ~> it > 5 )
 ```
-### [下一章](泛型.md)
+### [下一章](generic.md)

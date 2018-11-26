@@ -100,7 +100,7 @@ dictionary += _{"d"->11}        # 添加元素
 dictionary -= "c"              # 删除指定索引元素
 length := dictionary.count     # 长度
 ```
-### [下一章](判断.md)
+### [下一章](judgment.md)
 
 ## 本章示例
 ```
