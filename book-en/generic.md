@@ -37,7 +37,7 @@ Note that because generics are typed at run time, the compiler can not infer gen
 E.g:
 ```
 Package<T> {}-> {
-    item := null(T)    # initialized a null value of the generic data
+    item := lib.def<T>()    # initialized a nil value of the generic data
 }
 ```
 So how do we use generics?
@@ -50,7 +50,7 @@ ListNumber := List<i32>{}  # pass in the number type
 ```
 So we have an List of number types, is like this:
 ```
-ListNumber := []i32{}
+ListNumber := [i32]{}
 ```
 Yes, in fact, our list and dictionary syntax are syntactic sugar, the actual types are `lst` and `dic`.
 ## Supported Types

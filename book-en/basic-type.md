@@ -122,7 +122,7 @@ E.g:
 a :obj = 1  # any type
 ```
 ## Nullable Type
-All types in this language can't be null by default, which can avoid null problems to a great extent.
+All types in this language can't be nil by default, which can avoid nil problems to a great extent.
 If a type is defined but not assigned, it will not be used.
 
 E.g:
@@ -131,33 +131,33 @@ a : i32
 b := a   # error, no assignment to a
 ```
 
-If you have to use a type with null values in some cases, you can use a nullable type.
-Just add `|null` after any type, which is a nullable type.
+If you have to use a type with nil values in some cases, you can use a nullable type.
+Just add `?` after any type, which is a nullable type.
 
 E.g:
 ```
-a : i32|null
+a : i32?
 b := a   # b assigns an empty i32
 ```
-## null
-We will need a value that can be any null value, so it is `null`.
+## nil value
+We will need a value that can be any nil value, so it is `nil`.
 
 E.g:
 ```
-null # empty value
+nil # empty value
 ```
-## Create a null value with type
+## Create a defalut value with type
 Sometimes, maybe we do not need to specify a specific value, but only want to create a type of default.
 
 Especially when using generics, you can not create directly using type conStructs.
 
-At this time we can use the null create method `null(type)` to specify a null value that contains a type.
+At this time we can use the nil create method `lib.def<type>()` to specify a nil value that contains a type.
 
 E.g:
 ```
-x := null( i64 )
-y := null( Protocol )
-z := null( ()->() )
+x := lib.def<i64>()
+y := lib.def<Protocol>()
+z := lib.def<()->()>()
 ```
 More details on generics can be found in the generic section.
 
@@ -178,7 +178,7 @@ Main ()->() {
     c := "{d} world"
     e := true
     f :obj = false
-    g :i32|null = null
-    h := null( i32 ) 
+    g :i32? = nil
+    h := lib.def<i32>()
 }
 ```

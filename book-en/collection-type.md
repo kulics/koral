@@ -16,19 +16,19 @@ This will create a `i32` type List containing` 1` to `5`.
 
 If you need an List of explicit types, you can create them using type creation syntax.
 
-The List type is represented by `[]type`, where `[]` is a one-dimensional List, so multidimensional lists can be represented as `[][][]type`.
+The List type is represented by `[type]`.
 
 For example we need a string list:
 ```
-list := []str{}         # empty List
+list := [str]{}         # empty List
 ```
 #### Array
-If we need to use the native Array type, we can use `[|]type` to represent it.
+If we need to use the native Array type, we can use `[|type|]` to represent it.
 It can also be created directly using `_{|e1,e2,e3|}`.
 
 E.g:
 ```
-arr := [|]i32{}
+arr := [|i32|]{}
 arr2 = _{|1,2,3,4,5|}
 ```
 ### Visit
@@ -71,11 +71,11 @@ This will create a `str->i32` type dictionary containing` a, b, c` entries.
 
 If you need an explicit type of dictionary, you can also create it using type creation syntax.
 
-The dictionary type is represented by `[type]type` and `[type]` represents a one-dimensional dictionary, so the nested dictionary can be represented as `[type][type][type]type`.
+The dictionary type is represented by `[type->type]`.
 
 E.g:
 ```
-dictionaryNumNum := [i32]i32{} # Empty
+dictionaryNumNum := [i32->i32]{} # Empty
 ```
 ### Visit
 Like an List, we can also use indexes to access data directly.
@@ -110,11 +110,11 @@ Demo {
 Main ()->() {
     list1 := _{1,2,3,4,5}
     list1 += 6
-    list2 := []i8{<- 1,2,1,2}
+    list2 := [i8]{<- 1,2,1,2}
     list3 := _{|1,2,3|}
 
     dictionary1 := _{"a"->1, "b"->2, "c"->3}
     dictionary1["d"] = 4
-    dictionary2 := [i8]i8{<- 1->1,2->2,3->3}
+    dictionary2 := [i8->i8]{<- 1->1,2->2,3->3}
 }
 ```

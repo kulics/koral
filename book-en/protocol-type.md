@@ -105,10 +105,10 @@ Of course, it is better to put these students in an array so that we can use loo
 
 E.g:
 ```
-Arr := []homeWork{}
-Arr.add( StudentA.homeWork )
+arr := [homeWork]{}
+arr.add( StudentA.homeWork )
 ... # stuffed many, many students
-@ [Arr] {
+@ arr {
     doHomeWork(ea)
 }
 ```
@@ -132,7 +132,7 @@ func (hw :homeWork)->() {
     }
 }
 ```
-Note that if the type can not be converted correctly, it will return a `null` value.
+Note that if the type can not be converted correctly, it will return a `nil` value.
 
 ### [Next Chapter](enumeration-type.md)
 

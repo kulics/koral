@@ -21,17 +21,17 @@ readFile (name: str)->() {
 ```
 So we declare an exception, the exception description is `something wrong`, once the external caller uses the illegal length of `name`, the function will be forced to abort, report the exception up and hand it to the caller.
 ## Check Exception
-We can use the `! {}` statement to check for exceptions and `id:type {}` to handle exceptions.  
-`id` can be omitted, the default is `ex`.
-`:type` can also be omitted, the default is `Exception`, but both can only omit one at the same time.
+We can use the `! {}` statement to check for exceptions and `-> id:type {} id:type {}` to handle exceptions.  
+`id` can be omitted, the default is `ex`.  
+If you only need to handle uniform exceptions, you can use `-> {}`.
 
 E.g:
 ```
 ! {
     f := readFile("temp.txt")
-} :IOException {
+} -> :IOException {
     !(ex)
-} e {
+} e:Exception {
     cmd.print(e.message)
 }
 ```
@@ -45,7 +45,7 @@ E.g:
 ```
 ! {
     Func()
-} ex {
+} -> {
      # can be returned manually
      # <- ()
      !(ex)
@@ -64,7 +64,7 @@ func ()->() {
     ! {
         file = readFile("./somecode.xs")
     } _ {
-        ? file ~= null {
+        ? file ~= nil {
             file.release()
         }
     }
@@ -109,18 +109,18 @@ Demo {
 Main ()->() {
     ! {
         x: i32 = (1 * 1)
-    } e {
-        !(e)
+    } -> {
+        !(ex)
     }
 
     x := Defer{}
     ! y := Defer{} {
         x.content = "defer"
         cmd.print(x.content)
-    } ex {
-        !(ex)
+    } -> e:Exception {
+        !(e)
     } _ {
-        ? x ~= null {
+        ? x ~= nil {
             x.IDisposable.Dispose()
         }
     }
