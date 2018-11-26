@@ -16,4 +16,4 @@
 运行包:
 <https://github.com/kulics/xs/releases/tag/v0.23>
 
-### [下一章](基础语法.md)
+### [下一章](basic-grammar.md)
