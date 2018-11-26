@@ -199,7 +199,7 @@ each1To10( _(item:i32)->() {
      cmd.print(item)
 })
 ```
-### [Next Chapter](control-type.md)
+### [Next Chapter](package-type.md)
 
 ## Example of this chapter
 ```

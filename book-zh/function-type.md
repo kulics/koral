@@ -198,7 +198,7 @@ each1To10( _(item:i32)->() {
 })
 ```
 
-### [下一章](control-type.md)
+### [下一章](package-type.md)
 
 ## 本章示例
 ```

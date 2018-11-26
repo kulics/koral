@@ -26,4 +26,4 @@ linq ()->() {
 }
 ```
 
-### [Next Chapter](namespace.md)
+### [Next Chapter](optional-type.md)

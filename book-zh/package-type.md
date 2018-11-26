@@ -219,8 +219,8 @@ chineseStudent {}-> {
 例如：
 ```
 chineseStudent {}-> {
-    student :student?   # 将学生属性包含其中
-    kungfu :bl?         # 不会功夫的学生
+    student := student{}   # 将学生属性包含其中
+    kungfu := false        # 不会功夫
 }
 ```
 这样你就可以通过中国学生里的学生属性来使用通用属性。
@@ -233,7 +233,7 @@ cmd.print( Chen.student.name )
 ```
 通过组合一层又一层的包，你可以自由拼装出任何一个你想要描述的事物。
 
-### [下一章](protocol-type.md)
+### [下一章](namespace.md)
 
 ## 本章示例
 ```
