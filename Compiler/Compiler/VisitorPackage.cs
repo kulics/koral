@@ -1,7 +1,5 @@
 ﻿using Antlr4.Runtime.Misc;
-using System;
 using System.Collections.Generic;
-using System.Text;
 using static Compiler.XsParser;
 
 namespace Compiler
@@ -55,20 +53,14 @@ namespace Compiler
                 extend = (string)((Result)Visit(context.extend())).data;
             }
             // 获取构造数据
-            var paramConstructor = (ParameterPackage)Visit(context.parameterClausePackage());
-            Init += "public " + id.text + paramConstructor.content;
+            var paramConstructor = (string)Visit(context.parameterClausePackage());
+            Init += "public " + id.text + paramConstructor;
             // 加载继承
             if (context.extend() != null)
             {
                 Init += " :base " + ((Result)Visit(context.extend())).text;
             }
             Init += BlockLeft;
-            // 提前写好自动变量
-            foreach (var self in paramConstructor.paramSelf)
-            {
-                Init += $"this.{self.id} = {self.id}; {Wrap}";
-                obj += $"{self.annotation} {self.permission} {self.type} {self.id} {{ get; set; }}";
-            }
             foreach (var item in context.packageSupportStatement())
             {
                 if (item.GetChild(0) is PackageInitStatementContext)
@@ -117,26 +109,15 @@ namespace Compiler
             return obj;
         }
 
-        private class ParameterPackage
-        {
-            public string content { get; set; }
-            public List<Parameter> paramSelf { get; set; } = new List<Parameter>();
-        }
-
         public override object VisitParameterClausePackage([NotNull] ParameterClausePackageContext context)
         {
-            var param = new ParameterPackage();
             var obj = "( ";
 
             var lastType = "";
             var temp = new List<string>();
-            for (int i = context.parameterPackage().Length - 1; i >= 0; i--)
+            for (int i = context.parameter().Length - 1; i >= 0; i--)
             {
-                Parameter p = (Parameter)Visit(context.parameterPackage(i));
-                if (context.parameterPackage(i).GetChild(0) is ParameterSelfContext)
-                {
-                    param.paramSelf.Add(p);
-                }
+                Parameter p = (Parameter)Visit(context.parameter(i));
                 if (p.type != null)
                 {
                     lastType = p.type;
@@ -161,8 +142,7 @@ namespace Compiler
             }
 
             obj += " )";
-            param.content = obj;
-            return param;
+            return obj;
         }
 
         public override object VisitPackageVariableStatement([NotNull] PackageVariableStatementContext context)
