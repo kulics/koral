@@ -178,17 +178,6 @@ Peter := student{"Peter", "060233"}
 cmd.print(Peter.class)     # print out 2
 ```
 
-Can the declaration be simpler, such as defining properties directly in the construct?
-Of course, we can mark the constructor parameter `..`, and the compiler will automatically generate the relevant variables.
-
-E.g:
-```
-# automatically generate the attributes name and number , which is equivalent to the previous example
-student {..name, ..number:str}-> {
-     ...
-}
-```
-
 If you need to use both constructors and simplified creations, you can do so.
 
 E.g:
@@ -255,11 +244,15 @@ S {}-> {
     B := 0
 }
 
-PKG {x:str, ..Y:i32, ..Z:S}-> {
+PKG {x:str, y:i32, z:S}-> {
     X := ""
+    Y := 0
+    Z :S
     
     .. {
         X = x
+        Y = y
+        Z = z
     }
 }
 
