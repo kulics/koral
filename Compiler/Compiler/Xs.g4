@@ -42,11 +42,7 @@ packageStatement:(annotationSupport)? id (templateDefine)? parameterClausePackag
 // 继承
 extend: type '{' expressionList? '}';
 // 入参
-parameterClausePackage : '{' parameterPackage? (',' parameterPackage)*  '}'  ;
-// 构造参数
-parameterPackage : parameter|parameterSelf;
-// 参数结构
-parameterSelf : (annotationSupport)? '..' id (':' type)?;
+parameterClausePackage : '{' parameter? (',' parameter)*  '}'  ;
 // 包支持的语句
 packageSupportStatement:
 packageInitStatement

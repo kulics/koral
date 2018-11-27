@@ -197,24 +197,6 @@ namespace Compiler
             return p;
         }
 
-        public override object VisitParameterSelf([NotNull] ParameterSelfContext context)
-        {
-            var p = new Parameter();
-            var id = (Result)Visit(context.id());
-            p.id = id.text;
-            p.permission = id.permission;
-            if (context.annotationSupport() != null)
-            {
-                p.annotation = (string)Visit(context.annotationSupport());
-            }
-            if (context.type() != null)
-            {
-                p.type = (string)Visit(context.type());
-            }
-
-            return p;
-        }
-
         public string ProcessFunctionSupport(FunctionSupportStatementContext[] items)
         {
             var obj = "";

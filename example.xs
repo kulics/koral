@@ -377,7 +377,13 @@ app += protocol {
     f :str
 }
 
-result {..data: str} ->{}
+result {data: str} ->{
+    data :str
+
+    ..{
+        ..data = data
+    }
+}
 
 testPackageTemplate<T> {}-> {
     data :T
@@ -431,12 +437,20 @@ OtherData2 :str "512"
 
 OtherFunction ()->(v:i32) { <- (OtherData) }
 
-Package {..y: i32}-> {
+Package {y: i32}-> {
     x :i32
+    y :i32
 
     .. {
         ..x = OtherData
+        ..y = y
     }
 }
 
-PackageChild {..x, y: i32}-> Package{y}{}
+PackageChild {x, y: i32}-> Package{y}{
+    x :i32
+
+    ..{
+        ..x = x
+    }
+}

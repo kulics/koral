@@ -51,9 +51,14 @@ Main ()->() {
     cmd.rd()
 }
 
-node {..value :i32}-> {
+node {value :i32}-> {
+    value :i32
     left :node?
     right :node?
+
+    ..{
+        ..value = value
+    }
 }
 
 PreorderTraverse (node:node?)->() {
@@ -162,8 +167,12 @@ Shutdown (ctrl:Control)->() {
     ctrl.Shutdown()
 }
 
-Program {..Name:str}-> {
+Program {name:str}-> {
+    name:str
     _running := false
+    ..{
+        ..name = name
+    }
 }
 
 Program += {
@@ -189,4 +198,10 @@ Program += Control {
     }
 }
 
-App {name, ..Platform:str}-> Program{name}{}
+App {name, platform:str}-> Program{name}{
+    Platform:str
+
+    .. {
+        Platform = platform
+    }
+}
