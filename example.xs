@@ -75,7 +75,7 @@ testOperator ()->() {
     i += ".890"
     b :i32
     b = 0
-    b += OtherData
+    b += ConstData
     b = + - b
     b -= 1
     b *= 2
@@ -432,17 +432,17 @@ testAnnotation {}-> {
 
 testEnum [Ok, Err = -1]
 
-OtherData 256
-OtherData2 :str "512"
+ConstData 256
+ConstData2 :str "512"
 
-OtherFunction ()->(v:i32) { <- (OtherData) }
+OtherFunction ()->(v:i32) { <- (ConstData) }
 
 Package {y: i32}-> {
     x :i32
     y :i32
 
     .. {
-        ..x = OtherData
+        ..x = ConstData
         ..y = y
     }
 }
