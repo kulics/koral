@@ -24,9 +24,9 @@ print("Hello, world!")
 ## Variables And Constants
 ### Xs
 ```
-myVariable := 42
-myVariable = 50
-myConstant 42
+MyVariable := 42
+MyVariable = 50
+MyConstant 42
 ```
 ### C#
 ```
@@ -406,11 +406,11 @@ increment(7)
 ### Xs
 ```
 Shape {}-> {
-    numberOfSides := 0
+    NumberOfSides := 0
 }
 Shape += {
     simpleDescription ()->(s: str) {
-        <- ("A shape with {numberOfSides} sides.")
+        <- ("A shape with {NumberOfSides} sides.")
     }
 }
 ```
@@ -455,7 +455,7 @@ class Shape {
 ### Xs
 ```
 shape := Shape{}
-shape.numberOfSides = 7
+shape.NumberOfSides = 7
 shapeDescription := shape.simpleDescription()
 ```
 ### C#
@@ -485,18 +485,24 @@ var shapeDescription = shape.simpleDescription()
 ## Subclass
 ### Xs
 ```
-NamedShape {..name: str}-> {
-    numberOfSides: i32 = 0
+NamedShape {name: str}-> {
+    name: str
+    NumberOfSides: i32 = 0
+    ..{
+        ..name = name
+    }
 }
 NamedShape += {
     simpleDescription ()->(s: str) {
-        <- ("A shape with {numberOfSides} sides.")
+        <- ("A shape with {NumberOfSides} sides.")
     }
 }
 
-Square {..sideLength: f64, name: str}-> NamedShape {name} {
+Square {sideLength: f64, name: str}-> NamedShape {name} {
+    sideLength: f64
     .. {
-        ..numberOfSides = 4
+        ..NumberOfSides = 4
+        ..sideLength = sideLength
     }
 }
 Square += {
@@ -657,14 +663,14 @@ test.simpleDescription()
 ## Checking Type
 ### Xs
 ```
-movieCount := 0
-songCount := 0
+MovieCount := 0
+SongCount := 0
 
 @ library {
     ? ea -> :Movie {
-        movieCount += 1
+        MovieCount += 1
     } :Song {
-        songCount += 1
+        SongCount += 1
     }
 }
 ```

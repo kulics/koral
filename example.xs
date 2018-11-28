@@ -47,8 +47,8 @@ StaticY := "hello"
 readonlyZ := "1024"
 StaticG :i64
 StaticP :str {
-    get { <- (staticY) }
-    set { staticY = value }
+    get { <- (StaticY) }
+    set { StaticY = value }
 }
 
 testTuple_ (i:i32)->(v:str) {
@@ -72,27 +72,27 @@ testSharpType ()->() {
 
 testOperator ()->() {
     I :str = "128.687"
-    i += ".890"
+    I += ".890"
     B :i32
-    b = 0
-    b += ConstData
-    b = + - b
-    b -= 1
-    b *= 2
-    b /= 2
-    b %= 5
-    i += " mark string i32 {b} "
-    c := false
-    c = ~c
-    c = 1 ~= 2
-    c = 3 == 3
-    c = 3 >= 1
-    c = 1 <= 3
-    c = true | false
-    c = true & false
-    d := 11
-    d = d.and(1).or(2).xor(3).not().lft(1).rht(2)
-    cmd.prt(b.toStr())
+    B = 0
+    B += CONST_DATA
+    B = + - B
+    B -= 1
+    B *= 2
+    B /= 2
+    B %= 5
+    I += " mark string i32 {B} "
+    C := false
+    C = ~C
+    C = 1 ~= 2
+    C = 3 == 3
+    C = 3 >= 1
+    C = 1 <= 3
+    C = true | false
+    C = true & false
+    D := 11
+    D = D.and(1).or(2).xor(3).not().lft(1).rht(2)
+    cmd.prt(B.toStr())
 }
 
 testString ()->() {
@@ -121,7 +121,7 @@ testTypeConvert ()->() {
     z2 := z1.toI64()
     cmd.prt( z2.to<obj>().to<i64>() )
     cmd.prt( y.is<program>() )
-    cmd.prt( x.as<program>().running )
+    cmd.prt( x.as<program>().Running )
     cmd.prt( ?(:program) )
     cmd.prt( ?(x) )
 }
@@ -163,41 +163,41 @@ testIf ()->() {
 
 testArray ()->() {
     arrSingle := _{1}
-    arrNumber := _{1,2,5,6,8,4}
-    arrNumber = arrNumber + 0
-    arrNumber += 3 + 7
-    arrNumber -= 6
-    take := arrNumber[0]
-    take = inPackageArray{}.arr[2]
+    ArrNumber := _{1,2,5,6,8,4}
+    ArrNumber = ArrNumber + 0
+    ArrNumber += 3 + 7
+    ArrNumber -= 6
+    Take := ArrNumber[0]
+    Take = inPackageArray{}.arr[2]
     arrObj := _{"123", 432, app{}}
     arrArr := _{_{1,1,1},_{1,1,1}}
     arrEmpty := [i32]{}
     arrType := _{1,2,3}
     array : [|i32|] = _{|1,2,3|}
-    @ arrNumber {
+    @ ArrNumber {
         cmd.prt(ea)
     }
-    @ item <- arrNumber {
+    @ item <- ArrNumber {
         cmd.prt(item)
     }
-    @ i->v <- arrNumber {
+    @ i->v <- ArrNumber {
         cmd.prt(i)
         cmd.prt(v)
     }
-    slice := arrNumber[0<=]
-    slice2 := arrNumber[<3]
+    slice := ArrNumber[0<=]
+    slice2 := ArrNumber[<3]
 }
 
 testDictionary ()->() {
     empty := [str->i32]{}
-    dicSN := _{"k1"->1,"k2"->2}
-    dicSN += _{"k3"->3}
-    @ k->v <- dicSN {
+    DicTemp := _{"k1"->1,"k2"->2}
+    DicTemp += _{"k3"->3}
+    @ k->v <- DicTemp {
         cmd.prt(k)
         cmd.prt(v)
     }
-    dicSN -= "k1"
-    cmd.prt(dicSN["k2"])
+    DicTemp -= "k1"
+    cmd.prt(DicTemp["k2"])
 }
 
 testLoop ()->() {
@@ -222,15 +222,15 @@ testLoop ()->() {
     @ {
         <- @
     }
-    a := 0
+    A := 0
     b := 8
-    @ ? a < b {
-        a += 1
+    @ ? A < b {
+        A += 1
     }
 }
 
-testFunc (s: str)->(out1: str, out2: i32) {
-    s = s + "test"
+testFunc (S: str)->(out1: str, out2: i32) {
+    S = S + "test"
     i := 1+1*3*9/8
     out2 := i + 5 + _(i + 8)
     # func in func
@@ -239,7 +239,7 @@ testFunc (s: str)->(out1: str, out2: i32) {
     }
     InFunc()
 
-    <- (s, i)
+    <- (S, i)
 }
 
 testFuncParams (a,b: i32, fn: (a,b,c: i32, d: i8)->(z: str, a,b,c: i32))->(a: i32, b,c: str) {
@@ -273,9 +273,9 @@ testLambda ()->() {
 }
 
 testCheck ()->() {
-    z :defer = nil
+    Z :defer? = nil
     ! z2 := defer{} {
-        z = defer{}
+        Z = defer{}
         ! z3 := defer{} {
             x := 1 * 1
         }
@@ -289,8 +289,8 @@ testCheck ()->() {
     } e:Exception {
         !(e)
     } _ {
-        ? z ~= nil {
-            z.IDisposable.Dispose()
+        ? Z ~= nil {
+            Z.IDisposable.Dispose()
         }
     }
 }
@@ -322,7 +322,7 @@ inPackageArray {} -> {
 }
 
 defer {} -> {
-    str :str
+    data := ""
 }
 
 defer += IDisposable {
@@ -332,16 +332,16 @@ defer += IDisposable {
 app {}-> program{} { 
     i := 555
     d := 128.687
-    b := "12"
+    B := "12"
     c := true
     arr := _{1,1,1,1}
     _PriName := " program "
-    _b := 5
+    _B := 5
 } 
 
 app += {
     testPackage ()->() {
-        item := program{<- Name = "new program",running = true}
+        item := program{<- Name = "new program",Running = true}
         item2 := _{
             Name := "new program"
             running := true
@@ -356,13 +356,13 @@ app += {
 }
 
 app += protocol {
-    b :i32 {
-        get { <- (_b) } 
-        set { _b = value }
+    B :i32 {
+        get { <- (_B) } 
+        set { _B = value }
     }
 
     c (x: i32)->(y: i32) {
-        <- (x + ..protocol.b)
+        <- (x + ..protocol.B)
     }
 
     d ()~>(x: i32) {
@@ -404,7 +404,7 @@ testImplementTemplate += testProtocolTemplate<testImplementTemplate> {
 
 program {}-> {
     Name :str?
-    running :bl?
+    Running :bl?
 
     Property :str? {
         get { <- (Name) }
@@ -413,7 +413,7 @@ program {}-> {
 }
 
 protocol -> {
-    b :i32 { get{} set{} }
+    B :i32 
     c (x:i32)->(y:i32){}
     d ()~>(y:i32){}
     e ()~>(){}
@@ -432,17 +432,17 @@ testAnnotation {}-> {
 
 testEnum [Ok, Err = -1]
 
-ConstData 256
-ConstData2 :str "512"
+CONST_DATA 256
+CONST_DATA2 :str "512"
 
-OtherFunction ()->(v:i32) { <- (ConstData) }
+OtherFunction ()->(v:i32) { <- (CONST_DATA) }
 
 Package {y: i32}-> {
     x :i32
     y :i32
 
     .. {
-        ..x = ConstData
+        ..x = CONST_DATA
         ..y = y
     }
 }

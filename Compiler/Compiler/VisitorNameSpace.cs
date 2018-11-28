@@ -1,7 +1,4 @@
 ﻿using Antlr4.Runtime.Misc;
-using System;
-using System.Collections.Generic;
-using System.Text;
 using static Compiler.XsParser;
 
 namespace Compiler
@@ -46,7 +43,7 @@ namespace Compiler
             return obj;
         }
 
-        class Namespace
+        private class Namespace
         {
             public string name;
             public string staticName;
@@ -55,10 +52,12 @@ namespace Compiler
 
         public override object VisitExportStatement([NotNull] ExportStatementContext context)
         {
-            var obj = new Namespace();
-            obj.name = (string)Visit(context.nameSpace());
+            var obj = new Namespace
+            {
+                name = (string)Visit(context.nameSpace()),
 
-            obj.staticName = FileName;
+                staticName = FileName
+            };
             if (context.id() != null)
             {
                 obj.staticName = (Visit(context.id()) as Result).text;
@@ -293,13 +292,14 @@ namespace Compiler
         {
             var r1 = (Result)Visit(context.expression(0));
             var typ = "";
+            Result r2 = null;
             if (context.type() != null)
             {
                 typ = (string)Visit(context.type());
             }
             else if (context.expression().Length == 2)
             {
-                var r2 = (Result)Visit(context.expression(1));
+                r2 = (Result)Visit(context.expression(1));
                 typ = (string)r2.data;
             }
             var obj = "";
@@ -309,6 +309,7 @@ namespace Compiler
             }
             if (context.namespaceControlSubStatement().Length > 0)
             {
+
                 obj += $"{r1.permission} static {typ} {r1.text} {{";
                 foreach (var item in context.namespaceControlSubStatement())
                 {
@@ -318,12 +319,30 @@ namespace Compiler
             }
             else
             {
-                obj += $"{r1.permission} static {typ} {r1.text} {{ get;set; }} {Wrap}";
-            }
-            if (context.expression().Length == 2)
-            {
-                var r2 = (Result)Visit(context.expression(1));
-                obj += $" = {r2.text} {Terminate} {Wrap}";
+                if (r1.isVariable)
+                {
+                    obj += $"{r1.permission} static {typ} {r1.text} {{ get;set; }}";
+                    if (r2 != null)
+                    {
+                        obj += $" = {r2.text} {Terminate} {Wrap}";
+                    }
+                    else
+                    {
+                        obj += Wrap;
+                    }
+                }
+                else
+                {
+                    obj += $"{r1.permission} static readonly {typ} {r1.text}";
+                    if (r2 != null)
+                    {
+                        obj += $" = {r2.text} {Terminate} {Wrap}";
+                    }
+                    else
+                    {
+                        obj += Terminate + Wrap;
+                    }
+                }
             }
             return obj;
         }
