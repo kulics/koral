@@ -1,15 +1,15 @@
 ﻿using Antlr4.Runtime;
 using Antlr4.Runtime.Misc;
 using System;
-using System.Collections.Generic;
-using System.Text;
+using Library;
+using System.Linq;
 using static Compiler.XsParser;
 
 namespace Compiler
 {
     internal class ErrorListener : BaseErrorListener
     {
-        string FileDir { get; set; }
+        private string FileDir { get; set; }
 
         public ErrorListener(string FileDir)
         {
@@ -48,7 +48,7 @@ namespace Compiler
 
         private const string f32 = "System.Single";
         private const string f64 = "System.Double";
-        
+
         private const string bl = "System.Boolean";
         private const string t = "true";
         private const string f = "false";
@@ -79,6 +79,7 @@ namespace Compiler
             public object data { get; set; }
             public string text { get; set; }
             public string permission { get; set; }
+            public bool isVariable { get; set; }
         }
 
         public override object VisitId([NotNull] IdContext context)
@@ -101,11 +102,13 @@ namespace Compiler
             {
                 r.permission = "public";
                 r.text += context.op.Text;
+                r.isVariable = r.text[0].isUpper();
             }
             else if (context.op.Type == IDPrivate)
             {
                 r.permission = "private";
                 r.text += context.op.Text;
+                r.isVariable = r.text[r.text.findFirst(it => it != '_')].isUpper();
             }
 
             if (keywords.Exists(t => t == r.text))

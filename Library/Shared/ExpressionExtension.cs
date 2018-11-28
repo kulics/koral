@@ -265,6 +265,18 @@ namespace Library
 
         public static bool contains(this string it, string value) => it.Contains(value);
 
+        public static int findFirst(this string it, Func<char,bool> fn)
+        {
+            for (int i = 0; i < it.count(); i++)
+            {
+                if (fn(it[i]))
+                {
+                    return i;
+                }
+            }
+            return 0;
+        }
+
         public static int firstIndexOf(this string it, string value, StringComparison comparisonType = StringComparison.Ordinal) => it.IndexOf(value, comparisonType);
         public static int firstIndexOf(this string it, string value, int startIndex, StringComparison comparisonType = StringComparison.Ordinal) => it.IndexOf(value, startIndex, comparisonType);
         public static int firstIndexOf(this string it, string value, int startIndex, int count, StringComparison comparisonType = StringComparison.Ordinal) => it.IndexOf(value, startIndex, count, comparisonType);
