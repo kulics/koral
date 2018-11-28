@@ -149,13 +149,14 @@ namespace Compiler
         {
             var r1 = (Result)Visit(context.expression(0));
             var typ = "";
+            Result r2 = null;
             if (context.type() != null)
             {
                 typ = (string)Visit(context.type());
             }
-            else
+            else if (context.expression().Length == 2)
             {
-                var r2 = (Result)Visit(context.expression(1));
+                r2 = (Result)Visit(context.expression(1));
                 typ = (string)r2.data;
             }
             var obj = "";
@@ -174,12 +175,30 @@ namespace Compiler
             }
             else
             {
-                obj += $"{r1.permission} {typ} {r1.text + BlockLeft} get;set; {BlockRight + Wrap}";
-            }
-            if (context.expression(1) != null)
-            {
-                var r2 = (Result)Visit(context.expression(1));
-                obj += $" = {r2.text + Terminate + Wrap}";
+                if (r1.isVariable)
+                {
+                    obj += $"{r1.permission} {typ} {r1.text} {{ get;set; }}";
+                    if (r2 != null)
+                    {
+                        obj += $" = {r2.text} {Terminate} {Wrap}";
+                    }
+                    else
+                    {
+                        obj += Wrap;
+                    }
+                }
+                else
+                {
+                    obj += $"{r1.permission} readonly {typ} {r1.text}";
+                    if (r2 != null)
+                    {
+                        obj += $" = {r2.text} {Terminate} {Wrap}";
+                    }
+                    else
+                    {
+                        obj += Terminate + Wrap;
+                    }
+                }
             }
             return obj;
         }
@@ -336,13 +355,14 @@ namespace Compiler
         {
             var id = (Result)Visit(context.id());
             var type = "";
+            Result r2 = null;
             if (context.type() != null)
             {
                 type = (string)Visit(context.type());
             }
-            else
+            else if (context.expression() != null)
             {
-                var r2 = (Result)Visit(context.expression());
+                r2 = (Result)Visit(context.expression());
                 type = (string)r2.data;
             }
 
@@ -358,12 +378,30 @@ namespace Compiler
             }
             else
             {
-                body += "{ get; set;}" + Wrap;
-            }
-            if (context.expression() != null)
-            {
-                var r2 = (Result)Visit(context.expression());
-                body += $" = {r2.text} {Terminate} {Wrap}";
+                if (id.isVariable)
+                {
+                    body += "{ get; set; } ";
+                    if (r2 != null)
+                    {
+                        body += $" = {r2.text} {Terminate} {Wrap}";
+                    }
+                    else
+                    {
+                        body += Wrap;
+                    }
+                }
+                else
+                {
+                    body += "{ get; } ";
+                    if (r2 != null)
+                    {
+                        body += $" = {r2.text} {Terminate} {Wrap}";
+                    }
+                    else
+                    {
+                        body += Wrap;
+                    }
+                }
             }
 
             var vr = new Variable
@@ -477,7 +515,14 @@ namespace Compiler
             }
             else
             {
-                r.text += " { get; set; }" + Wrap;
+                if (id.isVariable)
+                {
+                    r.text += " { get; set; }" + Wrap;
+                }
+                else
+                {
+                    r.text += " { get; }" + Wrap;
+                }
             }
             return r;
         }
