@@ -29,8 +29,6 @@ enumSupportStatement: id ('=' (add)? Integer)?;
 
 // 命名空间变量
 namespaceVariableStatement:(annotationSupport)? expression (Define expression|Declared type (Assign expression)?) (BlockLeft (namespaceControlSubStatement )* BlockRight)? Terminate?;
-// 命名空间不变量
-namespaceInvariableStatement:(annotationSupport)? expression (Declared type '==' | ':==') expression Terminate?;
 // 命名空间常量
 namespaceConstantStatement: (annotationSupport)? id (Declared type)? expression Terminate?;
 // 定义子方法

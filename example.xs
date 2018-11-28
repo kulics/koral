@@ -42,11 +42,11 @@ Main ()~>() {
     cmd.rd()
 }
 
-staticX := 0
-staticY := "hello"
-readonlyZ :== "1024"
-staticG :i64
-staticP :str {
+StaticX := 0
+StaticY := "hello"
+readonlyZ := "1024"
+StaticG :i64
+StaticP :str {
     get { <- (staticY) }
     set { staticY = value }
 }
@@ -71,9 +71,9 @@ testSharpType ()->() {
 }
 
 testOperator ()->() {
-    i :str = "128.687"
+    I :str = "128.687"
     i += ".890"
-    b :i32
+    B :i32
     b = 0
     b += ConstData
     b = + - b
