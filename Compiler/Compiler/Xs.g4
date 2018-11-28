@@ -13,7 +13,6 @@ importStatement: (annotationSupport)? nameSpace (call id)? Terminate?;
 namespaceSupportStatement:
 namespaceFunctionStatement
 |namespaceVariableStatement
-|namespaceInvariableStatement
 |namespaceConstantStatement
 |packageStatement
 |packageExtensionStatement

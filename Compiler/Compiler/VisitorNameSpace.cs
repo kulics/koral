@@ -25,7 +25,6 @@ namespace Compiler
                 {
                     case NamespaceFunctionStatementContext _:
                     case NamespaceVariableStatementContext _:
-                    case NamespaceInvariableStatementContext _:
                     case NamespaceConstantStatementContext _:
                         Static += Visit(item);
                         hasStatic = true;
@@ -223,30 +222,6 @@ namespace Compiler
             obj += Visit(context.parameterClauseIn()) + Wrap + BlockLeft + Wrap;
             obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += BlockRight + Wrap;
-            return obj;
-        }
-
-        public override object VisitNamespaceInvariableStatement([NotNull] NamespaceInvariableStatementContext context)
-        {
-            var r1 = (Result)Visit(context.expression(0));
-            var r2 = (Result)Visit(context.expression(1));
-            var typ = "";
-            if (context.type() != null)
-            {
-                typ = (string)Visit(context.type());
-            }
-            else
-            {
-                typ = (string)r2.data;
-            }
-
-            var obj = "";
-            if (context.annotationSupport() != null)
-            {
-                obj += Visit(context.annotationSupport());
-            }
-            obj += $"{r1.permission} readonly static {typ} {r1.text} = {r2.text} {Terminate} {Wrap}";
-
             return obj;
         }
 
