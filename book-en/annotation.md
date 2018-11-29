@@ -20,11 +20,11 @@ E.g:
 `Table{"test"}`
 annotation {}-> {
         `Key,Column{"id"}`
-        id :str = ""
+        ID :str = ""
         `Column{"name"}`
-        name :str = ""
+        Name :str = ""
         `Column{"data"}`
-        data :str = ""
+        Data :str = ""
 }
 ```
 We declare an annotation package that annotates the table name `test`, the primary key `id`, the field `name`, and the field `data`.

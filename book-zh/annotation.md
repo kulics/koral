@@ -20,11 +20,11 @@ System\ComponentModel\DataAnnotations
 `Table{"test"}`
 annotation {}-> {
         `Key,Column{"id"}`
-        id :str = ""
+        ID :str = ""
         `Column{"name"}`
-        name :str = ""
+        Name :str = ""
         `Column{"data"}`
-        data :str = ""
+        Data :str = ""
 }
 ```
 我们声明了一个`annotation`的包，它使用注解标记了表名`test`、主键`id`、字段`name`和字段`data`。

@@ -29,7 +29,7 @@ It can also be created directly using `_{|e1,e2,e3|}`.
 E.g:
 ```
 arr := [|i32|]{}
-arr2 = _{|1,2,3,4,5|}
+arr2 := _{|1,2,3,4,5|}
 ```
 ### Visit
 If we need to access one of the elements in the List we can access it with the `identifier[index]`.

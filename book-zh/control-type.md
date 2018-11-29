@@ -43,12 +43,12 @@ number :i32 {
 
 例如：
 ```
-_number := 0
+_Number := 0
 
 number :i32 {
     ...
     set {
-        _number = value     # value代表输入的值
+        _Number = value     # value代表输入的值
     }
 }
 ```
@@ -57,13 +57,13 @@ number :i32 {
 
 一个完整的读写例子如下：
 ```
-_number := 0
+_Number := 0
 number: i32 {
     get {
-        <- (_number)
+        <- (_Number)
     }
     set {
-        _number = value # value代表输入的值
+        _Number = value # value代表输入的值
     }
 }
 ```
@@ -83,18 +83,18 @@ Demo {
 
 Main ()->() {
     cmd.print(a)
-    c = 5
-    cmd.print(b)
-    cmd.print(c)
+    C = 5
+    cmd.print(B)
+    cmd.print(C)
 }
 
 a : i32 {
     get { <- (3) }
 }
 
-b := 0
-c : i32 {
-    get { <- (b) }
-    set { b = value }
+B := 0
+C : i32 {
+    get { <- (B) }
+    set { B = value }
 }
 ```

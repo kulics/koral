@@ -20,7 +20,7 @@ protocol -> {
 例如：
 ```
 homeWork -> {
-    count :i32
+    Count :i32
     do ()->(){}
 }
 ```
@@ -37,11 +37,11 @@ homeWork -> {
 例如：
 ```
 student += homeWork {
-    count :i32
+    Count :i32
 
     do ()->() {
         SpendTime(1)           # 花费了一个小时
-        ..homeWork.count -= 1   # 完成了一个
+        ..homeWork.Count -= 1   # 完成了一个
     }
 }
 ```
@@ -60,12 +60,12 @@ student += homeWork {
 
 例如：
 ```
-Peter := student{ <-count=999999 }
-cmd.print( Peter.homeWork.count )
+Peter := student{ <-Count=999999 }
+cmd.print( Peter.homeWork.Count )
 # 打印 999999，好多呀
 Peter.homeWork.do()
 # 做了一次作业
-cmd.print( Peter.homeWork.count )
+cmd.print( Peter.homeWork.Count )
 # 打印 999998，还是好多呀
 ```
 如果只是这样使用，那和在包里直接定义这两个属性比就没什么优势了。

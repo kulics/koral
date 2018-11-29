@@ -18,10 +18,10 @@ We can define these data in the same way we define normal identifiers.
 E.g:
 ```
 student {}-> {
-    name :str = ""
-    number :str = ""
-    class :i32 = 0
-    grade :i32 = 0
+    Name :str = ""
+    Number :str = ""
+    Class :i32 = 0
+    Grade :i32 = 0
 }
 ```
 So we get a student bag with these data attributes. This student bag now becomes a usable type like `i32, str, bl`.
@@ -57,10 +57,10 @@ To change the value of the property is the same, it is equivalent to a nested id
 
 E.g:
 ```
-Peter.name = "Peter" 
-Peter.number = "060233"
-Peter.class = 2
-Peter.grade = 6
+Peter.Name = "Peter" 
+Peter.Number = "060233"
+Peter.Class = 2
+Peter.Grade = 6
 ```
 ## Simplify creation
 Creating a new package like the one above, and then loading the data one by one, is very cumbersome. We can use a simplified syntax to configure.
@@ -69,8 +69,8 @@ Just add `<-` to the creation grammar to use the `key=value` method to quickly l
 E.g:
 ```
 Peter := student{ <-
-    name="Peter", number="060233",
-    class=2, grade=6
+    Name="Peter", Number="060233",
+    Class=2, Grade=6
 }
 ```
 
@@ -110,12 +110,12 @@ E.g:
 ```
 student {}-> {
     ...
-    _girlFirend :str    # The identifier beginning with this '_' is private
+    _GirlFirend :str    # The identifier beginning with this '_' is private
 }
 ```
 That's right, if you remember the definition of identifiers, this is how private identifiers are defined, and private identifiers can not be accessed by outsiders.
 
-Therefore, we can define a `Peter`, nor can we get or modify the value via `Peter._girlFirend`.
+Therefore, we can define a `Peter`, nor can we get or modify the value via `Peter._GirlFirend`.
 
 Then the private properties of this package can not be accessed, and can not be modified, what is the use? Do not worry, there is another attribute package.
 
@@ -127,7 +127,7 @@ E.g:
 ```
 student += {
     getGirlFirend ()->(name:str) {
-        <- (.._girlFirend)
+        <- (.._GirlFirend)
     }
 }
 ```
@@ -161,12 +161,12 @@ student {name, number: str}-> {
     ...
 
     .. {
-        ..name = name
-        ..number = number
+        ..Name = name
+        ..Number = number
         # calculate the class
-        ..class = GetSubText(number, 2, 3)
+        ..Class = GetSubText(number, 2, 3)
         # calculate the grade
-        ..grade = GetSubText(number, 0, 1)
+        ..Grade = GetSubText(number, 0, 1)
     }
 }
 ```
@@ -175,14 +175,14 @@ This gives us a package with constructors, and when we create a new student, cla
 E.g:
 ```
 Peter := student{"Peter", "060233"}
-cmd.print(Peter.class)     # print out 2
+cmd.print(Peter.Class)     # print out 2
 ```
 
 If you need to use both constructors and simplified creations, you can do so.
 
 E.g:
 ```
-Peter := student{"Peter", "060233" <- name="New Peter"}
+Peter := student{"Peter", "060233" <- Name="New Peter"}
 ```
 
 It should be noted that a package can only support one constructor, we recommend to maintain the simplicity of the structure, a stable package easier to be used by the caller,
@@ -195,10 +195,10 @@ Now let us play our imagination, we want a customized package for Chinese studen
 E.g:
 ```
 chineseStudent {}-> {
-    name :str = ""
-    number :str = ""
-    class :i32 = 0
-    grade :i32 = 0
+    Name :str = ""
+    Number :str = ""
+    Class :i32 = 0
+    Grade :i32 = 0
     kungfu :bl = false    # kung fu students
 }
 ```
@@ -209,8 +209,8 @@ We need to use a combination of this feature, but not so complicated, just creat
 E.g:
 ```
 chineseStudent {}-> {
-    student := student{}   # include student attributes in it
-    kungfu := false        # no kung fu
+    Student := student{}   # include student attributes in it
+    Kungfu := false        # no kung fu
 }
 ```
 This way you can use generic attributes via student attributes in Chinese students.
@@ -218,7 +218,7 @@ This way you can use generic attributes via student attributes in Chinese studen
 E.g:
 ```
 Chen := chinesestudent{}
-cmd.print(Chen.student.name)
+cmd.print(Chen.Student.Name)
 # of course, since there is no assignment, nothing is output
 ```
 By combining layers after layer, you are free to assemble whatever you want to describe.

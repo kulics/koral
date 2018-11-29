@@ -20,7 +20,7 @@ Next, let's design a difficult task that students need to accomplish ... homewor
 E.g:
 ```
 homeWork -> {
-    count :i32
+    Count :i32
     do ()->(){}
 }
 ```
@@ -37,11 +37,11 @@ Similar to the extension function, we can implement this protocol by using the `
 E.g:
 ```
 student += homeWork {
-    count :i32
+    Count :i32
 
     do ()->() {
         SpendTime(1)            # spent an hour
-        ..homeWork.count -= 1   # completed one
+        ..homeWork.Count -= 1   # completed one
     }
 }
 ```
@@ -62,12 +62,12 @@ With the protocol included, we can use the student bundle that owns the protocol
 
 E.g:
 ```
-Peter := student{ <-count=999999 }
-cmd.print( Peter.homeWork.count )
+Peter := student{ <-Count=999999 }
+cmd.print( Peter.homeWork.Count )
 # print 999999, too much
 Peter.homeWork.do()
 # did a homework
-cmd.print(Peter.homeWork.count)
+cmd.print(Peter.homeWork.Count)
 # print 999998, or too much
 ```
 If this is the case, there is no advantage in defining these two properties directly in the package.

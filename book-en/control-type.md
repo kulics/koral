@@ -43,12 +43,12 @@ So we need to use another type of data to use the control type.
 
 E.g:
 ```
-_number := 0
+_Number := 0
 
 Number :i32 {
     ...
     set {
-        _number = value  # value represents the value of the input
+        _Number = value  # value represents the value of the input
     }
 }
 ```
@@ -57,14 +57,14 @@ Note that the setting method cannot exist separately and must exist at the same 
 
 A complete example of reading and writing is as follows:
 ```
-_number := 0
+_Number := 0
 
 Number :i32 {
     get {
-        <- (_number)
+        <- (_Number)
     }
     set {
-        _number = value  # value represents the value of the input
+        _Number = value  # value represents the value of the input
     }
 }
 ```
@@ -84,18 +84,18 @@ Demo {
 
 Main ()->() {
     cmd.print(a)
-    c = 5
-    cmd.print(b)
-    cmd.print(c)
+    C = 5
+    cmd.print(B)
+    cmd.print(C)
 }
 
 a : i32 {
     get { <- (3) }
 }
 
-b := 0
-c : i32 {
-    get { <- (b) }
-    set { b = value }
+B := 0
+C : i32 {
+    get { <- (B) }
+    set { B = value }
 }
 ```

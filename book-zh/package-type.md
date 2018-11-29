@@ -18,10 +18,10 @@ package {}-> {
 例如：
 ```
 student {}-> {
-    name :str = ""
-    number :str = ""
-    class :i32 = 0
-    grade :i32 = 0
+    Name :str = ""
+    Number :str = ""
+    Class :i32 = 0
+    Grade :i32 = 0
 }
 ```
 这样我们就得到了具有这几个数据属性的学生包。这个学生包现在就像 `i32,str,bl` 一样成为了一个可以使用的类型。
@@ -56,10 +56,10 @@ cmd.print( Peter.name )      # 打印了某个学生的名字
 
 例如：
 ```
-Peter.name = "Peter" 
-Peter.number = "060233"
-Peter.class = 2
-Peter.grade = 6
+Peter.Name = "Peter" 
+Peter.Number = "060233"
+Peter.Class = 2
+Peter.Grade = 6
 ```
 ## 简化创建
 像上面那样创建一个新的包，再逐个装填数据非常麻烦，我们可以使用简化语法来配置。
@@ -68,8 +68,8 @@ Peter.grade = 6
 例如：
 ```
 Peter := student{ <-
-    name="Peter", number="060233",
-    class=2, grade=6
+    Name="Peter", Number="060233",
+    Class=2, Grade=6
 }
 ```
 
@@ -110,12 +110,12 @@ Peter := _{
 ```
 student {}-> {
     ...
-    _girlFirend :str # 第一个字符是 _ 的标识符是私有的
+    _GirlFirend :str # 第一个字符是 _ 的标识符是私有的
 }
 ```
 没错，如果你还记得标识符的定义的话，这就是私有标识符的定义方式，私有标识符是不能被外界访问的。
 
-因此我们再定义一个 `Peter` 的话，也不能通过 `Peter._girlFirend` 来获取值或修改值。
+因此我们再定义一个 `Peter` 的话，也不能通过 `Peter._GirlFirend` 来获取值或修改值。
 
 那这种包的私有属性又不能访问，又不能修改，有什么用呢？别急，包还有另外一种属性。
 
@@ -127,7 +127,7 @@ student {}-> {
 ```
 student += {
     getGirlFirend ()->(name:str) {
-        <- (.._girlFirend)
+        <- (.._GirlFirend)
     }
 }
 ```
@@ -161,12 +161,12 @@ student {name, number:str}-> {
     ...
     
     .. {
-        ..name = name
-        ..number = number
+        ..Name = name
+        ..Number = number
         # 计算得出班级
-        ..class = GetSubText(number, 2, 3)
+        ..Class = GetSubText(number, 2, 3)
         # 计算得出年级
-        ..grade = GetSubText(number, 0, 1)
+        ..Grade = GetSubText(number, 0, 1)
     }
 }
 ```
@@ -175,14 +175,14 @@ student {name, number:str}-> {
 例如：
 ```
 Peter := student{"Peter", "060233"}
-cmd.print(Peter.class)     # 打印出 2
+cmd.print(Peter.Class)     # 打印出 2
 ```
 
 如果需要同时使用构造函数和简化创建，可以这样做。
 
 例如：
 ```
-Peter := student{"Peter", "060233" <- name="New Peter"}
+Peter := student{"Peter", "060233" <- Name="New Peter"}
 ```
 
 需要注意的是，一个包只能支持一个构造函数，我们建议保持构造的简单性，一个稳定的包更容易被调用者放心使用，
@@ -194,10 +194,10 @@ Peter := student{"Peter", "060233" <- name="New Peter"}
 例如：
 ```
 chineseStudent {}-> {
-    name :str = ""
-    number :str = ""
-    class :i32 = 0
-    grade :i32 = 0
+    Name :str = ""
+    Number :str = ""
+    Class :i32 = 0
+    Grade :i32 = 0
     kungfu :bl = false     # 不会功夫的学生
 }
 ```
@@ -208,8 +208,8 @@ chineseStudent {}-> {
 例如：
 ```
 chineseStudent {}-> {
-    student := student{}   # 将学生属性包含其中
-    kungfu := false        # 不会功夫
+    Student := student{}   # 将学生属性包含其中
+    Kungfu := false        # 不会功夫
 }
 ```
 这样你就可以通过中国学生里的学生属性来使用通用属性。
@@ -217,7 +217,7 @@ chineseStudent {}-> {
 例如：
 ```
 Chen := chinesestudent{}
-cmd.print( Chen.student.name )
+cmd.print( Chen.Student.Name )
 # 当然，因为没有赋值，所以什么也没有输出
 ```
 通过组合一层又一层的包，你可以自由拼装出任何一个你想要描述的事物。

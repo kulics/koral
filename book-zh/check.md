@@ -60,18 +60,18 @@ readFile (name:str)->() {
 例如：
 ```
 func ()->() {
-    file: File
+    File: file
     ! {
-        file = readFile("./somecode.xs")
+        File = readFile("./somecode.xs")
     } _ {
-        ? file ~= nil {
-            file.release()
+        ? File ~= nil {
+            File.release()
         }
     }
     ...
 }
 ```
-这样我们就声明了`file.release()`这条释放文件的语句，这条语句不会被立刻执行，而是会等待检查结束后调用。
+这样我们就声明了`File.release()`这条释放文件的语句，这条语句不会被立刻执行，而是会等待检查结束后调用。
 
 有了检查延迟，我们就可以无需关心如何退出，安全地处理某些任务。
 
@@ -81,7 +81,7 @@ func ()->() {
 ```
 ...
 _ {
-    file.release()
+    File.release()
     <- ()   # 错误，不能使用返回语句
 }
 ```

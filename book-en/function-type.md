@@ -108,9 +108,9 @@ The difference is that for multiple return values ​​we have to wrap each ide
 
 E.g:
 ```
-_(n, c) := topSell()
+_(N, C) := topSell()
 # define the returned two values ​​for n and c
-_(n, c) = topSell()
+_(N, C) = topSell()
 # overrides the returned two values ​​to n and c
 ```
 You can use the definition or assignment statement to get the return value of the function to use, you can also use the nested function to another function.

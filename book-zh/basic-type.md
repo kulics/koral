@@ -42,8 +42,8 @@ integer8 := _(16).toI8()
 
 例如：
 ```
-float := 855.544
-float = 0.3141592653
+float1 := 855.544
+float2 := 0.3141592653
 ```
 
 需要注意的是，由于计算机计算浮点数的特殊性，浮点数运算存在一定的精度问题，所以对精度敏感的需求应该考虑特殊处理。
@@ -112,8 +112,8 @@ string := "This is block {{ and }}"
 
 例如：
 ```
-boolean := true     # 真  
-boolean = false     # 假  
+boolean1 := true     # 真  
+boolean2 := false     # 假  
 ```
 ## Object 对象类型  
 特别的，有时候会需要一个可以是 任意对象 的 类型 来辅助完成功能，它就是 `obj` 。

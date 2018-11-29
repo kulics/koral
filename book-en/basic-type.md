@@ -42,8 +42,8 @@ In this language, the default decimal is `f64`, which is a 64-bit double-precisi
 
 E.g:
 ```
-float := 855.544
-float = 0.3141592653
+float1 := 855.544
+float2 := 0.3141592653
 ```
 Note that due to the special nature of computer-calculated floating-point numbers, there are certain accuracy issues in floating-point number operations, so the sensitivity-sensitive requirements should consider special handling.
 
@@ -111,8 +111,8 @@ In this language, the default boolean is the type `bl`, which is a type that has
 
 E.g:
 ```
-boolean := true     # true  
-boolean = false     # false  
+boolean1 := true     # true  
+boolean2 := false     # false  
 ```
 ## Object
 In particular, sometimes you need a type that can be any object to assist in the completion of the function, so it is `obj`.

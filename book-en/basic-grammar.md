@@ -119,28 +119,27 @@ E.g:
 ```
 b :i16 = 10
 ```
-## Variable data
-We can define variable data very easily, and types that are not marked with special symbols are variable data.
+## Mutable Data
+We can easily define mutable data, and identifiers that start with uppercase are all mutable data.
 
 E.g:
 ```
-i := 1          # can be changed
-j :i32 = 1      # do not use automatic derivation
+I := 1          # can be changed
+J :i32 = 1      # do not use automatic derivation
 ```
 
-It should be noted that variable data cannot be called externally and can only be used within a defined range. Can be considered private.
-
-## Invariable data
-We can also define invariable data that must be assigned at the time of definition and cannot be changed afterwards, using `id :== value`.
+## Immutable Data
+We can also define immutable data, which is immutable after assignment, and all the markers that start with lowercase are immutable data.
 
 E.g:
 ```
-i :== 2         # cannot be changed
-j :i32 == 3     # do not use automatic derivation
+i := 2         # cannot be changed
+j :i32 = 3     # do not use automatic derivation
 ```
 
 ## Constant
-Constants are languages that are determined at compile time and are unchangeable. Only a special type of the underlying type is supported. Use `id :type value` to define it, and `:type` can usually be omitted.
+Constants are languages that are determined at compile time and are unchangeable. Only a special type of the underlying type is supported. Use `id :type value` to define it, and `:type` can usually be omitted.  
+Constant identifiers must conform to the snake-like nomenclature in lowercase. 
 
 E.g:
 ```
@@ -158,7 +157,7 @@ Identifier is the variable, function, package, protocol, etc. specified name. Th
 1. Within the same `{}`, you can not define more than two identifiers of the same name.
 1. In different `{}`, you can define the identifier of the duplicate name, the language will give priority to the identifier defined in the current range.
 
-In particular, in packages and protocols, properties and method names that begin with the underscore `_` are considered private and the rest are considered public.
+In particular, in namespace, packages and protocols, properties and method names that begin with the underscore `_` are considered private and the rest are considered public.
 ## Keyword
 none.
 
@@ -170,11 +169,11 @@ However, in practical projects, the use of partition will effectively improve th
 
 E.g:
 ```
-a.b(x,y).c(fn:_()->(x:i32){<-(2+1)}).d=1+3*5/4
+a.b(x,y).c(fn:_()->(x:i32){<-(2+1)}).D=1+3*5/4
 
 a.b(x, y).c(fn: _()->(x: i32) {
     <- (2 + 1)
-}).d = 1 + 3 * 5 / 4
+}).D = 1 + 3 * 5 / 4
 ```
 ### [Next Chapter](basic-type.md)
 
