@@ -60,18 +60,18 @@ Quite simply, using `_ {}` at the end of the check can declare a statement that 
 E.g:
 ```
 func ()->() {
-    file: File
+    File: file
     ! {
-        file = readFile("./somecode.xs")
+        File = readFile("./somecode.xs")
     } _ {
-        ? file ~= nil {
-            file.release()
+        ? File ~= nil {
+            File.release()
         }
     }
     ...
 }
 ```
-So we declare the `file.release()` statement that releases the file. This statement will not be executed immediately, but will wait for the function to be called before exiting.
+So we declare the `File.release()` statement that releases the file. This statement will not be executed immediately, but will wait for the function to be called before exiting.
 
 With check defer, we can safely handle certain tasks without having to worry about how the function exits.
 
@@ -81,7 +81,7 @@ E.g:
 ```
 ...
 _ {
-    file.release()
+    File.release()
     <- ()    # error, cannot use return statement
 }
 ```

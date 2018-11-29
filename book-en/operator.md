@@ -10,11 +10,11 @@ E.g:
 ```
 a := 4
 b := 2
-c := a + b  # + add
-c = a - b   # - subtract
-c = a * b   # * multiply
-c = a / b   # / divide
-c = a % b   # % take the remainder, meaning the remainder after the divisibility, the result here is 2
+C := a + b  # + add
+C = a - b   # - subtract
+C = a * b   # * multiply
+C = a / b   # / divide
+C = a % b   # % take the remainder, meaning the remainder after the divisibility, the result here is 2
 ```
 In addition to numbers, there are other types that support arithmetic operations, such as `str`, which can be used to combine two paragraphs of text.
 
@@ -31,12 +31,12 @@ E.g:
 ```
 a := 4
 b := 2
-c := a == b     # == equal to
-c = a ~= b      # ~= not equal
-c = a > b       # > greater than
-c = a >= b      # >= greater than or equal
-c = a < b       # < less than
-c = a <= b      # <= less than or equal
+C := a == b     # == equal to
+C = a ~= b      # ~= not equal
+C = a > b       # > greater than
+C = a >= b      # >= greater than or equal
+C = a < b       # < less than
+C = a <= b      # <= less than or equal
 ```
 ## Logical Operator
 Logical operators are also used primarily in judgment statements for logic operations (AND, OR, NOT).
@@ -45,22 +45,22 @@ E.g:
 ```
 a := true
 b := false
-c := a & b     # & and, both true at the same time
-c = a | b      # | or, one of them is true
-c = ~ a        # ~ not, boolean negation
+C := a & b     # & and, both true at the same time
+C = a | b      # | or, one of them is true
+C = ~a        # ~ not, boolean negation
 ```
 ## Assignment Operator
 Assignment operator is mainly used to assign the right data to the left identifier, you can also attach some shortcut.
 
 E.g:
 ```
-a := 0
-a = 1   # = the simplest assignment
-a += 1  # += add first and then assign
-a -= 1  # -= subtract first and then assign
-a *= 1  # *= multiply first and then assign
-a /= 1  # /= divide first and then assign
-a %= 1  # %= take remainder first and than assignment
+A := 0
+A = 1   # = the simplest assignment
+A += 1  # += add first and then assign
+A -= 1  # -= subtract first and then assign
+A *= 1  # *= multiply first and then assign
+A /= 1  # /= divide first and then assign
+A %= 1  # %= take remainder first and than assignment
 ```
 ## Bit Operation
 In this language, no special symbols are set for bit operations, and function operations are used to perform bit operations.
