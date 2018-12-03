@@ -325,7 +325,7 @@ defer {} -> {
     data := ""
 }
 
-defer += IDisposable {
+defer <- IDisposable {
     Dispose ()->(){}
 }
 
@@ -339,7 +339,7 @@ app {}-> program{} {
     _B := 5
 } 
 
-app += {
+app <- {
     testPackage ()->() {
         item := program{<- Name = "new program",Running = true}
         item2 := _{
@@ -355,7 +355,7 @@ app += {
     }
 }
 
-app += protocol {
+app <- protocol {
     B :i32 {
         get { <- (_B) } 
         set { _B = value }
@@ -389,7 +389,7 @@ testPackageTemplate<T> {}-> {
     data :T
 }
 
-testPackageTemplate<T> += {
+testPackageTemplate<T> <- {
     Generic (a:T)->(){}
 }
 
@@ -398,7 +398,7 @@ testProtocolTemplate<T> -> {
 }
 
 testImplementTemplate {}->{}
-testImplementTemplate += testProtocolTemplate<testImplementTemplate> {
+testImplementTemplate <- testProtocolTemplate<testImplementTemplate> {
     test<testImplementTemplate> (in:testImplementTemplate)->(){}
 }
 

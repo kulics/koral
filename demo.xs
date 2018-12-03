@@ -175,7 +175,7 @@ program {name:str}-> {
     }
 }
 
-program += {
+program <- {
     start ()->() {
         cmd.prt("Start")
         .._Running = true
@@ -191,7 +191,7 @@ control -> {
     shutdown ()->(){}
 }
 
-program += control {
+program <- control {
     shutdown ()->() {
         cmd.prt("Shutdown")
         .._Running = false
