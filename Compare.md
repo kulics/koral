@@ -408,7 +408,7 @@ increment(7)
 Shape {}-> {
     NumberOfSides := 0
 }
-Shape += {
+Shape <- {
     simpleDescription ()->(s: str) {
         <- ("A shape with {NumberOfSides} sides.")
     }
@@ -492,7 +492,7 @@ NamedShape {name: str}-> {
         ..name = name
     }
 }
-NamedShape += {
+NamedShape <- {
     simpleDescription ()->(s: str) {
         <- ("A shape with {NumberOfSides} sides.")
     }
@@ -505,7 +505,7 @@ Square {sideLength: f64, name: str}-> NamedShape {name} {
         ..sideLength = sideLength
     }
 }
-Square += {
+Square <- {
     area ()->(f: f64) {
         <- (sideLength * sideLength)
     }
@@ -895,13 +895,13 @@ func f(x: Nameable) {
 ## Implement
 ### Xs
 ```
-Dog += Nameable {
+Dog <- Nameable {
     name ()->(n: str) {
         <- ("Dog")
     }
 }
 
-Dog += Weight {
+Dog <- Weight {
     getWeight ()->(w: i32) {
         <- (30)
     }

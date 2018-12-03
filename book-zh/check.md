@@ -130,7 +130,7 @@ Defer {} -> {
     content :str
 }
 
-Defer += IDisposable {
+Defer <- IDisposable {
     Dispose ()->() {
         ..content = ""
     }
