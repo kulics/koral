@@ -57,7 +57,7 @@ packageVariableStatement:(annotationSupport)? expression (Define expression|Decl
 // 定义子方法
 packageControlSubStatement: id BlockLeft (functionSupportStatement)* BlockRight;
 // 包扩展
-packageExtensionStatement: id (templateDefine)? '+=' BlockLeft (packageExtensionSupportStatement)* BlockRight Terminate?;
+packageExtensionStatement: id (templateDefine)? ArrowLeft BlockLeft (packageExtensionSupportStatement)* BlockRight Terminate?;
 // 包扩展支持的语句
 packageExtensionSupportStatement: 
 packageFunctionStatement
@@ -82,7 +82,7 @@ implementFunctionStatement
 |implementEventStatement
 ;
 // 实现协议
-protocolImplementStatement: id '+=' nameSpaceItem (templateCall)? BlockLeft (protocolImplementSupportStatement)* BlockRight Terminate?;
+protocolImplementStatement: id ArrowLeft nameSpaceItem (templateCall)? BlockLeft (protocolImplementSupportStatement)* BlockRight Terminate?;
 // 控制实现
 implementControlStatement:(annotationSupport)? id (Define expression|Declared type (Assign expression)?) (BlockLeft (packageControlSubStatement)* BlockRight)? Terminate?;
 // 函数实现
