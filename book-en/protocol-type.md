@@ -32,11 +32,11 @@ Unlike a package, the definition of the protocol properties do not need specific
 
 Next, let's have the students implement the protocol.
 ## Implement the protocol
-Similar to the extension function, we can implement this protocol by using the `id += protocol {}` statement in the required package.
+Similar to the extension function, we can implement this protocol by using the `id <- protocol {}` statement in the required package.
 
 E.g:
 ```
-student += homeWork {
+student <- homeWork {
     Count :i32
 
     do ()->() {
@@ -158,7 +158,7 @@ B {}-> {
     Y := 5
 }
 
-B += A {
+B <- A {
     X := 0
     do ()->() {
         ..A.X += 1

@@ -121,11 +121,11 @@ Then the private properties of this package can not be accessed, and can not be 
 
 ## Extension Function
 If we need to make this package come with a function that makes it easy to manipulate, we can't define it directly in the package.
-We need to use the extension statement `id += {}` to make the package add extension functions.
+We need to use the extension statement `id <- {}` to make the package add extension functions.
 
 E.g:
 ```
-student += {
+student <- {
     getGirlFirend ()->(name:str) {
         <- (.._GirlFirend)
     }
@@ -256,7 +256,7 @@ PKG {x:str, y:i32, z:S}-> {
     }
 }
 
-PKG += {
+PKG <- {
     Print ()->(a:str) {
         <- ( "X {Y}" )
     }

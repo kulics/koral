@@ -16,7 +16,7 @@ List<T> {}-> {
     items := Storage{T}    # 创建存储
     Length := 0
 }
-List<T> += {
+List<T> <- {
     get (index:i32)->(item:T) { # 获取某个泛型数据
         <- ( items.get( index ) )
     }
@@ -78,7 +78,7 @@ Protocol<T> -> {
     test<T> (in:T)->(){}
 }
 
-Implement += Protocol<Implement> {
+Implement <- Protocol<Implement> {
     test<Implement> (in:Implement)->(){}
 }
 ```

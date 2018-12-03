@@ -15,7 +15,7 @@ List<T> {}-> {
     items := Storage{T}    # create storage
     Length := 0
 }
-List<T> += {
+List<T> <- {
     get (index:i32)->(item:T) { # get some T item
         <- ( items.get( index ) )
     }
@@ -77,7 +77,7 @@ Protocol<T> -> {
     test<T> (in: T)->(){}
 }
 
-Implement += Protocol<Implement> {
+Implement <- Protocol<Implement> {
     test<Implement> (in: Implement)->(){}
 }
 ```
