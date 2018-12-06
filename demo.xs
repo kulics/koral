@@ -169,6 +169,10 @@ node {value :i32}-> {
     }
 }
 
+control -> {
+    shutdown ()->(){}
+}
+
 program {name:str}-> {
     name:str
     _Running := false
@@ -185,13 +189,7 @@ program {name:str}-> {
         cmd.prt("Stop")
         .._Running = false
     }
-}
-
-control -> {
-    shutdown ()->(){}
-}
-
-program <- control {
+} :control {
     shutdown ()->() {
         cmd.prt("Shutdown")
         .._Running = false

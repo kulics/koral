@@ -35,8 +35,8 @@ program. -> {
 
         p := app{}
 
-        _ = p.protocol.c(1)
-        testInterface(p.protocol)
+        _ = p.c(1)
+        testInterface(p)
 
         p.testFuncTemplate<i32,str>(1, "2").testPackage()
         
@@ -291,7 +291,7 @@ program. -> {
             !(e)
         } _ {
             ? Z ~= nil {
-                Z.IDisposable.Dispose()
+                Z.Dispose()
             }
         }
     }
@@ -329,17 +329,12 @@ inPackageArray {} -> {
 
 defer {} -> {
     data := ""
-}
-
-defer <- IDisposable {
+} :IDisposable {
     Dispose ()->(){}
 }
 
 app {}-> program{} { 
     i := 555
-    d := 128.687
-    B := "12"
-    c := true
     arr := _{1,1,1,1}
     _PriName := " program "
     _B := 5
@@ -357,16 +352,14 @@ app {}-> program{} {
     testFuncTemplate<T1,T2> (data1: T1, data2: T2)->(data: app) {
         <- (..)
     }
-}
-
-app <- protocol {
+} :protocol {
     B :i32 {
         get { <- (_B) } 
         set { _B = value }
     }
 
     c (x: i32)->(y: i32) {
-        <- (x + ..protocol.B)
+        <- (x + ..B)
     }
 
     d ()~>(x: i32) {
@@ -378,7 +371,7 @@ app <- protocol {
         <~ tsks.delay(5000)
     }
 
-    f :str
+    f :str = "get"
 }
 
 result {data: str} ->{
@@ -399,8 +392,8 @@ testProtocolTemplate<T> -> {
     test<T> (in:T)->(){}
 }
 
-testImplementTemplate {}->{}
-testImplementTemplate <- testProtocolTemplate<testImplementTemplate> {
+testImplementTemplate{} -> {
+} :testProtocolTemplate<testImplementTemplate> {
     test<testImplementTemplate> (in:testImplementTemplate)->(){}
 }
 
