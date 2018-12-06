@@ -22,7 +22,7 @@ Read detail from The [Book](./book-en/introduction.md).
 ## Quick Preview
 ```
 # export namespace
-HelloWorld {
+\HelloWorld {
     Library # import namespace
 }
 # package
