@@ -9,7 +9,7 @@
 
 program. -> {
     # main function
-    Main ()~>() {
+    Main() ~> () {
         cmd.prt("main function")
         # run test
         testSharpType()
@@ -22,7 +22,7 @@ program. -> {
         testDictionary()
         testLoop()
         x := testFunc("testcall")
-        _ = testFuncParams(1, 2, _(a:i32,b:i32,c:i32,d:i8)->(z:str,a:i32,b:i32,c:i32) {
+        _ = testFuncParams(1, 2, _(a: i32, b: i32, c: i32, d: i8) -> (z: str, a: i32, b: i32, c: i32) {
             <- ("",a,b,c)
         })
         testCheck()
@@ -38,7 +38,7 @@ program. -> {
         _ = p.c(1)
         testInterface(p)
 
-        p.testFuncTemplate<i32,str>(1, "2").testPackage()
+        p.testFuncTemplate<i32, str>(1, "2").testPackage()
         
         cmd.rd()
     }
@@ -46,17 +46,17 @@ program. -> {
     StaticX := 0
     StaticY := "hello"
     readonlyZ := "1024"
-    StaticG :i64
-    StaticP :str {
+    StaticG: i64
+    StaticP: str {
         get { <- (StaticY) }
         set { StaticY = value }
     }
 
-    testTuple_ (i:i32)->(v:str) {
+    testTuple_(i: i32) -> (v: str) {
         <- ("tuple")
     }
 
-    testSharpType ()->() {
+    testSharpType() -> () {
         i1 : \System.SByte = 1               # sbyte
         i2 : \System.Int16 = 1               # short
         i3 : \System.Int32 = 1               # int
@@ -71,7 +71,7 @@ program. -> {
         string1 : \System.String = "123"     # string
     }
 
-    testOperator ()->() {
+    testOperator() -> () {
         I :str = "128.687"
         I += ".890"
         B :i32
@@ -96,7 +96,7 @@ program. -> {
         cmd.prt(B.toStr())
     }
 
-    testString ()->() {
+    testString() -> () {
         @ "love xs" {
             ? ea == 'e' {
                 cmd.prt("love xs")
@@ -104,7 +104,7 @@ program. -> {
         }
     }
 
-    testOptional ()->() {
+    testOptional() -> () {
         a: i32? = 1
         a?.toStr()
         b: str? = ""
@@ -115,7 +115,7 @@ program. -> {
         e?[0]?.toStr()?.toStr()
     }
 
-    testTypeConvert ()->() {
+    testTypeConvert() -> () {
         x := app{}
         y := x.as<program>()
         z1 := _(12.34).toF32()
@@ -127,13 +127,13 @@ program. -> {
         cmd.prt( ?(x) )
     }
 
-    testDefault ()->() {
+    testDefault() -> () {
         x := lib.def<program>()
         y := lib.def<protocol>()
         z := lib.def<(a:i32)->(b:i32)>()
     }
 
-    testSwitch ()->() {
+    testSwitch() -> () {
         x :obj = 3
         ? x -> 1 {
             cmd.prt(1)
@@ -148,7 +148,7 @@ program. -> {
         }
     }
 
-    testIf ()->() {
+    testIf() -> () {
         x := 5
         ? x == 2 {
             cmd.prt(2)
@@ -162,7 +162,7 @@ program. -> {
         }
     }
 
-    testArray ()->() {
+    testArray() -> () {
         arrSingle := _{1}
         ArrNumber := _{1,2,5,6,8,4}
         ArrNumber = ArrNumber + 0
@@ -189,7 +189,7 @@ program. -> {
         slice2 := ArrNumber[<3]
     }
 
-    testDictionary ()->() {
+    testDictionary() -> () {
         empty := [str->i32]{}
         DicTemp := _{"k1"->1,"k2"->2}
         DicTemp += _{"k3"->3}
@@ -201,7 +201,7 @@ program. -> {
         cmd.prt(DicTemp["k2"])
     }
 
-    testLoop ()->() {
+    testLoop() -> () {
         cmd.prt(" 0 to 10")
         @ i <- [0 <= 10] {
             cmd.prt(i, ", ", "")
@@ -230,12 +230,12 @@ program. -> {
         }
     }
 
-    testFunc (S: str)->(out1: str, out2: i32) {
+    testFunc(S: str) -> (out1: str, out2: i32) {
         S = S + "test"
         i := 1+1*3*9/8
         out2 := i + 5 + _(i + 8)
         # func in func
-        InFunc ()->() {
+        InFunc() -> () {
             <- ()
         }
         InFunc()
@@ -243,25 +243,25 @@ program. -> {
         <- (S, i)
     }
 
-    testFuncParams (a:i32, b: i32, fn: (a:i32,b:i32,c:i32, d:i8)->(z:str,a:i32,b:i32,c:i32))->(a:i32,b:str,c:str) {
+    testFuncParams(a: i32, b: i32, fn: (a: i32, b: i32, c: i32, d: i8) -> (z: str, a: i32, b: i32, c: i32)) -> (a: i32, b: str, c: str) {
         <- (0,"", "")
     }
 
-    testLambda ()->() {
-        test1 (fn: (i1: i32, i2: i32)->(o1: i32, o2: i32))->() {
+    testLambda() -> () {
+        test1(fn: (i1: i32, i2: i32) -> (o1: i32, o2: i32)) -> () {
             _(o1,o2) := fn(1, 2)
         }
         test1( $i1,i2-> _(i1,i2) )
 
-        test2 (fn: ()->(o1: i32))->() {
+        test2(fn: () -> (o1: i32)) -> () {
             o1 := fn()
         }
         test2( $->1 )
 
-        test3 (fn: (it: i32)->())->() {
+        test3(fn: (it: i32) -> ()) -> () {
             fn(1)
         }
-        test3( _(it:i32)~>(){
+        test3( _(it: i32) ~> () {
             <~ tsks.delay(5000)
             cmd.prt(it)
         })
@@ -269,11 +269,11 @@ program. -> {
             <~ tsks.delay(5000)
             cmd.prt(it)
         })
-        test4(fn: (it:i32)->(v:i32))->(){ fn(18) }
+        test4(fn: (it: i32) -> (v: i32)) -> () { fn(18) }
         test4($it+1)
     }
 
-    testCheck ()->() {
+    testCheck() -> () {
         Z :defer? = nil
         ! z2 := defer{} {
             Z = defer{}
@@ -296,9 +296,9 @@ program. -> {
         }
     }
 
-    testAsync ()~>(x:i32,y:i32,z:str) {
+    testAsync() ~> (x: i32, y: i32, z: str) {
         <~ tsks.delay(5000)
-        async1 ()~>() {
+        async1() ~> () {
             <~ tsks.delay(5000)
         }
         <~ async1()
@@ -306,40 +306,40 @@ program. -> {
         <- (1, 2, "123")
     }
 
-    testLinq ()->() {
+    testLinq() -> () {
         numbers :=  _{0, 1, 2, 3, 4, 5, 6}
         arr := from num in numbers where _(num % 2) == 0 
         orderby num descending select num
     }
 
-    testInterface (in: protocol)->() {}
+    testInterface(in: protocol) -> () {}
 
     const_data 256
     const_data2 :str "512"
-    constFunction ()->(v:i32) { <- (const_data) }
+    constFunction() -> (v: i32) { <- (const_data) }
 }
 
-inPackageArray {} -> {
-    arr :[i32]
+inPackageArray{} -> {
+    arr: [i32]
 
     .. {
         arr = _{1,2,3,4,5,6,7}
     }
 }
 
-defer {} -> {
+defer{} -> {
     data := ""
 } :IDisposable {
-    Dispose ()->(){}
+    Dispose() -> () {}
 }
 
-app {}-> program{} { 
+app{} -> program{} { 
     i := 555
     arr := _{1,1,1,1}
     _PriName := " program "
     _B := 5
 
-    testPackage ()->() {
+    testPackage() -> () {
         item := program{<- Name = "new program",Running = true}
         item2 := _{
             Name := "new program"
@@ -349,80 +349,80 @@ app {}-> program{} {
         item4 := [str->i32]{<- "1"->1,"2"->2,"3"->3}
     }
 
-    testFuncTemplate<T1,T2> (data1: T1, data2: T2)->(data: app) {
+    testFuncTemplate<T1,T2>(data1: T1, data2: T2) -> (data: app) {
         <- (..)
     }
 } :protocol {
-    B :i32 {
+    B: i32 {
         get { <- (_B) } 
         set { _B = value }
     }
 
-    c (x: i32)->(y: i32) {
+    c(x: i32) -> (y: i32) {
         <- (x + ..B)
     }
 
-    d ()~>(x: i32) {
+    d() ~> (x: i32) {
         <~ tsks.delay(5000)
         <- (3)
     }
 
-    e ()~>() {
+    e() ~> () {
         <~ tsks.delay(5000)
     }
 
-    f :str = "get"
+    f: str = "get"
 }
 
-result {data: str} ->{
-    data :str
+result{data: str} -> {
+    data: str
 
     ..{
         ..data = data
     }
 }
 
-testPackageTemplate<T> {}-> {
-    data :T
+testPackageTemplate<T>{} -> {
+    data: T
 
-    Generic (a:T)->(){}
+    Generic(a: T) -> () {}
 }
 
 testProtocolTemplate<T> -> {
-    test<T> (in:T)->(){}
+    test<T>(in: T) -> () {}
 }
 
 testImplementTemplate{} -> {
 } :testProtocolTemplate<testImplementTemplate> {
-    test<testImplementTemplate> (in:testImplementTemplate)->(){}
+    test<testImplementTemplate>(in: testImplementTemplate) -> () {}
 }
 
-program {}-> {
-    Name :str?
-    Running :bl?
+program{} -> {
+    Name: str?
+    Running: bl?
 
-    Property :str? {
+    Property: str? {
         get { <- (Name) }
         set { Name = value }
     }
 }
 
 protocol -> {
-    B :i32 
-    c (x:i32)->(y:i32){}
-    d ()~>(y:i32){}
-    e ()~>(){}
-    f :str
+    B: i32 
+    c(x: i32) -> (y: i32) {}
+    d() ~> (y: i32) {}
+    e() ~> () {}
+    f: str
 }
 
 `Table{"test"}`
-testAnnotation {}-> {
+testAnnotation{} -> {
     `Key, Column{"id"}`
-    Id :str?
+    Id: str?
     `Column{"nick_name"}`
-    NickName :str?
+    NickName: str?
     `Column{"profile"}`
-    Profile :str?
+    Profile: str?
 }
 
 testEnum. -> ?{
@@ -430,9 +430,9 @@ testEnum. -> ?{
     Err = -1
 }
 
-package {y: i32}-> {
-    x :i32
-    y :i32
+package{y: i32} -> {
+    x: i32
+    y: i32
 
     .. {
         ..x = program.const_data
@@ -440,10 +440,10 @@ package {y: i32}-> {
     }
 }
 
-packageChild {x: i32, y: i32}-> package{y}{
-    x :i32
+packageChild{x: i32, y: i32} -> package{y} {
+    x: i32
 
-    ..{
+    .. {
         ..x = x
     }
 }

@@ -275,7 +275,7 @@ let emptyDictionary = [String: Float]()
 ## Functions
 ### Xs
 ```
-greet (name, day: str)->(r: str) {
+greet(name: str, day: str) -> (r: str) {
     <- ("Hello {name}, today is {day}.")
 }
 greet("Bob", "Tuesday")
@@ -312,7 +312,7 @@ greet("Bob", "Tuesday")
 ## Tuple Return
 ### Xs
 ```
-getGasPrices ()->(a, b, c: f64) {
+getGasPrices() -> (a: f64, b: f64, c: f64) {
     <- (3.59, 3.69, 3.79)
 }
 ```
@@ -344,8 +344,8 @@ func getGasPrices() -> (Double, Double, Double) {
 ## Function Type
 ### Xs
 ```
-makeIncrementer ()->(fn: (in: i32)->(out: i32)) {
-    addOne (number: i32)->(number: i32) {
+makeIncrementer() -> (fn: (in: i32) -> (out: i32)) {
+    addOne(number: i32) -> (number: i32) {
         <- (1 + number)
     }
     <- (addOne)
@@ -405,9 +405,9 @@ increment(7)
 ## Classes Declaration
 ### Xs
 ```
-Shape {}-> {
+Shape{} -> {
     NumberOfSides := 0
-    simpleDescription ()->(s: str) {
+    simpleDescription() -> (s: str) {
         <- ("A shape with {NumberOfSides} sides.")
     }
 }
@@ -483,30 +483,32 @@ var shapeDescription = shape.simpleDescription()
 ## Subclass
 ### Xs
 ```
-NamedShape {name: str}-> {
+NamedShape{name: str} -> {
     name: str
     NumberOfSides: i32 = 0
-    ..{
+
+    .. {
         ..name = name
     }
 
-    simpleDescription ()->(s: str) {
+    simpleDescription() -> (s: str) {
         <- ("A shape with {NumberOfSides} sides.")
     }
 }
 
-Square {sideLength: f64, name: str}-> NamedShape {name} {
+Square{sideLength: f64, name: str} -> NamedShape{name} {
     sideLength: f64
+
     .. {
         ..NumberOfSides = 4
         ..sideLength = sideLength
     }
 
-    area ()->(f: f64) {
+    area() -> (f: f64) {
         <- (sideLength * sideLength)
     }
 
-    ..simpleDescription ()->(s: str) {
+    ..simpleDescription() -> (s: str) {
         <- ("A square with sides of length {sideLength}.")
     }
 }
@@ -730,7 +732,7 @@ for item in library {
 ### Xs
 ```
 nb := 42
-? nb -> [0<=7],8,9 { 
+? nb -> [0<=7], 8, 9 { 
     cmd.prt("single digit") 
 } 10 { 
     cmd.prt("double digits") 
@@ -839,10 +841,10 @@ for current in someObjects {
 ### Xs
 ```
 Nameable -> {
-    name ()->(s: str){}
+    name() -> (s: str) {}
 }
 
-f (x: Nameable)->() {
+f(x: Nameable) -> () {
     print("Name is " + x.name())
 }
 ```
@@ -891,13 +893,13 @@ func f(x: Nameable) {
 ## Implement
 ### Xs
 ```
-Dog {}->{
+Dog{} -> {
 } :Nameable {
-    name ()->(n: str) {
+    name() -> (n: str) {
         <- ("Dog")
     }
 } :Weight {
-    getWeight ()->(w: i32) {
+    getWeight() -> (w: i32) {
         <- (30)
     }
 }
