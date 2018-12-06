@@ -13,32 +13,12 @@ namespace Compiler
             obj += $"namespace {ns.name + Wrap + BlockLeft + Wrap}";
             obj += ns.imports + Wrap;
 
-            var unStatic = "";
-            var Static = "";
-            var hasStatic = false;
+            var content = "";
             foreach (var item in context.namespaceSupportStatement())
             {
-                switch (item.GetChild(0))
-                {
-                    case NamespaceFunctionStatementContext _:
-                    case NamespaceVariableStatementContext _:
-                    case NamespaceConstantStatementContext _:
-                        Static += Visit(item);
-                        hasStatic = true;
-                        break;
-                    default:
-                        unStatic += Visit(item);
-                        break;
-                }
+                content += Visit(item);
             }
-            if (hasStatic)
-            {
-                obj += $"using static {ns.staticName + Terminate + Wrap}";
-                obj += $"public static partial class {ns.staticName} {BlockLeft + Wrap}";
-                obj += Static;
-                obj += BlockRight + Terminate + Wrap;
-            }
-            obj += unStatic;
+            obj += content;
             obj += BlockRight + Wrap;
             return obj;
         }
@@ -46,7 +26,6 @@ namespace Compiler
         private class Namespace
         {
             public string name;
-            public string staticName;
             public string imports;
         }
 
@@ -54,14 +33,8 @@ namespace Compiler
         {
             var obj = new Namespace
             {
-                name = (string)Visit(context.nameSpace()),
-
-                staticName = FileName
+                name = (string)Visit(context.nameSpace())
             };
-            if (context.id() != null)
-            {
-                obj.staticName = (Visit(context.id()) as Result).text;
-            }
             foreach (var item in context.importStatement())
             {
                 obj.imports += (string)Visit(item);
@@ -184,6 +157,27 @@ namespace Compiler
                 id.text += " = " + op + context.Integer().GetText();
             }
             return id.text + ",";
+        }
+
+        public override object VisitPackageStaticStatement([NotNull] PackageStaticStatementContext context)
+        {
+            var id = (Result)Visit(context.id());
+            var obj = "";
+            foreach (var item in context.packageStaticSupportStatement())
+            {
+                obj += Visit(item);
+            }
+            obj += BlockRight + Terminate + Wrap;
+            var header = "";
+            if (context.annotationSupport() != null)
+            {
+                header += Visit(context.annotationSupport());
+            }
+            header += $"{id.permission} partial class {id.text}";
+
+            header += Wrap + BlockLeft + Wrap;
+            obj = header + obj;
+            return obj;
         }
 
         public override object VisitNamespaceFunctionStatement([NotNull] NamespaceFunctionStatementContext context)
