@@ -1,4 +1,4 @@
-demo {
+\demo {
     System
     Library
 }
@@ -173,9 +173,7 @@ program {name:str}-> {
     ..{
         ..name = name
     }
-}
 
-program <- {
     start ()->() {
         cmd.prt("Start")
         .._Running = true

@@ -1,4 +1,4 @@
-demo=run {
+\demo=run {
     Library
     System
     System\IO
