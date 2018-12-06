@@ -92,21 +92,10 @@ namespace Compiler
         public override object VisitParameterClauseIn([NotNull] ParameterClauseInContext context)
         {
             var obj = "(";
-
-            var lastType = "";
             var temp = new List<string>();
             for (int i = context.parameter().Length - 1; i >= 0; i--)
             {
                 Parameter p = (Parameter)Visit(context.parameter(i));
-                if (p.type != null)
-                {
-                    lastType = p.type;
-                }
-                else
-                {
-                    p.type = lastType;
-                }
-
                 temp.Add($"{p.annotation} {p.type} {p.id}");
             }
             for (int i = temp.Count - 1; i >= 0; i--)
@@ -140,19 +129,10 @@ namespace Compiler
             if (context.parameter().Length > 1)
             {
                 obj += "( ";
-                var lastType = "";
                 var temp = new List<string>();
                 for (int i = context.parameter().Length - 1; i >= 0; i--)
                 {
                     Parameter p = (Parameter)Visit(context.parameter(i));
-                    if (p.type != null)
-                    {
-                        lastType = p.type;
-                    }
-                    else
-                    {
-                        p.type = lastType;
-                    }
                     temp.Add($"{p.annotation} {p.type} {p.id}");
                 }
                 for (int i = temp.Count - 1; i >= 0; i--)
@@ -189,11 +169,7 @@ namespace Compiler
             {
                 p.annotation = (string)Visit(context.annotationSupport());
             }
-            if (context.type() != null)
-            {
-                p.type = (string)Visit(context.type());
-            }
-
+            p.type = (string)Visit(context.type());
             return p;
         }
 
