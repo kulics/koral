@@ -45,6 +45,7 @@ packageSupportStatement:
 packageInitStatement
 |packageOverrideFunctionStatement
 |packageVariableStatement
+|packageFunctionStatement
 ;
 // 包构造方法
 packageInitStatement:(annotationSupport)? '..' BlockLeft (functionSupportStatement)* BlockRight Terminate?;

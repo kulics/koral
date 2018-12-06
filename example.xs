@@ -337,9 +337,7 @@ app {}-> program{} {
     arr := _{1,1,1,1}
     _PriName := " program "
     _B := 5
-} 
 
-app <- {
     testPackage ()->() {
         item := program{<- Name = "new program",Running = true}
         item2 := _{
@@ -387,9 +385,7 @@ result {data: str} ->{
 
 testPackageTemplate<T> {}-> {
     data :T
-}
 
-testPackageTemplate<T> <- {
     Generic (a:T)->(){}
 }
 
