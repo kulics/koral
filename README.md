@@ -28,7 +28,7 @@ HelloWorld {
 # package
 program. -> {
     # main function
-    Main ()->() {
+    Main() -> () {
         # list
         greetings := _{"Hello", "Hola", "Bonjour",
                     "Ciao", "こんにちは", "안녕하세요",

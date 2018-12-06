@@ -4,7 +4,7 @@
 }
 
 program. -> {
-    Main ()->() {
+    Main() -> () {
         n0 := node{0}
         n1 := node{1}
         n2 := node{2}
@@ -52,28 +52,28 @@ program. -> {
         cmd.rd()
     }
 
-    preOrderTraverse (node:node?)->() {
+    preOrderTraverse(node: node?) -> () {
         ? node -> nil { <- () }
         cmd.prt(node.value)
         preOrderTraverse(node.Left)
         preOrderTraverse(node.Right)
     }
 
-    postOrderTraverse (node:node?)->() {
+    postOrderTraverse(node: node?) -> () {
         ? node -> nil { <- () }
         postOrderTraverse(node.Left)
         postOrderTraverse(node.Right)
         cmd.prt(node.value)
     }
 
-    middleOrderTraverse (node:node?)->() {
+    middleOrderTraverse(node: node?) -> () {
         ? node -> nil { <- () }
         middleOrderTraverse(node.Left)
         cmd.prt(node.value)
         middleOrderTraverse(node.Right)
     }
 
-    inverseNode (node:node?)->(node:node?) {
+    inverseNode(node: node?) -> (node: node?) {
         ? node -> nil { <- (nil) }
         node.Left = inverseNode(node.Left)
         node.Right = inverseNode(node.Right)
@@ -82,11 +82,11 @@ program. -> {
         <- (temp)
     }
 
-    swap (list:[i32], i:i32, j:i32)->() {
+    swap(list: [i32], i: i32, j: i32) -> () {
         _(list[i], list[j]) = _(list[j], list[i])
     }
 
-    simpleSort (list:[i32])->() {
+    simpleSort(list: [i32]) -> () {
         cmd.prt("Simple Sort")
         @ i <- [0 < list.count] {
             @ j <- [i+1 < list.count] {
@@ -98,7 +98,7 @@ program. -> {
         @ list { cmd.prt(ea) }
     }
 
-    bubbleSort (list:[i32])->() {
+    bubbleSort(list: [i32]) -> () {
         cmd.prt("Bubble Sort")
         @ i <- [0 < list.count] {
             @ j <- [list.count-2 >= i] {
@@ -110,13 +110,13 @@ program. -> {
         @ list { cmd.prt(ea) }
     }
 
-    quickSort (list:[i32])->() {
+    quickSort(list: [i32]) -> () {
         cmd.prt("Quick Sort")
         qSort(list,0,list.count-1)
         @ list { cmd.prt(ea) }
     }
 
-    qSort (list:[i32], low:i32, high:i32)->() {
+    qSort(list: [i32], low: i32, high: i32) -> () {
         Pivot := 0
         ? low < high {
             Pivot = partition(list,low,high)
@@ -126,7 +126,7 @@ program. -> {
         }
     }
 
-    partition (list:[i32], low:i32, high:i32)->(position:i32) {
+    partition(list: [i32], low: i32, high: i32) -> (position: i32) {
         pivotkey := list[low]
         
         @ ? low < high {
@@ -143,7 +143,7 @@ program. -> {
         <- (low)
     }
 
-    filterList (list:[i32], fn:(take:i32)->(act:bl))->(l:[i32]) {
+    filterList(list: [i32], fn: (take: i32) -> (act: bl)) -> (l: [i32]) {
         Filter := [i32]{}
 
         @ list {
@@ -154,15 +154,15 @@ program. -> {
         <- (Filter)
     }
 
-    shutdown(ctrl:control) -> () {
+    shutdown(ctrl: control) -> () {
         ctrl.shutdown()
     }
 }
 
-node {value :i32}-> {
-    value :i32
-    Left :node?
-    Right :node?
+node{value: i32} -> {
+    value: i32
+    Left: node?
+    Right: node?
 
     ..{
         ..value = value
@@ -170,34 +170,34 @@ node {value :i32}-> {
 }
 
 control -> {
-    shutdown ()->(){}
+    shutdown() -> () {}
 }
 
-program {name:str}-> {
-    name:str
+program{name: str} -> {
+    name: str
     _Running := false
     ..{
         ..name = name
     }
 
-    start ()->() {
+    start() -> () {
         cmd.prt("Start")
         .._Running = true
     }
 
-    stop ()->() {
+    stop() -> () {
         cmd.prt("Stop")
         .._Running = false
     }
 } :control {
-    shutdown ()->() {
+    shutdown() -> () {
         cmd.prt("Shutdown")
         .._Running = false
     }
 }
 
-app {name:str, platform:str}-> program{name}{
-    Platform:str
+app{name: str, platform: str} -> program{name} {
+    Platform: str
 
     .. {
         Platform = platform
