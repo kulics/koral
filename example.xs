@@ -430,7 +430,10 @@ testAnnotation {}-> {
     Profile :str?
 }
 
-testEnum [Ok, Err = -1]
+testEnum. -> ?{
+    Ok 
+    Err = -1
+}
 
 const_data 256
 const_data2 :str "512"

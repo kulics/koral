@@ -22,7 +22,7 @@ namespaceFunctionStatement
 ;
 
 // 枚举
-enumStatement: (annotationSupport)? id '[' enumSupportStatement (',' enumSupportStatement )* ']' Terminate?;
+enumStatement: (annotationSupport)? id call ArrowRight Judge BlockLeft enumSupportStatement* BlockRight Terminate?;
 
 enumSupportStatement: id ('=' (add)? Integer)?;
 
