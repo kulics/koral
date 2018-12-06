@@ -15,7 +15,6 @@ packageStaticStatement
 |packageStatement
 |packageExtensionStatement
 |protocolStatement
-|protocolImplementStatement
 |enumStatement
 ;
 
@@ -42,7 +41,7 @@ namespaceControlSubStatement: id BlockLeft (functionSupportStatement)* BlockRigh
 namespaceFunctionStatement:(annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 
 // 定义包
-packageStatement:(annotationSupport)? id (templateDefine)? parameterClausePackage ArrowRight (extend)? BlockLeft (packageSupportStatement)* BlockRight;
+packageStatement:(annotationSupport)? id (templateDefine)? parameterClausePackage ArrowRight (extend)? BlockLeft (packageSupportStatement)* BlockRight protocolImplementStatement* Terminate?;
 // 继承
 extend: type '{' expressionList? '}';
 // 入参
@@ -90,9 +89,9 @@ implementFunctionStatement
 |implementEventStatement
 ;
 // 实现协议
-protocolImplementStatement: id ArrowLeft nameSpaceItem (templateCall)? BlockLeft (protocolImplementSupportStatement)* BlockRight Terminate?;
+protocolImplementStatement: ':' nameSpaceItem (templateCall)? BlockLeft (protocolImplementSupportStatement)* BlockRight Terminate?;
 // 控制实现
-implementControlStatement:(annotationSupport)? id (Define expression|Declared type (Assign expression)?) (BlockLeft (packageControlSubStatement)* BlockRight)? Terminate?;
+implementControlStatement:(annotationSupport)? expression (Define expression|Declared type (Assign expression)?) (BlockLeft (packageControlSubStatement)* BlockRight)? Terminate?;
 // 函数实现
 implementFunctionStatement:(annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 事件实现

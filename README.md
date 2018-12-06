@@ -25,22 +25,25 @@ Read detail from The [Book](./book-en/introduction.md).
 HelloWorld {
     Library # import namespace
 }
-# main function
-Main ()->() {
-    # list
-    greetings := _{"Hello", "Hola", "Bonjour",
-                "Ciao", "こんにちは", "안녕하세요",
-                "Cześć", "Olá", "Здравствуйте",
-                "Chào bạn", "您好"}
-    # for-each  
-    @ greetings {
-        # match
-        ? ea -> [ 0 <= 8 ] {
-            cmd.prt(ea) # call function
-        } _ {
-            # lambda
-            cmd.prt( greetings.filter($it.count > 4) )
-            <- @
+# package
+program. -> {
+    # main function
+    Main ()->() {
+        # list
+        greetings := _{"Hello", "Hola", "Bonjour",
+                    "Ciao", "こんにちは", "안녕하세요",
+                    "Cześć", "Olá", "Здравствуйте",
+                    "Chào bạn", "您好"}
+        # for-each  
+        @ greetings {
+            # match
+            ? ea -> [ 0 <= 8 ] {
+                cmd.prt(ea) # call function
+            } _ {
+                # lambda
+                cmd.prt( greetings.filter($it.count > 4) )
+                <- @
+            }
         }
     }
 }

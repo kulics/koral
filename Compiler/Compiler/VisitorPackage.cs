@@ -106,6 +106,12 @@ namespace Compiler
 
             header += Wrap + BlockLeft + Wrap;
             obj = header + obj;
+
+            foreach (var item in context.protocolImplementStatement())
+            {
+                obj += $"{id.permission} partial class {id.text} {(string)Visit(item)} {Wrap}";
+            }
+
             return obj;
         }
 
@@ -150,14 +156,14 @@ namespace Compiler
             var r1 = (Result)Visit(context.expression(0));
             var typ = "";
             Result r2 = null;
-            if (context.type() != null)
-            {
-                typ = (string)Visit(context.type());
-            }
-            else if (context.expression().Length == 2)
+            if (context.expression().Length == 2)
             {
                 r2 = (Result)Visit(context.expression(1));
                 typ = (string)r2.data;
+            }
+            if (context.type() != null)
+            {
+                typ = (string)Visit(context.type());
             }
             var obj = "";
             if (context.annotationSupport() != null)
@@ -287,10 +293,7 @@ namespace Compiler
 
         public override object VisitProtocolImplementStatement([NotNull] ProtocolImplementStatementContext context)
         {
-            var id = (Result)Visit(context.id());
-
             var obj = "";
-            obj += id.permission + " partial class " + id.text;
 
             var ptcl = (string)Visit(context.nameSpaceItem());
             // 泛型
@@ -301,34 +304,9 @@ namespace Compiler
 
             obj += $":{ptcl} {Wrap} {BlockLeft} {Wrap}";
 
-            var pName = ptcl;
-            if (pName.LastIndexOf(".") > 0)
-            {
-                pName = pName.Substring(pName.LastIndexOf("."));
-            }
-            if (pName.IndexOf("<") > 0)
-            {
-                pName = pName.Substring(0, pName.LastIndexOf("<"));
-            }
-            obj += "public " + ptcl + " " + pName +
-                " { get { return this as " + ptcl + ";}}" + Wrap;
-
             foreach (var item in context.protocolImplementSupportStatement())
             {
-                if (item.GetChild(0) is ImplementFunctionStatementContext)
-                {
-                    var fn = (Function)Visit(item);
-                    obj += fn.@out + " " + ptcl + "." + fn.ID + " " + fn.@in + Wrap + fn.body;
-                }
-                else if (item.GetChild(0) is ImplementControlStatementContext)
-                {
-                    var vr = (Variable)Visit(item);
-                    obj += vr.type + " " + ptcl + "." + vr.ID + " " + vr.body;
-                }
-                else if (item.GetChild(0) is ImplementEventStatementContext)
-                {
-                    obj += Visit(item);
-                }
+                obj += Visit(item);
             }
             obj += $"{BlockRight} {Terminate} {Wrap}";
             return obj;
@@ -343,104 +321,72 @@ namespace Compiler
             return obj;
         }
 
-        private class Variable
-        {
-            public string type;
-            public string ID;
-            public string body;
-            public string annotation;
-        }
-
         public override object VisitImplementControlStatement([NotNull] ImplementControlStatementContext context)
         {
-            var id = (Result)Visit(context.id());
-            var type = "";
+            var r1 = (Result)Visit(context.expression(0));
+            var typ = "";
             Result r2 = null;
+            if (context.expression().Length == 2)
+            {
+                r2 = (Result)Visit(context.expression(1));
+                typ = (string)r2.data;
+            }
             if (context.type() != null)
             {
-                type = (string)Visit(context.type());
+                typ = (string)Visit(context.type());
             }
-            else if (context.expression() != null)
+            var obj = "";
+            if (context.annotationSupport() != null)
             {
-                r2 = (Result)Visit(context.expression());
-                type = (string)r2.data;
+                obj += Visit(context.annotationSupport());
             }
-
-            var body = "";
             if (context.packageControlSubStatement().Length > 0)
             {
-                body += BlockLeft;
+                obj += $"{r1.permission} {typ} {r1.text + BlockLeft}";
                 foreach (var item in context.packageControlSubStatement())
                 {
-                    body += Visit(item);
+                    obj += Visit(item);
                 }
-                body += BlockRight + Wrap;
+                obj += BlockRight + Wrap;
             }
             else
             {
-                if (id.isVariable)
+                if (r1.isVariable)
                 {
-                    body += "{ get; set; } ";
+                    obj += $"{r1.permission} {typ} {r1.text} {{ get;set; }}";
                     if (r2 != null)
                     {
-                        body += $" = {r2.text} {Terminate} {Wrap}";
+                        obj += $" = {r2.text} {Terminate} {Wrap}";
                     }
                     else
                     {
-                        body += Wrap;
+                        obj += Wrap;
                     }
                 }
                 else
                 {
-                    body += "{ get; } ";
+                    obj += $"{r1.permission} {typ} {r1.text} {{ get; }}";
                     if (r2 != null)
                     {
-                        body += $" = {r2.text} {Terminate} {Wrap}";
+                        obj += $" = {r2.text} {Terminate} {Wrap}";
                     }
                     else
                     {
-                        body += Wrap;
+                        obj += Wrap;
                     }
                 }
             }
-
-            var vr = new Variable
-            {
-                ID = id.text,
-                type = type,
-                body = body + Wrap
-            };
-            if (context.annotationSupport() != null)
-            {
-                vr.annotation = (string)Visit(context.annotationSupport());
-            }
-            return vr;
-        }
-
-        private class Function
-        {
-            public string ID;
-            public string @in;
-            public string @out;
-            public string body;
-            public string annotation;
+            return obj;
         }
 
         public override object VisitImplementFunctionStatement([NotNull] ImplementFunctionStatementContext context)
         {
-            var fn = new Function();
             var id = (Result)Visit(context.id());
+            var obj = "";
             if (context.annotationSupport() != null)
             {
-                fn.annotation = (string)Visit(context.annotationSupport());
+                obj += Visit(context.annotationSupport());
             }
-            fn.ID = id.text;
-            // 泛型
-            if (context.templateDefine() != null)
-            {
-                fn.ID += Visit(context.templateDefine());
-            }
-            fn.@in = (string)Visit(context.parameterClauseIn());
             // 异步
             if (context.t.Type == FlowRight)
             {
@@ -453,16 +399,22 @@ namespace Compiler
                 {
                     pout = Task;
                 }
-                fn.@out = " async " + pout;
+                obj += $"{id.permission} async {pout} {id.text}";
             }
             else
             {
-                fn.@out = (string)Visit(context.parameterClauseOut());
+                obj += id.permission + " " + Visit(context.parameterClauseOut()) + " " + id.text;
             }
-            fn.body = BlockLeft + Wrap;
-            fn.body += ProcessFunctionSupport(context.functionSupportStatement());
-            fn.body += BlockRight + Wrap;
-            return fn;
+
+            // 泛型
+            if (context.templateDefine() != null)
+            {
+                obj += Visit(context.templateDefine());
+            }
+            obj += Visit(context.parameterClauseIn()) + Wrap + BlockLeft + Wrap;
+            obj += ProcessFunctionSupport(context.functionSupportStatement());
+            obj += BlockRight + Wrap;
+            return obj;
         }
 
         public override object VisitProtocolStatement([NotNull] ProtocolStatementContext context)

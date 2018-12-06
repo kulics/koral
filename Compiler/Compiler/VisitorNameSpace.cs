@@ -287,14 +287,14 @@ namespace Compiler
             var r1 = (Result)Visit(context.expression(0));
             var typ = "";
             Result r2 = null;
-            if (context.type() != null)
-            {
-                typ = (string)Visit(context.type());
-            }
-            else if (context.expression().Length == 2)
+            if (context.expression().Length == 2)
             {
                 r2 = (Result)Visit(context.expression(1));
                 typ = (string)r2.data;
+            }
+            if (context.type() != null)
+            {
+                typ = (string)Visit(context.type());
             }
             var obj = "";
             if (context.annotationSupport() != null)
