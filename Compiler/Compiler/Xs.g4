@@ -5,7 +5,7 @@ program: statement+;
 statement: exportStatement namespaceSupportStatement*;
 
 // 导出命名空间
-exportStatement: nameSpace ('=' id)? BlockLeft (importStatement)* BlockRight Terminate?;
+exportStatement: '\\' nameSpace ('=' id)? BlockLeft (importStatement)* BlockRight Terminate?;
 
 // 导入命名空间
 importStatement: (annotationSupport)? nameSpace (call id)? Terminate?;
