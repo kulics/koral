@@ -5,15 +5,13 @@ program: statement+;
 statement: exportStatement namespaceSupportStatement*;
 
 // 导出命名空间
-exportStatement: '\\' nameSpace ('=' id)? BlockLeft (importStatement)* BlockRight Terminate?;
+exportStatement: '\\' nameSpace BlockLeft (importStatement)* BlockRight Terminate?;
 
 // 导入命名空间
 importStatement: (annotationSupport)? nameSpace (call id)? Terminate?;
 
 namespaceSupportStatement:
-namespaceFunctionStatement
-|namespaceVariableStatement
-|namespaceConstantStatement
+packageStaticStatement
 |packageStatement
 |packageExtensionStatement
 |protocolStatement
@@ -25,7 +23,15 @@ namespaceFunctionStatement
 enumStatement: (annotationSupport)? id call ArrowRight Judge BlockLeft enumSupportStatement* BlockRight Terminate?;
 
 enumSupportStatement: id ('=' (add)? Integer)?;
-
+// 静态包
+packageStaticStatement:(annotationSupport)? id call ArrowRight BlockLeft (packageStaticSupportStatement)* BlockRight;
+// 静态包支持的语句
+packageStaticSupportStatement:
+namespaceVariableStatement
+|namespaceControlSubStatement
+|namespaceFunctionStatement
+|namespaceConstantStatement
+;
 // 命名空间变量
 namespaceVariableStatement:(annotationSupport)? expression (Define expression|Declared type (Assign expression)?) (BlockLeft (namespaceControlSubStatement )* BlockRight)? Terminate?;
 // 命名空间常量
@@ -34,6 +40,7 @@ namespaceConstantStatement: (annotationSupport)? id (Declared type)? expression 
 namespaceControlSubStatement: id BlockLeft (functionSupportStatement)* BlockRight;
 // 命名空间函数
 namespaceFunctionStatement:(annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
+
 // 定义包
 packageStatement:(annotationSupport)? id (templateDefine)? parameterClausePackage ArrowRight (extend)? BlockLeft (packageSupportStatement)* BlockRight;
 // 继承
