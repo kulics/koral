@@ -105,7 +105,7 @@ parameterClauseIn : '(' parameter? (',' parameter)*  ')'  ;
 // 出参
 parameterClauseOut : '(' parameter? (',' parameter)*  ')'  ;
 // 参数结构
-parameter :(annotationSupport)? id (':' type)?;
+parameter :(annotationSupport)? id ':' type;
 
 // 函数支持的语句
 functionSupportStatement:

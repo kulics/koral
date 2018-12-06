@@ -82,7 +82,7 @@ program. -> {
         <- (temp)
     }
 
-    swap (list:[i32], i, j:i32)->() {
+    swap (list:[i32], i:i32, j:i32)->() {
         _(list[i], list[j]) = _(list[j], list[i])
     }
 
@@ -116,7 +116,7 @@ program. -> {
         @ list { cmd.prt(ea) }
     }
 
-    qSort (list:[i32], low, high:i32)->() {
+    qSort (list:[i32], low:i32, high:i32)->() {
         Pivot := 0
         ? low < high {
             Pivot = partition(list,low,high)
@@ -126,7 +126,7 @@ program. -> {
         }
     }
 
-    partition (list:[i32], low, high:i32)->(position:i32) {
+    partition (list:[i32], low:i32, high:i32)->(position:i32) {
         pivotkey := list[low]
         
         @ ? low < high {
@@ -196,7 +196,7 @@ program {name:str}-> {
     }
 }
 
-app {name, platform:str}-> program{name}{
+app {name:str, platform:str}-> program{name}{
     Platform:str
 
     .. {
