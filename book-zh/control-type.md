@@ -8,7 +8,7 @@
 
 例如：
 ```
-number :i32
+Number: i32
 ```
 这样便定义了一个没有额外方法的控制数据，它内置了默认的控制方法。
 
@@ -17,7 +17,7 @@ number :i32
 
 例如：
 ```
-number :i32 {
+Number: i32 {
     get {   # 表示获取，相当于其它语言中的getter
         <- (7)     # 只返回 7
     }
@@ -31,7 +31,7 @@ number :i32 {
 
 例如：
 ```
-number :i32 {
+Number: i32 {
     ...
     set {   # 表示设置，相当于其它语言中的setter
         # ？？？该把值给谁？？？
@@ -45,7 +45,7 @@ number :i32 {
 ```
 _Number := 0
 
-number :i32 {
+Number: i32 {
     ...
     set {
         _Number = value     # value代表输入的值
@@ -58,7 +58,7 @@ number :i32 {
 一个完整的读写例子如下：
 ```
 _Number := 0
-number: i32 {
+Number: i32 {
     get {
         <- (_Number)
     }
@@ -76,16 +76,18 @@ number: i32 {
 
 ## 本章示例
 ```
-Demo {
+\Demo {
     System
     Library
 }
 
-Main ()->() {
-    cmd.print(a)
-    C = 5
-    cmd.print(B)
-    cmd.print(C)
+example. -> {
+    Main ()->() {
+        cmd.print(a)
+        C = 5
+        cmd.print(B)
+        cmd.print(C)
+    }
 }
 
 a : i32 {

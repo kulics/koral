@@ -12,7 +12,7 @@ We can declare an exception data using `!()` Anywhere in the function.
 
 E.g:
 ```
-readFile (name: str)->() {
+readFile(name: str) -> () {
     ? name.Length == 0 {
         !( Exception{"something wrong"} )
     }
@@ -59,7 +59,7 @@ Quite simply, using `_ {}` at the end of the check can declare a statement that 
 
 E.g:
 ```
-func ()->() {
+func() -> () {
     File: file
     ! {
         File = readFile("./somecode.xs")
@@ -101,37 +101,37 @@ E.g:
 
 ## Example of this chapter
 ```
-Demo {
+\Demo {
     System
     Library
 }
 
-Main ()->() {
-    ! {
-        x: i32 = (1 * 1)
-    } -> {
-        !(ex)
-    }
+example. -> {
+    Main ()->() {
+        ! {
+            x: i32 = (1 * 1)
+        } -> {
+            !(ex)
+        }
 
-    x := Defer{}
-    ! y := Defer{} {
-        x.content = "defer"
-        cmd.print(x.content)
-    } -> e:Exception {
-        !(e)
-    } _ {
-        ? x ~= nil {
-            x.IDisposable.Dispose()
+        x := Defer{}
+        ! y := Defer{} {
+            x.content = "defer"
+            cmd.print(x.content)
+        } -> e:Exception {
+            !(e)
+        } _ {
+            ? x ~= nil {
+                x.Dispose()
+            }
         }
     }
 }
 
-Defer {} -> {
-    content :str
-}
-
-Defer <- IDisposable {
-    Dispose ()->() {
+Defer{} -> {
+    content: str
+} :IDisposable {
+    Dispose() -> () {
         ..content = ""
     }
 }

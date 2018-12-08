@@ -1,11 +1,15 @@
 # 枚举
 枚举是一组具有独立名称整数常量。通常可以用来标记一些业务数据的类型，方便判断处理。
 ## 定义
-我们只需要使用`id [id,id,id,id]`语句即可。
+我们只需要使用`id. -> ?{id id id id}`语句即可。
 
 例如：
 ```
-Color [Red, Green, Blue]
+Color. -> ?{
+    Red
+    Green
+    Blue
+}
 ```
 枚举会按照顺序给标识符赋值，最终得到`Red->0, Green->1, Blue->2`这样的集合。
 
@@ -29,28 +33,30 @@ c := randomColor()     # 获取一个随机颜色
 
 例如:
 ```
-Number [
-    a = 1,  # 1
-    b,      # 2
-    c = 1,  # 1
+Number. -> ?{
+    a = 1   # 1
+    b       # 2
+    c = 1   # 1
     d       # 2
-]
+}
 ```
 
 ### [下一章](check.md)
 
 ## 本章示例
 ```
-Demo {
+\Demo {
     System
     Library
 }
 
-Main ()->() {
-    cmd.print( A.Z )
-    cmd.print( B.Z )
+example. -> {
+    Main() -> () {
+        cmd.print( A.Z )
+        cmd.print( B.Z )
+    }
 }
 
-A [X, Y, Z]
-B [X, Y=0, Z]
+A. -> ?{X, Y, Z}
+B. -> ?{X, Y=0, Z}
 ```

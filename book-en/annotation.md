@@ -18,13 +18,13 @@ Let's take a look at the database data for how to use annotations.
 E.g:
 ```
 `Table{"test"}`
-annotation {}-> {
+annotation{} -> {
         `Key,Column{"id"}`
-        ID :str = ""
+        ID: str = ""
         `Column{"name"}`
-        Name :str = ""
+        Name: str = ""
         `Column{"data"}`
-        Data :str = ""
+        Data: str = ""
 }
 ```
 We declare an annotation package that annotates the table name `test`, the primary key `id`, the field `name`, and the field `data`.

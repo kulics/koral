@@ -52,18 +52,20 @@ a!.toStr()
 
 ## 本章示例
 ```
-Demo {
+\Demo {
     System
     Library
 }
 
-Main ()->() {
-    a :i32? = nil
+example. -> {
+    Main ()->() {
+        a :i32? = nil
 
-    b: [i32?]? = [i32?]?{<-0}
-    b?[0]?.toStr()?.toStr()
+        b: [i32?]? = [i32?]?{<-0}
+        b?[0]?.toStr()?.toStr()
 
-    c: [i32!]! = [i32!]!{<-0}
-    c![0]!.toStr()!.toStr()
+        c: [i32!]! = [i32!]!{<-0}
+        c![0]!.toStr()!.toStr()
+    }
 }
 ```
