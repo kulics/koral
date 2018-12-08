@@ -1,19 +1,15 @@
 # The Xs Programming Language
-Xs is a concise open source .NET programming language. 
+Xs is an open source cross-platform programming language focused on simplicity.
+
+The design goal of this language is to improve the efficiency of reading and writing, reduce the burden of grammar, and enable users to focus their real attention on problem solving.
+
+So we abandon a lot of complicated features and only retain the most general functions. In the end, Xs can express logic gracefully with very little grammar.
 
 This is the main source code repository for Xs. It contains the compiler, and documentation.
-
-The language is designed to improve reading performance and reduce the grammatical burden so that users can focus their real attention on business needs.
-
-Therefore, we abandon many subtle grammatical features, retaining only the most used part, and enhance its versatility.
-
-Eventually making Xs with very few grammar, only the presence of symbols on the keyboard instead of keywords is sufficient to express all the logic.
-
 ## Features
-+ Focus on writing and reading.
-+ Less grammar, no keywords.
-+ Clear semantics, one logic corresponds to only one expression.
-+ Support for compilation to .NET platform, with .NET framework and library resources, we can use this language in a very wide range of scenarios.
++ Well-designed grammar, easy to write and read.
++ Rules are clear and uniform, intuitive.
++ With the support of. NET platform, we can use this language in a very wide range of scenarios with the help of. NET framework and library resources.
 
 ## Getting Started
 Read detail from The [Book](./book-en/introduction.md).  
@@ -53,11 +49,11 @@ program. -> {
     1. Design syntax.
     1. Completed translator to C # compiler.
 1. 2018.03 ~ 2019.03
-    1. Rewrite all xylaga projects using Xs.
-    1. Develop vscode syntax plugin.
-    1. Compiler features improvements (identifier records, cross-file references, project compilation).
+    1. Add standard library.
+    1. Improve grammar to achieve grammatical stability.
 1. 2019.03 ~ 2021.03
-    1. Compile to CIL or LLVM.
+    1. Rewrite all xylaga projects using Xs.
+    1. Complete a mature compiler, Compile to CIL or LLVM or JVM.
     1. Improved compilation capabilities and support for language server protocols.
 ## Compare
 Compare with C#, Go, Kotlin, Swift.
