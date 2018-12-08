@@ -1,17 +1,14 @@
 # Xs Programming Language
-Xs is a concise open source .NET programming language. 
+Xs is an open source cross-platform programming language focused on simplicity.
 
-The language is designed to improve reading performance and reduce the grammatical burden so that users can focus their real attention on business needs.
+The design goal of this language is to improve the efficiency of reading and writing, reduce the burden of grammar, and enable users to focus their real attention on problem solving.
 
-Therefore, we abandon many subtle grammatical features, retaining only the most used part, and enhance its versatility.
-
-Eventually making Xs with very few grammar, only the presence of symbols on the keyboard instead of keywords is sufficient to express all the logic. 
+So we abandon a lot of complicated features and only retain the most general functions. In the end, Xs can express logic gracefully with very little grammar.
 
 ## Features
-+ Focus on writing and reading..
-+ Less grammar, no keywords.
-+ Clear semantics, one logic corresponds to only one expression.
-+ Support for compilation to .NET platform, with .NET framework and library resources, we can use this language in a very wide range of scenarios.
++ Well-designed grammar, easy to write and read.
++ Rules are clear and uniform, intuitive.
++ With the support of. NET platform, we can use this language in a very wide range of scenarios with the help of. NET framework and library resources.
 
 ## Index
 ---
