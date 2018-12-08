@@ -104,7 +104,7 @@ length := dictionary.count     # 长度
 
 ## 本章示例
 ```
-Demo {
+\Demo {
     System
     Library
 }

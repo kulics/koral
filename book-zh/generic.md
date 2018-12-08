@@ -12,16 +12,15 @@
 
 例如：
 ```
-List<T> {}-> {
+List<T>{} -> {
     items := Storage{T}    # 创建存储
     Length := 0
-}
-List<T> <- {
-    get (index:i32)->(item:T) { # 获取某个泛型数据
+
+    get(index: i32) -> (item: T) { # 获取某个泛型数据
         <- ( items.get( index ) )
     }
 
-    add (item:T)->() {   # 将一个泛型数据添加进列表
+    add(item: T) -> () {   # 将一个泛型数据添加进列表
         items.insert(Length, item)
         Length += 1
     }
@@ -48,7 +47,7 @@ z := lib.def<()->()>()
 
 例如：
 ```
-Package<T> {}-> {
+Package<T>{} -> {
     item := lib.def<T>()    # 初始化了一个缺省值的泛型数据
 }
 ```
@@ -70,16 +69,20 @@ ListNumber := [i32]{}
 
 例如：
 ```
-Func<T> (data:T)->(data:T) {
+Func<T>(data: T) -> (data: T) {
     <- (data)
 }
 
 Protocol<T> -> {
-    test<T> (in:T)->(){}
+    test<T>(in: T) -> () {}
 }
 
-Implement <- Protocol<Implement> {
-    test<Implement> (in:Implement)->(){}
+Implement{} -> {
+
+} :Protocol<Implement> {
+    test<Implement>(in: Implement) -> () {
+        
+    }
 }
 ```
 ### [下一章](annotation.md)

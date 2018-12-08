@@ -8,44 +8,26 @@
 
 例如：
 ```
-name\space{}
+\name\space{}
 
-getSomething ()->(content:str) {
-    <- ("something")
+Demo. -> {
+    getSomething() -> (content: str) {
+        <- ("something")
+    }
 }
 ```
 ## 导入
 我们可以通过导入功能来使用其它命名空间内容，导入后可以直接调用命名空间内容。
 
-需要注意的是，顶层函数、顶层变量、顶层常量会以当前文件名作为宿主容器，实装为一个对象。
-因此默认需要使用文件名来跨命名空间访问，这里的文件名为`Demo`。
-
 例如：
 ```
-run { name\space }
+\run { name\space }
 
-Main ()->() {
-    # 打印 something
-    cmd.print( Demo.getSomething() )
-}
-```
-
-如果我们需要指定宿主容器的名称，可以使用 `=name` 的方式指定。
-
-例如：
-```
-name\space=helper {}
-
-getSomething ()->(content:str) {
-    <- ("something")
-}
-
-------------------------
-
-run{ name\space }
-
-Main ()->() {
-    cmd.print( helper.getSomething() )
+example. -> {
+    Main() -> () {
+        # 打印 something
+        cmd.print( Demo.getSomething() )
+    }
 }
 ```
 ## 简化导入
@@ -53,11 +35,13 @@ Main ()->() {
 
 例如：
 ```
-run{ name\space.Demo }
+\run{ name\space.Demo }
 
-Main ()->() {
-    # 打印 something
-    cmd.print( getSomething() )
+example. -> {
+    Main() -> () {
+        # 打印 something
+        cmd.print( getSomething() )
+    }
 }
 ```
 这样就不需要每次都使用`space`来调用了。
@@ -66,11 +50,13 @@ Main ()->() {
 
 例如：
 ```
-demo {}
+\Demo {}
 
-Main ()->() {
-    # 直接使用即可
-    cmd.print( \name\space.Demo.getSomething() )    
+example. -> {
+    Main() -> () {
+        # 直接使用即可
+        cmd.print( \name\space.Demo.getSomething() )    
+    }
 }
 ```
 

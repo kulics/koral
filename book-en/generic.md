@@ -11,16 +11,15 @@ This is a simplified implementation.
 
 E.g:
 ```
-List<T> {}-> {
+List<T>{} -> {
     items := Storage{T}    # create storage
     Length := 0
-}
-List<T> <- {
-    get (index:i32)->(item:T) { # get some T item
+
+    get(index: i32) -> (item: T) { # get some T item
         <- ( items.get( index ) )
     }
   
-    add (item:T)->() {   # add a T item to List
+    add(item: T) -> () {   # add a T item to List
         items.insert(Length, item)
         Length += 1
     }
@@ -47,7 +46,7 @@ This way we can use it in generics.
 
 E.g:
 ```
-Package<T> {}-> {
+Package<T>{} -> {
     item := lib.def<T>()    # initialized a default value of the generic data
 }
 ```
@@ -69,16 +68,20 @@ We can use generics in packages, functions, and protocol types.
 
 E.g:
 ```
-Func<T> (data: T)->(data: T) {
+Func<T>(data: T) -> (data: T) {
     <- (data)
 }
 
 Protocol<T> -> {
-    test<T> (in: T)->(){}
+    test<T>(in: T) -> () {}
 }
 
-Implement <- Protocol<Implement> {
-    test<Implement> (in: Implement)->(){}
+Implement{} -> {
+
+} :Protocol<Implement> {
+    test<Implement>(in: Implement) -> () {
+        
+    }
 }
 ```
 ### [Next Chapter](annotation.md)

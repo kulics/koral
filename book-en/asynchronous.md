@@ -17,7 +17,7 @@ That's right, it's really use `~>` on it.
 
 E.g:
 ```
-async ()~>(out: i32) {
+async() ~> (out: i32) { 
     <- (12)
 }
 ```
@@ -45,12 +45,12 @@ Asynchronous wait can only be used in asynchronous declared functions.
 E.g:
 ```
 # correct
-async ()~>(out: i32) {
+async() ~> (out: i32) {
     <~ tsks.delay(5000)     # wait for a while
     <- (12)
 }
 # wrong
-async ()->(out: i32) {
+async() -> (out: i32) {
     <~ tsks.delay(5000)     # can not be declared
     <- (12)
 }
@@ -62,7 +62,7 @@ We can choose to wait for no data, or we can choose not to wait for data.
 
 E.g:
 ```
-async ()~>() {
+async() ~> () {
     <~ tsks.delay(5000)    # wait for a while
 }
 

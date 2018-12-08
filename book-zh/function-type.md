@@ -202,7 +202,7 @@ each1To10( _(item:i32)->() {
 
 ## 本章示例
 ```
-Demo {
+\Demo {
     System
     Library
 }

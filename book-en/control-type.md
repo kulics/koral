@@ -8,7 +8,7 @@ If we don't need to define a specific control method for a while, we only need t
 
 E.g:
 ```
-Number :i32
+Number: i32
 ```
 This defines a control data with no additional methods, and it has a built-in default control method.
 
@@ -17,7 +17,7 @@ If we want to set a get operation, we can add `{ ctrl{} }` later to define.
 
 E.g:
 ```
-Number :i32 {
+Number: i32 {
     get {   # means get, equivalent to getter in other languages
         <- (7)  # only returns 7
     }
@@ -31,7 +31,7 @@ With the above example, we naturally can think of how to deal with set operation
 
 E.g:
 ```
-Number :i32 {
+Number: i32 {
     ...
     set {   # means set, equivalent to setter in other languages
         # ? ? ? Who should give the value? ? ?
@@ -45,7 +45,7 @@ E.g:
 ```
 _Number := 0
 
-Number :i32 {
+Number: i32 {
     ...
     set {
         _Number = value  # value represents the value of the input
@@ -77,16 +77,18 @@ Most of the time, we can use only simple definitions to complete the task, becau
 
 ## Example of this chapter
 ```
-Demo {
+\Demo {
     System
     Library
 }
 
-Main ()->() {
-    cmd.print(a)
-    C = 5
-    cmd.print(B)
-    cmd.print(C)
+example. -> {
+    Main ()->() {
+        cmd.print(a)
+        C = 5
+        cmd.print(B)
+        cmd.print(C)
+    }
 }
 
 a : i32 {

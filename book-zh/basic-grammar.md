@@ -23,7 +23,7 @@
 
 例如：
 ```
-Demo {}
+\Demo {}
 ```
 这个语句的意思是将当前代码文件内的内容标记命名空间为 `Demo` ，这样里面的内容命名就被限定在区域内，不必考虑和区域外的命名冲突。  
 
@@ -34,7 +34,7 @@ Demo {}
 
 例如：
 ```
-Demo {
+\Demo {
     System
     Library
 }
@@ -53,7 +53,7 @@ Demo {
 
 例如：
 ```
-Demo {
+\Demo {
     System
     Library
 }
@@ -179,7 +179,7 @@ a.b(x, y).c(fn: _()->(x:i32) {
 
 ## 本章示例
 ```
-Demo {
+\Demo {
     System
     Library
 }

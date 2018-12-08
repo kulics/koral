@@ -20,8 +20,8 @@ protocol -> {
 例如：
 ```
 homeWork -> {
-    Count :i32
-    do ()->(){}
+    Count: i32
+    do() -> () {}
 }
 ```
 这是一个作业协议，它有两个属性，一个是需要做作业的数量，一个是完成作业的函数。
@@ -32,28 +32,28 @@ homeWork -> {
 
 接下来，我们就要让学生来实现这个协议了。
 ## 实现协议
-和扩展函数类似，我们可以在需要的包中，使用 `id <- protocol {}` 语句，就可以实现这个协议。
+我们可以在包声明后面，使用 `:protocol {}` 语句来实现这个协议。
 
 例如：
 ```
-student <- homeWork {
-    Count :i32
+student{} -> {
+    ...
+} :homeWork {
+    Count: i32
 
-    do ()->() {
+    do() -> () {
         SpendTime(1)           # 花费了一个小时
-        ..homeWork.Count -= 1   # 完成了一个
+        Count -= 1   # 完成了一个
     }
 }
 ```
 我们的学生写作业真是非常艰苦的……
 
-让我们来解释一下这段包含协议发生了什么：
-1. 我们定义了一个协议属性，这个属性的标识符就是协议的名称 `homeWork`， 所以我们可以像定义了一个属性一样去使用它。
+让我们来解释一下这段代码发生了什么：
+1. 我们实现了一个协议，现在 `student` 也被认为是 `homework` 类型了，我们可以将一个 `student` 当作 `homework` 一样去使用。
 1. 在协议内我们包含了协议规定的两个属性 `count, do` ，根据规定，一个也不能少。
 1. 我们给协议的两个属性都分别编写了真实的值和函数，这样这两个属性就成为了 `student` 的有效子属性之一。
-1. 我们在 `do` 里面做了一些事情，并且通过调用 `homeWork` 的属性减少了作业的总量。
-
-需要注意的是，协议属性也是属性，我们在一个包内不能实现两个同名的协议，也不能有其它属性或方法与协议同名，但是不同名的协议所包含的方法允许同名。
+1. 我们在 `do` 里面做了一些事情，减少了作业的总量。
 
 ## 使用协议
 包含了协议之后，我们就能使用拥有协议的学生包了。
@@ -61,11 +61,11 @@ student <- homeWork {
 例如：
 ```
 Peter := student{ <-Count=999999 }
-cmd.print( Peter.homeWork.Count )
+cmd.print( Peter.Count )
 # 打印 999999，好多呀
-Peter.homeWork.do()
+Peter.do()
 # 做了一次作业
-cmd.print( Peter.homeWork.Count )
+cmd.print( Peter.Count )
 # 打印 999998，还是好多呀
 ```
 如果只是这样使用，那和在包里直接定义这两个属性比就没什么优势了。
@@ -83,28 +83,28 @@ StudentA := chinesestudent{}
 StudentB := americastudent{}
 StudentC := japanstudent{}
 # 让他们分别做作业
-StudentA.homeWork.do()
-StudentB.homeWork.do()
-StudentC.homeWork.do()
+StudentA.do()
+StudentB.do()
+StudentC.do()
 ```
 更有效率的做法是把这个功能写进函数，让函数来帮我们重复调用协议的功能。
 
 例如：
 ```
-doHomeWork (student: homeWork)->() {
+doHomeWork(student: homeWork) -> () {
     student.do()
 }
 # 现在我们就可以更简单地让每个学生做作业了
-doHomeWork(StudentA.homeWork)
-doHomeWork(StudentB.homeWork)
-doHomeWork(StudentC.homeWork)
+doHomeWork(StudentA)
+doHomeWork(StudentB)
+doHomeWork(StudentC)
 ```
 当然，更好的做法是把这些学生都放进数组，这样我们就可以使用循环来处理这些重复的工作了。
 
 例如：
 ```
 arr := [homeWork]{}
-arr.add( StudentA.homeWork )
+arr.add( StudentA )
 ... # 塞进很多很多学生
 @ arr {
     doHomeWork(ea)
@@ -122,7 +122,7 @@ arr.add( StudentA.homeWork )
 
 例如：
 ```
-func (hw:homeWork)->() {
+func(hw: homeWork) -> () {
     # 判断是否中国学生
     ? hw.is<chineseStudent>() {
         # 转换为中国学生数据
@@ -136,34 +136,34 @@ func (hw:homeWork)->() {
 
 ## 本章示例
 ```
-Demo {
+\Demo {
     System
     Library
 }
 
-Main ()->() {
-    S := B{}
-    B.A.do()
-    C( B.A )
-}
-
-A -> {
-    X : i32
-    do ()->() {}
-}
-
-B {}-> {
-    Y := 5
-}
-
-B <- A {
-    X := 0
-    do ()->() {
-        ..A.X += 1
+example. -> {
+    Main ()->() {
+        S := B{}
+        B.do()
+        C( B )
     }
 }
 
-C (a:A)->() {
+A -> {
+    X: i32
+    do() -> () {}
+}
+
+B{} -> {
+    Y := 5
+} :A {
+    X := 0
+    do() -> () {
+        X += 1
+    }
+}
+
+C(a: A) -> () {
     a.do()
     ? a.is<B>() {
         cmd.print( a.as<B>().Y )

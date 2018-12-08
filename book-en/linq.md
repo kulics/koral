@@ -17,7 +17,7 @@ We can use Linq to query like C#.
 
 E.g:
 ```
-linq ()->() {
+linq() -> () {
     numbers := _{ 0, 1, 2, 3, 4, 5, 6 }
     arr := from num in numbers
             where _(num % 2) == 0
