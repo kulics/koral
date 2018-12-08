@@ -109,14 +109,16 @@ length := dictionary.count     # 长度
     Library
 }
 
-Main ()->() {
-    list1 := _{1,2,3,4,5}
-    list1 += 6
-    list2 := [i8]{<- 1,2,1,2}
-    list3 := _{|1,2,3|}
+example. -> {
+    Main() -> () {
+        list1 := _{1,2,3,4,5}
+        list1 += 6
+        list2 := [i8]{<- 1,2,1,2}
+        list3 := _{|1,2,3|}
 
-    dictionary1 := _{"a"->1, "b"->2, "c"->3}
-    dictionary1["d"] = 4
-    dictionary2 := [i8->i8]{<- 1->1,2->2,3->3}
+        dictionary1 := _{"a"->1, "b"->2, "c"->3}
+        dictionary1["d"] = 4
+        dictionary2 := [i8->i8]{<- 1->1,2->2,3->3}
+    }
 }
 ```

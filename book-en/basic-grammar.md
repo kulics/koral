@@ -19,7 +19,7 @@ In the following content, we will omit the `;` at the end of the statement by de
 ## Export Namespace
 All content in this language can only be defined in the namespace so that content can be efficiently divided into distinct blocks for management. You can define it freely in a separate namespace without undue restrictions on naming.
 
-We can use the `id {}` statement to define the namespace of the current file.
+We can use the `\id {}` statement to define the namespace of the current file.
 
 E.g:
 ```
@@ -47,7 +47,7 @@ You can write multiple import statements that their order does not affect the im
 For more details on namespaces, please see [Namespace](namespace.md)
 
 ## Main Entry
-We need to define a main entry to let the program know where to start. The main entry is declared with a function `Main ()->() {}` and must be valid at the top level of the namespace.  
+We need to define a main entry to let the program know where to start. The main entry is declared with a function `Main() -> () {}` and must be package mount property.  
 Depending on the target platform, the main entry may be declared differently, and the main function of C# is used here by default.
 
 E.g:
@@ -57,10 +57,12 @@ E.g:
     Library
 }
 
-Main ()->() {
+example. -> {
+    Main() -> () {
+    }
 }
 ```
-The main entry function here is defined at the top of the namespace and is a function with no arguments and no return value. It is automatically recognized as the main entry and the main entry function is executed when the program is started, so we simply write the function main entry function can be.
+The main entry function here is defined of the `example` and is a function with no arguments and no return value. It is automatically recognized as the main entry and the main entry function is executed when the program is started, so we simply write the function main entry function can be.
 
 In the examples that follow, we are by default implemented in the main entry function, so we will not overplay this part of the code.
 
@@ -89,7 +91,7 @@ We can create new variable using the `id:type` statement.
 
 E.g:
 ```
-a : i32
+a: i32
 ```
 This will create an identifier for the name on the left and define it as the type on the right, in which case the identifier is a nil value.
 
@@ -117,7 +119,7 @@ If we don't want automatic derivation, we can also use the write statement defin
 
 E.g:
 ```
-b :i16 = 10
+b: i16 = 10
 ```
 ## Mutable Data
 We can easily define mutable data, and identifiers that start with uppercase are all mutable data.
@@ -125,7 +127,7 @@ We can easily define mutable data, and identifiers that start with uppercase are
 E.g:
 ```
 I := 1          # can be changed
-J :i32 = 1      # do not use automatic derivation
+J: i32 = 1      # do not use automatic derivation
 ```
 
 ## Immutable Data
@@ -134,7 +136,7 @@ We can also define immutable data, which is immutable after assignment, and all 
 E.g:
 ```
 i := 2         # cannot be changed
-j :i32 = 3     # do not use automatic derivation
+j: i32 = 3     # do not use automatic derivation
 ```
 
 ## Constant
@@ -144,7 +146,7 @@ Constant identifiers must conform to the snake-like nomenclature in lowercase.
 E.g:
 ```
 i 2         # automatic derivation
-j :i32 3    # do not use automatic derivation
+j: i32 3    # do not use automatic derivation
 ```
 
 Note that invariable data can only be defined within the package without initial.
@@ -171,7 +173,7 @@ E.g:
 ```
 a.b(x,y).c(fn:_()->(x:i32){<-(2+1)}).D=1+3*5/4
 
-a.b(x, y).c(fn: _()->(x: i32) {
+a.b(x, y).c(fn: _() -> (x: i32) {
     <- (2 + 1)
 }).D = 1 + 3 * 5 / 4
 ```
@@ -184,10 +186,12 @@ a.b(x, y).c(fn: _()->(x: i32) {
     Library
 }
 
-Main ()->() {
-    a : i32
-    a = 5
-    b := 6
-    c :i8 = 1
+example. -> {
+    Main() -> () {
+        a : i32
+        a = 5
+        b := 6
+        c: i8 = 1
+    }
 }
 ```

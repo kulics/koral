@@ -58,7 +58,7 @@ a!.toStr()
 }
 
 example. -> {
-    Main ()->() {
+    Main() -> () {
         a :i32? = nil
 
         b: [i32?]? = [i32?]?{<-0}

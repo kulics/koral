@@ -5,11 +5,11 @@ Therefore, we need a feature that can wrap data of different attributes to bette
 
 Obviously, this feature for package data, called package.
 ## Definition
-We can use the `id {}-> {}` statement to define a package that has nothing.
+We can use the `id{} -> {}` statement to define a package that has nothing.
 
 E.g:
 ```
-package {}-> {
+package{} -> {
 }
 ```
 Of course, we hope more is to be able to pack a few data, for example, a name, student number, class, grade attributes of students.
@@ -17,11 +17,11 @@ We can define these data in the same way we define normal identifiers.
 
 E.g:
 ```
-student {}-> {
-    Name :str = ""
-    Number :str = ""
-    Class :i32 = 0
-    Grade :i32 = 0
+student{} -> {
+    Name: str = ""
+    Number: str = ""
+    Class: i32 = 0
+    Grade: i32 = 0
 }
 ```
 So we get a student bag with these data attributes. This student bag now becomes a usable type like `i32, str, bl`.
@@ -119,19 +119,18 @@ Therefore, we can define a `Peter`, nor can we get or modify the value via `Pete
 
 Then the private properties of this package can not be accessed, and can not be modified, what is the use? Do not worry, there is another attribute package.
 
-## Extension Function
-If we need to make this package come with a function that makes it easy to manipulate, we can't define it directly in the package.
-We need to use the extension statement `id <- {}` to make the package add extension functions.
+## Function
+If we need to make this package come with a function that makes it easy to manipulate, we can define it directly in the package.
 
 E.g:
 ```
-student <- {
-    getGirlFirend ()->(name:str) {
+student{} -> {
+    ...
+    getGirlFirend() -> (name: str) {
         <- (.._GirlFirend)
     }
 }
 ```
-Because the extension function is part of the package, and the function can call data or functionality, we can define a method for getting the private property.
 
 The `..` used here to declare the package itself, so you can easily access their own properties. This can be thought of as `this | self` in other languages.
 
@@ -157,7 +156,7 @@ Add parameters at the time of definition, and write the definition of the constr
 
 E.g:
 ```
-student {name, number: str}-> {
+student{name: str, number: str} -> {
     ...
 
     .. {
@@ -188,18 +187,33 @@ Peter := student{"Peter", "060233" <- Name="New Peter"}
 It should be noted that a package can only support one constructor, we recommend to maintain the simplicity of the structure, a stable package easier to be used by the caller,
 
 If you really have more construction requirements, you can use regular functions to accomplish this requirement.
+## Mount Property
+Sometimes we don't want to always use constructive methods to use certain data and functions, when we can mount property on the package itself.  
+By wrapping the data and functions we need with `id. -> {}`, we can call them directly.
 
+E.g:
+```
+student. -> {
+    ShareData: i32 = 20
+    shareFunction() -> () {
+        cmd.print("nothing")
+    }
+}
+```
+
+It should be noted that mount property are created while the program is running, and they survive and are shared during the program declaration cycle.  
+Therefore, it does not belong to the same space as the package's construction property. The construction property belong to the object and the mount property belong to the package itself.
 ## Combination
 Now let us play our imagination, we want a customized package for Chinese students how to define it?
 
 E.g:
 ```
 chineseStudent {}-> {
-    Name :str = ""
-    Number :str = ""
-    Class :i32 = 0
-    Grade :i32 = 0
-    kungfu :bl = false    # kung fu students
+    Name: str = ""
+    Number: str = ""
+    Class: i32 = 0
+    Grade: i32 = 0
+    kungfu: bl = false    # kung fu students
 }
 ```
 No, no repeatable definition of data so elegant, we can reuse student attributes, with an additional kung fu attributes on it.
@@ -208,7 +222,7 @@ We need to use a combination of this feature, but not so complicated, just creat
 
 E.g:
 ```
-chineseStudent {}-> {
+chineseStudent{} -> {
     Student := student{}   # include student attributes in it
     Kungfu := false        # no kung fu
 }
@@ -232,19 +246,23 @@ By combining layers after layer, you are free to assemble whatever you want to d
     Library
 }
 
-Main ()->() {
-    a := S{ <- A=5,B=12}
-    b := PKG{"hello", 64, a}
-    cmd.print( b.Z.A )
-    cmd.print( b.Print() )
+
+example. -> {
+    Main() -> () {
+        a := S{ <- A=5,B=12}
+        b := PKG{"hello", 64, a}
+        cmd.print( b.Z.A )
+        cmd.print( b.Print() )
+        PKG.N()
+    }
 }
 
-S {}-> {
+S{} -> {
     A := 0
     B := 0
 }
 
-PKG {x:str, y:i32, z:S}-> {
+PKG{x: str, y: i32, z: S}-> {
     X := ""
     Y := 0
     Z :S
@@ -254,11 +272,16 @@ PKG {x:str, y:i32, z:S}-> {
         Y = y
         Z = z
     }
+
+    Print() -> (a: str) {
+        <- ( "X {Y}" )
+    }
 }
 
-PKG <- {
-    Print ()->(a:str) {
-        <- ( "X {Y}" )
+PKG. -> {
+    M := 20
+    N() -> () {
+        cmd.print(M)
     }
 }
 ```

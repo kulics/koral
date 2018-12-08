@@ -142,7 +142,7 @@ func(hw: homeWork) -> () {
 }
 
 example. -> {
-    Main ()->() {
+    Main() -> () {
         S := B{}
         B.do()
         C( B )

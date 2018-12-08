@@ -82,7 +82,7 @@ Number: i32 {
 }
 
 example. -> {
-    Main ()->() {
+    Main() -> () {
         cmd.print(a)
         C = 5
         cmd.print(B)

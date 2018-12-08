@@ -139,13 +139,15 @@ nil # empty value
     Library
 }
 
-Main ()->() {
-    a := 123
-    b := a.toI64()
-    c := 123.456
-    d := "hello"
-    c := "{d} world"
-    e := true
-    f :obj = false
+example. -> {
+    Main() -> () {
+        a := 123
+        b := a.toI64()
+        c := 123.456
+        d := "hello"
+        c := "{d} world"
+        e := true
+        f :obj = false
+    }
 }
 ```
