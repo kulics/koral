@@ -83,7 +83,7 @@ Most of the time, we can use only simple definitions to complete the task, becau
 }
 
 example. -> {
-    Main ()->() {
+    Main() -> () {
         cmd.print(a)
         C = 5
         cmd.print(B)

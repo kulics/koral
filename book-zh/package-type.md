@@ -5,11 +5,11 @@
 
 显而易见，这个负责包装数据的功能，就是包。
 ## 定义
-我们可以使用 `id {}-> {}` 语句来定义一个什么都没有的包。
+我们可以使用 `id{} -> {}` 语句来定义一个什么都没有的包。
 
 例如：
 ```
-package {}-> {
+package{} -> {
 }
 ```
 当然，我们更希望的是能包装几个数据，例如一个具有名称、学号、班级、年级属性的学生。
@@ -17,11 +17,11 @@ package {}-> {
 
 例如：
 ```
-student {}-> {
-    Name :str = ""
-    Number :str = ""
-    Class :i32 = 0
-    Grade :i32 = 0
+student{} -> {
+    Name: str = ""
+    Number: str = ""
+    Class: i32 = 0
+    Grade: i32 = 0
 }
 ```
 这样我们就得到了具有这几个数据属性的学生包。这个学生包现在就像 `i32,str,bl` 一样成为了一个可以使用的类型。
@@ -119,19 +119,18 @@ student {}-> {
 
 那这种包的私有属性又不能访问，又不能修改，有什么用呢？别急，包还有另外一种属性。
 
-## 扩展函数
-如果我们需要让这个包自带函数，让它能方便操作，我们不能在包内直接定义。
-我们需要使用扩展语句`id <- {}`来使包增加扩展函数。
+## 函数
+如果我们需要让这个包自带函数，让它能方便操作，我们也可以在包内直接定义。
 
 例如：
 ```
-student <- {
-    getGirlFirend ()->(name:str) {
+student{} -> {
+    ...
+    getGirlFirend() -> (name: str) {
         <- (.._GirlFirend)
     }
 }
 ```
-因为扩展函数属于包的一部分，而函数是可以调用数据或功能的，这样我们就可以定义一个获取获取私有属性的方法。
 
 这里的 `..` 用来声明包自身，这样可以方便地访问自身的属性。这可以认为是其它语言中的 `this | self` 。
 
@@ -157,7 +156,7 @@ cmd.print( Peter.getGirlFirend() )
 
 例如：
 ```
-student {name, number:str}-> {
+student{name: str, number: str} -> {
     ...
     
     .. {
@@ -188,17 +187,33 @@ Peter := student{"Peter", "060233" <- Name="New Peter"}
 需要注意的是，一个包只能支持一个构造函数，我们建议保持构造的简单性，一个稳定的包更容易被调用者放心使用，
 
 如果真的有更多构造需求，可以使用常规函数来完成这个需求。
+## 挂载属性
+有时候我们并不希望总是使用构造的方法来使用某些数据和函数，这时候我们可以将属性挂载到包本身上。  
+通过 `id. -> {}` 来包裹我们需要的数据和函数，我们就能直接调用它们了。
+
+例如：
+```
+student. -> {
+    ShareData: i32 = 20
+    shareFunction() -> () {
+        cmd.print("nothing")
+    }
+}
+```
+
+需要注意的是，挂载属性是在程序运行时就被创建，在程序声明周期内都存活并被共享的。
+因此它与包的构造属性并不在同一个空间内，构造属性是属于对象的，挂载属性是属于包自身的。
 ## 组合
 现在让我们发挥我们的想象力，我们想要一个专门给中国学生定制的数据包该怎么定义呢？
 
 例如：
 ```
-chineseStudent {}-> {
-    Name :str = ""
-    Number :str = ""
-    Class :i32 = 0
-    Grade :i32 = 0
-    kungfu :bl = false     # 不会功夫的学生
+chineseStudent{} -> {
+    Name: str = ""
+    Number: str = ""
+    Class: i32 = 0
+    Grade: i32 = 0
+    kungfu: bl = false     # 不会功夫的学生
 }
 ```
 不不不，这样重复定义数据就很不优雅了，我们可以将学生属性复用，加上一个额外的功夫属性就可以了。
@@ -207,7 +222,7 @@ chineseStudent {}-> {
 
 例如：
 ```
-chineseStudent {}-> {
+chineseStudent{} -> {
     Student := student{}   # 将学生属性包含其中
     Kungfu := false        # 不会功夫
 }
@@ -231,19 +246,22 @@ cmd.print( Chen.Student.Name )
     Library
 }
 
-Main ()->() {
-    a := S{ <- A=5,B=12}
-    b := PKG{"hello", 64, a}
-    cmd.print( b.Z.A )
-    cmd.print( b.Print() )
+example. -> {
+    Main() -> () {
+        a := S{ <- A=5,B=12}
+        b := PKG{"hello", 64, a}
+        cmd.print( b.Z.A )
+        cmd.print( b.Print() )
+        PKG.N()
+    }
 }
 
-S {}-> {
+S{} -> {
     A := 0
     B := 0
 }
 
-PKG {x:str, y:i32, z:S}-> {
+PKG{x: str, y: i32, z: S}-> {
     X := ""
     Y := 0
     Z :S
@@ -253,11 +271,16 @@ PKG {x:str, y:i32, z:S}-> {
         Y = y
         Z = z
     }
+
+    Print() -> (a: str) {
+        <- ( "X {Y}" )
+    }
 }
 
-PKG <- {
-    Print ()->(a:str) {
-        <- ( "X {Y}" )
+PKG. -> {
+    M := 20
+    N() -> () {
+        cmd.print(M)
     }
 }
 ```

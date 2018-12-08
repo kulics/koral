@@ -112,23 +112,25 @@ If you only need to jump out of the current loop, use the `-> @` statement.
     Library
 }
 
-Main ()->() {
-    arr := _{1,2,3,4,5}
-    @ arr {
-        cmd.print(ea)
-    }
+example. -> {
+    Main() -> () {
+        arr := _{1,2,3,4,5}
+        @ arr {
+            cmd.print(ea)
+        }
 
-    @ i <- [1 <= 50] {
-        cmd.print(i)
-    }
+        @ i <- [1 <= 50] {
+            cmd.print(i)
+        }
 
-    @ i <- [100 >= 0; 2] {
-        cmd.print(i)
-    }
+        @ i <- [100 >= 0; 2] {
+            cmd.print(i)
+        }
 
-    X := 0
-    @ ? X <= 10 {
-        X += 1
+        X := 0
+        @ ? X <= 10 {
+            X += 1
+        }
     }
 }
 ```

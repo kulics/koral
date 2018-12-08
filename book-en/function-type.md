@@ -5,15 +5,13 @@ Often we will package a series of tasks that need to be reused as functions for 
 
 In practical engineering practice, given a definite input, the function that will surely return exactly to the output is considered to be a better design. Therefore, it is recommended to maintain functional independence as much as possible.
 ## Definition
-We have seen the main entry function before, it only uses the fixed statement `Main ()->() {}` to define.
+We have seen the main entry function before, it only uses the fixed statement `Main() -> () {}` to define.
 
-The main entry function is a special case, in fact, the conventional functions of this language must explicitly declare the identifier, in parameters and out parameters.
-
-We only need to use `id ()->() {}` to define a function, the first parenthesis is in parameters, the second parenthesis is out parameters.
+We only need to use `id() -> () {}` to define a function, the first parenthesis is in parameters, the second parenthesis is out parameters.
 
 E.g:
 ```
-function ()->() {
+function() -> () {
     ...
 }
 ```
@@ -34,7 +32,7 @@ Very simple, we only need to use `id:type` declare the parameters.
 
 E.g:
 ```
-func (x:i32)->(y:i32) {
+func(x: i32) -> (y: i32) {
     <- (x * 2)
 }
 ```
@@ -43,15 +41,6 @@ The meaning of this function is to accept an input `i32` parameter `x` and a `i3
 This is very similar to what? Yes, in fact, the parameters and dictionary functions are almost the same, the parameters just tell the function, we need to use this type of data, marked by the identifier to match. Therefore, the expression of the same parameters and dictionaries will help us to understand.
 
 The first parentheses is the in parameter, the second parenthesis is the out parameter. There is no limit to the number of parameters in brackets, but there are strict requirements on the order and type.
-## Parameter shorthand
-If we need several consecutive parameters of the same type, we can simply write the type, just write the type in the last parameter of the same type.
-
-E.g:
-```
-func (a, b, c:i32, d:str)->(a:str, b, c, d:i32) {
-    <- (d, a, b, c)
-}
-```
 ### Return
 Here, even if you do not know, roughly you can guess that `<-` should be a return-related statement.
 
@@ -84,7 +73,7 @@ When we call the function, we need to fill the brackets with the identifier in t
 E.g:
 ```
 # define one function with two in parameter
-sell (price: i32, name: str)->(){}
+sell(price: i32, name: str) -> () {}
 # fill in the data that meets the requirements as defined
 sell(1.99, "cola")
 
@@ -94,7 +83,7 @@ Similar to in parameters, out parameters also need to be clearly defined with an
 
 E.g:
 ```
-topSell ()->(name: str, count: i32) {
+topSell() -> (name: str, count: i32) {
     ...
     <- ("cola", many)
 }
@@ -146,7 +135,7 @@ Function In Parameter no special definition of way, just replace the type of the
 
 E.g:
 ```
-each1To10 (func: (item: i32)->() )->() {
+each1To10(func: (item: i32) -> () ) -> () {
     @ [1<=10] {
         func(ea)
     }
@@ -195,7 +184,7 @@ Unlike the above simplified method, we can also write a complete function direct
 
 E.g:
 ```
-each1To10( _(item:i32)->() {
+each1To10( _(item: i32) -> () {
      cmd.print(item)
 })
 ```
@@ -208,33 +197,34 @@ each1To10( _(item:i32)->() {
     Library
 }
 
-Main ()->() {
-    A()
-    B(1,2,3)
-    x := C()
-    D( $-> cmd.print("D") )
-    E( $cmd.print(it) )
-    E( _(a:i32)->() {
-        cmd.print(it)
-    })
-}
+example. -> {
+    Main() -> () {
+        A()
+        B(1,2,3)
+        x := C()
+        D( $-> cmd.print("D") )
+        E( $cmd.print(it) )
+        E( _(a: i32) -> () {
+            cmd.print(it)
+        })
+    }
 
-A ()->(){}
+    A() -> () {}
 
-B (a,b,c :i32)->(){}
+    B(a: i32, b: i32, c: i32) -> () {}
 
-C ()->(a:i32) {
-    <- (1024)
-}
+    C() -> (a: i32) {
+        <- (1024)
+    }
 
-D (fn: ()->() )->() {
-    fn()
-}
+    D(fn: () -> () ) -> () {
+        fn()
+    }
 
-E (fn: (a:i32)->() )->() {
-    @ [1<=20]
-    {
-        fn(ea)
+    E(fn: (a: i32) -> () ) -> () {
+        @ [1<=20] {
+            fn(ea)
+        }
     }
 }
 ```

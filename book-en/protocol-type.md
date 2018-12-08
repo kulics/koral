@@ -142,7 +142,7 @@ Note that if the type can not be converted correctly, it will return a `nil` val
 }
 
 example. -> {
-    Main ()->() {
+    Main() -> () {
         S := B{}
         B.do()
         C( B )
