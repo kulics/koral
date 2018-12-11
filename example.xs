@@ -22,7 +22,8 @@ program. -> {
         testDictionary()
         testLoop()
         x := testFunc("testcall")
-        _ = testFuncParams(1, 2, _(a: i32, b: i32, c: i32, d: i8) -> (z: str, a: i32, b: i32, c: i32) {
+        _ = testFuncParams(1, 2, 
+        _(a: i32, b: i32, c: i32, d: i8) -> (z: str, a: i32, b: i32, c: i32) {
             <- ("",a,b,c)
         })
         testCheck()
@@ -243,7 +244,9 @@ program. -> {
         <- (S, i)
     }
 
-    testFuncParams(a: i32, b: i32, fn: (a: i32, b: i32, c: i32, d: i8) -> (z: str, a: i32, b: i32, c: i32)) -> (a: i32, b: str, c: str) {
+    testFuncParams(a: i32, b: i32, 
+    fn: (a: i32, b: i32, c: i32, d: i8) -> (z: str, a: i32, b: i32, c: i32)) 
+    -> (a: i32, b: str, c: str) {
         <- (0,"", "")
     }
 
