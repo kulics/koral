@@ -152,21 +152,19 @@ cmd.print( Peter.getGirlFirend() )
 
 这可以使用常规函数来实现，但是为什么不用包自带的构造函数呢？
 
-在定义的时候加入参数，并且写好构造函数的定义，这只需要 `.. {}` 语句就可以办到。
+在定义的时候加入参数，并且写好构造函数的定义，这只需要在构造参数后追加 `{}` 语句就可以办到。
 
 例如：
 ```
-student{name: str, number: str} -> {
+student{name: str, number: str} {
+    ..Name = name
+    ..Number = number
+    # 计算得出班级
+    ..Class = GetSubText(number, 2, 3)
+    # 计算得出年级
+    ..Grade = GetSubText(number, 0, 1)
+} -> {
     ...
-    
-    .. {
-        ..Name = name
-        ..Number = number
-        # 计算得出班级
-        ..Class = GetSubText(number, 2, 3)
-        # 计算得出年级
-        ..Grade = GetSubText(number, 0, 1)
-    }
 }
 ```
 这样就得到了一个带构造函数的包，我们在创建一个新学生的时候，就会自动产生班级和年级数据。
@@ -261,16 +259,14 @@ S{} -> {
     B := 0
 }
 
-PKG{x: str, y: i32, z: S}-> {
+PKG{x: str, y: i32, z: S} {
+    X = x
+    Y = y
+    Z = z
+} -> {
     X := ""
     Y := 0
     Z :S
-    
-    .. {
-        X = x
-        Y = y
-        Z = z
-    }
 
     Print() -> (a: str) {
         <- ( "X {Y}" )
