@@ -88,15 +88,15 @@ example. -> {
         cmd.print(B)
         cmd.print(C)
     }
-}
 
-a : i32 {
-    get { <- (3) }
-}
+    a : i32 {
+        get { <- (3) }
+    }
 
-B := 0
-C : i32 {
-    get { <- (B) }
-    set { B = value }
+    B := 0
+    C : i32 {
+        get { <- (B) }
+        set { B = value }
+    }
 }
 ```

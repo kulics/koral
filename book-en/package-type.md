@@ -152,21 +152,19 @@ We hope that given a name and student number, class and grade information will b
 
 This can be achieved using regular functions, but why not use the built-in constructor?
 
-Add parameters at the time of definition, and write the definition of the constructor, which only needs the `.. {}` statement.
+Add parameters at the time of definition, and write the definition of the constructor, which only needs the `{}` statement behind the parameters.
 
 E.g:
 ```
-student{name: str, number: str} -> {
+student{name: str, number: str} {
+    ..Name = name
+    ..Number = number
+    # calculate the class
+    ..Class = GetSubText(number, 2, 3)
+    # calculate the grade
+    ..Grade = GetSubText(number, 0, 1)
+} -> {
     ...
-
-    .. {
-        ..Name = name
-        ..Number = number
-        # calculate the class
-        ..Class = GetSubText(number, 2, 3)
-        # calculate the grade
-        ..Grade = GetSubText(number, 0, 1)
-    }
 }
 ```
 This gives us a package with constructors, and when we create a new student, class and grade data are automatically generated.
@@ -262,16 +260,14 @@ S{} -> {
     B := 0
 }
 
-PKG{x: str, y: i32, z: S}-> {
+PKG{x: str, y: i32, z: S} {
+    X = x
+    Y = y
+    Z = z
+} -> {
     X := ""
     Y := 0
     Z :S
-    
-    .. {
-        X = x
-        Y = y
-        Z = z
-    }
 
     Print() -> (a: str) {
         <- ( "X {Y}" )
