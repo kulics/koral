@@ -483,26 +483,22 @@ var shapeDescription = shape.simpleDescription()
 ## Subclass
 ### Xs
 ```
-NamedShape{name: str} -> {
+NamedShape{name: str} {
+    ..name = name
+} -> {
     name: str
     NumberOfSides: i32 = 0
-
-    .. {
-        ..name = name
-    }
 
     simpleDescription() -> (s: str) {
         <- ("A shape with {NumberOfSides} sides.")
     }
 }
 
-Square{sideLength: f64, name: str} -> NamedShape{name} {
+Square{sideLength: f64, name: str} {
+    ..NumberOfSides = 4
+    ..sideLength = sideLength
+} -> NamedShape{name} {
     sideLength: f64
-
-    .. {
-        ..NumberOfSides = 4
-        ..sideLength = sideLength
-    }
 
     area() -> (f: f64) {
         <- (sideLength * sideLength)

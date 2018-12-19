@@ -322,12 +322,10 @@ program. -> {
     constFunction() -> (v: i32) { <- (const_data) }
 }
 
-inPackageArray{} -> {
+inPackageArray{} {
+    arr = _{1,2,3,4,5,6,7}
+} -> {
     arr: [i32]
-
-    .. {
-        arr = _{1,2,3,4,5,6,7}
-    }
 }
 
 defer{} -> {
@@ -377,12 +375,10 @@ app{} -> program{} {
     f: str = "get"
 }
 
-result{data: str} -> {
+result{data: str} {
+    ..data = data
+} -> {
     data: str
-
-    ..{
-        ..data = data
-    }
 }
 
 testPackageTemplate<T>{} -> {
@@ -429,24 +425,20 @@ testAnnotation{} -> {
 }
 
 testEnum. -> ?{
-    Ok 
+    Ok
     Err = -1
 }
 
-package{y: i32} -> {
+package{y: i32} {
+    ..x = program.const_data
+    ..y = y
+} -> {
     x: i32
     y: i32
-
-    .. {
-        ..x = program.const_data
-        ..y = y
-    }
 }
 
-packageChild{x: i32, y: i32} -> package{y} {
+packageChild{x: i32, y: i32} {
+    ..x = x
+} -> package{y} {
     x: i32
-
-    .. {
-        ..x = x
-    }
 }

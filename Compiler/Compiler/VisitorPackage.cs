@@ -44,7 +44,6 @@ namespace Compiler
         {
             var id = (Result)Visit(context.id());
             var obj = "";
-            var hasInit = false;
             var Init = "";
             var extend = "";
 
@@ -63,26 +62,15 @@ namespace Compiler
             Init += BlockLeft;
             foreach (var item in context.packageSupportStatement())
             {
-                if (item.GetChild(0) is PackageInitStatementContext)
-                {
-                    // 处理构造函数
-                    if (!hasInit)
-                    {
-                        Init += Visit(item) + BlockRight;
-                        hasInit = true;
-                        obj = Init + obj;
-                    }
-                }
-                else
-                {
-                    obj += Visit(item);
-                }
+                obj += Visit(item);
             }
-            if (!hasInit)
+            // 处理构造函数
+            if (context.packageInitStatement() != null)
             {
-                Init += BlockRight;
-                obj = Init + obj;
+                Init += Visit(context.packageInitStatement());
             }
+            Init += BlockRight;
+            obj = Init + obj;
             obj += BlockRight + Terminate + Wrap;
             var header = "";
             if (context.annotationSupport() != null)
