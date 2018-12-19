@@ -159,26 +159,23 @@ program. -> {
     }
 }
 
-node{value: i32} -> {
+node{value: i32} {
+    ..value = value
+} -> {
     value: i32
     Left: node?
     Right: node?
-
-    ..{
-        ..value = value
-    }
 }
 
 control -> {
     shutdown() -> () {}
 }
 
-program{name: str} -> {
+program{name: str} {
+    ..name = name
+} -> {
     name: str
     _Running := false
-    ..{
-        ..name = name
-    }
 
     start() -> () {
         cmd.prt("Start")
@@ -196,10 +193,8 @@ program{name: str} -> {
     }
 }
 
-app{name: str, platform: str} -> program{name} {
+app{name: str, platform: str} {
+    Platform = platform
+} -> program{name} {
     Platform: str
-
-    .. {
-        Platform = platform
-    }
 }

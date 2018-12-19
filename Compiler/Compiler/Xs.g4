@@ -41,20 +41,20 @@ namespaceControlSubStatement: id BlockLeft (functionSupportStatement)* BlockRigh
 namespaceFunctionStatement:(annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 
 // 定义包
-packageStatement:(annotationSupport)? id (templateDefine)? parameterClausePackage ArrowRight (extend)? BlockLeft (packageSupportStatement)* BlockRight protocolImplementStatement* Terminate?;
+packageStatement:(annotationSupport)? id (templateDefine)? parameterClausePackage (packageInitStatement)?
+ ArrowRight (extend)? BlockLeft (packageSupportStatement)* BlockRight protocolImplementStatement* Terminate?;
 // 继承
 extend: type '{' expressionList? '}';
 // 入参
 parameterClausePackage : '{' parameter? (',' parameter)*  '}'  ;
 // 包支持的语句
 packageSupportStatement:
-packageInitStatement
-|packageOverrideFunctionStatement
+packageOverrideFunctionStatement
 |packageVariableStatement
 |packageFunctionStatement
 ;
 // 包构造方法
-packageInitStatement:(annotationSupport)? '..' BlockLeft (functionSupportStatement)* BlockRight Terminate?;
+packageInitStatement:(annotationSupport)? BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 函数
 packageFunctionStatement:(annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight Terminate?;
 // 重载函数
