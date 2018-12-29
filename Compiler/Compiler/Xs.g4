@@ -287,7 +287,7 @@ templateDefine: '<' id (',' id)* '>';
 templateCall: '<' type (',' type)* '>';
 
 lambda : '$' (lambdaIn)? t=(ArrowRight|FlowRight) expressionList 
-| '$' BlockLeft (lambdaIn)? t=(ArrowRight|FlowRight) (functionSupportStatement)* BlockRight
+| '$' (lambdaIn)? t=(ArrowRight|FlowRight) BlockLeft (functionSupportStatement)* BlockRight
 | lambdaShort;
 
 lambdaIn : id (',' id)*;

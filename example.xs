@@ -268,7 +268,7 @@ program. -> {
             <~ tsks.delay(5000)
             cmd.prt(it)
         })
-        test3( ${ it ~>
+        test3( $it ~> {
             <~ tsks.delay(5000)
             cmd.prt(it)
         })
