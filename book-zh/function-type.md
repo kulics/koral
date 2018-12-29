@@ -159,7 +159,7 @@ each1To10(print)
 
 这时我们可以使用 Lambda 表达式 的语法来简化我们的代码。
 
-因为函数入参在声明时就已经确定了，所以我们可以使用简化的语法 `${id,id -> statements}` 来表达，它的意思是定义入参标识符，执行函数语句。
+因为函数入参在声明时就已经确定了，所以我们可以使用简化的语法 `$id,id -> {statements}` 来表达，它的意思是定义入参标识符，执行函数语句。
 
 如果只有一条单返回值语句，可以省略`{}`，使用 `$id, id -> expression`。
 
@@ -167,7 +167,7 @@ each1To10(print)
 
 例如：
 ```
-foreach( ${ it -> 
+foreach( $it -> { 
     cmd.print(it)
     cmd.print(it * it)
     cmd.print(it % 2)
