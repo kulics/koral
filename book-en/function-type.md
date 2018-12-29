@@ -162,7 +162,7 @@ As the above way to define a function and then imported into use sometimes appea
 
 At this point we can use the syntax of the Lambda expression to simplify our code.
 
-Since the function argument is already determined at the time of declaration, we can use the simplified syntax `${id, id -> statements}` to express it, which means defining the argument identifier and executing the function statement.
+Since the function argument is already determined at the time of declaration, we can use the simplified syntax `$id, id -> {statements}` to express it, which means defining the argument identifier and executing the function statement.
 
 If there is only one single return value statement, you can omit `{}` and use `$id, id -> expression`.
 
@@ -170,7 +170,7 @@ If there is one and only one parameter at the same time, the identifier part can
 
 E.g:
 ```
-foreach( ${ it ->
+foreach( $it -> {
      cmd.print(it)
      cmd.print(it * it)
      cmd.print(it % 2)
