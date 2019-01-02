@@ -163,6 +163,16 @@ namespace Compiler
         {
             var id = (Result)Visit(context.id());
             var obj = "";
+            var Init = "";
+            // 获取构造数据
+            Init += "static " + id.text + "()" + BlockLeft + Wrap;
+            // 处理构造函数
+            if (context.packageInitStatement() != null)
+            {
+                Init += Visit(context.packageInitStatement());
+            }
+            Init += BlockRight;
+            obj = Init + obj;
             foreach (var item in context.packageStaticSupportStatement())
             {
                 obj += Visit(item);
@@ -174,7 +184,11 @@ namespace Compiler
                 header += Visit(context.annotationSupport());
             }
             header += $"{id.permission} partial class {id.text}";
-
+            // 泛型
+            if (context.templateDefine() != null)
+            {
+                header += Visit(context.templateDefine());
+            }
             header += Wrap + BlockLeft + Wrap;
             obj = header + obj;
             return obj;

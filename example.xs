@@ -7,7 +7,9 @@
     System\ComponentModel\DataAnnotations
 }
 
-program. -> {
+program. {
+    StaticG = 5
+} -> {
     # main function
     Main() ~> () {
         cmd.prt("main function")
@@ -387,6 +389,10 @@ testPackageTemplate<T>{} -> {
     Generic(a: T) -> () {}
 }
 
+testStaticTemplate<T>. -> {
+    const_data: T
+}
+
 testProtocolTemplate<T> -> {
     test<T>(in: T) -> () {}
 }
@@ -430,7 +436,7 @@ testEnum. -> ?{
 }
 
 package{y: i32} {
-    ..x = program.const_data
+    ..x = testStaticTemplate<i32>.const_data
     ..y = y
 } -> {
     x: i32

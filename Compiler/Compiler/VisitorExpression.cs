@@ -1,4 +1,5 @@
 ﻿using Antlr4.Runtime.Misc;
+using Library;
 using System.Collections.Generic;
 using static Compiler.XsParser;
 
@@ -247,6 +248,12 @@ namespace Compiler
                 {
                     return new Result { text = "_", data = "var" };
                 }
+            }
+            else if (context.ChildCount == 2)
+            {
+                var id = Visit(context.id()).@as<Result>();
+                var template = Visit(context.templateCall()).@as<string>();
+                return new Result { text = id.text + template, data = id.text + template };
             }
             var r = (Result)Visit(context.expression());
             return new Result { text = "(" + r.text + ")", data = r.data };

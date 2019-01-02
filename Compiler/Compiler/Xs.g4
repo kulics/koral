@@ -23,7 +23,7 @@ enumStatement: (annotationSupport)? id call ArrowRight Judge BlockLeft enumSuppo
 
 enumSupportStatement: id ('=' (add)? Integer)?;
 // 静态包
-packageStaticStatement:(annotationSupport)? id call ArrowRight BlockLeft (packageStaticSupportStatement)* BlockRight;
+packageStaticStatement:(annotationSupport)? id (templateDefine)? call (packageInitStatement)? ArrowRight BlockLeft (packageStaticSupportStatement)* BlockRight;
 // 静态包支持的语句
 packageStaticSupportStatement:
 namespaceVariableStatement
@@ -185,7 +185,7 @@ execFuncStatement: FlowLeft? (expression call|('\\' id)+ call)? callFunc Termina
 
 // 基础表达式
 primaryExpression: 
-id
+id (templateCall)?
 | t=Self
 | t=Discard
 | dataStatement
