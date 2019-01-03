@@ -201,6 +201,19 @@ student. -> {
 
 It should be noted that mount property are created while the program is running, and they survive and are shared during the program declaration cycle.  
 Therefore, it does not belong to the same space as the package's construction property. The construction property belong to the object and the mount property belong to the package itself.
+
+## Mount Construct
+If there are some mount attributes, we also need some initialization operations, as well as the use of constructors.
+The grammar is consistent with the constructor.
+
+E.g:
+```
+student. {
+    ShareData = 128 
+} -> {
+    ...
+}
+```
 ## Combination
 Now let us play our imagination, we want a customized package for Chinese students how to define it?
 
