@@ -25,7 +25,7 @@ List<T>{} -> {
     }
 }
 ```
-So we define a package that supports generics, `T` is a generic x, in fact it can be any identifier, just customary we will use` T` as a synonym.
+So we define a package that supports generics, `T` is a generic type, in fact it can be any identifier, just customary we will use` T` as a synonym.
 
 Generic brackets, like parameters, support multiple generations, for example: `<T, H, Q>`.
 
