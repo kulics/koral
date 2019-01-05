@@ -95,6 +95,11 @@ namespace Compiler
             header += Wrap + BlockLeft + Wrap;
             obj = header + obj;
 
+            if (context.packageOverrideStatement() != null)
+            {
+                obj += $"{id.permission} partial class {id.text} {(string)Visit(context.packageOverrideStatement())} {Wrap}";
+            }
+
             foreach (var item in context.protocolImplementStatement())
             {
                 obj += $"{id.permission} partial class {id.text} {(string)Visit(item)} {Wrap}";
@@ -265,12 +270,49 @@ namespace Compiler
             {
                 obj += Visit(context.annotationSupport());
             }
-
-            obj += "protected override " + Visit(context.parameterClauseOut()) + " " + id.text;
+            // 异步
+            if (context.t.Type == FlowRight)
+            {
+                var pout = (string)Visit(context.parameterClauseOut());
+                if (pout != "void")
+                {
+                    pout = $"{Task}<{pout}>";
+                }
+                else
+                {
+                    pout = Task;
+                }
+                obj += $"protected override async {pout} {id.text}";
+            }
+            else
+            {
+                obj += "protected override " + Visit(context.parameterClauseOut()) + " " + id.text;
+            }
 
             obj += Visit(context.parameterClauseIn()) + Wrap + BlockLeft + Wrap;
             obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += BlockRight + Wrap;
+            return obj;
+        }
+
+        public override object VisitPackageOverrideStatement([NotNull] PackageOverrideStatementContext context)
+        {
+            var obj = "";
+
+            var ptcl = (string)Visit(context.nameSpaceItem());
+            // 泛型
+            if (context.templateCall() != null)
+            {
+                ptcl += Visit(context.templateCall());
+            }
+
+            obj += $":{ptcl} {Wrap} {BlockLeft} {Wrap}";
+
+            foreach (var item in context.packageOverrideFunctionStatement())
+            {
+                obj += Visit(item);
+            }
+            obj += $"{BlockRight} {Terminate} {Wrap}";
             return obj;
         }
 
