@@ -336,7 +336,7 @@ defer{} -> {
     Dispose() -> () {}
 }
 
-app{} -> program{} { 
+app{}::program{} -> { 
     i := 555
     arr := _{1,1,1,1}
     _PriName := " program "
@@ -443,8 +443,8 @@ package{y: i32} {
     y: i32
 }
 
-packageChild{x: i32, y: i32} {
+packageChild{x: i32, y: i32} ::package{y} {
     ..x = x
-} -> package{y} {
+} -> {
     x: i32
 }
