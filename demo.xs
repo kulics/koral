@@ -193,8 +193,8 @@ program{name: str} {
     }
 }
 
-app{name: str, platform: str} {
+app{name: str, platform: str} :: program{name} {
     Platform = platform
-} -> program{name} {
+} -> {
     Platform: str
 }
