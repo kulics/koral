@@ -237,7 +237,7 @@ expressionList : expression (',' expression)* ; // 表达式列
 
 annotationSupport: annotation ;
 
-annotation: '`' (id ':')? annotationList '`' ; // 注解
+annotation: '`' (id ArrowRight)? annotationList '`' ; // 注解
 
 annotationList: annotationItem (',' annotationItem)*;
 
