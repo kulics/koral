@@ -2,7 +2,7 @@
 
 program: statement+;
 
-statement: exportStatement namespaceSupportStatement*;
+statement: (annotationSupport)? exportStatement namespaceSupportStatement*;
 
 // 导出命名空间
 exportStatement: '\\' nameSpace BlockLeft (importStatement)* BlockRight Terminate?;
