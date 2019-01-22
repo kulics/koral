@@ -9,7 +9,10 @@ namespace Compiler
         {
             var obj = "";
             var ns = (Namespace)Visit(context.exportStatement());
-
+            if (context.annotationSupport() != null)
+            {
+                obj += Visit(context.annotationSupport());
+            }
             obj += $"namespace {ns.name + Wrap + BlockLeft + Wrap}";
             obj += ns.imports + Wrap;
 
