@@ -41,8 +41,8 @@ namespaceControlSubStatement: id BlockLeft (functionSupportStatement)* BlockRigh
 namespaceFunctionStatement:(annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) parameterClauseOut BlockLeft (functionSupportStatement)* BlockRight;
 
 // 定义包
-packageStatement:(annotationSupport)? id (templateDefine)? parameterClausePackage (extend)? (packageInitStatement)? 
- ArrowRight BlockLeft (packageSupportStatement)* BlockRight (packageOverrideStatement)? protocolImplementStatement* Terminate?;
+packageStatement:(annotationSupport)? id (templateDefine)? parameterClausePackage (packageInitStatement)? 
+ ArrowRight BlockLeft (packageSupportStatement)* BlockRight (extend packageOverrideStatement)? protocolImplementStatement* Terminate?;
 // 继承
 extend: '::' type '{' expressionList? '}';
 // 入参
@@ -63,7 +63,7 @@ packageVariableStatement:(annotationSupport)? expression (Define expression|Decl
 // 定义子方法
 packageControlSubStatement: id BlockLeft (functionSupportStatement)* BlockRight;
 // 包重载
-packageOverrideStatement: '::' nameSpaceItem (templateCall)? BlockLeft (packageOverrideFunctionStatement)* BlockRight;
+packageOverrideStatement: BlockLeft (packageOverrideFunctionStatement)* BlockRight;
 // 包扩展
 packageExtensionStatement: id (templateDefine)? ArrowLeft BlockLeft (packageExtensionSupportStatement)* BlockRight Terminate?;
 // 包扩展支持的语句
