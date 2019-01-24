@@ -64,6 +64,10 @@ namespace Compiler
             {
                 obj += Visit(item);
             }
+            if (context.packageOverrideStatement() != null)
+            {
+                obj += (string)Visit(context.packageOverrideStatement());
+            }
             // 处理构造函数
             if (context.packageInitStatement() != null)
             {
@@ -94,11 +98,6 @@ namespace Compiler
 
             header += Wrap + BlockLeft + Wrap;
             obj = header + obj;
-
-            if (context.packageOverrideStatement() != null)
-            {
-                obj += $"{id.permission} partial class {id.text} {(string)Visit(context.packageOverrideStatement())} {Wrap}";
-            }
 
             foreach (var item in context.protocolImplementStatement())
             {
@@ -298,21 +297,10 @@ namespace Compiler
         public override object VisitPackageOverrideStatement([NotNull] PackageOverrideStatementContext context)
         {
             var obj = "";
-
-            var ptcl = (string)Visit(context.nameSpaceItem());
-            // 泛型
-            if (context.templateCall() != null)
-            {
-                ptcl += Visit(context.templateCall());
-            }
-
-            obj += $":{ptcl} {Wrap} {BlockLeft} {Wrap}";
-
             foreach (var item in context.packageOverrideFunctionStatement())
             {
                 obj += Visit(item);
             }
-            obj += $"{BlockRight} {Terminate} {Wrap}";
             return obj;
         }
 

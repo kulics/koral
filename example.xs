@@ -336,7 +336,7 @@ defer{} -> {
     Dispose() -> () {}
 }
 
-app{}::program{} -> { 
+app{} -> { 
     i := 555
     arr := _{1,1,1,1}
     _PriName := " program "
@@ -355,6 +355,8 @@ app{}::program{} -> {
     testFuncTemplate<T1,T2>(data1: T1, data2: T2) -> (data: app) {
         <- (..)
     }
+} ::program{} {
+    
 } :protocol {
     B: i32 {
         get { <- (_B) } 
@@ -375,7 +377,7 @@ app{}::program{} -> {
     }
 
     f: str = "get"
-}
+} 
 
 result{data: str} {
     ..data = data
@@ -443,8 +445,10 @@ package{y: i32} {
     y: i32
 }
 
-packageChild{x: i32, y: i32} ::package{y} {
+packageChild{x: i32, y: i32}  {
     ..x = x
 } -> {
     x: i32
+} ::package{y} {
+
 }
