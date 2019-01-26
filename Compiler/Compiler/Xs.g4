@@ -173,7 +173,7 @@ checkFinallyStatment: Discard BlockLeft (functionSupportStatement)* BlockRight;
 // 报告错误
 reportStatement: Check '(' (expression)? ')' Terminate?;
 // 迭代器
-iteratorStatement: '[' expression op=('<'|'<='|'>'|'>=') expression Terminate expression ']' | '[' expression op=('<'|'<='|'>'|'>=') expression ']';
+iteratorStatement: '[' expression op=('<'|'<='|'>'|'>=') expression ',' expression ']' | '[' expression op=('<'|'<='|'>'|'>=') expression ']';
 
 // 定义变量
 variableStatement: expression (Define|Declared type Assign) expression Terminate?;

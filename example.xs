@@ -211,12 +211,12 @@ program. {
         }
         cmd.prt(" ")
         cmd.prt(" 0 to 8 step 2")
-        @ [0 < 8; 2] {
+        @ [0 < 8, 2] {
             cmd.prt(ea, ", ", "")
         }
         cmd.prt(" ")
         cmd.prt(" 8 to 2 step 2")
-        @ [8 > 0; 2] {
+        @ [8 > 0, 2] {
             cmd.prt(ea, ", ", "")
             ? ea == 6 {
                 -> @

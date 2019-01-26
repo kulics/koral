@@ -46,11 +46,11 @@ It should be noted that the meaning of `0 <= 100` is read from` 0` to `100` one 
 
 So if we need to do it a hundred times, we can use `0 < 99` or` 1 <= 100-1`, remembering this difference.
 
-By default, iterators add `1` to each interval. If we need to take every other number, we can add a step-by-step condition, just insert `;` and a number behind the start point and the end point.
+By default, iterators add `1` to each interval. If we need to take every other number, we can add a step-by-step condition, just insert `,` and a number behind the start point and the end point.
 
 E.g:
 ```
-@ [0 <= 100; 2] {
+@ [0 <= 100, 2] {
     ...
 }
 ```
@@ -123,7 +123,7 @@ example. -> {
             cmd.print(i)
         }
 
-        @ i <- [100 >= 0; 2] {
+        @ i <- [100 >= 0, 2] {
             cmd.print(i)
         }
 
