@@ -10,7 +10,9 @@
 program. {
     StaticG = 5
 } -> {
-    # main function
+    ## 
+        main function 
+    ##
     Main() ~> () {
         cmd.prt("main function")
         # run test

@@ -439,7 +439,7 @@ IDPrivate : '_' [a-zA-Z0-9_]+; // 私有标识符
 IDPublic  : [a-zA-Z] [a-zA-Z0-9_]*; // 公有标识符
 Discard : '_'; // 匿名变量
 
-// Comment : '/*' .*? '*/' -> skip; // 结构注释
+Comment : '##' .*? '##' -> skip; // 结构注释
 CommentLine : '#' .*? '\r'? '\n' -> skip; // 行注释
 
 //NEWLINE: '\r'? '\n'; 
