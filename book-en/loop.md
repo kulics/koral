@@ -12,14 +12,6 @@ arr := _{1, 2, 3, 4, 5}
     cmd.print(item)     # print each number
 }
 ```
-If we don't want to define additional identifiers, we can omit them. The default is `ea`.
-
-E.g:
-```
-@ arr {
-     cmd.print(ea)     # print each number
-}
-```
 
 If we need to fetch the index and value at the same time, we can replace `id` with the `index -> value` syntax, which is valid for both the list and the dictionary.
 
@@ -38,8 +30,8 @@ Iterators can loop from the start point to the end point, we use the collection 
 
 E.g:
 ```
-@ [0 <= 100] {
-    cmd.print(ea)      # print each number
+@ i <- [0 <= 100] {
+    cmd.print(i)      # print each number
 }
 ```
 It should be noted that the meaning of `0 <= 100` is read from` 0` to `100` one by one, that is, a total execution of` 101` times. Iterator will be executed until the last number is completed, rather than an early end.
@@ -50,7 +42,7 @@ By default, iterators add `1` to each interval. If we need to take every other n
 
 E.g:
 ```
-@ [0 <= 100, 2] {
+@ i <- [0 <= 100, 2] {
     ...
 }
 ```
@@ -60,7 +52,7 @@ We can also reverse it in reverse order, as long as we use `>=`.
 
 E.g:
 ```
-@ [100 >= 0] {
+@ i <- [100 >= 0] {
      ...    # from 100 to 0
 }
 ```
@@ -115,8 +107,8 @@ If you only need to jump out of the current loop, use the `-> @` statement.
 example. -> {
     Main() -> () {
         arr := _{1,2,3,4,5}
-        @ arr {
-            cmd.print(ea)
+        @ i <- arr {
+            cmd.print(i)
         }
 
         @ i <- [1 <= 50] {

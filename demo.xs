@@ -42,7 +42,7 @@ program. -> {
 
         cmd.prt("Filter Array")
         Arr = filterList(Arr, $it > 4)
-        @ Arr { cmd.prt(ea) }
+        @ ea <- Arr { cmd.prt(ea) }
 
         cmd.prt("oop")
         app := app{"test", "Windows"}
@@ -95,7 +95,7 @@ program. -> {
                 }
             }
         }
-        @ list { cmd.prt(ea) }
+        @ ea <- list { cmd.prt(ea) }
     }
 
     bubbleSort(list: [i32]) -> () {
@@ -107,13 +107,13 @@ program. -> {
                 }
             }
         }
-        @ list { cmd.prt(ea) }
+        @ ea <- list { cmd.prt(ea) }
     }
 
     quickSort(list: [i32]) -> () {
         cmd.prt("Quick Sort")
         qSort(list,0,list.count-1)
-        @ list { cmd.prt(ea) }
+        @ ea <- list { cmd.prt(ea) }
     }
 
     qSort(list: [i32], low: i32, high: i32) -> () {
@@ -146,7 +146,7 @@ program. -> {
     filterList(list: [i32], fn: (take: i32) -> (act: bl)) -> (l: [i32]) {
         Filter := [i32]{}
 
-        @ list {
+        @ ea <- list {
             ? fn(ea) {
                 Filter += ea
             }

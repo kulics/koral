@@ -102,7 +102,7 @@ program. {
     }
 
     testString() -> () {
-        @ "love xs" {
+        @ ea <- "love xs" {
             ? ea == 'e' {
                 cmd.prt("love xs")
             }
@@ -180,9 +180,6 @@ program. {
         arrEmpty := [i32]{}
         arrType := _{1,2,3}
         array : [|i32|] = _{|1,2,3|}
-        @ ArrNumber {
-            cmd.prt(ea)
-        }
         @ item <- ArrNumber {
             cmd.prt(item)
         }
@@ -213,12 +210,12 @@ program. {
         }
         cmd.prt(" ")
         cmd.prt(" 0 to 8 step 2")
-        @ [0 < 8, 2] {
+        @ ea <- [0 < 8, 2] {
             cmd.prt(ea, ", ", "")
         }
         cmd.prt(" ")
         cmd.prt(" 8 to 2 step 2")
-        @ [8 > 0, 2] {
+        @ ea <- [8 > 0, 2] {
             cmd.prt(ea, ", ", "")
             ? ea == 6 {
                 -> @

@@ -143,8 +143,8 @@ let count = i + Int(f)
 ## Inclusive Range Operator
 ### Xs
 ```
-@ [ 1 <= 5 ] {
-    cmd.prt("{ea} times 5 is {ea * 5}")
+@ index <- [ 1 <= 5 ] {
+    cmd.prt("{index} times 5 is {index * 5}")
 }
 ```
 ### C#
@@ -660,8 +660,8 @@ test.simpleDescription()
 MovieCount := 0
 SongCount := 0
 
-@ library {
-    ? ea -> :Movie {
+@ item <- library {
+    ? item -> :Movie {
         MovieCount += 1
     } :Song {
         SongCount += 1
@@ -789,8 +789,8 @@ switch nb {
 ## Downcasting
 ### Xs
 ```
-@ someObjects {
-    ? ea -> movie:Movie {
+@ current <- someObjects {
+    ? current -> movie:Movie {
         cmd.prt("Movie: '{movie.name}', " +
             "dir. {movie.director}")
     }
