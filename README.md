@@ -31,10 +31,10 @@ program. -> {
                     "Cześć", "Olá", "Здравствуйте",
                     "Chào bạn", "您好"}
         # for-each  
-        @ greetings {
+        @ item <- greetings {
             # match
-            ? ea -> [ 0 <= 8 ] {
-                cmd.prt(ea) # call function
+            ? item -> [ 0 <= 8 ] {
+                cmd.prt(item) # call function
             } _ {
                 # lambda
                 cmd.prt( greetings.filter($it.count > 4) )

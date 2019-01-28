@@ -106,8 +106,8 @@ doHomeWork(StudentC)
 arr := [homeWork]{}
 arr.add( StudentA )
 ... # 塞进很多很多学生
-@ arr {
-    doHomeWork(ea)
+@ i <- arr {
+    doHomeWork(i)
 }
 ```
 ╮（￣▽￣）╭  
