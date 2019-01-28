@@ -161,12 +161,12 @@ loopContinueStatement:ArrowRight Loop Terminate?;
 // 检查
 checkStatement: 
 Check usingExpression BlockLeft (functionSupportStatement)* BlockRight Terminate?
-|Check (usingExpression)? BlockLeft (functionSupportStatement)* BlockRight (ArrowRight (checkErrorStatement)+)? checkFinallyStatment Terminate?
-|Check (usingExpression)? BlockLeft (functionSupportStatement)* BlockRight ArrowRight (checkErrorStatement)+ Terminate?;
+|Check (usingExpression)? BlockLeft (functionSupportStatement)* BlockRight (checkErrorStatement)* checkFinallyStatment Terminate?
+|Check (usingExpression)? BlockLeft (functionSupportStatement)* BlockRight (checkErrorStatement)+ Terminate?;
 // 定义变量
 usingExpression: expression (Define|Declared type Assign) expression;
 // 错误处理
-checkErrorStatement:(Declared type|id Declared type)? BlockLeft (functionSupportStatement)* BlockRight;
+checkErrorStatement:(id|id Declared type) BlockLeft (functionSupportStatement)* BlockRight;
 // 最终执行
 checkFinallyStatment: Discard BlockLeft (functionSupportStatement)* BlockRight;
 

@@ -21,17 +21,16 @@ readFile(name: str) -> () {
 ```
 So we declare an exception, the exception description is `something wrong`, once the external caller uses the illegal length of `name`, the function will be forced to abort, report the exception up and hand it to the caller.
 ## Check Exception
-We can use the `! {}` statement to check for exceptions and `-> id:type {} id:type {}` to handle exceptions.  
-`id` can be omitted, the default is `ex`.  
-If you only need to handle uniform exceptions, you can use `-> {}`.
+We can use the `! {}` statement to check for exceptions and `id:type {}` to handle exceptions.  
+`:type` can be omitted, the default is `Exception`.  
 
 E.g:
 ```
 ! {
     f := readFile("temp.txt")
-} -> :IOException {
+} ex:IOException {
     !(ex)
-} e:Exception {
+} e {
     cmd.print(e.message)
 }
 ```
@@ -45,7 +44,7 @@ E.g:
 ```
 ! {
     Func()
-} -> {
+} ex {
      # can be returned manually
      # <- ()
      !(ex)
@@ -110,7 +109,7 @@ example. -> {
     Main() -> () {
         ! {
             x: i32 = (1 * 1)
-        } -> {
+        } ex {
             !(ex)
         }
 
@@ -118,7 +117,7 @@ example. -> {
         ! y := Defer{} {
             x.content = "defer"
             cmd.print(x.content)
-        } -> e:Exception {
+        } e:Exception {
             !(e)
         } _ {
             ? x ~= nil {
