@@ -286,12 +286,12 @@ program. {
             }
             ! {
                 y := 1 + 1
-            } -> {
+            } ex {
                 !(ex)
             }
-        } -> :IOException {
+        } ex: IOException {
             !(ex)
-        } e:Exception {
+        } e {
             !(e)
         } _ {
             ? Z ~= nil {
