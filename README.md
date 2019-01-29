@@ -26,7 +26,7 @@ program. -> {
     # main function
     Main() -> () {
         # list
-        greetings := _{"Hello", "Hola", "Bonjour",
+        greetings := {"Hello", "Hola", "Bonjour",
                     "Ciao", "こんにちは", "안녕하세요",
                     "Cześć", "Olá", "Здравствуйте",
                     "Chào bạn", "您好"}

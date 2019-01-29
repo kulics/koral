@@ -27,7 +27,7 @@ program. {
         testLoop()
         x := testFunc("testcall")
         _ = testFuncParams(1, 2, 
-        _(a: i32, b: i32, c: i32, d: i8) -> (z: str, a: i32, b: i32, c: i32) {
+        (a: i32, b: i32, c: i32, d: i8) -> (z: str, a: i32, b: i32, c: i32) {
             <- ("",a,b,c)
         })
         testCheck()
@@ -36,7 +36,7 @@ program. {
         testLambda()
         _ = <~ testAsync()
 
-        y := testTuple_(1).toStr()
+        y := testTuple(1).toStr()
 
         p := app{}
 
@@ -61,7 +61,7 @@ program. {
         }
     }
 
-    testTuple_(i: i32) -> (v: str) {
+    testTuple(i: i32) -> (v: str) {
         <- ("tuple")
     }
 
@@ -172,18 +172,18 @@ program. {
     }
 
     testArray() -> () {
-        arrSingle := _{1}
-        ArrNumber := _{1,2,5,6,8,4}
+        arrSingle := {1}
+        ArrNumber := {1,2,5,6,8,4}
         ArrNumber = ArrNumber + 0
         ArrNumber += 3 + 7
         ArrNumber -= 6
         Take := ArrNumber[0]
         Take = inPackageArray{}.arr[2]
-        arrObj := _{"123", 432, app{}}
-        arrArr := _{_{1,1,1},_{1,1,1}}
+        arrObj := {"123", 432, app{}}
+        arrArr := {{1,1,1}, {1,1,1}}
         arrEmpty := [i32]{}
-        arrType := _{1,2,3}
-        array : [|i32|] = _{|1,2,3|}
+        arrType := {1,2,3}
+        array : [|i32|] = {|1,2,3|}
         @ item <- ArrNumber {
             cmd.prt(item)
         }
@@ -197,8 +197,8 @@ program. {
 
     testDictionary() -> () {
         empty := [str->i32]{}
-        DicTemp := _{"k1"->1,"k2"->2}
-        DicTemp += _{"k3"->3}
+        DicTemp := {"k1"->1,"k2"->2}
+        DicTemp += {"k3"->3}
         @ k->v <- DicTemp {
             cmd.prt(k)
             cmd.prt(v)
@@ -268,7 +268,7 @@ program. {
         test3(fn: (it: i32) -> ()) -> () {
             fn(1)
         }
-        test3( _(it: i32) ~> () {
+        test3( (it: i32) ~> () {
             <~ tsks.delay(5000)
             cmd.prt(it)
         })
@@ -316,7 +316,7 @@ program. {
     }
 
     testLinq() -> () {
-        numbers :=  _{0, 1, 2, 3, 4, 5, 6}
+        numbers := {0, 1, 2, 3, 4, 5, 6}
         arr := from num in numbers where (num % 2) == 0 
         orderby num descending select num
     }
@@ -331,7 +331,7 @@ program. {
 }
 
 inPackageArray{} {
-    arr = _{1,2,3,4,5,6,7}
+    arr = {1,2,3,4,5,6,7}
 } -> {
     arr: [i32]
 }
@@ -344,13 +344,13 @@ defer{} -> {
 
 app{} -> { 
     i := 555
-    arr := _{1,1,1,1}
+    arr := {1,1,1,1}
     _PriName := " program "
     _B := 5
 
     testPackage() -> () {
         item := program{<- Name = "new program",Running = true}
-        item2 := _{
+        item2 := {
             Name := "new program"
             running := true
         }

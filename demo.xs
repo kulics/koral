@@ -33,11 +33,11 @@ program. -> {
         cmd.prt("Inverse node")
         preOrderTraverse(n7)
 
-        Arr := _{9,1,5,8,3,7,4,6,2}
+        Arr := {9,1,5,8,3,7,4,6,2}
         simpleSort(Arr)
-        Arr = _{9,1,5,8,3,7,4,6,2}
+        Arr = {9,1,5,8,3,7,4,6,2}
         bubbleSort(Arr)
-        Arr = _{9,1,5,8,3,7,4,6,2}
+        Arr = {9,1,5,8,3,7,4,6,2}
         quickSort(Arr)
 
         cmd.prt("Filter Array")

@@ -175,7 +175,7 @@ for index in 1...5 {
 ## Arrays
 ### Xs
 ```
-shoppingList := _{"catfish", "water",
+shoppingList := {"catfish", "water",
     "tulips", "blue paint"}
 shoppingList[1] = "bottle of water"
 ```
@@ -206,7 +206,7 @@ shoppingList[1] = "bottle of water"
 ## Maps
 ### Xs
 ```
-occupations := _{
+occupations := {
     "Malcolm"->"Captain",
     "Kaylee"->"Mechanic"
 }
@@ -837,7 +837,7 @@ for current in someObjects {
 ### Xs
 ```
 Nameable -> {
-    name() -> (s: str) {}
+    name() -> (s: str)
 }
 
 f(x: Nameable) -> () {
