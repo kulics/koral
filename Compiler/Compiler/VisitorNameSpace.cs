@@ -14,6 +14,8 @@ namespace Compiler
                 obj += Visit(context.annotationSupport());
             }
             obj += $"namespace {ns.name + Wrap + BlockLeft + Wrap}";
+            // import library
+            obj += $"using Library;{Wrap}using static Library.lib;{Wrap}";
             obj += ns.imports + Wrap;
 
             var content = "";
