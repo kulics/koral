@@ -127,7 +127,7 @@ program. {
     testTypeConvert() -> () {
         x := app{}
         y := x.as<program>()
-        z1 := _(12.34).toF32()
+        z1 := (12.34).toF32()
         z2 := z1.toI64()
         cmd.prt( z2.to<obj>().to<i64>() )
         cmd.prt( y.is<program>() )
@@ -239,7 +239,7 @@ program. {
     testFunc(S: str) -> (out1: str, out2: i32) {
         S = S + "test"
         i := 1+1*3*9/8
-        out2 := i + 5 + _(i + 8)
+        out2 := i + 5 + (i + 8)
         # func in func
         InFunc() -> () {
             <- ()
@@ -249,17 +249,16 @@ program. {
         <- (S, i)
     }
 
-    testFuncParams(a: i32, b: i32, 
-    fn: (a: i32, b: i32, c: i32, d: i8) -> (z: str, a: i32, b: i32, c: i32)) 
-    -> (a: i32, b: str, c: str) {
+    testFuncParams(a: i32, b: i32, fn: (a: i32, b: i32, c: i32, d: i8) ->
+     (z: str, a: i32, b: i32, c: i32)) -> (a: i32, b: str, c: str) {
         <- (0,"", "")
     }
 
     testLambda() -> () {
         test1(fn: (i1: i32, i2: i32) -> (o1: i32, o2: i32)) -> () {
-            _(o1,o2) := fn(1, 2)
+            (o1,o2) := fn(1, 2)
         }
-        test1( $i1,i2-> _(i1,i2) )
+        test1( $i1,i2-> (i1,i2) )
 
         test2(fn: () -> (o1: i32)) -> () {
             o1 := fn()
@@ -318,7 +317,7 @@ program. {
 
     testLinq() -> () {
         numbers :=  _{0, 1, 2, 3, 4, 5, 6}
-        arr := from num in numbers where _(num % 2) == 0 
+        arr := from num in numbers where (num % 2) == 0 
         orderby num descending select num
     }
 

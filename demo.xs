@@ -93,7 +93,7 @@ program. -> {
     }
 
     swap(list: [i32], i: i32, j: i32) -> () {
-        _(list[i], list[j]) = _(list[j], list[i])
+        (list[i], list[j]) = (list[j], list[i])
     }
 
     simpleSort(list: [i32]) -> () {

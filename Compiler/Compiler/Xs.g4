@@ -215,7 +215,7 @@ id (templateCall)?
 | t=Self
 | t=Discard
 | dataStatement
-| '_(' expression ')'
+| '(' expression ')'
 ;
 
 // 表达式
@@ -332,7 +332,7 @@ parameterClauseOut blockLeft (functionSupportStatement)* BlockRight;
 // 入参
 anonymousParameterClauseIn : '_(' parameter? (more parameter)*  ')'  ;
 
-tupleExpression : '_(' expression (more expression)*  ')'; // 元组
+tupleExpression : '(' expression (more expression)*  ')'; // 元组
 
 plusMinus : add expression;
 
