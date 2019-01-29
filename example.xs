@@ -53,8 +53,12 @@ program. {
     readonlyZ := "1024"
     StaticG: i64
     StaticP: str {
-        get { <- (StaticY) }
-        set { StaticY = value }
+        get { 
+            <- (StaticY) 
+        }
+        set { 
+            StaticY = value 
+        }
     }
 
     testTuple_(i: i32) -> (v: str) {
@@ -273,7 +277,9 @@ program. {
             <~ tsks.delay(5000)
             cmd.prt(it)
         })
-        test4(fn: (it: i32) -> (v: i32)) -> () { fn(18) }
+        test4(fn: (it: i32) -> (v: i32)) -> () { 
+            fn(18) 
+        }
         test4($it+1)
     }
 
@@ -320,7 +326,9 @@ program. {
 
     const_data 256
     const_data2 :str "512"
-    constFunction() -> (v: i32) { <- (const_data) }
+    constFunction() -> (v: i32) { 
+        <- (const_data) 
+    }
 }
 
 inPackageArray{} {
@@ -351,15 +359,19 @@ app{} -> {
         item4 := [str->i32]{<- "1"->1,"2"->2,"3"->3}
     }
 
-    testFuncTemplate<T1,T2>(data1: T1, data2: T2) -> (data: app) {
+    testFuncTemplate<T1, T2>(data1: T1, data2: T2) -> (data: app) {
         <- (..)
     }
 } ::program{} {
     
 } :protocol {
     B: i32 {
-        get { <- (_B) } 
-        set { _B = value }
+        get { 
+            <- (_B) 
+        }
+        set { 
+            _B = value 
+        }
     }
 
     c(x: i32) -> (y: i32) {
@@ -395,7 +407,7 @@ testStaticTemplate<T>. -> {
 }
 
 testProtocolTemplate<T> -> {
-    test<T>(in: T) -> () {}
+    test<T>(in: T) -> ()
 }
 
 testImplementTemplate{} -> {
@@ -408,16 +420,20 @@ program{} -> {
     Running: bl?
 
     Property: str? {
-        get { <- (Name) }
-        set { Name = value }
+        get { 
+            <- (Name) 
+        }
+        set { 
+            Name = value 
+        }
     }
 }
 
 protocol -> {
     B: i32 
-    c(x: i32) -> (y: i32) {}
-    d() ~> (y: i32) {}
-    e() ~> () {}
+    c(x: i32) -> (y: i32)
+    d() ~> (y: i32)
+    e() ~> ()
     f: str
 }
 
