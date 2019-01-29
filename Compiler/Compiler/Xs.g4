@@ -288,11 +288,11 @@ dictionaryAssign: (dictionaryElement (more dictionaryElement)*)? ;
 
 callAwait: FlowLeft expression; // 异步调用
 
-array : '_{|' (expression (more expression)*)? '|}'; // 数组
+array : '{|' (expression (more expression)*)? '|}'; // 数组
 
-list : '_{' (expression (more expression)*)? '}'; // 列表
+list : '{' (expression (more expression)*)? '}'; // 列表
 
-dictionary :  '_{' (dictionaryElement (more dictionaryElement)*)? '}'; // 字典
+dictionary :  '{' (dictionaryElement (more dictionaryElement)*)? '}'; // 字典
 
 dictionaryElement: expression '->' expression; // 字典元素
 
@@ -322,7 +322,7 @@ lambdaShort : '$' expressionList;
 
 pkgAnonymous: pkgAnonymousAssign; // 匿名包
 
-pkgAnonymousAssign: '_{' NewLine* (pkgAnonymousAssignElement NewLine)+ BlockRight; // 简化赋值
+pkgAnonymousAssign: blockLeft (pkgAnonymousAssignElement NewLine)+ BlockRight; // 简化赋值
 
 pkgAnonymousAssignElement: name ':=' expression Terminate?; // 简化赋值元素
 
@@ -330,7 +330,7 @@ function : anonymousParameterClauseIn t=(ArrowRight|FlowRight) NewLine*
 parameterClauseOut blockLeft (functionSupportStatement)* BlockRight;
 
 // 入参
-anonymousParameterClauseIn : '_(' parameter? (more parameter)*  ')'  ;
+anonymousParameterClauseIn : '(' parameter? (more parameter)*  ')'  ;
 
 tupleExpression : '(' expression (more expression)*  ')'; // 元组
 
