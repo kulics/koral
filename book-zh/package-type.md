@@ -50,7 +50,7 @@ Peter := student{}
 
 例如：
 ```
-cmd.print( Peter.name )      # 打印了某个学生的名字
+prt( Peter.name )      # 打印了某个学生的名字
 ```
 要更改属性的值也是一样的，它就相当于是个嵌套的标识符。我们可以直接用赋值语句去更改值。
 
@@ -80,16 +80,16 @@ Peter := student{ <-
 例如：
 ```
 Array := [i32]{ <- 1, 2, 3, 4, 5 }
-Dictionary := [str->i32]{ <- "1"->1, "2"->2, "3"->3 }
+Dictionary := [[str]i32]{ <- ["1"]1, ["2"]2, ["3"]3 }
 ```
 ## 匿名包
 如果我们只想直接包裹某些数据使用，而不是先定义包再使用，像匿名函数那样可以吗？
 
-当然可以的，我们直接使用`_{}`包裹就可以了，与集合的语法相同，只有里面的元素语法不同。
+当然可以的，我们直接使用 `{}` 包裹就可以了，与集合的语法相同，只有里面的元素语法不同。
 
 例如：
 ```
-Peter := _{
+Peter := {
     name := "Peter"
     number := "060233"
     class := 2
@@ -97,7 +97,7 @@ Peter := _{
 }
 ```
 
-这样就直接创建了一个`Peter`数据，我们可以直接使用这些数据，但是不可更改这些数据。
+这样就直接创建了一个 `Peter` 数据，我们可以直接使用这些数据，但是不可更改这些数据。
 
 由于匿名包并不是一个具有明确类型的包，所以我们只建议在一些临时场合使用，例如LINQ。
 
@@ -110,7 +110,7 @@ Peter := _{
 ```
 student {}-> {
     ...
-    _GirlFirend :str # 第一个字符是 _ 的标识符是私有的
+    _GirlFirend: str # 第一个字符是 _ 的标识符是私有的
 }
 ```
 没错，如果你还记得标识符的定义的话，这就是私有标识符的定义方式，私有标识符是不能被外界访问的。
@@ -140,7 +140,7 @@ student{} -> {
 
 例如：
 ```
-cmd.print( Peter.getGirlFirend() ) 
+prt( Peter.getGirlFirend() ) 
 # 打印了某个早恋学生的女朋友名字
 ```
 与数据属性一样，函数也可以是私有标识符，使用私有标识符的函数也意味着只有包自己能访问。
@@ -172,7 +172,7 @@ student{name: str, number: str} {
 例如：
 ```
 Peter := student{"Peter", "060233"}
-cmd.print(Peter.Class)     # 打印出 2
+prt(Peter.Class)     # 打印出 2
 ```
 
 如果需要同时使用构造函数和简化创建，可以这样做。
@@ -194,7 +194,7 @@ Peter := student{"Peter", "060233" <- Name="New Peter"}
 student. -> {
     ShareData: i32 = 20
     shareFunction() -> () {
-        cmd.print("nothing")
+        prt("nothing")
     }
 }
 ```
@@ -243,7 +243,7 @@ chineseStudent{} -> {
 例如：
 ```
 Chen := chinesestudent{}
-cmd.print( Chen.Student.Name )
+prt( Chen.Student.Name )
 # 当然，因为没有赋值，所以什么也没有输出
 ```
 通过组合一层又一层的包，你可以自由拼装出任何一个你想要描述的事物。
@@ -254,15 +254,14 @@ cmd.print( Chen.Student.Name )
 ```
 \Demo {
     System
-    Library
 }
 
 example. -> {
     Main() -> () {
         a := S{ <- A=5,B=12}
         b := PKG{"hello", 64, a}
-        cmd.print( b.Z.A )
-        cmd.print( b.Print() )
+        prt( b.Z.A )
+        prt( b.Print() )
         PKG.N()
     }
 }
@@ -289,7 +288,7 @@ PKG{x: str, y: i32, z: S} {
 PKG. -> {
     M := 20
     N() -> () {
-        cmd.print(M)
+        prt(M)
     }
 }
 ```

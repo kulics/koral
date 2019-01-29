@@ -31,7 +31,7 @@ E.g:
 } ex:IOException {
     !(ex)
 } e {
-    cmd.print(e.message)
+    prt(e.message)
 }
 ```
 When an exception occurs, the program enters the error process block, and `e` is the exception identifier. We can get the exception information or perform other operations.
@@ -102,7 +102,6 @@ E.g:
 ```
 \Demo {
     System
-    Library
 }
 
 example. -> {
@@ -116,7 +115,7 @@ example. -> {
         x := Defer{}
         ! y := Defer{} {
             x.content = "defer"
-            cmd.print(x.content)
+            prt(x.content)
         } e:Exception {
             !(e)
         } _ {

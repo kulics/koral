@@ -29,7 +29,7 @@ We can use type conversion to change the number to the type we need, just use th
 
 E.g:
 ```
-integer8 := _(16).toI8()
+integer8 := (16).toI8()
 ```
 
 Note that, the basic type conversion function is only valid for the base type.
@@ -136,7 +136,6 @@ nil # empty value
 ```
 \Demo {
     System
-    Library
 }
 
 example. -> {

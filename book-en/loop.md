@@ -7,18 +7,18 @@ If we happen to have a collection that can be an array, a dictionary, or a piece
 
 E.g:
 ```
-arr := _{1, 2, 3, 4, 5}
+arr := {1, 2, 3, 4, 5}
 @ item <- arr {
-    cmd.print(item)     # print each number
+    prt(item)     # print each number
 }
 ```
 
-If we need to fetch the index and value at the same time, we can replace `id` with the `index -> value` syntax, which is valid for both the list and the dictionary.
+If we need to fetch the index and value at the same time, we can replace `id` with the `[index]value` syntax, which is valid for both the list and the dictionary.
 
 E.g:
 ```
-@ i -> v <- arr  {
-     cmd.print("{i}:{v}")
+@ [i]v <- arr  {
+    prt("{i}:{v}")
 }
 ```
 
@@ -31,7 +31,7 @@ Iterators can loop from the start point to the end point, we use the collection 
 E.g:
 ```
 @ i <- [0 <= 100] {
-    cmd.print(i)      # print each number
+    prt(i)      # print each number
 }
 ```
 It should be noted that the meaning of `0 <= 100` is read from` 0` to `100` one by one, that is, a total execution of` 101` times. Iterator will be executed until the last number is completed, rather than an early end.
@@ -101,22 +101,21 @@ If you only need to jump out of the current loop, use the `-> @` statement.
 ```
 \Demo {
     System
-    Library
 }
 
 example. -> {
     Main() -> () {
-        arr := _{1,2,3,4,5}
+        arr := {1,2,3,4,5}
         @ i <- arr {
-            cmd.print(i)
+            prt(i)
         }
 
         @ i <- [1 <= 50] {
-            cmd.print(i)
+            prt(i)
         }
 
-        @ i <- [100 >= 0, 2] {
-            cmd.print(i)
+        @ [i]v <- [100 >= 0, 2] {
+            prt(i, v)
         }
 
         X := 0

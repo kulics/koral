@@ -11,7 +11,7 @@ Color. -> ?{
     Blue
 }
 ```
-The enumeration assigns values to the identifiers in order, and finally gets a collection of `Red->0, Green->1, Blue->2`.
+The enumeration assigns values to the identifiers in order, and finally gets a collection of `Red=0, Green=1, Blue=2`.
 
 In this way, we don't need to care about their values when we use them, and we can mark the business we need to handle.
 
@@ -47,13 +47,12 @@ Number. -> ?{
 ```
 \Demo {
     System
-    Library
 }
 
 example. -> {
     Main() -> () {
-        cmd.print( A.Z )
-        cmd.print( B.Z )
+        prt( A.Z )
+        prt( B.Z )
     }
 }
 
@@ -62,6 +61,7 @@ A. -> ?{
     Y 
     Z
 }
+
 B. -> ?{
     X 
     Y=0 

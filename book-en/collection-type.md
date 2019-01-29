@@ -6,11 +6,11 @@ Our built-in collection types are two types of lists and dictionaries.
 List use ordered lists to store multiple values ​​of the same type. The same value can appear more than once in different places in an List.
     
 ### Definition
-We only need to use `_{ e1,e2,e3 }` syntax to enclose the data we need, and to split each data with `,` to create an List. In most cases, the data type can be automatically inferred by the language.
+We only need to use `{ e1,e2,e3 }` syntax to enclose the data we need, and to split each data with `,` to create an List. In most cases, the data type can be automatically inferred by the language.
 
 E.g:
 ```
-list := _{ 1,2,3,4,5 }
+list := { 1,2,3,4,5 }
 ```
 This will create a `i32` type List containing` 1` to `5`.
 
@@ -24,19 +24,19 @@ list := [str]{}         # empty List
 ```
 #### Array
 If we need to use the native Array type, we can use `[|type|]` to represent it.
-It can also be created directly using `_{|e1,e2,e3|}`.
+It can also be created directly using `{|e1,e2,e3|}`.
 
 E.g:
 ```
 arr := [|i32|]{}
-arr2 := _{|1,2,3,4,5|}
+arr2 := {|1,2,3,4,5|}
 ```
 ### Visit
 If we need to access one of the elements in the List we can access it with the `identifier[index]`.
 
 E.g:
 ```
-cmd.print( list[1] )
+prt( list[1] )
 ```
 It should be noted that in the programming language, most of the List starting index is from `0`,` identifier[0] `is the first element obtained, the subsequent elements and so on.
 ### Change the element
@@ -61,28 +61,28 @@ Unlike the data items in an List, the data items in the dictionary do not have a
 
 dictionary keys can only use `integer` and` string` types.
 ### Definition
-Similar to lists, dictionaries also use the `_{}` definition, except that the dictionaries type is a combination of `key` and` value`, separated by `->`.
+Similar to lists, dictionaries also use the `{}` definition, except that the dictionaries type is a combination of `key` and` value`, Form is `[key]value`.
 
 E.g:
 ```
-dictionary := _{"a"->1, "b"->2, "c"->3}
+dictionary := {["a"]1, ["b"]2, ["c"]3}
 ```
-This will create a `str->i32` type dictionary containing` a, b, c` entries.
+This will create a `[str]i32` type dictionary containing ` a, b, c` entries.
 
 If you need an explicit type of dictionary, you can also create it using type creation syntax.
 
-The dictionary type is represented by `[type->type]`.
+The dictionary type is represented by `[[type]type]`.
 
 E.g:
 ```
-dictionaryNumNum := [i32->i32]{} # Empty
+dictionaryNumNum := [[i32]i32]{} # Empty
 ```
 ### Visit
 Like an List, we can also use indexes to access data directly.
 
 E.g:
 ```
-cmd.print( dictionary["a"] )
+prt( dictionary["a"] )
 ```
 ### Change the element
 Like lists, we can also use assignment statements to change to elements.
@@ -94,7 +94,7 @@ dictionary["b"] = 5
 The difference is that with the List, if the assignment is a non-existent index, it will not be wrong, the value will be given directly to the new key.
 ### Common operation
 ```
-dictionary += _{"d"->11}        # add index by method
+dictionary += {["d"]11}        # add index by method
 dictionary -= "c"              # delete the specified index element
 length := dictionary.count     # length
 ```
@@ -104,18 +104,17 @@ length := dictionary.count     # length
 ```
 \Demo {
     System
-    Library
 }
 
 example. -> {
     Main() -> () {
-        list1 := _{1,2,3,4,5}
-        list1 += 6
+        List1 := {1,2,3,4,5}
+        List1 += 6
         list2 := [i8]{<- 1,2,1,2}
-        list3 := _{|1,2,3|}
+        list3 := {|1,2,3|}
 
-        dictionary1 := _{"a"->1, "b"->2, "c"->3}
-        dictionary1["d"] = 4
+        Dictionary1 := {["a"]1, ["b"]2, ["c"]3}
+        Dictionary1["d"] = 4
         dictionary2 := [i8->i8]{<- 1->1,2->2,3->3}
     }
 }

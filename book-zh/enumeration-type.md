@@ -11,7 +11,7 @@ Color. -> ?{
     Blue
 }
 ```
-枚举会按照顺序给标识符赋值，最终得到`Red->0, Green->1, Blue->2`这样的集合。
+枚举会按照顺序给标识符赋值，最终得到 `Red=0, Green=1, Blue=2` 这样的集合。
 
 这样我们在使用时就无需关心它们的数值，放心标记我们需要处理的业务。
 
@@ -47,13 +47,12 @@ Number. -> ?{
 ```
 \Demo {
     System
-    Library
 }
 
 example. -> {
     Main() -> () {
-        cmd.print( A.Z )
-        cmd.print( B.Z )
+        prt( A.Z )
+        prt( B.Z )
     }
 }
 
@@ -62,6 +61,7 @@ A. -> ?{
     Y 
     Z
 }
+
 B. -> ?{
     X 
     Y=0 

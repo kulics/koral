@@ -21,7 +21,7 @@ E.g:
 ```
 homeWork -> {
     Count: i32
-    do() -> () {}
+    do() -> ()
 }
 ```
 The protocol for this job has two properties, one is the number of homework and the other is the function to do homework.
@@ -60,12 +60,12 @@ With the protocol included, we can use the student bundle that owns the protocol
 
 E.g:
 ```
-Peter := student{ <-Count=999999 }
-cmd.print( Peter.Count )
+Peter := student{ <- Count=999999 }
+prt( Peter.Count )
 # print 999999, too much
 Peter.do()
 # did a homework
-cmd.print(Peter.Count)
+prt(Peter.Count)
 # print 999998, or too much
 ```
 If this is the case, there is no advantage in defining these two properties directly in the package.
@@ -138,7 +138,6 @@ Note that if the type can not be converted correctly, it will return a `nil` val
 ```
 \Demo {
     System
-    Library
 }
 
 example. -> {
@@ -166,7 +165,7 @@ B{} -> {
 C(a: A) -> () {
     a.do()
     ? a.is<B>() {
-        cmd.print( a.as<B>().Y )
+        prt( a.as<B>().Y )
     }
 }
 ```

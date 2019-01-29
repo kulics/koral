@@ -78,14 +78,14 @@ a.rht(1)   # right shift
 ## Braces
 Sometimes we need to do a mix of multiple data operations within a single statement, which involves priority issues.
 
-At this time we can use `_()` to distinguish between priorities, the parentheses will be given priority to the implementation of the operation.
+At this time we can use `()` to distinguish between priorities, the parentheses will be given priority to the implementation of the operation.
 
 Proposal to use more brackets to express our operation, which is very helpful for the reading of the code.
 
 E.g:
 ```
 a := 1+9%5*5-8/9==5
-b := _(1 + _(9 % 5 * 5) - _(8 / 9)) == 5
+b := (1 + (9 % 5 * 5) - (8 / 9)) == 5
 ```
 Obviously……
 

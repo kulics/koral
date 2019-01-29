@@ -6,7 +6,7 @@
 例如：
 ```
 ? true {
-    cmd.print("true")  # true
+    prt("true")  # true
 }
 ```
 ## 布尔判断
@@ -73,16 +73,16 @@ i := 3
 
 ### 模式匹配
 条件判断还能做的更多，比如我们需要判断标志符的类型，
-可以使用`? value -> id:type{}`语法来匹配类型，`id`可以省略，默认为`it`。
+可以使用`? value -> id:type{}`语法来匹配类型，`id`可以省略。
 
 例如：
 ```
-? x -> :i32 {          # 是否 i32
-    cmd.print(it)
+? x -> :i32 {       # 是否 i32
+    prt("i32")
 } content:str {     # 是否 str
-    cmd.print(content)
-} nil {            # 是否为 nil
-    cmd.print("nil")
+    prt(content)
+} nil {             # 是否为 nil
+    prt("nil")
 }
 ```
 ### 获取类型
@@ -99,31 +99,30 @@ i := 3
 ```
 \Demo {
     System
-    Library
 }
 
 example. -> {
     Main() -> () {
         a := 5
         ? a == 2 { 
-            cmd.print(2) 
+            prt(2) 
         } a == 4 { 
-            cmd.print(4) 
+            prt(4) 
         } _ { 
-            cmd.print("not find") 
+            prt("not find") 
         }
 
         b := 7
         ? b -> 5 { 
-            cmd.print(5) 
+            prt(5) 
         } 7 { 
-            cmd.print(7) 
+            prt(7) 
         } _ { 
-            cmd.print("not find") 
+            prt("not find") 
         }
 
-        cmd.print( ?(b) )
-        cmd.print( ?(:i32) )
+        prt( ?(b) )
+        prt( ?(:i32) )
     }
 }
 ```

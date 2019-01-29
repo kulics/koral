@@ -50,7 +50,7 @@ Very simple, we only need to use `.` syntax, we can summon the attributes we nee
 
 E.g:
 ```
-cmd.print(Peter.name)
+prt(Peter.name)
 # print the name of a student
 ```
 To change the value of the property is the same, it is equivalent to a nested identifier. We can directly use the assignment statement to change the value.
@@ -81,16 +81,16 @@ Similarly, the way the collection is created is actually a simplified creation, 
 E.g:
 ```
 Array := [i32]{ <- 1, 2, 3, 4, 5 }
-Dictionary := [str->i32]{ <- "1"->1, "2"->2, "3"->3 }
+Dictionary := [[str]i32]{ <- ["1"]1, ["2"]2, ["3"]3 }
 ```
 ## Anonymous Package
 If we only want to wrap some data directly, instead of defining the package first and then using it, is it like an anonymous function?
 
-Of course, we can use the `_{}` package directly, the same syntax as the collection, only the elements inside have different syntax.
+Of course, we can use the `{}` package directly, the same syntax as the collection, only the elements inside have different syntax.
 
 E.g:
 ```
-Peter := _{
+Peter := {
     name := "Peter"
     number := "060233"
     class := 2
@@ -110,7 +110,7 @@ E.g:
 ```
 student {}-> {
     ...
-    _GirlFirend :str    # The identifier beginning with this '_' is private
+    _GirlFirend: str    # The identifier beginning with this '_' is private
 }
 ```
 That's right, if you remember the definition of identifiers, this is how private identifiers are defined, and private identifiers can not be accessed by outsiders.
@@ -140,7 +140,7 @@ With this function, we can get the private property by calling the function.
 
 E.g:
 ```
-cmd.print( Peter.getGirlFirend() )
+prt( Peter.getGirlFirend() )
 # printed the name of a girlfriend of a puppy love student
 ```
 As with data attributes, functions can also be private identifiers, and functions that use private identifiers also mean that only the packet can access itself.
@@ -172,7 +172,7 @@ This gives us a package with constructors, and when we create a new student, cla
 E.g:
 ```
 Peter := student{"Peter", "060233"}
-cmd.print(Peter.Class)     # print out 2
+prt(Peter.Class)     # print out 2
 ```
 
 If you need to use both constructors and simplified creations, you can do so.
@@ -194,7 +194,7 @@ E.g:
 student. -> {
     ShareData: i32 = 20
     shareFunction() -> () {
-        cmd.print("nothing")
+        prt("nothing")
     }
 }
 ```
@@ -243,7 +243,7 @@ This way you can use generic attributes via student attributes in Chinese studen
 E.g:
 ```
 Chen := chinesestudent{}
-cmd.print(Chen.Student.Name)
+prt(Chen.Student.Name)
 # of course, since there is no assignment, nothing is output
 ```
 By combining layers after layer, you are free to assemble whatever you want to describe.
@@ -254,16 +254,14 @@ By combining layers after layer, you are free to assemble whatever you want to d
 ```
 \Demo {
     System
-    Library
 }
-
 
 example. -> {
     Main() -> () {
         a := S{ <- A=5,B=12}
         b := PKG{"hello", 64, a}
-        cmd.print( b.Z.A )
-        cmd.print( b.Print() )
+        prt( b.Z.A )
+        prt( b.Print() )
         PKG.N()
     }
 }
@@ -290,7 +288,7 @@ PKG{x: str, y: i32, z: S} {
 PKG. -> {
     M := 20
     N() -> () {
-        cmd.print(M)
+        prt(M)
     }
 }
 ```

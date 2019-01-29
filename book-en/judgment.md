@@ -6,7 +6,7 @@ We only need to use the `? value {}` to declare the judgment statement, accordin
 E.g:
 ```
 ? true {
-    cmd.print("true")  # true
+    prt("true")  # true
 }
 ```
 # Boolean Judgment
@@ -73,16 +73,16 @@ This can be thought of as the `switch case default` structure relative to other 
 
 ### Pattern Matching
 Conditional judgment can do more, for example, we need to judge the type of the identifier,
-You can use the `? value -> id:type{}` syntax to match types, `id` can be omitted, and the default is `it`.
+You can use the `? value -> id:type{}` syntax to match types, `id` can be omitted.
 
 E.g:
 ```
-? x -> :i32 {          # When i32
-     cmd.print(it)
+? x -> :i32 {       # When i32
+     prt("i32")
 } content:str {     # when str
-     cmd.print(content)
-} nil {            # When it is nil
-     cmd.print("nil")
+     prt(content)
+} nil {             # When it is nil
+     prt("nil")
 }
 ```
 ### Get type
@@ -99,31 +99,30 @@ E.g:
 ```
 \Demo {
     System
-    Library
 }
 
 example. -> {
     Main() -> () {
         a := 5
         ? a == 2 { 
-            cmd.print(2) 
+            prt(2) 
         } a == 4 { 
-            cmd.print(4) 
+            prt(4) 
         } _ { 
-            cmd.print("not find") 
+            prt("not find") 
         }
 
         b := 7
         ? b -> 5 { 
-            cmd.print(5) 
+            prt(5) 
         } 7 { 
-            cmd.print(7) 
+            prt(7) 
         } _ { 
-            cmd.print("not find") 
+            prt("not find") 
         }
 
-        cmd.print( ?(b) )
-        cmd.print( ?(:i32) )
+        prt( ?(b) )
+        prt( ?(:i32) )
     }
 }
 ```

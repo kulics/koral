@@ -18,8 +18,8 @@ If we want to set a get operation, we can add `{ ctrl{} }` later to define.
 E.g:
 ```
 Number: i32 {
-    get {   # means get, equivalent to getter in other languages
-        <- (7)  # only returns 7
+    get {           # means get, equivalent to getter in other languages
+        <- (7)      # only returns 7
     }
 }
 ```
@@ -33,7 +33,7 @@ E.g:
 ```
 Number: i32 {
     ...
-    set {   # means set, equivalent to setter in other languages
+    set {       # means set, equivalent to setter in other languages
         # ? ? ? Who should give the value? ? ?
     }
 }
@@ -79,25 +79,30 @@ Most of the time, we can use only simple definitions to complete the task, becau
 ```
 \Demo {
     System
-    Library
 }
 
 example. -> {
     Main() -> () {
-        cmd.print(a)
+        prt(a)
         C = 5
-        cmd.print(B)
-        cmd.print(C)
+        prt(B)
+        prt(C)
     }
 
     a : i32 {
-        get { <- (3) }
+        get { 
+            <- (3) 
+        }
     }
 
     B := 0
     C : i32 {
-        get { <- (B) }
-        set { B = value }
+        get { 
+            <- (B) 
+        }
+        set { 
+            B = value 
+        }
     }
 }
 ```

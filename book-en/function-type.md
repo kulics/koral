@@ -38,8 +38,6 @@ func(x: i32) -> (y: i32) {
 ```
 The meaning of this function is to accept an input `i32` parameter `x` and a `i32` parameter `y`.
 
-This is very similar to what? Yes, in fact, the parameters and dictionary functions are almost the same, the parameters just tell the function, we need to use this type of data, marked by the identifier to match. Therefore, the expression of the same parameters and dictionaries will help us to understand.
-
 The first parentheses is the in parameter, the second parenthesis is the out parameter. There is no limit to the number of parameters in brackets, but there are strict requirements on the order and type.
 ### Return
 Here, even if you do not know, roughly you can guess that `<-` should be a return-related statement.
@@ -97,16 +95,16 @@ The difference is that for multiple return values ​​we have to wrap each ide
 
 E.g:
 ```
-_(N, C) := topSell()
+(N, C) := topSell()
 # define the returned two values ​​for n and c
-_(N, C) = topSell()
+(N, C) = topSell()
 # overrides the returned two values ​​to n and c
 ```
 You can use the definition or assignment statement to get the return value of the function to use, you can also use the nested function to another function.
 
 E.g:
 ```
-cmd.print( topSell() )    # print two values
+prt( topSell() )    # print two values
 ```
 If there is only one return value, the brackets can be taken without.
 
@@ -131,24 +129,24 @@ _ = topSell()  # for _ , assignment and definition are equivalent
 ## Function In Parameter
 If we want part of the function defined by the external, and only perform the rest of the internal logic, such as some set traversal for a collection of functions, then we can use the function parameters to accomplish this goal.
 
-Function In Parameter no special definition of way, just replace the type of the function parameters, do not need to define the contents of the function.
+Function In Parameter no special definition of way, just replace the type of the function parameters, do not need to define the contents of the function, and the identifier is omitted.
 
 E.g:
 ```
-each1To10(func: (item: i32) -> () ) -> () {
-    @ [1<=10] {
-        func(ea)
+each1To10(func: (i32) -> () ) -> () {
+    @ i <- [1<=10] {
+        func(i)
     }
 }
 ```
-We define a function named `func`, whose type is a function of only `item`.
+We define a function named `func`, whose type is a function of only one parameter.
 
 So that we can pass the details of the processing to the externally passed `func`.
 
 E.g:
 ```
 print (item: i32)->() {
-    cmd.print(item)
+    prt(item)
 }
 
 each1To10(print)
@@ -162,30 +160,26 @@ As the above way to define a function and then imported into use sometimes appea
 
 At this point we can use the syntax of the Lambda expression to simplify our code.
 
-Since the function argument is already determined at the time of declaration, we can use the simplified syntax `$id, id -> {statements}` to express it, which means defining the argument identifier and executing the function statement.
-
-If there is only one single return value statement, you can omit `{}` and use `$id, id -> expression`.
-
-If there is one and only one parameter at the same time, the identifier part can be omitted. The default identifier is `it`, using `$expression`.
+Since the function argument is already determined at the time of declaration, we can use the simplified syntax `{id, id -> statements}` to express it, which means defining the argument identifier and executing the function statement.
 
 E.g:
 ```
-foreach( $it -> {
-     cmd.print(it)
-     cmd.print(it * it)
-     cmd.print(it % 2)
+foreach( {it -> 
+    prt(it)
+    prt(it * it)
+    prt(it % 2)
 })
-take( $a, b -> a + b )
-findAll( $it > 7 )
+take( {a, b -> a + b} )
+findAll( {it -> it > 7} )
 ```
 Very simple, the difference from the expression of a function type is that you only need to declare the parameter identifier and execution logic, and neither the type nor the return value need to be declared.
 ## Lambda Function
-Unlike the above simplified method, we can also write a complete function directly, just as we define the function, but you need add `_` to the front .
+Unlike the above simplified method, we can also write a complete function directly, just as we define the function.
 
 E.g:
 ```
-each1To10( _(item: i32) -> () {
-     cmd.print(item)
+each1To10( (item: i32) -> () {
+     prt(item)
 })
 ```
 ### [Next Chapter](package-type.md)
@@ -194,7 +188,6 @@ each1To10( _(item: i32) -> () {
 ```
 \Demo {
     System
-    Library
 }
 
 example. -> {
@@ -202,10 +195,10 @@ example. -> {
         A()
         B(1,2,3)
         x := C()
-        D( $-> cmd.print("D") )
-        E( $cmd.print(it) )
-        E( _(a: i32) -> () {
-            cmd.print(it)
+        D( {-> prt("D")} )
+        E( {it -> prt(it)} )
+        E( (a: i32) -> () {
+            prt(it)
         })
     }
 
@@ -221,9 +214,9 @@ example. -> {
         fn()
     }
 
-    E(fn: (a: i32) -> () ) -> () {
-        @ [1<=20] {
-            fn(ea)
+    E(fn: (i32) -> () ) -> () {
+        @ i <- [1<=20] {
+            fn(i)
         }
     }
 }

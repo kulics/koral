@@ -21,30 +21,34 @@ Demo. -> {
 
 例如：
 ```
-\run { name\space }
+\run { 
+    name\space 
+}
 
 example. -> {
     Main() -> () {
         # 打印 something
-        cmd.print( Demo.getSomething() )
+        prt( Demo.getSomething() )
     }
 }
 ```
 ## 简化导入
-如果我们不希望每次都使用命名空间名称来调用内容，我们可以使用简化语法，在导入时加入`.LastName`即可。
+如果我们不希望每次都使用命名空间名称来调用内容，我们可以使用简化语法，在导入时加入 `.LastName` 即可。
 
 例如：
 ```
-\run{ name\space.Demo }
+\run { 
+    name\space.Demo 
+}
 
 example. -> {
     Main() -> () {
         # 打印 something
-        cmd.print( getSomething() )
+        prt( getSomething() )
     }
 }
 ```
-这样就不需要每次都使用`space`来调用了。
+这样就不需要每次都使用 `space` 来调用了。
 ## 临时导入
 我们也可以直接使用命名空间调用功能而不需要导入。
 
@@ -55,10 +59,11 @@ example. -> {
 example. -> {
     Main() -> () {
         # 直接使用即可
-        cmd.print( \name\space.Demo.getSomething() )    
+        prt( \name\space.Demo.getSomething() )    
     }
 }
 ```
 
+## [进阶](./control-type.md)
 ## [返回目录](./introduction.md)
 ## [完整示例](../example.xs)
