@@ -1,6 +1,5 @@
 \demo {
     System
-    Library
 }
 
 program. -> {
@@ -22,15 +21,15 @@ program. -> {
         n2.Left = n5
         n2.Right = n6
 
-        cmd.prt("Pre Order Traverse")
+        prt("Pre Order Traverse")
         preOrderTraverse(n0)
-        cmd.prt("Middle Order Traverse")
+        prt("Middle Order Traverse")
         middleOrderTraverse(n0)
-        cmd.prt("Post Order Traverse")
+        prt("Post Order Traverse")
         postOrderTraverse(n0)
 
         n7 := inverseNode(n0)
-        cmd.prt("Inverse node")
+        prt("Inverse node")
         preOrderTraverse(n7)
 
         Arr := {9,1,5,8,3,7,4,6,2}
@@ -40,25 +39,25 @@ program. -> {
         Arr = {9,1,5,8,3,7,4,6,2}
         quickSort(Arr)
 
-        cmd.prt("Filter Array")
-        Arr = filterList(Arr, $it > 4)
+        prt("Filter Array")
+        Arr = filterList(Arr, {it->it > 4})
         @ ea <- Arr {
-            cmd.prt(ea) 
+            prt(ea) 
         }
 
-        cmd.prt("oop")
+        prt("oop")
         app := app{"test", "Windows"}
         app.start()
         app.stop()
         shutdown(app)
-        cmd.rd()
+        rd()
     }
 
     preOrderTraverse(node: node?) -> () {
         ? node -> nil { 
             <- () 
         }
-        cmd.prt(node.value)
+        prt(node.value)
         preOrderTraverse(node.Left)
         preOrderTraverse(node.Right)
     }
@@ -69,7 +68,7 @@ program. -> {
         }
         postOrderTraverse(node.Left)
         postOrderTraverse(node.Right)
-        cmd.prt(node.value)
+        prt(node.value)
     }
 
     middleOrderTraverse(node: node?) -> () {
@@ -77,7 +76,7 @@ program. -> {
             <- () 
         }
         middleOrderTraverse(node.Left)
-        cmd.prt(node.value)
+        prt(node.value)
         middleOrderTraverse(node.Right)
     }
 
@@ -97,7 +96,7 @@ program. -> {
     }
 
     simpleSort(list: [i32]) -> () {
-        cmd.prt("Simple Sort")
+        prt("Simple Sort")
         @ i <- [0 < list.count] {
             @ j <- [i+1 < list.count] {
                 ? list[i] > list[j] {
@@ -106,12 +105,12 @@ program. -> {
             }
         }
         @ ea <- list { 
-            cmd.prt(ea) 
+            prt(ea) 
         }
     }
 
     bubbleSort(list: [i32]) -> () {
-        cmd.prt("Bubble Sort")
+        prt("Bubble Sort")
         @ i <- [0 < list.count] {
             @ j <- [list.count-2 >= i] {
                 ? list[j] > list[j+1] {
@@ -120,15 +119,15 @@ program. -> {
             }
         }
         @ ea <- list { 
-            cmd.prt(ea) 
+            prt(ea) 
         }
     }
 
     quickSort(list: [i32]) -> () {
-        cmd.prt("Quick Sort")
+        prt("Quick Sort")
         qSort(list,0,list.count-1)
         @ ea <- list { 
-            cmd.prt(ea) 
+            prt(ea) 
         }
     }
 
@@ -194,17 +193,17 @@ program{name: str} {
     _Running := false
 
     start() -> () {
-        cmd.prt("Start")
+        prt("Start")
         .._Running = true
     }
 
     stop() -> () {
-        cmd.prt("Stop")
+        prt("Stop")
         .._Running = false
     }
 } :control {
     shutdown() -> () {
-        cmd.prt("Shutdown")
+        prt("Shutdown")
         .._Running = false
     }
 }

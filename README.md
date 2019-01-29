@@ -19,7 +19,7 @@ Read detail from The [Book](./book-en/introduction.md).
 ```
 # export namespace
 \HelloWorld {
-    Library # import namespace
+    System # import namespace
 }
 # package
 program. -> {
@@ -34,10 +34,10 @@ program. -> {
         @ item <- greetings {
             # match
             ? item -> [ 0 <= 8 ] {
-                cmd.prt(item) # call function
+                prt(item) # call function
             } _ {
                 # lambda
-                cmd.prt( greetings.filter( {it -> it.count > 4} ) )
+                prt( greetings.filter( {it -> it.count > 4} ) )
                 <- @
             }
         }

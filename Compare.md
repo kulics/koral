@@ -3,7 +3,7 @@
 ## Hello World
 ### Xs
 ```
-cmd.prt("Hello, world!")
+prt("Hello, world!")
 ```
 ### C#
 ```
@@ -144,7 +144,7 @@ let count = i + Int(f)
 ### Xs
 ```
 @ index <- [ 1 <= 5 ] {
-    cmd.prt("{index} times 5 is {index * 5}")
+    prt("{index} times 5 is {index * 5}")
 }
 ```
 ### C#
@@ -729,15 +729,15 @@ for item in library {
 ```
 nb := 42
 ? nb -> [0<=7], 8, 9 { 
-    cmd.prt("single digit") 
+    prt("single digit") 
 } 10 { 
-    cmd.prt("double digits") 
+    prt("double digits") 
 } [11<=99] { 
-    cmd.prt("double digits") 
+    prt("double digits") 
 } [100<=999] { 
-    cmd.prt("triple digits") 
+    prt("triple digits") 
 } _ { 
-    cmd.prt("four or more digits") 
+    prt("four or more digits") 
 }
 ```
 ### C#
@@ -791,7 +791,7 @@ switch nb {
 ```
 @ current <- someObjects {
     ? current -> movie:Movie {
-        cmd.prt("Movie: '{movie.name}', " +
+        prt("Movie: '{movie.name}', " +
             "dir. {movie.director}")
     }
 }

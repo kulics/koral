@@ -1,5 +1,4 @@
 \demo {
-    Library
     System
     System\IO
     System\Linq
@@ -14,7 +13,7 @@ program. {
         main function 
     ##
     Main() ~> () {
-        cmd.prt("main function")
+        prt("main function")
         # run test
         testSharpType()
         testOperator()
@@ -45,7 +44,7 @@ program. {
 
         p.testFuncTemplate<i32, str>(1, "2").testPackage()
         
-        cmd.rd()
+        rd()
     }
 
     StaticX := 0
@@ -102,13 +101,13 @@ program. {
         C = true & false
         D := 11
         D = D.and(1).or(2).xor(3).not().lft(1).rht(2)
-        cmd.prt(B.toStr())
+        prt(B.toStr())
     }
 
     testString() -> () {
         @ ea <- "love xs" {
             ? ea == 'e' {
-                cmd.prt("love xs")
+                prt("love xs")
             }
         }
     }
@@ -129,45 +128,45 @@ program. {
         y := x.as<program>()
         z1 := (12.34).toF32()
         z2 := z1.toI64()
-        cmd.prt( z2.to<obj>().to<i64>() )
-        cmd.prt( y.is<program>() )
-        cmd.prt( x.as<program>().Running )
-        cmd.prt( ?(:program) )
-        cmd.prt( ?(x) )
+        prt( z2.to<obj>().to<i64>() )
+        prt( y.is<program>() )
+        prt( x.as<program>().Running )
+        prt( ?(:program) )
+        prt( ?(x) )
     }
 
     testDefault() -> () {
-        x := lib.def<program>()
-        y := lib.def<protocol>()
-        z := lib.def<(a:i32)->(b:i32)>()
+        x := def<program>()
+        y := def<protocol>()
+        z := def<(a:i32)->(b:i32)>()
     }
 
     testSwitch() -> () {
         x :obj = 3
         ? x -> 1 {
-            cmd.prt(1)
+            prt(1)
         } :str {
-            cmd.prt("string")
+            prt("string")
         } :i32 {
-            cmd.prt("int")
+            prt("int")
         } nil {
-            cmd.prt("nil")
+            prt("nil")
         } _ {
-            cmd.prt("default")
+            prt("default")
         }
     }
 
     testIf() -> () {
         x := 5
         ? x == 2 {
-            cmd.prt(2)
+            prt(2)
         } x == 3 {
-            cmd.prt(3)
+            prt(3)
         } _ {
-            cmd.prt("else")
+            prt("else")
         }
         ? x == 5 {
-            cmd.prt("yes")
+            prt("yes")
         }
     }
 
@@ -185,11 +184,11 @@ program. {
         arrType := {1,2,3}
         array : [|i32|] = {|1,2,3|}
         @ item <- ArrNumber {
-            cmd.prt(item)
+            prt(item)
         }
         @ [i]v <- ArrNumber {
-            cmd.prt(i)
-            cmd.prt(v)
+            prt(i)
+            prt(v)
         }
         slice := ArrNumber[0<=]
         slice2 := ArrNumber[<3]
@@ -200,32 +199,32 @@ program. {
         DicTemp := {["k1"]1,["k2"]2}
         DicTemp += {["k3"]3}
         @ [k]v <- DicTemp {
-            cmd.prt(k)
-            cmd.prt(v)
+            prt(k)
+            prt(v)
         }
         DicTemp -= "k1"
-        cmd.prt(DicTemp["k2"])
+        prt(DicTemp["k2"])
     }
 
     testLoop() -> () {
-        cmd.prt(" 0 to 10")
+        prt(" 0 to 10")
         @ i <- [0 <= 10] {
-            cmd.prt(i, ", ", "")
+            prt(i, ", ", "")
         }
-        cmd.prt(" ")
-        cmd.prt(" 0 to 8 step 2")
+        prt(" ")
+        prt(" 0 to 8 step 2")
         @ ea <- [0 < 8, 2] {
-            cmd.prt(ea, ", ", "")
+            prt(ea, ", ", "")
         }
-        cmd.prt(" ")
-        cmd.prt(" 8 to 2 step 2")
+        prt(" ")
+        prt(" 8 to 2 step 2")
         @ ea <- [8 > 0, 2] {
-            cmd.prt(ea, ", ", "")
+            prt(ea, ", ", "")
             ? ea == 6 {
                 -> @
             }
         }
-        cmd.prt(" ")
+        prt(" ")
         @ {
             <- @
         }
@@ -293,11 +292,11 @@ program. {
         }
         test3( (it: i32) ~> () {
             <~ tsks.delay(5000)
-            cmd.prt(it)
+            prt(it)
         })
         test3( {it ~>
             <~ tsks.delay(5000)
-            cmd.prt(it)
+            prt(it)
         })
         test4(fn: (it: i32) -> (v: i32)) -> () { 
             fn(18) 
