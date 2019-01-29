@@ -184,7 +184,7 @@ node{value: i32} {
 }
 
 control -> {
-    shutdown() -> () {}
+    shutdown() -> ()
 }
 
 program{name: str} {
