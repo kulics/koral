@@ -22,12 +22,14 @@ We can use other namespace contents through the import function. The namespace c
 
 E.g:
 ```
-\run { name\space }
+\run { 
+    name\space 
+}
 
 example. -> {
     Main() -> () {
-        # 打印 something
-        cmd.print( Demo.getSomething() )
+        # print something
+        prt( Demo.getSomething() )
     }
 }
 ```
@@ -36,12 +38,14 @@ If we don't want to use the namespace name to call the content every time, we ca
 
 E.g:
 ```
-\run{ name\space.Demo }
+\run{ 
+    name\space.Demo 
+}
 
 example. -> {
     Main() -> () {
-        # 打印 something
-        cmd.print( getSomething() )
+        # print something
+        prt( getSomething() )
     }
 }
 ```
@@ -56,10 +60,11 @@ E.g:
 example. -> {
     Main() -> () {
         # use it directly
-        cmd.print( \name\space.Demo.getSomething() )    
+        prt( \name\space.Demo.getSomething() )    
     }
 }
 ```
 
+## [Advanced](./control-type.md)
 ## [Back to index](./introduction.md)
 ## [Complete Example](../example.xs)

@@ -21,7 +21,7 @@ protocol -> {
 ```
 homeWork -> {
     Count: i32
-    do() -> () {}
+    do() -> ()
 }
 ```
 这是一个作业协议，它有两个属性，一个是需要做作业的数量，一个是完成作业的函数。
@@ -60,12 +60,12 @@ student{} -> {
 
 例如：
 ```
-Peter := student{ <-Count=999999 }
-cmd.print( Peter.Count )
+Peter := student{ <- Count=999999 }
+prt( Peter.Count )
 # 打印 999999，好多呀
 Peter.do()
 # 做了一次作业
-cmd.print( Peter.Count )
+prt( Peter.Count )
 # 打印 999998，还是好多呀
 ```
 如果只是这样使用，那和在包里直接定义这两个属性比就没什么优势了。
@@ -138,7 +138,6 @@ func(hw: homeWork) -> () {
 ```
 \Demo {
     System
-    Library
 }
 
 example. -> {
@@ -166,7 +165,7 @@ B{} -> {
 C(a: A) -> () {
     a.do()
     ? a.is<B>() {
-        cmd.print( a.as<B>().Y )
+        prt( a.as<B>().Y )
     }
 }
 ```

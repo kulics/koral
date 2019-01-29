@@ -18,8 +18,8 @@ Number: i32
 例如：
 ```
 Number: i32 {
-    get {   # 表示获取，相当于其它语言中的getter
-        <- (7)     # 只返回 7
+    get {           # 表示获取，相当于其它语言中的getter
+        <- (7)      # 只返回 7
     }
 }
 ```
@@ -33,7 +33,7 @@ Number: i32 {
 ```
 Number: i32 {
     ...
-    set {   # 表示设置，相当于其它语言中的setter
+    set {       # 表示设置，相当于其它语言中的setter
         # ？？？该把值给谁？？？
     }
 }
@@ -78,25 +78,30 @@ Number: i32 {
 ```
 \Demo {
     System
-    Library
 }
 
 example. -> {
     Main() -> () {
-        cmd.print(a)
+        prt(a)
         C = 5
-        cmd.print(B)
-        cmd.print(C)
+        prt(B)
+        prt(C)
     }
 
     a : i32 {
-        get { <- (3) }
+        get { 
+            <- (3) 
+        }
     }
 
     B := 0
     C : i32 {
-        get { <- (B) }
-        set { B = value }
+        get { 
+            <- (B) 
+        }
+        set { 
+            B = value 
+        }
     }
 }
 ```

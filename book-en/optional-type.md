@@ -54,7 +54,6 @@ a!.toStr()
 ```
 \Demo {
     System
-    Library
 }
 
 example. -> {

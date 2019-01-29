@@ -6,8 +6,8 @@ The basic form of the statement is:
 ```
 StatementContent;
 ```
-In this language, the grammar rules are clear, and each statement has a clear end.
-So in most cases, we can omit the `;` used to end, this symbol is optional, for every statement.
+In this language, the grammar rules are clear, and each statement has a clear scope and must be terminated by `;` or `newline`.  
+So in most cases, we can end up using line breaks directly. When there is a special need, you can choose to use `;` to maintain the current line.
 
 So we prefer to write like this:
 ```
@@ -15,7 +15,6 @@ StatementContent # auto end
 StatementContent
 ```
 
-In the following content, we will omit the `;` at the end of the statement by default.
 ## Export Namespace
 All content in this language can only be defined in the namespace so that content can be efficiently divided into distinct blocks for management. You can define it freely in a separate namespace without undue restrictions on naming.
 
@@ -38,9 +37,7 @@ E.g:
     Library
 }
 ```
-This imports the `System` and` Library` libraries into the `Demo` namespace, and then you can use them in the program.
-
-It's important to note that most of Xs's functionality is included in the Library, so we have to import this namespace to ensure proper use of Xs.
+This imports the `System` libraries into the `Demo` namespace, and then you can use them in the program.
 
 You can write multiple import statements that their order does not affect the import function.
 
@@ -54,7 +51,6 @@ E.g:
 ```
 \Demo {
     System
-    Library
 }
 
 example. -> {
@@ -73,11 +69,11 @@ More details about the function will be explained in later chapters.
 ## Display information
 We use the program in order to obtain some useful information, so we need a feature to browse information, this feature can be display, print or output.
 
-If we write a console program, we can use `cmd.print()` function, it can display data or text information to the console for us to browse.
+If we write a console program, we can use `prt()` function, it can display data or text information to the console for us to browse.
 
 E.g:
 ```
-cmd.print("Hello world")    # output Hello world
+prt("Hello world")    # output Hello world
 ```
 In the following examples, we will all use the console as a presentation environment.
 ## Comment
@@ -86,6 +82,14 @@ Single-line comment starting with `#`:
 # single-line comment
 ```
 Comment is only used to provide additional information to the user, and will not be really compiled into the executable program.
+
+Multi-line comments only need to wrap the content with `##`:
+```
+##
+Multi-line 
+comment
+##
+```
 ## Definition
 We can create new variable using the `id:type` statement.
 
@@ -171,9 +175,9 @@ However, in practical projects, the use of partition will effectively improve th
 
 E.g:
 ```
-a.b(x,y).c(fn:_()->(x:i32){<-(2+1)}).D=1+3*5/4
+a.b(x,y).c(()->(i32){<-(2+1)}).D=1+3*5/4
 
-a.b(x, y).c(fn: _() -> (x: i32) {
+a.b(x, y).c( () -> (i32) {
     <- (2 + 1)
 }).D = 1 + 3 * 5 / 4
 ```
@@ -183,7 +187,6 @@ a.b(x, y).c(fn: _() -> (x: i32) {
 ```
 \Demo {
     System
-    Library
 }
 
 example. -> {
