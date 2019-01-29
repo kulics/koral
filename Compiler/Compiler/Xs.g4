@@ -9,7 +9,7 @@ exportStatement CommentLine* NewLine* namespaceSupportStatement*;
 exportStatement: '\\' nameSpace blockLeft (importStatement)* BlockRight end;
 
 // 导入命名空间
-importStatement: (annotationSupport)? nameSpace (call id)? end;
+importStatement: (annotationSupport)? nameSpace (call NewLine? id)? end;
 
 namespaceSupportStatement:
 packageStaticStatement
@@ -238,7 +238,7 @@ linq // 联合查询
 | tupleExpression //元组表达式
 | plusMinus // 正负处理
 | negate // 取反
-| expression call callExpression // 链式调用
+| expression call NewLine? callExpression // 链式调用
 | expression judge expression // 判断型表达式
 | expression add expression // 和型表达式
 | expression mul expression // 积型表达式
@@ -246,14 +246,14 @@ linq // 联合查询
 ;
 
 callSelf: '..' callExpression;
-callNameSpace: ('\\' id)+ call callExpression;
+callNameSpace: ('\\' id)+ call NewLine? callExpression;
 
 callExpression:
 callElement // 访问元素
 | callFunc // 函数调用
 | callPkg //
 | id // id
-| callExpression call callExpression // 链式调用
+| callExpression call NewLine? callExpression // 链式调用
 ;
 
 tuple : '(' (expression (more expression)* )? ')'; // 元组
@@ -304,9 +304,9 @@ sliceEnd: op=('<'|'<='|'>'|'>=') expression;
 
 nameSpace: id ('\\' id)*;
 
-nameSpaceItem: (('\\' id)+ call)? id;
+nameSpaceItem: (('\\' id)+ call NewLine?)? id;
 
-name: id (call id)* ;
+name: id (call NewLine? id)* ;
 
 templateDefine: '<' id (more id)* '>';
 
