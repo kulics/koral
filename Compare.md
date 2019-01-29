@@ -344,7 +344,7 @@ func getGasPrices() -> (Double, Double, Double) {
 ## Function Type
 ### Xs
 ```
-makeIncrementer() -> (fn: (in: i32) -> (out: i32)) {
+makeIncrementer() -> (fn: (i32) -> (i32)) {
     addOne(number: i32) -> (number: i32) {
         <- (1 + number)
     }
