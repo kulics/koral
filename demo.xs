@@ -42,7 +42,9 @@ program. -> {
 
         cmd.prt("Filter Array")
         Arr = filterList(Arr, $it > 4)
-        @ ea <- Arr { cmd.prt(ea) }
+        @ ea <- Arr {
+            cmd.prt(ea) 
+        }
 
         cmd.prt("oop")
         app := app{"test", "Windows"}
@@ -53,28 +55,36 @@ program. -> {
     }
 
     preOrderTraverse(node: node?) -> () {
-        ? node -> nil { <- () }
+        ? node -> nil { 
+            <- () 
+        }
         cmd.prt(node.value)
         preOrderTraverse(node.Left)
         preOrderTraverse(node.Right)
     }
 
     postOrderTraverse(node: node?) -> () {
-        ? node -> nil { <- () }
+        ? node -> nil { 
+            <- () 
+        }
         postOrderTraverse(node.Left)
         postOrderTraverse(node.Right)
         cmd.prt(node.value)
     }
 
     middleOrderTraverse(node: node?) -> () {
-        ? node -> nil { <- () }
+        ? node -> nil { 
+            <- () 
+        }
         middleOrderTraverse(node.Left)
         cmd.prt(node.value)
         middleOrderTraverse(node.Right)
     }
 
     inverseNode(node: node?) -> (node: node?) {
-        ? node -> nil { <- (nil) }
+        ? node -> nil { 
+            <- (nil) 
+        }
         node.Left = inverseNode(node.Left)
         node.Right = inverseNode(node.Right)
 
@@ -95,7 +105,9 @@ program. -> {
                 }
             }
         }
-        @ ea <- list { cmd.prt(ea) }
+        @ ea <- list { 
+            cmd.prt(ea) 
+        }
     }
 
     bubbleSort(list: [i32]) -> () {
@@ -107,13 +119,17 @@ program. -> {
                 }
             }
         }
-        @ ea <- list { cmd.prt(ea) }
+        @ ea <- list { 
+            cmd.prt(ea) 
+        }
     }
 
     quickSort(list: [i32]) -> () {
         cmd.prt("Quick Sort")
         qSort(list,0,list.count-1)
-        @ ea <- list { cmd.prt(ea) }
+        @ ea <- list { 
+            cmd.prt(ea) 
+        }
     }
 
     qSort(list: [i32], low: i32, high: i32) -> () {
