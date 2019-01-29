@@ -138,7 +138,7 @@ program. {
     testDefault() -> () {
         x := def<program>()
         y := def<protocol>()
-        z := def<(a:i32)->(b:i32)>()
+        z := def<(i32)->(i32)>()
     }
 
     testSwitch() -> () {
@@ -271,23 +271,23 @@ program. {
         <- (S, i)
     }
 
-    testFuncParams(a: i32, b: i32, fn: (a: i32, b: i32, c: i32, d: i8) ->
-     (z: str, a: i32, b: i32, c: i32)) -> (a: i32, b: str, c: str) {
+    testFuncParams(a: i32, b: i32, fn: (i32, i32, i32, i8) ->
+     (str, i32, i32, i32)) -> (a: i32, b: str, c: str) {
         <- (0,"", "")
     }
 
     testLambda() -> () {
-        test1(fn: (i1: i32, i2: i32) -> (o1: i32, o2: i32)) -> () {
+        test1(fn: (i32, i32) -> (i32, i32)) -> () {
             (o1,o2) := fn(1, 2)
         }
         test1( {i1,i2-> (i1,i2)} )
 
-        test2(fn: () -> (o1: i32)) -> () {
+        test2(fn: () -> (i32)) -> () {
             o1 := fn()
         }
         test2( {->1} )
 
-        test3(fn: (it: i32) -> ()) -> () {
+        test3(fn: (i32) -> ()) -> () {
             fn(1)
         }
         test3( (it: i32) ~> () {
@@ -298,7 +298,7 @@ program. {
             <~ tsks.delay(5000)
             prt(it)
         })
-        test4(fn: (it: i32) -> (v: i32)) -> () { 
+        test4(fn: (i32) -> (i32)) -> () { 
             fn(18) 
         }
         test4({it->it+1})

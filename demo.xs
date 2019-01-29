@@ -158,7 +158,7 @@ program. -> {
         <- (low)
     }
 
-    filterList(list: [i32], fn: (take: i32) -> (act: bl)) -> (l: [i32]) {
+    filterList(list: [i32], fn: (i32) -> (bl)) -> (l: [i32]) {
         Filter := [i32]{}
 
         @ ea <- list {

@@ -12,7 +12,7 @@ namespace Compiler
         {
             var obj = "";
             obj = Visit(context.typeNotNull()) as string;
-            if (context.typeNotNull().GetChild(0) is TypeBasicContext && 
+            if (context.typeNotNull().GetChild(0) is TypeBasicContext &&
                 context.typeNotNull().GetChild(0).GetText() != "obj" &&
                  context.typeNotNull().GetChild(0).GetText() != "str")
             {
@@ -133,47 +133,19 @@ namespace Compiler
         public override object VisitTypeFunctionParameterClause([NotNull] TypeFunctionParameterClauseContext context)
         {
             var obj = "";
-            var lastType = "";
-            var temp = new List<string>();
-            for (int i = context.typeParameter().Length - 1; i >= 0; i--)
+            for (int i = 0; i <= context.type().Length - 1; i++)
             {
-                Parameter p = (Parameter)Visit(context.typeParameter(i));
-                if (p.type != null)
+                string p = (string)Visit(context.type(i));
+                if (i == 0)
                 {
-                    lastType = p.type;
+                    obj += p;
                 }
                 else
                 {
-                    p.type = lastType;
-                }
-                temp.Add($"{p.type}");
-            }
-            for (int i = temp.Count - 1; i >= 0; i--)
-            {
-                if (i == temp.Count - 1)
-                {
-                    obj += temp[i];
-                }
-                else
-                {
-                    obj += $", {temp[i]}";
+                    obj += $", {p}";
                 }
             }
             return obj;
-        }
-
-        public override object VisitTypeParameter([NotNull] TypeParameterContext context)
-        {
-            var p = new Parameter
-            {
-                id = ((Result)Visit(context.id())).text
-            };
-            if (context.type() != null)
-            {
-                p.type = (string)Visit(context.type());
-            }
-
-            return p;
         }
 
         public override object VisitTypeBasic([NotNull] TypeBasicContext context)
