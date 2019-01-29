@@ -134,6 +134,11 @@ namespace Compiler
             return r;
         }
 
+        public override object VisitAnnotationSupport([NotNull] AnnotationSupportContext context)
+        {
+            return (string)Visit(context.annotation());
+        }
+
         public override object VisitAnnotation([NotNull] AnnotationContext context)
         {
             var obj = "";
