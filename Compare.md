@@ -207,8 +207,8 @@ shoppingList[1] = "bottle of water"
 ### Xs
 ```
 occupations := {
-    "Malcolm"->"Captain",
-    "Kaylee"->"Mechanic"
+    ["Malcolm"]"Captain",
+    ["Kaylee"]"Mechanic"
 }
 occupations["Jayne"] = "Public Relations"
 ```
@@ -248,7 +248,7 @@ occupations["Jayne"] = "Public Relations"
 ### Xs
 ```
 emptyArray := [str]{}
-emptyDictionary := [str->f32]{}
+emptyDictionary := [[str]f32]{}
 ```
 ### C#
 ```

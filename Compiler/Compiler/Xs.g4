@@ -174,7 +174,7 @@ judgeElseIfStatement: expression blockLeft (functionSupportStatement)* BlockRigh
 // 循环
 loopStatement:Loop id ArrowLeft iteratorStatement blockLeft (functionSupportStatement)* BlockRight end;
 // 集合循环
-loopEachStatement:Loop (id ArrowRight)? id ArrowLeft expression blockLeft (functionSupportStatement)* BlockRight end;
+loopEachStatement:Loop ('[' id ']')? id ArrowLeft expression blockLeft (functionSupportStatement)* BlockRight end;
 // 条件循环
 loopCaseStatement:Loop Judge expression blockLeft (functionSupportStatement)* BlockRight end;
 // 无限循环
@@ -294,7 +294,7 @@ list : '{' (expression (more expression)*)? '}'; // 列表
 
 dictionary :  '{' (dictionaryElement (more dictionaryElement)*)? '}'; // 字典
 
-dictionaryElement: expression '->' expression; // 字典元素
+dictionaryElement: '[' expression ']' expression; // 字典元素
 
 slice: sliceFull | sliceStart | sliceEnd;
 
@@ -312,13 +312,11 @@ templateDefine: '<' id (more id)* '>';
 
 templateCall: '<' type (more type)* '>';
 
-lambda : '$' (lambdaIn)? t=(ArrowRight|FlowRight) NewLine* expressionList 
-| '$' (lambdaIn)? t=(ArrowRight|FlowRight) NewLine* blockLeft (functionSupportStatement)* BlockRight
-| lambdaShort;
+lambda : blockLeft (lambdaIn)? t=(ArrowRight|FlowRight) NewLine* expressionList BlockRight
+| blockLeft (lambdaIn)? t=(ArrowRight|FlowRight) NewLine* 
+(functionSupportStatement)* BlockRight;
 
 lambdaIn : id (more id)*;
-
-lambdaShort : '$' expressionList;
 
 pkgAnonymous: pkgAnonymousAssign; // 匿名包
 
@@ -374,7 +372,7 @@ type : typeNotNull | typeNullable;
 typeTuple : '(' type (more type)+ ')';
 typeList : '[' type ']';
 typeArray : '[' '|' type '|' ']';
-typeDictionary :  '[' type ArrowRight type ']';
+typeDictionary :  '[' '[' type ']' type ']';
 typePackage : nameSpaceItem (templateCall)? ;
 typeFunction : typeFunctionParameterClause ArrowRight NewLine* typeFunctionParameterClause;
 

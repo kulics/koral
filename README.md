@@ -37,7 +37,7 @@ program. -> {
                 cmd.prt(item) # call function
             } _ {
                 # lambda
-                cmd.prt( greetings.filter($it.count > 4) )
+                cmd.prt( greetings.filter( {it -> it.count > 4} ) )
                 <- @
             }
         }

@@ -187,7 +187,7 @@ program. {
         @ item <- ArrNumber {
             cmd.prt(item)
         }
-        @ i->v <- ArrNumber {
+        @ [i]v <- ArrNumber {
             cmd.prt(i)
             cmd.prt(v)
         }
@@ -196,10 +196,10 @@ program. {
     }
 
     testDictionary() -> () {
-        empty := [str->i32]{}
-        DicTemp := {"k1"->1,"k2"->2}
-        DicTemp += {"k3"->3}
-        @ k->v <- DicTemp {
+        empty := [[str]i32]{}
+        DicTemp := {["k1"]1,["k2"]2}
+        DicTemp += {["k3"]3}
+        @ [k]v <- DicTemp {
             cmd.prt(k)
             cmd.prt(v)
         }
@@ -236,6 +236,29 @@ program. {
         }
     }
 
+    testCheck() -> () {
+        Z :defer? = nil
+        ! z2 := defer{} {
+            Z = defer{}
+            ! z3 := defer{} {
+                x := 1 * 1
+            }
+            ! {
+                y := 1 + 1
+            } ex {
+                !(ex)
+            }
+        } ex: IOException {
+            !(ex)
+        } e {
+            !(e)
+        } _ {
+            ? Z ~= nil {
+                Z.Dispose()
+            }
+        }
+    }
+
     testFunc(S: str) -> (out1: str, out2: i32) {
         S = S + "test"
         i := 1+1*3*9/8
@@ -258,12 +281,12 @@ program. {
         test1(fn: (i1: i32, i2: i32) -> (o1: i32, o2: i32)) -> () {
             (o1,o2) := fn(1, 2)
         }
-        test1( $i1,i2-> (i1,i2) )
+        test1( {i1,i2-> (i1,i2)} )
 
         test2(fn: () -> (o1: i32)) -> () {
             o1 := fn()
         }
-        test2( $->1 )
+        test2( {->1} )
 
         test3(fn: (it: i32) -> ()) -> () {
             fn(1)
@@ -272,37 +295,14 @@ program. {
             <~ tsks.delay(5000)
             cmd.prt(it)
         })
-        test3( $it ~> {
+        test3( {it ~>
             <~ tsks.delay(5000)
             cmd.prt(it)
         })
         test4(fn: (it: i32) -> (v: i32)) -> () { 
             fn(18) 
         }
-        test4($it+1)
-    }
-
-    testCheck() -> () {
-        Z :defer? = nil
-        ! z2 := defer{} {
-            Z = defer{}
-            ! z3 := defer{} {
-                x := 1 * 1
-            }
-            ! {
-                y := 1 + 1
-            } ex {
-                !(ex)
-            }
-        } ex: IOException {
-            !(ex)
-        } e {
-            !(e)
-        } _ {
-            ? Z ~= nil {
-                Z.Dispose()
-            }
-        }
+        test4({it->it+1})
     }
 
     testAsync() ~> (x: i32, y: i32, z: str) {
@@ -355,7 +355,7 @@ app{} -> {
             running := true
         }
         item3 := [i32]{<- 1,2,3,4,5}
-        item4 := [str->i32]{<- "1"->1,"2"->2,"3"->3}
+        item4 := [[str]i32]{<- ["1"]1,["2"]2,["3"]3}
     }
 
     testFuncTemplate<T1, T2>(data1: T1, data2: T2) -> (data: app) {

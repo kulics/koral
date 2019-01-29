@@ -781,11 +781,6 @@ namespace Compiler
             {
                 data = "var"
             };
-            if (context.lambdaShort() != null)
-            {
-                r.text += Visit(context.lambdaShort());
-                return r;
-            }
             // 异步
             if (context.t.Type == FlowRight)
             {
@@ -826,13 +821,6 @@ namespace Compiler
                     obj += ", " + r.text;
                 }
             }
-            return obj;
-        }
-
-        public override object VisitLambdaShort([NotNull] LambdaShortContext context)
-        {
-            var obj = "(it) => ";
-            obj += ((Result)Visit(context.expressionList())).text;
             return obj;
         }
 
