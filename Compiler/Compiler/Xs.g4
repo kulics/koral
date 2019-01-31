@@ -22,11 +22,11 @@ packageStaticStatement
 ;
 
 // 枚举
-enumStatement: (annotationSupport)? id call ArrowRight NewLine* Judge blockLeft enumSupportStatement* BlockRight;
+enumStatement: (annotationSupport)? id ArrowRight NewLine* Judge blockLeft enumSupportStatement* BlockRight;
 
 enumSupportStatement: id ('=' (add)? Integer)? end;
 // 静态包
-packageStaticStatement:(annotationSupport)? id (templateDefine)? call (packageInitStatement)? 
+packageStaticStatement:(annotationSupport)? id (templateDefine)? (packageInitStatement)? 
 ArrowRight NewLine* blockLeft (packageStaticSupportStatement)* BlockRight;
 // 静态包支持的语句
 packageStaticSupportStatement:
@@ -50,9 +50,10 @@ parameterClauseOut blockLeft (functionSupportStatement)* BlockRight end;
 
 // 定义包
 packageStatement:(annotationSupport)? id (templateDefine)? parameterClausePackage (packageInitStatement)? 
- ArrowRight blockLeft (packageSupportStatement)* BlockRight (extend packageOverrideStatement)? protocolImplementStatement*;
+ ArrowRight blockLeft (packageSupportStatement)* BlockRight 
+ (':' (extend packageOverrideStatement (protocolImplementStatement)* | protocolImplementStatement+) )?;
 // 继承
-extend: '::' type blockLeft expressionList? BlockRight;
+extend: type blockLeft expressionList? BlockRight;
 // 入参
 parameterClausePackage : blockLeft parameter? (more parameter)*  BlockRight  ;
 // 包支持的语句
@@ -63,12 +64,12 @@ packageVariableStatement
 |NewLine
 ;
 // 包构造方法
-packageInitStatement:(annotationSupport)? blockLeft (functionSupportStatement)* BlockRight;
+packageInitStatement:(annotationSupport)? '..' blockLeft (functionSupportStatement)* BlockRight;
 // 函数
 packageFunctionStatement:(annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) NewLine*
 parameterClauseOut blockLeft (functionSupportStatement)* BlockRight end;
 // 重写函数
-packageOverrideFunctionStatement:(annotationSupport)? (n='::')? id parameterClauseIn t=(ArrowRight|FlowRight) NewLine*
+packageOverrideFunctionStatement:(annotationSupport)? (n=':')? id parameterClauseIn t=(ArrowRight|FlowRight) NewLine*
 parameterClauseOut blockLeft (functionSupportStatement)* BlockRight end;
 // 定义变量
 packageVariableStatement:(annotationSupport)? expression (Define expression|Declared type (Assign expression)?)
@@ -86,7 +87,7 @@ packageFunctionStatement
 |NewLine
 ;
 // 协议
-protocolStatement:(annotationSupport)? id (templateDefine)? ArrowRight blockLeft (protocolSupportStatement)* BlockRight;
+protocolStatement:(annotationSupport)? id (templateDefine)? '::' blockLeft (protocolSupportStatement)* BlockRight;
 // 协议支持的语句
 protocolSupportStatement:
 protocolFunctionStatement
@@ -110,7 +111,7 @@ implementFunctionStatement
 |NewLine
 ;
 // 实现协议
-protocolImplementStatement: ':' nameSpaceItem (templateCall)? blockLeft (protocolImplementSupportStatement)* BlockRight;
+protocolImplementStatement: nameSpaceItem (templateCall)? blockLeft (protocolImplementSupportStatement)* BlockRight;
 // 控制实现
 implementControlStatement:(annotationSupport)? expression (Define expression|Declared type (Assign expression)?)
 (blockLeft (packageControlSubStatement)* BlockRight)? end;

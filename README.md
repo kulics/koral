@@ -22,7 +22,7 @@ Read detail from The [Book](./book-en/introduction.md).
     System # import namespace
 }
 # package
-program. -> {
+program -> {
     # main function
     Main() -> () {
         # list
