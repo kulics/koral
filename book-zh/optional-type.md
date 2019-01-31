@@ -56,7 +56,7 @@ a!.toStr()
     System
 }
 
-example. -> {
+example -> {
     Main() -> () {
         a: i32? = nil
 

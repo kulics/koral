@@ -81,7 +81,7 @@ Most of the time, we can use only simple definitions to complete the task, becau
     System
 }
 
-example. -> {
+example -> {
     Main() -> () {
         prt(a)
         C = 5

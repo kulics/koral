@@ -106,7 +106,7 @@ length := dictionary.count     # length
     System
 }
 
-example. -> {
+example -> {
     Main() -> () {
         List1 := {1,2,3,4,5}
         List1 += 6

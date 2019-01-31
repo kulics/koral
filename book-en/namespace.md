@@ -10,7 +10,7 @@ E.g:
 ```
 \name\space{}
 
-Demo. -> {
+Demo -> {
     getSomething() -> (content: str) {
         <- ("something")
     }
@@ -26,7 +26,7 @@ E.g:
     name\space 
 }
 
-example. -> {
+example -> {
     Main() -> () {
         # print something
         prt( Demo.getSomething() )
@@ -42,7 +42,7 @@ E.g:
     name\space.Demo 
 }
 
-example. -> {
+example -> {
     Main() -> () {
         # print something
         prt( getSomething() )
@@ -57,7 +57,7 @@ E.g:
 ```
 \Demo {}
 
-example. -> {
+example -> {
     Main() -> () {
         # use it directly
         prt( \name\space.Demo.getSomething() )    

@@ -108,7 +108,7 @@ We can define private properties to store properties that we do not want to be a
 
 E.g:
 ```
-student {}-> {
+student{} -> {
     ...
     _GirlFirend: str    # The identifier beginning with this '_' is private
 }
@@ -152,11 +152,11 @@ We hope that given a name and student number, class and grade information will b
 
 This can be achieved using regular functions, but why not use the built-in constructor?
 
-Add parameters at the time of definition, and write the definition of the constructor, which only needs the `{}` statement behind the parameters.
+Add parameters at the time of definition, and write the definition of the constructor, which only needs the `..{}` statement behind the parameters.
 
 E.g:
 ```
-student{name: str, number: str} {
+student{name: str, number: str}..{
     ..Name = name
     ..Number = number
     # calculate the class
@@ -187,11 +187,11 @@ It should be noted that a package can only support one constructor, we recommend
 If you really have more construction requirements, you can use regular functions to accomplish this requirement.
 ## Mount Property
 Sometimes we don't want to always use constructive methods to use certain data and functions, when we can mount property on the package itself.  
-By wrapping the data and functions we need with `id. -> {}`, we can call them directly.
+By wrapping the data and functions we need with `id -> {}`, we can call them directly.
 
 E.g:
 ```
-student. -> {
+student -> {
     ShareData: i32 = 20
     shareFunction() -> () {
         prt("nothing")
@@ -208,7 +208,7 @@ The grammar is consistent with the constructor.
 
 E.g:
 ```
-student. {
+student..{
     ShareData = 128 
 } -> {
     ...
@@ -256,7 +256,7 @@ By combining layers after layer, you are free to assemble whatever you want to d
     System
 }
 
-example. -> {
+example -> {
     Main() -> () {
         a := S{ <- A=5,B=12}
         b := PKG{"hello", 64, a}
@@ -271,7 +271,7 @@ S{} -> {
     B := 0
 }
 
-PKG{x: str, y: i32, z: S} {
+PKG{x: str, y: i32, z: S}..{
     X = x
     Y = y
     Z = z
@@ -285,7 +285,7 @@ PKG{x: str, y: i32, z: S} {
     }
 }
 
-PKG. -> {
+PKG -> {
     M := 20
     N() -> () {
         prt(M)

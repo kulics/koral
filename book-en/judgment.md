@@ -101,7 +101,7 @@ E.g:
     System
 }
 
-example. -> {
+example -> {
     Main() -> () {
         a := 5
         ? a == 2 { 

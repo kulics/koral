@@ -80,7 +80,7 @@ Number: i32 {
     System
 }
 
-example. -> {
+example -> {
     Main() -> () {
         prt(a)
         C = 5

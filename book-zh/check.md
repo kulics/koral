@@ -104,7 +104,7 @@ _ {
     System
 }
 
-example. -> {
+example -> {
     Main() -> () {
         ! {
             x: i32 = (1 * 1)

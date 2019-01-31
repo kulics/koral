@@ -53,7 +53,7 @@ E.g:
     System
 }
 
-example. -> {
+example -> {
     Main() -> () {
     }
 }
@@ -189,7 +189,7 @@ a.b(x, y).c( () -> (i32) {
     System
 }
 
-example. -> {
+example -> {
     Main() -> () {
         a : i32
         a = 5

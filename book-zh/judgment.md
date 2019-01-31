@@ -101,7 +101,7 @@ i := 3
     System
 }
 
-example. -> {
+example -> {
     Main() -> () {
         a := 5
         ? a == 2 { 
