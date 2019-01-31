@@ -483,7 +483,7 @@ var shapeDescription = shape.simpleDescription()
 ## Subclass
 ### Xs
 ```
-NamedShape{name: str} {
+NamedShape{name: str}..{
     ..name = name
 } -> {
     name: str
@@ -494,7 +494,7 @@ NamedShape{name: str} {
     }
 }
 
-Square{sideLength: f64, name: str} {
+Square{sideLength: f64, name: str}..{
     ..NumberOfSides = 4
     ..sideLength = sideLength
 } -> {
@@ -503,7 +503,7 @@ Square{sideLength: f64, name: str} {
     area() -> (f: f64) {
         <- (sideLength * sideLength)
     }
-} ::NamedShape{name} {
+} :NamedShape{name} {
     simpleDescription() -> (s: str) {
         <- ("A square with sides of length {sideLength}.")
     }
@@ -836,7 +836,7 @@ for current in someObjects {
 ## Protocol
 ### Xs
 ```
-Nameable -> {
+Nameable :: {
     name() -> (s: str)
 }
 
@@ -894,7 +894,7 @@ Dog{} -> {
     name() -> (n: str) {
         <- ("Dog")
     }
-} :Weight {
+} Weight {
     getWeight() -> (w: i32) {
         <- (30)
     }
