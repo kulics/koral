@@ -103,7 +103,7 @@ If you only need to jump out of the current loop, use the `-> @` statement.
     System
 }
 
-example. -> {
+example -> {
     Main() -> () {
         arr := {1,2,3,4,5}
         @ i <- arr {

@@ -103,7 +103,7 @@ I := 0
     System
 }
 
-example. -> {
+example -> {
     Main() -> () {
         arr := {1,2,3,4,5}
         @ i <- arr {

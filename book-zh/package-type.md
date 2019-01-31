@@ -108,7 +108,7 @@ Peter := {
 
 例如：
 ```
-student {}-> {
+student{} -> {
     ...
     _GirlFirend: str # 第一个字符是 _ 的标识符是私有的
 }
@@ -152,11 +152,11 @@ prt( Peter.getGirlFirend() )
 
 这可以使用常规函数来实现，但是为什么不用包自带的构造函数呢？
 
-在定义的时候加入参数，并且写好构造函数的定义，这只需要在构造参数后追加 `{}` 语句就可以办到。
+在定义的时候加入参数，并且写好构造函数的定义，这只需要在构造参数后追加 `..{}` 语句就可以办到。
 
 例如：
 ```
-student{name: str, number: str} {
+student{name: str, number: str}..{
     ..Name = name
     ..Number = number
     # 计算得出班级
@@ -187,11 +187,11 @@ Peter := student{"Peter", "060233" <- Name="New Peter"}
 如果真的有更多构造需求，可以使用常规函数来完成这个需求。
 ## 挂载属性
 有时候我们并不希望总是使用构造的方法来使用某些数据和函数，这时候我们可以将属性挂载到包本身上。  
-通过 `id. -> {}` 来包裹我们需要的数据和函数，我们就能直接调用它们了。
+通过 `id -> {}` 来包裹我们需要的数据和函数，我们就能直接调用它们了。
 
 例如：
 ```
-student. -> {
+student -> {
     ShareData: i32 = 20
     shareFunction() -> () {
         prt("nothing")
@@ -208,7 +208,7 @@ student. -> {
 
 例如：
 ```
-student. {
+student..{
     ShareData = 128 
 } -> {
     ...
@@ -256,7 +256,7 @@ prt( Chen.Student.Name )
     System
 }
 
-example. -> {
+example -> {
     Main() -> () {
         a := S{ <- A=5,B=12}
         b := PKG{"hello", 64, a}
@@ -271,7 +271,7 @@ S{} -> {
     B := 0
 }
 
-PKG{x: str, y: i32, z: S} {
+PKG{x: str, y: i32, z: S}..{
     X = x
     Y = y
     Z = z
@@ -285,7 +285,7 @@ PKG{x: str, y: i32, z: S} {
     }
 }
 
-PKG. -> {
+PKG -> {
     M := 20
     N() -> () {
         prt(M)

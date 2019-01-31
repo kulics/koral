@@ -190,7 +190,7 @@ each1To10( (item: i32) -> () {
     System
 }
 
-example. -> {
+example -> {
     Main() -> () {
         A()
         B(1,2,3)

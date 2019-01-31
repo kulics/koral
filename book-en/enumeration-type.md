@@ -1,11 +1,11 @@
 # Enumeration
 Enumerations are a set of integer constants with independent names. Usually can be used to mark some types of business data, to facilitate the judgment process.
 ## Definition
-We only need to use the `id. -> ?{id id id id}` statement.
+We only need to use the `id -> ?{id id id id}` statement.
 
 E.g:
 ```
-Color. -> ?{
+Color -> ?{
     Red
     Green
     Blue
@@ -33,7 +33,7 @@ If necessary, we can also assign a value to a single identifier. If not specifie
 
 E.g:
 ```
-Number. -> ?{
+Number -> ?{
     a = 1   # 1
     b       # 2
     c = 1   # 1
@@ -49,20 +49,20 @@ Number. -> ?{
     System
 }
 
-example. -> {
+example -> {
     Main() -> () {
         prt( A.Z )
         prt( B.Z )
     }
 }
 
-A. -> ?{
+A -> ?{
     X 
     Y 
     Z
 }
 
-B. -> ?{
+B -> ?{
     X 
     Y=0 
     Z

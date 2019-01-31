@@ -6,11 +6,11 @@ The protocol specifies the methods and properties necessary to implement a parti
 
 Our package can introduce the protocol we need, just like signing an protocol, and then declare all the properties required by the protocol, so that we think the package signed the protocol.
 ## Definition
-We only need to use the symbol `id -> {}` to define a protocol.
+We only need to use the symbol `id :: {}` to define a protocol.
 
 E.g:
 ```
-protocol -> {
+protocol :: {
 }
 ```
 This is an empty protocol.
@@ -19,7 +19,7 @@ Next, let's design a difficult task that students need to accomplish ... homewor
 
 E.g:
 ```
-homeWork -> {
+homeWork :: {
     Count: i32
     do() -> ()
 }
@@ -140,7 +140,7 @@ Note that if the type can not be converted correctly, it will return a `nil` val
     System
 }
 
-example. -> {
+example -> {
     Main() -> () {
         S := B{}
         B.do()
@@ -148,7 +148,7 @@ example. -> {
     }
 }
 
-A -> {
+A :: {
     X: i32
     do() -> () {}
 }

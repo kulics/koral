@@ -1,11 +1,11 @@
 # 枚举
 枚举是一组具有独立名称整数常量。通常可以用来标记一些业务数据的类型，方便判断处理。
 ## 定义
-我们只需要使用`id. -> ?{id id id id}`语句即可。
+我们只需要使用`id -> ?{id id id id}`语句即可。
 
 例如：
 ```
-Color. -> ?{
+Color -> ?{
     Red
     Green
     Blue
@@ -33,7 +33,7 @@ c := randomColor()     # 获取一个随机颜色
 
 例如:
 ```
-Number. -> ?{
+Number -> ?{
     a = 1   # 1
     b       # 2
     c = 1   # 1
@@ -49,20 +49,20 @@ Number. -> ?{
     System
 }
 
-example. -> {
+example -> {
     Main() -> () {
         prt( A.Z )
         prt( B.Z )
     }
 }
 
-A. -> ?{
+A -> ?{
     X 
     Y 
     Z
 }
 
-B. -> ?{
+B -> ?{
     X 
     Y=0 
     Z

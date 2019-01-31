@@ -69,7 +69,7 @@ ListNumber := [i32]{}
 
 例如：
 ```
-Package<T>. -> {
+Package<T> -> {
     Count: T
 }
 
@@ -77,7 +77,7 @@ Func<T>(data: T) -> (data: T) {
     <- (data)
 }
 
-Protocol<T> -> {
+Protocol<T> :: {
     test<T>(in: T) -> () {}
 }
 

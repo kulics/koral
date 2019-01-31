@@ -138,7 +138,7 @@ nil # 空值
     System
 }
 
-example. -> {
+example -> {
     Main() -> () {
         a := 123
         b := a.toI64()
