@@ -269,6 +269,14 @@ namespace Compiler
             {
                 obj += Visit(context.annotationSupport());
             }
+            if (context.n != null)
+            {
+                obj += "protected ";
+            }
+            else
+            {
+                obj += "public ";
+            }
             // 异步
             if (context.t.Type == FlowRight)
             {
@@ -281,11 +289,11 @@ namespace Compiler
                 {
                     pout = Task;
                 }
-                obj += $"protected override async {pout} {id.text}";
+                obj += $"override async {pout} {id.text}";
             }
             else
             {
-                obj += "protected override " + Visit(context.parameterClauseOut()) + " " + id.text;
+                obj += "override " + Visit(context.parameterClauseOut()) + " " + id.text;
             }
 
             obj += Visit(context.parameterClauseIn()) + Wrap + BlockLeft + Wrap;
