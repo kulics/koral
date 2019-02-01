@@ -331,9 +331,7 @@ func getGasPrices() (float64, float64, float64) {
 ```
 ### Kotlin
 ```
-data class GasPrices(val a: Double, val b: Double,
-     val c: Double)
-fun getGasPrices() = GasPrices(3.59, 3.69, 3.79)
+fun getGasPrices() = Triple(3.59, 3.69, 3.79)
 ```
 ### Swift
 ```
@@ -841,7 +839,7 @@ Nameable :: {
 }
 
 f(x: Nameable) -> () {
-    print("Name is " + x.name())
+    prt("Name is " + x.name())
 }
 ```
 ### C#

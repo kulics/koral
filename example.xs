@@ -15,7 +15,7 @@ program..{
     Main() ~> () {
         prt("main function")
         # run test
-        testSharpType()
+        testType()
         testOperator()
         testString()
         testOptional()
@@ -64,19 +64,19 @@ program..{
         <- ("tuple")
     }
 
-    testSharpType() -> () {
-        i1 : \System.SByte = 1               # sbyte
-        i2 : \System.Int16 = 1               # short
-        i3 : \System.Int32 = 1               # int
-        i4 : \System.Int64 = 1               # long
-        u1 : \System.Byte = 1                # byte
-        u2 : \System.UInt16 = 1              # ushort
-        u3 : \System.UInt32 = 1              # uint
-        u4 : \System.UInt64 = 1              # ulong
-        f1 : \System.Single = 1              # float
-        f2 : \System.Double = 1              # double
-        char1 : \System.Char = 'a'           # char
-        string1 : \System.String = "123"     # string
+    testType() -> () {
+        i1: i8 = 1               # sbyte
+        i2: i16 = 1               # short
+        i3: i32 = 1               # int
+        i4: i64 = 1               # long
+        u1: u8 = 1                # byte
+        u2: u16 = 1              # ushort
+        u3: u32 = 1              # uint
+        u4: u64 = 1              # ulong
+        f1: f32 = 1              # float
+        f2: f64 = 1              # double
+        char1: chr = 'a'           # char
+        string1: str = "123"     # string
     }
 
     testOperator() -> () {
