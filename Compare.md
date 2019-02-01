@@ -894,7 +894,7 @@ Dog{} -> {
     name() -> (n: str) {
         <- ("Dog")
     }
-} Weight {
+} :Weight {
     getWeight() -> (w: i32) {
         <- (30)
     }

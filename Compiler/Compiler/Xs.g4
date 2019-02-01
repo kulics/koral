@@ -51,9 +51,9 @@ parameterClauseOut blockLeft (functionSupportStatement)* BlockRight end;
 // 定义包
 packageStatement:(annotationSupport)? id (templateDefine)? parameterClausePackage (packageInitStatement)? 
  ArrowRight blockLeft (packageSupportStatement)* BlockRight 
- (':' (extend packageOverrideStatement (protocolImplementStatement)* | protocolImplementStatement+) )?;
+ (extend packageOverrideStatement)? (protocolImplementStatement)* ;
 // 继承
-extend: type blockLeft expressionList? BlockRight;
+extend: ':' type blockLeft expressionList? BlockRight;
 // 入参
 parameterClausePackage : blockLeft parameter? (more parameter)*  BlockRight  ;
 // 包支持的语句
@@ -111,7 +111,7 @@ implementFunctionStatement
 |NewLine
 ;
 // 实现协议
-protocolImplementStatement: nameSpaceItem (templateCall)? blockLeft (protocolImplementSupportStatement)* BlockRight;
+protocolImplementStatement: ':' nameSpaceItem (templateCall)? blockLeft (protocolImplementSupportStatement)* BlockRight;
 // 控制实现
 implementControlStatement:(annotationSupport)? expression (Define expression|Declared type (Assign expression)?)
 (blockLeft (packageControlSubStatement)* BlockRight)? end;
@@ -469,7 +469,7 @@ Discard : '_'; // 匿名变量
 Comment : '##' .*? '##' -> skip; // 结构注释
 CommentLine : '#' .*? NewLine; // 行注释
 
-NewLine: '\r'? '\n'; 
+NewLine: '\n'; 
 //WS : (' ' |'\t' |'\n' |'\r' )+ -> skip ;
 
 WS   : [ \t]+ -> skip; // 空白， 后面的->skip表示antlr4在分析语言的文本时，符合这个规则的词法将被无视
