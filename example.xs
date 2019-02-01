@@ -361,7 +361,7 @@ app{} -> {
         <- (..)
     }
 } :program{} {  
-} protocol {
+} :protocol {
     B: i32 {
         get { 
             <- (_B) 

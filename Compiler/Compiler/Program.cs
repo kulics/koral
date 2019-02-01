@@ -51,6 +51,8 @@ namespace Compiler
                         var heByte = new byte[fsLen];
                         var r = fsRead.Read(heByte, 0, heByte.Length);
                         var input = Encoding.UTF8.GetString(heByte);
+                        // 移除平台差异
+                        input.Replace("\r", string.Empty);
 
                         var stream = new AntlrInputStream(input);
                         var lexer = new XsLexer(stream);
