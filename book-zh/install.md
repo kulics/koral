@@ -14,6 +14,6 @@
 `Xs` 需要使用部分语言库的功能，所以需要自行在项目中引用 `Library.dll` 来使用库。
 
 运行包:
-<https://github.com/kulics/xs/releases/tag/v0.27>
+<https://github.com/kulics/xs/releases/tag/v0.27.1>
 
 ### [下一章](basic-grammar.md)
