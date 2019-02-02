@@ -130,7 +130,7 @@ parameterClauseIn : '(' parameter? (more parameter)*  ')'  ;
 // 出参
 parameterClauseOut : '(' parameter? (more parameter)*  ')'  ;
 // 参数结构
-parameter :(annotationSupport)? id ':' type;
+parameter :(annotationSupport)? id ':' type ('=' expression)?;
 
 // 函数支持的语句
 functionSupportStatement:

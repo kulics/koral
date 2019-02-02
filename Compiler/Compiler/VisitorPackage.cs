@@ -110,32 +110,16 @@ namespace Compiler
         public override object VisitParameterClausePackage([NotNull] ParameterClausePackageContext context)
         {
             var obj = "( ";
-
-            var lastType = "";
-            var temp = new List<string>();
-            for (int i = context.parameter().Length - 1; i >= 0; i--)
+            for (int i = 0; i < context.parameter().Length; i++)
             {
                 Parameter p = (Parameter)Visit(context.parameter(i));
-                if (p.type != null)
+                if (i == 0)
                 {
-                    lastType = p.type;
+                    obj += $"{p.annotation} {p.type} {p.id} {p.value}";
                 }
                 else
                 {
-                    p.type = lastType;
-                }
-
-                temp.Add($"{p.annotation} {p.type} {p.id}");
-            }
-            for (int i = temp.Count - 1; i >= 0; i--)
-            {
-                if (i == temp.Count - 1)
-                {
-                    obj += temp[i];
-                }
-                else
-                {
-                    obj += $", {temp[i]}";
+                    obj += $", {p.annotation} {p.type} {p.id} {p.value}";
                 }
             }
 

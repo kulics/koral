@@ -258,7 +258,7 @@ program..{
         }
     }
 
-    testFunc(S: str) -> (out1: str, out2: i32) {
+    testFunc(S: str = "test") -> (out1: str, out2: i32) {
         S = S + "test"
         i := 1+1*3*9/8
         out2 := i + 5 + (i + 8)
@@ -449,7 +449,7 @@ testEnum -> ?{
     Err = -1
 }
 
-package{y: i32}..{
+package{y: i32 = 3}..{
     ..x = testStaticTemplate<i32>.const_data
     ..y = y
 } -> {
