@@ -96,7 +96,7 @@ namespace Compiler
             for (int i = context.parameter().Length - 1; i >= 0; i--)
             {
                 Parameter p = (Parameter)Visit(context.parameter(i));
-                temp.Add($"{p.annotation} {p.type} {p.id}");
+                temp.Add($"{p.annotation} {p.type} {p.id} {p.value}");
             }
             for (int i = temp.Count - 1; i >= 0; i--)
             {
@@ -133,7 +133,7 @@ namespace Compiler
                 for (int i = context.parameter().Length - 1; i >= 0; i--)
                 {
                     Parameter p = (Parameter)Visit(context.parameter(i));
-                    temp.Add($"{p.annotation} {p.type} {p.id}");
+                    temp.Add($"{p.annotation} {p.type} {p.id} {p.value}");
                 }
                 for (int i = temp.Count - 1; i >= 0; i--)
                 {
@@ -155,6 +155,7 @@ namespace Compiler
         {
             public string id { get; set; }
             public string type { get; set; }
+            public string value { get; set; }
             public string annotation { get; set; }
             public string permission { get; set; }
         }
@@ -168,6 +169,10 @@ namespace Compiler
             if (context.annotationSupport() != null)
             {
                 p.annotation = (string)Visit(context.annotationSupport());
+            }
+            if (context.expression() != null)
+            {
+                p.value = "=" + (Visit(context.expression()) as Result).text;
             }
             p.type = (string)Visit(context.type());
             return p;
