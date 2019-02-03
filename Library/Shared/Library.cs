@@ -1,4 +1,7 @@
-﻿namespace Library
+﻿using System;
+using System.Threading.Tasks;
+
+namespace Library
 {
     public static partial class lib
     {
@@ -19,5 +22,10 @@
         public static string rd() => cmd.rd();
 
         public static void clr() => cmd.clr();
+
+        public static async void go(Func<Task> @do)
+        {
+            await @do();
+        }
     }
 }
