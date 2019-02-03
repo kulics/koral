@@ -23,9 +23,6 @@ namespace Library
 
         public static void clr() => cmd.clr();
 
-        public static async void go(Func<Task> @do)
-        {
-            await @do();
-        }
+        public static async Task go(Func<Task> @do) => await @do();
     }
 }
