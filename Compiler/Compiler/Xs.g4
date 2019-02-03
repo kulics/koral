@@ -38,7 +38,7 @@ namespaceVariableStatement
 ;
 // 命名空间变量
 namespaceVariableStatement:(annotationSupport)? expression (Define expression|Declared type (Assign expression)?) 
-(blockLeft (packageControlSubStatement)* BlockRight)? end;
+(blockLeft (packageControlSubStatement)+ BlockRight)? end;
 // 命名空间常量
 namespaceConstantStatement: (annotationSupport)? id (Declared type)? expression end;
 // 命名空间函数
@@ -70,7 +70,7 @@ packageOverrideFunctionStatement:(annotationSupport)? (n=':')? id parameterClaus
 parameterClauseOut blockLeft (functionSupportStatement)* BlockRight end;
 // 定义变量
 packageVariableStatement:(annotationSupport)? expression (Define expression|Declared type (Assign expression)?)
-(blockLeft (packageControlSubStatement )* BlockRight)? end;
+(blockLeft (packageControlSubStatement )+ BlockRight)? end;
 // 定义子方法
 packageControlSubStatement: id (blockLeft (functionSupportStatement)+ BlockRight)? end;
 // 包重载
@@ -111,7 +111,7 @@ implementFunctionStatement
 protocolImplementStatement: ':' nameSpaceItem (templateCall)? blockLeft (protocolImplementSupportStatement)* BlockRight;
 // 控制实现
 implementControlStatement:(annotationSupport)? expression (Define expression|Declared type (Assign expression)?)
-(blockLeft (packageControlSubStatement)* BlockRight)? end;
+(blockLeft (packageControlSubStatement)+ BlockRight)? end;
 // 函数实现
 implementFunctionStatement:(annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) NewLine*
 parameterClauseOut blockLeft (functionSupportStatement)* BlockRight end;
