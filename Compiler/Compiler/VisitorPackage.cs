@@ -163,6 +163,10 @@ namespace Compiler
                     {
                         obj += $"get {{ return _{r1.text}; }}";
                     }
+                    if (r1.isVariable && !record.ContainsKey("set"))
+                    {
+                        obj += $"set {{ _{r1.text} = value; }}";
+                    }
                 }
                 obj += BlockRight + Wrap;
             }
@@ -378,6 +382,10 @@ namespace Compiler
                     if (!record.ContainsKey("get"))
                     {
                         obj += $"get {{ return _{r1.text}; }}";
+                    }
+                    if (r1.isVariable && !record.ContainsKey("set"))
+                    {
+                        obj += $"set {{ _{r1.text} = value; }}";
                     }
                 }
                 obj += BlockRight + Wrap;

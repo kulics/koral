@@ -47,7 +47,11 @@ program..{
         rd()
     }
 
-    StaticX := 0
+    StaticX := 0 {
+        get {
+            <- (_StaticX)
+        }
+    }
     StaticY := "hello" {
         get { 
             <- (_StaticY) 
