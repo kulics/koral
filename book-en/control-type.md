@@ -17,7 +17,7 @@ If we want to set a get operation, we can add `{ ctrl{} }` later to define.
 
 E.g:
 ```
-Number: i32 {
+number: i32 {
     get {           # means get, equivalent to getter in other languages
         <- (7)      # only returns 7
     }
@@ -53,7 +53,7 @@ Number: i32 {
 }
 ```
 
-Note that the setting method cannot exist separately and must exist at the same time as the getter method.
+Note that the variables need to declare both `get` and `set` methods, the invariables only can declare `get` method.
 
 A complete example of reading and writing is as follows:
 ```
@@ -65,6 +65,20 @@ Number :i32 {
     }
     set {
         _Number = value  # value represents the value of the input
+    }
+}
+```
+
+In particular, if we initialize `Number`, the compiler automatically generates the corresponding `_Number` private variable, and then we can omit the step of defining another variable.
+
+E.g:
+```
+Number: i32 = 0 {
+    get {
+        <- (_Number)
+    }
+    set {
+        _Number = value 
     }
 }
 ```
