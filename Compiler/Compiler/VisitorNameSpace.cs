@@ -1,4 +1,5 @@
-﻿using Antlr4.Runtime.Misc;
+﻿using System.Collections.Generic;
+using Antlr4.Runtime.Misc;
 using static Compiler.XsParser;
 
 namespace Compiler
@@ -320,15 +321,25 @@ namespace Compiler
             {
                 obj += Visit(context.annotationSupport());
             }
-            if (context.namespaceControlSubStatement().Length > 0)
+            if (context.packageControlSubStatement().Length > 0)
             {
-
-                obj += $"{r1.permission} static {typ} {r1.text} {{";
-                foreach (var item in context.namespaceControlSubStatement())
+                obj += $"{r1.permission} static {typ} {r1.text + BlockLeft}";
+                var record = new Dictionary<string, bool>();
+                foreach (var item in context.packageControlSubStatement())
                 {
-                    obj += Visit(item);
+                    var temp = (Visit(item) as Result);
+                    obj += temp.text;
+                    record[temp.data as string] = true;
                 }
-                obj += $"}} {Wrap}";
+                if (r2 != null)
+                {
+                    obj = $"private static {typ} _{r1.text} = {r2.text}; {Wrap}" + obj;
+                    if (!record.ContainsKey("get"))
+                    {
+                        obj += $"get {{ return _{r1.text}; }}";
+                    }
+                }
+                obj += BlockRight + Wrap;
             }
             else
             {
@@ -360,54 +371,39 @@ namespace Compiler
             return obj;
         }
 
-        public override object VisitNamespaceControlSubStatement([NotNull] NamespaceControlSubStatementContext context)
+        public (string, string) GetControlSub(string id)
         {
-            var obj = "";
-            var id = "";
-            id = GetControlSub(context.id().GetText());
-            if (context.functionSupportStatement().Length > 0)
-            {
-                obj += id + BlockLeft;
-                foreach (var item in context.functionSupportStatement())
-                {
-                    obj += Visit(item);
-                }
-                obj += BlockRight + Wrap;
-            }
-            else
-            {
-                obj += id + ";";
-            }
-
-            return obj;
-        }
-
-        public string GetControlSub(string id)
-        {
+            var typ = "";
             switch (id)
             {
                 case "get":
                     id = " get ";
+                    typ = "get";
                     break;
                 case "set":
                     id = " set ";
+                    typ = "set";
                     break;
                 case "_get":
                     id = " private get ";
+                    typ = "get";
                     break;
                 case "_set":
                     id = " private set ";
+                    typ = "set";
                     break;
                 case "add":
                     id = " add ";
+                    typ = "add";
                     break;
                 case "remove":
                     id = " remove ";
+                    typ = "remove";
                     break;
                 default:
                     break;
             }
-            return id;
+            return (id,typ);
         }
     }
 }

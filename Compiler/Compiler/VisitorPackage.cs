@@ -149,9 +149,20 @@ namespace Compiler
             if (context.packageControlSubStatement().Length > 0)
             {
                 obj += $"{r1.permission} {typ} {r1.text + BlockLeft}";
+                var record = new Dictionary<string, bool>();
                 foreach (var item in context.packageControlSubStatement())
                 {
-                    obj += Visit(item);
+                    var temp = (Visit(item) as Result);
+                    obj += temp.text;
+                    record[temp.data as string] = true;
+                }
+                if (r2 != null)
+                {
+                    obj = $"private {typ} _{r1.text} = {r2.text}; {Wrap}" + obj;
+                    if (!record.ContainsKey("get"))
+                    {
+                        obj += $"get {{ return _{r1.text}; }}";
+                    }
                 }
                 obj += BlockRight + Wrap;
             }
@@ -189,7 +200,8 @@ namespace Compiler
         {
             var obj = "";
             var id = "";
-            id = GetControlSub(context.id().GetText());
+            var typ = "";
+            (id, typ) = GetControlSub(context.id().GetText());
             if (context.functionSupportStatement().Length > 0)
             {
                 obj += id + BlockLeft;
@@ -204,7 +216,7 @@ namespace Compiler
                 obj += id + Terminate;
             }
 
-            return obj;
+            return new Result { text = obj, data = typ };
         }
 
         public override object VisitPackageFunctionStatement([NotNull] PackageFunctionStatementContext context)
@@ -353,9 +365,20 @@ namespace Compiler
             if (context.packageControlSubStatement().Length > 0)
             {
                 obj += $"{r1.permission} {typ} {r1.text + BlockLeft}";
+                var record = new Dictionary<string, bool>();
                 foreach (var item in context.packageControlSubStatement())
                 {
-                    obj += Visit(item);
+                    var temp = (Visit(item) as Result);
+                    obj += temp.text;
+                    record[temp.data as string] = true;
+                }
+                if (r2 != null)
+                {
+                    obj = $"private {typ} _{r1.text} = {r2.text}; {Wrap}" + obj;
+                    if (!record.ContainsKey("get"))
+                    {
+                        obj += $"get {{ return _{r1.text}; }}";
+                    }
                 }
                 obj += BlockRight + Wrap;
             }

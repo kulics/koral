@@ -48,17 +48,16 @@ program..{
     }
 
     StaticX := 0
-    StaticY := "hello"
-    readonlyZ := "1024"
-    StaticG: i64
-    StaticP: str {
+    StaticY := "hello" {
         get { 
-            <- (StaticY) 
+            <- (_StaticY) 
         }
         set { 
-            StaticY = value 
+            _StaticY = value 
         }
     }
+    readonlyA := "1024"
+    StaticG: i64
 
     testTuple(i: i32) -> (v: str) {
         <- ("tuple")
@@ -413,17 +412,13 @@ testImplementTemplate{} -> {
 }
 
 program{} -> {
-    Name: str?
-    Running: bl?
-
-    Property: str? {
-        get { 
-            <- (Name) 
-        }
+    Name: str? = "name" {
         set { 
-            Name = value 
+            _Name = value 
         }
     }
+
+    Running: bl?
 }
 
 protocol :: {

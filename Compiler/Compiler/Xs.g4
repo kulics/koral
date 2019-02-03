@@ -31,7 +31,6 @@ ArrowRight NewLine* blockLeft (packageStaticSupportStatement)* BlockRight;
 // 静态包支持的语句
 packageStaticSupportStatement:
 namespaceVariableStatement
-|namespaceControlSubStatement
 |namespaceFunctionStatement
 |namespaceConstantStatement
 |CommentLine
@@ -39,11 +38,9 @@ namespaceVariableStatement
 ;
 // 命名空间变量
 namespaceVariableStatement:(annotationSupport)? expression (Define expression|Declared type (Assign expression)?) 
-(blockLeft (namespaceControlSubStatement )* BlockRight)? end;
+(blockLeft (packageControlSubStatement)* BlockRight)? end;
 // 命名空间常量
 namespaceConstantStatement: (annotationSupport)? id (Declared type)? expression end;
-// 定义子方法
-namespaceControlSubStatement: id blockLeft (functionSupportStatement)* BlockRight end?;
 // 命名空间函数
 namespaceFunctionStatement:(annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) NewLine*
 parameterClauseOut blockLeft (functionSupportStatement)* BlockRight end;
