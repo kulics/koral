@@ -288,9 +288,9 @@ callAwait: FlowLeft expression; // 异步调用
 
 array : '{|' (expression (more expression)*)? '|}'; // 数组
 
-list : '{' (expression (more expression)*)? '}'; // 列表
+list : '{' expression (more expression)* '}'; // 列表
 
-dictionary :  '{' (dictionaryElement (more dictionaryElement)*)? '}'; // 字典
+dictionary :  '{' dictionaryElement (more dictionaryElement)* '}'; // 字典
 
 dictionaryElement: '[' expression ']' expression; // 字典元素
 
