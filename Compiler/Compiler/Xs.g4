@@ -146,7 +146,7 @@ functionSupportStatement:
 | variableStatement
 | variableDeclaredStatement
 | assignStatement
-| execFuncStatement
+| expressionStatement
 | CommentLine
 | NewLine
 ;
@@ -205,7 +205,7 @@ variableDeclaredStatement: expression Declared type end;
 // 赋值
 assignStatement: expression assign expression end;
 
-execFuncStatement: FlowLeft? (expression call|('\\' id)+ call)? callFunc end;
+expressionStatement: expression end;
 
 // 基础表达式
 primaryExpression: 
@@ -220,6 +220,7 @@ id (templateCall)?
 expression:
 linq // 联合查询
 | primaryExpression
+| callBase // 调用继承
 | callSelf // 调用自己
 | callNameSpace // 调用命名空间
 | callFunc // 函数调用
@@ -243,6 +244,7 @@ linq // 联合查询
 | expression op=(Judge|Check) // 可空判断
 ;
 
+callBase: '...' callExpression;
 callSelf: '..' callExpression;
 callNameSpace: ('\\' id)+ call NewLine? callExpression;
 

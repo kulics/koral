@@ -50,27 +50,10 @@ namespace Compiler
             return context.op.Text;
         }
 
-        public override object VisitExecFuncStatement([NotNull] ExecFuncStatementContext context)
+        public override object VisitExpressionStatement([NotNull] ExpressionStatementContext context)
         {
-            var obj = ((Result)Visit(context.callFunc())).text;
-            if (context.expression() != null)
-            {
-                obj = ((Result)Visit(context.expression())).text + "." + obj;
-            }
-            else if (context.id().Length > 0)
-            {
-                var id = "";
-                foreach (var item in context.id())
-                {
-                    id += (Visit(item) as Result).text + ".";
-                }
-                obj = id + obj;
-            }
-            if (context.FlowLeft() != null)
-            {
-                obj = "await " + obj;
-            }
-            return obj + Terminate + Wrap;
+            var r = (Result)Visit(context.expression());
+            return r.text + Terminate + Wrap;
         }
 
         public override object VisitExpression([NotNull] ExpressionContext context)
@@ -129,6 +112,19 @@ namespace Compiler
             {
                 r = (Result)Visit(context.GetChild(0));
             }
+            return r;
+        }
+
+        public override object VisitCallBase([NotNull] CallBaseContext context)
+        {
+            var r = new Result
+            {
+                data = "var"
+            };
+            var e1 = "base";
+            var op = ".";
+            var e2 = (Result)Visit(context.GetChild(1));
+            r.text = e1 + op + e2.text;
             return r;
         }
 
