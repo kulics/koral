@@ -10,14 +10,14 @@ namespace Compiler
         {
             var obj = "";
             var ns = (Namespace)Visit(context.exportStatement());
+            // import library
+            obj += $"using Library;{Wrap}using static Library.lib;{Wrap}";
+            obj += ns.imports + Wrap;
             if (context.annotationSupport() != null)
             {
                 obj += Visit(context.annotationSupport());
             }
             obj += $"namespace {ns.name + Wrap + BlockLeft + Wrap}";
-            // import library
-            obj += $"using Library;{Wrap}using static Library.lib;{Wrap}";
-            obj += ns.imports + Wrap;
 
             var content = "";
             foreach (var item in context.namespaceSupportStatement())
