@@ -6,7 +6,7 @@ statement: (annotationSupport)? CommentLine*
 exportStatement CommentLine* NewLine* namespaceSupportStatement*;
 
 // 导出命名空间
-exportStatement: '\\' nameSpace blockLeft (importStatement)* BlockRight end;
+exportStatement: '\\' nameSpace blockLeft (importStatement|NewLine)* BlockRight end;
 
 // 导入命名空间
 importStatement: (annotationSupport)? nameSpace (call NewLine? id)? end;
@@ -116,7 +116,7 @@ implementControlStatement:(annotationSupport)? expression (Define expression|Dec
 implementFunctionStatement:(annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) NewLine*
 parameterClauseOut blockLeft (functionSupportStatement)* BlockRight end;
 // 事件实现
-implementEventStatement: id 'event' nameSpaceItem end;
+implementEventStatement: id ':' nameSpaceItem '!!' end;
 // 函数
 functionStatement:id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) NewLine* parameterClauseOut blockLeft
 (functionSupportStatement)* BlockRight end;
@@ -272,7 +272,7 @@ callFunc: id (templateCall)? tuple; // 函数调用
 
 callElement : id op=(Judge|Check)? '[' (expression | slice) ']';
 
-callPkg: type '{' expressionList? ( ArrowLeft (pkgAssign|listAssign|dictionaryAssign))? '}'; // 新建包
+callPkg: type '{' expressionList? ( ArrowLeft NewLine? (pkgAssign|listAssign|dictionaryAssign))? NewLine? '}'; // 新建包
 
 getType: Judge '(' (expression|':' type) ')';
 
