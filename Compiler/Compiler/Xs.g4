@@ -241,6 +241,7 @@ linq // 联合查询
 | expression judge expression // 判断型表达式
 | expression add expression // 和型表达式
 | expression mul expression // 积型表达式
+| expression pow expression // 幂型表达式
 | expression op=(Judge|Check) // 可空判断
 ;
 
@@ -404,6 +405,7 @@ judge : op=('|' | '&' | '==' | '~=' | '<' | '>' | '<=' | '>=');
 assign : op=(Assign | '+=' | '-=' | '*=' | '/=' | '%=');
 add : op=('+' | '-');
 mul : op=('*' | '/' | '%');
+pow : op=('**' | '//' | '%%');
 call : op='.';
 wave : op='~';
 
