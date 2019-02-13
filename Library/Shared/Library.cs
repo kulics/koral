@@ -24,5 +24,11 @@ namespace Library
         public static void clr() => cmd.clr();
 
         public static async Task go(Func<Task> @do) => await @do();
+
+        public static double pow(double a, double b) => Math.Pow(a, b);
+
+        public static double root(double a, double b) => Math.Pow(a, 1/b);
+
+        public static double log(double a, double b) => Math.Log(a, b);
     }
 }

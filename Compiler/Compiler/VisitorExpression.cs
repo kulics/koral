@@ -95,8 +95,29 @@ namespace Compiler
                     }
                     else
                     {
-                        r.data = i32;
+                        r.data = f64;
                     }
+                }
+                else if (context.GetChild(1).GetType() == typeof(PowContext))
+                {
+                    // todo 如果左右部署number类型，报错
+                    r.data = f64;
+                    switch (op)
+                    {
+                        case "**":
+                            op = "pow";
+                            break;
+                        case "//":
+                            op = "root";
+                            break;
+                        case "%%":
+                            op = "log";
+                            break;
+                        default:
+                            break;
+                    }
+                    r.text = $"{op}({e1.text}, {e2.text})";
+                    return r;
                 }
                 r.text = e1.text + op + e2.text;
             }
@@ -213,15 +234,11 @@ namespace Compiler
             return context.op.Text;
         }
 
-        public override object VisitAdd([NotNull] AddContext context)
-        {
-            return context.op.Text;
-        }
+        public override object VisitAdd([NotNull] AddContext context) => context.op.Text;
 
-        public override object VisitMul([NotNull] MulContext context)
-        {
-            return context.op.Text;
-        }
+        public override object VisitMul([NotNull] MulContext context) => context.op.Text;
+
+        public override object VisitPow([NotNull] PowContext context) => context.op.Text;
 
         public override object VisitPrimaryExpression([NotNull] PrimaryExpressionContext context)
         {
