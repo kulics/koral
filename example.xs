@@ -69,16 +69,16 @@ program..{
 
     testType() -> () {
         i1: i8 = 1               # sbyte
-        i2: i16 = 1               # short
-        i3: i32 = 1               # int
-        i4: i64 = 1               # long
-        u1: u8 = 1                # byte
+        i2: i16 = 1              # short
+        i3: i32 = 1              # int
+        i4: i64 = 1              # long
+        u1: u8 = 1               # byte
         u2: u16 = 1              # ushort
         u3: u32 = 1              # uint
         u4: u64 = 1              # ulong
         f1: f32 = 1              # float
         f2: f64 = 1              # double
-        char1: chr = 'a'           # char
+        char1: chr = 'a'         # char
         string1: str = "123"     # string
     }
 
@@ -93,6 +93,9 @@ program..{
         B *= 2
         B /= 2
         B %= 5
+        prt("2 pow 2 = ", 2 ** 2) 
+        prt("4 extract root for 2 = ", 4 // 2) 
+        prt("4 log with base 2 = ", 4 %% 2) 
         I += " mark string i32 {B} "
         C := false
         C = ~C
