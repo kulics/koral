@@ -15,6 +15,9 @@ C = a - b   # - subtract
 C = a * b   # * multiply
 C = a / b   # / divide
 C = a % b   # % take the remainder, meaning the remainder after the divisibility, the result here is 2
+C = a ** b  # ** power
+C = a // b  # // root
+C = a %% b  # %% logarithm
 ```
 In addition to numbers, there are other types that support arithmetic operations, such as `str`, which can be used to combine two paragraphs of text.
 

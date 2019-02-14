@@ -5,11 +5,11 @@
 
 显而易见，这个负责包装数据的功能，就是包。
 ## 定义
-我们可以使用 `id{} -> {}` 语句来定义一个什么都没有的包。
+我们可以使用 `id() -> {}` 语句来定义一个什么都没有的包。
 
 例如：
 ```
-package{} -> {
+package() -> {
 }
 ```
 当然，我们更希望的是能包装几个数据，例如一个具有名称、学号、班级、年级属性的学生。
@@ -17,7 +17,7 @@ package{} -> {
 
 例如：
 ```
-student{} -> {
+student() -> {
     Name: str = ""
     Number: str = ""
     Class: i32 = 0
@@ -31,17 +31,15 @@ student{} -> {
 这非常像是我们现实中将不同的零件拼装在一起包装成一个整体的概念，因此它就被称之为包。
 
 ## 创建
-那么我们怎么创建一个新的包呢？老样子，我们所有的类型都可以使用类型创建语法`type{}`来创建。
+那么我们怎么创建一个新的包呢？老样子，我们所有的类型都可以使用构造函数`type()`来创建。
 
 例如：
 ```
-Peter := student{}
+Peter := student()
 ```
 这样便创建了一个 `Peter` 标识符，这个学生的所有属性都根据定义中设置的那样被初始化为 `"","",0,0` 。
 
-让我们回顾一下，我们的基础类型、集合类型都可以使用类型创建语法来创建，实际上它们都是包.
-
-只要是由包扩展出来的类型，都可以一样使用创建语法来创建，这在这门语言里是一个定则。
+让我们回顾一下，我们的基础类型、集合类型都可以使用构造函数来创建，实际上它们都是包.
 
 ## 使用属性
 现在我们已经有了一个 `Peter` ，我们要怎么使用里面的属性呢？
@@ -63,11 +61,12 @@ Peter.Grade = 6
 ```
 ## 简化创建
 像上面那样创建一个新的包，再逐个装填数据非常麻烦，我们可以使用简化语法来配置。
-只要在创建语法后面加上`<-`就能使用`key=value`方式来快捷装填数据了，多个数据用`,`隔开。
+只要在创建语法后面加上`{}`就能使用`key=value`方式来快捷装填数据了，多个数据用`,`隔开。  
+当构造函数为空时括号可以省略。
 
 例如：
 ```
-Peter := student{ <-
+Peter := student() {
     Name="Peter", Number="060233",
     Class=2, Grade=6
 }
@@ -79,8 +78,8 @@ Peter := student{ <-
 
 例如：
 ```
-Array := [i32]{ <- 1, 2, 3, 4, 5 }
-Dictionary := [[str]i32]{ <- ["1"]1, ["2"]2, ["3"]3 }
+Array := [i32]{ 1, 2, 3, 4, 5 }
+Dictionary := [[str]i32]{ ["1"]1, ["2"]2, ["3"]3 }
 ```
 ## 匿名包
 如果我们只想直接包裹某些数据使用，而不是先定义包再使用，像匿名函数那样可以吗？
@@ -108,7 +107,7 @@ Peter := {
 
 例如：
 ```
-student{} -> {
+student() -> {
     ...
     _GirlFirend: str # 第一个字符是 _ 的标识符是私有的
 }
@@ -124,7 +123,7 @@ student{} -> {
 
 例如：
 ```
-student{} -> {
+student() -> {
     ...
     getGirlFirend() -> (name: str) {
         <- (.._GirlFirend)
@@ -152,11 +151,11 @@ prt( Peter.getGirlFirend() )
 
 这可以使用常规函数来实现，但是为什么不用包自带的构造函数呢？
 
-在定义的时候加入参数，并且写好构造函数的定义，这只需要在构造参数后追加 `..{}` 语句就可以办到。
+在定义的时候加入参数，并且写好构造函数的定义，这只需要在构造参数后追加 `{}` 语句就可以办到。
 
 例如：
 ```
-student{name: str, number: str}..{
+student(name: str, number: str) {
     ..Name = name
     ..Number = number
     # 计算得出班级
@@ -171,15 +170,8 @@ student{name: str, number: str}..{
 
 例如：
 ```
-Peter := student{"Peter", "060233"}
+Peter := student("Peter", "060233")
 prt(Peter.Class)     # 打印出 2
-```
-
-如果需要同时使用构造函数和简化创建，可以这样做。
-
-例如：
-```
-Peter := student{"Peter", "060233" <- Name="New Peter"}
 ```
 
 需要注意的是，一个包只能支持一个构造函数，我们建议保持构造的简单性，一个稳定的包更容易被调用者放心使用，
@@ -208,7 +200,7 @@ student -> {
 
 例如：
 ```
-student..{
+student {
     ShareData = 128 
 } -> {
     ...
@@ -219,7 +211,7 @@ student..{
 
 例如：
 ```
-chineseStudent{} -> {
+chineseStudent() -> {
     Name: str = ""
     Number: str = ""
     Class: i32 = 0
@@ -233,8 +225,8 @@ chineseStudent{} -> {
 
 例如：
 ```
-chineseStudent{} -> {
-    Student := student{}   # 将学生属性包含其中
+chineseStudent() -> {
+    Student := student()   # 将学生属性包含其中
     Kungfu := false        # 不会功夫
 }
 ```
@@ -242,7 +234,7 @@ chineseStudent{} -> {
 
 例如：
 ```
-Chen := chinesestudent{}
+Chen := chineseStudent()
 prt( Chen.Student.Name )
 # 当然，因为没有赋值，所以什么也没有输出
 ```
@@ -258,20 +250,20 @@ prt( Chen.Student.Name )
 
 example -> {
     Main() -> () {
-        a := S{ <- A=5,B=12}
-        b := PKG{"hello", 64, a}
+        a := S{A=5,B=12}
+        b := PKG("hello", 64, a)
         prt( b.Z.A )
         prt( b.Print() )
         PKG.N()
     }
 }
 
-S{} -> {
+S() -> {
     A := 0
     B := 0
 }
 
-PKG{x: str, y: i32, z: S}..{
+PKG(x: str, y: i32, z: S) {
     X = x
     Y = y
     Z = z

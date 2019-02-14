@@ -36,7 +36,7 @@ We can implement this protocol by using the `:protocol {}` statement after the p
 
 E.g:
 ```
-student{} -> {
+student() -> {
     ...
 } :homeWork {
     Count: i32
@@ -60,7 +60,7 @@ With the protocol included, we can use the student bundle that owns the protocol
 
 E.g:
 ```
-Peter := student{ <- Count=999999 }
+Peter := student{ Count=999999 }
 prt( Peter.Count )
 # print 999999, too much
 Peter.do()
@@ -79,9 +79,9 @@ Now we can create a wide variety of students, all of whom follow the same protoc
 E.g:
 ```
 # create three different types of student packages
-StudentA := chinesestudent{}
-StudentB := americastudent{}
-StudentC := japanstudent{}
+StudentA := chineseStudent{}
+StudentB := americaStudent{}
+StudentC := japanStudent{}
 # let them do homework separately
 StudentA.do()
 StudentB.do()
@@ -153,7 +153,7 @@ A :: {
     do() -> () {}
 }
 
-B{} -> {
+B() -> {
     Y := 5
 } :A {
     X := 0

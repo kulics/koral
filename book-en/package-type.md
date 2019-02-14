@@ -5,11 +5,11 @@ Therefore, we need a feature that can wrap data of different attributes to bette
 
 Obviously, this feature for package data, called package.
 ## Definition
-We can use the `id{} -> {}` statement to define a package that has nothing.
+We can use the `id() -> {}` statement to define a package that has nothing.
 
 E.g:
 ```
-package{} -> {
+package() -> {
 }
 ```
 Of course, we hope more is to be able to pack a few data, for example, a name, student number, class, grade attributes of students.
@@ -17,7 +17,7 @@ We can define these data in the same way we define normal identifiers.
 
 E.g:
 ```
-student{} -> {
+student() -> {
     Name: str = ""
     Number: str = ""
     Class: i32 = 0
@@ -31,17 +31,15 @@ Unlike our original base type can only store one data, the student package can s
 This is very much like the concept of assembling different parts together in our reality as a whole, so it is called a package.
 
 ## Create
-So how do we create a new package? As always, all of our types can be created using the type-creation syntax.
+So how do we create a new package? As always, all of our types can be created using the construct function `type()`.
 
 E.g:
 ```
-Peter := student{}
+Peter := student()
 ```
 This create a `Peter` identifier. All the properties of this student are initialized to `"", "", 0,0` as set in the definition.
 
 Let us recall that our base type, collection types can be created using the type-creation syntax, in fact they are all packages.
-
-As long as it is a type that is extended by a package, it can be created in the same way as the create syntax, which is a rule in this language.
 
 ## Using Property
 Now that we have a `Peter`, how do we use the attributes inside?
@@ -53,7 +51,8 @@ E.g:
 prt(Peter.name)
 # print the name of a student
 ```
-To change the value of the property is the same, it is equivalent to a nested identifier. We can directly use the assignment statement to change the value.
+To change the value of the property is the same, it is equivalent to a nested identifier. We can directly use the assignment statement to change the value.  
+Parentheses can be omitted when the constructor is empty.
 
 E.g:
 ```
@@ -64,11 +63,11 @@ Peter.Grade = 6
 ```
 ## Simplify creation
 Creating a new package like the one above, and then loading the data one by one, is very cumbersome. We can use a simplified syntax to configure.
-Just add `<-` to the creation grammar to use the `key=value` method to quickly load data. Separate multiple data with `,`.
+Just add `{}` to the creation grammar to use the `key=value` method to quickly load data. Separate multiple data with `,`.
 
 E.g:
 ```
-Peter := student{ <-
+Peter := student() {
     Name="Peter", Number="060233",
     Class=2, Grade=6
 }
@@ -80,8 +79,8 @@ Similarly, the way the collection is created is actually a simplified creation, 
 
 E.g:
 ```
-Array := [i32]{ <- 1, 2, 3, 4, 5 }
-Dictionary := [[str]i32]{ <- ["1"]1, ["2"]2, ["3"]3 }
+Array := [i32]{ 1, 2, 3, 4, 5 }
+Dictionary := [[str]i32]{ ["1"]1, ["2"]2, ["3"]3 }
 ```
 ## Anonymous Package
 If we only want to wrap some data directly, instead of defining the package first and then using it, is it like an anonymous function?
@@ -108,7 +107,7 @@ We can define private properties to store properties that we do not want to be a
 
 E.g:
 ```
-student{} -> {
+student() -> {
     ...
     _GirlFirend: str    # The identifier beginning with this '_' is private
 }
@@ -124,7 +123,7 @@ If we need to make this package come with a function that makes it easy to manip
 
 E.g:
 ```
-student{} -> {
+student() -> {
     ...
     getGirlFirend() -> (name: str) {
         <- (.._GirlFirend)
@@ -152,11 +151,11 @@ We hope that given a name and student number, class and grade information will b
 
 This can be achieved using regular functions, but why not use the built-in constructor?
 
-Add parameters at the time of definition, and write the definition of the constructor, which only needs the `..{}` statement behind the parameters.
+Add parameters at the time of definition, and write the definition of the constructor, which only needs the `{}` statement behind the parameters.
 
 E.g:
 ```
-student{name: str, number: str}..{
+student(name: str, number: str) {
     ..Name = name
     ..Number = number
     # calculate the class
@@ -171,15 +170,8 @@ This gives us a package with constructors, and when we create a new student, cla
 
 E.g:
 ```
-Peter := student{"Peter", "060233"}
+Peter := student("Peter", "060233")
 prt(Peter.Class)     # print out 2
-```
-
-If you need to use both constructors and simplified creations, you can do so.
-
-E.g:
-```
-Peter := student{"Peter", "060233" <- Name="New Peter"}
 ```
 
 It should be noted that a package can only support one constructor, we recommend to maintain the simplicity of the structure, a stable package easier to be used by the caller,
@@ -219,7 +211,7 @@ Now let us play our imagination, we want a customized package for Chinese studen
 
 E.g:
 ```
-chineseStudent {}-> {
+chineseStudent() -> {
     Name: str = ""
     Number: str = ""
     Class: i32 = 0
@@ -233,8 +225,8 @@ We need to use a combination of this feature, but not so complicated, just creat
 
 E.g:
 ```
-chineseStudent{} -> {
-    Student := student{}   # include student attributes in it
+chineseStudent() -> {
+    Student := student()   # include student attributes in it
     Kungfu := false        # no kung fu
 }
 ```
@@ -242,7 +234,7 @@ This way you can use generic attributes via student attributes in Chinese studen
 
 E.g:
 ```
-Chen := chinesestudent{}
+Chen := chineseStudent()
 prt(Chen.Student.Name)
 # of course, since there is no assignment, nothing is output
 ```
@@ -258,20 +250,20 @@ By combining layers after layer, you are free to assemble whatever you want to d
 
 example -> {
     Main() -> () {
-        a := S{ <- A=5,B=12}
-        b := PKG{"hello", 64, a}
+        a := S{A=5,B=12}
+        b := PKG("hello", 64, a)
         prt( b.Z.A )
         prt( b.Print() )
         PKG.N()
     }
 }
 
-S{} -> {
+S() -> {
     A := 0
     B := 0
 }
 
-PKG{x: str, y: i32, z: S}..{
+PKG(x: str, y: i32, z: S) {
     X = x
     Y = y
     Z = z

@@ -90,7 +90,7 @@ For packages that implement the automatic release protocol, we can use the '!= '
 
 E.g:
 ``` 
-! res := FileResource{"/test.xs"} {
+! res := FileResource("/test.xs") {
     ...
 }
 ...
@@ -112,8 +112,8 @@ example -> {
             !(ex)
         }
 
-        x := Defer{}
-        ! y := Defer{} {
+        x := Defer()
+        ! y := Defer() {
             x.content = "defer"
             prt(x.content)
         } e:Exception {
@@ -126,7 +126,7 @@ example -> {
     }
 }
 
-Defer{} -> {
+Defer() -> {
     content: str
 } :IDisposable {
     Dispose() -> () {
