@@ -6,7 +6,7 @@
     System\ComponentModel\DataAnnotations
 }
 
-program..{
+program {
     StaticG = 5
 } -> {
     ## 
@@ -335,19 +335,19 @@ program..{
     }
 }
 
-inPackageArray{}..{
+inPackageArray() {
     arr = {1,2,3,4,5,6,7}
 } -> {
     arr: [i32]
 }
 
-defer{} -> {
+defer() -> {
     data := ""
 } :IDisposable {
     Dispose() -> () {}
 }
 
-app{} -> { 
+app() -> { 
     i := 555
     arr := {1,1,1,1}
     _PriName := " program "
@@ -366,7 +366,7 @@ app{} -> {
     testFuncTemplate<T1, T2>(data1: T1, data2: T2) -> (data: app) {
         <- (..)
     }
-} :program{} {  
+} :program() {  
 } :protocol {
     B: i32 {
         get { 
@@ -393,13 +393,13 @@ app{} -> {
     f: str = "get"
 } 
 
-result{data: str}..{
+result(data: str) {
     ..data = data
 } -> {
     data: str
 }
 
-testPackageTemplate<T>{} -> {
+testPackageTemplate<T>() -> {
     data: T
 
     Generic(a: T) -> () {}
@@ -413,12 +413,12 @@ testProtocolTemplate<T> :: {
     test<T>(in: T) -> ()
 }
 
-testImplementTemplate{} -> {
+testImplementTemplate() -> {
 } :testProtocolTemplate<testImplementTemplate> {
     test<testImplementTemplate>(in: testImplementTemplate) -> () {}
 }
 
-program{} -> {
+program() -> {
     Name: str? = "name" {
         set { 
             _Name = value 
@@ -436,13 +436,13 @@ protocol :: {
     f: str
 }
 
-`Table{"test"}`
-testAnnotation{} -> {
-    `Key, Column{"id"}`
+`Table("test")`
+testAnnotation() -> {
+    `Key, Column("id")`
     Id: str?
-    `Column{"nick_name"}`
+    `Column("nick_name")`
     NickName: str?
-    `Column{"profile"}`
+    `Column("profile")`
     Profile: str?
 }
 
@@ -451,7 +451,7 @@ testEnum -> ?{
     Err = -1
 }
 
-package{y: i32 = 3}..{
+package(y: i32 = 3) {
     ..x = testStaticTemplate<i32>.const_data
     ..y = y
 } -> {
@@ -459,9 +459,9 @@ package{y: i32 = 3}..{
     y: i32
 }
 
-packageChild{x: i32, y: i32}..{
+packageChild(x: i32, y: i32) {
     ..x = x
 } -> {
     x: i32
-} :package{y} {
+} :package(y) {
 }
