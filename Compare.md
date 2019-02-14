@@ -157,7 +157,7 @@ for (int index = 1; index <= 5; index++)
 ### Go
 ```
 for index := 1; index <= 5; index++  {
-    fmt.Printf("%d times 5 is %d", i, i*5)
+    fmt.Printf("%d times 5 is %d", index, index*5)
 }
 ```
 ### Kotlin
