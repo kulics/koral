@@ -114,7 +114,7 @@ String
 ```
 f := 6.0
 i := 94
-count := i + f.toI32()
+count := i + f.to<i32>()
 ```
 ### C#
 ```
@@ -247,8 +247,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Xs
 ```
-emptyArray := [str]{}
-emptyDictionary := [[str]f32]{}
+emptyArray := [str]()
+emptyDictionary := [[str]f32]()
 ```
 ### C#
 ```
@@ -403,7 +403,7 @@ increment(7)
 ## Classes Declaration
 ### Xs
 ```
-Shape{} -> {
+Shape() -> {
     NumberOfSides := 0
     simpleDescription() -> (s: str) {
         <- ("A shape with {NumberOfSides} sides.")
@@ -450,7 +450,7 @@ class Shape {
 ## Classes Usage
 ### Xs
 ```
-shape := Shape{}
+shape := Shape()
 shape.NumberOfSides = 7
 shapeDescription := shape.simpleDescription()
 ```
@@ -481,7 +481,7 @@ var shapeDescription = shape.simpleDescription()
 ## Subclass
 ### Xs
 ```
-NamedShape{name: str}..{
+NamedShape(name: str) {
     ..name = name
 } -> {
     name: str
@@ -492,7 +492,7 @@ NamedShape{name: str}..{
     }
 }
 
-Square{sideLength: f64, name: str}..{
+Square(sideLength: f64, name: str) {
     ..NumberOfSides = 4
     ..sideLength = sideLength
 } -> {
@@ -501,13 +501,13 @@ Square{sideLength: f64, name: str}..{
     area() -> (f: f64) {
         <- (sideLength * sideLength)
     }
-} :NamedShape{name} {
+} :NamedShape(name) {
     simpleDescription() -> (s: str) {
         <- ("A square with sides of length {sideLength}.")
     }
 }
 
-test := Square{5.2, "square"}
+test := Square(5.2, "square")
 test.area()
 test.simpleDescription()
 ```
@@ -887,7 +887,7 @@ func f(x: Nameable) {
 ## Implement
 ### Xs
 ```
-Dog{} -> {
+Dog() -> {
 } :Nameable {
     name() -> (n: str) {
         <- ("Dog")

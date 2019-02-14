@@ -50,9 +50,9 @@ packageStatement:(annotationSupport)? id (templateDefine)? parameterClausePackag
  ArrowRight blockLeft (packageSupportStatement)* BlockRight 
  (extend packageOverrideStatement)? (protocolImplementStatement)* ;
 // 继承
-extend: ':' type blockLeft expressionList? BlockRight;
+extend: ':' type '(' expressionList? ')';
 // 入参
-parameterClausePackage : blockLeft parameter? (more parameter)*  BlockRight  ;
+parameterClausePackage : '(' parameter? (more parameter)*  ')';
 // 包支持的语句
 packageSupportStatement:
 packageVariableStatement
@@ -61,7 +61,7 @@ packageVariableStatement
 |NewLine
 ;
 // 包构造方法
-packageInitStatement:(annotationSupport)? '..' blockLeft (functionSupportStatement)* BlockRight;
+packageInitStatement:(annotationSupport)? blockLeft (functionSupportStatement)* BlockRight;
 // 函数
 packageFunctionStatement:(annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) NewLine*
 parameterClauseOut blockLeft (functionSupportStatement)* BlockRight end;
@@ -267,7 +267,7 @@ annotation: '`' (id ArrowRight)? annotationList '`'; // 注解
 
 annotationList: annotationItem (more annotationItem)*;
 
-annotationItem: id ( '{' annotationAssign (more annotationAssign)* '}')? ;
+annotationItem: id ( '(' annotationAssign (more annotationAssign)* ')')? ;
 
 annotationAssign: (id '=')? expression ;
 

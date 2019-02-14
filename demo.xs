@@ -174,7 +174,7 @@ program -> {
     }
 }
 
-node{value: i32}..{
+node(value: i32) {
     ..value = value
 } -> {
     value: i32
@@ -186,7 +186,7 @@ control :: {
     shutdown() -> ()
 }
 
-program{name: str}..{
+program(name: str) {
     ..name = name
 } -> {
     name: str
@@ -208,10 +208,10 @@ program{name: str}..{
     }
 }
 
-app{name: str, platform: str}..{
+app(name: str, platform: str) {
     Platform = platform
 } -> {
     Platform: str
-} :program{name} {
+} :program(name) {
     
 }
