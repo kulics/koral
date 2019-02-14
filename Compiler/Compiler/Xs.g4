@@ -275,7 +275,10 @@ callFunc: id (templateCall)? tuple; // 函数调用
 
 callElement : id op=(Judge|Check)? '[' (expression | slice) ']';
 
-callPkg: type '{' expressionList? ( ArrowLeft NewLine? (pkgAssign|listAssign|dictionaryAssign))? NewLine? '}'; // 新建包
+callPkg: 
+type '(' NewLine? expressionList? NewLine? ')'
+| type blockLeft NewLine? (pkgAssign|listAssign|dictionaryAssign) BlockRight 
+| type '(' NewLine? expressionList? NewLine? ')' blockLeft NewLine? (pkgAssign|listAssign|dictionaryAssign) BlockRight ; // 新建包
 
 getType: Judge '(' (expression|':' type) ')';
 

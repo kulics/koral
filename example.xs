@@ -125,7 +125,7 @@ program {
         b!.toStr()
         c: obj? = nil
         d: app! = nil
-        e: [i32?]? = [i32?]?{<-0}
+        e: [i32?]? = [i32?]?{0}
         e?[0]?.toStr()?.toStr()
     }
 
@@ -354,13 +354,13 @@ app() -> {
     _B := 5
 
     testPackage() -> () {
-        item := program{<- Name = "new program",Running = true}
+        item := program{Name = "new program",Running = true}
         item2 := {
             Name := "new program"
             running := true
         }
-        item3 := [i32]{<- 1,2,3,4,5}
-        item4 := [[str]i32]{<- ["1"]1,["2"]2,["3"]3}
+        item3 := [i32]{1,2,3,4,5}
+        item4 := [[str]i32]{["1"]1,["2"]2,["3"]3}
     }
 
     testFuncTemplate<T1, T2>(data1: T1, data2: T2) -> (data: app) {

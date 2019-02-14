@@ -4,13 +4,13 @@
 
 program -> {
     Main() -> () {
-        n0 := node{0}
-        n1 := node{1}
-        n2 := node{2}
-        n3 := node{3}
-        n4 := node{4}
-        n5 := node{5}
-        n6 := node{6}
+        n0 := node(0){}
+        n1 := node(1){}
+        n2 := node(2){}
+        n3 := node(3){}
+        n4 := node(4){}
+        n5 := node(5){}
+        n6 := node(6){}
 
         n0.Left = n1
         n0.Right = n2
@@ -46,7 +46,7 @@ program -> {
         }
 
         prt("oop")
-        app := app{"test", "Windows"}
+        app := app("test", "Windows"){}
         app.start()
         app.stop()
         shutdown(app)
@@ -87,7 +87,7 @@ program -> {
         node.Left = inverseNode(node.Left)
         node.Right = inverseNode(node.Right)
 
-        temp := node{node.value <- Left = node.Right, Right = node.Left}
+        temp := node(node.value){Left = node.Right, Right = node.Left}
         <- (temp)
     }
 
