@@ -14,7 +14,7 @@ list := { 1,2,3,4,5 }
 ```
 This will create a `i32` type List containing` 1` to `5`.
 
-If you need an List of explicit types, you can create them using type creation syntax.
+If you need an List of explicit types, you can create them using construct function.
 
 The List type is represented by `[type]`.
 
@@ -69,7 +69,7 @@ dictionary := {["a"]1, ["b"]2, ["c"]3}
 ```
 This will create a `[str]i32` type dictionary containing ` a, b, c` entries.
 
-If you need an explicit type of dictionary, you can also create it using type creation syntax.
+If you need an explicit type of dictionary, you can also create it using construct function.
 
 The dictionary type is represented by `[[type]type]`.
 
@@ -110,12 +110,12 @@ example -> {
     Main() -> () {
         List1 := {1,2,3,4,5}
         List1 += 6
-        list2 := [i8]{<- 1,2,1,2}
+        list2 := [i8]{1,2,1,2}
         list3 := {|1,2,3|}
 
         Dictionary1 := {["a"]1, ["b"]2, ["c"]3}
         Dictionary1["d"] = 4
-        dictionary2 := [i8->i8]{<- 1->1,2->2,3->3}
+        dictionary2 := [[i8]i8]{[1]1,[2]2,[3]3}
     }
 }
 ```

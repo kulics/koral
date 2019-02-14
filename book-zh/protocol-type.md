@@ -36,7 +36,7 @@ homeWork :: {
 
 例如：
 ```
-student{} -> {
+student() -> {
     ...
 } :homeWork {
     Count: i32
@@ -60,7 +60,7 @@ student{} -> {
 
 例如：
 ```
-Peter := student{ <- Count=999999 }
+Peter := student{ Count=999999 }
 prt( Peter.Count )
 # 打印 999999，好多呀
 Peter.do()
@@ -79,9 +79,9 @@ prt( Peter.Count )
 例如:
 ```
 # 创建了三个不同类型的学生包
-StudentA := chinesestudent{}
-StudentB := americastudent{}
-StudentC := japanstudent{}
+StudentA := chineseStudent()
+StudentB := americaStudent()
+StudentC := japaneseStudent()
 # 让他们分别做作业
 StudentA.do()
 StudentB.do()
@@ -153,7 +153,7 @@ A :: {
     do() -> () {}
 }
 
-B{} -> {
+B() -> {
     Y := 5
 } :A {
     X := 0

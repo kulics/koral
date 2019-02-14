@@ -20,7 +20,7 @@
 linq() -> () {
     numbers := { 0, 1, 2, 3, 4, 5, 6 }
     arr := from num in numbers
-            where _(num % 2) == 0
+            where (num % 2) == 0
             orderby num descending
             select num
 }
