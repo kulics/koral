@@ -3,10 +3,8 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Library
-{
-    public class tsk : Task
-    {
+namespace Library {
+    public class tsk : Task {
         public tsk(Action action) : base(action) { }
         public tsk(Action action, CancellationToken cancellationToken) : base(action, cancellationToken) { }
         public tsk(Action action, TaskCreationOptions creationOptions) : base(action, creationOptions) { }
@@ -33,8 +31,7 @@ namespace Library
         public void wait() => Wait();
     }
 
-    public static class tsks
-    {
+    public static class tsks {
         public static Task run(Func<Task> function, CancellationToken cancellationToken) => Task.Run(function, cancellationToken);
         public static Task run(Action action, CancellationToken cancellationToken) => Task.Run(action, cancellationToken);
         public static Task run(Action action) => Task.Run(action);
@@ -55,8 +52,7 @@ namespace Library
         public static Task delay(int millisecondsDelay, CancellationToken cancellationToken) => Task.Delay(millisecondsDelay, cancellationToken);
     }
 
-    public class tsk<TResult> : Task<TResult>
-    {
+    public class tsk<TResult> : Task<TResult> {
         public tsk(Func<TResult> function) : base(function) { }
         public tsk(Func<TResult> function, CancellationToken cancellationToken) : base(function, cancellationToken) { }
         public tsk(Func<TResult> function, TaskCreationOptions creationOptions) : base(function, creationOptions) { }

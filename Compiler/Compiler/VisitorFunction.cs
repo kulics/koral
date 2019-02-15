@@ -2,35 +2,25 @@
 using System.Collections.Generic;
 using static Compiler.XsParser;
 
-namespace Compiler
-{
-    internal partial class Visitor
-    {
-        public override object VisitFunctionStatement([NotNull] FunctionStatementContext context)
-        {
+namespace Compiler {
+    internal partial class Visitor {
+        public override object VisitFunctionStatement([NotNull] FunctionStatementContext context) {
             var id = (Result)Visit(context.id());
             var obj = "";
             // 异步
-            if (context.t.Type == FlowRight)
-            {
+            if (context.t.Type == FlowRight) {
                 var pout = (string)Visit(context.parameterClauseOut());
-                if (pout != "void")
-                {
+                if (pout != "void") {
                     pout = $"{Task}<{pout}>";
-                }
-                else
-                {
+                } else {
                     pout = Task;
                 }
                 obj += $" async {pout} {id.text}";
-            }
-            else
-            {
+            } else {
                 obj += Visit(context.parameterClauseOut()) + " " + id.text;
             }
             // 泛型
-            if (context.templateDefine() != null)
-            {
+            if (context.templateDefine() != null) {
                 obj += Visit(context.templateDefine());
             }
             obj += $"{Visit(context.parameterClauseIn())} {Wrap} {BlockLeft} {Wrap}";
@@ -39,28 +29,21 @@ namespace Compiler
             return obj;
         }
 
-        public override object VisitReturnStatement([NotNull] ReturnStatementContext context)
-        {
+        public override object VisitReturnStatement([NotNull] ReturnStatementContext context) {
             var r = (Result)Visit(context.tuple());
-            if (r.text == "()")
-            {
+            if (r.text == "()") {
                 r.text = "";
             }
             return $"return {r.text} {Terminate} {Wrap}";
         }
 
-        public override object VisitTuple([NotNull] TupleContext context)
-        {
+        public override object VisitTuple([NotNull] TupleContext context) {
             var obj = "(";
-            for (int i = 0; i < context.expression().Length; i++)
-            {
+            for (int i = 0; i < context.expression().Length; i++) {
                 var r = (Result)Visit(context.expression(i));
-                if (i == 0)
-                {
+                if (i == 0) {
                     obj += r.text;
-                }
-                else
-                {
+                } else {
                     obj += ", " + r.text;
                 }
             }
@@ -69,18 +52,13 @@ namespace Compiler
             return result;
         }
 
-        public override object VisitTupleExpression([NotNull] TupleExpressionContext context)
-        {
+        public override object VisitTupleExpression([NotNull] TupleExpressionContext context) {
             var obj = "(";
-            for (int i = 0; i < context.expression().Length; i++)
-            {
+            for (int i = 0; i < context.expression().Length; i++) {
                 var r = (Result)Visit(context.expression(i));
-                if (i == 0)
-                {
+                if (i == 0) {
                     obj += r.text;
-                }
-                else
-                {
+                } else {
                     obj += ", " + r.text;
                 }
             }
@@ -89,23 +67,17 @@ namespace Compiler
             return result;
         }
 
-        public override object VisitParameterClauseIn([NotNull] ParameterClauseInContext context)
-        {
+        public override object VisitParameterClauseIn([NotNull] ParameterClauseInContext context) {
             var obj = "(";
             var temp = new List<string>();
-            for (int i = context.parameter().Length - 1; i >= 0; i--)
-            {
+            for (int i = context.parameter().Length - 1; i >= 0; i--) {
                 Parameter p = (Parameter)Visit(context.parameter(i));
                 temp.Add($"{p.annotation} {p.type} {p.id} {p.value}");
             }
-            for (int i = temp.Count - 1; i >= 0; i--)
-            {
-                if (i == temp.Count - 1)
-                {
+            for (int i = temp.Count - 1; i >= 0; i--) {
+                if (i == temp.Count - 1) {
                     obj += temp[i];
-                }
-                else
-                {
+                } else {
                     obj += $", {temp[i]}";
                 }
             }
@@ -114,35 +86,25 @@ namespace Compiler
             return obj;
         }
 
-        public override object VisitParameterClauseOut([NotNull] ParameterClauseOutContext context)
-        {
+        public override object VisitParameterClauseOut([NotNull] ParameterClauseOutContext context) {
             var obj = "";
-            if (context.parameter().Length == 0)
-            {
+            if (context.parameter().Length == 0) {
                 obj += "void";
-            }
-            else if (context.parameter().Length == 1)
-            {
+            } else if (context.parameter().Length == 1) {
                 Parameter p = (Parameter)Visit(context.parameter(0));
                 obj += p.type;
             }
-            if (context.parameter().Length > 1)
-            {
+            if (context.parameter().Length > 1) {
                 obj += "( ";
                 var temp = new List<string>();
-                for (int i = context.parameter().Length - 1; i >= 0; i--)
-                {
+                for (int i = context.parameter().Length - 1; i >= 0; i--) {
                     Parameter p = (Parameter)Visit(context.parameter(i));
                     temp.Add($"{p.annotation} {p.type} {p.id} {p.value}");
                 }
-                for (int i = temp.Count - 1; i >= 0; i--)
-                {
-                    if (i == temp.Count - 1)
-                    {
+                for (int i = temp.Count - 1; i >= 0; i--) {
+                    if (i == temp.Count - 1) {
                         obj += temp[i];
-                    }
-                    else
-                    {
+                    } else {
                         obj += $", {temp[i]}";
                     }
                 }
@@ -151,8 +113,7 @@ namespace Compiler
             return obj;
         }
 
-        public class Parameter
-        {
+        public class Parameter {
             public string id { get; set; }
             public string type { get; set; }
             public string value { get; set; }
@@ -160,29 +121,24 @@ namespace Compiler
             public string permission { get; set; }
         }
 
-        public override object VisitParameter([NotNull] ParameterContext context)
-        {
+        public override object VisitParameter([NotNull] ParameterContext context) {
             var p = new Parameter();
             var id = (Result)Visit(context.id());
             p.id = id.text;
             p.permission = id.permission;
-            if (context.annotationSupport() != null)
-            {
+            if (context.annotationSupport() != null) {
                 p.annotation = (string)Visit(context.annotationSupport());
             }
-            if (context.expression() != null)
-            {
+            if (context.expression() != null) {
                 p.value = "=" + (Visit(context.expression()) as Result).text;
             }
             p.type = (string)Visit(context.type());
             return p;
         }
 
-        public string ProcessFunctionSupport(FunctionSupportStatementContext[] items)
-        {
+        public string ProcessFunctionSupport(FunctionSupportStatementContext[] items) {
             var obj = "";
-            foreach (var item in items)
-            {
+            foreach (var item in items) {
                 obj += Visit(item);
             }
             return obj;

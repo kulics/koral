@@ -3,22 +3,17 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 
-namespace Library
-{
-    public static class ExpressionExtension
-    {
+namespace Library {
+    public static class ExpressionExtension {
         // object 
         public static string toStr(this object it) => it.ToString();
-        public static T to<T>(this object it)
-        {
+        public static T to<T>(this object it) {
             return (T)it;
         }
-        public static bool @is<T>(this object it)
-        {
+        public static bool @is<T>(this object it) {
             return it is T;
         }
-        public static T @as<T>(this object it) where T : class
-        {
+        public static T @as<T>(this object it) where T : class {
             return it as T;
         }
 
@@ -265,12 +260,9 @@ namespace Library
 
         public static bool contains(this string it, string value) => it.Contains(value);
 
-        public static int findFirst(this string it, Func<char,bool> fn)
-        {
-            for (int i = 0; i < it.count(); i++)
-            {
-                if (fn(it[i]))
-                {
+        public static int findFirst(this string it, Func<char, bool> fn) {
+            for (int i = 0; i < it.count(); i++) {
+                if (fn(it[i])) {
                     return i;
                 }
             }
@@ -286,20 +278,15 @@ namespace Library
         public static int lastIndexOf(this string it, string value, int startIndex, int count, StringComparison comparisonType = StringComparison.Ordinal) => it.LastIndexOf(value, startIndex, count, comparisonType);
 
 
-        public static string[] split(this string it, string[] separator, StringSplitOptions options = StringSplitOptions.None) => it.Split(separator,options);
-        public static string slice(this string it, int? startIndex, int? endIndex)
-        {
-            if (startIndex == null && endIndex == null)
-            {
+        public static string[] split(this string it, string[] separator, StringSplitOptions options = StringSplitOptions.None) => it.Split(separator, options);
+        public static string slice(this string it, int? startIndex, int? endIndex) {
+            if (startIndex == null && endIndex == null) {
                 return it;
-            }
-            else if (endIndex == null)
-            {
-                return it.subStr(startIndex??0, it.lastIndex() - startIndex??0);
-            }
-            else // (startIndex == null)
-            {
-                return it.subStr(0, it.lastIndex() - endIndex??0);
+            } else if (endIndex == null) {
+                return it.subStr(startIndex ?? 0, it.lastIndex() - startIndex ?? 0);
+            } else // (startIndex == null)
+              {
+                return it.subStr(0, it.lastIndex() - endIndex ?? 0);
             }
         }
 
