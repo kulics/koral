@@ -2,26 +2,21 @@
 using Antlr4.Runtime.Misc;
 using static Compiler.XsParser;
 
-namespace Compiler
-{
-    internal partial class Visitor
-    {
-        public override object VisitStatement([NotNull] StatementContext context)
-        {
+namespace Compiler {
+    internal partial class Visitor {
+        public override object VisitStatement([NotNull] StatementContext context) {
             var obj = "";
             var ns = (Namespace)Visit(context.exportStatement());
             // import library
             obj += $"using Library;{Wrap}using static Library.lib;{Wrap}";
             obj += ns.imports + Wrap;
-            if (context.annotationSupport() != null)
-            {
+            if (context.annotationSupport() != null) {
                 obj += Visit(context.annotationSupport());
             }
             obj += $"namespace {ns.name + Wrap + BlockLeft + Wrap}";
 
             var content = "";
-            foreach (var item in context.namespaceSupportStatement())
-            {
+            foreach (var item in context.namespaceSupportStatement()) {
                 content += Visit(item);
             }
             obj += content;
@@ -29,120 +24,92 @@ namespace Compiler
             return obj;
         }
 
-        private class Namespace
-        {
+        private class Namespace {
             public string name;
             public string imports;
         }
 
-        public override object VisitExportStatement([NotNull] ExportStatementContext context)
-        {
-            var obj = new Namespace
-            {
+        public override object VisitExportStatement([NotNull] ExportStatementContext context) {
+            var obj = new Namespace {
                 name = (string)Visit(context.nameSpace())
             };
-            foreach (var item in context.importStatement())
-            {
+            foreach (var item in context.importStatement()) {
                 obj.imports += (string)Visit(item);
             }
             return obj;
         }
 
-        public override object VisitImportStatement([NotNull] ImportStatementContext context)
-        {
+        public override object VisitImportStatement([NotNull] ImportStatementContext context) {
             var obj = "";
-            if (context.annotationSupport() != null)
-            {
+            if (context.annotationSupport() != null) {
                 obj += Visit(context.annotationSupport());
             }
-            if (context.id() != null)
-            {
+            if (context.id() != null) {
                 var ns = (string)Visit(context.nameSpace());
                 obj += "using static " + ns;
-                if (context.id() != null)
-                {
+                if (context.id() != null) {
                     var r = (Result)Visit(context.id());
 
                     obj += "." + r.text;
                 }
 
                 obj += Terminate;
-            }
-            else
-            {
+            } else {
                 obj += "using " + Visit(context.nameSpace()) + Terminate;
             }
             obj += Wrap;
             return obj;
         }
 
-        public override object VisitNameSpace([NotNull] NameSpaceContext context)
-        {
+        public override object VisitNameSpace([NotNull] NameSpaceContext context) {
             var obj = "";
-            for (int i = 0; i < context.id().Length; i++)
-            {
+            for (int i = 0; i < context.id().Length; i++) {
                 var id = (Result)Visit(context.id(i));
-                if (i == 0)
-                {
+                if (i == 0) {
                     obj += "" + id.text;
-                }
-                else
-                {
+                } else {
                     obj += "." + id.text;
                 }
             }
             return obj;
         }
 
-        public override object VisitNameSpaceItem([NotNull] NameSpaceItemContext context)
-        {
+        public override object VisitNameSpaceItem([NotNull] NameSpaceItemContext context) {
             var obj = "";
-            for (int i = 0; i < context.id().Length; i++)
-            {
+            for (int i = 0; i < context.id().Length; i++) {
                 var id = (Result)Visit(context.id(i));
-                if (i == 0)
-                {
+                if (i == 0) {
                     obj += "" + id.text;
-                }
-                else
-                {
+                } else {
                     obj += "." + id.text;
                 }
             }
             return obj;
         }
 
-        public override object VisitName([NotNull] NameContext context)
-        {
+        public override object VisitName([NotNull] NameContext context) {
             var obj = "";
-            for (int i = 0; i < context.id().Length; i++)
-            {
+            for (int i = 0; i < context.id().Length; i++) {
                 var id = (Result)Visit(context.id(i));
-                if (i == 0)
-                {
+                if (i == 0) {
                     obj += "" + id.text;
-                }
-                else
-                {
+                } else {
                     obj += "." + id.text;
                 }
             }
             return obj;
         }
 
-        public override object VisitEnumStatement([NotNull] EnumStatementContext context)
-        {
+        public override object VisitEnumStatement([NotNull] EnumStatementContext context) {
             var obj = "";
             var id = (Result)Visit(context.id());
             var header = "";
-            if (context.annotationSupport() != null)
-            {
+            if (context.annotationSupport() != null) {
                 header += Visit(context.annotationSupport());
             }
             header += id.permission + " enum " + id.text;
             header += Wrap + BlockLeft + Wrap;
-            for (int i = 0; i < context.enumSupportStatement().Length; i++)
-            {
+            for (int i = 0; i < context.enumSupportStatement().Length; i++) {
                 obj += Visit(context.enumSupportStatement(i));
             }
             obj += BlockRight + Terminate + Wrap;
@@ -150,14 +117,11 @@ namespace Compiler
             return obj;
         }
 
-        public override object VisitEnumSupportStatement([NotNull] EnumSupportStatementContext context)
-        {
+        public override object VisitEnumSupportStatement([NotNull] EnumSupportStatementContext context) {
             var id = (Result)Visit(context.id());
-            if (context.Integer() != null)
-            {
+            if (context.Integer() != null) {
                 var op = "";
-                if (context.add() != null)
-                {
+                if (context.add() != null) {
                     op = (string)Visit(context.add());
                 }
                 id.text += " = " + op + context.Integer().GetText();
@@ -165,34 +129,29 @@ namespace Compiler
             return id.text + ",";
         }
 
-        public override object VisitPackageStaticStatement([NotNull] PackageStaticStatementContext context)
-        {
+        public override object VisitPackageStaticStatement([NotNull] PackageStaticStatementContext context) {
             var id = (Result)Visit(context.id());
             var obj = "";
             var Init = "";
             // 获取构造数据
             Init += "static " + id.text + "()" + BlockLeft + Wrap;
             // 处理构造函数
-            if (context.packageInitStatement() != null)
-            {
+            if (context.packageInitStatement() != null) {
                 Init += Visit(context.packageInitStatement());
             }
             Init += BlockRight;
             obj = Init + obj;
-            foreach (var item in context.packageStaticSupportStatement())
-            {
+            foreach (var item in context.packageStaticSupportStatement()) {
                 obj += Visit(item);
             }
             obj += BlockRight + Terminate + Wrap;
             var header = "";
-            if (context.annotationSupport() != null)
-            {
+            if (context.annotationSupport() != null) {
                 header += Visit(context.annotationSupport());
             }
             header += $"{id.permission} partial class {id.text}";
             // 泛型
-            if (context.templateDefine() != null)
-            {
+            if (context.templateDefine() != null) {
                 header += Visit(context.templateDefine());
             }
             header += Wrap + BlockLeft + Wrap;
@@ -200,36 +159,27 @@ namespace Compiler
             return obj;
         }
 
-        public override object VisitNamespaceFunctionStatement([NotNull] NamespaceFunctionStatementContext context)
-        {
+        public override object VisitNamespaceFunctionStatement([NotNull] NamespaceFunctionStatementContext context) {
             var id = (Result)Visit(context.id());
             var obj = "";
-            if (context.annotationSupport() != null)
-            {
+            if (context.annotationSupport() != null) {
                 obj += Visit(context.annotationSupport());
             }
             // 异步
-            if (context.t.Type == FlowRight)
-            {
+            if (context.t.Type == FlowRight) {
                 var pout = (string)Visit(context.parameterClauseOut());
-                if (pout != "void")
-                {
+                if (pout != "void") {
                     pout = $"{Task}<{pout}>";
-                }
-                else
-                {
+                } else {
                     pout = Task;
                 }
                 obj += $"{id.permission} async static {pout} {id.text}";
-            }
-            else
-            {
+            } else {
                 obj += $"{id.permission} static {Visit(context.parameterClauseOut())} {id.text}";
             }
 
             // 泛型
-            if (context.templateDefine() != null)
-            {
+            if (context.templateDefine() != null) {
                 obj += Visit(context.templateDefine());
             }
             obj += Visit(context.parameterClauseIn()) + Wrap + BlockLeft + Wrap;
@@ -238,27 +188,21 @@ namespace Compiler
             return obj;
         }
 
-        public override object VisitNamespaceConstantStatement([NotNull] NamespaceConstantStatementContext context)
-        {
+        public override object VisitNamespaceConstantStatement([NotNull] NamespaceConstantStatementContext context) {
             var id = (Result)Visit(context.id());
             var expr = (Result)Visit(context.expression());
             var typ = "";
-            if (context.type() != null)
-            {
+            if (context.type() != null) {
                 typ = (string)Visit(context.type());
-            }
-            else
-            {
+            } else {
                 typ = (string)expr.data;
             }
 
             var obj = "";
-            if (context.annotationSupport() != null)
-            {
+            if (context.annotationSupport() != null) {
                 obj += Visit(context.annotationSupport());
             }
-            switch (typ)
-            {
+            switch (typ) {
                 case i8:
                     typ = "ubyte";
                     break;
@@ -302,72 +246,52 @@ namespace Compiler
             return obj;
         }
 
-        public override object VisitNamespaceVariableStatement([NotNull] NamespaceVariableStatementContext context)
-        {
+        public override object VisitNamespaceVariableStatement([NotNull] NamespaceVariableStatementContext context) {
             var r1 = (Result)Visit(context.expression(0));
             var typ = "";
             Result r2 = null;
-            if (context.expression().Length == 2)
-            {
+            if (context.expression().Length == 2) {
                 r2 = (Result)Visit(context.expression(1));
                 typ = (string)r2.data;
             }
-            if (context.type() != null)
-            {
+            if (context.type() != null) {
                 typ = (string)Visit(context.type());
             }
             var obj = "";
-            if (context.annotationSupport() != null)
-            {
+            if (context.annotationSupport() != null) {
                 obj += Visit(context.annotationSupport());
             }
-            if (context.packageControlSubStatement().Length > 0)
-            {
+            if (context.packageControlSubStatement().Length > 0) {
                 obj += $"{r1.permission} static {typ} {r1.text + BlockLeft}";
                 var record = new Dictionary<string, bool>();
-                foreach (var item in context.packageControlSubStatement())
-                {
+                foreach (var item in context.packageControlSubStatement()) {
                     var temp = (Visit(item) as Result);
                     obj += temp.text;
                     record[temp.data as string] = true;
                 }
-                if (r2 != null)
-                {
+                if (r2 != null) {
                     obj = $"private static {typ} _{r1.text} = {r2.text}; {Wrap}" + obj;
-                    if (!record.ContainsKey("get"))
-                    {
+                    if (!record.ContainsKey("get")) {
                         obj += $"get {{ return _{r1.text}; }}";
                     }
-                    if (r1.isVariable && !record.ContainsKey("set"))
-                    {
+                    if (r1.isVariable && !record.ContainsKey("set")) {
                         obj += $"set {{ _{r1.text} = value; }}";
                     }
                 }
                 obj += BlockRight + Wrap;
-            }
-            else
-            {
-                if (r1.isVariable)
-                {
+            } else {
+                if (r1.isVariable) {
                     obj += $"{r1.permission} static {typ} {r1.text} {{ get;set; }}";
-                    if (r2 != null)
-                    {
+                    if (r2 != null) {
                         obj += $" = {r2.text} {Terminate} {Wrap}";
-                    }
-                    else
-                    {
+                    } else {
                         obj += Wrap;
                     }
-                }
-                else
-                {
+                } else {
                     obj += $"{r1.permission} static readonly {typ} {r1.text}";
-                    if (r2 != null)
-                    {
+                    if (r2 != null) {
                         obj += $" = {r2.text} {Terminate} {Wrap}";
-                    }
-                    else
-                    {
+                    } else {
                         obj += Terminate + Wrap;
                     }
                 }
@@ -375,11 +299,9 @@ namespace Compiler
             return obj;
         }
 
-        public (string, string) GetControlSub(string id)
-        {
+        public (string, string) GetControlSub(string id) {
             var typ = "";
-            switch (id)
-            {
+            switch (id) {
                 case "get":
                     id = " get ";
                     typ = "get";
@@ -407,7 +329,7 @@ namespace Compiler
                 default:
                     break;
             }
-            return (id,typ);
+            return (id, typ);
         }
     }
 }

@@ -2,17 +2,14 @@
 using System.Collections.Generic;
 using System.Linq;
 
-namespace Library
-{
-    public class lst<T> : List<T>
-    {
+namespace Library {
+    public class lst<T> : List<T> {
         public lst() { }
         public lst(T[] v) : base(v) { }
         public lst(IEnumerable<T> collection) : base(collection) { }
         public lst(int capacity) : base(capacity) { }
 
-        public static lst<T> operator +(lst<T> L, T R)
-        {
+        public static lst<T> operator +(lst<T> L, T R) {
             var list = new lst<T>(L)
             {
                 R
@@ -20,15 +17,13 @@ namespace Library
             return list;
         }
 
-        public static lst<T> operator +(lst<T> L, lst<T> R)
-        {
+        public static lst<T> operator +(lst<T> L, lst<T> R) {
             var list = new lst<T>(L);
             list.AddRange(R);
             return list;
         }
 
-        public static lst<T> operator -(lst<T> L, int R)
-        {
+        public static lst<T> operator -(lst<T> L, int R) {
             var list = new lst<T>(L);
             list.RemoveAt(R);
             return list;
@@ -48,38 +43,26 @@ namespace Library
         {
             var temp = new lst<T>();
             int currIndex = startIndex;
-            while (currIndex <= endIndex)
-            {
+            while (currIndex <= endIndex) {
                 temp += this[currIndex];
                 currIndex++;
             }
             return temp;
         }
-        public lst<T> slice(int? startIndex, int? endIndex, bool order = true, bool attach = true)
-        {
-            if (startIndex == null && endIndex == null)
-            {
+        public lst<T> slice(int? startIndex, int? endIndex, bool order = true, bool attach = true) {
+            if (startIndex == null && endIndex == null) {
                 return this;
-            }
-            else if (endIndex == null)
-            {
-                if (attach)
-                {
+            } else if (endIndex == null) {
+                if (attach) {
                     return subList(startIndex ?? 0, lastIndex);
-                }
-                else
-                {
+                } else {
                     return subList(startIndex ?? 0, lastIndex - 1);
                 }
-            }
-            else // (startIndex == null)
-            {
-                if (attach)
-                {
+            } else // (startIndex == null)
+              {
+                if (attach) {
                     return subList(0, endIndex ?? 0);
-                }
-                else
-                {
+                } else {
                     return subList(0, endIndex ?? 0 - 1);
                 }
             }
@@ -110,8 +93,7 @@ namespace Library
         public void sort(Comparison<T> comparison) => Sort(comparison);
     }
 
-    public class dic<TKey, TValue> : Dictionary<TKey, TValue>
-    {
+    public class dic<TKey, TValue> : Dictionary<TKey, TValue> {
         public dic() : base() { }
         public dic(IDictionary<TKey, TValue> dictionary) : base(dictionary) { }
         public dic(IEqualityComparer<TKey> comparer) : base(comparer) { }
@@ -119,18 +101,15 @@ namespace Library
         public dic(IDictionary<TKey, TValue> dictionary, IEqualityComparer<TKey> comparer) : base(dictionary, comparer) { }
         public dic(int capacity, IEqualityComparer<TKey> comparer) : base(capacity, comparer) { }
 
-        public static dic<TKey, TValue> operator +(dic<TKey, TValue> L, dic<TKey, TValue> R)
-        {
+        public static dic<TKey, TValue> operator +(dic<TKey, TValue> L, dic<TKey, TValue> R) {
             var dic = new dic<TKey, TValue>(L);
-            foreach (var item in R)
-            {
+            foreach (var item in R) {
                 dic.Add(item.Key, item.Value);
             }
             return dic;
         }
 
-        public static dic<TKey, TValue> operator -(dic<TKey, TValue> L, TKey R)
-        {
+        public static dic<TKey, TValue> operator -(dic<TKey, TValue> L, TKey R) {
             var dic = new dic<TKey, TValue>(L);
             dic.Remove(R);
             return dic;

@@ -1,22 +1,16 @@
 ﻿using System;
 
-namespace Library
-{
-    public static class cmd
-    {
-        public static void prt(params object[] paramList)
-        {
+namespace Library {
+    public static class cmd {
+        public static void prt(params object[] paramList) {
             print(paramList);
         }
 
-        public static void print(params object[] paramList)
-        {
-            foreach (var item in paramList)
-            {
+        public static void print(params object[] paramList) {
+            foreach (var item in paramList) {
                 Console.Write(item);
             }
-            if (paramList.Length > 0 && paramList[paramList.Length - 1] as string == "")
-            {
+            if (paramList.Length > 0 && paramList[paramList.Length - 1] as string == "") {
                 return;
             }
             Console.WriteLine();

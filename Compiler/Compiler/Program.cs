@@ -3,24 +3,18 @@ using System;
 using System.IO;
 using System.Text;
 
-namespace Compiler
-{
-    internal static class Compiler
-    {
+namespace Compiler {
+    internal static class Compiler {
         private static string readPath;
         private static string pathLine;
 
-        private static void Main(string[] args)
-        {
+        private static void Main(string[] args) {
             // 检查系统平台，区分路径字符
             var os = Environment.OSVersion.Platform;
-            if (os == PlatformID.Unix || os == PlatformID.MacOSX)
-            {
+            if (os == PlatformID.Unix || os == PlatformID.MacOSX) {
                 readPath = @"./";
                 pathLine = @"/";
-            }
-            else
-            {
+            } else {
                 readPath = @".\";
                 pathLine = @"\";
             }
@@ -36,17 +30,13 @@ namespace Compiler
             //}
         }
 
-        private static void Compiled(string path)
-        {
+        private static void Compiled(string path) {
             //获取相对路径下所有文件
             var files = Directory.GetFiles(path, "*.xs");
-            foreach (var file in files)
-            {
+            foreach (var file in files) {
                 // c#文件流读文件
-                using (FileStream fsRead = new FileStream(file, FileMode.Open))
-                {
-                    try
-                    {
+                using (FileStream fsRead = new FileStream(file, FileMode.Open)) {
+                    try {
                         var fsLen = (int)fsRead.Length;
                         var heByte = new byte[fsLen];
                         var r = fsRead.Read(heByte, 0, heByte.Length);
@@ -64,13 +54,10 @@ namespace Compiler
                         var tree = parser.program();
 
                         var fileName = "";
-                        if (file.LastIndexOf(pathLine) > 0)
-                        {
+                        if (file.LastIndexOf(pathLine) > 0) {
                             var index = file.LastIndexOf(pathLine);
                             fileName = file.Substring(index + 1, file.Length - (index + 1) - 3);
-                        }
-                        else
-                        {
+                        } else {
                             fileName = file.Substring(0, file.Length - 3);
                         }
 
@@ -79,21 +66,17 @@ namespace Compiler
 
                         // C#文件流写文件,使用覆盖模式
                         var resByte = Encoding.UTF8.GetBytes(result.ToString());  //转换为字节
-                        using (var fsWrite = new FileStream(readPath + file.Substring(0, file.Length - 3) + ".cs", FileMode.Create))
-                        {
+                        using (var fsWrite = new FileStream(readPath + file.Substring(0, file.Length - 3) + ".cs", FileMode.Create)) {
                             fsWrite.Write(resByte, 0, resByte.Length);
                         };
-                    }
-                    catch (Exception err)
-                    {
+                    } catch (Exception err) {
                         Console.WriteLine(err);
                     }
                 }
             }
 
             var folders = Directory.GetDirectories(path);
-            foreach (var folder in folders)
-            {
+            foreach (var folder in folders) {
                 Compiled(folder);
             }
         }

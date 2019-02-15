@@ -1,10 +1,8 @@
 ﻿using System;
 using System.Threading.Tasks;
 
-namespace Library
-{
-    public static partial class lib
-    {
+namespace Library {
+    public static partial class lib {
         public static T[] arrOf<T>(params T[] item) => item;
 
         public static lst<T> lstOf<T>(params T[] item) => new lst<T>(item);
@@ -27,7 +25,7 @@ namespace Library
 
         public static double pow(double a, double b) => Math.Pow(a, b);
 
-        public static double root(double a, double b) => Math.Pow(a, 1/b);
+        public static double root(double a, double b) => Math.Pow(a, 1 / b);
 
         public static double log(double a, double b) => Math.Log(a, b);
     }

@@ -243,6 +243,7 @@ linq // 联合查询
 | expression mul expression // 积型表达式
 | expression pow expression // 幂型表达式
 | expression op=(Judge|Check) // 可空判断
+| stringExpression // 字符串插值
 ;
 
 callBase: '...' callExpression;
@@ -347,6 +348,10 @@ linqItem: linqBodyKeyword | expression ;
 linqKeyword: linqHeadKeyword | linqBodyKeyword | NewLine;
 linqHeadKeyword: k='from';
 linqBodyKeyword: k=('where'|'select'|'group'|'into'|'orderby'|'join'|'let'|'in'|'on'|'equals'|'by'|'ascending'|'descending') ;
+
+stringExpression: Text (stringExpressionElement)+;
+
+stringExpressionElement: expression Text;
 
 // 基础数据
 dataStatement:

@@ -96,7 +96,7 @@ program {
         prt("2 pow 2 = ", 2 ** 2) 
         prt("4 extract root for 2 = ", 4 // 2) 
         prt("4 log with base 2 = ", 4 %% 2) 
-        I += " mark string i32 {B} "
+        I += " mark string i32 "B" "
         C := false
         C = ~C
         C = 1 ~= 2

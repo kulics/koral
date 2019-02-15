@@ -2,22 +2,17 @@
 using Antlr4.Runtime.Misc;
 using System;
 using Library;
-using System.Linq;
 using static Compiler.XsParser;
 
-namespace Compiler
-{
-    internal class ErrorListener : BaseErrorListener
-    {
+namespace Compiler {
+    internal class ErrorListener : BaseErrorListener {
         private string FileDir { get; set; }
 
-        public ErrorListener(string FileDir)
-        {
+        public ErrorListener(string FileDir) {
             this.FileDir = FileDir;
         }
 
-        public override void SyntaxError([NotNull] IRecognizer recognizer, [Nullable] IToken offendingSymbol, int line, int charPositionInLine, [NotNull] string msg, [Nullable] RecognitionException e)
-        {
+        public override void SyntaxError([NotNull] IRecognizer recognizer, [Nullable] IToken offendingSymbol, int line, int charPositionInLine, [NotNull] string msg, [Nullable] RecognitionException e) {
             base.SyntaxError(recognizer, offendingSymbol, line, charPositionInLine, msg, e);
             Console.WriteLine("------Syntax Error------");
             Console.WriteLine($"File: {FileDir}");
@@ -27,8 +22,7 @@ namespace Compiler
         }
     }
 
-    internal partial class Visitor : XsBaseVisitor<object>
-    {
+    internal partial class Visitor : XsBaseVisitor<object> {
         public string FileName { get; set; }
 
         private const string Terminate = ";";
@@ -62,88 +56,68 @@ namespace Compiler
 
         private const string Task = "System.Threading.Tasks.Task";
 
-        public override object VisitProgram([NotNull] ProgramContext context)
-        {
+        public override object VisitProgram([NotNull] ProgramContext context) {
             var list = context.statement();
             var result = "";
-            foreach (var item in list)
-            {
+            foreach (var item in list) {
                 result += VisitStatement(item);
             }
             return result;
         }
 
-        public class Result
-        {
+        public class Result {
             public object data { get; set; }
             public string text { get; set; }
             public string permission { get; set; }
             public bool isVariable { get; set; }
         }
 
-        public override object VisitId([NotNull] IdContext context)
-        {
-            var r = new Result
-            {
+        public override object VisitId([NotNull] IdContext context) {
+            var r = new Result {
                 data = "var"
             };
-            if (context.typeBasic() != null)
-            {
+            if (context.typeBasic() != null) {
                 r.permission = "public";
                 r.text += context.typeBasic().GetText();
-            }
-            else if (context.linqKeyword() != null)
-            {
+            } else if (context.linqKeyword() != null) {
                 r.permission = "public";
                 r.text += Visit(context.linqKeyword());
-            }
-            else if (context.op.Type == IDPublic)
-            {
+            } else if (context.op.Type == IDPublic) {
                 r.permission = "public";
                 r.text += context.op.Text;
                 r.isVariable = r.text[0].isUpper();
-            }
-            else if (context.op.Type == IDPrivate)
-            {
+            } else if (context.op.Type == IDPrivate) {
                 r.permission = "private";
                 r.text += context.op.Text;
                 r.isVariable = r.text[r.text.findFirst(it => it != '_')].isUpper();
             }
 
-            if (keywords.Exists(t => t == r.text))
-            {
+            if (keywords.Exists(t => t == r.text)) {
                 r.text = "@" + r.text;
             }
             return r;
         }
 
-        public override object VisitBool([NotNull] BoolContext context)
-        {
+        public override object VisitBool([NotNull] BoolContext context) {
             var r = new Result();
-            if (context.t.Type == True)
-            {
+            if (context.t.Type == True) {
                 r.data = bl;
                 r.text = t;
-            }
-            else if (context.t.Type == False)
-            {
+            } else if (context.t.Type == False) {
                 r.data = bl;
                 r.text = f;
             }
             return r;
         }
 
-        public override object VisitAnnotationSupport([NotNull] AnnotationSupportContext context)
-        {
+        public override object VisitAnnotationSupport([NotNull] AnnotationSupportContext context) {
             return (string)Visit(context.annotation());
         }
 
-        public override object VisitAnnotation([NotNull] AnnotationContext context)
-        {
+        public override object VisitAnnotation([NotNull] AnnotationContext context) {
             var obj = "";
             var id = "";
-            if (context.id() != null)
-            {
+            if (context.id() != null) {
                 id = ((Result)Visit(context.id())).text + ":";
             }
 
@@ -152,51 +126,38 @@ namespace Compiler
             return obj;
         }
 
-        public override object VisitAnnotationList([NotNull] AnnotationListContext context)
-        {
+        public override object VisitAnnotationList([NotNull] AnnotationListContext context) {
             var obj = "";
-            for (int i = 0; i < context.annotationItem().Length; i++)
-            {
-                if (i > 0)
-                {
+            for (int i = 0; i < context.annotationItem().Length; i++) {
+                if (i > 0) {
                     obj += "," + Visit(context.annotationItem(i));
-                }
-                else
-                {
+                } else {
                     obj += Visit(context.annotationItem(i));
                 }
             }
             return obj;
         }
 
-        public override object VisitAnnotationItem([NotNull] AnnotationItemContext context)
-        {
+        public override object VisitAnnotationItem([NotNull] AnnotationItemContext context) {
             var obj = "";
             obj += ((Result)Visit(context.id())).text;
-            for (int i = 0; i < context.annotationAssign().Length; i++)
-            {
-                if (i > 0)
-                {
+            for (int i = 0; i < context.annotationAssign().Length; i++) {
+                if (i > 0) {
                     obj += "," + Visit(context.annotationAssign(i));
-                }
-                else
-                {
+                } else {
                     obj += "(" + Visit(context.annotationAssign(i));
                 }
             }
-            if (context.annotationAssign().Length > 0)
-            {
+            if (context.annotationAssign().Length > 0) {
                 obj += ")";
             }
             return obj;
         }
 
-        public override object VisitAnnotationAssign([NotNull] AnnotationAssignContext context)
-        {
+        public override object VisitAnnotationAssign([NotNull] AnnotationAssignContext context) {
             var obj = "";
             var id = "";
-            if (context.id() != null)
-            {
+            if (context.id() != null) {
                 id = ((Result)Visit(context.id())).text + "=";
             }
             var r = (Result)Visit(context.expression());
