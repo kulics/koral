@@ -14,7 +14,7 @@ E.g:
 ```
 readFile(name: str) -> () {
     ? name.Length == 0 {
-        !( Exception{"something wrong"} )
+        !( Exception("something wrong") )
     }
     ...
 }

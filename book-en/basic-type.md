@@ -89,20 +89,12 @@ string := "Hello world! " + title + content.toStr()
 ```
 
 This of course does not affect the functionality, but we can use a more intuitive and convenient way, that is string templates.
-We use `{}` to mark the code segment directly in the content, and the language will automatically insert the element into the string.
+We can insert elements directly in the middle of two strings, and the language will automatically merge into one string.
 
 E.g:
 ```
-string := "Hello world! {title} {content}"
+string := "Hello world! " title " " content ""
 # Hello world! Year:2018
-```
-
-If you need to use `{` and `}` in the string, you only need to use `{{` and `}}`.
-
-E.g:
-```
-string := "This is block {{ and }}"
-# This is block { and }
 ```
 ## Boolean
 boolean are logical values ​​because they can only be true or false. It is often used to assist in judging logic.
@@ -144,7 +136,7 @@ example -> {
         b := a.toI64()
         c := 123.456
         d := "hello"
-        c := "{d} world"
+        c := ""d" world"
         e := true
         f :obj = false
     }
