@@ -144,7 +144,7 @@ let count = i + Int(f)
 ### Xs
 ```
 @ index <- [ 1 <= 5 ] {
-    prt("{index} times 5 is {index * 5}")
+    prt(""index" times 5 is "index * 5"")
 }
 ```
 ### C#
@@ -276,7 +276,7 @@ let emptyDictionary = [String: Float]()
 ### Xs
 ```
 greet(name: str, day: str) -> (r: str) {
-    <- ("Hello {name}, today is {day}.")
+    <- ("Hello "name", today is "day".")
 }
 greet("Bob", "Tuesday")
 ```
@@ -406,7 +406,7 @@ increment(7)
 Shape() -> {
     NumberOfSides := 0
     simpleDescription() -> (s: str) {
-        <- ("A shape with {NumberOfSides} sides.")
+        <- ("A shape with "NumberOfSides" sides.")
     }
 }
 ```
@@ -488,7 +488,7 @@ NamedShape(name: str) {
     NumberOfSides: i32 = 0
 
     simpleDescription() -> (s: str) {
-        <- ("A shape with {NumberOfSides} sides.")
+        <- ("A shape with "NumberOfSides" sides.")
     }
 }
 
@@ -503,7 +503,7 @@ Square(sideLength: f64, name: str) {
     }
 } :NamedShape(name) {
     simpleDescription() -> (s: str) {
-        <- ("A square with sides of length {sideLength}.")
+        <- ("A square with sides of length "sideLength".")
     }
 }
 
@@ -789,8 +789,8 @@ switch nb {
 ```
 @ current <- someObjects {
     ? current -> movie:Movie {
-        prt("Movie: '{movie.name}', " +
-            "dir. {movie.director}")
+        prt("Movie: '"movie.name"', " +
+            "dir. "movie.director"")
     }
 }
 ```

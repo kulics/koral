@@ -90,20 +90,12 @@ string := "Hello world! " + title + content.toStr()
 ```
 
 这样做当然不影响功能，但是我们可以使用更直观方便的方式，那就是字符串模版。
-我们直接使用`{}`在内容中标记出代码段即可，语言会自动将元素插入到字符串中。
+我们可以在两段字符串中间直接插入元素，然后语言会自动合并为一段字符串。
 
 例如：
 ```
-string := "Hello world! {title} {content}"
+string := "Hello world! " title " " content ""
 # Hello world! Year:2018 
-```
-
-如果需要在字符串内使用 `{` 和 `}`，只需要使用 `{{` 和 `}}` 即可。
-
-例如：
-```
-string := "This is block {{ and }}"
-# This is block { and }
 ```
 ## Boolean 布尔  
 布尔指逻辑上的值，因为它们只能是真或者假。它经常用以辅助判断逻辑。
@@ -144,7 +136,7 @@ example -> {
         b := a.toI64()
         c := 123.456
         d := "hello"
-        c := "{d} world"
+        c := ""d" world"
         e := true
         f :obj = false
     }
