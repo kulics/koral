@@ -153,7 +153,6 @@ i 2         # automatic derivation
 j: i32 3    # do not use automatic derivation
 ```
 
-Note that invariable data can only be defined within the package without initial.
 ## Identifier
 Identifier is the variable, function, package, protocol, etc. specified name. The letters that make up the identifier all have a certain norm, and the naming convention of the identifier in this language is as follows:
 
@@ -168,8 +167,8 @@ In particular, in namespace, packages and protocols, properties and method names
 none.
 
 Yes, you are not mistaken, we do not have keywords. So you can use any character as your identifier, regardless of conflict issues.
-## Space and Wrap
-By default, both spaces and newlines are ignored by the compiler.
+## Space
+By default, spaces are ignored by the compiler.
 
 However, in practical projects, the use of partition will effectively improve the reading effect of the code, so we strongly recommend that you use the partition reasonably to improve the source code expression.
 
