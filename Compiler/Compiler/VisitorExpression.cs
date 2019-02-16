@@ -560,7 +560,7 @@ namespace Compiler {
         public override object VisitStringExpressionElement([NotNull] StringExpressionElementContext context) {
             var r = (Result)Visit(context.expression());
             var text = context.Text().GetText();
-            return $"{r.text} + {text}";
+            return $"({r.text}).toStr() + {text}";
         }
 
         public override object VisitDataStatement([NotNull] DataStatementContext context) {
