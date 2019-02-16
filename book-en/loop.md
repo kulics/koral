@@ -18,7 +18,7 @@ If we need to fetch the index and value at the same time, we can replace `id` wi
 E.g:
 ```
 @ [i]v <- arr  {
-    prt("{i}:{v}")
+    prt(""i":"v"")
 }
 ```
 
