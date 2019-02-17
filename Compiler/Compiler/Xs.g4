@@ -293,11 +293,11 @@ dictionaryAssign: (dictionaryElement (more dictionaryElement)*)? ;
 
 callAwait: FlowLeft expression; // 异步调用
 
-array : '{|' (expression (more expression)*)? '|}'; // 数组
+array : '{|' NewLine? CommentLine? (expression (more expression)*)? NewLine? CommentLine? '|}'; // 数组
 
-list : '{' expression (more expression)* '}'; // 列表
+list : '{' NewLine? CommentLine? expression (more expression)* NewLine? CommentLine? '}'; // 列表
 
-dictionary :  '{' dictionaryElement (more dictionaryElement)* '}'; // 字典
+dictionary :  '{' NewLine? CommentLine? dictionaryElement (more dictionaryElement)* NewLine? CommentLine? '}'; // 字典
 
 dictionaryElement: '[' expression ']' expression; // 字典元素
 
@@ -414,7 +414,7 @@ assign : op=(Assign | '+=' | '-=' | '*=' | '/=' | '%=');
 add : op=('+' | '-');
 mul : op=('*' | '/' | '%');
 pow : op=('**' | '//' | '%%');
-call : op='.';
+call : op='.' NewLine* CommentLine*;
 wave : op='~';
 
 id: op=(IDPublic|IDPrivate)
