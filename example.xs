@@ -279,14 +279,14 @@ program {
 
     testFuncParams(a: i32, b: i32, fn: (i32, i32, i32, i8) ->
      (str, i32, i32, i32)) -> (a: i32, b: str, c: str) {
-        <- (0,"", "")
+        <- (0, "", "")
     }
 
     testLambda() -> () {
         test1(fn: (i32, i32) -> (i32, i32)) -> () {
             (o1,o2) := fn(1, 2)
         }
-        test1( {i1,i2-> (i1,i2)} )
+        test1( {i1,i2 -> (i1,i2)} )
 
         test2(fn: () -> (i32)) -> () {
             o1 := fn()
