@@ -90,10 +90,10 @@ Of course, we can use the `{}` package directly, the same syntax as the collecti
 E.g:
 ```
 Peter := {
-    name := "Peter"
-    number := "060233"
-    class := 2
-    grade := 6
+    name = "Peter",
+    number = "060233",
+    class = 2,
+    grade = 6
 }
 ```
 

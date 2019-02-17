@@ -325,9 +325,9 @@ lambdaIn : id (more id)*;
 
 pkgAnonymous: pkgAnonymousAssign; // 匿名包
 
-pkgAnonymousAssign: blockLeft (pkgAnonymousAssignElement NewLine)+ blockRight; // 简化赋值
+pkgAnonymousAssign: blockLeft (pkgAnonymousAssignElement (more pkgAnonymousAssignElement)* NewLine)+ blockRight; // 简化赋值
 
-pkgAnonymousAssignElement: name ':=' expression Terminate?; // 简化赋值元素
+pkgAnonymousAssignElement: name '=' expression; // 简化赋值元素
 
 function : anonymousParameterClauseIn t=(ArrowRight|FlowRight) NewLine*
 parameterClauseOut blockLeft (functionSupportStatement)* blockRight;
