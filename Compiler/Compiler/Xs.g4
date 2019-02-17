@@ -6,7 +6,7 @@ statement: (annotationSupport)? CommentLine*
 exportStatement CommentLine* NewLine* namespaceSupportStatement*;
 
 // 导出命名空间
-exportStatement: '\\' nameSpace blockLeft (importStatement|NewLine)* BlockRight end;
+exportStatement: '\\' nameSpace blockLeft (importStatement|NewLine)* blockRight end;
 
 // 导入命名空间
 importStatement: (annotationSupport)? nameSpace (call NewLine? id)? end;
@@ -22,12 +22,12 @@ packageStaticStatement
 ;
 
 // 枚举
-enumStatement: (annotationSupport)? id ArrowRight NewLine* Judge blockLeft enumSupportStatement* BlockRight;
+enumStatement: (annotationSupport)? id ArrowRight NewLine* Judge blockLeft enumSupportStatement* blockRight;
 
 enumSupportStatement: id ('=' (add)? Integer)? end;
 // 静态包
 packageStaticStatement:(annotationSupport)? id (templateDefine)? (packageInitStatement)? 
-ArrowRight NewLine* blockLeft (packageStaticSupportStatement)* BlockRight;
+ArrowRight NewLine* blockLeft (packageStaticSupportStatement)* blockRight;
 // 静态包支持的语句
 packageStaticSupportStatement:
 namespaceVariableStatement
@@ -38,16 +38,16 @@ namespaceVariableStatement
 ;
 // 命名空间变量
 namespaceVariableStatement:(annotationSupport)? expression (Define expression|Declared type (Assign expression)?) 
-(blockLeft (packageControlSubStatement)+ BlockRight)? end;
+(blockLeft (packageControlSubStatement)+ blockRight)? end;
 // 命名空间常量
 namespaceConstantStatement: (annotationSupport)? id (Declared type)? expression end;
 // 命名空间函数
 namespaceFunctionStatement:(annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) NewLine*
-parameterClauseOut blockLeft (functionSupportStatement)* BlockRight end;
+parameterClauseOut blockLeft (functionSupportStatement)* blockRight end;
 
 // 定义包
 packageStatement:(annotationSupport)? id (templateDefine)? parameterClausePackage (packageInitStatement)? 
- ArrowRight blockLeft (packageSupportStatement)* BlockRight 
+ ArrowRight blockLeft (packageSupportStatement)* blockRight 
  (extend packageOverrideStatement)? (protocolImplementStatement)* ;
 // 继承
 extend: ':' type '(' expressionList? ')';
@@ -61,22 +61,22 @@ packageVariableStatement
 |NewLine
 ;
 // 包构造方法
-packageInitStatement:(annotationSupport)? blockLeft (functionSupportStatement)* BlockRight;
+packageInitStatement:(annotationSupport)? blockLeft (functionSupportStatement)* blockRight;
 // 函数
 packageFunctionStatement:(annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) NewLine*
-parameterClauseOut blockLeft (functionSupportStatement)* BlockRight end;
+parameterClauseOut blockLeft (functionSupportStatement)* blockRight end;
 // 重写函数
 packageOverrideFunctionStatement:(annotationSupport)? (n=':')? id parameterClauseIn t=(ArrowRight|FlowRight) NewLine*
-parameterClauseOut blockLeft (functionSupportStatement)* BlockRight end;
+parameterClauseOut blockLeft (functionSupportStatement)* blockRight end;
 // 定义变量
 packageVariableStatement:(annotationSupport)? expression (Define expression|Declared type (Assign expression)?)
-(blockLeft (packageControlSubStatement )+ BlockRight)? end;
+(blockLeft (packageControlSubStatement )+ blockRight)? end;
 // 定义子方法
-packageControlSubStatement: id (blockLeft (functionSupportStatement)+ BlockRight)? end;
+packageControlSubStatement: id (blockLeft (functionSupportStatement)+ blockRight)? end;
 // 包重载
 packageOverrideStatement: blockLeft (packageOverrideFunctionStatement)* BlockRight;
 // 包扩展
-packageExtensionStatement: id (templateDefine)? ArrowLeft blockLeft (packageExtensionSupportStatement)* BlockRight;
+packageExtensionStatement: id (templateDefine)? ArrowLeft blockLeft (packageExtensionSupportStatement)* blockRight;
 // 包扩展支持的语句
 packageExtensionSupportStatement: 
 packageFunctionStatement
@@ -84,7 +84,7 @@ packageFunctionStatement
 |NewLine
 ;
 // 协议
-protocolStatement:(annotationSupport)? id (templateDefine)? '::' blockLeft (protocolSupportStatement)* BlockRight;
+protocolStatement:(annotationSupport)? id (templateDefine)? '::' blockLeft (protocolSupportStatement)* blockRight;
 // 协议支持的语句
 protocolSupportStatement:
 protocolFunctionStatement
@@ -93,7 +93,7 @@ protocolFunctionStatement
 |NewLine
 ;
 // 定义控制
-protocolControlStatement:(annotationSupport)? id Declared type (blockLeft (protocolControlSubStatement)* BlockRight)? end;
+protocolControlStatement:(annotationSupport)? id Declared type (blockLeft (protocolControlSubStatement)* blockRight)? end;
 // 定义子方法
 protocolControlSubStatement: id end?;
 // 函数
@@ -108,18 +108,18 @@ implementFunctionStatement
 |NewLine
 ;
 // 实现协议
-protocolImplementStatement: ':' nameSpaceItem (templateCall)? blockLeft (protocolImplementSupportStatement)* BlockRight;
+protocolImplementStatement: ':' nameSpaceItem (templateCall)? blockLeft (protocolImplementSupportStatement)* blockRight;
 // 控制实现
 implementControlStatement:(annotationSupport)? expression (Define expression|Declared type (Assign expression)?)
-(blockLeft (packageControlSubStatement)+ BlockRight)? end;
+(blockLeft (packageControlSubStatement)+ blockRight)? end;
 // 函数实现
 implementFunctionStatement:(annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) NewLine*
-parameterClauseOut blockLeft (functionSupportStatement)* BlockRight end;
+parameterClauseOut blockLeft (functionSupportStatement)* blockRight end;
 // 事件实现
 implementEventStatement: id ':' nameSpaceItem '!!' end;
 // 函数
 functionStatement:id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) NewLine* parameterClauseOut blockLeft
-(functionSupportStatement)* BlockRight end;
+(functionSupportStatement)* blockRight end;
 // 返回
 returnStatement: ArrowLeft tuple end;
 // 入参
@@ -154,9 +154,9 @@ functionSupportStatement:
 // 条件判断
 judgeCaseStatement: Judge expression ArrowRight (caseStatement)+ end;
 // 缺省条件声明
-caseDefaultStatement: Discard blockLeft (functionSupportStatement)* BlockRight;
+caseDefaultStatement: Discard blockLeft (functionSupportStatement)* blockRight;
 // 条件声明
-caseExprStatement: (expression| (id)? ':' type) blockLeft (functionSupportStatement)* BlockRight;
+caseExprStatement: (expression| (id)? ':' type) blockLeft (functionSupportStatement)* blockRight;
 // 判断条件声明
 caseStatement: caseDefaultStatement|caseExprStatement;
 // 判断
@@ -164,34 +164,34 @@ judgeStatement:
 judgeIfStatement (judgeElseIfStatement)* judgeElseStatement end
 | judgeIfStatement (judgeElseIfStatement)* end;
 // else 判断
-judgeElseStatement:Discard blockLeft (functionSupportStatement)* BlockRight;
+judgeElseStatement:Discard blockLeft (functionSupportStatement)* blockRight;
 // if 判断
-judgeIfStatement:Judge expression blockLeft (functionSupportStatement)* BlockRight;
+judgeIfStatement:Judge expression blockLeft (functionSupportStatement)* blockRight;
 // else if 判断
-judgeElseIfStatement: expression blockLeft (functionSupportStatement)* BlockRight;
+judgeElseIfStatement: expression blockLeft (functionSupportStatement)* blockRight;
 // 循环
-loopStatement:Loop id ArrowLeft iteratorStatement blockLeft (functionSupportStatement)* BlockRight end;
+loopStatement:Loop id ArrowLeft iteratorStatement blockLeft (functionSupportStatement)* blockRight end;
 // 集合循环
-loopEachStatement:Loop ('[' id ']')? id ArrowLeft expression blockLeft (functionSupportStatement)* BlockRight end;
+loopEachStatement:Loop ('[' id ']')? id ArrowLeft expression blockLeft (functionSupportStatement)* blockRight end;
 // 条件循环
-loopCaseStatement:Loop Judge expression blockLeft (functionSupportStatement)* BlockRight end;
+loopCaseStatement:Loop Judge expression blockLeft (functionSupportStatement)* blockRight end;
 // 无限循环
-loopInfiniteStatement:Loop blockLeft (functionSupportStatement)* BlockRight end;
+loopInfiniteStatement:Loop blockLeft (functionSupportStatement)* blockRight end;
 // 跳出循环
 loopJumpStatement:ArrowLeft Loop end;
 // 跳出当前循环
 loopContinueStatement:ArrowRight Loop end;
 // 检查
 checkStatement: 
-Check usingExpression blockLeft (functionSupportStatement)* BlockRight end
-|Check (usingExpression)? blockLeft (functionSupportStatement)* BlockRight (checkErrorStatement)* checkFinallyStatment end
-|Check (usingExpression)? blockLeft (functionSupportStatement)* BlockRight (checkErrorStatement)+ end;
+Check usingExpression blockLeft (functionSupportStatement)* blockRight end
+|Check (usingExpression)? blockLeft (functionSupportStatement)* blockRight (checkErrorStatement)* checkFinallyStatment end
+|Check (usingExpression)? blockLeft (functionSupportStatement)* blockRight (checkErrorStatement)+ end;
 // 定义变量
 usingExpression: expression (Define|Declared type Assign) expression;
 // 错误处理
-checkErrorStatement:(id|id Declared type) blockLeft (functionSupportStatement)* BlockRight;
+checkErrorStatement:(id|id Declared type) blockLeft (functionSupportStatement)* blockRight;
 // 最终执行
-checkFinallyStatment: Discard blockLeft (functionSupportStatement)* BlockRight;
+checkFinallyStatment: Discard blockLeft (functionSupportStatement)* blockRight;
 
 // 报告错误
 reportStatement: Check '(' (expression)? ')' end;
@@ -278,8 +278,8 @@ callElement : id op=(Judge|Check)? '[' (expression | slice) ']';
 
 callPkg: 
 type '(' NewLine? expressionList? NewLine? ')'
-| type blockLeft NewLine? (pkgAssign|listAssign|dictionaryAssign) BlockRight 
-| type '(' NewLine? expressionList? NewLine? ')' blockLeft NewLine? (pkgAssign|listAssign|dictionaryAssign) BlockRight ; // 新建包
+| type blockLeft (pkgAssign|listAssign|dictionaryAssign) blockRight 
+| type '(' NewLine? expressionList? NewLine? ')' blockLeft (pkgAssign|listAssign|dictionaryAssign) blockRight ; // 新建包
 
 getType: Judge '(' (expression|':' type) ')';
 
@@ -317,20 +317,20 @@ templateDefine: '<' id (more id)* '>';
 
 templateCall: '<' type (more type)* '>';
 
-lambda : blockLeft (lambdaIn)? t=(ArrowRight|FlowRight) NewLine* expressionList BlockRight
+lambda : blockLeft (lambdaIn)? t=(ArrowRight|FlowRight) NewLine* expressionList blockRight
 | blockLeft (lambdaIn)? t=(ArrowRight|FlowRight) NewLine* 
-(functionSupportStatement)* BlockRight;
+(functionSupportStatement)* blockRight;
 
 lambdaIn : id (more id)*;
 
 pkgAnonymous: pkgAnonymousAssign; // 匿名包
 
-pkgAnonymousAssign: blockLeft (pkgAnonymousAssignElement NewLine)+ BlockRight; // 简化赋值
+pkgAnonymousAssign: blockLeft (pkgAnonymousAssignElement NewLine)+ blockRight; // 简化赋值
 
 pkgAnonymousAssignElement: name ':=' expression Terminate?; // 简化赋值元素
 
 function : anonymousParameterClauseIn t=(ArrowRight|FlowRight) NewLine*
-parameterClauseOut blockLeft (functionSupportStatement)* BlockRight;
+parameterClauseOut blockLeft (functionSupportStatement)* blockRight;
 
 // 入参
 anonymousParameterClauseIn : '(' parameter? (more parameter)*  ')'  ;
@@ -426,8 +426,9 @@ Terminate : ';';
 
 more : ',' CommentLine* NewLine* ;
 
-blockLeft : BlockLeft NewLine*;
+blockLeft : BlockLeft CommentLine* NewLine*;
 BlockLeft : '{';
+blockRight : CommentLine* NewLine* BlockRight;
 BlockRight : '}';
 
 Define : ':=';
