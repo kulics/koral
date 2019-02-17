@@ -89,10 +89,10 @@ Dictionary := [[str]i32]{ ["1"]1, ["2"]2, ["3"]3 }
 例如：
 ```
 Peter := {
-    name := "Peter"
-    number := "060233"
-    class := 2
-    grade := 6
+    name = "Peter",
+    number = "060233",
+    class = 2,
+    grade = 6
 }
 ```
 

@@ -356,8 +356,8 @@ app() -> {
     testPackage() -> () {
         item := program{Name = "new program",Running = true}
         item2 := {
-            Name := "new program"
-            running := true
+            Name = "new program",
+            running = true
         }
         item3 := [i32]{1,2,3,4,5}
         item4 := [[str]i32]{["1"]1,["2"]2,["3"]3}
