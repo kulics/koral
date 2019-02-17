@@ -547,9 +547,9 @@ namespace Compiler {
         }
 
         public override object VisitStringExpression([NotNull] StringExpressionContext context) {
-            var text = context.Text().GetText() + " + ";
+            var text = context.Text().GetText();
             foreach (var item in context.stringExpressionElement()) {
-                text += Visit(item);
+                text += " + " + Visit(item);
             }
             return new Result {
                 data = str,
