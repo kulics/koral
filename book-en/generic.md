@@ -76,13 +76,13 @@ Func<T>(data: T) -> (data: T) {
     <- (data)
 }
 
-Protocol<T> :: {
+Protocol<T> {
     test<T>(in: T) -> () {}
 }
 
 Implement() -> {
 
-} :Protocol<Implement> {
+} Protocol<Implement> {
     test<Implement>(in: Implement) -> () {
         
     }

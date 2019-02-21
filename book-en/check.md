@@ -128,7 +128,7 @@ example -> {
 
 Defer() -> {
     content: str
-} :IDisposable {
+} IDisposable {
     Dispose() -> () {
         ..content = ""
     }
