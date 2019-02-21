@@ -343,7 +343,7 @@ inPackageArray() {
 
 defer() -> {
     data := ""
-} :IDisposable {
+} IDisposable {
     Dispose() -> () {}
 }
 
@@ -366,8 +366,8 @@ app() -> {
     testFuncTemplate<T1, T2>(data1: T1, data2: T2) -> (data: app) {
         <- (..)
     }
-} :program() {  
-} :protocol {
+} program() {  
+} protocol {
     B: i32 {
         get { 
             <- (_B) 
@@ -409,12 +409,12 @@ testStaticTemplate<T> -> {
     const_data: T
 }
 
-testProtocolTemplate<T> :: {
+testProtocolTemplate<T> {
     test<T>(in: T) -> ()
 }
 
 testImplementTemplate() -> {
-} :testProtocolTemplate<testImplementTemplate> {
+} testProtocolTemplate<testImplementTemplate> {
     test<testImplementTemplate>(in: testImplementTemplate) -> () {}
 }
 
@@ -428,7 +428,7 @@ program() -> {
     Running: bl?
 }
 
-protocol :: {
+protocol {
     B: i32 
     c(x: i32) -> (y: i32)
     d() ~> (y: i32)
@@ -463,5 +463,5 @@ packageChild(x: i32, y: i32) {
     ..x = x
 } -> {
     x: i32
-} :package(y) {
+} package(y) {
 }

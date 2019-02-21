@@ -182,7 +182,7 @@ node(value: i32) {
     Right: node?
 }
 
-control :: {
+control {
     shutdown() -> ()
 }
 
@@ -201,7 +201,7 @@ program(name: str) {
         prt("Stop")
         .._Running = false
     }
-} :control {
+} control {
     shutdown() -> () {
         prt("Shutdown")
         .._Running = false
@@ -212,6 +212,5 @@ app(name: str, platform: str) {
     Platform = platform
 } -> {
     Platform: str
-} :program(name) {
-    
+} program(name) {
 }

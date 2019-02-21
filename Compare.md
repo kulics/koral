@@ -501,7 +501,7 @@ Square(sideLength: f64, name: str) {
     area() -> (f: f64) {
         <- (sideLength * sideLength)
     }
-} :NamedShape(name) {
+} NamedShape(name) {
     simpleDescription() -> (s: str) {
         <- ("A square with sides of length "sideLength".")
     }
@@ -834,7 +834,7 @@ for current in someObjects {
 ## Protocol
 ### Xs
 ```
-Nameable :: {
+Nameable {
     name() -> (s: str)
 }
 
@@ -888,11 +888,11 @@ func f(x: Nameable) {
 ### Xs
 ```
 Dog() -> {
-} :Nameable {
+} Nameable {
     name() -> (n: str) {
         <- ("Dog")
     }
-} :Weight {
+} Weight {
     getWeight() -> (w: i32) {
         <- (30)
     }
