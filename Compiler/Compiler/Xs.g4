@@ -22,12 +22,12 @@ packageStaticStatement
 ;
 
 // 枚举
-enumStatement: (annotationSupport)? id ArrowRight NewLine* Judge blockLeft enumSupportStatement* blockRight;
+enumStatement: (annotationSupport)? id ArrowRight NewLine* Judge blockLeft enumSupportStatement* blockRight end;
 
 enumSupportStatement: id ('=' (add)? Integer)? end;
 // 静态包
 packageStaticStatement:(annotationSupport)? id (templateDefine)? (packageInitStatement)? 
-ArrowRight NewLine* blockLeft (packageStaticSupportStatement)* blockRight;
+ArrowRight NewLine* blockLeft (packageStaticSupportStatement)* blockRight end;
 // 静态包支持的语句
 packageStaticSupportStatement:
 namespaceVariableStatement
@@ -48,9 +48,9 @@ parameterClauseOut blockLeft (functionSupportStatement)* blockRight end;
 // 定义包
 packageStatement:(annotationSupport)? id (templateDefine)? parameterClausePackage (packageInitStatement)? 
  ArrowRight blockLeft (packageSupportStatement)* blockRight 
- (extend packageOverrideStatement)? (protocolImplementStatement)* ;
+ (extend packageOverrideStatement)? (protocolImplementStatement)* end;
 // 继承
-extend: ':' type '(' expressionList? ')';
+extend: type '(' expressionList? ')';
 // 入参
 parameterClausePackage : '(' parameter? (more parameter)*  ')';
 // 包支持的语句
@@ -84,7 +84,7 @@ packageFunctionStatement
 |NewLine
 ;
 // 协议
-protocolStatement:(annotationSupport)? id (templateDefine)? '::' blockLeft (protocolSupportStatement)* blockRight;
+protocolStatement:(annotationSupport)? id (templateDefine)? blockLeft (protocolSupportStatement)* blockRight end;
 // 协议支持的语句
 protocolSupportStatement:
 protocolFunctionStatement
@@ -108,7 +108,7 @@ implementFunctionStatement
 |NewLine
 ;
 // 实现协议
-protocolImplementStatement: ':' nameSpaceItem (templateCall)? blockLeft (protocolImplementSupportStatement)* blockRight;
+protocolImplementStatement: nameSpaceItem (templateCall)? blockLeft (protocolImplementSupportStatement)* blockRight;
 // 控制实现
 implementControlStatement:(annotationSupport)? expression (Define expression|Declared type (Assign expression)?)
 (blockLeft (packageControlSubStatement)+ blockRight)? end;
