@@ -6,11 +6,11 @@ The protocol specifies the methods and properties necessary to implement a parti
 
 Our package can introduce the protocol we need, just like signing an protocol, and then declare all the properties required by the protocol, so that we think the package signed the protocol.
 ## Definition
-We only need to use the symbol `id :: {}` to define a protocol.
+We only need to use the symbol `id {}` to define a protocol.
 
 E.g:
 ```
-protocol :: {
+protocol {
 }
 ```
 This is an empty protocol.
@@ -19,7 +19,7 @@ Next, let's design a difficult task that students need to accomplish ... homewor
 
 E.g:
 ```
-homeWork :: {
+homeWork {
     Count: i32
     do() -> ()
 }
@@ -32,13 +32,13 @@ Unlike a package, the definition of the protocol properties do not need specific
 
 Next, let's have the students implement the protocol.
 ## Implement the protocol
-We can implement this protocol by using the `:protocol {}` statement after the package declaration.
+We can implement this protocol by using the `protocol {}` statement after the package declaration.
 
 E.g:
 ```
 student() -> {
     ...
-} :homeWork {
+} homeWork {
     Count: i32
 
     do() -> () {
@@ -148,14 +148,14 @@ example -> {
     }
 }
 
-A :: {
+A {
     X: i32
     do() -> () {}
 }
 
 B() -> {
     Y := 5
-} :A {
+} A {
     X := 0
     do() -> () {
         X += 1
