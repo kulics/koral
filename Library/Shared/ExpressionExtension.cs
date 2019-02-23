@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 
 namespace Library {
-    public static class ExpressionExtension {
+    public static partial class ExpressionExtension {
         // object 
         public static string toStr(this object it) => it.ToString();
         public static T to<T>(this object it) {
@@ -255,13 +255,14 @@ namespace Library {
         public static string subStr(this string it, int startIndex) => it.Substring(startIndex);
 
         public static string replace(this string it, string older, string newer) => it.Replace(older, newer);
-        public static int count(this string it) => it.Length;
+        public static int len(this string it) => it.Length;
+        public static int length(this string it) => it.Length;
         public static int lastIndex(this string it) => it.Length - 1;
 
         public static bool contains(this string it, string value) => it.Contains(value);
 
         public static int findFirst(this string it, Func<char, bool> fn) {
-            for (int i = 0; i < it.count(); i++) {
+            for (int i = 0; i < it.len(); i++) {
                 if (fn(it[i])) {
                     return i;
                 }

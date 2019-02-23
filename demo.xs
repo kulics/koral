@@ -97,8 +97,8 @@ program -> {
 
     simpleSort(list: [i32]) -> () {
         prt("Simple Sort")
-        @ i <- [0 < list.count] {
-            @ j <- [i+1 < list.count] {
+        @ i <- [0 < list.len] {
+            @ j <- [i+1 < list.len] {
                 ? list[i] > list[j] {
                     swap(list, i , j)
                 }
@@ -111,8 +111,8 @@ program -> {
 
     bubbleSort(list: [i32]) -> () {
         prt("Bubble Sort")
-        @ i <- [0 < list.count] {
-            @ j <- [list.count-2 >= i] {
+        @ i <- [0 < list.len] {
+            @ j <- [list.len-2 >= i] {
                 ? list[j] > list[j+1] {
                     swap(list, j , j+1)
                 }
@@ -125,7 +125,7 @@ program -> {
 
     quickSort(list: [i32]) -> () {
         prt("Quick Sort")
-        qSort(list,0,list.count-1)
+        qSort(list,0,list.len-1)
         @ ea <- list { 
             prt(ea) 
         }

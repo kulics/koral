@@ -51,10 +51,10 @@ list[0] = 5
 需要注意的是，我们只能访问已经存在数据的索引，如果不存在，则会出现错误。
 ### 常用操作
 ```
-list += 1                # 添加到末尾
-list.insert(2, 3)        # 插入元素 3 到索引 2
-list -= 1                # 删除指定位置元素
-length := list.count     # 长度
+list += 1                   # 添加到末尾
+list.insert(2, 3)           # 插入元素 3 到索引 2
+list -= 1                   # 删除指定位置元素
+length := list.len          # 长度
 ```
 ## 字典
 字典是用来存储无序的相同类型数据的集合，字典每个值（value）都关联唯一的键（key），键作为字典中的这个值数据的标识符。
@@ -96,9 +96,9 @@ dictionary["b"] = 5
 和列表不同的是，如果赋值的是不存在的索引，也不会错误，会直接将值赋予给新的键。
 ### 常用操作
 ```
-dictionary += {["d"]11}        # 添加元素
-dictionary -= "c"              # 删除指定索引元素
-length := dictionary.count     # 长度
+dictionary += {["d"]11}         # 添加元素
+dictionary -= "c"               # 删除指定索引元素
+length := dictionary.len        # 长度
 ```
 ### [下一章](judgment.md)
 

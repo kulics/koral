@@ -49,10 +49,10 @@ list[0] = 5
 Note that we can only access the index of the existing data, if not exist, there will be an error.
 ### Common operation
 ```
-list += 1                # added to the end
-list.insert(2, 3)       # insert element 3 to index 2
-list -= 1                # delete the specified location element
-length := list.count     # length
+list += 1                   # added to the end
+list.insert(2, 3)           # insert element 3 to index 2
+list -= 1                   # delete the specified location element
+length := list.len          # length
 ```
 ## Dictionary
 A dictionary is a collection of disparate data of the same type. Each value of a dictionary is associated with a unique key, which is used as an identifier for this value data in the dictionary.
@@ -94,9 +94,9 @@ dictionary["b"] = 5
 The difference is that with the List, if the assignment is a non-existent index, it will not be wrong, the value will be given directly to the new key.
 ### Common operation
 ```
-dictionary += {["d"]11}        # add index by method
-dictionary -= "c"              # delete the specified index element
-length := dictionary.count     # length
+dictionary += {["d"]11}         # add index by method
+dictionary -= "c"               # delete the specified index element
+length := dictionary.len        # length
 ```
 ### [Next Chapter](judgment.md)
 
