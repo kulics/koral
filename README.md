@@ -37,7 +37,7 @@ program -> {
                 prt(item) # call function
             } _ {
                 # lambda
-                prt( greetings.filter( {it -> it.count > 4} ) )
+                prt( greetings.filter( {it -> it.len > 4} ) )
                 <- @
             }
         }
