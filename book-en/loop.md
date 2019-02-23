@@ -43,7 +43,7 @@ By default, iterators add `1` to each interval. If we need to take every other n
 E.g:
 ```
 @ i <- [0 <= 100, 2] {
-    ...
+    todo("...")
 }
 ```
 So every interval is not `1` but `2`, empathy we can set other numbers.
@@ -53,7 +53,7 @@ We can also reverse it in reverse order, as long as we use `>=`.
 E.g:
 ```
 @ i <- [100 >= 0] {
-     ...    # from 100 to 0
+     todo("...")    # from 100 to 0
 }
 ```
 For the same reason, if you don't want to reach the last one, you can use `100 > 0`.
@@ -65,7 +65,7 @@ At other times, we may need an infinite loop. Very easy, we only need to use the
 E.g:
 ```
 @ {
-    ... # never jump out
+    todo("...") # never jump out
 }
 ```
 This can be thought of as a while while for other languages.

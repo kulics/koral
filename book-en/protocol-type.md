@@ -37,7 +37,7 @@ We can implement this protocol by using the `protocol {}` statement after the pa
 E.g:
 ```
 student() -> {
-    ...
+    todo("...")
 } homeWork {
     Count: i32
 
@@ -105,7 +105,7 @@ E.g:
 ```
 arr := [homeWork]{}
 arr.add( StudentA )
-... # stuffed many, many students
+todo("...") # stuffed many, many students
 @ i <- arr {
     doHomeWork(i)
 }

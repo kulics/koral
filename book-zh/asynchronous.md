@@ -37,7 +37,7 @@ result := async()  # result 是一个 Task 数据
 例如：
 ```
 result := <~ async()
-...
+todo("...")
 ```
 声明异步等待后，程序执行到这里就会暂时停止后面的功能，直到 `async` 函数执行完毕后，将 `out` 的值赋值给 `result`，再继续执行。
 ## 异步使用条件

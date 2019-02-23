@@ -16,7 +16,7 @@ readFile(name: str) -> () {
     ? name.Length == 0 {
         !( Exception("something wrong") )
     }
-    ...
+    todo("...")
 }
 ```
 So we declare an exception, the exception description is `something wrong`, once the external caller uses the illegal length of `name`, the function will be forced to abort, report the exception up and hand it to the caller.
@@ -67,7 +67,7 @@ func() -> () {
             File.release()
         }
     }
-    ...
+    todo("...")
 }
 ```
 So we declare the `File.release()` statement that releases the file. This statement will not be executed immediately, but will wait for the function to be called before exiting.
@@ -78,7 +78,7 @@ Note that because the check defer is performed before the function exits and the
 
 E.g:
 ```
-...
+todo("...")
 _ {
     File.release()
     <- ()    # error, cannot use return statement
@@ -91,9 +91,9 @@ For packages that implement the automatic release protocol, we can use the '!= '
 E.g:
 ``` 
 ! res := FileResource("/test.xs") {
-    ...
+    todo("...")
 }
-...
+todo("...")
 ```
 
 ### [Next Chapter](asynchronous.md)
