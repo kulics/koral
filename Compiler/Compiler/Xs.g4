@@ -14,7 +14,6 @@ importStatement: (annotationSupport)? nameSpace (call NewLine? id)? end;
 namespaceSupportStatement:
 packageStaticStatement
 |packageStatement
-|packageExtensionStatement
 |protocolStatement
 |enumStatement
 |CommentLine
@@ -76,7 +75,7 @@ packageControlSubStatement: id (blockLeft (functionSupportStatement)+ blockRight
 // 包重载
 packageOverrideStatement: blockLeft (packageOverrideFunctionStatement)* BlockRight;
 // 包扩展
-packageExtensionStatement: id (templateDefine)? ArrowLeft blockLeft (packageExtensionSupportStatement)* blockRight;
+packageExtensionStatement: id (templateDefine)? '+=' blockLeft (packageExtensionSupportStatement)* blockRight;
 // 包扩展支持的语句
 packageExtensionSupportStatement: 
 packageFunctionStatement
@@ -84,7 +83,7 @@ packageFunctionStatement
 |NewLine
 ;
 // 协议
-protocolStatement:(annotationSupport)? id (templateDefine)? blockLeft (protocolSupportStatement)* blockRight end;
+protocolStatement:(annotationSupport)? id (templateDefine)? ArrowLeft blockLeft (protocolSupportStatement)* blockRight end;
 // 协议支持的语句
 protocolSupportStatement:
 protocolFunctionStatement

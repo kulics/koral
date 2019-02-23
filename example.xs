@@ -409,7 +409,7 @@ testStaticTemplate<T> -> {
     const_data: T
 }
 
-testProtocolTemplate<T> {
+testProtocolTemplate<T> <- {
     test<T>(in: T) -> ()
 }
 
@@ -428,7 +428,7 @@ program() -> {
     Running: bl?
 }
 
-protocol {
+protocol <- {
     B: i32 
     c(x: i32) -> (y: i32)
     d() ~> (y: i32)
