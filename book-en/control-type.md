@@ -32,7 +32,7 @@ With the above example, we naturally can think of how to deal with set operation
 E.g:
 ```
 Number: i32 {
-    ...
+    todo("...")
     set {       # means set, equivalent to setter in other languages
         # ? ? ? Who should give the value? ? ?
     }
@@ -46,7 +46,7 @@ E.g:
 _Number := 0
 
 Number: i32 {
-    ...
+    todo("...")
     set {
         _Number = value  # value represents the value of the input
     }

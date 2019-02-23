@@ -19,11 +19,11 @@ Color -> ?{
 ```
 c := randomColor()     # 获取一个随机颜色
 ? c -> Color.Red {
-    ...
+    todo("...")
 } Color.Green {
-    ...
+    todo("...")
 } Color.Blue {
-    ...
+    todo("...")
 }
 ```
 

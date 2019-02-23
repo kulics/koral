@@ -108,7 +108,7 @@ We can define private properties to store properties that we do not want to be a
 E.g:
 ```
 student() -> {
-    ...
+    todo("...")
     _GirlFirend: str    # The identifier beginning with this '_' is private
 }
 ```
@@ -124,7 +124,7 @@ If we need to make this package come with a function that makes it easy to manip
 E.g:
 ```
 student() -> {
-    ...
+    todo("...")
     getGirlFirend() -> (name: str) {
         <- (.._GirlFirend)
     }
@@ -163,7 +163,7 @@ student(name: str, number: str) {
     # calculate the grade
     ..Grade = GetSubText(number, 0, 1)
 } -> {
-    ...
+    todo("...")
 }
 ```
 This gives us a package with constructors, and when we create a new student, class and grade data are automatically generated.
@@ -203,7 +203,7 @@ E.g:
 student {
     ShareData = 128 
 } -> {
-    ...
+    todo("...")
 }
 ```
 ## Combination

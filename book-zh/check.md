@@ -16,7 +16,7 @@ readFile(name: str) -> () {
     ? name.Length == 0 {
         !( Exception("something wrong") )
     }
-    ...
+    todo("...")
 }
 ```
 这样我们就声明了一个异常，异常说明是 `something wrong`，一旦外部调用者使用了不合法长度的 `name`，这个函数就会被强制中止，将这个异常向上报告，交给调用者处理。
@@ -67,7 +67,7 @@ func() -> () {
             File.release()
         }
     }
-    ...
+    todo("...")
 }
 ```
 这样我们就声明了 `File.release()` 这条释放文件的语句，这条语句不会被立刻执行，而是会等待检查结束后调用。
@@ -78,7 +78,7 @@ func() -> () {
 
 例如：
 ```
-...
+todo("...")
 _ {
     File.release()
     <- ()   # 错误，不能使用返回语句
@@ -91,9 +91,9 @@ _ {
 例如：
 ```
 ! res := FileResource("/test.xs") {
-    ...
+    todo("...")
 }
-...
+todo("...")
 ```
 
 ### [下一章](asynchronous.md)

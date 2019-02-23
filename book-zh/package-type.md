@@ -108,7 +108,7 @@ Peter := {
 例如：
 ```
 student() -> {
-    ...
+    todo("...")
     _GirlFirend: str # 第一个字符是 _ 的标识符是私有的
 }
 ```
@@ -124,7 +124,7 @@ student() -> {
 例如：
 ```
 student() -> {
-    ...
+    todo("...")
     getGirlFirend() -> (name: str) {
         <- (.._GirlFirend)
     }
@@ -163,7 +163,7 @@ student(name: str, number: str) {
     # 计算得出年级
     ..Grade = GetSubText(number, 0, 1)
 } -> {
-    ...
+    todo("...")
 }
 ```
 这样就得到了一个带构造函数的包，我们在创建一个新学生的时候，就会自动产生班级和年级数据。
@@ -203,7 +203,7 @@ student -> {
 student {
     ShareData = 128 
 } -> {
-    ...
+    todo("...")
 }
 ```
 ## 组合

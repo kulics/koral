@@ -37,7 +37,7 @@ homeWork <- {
 例如：
 ```
 student() -> {
-    ...
+    todo("...")
 } homeWork {
     Count: i32
 
@@ -105,7 +105,7 @@ doHomeWork(StudentC)
 ```
 arr := [homeWork]{}
 arr.add( StudentA )
-... # 塞进很多很多学生
+todo("...") # 塞进很多很多学生
 @ i <- arr {
     doHomeWork(i)
 }

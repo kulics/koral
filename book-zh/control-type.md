@@ -32,7 +32,7 @@ number: i32 {
 例如：
 ```
 Number: i32 {
-    ...
+    todo("...")
     set {       # 表示设置，相当于其它语言中的setter
         # ？？？该把值给谁？？？
     }
@@ -46,7 +46,7 @@ Number: i32 {
 _Number := 0
 
 Number: i32 {
-    ...
+    todo("...")
     set {
         _Number = value     # value代表输入的值
     }
