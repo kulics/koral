@@ -1,9 +1,9 @@
 # Xs Programming Language
-Xs is an open source cross-platform programming language focused on simplicity.
+Xs is a focus on simple, open source, cross-platform programming language.
 
-The design goal of this language is to improve the efficiency of reading and writing, reduce the burden of grammar, and enable users to focus their real attention on problem solving.
+The language is designed to improve reading and writing efficiency, reduce the burden of grammar, and allow users to focus on solving problems.
 
-So we abandon a lot of complicated features and only retain the most general functions. In the end, Xs can express logic gracefully with very little grammar.
+So Xs discards the cumbersome features, retains the most versatile features, and elegantly expresses logic with minimal grammar.
 
 ## Features
 + Well-designed grammar, easy to write and read.
