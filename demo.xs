@@ -182,7 +182,7 @@ node(value: i32) {
     Right: node?
 }
 
-control {
+control <- {
     shutdown() -> ()
 }
 

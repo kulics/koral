@@ -77,7 +77,7 @@ Func<T>(data: T) -> (data: T) {
     <- (data)
 }
 
-Protocol<T> {
+Protocol<T> <- {
     test<T>(in: T) -> () {}
 }
 

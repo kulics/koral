@@ -6,11 +6,11 @@ The protocol specifies the methods and properties necessary to implement a parti
 
 Our package can introduce the protocol we need, just like signing an protocol, and then declare all the properties required by the protocol, so that we think the package signed the protocol.
 ## Definition
-We only need to use the symbol `id {}` to define a protocol.
+We only need to use the symbol `id <- {}` to define a protocol.
 
 E.g:
 ```
-protocol {
+protocol <- {
 }
 ```
 This is an empty protocol.
@@ -19,7 +19,7 @@ Next, let's design a difficult task that students need to accomplish ... homewor
 
 E.g:
 ```
-homeWork {
+homeWork <- {
     Count: i32
     do() -> ()
 }
@@ -79,9 +79,9 @@ Now we can create a wide variety of students, all of whom follow the same protoc
 E.g:
 ```
 # create three different types of student packages
-StudentA := chineseStudent{}
-StudentB := americaStudent{}
-StudentC := japanStudent{}
+StudentA := chineseStudent()
+StudentB := americaStudent()
+StudentC := japanStudent()
 # let them do homework separately
 StudentA.do()
 StudentB.do()
@@ -142,13 +142,13 @@ Note that if the type can not be converted correctly, it will return a `nil` val
 
 example -> {
     Main() -> () {
-        S := B{}
+        S := B()
         B.do()
         C( B )
     }
 }
 
-A {
+A <- {
     X: i32
     do() -> () {}
 }

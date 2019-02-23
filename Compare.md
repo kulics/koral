@@ -834,7 +834,7 @@ for current in someObjects {
 ## Protocol
 ### Xs
 ```
-Nameable {
+Nameable <- {
     name() -> (s: str)
 }
 

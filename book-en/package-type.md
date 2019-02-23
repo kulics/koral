@@ -200,7 +200,7 @@ The grammar is consistent with the constructor.
 
 E.g:
 ```
-student..{
+student {
     ShareData = 128 
 } -> {
     ...
