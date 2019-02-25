@@ -311,11 +311,11 @@ namespace Compiler {
                     typ = "set";
                     break;
                 case "_get":
-                    id = " private get ";
+                    id = " protected get ";
                     typ = "get";
                     break;
                 case "_set":
-                    id = " private set ";
+                    id = " protected set ";
                     typ = "set";
                     break;
                 case "add":
