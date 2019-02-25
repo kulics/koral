@@ -87,7 +87,7 @@ namespace Compiler {
                 r.text += context.op.Text;
                 r.isVariable = r.text[0].isUpper();
             } else if (context.op.Type == IDPrivate) {
-                r.permission = "private";
+                r.permission = "protected";
                 r.text += context.op.Text;
                 r.isVariable = r.text[r.text.findFirst(it => it != '_')].isUpper();
             }

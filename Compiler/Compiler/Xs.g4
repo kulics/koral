@@ -65,7 +65,7 @@ packageInitStatement:(annotationSupport)? blockLeft (functionSupportStatement)* 
 packageFunctionStatement:(annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) NewLine*
 parameterClauseOut blockLeft (functionSupportStatement)* blockRight end;
 // 重写函数
-packageOverrideFunctionStatement:(annotationSupport)? (n=':')? id parameterClauseIn t=(ArrowRight|FlowRight) NewLine*
+packageOverrideFunctionStatement:(annotationSupport)? (n='_')? id parameterClauseIn t=(ArrowRight|FlowRight) NewLine*
 parameterClauseOut blockLeft (functionSupportStatement)* blockRight end;
 // 定义变量
 packageVariableStatement:(annotationSupport)? expression (Define expression|Declared type (Assign expression)?)

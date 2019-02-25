@@ -270,7 +270,7 @@ namespace Compiler {
                     record[temp.data as string] = true;
                 }
                 if (r2 != null) {
-                    obj = $"private static {typ} _{r1.text} = {r2.text}; {Wrap}" + obj;
+                    obj = $"protected static {typ} _{r1.text} = {r2.text}; {Wrap}" + obj;
                     if (!record.ContainsKey("get")) {
                         obj += $"get {{ return _{r1.text}; }}";
                     }

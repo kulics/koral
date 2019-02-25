@@ -127,7 +127,7 @@ namespace Compiler {
                     record[temp.data as string] = true;
                 }
                 if (r2 != null) {
-                    obj = $"private {typ} _{r1.text} = {r2.text}; {Wrap}" + obj;
+                    obj = $"protected {typ} _{r1.text} = {r2.text}; {Wrap}" + obj;
                     if (!record.ContainsKey("get")) {
                         obj += $"get {{ return _{r1.text}; }}";
                     }
@@ -212,7 +212,7 @@ namespace Compiler {
             if (context.n != null) {
                 obj += "protected ";
             } else {
-                obj += "public ";
+                obj += $"{id.permission} ";
             }
             // 异步
             if (context.t.Type == FlowRight) {
@@ -295,7 +295,7 @@ namespace Compiler {
                     record[temp.data as string] = true;
                 }
                 if (r2 != null) {
-                    obj = $"private {typ} _{r1.text} = {r2.text}; {Wrap}" + obj;
+                    obj = $"protected {typ} _{r1.text} = {r2.text}; {Wrap}" + obj;
                     if (!record.ContainsKey("get")) {
                         obj += $"get {{ return _{r1.text}; }}";
                     }
