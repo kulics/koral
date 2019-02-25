@@ -7,7 +7,7 @@
 }
 
 program {
-    StaticG = 5
+    staticG = 5
 } -> {
     ## 
         main function 
@@ -47,21 +47,21 @@ program {
         rd()
     }
 
-    StaticX := 0 {
+    staticX := 0 {
         get {
-            <- (_StaticX)
+            <- (_staticX)
         }
     }
-    StaticY := "hello" {
+    $staticY := "hello" {
         get { 
-            <- (_StaticY) 
+            <- (_staticY) 
         }
         set { 
-            _StaticY = value 
+            _staticY = value 
         }
     }
     readonlyA := "1024"
-    StaticG: i64
+    $staticG: i64
 
     testTuple(i: i32) -> (v: str) {
         <- ("tuple")
@@ -83,31 +83,31 @@ program {
     }
 
     testOperator() -> () {
-        I :str = "128.687"
-        I += ".890"
-        B :i32
-        B = 0
-        B += const_data
-        B = + - B
-        B -= 1
-        B *= 2
-        B /= 2
-        B %= 5
+        $i :str = "128.687"
+        i += ".890"
+        $b :i32
+        b = 0
+        b += const_data
+        b = + - b
+        b -= 1
+        b *= 2
+        b /= 2
+        b %= 5
         prt("2 pow 2 = ", 2 ** 2) 
         prt("4 extract root for 2 = ", 4 // 2) 
         prt("4 log with base 2 = ", 4 %% 2) 
-        prt(" mark string i32 "B" ")
-        C := false
-        C = ~C
-        C = 1 ~= 2
-        C = 3 == 3
-        C = 3 >= 1
-        C = 1 <= 3
-        C = true | false
-        C = true & false
-        D := 11
-        D = D.and(1).or(2).xor(3).not().lft(1).rht(2)
-        prt(B.toStr())
+        prt(" mark string i32 " b " ")
+        $c := false
+        c = ~c
+        c = 1 ~= 2
+        c = 3 == 3
+        c = 3 >= 1
+        c = 1 <= 3
+        c = true | false
+        c = true & false
+        $d := 11
+        d = d.and(1).or(2).xor(3).not().lft(1).rht(2)
+        prt(b.toStr())
     }
 
     testString() -> () {
@@ -178,38 +178,38 @@ program {
 
     testArray() -> () {
         arrSingle := {1}
-        ArrNumber := {1,2,5,6,8,4}
-        ArrNumber = ArrNumber + 0
-        ArrNumber += 3 + 7
-        ArrNumber -= 6
-        Take := ArrNumber[0]
-        Take = inPackageArray{}.arr[2]
+        $arrNumber := {1,2,5,6,8,4}
+        arrNumber = arrNumber + 0
+        arrNumber += 3 + 7
+        arrNumber -= 6
+        $take := arrNumber[0]
+        take = inPackageArray{}.arr[2]
         arrObj := {"123", 432, app{}}
         arrArr := {{1,1,1}, {1,1,1}}
         arrEmpty := [i32]{}
         arrType := {1,2,3}
         array : [|i32|] = {|1,2,3|}
-        @ item <- ArrNumber {
+        @ item <- arrNumber {
             prt(item)
         }
-        @ [i]v <- ArrNumber {
+        @ [i]v <- arrNumber {
             prt(i)
             prt(v)
         }
-        slice := ArrNumber[0<=]
-        slice2 := ArrNumber[<3]
+        slice := arrNumber[0<=]
+        slice2 := arrNumber[<3]
     }
 
     testDictionary() -> () {
         empty := [[str]i32]{}
-        DicTemp := {["k1"]1,["k2"]2}
-        DicTemp += {["k3"]3}
-        @ [k]v <- DicTemp {
+        $dicTemp := {["k1"]1,["k2"]2}
+        dicTemp += {["k3"]3}
+        @ [k]v <- dicTemp {
             prt(k)
             prt(v)
         }
-        DicTemp -= "k1"
-        prt(DicTemp["k2"])
+        dicTemp -= "k1"
+        prt(dicTemp["k2"])
     }
 
     testLoop() -> () {
@@ -234,17 +234,17 @@ program {
         @ {
             <- @
         }
-        A := 0
+        $a := 0
         b := 8
-        @ ? A < b {
-            A += 1
+        @ ? a < b {
+            a += 1
         }
     }
 
     testCheck() -> () {
-        Z :defer? = nil
+        $z :defer? = nil
         ! z2 := defer{} {
-            Z = defer{}
+            z = defer{}
             ! z3 := defer{} {
                 x := 1 * 1
             }
@@ -258,23 +258,23 @@ program {
         } e {
             !(e)
         } _ {
-            ? Z ~= nil {
-                Z.Dispose()
+            ? z ~= nil {
+                z.Dispose()
             }
         }
     }
 
-    testFunc(S: str = "test") -> (out1: str, out2: i32) {
-        S = S + "test"
+    testFunc(s: str = "test") -> (out1: str, out2: i32) {
+        s = s + "test"
         i := 1+1*3*9/8
         out2 := i + 5 + (i + 8)
         # func in func
-        InFunc() -> () {
+        inFunc() -> () {
             <- ()
         }
-        InFunc()
+        inFunc()
 
-        <- (S, i)
+        <- (s, i)
     }
 
     testFuncParams(a: i32, b: i32, fn: (i32, i32, i32, i8) ->
@@ -350,8 +350,8 @@ defer() -> {
 app() -> { 
     i := 555
     arr := {1,1,1,1}
-    _PriName := " program "
-    _B := 5
+    $_PriName := " program "
+    $_B := 5
 
     testPackage() -> () {
         item := program{Name = "new program",Running = true}
@@ -419,17 +419,17 @@ testImplementTemplate() -> {
 }
 
 program() -> {
-    Name: str? = "name" {
+    $Name: str? = "name" {
         set { 
             _Name = value 
         }
     }
 
-    Running: bl?
+    $Running: bl?
 }
 
 protocol <- {
-    B: i32 
+    $B: i32 
     c(x: i32) -> (y: i32)
     d() ~> (y: i32)
     e() ~> ()
@@ -439,11 +439,11 @@ protocol <- {
 `Table("test")`
 testAnnotation() -> {
     `Key, Column("id")`
-    Id: str?
+    $Id: str?
     `Column("nick_name")`
-    NickName: str?
+    $NickName: str?
     `Column("profile")`
-    Profile: str?
+    $Profile: str?
 }
 
 testEnum -> ?{

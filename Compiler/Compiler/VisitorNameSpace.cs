@@ -248,6 +248,7 @@ namespace Compiler {
 
         public override object VisitNamespaceVariableStatement([NotNull] NamespaceVariableStatementContext context) {
             var r1 = (Result)Visit(context.expression(0));
+            var isMutable = context.m != null;
             var typ = "";
             Result r2 = null;
             if (context.expression().Length == 2) {
@@ -274,13 +275,13 @@ namespace Compiler {
                     if (!record.ContainsKey("get")) {
                         obj += $"get {{ return _{r1.text}; }}";
                     }
-                    if (r1.isVariable && !record.ContainsKey("set")) {
+                    if (isMutable && !record.ContainsKey("set")) {
                         obj += $"set {{ _{r1.text} = value; }}";
                     }
                 }
                 obj += BlockRight + Wrap;
             } else {
-                if (r1.isVariable) {
+                if (isMutable) {
                     obj += $"{r1.permission} static {typ} {r1.text} {{ get;set; }}";
                     if (r2 != null) {
                         obj += $" = {r2.text} {Terminate} {Wrap}";
@@ -288,11 +289,11 @@ namespace Compiler {
                         obj += Wrap;
                     }
                 } else {
-                    obj += $"{r1.permission} static readonly {typ} {r1.text}";
+                    obj += $"{r1.permission} static {typ} {r1.text} {{ get; }}";
                     if (r2 != null) {
                         obj += $" = {r2.text} {Terminate} {Wrap}";
                     } else {
-                        obj += Terminate + Wrap;
+                        obj += Wrap;
                     }
                 }
             }

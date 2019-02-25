@@ -105,6 +105,8 @@ namespace Compiler {
 
         public override object VisitPackageVariableStatement([NotNull] PackageVariableStatementContext context) {
             var r1 = (Result)Visit(context.expression(0));
+            var isMutable = context.m != null;
+            var isVirtual = r1.isVirtual ? " virtual " : "";
             var typ = "";
             Result r2 = null;
             if (context.expression().Length == 2) {
@@ -119,7 +121,7 @@ namespace Compiler {
                 obj += Visit(context.annotationSupport());
             }
             if (context.packageControlSubStatement().Length > 0) {
-                obj += $"{r1.permission} {typ} {r1.text + BlockLeft}";
+                obj += $"{r1.permission} {isVirtual} {typ} {r1.text + BlockLeft}";
                 var record = new Dictionary<string, bool>();
                 foreach (var item in context.packageControlSubStatement()) {
                     var temp = (Visit(item) as Result);
@@ -131,25 +133,25 @@ namespace Compiler {
                     if (!record.ContainsKey("get")) {
                         obj += $"get {{ return _{r1.text}; }}";
                     }
-                    if (r1.isVariable && !record.ContainsKey("set")) {
+                    if (isMutable && !record.ContainsKey("set")) {
                         obj += $"set {{ _{r1.text} = value; }}";
                     }
                 }
                 obj += BlockRight + Wrap;
             } else {
-                if (r1.isVariable) {
-                    obj += $"{r1.permission} {typ} {r1.text} {{ get;set; }}";
+                if (isMutable) {
+                    obj += $"{r1.permission} {isVirtual} {typ} {r1.text} {{ get;set; }}";
                     if (r2 != null) {
                         obj += $" = {r2.text} {Terminate} {Wrap}";
                     } else {
                         obj += Wrap;
                     }
                 } else {
-                    obj += $"{r1.permission} readonly {typ} {r1.text}";
+                    obj += $"{r1.permission} {isVirtual} {typ} {r1.text} {{ get; }}";
                     if (r2 != null) {
                         obj += $" = {r2.text} {Terminate} {Wrap}";
                     } else {
-                        obj += Terminate + Wrap;
+                        obj += Wrap;
                     }
                 }
             }
@@ -176,6 +178,7 @@ namespace Compiler {
 
         public override object VisitPackageFunctionStatement([NotNull] PackageFunctionStatementContext context) {
             var id = (Result)Visit(context.id());
+            var isVirtual = id.isVirtual ? " virtual " : "";
             var obj = "";
             if (context.annotationSupport() != null) {
                 obj += Visit(context.annotationSupport());
@@ -188,9 +191,9 @@ namespace Compiler {
                 } else {
                     pout = Task;
                 }
-                obj += $"{id.permission} async {pout} {id.text}";
+                obj += $"{id.permission} {isVirtual} async {pout} {id.text}";
             } else {
-                obj += id.permission + " " + Visit(context.parameterClauseOut()) + " " + id.text;
+                obj += id.permission + isVirtual + " " + Visit(context.parameterClauseOut()) + " " + id.text;
             }
 
             // 泛型
@@ -273,6 +276,8 @@ namespace Compiler {
 
         public override object VisitImplementControlStatement([NotNull] ImplementControlStatementContext context) {
             var r1 = (Result)Visit(context.expression(0));
+            var isMutable = context.m != null;
+            var isVirtual = r1.isVirtual ? " virtual " : "";
             var typ = "";
             Result r2 = null;
             if (context.expression().Length == 2) {
@@ -287,7 +292,7 @@ namespace Compiler {
                 obj += Visit(context.annotationSupport());
             }
             if (context.packageControlSubStatement().Length > 0) {
-                obj += $"{r1.permission} {typ} {r1.text + BlockLeft}";
+                obj += $"{r1.permission} {isVirtual} {typ} {r1.text + BlockLeft}";
                 var record = new Dictionary<string, bool>();
                 foreach (var item in context.packageControlSubStatement()) {
                     var temp = (Visit(item) as Result);
@@ -299,21 +304,21 @@ namespace Compiler {
                     if (!record.ContainsKey("get")) {
                         obj += $"get {{ return _{r1.text}; }}";
                     }
-                    if (r1.isVariable && !record.ContainsKey("set")) {
+                    if (isMutable && !record.ContainsKey("set")) {
                         obj += $"set {{ _{r1.text} = value; }}";
                     }
                 }
                 obj += BlockRight + Wrap;
             } else {
-                if (r1.isVariable) {
-                    obj += $"{r1.permission} {typ} {r1.text} {{ get;set; }}";
+                if (isMutable) {
+                    obj += $"{r1.permission} {isVirtual} {typ} {r1.text} {{ get;set; }}";
                     if (r2 != null) {
                         obj += $" = {r2.text} {Terminate} {Wrap}";
                     } else {
                         obj += Wrap;
                     }
                 } else {
-                    obj += $"{r1.permission} {typ} {r1.text} {{ get; }}";
+                    obj += $"{r1.permission} {isVirtual} {typ} {r1.text} {{ get; }}";
                     if (r2 != null) {
                         obj += $" = {r2.text} {Terminate} {Wrap}";
                     } else {
@@ -326,6 +331,7 @@ namespace Compiler {
 
         public override object VisitImplementFunctionStatement([NotNull] ImplementFunctionStatementContext context) {
             var id = (Result)Visit(context.id());
+            var isVirtual = id.isVirtual ? " virtual " : "";
             var obj = "";
             if (context.annotationSupport() != null) {
                 obj += Visit(context.annotationSupport());
@@ -338,9 +344,9 @@ namespace Compiler {
                 } else {
                     pout = Task;
                 }
-                obj += $"{id.permission} async {pout} {id.text}";
+                obj += $"{id.permission} {isVirtual} async {pout} {id.text}";
             } else {
-                obj += id.permission + " " + Visit(context.parameterClauseOut()) + " " + id.text;
+                obj += id.permission + isVirtual + " " + Visit(context.parameterClauseOut()) + " " + id.text;
             }
 
             // 泛型
@@ -378,6 +384,7 @@ namespace Compiler {
 
         public override object VisitProtocolControlStatement([NotNull] ProtocolControlStatementContext context) {
             var id = (Result)Visit(context.id());
+            var isMutable = context.m != null;
             var r = new Result();
             if (context.annotationSupport() != null) {
                 r.text += Visit(context.annotationSupport());
@@ -393,7 +400,7 @@ namespace Compiler {
                 }
                 r.text += "}" + Wrap;
             } else {
-                if (id.isVariable) {
+                if (isMutable) {
                     r.text += " { get; set; }" + Wrap;
                 } else {
                     r.text += " { get; }" + Wrap;
