@@ -69,7 +69,7 @@ namespace Compiler {
             public object data { get; set; }
             public string text { get; set; }
             public string permission { get; set; }
-            public bool isVariable { get; set; }
+            public bool isVirtual { get; set; }
         }
 
         public override object VisitId([NotNull] IdContext context) {
@@ -85,11 +85,11 @@ namespace Compiler {
             } else if (context.op.Type == IDPublic) {
                 r.permission = "public";
                 r.text += context.op.Text;
-                r.isVariable = r.text[0].isUpper();
+                r.isVirtual = r.text[0].isUpper();
             } else if (context.op.Type == IDPrivate) {
                 r.permission = "protected";
                 r.text += context.op.Text;
-                r.isVariable = r.text[r.text.findFirst(it => it != '_')].isUpper();
+                r.isVirtual = r.text[r.text.findFirst(it => it != '_')].isUpper();
             }
 
             if (keywords.Exists(t => t == r.text)) {

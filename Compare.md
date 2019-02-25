@@ -24,9 +24,9 @@ print("Hello, world!")
 ## Variables And Constants
 ### Xs
 ```
-MyVariable := 42
-MyVariable = 50
-my_constant 42
+$myVariable := 42
+myVariable = 50
+myConstant 42
 ```
 ### C#
 ```
@@ -144,7 +144,7 @@ let count = i + Int(f)
 ### Xs
 ```
 @ index <- [ 1 <= 5 ] {
-    prt(""index" times 5 is "index * 5"")
+    prt("" index " times 5 is " index * 5 "")
 }
 ```
 ### C#
@@ -276,7 +276,7 @@ let emptyDictionary = [String: Float]()
 ### Xs
 ```
 greet(name: str, day: str) -> (r: str) {
-    <- ("Hello "name", today is "day".")
+    <- ("Hello " name ", today is " day ".")
 }
 greet("Bob", "Tuesday")
 ```
@@ -404,9 +404,9 @@ increment(7)
 ### Xs
 ```
 Shape() -> {
-    NumberOfSides := 0
+    $numberOfSides := 0
     simpleDescription() -> (s: str) {
-        <- ("A shape with "NumberOfSides" sides.")
+        <- ("A shape with " numberOfSides " sides.")
     }
 }
 ```
@@ -451,7 +451,7 @@ class Shape {
 ### Xs
 ```
 shape := Shape()
-shape.NumberOfSides = 7
+shape.numberOfSides = 7
 shapeDescription := shape.simpleDescription()
 ```
 ### C#
@@ -485,15 +485,15 @@ NamedShape(name: str) {
     ..name = name
 } -> {
     name: str
-    NumberOfSides: i32 = 0
+    $numberOfSides: i32 = 0
 
-    simpleDescription() -> (s: str) {
-        <- ("A shape with "NumberOfSides" sides.")
+    SimpleDescription() -> (s: str) {
+        <- ("A shape with " numberOfSides " sides.")
     }
 }
 
 Square(sideLength: f64, name: str) {
-    ..NumberOfSides = 4
+    ..numberOfSides = 4
     ..sideLength = sideLength
 } -> {
     sideLength: f64
@@ -502,14 +502,14 @@ Square(sideLength: f64, name: str) {
         <- (sideLength * sideLength)
     }
 } NamedShape(name) {
-    simpleDescription() -> (s: str) {
-        <- ("A square with sides of length "sideLength".")
+    SimpleDescription() -> (s: str) {
+        <- ("A square with sides of length " sideLength ".")
     }
 }
 
 test := Square(5.2, "square")
 test.area()
-test.simpleDescription()
+test.SimpleDescription()
 ```
 ### C#
 ```
@@ -655,14 +655,14 @@ test.simpleDescription()
 ## Checking Type
 ### Xs
 ```
-MovieCount := 0
-SongCount := 0
+$movieCount := 0
+$songCount := 0
 
 @ item <- library {
     ? item -> :Movie {
-        MovieCount += 1
+        movieCount += 1
     } :Song {
-        SongCount += 1
+        songCount += 1
     }
 }
 ```
@@ -789,8 +789,8 @@ switch nb {
 ```
 @ current <- someObjects {
     ? current -> movie:Movie {
-        prt("Movie: '"movie.name"', " +
-            "dir. "movie.director"")
+        prt("Movie: '" movie.name "', " +
+            "dir. " movie.director "")
     }
 }
 ```
