@@ -368,7 +368,7 @@ app() -> {
     }
 } program() {  
 } protocol {
-    B: i32 {
+    $B: i32 {
         get { 
             <- (_B) 
         }
