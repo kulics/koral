@@ -8,7 +8,7 @@
 
 例如：
 ```
-Number: i32
+number: i32
 ```
 这样便定义了一个没有额外方法的控制数据，它内置了默认的控制方法。
 
@@ -31,7 +31,7 @@ number: i32 {
 
 例如：
 ```
-Number: i32 {
+$number: i32 {
     todo("...")
     set {       # 表示设置，相当于其它语言中的setter
         # ？？？该把值给谁？？？
@@ -43,41 +43,41 @@ Number: i32 {
 
 例如：
 ```
-_Number := 0
+$_number := 0
 
-Number: i32 {
+$number: i32 {
     todo("...")
     set {
-        _Number = value     # value代表输入的值
+        _number = value     # value代表输入的值
     }
 }
 ```
 
-需要注意的是，变量需要同时声明`获取`和`设置`方法。不必量只能声明`获取`方法。
+需要注意的是，变量需要同时声明`获取`和`设置`方法。不变量只能声明`获取`方法。
 
 一个完整的读写例子如下：
 ```
-_Number := 0
-Number: i32 {
+$_number := 0
+$number: i32 {
     get {
-        <- (_Number)
+        <- (_number)
     }
     set {
-        _Number = value # value代表输入的值
+        _number = value # value代表输入的值
     }
 }
 ```
 
-特别的，如果我们给 `Number` 初始化，编译器会自动生成对应的 `_Number` 私有变量, 这时我们就可以省去定义另一个变量的步骤。
+特别的，如果我们给 `number` 初始化，编译器会自动生成对应的 `_number` 私有变量, 这时我们就可以省去定义另一个变量的步骤。
 
 例如：
 ```
-Number: i32 = 0 {
+$number: i32 = 0 {
     get {
-        <- (_Number)
+        <- (_number)
     }
     set {
-        _Number = value 
+        _number = value 
     }
 }
 ```
@@ -97,9 +97,9 @@ Number: i32 = 0 {
 example -> {
     Main() -> () {
         prt(a)
-        C = 5
-        prt(B)
-        prt(C)
+        c = 5
+        prt(c)
+        prt(c)
     }
 
     a : i32 {
@@ -108,13 +108,13 @@ example -> {
         }
     }
 
-    B := 0
-    C : i32 {
+    $b := 0
+    $c : i32 {
         get { 
-            <- (B) 
+            <- (b) 
         }
         set { 
-            B = value 
+            b = value 
         }
     }
 }

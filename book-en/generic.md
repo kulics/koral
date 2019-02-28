@@ -13,15 +13,15 @@ E.g:
 ```
 List<T>() -> {
     items := Storage{T}    # create storage
-    Length := 0
+    length := 0
 
     get(index: i32) -> (item: T) { # get some T item
         <- ( items.get( index ) )
     }
   
     add(item: T) -> () {   # add a T item to List
-        items.insert(Length, item)
-        Length += 1
+        items.insert(length, item)
+        length += 1
     }
 }
 ```
@@ -56,11 +56,11 @@ Very simple, and we can use the same statement, but called when the need to impo
 
 E.g:
 ```
-ListNumber := List<i32>()  # pass in the number type
+listNumber := List<i32>()  # pass in the number type
 ```
 So we have an List of number types, is like this:
 ```
-ListNumber := [i32]{}
+listNumber := [i32]{}
 ```
 Yes, in fact, our list and dictionary syntax are syntactic sugar, the actual types are `lst` and `dic`.
 ## Supported Types
@@ -69,7 +69,7 @@ We can use generics in packages, functions, and protocol types.
 E.g:
 ```
 Package<T> -> {
-    Count: T
+    count: T
 }
 
 Func<T>(data: T) -> (data: T) {

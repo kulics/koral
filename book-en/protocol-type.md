@@ -20,7 +20,7 @@ Next, let's design a difficult task that students need to accomplish ... homewor
 E.g:
 ```
 homeWork <- {
-    Count: i32
+    $count: i32
     do() -> ()
 }
 ```
@@ -39,11 +39,11 @@ E.g:
 student() -> {
     todo("...")
 } homeWork {
-    Count: i32
+    $count: i32
 
     do() -> () {
         SpendTime(1)            # spent an hour
-        Count -= 1   # completed one
+        count -= 1   # completed one
     }
 }
 ```
@@ -61,11 +61,11 @@ With the protocol included, we can use the student bundle that owns the protocol
 E.g:
 ```
 Peter := student{ Count=999999 }
-prt( Peter.Count )
+prt( Peter.count )
 # print 999999, too much
 Peter.do()
 # did a homework
-prt(Peter.Count)
+prt(Peter.count)
 # print 999998, or too much
 ```
 If this is the case, there is no advantage in defining these two properties directly in the package.
@@ -149,23 +149,23 @@ example -> {
 }
 
 A <- {
-    X: i32
+    $x: i32
     do() -> () {}
 }
 
 B() -> {
-    Y := 5
+    y := 5
 } A {
-    X := 0
+    $x := 0
     do() -> () {
-        X += 1
+        x += 1
     }
 }
 
 C(a: A) -> () {
     a.do()
     ? a.is<B>() {
-        prt( a.as<B>().Y )
+        prt( a.as<B>().y )
     }
 }
 ```

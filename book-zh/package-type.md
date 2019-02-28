@@ -18,10 +18,10 @@ package() -> {
 例如：
 ```
 student() -> {
-    Name: str = ""
-    Number: str = ""
-    Class: i32 = 0
-    Grade: i32 = 0
+    $name: str = ""
+    $number: str = ""
+    $class: i32 = 0
+    $grade: i32 = 0
 }
 ```
 这样我们就得到了具有这几个数据属性的学生包。这个学生包现在就像 `i32,str,bl` 一样成为了一个可以使用的类型。
@@ -54,10 +54,10 @@ prt( Peter.name )      # 打印了某个学生的名字
 
 例如：
 ```
-Peter.Name = "Peter" 
-Peter.Number = "060233"
-Peter.Class = 2
-Peter.Grade = 6
+Peter.name = "Peter" 
+Peter.number = "060233"
+Peter.class = 2
+Peter.grade = 6
 ```
 ## 简化创建
 像上面那样创建一个新的包，再逐个装填数据非常麻烦，我们可以使用简化语法来配置。
@@ -67,8 +67,8 @@ Peter.Grade = 6
 例如：
 ```
 Peter := student() {
-    Name="Peter", Number="060233",
-    Class=2, Grade=6
+    name="Peter", number="060233",
+    class=2, grade=6
 }
 ```
 
@@ -78,8 +78,8 @@ Peter := student() {
 
 例如：
 ```
-Array := [i32]{ 1, 2, 3, 4, 5 }
-Dictionary := [[str]i32]{ ["1"]1, ["2"]2, ["3"]3 }
+array := [i32]{ 1, 2, 3, 4, 5 }
+dictionary := [[str]i32]{ ["1"]1, ["2"]2, ["3"]3 }
 ```
 ## 匿名包
 如果我们只想直接包裹某些数据使用，而不是先定义包再使用，像匿名函数那样可以吗？
@@ -109,12 +109,12 @@ Peter := {
 ```
 student() -> {
     todo("...")
-    _GirlFirend: str # 第一个字符是 _ 的标识符是私有的
+    _girlFirend: str # 第一个字符是 _ 的标识符是私有的
 }
 ```
 没错，如果你还记得标识符的定义的话，这就是私有标识符的定义方式，私有标识符是不能被外界访问的。
 
-因此我们再定义一个 `Peter` 的话，也不能通过 `Peter._GirlFirend` 来获取值或修改值。
+因此我们再定义一个 `Peter` 的话，也不能通过 `Peter._girlFirend` 来获取值或修改值。
 
 那这种包的私有属性又不能访问，又不能修改，有什么用呢？别急，包还有另外一种属性。
 
@@ -125,8 +125,9 @@ student() -> {
 ```
 student() -> {
     todo("...")
+    _girlFirend: str
     getGirlFirend() -> (name: str) {
-        <- (.._GirlFirend)
+        <- (.._girlFirend)
     }
 }
 ```
@@ -156,12 +157,12 @@ prt( Peter.getGirlFirend() )
 例如：
 ```
 student(name: str, number: str) {
-    ..Name = name
-    ..Number = number
+    ..name = name
+    ..number = number
     # 计算得出班级
-    ..Class = GetSubText(number, 2, 3)
+    ..class = GetSubText(number, 2, 3)
     # 计算得出年级
-    ..Grade = GetSubText(number, 0, 1)
+    ..grade = GetSubText(number, 0, 1)
 } -> {
     todo("...")
 }
@@ -171,7 +172,7 @@ student(name: str, number: str) {
 例如：
 ```
 Peter := student("Peter", "060233")
-prt(Peter.Class)     # 打印出 2
+prt(Peter.class)     # 打印出 2
 ```
 
 需要注意的是，一个包只能支持一个构造函数，我们建议保持构造的简单性，一个稳定的包更容易被调用者放心使用，
@@ -184,7 +185,7 @@ prt(Peter.Class)     # 打印出 2
 例如：
 ```
 student -> {
-    ShareData: i32 = 20
+    shareData: i32 = 20
     shareFunction() -> () {
         prt("nothing")
     }
@@ -201,7 +202,7 @@ student -> {
 例如：
 ```
 student {
-    ShareData = 128 
+    shareData = 128 
 } -> {
     todo("...")
 }
@@ -212,11 +213,11 @@ student {
 例如：
 ```
 chineseStudent() -> {
-    Name: str = ""
-    Number: str = ""
-    Class: i32 = 0
-    Grade: i32 = 0
-    kungfu: bl = false     # 不会功夫的学生
+    $name: str = ""
+    $number: str = ""
+    $class: i32 = 0
+    $grade: i32 = 0
+    $kungfu: bl = false     # 不会功夫的学生
 }
 ```
 不不不，这样重复定义数据就很不优雅了，我们可以将学生属性复用，加上一个额外的功夫属性就可以了。
@@ -226,8 +227,8 @@ chineseStudent() -> {
 例如：
 ```
 chineseStudent() -> {
-    Student := student()   # 将学生属性包含其中
-    Kungfu := false        # 不会功夫
+    $student := student()   # 将学生属性包含其中
+    $kungfu := false        # 不会功夫
 }
 ```
 这样你就可以通过中国学生里的学生属性来使用通用属性。
@@ -235,7 +236,7 @@ chineseStudent() -> {
 例如：
 ```
 Chen := chineseStudent()
-prt( Chen.Student.Name )
+prt( Chen.student.name )
 # 当然，因为没有赋值，所以什么也没有输出
 ```
 通过组合一层又一层的包，你可以自由拼装出任何一个你想要描述的事物。
