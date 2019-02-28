@@ -13,7 +13,7 @@ We can declare an exception data using `!()` Anywhere in the function.
 E.g:
 ```
 readFile(name: str) -> () {
-    ? name.Length == 0 {
+    ? name.len == 0 {
         !( Exception("something wrong") )
     }
     todo("...")

@@ -14,15 +14,15 @@
 ```
 List<T>() -> {
     items := Storage(T)    # 创建存储
-    Length := 0
+    $length := 0
 
     get(index: i32) -> (item: T) { # 获取某个泛型数据
         <- ( items.get( index ) )
     }
 
     add(item: T) -> () {   # 将一个泛型数据添加进列表
-        items.insert(Length, item)
-        Length += 1
+        items.insert(length, item)
+        length += 1
     }
 }
 ```
@@ -57,11 +57,11 @@ Package<T>() -> {
 
 例如：
 ```
-ListNumber := List<i32>()      # 传入 integer 类型
+listNumber := List<i32>()      # 传入 integer 类型
 ```
 这样我们便拥有了一个整数类型的列表，是不是很像这个：
 ```
-ListNumber := [i32]{}
+listNumber := [i32]{}
 ```
 没错，其实我们的列表和字典语法都是语法糖，实际类型分别是 `lst` 和 `dic`。
 ## 支持的类型
@@ -70,7 +70,7 @@ ListNumber := [i32]{}
 例如：
 ```
 Package<T> -> {
-    Count: T
+    count: T
 }
 
 Func<T>(data: T) -> (data: T) {

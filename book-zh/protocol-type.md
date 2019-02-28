@@ -20,7 +20,7 @@ protocol <- {
 例如：
 ```
 homeWork <- {
-    Count: i32
+    $count: i32
     do() -> ()
 }
 ```
@@ -39,11 +39,11 @@ homeWork <- {
 student() -> {
     todo("...")
 } homeWork {
-    Count: i32
+    $count: i32
 
     do() -> () {
         SpendTime(1)           # 花费了一个小时
-        Count -= 1   # 完成了一个
+        count -= 1   # 完成了一个
     }
 }
 ```
@@ -61,11 +61,11 @@ student() -> {
 例如：
 ```
 Peter := student{ Count=999999 }
-prt( Peter.Count )
+prt( Peter.count )
 # 打印 999999，好多呀
 Peter.do()
 # 做了一次作业
-prt( Peter.Count )
+prt( Peter.count )
 # 打印 999998，还是好多呀
 ```
 如果只是这样使用，那和在包里直接定义这两个属性比就没什么优势了。
@@ -149,23 +149,23 @@ example -> {
 }
 
 A <- {
-    X: i32
+    $x: i32
     do() -> () {}
 }
 
 B() -> {
-    Y := 5
+    y := 5
 } A {
-    X := 0
+    $x := 0
     do() -> () {
-        X += 1
+        x += 1
     }
 }
 
 C(a: A) -> () {
     a.do()
     ? a.is<B>() {
-        prt( a.as<B>().Y )
+        prt( a.as<B>().y )
     }
 }
 ```

@@ -18,10 +18,10 @@ We can define these data in the same way we define normal identifiers.
 E.g:
 ```
 student() -> {
-    Name: str = ""
-    Number: str = ""
-    Class: i32 = 0
-    Grade: i32 = 0
+    $name: str = ""
+    $number: str = ""
+    $class: i32 = 0
+    $grade: i32 = 0
 }
 ```
 So we get a student bag with these data attributes. This student bag now becomes a usable type like `i32, str, bl`.
@@ -56,10 +56,10 @@ Parentheses can be omitted when the constructor is empty.
 
 E.g:
 ```
-Peter.Name = "Peter" 
-Peter.Number = "060233"
-Peter.Class = 2
-Peter.Grade = 6
+Peter.name = "Peter" 
+Peter.number = "060233"
+Peter.class = 2
+Peter.grade = 6
 ```
 ## Simplify creation
 Creating a new package like the one above, and then loading the data one by one, is very cumbersome. We can use a simplified syntax to configure.
@@ -68,8 +68,8 @@ Just add `{}` to the creation grammar to use the `key=value` method to quickly l
 E.g:
 ```
 Peter := student() {
-    Name="Peter", Number="060233",
-    Class=2, Grade=6
+    name="Peter", number="060233",
+    class=2, grade=6
 }
 ```
 
@@ -79,8 +79,8 @@ Similarly, the way the collection is created is actually a simplified creation, 
 
 E.g:
 ```
-Array := [i32]{ 1, 2, 3, 4, 5 }
-Dictionary := [[str]i32]{ ["1"]1, ["2"]2, ["3"]3 }
+array := [i32]{ 1, 2, 3, 4, 5 }
+dictionary := [[str]i32]{ ["1"]1, ["2"]2, ["3"]3 }
 ```
 ## Anonymous Package
 If we only want to wrap some data directly, instead of defining the package first and then using it, is it like an anonymous function?
@@ -109,7 +109,7 @@ E.g:
 ```
 student() -> {
     todo("...")
-    _GirlFirend: str    # The identifier beginning with this '_' is private
+    _girlFirend: str    # The identifier beginning with this '_' is private
 }
 ```
 That's right, if you remember the definition of identifiers, this is how private identifiers are defined, and private identifiers can not be accessed by outsiders.
@@ -125,8 +125,9 @@ E.g:
 ```
 student() -> {
     todo("...")
+    _girlFirend: str
     getGirlFirend() -> (name: str) {
-        <- (.._GirlFirend)
+        <- (.._girlFirend)
     }
 }
 ```
@@ -156,12 +157,12 @@ Add parameters at the time of definition, and write the definition of the constr
 E.g:
 ```
 student(name: str, number: str) {
-    ..Name = name
-    ..Number = number
+    ..name = name
+    ..number = number
     # calculate the class
-    ..Class = GetSubText(number, 2, 3)
+    ..class = GetSubText(number, 2, 3)
     # calculate the grade
-    ..Grade = GetSubText(number, 0, 1)
+    ..grade = GetSubText(number, 0, 1)
 } -> {
     todo("...")
 }
@@ -171,7 +172,7 @@ This gives us a package with constructors, and when we create a new student, cla
 E.g:
 ```
 Peter := student("Peter", "060233")
-prt(Peter.Class)     # print out 2
+prt(Peter.class)     # print out 2
 ```
 
 It should be noted that a package can only support one constructor, we recommend to maintain the simplicity of the structure, a stable package easier to be used by the caller,
@@ -184,7 +185,7 @@ By wrapping the data and functions we need with `id -> {}`, we can call them dir
 E.g:
 ```
 student -> {
-    ShareData: i32 = 20
+    shareData: i32 = 20
     shareFunction() -> () {
         prt("nothing")
     }
@@ -201,7 +202,7 @@ The grammar is consistent with the constructor.
 E.g:
 ```
 student {
-    ShareData = 128 
+    shareData = 128 
 } -> {
     todo("...")
 }
@@ -212,11 +213,11 @@ Now let us play our imagination, we want a customized package for Chinese studen
 E.g:
 ```
 chineseStudent() -> {
-    Name: str = ""
-    Number: str = ""
-    Class: i32 = 0
-    Grade: i32 = 0
-    kungfu: bl = false    # kung fu students
+    $name: str = ""
+    $number: str = ""
+    $class: i32 = 0
+    $grade: i32 = 0
+    $kungfu: bl = false    # kung fu students
 }
 ```
 No, no repeatable definition of data so elegant, we can reuse student attributes, with an additional kung fu attributes on it.
@@ -226,8 +227,8 @@ We need to use a combination of this feature, but not so complicated, just creat
 E.g:
 ```
 chineseStudent() -> {
-    Student := student()   # include student attributes in it
-    Kungfu := false        # no kung fu
+    $student := student()   # include student attributes in it
+    $kungfu := false        # no kung fu
 }
 ```
 This way you can use generic attributes via student attributes in Chinese students.
@@ -235,7 +236,7 @@ This way you can use generic attributes via student attributes in Chinese studen
 E.g:
 ```
 Chen := chineseStudent()
-prt(Chen.Student.Name)
+prt(Chen.student.name)
 # of course, since there is no assignment, nothing is output
 ```
 By combining layers after layer, you are free to assemble whatever you want to describe.

@@ -113,8 +113,8 @@ example -> {
         list2 := [i8]{1,2,1,2}
         list3 := {|1,2,3|}
 
-        Dictionary1 := {["a"]1, ["b"]2, ["c"]3}
-        Dictionary1["d"] = 4
+        dictionary1 := {["a"]1, ["b"]2, ["c"]3}
+        dictionary1["d"] = 4
         dictionary2 := [[i8]i8]{[1]1,[2]2,[3]3}
     }
 }

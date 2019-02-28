@@ -8,7 +8,7 @@ If we don't need to define a specific control method for a while, we only need t
 
 E.g:
 ```
-Number: i32
+number: i32
 ```
 This defines a control data with no additional methods, and it has a built-in default control method.
 
@@ -31,7 +31,7 @@ With the above example, we naturally can think of how to deal with set operation
 
 E.g:
 ```
-Number: i32 {
+$number: i32 {
     todo("...")
     set {       # means set, equivalent to setter in other languages
         # ? ? ? Who should give the value? ? ?
@@ -43,12 +43,12 @@ So we need to use another type of data to use the control type.
 
 E.g:
 ```
-_Number := 0
+$_number := 0
 
-Number: i32 {
+$number: i32 {
     todo("...")
     set {
-        _Number = value  # value represents the value of the input
+        _number = value  # value represents the value of the input
     }
 }
 ```
@@ -57,28 +57,28 @@ Note that the variables need to declare both `get` and `set` methods, the invari
 
 A complete example of reading and writing is as follows:
 ```
-_Number := 0
+$_number := 0
 
-Number :i32 {
+$number :i32 {
     get {
-        <- (_Number)
+        <- (_number)
     }
     set {
-        _Number = value  # value represents the value of the input
+        _number = value  # value represents the value of the input
     }
 }
 ```
 
-In particular, if we initialize `Number`, the compiler automatically generates the corresponding `_Number` private variable, and then we can omit the step of defining another variable.
+In particular, if we initialize `number`, the compiler automatically generates the corresponding `_number` private variable, and then we can omit the step of defining another variable.
 
 E.g:
 ```
-Number: i32 = 0 {
+$number: i32 = 0 {
     get {
-        <- (_Number)
+        <- (_number)
     }
     set {
-        _Number = value 
+        _number = value 
     }
 }
 ```
@@ -98,9 +98,9 @@ Most of the time, we can use only simple definitions to complete the task, becau
 example -> {
     Main() -> () {
         prt(a)
-        C = 5
-        prt(B)
-        prt(C)
+        c = 5
+        prt(c)
+        prt(c)
     }
 
     a : i32 {
@@ -109,13 +109,13 @@ example -> {
         }
     }
 
-    B := 0
-    C : i32 {
+    $b := 0
+    $c : i32 {
         get { 
-            <- (B) 
+            <- (b) 
         }
         set { 
-            B = value 
+            b = value 
         }
     }
 }

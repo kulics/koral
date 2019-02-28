@@ -13,7 +13,7 @@
 例如：
 ```
 readFile(name: str) -> () {
-    ? name.Length == 0 {
+    ? name.len == 0 {
         !( Exception("something wrong") )
     }
     todo("...")
