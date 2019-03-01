@@ -8,7 +8,7 @@
 
 例如：
 ```
-\name\space{}
+\name\space <- {}
 
 Demo -> {
     getSomething() -> (content: str) {
@@ -21,7 +21,7 @@ Demo -> {
 
 例如：
 ```
-\run { 
+\run <- { 
     name\space 
 }
 
@@ -37,7 +37,7 @@ example -> {
 
 例如：
 ```
-\run { 
+\run <- { 
     name\space.Demo 
 }
 
@@ -54,7 +54,7 @@ example -> {
 
 例如：
 ```
-\Demo {}
+\Demo <- {}
 
 example -> {
     Main() -> () {

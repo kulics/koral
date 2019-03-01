@@ -6,7 +6,7 @@ statement: (annotationSupport)? CommentLine*
 exportStatement CommentLine* NewLine* namespaceSupportStatement*;
 
 // 导出命名空间
-exportStatement: '\\' nameSpace blockLeft (importStatement|NewLine)* blockRight end;
+exportStatement: '\\' nameSpace ArrowLeft blockLeft (importStatement|NewLine)* blockRight end;
 
 // 导入命名空间
 importStatement: (annotationSupport)? nameSpace (call NewLine? id)? end;

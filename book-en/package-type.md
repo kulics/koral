@@ -245,7 +245,7 @@ By combining layers after layer, you are free to assemble whatever you want to d
 
 ## Example of this chapter
 ```
-\Demo {
+\Demo <- {
     System
 }
 

@@ -185,7 +185,7 @@ each1To10( (item: i32) -> () {
 
 ## 本章示例
 ```
-\Demo {
+\Demo <- {
     System
 }
 

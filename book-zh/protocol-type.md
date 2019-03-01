@@ -136,7 +136,7 @@ func(hw: homeWork) -> () {
 
 ## 本章示例
 ```
-\Demo {
+\Demo <- {
     System
 }
 
