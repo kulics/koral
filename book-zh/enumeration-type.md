@@ -45,7 +45,7 @@ Number -> ?{
 
 ## 本章示例
 ```
-\Demo {
+\Demo <- {
     System
 }
 

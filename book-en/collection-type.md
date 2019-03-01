@@ -102,7 +102,7 @@ length := dictionary.len        # length
 
 ## Example of this chapter
 ```
-\Demo {
+\Demo <- {
     System
 }
 

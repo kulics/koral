@@ -136,7 +136,7 @@ Note that if the type can not be converted correctly, it will return a `nil` val
 
 ## Example of this chapter
 ```
-\Demo {
+\Demo <- {
     System
 }
 

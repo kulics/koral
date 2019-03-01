@@ -90,7 +90,7 @@ $number: i32 = 0 {
 
 ## 本章示例
 ```
-\Demo {
+\Demo <- {
     System
 }
 

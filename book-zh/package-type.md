@@ -245,7 +245,7 @@ prt( Chen.student.name )
 
 ## 本章示例
 ```
-\Demo {
+\Demo <- {
     System
 }
 

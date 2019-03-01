@@ -18,11 +18,11 @@ StatementContent
 ## Export Namespace
 All content in this language can only be defined in the namespace so that content can be efficiently divided into distinct blocks for management. You can define it freely in a separate namespace without undue restrictions on naming.
 
-We can use the `\id {}` statement to define the namespace of the current file.
+We can use the `\id <- {}` statement to define the namespace of the current file.
 
 E.g:
 ```
-\Demo {}
+\Demo <- {}
 ```
 The meaning of this statement is to mark the content tag in the current code file as `Demo`, so that the content naming inside is limited to the area, and it is not necessary to consider naming conflicts with the outside of the area.
 
@@ -32,7 +32,7 @@ We can use the `id` statement in the `{}` of the export statement to import othe
 
 E.g:
 ```
-\Demo {
+\Demo <- {
     System
     Library
 }
@@ -49,7 +49,7 @@ Depending on the target platform, the main entry may be declared differently, an
 
 E.g:
 ```
-\Demo {
+\Demo <- {
     System
 }
 
@@ -183,7 +183,7 @@ a.b(x, y).c( () -> (i32) {
 
 ## Example of this chapter
 ```
-\Demo {
+\Demo <- {
     System
 }
 

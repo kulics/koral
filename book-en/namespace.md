@@ -8,7 +8,7 @@ Exported names can be nested in a loop so that functions can be split as effecti
 
 E.g:
 ```
-\name\space{}
+\name\space <- {}
 
 Demo -> {
     getSomething() -> (content: str) {
@@ -22,7 +22,7 @@ We can use other namespace contents through the import function. The namespace c
 
 E.g:
 ```
-\run { 
+\run <- { 
     name\space 
 }
 
@@ -38,7 +38,7 @@ If we don't want to use the namespace name to call the content every time, we ca
 
 E.g:
 ```
-\run{ 
+\run <- { 
     name\space.Demo 
 }
 
@@ -55,7 +55,7 @@ We can use the namespace directly to call function without importing it.
 
 E.g:
 ```
-\Demo {}
+\Demo <- {}
 
 example -> {
     Main() -> () {
