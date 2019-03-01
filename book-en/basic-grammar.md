@@ -126,16 +126,16 @@ E.g:
 b: i16 = 10
 ```
 ## Mutable Data
-We can easily define mutable data, and identifiers that start with uppercase are all mutable data.
+We can easily define mutable data, and identifiers that start with `$` are all mutable data.
 
 E.g:
 ```
-I := 1          # can be changed
-J: i32 = 1      # do not use automatic derivation
+$i := 1          # can be changed
+$j: i32 = 1      # do not use automatic derivation
 ```
 
 ## Immutable Data
-We can also define immutable data, which is immutable after assignment, and all the markers that start with lowercase are immutable data.
+We can also define immutable data, which is immutable after assignment, and all the markers that not start with `$` are immutable data.
 
 E.g:
 ```
@@ -144,13 +144,13 @@ j: i32 = 3     # do not use automatic derivation
 ```
 
 ## Constant
-Constants are languages that are determined at compile time and are unchangeable. Only a special type of the underlying type is supported. Use `id :type value` to define it, and `:type` can usually be omitted.  
+Constants are languages that are determined at compile time and are unchangeable. Only a special type of the underlying type is supported. Use `id:type value` to define it, and `:type` can usually be omitted.  
 Constant identifiers must conform to the snake-like nomenclature in lowercase. 
 
 E.g:
 ```
 i 2         # automatic derivation
-j: i32 3    # do not use automatic derivation
+j:i32 3     # do not use automatic derivation
 ```
 
 ## Identifier
