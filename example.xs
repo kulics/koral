@@ -47,12 +47,13 @@ program {
         rd()
     }
 
-    staticX := 0 {
-        get {
+    staticX() := 0 {
+        get { 
             <- (_staticX)
         }
     }
-    $staticY := "hello" {
+    
+    $staticY() := "hello" {
         get { 
             <- (_staticY) 
         }
@@ -60,6 +61,7 @@ program {
             _staticY = value 
         }
     }
+    
     readonlyA := "1024"
     $staticG: i64
 
@@ -368,7 +370,7 @@ app() -> {
     }
 } program() {  
 } protocol {
-    $B: i32 {
+    $B(): i32 {
         get { 
             <- (_B) 
         }
@@ -390,7 +392,7 @@ app() -> {
         <~ tsks.delay(5000)
     }
 
-    f: str = "get"
+    f(): str = "get"
 } 
 
 result(data: str) {
@@ -419,7 +421,7 @@ testImplementTemplate() -> {
 }
 
 program() -> {
-    $Name: str? = "name" {
+    $Name(): str? = "name" {
         set { 
             _Name = value 
         }
@@ -429,11 +431,11 @@ program() -> {
 }
 
 protocol <- {
-    $B: i32 
+    $B(): i32 
     c(x: i32) -> (y: i32)
     d() ~> (y: i32)
     e() ~> ()
-    f: str
+    f(): str
 }
 
 `Table("test")`
