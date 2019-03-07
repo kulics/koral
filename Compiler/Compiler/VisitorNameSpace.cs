@@ -247,12 +247,38 @@ namespace Compiler {
         }
 
         public override object VisitNamespaceVariableStatement([NotNull] NamespaceVariableStatementContext context) {
-            var r1 = (Result)Visit(context.expression(0));
+            var r1 = (Result)Visit(context.id());
             var isMutable = context.m != null;
             var typ = "";
             Result r2 = null;
-            if (context.expression().Length == 2) {
-                r2 = (Result)Visit(context.expression(1));
+            if (context.expression() != null) {
+                r2 = (Result)Visit(context.expression());
+                typ = (string)r2.data;
+            }
+            if (context.type() != null) {
+                typ = (string)Visit(context.type());
+            }
+            var obj = "";
+            if (context.annotationSupport() != null) {
+                obj += Visit(context.annotationSupport());
+            }
+
+            obj += $"{r1.permission} static {typ} {r1.text}";
+            if (r2 != null) {
+                obj += $" = {r2.text} {Terminate} {Wrap}";
+            } else {
+                obj += Terminate + Wrap;
+            }
+            return obj;
+        }
+
+        public override object VisitNamespaceControlStatement([NotNull] NamespaceControlStatementContext context) {
+            var r1 = (Result)Visit(context.id());
+            var isMutable = context.m != null;
+            var typ = "";
+            Result r2 = null;
+            if (context.expression() != null) {
+                r2 = (Result)Visit(context.expression());
                 typ = (string)r2.data;
             }
             if (context.type() != null) {
