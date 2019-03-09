@@ -4,11 +4,11 @@ The control type is a block of code that encapsulates data operations.
 Usually we will encapsulate some data control processes into control types so that there is no need to perform additional methods when using data.
 
 ## Simple Definition
-If we don't need to define a specific control method for a while, we only need to use `id:type` to define a control type.
+If we don't need to define a specific control method for a while, we only need to use `id():type` to define a control type.
 
 E.g:
 ```
-number: i32
+number(): i32
 ```
 This defines a control data with no additional methods, and it has a built-in default control method.
 
@@ -17,7 +17,7 @@ If we want to set a get operation, we can add `{ ctrl{} }` later to define.
 
 E.g:
 ```
-number: i32 {
+number(): i32 {
     get {           # means get, equivalent to getter in other languages
         <- (7)      # only returns 7
     }
@@ -31,8 +31,7 @@ With the above example, we naturally can think of how to deal with set operation
 
 E.g:
 ```
-$number: i32 {
-    todo("...")
+$number(): i32 {
     set {       # means set, equivalent to setter in other languages
         # ? ? ? Who should give the value? ? ?
     }
@@ -45,8 +44,7 @@ E.g:
 ```
 $_number := 0
 
-$number: i32 {
-    todo("...")
+$number(): i32 {
     set {
         _number = value  # value represents the value of the input
     }
@@ -59,7 +57,7 @@ A complete example of reading and writing is as follows:
 ```
 $_number := 0
 
-$number :i32 {
+$number() :i32 {
     get {
         <- (_number)
     }
@@ -73,7 +71,7 @@ In particular, if we initialize `number`, the compiler automatically generates t
 
 E.g:
 ```
-$number: i32 = 0 {
+$number(): i32 = 0 {
     get {
         <- (_number)
     }
@@ -103,14 +101,14 @@ example -> {
         prt(c)
     }
 
-    a : i32 {
+    a() : i32 {
         get { 
             <- (3) 
         }
     }
 
     $b := 0
-    $c : i32 {
+    $c() : i32 {
         get { 
             <- (b) 
         }

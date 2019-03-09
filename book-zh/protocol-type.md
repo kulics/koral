@@ -20,7 +20,7 @@ protocol <- {
 例如：
 ```
 homeWork <- {
-    $count: i32
+    $count(): i32
     do() -> ()
 }
 ```
@@ -39,7 +39,7 @@ homeWork <- {
 student() -> {
     todo("...")
 } homeWork {
-    $count: i32
+    $count(): i32
 
     do() -> () {
         SpendTime(1)           # 花费了一个小时
@@ -149,14 +149,14 @@ example -> {
 }
 
 A <- {
-    $x: i32
+    $x(): i32
     do() -> () {}
 }
 
 B() -> {
     y := 5
 } A {
-    $x := 0
+    $x() := 0
     do() -> () {
         x += 1
     }
