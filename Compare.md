@@ -24,8 +24,8 @@ print("Hello, world!")
 ## Variables And Constants
 ### Xs
 ```
-$myVariable := 42
-myVariable = 50
+MyVariable := 42
+MyVariable = 50
 myConstant 42
 ```
 ### C#
@@ -404,9 +404,9 @@ increment(7)
 ### Xs
 ```
 Shape() -> {
-    $numberOfSides := 0
+    NumberOfSides := 0
     simpleDescription() -> (s: str) {
-        <- ("A shape with " numberOfSides " sides.")
+        <- ("A shape with " NumberOfSides " sides.")
     }
 }
 ```
@@ -451,7 +451,7 @@ class Shape {
 ### Xs
 ```
 shape := Shape()
-shape.numberOfSides = 7
+shape.NumberOfSides = 7
 shapeDescription := shape.simpleDescription()
 ```
 ### C#
@@ -485,15 +485,15 @@ NamedShape(name: str) {
     ..name = name
 } -> {
     name: str
-    $numberOfSides: i32 = 0
+    NumberOfSides: i32 = 0
 
     SimpleDescription() -> (s: str) {
-        <- ("A shape with " numberOfSides " sides.")
+        <- ("A shape with " NumberOfSides " sides.")
     }
 }
 
 Square(sideLength: f64, name: str) {
-    ..numberOfSides = 4
+    ..NumberOfSides = 4
     ..sideLength = sideLength
 } -> {
     sideLength: f64
@@ -655,14 +655,14 @@ test.simpleDescription()
 ## Checking Type
 ### Xs
 ```
-$movieCount := 0
-$songCount := 0
+MovieCount := 0
+SongCount := 0
 
 @ item <- library {
     ? item -> :Movie {
-        movieCount += 1
+        MovieCount += 1
     } :Song {
-        songCount += 1
+        SongCount += 1
     }
 }
 ```
