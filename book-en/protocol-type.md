@@ -20,7 +20,7 @@ Next, let's design a difficult task that students need to accomplish ... homewor
 E.g:
 ```
 homeWork <- {
-    $count: i32
+    $count(): i32
     do() -> ()
 }
 ```
@@ -39,7 +39,7 @@ E.g:
 student() -> {
     todo("...")
 } homeWork {
-    $count: i32
+    $count(): i32
 
     do() -> () {
         SpendTime(1)            # spent an hour
@@ -149,14 +149,14 @@ example -> {
 }
 
 A <- {
-    $x: i32
+    $x(): i32
     do() -> () {}
 }
 
 B() -> {
     y := 5
 } A {
-    $x := 0
+    $x() := 0
     do() -> () {
         x += 1
     }
