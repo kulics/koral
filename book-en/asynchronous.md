@@ -36,7 +36,7 @@ As with the declaration, we only need to use `<~ function()` to declare the wait
 E.g:
 ```
 result := <~ async()
-todo("...")
+......
 ```
 After declare, the program execution here will temporarily stop the back of the function, until the async function is completed, the `out` value assigned to` result`, and then continue to execute.
 ## Asynchronous Use Conditions

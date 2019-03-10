@@ -13,15 +13,15 @@ E.g:
 ```
 List<T>() -> {
     items := Storage{T}    # create storage
-    length := 0
+    Length := 0
 
     get(index: i32) -> (item: T) { # get some T item
         <- ( items.get( index ) )
     }
   
     add(item: T) -> () {   # add a T item to List
-        items.insert(length, item)
-        length += 1
+        items.insert(Length, item)
+        Length += 1
     }
 }
 ```

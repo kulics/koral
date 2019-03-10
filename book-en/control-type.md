@@ -31,7 +31,8 @@ With the above example, we naturally can think of how to deal with set operation
 
 E.g:
 ```
-$number(): i32 {
+Number(): i32 {
+    ......
     set {       # means set, equivalent to setter in other languages
         # ? ? ? Who should give the value? ? ?
     }
@@ -42,11 +43,12 @@ So we need to use another type of data to use the control type.
 
 E.g:
 ```
-$_number := 0
+_Number := 0
 
-$number(): i32 {
+Number(): i32 {
+    ......
     set {
-        _number = value  # value represents the value of the input
+        _Number = value  # value represents the value of the input
     }
 }
 ```
@@ -55,28 +57,28 @@ Note that the variables need to declare both `get` and `set` methods, the invari
 
 A complete example of reading and writing is as follows:
 ```
-$_number := 0
+_Number := 0
 
-$number() :i32 {
+Number() :i32 {
     get {
-        <- (_number)
+        <- (_Number)
     }
     set {
-        _number = value  # value represents the value of the input
+        _Number = value  # value represents the value of the input
     }
 }
 ```
 
-In particular, if we initialize `number`, the compiler automatically generates the corresponding `_number` private variable, and then we can omit the step of defining another variable.
+In particular, if we initialize `Number`, the compiler automatically generates the corresponding `_Number` private variable, and then we can omit the step of defining another variable.
 
 E.g:
 ```
-$number(): i32 = 0 {
+Number(): i32 = 0 {
     get {
-        <- (_number)
+        <- (_Number)
     }
     set {
-        _number = value 
+        _Number = value 
     }
 }
 ```
@@ -107,13 +109,13 @@ example -> {
         }
     }
 
-    $b := 0
-    $c() : i32 {
+    B := 0
+    C() : i32 {
         get { 
-            <- (b) 
+            <- (B) 
         }
         set { 
-            b = value 
+            B = value 
         }
     }
 }

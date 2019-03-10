@@ -20,7 +20,7 @@ Next, let's design a difficult task that students need to accomplish ... homewor
 E.g:
 ```
 homeWork <- {
-    $count(): i32
+    Count(): i32
     do() -> ()
 }
 ```
@@ -37,13 +37,13 @@ We can implement this protocol by using the `protocol {}` statement after the pa
 E.g:
 ```
 student() -> {
-    todo("...")
+    ......
 } homeWork {
-    $count(): i32
+    Count(): i32
 
     do() -> () {
-        SpendTime(1)            # spent an hour
-        count -= 1   # completed one
+        SpendTime(1)    # spent an hour
+        Count -= 1      # completed one
     }
 }
 ```
@@ -51,7 +51,7 @@ Our student homework is really hard ...
 
 Let's explain what this section of the code:
 1. We have implemented an protocol, and now `student` is also considered as `homework'. We can use a `student' as `homework'.
-1. In the protocol we include the protocol of the two properties `count, do`, according to the provisions of a nor less.
+1. In the protocol we include the protocol of the two properties `Count, do`, according to the provisions of a nor less.
 1. We have written the actual values ​​and functions for each of the two properties of the protocol, so that these two properties become one of the valid sub-properties of `student`.
 1. We did something in `do`, which reduced the total count of homework.
 
@@ -61,11 +61,11 @@ With the protocol included, we can use the student bundle that owns the protocol
 E.g:
 ```
 Peter := student{ Count=999999 }
-prt( Peter.count )
+prt( Peter.Count )
 # print 999999, too much
 Peter.do()
 # did a homework
-prt(Peter.count)
+prt(Peter.Count)
 # print 999998, or too much
 ```
 If this is the case, there is no advantage in defining these two properties directly in the package.
@@ -105,7 +105,7 @@ E.g:
 ```
 arr := [homeWork]{}
 arr.add( StudentA )
-todo("...") # stuffed many, many students
+...... # stuffed many, many students
 @ i <- arr {
     doHomeWork(i)
 }
@@ -149,16 +149,16 @@ example -> {
 }
 
 A <- {
-    $x(): i32
+    X(): i32
     do() -> () {}
 }
 
 B() -> {
     y := 5
 } A {
-    $x() := 0
+    X() := 0
     do() -> () {
-        x += 1
+        X += 1
     }
 }
 

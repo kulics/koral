@@ -31,7 +31,8 @@ number(): i32 {
 
 例如：
 ```
-$number(): i32 {
+Number(): i32 {
+    ......
     set {       # 表示设置，相当于其它语言中的setter
         # ？？？该把值给谁？？？
     }
@@ -42,11 +43,12 @@ $number(): i32 {
 
 例如：
 ```
-$_number := 0
+_Number := 0
 
-$number(): i32 {
+Number(): i32 {
+    ......
     set {
-        _number = value     # value代表输入的值
+        _Number = value     # value代表输入的值
     }
 }
 ```
@@ -55,27 +57,27 @@ $number(): i32 {
 
 一个完整的读写例子如下：
 ```
-$_number := 0
-$number(): i32 {
+_Number := 0
+Number(): i32 {
     get {
-        <- (_number)
+        <- (_Number)
     }
     set {
-        _number = value # value代表输入的值
+        _Number = value # value代表输入的值
     }
 }
 ```
 
-特别的，如果我们给 `number` 初始化，编译器会自动生成对应的 `_number` 私有变量, 这时我们就可以省去定义另一个变量的步骤。
+特别的，如果我们给 `Number` 初始化，编译器会自动生成对应的 `_Number` 私有变量, 这时我们就可以省去定义另一个变量的步骤。
 
 例如：
 ```
-$number(): i32 = 0 {
+Number(): i32 = 0 {
     get {
-        <- (_number)
+        <- (_Number)
     }
     set {
-        _number = value 
+        _Number = value 
     }
 }
 ```
@@ -106,13 +108,13 @@ example -> {
         }
     }
 
-    $b := 0
-    $c() : i32 {
+    B := 0
+    C() : i32 {
         get { 
-            <- (b) 
+            <- (B) 
         }
         set { 
-            b = value 
+            B = value 
         }
     }
 }
