@@ -18,10 +18,10 @@ We can define these data in the same way we define normal identifiers.
 E.g:
 ```
 student() -> {
-    $name: str = ""
-    $number: str = ""
-    $class: i32 = 0
-    $grade: i32 = 0
+    Name: str = ""
+    Number: str = ""
+    Class: i32 = 0
+    Grade: i32 = 0
 }
 ```
 So we get a student bag with these data attributes. This student bag now becomes a usable type like `i32, str, bl`.
@@ -48,7 +48,7 @@ Very simple, we only need to use `.` syntax, we can summon the attributes we nee
 
 E.g:
 ```
-prt(Peter.name)
+prt(Peter.Name)
 # print the name of a student
 ```
 To change the value of the property is the same, it is equivalent to a nested identifier. We can directly use the assignment statement to change the value.  
@@ -56,10 +56,10 @@ Parentheses can be omitted when the constructor is empty.
 
 E.g:
 ```
-Peter.name = "Peter" 
-Peter.number = "060233"
-Peter.class = 2
-Peter.grade = 6
+Peter.Name = "Peter" 
+Peter.Number = "060233"
+Peter.Class = 2
+Peter.Grade = 6
 ```
 ## Simplify creation
 Creating a new package like the one above, and then loading the data one by one, is very cumbersome. We can use a simplified syntax to configure.
@@ -68,8 +68,8 @@ Just add `{}` to the creation grammar to use the `key=value` method to quickly l
 E.g:
 ```
 Peter := student() {
-    name="Peter", number="060233",
-    class=2, grade=6
+    Name="Peter", Number="060233",
+    Class=2, Grade=6
 }
 ```
 
@@ -90,10 +90,10 @@ Of course, we can use the `{}` package directly, the same syntax as the collecti
 E.g:
 ```
 Peter := {
-    name = "Peter",
-    number = "060233",
-    class = 2,
-    grade = 6
+    Name = "Peter",
+    Number = "060233",
+    Class = 2,
+    Grade = 6
 }
 ```
 
@@ -157,12 +157,12 @@ Add parameters at the time of definition, and write the definition of the constr
 E.g:
 ```
 student(name: str, number: str) {
-    ..name = name
-    ..number = number
+    ..Name = name
+    ..Number = number
     # calculate the class
-    ..class = GetSubText(number, 2, 3)
+    ..Class = GetSubText(number, 2, 3)
     # calculate the grade
-    ..grade = GetSubText(number, 0, 1)
+    ..Grade = GetSubText(number, 0, 1)
 } -> {
     ......
 }
@@ -172,7 +172,7 @@ This gives us a package with constructors, and when we create a new student, cla
 E.g:
 ```
 Peter := student("Peter", "060233")
-prt(Peter.class)     # print out 2
+prt(Peter.Class)     # print out 2
 ```
 
 It should be noted that a package can only support one constructor, we recommend to maintain the simplicity of the structure, a stable package easier to be used by the caller,
@@ -185,7 +185,7 @@ By wrapping the data and functions we need with `id -> {}`, we can call them dir
 E.g:
 ```
 student -> {
-    shareData: i32 = 20
+    shareData: i32
     shareFunction() -> () {
         prt("nothing")
     }
@@ -213,11 +213,11 @@ Now let us play our imagination, we want a customized package for Chinese studen
 E.g:
 ```
 chineseStudent() -> {
-    $name: str = ""
-    $number: str = ""
-    $class: i32 = 0
-    $grade: i32 = 0
-    $kungfu: bl = false    # kung fu students
+    Name: str = ""
+    Number: str = ""
+    Class: i32 = 0
+    Grade: i32 = 0
+    Kungfu: bl = false    # kung fu students
 }
 ```
 No, no repeatable definition of data so elegant, we can reuse student attributes, with an additional kung fu attributes on it.
@@ -227,8 +227,8 @@ We need to use a combination of this feature, but not so complicated, just creat
 E.g:
 ```
 chineseStudent() -> {
-    $student := student()   # include student attributes in it
-    $kungfu := false        # no kung fu
+    Student := student()   # include student attributes in it
+    Kungfu := false        # no kung fu
 }
 ```
 This way you can use generic attributes via student attributes in Chinese students.
@@ -236,7 +236,7 @@ This way you can use generic attributes via student attributes in Chinese studen
 E.g:
 ```
 Chen := chineseStudent()
-prt(Chen.student.name)
+prt(Chen.Student.Name)
 # of course, since there is no assignment, nothing is output
 ```
 By combining layers after layer, you are free to assemble whatever you want to describe.
