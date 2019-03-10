@@ -14,6 +14,6 @@ It is now recommended to use the .NET Core runtime to use this language. For eas
 `Xs` needs to use some of the language library features, so you need to refer to `Library.dll` in your project to use the library.
 
 Run Package:
-<https://github.com/kulics/xs/releases/tag/v0.28>
+<https://github.com/kulics/xs/releases/tag/v0.29>
 
 ### [Next Chapter](basic-grammar.md)
