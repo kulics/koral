@@ -126,16 +126,16 @@ E.g:
 b: i16 = 10
 ```
 ## Mutable Data
-We can easily define mutable data, and identifiers that start with `$` are all mutable data.
+We can easily define mutable data, and identifiers that start with upper case letters are all mutable data.
 
 E.g:
 ```
-$i := 1          # can be changed
-$j: i32 = 1      # do not use automatic derivation
+I := 1          # can be changed
+J: i32 = 1      # do not use automatic derivation
 ```
 
 ## Immutable Data
-We can also define immutable data, which is immutable after assignment, and all the markers that not start with `$` are immutable data.
+We can also define immutable data, which is immutable after assignment, and all the markers that not start with upper case letters are immutable data.
 
 E.g:
 ```

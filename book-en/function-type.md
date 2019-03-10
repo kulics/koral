@@ -12,7 +12,7 @@ We only need to use `id() -> () {}` to define a function, the first parenthesis 
 E.g:
 ```
 function() -> () {
-    todo("...")
+    ......
 }
 ```
 This defines a function with the identifier `function`.
@@ -82,7 +82,7 @@ Similar to in parameters, out parameters also need to be clearly defined with an
 E.g:
 ```
 topSell() -> (name: str, count: i32) {
-    todo("...")
+    ......
     <- ("cola", many)
 }
 ```

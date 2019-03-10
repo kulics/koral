@@ -12,7 +12,7 @@
 例如：
 ```
 function() -> () {
-    todo("...")
+    ......
 }
 ```
 这样便定义了一个标识符为 `function` 的函数。 
@@ -81,7 +81,7 @@ sell(1.99, "cola")
 例如：
 ```
 topSell() -> (name: str, count: i32) {
-    todo("...")
+    ......
     <- ("cola", many)
 }
 ```

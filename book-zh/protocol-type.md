@@ -20,7 +20,7 @@ protocol <- {
 例如：
 ```
 homeWork <- {
-    $count(): i32
+    Count(): i32
     do() -> ()
 }
 ```
@@ -37,13 +37,13 @@ homeWork <- {
 例如：
 ```
 student() -> {
-    todo("...")
+    ......
 } homeWork {
-    $count(): i32
+    Count(): i32
 
     do() -> () {
-        SpendTime(1)           # 花费了一个小时
-        count -= 1   # 完成了一个
+        SpendTime(1)    # 花费了一个小时
+        Count -= 1      # 完成了一个
     }
 }
 ```
@@ -51,7 +51,7 @@ student() -> {
 
 让我们来解释一下这段代码发生了什么：
 1. 我们实现了一个协议，现在 `student` 也被认为是 `homework` 类型了，我们可以将一个 `student` 当作 `homework` 一样去使用。
-1. 在协议内我们包含了协议规定的两个属性 `count, do` ，根据规定，一个也不能少。
+1. 在协议内我们包含了协议规定的两个属性 `Count, do` ，根据规定，一个也不能少。
 1. 我们给协议的两个属性都分别编写了真实的值和函数，这样这两个属性就成为了 `student` 的有效子属性之一。
 1. 我们在 `do` 里面做了一些事情，减少了作业的总量。
 
@@ -61,11 +61,11 @@ student() -> {
 例如：
 ```
 Peter := student{ Count=999999 }
-prt( Peter.count )
+prt( Peter.Count )
 # 打印 999999，好多呀
 Peter.do()
 # 做了一次作业
-prt( Peter.count )
+prt( Peter.Count )
 # 打印 999998，还是好多呀
 ```
 如果只是这样使用，那和在包里直接定义这两个属性比就没什么优势了。
@@ -105,7 +105,7 @@ doHomeWork(StudentC)
 ```
 arr := [homeWork]{}
 arr.add( StudentA )
-todo("...") # 塞进很多很多学生
+...... # 塞进很多很多学生
 @ i <- arr {
     doHomeWork(i)
 }
@@ -149,16 +149,16 @@ example -> {
 }
 
 A <- {
-    $x(): i32
+    X(): i32
     do() -> () {}
 }
 
 B() -> {
     y := 5
 } A {
-    $x() := 0
+    X() := 0
     do() -> () {
-        x += 1
+        X += 1
     }
 }
 

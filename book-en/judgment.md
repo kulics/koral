@@ -18,9 +18,9 @@ E.g:
 ```
 b := false
 ? b {
-    todo("...") # since b is false, it will never enter this branch
+    ...... # since b is false, it will never enter this branch
 } _ {
-    todo("...") # handle false
+    ...... # handle false
 }
 ```
 
@@ -30,11 +30,11 @@ E.g:
 ```
 i := 3
 ? i == 0 {
-    todo("...")
+    ......
 } i == 1 {
-    todo("...")
+    ......
 } i == 2 {
-    todo("...")
+    ......
 }
 ```
 
@@ -45,9 +45,9 @@ If we need to judge an identifier, we can use the `? value -> case {}` statement
 E.g:
 ```
 ? i -> 1 {
-    todo("...")
+    ......
 } 2 {
-    todo("...")
+    ......
 }
 ```
 This kind of condition judgment is very suitable for the multi-condition judgment of a certain identifier, and avoids writing too many judgment conditions.
@@ -60,11 +60,11 @@ What if you need a default condition to execute logic? We can use an anonymous i
 E.g:
 ```
 ? i -> 1 {
-    todo("...")
+    ......
 } 2 {
-    todo("...")
+    ......
 } _ {
-    todo("...")
+    ......
 }
 ```
 In this case can not match, it will go to the default processing area to execute.

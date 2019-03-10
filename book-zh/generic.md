@@ -14,15 +14,15 @@
 ```
 List<T>() -> {
     items := Storage(T)    # 创建存储
-    $length := 0
+    Length := 0
 
     get(index: i32) -> (item: T) { # 获取某个泛型数据
         <- ( items.get( index ) )
     }
 
     add(item: T) -> () {   # 将一个泛型数据添加进列表
-        items.insert(length, item)
-        length += 1
+        items.insert(Length, item)
+        Length += 1
     }
 }
 ```

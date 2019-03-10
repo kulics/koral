@@ -19,11 +19,11 @@ E.g:
 ```
 c := randomColor()     # Get a random color
 ? c -> Color.Red {
-     todo("...")
+     ......
 } Color.Green {
-     todo("...")
+     ......
 } Color.Blue {
-     todo("...")
+     ......
 }
 ```
 
