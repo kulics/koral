@@ -37,9 +37,9 @@ namespaceVariableStatement
 |NewLine
 ;
 // 命名空间变量
-namespaceVariableStatement:(annotationSupport)? (m=Mutable)? id (Define expression|Declared type (Assign expression)?) end;
+namespaceVariableStatement:(annotationSupport)? id (Define expression|Declared type (Assign expression)?) end;
 // 命名空间控制
-namespaceControlStatement:(annotationSupport)? (m=Mutable)? id bracketLeft bracketRight (Define expression|Declared type (Assign expression)?) 
+namespaceControlStatement:(annotationSupport)? id bracketLeft bracketRight (Define expression|Declared type (Assign expression)?) 
 (blockLeft (packageControlSubStatement)+ blockRight)? end;
 // 命名空间常量
 namespaceConstantStatement: (annotationSupport)? id (Declared type)? expression end;
@@ -72,9 +72,9 @@ parameterClauseOut blockLeft (functionSupportStatement)* blockRight end;
 packageOverrideFunctionStatement:(annotationSupport)? (n='_')? id parameterClauseIn t=(ArrowRight|FlowRight) NewLine*
 parameterClauseOut blockLeft (functionSupportStatement)* blockRight end;
 // 定义变量
-packageVariableStatement:(annotationSupport)? (m=Mutable)? id (Define expression|Declared type (Assign expression)?) end;
+packageVariableStatement:(annotationSupport)? id (Define expression|Declared type (Assign expression)?) end;
 // 定义控制
-packageControlStatement: (annotationSupport)? (m=Mutable)? id bracketLeft bracketRight (Define expression|Declared type (Assign expression)?)
+packageControlStatement: (annotationSupport)? id bracketLeft bracketRight (Define expression|Declared type (Assign expression)?)
 (blockLeft (packageControlSubStatement)+ blockRight)? end;
 // 定义子方法
 packageControlSubStatement: id blockLeft (functionSupportStatement)+ blockRight end;
@@ -98,7 +98,7 @@ protocolFunctionStatement
 |NewLine
 ;
 // 定义控制
-protocolControlStatement:(annotationSupport)? (m=Mutable)? id bracketLeft bracketRight Declared type (protocolControlSubStatement)* end;
+protocolControlStatement:(annotationSupport)? id bracketLeft bracketRight Declared type (protocolControlSubStatement)* end;
 // 定义子方法
 protocolControlSubStatement: id end?;
 // 函数
@@ -115,7 +115,7 @@ implementFunctionStatement
 // 实现协议
 protocolImplementStatement: nameSpaceItem (templateCall)? blockLeft (protocolImplementSupportStatement)* blockRight;
 // 控制实现
-implementControlStatement:(annotationSupport)? (m=Mutable)? expression bracketLeft bracketRight (Define expression|Declared type (Assign expression)?)
+implementControlStatement:(annotationSupport)? expression bracketLeft bracketRight (Define expression|Declared type (Assign expression)?)
 (blockLeft (packageControlSubStatement)+ blockRight)? end;
 // 函数实现
 implementFunctionStatement:(annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) NewLine*
@@ -204,9 +204,9 @@ reportStatement: Check bracketLeft (expression)? bracketRight end;
 iteratorStatement: '[' expression op=('<'|'<='|'>'|'>=') expression more expression ']' | '[' expression op=('<'|'<='|'>'|'>=') expression ']';
 
 // 定义变量
-variableStatement: (m=Mutable)? expression (Define|Declared type Assign) expression end;
+variableStatement: expression (Define|Declared type Assign) expression end;
 // 声明变量
-variableDeclaredStatement: (m=Mutable)? expression Declared type end;
+variableDeclaredStatement: expression Declared type end;
 // 赋值
 assignStatement: expression assign expression end;
 
@@ -456,8 +456,6 @@ Judge : '?';
 Loop : '@';
 
 Check : '!';
-
-Mutable : '$';
 
 TypeAny : 'obj';
 TypeI8: 'i8';
