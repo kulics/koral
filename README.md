@@ -7,13 +7,13 @@ So Xs discards the cumbersome features, retains the most versatile features, and
 
 This is the main source code repository for Xs. It contains the compiler, and documentation.
 ## Features
-+ Well-designed grammar, easy to write and read.
-+ Rules are clear and uniform, intuitive.
-+ With the support of. NET platform, we can use this language in a very wide range of scenarios with the help of. NET framework and library resources.
+1. Well-designed grammar, easy to write and read.
+1. Rules are clear and uniform, intuitive.
+1. With the support of. NET platform, we can use this language in a very wide range of scenarios with the help of. NET framework and library resources.
 
 ## Getting Started
-Read detail from The [Book](./book-en/introduction.md).  
-阅读 [语言说明文档](./book-zh/introduction.md)。
+- [English](./book-en/introduction.md)
+- [中文](./book-zh/introduction.md)
 
 ## Quick Preview
 ```
