@@ -248,7 +248,7 @@ namespace Compiler {
 
         public override object VisitNamespaceVariableStatement([NotNull] NamespaceVariableStatementContext context) {
             var r1 = (Result)Visit(context.id());
-            var isMutable = context.m != null;
+            var isMutable = r1.isVirtual;
             var typ = "";
             Result r2 = null;
             if (context.expression() != null) {
@@ -274,7 +274,7 @@ namespace Compiler {
 
         public override object VisitNamespaceControlStatement([NotNull] NamespaceControlStatementContext context) {
             var r1 = (Result)Visit(context.id());
-            var isMutable = context.m != null;
+            var isMutable = r1.isVirtual;
             var typ = "";
             Result r2 = null;
             if (context.expression() != null) {

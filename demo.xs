@@ -12,14 +12,14 @@ program -> {
         n5 := node(5){}
         n6 := node(6){}
 
-        n0.left = n1
-        n0.right = n2
+        n0.Left = n1
+        n0.Right = n2
 
-        n1.left = n3
-        n1.right = n4
+        n1.Left = n3
+        n1.Right = n4
 
-        n2.left = n5
-        n2.right = n6
+        n2.Left = n5
+        n2.Right = n6
 
         prt("Pre Order Traverse")
         preOrderTraverse(n0)
@@ -32,16 +32,16 @@ program -> {
         prt("Inverse node")
         preOrderTraverse(n7)
 
-        $arr := {9,1,5,8,3,7,4,6,2}
-        simpleSort(arr)
-        arr = {9,1,5,8,3,7,4,6,2}
-        bubbleSort(arr)
-        arr = {9,1,5,8,3,7,4,6,2}
-        quickSort(arr)
+        Arr := {9,1,5,8,3,7,4,6,2}
+        simpleSort(Arr)
+        Arr = {9,1,5,8,3,7,4,6,2}
+        bubbleSort(Arr)
+        Arr = {9,1,5,8,3,7,4,6,2}
+        quickSort(Arr)
 
         prt("Filter Array")
-        arr = filterList(arr, {it->it > 4})
-        @ ea <- arr {
+        Arr = filterList(Arr, {it->it > 4})
+        @ ea <- Arr {
             prt(ea) 
         }
 
@@ -58,16 +58,16 @@ program -> {
             <- () 
         }
         prt(node.value)
-        preOrderTraverse(node.left)
-        preOrderTraverse(node.right)
+        preOrderTraverse(node.Left)
+        preOrderTraverse(node.Right)
     }
 
     postOrderTraverse(node: node?) -> () {
         ? node -> nil { 
             <- () 
         }
-        postOrderTraverse(node.left)
-        postOrderTraverse(node.right)
+        postOrderTraverse(node.Left)
+        postOrderTraverse(node.Right)
         prt(node.value)
     }
 
@@ -75,19 +75,19 @@ program -> {
         ? node -> nil { 
             <- () 
         }
-        middleOrderTraverse(node.left)
+        middleOrderTraverse(node.Left)
         prt(node.value)
-        middleOrderTraverse(node.right)
+        middleOrderTraverse(node.Right)
     }
 
     inverseNode(node: node?) -> (node: node?) {
         ? node -> nil { 
             <- (nil) 
         }
-        node.left = inverseNode(node.left)
-        node.right = inverseNode(node.right)
+        node.Left = inverseNode(node.Left)
+        node.Right = inverseNode(node.Right)
 
-        temp := node(node.value){left = node.right, right = node.left}
+        temp := node(node.value){Left = node.Right, Right = node.Left}
         <- (temp)
     }
 
@@ -132,12 +132,12 @@ program -> {
     }
 
     qSort(list: [i32], low: i32, high: i32) -> () {
-        $pivot := 0
+        Pivot := 0
         ? low < high {
-            pivot = partition(list,low,high)
+            Pivot = partition(list,low,high)
 
-            qSort(list, low, pivot-1)
-            qSort(list, pivot+1, high)
+            qSort(list, low, Pivot-1)
+            qSort(list, Pivot+1, high)
         }
     }
 
@@ -159,7 +159,7 @@ program -> {
     }
 
     filterList(list: [i32], fn: (i32) -> (bl)) -> (l: [i32]) {
-        $filter := [i32]{}
+        filter := [i32]{}
 
         @ ea <- list {
             ? fn(ea) {
@@ -178,8 +178,8 @@ node(value: i32) {
     ..value = value
 } -> {
     value: i32
-    $left: node?
-    $right: node?
+    Left: node?
+    Right: node?
 }
 
 control <- {
@@ -190,27 +190,27 @@ program(name: str) {
     ..name = name
 } -> {
     name: str
-    $_running := false
+    _Running := false
 
     start() -> () {
         prt("Start")
-        .._running = true
+        .._Running = true
     }
 
     stop() -> () {
         prt("Stop")
-        .._running = false
+        .._Running = false
     }
 } control {
     shutdown() -> () {
         prt("Shutdown")
-        .._running = false
+        .._Running = false
     }
 }
 
 app(name: str, platform: str) {
     platform = platform
 } -> {
-    $platform: str
+    platform: str
 } program(name) {
 }

@@ -105,7 +105,7 @@ namespace Compiler {
 
         public override object VisitPackageVariableStatement([NotNull] PackageVariableStatementContext context) {
             var r1 = (Result)Visit(context.id());
-            var isMutable = context.m != null;
+            var isMutable = r1.isVirtual;
             var typ = "";
             Result r2 = null;
             if (context.expression() != null) {
@@ -131,7 +131,7 @@ namespace Compiler {
 
         public override object VisitPackageControlStatement([NotNull] PackageControlStatementContext context) {
             var r1 = (Result)Visit(context.id());
-            var isMutable = context.m != null;
+            var isMutable = r1.isVirtual;
             var isVirtual = r1.isVirtual ? " virtual " : "";
             var typ = "";
             Result r2 = null;
@@ -302,7 +302,7 @@ namespace Compiler {
 
         public override object VisitImplementControlStatement([NotNull] ImplementControlStatementContext context) {
             var r1 = (Result)Visit(context.expression(0));
-            var isMutable = context.m != null;
+            var isMutable = r1.isVirtual;
             var isVirtual = r1.isVirtual ? " virtual " : "";
             var typ = "";
             Result r2 = null;
@@ -410,7 +410,7 @@ namespace Compiler {
 
         public override object VisitProtocolControlStatement([NotNull] ProtocolControlStatementContext context) {
             var id = (Result)Visit(context.id());
-            var isMutable = context.m != null;
+            var isMutable = id.isVirtual;
             var r = new Result();
             if (context.annotationSupport() != null) {
                 r.text += Visit(context.annotationSupport());
