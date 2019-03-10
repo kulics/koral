@@ -241,6 +241,22 @@ prt( Chen.Student.Name )
 ```
 通过组合一层又一层的包，你可以自由拼装出任何一个你想要描述的事物。
 
+## 继承
+如果我们希望定义一个新的包，并且完全继承某个包的所有属性，可以使用继承语法, 在定义后面追加 `id() {}` 。
+如果希望改写原始包的属性，在 `{}` 中重写即可。
+
+例如：
+```
+chineseStudent() -> {
+    Kungfu := false
+} student() {   # 继承 student
+    # 重写
+    getGirlFriend() -> (name: str) {
+        <- ("none")
+    }
+}
+```
+
 ### [下一章](namespace.md)
 
 ## 本章示例

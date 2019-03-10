@@ -241,6 +241,21 @@ prt(Chen.Student.Name)
 ```
 By combining layers after layer, you are free to assemble whatever you want to describe.
 
+## Inheritance
+If we want to define a new package and fully inherit all the properties of a package, we can use the inheritance syntax, append `id() {}` to the definition.
+If you want to override the properties of the original package, rewrite it in `{}`.
+
+E.g:
+```
+chineseStudent() -> {
+    Kungfu := false
+} student() {   # inhert student
+    # override
+    getGirlFriend() -> (name: str) {
+        <- ("none")
+    }
+}
+```
 ### [Next Chapter](namespace.md)
 
 ## Example of this chapter
