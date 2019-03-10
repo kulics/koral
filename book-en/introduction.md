@@ -34,3 +34,6 @@ So Xs discards the cumbersome features, retains the most versatile features, and
 1. [Annotation](annotation.md)
 1. [LINQ](linq.md)
 1. [Optional Type](optional-type.md)
+---
+### Future
+[Unrealized Feature](future.md)
