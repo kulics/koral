@@ -83,10 +83,6 @@ val explicitDouble: Double = 70.0
 ```
 let explicitDouble: Double = 70
 ```
-### Python
-```
-explicitDouble = 70
-```
 ## Basic Types
 ### Xs
 ```
@@ -734,6 +730,30 @@ class Square: NamedShape {
 }
 
 let test = Square(sideLength: 5.2, name: "square")
+test.area()
+test.simpleDescription()
+```
+## Python
+```
+class NamedShape(object):
+    def __init__(self,name):
+        self.numberOfSides = 0
+        self.name = name
+    def simpleDescription(self):
+        return 'A shape with ' + str(self.numberOfSides) + ' sides.'
+
+
+class Square(NamedShape):
+    def __init__(self,sideLength,name):
+        NamedShape.__init__(self,name)
+        self.sideLength = sideLength
+        self.numberOfSides = 4
+    def area(self):
+        return self.sideLength * self.sideLength
+    def simpleDescription(self):
+        return 'A square with sides of length ' + str(self.sideLength)
+
+test = Square(5.2,'square')
 test.area()
 test.simpleDescription()
 ```
