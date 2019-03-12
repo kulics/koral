@@ -807,8 +807,8 @@ foreach (var current in someObjects)
 ```
 ### Go
 ```
-for object := range someObjects {
-    if movie,ok := object(Movie); ok {
+for _, object := range someObjects {
+    if movie,ok := object.(Movie); ok {
         fmt.Printf("Movie: '%s', dir. %s", movie.name, movie.director)
     }
 }
