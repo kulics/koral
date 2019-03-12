@@ -21,6 +21,10 @@ println("Hello, world!")
 ```
 print("Hello, world!")
 ```
+### Python
+```
+print("Hello, world!")
+```
 ## Variables And Constants
 ### Xs
 ```
@@ -52,6 +56,12 @@ var myVariable = 42
 myVariable = 50
 let myConstant = 42
 ```
+### Python
+```
+myVariable = 42
+myVariable = 50
+MYCONSTANT = 42
+```
 ## Explicit Types
 ### Xs
 ```
@@ -72,6 +82,10 @@ val explicitDouble: Double = 70.0
 ### Swift
 ```
 let explicitDouble: Double = 70
+```
+### Python
+```
+explicitDouble = 70
 ```
 ## Basic Types
 ### Xs
@@ -109,6 +123,13 @@ Double Float
 Bool 
 String
 ```
+### Python
+```
+int long 
+double float 
+bool
+string
+```
 ## Type Coercion
 ### Xs
 ```
@@ -139,6 +160,12 @@ val count:Int = i + f
 let f = 6.0
 let i = 94
 let count = i + Int(f)
+```
+### Python
+```
+f = 6.0
+i = 94
+count = i + int(f)
 ```
 ## Inclusive Range Operator
 ### Xs
@@ -172,6 +199,11 @@ for index in 1...5 {
     print("\(index) times 5 is \(index * 5)")
 }
 ```
+### Python
+```
+for index in range(1,6):
+    print ("%d times 5 is %d" % (index,index*5))
+```
 ## Arrays
 ### Xs
 ```
@@ -200,6 +232,12 @@ shoppingList[1] = "bottle of water"
 ### Swift
 ```
 var shoppingList = ["catfish", "water",
+    "tulips", "blue paint"]
+shoppingList[1] = "bottle of water"
+```
+### Python
+```
+shoppingList = ["catfish", "water",
     "tulips", "blue paint"]
 shoppingList[1] = "bottle of water"
 ```
@@ -244,6 +282,14 @@ var occupations = [
 ]
 occupations["Jayne"] = "Public Relations"
 ```
+### Python
+```
+occupations = {
+    "Malcolm":"Captain",
+    "Kaylee":"Mechanic"
+}
+occupations["Jayne"] = "Public Relations"
+```
 ## Empty Collections
 ### Xs
 ```
@@ -271,6 +317,11 @@ val emptyMap = mapOf<String, Float>()
 ```
 let emptyArray = [String]()
 let emptyDictionary = [String: Float]()
+```
+### Python
+```
+emptyArray = []
+emptyDictionary ={}
 ```
 ## Functions
 ### Xs
@@ -309,6 +360,12 @@ func greet(_ name: String,_ day: String) -> String {
 }
 greet("Bob", "Tuesday")
 ```
+### Python
+```
+def greet(name,day):
+    return 'hello ' + name + ',today is '+ day
+greet("Bob", "Tuesday")
+```
 ## Tuple Return
 ### Xs
 ```
@@ -338,6 +395,11 @@ fun getGasPrices() = Triple(3.59, 3.69, 3.79)
 func getGasPrices() -> (Double, Double, Double) {
     return (3.59, 3.69, 3.79)
 }
+```
+### Python
+```
+def getGasPrices():
+    return (3.59, 3.69, 3.79)
 ```
 ## Function Type
 ### Xs
@@ -400,6 +462,15 @@ func makeIncrementer() -> (Int -> Int) {
 let increment = makeIncrementer()
 increment(7)
 ```
+### Python
+```
+def makeIncrementer():
+    def addOne(number):
+        return 1 + number
+    return addOne
+increment = makeIncrementer()
+increment(7)
+```
 ## Classes Declaration
 ### Xs
 ```
@@ -447,6 +518,14 @@ class Shape {
     }
 }
 ```
+### Python
+```
+class Shape(object):
+    def __init__(self):
+        self.numberOfSides = 0
+    def simpleDescription(self):
+        return 'A shape with' + numberOfSides +' sides.'
+```
 ## Classes Usage
 ### Xs
 ```
@@ -477,6 +556,12 @@ var shapeDescription = shape.simpleDescription()
 var shape = Shape()
 shape.numberOfSides = 7
 var shapeDescription = shape.simpleDescription()
+```
+### Python
+```
+shape = Shape()
+shape.numberOfSides = 7
+shapeDescription = shape.simpleDescription()
 ```
 ## Subclass
 ### Xs
@@ -722,6 +807,17 @@ for item in library {
     }
 }
 ```
+### Python
+```
+movieCount = 0
+songCount = 0
+
+for item in library:
+    if item is Movie:
+        movieCount+=1
+    elif item is Song
+        songCount+=1
+```
 ## Pattern Matching
 ### Xs
 ```
@@ -830,6 +926,12 @@ for current in someObjects {
             "dir. \(movie.director)")
     }
 }
+```
+### Python
+```
+for current in someObjects:
+    if current is Movie:
+        print('Movie: %s, dir. %s' % (movie.name, movie.director))
 ```
 ## Protocol
 ### Xs
