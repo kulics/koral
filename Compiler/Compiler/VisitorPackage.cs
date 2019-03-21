@@ -68,8 +68,10 @@ namespace Compiler {
             }
             header += $"{id.permission} partial class {id.text}";
             // 泛型
+            var template = "";
             if (context.templateDefine() != null) {
-                header += Visit(context.templateDefine());
+                template += Visit(context.templateDefine());
+                header += template;
             }
             if (extend.Length > 0) {
                 header += ":";
@@ -82,7 +84,7 @@ namespace Compiler {
             obj = header + obj;
 
             foreach (var item in context.protocolImplementStatement()) {
-                obj += $"{id.permission} partial class {id.text} {(string)Visit(item)} {Wrap}";
+                obj += $"{id.permission} partial class {id.text}{template} {(string)Visit(item)} {Wrap}";
             }
 
             return obj;
