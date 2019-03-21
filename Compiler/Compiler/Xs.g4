@@ -79,7 +79,7 @@ packageControlStatement: (annotationSupport)? id bracketLeft bracketRight (Defin
 // 定义子方法
 packageControlSubStatement: id blockLeft (functionSupportStatement)+ blockRight end;
 // 包重载
-packageOverrideStatement: blockLeft (packageOverrideFunctionStatement)* BlockRight;
+packageOverrideStatement: blockLeft (packageOverrideFunctionStatement|CommentLine|NewLine)* BlockRight;
 // 包扩展
 packageExtensionStatement: id (templateDefine)? '+=' blockLeft (packageExtensionSupportStatement)* blockRight;
 // 包扩展支持的语句
