@@ -7,8 +7,8 @@ namespace Compiler {
             var obj = "";
             obj = Visit(context.typeNotNull()) as string;
             if (context.typeNotNull().GetChild(0) is TypeBasicContext &&
-                context.typeNotNull().GetChild(0).GetText() != "obj" &&
-                 context.typeNotNull().GetChild(0).GetText() != "str") {
+                context.typeNotNull().GetChild(0).GetText() != "Obj" &&
+                 context.typeNotNull().GetChild(0).GetText() != "Str") {
                 obj += "?";
             }
             return obj;

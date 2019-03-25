@@ -1,12 +1,12 @@
 ﻿using System;
 
 namespace Library {
-    public static class cmd {
-        public static void prt(params object[] paramList) {
-            print(paramList);
+    public static class Cmd {
+        public static void Prt(params object[] paramList) {
+            Print(paramList);
         }
 
-        public static void print(params object[] paramList) {
+        public static void Print(params object[] paramList) {
             foreach (var item in paramList) {
                 Console.Write(item);
             }
@@ -16,12 +16,12 @@ namespace Library {
             Console.WriteLine();
         }
 
-        public static string rd() => read();
+        public static string Rd() => Read();
 
-        public static string read() => Console.ReadLine();
+        public static string Read() => Console.ReadLine();
 
-        public static void clr() => clear();
+        public static void Clr() => Clear();
 
-        public static void clear() => Console.Clear();
+        public static void Clear() => Console.Clear();
     }
 }

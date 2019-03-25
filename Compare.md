@@ -3,7 +3,7 @@
 ## Hello World
 ### Xs
 ```
-prt("Hello, world!")
+Prt("Hello, world!")
 ```
 ### C#
 ```
@@ -28,8 +28,8 @@ print("Hello, world!")
 ## Variables And Constants
 ### Xs
 ```
-MyVariable := 42
-MyVariable = 50
+myVariable := 42
+myVariable = 50
 myConstant 42
 ```
 ### C#
@@ -65,7 +65,7 @@ MYCONSTANT = 42
 ## Explicit Types
 ### Xs
 ```
-explicitDouble: f64 = 70
+explicitDouble: F64 = 70
 ```
 ### C#
 ```
@@ -86,10 +86,10 @@ let explicitDouble: Double = 70
 ## Basic Types
 ### Xs
 ```
-i32 i16 i64 i8 
-f64 f32 
-bl 
-str
+I32 I16 I64 I8 
+F64 F32 
+Bl 
+Str
 ```
 ### C#
 ```
@@ -131,7 +131,7 @@ string
 ```
 f := 6.0
 i := 94
-count := i + f.to<i32>()
+count := i + f.To<I32>()
 ```
 ### C#
 ```
@@ -167,7 +167,7 @@ count = i + int(f)
 ### Xs
 ```
 @ index <- [ 1 <= 5 ] {
-    prt("" index " times 5 is " index * 5 "")
+    Prt("" index " times 5 is " index * 5 "")
 }
 ```
 ### C#
@@ -289,8 +289,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Xs
 ```
-emptyArray := [str]()
-emptyDictionary := [[str]f32]()
+emptyArray := [Str]()
+emptyDictionary := [[Str]F32]()
 ```
 ### C#
 ```
@@ -322,7 +322,7 @@ emptyDictionary ={}
 ## Functions
 ### Xs
 ```
-greet(name: str, day: str) -> (r: str) {
+greet(name: Str, day: Str) -> (r: Str) {
     <- ("Hello " name ", today is " day ".")
 }
 greet("Bob", "Tuesday")
@@ -365,7 +365,7 @@ greet("Bob", "Tuesday")
 ## Tuple Return
 ### Xs
 ```
-getGasPrices() -> (a: f64, b: f64, c: f64) {
+getGasPrices() -> (a: F64, b: F64, c: F64) {
     <- (3.59, 3.69, 3.79)
 }
 ```
@@ -400,8 +400,8 @@ def getGasPrices():
 ## Function Type
 ### Xs
 ```
-makeIncrementer() -> (fn: (i32) -> (i32)) {
-    addOne(number: i32) -> (number: i32) {
+makeIncrementer() -> (fn: (I32) -> (I32)) {
+    addOne(number: I32) -> (number: I32) {
         <- (1 + number)
     }
     <- (addOne)
@@ -472,7 +472,7 @@ increment(7)
 ```
 Shape() -> {
     NumberOfSides := 0
-    simpleDescription() -> (s: str) {
+    SimpleDescription() -> (s: Str) {
         <- ("A shape with " NumberOfSides " sides.")
     }
 }
@@ -527,7 +527,7 @@ class Shape(object):
 ```
 shape := Shape()
 shape.NumberOfSides = 7
-shapeDescription := shape.simpleDescription()
+shapeDescription := shape.SimpleDescription()
 ```
 ### C#
 ```
@@ -562,34 +562,34 @@ shapeDescription = shape.simpleDescription()
 ## Subclass
 ### Xs
 ```
-NamedShape(name: str) {
-    ..name = name
+NamedShape(name: Str) {
+    ..Name = name
 } -> {
-    name: str
-    NumberOfSides: i32 = 0
+    Name: Str
+    NumberOfSides: I32 = 0
 
-    SimpleDescription() -> (s: str) {
+    SimpleDescription() -> (s: Str) {
         <- ("A shape with " NumberOfSides " sides.")
     }
 }
 
-Square(sideLength: f64, name: str) {
+Square(sideLength: F64, name: Str) {
     ..NumberOfSides = 4
-    ..sideLength = sideLength
+    ..SideLength = sideLength
 } -> {
-    sideLength: f64
+    SideLength: F64
 
-    area() -> (f: f64) {
-        <- (sideLength * sideLength)
+    Area() -> (f: F64) {
+        <- (SideLength ** 2)
     }
 } NamedShape(name) {
-    SimpleDescription() -> (s: str) {
-        <- ("A square with sides of length " sideLength ".")
+    SimpleDescription() -> (s: Str) {
+        <- ("A square with sides of length " SideLength ".")
     }
 }
 
 test := Square(5.2, "square")
-test.area()
+test.Area()
 test.SimpleDescription()
 ```
 ### C#
@@ -843,15 +843,15 @@ for item in library:
 ```
 nb := 42
 ? nb -> [0<=7], 8, 9 { 
-    prt("single digit") 
+    Prt("single digit") 
 } 10 { 
-    prt("double digits") 
+    Prt("double digits") 
 } [11<=99] { 
-    prt("double digits") 
+    Prt("double digits") 
 } [100<=999] { 
-    prt("triple digits") 
+    Prt("triple digits") 
 } _ { 
-    prt("four or more digits") 
+    Prt("four or more digits") 
 }
 ```
 ### C#
@@ -905,7 +905,7 @@ switch nb {
 ```
 @ current <- someObjects {
     ? current -> movie:Movie {
-        prt("Movie: '" movie.name "', " +
+        Prt("Movie: '" movie.name "', " +
             "dir. " movie.director "")
     }
 }
@@ -957,11 +957,11 @@ for current in someObjects:
 ### Xs
 ```
 Nameable <- {
-    name() -> (s: str)
+    Name() -> (s: Str)
 }
 
 f(x: Nameable) -> () {
-    prt("Name is " + x.name())
+    Prt("Name is " + x.Name())
 }
 ```
 ### C#
@@ -1011,11 +1011,11 @@ func f(x: Nameable) {
 ```
 Dog() -> {
 } Nameable {
-    name() -> (n: str) {
+    Name() -> (n: Str) {
         <- ("Dog")
     }
 } Weight {
-    getWeight() -> (w: i32) {
+    GetWeight() -> (w: I32) {
         <- (30)
     }
 }

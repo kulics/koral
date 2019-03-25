@@ -48,8 +48,8 @@ namespace Compiler {
 
         private const string chr = "char";
         private const string str = "string";
-        private const string lst = "lst";
-        private const string dic = "dic";
+        private const string lst = "Lst";
+        private const string dic = "Dic";
 
         private const string BlockLeft = "{";
         private const string BlockRight = "}";
@@ -85,11 +85,11 @@ namespace Compiler {
             } else if (context.op.Type == IDPublic) {
                 r.permission = "public";
                 r.text += context.op.Text;
-                r.isVirtual = r.text[0].isUpper();
+                r.isVirtual = r.text[0].IsUpper();
             } else if (context.op.Type == IDPrivate) {
                 r.permission = "protected";
                 r.text += context.op.Text;
-                r.isVirtual = r.text[r.text.findFirst(it => it != '_')].isUpper();
+                r.isVirtual = r.text[r.text.FindFirst(it => it != '_')].IsUpper();
             }
 
             if (keywords.Exists(t => t == r.text)) {

@@ -22,7 +22,7 @@ This is the main source code repository for Xs. It contains the compiler, and do
     System # import namespace
 }
 # package
-program -> {
+Program -> {
     # main function
     Main() -> () {
         # list
@@ -34,10 +34,10 @@ program -> {
         @ item <- greetings {
             # match
             ? item -> [ 0 <= 8 ] {
-                prt(item) # call function
+                Prt(item) # call function
             } _ {
                 # lambda
-                prt( greetings.filter( {it -> it.len > 4} ) )
+                Prt( greetings.Filter( {it -> it.Len > 4} ) )
                 <- @
             }
         }
