@@ -8,7 +8,7 @@ namespace Compiler {
             var obj = "";
             var ns = (Namespace)Visit(context.exportStatement());
             // import library
-            obj += $"using Library;{Wrap}using static Library.lib;{Wrap}";
+            obj += $"using Library;{Wrap}using static Library.Lib;{Wrap}";
             obj += ns.imports + Wrap;
             if (context.annotationSupport() != null) {
                 obj += Visit(context.annotationSupport());

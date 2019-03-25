@@ -62,7 +62,7 @@ namespace Compiler {
             var target = arr.text;
             var id = "ea";
             if (context.id().Length == 2) {
-                target += ".range()";
+                target += ".Range()";
                 id = $"({((Result)Visit(context.id(0))).text},{((Result)Visit(context.id(1))).text})";
             } else if (context.id().Length == 1) {
                 id = ((Result)Visit(context.id(0))).text;
