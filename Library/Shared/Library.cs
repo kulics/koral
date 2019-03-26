@@ -3,12 +3,26 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 
 namespace Library {
+    public class ReadOnly<T> {
+        public T Value { get; }
+        public T V { get => Value; }
+        public ReadOnly(T value) {
+            Value = value;
+        }
+    }
+
     public static partial class Lib {
+        public static ReadOnly<T> RO<T>(T it) => new ReadOnly<T>(it);
+
+        public static ReadOnly<T> ReadOnly<T>(T it) => RO(it);
+
         public static T[] ArrOf<T>(params T[] item) => item;
 
         public static Lst<T> LstOf<T>(params T[] item) => new Lst<T>(item);
 
         public static T Def<T>() => default(T);
+
+        public static T Default<T>() => Def<T>();
 
         public static T To<T>(object it) => (T)it;
 
@@ -18,13 +32,21 @@ namespace Library {
 
         public static void Prt(params object[] paramList) => Cmd.Prt(paramList);
 
+        public static void Print(params object[] paramList) => Prt(paramList);
+
         public static string Rd() => Cmd.Rd();
 
+        public static string Read() => Rd();
+
         public static void Clr() => Cmd.Clr();
+
+        public static void Clear() => Clr();
 
         public static async Task Go(Func<Task> @do) => await @do();
 
         public static Task Slp(int milliseconds) => Task.Delay(milliseconds);
+
+        public static Task Sleep(int milliseconds) => Slp(milliseconds);
 
         public static double Pow(double a, double b) => Math.Pow(a, b);
 

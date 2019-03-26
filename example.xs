@@ -7,7 +7,7 @@
 }
 
 Program {
-    StaticG = 5
+    StaticG = Readonly.V
 } -> {
     ## 
         main function 
@@ -62,7 +62,7 @@ Program {
         }
     }
     
-    ReadonlyA := "1024"
+    Readonly: ReadOnly<I32> = RO(5)
     StaticG: I64
 
     TestTuple(i: I32) -> (v: Str) {
@@ -322,7 +322,7 @@ Program {
         <- (1, 2, "123")
     }
 
-    testLinq() -> () {
+    TestLinq() -> () {
         numbers := {0, 1, 2, 3, 4, 5, 6}
         arr := from num in numbers where (num % 2) == 0 
         orderby num descending select num
@@ -332,7 +332,7 @@ Program {
 
     ConstData 256
     ConstData2 :Str "512"
-    constFunction() -> (v: I32) { 
+    ConstFunction() -> (v: I32) { 
         <- (ConstData) 
     }
 }
