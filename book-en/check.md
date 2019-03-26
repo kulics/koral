@@ -12,8 +12,8 @@ We can declare an exception data using `!()` Anywhere in the function.
 
 E.g:
 ```
-readFile(name: str) -> () {
-    ? name.len == 0 {
+readFile(name: Str) -> () {
+    ? name.Len == 0 {
         !( Exception("something wrong") )
     }
     ......
@@ -31,7 +31,7 @@ E.g:
 } ex:IOException {
     !(ex)
 } e {
-    prt(e.message)
+    Prt(e.message)
 }
 ```
 When an exception occurs, the program enters the error process block, and `e` is the exception identifier. We can get the exception information or perform other operations.
@@ -104,18 +104,18 @@ E.g:
     System
 }
 
-example -> {
+Example -> {
     Main() -> () {
         ! {
-            x: i32 = (1 * 1)
+            x: I32 = (1 * 1)
         } ex {
             !(ex)
         }
 
         x := Defer()
         ! y := Defer() {
-            x.content = "defer"
-            prt(x.content)
+            x.Content = "defer"
+            Prt(x.Content)
         } e:Exception {
             !(e)
         } _ {
@@ -127,10 +127,10 @@ example -> {
 }
 
 Defer() -> {
-    content: str
+    Content: Str
 } IDisposable {
     Dispose() -> () {
-        ..content = ""
+        ..Content = ""
     }
 }
 ```

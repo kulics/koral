@@ -34,10 +34,10 @@ c := randomColor()     # 获取一个随机颜色
 例如:
 ```
 Number -> ?{
-    a = 1   # 1
-    b       # 2
-    c = 1   # 1
-    d       # 2
+    A = 1   # 1
+    B       # 2
+    C = 1   # 1
+    D       # 2
 }
 ```
 
@@ -49,10 +49,10 @@ Number -> ?{
     System
 }
 
-example -> {
+Example -> {
     Main() -> () {
-        prt( A.Z )
-        prt( B.Z )
+        Prt( A.Z )
+        Prt( B.Z )
     }
 }
 

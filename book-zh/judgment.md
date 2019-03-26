@@ -6,11 +6,11 @@
 例如：
 ```
 ? true {
-    prt("true")  # true
+    Prt("true")  # true
 }
 ```
 ## 布尔判断
-当判断值只会为 `bl` 类型时，语句只有当为 `true` 时才执行。
+当判断值只会为 `Bl` 类型时，语句只有当为 `true` 时才执行。
 如果我们同时需要处理其它情况，可以在之后使用 `value {}` 来继续声明另一个处理语句。
 如果只需要 `false` 的情况，使用 `_ {}` 来声明。
 
@@ -77,12 +77,12 @@ i := 3
 
 例如：
 ```
-? x -> :i32 {       # 是否 i32
-    prt("i32")
-} content:str {     # 是否 str
-    prt(content)
+? x -> :I32 {       # 是否 I32
+    Prt("I32")
+} content:Str {     # 是否 Str
+    Prt(content)
 } nil {             # 是否为 nil
-    prt("nil")
+    Prt("nil")
 }
 ```
 ### 获取类型
@@ -101,28 +101,28 @@ i := 3
     System
 }
 
-example -> {
+Example -> {
     Main() -> () {
         a := 5
         ? a == 2 { 
-            prt(2) 
+            Prt(2) 
         } a == 4 { 
-            prt(4) 
+            Prt(4) 
         } _ { 
-            prt("not find") 
+            Prt("not find") 
         }
 
         b := 7
         ? b -> 5 { 
-            prt(5) 
+            Prt(5) 
         } 7 { 
-            prt(7) 
+            Prt(7) 
         } _ { 
-            prt("not find") 
+            Prt("not find") 
         }
 
-        prt( ?(b) )
-        prt( ?(:i32) )
+        Prt( ?(b) )
+        Prt( ?(:I32) )
     }
 }
 ```

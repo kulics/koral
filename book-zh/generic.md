@@ -13,15 +13,15 @@
 例如：
 ```
 List<T>() -> {
-    items := Storage(T)    # 创建存储
+    Items := Storage(T)    # 创建存储
     Length := 0
 
-    get(index: i32) -> (item: T) { # 获取某个泛型数据
-        <- ( items.get( index ) )
+    Get(index: I32) -> (item: T) { # 获取某个泛型数据
+        <- ( Items.Get( index ) )
     }
 
-    add(item: T) -> () {   # 将一个泛型数据添加进列表
-        items.insert(Length, item)
+    Add(item: T) -> () {   # 将一个泛型数据添加进列表
+        Items.insert(Length, item)
         Length += 1
     }
 }
@@ -30,17 +30,17 @@ List<T>() -> {
 
 泛型括号内像参数一样支持多个代称，例如：`<T, H, Q>`。
 
-定义了泛型之后，在包的区域内，就会将 `T` 看作是真正的类型，之后我们可以像 `i32` 一样在各种需要类型的地方使用它。
+定义了泛型之后，在包的区域内，就会将 `T` 看作是真正的类型，之后我们可以像 `I32` 一样在各种需要类型的地方使用它。
 
 需要注意的是，因为泛型是在运行中确定类型的，所以编译器无法推断泛型的构造方法。我们只能用缺省值创建方法去构造泛型数据。
 
-我们可以用缺省值创建方法 `def<type>()` 来指定一个包含了类型的缺省值。
+我们可以用缺省值创建方法 `Def<type>()` 来指定一个包含了类型的缺省值。
 
 例如：
 ```
-x := def<i64>()
-y := def<Protocol>()
-z := def<()->()>()
+x := Def<I64>()
+y := Def<Protocol>()
+z := Def<()->()>()
 ```
 
 这样我们就可以在泛型里使用。
@@ -48,7 +48,7 @@ z := def<()->()>()
 例如：
 ```
 Package<T>() -> {
-    item := def<T>()    # 初始化了一个缺省值的泛型数据
+    Item := Def<T>()    # 初始化了一个缺省值的泛型数据
 }
 ```
 那么我们如何使用泛型呢？
@@ -57,20 +57,20 @@ Package<T>() -> {
 
 例如：
 ```
-listNumber := List<i32>()      # 传入 integer 类型
+listNumber := List<I32>()      # 传入 integer 类型
 ```
 这样我们便拥有了一个整数类型的列表，是不是很像这个：
 ```
-listNumber := [i32]{}
+listNumber := [I32]{}
 ```
-没错，其实我们的列表和字典语法都是语法糖，实际类型分别是 `lst` 和 `dic`。
+没错，其实我们的列表和字典语法都是语法糖，实际类型分别是 `Lst` 和 `Dic`。
 ## 支持的类型
 我们可以在 包、函数、协议 类型中使用泛型。
 
 例如：
 ```
 Package<T> -> {
-    count: T
+    Count: T
 }
 
 Func<T>(data: T) -> (data: T) {
@@ -78,13 +78,13 @@ Func<T>(data: T) -> (data: T) {
 }
 
 Protocol<T> <- {
-    test<T>(in: T) -> () {}
+    Test<T>(in: T) -> () {}
 }
 
 Implement() -> {
 
 } Protocol<Implement> {
-    test<Implement>(in: Implement) -> () {
+    Test<Implement>(in: Implement) -> () {
         
     }
 }

@@ -9,7 +9,7 @@ We can use the `id() -> {}` statement to define a package that has nothing.
 
 E.g:
 ```
-package() -> {
+Package() -> {
 }
 ```
 Of course, we hope more is to be able to pack a few data, for example, a name, student number, class, grade attributes of students.
@@ -18,13 +18,13 @@ We can define these data in the same way we define normal identifiers.
 E.g:
 ```
 student() -> {
-    Name: str = ""
-    Number: str = ""
-    Class: i32 = 0
-    Grade: i32 = 0
+    Name: Str = ""
+    Number: Str = ""
+    Class: I32 = 0
+    Grade: I32 = 0
 }
 ```
-So we get a student bag with these data attributes. This student bag now becomes a usable type like `i32, str, bl`.
+So we get a student bag with these data attributes. This student bag now becomes a usable type like `I32, Str, Bl`.
 
 Unlike our original base type can only store one data, the student package can store name, student number, class, grade data.
 
@@ -35,20 +35,20 @@ So how do we create a new package? As always, all of our types can be created us
 
 E.g:
 ```
-Peter := student()
+peter := student()
 ```
-This create a `Peter` identifier. All the properties of this student are initialized to `"", "", 0,0` as set in the definition.
+This create a `peter` identifier. All the properties of this student are initialized to `"", "", 0,0` as set in the definition.
 
 Let us recall that our base type, collection types can be created using the type-creation syntax, in fact they are all packages.
 
 ## Using Property
-Now that we have a `Peter`, how do we use the attributes inside?
+Now that we have a `peter`, how do we use the attributes inside?
 
 Very simple, we only need to use `.` syntax, we can summon the attributes we need.
 
 E.g:
 ```
-prt(Peter.Name)
+Prt(peter.Name)
 # print the name of a student
 ```
 To change the value of the property is the same, it is equivalent to a nested identifier. We can directly use the assignment statement to change the value.  
@@ -56,10 +56,10 @@ Parentheses can be omitted when the constructor is empty.
 
 E.g:
 ```
-Peter.Name = "Peter" 
-Peter.Number = "060233"
-Peter.Class = 2
-Peter.Grade = 6
+peter.Name = "peter" 
+peter.Number = "060233"
+peter.Class = 2
+peter.Grade = 6
 ```
 ## Simplify creation
 Creating a new package like the one above, and then loading the data one by one, is very cumbersome. We can use a simplified syntax to configure.
@@ -67,8 +67,8 @@ Just add `{}` to the creation grammar to use the `key=value` method to quickly l
 
 E.g:
 ```
-Peter := student() {
-    Name="Peter", Number="060233",
+peter := student() {
+    Name="peter", Number="060233",
     Class=2, Grade=6
 }
 ```
@@ -79,8 +79,8 @@ Similarly, the way the collection is created is actually a simplified creation, 
 
 E.g:
 ```
-array := [i32]{ 1, 2, 3, 4, 5 }
-dictionary := [[str]i32]{ ["1"]1, ["2"]2, ["3"]3 }
+array := [I32]{ 1, 2, 3, 4, 5 }
+dictionary := [[Str]I32]{ ["1"]1, ["2"]2, ["3"]3 }
 ```
 ## Anonymous Package
 If we only want to wrap some data directly, instead of defining the package first and then using it, is it like an anonymous function?
@@ -89,19 +89,19 @@ Of course, we can use the `{}` package directly, the same syntax as the collecti
 
 E.g:
 ```
-Peter := {
-    Name = "Peter",
+peter := {
+    Name = "peter",
     Number = "060233",
     Class = 2,
     Grade = 6
 }
 ```
 
-This directly creates a `Peter` data that we can use directly, but we cannot change this data.
+This directly creates a `peter` data that we can use directly, but we cannot change this data.
 
 Since the anonymous package is not a package of a clear type, we only recommend it for use on occasional occasions, such as LINQ.
 ## Private Property
-Anyone has some little secret, Peter is the same, maybe he hid a secret little girl's name and did not want others to know.
+Anyone has some little secret, peter is the same, maybe he hid a secret little girl's name and did not want others to know.
 
 We can define private properties to store properties that we do not want to be accessed by the outside world.
 
@@ -109,12 +109,12 @@ E.g:
 ```
 student() -> {
     ......
-    _GirlFriend: str    # The identifier beginning with this '_' is private
+    _GirlFriend: Str    # The identifier beginning with this '_' is private
 }
 ```
 That's right, if you remember the definition of identifiers, this is how private identifiers are defined, and private identifiers can not be accessed by outsiders.
 
-Therefore, we can define a `Peter`, nor can we get or modify the value via `Peter._GirlFirend`.
+Therefore, we can define a `peter`, nor can we get or modify the value via `peter._GirlFirend`.
 
 Then the private properties of this package can not be accessed, and can not be modified, what is the use? Do not worry, there is another attribute package.
 
@@ -125,8 +125,8 @@ E.g:
 ```
 student() -> {
     ......
-    _GirlFriend: str
-    getGirlFriend() -> (name: str) {
+    _GirlFriend: Str
+    GetGirlFriend() -> (name: Str) {
         <- (.._GirlFriend)
     }
 }
@@ -140,7 +140,7 @@ With this function, we can get the private property by calling the function.
 
 E.g:
 ```
-prt( Peter.getGirlFriend() )
+Prt( peter.GetGirlFriend() )
 # printed the name of a girlfriend of a puppy love student
 ```
 As with data attributes, functions can also be private identifiers, and functions that use private identifiers also mean that only the packet can access itself.
@@ -156,7 +156,7 @@ Add parameters at the time of definition, and write the definition of the constr
 
 E.g:
 ```
-student(name: str, number: str) {
+student(name: Str, number: Str) {
     ..Name = name
     ..Number = number
     # calculate the class
@@ -171,8 +171,8 @@ This gives us a package with constructors, and when we create a new student, cla
 
 E.g:
 ```
-Peter := student("Peter", "060233")
-prt(Peter.Class)     # print out 2
+peter := student("peter", "060233")
+Prt(peter.Class)     # print out 2
 ```
 
 It should be noted that a package can only support one constructor, we recommend to maintain the simplicity of the structure, a stable package easier to be used by the caller,
@@ -185,9 +185,9 @@ By wrapping the data and functions we need with `id -> {}`, we can call them dir
 E.g:
 ```
 student -> {
-    shareData: i32
-    shareFunction() -> () {
-        prt("nothing")
+    ShareData: I32
+    ShareFunction() -> () {
+        Prt("nothing")
     }
 }
 ```
@@ -202,7 +202,7 @@ The grammar is consistent with the constructor.
 E.g:
 ```
 student {
-    shareData = 128 
+    ShareData = 128 
 } -> {
     ......
 }
@@ -213,11 +213,11 @@ Now let us play our imagination, we want a customized package for Chinese studen
 E.g:
 ```
 chineseStudent() -> {
-    Name: str = ""
-    Number: str = ""
-    Class: i32 = 0
-    Grade: i32 = 0
-    Kungfu: bl = false    # kung fu students
+    Name: Str = ""
+    Number: Str = ""
+    Class: I32 = 0
+    Grade: I32 = 0
+    Kungfu: Bl = false    # kung fu students
 }
 ```
 No, no repeatable definition of data so elegant, we can reuse student attributes, with an additional kung fu attributes on it.
@@ -235,8 +235,8 @@ This way you can use generic attributes via student attributes in Chinese studen
 
 E.g:
 ```
-Chen := chineseStudent()
-prt(Chen.Student.Name)
+chen := chineseStudent()
+Prt(chen.Student.Name)
 # of course, since there is no assignment, nothing is output
 ```
 By combining layers after layer, you are free to assemble whatever you want to describe.
@@ -251,7 +251,7 @@ chineseStudent() -> {
     Kungfu := false
 } student() {   # inhert student
     # override
-    getGirlFriend() -> (name: str) {
+    GetGirlFriend() -> (name: Str) {
         <- ("none")
     }
 }
@@ -264,12 +264,12 @@ chineseStudent() -> {
     System
 }
 
-example -> {
+Example -> {
     Main() -> () {
         a := S{A=5,B=12}
         b := PKG("hello", 64, a)
-        prt( b.Z.A )
-        prt( b.Print() )
+        Prt( b.Z.A )
+        Prt( b.Print() )
         PKG.N()
     }
 }
@@ -279,7 +279,7 @@ S() -> {
     B := 0
 }
 
-PKG(x: str, y: i32, z: S) {
+PKG(x: Str, y: I32, z: S) {
     X = x
     Y = y
     Z = z
@@ -288,7 +288,7 @@ PKG(x: str, y: i32, z: S) {
     Y := 0
     Z :S
 
-    Print() -> (a: str) {
+    Print() -> (a: Str) {
         <- ( "X {Y}" )
     }
 }
@@ -296,7 +296,7 @@ PKG(x: str, y: i32, z: S) {
 PKG -> {
     M := 20
     N() -> () {
-        prt(M)
+        Prt(M)
     }
 }
 ```

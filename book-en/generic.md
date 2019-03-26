@@ -12,15 +12,15 @@ This is a simplified implementation.
 E.g:
 ```
 List<T>() -> {
-    items := Storage{T}    # create storage
+    Items := Storage{T}    # create storage
     Length := 0
 
-    get(index: i32) -> (item: T) { # get some T item
-        <- ( items.get( index ) )
+    Get(index: I32) -> (item: T) { # get some T item
+        <- ( Items.Get( index ) )
     }
   
-    add(item: T) -> () {   # add a T item to List
-        items.insert(Length, item)
+    Add(item: T) -> () {   # add a T item to List
+        Items.insert(Length, item)
         Length += 1
     }
 }
@@ -29,17 +29,17 @@ So we define a package that supports generics, `T` is a generic type, in fact it
 
 Generic brackets, like parameters, support multiple generations, for example: `<T, H, Q>`.
 
-After the generic is defined, `T` is treated as a real type within the area of ​​the package, and then we can use it in a variety of desired types just as `i32` does.
+After the generic is defined, `T` is treated as a real type within the area of ​​the package, and then we can use it in a variety of desired types just as `I32` does.
 
 Note that because generics are typed at run time, the compiler can not infer generic constructor methods. We can only use the default value create method to construct generic data.
 
-We can use the default value create method `def<type>()` to specify a default value that contains a type.
+We can use the default value create method `Def<type>()` to specify a default value that contains a type.
 
 E.g:
 ```
-x := def<i64>()
-y := def<Protocol>()
-z := def<()->()>()
+x := Def<I64>()
+y := Def<Protocol>()
+z := Def<()->()>()
 ```
 
 This way we can use it in generics.
@@ -47,7 +47,7 @@ This way we can use it in generics.
 E.g:
 ```
 Package<T>() -> {
-    item := def<T>()    # initialized a default value of the generic data
+    Item := Def<T>()    # initialized a default value of the generic data
 }
 ```
 So how do we use generics?
@@ -56,20 +56,20 @@ Very simple, and we can use the same statement, but called when the need to impo
 
 E.g:
 ```
-listNumber := List<i32>()  # pass in the number type
+listNumber := List<I32>()  # pass in the number type
 ```
 So we have an List of number types, is like this:
 ```
-listNumber := [i32]{}
+listNumber := [I32]{}
 ```
-Yes, in fact, our list and dictionary syntax are syntactic sugar, the actual types are `lst` and `dic`.
+Yes, in fact, our list and dictionary syntax are syntactic sugar, the actual types are `Lst` and `Dic`.
 ## Supported Types
 We can use generics in packages, functions, and protocol types.
 
 E.g:
 ```
 Package<T> -> {
-    count: T
+    Count: T
 }
 
 Func<T>(data: T) -> (data: T) {
@@ -77,13 +77,13 @@ Func<T>(data: T) -> (data: T) {
 }
 
 Protocol<T> <- {
-    test<T>(in: T) -> () {}
+    Test<T>(in: T) -> () {}
 }
 
 Implement() -> {
 
 } Protocol<Implement> {
-    test<Implement>(in: Implement) -> () {
+    Test<Implement>(in: Implement) -> () {
         
     }
 }

@@ -12,7 +12,7 @@ E.g:
 ```
 list := { 1,2,3,4,5 }
 ```
-This will create a `i32` type List containing` 1` to `5`.
+This will create a `I32` type List containing` 1` to `5`.
 
 If you need an List of explicit types, you can create them using construct function.
 
@@ -20,7 +20,7 @@ The List type is represented by `[type]`.
 
 For example we need a string list:
 ```
-list := [str]{}         # empty List
+list := [Str]{}         # empty List
 ```
 #### Array
 If we need to use the native Array type, we can use `[|type|]` to represent it.
@@ -28,7 +28,7 @@ It can also be created directly using `{|e1,e2,e3|}`.
 
 E.g:
 ```
-arr := [|i32|]{}
+arr := [|I32|]{}
 arr2 := {|1,2,3,4,5|}
 ```
 ### Visit
@@ -36,7 +36,7 @@ If we need to access one of the elements in the List we can access it with the `
 
 E.g:
 ```
-prt( list[1] )
+Prt( list[1] )
 ```
 It should be noted that in the programming language, most of the List starting index is from `0`,` identifier[0] `is the first element obtained, the subsequent elements and so on.
 ### Change the element
@@ -52,7 +52,7 @@ Note that we can only access the index of the existing data, if not exist, there
 list += 1                   # added to the end
 list.insert(2, 3)           # insert element 3 to index 2
 list -= 1                   # delete the specified location element
-length := list.len          # length
+length := list.Len          # length
 ```
 ## Dictionary
 A dictionary is a collection of disparate data of the same type. Each value of a dictionary is associated with a unique key, which is used as an identifier for this value data in the dictionary.
@@ -67,7 +67,7 @@ E.g:
 ```
 dictionary := {["a"]1, ["b"]2, ["c"]3}
 ```
-This will create a `[str]i32` type dictionary containing ` a, b, c` entries.
+This will create a `[Str]I32` type dictionary containing ` a, b, c` entries.
 
 If you need an explicit type of dictionary, you can also create it using construct function.
 
@@ -75,14 +75,14 @@ The dictionary type is represented by `[[type]type]`.
 
 E.g:
 ```
-dictionaryNumNum := [[i32]i32]{} # Empty
+dictionaryNumNum := [[I32]I32]{} # Empty
 ```
 ### Visit
 Like an List, we can also use indexes to access data directly.
 
 E.g:
 ```
-prt( dictionary["a"] )
+Prt( dictionary["a"] )
 ```
 ### Change the element
 Like lists, we can also use assignment statements to change to elements.
@@ -96,7 +96,7 @@ The difference is that with the List, if the assignment is a non-existent index,
 ```
 dictionary += {["d"]11}         # add index by method
 dictionary -= "c"               # delete the specified index element
-length := dictionary.len        # length
+length := dictionary.Len        # length
 ```
 ### [Next Chapter](judgment.md)
 
@@ -106,16 +106,16 @@ length := dictionary.len        # length
     System
 }
 
-example -> {
+Example -> {
     Main() -> () {
         List1 := {1,2,3,4,5}
         List1 += 6
-        list2 := [i8]{1,2,1,2}
+        list2 := [I8]{1,2,1,2}
         list3 := {|1,2,3|}
 
         dictionary1 := {["a"]1, ["b"]2, ["c"]3}
         dictionary1["d"] = 4
-        dictionary2 := [[i8]i8]{[1]1,[2]2,[3]3}
+        dictionary2 := [[I8]I8]{[1]1,[2]2,[3]3}
     }
 }
 ```

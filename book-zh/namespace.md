@@ -8,10 +8,10 @@
 
 例如：
 ```
-\name\space <- {}
+\Name\Space <- {}
 
 Demo -> {
-    getSomething() -> (content: str) {
+    GetSomething() -> (content: Str) {
         <- ("something")
     }
 }
@@ -21,14 +21,14 @@ Demo -> {
 
 例如：
 ```
-\run <- { 
-    name\space 
+\Run <- { 
+    Name\Space 
 }
 
-example -> {
+Example -> {
     Main() -> () {
         # 打印 something
-        prt( Demo.getSomething() )
+        Prt( Demo.GetSomething() )
     }
 }
 ```
@@ -37,14 +37,14 @@ example -> {
 
 例如：
 ```
-\run <- { 
-    name\space.Demo 
+\Run <- { 
+    Name\Space.Demo 
 }
 
-example -> {
+Example -> {
     Main() -> () {
         # 打印 something
-        prt( getSomething() )
+        Prt( GetSomething() )
     }
 }
 ```
@@ -56,10 +56,10 @@ example -> {
 ```
 \Demo <- {}
 
-example -> {
+Example -> {
     Main() -> () {
         # 直接使用即可
-        prt( \name\space.Demo.getSomething() )    
+        Prt( \Name\Space.Demo.GetSomething() )    
     }
 }
 ```

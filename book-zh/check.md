@@ -12,8 +12,8 @@
 
 例如：
 ```
-readFile(name: str) -> () {
-    ? name.len == 0 {
+readFile(name: Str) -> () {
+    ? name.Len == 0 {
         !( Exception("something wrong") )
     }
     ......
@@ -31,7 +31,7 @@ readFile(name: str) -> () {
 } ex:IOException {
     !(ex)
 } e {
-    prt(e.message)
+    Prt(e.message)
 }
 ```
 当出现异常时，程序就会进入错误处理区块，`e` 为异常标识符，我们可以获取异常的信息，或者进行其它操作。
@@ -104,18 +104,18 @@ _ {
     System
 }
 
-example -> {
+Example -> {
     Main() -> () {
         ! {
-            x: i32 = (1 * 1)
+            x: I32 = (1 * 1)
         } ex {
             !(ex)
         }
 
         x := Defer()
         ! y := Defer() {
-            x.content = "defer"
-            prt(x.content)
+            x.Content = "defer"
+            Prt(x.Content)
         } e:Exception {
             !(e)
         } _ {
@@ -127,10 +127,10 @@ example -> {
 }
 
 Defer() -> {
-    content: str
+    Content: Str
 } IDisposable {
     Dispose() -> () {
-        ..content = ""
+        ..Content = ""
     }
 }
 ```

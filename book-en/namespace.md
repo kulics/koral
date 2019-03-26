@@ -8,10 +8,10 @@ Exported names can be nested in a loop so that functions can be split as effecti
 
 E.g:
 ```
-\name\space <- {}
+\Name\Space <- {}
 
 Demo -> {
-    getSomething() -> (content: str) {
+    GetSomething() -> (content: Str) {
         <- ("something")
     }
 }
@@ -22,14 +22,14 @@ We can use other namespace contents through the import function. The namespace c
 
 E.g:
 ```
-\run <- { 
-    name\space 
+\Run <- { 
+    Name\Space 
 }
 
-example -> {
+Example -> {
     Main() -> () {
         # print something
-        prt( Demo.getSomething() )
+        Prt( Demo.GetSomething() )
     }
 }
 ```
@@ -38,14 +38,14 @@ If we don't want to use the namespace name to call the content every time, we ca
 
 E.g:
 ```
-\run <- { 
-    name\space.Demo 
+\Run <- { 
+    Name\Space.Demo 
 }
 
-example -> {
+Example -> {
     Main() -> () {
         # print something
-        prt( getSomething() )
+        Prt( GetSomething() )
     }
 }
 ```
@@ -57,10 +57,10 @@ E.g:
 ```
 \Demo <- {}
 
-example -> {
+Example -> {
     Main() -> () {
         # use it directly
-        prt( \name\space.Demo.getSomething() )    
+        Prt( \Name\Space.Demo.GetSomething() )    
     }
 }
 ```

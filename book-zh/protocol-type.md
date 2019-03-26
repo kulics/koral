@@ -20,8 +20,8 @@ protocol <- {
 例如：
 ```
 homeWork <- {
-    Count(): i32
-    do() -> ()
+    Count(): I32
+    Do() -> ()
 }
 ```
 这是一个作业协议，它有两个属性，一个是需要做作业的数量，一个是完成作业的函数。
@@ -39,9 +39,9 @@ homeWork <- {
 student() -> {
     ......
 } homeWork {
-    Count(): i32
+    Count(): I32
 
-    do() -> () {
+    Do() -> () {
         SpendTime(1)    # 花费了一个小时
         Count -= 1      # 完成了一个
     }
@@ -51,21 +51,21 @@ student() -> {
 
 让我们来解释一下这段代码发生了什么：
 1. 我们实现了一个协议，现在 `student` 也被认为是 `homework` 类型了，我们可以将一个 `student` 当作 `homework` 一样去使用。
-1. 在协议内我们包含了协议规定的两个属性 `Count, do` ，根据规定，一个也不能少。
+1. 在协议内我们包含了协议规定的两个属性 `Count, Do` ，根据规定，一个也不能少。
 1. 我们给协议的两个属性都分别编写了真实的值和函数，这样这两个属性就成为了 `student` 的有效子属性之一。
-1. 我们在 `do` 里面做了一些事情，减少了作业的总量。
+1. 我们在 `Do` 里面做了一些事情，减少了作业的总量。
 
 ## 使用协议
 包含了协议之后，我们就能使用拥有协议的学生包了。
 
 例如：
 ```
-Peter := student{ Count=999999 }
-prt( Peter.Count )
+peter := student{ Count=999999 }
+Prt( peter.Count )
 # 打印 999999，好多呀
-Peter.do()
+peter.Do()
 # 做了一次作业
-prt( Peter.Count )
+Prt( peter.Count )
 # 打印 999998，还是好多呀
 ```
 如果只是这样使用，那和在包里直接定义这两个属性比就没什么优势了。
@@ -83,16 +83,16 @@ StudentA := chineseStudent()
 StudentB := americaStudent()
 StudentC := japaneseStudent()
 # 让他们分别做作业
-StudentA.do()
-StudentB.do()
-StudentC.do()
+StudentA.Do()
+StudentB.Do()
+StudentC.Do()
 ```
 更有效率的做法是把这个功能写进函数，让函数来帮我们重复调用协议的功能。
 
 例如：
 ```
 doHomeWork(student: homeWork) -> () {
-    student.do()
+    student.Do()
 }
 # 现在我们就可以更简单地让每个学生做作业了
 doHomeWork(StudentA)
@@ -118,15 +118,15 @@ arr.add( StudentA )
 
 但有时候我们又需要获得数据的原始类型来处理，我们可以使用类型判断来帮助我们完成这个事情。
 
-我们可以使用`value.is<type>()`来判断数据的类型，使用`value.as<type>()`来将数据转化为我们的类型。
+我们可以使用`value.Is<type>()`来判断数据的类型，使用`value.As<type>()`来将数据转化为我们的类型。
 
 例如：
 ```
 func(hw: homeWork) -> () {
     # 判断是否中国学生
-    ? hw.is<chineseStudent>() {
+    ? hw.Is<chineseStudent>() {
         # 转换为中国学生数据
-        cs := hw.as<chineseStudent>()
+        cs := hw.As<chineseStudent>()
     }
 }
 ```
@@ -140,32 +140,32 @@ func(hw: homeWork) -> () {
     System
 }
 
-example -> {
+Example -> {
     Main() -> () {
         S := B()
-        B.do()
+        B.Do()
         C( B )
     }
 }
 
 A <- {
-    X(): i32
-    do() -> () {}
+    X(): I32
+    Do() -> () {}
 }
 
 B() -> {
-    y := 5
+    Y := 5
 } A {
     X() := 0
-    do() -> () {
+    Do() -> () {
         X += 1
     }
 }
 
 C(a: A) -> () {
-    a.do()
-    ? a.is<B>() {
-        prt( a.as<B>().y )
+    a.Do()
+    ? a.Is<B>() {
+        Prt( a.As<B>().Y )
     }
 }
 ```

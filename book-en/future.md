@@ -5,13 +5,13 @@ When a package has all the attributes of another package, then the two packages 
 E.g:
 ```
 A() -> {
-    Number: i32
+    Number: I32
     Function() -> (){}
 }
 
 B() -> {
-    Number: i32
-    Text: str
+    Number: I32
+    Text: Str
     Function() -> (){}
 }
 
