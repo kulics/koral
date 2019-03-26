@@ -32,11 +32,11 @@ function()  # 调用了 function
 
 例如：
 ```
-func(x: i32) -> (y: i32) {
+func(x: I32) -> (y: I32) {
     <- (x * 2)
 }
 ```
-这个函数的意义是，接受输入的一个 `i32` 参数 `x`，返回一个 `i32` 参数 `y`。
+这个函数的意义是，接受输入的一个 `I32` 参数 `x`，返回一个 `I32` 参数 `y`。
 
 靠左边的括号内是入参，靠右边的括号内是出参，括号内的参数没有数量限制，但是对顺序和类型有严格要求。
 ### 返回
@@ -71,7 +71,7 @@ func(x: i32) -> (y: i32) {
 例如：
 ```
 # 定义一个包含两个入参的函数
-sell(price: i32, name: str) -> () {}
+sell(price: I32, name: Str) -> () {}
 # 按照定义的要求，填入符合要求的数据
 sell(1.99, "cola")
 ```
@@ -80,7 +80,7 @@ sell(1.99, "cola")
 
 例如：
 ```
-topSell() -> (name: str, count: i32) {
+topSell() -> (name: Str, count: I32) {
     ......
     <- ("cola", many)
 }
@@ -101,7 +101,7 @@ topSell() -> (name: str, count: i32) {
 
 例如：
 ```
-prt( topSell() )      # 打印两个数值
+Prt( topSell() )      # 打印两个数值
 ```
 如果只有一个返回值，括号可带可不带。
 
@@ -130,7 +130,7 @@ _ = topSell()      # 对于 _ 来说，赋值和定义是等价的
 
 例如：
 ```
-each1To10(func: (i32) -> () ) -> () {
+each1To10(func: (I32) -> () ) -> () {
     @ i <- [1<=10] {
         func(i)
     }
@@ -142,8 +142,8 @@ each1To10(func: (i32) -> () ) -> () {
 
 例如：
 ```
-print(item: i32) -> () {
-    prt(item)
+print(item: I32) -> () {
+    Prt(item)
 }
 
 each1To10(print)
@@ -162,9 +162,9 @@ each1To10(print)
 例如：
 ```
 foreach( {it -> 
-    prt(it)
-    prt(it * it)
-    prt(it % 2)
+    Prt(it)
+    Prt(it * it)
+    Prt(it % 2)
 })
 take( {a, b -> a + b} )
 findAll( {it -> it > 7} )
@@ -176,8 +176,8 @@ findAll( {it -> it > 7} )
 
 例如：
 ```
-each1To10( (item: i32) -> () {
-    prt(item)
+each1To10( (item: I32) -> () {
+    Prt(item)
 })
 ```
 
@@ -189,23 +189,23 @@ each1To10( (item: i32) -> () {
     System
 }
 
-example -> {
+Example -> {
     Main() -> () {
         A()
         B(1,2,3)
         x := C()
-        D( {-> prt("D")} )
-        E( {it -> prt(it)} )
-        E( (a: i32) -> () {
-            prt(it)
+        D( {-> Prt("D")} )
+        E( {it -> Prt(it)} )
+        E( (a: I32) -> () {
+            Prt(it)
         })
     }
 
     A() -> () {}
 
-    B(a: i32, b: i32, c: i32) -> () {}
+    B(a: I32, b: I32, c: I32) -> () {}
 
-    C() -> (a: i32) {
+    C() -> (a: I32) {
         <- (1024)
     }
 
@@ -213,7 +213,7 @@ example -> {
         fn()
     }
 
-    E(fn: (i32) -> () ) -> () {
+    E(fn: (I32) -> () ) -> () {
         @ i <- [1<=20] {
             fn(i)
         }

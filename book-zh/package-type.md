@@ -18,13 +18,13 @@ package() -> {
 例如：
 ```
 student() -> {
-    Name: str = ""
-    Number: str = ""
-    Class: i32 = 0
-    Grade: i32 = 0
+    Name: Str = ""
+    Number: Str = ""
+    Class: I32 = 0
+    Grade: I32 = 0
 }
 ```
-这样我们就得到了具有这几个数据属性的学生包。这个学生包现在就像 `i32,str,bl` 一样成为了一个可以使用的类型。
+这样我们就得到了具有这几个数据属性的学生包。这个学生包现在就像 `I32,Str,Bl` 一样成为了一个可以使用的类型。
 
 不像我们原始的基础类型只能存储一种数据，这个学生包可以同时存储名称、学号、班级、年级这些数据。
 
@@ -35,29 +35,29 @@ student() -> {
 
 例如：
 ```
-Peter := student()
+peter := student()
 ```
-这样便创建了一个 `Peter` 标识符，这个学生的所有属性都根据定义中设置的那样被初始化为 `"","",0,0` 。
+这样便创建了一个 `peter` 标识符，这个学生的所有属性都根据定义中设置的那样被初始化为 `"","",0,0` 。
 
 让我们回顾一下，我们的基础类型、集合类型都可以使用构造函数来创建，实际上它们都是包.
 
 ## 使用属性
-现在我们已经有了一个 `Peter` ，我们要怎么使用里面的属性呢？
+现在我们已经有了一个 `peter` ，我们要怎么使用里面的属性呢？
 
 很简单，我们只需要使用 `.` 语法，就能召唤出我们需要的属性。
 
 例如：
 ```
-prt( Peter.Name )      # 打印了某个学生的名字
+Prt( peter.Name )      # 打印了某个学生的名字
 ```
 要更改属性的值也是一样的，它就相当于是个嵌套的标识符。我们可以直接用赋值语句去更改值。
 
 例如：
 ```
-Peter.Name = "Peter" 
-Peter.Number = "060233"
-Peter.Class = 2
-Peter.Grade = 6
+peter.Name = "peter" 
+peter.Number = "060233"
+peter.Class = 2
+peter.Grade = 6
 ```
 ## 简化创建
 像上面那样创建一个新的包，再逐个装填数据非常麻烦，我们可以使用简化语法来配置。
@@ -66,8 +66,8 @@ Peter.Grade = 6
 
 例如：
 ```
-Peter := student() {
-    Name="Peter", Number="060233",
+peter := student() {
+    Name="peter", Number="060233",
     Class=2, Grade=6
 }
 ```
@@ -78,8 +78,8 @@ Peter := student() {
 
 例如：
 ```
-array := [i32]{ 1, 2, 3, 4, 5 }
-dictionary := [[str]i32]{ ["1"]1, ["2"]2, ["3"]3 }
+array := [I32]{ 1, 2, 3, 4, 5 }
+dictionary := [[Str]I32]{ ["1"]1, ["2"]2, ["3"]3 }
 ```
 ## 匿名包
 如果我们只想直接包裹某些数据使用，而不是先定义包再使用，像匿名函数那样可以吗？
@@ -88,20 +88,20 @@ dictionary := [[str]i32]{ ["1"]1, ["2"]2, ["3"]3 }
 
 例如：
 ```
-Peter := {
-    Name = "Peter",
+peter := {
+    Name = "peter",
     Number = "060233",
     Class = 2,
     Grade = 6
 }
 ```
 
-这样就直接创建了一个 `Peter` 数据，我们可以直接使用这些数据，但是不可更改这些数据。
+这样就直接创建了一个 `peter` 数据，我们可以直接使用这些数据，但是不可更改这些数据。
 
 由于匿名包并不是一个具有明确类型的包，所以我们只建议在一些临时场合使用，例如LINQ。
 
 ## 私有属性
-任何人都会有些小秘密， `Peter` 也一样，也许他藏了一个秘密小女友的名字不想让其他人知道。
+任何人都会有些小秘密， `peter` 也一样，也许他藏了一个秘密小女友的名字不想让其他人知道。
 
 我们可以定义私有属性来存储一些不想被外界访问的属性。
 
@@ -109,12 +109,12 @@ Peter := {
 ```
 student() -> {
     ......
-    _GirlFriend: str # 第一个字符是 _ 的标识符是私有的
+    _GirlFriend: Str # 第一个字符是 _ 的标识符是私有的
 }
 ```
 没错，如果你还记得标识符的定义的话，这就是私有标识符的定义方式，私有标识符是不能被外界访问的。
 
-因此我们再定义一个 `Peter` 的话，也不能通过 `Peter._GirlFriend` 来获取值或修改值。
+因此我们再定义一个 `peter` 的话，也不能通过 `peter._GirlFriend` 来获取值或修改值。
 
 那这种包的私有属性又不能访问，又不能修改，有什么用呢？别急，包还有另外一种属性。
 
@@ -125,8 +125,8 @@ student() -> {
 ```
 student() -> {
     ......
-    _GirlFriend: str
-    getGirlFriend() -> (name: str) {
+    _GirlFriend: Str
+    GetGirlFriend() -> (name: Str) {
         <- (.._GirlFriend)
     }
 }
@@ -140,7 +140,7 @@ student() -> {
 
 例如：
 ```
-prt( Peter.getGirlFriend() ) 
+Prt( peter.GetGirlFriend() ) 
 # 打印了某个早恋学生的女朋友名字
 ```
 与数据属性一样，函数也可以是私有标识符，使用私有标识符的函数也意味着只有包自己能访问。
@@ -156,7 +156,7 @@ prt( Peter.getGirlFriend() )
 
 例如：
 ```
-student(name: str, number: str) {
+student(name: Str, number: Str) {
     ..Name = name
     ..Number = number
     # 计算得出班级
@@ -171,8 +171,8 @@ student(name: str, number: str) {
 
 例如：
 ```
-Peter := student("Peter", "060233")
-prt(Peter.Class)     # 打印出 2
+peter := student("peter", "060233")
+Prt(peter.Class)     # 打印出 2
 ```
 
 需要注意的是，一个包只能支持一个构造函数，我们建议保持构造的简单性，一个稳定的包更容易被调用者放心使用，
@@ -185,9 +185,9 @@ prt(Peter.Class)     # 打印出 2
 例如：
 ```
 student -> {
-    shareData: i32
-    shareFunction() -> () {
-        prt("nothing")
+    ShareData: I32
+    ShareFunction() -> () {
+        Prt("nothing")
     }
 }
 ```
@@ -202,7 +202,7 @@ student -> {
 例如：
 ```
 student {
-    shareData = 128 
+    ShareData = 128 
 } -> {
     ......
 }
@@ -213,11 +213,11 @@ student {
 例如：
 ```
 chineseStudent() -> {
-    Name: str = ""
-    Number: str = ""
-    Class: i32 = 0
-    Grade: i32 = 0
-    Kungfu: bl = false     # 不会功夫的学生
+    Name: Str = ""
+    Number: Str = ""
+    Class: I32 = 0
+    Grade: I32 = 0
+    Kungfu: Bl = false     # 不会功夫的学生
 }
 ```
 不不不，这样重复定义数据就很不优雅了，我们可以将学生属性复用，加上一个额外的功夫属性就可以了。
@@ -235,8 +235,8 @@ chineseStudent() -> {
 
 例如：
 ```
-Chen := chineseStudent()
-prt( Chen.Student.Name )
+chen := chineseStudent()
+Prt( chen.Student.Name )
 # 当然，因为没有赋值，所以什么也没有输出
 ```
 通过组合一层又一层的包，你可以自由拼装出任何一个你想要描述的事物。
@@ -251,7 +251,7 @@ chineseStudent() -> {
     Kungfu := false
 } student() {   # 继承 student
     # 重写
-    getGirlFriend() -> (name: str) {
+    GetGirlFriend() -> (name: Str) {
         <- ("none")
     }
 }
@@ -265,12 +265,12 @@ chineseStudent() -> {
     System
 }
 
-example -> {
+Example -> {
     Main() -> () {
         a := S{A=5,B=12}
         b := PKG("hello", 64, a)
-        prt( b.Z.A )
-        prt( b.Print() )
+        Prt( b.Z.A )
+        Prt( b.Print() )
         PKG.N()
     }
 }
@@ -280,7 +280,7 @@ S() -> {
     B := 0
 }
 
-PKG(x: str, y: i32, z: S) {
+PKG(x: Str, y: I32, z: S) {
     X = x
     Y = y
     Z = z
@@ -289,7 +289,7 @@ PKG(x: str, y: i32, z: S) {
     Y := 0
     Z :S
 
-    Print() -> (a: str) {
+    Print() -> (a: Str) {
         <- ( "X {Y}" )
     }
 }
@@ -297,7 +297,7 @@ PKG(x: str, y: i32, z: S) {
 PKG -> {
     M := 20
     N() -> () {
-        prt(M)
+        Prt(M)
     }
 }
 ```

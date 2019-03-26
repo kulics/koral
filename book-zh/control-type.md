@@ -8,7 +8,7 @@
 
 例如：
 ```
-number(): i32
+number(): I32
 ```
 这样便定义了一个没有额外方法的控制数据，它内置了默认的控制方法。
 
@@ -17,7 +17,7 @@ number(): i32
 
 例如：
 ```
-number(): i32 {
+number(): I32 {
     get {           # 表示获取，相当于其它语言中的getter
         <- (7)      # 只返回 7
     }
@@ -31,7 +31,7 @@ number(): i32 {
 
 例如：
 ```
-Number(): i32 {
+number(): I32 {
     ......
     set {       # 表示设置，相当于其它语言中的setter
         # ？？？该把值给谁？？？
@@ -43,12 +43,12 @@ Number(): i32 {
 
 例如：
 ```
-_Number := 0
+_number := 0
 
-Number(): i32 {
+number(): I32 {
     ......
     set {
-        _Number = value     # value代表输入的值
+        _number = value     # value代表输入的值
     }
 }
 ```
@@ -57,27 +57,27 @@ Number(): i32 {
 
 一个完整的读写例子如下：
 ```
-_Number := 0
-Number(): i32 {
+_number := 0
+number(): I32 {
     get {
-        <- (_Number)
+        <- (_number)
     }
     set {
-        _Number = value # value代表输入的值
+        _number = value # value代表输入的值
     }
 }
 ```
 
-特别的，如果我们给 `Number` 初始化，编译器会自动生成对应的 `_Number` 私有变量, 这时我们就可以省去定义另一个变量的步骤。
+特别的，如果我们给 `number` 初始化，编译器会自动生成对应的 `_number` 私有变量, 这时我们就可以省去定义另一个变量的步骤。
 
 例如：
 ```
-Number(): i32 = 0 {
+number(): I32 = 0 {
     get {
-        <- (_Number)
+        <- (_number)
     }
     set {
-        _Number = value 
+        _number = value 
     }
 }
 ```
@@ -94,22 +94,22 @@ Number(): i32 = 0 {
     System
 }
 
-example -> {
+Example -> {
     Main() -> () {
-        prt(a)
+        Prt(a)
         c = 5
-        prt(c)
-        prt(c)
+        Prt(c)
+        Prt(c)
     }
 
-    a() : i32 {
+    A() : I32 {
         get { 
             <- (3) 
         }
     }
 
     B := 0
-    C() : i32 {
+    C() : I32 {
         get { 
             <- (B) 
         }

@@ -4,7 +4,7 @@ If a type is defined but not assigned, it will not be used.
 
 E.g:
 ```
-a: i32
+a: I32
 b := a   # error, no assignment to a
 ```
 
@@ -15,8 +15,8 @@ Just add `?` after any type, which is a nullable type.
 
 E.g:
 ```
-a: i32?
-b := a   # b assigns an empty i32
+a: I32?
+b := a   # b assigns an empty I32
 ```
 
 Once an optional type has appeared, we need to strictly handle nil values to avoid program errors.
@@ -25,7 +25,7 @@ E.g:
 ```
 # Judgment is not empty and then use
 ? a ~= nil {
-     a.toStr()
+     a.ToStr()
 }
 ```
 
@@ -34,7 +34,7 @@ We can use `?` after the expression to use them, so that they will only be execu
 
 E.g:
 ```
-arr?.toStr()
+arr?.ToStr()
 ```
 
 ## Ignore optional types of warnings
@@ -43,9 +43,9 @@ Just replace `?` with `!`.
 
 E.g:
 ```
-a: i32!
+a: I32!
 b := a
-a!.toStr()
+a!.ToStr()
 ```
 
 ## [Complete Example](../example.xs)
@@ -56,15 +56,15 @@ a!.toStr()
     System
 }
 
-example -> {
+Example -> {
     Main() -> () {
-        a: i32? = nil
+        a: I32? = nil
 
-        b: [i32?]? = [i32?]?{0}
-        b?[0]?.toStr()?.toStr()
+        b: [I32?]? = [I32?]?{0}
+        b?[0]?.ToStr()?.ToStr()
 
-        c: [i32!]! = [i32!]!{0}
-        c![0]!.toStr()!.toStr()
+        c: [I32!]! = [I32!]!{0}
+        c![0]!.ToStr()!.ToStr()
     }
 }
 ```

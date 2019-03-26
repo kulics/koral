@@ -5,13 +5,13 @@
 例如：
 ```
 A() -> {
-    Number: i32
+    Number: I32
     Function() -> (){}
 }
 
 B() -> {
-    Number: i32
-    Text: str
+    Number: I32
+    Text: Str
     Function() -> (){}
 }
 

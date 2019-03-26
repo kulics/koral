@@ -6,11 +6,11 @@ We only need to use the `? value {}` to declare the judgment statement, accordin
 E.g:
 ```
 ? true {
-    prt("true")  # true
+    Prt("true")  # true
 }
 ```
 # Boolean Judgment
-When the judgment value is only `bl`, the statement is executed only if it is `true`. 
+When the judgment value is only `Bl`, the statement is executed only if it is `true`. 
 If we need to deal with other situations at the same time, we can continue to declare another processing statement after using `value {}`.
 If you only need `false`, use `_ {}` to declare it.
 
@@ -77,12 +77,12 @@ You can use the `? value -> id:type{}` syntax to match types, `id` can be omitte
 
 E.g:
 ```
-? x -> :i32 {       # When i32
-     prt("i32")
-} content:str {     # when str
-     prt(content)
+? x -> :I32 {       # When I32
+     Prt("I32")
+} content:Str {     # when Str
+     Prt(content)
 } nil {             # When it is nil
-     prt("nil")
+     Prt("nil")
 }
 ```
 ### Get type
@@ -101,28 +101,28 @@ E.g:
     System
 }
 
-example -> {
+Example -> {
     Main() -> () {
         a := 5
         ? a == 2 { 
-            prt(2) 
+            Prt(2) 
         } a == 4 { 
-            prt(4) 
+            Prt(4) 
         } _ { 
-            prt("not find") 
+            Prt("not find") 
         }
 
         b := 7
         ? b -> 5 { 
-            prt(5) 
+            Prt(5) 
         } 7 { 
-            prt(7) 
+            Prt(7) 
         } _ { 
-            prt("not find") 
+            Prt("not find") 
         }
 
-        prt( ?(b) )
-        prt( ?(:i32) )
+        Prt( ?(b) )
+        Prt( ?(:I32) )
     }
 }
 ```

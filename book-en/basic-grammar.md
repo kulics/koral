@@ -53,12 +53,12 @@ E.g:
     System
 }
 
-example -> {
+Example -> {
     Main() -> () {
     }
 }
 ```
-The main entry function here is defined of the `example` and is a function with no arguments and no return value. It is automatically recognized as the main entry and the main entry function is executed when the program is started, so we simply write the function main entry function can be.
+The main entry function here is defined of the `Example` and is a function with no arguments and no return value. It is automatically recognized as the main entry and the main entry function is executed when the program is started, so we simply write the function main entry function can be.
 
 In the examples that follow, we are by default implemented in the main entry function, so we will not overplay this part of the code.
 
@@ -69,11 +69,11 @@ More details about the function will be explained in later chapters.
 ## Display information
 We use the program in order to obtain some useful information, so we need a feature to browse information, this feature can be display, print or output.
 
-If we write a console program, we can use `prt()` function, it can display data or text information to the console for us to browse.
+If we write a console program, we can use `Prt()` function, it can display data or text information to the console for us to browse.
 
 E.g:
 ```
-prt("Hello world")    # output Hello world
+Prt("Hello world")    # output Hello world
 ```
 In the following examples, we will all use the console as a presentation environment.
 ## Comment
@@ -95,7 +95,7 @@ We can create new variable using the `id:type` statement.
 
 E.g:
 ```
-a: i32
+a: I32
 ```
 This will create an identifier for the name on the left and define it as the type on the right, in which case the identifier is a nil value.
 
@@ -117,30 +117,13 @@ E.g:
 b := 10
 ```
 
-This defines the new variable `b`, which is equal to `10` and is automatically derived as an `i32` type.
+This defines the new variable `b`, which is equal to `10` and is automatically derived as an `I32` type.
 
 If we don't want automatic derivation, we can also use the write statement definition to mark the type we need.
 
 E.g:
 ```
-b: i16 = 10
-```
-## Mutable Data
-We can easily define mutable data, and identifiers that start with upper case letters are all mutable data.
-
-E.g:
-```
-I := 1          # can be changed
-J: i32 = 1      # do not use automatic derivation
-```
-
-## Immutable Data
-We can also define immutable data, which is immutable after assignment, and all the markers that not start with upper case letters are immutable data.
-
-E.g:
-```
-i := 2         # cannot be changed
-j: i32 = 3     # do not use automatic derivation
+b: I16 = 10
 ```
 
 ## Constant
@@ -149,7 +132,7 @@ Constants are languages that are determined at compile time and are unchangeable
 E.g:
 ```
 i 2         # automatic derivation
-j:i32 3     # do not use automatic derivation
+j:I32 3     # do not use automatic derivation
 ```
 
 ## Identifier
@@ -160,8 +143,9 @@ Identifier is the variable, function, package, protocol, etc. specified name. Th
 1. Other characters in the identifier can be underlined `_`, letters, or numbers.
 1. Within the same `{}`, you can not define more than two identifiers of the same name.
 1. In different `{}`, you can define the identifier of the duplicate name, the language will give priority to the identifier defined in the current range.
+1. In namespace, packages and protocols, properties and method names that begin with the underscore `_` are considered private and the rest are considered public.
+1. The identifier at the beginning of lowercase can only be used within the function, and the rest of the place can only use the identifier of the uppercase header.
 
-In particular, in namespace, packages and protocols, properties and method names that begin with the underscore `_` are considered private and the rest are considered public.
 ## Keyword
 none.
 
@@ -173,9 +157,9 @@ However, in practical projects, the use of partition will effectively improve th
 
 E.g:
 ```
-a.b(x,y).c(()->(i32){<-(2+1)}).D=1+3*5/4
+a.b(x,y).c(()->(I32){<-(2+1)}).D=1+3*5/4
 
-a.b(x, y).c( () -> (i32) {
+a.b(x, y).c( () -> (I32) {
     <- (2 + 1)
 }).D = 1 + 3 * 5 / 4
 ```
@@ -187,12 +171,12 @@ a.b(x, y).c( () -> (i32) {
     System
 }
 
-example -> {
+Example -> {
     Main() -> () {
-        a : i32
+        a : I32
         a = 5
         b := 6
-        c: i8 = 1
+        c: I8 = 1
     }
 }
 ```

@@ -9,7 +9,7 @@ E.g:
 ```
 arr := {1, 2, 3, 4, 5}
 @ item <- arr {
-    prt(item)     # print each number
+    Prt(item)     # print each number
 }
 ```
 
@@ -18,7 +18,7 @@ If we need to fetch the index and value at the same time, we can replace `id` wi
 E.g:
 ```
 @ [i]v <- arr  {
-    prt(""i":"v"")
+    Prt(""i":"v"")
 }
 ```
 
@@ -31,7 +31,7 @@ Iterators can loop from the start point to the end point, we use the collection 
 E.g:
 ```
 @ i <- [0 <= 100] {
-    prt(i)      # print each number
+    Prt(i)      # print each number
 }
 ```
 It should be noted that the meaning of `0 <= 100` is read from` 0` to `100` one by one, that is, a total execution of` 101` times. Iterator will be executed until the last number is completed, rather than an early end.
@@ -87,9 +87,9 @@ Add a condition `?` to it.
 
 E.g:
 ```
-I := 0
-@ ? I < 6 {
-     I += 1
+i := 0
+@ ? i < 6 {
+     i += 1
 }
 ```
 ## Continue
@@ -103,24 +103,24 @@ If you only need to jump out of the current loop, use the `-> @` statement.
     System
 }
 
-example -> {
+Example -> {
     Main() -> () {
         arr := {1,2,3,4,5}
         @ i <- arr {
-            prt(i)
+            Prt(i)
         }
 
         @ i <- [1 <= 50] {
-            prt(i)
+            Prt(i)
         }
 
         @ [i]v <- [100 >= 0, 2] {
-            prt(i, v)
+            Prt(i, v)
         }
 
-        X := 0
-        @ ? X <= 10 {
-            X += 1
+        x := 0
+        @ ? x <= 10 {
+            x += 1
         }
     }
 }

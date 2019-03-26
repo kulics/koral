@@ -20,11 +20,11 @@ E.g:
 `Table("test")`
 annotation() -> {
         `Key,Column("id")`
-        ID: str = ""
+        ID: Str = ""
         `Column("name")`
-        Name: str = ""
+        Name: Str = ""
         `Column("data")`
-        Data: str = ""
+        Data: Str = ""
 }
 ```
 We declare an annotation package that annotates the table name `test`, the primary key `id`, the field `name`, and the field `data`.

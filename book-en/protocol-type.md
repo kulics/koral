@@ -20,8 +20,8 @@ Next, let's design a difficult task that students need to accomplish ... homewor
 E.g:
 ```
 homeWork <- {
-    Count(): i32
-    do() -> ()
+    Count(): I32
+    Do() -> ()
 }
 ```
 The protocol for this job has two properties, one is the number of homework and the other is the function to do homework.
@@ -39,9 +39,9 @@ E.g:
 student() -> {
     ......
 } homeWork {
-    Count(): i32
+    Count(): I32
 
-    do() -> () {
+    Do() -> () {
         SpendTime(1)    # spent an hour
         Count -= 1      # completed one
     }
@@ -51,21 +51,21 @@ Our student homework is really hard ...
 
 Let's explain what this section of the code:
 1. We have implemented an protocol, and now `student` is also considered as `homework'. We can use a `student' as `homework'.
-1. In the protocol we include the protocol of the two properties `Count, do`, according to the provisions of a nor less.
+1. In the protocol we include the protocol of the two properties `Count, Do`, according to the provisions of a nor less.
 1. We have written the actual values ​​and functions for each of the two properties of the protocol, so that these two properties become one of the valid sub-properties of `student`.
-1. We did something in `do`, which reduced the total count of homework.
+1. We did something in `Do`, which reduced the total count of homework.
 
 ## Use Protocol
 With the protocol included, we can use the student bundle that owns the protocol.
 
 E.g:
 ```
-Peter := student{ Count=999999 }
-prt( Peter.Count )
+peter := student{ Count=999999 }
+Prt( peter.Count )
 # print 999999, too much
-Peter.do()
+peter.Do()
 # did a homework
-prt(Peter.Count)
+Prt(peter.Count)
 # print 999998, or too much
 ```
 If this is the case, there is no advantage in defining these two properties directly in the package.
@@ -83,16 +83,16 @@ StudentA := chineseStudent()
 StudentB := americaStudent()
 StudentC := japanStudent()
 # let them do homework separately
-StudentA.do()
-StudentB.do()
-StudentC.do()
+StudentA.Do()
+StudentB.Do()
+StudentC.Do()
 ```
 More efficient approach is to write this function into the function, let the function to help us repeatedly call the function of the protocol.
 
 E.g:
 ```
 doHomeWork(student: homeWork) -> () {
-    student.do()
+    student.Do()
 }
 # Now we can make it easier for every student to do their homework
 doHomeWork(StudentA)
@@ -118,15 +118,15 @@ Because packet types can be converted to protocol types, the original type of da
 
 But sometimes we need to get the original type of data to handle, we can use type judgment to help us accomplish this.
 
-We can use `value.is<type>()` To judge the type of data, using `value.as<type>()` To convert the data to our type.
+We can use `value.Is<type>()` To judge the type of data, using `value.As<type>()` To convert the data to our type.
 
 E.g:
 ```
 func(hw: homeWork) -> () {
     # judge type
-    ? hw.is<chineseStudent>() {
+    ? hw.Is<chineseStudent>() {
         # convert to chinese student data
-        cs := hw.as<chineseStudent>()
+        cs := hw.As<chineseStudent>()
     }
 }
 ```
@@ -140,32 +140,32 @@ Note that if the type can not be converted correctly, it will return a `nil` val
     System
 }
 
-example -> {
+Example -> {
     Main() -> () {
         S := B()
-        B.do()
+        B.Do()
         C( B )
     }
 }
 
 A <- {
-    X(): i32
-    do() -> () {}
+    X(): I32
+    Do() -> () {}
 }
 
 B() -> {
-    y := 5
+    Y := 5
 } A {
     X() := 0
-    do() -> () {
+    Do() -> () {
         X += 1
     }
 }
 
 C(a: A) -> () {
-    a.do()
-    ? a.is<B>() {
-        prt( a.as<B>().y )
+    a.Do()
+    ? a.Is<B>() {
+        Prt( a.As<B>().Y )
     }
 }
 ```

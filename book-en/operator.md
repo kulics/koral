@@ -10,16 +10,16 @@ E.g:
 ```
 a := 4
 b := 2
-prt( a + b )    # + add
-prt( a - b )    # - subtract
-prt( a * b )    # * multiply
-prt( a / b )    # / divide
-prt( a % b )    # % take the remainder, meaning the remainder after the divisibility, the result here is 2
-prt( a ** b )   # ** power
-prt( a // b )   # // root
-prt( a %% b )   # %% logarithm
+Prt( a + b )    # + add
+Prt( a - b )    # - subtract
+Prt( a * b )    # * multiply
+Prt( a / b )    # / divide
+Prt( a % b )    # % take the remainder, meaning the remainder after the divisibility, the result here is 2
+Prt( a ** b )   # ** power
+Prt( a // b )   # // root
+Prt( a %% b )   # %% logarithm
 ```
-In addition to numbers, there are other types that support arithmetic operations, such as `str`, which can be used to combine two paragraphs of text.
+In addition to numbers, there are other types that support arithmetic operations, such as `Str`, which can be used to combine two paragraphs of text.
 
 E.g:
 ```
@@ -34,12 +34,12 @@ E.g:
 ```
 a := 4
 b := 2
-prt( a == b )   # == equal to
-prt( a ~= b )   # ~= not equal
-prt( a > b )    # > greater than
-prt( a >= b )   # >= greater than or equal
-prt( a < b )    # < less than
-prt( a <= b )   # <= less than or equal
+Prt( a == b )   # == equal to
+Prt( a ~= b )   # ~= not equal
+Prt( a > b )    # > greater than
+Prt( a >= b )   # >= greater than or equal
+Prt( a < b )    # < less than
+Prt( a <= b )   # <= less than or equal
 ```
 ## Logical Operator
 Logical operators are also used primarily in judgment statements for logic operations (AND, OR, NOT).
@@ -48,22 +48,22 @@ E.g:
 ```
 a := true
 b := false
-prt( a & b )    # & and, both true at the same time
-prt( a | b )    # | or, one of them is true
-prt( ~a )       # ~ not, boolean negation
+Prt( a & b )    # & and, both true at the same time
+Prt( a | b )    # | or, one of them is true
+Prt( ~a )       # ~ not, boolean negation
 ```
 ## Assignment Operator
 Assignment operator is mainly used to assign the right data to the left identifier, you can also attach some shortcut.
 
 E.g:
 ```
-A := 0
-A = 1   # = the simplest assignment
-A += 1  # += add first and then assign
-A -= 1  # -= subtract first and then assign
-A *= 1  # *= multiply first and then assign
-A /= 1  # /= divide first and then assign
-A %= 1  # %= take remainder first and than assignment
+a := 0
+a = 1   # = the simplest assignment
+a += 1  # += add first and then assign
+a -= 1  # -= subtract first and then assign
+a *= 1  # *= multiply first and then assign
+a /= 1  # /= divide first and then assign
+a %= 1  # %= take remainder first and than assignment
 ```
 ## Bit Operation
 In this language, no special symbols are set for bit operations, and function operations are used to perform bit operations.
@@ -71,12 +71,12 @@ In this language, no special symbols are set for bit operations, and function op
 E.g:
 ```
 a := 1
-a.and(1)   # bitwise AND
-a.or(1)    # bitwise OR
-a.xor(1)   # bitwise XOR
-a.not()    # bitwise Invert
-a.lft(1)   # left shift 
-a.rht(1)   # right shift
+a.And(1)   # bitwise AND
+a.Or(1)    # bitwise OR
+a.Xor(1)   # bitwise XOR
+a.Not()    # bitwise Invert
+a.Lft(1)   # left shift 
+a.Rht(1)   # right shift
 ```
 ## Braces
 Sometimes we need to do a mix of multiple data operations within a single statement, which involves priority issues.

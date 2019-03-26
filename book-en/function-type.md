@@ -32,11 +32,11 @@ Very simple, we only need to use `id:type` declare the parameters.
 
 E.g:
 ```
-func(x: i32) -> (y: i32) {
+func(x: I32) -> (y: I32) {
     <- (x * 2)
 }
 ```
-The meaning of this function is to accept an input `i32` parameter `x` and a `i32` parameter `y`.
+The meaning of this function is to accept an input `I32` parameter `x` and a `I32` parameter `y`.
 
 The first parentheses is the in parameter, the second parenthesis is the out parameter. There is no limit to the number of parameters in brackets, but there are strict requirements on the order and type.
 ### Return
@@ -71,7 +71,7 @@ When we call the function, we need to fill the brackets with the identifier in t
 E.g:
 ```
 # define one function with two in parameter
-sell(price: i32, name: str) -> () {}
+sell(price: I32, name: Str) -> () {}
 # fill in the data that meets the requirements as defined
 sell(1.99, "cola")
 
@@ -81,7 +81,7 @@ Similar to in parameters, out parameters also need to be clearly defined with an
 
 E.g:
 ```
-topSell() -> (name: str, count: i32) {
+topSell() -> (name: Str, count: I32) {
     ......
     <- ("cola", many)
 }
@@ -104,7 +104,7 @@ You can use the definition or assignment statement to get the return value of th
 
 E.g:
 ```
-prt( topSell() )    # print two values
+Prt( topSell() )    # print two values
 ```
 If there is only one return value, the brackets can be taken without.
 
@@ -133,7 +133,7 @@ Function In Parameter no special definition of way, just replace the type of the
 
 E.g:
 ```
-each1To10(func: (i32) -> () ) -> () {
+each1To10(func: (I32) -> () ) -> () {
     @ i <- [1<=10] {
         func(i)
     }
@@ -145,8 +145,8 @@ So that we can pass the details of the processing to the externally passed `func
 
 E.g:
 ```
-print (item: i32)->() {
-    prt(item)
+print (item: I32)->() {
+    Prt(item)
 }
 
 each1To10(print)
@@ -165,9 +165,9 @@ Since the function argument is already determined at the time of declaration, we
 E.g:
 ```
 foreach( {it -> 
-    prt(it)
-    prt(it * it)
-    prt(it % 2)
+    Prt(it)
+    Prt(it * it)
+    Prt(it % 2)
 })
 take( {a, b -> a + b} )
 findAll( {it -> it > 7} )
@@ -178,8 +178,8 @@ Unlike the above simplified method, we can also write a complete function direct
 
 E.g:
 ```
-each1To10( (item: i32) -> () {
-     prt(item)
+each1To10( (item: I32) -> () {
+     Prt(item)
 })
 ```
 ### [Next Chapter](package-type.md)
@@ -190,23 +190,23 @@ each1To10( (item: i32) -> () {
     System
 }
 
-example -> {
+Example -> {
     Main() -> () {
         A()
         B(1,2,3)
         x := C()
-        D( {-> prt("D")} )
-        E( {it -> prt(it)} )
-        E( (a: i32) -> () {
-            prt(it)
+        D( {-> Prt("D")} )
+        E( {it -> Prt(it)} )
+        E( (a: I32) -> () {
+            Prt(it)
         })
     }
 
     A() -> () {}
 
-    B(a: i32, b: i32, c: i32) -> () {}
+    B(a: I32, b: I32, c: I32) -> () {}
 
-    C() -> (a: i32) {
+    C() -> (a: I32) {
         <- (1024)
     }
 
@@ -214,7 +214,7 @@ example -> {
         fn()
     }
 
-    E(fn: (i32) -> () ) -> () {
+    E(fn: (I32) -> () ) -> () {
         @ i <- [1<=20] {
             fn(i)
         }
