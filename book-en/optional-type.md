@@ -11,11 +11,11 @@ b := a   # error, no assignment to a
 ## Statement and Use
 
 If you have to use a type with nil values in some cases, you can use a nullable type.
-Just add `?` after any type, which is a nullable type.
+Just add `!` after any type, which is a nullable type.
 
 E.g:
 ```
-a: I32?
+a: I32!
 b := a   # b assigns an empty I32
 ```
 
@@ -37,15 +37,26 @@ E.g:
 arr?.ToStr()
 ```
 
-## Ignore optional types of warnings
-If the data is of an optional type, but we guarantee that the data will not be empty, we can use the mandatory optional type to let the compiler ignore the warning.
-Just replace `?` with `!`.
+## Get Pointer
+If you need to get a pointer of an optional type, you can use the `id?` syntax.
 
 E.g:
 ```
-a: I32!
-b := a
-a!.ToStr()
+b := a?
+```
+## Get Value
+If you need to get an optional type of value, you can use the `id!` syntax.
+
+E.g:
+```
+b := a!
+```
+## Merge Operation
+If you want to use another default value when the value of the optional type is null, you can use the `id ?! value` syntax.
+
+E.g:
+```
+b := a ?! 128
 ```
 
 ## [Complete Example](../example.xs)
@@ -58,13 +69,15 @@ a!.ToStr()
 
 Example -> {
     Main() -> () {
-        a: I32? = nil
+        a: I32! = nil
 
-        b: [I32?]? = [I32?]?{0}
+        b: [I32!]! = [I32!]!{0}
         b?[0]?.ToStr()?.ToStr()
 
-        c: [I32!]! = [I32!]!{0}
-        c![0]!.ToStr()!.ToStr()
+        c := a?
+        d := a!
+
+        e := a ?! 1024
     }
 }
 ```
