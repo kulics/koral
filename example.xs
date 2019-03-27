@@ -244,7 +244,7 @@ Program {
     }
 
     TestCheck() -> () {
-        z1 :Defer? = nil
+        z1 :Defer! = nil
         ! z2 := Defer{} {
             z1 = Defer{}
             ! z3 := Defer{} {
