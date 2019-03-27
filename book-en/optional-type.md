@@ -37,8 +37,8 @@ E.g:
 arr?.ToStr()
 ```
 
-## Get Pointer
-If you need to get a pointer of an optional type, you can use the `id?` syntax.
+## Convert Optional Type
+If you need to convert a variable to an optional type, you can use the `id?` syntax.
 
 E.g:
 ```
