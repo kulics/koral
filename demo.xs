@@ -53,7 +53,7 @@ Program -> {
         Rd()
     }
 
-    PreOrderTraverse(node: Node?) -> () {
+    PreOrderTraverse(node: Node!) -> () {
         ? node -> nil { 
             <- () 
         }
@@ -62,7 +62,7 @@ Program -> {
         PreOrderTraverse(node.Right)
     }
 
-    PostOrderTraverse(node: Node?) -> () {
+    PostOrderTraverse(node: Node!) -> () {
         ? node -> nil { 
             <- () 
         }
@@ -71,7 +71,7 @@ Program -> {
         Prt(node.Value)
     }
 
-    MiddleOrderTraverse(node: Node?) -> () {
+    MiddleOrderTraverse(node: Node!) -> () {
         ? node -> nil { 
             <- () 
         }
@@ -80,7 +80,7 @@ Program -> {
         MiddleOrderTraverse(node.Right)
     }
 
-    InverseNode(node: Node?) -> (node: Node?) {
+    InverseNode(node: Node!) -> (node: Node!) {
         ? node -> nil { 
             <- (nil) 
         }
@@ -178,8 +178,8 @@ Node(value: I32) {
     Value = value
 } -> {
     Value: I32
-    Left: Node?
-    Right: Node?
+    Left: Node!
+    Right: Node!
 }
 
 Control <- {

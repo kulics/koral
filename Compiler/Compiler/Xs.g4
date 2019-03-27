@@ -380,7 +380,7 @@ typeTuple
 | typeFunction
 ;
 
-typeNullable : typeNotNull (Judge|Check);
+typeNullable : typeNotNull Check;
 type : typeNotNull | typeNullable;
 
 typeTuple : bracketLeft type (more type)+ bracketRight;
