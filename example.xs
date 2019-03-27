@@ -121,13 +121,13 @@ Program {
     }
 
     TestOptional() -> () {
-        a: I32? = 1
+        a: I32! = 1
         a?.ToStr()
-        b: Str? = ""
-        b!.ToStr()
-        c: Obj? = nil
+        b: Str! = ""
+        b?.ToStr()
+        c: Obj! = nil
         d: App! = nil
-        e: [I32?]? = [I32?]?{0}
+        e: [I32!]! = [I32!]!{0}
         e?[0]?.ToStr()?.ToStr()
     }
 
@@ -421,13 +421,13 @@ TestImplementTemplate() -> {
 }
 
 Program() -> {
-    Name(): Str? = "name" {
+    Name(): Str = "name" {
         set { 
             _Name = value 
         }
     }
 
-    Running: Bl?
+    Running: Bl
 }
 
 Protocol <- {
@@ -441,11 +441,11 @@ Protocol <- {
 `Table("test")`
 TestAnnotation() -> {
     `Key, Column("id")`
-    Id: Str?
+    Id: Str
     `Column("nick_name")`
-    NickName: Str?
+    NickName: Str
     `Column("profile")`
-    Profile: Str?
+    Profile: Str
 }
 
 TestEnum -> ?{
