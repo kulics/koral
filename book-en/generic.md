@@ -88,4 +88,12 @@ Implement() -> {
     }
 }
 ```
+## Generic Constraints
+If we need to constrain the type of generics, we only need to use the `T:id` syntax.
+
+E.g:
+```
+Package<T:Student>() -> {
+}
+```
 ### [Next Chapter](annotation.md)
