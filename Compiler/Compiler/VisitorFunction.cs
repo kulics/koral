@@ -2,8 +2,10 @@
 using System.Collections.Generic;
 using static Compiler.XsParser;
 
-namespace Compiler {
-    internal partial class Visitor {
+namespace Compiler
+{
+    internal partial class Visitor
+    {
         public override object VisitFunctionStatement([NotNull] FunctionStatementContext context) {
             var id = (Result)Visit(context.id());
             var obj = "";
@@ -20,10 +22,13 @@ namespace Compiler {
                 obj += Visit(context.parameterClauseOut()) + " " + id.text;
             }
             // 泛型
+            var templateContract = "";
             if (context.templateDefine() != null) {
-                obj += Visit(context.templateDefine());
+                var template = (TemplateItem)Visit(context.templateDefine());
+                obj += template.Template;
+                templateContract = template.Contract;
             }
-            obj += $"{Visit(context.parameterClauseIn())} {Wrap} {BlockLeft} {Wrap}";
+            obj += $"{Visit(context.parameterClauseIn())} {templateContract} {Wrap} {BlockLeft} {Wrap}";
             obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += BlockRight + Wrap;
             return obj;
@@ -113,7 +118,8 @@ namespace Compiler {
             return obj;
         }
 
-        public class Parameter {
+        public class Parameter
+        {
             public string id { get; set; }
             public string type { get; set; }
             public string value { get; set; }

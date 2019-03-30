@@ -3,8 +3,10 @@ using Library;
 using System.Collections.Generic;
 using static Compiler.XsParser;
 
-namespace Compiler {
-    internal partial class Visitor {
+namespace Compiler
+{
+    internal partial class Visitor
+    {
         public override object VisitVariableStatement(VariableStatementContext context) {
             var obj = "";
             var r1 = (Result)Visit(context.expression(0));
@@ -194,7 +196,7 @@ namespace Compiler {
                 } else if (context.t.Type == Self) {
                     return new Result { text = "this", data = "var" };
                 } else if (context.t.Type == Discard) {
-                   return new Result { text = "_", data = "var" };
+                    return new Result { text = "_", data = "var" };
                 }
             } else if (context.ChildCount == 2) {
                 var id = Visit(context.id()).As<Result>();
@@ -221,7 +223,8 @@ namespace Compiler {
             return r;
         }
 
-        public class TemplateItem {
+        public class TemplateItem
+        {
             public string Template { get; set; }
             public string Contract { get; set; }
         }
@@ -236,7 +239,7 @@ namespace Compiler {
                         item.Contract += ",";
                     }
                 }
-                var r = (TemplateItem)Visit(context.idtemplateDefineItem(i));
+                var r = (TemplateItem)Visit(context.templateDefineItem(i));
                 item.Template += r.Template;
                 item.Contract += r.Contract;
             }
@@ -246,12 +249,15 @@ namespace Compiler {
 
         public override object VisitTemplateDefineItem([NotNull] TemplateDefineItemContext context) {
             var item = new TemplateItem();
-            if (context.id() == 1) {
-
+            if (context.id().Len() == 1) {
+                var id1 = context.id(0).GetText();
+                item.Template = id1;
             } else {
-
+                var id1 = context.id(0).GetText();
+                item.Template = id1;
+                var id2 = context.id(1).GetText();
+                item.Contract = $" where {id1}:{id2}";
             }
-            var id1 = (Result)context.id();
             return item;
         }
 
@@ -549,7 +555,8 @@ namespace Compiler {
             return result;
         }
 
-        private class DicEle {
+        private class DicEle
+        {
             public string key;
             public string value;
             public string text;

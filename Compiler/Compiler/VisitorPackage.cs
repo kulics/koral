@@ -2,8 +2,10 @@
 using System.Collections.Generic;
 using static Compiler.XsParser;
 
-namespace Compiler {
-    internal partial class Visitor {
+namespace Compiler
+{
+    internal partial class Visitor
+    {
         public override object VisitExtend([NotNull] ExtendContext context) {
             var r = new Result {
                 data = Visit(context.type())
@@ -21,10 +23,13 @@ namespace Compiler {
             var obj = "";
             obj += $"{id.permission} partial class {id.text}";
             // 泛型
+            var templateContract = "";
             if (context.templateDefine() != null) {
-                obj += Visit(context.templateDefine());
+                var template = (TemplateItem)Visit(context.templateDefine());
+                obj += template.Template;
+                templateContract = template.Contract;
             }
-            obj += BlockLeft + Wrap;
+            obj += templateContract + BlockLeft + Wrap;
             foreach (var item in context.packageExtensionSupportStatement()) {
                 obj += Visit(item);
             }
@@ -69,10 +74,14 @@ namespace Compiler {
             header += $"{id.permission} partial class {id.text}";
             // 泛型
             var template = "";
+            var templateContract = "";
             if (context.templateDefine() != null) {
-                template += Visit(context.templateDefine());
+                var item = (TemplateItem)Visit(context.templateDefine());
+                template += item.Template;
+                templateContract = item.Contract;
                 header += template;
             }
+
             if (extend.Length > 0) {
                 header += ":";
                 if (extend.Length > 0) {
@@ -80,11 +89,11 @@ namespace Compiler {
                 }
             }
 
-            header += Wrap + BlockLeft + Wrap;
+            header += templateContract + Wrap + BlockLeft + Wrap;
             obj = header + obj;
 
             foreach (var item in context.protocolImplementStatement()) {
-                obj += $"{id.permission} partial class {id.text}{template} {(string)Visit(item)} {Wrap}";
+                obj += $"{id.permission} partial class {id.text}{template} {templateContract} {(string)Visit(item)} {Wrap}";
             }
 
             return obj;
@@ -225,10 +234,13 @@ namespace Compiler {
             }
 
             // 泛型
+            var templateContract = "";
             if (context.templateDefine() != null) {
-                obj += Visit(context.templateDefine());
+                var template = (TemplateItem)Visit(context.templateDefine());
+                obj += template.Template;
+                templateContract = template.Contract;
             }
-            obj += Visit(context.parameterClauseIn()) + Wrap + BlockLeft + Wrap;
+            obj += Visit(context.parameterClauseIn()) + templateContract + Wrap + BlockLeft + Wrap;
             obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += BlockRight + Wrap;
             return obj;
@@ -378,10 +390,13 @@ namespace Compiler {
             }
 
             // 泛型
+            var templateContract = "";
             if (context.templateDefine() != null) {
-                obj += Visit(context.templateDefine());
+                var template = (TemplateItem)Visit(context.templateDefine());
+                obj += template.Template;
+                templateContract = template.Contract;
             }
-            obj += Visit(context.parameterClauseIn()) + Wrap + BlockLeft + Wrap;
+            obj += Visit(context.parameterClauseIn()) + templateContract + Wrap + BlockLeft + Wrap;
             obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += BlockRight + Wrap;
             return obj;
@@ -401,10 +416,13 @@ namespace Compiler {
             }
             obj += "public partial interface " + ptclName;
             // 泛型
+            var templateContract = "";
             if (context.templateDefine() != null) {
-                obj += Visit(context.templateDefine());
+                var template = (TemplateItem)Visit(context.templateDefine());
+                obj += template.Template;
+                templateContract = template.Contract;
             }
-            obj += Wrap + BlockLeft + Wrap;
+            obj += templateContract + Wrap + BlockLeft + Wrap;
             obj += interfaceProtocol;
             obj += BlockRight + Wrap;
             return obj;
@@ -463,10 +481,13 @@ namespace Compiler {
                 r.text += Visit(context.parameterClauseOut()) + " " + id.text;
             }
             // 泛型
+            var templateContract = "";
             if (context.templateDefine() != null) {
-                r.text += Visit(context.templateDefine());
+                var template = (TemplateItem)Visit(context.templateDefine());
+                r.text += template.Template;
+                templateContract = template.Contract;
             }
-            r.text += Visit(context.parameterClauseIn()) + Terminate + Wrap;
+            r.text += Visit(context.parameterClauseIn()) + templateContract + Terminate + Wrap;
             return r;
         }
     }
