@@ -93,7 +93,7 @@ namespace Compiler
             obj = header + obj;
 
             foreach (var item in context.protocolImplementStatement()) {
-                obj += $"{id.permission} partial class {id.text}{template} {templateContract} {(string)Visit(item)} {Wrap}";
+                obj += $"{id.permission} partial class {id.text}{template} {(string)Visit(item)} {Wrap}";
             }
 
             return obj;
