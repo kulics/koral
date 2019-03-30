@@ -2,8 +2,10 @@
 using Antlr4.Runtime.Misc;
 using static Compiler.XsParser;
 
-namespace Compiler {
-    internal partial class Visitor {
+namespace Compiler
+{
+    internal partial class Visitor
+    {
         public override object VisitStatement([NotNull] StatementContext context) {
             var obj = "";
             var ns = (Namespace)Visit(context.exportStatement());
@@ -24,7 +26,8 @@ namespace Compiler {
             return obj;
         }
 
-        private class Namespace {
+        private class Namespace
+        {
             public string name;
             public string imports;
         }
@@ -151,10 +154,13 @@ namespace Compiler {
             }
             header += $"{id.permission} partial class {id.text}";
             // 泛型
+            var templateContract = "";
             if (context.templateDefine() != null) {
-                header += Visit(context.templateDefine());
+                var template = (TemplateItem)Visit(context.templateDefine());
+                header += template.Template;
+                templateContract = template.Contract;
             }
-            header += Wrap + BlockLeft + Wrap;
+            header += templateContract + Wrap + BlockLeft + Wrap;
             obj = header + obj;
             return obj;
         }
@@ -179,10 +185,13 @@ namespace Compiler {
             }
 
             // 泛型
+            var templateContract = "";
             if (context.templateDefine() != null) {
-                obj += Visit(context.templateDefine());
+                var template = (TemplateItem)Visit(context.templateDefine());
+                obj += template.Template;
+                templateContract = template.Contract;
             }
-            obj += Visit(context.parameterClauseIn()) + Wrap + BlockLeft + Wrap;
+            obj += Visit(context.parameterClauseIn()) + templateContract + Wrap + BlockLeft + Wrap;
             obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += BlockRight + Wrap;
             return obj;

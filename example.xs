@@ -299,11 +299,11 @@ Program {
             fn(1)
         }
         test3( (it: I32) ~> () {
-            <~ Slp(5000)
+            <~ Slp(2000)
             Prt(it)
         })
         test3( {it ~>
-            <~ Slp(5000)
+            <~ Slp(2000)
             Prt(it)
         })
         test4(fn: (I32) -> (I32)) -> () { 
@@ -313,9 +313,9 @@ Program {
     }
 
     TestAsync() ~> (x: I32, y: I32, z: Str) {
-        <~ Slp(5000)
+        <~ Slp(2000)
         async1() ~> () {
-            <~ Slp(5000)
+            <~ Slp(2000)
         }
         <~ async1()
         
@@ -384,12 +384,12 @@ App() -> {
     }
 
     D() ~> (x: I32) {
-        <~ Slp(5000)
+        <~ Slp(2000)
         <- (3)
     }
 
     E() ~> () {
-        <~ Slp(5000)
+        <~ Slp(2000)
     }
 
     F(): Str = "get"
@@ -456,7 +456,7 @@ TestEnum -> ?{
 }
 
 Package(y: I32 = 3) {
-    X = TestStaticTemplate<I32>.ConstData
+    X = Program.ConstData
     Y = y
 } -> {
     X: I32
