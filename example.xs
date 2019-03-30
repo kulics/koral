@@ -401,23 +401,25 @@ Result(data: Str) {
     Data: Str
 }
 
-TestPackageTemplate<T>() -> {
+TestPackageTemplate<T:class>() -> {
     Data: T
 
     Generic(a: T) -> () {}
 }
 
-TestStaticTemplate<T> -> {
+TestStaticTemplate<T:class> -> {
     ConstData: T
 }
 
-TestProtocolTemplate<T> <- {
-    Test<T>(in: T) -> ()
+TestProtocolTemplate<T:class> <- {
+    Test<H:class>(in: H) -> ()
+    Test(in: T) -> ()
 }
 
 TestImplementTemplate() -> {
 } TestProtocolTemplate<TestImplementTemplate> {
-    Test<TestImplementTemplate>(in: TestImplementTemplate) -> () {}
+    Test(in: TestImplementTemplate) -> () {}
+    Test<H:class>(in: H) -> () {}
 }
 
 Program() -> {

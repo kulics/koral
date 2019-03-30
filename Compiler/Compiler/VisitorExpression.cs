@@ -221,18 +221,38 @@ namespace Compiler {
             return r;
         }
 
+        public class TemplateItem {
+            public string Template { get; set; }
+            public string Contract { get; set; }
+        }
+
         public override object VisitTemplateDefine([NotNull] TemplateDefineContext context) {
-            var obj = "";
-            obj += "<";
-            for (int i = 0; i < context.id().Length; i++) {
+            var item = new TemplateItem();
+            item.Template += "<";
+            for (int i = 0; i < context.templateDefineItem().Length; i++) {
                 if (i > 0) {
-                    obj += ",";
+                    item.Template += ",";
+                    if (item.Contract.Len() > 0) {
+                        item.Contract += ",";
+                    }
                 }
-                var r = (Result)Visit(context.id(i));
-                obj += r.text;
+                var r = (TemplateItem)Visit(context.idtemplateDefineItem(i));
+                item.Template += r.Template;
+                item.Contract += r.Contract;
             }
-            obj += ">";
-            return obj;
+            item.Template += ">";
+            return item;
+        }
+
+        public override object VisitTemplateDefineItem([NotNull] TemplateDefineItemContext context) {
+            var item = new TemplateItem();
+            if (context.id() == 1) {
+
+            } else {
+
+            }
+            var id1 = (Result)context.id();
+            return item;
         }
 
         public override object VisitTemplateCall([NotNull] TemplateCallContext context) {
