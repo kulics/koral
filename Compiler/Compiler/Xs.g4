@@ -318,7 +318,9 @@ nameSpaceItem: (('\\' id)+ call NewLine?)? id;
 
 name: id (call NewLine? id)* ;
 
-templateDefine: '<' id (more id)* '>';
+templateDefine: '<' templateDefineItem (more templateDefineItem)* '>';
+
+templateDefineItem: id (':' id)?; 
 
 templateCall: '<' type (more type)* '>';
 
