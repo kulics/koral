@@ -1,5 +1,6 @@
 # The Xs Programming Language
 [![996.ICU](https://img.shields.io/badge/link-996.icu-red.svg)](https://996.icu)
+
 Xs is a focus on simple, open source, cross-platform programming language.
 
 The language is designed to improve reading and writing efficiency, reduce the burden of grammar, and allow users to focus on solving problems.
