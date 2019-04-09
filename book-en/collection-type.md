@@ -108,8 +108,8 @@ length := dictionary.Len        # length
 
 Example -> {
     Main() -> () {
-        List1 := {1,2,3,4,5}
-        List1 += 6
+        list1 := {1,2,3,4,5}
+        list1 += 6
         list2 := [I8]{1,2,1,2}
         list3 := {|1,2,3|}
 
