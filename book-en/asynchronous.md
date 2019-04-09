@@ -45,12 +45,12 @@ E.g:
 ```
 # correct
 async() ~> (out: I32) {
-    <~ Slp(5000)     # wait for a while
+    <~ Delay(5000)     # wait for a while
     <- (12)
 }
 # wrong
 async() -> (out: I32) {
-    <~ Slp(5000)     # can not be declared
+    <~ Delay(5000)     # can not be declared
     <- (12)
 }
 ```
@@ -62,7 +62,7 @@ We can choose to wait for no data, or we can choose not to wait for data.
 E.g:
 ```
 async() ~> () {
-    <~ Slp(5000)    # wait for a while
+    <~ Delay(5000)    # wait for a while
 }
 
 <~ async()  # correct
