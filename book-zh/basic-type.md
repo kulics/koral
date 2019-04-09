@@ -133,7 +133,7 @@ nil # 空值
 Example -> {
     Main() -> () {
         a := 123
-        b := a.toI64()
+        b := a.ToI64()
         c := 123.456
         d := "hello"
         c := ""d" world"
