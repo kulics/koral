@@ -1,5 +1,5 @@
 # Basic Type
-We only need three simple basic types, we can do most of the work.
+We only need a few simple basic types to do most of the work.
 
 ## Integer
 Since our current computer architecture is better at calculating integers, a separate integer type helps to increase the efficiency of the program.
