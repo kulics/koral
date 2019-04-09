@@ -50,7 +50,7 @@ Note that we can only access the index of the existing data, if not exist, there
 ### Common operation
 ```
 list += 1                   # added to the end
-list.insert(2, 3)           # insert element 3 to index 2
+list.Insert(2, 3)           # insert element 3 to index 2
 list -= 1                   # delete the specified location element
 length := list.Len          # length
 ```
