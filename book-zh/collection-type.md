@@ -52,7 +52,7 @@ list[0] = 5
 ### 常用操作
 ```
 list += 1                   # 添加到末尾
-list.insert(2, 3)           # 插入元素 3 到索引 2
+list.Insert(2, 3)           # 插入元素 3 到索引 2
 list -= 1                   # 删除指定位置元素
 length := list.Len          # 长度
 ```
