@@ -144,7 +144,7 @@ Identifier is the variable, function, package, protocol, etc. specified name. Th
 1. Within the same `{}`, you can not define more than two identifiers of the same name.
 1. In different `{}`, you can define the identifier of the duplicate name, the language will give priority to the identifier defined in the current range.
 1. In namespace, packages and protocols, properties and method names that begin with the underscore `_` are considered private and the rest are considered public.
-1. The identifier at the beginning of lowercase can only be used within the function, and the rest of the place can only use the identifier of the uppercase header.
+1. Identifiers starting with lowercase letters can only be used in functions. Other scenarios can only use identifiers beginning with uppercase letters..
 
 ## Keyword
 none.
