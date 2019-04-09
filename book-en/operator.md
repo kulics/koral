@@ -35,7 +35,7 @@ E.g:
 a := 4
 b := 2
 Prt( a == b )   # == equal to
-Prt( a ~= b )   # ~= not equal
+Prt( a >< b )   # >< not equal
 Prt( a > b )    # > greater than
 Prt( a >= b )   # >= greater than or equal
 Prt( a < b )    # < less than

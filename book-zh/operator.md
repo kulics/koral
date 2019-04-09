@@ -35,7 +35,7 @@ c := a + " " + b    # c 为 "hello world"
 a := 4
 b := 2
 Prt( a == b )     # == 等于
-Prt( a ~= b )     # ~= 不等于
+Prt( a >< b )     # >< 不等于
 Prt( a > b )      # > 大于
 Prt( a >= b )     # >= 大于或等于
 Prt( a < b )      # < 小于

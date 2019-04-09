@@ -24,7 +24,7 @@ Once an optional type has appeared, we need to strictly handle nil values to avo
 E.g:
 ```
 # Judgment is not empty and then use
-? a ~= nil {
+? a >< nil {
      a.ToStr()
 }
 ```

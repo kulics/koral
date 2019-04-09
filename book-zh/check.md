@@ -63,7 +63,7 @@ func() -> () {
     ! {
         File = readFile("./somecode.xs")
     } _ {
-        ? File ~= nil {
+        ? File >< nil {
             File.release()
         }
     }
@@ -119,7 +119,7 @@ Example -> {
         } e:Exception {
             !(e)
         } _ {
-            ? x ~= nil {
+            ? x >< nil {
                 x.Dispose()
             }
         }
