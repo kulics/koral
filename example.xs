@@ -299,11 +299,11 @@ Program {
             fn(1)
         }
         test3( (it: I32) ~> () {
-            <~ Slp(2000)
+            <~ Dly(1000)
             Prt(it)
         })
         test3( {it ~>
-            <~ Slp(2000)
+            <~ Dly(1000)
             Prt(it)
         })
         test4(fn: (I32) -> (I32)) -> () { 
@@ -313,9 +313,9 @@ Program {
     }
 
     TestAsync() ~> (x: I32, y: I32, z: Str) {
-        <~ Slp(2000)
+        Slp(1000)
         async1() ~> () {
-            <~ Slp(2000)
+            <~ Dly(1000)
         }
         <~ async1()
         
@@ -384,12 +384,12 @@ App() -> {
     }
 
     D() ~> (x: I32) {
-        <~ Slp(2000)
+        <~ Dly(1000)
         <- (3)
     }
 
     E() ~> () {
-        <~ Slp(2000)
+        <~ Dly(1000)
     }
 
     F(): Str = "get"

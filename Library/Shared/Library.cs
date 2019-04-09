@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Library {
@@ -44,9 +45,13 @@ namespace Library {
 
         public static async Task Go(Func<Task> @do) => await @do();
 
-        public static Task Slp(int milliseconds) => Task.Delay(milliseconds);
+        public static void Slp(int milliseconds) => Thread.Sleep(milliseconds);
 
-        public static Task Sleep(int milliseconds) => Slp(milliseconds);
+        public static void Sleep(int milliseconds) => Slp(milliseconds);
+
+        public static Task Dly(int milliseconds) => Task.Delay(milliseconds);
+
+        public static Task Delay(int milliseconds) => Dly(milliseconds);
 
         public static double Pow(double a, double b) => Math.Pow(a, b);
 
