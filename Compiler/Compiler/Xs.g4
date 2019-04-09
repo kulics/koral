@@ -21,7 +21,7 @@ packageStaticStatement
 ;
 
 // 枚举
-enumStatement: (annotationSupport)? id ArrowRight NewLine* Judge blockLeft enumSupportStatement* blockRight end;
+enumStatement: (annotationSupport)? id ArrowRight NewLine* squareBracketLeft enumSupportStatement* squareBracketRight end;
 
 enumSupportStatement: id ('=' (add)? Integer)? end;
 // 静态包
@@ -440,6 +440,9 @@ BlockRight : '}';
 
 bracketLeft: '(';
 bracketRight: ')';
+
+squareBracketLeft: '[' CommentLine* NewLine*;
+squareBracketRight: CommentLine* NewLine* ']';
 
 Define : ':=';
 Declared : ':';
