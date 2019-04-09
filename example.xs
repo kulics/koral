@@ -450,10 +450,10 @@ TestAnnotation() -> {
     Profile: Str
 }
 
-TestEnum -> ?{
+TestEnum -> [
     Ok
     Err = -1
-}
+]
 
 Package(y: I32 = 3) {
     X = Program.ConstData
