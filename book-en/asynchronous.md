@@ -74,6 +74,6 @@ For lambda, we can also use asynchronous, just use `~>`.
 
 E.g:
 ```
-_ = arr.filter( {it ~> it > 5} )
+_ = arr.Filter( {it ~> it > 5} )
 ```
 ### [Next Chapter](generic.md)
