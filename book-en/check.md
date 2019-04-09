@@ -59,18 +59,18 @@ Quite simply, using `_ {}` at the end of the check can declare a statement that 
 E.g:
 ```
 func() -> () {
-    File: file
+    f: File
     ! {
-        File = readFile("./somecode.xs")
+        f = ReadFile("./somecode.xs")
     } _ {
-        ? File >< nil {
-            File.release()
+        ? f >< nil {
+            f.Release()
         }
     }
     ......
 }
 ```
-So we declare the `File.release()` statement that releases the file. This statement will not be executed immediately, but will wait for the function to be called before exiting.
+So we declare the `f.Release()` statement that releases the file. This statement will not be executed immediately, but will wait for the function to be called before exiting.
 
 With check defer, we can safely handle certain tasks without having to worry about how the function exits.
 
@@ -80,7 +80,7 @@ E.g:
 ```
 ......
 _ {
-    File.release()
+    f.Release()
     <- ()    # error, cannot use return statement
 }
 ```
