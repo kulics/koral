@@ -101,7 +101,7 @@ Program {
         Prt(" mark string I32 " b " ")
         c := false
         c = ~c
-        c = 1 ~= 2
+        c = 1 >< 2
         c = 3 == 3
         c = 3 >= 1
         c = 1 <= 3
@@ -260,7 +260,7 @@ Program {
         } e {
             !(e)
         } _ {
-            ? z1 ~= nil {
+            ? z1 >< nil {
                 z1.Dispose()
             }
         }

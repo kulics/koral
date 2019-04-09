@@ -170,7 +170,7 @@ namespace Compiler
         }
 
         public override object VisitJudge([NotNull] JudgeContext context) {
-            if (context.op.Text == "~=") {
+            if (context.op.Text == "><") {
                 return "!=";
             } else if (context.op.Text == "&") {
                 return "&&";
