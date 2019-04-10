@@ -179,7 +179,7 @@ loopStatement:Loop id ArrowLeft iteratorStatement blockLeft (functionSupportStat
 // 集合循环
 loopEachStatement:Loop ('[' id ']')? id ArrowLeft expression blockLeft (functionSupportStatement)* blockRight end;
 // 条件循环
-loopCaseStatement:Loop Judge expression blockLeft (functionSupportStatement)* blockRight end;
+loopCaseStatement:Loop expression blockLeft (functionSupportStatement)* blockRight end;
 // 无限循环
 loopInfiniteStatement:Loop blockLeft (functionSupportStatement)* blockRight end;
 // 跳出循环
