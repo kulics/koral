@@ -83,12 +83,12 @@ In addition to the infinite loop, jump out can also be used in other cycles.
 Note that if you jump out of a multi-nested loop, it will only jump out the loop closest to it.
 ## Conditional Loop
 What if we need a loop that just judges a certain condition?
-Add a condition `?` to it.
+Add a condition to it.
 
 E.g:
 ```
 i := 0
-@ ? i < 6 {
+@ i < 6 {
      i += 1
 }
 ```
@@ -119,7 +119,7 @@ Example -> {
         }
 
         x := 0
-        @ ? x <= 10 {
+        @ x <= 10 {
             x += 1
         }
     }

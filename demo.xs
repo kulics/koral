@@ -144,12 +144,12 @@ Program -> {
     Partition(list: [I32], low: I32, high: I32) -> (position: I32) {
         pivotkey := list[low]
         
-        @ ? low < high {
-            @ ? low<high & list[high] >= pivotkey {
+        @ low < high {
+            @ low < high & list[high] >= pivotkey {
                 high -= 1
             }
             Swap(list, low , high)
-            @ ? low<high & list[low] <= pivotkey {
+            @ low < high & list[low] <= pivotkey {
                 low += 1
             }
             Swap(list, low , high)
