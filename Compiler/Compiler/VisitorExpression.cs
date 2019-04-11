@@ -606,10 +606,10 @@ namespace Compiler
                 r.text = context.Char().GetText();
             } else if (context.t.Type == XsParser.True) {
                 r.data = bl;
-                r.text = $"{context.True().GetText()}";
+                r.text = t;
             } else if (context.t.Type == XsParser.False) {
                 r.data = bl;
-                r.text = $"{context.False().GetText()}";
+                r.text = f;
             } else if (context.t.Type == Null) {
                 r.data = Any;
                 r.text = "null";
