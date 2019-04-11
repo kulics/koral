@@ -190,21 +190,21 @@ Program(name: Str) {
     Name = name
 } -> {
     Name: Str
-    _Running := false
+    _Running := False
 
     Start() -> () {
         Prt("Start")
-        _Running = true
+        _Running = True
     }
 
     Stop() -> () {
         Prt("Stop")
-        _Running = false
+        _Running = False
     }
 } Control {
     Shutdown() -> () {
         Prt("Shutdown")
-        _Running = false
+        _Running = False
     }
 }
 

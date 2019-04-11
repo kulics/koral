@@ -1,26 +1,26 @@
 # Judgment
-The judgment statement executes the program by setting one or more conditions, executes the specified statement if the condition is true, and executes the otherwise specified statement if the condition is false.
+The judgment statement executes the program by setting one or more conditions, executes the specified statement if the condition is True, and executes the otherwise specified statement if the condition is False.
 
 We only need to use the `? value {}` to declare the judgment statement, according to the following value into the corresponding area.
 
 E.g:
 ```
-? true {
-    Prt("true")  # true
+? True {
+    Prt("True")  # true
 }
 ```
 # Boolean Judgment
-When the judgment value is only `Bl`, the statement is executed only if it is `true`. 
+When the judgment value is only `Bl`, the statement is executed only if it is `True`. 
 If we need to deal with other situations at the same time, we can continue to declare another processing statement after using `value {}`.
-If you only need `false`, use `_ {}` to declare it.
+If you only need `False`, use `_ {}` to declare it.
 
 E.g:
 ```
-b := false
+b := False
 ? b {
-    ...... # since b is false, it will never enter this branch
+    ...... # since b is False, it will never enter this branch
 } _ {
-    ...... # handle false
+    ...... # handle False
 }
 ```
 

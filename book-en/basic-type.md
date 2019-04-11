@@ -99,12 +99,12 @@ string := "Hello world! " title " " content ""
 ## Boolean
 boolean are logical values ​​because they can only be true or false. It is often used to assist in judging logic.
 
-In this language, the default boolean is the type `Bl`, which is a type that has only true and false values.
+In this language, the default boolean is the type `Bl`, which is a type that has only True and False values.
 
 E.g:
 ```
-boolean1 := true     # true  
-boolean2 := false     # false  
+boolean1 := True      # true  
+boolean2 := False     # false  
 ```
 ## Object
 In particular, sometimes you need a type that can be any object to assist in the completion of the function, so it is `Obj`.
@@ -137,8 +137,8 @@ Example -> {
         c := 123.456
         d := "hello"
         c := ""d" world"
-        e := true
-        f :Obj = false
+        e := True
+        f :Obj = False
     }
 }
 ```
