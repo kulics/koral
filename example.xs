@@ -125,8 +125,8 @@ Program {
         a?.ToStr()
         b: Str! = ""
         b?.ToStr()
-        c: Obj! = nil
-        d: App! = nil
+        c: Obj! = Nil
+        d: App! = Nil
         e: [I32!]! = [I32!]!{0}
         e?[0]?.ToStr()?.ToStr()
     }
@@ -157,8 +157,8 @@ Program {
             Prt("string")
         } :I32 {
             Prt("int")
-        } nil {
-            Prt("nil")
+        } Nil {
+            Prt("Nil")
         } _ {
             Prt("default")
         }
@@ -244,7 +244,7 @@ Program {
     }
 
     TestCheck() -> () {
-        z1 :Defer! = nil
+        z1 :Defer! = Nil
         ! z2 := Defer{} {
             z1 = Defer{}
             ! z3 := Defer{} {
@@ -260,7 +260,7 @@ Program {
         } e {
             !(e)
         } _ {
-            ? z1 >< nil {
+            ? z1 >< Nil {
                 z1.Dispose()
             }
         }

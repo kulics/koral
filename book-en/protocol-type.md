@@ -130,7 +130,7 @@ func(hw: homeWork) -> () {
     }
 }
 ```
-Note that if the type can not be converted correctly, it will return a `nil` value.
+Note that if the type can not be converted correctly, it will return a `Nil` value.
 
 ### [Next Chapter](enumeration-type.md)
 
