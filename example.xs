@@ -99,14 +99,14 @@ Program {
         Prt("4 extract root for 2 = ", 4 // 2) 
         Prt("4 log with base 2 = ", 4 %% 2) 
         Prt(" mark string I32 " b " ")
-        c := false
+        c := False
         c = ~c
         c = 1 >< 2
         c = 3 == 3
         c = 3 >= 1
         c = 1 <= 3
-        c = true | false
-        c = true & false
+        c = True | False
+        c = True & False
         d := 11
         d = d.And(1).Or(2).Xor(3).Not().Lft(1).Rht(2)
         Prt(b.ToStr())
@@ -356,10 +356,10 @@ App() -> {
     _B := 5
 
     TestPackage() -> () {
-        item := Program{Name = "new Program",Running = true}
+        item := Program{Name = "new Program",Running = True}
         item2 := {
             Name = "new Program",
-            Running = true
+            Running = True
         }
         item3 := [I32]{1,2,3,4,5}
         item4 := [[Str]I32]{["1"]1,["2"]2,["3"]3}

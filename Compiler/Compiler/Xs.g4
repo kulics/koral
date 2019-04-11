@@ -476,8 +476,8 @@ TypeF64: 'F64';
 TypeChr: 'Chr';
 TypeStr: 'Str';
 TypeBool: 'Bl';
-True: 'true';
-False: 'false';
+True: 'True';
+False: 'False';
 Null : 'Nil';
 
 Float: Integer '.' DIGIT+ ; // 浮点数

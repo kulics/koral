@@ -104,8 +104,8 @@ string := "Hello world! " title " " content ""
 
 例如：
 ```
-boolean1 := true     # 真  
-boolean2 := false     # 假  
+boolean1 := True      # 真  
+boolean2 := False     # 假  
 ```
 ## Object 对象类型  
 特别的，有时候会需要一个可以是 任意对象 的 类型 来辅助完成功能，它就是 `Obj` 。
@@ -137,8 +137,8 @@ Example -> {
         c := 123.456
         d := "hello"
         c := ""d" world"
-        e := true
-        f :Obj = false
+        e := True
+        f :Obj = False
     }
 }
 ```

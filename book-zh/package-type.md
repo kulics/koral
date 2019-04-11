@@ -217,7 +217,7 @@ chineseStudent() -> {
     Number: Str = ""
     Class: I32 = 0
     Grade: I32 = 0
-    Kungfu: Bl = false     # 不会功夫的学生
+    Kungfu: Bl = False     # 不会功夫的学生
 }
 ```
 不不不，这样重复定义数据就很不优雅了，我们可以将学生属性复用，加上一个额外的功夫属性就可以了。
@@ -228,7 +228,7 @@ chineseStudent() -> {
 ```
 chineseStudent() -> {
     Student := student()   # 将学生属性包含其中
-    Kungfu := false        # 不会功夫
+    Kungfu := False        # 不会功夫
 }
 ```
 这样你就可以通过中国学生里的学生属性来使用通用属性。
@@ -248,7 +248,7 @@ Prt( chen.Student.Name )
 例如：
 ```
 chineseStudent() -> {
-    Kungfu := false
+    Kungfu := False
 } student() {   # 继承 student
     # 重写
     GetGirlFriend() -> (name: Str) {

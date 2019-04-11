@@ -217,7 +217,7 @@ chineseStudent() -> {
     Number: Str = ""
     Class: I32 = 0
     Grade: I32 = 0
-    Kungfu: Bl = false    # kung fu students
+    Kungfu: Bl = False    # kung fu students
 }
 ```
 No, no repeatable definition of data so elegant, we can reuse student attributes, with an additional kung fu attributes on it.
@@ -228,7 +228,7 @@ E.g:
 ```
 chineseStudent() -> {
     Student := student()   # include student attributes in it
-    Kungfu := false        # no kung fu
+    Kungfu := False        # no kung fu
 }
 ```
 This way you can use generic attributes via student attributes in Chinese students.
@@ -248,7 +248,7 @@ If you want to override the properties of the original package, rewrite it in `{
 E.g:
 ```
 chineseStudent() -> {
-    Kungfu := false
+    Kungfu := False
 } student() {   # inhert student
     # override
     GetGirlFriend() -> (name: Str) {

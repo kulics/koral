@@ -46,8 +46,8 @@ Logical operators are also used primarily in judgment statements for logic opera
 
 E.g:
 ```
-a := true
-b := false
+a := True
+b := False
 Prt( a & b )    # & and, both true at the same time
 Prt( a | b )    # | or, one of them is true
 Prt( ~a )       # ~ not, boolean negation
