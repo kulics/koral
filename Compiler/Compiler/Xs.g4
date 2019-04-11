@@ -478,7 +478,7 @@ TypeStr: 'Str';
 TypeBool: 'Bl';
 True: 'true';
 False: 'false';
-Null : 'nil';
+Null : 'Nil';
 
 Float: Integer '.' DIGIT+ ; // 浮点数
 Integer : DIGIT+ ; // 整数

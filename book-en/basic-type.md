@@ -114,12 +114,12 @@ E.g:
 a :Obj = 1  # any type
 ```
 
-## nil value
-We will need a value that can be any nil value, so it is `nil`.
+## Nil value
+We will need a value that can be any nil value, so it is `Nil`.
 
 E.g:
 ```
-nil # empty value
+Nil # empty value
 ```
 
 ### [Next Chapter](operator.md)

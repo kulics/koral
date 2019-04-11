@@ -81,8 +81,8 @@ E.g:
      Prt("I32")
 } content:Str {     # when Str
      Prt(content)
-} nil {             # When it is nil
-     Prt("nil")
+} Nil {             # When it is Nil
+     Prt("Nil")
 }
 ```
 ### Get type

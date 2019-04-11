@@ -24,7 +24,7 @@ Once an optional type has appeared, we need to strictly handle nil values to avo
 E.g:
 ```
 # Judgment is not empty and then use
-? a >< nil {
+? a >< Nil {
      a.ToStr()
 }
 ```
@@ -69,7 +69,7 @@ b := a ?! 128
 
 Example -> {
     Main() -> () {
-        a: I32! = nil
+        a: I32! = Nil
 
         b: [I32!]! = [I32!]!{0}
         b?[0]?.ToStr()?.ToStr()
