@@ -1,4 +1,4 @@
-﻿grammar Xs;
+grammar Xs;
 
 program: statement+;
 
@@ -81,7 +81,7 @@ packageControlSubStatement: id blockLeft (functionSupportStatement)+ blockRight 
 // 包重载
 packageOverrideStatement: blockLeft (packageOverrideFunctionStatement|CommentLine|NewLine)* BlockRight;
 // 包扩展
-packageExtensionStatement: id (templateDefine)? '+=' blockLeft (packageExtensionSupportStatement)* blockRight;
+packageExtensionStatement: id (templateDefine)? FlowLeft blockLeft (packageExtensionSupportStatement)* blockRight;
 // 包扩展支持的语句
 packageExtensionSupportStatement: 
 packageFunctionStatement
