@@ -129,6 +129,7 @@ Program {
         d: App! = Nil
         e: [I32!]! = [I32!]!{0}
         e?[0]?.ToStr()?.ToStr()
+        f := d.Def(App{})
     }
 
     TestTypeConvert() -> () {
