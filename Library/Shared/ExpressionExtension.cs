@@ -11,6 +11,7 @@ namespace Library {
         public static bool Is<T>(this object it) => it is T;
         public static T As<T>(this object it) where T : class => it as T;
         public static T Def<T>(this T it, T value) where T : class => it != null ? it : value;
+        public static T Default<T>(this T it, T value) where T : class => it.Def(value);
 
         public static sbyte ToI8(this object it) => Convert.ToSByte(it);
         public static short ToI16(this object it) => Convert.ToInt16(it);

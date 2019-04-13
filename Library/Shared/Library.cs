@@ -19,7 +19,11 @@ namespace Library {
 
         public static T[] ArrOf<T>(params T[] item) => item;
 
+        public static T[] ArrayOf<T>(params T[] item) => ArrOf(item);
+
         public static Lst<T> LstOf<T>(params T[] item) => new Lst<T>(item);
+
+        public static Lst<T> ListOf<T>(params T[] item) => LstOf(item);
 
         public static T Def<T>() => default(T);
 
@@ -60,8 +64,11 @@ namespace Library {
         public static double Log(double a, double b) => Math.Log(a, b);
 
         public static int Len<T>(T[] it) => it.Length;
+        public static int Length<T>(T[] it) => it.Length;
         public static int Len<T>(ICollection<T> it) => it.Count;
+        public static int Length<T>(ICollection<T> it) => it.Count;
         public static int Cap<T>(List<T> it) => it.Capacity;
+        public static int Capacity<T>(List<T> it) => it.Capacity;
 
         public static void Todo(string it) => throw new Exception(it);
 
