@@ -489,25 +489,25 @@ namespace Compiler
             return r;
         }
 
-        public override object VisitArray([NotNull] ArrayContext context) {
-            var type = "var";
-            var result = new Result();
-            for (int i = 0; i < context.expression().Length; i++) {
-                var r = (Result)Visit(context.expression(i));
-                if (i == 0) {
-                    type = (string)r.data;
-                    result.text += r.text;
-                } else {
-                    if (type != (string)r.data) {
-                        type = "object";
-                    }
-                    result.text += "," + r.text;
-                }
-            }
-            result.data = type + "[]";
-            result.text = $"(new {result.data}{{ {result.text} }})";
-            return result;
-        }
+        //public override object VisitArray([NotNull] ArrayContext context) {
+        //    var type = "var";
+        //    var result = new Result();
+        //    for (int i = 0; i < context.expression().Length; i++) {
+        //        var r = (Result)Visit(context.expression(i));
+        //        if (i == 0) {
+        //            type = (string)r.data;
+        //            result.text += r.text;
+        //        } else {
+        //            if (type != (string)r.data) {
+        //                type = "object";
+        //            }
+        //            result.text += "," + r.text;
+        //        }
+        //    }
+        //    result.data = type + "[]";
+        //    result.text = $"(new {result.data}{{ {result.text} }})";
+        //    return result;
+        //}
 
         public override object VisitList([NotNull] ListContext context) {
             var type = "object";

@@ -233,7 +233,7 @@ linq // 联合查询
 | callPkg // 新建包
 | getType // 获取类型
 | callAwait // 异步调用
-| array // 数组
+// | array // 数组
 | list // 列表
 | dictionary // 字典
 | lambda // lambda表达式
@@ -298,11 +298,11 @@ dictionaryAssign: (dictionaryElement (more dictionaryElement)*)? ;
 
 callAwait: FlowLeft expression; // 异步调用
 
-array : '{|' NewLine? CommentLine? (expression (more expression)*)? NewLine? CommentLine? '|}'; // 数组
+// array : 'ArrOf' blockLeft (expression (more expression)*)? blockRight; // 数组
 
-list : '{' NewLine? CommentLine? expression (more expression)* NewLine? CommentLine? '}'; // 列表
+list : blockLeft expression (more expression)* blockRight; // 列表
 
-dictionary :  '{' NewLine? CommentLine? dictionaryElement (more dictionaryElement)* NewLine? CommentLine? '}'; // 字典
+dictionary :  blockLeft dictionaryElement (more dictionaryElement)* blockRight; // 字典
 
 dictionaryElement: '[' expression ']' expression; // 字典元素
 
@@ -387,7 +387,7 @@ type : typeNotNull | typeNullable;
 
 typeTuple : bracketLeft type (more type)+ bracketRight;
 typeList : '[' type ']';
-typeArray : '[' '|' type '|' ']';
+typeArray : 'Arr<' type  '>';
 typeDictionary :  '[' '[' type ']' type ']';
 typePackage : nameSpaceItem (templateCall)? ;
 typeFunction : typeFunctionParameterClause ArrowRight NewLine* typeFunctionParameterClause;
