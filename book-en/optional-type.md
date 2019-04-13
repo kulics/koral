@@ -52,11 +52,11 @@ E.g:
 b := a!
 ```
 ## Merge Operation
-If you want to use another default value when the value of the optional type is null, you can use the `id ?! value` syntax.
+If you want to use another default value when the value of the optional type is null, you can use the `id.Def(value)` function.
 
 E.g:
 ```
-b := a ?! 128
+b := a.Def(128)
 ```
 
 ## [Complete Example](../example.xs)
@@ -77,7 +77,7 @@ Example -> {
         c := a?
         d := a!
 
-        e := a ?! 1024
+        e := a.Def(1024)
     }
 }
 ```

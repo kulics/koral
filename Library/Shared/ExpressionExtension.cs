@@ -7,15 +7,10 @@ namespace Library {
     public static partial class ExpressionExtension {
         // object 
         public static string ToStr(this object it) => it.ToString();
-        public static T To<T>(this object it) {
-            return (T)it;
-        }
-        public static bool Is<T>(this object it) {
-            return it is T;
-        }
-        public static T As<T>(this object it) where T : class {
-            return it as T;
-        }
+        public static T To<T>(this object it) => (T)it;
+        public static bool Is<T>(this object it) => it is T;
+        public static T As<T>(this object it) where T : class => it as T;
+        public static T Def<T>(this T it, T value) where T : class => it != null ? it : value;
 
         public static sbyte ToI8(this object it) => Convert.ToSByte(it);
         public static short ToI16(this object it) => Convert.ToInt16(it);
