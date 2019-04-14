@@ -121,7 +121,7 @@ implementControlStatement:(annotationSupport)? expression bracketLeft bracketRig
 implementFunctionStatement:(annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) NewLine*
 parameterClauseOut blockLeft (functionSupportStatement)* blockRight end;
 // 事件实现
-implementEventStatement: id ':' nameSpaceItem '!!' end;
+implementEventStatement: id ':' 'Event<' nameSpaceItem '>' end;
 // 函数
 functionStatement:id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) NewLine* parameterClauseOut blockLeft
 (functionSupportStatement)* blockRight end;
