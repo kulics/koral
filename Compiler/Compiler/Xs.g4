@@ -3,7 +3,7 @@ grammar Xs;
 program: statement+;
 
 statement: (annotationSupport)? CommentLine* 
-exportStatement CommentLine* NewLine* namespaceSupportStatement*;
+exportStatement (CommentLine|NewLine)* namespaceSupportStatement*;
 
 // 导出命名空间
 exportStatement: '\\' nameSpace ArrowLeft blockLeft (importStatement|NewLine)* blockRight end;
