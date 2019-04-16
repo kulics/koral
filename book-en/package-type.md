@@ -178,35 +178,6 @@ Prt(peter.Class)     # print out 2
 It should be noted that a package can only support one constructor, we recommend to maintain the simplicity of the structure, a stable package easier to be used by the caller,
 
 If you really have more construction requirements, you can use regular functions to accomplish this requirement.
-## Mount Property
-Sometimes we don't want to always use constructive methods to use certain data and functions, when we can mount property on the package itself.  
-By wrapping the data and functions we need with `id -> {}`, we can call them directly.
-
-E.g:
-```
-student -> {
-    ShareData: I32
-    ShareFunction() -> () {
-        Prt("nothing")
-    }
-}
-```
-
-It should be noted that mount property are created while the program is running, and they survive and are shared during the program declaration cycle.  
-Therefore, it does not belong to the same space as the package's construction property. The construction property belong to the object and the mount property belong to the package itself.
-
-## Mount Construct
-If there are some mount attributes, we also need some initialization operations, as well as the use of constructors.
-The grammar is consistent with the constructor.
-
-E.g:
-```
-student {
-    ShareData = 128 
-} -> {
-    ......
-}
-```
 ## Combination
 Now let us play our imagination, we want a customized package for Chinese students how to define it?
 
@@ -264,14 +235,11 @@ chineseStudent() -> {
     System
 }
 
-Example -> {
-    Main() -> () {
-        a := S{A=5,B=12}
-        b := PKG("hello", 64, a)
-        Prt( b.Z.A )
-        Prt( b.Print() )
-        PKG.N()
-    }
+Main() -> () {
+    a := S{A=5,B=12}
+    b := PKG("hello", 64, a)
+    Prt( b.Z.A )
+    Prt( b.Print() )
 }
 
 S() -> {
@@ -290,13 +258,6 @@ PKG(x: Str, y: I32, z: S) {
 
     Print() -> (a: Str) {
         <- ( "X {Y}" )
-    }
-}
-
-PKG -> {
-    M := 20
-    N() -> () {
-        Prt(M)
     }
 }
 ```

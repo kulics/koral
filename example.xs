@@ -440,11 +440,11 @@ Protocol <- {
 `Table("test")`
 TestAnnotation() -> {
     `Key, Column("id")`
-    Id: Str
+    Id(): Str
     `Column("nick_name")`
-    NickName: Str
+    NickName(): Str
     `Column("profile")`
-    Profile: Str
+    Profile(): Str
 }
 
 TestEnum -> [

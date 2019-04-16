@@ -94,28 +94,26 @@ number(): I32 = 0 {
     System
 }
 
-Example -> {
-    Main() -> () {
-        Prt(a)
-        c = 5
-        Prt(c)
-        Prt(c)
-    }
+Main() -> () {
+    Prt(a)
+    C = 5
+    Prt(C)
+    Prt(C)
+}
 
-    A() : I32 {
-        get { 
-            <- (3) 
-        }
+A() : I32 {
+    get { 
+        <- (3) 
     }
+}
 
-    B := 0
-    C() : I32 {
-        get { 
-            <- (B) 
-        }
-        set { 
-            B = value 
-        }
+B := 0
+C() : I32 {
+    get { 
+        <- (B) 
+    }
+    set { 
+        B = value 
     }
 }
 ```

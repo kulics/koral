@@ -27,25 +27,23 @@ This is the main source code repository for Xs. It contains the compiler, and do
 \HelloWorld <- {
     System # import namespace
 }
-# package
-Program -> {
-    # main function
-    Main() -> () {
-        # list
-        greetings := {"Hello", "Hola", "Bonjour",
-                    "Ciao", "こんにちは", "안녕하세요",
-                    "Cześć", "Olá", "Здравствуйте",
-                    "Chào bạn", "您好"}
-        # for-each  
-        @ item <- greetings {
-            # match
-            ? item -> [ 0 <= 8 ] {
-                Prt(item) # call function
-            } _ {
-                # lambda
-                Prt( greetings.Filter( {it -> it.Len > 4} ) )
-                <- @
-            }
+
+# main function
+Main() -> () {
+    # list
+    greetings := {"Hello", "Hola", "Bonjour",
+                "Ciao", "こんにちは", "안녕하세요",
+                "Cześć", "Olá", "Здравствуйте",
+                "Chào bạn", "您好"}
+    # for-each  
+    @ item <- greetings {
+        # match
+        ? item -> [ 0 <= 8 ] {
+            Prt(item) # call function
+        } _ {
+            # lambda
+            Prt( greetings.Filter( {it -> it.Len > 4} ) )
+            <- @
         }
     }
 }

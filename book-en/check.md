@@ -104,24 +104,22 @@ E.g:
     System
 }
 
-Example -> {
-    Main() -> () {
-        ! {
-            x: I32 = (1 * 1)
-        } ex {
-            !(ex)
-        }
+Main() -> () {
+    ! {
+        x: I32 = (1 * 1)
+    } ex {
+        !(ex)
+    }
 
-        x := Defer()
-        ! y := Defer() {
-            x.Content = "defer"
-            Prt(x.Content)
-        } e:Exception {
-            !(e)
-        } _ {
-            ? x >< Nil {
-                x.Dispose()
-            }
+    x := Defer()
+    ! y := Defer() {
+        x.Content = "defer"
+        Prt(x.Content)
+    } e:Exception {
+        !(e)
+    } _ {
+        ? x >< Nil {
+            x.Dispose()
         }
     }
 }

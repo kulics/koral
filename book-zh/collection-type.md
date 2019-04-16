@@ -108,16 +108,14 @@ length := dictionary.Len        # 长度
     System
 }
 
-Example -> {
-    Main() -> () {
-        list1 := {1,2,3,4,5}
-        list1 += 6
-        list2 := [I8]{1,2,1,2}
-        list3 := ArrOf(1,2,3)
+Main() -> () {
+    list1 := {1,2,3,4,5}
+    list1 += 6
+    list2 := [I8]{1,2,1,2}
+    list3 := ArrOf(1,2,3)
 
-        dictionary1 := {["a"]1, ["b"]2, ["c"]3}
-        dictionary1["d"] = 4
-        dictionary2 := [[I8]I8]{[1]1,[2]2,[3]3}
-    }
+    dictionary1 := {["a"]1, ["b"]2, ["c"]3}
+    dictionary1["d"] = 4
+    dictionary2 := [[I8]I8]{[1]1,[2]2,[3]3}
 }
 ```

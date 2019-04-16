@@ -68,10 +68,6 @@ We can use generics in packages, functions, and protocol types.
 
 E.g:
 ```
-Package<T> -> {
-    Count: T
-}
-
 Func<T>(data: T) -> (data: T) {
     <- (data)
 }

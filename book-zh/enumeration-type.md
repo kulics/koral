@@ -49,11 +49,9 @@ Number -> [
     System
 }
 
-Example -> {
-    Main() -> () {
-        Prt( A.Z )
-        Prt( B.Z )
-    }
+Main() -> () {
+    Prt( A.Z )
+    Prt( B.Z )
 }
 
 A -> [

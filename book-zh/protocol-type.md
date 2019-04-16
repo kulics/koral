@@ -140,12 +140,10 @@ func(hw: homeWork) -> () {
     System
 }
 
-Example -> {
-    Main() -> () {
-        S := B()
-        B.Do()
-        C( B )
-    }
+Main() -> () {
+    S := B()
+    B.Do()
+    C( B )
 }
 
 A <- {

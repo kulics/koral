@@ -67,17 +67,15 @@ b := a.Def(128)
     System
 }
 
-Example -> {
-    Main() -> () {
-        a: I32! = Nil
+Main() -> () {
+    a: I32! = Nil
 
-        b: [I32!]! = [I32!]!{0}
-        b?[0]?.ToStr()?.ToStr()
+    b: [I32!]! = [I32!]!{0}
+    b?[0]?.ToStr()?.ToStr()
 
-        c := a?
-        d := a!
+    c := a?
+    d := a!
 
-        e := a.Def(1024)
-    }
+    e := a.Def(1024)
 }
 ```
