@@ -10,10 +10,8 @@ E.g:
 ```
 \Name\Space <- {}
 
-Demo -> {
-    GetSomething() -> (content: Str) {
-        <- ("something")
-    }
+GetSomething() -> (content: Str) {
+    <- ("something")
 }
 ```
 ## Import
@@ -26,11 +24,9 @@ E.g:
     Name\Space 
 }
 
-Example -> {
-    Main() -> () {
-        # print something
-        Prt( Demo.GetSomething() )
-    }
+Main() -> () {
+    # print something
+    Prt( Demo.GetSomething() )
 }
 ```
 ## Simplify Import
@@ -39,14 +35,12 @@ If we don't want to use the namespace name to call the content every time, we ca
 E.g:
 ```
 \Run <- { 
-    Name\Space.Demo 
+    Name\Space.Code 
 }
 
-Example -> {
-    Main() -> () {
-        # print something
-        Prt( GetSomething() )
-    }
+Main() -> () {
+    # print something
+    Prt( GetSomething() )
 }
 ```
 This eliminates the need to call `space` every time.
@@ -57,12 +51,22 @@ E.g:
 ```
 \Demo <- {}
 
-Example -> {
-    Main() -> () {
-        # use it directly
-        Prt( \Name\Space.Demo.GetSomething() )    
-    }
+Main() -> () {
+    # use it directly
+    Prt( \Name\Space.Code.GetSomething() )    
 }
+```
+## NameSpace Construct
+If there are some attributes, we also need some initialization operations, as well as the use of constructors.
+The grammar is consistent with the constructor.
+
+E.g:
+```
+\Demo {
+    ShareData = 128 
+} <- {}
+
+ShareData: I32
 ```
 
 ## [Advanced](./control-type.md)

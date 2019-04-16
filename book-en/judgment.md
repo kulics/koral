@@ -101,28 +101,26 @@ E.g:
     System
 }
 
-Example -> {
-    Main() -> () {
-        a := 5
-        ? a == 2 { 
-            Prt(2) 
-        } a == 4 { 
-            Prt(4) 
-        } _ { 
-            Prt("not find") 
-        }
-
-        b := 7
-        ? b -> 5 { 
-            Prt(5) 
-        } 7 { 
-            Prt(7) 
-        } _ { 
-            Prt("not find") 
-        }
-
-        Prt( ?(b) )
-        Prt( ?(:I32) )
+Main() -> () {
+    a := 5
+    ? a == 2 { 
+        Prt(2) 
+    } a == 4 { 
+        Prt(4) 
+    } _ { 
+        Prt("not find") 
     }
+
+    b := 7
+    ? b -> 5 { 
+        Prt(5) 
+    } 7 { 
+        Prt(7) 
+    } _ { 
+        Prt("not find") 
+    }
+
+    Prt( ?(b) )
+    Prt( ?(:I32) )
 }
 ```

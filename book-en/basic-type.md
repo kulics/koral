@@ -130,15 +130,13 @@ Nil # empty value
     System
 }
 
-Example -> {
-    Main() -> () {
-        a := 123
-        b := a.ToI64()
-        c := 123.456
-        d := "hello"
-        c := ""d" world"
-        e := True
-        f :Obj = False
-    }
+Main() -> () {
+    a := 123
+    b := a.ToI64()
+    c := 123.456
+    d := "hello"
+    c := ""d" world"
+    e := True
+    f :Obj = False
 }
 ```

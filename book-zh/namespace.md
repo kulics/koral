@@ -10,10 +10,8 @@
 ```
 \Name\Space <- {}
 
-Demo -> {
-    GetSomething() -> (content: Str) {
-        <- ("something")
-    }
+GetSomething() -> (content: Str) {
+    <- ("something")
 }
 ```
 ## 导入
@@ -25,11 +23,9 @@ Demo -> {
     Name\Space 
 }
 
-Example -> {
-    Main() -> () {
-        # 打印 something
-        Prt( Demo.GetSomething() )
-    }
+Main() -> () {
+    # 打印 something
+    Prt( GetSomething() )
 }
 ```
 ## 简化导入
@@ -38,14 +34,12 @@ Example -> {
 例如：
 ```
 \Run <- { 
-    Name\Space.Demo 
+    Name\Space.Code 
 }
 
-Example -> {
-    Main() -> () {
-        # 打印 something
-        Prt( GetSomething() )
-    }
+Main() -> () {
+    # 打印 something
+    Prt( GetSomething() )
 }
 ```
 这样就不需要每次都使用 `space` 来调用了。
@@ -56,12 +50,22 @@ Example -> {
 ```
 \Demo <- {}
 
-Example -> {
-    Main() -> () {
-        # 直接使用即可
-        Prt( \Name\Space.Demo.GetSomething() )    
-    }
+Main() -> () {
+    # 直接使用即可
+    Prt( \Name\Space.Code.GetSomething() )    
 }
+```
+## 命名空间构造
+如果有些属性我们也需要进行一些初始化操作，一样也可以使用构造函数。
+语法与构造函数一致。
+
+例如：
+```
+\Demo {
+    ShareData = 128 
+} <- {}
+
+ShareData: I32
 ```
 
 ## [进阶](./control-type.md)

@@ -140,12 +140,10 @@ Note that if the type can not be converted correctly, it will return a `Nil` val
     System
 }
 
-Example -> {
-    Main() -> () {
-        S := B()
-        B.Do()
-        C( B )
-    }
+Main() -> () {
+    S := B()
+    B.Do()
+    C( B )
 }
 
 A <- {

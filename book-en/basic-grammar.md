@@ -44,7 +44,7 @@ You can write multiple import statements that their order does not affect the im
 For more details on namespaces, please see [Namespace](namespace.md)
 
 ## Main Entry
-We need to define a main entry to let the program know where to start. The main entry is declared with a function `Main() -> () {}` and must be package mount property.  
+We need to define a main entry to let the program know where to start. The main entry is declared with a function `Main() -> () {}`.  
 Depending on the target platform, the main entry may be declared differently, and the main function of C# is used here by default.
 
 E.g:
@@ -53,12 +53,10 @@ E.g:
     System
 }
 
-Example -> {
-    Main() -> () {
-    }
+Main() -> () {
 }
 ```
-The main entry function here is defined of the `Example` and is a function with no arguments and no return value. It is automatically recognized as the main entry and the main entry function is executed when the program is started, so we simply write the function main entry function can be.
+The main entry function is a function with no arguments and no return value. It is automatically recognized as the main entry and the main entry function is executed when the program is started, so we simply write the function main entry function can be.
 
 In the examples that follow, we are by default implemented in the main entry function, so we will not overplay this part of the code.
 
@@ -171,12 +169,10 @@ a.b(x, y).c( () -> (I32) {
     System
 }
 
-Example -> {
-    Main() -> () {
-        a : I32
-        a = 5
-        b := 6
-        c: I8 = 1
-    }
+Main() -> () {
+    a : I32
+    a = 5
+    b := 6
+    c: I8 = 1
 }
 ```
