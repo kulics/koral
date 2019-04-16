@@ -2,10 +2,8 @@
 using Antlr4.Runtime.Misc;
 using static Compiler.XsParser;
 
-namespace Compiler
-{
-    internal partial class Visitor
-    {
+namespace Compiler {
+    internal partial class Visitor {
         public override object VisitStatement([NotNull] StatementContext context) {
             var obj = "";
             var ns = (Namespace)Visit(context.exportStatement());
@@ -18,18 +16,33 @@ namespace Compiler
             obj += $"namespace {ns.name + Wrap + BlockLeft + Wrap}";
 
             var content = "";
+            var contentStatic = "";
             foreach (var item in context.namespaceSupportStatement()) {
-                content += Visit(item);
+                var typ = item.GetChild(0).GetType();
+                if (typ == typeof(NamespaceVariableStatementContext) ||
+                    typ == typeof(NamespaceControlStatementContext) ||
+                    typ == typeof(NamespaceFunctionStatementContext) ||
+                    typ == typeof(NamespaceConstantStatementContext)) {
+                    contentStatic += Visit(item);
+                } else {
+                    content += Visit(item);
+                }
             }
             obj += content;
+            if (contentStatic != "" || ns.init != "") {
+                obj += $"public class {FileName} {BlockLeft} {Wrap}" +
+                    $" static {FileName}() {BlockLeft}{Wrap} {ns.init} {BlockRight}{Wrap}" +
+                    $" {contentStatic}" +
+                    $" {BlockRight} {Wrap}";
+            }
             obj += BlockRight + Wrap;
             return obj;
         }
 
-        private class Namespace
-        {
+        private class Namespace {
             public string name;
             public string imports;
+            public string init;
         }
 
         public override object VisitExportStatement([NotNull] ExportStatementContext context) {
@@ -38,6 +51,10 @@ namespace Compiler
             };
             foreach (var item in context.importStatement()) {
                 obj.imports += (string)Visit(item);
+            }
+            // 处理构造函数
+            if (context.packageInitStatement() != null) {
+                obj.init += Visit(context.packageInitStatement());
             }
             return obj;
         }
@@ -130,39 +147,6 @@ namespace Compiler
                 id.text += " = " + op + context.Integer().GetText();
             }
             return id.text + ",";
-        }
-
-        public override object VisitPackageStaticStatement([NotNull] PackageStaticStatementContext context) {
-            var id = (Result)Visit(context.id());
-            var obj = "";
-            var Init = "";
-            // 获取构造数据
-            Init += "static " + id.text + "()" + BlockLeft + Wrap;
-            // 处理构造函数
-            if (context.packageInitStatement() != null) {
-                Init += Visit(context.packageInitStatement());
-            }
-            Init += BlockRight;
-            obj = Init + obj;
-            foreach (var item in context.packageStaticSupportStatement()) {
-                obj += Visit(item);
-            }
-            obj += BlockRight + Terminate + Wrap;
-            var header = "";
-            if (context.annotationSupport() != null) {
-                header += Visit(context.annotationSupport());
-            }
-            header += $"{id.permission} partial class {id.text}";
-            // 泛型
-            var templateContract = "";
-            if (context.templateDefine() != null) {
-                var template = (TemplateItem)Visit(context.templateDefine());
-                header += template.Template;
-                templateContract = template.Contract;
-            }
-            header += templateContract + Wrap + BlockLeft + Wrap;
-            obj = header + obj;
-            return obj;
         }
 
         public override object VisitNamespaceFunctionStatement([NotNull] NamespaceFunctionStatementContext context) {
