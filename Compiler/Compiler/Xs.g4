@@ -6,13 +6,16 @@ statement: (annotationSupport)? CommentLine*
 exportStatement (CommentLine|NewLine)* namespaceSupportStatement*;
 
 // 导出命名空间
-exportStatement: '\\' nameSpace ArrowLeft blockLeft (importStatement|NewLine)* blockRight end;
+exportStatement: '\\' nameSpace (packageInitStatement)?  ArrowLeft blockLeft (importStatement|NewLine)* blockRight end;
 
 // 导入命名空间
 importStatement: (annotationSupport)? nameSpace (call NewLine? id)? end;
 
 namespaceSupportStatement:
-packageStaticStatement
+namespaceVariableStatement
+|namespaceControlStatement
+|namespaceFunctionStatement
+|namespaceConstantStatement
 |packageStatement
 |protocolStatement
 |enumStatement
@@ -24,18 +27,6 @@ packageStaticStatement
 enumStatement: (annotationSupport)? id ArrowRight NewLine* squareBracketLeft enumSupportStatement* squareBracketRight end;
 
 enumSupportStatement: id ('=' (add)? Integer)? end;
-// 静态包
-packageStaticStatement:(annotationSupport)? id (templateDefine)? (packageInitStatement)? 
-ArrowRight NewLine* blockLeft (packageStaticSupportStatement)* blockRight end;
-// 静态包支持的语句
-packageStaticSupportStatement:
-namespaceVariableStatement
-|namespaceControlStatement
-|namespaceFunctionStatement
-|namespaceConstantStatement
-|CommentLine
-|NewLine
-;
 // 命名空间变量
 namespaceVariableStatement:(annotationSupport)? id (Define expression|Declared type (Assign expression)?) end;
 // 命名空间控制

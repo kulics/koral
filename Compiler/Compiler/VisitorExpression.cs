@@ -3,10 +3,8 @@ using Library;
 using System.Collections.Generic;
 using static Compiler.XsParser;
 
-namespace Compiler
-{
-    internal partial class Visitor
-    {
+namespace Compiler {
+    internal partial class Visitor {
         public override object VisitVariableStatement(VariableStatementContext context) {
             var obj = "";
             var r1 = (Result)Visit(context.expression(0));
@@ -223,8 +221,7 @@ namespace Compiler
             return r;
         }
 
-        public class TemplateItem
-        {
+        public class TemplateItem {
             public string Template { get; set; }
             public string Contract { get; set; }
         }
@@ -555,8 +552,7 @@ namespace Compiler
             return result;
         }
 
-        private class DicEle
-        {
+        private class DicEle {
             public string key;
             public string value;
             public string text;
