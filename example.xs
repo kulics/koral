@@ -7,7 +7,7 @@
     System\ComponentModel\DataAnnotations\Schema
     System\ComponentModel\DataAnnotations
 
-    Xs.Example
+    Xs.example
 }
 
 ## 
@@ -453,7 +453,7 @@ TestEnum -> [
 ]
 
 Package(y: I32 = 3) {
-    X = Example.ConstData
+    X = ConstData
     Y = y
 } -> {
     X: I32
