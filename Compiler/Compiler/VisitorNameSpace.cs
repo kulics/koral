@@ -29,7 +29,7 @@ namespace Compiler {
                 }
             }
             obj += content;
-            if (contentStatic != "" || ns.init != "") {
+            if (contentStatic != "" || ns.init != null) {
                 obj += $"public class {FileName} {BlockLeft} {Wrap}" +
                     $" static {FileName}() {BlockLeft}{Wrap} {ns.init} {BlockRight}{Wrap}" +
                     $" {contentStatic}" +
