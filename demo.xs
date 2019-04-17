@@ -1,6 +1,6 @@
 \Xs <- {
     System
-    Xs.Demo
+    Xs.demo
 }
 
 Main() -> () {
