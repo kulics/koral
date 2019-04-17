@@ -160,7 +160,7 @@ TestSwitch() -> () {
     } :I32 {
         Prt("int")
     } Nil {
-        Prt("Nil")
+        Prt("null")
     } _ {
         Prt("default")
     }
