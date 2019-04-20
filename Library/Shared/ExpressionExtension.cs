@@ -311,10 +311,16 @@ namespace Library {
         public static uint ToU32FromBase(this string it, int fromBase) => Convert.ToUInt32(it, fromBase);
         public static ulong ToU64FromBase(this string it, int fromBase) => Convert.ToUInt64(it, fromBase);
 
+        public static byte[] ToBytesByBase64(this string it) => Convert.FromBase64String(it);
+
         public static string ToStr(this byte[] it) => Encoding.UTF8.GetString(it);
         public static string ToHex(this byte[] it) => BitConverter.ToString(it, 0).Replace("-", string.Empty);
         public static string ToLowerHex(this byte[] it) => it.ToHex().ToLower();
         public static string ToUpperHex(this byte[] it) => it.ToHex();
+
+        public static string ToStrByBase64(this byte[] it) => Convert.ToBase64String(it, 0, it.Length);
+
+        public static byte[] SubBytes(this byte[] it, int start, int length) => it.Skip(start).Take(length).ToArray();
 
         public static IEnumerable<(int index, T item)> Range<T>(this IEnumerable<T> self)
    => self.Select((item, index) => (index, item));
