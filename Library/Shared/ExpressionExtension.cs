@@ -286,10 +286,11 @@ namespace Library {
                 return it.SubStr(0, it.LastIndex() - endIndex ?? 0);
             }
         }
-        
+
         public static string Join(this string it, string j) => string.Join(j, it);
 
         public static string ToStr(this string it, string format) => it;
+        public static byte[] ToBytes(this string it) => Encoding.UTF8.GetBytes(it);
         public static sbyte ToI8(this string it) => Convert.ToSByte(it);
         public static short ToI16(this string it) => Convert.ToInt16(it);
         public static int ToI32(this string it) => Convert.ToInt32(it);
@@ -309,7 +310,12 @@ namespace Library {
         public static ushort ToU16FromBase(this string it, int fromBase) => Convert.ToUInt16(it, fromBase);
         public static uint ToU32FromBase(this string it, int fromBase) => Convert.ToUInt32(it, fromBase);
         public static ulong ToU64FromBase(this string it, int fromBase) => Convert.ToUInt64(it, fromBase);
-        
+
+        public static string ToStr(this byte[] it) => Encoding.UTF8.GetString(it);
+        public static string ToHex(this byte[] it) => BitConverter.ToString(it, 0).Replace("-", string.Empty);
+        public static string ToLowerHex(this byte[] it) => it.ToHex().ToLower();
+        public static string ToUpperHex(this byte[] it) => it.ToHex();
+
         public static IEnumerable<(int index, T item)> Range<T>(this IEnumerable<T> self)
    => self.Select((item, index) => (index, item));
 
