@@ -437,13 +437,13 @@ Protocol <- {
     F(): Str
 }
 
-`Table("test")`
+[Table("test")]
 TestAnnotation() -> {
-    `Key, Column("id")`
+    [Key, Column("id")]
     Id(): Str
-    `Column("nick_name")`
+    [Column("nick_name")]
     NickName(): Str
-    `Column("profile")`
+    [Column("profile")]
     Profile(): Str
 }
 
