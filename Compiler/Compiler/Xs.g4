@@ -260,7 +260,7 @@ expressionList : expression (more expression)* ; // 表达式列
 
 annotationSupport: annotation (NewLine|CommentLine)?;
 
-annotation: '`' (id ArrowRight)? annotationList '`'; // 注解
+annotation: '[' (id ArrowRight)? annotationList ']'; // 注解
 
 annotationList: annotationItem (more annotationItem)*;
 
