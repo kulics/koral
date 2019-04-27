@@ -486,6 +486,14 @@ namespace Compiler {
             return r;
         }
 
+        public override object VisitCallAsync([NotNull] CallAsyncContext context) {
+            var r = new Result();
+            var expr = (Result)Visit(context.expression());
+            r.data = "var";
+            r.text = $"Go(()=> {expr.text})";
+            return r;
+        }
+
         //public override object VisitArray([NotNull] ArrayContext context) {
         //    var type = "var";
         //    var result = new Result();

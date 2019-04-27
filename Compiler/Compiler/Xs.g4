@@ -223,7 +223,8 @@ linq // 联合查询
 | callElement //调用元素
 | callPkg // 新建包
 | getType // 获取类型
-| callAwait // 异步调用
+| callAwait // 异步等待调用
+| callAsync // 异步调用
 // | array // 数组
 | list // 列表
 | dictionary // 字典
@@ -288,6 +289,8 @@ listAssign: (expression (more expression)*)? ;
 dictionaryAssign: (dictionaryElement (more dictionaryElement)*)? ;
 
 callAwait: FlowLeft expression; // 异步调用
+
+callAsync: FlowRight expression; // 异步调用
 
 // array : 'ArrOf' blockLeft (expression (more expression)*)? blockRight; // 数组
 
