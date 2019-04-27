@@ -321,11 +321,5 @@ namespace Library {
         public static string ToStrByBase64(this byte[] it) => Convert.ToBase64String(it, 0, it.Length);
 
         public static byte[] SubBytes(this byte[] it, int start, int length) => it.Skip(start).Take(length).ToArray();
-
-        public static IEnumerable<(int index, T item)> Range<T>(this IEnumerable<T> self)
-   => self.Select((item, index) => (index, item));
-
-        public static IEnumerable<(TKey, TValue)> Range<TKey, TValue>(this IEnumerable<KeyValuePair<TKey, TValue>> self)
-   => self.Select((item) => (item.Key, item.Value));
     }
 }
