@@ -95,7 +95,6 @@ namespace Library {
                     }
                 }
             }
-            yield break;
         }
 
         public static IEnumerable<(int index, T item)> Range<T>(IEnumerable<T> self)
