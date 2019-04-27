@@ -316,10 +316,18 @@ TestLambda() -> () {
 
 TestAsync() ~> (x: I32, y: I32, z: Str) {
     Slp(1000)
-    async1() ~> () {
+    ##
+    @ i <- [1<=10] {
+        fun() -> () {
+            Prt("task", i)
+        }
+        ~> fun(i)
+    }
+    ##
+    fun() ~> () {
         <~ Dly(1000)
     }
-    <~ async1()
+    <~ fun()
     
     <- (1, 2, "123")
 }

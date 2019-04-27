@@ -4,25 +4,29 @@ using static Compiler.XsParser;
 namespace Compiler {
     internal partial class Visitor {
         public class Iterator {
-            public Result from { get; set; }
-            public Result to { get; set; }
-            public Result step { get; set; }
-            public string op { get; set; }
+            public Result Begin;
+            public Result End;
+            public Result Step;
+            public string Order = t;
+            public string Attach = f;
         }
 
         public override object VisitIteratorStatement([NotNull] IteratorStatementContext context) {
             var it = new Iterator();
-            var i = context.expression();
-
-            it.op = context.op.Text;
+            if (context.op.Text == ">=" || context.op.Text == "<=") {
+                it.Attach = t;
+            }
+            if (context.op.Text == ">" || context.op.Text == ">=") {
+                it.Order = f;
+            }
             if (context.expression().Length == 2) {
-                it.from = (Result)Visit(context.expression(0));
-                it.to = (Result)Visit(context.expression(1));
-                it.step = new Result { data = i32, text = "1" };
+                it.Begin = (Result)Visit(context.expression(0));
+                it.End = (Result)Visit(context.expression(1));
+                it.Step = new Result { data = i32, text = "1" };
             } else {
-                it.from = (Result)Visit(context.expression(0));
-                it.to = (Result)Visit(context.expression(1));
-                it.step = (Result)Visit(context.expression(2));
+                it.Begin = (Result)Visit(context.expression(0));
+                it.End = (Result)Visit(context.expression(1));
+                it.Step = (Result)Visit(context.expression(2));
             }
             return it;
         }
@@ -34,14 +38,8 @@ namespace Compiler {
                 id = ((Result)Visit(context.id())).text;
             }
             var it = (Iterator)Visit(context.iteratorStatement());
-            obj += $"for (var {id} = {it.from.text};";
-            if (it.op == ">" || it.op == ">=") {
-                obj += $"{id} {it.op} {it.to.text};";
-                obj += $"{id} -= {it.step.text})";
-            } else {
-                obj += $"{id} {it.op} {it.to.text};";
-                obj += $"{id} += {it.step.text})";
-            }
+
+            obj += $"foreach (var {id} in Range({it.Begin.text},{it.End.text},{it.Step.text},{it.Order},{it.Attach}))";
 
             obj += $"{Wrap} {BlockLeft} {Wrap}";
             obj += ProcessFunctionSupport(context.functionSupportStatement());
@@ -62,7 +60,7 @@ namespace Compiler {
             var target = arr.text;
             var id = "ea";
             if (context.id().Length == 2) {
-                target += ".Range()";
+                target = $"Range({target})";
                 id = $"({((Result)Visit(context.id(0))).text},{((Result)Visit(context.id(1))).text})";
             } else if (context.id().Length == 1) {
                 id = ((Result)Visit(context.id(0))).text;

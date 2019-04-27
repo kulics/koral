@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -47,7 +48,9 @@ namespace Library {
 
         public static void Clear() => Clr();
 
-        public static async Task Go(Func<Task> @do) => await @do();
+        public static Task Go(Func<Task> @do) => Task.Run(@do);
+
+        public static Task Go(Action @do) => Task.Run(@do);
 
         public static void Slp(int milliseconds) => Thread.Sleep(milliseconds);
 
@@ -69,6 +72,37 @@ namespace Library {
         public static int Length<T>(ICollection<T> it) => it.Count;
         public static int Cap<T>(List<T> it) => it.Capacity;
         public static int Capacity<T>(List<T> it) => it.Capacity;
+
+        public static IEnumerable<int> Range(int begin, int end, int step = 1, bool order = true, bool attach = true) {
+            if (order) {
+                if (attach) {
+                    for (int index = begin; index <= end; index += step) {
+                        yield return index;
+                    }
+                } else {
+                    for (int index = begin; index < end; index += step) {
+                        yield return index;
+                    }
+                }
+            } else {
+                if (attach) {
+                    for (int index = begin; index >= end; index -= step) {
+                        yield return index;
+                    }
+                } else {
+                    for (int index = begin; index > end; index -= step) {
+                        yield return index;
+                    }
+                }
+            }
+            yield break;
+        }
+
+        public static IEnumerable<(int index, T item)> Range<T>(IEnumerable<T> self)
+=> self.Select((item, index) => (index, item));
+
+        public static IEnumerable<(TKey, TValue)> Range<TKey, TValue>(IEnumerable<KeyValuePair<TKey, TValue>> self)
+   => self.Select((item) => (item.Key, item.Value));
 
         public static void Todo(string it) => throw new Exception(it);
 
