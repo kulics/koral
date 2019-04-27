@@ -48,9 +48,9 @@ namespace Library {
 
         public static void Clear() => Clr();
 
-        public static Task Go(Func<Task> @do) => Task.Run(@do);
+        public static Task Go(Func<Task> fn) => Task.Run(fn);
 
-        public static Task Go(Action @do) => Task.Run(@do);
+        public static Task Go(Action fn) => Task.Run(fn);
 
         public static void Wait(params Task[] tasks) => Task.WaitAll(tasks);
 
