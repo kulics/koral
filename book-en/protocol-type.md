@@ -50,7 +50,7 @@ student() -> {
 Our student homework is really hard ...
 
 Let's explain what this section of the code:
-1. We have implemented an protocol, and now `student` is also considered as `homework'. We can use a `student' as `homework'.
+1. We have implemented an protocol, and now `student` is also considered as `homework`. We can use a `student` as `homework`.
 1. In the protocol we include the protocol of the two properties `Count, Do`, according to the provisions of a nor less.
 1. We have written the actual values ​​and functions for each of the two properties of the protocol, so that these two properties become one of the valid sub-properties of `student`.
 1. We did something in `Do`, which reduced the total count of homework.

@@ -139,7 +139,7 @@ Identifier is the variable, function, package, protocol, etc. specified name. Th
 1. Case sensitive, Myname and myname are two different identifiers;
 1. The first character of an identifier can start with an underscore `_` or a letter, but it can not be a number;
 1. Other characters in the identifier can be underlined `_`, letters, or numbers.
-1. Within the same `{}`, you can not define more than two identifiers of the same name.
+1. In the same `{}`, you cannot repeatedly define an identifier with the same name.
 1. In different `{}`, you can define the identifier of the duplicate name, the language will give priority to the identifier defined in the current range.
 1. In namespace, packages and protocols, properties and method names that begin with the underscore `_` are considered private and the rest are considered public.
 1. Identifiers starting with lowercase letters can only be used in functions. Other scenarios can only use identifiers beginning with uppercase letters..
