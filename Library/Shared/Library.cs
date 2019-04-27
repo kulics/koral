@@ -52,6 +52,8 @@ namespace Library {
 
         public static Task Go(Action @do) => Task.Run(@do);
 
+        public static void Wait(params Task[] tasks) => Task.WaitAll(tasks);
+
         public static void Slp(int milliseconds) => Thread.Sleep(milliseconds);
 
         public static void Sleep(int milliseconds) => Slp(milliseconds);
