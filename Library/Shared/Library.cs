@@ -48,6 +48,8 @@ namespace Library {
 
         public static void Clear() => Clr();
 
+        public static Task<T> Go<T>(Func<Task<T>> fn) => Task.Run(fn);
+
         public static Task Go(Func<Task> fn) => Task.Run(fn);
 
         public static Task Go(Action fn) => Task.Run(fn);
