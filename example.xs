@@ -126,8 +126,8 @@ TestOptional() -> () {
     a?.ToStr()
     b: Str! = ""
     b?.ToStr()
-    c: {}! = Nil
-    d: App! = Nil
+    c: {}! = ()
+    d: App! = ()
     e: [I32!]! = [I32!]{0}
     e?[0]?.ToStr()?.ToStr()
     f := d.Def(App{})
@@ -159,7 +159,7 @@ TestSwitch() -> () {
         Prt("string")
     } :I32 {
         Prt("int")
-    } Nil {
+    } () {
         Prt("null")
     } _ {
         Prt("default")
@@ -246,7 +246,7 @@ TestLoop() -> () {
 }
 
 TestCheck() -> () {
-    z1 :Defer! = Nil
+    z1 :Defer! = ()
     ! z2 := Defer{} {
         z1 = Defer{}
         ! z3 := Defer{} {
@@ -262,7 +262,7 @@ TestCheck() -> () {
     } e {
         !(e)
     } _ {
-        ? z1 >< Nil {
+        ? z1 >< () {
             z1.Dispose()
         }
     }
@@ -317,10 +317,9 @@ TestLambda() -> () {
 TestAsync() ~> (x: I32, y: I32, z: Str) {
     Slp(1000)
     @ i <- [1<=10] {
-        funGo() -> () {
+        Go({ ->
             Prt("task", i)
-        }
-        ~> funGo()
+        })
     }
     funWait() ~> () {
         <~ Dly(1000)

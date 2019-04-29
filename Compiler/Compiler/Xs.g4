@@ -208,23 +208,22 @@ primaryExpression:
 id (templateCall)?
 | t=Self
 | t=Discard
-| dataStatement
 | bracketLeft expression bracketRight
+| dataStatement
 ;
 
 // 表达式
 expression:
 linq // 联合查询
+| callFunc // 函数调用
 | primaryExpression
 | callBase // 调用继承
 | callSelf // 调用自己
 | callNameSpace // 调用命名空间
-| callFunc // 函数调用
 | callElement //调用元素
 | callPkg // 新建包
 | getType // 获取类型
 | callAwait // 异步等待调用
-| callAsync // 异步调用
 // | array // 数组
 | list // 列表
 | dictionary // 字典
@@ -274,8 +273,8 @@ callFunc: id (templateCall)? tuple; // 函数调用
 callElement : id op=(Judge|Check)? '[' (expression | slice) ']';
 
 callPkg: 
-type bracketLeft NewLine? expressionList? NewLine? bracketRight
-| type blockLeft (pkgAssign|listAssign|dictionaryAssign) blockRight 
+type blockLeft (pkgAssign|listAssign|dictionaryAssign) blockRight 
+// | type bracketLeft NewLine? expressionList? NewLine? bracketRight
 | type bracketLeft NewLine? expressionList? NewLine? bracketRight blockLeft (pkgAssign|listAssign|dictionaryAssign) blockRight ; // 新建包
 
 getType: Judge bracketLeft (expression|':' type) bracketRight;
@@ -289,8 +288,6 @@ listAssign: (expression (more expression)*)? ;
 dictionaryAssign: (dictionaryElement (more dictionaryElement)*)? ;
 
 callAwait: FlowLeft expression; // 异步调用
-
-callAsync: FlowRight expression; // 异步调用
 
 // array : 'ArrOf' blockLeft (expression (more expression)*)? blockRight; // 数组
 
@@ -362,7 +359,7 @@ t=Float
 | t=Char
 | t=True
 | t=False
-| t=Null
+| nil
 ;
 
 // 类型
@@ -393,8 +390,7 @@ typeFunctionParameterClause : bracketLeft type? (more type)*  bracketRight;
 
 // 基础类型名
 typeBasic:
-t=TypeAny
-| t=TypeI8
+t=TypeI8
 | t=TypeU8
 | t=TypeI16
 | t=TypeU16
@@ -474,7 +470,6 @@ TypeStr: 'Str';
 TypeBool: 'Bl';
 True: 'True';
 False: 'False';
-Null : 'Nil';
 
 Float: Integer '.' DIGIT+ ; // 浮点数
 Integer : DIGIT+ ; // 整数

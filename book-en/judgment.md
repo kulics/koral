@@ -81,7 +81,7 @@ E.g:
      Prt("I32")
 } content:Str {     # when Str
      Prt(content)
-} Nil {             # When it is Nil
+} () {             # When it is Nil
      Prt("Nil")
 }
 ```
