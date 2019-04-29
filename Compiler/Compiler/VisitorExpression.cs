@@ -486,14 +486,6 @@ namespace Compiler {
             return r;
         }
 
-        public override object VisitCallAsync([NotNull] CallAsyncContext context) {
-            var r = new Result();
-            var expr = (Result)Visit(context.expression());
-            r.data = "var";
-            r.text = $"Go(()=> {expr.text})";
-            return r;
-        }
-
         //public override object VisitArray([NotNull] ArrayContext context) {
         //    var type = "var";
         //    var result = new Result();
@@ -596,7 +588,10 @@ namespace Compiler {
 
         public override object VisitDataStatement([NotNull] DataStatementContext context) {
             var r = new Result();
-            if (context.t.Type == Float) {
+            if (context.nil() != null) {
+                r.data = Any;
+                r.text = "null";
+            } else if (context.t.Type == Float) {
                 r.data = f64;
                 r.text = $"{context.Float().GetText()}";
             } else if (context.t.Type == Integer) {
@@ -614,10 +609,7 @@ namespace Compiler {
             } else if (context.t.Type == XsParser.False) {
                 r.data = bl;
                 r.text = f;
-            } else if (context.t.Type == Null) {
-                r.data = Any;
-                r.text = "null";
-            }
+            } 
             return r;
         }
 

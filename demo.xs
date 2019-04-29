@@ -54,7 +54,7 @@ Main() -> () {
 }
 
 PreOrderTraverse(node: Node!) -> () {
-    ? node -> Nil { 
+    ? node -> () { 
         <- () 
     }
     Prt(node.Value)
@@ -63,7 +63,7 @@ PreOrderTraverse(node: Node!) -> () {
 }
 
 PostOrderTraverse(node: Node!) -> () {
-    ? node -> Nil { 
+    ? node -> () { 
         <- () 
     }
     PostOrderTraverse(node.Left)
@@ -72,7 +72,7 @@ PostOrderTraverse(node: Node!) -> () {
 }
 
 MiddleOrderTraverse(node: Node!) -> () {
-    ? node -> Nil { 
+    ? node -> () { 
         <- () 
     }
     MiddleOrderTraverse(node.Left)
@@ -81,8 +81,8 @@ MiddleOrderTraverse(node: Node!) -> () {
 }
 
 InverseNode(node: Node!) -> (node: Node!) {
-    ? node -> Nil { 
-        <- (Nil) 
+    ? node -> () { 
+        <- (()) 
     }
     node.Left = InverseNode(node.Left)
     node.Right = InverseNode(node.Right)

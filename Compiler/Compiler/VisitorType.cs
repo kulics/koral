@@ -152,9 +152,6 @@ namespace Compiler {
                 case TypeBool:
                     obj = bl;
                     break;
-                case TypeAny:
-                    obj = Any;
-                    break;
                 default:
                     obj = Any;
                     break;

@@ -115,11 +115,11 @@ a :{} = 1  # any type
 ```
 
 ## Nil value
-We will need a value that can be any nil value, so it is `Nil`.
+We will need a value that can be any nil value, so it is `()`.
 
 E.g:
 ```
-Nil # empty value
+() # empty value
 ```
 
 ### [Next Chapter](operator.md)

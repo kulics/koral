@@ -81,7 +81,7 @@ i := 3
     Prt("I32")
 } content:Str {     # 是否 Str
     Prt(content)
-} Nil {             # 是否为 Nil
+} () {             # 是否为 Nil
     Prt("Nil")
 }
 ```
