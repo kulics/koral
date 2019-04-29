@@ -126,9 +126,9 @@ TestOptional() -> () {
     a?.ToStr()
     b: Str! = ""
     b?.ToStr()
-    c: Obj! = Nil
+    c: {}! = Nil
     d: App! = Nil
-    e: [I32!]! = [I32!]!{0}
+    e: [I32!]! = [I32!]{0}
     e?[0]?.ToStr()?.ToStr()
     f := d.Def(App{})
 }
@@ -138,7 +138,7 @@ TestTypeConvert() -> () {
     y := x.As<Program>()
     z1 := (12.34).ToF32()
     z2 := z1.ToI64()
-    Prt( z2.To<Obj>().To<I64>() )
+    Prt( z2.To<{}>().To<I64>() )
     Prt( y.Is<Program>() )
     Prt( x.As<Program>().Running )
     Prt( ?(:Program) )
@@ -152,7 +152,7 @@ TestDefault() -> () {
 }
 
 TestSwitch() -> () {
-    x :Obj = 3
+    x :{} = 3
     ? x -> 1 {
         Prt(1)
     } :Str {

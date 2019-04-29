@@ -6,11 +6,7 @@ namespace Compiler {
         public override object VisitTypeNullable([NotNull] TypeNullableContext context) {
             var obj = "";
             obj = Visit(context.typeNotNull()) as string;
-            if (context.typeNotNull().GetChild(0) is TypeBasicContext &&
-                context.typeNotNull().GetChild(0).GetText() != "Obj" &&
-                 context.typeNotNull().GetChild(0).GetText() != "Str") {
-                obj += "?";
-            }
+            obj += "?";
             return obj;
         }
 
@@ -95,6 +91,10 @@ namespace Compiler {
                 }
             }
             return obj;
+        }
+
+        public override object VisitTypeAny([NotNull] TypeAnyContext context) {
+            return Any;
         }
 
         public override object VisitTypeFunctionParameterClause([NotNull] TypeFunctionParameterClauseContext context) {
