@@ -106,12 +106,12 @@ E.g:
 boolean1 := True      # true  
 boolean2 := False     # false  
 ```
-## Object
-In particular, sometimes you need a type that can be any object to assist in the completion of the function, so it is `Obj`.
+## Any
+In particular, sometimes you need a type that can be any object to assist in the completion of the function, so it is `{}`.
 
 E.g:
 ```
-a :Obj = 1  # any type
+a :{} = 1  # any type
 ```
 
 ## Nil value
@@ -137,6 +137,6 @@ Main() -> () {
     d := "hello"
     c := ""d" world"
     e := True
-    f :Obj = False
+    f :{} = False
 }
 ```

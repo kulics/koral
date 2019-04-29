@@ -374,6 +374,7 @@ typeTuple
 | typeBasic
 | typePackage
 | typeFunction
+| typeAny
 ;
 
 typeNullable : typeNotNull Check;
@@ -385,6 +386,7 @@ typeArray : 'Arr<' type  '>';
 typeDictionary :  '[' '[' type ']' type ']';
 typePackage : nameSpaceItem (templateCall)? ;
 typeFunction : typeFunctionParameterClause ArrowRight NewLine* typeFunctionParameterClause;
+typeAny: BlockLeft BlockRight;
 
 // 函数类型参数
 typeFunctionParameterClause : bracketLeft type? (more type)*  bracketRight;
@@ -406,7 +408,8 @@ t=TypeAny
 | t=TypeStr
 | t=TypeBool
 ;
-
+// nil值
+nil:bracketLeft bracketRight;
 // bool值
 bool:t=True|t=False;
 
@@ -456,7 +459,6 @@ Loop : '@';
 
 Check : '!';
 
-TypeAny : 'Obj';
 TypeI8: 'I8';
 TypeU8: 'U8';
 TypeI16: 'I16';

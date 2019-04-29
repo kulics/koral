@@ -107,12 +107,12 @@ string := "Hello world! " title " " content ""
 boolean1 := True      # 真  
 boolean2 := False     # 假  
 ```
-## Object 对象类型  
-特别的，有时候会需要一个可以是 任意对象 的 类型 来辅助完成功能，它就是 `Obj` 。
+## 任意类型  
+特别的，有时候会需要一个可以是 任意对象 的 类型 来辅助完成功能，它就是 `{}` 。
 
 例如：
 ```
-a :Obj = 1  # 任意类型
+a :{} = 1  # 任意类型
 ```
 ## Nil 空 
 我们需要一个可以是 任意类型空值 的 值 ，所以它就是 `Nil` 。
@@ -137,6 +137,6 @@ Main() -> () {
     d := "hello"
     c := ""d" world"
     e := True
-    f :Obj = False
+    f :{} = False
 }
 ```
