@@ -317,8 +317,12 @@ TestLambda() -> () {
 TestAsync() ~> (x: I32, y: I32, z: Str) {
     Slp(1000)
     @ i <- [1<=10] {
-        Go({ ->
+        Go({ ~> 
+            <~ Dly(1000)
             Prt("task", i)
+        })
+        Go({ -> 
+            <- ("task",i)
         })
     }
     funWait() ~> () {
