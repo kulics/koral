@@ -86,7 +86,7 @@ Main() ~> () {
     } :Bl { 
         Prt("boolean") 
     } () { 
-        Prt("()") 
+        Prt("null") 
     }
 
     # Loop, use identify to take out single item, default is it
@@ -119,14 +119,14 @@ Main() ~> () {
     }
     
     # Package，支持 variable 类型，通常用来包装数据
-    View() -> {
+    View -> {
         Width: I32
         Height: I32
         Background: Str
     }
 
     # 也支持包装方法
-    Button() -> {
+    Button -> {
         Width: I32
         Height: I32
         Background: Str
@@ -140,15 +140,16 @@ Main() ~> () {
         }
     }
 
-    # 可以通过参数标记，让包支持构造方法，默认可以省略
-    Image(w: I32, h: I32, s: Str) {
-        # 构造方法
-        (_Width, _Height, _Source) = (w,h,s)
-    } -> {
+    Image -> {
         # 私有属性，不能被外部访问，也不能被重包装
         _Width := 0
         _Height := 0
         _Source := "" 
+        # 初始化方法
+        Init(w: I32, h: I32, s: Str) -> (v:Image) {  
+            (_Width, _Height, _Source) = (w,h,s)
+            <- (..)
+        }
     }
 
     # Extension ，对某个包扩展，可以用来扩展方法
@@ -167,10 +168,9 @@ Main() ~> () {
     }
 
     # Combine Package，通过引入来复用属性和方法
-    ImageButton() -> {
-        Title: Str # 重名自动覆盖，这会代替包原本的属性
+    ImageButton -> {
         Button: Button    # 通过包含其它包，来组合新的包使用 
-    } View() {
+        Title: Str
     } Animation { # Implement protocol
         Speed := 2
 
@@ -179,25 +179,32 @@ Main() ~> () {
             play( s + t )
         }
     }
+    # 兼容构造和继承
+    ImageButton(w: I32, h: I32) -> Image(w, h , "img") {
+        Title = "img btn"
+    } -> { # 继承View
+        Background: Str # 重名覆盖
+    }
 
     # Create an package object
-    ib := ImageButton()
-    # Calling object property
+    ib := ImageButton{}
+    # Calling property
     ib.Title = "OK"
-    # Calling object method
+    # Calling method
     ib.Button.Show()
-    # Calling object protocol
-    ib.Animation.Move(6)
+    # Calling protocol
+    ib.Move(6)
 
     # Create an object with simple assign
-    ib2 := ImageButton(){
+    ib2 := ImageButton{
         Title="Cancel"，Background="red"
     }
     list := [I32]{1,2,3,4,5}
     map := [[Str]I32]{["1"]1,["2"]2,["3"]3}
 
     # Create an object with params
-    img := Image(30, 20, "./icon.png")
+    img := Image{}.Init(30, 20, "./icon.png")
+    imgBtn := New_ImageButton(1, 1)
 
     # 可以使用 Is<Type>() 判断类型，使用 As<Type>() 来转换包类型
     ? ib.Is<ImageButton>() {
