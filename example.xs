@@ -322,7 +322,7 @@ TestAsync() ~> (x: I32, y: I32, z: Str) {
             Prt("task", i)
         })
         Go({ -> 
-            <- ("task",i)
+            <- ()
         })
     }
     funWait() ~> () {

@@ -613,7 +613,7 @@ namespace Compiler {
             return r;
         }
 
-        public override object VisitFunction([NotNull] FunctionContext context) {
+        public override object VisitFunctionExpression([NotNull] FunctionExpressionContext context) {
             var r = new Result();
             // 异步
             if (context.t.Type == FlowRight) {
