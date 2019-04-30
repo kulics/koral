@@ -228,7 +228,7 @@ linq // 联合查询
 | list // 列表
 | dictionary // 字典
 | lambda // lambda表达式
-| function // 函数
+| functionExpression // 函数
 | pkgAnonymous // 匿名包
 | tupleExpression //元组表达式
 | plusMinus // 正负处理
@@ -327,7 +327,7 @@ pkgAnonymousAssign: blockLeft (pkgAnonymousAssignElement (more pkgAnonymousAssig
 
 pkgAnonymousAssignElement: name '=' expression; // 简化赋值元素
 
-function : anonymousParameterClauseIn t=(ArrowRight|FlowRight) NewLine*
+functionExpression : anonymousParameterClauseIn t=(ArrowRight|FlowRight) NewLine*
 parameterClauseOut blockLeft (functionSupportStatement)* blockRight;
 
 // 入参
