@@ -5,11 +5,11 @@ Therefore, we need a feature that can wrap data of different attributes to bette
 
 Obviously, this feature for package data, called package.
 ## Definition
-We can use the `id() -> {}` statement to define a package that has nothing.
+We can use the `id -> {}` statement to define a package that has nothing.
 
 E.g:
 ```
-Package() -> {
+Package -> {
 }
 ```
 Of course, we hope more is to be able to pack a few data, for example, a name, student number, class, grade attributes of students.
@@ -17,7 +17,7 @@ We can define these data in the same way we define normal identifiers.
 
 E.g:
 ```
-student() -> {
+student -> {
     Name: Str = ""
     Number: Str = ""
     Class: I32 = 0
@@ -31,11 +31,11 @@ Unlike our original base type can only store one data, the student package can s
 This is very much like the concept of assembling different parts together in our reality as a whole, so it is called a package.
 
 ## Create
-So how do we create a new package? As always, all of our types can be created using the construct function `type()`.
+So how do we create a new package? As always, all of our types can be created using the construct function `type{}`.
 
 E.g:
 ```
-peter := student()
+peter := student{}
 ```
 This create a `peter` identifier. All the properties of this student are initialized to `"", "", 0,0` as set in the definition.
 
@@ -61,19 +61,18 @@ peter.Number = "060233"
 peter.Class = 2
 peter.Grade = 6
 ```
-## Simplify creation
+## Construction assignment
 Creating a new package like the one above, and then loading the data one by one, is very cumbersome. We can use a simplified syntax to configure.
-Just add `{}` to the creation grammar to use the `key=value` method to quickly load data. Separate multiple data with `,`.
+
+Add `key=value` to the build syntax and separate the data with `,`.
 
 E.g:
 ```
-peter := student() {
+peter := student{
     Name="peter", Number="060233",
     Class=2, Grade=6
 }
 ```
-
-So the fingers are not so sour.
 
 Similarly, the way the collection is created is actually a simplified creation, so we can also create arrays and dictionaries like this.
 
@@ -107,7 +106,7 @@ We can define private properties to store properties that we do not want to be a
 
 E.g:
 ```
-student() -> {
+student -> {
     ......
     _GirlFriend: Str    # The identifier beginning with this '_' is private
 }
@@ -123,7 +122,7 @@ If we need to make this package come with a function that makes it easy to manip
 
 E.g:
 ```
-student() -> {
+student -> {
     ......
     _GirlFriend: Str
     GetGirlFriend() -> (name: Str) {
@@ -145,45 +144,12 @@ Prt( peter.GetGirlFriend() )
 ```
 As with data attributes, functions can also be private identifiers, and functions that use private identifiers also mean that only the packet can access itself.
 
-## Construct
-Sometimes, we do not want to always create a blank students, in fact, the student number often contains the grade and class information,
-
-We hope that given a name and student number, class and grade information will be automatically created exactly.
-
-This can be achieved using regular functions, but why not use the built-in constructor?
-
-Add parameters at the time of definition, and write the definition of the constructor, which only needs the `{}` statement behind the parameters.
-
-E.g:
-```
-student(name: Str, number: Str) {
-    ..Name = name
-    ..Number = number
-    # calculate the class
-    ..Class = GetSubText(number, 2, 3)
-    # calculate the grade
-    ..Grade = GetSubText(number, 0, 1)
-} -> {
-    ......
-}
-```
-This gives us a package with constructors, and when we create a new student, class and grade data are automatically generated.
-
-E.g:
-```
-peter := student("peter", "060233")
-Prt(peter.Class)     # print out 2
-```
-
-It should be noted that a package can only support one constructor, we recommend to maintain the simplicity of the structure, a stable package easier to be used by the caller,
-
-If you really have more construction requirements, you can use regular functions to accomplish this requirement.
 ## Combination
 Now let us play our imagination, we want a customized package for Chinese students how to define it?
 
 E.g:
 ```
-chineseStudent() -> {
+chineseStudent -> {
     Name: Str = ""
     Number: Str = ""
     Class: I32 = 0
@@ -197,8 +163,8 @@ We need to use a combination of this feature, but not so complicated, just creat
 
 E.g:
 ```
-chineseStudent() -> {
-    Student := student()   # include student attributes in it
+chineseStudent -> {
+    Student := student{}   # include student attributes in it
     Kungfu := False        # no kung fu
 }
 ```
@@ -206,27 +172,73 @@ This way you can use generic attributes via student attributes in Chinese studen
 
 E.g:
 ```
-chen := chineseStudent()
+chen := chineseStudent{}
 Prt(chen.Student.Name)
 # of course, since there is no assignment, nothing is output
 ```
 By combining layers after layer, you are free to assemble whatever you want to describe.
 
-## Inheritance
-If we want to define a new package and fully inherit all the properties of a package, we can use the inheritance syntax, append `id() {}` to the definition.
+## Compatible with .NET
+The following are compatibility features, if not necessary, it is not recommended.
+
+### Inheritance
+If we want to define a new package and fully inherit all the properties of a package, we can use the inheritance syntax, append `{id} {}` to the definition.
 If you want to override the properties of the original package, rewrite it in `{}`.
 
 E.g:
 ```
-chineseStudent() -> {
+chineseStudent -> {
     Kungfu := False
-} student() {   # inhert student
+} {student} {   # inhert student
     # override
     GetGirlFriend() -> (name: Str) {
         <- ("none")
     }
 }
 ```
+
+### Construct
+Sometimes we might use the constructor in .NET.
+
+We can append the `(id:type){}` statement after the definition.
+
+E.g:
+```
+student -> {
+    ......
+} (name: Str, number: Str) {
+    ..Name = name
+    ..Number = number
+    # calculate the class
+    ..Class = GetSubText(number, 2, 3)
+    # calculate the grade
+    ..Grade = GetSubText(number, 0, 1)
+}
+```
+This gives us a package with constructors, and when we create a new student, class and grade data are automatically generated.
+
+We need to use the constructor with the `New<type>()` function.
+
+E.g:
+```
+peter := New<student>("peter", "060233")
+Prt(peter.Class)     # print 2
+```
+
+If you need to use a constructor with inheritance, you can append `...(params)` to the argument syntax.
+
+E.g:
+```
+Parent -> {
+} (a:I32) {
+}
+
+Child -> {
+} (a:I32)...(a) {
+} {Parent} {
+}
+```
+
 ### [Next Chapter](namespace.md)
 
 ## Example of this chapter
@@ -237,21 +249,17 @@ chineseStudent() -> {
 
 Main() -> () {
     a := S{A=5,B=12}
-    b := PKG("hello", 64, a)
+    b := PKG(X="hello", Y=64, Z=a)
     Prt( b.Z.A )
     Prt( b.Print() )
 }
 
-S() -> {
+S -> {
     A := 0
     B := 0
 }
 
-PKG(x: Str, y: I32, z: S) {
-    X = x
-    Y = y
-    Z = z
-} -> {
+PKG -> {
     X := ""
     Y := 0
     Z :S
@@ -259,5 +267,5 @@ PKG(x: Str, y: I32, z: S) {
     Print() -> (a: Str) {
         <- ( "X {Y}" )
     }
-}
+} 
 ```
