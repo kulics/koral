@@ -53,8 +53,8 @@ namespace Compiler {
                 obj.imports += (string)Visit(item);
             }
             // 处理构造函数
-            if (context.packageInitStatement() != null) {
-                obj.init += Visit(context.packageInitStatement());
+            if (context.namespaceInitStatement() != null) {
+                obj.init += Visit(context.namespaceInitStatement());
             }
             return obj;
         }
@@ -118,6 +118,10 @@ namespace Compiler {
                 }
             }
             return obj;
+        }
+
+        public override object VisitNamespaceInitStatement([NotNull] NamespaceInitStatementContext context) {
+            return ProcessFunctionSupport(context.functionSupportStatement());
         }
 
         public override object VisitEnumStatement([NotNull] EnumStatementContext context) {

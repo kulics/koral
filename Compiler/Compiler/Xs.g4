@@ -6,8 +6,10 @@ statement: (annotationSupport)? CommentLine*
 exportStatement (CommentLine|NewLine)* namespaceSupportStatement*;
 
 // 导出命名空间
-exportStatement: '\\' nameSpace (packageInitStatement)?  ArrowLeft blockLeft (importStatement|NewLine)* blockRight end;
+exportStatement: '\\' nameSpace (namespaceInitStatement)?  ArrowLeft blockLeft (importStatement|NewLine)* blockRight end;
 
+// 命名空间初始化方法
+namespaceInitStatement: blockLeft (functionSupportStatement)* blockRight;
 // 导入命名空间
 importStatement: (annotationSupport)? nameSpace (call NewLine? id)? end;
 
@@ -39,11 +41,11 @@ namespaceFunctionStatement:(annotationSupport)? id (templateDefine)? parameterCl
 parameterClauseOut blockLeft (functionSupportStatement)* blockRight end;
 
 // 定义包
-packageStatement:(annotationSupport)? id (templateDefine)? parameterClausePackage (packageInitStatement)? 
- ArrowRight blockLeft (packageSupportStatement)* blockRight 
- (extend packageOverrideStatement)? (protocolImplementStatement)* end;
-// 继承
-extend: type bracketLeft expressionList? bracketRight;
+packageStatement:(annotationSupport)? id (templateDefine)? ArrowRight blockLeft (packageSupportStatement)* blockRight 
+ (packageNewStatement)* (blockLeft type blockRight packageOverrideStatement)? (protocolImplementStatement)* end;
+// 包构造方法
+packageNewStatement: (annotationSupport)? parameterClausePackage 
+('...' bracketLeft expressionList? bracketRight)? blockLeft (functionSupportStatement)* blockRight;
 // 入参
 parameterClausePackage : bracketLeft parameter? (more parameter)* bracketRight;
 // 包支持的语句
@@ -54,8 +56,6 @@ packageVariableStatement
 |CommentLine
 |NewLine
 ;
-// 包构造方法
-packageInitStatement:(annotationSupport)? blockLeft (functionSupportStatement)* blockRight;
 // 函数
 packageFunctionStatement:(annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) NewLine*
 parameterClauseOut blockLeft (functionSupportStatement)* blockRight end;
