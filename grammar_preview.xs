@@ -85,6 +85,8 @@ Main() ~> () {
         Prt("float") 
     } :Bl { 
         Prt("boolean") 
+    } :{} {
+        Prt("object")
     } () { 
         Prt("null") 
     }
