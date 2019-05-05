@@ -470,7 +470,7 @@ increment(7)
 ## Classes Declaration
 ### Xs
 ```
-Shape() -> {
+Shape -> {
     NumberOfSides := 0
     SimpleDescription() -> (s: Str) {
         <- ("A shape with " NumberOfSides " sides.")
@@ -525,7 +525,7 @@ class Shape(object):
 ## Classes Usage
 ### Xs
 ```
-shape := Shape()
+shape := Shape{}
 shape.NumberOfSides = 7
 shapeDescription := shape.SimpleDescription()
 ```
@@ -562,9 +562,7 @@ shapeDescription = shape.simpleDescription()
 ## Subclass
 ### Xs
 ```
-NamedShape(name: Str) {
-    ..Name = name
-} -> {
+NamedShape -> {
     Name: Str
     NumberOfSides: I32 = 0
 
@@ -573,22 +571,27 @@ NamedShape(name: Str) {
     }
 }
 
-Square(sideLength: F64, name: Str) {
-    ..NumberOfSides = 4
-    ..SideLength = sideLength
-} -> {
+Square -> {
+    NamedShape
     SideLength: F64
+
+    Init(sideLength:F64, name:Str) -> (v:Square) {
+        ..SideLength = sideLength
+        ..NumberOfSides = 4
+        ..Name = name
+        <- (..)
+    }
 
     Area() -> (f: F64) {
         <- (SideLength ** 2)
     }
-} NamedShape(name) {
+
     SimpleDescription() -> (s: Str) {
         <- ("A square with sides of length " SideLength ".")
     }
 }
 
-test := Square(5.2, "square")
+test := Square{}.Init(5.2, "square")
 test.Area()
 test.SimpleDescription()
 ```
@@ -1009,7 +1012,7 @@ func f(x: Nameable) {
 ## Implement
 ### Xs
 ```
-Dog() -> {
+Dog -> {
 } Nameable {
     Name() -> (n: Str) {
         <- ("Dog")
