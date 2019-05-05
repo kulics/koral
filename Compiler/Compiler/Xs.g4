@@ -221,6 +221,7 @@ linq // 联合查询
 | callSelf // 调用自己
 | callNameSpace // 调用命名空间
 | callElement //调用元素
+| callNew // 构造类对象
 | callPkg // 新建包
 | getType // 获取类型
 | callAwait // 异步等待调用
@@ -272,10 +273,9 @@ callFunc: id (templateCall)? tuple; // 函数调用
 
 callElement : id op=(Judge|Check)? '[' (expression | slice) ']';
 
-callPkg: 
-type blockLeft (pkgAssign|listAssign|dictionaryAssign) blockRight 
-// | type bracketLeft NewLine? expressionList? NewLine? bracketRight
-| type bracketLeft NewLine? expressionList? NewLine? bracketRight blockLeft (pkgAssign|listAssign|dictionaryAssign) blockRight ; // 新建包
+callPkg: type blockLeft (pkgAssign|listAssign|dictionaryAssign) blockRight; // 新建包
+
+callNew: 'New<' NewLine? type NewLine? '>' bracketLeft NewLine? expressionList? NewLine? bracketRight; // 构造类对象
 
 getType: Judge bracketLeft (expression|':' type) bracketRight;
 
