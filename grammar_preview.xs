@@ -180,11 +180,9 @@ Main() ~> () {
             t := 5000/s
             play( s + t )
         }
-    }
-    # 兼容构造和继承
-    ImageButton(w: I32, h: I32) -> Image(w, h , "img") {
+    } (w: I32, h: I32)...(w, h , "img") {
         Title = "img btn"
-    } -> { # 继承View
+    } {Image} { # 继承View
         Background: Str # 重名覆盖
     }
 
@@ -206,7 +204,7 @@ Main() ~> () {
 
     # Create an object with params
     img := Image{}.Init(30, 20, "./icon.png")
-    imgBtn := New_ImageButton(1, 1)
+    imgBtn := New<ImageButton>(1, 1)
 
     # 可以使用 Is<Type>() 判断类型，使用 As<Type>() 来转换包类型
     ? ib.Is<ImageButton>() {
@@ -240,13 +238,13 @@ Main() ~> () {
 
     # Annotation 
     [assemby: Table("user"), D(False,Name="d",Hide=True)]
-    User() -> {
+    User -> {
         [Column("id"), Required, Key]
-        Id: Str
+        Id(): Str
         [Column("nick_name"), Required]
-        NickName: Str
+        NickName(): Str
         [Column("time_update"), Required]
-        TimeUpdate: I32
+        TimeUpdate(): I32
     }
 
     # Pointer Type
@@ -261,7 +259,7 @@ Main() ~> () {
     f := a.Def(128)
     
     # Generic package
-    Table<T>() -> {
+    Table<T> -> {
         Data: T
 
         SetData(d: T) -> () {
@@ -288,12 +286,12 @@ Main() ~> () {
     arr := from id in expr where expr order expr select expr
 
     # event
-    EventHandle() -> {
+    EventHandle -> {
         PropertyChanged: Event<PropertyChangedEventHandler>
     }
 
     # control
-    Data() -> {
+    Data -> {
         B() := 0
         C(): I32 {get;set;}
 
@@ -325,10 +323,7 @@ Main() ~> () {
 }
 Num: I32
 Txt: Str
-Class() {
-    Num = 1
-    Txt = "123"
-} -> {
+Class -> {
     Num: I32
     Txt: Str
     FuncInClass() -> () {
@@ -336,15 +331,15 @@ Class() {
     }
 }
 Func() -> () {
-    ClassInFunc() -> {
+    ClassInFunc -> {
         Num: I32
         Txt: Str
         Func() -> () {
         } 
     }
-    UseProtocol(Class())
+    UseProtocol(Class{})
 }
-Protocol() -> {
+Protocol -> {
     FuncInClass() -> () {
     }
 }
