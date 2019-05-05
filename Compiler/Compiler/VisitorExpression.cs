@@ -382,11 +382,7 @@ namespace Compiler {
             var r = new Result {
                 data = Visit(context.type())
             };
-            var param = "";
-            if (context.expressionList() != null) {
-                param = ((Result)Visit(context.expressionList())).text;
-            }
-            r.text = $"(new {Visit(context.type())}({param})";
+            r.text = $"(new {Visit(context.type())}()";
             if (context.pkgAssign() != null) {
                 r.text += Visit(context.pkgAssign());
             }
@@ -396,6 +392,22 @@ namespace Compiler {
             if (context.dictionaryAssign() != null) {
                 r.text += Visit(context.dictionaryAssign());
             }
+            r.text += ")";
+            return r;
+        }
+
+        public override object VisitCallNew([NotNull] CallNewContext context)
+        {
+            var r = new Result
+            {
+                data = Visit(context.type())
+            };
+            var param = "";
+            if (context.expressionList() != null)
+            {
+                param = ((Result)Visit(context.expressionList())).text;
+            }
+            r.text = $"(new {Visit(context.type())}({param})";
             r.text += ")";
             return r;
         }

@@ -4,13 +4,13 @@
 }
 
 Main() -> () {
-    n0 := Node(0){}
-    n1 := Node(1){}
-    n2 := Node(2){}
-    n3 := Node(3){}
-    n4 := Node(4){}
-    n5 := Node(5){}
-    n6 := Node(6){}
+    n0 := New<Node>(0)
+    n1 := New<Node>(1)
+    n2 := New<Node>(2)
+    n3 := New<Node>(3)
+    n4 := New<Node>(4)
+    n5 := New<Node>(5)
+    n6 := New<Node>(6)
 
     n0.Left = n1
     n0.Right = n2
@@ -46,7 +46,7 @@ Main() -> () {
     }
 
     Prt("oop")
-    app := App("test", "Windows"){}
+    app := New<App>("test", "Windows")
     app.Start()
     app.Stop()
     Shutdown(app)
@@ -87,7 +87,9 @@ InverseNode(node: Node!) -> (node: Node!) {
     node.Left = InverseNode(node.Left)
     node.Right = InverseNode(node.Right)
 
-    temp := Node(node.Value){Left = node.Right, Right = node.Left}
+    temp := New<Node>(node.Value)
+    temp.Left = node.Right
+    temp.Right = node.Left
     <- (temp)
 }
 
