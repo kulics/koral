@@ -36,7 +36,7 @@ homeWork <- {
 
 例如：
 ```
-student() -> {
+student -> {
     ......
 } homeWork {
     Count(): I32
@@ -79,9 +79,9 @@ Prt( peter.Count )
 例如:
 ```
 # 创建了三个不同类型的学生包
-StudentA := chineseStudent()
-StudentB := americaStudent()
-StudentC := japaneseStudent()
+StudentA := chineseStudent{}
+StudentB := americaStudent{}
+StudentC := japaneseStudent{}
 # 让他们分别做作业
 StudentA.Do()
 StudentB.Do()
@@ -151,7 +151,7 @@ A <- {
     Do() -> () {}
 }
 
-B() -> {
+B -> {
     Y := 5
 } A {
     X() := 0

@@ -36,7 +36,7 @@ We can implement this protocol by using the `protocol {}` statement after the pa
 
 E.g:
 ```
-student() -> {
+student -> {
     ......
 } homeWork {
     Count(): I32
@@ -79,9 +79,9 @@ Now we can create a wide variety of students, all of whom follow the same protoc
 E.g:
 ```
 # create three different types of student packages
-StudentA := chineseStudent()
-StudentB := americaStudent()
-StudentC := japanStudent()
+StudentA := chineseStudent{}
+StudentB := americaStudent{}
+StudentC := japanStudent{}
 # let them do homework separately
 StudentA.Do()
 StudentB.Do()
@@ -151,7 +151,7 @@ A <- {
     Do() -> () {}
 }
 
-B() -> {
+B -> {
     Y := 5
 } A {
     X() := 0

@@ -18,7 +18,7 @@ System\ComponentModel\DataAnnotations
 例如：
 ```
 [Table("test")]
-annotation() -> {
+annotation -> {
         [Key,Column("id")]
         ID(): Str = ""
         [Column("name")]
