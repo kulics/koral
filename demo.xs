@@ -175,21 +175,19 @@ Shutdown(ctrl: Control) -> () {
     ctrl.Shutdown()
 }
 
-Node(value: I32) {
-    Value = value
-} -> {
+Node -> {
     Value: I32
     Left: Node!
     Right: Node!
+} (value: I32) {
+    Value = value
 }
 
 Control <- {
     Shutdown() -> ()
 }
 
-Program(name: Str) {
-    Name = name
-} -> {
+Program -> {
     Name: Str
     _Running := False
 
@@ -202,6 +200,8 @@ Program(name: Str) {
         Prt("Stop")
         _Running = False
     }
+} (name: Str) {
+    Name = name
 } Control {
     Shutdown() -> () {
         Prt("Shutdown")
@@ -209,9 +209,9 @@ Program(name: Str) {
     }
 }
 
-App(name: Str, platform: Str) {
-    Platform = platform
-} -> {
+App -> {
     Platform: Str
-} Program(name) {
+} (name: Str, platform: Str)...(name) {
+    Platform = platform
+} {Program} {
 }

@@ -6,18 +6,6 @@ namespace Compiler
 {
     internal partial class Visitor
     {
-        public override object VisitExtend([NotNull] ExtendContext context) {
-            var r = new Result {
-                data = Visit(context.type())
-            };
-            r.text += "(";
-            if (context.expressionList() != null) {
-                r.text += (Visit(context.expressionList()) as Result).text;
-            }
-            r.text += ")";
-            return r;
-        }
-
         public override object VisitPackageExtensionStatement([NotNull] PackageExtensionStatementContext context) {
             var id = (Result)Visit(context.id());
             var obj = "";
@@ -43,28 +31,21 @@ namespace Compiler
             var Init = "";
             var extend = "";
 
-            if (context.extend() != null) {
-                extend = (string)((Result)Visit(context.extend())).data;
+            if (context.type() != null) {
+                extend = (string)Visit(context.type());
             }
-            // 获取构造数据
-            var paramConstructor = (string)Visit(context.parameterClausePackage());
-            Init += "public " + id.text + paramConstructor;
-            // 加载继承
-            if (context.extend() != null) {
-                Init += " :base " + ((Result)Visit(context.extend())).text;
+
+            // 处理构造函数
+            foreach (var item in context.packageNewStatement())
+            {
+                Init += "public " + id.text + " " + (string)Visit(item);
             }
-            Init += BlockLeft;
             foreach (var item in context.packageSupportStatement()) {
                 obj += Visit(item);
             }
             if (context.packageOverrideStatement() != null) {
                 obj += (string)Visit(context.packageOverrideStatement());
             }
-            // 处理构造函数
-            if (context.packageInitStatement() != null) {
-                Init += Visit(context.packageInitStatement());
-            }
-            Init += BlockRight;
             obj = Init + obj;
             obj += BlockRight + Terminate + Wrap;
             var header = "";
@@ -284,8 +265,15 @@ namespace Compiler
             return obj;
         }
 
-        public override object VisitPackageInitStatement([NotNull] PackageInitStatementContext context) {
-            return ProcessFunctionSupport(context.functionSupportStatement());
+        public override object VisitPackageNewStatement([NotNull] PackageNewStatementContext context) {
+            var text = "";
+            // 获取构造数据
+            text = (string)Visit(context.parameterClausePackage());
+            if (context.expressionList() != null) {
+                text += ":base(" + (Visit(context.expressionList()) as Result).text + ")" ;
+            }
+            text += BlockLeft + ProcessFunctionSupport(context.functionSupportStatement()) + BlockRight + Wrap;
+            return text;
         }
 
         public override object VisitProtocolImplementStatement([NotNull] ProtocolImplementStatementContext context) {

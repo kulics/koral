@@ -347,19 +347,19 @@ ConstFunction() -> (v: I32) {
     <- (ConstData) 
 }
 
-InPackageArray() {
-    Arr = {1,2,3,4,5,6,7}
-} -> {
+InPackageArray -> {
     Arr: [I32]
+} () {
+    Arr = {1,2,3,4,5,6,7}
 }
 
-Defer() -> {
+Defer -> {
     Data := ""
 } IDisposable {
     Dispose() -> () {}
 }
 
-App() -> { 
+App -> { 
     I := 555
     Arr := {1,1,1,1}
     _PriName := " Program "
@@ -378,7 +378,7 @@ App() -> {
     TestFuncTemplate<T1, T2>(data1: T1, data2: T2) -> (data: App) {
         <- (..)
     }
-} Program() {  
+} {Program} {  
 } Protocol {
     B(): I32 {
         get { 
@@ -405,13 +405,13 @@ App() -> {
     F(): Str = "get"
 } 
 
-Result(data: Str) {
-    ..Data = data
-} -> {
+Result -> {
     Data: Str
+} (data: Str) {
+    ..Data = data
 }
 
-TestPackageTemplate<T:class>() -> {
+TestPackageTemplate<T:class> -> {
     Data: T
 
     Generic(a: T) -> () {}
@@ -422,13 +422,13 @@ TestProtocolTemplate<T:class> <- {
     Test(in: T) -> ()
 }
 
-TestImplementTemplate() -> {
+TestImplementTemplate -> {
 } TestProtocolTemplate<TestImplementTemplate> {
     Test(in: TestImplementTemplate) -> () {}
     Test<H:class>(in: H) -> () {}
 }
 
-Program() -> {
+Program -> {
     Name(): Str = "name" {
         set { 
             _Name = value 
@@ -447,7 +447,7 @@ Protocol <- {
 }
 
 [Table("test")]
-TestAnnotation() -> {
+TestAnnotation -> {
     [Key, Column("id")]
     Id(): Str
     [Column("nick_name")]
@@ -461,17 +461,17 @@ TestEnum -> [
     Err = -1
 ]
 
-Package(y: I32 = 3) {
-    X = ConstData
-    Y = y
-} -> {
+Package -> {
     X: I32
     Y: I32
+} (y: I32 = 3) {
+    X = ConstData
+    Y = y
 }
 
-PackageChild(x: I32, y: I32) {
-    X = x
-} -> {
+PackageChild -> {
     X: I32
-} Package(y) {
+} (x: I32, y: I32)...(y) {
+    X = x
+} {Package} {
 }
