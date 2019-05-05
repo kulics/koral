@@ -124,11 +124,11 @@ Main() -> () {
     }
 }
 
-Defer() -> {
+Defer -> {
     Content: Str
 } IDisposable {
     Dispose() -> () {
-        ..Content = ""
+        Content = ""
     }
 }
 ```

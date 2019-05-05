@@ -11,7 +11,7 @@ This is a simplified implementation.
 
 E.g:
 ```
-List<T>() -> {
+List<T> -> {
     Items := Storage{T}    # create storage
     Length := 0
 
@@ -46,7 +46,7 @@ This way we can use it in generics.
 
 E.g:
 ```
-Package<T>() -> {
+Package<T> -> {
     Item := Def<T>()    # initialized a default value of the generic data
 }
 ```
@@ -56,7 +56,7 @@ Very simple, and we can use the same statement, but called when the need to impo
 
 E.g:
 ```
-listNumber := List<I32>()  # pass in the number type
+listNumber := List<I32>{}  # pass in the number type
 ```
 So we have an List of number types, is like this:
 ```
@@ -76,8 +76,7 @@ Protocol<T> <- {
     Test<T>(in: T) -> () {}
 }
 
-Implement() -> {
-
+Implement -> {
 } Protocol<Implement> {
     Test<Implement>(in: Implement) -> () {
         
@@ -89,7 +88,7 @@ If we need to constrain the type of generics, we only need to use the `T:id` syn
 
 E.g:
 ```
-Package<T:Student>() -> {
+Package<T:Student> -> {
 }
 ```
 ### [Next Chapter](annotation.md)

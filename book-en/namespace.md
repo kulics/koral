@@ -57,8 +57,7 @@ Main() -> () {
 }
 ```
 ## NameSpace Construct
-If there are some attributes, we also need some initialization operations, as well as the use of constructors.
-The grammar is consistent with the constructor.
+If there are some attributes, we need some initialization operations, as well as the use of initialization syntax.
 
 E.g:
 ```

@@ -4,12 +4,12 @@
 
 例如：
 ```
-A() -> {
+A -> {
     Number: I32
     Function() -> (){}
 }
 
-B() -> {
+B -> {
     Number: I32
     Text: Str
     Function() -> (){}
@@ -20,6 +20,6 @@ main() -> () {
         a.Function()
     }
 
-    use( B() )
+    use( B{} )
 }
 ```

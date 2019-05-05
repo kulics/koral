@@ -12,8 +12,8 @@
 
 例如：
 ```
-List<T>() -> {
-    Items := Storage(T)    # 创建存储
+List<T> -> {
+    Items := Storage{T}    # 创建存储
     Length := 0
 
     Get(index: I32) -> (item: T) { # 获取某个泛型数据
@@ -47,7 +47,7 @@ z := Def<()->()>()
 
 例如：
 ```
-Package<T>() -> {
+Package<T> -> {
     Item := Def<T>()    # 初始化了一个缺省值的泛型数据
 }
 ```
@@ -57,7 +57,7 @@ Package<T>() -> {
 
 例如：
 ```
-listNumber := List<I32>()      # 传入 integer 类型
+listNumber := List<I32>{}      # 传入 integer 类型
 ```
 这样我们便拥有了一个整数类型的列表，是不是很像这个：
 ```
@@ -77,8 +77,7 @@ Protocol<T> <- {
     Test<T>(in: T) -> () {}
 }
 
-Implement() -> {
-
+Implement -> {
 } Protocol<Implement> {
     Test<Implement>(in: Implement) -> () {
         
@@ -90,7 +89,7 @@ Implement() -> {
 
 例如：
 ```
-Package<T:Student>() -> {
+Package<T:Student> -> {
 }
 ```
 ### [下一章](annotation.md)

@@ -4,12 +4,12 @@ When a package has all the attributes of another package, then the two packages 
 
 E.g:
 ```
-A() -> {
+A -> {
     Number: I32
     Function() -> (){}
 }
 
-B() -> {
+B -> {
     Number: I32
     Text: Str
     Function() -> (){}
@@ -20,6 +20,6 @@ main() -> () {
         a.Function()
     }
 
-    use( B() )
+    use( B{} )
 }
 ```
