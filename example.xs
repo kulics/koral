@@ -1,6 +1,4 @@
-\Xs {
-    StaticG = Readonly.V
-} <- {
+\Xs <- {
     System
     System\IO
     System\Linq

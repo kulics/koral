@@ -55,17 +55,6 @@ Main() -> () {
     Prt( \Name\Space.Code.GetSomething() )    
 }
 ```
-## 命名空间初始化
-如果有些属性我们也需要进行一些初始化操作，可以使用初始化语法。
-
-例如：
-```
-\Demo {
-    ShareData = 128 
-} <- {}
-
-ShareData: I32
-```
 
 ## [进阶](./control-type.md)
 ## [返回目录](./introduction.md)

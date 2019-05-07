@@ -56,17 +56,6 @@ Main() -> () {
     Prt( \Name\Space.Code.GetSomething() )    
 }
 ```
-## NameSpace Construct
-If there are some attributes, we need some initialization operations, as well as the use of initialization syntax.
-
-E.g:
-```
-\Demo {
-    ShareData = 128 
-} <- {}
-
-ShareData: I32
-```
 
 ## [Advanced](./control-type.md)
 ## [Back to index](./introduction.md)
