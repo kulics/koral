@@ -43,6 +43,14 @@ Main() ~> () {
 
     p.TestFuncTemplate<I32, Str>(1, "2").TestPackage()
     
+    @ True {
+        <- @
+    }
+    
+    ? 1 == 1 {
+        Prt("test exception expression")
+    }
+
     Rd()
 }
 

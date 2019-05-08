@@ -223,7 +223,6 @@ linq // 联合查询
 | callPkg // 新建包
 | getType // 获取类型
 | callAwait // 异步等待调用
-// | array // 数组
 | list // 列表
 | dictionary // 字典
 | lambda // lambda表达式
@@ -271,23 +270,21 @@ callFunc: id (templateCall)? tuple; // 函数调用
 
 callElement : id op=(Judge|Check)? '[' (expression | slice) ']';
 
-callPkg: type blockLeft (pkgAssign|listAssign|dictionaryAssign) blockRight; // 新建包
+callPkg: type blockLeft (pkgAssign|listAssign|dictionaryAssign)? blockRight; // 新建包
 
 callNew: 'New<' NewLine? type NewLine? '>' bracketLeft NewLine? expressionList? NewLine? bracketRight; // 构造类对象
 
 getType: Judge bracketLeft (expression|':' type) bracketRight;
 
-pkgAssign: (pkgAssignElement (more pkgAssignElement)*)? ; // 简化赋值
+pkgAssign: pkgAssignElement (more pkgAssignElement)* ; // 简化赋值
 
 pkgAssignElement: name Assign expression; // 简化赋值元素
 
-listAssign: (expression (more expression)*)? ;
+listAssign: expression (more expression)* ;
 
-dictionaryAssign: (dictionaryElement (more dictionaryElement)*)? ;
+dictionaryAssign: dictionaryElement (more dictionaryElement)* ;
 
 callAwait: FlowLeft expression; // 异步调用
-
-// array : 'ArrOf' blockLeft (expression (more expression)*)? blockRight; // 数组
 
 list : blockLeft expression (more expression)* blockRight; // 列表
 
@@ -337,11 +334,11 @@ plusMinus : add expression;
 
 negate : wave expression;
 
-linq: linqHeadKeyword expression (linqItem)+ k=('by'|'select') expression;
+linq: linqHeadKeyword NewLine? expression NewLine? (linqItem)+ k=('by'|'select') NewLine? expression;
 
-linqItem: linqBodyKeyword | expression ;
+linqItem: linqBodyKeyword NewLine? | expression NewLine? ;
 
-linqKeyword: linqHeadKeyword | linqBodyKeyword | NewLine;
+linqKeyword: linqHeadKeyword | linqBodyKeyword ;
 linqHeadKeyword: k='from';
 linqBodyKeyword: k=('where'|'select'|'group'|'into'|'orderby'|'join'|'let'|'in'|'on'|'equals'|'by'|'ascending'|'descending') ;
 
