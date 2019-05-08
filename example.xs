@@ -190,7 +190,7 @@ TestArray() -> () {
     arrArr := {{1,1,1}, {1,1,1}}
     arrEmpty := [I32]{}
     arrType := {1,2,3}
-    array: Arr<I32> = ArrOf(1,2,3)
+    array: I32[] = ArrOf(1,2,3)
     @ item <- arrNumber {
         Prt(item)
     }

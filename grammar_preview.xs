@@ -35,7 +35,7 @@ Main() ~> () {
     dic := [[Str]Bl]{ ["1"]False, ["2"]True}
     Prt( dic["1"] ) # 使用key获取
 
-    arr: Arr<I32> = ArrOf(1,2,3)
+    arr: I32[] = ArrOf(1,2,3)
     # Anonymous Package
     new := {
         Title = "nnn",

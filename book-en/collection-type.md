@@ -23,12 +23,12 @@ For example we need a string list:
 list := [Str]{}         # empty List
 ```
 #### Array
-If we need to use the native Array type, we can use `Arr<type>` to represent it.
+If we need to use the native Array type, we can use `type[]` to represent it.
 It can also be created directly using `ArrOf(e1,e2,e3)`.
 
 E.g:
 ```
-arr := Arr<I32>{}
+arr := I32[]{}
 arr2 := ArrOf(1,2,3,4,5)
 ```
 ### Visit

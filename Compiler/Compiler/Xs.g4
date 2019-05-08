@@ -364,7 +364,6 @@ t=Float
 typeNotNull:
 typeTuple
 | typeList
-| typeArray
 | typeDictionary
 | typeBasic
 | typePackage
@@ -373,11 +372,10 @@ typeTuple
 ;
 
 typeNullable : typeNotNull Check;
-type : typeNotNull | typeNullable;
+type : typeNotNull | typeNullable | type '[]';
 
 typeTuple : bracketLeft type (more type)+ bracketRight;
 typeList : '[' type ']';
-typeArray : 'Arr<' type  '>';
 typeDictionary :  '[' '[' type ']' type ']';
 typePackage : nameSpaceItem (templateCall)? ;
 typeFunction : typeFunctionParameterClause ArrowRight NewLine* typeFunctionParameterClause;
