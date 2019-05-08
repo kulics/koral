@@ -5,7 +5,7 @@
     System\ComponentModel\DataAnnotations\Schema
     System\ComponentModel\DataAnnotations
 
-    Xs.example
+    Xs.Xs
 }
 
 ## 
