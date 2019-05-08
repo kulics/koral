@@ -166,7 +166,7 @@ count = i + int(f)
 ## Inclusive Range Operator
 ### Xs
 ```
-@ index <- [ 1 <= 5 ] {
+[ 1 <= 5 ] @ index {
     Prt("" index " times 5 is " index * 5 "")
 }
 ```
@@ -766,8 +766,8 @@ test.simpleDescription()
 MovieCount := 0
 SongCount := 0
 
-@ item <- library {
-    ? item -> :Movie {
+library @ item {
+    item ? :Movie {
         MovieCount += 1
     } :Song {
         SongCount += 1
@@ -845,7 +845,7 @@ for item in library:
 ### Xs
 ```
 nb := 42
-? nb -> [0<=7], 8, 9 { 
+nb ? [0<=7], 8, 9 { 
     Prt("single digit") 
 } 10 { 
     Prt("double digits") 
@@ -906,8 +906,8 @@ switch nb {
 ## Downcasting
 ### Xs
 ```
-@ current <- someObjects {
-    ? current -> movie:Movie {
+someObjects @ current {
+    current ? movie:Movie {
         Prt("Movie: '" movie.name "', " +
             "dir. " movie.director "")
     }
