@@ -40,11 +40,11 @@ i := 3
 
 This can be considered as an `if elseif else` structure relative to other languages.
 # Condition Judgment
-If we need to judge an identifier, we can use the `? value -> case {}` statement, the statement implements multiple conditional matching, and the matching condition is used to execute the corresponding logic, so that it will only execute the statement with successful matching.
+If we need to judge an identifier, we can use the `value ? case {}` statement, the statement implements multiple conditional matching, and the matching condition is used to execute the corresponding logic, so that it will only execute the statement with successful matching.
 
 E.g:
 ```
-? i -> 1 {
+i ? 1 {
     ......
 } 2 {
     ......
@@ -59,7 +59,7 @@ What if you need a default condition to execute logic? We can use an anonymous i
 
 E.g:
 ```
-? i -> 1 {
+i ? 1 {
     ......
 } 2 {
     ......
@@ -73,11 +73,11 @@ This can be thought of as the `switch case default` structure relative to other 
 
 ### Pattern Matching
 Conditional judgment can do more, for example, we need to judge the type of the identifier,
-You can use the `? value -> id:type{}` syntax to match types, `id` can be omitted.
+You can use the `value ? id:type{}` syntax to match types, `id` can be omitted.
 
 E.g:
 ```
-? x -> :I32 {       # When I32
+x ? :I32 {       # When I32
      Prt("I32")
 } content:Str {     # when Str
      Prt(content)
@@ -112,7 +112,7 @@ Main() -> () {
     }
 
     b := 7
-    ? b -> 5 { 
+    b ? 5 { 
         Prt(5) 
     } 7 { 
         Prt(7) 

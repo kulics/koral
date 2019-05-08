@@ -106,7 +106,7 @@ E.g:
 arr := [homeWork]{}
 arr.add( StudentA )
 ...... # stuffed many, many students
-@ i <- arr {
+arr @ i {
     doHomeWork(i)
 }
 ```

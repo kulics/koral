@@ -134,7 +134,7 @@ Function In Parameter no special definition of way, just replace the type of the
 E.g:
 ```
 each1To10(func: (I32) -> () ) -> () {
-    @ i <- [1<=10] {
+    [1<=10] @ i {
         func(i)
     }
 }
@@ -214,7 +214,7 @@ D(fn: () -> () ) -> () {
 }
 
 E(fn: (I32) -> () ) -> () {
-    @ i <- [1<=20] {
+    [1<=20] @ i {
         fn(i)
     }
 }

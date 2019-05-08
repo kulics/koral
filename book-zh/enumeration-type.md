@@ -18,7 +18,7 @@ Color -> [
 例如：
 ```
 c := randomColor()     # 获取一个随机颜色
-? c -> Color.Red {
+c ? Color.Red {
     ......
 } Color.Green {
     ......

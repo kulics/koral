@@ -3,12 +3,12 @@ Sometimes, we may need to execute the same code multiple times.
 
 Under normal circumstances, the statement is executed in order, the first statement in the function first, followed by the second statement, and so on.
 ## Collection Loop
-If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can use the `@ id <- value {}` statement to iterate over the collection, taking each element out of `id`.
+If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can use the `value @ id {}` statement to iterate over the collection, taking each element out of `id`.
 
 E.g:
 ```
 arr := {1, 2, 3, 4, 5}
-@ item <- arr {
+arr @ item {
     Prt(item)     # print each number
 }
 ```
@@ -17,7 +17,7 @@ If we need to fetch the index and value at the same time, we can replace `id` wi
 
 E.g:
 ```
-@ [i]v <- arr  {
+arr @ [i]v {
     Prt(""i":"v"")
 }
 ```
@@ -30,7 +30,7 @@ Iterators can loop from the start point to the end point, we use the collection 
 
 E.g:
 ```
-@ i <- [0 <= 100] {
+[0 <= 100] @ i <- {
     Prt(i)      # print each number
 }
 ```
@@ -42,7 +42,7 @@ By default, iterators add `1` to each interval. If we need to take every other n
 
 E.g:
 ```
-@ i <- [0 <= 100, 2] {
+[0 <= 100, 2] @ i {
     ......
 }
 ```
@@ -52,7 +52,7 @@ We can also reverse it in reverse order, as long as we use `>=`.
 
 E.g:
 ```
-@ i <- [100 >= 0] {
+[100 >= 0] @ i {
      ......    # from 100 to 0
 }
 ```
@@ -105,15 +105,15 @@ If you only need to jump out of the current loop, use the `-> @` statement.
 
 Main() -> () {
     arr := {1,2,3,4,5}
-    @ i <- arr {
+    arr @ i {
         Prt(i)
     }
 
-    @ i <- [1 <= 50] {
+    [1 <= 50] @ i {
         Prt(i)
     }
 
-    @ [i]v <- [100 >= 0, 2] {
+    [100 >= 0, 2] @ [i]v {
         Prt(i, v)
     }
 
