@@ -314,10 +314,7 @@ Main() ~> () {
 
 # The Future
 
-\Namespace {
-    Num = 1
-    Txt = "123"
-} <- {
+\Namespace <- {
     System
     System\IO
 }
