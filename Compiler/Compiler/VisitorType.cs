@@ -16,7 +16,12 @@ namespace Compiler {
         public override object VisitTypeNullable([NotNull] TypeNullableContext context) {
             var obj = "";
             obj = Visit(context.typeNotNull()) as string;
-            obj += "?";
+            if (context.typeNotNull().GetChild(0) is TypeBasicContext &&
+                context.typeNotNull().GetChild(0).GetText() != "{}" &&
+                context.typeNotNull().GetChild(0).GetText() != "Str")
+            {
+                obj += "?";
+            }
             return obj;
         }
 
