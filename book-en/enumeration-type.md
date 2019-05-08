@@ -18,7 +18,7 @@ In this way, we don't need to care about their values when we use them, and we c
 E.g:
 ```
 c := randomColor()     # Get a random color
-? c -> Color.Red {
+c ? Color.Red {
      ......
 } Color.Green {
      ......

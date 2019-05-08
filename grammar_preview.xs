@@ -68,7 +68,7 @@ Main() ~> () {
     }
 
     # pattern match
-    ? x -> [0<6] {
+    x ? [0<6] {
         doSomeThingA()
     } 14 {
         doSomeThingB()
@@ -77,7 +77,7 @@ Main() ~> () {
     }
 
     # type match
-    ? object -> :Str { 
+    object ? :Str { 
         Prt("string") 
     } :I32 { 
         Prt("integer") 
@@ -92,19 +92,19 @@ Main() ~> () {
     }
 
     # Loop, use identify to take out single item, default is it
-    @ item <- array {
+    array @ item {
         Prt(item)
     }
     # take index and value, both worked at Dictionary
-    @ [index]value <- array {
+    array @ [index]value {
         Prt(index, value)
     }
 
     # Iterator, Increment [from < to, step], Decrement [from > to, step], step can omit 
-    @ it <- [0 < 100, 2] {
+    [0 < 100, 2] @ it {
         Prt(it)
     }
-    @ it <- [10>=1] {}
+    [10>=1] @ it {}
 
     # Infinite
     @ {
