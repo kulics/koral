@@ -41,7 +41,7 @@ Main() -> () {
 
     Prt("Filter Array")
     arr = FilterList(arr, {it->it > 4})
-    @ ea <- arr {
+    arr @ ea {
         Prt(ea) 
     }
 
@@ -54,7 +54,7 @@ Main() -> () {
 }
 
 PreOrderTraverse(node: Node!) -> () {
-    ? node -> () { 
+    node ? () { 
         <- () 
     }
     Prt(node.Value)
@@ -63,7 +63,7 @@ PreOrderTraverse(node: Node!) -> () {
 }
 
 PostOrderTraverse(node: Node!) -> () {
-    ? node -> () { 
+    node ? () { 
         <- () 
     }
     PostOrderTraverse(node.Left)
@@ -72,7 +72,7 @@ PostOrderTraverse(node: Node!) -> () {
 }
 
 MiddleOrderTraverse(node: Node!) -> () {
-    ? node -> () { 
+    node ? () { 
         <- () 
     }
     MiddleOrderTraverse(node.Left)
@@ -81,7 +81,7 @@ MiddleOrderTraverse(node: Node!) -> () {
 }
 
 InverseNode(node: Node!) -> (node: Node!) {
-    ? node -> () { 
+    node ? () { 
         <- (()) 
     }
     node.Left = InverseNode(node.Left)
@@ -99,28 +99,28 @@ Swap(list: [I32], i: I32, j: I32) -> () {
 
 SimpleSort(list: [I32]) -> () {
     Prt("Simple Sort")
-    @ i <- [0 < list.Len] {
-        @ j <- [i+1 < list.Len] {
+    [0 < list.Len] @ i {
+        [i+1 < list.Len] @ j {
             ? list[i] > list[j] {
                 Swap(list, i , j)
             }
         }
     }
-    @ ea <- list { 
+    list @ ea { 
         Prt(ea) 
     }
 }
 
 BubbleSort(list: [I32]) -> () {
     Prt("Bubble Sort")
-    @ i <- [0 < list.Len] {
-        @ j <- [list.Len-2 >= i] {
+    [0 < list.Len] @ i {
+        [list.Len-2 >= i] @ j {
             ? list[j] > list[j+1] {
                 Swap(list, j , j+1)
             }
         }
     }
-    @ ea <- list { 
+    list @ ea { 
         Prt(ea) 
     }
 }
@@ -128,7 +128,7 @@ BubbleSort(list: [I32]) -> () {
 QuickSort(list: [I32]) -> () {
     Prt("Quick Sort")
     QSort(list,0,list.Len-1)
-    @ ea <- list { 
+    list @ ea { 
         Prt(ea) 
     }
 }
@@ -163,7 +163,7 @@ Partition(list: [I32], low: I32, high: I32) -> (position: I32) {
 FilterList(list: [I32], fn: (I32) -> (Bl)) -> (l: [I32]) {
     filter := [I32]{}
 
-    @ ea <- list {
+    list @ ea {
         ? fn(ea) {
             filter += ea
         }

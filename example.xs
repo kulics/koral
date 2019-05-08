@@ -112,7 +112,7 @@ TestOperator() -> () {
 }
 
 TestString() -> () {
-    @ ea <- "love xs" {
+    "love xs" @ ea {
         ? ea == 'e' {
             Prt("love xs")
         }
@@ -151,7 +151,7 @@ TestDefault() -> () {
 
 TestSwitch() -> () {
     x :{} = 3
-    ? x -> 1 {
+    x ? 1 {
         Prt(1)
     } :Str {
         Prt("string")
@@ -191,10 +191,10 @@ TestArray() -> () {
     arrEmpty := [I32]{}
     arrType := {1,2,3}
     array: I32[] = ArrOf(1,2,3)
-    @ item <- arrNumber {
+    arrNumber @ item {
         Prt(item)
     }
-    @ [i]v <- arrNumber {
+    arrNumber @ [i]v {
         Prt(i)
         Prt(v)
     }
@@ -206,7 +206,7 @@ TestDictionary() -> () {
     empty := [[Str]I32]{}
     dicTemp := {["k1"]1,["k2"]2}
     dicTemp += {["k3"]3}
-    @ [k]v <- dicTemp {
+    dicTemp @ [k]v {
         Prt(k)
         Prt(v)
     }
@@ -216,17 +216,17 @@ TestDictionary() -> () {
 
 TestLoop() -> () {
     Prt(" 0 to 10")
-    @ i <- [0 <= 10] {
+    [0 <= 10] @ i {
         Prt(i, ", ", "")
     }
     Prt(" ")
     Prt(" 0 to 8 step 2")
-    @ ea <- [0 < 8, 2] {
+    [0 < 8, 2] @ ea {
         Prt(ea, ", ", "")
     }
     Prt(" ")
     Prt(" 8 to 2 step 2")
-    @ ea <- [8 > 0, 2] {
+    [8 > 0, 2] @ ea {
         Prt(ea, ", ", "")
         ? ea == 6 {
             -> @
@@ -314,7 +314,7 @@ TestLambda() -> () {
 
 TestAsync() ~> (x: I32, y: I32, z: Str) {
     Slp(1000)
-    @ i <- [1<=10] {
+    [1<=10] @ i {
         Go({ ~> 
             <~ Dly(1000)
             Prt("task", i)

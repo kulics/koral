@@ -146,7 +146,7 @@ functionSupportStatement:
 ;
 
 // 条件判断
-judgeCaseStatement: Judge expression ArrowRight (caseStatement)+ end;
+judgeCaseStatement: expression Judge (caseStatement)+ end;
 // 缺省条件声明
 caseDefaultStatement: Discard blockLeft (functionSupportStatement)* blockRight;
 // 条件声明
@@ -164,9 +164,9 @@ judgeIfStatement:Judge expression blockLeft (functionSupportStatement)* blockRig
 // else if 判断
 judgeElseIfStatement: expression blockLeft (functionSupportStatement)* blockRight;
 // 循环
-loopStatement:Loop id ArrowLeft iteratorStatement blockLeft (functionSupportStatement)* blockRight end;
+loopStatement:iteratorStatement Loop id blockLeft (functionSupportStatement)* blockRight end;
 // 集合循环
-loopEachStatement:Loop ('[' id ']')? id ArrowLeft expression blockLeft (functionSupportStatement)* blockRight end;
+loopEachStatement:expression Loop ('[' id ']')? id blockLeft (functionSupportStatement)* blockRight end;
 // 条件循环
 loopCaseStatement:Loop expression blockLeft (functionSupportStatement)* blockRight end;
 // 无限循环

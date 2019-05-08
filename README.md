@@ -36,9 +36,9 @@ Main() -> () {
                 "Cześć", "Olá", "Здравствуйте",
                 "Chào bạn", "您好"}
     # for-each  
-    @ item <- greetings {
+    greetings @ item {
         # match
-        ? item -> [ 0 <= 8 ] {
+        item ? [ 0 <= 8 ] {
             Prt(item) # call function
         } _ {
             # lambda
