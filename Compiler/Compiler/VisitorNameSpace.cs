@@ -29,9 +29,8 @@ namespace Compiler {
                 }
             }
             obj += content;
-            if (contentStatic != "" || ns.init != null) {
-                obj += $"public class {FileName} {BlockLeft} {Wrap}" +
-                    $" static {FileName}() {BlockLeft}{Wrap} {ns.init} {BlockRight}{Wrap}" +
+            if (contentStatic != "") {
+                obj += $"public partial class {ns.name} {BlockLeft} {Wrap}" +
                     $" {contentStatic}" +
                     $" {BlockRight} {Wrap}";
             }
@@ -42,7 +41,6 @@ namespace Compiler {
         private class Namespace {
             public string name;
             public string imports;
-            public string init;
         }
 
         public override object VisitExportStatement([NotNull] ExportStatementContext context) {
