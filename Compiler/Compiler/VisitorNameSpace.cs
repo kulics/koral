@@ -30,7 +30,7 @@ namespace Compiler {
             }
             obj += content;
             if (contentStatic != "") {
-                obj += $"public partial class {ns.name} {BlockLeft} {Wrap}" +
+                obj += $"public partial class {ns.name.Substring(ns.name.LastIndexOf('.')+1)} {BlockLeft} {Wrap}" +
                     $" {contentStatic}" +
                     $" {BlockRight} {Wrap}";
             }
