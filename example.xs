@@ -1,4 +1,4 @@
-\Xs <- {
+\Xs\Example <- {
     System
     System\IO
     System\Linq
