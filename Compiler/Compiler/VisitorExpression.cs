@@ -93,7 +93,7 @@ namespace Compiler {
                 r.text = e1.text + op + e2.text;
             } else if (count == 2) {
                 r = (Result)Visit(context.GetChild(0));
-                if (context.op.Type == XsParser.Judge) {
+                if (context.op.Type == XsParser.Pointer) {
                     r.text += "?";
                 }
             } else if (count == 1) {
