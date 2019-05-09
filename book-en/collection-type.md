@@ -23,12 +23,12 @@ For example we need a string list:
 list := [Str]{}         # empty List
 ```
 #### Array
-If we need to use the native Array type, we can use `type[]` to represent it.
+If we need to use the native Array type, we can use `[]type` to represent it.
 It can also be created directly using `ArrOf(e1,e2,e3)`.
 
 E.g:
 ```
-arr := I32[]{}
+arr := []I32{}
 arr2 := ArrOf(1,2,3,4,5)
 ```
 ### Visit
@@ -110,7 +110,7 @@ Main() -> () {
     list1 := {1,2,3,4,5}
     list1 += 6
     list2 := [I8]{1,2,1,2}
-    list3 := ArrOf(1,2,3)
+    list3 := []I8{1,2,3}
 
     dictionary1 := {["a"]1, ["b"]2, ["c"]3}
     dictionary1["d"] = 4

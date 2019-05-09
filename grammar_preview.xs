@@ -35,7 +35,7 @@ Main() ~> () {
     dic := [[Str]Bl]{ ["1"]False, ["2"]True}
     Prt( dic["1"] ) # 使用key获取
 
-    arr: I32[] = ArrOf(1,2,3)
+    arr: []I32 = ArrOf(1,2,3)
     # Anonymous Package
     new := {
         Title = "nnn",
@@ -248,13 +248,13 @@ Main() ~> () {
     }
 
     # Pointer Type
-    a: I32! = ()
+    a: ^I32 = ()
     # Get Pointer
-    c := a?
+    c := a^
     # Get Value
-    d := c!
+    d := c~^
     # Safe Call
-    e := a?.ToStr()
+    e := a^.ToStr()
     # OrElseValue
     f := a.Def(128)
     

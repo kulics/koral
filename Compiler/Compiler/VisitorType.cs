@@ -5,11 +5,7 @@ namespace Compiler {
     internal partial class Visitor {
         public override object VisitType([NotNull] TypeContext context) {
             var obj = "";
-            if (context.ChildCount > 1) {
-                obj = Visit(context.GetChild(0)) + "[]";
-            } else {
-                obj = (string)Visit(context.GetChild(0));
-            }
+            obj = (string)Visit(context.GetChild(0));
             return obj;
         }
 
@@ -50,7 +46,11 @@ namespace Compiler {
             }
             return r;
         }
-
+        public override object VisitTypeArray([NotNull] TypeArrayContext context) {
+            var obj = "";
+            obj += $" { Visit(context.type())}[] ";
+            return obj;
+        }
         public override object VisitTypeList([NotNull] TypeListContext context) {
             var obj = "";
             obj += $" {lst}<{ Visit(context.type())}> ";
