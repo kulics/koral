@@ -248,8 +248,6 @@ Main() ~> () {
     a: ^I32 = ()
     # Get Pointer
     c := a^
-    # Get Value
-    d := c~^
     # Safe Call
     e := a^.ToStr()
     # OrElseValue
