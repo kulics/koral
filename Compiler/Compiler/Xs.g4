@@ -134,6 +134,7 @@ functionSupportStatement:
 | loopInfiniteStatement
 | loopJumpStatement
 | loopContinueStatement
+| usingStatement
 | checkStatement
 | reportStatement
 | functionStatement
@@ -177,11 +178,10 @@ loopJumpStatement:ArrowLeft Loop end;
 loopContinueStatement:ArrowRight Loop end;
 // 检查
 checkStatement: 
-Check usingExpression blockLeft (functionSupportStatement)* blockRight end
-|Check (usingExpression)? blockLeft (functionSupportStatement)* blockRight (checkErrorStatement)* checkFinallyStatment end
-|Check (usingExpression)? blockLeft (functionSupportStatement)* blockRight (checkErrorStatement)+ end;
-// 定义变量
-usingExpression: expression (Define|Declared type Assign) expression;
+Check blockLeft (functionSupportStatement)* blockRight (checkErrorStatement)* checkFinallyStatment end
+|Check blockLeft (functionSupportStatement)* blockRight (checkErrorStatement)+ end;
+// 定义检查变量
+usingStatement: Check expression (Define|Declared type Assign) expression end;
 // 错误处理
 checkErrorStatement:(id|id Declared type) blockLeft (functionSupportStatement)* blockRight;
 // 最终执行

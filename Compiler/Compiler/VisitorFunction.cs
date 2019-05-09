@@ -2,10 +2,8 @@
 using System.Collections.Generic;
 using static Compiler.XsParser;
 
-namespace Compiler
-{
-    internal partial class Visitor
-    {
+namespace Compiler {
+    internal partial class Visitor {
         public override object VisitFunctionStatement([NotNull] FunctionStatementContext context) {
             var id = (Result)Visit(context.id());
             var obj = "";
@@ -118,8 +116,7 @@ namespace Compiler
             return obj;
         }
 
-        public class Parameter
-        {
+        public class Parameter {
             public string id { get; set; }
             public string type { get; set; }
             public string value { get; set; }
@@ -144,9 +141,22 @@ namespace Compiler
 
         public string ProcessFunctionSupport(FunctionSupportStatementContext[] items) {
             var obj = "";
+            var content = "";
+            var lazy = new List<string>();
             foreach (var item in items) {
-                obj += Visit(item);
+                if (item.GetChild(0) is UsingStatementContext) {
+                    lazy.Add("}");
+                    content += $"using ({(string)Visit(item)}) {{ {Wrap}";
+                } else {
+                    content += Visit(item);
+                }
             }
+            if (lazy.Count > 0) {
+                for (int i = lazy.Count - 1; i >= 0; i--) {
+                    content += "}";
+                }
+            }
+            obj += content;
             return obj;
         }
     }
