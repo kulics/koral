@@ -16,20 +16,19 @@ This will create a `I32` type List containing` 1` to `5`.
 
 If you need an List of explicit types, you can create them using construct function.
 
-The List type is represented by `[type]`.
+The List type is represented by `[]type`.
 
 For example we need a string list:
 ```
-list := [Str]{}         # empty List
+list := []Str{}         # empty List
 ```
 #### Array
-If we need to use the native Array type, we can use `[]type` to represent it.
+If we need to use the native Array type, we can use `[type]` to represent it.
 It can also be created directly using `ArrOf(e1,e2,e3)`.
 
 E.g:
 ```
-arr := []I32{}
-arr2 := ArrOf(1,2,3,4,5)
+arr: [I32] = ArrOf(1,2,3,4,5)
 ```
 ### Visit
 If we need to access one of the elements in the List we can access it with the `identifier[index]`.
@@ -71,11 +70,11 @@ This will create a `[Str]I32` type dictionary containing ` a, b, c` entries.
 
 If you need an explicit type of dictionary, you can also create it using construct function.
 
-The dictionary type is represented by `[[type]type]`.
+The dictionary type is represented by `[type]type`.
 
 E.g:
 ```
-dictionaryNumNum := [[I32]I32]{} # Empty
+dictionaryNumNum := [I32]I32{} # Empty
 ```
 ### Visit
 Like an List, we can also use indexes to access data directly.
@@ -109,11 +108,11 @@ length := dictionary.Len        # length
 Main() -> () {
     list1 := {1,2,3,4,5}
     list1 += 6
-    list2 := [I8]{1,2,1,2}
-    list3 := []I8{1,2,3}
+    list2 := []I8{1,2,1,2}
+    array := [I8]{1,2,3}
 
     dictionary1 := {["a"]1, ["b"]2, ["c"]3}
     dictionary1["d"] = 4
-    dictionary2 := [[I8]I8]{[1]1,[2]2,[3]3}
+    dictionary2 := [I8]I8{[1]1,[2]2,[3]3}
 }
 ```

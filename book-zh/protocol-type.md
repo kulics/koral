@@ -103,7 +103,7 @@ doHomeWork(StudentC)
 
 例如：
 ```
-arr := [homeWork]{}
+arr := []homeWork{}
 arr.add( StudentA )
 ...... # 塞进很多很多学生
 arr @ i {

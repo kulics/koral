@@ -103,7 +103,7 @@ Of course, it is better to put these students in an array so that we can use loo
 
 E.g:
 ```
-arr := [homeWork]{}
+arr := []homeWork{}
 arr.add( StudentA )
 ...... # stuffed many, many students
 arr @ i {

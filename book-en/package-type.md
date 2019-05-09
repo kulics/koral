@@ -78,8 +78,8 @@ Similarly, the way the collection is created is actually a simplified creation, 
 
 E.g:
 ```
-array := [I32]{ 1, 2, 3, 4, 5 }
-dictionary := [[Str]I32]{ ["1"]1, ["2"]2, ["3"]3 }
+array := []I32{ 1, 2, 3, 4, 5 }
+dictionary := [Str]I32{ ["1"]1, ["2"]2, ["3"]3 }
 ```
 ## Anonymous Package
 If we only want to wrap some data directly, instead of defining the package first and then using it, is it like an anonymous function?

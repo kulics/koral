@@ -60,7 +60,7 @@ listNumber := List<I32>{}  # pass in the number type
 ```
 So we have an List of number types, is like this:
 ```
-listNumber := [I32]{}
+listNumber := []I32{}
 ```
 Yes, in fact, our list and dictionary syntax are syntactic sugar, the actual types are `Lst` and `Dic`.
 ## Supported Types
