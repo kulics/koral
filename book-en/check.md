@@ -109,8 +109,8 @@ Main() -> () {
         !(ex)
     }
 
-    x := Defer()
-    ! y := Defer()
+    x := Defer{}
+    ! y := Defer{}
     ! {
         x.Content = "defer"
         Prt(x.Content)
