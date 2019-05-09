@@ -52,7 +52,7 @@ Main() -> () {
     Rd()
 }
 
-PreOrderTraverse(node: Node!) -> () {
+PreOrderTraverse(node: ^Node) -> () {
     node ? () { 
         <- () 
     }
@@ -61,7 +61,7 @@ PreOrderTraverse(node: Node!) -> () {
     PreOrderTraverse(node.Right)
 }
 
-PostOrderTraverse(node: Node!) -> () {
+PostOrderTraverse(node: ^Node) -> () {
     node ? () { 
         <- () 
     }
@@ -70,7 +70,7 @@ PostOrderTraverse(node: Node!) -> () {
     Prt(node.Value)
 }
 
-MiddleOrderTraverse(node: Node!) -> () {
+MiddleOrderTraverse(node: ^Node) -> () {
     node ? () { 
         <- () 
     }
@@ -79,7 +79,7 @@ MiddleOrderTraverse(node: Node!) -> () {
     MiddleOrderTraverse(node.Right)
 }
 
-InverseNode(node: Node!) -> (node: Node!) {
+InverseNode(node: ^Node) -> (node: ^Node) {
     node ? () { 
         <- (()) 
     }
@@ -176,8 +176,8 @@ Shutdown(ctrl: Control) -> () {
 
 Node -> {
     Value: I32
-    Left: Node!
-    Right: Node!
+    Left: ^Node
+    Right: ^Node
 } (value: I32) {
     Value = value
 }

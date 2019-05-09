@@ -5,7 +5,7 @@
     System\ComponentModel\DataAnnotations\Schema
     System\ComponentModel\DataAnnotations
 
-    Xs.Xs
+    Xs\Example.Example
 }
 
 ## 
@@ -128,14 +128,14 @@ TestString() -> () {
 }
 
 TestOptional() -> () {
-    a: I32! = 1
-    a?.ToStr()
-    b: Str! = ""
-    b?.ToStr()
-    c: {}! = ()
-    d: App! = ()
-    e: [I32!]! = [I32!]{0}
-    e?[0]?.ToStr()?.ToStr()
+    a: ^I32 = 1
+    a^.ToStr()
+    b: ^Str = ""
+    b^.ToStr()
+    c: ^{} = ()
+    d: ^App = ()
+    e: ^[^I32] = [^I32]{0}
+    e^[0]^.ToStr()^.ToStr()
     f := d.Def(App{})
 }
 
@@ -198,7 +198,7 @@ TestArray() -> () {
     arrArr := {{1,1,1}, {1,1,1}}
     arrEmpty := [I32]{}
     arrType := {1,2,3}
-    array: I32[] = ArrOf(1,2,3)
+    array: []I32 = ArrOf(1,2,3)
     arrNumber @ item {
         Prt(item)
     }
@@ -252,7 +252,7 @@ TestLoop() -> () {
 }
 
 TestCheck() -> () {
-    z1 :Defer! = ()
+    z1: ^Defer = ()
     ! z2 := Defer{} {
         z1 = Defer{}
         ! z3 := Defer{} {

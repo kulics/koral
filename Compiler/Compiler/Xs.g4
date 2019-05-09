@@ -236,7 +236,7 @@ linq // 联合查询
 | expression add expression // 和型表达式
 | expression mul expression // 积型表达式
 | expression pow expression // 幂型表达式
-| expression op=(Judge|Check) // 可空判断
+| expression op=Pointer // 可空判断
 | stringExpression // 字符串插值
 ;
 
@@ -268,7 +268,7 @@ annotationAssign: (id '=')? expression ;
 
 callFunc: id (templateCall)? tuple; // 函数调用
 
-callElement : id op=(Judge|Check)? '[' (expression | slice) ']';
+callElement : id op=Pointer? '[' (expression | slice) ']';
 
 callPkg: type blockLeft (pkgAssign|listAssign|dictionaryAssign)? blockRight; // 新建包
 
@@ -360,6 +360,7 @@ t=Float
 // 类型
 typeNotNull:
 typeTuple
+| typeArray
 | typeList
 | typeDictionary
 | typeBasic
@@ -368,10 +369,11 @@ typeTuple
 | typeAny
 ;
 
-typeNullable : typeNotNull Check;
-type : typeNotNull | typeNullable | type '[]';
+typeNullable : Pointer typeNotNull;
+type : typeNotNull | typeNullable;
 
 typeTuple : bracketLeft type (more type)+ bracketRight;
+typeArray : '[]' type;
 typeList : '[' type ']';
 typeDictionary :  '[' '[' type ']' type ']';
 typePackage : nameSpaceItem (templateCall)? ;
@@ -447,6 +449,8 @@ Judge : '?';
 Loop : '@';
 
 Check : '!';
+
+Pointer : '^';
 
 TypeI8: 'I8';
 TypeU8: 'U8';

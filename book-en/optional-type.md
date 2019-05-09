@@ -11,11 +11,11 @@ b := a   # error, no assignment to a
 ## Statement and Use
 
 If you have to use a type with nil values in some cases, you can use a nullable type.
-Just add `!` after any type, which is a nullable type.
+Just add `^` forward any type, which is a nullable type.
 
 E.g:
 ```
-a: I32!
+a: ^I32
 b := a   # b assigns an empty I32
 ```
 
@@ -30,27 +30,13 @@ E.g:
 ```
 
 This is cumbersome, especially when we need to execute multiple functions in succession.
-We can use `?` after the expression to use them, so that they will only be executed if they are not empty.
+We can use `^` after the expression to use them, so that they will only be executed if they are not empty.
 
 E.g:
 ```
-arr?.ToStr()
+arr^.ToStr()
 ```
 
-## Convert Optional Type
-If you need to convert a variable to an optional type, you can use the `id?` syntax.
-
-E.g:
-```
-b := a?
-```
-## Get Value
-If you need to get an optional type of value, you can use the `id!` syntax.
-
-E.g:
-```
-b := a!
-```
 ## Merge Operation
 If you want to use another default value when the value of the optional type is null, you can use the `id.Def(value)` function.
 
@@ -68,13 +54,10 @@ b := a.Def(128)
 }
 
 Main() -> () {
-    a: I32! = ()
+    a: ^I32 = ()
 
-    b: [I32!]! = [I32!]!{0}
-    b?[0]?.ToStr()?.ToStr()
-
-    c := a?
-    d := a!
+    b: ^[^I32] = [^I32]{0}
+    b^[0]^.ToStr()^.ToStr()
 
     e := a.Def(1024)
 }
