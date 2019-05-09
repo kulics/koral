@@ -171,40 +171,15 @@ namespace Compiler {
         }
 
         public override object VisitCheckStatement([NotNull] CheckStatementContext context) {
-            if (context.checkErrorStatement().Length == 0 && context.checkFinallyStatment() == null) {
-                var obj = "using (";
-                obj += Visit(context.usingExpression()) + ")" + BlockLeft + Wrap;
-                obj += ProcessFunctionSupport(context.functionSupportStatement());
-                obj += BlockRight + Wrap;
-                return obj;
-            } else {
-                var obj = $"try {BlockLeft} {Wrap}";
-                obj += ProcessFunctionSupport(context.functionSupportStatement());
-                obj += BlockRight + Wrap;
-                foreach (var item in context.checkErrorStatement()) {
-                    obj += Visit(item) + Wrap;
-                }
-
-                if (context.checkFinallyStatment() != null) {
-                    obj += Visit(context.checkFinallyStatment());
-                }
-                if (context.usingExpression() != null) {
-                    obj = $"using ({ Visit(context.usingExpression())}) {BlockLeft} {Wrap} {obj} ";
-                    obj += BlockRight + Wrap;
-                }
-                return obj;
+            var obj = $"try {BlockLeft} {Wrap}";
+            obj += ProcessFunctionSupport(context.functionSupportStatement());
+            obj += BlockRight + Wrap;
+            foreach (var item in context.checkErrorStatement()) {
+                obj += Visit(item) + Wrap;
             }
-        }
 
-        public override object VisitUsingExpression([NotNull] UsingExpressionContext context) {
-            var obj = "";
-            var r1 = (Result)Visit(context.expression(0));
-            var r2 = (Result)Visit(context.expression(1));
-            if (context.type() != null) {
-                var Type = (string)Visit(context.type());
-                obj = $"{Type} {r1.text} = {r2.text}";
-            } else {
-                obj = $"var {r1.text} = {r2.text}";
+            if (context.checkFinallyStatment() != null) {
+                obj += Visit(context.checkFinallyStatment());
             }
             return obj;
         }
@@ -231,6 +206,19 @@ namespace Compiler {
             var obj = $"finally {Wrap} {BlockLeft} {Wrap}";
             obj += ProcessFunctionSupport(context.functionSupportStatement());
             obj += $"{BlockRight}{Wrap}";
+            return obj;
+        }
+
+        public override object VisitUsingStatement([NotNull] UsingStatementContext context) {
+            var obj = "";
+            var r1 = (Result)Visit(context.expression(0));
+            var r2 = (Result)Visit(context.expression(1));
+            if (context.type() != null) {
+                var Type = (string)Visit(context.type());
+                obj = $"{Type} {r1.text} = {r2.text}";
+            } else {
+                obj = $"var {r1.text} = {r2.text}";
+            }
             return obj;
         }
 

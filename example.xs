@@ -251,16 +251,12 @@ TestLoop() -> () {
 
 TestCheck() -> () {
     z1: ^Defer = ()
-    ! z2 := Defer{} {
+    ! z2 := Defer{}
+    ! {
         z1 = Defer{}
-        ! z3 := Defer{} {
-            x := 1 * 1
-        }
-        ! {
-            y := 1 + 1
-        } ex {
-            !(ex)
-        }
+        ! z3 := Defer{}
+        x := 1 * 1
+        y := 1 + 1
     } ex: IOException {
         !(ex)
     } e {
