@@ -134,7 +134,7 @@ TestOptional() -> () {
     b^.ToStr()
     c: ^{} = ()
     d: ^App = ()
-    e: ^[^I32] = [^I32]{0}
+    e: ^[]^I32 = []^I32{0}
     e^[0]^.ToStr()^.ToStr()
     f := d.Def(App{})
 }
@@ -187,31 +187,29 @@ TestIf() -> () {
 }
 
 TestArray() -> () {
-    arrSingle := {1}
-    arrNumber := {1,2,5,6,8,4}
-    arrNumber = arrNumber + 0
-    arrNumber += 3 + 7
-    arrNumber -= 6
-    take := arrNumber[0]
+    lstSingle := {1}
+    lstNumber := {1,2,5,6,8,4}
+    lstNumber = lstNumber + 0
+    lstNumber += 3 + 7
+    lstNumber -= 6
+    take := lstNumber[0]
     take = InPackageArray{}.Arr[2]
-    arrObj := {"123", 432, App{}}
-    arrArr := {{1,1,1}, {1,1,1}}
-    arrEmpty := [I32]{}
-    arrType := {1,2,3}
-    array: []I32 = ArrOf(1,2,3)
-    arrNumber @ item {
+    lstObj := {"123", 432, App{}}
+    lstArr := {{1,1,1}, {1,1,1}}
+    lstEmpty := []I32{}
+    array: [I32] = ArrOf(1,2,3)
+    lstNumber @ item {
         Prt(item)
     }
-    arrNumber @ [i]v {
-        Prt(i)
-        Prt(v)
+    lstNumber @ [i]v {
+        Prt(i, ":", v)
     }
-    slice := arrNumber[0<=]
-    slice2 := arrNumber[<3]
+    slice := lstNumber[0<=]
+    slice2 := lstNumber[<3]
 }
 
 TestDictionary() -> () {
-    empty := [[Str]I32]{}
+    empty := [Str]I32{}
     dicTemp := {["k1"]1,["k2"]2}
     dicTemp += {["k3"]3}
     dicTemp @ [k]v {
@@ -354,9 +352,7 @@ ConstFunction() -> (v: I32) {
 }
 
 InPackageArray -> {
-    Arr: [I32]
-} () {
-    Arr = {1,2,3,4,5,6,7}
+    Arr: []I32 = {1,2,3,4,5,6,7}
 }
 
 Defer -> {
@@ -377,8 +373,8 @@ App -> {
             Name = "new Program",
             Running = True
         }
-        item3 := [I32]{1,2,3,4,5}
-        item4 := [[Str]I32]{["1"]1,["2"]2,["3"]3}
+        item3 := []I32{1,2,3,4,5}
+        item4 := [Str]I32{["1"]1,["2"]2,["3"]3}
     }
 
     TestFuncTemplate<T1, T2>(data1: T1, data2: T2) -> (data: App) {

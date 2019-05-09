@@ -26,16 +26,16 @@ Main() ~> () {
     format := "the value is "integer","float","Boolean""
 
     # List
-    arr := [I32]{ 1,2,3,4,5 }
+    arr := []I32{ 1,2,3,4,5 }
     arr2 := { 1,2,3,4,5}
     Prt( arr[0] ) # 使用下标获取
 
     # Dictionary, 前面为key，后面为value
     dic := {["1"]False, ["2"]True}
-    dic := [[Str]Bl]{ ["1"]False, ["2"]True}
+    dic := [Str]Bl{ ["1"]False, ["2"]True}
     Prt( dic["1"] ) # 使用key获取
 
-    arr: []I32 = ArrOf(1,2,3)
+    arr: [I32] = ArrOf(1,2,3)
     # Anonymous Package
     new := {
         Title = "nnn",
@@ -199,8 +199,8 @@ Main() ~> () {
     ib2 := ImageButton{
         Title="Cancel"，Background="red"
     }
-    list := [I32]{1,2,3,4,5}
-    map := [[Str]I32]{["1"]1,["2"]2,["3"]3}
+    list := []I32{1,2,3,4,5}
+    map := [Str]I32{["1"]1,["2"]2,["3"]3}
 
     # Create an object with params
     img := Image{}.Init(30, 20, "./icon.png")
@@ -217,7 +217,8 @@ Main() ~> () {
 
     # Check, listen the Excption Function
     file := File("./test.xy")
-    ! f := ReadFile("demo.xy") {
+    ! f := ReadFile("demo.xy")
+    ! {
         doSomeThing...
     } ex {
         !(ex) # Use !() to declare an Excption
@@ -326,6 +327,11 @@ Class -> {
     FuncInClass() -> () {
         Func()
     }
+}
+(Class)Switch:Bl
+(Class)FuncOutClass() -> () {
+    Prt(..Num)
+    Func()
 }
 Func() -> () {
     ClassInFunc -> {
