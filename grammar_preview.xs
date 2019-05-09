@@ -155,12 +155,8 @@ Main() ~> () {
     }
 
     # Extension ，对某个包扩展，可以用来扩展方法
-    View <~ {
-        Show() -> () {}
-        Hide() -> () {}
-        # 重载操作符
-        +() -> () {}
-        -() -> () {}
+    (View)Show() -> () {
+        ...
     }
 
     # Protocol, implemented by package
