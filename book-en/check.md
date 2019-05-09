@@ -90,9 +90,7 @@ For packages that implement the automatic release protocol, we can use the '!= '
 
 E.g:
 ``` 
-! res := FileResource("/test.xs") {
-    ......
-}
+! res := FileResource("/test.xs") 
 ......
 ```
 
@@ -112,7 +110,8 @@ Main() -> () {
     }
 
     x := Defer()
-    ! y := Defer() {
+    ! y := Defer()
+    ! {
         x.Content = "defer"
         Prt(x.Content)
     } e:Exception {

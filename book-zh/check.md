@@ -90,9 +90,7 @@ _ {
 
 例如：
 ```
-! res := FileResource("/test.xs") {
-    ......
-}
+! res := FileResource("/test.xs") 
 ......
 ```
 
@@ -112,7 +110,8 @@ Main() -> () {
     }
 
     x := Defer()
-    ! y := Defer() {
+    ! y := Defer()
+    ! {
         x.Content = "defer"
         Prt(x.Content)
     } e:Exception {
