@@ -289,8 +289,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Xs
 ```
-emptyArray := [Str]{}
-emptyDictionary := [[Str]F32]{}
+emptyArray := []Str{}
+emptyDictionary := [Str]F32{}
 ```
 ### C#
 ```
@@ -763,14 +763,14 @@ test.simpleDescription()
 ## Checking Type
 ### Xs
 ```
-MovieCount := 0
-SongCount := 0
+movieCount := 0
+songCount := 0
 
 library @ item {
     item ? :Movie {
-        MovieCount += 1
+        movieCount += 1
     } :Song {
-        SongCount += 1
+        songCount += 1
     }
 }
 ```
@@ -796,7 +796,7 @@ foreach (var item in library)
 var movieCount = 0
 var songCount = 0
 
-for _, item := range(library) {
+for _, item := range library {
     if _, ok := item(Movie); ok {
         movieCount++
     } else if _, ok := item(Song); ok {

@@ -373,9 +373,9 @@ typeNullable : Pointer typeNotNull;
 type : typeNotNull | typeNullable;
 
 typeTuple : bracketLeft type (more type)+ bracketRight;
-typeArray : '[]' type;
-typeList : '[' type ']';
-typeDictionary :  '[' '[' type ']' type ']';
+typeArray : '[' type ']';
+typeList : '[]' type;
+typeDictionary : '[' type ']' type;
 typePackage : nameSpaceItem (templateCall)? ;
 typeFunction : typeFunctionParameterClause ArrowRight NewLine* typeFunctionParameterClause;
 typeAny: BlockLeft BlockRight;

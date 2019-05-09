@@ -92,11 +92,11 @@ InverseNode(node: ^Node) -> (node: ^Node) {
     <- (temp)
 }
 
-Swap(list: [I32], i: I32, j: I32) -> () {
+Swap(list: []I32, i: I32, j: I32) -> () {
     (list[i], list[j]) = (list[j], list[i])
 }
 
-SimpleSort(list: [I32]) -> () {
+SimpleSort(list: []I32) -> () {
     Prt("Simple Sort")
     [0 < list.Len] @ i {
         [i+1 < list.Len] @ j {
@@ -110,7 +110,7 @@ SimpleSort(list: [I32]) -> () {
     }
 }
 
-BubbleSort(list: [I32]) -> () {
+BubbleSort(list: []I32) -> () {
     Prt("Bubble Sort")
     [0 < list.Len] @ i {
         [list.Len-2 >= i] @ j {
@@ -124,15 +124,15 @@ BubbleSort(list: [I32]) -> () {
     }
 }
 
-QuickSort(list: [I32]) -> () {
+QuickSort(list: []I32) -> () {
     Prt("Quick Sort")
-    QSort(list,0,list.Len-1)
+    QSort(list, 0, list.Len-1)
     list @ ea { 
         Prt(ea) 
     }
 }
 
-QSort(list: [I32], low: I32, high: I32) -> () {
+QSort(list: []I32, low: I32, high: I32) -> () {
     Pivot := 0
     ? low < high {
         Pivot = Partition(list,low,high)
@@ -142,7 +142,7 @@ QSort(list: [I32], low: I32, high: I32) -> () {
     }
 }
 
-Partition(list: [I32], low: I32, high: I32) -> (position: I32) {
+Partition(list: []I32, low: I32, high: I32) -> (position: I32) {
     pivotkey := list[low]
     
     @ low < high {
@@ -159,8 +159,8 @@ Partition(list: [I32], low: I32, high: I32) -> (position: I32) {
     <- (low)
 }
 
-FilterList(list: [I32], fn: (I32) -> (Bl)) -> (l: [I32]) {
-    filter := [I32]{}
+FilterList(list: []I32, fn: (I32) -> (Bl)) -> (l: []I32) {
+    filter := []I32{}
 
     list @ ea {
         ? fn(ea) {
