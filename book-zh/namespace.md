@@ -28,21 +28,6 @@ Main() -> () {
     Prt( GetSomething() )
 }
 ```
-## 简化导入
-如果我们不希望每次都使用命名空间名称来调用内容，我们可以使用简化语法，在导入时加入 `.LastName` 即可。
-
-例如：
-```
-\Run <- { 
-    Name\Space.Code 
-}
-
-Main() -> () {
-    # 打印 something
-    Prt( GetSomething() )
-}
-```
-这样就不需要每次都使用 `space` 来调用了。
 ## 临时导入
 我们也可以直接使用命名空间调用功能而不需要导入。
 
@@ -52,7 +37,7 @@ Main() -> () {
 
 Main() -> () {
     # 直接使用即可
-    Prt( \Name\Space.Code.GetSomething() )    
+    Prt( \Name\Space.GetSomething() )    
 }
 ```
 
