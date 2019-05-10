@@ -572,7 +572,6 @@ NamedShape -> {
 }
 
 Square -> {
-    NamedShape
     SideLength: F64
 
     Init(sideLength:F64, name:Str) -> (v:Square) {
@@ -585,7 +584,7 @@ Square -> {
     Area() -> (f: F64) {
         <- (SideLength ** 2)
     }
-
+} ...NamedShape {
     SimpleDescription() -> (s: Str) {
         <- ("A square with sides of length " SideLength ".")
     }
