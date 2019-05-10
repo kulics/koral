@@ -212,5 +212,5 @@ App -> {
     Platform: Str
 } (name: Str, platform: Str)...(name) {
     Platform = platform
-} {Program} {
+} ...Program {
 }
