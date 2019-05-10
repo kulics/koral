@@ -376,7 +376,7 @@ App -> {
     TestFuncTemplate<T1, T2>(data1: T1, data2: T2) -> (data: App) {
         <- (..)
     }
-} {Program} {  
+} ...Program {  
 } Protocol {
     B(): I32 {
         get { 
@@ -471,5 +471,5 @@ PackageChild -> {
     X: I32
 } (x: I32, y: I32)...(y) {
     X = x
-} {Package} {
+} ...Package {
 }

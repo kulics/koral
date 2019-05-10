@@ -40,7 +40,7 @@ parameterClauseOut blockLeft (functionSupportStatement)* blockRight end;
 
 // 定义包
 packageStatement:(annotationSupport)? id (templateDefine)? ArrowRight blockLeft (packageSupportStatement)* blockRight 
- (packageNewStatement)* (blockLeft type blockRight packageOverrideStatement)? (protocolImplementStatement)* end;
+ (packageNewStatement)* ('...' type packageOverrideStatement)? (protocolImplementStatement)* end;
 // 包构造方法
 packageNewStatement: (annotationSupport)? parameterClausePackage 
 ('...' bracketLeft expressionList? bracketRight)? blockLeft (functionSupportStatement)* blockRight;
@@ -70,13 +70,8 @@ packageControlSubStatement: id blockLeft (functionSupportStatement)+ blockRight 
 // 包重载
 packageOverrideStatement: blockLeft (packageOverrideFunctionStatement|CommentLine|NewLine)* BlockRight;
 // 包扩展
-packageExtensionStatement: id (templateDefine)? FlowLeft blockLeft (packageExtensionSupportStatement)* blockRight;
-// 包扩展支持的语句
-packageExtensionSupportStatement: 
-packageFunctionStatement
-|CommentLine
-|NewLine
-;
+packageExtensionStatement: (annotationSupport)? parameterClauseIn id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) NewLine*
+parameterClauseOut blockLeft (packageFunctionStatement)* blockRight end;
 // 协议
 protocolStatement:(annotationSupport)? id (templateDefine)? ArrowLeft blockLeft (protocolSupportStatement)* blockRight end;
 // 协议支持的语句

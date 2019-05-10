@@ -182,14 +182,14 @@ By combining layers after layer, you are free to assemble whatever you want to d
 The following are compatibility features, if not necessary, it is not recommended.
 
 ### Inheritance
-If we want to define a new package and fully inherit all the properties of a package, we can use the inheritance syntax, append `{id} {}` to the definition.
+If we want to define a new package and fully inherit all the properties of a package, we can use the inheritance syntax, append `...id {}` to the definition.
 If you want to override the properties of the original package, rewrite it in `{}`.
 
 E.g:
 ```
 chineseStudent -> {
     Kungfu := False
-} {student} {   # inhert student
+} ...student {   # inhert student
     # override
     GetGirlFriend() -> (name: Str) {
         <- ("none")
@@ -235,7 +235,7 @@ Parent -> {
 
 Child -> {
 } (a:I32)...(a) {
-} {Parent} {
+} ...Parent {
 }
 ```
 

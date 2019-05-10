@@ -7,21 +7,21 @@ namespace Compiler
     internal partial class Visitor
     {
         public override object VisitPackageExtensionStatement([NotNull] PackageExtensionStatementContext context) {
-            var id = (Result)Visit(context.id());
+            //var id = (Result)Visit(context.id());
             var obj = "";
-            obj += $"{id.permission} partial class {id.text}";
-            // 泛型
-            var templateContract = "";
-            if (context.templateDefine() != null) {
-                var template = (TemplateItem)Visit(context.templateDefine());
-                obj += template.Template;
-                templateContract = template.Contract;
-            }
-            obj += templateContract + BlockLeft + Wrap;
-            foreach (var item in context.packageExtensionSupportStatement()) {
-                obj += Visit(item);
-            }
-            obj += BlockRight + Terminate + Wrap;
+            //obj += $"{id.permission} partial class {id.text}";
+            //// 泛型
+            //var templateContract = "";
+            //if (context.templateDefine() != null) {
+            //    var template = (TemplateItem)Visit(context.templateDefine());
+            //    obj += template.Template;
+            //    templateContract = template.Contract;
+            //}
+            //obj += templateContract + BlockLeft + Wrap;
+            //foreach (var item in context.packageExtensionSupportStatement()) {
+            //    obj += Visit(item);
+            //}
+            //obj += BlockRight + Terminate + Wrap;
             return obj;
         }
 

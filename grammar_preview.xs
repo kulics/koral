@@ -178,7 +178,7 @@ Main() ~> () {
         }
     } (w: I32, h: I32)...(w, h , "img") {
         Title = "img btn"
-    } {Image} { # 继承View
+    } ...Image { # 继承View
         Background: Str # 重名覆盖
     }
 

@@ -182,14 +182,14 @@ Prt( chen.Student.Name )
 以下内容为兼容性功能，如无必要，不推荐使用
 
 ### 继承
-如果我们希望定义一个新的包，并且完全继承某个包的所有属性，可以使用继承语法, 在定义后面追加 `{id} {}` 。
+如果我们希望定义一个新的包，并且完全继承某个包的所有属性，可以使用继承语法, 在定义后面追加 `...id {}` 。
 如果希望改写原始包的属性，在 `{}` 中重写即可。
 
 例如：
 ```
 chineseStudent -> {
     Kungfu := False
-} {student} {   # 继承 student
+} ...student {   # 继承 student
     # 重写
     GetGirlFriend() -> (name: Str) {
         <- ("none")
@@ -234,7 +234,7 @@ Parent -> {
 
 Child -> {
 } (a:I32)...(a) {
-} {Parent} {
+} ...Parent {
 }
 ```
 
