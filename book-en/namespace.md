@@ -29,21 +29,6 @@ Main() -> () {
     Prt( Demo.GetSomething() )
 }
 ```
-## Simplify Import
-If we don't want to use the namespace name to call the content every time, we can use the simplified syntax to add `.LastName` to the import.
-
-E.g:
-```
-\Run <- { 
-    Name\Space.Code 
-}
-
-Main() -> () {
-    # print something
-    Prt( GetSomething() )
-}
-```
-This eliminates the need to call `space` every time.
 ## Temporary Import
 We can use the namespace directly to call function without importing it.
 
@@ -53,7 +38,7 @@ E.g:
 
 Main() -> () {
     # use it directly
-    Prt( \Name\Space.Code.GetSomething() )    
+    Prt( \Name\Space.GetSomething() )    
 }
 ```
 
