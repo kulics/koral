@@ -1,11 +1,11 @@
 # Enumeration
 Enumerations are a set of integer constants with independent names. Usually can be used to mark some types of business data, to facilitate the judgment process.
 ## Definition
-We only need to use the `id -> [id id id id]` statement.
+We only need to use the `id -> type[id id id id]` statement.
 
 E.g:
 ```
-Color -> [
+Color -> U8[
     Red
     Green
     Blue
@@ -33,7 +33,7 @@ If necessary, we can also assign a value to a single identifier. If not specifie
 
 E.g:
 ```
-Number -> [
+Number -> U8[
     A = 1   # 1
     B       # 2
     C = 1   # 1
@@ -54,13 +54,13 @@ Main() -> () {
     Prt( B.Z )
 }
 
-A -> [
+A -> U8[
     X 
     Y 
     Z
 ]
 
-B -> [
+B -> U8[
     X 
     Y=0 
     Z
