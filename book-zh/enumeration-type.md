@@ -1,11 +1,11 @@
 # 枚举
 枚举是一组具有独立名称整数常量。通常可以用来标记一些业务数据的类型，方便判断处理。
 ## 定义
-我们只需要使用`id -> [id id id id]`语句即可。
+我们只需要使用`id -> type[id id id id]`语句即可。
 
 例如：
 ```
-Color -> [
+Color -> U8[
     Red
     Green
     Blue
@@ -33,7 +33,7 @@ c ? Color.Red {
 
 例如:
 ```
-Number -> [
+Number -> U8[
     A = 1   # 1
     B       # 2
     C = 1   # 1
@@ -54,13 +54,13 @@ Main() -> () {
     Prt( B.Z )
 }
 
-A -> [
+A -> U8[
     X 
     Y 
     Z
 ]
 
-B -> [
+B -> U8[
     X 
     Y=0 
     Z

@@ -300,7 +300,7 @@ Main() ~> () {
         z := \NS.Pkg{}
     }
 
-    Color -> [
+    Color -> I8[
         Red 
         Green
         Blue

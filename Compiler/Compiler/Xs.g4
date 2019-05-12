@@ -24,9 +24,9 @@ namespaceVariableStatement
 ;
 
 // 枚举
-enumStatement: (annotationSupport)? id ArrowRight NewLine* squareBracketLeft enumSupportStatement* squareBracketRight end;
+enumStatement: (annotationSupport)? id ArrowRight NewLine* type squareBracketLeft enumSupportStatement* squareBracketRight end;
 
-enumSupportStatement: id ('=' (add)? Integer)? end;
+enumSupportStatement: id ((add)? Integer)? end;
 // 命名空间变量
 namespaceVariableStatement:(annotationSupport)? id (Define expression|Declared type (Assign expression)?) end;
 // 命名空间控制

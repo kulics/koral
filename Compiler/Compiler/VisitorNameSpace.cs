@@ -118,10 +118,11 @@ namespace Compiler {
             var obj = "";
             var id = (Result)Visit(context.id());
             var header = "";
+            var typ = (string)Visit(context.type());
             if (context.annotationSupport() != null) {
                 header += Visit(context.annotationSupport());
             }
-            header += id.permission + " enum " + id.text;
+            header += id.permission + " enum " + id.text + ":" + typ;
             header += Wrap + BlockLeft + Wrap;
             for (int i = 0; i < context.enumSupportStatement().Length; i++) {
                 obj += Visit(context.enumSupportStatement(i));

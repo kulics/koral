@@ -454,9 +454,9 @@ TestAnnotation -> {
     Profile(): Str
 }
 
-TestEnum -> [
+TestEnum -> I32[
     Ok
-    Err = -1
+    Err -1
 ]
 
 Package -> {
