@@ -267,7 +267,7 @@ callElement : id op=Pointer? '[' (expression | slice) ']';
 
 callPkg: type blockLeft (pkgAssign|listAssign|dictionaryAssign)? blockRight; // 新建包
 
-callNew: 'New<' NewLine? type NewLine? '>' bracketLeft NewLine? expressionList? NewLine? bracketRight; // 构造类对象
+callNew: '<' type '>' bracketLeft NewLine? expressionList? NewLine? bracketRight; // 构造类对象
 
 getType: Judge bracketLeft (expression|':' type) bracketRight;
 

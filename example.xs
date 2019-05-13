@@ -371,6 +371,7 @@ App -> {
         }
         item3 := []I32{1,2,3,4,5}
         item4 := [Str]I32{["1"]1,["2"]2,["3"]3}
+        item5 := <PackageChild>(1,2) # New
     }
 
     TestFuncTemplate<T1, T2>(data1: T1, data2: T2) -> (data: App) {
