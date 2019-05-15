@@ -118,19 +118,18 @@ arr @ i {
 
 但有时候我们又需要获得数据的原始类型来处理，我们可以使用类型判断来帮助我们完成这个事情。
 
-我们可以使用`value.Is<type>()`来判断数据的类型，使用`value.As<type>()`来将数据转化为我们的类型。
+我们可以使用 `value == :type` 或 `value >< :type` 来判断数据的类型，使用 `value:type:` 来将数据转化为我们的类型。
 
 例如：
 ```
 func(hw: homeWork) -> () {
     # 判断是否中国学生
-    ? hw.Is<chineseStudent>() {
+    ? hw == :chineseStudent {
         # 转换为中国学生数据
-        cs := hw.As<chineseStudent>()
+        cs := hw:chineseStudent:
     }
 }
 ```
-需要注意的是，如果不能正确地转换类型，会得到一个`Nil`结果。
 
 ### [下一章](enumeration-type.md)
 
@@ -162,8 +161,8 @@ B -> {
 
 C(a: A) -> () {
     a.Do()
-    ? a.Is<B>() {
-        Prt( a.As<B>().Y )
+    ? a == :B {
+        Prt( a:B:.Y )
     }
 }
 ```
