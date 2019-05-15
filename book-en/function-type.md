@@ -118,7 +118,7 @@ But sometimes, as a caller, we do not necessarily need all the return values, bu
 
 E.g:
 ```
-name, _ := topSell()
+(name, _) := topSell()
 ```
 If indeed all the return values ​​are not needed, we can also just write a `_` to discard all. But why would need to call such a function? Maybe we should review the code again.
 
