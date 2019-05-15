@@ -141,12 +141,13 @@ TestOptional() -> () {
 
 TestTypeConvert() -> () {
     x := App{}
-    y := x.As<Program>()
+    y := x:Program:
     z1 := (12.34).ToF32()
     z2 := z1.ToI64()
     Prt( z2.To<{}>().To<I64>() )
-    Prt( y.Is<Program>() )
-    Prt( x.As<Program>().Running )
+    Prt( y == :Program )
+    Prt( y >< :Program )
+    Prt( x:Program:.Running )
     Prt( ?(:Program) )
     Prt( ?(x) )
 }

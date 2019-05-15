@@ -227,11 +227,13 @@ linq // 联合查询
 | plusMinus // 正负处理
 | negate // 取反
 | expression call NewLine? callExpression // 链式调用
+| expression judgeType type // 类型判断表达式
 | expression judge expression // 判断型表达式
 | expression add expression // 和型表达式
 | expression mul expression // 积型表达式
 | expression pow expression // 幂型表达式
 | expression op=Pointer // 可空判断
+| expression typeConversion // 类型转换
 | stringExpression // 字符串插值
 ;
 
@@ -270,6 +272,8 @@ callPkg: type blockLeft (pkgAssign|listAssign|dictionaryAssign)? blockRight; // 
 callNew: '<' type '>' bracketLeft NewLine? expressionList? NewLine? bracketRight; // 构造类对象
 
 getType: Judge bracketLeft (expression|':' type) bracketRight;
+
+typeConversion: Declared type Declared; // 类型转化
 
 pkgAssign: pkgAssignElement (more pkgAssignElement)* ; // 简化赋值
 
@@ -399,6 +403,7 @@ nil:bracketLeft bracketRight;
 // bool值
 bool:t=True|t=False;
 
+judgeType : op=('=='|'><') Declared;
 judge : op=('|' | '&' | '==' | '><' | '<' | '>' | '<=' | '>=');
 assign : op=(Assign | '+=' | '-=' | '*=' | '/=' | '%=');
 add : op=('+' | '-');

@@ -202,9 +202,10 @@ Main() ~> () {
     img := Image{}.Init(30, 20, "./icon.png")
     imgBtn := <ImageButton>(1, 1)
 
-    # 可以使用 Is<Type>() 判断类型，使用 As<Type>() 来转换包类型
-    ? ib.Is<ImageButton>() {
-        ib.As<View>().Show()
+    # judge type
+    ? ib == :ImageButton {
+        # conversion type
+        ib:View:.Show()
     }
 
     # get type

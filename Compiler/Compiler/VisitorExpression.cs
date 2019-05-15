@@ -51,6 +51,23 @@ namespace Compiler {
             if (count == 3) {
                 var e1 = (Result)Visit(context.GetChild(0));
                 var op = Visit(context.GetChild(1));
+
+                if (context.GetChild(1).GetType() == typeof(JudgeTypeContext)) {
+                    r.data = bl;
+                    var e3 = (string)Visit(context.GetChild(2));
+                    switch (op)
+                    {
+                        case "==":
+                            r.text = $"(Is<{e3}>({e1.text}) )";
+                            break;
+                        case "><":
+                            r.text = $"(!Is<{e3}>({e1.text}) )";
+                            break;
+                        default:
+                            break;
+                    }
+                    return r;
+                }
                 var e2 = (Result)Visit(context.GetChild(2));
                 if (context.GetChild(1).GetType() == typeof(JudgeContext)) {
                     // todo 如果左右不是bool类型值，报错
@@ -93,8 +110,15 @@ namespace Compiler {
                 r.text = e1.text + op + e2.text;
             } else if (count == 2) {
                 r = (Result)Visit(context.GetChild(0));
-                if (context.op.Type == XsParser.Pointer) {
-                    r.text += "?";
+                if (context.GetChild(1).GetType() == typeof(TypeConversionContext)) {
+                    var e2 = (string)Visit(context.GetChild(1));
+                    r.data = e2;
+                    r.text = $"To<{e2}>({r.text})";
+                } else {
+                    if (context.op.Type == XsParser.Pointer)
+                    {
+                        r.text += "?";
+                    }
                 }
             } else if (count == 1) {
                 r = (Result)Visit(context.GetChild(0));
@@ -159,11 +183,19 @@ namespace Compiler {
             return r;
         }
 
+        public override object VisitTypeConversion([NotNull] TypeConversionContext context) {
+            return (string)Visit(context.type());
+        }
+
         public override object VisitCall([NotNull] CallContext context) {
             return context.op.Text;
         }
 
         public override object VisitWave([NotNull] WaveContext context) {
+            return context.op.Text;
+        }
+
+        public override object VisitJudgeType([NotNull] JudgeTypeContext context) {
             return context.op.Text;
         }
 
