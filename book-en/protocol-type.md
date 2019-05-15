@@ -118,19 +118,18 @@ Because packet types can be converted to protocol types, the original type of da
 
 But sometimes we need to get the original type of data to handle, we can use type judgment to help us accomplish this.
 
-We can use `value.Is<type>()` To judge the type of data, using `value.As<type>()` To convert the data to our type.
+We can use `value == :type` or `value >< :type` To judge the type of data, using `value:type:` To convert the data to our type.
 
 E.g:
 ```
 func(hw: homeWork) -> () {
     # judge type
-    ? hw.Is<chineseStudent>() {
+    ? hw == :chineseStudent {
         # convert to chinese student data
-        cs := hw.As<chineseStudent>()
+        cs := hw:chineseStudent:
     }
 }
 ```
-Note that if the type can not be converted correctly, it will return a `Nil` value.
 
 ### [Next Chapter](enumeration-type.md)
 
@@ -162,8 +161,8 @@ B -> {
 
 C(a: A) -> () {
     a.Do()
-    ? a.Is<B>() {
-        Prt( a.As<B>().Y )
+    ? a == :B {
+        Prt( a:B:.Y )
     }
 }
 ```
