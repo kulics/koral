@@ -289,7 +289,7 @@ namespace Library {
         public static string join(this string it, string j) => string.Join(j, it);
 
         public static string to_Str(this string it, string format) => it;
-        public static byte[] to_bytes(this string it) => Encoding.UTF8.GetBytes(it);
+        public static byte[] to_Bytes(this string it) => Encoding.UTF8.GetBytes(it);
         public static sbyte to_I8(this string it) => Convert.ToSByte(it);
         public static short to_I16(this string it) => Convert.ToInt16(it);
         public static int to_I32(this string it) => Convert.ToInt32(it);
@@ -306,7 +306,7 @@ namespace Library {
         public static int to_I32_from_Base(this string it, int fromBase) => Convert.ToInt32(it, fromBase);
         public static long to_I64_from_Base(this string it, int fromBase) => Convert.ToInt64(it, fromBase);
         public static byte to_U8_from_Base(this string it, int fromBase) => Convert.ToByte(it, fromBase);
-        public static ushort tto_U16_from_Base(this string it, int fromBase) => Convert.ToUInt16(it, fromBase);
+        public static ushort to_U16_from_Base(this string it, int fromBase) => Convert.ToUInt16(it, fromBase);
         public static uint to_U32_from_Base(this string it, int fromBase) => Convert.ToUInt32(it, fromBase);
         public static ulong to_U64_from_Base(this string it, int fromBase) => Convert.ToUInt64(it, fromBase);
 
