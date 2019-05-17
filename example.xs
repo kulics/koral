@@ -422,14 +422,14 @@ Test package template<T:class> -> {
 }
 
 Test protocol template<T:class> <- {
-    Test<H:class>(in: H) -> ()
-    Test(in: T) -> ()
+    test<H:class>(in: H) -> ()
+    test(in: T) -> ()
 }
 
 Test implement template -> {
 } Test protocol template<Test implement template> {
-    Test(in: Test implement template) -> () {}
-    Test<H:class>(in: H) -> () {}
+    test(in: Test implement template) -> () {}
+    test<H:class>(in: H) -> () {}
 }
 
 Program -> {
