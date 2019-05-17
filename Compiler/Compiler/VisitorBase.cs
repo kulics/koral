@@ -29,6 +29,8 @@ namespace Compiler {
         private const string Wrap = "\r\n";
 
         private const string Any = "object";
+        private const string @int = "int";
+        private const string num = "double";
         private const string i8 = "sbyte";
         private const string i16 = "short";
         private const string i32 = "int";
@@ -106,11 +108,11 @@ namespace Compiler {
             } else if (context.op.Type == IDPublic) {
                 r.permission = "public";
                 r.text += context.op.Text;
-                r.isVirtual = r.text[0].IsUpper();
+                r.isVirtual = r.text[0].is_Upper();
             } else if (context.op.Type == IDPrivate) {
                 r.permission = "protected";
                 r.text += context.op.Text;
-                r.isVirtual = r.text[r.text.FindFirst(it => it != '_')].IsUpper();
+                r.isVirtual = r.text[r.text.find_first(it => it != '_')].is_Upper();
             }
             return r;
         }

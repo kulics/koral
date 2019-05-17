@@ -58,10 +58,10 @@ namespace Compiler {
                     switch (op)
                     {
                         case "==":
-                            r.text = $"(Is<{e3}>({e1.text}) )";
+                            r.text = $"({e1.text} is {e3})";
                             break;
                         case "><":
-                            r.text = $"(!Is<{e3}>({e1.text}) )";
+                            r.text = $"!({e1.text} is {e3})";
                             break;
                         default:
                             break;
@@ -229,8 +229,8 @@ namespace Compiler {
                     return new Result { text = "_", data = "var" };
                 }
             } else if (context.ChildCount == 2) {
-                var id = Visit(context.id()).As<Result>();
-                var template = Visit(context.templateCall()).As<string>();
+                var id = Visit(context.id()).@as<Result>();
+                var template = Visit(context.templateCall()).@as<string>();
                 return new Result { text = id.text + template, data = id.text + template };
             }
             var r = (Result)Visit(context.expression());
@@ -264,7 +264,7 @@ namespace Compiler {
             for (int i = 0; i < context.templateDefineItem().Length; i++) {
                 if (i > 0) {
                     item.Template += ",";
-                    if (item.Contract.Len() > 0) {
+                    if (item.Contract.len() > 0) {
                         item.Contract += ",";
                     }
                 }
@@ -278,7 +278,7 @@ namespace Compiler {
 
         public override object VisitTemplateDefineItem([NotNull] TemplateDefineItemContext context) {
             var item = new TemplateItem();
-            if (context.id().Len() == 1) {
+            if (context.id().len() == 1) {
                 var id1 = context.id(0).GetText();
                 item.Template = id1;
             } else {
@@ -344,7 +344,7 @@ namespace Compiler {
             }
             var expr1 = (Result)Visit(context.expression(0));
             var expr2 = (Result)Visit(context.expression(1));
-            return $".Slice({expr1.text}, {expr2.text}, {order}, {attach})";
+            return $".slice({expr1.text}, {expr2.text}, {order}, {attach})";
         }
 
         public override object VisitSliceStart([NotNull] SliceStartContext context) {
@@ -369,7 +369,7 @@ namespace Compiler {
                     break;
             }
             var expr = (Result)Visit(context.expression());
-            return $".Slice({expr.text}, null, {order}, {attach})";
+            return $".slice({expr.text}, null, {order}, {attach})";
         }
 
         public override object VisitSliceEnd([NotNull] SliceEndContext context) {
@@ -394,7 +394,7 @@ namespace Compiler {
                     break;
             }
             var expr = (Result)Visit(context.expression());
-            return $".Slice(null, {expr.text}, {order}, {attach})";
+            return $".slice(null, {expr.text}, {order}, {attach})";
         }
 
         public override object VisitCallFunc([NotNull] CallFuncContext context) {
@@ -607,7 +607,7 @@ namespace Compiler {
         public override object VisitStringExpressionElement([NotNull] StringExpressionElementContext context) {
             var r = (Result)Visit(context.expression());
             var text = context.Text().GetText();
-            return $"({r.text}).ToStr() + {text}";
+            return $"({r.text}).to_Str() + {text}";
         }
 
         public override object VisitDataStatement([NotNull] DataStatementContext context) {

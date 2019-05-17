@@ -13,77 +13,77 @@
 
 Main() ~> () {
     # Define, 一般情况下编译器会自动判断类型
-    string := "10"   # Str
-    float := 1.2     # F64
-    integer := 123   # I32
-    boolean := True  # Bl
-    smallFloat := (1.2).ToF32() # basic type convert
+    String := "10"   # Str
+    Number := 1.2     # Num
+    Integer := 123   # Int
+    Boolean := True  # Bool
+    Small Float := (1.2).to F32() # basic type convert
 
     # Const
     PI 3.141592653
 
     # Mark String
-    format := "the value is "integer","float","Boolean""
+    Format := "the value is "Integer","Number","Boolean""
 
     # List
-    arr := []I32{ 1,2,3,4,5 }
-    arr2 := { 1,2,3,4,5}
-    Prt( arr[0] ) # 使用下标获取
+    Arr := []Int{ 1,2,3,4,5 }
+    Arr2 := { 1,2,3,4,5 }
+    Prt( Arr[0] ) # 使用下标获取
 
     # Dictionary, 前面为key，后面为value
-    dic := {["1"]False, ["2"]True}
-    dic := [Str]Bl{ ["1"]False, ["2"]True}
-    Prt( dic["1"] ) # 使用key获取
+    Dic := {["1"]False, ["2"]True}
+    Dic := [Str]Bool{ ["1"]False, ["2"]True}
+    Prt( Dic["1"] ) # 使用key获取
 
-    arr: [I32] = ArrOf(1,2,3)
+    Arr: [Int] = Arr of(1,2,3)
     # Anonymous Package
-    new := {
-        Title = "nnn",
-        Num = 8
+    New := {
+        title = "nnn",
+        number = 8
     }
 
     # Function
-    fn(in: I32) -> (out: I32) {} # (I32)->(I32) 
+    Fn(in: Int) -> (out: Int) {} # (Int)->(Int) 
 
     # Function with no params no return
-    doSomeThingVoid() -> () {
-        doSomeThingA()
-        doSomeThingB()
+    DoSomeThingVoid() -> () {
+        DoSomeThingA()
+        DoSomeThingB()
     }
 
     # Full Function with in params and out params
-    doSomeThingWithParams(x: I32, y: Str) -> (a: I32, b: Str) {
+    DoSomeThingWithParams(x: Int, y: Str) -> (a: Int, b: Str) {
         <- (x, y)
     }
 
-    b2c()
+    B2C()
     # 使用 _ 舍弃返回值
-    _ = a2b(3, "test")
+    _ = A2B(3, "test")
 
-    # Judge，当表达式的结果只有Bool时，相当于if，只当true时才执行
+    # Judge，当表达式的结果只有Bool时，相当于if，只当True时才执行
     ? 1+1 >< 2 {
-        doSomeThingA()
+        DoSomeThingA()
     } _ { # else
-        doSomeThingB()
+        DoSomeThingB()
     }
 
     # pattern match
     x ? [0<6] {
-        doSomeThingA()
+        DoSomeThingA()
     } 14 {
-        doSomeThingB()
+        DoSomeThingB()
     } _ { # default
-        doSomeThingC()
+        DoSomeThingC()
     }
 
     # type match
     object ? :Str { 
         Prt("string") 
-    } :I32 { 
+    } :Int { 
         Prt("integer") 
-    } :F64 { 
+    } :Num { 
         Prt("float") 
-    } :Bl { 
+    } :Bool { 
         Prt("boolean") 
     } :{} {
         Prt("object")
@@ -122,21 +122,21 @@ Main() ~> () {
     
     # Package，支持 variable 类型，通常用来包装数据
     View -> {
-        Width: I32
-        Height: I32
-        Background: Str
+        width: Int
+        height: Int
+        background: Str
     }
 
     # 也支持包装方法
     Button -> {
-        Width: I32
-        Height: I32
-        Background: Str
-        Title: Str
+        width: Int
+        height: Int
+        background: Str
+        title: Str
         
-        Click() -> () {
+        click() -> () {
             # 可以通过 .. 来访问包自身属性或方法
-            Prt( ..Title )
+            Prt( ..title )
             doSomeThingA()
             doSomeThingB()
         }
@@ -144,122 +144,122 @@ Main() ~> () {
 
     Image -> {
         # 私有属性，不能被外部访问，也不能被重包装
-        _Width := 0
-        _Height := 0
-        _Source := "" 
+        _width := 0
+        _height := 0
+        _source := "" 
         # 初始化方法
-        Init(w: I32, h: I32, s: Str) -> (v:Image) {  
-            (_Width, _Height, _Source) = (w,h,s)
+        init(w: Int, h: Int, s: Str) -> (v:Image) {  
+            (_width, _height, _source) = (w,h,s)
             <- (..)
         }
     }
 
     # Extension ，对某个包扩展，可以用来扩展方法
-    (View)Show() -> () {
+    (View)show() -> () {
         ...
     }
 
     # Protocol, implemented by package
     Animation <- {
-        Speed: I32 # 需求变量，导入的包必须实现定义
-        Move(s: I32) -> () # 需求方法，导入的包必须实现定义
+        speed(): Int        # 需求变量，导入的包必须实现定义
+        move(s: Int) -> ()  # 需求方法，导入的包必须实现定义
     }
 
     # Combine Package，通过引入来复用属性和方法
-    ImageButton -> {
-        Button: Button    # 通过包含其它包，来组合新的包使用 
-        Title: Str
+    Image Button -> {
+        button: Button    # 通过包含其它包，来组合新的包使用 
+        title: Str
     } Animation { # Implement protocol
-        Speed := 2
+        speed := 2
 
-        Move(s: I32) -> () {
+        move(s: Int) -> () {
             t := 5000/s
             play( s + t )
         }
-    } (w: I32, h: I32)...(w, h , "img") {
-        Title = "img btn"
+    } (w: Int, h: Int)...(w, h , "img") {
+        title = "img btn"
     } ...Image { # 继承View
-        Background: Str # 重名覆盖
+        background: Str # 重名覆盖
     }
 
     # Create an package object
-    ib := ImageButton{}
+    IB := Image Button{}
     # Calling property
-    ib.Title = "OK"
+    IB.title = "OK"
     # Calling method
-    ib.Button.Show()
+    IB.button.show()
     # Calling protocol
-    ib.Move(6)
+    IB.move(6)
 
     # Create an object with simple assign
-    ib2 := ImageButton{
-        Title="Cancel"，Background="red"
+    IB2 := Image Button{
+        title="Cancel"，background="red"
     }
-    list := []I32{1,2,3,4,5}
-    map := [Str]I32{["1"]1,["2"]2,["3"]3}
+    List := []Int{1,2,3,4,5}
+    Map := [Str]Int{["1"]1,["2"]2,["3"]3}
 
     # Create an object with params
-    img := Image{}.Init(30, 20, "./icon.png")
-    imgBtn := <ImageButton>(1, 1)
+    Img := Image{}.init(30, 20, "./icon.png")
+    ImgBtn := <Image Button>(1, 1)
 
     # judge type
-    ? ib == :ImageButton {
+    ? IB == :Image Button {
         # conversion type
-        ib:View:.Show()
+        IB:View:.show()
     }
 
     # get type
-    Prt( ?(ib) )
-    Prt( ?(:ImageButton) )
+    Prt( ?(IB) )
+    Prt( ?(:Image Button) )
 
     # Check, listen the Excption Function
-    file := File("./test.xy")
-    ! f := ReadFile("demo.xy")
+    Fi := File("./test.xy")
+    ! F := Read File("demo.xy")
     ! {
-        doSomeThing...
+        do some thing()
     } ex {
         !(ex) # Use !() to declare an Excption
     } _ {
-        file.Dispose()
+        Fi.Dispose()
     }
 
     # Use ~> to declare Async Function
-    task(in: I32) ~> (out: I32) {
+    Task(in: Int) ~> (out: Int) {
         # make a function to await
-        <~ doSomeThingA()
-        doSomeThingB()
-        <~ doSomeThingC()
+        <~ do some thing A()
+        do some thing B()
+        <~ do some thing C()
         <- (in)
     }
 
-    x := task(6)
+    X := Task(6)
 
     # Annotation 
     [assemby: Table("user"), D(False,Name="d",Hide=True)]
     User -> {
         [Column("id"), Required, Key]
-        Id(): Str
+        id(): Str
         [Column("nick_name"), Required]
-        NickName(): Str
+        nick name(): Str
         [Column("time_update"), Required]
-        TimeUpdate(): I32
+        time update(): Int
     }
 
     # Pointer Type
-    a: ^I32 = ()
+    A: ^Int = ()
     # Get Pointer
-    c := a^
+    C := A^
     # Safe Call
-    e := a^.ToStr()
+    E := A^.to Str()
     # OrElseValue
-    f := a.Def(128)
+    F := A.or else(128)
     
     # Generic package
     Table<T> -> {
-        Data: T
+        data: T
 
-        SetData(d: T) -> () {
-            Data = d
+        set data(d: T) -> () {
+            data = d
         }
     }
     # Generic function
@@ -268,37 +268,37 @@ Main() ~> () {
     }
 
     # Lambda Function
-    arr.Select( {it -> it > 2} )
+    arr.select( {it -> it > 2} )
 
     # Func params
-    Func(in: (I32) -> (I32)) -> () {
+    Func(in: (Int) -> (Int)) -> () {
         in(1)
     }
-    Func( (x: I32) -> (y: I32) {
+    Func( (x: Int) -> (y: Int) {
         <- (y)
     })
 
     # linq
-    arr := from id in expr where expr order expr select expr
+    arr := $from id $in expr $where expr $order expr $select expr
 
     # event
     EventHandle -> {
-        PropertyChanged: Event<PropertyChangedEventHandler>
+        property changed: Event<PropertyChangedEventHandler>
     }
 
     # control
     Data -> {
-        B() := 0
-        C(): I32 {get;set;}
+        b() := 0
+        c(): Int {get;set;}
 
-        D(): I32
-        E(): PropertyChangedEventHandler {add;remove;}
+        d(): Int
+        e(): PropertyChangedEventHandler {add;remove;}
     }
 
     # use \ to use namespace content
-    func(x: \NS\NS2\NS3.Pkg) -> () {
-        y := \NS\NS2\NS4.Pkg{}
-        z := \NS.Pkg{}
+    Func(x: \NS\NS2\NS3.Pkg) -> () {
+        Y := \NS\NS2\NS4.Pkg{}
+        Z := \NS.Pkg{}
     }
 
     Color -> I8[
@@ -314,33 +314,33 @@ Main() ~> () {
     System
     System\IO
 }
-Num: I32
+Num: Int
 Txt: Str
 Class -> {
-    Num: I32
-    Txt: Str
-    FuncInClass() -> () {
+    num: Int
+    txt: Str
+    func in class() -> () {
         Func()
     }
 }
-(Class)Switch:Bl
-(Class)FuncOutClass() -> () {
-    Prt(..Num)
+(Class)switch:Bool
+(Class)func out class() -> () {
+    Prt(..num)
     Func()
 }
 Func() -> () {
-    ClassInFunc -> {
-        Num: I32
-        Txt: Str
-        Func() -> () {
-        } 
+    Class In Func -> {
+        num: Int
+        txt: Str
+        func() -> () {
+        }
     }
-    UseProtocol(Class{})
+    Use protocol(Class{})
 }
 Protocol -> {
-    FuncInClass() -> () {
+    func in class() -> () {
     }
 }
-UseProtocol(it: Protocol) -> () {
-    it.FuncInClass()
+Use protocol(it: Protocol) -> () {
+    it.func in class()
 }

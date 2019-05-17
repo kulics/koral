@@ -3,28 +3,28 @@ using System.Collections.Generic;
 using System.Linq;
 
 namespace Library {
-    public class lst<T> : List<T> {
-        public lst() { }
-        public lst(T[] v) : base(v) { }
-        public lst(IEnumerable<T> collection) : base(collection) { }
-        public lst(int capacity) : base(capacity) { }
+    public class Lst<T> : List<T> {
+        public Lst() { }
+        public Lst(T[] v) : base(v) { }
+        public Lst(IEnumerable<T> collection) : base(collection) { }
+        public Lst(int capacity) : base(capacity) { }
 
-        public static lst<T> operator +(lst<T> L, T R) {
-            var list = new lst<T>(L)
+        public static Lst<T> operator +(Lst<T> L, T R) {
+            var list = new Lst<T>(L)
             {
                 R
             };
             return list;
         }
 
-        public static lst<T> operator +(lst<T> L, lst<T> R) {
-            var list = new lst<T>(L);
+        public static Lst<T> operator +(Lst<T> L, Lst<T> R) {
+            var list = new Lst<T>(L);
             list.AddRange(R);
             return list;
         }
 
-        public static lst<T> operator -(lst<T> L, int R) {
-            var list = new lst<T>(L);
+        public static Lst<T> operator -(Lst<T> L, int R) {
+            var list = new Lst<T>(L);
             list.RemoveAt(R);
             return list;
         }
@@ -41,9 +41,9 @@ namespace Library {
         public int cap => Capacity;
         public int capacity => Capacity;
 
-        public lst<T> sub_list(int startIndex, int endIndex) //=> GetRange(startIndex, count) as lst<T>;
+        public Lst<T> sub_list(int startIndex, int endIndex) //=> GetRange(startIndex, count) as lst<T>;
         {
-            var temp = new lst<T>();
+            var temp = new Lst<T>();
             int currIndex = startIndex;
             while (currIndex <= endIndex) {
                 temp += this[currIndex];
@@ -51,7 +51,7 @@ namespace Library {
             }
             return temp;
         }
-        public lst<T> slice(int? startIndex, int? endIndex, bool order = true, bool attach = true) {
+        public Lst<T> slice(int? startIndex, int? endIndex, bool order = true, bool attach = true) {
             if (startIndex == null && endIndex == null) {
                 return this;
             } else if (endIndex == null) {
@@ -74,7 +74,7 @@ namespace Library {
 
         public T find_first(Predicate<T> match) => Find(match);
         public T find_last(Predicate<T> match) => FindLast(match);
-        public lst<T> find_all(Func<T, bool> match) => this.Where(match) as lst<T>;
+        public Lst<T> find_all(Func<T, bool> match) => this.Where(match) as Lst<T>;
         public int find_first_index(Predicate<T> match) => FindIndex(match);
         public int find_last_index(Predicate<T> match) => FindLastIndex(match);
 
@@ -95,24 +95,24 @@ namespace Library {
         public void sort(Comparison<T> comparison) => Sort(comparison);
     }
 
-    public class dic<TKey, TValue> : Dictionary<TKey, TValue> {
-        public dic() : base() { }
-        public dic(IDictionary<TKey, TValue> dictionary) : base(dictionary) { }
-        public dic(IEqualityComparer<TKey> comparer) : base(comparer) { }
-        public dic(int capacity) : base(capacity) { }
-        public dic(IDictionary<TKey, TValue> dictionary, IEqualityComparer<TKey> comparer) : base(dictionary, comparer) { }
-        public dic(int capacity, IEqualityComparer<TKey> comparer) : base(capacity, comparer) { }
+    public class Dic<TKey, TValue> : Dictionary<TKey, TValue> {
+        public Dic() : base() { }
+        public Dic(IDictionary<TKey, TValue> dictionary) : base(dictionary) { }
+        public Dic(IEqualityComparer<TKey> comparer) : base(comparer) { }
+        public Dic(int capacity) : base(capacity) { }
+        public Dic(IDictionary<TKey, TValue> dictionary, IEqualityComparer<TKey> comparer) : base(dictionary, comparer) { }
+        public Dic(int capacity, IEqualityComparer<TKey> comparer) : base(capacity, comparer) { }
 
-        public static dic<TKey, TValue> operator +(dic<TKey, TValue> L, dic<TKey, TValue> R) {
-            var dic = new dic<TKey, TValue>(L);
+        public static Dic<TKey, TValue> operator +(Dic<TKey, TValue> L, Dic<TKey, TValue> R) {
+            var dic = new Dic<TKey, TValue>(L);
             foreach (var item in R) {
                 dic.Add(item.Key, item.Value);
             }
             return dic;
         }
 
-        public static dic<TKey, TValue> operator -(dic<TKey, TValue> L, TKey R) {
-            var dic = new dic<TKey, TValue>(L);
+        public static Dic<TKey, TValue> operator -(Dic<TKey, TValue> L, TKey R) {
+            var dic = new Dic<TKey, TValue>(L);
             dic.Remove(R);
             return dic;
         }
@@ -144,9 +144,9 @@ namespace Library {
         public static int cap<T>(this List<T> it) => it.Capacity;
         public static int capacity<T>(this List<T> it) => it.Capacity;
 
-        public static lst<T> sub_list<T>(this List<T> it, int startIndex, int endIndex) //=> GetRange(startIndex, count) as lst<T>;
+        public static Lst<T> sub_list<T>(this List<T> it, int startIndex, int endIndex) //=> GetRange(startIndex, count) as lst<T>;
         {
-            var temp = new lst<T>();
+            var temp = new Lst<T>();
             int currIndex = startIndex;
             while (currIndex <= endIndex) {
                 temp += it[currIndex];
@@ -154,7 +154,7 @@ namespace Library {
             }
             return temp;
         }
-        public static lst<T> slice<T>(this List<T> it, int? startIndex, int? endIndex, bool order = true, bool attach = true) {
+        public static Lst<T> slice<T>(this List<T> it, int? startIndex, int? endIndex, bool order = true, bool attach = true) {
             if (startIndex == null && endIndex == null) {
                 return it.sub_list(0, it.len() - 1);
             } else if (endIndex == null) {
@@ -177,7 +177,7 @@ namespace Library {
 
         public static T find_first<T>(this List<T> it, Predicate<T> match) => it.Find(match);
         public static T find_last<T>(this List<T> it, Predicate<T> match) => it.FindLast(match);
-        public static lst<T> find_all<T>(this List<T> it, Func<T, bool> match) => it.Where(match) as lst<T>;
+        public static Lst<T> find_all<T>(this List<T> it, Func<T, bool> match) => it.Where(match) as Lst<T>;
         public static int find_first_index<T>(this List<T> it, Predicate<T> match) => it.FindIndex(match);
         public static int find_last_index<T>(this List<T> it, Predicate<T> match) => it.FindLastIndex(match);
 

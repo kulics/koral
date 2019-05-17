@@ -3,105 +3,105 @@
 }
 
 Main() -> () {
-    n0 := <Node>(0)
-    n1 := <Node>(1)
-    n2 := <Node>(2)
-    n3 := <Node>(3)
-    n4 := <Node>(4)
-    n5 := <Node>(5)
-    n6 := <Node>(6)
+    N0 := <Node>(0)
+    N1 := <Node>(1)
+    N2 := <Node>(2)
+    N3 := <Node>(3)
+    N4 := <Node>(4)
+    N5 := <Node>(5)
+    N6 := <Node>(6)
 
-    n0.Left = n1
-    n0.Right = n2
+    N0.left = N1
+    N0.right = N2
 
-    n1.Left = n3
-    n1.Right = n4
+    N1.left = N3
+    N1.right = N4
 
-    n2.Left = n5
-    n2.Right = n6
+    N2.left = N5
+    N2.right = N6
 
     Prt("Pre Order Traverse")
-    pre order traverse(n0)
+    Pre order traverse(N0)
     Prt("Middle Order Traverse")
-    middle order traverse(n0)
+    Middle order traverse(N0)
     Prt("Post Order Traverse")
-    post order traverse(n0)
+    Post order traverse(N0)
 
-    n7 := inverse node(n0)
+    N7 := Inverse node(N0)
     Prt("Inverse Node")
-    pre order traverse(n7)
+    Pre order traverse(N7)
 
-    arr := {9,1,5,8,3,7,4,6,2}
-    simple sort(arr)
-    arr = {9,1,5,8,3,7,4,6,2}
-    bubble sort(arr)
-    arr = {9,1,5,8,3,7,4,6,2}
-    quick sort(arr)
+    Arr := {9,1,5,8,3,7,4,6,2}
+    Simple sort(Arr)
+    Arr = {9,1,5,8,3,7,4,6,2}
+    Bubble sort(Arr)
+    Arr = {9,1,5,8,3,7,4,6,2}
+    Quick sort(Arr)
 
     Prt("Filter Array")
-    arr = filter list(arr, {it->it > 4})
-    arr @ ea {
+    Arr = Filter list(Arr, {it->it > 4})
+    Arr @ ea {
         Prt(ea) 
     }
 
     Prt("oop")
-    app := <App>("test", "Windows")
-    app.Start()
-    app.Stop()
-    shutdown(app)
+    App := <App>("test", "Windows")
+    App.start()
+    App.stop()
+    Shutdown(App)
     Rd()
 }
 
-pre order traverse(node: ^Node) -> () {
+Pre order traverse(node: ^Node) -> () {
     node ? () { 
         <- () 
     }
-    Prt(node.Value)
-    pre order traverse(node.Left)
-    pre order traverse(node.Right)
+    Prt(node.value)
+    Pre order traverse(node.left)
+    Pre order traverse(node.right)
 }
 
-post order traverse(node: ^Node) -> () {
+Post order traverse(node: ^Node) -> () {
     node ? () { 
         <- () 
     }
-    post order traverse(node.Left)
-    post order traverse(node.Right)
-    Prt(node.Value)
+    Post order traverse(node.left)
+    Post order traverse(node.right)
+    Prt(node.value)
 }
 
-middle order traverse(node: ^Node) -> () {
+Middle order traverse(node: ^Node) -> () {
     node ? () { 
         <- () 
     }
-    middle order traverse(node.Left)
-    Prt(node.Value)
-    middle order traverse(node.Right)
+    Middle order traverse(node.left)
+    Prt(node.value)
+    Middle order traverse(node.right)
 }
 
-inverse node(node: ^Node) -> (node: ^Node) {
+Inverse node(node: ^Node) -> (node: ^Node) {
     node ? () { 
         <- (()) 
     }
-    node.Left = inverse node(node.Left)
-    node.Right = inverse node(node.Right)
+    node.left = Inverse node(node.left)
+    node.right = Inverse node(node.right)
 
-    temp := <Node>(node.Value)
-    temp.Left = node.Right
-    temp.Right = node.Left
+    temp := <Node>(node.value)
+    temp.left = node.right
+    temp.right = node.left
     <- (temp)
 }
 
-swap(list: []I32, i: I32, j: I32) -> () {
+Swap(list: []Int, i: Int, j: Int) -> () {
     (list[i], list[j]) = (list[j], list[i])
 }
 
-simple sort(list: []I32) -> () {
+Simple sort(list: []Int) -> () {
     Prt("Simple Sort")
-    [0 < list.Len] @ i {
-        [i+1 < list.Len] @ j {
+    [0 < list.len] @ i {
+        [i+1 < list.len] @ j {
             ? list[i] > list[j] {
-                swap(list, i , j)
+                Swap(list, i , j)
             }
         }
     }
@@ -110,12 +110,12 @@ simple sort(list: []I32) -> () {
     }
 }
 
-bubble sort(list: []I32) -> () {
+Bubble sort(list: []Int) -> () {
     Prt("Bubble Sort")
-    [0 < list.Len] @ i {
-        [list.Len-2 >= i] @ j {
+    [0 < list.len] @ i {
+        [list.len-2 >= i] @ j {
             ? list[j] > list[j+1] {
-                swap(list, j , j+1)
+                Swap(list, j , j+1)
             }
         }
     }
@@ -124,62 +124,62 @@ bubble sort(list: []I32) -> () {
     }
 }
 
-quick sort(list: []I32) -> () {
+Quick sort(list: []Int) -> () {
     Prt("Quick Sort")
-    q sort(list, 0, list.Len-1)
+    Q sort(list, 0, list.len-1)
     list @ ea { 
         Prt(ea) 
     }
 }
 
-q sort(list: []I32, low: I32, high: I32) -> () {
-    pivot := 0
+Q sort(list: []Int, low: Int, high: Int) -> () {
+    Pivot := 0
     ? low < high {
-        pivot = partition(list,low,high)
+        Pivot = Partition(list, low, high)
 
-        q sort(list, low, pivot-1)
-        q sort(list, pivot+1, high)
+        Q sort(list, low, Pivot-1)
+        Q sort(list, Pivot+1, high)
     }
 }
 
-partition(list: []I32, low: I32, high: I32) -> (position: I32) {
-    pivot key := list[low]
+Partition(list: []Int, low: Int, high: Int) -> (position: Int) {
+    Pivot key := list[low]
     
     @ low < high {
-        @ low < high & list[high] >= pivot key {
+        @ low < high & list[high] >= Pivot key {
             high -= 1
         }
-        swap(list, low , high)
-        @ low < high & list[low] <= pivot key {
+        Swap(list, low , high)
+        @ low < high & list[low] <= Pivot key {
             low += 1
         }
-        swap(list, low , high)
+        Swap(list, low , high)
     }
 
     <- (low)
 }
 
-filter list(list: []I32, fn: (I32) -> (Bl)) -> (l: []I32) {
-    filter := []I32{}
+Filter list(list: []Int, fn: (Int) -> (Bool)) -> (l: []Int) {
+    Filter := []Int{}
 
     list @ ea {
         ? fn(ea) {
-            filter += ea
+            Filter += ea
         }
     }
-    <- (filter)
+    <- (Filter)
 }
 
-shutdown(ctrl: Control) -> () {
+Shutdown(ctrl: Control) -> () {
     ctrl.shutdown()
 }
 
 Node -> {
-    Value: I32
-    Left: ^Node
-    Right: ^Node
-} (value: I32) {
-    Value = value
+    value: Int
+    left: ^Node
+    right: ^Node
+} (value: Int) {
+    ..value = value
 }
 
 Control <- {
@@ -187,30 +187,30 @@ Control <- {
 }
 
 Program -> {
-    Name: Str
-    _Running := False
+    name: Str
+    _running := False
 
-    Start() -> () {
+    start() -> () {
         Prt("Start")
-        _Running = True
+        _running = True
     }
 
-    Stop() -> () {
+    stop() -> () {
         Prt("Stop")
-        _Running = False
+        _running = False
     }
 } (name: Str) {
-    Name = name
+    ..name = name
 } Control {
     shutdown() -> () {
         Prt("shutdown")
-        _Running = False
+        _running = False
     }
 }
 
 App -> {
-    Platform: Str
+    platform: Str
 } (name: Str, platform: Str)...(name) {
-    Platform = platform
+    ..platform = platform
 } ...Program {
 }
