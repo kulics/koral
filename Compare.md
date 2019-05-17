@@ -28,9 +28,9 @@ print("Hello, world!")
 ## Variables And Constants
 ### Xs
 ```
-myVariable := 42
-myVariable = 50
-myConstant 42
+my Variable := 42
+my Variable = 50
+my Constant 42
 ```
 ### C#
 ```
@@ -65,7 +65,7 @@ MYCONSTANT = 42
 ## Explicit Types
 ### Xs
 ```
-explicitDouble: F64 = 70
+explicit Double: Num = 70
 ```
 ### C#
 ```
@@ -88,7 +88,7 @@ let explicitDouble: Double = 70
 ```
 I32 I16 I64 I8 
 F64 F32 
-Bl 
+Bool 
 Str
 ```
 ### C#
@@ -129,9 +129,9 @@ string
 ## Type Coercion
 ### Xs
 ```
-f := 6.0
-i := 94
-count := i + f.To<I32>()
+F := 6.0
+I := 94
+Count := I + F.to Int()
 ```
 ### C#
 ```
@@ -203,9 +203,9 @@ for index in range(1,6):
 ## Arrays
 ### Xs
 ```
-shoppingList := {"catfish", "water",
+Shopping List := {"catfish", "water",
     "tulips", "blue paint"}
-shoppingList[1] = "bottle of water"
+Shopping List[1] = "bottle of water"
 ```
 ### C#
 ```
@@ -240,11 +240,11 @@ shoppingList[1] = "bottle of water"
 ## Maps
 ### Xs
 ```
-occupations := {
+Occupations := {
     ["Malcolm"]"Captain",
     ["Kaylee"]"Mechanic"
 }
-occupations["Jayne"] = "Public Relations"
+Occupations["Jayne"] = "Public Relations"
 ```
 ### C#
 ```
@@ -289,8 +289,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Xs
 ```
-emptyArray := []Str{}
-emptyDictionary := [Str]F32{}
+Empty Array := []Str{}
+Empty Dictionary := [Str]F32{}
 ```
 ### C#
 ```
@@ -322,10 +322,10 @@ emptyDictionary ={}
 ## Functions
 ### Xs
 ```
-greet(name: Str, day: Str) -> (r: Str) {
+Greet(name: Str, day: Str) -> (r: Str) {
     <- ("Hello " name ", today is " day ".")
 }
-greet("Bob", "Tuesday")
+Greet("Bob", "Tuesday")
 ```
 ### C#
 ```
@@ -365,7 +365,7 @@ greet("Bob", "Tuesday")
 ## Tuple Return
 ### Xs
 ```
-getGasPrices() -> (a: F64, b: F64, c: F64) {
+Get gas prices() -> (a: Num, b: Num, c: Num) {
     <- (3.59, 3.69, 3.79)
 }
 ```
@@ -400,14 +400,14 @@ def getGasPrices():
 ## Function Type
 ### Xs
 ```
-makeIncrementer() -> (fn: (I32) -> (I32)) {
-    addOne(number: I32) -> (number: I32) {
+Make incrementer() -> (fn: (Int) -> (Int)) {
+    Add one(number: Int) -> (number: Int) {
         <- (1 + number)
     }
-    <- (addOne)
+    <- (Add one)
 }
-increment := makeIncrementer()
-increment(7)
+Increment := Make incrementer()
+Increment(7)
 ```
 ### C#
 ```
@@ -471,9 +471,9 @@ increment(7)
 ### Xs
 ```
 Shape -> {
-    NumberOfSides := 0
-    SimpleDescription() -> (s: Str) {
-        <- ("A shape with " NumberOfSides " sides.")
+    number of sides := 0
+    simple description() -> (s: Str) {
+        <- ("A shape with " number of sides " sides.")
     }
 }
 ```
@@ -525,9 +525,9 @@ class Shape(object):
 ## Classes Usage
 ### Xs
 ```
-shape := Shape{}
-shape.NumberOfSides = 7
-shapeDescription := shape.SimpleDescription()
+Shape := Shape{}
+Shape.number of sides = 7
+Shape description := Shape.simple description()
 ```
 ### C#
 ```
@@ -562,37 +562,37 @@ shapeDescription = shape.simpleDescription()
 ## Subclass
 ### Xs
 ```
-NamedShape -> {
-    Name: Str
-    NumberOfSides: I32 = 0
+Named Shape -> {
+    name: Str
+    number of sides := 0
 
-    SimpleDescription() -> (s: Str) {
-        <- ("A shape with " NumberOfSides " sides.")
+    simple description() -> (s: Str) {
+        <- ("A shape with " number of sides " sides.")
     }
 }
 
 Square -> {
-    SideLength: F64
+    side length: Num
 
-    Init(sideLength:F64, name:Str) -> (v:Square) {
-        ..SideLength = sideLength
-        ..NumberOfSides = 4
-        ..Name = name
+    init(side length: Num, name: Str) -> (v: Square) {
+        ..side length = side length
+        ..number of sides = 4
+        ..name = name
         <- (..)
     }
 
-    Area() -> (f: F64) {
-        <- (SideLength ** 2)
+    area() -> (f: Num) {
+        <- (side length ** 2)
     }
-} ...NamedShape {
-    SimpleDescription() -> (s: Str) {
-        <- ("A square with sides of length " SideLength ".")
+} ...Named Shape {
+    simple description() -> (s: Str) {
+        <- ("A square with sides of length " side length ".")
     }
 }
 
-test := Square{}.Init(5.2, "square")
-test.Area()
-test.SimpleDescription()
+Test := Square{}.init(5.2, "square")
+Test.area()
+Test.simple description()
 ```
 ### C#
 ```
@@ -762,14 +762,14 @@ test.simpleDescription()
 ## Checking Type
 ### Xs
 ```
-movieCount := 0
-songCount := 0
+Movie Count := 0
+Song Count := 0
 
 library @ item {
     item ? :Movie {
-        movieCount += 1
+        Movie Count += 1
     } :Song {
-        songCount += 1
+        Song Count += 1
     }
 }
 ```
@@ -844,13 +844,13 @@ for item in library:
 ### Xs
 ```
 nb := 42
-nb ? [0<=7], 8, 9 { 
+nb ? [0 <= 7], 8, 9 { 
     Prt("single digit") 
 } 10 { 
     Prt("double digits") 
-} [11<=99] { 
+} [11 <= 99] { 
     Prt("double digits") 
-} [100<=999] { 
+} [100 <= 999] { 
     Prt("triple digits") 
 } _ { 
     Prt("four or more digits") 
@@ -959,11 +959,11 @@ for current in someObjects:
 ### Xs
 ```
 Nameable <- {
-    Name() -> (s: Str)
+    name() -> (s: Str)
 }
 
 f(x: Nameable) -> () {
-    Prt("Name is " + x.Name())
+    Prt("Name is " + x.name())
 }
 ```
 ### C#
@@ -1013,11 +1013,11 @@ func f(x: Nameable) {
 ```
 Dog -> {
 } Nameable {
-    Name() -> (n: Str) {
+    name() -> (n: Str) {
         <- ("Dog")
     }
 } Weight {
-    GetWeight() -> (w: I32) {
+    get weight() -> (w: Int) {
         <- (30)
     }
 }

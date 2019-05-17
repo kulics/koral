@@ -397,6 +397,8 @@ t=TypeI8
 | t=TypeChr
 | t=TypeStr
 | t=TypeBool
+| t=TypeInt
+| t=TypeNum
 ;
 // nil值
 nil:bracketLeft bracketRight;
@@ -466,7 +468,9 @@ TypeF32: 'F32';
 TypeF64: 'F64';
 TypeChr: 'Chr';
 TypeStr: 'Str';
-TypeBool: 'Bl';
+TypeBool: 'Bool';
+TypeInt: 'Int';
+TypeNum: 'Num';
 True: 'True';
 False: 'False';
 

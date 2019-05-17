@@ -161,6 +161,12 @@ namespace Compiler {
                 case TypeBool:
                     obj = bl;
                     break;
+                case TypeInt:
+                    obj = @int;
+                    break;
+                case TypeNum:
+                    obj = num;
+                    break;
                 default:
                     obj = Any;
                     break;

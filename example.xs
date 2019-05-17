@@ -5,7 +5,7 @@
     System\ComponentModel\DataAnnotations\Schema
     System\ComponentModel\DataAnnotations
 
-    Xs\Example.ExampleStatic
+    Xs\Example.Example Static
 }
 
 ## 
@@ -14,35 +14,35 @@
 Main() ~> () {
     Prt("main function")
     # run test
-    test type()
-    test operator()
-    test string()
-    test optional()
-    test switch()
-    test if()
-    test array()
-    test dictionary()
-    test loop()
-    x := test func("testcall")
-    _ = test func params(1, 2, 
-    (a: I32, b: I32, c: I32, d: I8) -> (z: Str, a: I32, b: I32, c: I32) {
-        <- ("",a,b,c)
+    Test type()
+    Test operator()
+    Test string()
+    Test optional()
+    Test switch()
+    Test if()
+    Test array()
+    Test dictionary()
+    Test loop()
+    X := Test func("testcall")
+    _ = Test func params(1, 2, 
+    (a: Int, b: Int, c: Int, d: I8) -> (z: Str, a: Int, b: Int, c: Int) {
+        <- ("", a, b, c)
     })
-    test check()
-    test type convert()
-    test default()
-    test lambda()
-    test linq()
-    _ = <~ test async()
+    Test check()
+    Test type convert()
+    Test default()
+    Test lambda()
+    Test linq()
+    _ = <~ Test async()
 
-    y := test tuple(1).to str()
+    Y := Test tuple(1).to Str()
 
-    p := App{}
+    P := App{}
 
-    _ = p.C(1)
-    test interface(p)
+    _ = P.c(1)
+    Test interface(P)
 
-    p.test func template<I32, Str>(1, "2").test package()
+    P.test func template<Int, Str>(1, "2").test package()
     
     @ True {
         <- @
@@ -55,72 +55,75 @@ Main() ~> () {
     Rd()
 }
 
-static x() := 0 {
+Static x() := 0 {
     get { 
-        <- (_static x)
+        <- (_Static x)
     }
 }
 
-static y() := "hello" {
+Static y() := "hello" {
     get { 
-        <- (_static y) 
+        <- (_Static y) 
     }
     set { 
-        _static y = value 
+        _Static y = value 
     }
 }
 
-Readonly: ReadOnly<I32> = RO(5)
-static g: I64
+Readonly: Read Only<Int> = RO(5)
+Static g: I64
 
-test tuple(i: I32) -> (v: Str) {
+Test tuple(i: Int) -> (v: Str) {
     <- ("tuple")
 }
 
-test type() -> () {
-    i1: I8 = 1               # sbyte
-    i2: I16 = 1              # short
-    i3: I32 = 1              # int
-    i4: I64 = 1              # long
-    u1: U8 = 1               # byte
-    u2: U16 = 1              # ushort
-    u3: U32 = 1              # uint
-    u4: U64 = 1              # ulong
-    f1: F32 = 1              # float
-    f2: F64 = 1              # double
-    char1: Chr = 'a'         # char
-    string1: Str = "123"     # string
+Test type() -> () {
+    I1: I8 = 1              # sbyte
+    I2: I16 = 1             # short
+    I3: I32 = 1             # int
+    I4: I64 = 1             # long
+    U1: U8 = 1              # byte
+    U2: U16 = 1             # ushort
+    U3: U32 = 1             # uint
+    U4: U64 = 1             # ulong
+    F1: F32 = 1             # float
+    F2: F64 = 1             # double
+    Char1: Chr = 'a'        # char
+    String1: Str = "123"    # string
+    Bool1: Bool = False     # bool
+    Int1: Int = 1           # bool
+    Num1: Num = 1.0         # bool
 }
 
-test operator() -> () {
-    i :Str = "128.687"
-    i += ".890"
-    b :I32
-    b = 0
-    b += const data
-    b = + - b
-    b -= 1
-    b *= 2
-    b /= 2
-    b %= 5
+Test operator() -> () {
+    I: Str = "128.687"
+    I += ".890"
+    B: Int
+    B = 0
+    B += Const Data
+    B = + - B
+    B -= 1
+    B *= 2
+    B /= 2
+    B %= 5
     Prt("2 pow 2 = ", 2 ** 2) 
     Prt("4 extract root for 2 = ", 4 // 2) 
     Prt("4 log with base 2 = ", 4 %% 2) 
-    Prt(" mark string I32 " b " ")
-    c := False
-    c = ~c
-    c = 1 >< 2
-    c = 3 == 3
-    c = 3 >= 1
-    c = 1 <= 3
-    c = True | False
-    c = True & False
-    d := 11
-    d = d.And(1).Or(2).Xor(3).Not().Lft(1).Rht(2)
-    Prt(b.to str())
+    Prt(" mark string int " B " ")
+    C := False
+    C = ~C
+    C = 1 >< 2
+    C = 3 == 3
+    C = 3 >= 1
+    C = 1 <= 3
+    C = True | False
+    C = True & False
+    D := 11
+    D = D.and(1).or(2).xor(3).not().lft(1).rht(2)
+    Prt(B.to Str())
 }
 
-test string() -> () {
+Test string() -> () {
     "love xs" @ ea {
         ? ea == 'e' {
             Prt("love xs")
@@ -128,44 +131,44 @@ test string() -> () {
     }
 }
 
-test optional() -> () {
-    a: ^I32 = 1
-    a^.to str()
-    b: ^Str = ""
-    b^.to str()
-    c: ^{} = ()
-    d: ^App = ()
-    e: ^[]^I32 = []^I32{0}
-    e^[0]^.to str()^.to str()
-    f := d.Def(App{})
+Test optional() -> () {
+    A: ^Int = 1
+    A^.to Str()
+    B: ^Str = ""
+    B^.to Str()
+    C: ^{} = ()
+    D: ^App = ()
+    E: ^[]^Int = []^Int{0}
+    E^[0]^.to Str()^.to Str()
+    F := D.or else(App{})
 }
 
-test type convert() -> () {
-    x := App{}
-    y := x:Program:
-    z1 := (12.34).ToF32()
-    z2 := z1.ToI64()
-    Prt( z2.To<{}>().To<I64>() )
-    Prt( y == :Program )
-    Prt( y >< :Program )
-    Prt( x:Program:.Running )
+Test type convert() -> () {
+    X := App{}
+    Y := X:Program:
+    Z1 := (12.34).to F32()
+    Z2 := Z1.to I64()
+    Prt( Z2.to<{}>().to<I64>() )
+    Prt( Y == :Program )
+    Prt( Y >< :Program )
+    Prt( X:Program:.running )
     Prt( ?(:Program) )
-    Prt( ?(x) )
+    Prt( ?(X) )
 }
 
-test default() -> () {
-    x := Def<Program>()
-    y := Def<Protocol>()
-    z := Def<(I32)->(I32)>()
+Test default() -> () {
+    X := Def<Program>()
+    Y := Def<Protocol>()
+    Z := Def<(Int)->(Int)>()
 }
 
-test switch() -> () {
-    x :{} = 3
-    x ? 1 {
+Test switch() -> () {
+    X :{} = 3
+    X ? 1 {
         Prt(1)
     } :Str {
         Prt("string")
-    } :I32 {
+    } :Int {
         Prt("int")
     } () {
         Prt("null")
@@ -174,55 +177,55 @@ test switch() -> () {
     }
 }
 
-test if() -> () {
-    x := 5
-    ? x == 2 {
+Test if() -> () {
+    X := 5
+    ? X == 2 {
         Prt(2)
-    } x == 3 {
+    } X == 3 {
         Prt(3)
     } _ {
         Prt("else")
     }
-    ? x == 5 {
+    ? X == 5 {
         Prt("yes")
     }
 }
 
-test array() -> () {
-    lst single := {1}
-    lst number := {1,2,5,6,8,4}
-    lst number = lst number + 0
-    lst number += 3 + 7
-    lst number -= 6
-    take := lst number[0]
-    take = in package array{}.Arr[2]
-    lst obj := {"123", 432, App{}}
-    lst arr := {{1,1,1}, {1,1,1}}
-    lst empty := []I32{}
-    array: [I32] = ArrOf(1,2,3)
-    lst number @ item {
+Test array() -> () {
+    Single := {1}
+    Numbers := {1,2,5,6,8,4}
+    Numbers = Numbers + 0
+    Numbers += 3 + 7
+    Numbers -= 6
+    Take := Numbers[0]
+    Take = In Package Array{}.arr[2]
+    Object := {"123", 432, App{}}
+    Numbers In Numbers := {{1,1,1}, {1,1,1}}
+    Empty := []Int{}
+    Array: [Int] = Array of(1,2,3)
+    Numbers @ item {
         Prt(item)
     }
-    lst number @ [i]v {
+    Numbers @ [i]v {
         Prt(i, ":", v)
     }
-    slice := lst number[0<=]
-    slice2 := lst number[<3]
+    Slice := Numbers[0<=]
+    Slice2 := Numbers[<3]
 }
 
-test dictionary() -> () {
-    empty := [Str]I32{}
-    dic temp := {["k1"]1,["k2"]2}
-    dic temp += {["k3"]3}
-    dic temp @ [k]v {
+Test dictionary() -> () {
+    Empty := [Str]Int{}
+    Temp := {["k1"]1,["k2"]2}
+    Temp += {["k3"]3}
+    Temp @ [k]v {
         Prt(k)
         Prt(v)
     }
-    dic temp -= "k1"
-    Prt(dic temp["k2"])
+    Temp -= "k1"
+    Prt(Temp["k2"])
 }
 
-test loop() -> () {
+Test loop() -> () {
     Prt(" 0 to 10")
     [0 <= 10] @ i {
         Prt(i, ", ", "")
@@ -244,79 +247,79 @@ test loop() -> () {
     @ {
         <- @
     }
-    a := 0
-    b := 8
-    @ a < b {
-        a += 1
+    A := 0
+    B := 8
+    @ A < B {
+        A += 1
     }
 }
 
-test check() -> () {
-    z1: ^Defer = ()
-    ! z2 := Defer{}
+Test check() -> () {
+    Z1: ^Defer = ()
+    ! Z2 := Defer{}
     ! {
-        z1 = Defer{}
-        ! z3 := Defer{}
-        x := 1 * 1
-        y := 1 + 1
+        Z1 = Defer{}
+        ! Z3 := Defer{}
+        X := 1 * 1
+        Y := 1 + 1
     } ex: IOException {
         !(ex)
     } e {
         !(e)
     } _ {
-        ? z1 >< () {
-            z1.Dispose()
+        ? Z1 >< () {
+            Z1.Dispose()
         }
     }
 }
 
-test func(s: Str = "test") -> (out1: Str, out2: I32) {
+Test func(s: Str = "test") -> (out1: Str, out2: Int) {
     s = s + "test"
-    i := 1+1*3*9/8
-    out2 := i + 5 + (i + 8)
+    I1 := 1+1*3*9/8
+    I2 := I1 + 5 + (I1 + 8)
     # func in func
-    in func() -> () {
+    In func() -> () {
         <- ()
     }
-    in func()
+    In func()
 
-    <- (s, i)
+    <- (s, I2)
 }
 
-test func params(a: I32, b: I32, fn: (I32, I32, I32, I8) ->
-    (Str, I32, I32, I32)) -> (a: I32, b: Str, c: Str) {
+Test func params(a: Int, b: Int, fn: (Int, Int, Int, I8) ->
+    (Str, Int, Int, Int)) -> (a: Int, b: Str, c: Str) {
     <- (0, "", "")
 }
 
-test lambda() -> () {
-    test1(fn: (I32, I32) -> (I32, I32)) -> () {
-        (o1,o2) := fn(1, 2)
+Test lambda() -> () {
+    Test1(fn: (Int, Int) -> (Int, Int)) -> () {
+        (O1,O2) := fn(1, 2)
     }
-    test1( {i1,i2 -> (i1,i2)} )
+    Test1( {i1,i2 -> (i1,i2)} )
 
-    test2(fn: () -> (I32)) -> () {
-        o1 := fn()
+    Test2(fn: () -> (Int)) -> () {
+        O1 := fn()
     }
-    test2( {->1} )
+    Test2( {->1} )
 
-    test3(fn: (I32) -> ()) -> () {
+    Test3(fn: (Int) -> ()) -> () {
         fn(1)
     }
-    test3( (it: I32) ~> () {
+    Test3( (it: Int) ~> () {
         <~ Dly(1000)
         Prt(it)
     })
-    test3( {it ~>
+    Test3( {it ~>
         <~ Dly(1000)
         Prt(it)
     })
-    test4(fn: (I32) -> (I32)) -> () { 
+    Test4(fn: (Int) -> (Int)) -> () { 
         fn(18) 
     }
-    test4({it->it+1})
+    Test4({it->it+1})
 }
 
-test async() ~> (x: I32, y: I32, z: Str) {
+Test async() ~> (x: Int, y: Int, z: Str) {
     Slp(1000)
     [1<=10] @ i {
         Go({ ~> 
@@ -327,53 +330,53 @@ test async() ~> (x: I32, y: I32, z: Str) {
             <- ()
         })
     }
-    funWait() ~> () {
+    Fun wait() ~> () {
         <~ Dly(1000)
     }
-    <~ funWait()
+    <~ Fun wait()
     
     <- (1, 2, "123")
 }
 
-test linq() -> () {
-    numbers := {0, 1, 2, 3, 4, 5, 6}
-    arr := $from num $in numbers $where (num % 2) == 0 
-    $orderby num $descending $select num
+Test linq() -> () {
+    Numbers := {0, 1, 2, 3, 4, 5, 6}
+    Array := $from i $in Numbers $where (i % 2) == 0 
+    $orderby i $descending $select i
 }
 
-test interface(in: Protocol) -> () {}
+Test interface(in: Protocol) -> () {}
 
-const data 256
-const data2 :Str "512"
-const function() -> (v: I32) { 
-    <- (const data) 
+Const Data 256
+Const Data2: Str "512"
+Const function() -> (v: Int) { 
+    <- (Const Data) 
 }
 
-in package array -> {
-    Arr: []I32 = {1,2,3,4,5,6,7}
+In Package Array -> {
+    arr: []Int = {1,2,3,4,5,6,7}
 }
 
 Defer -> {
-    Data := ""
+    data := ""
 } IDisposable {
     Dispose() -> () {}
 }
 
 App -> { 
-    I := 555
-    Arr := {1,1,1,1}
-    _PriName := " Program "
-    _B := 5
+    i := 555
+    arr := {1,1,1,1}
+    _pri name := " Program "
+    _b := 5
 
     test package() -> () {
-        item := Program{Name = "new Program",Running = True}
-        item2 := {
-            Name = "new Program",
-            Running = True
+        Item := Program{name = "new Program",running = True}
+        Item2 := {
+            name = "new Program",
+            running = True
         }
-        item3 := []I32{1,2,3,4,5}
-        item4 := [Str]I32{["1"]1,["2"]2,["3"]3}
-        item5 := <PackageChild>(1,2) # New
+        Item3 := []Int{1,2,3,4,5}
+        Item4 := [Str]Int{["1"]1,["2"]2,["3"]3}
+        Item5 := <Package Child>(1,2) # New
     }
 
     test func template<T1, T2>(data1: T1, data2: T2) -> (data: App) {
@@ -381,74 +384,74 @@ App -> {
     }
 } ...Program {  
 } Protocol {
-    B(): I32 {
+    b(): Int {
         get { 
-            <- (_B) 
+            <- (_b) 
         }
         set { 
-            _B = value 
+            _b = value 
         }
     }
 
-    C(x: I32) -> (y: I32) {
-        <- (x + ..B)
+    c(x: Int) -> (y: Int) {
+        <- (x + ..b)
     }
 
-    D() ~> (x: I32) {
+    d() ~> (x: Int) {
         <~ Dly(1000)
         <- (3)
     }
 
-    E() ~> () {
+    e() ~> () {
         <~ Dly(1000)
     }
 
-    F(): Str = "get"
+    f(): Str = "get"
 } 
 
 Result -> {
-    Data: Str
+    data: Str
 } (data: Str) {
-    ..Data = data
+    ..data = data
 }
 
-test package template<T:class> -> {
-    Data: T
+Test package template<T:class> -> {
+    data: T
 
-    Generic(a: T) -> () {}
+    generic(a: T) -> () {}
 }
 
-test protocol template<T:class> <- {
+Test protocol template<T:class> <- {
     Test<H:class>(in: H) -> ()
     Test(in: T) -> ()
 }
 
-test implement template -> {
-} test protocol template<test implement template> {
-    Test(in: test implement template) -> () {}
+Test implement template -> {
+} Test protocol template<Test implement template> {
+    Test(in: Test implement template) -> () {}
     Test<H:class>(in: H) -> () {}
 }
 
 Program -> {
-    Name(): Str = "name" {
+    name(): Str = "name" {
         set { 
-            _Name = value 
+            _name = value 
         }
     }
 
-    Running: Bl
+    running: Bool
 }
 
 Protocol <- {
-    B(): I32 
-    C(x: I32) -> (y: I32)
-    D() ~> (y: I32)
-    E() ~> ()
-    F(): Str
+    b(): Int 
+    c(x: Int) -> (y: Int)
+    d() ~> (y: Int)
+    e() ~> ()
+    f(): Str
 }
 
 [Table("test")]
-test annotation -> {
+Test Annotation -> {
     [Key, Column("id")]
     id(): Str
     [Column("nick_name")]
@@ -457,22 +460,22 @@ test annotation -> {
     profile(): Str
 }
 
-test enum -> I32[
-    ok
-    err -1
+Test Enum -> Int[
+    OK
+    Error -1
 ]
 
 Package -> {
-    X: I32
-    Y: I32
-} (y: I32 = 3) {
-    X = const data
-    Y = y
+    x: Int
+    y: Int
+} (y: Int = 3) {
+    ..x = Const Data
+    ..y = y
 }
 
-PackageChild -> {
-    X: I32
-} (x: I32, y: I32)...(y) {
-    X = x
+Package Child -> {
+    x: Int
+} (x: Int, y: Int)...(y) {
+    ..x = x
 } ...Package {
 }

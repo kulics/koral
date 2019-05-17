@@ -5,79 +5,79 @@ using System.Threading;
 using System.Threading.Tasks;
 
 namespace Library {
-    public class read_only<T> {
+    public class Read_Only<T> {
         public T value { get; }
         public T v { get => value; }
-        public read_only(T value) {
+        public Read_Only(T value) {
             this.value = value;
         }
     }
 
-    public static partial class lib {
-        public static read_only<T> ro<T>(T it) => new read_only<T>(it);
+    public static partial class Lib {
+        public static Read_Only<T> RO<T>(T it) => new Read_Only<T>(it);
 
-        public static read_only<T> read_only<T>(T it) => ro(it);
+        public static Read_Only<T> Read_only<T>(T it) => RO(it);
 
-        public static T[] arr_of<T>(params T[] item) => item;
+        public static T[] Arr_of<T>(params T[] item) => item;
 
-        public static T[] array_of<T>(params T[] item) => arr_of(item);
+        public static T[] Array_of<T>(params T[] item) => Arr_of(item);
 
-        public static lst<T> lst_of<T>(params T[] item) => new lst<T>(item);
+        public static Lst<T> Lst_of<T>(params T[] item) => new Lst<T>(item);
 
-        public static lst<T> list_of<T>(params T[] item) => lst_of(item);
+        public static Lst<T> List_of<T>(params T[] item) => Lst_of(item);
 
-        public static T def<T>() => default(T);
+        public static T Def<T>() => default(T);
 
-        public static T @default<T>() => def<T>();
+        public static T Default<T>() => Def<T>();
 
-        public static T to<T>(object it) => (T)it;
+        public static T To<T>(object it) => (T)it;
 
-        public static bool @is<T>(object it) => it is T;
+        public static bool Is<T>(object it) => it is T;
 
-        public static T @as<T>(object it) where T : class => it as T;
+        public static T As<T>(object it) where T : class => it as T;
 
-        public static void prt(params object[] paramList) => Cmd.print(paramList);
+        public static void Prt(params object[] paramList) => Cmd.Print(paramList);
 
-        public static void print(params object[] paramList) => prt(paramList);
+        public static void Print(params object[] paramList) => Prt(paramList);
 
-        public static string rd() => Cmd.read();
+        public static string Rd() => Cmd.Read();
 
-        public static string read() => rd();
+        public static string Read() => Rd();
 
-        public static void clr() => Cmd.clear();
+        public static void Clr() => Cmd.Clear();
 
-        public static void clear() => clr();
+        public static void Clear() => Clr();
 
-        public static Task<T> go<T>(Func<Task<T>> fn) => Task.Run(fn);
+        public static Task<T> Go<T>(Func<Task<T>> fn) => Task.Run(fn);
 
-        public static Task go(Func<Task> fn) => Task.Run(fn);
+        public static Task Go(Func<Task> fn) => Task.Run(fn);
 
-        public static Task go(Action fn) => Task.Run(fn);
+        public static Task Go(Action fn) => Task.Run(fn);
 
-        public static void wait(params Task[] tasks) => Task.WaitAll(tasks);
+        public static void Wait(params Task[] tasks) => Task.WaitAll(tasks);
 
-        public static void slp(int milliseconds) => Thread.Sleep(milliseconds);
+        public static void Slp(int milliseconds) => Thread.Sleep(milliseconds);
 
-        public static void sleep(int milliseconds) => slp(milliseconds);
+        public static void Sleep(int milliseconds) => Slp(milliseconds);
 
-        public static Task dly(int milliseconds) => Task.Delay(milliseconds);
+        public static Task Dly(int milliseconds) => Task.Delay(milliseconds);
 
-        public static Task delay(int milliseconds) => dly(milliseconds);
+        public static Task Delay(int milliseconds) => Dly(milliseconds);
 
-        public static double pow(double a, double b) => Math.Pow(a, b);
+        public static double Pow(double a, double b) => Math.Pow(a, b);
 
-        public static double root(double a, double b) => Math.Pow(a, 1 / b);
+        public static double Root(double a, double b) => Math.Pow(a, 1 / b);
 
-        public static double log(double a, double b) => Math.Log(a, b);
+        public static double Log(double a, double b) => Math.Log(a, b);
 
-        public static int len<T>(T[] it) => it.Length;
-        public static int length<T>(T[] it) => it.Length;
-        public static int len<T>(ICollection<T> it) => it.Count;
-        public static int length<T>(ICollection<T> it) => it.Count;
-        public static int cap<T>(List<T> it) => it.Capacity;
-        public static int capacity<T>(List<T> it) => it.Capacity;
+        public static int Len<T>(T[] it) => it.Length;
+        public static int Length<T>(T[] it) => it.Length;
+        public static int Len<T>(ICollection<T> it) => it.Count;
+        public static int Length<T>(ICollection<T> it) => it.Count;
+        public static int Cap<T>(List<T> it) => it.Capacity;
+        public static int Capacity<T>(List<T> it) => it.Capacity;
 
-        public static IEnumerable<int> range(int begin, int end, int step = 1, bool order = true, bool attach = true) {
+        public static IEnumerable<int> Range(int begin, int end, int step = 1, bool order = true, bool attach = true) {
             if (order) {
                 if (attach) {
                     for (int index = begin; index <= end; index += step) {
@@ -101,23 +101,23 @@ namespace Library {
             }
         }
 
-        public static IEnumerable<(int index, T item)> range<T>(IEnumerable<T> self)
+        public static IEnumerable<(int index, T item)> Range<T>(IEnumerable<T> self)
 => self.Select((item, index) => (index, item));
 
-        public static IEnumerable<(TKey, TValue)> range<TKey, TValue>(IEnumerable<KeyValuePair<TKey, TValue>> self)
+        public static IEnumerable<(TKey, TValue)> Range<TKey, TValue>(IEnumerable<KeyValuePair<TKey, TValue>> self)
    => self.Select((item) => (item.Key, item.Value));
 
-        public static void todo(string it) => throw new Exception(it);
+        public static void Todo(string it) => throw new Exception(it);
 
-        public static decimal abs(decimal it) => Math.Abs(it);
-        public static sbyte abs(sbyte it) => Math.Abs(it);
-        public static short abs(short it) => Math.Abs(it);
-        public static int abs(int it) => Math.Abs(it);
-        public static long abs(long it) => Math.Abs(it);
-        public static float abs(float it) => Math.Abs(it);
-        public static double abs(double it) => Math.Abs(it);
+        public static decimal Abs(decimal it) => Math.Abs(it);
+        public static sbyte Abs(sbyte it) => Math.Abs(it);
+        public static short Abs(short it) => Math.Abs(it);
+        public static int Abs(int it) => Math.Abs(it);
+        public static long Abs(long it) => Math.Abs(it);
+        public static float Abs(float it) => Math.Abs(it);
+        public static double Abs(double it) => Math.Abs(it);
 
-        public static decimal max(params decimal[] it) {
+        public static decimal Max(params decimal[] it) {
             if (it.Length == 0) {
                 return 0;
             }
@@ -128,7 +128,7 @@ namespace Library {
             return x;
         }
 
-        public static sbyte max(params sbyte[] it) {
+        public static sbyte Max(params sbyte[] it) {
             if (it.Length == 0) {
                 return 0;
             }
@@ -139,7 +139,7 @@ namespace Library {
             return x;
         }
 
-        public static byte max(params byte[] it) {
+        public static byte Max(params byte[] it) {
             if (it.Length == 0) {
                 return 0;
             }
@@ -150,7 +150,7 @@ namespace Library {
             return x;
         }
 
-        public static short max(params short[] it) {
+        public static short Max(params short[] it) {
             if (it.Length == 0) {
                 return 0;
             }
@@ -161,7 +161,7 @@ namespace Library {
             return x;
         }
 
-        public static ushort max(params ushort[] it) {
+        public static ushort Max(params ushort[] it) {
             if (it.Length == 0) {
                 return 0;
             }
@@ -172,7 +172,7 @@ namespace Library {
             return x;
         }
 
-        public static int max(params int[] it) {
+        public static int Max(params int[] it) {
             if (it.Length == 0) {
                 return 0;
             }
@@ -183,7 +183,7 @@ namespace Library {
             return x;
         }
 
-        public static uint max(params uint[] it) {
+        public static uint Max(params uint[] it) {
             if (it.Length == 0) {
                 return 0;
             }
@@ -194,7 +194,7 @@ namespace Library {
             return x;
         }
 
-        public static long max(params long[] it) {
+        public static long Max(params long[] it) {
             if (it.Length == 0) {
                 return 0;
             }
@@ -205,7 +205,7 @@ namespace Library {
             return x;
         }
 
-        public static ulong max(params ulong[] it) {
+        public static ulong Max(params ulong[] it) {
             if (it.Length == 0) {
                 return 0;
             }
@@ -216,7 +216,7 @@ namespace Library {
             return x;
         }
 
-        public static float max(params float[] it) {
+        public static float Max(params float[] it) {
             if (it.Length == 0) {
                 return 0;
             }
@@ -227,7 +227,7 @@ namespace Library {
             return x;
         }
 
-        public static double max(params double[] it) {
+        public static double Max(params double[] it) {
             if (it.Length == 0) {
                 return 0;
             }
@@ -238,7 +238,7 @@ namespace Library {
             return x;
         }
 
-        public static decimal min(params decimal[] it) {
+        public static decimal Min(params decimal[] it) {
             if (it.Length == 0) {
                 return 0;
             }
@@ -249,7 +249,7 @@ namespace Library {
             return x;
         }
 
-        public static sbyte min(params sbyte[] it) {
+        public static sbyte Min(params sbyte[] it) {
             if (it.Length == 0) {
                 return 0;
             }
@@ -260,7 +260,7 @@ namespace Library {
             return x;
         }
 
-        public static byte min(params byte[] it) {
+        public static byte Min(params byte[] it) {
             if (it.Length == 0) {
                 return 0;
             }
@@ -271,7 +271,7 @@ namespace Library {
             return x;
         }
 
-        public static short min(params short[] it) {
+        public static short Min(params short[] it) {
             if (it.Length == 0) {
                 return 0;
             }
@@ -282,7 +282,7 @@ namespace Library {
             return x;
         }
 
-        public static ushort min(params ushort[] it) {
+        public static ushort Min(params ushort[] it) {
             if (it.Length == 0) {
                 return 0;
             }
@@ -293,7 +293,7 @@ namespace Library {
             return x;
         }
 
-        public static int min(params int[] it) {
+        public static int Min(params int[] it) {
             if (it.Length == 0) {
                 return 0;
             }
@@ -304,7 +304,7 @@ namespace Library {
             return x;
         }
 
-        public static uint min(params uint[] it) {
+        public static uint Min(params uint[] it) {
             if (it.Length == 0) {
                 return 0;
             }
@@ -315,7 +315,7 @@ namespace Library {
             return x;
         }
 
-        public static long min(params long[] it) {
+        public static long Min(params long[] it) {
             if (it.Length == 0) {
                 return 0;
             }
@@ -326,7 +326,7 @@ namespace Library {
             return x;
         }
 
-        public static ulong min(params ulong[] it) {
+        public static ulong Min(params ulong[] it) {
             if (it.Length == 0) {
                 return 0;
             }
@@ -337,7 +337,7 @@ namespace Library {
             return x;
         }
 
-        public static float min(params float[] it) {
+        public static float Min(params float[] it) {
             if (it.Length == 0) {
                 return 0;
             }
@@ -348,7 +348,7 @@ namespace Library {
             return x;
         }
 
-        public static double min(params double[] it) {
+        public static double Min(params double[] it) {
             if (it.Length == 0) {
                 return 0;
             }

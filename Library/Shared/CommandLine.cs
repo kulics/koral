@@ -2,7 +2,7 @@
 
 namespace Library {
     public static class Cmd {
-        public static void print(params object[] paramList) {
+        public static void Print(params object[] paramList) {
             foreach (var item in paramList) {
                 Console.Write(item);
             }
@@ -12,8 +12,8 @@ namespace Library {
             Console.WriteLine();
         }
 
-        public static string read() => Console.ReadLine();
+        public static string Read() => Console.ReadLine();
 
-        public static void clear() => Console.Clear();
+        public static void Clear() => Console.Clear();
     }
 }
