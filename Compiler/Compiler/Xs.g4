@@ -333,9 +333,9 @@ plusMinus : add expression;
 
 negate : wave expression;
 
-linq: linqHeadKeyword NewLine? expression NewLine? (linqItem)+ k=('by'|'select') NewLine? expression;
+linq: '$' linqHeadKeyword NewLine? expression NewLine? (linqItem)+ '$' k=('by'|'select') NewLine? expression;
 
-linqItem: linqBodyKeyword NewLine? | expression NewLine? ;
+linqItem: '$' linqBodyKeyword NewLine? | expression NewLine? ;
 
 linqKeyword: linqHeadKeyword | linqBodyKeyword ;
 linqHeadKeyword: k='from';
@@ -412,7 +412,9 @@ pow : op=('**' | '//' | '%%');
 call : op='.' NewLine* CommentLine*;
 wave : op='~';
 
-id: op=(IDPublic|IDPrivate)
+id: (idItem)+;
+
+idItem: op=(IDPublic|IDPrivate)
 |typeBasic
 |linqKeyword;
 
