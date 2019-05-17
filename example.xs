@@ -14,34 +14,35 @@
 Main() ~> () {
     Prt("main function")
     # run test
-    TestType()
-    TestOperator()
-    TestString()
-    TestOptional()
-    TestSwitch()
-    TestIf()
-    TestArray()
-    TestDictionary()
-    TestLoop()
-    x := TestFunc("testcall")
-    _ = TestFuncParams(1, 2, 
+    test type()
+    test operator()
+    test string()
+    test optional()
+    test switch()
+    test if()
+    test array()
+    test dictionary()
+    test loop()
+    x := test func("testcall")
+    _ = test func params(1, 2, 
     (a: I32, b: I32, c: I32, d: I8) -> (z: Str, a: I32, b: I32, c: I32) {
         <- ("",a,b,c)
     })
-    TestCheck()
-    TestTypeConvert()
-    TestDefault()
-    TestLambda()
-    _ = <~ TestAsync()
+    test check()
+    test type convert()
+    test default()
+    test lambda()
+    test linq()
+    _ = <~ test async()
 
-    y := TestTuple(1).ToStr()
+    y := test tuple(1).to str()
 
     p := App{}
 
     _ = p.C(1)
-    TestInterface(p)
+    test interface(p)
 
-    p.TestFuncTemplate<I32, Str>(1, "2").TestPackage()
+    p.test func template<I32, Str>(1, "2").test package()
     
     @ True {
         <- @
@@ -54,29 +55,29 @@ Main() ~> () {
     Rd()
 }
 
-StaticX() := 0 {
+static x() := 0 {
     get { 
-        <- (_StaticX)
+        <- (_static x)
     }
 }
 
-StaticY() := "hello" {
+static y() := "hello" {
     get { 
-        <- (_StaticY) 
+        <- (_static y) 
     }
     set { 
-        _StaticY = value 
+        _static y = value 
     }
 }
 
 Readonly: ReadOnly<I32> = RO(5)
-StaticG: I64
+static g: I64
 
-TestTuple(i: I32) -> (v: Str) {
+test tuple(i: I32) -> (v: Str) {
     <- ("tuple")
 }
 
-TestType() -> () {
+test type() -> () {
     i1: I8 = 1               # sbyte
     i2: I16 = 1              # short
     i3: I32 = 1              # int
@@ -91,12 +92,12 @@ TestType() -> () {
     string1: Str = "123"     # string
 }
 
-TestOperator() -> () {
+test operator() -> () {
     i :Str = "128.687"
     i += ".890"
     b :I32
     b = 0
-    b += ConstData
+    b += const data
     b = + - b
     b -= 1
     b *= 2
@@ -116,10 +117,10 @@ TestOperator() -> () {
     c = True & False
     d := 11
     d = d.And(1).Or(2).Xor(3).Not().Lft(1).Rht(2)
-    Prt(b.ToStr())
+    Prt(b.to str())
 }
 
-TestString() -> () {
+test string() -> () {
     "love xs" @ ea {
         ? ea == 'e' {
             Prt("love xs")
@@ -127,19 +128,19 @@ TestString() -> () {
     }
 }
 
-TestOptional() -> () {
+test optional() -> () {
     a: ^I32 = 1
-    a^.ToStr()
+    a^.to str()
     b: ^Str = ""
-    b^.ToStr()
+    b^.to str()
     c: ^{} = ()
     d: ^App = ()
     e: ^[]^I32 = []^I32{0}
-    e^[0]^.ToStr()^.ToStr()
+    e^[0]^.to str()^.to str()
     f := d.Def(App{})
 }
 
-TestTypeConvert() -> () {
+test type convert() -> () {
     x := App{}
     y := x:Program:
     z1 := (12.34).ToF32()
@@ -152,13 +153,13 @@ TestTypeConvert() -> () {
     Prt( ?(x) )
 }
 
-TestDefault() -> () {
+test default() -> () {
     x := Def<Program>()
     y := Def<Protocol>()
     z := Def<(I32)->(I32)>()
 }
 
-TestSwitch() -> () {
+test switch() -> () {
     x :{} = 3
     x ? 1 {
         Prt(1)
@@ -173,7 +174,7 @@ TestSwitch() -> () {
     }
 }
 
-TestIf() -> () {
+test if() -> () {
     x := 5
     ? x == 2 {
         Prt(2)
@@ -187,41 +188,41 @@ TestIf() -> () {
     }
 }
 
-TestArray() -> () {
-    lstSingle := {1}
-    lstNumber := {1,2,5,6,8,4}
-    lstNumber = lstNumber + 0
-    lstNumber += 3 + 7
-    lstNumber -= 6
-    take := lstNumber[0]
-    take = InPackageArray{}.Arr[2]
-    lstObj := {"123", 432, App{}}
-    lstArr := {{1,1,1}, {1,1,1}}
-    lstEmpty := []I32{}
+test array() -> () {
+    lst single := {1}
+    lst number := {1,2,5,6,8,4}
+    lst number = lst number + 0
+    lst number += 3 + 7
+    lst number -= 6
+    take := lst number[0]
+    take = in package array{}.Arr[2]
+    lst obj := {"123", 432, App{}}
+    lst arr := {{1,1,1}, {1,1,1}}
+    lst empty := []I32{}
     array: [I32] = ArrOf(1,2,3)
-    lstNumber @ item {
+    lst number @ item {
         Prt(item)
     }
-    lstNumber @ [i]v {
+    lst number @ [i]v {
         Prt(i, ":", v)
     }
-    slice := lstNumber[0<=]
-    slice2 := lstNumber[<3]
+    slice := lst number[0<=]
+    slice2 := lst number[<3]
 }
 
-TestDictionary() -> () {
+test dictionary() -> () {
     empty := [Str]I32{}
-    dicTemp := {["k1"]1,["k2"]2}
-    dicTemp += {["k3"]3}
-    dicTemp @ [k]v {
+    dic temp := {["k1"]1,["k2"]2}
+    dic temp += {["k3"]3}
+    dic temp @ [k]v {
         Prt(k)
         Prt(v)
     }
-    dicTemp -= "k1"
-    Prt(dicTemp["k2"])
+    dic temp -= "k1"
+    Prt(dic temp["k2"])
 }
 
-TestLoop() -> () {
+test loop() -> () {
     Prt(" 0 to 10")
     [0 <= 10] @ i {
         Prt(i, ", ", "")
@@ -250,7 +251,7 @@ TestLoop() -> () {
     }
 }
 
-TestCheck() -> () {
+test check() -> () {
     z1: ^Defer = ()
     ! z2 := Defer{}
     ! {
@@ -269,25 +270,25 @@ TestCheck() -> () {
     }
 }
 
-TestFunc(s: Str = "test") -> (out1: Str, out2: I32) {
+test func(s: Str = "test") -> (out1: Str, out2: I32) {
     s = s + "test"
     i := 1+1*3*9/8
     out2 := i + 5 + (i + 8)
     # func in func
-    inFunc() -> () {
+    in func() -> () {
         <- ()
     }
-    inFunc()
+    in func()
 
     <- (s, i)
 }
 
-TestFuncParams(a: I32, b: I32, fn: (I32, I32, I32, I8) ->
+test func params(a: I32, b: I32, fn: (I32, I32, I32, I8) ->
     (Str, I32, I32, I32)) -> (a: I32, b: Str, c: Str) {
     <- (0, "", "")
 }
 
-TestLambda() -> () {
+test lambda() -> () {
     test1(fn: (I32, I32) -> (I32, I32)) -> () {
         (o1,o2) := fn(1, 2)
     }
@@ -315,7 +316,7 @@ TestLambda() -> () {
     test4({it->it+1})
 }
 
-TestAsync() ~> (x: I32, y: I32, z: Str) {
+test async() ~> (x: I32, y: I32, z: Str) {
     Slp(1000)
     [1<=10] @ i {
         Go({ ~> 
@@ -334,21 +335,21 @@ TestAsync() ~> (x: I32, y: I32, z: Str) {
     <- (1, 2, "123")
 }
 
-TestLinq() -> () {
+test linq() -> () {
     numbers := {0, 1, 2, 3, 4, 5, 6}
-    arr := from num in numbers where (num % 2) == 0 
-    orderby num descending select num
+    arr := $from num $in numbers $where (num % 2) == 0 
+    $orderby num $descending $select num
 }
 
-TestInterface(in: Protocol) -> () {}
+test interface(in: Protocol) -> () {}
 
-ConstData 256
-ConstData2 :Str "512"
-ConstFunction() -> (v: I32) { 
-    <- (ConstData) 
+const data 256
+const data2 :Str "512"
+const function() -> (v: I32) { 
+    <- (const data) 
 }
 
-InPackageArray -> {
+in package array -> {
     Arr: []I32 = {1,2,3,4,5,6,7}
 }
 
@@ -364,7 +365,7 @@ App -> {
     _PriName := " Program "
     _B := 5
 
-    TestPackage() -> () {
+    test package() -> () {
         item := Program{Name = "new Program",Running = True}
         item2 := {
             Name = "new Program",
@@ -375,7 +376,7 @@ App -> {
         item5 := <PackageChild>(1,2) # New
     }
 
-    TestFuncTemplate<T1, T2>(data1: T1, data2: T2) -> (data: App) {
+    test func template<T1, T2>(data1: T1, data2: T2) -> (data: App) {
         <- (..)
     }
 } ...Program {  
@@ -411,20 +412,20 @@ Result -> {
     ..Data = data
 }
 
-TestPackageTemplate<T:class> -> {
+test package template<T:class> -> {
     Data: T
 
     Generic(a: T) -> () {}
 }
 
-TestProtocolTemplate<T:class> <- {
+test protocol template<T:class> <- {
     Test<H:class>(in: H) -> ()
     Test(in: T) -> ()
 }
 
-TestImplementTemplate -> {
-} TestProtocolTemplate<TestImplementTemplate> {
-    Test(in: TestImplementTemplate) -> () {}
+test implement template -> {
+} test protocol template<test implement template> {
+    Test(in: test implement template) -> () {}
     Test<H:class>(in: H) -> () {}
 }
 
@@ -447,25 +448,25 @@ Protocol <- {
 }
 
 [Table("test")]
-TestAnnotation -> {
+test annotation -> {
     [Key, Column("id")]
-    Id(): Str
+    id(): Str
     [Column("nick_name")]
-    NickName(): Str
+    nick name(): Str
     [Column("profile")]
-    Profile(): Str
+    profile(): Str
 }
 
-TestEnum -> I32[
-    Ok
-    Err -1
+test enum -> I32[
+    ok
+    err -1
 ]
 
 Package -> {
     X: I32
     Y: I32
 } (y: I32 = 3) {
-    X = ConstData
+    X = const data
     Y = y
 }
 

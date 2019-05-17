@@ -76,6 +76,27 @@ namespace Compiler {
             var r = new Result {
                 data = "var"
             };
+            var first = (Result)Visit(context.GetChild(0));
+            r.permission = first.permission;
+            r.text = first.text;
+            r.isVirtual = first.isVirtual;
+            if (context.ChildCount >= 2) {
+                for (int i = 1; i < context.ChildCount; i++) {
+                    var other = (Result)Visit(context.GetChild(i));
+                    r.text += "_" + other.text;
+                }
+            }
+
+            if (keywords.Exists(t => t == r.text)) {
+                r.text = "@" + r.text;
+            }
+            return r;
+        }
+
+        public override object VisitIdItem([NotNull] IdItemContext context) {
+            var r = new Result{
+                data = "var"
+            };
             if (context.typeBasic() != null) {
                 r.permission = "public";
                 r.text += context.typeBasic().GetText();
@@ -90,10 +111,6 @@ namespace Compiler {
                 r.permission = "protected";
                 r.text += context.op.Text;
                 r.isVirtual = r.text[r.text.FindFirst(it => it != '_')].IsUpper();
-            }
-
-            if (keywords.Exists(t => t == r.text)) {
-                r.text = "@" + r.text;
             }
             return r;
         }
