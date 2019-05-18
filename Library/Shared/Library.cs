@@ -50,7 +50,7 @@ namespace Library {
 
         public static Task<T> Go<T>(Func<Task<T>> fn) => Task.Run(fn);
 
-        public static Task Go(Func<Task> fn) => Task.Run(fn);
+        public static Task Go(Func<Task> fn) => fn();
 
         public static Task Go(Action fn) => Task.Run(fn);
 
