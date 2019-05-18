@@ -8,7 +8,7 @@
 
 例如：
 ```
-integer := 3987349
+Integer := 3987349
 ```
 
 如果我们需要其它数值范围的整数，也可以使用其它类型，所有支持的整数类型如下表。
@@ -29,7 +29,7 @@ U64     # 64位无符号    0 到 18,446,744,073,709,551,615
 
 例如：
 ```
-integer8 := (16).ToI8()
+Integer8 := (16).ToI8()
 ```
 
 需要注意的是，基础类型转换方法只有基础类型拥有，
@@ -42,8 +42,8 @@ integer8 := (16).ToI8()
 
 例如：
 ```
-float1 := 855.544
-float2 := 0.3141592653
+Float1 := 855.544
+Float2 := 0.3141592653
 ```
 
 需要注意的是，由于计算机计算浮点数的特殊性，浮点数运算存在一定的精度问题，所以对精度敏感的需求应该考虑特殊处理。
@@ -62,8 +62,8 @@ F64     # 64位     ±5.0e−324 到 ±1.7e308
 
 例如：
 ```
-char := 'x'
-char2 := '8'
+Char := 'x'
+Char2 := '8'
 ```
 ## String 字符串  
 我们在并不是生活在一个只有数字的世界，所以我们也非常需要使用文字来显示我们需要的信息。
@@ -74,7 +74,7 @@ char2 := '8'
 
 例如：
 ```
-string := "Hello world!"
+String := "Hello world!"
 ```
 
 需要注意的是，字符串是由多个字符组成的类型，所以实际上字符串是一个固定顺序的列表，两者存在对应关系。很多时候我们可以像使用列表那样对字符串进行处理。
@@ -83,9 +83,9 @@ string := "Hello world!"
 
 例如：
 ```
-title := "Year:"
-content := 2018
-string := "Hello world! " + title + content.ToStr()
+Title := "Year:"
+Content := 2018
+String := "Hello world! " + Title + Content.ToStr()
 # Hello world! Year:2018
 ```
 
@@ -94,7 +94,7 @@ string := "Hello world! " + title + content.ToStr()
 
 例如：
 ```
-string := "Hello world! " title " " content ""
+String := "Hello world! " Title ""  Content ""
 # Hello world! Year:2018 
 ```
 ## Boolean 布尔  
@@ -104,15 +104,15 @@ string := "Hello world! " title " " content ""
 
 例如：
 ```
-boolean1 := True      # 真  
-boolean2 := False     # 假  
+Boolean1 := True      # 真  
+Boolean2 := False     # 假  
 ```
 ## 任意类型  
 特别的，有时候会需要一个可以是 任意对象 的 类型 来辅助完成功能，它就是 `{}` 。
 
 例如：
 ```
-a :{} = 1  # 任意类型
+A :{} = 1  # 任意类型
 ```
 ## Nil 空 
 我们需要一个可以是 任意类型空值 的 值 ，所以它就是 `()` 。
@@ -131,12 +131,12 @@ a :{} = 1  # 任意类型
 }
 
 Main() -> () {
-    a := 123
-    b := a.ToI64()
-    c := 123.456
-    d := "hello"
-    c := ""d" world"
-    e := True
-    f :{} = False
+    A := 123
+    B := A.ToI64()
+    C := 123.456
+    D := "hello"
+    C := ""D" world"
+    E := True
+    F :{} = False
 }
 ```
