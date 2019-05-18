@@ -85,7 +85,7 @@ String := "Hello world!"
 ```
 Title := "Year:"
 Content := 2018
-String := "Hello world! " + Title + Content.ToStr()
+String := "Hello world! " + Title + Content.to Str()
 # Hello world! Year:2018
 ```
 
@@ -132,11 +132,11 @@ A :{} = 1  # 任意类型
 
 Main() -> () {
     A := 123
-    B := A.ToI64()
+    B := A.to I64()
     C := 123.456
     D := "hello"
-    C := ""D" world"
-    E := True
-    F :{} = False
+    E := ""D" world"
+    F := True
+    G :{} = False
 }
 ```
