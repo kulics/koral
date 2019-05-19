@@ -12,7 +12,7 @@ We can declare an exception data using `!()` Anywhere in the function.
 
 E.g:
 ```
-readFile(name: Str) -> () {
+Read file(name: Str) -> () {
     ? name.len == 0 {
         !( Exception("something wrong") )
     }
@@ -27,7 +27,7 @@ We can use the `! {}` statement to check for exceptions and `id:type {}` to hand
 E.g:
 ```
 ! {
-    f := readFile("temp.txt")
+    f := Read file("temp.txt")
 } ex:IOException {
     !(ex)
 } e {
@@ -59,18 +59,18 @@ Quite simply, using `_ {}` at the end of the check can declare a statement that 
 E.g:
 ```
 func() -> () {
-    f: File
+    F: File
     ! {
-        f = ReadFile("./somecode.xs")
+        F = Read file("./somecode.xs")
     } _ {
-        ? f >< () {
-            f.Release()
+        ? F >< () {
+            F.Release()
         }
     }
     ......
 }
 ```
-So we declare the `f.Release()` statement that releases the file. This statement will not be executed immediately, but will wait for the function to be called before exiting.
+So we declare the `F.Release()` statement that releases the file. This statement will not be executed immediately, but will wait for the function to be called before exiting.
 
 With check defer, we can safely handle certain tasks without having to worry about how the function exits.
 
@@ -80,7 +80,7 @@ E.g:
 ```
 ......
 _ {
-    f.Release()
+    F.Release()
     <- ()    # error, cannot use return statement
 }
 ```
@@ -90,7 +90,7 @@ For packages that implement the automatic release protocol, we can use the '!= '
 
 E.g:
 ``` 
-! res := FileResource("/test.xs") 
+! res := File resource("/test.xs") 
 ......
 ```
 
@@ -109,7 +109,7 @@ Main() -> () {
         !(ex)
     }
 
-    x := Defer{}
+    X := Defer{}
     ! y := Defer{}
     ! {
         x.Content = "defer"

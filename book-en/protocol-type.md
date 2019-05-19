@@ -10,7 +10,7 @@ We only need to use the symbol `id <- {}` to define a protocol.
 
 E.g:
 ```
-protocol <- {
+Protocol <- {
 }
 ```
 This is an empty protocol.
@@ -19,9 +19,9 @@ Next, let's design a difficult task that students need to accomplish ... homewor
 
 E.g:
 ```
-homeWork <- {
-    Count(): Int
-    Do() -> ()
+Homework <- {
+    count(): Int
+    do() -> ()
 }
 ```
 The protocol for this job has two properties, one is the number of homework and the other is the function to do homework.
@@ -36,13 +36,13 @@ We can implement this protocol by using the `protocol {}` statement after the pa
 
 E.g:
 ```
-student -> {
+Student -> {
     ......
-} homeWork {
-    Count(): Int
+} Homework {
+    count(): Int
 
-    Do() -> () {
-        SpendTime(1)    # spent an hour
+    do() -> () {
+        Spend time(1)    # spent an hour
         Count -= 1      # completed one
     }
 }
@@ -50,22 +50,22 @@ student -> {
 Our student homework is really hard ...
 
 Let's explain what this section of the code:
-1. We have implemented an protocol, and now `student` is also considered as `homework`. We can use a `student` as `homework`.
-1. In the protocol we include the protocol of the two properties `Count, Do`, according to the provisions of a nor less.
-1. We have written the actual values ​​and functions for each of the two properties of the protocol, so that these two properties become one of the valid sub-properties of `student`.
-1. We did something in `Do`, which reduced the total count of homework.
+1. We have implemented an protocol, and now `Student` is also considered as `Homework`. We can use a `Student` as `Homework`.
+1. In the protocol we include the protocol of the two properties `count, do`, according to the provisions of a nor less.
+1. We have written the actual values ​​and functions for each of the two properties of the protocol, so that these two properties become one of the valid sub-properties of `Student`.
+1. We did something in `do`, which reduced the total count of homework.
 
 ## Use Protocol
 With the protocol included, we can use the student bundle that owns the protocol.
 
 E.g:
 ```
-peter := student{ Count=999999 }
-Prt( peter.Count )
+Peter := Student{ count=999999 }
+Prt( Peter.count )
 # print 999999, too much
-peter.Do()
+Peter.do()
 # did a homework
-Prt(peter.Count)
+Prt(Peter.count)
 # print 999998, or too much
 ```
 If this is the case, there is no advantage in defining these two properties directly in the package.
@@ -79,35 +79,35 @@ Now we can create a wide variety of students, all of whom follow the same protoc
 E.g:
 ```
 # create three different types of student packages
-StudentA := chineseStudent{}
-StudentB := americaStudent{}
-StudentC := japanStudent{}
+Student A := chinese student{}
+Student B := american student{}
+Student C := japanese student{}
 # let them do homework separately
-StudentA.Do()
-StudentB.Do()
-StudentC.Do()
+Student A.Do()
+Student B.Do()
+Student C.Do()
 ```
 More efficient approach is to write this function into the function, let the function to help us repeatedly call the function of the protocol.
 
 E.g:
 ```
-doHomeWork(student: homeWork) -> () {
+Do homework(Student: Homework) -> () {
     student.Do()
 }
 # Now we can make it easier for every student to do their homework
-doHomeWork(StudentA)
-doHomeWork(StudentB)
-doHomeWork(StudentC)
+Do homework(Student A)
+Do homework(Student B)
+Do homework(Student C)
 ```
 Of course, it is better to put these students in an array so that we can use loops to handle these repetitive tasks.
 
 E.g:
 ```
-arr := []homeWork{}
-arr.add( StudentA )
+Arr := []homeWork{}
+Arr.Add( Student A )
 ...... # stuffed many, many students
-arr @ i {
-    doHomeWork(i)
+Arr @ i {
+    Do homework(i)
 }
 ```
 ╮ (¯ ▽ ¯) ╭
@@ -122,11 +122,11 @@ We can use `value == :type` or `value >< :type` To judge the type of data, using
 
 E.g:
 ```
-func(hw: homeWork) -> () {
+Func(hw: Homework) -> () {
     # judge type
-    ? hw == :chineseStudent {
+    ? hw == :chinese student {
         # convert to chinese student data
-        cs := hw:chineseStudent:
+        Cs := hw:chinese student:
     }
 }
 ```

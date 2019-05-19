@@ -8,7 +8,7 @@ If we don't need to define a specific control method for a while, we only need t
 
 E.g:
 ```
-number(): Int
+Number(): Int
 ```
 This defines a control data with no additional methods, and it has a built-in default control method.
 
@@ -17,13 +17,13 @@ If we want to set a get operation, we can add `{ ctrl{} }` later to define.
 
 E.g:
 ```
-number(): Int {
+Number(): Int {
     get {           # means get, equivalent to getter in other languages
         <- (7)      # only returns 7
     }
 }
 ```
-In this way, number has a special method to get the value. When calling number, it will execute the internal logic.
+In this way, Number has a special method to get the value. When calling Number, it will execute the internal logic.
 
 Note that this control data has only one getter method, so it only supports the get operation and the caller cannot assign it.
 ## Set Operation
@@ -31,7 +31,7 @@ With the above example, we naturally can think of how to deal with set operation
 
 E.g:
 ```
-number(): Int {
+Number(): Int {
     ......
     set {       # means set, equivalent to setter in other languages
         # ? ? ? Who should give the value? ? ?
@@ -43,9 +43,9 @@ So we need to use another type of data to use the control type.
 
 E.g:
 ```
-_number := 0
+_Number := 0
 
-number(): Int {
+Number(): Int {
     ......
     set {
         _Number = value  # value represents the value of the input
@@ -57,28 +57,28 @@ Note that the variables need to declare both `get` and `set` methods, the invari
 
 A complete example of reading and writing is as follows:
 ```
-_number := 0
+_Number := 0
 
-number() :Int {
+Number() :Int {
     get {
-        <- (_number)
+        <- (_Number)
     }
     set {
-        _number = value  # value represents the value of the input
+        _Number = value  # value represents the value of the input
     }
 }
 ```
 
-In particular, if we initialize `number`, the compiler automatically generates the corresponding `_number` private variable, and then we can omit the step of defining another variable.
+In particular, if we initialize `Number`, the compiler automatically generates the corresponding `_Number` private variable, and then we can omit the step of defining another variable.
 
 E.g:
 ```
-number(): Int = 0 {
+Number(): Int = 0 {
     get {
-        <- (_number)
+        <- (_Number)
     }
     set {
-        _number = value 
+        _Number = value 
     }
 }
 ```
@@ -96,9 +96,8 @@ Most of the time, we can use only simple definitions to complete the task, becau
 }
 
 Main() -> () {
-    Prt(a)
+    Prt(A)
     C = 5
-    Prt(C)
     Prt(C)
 }
 

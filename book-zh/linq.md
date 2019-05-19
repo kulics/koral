@@ -17,9 +17,9 @@
 
 例如：
 ```
-linq() -> () {
-    numbers := { 0, 1, 2, 3, 4, 5, 6 }
-    arr := $from num $in numbers
+Linq() -> () {
+    Numbers := { 0, 1, 2, 3, 4, 5, 6 }
+    Arr := $from num $in numbers
             where (num % 2) == 0
             $orderby num $descending
             $select num
