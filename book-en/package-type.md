@@ -108,7 +108,7 @@ E.g:
 ```
 Student -> {
     ......
-    _girl Friend: Str    # The identifier beginning with this '_' is private
+    _girl friend: Str    # The identifier beginning with this '_' is private
 }
 ```
 That's right, if you remember the definition of identifiers, this is how private identifiers are defined, and private identifiers can not be accessed by outsiders.
@@ -124,9 +124,9 @@ E.g:
 ```
 Student -> {
     ......
-    _girl Friend: Str
-    get Girl Friend() -> (name: Str) {
-        <- (.._girl Friend)
+    _girl friend: Str
+    get girl friend() -> (name: Str) {
+        <- (.._girl friend)
     }
 }
 ```
@@ -139,7 +139,7 @@ With this function, we can get the private property by calling the function.
 
 E.g:
 ```
-Prt( Peter.get Girl Friend() )
+Prt( Peter.get girl friend() )
 # printed the name of a girlfriend of a puppy love student
 ```
 As with data attributes, functions can also be private identifiers, and functions that use private identifiers also mean that only the packet can access itself.
@@ -191,7 +191,7 @@ chineseStudent -> {
     kungfu := False
 } ...Student {   # inhert student
     # override
-    get Girl Friend() -> (name: Str) {
+    get girl friend() -> (name: Str) {
         <- ("none")
     }
 }
@@ -210,9 +210,9 @@ Student -> {
     ..name = name
     ..number = number
     # calculate the class
-    ..class = get Sub Text(number, 2, 3)
+    ..class = get sub text(number, 2, 3)
     # calculate the grade
-    ..grade = get Sub Text(number, 0, 1)
+    ..grade = get sub text(number, 0, 1)
 }
 ```
 This gives us a package with constructors, and when we create a new student, class and grade data are automatically generated.

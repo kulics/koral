@@ -81,7 +81,7 @@ Similar to in parameters, out parameters also need to be clearly defined with an
 
 E.g:
 ```
-Top Sell() -> (name: Str, count: Int) {
+Top sell() -> (name: Str, count: Int) {
     ......
     <- ("cola", many)
 }
@@ -95,16 +95,16 @@ The difference is that for multiple return values ​​we have to wrap each ide
 
 E.g:
 ```
-(n, c) := Top Sell()
+(n, c) := Top sell()
 # Define the two values returned to n and c
-(n, c) = Top Sell()
+(n, c) = Top sell()
 # Assign the returned two values to n and c
 ```
 You can use the definition or assignment statement to get the return value of the function to use, you can also use the nested function to another function.
 
 E.g:
 ```
-Prt( Top Sell() )    # print two values
+Prt( Top sell() )    # print two values
 ```
 If there is only one return value, the brackets can be taken without.
 
@@ -112,19 +112,19 @@ Note that if you call a function with a return value is not allowed to not recei
 
 E.g:
 ```
-Top Sell()  # error, did not explicitly receive the return value
+Top sell()  # error, did not explicitly receive the return value
 ```
 But sometimes, as a caller, we do not necessarily need all the return values, but this time we can use the anonymous identifier `_` to help us drop the data. Just need to write it in the corresponding position.
 
 E.g:
 ```
-(name, _) := Top Sell()
+(name, _) := Top sell()
 ```
 If indeed all the return values ​​are not needed, we can also just write a `_` to discard all. But why would need to call such a function? Maybe we should review the code again.
 
 E.g:
 ```
-_ = Top Sell()  # for _ , assignment and definition are equivalent
+_ = Top sell()  # for _ , assignment and definition are equivalent
 ```
 ## Function In Parameter
 If we want part of the function defined by the external, and only perform the rest of the internal logic, such as some set traversal for a collection of functions, then we can use the function parameters to accomplish this goal.
@@ -133,7 +133,7 @@ Function In Parameter no special definition of way, just replace the type of the
 
 E.g:
 ```
-Each 1 To 10(func: (Int) -> () ) -> () {
+Each 1 to 10(func: (Int) -> () ) -> () {
     [1<=10] @ i {
         func(i)
     }
@@ -149,7 +149,7 @@ Print (item: Int)->() {
     Prt(item)
 }
 
-Each 1 To 10(Print)
+Each 1 to 10(Print)
 ```
 So, we executed the `print` function in the loop inside `each1To10`.
 
@@ -170,7 +170,7 @@ For each( {it ->
     Prt(it % 2)
 })
 Take( {a, b -> a + b} )
-Find All( {it -> it > 7} )
+Find all( {it -> it > 7} )
 ```
 Very simple, the difference from the expression of a function type is that you only need to declare the parameter identifier and execution logic, and neither the type nor the return value need to be declared.
 ## Lambda Function
@@ -178,7 +178,7 @@ Unlike the above simplified method, we can also write a complete function direct
 
 E.g:
 ```
-Each 1 To 10( (item: Int) -> () {
+Each 1 to 10( (item: Int) -> () {
      Prt(item)
 })
 ```

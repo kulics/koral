@@ -10,7 +10,7 @@ E.g:
 ```
 \Name\Space <- {}
 
-Get Something() -> (content: Str) {
+Get something() -> (content: Str) {
     <- ("something")
 }
 ```
@@ -26,7 +26,7 @@ E.g:
 
 Main() -> () {
     # print something
-    Prt( Get Something() )
+    Prt( Get something() )
 }
 ```
 ## Temporary Import
@@ -38,7 +38,7 @@ E.g:
 
 Main() -> () {
     # use it directly
-    Prt( \Name\Space.Get Something() )    
+    Prt( \Name\Space.Get something() )    
 }
 ```
 
