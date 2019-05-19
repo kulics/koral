@@ -25,7 +25,7 @@ E.g:
 ```
 # Judgment is not empty and then use
 ? a >< () {
-     a.ToStr()
+     a.to Str()
 }
 ```
 
@@ -34,7 +34,7 @@ We can use `^` after the expression to use them, so that they will only be execu
 
 E.g:
 ```
-arr^.ToStr()
+arr^.to Str()
 ```
 
 ## Merge Operation
@@ -57,7 +57,7 @@ Main() -> () {
     a: ^Int = ()
 
     b: ^[]^Int = []^Int{0}
-    b^[0]^.ToStr()^.ToStr()
+    b^[0]^.to Str()^.to Str()
 
     e := a.Def(1024)
 }
