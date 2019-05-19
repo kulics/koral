@@ -43,7 +43,7 @@ Student -> {
 
     do() -> () {
         Spend time(1)    # spent an hour
-        Count -= 1      # completed one
+        count -= 1      # completed one
     }
 }
 ```
@@ -79,9 +79,9 @@ Now we can create a wide variety of students, all of whom follow the same protoc
 E.g:
 ```
 # create three different types of student packages
-Student A := chinese student{}
-Student B := american student{}
-Student C := japanese student{}
+Student A := Chinese student{}
+Student B := American student{}
+Student C := Japanese student{}
 # let them do homework separately
 Student A.Do()
 Student B.Do()
@@ -124,9 +124,9 @@ E.g:
 ```
 Func(hw: Homework) -> () {
     # judge type
-    ? hw == :chinese student {
+    ? hw == :Chinese student {
         # convert to chinese student data
-        Cs := hw:chinese student:
+        Cs := hw:Chinese student:
     }
 }
 ```

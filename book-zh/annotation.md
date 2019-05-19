@@ -19,11 +19,11 @@ System\ComponentModel\DataAnnotations
 ```
 [Table("test")]
 Annotation -> {
-        [key,column("id")]
+        [Key,Column("id")]
         id(): Str = ""
-        [column("name")]
+        [Column("name")]
         name(): Str = ""
-        [column("data")]
+        [Column("data")]
         data(): Str = ""
 }
 ```

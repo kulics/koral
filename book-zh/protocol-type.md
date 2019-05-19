@@ -43,7 +43,7 @@ Student -> {
 
     do() -> () {
         Spend time(1)    # 花费了一个小时
-        Count -= 1      # 完成了一个
+        count -= 1      # 完成了一个
     }
 }
 ```
@@ -79,9 +79,9 @@ Prt( Peter.count )
 例如:
 ```
 # 创建了三个不同类型的学生包
-Student A := chinese student{}
-Student B := american student{}
-Student C := japanese student{}
+Student A := Chinese student{}
+Student B := American student{}
+Student C := Japanese student{}
 # 让他们分别做作业
 Student A.Do()
 Student B.Do()
@@ -124,9 +124,9 @@ Arr @ i {
 ```
 Func(hw: Homework) -> () {
     # 判断是否中国学生
-    ? hw == :chinese student {
+    ? hw == :Chinese student {
         # 转换为中国学生数据
-        Cs := hw:chinese student:
+        Cs := hw:Chinese student:
     }
 }
 ```
