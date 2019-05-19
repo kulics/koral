@@ -13,16 +13,16 @@ More details on LINQ can be read at the following URL.
 [Microsoft Documentation](https:#docs.microsoft.com/en-us/dotnet/csharp/programming-guide/concepts/linq/getting-started-with-linq)
 
 ## Statement
-We can use Linq to query like C#.
+We can use Linq to query like C#, just use `$` to declare the LINQ keyword.
 
 E.g:
 ```
 linq() -> () {
     numbers := { 0, 1, 2, 3, 4, 5, 6 }
-    arr := from num in numbers
-            where (num % 2) == 0
-            orderby num descending
-            select num
+    arr := $from num $in numbers
+            $where (num % 2) == 0
+            $orderby num $descending
+            $select num
 }
 ```
 
