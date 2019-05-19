@@ -10,7 +10,7 @@
 
 例如：
 ```
-protocol <- {
+Protocol <- {
 }
 ```
 这就是一个空的协议。
@@ -19,9 +19,9 @@ protocol <- {
 
 例如：
 ```
-homeWork <- {
-    Count(): Int
-    Do() -> ()
+Homework <- {
+    count(): Int
+    do() -> ()
 }
 ```
 这是一个作业协议，它有两个属性，一个是需要做作业的数量，一个是完成作业的函数。
@@ -36,36 +36,36 @@ homeWork <- {
 
 例如：
 ```
-student -> {
+Student -> {
     ......
-} homeWork {
-    Count(): Int
+} Homework {
+    count(): Int
 
-    Do() -> () {
-        SpendTime(1)    # 花费了一个小时
-        Count -= 1      # 完成了一个
+    do() -> () {
+        Spend time(1)    # 花费了一个小时
+        count -= 1      # 完成了一个
     }
 }
 ```
 我们的学生写作业真是非常艰苦的……
 
 让我们来解释一下这段代码发生了什么：
-1. 我们实现了一个协议，现在 `student` 也被认为是 `homework` 类型了，我们可以将一个 `student` 当作 `homework` 一样去使用。
-1. 在协议内我们包含了协议规定的两个属性 `Count, Do` ，根据规定，一个也不能少。
-1. 我们给协议的两个属性都分别编写了真实的值和函数，这样这两个属性就成为了 `student` 的有效子属性之一。
-1. 我们在 `Do` 里面做了一些事情，减少了作业的总量。
+1. 我们实现了一个协议，现在 `Student` 也被认为是 `Homework` 类型了，我们可以将一个 `Student` 当作 `Homework` 一样去使用。
+1. 在协议内我们包含了协议规定的两个属性 `count, do` ，根据规定，一个也不能少。
+1. 我们给协议的两个属性都分别编写了真实的值和函数，这样这两个属性就成为了 `Student` 的有效子属性之一。
+1. 我们在 `do` 里面做了一些事情，减少了作业的总量。
 
 ## 使用协议
 包含了协议之后，我们就能使用拥有协议的学生包了。
 
 例如：
 ```
-peter := student{ Count=999999 }
-Prt( peter.Count )
+Peter := Student{ count=999999 }
+Prt( Peter.count )
 # 打印 999999，好多呀
-peter.Do()
+Peter.do()
 # 做了一次作业
-Prt( peter.Count )
+Prt( Peter.count )
 # 打印 999998，还是好多呀
 ```
 如果只是这样使用，那和在包里直接定义这两个属性比就没什么优势了。
@@ -79,35 +79,35 @@ Prt( peter.Count )
 例如:
 ```
 # 创建了三个不同类型的学生包
-StudentA := chineseStudent{}
-StudentB := americaStudent{}
-StudentC := japaneseStudent{}
+Student A := Chinese Student{}
+Student B := American Student{}
+Student C := Japanese Student{}
 # 让他们分别做作业
-StudentA.Do()
-StudentB.Do()
-StudentC.Do()
+Student A.Do()
+Student B.Do()
+Student C.Do()
 ```
 更有效率的做法是把这个功能写进函数，让函数来帮我们重复调用协议的功能。
 
 例如：
 ```
-doHomeWork(student: homeWork) -> () {
+Do homework(Student: Homework) -> () {
     student.Do()
 }
 # 现在我们就可以更简单地让每个学生做作业了
-doHomeWork(StudentA)
-doHomeWork(StudentB)
-doHomeWork(StudentC)
+Do homework(Student A)
+Do homework(Student B)
+Do homework(Student C)
 ```
 当然，更好的做法是把这些学生都放进数组，这样我们就可以使用循环来处理这些重复的工作了。
 
 例如：
 ```
-arr := []homeWork{}
-arr.add( StudentA )
+Arr := []homeWork{}
+Arr.Add( Student A )
 ...... # 塞进很多很多学生
-arr @ i {
-    doHomeWork(i)
+Arr @ i {
+    Do homework(i)
 }
 ```
 ╮（￣▽￣）╭  
@@ -122,11 +122,11 @@ arr @ i {
 
 例如：
 ```
-func(hw: homeWork) -> () {
+Func(hw: Homework) -> () {
     # 判断是否中国学生
-    ? hw == :chineseStudent {
+    ? hw == :Chinese Student {
         # 转换为中国学生数据
-        cs := hw:chineseStudent:
+        Cs := hw:Chinese Student:
     }
 }
 ```
