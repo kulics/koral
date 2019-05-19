@@ -79,9 +79,9 @@ Prt( Peter.count )
 例如:
 ```
 # 创建了三个不同类型的学生包
-Student A := Chinese student{}
-Student B := American student{}
-Student C := Japanese student{}
+Student A := Chinese Student{}
+Student B := American Student{}
+Student C := Japanese Student{}
 # 让他们分别做作业
 Student A.Do()
 Student B.Do()
@@ -124,9 +124,9 @@ Arr @ i {
 ```
 Func(hw: Homework) -> () {
     # 判断是否中国学生
-    ? hw == :Chinese student {
+    ? hw == :Chinese Student {
         # 转换为中国学生数据
-        Cs := hw:Chinese student:
+        Cs := hw:Chinese Student:
     }
 }
 ```

@@ -79,9 +79,9 @@ Now we can create a wide variety of students, all of whom follow the same protoc
 E.g:
 ```
 # create three different types of student packages
-Student A := Chinese student{}
-Student B := American student{}
-Student C := Japanese student{}
+Student A := Chinese Student{}
+Student B := American Student{}
+Student C := Japanese Student{}
 # let them do homework separately
 Student A.Do()
 Student B.Do()
@@ -124,9 +124,9 @@ E.g:
 ```
 Func(hw: Homework) -> () {
     # judge type
-    ? hw == :Chinese student {
+    ? hw == :Chinese Student {
         # convert to chinese student data
-        Cs := hw:Chinese student:
+        Cs := hw:Chinese Student:
     }
 }
 ```
