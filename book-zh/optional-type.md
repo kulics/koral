@@ -59,6 +59,6 @@ Main() -> () {
     b: ^[]^Int = []^Int{0}
     b^[0]^.to Str()^.to Str()
 
-    e := a.Def(1024)
+    e := a.or else(1024)
 }
 ```
