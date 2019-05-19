@@ -18,13 +18,13 @@ Let's take a look at the database data for how to use annotations.
 E.g:
 ```
 [Table("test")]
-annotation -> {
-        [Key,Column("id")]
-        ID(): Str = ""
-        [Column("name")]
-        Name(): Str = ""
-        [Column("data")]
-        Data(): Str = ""
+Annotation -> {
+        [key,column("id")]
+        id(): Str = ""
+        [column("name")]
+        name(): Str = ""
+        [column("data")]
+        data(): Str = ""
 }
 ```
 We declare an annotation package that annotates the table name `test`, the primary key `id`, the field `name`, and the field `data`.

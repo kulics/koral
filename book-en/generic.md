@@ -15,11 +15,11 @@ List<T> -> {
     Items := Storage{T}    # create storage
     Length := 0
 
-    Get(index: Int) -> (item: T) { # get some T item
-        <- ( Items.Get( index ) )
+    get(index: Int) -> (item: T) { # get some T item
+        <- ( Items.get( index ) )
     }
   
-    Add(item: T) -> () {   # add a T item to List
+    add(item: T) -> () {   # add a T item to List
         Items.insert(Length, item)
         Length += 1
     }
@@ -56,11 +56,11 @@ Very simple, and we can use the same statement, but called when the need to impo
 
 E.g:
 ```
-listNumber := List<Int>{}  # pass in the number type
+List number := List<Int>{}  # pass in the number type
 ```
 So we have an List of number types, is like this:
 ```
-listNumber := []Int{}
+List number := []Int{}
 ```
 Yes, in fact, our list and dictionary syntax are syntactic sugar, the actual types are `Lst` and `Dic`.
 ## Supported Types

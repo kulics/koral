@@ -8,7 +8,7 @@
 
 例如：
 ```
-number(): Int
+Number(): Int
 ```
 这样便定义了一个没有额外方法的控制数据，它内置了默认的控制方法。
 
@@ -17,13 +17,13 @@ number(): Int
 
 例如：
 ```
-number(): Int {
+Number(): Int {
     get {           # 表示获取，相当于其它语言中的getter
         <- (7)      # 只返回 7
     }
 }
 ```
-这样number就具有了一个特殊的获取值方法，在调用number时会执行内部的逻辑。
+这样Number就具有了一个特殊的获取值方法，在调用Number时会执行内部的逻辑。
 
 需要注意的是，这个控制数据只有一个获取方法，那么它就只支持获取操作，调用者无法给它赋值。
 ## 设置操作
@@ -31,7 +31,7 @@ number(): Int {
 
 例如：
 ```
-number(): Int {
+Number(): Int {
     ......
     set {       # 表示设置，相当于其它语言中的setter
         # ？？？该把值给谁？？？
@@ -43,9 +43,9 @@ number(): Int {
 
 例如：
 ```
-_number := 0
+_Number := 0
 
-number(): Int {
+Number(): Int {
     ......
     set {
         _number = value     # value代表输入的值
@@ -57,27 +57,27 @@ number(): Int {
 
 一个完整的读写例子如下：
 ```
-_number := 0
-number(): Int {
+_Number := 0
+Number(): Int {
     get {
-        <- (_number)
+        <- (_Number)
     }
     set {
-        _number = value # value代表输入的值
+        _Number = value # value代表输入的值
     }
 }
 ```
 
-特别的，如果我们给 `number` 初始化，编译器会自动生成对应的 `_number` 私有变量, 这时我们就可以省去定义另一个变量的步骤。
+特别的，如果我们给 `Number` 初始化，编译器会自动生成对应的 `_Number` 私有变量, 这时我们就可以省去定义另一个变量的步骤。
 
 例如：
 ```
-number(): Int = 0 {
+Number(): Int = 0 {
     get {
-        <- (_number)
+        <- (_Number)
     }
     set {
-        _number = value 
+        _Number = value 
     }
 }
 ```
@@ -95,9 +95,8 @@ number(): Int = 0 {
 }
 
 Main() -> () {
-    Prt(a)
+    Prt(A)
     C = 5
-    Prt(C)
     Prt(C)
 }
 

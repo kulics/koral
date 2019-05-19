@@ -16,8 +16,8 @@ That's right, it's really use `~>` on it.
 
 E.g:
 ```
-async() ~> (out: Int) { 
-    <- (12)
+Async() ~> (out: Int) { 
+    <-(12)
 }
 ```
 Once a method has been declared as an async method, the compiler will automatically put a `Task<>` wrapper around the return value, and the method will be executed asynchronously.
@@ -26,7 +26,7 @@ Normal direct call will only get a `Task` data.
 
 E.g:
 ```
-result := async()   # result is a Task data
+Result := Async()   # result is a Task data
 ```
 Let's see how to make it asynchronously waiting for execution.
 ## Asynchronous Wait
@@ -34,22 +34,22 @@ As with the declaration, we only need to use `<~ function()` to declare the wait
 
 E.g:
 ```
-result := <~ async()
+Result := <~ Async()
 ......
 ```
-After declare, the program execution here will temporarily stop the back of the function, until the async function is completed, the `out` value assigned to` result`, and then continue to execute.
+After declare, the program execution here will temporarily stop the back of the function, until the Async function is completed, the `out` value assigned to` Result`, and then continue to execute.
 ## Asynchronous Use Conditions
 Asynchronous wait can only be used in asynchronous declared functions.
 
 E.g:
 ```
 # correct
-async() ~> (out: Int) {
+Async() ~> (out: Int) {
     <~ Delay(5000)     # wait for a while
     <- (12)
 }
 # wrong
-async() -> (out: Int) {
+Async() -> (out: Int) {
     <~ Delay(5000)     # can not be declared
     <- (12)
 }
@@ -61,19 +61,19 @@ We can choose to wait for no data, or we can choose not to wait for data.
 
 E.g:
 ```
-async() ~> () {
+Async() ~> () {
     <~ Delay(5000)    # wait for a while
 }
 
-<~ async()  # correct
+<~ Async()  # correct
 
-task := async()    # correct, got the Task
+Task := Async()    # correct, got the Task
 ```
 ## Lambda
 For lambda, we can also use asynchronous, just use `~>`.
 
 E.g:
 ```
-_ = arr.Filter( {it ~> it > 5} )
+_ = Arr.Filter( {it ~> it > 5} )
 ```
 ### [Next Chapter](generic.md)
