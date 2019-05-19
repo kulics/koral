@@ -16,7 +16,7 @@
 
 例如：
 ```
-async() ~> (out: I32) { 
+async() ~> (out: Int) { 
     <-(12)
 }
 ```
@@ -44,12 +44,12 @@ result := <~ async()
 例如：
 ```
 # 正确
-async() ~> (out: I32) {
+async() ~> (out: Int) {
     <~ Delay(5000)    # 等待一段时间
     <- (12)
 }
 # 错误
-async() -> (out: I32) {
+async() -> (out: Int) {
     <~ Delay(5000)    # 不能被声明
     <- (12)
 }

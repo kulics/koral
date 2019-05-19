@@ -15,7 +15,7 @@ List<T> -> {
     Items := Storage{T}    # create storage
     Length := 0
 
-    Get(index: I32) -> (item: T) { # get some T item
+    Get(index: Int) -> (item: T) { # get some T item
         <- ( Items.Get( index ) )
     }
   
@@ -29,7 +29,7 @@ So we define a package that supports generics, `T` is a generic type, in fact it
 
 Generic brackets, like parameters, support multiple generations, for example: `<T, H, Q>`.
 
-After the generic is defined, `T` is treated as a real type within the area of ​​the package, and then we can use it in a variety of desired types just as `I32` does.
+After the generic is defined, `T` is treated as a real type within the area of ​​the package, and then we can use it in a variety of desired types just as `Int` does.
 
 Note that because generics are typed at run time, the compiler can not infer generic constructor methods. We can only use the default value create method to construct generic data.
 
@@ -56,11 +56,11 @@ Very simple, and we can use the same statement, but called when the need to impo
 
 E.g:
 ```
-listNumber := List<I32>{}  # pass in the number type
+listNumber := List<Int>{}  # pass in the number type
 ```
 So we have an List of number types, is like this:
 ```
-listNumber := []I32{}
+listNumber := []Int{}
 ```
 Yes, in fact, our list and dictionary syntax are syntactic sugar, the actual types are `Lst` and `Dic`.
 ## Supported Types

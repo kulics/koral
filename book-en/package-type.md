@@ -20,11 +20,11 @@ E.g:
 student -> {
     Name: Str = ""
     Number: Str = ""
-    Class: I32 = 0
-    Grade: I32 = 0
+    Class: Int = 0
+    Grade: Int = 0
 }
 ```
-So we get a student bag with these data attributes. This student bag now becomes a usable type like `I32, Str, Bl`.
+So we get a student bag with these data attributes. This student bag now becomes a usable type like `Int, Str, Bool`.
 
 Unlike our original base type can only store one data, the student package can store name, student number, class, grade data.
 
@@ -78,8 +78,8 @@ Similarly, the way the collection is created is actually a simplified creation, 
 
 E.g:
 ```
-array := []I32{ 1, 2, 3, 4, 5 }
-dictionary := [Str]I32{ ["1"]1, ["2"]2, ["3"]3 }
+array := []Int{ 1, 2, 3, 4, 5 }
+dictionary := [Str]Int{ ["1"]1, ["2"]2, ["3"]3 }
 ```
 ## Anonymous Package
 If we only want to wrap some data directly, instead of defining the package first and then using it, is it like an anonymous function?
@@ -152,9 +152,9 @@ E.g:
 chineseStudent -> {
     Name: Str = ""
     Number: Str = ""
-    Class: I32 = 0
-    Grade: I32 = 0
-    Kungfu: Bl = False    # kung fu students
+    Class: Int = 0
+    Grade: Int = 0
+    Kungfu: Bool = False    # kung fu students
 }
 ```
 No, no repeatable definition of data so elegant, we can reuse student attributes, with an additional kung fu attributes on it.
@@ -230,11 +230,11 @@ If you need to use a constructor with inheritance, you can append `...(params)` 
 E.g:
 ```
 Parent -> {
-} (a:I32) {
+} (a:Int) {
 }
 
 Child -> {
-} (a:I32)...(a) {
+} (a:Int)...(a) {
 } ...Parent {
 }
 ```

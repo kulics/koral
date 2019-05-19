@@ -20,7 +20,7 @@ protocol <- {
 例如：
 ```
 homeWork <- {
-    Count(): I32
+    Count(): Int
     Do() -> ()
 }
 ```
@@ -39,7 +39,7 @@ homeWork <- {
 student -> {
     ......
 } homeWork {
-    Count(): I32
+    Count(): Int
 
     Do() -> () {
         SpendTime(1)    # 花费了一个小时
@@ -146,7 +146,7 @@ Main() -> () {
 }
 
 A <- {
-    X(): I32
+    X(): Int
     Do() -> () {}
 }
 

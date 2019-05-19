@@ -20,11 +20,11 @@ package -> {
 student -> {
     Name: Str = ""
     Number: Str = ""
-    Class: I32 = 0
-    Grade: I32 = 0
+    Class: Int = 0
+    Grade: Int = 0
 }
 ```
-这样我们就得到了具有这几个数据属性的学生包。这个学生包现在就像 `I32,Str,Bl` 一样成为了一个可以使用的类型。
+这样我们就得到了具有这几个数据属性的学生包。这个学生包现在就像 `Int,Str,Bool` 一样成为了一个可以使用的类型。
 
 不像我们原始的基础类型只能存储一种数据，这个学生包可以同时存储名称、学号、班级、年级这些数据。
 
@@ -76,8 +76,8 @@ peter := student{
 
 例如：
 ```
-array := []I32{ 1, 2, 3, 4, 5 }
-dictionary := [Str]I32{ ["1"]1, ["2"]2, ["3"]3 }
+array := []Int{ 1, 2, 3, 4, 5 }
+dictionary := [Str]Int{ ["1"]1, ["2"]2, ["3"]3 }
 ```
 ## 匿名包
 如果我们只想直接包裹某些数据使用，而不是先定义包再使用，像匿名函数那样可以吗？
@@ -152,9 +152,9 @@ Prt( peter.GetGirlFriend() )
 chineseStudent -> {
     Name: Str = ""
     Number: Str = ""
-    Class: I32 = 0
-    Grade: I32 = 0
-    Kungfu: Bl = False     # 不会功夫的学生
+    Class: Int = 0
+    Grade: Int = 0
+    Kungfu: Bool = False     # 不会功夫的学生
 }
 ```
 不不不，这样重复定义数据就很不优雅了，我们可以将学生属性复用，加上一个额外的功夫属性就可以了。
@@ -229,11 +229,11 @@ Prt(peter.Class)     # 打印出 2
 例如：
 ```
 Parent -> {
-} (a:I32) {
+} (a:Int) {
 }
 
 Child -> {
-} (a:I32)...(a) {
+} (a:Int)...(a) {
 } ...Parent {
 }
 ```

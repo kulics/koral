@@ -10,7 +10,7 @@ E.g:
 }
 ```
 # Boolean Judgment
-When the judgment value is only `Bl`, the statement is executed only if it is `True`. 
+When the judgment value is only `Bool`, the statement is executed only if it is `True`. 
 If we need to deal with other situations at the same time, we can continue to declare another processing statement after using `value {}`.
 If you only need `False`, use `_ {}` to declare it.
 
@@ -77,8 +77,8 @@ You can use the `value ? id:type{}` syntax to match types, `id` can be omitted.
 
 E.g:
 ```
-x ? :I32 {       # When I32
-     Prt("I32")
+x ? :Int {       # When Int
+     Prt("Int")
 } content:Str {     # when Str
      Prt(content)
 } () {             # When it is Nil
@@ -121,6 +121,6 @@ Main() -> () {
     }
 
     Prt( ?(b) )
-    Prt( ?(:I32) )
+    Prt( ?(:Int) )
 }
 ```

@@ -16,7 +16,7 @@ That's right, it's really use `~>` on it.
 
 E.g:
 ```
-async() ~> (out: I32) { 
+async() ~> (out: Int) { 
     <- (12)
 }
 ```
@@ -44,12 +44,12 @@ Asynchronous wait can only be used in asynchronous declared functions.
 E.g:
 ```
 # correct
-async() ~> (out: I32) {
+async() ~> (out: Int) {
     <~ Delay(5000)     # wait for a while
     <- (12)
 }
 # wrong
-async() -> (out: I32) {
+async() -> (out: Int) {
     <~ Delay(5000)     # can not be declared
     <- (12)
 }

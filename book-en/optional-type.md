@@ -4,7 +4,7 @@ If a type is defined but not assigned, it will not be used.
 
 E.g:
 ```
-a: I32
+a: Int
 b := a   # error, no assignment to a
 ```
 
@@ -15,8 +15,8 @@ Just add `^` forward any type, which is a nullable type.
 
 E.g:
 ```
-a: ^I32
-b := a   # b assigns an empty I32
+a: ^Int
+b := a   # b assigns an empty Int
 ```
 
 Once an optional type has appeared, we need to strictly handle nil values to avoid program errors.
@@ -54,9 +54,9 @@ b := a.Def(128)
 }
 
 Main() -> () {
-    a: ^I32 = ()
+    a: ^Int = ()
 
-    b: ^[]^I32 = []^I32{0}
+    b: ^[]^Int = []^Int{0}
     b^[0]^.ToStr()^.ToStr()
 
     e := a.Def(1024)

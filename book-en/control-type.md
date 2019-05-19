@@ -8,7 +8,7 @@ If we don't need to define a specific control method for a while, we only need t
 
 E.g:
 ```
-number(): I32
+number(): Int
 ```
 This defines a control data with no additional methods, and it has a built-in default control method.
 
@@ -17,7 +17,7 @@ If we want to set a get operation, we can add `{ ctrl{} }` later to define.
 
 E.g:
 ```
-number(): I32 {
+number(): Int {
     get {           # means get, equivalent to getter in other languages
         <- (7)      # only returns 7
     }
@@ -31,7 +31,7 @@ With the above example, we naturally can think of how to deal with set operation
 
 E.g:
 ```
-number(): I32 {
+number(): Int {
     ......
     set {       # means set, equivalent to setter in other languages
         # ? ? ? Who should give the value? ? ?
@@ -45,7 +45,7 @@ E.g:
 ```
 _number := 0
 
-number(): I32 {
+number(): Int {
     ......
     set {
         _Number = value  # value represents the value of the input
@@ -59,7 +59,7 @@ A complete example of reading and writing is as follows:
 ```
 _number := 0
 
-number() :I32 {
+number() :Int {
     get {
         <- (_number)
     }
@@ -73,7 +73,7 @@ In particular, if we initialize `number`, the compiler automatically generates t
 
 E.g:
 ```
-number(): I32 = 0 {
+number(): Int = 0 {
     get {
         <- (_number)
     }
@@ -102,14 +102,14 @@ Main() -> () {
     Prt(C)
 }
 
-A() : I32 {
+A() : Int {
     get { 
         <- (3) 
     }
 }
 
 B := 0
-C() : I32 {
+C() : Int {
     get { 
         <- (B) 
     }

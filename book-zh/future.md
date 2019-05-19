@@ -5,12 +5,12 @@
 例如：
 ```
 A -> {
-    Number: I32
+    Number: Int
     Function() -> (){}
 }
 
 B -> {
-    Number: I32
+    Number: Int
     Text: Str
     Function() -> (){}
 }
