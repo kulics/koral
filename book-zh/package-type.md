@@ -107,7 +107,7 @@ Peter := {
 ```
 Student -> {
     ......
-    _girl Friend: Str # 第一个字符是 _ 的标识符是私有的
+    _girl friend: Str # 第一个字符是 _ 的标识符是私有的
 }
 ```
 没错，如果你还记得标识符的定义的话，这就是私有标识符的定义方式，私有标识符是不能被外界访问的。
@@ -123,9 +123,9 @@ Student -> {
 ```
 Student -> {
     ......
-    _girl Friend: Str
-    get Girl Friend() -> (name: Str) {
-        <- (.._girl Friend)
+    _girl friend: Str
+    get girl friend() -> (name: Str) {
+        <- (.._girl friend)
     }
 }
 ```
@@ -138,7 +138,7 @@ Student -> {
 
 例如：
 ```
-Prt( Peter.get Girl Friend() ) 
+Prt( Peter.get girl friend() ) 
 # 打印了某个早恋学生的女朋友名字
 ```
 与数据属性一样，函数也可以是私有标识符，使用私有标识符的函数也意味着只有包自己能访问。
@@ -191,7 +191,7 @@ Chinese Student -> {
     kungfu := False
 } ...Student {   # 继承 student
     # 重写
-    get Girl Friend() -> (name: Str) {
+    get girl friend() -> (name: Str) {
         <- ("none")
     }
 }
@@ -209,9 +209,9 @@ Student -> {
     ..name = name
     ..number = number
     # 计算得出班级
-    ..class = get Sub Text(number, 2, 3)
+    ..class = get sub text(number, 2, 3)
     # 计算得出年级
-    ..grade = get Sub Text(number, 0, 1)
+    ..grade = get sub text(number, 0, 1)
 }
 ```
 这样就得到了一个带构造函数的包，我们在创建一个新学生的时候，就会自动产生班级和年级数据。

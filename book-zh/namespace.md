@@ -10,7 +10,7 @@
 ```
 \Name\Space <- {}
 
-Get Something() -> (content: Str) {
+Get something() -> (content: Str) {
     <- ("something")
 }
 ```
@@ -25,7 +25,7 @@ Get Something() -> (content: Str) {
 
 Main() -> () {
     # 打印 something
-    Prt( Get Something() )
+    Prt( Get something() )
 }
 ```
 ## 临时导入
@@ -37,7 +37,7 @@ Main() -> () {
 
 Main() -> () {
     # 直接使用即可
-    Prt( \Name\Space.Get Something() )    
+    Prt( \Name\Space.Get something() )    
 }
 ```
 
