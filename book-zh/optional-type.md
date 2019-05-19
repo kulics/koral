@@ -25,7 +25,7 @@ b := a  # b 赋值为空的I32
 ```
 # 判断不为空再使用
 ? a >< () {
-    a.ToStr()
+    a.to Str()
 }
 ```
 
@@ -34,7 +34,7 @@ b := a  # b 赋值为空的I32
 
 例如：
 ```
-arr^.ToStr()
+arr^.to Str()
 ```
 
 ## 合并操作
@@ -57,7 +57,7 @@ Main() -> () {
     a: ^Int = ()
 
     b: ^[]^Int = []^Int{0}
-    b^[0]^.ToStr()^.ToStr()
+    b^[0]^.to Str()^.to Str()
 
     e := a.Def(1024)
 }
