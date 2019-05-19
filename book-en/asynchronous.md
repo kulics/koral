@@ -17,7 +17,7 @@ That's right, it's really use `~>` on it.
 E.g:
 ```
 Async() ~> (out: Int) { 
-    <-(12)
+    <- (12)
 }
 ```
 Once a method has been declared as an async method, the compiler will automatically put a `Task<>` wrapper around the return value, and the method will be executed asynchronously.
