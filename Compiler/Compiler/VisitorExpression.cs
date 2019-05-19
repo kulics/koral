@@ -55,8 +55,7 @@ namespace Compiler {
                 if (context.GetChild(1).GetType() == typeof(JudgeTypeContext)) {
                     r.data = bl;
                     var e3 = (string)Visit(context.GetChild(2));
-                    switch (op)
-                    {
+                    switch (op) {
                         case "==":
                             r.text = $"({e1.text} is {e3})";
                             break;
@@ -115,8 +114,7 @@ namespace Compiler {
                     r.data = e2;
                     r.text = $"To<{e2}>({r.text})";
                 } else {
-                    if (context.op.Type == XsParser.Pointer)
-                    {
+                    if (context.op.Type == XsParser.Pointer) {
                         r.text += "?";
                     }
                 }
@@ -428,15 +426,12 @@ namespace Compiler {
             return r;
         }
 
-        public override object VisitCallNew([NotNull] CallNewContext context)
-        {
-            var r = new Result
-            {
+        public override object VisitCallNew([NotNull] CallNewContext context) {
+            var r = new Result {
                 data = Visit(context.type())
             };
             var param = "";
-            if (context.expressionList() != null)
-            {
+            if (context.expressionList() != null) {
                 param = ((Result)Visit(context.expressionList())).text;
             }
             r.text = $"(new {Visit(context.type())}({param})";
@@ -615,12 +610,12 @@ namespace Compiler {
             if (context.nil() != null) {
                 r.data = Any;
                 r.text = "null";
-            } else if (context.t.Type == Float) {
+            } else if (context.floatExpr() != null) {
                 r.data = f64;
-                r.text = $"{context.Float().GetText()}";
-            } else if (context.t.Type == Integer) {
+                r.text = (string)Visit(context.floatExpr());
+            } else if (context.integerExpr() != null) {
                 r.data = i32;
-                r.text = $"{context.Integer().GetText()}";
+                r.text = (string)Visit(context.integerExpr());
             } else if (context.t.Type == Text) {
                 r.data = str;
                 r.text = context.Text().GetText();
@@ -633,8 +628,22 @@ namespace Compiler {
             } else if (context.t.Type == XsParser.False) {
                 r.data = bl;
                 r.text = f;
-            } 
+            }
             return r;
+        }
+
+        public override object VisitFloatExpr([NotNull] FloatExprContext context) {
+            var number = "";
+            number += Visit(context.integerExpr(0)) + "." + Visit(context.integerExpr(1));
+            return number;
+        }
+
+        public override object VisitIntegerExpr([NotNull] IntegerExprContext context) {
+            var number = "";
+            foreach (var item in context.Number()) {
+                number += item.GetText();
+            }
+            return number;
         }
 
         public override object VisitFunctionExpression([NotNull] FunctionExpressionContext context) {
