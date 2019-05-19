@@ -7,8 +7,8 @@ If we happen to have a collection that can be an array, a dictionary, or a piece
 
 E.g:
 ```
-arr := {1, 2, 3, 4, 5}
-arr @ item {
+Arr := {1, 2, 3, 4, 5}
+Arr @ item {
     Prt(item)     # print each number
 }
 ```
@@ -17,7 +17,7 @@ If we need to fetch the index and value at the same time, we can replace `id` wi
 
 E.g:
 ```
-arr @ [i]v {
+Arr @ [i]v {
     Prt(""i":"v"")
 }
 ```
@@ -87,9 +87,9 @@ Add a condition to it.
 
 E.g:
 ```
-i := 0
-@ i < 6 {
-     i += 1
+I := 0
+@ I < 6 {
+     I += 1
 }
 ```
 ## Continue
@@ -104,8 +104,8 @@ If you only need to jump out of the current loop, use the `-> @` statement.
 }
 
 Main() -> () {
-    arr := {1,2,3,4,5}
-    arr @ i {
+    Arr := {1,2,3,4,5}
+    Arr @ i {
         Prt(i)
     }
 
@@ -117,9 +117,9 @@ Main() -> () {
         Prt(i, v)
     }
 
-    x := 0
-    @ x <= 10 {
-        x += 1
+    X := 0
+    @ X <= 10 {
+        X += 1
     }
 }
 ```

@@ -16,9 +16,9 @@ If you only need `False`, use `_ {}` to declare it.
 
 E.g:
 ```
-b := False
-? b {
-    ...... # since b is False, it will never enter this branch
+B := False
+? B {
+    ...... # since B is False, it will never enter this branch
 } _ {
     ...... # handle False
 }
@@ -28,12 +28,12 @@ We can also insert more judgments in the middle, and the language will automatic
 
 E.g:
 ```
-i := 3
-? i == 0 {
+I := 3
+? I == 0 {
     ......
-} i == 1 {
+} I == 1 {
     ......
-} i == 2 {
+} I == 2 {
     ......
 }
 ```
@@ -44,7 +44,7 @@ If we need to judge an identifier, we can use the `value ? case {}` statement, t
 
 E.g:
 ```
-i ? 1 {
+I ? 1 {
     ......
 } 2 {
     ......
@@ -59,7 +59,7 @@ What if you need a default condition to execute logic? We can use an anonymous i
 
 E.g:
 ```
-i ? 1 {
+I ? 1 {
     ......
 } 2 {
     ......
@@ -77,7 +77,7 @@ You can use the `value ? id:type{}` syntax to match types, `id` can be omitted.
 
 E.g:
 ```
-x ? :Int {       # When Int
+X ? :Int {       # When Int
      Prt("Int")
 } content:Str {     # when Str
      Prt(content)
@@ -102,17 +102,17 @@ E.g:
 }
 
 Main() -> () {
-    a := 5
-    ? a == 2 { 
+    A := 5
+    ? A == 2 { 
         Prt(2) 
-    } a == 4 { 
+    } A == 4 { 
         Prt(4) 
     } _ { 
         Prt("not find") 
     }
 
-    b := 7
-    b ? 5 { 
+    B := 7
+    B ? 5 { 
         Prt(5) 
     } 7 { 
         Prt(7) 
@@ -120,7 +120,7 @@ Main() -> () {
         Prt("not find") 
     }
 
-    Prt( ?(b) )
+    Prt( ?(B) )
     Prt( ?(:Int) )
 }
 ```
