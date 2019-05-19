@@ -26,7 +26,7 @@ namespaceVariableStatement
 // 枚举
 enumStatement: (annotationSupport)? id ArrowRight NewLine* type squareBracketLeft enumSupportStatement* squareBracketRight end;
 
-enumSupportStatement: id ((add)? Integer)? end;
+enumSupportStatement: id ((add)? integerExpr)? end;
 // 命名空间变量
 namespaceVariableStatement:(annotationSupport)? id (Define expression|Declared type (Assign expression)?) end;
 // 命名空间控制
@@ -347,14 +347,17 @@ stringExpressionElement: expression Text;
 
 // 基础数据
 dataStatement:
-t=Float
-| t=Integer
+floatExpr
+| integerExpr
 | t=Text
 | t=Char
 | t=True
 | t=False
-| nil
+| nil 
 ;
+
+floatExpr: integerExpr call integerExpr;
+integerExpr: Number+;
 
 // 类型
 typeNotNull:
@@ -474,8 +477,7 @@ TypeNum: 'Num';
 True: 'True';
 False: 'False';
 
-Float: Integer '.' DIGIT+ ; // 浮点数
-Integer : DIGIT+ ; // 整数
+Number : DIGIT+ ; // 整数
 fragment DIGIT : [0-9] ;             // 单个数字
 Text: '"' (~[\\\r\n])*? '"'; // 文本
 Char: '\'' (~[\\\r\n])*? '\''; // 单字符

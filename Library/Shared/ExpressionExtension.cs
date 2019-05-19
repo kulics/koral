@@ -12,6 +12,8 @@ namespace Library {
         public static T @as<T>(this object it) where T : class => it as T;
         public static T or_else<T>(this T it, T value) where T : class => it != null ? it : value;
 
+        public static int to_Int(this object it) => Convert.ToInt32(it);
+        public static double to_Num(this object it) => Convert.ToDouble(it);
         public static sbyte to_I8(this object it) => Convert.ToSByte(it);
         public static short to_I16(this object it) => Convert.ToInt16(it);
         public static int to_I32(this object it) => Convert.ToInt32(it);
@@ -23,6 +25,8 @@ namespace Library {
         public static float to_F32(this object it) => Convert.ToSingle(it);
         public static double to_F64(this object it) => Convert.ToDouble(it);
         // sbyte
+        public static int to_Int(this sbyte it) => Convert.ToInt32(it);
+        public static double to_Num(this sbyte it) => Convert.ToDouble(it);
         public static string to_Str(this sbyte it, string format) => it.ToString(format);
         public static string to_Base(this sbyte it, int fromBase) => Convert.ToString(it, fromBase);
         public static sbyte to_I8(this sbyte it) => Convert.ToSByte(it);
@@ -43,6 +47,8 @@ namespace Library {
         public static sbyte lft(this sbyte it, int v) => Convert.ToSByte(it << v);
         public static sbyte rht(this sbyte it, int v) => Convert.ToSByte(it >> v);
         // byte
+        public static int to_Int(this byte it) => Convert.ToInt32(it);
+        public static double to_Num(this byte it) => Convert.ToDouble(it);
         public static string to_Str(this byte it, string format) => it.ToString(format);
         public static string to_Base(this byte it, int fromBase) => Convert.ToString(it, fromBase);
         public static sbyte to_I8(this byte it) => Convert.ToSByte(it);
@@ -64,6 +70,8 @@ namespace Library {
         public static byte rht(this byte it, int v) => Convert.ToByte(it >> v);
 
         // short
+        public static int to_Int(this short it) => Convert.ToInt32(it);
+        public static double to_Num(this short it) => Convert.ToDouble(it);
         public static string to_Str(this short it, string format) => it.ToString(format);
         public static string to_Base(this short it, int fromBase) => Convert.ToString(it, fromBase);
         public static sbyte to_I8(this short it) => Convert.ToSByte(it);
@@ -85,6 +93,8 @@ namespace Library {
         public static short rht(this short it, int v) => Convert.ToInt16(it >> v);
 
         // ushort
+        public static int to_Int(this ushort it) => Convert.ToInt32(it);
+        public static double to_Num(this ushort it) => Convert.ToDouble(it);
         public static string to_Str(this ushort it, string format) => it.ToString(format);
         public static string to_Base(this ushort it, int fromBase) => Convert.ToString(it, fromBase);
         public static sbyte to_I8(this ushort it) => Convert.ToSByte(it);
@@ -106,6 +116,8 @@ namespace Library {
         public static ushort rht(this ushort it, int v) => Convert.ToUInt16(it >> v);
 
         // int
+        public static int to_Int(this int it) => Convert.ToInt32(it);
+        public static double to_Num(this int it) => Convert.ToDouble(it);
         public static string to_Str(this int it, string format) => it.ToString(format);
         public static string to_Base(this int it, int fromBase) => Convert.ToString(it, fromBase);
         public static sbyte to_I8(this int it) => Convert.ToSByte(it);
@@ -127,6 +139,8 @@ namespace Library {
         public static int rht(this int it, int v) => Convert.ToInt32(it >> v);
 
         // uint
+        public static int to_Int(this uint it) => Convert.ToInt32(it);
+        public static double to_Num(this uint it) => Convert.ToDouble(it);
         public static string to_Str(this uint it, string format) => it.ToString(format);
         public static string to_Base(this uint it, int fromBase) => Convert.ToString(it, fromBase);
         public static sbyte to_I8(this uint it) => Convert.ToSByte(it);
@@ -148,6 +162,8 @@ namespace Library {
         public static uint rht(this uint it, int v) => Convert.ToUInt32(it >> v);
 
         // long
+        public static int to_Int(this long it) => Convert.ToInt32(it);
+        public static double to_Num(this long it) => Convert.ToDouble(it);
         public static string to_Str(this long it, string format) => it.ToString(format);
         public static string to_Base(this long it, int fromBase) => Convert.ToString(it, fromBase);
         public static sbyte to_I8(this long it) => Convert.ToSByte(it);
@@ -169,6 +185,8 @@ namespace Library {
         public static long rht(this long it, int v) => Convert.ToInt64(it >> v);
 
         // ulong
+        public static int to_Int(this ulong it) => Convert.ToInt32(it);
+        public static double to_Num(this ulong it) => Convert.ToDouble(it);
         public static string to_Str(this ulong it, string format) => it.ToString(format);
         public static string to_Base(this ulong it, int fromBase) => Convert.ToString((long)it, fromBase);
         public static sbyte to_I8(this ulong it) => Convert.ToSByte(it);
@@ -190,6 +208,8 @@ namespace Library {
         public static ulong rht(this ulong it, int v) => Convert.ToUInt64(it >> v);
 
         // float
+        public static int to_Int(this float it) => Convert.ToInt32(it);
+        public static double to_Num(this float it) => Convert.ToDouble(it);
         public static string to_Str(this float it, string format) => it.ToString(format);
         public static sbyte to_I8(this float it) => Convert.ToSByte(it);
         public static short to_I16(this float it) => Convert.ToInt16(it);
@@ -203,6 +223,8 @@ namespace Library {
         public static double to_F64(this float it) => Convert.ToDouble(it);
 
         // double
+        public static int to_Int(this double it) => Convert.ToInt32(it);
+        public static double to_Num(this double it) => Convert.ToDouble(it);
         public static string to_Str(this double it, string format) => it.ToString(format);
         public static sbyte to_I8(this double it) => Convert.ToSByte(it);
         public static short to_I16(this double it) => Convert.ToInt16(it);
@@ -216,6 +238,8 @@ namespace Library {
         public static double to_F64(this double it) => Convert.ToDouble(it);
 
         // Char
+        public static int to_Int(this char it) => Convert.ToInt32(it);
+        public static double to_Num(this char it) => Convert.ToDouble(it);
         public static string to_Str(this char it, string format) => it.ToString();
         public static sbyte to_I8(this char it) => Convert.ToSByte(it);
         public static short to_I16(this char it) => Convert.ToInt16(it);
@@ -290,6 +314,8 @@ namespace Library {
 
         public static string to_Str(this string it, string format) => it;
         public static byte[] to_Bytes(this string it) => Encoding.UTF8.GetBytes(it);
+        public static int to_Int(this string it) => Convert.ToInt32(it);
+        public static double to_Num(this string it) => Convert.ToDouble(it);
         public static sbyte to_I8(this string it) => Convert.ToSByte(it);
         public static short to_I16(this string it) => Convert.ToInt16(it);
         public static int to_I32(this string it) => Convert.ToInt32(it);

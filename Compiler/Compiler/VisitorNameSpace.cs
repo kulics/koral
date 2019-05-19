@@ -30,7 +30,7 @@ namespace Compiler {
             }
             obj += content;
             if (contentStatic != "") {
-                obj += $"public partial class {ns.name.Substring(ns.name.LastIndexOf('.')+1)+"_Static"} {BlockLeft} {Wrap}" +
+                obj += $"public partial class {ns.name.Substring(ns.name.LastIndexOf('.') + 1) + "_Static"} {BlockLeft} {Wrap}" +
                     $" {contentStatic}" +
                     $" {BlockRight} {Wrap}";
             }
@@ -134,12 +134,12 @@ namespace Compiler {
 
         public override object VisitEnumSupportStatement([NotNull] EnumSupportStatementContext context) {
             var id = (Result)Visit(context.id());
-            if (context.Integer() != null) {
+            if (context.integerExpr() != null) {
                 var op = "";
                 if (context.add() != null) {
                     op = (string)Visit(context.add());
                 }
-                id.text += " = " + op + context.Integer().GetText();
+                id.text += " = " + op + Visit(context.integerExpr());
             }
             return id.text + ",";
         }
