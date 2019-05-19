@@ -217,11 +217,11 @@ Student -> {
 ```
 This gives us a package with constructors, and when we create a new student, class and grade data are automatically generated.
 
-We need to use the constructor with the `New<type>()` function.
+We need to use the constructor with the `<type>()` function.
 
 E.g:
 ```
-Peter := New<student>("peter", "060233")
+Peter := <Student>("peter", "060233")
 Prt(Peter.class)     # print 2
 ```
 
@@ -265,7 +265,7 @@ PKG -> {
     z :S
 
     print() -> (a: Str) {
-        <- ( "x {y}" )
+        <- ( x + "{" y "}" )
     }
 } 
 ```
