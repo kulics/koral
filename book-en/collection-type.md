@@ -24,11 +24,11 @@ list := []Str{}         # empty List
 ```
 #### Array
 If we need to use the native Array type, we can use `[type]` to represent it.
-It can also be created directly using `ArrOf(e1,e2,e3)`.
+It can also be created directly using `Array of(e1,e2,e3)`.
 
 E.g:
 ```
-arr: [Int] = ArrOf(1,2,3,4,5)
+arr: [Int] = Array of(1,2,3,4,5)
 ```
 ### Visit
 If we need to access one of the elements in the List we can access it with the `identifier[index]`.
@@ -49,9 +49,9 @@ Note that we can only access the index of the existing data, if not exist, there
 ### Common operation
 ```
 list += 1                   # added to the end
-list.Insert(2, 3)           # insert element 3 to index 2
+list.insert(2, 3)           # insert element 3 to index 2
 list -= 1                   # delete the specified location element
-length := list.Len          # length
+length := list.len          # length
 ```
 ## Dictionary
 A dictionary is a collection of disparate data of the same type. Each value of a dictionary is associated with a unique key, which is used as an identifier for this value data in the dictionary.
@@ -95,7 +95,7 @@ The difference is that with the List, if the assignment is a non-existent index,
 ```
 dictionary += {["d"]11}         # add index by method
 dictionary -= "c"               # delete the specified index element
-length := dictionary.Len        # length
+length := dictionary.len        # length
 ```
 ### [Next Chapter](judgment.md)
 

@@ -26,11 +26,11 @@ list := []Str{}         # 空
 ```
 #### 数组
 如果我们需要使用原生数组类型，可以使用 `[type]` 来表示。
-也可以使用 `ArrOf(e1,e2,e3)` 直接创建。
+也可以使用 `Array of(e1,e2,e3)` 直接创建。
 
 例如：
 ```
-arr: [Int] = ArrOf(1,2,3,4,5)
+arr: [Int] = Array of(1,2,3,4,5)
 ```
 ### 访问
 如果我们需要访问列表中的其中一个元素，我们可以用 `标识符[索引]` 来访问。
@@ -51,9 +51,9 @@ list[0] = 5
 ### 常用操作
 ```
 list += 1                   # 添加到末尾
-list.Insert(2, 3)           # 插入元素 3 到索引 2
+list.insert(2, 3)           # 插入元素 3 到索引 2
 list -= 1                   # 删除指定位置元素
-length := list.Len          # 长度
+length := list.len          # 长度
 ```
 ## 字典
 字典是用来存储无序的相同类型数据的集合，字典每个值（value）都关联唯一的键（key），键作为字典中的这个值数据的标识符。
@@ -97,7 +97,7 @@ dictionary["b"] = 5
 ```
 dictionary += {["d"]11}         # 添加元素
 dictionary -= "c"               # 删除指定索引元素
-length := dictionary.Len        # 长度
+length := dictionary.len        # 长度
 ```
 ### [下一章](judgment.md)
 

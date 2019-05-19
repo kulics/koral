@@ -38,11 +38,11 @@ arr^.ToStr()
 ```
 
 ## Merge Operation
-If you want to use another default value when the value of the optional type is null, you can use the `id.Def(value)` function.
+If you want to use another default value when the value of the optional type is null, you can use the `id.or else(value)` function.
 
 E.g:
 ```
-b := a.Def(128)
+b := a.or else(128)
 ```
 
 ## [Complete Example](../example.xs)
