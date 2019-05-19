@@ -22,7 +22,7 @@ list := { 1,2,3,4,5 }
 
 例如我们需要一个字符串列表：
 ```
-list := []Str{}         # 空     
+List := []Str{}         # 空     
 ```
 #### 数组
 如果我们需要使用原生数组类型，可以使用 `[type]` 来表示。
@@ -30,14 +30,14 @@ list := []Str{}         # 空
 
 例如：
 ```
-arr: [Int] = Array of(1,2,3,4,5)
+Arr: [Int] = Array of(1,2,3,4,5)
 ```
 ### 访问
 如果我们需要访问列表中的其中一个元素，我们可以用 `标识符[索引]` 来访问。
 
 例如：
 ```
-Prt( list[1] )
+Prt( List[1] )
 ```
 需要注意的是，在编程语言里，大多数列表起始索引都是从 `0` 开始的，`标识符[0]` 取得的才是第一个元素，往后的元素以此类推。
 ### 更改元素
@@ -45,15 +45,15 @@ Prt( list[1] )
 
 例如：
 ```
-list[0] = 5
+List[0] = 5
 ```
 需要注意的是，我们只能访问已经存在数据的索引，如果不存在，则会出现错误。
 ### 常用操作
 ```
-list += 1                   # 添加到末尾
-list.insert(2, 3)           # 插入元素 3 到索引 2
-list -= 1                   # 删除指定位置元素
-length := list.len          # 长度
+List += 1                   # 添加到末尾
+List.insert(2, 3)           # 插入元素 3 到索引 2
+List -= 1                   # 删除指定位置元素
+Length := List.len          # 长度
 ```
 ## 字典
 字典是用来存储无序的相同类型数据的集合，字典每个值（value）都关联唯一的键（key），键作为字典中的这个值数据的标识符。
@@ -66,7 +66,7 @@ length := list.len          # 长度
 
 例如：
 ```
-dictionary := {["a"]1, ["b"]2, ["c"]3}
+Dictionary := {["a"]1, ["b"]2, ["c"]3}
 ```
 这样便会创建一个包含 `a,b,c` 三个条目 的 `[Str]Int` 类型字典。
 
@@ -76,28 +76,28 @@ dictionary := {["a"]1, ["b"]2, ["c"]3}
 
 例如：
 ```
-dictionaryNumNum := [Int]Int{} # 空
+DictionaryNumNum := [Int]Int{} # 空
 ```
 ### 访问
 和列表类似，我们也可以使用索引直接访问数据。
 
 例如：
 ```
-Prt( dictionary["a"] )
+Prt( Dictionary["a"] )
 ```
 ### 更改元素
 和列表类似，我们也可以使用赋值语句来更改元素。
 
 例如：
 ```
-dictionary["b"] = 5
+Dictionary["b"] = 5
 ```
 和列表不同的是，如果赋值的是不存在的索引，也不会错误，会直接将值赋予给新的键。
 ### 常用操作
 ```
-dictionary += {["d"]11}         # 添加元素
-dictionary -= "c"               # 删除指定索引元素
-length := dictionary.len        # 长度
+Dictionary += {["d"]11}         # 添加元素
+Dictionary -= "c"               # 删除指定索引元素
+Length := Dictionary.len        # 长度
 ```
 ### [下一章](judgment.md)
 
@@ -108,13 +108,13 @@ length := dictionary.len        # 长度
 }
 
 Main() -> () {
-    list1 := {1,2,3,4,5}
-    list1 += 6
-    list2 := []I8{1,2,1,2}
-    array := [I8]{1,2,3}
+    List1 := {1,2,3,4,5}
+    List1 += 6
+    List2 := []I8{1,2,1,2}
+    Array := [I8]{1,2,3}
 
-    dictionary1 := {["a"]1, ["b"]2, ["c"]3}
-    dictionary1["d"] = 4
-    dictionary2 := [I8]I8{[1]1,[2]2,[3]3}
+    Dictionary1 := {["a"]1, ["b"]2, ["c"]3}
+    Dictionary1["d"] = 4
+    Dictionary2 := [I8]I8{[1]1,[2]2,[3]3}
 }
 ```
