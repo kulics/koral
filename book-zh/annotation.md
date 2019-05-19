@@ -18,13 +18,13 @@ System\ComponentModel\DataAnnotations
 例如：
 ```
 [Table("test")]
-annotation -> {
+Annotation -> {
         [Key,Column("id")]
-        ID(): Str = ""
+        id(): Str = ""
         [Column("name")]
-        Name(): Str = ""
+        name(): Str = ""
         [Column("data")]
-        Data(): Str = ""
+        data(): Str = ""
 }
 ```
 我们声明了一个 `annotation` 的包，它使用注解标记了表名 `test`、主键 `id`、字段 `name`和字段 `data`。

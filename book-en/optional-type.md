@@ -4,8 +4,8 @@ If a type is defined but not assigned, it will not be used.
 
 E.g:
 ```
-a: Int
-b := a   # error, no assignment to a
+A: Int
+B := A   # error, no assignment to A
 ```
 
 ## Statement and Use
@@ -15,8 +15,8 @@ Just add `^` forward any type, which is a nullable type.
 
 E.g:
 ```
-a: ^Int
-b := a   # b assigns an empty Int
+A: ^Int
+B := A  # B assigns an empty Int
 ```
 
 Once an optional type has appeared, we need to strictly handle nil values to avoid program errors.
@@ -24,8 +24,8 @@ Once an optional type has appeared, we need to strictly handle nil values to avo
 E.g:
 ```
 # Judgment is not empty and then use
-? a >< () {
-     a.to Str()
+? A >< () {
+     A.to Str()
 }
 ```
 
@@ -34,7 +34,7 @@ We can use `^` after the expression to use them, so that they will only be execu
 
 E.g:
 ```
-arr^.to Str()
+Arr^.to Str()
 ```
 
 ## Merge Operation
@@ -42,7 +42,7 @@ If you want to use another default value when the value of the optional type is 
 
 E.g:
 ```
-b := a.or else(128)
+B := A.or else(128)
 ```
 
 ## [Complete Example](../example.xs)
@@ -54,11 +54,11 @@ b := a.or else(128)
 }
 
 Main() -> () {
-    a: ^Int = ()
+    A: ^Int = ()
 
-    b: ^[]^Int = []^Int{0}
-    b^[0]^.to Str()^.to Str()
+    B: ^[]^Int = []^Int{0}
+    B^[0]^.to Str()^.to Str()
 
-    e := a.or else(1024)
+    E := A.or else(1024)
 }
 ```

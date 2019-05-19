@@ -12,7 +12,7 @@
 
 例如：
 ```
-readFile(name: Str) -> () {
+Read file(name: Str) -> () {
     ? name.len == 0 {
         !( Exception("something wrong") )
     }
@@ -27,7 +27,7 @@ readFile(name: Str) -> () {
 例如：
 ```
 ! {
-    f := readFile("temp.txt")
+    f := Read file("temp.txt")
 } ex:IOException {
     !(ex)
 } e {
@@ -59,18 +59,18 @@ readFile(name: Str) -> () {
 例如：
 ```
 func() -> () {
-    f: File
+    F: File
     ! {
-        f = ReadFile("./somecode.xs")
+        F = Read file("./somecode.xs")
     } _ {
-        ? f >< () {
-            f.Release()
+        ? F >< () {
+            F.Release()
         }
     }
     ......
 }
 ```
-这样我们就声明了 `f.Release()` 这条释放文件的语句，这条语句不会被立刻执行，而是会等待检查结束后调用。
+这样我们就声明了 `F.Release()` 这条释放文件的语句，这条语句不会被立刻执行，而是会等待检查结束后调用。
 
 有了检查延迟，我们就可以无需关心如何退出，安全地处理某些任务。
 
@@ -80,7 +80,7 @@ func() -> () {
 ```
 ......
 _ {
-    f.Release()
+    F.Release()
     <- ()   # 错误，不能使用返回语句
 }
 ```
@@ -90,7 +90,7 @@ _ {
 
 例如：
 ```
-! res := FileResource("/test.xs") 
+! res := File resource("/test.xs") 
 ......
 ```
 
@@ -109,7 +109,7 @@ Main() -> () {
         !(ex)
     }
 
-    x := Defer{}
+    X := Defer{}
     ! y := Defer{}
     ! {
         x.Content = "defer"

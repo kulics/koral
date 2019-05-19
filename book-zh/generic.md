@@ -16,11 +16,11 @@ List<T> -> {
     Items := Storage{T}    # 创建存储
     Length := 0
 
-    Get(index: Int) -> (item: T) { # 获取某个泛型数据
-        <- ( Items.Get( index ) )
+    get(index: Int) -> (item: T) { # 获取某个泛型数据
+        <- ( Items.get( index ) )
     }
 
-    Add(item: T) -> () {   # 将一个泛型数据添加进列表
+    add(item: T) -> () {   # 将一个泛型数据添加进列表
         Items.insert(Length, item)
         Length += 1
     }
@@ -57,11 +57,11 @@ Package<T> -> {
 
 例如：
 ```
-listNumber := List<Int>{}      # 传入 integer 类型
+List number := List<Int>{}      # 传入 integer 类型
 ```
 这样我们便拥有了一个整数类型的列表，是不是很像这个：
 ```
-listNumber := []Int{}
+List number := []Int{}
 ```
 没错，其实我们的列表和字典语法都是语法糖，实际类型分别是 `Lst` 和 `Dic`。
 ## 支持的类型

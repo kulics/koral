@@ -16,8 +16,8 @@
 
 例如：
 ```
-async() ~> (out: Int) { 
-    <-(12)
+Async() ~> (out: Int) { 
+    <- (12)
 }
 ```
 一旦一个方法被声明为异步方法，编译器会自动给返回值套上 `Task<>` 类型包裹，这个方法就可以被异步执行了。
@@ -26,7 +26,7 @@ async() ~> (out: Int) {
 
 例如：
 ```
-result := async()  # result 是一个 Task 数据
+Result := Async()  # result 是一个 Task 数据
 ```
 接下来我们再看看如何让它异步等待执行。
 ## 异步等待
@@ -34,22 +34,22 @@ result := async()  # result 是一个 Task 数据
 
 例如：
 ```
-result := <~ async()
+Result := <~ Async()
 ......
 ```
-声明异步等待后，程序执行到这里就会暂时停止后面的功能，直到 `async` 函数执行完毕后，将 `out` 的值赋值给 `result`，再继续执行。
+声明异步等待后，程序执行到这里就会暂时停止后面的功能，直到 `Async` 函数执行完毕后，将 `out` 的值赋值给 `Result`，再继续执行。
 ## 异步使用条件
 异步等待只能在异步声明的函数里使用。
 
 例如：
 ```
 # 正确
-async() ~> (out: Int) {
+Async() ~> (out: Int) {
     <~ Delay(5000)    # 等待一段时间
     <- (12)
 }
 # 错误
-async() -> (out: Int) {
+Async() -> (out: Int) {
     <~ Delay(5000)    # 不能被声明
     <- (12)
 }
@@ -61,19 +61,19 @@ async() -> (out: Int) {
 
 例如：
 ```
-async() ~> () {
+Async() ~> () {
     <~ Delay(5000)    # 等待一段时间
 }
 
-<~ async()     # 正确
+<~ Async()     # 正确
 
-task := async()    # 正确，获取了 Task
+Task := Async()    # 正确，获取了 Task
 ```
 ## Lambda
 对于lambda，我们也可以使用异步，同样使用 `~>` 即可。
 
 例如：
 ```
-_ = arr.Filter( {it ~> it > 5} )
+_ = Arr.Filter( {it ~> it > 5} )
 ```
 ### [下一章](generic.md)
