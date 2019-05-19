@@ -84,7 +84,7 @@ Comment is only used to provide additional information to the user, and will not
 Multi-line comments only need to wrap the content with `##`:
 ```
 ##
-Multi-line 
+multi-line 
 comment
 ##
 ```
@@ -93,7 +93,7 @@ We can create new variable using the `id:type` statement.
 
 E.g:
 ```
-a: I32
+A: Int
 ```
 This will create an identifier for the name on the left and define it as the type on the right, in which case the identifier is a nil value.
 
@@ -104,7 +104,7 @@ Like a normal programming language, we need to use the `id = value` statement to
 
 E.g:
 ```
-a = 2
+A = 2
 ```
 But the definition is not the same, the left side of the assignment can only be an identifier that has been defined, otherwise the assignment statement does not hold.
 ## Automatic derivation
@@ -112,16 +112,16 @@ In most cases, you can use the simpler automatic derivation syntax `id := value`
 
 E.g:
 ```
-b := 10
+B := 10
 ```
 
-This defines the new variable `b`, which is equal to `10` and is automatically derived as an `I32` type.
+This defines the new variable `b`, which is equal to `10` and is automatically derived as an `Int` type.
 
 If we don't want automatic derivation, we can also use the write statement definition to mark the type we need.
 
 E.g:
 ```
-b: I16 = 10
+B: I16 = 10
 ```
 
 ## Constant
@@ -129,8 +129,8 @@ Constants are languages that are determined at compile time and are unchangeable
 
 E.g:
 ```
-i 2         # automatic derivation
-j:I32 3     # do not use automatic derivation
+I 2         # automatic derivation
+J:Int 3     # do not use automatic derivation
 ```
 
 ## Identifier
@@ -142,7 +142,13 @@ Identifier is the variable, function, package, protocol, etc. specified name. Th
 1. In the same `{}`, you cannot repeatedly define an identifier with the same name.
 1. In different `{}`, you can define the identifier of the duplicate name, the language will give priority to the identifier defined in the current range.
 1. In namespace, packages and protocols, properties and method names that begin with the underscore `_` are considered private and the rest are considered public.
-1. Identifiers starting with lowercase letters can only be used in functions. Other scenarios can only use identifiers beginning with uppercase letters..
+
+In particular, since Xs has no keywords, the rules for identifiers are more lenient than other languages and can even support spaces.
+
+E.g:
+```
+I am Int := 1   # legal identifier
+```
 
 ## Keyword
 none.
@@ -152,14 +158,14 @@ Yes, you are not mistaken, we do not have keywords. So you can use any character
 By default, spaces are ignored by the compiler.
 
 However, in practical projects, the use of partition will effectively improve the reading effect of the code, so we strongly recommend that you use the partition reasonably to improve the source code expression.
-
+0
 E.g:
 ```
-a.b(x,y).c(()->(I32){<-(2+1)}).D=1+3*5/4
+a.b(x,y).c(()->(Int){<-(2+1)}).d=1+3*5/4
 
-a.b(x, y).c( () -> (I32) {
+a.b(x, y).c( () -> (Int) {
     <- (2 + 1)
-}).D = 1 + 3 * 5 / 4
+}).d = 1 + 3 * 5 / 4
 ```
 ### [Next Chapter](basic-type.md)
 
@@ -170,9 +176,9 @@ a.b(x, y).c( () -> (I32) {
 }
 
 Main() -> () {
-    a : I32
-    a = 5
-    b := 6
-    c: I8 = 1
+    A: Int
+    A = 5
+    B := 6
+    C: I8 = 1
 }
 ```
