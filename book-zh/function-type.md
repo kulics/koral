@@ -32,11 +32,11 @@ function()  # 调用了 function
 
 例如：
 ```
-func(x: I32) -> (y: I32) {
+func(x: Int) -> (y: Int) {
     <- (x * 2)
 }
 ```
-这个函数的意义是，接受输入的一个 `I32` 参数 `x`，返回一个 `I32` 参数 `y`。
+这个函数的意义是，接受输入的一个 `Int` 参数 `x`，返回一个 `Int` 参数 `y`。
 
 靠左边的括号内是入参，靠右边的括号内是出参，括号内的参数没有数量限制，但是对顺序和类型有严格要求。
 ### 返回
@@ -71,7 +71,7 @@ func(x: I32) -> (y: I32) {
 例如：
 ```
 # 定义一个包含两个入参的函数
-sell(price: I32, name: Str) -> () {}
+sell(price: Int, name: Str) -> () {}
 # 按照定义的要求，填入符合要求的数据
 sell(1.99, "cola")
 ```
@@ -80,7 +80,7 @@ sell(1.99, "cola")
 
 例如：
 ```
-topSell() -> (name: Str, count: I32) {
+topSell() -> (name: Str, count: Int) {
     ......
     <- ("cola", many)
 }
@@ -130,7 +130,7 @@ _ = topSell()      # 对于 _ 来说，赋值和定义是等价的
 
 例如：
 ```
-each1To10(func: (I32) -> () ) -> () {
+each1To10(func: (Int) -> () ) -> () {
     [1<=10] @ i {
         func(i)
     }
@@ -142,7 +142,7 @@ each1To10(func: (I32) -> () ) -> () {
 
 例如：
 ```
-print(item: I32) -> () {
+print(item: Int) -> () {
     Prt(item)
 }
 
@@ -176,7 +176,7 @@ findAll( {it -> it > 7} )
 
 例如：
 ```
-each1To10( (item: I32) -> () {
+each1To10( (item: Int) -> () {
     Prt(item)
 })
 ```
@@ -195,16 +195,16 @@ Main() -> () {
     x := C()
     D( {-> Prt("D")} )
     E( {it -> Prt(it)} )
-    E( (a: I32) -> () {
+    E( (a: Int) -> () {
         Prt(it)
     })
 }
 
 A() -> () {}
 
-B(a: I32, b: I32, c: I32) -> () {}
+B(a: Int, b: Int, c: Int) -> () {}
 
-C() -> (a: I32) {
+C() -> (a: Int) {
     <- (1024)
 }
 
@@ -212,7 +212,7 @@ D(fn: () -> () ) -> () {
     fn()
 }
 
-E(fn: (I32) -> () ) -> () {
+E(fn: (Int) -> () ) -> () {
     [1<=20] @ i {
         fn(i)
     }

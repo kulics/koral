@@ -20,7 +20,7 @@ Next, let's design a difficult task that students need to accomplish ... homewor
 E.g:
 ```
 homeWork <- {
-    Count(): I32
+    Count(): Int
     Do() -> ()
 }
 ```
@@ -39,7 +39,7 @@ E.g:
 student -> {
     ......
 } homeWork {
-    Count(): I32
+    Count(): Int
 
     Do() -> () {
         SpendTime(1)    # spent an hour
@@ -146,7 +146,7 @@ Main() -> () {
 }
 
 A <- {
-    X(): I32
+    X(): Int
     Do() -> () {}
 }
 

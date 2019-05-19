@@ -12,7 +12,7 @@ E.g:
 ```
 list := { 1,2,3,4,5 }
 ```
-This will create a `I32` type List containing` 1` to `5`.
+This will create a `Int` type List containing` 1` to `5`.
 
 If you need an List of explicit types, you can create them using construct function.
 
@@ -28,7 +28,7 @@ It can also be created directly using `ArrOf(e1,e2,e3)`.
 
 E.g:
 ```
-arr: [I32] = ArrOf(1,2,3,4,5)
+arr: [Int] = ArrOf(1,2,3,4,5)
 ```
 ### Visit
 If we need to access one of the elements in the List we can access it with the `identifier[index]`.
@@ -66,7 +66,7 @@ E.g:
 ```
 dictionary := {["a"]1, ["b"]2, ["c"]3}
 ```
-This will create a `[Str]I32` type dictionary containing ` a, b, c` entries.
+This will create a `[Str]Int` type dictionary containing ` a, b, c` entries.
 
 If you need an explicit type of dictionary, you can also create it using construct function.
 
@@ -74,7 +74,7 @@ The dictionary type is represented by `[type]type`.
 
 E.g:
 ```
-dictionaryNumNum := [I32]I32{} # Empty
+dictionaryNumNum := [Int]Int{} # Empty
 ```
 ### Visit
 Like an List, we can also use indexes to access data directly.
