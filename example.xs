@@ -99,7 +99,7 @@ Test operator() -> () {
     I: Str = "128.687"
     I += ".890"
     B: Int
-    B = 0
+    B = 2019 05 20
     B += Const Data
     B = + - B
     B -= 1
@@ -118,7 +118,7 @@ Test operator() -> () {
     C = 1 <= 3
     C = True | False
     C = True & False
-    D := 11
+    D := (20 18. 03 09).to Int() 
     D = D.and(1).or(2).xor(3).not().lft(1).rht(2)
     Prt(B.to Str())
 }

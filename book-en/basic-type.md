@@ -52,6 +52,12 @@ All supported floating-point types are as follows:
 F32     # 32-bit   ±1.5e−45 to ±3.4e38
 F64     # 64-bit   ±5.0e−324 to ±1.7e308
 ```
+## Literal Rules
+Like identifiers, literals can be separated by spaces to improve readability.
+```
+Integer := 2018 03 09
+Float := 3.14159 26535 89793 23846 26433 83279 50288 41971
+```
 ## Character
 Computers usually use a specific number to encode characters, so a type is needed to express the characters. This is the `Chr` type.
 
