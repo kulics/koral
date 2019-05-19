@@ -11,11 +11,11 @@ We only need to use `id() -> () {}` to define a function, the first parenthesis 
 
 E.g:
 ```
-function() -> () {
+Function() -> () {
     ......
 }
 ```
-This defines a function with the identifier `function`.
+This defines a function with the identifier `Function`.
 
 It should be noted that functions can be defined in namespaces, packages, protocols, or inside functions. When defining a function in a function, the internal function does not have a public property and belongs only to the private function of the current function.
 ## Call
@@ -23,7 +23,7 @@ Unlike the main entry function, which cannot be called, regular functions can be
 
 E.g:
 ```
-function()  # call function
+Function()  # call Function
 ```
 ## Parameter
 Although functions can perform specific functions without any parameters, more often we need to be able to accept some input data, or to return data, or both, which requires parameters to help us accomplish task.
@@ -32,7 +32,7 @@ Very simple, we only need to use `id:type` declare the parameters.
 
 E.g:
 ```
-func(x: Int) -> (y: Int) {
+Func(x: Int) -> (y: Int) {
     <- (x * 2)
 }
 ```
@@ -71,9 +71,9 @@ When we call the function, we need to fill the brackets with the identifier in t
 E.g:
 ```
 # define one function with two in parameter
-sell(price: Int, name: Str) -> () {}
+Sell(price: Int, name: Str) -> () {}
 # fill in the data that meets the requirements as defined
-sell(1.99, "cola")
+Sell(1.99, "cola")
 
 ```
 ### Out Parameters
@@ -81,7 +81,7 @@ Similar to in parameters, out parameters also need to be clearly defined with an
 
 E.g:
 ```
-topSell() -> (name: Str, count: Int) {
+Top Sell() -> (name: Str, count: Int) {
     ......
     <- ("cola", many)
 }
@@ -95,16 +95,16 @@ The difference is that for multiple return values ​​we have to wrap each ide
 
 E.g:
 ```
-(n, c) := topSell()
+(n, c) := Top Sell()
 # Define the two values returned to n and c
-(n, c) = topSell()
+(n, c) = Top Sell()
 # Assign the returned two values to n and c
 ```
 You can use the definition or assignment statement to get the return value of the function to use, you can also use the nested function to another function.
 
 E.g:
 ```
-Prt( topSell() )    # print two values
+Prt( Top Sell() )    # print two values
 ```
 If there is only one return value, the brackets can be taken without.
 
@@ -112,19 +112,19 @@ Note that if you call a function with a return value is not allowed to not recei
 
 E.g:
 ```
-topSell()  # error, did not explicitly receive the return value
+Top Sell()  # error, did not explicitly receive the return value
 ```
 But sometimes, as a caller, we do not necessarily need all the return values, but this time we can use the anonymous identifier `_` to help us drop the data. Just need to write it in the corresponding position.
 
 E.g:
 ```
-(name, _) := topSell()
+(name, _) := Top Sell()
 ```
 If indeed all the return values ​​are not needed, we can also just write a `_` to discard all. But why would need to call such a function? Maybe we should review the code again.
 
 E.g:
 ```
-_ = topSell()  # for _ , assignment and definition are equivalent
+_ = Top Sell()  # for _ , assignment and definition are equivalent
 ```
 ## Function In Parameter
 If we want part of the function defined by the external, and only perform the rest of the internal logic, such as some set traversal for a collection of functions, then we can use the function parameters to accomplish this goal.
@@ -133,7 +133,7 @@ Function In Parameter no special definition of way, just replace the type of the
 
 E.g:
 ```
-each1To10(func: (Int) -> () ) -> () {
+Each 1 To 10(func: (Int) -> () ) -> () {
     [1<=10] @ i {
         func(i)
     }
@@ -145,11 +145,11 @@ So that we can pass the details of the processing to the externally passed `func
 
 E.g:
 ```
-print (item: Int)->() {
+Print (item: Int)->() {
     Prt(item)
 }
 
-each1To10(print)
+Each 1 To 10(Print)
 ```
 So, we executed the `print` function in the loop inside `each1To10`.
 
@@ -164,13 +164,13 @@ Since the function argument is already determined at the time of declaration, we
 
 E.g:
 ```
-foreach( {it -> 
+For each( {it -> 
     Prt(it)
     Prt(it * it)
     Prt(it % 2)
 })
-take( {a, b -> a + b} )
-findAll( {it -> it > 7} )
+Take( {a, b -> a + b} )
+Find All( {it -> it > 7} )
 ```
 Very simple, the difference from the expression of a function type is that you only need to declare the parameter identifier and execution logic, and neither the type nor the return value need to be declared.
 ## Lambda Function
@@ -178,7 +178,7 @@ Unlike the above simplified method, we can also write a complete function direct
 
 E.g:
 ```
-each1To10( (item: Int) -> () {
+Each 1 To 10( (item: Int) -> () {
      Prt(item)
 })
 ```
@@ -193,7 +193,7 @@ each1To10( (item: Int) -> () {
 Main() -> () {
     A()
     B(1,2,3)
-    x := C()
+    X := C()
     D( {-> Prt("D")} )
     E( {it -> Prt(it)} )
     E( (a: Int) -> () {

@@ -17,11 +17,11 @@ We can define these data in the same way we define normal identifiers.
 
 E.g:
 ```
-student -> {
-    Name: Str = ""
-    Number: Str = ""
-    Class: Int = 0
-    Grade: Int = 0
+Student -> {
+    name: Str = ""
+    number: Str = ""
+    class: Int = 0
+    grade: Int = 0
 }
 ```
 So we get a student bag with these data attributes. This student bag now becomes a usable type like `Int, Str, Bool`.
@@ -35,20 +35,20 @@ So how do we create a new package? As always, all of our types can be created us
 
 E.g:
 ```
-peter := student{}
+Peter := Student{}
 ```
-This create a `peter` identifier. All the properties of this student are initialized to `"", "", 0,0` as set in the definition.
+This create a `Peter` identifier. All the properties of this student are initialized to `"", "", 0,0` as set in the definition.
 
 Let us recall that our base type, collection types can be created using the type-creation syntax, in fact they are all packages.
 
 ## Using Property
-Now that we have a `peter`, how do we use the attributes inside?
+Now that we have a `Peter`, how do we use the attributes inside?
 
 Very simple, we only need to use `.` syntax, we can summon the attributes we need.
 
 E.g:
 ```
-Prt(peter.Name)
+Prt(Peter.name)
 # print the name of a student
 ```
 To change the value of the property is the same, it is equivalent to a nested identifier. We can directly use the assignment statement to change the value.  
@@ -56,10 +56,10 @@ Parentheses can be omitted when the constructor is empty.
 
 E.g:
 ```
-peter.Name = "peter" 
-peter.Number = "060233"
-peter.Class = 2
-peter.Grade = 6
+Peter.name = "peter" 
+Peter.number = "060233"
+Peter.class = 2
+Peter.grade = 6
 ```
 ## Construction assignment
 Creating a new package like the one above, and then loading the data one by one, is very cumbersome. We can use a simplified syntax to configure.
@@ -68,9 +68,9 @@ Add `key=value` to the build syntax and separate the data with `,`.
 
 E.g:
 ```
-peter := student{
-    Name="peter", Number="060233",
-    Class=2, Grade=6
+Peter := Student{
+    name="peter", number="060233",
+    class=2, grade=6
 }
 ```
 
@@ -78,8 +78,8 @@ Similarly, the way the collection is created is actually a simplified creation, 
 
 E.g:
 ```
-array := []Int{ 1, 2, 3, 4, 5 }
-dictionary := [Str]Int{ ["1"]1, ["2"]2, ["3"]3 }
+Array := []Int{ 1, 2, 3, 4, 5 }
+Dictionary := [Str]Int{ ["1"]1, ["2"]2, ["3"]3 }
 ```
 ## Anonymous Package
 If we only want to wrap some data directly, instead of defining the package first and then using it, is it like an anonymous function?
@@ -88,32 +88,32 @@ Of course, we can use the `{}` package directly, the same syntax as the collecti
 
 E.g:
 ```
-peter := {
-    Name = "peter",
-    Number = "060233",
-    Class = 2,
-    Grade = 6
+Peter := {
+    name = "peter",
+    number = "060233",
+    class = 2,
+    grade = 6
 }
 ```
 
-This directly creates a `peter` data that we can use directly, but we cannot change this data.
+This directly creates a `Peter` data that we can use directly, but we cannot change this data.
 
 Since the anonymous package is not a package of a clear type, we only recommend it for use on occasional occasions, such as LINQ.
 ## Private Property
-Anyone has some little secret, peter is the same, maybe he hid a secret little girl's name and did not want others to know.
+Anyone has some little secret, Peter is the same, maybe he hid a secret little girl's name and did not want others to know.
 
 We can define private properties to store properties that we do not want to be accessed by the outside world.
 
 E.g:
 ```
-student -> {
+Student -> {
     ......
-    _GirlFriend: Str    # The identifier beginning with this '_' is private
+    _girl Friend: Str    # The identifier beginning with this '_' is private
 }
 ```
 That's right, if you remember the definition of identifiers, this is how private identifiers are defined, and private identifiers can not be accessed by outsiders.
 
-Therefore, we can define a `peter`, nor can we get or modify the value via `peter._GirlFirend`.
+Therefore, we can define a `Peter`, nor can we get or modify the value via `Peter._girl Firend`.
 
 Then the private properties of this package can not be accessed, and can not be modified, what is the use? Do not worry, there is another attribute package.
 
@@ -122,11 +122,11 @@ If we need to make this package come with a function that makes it easy to manip
 
 E.g:
 ```
-student -> {
+Student -> {
     ......
-    _GirlFriend: Str
-    GetGirlFriend() -> (name: Str) {
-        <- (.._GirlFriend)
+    _girl Friend: Str
+    get Girl Friend() -> (name: Str) {
+        <- (.._girl Friend)
     }
 }
 ```
@@ -139,7 +139,7 @@ With this function, we can get the private property by calling the function.
 
 E.g:
 ```
-Prt( peter.GetGirlFriend() )
+Prt( Peter.get Girl Friend() )
 # printed the name of a girlfriend of a puppy love student
 ```
 As with data attributes, functions can also be private identifiers, and functions that use private identifiers also mean that only the packet can access itself.
@@ -149,12 +149,12 @@ Now let us play our imagination, we want a customized package for Chinese studen
 
 E.g:
 ```
-chineseStudent -> {
-    Name: Str = ""
-    Number: Str = ""
-    Class: Int = 0
-    Grade: Int = 0
-    Kungfu: Bool = False    # kung fu students
+Chinese Student -> {
+    name: Str = ""
+    number: Str = ""
+    class: Int = 0
+    grade: Int = 0
+    kungfu: Bool = False    # kung fu students
 }
 ```
 No, no repeatable definition of data so elegant, we can reuse student attributes, with an additional kung fu attributes on it.
@@ -163,17 +163,17 @@ We need to use a combination of this feature, but not so complicated, just creat
 
 E.g:
 ```
-chineseStudent -> {
-    Student := student{}   # include student attributes in it
-    Kungfu := False        # no kung fu
+Chinese Student -> {
+    student := Student{}   # include student attributes in it
+    kungfu := False        # no kung fu
 }
 ```
 This way you can use generic attributes via student attributes in Chinese students.
 
 E.g:
 ```
-chen := chineseStudent{}
-Prt(chen.Student.Name)
+Chen := Chinese Student{}
+Prt(Chen.student.name)
 # of course, since there is no assignment, nothing is output
 ```
 By combining layers after layer, you are free to assemble whatever you want to describe.
@@ -188,10 +188,10 @@ If you want to override the properties of the original package, rewrite it in `{
 E.g:
 ```
 chineseStudent -> {
-    Kungfu := False
-} ...student {   # inhert student
+    kungfu := False
+} ...Student {   # inhert student
     # override
-    GetGirlFriend() -> (name: Str) {
+    get Girl Friend() -> (name: Str) {
         <- ("none")
     }
 }
@@ -204,15 +204,15 @@ We can append the `(id:type){}` statement after the definition.
 
 E.g:
 ```
-student -> {
+Student -> {
     ......
 } (name: Str, number: Str) {
-    ..Name = name
-    ..Number = number
+    ..name = name
+    ..number = number
     # calculate the class
-    ..Class = GetSubText(number, 2, 3)
+    ..class = get Sub Text(number, 2, 3)
     # calculate the grade
-    ..Grade = GetSubText(number, 0, 1)
+    ..grade = get Sub Text(number, 0, 1)
 }
 ```
 This gives us a package with constructors, and when we create a new student, class and grade data are automatically generated.
@@ -221,8 +221,8 @@ We need to use the constructor with the `New<type>()` function.
 
 E.g:
 ```
-peter := New<student>("peter", "060233")
-Prt(peter.Class)     # print 2
+Peter := New<student>("peter", "060233")
+Prt(Peter.class)     # print 2
 ```
 
 If you need to use a constructor with inheritance, you can append `...(params)` to the argument syntax.
@@ -248,24 +248,24 @@ Child -> {
 }
 
 Main() -> () {
-    a := S{A=5,B=12}
-    b := PKG(X="hello", Y=64, Z=a)
-    Prt( b.Z.A )
-    Prt( b.Print() )
+    A := S{a=5,b=12}
+    B := PKG(x="hello", y=64, z=A)
+    Prt( B.z.a )
+    Prt( B.print() )
 }
 
 S -> {
-    A := 0
-    B := 0
+    a := 0
+    b := 0
 }
 
 PKG -> {
-    X := ""
-    Y := 0
-    Z :S
+    x := ""
+    y := 0
+    z :S
 
-    Print() -> (a: Str) {
-        <- ( "X {Y}" )
+    print() -> (a: Str) {
+        <- ( "x {y}" )
     }
 } 
 ```

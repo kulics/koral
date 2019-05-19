@@ -9,7 +9,7 @@
 
 例如：
 ```
-package -> {
+Package -> {
 }
 ```
 当然，我们更希望的是能包装几个数据，例如一个具有名称、学号、班级、年级属性的学生。
@@ -17,11 +17,11 @@ package -> {
 
 例如：
 ```
-student -> {
-    Name: Str = ""
-    Number: Str = ""
-    Class: Int = 0
-    Grade: Int = 0
+Student -> {
+    name: Str = ""
+    number: Str = ""
+    class: Int = 0
+    grade: Int = 0
 }
 ```
 这样我们就得到了具有这几个数据属性的学生包。这个学生包现在就像 `Int,Str,Bool` 一样成为了一个可以使用的类型。
@@ -35,29 +35,29 @@ student -> {
 
 例如：
 ```
-peter := student{}
+Peter := Student{}
 ```
-这样便创建了一个 `peter` 标识符，这个学生的所有属性都根据定义中设置的那样被初始化为 `"","",0,0` 。
+这样便创建了一个 `Peter` 标识符，这个学生的所有属性都根据定义中设置的那样被初始化为 `"","",0,0` 。
 
 让我们回顾一下，我们的基础类型、集合类型都可以使用构造函数来创建，实际上它们都是包.
 
 ## 使用属性
-现在我们已经有了一个 `peter` ，我们要怎么使用里面的属性呢？
+现在我们已经有了一个 `Peter` ，我们要怎么使用里面的属性呢？
 
 很简单，我们只需要使用 `.` 语法，就能召唤出我们需要的属性。
 
 例如：
 ```
-Prt( peter.Name )      # 打印了某个学生的名字
+Prt( Peter.name )      # 打印了某个学生的名字
 ```
 要更改属性的值也是一样的，它就相当于是个嵌套的标识符。我们可以直接用赋值语句去更改值。
 
 例如：
 ```
-peter.Name = "peter" 
-peter.Number = "060233"
-peter.Class = 2
-peter.Grade = 6
+Peter.name = "peter" 
+Peter.number = "060233"
+Peter.class = 2
+Peter.grade = 6
 ```
 ## 构建赋值
 像上面那样创建一个新的包，再逐个装填数据非常麻烦，我们可以使用简化语法来配置。
@@ -66,9 +66,9 @@ peter.Grade = 6
 
 例如：
 ```
-peter := student{
-    Name="peter", Number="060233",
-    Class=2, Grade=6
+Peter := Student{
+    name="peter", number="060233",
+    class=2, grade=6
 }
 ```
 
@@ -76,8 +76,8 @@ peter := student{
 
 例如：
 ```
-array := []Int{ 1, 2, 3, 4, 5 }
-dictionary := [Str]Int{ ["1"]1, ["2"]2, ["3"]3 }
+Array := []Int{ 1, 2, 3, 4, 5 }
+Dictionary := [Str]Int{ ["1"]1, ["2"]2, ["3"]3 }
 ```
 ## 匿名包
 如果我们只想直接包裹某些数据使用，而不是先定义包再使用，像匿名函数那样可以吗？
@@ -86,33 +86,33 @@ dictionary := [Str]Int{ ["1"]1, ["2"]2, ["3"]3 }
 
 例如：
 ```
-peter := {
-    Name = "peter",
-    Number = "060233",
-    Class = 2,
-    Grade = 6
+Peter := {
+    name = "peter",
+    number = "060233",
+    class = 2,
+    grade = 6
 }
 ```
 
-这样就直接创建了一个 `peter` 数据，我们可以直接使用这些数据，但是不可更改这些数据。
+这样就直接创建了一个 `Peter` 数据，我们可以直接使用这些数据，但是不可更改这些数据。
 
 由于匿名包并不是一个具有明确类型的包，所以我们只建议在一些临时场合使用，例如LINQ。
 
 ## 私有属性
-任何人都会有些小秘密， `peter` 也一样，也许他藏了一个秘密小女友的名字不想让其他人知道。
+任何人都会有些小秘密， `Peter` 也一样，也许他藏了一个秘密小女友的名字不想让其他人知道。
 
 我们可以定义私有属性来存储一些不想被外界访问的属性。
 
 例如：
 ```
-student -> {
+Student -> {
     ......
-    _GirlFriend: Str # 第一个字符是 _ 的标识符是私有的
+    _girl Friend: Str # 第一个字符是 _ 的标识符是私有的
 }
 ```
 没错，如果你还记得标识符的定义的话，这就是私有标识符的定义方式，私有标识符是不能被外界访问的。
 
-因此我们再定义一个 `peter` 的话，也不能通过 `peter._GirlFriend` 来获取值或修改值。
+因此我们再定义一个 `Peter` 的话，也不能通过 `Peter._girl Friend` 来获取值或修改值。
 
 那这种包的私有属性又不能访问，又不能修改，有什么用呢？别急，包还有另外一种属性。
 
@@ -121,11 +121,11 @@ student -> {
 
 例如：
 ```
-student -> {
+Student -> {
     ......
-    _GirlFriend: Str
-    GetGirlFriend() -> (name: Str) {
-        <- (.._GirlFriend)
+    _girl Friend: Str
+    get Girl Friend() -> (name: Str) {
+        <- (.._girl Friend)
     }
 }
 ```
@@ -138,7 +138,7 @@ student -> {
 
 例如：
 ```
-Prt( peter.GetGirlFriend() ) 
+Prt( Peter.get Girl Friend() ) 
 # 打印了某个早恋学生的女朋友名字
 ```
 与数据属性一样，函数也可以是私有标识符，使用私有标识符的函数也意味着只有包自己能访问。
@@ -149,12 +149,12 @@ Prt( peter.GetGirlFriend() )
 
 例如：
 ```
-chineseStudent -> {
-    Name: Str = ""
-    Number: Str = ""
-    Class: Int = 0
-    Grade: Int = 0
-    Kungfu: Bool = False     # 不会功夫的学生
+Chinese Student -> {
+    name: Str = ""
+    number: Str = ""
+    class: Int = 0
+    grade: Int = 0
+    kungfu: Bool = False     # 不会功夫的学生
 }
 ```
 不不不，这样重复定义数据就很不优雅了，我们可以将学生属性复用，加上一个额外的功夫属性就可以了。
@@ -163,17 +163,17 @@ chineseStudent -> {
 
 例如：
 ```
-chineseStudent -> {
-    Student := student{}   # 将学生属性包含其中
-    Kungfu := False        # 不会功夫
+Chinese Student -> {
+    student := Student{}   # 将学生属性包含其中
+    kungfu := False        # 不会功夫
 }
 ```
 这样你就可以通过中国学生里的学生属性来使用通用属性。
 
 例如：
 ```
-chen := chineseStudent{}
-Prt( chen.Student.Name )
+Chen := Chinese Student{}
+Prt( Chen.student.name )
 # 当然，因为没有赋值，所以什么也没有输出
 ```
 通过组合一层又一层的包，你可以自由拼装出任何一个你想要描述的事物。
@@ -187,11 +187,11 @@ Prt( chen.Student.Name )
 
 例如：
 ```
-chineseStudent -> {
-    Kungfu := False
-} ...student {   # 继承 student
+Chinese Student -> {
+    kungfu := False
+} ...Student {   # 继承 student
     # 重写
-    GetGirlFriend() -> (name: Str) {
+    get Girl Friend() -> (name: Str) {
         <- ("none")
     }
 }
@@ -203,15 +203,15 @@ chineseStudent -> {
 
 例如：
 ```
-student -> {
+Student -> {
     ......
 } (name: Str, number: Str) {
-    ..Name = name
-    ..Number = number
+    ..name = name
+    ..number = number
     # 计算得出班级
-    ..Class = GetSubText(number, 2, 3)
+    ..class = get Sub Text(number, 2, 3)
     # 计算得出年级
-    ..Grade = GetSubText(number, 0, 1)
+    ..grade = get Sub Text(number, 0, 1)
 }
 ```
 这样就得到了一个带构造函数的包，我们在创建一个新学生的时候，就会自动产生班级和年级数据。
@@ -220,8 +220,8 @@ student -> {
 
 例如：
 ```
-peter := New<student>("peter", "060233")
-Prt(peter.Class)     # 打印出 2
+Peter := New<student>("peter", "060233")
+Prt(Peter.class)     # 打印出 2
 ```
 
 如果需要使用带继承的构造函数，可在参数语法后面追加 `...(params)` 即可。
@@ -247,24 +247,24 @@ Child -> {
 }
 
 Main() -> () {
-    a := S{A=5,B=12}
-    b := PKG(X="hello", Y=64, Z=a)
-    Prt( b.Z.A )
-    Prt( b.Print() )
+    A := S{a=5,b=12}
+    B := PKG(x="hello", y=64, z=A)
+    Prt( B.z.a )
+    Prt( B.print() )
 }
 
 S -> {
-    A := 0
-    B := 0
+    a := 0
+    b := 0
 }
 
 PKG -> {
-    X := ""
-    Y := 0
-    Z :S
+    x := ""
+    y := 0
+    z :S
 
-    Print() -> (a: Str) {
-        <- ( "X {Y}" )
+    print() -> (a: Str) {
+        <- ( "x {y}" )
     }
 } 
 ```
