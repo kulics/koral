@@ -64,13 +64,13 @@ func() -> () {
         F = Read file("./somecode.xs")
     } _ {
         ? F >< () {
-            F.Release()
+            F.release()
         }
     }
     ......
 }
 ```
-这样我们就声明了 `F.Release()` 这条释放文件的语句，这条语句不会被立刻执行，而是会等待检查结束后调用。
+这样我们就声明了 `F.release()` 这条释放文件的语句，这条语句不会被立刻执行，而是会等待检查结束后调用。
 
 有了检查延迟，我们就可以无需关心如何退出，安全地处理某些任务。
 
@@ -80,7 +80,7 @@ func() -> () {
 ```
 ......
 _ {
-    F.Release()
+    F.release()
     <- ()   # 错误，不能使用返回语句
 }
 ```
@@ -90,7 +90,7 @@ _ {
 
 例如：
 ```
-! res := File resource("/test.xs") 
+! Res := File resource("/test.xs") 
 ......
 ```
 
@@ -104,30 +104,30 @@ _ {
 
 Main() -> () {
     ! {
-        x: Int = (1 * 1)
+        A: Int = (1 * 1)
     } ex {
         !(ex)
     }
 
     X := Defer{}
-    ! y := Defer{}
+    ! Y := Defer{}
     ! {
-        x.Content = "defer"
-        Prt(x.Content)
+        X.content = "defer"
+        Prt(X.content)
     } e:Exception {
         !(e)
     } _ {
-        ? x >< () {
-            x.Dispose()
+        ? X >< () {
+            X.Dispose()
         }
     }
 }
 
 Defer -> {
-    Content: Str
+    content: Str
 } IDisposable {
     Dispose() -> () {
-        Content = ""
+        content = ""
     }
 }
 ```

@@ -83,16 +83,16 @@ Student A := Chinese Student{}
 Student B := American Student{}
 Student C := Japanese Student{}
 # 让他们分别做作业
-Student A.Do()
-Student B.Do()
-Student C.Do()
+Student A.do()
+Student B.do()
+Student C.do()
 ```
 更有效率的做法是把这个功能写进函数，让函数来帮我们重复调用协议的功能。
 
 例如：
 ```
 Do homework(Student: Homework) -> () {
-    student.Do()
+    student.do()
 }
 # 现在我们就可以更简单地让每个学生做作业了
 Do homework(Student A)
@@ -104,7 +104,7 @@ Do homework(Student C)
 例如：
 ```
 Arr := []homeWork{}
-Arr.Add( Student A )
+Arr.add( Student A )
 ...... # 塞进很多很多学生
 Arr @ i {
     Do homework(i)
@@ -140,29 +140,29 @@ Func(hw: Homework) -> () {
 }
 
 Main() -> () {
-    S := B()
-    B.Do()
-    C( B )
+    P := B{}
+    P.do()
+    C( P )
 }
 
 A <- {
-    X(): Int
-    Do() -> () {}
+    x(): Int
+    do() -> () {}
 }
 
 B -> {
-    Y := 5
+    y := 5
 } A {
-    X() := 0
-    Do() -> () {
-        X += 1
+    x() := 0
+    do() -> () {
+        x += 1
     }
 }
 
 C(a: A) -> () {
-    a.Do()
+    a.do()
     ? a == :B {
-        Prt( a:B:.Y )
+        Prt( a:B:.y )
     }
 }
 ```

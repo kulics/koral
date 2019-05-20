@@ -64,13 +64,13 @@ func() -> () {
         F = Read file("./somecode.xs")
     } _ {
         ? F >< () {
-            F.Release()
+            F.release()
         }
     }
     ......
 }
 ```
-So we declare the `F.Release()` statement that releases the file. This statement will not be executed immediately, but will wait for the function to be called before exiting.
+So we declare the `F.release()` statement that releases the file. This statement will not be executed immediately, but will wait for the function to be called before exiting.
 
 With check defer, we can safely handle certain tasks without having to worry about how the function exits.
 
@@ -80,7 +80,7 @@ E.g:
 ```
 ......
 _ {
-    F.Release()
+    F.release()
     <- ()    # error, cannot use return statement
 }
 ```
@@ -90,7 +90,7 @@ For packages that implement the automatic release protocol, we can use the '!= '
 
 E.g:
 ``` 
-! res := File resource("/test.xs") 
+! Res := File resource("/test.xs") 
 ......
 ```
 
@@ -104,30 +104,30 @@ E.g:
 
 Main() -> () {
     ! {
-        x: Int = (1 * 1)
+        A: Int = (1 * 1)
     } ex {
         !(ex)
     }
 
     X := Defer{}
-    ! y := Defer{}
+    ! Y := Defer{}
     ! {
-        x.Content = "defer"
-        Prt(x.Content)
+        X.content = "defer"
+        Prt(X.content)
     } e:Exception {
         !(e)
     } _ {
-        ? x >< () {
-            x.Dispose()
+        ? X >< () {
+            X.Dispose()
         }
     }
 }
 
 Defer -> {
-    Content: Str
+    content: Str
 } IDisposable {
     Dispose() -> () {
-        Content = ""
+        content = ""
     }
 }
 ```

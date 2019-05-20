@@ -74,6 +74,6 @@ Task := Async()    # 正确，获取了 Task
 
 例如：
 ```
-_ = Arr.Filter( {it ~> it > 5} )
+_ = Arr.filter( {it ~> it > 5} )
 ```
 ### [下一章](generic.md)

@@ -5,23 +5,23 @@ For example, we now need a collection that supports adding, deleting, and readin
 
 Our lists and dictionaries are actually implemented using generics.
 ## Statement and Use
-Let's see how we can use generics to implement an List. We just use the `<>` sign after the identifier to enclose the generation of the type.
+Let's see how we can use generics to implement an List. We just use the `<id>` sign after the identifier to enclose the generation of the type.
 
 This is a simplified implementation.
 
 E.g:
 ```
 List<T> -> {
-    Items := Storage{T}    # create storage
-    Length := 0
+    items := Storage{T}    # create storage
+    length := 0
 
     get(index: Int) -> (item: T) { # get some T item
-        <- ( Items.get( index ) )
+        <- ( items.get( index ) )
     }
   
     add(item: T) -> () {   # add a T item to List
-        Items.insert(Length, item)
-        Length += 1
+        items.insert(length, item)
+        length += 1
     }
 }
 ```
@@ -37,9 +37,9 @@ We can use the default value create method `Def<type>()` to specify a default va
 
 E.g:
 ```
-x := Def<I64>()
-y := Def<Protocol>()
-z := Def<()->()>()
+X := Def<Int>()
+Y := Def<Protocol>()
+Z := Def<()->()>()
 ```
 
 This way we can use it in generics.
@@ -47,7 +47,7 @@ This way we can use it in generics.
 E.g:
 ```
 Package<T> -> {
-    Item := Def<T>()    # initialized a default value of the generic data
+    item := Def<T>()    # initialized a default value of the generic data
 }
 ```
 So how do we use generics?
@@ -73,12 +73,12 @@ Func<T>(data: T) -> (data: T) {
 }
 
 Protocol<T> <- {
-    Test<T>(in: T) -> () {}
+    test<T>(in: T) -> () {}
 }
 
 Implement -> {
 } Protocol<Implement> {
-    Test<Implement>(in: Implement) -> () {
+    test<Implement>(in: Implement) -> () {
         
     }
 }

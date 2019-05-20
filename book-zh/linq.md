@@ -19,7 +19,7 @@
 ```
 Linq() -> () {
     Numbers := { 0, 1, 2, 3, 4, 5, 6 }
-    Arr := $from num $in numbers
+    Arr := $from num $in Numbers
             where (num % 2) == 0
             $orderby num $descending
             $select num

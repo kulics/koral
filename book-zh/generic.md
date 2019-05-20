@@ -6,23 +6,23 @@
 我们的列表和字典其实就是使用泛型实现的。
 
 ## 声明与使用
-让我们来看看怎么使用泛型来实现一个列表，我们只需在标识符后面使用 `<>` 符号来包裹类型的代称即可。
+让我们来看看怎么使用泛型来实现一个列表，我们只需在标识符后面使用 `<id>` 符号来包裹类型的代称即可。
 
 这是一个简化的实现。
 
 例如：
 ```
 List<T> -> {
-    Items := Storage{T}    # 创建存储
-    Length := 0
+    items := Storage{T}    # 创建存储
+    length := 0
 
     get(index: Int) -> (item: T) { # 获取某个泛型数据
-        <- ( Items.get( index ) )
+        <- ( items.get( index ) )
     }
 
     add(item: T) -> () {   # 将一个泛型数据添加进列表
-        Items.insert(Length, item)
-        Length += 1
+        items.insert(length, item)
+        length += 1
     }
 }
 ```
@@ -38,9 +38,9 @@ List<T> -> {
 
 例如：
 ```
-x := Def<I64>()
-y := Def<Protocol>()
-z := Def<()->()>()
+X := Def<Int>()
+Y := Def<Protocol>()
+Z := Def<()->()>()
 ```
 
 这样我们就可以在泛型里使用。
@@ -48,7 +48,7 @@ z := Def<()->()>()
 例如：
 ```
 Package<T> -> {
-    Item := Def<T>()    # 初始化了一个缺省值的泛型数据
+    item := Def<T>()    # 初始化了一个缺省值的泛型数据
 }
 ```
 那么我们如何使用泛型呢？
@@ -74,12 +74,12 @@ Func<T>(data: T) -> (data: T) {
 }
 
 Protocol<T> <- {
-    Test<T>(in: T) -> () {}
+    test<T>(in: T) -> () {}
 }
 
 Implement -> {
 } Protocol<Implement> {
-    Test<Implement>(in: Implement) -> () {
+    test<Implement>(in: Implement) -> () {
         
     }
 }
