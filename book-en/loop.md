@@ -30,7 +30,7 @@ Iterators can loop from the start point to the end point, we use the collection 
 
 E.g:
 ```
-[0 <= 100] @ i <- {
+[0 <= 100] @ i {
     Prt(i)      # print each number
 }
 ```
