@@ -34,9 +34,9 @@ If necessary, we can also assign a value to a single identifier. If not specifie
 E.g:
 ```
 Number -> U8[
-    A = 1   # 1
+    A 1     # 1
     B       # 2
-    C = 1   # 1
+    C 1     # 1
     D       # 2
 ]
 ```
@@ -62,7 +62,7 @@ A -> U8[
 
 B -> U8[
     X 
-    Y=0 
+    Y 0 
     Z
 ]
 ```

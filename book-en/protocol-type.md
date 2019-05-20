@@ -83,16 +83,16 @@ Student A := Chinese Student{}
 Student B := American Student{}
 Student C := Japanese Student{}
 # let them do homework separately
-Student A.Do()
-Student B.Do()
-Student C.Do()
+Student A.do()
+Student B.do()
+Student C.do()
 ```
 More efficient approach is to write this function into the function, let the function to help us repeatedly call the function of the protocol.
 
 E.g:
 ```
 Do homework(Student: Homework) -> () {
-    student.Do()
+    student.do()
 }
 # Now we can make it easier for every student to do their homework
 Do homework(Student A)
@@ -104,7 +104,7 @@ Of course, it is better to put these students in an array so that we can use loo
 E.g:
 ```
 Arr := []homeWork{}
-Arr.Add( Student A )
+Arr.add( Student A )
 ...... # stuffed many, many students
 Arr @ i {
     Do homework(i)
@@ -140,29 +140,29 @@ Func(hw: Homework) -> () {
 }
 
 Main() -> () {
-    S := B()
-    B.Do()
-    C( B )
+    P := B{}
+    P.do()
+    C( P )
 }
 
 A <- {
-    X(): Int
-    Do() -> () {}
+    x(): Int
+    do() -> () {}
 }
 
 B -> {
-    Y := 5
+    y := 5
 } A {
-    X() := 0
-    Do() -> () {
-        X += 1
+    x() := 0
+    do() -> () {
+        x += 1
     }
 }
 
 C(a: A) -> () {
-    a.Do()
+    a.do()
     ? a == :B {
-        Prt( a:B:.Y )
+        Prt( a:B:.y )
     }
 }
 ```
