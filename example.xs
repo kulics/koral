@@ -91,8 +91,8 @@ Test type() -> () {
     Char1: Chr = 'a'        # char
     String1: Str = "123"    # string
     Bool1: Bool = False     # bool
-    Int1: Int = 1           # bool
-    Num1: Num = 1.0         # bool
+    Int1: Int = 1           # int
+    Num1: Num = 1.0         # double
 }
 
 Test operator() -> () {
