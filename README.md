@@ -36,6 +36,7 @@ Main() -> () {
 
 # function
 Say hello world now(begin: Str) -> () {
+    # print
     Prt(begin)
     # array
     Greetings around the world := {"Hello", "Hola", "Bonjour",
