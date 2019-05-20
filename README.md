@@ -30,20 +30,27 @@ This is the main source code repository for Xs. It contains the compiler, and do
 
 # main function
 Main() -> () {
-    # list
-    greetings := {"Hello", "Hola", "Bonjour",
+    # call function
+   Say hello world now("start now")
+}
+
+# function
+Say hello world now(begin: Str) -> () {
+    Prt(begin)
+    # array
+    Greetings around the world := {"Hello", "Hola", "Bonjour",
                 "Ciao", "こんにちは", "안녕하세요",
                 "Cześć", "Olá", "Здравствуйте",
-                "Chào bạn", "您好"}
-    # for-each  
-    greetings @ item {
-        # match
-        item ? [ 0 <= 8 ] {
-            Prt(item) # call function
+                "Chào bạn", "你好"}
+    # loop
+    Greetings around the world @ greeting {
+        # judge
+        greeting ? "Hello" {
+            Prt(greeting + " World!")
+        } "你好" {
+            Prt(greeting + " 世界！")
         } _ {
-            # lambda
-            Prt( greetings.Filter( {it -> it.Len > 4} ) )
-            <- @
+            Prt(greeting + " Xs!")
         }
     }
 }
