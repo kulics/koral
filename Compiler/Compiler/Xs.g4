@@ -354,6 +354,7 @@ floatExpr
 | t=True
 | t=False
 | nil 
+| t=Undefined
 ;
 
 floatExpr: integerExpr call integerExpr;
@@ -476,6 +477,7 @@ TypeInt: 'Int';
 TypeNum: 'Num';
 True: 'True';
 False: 'False';
+Undefined: 'Undefined';
 
 Number : DIGIT+ ; // 整数
 fragment DIGIT : [0-9] ;             // 单个数字
