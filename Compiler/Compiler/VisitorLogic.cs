@@ -211,8 +211,8 @@ namespace Compiler {
 
         public override object VisitUsingStatement([NotNull] UsingStatementContext context) {
             var obj = "";
-            var r1 = (Result)Visit(context.expression(0));
-            var r2 = (Result)Visit(context.expression(1));
+            var r2 = (Result)Visit(context.expression(0));
+            var r1 = (Result)Visit(context.expression(1));
             if (context.type() != null) {
                 var Type = (string)Visit(context.type());
                 obj = $"{Type} {r1.text} = {r2.text}";

@@ -256,10 +256,10 @@ Test loop() -> () {
 
 Test check() -> () {
     Z1: ^Defer = ()
-    ! Z2 := Defer{}
+    Defer{} ! Z2
     ! {
         Z1 = Defer{}
-        ! Z3 := Defer{}
+        Defer{} ! Z3
         X := 1 * 1
         Y := 1 + 1
     } ex: IOException {
