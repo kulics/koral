@@ -90,7 +90,7 @@ _ {
 
 例如：
 ```
-! Res := File resource("/test.xs") 
+File resource("/test.xs") ! Res
 ......
 ```
 
@@ -110,7 +110,7 @@ Main() -> () {
     }
 
     X := Defer{}
-    ! Y := Defer{}
+    Defer{} ! Y
     ! {
         X.content = "defer"
         Prt(X.content)
