@@ -90,7 +90,7 @@ For packages that implement the automatic release protocol, we can use the '!= '
 
 E.g:
 ``` 
-! Res := File resource("/test.xs") 
+File resource("/test.xs") ! Res
 ......
 ```
 
@@ -110,7 +110,7 @@ Main() -> () {
     }
 
     X := Defer{}
-    ! Y := Defer{}
+    Defer{} ! Y
     ! {
         X.content = "defer"
         Prt(X.content)
