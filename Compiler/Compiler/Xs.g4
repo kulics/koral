@@ -176,7 +176,7 @@ checkStatement:
 Check blockLeft (functionSupportStatement)* blockRight (checkErrorStatement)* checkFinallyStatment end
 |Check blockLeft (functionSupportStatement)* blockRight (checkErrorStatement)+ end;
 // 定义检查变量
-usingStatement: Check expression (Define|Declared type Assign) expression end;
+usingStatement: expression Check expression (Declared type)? end;
 // 错误处理
 checkErrorStatement:(id|id Declared type) blockLeft (functionSupportStatement)* blockRight;
 // 最终执行
