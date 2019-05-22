@@ -214,7 +214,7 @@ Main() ~> () {
 
     # Check, listen the Excption Function
     Fi := File("./test.xy")
-    ! F := Read File("demo.xy")
+    Read File("demo.xy") ! F
     ! {
         do some thing()
     } ex {
@@ -279,7 +279,7 @@ Main() ~> () {
     })
 
     # linq
-    arr := $from id $in expr $where expr $order expr $select expr
+    arr := [from] id [in] expr [where] expr [order] expr [select] expr
 
     # event
     EventHandle -> {
