@@ -53,7 +53,7 @@ namespace Compiler {
                 var op = Visit(context.GetChild(1));
 
                 if (context.GetChild(1).GetType() == typeof(JudgeTypeContext)) {
-                    r.data = bl;
+                    r.data = Bool;
                     var e3 = (string)Visit(context.GetChild(2));
                     switch (op) {
                         case "==":
@@ -70,26 +70,26 @@ namespace Compiler {
                 var e2 = (Result)Visit(context.GetChild(2));
                 if (context.GetChild(1).GetType() == typeof(JudgeContext)) {
                     // todo 如果左右不是bool类型值，报错
-                    r.data = bl;
+                    r.data = Bool;
                 } else if (context.GetChild(1).GetType() == typeof(AddContext)) {
                     // todo 如果左右不是number或text类型值，报错
-                    if ((string)e1.data == str || (string)e2.data == str) {
-                        r.data = str;
-                    } else if ((string)e1.data == i32 && (string)e2.data == i32) {
-                        r.data = i32;
+                    if ((string)e1.data == Str || (string)e2.data == Str) {
+                        r.data = Str;
+                    } else if ((string)e1.data == I32 && (string)e2.data == I32) {
+                        r.data = I32;
                     } else {
-                        r.data = f64;
+                        r.data = F64;
                     }
                 } else if (context.GetChild(1).GetType() == typeof(MulContext)) {
                     // todo 如果左右不是number类型值，报错
-                    if ((string)e1.data == i32 && (string)e2.data == i32) {
-                        r.data = i32;
+                    if ((string)e1.data == I32 && (string)e2.data == I32) {
+                        r.data = I32;
                     } else {
-                        r.data = f64;
+                        r.data = F64;
                     }
                 } else if (context.GetChild(1).GetType() == typeof(PowContext)) {
                     // todo 如果左右部署number类型，报错
-                    r.data = f64;
+                    r.data = F64;
                     switch (op) {
                         case "**":
                             op = "Pow";
@@ -415,11 +415,11 @@ namespace Compiler {
             r.text = $"(new {Visit(context.type())}()";
             if (context.pkgAssign() != null) {
                 r.text += Visit(context.pkgAssign());
-            }
-            if (context.listAssign() != null) {
+            } else if (context.listAssign() != null) {
                 r.text += Visit(context.listAssign());
-            }
-            if (context.dictionaryAssign() != null) {
+            } else if (context.setAssign() != null) {
+                r.text += Visit(context.setAssign());
+            } else if (context.dictionaryAssign() != null) {
                 r.text += Visit(context.dictionaryAssign());
             }
             r.text += ")";
@@ -454,6 +454,21 @@ namespace Compiler {
         }
 
         public override object VisitListAssign([NotNull] ListAssignContext context) {
+            var obj = "";
+            obj += "{";
+            for (int i = 0; i < context.expression().Length; i++) {
+                var r = (Result)Visit(context.expression(i));
+                if (i == 0) {
+                    obj += r.text;
+                } else {
+                    obj += "," + r.text;
+                }
+            }
+            obj += "}";
+            return obj;
+        }
+
+        public override object VisitSetAssign([NotNull] SetAssignContext context) {
             var obj = "";
             obj += "{";
             for (int i = 0; i < context.expression().Length; i++) {
@@ -540,7 +555,27 @@ namespace Compiler {
                     result.text += "," + r.text;
                 }
             }
-            result.data = $"{lst}<{type}>";
+            result.data = $"{Lst}<{type}>";
+            result.text = $"(new {result.data}(){{ {result.text} }})";
+            return result;
+        }
+
+        public override object VisitSet([NotNull] SetContext context) {
+            var type = "object";
+            var result = new Result();
+            for (int i = 0; i < context.expression().Length; i++) {
+                var r = (Result)Visit(context.expression(i));
+                if (i == 0) {
+                    type = (string)r.data;
+                    result.text += r.text;
+                } else {
+                    if (type != (string)r.data) {
+                        type = "object";
+                    }
+                    result.text += "," + r.text;
+                }
+            }
+            result.data = $"{Set}<{type}>";
             result.text = $"(new {result.data}(){{ {result.text} }})";
             return result;
         }
@@ -566,7 +601,7 @@ namespace Compiler {
                 }
             }
             var type = key + "," + value;
-            result.data = $"{dic}<{type}>";
+            result.data = $"{Dic}<{type}>";
             result.text = $"(new {result.data}(){{ {result.text} }})";
             return result;
         }
@@ -595,7 +630,7 @@ namespace Compiler {
             }
             text += ")";
             return new Result {
-                data = str,
+                data = Str,
                 text = text,
             };
         }
@@ -612,23 +647,23 @@ namespace Compiler {
                 r.data = Any;
                 r.text = "null";
             } else if (context.floatExpr() != null) {
-                r.data = f64;
+                r.data = F64;
                 r.text = (string)Visit(context.floatExpr());
             } else if (context.integerExpr() != null) {
-                r.data = i32;
+                r.data = I32;
                 r.text = (string)Visit(context.integerExpr());
             } else if (context.t.Type == Text) {
-                r.data = str;
+                r.data = Str;
                 r.text = context.Text().GetText();
             } else if (context.t.Type == XsParser.Char) {
-                r.data = chr;
+                r.data = Chr;
                 r.text = context.Char().GetText();
             } else if (context.t.Type == XsParser.True) {
-                r.data = bl;
-                r.text = t;
+                r.data = Bool;
+                r.text = T;
             } else if (context.t.Type == XsParser.False) {
-                r.data = bl;
-                r.text = f;
+                r.data = Bool;
+                r.text = F;
             }
             return r;
         }

@@ -7,22 +7,22 @@ namespace Compiler {
             public Result Begin;
             public Result End;
             public Result Step;
-            public string Order = t;
-            public string Attach = f;
+            public string Order = T;
+            public string Attach = F;
         }
 
         public override object VisitIteratorStatement([NotNull] IteratorStatementContext context) {
             var it = new Iterator();
             if (context.op.Text == ">=" || context.op.Text == "<=") {
-                it.Attach = t;
+                it.Attach = T;
             }
             if (context.op.Text == ">" || context.op.Text == ">=") {
-                it.Order = f;
+                it.Order = F;
             }
             if (context.expression().Length == 2) {
                 it.Begin = (Result)Visit(context.expression(0));
                 it.End = (Result)Visit(context.expression(1));
-                it.Step = new Result { data = i32, text = "1" };
+                it.Step = new Result { data = I32, text = "1" };
             } else {
                 it.Begin = (Result)Visit(context.expression(0));
                 it.End = (Result)Visit(context.expression(1));

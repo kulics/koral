@@ -20,7 +20,8 @@ Main() ~> () {
     Test optional()
     Test switch()
     Test if()
-    Test array()
+    Test list()
+    Test set()
     Test dictionary()
     Test loop()
     X := Test func("testcall")
@@ -191,7 +192,7 @@ Test if() -> () {
     }
 }
 
-Test array() -> () {
+Test list() -> () {
     Single := {1}
     Numbers := {1,2,5,6,8,4}
     Numbers = Numbers + 0
@@ -202,15 +203,20 @@ Test array() -> () {
     Object := {"123", 432, App{}}
     Numbers In Numbers := {{1,1,1}, {1,1,1}}
     Empty := []Int{}
-    Array: [Int] = Array of(1,2,3)
-    Numbers @ item {
-        Prt(item)
-    }
+    Array: [:]Int = Array of(1,2,3)
     Numbers @ [i]v {
         Prt(i, ":", v)
     }
     Slice := Numbers[0<=]
     Slice2 := Numbers[<3]
+}
+
+Test set() -> () {
+    Empty := [Str]{}
+    Numbers: [Int] = {[1],[2],[5],[6],[8],[4]}
+    Numbers @ item {
+        Prt(item)
+    }
 }
 
 Test dictionary() -> () {

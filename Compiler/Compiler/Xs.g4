@@ -219,6 +219,7 @@ linq // 联合查询
 | getType // 获取类型
 | callAwait // 异步等待调用
 | list // 列表
+| set // 集合
 | dictionary // 字典
 | lambda // lambda表达式
 | functionExpression // 函数
@@ -267,7 +268,7 @@ callFunc: id (templateCall)? tuple; // 函数调用
 
 callElement : id op=Judge? '[' (expression | slice) ']';
 
-callPkg: type blockLeft (pkgAssign|listAssign|dictionaryAssign)? blockRight; // 新建包
+callPkg: type blockLeft (pkgAssign|listAssign|setAssign|dictionaryAssign)? blockRight; // 新建包
 
 callNew: '<' type '>' bracketLeft NewLine? expressionList? NewLine? bracketRight; // 构造类对象
 
@@ -281,11 +282,15 @@ pkgAssignElement: name Assign expression; // 简化赋值元素
 
 listAssign: expression (more expression)* ;
 
+setAssign: '[' expression ']' (more '[' expression ']')* ;
+
 dictionaryAssign: dictionaryElement (more dictionaryElement)* ;
 
 callAwait: FlowLeft expression; // 异步调用
 
 list : blockLeft expression (more expression)* blockRight; // 列表
+
+set : blockLeft '[' expression ']' (more '[' expression ']')* blockRight; // 无序集合
 
 dictionary :  blockLeft dictionaryElement (more dictionaryElement)* blockRight; // 字典
 
@@ -365,6 +370,7 @@ typeNotNull:
 typeTuple
 | typeArray
 | typeList
+| typeSet
 | typeDictionary
 | typeBasic
 | typePackage
@@ -376,8 +382,9 @@ typeNullable : Judge typeNotNull;
 type : typeNotNull | typeNullable;
 
 typeTuple : bracketLeft type (more type)+ bracketRight;
-typeArray : '[' type ']';
+typeArray : '[:]' type;
 typeList : '[]' type;
+typeSet : '[' type ']';
 typeDictionary : '[' type ']' type;
 typePackage : nameSpaceItem (templateCall)? ;
 typeFunction : typeFunctionParameterClause ArrowRight NewLine* typeFunctionParameterClause;
