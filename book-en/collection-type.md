@@ -23,12 +23,12 @@ For example we need a string list:
 List := []Str{}         # empty List
 ```
 #### Array
-If we need to use the native Array type, we can use `[type]` to represent it.
+If we need to use the native Array type, we can use `[:]type` to represent it.
 It can also be created directly using `Array of(e1,e2,e3)`.
 
 E.g:
 ```
-Arr: [Int] = Array of(1,2,3,4,5)
+Array: [:]Int = Array of(1,2,3,4,5)
 ```
 ### Visit
 If we need to access one of the elements in the List we can access it with the `identifier[index]`.
@@ -97,6 +97,35 @@ Dictionary += {["d"]11}         # add index by method
 Dictionary -= "c"               # delete the specified index element
 Length := Dictionary.len        # length
 ```
+
+## Set
+A Set is used to store values of the same type, without a determined order, and without repeating.
+That is to say, when the order of the elements is not important, or if you want to ensure that each element only appears once, you can use the set instead of the list.
+### Definition
+Similar to lists, set are also defined using `{}` in the form `[value]`.
+
+E.g:
+```
+Set := {["a"], ["b"], ["c"]}
+```
+This will create a set of `[Str]` types containing three entries: `a,b,c`.
+
+If you need a set of explicit types, you can also create them using the constructor.
+
+The representation of the set type is `[type]`.
+
+E.g:
+```
+Numbers := [Int]{} # empty
+```
+### Common operations
+```
+Numbers.add(1)                  # Add element
+Has := Numbers.contains(1)      # Determine whether to include
+Success = Numbers.remove(1)     # Delete element
+Length := Numbers.len           # Length
+```
+
 ### [Next Chapter](judgment.md)
 
 ## Example of this chapter
@@ -109,10 +138,12 @@ Main() -> () {
     List1 := {1,2,3,4,5}
     List1 += 6
     List2 := []I8{1,2,1,2}
-    Array := [I8]{1,2,3}
+    Array := [:]I8{1,2,3}
 
     Dictionary1 := {["a"]1, ["b"]2, ["c"]3}
     Dictionary1["d"] = 4
     Dictionary2 := [I8]I8{[1]1,[2]2,[3]3}
+
+    Set := [Int]{1,2,3}
 }
 ```
