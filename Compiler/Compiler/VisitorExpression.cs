@@ -589,10 +589,11 @@ namespace Compiler {
         }
 
         public override object VisitStringExpression([NotNull] StringExpressionContext context) {
-            var text = context.Text().GetText();
+            var text = $"(new System.Text.StringBuilder({context.Text().GetText()})";
             foreach (var item in context.stringExpressionElement()) {
-                text += " + " + Visit(item);
+                text += Visit(item);
             }
+            text += ")";
             return new Result {
                 data = str,
                 text = text,
@@ -602,7 +603,7 @@ namespace Compiler {
         public override object VisitStringExpressionElement([NotNull] StringExpressionElementContext context) {
             var r = (Result)Visit(context.expression());
             var text = context.Text().GetText();
-            return $"({r.text}).to_Str() + {text}";
+            return $".Append({r.text}).Append({text})";
         }
 
         public override object VisitDataStatement([NotNull] DataStatementContext context) {
