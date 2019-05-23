@@ -51,15 +51,22 @@ namespace Compiler {
             obj += $" { Visit(context.type())}[] ";
             return obj;
         }
+
         public override object VisitTypeList([NotNull] TypeListContext context) {
             var obj = "";
-            obj += $" {lst}<{ Visit(context.type())}> ";
+            obj += $" {Lst}<{ Visit(context.type())}> ";
+            return obj;
+        }
+
+        public override object VisitTypeSet([NotNull] TypeSetContext context) {
+            var obj = "";
+            obj += $" {Set}<{ Visit(context.type())}> ";
             return obj;
         }
 
         public override object VisitTypeDictionary([NotNull] TypeDictionaryContext context) {
             var obj = "";
-            obj += $" {dic}<{ Visit(context.type(0))},{Visit(context.type(1))}> ";
+            obj += $" {Dic}<{ Visit(context.type(0))},{Visit(context.type(1))}> ";
             return obj;
         }
 
@@ -123,49 +130,49 @@ namespace Compiler {
             var obj = "";
             switch (context.t.Type) {
                 case TypeI8:
-                    obj = i8;
+                    obj = I8;
                     break;
                 case TypeU8:
-                    obj = u8;
+                    obj = U8;
                     break;
                 case TypeI16:
-                    obj = i16;
+                    obj = I16;
                     break;
                 case TypeU16:
-                    obj = u16;
+                    obj = U16;
                     break;
                 case TypeI32:
-                    obj = i32;
+                    obj = I32;
                     break;
                 case TypeU32:
-                    obj = u32;
+                    obj = U32;
                     break;
                 case TypeI64:
-                    obj = i64;
+                    obj = I64;
                     break;
                 case TypeU64:
-                    obj = u64;
+                    obj = U64;
                     break;
                 case TypeF32:
-                    obj = f32;
+                    obj = F32;
                     break;
                 case TypeF64:
-                    obj = f64;
+                    obj = F64;
                     break;
                 case TypeChr:
-                    obj = chr;
+                    obj = Chr;
                     break;
                 case TypeStr:
-                    obj = str;
+                    obj = Str;
                     break;
                 case TypeBool:
-                    obj = bl;
+                    obj = Bool;
                     break;
                 case TypeInt:
-                    obj = @int;
+                    obj = Int;
                     break;
                 case TypeNum:
-                    obj = num;
+                    obj = Num;
                     break;
                 default:
                     obj = Any;

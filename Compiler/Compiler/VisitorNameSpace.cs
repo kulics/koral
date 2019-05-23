@@ -191,40 +191,40 @@ namespace Compiler {
                 obj += Visit(context.annotationSupport());
             }
             switch (typ) {
-                case i8:
+                case I8:
                     typ = "ubyte";
                     break;
-                case i16:
+                case I16:
                     typ = "short";
                     break;
-                case i32:
+                case I32:
                     typ = "int";
                     break;
-                case i64:
+                case I64:
                     typ = "long";
                     break;
 
-                case u8:
+                case U8:
                     typ = "byte";
                     break;
-                case u16:
+                case U16:
                     typ = "ushort";
                     break;
-                case u32:
+                case U32:
                     typ = "uint";
                     break;
-                case u64:
+                case U64:
                     typ = "ulong";
                     break;
 
-                case f32:
+                case F32:
                     typ = "float";
                     break;
-                case f64:
+                case F64:
                     typ = "double";
                     break;
 
-                case str:
+                case Str:
                     typ = "string";
                     break;
                 default:

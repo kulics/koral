@@ -131,6 +131,35 @@ namespace Library {
         public void clear() => Clear();
     }
 
+    public class Set<T> : HashSet<T> {
+        public Set() : base() { }
+        public Set(IEnumerable<T> collection) : base(collection) { }
+        public Set(IEqualityComparer<T> comparer) : base(comparer) { }
+        public Set(IEnumerable<T> collection, IEqualityComparer<T> comparer) : base(collection, comparer) { }
+
+        public int len => Count;
+        public int length => Count;
+
+        public IEqualityComparer<T> comparer => Comparer;
+
+        public bool add(T item) => Add(item);
+        public bool remove(T item) => Remove(item);
+        public int remove_where(Predicate<T> match) => RemoveWhere(match);
+        public void clear() => Clear();
+        public bool contains(T item) => Contains(item);
+        public void except_with(IEnumerable<T> other) => ExceptWith(other);
+        public void intersect_with(IEnumerable<T> other) => IntersectWith(other);
+        public bool is_proper_subset_of(IEnumerable<T> other) => IsProperSubsetOf(other);
+        public bool is_proper_superset_of(IEnumerable<T> other) => IsProperSupersetOf(other);
+        public bool is_subset_of(IEnumerable<T> other) => IsSubsetOf(other);
+        public bool is_superset_of(IEnumerable<T> other) => IsSupersetOf(other);
+        public bool overlaps(IEnumerable<T> other) => Overlaps(other);
+        public bool set_equals(IEnumerable<T> other) => SetEquals(other);
+        public void symmetric_except_with(IEnumerable<T> other) => SymmetricExceptWith(other);
+        public void trim_excess() => TrimExcess();
+        public void union_with(IEnumerable<T> other) => UnionWith(other);
+    }
+
     public static partial class CollectionsExtension {
         public static bool is_empty<T>(this ICollection<T> it) => !it.not_empty();
         public static bool not_empty<T>(this ICollection<T> it) => it.Count > 0;

@@ -29,29 +29,30 @@ namespace Compiler {
         private const string Wrap = "\r\n";
 
         private const string Any = "object";
-        private const string @int = "int";
-        private const string num = "double";
-        private const string i8 = "sbyte";
-        private const string i16 = "short";
-        private const string i32 = "int";
-        private const string i64 = "long";
+        private const string Int = "int";
+        private const string Num = "double";
+        private const string I8 = "sbyte";
+        private const string I16 = "short";
+        private const string I32 = "int";
+        private const string I64 = "long";
 
-        private const string u8 = "byte";
-        private const string u16 = "ushort";
-        private const string u32 = "uint";
-        private const string u64 = "ulong";
+        private const string U8 = "byte";
+        private const string U16 = "ushort";
+        private const string U32 = "uint";
+        private const string U64 = "ulong";
 
-        private const string f32 = "float";
-        private const string f64 = "double";
+        private const string F32 = "float";
+        private const string F64 = "double";
 
-        private const string bl = "bool";
-        private const string t = "true";
-        private const string f = "false";
+        private const string Bool = "bool";
+        private const string T = "true";
+        private const string F = "false";
 
-        private const string chr = "char";
-        private const string str = "string";
-        private const string lst = "Lst";
-        private const string dic = "Dic";
+        private const string Chr = "char";
+        private const string Str = "string";
+        private const string Lst = "Lst";
+        private const string Set = "Set";
+        private const string Dic = "Dic";
 
         private const string BlockLeft = "{";
         private const string BlockRight = "}";
@@ -120,11 +121,11 @@ namespace Compiler {
         public override object VisitBool([NotNull] BoolContext context) {
             var r = new Result();
             if (context.t.Type == True) {
-                r.data = bl;
-                r.text = t;
+                r.data = Bool;
+                r.text = T;
             } else if (context.t.Type == False) {
-                r.data = bl;
-                r.text = f;
+                r.data = Bool;
+                r.text = F;
             }
             return r;
         }
