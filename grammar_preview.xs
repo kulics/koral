@@ -246,11 +246,11 @@ Main() ~> () {
     }
 
     # Pointer Type
-    A: ^Int = ()
+    A: ?Int = ()
     # Get Pointer
-    C := A^
+    C := A?
     # Safe Call
-    E := A^.to Str()
+    E := A?.to Str()
     # OrElseValue
     F := A.or else(128)
     

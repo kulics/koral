@@ -232,7 +232,7 @@ linq // 联合查询
 | expression add expression // 和型表达式
 | expression mul expression // 积型表达式
 | expression pow expression // 幂型表达式
-| expression op=Pointer // 可空判断
+| expression op=Judge // 可空判断
 | expression typeConversion // 类型转换
 | stringExpression // 字符串插值
 ;
@@ -265,7 +265,7 @@ annotationAssign: (id '=')? expression ;
 
 callFunc: id (templateCall)? tuple; // 函数调用
 
-callElement : id op=Pointer? '[' (expression | slice) ']';
+callElement : id op=Judge? '[' (expression | slice) ']';
 
 callPkg: type blockLeft (pkgAssign|listAssign|dictionaryAssign)? blockRight; // 新建包
 
@@ -372,7 +372,7 @@ typeTuple
 | typeAny
 ;
 
-typeNullable : Pointer typeNotNull;
+typeNullable : Judge typeNotNull;
 type : typeNotNull | typeNullable;
 
 typeTuple : bracketLeft type (more type)+ bracketRight;
@@ -457,8 +457,6 @@ Judge : '?';
 Loop : '@';
 
 Check : '!';
-
-Pointer : '^';
 
 TypeI8: 'I8';
 TypeU8: 'U8';

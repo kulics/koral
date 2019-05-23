@@ -132,14 +132,14 @@ Test string() -> () {
 }
 
 Test optional() -> () {
-    A: ^Int = 1
-    A^.to Str()
-    B: ^Str = ""
-    B^.to Str()
-    C: ^{} = ()
-    D: ^App = ()
-    E: ^[]^Int = []^Int{0}
-    E^[0]^.to Str()^.to Str()
+    A: ?Int = 1
+    A?.to Str()
+    B: ?Str = ""
+    B?.to Str()
+    C: ?{} = ()
+    D: ?App = ()
+    E: ?[]?Int = []?Int{0}
+    E?[0]?.to Str()?.to Str()
     F := D.or else(App{})
 }
 
@@ -255,7 +255,7 @@ Test loop() -> () {
 }
 
 Test check() -> () {
-    Z1: ^Defer = ()
+    Z1: ?Defer = ()
     Defer{} ! Z2
     ! {
         Z1 = Defer{}

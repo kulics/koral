@@ -52,7 +52,7 @@ Main() -> () {
     Rd()
 }
 
-Pre order traverse(node: ^Node) -> () {
+Pre order traverse(node: ?Node) -> () {
     node ? () { 
         <- () 
     }
@@ -61,7 +61,7 @@ Pre order traverse(node: ^Node) -> () {
     Pre order traverse(node.right)
 }
 
-Post order traverse(node: ^Node) -> () {
+Post order traverse(node: ?Node) -> () {
     node ? () { 
         <- () 
     }
@@ -70,7 +70,7 @@ Post order traverse(node: ^Node) -> () {
     Prt(node.value)
 }
 
-Middle order traverse(node: ^Node) -> () {
+Middle order traverse(node: ?Node) -> () {
     node ? () { 
         <- () 
     }
@@ -79,7 +79,7 @@ Middle order traverse(node: ^Node) -> () {
     Middle order traverse(node.right)
 }
 
-Inverse node(node: ^Node) -> (node: ^Node) {
+Inverse node(node: ?Node) -> (node: ?Node) {
     node ? () { 
         <- (()) 
     }
@@ -176,8 +176,8 @@ Shutdown(ctrl: Control) -> () {
 
 Node -> {
     value: Int
-    left: ^Node
-    right: ^Node
+    left: ?Node
+    right: ?Node
 } (value: Int) {
     ..value = value
 }
