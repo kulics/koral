@@ -273,7 +273,7 @@ callNew: '<' type '>' bracketLeft NewLine? expressionList? NewLine? bracketRight
 
 getType: Judge bracketLeft (expression|':' type) bracketRight;
 
-typeConversion: Declared type Declared; // 类型转化
+typeConversion: Declared type; // 类型转化
 
 pkgAssign: pkgAssignElement (more pkgAssignElement)* ; // 简化赋值
 
