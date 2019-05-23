@@ -11,11 +11,11 @@ B := A   # error, no assignment to A
 ## Statement and Use
 
 If you have to use a type with nil values in some cases, you can use a nullable type.
-Just add `^` forward any type, which is a nullable type.
+Just add `?` forward any type, which is a nullable type.
 
 E.g:
 ```
-A: ^Int
+A: ?Int
 B := A  # B assigns an empty Int
 ```
 
@@ -30,11 +30,11 @@ E.g:
 ```
 
 This is cumbersome, especially when we need to execute multiple functions in succession.
-We can use `^` after the expression to use them, so that they will only be executed if they are not empty.
+We can use `?` after the expression to use them, so that they will only be executed if they are not empty.
 
 E.g:
 ```
-Arr^.to Str()
+Arr?.to Str()
 ```
 
 ## Merge Operation
@@ -54,10 +54,10 @@ B := A.or else(128)
 }
 
 Main() -> () {
-    A: ^Int = ()
+    A: ?Int = ()
 
-    B: ^[]^Int = []^Int{0}
-    B^[0]^.to Str()^.to Str()
+    B: ?[]?Int = []?Int{0}
+    B?[0]?.to Str()?.to Str()
 
     E := A.or else(1024)
 }
