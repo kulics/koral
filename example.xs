@@ -145,13 +145,13 @@ Test optional() -> () {
 
 Test type convert() -> () {
     X := App{}
-    Y := X:Program:
+    Y := X:Program
     Z1 := (12.34).to F32()
     Z2 := Z1.to I64()
     Prt( Z2.to<{}>().to<I64>() )
     Prt( Y == :Program )
     Prt( Y >< :Program )
-    Prt( X:Program:.running )
+    Prt( X:Program.running )
     Prt( ?(:Program) )
     Prt( ?(X) )
 }

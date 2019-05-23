@@ -118,7 +118,7 @@ Because packet types can be converted to protocol types, the original type of da
 
 But sometimes we need to get the original type of data to handle, we can use type judgment to help us accomplish this.
 
-We can use `value == :type` or `value >< :type` To judge the type of data, using `value:type:` To convert the data to our type.
+We can use `value == :type` or `value >< :type` To judge the type of data, using `value:type` To convert the data to our type.
 
 E.g:
 ```
@@ -126,7 +126,7 @@ Func(hw: Homework) -> () {
     # judge type
     ? hw == :Chinese Student {
         # convert to chinese student data
-        Cs := hw:Chinese Student:
+        Cs := hw:Chinese Student
     }
 }
 ```
@@ -162,7 +162,7 @@ B -> {
 C(a: A) -> () {
     a.do()
     ? a == :B {
-        Prt( a:B:.y )
+        Prt( a:B.y )
     }
 }
 ```

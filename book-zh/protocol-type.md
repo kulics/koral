@@ -118,7 +118,7 @@ Arr @ i {
 
 但有时候我们又需要获得数据的原始类型来处理，我们可以使用类型判断来帮助我们完成这个事情。
 
-我们可以使用 `value == :type` 或 `value >< :type` 来判断数据的类型，使用 `value:type:` 来将数据转化为我们的类型。
+我们可以使用 `value == :type` 或 `value >< :type` 来判断数据的类型，使用 `value:type` 来将数据转化为我们的类型。
 
 例如：
 ```
@@ -126,7 +126,7 @@ Func(hw: Homework) -> () {
     # 判断是否中国学生
     ? hw == :Chinese Student {
         # 转换为中国学生数据
-        Cs := hw:Chinese Student:
+        Cs := hw:Chinese Student
     }
 }
 ```
@@ -162,7 +162,7 @@ B -> {
 C(a: A) -> () {
     a.do()
     ? a == :B {
-        Prt( a:B:.y )
+        Prt( a:B.y )
     }
 }
 ```
