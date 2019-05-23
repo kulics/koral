@@ -26,16 +26,20 @@ Main() ~> () {
     Format := "the value is "Integer","Number","Boolean""
 
     # List
-    Arr := []Int{ 1,2,3,4,5 }
-    Arr2 := { 1,2,3,4,5 }
-    Prt( Arr[0] ) # 使用下标获取
+    List := []Int{ 1,2,3,4,5 }
+    List2 := { 1,2,3,4,5 }
+    Prt( List[0] ) # 使用下标获取
+
+    # Set
+    Set := [Int]{ [1],[2],[3],[4],[5] }
+    Set2 := { [1],[2],[3],[4],[5] }
 
     # Dictionary, 前面为key，后面为value
-    Dic := {["1"]False, ["2"]True}
-    Dic := [Str]Bool{ ["1"]False, ["2"]True}
-    Prt( Dic["1"] ) # 使用key获取
+    Dictionary := {["1"]False, ["2"]True}
+    Dictionary := [Str]Bool{ ["1"]False, ["2"]True}
+    Prt( Dictionary["1"] ) # 使用key获取
 
-    Arr: [Int] = Arr of(1,2,3)
+    Array: [:]Int = Array of(1,2,3)
     # Anonymous Package
     New := {
         title = "nnn",
@@ -204,8 +208,8 @@ Main() ~> () {
 
     # judge type
     ? IB == :Image Button {
-        # conversion type
-        IB:View:.show()
+        # convert type
+        IB:View.show()
     }
 
     # get type
@@ -213,8 +217,8 @@ Main() ~> () {
     Prt( ?(:Image Button) )
 
     # Check, listen the Excption Function
-    Fi := File("./test.xy")
-    Read File("demo.xy") ! F
+    Fi := File("./test.xs")
+    Read File("demo.xs") ! F
     ! {
         do some thing()
     } ex {
@@ -235,7 +239,7 @@ Main() ~> () {
     X := Task(6)
 
     # Annotation 
-    [assemby: Table("user"), D(False,Name="d",Hide=True)]
+    [assemby-> Table("user"), D(False,Name="d",Hide=True)]
     User -> {
         [Column("id"), Required, Key]
         id(): Str
