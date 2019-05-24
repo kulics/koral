@@ -308,7 +308,7 @@ Test lambda() -> () {
     }
     Test2( {->1} )
 
-    Test3(fn: (Int) -> ()) -> () {
+    Test3(fn: (Int) ~> ()) -> () {
         fn(1)
     }
     Test3( (it: Int) ~> () {
@@ -319,10 +319,10 @@ Test lambda() -> () {
         <~ Dly(1000)
         Prt(it)
     })
-    Test4(fn: (Int) -> (Int)) -> () { 
+    Test4(fn: (Int) ~> (Int)) -> () { 
         fn(18) 
     }
-    Test4({it->it+1})
+    Test4({it~>it+1})
 }
 
 Test async() ~> (x: Int, y: Int, z: Str) {

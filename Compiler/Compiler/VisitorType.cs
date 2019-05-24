@@ -83,27 +83,36 @@ namespace Compiler {
             var obj = "";
             var @in = (string)Visit(context.typeFunctionParameterClause(0));
             var @out = (string)Visit(context.typeFunctionParameterClause(1));
-            if (@out.Length == 0) {
-                if (@in.Length == 0) {
-                    obj += "Action";
+            if (context.t.Type == ArrowRight) {
+                if (@out.Length == 0) {
+                    if (@in.Length == 0) {
+                        obj = "Action";
+                    } else {
+                        obj = $"Action<{@in}>";
+                    }
                 } else {
-                    obj += "Action<";
-                    obj += @in;
-                    obj += ">";
+                    if (@out.IndexOf(",") >= 0) {
+                        @out = "(" + @out + ")";
+                    }
+                    if (@in.Length == 0) {
+                        obj = $"Func<{@out}>";
+                    } else {
+                        obj = $"Func<{@in}, {@out}>";
+                    }
                 }
-            } else {
-                if (@out.IndexOf(",") >= 0) {
-                    @out = "(" + @out + ")";
-                }
-                if (@in.Length == 0) {
-                    obj += "Func<";
-                    obj += @out;
-                    obj += ">";
+            }else{
+                if (@out.Length == 0) {
+                    if (@in.Length == 0) {
+                        obj = $"Func<{Task}>";
+                    } else {
+                        obj = $"Func<{@in}, {Task}>";
+                    }
                 } else {
-                    obj += "Func<";
-                    obj += @in + ", ";
-                    obj += @out;
-                    obj += ">";
+                    if (@in.Length == 0) {
+                        obj = $"Func<{Task}<{@out}>>";
+                    } else {
+                        obj = $"Func<{@in}, {Task}<{@out}>>";
+                    }
                 }
             }
             return obj;
