@@ -283,7 +283,7 @@ Main() ~> () {
     })
 
     # linq
-    arr := [from] id [in] expr [where] expr [order] expr [select] expr
+    arr := from id => in expr => where expr => order expr => select expr
 
     # event
     EventHandle -> {

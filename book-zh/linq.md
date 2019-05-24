@@ -13,16 +13,16 @@
 [微软文档](https://docs.microsoft.com/zh-cn/dotnet/csharp/programming-guide/concepts/linq/getting-started-with-linq)
 
 ## 声明
-我们可以像C#一样使用Linq进行查询，只需要使用 `[]` 声明LINQ关键字即可。
+我们可以像C#一样使用Linq进行查询，只需要使用 `=>` 声明LINQ语句即可。
 
 例如：
 ```
 Linq() -> () {
     Numbers := { 0, 1, 2, 3, 4, 5, 6 }
-    Arr := [from] num [in] Numbers
-            [where] (num % 2) == 0
-            [orderby] num [descending]
-            [select] num
+    Arr := from num => in Numbers =>
+            where (num % 2) == 0 =>
+            orderby num => descending =>
+            select num
 }
 ```
 

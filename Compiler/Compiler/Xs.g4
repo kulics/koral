@@ -338,9 +338,9 @@ plusMinus : add expression;
 
 negate : wave expression;
 
-linq: '[' linqHeadKeyword ']' NewLine? expression NewLine? (linqItem)+ '[' k=('by'|'select') ']' NewLine? expression;
+linq: linqHeadKeyword NewLine? expression ArrowDouble NewLine?  (linqItem)+ k=('by'|'select') NewLine? expression;
 
-linqItem: '[' linqBodyKeyword ']' NewLine? | expression NewLine? ;
+linqItem: linqBodyKeyword (expression)? ArrowDouble NewLine?;
 
 linqKeyword: linqHeadKeyword | linqBodyKeyword ;
 linqHeadKeyword: k='from';
@@ -458,6 +458,8 @@ ArrowLeft : '<-';
 
 FlowRight : '~>';
 FlowLeft : '<~';
+
+ArrowDouble : '=>';
 
 Judge : '?';
 
