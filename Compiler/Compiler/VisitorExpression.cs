@@ -628,7 +628,7 @@ namespace Compiler {
             foreach (var item in context.stringExpressionElement()) {
                 text += Visit(item);
             }
-            text += ")";
+            text += ").to_Str()";
             return new Result {
                 data = Str,
                 text = text,
