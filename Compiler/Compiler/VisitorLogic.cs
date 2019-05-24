@@ -244,10 +244,11 @@ namespace Compiler {
         }
 
         public override object VisitLinqItem([NotNull] LinqItemContext context) {
+            var txt = (string)Visit(context.linqBodyKeyword());
             if (context.expression() != null) {
-                return ((Result)Visit(context.expression())).text;
+                txt += $" {((Result)Visit(context.expression())).text}";
             }
-            return (string)Visit(context.linqBodyKeyword());
+            return txt;
         }
 
         public override object VisitLinqKeyword([NotNull] LinqKeywordContext context) {
