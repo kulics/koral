@@ -30,7 +30,7 @@ print("Hello, world!")
 ```
 my Variable := 42
 my Variable = 50
-my Constant 42
+my Constant => 42
 ```
 ### C#
 ```

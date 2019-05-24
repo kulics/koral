@@ -24,7 +24,7 @@ namespaceVariableStatement
 ;
 
 // 枚举
-enumStatement: (annotationSupport)? id ArrowRight NewLine* type squareBracketLeft enumSupportStatement* squareBracketRight end;
+enumStatement: (annotationSupport)? id ArrowDouble NewLine* type squareBracketLeft enumSupportStatement* squareBracketRight end;
 
 enumSupportStatement: id ((add)? integerExpr)? end;
 // 命名空间变量
@@ -33,7 +33,7 @@ namespaceVariableStatement:(annotationSupport)? id (Define expression|Declared t
 namespaceControlStatement:(annotationSupport)? id bracketLeft bracketRight (Define expression|Declared type (Assign expression)?) 
 (blockLeft (packageControlSubStatement)+ blockRight)? end;
 // 命名空间常量
-namespaceConstantStatement: (annotationSupport)? id (Declared type)? expression end;
+namespaceConstantStatement: (annotationSupport)? id (Declared type)? ArrowDouble expression end;
 // 命名空间函数
 namespaceFunctionStatement:(annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) NewLine*
 parameterClauseOut blockLeft (functionSupportStatement)* blockRight end;
