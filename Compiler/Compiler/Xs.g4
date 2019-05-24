@@ -387,7 +387,7 @@ typeList : '[]' type;
 typeSet : '[' type ']';
 typeDictionary : '[' type ']' type;
 typePackage : nameSpaceItem (templateCall)? ;
-typeFunction : typeFunctionParameterClause ArrowRight NewLine* typeFunctionParameterClause;
+typeFunction : typeFunctionParameterClause t=(ArrowRight|FlowRight) NewLine* typeFunctionParameterClause;
 typeAny: BlockLeft BlockRight;
 
 // 函数类型参数
@@ -412,18 +412,18 @@ t=TypeI8
 | t=TypeNum
 ;
 // nil值
-nil:bracketLeft bracketRight;
+nil: bracketLeft bracketRight;
 // bool值
-bool:t=True|t=False;
+bool: t=True|t=False;
 
-judgeType : op=('=='|'><') Declared;
-judge : op=('|' | '&' | '==' | '><' | '<' | '>' | '<=' | '>=');
-assign : op=(Assign | '+=' | '-=' | '*=' | '/=' | '%=');
-add : op=('+' | '-');
-mul : op=('*' | '/' | '%');
-pow : op=('**' | '//' | '%%');
-call : op='.' NewLine* CommentLine*;
-wave : op='~';
+judgeType: op=('=='|'><') Declared;
+judge: op=('|' | '&' | '==' | '><' | '<' | '>' | '<=' | '>=');
+assign: op=(Assign | '+=' | '-=' | '*=' | '/=' | '%=');
+add: op=('+' | '-');
+mul: op=('*' | '/' | '%');
+pow: op=('**' | '//' | '%%');
+call: op='.' NewLine* CommentLine*;
+wave: op='~';
 
 id: (idItem)+;
 
