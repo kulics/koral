@@ -467,9 +467,9 @@ Test Annotation -> {
     profile(): Str
 }
 
-Test Enum => Int[
+Test Enum -> Int[
     OK
-    Error -1
+    Error => -1
 ]
 
 Package -> {
