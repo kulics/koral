@@ -20,7 +20,7 @@ Main() ~> () {
     Small Float := (1.2).to F32() # basic type convert
 
     # Const
-    PI 3.141592653
+    PI => 3.141592653
 
     # Mark String
     Format := "the value is "Integer","Number","Boolean""
@@ -305,7 +305,7 @@ Main() ~> () {
         Z := \NS.Pkg{}
     }
 
-    Color -> I8[
+    Color => I8[
         Red 
         Green
         Blue

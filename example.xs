@@ -352,8 +352,9 @@ Test linq() -> () {
 
 Test interface(in: Protocol) -> () {}
 
-Const Data 256
-Const Data2: Str "512"
+Const Data => 256
+Const Data2: Str => "512"
+Const Data3: Int => Const Data
 Const function() -> (v: Int) { 
     <- (Const Data) 
 }
@@ -466,7 +467,7 @@ Test Annotation -> {
     profile(): Str
 }
 
-Test Enum -> Int[
+Test Enum => Int[
     OK
     Error -1
 ]
