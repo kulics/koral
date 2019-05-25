@@ -11,6 +11,7 @@ namespace Library {
         public static bool @is<T>(this object it) => it is T;
         public static T @as<T>(this object it) where T : class => it as T;
         public static T or_else<T>(this T it, T value) where T : class => it != null ? it : value;
+        public static T or_else<T>(this T? it, T value) where T : struct => it ?? value;
 
         public static int to_Int(this object it) => Convert.ToInt32(it);
         public static double to_Num(this object it) => Convert.ToDouble(it);

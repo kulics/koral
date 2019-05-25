@@ -9,13 +9,22 @@ namespace Compiler {
             return obj;
         }
 
+        public override object VisitTypeReference([NotNull] TypeReferenceContext context) {
+            var obj = "ref ";
+            if (context.typeNullable() != null) {
+                obj += Visit(context.typeNullable());
+            } else if (context.typeNotNull() != null) {
+                obj += Visit(context.typeNotNull());
+            }
+            return obj;
+        }
+
         public override object VisitTypeNullable([NotNull] TypeNullableContext context) {
             var obj = "";
             obj = Visit(context.typeNotNull()) as string;
             if (context.typeNotNull().GetChild(0) is TypeBasicContext &&
                 context.typeNotNull().GetChild(0).GetText() != "{}" &&
-                context.typeNotNull().GetChild(0).GetText() != "Str")
-            {
+                context.typeNotNull().GetChild(0).GetText() != "Str") {
                 obj += "?";
             }
             return obj;
@@ -100,7 +109,7 @@ namespace Compiler {
                         obj = $"Func<{@in}, {@out}>";
                     }
                 }
-            }else{
+            } else {
                 if (@out.Length == 0) {
                     if (@in.Length == 0) {
                         obj = $"Func<{Task}>";
