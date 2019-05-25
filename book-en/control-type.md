@@ -13,14 +13,12 @@ Number(): Int
 This defines a control data with no additional methods, and it has a built-in default control method.
 
 ## Get Operation
-If we want to set a get operation, we can add `{ ctrl{} }` later to define.
+If we want to set a get operation, we can add `-> ctrl{} ctrl{}` later to define.
 
 E.g:
 ```
-Number(): Int {
-    get {           # means get, equivalent to getter in other languages
-        <- (7)      # only returns 7
-    }
+Number(): Int -> get {  # means get, equivalent to getter in other languages
+    <- (7)              # only returns 7
 }
 ```
 In this way, Number has a special method to get the value. When calling Number, it will execute the internal logic.
@@ -31,11 +29,8 @@ With the above example, we naturally can think of how to deal with set operation
 
 E.g:
 ```
-Number(): Int {
-    ......
-    set {       # means set, equivalent to setter in other languages
-        # ? ? ? Who should give the value? ? ?
-    }
+Number(): Int -> set {  # means set, equivalent to setter in other languages
+    # ? ? ? Who should give the value? ? ?
 }
 ```
 Yes, this raises the question that control types are used to control operations and cannot be used to store data when implementing operations.
@@ -45,27 +40,19 @@ E.g:
 ```
 _Number := 0
 
-Number(): Int {
-    ......
-    set {
-        _Number = value  # value represents the value of the input
-    }
+Number(): Int -> set {
+    _Number = value  # value represents the value of the input
 }
 ```
-
-Note that the variables need to declare both `get` and `set` methods, the invariables only can declare `get` method.
 
 A complete example of reading and writing is as follows:
 ```
 _Number := 0
 
-Number() :Int {
-    get {
-        <- (_Number)
-    }
-    set {
-        _Number = value  # value represents the value of the input
-    }
+Number() :Int -> get {
+    <- (_Number)
+} set {
+    _Number = value  # value represents the value of the input
 }
 ```
 
@@ -73,13 +60,10 @@ In particular, if we initialize `Number`, the compiler automatically generates t
 
 E.g:
 ```
-Number(): Int = 0 {
-    get {
-        <- (_Number)
-    }
-    set {
-        _Number = value 
-    }
+Number(): Int = 0 -> get {
+    <- (_Number)
+} set {
+    _Number = value 
 }
 ```
 
@@ -101,19 +85,14 @@ Main() -> () {
     Prt(C)
 }
 
-A() : Int {
-    get { 
-        <- (3) 
-    }
+A(): Int -> get { 
+    <- (3) 
 }
 
 B := 0
-C() : Int {
-    get { 
-        <- (B) 
-    }
-    set { 
-        B = value 
-    }
+C(): Int -> get { 
+    <- (B) 
+} set { 
+    B = value 
 }
 ```

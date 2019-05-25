@@ -13,14 +13,12 @@ Number(): Int
 这样便定义了一个没有额外方法的控制数据，它内置了默认的控制方法。
 
 ## 获取操作
-如果我们想设定一个获取的操作，我们可以在后面加入`{ ctrl{} }`定义。
+如果我们想设定一个获取的操作，我们可以在后面加入 `-> ctrl{} ctrl{}` 定义。
 
 例如：
 ```
-Number(): Int {
-    get {           # 表示获取，相当于其它语言中的getter
-        <- (7)      # 只返回 7
-    }
+Number(): Int -> get {  # 表示获取，相当于其它语言中的getter
+    <- (7)              # 只返回 7
 }
 ```
 这样Number就具有了一个特殊的获取值方法，在调用Number时会执行内部的逻辑。
@@ -31,11 +29,8 @@ Number(): Int {
 
 例如：
 ```
-Number(): Int {
-    ......
-    set {       # 表示设置，相当于其它语言中的setter
-        # ？？？该把值给谁？？？
-    }
+Number(): Int -> set {  # 表示设置，相当于其它语言中的setter
+    # ？？？该把值给谁？？？
 }
 ```
 是的，这里引出了一个问题，控制类型是用来控制操作的，实现操作的时候无法使用自身来存储数据。  
@@ -45,26 +40,18 @@ Number(): Int {
 ```
 _Number := 0
 
-Number(): Int {
-    ......
-    set {
-        _number = value     # value代表输入的值
-    }
+Number(): Int -> set {
+    _number = value     # value代表输入的值
 }
 ```
-
-需要注意的是，变量需要同时声明`获取`和`设置`方法。不变量只能声明`获取`方法。
 
 一个完整的读写例子如下：
 ```
 _Number := 0
-Number(): Int {
-    get {
-        <- (_Number)
-    }
-    set {
-        _Number = value # value代表输入的值
-    }
+Number(): Int -> get {
+    <- (_Number)
+} set {
+    _Number = value # value代表输入的值
 }
 ```
 
@@ -72,13 +59,10 @@ Number(): Int {
 
 例如：
 ```
-Number(): Int = 0 {
-    get {
-        <- (_Number)
-    }
-    set {
-        _Number = value 
-    }
+Number(): Int = 0 -> get {
+    <- (_Number)
+} set {
+    _Number = value 
 }
 ```
 
@@ -100,19 +84,14 @@ Main() -> () {
     Prt(C)
 }
 
-A() : Int {
-    get { 
-        <- (3) 
-    }
+A(): Int -> get { 
+    <- (3) 
 }
 
 B := 0
-C() : Int {
-    get { 
-        <- (B) 
-    }
-    set { 
-        B = value 
-    }
+C(): Int -> get { 
+    <- (B) 
+} set { 
+    B = value 
 }
 ```
