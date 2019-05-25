@@ -31,7 +31,7 @@ enumSupportStatement: id (Assign (add)? integerExpr)? end;
 namespaceVariableStatement: (annotationSupport)? id (Define expression|Declared type (Assign expression)?) end;
 // 命名空间控制
 namespaceControlStatement: (annotationSupport)? id bracketLeft bracketRight (Define expression|Declared type (Assign expression)?) 
-(blockLeft (packageControlSubStatement)+ blockRight)? end;
+(ArrowRight (packageControlSubStatement)+)? end;
 // 命名空间常量
 namespaceConstantStatement: (annotationSupport)? id (Declared type Declared|'::') expression end;
 // 命名空间函数
@@ -64,9 +64,9 @@ parameterClauseOut blockLeft (functionSupportStatement)* blockRight end;
 packageVariableStatement: (annotationSupport)? id (Define expression|Declared type (Assign expression)?) end;
 // 定义控制
 packageControlStatement: (annotationSupport)? id bracketLeft bracketRight (Define expression|Declared type (Assign expression)?)
-(blockLeft (packageControlSubStatement)+ blockRight)? end;
+(ArrowRight (packageControlSubStatement)+ )? end;
 // 定义子方法
-packageControlSubStatement: id blockLeft (functionSupportStatement)+ blockRight end;
+packageControlSubStatement: id blockLeft (functionSupportStatement)+ blockRight;
 // 包重载
 packageOverrideStatement: blockLeft (packageOverrideFunctionStatement|CommentLine|NewLine)* BlockRight;
 // 包扩展
@@ -82,9 +82,10 @@ protocolFunctionStatement
 |NewLine
 ;
 // 定义控制
-protocolControlStatement: (annotationSupport)? id bracketLeft bracketRight Declared type (protocolControlSubStatement)* end;
+protocolControlStatement: (annotationSupport)? id bracketLeft bracketRight Declared type
+ (ArrowRight protocolControlSubStatement (',' protocolControlSubStatement)*)? end;
 // 定义子方法
-protocolControlSubStatement: id end?;
+protocolControlSubStatement: id;
 // 函数
 protocolFunctionStatement: (annotationSupport)? id (templateDefine)? parameterClauseIn 
 t=(ArrowRight|FlowRight) NewLine* parameterClauseOut end;
@@ -100,7 +101,7 @@ implementFunctionStatement
 protocolImplementStatement: nameSpaceItem (templateCall)? blockLeft (protocolImplementSupportStatement)* blockRight;
 // 控制实现
 implementControlStatement: (annotationSupport)? expression bracketLeft bracketRight (Define expression|Declared type (Assign expression)?)
-(blockLeft (packageControlSubStatement)+ blockRight)? end;
+(ArrowRight (packageControlSubStatement)+ )? end;
 // 函数实现
 implementFunctionStatement: (annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) NewLine*
 parameterClauseOut blockLeft (functionSupportStatement)* blockRight end;
