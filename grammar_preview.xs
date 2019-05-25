@@ -20,7 +20,7 @@ Main() ~> () {
     Small Float := (1.2).to F32() # basic type convert
 
     # Const
-    PI => 3.141592653
+    PI :: 3.141592653
 
     # Mark String
     Format := "the value is "Integer","Number","Boolean""
@@ -283,7 +283,7 @@ Main() ~> () {
     })
 
     # linq
-    arr := from id => in expr => where expr => order expr => select expr
+    arr := from id -> in expr -> where expr -> order expr -> select expr
 
     # event
     EventHandle -> {
@@ -293,10 +293,10 @@ Main() ~> () {
     # control
     Data -> {
         b() := 0
-        c(): Int {get;set;}
+        c(): Int -> get,set
 
         d(): Int
-        e(): PropertyChangedEventHandler {add;remove;}
+        e(): PropertyChangedEventHandler -> add,remove
     }
 
     # use \ to use namespace content
@@ -305,7 +305,7 @@ Main() ~> () {
         Z := \NS.Pkg{}
     }
 
-    Color => I8[
+    Color -> I8[
         Red 
         Green
         Blue
