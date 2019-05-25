@@ -5,7 +5,7 @@
 
 例如：
 ```
-Color => U8[
+Color -> U8[
     Red
     Green
     Blue
@@ -34,9 +34,9 @@ C ? Color.Red {
 例如:
 ```
 Number -> U8[
-    A => 1  # 1
+    A = 1   # 1
     B       # 2
-    C => 1  # 1
+    C = 1   # 1
     D       # 2
 ]
 ```
@@ -62,7 +62,7 @@ A -> U8[
 
 B -> U8[
     X 
-    Y => 0 
+    Y = 0 
     Z
 ]
 ```
