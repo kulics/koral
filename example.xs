@@ -362,8 +362,8 @@ Test linq() -> () {
 Test interface(in: Protocol) -> () {}
 
 Const Data :: 256
-Const Data2: Str : "512"
-Const Data3: Int : Const Data
+Const Data2: Str: "512"
+Const Data3: Int: Const Data
 Const function() -> (v: Int) { 
     <- (Const Data) 
 }
