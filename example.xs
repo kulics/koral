@@ -56,19 +56,14 @@ Main() ~> () {
     Rd()
 }
 
-Static x() := 0 {
-    get { 
-        <- (_Static x)
-    }
+Static x() := 0 -> get {
+    <- (_Static x)
 }
 
-Static y() := "hello" {
-    get { 
-        <- (_Static y) 
-    }
-    set { 
-        _Static y = value 
-    }
+Static y() := "hello" -> get { 
+    <- (_Static y) 
+} set { 
+    _Static y = value 
 }
 
 Readonly: Read Only<Int> = RO(5)
@@ -400,13 +395,10 @@ App -> {
     }
 } ...Program {  
 } Protocol {
-    b(): Int {
-        get { 
-            <- (_b) 
-        }
-        set { 
-            _b = value 
-        }
+    b(): Int -> get { 
+        <- (_b) 
+    } set { 
+        _b = value 
     }
 
     c(x: Int) -> (y: Int) {
@@ -449,10 +441,8 @@ Test implement template -> {
 }
 
 Program -> {
-    name(): Str = "name" {
-        set { 
-            _name = value 
-        }
+    name(): Str = "name" -> set { 
+        _name = value 
     }
 
     running: Bool
