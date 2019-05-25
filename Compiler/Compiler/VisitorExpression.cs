@@ -114,7 +114,9 @@ namespace Compiler {
                     r.data = e2;
                     r.text = $"To<{e2}>({r.text})";
                 } else {
-                    if (context.op.Type == XsParser.Judge) {
+                    if (context.op.Type == XsParser.Check) {
+                        r.text = $"ref {r.text}";
+                    } else if (context.op.Type == XsParser.Judge) {
                         r.text += "?";
                     }
                 }

@@ -144,6 +144,15 @@ Test optional() -> () {
     F := D.or else(App{})
 }
 
+Test reference() -> () {
+    x: Int = 1
+    y: ?Int = 2
+    Swap(a: !Int, b: !?Int) -> () {
+        (b, a) = (a, b.or else(2))
+    }
+    Swap(x!, y!)
+}
+
 Test type convert() -> () {
     X := App{}
     Y := X:Program

@@ -233,6 +233,7 @@ linq // 联合查询
 | expression add expression // 和型表达式
 | expression mul expression // 积型表达式
 | expression pow expression // 幂型表达式
+| expression op=Check // 引用判断
 | expression op=Judge // 可空判断
 | expression typeConversion // 类型转换
 | stringExpression // 字符串插值
@@ -378,8 +379,9 @@ typeTuple
 | typeAny
 ;
 
+typeReference: Check (typeNotNull | typeNullable);
 typeNullable: Judge typeNotNull;
-type: typeNotNull | typeNullable;
+type: typeNotNull | typeNullable | typeReference;
 
 typeTuple: bracketLeft type (more type)+ bracketRight;
 typeArray: '[:]' type;
