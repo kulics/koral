@@ -125,12 +125,12 @@ B: I16 = 10
 ```
 
 ## Constant
-Constants are languages that are determined at compile time and are unchangeable. Only a special type of the underlying type is supported. Use `id:type => value` to define it, and `:type` can usually be omitted.  
+Constants are languages that are determined at compile time and are unchangeable. Only a special type of the underlying type is supported. Use `id: type: value` to define it, and `type` can usually be omitted.  
 
 E.g:
 ```
-I => 2         # automatic derivation
-J:Int => 3     # do not use automatic derivation
+I :: 2         # automatic derivation
+J: Int: 3      # do not use automatic derivation
 ```
 
 ## Identifier
