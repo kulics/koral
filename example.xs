@@ -355,15 +355,15 @@ Test async() ~> (x: Int, y: Int, z: Str) {
 
 Test linq() -> () {
     Numbers := {0, 1, 2, 3, 4, 5, 6}
-    Array := from i => in Numbers => where (i % 2) == 0 =>
-    orderby i => descending => select i
+    Array := from i -> in Numbers -> where (i % 2) == 0 ->
+    orderby i -> descending -> select i
 }
 
 Test interface(in: Protocol) -> () {}
 
-Const Data => 256
-Const Data2: Str => "512"
-Const Data3: Int => Const Data
+Const Data :: 256
+Const Data2: Str : "512"
+Const Data3: Int : Const Data
 Const function() -> (v: Int) { 
     <- (Const Data) 
 }
@@ -478,7 +478,7 @@ Test Annotation -> {
 
 Test Enum -> Int[
     OK
-    Error => -1
+    Error = -1
 ]
 
 Package -> {

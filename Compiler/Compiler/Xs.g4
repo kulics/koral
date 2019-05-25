@@ -26,14 +26,14 @@ namespaceVariableStatement
 // 枚举
 enumStatement: (annotationSupport)? id ArrowRight NewLine* type squareBracketLeft enumSupportStatement* squareBracketRight end;
 
-enumSupportStatement: id (ArrowDouble (add)? integerExpr)? end;
+enumSupportStatement: id (Assign (add)? integerExpr)? end;
 // 命名空间变量
 namespaceVariableStatement: (annotationSupport)? id (Define expression|Declared type (Assign expression)?) end;
 // 命名空间控制
 namespaceControlStatement: (annotationSupport)? id bracketLeft bracketRight (Define expression|Declared type (Assign expression)?) 
 (blockLeft (packageControlSubStatement)+ blockRight)? end;
 // 命名空间常量
-namespaceConstantStatement: (annotationSupport)? id (Declared type)? ArrowDouble expression end;
+namespaceConstantStatement: (annotationSupport)? id (Declared type Declared|'::') expression end;
 // 命名空间函数
 namespaceFunctionStatement: (annotationSupport)? id (templateDefine)? parameterClauseIn t=(ArrowRight|FlowRight) NewLine*
 parameterClauseOut blockLeft (functionSupportStatement)* blockRight end;
@@ -339,9 +339,9 @@ plusMinus: add expression;
 
 negate: wave expression;
 
-linq: linqHeadKeyword NewLine? expression ArrowDouble NewLine?  (linqItem)+ k=('by'|'select') NewLine? expression;
+linq: linqHeadKeyword NewLine? expression ArrowRight NewLine?  (linqItem)+ k=('by'|'select') NewLine? expression;
 
-linqItem: linqBodyKeyword (expression)? ArrowDouble NewLine?;
+linqItem: linqBodyKeyword (expression)? ArrowRight NewLine?;
 
 linqKeyword: linqHeadKeyword | linqBodyKeyword ;
 linqHeadKeyword: k='from';
@@ -460,8 +460,6 @@ ArrowLeft: '<-';
 
 FlowRight: '~>';
 FlowLeft: '<~';
-
-ArrowDouble: '=>';
 
 Judge: '?';
 
