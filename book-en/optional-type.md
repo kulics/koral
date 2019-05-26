@@ -45,6 +45,24 @@ E.g:
 B := A.or else(128)
 ```
 
+## Reference Operation
+If we need to use a property that can modify itself in parameter passing, we can use the reference declaration `!type`.
+In this way, you can manipulate external variables inside the function, and you need to use the `value!` declaration to pass the reference.
+
+E.g:
+```
+Swap(x: !Int, y: !Int) -> () {
+     (x, y) = (y, x)
+}
+
+A := 1
+B := 2
+
+Swap(A!, B!)
+Prt(A, B)
+# A = 2, B = 1
+```
+
 ## [Complete Example](../example.xs)
 
 ## Example of this chapter
