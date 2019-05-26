@@ -257,6 +257,12 @@ Main() ~> () {
     E := A?.to Str()
     # OrElseValue
     F := A.or else(128)
+
+    # Reference
+    Swap(x:!Int, y:!Int) -> () {
+        (x, y) = (y, x)
+    }
+    Swap(A!, B!)
     
     # Generic package
     Table<T> -> {
