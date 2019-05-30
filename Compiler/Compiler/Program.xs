@@ -33,8 +33,7 @@ Compiled(path: Str) -> () {
             <FileStream>(file, FileMode.Open) ! fs read
             ! {
                 FSLength := fs read.Length:Int
-                Todo("还没实现定长数组初始化")
-                Byte Block := <byte>[FSLength]
+                Byte Block := Array<U8>(FSLength)
                 r := fs read.Read(Byte Block, 0, Byte Block.Length)
                 Input := Encoding.UTF8.GetString(Byte Block)
                 # 移除平台差异
