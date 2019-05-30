@@ -22,6 +22,14 @@ namespace Library {
 
         public static T[] Array_of<T>(params T[] item) => Arr_of(item);
 
+        public static T[] Array<T>(int cap, params T[] item) {
+            var arr = new T[cap];
+            for (int i = 0; i < item.Length; i++) {
+                arr[i] = item[i];
+            }
+            return arr;
+        }
+
         public static Lst<T> Lst_of<T>(params T[] item) => new Lst<T>(item);
 
         public static Lst<T> List_of<T>(params T[] item) => Lst_of(item);
