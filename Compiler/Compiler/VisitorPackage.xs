@@ -10,21 +10,22 @@
 XsVisitor -> {
 } ...XsBaseVisitor<{}> {
     VisitPackageExtensionStatement(context: PackageExtensionStatementContext) -> ({}) {
-        ## var id = (Result)Visit(context.id());
-        var obj = "";
-        //obj += $"{id.permission} partial class {id.text}";
-        //// 泛型
-        //var templateContract = "";
-        //if (context.templateDefine() != null) {
-        //    var template = (TemplateItem)Visit(context.templateDefine());
-        //    obj += template.Template;
-        //    templateContract = template.Contract;
-        //}
-        //obj += templateContract + BlockLeft + Wrap;
-        //foreach (var item in context.packageExtensionSupportStatement()) {
-        //    obj += Visit(item);
-        //}
-        //obj += BlockRight + Terminate + Wrap;
+        ## 
+        id := Visit(context.id()):Result
+        obj := ""
+        obj += ""id.permission" partial class "id.text""
+        # 泛型
+        templateContract := ""
+        ? context.templateDefine() >< () {
+            template := Visit(context.templateDefine()):TemplateItem
+            obj += template.Template
+            templateContract = template.Contract
+        }
+        obj += templateContract + BlockLeft + Wrap
+        context.packageExtensionSupportStatement() @ item {
+            obj += Visit(item)
+        }
+        obj += BlockRight + Terminate + Wrap
         ##
         <- ("")
     }
@@ -124,361 +125,373 @@ XsVisitor -> {
         <- (obj)
     }
 
-    public override object VisitPackageControlStatement( PackageControlStatementContext context) {
-        var r1 = (Result)Visit(context.id());
-        var isMutable = r1.isVirtual;
-        var isVirtual = r1.isVirtual ? " virtual " : "";
-        var typ = "";
-        Result r2 = null;
-        if (context.expression() != null) {
-            r2 = (Result)Visit(context.expression());
-            typ = (string)r2.data;
+    VisitPackageControlStatement(context: PackageControlStatementContext) -> ({}) {
+        r1 := Visit(context.id()):Result
+        isMutable := r1.isVirtual
+        isVirtual := ""
+        ? r1.isVirtual {
+            isVirtual = " virtual "
         }
-        if (context.type() != null) {
-            typ = (string)Visit(context.type());
+        typ := ""
+        r2: Result
+        ? context.expression() >< () {
+            r2 = Visit(context.expression()):Result
+            typ = r2.data:Str
         }
-        var obj = "";
-        if (context.annotationSupport() != null) {
-            obj += Visit(context.annotationSupport());
+        ? context.type() >< () {
+            typ = Visit(context.type()):Str
         }
-        if (context.packageControlSubStatement().Length > 0) {
-            obj += $"{r1.permission} {isVirtual} {typ} {r1.text + BlockLeft}";
-            var record = new Dictionary<string, bool>();
-            foreach (var item in context.packageControlSubStatement()) {
-                var temp = (Visit(item) as Result);
-                obj += temp.text;
-                record[temp.data as string] = true;
+        obj := ""
+        ? context.annotationSupport() >< () {
+            obj += Visit(context.annotationSupport())
+        }
+        ? context.packageControlSubStatement().Length > 0 {
+            obj += ""r1.permission" "isVirtual" "typ" "r1.text + BlockLeft""
+            record := [Str]Bool()
+            context.packageControlSubStatement() @ item {
+                temp := Visit(item):Result
+                obj += temp.text
+                record[temp.data:Str] = True
             }
-            if (r2 != null) {
-                obj = $"protected {typ} _{r1.text} = {r2.text}; {Wrap}" + obj;
-                if (!record.ContainsKey("get")) {
-                    obj += $"get {{ return _{r1.text}; }}";
+            ? r2 >< () {
+                obj = "protected "typ" _"r1.text" = "r2.text"" Terminate " "Wrap"" obj ""
+                ? ~record.ContainsKey("get") {
+                    obj += "get "BlockLeft" return _"r1.text"; "BlockRight""
                 }
-                if (isMutable && !record.ContainsKey("set")) {
-                    obj += $"set {{ _{r1.text} = value; }}";
-                }
-            }
-            obj += BlockRight + Wrap;
-        } else {
-            if (isMutable) {
-                obj += $"{r1.permission} {isVirtual} {typ} {r1.text} {{ get;set; }}";
-                if (r2 != null) {
-                    obj += $" = {r2.text} {Terminate} {Wrap}";
-                } else {
-                    obj += Wrap;
-                }
-            } else {
-                obj += $"{r1.permission} {isVirtual} {typ} {r1.text} {{ get; }}";
-                if (r2 != null) {
-                    obj += $" = {r2.text} {Terminate} {Wrap}";
-                } else {
-                    obj += Wrap;
+                ? isMutable & ~record.ContainsKey("set") {
+                    obj += "set "BlockLeft" _"r1.text" = value"Terminate" "BlockRight""
                 }
             }
-        }
-        return obj;
-    }
-
-    public override object VisitPackageControlSubStatement( PackageControlSubStatementContext context) {
-        var obj = "";
-        var id = "";
-        var typ = "";
-        (id, typ) = GetControlSub(context.id().GetText());
-        if (context.functionSupportStatement().Length > 0) {
-            obj += id + BlockLeft;
-            foreach (var item in context.functionSupportStatement()) {
-                obj += Visit(item);
-            }
-            obj += BlockRight + Wrap;
-        } else {
-            obj += id + Terminate;
-        }
-
-        return new Result { text = obj, data = typ };
-    }
-
-    public override object VisitPackageFunctionStatement( PackageFunctionStatementContext context) {
-        var id = (Result)Visit(context.id());
-        var isVirtual = id.isVirtual ? " virtual " : "";
-        var obj = "";
-        if (context.annotationSupport() != null) {
-            obj += Visit(context.annotationSupport());
-        }
-        // 异步
-        if (context.t.Type == FlowRight) {
-            var pout = (string)Visit(context.parameterClauseOut());
-            if (pout != "void") {
-                pout = $"{Task}<{pout}>";
-            } else {
-                pout = Task;
-            }
-            obj += $"{id.permission} {isVirtual} async {pout} {id.text}";
-        } else {
-            obj += id.permission + isVirtual + " " + Visit(context.parameterClauseOut()) + " " + id.text;
-        }
-
-        // 泛型
-        var templateContract = "";
-        if (context.templateDefine() != null) {
-            var template = (TemplateItem)Visit(context.templateDefine());
-            obj += template.Template;
-            templateContract = template.Contract;
-        }
-        obj += Visit(context.parameterClauseIn()) + templateContract + Wrap + BlockLeft + Wrap;
-        obj += ProcessFunctionSupport(context.functionSupportStatement());
-        obj += BlockRight + Wrap;
-        return obj;
-    }
-
-    public override object VisitPackageOverrideFunctionStatement( PackageOverrideFunctionStatementContext context) {
-        var id = (Result)Visit(context.id());
-        var obj = "";
-        if (context.annotationSupport() != null) {
-            obj += Visit(context.annotationSupport());
-        }
-        if (context.n != null) {
-            obj += "protected ";
-        } else {
-            obj += $"{id.permission} ";
-        }
-        // 异步
-        if (context.t.Type == FlowRight) {
-            var pout = (string)Visit(context.parameterClauseOut());
-            if (pout != "void") {
-                pout = $"{Task}<{pout}>";
-            } else {
-                pout = Task;
-            }
-            obj += $"override async {pout} {id.text}";
-        } else {
-            obj += "override " + Visit(context.parameterClauseOut()) + " " + id.text;
-        }
-
-        obj += Visit(context.parameterClauseIn()) + Wrap + BlockLeft + Wrap;
-        obj += ProcessFunctionSupport(context.functionSupportStatement());
-        obj += BlockRight + Wrap;
-        return obj;
-    }
-
-    public override object VisitPackageOverrideStatement( PackageOverrideStatementContext context) {
-        var obj = "";
-        foreach (var item in context.packageOverrideFunctionStatement()) {
-            obj += Visit(item);
-        }
-        return obj;
-    }
-
-    public override object VisitPackageNewStatement( PackageNewStatementContext context) {
-        var text = "";
-        // 获取构造数据
-        text = (string)Visit(context.parameterClausePackage());
-        if (context.expressionList() != null) {
-            text += ":base(" + (Visit(context.expressionList()) as Result).text + ")" ;
-        }
-        text += BlockLeft + ProcessFunctionSupport(context.functionSupportStatement()) + BlockRight + Wrap;
-        return text;
-    }
-
-    public override object VisitProtocolImplementStatement( ProtocolImplementStatementContext context) {
-        var obj = "";
-
-        var ptcl = (string)Visit(context.nameSpaceItem());
-        // 泛型
-        if (context.templateCall() != null) {
-            ptcl += Visit(context.templateCall());
-        }
-
-        obj += $":{ptcl} {Wrap} {BlockLeft} {Wrap}";
-
-        foreach (var item in context.protocolImplementSupportStatement()) {
-            obj += Visit(item);
-        }
-        obj += $"{BlockRight} {Terminate} {Wrap}";
-        return obj;
-    }
-
-    public override object VisitImplementEventStatement( ImplementEventStatementContext context) {
-        var obj = "";
-        var id = (Result)Visit(context.id());
-        var nameSpace = Visit(context.nameSpaceItem());
-        obj += $"public event {nameSpace} {id.text + Terminate + Wrap}";
-        return obj;
-    }
-
-    public override object VisitImplementControlStatement( ImplementControlStatementContext context) {
-        var r1 = (Result)Visit(context.expression(0));
-        var isMutable = r1.isVirtual;
-        var isVirtual = r1.isVirtual ? " virtual " : "";
-        var typ = "";
-        Result r2 = null;
-        if (context.expression().Length == 2) {
-            r2 = (Result)Visit(context.expression(1));
-            typ = (string)r2.data;
-        }
-        if (context.type() != null) {
-            typ = (string)Visit(context.type());
-        }
-        var obj = "";
-        if (context.annotationSupport() != null) {
-            obj += Visit(context.annotationSupport());
-        }
-        if (context.packageControlSubStatement().Length > 0) {
-            obj += $"{r1.permission} {isVirtual} {typ} {r1.text + BlockLeft}";
-            var record = new Dictionary<string, bool>();
-            foreach (var item in context.packageControlSubStatement()) {
-                var temp = (Visit(item) as Result);
-                obj += temp.text;
-                record[temp.data as string] = true;
-            }
-            if (r2 != null) {
-                obj = $"protected {typ} _{r1.text} = {r2.text}; {Wrap}" + obj;
-                if (!record.ContainsKey("get")) {
-                    obj += $"get {{ return _{r1.text}; }}";
+            obj += BlockRight + Wrap
+        } _ {
+            ? isMutable {
+                obj += ""r1.permission" "isVirtual" "typ" "r1.text" "BlockLeft" get"Terminate"set"Terminate" "BlockRight""
+                ? r2 >< () {
+                    obj += " = "r2.text" "Terminate" "Wrap""
+                } _ {
+                    obj += Wrap
                 }
-                if (isMutable && !record.ContainsKey("set")) {
-                    obj += $"set {{ _{r1.text} = value; }}";
-                }
-            }
-            obj += BlockRight + Wrap;
-        } else {
-            if (isMutable) {
-                obj += $"{r1.permission} {isVirtual} {typ} {r1.text} {{ get;set; }}";
-                if (r2 != null) {
-                    obj += $" = {r2.text} {Terminate} {Wrap}";
-                } else {
-                    obj += Wrap;
-                }
-            } else {
-                obj += $"{r1.permission} {isVirtual} {typ} {r1.text} {{ get; }}";
-                if (r2 != null) {
-                    obj += $" = {r2.text} {Terminate} {Wrap}";
-                } else {
-                    obj += Wrap;
+            } _ {
+                obj += ""r1.permission" "isVirtual" "typ" "r1.text" "BlockLeft" get"Terminate" "BlockRight""
+                ? r2 >< () {
+                    obj += " = "r2.text" "Terminate" "Wrap""
+                } _ {
+                    obj += Wrap
                 }
             }
         }
-        return obj;
+        <- (obj)
     }
 
-    public override object VisitImplementFunctionStatement( ImplementFunctionStatementContext context) {
-        var id = (Result)Visit(context.id());
-        var isVirtual = id.isVirtual ? " virtual " : "";
-        var obj = "";
-        if (context.annotationSupport() != null) {
-            obj += Visit(context.annotationSupport());
-        }
-        // 异步
-        if (context.t.Type == FlowRight) {
-            var pout = (string)Visit(context.parameterClauseOut());
-            if (pout != "void") {
-                pout = $"{Task}<{pout}>";
-            } else {
-                pout = Task;
+    VisitPackageControlSubStatement(context: PackageControlSubStatementContext) -> ({}) {
+        obj := ""
+        id := ""
+        typ := ""
+        (id, typ) = GetControlSub(context.id().GetText())
+        ? context.functionSupportStatement().Length > 0 {
+            obj += id + BlockLeft
+            context.functionSupportStatement() @ item {
+                obj += Visit(item)
             }
-            obj += $"{id.permission} {isVirtual} async {pout} {id.text}";
+            obj += BlockRight + Wrap
+        } _ {
+            obj += id + Terminate
+        }
+
+        <- (Result{ text = obj, data = typ })
+    }
+
+    VisitPackageFunctionStatement(context: PackageFunctionStatementContext) -> ({}) {
+        id := Visit(context.id()):Result
+        isVirtual := ""
+        ? id.isVirtual {
+            isVirtual = " virtual "
+        }
+        obj := ""
+        ? context.annotationSupport() >< () {
+            obj += Visit(context.annotationSupport())
+        }
+        # 异步
+        ? context.t.Type == FlowRight {
+            pout := Visit(context.parameterClauseOut()):Str
+            ? pout >< "void" {
+                pout = ""Task"<"pout">"
+            } _ {
+                pout = Task
+            }
+            obj += ""id.permission" "isVirtual" async "pout" "id.text""
         } else {
-            obj += id.permission + isVirtual + " " + Visit(context.parameterClauseOut()) + " " + id.text;
+            obj += ""id.permission" "isVirtual" "Visit(context.parameterClauseOut())" "id.text""
         }
 
-        // 泛型
-        var templateContract = "";
-        if (context.templateDefine() != null) {
-            var template = (TemplateItem)Visit(context.templateDefine());
-            obj += template.Template;
-            templateContract = template.Contract;
+        # 泛型
+        templateContract := ""
+        ? context.templateDefine() >< () {
+            template := Visit(context.templateDefine()):TemplateItem
+            obj += template.Template
+            templateContract = template.Contract
         }
-        obj += Visit(context.parameterClauseIn()) + templateContract + Wrap + BlockLeft + Wrap;
-        obj += ProcessFunctionSupport(context.functionSupportStatement());
-        obj += BlockRight + Wrap;
-        return obj;
+        obj += Visit(context.parameterClauseIn()) + templateContract + Wrap + BlockLeft + Wrap
+        obj += ProcessFunctionSupport(context.functionSupportStatement())
+        obj += BlockRight + Wrap
+        <- (obj)
     }
 
-    public override object VisitProtocolStatement( ProtocolStatementContext context) {
-        var id = (Result)Visit(context.id());
-        var obj = "";
-        var interfaceProtocol = "";
-        var ptclName = id.text;
-        if (context.annotationSupport() != null) {
-            obj += Visit(context.annotationSupport());
+    VisitPackageOverrideFunctionStatement(context: PackageOverrideFunctionStatementContext) -> ({}) {
+        id := Visit(context.id()):Result
+        obj := ""
+        ? context.annotationSupport() >< () {
+            obj += Visit(context.annotationSupport())
         }
-        foreach (var item in context.protocolSupportStatement()) {
-            var r = (Result)Visit(item);
-            interfaceProtocol += r.text;
+        ? context.n >< () {
+            obj += "protected "
+        } _ {
+            obj += ""id.permission" "
         }
-        obj += "public partial interface " + ptclName;
-        // 泛型
-        var templateContract = "";
-        if (context.templateDefine() != null) {
-            var template = (TemplateItem)Visit(context.templateDefine());
-            obj += template.Template;
-            templateContract = template.Contract;
-        }
-        obj += templateContract + Wrap + BlockLeft + Wrap;
-        obj += interfaceProtocol;
-        obj += BlockRight + Wrap;
-        return obj;
-    }
-
-    public override object VisitProtocolControlStatement( ProtocolControlStatementContext context) {
-        var id = (Result)Visit(context.id());
-        var isMutable = id.isVirtual;
-        var r = new Result();
-        if (context.annotationSupport() != null) {
-            r.text += Visit(context.annotationSupport());
-        }
-        r.permission = "public";
-
-        var type = (string)Visit(context.type());
-        r.text += type + " " + id.text;
-        if (context.protocolControlSubStatement().Length > 0) {
-            r.text += " {";
-            foreach (var item in context.protocolControlSubStatement()) {
-                r.text += Visit(item);
+        # 异步
+        ? context.t.Type == FlowRight {
+            pout := (string)Visit(context.parameterClauseOut())
+            ? pout >< "void" {
+                pout = ""Task"<"pout">"
+            } _ {
+                pout = Task
             }
-            r.text += "}" + Wrap;
-        } else {
-            if (isMutable) {
-                r.text += " { get; set; }" + Wrap;
-            } else {
-                r.text += " { get; }" + Wrap;
-            }
+            obj += "override async "pout" "id.text""
+        } _ {
+            obj += "override " + Visit(context.parameterClauseOut()) + " " + id.text
         }
-        return r;
+
+        obj += Visit(context.parameterClauseIn()) + Wrap + BlockLeft + Wrap
+        obj += ProcessFunctionSupport(context.functionSupportStatement())
+        obj += BlockRight + Wrap
+        <- (obj)
     }
 
-    public override object VisitProtocolControlSubStatement( ProtocolControlSubStatementContext context) {
-        var obj = "";
-        obj = GetControlSub(context.id().GetText()) + Terminate;
-        return obj;
+    VisitPackageOverrideStatement(context: PackageOverrideStatementContext) -> ({}) {
+        obj := ""
+        context.packageOverrideFunctionStatement() @ item {
+            obj += Visit(item)
+        }
+        <- (obj)
     }
 
-    public override object VisitProtocolFunctionStatement( ProtocolFunctionStatementContext context) {
-        var id = (Result)Visit(context.id());
-        var r = new Result();
-        if (context.annotationSupport() != null) {
-            r.text += Visit(context.annotationSupport());
+    VisitPackageNewStatement(context: PackageNewStatementContext) -> ({}) {
+        text := ""
+        # 获取构造数据
+        text = Visit(context.parameterClausePackage()):Str
+        ? context.expressionList() >< () {
+            text += ":base(" Visit(context.expressionList()):Result.text ")"
         }
-        r.permission = "public";
-        // 异步
-        if (context.t.Type == FlowRight) {
-            var pout = (string)Visit(context.parameterClauseOut());
-            if (pout != "void") {
-                pout = $"{Task}<{pout}>";
-            } else {
-                pout = Task;
+        text += BlockLeft + ProcessFunctionSupport(context.functionSupportStatement()) + BlockRight + Wrap
+        <- (text)
+    }
+
+    VisitProtocolImplementStatement(context: ProtocolImplementStatementContext) -> ({}) {
+        obj := ""
+
+        ptcl := Visit(context.nameSpaceItem()):Str
+        # 泛型
+        ? context.templateCall() >< () {
+            ptcl += Visit(context.templateCall())
+        }
+
+        obj += ":"ptcl" "Wrap" "BlockLeft" "Wrap""
+
+        context.protocolImplementSupportStatement() @ item {
+            obj += Visit(item)
+        }
+        obj += ""BlockRight" "Terminate" "Wrap""
+        <- (obj)
+    }
+
+    VisitImplementEventStatement(context: ImplementEventStatementContext) -> ({}) {
+        obj := ""
+        id := Visit(context.id()):Result
+        nameSpace := Visit(context.nameSpaceItem())
+        obj += "public event "nameSpace" "id.text + Terminate + Wrap""
+        <- (obj)
+    }
+
+    VisitImplementControlStatement(context: ImplementControlStatementContext) -> ({}) {
+        r1 := Visit(context.expression(0)):Result
+        isMutable := r1.isVirtual
+        isVirtual := ""
+        ? r1.isVirtual {
+            isVirtual = " virtual "
+        }
+        typ := ""
+        r2: Result
+        ? context.expression().Length == 2 {
+            r2 = Visit(context.expression(1)):Result
+            typ = r2.data:Str
+        }
+        ? context.type() >< () {
+            typ = Visit(context.type()):Str
+        }
+        obj := ""
+        ? context.annotationSupport() >< () {
+            obj += Visit(context.annotationSupport())
+        }
+        ? context.packageControlSubStatement().Length > 0 {
+            obj += ""r1.permission" "isVirtual" "typ" "r1.text + BlockLeft""
+            record := [Str]Bool{}
+            context.packageControlSubStatement() @ item {
+                temp := Visit(item):Result
+                obj += temp.text
+                record[temp.data:Str] = True
             }
-            r.text += pout + " " + id.text;
-        } else {
-            r.text += Visit(context.parameterClauseOut()) + " " + id.text;
+            ? r2 >< () {
+                obj = "protected "typ" _"r1.text" = "r2.text""Terminate" "Wrap"" obj ""
+                ? ~record.ContainsKey("get") {
+                    obj += "get "BlockLeft" return _"r1.text+Terminate+BlockRight""
+                }
+                ? isMutable & ~record.ContainsKey("set") {
+                    obj += "set "BlockLeft" _"r1.text" = value"Terminate+BlockRight""
+                }
+            }
+            obj += BlockRight + Wrap
+        } _ {
+            ? isMutable {
+                obj += ""r1.permission" "isVirtual" "typ" "r1.text" "BlockLeft" get"Terminate"set"Terminate+BlockRight""
+                ? r2 >< () {
+                    obj += " = "r2.text" "Terminate+Wrap""
+                } _ {
+                    obj += Wrap
+                }
+            } _ {
+                obj += ""r1.permission" "isVirtual" "typ" "r1.text" "BlockLeft" get"Terminate+BlockRight""
+                ? r2 >< () {
+                    obj += " = "r2.text" "Terminate+Wrap""
+                } _ {
+                    obj += Wrap
+                }
+            }
         }
-        // 泛型
-        var templateContract = "";
-        if (context.templateDefine() != null) {
-            var template = (TemplateItem)Visit(context.templateDefine());
-            r.text += template.Template;
-            templateContract = template.Contract;
+        <- (obj)
+    }
+
+    VisitImplementFunctionStatement(context: ImplementFunctionStatementContext) -> ({}) {
+        id := Visit(context.id()):Result
+        isVirtual := ""
+        ? id.isVirtual {
+            isVirtual = " virtual "
         }
-        r.text += Visit(context.parameterClauseIn()) + templateContract + Terminate + Wrap;
-        return r;
+        obj := ""
+        ? context.annotationSupport() >< () {
+            obj += Visit(context.annotationSupport())
+        }
+        # 异步
+        ? context.t.Type == FlowRight {
+            pout := Visit(context.parameterClauseOut()):Str
+            ? pout >< "void" {
+                pout = ""Task"<"pout">"
+            } _ {
+                pout = Task
+            }
+            obj += ""id.permission" "isVirtual" async "pout" "id.text""
+        } _ {
+            obj += id.permission + isVirtual + " " + Visit(context.parameterClauseOut()) + " " + id.text
+        }
+
+        # 泛型
+        templateContract := ""
+        ? context.templateDefine() >< () {
+            template := Visit(context.templateDefine()):TemplateItem
+            obj += template.Template
+            templateContract = template.Contract
+        }
+        obj += Visit(context.parameterClauseIn()) + templateContract + Wrap + BlockLeft + Wrap
+        obj += ProcessFunctionSupport(context.functionSupportStatement())
+        obj += BlockRight + Wrap
+        <- (obj)
+    }
+
+    VisitProtocolStatement(context: ProtocolStatementContext) -> ({}) {
+        id := Visit(context.id()):Result
+        obj := ""
+        interfaceProtocol := ""
+        ptclName := id.text
+        ? context.annotationSupport() >< () {
+            obj += Visit(context.annotationSupport())
+        }
+        context.protocolSupportStatement() @ item {
+            r := Visit(item):Result
+            interfaceProtocol += r.text
+        }
+        obj += "public partial interface " + ptclName
+        # 泛型
+        templateContract := ""
+        ? context.templateDefine() >< () {
+            template := Visit(context.templateDefine()):TemplateItem
+            obj += template.Template
+            templateContract = template.Contract
+        }
+        obj += templateContract + Wrap + BlockLeft + Wrap
+        obj += interfaceProtocol
+        obj += BlockRight + Wrap
+        <- (obj)
+    }
+
+    VisitProtocolControlStatement(context: ProtocolControlStatementContext) -> ({}) {
+        id := Visit(context.id()):Result
+        isMutable := id.isVirtual
+        r := Result{}
+        ? context.annotationSupport() >< () {
+            r.text += Visit(context.annotationSupport())
+        }
+        r.permission = "public"
+
+        type := Visit(context.type()):Str
+        r.text += type + " " + id.text
+        ? context.protocolControlSubStatement().Length > 0 {
+            r.text += " {"
+            context.protocolControlSubStatement() @ item {
+                r.text += Visit(item)
+            }
+            r.text += "}" + Wrap
+        } _ {
+            ? isMutable {
+                r.text += " { get; set; }" + Wrap
+            } _ {
+                r.text += " { get; }" + Wrap
+            }
+        }
+        <- (r)
+    }
+
+    VisitProtocolControlSubStatement(context: ProtocolControlSubStatementContext) -> ({}) {
+        obj := ""
+        obj = GetControlSub(context.id().GetText()) + Terminate
+        <- (obj)
+    }
+
+    VisitProtocolFunctionStatement(context: ProtocolFunctionStatementContext) -> ({}) {
+        id := Visit(context.id()):Result
+        r := Result{}
+        ? context.annotationSupport() >< () {
+            r.text += Visit(context.annotationSupport())
+        }
+        r.permission = "public"
+        # 异步
+        ? context.t.Type == FlowRight {
+            pout := Visit(context.parameterClauseOut()):Str
+            ? pout >< "void" {
+                pout = ""Task"<"pout">"
+            } _ {
+                pout = Task
+            }
+            r.text += pout + " " + id.text
+        } _ {
+            r.text += Visit(context.parameterClauseOut()) + " " + id.text
+        }
+        # 泛型
+        templateContract := ""
+        ? context.templateDefine() >< () {
+            template := Visit(context.templateDefine()):TemplateItem
+            r.text += template.Template
+            templateContract = template.Contract
+        }
+        r.text += Visit(context.parameterClauseIn()) + templateContract + Terminate + Wrap
+        <- (r)
     }
 }
