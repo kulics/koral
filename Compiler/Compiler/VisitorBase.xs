@@ -10,9 +10,9 @@
 ErrorListener -> {
     File Dir(): Str
 } ...BaseErrorListener {
-    SyntaxError([NotNull]recognizer: IRecognizer, [Nullable]offendingSymbol: IToken, 
-    line: Int, charPositionInLine: Int, [NotNull]msg: Int, 
-    [Nullable] RecognitionException e) -> () {
+    SyntaxError(recognizer: IRecognizer, offendingSymbol: ?IToken, 
+    line: Int, charPositionInLine: Int, msg: Int, 
+    e: ?RecognitionException) -> () {
         ...SyntaxError(recognizer, offendingSymbol, line, charPositionInLine, msg, e)
         Prt("------Syntax Error------")
         Prt("File: "File Dir"")
@@ -65,7 +65,7 @@ Result -> {
 
 XsVisitor -> {
 } ...XsBaseVisitor<{}>  {
-    VisitProgram([NotNull]context: ProgramContext) -> ({}) {
+    VisitProgram(context: ProgramContext) -> ({}) {
         Statement List := context.statement()
         Result := ""
         Statement List @ item {
@@ -74,7 +74,7 @@ XsVisitor -> {
         <- (Result)
     }
 
-    VisitId([NotNull]context: IdContext) -> ({}) {
+    VisitId(context: IdContext) -> ({}) {
         r := Result{data = "var"}
         first := Visit(context.GetChild(0)):Result
         r.permission = first.permission
@@ -93,7 +93,7 @@ XsVisitor -> {
         <- (r)
     }
 
-    VisitIdItem([NotNull]context: IdItemContext) -> ({}) {
+    VisitIdItem(context: IdItemContext) -> ({}) {
         r := Result{data = "var"}
         ? context.typeBasic() >< () {
             r.permission = "public"
@@ -113,7 +113,7 @@ XsVisitor -> {
         <- (r)
     }
 
-    VisitBool([NotNull]context: BoolContext) -> ({}) {
+    VisitBool(context: BoolContext) -> ({}) {
         r := Result{}
         ? context.t.Type == True {
             r.data = Bool
@@ -125,11 +125,11 @@ XsVisitor -> {
         <- (r)
     }
 
-    VisitAnnotationSupport([NotNull]context: AnnotationSupportContext) -> ({}) {
+    VisitAnnotationSupport(context: AnnotationSupportContext) -> ({}) {
         <- (Visit(context.annotation()):Str)
     }
 
-    VisitAnnotation([NotNull]context: AnnotationContext) -> ({}) {
+    VisitAnnotation(context: AnnotationContext) -> ({}) {
         obj := ""
         id := ""
         ? context.id() >< () {
@@ -141,7 +141,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitAnnotationList([NotNull]context: AnnotationListContext) -> ({}) {
+    VisitAnnotationList(context: AnnotationListContext) -> ({}) {
         obj := ""
         [0 < context.annotationItem().Length] @ i {
             ? i > 0 {
@@ -153,7 +153,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitAnnotationItem([NotNull]context: AnnotationItemContext) -> ({}) {
+    VisitAnnotationItem(context: AnnotationItemContext) -> ({}) {
         obj := ""
         obj += Visit(context.id():Result.text
         [0 < context.annotationAssign().Length] @ i {
@@ -169,7 +169,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitAnnotationAssign([NotNull]context: AnnotationAssignContext) -> ({}) {
+    VisitAnnotationAssign(context: AnnotationAssignContext) -> ({}) {
         obj := ""
         id := ""
         ? context.id() >< () {

@@ -4,7 +4,7 @@ using static Compiler.XsParser;
 
 namespace Compiler {
     internal partial class Visitor {
-        public override object VisitStatement([NotNull] StatementContext context) {
+        public override object VisitStatement(StatementContext context) {
             var obj = "";
             var ns = (Namespace)Visit(context.exportStatement());
             // import library
@@ -43,7 +43,7 @@ namespace Compiler {
             public string imports;
         }
 
-        public override object VisitExportStatement([NotNull] ExportStatementContext context) {
+        public override object VisitExportStatement( ExportStatementContext context) {
             var obj = new Namespace {
                 name = (string)Visit(context.nameSpace())
             };

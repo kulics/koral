@@ -17,7 +17,7 @@ Iterator -> {
 
 XsVisitor -> {
 } ...XsBaseVisitor<{}> {
-    VisitIteratorStatement([NotNull]context: IteratorStatementContext) -> ({}) {
+    VisitIteratorStatement(context: IteratorStatementContext) -> ({}) {
         it := Iterator{}
         ? context.op.Text == ">=" | context.op.Text == "<=" {
             it.attach = T
@@ -37,7 +37,7 @@ XsVisitor -> {
         <- (it)
     }
 
-    VisitLoopStatement([NotNull]context: LoopStatementContext) -> ({}) {
+    VisitLoopStatement(context: LoopStatementContext) -> ({}) {
         obj := ""
         id := "ea"
         ? context.id() >< () {
@@ -53,14 +53,14 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitLoopInfiniteStatement([NotNull]context: LoopInfiniteStatementContext) -> ({}) {
+    VisitLoopInfiniteStatement(context: LoopInfiniteStatementContext) -> ({}) {
         obj := "for (;;) "Wrap" "BlockLeft" "Wrap""
         obj += ProcessFunctionSupport(context.functionSupportStatement())
         obj += ""BlockRight" "Terminate" "Wrap""
         <- (obj)
     }
 
-    VisitLoopEachStatement([NotNull]context: LoopEachStatementContext) -> ({}) {
+    VisitLoopEachStatement(context: LoopEachStatementContext) -> ({}) {
         obj := ""
         arr := Visit(context.expression()):Result
         target := arr.text
@@ -79,7 +79,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitLoopCaseStatement([NotNull]context: LoopCaseStatementContext) -> ({}) {
+    VisitLoopCaseStatement(context: LoopCaseStatementContext) -> ({}) {
         obj := ""
         expr := Visit(context.expression()):Result
         obj += "for ( ;"expr.text" ;)"
@@ -89,15 +89,15 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitLoopJumpStatement([NotNull]context: LoopJumpStatementContext) -> ({}) {
+    VisitLoopJumpStatement(context: LoopJumpStatementContext) -> ({}) {
         <- ("break "Terminate" "Wrap"")
     }
 
-    VisitLoopContinueStatement([NotNull]context: LoopContinueStatementContext) -> ({}) {
+    VisitLoopContinueStatement(context: LoopContinueStatementContext) -> ({}) {
         <- ("continue "Terminate" "Wrap"")
     }
 
-    VisitJudgeCaseStatement([NotNull]context: JudgeCaseStatementContext) -> ({})  {
+    VisitJudgeCaseStatement(context: JudgeCaseStatementContext) -> ({})  {
         obj := ""
         expr := Visit(context.expression()):Result
         obj += "switch ("expr.text") "Wrap" "BlockLeft" "Wrap""
@@ -109,7 +109,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitCaseDefaultStatement([NotNull]context: CaseDefaultStatementContext) -> ({}) {
+    VisitCaseDefaultStatement(context: CaseDefaultStatementContext) -> ({}) {
         obj := ""
         obj += "default:"BlockLeft" "Wrap""
         obj += ProcessFunctionSupport(context.functionSupportStatement())
@@ -117,7 +117,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitCaseExprStatement([NotNull]context: CaseExprStatementContext) -> ({}) {
+    VisitCaseExprStatement(context: CaseExprStatementContext) -> ({}) {
         obj := ""
         ? context.type() == () {
             expr := Visit(context.expression()):Result
@@ -136,12 +136,12 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitCaseStatement([NotNull]context: CaseStatementContext) -> ({}) {
+    VisitCaseStatement(context: CaseStatementContext) -> ({}) {
         obj := Visit(context.GetChild(0)):Str
         <- (obj)
     }
 
-    VisitJudgeStatement([NotNull]context: JudgeStatementContext) -> ({}) {
+    VisitJudgeStatement(context: JudgeStatementContext) -> ({}) {
         obj := ""
         obj += Visit(context.judgeIfStatement())
         context.judgeElseIfStatement() @ it {
@@ -153,7 +153,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitJudgeIfStatement([NotNull]context: JudgeIfStatementContext) -> ({}) {
+    VisitJudgeIfStatement(context: JudgeIfStatementContext) -> ({}) {
         b := Visit(context.expression()):Result
         obj := "if ( "b.text" ) "Wrap" "BlockLeft" "Wrap""
         obj += ProcessFunctionSupport(context.functionSupportStatement())
@@ -161,7 +161,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitJudgeElseIfStatement([NotNull]context: JudgeElseIfStatementContext) -> ({}) {
+    VisitJudgeElseIfStatement(context: JudgeElseIfStatementContext) -> ({}) {
         b := Visit(context.expression()):Result
         obj := "else if ( "b.text" ) "Wrap" "BlockLeft" "Wrap""
         obj += ProcessFunctionSupport(context.functionSupportStatement())
@@ -169,14 +169,14 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitJudgeElseStatement([NotNull]context: JudgeElseStatementContext) -> ({}) {
+    VisitJudgeElseStatement(context: JudgeElseStatementContext) -> ({}) {
         obj := "else "Wrap" "BlockLeft" "Wrap""
         obj += ProcessFunctionSupport(context.functionSupportStatement())
         obj += ""BlockRight""Wrap""
         <- (obj)
     }
 
-    VisitCheckStatement([NotNull]context: CheckStatementContext) -> ({}) {
+    VisitCheckStatement(context: CheckStatementContext) -> ({}) {
         obj := "try "BlockLeft" "Wrap""
         obj += ProcessFunctionSupport(context.functionSupportStatement())
         obj += ""BlockRight""Wrap""
@@ -190,7 +190,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitCheckErrorStatement([NotNull]context: CheckErrorStatementContext) -> ({}) {
+    VisitCheckErrorStatement(context: CheckErrorStatementContext) -> ({}) {
         obj := ""
         ID := "ex"
         ? context.id() >< () {
@@ -208,14 +208,14 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitCheckFinallyStatment([NotNull]context: CheckFinallyStatmentContext) -> ({}) {
+    VisitCheckFinallyStatment(context: CheckFinallyStatmentContext) -> ({}) {
         obj := "finally "Wrap" "BlockLeft""Wrap""
         obj += ProcessFunctionSupport(context.functionSupportStatement())
         obj += ""BlockRight""Wrap""
         <- (obj)
     }
 
-    VisitUsingStatement([NotNull]context: UsingStatementContext) -> ({}) {
+    VisitUsingStatement(context: UsingStatementContext) -> ({}) {
         obj := ""
         r2 := Visit(context.expression(0)):Result
         r1 := Visit(context.expression(1)):Result
@@ -228,7 +228,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitReportStatement([NotNull]context: ReportStatementContext) -> ({}) {
+    VisitReportStatement(context: ReportStatementContext) -> ({}) {
         obj := ""
         ? context.expression() >< () {
             r := Visit(context.expression()):Result
@@ -237,7 +237,7 @@ XsVisitor -> {
         <- ("throw "obj""Terminate""Wrap"")
     }
 
-    VisitLinq([NotNull]context: LinqContext) -> ({}) {
+    VisitLinq(context: LinqContext) -> ({}) {
         r := Result{data = "var"}
         r.text += "from " Visit(context.expression(0))):Result.text " "
         context.linqItem() @ item {
@@ -247,7 +247,7 @@ XsVisitor -> {
         <- (r)
     }
 
-    VisitLinqItem([NotNull]context: LinqItemContext) -> ({}) {
+    VisitLinqItem(context: LinqItemContext) -> ({}) {
         obj := Visit(context.linqBodyKeyword()):Str
         ? context.expression() >< () {
             obj += " "Visit(context.expression()):Result.text""
@@ -255,15 +255,15 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitLinqKeyword([NotNull]context: LinqKeywordContext) -> ({}) {
+    VisitLinqKeyword(context: LinqKeywordContext) -> ({}) {
         <- (Visit(context.GetChild(0)))
     }
 
-    VisitLinqHeadKeyword([NotNull]context: LinqHeadKeywordContext) -> ({}) {
+    VisitLinqHeadKeyword(context: LinqHeadKeywordContext) -> ({}) {
         <- (context.k.Text)
     }
 
-    VisitLinqBodyKeyword([NotNull]context: LinqBodyKeywordContext) -> ({}) {
+    VisitLinqBodyKeyword(context: LinqBodyKeywordContext) -> ({}) {
         <- (context.k.Text)
     }
 }

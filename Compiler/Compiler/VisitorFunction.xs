@@ -37,7 +37,7 @@ XsVisitor -> {
         <- (obj)
     }
 } ...XsBaseVisitor<{}> {
-    VisitFunctionStatement([NotNull]context: FunctionStatementContext) -> ({}) {
+    VisitFunctionStatement(context: FunctionStatementContext) -> ({}) {
         id := Visit(context.id()):Result
         obj := ""
         # 异步
@@ -65,7 +65,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitReturnStatement([NotNull]context: ReturnStatementContext) -> ({}) {
+    VisitReturnStatement(context: ReturnStatementContext) -> ({}) {
         r := Visit(context.tuple()):Result
         ? r.text == "()" {
             r.text = ""
@@ -73,7 +73,7 @@ XsVisitor -> {
         <- ("return "r.text" "Terminate" "Wrap"")
     }
 
-    VisitTuple([NotNull]context: TupleContext) -> ({}) {
+    VisitTuple(context: TupleContext) -> ({}) {
         obj := "("
         [0 < context.expression().Length] @ i {
             r := Visit(context.expression(i)):Result
@@ -88,7 +88,7 @@ XsVisitor -> {
         <- (result)
     }
 
-    VisitTupleExpression([NotNull]context: TupleExpressionContext) -> ({}) {
+    VisitTupleExpression(context: TupleExpressionContext) -> ({}) {
         obj := "("
         [0 < context.expression().Length @ i {
             r := Visit(context.expression(i)):Result
@@ -103,7 +103,7 @@ XsVisitor -> {
         <- (result)
     }
 
-    VisitParameterClauseIn([NotNull]context: ParameterClauseInContext) -> ({}) {
+    VisitParameterClauseIn(context: ParameterClauseInContext) -> ({}) {
         obj := "("
         temp := []Str{}
         [context.parameter().Length - 1 >= 0] @ i {
@@ -122,7 +122,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitParameterClauseOut([NotNull]context: ParameterClauseOutContext) -> ({}) {
+    VisitParameterClauseOut(context: ParameterClauseOutContext) -> ({}) {
         obj := ""
         ? context.parameter().Length == 0 {
             obj += "void"
@@ -149,7 +149,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitParameter([NotNull]context: ParameterContext) -> ({}) {
+    VisitParameter(context: ParameterContext) -> ({}) {
         p := Parameter{}
         id := Visit(context.id()):Result
         p.id = id.text
