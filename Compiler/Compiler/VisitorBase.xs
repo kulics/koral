@@ -65,7 +65,7 @@ Result -> {
 
 XsVisitor -> {
 } ...XsBaseVisitor<{}>  {
-    VisitProgram(context: ProgramContext) -> ({}) {
+    VisitProgram(context: ProgramContext) -> (v: {}) {
         Statement List := context.statement()
         Result := ""
         Statement List @ item {
@@ -74,7 +74,7 @@ XsVisitor -> {
         <- (Result)
     }
 
-    VisitId(context: IdContext) -> ({}) {
+    VisitId(context: IdContext) -> (v: {}) {
         r := Result{data = "var"}
         first := Visit(context.GetChild(0)):Result
         r.permission = first.permission
@@ -93,7 +93,7 @@ XsVisitor -> {
         <- (r)
     }
 
-    VisitIdItem(context: IdItemContext) -> ({}) {
+    VisitIdItem(context: IdItemContext) -> (v: {}) {
         r := Result{data = "var"}
         ? context.typeBasic() >< () {
             r.permission = "public"
@@ -113,7 +113,7 @@ XsVisitor -> {
         <- (r)
     }
 
-    VisitBool(context: BoolContext) -> ({}) {
+    VisitBool(context: BoolContext) -> (v: {}) {
         r := Result{}
         ? context.t.Type == True {
             r.data = Bool
@@ -125,11 +125,11 @@ XsVisitor -> {
         <- (r)
     }
 
-    VisitAnnotationSupport(context: AnnotationSupportContext) -> ({}) {
+    VisitAnnotationSupport(context: AnnotationSupportContext) -> (v: {}) {
         <- (Visit(context.annotation()):Str)
     }
 
-    VisitAnnotation(context: AnnotationContext) -> ({}) {
+    VisitAnnotation(context: AnnotationContext) -> (v: {}) {
         obj := ""
         id := ""
         ? context.id() >< () {
@@ -141,7 +141,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitAnnotationList(context: AnnotationListContext) -> ({}) {
+    VisitAnnotationList(context: AnnotationListContext) -> (v: {}) {
         obj := ""
         [0 < context.annotationItem().Length] @ i {
             ? i > 0 {
@@ -153,7 +153,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitAnnotationItem(context: AnnotationItemContext) -> ({}) {
+    VisitAnnotationItem(context: AnnotationItemContext) -> (v: {}) {
         obj := ""
         obj += Visit(context.id():Result.text
         [0 < context.annotationAssign().Length] @ i {
@@ -169,7 +169,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitAnnotationAssign(context: AnnotationAssignContext) -> ({}) {
+    VisitAnnotationAssign(context: AnnotationAssignContext) -> (v: {}) {
         obj := ""
         id := ""
         ? context.id() >< () {
