@@ -11,7 +11,7 @@ ErrorListener -> {
     File Dir(): Str
 } ...BaseErrorListener {
     SyntaxError(recognizer: IRecognizer, offendingSymbol: ?IToken, 
-    line: Int, charPositionInLine: Int, msg: Int, 
+    line: Int, charPositionInLine: Int, msg: Str, 
     e: ?RecognitionException) -> () {
         ...SyntaxError(recognizer, offendingSymbol, line, charPositionInLine, msg, e)
         Prt("------Syntax Error------")
@@ -51,10 +51,10 @@ Lst :: "Lst"
 Set :: "Set"
 Dic :: "Dic"
 
-BlockLeft = "{"
-BlockRight = "}"
+BlockLeft :: "{"
+BlockRight :: "}"
 
-Task = "System.Threading.Tasks.Task";
+Task :: "System.Threading.Tasks.Task"
 
 Result -> {
     data(): {}
@@ -63,7 +63,7 @@ Result -> {
     isVirtual(): Bool
 }
 
-XsVisitor -> {
+XsLangVisitor -> {
 } ...XsBaseVisitor<{}>  {
     VisitProgram(context: ProgramContext) -> (v: {}) {
         Statement List := context.statement()
@@ -105,7 +105,7 @@ XsVisitor -> {
             r.permission = "public"
             r.text += context.op.Text
             r.isVirtual = r.text[0].is Upper()
-        } context.op.Type == IDPrivate) {
+        } context.op.Type == IDPrivate {
             r.permission = "protected"
             r.text += context.op.Text
             r.isVirtual = r.text[r.text.find first({it -> it >< '_'})].is Upper()
@@ -155,7 +155,7 @@ XsVisitor -> {
 
     VisitAnnotationItem(context: AnnotationItemContext) -> (v: {}) {
         obj := ""
-        obj += Visit(context.id():Result.text
+        obj += Visit(context.id()):Result.text
         [0 < context.annotationAssign().Length] @ i {
             ? i > 0 {
                 obj += "," Visit(context.annotationAssign(i)) ""
@@ -173,7 +173,7 @@ XsVisitor -> {
         obj := ""
         id := ""
         ? context.id() >< () {
-            id = "" Visit(context.id():Result.text "="
+            id = "" Visit(context.id()):Result.text "="
         }
         r := Visit(context.expression()):Result
         obj = id + r.text

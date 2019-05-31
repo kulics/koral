@@ -11,11 +11,11 @@ Iterator -> {
     begin(): Result
     end(): Result
     step(): Result
-    order() := T
-    attach() := F
+    order():Str = T
+    attach():Str = F
 }
 
-XsVisitor -> {
+XsLangVisitor -> {
 } ...XsBaseVisitor<{}> {
     VisitIteratorStatement(context: IteratorStatementContext) -> (v: {}) {
         it := Iterator{}
@@ -101,9 +101,9 @@ XsVisitor -> {
         obj := ""
         expr := Visit(context.expression()):Result
         obj += "switch ("expr.text") "BlockLeft+Wrap""
-        foreach (var item in context.caseStatement()) {
-            var r = (string)Visit(item);
-            obj += r + Wrap;
+        context.caseStatement() @ item {
+            r := Visit(item):Str
+            obj += r + Wrap
         }
         obj += ""BlockRight" "Wrap""
         <- (obj)
@@ -199,10 +199,10 @@ XsVisitor -> {
 
         Type := "Exception"
         ? context.type() >< () {
-            Type = (string)Visit(context.type())
+            Type = Visit(context.type()):Str
         }
 
-        obj += "catch( "Type" "ID" )"Wrap+BlockLeft+Wrap" "
+        obj += "catch( "Type" "ID" )"+Wrap+BlockLeft+Wrap
         obj += ProcessFunctionSupport(context.functionSupportStatement())
         obj += BlockRight
         <- (obj)
@@ -239,11 +239,11 @@ XsVisitor -> {
 
     VisitLinq(context: LinqContext) -> (v: {}) {
         r := Result{data = "var"}
-        r.text += "from " Visit(context.expression(0))):Result.text " "
+        r.text += "from " Visit(context.expression(0)):Result.text " "
         context.linqItem() @ item {
             r.text += "" Visit(item) " "
         }
-        r.text += ""context.k.Text " " Visit(context.expression(1)):Result.text
+        r.text += ""context.k.Text " " Visit(context.expression(1)):Result.text ""
         <- (r)
     }
 

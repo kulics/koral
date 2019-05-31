@@ -230,10 +230,10 @@ linq // 联合查询
 | negate // 取反
 | expression call NewLine? callExpression // 链式调用
 | expression judgeType type // 类型判断表达式
-| expression judge expression // 判断型表达式
-| expression add expression // 和型表达式
-| expression mul expression // 积型表达式
-| expression pow expression // 幂型表达式
+| expression judge NewLine? CommentLine? expression // 判断型表达式
+| expression add NewLine? CommentLine? expression // 和型表达式
+| expression mul NewLine? CommentLine? expression // 积型表达式
+| expression pow NewLine? CommentLine? expression // 幂型表达式
 | expression op=Check // 引用判断
 | expression op=Judge // 可空判断
 | expression typeConversion // 类型转换
@@ -488,9 +488,9 @@ False: 'False';
 Undefined: 'Undefined';
 
 Number: DIGIT+ ; // 整数
-fragment DIGIT: [0-9] ;             // 单个数字
-Text: '"' (~[\\\r\n])*? '"'; // 文本
-Char: '\'' (~[\\\r\n])*? '\''; // 单字符
+fragment DIGIT: [0-9] ;   // 单个数字
+Text: '"' (~["\\\r\n]|'\\' [btnfr"\'\\])* '"'; // 文本
+Char: '\'' (~[\'\\\r\n]|'\\' [btnfr"\'\\]) '\''; // 单字符
 IDPrivate: '_' [a-zA-Z0-9_]+; // 私有标识符
 IDPublic: [a-zA-Z] [a-zA-Z0-9_]*; // 公有标识符
 Discard: '_'; // 匿名变量

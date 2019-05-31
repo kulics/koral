@@ -8,13 +8,13 @@
 _Read Path(): Str
 _Path Line(): Str
 
-Main() -> (args: [:]Str) {
+Main(args: [:]Str) -> () {
     # 检查系统平台，区分路径字符
     os := Environment.OSVersion.Platform
     ? os == PlatformID.Unix | os == PlatformID.MacOSX {
         _Read Path = "./"
         _Path Line = "/"
-    } else {
+    } _ {
         _Read Path = ".\\"
         _Path Line = "\\"
     }
@@ -49,7 +49,7 @@ Compiled(path: Str) -> () {
 
                 AST := Parser.program()
 
-                Visitor := XsVisitor{}
+                Visitor := XsLangVisitor{}
                 Result := Visitor.Visit(AST)
 
                 # 文件流写文件,使用覆盖模式

@@ -7,7 +7,7 @@
     Compiler.Compiler Static
 }
 
-XsVisitor -> {
+XsLangVisitor -> {
 } ...XsBaseVisitor<{}> {
     VisitPackageExtensionStatement(context: PackageExtensionStatementContext) -> (v: {}) {
         ## 
@@ -146,8 +146,8 @@ XsVisitor -> {
             obj += Visit(context.annotationSupport())
         }
         ? context.packageControlSubStatement().Length > 0 {
-            obj += ""r1.permission" "isVirtual" "typ" "r1.text + BlockLeft""
-            record := [Str]Bool()
+            obj += ""r1.permission" "isVirtual" "typ" "r1.text""BlockLeft""
+            record := [Str]Bool{}
             context.packageControlSubStatement() @ item {
                 temp := Visit(item):Result
                 obj += temp.text
@@ -250,7 +250,7 @@ XsVisitor -> {
         }
         # 异步
         ? context.t.Type == FlowRight {
-            pout := (string)Visit(context.parameterClauseOut())
+            pout := Visit(context.parameterClauseOut()):Str
             ? pout >< "void" {
                 pout = ""Task"<"pout">"
             } _ {

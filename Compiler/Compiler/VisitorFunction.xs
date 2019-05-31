@@ -15,7 +15,7 @@ Parameter -> {
     permission(): Str
 }
 
-XsVisitor -> {
+XsLangVisitor -> {
     ProcessFunctionSupport(items: []FunctionSupportStatementContext) -> (v:Str) {
         obj := ""
         content := ""
@@ -29,7 +29,7 @@ XsVisitor -> {
             }
         }
         ? lazy.Count > 0 {
-            [lazy.Count - 1 >= 0 @ i {
+            [lazy.Count - 1 >= 0] @ i {
                 content += BlockRight
             }
         }
@@ -90,7 +90,7 @@ XsVisitor -> {
 
     VisitTupleExpression(context: TupleExpressionContext) -> (v: {}) {
         obj := "("
-        [0 < context.expression().Length @ i {
+        [0 < context.expression().Length] @ i {
             r := Visit(context.expression(i)):Result
             ? i == 0 {
                 obj += r.text;
@@ -137,7 +137,7 @@ XsVisitor -> {
                 p := Visit(context.parameter(i)):Parameter
                 temp.add(""p.annotation" "p.type" "p.id" "p.value"")
             }
-            [temp.Count - 1; i >= 0] @ i {
+            [temp.Count - 1 >= 0] @ i {
                 ? i == temp.Count - 1 {
                     obj += temp[i]
                 } _ {
@@ -158,7 +158,7 @@ XsVisitor -> {
             p.annotation = Visit(context.annotationSupport()):Str
         }
         ? context.expression() >< () {
-            p.value = "=" (Visit(context.expression()):Result.text ""
+            p.value = "=" Visit(context.expression()):Result.text ""
         }
         p.type = Visit(context.type()):Str
         <- (p)

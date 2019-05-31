@@ -12,7 +12,31 @@ Namespace -> {
     imports():Str
 }
 
-XsVisitor -> {
+GetControlSub(id: Str) -> (id: Str, type:Str) {
+    typ := ""
+    id ? "get" {
+        id = " get "
+        typ = "get"
+    } "set" {
+        id = " set "
+        typ = "set"
+    } "_get" {
+        id = " protected get "
+        typ = "get"
+    } "_set" {
+        id = " protected set "
+        typ = "set"
+    } "add" {
+        id = " add "
+        typ = "add"
+    } "remove" {
+        id = " remove "
+        typ = "remove"
+    }
+    <- (id, typ)
+}
+
+XsLangVisitor -> {
 } ...XsBaseVisitor<{}> {
     VisitStatement(context: StatementContext) -> (v: {}) {
         obj := ""
@@ -28,11 +52,8 @@ XsVisitor -> {
         content := ""
         contentStatic := ""
         context.namespaceSupportStatement() @ item {
-            typ := item.GetChild(0).GetType()
-            ? typ == typeof(NamespaceVariableStatementContext) |
-                typ == typeof(NamespaceControlStatementContext) |
-                typ == typeof(NamespaceFunctionStatementContext) |
-                typ == typeof(NamespaceConstantStatementContext) {
+            type := item.GetChild(0).GetType()
+            ? type == ?(:NamespaceVariableStatementContext) | type == ?(:NamespaceControlStatementContext) | type == ?(:NamespaceFunctionStatementContext) | type == ?(:NamespaceConstantStatementContext) {
                 contentStatic += Visit(item)
             } _ {
                 content += Visit(item)
@@ -66,7 +87,7 @@ XsVisitor -> {
             ns := Visit(context.nameSpace()):Str
             obj += "using static " + ns
             ? context.id() >< () {
-                r := (Result)Visit(context.id())
+                r := Visit(context.id()):Result
 
                 obj += "." + r.text
             }
@@ -107,22 +128,22 @@ XsVisitor -> {
 
     VisitName(context: NameContext) -> (v: {}) {
         obj := ""
-        for (int i = 0; i < context.id().Length; i++) {
-            var id = (Result)Visit(context.id(i));
-            ? (i == 0) {
-                obj += "" + id.text;
+        [0 < context.id().Length] @ i {
+            id := Visit(context.id(i)):Result
+            ? i == 0 {
+                obj += "" + id.text
             } _ {
-                obj += "." + id.text;
+                obj += "." + id.text
             }
         }
         <- (obj)
     }
 
-    VisitEnumStatement(EnumStatementContext context) -> (v: {}) {
+    VisitEnumStatement(context: EnumStatementContext) -> (v: {}) {
         obj := ""
         id := Visit(context.id()):Result
-        header := "";
-        typ := Visit(context.type()):
+        header := ""
+        typ := Visit(context.type()):Str
         ? context.annotationSupport() >< () {
             header += Visit(context.annotationSupport())
         }
@@ -302,29 +323,5 @@ XsVisitor -> {
             }
         }
         <- (obj)
-    }
-
-    GetControlSub(id: Str) -> (id: Str, type:Str) {
-        typ := ""
-        id ? "get" {
-            id = " get "
-            typ = "get"
-        } "set" {
-            id = " set "
-            typ = "set"
-        } "_get" {
-            id = " protected get "
-            typ = "get"
-        } "_set" {
-            id = " protected set "
-            typ = "set"
-        } "add" {
-            id = " add "
-            typ = "add"
-        } "remove" {
-            id = " remove "
-            typ = "remove"
-        }
-        <- (id, typ)
     }
 }
