@@ -9,13 +9,13 @@
 
 XsVisitor -> {
 } ...XsBaseVisitor<{}> {
-    VisitType(context: TypeContext) -> ({}) {
+    VisitType(context: TypeContext) -> (v: {}) {
         obj := ""
         obj = Visit(context.GetChild(0)):Str
         <- (obj)
     }
 
-    VisitTypeReference(context: TypeReferenceContext) -> ({}) {
+    VisitTypeReference(context: TypeReferenceContext) -> (v: {}) {
         obj := "ref "
         ? context.typeNullable() >< () {
             obj += Visit(context.typeNullable())
@@ -25,7 +25,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitTypeNullable(context: TypeNullableContext) -> ({}) {
+    VisitTypeNullable(context: TypeNullableContext) -> (v: {}) {
         obj := ""
         obj = Visit(context.typeNotNull()):Str
         ? context.typeNotNull().GetChild(0) == :TypeBasicContext &
@@ -36,7 +36,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitTypeTuple(context: TypeTupleContext) -> ({}) {
+    VisitTypeTuple(context: TypeTupleContext) -> (v: {}) {
         obj := ""
         obj += "("
         [0 < context.type().Length] @ i {
@@ -50,7 +50,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitGetType(context: GetTypeContext) -> ({}) {
+    VisitGetType(context: GetTypeContext) -> (v: {}) {
         r := Result{data = "System.Type"}
         ? context.type() == () {
             r.text = ""Visit(context.expression()):Result.text".GetType()"
@@ -60,31 +60,31 @@ XsVisitor -> {
         <- (r)
     }
     
-    VisitTypeArray(context: TypeArrayContext) -> ({}) {
+    VisitTypeArray(context: TypeArrayContext) -> (v: {}) {
         obj := ""
         obj += ""Visit(context.type())"[]"
         <- (obj)
     }
 
-    VisitTypeList(context: TypeListContext) -> ({}) {
+    VisitTypeList(context: TypeListContext) -> (v: {}) {
         obj := ""
         obj += ""Lst"<"Visit(context.type())">"
         <- (obj)
     }
 
-    VisitTypeSet(context: TypeSetContext) -> ({}) {
+    VisitTypeSet(context: TypeSetContext) -> (v: {}) {
         obj := ""
         obj += ""Set"<"Visit(context.type())">"
         <- (obj)
     }
 
-    VisitTypeDictionary(context: TypeDictionaryContext) -> ({}) {
+    VisitTypeDictionary(context: TypeDictionaryContext) -> (v: {}) {
         obj := ""
         obj += ""Dic"<"Visit(context.type(0))","Visit(context.type(1))">"
         <- (obj)
     }
 
-    VisitTypePackage(context: TypePackageContext) -> ({}) {
+    VisitTypePackage(context: TypePackageContext) -> (v: {}) {
         obj := ""
         obj += Visit(context.nameSpaceItem())
         ? context.templateCall() >< () {
@@ -93,7 +93,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitTypeFunction(context: TypeFunctionContext) -> ({}) {
+    VisitTypeFunction(context: TypeFunctionContext) -> (v: {}) {
         obj := ""
         in := Visit(context.typeFunctionParameterClause(0)):Str
         out := Visit(context.typeFunctionParameterClause(1)):Str
@@ -132,11 +132,11 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitTypeAny(context: TypeAnyContext) -> ({}) {
+    VisitTypeAny(context: TypeAnyContext) -> (v: {}) {
         <- (Any)
     }
 
-    VisitTypeFunctionParameterClause(context: TypeFunctionParameterClauseContext) -> ({}) {
+    VisitTypeFunctionParameterClause(context: TypeFunctionParameterClauseContext) -> (v: {}) {
         obj := ""
         [0 <= context.type().Length - 1] @ i {
             p := Visit(context.type(i)):Str
@@ -149,7 +149,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitTypeBasic(context: TypeBasicContext) -> ({}) {
+    VisitTypeBasic(context: TypeBasicContext) -> (v: {}) {
         obj := ""
         context.t.Type ? TypeI8 {
             obj = I8

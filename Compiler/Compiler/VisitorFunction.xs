@@ -16,7 +16,7 @@ Parameter -> {
 }
 
 XsVisitor -> {
-    ProcessFunctionSupport(items: []FunctionSupportStatementContext) -> (Str) {
+    ProcessFunctionSupport(items: []FunctionSupportStatementContext) -> (v:Str) {
         obj := ""
         content := ""
         lazy := []Str{}
@@ -37,7 +37,7 @@ XsVisitor -> {
         <- (obj)
     }
 } ...XsBaseVisitor<{}> {
-    VisitFunctionStatement(context: FunctionStatementContext) -> ({}) {
+    VisitFunctionStatement(context: FunctionStatementContext) -> (v: {}) {
         id := Visit(context.id()):Result
         obj := ""
         # 异步
@@ -65,7 +65,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitReturnStatement(context: ReturnStatementContext) -> ({}) {
+    VisitReturnStatement(context: ReturnStatementContext) -> (v: {}) {
         r := Visit(context.tuple()):Result
         ? r.text == "()" {
             r.text = ""
@@ -73,7 +73,7 @@ XsVisitor -> {
         <- ("return "r.text" "Terminate" "Wrap"")
     }
 
-    VisitTuple(context: TupleContext) -> ({}) {
+    VisitTuple(context: TupleContext) -> (v: {}) {
         obj := "("
         [0 < context.expression().Length] @ i {
             r := Visit(context.expression(i)):Result
@@ -88,7 +88,7 @@ XsVisitor -> {
         <- (result)
     }
 
-    VisitTupleExpression(context: TupleExpressionContext) -> ({}) {
+    VisitTupleExpression(context: TupleExpressionContext) -> (v: {}) {
         obj := "("
         [0 < context.expression().Length @ i {
             r := Visit(context.expression(i)):Result
@@ -103,7 +103,7 @@ XsVisitor -> {
         <- (result)
     }
 
-    VisitParameterClauseIn(context: ParameterClauseInContext) -> ({}) {
+    VisitParameterClauseIn(context: ParameterClauseInContext) -> (v: {}) {
         obj := "("
         temp := []Str{}
         [context.parameter().Length - 1 >= 0] @ i {
@@ -122,7 +122,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitParameterClauseOut(context: ParameterClauseOutContext) -> ({}) {
+    VisitParameterClauseOut(context: ParameterClauseOutContext) -> (v: {}) {
         obj := ""
         ? context.parameter().Length == 0 {
             obj += "void"
@@ -149,7 +149,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitParameter(context: ParameterContext) -> ({}) {
+    VisitParameter(context: ParameterContext) -> (v: {}) {
         p := Parameter{}
         id := Visit(context.id()):Result
         p.id = id.text

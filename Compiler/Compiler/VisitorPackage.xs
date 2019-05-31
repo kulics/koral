@@ -9,7 +9,7 @@
 
 XsVisitor -> {
 } ...XsBaseVisitor<{}> {
-    VisitPackageExtensionStatement(context: PackageExtensionStatementContext) -> ({}) {
+    VisitPackageExtensionStatement(context: PackageExtensionStatementContext) -> (v: {}) {
         ## 
         id := Visit(context.id()):Result
         obj := ""
@@ -30,7 +30,7 @@ XsVisitor -> {
         <- ("")
     }
 
-    VisitPackageStatement(context: PackageStatementContext) -> ({}) {
+    VisitPackageStatement(context: PackageStatementContext) -> (v: {}) {
         id := Visit(context.id()):Result
         obj := ""
         Init := ""
@@ -84,7 +84,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitParameterClausePackage(context: ParameterClausePackageContext) -> ({}) {
+    VisitParameterClausePackage(context: ParameterClausePackageContext) -> (v: {}) {
         obj := "( "
         [0 < context.parameter().Length] @ i {
             p := Visit(context.parameter(i)):Parameter
@@ -99,7 +99,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitPackageVariableStatement(context: PackageVariableStatementContext) -> ({}) {
+    VisitPackageVariableStatement(context: PackageVariableStatementContext) -> (v: {}) {
         r1 := Visit(context.id()):Result
         isMutable := r1.isVirtual
         typ := ""
@@ -125,7 +125,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitPackageControlStatement(context: PackageControlStatementContext) -> ({}) {
+    VisitPackageControlStatement(context: PackageControlStatementContext) -> (v: {}) {
         r1 := Visit(context.id()):Result
         isMutable := r1.isVirtual
         isVirtual := ""
@@ -183,7 +183,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitPackageControlSubStatement(context: PackageControlSubStatementContext) -> ({}) {
+    VisitPackageControlSubStatement(context: PackageControlSubStatementContext) -> (v: {}) {
         obj := ""
         id := ""
         typ := ""
@@ -201,7 +201,7 @@ XsVisitor -> {
         <- (Result{ text = obj, data = typ })
     }
 
-    VisitPackageFunctionStatement(context: PackageFunctionStatementContext) -> ({}) {
+    VisitPackageFunctionStatement(context: PackageFunctionStatementContext) -> (v: {}) {
         id := Visit(context.id()):Result
         isVirtual := ""
         ? id.isVirtual {
@@ -237,7 +237,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitPackageOverrideFunctionStatement(context: PackageOverrideFunctionStatementContext) -> ({}) {
+    VisitPackageOverrideFunctionStatement(context: PackageOverrideFunctionStatementContext) -> (v: {}) {
         id := Visit(context.id()):Result
         obj := ""
         ? context.annotationSupport() >< () {
@@ -267,7 +267,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitPackageOverrideStatement(context: PackageOverrideStatementContext) -> ({}) {
+    VisitPackageOverrideStatement(context: PackageOverrideStatementContext) -> (v: {}) {
         obj := ""
         context.packageOverrideFunctionStatement() @ item {
             obj += Visit(item)
@@ -275,7 +275,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitPackageNewStatement(context: PackageNewStatementContext) -> ({}) {
+    VisitPackageNewStatement(context: PackageNewStatementContext) -> (v: {}) {
         text := ""
         # 获取构造数据
         text = Visit(context.parameterClausePackage()):Str
@@ -286,7 +286,7 @@ XsVisitor -> {
         <- (text)
     }
 
-    VisitProtocolImplementStatement(context: ProtocolImplementStatementContext) -> ({}) {
+    VisitProtocolImplementStatement(context: ProtocolImplementStatementContext) -> (v: {}) {
         obj := ""
 
         ptcl := Visit(context.nameSpaceItem()):Str
@@ -304,7 +304,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitImplementEventStatement(context: ImplementEventStatementContext) -> ({}) {
+    VisitImplementEventStatement(context: ImplementEventStatementContext) -> (v: {}) {
         obj := ""
         id := Visit(context.id()):Result
         nameSpace := Visit(context.nameSpaceItem())
@@ -312,7 +312,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitImplementControlStatement(context: ImplementControlStatementContext) -> ({}) {
+    VisitImplementControlStatement(context: ImplementControlStatementContext) -> (v: {}) {
         r1 := Visit(context.expression(0)):Result
         isMutable := r1.isVirtual
         isVirtual := ""
@@ -370,7 +370,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitImplementFunctionStatement(context: ImplementFunctionStatementContext) -> ({}) {
+    VisitImplementFunctionStatement(context: ImplementFunctionStatementContext) -> (v: {}) {
         id := Visit(context.id()):Result
         isVirtual := ""
         ? id.isVirtual {
@@ -406,7 +406,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitProtocolStatement(context: ProtocolStatementContext) -> ({}) {
+    VisitProtocolStatement(context: ProtocolStatementContext) -> (v: {}) {
         id := Visit(context.id()):Result
         obj := ""
         interfaceProtocol := ""
@@ -432,7 +432,7 @@ XsVisitor -> {
         <- (obj)
     }
 
-    VisitProtocolControlStatement(context: ProtocolControlStatementContext) -> ({}) {
+    VisitProtocolControlStatement(context: ProtocolControlStatementContext) -> (v: {}) {
         id := Visit(context.id()):Result
         isMutable := id.isVirtual
         r := Result{}
@@ -459,13 +459,13 @@ XsVisitor -> {
         <- (r)
     }
 
-    VisitProtocolControlSubStatement(context: ProtocolControlSubStatementContext) -> ({}) {
+    VisitProtocolControlSubStatement(context: ProtocolControlSubStatementContext) -> (v: {}) {
         obj := ""
         obj = GetControlSub(context.id().GetText()) + Terminate
         <- (obj)
     }
 
-    VisitProtocolFunctionStatement(context: ProtocolFunctionStatementContext) -> ({}) {
+    VisitProtocolFunctionStatement(context: ProtocolFunctionStatementContext) -> (v: {}) {
         id := Visit(context.id()):Result
         r := Result{}
         ? context.annotationSupport() >< () {
