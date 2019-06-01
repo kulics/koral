@@ -37,7 +37,7 @@ GetControlSub(id: Str) -> (id: Str, type:Str) {
 }
 
 XsLangVisitor -> {
-} ...XsBaseVisitor<{}> {
+} ...XsParserBaseVisitor<{}> {
     VisitStatement(context: StatementContext) -> (v: {}) {
         obj := ""
         ns := Visit(context.exportStatement()):Namespace

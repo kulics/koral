@@ -36,7 +36,7 @@ XsLangVisitor -> {
         obj += content
         <- (obj)
     }
-} ...XsBaseVisitor<{}> {
+} ...XsParserBaseVisitor<{}> {
     VisitFunctionStatement(context: FunctionStatementContext) -> (v: {}) {
         id := Visit(context.id()):Result
         obj := ""

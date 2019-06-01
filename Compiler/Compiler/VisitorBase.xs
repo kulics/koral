@@ -64,7 +64,7 @@ Result -> {
 }
 
 XsLangVisitor -> {
-} ...XsBaseVisitor<{}>  {
+} ...XsParserBaseVisitor<{}>  {
     VisitProgram(context: ProgramContext) -> (v: {}) {
         Statement List := context.statement()
         Result := ""

@@ -8,7 +8,7 @@
 }
 
 XsLangVisitor -> {
-} ...XsBaseVisitor<{}> {
+} ...XsParserBaseVisitor<{}> {
     VisitPackageExtensionStatement(context: PackageExtensionStatementContext) -> (v: {}) {
         ## 
         id := Visit(context.id()):Result

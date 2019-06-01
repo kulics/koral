@@ -8,7 +8,7 @@
 }
 
 XsLangVisitor -> {
-} ...XsBaseVisitor<{}> {
+} ...XsParserBaseVisitor<{}> {
     VisitTypeType(context: TypeTypeContext) -> (v: {}) {
         obj := ""
         obj = Visit(context.GetChild(0)):Str
