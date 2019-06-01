@@ -8,11 +8,11 @@
 }
 
 Iterator -> {
-    begin: Result
-    end: Result
-    step: Result
-    order:Str = T
-    attach:Str = F
+    begin(): Result
+    end(): Result
+    step(): Result
+    order():Str = T
+    attach():Str = F
 }
 
 XsLangVisitor -> {

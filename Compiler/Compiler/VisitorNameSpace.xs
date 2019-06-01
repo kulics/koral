@@ -8,8 +8,8 @@
 }
 
 Namespace -> {
-    name: Str
-    imports: Str
+    name(): Str
+    imports(): Str
 }
 
 GetControlSub(id: Str) -> (id: Str, type:Str) {

@@ -57,10 +57,10 @@ BlockRight :: "}"
 Task :: "System.Threading.Tasks.Task"
 
 Result -> {
-    data: {}
-    text: Str
-    permission: Str
-    isVirtual: Bool
+    data(): {}
+    text(): Str
+    permission(): Str
+    isVirtual(): Bool
 }
 
 XsLangVisitor -> {
