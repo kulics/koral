@@ -2,21 +2,21 @@
     Antlr4\Runtime
     Antlr4\Runtime\Misc
     System
-    Library
+
     Compiler.XsParser
     Compiler.Compiler Static
 }
 
 Parameter -> {
-    id(): Str
-    type(): Str
-    value(): Str
-    annotation(): Str
-    permission(): Str
+    id: Str
+    type: Str
+    value: Str
+    annotation: Str
+    permission: Str
 }
 
 XsLangVisitor -> {
-    ProcessFunctionSupport(items: []FunctionSupportStatementContext) -> (v:Str) {
+    ProcessFunctionSupport(items: [:]FunctionSupportStatementContext) -> (v:Str) {
         obj := ""
         content := ""
         lazy := []Str{}
@@ -41,11 +41,11 @@ XsLangVisitor -> {
         id := Visit(context.id()):Result
         obj := ""
         # 异步
-        ? context.t.Type == FlowRight {
+        ? context.t.Type == Right Flow {
             pout := Visit(context.parameterClauseOut()):Str
             ? pout >< "void" {
                 pout = ""Task"<"pout">"
-            } else {
+            } _ {
                 pout = Task
             }
             obj += " async "pout" "id.text""
@@ -160,7 +160,7 @@ XsLangVisitor -> {
         ? context.expression() >< () {
             p.value = "=" Visit(context.expression()):Result.text ""
         }
-        p.type = Visit(context.type()):Str
+        p.type = Visit(context.typeType()):Str
         <- (p)
     }
 }

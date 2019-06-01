@@ -2,15 +2,16 @@
 using Library;
 using System.Collections.Generic;
 using static Compiler.XsParser;
+using static Compiler.Compiler_Static;
 
 namespace Compiler {
-    internal partial class Visitor {
+    public partial class XsLangVisitor {
         public override object VisitVariableStatement(VariableStatementContext context) {
             var obj = "";
             var r1 = (Result)Visit(context.expression(0));
             var r2 = (Result)Visit(context.expression(1));
-            if (context.type() != null) {
-                var Type = (string)Visit(context.type());
+            if (context.typeType() != null) {
+                var Type = (string)Visit(context.typeType());
                 obj = $"{Type} {r1.text} = {r2.text} {Terminate} {Wrap}";
             } else {
                 obj = $"var {r1.text} = {r2.text} {Terminate} {Wrap}";
@@ -20,7 +21,7 @@ namespace Compiler {
 
         public override object VisitVariableDeclaredStatement([NotNull] VariableDeclaredStatementContext context) {
             var obj = "";
-            var Type = (string)Visit(context.type());
+            var Type = (string)Visit(context.typeType());
             var r = (Result)Visit(context.expression());
             obj = $"{Type} {r.text} {Terminate} {Wrap}";
             return obj;
@@ -34,7 +35,7 @@ namespace Compiler {
         }
 
         public override object VisitAssign([NotNull] AssignContext context) {
-            if (context.op.Type == Assign) {
+            if (context.op.Type == Equal) {
                 return "=";
             }
             return context.op.Text;
@@ -112,11 +113,11 @@ namespace Compiler {
                 if (context.GetChild(1).GetType() == typeof(TypeConversionContext)) {
                     var e2 = (string)Visit(context.GetChild(1));
                     r.data = e2;
-                    r.text = $"To<{e2}>({r.text})";
+                    r.text = $"(({e2})({r.text}))";
                 } else {
-                    if (context.op.Type == XsParser.Check) {
+                    if (context.op.Type == XsParser.Bang) {
                         r.text = $"ref {r.text}";
-                    } else if (context.op.Type == XsParser.Judge) {
+                    } else if (context.op.Type == XsParser.Question) {
                         r.text += "?";
                     }
                 }
@@ -184,7 +185,7 @@ namespace Compiler {
         }
 
         public override object VisitTypeConversion([NotNull] TypeConversionContext context) {
-            return (string)Visit(context.type());
+            return (string)Visit(context.typeType());
         }
 
         public override object VisitCall([NotNull] CallContext context) {
@@ -223,7 +224,7 @@ namespace Compiler {
                     return Visit(context.dataStatement());
                 } else if (c is IdContext) {
                     return Visit(context.id());
-                } else if (context.t.Type == Self) {
+                } else if (context.t.Type == Dot_Dot) {
                     return new Result { text = "this", data = "var" };
                 } else if (context.t.Type == Discard) {
                     return new Result { text = "_", data = "var" };
@@ -293,11 +294,11 @@ namespace Compiler {
         public override object VisitTemplateCall([NotNull] TemplateCallContext context) {
             var obj = "";
             obj += "<";
-            for (int i = 0; i < context.type().Length; i++) {
+            for (int i = 0; i < context.typeType().Length; i++) {
                 if (i > 0) {
                     obj += ",";
                 }
-                var r = Visit(context.type(i));
+                var r = Visit(context.typeType(i));
                 obj += r;
             }
             obj += ">";
@@ -306,7 +307,7 @@ namespace Compiler {
 
         public override object VisitCallElement([NotNull] CallElementContext context) {
             var id = (Result)Visit(context.id());
-            if (context.op?.Type == XsParser.Judge) {
+            if (context.op?.Type == XsParser.Question) {
                 id.text += "?";
             }
             if (context.expression() == null) {
@@ -412,9 +413,9 @@ namespace Compiler {
 
         public override object VisitCallPkg([NotNull] CallPkgContext context) {
             var r = new Result {
-                data = Visit(context.type())
+                data = Visit(context.typeType())
             };
-            r.text = $"(new {Visit(context.type())}()";
+            r.text = $"(new {Visit(context.typeType())}()";
             if (context.pkgAssign() != null) {
                 r.text += Visit(context.pkgAssign());
             } else if (context.listAssign() != null) {
@@ -430,13 +431,13 @@ namespace Compiler {
 
         public override object VisitCallNew([NotNull] CallNewContext context) {
             var r = new Result {
-                data = Visit(context.type())
+                data = Visit(context.typeType())
             };
             var param = "";
             if (context.expressionList() != null) {
                 param = ((Result)Visit(context.expressionList())).text;
             }
-            r.text = $"(new {Visit(context.type())}({param})";
+            r.text = $"(new {Visit(context.typeType())}({param})";
             r.text += ")";
             return r;
         }
@@ -557,7 +558,7 @@ namespace Compiler {
                     result.text += "," + r.text;
                 }
             }
-            result.data = $"{Lst}<{type}>";
+            result.data = $"Lst<{type}>";
             result.text = $"(new {result.data}(){{ {result.text} }})";
             return result;
         }
@@ -577,7 +578,7 @@ namespace Compiler {
                     result.text += "," + r.text;
                 }
             }
-            result.data = $"{Set}<{type}>";
+            result.data = $"Set<{type}>";
             result.text = $"(new {result.data}(){{ {result.text} }})";
             return result;
         }
@@ -603,7 +604,7 @@ namespace Compiler {
                 }
             }
             var type = key + "," + value;
-            result.data = $"{Dic}<{type}>";
+            result.data = $"Dic<{type}>";
             result.text = $"(new {result.data}(){{ {result.text} }})";
             return result;
         }
@@ -626,7 +627,7 @@ namespace Compiler {
         }
 
         public override object VisitStringExpression([NotNull] StringExpressionContext context) {
-            var text = $"(new System.Text.StringBuilder({context.Text().GetText()})";
+            var text = $"(new System.Text.StringBuilder({context.TextLiteral().GetText()})";
             foreach (var item in context.stringExpressionElement()) {
                 text += Visit(item);
             }
@@ -639,13 +640,13 @@ namespace Compiler {
 
         public override object VisitStringExpressionElement([NotNull] StringExpressionElementContext context) {
             var r = (Result)Visit(context.expression());
-            var text = context.Text().GetText();
+            var text = context.TextLiteral().GetText();
             return $".Append({r.text}).Append({text})";
         }
 
         public override object VisitDataStatement([NotNull] DataStatementContext context) {
             var r = new Result();
-            if (context.nil() != null) {
+            if (context.nilExpr() != null) {
                 r.data = Any;
                 r.text = "null";
             } else if (context.floatExpr() != null) {
@@ -654,16 +655,16 @@ namespace Compiler {
             } else if (context.integerExpr() != null) {
                 r.data = I32;
                 r.text = (string)Visit(context.integerExpr());
-            } else if (context.t.Type == Text) {
+            } else if (context.t.Type == TextLiteral) {
                 r.data = Str;
-                r.text = context.Text().GetText();
-            } else if (context.t.Type == XsParser.Char) {
+                r.text = context.TextLiteral().GetText();
+            } else if (context.t.Type == XsParser.CharLiteral) {
                 r.data = Chr;
-                r.text = context.Char().GetText();
-            } else if (context.t.Type == XsParser.True) {
+                r.text = context.CharLiteral().GetText();
+            } else if (context.t.Type == XsParser.TrueLiteral) {
                 r.data = Bool;
                 r.text = T;
-            } else if (context.t.Type == XsParser.False) {
+            } else if (context.t.Type == XsParser.FalseLiteral) {
                 r.data = Bool;
                 r.text = F;
             }
@@ -678,7 +679,7 @@ namespace Compiler {
 
         public override object VisitIntegerExpr([NotNull] IntegerExprContext context) {
             var number = "";
-            foreach (var item in context.Number()) {
+            foreach (var item in context.NumberLiteral()) {
                 number += item.GetText();
             }
             return number;
@@ -687,7 +688,7 @@ namespace Compiler {
         public override object VisitFunctionExpression([NotNull] FunctionExpressionContext context) {
             var r = new Result();
             // 异步
-            if (context.t.Type == FlowRight) {
+            if (context.t.Type == Right_Flow) {
                 r.text += " async ";
             }
             r.text += Visit(context.anonymousParameterClauseIn()) + " => " + BlockLeft + Wrap;
@@ -729,7 +730,7 @@ namespace Compiler {
                 data = "var"
             };
             // 异步
-            if (context.t.Type == FlowRight) {
+            if (context.t.Type == Right_Flow) {
                 r.text += "async ";
             }
             r.text += "(";
