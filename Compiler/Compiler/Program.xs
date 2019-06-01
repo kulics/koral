@@ -37,7 +37,7 @@ Compiled(path: Str) -> () {
                 r := fs read.Read(Byte Block, 0, Byte Block.Length)
                 Input := Encoding.UTF8.GetString(Byte Block)
                 # 移除平台差异
-                Input.Replace("\r", string.Empty)
+                Input.Replace("\r", "")
 
                 Stream := <AntlrInputStream>(Input)
                 Lexer := <XsLexer>(Stream)

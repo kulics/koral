@@ -2,7 +2,7 @@
     Antlr4\Runtime
     Antlr4\Runtime\Misc
     System
-    Library
+
     Compiler.XsParser
     Compiler.Compiler Static
 }
@@ -36,8 +36,8 @@ XsLangVisitor -> {
         Init := ""
         extend := ""
 
-        ? context.type() >< () {
-            extend = Visit(context.type()):Str
+        ? context.typeType() >< () {
+            extend = Visit(context.typeType()):Str
         }
 
         # 处理构造函数
@@ -52,7 +52,7 @@ XsLangVisitor -> {
         }
         obj = Init + obj
         obj += BlockRight + Terminate + Wrap
-        header = ""
+        header := ""
         ? context.annotationSupport() >< () {
             header += Visit(context.annotationSupport())
         }
@@ -103,13 +103,13 @@ XsLangVisitor -> {
         r1 := Visit(context.id()):Result
         isMutable := r1.isVirtual
         typ := ""
-        r2: Result
+        r2: Result = ()
         ? context.expression() >< () {
             r2 = Visit(context.expression()):Result
             typ = r2.data:Str
         }
-        ? context.type() >< () {
-            typ = Visit(context.type()):Str
+        ? context.typeType() >< () {
+            typ = Visit(context.typeType()):Str
         }
         obj := ""
         ? context.annotationSupport() >< () {
@@ -127,19 +127,19 @@ XsLangVisitor -> {
 
     VisitPackageControlStatement(context: PackageControlStatementContext) -> (v: {}) {
         r1 := Visit(context.id()):Result
-        isMutable := r1.isVirtual
+        isMutable := True # r1.isVirtual
         isVirtual := ""
         ? r1.isVirtual {
             isVirtual = " virtual "
         }
         typ := ""
-        r2: Result
+        r2: Result = ()
         ? context.expression() >< () {
             r2 = Visit(context.expression()):Result
             typ = r2.data:Str
         }
-        ? context.type() >< () {
-            typ = Visit(context.type()):Str
+        ? context.typeType() >< () {
+            typ = Visit(context.typeType()):Str
         }
         obj := ""
         ? context.annotationSupport() >< () {
@@ -212,7 +212,7 @@ XsLangVisitor -> {
             obj += Visit(context.annotationSupport())
         }
         # 异步
-        ? context.t.Type == FlowRight {
+        ? context.t.Type == Right Flow {
             pout := Visit(context.parameterClauseOut()):Str
             ? pout >< "void" {
                 pout = ""Task"<"pout">"
@@ -220,7 +220,7 @@ XsLangVisitor -> {
                 pout = Task
             }
             obj += ""id.permission" "isVirtual" async "pout" "id.text""
-        } else {
+        } _ {
             obj += ""id.permission" "isVirtual" "Visit(context.parameterClauseOut())" "id.text""
         }
 
@@ -249,7 +249,7 @@ XsLangVisitor -> {
             obj += ""id.permission" "
         }
         # 异步
-        ? context.t.Type == FlowRight {
+        ? context.t.Type == Right Flow {
             pout := Visit(context.parameterClauseOut()):Str
             ? pout >< "void" {
                 pout = ""Task"<"pout">"
@@ -320,13 +320,13 @@ XsLangVisitor -> {
             isVirtual = " virtual "
         }
         typ := ""
-        r2: Result
+        r2: Result = ()
         ? context.expression().Length == 2 {
             r2 = Visit(context.expression(1)):Result
             typ = r2.data:Str
         }
-        ? context.type() >< () {
-            typ = Visit(context.type()):Str
+        ? context.typeType() >< () {
+            typ = Visit(context.typeType()):Str
         }
         obj := ""
         ? context.annotationSupport() >< () {
@@ -381,7 +381,7 @@ XsLangVisitor -> {
             obj += Visit(context.annotationSupport())
         }
         # 异步
-        ? context.t.Type == FlowRight {
+        ? context.t.Type == Right Flow {
             pout := Visit(context.parameterClauseOut()):Str
             ? pout >< "void" {
                 pout = ""Task"<"pout">"
@@ -441,7 +441,7 @@ XsLangVisitor -> {
         }
         r.permission = "public"
 
-        type := Visit(context.type()):Str
+        type := Visit(context.typeType()):Str
         r.text += type + " " + id.text
         ? context.protocolControlSubStatement().Length > 0 {
             r.text += " {"
@@ -473,7 +473,7 @@ XsLangVisitor -> {
         }
         r.permission = "public"
         # 异步
-        ? context.t.Type == FlowRight {
+        ? context.t.Type == Right Flow {
             pout := Visit(context.parameterClauseOut()):Str
             ? pout >< "void" {
                 pout = ""Task"<"pout">"

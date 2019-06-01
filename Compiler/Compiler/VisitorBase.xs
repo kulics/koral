@@ -2,7 +2,7 @@
     Antlr4\Runtime
     Antlr4\Runtime\Misc
     System
-    Library
+
     Compiler.XsParser
     Compiler.Compiler Static
 }
@@ -57,10 +57,10 @@ BlockRight :: "}"
 Task :: "System.Threading.Tasks.Task"
 
 Result -> {
-    data(): {}
-    text(): Str
-    permission(): Str
-    isVirtual(): Bool
+    data: {}
+    text: Str
+    permission: Str
+    isVirtual: Bool
 }
 
 XsLangVisitor -> {
@@ -113,12 +113,12 @@ XsLangVisitor -> {
         <- (r)
     }
 
-    VisitBool(context: BoolContext) -> (v: {}) {
+    VisitBoolExpr(context: BoolExprContext) -> (v: {}) {
         r := Result{}
-        ? context.t.Type == True {
+        ? context.t.Type == TrueLiteral {
             r.data = Bool
             r.text = T
-        } context.t.Type == False {
+        } context.t.Type == FalseLiteral {
             r.data = Bool
             r.text = F
         }

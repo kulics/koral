@@ -2,14 +2,14 @@
     Antlr4\Runtime
     Antlr4\Runtime\Misc
     System
-    Library
+
     Compiler.XsParser
     Compiler.Compiler Static
 }
 
 Namespace -> {
-    name():Str
-    imports():Str
+    name: Str
+    imports: Str
 }
 
 GetControlSub(id: Str) -> (id: Str, type:Str) {
@@ -61,8 +61,7 @@ XsLangVisitor -> {
         }
         obj += content
         ? contentStatic >< "" {
-            obj += "public partial class "ns.name.sub Str(ns.name.last index of('.') +
-                 1) "_Static" BlockLeft + Wrap + contentStatic + BlockRight + Wrap""
+            obj += "public partial class "ns.name.sub Str(ns.name.last index of(".") + 1) "_Static" + BlockLeft + Wrap + contentStatic + BlockRight + Wrap
         }
         obj += BlockRight + Wrap
         <- (obj)
@@ -143,7 +142,7 @@ XsLangVisitor -> {
         obj := ""
         id := Visit(context.id()):Result
         header := ""
-        typ := Visit(context.type()):Str
+        typ := Visit(context.typeType()):Str
         ? context.annotationSupport() >< () {
             header += Visit(context.annotationSupport())
         }
@@ -176,7 +175,7 @@ XsLangVisitor -> {
             obj += Visit(context.annotationSupport())
         }
         # 异步
-        ? context.t.Type == FlowRight {
+        ? context.t.Type == Right Flow {
             pout := Visit(context.parameterClauseOut()):Str
             ? pout >< "void" {
                 pout = ""Task"<"pout">"
@@ -205,8 +204,8 @@ XsLangVisitor -> {
         id := Visit(context.id()):Result
         expr := Visit(context.expression()):Result
         typ := "";
-        ? context.type() >< () {
-            typ = Visit(context.type()):Str
+        ? context.typeType() >< () {
+            typ = Visit(context.typeType()):Str
         } _ {
             typ = expr.data:Str
         }
@@ -249,13 +248,13 @@ XsLangVisitor -> {
         r1 := Visit(context.id()):Result
         isMutable := r1.isVirtual
         typ := ""
-        r2: Result
+        r2: Result = ()
         ? context.expression() >< () {
             r2 = Visit(context.expression()):Result
             typ = r2.data:Str
         }
-        ? context.type() >< () {
-            typ = Visit(context.type()):Str
+        ? context.typeType() >< () {
+            typ = Visit(context.typeType()):Str
         }
         obj := ""
         ? context.annotationSupport() >< () {
@@ -275,13 +274,13 @@ XsLangVisitor -> {
         r1 := Visit(context.id()):Result
         isMutable := r1.isVirtual
         typ := ""
-        r2: Result
+        r2: Result = ()
         ? context.expression() >< () {
             r2 = Visit(context.expression()):Result
             typ = r2.data:Str
         }
-        ? context.type() >< () {
-            typ = Visit(context.type()):Str
+        ? context.typeType() >< () {
+            typ = Visit(context.typeType()):Str
         }
         obj := ""
         ? context.annotationSupport() >< () {

@@ -2,17 +2,17 @@
     Antlr4\Runtime
     Antlr4\Runtime\Misc
     System
-    Library
+
     Compiler.XsParser
     Compiler.Compiler Static
 }
 
 Iterator -> {
-    begin(): Result
-    end(): Result
-    step(): Result
-    order():Str = T
-    attach():Str = F
+    begin: Result
+    end: Result
+    step: Result
+    order:Str = T
+    attach:Str = F
 }
 
 XsLangVisitor -> {
@@ -119,7 +119,7 @@ XsLangVisitor -> {
 
     VisitCaseExprStatement(context: CaseExprStatementContext) -> (v: {}) {
         obj := ""
-        ? context.type() == () {
+        ? context.typeType() == () {
             expr := Visit(context.expression()):Result
             obj += "case "expr.text" :"Wrap""
         } _ {
@@ -127,7 +127,7 @@ XsLangVisitor -> {
             ? context.id() >< () {
                 id = Visit(context.id()):Result.text
             }
-            type := Visit(context.type()):Str
+            type := Visit(context.typeType()):Str
             obj += "case "type" "id" :"Wrap""
         }
 
@@ -198,8 +198,8 @@ XsLangVisitor -> {
         }
 
         Type := "Exception"
-        ? context.type() >< () {
-            Type = Visit(context.type()):Str
+        ? context.typeType() >< () {
+            Type = Visit(context.typeType()):Str
         }
 
         obj += "catch( "Type" "ID" )"+Wrap+BlockLeft+Wrap
@@ -219,10 +219,10 @@ XsLangVisitor -> {
         obj := ""
         r2 := Visit(context.expression(0)):Result
         r1 := Visit(context.expression(1)):Result
-        ? context.type() >< () {
-            Type := Visit(context.type()):Str
+        ? context.typeType() >< () {
+            Type := Visit(context.typeType()):Str
             obj = ""Type" "r1.text" = "r2.text""
-        } else {
+        } _ {
             obj = "var "r1.text" = "r2.text""
         }
         <- (obj)
@@ -248,7 +248,7 @@ XsLangVisitor -> {
     }
 
     VisitLinqItem(context: LinqItemContext) -> (v: {}) {
-        obj := Visit(context.linqBodyKeyword()):Str
+        obj := Visit(context.linqKeyword()):Str
         ? context.expression() >< () {
             obj += " "Visit(context.expression()):Result.text""
         }

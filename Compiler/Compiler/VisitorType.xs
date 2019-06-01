@@ -2,14 +2,14 @@
     Antlr4\Runtime
     Antlr4\Runtime\Misc
     System
-    Library
+
     Compiler.XsParser
     Compiler.Compiler Static
 }
 
 XsLangVisitor -> {
 } ...XsBaseVisitor<{}> {
-    VisitType(context: TypeContext) -> (v: {}) {
+    VisitTypeType(context: TypeTypeContext) -> (v: {}) {
         obj := ""
         obj = Visit(context.GetChild(0)):Str
         <- (obj)
@@ -37,11 +37,11 @@ XsLangVisitor -> {
     VisitTypeTuple(context: TypeTupleContext) -> (v: {}) {
         obj := ""
         obj += "("
-        [0 < context.type().Length] @ i {
+        [0 < context.typeType().Length] @ i {
             ? i == 0 {
-                obj += Visit(context.type(i))
+                obj += Visit(context.typeType(i))
             } _ {
-                obj += ","Visit(context.type(i))""
+                obj += ","Visit(context.typeType(i))""
             }
         }
         obj += ")"
@@ -50,35 +50,35 @@ XsLangVisitor -> {
 
     VisitGetType(context: GetTypeContext) -> (v: {}) {
         r := Result{data = "System.Type"}
-        ? context.type() == () {
+        ? context.typeType() == () {
             r.text = ""Visit(context.expression()):Result.text".GetType()"
-        } else {
-            r.text = "typeof("Visit(context.type())")"
+        } _ {
+            r.text = "typeof("Visit(context.typeType())")"
         }
         <- (r)
     }
     
     VisitTypeArray(context: TypeArrayContext) -> (v: {}) {
         obj := ""
-        obj += ""Visit(context.type())"[]"
+        obj += ""Visit(context.typeType())"[]"
         <- (obj)
     }
 
     VisitTypeList(context: TypeListContext) -> (v: {}) {
         obj := ""
-        obj += ""Lst"<"Visit(context.type())">"
+        obj += ""Lst"<"Visit(context.typeType())">"
         <- (obj)
     }
 
     VisitTypeSet(context: TypeSetContext) -> (v: {}) {
         obj := ""
-        obj += ""Set"<"Visit(context.type())">"
+        obj += ""Set"<"Visit(context.typeType())">"
         <- (obj)
     }
 
     VisitTypeDictionary(context: TypeDictionaryContext) -> (v: {}) {
         obj := ""
-        obj += ""Dic"<"Visit(context.type(0))","Visit(context.type(1))">"
+        obj += ""Dic"<"Visit(context.typeType(0))","Visit(context.typeType(1))">"
         <- (obj)
     }
 
@@ -95,7 +95,7 @@ XsLangVisitor -> {
         obj := ""
         in := Visit(context.typeFunctionParameterClause(0)):Str
         out := Visit(context.typeFunctionParameterClause(1)):Str
-        ? context.t.Type == ArrowRight {
+        ? context.t.Type == Right Arrow {
             ? out.Length == 0 {
                 ? in.Length == 0 {
                     obj = "Action"
@@ -103,7 +103,7 @@ XsLangVisitor -> {
                     obj = "Action<"in">"
                 }
             } _ {
-                ? out.index of(",") >= 0 {
+                ? out.first_index of(",") >= 0 {
                     out = "(" out ")"
                 }
                 ? in.Length == 0 {
@@ -136,8 +136,8 @@ XsLangVisitor -> {
 
     VisitTypeFunctionParameterClause(context: TypeFunctionParameterClauseContext) -> (v: {}) {
         obj := ""
-        [0 <= context.type().Length - 1] @ i {
-            p := Visit(context.type(i)):Str
+        [0 <= context.typeType().Length - 1] @ i {
+            p := Visit(context.typeType(i)):Str
             ? i == 0 {
                 obj += p
             } _ {
