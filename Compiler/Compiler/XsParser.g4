@@ -231,6 +231,7 @@ linq // 联合查询
 | tupleExpression //元组表达式
 | plusMinus // 正负处理
 | negate // 取反
+| expression typeConversion // 类型转换
 | expression call callExpression // 链式调用
 | expression judgeType typeType // 类型判断表达式
 | expression judge expression // 判断型表达式
@@ -239,7 +240,6 @@ linq // 联合查询
 | expression pow expression // 幂型表达式
 | expression op=Bang // 引用判断
 | expression op=Question // 可空判断
-| expression typeConversion // 类型转换
 | stringExpression // 字符串插值
 ;
 
