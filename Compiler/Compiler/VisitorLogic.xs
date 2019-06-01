@@ -16,7 +16,7 @@ Iterator -> {
 }
 
 XsLangVisitor -> {
-} ...XsBaseVisitor<{}> {
+} ...XsParserBaseVisitor<{}> {
     VisitIteratorStatement(context: IteratorStatementContext) -> (v: {}) {
         it := Iterator{}
         ? context.op.Text == ">=" | context.op.Text == "<=" {
