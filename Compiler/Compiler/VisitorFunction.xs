@@ -8,11 +8,11 @@
 }
 
 Parameter -> {
-    id: Str
-    type: Str
-    value: Str
-    annotation: Str
-    permission: Str
+    id(): Str
+    type(): Str
+    value(): Str
+    annotation(): Str
+    permission(): Str
 }
 
 XsLangVisitor -> {
