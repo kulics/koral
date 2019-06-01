@@ -53,7 +53,10 @@ XsLangVisitor -> {
         contentStatic := ""
         context.namespaceSupportStatement() @ item {
             type := item.GetChild(0).GetType()
-            ? type == ?(:NamespaceVariableStatementContext) | type == ?(:NamespaceControlStatementContext) | type == ?(:NamespaceFunctionStatementContext) | type == ?(:NamespaceConstantStatementContext) {
+            ? type == ?(:NamespaceVariableStatementContext) |
+                type == ?(:NamespaceControlStatementContext) |
+                type == ?(:NamespaceFunctionStatementContext) |
+                type == ?(:NamespaceConstantStatementContext) {
                 contentStatic += Visit(item)
             } _ {
                 content += Visit(item)
@@ -61,7 +64,8 @@ XsLangVisitor -> {
         }
         obj += content
         ? contentStatic >< "" {
-            obj += "public partial class "ns.name.sub Str(ns.name.last index of(".") + 1) "_Static" + BlockLeft + Wrap + contentStatic + BlockRight + Wrap
+            obj += "public partial class "ns.name.sub Str(ns.name.last index of(".") + 1) "_Static" +
+             BlockLeft + Wrap + contentStatic + BlockRight + Wrap
         }
         obj += BlockRight + Wrap
         <- (obj)

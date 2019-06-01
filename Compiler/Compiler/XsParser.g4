@@ -231,12 +231,12 @@ linq // 联合查询
 | tupleExpression //元组表达式
 | plusMinus // 正负处理
 | negate // 取反
-| expression call New_Line? callExpression // 链式调用
+| expression call callExpression // 链式调用
 | expression judgeType typeType // 类型判断表达式
-| expression judge New_Line? Line_Comment? expression // 判断型表达式
-| expression add New_Line? Line_Comment? expression // 和型表达式
-| expression mul New_Line? Line_Comment? expression // 积型表达式
-| expression pow New_Line? Line_Comment? expression // 幂型表达式
+| expression judge expression // 判断型表达式
+| expression add expression // 和型表达式
+| expression mul expression // 积型表达式
+| expression pow expression // 幂型表达式
 | expression op=Bang // 引用判断
 | expression op=Question // 可空判断
 | expression typeConversion // 类型转换
@@ -423,12 +423,12 @@ nilExpr: left_paren right_paren;
 boolExpr: t=TrueLiteral|t=FalseLiteral;
 
 judgeType: op=(Equal_Equal|Not_Equal) Colon;
-judge: op=(Or | And | Equal_Equal | Not_Equal | Less_Equal | Greater_Equal | Less | Greater);
-assign: op=(Equal | Add_Equal | Sub_Equal | Mul_Equal | Div_Equal | Mod_Equal);
-add: op=(Add | Sub);
-mul: op=(Mul | Div | Mod);
-pow: op=(Pow | Root | Log);
-call: op=Dot New_Line* Line_Comment*;
+judge: op=(Or | And | Equal_Equal | Not_Equal | Less_Equal | Greater_Equal | Less | Greater) (New_Line|Line_Comment)?;
+assign: op=(Equal | Add_Equal | Sub_Equal | Mul_Equal | Div_Equal | Mod_Equal) (New_Line|Line_Comment)?;
+add: op=(Add | Sub) (New_Line|Line_Comment)?;
+mul: op=(Mul | Div | Mod) (New_Line|Line_Comment)?;
+pow: op=(Pow | Root | Log) (New_Line|Line_Comment)?;
+call: op=Dot (New_Line|Line_Comment)?;
 wave: op=Wave;
 
 id: (idItem)+;

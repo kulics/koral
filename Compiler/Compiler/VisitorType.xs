@@ -28,7 +28,9 @@ XsLangVisitor -> {
     VisitTypeNullable(context: TypeNullableContext) -> (v: {}) {
         obj := ""
         obj = Visit(context.typeNotNull()):Str
-        ? context.typeNotNull().GetChild(0) == :TypeBasicContext & context.typeNotNull().GetChild(0).GetText() >< "{}" & context.typeNotNull().GetChild(0).GetText() >< "Str" {
+        ? context.typeNotNull().GetChild(0) == :TypeBasicContext &
+            context.typeNotNull().GetChild(0).GetText() >< "{}" &
+            context.typeNotNull().GetChild(0).GetText() >< "Str" {
             obj += "?"
         }
         <- (obj)
