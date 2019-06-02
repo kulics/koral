@@ -105,7 +105,7 @@ XsLangVisitor -> {
                     obj = "Action<"in">"
                 }
             } _ {
-                ? out.first_index of(",") >= 0 {
+                ? out.first index of(",") >= 0 {
                     out = "(" out ")"
                 }
                 ? in.Length == 0 {
