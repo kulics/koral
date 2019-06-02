@@ -37,9 +37,9 @@ XsLangVisitor -> {
         r2 := Visit(context.expression(1)):Result
         ? context.typeType() >< () {
             Type := Visit(context.typeType()):Str
-            obj = ""Type" "r1.text" = "r2.text"" + Terminate + Wrap;
+            obj = ""Type" "r1.text" = "r2.text"" + Terminate + Wrap
         } _ {
-            obj = "var "r1.text" = "r2.text"" + Terminate + Wrap;
+            obj = "var "r1.text" = "r2.text"" + Terminate + Wrap
         }
         <- (obj)
     }
