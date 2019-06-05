@@ -170,7 +170,7 @@ For each( {it ->
     Prt(it % 2)
 })
 Take( {a, b -> a + b} )
-Find all( {it -> it > 7} )
+Find all{ it -> it > 7 }  # If the Function only have one parameter, you can also omit the parentheses
 ```
 Very simple, the difference from the expression of a function type is that you only need to declare the parameter identifier and execution logic, and neither the type nor the return value need to be declared.
 ## Lambda Function
@@ -195,7 +195,7 @@ Main() -> () {
     B(1,2,3)
     X := C()
     D( {-> Prt("D")} )
-    E( {it -> Prt(it)} )
+    E{it -> Prt(it)}
     E( (a: Int) -> () {
         Prt(it)
     })

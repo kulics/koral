@@ -269,7 +269,7 @@ annotationItem: id ( left_paren annotationAssign (more annotationAssign)* right_
 
 annotationAssign: (id Equal)? expression ;
 
-callFunc: id (templateCall)? tuple; // 函数调用
+callFunc: id (templateCall)? (tuple|lambda); // 函数调用
 
 callElement : id op=Question? Left_Brack (expression | slice) Right_Brack;
 
