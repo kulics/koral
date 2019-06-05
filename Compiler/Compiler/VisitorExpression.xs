@@ -389,7 +389,12 @@ XsLangVisitor -> {
         ? context.templateCall() >< () {
             r.text += Visit(context.templateCall())
         }
-        r.text += Visit(context.tuple()):Result.text
+        ? context.tuple() >< () {
+            r.text += Visit(context.tuple()):Result.text
+        } _ {
+            r.text += "(" Visit(context.lambda()):Result.text ")"
+        }
+
         <- (r)
     }
 

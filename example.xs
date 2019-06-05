@@ -350,8 +350,9 @@ Test async() ~> (x: Int, y: Int, z: Str) {
 
 Test linq() -> () {
     Numbers := {0, 1, 2, 3, 4, 5, 6}
-    Array := from i -> in Numbers -> where (i % 2) == 0 ->
+    Linq := from i -> in Numbers -> where (i % 2) == 0 ->
     orderby i -> descending -> select i
+    Lambda := Numbers.Where{ i -> i%2==0 }.OrderBy{ i -> i }.ToList()
 }
 
 Test interface(in: Protocol) -> () {}

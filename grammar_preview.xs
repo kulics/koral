@@ -279,6 +279,7 @@ Main() ~> () {
 
     # Lambda Function
     arr.select( {it -> it > 2} )
+    arr.select{it -> it > 2}
 
     # Func params
     Func(in: (Int) -> (Int)) -> () {
