@@ -310,7 +310,7 @@ Test lambda() -> () {
     Test2(fn: () -> (Int)) -> () {
         O1 := fn()
     }
-    Test2( {->1} )
+    Test2{->1}
 
     Test3(fn: (Int) ~> ()) -> () {
         fn(1)
@@ -319,26 +319,26 @@ Test lambda() -> () {
         <~ Dly(1000)
         Prt(it)
     })
-    Test3( {it ~>
+    Test3{it ~>
         <~ Dly(1000)
         Prt(it)
-    })
+    }
     Test4(fn: (Int) ~> (Int)) -> () { 
         fn(18) 
     }
-    Test4({it~>it+1})
+    Test4{it~>it+1}
 }
 
 Test async() ~> (x: Int, y: Int, z: Str) {
     Slp(1000)
     [1<=10] @ i {
-        Go({ ~> 
+        Go{ ~> 
             <~ Dly(1000)
             Prt("task", i)
-        })
-        Go({ -> 
+        }
+        Go{ -> 
             <- ()
-        })
+        }
     }
     Fun wait() ~> () {
         <~ Dly(1000)
