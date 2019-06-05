@@ -231,6 +231,8 @@ linq // 联合查询
 | tupleExpression //元组表达式
 | plusMinus // 正负处理
 | negate // 取反
+| expression op=Bang // 引用判断
+| expression op=Question // 可空判断
 | expression typeConversion // 类型转换
 | expression call callExpression // 链式调用
 | expression judgeType typeType // 类型判断表达式
@@ -238,8 +240,6 @@ linq // 联合查询
 | expression add expression // 和型表达式
 | expression mul expression // 积型表达式
 | expression pow expression // 幂型表达式
-| expression op=Bang // 引用判断
-| expression op=Question // 可空判断
 | stringExpression // 字符串插值
 ;
 
@@ -327,7 +327,7 @@ lambdaIn: id (more id)*;
 
 pkgAnonymous: pkgAnonymousAssign; // 匿名包
 
-pkgAnonymousAssign: left_brace (pkgAnonymousAssignElement (more pkgAnonymousAssignElement)* New_Line)+ right_brace; // 简化赋值
+pkgAnonymousAssign: left_brace pkgAnonymousAssignElement (more pkgAnonymousAssignElement)* right_brace; // 简化赋值
 
 pkgAnonymousAssignElement: name Equal expression; // 简化赋值元素
 
