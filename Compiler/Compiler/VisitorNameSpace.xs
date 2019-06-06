@@ -41,7 +41,7 @@ XsLangVisitor -> {
     VisitStatement(context: StatementContext) -> (v: {}) {
         obj := ""
         ns := Visit(context.exportStatement()):Namespace
-        # import library
+        # import library #
         obj += "using Library;"Wrap"using static Library.Lib;"Wrap""
         obj += ns.imports + Wrap
         ? context.annotationSupport() >< () {
@@ -178,7 +178,7 @@ XsLangVisitor -> {
         ? context.annotationSupport() >< () {
             obj += Visit(context.annotationSupport())
         }
-        # 异步
+        # 异步 #
         ? context.t.Type == Right Flow {
             pout := Visit(context.parameterClauseOut()):Str
             ? pout >< "void" {
@@ -191,7 +191,7 @@ XsLangVisitor -> {
             obj += ""id.permission" static "Visit(context.parameterClauseOut())" "id.text""
         }
 
-        # 泛型
+        # 泛型 #
         templateContract := ""
         ? context.templateDefine() >< () {
             template := Visit(context.templateDefine()):TemplateItem

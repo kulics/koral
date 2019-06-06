@@ -86,10 +86,10 @@ XsLangVisitor -> {
                 }
                 <- (r)
             } :JudgeContext {
-                # todo 如果左右不是bool类型值，报错
+                # todo 如果左右不是bool类型值，报错 #
                 r.data = Bool
             } :AddContext {
-                # todo 如果左右不是number或text类型值，报错
+                # todo 如果左右不是number或text类型值，报错 #
                 ? e1.data:Str == Str | e2:Result.data:Str == Str {
                     r.data = Str
                 }  e1.data:Str == I32 & e2:Result.data:Str == I32 {
@@ -98,14 +98,14 @@ XsLangVisitor -> {
                     r.data = F64
                 }
             } :MulContext {
-                # todo 如果左右不是number类型值，报错
+                # todo 如果左右不是number类型值，报错 #
                 ? e1.data:Str == I32 & e2:Result.data:Str == I32 {
                     r.data = I32
                 } _ {
                     r.data = F64
                 }
             } :PowContext {
-                # todo 如果左右部署number类型，报错
+                # todo 如果左右部署number类型，报错 #
                 r.data = F64
                 op ? "**" {
                     op = "Pow"
@@ -663,7 +663,7 @@ XsLangVisitor -> {
 
     VisitFunctionExpression(context: FunctionExpressionContext) -> (v:{}) {
         r := Result{}
-        # 异步
+        # 异步 #
         ? context.t.Type == Right_Flow {
             r.text += " async "
         }
@@ -703,7 +703,7 @@ XsLangVisitor -> {
 
     VisitLambda(context: LambdaContext) -> (v:{}) {
         r := Result{data = "var"}
-        # 异步
+        # 异步 #
         ? context.t.Type == Right_Flow {
             r.text += "async "
         }
