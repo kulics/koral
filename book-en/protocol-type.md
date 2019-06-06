@@ -42,8 +42,8 @@ Student -> {
     count(): Int
 
     do() -> () {
-        Spend time(1)    # spent an hour
-        count -= 1      # completed one
+        Spend time(1)    # spent an hour #
+        count -= 1      # completed one #
     }
 }
 ```
@@ -62,11 +62,11 @@ E.g:
 ```
 Peter := Student{ count=999999 }
 Prt( Peter.count )
-# print 999999, too much
+# print 999999, too much #
 Peter.do()
-# did a homework
+# did a homework #
 Prt(Peter.count)
-# print 999998, or too much
+# print 999998, or too much #
 ```
 If this is the case, there is no advantage in defining these two properties directly in the package.
 
@@ -78,11 +78,11 @@ Now we can create a wide variety of students, all of whom follow the same protoc
 
 E.g:
 ```
-# create three different types of student packages
+# create three different types of student packages #
 Student A := Chinese Student{}
 Student B := American Student{}
 Student C := Japanese Student{}
-# let them do homework separately
+# let them do homework separately #
 Student A.do()
 Student B.do()
 Student C.do()
@@ -94,7 +94,7 @@ E.g:
 Do homework(Student: Homework) -> () {
     student.do()
 }
-# Now we can make it easier for every student to do their homework
+# Now we can make it easier for every student to do their homework #
 Do homework(Student A)
 Do homework(Student B)
 Do homework(Student C)
@@ -105,7 +105,7 @@ E.g:
 ```
 Arr := []homeWork{}
 Arr.add( Student A )
-...... # stuffed many, many students
+...... # stuffed many, many students #
 Arr @ i {
     Do homework(i)
 }
@@ -123,9 +123,9 @@ We can use `value == :type` or `value >< :type` To judge the type of data, using
 E.g:
 ```
 Func(hw: Homework) -> () {
-    # judge type
+    # judge type #
     ? hw == :Chinese Student {
-        # convert to chinese student data
+        # convert to chinese student data #
         Cs := hw:Chinese Student
     }
 }

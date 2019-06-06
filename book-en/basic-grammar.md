@@ -11,7 +11,7 @@ So in most cases, we can end up using line breaks directly. When there is a spec
 
 So we prefer to write like this:
 ```
-StatementContent # auto end
+StatementContent # auto end #
 StatementContent
 ```
 
@@ -71,22 +71,18 @@ If we write a console program, we can use `Prt()` function, it can display data 
 
 E.g:
 ```
-Prt("Hello world")    # output Hello world
+Prt("Hello world")    # output Hello world #
 ```
 In the following examples, we will all use the console as a presentation environment.
 ## Comment
-Single-line comment starting with `#`:
-```
-# single-line comment
-```
 Comment is only used to provide additional information to the user, and will not be really compiled into the executable program.
 
-Multi-line comments only need to wrap the content with `##`:
+Comments only need to wrap the content with `#`:
 ```
-##
+#
 multi-line 
 comment
-##
+#
 ```
 ## Definition
 We can create new variable using the `id:type` statement.
@@ -129,8 +125,8 @@ Constants are languages that are determined at compile time and are unchangeable
 
 E.g:
 ```
-I :: 2         # automatic derivation
-J: Int: 3      # do not use automatic derivation
+I :: 2         # automatic derivation #
+J: Int: 3      # do not use automatic derivation #
 ```
 
 ## Identifier
@@ -147,7 +143,7 @@ In particular, since Xs has no keywords, the rules for identifiers are more leni
 
 E.g:
 ```
-I am Int := 1   # legal identifier
+I am Int := 1   # legal identifier #
 ```
 
 ## Keyword

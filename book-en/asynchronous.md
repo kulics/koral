@@ -26,7 +26,7 @@ Normal direct call will only get a `Task` data.
 
 E.g:
 ```
-Result := Async()   # result is a Task data
+Result := Async()   # result is a Task data #
 ```
 Let's see how to make it asynchronously waiting for execution.
 ## Asynchronous Wait
@@ -45,12 +45,12 @@ E.g:
 ```
 # correct
 Async() ~> (out: Int) {
-    <~ Delay(5000)     # wait for a while
+    <~ Delay(5000)     # wait for a while #
     <- (12)
 }
 # wrong
 Async() -> (out: Int) {
-    <~ Delay(5000)     # can not be declared
+    <~ Delay(5000)     # can not be declared #
     <- (12)
 }
 ```
@@ -62,12 +62,12 @@ We can choose to wait for no data, or we can choose not to wait for data.
 E.g:
 ```
 Async() ~> () {
-    <~ Delay(5000)    # wait for a while
+    <~ Delay(5000)    # wait for a while #
 }
 
 <~ Async()  # correct
 
-Task := Async()    # correct, got the Task
+Task := Async()    # correct, got the Task #
 ```
 ## Lambda
 For lambda, we can also use asynchronous, just use `~>`.

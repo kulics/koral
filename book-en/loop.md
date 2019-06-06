@@ -9,7 +9,7 @@ E.g:
 ```
 Arr := {1, 2, 3, 4, 5}
 Arr @ item {
-    Prt(item)     # print each number
+    Prt(item)     # print each number #
 }
 ```
 
@@ -31,7 +31,7 @@ Iterators can loop from the start point to the end point, we use the collection 
 E.g:
 ```
 [0 <= 100] @ i {
-    Prt(i)      # print each number
+    Prt(i)      # print each number #
 }
 ```
 It should be noted that the meaning of `0 <= 100` is read from` 0` to `100` one by one, that is, a total execution of` 101` times. Iterator will be executed until the last number is completed, rather than an early end.
@@ -53,7 +53,7 @@ We can also reverse it in reverse order, as long as we use `>=`.
 E.g:
 ```
 [100 >= 0] @ i {
-     ......    # from 100 to 0
+     ......    # from 100 to 0 #
 }
 ```
 For the same reason, if you don't want to reach the last one, you can use `100 > 0`.
@@ -65,7 +65,7 @@ At other times, we may need an infinite loop. Very easy, we only need to use the
 E.g:
 ```
 @ {
-    ...... # never jump out
+    ...... # never jump out #
 }
 ```
 This can be thought of as a while while for other languages.
@@ -75,7 +75,7 @@ So how to jump out of infinite loop? We can use the `<- @` statement to jump out
 E.g:
 ```
 @ {
-    <- @  # jump out
+    <- @  # jump out #
 }
 ```
 In addition to the infinite loop, jump out can also be used in other cycles.

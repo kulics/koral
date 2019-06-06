@@ -5,7 +5,7 @@ If a type is defined but not assigned, it will not be used.
 E.g:
 ```
 A: Int
-B := A   # error, no assignment to A
+B := A   # error, no assignment to A #
 ```
 
 ## Statement and Use
@@ -16,14 +16,14 @@ Just add `?` forward any type, which is a nullable type.
 E.g:
 ```
 A: ?Int
-B := A  # B assigns an empty Int
+B := A  # B assigns an empty Int #
 ```
 
 Once an optional type has appeared, we need to strictly handle nil values to avoid program errors.
 
 E.g:
 ```
-# Judgment is not empty and then use
+# Judgment is not empty and then use #
 ? A >< () {
      A.to Str()
 }
@@ -60,7 +60,7 @@ B := 2
 
 Swap(A!, B!)
 Prt(A, B)
-# A = 2, B = 1
+# A = 2, B = 1 #
 ```
 
 ## [Complete Example](../example.xs)

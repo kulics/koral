@@ -23,29 +23,29 @@ This is the main source code repository for Xs. It contains the compiler, and do
 
 ## Quick Preview
 ```
-# export namespace
+# export namespace #
 \HelloWorld <- {
-    System # import namespace
+    System # import namespace #
 }
 
-# main function
+# main function #
 Main() -> () {
-    # call function
+    # call function #
    Say hello world now("start now")
 }
 
-# function
+# function #
 Say hello world now(begin: Str) -> () {
-    # print
+    # print #
     Prt(begin)
-    # array
+    # array #
     Greetings around the world := {"Hello", "Hola", "Bonjour",
                 "Ciao", "こんにちは", "안녕하세요",
                 "Cześć", "Olá", "Здравствуйте",
                 "Chào bạn", "你好"}
-    # loop
+    # loop #
     Greetings around the world @ greeting {
-        # judge
+        # judge #
         greeting ? "Hello" {
             Prt(greeting + " World!")
         } "你好" {

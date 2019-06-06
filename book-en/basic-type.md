@@ -13,14 +13,14 @@ Integer: Int = 3987349
 
 If we need integers of other numeric ranges, other types can also be used. All supported integer types are shown in the following table.
 ```
-I8      # 8-bit signed     -128 to 127
-U8      # 8-bit unsigned   0 to 255
-I16     # 16-bit signed    -32,768 to 32,767
-U16     # 16-bit unsigned  0 to 65,535
-I32     # 32-bit signed    -2,147,483,648 to 2,147,483,647
-U32     # 32-bit unsigned  0 to 4,294,967,295
-I64     # 64-bit signed    -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807
-U64     # 64-bit unsigned  0 to 18,446,744,073,709,551,615
+I8      # 8-bit signed     -128 to 127 #
+U8      # 8-bit unsigned   0 to 255 #
+I16     # 16-bit signed    -32,768 to 32,767 #
+U16     # 16-bit unsigned  0 to 65,535 #
+I32     # 32-bit signed    -2,147,483,648 to 2,147,483,647 #
+U32     # 32-bit unsigned  0 to 4,294,967,295 #
+I64     # 64-bit signed    -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807 #
+U64     # 64-bit unsigned  0 to 18,446,744,073,709,551,615 #
 ```
 ## Basic Type Conversion
 Since the default integer is `Int`, how do we use other types of integers?
@@ -49,8 +49,8 @@ Note that due to the special nature of computer-calculated floating-point number
 
 All supported floating-point types are as follows:
 ```
-F32     # 32-bit   ±1.5e−45 to ±3.4e38
-F64     # 64-bit   ±5.0e−324 to ±1.7e308
+F32     # 32-bit   ±1.5e−45 to ±3.4e38 #
+F64     # 64-bit   ±5.0e−324 to ±1.7e308 #
 ```
 ## Literal Rules
 Like identifiers, literals can be separated by spaces to improve readability.
@@ -91,7 +91,7 @@ E.g:
 Title := "Year:"
 Content := 2018
 String := "Hello world! " + Title + Content.to Str()
-# Hello world! Year:2018
+# Hello world! Year:2018 #
 ```
 
 This of course does not affect the functionality, but we can use a more intuitive and convenient way, that is string templates.
@@ -100,7 +100,7 @@ We can insert elements directly in the middle of two strings, and the language w
 E.g:
 ```
 String := "Hello world! " Title ""  Content ""
-# Hello world! Year:2018
+# Hello world! Year:2018 #
 ```
 ## Boolean
 boolean are logical values ​​because they can only be true or false. It is often used to assist in judging logic.
@@ -109,15 +109,15 @@ In this language, the default boolean is the type `Bool`, which is a type that h
 
 E.g:
 ```
-Boolean1: Bool = True      # true  
-Boolean2: Bool = False     # false  
+Boolean1: Bool = True      # true #
+Boolean2: Bool = False     # false #
 ```
 ## Any
 In particular, sometimes you need a type that can be any object to assist in the completion of the function, so it is `{}`.
 
 E.g:
 ```
-A: {} = 1  # any type
+A: {} = 1  # any type #
 ```
 
 ## Nil value
@@ -125,7 +125,7 @@ We will need a value that can be any nil value, so it is `()`.
 
 E.g:
 ```
-() # empty value
+() # empty value #
 ```
 
 ### [Next Chapter](operator.md)

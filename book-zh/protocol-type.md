@@ -42,8 +42,8 @@ Student -> {
     count(): Int
 
     do() -> () {
-        Spend time(1)    # 花费了一个小时
-        count -= 1      # 完成了一个
+        Spend time(1)    # 花费了一个小时 #
+        count -= 1      # 完成了一个 #
     }
 }
 ```
@@ -62,11 +62,11 @@ Student -> {
 ```
 Peter := Student{ count=999999 }
 Prt( Peter.count )
-# 打印 999999，好多呀
+# 打印 999999，好多呀 #
 Peter.do()
-# 做了一次作业
+# 做了一次作业 #
 Prt( Peter.count )
-# 打印 999998，还是好多呀
+# 打印 999998，还是好多呀 #
 ```
 如果只是这样使用，那和在包里直接定义这两个属性比就没什么优势了。
 
@@ -78,11 +78,11 @@ Prt( Peter.count )
 
 例如:
 ```
-# 创建了三个不同类型的学生包
+# 创建了三个不同类型的学生包 #
 Student A := Chinese Student{}
 Student B := American Student{}
 Student C := Japanese Student{}
-# 让他们分别做作业
+# 让他们分别做作业 #
 Student A.do()
 Student B.do()
 Student C.do()
@@ -94,7 +94,7 @@ Student C.do()
 Do homework(Student: Homework) -> () {
     student.do()
 }
-# 现在我们就可以更简单地让每个学生做作业了
+# 现在我们就可以更简单地让每个学生做作业了 #
 Do homework(Student A)
 Do homework(Student B)
 Do homework(Student C)
@@ -105,7 +105,7 @@ Do homework(Student C)
 ```
 Arr := []homeWork{}
 Arr.add( Student A )
-...... # 塞进很多很多学生
+...... # 塞进很多很多学生 #
 Arr @ i {
     Do homework(i)
 }
@@ -123,9 +123,9 @@ Arr @ i {
 例如：
 ```
 Func(hw: Homework) -> () {
-    # 判断是否中国学生
+    # 判断是否中国学生 #
     ? hw == :Chinese Student {
-        # 转换为中国学生数据
+        # 转换为中国学生数据 #
         Cs := hw:Chinese Student
     }
 }

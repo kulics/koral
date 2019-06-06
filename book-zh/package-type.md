@@ -48,7 +48,7 @@ Peter := Student{}
 
 例如：
 ```
-Prt( Peter.name )      # 打印了某个学生的名字
+Prt( Peter.name )      # 打印了某个学生的名字 #
 ```
 要更改属性的值也是一样的，它就相当于是个嵌套的标识符。我们可以直接用赋值语句去更改值。
 
@@ -107,7 +107,7 @@ Peter := {
 ```
 Student -> {
     ......
-    _girl friend: Str # 第一个字符是 _ 的标识符是私有的
+    _girl friend: Str # 第一个字符是 _ 的标识符是私有的 #
 }
 ```
 没错，如果你还记得标识符的定义的话，这就是私有标识符的定义方式，私有标识符是不能被外界访问的。
@@ -139,7 +139,7 @@ Student -> {
 例如：
 ```
 Prt( Peter.get girl friend() ) 
-# 打印了某个早恋学生的女朋友名字
+# 打印了某个早恋学生的女朋友名字 #
 ```
 与数据属性一样，函数也可以是私有标识符，使用私有标识符的函数也意味着只有包自己能访问。
 
@@ -154,7 +154,7 @@ Chinese Student -> {
     number: Str = ""
     class: Int = 0
     grade: Int = 0
-    kungfu: Bool = False     # 不会功夫的学生
+    kungfu: Bool = False     # 不会功夫的学生 #
 }
 ```
 不不不，这样重复定义数据就很不优雅了，我们可以将学生属性复用，加上一个额外的功夫属性就可以了。
@@ -164,8 +164,8 @@ Chinese Student -> {
 例如：
 ```
 Chinese Student -> {
-    student := Student{}   # 将学生属性包含其中
-    kungfu := False        # 不会功夫
+    student := Student{}   # 将学生属性包含其中 #
+    kungfu := False        # 不会功夫 #
 }
 ```
 这样你就可以通过中国学生里的学生属性来使用通用属性。
@@ -189,8 +189,8 @@ Prt( Chen.student.name )
 ```
 Chinese Student -> {
     kungfu := False
-} ...Student {   # 继承 student
-    # 重写
+} ...Student {   # 继承 student #
+    # 重写 #
     get girl friend() -> (name: Str) {
         <- ("none")
     }
@@ -208,9 +208,9 @@ Student -> {
 } (name: Str, number: Str) {
     ..name = name
     ..number = number
-    # 计算得出班级
+    # 计算得出班级 #
     ..class = get sub text(number, 2, 3)
-    # 计算得出年级
+    # 计算得出年级 #
     ..grade = get sub text(number, 0, 1)
 }
 ```
@@ -221,7 +221,7 @@ Student -> {
 例如：
 ```
 Peter := <Student>("peter", "060233")
-Prt(Peter.class)     # 打印出 2
+Prt(Peter.class)     # 打印出 2 #
 ```
 
 如果需要使用带继承的构造函数，可在参数语法后面追加 `...(params)` 即可。

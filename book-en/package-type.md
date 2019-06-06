@@ -49,7 +49,7 @@ Very simple, we only need to use `.` syntax, we can summon the attributes we nee
 E.g:
 ```
 Prt(Peter.name)
-# print the name of a student
+# print the name of a student #
 ```
 To change the value of the property is the same, it is equivalent to a nested identifier. We can directly use the assignment statement to change the value.  
 Parentheses can be omitted when the constructor is empty.
@@ -108,7 +108,7 @@ E.g:
 ```
 Student -> {
     ......
-    _girl friend: Str    # The identifier beginning with this '_' is private
+    _girl friend: Str    # The identifier beginning with this '_' is private #
 }
 ```
 That's right, if you remember the definition of identifiers, this is how private identifiers are defined, and private identifiers can not be accessed by outsiders.
@@ -140,7 +140,7 @@ With this function, we can get the private property by calling the function.
 E.g:
 ```
 Prt( Peter.get girl friend() )
-# printed the name of a girlfriend of a puppy love student
+# printed the name of a girlfriend of a puppy love student #
 ```
 As with data attributes, functions can also be private identifiers, and functions that use private identifiers also mean that only the packet can access itself.
 
@@ -154,7 +154,7 @@ Chinese Student -> {
     number: Str = ""
     class: Int = 0
     grade: Int = 0
-    kungfu: Bool = False    # kung fu students
+    kungfu: Bool = False    # kung fu students #
 }
 ```
 No, no repeatable definition of data so elegant, we can reuse student attributes, with an additional kung fu attributes on it.
@@ -164,8 +164,8 @@ We need to use a combination of this feature, but not so complicated, just creat
 E.g:
 ```
 Chinese Student -> {
-    student := Student{}   # include student attributes in it
-    kungfu := False        # no kung fu
+    student := Student{}   # include student attributes in it #
+    kungfu := False        # no kung fu #
 }
 ```
 This way you can use generic attributes via student attributes in Chinese students.
@@ -174,7 +174,7 @@ E.g:
 ```
 Chen := Chinese Student{}
 Prt(Chen.student.name)
-# of course, since there is no assignment, nothing is output
+# of course, since there is no assignment, nothing is output #
 ```
 By combining layers after layer, you are free to assemble whatever you want to describe.
 
@@ -189,8 +189,8 @@ E.g:
 ```
 chineseStudent -> {
     kungfu := False
-} ...Student {   # inhert student
-    # override
+} ...Student {   # inhert student #
+    # override #
     get girl friend() -> (name: Str) {
         <- ("none")
     }
@@ -209,9 +209,9 @@ Student -> {
 } (name: Str, number: Str) {
     ..name = name
     ..number = number
-    # calculate the class
+    # calculate the class #
     ..class = get sub text(number, 2, 3)
-    # calculate the grade
+    # calculate the grade #
     ..grade = get sub text(number, 0, 1)
 }
 ```
@@ -222,7 +222,7 @@ We need to use the constructor with the `<type>()` function.
 E.g:
 ```
 Peter := <Student>("peter", "060233")
-Prt(Peter.class)     # print 2
+Prt(Peter.class)     # print 2 #
 ```
 
 If you need to use a constructor with inheritance, you can append `...(params)` to the argument syntax.
