@@ -4,8 +4,8 @@ options { tokenVocab=XsLexer; }
 
 program: statement+;
 
-statement: (annotationSupport)? Line_Comment* 
-exportStatement (Line_Comment|New_Line)* namespaceSupportStatement*;
+statement: (annotationSupport)?  
+exportStatement (New_Line)* namespaceSupportStatement*;
 
 // 导出命名空间
 exportStatement: Slash nameSpace Left_Arrow left_brace (importStatement|New_Line)* right_brace end;
@@ -21,7 +21,6 @@ namespaceVariableStatement
 |packageStatement
 |protocolStatement
 |enumStatement
-|Line_Comment
 |New_Line
 ;
 
@@ -53,7 +52,6 @@ packageSupportStatement:
 packageVariableStatement
 |packageControlStatement
 |packageFunctionStatement
-|Line_Comment
 |New_Line
 ;
 // 函数
@@ -70,7 +68,7 @@ packageControlStatement: (annotationSupport)? id left_paren right_paren (Colon_E
 // 定义子方法
 packageControlSubStatement: id left_brace (functionSupportStatement)+ right_brace;
 // 包重载
-packageOverrideStatement: left_brace (packageOverrideFunctionStatement|Line_Comment|New_Line)* right_brace;
+packageOverrideStatement: left_brace (packageOverrideFunctionStatement|New_Line)* right_brace;
 // 包扩展
 packageExtensionStatement: (annotationSupport)? parameterClauseIn id (templateDefine)? parameterClauseIn t=(Right_Arrow|Right_Flow) New_Line*
 parameterClauseOut left_brace (packageFunctionStatement)* right_brace end;
@@ -80,7 +78,6 @@ protocolStatement: (annotationSupport)? id (templateDefine)? Left_Arrow left_bra
 protocolSupportStatement:
 protocolFunctionStatement
 |protocolControlStatement
-|Line_Comment
 |New_Line
 ;
 // 定义控制
@@ -96,7 +93,6 @@ protocolImplementSupportStatement:
 implementFunctionStatement
 |implementControlStatement
 |implementEventStatement
-|Line_Comment
 |New_Line
 ;
 // 实现协议
@@ -140,7 +136,6 @@ functionSupportStatement:
 | variableDeclaredStatement
 | assignStatement
 | expressionStatement
-| Line_Comment
 | New_Line
 ;
 
@@ -259,7 +254,7 @@ tuple: left_paren (expression (more expression)* )? right_paren; // 元组
 
 expressionList: expression (more expression)* ; // 表达式列
 
-annotationSupport: annotation (New_Line|Line_Comment)?;
+annotationSupport: annotation (New_Line)?;
 
 annotation: Left_Brack (id Right_Arrow)? annotationList Right_Brack; // 注解
 
@@ -423,12 +418,12 @@ nilExpr: left_paren right_paren;
 boolExpr: t=TrueLiteral|t=FalseLiteral;
 
 judgeType: op=(Equal_Equal|Not_Equal) Colon;
-judge: op=(Or | And | Equal_Equal | Not_Equal | Less_Equal | Greater_Equal | Less | Greater) (New_Line|Line_Comment)?;
-assign: op=(Equal | Add_Equal | Sub_Equal | Mul_Equal | Div_Equal | Mod_Equal) (New_Line|Line_Comment)?;
-add: op=(Add | Sub) (New_Line|Line_Comment)?;
-mul: op=(Mul | Div | Mod) (New_Line|Line_Comment)?;
-pow: op=(Pow | Root | Log) (New_Line|Line_Comment)?;
-call: op=Dot (New_Line|Line_Comment)?;
+judge: op=(Or | And | Equal_Equal | Not_Equal | Less_Equal | Greater_Equal | Less | Greater) (New_Line)?;
+assign: op=(Equal | Add_Equal | Sub_Equal | Mul_Equal | Div_Equal | Mod_Equal) (New_Line)?;
+add: op=(Add | Sub) (New_Line)?;
+mul: op=(Mul | Div | Mod) (New_Line)?;
+pow: op=(Pow | Root | Log) (New_Line)?;
+call: op=Dot (New_Line)?;
 wave: op=Wave;
 
 id: (idItem)+;
@@ -438,15 +433,14 @@ idItem: op=(IDPublic|IDPrivate)
 |linqKeyword
 |Event;
 
-end: Semi | New_Line | Line_Comment;
-more: Comma Line_Comment* New_Line* ;
+end: Semi | New_Line ;
+more: Comma  New_Line* ;
 
-left_brace: Left_Brace Line_Comment* New_Line*;
-right_brace: Line_Comment* New_Line* Right_Brace;
+left_brace: Left_Brace  New_Line*;
+right_brace:  New_Line* Right_Brace;
 
 left_paren: Left_Paren;
 right_paren: Right_Paren;
 
-left_brack: Left_Brack Line_Comment* New_Line*;
-right_brack: Line_Comment* New_Line* Right_Brack;
-
+left_brack: Left_Brack  New_Line*;
+right_brack:  New_Line* Right_Brack;

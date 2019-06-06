@@ -45,8 +45,8 @@ E.g:
 ! {
     Func()
 } ex {
-     # can be returned manually
-     # <- ()
+     # can be returned manually #
+     # <- () #
      !(ex)
 }
 ```
@@ -81,7 +81,7 @@ E.g:
 ......
 _ {
     F.release()
-    <- ()    # error, cannot use return statement
+    <- ()    # error, cannot use return statement #
 }
 ```
 

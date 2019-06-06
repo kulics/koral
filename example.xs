@@ -8,12 +8,12 @@
     Xs\Example.Example Static
 }
 
-## 
+#
     main function 
-##
+#
 Main() ~> () {
     Prt("main function")
-    # run test
+    # run test #
     Test type()
     Test operator()
     Test string()
@@ -74,21 +74,21 @@ Test tuple(i: Int) -> (v: Str) {
 }
 
 Test type() -> () {
-    I1: I8 = 1              # sbyte
-    I2: I16 = 1             # short
-    I3: I32 = 1             # int
-    I4: I64 = 1             # long
-    U1: U8 = 1              # byte
-    U2: U16 = 1             # ushort
-    U3: U32 = 1             # uint
-    U4: U64 = 1             # ulong
-    F1: F32 = 1             # float
-    F2: F64 = 1             # double
-    Char1: Chr = 'a'        # char
-    String1: Str = "123"    # string
-    Bool1: Bool = False     # bool
-    Int1: Int = 1           # int
-    Num1: Num = 1.0         # double
+    I1: I8 = 1              # sbyte #
+    I2: I16 = 1             # short #
+    I3: I32 = 1             # int #
+    I4: I64 = 1             # long #
+    U1: U8 = 1              # byte #
+    U2: U16 = 1             # ushort #
+    U3: U32 = 1             # uint #
+    U4: U64 = 1             # ulong #
+    F1: F32 = 1             # float #
+    F2: F64 = 1             # double #
+    Char1: Chr = 'a'        # char #
+    String1: Str = "123"    # string #
+    Bool1: Bool = False     # bool #
+    Int1: Int = 1           # int #
+    Num1: Num = 1.0         # double #
 }
 
 Test operator() -> () {
@@ -287,7 +287,7 @@ Test func(s: Str = "test") -> (out1: Str, out2: Int) {
     s = s + "test"
     I1 := 1+1*3*9/8
     I2 := I1 + 5 + (I1 + 8)
-    # func in func
+    # func in func #
     In func() -> () {
         <- ()
     }
@@ -388,7 +388,7 @@ App -> {
         }
         Item3 := []Int{1,2,3,4,5}
         Item4 := [Str]Int{["1"]1,["2"]2,["3"]3}
-        Item5 := <Package Child>(1,2) # New
+        Item5 := <Package Child>(1,2) # New #
     }
 
     test func template<T1, T2>(data1: T1, data2: T2) -> (data: App) {

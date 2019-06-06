@@ -17,7 +17,7 @@ In this way, we don't need to care about their values when we use them, and we c
 
 E.g:
 ```
-C := Random color()     # Get a random color
+C := Random color()     # Get a random color #
 C ? Color.Red {
      ......
 } Color.Green {
@@ -34,10 +34,10 @@ If necessary, we can also assign a value to a single identifier. If not specifie
 E.g:
 ```
 Number -> U8[
-    A = 1   # 1
-    B       # 2
-    C = 1   # 1
-    D       # 2
+    A = 1   # 1 #
+    B       # 2 #
+    C = 1   # 1 #
+    D       # 2 #
 ]
 ```
 

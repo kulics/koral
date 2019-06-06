@@ -6,7 +6,7 @@
 例如：
 ```
 ? True {
-    Prt("True")  # 真
+    Prt("True")  # 真 #
 }
 ```
 ## 布尔判断
@@ -18,9 +18,9 @@
 ```
 B := False
 ? B {
-    ...... # 因为 B 为 False，所以永不会进入这个分支 
+    ...... # 因为 B 为 False，所以永不会进入这个分支 # 
 } _ {
-    ...... # 处理 False
+    ...... # 处理 False #
 }
 ```
 
@@ -77,11 +77,11 @@ I ? 1 {
 
 例如：
 ```
-X ? :Int {          # 是否 Int
+X ? :Int {          # 是否 Int #
     Prt("Int")
-} content:Str {     # 是否 Str
+} content:Str {     # 是否 Str #
     Prt(content)
-} () {              # 是否为 Nil
+} () {              # 是否为 Nil #
     Prt("Nil")
 }
 ```
@@ -90,8 +90,8 @@ X ? :Int {          # 是否 Int
 
 例如：
 ```
-?(expr)    # 获取表达式类型值
-?(:type)   # 通过类型直接获取类型值
+?(expr)    # 获取表达式类型值 #
+?(:type)   # 通过类型直接获取类型值 #
 ```
 ### [下一章](loop.md)
 

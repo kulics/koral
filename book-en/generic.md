@@ -12,14 +12,14 @@ This is a simplified implementation.
 E.g:
 ```
 List<T> -> {
-    items := Storage{T}    # create storage
+    items := Storage{T}    # create storage #
     length := 0
 
-    get(index: Int) -> (item: T) { # get some T item
+    get(index: Int) -> (item: T) { # get some T item #
         <- ( items.get( index ) )
     }
   
-    add(item: T) -> () {   # add a T item to List
+    add(item: T) -> () {   # add a T item to List #
         items.insert(length, item)
         length += 1
     }
@@ -47,7 +47,7 @@ This way we can use it in generics.
 E.g:
 ```
 Package<T> -> {
-    item := Def<T>()    # initialized a default value of the generic data
+    item := Def<T>()    # initialized a default value of the generic data #
 }
 ```
 So how do we use generics?
@@ -56,7 +56,7 @@ Very simple, and we can use the same statement, but called when the need to impo
 
 E.g:
 ```
-List number := List<Int>{}  # pass in the number type
+List number := List<Int>{}  # pass in the number type #
 ```
 So we have an List of number types, is like this:
 ```

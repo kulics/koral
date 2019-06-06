@@ -26,7 +26,7 @@ Async() ~> (out: Int) {
 
 例如：
 ```
-Result := Async()  # result 是一个 Task 数据
+Result := Async()  # result 是一个 Task 数据 #
 ```
 接下来我们再看看如何让它异步等待执行。
 ## 异步等待
@@ -43,14 +43,14 @@ Result := <~ Async()
 
 例如：
 ```
-# 正确
+# 正确 #
 Async() ~> (out: Int) {
-    <~ Delay(5000)    # 等待一段时间
+    <~ Delay(5000)    # 等待一段时间 #
     <- (12)
 }
-# 错误
+# 错误 #
 Async() -> (out: Int) {
-    <~ Delay(5000)    # 不能被声明
+    <~ Delay(5000)    # 不能被声明 #
     <- (12)
 }
 ```
@@ -62,12 +62,12 @@ Async() -> (out: Int) {
 例如：
 ```
 Async() ~> () {
-    <~ Delay(5000)    # 等待一段时间
+    <~ Delay(5000)    # 等待一段时间 #
 }
 
-<~ Async()     # 正确
+<~ Async()     # 正确 #
 
-Task := Async()    # 正确，获取了 Task
+Task := Async()    # 正确，获取了 Task #
 ```
 ## Lambda
 对于lambda，我们也可以使用异步，同样使用 `~>` 即可。

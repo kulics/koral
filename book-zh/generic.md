@@ -13,14 +13,14 @@
 例如：
 ```
 List<T> -> {
-    items := Storage{T}    # 创建存储
+    items := Storage{T}    # 创建存储 #
     length := 0
 
-    get(index: Int) -> (item: T) { # 获取某个泛型数据
+    get(index: Int) -> (item: T) { # 获取某个泛型数据 #
         <- ( items.get( index ) )
     }
 
-    add(item: T) -> () {   # 将一个泛型数据添加进列表
+    add(item: T) -> () {   # 将一个泛型数据添加进列表 #
         items.insert(length, item)
         length += 1
     }
@@ -48,7 +48,7 @@ Z := Def<()->()>()
 例如：
 ```
 Package<T> -> {
-    item := Def<T>()    # 初始化了一个缺省值的泛型数据
+    item := Def<T>()    # 初始化了一个缺省值的泛型数据 #
 }
 ```
 那么我们如何使用泛型呢？
@@ -57,7 +57,7 @@ Package<T> -> {
 
 例如：
 ```
-List number := List<Int>{}      # 传入 integer 类型
+List number := List<Int>{}      # 传入 integer 类型 #
 ```
 这样我们便拥有了一个整数类型的列表，是不是很像这个：
 ```

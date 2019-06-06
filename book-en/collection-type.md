@@ -20,7 +20,7 @@ The List type is represented by `[]type`.
 
 For example we need a string list:
 ```
-List := []Str{}         # empty List
+List := []Str{}         # empty List #
 ```
 #### Array
 If we need to use the native Array type, we can use `[:]type` to represent it.
@@ -48,10 +48,10 @@ List[0] = 5
 Note that we can only access the index of the existing data, if not exist, there will be an error.
 ### Common operation
 ```
-List += 1                   # added to the end
-List.insert(2, 3)           # insert element 3 to index 2
-List -= 1                   # delete the specified location element
-Length := list.len          # length
+List += 1                   # added to the end #
+List.insert(2, 3)           # insert element 3 to index 2 #
+List -= 1                   # delete the specified location element #
+Length := list.len          # length #
 ```
 ## Dictionary
 A dictionary is a collection of disparate data of the same type. Each value of a dictionary is associated with a unique key, which is used as an identifier for this value data in the dictionary.
@@ -74,7 +74,7 @@ The dictionary type is represented by `[type]type`.
 
 E.g:
 ```
-DictionaryNumNum := [Int]Int{} # Empty
+DictionaryNumNum := [Int]Int{} # Empty #
 ```
 ### Visit
 Like an List, we can also use indexes to access data directly.
@@ -93,9 +93,9 @@ Dictionary["b"] = 5
 The difference is that with the List, if the assignment is a non-existent index, it will not be wrong, the value will be given directly to the new key.
 ### Common operation
 ```
-Dictionary += {["d"]11}         # add index by method
-Dictionary -= "c"               # delete the specified index element
-Length := Dictionary.len        # length
+Dictionary += {["d"]11}         # add index by method #
+Dictionary -= "c"               # delete the specified index element #
+Length := Dictionary.len        # length #
 ```
 
 ## Set
@@ -116,14 +116,14 @@ The representation of the set type is `[type]`.
 
 E.g:
 ```
-Numbers := [Int]{} # empty
+Numbers := [Int]{} # empty #
 ```
 ### Common operations
 ```
-Numbers.add(1)                  # Add element
-Has := Numbers.contains(1)      # Determine whether to include
-Success = Numbers.remove(1)     # Delete element
-Length := Numbers.len           # Length
+Numbers.add(1)                  # Add element #
+Has := Numbers.contains(1)      # Determine whether to include #
+Success = Numbers.remove(1)     # Delete element #
+Length := Numbers.len           # Length #
 ```
 
 ### [Next Chapter](judgment.md)

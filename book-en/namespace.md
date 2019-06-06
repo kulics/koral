@@ -25,7 +25,7 @@ E.g:
 }
 
 Main() -> () {
-    # print something
+    # print something #
     Prt( Get something() )
 }
 ```

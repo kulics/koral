@@ -17,8 +17,8 @@ If we want to set a get operation, we can add `-> ctrl{} ctrl{}` later to define
 
 E.g:
 ```
-Number(): Int -> get {  # means get, equivalent to getter in other languages
-    <- (7)              # only returns 7
+Number(): Int -> get {  # means get, equivalent to getter in other languages #
+    <- (7)              # only returns 7 #
 }
 ```
 In this way, Number has a special method to get the value. When calling Number, it will execute the internal logic.
@@ -29,8 +29,8 @@ With the above example, we naturally can think of how to deal with set operation
 
 E.g:
 ```
-Number(): Int -> set {  # means set, equivalent to setter in other languages
-    # ? ? ? Who should give the value? ? ?
+Number(): Int -> set {  # means set, equivalent to setter in other languages #
+    # ? ? ? Who should give the value? ? ? #
 }
 ```
 Yes, this raises the question that control types are used to control operations and cannot be used to store data when implementing operations.
@@ -41,7 +41,7 @@ E.g:
 _Number := 0
 
 Number(): Int -> set {
-    _Number = value  # value represents the value of the input
+    _Number = value  # value represents the value of the input #
 }
 ```
 
@@ -52,7 +52,7 @@ _Number := 0
 Number() :Int -> get {
     <- (_Number)
 } set {
-    _Number = value  # value represents the value of the input
+    _Number = value  # value represents the value of the input #
 }
 ```
 

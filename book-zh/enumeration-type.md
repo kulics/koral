@@ -17,7 +17,7 @@ Color -> U8[
 
 例如：
 ```
-C := Random color()     # 获取一个随机颜色
+C := Random color()     # 获取一个随机颜色 #
 C ? Color.Red {
      ......
 } Color.Green {
@@ -34,10 +34,10 @@ C ? Color.Red {
 例如:
 ```
 Number -> U8[
-    A = 1   # 1
-    B       # 2
-    C = 1   # 1
-    D       # 2
+    A = 1   # 1 #
+    B       # 2 #
+    C = 1   # 1 #
+    D       # 2 #
 ]
 ```
 

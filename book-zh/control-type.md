@@ -17,8 +17,8 @@ Number(): Int
 
 例如：
 ```
-Number(): Int -> get {  # 表示获取，相当于其它语言中的getter
-    <- (7)              # 只返回 7
+Number(): Int -> get {  # 表示获取，相当于其它语言中的getter #
+    <- (7)              # 只返回 7 #
 }
 ```
 这样Number就具有了一个特殊的获取值方法，在调用Number时会执行内部的逻辑。
@@ -29,8 +29,8 @@ Number(): Int -> get {  # 表示获取，相当于其它语言中的getter
 
 例如：
 ```
-Number(): Int -> set {  # 表示设置，相当于其它语言中的setter
-    # ？？？该把值给谁？？？
+Number(): Int -> set {  # 表示设置，相当于其它语言中的setter #
+    # ？？？该把值给谁？？？ #
 }
 ```
 是的，这里引出了一个问题，控制类型是用来控制操作的，实现操作的时候无法使用自身来存储数据。  
@@ -41,7 +41,7 @@ Number(): Int -> set {  # 表示设置，相当于其它语言中的setter
 _Number := 0
 
 Number(): Int -> set {
-    _number = value     # value代表输入的值
+    _number = value     # value代表输入的值 #
 }
 ```
 
@@ -51,7 +51,7 @@ _Number := 0
 Number(): Int -> get {
     <- (_Number)
 } set {
-    _Number = value # value代表输入的值
+    _Number = value     # value代表输入的值 #
 }
 ```
 

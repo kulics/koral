@@ -24,7 +24,7 @@ Get something() -> (content: Str) {
 }
 
 Main() -> () {
-    # 打印 something
+    # 打印 something #
     Prt( Get something() )
 }
 ```
@@ -36,7 +36,7 @@ Main() -> () {
 \Demo <- {}
 
 Main() -> () {
-    # 直接使用即可
+    # 直接使用即可 #
     Prt( \Name\Space.Get something() )    
 }
 ```

@@ -6,7 +6,7 @@ We only need to use the `? value {}` to declare the judgment statement, accordin
 E.g:
 ```
 ? True {
-    Prt("True")  # true
+    Prt("True")  # true #
 }
 ```
 # Boolean Judgment
@@ -18,9 +18,9 @@ E.g:
 ```
 B := False
 ? B {
-    ...... # since B is False, it will never enter this branch
+    ...... # since B is False, it will never enter this branch #
 } _ {
-    ...... # handle False
+    ...... # handle False #
 }
 ```
 
@@ -77,11 +77,11 @@ You can use the `value ? id:type{}` syntax to match types, `id` can be omitted.
 
 E.g:
 ```
-X ? :Int {       # When Int
+X ? :Int {       # When Int #
      Prt("Int")
-} content:Str {     # when Str
+} content:Str {     # when Str #
      Prt(content)
-} () {             # When it is Nil
+} () {             # When it is Nil #
      Prt("Nil")
 }
 ```
@@ -90,8 +90,8 @@ If we need to explicitly get the type value, we can use the `?(id)` or `?(:type)
 
 E.g:
 ```
-?(expr)    # Get the expression type value
-?(:type)   # Get the type value directly by type
+?(expr)    # Get the expression type value #
+?(:type)   # Get the type value directly by type #
 ```
 ### [Next Chapter](loop.md)
 
