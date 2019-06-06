@@ -14,7 +14,7 @@ XsLangVisitor -> {
         id := Visit(context.id()):Result
         obj := ""
         obj += ""id.permission" partial class "id.text""
-        # 泛型
+        # 泛型 #
         templateContract := ""
         ? context.templateDefine() >< () {
             template := Visit(context.templateDefine()):TemplateItem
@@ -40,7 +40,7 @@ XsLangVisitor -> {
             extend = Visit(context.typeType()):Str
         }
 
-        # 处理构造函数
+        # 处理构造函数 #
         context.packageNewStatement() @ item {
             Init += "public " id.text " " Visit(item):Str ""
         }
@@ -57,7 +57,7 @@ XsLangVisitor -> {
             header += Visit(context.annotationSupport())
         }
         header += ""id.permission" partial class "id.text""
-        # 泛型
+        # 泛型 #
         template := ""
         templateContract := ""
         ? context.templateDefine() >< () {
@@ -127,7 +127,7 @@ XsLangVisitor -> {
 
     VisitPackageControlStatement(context: PackageControlStatementContext) -> (v: {}) {
         r1 := Visit(context.id()):Result
-        isMutable := True # r1.isVirtual
+        isMutable := True # r1.isVirtual #
         isVirtual := ""
         ? r1.isVirtual {
             isVirtual = " virtual "
@@ -211,7 +211,7 @@ XsLangVisitor -> {
         ? context.annotationSupport() >< () {
             obj += Visit(context.annotationSupport())
         }
-        # 异步
+        # 异步 #
         ? context.t.Type == Right Flow {
             pout := Visit(context.parameterClauseOut()):Str
             ? pout >< "void" {
@@ -224,7 +224,7 @@ XsLangVisitor -> {
             obj += ""id.permission" "isVirtual" "Visit(context.parameterClauseOut())" "id.text""
         }
 
-        # 泛型
+        # 泛型 #
         templateContract := ""
         ? context.templateDefine() >< () {
             template := Visit(context.templateDefine()):TemplateItem
@@ -248,7 +248,7 @@ XsLangVisitor -> {
         } _ {
             obj += ""id.permission" "
         }
-        # 异步
+        # 异步 #
         ? context.t.Type == Right Flow {
             pout := Visit(context.parameterClauseOut()):Str
             ? pout >< "void" {
@@ -277,7 +277,7 @@ XsLangVisitor -> {
 
     VisitPackageNewStatement(context: PackageNewStatementContext) -> (v: {}) {
         text := ""
-        # 获取构造数据
+        # 获取构造数据 #
         text = Visit(context.parameterClausePackage()):Str
         ? context.expressionList() >< () {
             text += ":base(" Visit(context.expressionList()):Result.text ")"
@@ -290,7 +290,7 @@ XsLangVisitor -> {
         obj := ""
 
         ptcl := Visit(context.nameSpaceItem()):Str
-        # 泛型
+        # 泛型 #
         ? context.templateCall() >< () {
             ptcl += Visit(context.templateCall())
         }
@@ -380,7 +380,7 @@ XsLangVisitor -> {
         ? context.annotationSupport() >< () {
             obj += Visit(context.annotationSupport())
         }
-        # 异步
+        # 异步 #
         ? context.t.Type == Right Flow {
             pout := Visit(context.parameterClauseOut()):Str
             ? pout >< "void" {
@@ -393,7 +393,7 @@ XsLangVisitor -> {
             obj += id.permission + isVirtual + " " + Visit(context.parameterClauseOut()) + " " + id.text
         }
 
-        # 泛型
+        # 泛型 #
         templateContract := ""
         ? context.templateDefine() >< () {
             template := Visit(context.templateDefine()):TemplateItem
@@ -419,7 +419,7 @@ XsLangVisitor -> {
             interfaceProtocol += r.text
         }
         obj += "public partial interface " + ptclName
-        # 泛型
+        # 泛型 #
         templateContract := ""
         ? context.templateDefine() >< () {
             template := Visit(context.templateDefine()):TemplateItem
@@ -472,7 +472,7 @@ XsLangVisitor -> {
             r.text += Visit(context.annotationSupport())
         }
         r.permission = "public"
-        # 异步
+        # 异步 #
         ? context.t.Type == Right Flow {
             pout := Visit(context.parameterClauseOut()):Str
             ? pout >< "void" {
@@ -484,7 +484,7 @@ XsLangVisitor -> {
         } _ {
             r.text += Visit(context.parameterClauseOut()) + " " + id.text
         }
-        # 泛型
+        # 泛型 #
         templateContract := ""
         ? context.templateDefine() >< () {
             template := Visit(context.templateDefine()):TemplateItem

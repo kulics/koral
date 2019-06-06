@@ -40,7 +40,7 @@ XsLangVisitor -> {
     VisitFunctionStatement(context: FunctionStatementContext) -> (v: {}) {
         id := Visit(context.id()):Result
         obj := ""
-        # 异步
+        # 异步 #
         ? context.t.Type == Right Flow {
             pout := Visit(context.parameterClauseOut()):Str
             ? pout >< "void" {
@@ -52,7 +52,7 @@ XsLangVisitor -> {
         } _ {
             obj += ""Visit(context.parameterClauseOut())" "id.text""
         }
-        # 泛型
+        # 泛型 #
         templateContract := ""
         ? context.templateDefine() >< () {
             template := Visit(context.templateDefine()):TemplateItem
