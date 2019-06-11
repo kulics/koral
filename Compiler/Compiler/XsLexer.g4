@@ -101,8 +101,8 @@ UndefinedLiteral: 'Undefined';
 
 NumberLiteral: DIGIT+ ; // 整数
 fragment DIGIT: [0-9] ;   // 单个数字
-TextLiteral: '"' (~["\\\r\n]|'\\' [btnfr"\'\\])* '"'; // 文本
-CharLiteral: '\'' (~[\'\\\r\n]|'\\' [btnfr"\'\\]) '\''; // 单字符
+TextLiteral: '"' ('\\' [btnfr"\\] | .)*? '"'; // 文本
+CharLiteral: '\'' ('\\' [btnfr\'\\] | .)*? '\''; // 单字符
 IDPrivate: '_' [a-zA-Z0-9_]+; // 私有标识符
 IDPublic: [a-zA-Z] [a-zA-Z0-9_]*; // 公有标识符
 Discard: '_'; // 匿名变量

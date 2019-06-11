@@ -4,7 +4,7 @@ options { tokenVocab=XsLexer; }
 
 program: statement+;
 
-statement: (annotationSupport)?  
+statement: (New_Line)* (annotationSupport)?  
 exportStatement (New_Line)* namespaceSupportStatement*;
 
 // 导出命名空间
