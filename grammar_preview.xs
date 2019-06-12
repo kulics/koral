@@ -355,3 +355,35 @@ Protocol -> {
 Use protocol(it: Protocol) -> () {
     it.func in class()
 }
+
+# others #
+
+do something :: {
+    print: "hello, world".
+}
+do something.
+
+do something with params:a\Int,b\Str: {
+
+}
+do something with params:128, "text".
+
+get some value ::v\Int {
+    :1
+}
+value = get some value.
+
+swap numbers:a\Int,b\Int :a\Int,b\Int {
+    :b, a
+}
+a = 1
+b = 2
+a, b = swap numbers:b, a.
+
+lambda:a\:: : {
+    a.
+}
+
+lambda:{::
+    print: "lambda".
+}.
