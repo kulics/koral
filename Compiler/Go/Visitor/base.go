@@ -8,7 +8,40 @@ import (
 )
 
 const (
-	wrap = "\n"
+	Wrap      = "\r\n"
+	Terminate = ";"
+
+	Any = "interface{}"
+	Int = "int"
+	Num = "double"
+	I8  = "sbyte"
+	I16 = "short"
+	I32 = "int"
+	I64 = "long"
+
+	U8  = "byte"
+	U16 = "ushort"
+	U32 = "uint"
+	U64 = "ulong"
+
+	F32 = "float"
+	F64 = "double"
+
+	Bool = "bool"
+	T    = "true"
+	F    = "false"
+
+	Chr = "char"
+	Str = "string"
+	Lst = "Lst"
+	Set = "Set"
+	Dic = "Dic"
+
+	BlockLeft  = "{"
+	BlockRight = "}"
+
+	Func = "func "
+	Var  = "var "
 )
 
 type errorListener struct {
