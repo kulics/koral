@@ -46,7 +46,6 @@ func Compiled(dir string) error {
 
 			Visitor := visitor.XsVisitor{}
 			Result := Visitor.Visit(AST)
-			fmt.Println(Result)
 			if err := ioutil.WriteFile(strings.Replace(path, ".xs", ".go", 1), []byte(Result.(string)), 0644); err != nil {
 				return err
 			}
