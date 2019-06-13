@@ -20,6 +20,7 @@ namespaceVariableStatement
 |namespaceConstantStatement
 |packageStatement
 |protocolStatement
+|packageExtensionStatement
 |enumStatement
 |New_Line
 ;
@@ -71,7 +72,7 @@ packageControlSubStatement: id left_brace (functionSupportStatement)+ right_brac
 packageOverrideStatement: left_brace (packageOverrideFunctionStatement|New_Line)* right_brace;
 // 包扩展
 packageExtensionStatement: (annotationSupport)? parameterClauseIn id (templateDefine)? parameterClauseIn t=(Right_Arrow|Right_Flow) New_Line*
-parameterClauseOut left_brace (packageFunctionStatement)* right_brace end;
+parameterClauseOut left_brace (functionSupportStatement)* right_brace end;
 // 协议
 protocolStatement: (annotationSupport)? id (templateDefine)? Left_Arrow left_brace (protocolSupportStatement)* right_brace end;
 // 协议支持的语句
