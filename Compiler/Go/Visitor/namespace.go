@@ -51,6 +51,19 @@ func (sf *XsVisitor) VisitNameSpace(ctx *parser.NameSpaceContext) interface{} {
 	return obj
 }
 
+func (sf *XsVisitor) VisitNameSpaceItem(ctx *parser.NameSpaceItemContext) interface{} {
+	obj := ""
+	for i := 0; i < len(ctx.AllId()); i++ {
+		id := sf.Visit(ctx.Id(i)).(Result)
+		if i == 0 {
+			obj += "" + id.Text
+		} else {
+			obj += "." + id.Text
+		}
+	}
+	return obj
+}
+
 func (sf *XsVisitor) VisitNamespaceSupportStatement(ctx *parser.NamespaceSupportStatementContext) interface{} {
 	return sf.Visit(ctx.GetChild(0).(antlr.ParseTree))
 }

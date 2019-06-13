@@ -59,6 +59,8 @@ func (sf *XsVisitor) VisitCallPkg(ctx *parser.CallPkgContext) interface{} {
 		r.Text += sf.Visit(ctx.SetAssign()).(string)
 	} else if ctx.DictionaryAssign() != nil {
 		r.Text += sf.Visit(ctx.DictionaryAssign()).(string)
+	} else {
+		r.Text += "{}"
 	}
 	return r
 }
