@@ -40,3 +40,20 @@ func (sf *XsVisitor) VisitMul(ctx *parser.MulContext) interface{} {
 func (sf *XsVisitor) VisitPow(ctx *parser.PowContext) interface{} {
 	return ctx.GetOp().GetText()
 }
+
+func (sf *XsVisitor) VisitPlusMinus(ctx *parser.PlusMinusContext) interface{} {
+	r := Result{}
+	expr := sf.Visit(ctx.Expression()).(Result)
+	op := sf.Visit(ctx.Add()).(string)
+	r.Data = expr.Data
+	r.Text = op + expr.Text
+	return r
+}
+
+func (sf *XsVisitor) VisitNegate(ctx *parser.NegateContext) interface{} {
+	r := Result{}
+	expr := sf.Visit(ctx.Expression()).(Result)
+	r.Data = expr.Data
+	r.Text = "!" + expr.Text
+	return r
+}

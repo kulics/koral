@@ -208,20 +208,3 @@ func (sf *XsVisitor) VisitIntegerExpr(ctx *parser.IntegerExprContext) interface{
 	}
 	return number
 }
-
-func (sf *XsVisitor) VisitPlusMinus(ctx *parser.PlusMinusContext) interface{} {
-	r := Result{}
-	expr := sf.Visit(ctx.Expression()).(Result)
-	op := sf.Visit(ctx.Add()).(string)
-	r.Data = expr.Data
-	r.Text = op + expr.Text
-	return r
-}
-
-func (sf *XsVisitor) VisitNegate(ctx *parser.NegateContext) interface{} {
-	r := Result{}
-	expr := sf.Visit(ctx.Expression()).(Result)
-	r.Data = expr.Data
-	r.Text = "!" + expr.Text
-	return r
-}

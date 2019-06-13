@@ -13,7 +13,7 @@ func (sf *XsVisitor) VisitTypeType(ctx *parser.TypeTypeContext) interface{} {
 }
 
 func (sf *XsVisitor) VisitTypeReference(ctx *parser.TypeReferenceContext) interface{} {
-	obj := "ref "
+	obj := "*"
 	if ctx.TypeNullable() != nil {
 		obj += sf.Visit(ctx.TypeNullable()).(string)
 	} else if ctx.TypeNotNull() != nil {
