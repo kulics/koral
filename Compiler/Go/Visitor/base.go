@@ -104,14 +104,14 @@ func (sf *XsVisitor) VisitProgram(ctx *parser.ProgramContext) interface{} {
 }
 
 func (sf *XsVisitor) VisitId(ctx *parser.IdContext) interface{} {
-	r := &Result{Data: "var"}
-	first := sf.Visit(ctx.GetChild(0).(antlr.ParseTree)).(*Result)
+	r := Result{Data: "var"}
+	first := sf.Visit(ctx.GetChild(0).(antlr.ParseTree)).(Result)
 	r.Permission = first.Permission
 	r.Text = first.Text
 	r.IsVirtual = first.IsVirtual
 	if ctx.GetChildCount() >= 2 {
 		for i := 1; i < ctx.GetChildCount(); i++ {
-			other := sf.Visit(ctx.GetChild(i).(antlr.ParseTree)).(*Result)
+			other := sf.Visit(ctx.GetChild(i).(antlr.ParseTree)).(Result)
 			r.Text += "_" + other.Text
 		}
 	}
@@ -123,7 +123,7 @@ func (sf *XsVisitor) VisitId(ctx *parser.IdContext) interface{} {
 }
 
 func (sf *XsVisitor) VisitIdItem(ctx *parser.IdItemContext) interface{} {
-	r := &Result{Data: "var"}
+	r := Result{Data: "var"}
 	if ctx.TypeBasic() != nil {
 		r.Permission = "public"
 		r.Text += ctx.TypeBasic().GetText()

@@ -21,7 +21,9 @@ func (sf *XsVisitor) VisitStatement(ctx *parser.StatementContext) interface{} {
 	}
 	obj += fmt.Sprintf("package %s%s", ns.Name, Wrap)
 	for _, item := range ctx.AllNamespaceSupportStatement() {
-		obj += sf.Visit(item).(string)
+		if v, ok := sf.Visit(item).(string); ok {
+			obj += v
+		}
 	}
 	return obj
 }
@@ -39,7 +41,7 @@ func (sf *XsVisitor) VisitExportStatement(ctx *parser.ExportStatementContext) in
 func (sf *XsVisitor) VisitNameSpace(ctx *parser.NameSpaceContext) interface{} {
 	obj := ""
 	for i := 0; i < len(ctx.AllId()); i++ {
-		id := sf.Visit(ctx.Id(i)).(*Result)
+		id := sf.Visit(ctx.Id(i)).(Result)
 		if i == 0 {
 			obj += "" + id.Text
 		} else {
@@ -54,7 +56,7 @@ func (sf *XsVisitor) VisitNamespaceSupportStatement(ctx *parser.NamespaceSupport
 }
 
 func (sf *XsVisitor) VisitNamespaceFunctionStatement(ctx *parser.NamespaceFunctionStatementContext) interface{} {
-	id := sf.Visit(ctx.Id()).(*Result)
+	id := sf.Visit(ctx.Id()).(Result)
 	obj := ""
 	// if ctx.AnnotationSupport() >< () {
 	// 	obj += Visit(context.annotationSupport())
