@@ -13,25 +13,25 @@ const (
 
 	Any = "interface{}"
 	Int = "int"
-	Num = "double"
-	I8  = "sbyte"
-	I16 = "short"
-	I32 = "int"
-	I64 = "long"
+	Num = "float64"
+	I8  = "int8"
+	I16 = "int16"
+	I32 = "int32"
+	I64 = "int64"
 
-	U8  = "byte"
-	U16 = "ushort"
-	U32 = "uint"
-	U64 = "ulong"
+	U8  = "uint8"
+	U16 = "uint16"
+	U32 = "uint32"
+	U64 = "uint64"
 
-	F32 = "float"
-	F64 = "double"
+	F32 = "float32"
+	F64 = "float64"
 
 	Bool = "bool"
 	T    = "true"
 	F    = "false"
 
-	Chr = "char"
+	Chr = "rune"
 	Str = "string"
 	Lst = "Lst"
 	Set = "Set"
@@ -40,8 +40,9 @@ const (
 	BlockLeft  = "{"
 	BlockRight = "}"
 
-	Func = "func "
-	Var  = "var "
+	Func  = "func "
+	Var   = "var "
+	Const = "const "
 )
 
 type errorListener struct {

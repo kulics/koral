@@ -81,3 +81,39 @@ func (sf *XsVisitor) VisitNamespaceFunctionStatement(ctx *parser.NamespaceFuncti
 	obj += BlockRight + Wrap
 	return obj
 }
+
+func (sf *XsVisitor) VisitNamespaceConstantStatement(ctx *parser.NamespaceConstantStatementContext) interface{} {
+	id := sf.Visit(ctx.Id()).(Result)
+	expr := sf.Visit(ctx.Expression()).(Result)
+	typ := ""
+	if ctx.TypeType() != nil {
+		typ = sf.Visit(ctx.TypeType()).(string)
+	}
+
+	obj := ""
+	if ctx.AnnotationSupport() != nil {
+		obj += sf.Visit(ctx.AnnotationSupport()).(string)
+	}
+
+	obj += Const + id.Text + " " + typ + " = " + expr.Text + Wrap
+	return obj
+}
+
+func (sf *XsVisitor) VisitNamespaceVariableStatement(ctx *parser.NamespaceVariableStatementContext) interface{} {
+	r1 := sf.Visit(ctx.Id()).(Result)
+	typ := ""
+
+	if ctx.TypeType() != nil {
+		typ = sf.Visit(ctx.TypeType()).(string)
+	}
+	obj := ""
+	if ctx.AnnotationSupport() != nil {
+		obj += sf.Visit(ctx.AnnotationSupport()).(string)
+	}
+
+	obj += Var + r1.Text + " " + typ
+	if ctx.Expression() != nil {
+		obj += " = " + sf.Visit(ctx.Expression()).(Result).Text + Wrap
+	}
+	return obj
+}
