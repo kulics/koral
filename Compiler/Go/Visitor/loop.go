@@ -77,7 +77,7 @@ func (sf *XsVisitor) VisitLoopEachStatement(ctx *parser.LoopEachStatementContext
 	if len(ctx.AllId()) == 2 {
 		id = sf.Visit(ctx.Id(0)).(Result).Text + "," + sf.Visit(ctx.Id(1)).(Result).Text
 	} else if len(ctx.AllId()) == 1 {
-		id = sf.Visit(ctx.Id(0)).(Result).Text
+		id = "_," + sf.Visit(ctx.Id(0)).(Result).Text
 	}
 
 	obj += "for " + id + " := range " + target
