@@ -15,8 +15,11 @@ func (sf *XsVisitor) VisitProtocolStatement(ctx *parser.ProtocolStatementContext
 		obj += sf.Visit(ctx.AnnotationSupport()).(string)
 	}
 	for _, item := range ctx.AllProtocolSupportStatement() {
-		r := sf.Visit(item).(Result)
-		interfaceProtocol += r.Text
+		if r, ok := sf.Visit(item).(Result); ok {
+			interfaceProtocol += r.Text
+		} else {
+			interfaceProtocol += sf.Visit(item).(string)
+		}
 	}
 	obj += "type " + ptclName + " interface"
 	// 泛型

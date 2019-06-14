@@ -52,6 +52,10 @@ func (v *BaseXsParserVisitor) VisitNamespaceFunctionStatement(ctx *NamespaceFunc
 	return v.VisitChildren(ctx)
 }
 
+func (v *BaseXsParserVisitor) VisitIncludeStatement(ctx *IncludeStatementContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BaseXsParserVisitor) VisitPackageStatement(ctx *PackageStatementContext) interface{} {
 	return v.VisitChildren(ctx)
 }

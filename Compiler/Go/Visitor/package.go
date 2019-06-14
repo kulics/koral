@@ -6,6 +6,10 @@ import (
 	"github.com/antlr/antlr4/runtime/Go/antlr"
 )
 
+func (sf *XsVisitor) VisitIncludeStatement(ctx *parser.IncludeStatementContext) interface{} {
+	return sf.Visit(ctx.TypeType()).(string) + Wrap
+}
+
 func (sf *XsVisitor) VisitPackageStatement(ctx *parser.PackageStatementContext) interface{} {
 	id := sf.Visit(ctx.Id()).(Result)
 	obj := ""
