@@ -41,6 +41,9 @@ type XsParserVisitor interface {
 	// Visit a parse tree produced by XsParser#namespaceFunctionStatement.
 	VisitNamespaceFunctionStatement(ctx *NamespaceFunctionStatementContext) interface{}
 
+	// Visit a parse tree produced by XsParser#includeStatement.
+	VisitIncludeStatement(ctx *IncludeStatementContext) interface{}
+
 	// Visit a parse tree produced by XsParser#packageStatement.
 	VisitPackageStatement(ctx *PackageStatementContext) interface{}
 

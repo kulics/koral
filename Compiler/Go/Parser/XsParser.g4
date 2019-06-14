@@ -40,6 +40,8 @@ namespaceConstantStatement: (annotationSupport)? id (Colon typeType Colon|Colon_
 namespaceFunctionStatement: (annotationSupport)? id (templateDefine)? parameterClauseIn t=(Right_Arrow|Right_Flow) New_Line*
 parameterClauseOut left_brace (functionSupportStatement)* right_brace end;
 
+includeStatement: typeType end;
+
 // 定义包
 packageStatement: (annotationSupport)? id (templateDefine)? Right_Arrow left_brace (packageSupportStatement)* right_brace 
  (packageNewStatement)* (Dot_Dot_Dot typeType packageOverrideStatement)? (protocolImplementStatement)* end;
@@ -50,7 +52,8 @@ packageNewStatement: (annotationSupport)? parameterClausePackage
 parameterClausePackage: left_paren parameter? (more parameter)* right_paren;
 // 包支持的语句
 packageSupportStatement:
-packageVariableStatement
+includeStatement
+|packageVariableStatement
 |packageControlStatement
 |packageFunctionStatement
 |New_Line
@@ -77,7 +80,8 @@ parameterClauseOut left_brace (functionSupportStatement)* right_brace end;
 protocolStatement: (annotationSupport)? id (templateDefine)? Left_Arrow left_brace (protocolSupportStatement)* right_brace end;
 // 协议支持的语句
 protocolSupportStatement:
-protocolFunctionStatement
+includeStatement
+|protocolFunctionStatement
 |protocolControlStatement
 |New_Line
 ;
