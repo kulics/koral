@@ -73,7 +73,7 @@ func (sf *XsVisitor) VisitExpression(ctx *parser.ExpressionContext) interface{} 
 			if ctx.GetOp().GetTokenType() == parser.XsLexerBang {
 				r.Text = "*" + r.Text
 			} else if ctx.GetOp().GetTokenType() == parser.XsLexerQuestion {
-				r.Text += "?"
+				r.Text = "&" + r.Text
 			}
 		}
 	} else if count == 1 {
