@@ -392,10 +392,6 @@ func (v *BaseXsParserVisitor) VisitSliceEnd(ctx *SliceEndContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
-func (v *BaseXsParserVisitor) VisitNameSpace(ctx *NameSpaceContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
 func (v *BaseXsParserVisitor) VisitNameSpaceItem(ctx *NameSpaceItemContext) interface{} {
 	return v.VisitChildren(ctx)
 }
