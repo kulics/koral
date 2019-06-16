@@ -1,11 +1,11 @@
-\Xs\Example <- {
-    System
-    System\IO
-    System\Linq
-    System\ComponentModel\DataAnnotations\Schema
-    System\ComponentModel\DataAnnotations
+"Xs/Example" {
+    "System"
+    "System/IO"
+    "System/Linq"
+    "System/ComponentModel/DataAnnotations/Schema"
+    "System/ComponentModel/DataAnnotations"
 
-    Xs\Example.Example Static
+    "Xs/Example" Example Static.
 }
 
 #

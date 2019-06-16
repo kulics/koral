@@ -1,5 +1,5 @@
-\Xs <- {
-    System
+"Xs" {
+    "System"
 }
 
 Main() -> () {

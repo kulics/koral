@@ -1,14 +1,14 @@
-# Grammar Overview
+# Grammar Overview #
 
-# Name Space
-\Xs\Demo <- {
-    System
-    System\Linq
-    System\Text
-    System\Threading\Tasks
-    System\ComponentModel\DataAnnotations\Schema
-    System\ComponentModel\DataAnnotations
-    IO.File # 可以隐藏元素使用内容 #
+# Name Space #
+"Xs/Demo" {
+    "System"
+    "System/Linq"
+    "System/Text"
+    "System/Threading/Tasks"
+    "System/ComponentModel/DataAnnotations/Schema"
+    "System/ComponentModel/DataAnnotations"
+    "IO" File. # 可以隐藏元素使用内容 #
 }
 
 Main() ~> () {

@@ -8,10 +8,10 @@ statement: (New_Line)* (annotationSupport)?
 exportStatement (New_Line)* namespaceSupportStatement*;
 
 // 导出命名空间
-exportStatement: Slash nameSpace Left_Arrow left_brace (importStatement|New_Line)* right_brace end;
+exportStatement: TextLiteral left_brace (importStatement|New_Line)* right_brace end;
 
 // 导入命名空间
-importStatement: (annotationSupport)? nameSpace (call New_Line? id)? end;
+importStatement: (annotationSupport)? TextLiteral (id call?)? end;
 
 namespaceSupportStatement:
 namespaceVariableStatement
@@ -20,6 +20,7 @@ namespaceVariableStatement
 |namespaceConstantStatement
 |packageStatement
 |protocolStatement
+|packageExtensionStatement
 |enumStatement
 |New_Line
 ;
@@ -39,6 +40,8 @@ namespaceConstantStatement: (annotationSupport)? id (Colon typeType Colon|Colon_
 namespaceFunctionStatement: (annotationSupport)? id (templateDefine)? parameterClauseIn t=(Right_Arrow|Right_Flow) New_Line*
 parameterClauseOut left_brace (functionSupportStatement)* right_brace end;
 
+includeStatement: typeType end;
+
 // 定义包
 packageStatement: (annotationSupport)? id (templateDefine)? Right_Arrow left_brace (packageSupportStatement)* right_brace 
  (packageNewStatement)* (Dot_Dot_Dot typeType packageOverrideStatement)? (protocolImplementStatement)* end;
@@ -49,7 +52,8 @@ packageNewStatement: (annotationSupport)? parameterClausePackage
 parameterClausePackage: left_paren parameter? (more parameter)* right_paren;
 // 包支持的语句
 packageSupportStatement:
-packageVariableStatement
+includeStatement
+|packageVariableStatement
 |packageControlStatement
 |packageFunctionStatement
 |New_Line
@@ -71,12 +75,13 @@ packageControlSubStatement: id left_brace (functionSupportStatement)+ right_brac
 packageOverrideStatement: left_brace (packageOverrideFunctionStatement|New_Line)* right_brace;
 // 包扩展
 packageExtensionStatement: (annotationSupport)? parameterClauseIn id (templateDefine)? parameterClauseIn t=(Right_Arrow|Right_Flow) New_Line*
-parameterClauseOut left_brace (packageFunctionStatement)* right_brace end;
+parameterClauseOut left_brace (functionSupportStatement)* right_brace end;
 // 协议
 protocolStatement: (annotationSupport)? id (templateDefine)? Left_Arrow left_brace (protocolSupportStatement)* right_brace end;
 // 协议支持的语句
 protocolSupportStatement:
-protocolFunctionStatement
+includeStatement
+|protocolFunctionStatement
 |protocolControlStatement
 |New_Line
 ;
@@ -302,9 +307,7 @@ sliceFull: expression op=(Less|Less_Equal|Greater|Greater_Equal) expression;
 sliceStart: expression op=(Less|Less_Equal|Greater|Greater_Equal);
 sliceEnd: op=(Less|Less_Equal|Greater|Greater_Equal) expression; 
 
-nameSpace: id (Slash id)*;
-
-nameSpaceItem: ((Slash id)+ call New_Line?)? id;
+nameSpaceItem: ((call id)+ call New_Line?)? id;
 
 name: id (call New_Line? id)* ;
 

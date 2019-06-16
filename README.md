@@ -24,8 +24,8 @@ This is the main source code repository for Xs. It contains the compiler, and do
 ## Quick Preview
 ```
 # export namespace #
-\HelloWorld <- {
-    System # import namespace #
+"HelloWorld" {
+    "System" # import namespace #
 }
 
 # main function #

@@ -72,8 +72,11 @@ XsLangVisitor -> {
     }
 
     VisitExportStatement(context: ExportStatementContext) -> (v: {}) {
+        name := context.TextLiteral().GetText()
+        name = name.sub Str(1, name.len()-2)
+        name = name.replace("/", ".")
         obj := Namespace{
-            name = Visit(context.nameSpace()):Str
+            name = name
         }
         context.importStatement() @ item {
             obj.imports += Visit(item):Str
@@ -84,35 +87,19 @@ XsLangVisitor -> {
     VisitImportStatement(context: ImportStatementContext) -> (v: {}) {
         obj := ""
         ? context.annotationSupport() >< () {
-            obj += Visit(context.annotationSupport());
+            obj += Visit(context.annotationSupport())
         }
-        ? context.id() >< () {
-            ns := Visit(context.nameSpace()):Str
-            obj += "using static " + ns
-            ? context.id() >< () {
-                r := Visit(context.id()):Result
-
-                obj += "." + r.text
-            }
-
-            obj += Terminate
+        ns := context.TextLiteral().GetText()
+        ns = ns.sub Str(1, ns.len()-2)
+        ns = ns.replace("/", ".")
+        ? context.call() >< () {
+            obj += "using static " + ns + "." + Visit(context.id()):Result.text
+        } context.id() >< () {
+            obj += "using " + ns + "." + Visit(context.id()):Result.text
         } _ {
-            obj += "using " + Visit(context.nameSpace()) + Terminate
+            obj += "using " + ns
         }
-        obj += Wrap
-        <- (obj)
-    }
-
-    VisitNameSpace(context: NameSpaceContext) -> (v: {}) {
-        obj := ""
-        [0 < context.id().Length] @ i {
-            id := Visit(context.id(i)):Result
-            ? i == 0 {
-                obj += "" + id.text
-            } _ {
-                obj += "." + id.text
-            }
-        }
+        obj += Terminate + Wrap
         <- (obj)
     }
 
@@ -207,7 +194,7 @@ XsLangVisitor -> {
     VisitNamespaceConstantStatement(context: NamespaceConstantStatementContext) -> (v: {}) {
         id := Visit(context.id()):Result
         expr := Visit(context.expression()):Result
-        typ := "";
+        typ := ""
         ? context.typeType() >< () {
             typ = Visit(context.typeType()):Str
         } _ {
