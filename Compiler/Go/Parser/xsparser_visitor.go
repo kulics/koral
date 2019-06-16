@@ -296,9 +296,6 @@ type XsParserVisitor interface {
 	// Visit a parse tree produced by XsParser#sliceEnd.
 	VisitSliceEnd(ctx *SliceEndContext) interface{}
 
-	// Visit a parse tree produced by XsParser#nameSpace.
-	VisitNameSpace(ctx *NameSpaceContext) interface{}
-
 	// Visit a parse tree produced by XsParser#nameSpaceItem.
 	VisitNameSpaceItem(ctx *NameSpaceItemContext) interface{}
 

@@ -8,10 +8,10 @@ statement: (New_Line)* (annotationSupport)?
 exportStatement (New_Line)* namespaceSupportStatement*;
 
 // 导出命名空间
-exportStatement: Slash nameSpace Left_Arrow left_brace (importStatement|New_Line)* right_brace end;
+exportStatement: TextLiteral left_brace (importStatement|New_Line)* right_brace end;
 
 // 导入命名空间
-importStatement: (annotationSupport)? nameSpace (call New_Line? id)? end;
+importStatement: (annotationSupport)? TextLiteral (id call?)? end;
 
 namespaceSupportStatement:
 namespaceVariableStatement
@@ -307,9 +307,7 @@ sliceFull: expression op=(Less|Less_Equal|Greater|Greater_Equal) expression;
 sliceStart: expression op=(Less|Less_Equal|Greater|Greater_Equal);
 sliceEnd: op=(Less|Less_Equal|Greater|Greater_Equal) expression; 
 
-nameSpace: id (Slash id)*;
-
-nameSpaceItem: ((Slash id)+ call New_Line?)? id;
+nameSpaceItem: ((call id)+ call New_Line?)? id;
 
 name: id (call New_Line? id)* ;
 

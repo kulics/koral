@@ -15,11 +15,11 @@ type Namespace struct {
 
 func (sf *XsVisitor) VisitStatement(ctx *parser.StatementContext) interface{} {
 	obj := ""
-	ns, ok := sf.Visit(ctx.ExportStatement()).(*Namespace)
+	ns, ok := sf.Visit(ctx.ExportStatement()).(Namespace)
 	if !ok {
 		return ""
 	}
-	obj += fmt.Sprintf("package %s%s", ns.Name, Wrap)
+	obj += fmt.Sprintf("package %s%s%s", ns.Name, Wrap, ns.Imports)
 	for _, item := range ctx.AllNamespaceSupportStatement() {
 		if v, ok := sf.Visit(item).(string); ok {
 			obj += v
@@ -29,8 +29,9 @@ func (sf *XsVisitor) VisitStatement(ctx *parser.StatementContext) interface{} {
 }
 
 func (sf *XsVisitor) VisitExportStatement(ctx *parser.ExportStatementContext) interface{} {
-	obj := &Namespace{
-		Name: sf.Visit(ctx.NameSpace()).(string),
+	name := ctx.TextLiteral().GetText()
+	obj := Namespace{
+		Name: name[1 : len(name)-1],
 	}
 	for _, item := range ctx.AllImportStatement() {
 		obj.Imports += sf.Visit(item).(string)
@@ -38,16 +39,20 @@ func (sf *XsVisitor) VisitExportStatement(ctx *parser.ExportStatementContext) in
 	return obj
 }
 
-func (sf *XsVisitor) VisitNameSpace(ctx *parser.NameSpaceContext) interface{} {
-	obj := ""
-	for i := 0; i < len(ctx.AllId()); i++ {
-		id := sf.Visit(ctx.Id(i)).(Result)
-		if i == 0 {
-			obj += "" + id.Text
-		} else {
-			obj += "." + id.Text
-		}
+func (sf *XsVisitor) VisitImportStatement(ctx *parser.ImportStatementContext) interface{} {
+	obj := "import "
+	if ctx.AnnotationSupport() != nil {
+		obj += sf.Visit(ctx.AnnotationSupport()).(string)
 	}
+	ns := ctx.TextLiteral().GetText()
+	if ctx.Call() != nil {
+		obj += ". " + ns
+	} else if ctx.Id() != nil {
+		obj += sf.Visit(ctx.Id()).(Result).Text + " " + ns
+	} else {
+		obj += ns
+	}
+	obj += Wrap
 	return obj
 }
 
