@@ -307,7 +307,7 @@ sliceFull: expression op=(Less|Less_Equal|Greater|Greater_Equal) expression;
 sliceStart: expression op=(Less|Less_Equal|Greater|Greater_Equal);
 sliceEnd: op=(Less|Less_Equal|Greater|Greater_Equal) expression; 
 
-nameSpaceItem: ((call id)+ call New_Line?)? id;
+nameSpaceItem: (id call New_Line?)* id;
 
 name: id (call New_Line? id)* ;
 
