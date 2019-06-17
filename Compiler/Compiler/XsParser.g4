@@ -271,7 +271,7 @@ annotationAssign: (id Equal)? expression ;
 
 callFunc: id (templateCall)? (tuple|lambda); // 函数调用
 
-callElement : id op=Question? Left_Brack (expression | slice) Right_Brack;
+callElement : id op=Question? Left_Brack (slice | expression) Right_Brack;
 
 callPkg: typeType left_brace (pkgAssign|listAssign|setAssign|dictionaryAssign)? right_brace; // 新建包
 
