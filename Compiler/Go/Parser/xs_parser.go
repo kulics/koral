@@ -729,8 +729,8 @@ var parserATN = []uint16{
 	71, 2, 1394, 1396, 5, 204, 103, 2, 1395, 1393, 3, 2, 2, 2, 1395, 1394,
 	3, 2, 2, 2, 1396, 155, 3, 2, 2, 2, 1397, 1399, 5, 292, 147, 2, 1398, 1400,
 	7, 51, 2, 2, 1399, 1398, 3, 2, 2, 2, 1399, 1400, 3, 2, 2, 2, 1400, 1401,
-	3, 2, 2, 2, 1401, 1404, 7, 47, 2, 2, 1402, 1405, 5, 130, 66, 2, 1403, 1405,
-	5, 186, 94, 2, 1404, 1402, 3, 2, 2, 2, 1404, 1403, 3, 2, 2, 2, 1405, 1406,
+	3, 2, 2, 2, 1401, 1404, 7, 47, 2, 2, 1402, 1405, 5, 186, 94, 2, 1403, 1405,
+	5, 130, 66, 2, 1404, 1402, 3, 2, 2, 2, 1404, 1403, 3, 2, 2, 2, 1405, 1406,
 	3, 2, 2, 2, 1406, 1407, 7, 48, 2, 2, 1407, 157, 3, 2, 2, 2, 1408, 1409,
 	5, 250, 126, 2, 1409, 1414, 5, 300, 151, 2, 1410, 1415, 5, 166, 84, 2,
 	1411, 1415, 5, 170, 86, 2, 1412, 1415, 5, 172, 87, 2, 1413, 1415, 5, 174,
@@ -16780,16 +16780,6 @@ func (s *CallElementContext) Right_Brack() antlr.TerminalNode {
 	return s.GetToken(XsParserRight_Brack, 0)
 }
 
-func (s *CallElementContext) Expression() IExpressionContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IExpressionContext)(nil)).Elem(), 0)
-
-	if t == nil {
-		return nil
-	}
-
-	return t.(IExpressionContext)
-}
-
 func (s *CallElementContext) Slice() ISliceContext {
 	var t = s.GetTypedRuleContext(reflect.TypeOf((*ISliceContext)(nil)).Elem(), 0)
 
@@ -16798,6 +16788,16 @@ func (s *CallElementContext) Slice() ISliceContext {
 	}
 
 	return t.(ISliceContext)
+}
+
+func (s *CallElementContext) Expression() IExpressionContext {
+	var t = s.GetTypedRuleContext(reflect.TypeOf((*IExpressionContext)(nil)).Elem(), 0)
+
+	if t == nil {
+		return nil
+	}
+
+	return t.(IExpressionContext)
 }
 
 func (s *CallElementContext) Question() antlr.TerminalNode {
@@ -16872,13 +16872,13 @@ func (p *XsParser) CallElement() (localctx ICallElementContext) {
 	case 1:
 		{
 			p.SetState(1400)
-			p.expression(0)
+			p.Slice()
 		}
 
 	case 2:
 		{
 			p.SetState(1401)
-			p.Slice()
+			p.expression(0)
 		}
 
 	}
