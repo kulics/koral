@@ -132,8 +132,8 @@ E.g:
 
 ## Example of this chapter
 ```
-\Demo <- {
-    System
+"Demo" {
+    "System"
 }
 
 Main() -> () {

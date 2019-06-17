@@ -4,11 +4,11 @@
 ## 导出
 为了方便我们管理代码，我们必须将我们的代码写在命名空间内，我们可以通过公有属性暴露给外部使用，也可以使用私有属性只完成自己的业务。
 
-导出的名称可以循环嵌套，这样可以像文件夹一样有效分割功能，多个命名空间需要使用`\`隔开。
+导出的名称可以循环嵌套，这样可以像文件夹一样有效分割功能，多个命名空间需要使用 `/` 隔开。
 
 例如：
 ```
-\Name\Space <- {}
+"Name/Space" {}
 
 Get something() -> (content: Str) {
     <- ("something")
@@ -19,25 +19,13 @@ Get something() -> (content: Str) {
 
 例如：
 ```
-\Run <- { 
-    Name\Space 
+"Run" { 
+    "Name/Space" 
 }
 
 Main() -> () {
     # 打印 something #
     Prt( Get something() )
-}
-```
-## 临时导入
-我们也可以直接使用命名空间调用功能而不需要导入。
-
-例如：
-```
-\Demo <- {}
-
-Main() -> () {
-    # 直接使用即可 #
-    Prt( \Name\Space.Get something() )    
 }
 ```
 

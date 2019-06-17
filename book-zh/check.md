@@ -98,8 +98,8 @@ File resource("/test.xs") ! Res
 
 ## 本章示例
 ```
-\Demo <- {
-    System
+"Demo" {
+    "System"
 }
 
 Main() -> () {

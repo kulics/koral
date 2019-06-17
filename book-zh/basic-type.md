@@ -132,8 +132,8 @@ A: {} = 1  # 任意类型 #
 
 ## 本章示例
 ```
-\Demo <- {
-    System
+"Demo" {
+    "System"
 }
 
 Main() -> () {

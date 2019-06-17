@@ -130,8 +130,8 @@ Length := Numbers.len           # Length #
 
 ## Example of this chapter
 ```
-\Demo <- {
-    System
+"Demo" {
+    "System"
 }
 
 Main() -> () {

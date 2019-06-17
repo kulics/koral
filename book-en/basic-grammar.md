@@ -18,23 +18,22 @@ StatementContent
 ## Export Namespace
 All content in this language can only be defined in the namespace so that content can be efficiently divided into distinct blocks for management. You can define it freely in a separate namespace without undue restrictions on naming.
 
-We can use the `\id <- {}` statement to define the namespace of the current file.
+We can use the `"id" {}` statement to define the namespace of the current file.
 
 E.g:
 ```
-\Demo <- {}
+"Demo" {}
 ```
 The meaning of this statement is to mark the content tag in the current code file as `Demo`, so that the content naming inside is limited to the area, and it is not necessary to consider naming conflicts with the outside of the area.
 
 At the same time the external area can import `Demo` to use the contents of which, we will then understand how to import.
 ## Import Namespace
-We can use the `id` statement in the `{}` of the export statement to import other namespaces, libraries, and frameworks into a namespace.
+We can use the `"id"` statement in the `{}` of the export statement to import other namespaces, libraries, and frameworks into a namespace.
 
 E.g:
 ```
-\Demo <- {
-    System
-    Library
+"Demo" {
+    "System"
 }
 ```
 This imports the `System` libraries into the `Demo` namespace, and then you can use them in the program.
@@ -49,8 +48,8 @@ Depending on the target platform, the main entry may be declared differently, an
 
 E.g:
 ```
-\Demo <- {
-    System
+"Demo" {
+    "System"
 }
 
 Main() -> () {
@@ -167,8 +166,8 @@ a.b(x, y).c( () -> (Int) {
 
 ## Example of this chapter
 ```
-\Demo <- {
-    System
+"Demo" {
+    "System"
 }
 
 Main() -> () {
