@@ -136,7 +136,7 @@ func (sf *XsVisitor) VisitDictionaryElement(ctx *parser.DictionaryElementContext
 	r := DicEle{
 		Key:   r1.Data.(string),
 		Value: r2.Data.(string),
-		Text:  "{" + r1.Text + "," + r2.Text + "}",
+		Text:  r1.Text + ":" + r2.Text,
 	}
 	return r
 }
