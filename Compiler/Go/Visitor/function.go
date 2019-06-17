@@ -40,6 +40,35 @@ func (sf *XsVisitor) ProcessFunctionSupport(items []parser.IFunctionSupportState
 	return obj
 }
 
+func (sf *XsVisitor) VisitFunctionStatement(ctx *parser.FunctionStatementContext) interface{} {
+	id := sf.Visit(ctx.Id()).(Result)
+	obj := ""
+	// 异步
+	// ? context.t.Type == Right Flow {
+	// 	pout := Visit(context.parameterClauseOut()):Str
+	// 	? pout >< "void" {
+	// 		pout = ""Task"<"pout">"
+	// 	} _ {
+	// 		pout = Task
+	// 	}
+	// 	obj += " async "pout" "id.text""
+	// } _ {
+	// 	obj += ""Visit(context.parameterClauseOut())" "id.text""
+	// }
+	// # 泛型 #
+	templateContract := ""
+	// ? context.templateDefine() >< () {
+	// 	template := Visit(context.templateDefine()):TemplateItem
+	// 	obj += template.Template
+	// 	templateContract = template.Contract
+	// }
+	obj += id.Text + ":=" + Func + sf.Visit(ctx.ParameterClauseIn()).(string) + templateContract +
+		sf.Visit(ctx.ParameterClauseOut()).(string) + BlockLeft + Wrap
+	obj += sf.ProcessFunctionSupport(ctx.AllFunctionSupportStatement())
+	obj += BlockRight + Wrap
+	return obj
+}
+
 func (sf *XsVisitor) VisitFunctionSupportStatement(ctx *parser.FunctionSupportStatementContext) interface{} {
 	return sf.Visit(ctx.GetChild(0).(antlr.ParseTree))
 }

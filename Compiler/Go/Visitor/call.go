@@ -22,7 +22,7 @@ func (sf *XsVisitor) VisitCallExpression(ctx *parser.CallExpressionContext) inte
 
 func (sf *XsVisitor) VisitCallElement(ctx *parser.CallElementContext) interface{} {
 	id := sf.Visit(ctx.Id()).(Result)
-	if ctx.GetOp().GetTokenType() == parser.XsLexerQuestion {
+	if ctx.GetOp() != nil && ctx.GetOp().GetTokenType() == parser.XsLexerQuestion {
 		id.Text += "?"
 	}
 	if ctx.Expression() == nil {
