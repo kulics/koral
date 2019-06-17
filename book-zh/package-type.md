@@ -242,8 +242,8 @@ Child -> {
 
 ## 本章示例
 ```
-\Demo <- {
-    System
+"Demo" {
+    "System"
 }
 
 Main() -> () {

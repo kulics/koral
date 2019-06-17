@@ -97,8 +97,8 @@ X ? :Int {          # 是否 Int #
 
 ## 本章示例
 ```
-\Demo <- {
-    System
+"Demo" {
+    "System"
 }
 
 Main() -> () {

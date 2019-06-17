@@ -185,8 +185,8 @@ Each 1 to 10( (item: Int) -> () {
 
 ## 本章示例
 ```
-\Demo <- {
-    System
+"Demo" {
+    "System"
 }
 
 Main() -> () {

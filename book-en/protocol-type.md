@@ -135,8 +135,8 @@ Func(hw: Homework) -> () {
 
 ## Example of this chapter
 ```
-\Demo <- {
-    System
+"Demo" {
+    "System"
 }
 
 Main() -> () {

@@ -75,8 +75,8 @@ Most of the time, we can use only simple definitions to complete the task, becau
 
 ## Example of this chapter
 ```
-\Demo <- {
-    System
+"Demo" {
+    "System"
 }
 
 Main() -> () {
