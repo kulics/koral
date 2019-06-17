@@ -240,6 +240,7 @@ linq // 联合查询
 | negate // 取反
 | expression op=Bang // 引用判断
 | expression op=Question // 可空判断
+| expression op=Left_Flow // 异步执行
 | expression typeConversion // 类型转换
 | expression call callExpression // 链式调用
 | expression judgeType typeType // 类型判断表达式
