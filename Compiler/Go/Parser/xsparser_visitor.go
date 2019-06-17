@@ -23,6 +23,12 @@ type XsParserVisitor interface {
 	// Visit a parse tree produced by XsParser#namespaceSupportStatement.
 	VisitNamespaceSupportStatement(ctx *NamespaceSupportStatementContext) interface{}
 
+	// Visit a parse tree produced by XsParser#typeAliasStatement.
+	VisitTypeAliasStatement(ctx *TypeAliasStatementContext) interface{}
+
+	// Visit a parse tree produced by XsParser#typeRedefineStatement.
+	VisitTypeRedefineStatement(ctx *TypeRedefineStatementContext) interface{}
+
 	// Visit a parse tree produced by XsParser#enumStatement.
 	VisitEnumStatement(ctx *EnumStatementContext) interface{}
 

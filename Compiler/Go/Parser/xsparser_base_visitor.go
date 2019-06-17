@@ -28,6 +28,14 @@ func (v *BaseXsParserVisitor) VisitNamespaceSupportStatement(ctx *NamespaceSuppo
 	return v.VisitChildren(ctx)
 }
 
+func (v *BaseXsParserVisitor) VisitTypeAliasStatement(ctx *TypeAliasStatementContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseXsParserVisitor) VisitTypeRedefineStatement(ctx *TypeRedefineStatementContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BaseXsParserVisitor) VisitEnumStatement(ctx *EnumStatementContext) interface{} {
 	return v.VisitChildren(ctx)
 }
