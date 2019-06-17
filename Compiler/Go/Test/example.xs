@@ -4,6 +4,7 @@
 }
 
 main() -> () {
+    test go()
     test(1, "2")
     test judge()
     test loop()
@@ -106,5 +107,12 @@ test protocol(w: worker) -> (i:{}) {
 }
 
 test go() -> () {
-    
+    async() -> () {
+        Println("async")
+    }
+    async() <~
+    # channel: [=]Int
+    2 >> arr
+    channel << 1
+    <- (<< channel) #
 }
