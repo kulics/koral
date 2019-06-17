@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -30,7 +31,6 @@ func Compiled(dir string) error {
 		}
 
 		if info.IsDir() {
-
 		} else if strings.HasSuffix(info.Name(), ".xs") {
 			fmt.Println(path)
 			InputStream, _ := antlr.NewFileStream(path)
@@ -46,9 +46,11 @@ func Compiled(dir string) error {
 
 			Visitor := visitor.XsVisitor{}
 			Result := Visitor.Visit(AST)
-			if err := ioutil.WriteFile(strings.Replace(path, ".xs", ".go", 1), []byte(Result.(string)), 0644); err != nil {
+			gopath := strings.Replace(path, ".xs", ".go", 1)
+			if err := ioutil.WriteFile(gopath, []byte(Result.(string)), 0644); err != nil {
 				return err
 			}
+			exec.Command("go", "fmt", gopath).Output()
 		}
 		return nil
 	})
