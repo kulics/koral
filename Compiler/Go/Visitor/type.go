@@ -6,6 +6,18 @@ import (
 	"github.com/antlr/antlr4/runtime/Go/antlr"
 )
 
+func (sf *XsVisitor) VisitTypeAliasStatement(ctx *parser.TypeAliasStatementContext) interface{} {
+	obj := ""
+	obj = Type + sf.Visit(ctx.Id()).(Result).Text + "=" + sf.Visit(ctx.TypeType()).(string) + Wrap
+	return obj
+}
+
+func (sf *XsVisitor) VisitTypeRedefineStatement(ctx *parser.TypeRedefineStatementContext) interface{} {
+	obj := ""
+	obj = Type + sf.Visit(ctx.Id()).(Result).Text + " " + sf.Visit(ctx.TypeType()).(string) + Wrap
+	return obj
+}
+
 func (sf *XsVisitor) VisitTypeType(ctx *parser.TypeTypeContext) interface{} {
 	obj := ""
 	obj = sf.Visit(ctx.GetChild(0).(antlr.ParseTree)).(string)

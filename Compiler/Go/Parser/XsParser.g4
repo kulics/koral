@@ -22,8 +22,15 @@ namespaceVariableStatement
 |protocolStatement
 |packageExtensionStatement
 |enumStatement
+|typeAliasStatement
+|typeRedefineStatement
 |New_Line
 ;
+
+// 类型别名
+typeAliasStatement: id Equal_Arrow typeType end;
+// 类型重定义
+typeRedefineStatement: id Right_Arrow typeType end;
 
 // 枚举
 enumStatement: (annotationSupport)? id Right_Arrow New_Line* typeType left_brack enumSupportStatement* right_brack end;

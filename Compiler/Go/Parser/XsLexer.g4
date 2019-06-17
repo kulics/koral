@@ -39,6 +39,8 @@ Dot: '.';
 
 Comma: ',';
 
+Equal_Arrow: '=>';
+
 Right_Arrow: '->';
 Left_Arrow: '<-';
 

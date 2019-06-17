@@ -43,6 +43,7 @@ const (
 	Func  = "func "
 	Var   = "var "
 	Const = "const "
+	Type  = "type "
 )
 
 type errorListener struct {
