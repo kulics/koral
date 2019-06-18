@@ -160,3 +160,31 @@ func (sf *XsVisitor) VisitTupleExpression(ctx *parser.TupleExpressionContext) in
 	result := Result{Data: "var", Text: obj}
 	return result
 }
+
+func (sf *XsVisitor) VisitFunctionExpression(ctx *parser.FunctionExpressionContext) interface{} {
+	obj := ""
+	// 异步
+	// ? context.t.Type == Right Flow {
+	// 	pout := Visit(context.parameterClauseOut()):Str
+	// 	? pout >< "void" {
+	// 		pout = ""Task"<"pout">"
+	// 	} _ {
+	// 		pout = Task
+	// 	}
+	// 	obj += " async "pout" "id.text""
+	// } _ {
+	// 	obj += ""Visit(context.parameterClauseOut())" "id.text""
+	// }
+	// # 泛型 #
+	templateContract := ""
+	// ? context.templateDefine() >< () {
+	// 	template := Visit(context.templateDefine()):TemplateItem
+	// 	obj += template.Template
+	// 	templateContract = template.Contract
+	// }
+	obj += Func + sf.Visit(ctx.ParameterClauseIn()).(string) + templateContract +
+		sf.Visit(ctx.ParameterClauseOut()).(string) + BlockLeft + Wrap
+	obj += sf.ProcessFunctionSupport(ctx.AllFunctionSupportStatement())
+	obj += BlockRight + Wrap
+	return obj
+}

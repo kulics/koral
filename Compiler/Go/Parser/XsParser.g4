@@ -343,11 +343,8 @@ pkgAnonymousAssign: left_brace pkgAnonymousAssignElement (more pkgAnonymousAssig
 
 pkgAnonymousAssignElement: name Equal expression; // 简化赋值元素
 
-functionExpression: anonymousParameterClauseIn t=(Right_Arrow|Right_Flow) New_Line*
+functionExpression: parameterClauseIn t=(Right_Arrow|Right_Flow) New_Line*
 parameterClauseOut left_brace (functionSupportStatement)* right_brace;
-
-// 入参
-anonymousParameterClauseIn: left_paren parameter? (more parameter)*  right_paren  ;
 
 tupleExpression: left_paren expression (more expression)*  right_paren; // 元组
 
