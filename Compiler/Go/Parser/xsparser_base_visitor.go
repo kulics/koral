@@ -260,6 +260,10 @@ func (v *BaseXsParserVisitor) VisitVariableDeclaredStatement(ctx *VariableDeclar
 	return v.VisitChildren(ctx)
 }
 
+func (v *BaseXsParserVisitor) VisitChannelAssignStatement(ctx *ChannelAssignStatementContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BaseXsParserVisitor) VisitAssignStatement(ctx *AssignStatementContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -321,6 +325,10 @@ func (v *BaseXsParserVisitor) VisitAnnotationAssign(ctx *AnnotationAssignContext
 }
 
 func (v *BaseXsParserVisitor) VisitCallFunc(ctx *CallFuncContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseXsParserVisitor) VisitCallChannel(ctx *CallChannelContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -533,6 +541,10 @@ func (v *BaseXsParserVisitor) VisitTypeSet(ctx *TypeSetContext) interface{} {
 }
 
 func (v *BaseXsParserVisitor) VisitTypeDictionary(ctx *TypeDictionaryContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseXsParserVisitor) VisitTypeChannel(ctx *TypeChannelContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 

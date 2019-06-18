@@ -44,6 +44,7 @@ const (
 	Var   = "var "
 	Const = "const "
 	Type  = "type "
+	Chan  = "chan "
 )
 
 type errorListener struct {

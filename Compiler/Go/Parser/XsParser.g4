@@ -146,6 +146,7 @@ functionSupportStatement:
 | functionStatement
 | variableStatement
 | variableDeclaredStatement
+| channelAssignStatement
 | assignStatement
 | expressionStatement
 | New_Line
@@ -202,6 +203,8 @@ iteratorStatement: Left_Brack expression op=(Less|Less_Equal|Greater|Greater_Equ
 variableStatement: expression (Colon_Equal|Colon typeType Equal) expression end;
 // 声明变量
 variableDeclaredStatement: expression Colon typeType end;
+// 通道赋值
+channelAssignStatement: expression Left_Brack Left_Arrow Right_Brack assign expression end;
 // 赋值
 assignStatement: expression assign expression end;
 
@@ -224,6 +227,7 @@ linq // 联合查询
 | callBase // 调用继承
 | callSelf // 调用自己
 | callNameSpace // 调用命名空间
+| callChannel //调用通道
 | callElement //调用元素
 | callNew // 构造类对象
 | callPkg // 新建包
@@ -279,7 +283,9 @@ annotationAssign: (id Equal)? expression ;
 
 callFunc: id (templateCall)? (tuple|lambda); // 函数调用
 
-callElement : id op=Question? Left_Brack (slice | expression) Right_Brack;
+callChannel: id op=Question? Left_Brack Left_Arrow Right_Brack;
+
+callElement: id op=Question? Left_Brack (slice | expression) Right_Brack;
 
 callPkg: typeType left_brace (pkgAssign|listAssign|setAssign|dictionaryAssign)? right_brace; // 新建包
 
@@ -383,6 +389,7 @@ typeTuple
 | typeList
 | typeSet
 | typeDictionary
+| typeChannel
 | typeBasic
 | typePackage
 | typeFunction
@@ -398,6 +405,7 @@ typeArray: Left_Brack Colon Right_Brack typeType;
 typeList: Left_Brack Right_Brack typeType;
 typeSet: Left_Brack typeType Right_Brack;
 typeDictionary: Left_Brack typeType Right_Brack typeType;
+typeChannel: Left_Brack Right_Arrow Right_Brack typeType;
 typePackage: nameSpaceItem (templateCall)? ;
 typeFunction: typeFunctionParameterClause t=(Right_Arrow|Right_Flow) New_Line* typeFunctionParameterClause;
 typeAny: left_brace right_brace;

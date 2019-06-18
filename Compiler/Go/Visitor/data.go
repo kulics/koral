@@ -104,6 +104,13 @@ func (sf *XsVisitor) VisitVariableDeclaredStatement(ctx *parser.VariableDeclared
 	return obj
 }
 
+func (sf *XsVisitor) VisitChannelAssignStatement(ctx *parser.ChannelAssignStatementContext) interface{} {
+	r1 := sf.Visit(ctx.Expression(0)).(Result)
+	r2 := sf.Visit(ctx.Expression(1)).(Result)
+	obj := r1.Text + "<-" + r2.Text + Wrap
+	return obj
+}
+
 func (sf *XsVisitor) VisitAssignStatement(ctx *parser.AssignStatementContext) interface{} {
 	r1 := sf.Visit(ctx.Expression(0)).(Result)
 	r2 := sf.Visit(ctx.Expression(1)).(Result)

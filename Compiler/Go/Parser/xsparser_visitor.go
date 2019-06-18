@@ -197,6 +197,9 @@ type XsParserVisitor interface {
 	// Visit a parse tree produced by XsParser#variableDeclaredStatement.
 	VisitVariableDeclaredStatement(ctx *VariableDeclaredStatementContext) interface{}
 
+	// Visit a parse tree produced by XsParser#channelAssignStatement.
+	VisitChannelAssignStatement(ctx *ChannelAssignStatementContext) interface{}
+
 	// Visit a parse tree produced by XsParser#assignStatement.
 	VisitAssignStatement(ctx *AssignStatementContext) interface{}
 
@@ -244,6 +247,9 @@ type XsParserVisitor interface {
 
 	// Visit a parse tree produced by XsParser#callFunc.
 	VisitCallFunc(ctx *CallFuncContext) interface{}
+
+	// Visit a parse tree produced by XsParser#callChannel.
+	VisitCallChannel(ctx *CallChannelContext) interface{}
 
 	// Visit a parse tree produced by XsParser#callElement.
 	VisitCallElement(ctx *CallElementContext) interface{}
@@ -403,6 +409,9 @@ type XsParserVisitor interface {
 
 	// Visit a parse tree produced by XsParser#typeDictionary.
 	VisitTypeDictionary(ctx *TypeDictionaryContext) interface{}
+
+	// Visit a parse tree produced by XsParser#typeChannel.
+	VisitTypeChannel(ctx *TypeChannelContext) interface{}
 
 	// Visit a parse tree produced by XsParser#typePackage.
 	VisitTypePackage(ctx *TypePackageContext) interface{}
