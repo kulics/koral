@@ -86,6 +86,10 @@ func (sf *XsVisitor) VisitTypeDictionary(ctx *parser.TypeDictionaryContext) inte
 	return "map[" + sf.Visit(ctx.TypeType(0)).(string) + "]" + sf.Visit(ctx.TypeType(1)).(string)
 }
 
+func (sf *XsVisitor) VisitTypeChannel(ctx *parser.TypeChannelContext) interface{} {
+	return Chan + sf.Visit(ctx.TypeType()).(string)
+}
+
 func (sf *XsVisitor) VisitTypePackage(ctx *parser.TypePackageContext) interface{} {
 	obj := ""
 	obj += sf.Visit(ctx.NameSpaceItem()).(string)

@@ -106,13 +106,12 @@ test protocol(w: worker) -> (i:{}) {
     <- (w)
 }
 
-test go() -> () {
+test go() -> (v:Int) {
     async() -> () {
         Println("async")
     }
     async() <~
-    # channel: [=]Int
-    2 >> arr
-    channel << 1
-    <- (<< channel) #
+    channel := <[->]Int>(1)
+    channel[<-] = 2
+    <- (channel[<-]) 
 }

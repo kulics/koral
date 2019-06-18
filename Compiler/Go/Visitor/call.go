@@ -20,6 +20,15 @@ func (sf *XsVisitor) VisitCallExpression(ctx *parser.CallExpressionContext) inte
 	return r
 }
 
+func (sf *XsVisitor) VisitCallChannel(ctx *parser.CallChannelContext) interface{} {
+	id := sf.Visit(ctx.Id()).(Result)
+	if ctx.GetOp() != nil && ctx.GetOp().GetTokenType() == parser.XsLexerQuestion {
+		id.Text += "?"
+	}
+	id.Text = "<-" + id.Text
+	return id
+}
+
 func (sf *XsVisitor) VisitCallElement(ctx *parser.CallElementContext) interface{} {
 	id := sf.Visit(ctx.Id()).(Result)
 	if ctx.GetOp() != nil && ctx.GetOp().GetTokenType() == parser.XsLexerQuestion {
@@ -45,6 +54,20 @@ func (sf *XsVisitor) VisitCallFunc(ctx *parser.CallFuncContext) interface{} {
 	} else {
 		r.Text += "(" + sf.Visit(ctx.Lambda()).(Result).Text + ")"
 	}
+	return r
+}
+
+func (sf *XsVisitor) VisitCallNew(ctx *parser.CallNewContext) interface{} {
+	r := Result{Data: sf.Visit(ctx.TypeType())}
+	param := ""
+	if ctx.ExpressionList() != nil {
+		param = sf.Visit(ctx.ExpressionList()).(Result).Text
+	}
+	r.Text = "make(" + sf.Visit(ctx.TypeType()).(string)
+	if param != "" {
+		r.Text += "," + param
+	}
+	r.Text += ")"
 	return r
 }
 
