@@ -22,8 +22,15 @@ namespaceVariableStatement
 |protocolStatement
 |packageExtensionStatement
 |enumStatement
+|typeAliasStatement
+|typeRedefineStatement
 |New_Line
 ;
+
+// 类型别名
+typeAliasStatement: id Equal_Arrow typeType end;
+// 类型重定义
+typeRedefineStatement: id Right_Arrow typeType end;
 
 // 枚举
 enumStatement: (annotationSupport)? id Right_Arrow New_Line* typeType left_brack enumSupportStatement* right_brack end;
@@ -139,6 +146,7 @@ functionSupportStatement:
 | functionStatement
 | variableStatement
 | variableDeclaredStatement
+| channelAssignStatement
 | assignStatement
 | expressionStatement
 | New_Line
@@ -195,6 +203,8 @@ iteratorStatement: Left_Brack expression op=(Less|Less_Equal|Greater|Greater_Equ
 variableStatement: expression (Colon_Equal|Colon typeType Equal) expression end;
 // 声明变量
 variableDeclaredStatement: expression Colon typeType end;
+// 通道赋值
+channelAssignStatement: expression Left_Brack Left_Arrow Right_Brack assign expression end;
 // 赋值
 assignStatement: expression assign expression end;
 
@@ -217,6 +227,7 @@ linq // 联合查询
 | callBase // 调用继承
 | callSelf // 调用自己
 | callNameSpace // 调用命名空间
+| callChannel //调用通道
 | callElement //调用元素
 | callNew // 构造类对象
 | callPkg // 新建包
@@ -233,6 +244,7 @@ linq // 联合查询
 | negate // 取反
 | expression op=Bang // 引用判断
 | expression op=Question // 可空判断
+| expression op=Left_Flow // 异步执行
 | expression typeConversion // 类型转换
 | expression call callExpression // 链式调用
 | expression judgeType typeType // 类型判断表达式
@@ -271,7 +283,9 @@ annotationAssign: (id Equal)? expression ;
 
 callFunc: id (templateCall)? (tuple|lambda); // 函数调用
 
-callElement : id op=Question? Left_Brack (slice | expression) Right_Brack;
+callChannel: id op=Question? Left_Brack Left_Arrow Right_Brack;
+
+callElement: id op=Question? Left_Brack (slice | expression) Right_Brack;
 
 callPkg: typeType left_brace (pkgAssign|listAssign|setAssign|dictionaryAssign)? right_brace; // 新建包
 
@@ -279,7 +293,7 @@ callNew: Less typeType Greater left_paren New_Line? expressionList? New_Line? ri
 
 getType: Question left_paren (expression|Colon typeType) right_paren;
 
-typeConversion: Colon typeType; // 类型转化
+typeConversion: Colon left_paren typeType right_paren; // 类型转化
 
 pkgAssign: pkgAssignElement (more pkgAssignElement)* ; // 简化赋值
 
@@ -329,11 +343,8 @@ pkgAnonymousAssign: left_brace pkgAnonymousAssignElement (more pkgAnonymousAssig
 
 pkgAnonymousAssignElement: name Equal expression; // 简化赋值元素
 
-functionExpression: anonymousParameterClauseIn t=(Right_Arrow|Right_Flow) New_Line*
+functionExpression: parameterClauseIn t=(Right_Arrow|Right_Flow) New_Line*
 parameterClauseOut left_brace (functionSupportStatement)* right_brace;
-
-// 入参
-anonymousParameterClauseIn: left_paren parameter? (more parameter)*  right_paren  ;
 
 tupleExpression: left_paren expression (more expression)*  right_paren; // 元组
 
@@ -375,6 +386,7 @@ typeTuple
 | typeList
 | typeSet
 | typeDictionary
+| typeChannel
 | typeBasic
 | typePackage
 | typeFunction
@@ -390,6 +402,7 @@ typeArray: Left_Brack Colon Right_Brack typeType;
 typeList: Left_Brack Right_Brack typeType;
 typeSet: Left_Brack typeType Right_Brack;
 typeDictionary: Left_Brack typeType Right_Brack typeType;
+typeChannel: Left_Brack Right_Arrow Right_Brack typeType;
 typePackage: nameSpaceItem (templateCall)? ;
 typeFunction: typeFunctionParameterClause t=(Right_Arrow|Right_Flow) New_Line* typeFunctionParameterClause;
 typeAny: left_brace right_brace;

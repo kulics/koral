@@ -293,7 +293,7 @@ callNew: Less typeType Greater left_paren New_Line? expressionList? New_Line? ri
 
 getType: Question left_paren (expression|Colon typeType) right_paren;
 
-typeConversion: Colon typeType; // 类型转化
+typeConversion: Colon left_paren typeType right_paren; // 类型转化
 
 pkgAssign: pkgAssignElement (more pkgAssignElement)* ; // 简化赋值
 

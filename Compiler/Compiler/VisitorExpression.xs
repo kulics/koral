@@ -667,38 +667,11 @@ XsLangVisitor -> {
         ? context.t.Type == Right_Flow {
             r.text += " async "
         }
-        r.text += Visit(context.anonymousParameterClauseIn()) + " => " + BlockLeft + Wrap
+        r.text += Visit(context.parameterClauseIn()) + " => " + BlockLeft + Wrap
         r.text += ProcessFunctionSupport(context.functionSupportStatement())
         r.text += BlockRight + Wrap
         r.data = "var"
         <- (r)
-    }
-
-    VisitAnonymousParameterClauseIn(context: AnonymousParameterClauseInContext) -> (v:{}) {
-        obj := "("
-
-        lastType := ""
-        temp := []Str{}
-        [context.parameter().Length - 1 >= 0] @ i {
-            p := Visit(context.parameter(i)):Parameter
-            ? p.type >< () {
-                lastType = p.type
-            } _ {
-                p.type = lastType
-            }
-
-            temp.Add(""p.annotation" "p.type" "p.id"")
-        }
-        [temp.Count - 1 >= 0] @ i {
-            ? i == temp.Count - 1 {
-                obj += temp[i]
-            } _ {
-                obj += ", "temp[i]""
-            }
-        }
-
-        obj += ")"
-        <- (obj)
     }
 
     VisitLambda(context: LambdaContext) -> (v:{}) {
