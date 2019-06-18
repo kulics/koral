@@ -341,9 +341,6 @@ type XsParserVisitor interface {
 	// Visit a parse tree produced by XsParser#functionExpression.
 	VisitFunctionExpression(ctx *FunctionExpressionContext) interface{}
 
-	// Visit a parse tree produced by XsParser#anonymousParameterClauseIn.
-	VisitAnonymousParameterClauseIn(ctx *AnonymousParameterClauseInContext) interface{}
-
 	// Visit a parse tree produced by XsParser#tupleExpression.
 	VisitTupleExpression(ctx *TupleExpressionContext) interface{}
 

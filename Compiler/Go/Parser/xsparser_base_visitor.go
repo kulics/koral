@@ -452,10 +452,6 @@ func (v *BaseXsParserVisitor) VisitFunctionExpression(ctx *FunctionExpressionCon
 	return v.VisitChildren(ctx)
 }
 
-func (v *BaseXsParserVisitor) VisitAnonymousParameterClauseIn(ctx *AnonymousParameterClauseInContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
 func (v *BaseXsParserVisitor) VisitTupleExpression(ctx *TupleExpressionContext) interface{} {
 	return v.VisitChildren(ctx)
 }

@@ -107,7 +107,7 @@ test protocol(w: worker) -> (i:{}) {
 }
 
 test go() -> (v:Int) {
-    async() -> () {
+    async := () -> () {
         Println("async")
     }
     async() <~
