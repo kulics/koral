@@ -369,59 +369,61 @@ In Package Array -> {
 }
 
 Defer -> {
+    IDisposable
     data := ""
-} IDisposable {
-    Dispose() -> () {}
 }
 
-App -> { 
+(me: Defer) Dispose() -> () {}
+
+App -> {
+    Program
+    Protocol
     i := 555
     arr := {1,1,1,1}
     _pri name := " Program "
     _b := 5
-
-    test package() -> () {
-        Item := Program{name = "new Program",running = True}
-        Item2 := {
-            name = "new Program",
-            running = True
-        }
-        Item3 := []Int{1,2,3,4,5}
-        Item4 := [Str]Int{["1"]1,["2"]2,["3"]3}
-        Item5 := <Package Child>(1,2) # New #
-    }
-
-    test func template<T1, T2>(data1: T1, data2: T2) -> (data: App) {
-        <- (..)
-    }
-} ...Program {  
-} Protocol {
     b(): Int -> get { 
         <- (_b) 
     } set { 
         _b = value 
     }
 
-    c(x: Int) -> (y: Int) {
-        <- (x + ..b)
-    }
-
-    d() ~> (x: Int) {
-        <~ Dly(1000)
-        <- (3)
-    }
-
-    e() ~> () {
-        <~ Dly(1000)
-    }
-
     f(): Str = "get"
-} 
+}
+
+(me: App) test package() -> () {
+    Item := Program{name = "new Program",running = True}
+    Item2 := {
+        name = "new Program",
+        running = True
+    }
+    Item3 := []Int{1,2,3,4,5}
+    Item4 := [Str]Int{["1"]1,["2"]2,["3"]3}
+    Item5 := <Package Child>(1,2) # New #
+}
+
+(me: App) test func template<T1, T2>(data1: T1, data2: T2) -> (data: App) {
+    <- (me)
+}
+
+(me: App) c(x: Int) -> (y: Int) {
+    <- (x + me.b)
+}
+
+(me: App) d() ~> (x: Int) {
+    <~ Dly(1000)
+    <- (3)
+}
+
+(me: App) e() ~> () {
+    <~ Dly(1000)
+}
 
 Result -> {
     data: Str
-} (data: Str) {
-    ..data = data
+} 
+(me: Result) <>(data: Str) {
+    me.data = data
 }
 
 Test package template<T:class> -> {
@@ -438,8 +440,8 @@ Test protocol template<T:class> <- {
 Test implement template -> {
     Test protocol template<Test implement template>
 }
-(this: Test implement template) test(in: Test implement template) -> () {}
-(this: Test implement template) test<H:class>(in: H) -> () {}
+(me: Test implement template) test(in: Test implement template) -> () {}
+(me: Test implement template) test<H:class>(in: H) -> () {}
 
 Program -> {
     name(): Str = "name" -> set { 
@@ -475,24 +477,22 @@ Test Enum -> Int[
 Package -> {
     x: Int
     y: Int
-} (y: Int = 3) {
-    ..x = Const Data
-    ..y = y
+}
+(me:Package) <>(y: Int = 3) {
+    me.x = Const Data
+    me.y = y
 }
 
 (me:Package) parent func() -> () {
     me.x = 21
 }
-# (me:Package) New(y: Int = 3) {
-    me.x = Const Data
-    me.y = y
-} #
 
 Package Child -> {
     Package
     x: Int
-} (x: Int, y: Int)...(y) {
-    ..x = x
+} 
+(me:Package Child) <>(x: Int, y: Int)(y) {
+    me.x = x
 }
 
 (me:Package Child) parent func() -> () {
