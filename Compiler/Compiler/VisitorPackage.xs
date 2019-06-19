@@ -263,14 +263,6 @@ XsLangVisitor -> {
         <- (obj)
     }
 
-    VisitPackageOverrideStatement(context: PackageOverrideStatementContext) -> (v: {}) {
-        obj := ""
-        context.packageOverrideFunctionStatement() @ item {
-            obj += Visit(item)
-        }
-        <- (obj)
-    }
-
     VisitPackageNewStatement(context: PackageNewStatementContext) -> (v: {}) {
         text := ""
         Self := Visit(context.parameterClauseSelf()):Parameter
@@ -288,123 +280,11 @@ XsLangVisitor -> {
         <- (text)
     }
 
-    VisitProtocolImplementStatement(context: ProtocolImplementStatementContext) -> (v: {}) {
-        obj := ""
-
-        ptcl := Visit(context.nameSpaceItem()):Str
-        # 泛型 #
-        ? context.templateCall() >< () {
-            ptcl += Visit(context.templateCall())
-        }
-
-        obj += ":"ptcl" "Wrap" "BlockLeft" "Wrap""
-
-        context.protocolImplementSupportStatement() @ item {
-            obj += Visit(item)
-        }
-        obj += ""BlockRight" "Terminate" "Wrap""
-        <- (obj)
-    }
-
-    VisitImplementEventStatement(context: ImplementEventStatementContext) -> (v: {}) {
+    VisitPackageEventStatement(context: PackageEventStatementContext) -> (v: {}) {
         obj := ""
         id := Visit(context.id()):Result
         nameSpace := Visit(context.nameSpaceItem())
         obj += "public event "nameSpace" "id.text + Terminate + Wrap""
-        <- (obj)
-    }
-
-    VisitImplementControlStatement(context: ImplementControlStatementContext) -> (v: {}) {
-        r1 := Visit(context.expression(0)):Result
-        isMutable := r1.isVirtual
-        isVirtual := ""
-        ? r1.isVirtual {
-            isVirtual = " virtual "
-        }
-        typ := ""
-        r2: Result = ()
-        ? context.expression().Length == 2 {
-            r2 = Visit(context.expression(1)):Result
-            typ = r2.data:Str
-        }
-        ? context.typeType() >< () {
-            typ = Visit(context.typeType()):Str
-        }
-        obj := ""
-        ? context.annotationSupport() >< () {
-            obj += Visit(context.annotationSupport())
-        }
-        ? context.packageControlSubStatement().Length > 0 {
-            obj += ""r1.permission" "isVirtual" "typ" "r1.text + BlockLeft""
-            record := [Str]Bool{}
-            context.packageControlSubStatement() @ item {
-                temp := Visit(item):Result
-                obj += temp.text
-                record[temp.data:Str] = True
-            }
-            ? r2 >< () {
-                obj = "protected "typ" _"r1.text" = "r2.text""Terminate" "Wrap"" obj ""
-                ? ~record.ContainsKey("get") {
-                    obj += "get "BlockLeft" return _"r1.text+Terminate+BlockRight""
-                }
-                ? isMutable & ~record.ContainsKey("set") {
-                    obj += "set "BlockLeft" _"r1.text" = value"Terminate+BlockRight""
-                }
-            }
-            obj += BlockRight + Wrap
-        } _ {
-            ? isMutable {
-                obj += ""r1.permission" "isVirtual" "typ" "r1.text" "BlockLeft" get"Terminate"set"Terminate+BlockRight""
-                ? r2 >< () {
-                    obj += " = "r2.text" "Terminate+Wrap""
-                } _ {
-                    obj += Wrap
-                }
-            } _ {
-                obj += ""r1.permission" "isVirtual" "typ" "r1.text" "BlockLeft" get"Terminate+BlockRight""
-                ? r2 >< () {
-                    obj += " = "r2.text" "Terminate+Wrap""
-                } _ {
-                    obj += Wrap
-                }
-            }
-        }
-        <- (obj)
-    }
-
-    VisitImplementFunctionStatement(context: ImplementFunctionStatementContext) -> (v: {}) {
-        id := Visit(context.id()):Result
-        isVirtual := ""
-        ? id.isVirtual {
-            isVirtual = " virtual "
-        }
-        obj := ""
-        ? context.annotationSupport() >< () {
-            obj += Visit(context.annotationSupport())
-        }
-        # 异步 #
-        ? context.t.Type == Right Flow {
-            pout := Visit(context.parameterClauseOut()):Str
-            ? pout >< "void" {
-                pout = ""Task"<"pout">"
-            } _ {
-                pout = Task
-            }
-            obj += ""id.permission" "isVirtual" async "pout" "id.text""
-        } _ {
-            obj += id.permission + isVirtual + " " + Visit(context.parameterClauseOut()) + " " + id.text
-        }
-
-        # 泛型 #
-        templateContract := ""
-        ? context.templateDefine() >< () {
-            template := Visit(context.templateDefine()):TemplateItem
-            obj += template.Template
-            templateContract = template.Contract
-        }
-        obj += Visit(context.parameterClauseIn()) + templateContract + Wrap + BlockLeft + Wrap
-        obj += ProcessFunctionSupport(context.functionSupportStatement())
-        obj += BlockRight + Wrap
         <- (obj)
     }
 
