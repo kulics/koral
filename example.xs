@@ -428,9 +428,8 @@ Result -> {
 
 Test package template<T:class> -> {
     data: T
-
-    generic(a: T) -> () {}
 }
+(me:Test package template<T>) generic(a: T) -> () {}
 
 Test protocol template<T:class> <- {
     test<H:class>(in: H) -> ()
@@ -482,9 +481,9 @@ Package -> {
     me.x = Const Data
     me.y = y
 }
-
 (me:Package) parent func() -> () {
     me.x = 21
+    Prt("package")
 }
 
 Package Child -> {
@@ -494,7 +493,7 @@ Package Child -> {
 (me:Package Child) <>(x: Int, y: Int)(y) {
     me.x = x
 }
-
-(me:Package Child) parent func() -> () {
-    me.x = 64
+(me:Package Child)(super) parent func() -> () {
+    super.x = 64
+    Prt("package child")
 }

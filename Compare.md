@@ -565,29 +565,28 @@ shapeDescription = shape.simpleDescription()
 Named Shape -> {
     name: Str
     number of sides := 0
-
-    simple description() -> (s: Str) {
-        <- ("A shape with " number of sides " sides.")
-    }
+}
+(me: Named Shape) simple description() -> (s: Str) {
+    <- ("A shape with " me.number of sides " sides.")
 }
 
 Square -> {
+    Named Shape
     side length: Num
+} 
+(me: Square)(super) simple description() -> (s: Str) {
+    <- ("A square with sides of length " me.side length ".")
+}
 
-    init(side length: Num, name: Str) -> (v: Square) {
-        ..side length = side length
-        ..number of sides = 4
-        ..name = name
-        <- (..)
-    }
+(me: Square) init(side length: Num, name: Str) -> (v: Square) {
+    me.side length = side length
+    me.number of sides = 4
+    me.name = name
+    <- (me)
+}
 
-    area() -> (f: Num) {
-        <- (side length ** 2)
-    }
-} ...Named Shape {
-    simple description() -> (s: Str) {
-        <- ("A square with sides of length " side length ".")
-    }
+(me: Square) area() -> (f: Num) {
+    <- (me.side length ** 2)
 }
 
 Test := Square{}.init(5.2, "square")
@@ -1012,14 +1011,14 @@ func f(x: Nameable) {
 ### Xs
 ```
 Dog -> {
-} Nameable {
-    name() -> (n: Str) {
-        <- ("Dog")
-    }
-} Weight {
-    get weight() -> (w: Int) {
-        <- (30)
-    }
+}
+# Implement Nameable #
+(me:Dog) name() -> (n: Str) {
+    <- ("Dog")
+}
+# Implement Weight #
+(me:Dog) get weight() -> (w: Int) {
+    <- (30)
 }
 ```
 ### C#

@@ -9,8 +9,9 @@
 
 XsLangVisitor -> {
     self ID := ""
+    super ID := ""
 } ...XsParserBaseVisitor<{}> {
-    VisitPackageExtensionStatement(context: PackageExtensionStatementContext) -> (v: {}) {
+    VisitPackageFunctionStatement(context: PackageFunctionStatementContext) -> (v: {}) {
         Self := Visit(context.parameterClauseSelf()):Parameter
         self ID = Self.id
         id := Visit(context.id()):Result
@@ -18,9 +19,19 @@ XsLangVisitor -> {
         ? id.isVirtual {
             isVirtual = " virtual "
         }
+        ? Self.value >< () {
+            super ID = Self.value
+            isVirtual = " override "
+        }
         obj := ""
+
         obj += ""Self.permission" partial class "Self.type""BlockLeft + Wrap""
-            # 异步 #
+        # 异步 #
+        ? context.n >< () {
+            obj += "protected "
+        } _ {
+            obj += ""id.permission" "
+        }
         ? context.t.Type == Right Flow {
             pout := Visit(context.parameterClauseOut()):Str
             ? pout >< "void" {
@@ -28,9 +39,9 @@ XsLangVisitor -> {
             } _ {
                 pout = Task
             }
-            obj += ""id.permission""isVirtual" async "pout" "id.text""
+            obj += ""isVirtual" async "pout" "id.text""
         } _ {
-            obj += ""id.permission"" isVirtual " " Visit(context.parameterClauseOut())" "id.text""
+            obj += ""isVirtual" " Visit(context.parameterClauseOut())" "id.text""
         }
             # 泛型 #
         templateContract := ""
@@ -44,6 +55,7 @@ XsLangVisitor -> {
         obj += BlockRight + Wrap
         obj += BlockRight + Wrap
         self ID = ""
+        super ID = ""
         <- (obj)
     }
 
@@ -195,72 +207,6 @@ XsLangVisitor -> {
         }
 
         <- (Result{ text = obj, data = typ })
-    }
-
-    VisitPackageFunctionStatement(context: PackageFunctionStatementContext) -> (v: {}) {
-        id := Visit(context.id()):Result
-        isVirtual := ""
-        ? id.isVirtual {
-            isVirtual = " virtual "
-        }
-        obj := ""
-        ? context.annotationSupport() >< () {
-            obj += Visit(context.annotationSupport())
-        }
-        # 异步 #
-        ? context.t.Type == Right Flow {
-            pout := Visit(context.parameterClauseOut()):Str
-            ? pout >< "void" {
-                pout = ""Task"<"pout">"
-            } _ {
-                pout = Task
-            }
-            obj += ""id.permission" "isVirtual" async "pout" "id.text""
-        } _ {
-            obj += ""id.permission" "isVirtual" "Visit(context.parameterClauseOut())" "id.text""
-        }
-
-        # 泛型 #
-        templateContract := ""
-        ? context.templateDefine() >< () {
-            template := Visit(context.templateDefine()):TemplateItem
-            obj += template.Template
-            templateContract = template.Contract
-        }
-        obj += Visit(context.parameterClauseIn()) + templateContract + Wrap + BlockLeft + Wrap
-        obj += ProcessFunctionSupport(context.functionSupportStatement())
-        obj += BlockRight + Wrap
-        <- (obj)
-    }
-
-    VisitPackageOverrideFunctionStatement(context: PackageOverrideFunctionStatementContext) -> (v: {}) {
-        id := Visit(context.id()):Result
-        obj := ""
-        ? context.annotationSupport() >< () {
-            obj += Visit(context.annotationSupport())
-        }
-        ? context.n >< () {
-            obj += "protected "
-        } _ {
-            obj += ""id.permission" "
-        }
-        # 异步 #
-        ? context.t.Type == Right Flow {
-            pout := Visit(context.parameterClauseOut()):Str
-            ? pout >< "void" {
-                pout = ""Task"<"pout">"
-            } _ {
-                pout = Task
-            }
-            obj += "override async "pout" "id.text""
-        } _ {
-            obj += "override " + Visit(context.parameterClauseOut()) + " " + id.text
-        }
-
-        obj += Visit(context.parameterClauseIn()) + Wrap + BlockLeft + Wrap
-        obj += ProcessFunctionSupport(context.functionSupportStatement())
-        obj += BlockRight + Wrap
-        <- (obj)
     }
 
     VisitPackageNewStatement(context: PackageNewStatementContext) -> (v: {}) {

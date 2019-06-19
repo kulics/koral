@@ -137,43 +137,6 @@ XsLangVisitor -> {
         <- (r)
     }
 
-    VisitCallBase(context: CallBaseContext) -> (v:{}) {
-        r := Result{data = "var"}
-        e1 := "base"
-        op := "."
-        e2 := Visit(context.GetChild(1)):Result
-        r.text = e1 + op + e2.text
-        <- (r)
-    }
-
-    VisitCallSelf(context: CallSelfContext) -> (v:{}) {
-        r := Result{data = "var"}
-        e1 := "this"
-        op := "."
-        e2 := Visit(context.GetChild(1)):Result
-        r.text = e1 + op + e2.text
-        <- (r)
-    }
-
-    VisitCallNameSpace(context: CallNameSpaceContext) -> (v:{}) {
-        obj := ""
-        [0 < context.id().Length] @ i {
-            id := Visit(context.id(i)):Result
-            ? i == 0 {
-                obj += "" + id.text
-            } _ {
-                obj += "." + id.text
-            }
-        }
-
-        r := Result{data = "var"}
-        e1 := obj
-        op := "."
-        e2 := Visit(context.callExpression()):Result
-        r.text = e1 + op + e2.text
-        <- (r)
-    }
-
     VisitCallExpression(context: CallExpressionContext) -> (v:{}) {
         count := context.ChildCount
         r := Result{}
