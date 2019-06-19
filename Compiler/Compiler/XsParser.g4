@@ -57,6 +57,7 @@ includeStatement
 |packageVariableStatement
 |packageControlStatement
 |packageFunctionStatement
+|packageEventStatement
 |New_Line
 ;
 includeStatement: typeType end;
@@ -76,8 +77,8 @@ packageControlStatement: (annotationSupport)? id left_paren right_paren (Colon_E
 (Right_Arrow (packageControlSubStatement)+ )? end;
 // 定义子方法
 packageControlSubStatement: id left_brace (functionSupportStatement)+ right_brace;
-// 包重载
-packageOverrideStatement: left_brace (packageOverrideFunctionStatement|New_Line)* right_brace;
+// 事件实现
+packageEventStatement: id Colon Event Less nameSpaceItem Greater end;
 // 包扩展
 packageExtensionStatement: (annotationSupport)? parameterClauseSelf id (templateDefine)? parameterClauseIn t=(Right_Arrow|Right_Flow) New_Line*
 parameterClauseOut left_brace (functionSupportStatement)* right_brace end;
@@ -98,23 +99,7 @@ protocolControlSubStatement: id;
 // 函数
 protocolFunctionStatement: (annotationSupport)? id (templateDefine)? parameterClauseIn 
 t=(Right_Arrow|Right_Flow) New_Line* parameterClauseOut end;
-// 协议实现支持的语句
-protocolImplementSupportStatement:
-implementFunctionStatement
-|implementControlStatement
-|implementEventStatement
-|New_Line
-;
-// 实现协议
-protocolImplementStatement: nameSpaceItem (templateCall)? left_brace (protocolImplementSupportStatement)* right_brace;
-// 控制实现
-implementControlStatement: (annotationSupport)? expression left_paren right_paren (Colon_Equal expression|Colon typeType (Equal expression)?)
-(Right_Arrow (packageControlSubStatement)+ )? end;
-// 函数实现
-implementFunctionStatement: (annotationSupport)? id (templateDefine)? parameterClauseIn t=(Right_Arrow|Right_Flow) New_Line*
-parameterClauseOut left_brace (functionSupportStatement)* right_brace end;
-// 事件实现
-implementEventStatement: id Colon Event Less nameSpaceItem Greater end;
+
 // 函数
 functionStatement: id (templateDefine)? parameterClauseIn t=(Right_Arrow|Right_Flow) New_Line* parameterClauseOut left_brace
 (functionSupportStatement)* right_brace end;
