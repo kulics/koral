@@ -98,17 +98,19 @@ XsLangVisitor -> {
         ? context.typeBasic() >< () {
             r.permission = "public"
             r.text += context.typeBasic().GetText()
+            r.isVirtual = True
         } context.linqKeyword() >< () {
             r.permission = "public"
             r.text += Visit(context.linqKeyword())
+            r.isVirtual = True
         } context.op.Type == IDPublic {
             r.permission = "public"
             r.text += context.op.Text
-            r.isVirtual = r.text[0].is Upper()
+            r.isVirtual = True
         } context.op.Type == IDPrivate {
             r.permission = "protected"
             r.text += context.op.Text
-            r.isVirtual = r.text[r.text.find first({it -> it >< '_'})].is Upper()
+            r.isVirtual = True
         }
         <- (r)
     }

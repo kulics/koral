@@ -149,6 +149,15 @@ XsLangVisitor -> {
         <- (obj)
     }
 
+    VisitParameterClauseSelf(context: ParameterClauseSelfContext) -> (v: {}) {
+        p := Parameter{}
+        id := Visit(context.id()):Result
+        p.id = id.text
+        p.permission = id.permission
+        p.type = Visit(context.typeType()):Str
+        <- (p)
+    }
+
     VisitParameter(context: ParameterContext) -> (v: {}) {
         p := Parameter{}
         id := Visit(context.id()):Result
