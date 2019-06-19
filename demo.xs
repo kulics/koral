@@ -191,20 +191,18 @@ Program -> {
     Control
     name: Str
     _running := False
-
-    start() -> () {
-        Prt("Start")
-        _running = True
-    }
-
-    stop() -> () {
-        Prt("Stop")
-        _running = False
-    }
 } 
 (me:Program) <>(name: Str) {
     me.name = name
-} 
+}
+(me:Program) start() -> () {
+    Prt("Start")
+    me._running = True
+}
+(me:Program) stop() -> () {
+    Prt("Stop")
+    me._running = False
+}
 (me:Program) shutdown() -> () {
     Prt("shutdown")
     me._running = False

@@ -92,6 +92,8 @@ XsLangVisitor -> {
         }
         ? r.text == self ID {
             r.text = "this"
+        } r.text == super ID {
+            r.text = "base"
         }
         <- (r)
     }

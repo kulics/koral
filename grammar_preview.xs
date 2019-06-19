@@ -137,13 +137,12 @@ Main() ~> () {
         height: Int
         background: Str
         title: Str
-        
-        click() -> () {
-            # 可以通过 .. 来访问包自身属性或方法 #
-            Prt( ..title )
-            doSomeThingA()
-            doSomeThingB()
-        }
+    }
+    (me:Button) click() -> () {
+        # 可以通过 me 来访问包自身属性或方法 #
+        Prt( me.title )
+        doSomeThingA()
+        doSomeThingB()
     }
 
     Image -> {
@@ -151,16 +150,11 @@ Main() ~> () {
         _width := 0
         _height := 0
         _source := "" 
-        # 初始化方法 #
-        init(w: Int, h: Int, s: Str) -> (v:Image) {  
-            (_width, _height, _source) = (w,h,s)
-            <- (..)
-        }
     }
-
-    # Extension ，对某个包扩展，可以用来扩展方法 #
-    (View)show() -> () {
-        ...
+    # 初始化方法 #
+    (me:Image) init(w: Int, h: Int, s: Str) -> (v:Image) {  
+        (me._width, me._height, me._source) = (w,h,s)
+        <- (me)
     }
 
     # Protocol, implemented by package #
@@ -171,19 +165,21 @@ Main() ~> () {
 
     # Combine Package，通过引入来复用属性和方法 #
     Image Button -> {
-        button: Button    # 通过包含其它包，来组合新的包使用  #
-        title: Str
-    } Animation { # Implement protocol #
-        speed := 2
+        # 通过包含其它包，来组合新的包使用  #
+        Image
+        Animation
+        Button
 
-        move(s: Int) -> () {
-            t := 5000/s
-            play( s + t )
-        }
-    } (w: Int, h: Int)...(w, h , "img") {
+        title: Str
+        speed := 2
+    }   
+    # Implement protocol #  
+    (me:Image Button) move(s: Int) -> () {
+        t := 5000/s
+        play( s + t )
+    }
+    (me:Image Button) <>(w: Int, h: Int)(w, h , "img") {
         title = "img btn"
-    } ...Image { # 继承View #
-        background: Str # 重名覆盖 #
     }
 
     # Create an package object #
@@ -306,12 +302,6 @@ Main() ~> () {
         e(): PropertyChangedEventHandler -> add,remove
     }
 
-    # use \ to use namespace content #
-    Func(x: \NS\NS2\NS3.Pkg) -> () {
-        Y := \NS\NS2\NS4.Pkg{}
-        Z := \NS.Pkg{}
-    }
-
     Color -> I8[
         Red 
         Green
@@ -321,69 +311,32 @@ Main() ~> () {
 
 # The Future #
 
-\Namespace <- {
-    System
-    System\IO
+"Namespace" <- {
+    "System"
+    "System/IO"
 }
 Num: Int
 Txt: Str
 Class -> {
     num: Int
     txt: Str
-    func in class() -> () {
-        Func()
-    }
 }
-(Class)switch:Bool
-(Class)func out class() -> () {
-    Prt(..num)
+(me:Class)func in class() -> () {
     Func()
 }
 Func() -> () {
     Class In Func -> {
         num: Int
         txt: Str
-        func() -> () {
-        }
+    }
+    (me:Class In Func)func() -> () {
     }
     Use protocol(Class{})
 }
-Protocol -> {
+Protocol <- {
     func in class() -> () {
     }
 }
 Use protocol(it: Protocol) -> () {
     it.func in class()
 }
-
-# others #
-
-do something :: {
-    print: "hello, world".
-}
-do something.
-
-do something with params:a\Int,b\Str: {
-
-}
-do something with params:128, "text".
-
-get some value ::v\Int {
-    :1
-}
-value = get some value.
-
-swap numbers:a\Int,b\Int :a\Int,b\Int {
-    :b, a
-}
-a = 1
-b = 2
-a, b = swap numbers:b, a.
-
-lambda:a\:: : {
-    a.
-}
-
-lambda:{::
-    print: "lambda".
-}.

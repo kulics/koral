@@ -151,10 +151,13 @@ XsLangVisitor -> {
 
     VisitParameterClauseSelf(context: ParameterClauseSelfContext) -> (v: {}) {
         p := Parameter{}
-        id := Visit(context.id()):Result
+        id := Visit(context.id(0)):Result
         p.id = id.text
         p.permission = id.permission
         p.type = Visit(context.typeType()):Str
+        ? context.id(1) >< () {
+            p.value = Visit(context.id(1)):Result.text
+        }
         <- (p)
     }
 
