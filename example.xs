@@ -150,13 +150,13 @@ Test reference() -> () {
 
 Test type convert() -> () {
     X := App{}
-    Y := X:Program
+    Y := X:(Program)
     Z1 := (12.34).to F32()
     Z2 := Z1.to I64()
     Prt( Z2.to<{}>().to<I64>() )
     Prt( Y == :Program )
     Prt( Y >< :Program )
-    Prt( X:Program.running )
+    Prt( X:(Program).running )
     Prt( ?(:Program) )
     Prt( ?(X) )
 }
@@ -436,10 +436,10 @@ Test protocol template<T:class> <- {
 }
 
 Test implement template -> {
-} Test protocol template<Test implement template> {
-    test(in: Test implement template) -> () {}
-    test<H:class>(in: H) -> () {}
+    Test protocol template<Test implement template>
 }
+(this: Test implement template) test(in: Test implement template) -> () {}
+(this: Test implement template) test<H:class>(in: H) -> () {}
 
 Program -> {
     name(): Str = "name" -> set { 
@@ -480,9 +480,13 @@ Package -> {
     ..y = y
 }
 
+(this: Package) parent func() -> () {}
+
 Package Child -> {
+    Package
     x: Int
 } (x: Int, y: Int)...(y) {
     ..x = x
-} ...Package {
 }
+
+(base: Package Child) parent func() -> () {}
