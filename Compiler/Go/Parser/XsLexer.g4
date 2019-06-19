@@ -15,8 +15,6 @@ LinqEquals: 'equals';
 LinqAscending: 'ascending';
 LinqDescending: 'descending';
 
-Event: 'Event';
-
 Pow:    '**';
 Root:   '//';
 Log:    '%%';
