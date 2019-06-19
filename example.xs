@@ -480,7 +480,13 @@ Package -> {
     ..y = y
 }
 
-(this: Package) parent func() -> () {}
+(me:Package) parent func() -> () {
+    me.x = 21
+}
+# (me:Package) New(y: Int = 3) {
+    me.x = Const Data
+    me.y = y
+} #
 
 Package Child -> {
     Package
@@ -489,4 +495,6 @@ Package Child -> {
     ..x = x
 }
 
-(base: Package Child) parent func() -> () {}
+(me:Package Child) parent func() -> () {
+    me.x = 64
+}
