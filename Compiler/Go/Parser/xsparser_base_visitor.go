@@ -164,6 +164,10 @@ func (v *BaseXsParserVisitor) VisitParameterClauseOut(ctx *ParameterClauseOutCon
 	return v.VisitChildren(ctx)
 }
 
+func (v *BaseXsParserVisitor) VisitParameterClauseSelf(ctx *ParameterClauseSelfContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BaseXsParserVisitor) VisitParameter(ctx *ParameterContext) interface{} {
 	return v.VisitChildren(ctx)
 }
