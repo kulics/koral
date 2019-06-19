@@ -1,25 +1,10 @@
-\Compiler <- {
-    Antlr4\Runtime
-    Antlr4\Runtime\Misc
-    System
+"Compiler" {
+    "Antlr4/Runtime"
+    "Antlr4/Runtime/Misc"
+    "System"
 
-    Compiler.XsParser
-    Compiler.Compiler Static
-}
-
-ErrorListener -> {
-    File Dir(): Str
-} ...BaseErrorListener {
-    SyntaxError(recognizer: IRecognizer, offendingSymbol: ?IToken, 
-    line: Int, charPositionInLine: Int, msg: Str, 
-    e: ?RecognitionException) -> () {
-        ...SyntaxError(recognizer, offendingSymbol, line, charPositionInLine, msg, e)
-        Prt("------Syntax Error------")
-        Prt("File: "File Dir"")
-        Prt("Line: "line"  Column: "charPositionInLine"")
-        Prt("OffendingSymbol: "offendingSymbol.Text"")
-        Prt("Message: "msg"")
-    }
+    "Compiler" XsParser.
+    "Compiler" Compiler Static.
 }
 
 Terminate :: ";"
@@ -64,126 +49,129 @@ Result -> {
 }
 
 XsLangVisitor -> {
-} ...XsParserBaseVisitor<{}>  {
-    VisitProgram(context: ProgramContext) -> (v: {}) {
-        Statement List := context.statement()
-        Result := ""
-        Statement List @ item {
-            Result += VisitStatement(item)
+    XsParserBaseVisitor<{}> 
+
+    self ID := ""
+    super ID := ""
+}
+(me:XsLangVisitor)(base) VisitProgram(context: ProgramContext) -> (v: {}) {
+    Statement List := context.statement()
+    Result := ""
+    Statement List @ item {
+        Result += VisitStatement(item)
+    }
+    <- (Result)
+}
+
+(me:XsLangVisitor)(base) VisitId(context: IdContext) -> (v: {}) {
+    r := Result{data = "var"}
+    first := Visit(context.GetChild(0)):(Result)
+    r.permission = first.permission
+    r.text = first.text
+    r.isVirtual = first.isVirtual
+    ? context.ChildCount >= 2 {
+        [1 < context.ChildCount] @ i {
+            other := Visit(context.GetChild(i)):(Result)
+            r.text += "_"other.text""
         }
-        <- (Result)
     }
 
-    VisitId(context: IdContext) -> (v: {}) {
-        r := Result{data = "var"}
-        first := Visit(context.GetChild(0)):Result
-        r.permission = first.permission
-        r.text = first.text
-        r.isVirtual = first.isVirtual
-        ? context.ChildCount >= 2 {
-            [1 < context.ChildCount] @ i {
-                other := Visit(context.GetChild(i)):Result
-                r.text += "_"other.text""
-            }
-        }
+    ? keywords.Exists({t -> t == r.text}) {
+        r.text = "@"r.text""
+    }
+    ? r.text == self ID {
+        r.text = "this"
+    } r.text == super ID {
+        r.text = "base"
+    }
+    <- (r)
+}
 
-        ? keywords.Exists({t -> t == r.text}) {
-            r.text = "@"r.text""
-        }
-        ? r.text == self ID {
-            r.text = "this"
-        } r.text == super ID {
-            r.text = "base"
-        }
-        <- (r)
+(me:XsLangVisitor)(base) VisitIdItem(context: IdItemContext) -> (v: {}) {
+    r := Result{data = "var"}
+    ? context.typeBasic() >< () {
+        r.permission = "public"
+        r.text += context.typeBasic().GetText()
+        r.isVirtual = True
+    } context.linqKeyword() >< () {
+        r.permission = "public"
+        r.text += Visit(context.linqKeyword())
+        r.isVirtual = True
+    } context.op.Type == IDPublic {
+        r.permission = "public"
+        r.text += context.op.Text
+        r.isVirtual = True
+    } context.op.Type == IDPrivate {
+        r.permission = "protected"
+        r.text += context.op.Text
+        r.isVirtual = True
+    }
+    <- (r)
+}
+
+(me:XsLangVisitor)(base) VisitBoolExpr(context: BoolExprContext) -> (v: {}) {
+    r := Result{}
+    ? context.t.Type == TrueLiteral {
+        r.data = Bool
+        r.text = T
+    } context.t.Type == FalseLiteral {
+        r.data = Bool
+        r.text = F
+    }
+    <- (r)
+}
+
+(me:XsLangVisitor)(base) VisitAnnotationSupport(context: AnnotationSupportContext) -> (v: {}) {
+    <- (Visit(context.annotation()):(Str))
+}
+
+(me:XsLangVisitor)(base) VisitAnnotation(context: AnnotationContext) -> (v: {}) {
+    obj := ""
+    id := ""
+    ? context.id() >< () {
+        id = ""Visit(context.id()):(Result).text":"
     }
 
-    VisitIdItem(context: IdItemContext) -> (v: {}) {
-        r := Result{data = "var"}
-        ? context.typeBasic() >< () {
-            r.permission = "public"
-            r.text += context.typeBasic().GetText()
-            r.isVirtual = True
-        } context.linqKeyword() >< () {
-            r.permission = "public"
-            r.text += Visit(context.linqKeyword())
-            r.isVirtual = True
-        } context.op.Type == IDPublic {
-            r.permission = "public"
-            r.text += context.op.Text
-            r.isVirtual = True
-        } context.op.Type == IDPrivate {
-            r.permission = "protected"
-            r.text += context.op.Text
-            r.isVirtual = True
-        }
-        <- (r)
-    }
+    r := Visit(context.annotationList()):(Str)
+    obj += "[" id "" r "]"
+    <- (obj)
+}
 
-    VisitBoolExpr(context: BoolExprContext) -> (v: {}) {
-        r := Result{}
-        ? context.t.Type == TrueLiteral {
-            r.data = Bool
-            r.text = T
-        } context.t.Type == FalseLiteral {
-            r.data = Bool
-            r.text = F
+(me:XsLangVisitor)(base) VisitAnnotationList(context: AnnotationListContext) -> (v: {}) {
+    obj := ""
+    [0 < context.annotationItem().Length] @ i {
+        ? i > 0 {
+            obj += "," Visit(context.annotationItem(i)) ""
+        } _ {
+            obj += Visit(context.annotationItem(i))
         }
-        <- (r)
     }
+    <- (obj)
+}
 
-    VisitAnnotationSupport(context: AnnotationSupportContext) -> (v: {}) {
-        <- (Visit(context.annotation()):Str)
-    }
-
-    VisitAnnotation(context: AnnotationContext) -> (v: {}) {
-        obj := ""
-        id := ""
-        ? context.id() >< () {
-            id = ""Visit(context.id()):Result.text":"
+(me:XsLangVisitor)(base) VisitAnnotationItem(context: AnnotationItemContext) -> (v: {}) {
+    obj := ""
+    obj += Visit(context.id()):(Result).text
+    [0 < context.annotationAssign().Length] @ i {
+        ? i > 0 {
+            obj += "," Visit(context.annotationAssign(i)) ""
+        } _ {
+            obj += "(" Visit(context.annotationAssign(i)) ""
         }
-
-        r := Visit(context.annotationList()):Str
-        obj += "[" id "" r "]"
-        <- (obj)
     }
-
-    VisitAnnotationList(context: AnnotationListContext) -> (v: {}) {
-        obj := ""
-        [0 < context.annotationItem().Length] @ i {
-            ? i > 0 {
-                obj += "," Visit(context.annotationItem(i)) ""
-            } _ {
-                obj += Visit(context.annotationItem(i))
-            }
-        }
-        <- (obj)
+    ? context.annotationAssign().Length > 0 {
+        obj += ")"
     }
+    <- (obj)
+}
 
-    VisitAnnotationItem(context: AnnotationItemContext) -> (v: {}) {
-        obj := ""
-        obj += Visit(context.id()):Result.text
-        [0 < context.annotationAssign().Length] @ i {
-            ? i > 0 {
-                obj += "," Visit(context.annotationAssign(i)) ""
-            } _ {
-                obj += "(" Visit(context.annotationAssign(i)) ""
-            }
-        }
-        ? context.annotationAssign().Length > 0 {
-            obj += ")"
-        }
-        <- (obj)
+(me:XsLangVisitor)(base) VisitAnnotationAssign(context: AnnotationAssignContext) -> (v: {}) {
+    obj := ""
+    id := ""
+    ? context.id() >< () {
+        id = "" Visit(context.id()):(Result).text "="
     }
-
-    VisitAnnotationAssign(context: AnnotationAssignContext) -> (v: {}) {
-        obj := ""
-        id := ""
-        ? context.id() >< () {
-            id = "" Visit(context.id()):Result.text "="
-        }
-        r := Visit(context.expression()):Result
-        obj = id + r.text
-        <- (obj)
-    }
+    r := Visit(context.expression()):(Result)
+    obj = id + r.text
+    <- (obj)
 }
