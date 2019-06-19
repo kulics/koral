@@ -81,7 +81,7 @@ packageControlSubStatement: id left_brace (functionSupportStatement)+ right_brac
 // 包重载
 packageOverrideStatement: left_brace (packageOverrideFunctionStatement|New_Line)* right_brace;
 // 包扩展
-packageExtensionStatement: (annotationSupport)? parameterClauseIn id (templateDefine)? parameterClauseIn t=(Right_Arrow|Right_Flow) New_Line*
+packageExtensionStatement: (annotationSupport)? parameterClauseSelf id (templateDefine)? parameterClauseIn t=(Right_Arrow|Right_Flow) New_Line*
 parameterClauseOut left_brace (functionSupportStatement)* right_brace end;
 // 协议
 protocolStatement: (annotationSupport)? id (templateDefine)? Left_Arrow left_brace (protocolSupportStatement)* right_brace end;
@@ -126,6 +126,8 @@ returnStatement: Left_Arrow tuple end;
 parameterClauseIn: left_paren parameter? (more parameter)*  right_paren ;
 // 出参
 parameterClauseOut: left_paren parameter? (more parameter)*  right_paren ;
+// 接收器
+parameterClauseSelf: left_paren id Colon typeType right_paren;
 // 参数结构
 parameter: (annotationSupport)? id Colon typeType (Equal expression)?;
 

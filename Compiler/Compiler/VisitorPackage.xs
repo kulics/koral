@@ -10,24 +10,88 @@
 XsLangVisitor -> {
 } ...XsParserBaseVisitor<{}> {
     VisitPackageExtensionStatement(context: PackageExtensionStatementContext) -> (v: {}) {
-        ## 
+        Self := Visit(context.parameterClauseSelf()):Parameter
         id := Visit(context.id()):Result
+        isVirtual := ""
+        ? id.isVirtual {
+            isVirtual = " virtual "
+        }
         obj := ""
-        obj += ""id.permission" partial class "id.text""
-        # 泛型 #
-        templateContract := ""
-        ? context.templateDefine() >< () {
-            template := Visit(context.templateDefine()):TemplateItem
-            obj += template.Template
-            templateContract = template.Contract
+        ? Self.id == "@this" {
+            obj += ""Self.permission" partial class "Self.type""BlockLeft + Wrap""
+              # 异步 #
+            ? context.t.Type == Right Flow {
+                pout := Visit(context.parameterClauseOut()):Str
+                ? pout >< "void" {
+                    pout = ""Task"<"pout">"
+                } _ {
+                    pout = Task
+                }
+                obj += ""id.permission""isVirtual" async "pout" "id.text""
+            } _ {
+                obj += ""id.permission"" isVirtual " " Visit(context.parameterClauseOut())" "id.text""
+            }
+             # 泛型 #
+            templateContract := ""
+            ? context.templateDefine() >< () {
+                template := Visit(context.templateDefine()):TemplateItem
+                obj += template.Template
+                templateContract = template.Contract
+            }
+            obj += Visit(context.parameterClauseIn()) + templateContract + Wrap + BlockLeft + Wrap
+            obj += ProcessFunctionSupport(context.functionSupportStatement())
+            obj += BlockRight + Wrap
+            obj += BlockRight + Wrap
+        } Self.id == "@base" {
+            obj += ""Self.permission" partial class "Self.type""BlockLeft + Wrap""
+              # 异步 #
+            ? context.t.Type == Right Flow {
+                pout := Visit(context.parameterClauseOut()):Str
+                ? pout >< "void" {
+                    pout = ""Task"<"pout">"
+                } _ {
+                    pout = Task
+                }
+                obj += ""id.permission" override async "pout" "id.text""
+            } _ {
+                obj += ""id.permission" override "Visit(context.parameterClauseOut())" "id.text""
+            }
+             # 泛型 #
+            templateContract := ""
+            ? context.templateDefine() >< () {
+                template := Visit(context.templateDefine()):TemplateItem
+                obj += template.Template
+                templateContract = template.Contract
+            }
+            obj += Visit(context.parameterClauseIn()) + templateContract + Wrap + BlockLeft + Wrap
+            obj += ProcessFunctionSupport(context.functionSupportStatement())
+            obj += BlockRight + Wrap
+            obj += BlockRight + Wrap
+        } _ {
+            # 异步 #
+            ? context.t.Type == Right Flow {
+                pout := Visit(context.parameterClauseOut()):Str
+                ? pout >< "void" {
+                    pout = ""Task"<"pout">"
+                } _ {
+                    pout = Task
+                }
+                obj += ""id.permission" async static "pout" "id.text""
+            } _ {
+                obj += ""id.permission" static "Visit(context.parameterClauseOut())" "id.text""
+            }
+             # 泛型 #
+            templateContract := ""
+            ? context.templateDefine() >< () {
+                template := Visit(context.templateDefine()):TemplateItem
+                obj += template.Template
+                templateContract = template.Contract
+            }
+            obj += "(this " Self.type " "  + Self.id + Visit(context.parameterClauseIn()):Str.sub Str(1) + templateContract + Wrap + BlockLeft + Wrap
+            obj += ProcessFunctionSupport(context.functionSupportStatement())
+            obj += BlockRight + Wrap
         }
-        obj += templateContract + BlockLeft + Wrap
-        context.packageExtensionSupportStatement() @ item {
-            obj += Visit(item)
-        }
-        obj += BlockRight + Terminate + Wrap
-        ##
-        <- ("")
+        <- (obj)
     }
 
     VisitPackageStatement(context: PackageStatementContext) -> (v: {}) {
