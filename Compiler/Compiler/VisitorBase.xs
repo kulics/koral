@@ -90,6 +90,9 @@ XsLangVisitor -> {
         ? keywords.Exists({t -> t == r.text}) {
             r.text = "@"r.text""
         }
+        ? r.text == self ID {
+            r.text = "this"
+        }
         <- (r)
     }
 
