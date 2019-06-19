@@ -94,6 +94,10 @@ XsLangVisitor -> {
         <- (obj)
     }
 
+    VisitIncludeStatement(context: IncludeStatementContext) -> (v: {}){
+        <- (Visit(context.typeType()))
+    }
+
     VisitPackageStatement(context: PackageStatementContext) -> (v: {}) {
         id := Visit(context.id()):Result
         obj := ""
@@ -109,7 +113,11 @@ XsLangVisitor -> {
             Init += "public " id.text " " Visit(item):Str ""
         }
         context.packageSupportStatement() @ item {
-            obj += Visit(item)
+            ? item.GetChild(0).GetType() == ?(:IncludeStatementContext) {
+                extend += Visit(item)
+            } _ {
+                obj += Visit(item)
+            }
         }
         ? context.packageOverrideStatement() >< () {
             obj += Visit(context.packageOverrideStatement()):Str
