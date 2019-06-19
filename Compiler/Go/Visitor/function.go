@@ -119,10 +119,13 @@ func (sf *XsVisitor) VisitParameterClauseOut(ctx *parser.ParameterClauseOutConte
 
 func (sf *XsVisitor) VisitParameterClauseSelf(ctx *parser.ParameterClauseSelfContext) interface{} {
 	p := Parameter{}
-	id := sf.Visit(ctx.Id()).(Result)
+	id := sf.Visit(ctx.Id(0)).(Result)
 	p.Id = id.Text
 	p.Permission = id.Permission
 	p.Type = sf.Visit(ctx.TypeType()).(string)
+	if ctx.Id(1) != nil {
+		p.Value = sf.Visit(ctx.Id(1)).(Result).Text
+	}
 	return p
 }
 

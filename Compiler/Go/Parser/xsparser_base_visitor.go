@@ -60,19 +60,7 @@ func (v *BaseXsParserVisitor) VisitNamespaceFunctionStatement(ctx *NamespaceFunc
 	return v.VisitChildren(ctx)
 }
 
-func (v *BaseXsParserVisitor) VisitIncludeStatement(ctx *IncludeStatementContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
 func (v *BaseXsParserVisitor) VisitPackageStatement(ctx *PackageStatementContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BaseXsParserVisitor) VisitPackageNewStatement(ctx *PackageNewStatementContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BaseXsParserVisitor) VisitParameterClausePackage(ctx *ParameterClausePackageContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -80,11 +68,15 @@ func (v *BaseXsParserVisitor) VisitPackageSupportStatement(ctx *PackageSupportSt
 	return v.VisitChildren(ctx)
 }
 
-func (v *BaseXsParserVisitor) VisitPackageFunctionStatement(ctx *PackageFunctionStatementContext) interface{} {
+func (v *BaseXsParserVisitor) VisitIncludeStatement(ctx *IncludeStatementContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
-func (v *BaseXsParserVisitor) VisitPackageOverrideFunctionStatement(ctx *PackageOverrideFunctionStatementContext) interface{} {
+func (v *BaseXsParserVisitor) VisitPackageNewStatement(ctx *PackageNewStatementContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseXsParserVisitor) VisitPackageFunctionStatement(ctx *PackageFunctionStatementContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -100,11 +92,7 @@ func (v *BaseXsParserVisitor) VisitPackageControlSubStatement(ctx *PackageContro
 	return v.VisitChildren(ctx)
 }
 
-func (v *BaseXsParserVisitor) VisitPackageOverrideStatement(ctx *PackageOverrideStatementContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BaseXsParserVisitor) VisitPackageExtensionStatement(ctx *PackageExtensionStatementContext) interface{} {
+func (v *BaseXsParserVisitor) VisitPackageEventStatement(ctx *PackageEventStatementContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -125,26 +113,6 @@ func (v *BaseXsParserVisitor) VisitProtocolControlSubStatement(ctx *ProtocolCont
 }
 
 func (v *BaseXsParserVisitor) VisitProtocolFunctionStatement(ctx *ProtocolFunctionStatementContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BaseXsParserVisitor) VisitProtocolImplementSupportStatement(ctx *ProtocolImplementSupportStatementContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BaseXsParserVisitor) VisitProtocolImplementStatement(ctx *ProtocolImplementStatementContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BaseXsParserVisitor) VisitImplementControlStatement(ctx *ImplementControlStatementContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BaseXsParserVisitor) VisitImplementFunctionStatement(ctx *ImplementFunctionStatementContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BaseXsParserVisitor) VisitImplementEventStatement(ctx *ImplementEventStatementContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -281,18 +249,6 @@ func (v *BaseXsParserVisitor) VisitPrimaryExpression(ctx *PrimaryExpressionConte
 }
 
 func (v *BaseXsParserVisitor) VisitExpression(ctx *ExpressionContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BaseXsParserVisitor) VisitCallBase(ctx *CallBaseContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BaseXsParserVisitor) VisitCallSelf(ctx *CallSelfContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BaseXsParserVisitor) VisitCallNameSpace(ctx *CallNameSpaceContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 

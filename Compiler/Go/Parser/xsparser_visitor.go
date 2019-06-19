@@ -47,26 +47,20 @@ type XsParserVisitor interface {
 	// Visit a parse tree produced by XsParser#namespaceFunctionStatement.
 	VisitNamespaceFunctionStatement(ctx *NamespaceFunctionStatementContext) interface{}
 
-	// Visit a parse tree produced by XsParser#includeStatement.
-	VisitIncludeStatement(ctx *IncludeStatementContext) interface{}
-
 	// Visit a parse tree produced by XsParser#packageStatement.
 	VisitPackageStatement(ctx *PackageStatementContext) interface{}
-
-	// Visit a parse tree produced by XsParser#packageNewStatement.
-	VisitPackageNewStatement(ctx *PackageNewStatementContext) interface{}
-
-	// Visit a parse tree produced by XsParser#parameterClausePackage.
-	VisitParameterClausePackage(ctx *ParameterClausePackageContext) interface{}
 
 	// Visit a parse tree produced by XsParser#packageSupportStatement.
 	VisitPackageSupportStatement(ctx *PackageSupportStatementContext) interface{}
 
+	// Visit a parse tree produced by XsParser#includeStatement.
+	VisitIncludeStatement(ctx *IncludeStatementContext) interface{}
+
+	// Visit a parse tree produced by XsParser#packageNewStatement.
+	VisitPackageNewStatement(ctx *PackageNewStatementContext) interface{}
+
 	// Visit a parse tree produced by XsParser#packageFunctionStatement.
 	VisitPackageFunctionStatement(ctx *PackageFunctionStatementContext) interface{}
-
-	// Visit a parse tree produced by XsParser#packageOverrideFunctionStatement.
-	VisitPackageOverrideFunctionStatement(ctx *PackageOverrideFunctionStatementContext) interface{}
 
 	// Visit a parse tree produced by XsParser#packageVariableStatement.
 	VisitPackageVariableStatement(ctx *PackageVariableStatementContext) interface{}
@@ -77,11 +71,8 @@ type XsParserVisitor interface {
 	// Visit a parse tree produced by XsParser#packageControlSubStatement.
 	VisitPackageControlSubStatement(ctx *PackageControlSubStatementContext) interface{}
 
-	// Visit a parse tree produced by XsParser#packageOverrideStatement.
-	VisitPackageOverrideStatement(ctx *PackageOverrideStatementContext) interface{}
-
-	// Visit a parse tree produced by XsParser#packageExtensionStatement.
-	VisitPackageExtensionStatement(ctx *PackageExtensionStatementContext) interface{}
+	// Visit a parse tree produced by XsParser#packageEventStatement.
+	VisitPackageEventStatement(ctx *PackageEventStatementContext) interface{}
 
 	// Visit a parse tree produced by XsParser#protocolStatement.
 	VisitProtocolStatement(ctx *ProtocolStatementContext) interface{}
@@ -97,21 +88,6 @@ type XsParserVisitor interface {
 
 	// Visit a parse tree produced by XsParser#protocolFunctionStatement.
 	VisitProtocolFunctionStatement(ctx *ProtocolFunctionStatementContext) interface{}
-
-	// Visit a parse tree produced by XsParser#protocolImplementSupportStatement.
-	VisitProtocolImplementSupportStatement(ctx *ProtocolImplementSupportStatementContext) interface{}
-
-	// Visit a parse tree produced by XsParser#protocolImplementStatement.
-	VisitProtocolImplementStatement(ctx *ProtocolImplementStatementContext) interface{}
-
-	// Visit a parse tree produced by XsParser#implementControlStatement.
-	VisitImplementControlStatement(ctx *ImplementControlStatementContext) interface{}
-
-	// Visit a parse tree produced by XsParser#implementFunctionStatement.
-	VisitImplementFunctionStatement(ctx *ImplementFunctionStatementContext) interface{}
-
-	// Visit a parse tree produced by XsParser#implementEventStatement.
-	VisitImplementEventStatement(ctx *ImplementEventStatementContext) interface{}
 
 	// Visit a parse tree produced by XsParser#functionStatement.
 	VisitFunctionStatement(ctx *FunctionStatementContext) interface{}
@@ -214,15 +190,6 @@ type XsParserVisitor interface {
 
 	// Visit a parse tree produced by XsParser#expression.
 	VisitExpression(ctx *ExpressionContext) interface{}
-
-	// Visit a parse tree produced by XsParser#callBase.
-	VisitCallBase(ctx *CallBaseContext) interface{}
-
-	// Visit a parse tree produced by XsParser#callSelf.
-	VisitCallSelf(ctx *CallSelfContext) interface{}
-
-	// Visit a parse tree produced by XsParser#callNameSpace.
-	VisitCallNameSpace(ctx *CallNameSpaceContext) interface{}
 
 	// Visit a parse tree produced by XsParser#callExpression.
 	VisitCallExpression(ctx *CallExpressionContext) interface{}
