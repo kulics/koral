@@ -178,8 +178,9 @@ Node -> {
     value: Int
     left: ?Node
     right: ?Node
-} (value: Int) {
-    ..value = value
+}
+(me:Node) <>(value: Int) {
+    me.value = value
 }
 
 Control <- {
@@ -187,6 +188,7 @@ Control <- {
 }
 
 Program -> {
+    Control
     name: Str
     _running := False
 
@@ -199,18 +201,19 @@ Program -> {
         Prt("Stop")
         _running = False
     }
-} (name: Str) {
-    ..name = name
-} Control {
-    shutdown() -> () {
-        Prt("shutdown")
-        _running = False
-    }
+} 
+(me:Program) <>(name: Str) {
+    me.name = name
+} 
+(me:Program) shutdown() -> () {
+    Prt("shutdown")
+    me._running = False
 }
 
 App -> {
+    Program
     platform: Str
-} (name: Str, platform: Str)...(name) {
-    ..platform = platform
-} ...Program {
+}
+(me: App) <> (name: Str, platform: Str)(name) {
+    me.platform = platform
 }

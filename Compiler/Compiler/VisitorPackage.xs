@@ -54,28 +54,19 @@ XsLangVisitor -> {
     VisitPackageStatement(context: PackageStatementContext) -> (v: {}) {
         id := Visit(context.id()):Result
         obj := ""
-        Init := ""
         extend := ""
 
-        ? context.typeType() >< () {
-            extend = Visit(context.typeType()):Str
-        }
-
-        # 处理构造函数 #
-        context.packageNewStatement() @ item {
-            Init += "public " id.text " " Visit(item):Str ""
-        }
         context.packageSupportStatement() @ item {
             ? item.GetChild(0).GetType() == ?(:IncludeStatementContext) {
-                extend += Visit(item)
+                ? extend == "" {
+                    extend += Visit(item)
+                } _ {
+                    extend += "," + Visit(item)
+                }
             } _ {
                 obj += Visit(item)
             }
         }
-        ? context.packageOverrideStatement() >< () {
-            obj += Visit(context.packageOverrideStatement()):Str
-        }
-        obj = Init + obj
         obj += BlockRight + Terminate + Wrap
         header := ""
         ? context.annotationSupport() >< () {
@@ -101,26 +92,6 @@ XsLangVisitor -> {
 
         header += templateContract + Wrap + BlockLeft + Wrap
         obj = header + obj
-
-        context.protocolImplementStatement() @ item {
-            obj += ""id.permission" partial class "id.text""template" "Visit(item):Str" "Wrap""
-        }
-
-        <- (obj)
-    }
-
-    VisitParameterClausePackage(context: ParameterClausePackageContext) -> (v: {}) {
-        obj := "( "
-        [0 < context.parameter().Length] @ i {
-            p := Visit(context.parameter(i)):Parameter
-            ? i == 0 {
-                obj += ""p.annotation" "p.type" "p.id" "p.value""
-            } _ {
-                obj += ", "p.annotation" "p.type" "p.id" "p.value""
-            }
-        }
-
-        obj += " )"
         <- (obj)
     }
 
@@ -302,12 +273,18 @@ XsLangVisitor -> {
 
     VisitPackageNewStatement(context: PackageNewStatementContext) -> (v: {}) {
         text := ""
+        Self := Visit(context.parameterClauseSelf()):Parameter
+        self ID = Self.id
+        text += ""Self.permission" partial class "Self.type""BlockLeft + Wrap""
+        text += "public " Self.type " "
         # 获取构造数据 #
-        text = Visit(context.parameterClausePackage()):Str
+        text += Visit(context.parameterClauseIn()):Str
         ? context.expressionList() >< () {
             text += ":base(" Visit(context.expressionList()):Result.text ")"
         }
         text += BlockLeft + ProcessFunctionSupport(context.functionSupportStatement()) + BlockRight + Wrap
+        text += BlockRight + Wrap
+        self ID = ""
         <- (text)
     }
 

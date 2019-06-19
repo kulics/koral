@@ -21,6 +21,7 @@ namespaceVariableStatement
 |packageStatement
 |protocolStatement
 |packageExtensionStatement
+|packageNewStatement
 |enumStatement
 |typeAliasStatement
 |typeRedefineStatement
@@ -47,16 +48,9 @@ namespaceConstantStatement: (annotationSupport)? id (Colon typeType Colon|Colon_
 namespaceFunctionStatement: (annotationSupport)? id (templateDefine)? parameterClauseIn t=(Right_Arrow|Right_Flow) New_Line*
 parameterClauseOut left_brace (functionSupportStatement)* right_brace end;
 
-includeStatement: typeType end;
-
 // 定义包
-packageStatement: (annotationSupport)? id (templateDefine)? Right_Arrow left_brace (packageSupportStatement)* right_brace 
- (packageNewStatement)* (Dot_Dot_Dot typeType packageOverrideStatement)? (protocolImplementStatement)* end;
-// 包构造方法
-packageNewStatement: (annotationSupport)? parameterClausePackage 
-(Dot_Dot_Dot left_paren expressionList? right_paren)? left_brace (functionSupportStatement)* right_brace;
-// 入参
-parameterClausePackage: left_paren parameter? (more parameter)* right_paren;
+packageStatement: (annotationSupport)? id (templateDefine)? Right_Arrow left_brace (packageSupportStatement)* right_brace end;
+
 // 包支持的语句
 packageSupportStatement:
 includeStatement
@@ -65,6 +59,10 @@ includeStatement
 |packageFunctionStatement
 |New_Line
 ;
+includeStatement: typeType end;
+// 包构造方法
+packageNewStatement: (annotationSupport)? parameterClauseSelf Less Greater parameterClauseIn 
+(left_paren expressionList? right_paren)? left_brace (functionSupportStatement)* right_brace;
 // 函数
 packageFunctionStatement: (annotationSupport)? id (templateDefine)? parameterClauseIn t=(Right_Arrow|Right_Flow) New_Line*
 parameterClauseOut left_brace (functionSupportStatement)* right_brace end;
