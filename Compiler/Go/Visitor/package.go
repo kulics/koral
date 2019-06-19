@@ -73,7 +73,7 @@ func (sf *XsVisitor) VisitPackageVariableStatement(ctx *parser.PackageVariableSt
 	return obj
 }
 
-func (sf *XsVisitor) VisitPackageExtensionStatement(ctx *parser.PackageExtensionStatementContext) interface{} {
+func (sf *XsVisitor) VisitPackageFunctionStatement(ctx *parser.PackageFunctionStatementContext) interface{} {
 	id := sf.Visit(ctx.Id()).(Result)
 	obj := ""
 	// if ctx.AnnotationSupport() >< () {

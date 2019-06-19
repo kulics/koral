@@ -20,7 +20,8 @@ namespaceVariableStatement
 |namespaceConstantStatement
 |packageStatement
 |protocolStatement
-|packageExtensionStatement
+|packageFunctionStatement
+|packageNewStatement
 |enumStatement
 |typeAliasStatement
 |typeRedefineStatement
@@ -47,29 +48,25 @@ namespaceConstantStatement: (annotationSupport)? id (Colon typeType Colon|Colon_
 namespaceFunctionStatement: (annotationSupport)? id (templateDefine)? parameterClauseIn t=(Right_Arrow|Right_Flow) New_Line*
 parameterClauseOut left_brace (functionSupportStatement)* right_brace end;
 
-includeStatement: typeType end;
-
 // 定义包
-packageStatement: (annotationSupport)? id (templateDefine)? Right_Arrow left_brace (packageSupportStatement)* right_brace 
- (packageNewStatement)* (Dot_Dot_Dot typeType packageOverrideStatement)? (protocolImplementStatement)* end;
-// 包构造方法
-packageNewStatement: (annotationSupport)? parameterClausePackage 
-(Dot_Dot_Dot left_paren expressionList? right_paren)? left_brace (functionSupportStatement)* right_brace;
-// 入参
-parameterClausePackage: left_paren parameter? (more parameter)* right_paren;
+packageStatement: (annotationSupport)? id (templateDefine)? Right_Arrow left_brace (packageSupportStatement)* right_brace end;
+
 // 包支持的语句
 packageSupportStatement:
 includeStatement
 |packageVariableStatement
 |packageControlStatement
-|packageFunctionStatement
+|packageEventStatement
 |New_Line
 ;
+
+// 包含
+includeStatement: typeType end;
+// 包构造方法
+packageNewStatement: (annotationSupport)? parameterClauseSelf Less Greater parameterClauseIn 
+(left_paren expressionList? right_paren)? left_brace (functionSupportStatement)* right_brace;
 // 函数
-packageFunctionStatement: (annotationSupport)? id (templateDefine)? parameterClauseIn t=(Right_Arrow|Right_Flow) New_Line*
-parameterClauseOut left_brace (functionSupportStatement)* right_brace end;
-// 重写函数
-packageOverrideFunctionStatement: (annotationSupport)? (n='_')? id parameterClauseIn t=(Right_Arrow|Right_Flow) New_Line*
+packageFunctionStatement: (annotationSupport)? parameterClauseSelf (n='_')? id (templateDefine)? parameterClauseIn t=(Right_Arrow|Right_Flow) New_Line*
 parameterClauseOut left_brace (functionSupportStatement)* right_brace end;
 // 定义变量
 packageVariableStatement: (annotationSupport)? id (Colon_Equal expression|Colon typeType (Equal expression)?) end;
@@ -78,11 +75,8 @@ packageControlStatement: (annotationSupport)? id left_paren right_paren (Colon_E
 (Right_Arrow (packageControlSubStatement)+ )? end;
 // 定义子方法
 packageControlSubStatement: id left_brace (functionSupportStatement)+ right_brace;
-// 包重载
-packageOverrideStatement: left_brace (packageOverrideFunctionStatement|New_Line)* right_brace;
-// 包扩展
-packageExtensionStatement: (annotationSupport)? parameterClauseSelf id (templateDefine)? parameterClauseIn t=(Right_Arrow|Right_Flow) New_Line*
-parameterClauseOut left_brace (functionSupportStatement)* right_brace end;
+// 定义包事件
+packageEventStatement: id Colon Event Less nameSpaceItem Greater end;
 // 协议
 protocolStatement: (annotationSupport)? id (templateDefine)? Left_Arrow left_brace (protocolSupportStatement)* right_brace end;
 // 协议支持的语句
@@ -100,23 +94,7 @@ protocolControlSubStatement: id;
 // 函数
 protocolFunctionStatement: (annotationSupport)? id (templateDefine)? parameterClauseIn 
 t=(Right_Arrow|Right_Flow) New_Line* parameterClauseOut end;
-// 协议实现支持的语句
-protocolImplementSupportStatement:
-implementFunctionStatement
-|implementControlStatement
-|implementEventStatement
-|New_Line
-;
-// 实现协议
-protocolImplementStatement: nameSpaceItem (templateCall)? left_brace (protocolImplementSupportStatement)* right_brace;
-// 控制实现
-implementControlStatement: (annotationSupport)? expression left_paren right_paren (Colon_Equal expression|Colon typeType (Equal expression)?)
-(Right_Arrow (packageControlSubStatement)+ )? end;
-// 函数实现
-implementFunctionStatement: (annotationSupport)? id (templateDefine)? parameterClauseIn t=(Right_Arrow|Right_Flow) New_Line*
-parameterClauseOut left_brace (functionSupportStatement)* right_brace end;
-// 事件实现
-implementEventStatement: id Colon Event Less nameSpaceItem Greater end;
+
 // 函数
 functionStatement: id (templateDefine)? parameterClauseIn t=(Right_Arrow|Right_Flow) New_Line* parameterClauseOut left_brace
 (functionSupportStatement)* right_brace end;
@@ -127,7 +105,7 @@ parameterClauseIn: left_paren parameter? (more parameter)*  right_paren ;
 // 出参
 parameterClauseOut: left_paren parameter? (more parameter)*  right_paren ;
 // 接收器
-parameterClauseSelf: left_paren id Colon typeType right_paren;
+parameterClauseSelf: left_paren id Colon typeType right_paren (left_paren id right_paren)?;
 // 参数结构
 parameter: (annotationSupport)? id Colon typeType (Equal expression)?;
 
@@ -215,7 +193,6 @@ expressionStatement: expression end;
 // 基础表达式
 primaryExpression: 
 id (templateCall)?
-| t=Dot_Dot
 | t=Discard
 | left_paren expression right_paren
 | dataStatement
@@ -226,9 +203,6 @@ expression:
 linq // 联合查询
 | callFunc // 函数调用
 | primaryExpression
-| callBase // 调用继承
-| callSelf // 调用自己
-| callNameSpace // 调用命名空间
 | callChannel //调用通道
 | callElement //调用元素
 | callNew // 构造类对象
@@ -256,10 +230,6 @@ linq // 联合查询
 | expression pow expression // 幂型表达式
 | stringExpression // 字符串插值
 ;
-
-callBase: Dot_Dot_Dot callExpression;
-callSelf: Dot_Dot callExpression;
-callNameSpace: (Slash id)+ call New_Line? callExpression;
 
 callExpression:
 callElement // 访问元素
