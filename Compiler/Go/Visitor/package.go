@@ -94,7 +94,9 @@ func (sf *XsVisitor) VisitPackageExtensionStatement(ctx *parser.PackageExtension
 	// 	obj += template.Template
 	// 	templateContract = template.Contract
 	// }
-	obj += Func + sf.Visit(ctx.ParameterClauseIn(0)).(string) + id.Text + sf.Visit(ctx.ParameterClauseIn(1)).(string) +
+	Self := sf.Visit(ctx.ParameterClauseSelf()).(Parameter)
+	obj += Func + "(" + Self.Id + " " + Self.Type + ")" +
+		id.Text + sf.Visit(ctx.ParameterClauseIn()).(string) +
 		sf.Visit(ctx.ParameterClauseOut()).(string) + BlockLeft + Wrap
 	obj += sf.ProcessFunctionSupport(ctx.AllFunctionSupportStatement())
 	obj += BlockRight + Wrap

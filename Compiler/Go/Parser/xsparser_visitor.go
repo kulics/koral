@@ -125,6 +125,9 @@ type XsParserVisitor interface {
 	// Visit a parse tree produced by XsParser#parameterClauseOut.
 	VisitParameterClauseOut(ctx *ParameterClauseOutContext) interface{}
 
+	// Visit a parse tree produced by XsParser#parameterClauseSelf.
+	VisitParameterClauseSelf(ctx *ParameterClauseSelfContext) interface{}
+
 	// Visit a parse tree produced by XsParser#parameter.
 	VisitParameter(ctx *ParameterContext) interface{}
 

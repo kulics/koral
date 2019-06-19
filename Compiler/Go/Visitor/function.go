@@ -117,6 +117,15 @@ func (sf *XsVisitor) VisitParameterClauseOut(ctx *parser.ParameterClauseOutConte
 	return obj
 }
 
+func (sf *XsVisitor) VisitParameterClauseSelf(ctx *parser.ParameterClauseSelfContext) interface{} {
+	p := Parameter{}
+	id := sf.Visit(ctx.Id()).(Result)
+	p.Id = id.Text
+	p.Permission = id.Permission
+	p.Type = sf.Visit(ctx.TypeType()).(string)
+	return p
+}
+
 func (sf *XsVisitor) VisitParameter(ctx *parser.ParameterContext) interface{} {
 	p := Parameter{}
 	id := sf.Visit(ctx.Id()).(Result)
