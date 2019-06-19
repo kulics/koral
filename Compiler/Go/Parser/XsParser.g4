@@ -76,7 +76,7 @@ packageControlStatement: (annotationSupport)? id left_paren right_paren (Colon_E
 // 定义子方法
 packageControlSubStatement: id left_brace (functionSupportStatement)+ right_brace;
 // 定义包事件
-packageEventStatement: id Colon Event Less nameSpaceItem Greater end;
+packageEventStatement: id Colon left_brack Question right_brack nameSpaceItem end;
 // 协议
 protocolStatement: (annotationSupport)? id (templateDefine)? Left_Arrow left_brace (protocolSupportStatement)* right_brace end;
 // 协议支持的语句
