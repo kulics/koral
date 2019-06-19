@@ -1,8 +1,8 @@
-\Compiler <- {
-    Antlr4\Runtime
-    System
-    System\IO
-    System\Text
+"Compiler" {
+    "Antlr4/Runtime"
+    "System"
+    "System/IO"
+    "System/Text"
 }
 
 _Read Path(): Str
@@ -32,7 +32,7 @@ Compiled(path: Str) -> () {
         # 文件流读文件 #
         <FileStream>(file, FileMode.Open) ! fs read
         ! {
-            FSLength := fs read.Length:Int
+            FSLength := fs read.Length:(Int)
             Byte Block := Array<U8>(FSLength)
             r := fs read.Read(Byte Block, 0, Byte Block.Length)
             Input := Encoding.UTF8.GetString(Byte Block)
