@@ -91,8 +91,10 @@ func (sf *XsVisitor) VisitVariableStatement(ctx *parser.VariableStatementContext
 	Type := ""
 	if ctx.TypeType() != nil {
 		Type = sf.Visit(ctx.TypeType()).(string)
+		obj = Var + r1.Text + " " + Type + " = " + r2.Text + Wrap
+	} else {
+		obj = r1.Text + " := " + r2.Text + Wrap
 	}
-	obj = Var + r1.Text + " " + Type + " = " + r2.Text + Wrap
 	return obj
 }
 
@@ -216,4 +218,19 @@ func (sf *XsVisitor) VisitIntegerExpr(ctx *parser.IntegerExprContext) interface{
 		number += item.GetText()
 	}
 	return number
+}
+
+func (sf *XsVisitor) VisitTupleExpression(ctx *parser.TupleExpressionContext) interface{} {
+	obj := ""
+	for i := 0; i < len(ctx.AllExpression()); i++ {
+		r := sf.Visit(ctx.Expression(i)).(Result)
+		if i == 0 {
+			obj += r.Text
+		} else {
+			obj += ", " + r.Text
+		}
+	}
+	obj += ""
+	result := Result{Data: "var", Text: obj}
+	return result
 }

@@ -158,21 +158,6 @@ func (sf *XsVisitor) VisitTuple(ctx *parser.TupleContext) interface{} {
 	return result
 }
 
-func (sf *XsVisitor) VisitTupleExpression(ctx *parser.TupleExpressionContext) interface{} {
-	obj := "("
-	for i := 0; i < len(ctx.AllExpression()); i++ {
-		r := sf.Visit(ctx.Expression(i)).(Result)
-		if i == 0 {
-			obj += r.Text
-		} else {
-			obj += ", " + r.Text
-		}
-	}
-	obj += ")"
-	result := Result{Data: "var", Text: obj}
-	return result
-}
-
 func (sf *XsVisitor) VisitFunctionExpression(ctx *parser.FunctionExpressionContext) interface{} {
 	r := Result{}
 	r.Data = "var"
