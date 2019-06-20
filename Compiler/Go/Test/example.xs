@@ -10,6 +10,9 @@ main() -> () {
     test loop()
     m := man{}
     test protocol(m?)
+    test lambda((a:Int) -> (b:Str) {
+        <- ("")
+    })
 }
 
 pi :: 3.14
@@ -114,4 +117,8 @@ test go() -> (v:Int) {
     channel := <[->]Int>(1)
     channel[<-] = 2
     <- (channel[<-]) 
+}
+
+test lambda(fn:(Int)->(Str)) -> () {
+    fn(1)
 }

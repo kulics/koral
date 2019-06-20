@@ -174,7 +174,8 @@ func (sf *XsVisitor) VisitTupleExpression(ctx *parser.TupleExpressionContext) in
 }
 
 func (sf *XsVisitor) VisitFunctionExpression(ctx *parser.FunctionExpressionContext) interface{} {
-	obj := ""
+	r := Result{}
+	r.Data = "var"
 	// 异步
 	// ? context.t.Type == Right Flow {
 	// 	pout := Visit(context.parameterClauseOut()):Str
@@ -194,9 +195,9 @@ func (sf *XsVisitor) VisitFunctionExpression(ctx *parser.FunctionExpressionConte
 	// 	obj += template.Template
 	// 	templateContract = template.Contract
 	// }
-	obj += Func + sf.Visit(ctx.ParameterClauseIn()).(string) + templateContract +
+	r.Text += Func + sf.Visit(ctx.ParameterClauseIn()).(string) + templateContract +
 		sf.Visit(ctx.ParameterClauseOut()).(string) + BlockLeft + Wrap
-	obj += sf.ProcessFunctionSupport(ctx.AllFunctionSupportStatement())
-	obj += BlockRight + Wrap
-	return obj
+	r.Text += sf.ProcessFunctionSupport(ctx.AllFunctionSupportStatement())
+	r.Text += BlockRight
+	return r
 }
