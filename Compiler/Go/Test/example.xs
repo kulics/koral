@@ -104,7 +104,7 @@ worker <- {
     do something(work: Str) -> ()
 }
 
-test protocol(w: worker) -> (i:{}) {
+test protocol(w: worker) -> (i:Any) {
     w.do something("protocol")
     <- (w)
 }

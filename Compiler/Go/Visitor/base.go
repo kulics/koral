@@ -130,6 +130,9 @@ func (sf *XsVisitor) VisitIdItem(ctx *parser.IdItemContext) interface{} {
 	if ctx.TypeBasic() != nil {
 		r.Permission = "public"
 		r.Text += ctx.TypeBasic().GetText()
+	} else if ctx.TypeAny() != nil {
+		r.Permission = "public"
+		r.Text += ctx.TypeAny().GetText()
 	} else if ctx.LinqKeyword() != nil {
 		r.Permission = "public"
 		r.Text += sf.Visit(ctx.LinqKeyword()).(string)

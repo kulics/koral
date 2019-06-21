@@ -95,6 +95,8 @@ TypeStr: 'Str';
 TypeBool: 'Bool';
 TypeInt: 'Int';
 TypeNum: 'Num';
+TypeAny: 'Any';
+NilLiteral: 'Nil';
 TrueLiteral: 'True';
 FalseLiteral: 'False';
 UndefinedLiteral: 'Undefined';

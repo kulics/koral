@@ -132,8 +132,8 @@ Test optional() -> () {
     A?.to Str()
     B: ?Str = ""
     B?.to Str()
-    C: ?{} = ()
-    D: ?App = ()
+    C: ?Any = Nil
+    D: ?App = Nil
     E: ?[]?Int = []?Int{0}
     E?[0]?.to Str()?.to Str()
     F := D.or else(App{})
@@ -153,7 +153,7 @@ Test type convert() -> () {
     Y := X:(Program)
     Z1 := (12.34).to F32()
     Z2 := Z1.to I64()
-    Prt( Z2.to<{}>().to<I64>() )
+    Prt( Z2.to<Any>().to<I64>() )
     Prt( Y == :Program )
     Prt( Y >< :Program )
     Prt( X:(Program).running )
@@ -168,14 +168,14 @@ Test default() -> () {
 }
 
 Test switch() -> () {
-    X :{} = 3
+    X :Any = 3
     X ? 1 {
         Prt(1)
     } :Str {
         Prt("string")
     } :Int {
         Prt("int")
-    } () {
+    } Nil {
         Prt("null")
     } _ {
         Prt("default")
@@ -265,7 +265,7 @@ Test loop() -> () {
 }
 
 Test check() -> () {
-    Z1: ?Defer = ()
+    Z1: ?Defer = Nil
     Defer{} ! Z2
     ! {
         Z1 = Defer{}
@@ -277,7 +277,7 @@ Test check() -> () {
     } e {
         !(e)
     } _ {
-        ? Z1 >< () {
+        ? Z1 >< Nil {
             Z1.Dispose()
         }
     }
