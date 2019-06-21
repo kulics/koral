@@ -7,34 +7,34 @@
     "Compiler" Compiler Static.
 }
 
-(me:XsLangVisitor)(base) VisitTypeType(context: TypeTypeContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitTypeType(context: TypeTypeContext) -> (v: Any) {
     obj := ""
     obj = Visit(context.GetChild(0)):(Str)
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitTypeReference(context: TypeReferenceContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitTypeReference(context: TypeReferenceContext) -> (v: Any) {
     obj := "ref "
-    ? context.typeNullable() >< () {
+    ? context.typeNullable() >< Nil {
         obj += Visit(context.typeNullable())
-    } context.typeNotNull() >< () {
+    } context.typeNotNull() >< Nil {
         obj += Visit(context.typeNotNull())
     }
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitTypeNullable(context: TypeNullableContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitTypeNullable(context: TypeNullableContext) -> (v: Any) {
     obj := ""
     obj = Visit(context.typeNotNull()):(Str)
     ? context.typeNotNull().GetChild(0) == :TypeBasicContext &
-        context.typeNotNull().GetChild(0).GetText() >< "{}" &
+        context.typeNotNull().GetChild(0).GetText() >< "Any" &
         context.typeNotNull().GetChild(0).GetText() >< "Str" {
         obj += "?"
     }
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitTypeTuple(context: TypeTupleContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitTypeTuple(context: TypeTupleContext) -> (v: Any) {
     obj := ""
     obj += "("
     [0 < context.typeType().Length] @ i {
@@ -48,9 +48,9 @@
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitGetType(context: GetTypeContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitGetType(context: GetTypeContext) -> (v: Any) {
     r := Result{data = "System.Type"}
-    ? context.typeType() == () {
+    ? context.typeType() == Nil {
         r.text = ""Visit(context.expression()):(Result).text".GetType()"
     } _ {
         r.text = "typeof("Visit(context.typeType())")"
@@ -58,40 +58,40 @@
     <- (r)
 }
 
-(me:XsLangVisitor)(base) VisitTypeArray(context: TypeArrayContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitTypeArray(context: TypeArrayContext) -> (v: Any) {
     obj := ""
     obj += ""Visit(context.typeType())"[]"
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitTypeList(context: TypeListContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitTypeList(context: TypeListContext) -> (v: Any) {
     obj := ""
     obj += ""Lst"<"Visit(context.typeType())">"
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitTypeSet(context: TypeSetContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitTypeSet(context: TypeSetContext) -> (v: Any) {
     obj := ""
     obj += ""Set"<"Visit(context.typeType())">"
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitTypeDictionary(context: TypeDictionaryContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitTypeDictionary(context: TypeDictionaryContext) -> (v: Any) {
     obj := ""
     obj += ""Dic"<"Visit(context.typeType(0))","Visit(context.typeType(1))">"
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitTypePackage(context: TypePackageContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitTypePackage(context: TypePackageContext) -> (v: Any) {
     obj := ""
     obj += Visit(context.nameSpaceItem())
-    ? context.templateCall() >< () {
+    ? context.templateCall() >< Nil {
         obj += Visit(context.templateCall())
     }
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitTypeFunction(context: TypeFunctionContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitTypeFunction(context: TypeFunctionContext) -> (v: Any) {
     obj := ""
     in := Visit(context.typeFunctionParameterClause(0)):(Str)
     out := Visit(context.typeFunctionParameterClause(1)):(Str)
@@ -130,11 +130,11 @@
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitTypeAny(context: TypeAnyContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitTypeAny(context: TypeAnyContext) -> (v: Any) {
     <- (Any)
 }
 
-(me:XsLangVisitor)(base) VisitTypeFunctionParameterClause(context: TypeFunctionParameterClauseContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitTypeFunctionParameterClause(context: TypeFunctionParameterClauseContext) -> (v: Any) {
     obj := ""
     [0 <= context.typeType().Length - 1] @ i {
         p := Visit(context.typeType(i)):(Str)
@@ -147,7 +147,7 @@
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitTypeBasic(context: TypeBasicContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitTypeBasic(context: TypeBasicContext) -> (v: Any) {
     obj := ""
     context.t.Type ? TypeI8 {
         obj = I8

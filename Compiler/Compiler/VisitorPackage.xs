@@ -7,7 +7,7 @@
     "Compiler" Compiler Static.
 }
 
-(me:XsLangVisitor)(base) VisitPackageFunctionStatement(context: PackageFunctionStatementContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitPackageFunctionStatement(context: PackageFunctionStatementContext) -> (v: Any) {
     Self := Visit(context.parameterClauseSelf()):(Parameter)
     self ID = Self.id
     id := Visit(context.id()):(Result)
@@ -15,7 +15,7 @@
     ? id.isVirtual {
         isVirtual = " virtual "
     }
-    ? Self.value >< () {
+    ? Self.value >< Nil {
         super ID = Self.value
         isVirtual = " override "
     }
@@ -23,7 +23,7 @@
 
     obj += ""Self.permission" partial class "Self.type""BlockLeft + Wrap""
     # 异步 #
-    ? context.n >< () {
+    ? context.n >< Nil {
         obj += "protected "
     } _ {
         obj += ""id.permission" "
@@ -41,7 +41,7 @@
     }
         # 泛型 #
     templateContract := ""
-    ? context.templateDefine() >< () {
+    ? context.templateDefine() >< Nil {
         template := Visit(context.templateDefine()):(TemplateItem)
         obj += template.Template
         templateContract = template.Contract
@@ -55,11 +55,11 @@
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitIncludeStatement(context: IncludeStatementContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitIncludeStatement(context: IncludeStatementContext) -> (v: Any) {
     <- (Visit(context.typeType()))
 }
 
-(me:XsLangVisitor)(base) VisitPackageStatement(context: PackageStatementContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitPackageStatement(context: PackageStatementContext) -> (v: Any) {
     id := Visit(context.id()):(Result)
     obj := ""
     extend := ""
@@ -77,14 +77,14 @@
     }
     obj += BlockRight + Terminate + Wrap
     header := ""
-    ? context.annotationSupport() >< () {
+    ? context.annotationSupport() >< Nil {
         header += Visit(context.annotationSupport())
     }
     header += ""id.permission" partial class "id.text""
     # 泛型 #
     template := ""
     templateContract := ""
-    ? context.templateDefine() >< () {
+    ? context.templateDefine() >< Nil {
         item := Visit(context.templateDefine()):(TemplateItem)
         template += item.Template
         templateContract = item.Contract
@@ -103,25 +103,25 @@
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitPackageVariableStatement(context: PackageVariableStatementContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitPackageVariableStatement(context: PackageVariableStatementContext) -> (v: Any) {
     r1 := Visit(context.id()):(Result)
     isMutable := r1.isVirtual
     typ := ""
-    r2: Result = ()
-    ? context.expression() >< () {
+    r2: Result = Nil
+    ? context.expression() >< Nil {
         r2 = Visit(context.expression()):(Result)
         typ = r2.data:(Str)
     }
-    ? context.typeType() >< () {
+    ? context.typeType() >< Nil {
         typ = Visit(context.typeType()):(Str)
     }
     obj := ""
-    ? context.annotationSupport() >< () {
+    ? context.annotationSupport() >< Nil {
         obj += Visit(context.annotationSupport())
     }
 
     obj += ""r1.permission" "typ" "r1.text""
-    ? r2 >< () {
+    ? r2 >< Nil {
         obj += " = "r2.text" "Terminate" "Wrap""
     } _ {
         obj += Terminate + Wrap
@@ -129,7 +129,7 @@
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitPackageControlStatement(context: PackageControlStatementContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitPackageControlStatement(context: PackageControlStatementContext) -> (v: Any) {
     r1 := Visit(context.id()):(Result)
     isMutable := True # r1.isVirtual #
     isVirtual := ""
@@ -137,16 +137,16 @@
         isVirtual = " virtual "
     }
     typ := ""
-    r2: Result = ()
-    ? context.expression() >< () {
+    r2: Result = Nil
+    ? context.expression() >< Nil {
         r2 = Visit(context.expression()):(Result)
         typ = r2.data:(Str)
     }
-    ? context.typeType() >< () {
+    ? context.typeType() >< Nil {
         typ = Visit(context.typeType()):(Str)
     }
     obj := ""
-    ? context.annotationSupport() >< () {
+    ? context.annotationSupport() >< Nil {
         obj += Visit(context.annotationSupport())
     }
     ? context.packageControlSubStatement().Length > 0 {
@@ -157,7 +157,7 @@
             obj += temp.text
             record[temp.data:(Str)] = True
         }
-        ? r2 >< () {
+        ? r2 >< Nil {
             obj = "protected "typ" _"r1.text" = "r2.text"" Terminate " "Wrap"" obj ""
             ? ~record.ContainsKey("get") {
                 obj += "get "BlockLeft" return _"r1.text"; "BlockRight""
@@ -170,14 +170,14 @@
     } _ {
         ? isMutable {
             obj += ""r1.permission" "isVirtual" "typ" "r1.text" "BlockLeft" get"Terminate"set"Terminate" "BlockRight""
-            ? r2 >< () {
+            ? r2 >< Nil {
                 obj += " = "r2.text" "Terminate" "Wrap""
             } _ {
                 obj += Wrap
             }
         } _ {
             obj += ""r1.permission" "isVirtual" "typ" "r1.text" "BlockLeft" get"Terminate" "BlockRight""
-            ? r2 >< () {
+            ? r2 >< Nil {
                 obj += " = "r2.text" "Terminate" "Wrap""
             } _ {
                 obj += Wrap
@@ -187,7 +187,7 @@
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitPackageControlSubStatement(context: PackageControlSubStatementContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitPackageControlSubStatement(context: PackageControlSubStatementContext) -> (v: Any) {
     obj := ""
     id := ""
     typ := ""
@@ -205,7 +205,7 @@
     <- (Result{ text = obj, data = typ })
 }
 
-(me:XsLangVisitor)(base) VisitPackageNewStatement(context: PackageNewStatementContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitPackageNewStatement(context: PackageNewStatementContext) -> (v: Any) {
     text := ""
     Self := Visit(context.parameterClauseSelf()):(Parameter)
     self ID = Self.id
@@ -213,7 +213,7 @@
     text += "public " Self.type " "
     # 获取构造数据 #
     text += Visit(context.parameterClauseIn()):(Str)
-    ? context.expressionList() >< () {
+    ? context.expressionList() >< Nil {
         text += ":base(" Visit(context.expressionList()):(Result).text ")"
     }
     text += BlockLeft + ProcessFunctionSupport(context.functionSupportStatement()) + BlockRight + Wrap
@@ -222,7 +222,7 @@
     <- (text)
 }
 
-(me:XsLangVisitor)(base) VisitPackageEventStatement(context: PackageEventStatementContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitPackageEventStatement(context: PackageEventStatementContext) -> (v: Any) {
     obj := ""
     id := Visit(context.id()):(Result)
     nameSpace := Visit(context.nameSpaceItem())
@@ -230,12 +230,12 @@
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitProtocolStatement(context: ProtocolStatementContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitProtocolStatement(context: ProtocolStatementContext) -> (v: Any) {
     id := Visit(context.id()):(Result)
     obj := ""
     interfaceProtocol := ""
     ptclName := id.text
-    ? context.annotationSupport() >< () {
+    ? context.annotationSupport() >< Nil {
         obj += Visit(context.annotationSupport())
     }
     context.protocolSupportStatement() @ item {
@@ -245,7 +245,7 @@
     obj += "public partial interface " + ptclName
     # 泛型 #
     templateContract := ""
-    ? context.templateDefine() >< () {
+    ? context.templateDefine() >< Nil {
         template := Visit(context.templateDefine()):(TemplateItem)
         obj += template.Template
         templateContract = template.Contract
@@ -256,11 +256,11 @@
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitProtocolControlStatement(context: ProtocolControlStatementContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitProtocolControlStatement(context: ProtocolControlStatementContext) -> (v: Any) {
     id := Visit(context.id()):(Result)
     isMutable := id.isVirtual
     r := Result{}
-    ? context.annotationSupport() >< () {
+    ? context.annotationSupport() >< Nil {
         r.text += Visit(context.annotationSupport())
     }
     r.permission = "public"
@@ -283,16 +283,16 @@
     <- (r)
 }
 
-(me:XsLangVisitor)(base) VisitProtocolControlSubStatement(context: ProtocolControlSubStatementContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitProtocolControlSubStatement(context: ProtocolControlSubStatementContext) -> (v: Any) {
     obj := ""
     obj = GetControlSub(context.id().GetText()) + Terminate
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitProtocolFunctionStatement(context: ProtocolFunctionStatementContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitProtocolFunctionStatement(context: ProtocolFunctionStatementContext) -> (v: Any) {
     id := Visit(context.id()):(Result)
     r := Result{}
-    ? context.annotationSupport() >< () {
+    ? context.annotationSupport() >< Nil {
         r.text += Visit(context.annotationSupport())
     }
     r.permission = "public"
@@ -310,7 +310,7 @@
     }
     # 泛型 #
     templateContract := ""
-    ? context.templateDefine() >< () {
+    ? context.templateDefine() >< Nil {
         template := Visit(context.templateDefine()):(TemplateItem)
         r.text += template.Template
         templateContract = template.Contract

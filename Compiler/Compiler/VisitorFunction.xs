@@ -36,7 +36,7 @@ Parameter -> {
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitFunctionStatement(context: FunctionStatementContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitFunctionStatement(context: FunctionStatementContext) -> (v: Any) {
     id := Visit(context.id()):(Result)
     obj := ""
     # 异步 #
@@ -53,7 +53,7 @@ Parameter -> {
     }
     # 泛型 #
     templateContract := ""
-    ? context.templateDefine() >< () {
+    ? context.templateDefine() >< Nil {
         template := Visit(context.templateDefine()):(TemplateItem)
         obj += template.Template
         templateContract = template.Contract
@@ -64,7 +64,7 @@ Parameter -> {
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitReturnStatement(context: ReturnStatementContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitReturnStatement(context: ReturnStatementContext) -> (v: Any) {
     r := Visit(context.tuple()):(Result)
     ? r.text == "()" {
         r.text = ""
@@ -72,7 +72,7 @@ Parameter -> {
     <- ("return "r.text" "Terminate" "Wrap"")
 }
 
-(me:XsLangVisitor)(base) VisitTuple(context: TupleContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitTuple(context: TupleContext) -> (v: Any) {
     obj := "("
     [0 < context.expression().Length] @ i {
         r := Visit(context.expression(i)):(Result)
@@ -87,7 +87,7 @@ Parameter -> {
     <- (result)
 }
 
-(me:XsLangVisitor)(base) VisitTupleExpression(context: TupleExpressionContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitTupleExpression(context: TupleExpressionContext) -> (v: Any) {
     obj := "("
     [0 < context.expression().Length] @ i {
         r := Visit(context.expression(i)):(Result)
@@ -102,7 +102,7 @@ Parameter -> {
     <- (result)
 }
 
-(me:XsLangVisitor)(base) VisitParameterClauseIn(context: ParameterClauseInContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitParameterClauseIn(context: ParameterClauseInContext) -> (v: Any) {
     obj := "("
     temp := []Str{}
     [context.parameter().Length - 1 >= 0] @ i {
@@ -121,7 +121,7 @@ Parameter -> {
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitParameterClauseOut(context: ParameterClauseOutContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitParameterClauseOut(context: ParameterClauseOutContext) -> (v: Any) {
     obj := ""
     ? context.parameter().Length == 0 {
         obj += "void"
@@ -148,27 +148,27 @@ Parameter -> {
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitParameterClauseSelf(context: ParameterClauseSelfContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitParameterClauseSelf(context: ParameterClauseSelfContext) -> (v: Any) {
     p := Parameter{}
     id := Visit(context.id(0)):(Result)
     p.id = id.text
     p.permission = id.permission
     p.type = Visit(context.typeType()):(Str)
-    ? context.id(1) >< () {
+    ? context.id(1) >< Nil {
         p.value = Visit(context.id(1)):(Result).text
     }
     <- (p)
 }
 
-(me:XsLangVisitor)(base) VisitParameter(context: ParameterContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitParameter(context: ParameterContext) -> (v: Any) {
     p := Parameter{}
     id := Visit(context.id()):(Result)
     p.id = id.text
     p.permission = id.permission
-    ? context.annotationSupport() >< () {
+    ? context.annotationSupport() >< Nil {
         p.annotation = Visit(context.annotationSupport()):(Str)
     }
-    ? context.expression() >< () {
+    ? context.expression() >< Nil {
         p.value = "=" Visit(context.expression()):(Result).text ""
     }
     p.type = Visit(context.typeType()):(Str)
