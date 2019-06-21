@@ -53,7 +53,7 @@ Main() -> () {
 }
 
 Pre order traverse(node: ?Node) -> () {
-    node ? () { 
+    node ? Nil { 
         <- () 
     }
     Prt(node.value)
@@ -62,7 +62,7 @@ Pre order traverse(node: ?Node) -> () {
 }
 
 Post order traverse(node: ?Node) -> () {
-    node ? () { 
+    node ? Nil { 
         <- () 
     }
     Post order traverse(node.left)
@@ -71,7 +71,7 @@ Post order traverse(node: ?Node) -> () {
 }
 
 Middle order traverse(node: ?Node) -> () {
-    node ? () { 
+    node ? Nil { 
         <- () 
     }
     Middle order traverse(node.left)
@@ -80,8 +80,8 @@ Middle order traverse(node: ?Node) -> () {
 }
 
 Inverse node(node: ?Node) -> (node: ?Node) {
-    node ? () { 
-        <- (()) 
+    node ? Nil { 
+        <- (Nil) 
     }
     node.left = Inverse node(node.left)
     node.right = Inverse node(node.right)

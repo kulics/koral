@@ -353,7 +353,8 @@ integerExpr: NumberLiteral+;
 
 // 类型
 typeNotNull:
-typeTuple
+typeAny
+| typeTuple
 | typeArray
 | typeList
 | typeSet
@@ -362,7 +363,6 @@ typeTuple
 | typeBasic
 | typePackage
 | typeFunction
-| typeAny
 ;
 
 typeReference: Bang (typeNotNull | typeNullable);
@@ -377,7 +377,7 @@ typeDictionary: Left_Brack typeType Right_Brack typeType;
 typeChannel: Left_Brack Right_Arrow Right_Brack typeType;
 typePackage: nameSpaceItem (templateCall)? ;
 typeFunction: typeFunctionParameterClause t=(Right_Arrow|Right_Flow) New_Line* typeFunctionParameterClause;
-typeAny: left_brace right_brace;
+typeAny: TypeAny;
 
 // 函数类型参数
 typeFunctionParameterClause: left_paren typeType? (more typeType)*  right_paren;
@@ -401,7 +401,7 @@ t=TypeI8
 | t=TypeNum
 ;
 // nil值
-nilExpr: left_paren right_paren;
+nilExpr: NilLiteral;
 // bool值
 boolExpr: t=TrueLiteral|t=FalseLiteral;
 
@@ -418,8 +418,9 @@ id: (idItem)+;
 
 idItem: op=(IDPublic|IDPrivate)
 |typeBasic
+|typeAny
 |linqKeyword
-|Event;
+;
 
 end: Semi | New_Line ;
 more: Comma  New_Line* ;
