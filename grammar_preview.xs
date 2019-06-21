@@ -89,9 +89,9 @@ Main() ~> () {
         Prt("float") 
     } :Bool { 
         Prt("boolean") 
-    } :{} {
+    } :Any {
         Prt("object")
-    } () { 
+    } Nil { 
         Prt("null") 
     }
 
@@ -311,32 +311,38 @@ Main() ~> () {
 
 # The Future #
 
-"Namespace" <- {
+"Namespace" {
     "System"
     "System/IO"
 }
+
 Num: Int
 Txt: Str
+
 Class -> {
     num: Int
     txt: Str
 }
-(me:Class)func in class() -> () {
+(me:Class) func in class() -> () {
     Func()
 }
+
 Func() -> () {
     Class In Func -> {
         num: Int
         txt: Str
     }
-    (me:Class In Func)func() -> () {
+    (me:Class In Func) func() -> () {
     }
+
     Use protocol(Class{})
 }
+
 Protocol <- {
     func in class() -> () {
     }
 }
+
 Use protocol(it: Protocol) -> () {
     it.func in class()
 }
