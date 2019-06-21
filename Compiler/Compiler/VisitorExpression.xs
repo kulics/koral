@@ -29,11 +29,11 @@ DicEle -> {
     text(): Str
 }
 
-(me:XsLangVisitor)(base) VisitVariableStatement(context: VariableStatementContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitVariableStatement(context: VariableStatementContext) -> (v: Any) {
     obj := ""
     r1 := Visit(context.expression(0)):(Result)
     r2 := Visit(context.expression(1)):(Result)
-    ? context.typeType() >< () {
+    ? context.typeType() >< Nil {
         Type := Visit(context.typeType()):(Str)
         obj = ""Type" "r1.text" = "r2.text"" + Terminate + Wrap
     } _ {
@@ -42,7 +42,7 @@ DicEle -> {
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitVariableDeclaredStatement(context: VariableDeclaredStatementContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitVariableDeclaredStatement(context: VariableDeclaredStatementContext) -> (v: Any) {
     obj := ""
     Type := Visit(context.typeType()):(Str)
     r := Visit(context.expression()):(Result)
@@ -50,23 +50,23 @@ DicEle -> {
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitAssignStatement(context: AssignStatementContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitAssignStatement(context: AssignStatementContext) -> (v: Any) {
     r1 := Visit(context.expression(0)):(Result)
     r2 := Visit(context.expression(1)):(Result)
     obj := r1.text + Visit(context.assign()) + r2.text + Terminate + Wrap
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitAssign(context: AssignContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitAssign(context: AssignContext) -> (v: Any) {
     <- (context.op.Text)
 }
 
-(me:XsLangVisitor)(base) VisitExpressionStatement(context: ExpressionStatementContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitExpressionStatement(context: ExpressionStatementContext) -> (v: Any) {
     r := Visit(context.expression()):(Result)
     <- (r.text + Terminate + Wrap)
 }
 
-(me:XsLangVisitor)(base) VisitExpression(context: ExpressionContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitExpression(context: ExpressionContext) -> (v: Any) {
     count := context.ChildCount
     r := Result{}
     ? count == 3 {
@@ -135,7 +135,7 @@ DicEle -> {
     <- (r)
 }
 
-(me:XsLangVisitor)(base) VisitCallExpression(context: CallExpressionContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitCallExpression(context: CallExpressionContext) -> (v: Any) {
     count := context.ChildCount
     r := Result{}
     ? count == 3 {
@@ -149,23 +149,23 @@ DicEle -> {
     <- (r)
 }
 
-(me:XsLangVisitor)(base) VisitTypeConversion(context: TypeConversionContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitTypeConversion(context: TypeConversionContext) -> (v: Any) {
     <- (Visit(context.typeType()):(Str))
 }
 
-(me:XsLangVisitor)(base) VisitCall(context: CallContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitCall(context: CallContext) -> (v: Any) {
     <- (context.op.Text)
 }
 
-(me:XsLangVisitor)(base) VisitWave(context: WaveContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitWave(context: WaveContext) -> (v: Any) {
     <- (context.op.Text)
 }
 
-(me:XsLangVisitor)(base) VisitJudgeType(context: JudgeTypeContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitJudgeType(context: JudgeTypeContext) -> (v: Any) {
     <- (context.op.Text)
 }
 
-(me:XsLangVisitor)(base) VisitJudge(context: JudgeContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitJudge(context: JudgeContext) -> (v: Any) {
     ? context.op.Text == "><" {
         <- ("!=")
     } context.op.Text == "&" {
@@ -176,19 +176,19 @@ DicEle -> {
     <- (context.op.Text)
 }
 
-(me:XsLangVisitor)(base) VisitAdd(context: AddContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitAdd(context: AddContext) -> (v: Any) {
     <- (context.op.Text)
 }
 
-(me:XsLangVisitor)(base) VisitMul(context: MulContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitMul(context: MulContext) -> (v: Any) {
     <- (context.op.Text)
 }
 
-(me:XsLangVisitor)(base) VisitPow(context: PowContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitPow(context: PowContext) -> (v: Any) {
     <- (context.op.Text)
 }
 
-(me:XsLangVisitor)(base) VisitPrimaryExpression(context: PrimaryExpressionContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitPrimaryExpression(context: PrimaryExpressionContext) -> (v: Any) {
     ? context.ChildCount == 1 {
         c := context.GetChild(0)
         ? c == :DataStatementContext {
@@ -207,7 +207,7 @@ DicEle -> {
     <- (Result{ text = "(" + r.text + ")", data = r.data })
 }
 
-(me:XsLangVisitor)(base) VisitExpressionList(context: ExpressionListContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitExpressionList(context: ExpressionListContext) -> (v: Any) {
     r := Result{}
     obj := ""
     [0 < context.expression().Length] @ i {
@@ -223,7 +223,7 @@ DicEle -> {
     <- (r)
 }
 
-(me:XsLangVisitor)(base) VisitTemplateDefine(context: TemplateDefineContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitTemplateDefine(context: TemplateDefineContext) -> (v: Any) {
     item := TemplateItem{}
     item.Template += "<"
     [0 < context.templateDefineItem().Length] @ i {
@@ -241,7 +241,7 @@ DicEle -> {
     <- (item)
 }
 
-(me:XsLangVisitor)(base) VisitTemplateDefineItem(context: TemplateDefineItemContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitTemplateDefineItem(context: TemplateDefineItemContext) -> (v: Any) {
     item := TemplateItem{}
     ? context.id().len() == 1 {
         id1 := context.id(0).GetText()
@@ -255,7 +255,7 @@ DicEle -> {
     <- (item)
 }
 
-(me:XsLangVisitor)(base) VisitTemplateCall(context: TemplateCallContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitTemplateCall(context: TemplateCallContext) -> (v: Any) {
     obj := ""
     obj += "<"
     [0 < context.typeType().Length] @ i {
@@ -269,12 +269,12 @@ DicEle -> {
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitCallElement(context: CallElementContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitCallElement(context: CallElementContext) -> (v: Any) {
     id := Visit(context.id()):(Result)
     ? context.op?.Type == XsParser.Question {
         id.text += "?"
     }
-    ? context.expression() == () {
+    ? context.expression() == Nil {
         <- (Result{ text = id.text + Visit(context.slice()):(Str) })
     }
     r := Visit(context.expression()):(Result)
@@ -282,11 +282,11 @@ DicEle -> {
     <- (r)
 }
 
-(me:XsLangVisitor)(base) VisitSlice(context: SliceContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitSlice(context: SliceContext) -> (v: Any) {
     <- (Visit(context.GetChild(0)):(Str))
 }
 
-(me:XsLangVisitor)(base) VisitSliceFull(context: SliceFullContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitSliceFull(context: SliceFullContext) -> (v: Any) {
     order := ""
     attach := ""
     context.op.Text ? "<=" {
@@ -305,7 +305,7 @@ DicEle -> {
     <- (".slice("expr1.text", "expr2.text", "order", "attach")")
 }
 
-(me:XsLangVisitor)(base) VisitSliceStart(context: SliceStartContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitSliceStart(context: SliceStartContext) -> (v: Any) {
     order := ""
     attach := ""
     context.op.Text ? "<=" {
@@ -323,7 +323,7 @@ DicEle -> {
     <- (".slice("expr.text", null, "order", "attach")")
 }
 
-(me:XsLangVisitor)(base) VisitSliceEnd(context: SliceEndContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitSliceEnd(context: SliceEndContext) -> (v: Any) {
     order := ""
     attach := "false"
     context.op.Text ? "<=" {
@@ -341,14 +341,14 @@ DicEle -> {
     <- (".slice(null, "expr.text", "order", "attach")")
 }
 
-(me:XsLangVisitor)(base) VisitCallFunc(context: CallFuncContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitCallFunc(context: CallFuncContext) -> (v: Any) {
     r := Result{data = "var"}
     id := Visit(context.id()):(Result)
     r.text += id.text
-    ? context.templateCall() >< () {
+    ? context.templateCall() >< Nil {
         r.text += Visit(context.templateCall())
     }
-    ? context.tuple() >< () {
+    ? context.tuple() >< Nil {
         r.text += Visit(context.tuple()):(Result).text
     } _ {
         r.text += "(" Visit(context.lambda()):(Result).text ")"
@@ -357,26 +357,26 @@ DicEle -> {
     <- (r)
 }
 
-(me:XsLangVisitor)(base) VisitCallPkg(context: CallPkgContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitCallPkg(context: CallPkgContext) -> (v: Any) {
     r := Result{data = Visit(context.typeType())}
     r.text = "(new "Visit(context.typeType())"()"
-    ? context.pkgAssign() >< () {
+    ? context.pkgAssign() >< Nil {
         r.text += Visit(context.pkgAssign())
-    } context.listAssign() >< () {
+    } context.listAssign() >< Nil {
         r.text += Visit(context.listAssign())
-    } context.setAssign() >< () {
+    } context.setAssign() >< Nil {
         r.text += Visit(context.setAssign())
-    } context.dictionaryAssign() >< () {
+    } context.dictionaryAssign() >< Nil {
         r.text += Visit(context.dictionaryAssign())
     }
     r.text += ")"
     <- (r)
 }
 
-(me:XsLangVisitor)(base) VisitCallNew(context: CallNewContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitCallNew(context: CallNewContext) -> (v: Any) {
     r := Result{data = Visit(context.typeType())}
     param := ""
-    ? context.expressionList() >< () {
+    ? context.expressionList() >< Nil {
         param = Visit(context.expressionList()):(Result).text
     }
     r.text = "(new "Visit(context.typeType())"("param")"
@@ -384,7 +384,7 @@ DicEle -> {
     <- (r)
 }
 
-(me:XsLangVisitor)(base) VisitPkgAssign(context: PkgAssignContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitPkgAssign(context: PkgAssignContext) -> (v: Any) {
     obj := ""
     obj += "{"
     [0 < context.pkgAssignElement().Length] @ i {
@@ -398,7 +398,7 @@ DicEle -> {
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitListAssign(context: ListAssignContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitListAssign(context: ListAssignContext) -> (v: Any) {
     obj := ""
     obj += "{"
     [0 < context.expression().Length] @ i {
@@ -413,7 +413,7 @@ DicEle -> {
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitSetAssign(context: SetAssignContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitSetAssign(context: SetAssignContext) -> (v: Any) {
     obj := ""
     obj += "{"
     [0 < context.expression().Length] @ i {
@@ -428,7 +428,7 @@ DicEle -> {
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitDictionaryAssign(context: DictionaryAssignContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitDictionaryAssign(context: DictionaryAssignContext) -> (v: Any) {
     obj := ""
     obj += "{"
     [0 < context.dictionaryElement().Length] @ i {
@@ -443,20 +443,20 @@ DicEle -> {
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitPkgAssignElement(context: PkgAssignElementContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitPkgAssignElement(context: PkgAssignElementContext) -> (v: Any) {
     obj := ""
     obj += Visit(context.name()) + " = " + Visit(context.expression()):(Result).text
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitPkgAnonymous(context: PkgAnonymousContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitPkgAnonymous(context: PkgAnonymousContext) -> (v: Any) {
     <- (Result{
         data = "var",
         text = "new" + Visit(context.pkgAnonymousAssign()):(Str)
     })
 }
 
-(me:XsLangVisitor)(base) VisitPkgAnonymousAssign(context: PkgAnonymousAssignContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitPkgAnonymousAssign(context: PkgAnonymousAssignContext) -> (v: Any) {
     obj := ""
     obj += "{"
     [0 < context.pkgAnonymousAssignElement().Length] @ i {
@@ -470,13 +470,13 @@ DicEle -> {
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitPkgAnonymousAssignElement(context: PkgAnonymousAssignElementContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitPkgAnonymousAssignElement(context: PkgAnonymousAssignElementContext) -> (v: Any) {
     obj := ""
     obj += Visit(context.name()) + " = " + Visit(context.expression()):(Result).text
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitCallAwait(context: CallAwaitContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitCallAwait(context: CallAwaitContext) -> (v: Any) {
     r := Result{}
     expr := Visit(context.expression()):(Result)
     r.data = "var"
@@ -484,7 +484,7 @@ DicEle -> {
     <- (r)
 }
 
-(me:XsLangVisitor)(base) VisitList(context: ListContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitList(context: ListContext) -> (v: Any) {
     type := "object"
     result := Result{}
     [0 < context.expression().Length] @ i {
@@ -504,7 +504,7 @@ DicEle -> {
     <- (result)
 }
 
-(me:XsLangVisitor)(base) VisitSet(context: SetContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitSet(context: SetContext) -> (v: Any) {
     type := "object"
     result := Result{}
     [0 < context.expression().Length] @ i {
@@ -524,7 +524,7 @@ DicEle -> {
     <- (result)
 }
 
-(me:XsLangVisitor)(base) VisitDictionary(context: DictionaryContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitDictionary(context: DictionaryContext) -> (v: Any) {
     key := Any
     value := Any
     result := Result{}
@@ -550,7 +550,7 @@ DicEle -> {
     <- (result)
 }
 
-(me:XsLangVisitor)(base) VisitDictionaryElement(context: DictionaryElementContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitDictionaryElement(context: DictionaryElementContext) -> (v: Any) {
     r1 := Visit(context.expression(0)):(Result)
     r2 := Visit(context.expression(1)):(Result)
     result := DicEle{
@@ -561,7 +561,7 @@ DicEle -> {
     <- (result)
 }
 
-(me:XsLangVisitor)(base) VisitStringExpression(context: StringExpressionContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitStringExpression(context: StringExpressionContext) -> (v: Any) {
     text := "(new System.Text.StringBuilder("context.TextLiteral().GetText()")"
     context.stringExpressionElement() @ item {
         text += Visit(item)
@@ -573,21 +573,21 @@ DicEle -> {
     })
 }
 
-(me:XsLangVisitor)(base) VisitStringExpressionElement(context: StringExpressionElementContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitStringExpressionElement(context: StringExpressionElementContext) -> (v: Any) {
     r := Visit(context.expression()):(Result)
     text := context.TextLiteral().GetText()
     <- (".Append("r.text").Append("text")")
 }
 
-(me:XsLangVisitor)(base) VisitDataStatement(context: DataStatementContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitDataStatement(context: DataStatementContext) -> (v: Any) {
     r := Result{}
-    ? context.nilExpr() >< () {
+    ? context.nilExpr() >< Nil {
         r.data = Any
         r.text = "null"
-    } context.floatExpr() >< () {
+    } context.floatExpr() >< Nil {
         r.data = F64
         r.text = Visit(context.floatExpr()):(Str)
-    } context.integerExpr() >< () {
+    } context.integerExpr() >< Nil {
         r.data = I32
         r.text = Visit(context.integerExpr()):(Str)
     } context.t.Type == TextLiteral {
@@ -606,13 +606,13 @@ DicEle -> {
     <- (r)
 }
 
-(me:XsLangVisitor)(base) VisitFloatExpr(context: FloatExprContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitFloatExpr(context: FloatExprContext) -> (v: Any) {
     number := ""
     number += Visit(context.integerExpr(0)) + "." + Visit(context.integerExpr(1))
     <- (number)
 }
 
-(me:XsLangVisitor)(base) VisitIntegerExpr(context: IntegerExprContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitIntegerExpr(context: IntegerExprContext) -> (v: Any) {
     number := ""
     context.NumberLiteral() @ item {
         number += item.GetText()
@@ -620,7 +620,7 @@ DicEle -> {
     <- (number)
 }
 
-(me:XsLangVisitor)(base) VisitFunctionExpression(context: FunctionExpressionContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitFunctionExpression(context: FunctionExpressionContext) -> (v: Any) {
     r := Result{}
     # 异步 #
     ? context.t.Type == Right_Flow {
@@ -633,20 +633,20 @@ DicEle -> {
     <- (r)
 }
 
-(me:XsLangVisitor)(base) VisitLambda(context: LambdaContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitLambda(context: LambdaContext) -> (v: Any) {
     r := Result{data = "var"}
     # 异步 #
     ? context.t.Type == Right_Flow {
         r.text += "async "
     }
     r.text += "("
-    ? context.lambdaIn() >< () {
+    ? context.lambdaIn() >< Nil {
         r.text += Visit(context.lambdaIn())
     }
     r.text += ")"
     r.text += "=>"
 
-    ? context.expressionList() >< () {
+    ? context.expressionList() >< Nil {
         r.text += Visit(context.expressionList()):(Result).text
     } _ {
         r.text += "{" + ProcessFunctionSupport(context.functionSupportStatement()) + "}"
@@ -655,7 +655,7 @@ DicEle -> {
     <- (r)
 }
 
-(me:XsLangVisitor)(base) VisitLambdaIn(context: LambdaInContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitLambdaIn(context: LambdaInContext) -> (v: Any) {
     obj := ""
     [0 < context.id().Length] @ i {
         r := Visit(context.id(i)):(Result)
@@ -668,7 +668,7 @@ DicEle -> {
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitPlusMinus(context: PlusMinusContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitPlusMinus(context: PlusMinusContext) -> (v: Any) {
     r := Result{}
     expr := Visit(context.expression()):(Result)
     op := Visit(context.add())
@@ -677,7 +677,7 @@ DicEle -> {
     <- (r)
 }
 
-(me:XsLangVisitor)(base) VisitNegate(context: NegateContext) -> (v:{}) {
+(me:XsLangVisitor)(base) VisitNegate(context: NegateContext) -> (v: Any) {
     r := Result{}
     expr := Visit(context.expression()):(Result)
     r.data = expr.data

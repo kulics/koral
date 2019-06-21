@@ -42,19 +42,19 @@ BlockRight :: "}"
 Task :: "System.Threading.Tasks.Task"
 
 Result -> {
-    data(): {}
+    data(): Any
     text(): Str
     permission(): Str
     isVirtual(): Bool
 }
 
 XsLangVisitor -> {
-    XsParserBaseVisitor<{}> 
+    XsParserBaseVisitor<Any> 
 
     self ID := ""
     super ID := ""
 }
-(me:XsLangVisitor)(base) VisitProgram(context: ProgramContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitProgram(context: ProgramContext) -> (v: Any) {
     Statement List := context.statement()
     Result := ""
     Statement List @ item {
@@ -63,7 +63,7 @@ XsLangVisitor -> {
     <- (Result)
 }
 
-(me:XsLangVisitor)(base) VisitId(context: IdContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitId(context: IdContext) -> (v: Any) {
     r := Result{data = "var"}
     first := Visit(context.GetChild(0)):(Result)
     r.permission = first.permission
@@ -87,13 +87,17 @@ XsLangVisitor -> {
     <- (r)
 }
 
-(me:XsLangVisitor)(base) VisitIdItem(context: IdItemContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitIdItem(context: IdItemContext) -> (v: Any) {
     r := Result{data = "var"}
-    ? context.typeBasic() >< () {
+    ? context.typeBasic() >< Nil {
         r.permission = "public"
         r.text += context.typeBasic().GetText()
         r.isVirtual = True
-    } context.linqKeyword() >< () {
+    } context.typeAny() >< Nil {
+        r.permission = "public"
+        r.text += context.typeAny().GetText()
+        r.isVirtual = True
+    } context.linqKeyword() >< Nil {
         r.permission = "public"
         r.text += Visit(context.linqKeyword())
         r.isVirtual = True
@@ -109,7 +113,7 @@ XsLangVisitor -> {
     <- (r)
 }
 
-(me:XsLangVisitor)(base) VisitBoolExpr(context: BoolExprContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitBoolExpr(context: BoolExprContext) -> (v: Any) {
     r := Result{}
     ? context.t.Type == TrueLiteral {
         r.data = Bool
@@ -121,14 +125,14 @@ XsLangVisitor -> {
     <- (r)
 }
 
-(me:XsLangVisitor)(base) VisitAnnotationSupport(context: AnnotationSupportContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitAnnotationSupport(context: AnnotationSupportContext) -> (v: Any) {
     <- (Visit(context.annotation()):(Str))
 }
 
-(me:XsLangVisitor)(base) VisitAnnotation(context: AnnotationContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitAnnotation(context: AnnotationContext) -> (v: Any) {
     obj := ""
     id := ""
-    ? context.id() >< () {
+    ? context.id() >< Nil {
         id = ""Visit(context.id()):(Result).text":"
     }
 
@@ -137,7 +141,7 @@ XsLangVisitor -> {
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitAnnotationList(context: AnnotationListContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitAnnotationList(context: AnnotationListContext) -> (v: Any) {
     obj := ""
     [0 < context.annotationItem().Length] @ i {
         ? i > 0 {
@@ -149,7 +153,7 @@ XsLangVisitor -> {
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitAnnotationItem(context: AnnotationItemContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitAnnotationItem(context: AnnotationItemContext) -> (v: Any) {
     obj := ""
     obj += Visit(context.id()):(Result).text
     [0 < context.annotationAssign().Length] @ i {
@@ -165,10 +169,10 @@ XsLangVisitor -> {
     <- (obj)
 }
 
-(me:XsLangVisitor)(base) VisitAnnotationAssign(context: AnnotationAssignContext) -> (v: {}) {
+(me:XsLangVisitor)(base) VisitAnnotationAssign(context: AnnotationAssignContext) -> (v: Any) {
     obj := ""
     id := ""
-    ? context.id() >< () {
+    ? context.id() >< Nil {
         id = "" Visit(context.id()):(Result).text "="
     }
     r := Visit(context.expression()):(Result)
