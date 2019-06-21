@@ -472,9 +472,9 @@ increment(7)
 ```
 Shape -> {
     number of sides := 0
-    simple description() -> (s: Str) {
-        <- ("A shape with " number of sides " sides.")
-    }
+}
+(me: Shape) simple description() -> (s: Str) {
+    <- ("A shape with " me.number of sides " sides.")
 }
 ```
 ### C#
