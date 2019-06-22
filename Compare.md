@@ -571,7 +571,7 @@ Named Shape -> {
 }
 
 Square -> {
-    Named Shape
+    :Named Shape
     side length: Num
 } 
 (me: Square)(super) simple description() -> (s: Str) {
