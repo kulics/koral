@@ -49,7 +49,7 @@ Result -> {
 }
 
 XsLangVisitor -> {
-    XsParserBaseVisitor<Any> 
+    :XsParserBaseVisitor<Any> 
 
     self ID := ""
     super ID := ""
