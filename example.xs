@@ -369,15 +369,15 @@ In Package Array -> {
 }
 
 Defer -> {
-    IDisposable
+    :IDisposable
     data := ""
 }
 
 (me: Defer) Dispose() -> () {}
 
 App -> {
-    Program
-    Protocol
+    :Program
+    :Protocol
     i := 555
     arr := {1,1,1,1}
     _pri name := " Program "
@@ -437,7 +437,7 @@ Test protocol template<T:class> <- {
 }
 
 Test implement template -> {
-    Test protocol template<Test implement template>
+    :Test protocol template<Test implement template>
 }
 (me: Test implement template) test(in: Test implement template) -> () {}
 (me: Test implement template) test<H:class>(in: H) -> () {}
@@ -487,7 +487,7 @@ Package -> {
 }
 
 Package Child -> {
-    Package
+    :Package
     x: Int
 } 
 (me:Package Child) <>(x: Int, y: Int)(y) {

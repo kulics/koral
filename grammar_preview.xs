@@ -166,9 +166,9 @@ Main() ~> () {
     # Combine Package，通过引入来复用属性和方法 #
     Image Button -> {
         # 通过包含其它包，来组合新的包使用  #
-        Image
-        Animation
-        Button
+        :Image
+        :Animation
+        :Button
 
         title: Str
         speed := 2

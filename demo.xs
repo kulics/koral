@@ -188,7 +188,7 @@ Control <- {
 }
 
 Program -> {
-    Control
+    :Control
     name: Str
     _running := False
 } 
@@ -209,7 +209,7 @@ Program -> {
 }
 
 App -> {
-    Program
+    :Program
     platform: Str
 }
 (me: App) <> (name: Str, platform: Str)(name) {
