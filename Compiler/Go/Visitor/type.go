@@ -160,6 +160,8 @@ func (sf *XsVisitor) VisitTypeBasic(ctx *parser.TypeBasicContext) interface{} {
 		obj = Int
 	} else if ctx.GetT().GetTokenType() == parser.XsLexerTypeNum {
 		obj = Num
+	} else if ctx.GetT().GetTokenType() == parser.XsLexerTypeByte {
+		obj = Byte
 	} else {
 		obj = Any
 	}
