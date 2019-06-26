@@ -246,7 +246,7 @@ Main() ~> () {
     }
 
     # Pointer Type #
-    A: ?Int = ()
+    A: ?Int = Nil
     # Get Pointer #
     C := A?
     # Safe Call #
@@ -290,7 +290,7 @@ Main() ~> () {
 
     # event #
     EventHandle -> {
-        property changed: Event<PropertyChangedEventHandler>
+        property changed: [?]PropertyChangedEventHandler
     }
 
     # control #
