@@ -5,17 +5,19 @@
   </a>
 </p>
 
-Xs is a focus on simple, open source, cross-platform programming language.
+Xs is an open source cross-platform programming language focused on engineering.
 
-The language is designed to improve reading and writing efficiency, reduce the burden of grammar, and allow users to focus on solving problems.
+The language is designed to be simple, readable, and understandable.
 
-So Xs discards the cumbersome features, retains the most versatile features, and elegantly expresses logic with minimal grammar.
+By removing keywords, reducing grammatical features, and unifying expression specifications, the language can effectively reduce the burden of reading and writing, allowing users to focus on solving problems.
 
 This is the main source code repository for Xs. It contains the compiler, and documentation.
+
 ## Features
-1. Well-designed grammar, easy to write and read.
-1. Rules are clear and uniform, intuitive.
-1. With the support of. NET platform, we can use this language in a very wide range of scenarios with the help of. NET framework and library resources.
+- Well designed grammar, easy to write and read.
+- The rules are clear and uniform, in line with intuition.
+- Currently supports output to C#/Go/TypeScript, and with their resources, we can already use this language in a very wide range of scenarios.
+- Output to LLVM will be supported in the future to support a more comprehensive scenario.
 
 ## Getting Started
 - [English](./book-en/introduction.md)
@@ -51,14 +53,15 @@ Say hello world now(begin: Str) -> () {
 ## Roadmap
 1. 2017.07 ~ 2018.03 
     1. Design syntax.
-    1. Completed translator to C # compiler.
-1. 2018.03 ~ 2019.03
+    1. Completed translator to C# compiler.
+1. 2018.03 ~ 2019.06
+    1. Complete the implementation of bootstrap.
     1. Add standard library.
     1. Improve grammar to achieve grammatical stability.
-1. 2019.03 ~ 2021.03
+1. 2019.06 ~ 2021.06
     1. Rewrite all xylaga projects using Xs.
-    1. Complete a mature compiler, Compile to CIL or LLVM or JVM.
+    1. Compile to more languages, including Go/TypeScript/LLVM.
     1. Improved compilation capabilities and support for language server protocols.
 ## Compare
-Compare with C#, Go, Kotlin, Swift.
+Compare with C#, Go, Kotlin, Swift, Python.
 Read detail from [Here](./Compare.md).  
