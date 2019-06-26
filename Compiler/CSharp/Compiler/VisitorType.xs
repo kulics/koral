@@ -179,6 +179,8 @@
         obj = Int
     } TypeNum {
         obj = Num
+    } TypeByte {
+        obj = U8
     } _ {
         obj = Any
     }

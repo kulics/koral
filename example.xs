@@ -89,6 +89,8 @@ Test type() -> () {
     Bool1: Bool = False     # bool #
     Int1: Int = 1           # int #
     Num1: Num = 1.0         # double #
+    Byte1: Byte = 1         # byte #
+    Any1: Any = 1           # byte #
 }
 
 Test operator() -> () {

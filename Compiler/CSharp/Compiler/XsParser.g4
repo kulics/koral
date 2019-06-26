@@ -399,6 +399,7 @@ t=TypeI8
 | t=TypeBool
 | t=TypeInt
 | t=TypeNum
+| t=TypeByte
 ;
 // nil值
 nilExpr: NilLiteral;
