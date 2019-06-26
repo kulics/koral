@@ -138,7 +138,7 @@ Identifier is the variable, function, package, protocol, etc. specified name. Th
 1. In different `{}`, you can define the identifier of the duplicate name, the language will give priority to the identifier defined in the current range.
 1. In namespace, packages and protocols, properties and method names that begin with the underscore `_` are considered private and the rest are considered public.
 
-In particular, since Xs has no keywords, the rules for identifiers are more lenient than other languages and can even support spaces.
+In particular, since Lite has no keywords, the rules for identifiers are more lenient than other languages and can even support spaces.
 
 E.g:
 ```

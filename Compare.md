@@ -1,7 +1,7 @@
 
 # Compare
 ## Hello World
-### Xs
+### Lite
 ```
 Prt("Hello, world!")
 ```
@@ -26,7 +26,7 @@ print("Hello, world!")
 print("Hello, world!")
 ```
 ## Variables And Constants
-### Xs
+### Lite
 ```
 my Variable := 42
 my Variable = 50
@@ -63,7 +63,7 @@ myVariable = 50
 MYCONSTANT = 42
 ```
 ## Explicit Types
-### Xs
+### Lite
 ```
 explicit Double: Num = 70
 ```
@@ -84,7 +84,7 @@ val explicitDouble: Double = 70.0
 let explicitDouble: Double = 70
 ```
 ## Basic Types
-### Xs
+### Lite
 ```
 I32 I16 I64 I8 
 F64 F32 
@@ -127,7 +127,7 @@ bool
 string
 ```
 ## Type Coercion
-### Xs
+### Lite
 ```
 F := 6.0
 I := 94
@@ -164,7 +164,7 @@ i = 94
 count = i + int(f)
 ```
 ## Inclusive Range Operator
-### Xs
+### Lite
 ```
 [ 1 <= 5 ] @ index {
     Prt("" index " times 5 is " index * 5 "")
@@ -201,7 +201,7 @@ for index in range(1,6):
     print ("%d times 5 is %d" % (index,index*5))
 ```
 ## Arrays
-### Xs
+### Lite
 ```
 Shopping List := {"catfish", "water",
     "tulips", "blue paint"}
@@ -238,7 +238,7 @@ shoppingList = ["catfish", "water",
 shoppingList[1] = "bottle of water"
 ```
 ## Maps
-### Xs
+### Lite
 ```
 Occupations := {
     ["Malcolm"]"Captain",
@@ -287,7 +287,7 @@ occupations = {
 occupations["Jayne"] = "Public Relations"
 ```
 ## Empty Collections
-### Xs
+### Lite
 ```
 Empty Array := []Str{}
 Empty Dictionary := [Str]F32{}
@@ -320,7 +320,7 @@ emptyArray = []
 emptyDictionary ={}
 ```
 ## Functions
-### Xs
+### Lite
 ```
 Greet(name: Str, day: Str) -> (r: Str) {
     <- ("Hello " name ", today is " day ".")
@@ -363,7 +363,7 @@ def greet(name,day):
 greet("Bob", "Tuesday")
 ```
 ## Tuple Return
-### Xs
+### Lite
 ```
 Get gas prices() -> (a: Num, b: Num, c: Num) {
     <- (3.59, 3.69, 3.79)
@@ -398,7 +398,7 @@ def getGasPrices():
     return (3.59, 3.69, 3.79)
 ```
 ## Function Type
-### Xs
+### Lite
 ```
 Make incrementer() -> (fn: (Int) -> (Int)) {
     Add one(number: Int) -> (number: Int) {
@@ -468,7 +468,7 @@ increment = makeIncrementer()
 increment(7)
 ```
 ## Classes Declaration
-### Xs
+### Lite
 ```
 Shape -> {
     number of sides := 0
@@ -523,7 +523,7 @@ class Shape(object):
         return 'A shape with' + numberOfSides +' sides.'
 ```
 ## Classes Usage
-### Xs
+### Lite
 ```
 Shape := Shape{}
 Shape.number of sides = 7
@@ -560,7 +560,7 @@ shape.numberOfSides = 7
 shapeDescription = shape.simpleDescription()
 ```
 ## Subclass
-### Xs
+### Lite
 ```
 Named Shape -> {
     name: Str
@@ -759,7 +759,7 @@ test.area()
 test.simpleDescription()
 ```
 ## Checking Type
-### Xs
+### Lite
 ```
 Movie Count := 0
 Song Count := 0
@@ -840,7 +840,7 @@ for item in library:
         songCount+=1
 ```
 ## Pattern Matching
-### Xs
+### Lite
 ```
 nb := 42
 nb ? [0 <= 7], 8, 9 { 
@@ -902,7 +902,7 @@ switch nb {
 }
 ```
 ## Downcasting
-### Xs
+### Lite
 ```
 someObjects @ current {
     current ? movie:Movie {
@@ -955,7 +955,7 @@ for current in someObjects:
         print('Movie: %s, dir. %s' % (movie.name, movie.director))
 ```
 ## Protocol
-### Xs
+### Lite
 ```
 Nameable <- {
     name() -> (s: Str)
@@ -1008,7 +1008,7 @@ func f(x: Nameable) {
 }
 ```
 ## Implement
-### Xs
+### Lite
 ```
 Dog -> {
 }

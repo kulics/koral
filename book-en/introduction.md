@@ -1,5 +1,5 @@
-# Xs programming language
-Xs is an open source cross-platform programming language focused on engineering.
+# Lite programming language
+Lite is an open source cross-platform programming language focused on engineering.
 
 The language is designed to be simple, readable, and understandable.
 

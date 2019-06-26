@@ -1,11 +1,11 @@
-"Xs/Example" {
+"Lite/Example" {
     "System"
     "System/IO"
     "System/Linq"
     "System/ComponentModel/DataAnnotations/Schema"
     "System/ComponentModel/DataAnnotations"
 
-    "Xs/Example" Example Static.
+    "Lite/Example" Example Static.
 }
 
 #

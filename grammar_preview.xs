@@ -1,7 +1,7 @@
 # Grammar Overview #
 
 # Name Space #
-"Xs/Demo" {
+"Lite/Demo" {
     "System"
     "System/Linq"
     "System/Text"
