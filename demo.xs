@@ -1,4 +1,4 @@
-"Xs" {
+"Lite" {
     "System"
 }
 

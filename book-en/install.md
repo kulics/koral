@@ -1,5 +1,5 @@
 # Install
-Currently, `Xs` only supports compilation to` C# `, so you need to have `.NET Core 2.x` installed on your system.
+Currently, `Lite` only supports compilation to` C# `, so you need to have `.NET Core 2.x` installed on your system.
 
 Executing `dotnet Compiler.dll` will scan the` .xs` file in the current folder and will automatically translate it into a `.cs` file with the same name.
 
@@ -11,7 +11,7 @@ In the future, we will provide executable packages that are compiled for differe
 
 It is now recommended to use the .NET Core runtime to use this language. For ease of use, you can create custom command line commands for use on your own system.
 
-`Xs` needs to use some of the language library features, so you need to refer to `Library.dll` in your project to use the library.
+`Lite` needs to use some of the language library features, so you need to refer to `Library.dll` in your project to use the library.
 
 Run Package:
 <https://github.com/kulics/xs/releases/tag/0.34>

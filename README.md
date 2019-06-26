@@ -1,17 +1,17 @@
-# The Xs Programming Language
+# The Lite Programming Language
 <p>
   <a href="https://github.com/996icu/996.ICU/blob/master/LICENSE_CN">
     <img alt="996icu" src="https://img.shields.io/badge/license-NPL%20%28The%20996%20Prohibited%20License%29-blue.svg">
   </a>
 </p>
 
-Xs is an open source cross-platform programming language focused on engineering.
+Lite is an open source cross-platform programming language focused on engineering.
 
 The language is designed to be simple, readable, and understandable.
 
 By removing keywords, reducing grammatical features, and unifying expression specifications, the language can effectively reduce the burden of reading and writing, allowing users to focus on solving problems.
 
-This is the main source code repository for Xs. It contains the compiler, and documentation.
+This is the main source code repository for Lite. It contains the compiler, and documentation.
 
 ## Features
 - Well designed grammar, easy to write and read.
@@ -45,7 +45,7 @@ Say hello world now(begin: Str) -> () {
         } "你好" {
             Print(greeting + " 世界！")
         } _ {
-            Print(greeting + " Xs!")
+            Print(greeting + " Lite!")
         }
     }
 }
@@ -59,7 +59,7 @@ Say hello world now(begin: Str) -> () {
     1. Add standard library.
     1. Improve grammar to achieve grammatical stability.
 1. 2019.06 ~ 2021.06
-    1. Rewrite all xylaga projects using Xs.
+    1. Rewrite all Xylaga projects using Lite.
     1. Compile to more languages, including Go/TypeScript/LLVM.
     1. Improved compilation capabilities and support for language server protocols.
 ## Compare
