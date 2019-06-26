@@ -95,6 +95,7 @@ TypeStr: 'Str';
 TypeBool: 'Bool';
 TypeInt: 'Int';
 TypeNum: 'Num';
+TypeByte: 'Byte';
 TypeAny: 'Any';
 NilLiteral: 'Nil';
 TrueLiteral: 'True';

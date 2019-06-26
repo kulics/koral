@@ -233,6 +233,9 @@ case TypeInt :
 case TypeNum :
 { obj=Num;
 } break;
+case TypeByte :
+{ obj=U8;
+} break;
 default:{
 obj=Any;
 }break;
