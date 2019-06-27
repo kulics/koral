@@ -21,7 +21,7 @@ This is the main source code repository for Lite. It contains the compiler, and 
 
 ## Getting Started
 - [English](./book-en/introduction.md)
-- [中文](./book-zh/introduction.md)
+- [中文](./book-zh/document.md)
 
 ## Quick Preview
 ```
