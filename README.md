@@ -30,16 +30,16 @@ This is the main source code repository for Lite. It contains the compiler, and 
 }
 
 Main() -> () {
-    Say hello world now("start now")
+    SayHelloWorldNow("start now")
 }
 
-Say hello world now(begin: Str) -> () {
+SayHelloWorldNow(begin: Str) -> () {
     Print(begin)
-    Greetings around the world := {"Hello", "Hola", "Bonjour",
+    GreetingsAroundTheWorld := {"Hello", "Hola", "Bonjour",
                 "Ciao", "こんにちは", "안녕하세요",
                 "Cześć", "Olá", "Здравствуйте",
                 "Chào bạn", "你好"}
-    Greetings around the world @ greeting {
+    GreetingsAroundTheWorld @ greeting {
         greeting ? "Hello" {
             Print(greeting + " World!")
         } "你好" {

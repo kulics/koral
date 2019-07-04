@@ -28,9 +28,9 @@ print("Hello, world!")
 ## Variables And Constants
 ### Lite
 ```
-my Variable := 42
-my Variable = 50
-my Constant :: 42
+myVariable := 42
+myVariable = 50
+myConstant :: 42
 ```
 ### C#
 ```
@@ -65,7 +65,7 @@ MYCONSTANT = 42
 ## Explicit Types
 ### Lite
 ```
-explicit Double: Num = 70
+explicitDouble: Num = 70
 ```
 ### C#
 ```
@@ -131,7 +131,7 @@ string
 ```
 F := 6.0
 I := 94
-Count := I + F.to Int()
+Count := I + F.toInt()
 ```
 ### C#
 ```
@@ -203,9 +203,9 @@ for index in range(1,6):
 ## Arrays
 ### Lite
 ```
-Shopping List := {"catfish", "water",
+shoppingList := {"catfish", "water",
     "tulips", "blue paint"}
-Shopping List[1] = "bottle of water"
+shoppingList[1] = "bottle of water"
 ```
 ### C#
 ```
@@ -240,11 +240,11 @@ shoppingList[1] = "bottle of water"
 ## Maps
 ### Lite
 ```
-Occupations := {
+occupations := {
     ["Malcolm"]"Captain",
     ["Kaylee"]"Mechanic"
 }
-Occupations["Jayne"] = "Public Relations"
+occupations["Jayne"] = "Public Relations"
 ```
 ### C#
 ```
@@ -289,8 +289,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Lite
 ```
-Empty Array := []Str{}
-Empty Dictionary := [Str]F32{}
+emptyArray := []Str{}
+emptyDictionary := [Str]F32{}
 ```
 ### C#
 ```
@@ -322,10 +322,10 @@ emptyDictionary ={}
 ## Functions
 ### Lite
 ```
-Greet(name: Str, day: Str) -> (r: Str) {
+greet(name: Str, day: Str) -> (r: Str) {
     <- ("Hello " name ", today is " day ".")
 }
-Greet("Bob", "Tuesday")
+greet("Bob", "Tuesday")
 ```
 ### C#
 ```
@@ -365,7 +365,7 @@ greet("Bob", "Tuesday")
 ## Tuple Return
 ### Lite
 ```
-Get gas prices() -> (a: Num, b: Num, c: Num) {
+getGasPrices() -> (a: Num, b: Num, c: Num) {
     <- (3.59, 3.69, 3.79)
 }
 ```
@@ -400,14 +400,14 @@ def getGasPrices():
 ## Function Type
 ### Lite
 ```
-Make incrementer() -> (fn: (Int) -> (Int)) {
-    Add one(number: Int) -> (number: Int) {
+makeIncrementer() -> (fn: (Int) -> (Int)) {
+    addOne(number: Int) -> (number: Int) {
         <- (1 + number)
     }
-    <- (Add one)
+    <- (addOne)
 }
-Increment := Make incrementer()
-Increment(7)
+increment := makeIncrementer()
+increment(7)
 ```
 ### C#
 ```
@@ -471,9 +471,9 @@ increment(7)
 ### Lite
 ```
 Shape -> {
-    number of sides := 0
+    numberOfSides := 0
 }
-(me: Shape) simple description() -> (s: Str) {
+(me: Shape) simpleDescription() -> (s: Str) {
     <- ("A shape with " me.number of sides " sides.")
 }
 ```
@@ -525,9 +525,9 @@ class Shape(object):
 ## Classes Usage
 ### Lite
 ```
-Shape := Shape{}
-Shape.number of sides = 7
-Shape description := Shape.simple description()
+shape := Shape{}
+shape.numberOfSides = 7
+shapeDescription := shape.simpleDescription()
 ```
 ### C#
 ```
@@ -562,36 +562,36 @@ shapeDescription = shape.simpleDescription()
 ## Subclass
 ### Lite
 ```
-Named Shape -> {
+NamedShape -> {
     name: Str
-    number of sides := 0
+    numberOfSides := 0
 }
-(me: Named Shape) simple description() -> (s: Str) {
-    <- ("A shape with " me.number of sides " sides.")
+(me: NamedShape) simpleDescription() -> (s: Str) {
+    <- ("A shape with " me.numberOfSides " sides.")
 }
 
 Square -> {
-    :Named Shape
-    side length: Num
+    :NamedShape
+    sideLength: Num
 } 
-(me: Square)(super) simple description() -> (s: Str) {
-    <- ("A square with sides of length " me.side length ".")
+(me: Square)(super) simpleDescription() -> (s: Str) {
+    <- ("A square with sides of length " me.sideLength ".")
 }
 
-(me: Square) init(side length: Num, name: Str) -> (v: Square) {
-    me.side length = side length
-    me.number of sides = 4
+(me: Square) init(sideLength: Num, name: Str) -> (v: Square) {
+    me.sideLength = sideLength
+    me.numberOfSides = 4
     me.name = name
     <- (me)
 }
 
 (me: Square) area() -> (f: Num) {
-    <- (me.side length ** 2)
+    <- (me.sideLength ** 2)
 }
 
-Test := Square{}.init(5.2, "square")
-Test.area()
-Test.simple description()
+test := Square{}.init(5.2, "square")
+test.area()
+test.simpleDescription()
 ```
 ### C#
 ```
@@ -761,14 +761,14 @@ test.simpleDescription()
 ## Checking Type
 ### Lite
 ```
-Movie Count := 0
-Song Count := 0
+movieCount := 0
+songCount := 0
 
 library @ item {
     item ? :Movie {
-        Movie Count += 1
+        movieCount += 1
     } :Song {
-        Song Count += 1
+        songCount += 1
     }
 }
 ```
@@ -1017,7 +1017,7 @@ Dog -> {
     <- ("Dog")
 }
 # Implement Weight #
-(me:Dog) get weight() -> (w: Int) {
+(me:Dog) getWeight() -> (w: Int) {
     <- (30)
 }
 ```
