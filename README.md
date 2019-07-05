@@ -20,7 +20,7 @@ This is the main source code repository for Lite. It contains the compiler, and 
 - Output to LLVM will be supported in the future to support a more comprehensive scenario.
 
 ## Getting Started
-- [English](./book-en/introduction.md)
+- [English](./book-en/document.md)
 - [中文](./book-zh/document.md)
 
 ## Quick Preview
