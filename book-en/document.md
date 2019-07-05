@@ -636,7 +636,7 @@ E.g:
 ```
 Arr := {1, 2, 3, 4, 5}
 Arr @ item {
-    Prt(item) # print every number #
+    Prt(item)   # print every number #
 }
 ```
 
@@ -658,7 +658,7 @@ The iterator can take the number from the start point to the end point loop. We 
 E.g:
 ```
 [0 <= 100] @ i {
-    Prt(i) # print every number #
+    Prt(i)  # print every number #
 }
 ```
 It should be noted that the meaning of `0 <= 100` is read from `0` to `100`, that is, a total of `101` times. The iterator will execute until the last number is executed, rather than ending one at a time.
@@ -680,7 +680,7 @@ We can also let it traverse in reverse order, just use `>=`.
 E.g:
 ```
 [100 >= 0] @ i {
-    ...... #从100至0#
+    ......  # From 100 to 0 #
 }
 ```
 Similarly, if you don't want to reach the last bit, you can use `100 > 0`.
@@ -692,7 +692,7 @@ At other times, we may need an infinite loop. Very easy, we only need to use the
 E.g:
 ```
 @ {
-    ...... # Never jump out #
+    ......  # Never jump out #
 }
 ```
 This can be thought of as a `while` structure relative to other languages.
@@ -702,7 +702,7 @@ So how do you jump out of the infinite loop? We can use the `<- @` statement to 
 E.g:
 ```
 @ {
-    <- @ # Jumped out without executing anything #
+    <- @    # Jumped out without executing anything #
 }
 ```
 In addition to infinite loops, bounces can also be used in other loops.
