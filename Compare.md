@@ -473,8 +473,10 @@ increment(7)
 Shape -> {
     numberOfSides := 0
 }
-(me: Shape) simpleDescription() -> (s: Str) {
-    <- ("A shape with " me.number of sides " sides.")
+(me: Shape) -> {
+    simpleDescription() -> (s: Str) {
+        <- ("A shape with " me.number of sides " sides.")
+    }
 }
 ```
 ### C#
@@ -566,27 +568,31 @@ NamedShape -> {
     name: Str
     numberOfSides := 0
 }
-(me: NamedShape) simpleDescription() -> (s: Str) {
-    <- ("A shape with " me.numberOfSides " sides.")
-}
+(me: NamedShape) -> {
+    simpleDescription() -> (s: Str) {
+        <- ("A shape with " me.numberOfSides " sides.")
+    }
+} 
 
 Square -> {
     :NamedShape
     sideLength: Num
 } 
-(me: Square)(super) simpleDescription() -> (s: Str) {
-    <- ("A square with sides of length " me.sideLength ".")
-}
+(me: Square) -> {
+    simpleDescription() -> (s: Str) {
+        <- ("A square with sides of length " me.sideLength ".")
+    }
 
-(me: Square) init(sideLength: Num, name: Str) -> (v: Square) {
-    me.sideLength = sideLength
-    me.numberOfSides = 4
-    me.name = name
-    <- (me)
-}
+    init(sideLength: Num, name: Str) -> (v: Square) {
+        me.sideLength = sideLength
+        me.numberOfSides = 4
+        me.name = name
+        <- (me)
+    }
 
-(me: Square) area() -> (f: Num) {
-    <- (me.sideLength ** 2)
+    area() -> (f: Num) {
+        <- (me.sideLength ** 2)
+    }
 }
 
 test := Square{}.init(5.2, "square")
@@ -1010,15 +1016,15 @@ func f(x: Nameable) {
 ## Implement
 ### Lite
 ```
-Dog -> {
-}
-# Implement Nameable #
-(me:Dog) name() -> (n: Str) {
-    <- ("Dog")
-}
-# Implement Weight #
-(me:Dog) getWeight() -> (w: Int) {
-    <- (30)
+Dog -> {}
+(me:Dog) -> Nameable,Weight {
+    name() -> (n: Str) {
+        <- ("Dog")
+    }
+
+    getWeight() -> (w: Int) {
+        <- (30)
+    }
 }
 ```
 ### C#
