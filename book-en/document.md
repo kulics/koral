@@ -11,6 +11,27 @@ By removing keywords, reducing grammatical features, and unifying expression spe
 - Currently supports output to C#/Go/TypeScript, and with their resources, we can already use this language in a very wide range of scenarios.
 - Output to LLVM will be supported in the future to support a more comprehensive scenario.
 
+# Index
+1. [Install](#Install)
+1. [Basic Grammar](#Basic-Grammar)
+1. [Basic Types](#Basic-Types)
+1. [Operators](#Operators)
+1. [Collection Types](#Collection-Types)
+1. [Judgment](#Judgment)
+1. [Loop](#Loop)
+1. [Function Type](#Function-Type)
+1. [Structure Type](#Structure-Type)
+1. [Namespace](#Namespace)
+1. [Control Type](#Control-Type)
+1. [Interface Type](#Interface-Type)
+1. [Enumeration Type](#Enumeration-Type)
+1. [Check](#Check)
+1. [Asynchronous Processing](#Asynchronous-Processing)
+1. [Generics](#Generics)
+1. [Annotations](#Annotations)
+1. [LINQ](#LINQ)
+1. [Optional Type](#Optional-Type)
+
 # Install
 Currently `Lite` supports compilation to `C#` and `Go`, so you need to install `.NET Core 2.x` or `Go` environment on your system.
 
@@ -293,7 +314,7 @@ E.g:
 A = Nil     # none value #
 ```
 
-# Operator
+# Operators
 Operator is a symbol that tells the compiler to perform specific mathematical or logical operations.
 
 We can simply understand the computational notation in mathematics, but programming languages have different places.
@@ -376,7 +397,7 @@ A.lft(1)    # left shift #
 A.rht(1)    # right shift #
 ```
 
-# Collection
+# Collection Types
 When we need to combine many of the same types of data together, we can use the collection to accomplish this task.
 
 Our built-in collection types are both list and dictionary.
@@ -604,6 +625,102 @@ E.g:
 ?(expr)     # Get expression type value #
 ?(:type)    # Get the type value directly by type #
 ```
+# Loop
+Sometimes we may need to execute the same piece of code multiple times.
+
+In general, statements are executed in order, the first statement in the function is executed first, then the second statement, and so on.
+## Collection loop
+If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can use the `value @ id {}` statement to iterate over the collection, taking each element out of `id`.
+
+E.g:
+```
+Arr := {1, 2, 3, 4, 5}
+Arr @ item {
+    Prt(item) # print every number #
+}
+```
+
+If we need to fetch the index and value at the same time, we can replace `id` with the `[index]value` syntax, which is valid for both the list and the dictionary.
+
+E.g:
+```
+Arr @ [i]v {
+    Prt(""i":"v"")
+}
+```
+
+This can be thought of as a `foreach` structure relative to other languages.
+## Iterator loop
+Sometimes, we don't necessarily have a collection, but we need to take the number from `0` to `100`. We have an iterator syntax to accomplish such a task.
+
+The iterator can take the number from the start point to the end point loop. We use the expression of the set, separated by two numbers using the `<=` symbol.
+
+E.g:
+```
+[0 <= 100] @ i {
+    Prt(i) # print every number #
+}
+```
+It should be noted that the meaning of `0 <= 100` is read from `0` to `100`, that is, a total of `101` times. The iterator will execute until the last number is executed, rather than ending one at a time.
+
+So if we need to execute a hundred times, you can use `0 < 99` or `1 <= 100-1` and remember this difference.
+
+The iterator defaults to increment `1` every interval. If we need to take every other number, we can add a condition for each step. Just insert `,` and a number after the start and end points are completed.
+
+E.g:
+```
+[0 <= 100, 2] @ i {
+    ......
+}
+```
+So every time the interval is not `1` but `2`, we can set other numbers.
+
+We can also let it traverse in reverse order, just use `>=`.
+
+E.g:
+```
+[100 >= 0] @ i {
+    ...... #从100至0#
+}
+```
+Similarly, if you don't want to reach the last bit, you can use `100 > 0`.
+
+This can be thought of as a `for` structure relative to other languages.
+## Infinite loop
+At other times, we may need an infinite loop. Very easy, we only need to use the `@ {}` statement.
+
+E.g:
+```
+@ {
+    ...... # Never jump out #
+}
+```
+This can be thought of as a `while` structure relative to other languages.
+## Jump out
+So how do you jump out of the infinite loop? We can use the `<- @` statement to jump out.
+
+E.g:
+```
+@ {
+    <- @ # Jumped out without executing anything #
+}
+```
+In addition to infinite loops, bounces can also be used in other loops.
+
+It should be noted that if you jump out of a multi-level nested loop, you will only jump out of the loop that is closest to you.
+## Conditional loop
+What if we need a loop that only judges a certain condition?
+Add a condition to it.
+
+E.g:
+```
+I := 0
+@ I < 6 {
+    I += 1
+}
+```
+## Continue
+If you only need to jump out of the current loop, use the `-> @` statement.
 
 # Function Type
 Function is a separate block of code used to accomplish a specific task.
@@ -791,7 +908,7 @@ Each_1_To_10( (item: Int) -> () {
 })
 ```
 
-# Structure
+# Structure Type
 If we only have a few basic data, it is actually very difficult to describe something more specific.
 
 So we need a feature that wraps data from different attributes to better describe what we need.
@@ -1105,7 +1222,7 @@ Number: Int -> get {
 }
 ```
 
-# Interface
+# Interface Type
 In reality, we often use interfaces to specify specific rules, and people or things can do things according to the expected rules.
 We often need to do this in the programming language. This function is the interface.
 
@@ -1243,7 +1360,7 @@ Func(hw: Homework) -> () {
 }
 ```
 
-# Enumeration
+# Enumeration Type
 The enumeration is a set of integer constants with independent names. It can usually be used to mark the type of some business data, which is convenient for judgment processing.
 ## Definition
 We only need to use the `id -> type[id id id id]` statement.
@@ -1586,7 +1703,7 @@ When processing the database, the database interface can be parsed into the corr
 We use this structure directly inside the program. When the database function is called, the program will automatically map to the corresponding database data.
 This greatly saves us the work of parsing and converting.
 
-# LINQ Language Integration Query
+# LINQ
 In a relational database system, data is organized into well-formed tables and accessed through a simple and powerful SQL language. Because data follows certain strict rules in the table, SQL can work well with them.
 
 However, in the program, contrary to the database, the data stored in the class object or structure is very different. Therefore, there is no universal query language to get data from the data structure. Methods for getting data from objects have always been designed as part of the program, but using LINQ makes it easy to query a collection of objects.
