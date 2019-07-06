@@ -1016,11 +1016,14 @@ Student -> {
 
 ## 结构体函数
 如果我们需要让这个结构体自带函数，让它能方便操作，我们可以另外声明一个带结构体参数的函数。
+结构体函数的声明方式与结构体类似，只是需要声明指定的标志符。形式为 `(id: type) -> {}`。
 
 例如：
 ```
-(me: Student) getGirlFriend() -> (name: Str) {
-    <- (me._girlFriend)
+(me: Student) -> {
+    getGirlFriend() -> (name: Str) {
+        <- (me._girlFriend)
+    }
 }
 ```
 
@@ -1086,8 +1089,10 @@ ChineseStudent -> {
 }
 
 # 重写 #
-(me: ChineseStudent)(parent) getGirlFriend() -> (name: Str) {
-    <- (parent._girlFriend)
+(me: ChineseStudent)(parent) -> {
+    getGirlFriend() -> (name: Str) {
+        <- (parent._girlFriend)
+    }
 }
 ```
 ### 构造
@@ -1245,21 +1250,26 @@ Homework <- {
 ## 实现接口
 我们直接给结构体增加函数来实现这个接口。
 
+对于需要显式实现的接口，可以在结构体函数中指定接口，否则可以直接实现。
+
 例如：
 ```
 Student -> {
     ......
     _count: Int
 }
-(me:Student) count: Int -> get {
-    <- (me._count)
-} set(v) {
-    me._count = v
-}
+# 显式实现 #
+(me:Student) -> Homework {
+    count: Int -> get {
+        <- (me._count)
+    } set(v) {
+        me._count = v
+    }
 
-(me:Student) do() -> () {
-    SpendTime(1)    # 花费了一个小时 #
-    me.count -= 1      # 完成了一个 #
+    do() -> () {
+        SpendTime(1)        # 花费了一个小时 #
+        me.count -= 1       # 完成了一个 #
+    }
 }
 ```
 我们的学生写作业真是非常艰苦的……
@@ -1583,13 +1593,15 @@ List<T> -> {
     length := 0
 }
 
-(me: List<T>) get(index: Int) -> (item: T) { # 获取某个泛型数据 #
-    <- ( items.get( index ) )
-}
+(me: List<T>) -> {
+    get(index: Int) -> (item: T) {  # 获取某个泛型数据 #
+        <- ( items.get( index ) )
+    }
 
-(me: List<T>) add(item: T) -> () {   # 将一个泛型数据添加进列表 #
-    items.insert(length, item)
-    length += 1
+    add(item: T) -> () {   # 将一个泛型数据添加进列表 #
+        items.insert(length, item)
+        length += 1
+    }
 }
 ```
 这样我们便定义一个支持泛型的结构体，`T` 就是泛型，实际上它可以是任何标识符，只是习惯性我们会使用 `T` 作为代称。
@@ -1643,10 +1655,10 @@ Protocol<T> <- {
     test<T>(in: T) -> () {}
 }
 
-Implement -> {
-    :Protocol<Implement>
-} 
-(me:Implement) test<Implement>(in: Implement) -> () {
+Implement -> {} 
+(me:Implement) -> Protocol<Implement> {
+    test<Implement>(in: Implement) -> () {
+    }
 }
 ```
 ## 泛型约束

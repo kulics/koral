@@ -1028,12 +1028,15 @@ So if we define a `Peter`, we can't get the value or modify the value through `P
 The private property of this structure can not be accessed, and can not be modified. What is the use? Don't worry, the structure has another attribute.
 
 ## Structure Function
-If we need to make this structure come with a function that makes it easy to manipulate, we can additionally declare a function with a structure parameter.
+If we need to make this structure come with a function that makes it easy to manipulate, we can additionally declare a function with a structure parameter.  
+Structure functions are declared in a similar way to structures, except that the specified identifier is required. The form is `(id: type) -> {}`.
 
 E.g:
 ```
-(me: Student) getGirlFriend() -> (name: Str) {
-    <- (me._girlFriend)
+(me: Student) -> {
+    getGirlFriend() -> (name: Str) {
+        <- (me._girlFriend)
+    }
 }
 ```
 
@@ -1099,8 +1102,10 @@ ChineseStudent -> {
 }
 
 # override #
-(me: ChineseStudent)(parent) getGirlFriend() -> (name: Str) {
-    <- (parent._girlFriend)
+(me: ChineseStudent)(parent) -> {
+    getGirlFriend() -> (name: Str) {
+        <- (parent._girlFriend)
+    }
 }
 ```
 ### Construction
@@ -1259,21 +1264,26 @@ Next, we will let the students implement this interface.
 ## Implementing Interface
 We add functions directly to the structure to implement this interface.
 
+For interfaces that need to be explicitly implemented, you can specify the interface in the structure function, otherwise you can directly implement it.
+
 E.g:
 ```
 Student -> {
      ......
      _count: Int
 }
-(me:Student) count: Int -> get {
-     <- (me._count)
-} set(v) {
-     me._count = v
-}
+# Explicit implementation #
+(me:Student) -> Homework {
+     count: Int -> get {
+         <- (me._count)
+     } set(v) {
+         me._count = v
+     }
 
-(me:Student) do() -> () {
-     SpendTime(1)   # took an hour #
-     me.count -= 1  # completed one #
+     do() -> () {
+         SpendTime(1)       # took an hour #
+         me.count -= 1      # completed a #
+     }
 }
 ```
 It is very difficult for our students to write homework...
@@ -1597,13 +1607,15 @@ List<T> -> {
     Length := 0
 }
 
-(me: List<T>) get(index: Int) -> (item: T) {    # Get a generic data #
-    <- ( items.get( index ) )
-}
+(me: List<T>) -> {
+    get(index: Int) -> (item: T) {    # Get a generic data #
+        <- ( items.get( index ) )
+    }
 
-(me: List<T>) add(item: T) -> () {      # Add a generic data to the list #
-    Items.insert(length, item)
-    Length += 1
+    add(item: T) -> () {      # Add a generic data to the list #
+        Items.insert(length, item)
+        Length += 1
+    }
 }
 ```
 So we define a structure that supports generics, `T` is a generic, in fact it can be any identifier, but habitual we will use `T` as a proxy.
@@ -1657,10 +1669,10 @@ Protocol<T> <- {
     Test<T>(in: T) -> () {}
 }
 
-Implement -> {
-    :Protocol<Implement>
-}
-(me:Implement) test<Implement>(in: Implement) -> () {
+Implement -> {}
+(me:Implement) -> Protocol<Implement> {
+    test<Implement>(in: Implement) -> () {
+    }
 }
 ```
 ## Generic constraints
