@@ -33,7 +33,7 @@ Lite 是一个专注于工程化的开源跨平台编程语言。
 1. [可选类型](#可选类型)
 
 # 安装与使用
-目前 `Lite` 支持编译到 `C#` 和 `Go`，因此需要在系统中安装 `.NET Core 2.x` 或 `Go` 环境。  
+目前 `Lite` 支持编译到 `C#/Go/TypeScript`，因此需要在系统中安装 `.NET Core/Go/NodeJS` 环境。  
 
 执行编译器就会扫描当前文件夹的 `.lite` 文件，并且自动转译为同名的目标文件。  
 
@@ -42,6 +42,7 @@ Lite 是一个专注于工程化的开源跨平台编程语言。
 下载:
 - C# <https://github.com/kulics/lite-csharp/releases>
 - Go <https://github.com/kulics/lite-go/releases>
+- TypeScript <https://github.com/kulics/lite-typescript/releases>
 
 # 基础语法
 ## 基本语句
