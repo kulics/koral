@@ -33,7 +33,7 @@ By removing keywords, reducing grammatical features, and unifying expression spe
 1. [Optional Type](#Optional-Type)
 
 # Install
-Currently `Lite` supports compilation to `C#` and `Go`, so you need to install `.NET Core 2.x` or `Go` environment on your system.
+Currently `Lite` supports compilation to `C#/Go/TypeScript`, so you need to install `.NET Core/Go/NodeJS` environment on your system.
 
 The execution compiler will scan the `.lite` file of the current folder and automatically translate it to the target file of the same name.
 
@@ -42,6 +42,7 @@ The execution compiler will scan the `.lite` file of the current folder and auto
 download:
 - C# <https://github.com/kulics/lite-csharp/releases>
 - Go <https://github.com/kulics/lite-go/releases>
+- TypeScript <https://github.com/kulics/lite-typescript/releases>
 
 # Basic Grammar
 ## basic statement
