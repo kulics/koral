@@ -112,11 +112,11 @@ More details on the function will be explained in the following sections.
 ## Display information
 We use programs to get some useful information, so we need to have the ability to display information for us to browse, this function can be display, print or output.
 
-If we're writing a console program, we can use the `Prt()` function, which displays data or text information to the console for us to browse.
+If we're writing a console program, we can use the `Print()` function, which displays data or text information to the console for us to browse.
 
 E.g:
 ```
-Prt("Hello world") # Output Hello world #
+Print("Hello world") # Output Hello world #
 ```
 In the examples that follow, we will use the console as a demo environment.
 
@@ -327,14 +327,14 @@ E.g:
 ```
 A := 4
 B := 2
-Prt( A + B )    # + plus #
-Prt( A - B )    # - minus #
-Prt( A * B )    # * multiply #
-Prt( A / B )    # / divide #
-Prt( A % B )    # % residual, meaning the remainder remaining after the divisibility, the result here is 2 #
-Prt( A ** B )   # ** power #
-Prt( A // B )   # // root #
-Prt( A %% B )   # %% log #
+Print( A + B )    # + plus #
+Print( A - B )    # - minus #
+Print( A * B )    # * multiply #
+Print( A / B )    # / divide #
+Print( A % B )    # % residual, meaning the remainder remaining after the divisibility, the result here is 2 #
+Print( A ** B )   # ** power #
+Print( A // B )   # // root #
+Print( A %% B )   # %% log #
 ```
 In addition to numbers, there are other types that support arithmetic operations. For example, `Str` can use an addition operation to combine two paragraphs of text.
 
@@ -352,12 +352,12 @@ E.g:
 ```
 A := 4
 B := 2
-Prt( A == B )   # == equal to #
-Prt( A >< B )   # >< not equal to #
-Prt( A > B )    # > Greater than #
-Prt( A >= B )   # >= Greater than or equal to #
-Prt( A < B )    # < less than #
-Prt( A <= B )   # <= less than or equal to #
+Print( A == B )   # == equal to #
+Print( A >< B )   # >< not equal to #
+Print( A > B )    # > Greater than #
+Print( A >= B )   # >= Greater than or equal to #
+Print( A < B )    # < less than #
+Print( A <= B )   # <= less than or equal to #
 ```
 ## Logical Operators
 Logical operators are also used primarily in decision statements to perform logical operations (AND, OR, and NOT).
@@ -366,9 +366,9 @@ E.g:
 ```
 A := True
 B := False
-Prt( A & B )    # & AND, both are true at the same time #
-Prt( A | B )    # | OR, one of them is true. #
-Prt( ~A )       # ~ NOT, boolean inversion #
+Print( A & B )    # & AND, both are true at the same time #
+Print( A | B )    # | OR, one of them is true. #
+Print( ~A )       # ~ NOT, boolean inversion #
 ```
 
 ## Assignment Operator
@@ -438,7 +438,7 @@ If we need to access one of the elements in the list, we can access it with `ide
 
 E.g:
 ```
-Prt( List[1] )
+Print( List[1] )
 ```
 It should be noted that in the programming language, most of the list start index starts from `0`, the identifier [0]` gets the first element, and the next element and so on.
 ### Change Element
@@ -485,7 +485,7 @@ Similar to the list, we can also use the index to access the data directly.
 
 E.g:
 ```
-Prt( Dictionary["a"] )
+Print( Dictionary["a"] )
 ```
 ### Change Element
 Similar to lists, we can also use assignment statements to change elements.
@@ -611,11 +611,11 @@ You can use the `value ? id:type{}` syntax to match types, and `id` can be omitt
 E.g:
 ```
 X ? :Int {          # is Int #
-     Prt("Int")
+     Print("Int")
 } content:Str {     # is Str #
-     Prt(content)
+     Print(content)
 } Nil {             # is Nil #
-     Prt("Nil")
+     Print("Nil")
 }
 ```
 ### Get type
@@ -828,7 +828,7 @@ You can use a definition or assignment statement to get the return value of the 
 
 E.g:
 ```
-Prt( TopSell() )        # Print two values ​​#
+Print( TopSell() )        # Print two values ​​#
 ```
 If there is only one return value, the parentheses can be taken with or without.
 
@@ -871,7 +871,7 @@ This way we can pass the details of the processing to the external incoming `fun
 E.g:
 ```
 Print(item: Int) -> () {
-     Prt(item)
+     Print(item)
 }
 
 Each_1_To_10(Print)
@@ -959,7 +959,7 @@ Quite simply, we only need to use the `.` syntax to summon the properties we nee
 
 E.g:
 ```
-Prt( Peter.name )   # Printed the name of a student #
+Print( Peter.name )   # Printed the name of a student #
 ```
 The same is true for changing the value of an attribute, which is equivalent to a nested identifier. We can use the assignment statement to change the value directly.
 
@@ -1049,7 +1049,7 @@ With this function, we can get the private property by calling the function.
 
 E.g:
 ```
-Prt( Peter.getGirlFriend() )
+Print( Peter.getGirlFriend() )
 # Printed the name of a girlfriend of a young love student #
 ```
 Like data attributes, functions can also be private identifiers. Functions that use private identifiers also mean that only structures can access them.
@@ -1083,7 +1083,7 @@ This way you can use common attributes through the student attributes in Chinese
 E.g:
 ```
 Chen := ChineseStudent{}
-Prt( Chen.student.name )
+Print( Chen.student.name )
 # Of course, because there is no assignment, there is no output. #
 ```
 By combining layers of structure, you can freely assemble anything you want to describe.
@@ -1132,7 +1132,7 @@ We need to use the constructor with the `<type>()` function.
 E.g:
 ```
 Peter := <Student>("peter", "060233")
-Prt(Peter.class)    # Print out 2 #
+Print(Peter.class)    # Print out 2 #
 ```
 
 If you need to use a constructor with inheritance, you can append `(params)` to the argument syntax.
@@ -1176,7 +1176,7 @@ E.g:
 
 Main() -> () {
      # Print something #
-     Prt( GetSomething() )
+     Print( GetSomething() )
 }
 ```
 
@@ -1250,8 +1250,8 @@ Next, let's design a difficult task that students need to accomplish... homework
 E.g:
 ```
 Homework <- {
-    Count: Int -> get, set
-    Do() -> ()
+    count: Int -> get, set
+    do() -> ()
 }
 ```
 This is a job interface that has two properties, one is the number of jobs that need to be done, and the other is a function that completes the job.
@@ -1301,11 +1301,11 @@ After the interface is included, we can use the student who owns the interface.
 E.g:
 ```
 Peter := Student{ count=999999 }
-Prt( Peter.count )
+Print( Peter.count )
 # Print 999999, so much #
 Peter.do()
 # Do somework #
-Prt( Peter.count )
+Print( Peter.count )
 # Print 999998, still so much #
 ```
 If you just use it, there is no advantage to defining these two properties directly in the structure.
@@ -1335,16 +1335,16 @@ DoHomework(Student: Homework) -> () {
     Student.do()
 }
 # Now we can make each student do their homework more easily #
-DoHomework(Student A)
-DoHomework(Student B)
-DoHomework(Student C)
+DoHomework(StudentA)
+DoHomework(StudentB)
+DoHomework(StudentC)
 ```
 Of course, it's better to put these students in an array so that we can use loops to handle these repetitive tasks.
 
 E.g:
 ```
 Arr := []Homework{}
-Arr.add( Student A )
+Arr.add( StudentA )
 ......  # Insert many many students #
 Arr @ i {
     DoHomework(i)
@@ -1804,7 +1804,7 @@ A := 1
 B := 2
 
 Swap(A!, B!)
-Prt(A, B)
+Print(A, B)
 # A = 2, B = 1 #
 ```
 
