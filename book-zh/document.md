@@ -111,11 +111,11 @@ Main() -> () {
 ## 显示信息
 我们使用程序都是为了获取到一些实际有用的信息，所以我们需要有显示信息给我们浏览的功能，这个功能可以是显示、打印或输出。
 
-如果我们编写的是控制台程序，我们可以使用 `Prt()` 函数，它可以将数据或文本信息显示到控制台供我们浏览。
+如果我们编写的是控制台程序，我们可以使用 `Print()` 函数，它可以将数据或文本信息显示到控制台供我们浏览。
 
 例如：
 ```
-Prt("Hello world")   # 输出 Hello world #
+Print("Hello world")   # 输出 Hello world #
 ```
 在往后的例子中，我们都会使用控制台作为演示环境。
 ## 注释
@@ -323,14 +323,14 @@ A = Nil # 空值 #
 ```
 A := 4
 B := 2
-Prt( A + B )    # + 加 #
-Prt( A - B )    # - 减 #
-Prt( A * B )    # * 乘 #
-Prt( A / B )    # / 除 #
-Prt( A % B )    # % 取余，意思是整除后剩下的余数，这里的结果为 2 #
-Prt( A ** B )   # ** 幂 #
-Prt( A // B )   # // 根 #
-Prt( A %% B )   # %% 对数 #
+Print( A + B )    # + 加 #
+Print( A - B )    # - 减 #
+Print( A * B )    # * 乘 #
+Print( A / B )    # / 除 #
+Print( A % B )    # % 取余，意思是整除后剩下的余数，这里的结果为 2 #
+Print( A ** B )   # ** 幂 #
+Print( A // B )   # // 根 #
+Print( A %% B )   # %% 对数 #
 ```
 除了数字之外，也有其它支持算术操作的类型，例如 `Str` 可以使用加运算将两段文字合并起来。
 
@@ -347,12 +347,12 @@ C := A + " " + B    # C 为 "hello world" #
 ```
 A := 4
 B := 2
-Prt( A == B )     # == 等于 #
-Prt( A >< B )     # >< 不等于 #
-Prt( A > B )      # > 大于 #
-Prt( A >= B )     # >= 大于或等于 #
-Prt( A < B )      # < 小于 #
-Prt( A <= B )     # <= 小于或等于 #
+Print( A == B )     # == 等于 #
+Print( A >< B )     # >< 不等于 #
+Print( A > B )      # > 大于 #
+Print( A >= B )     # >= 大于或等于 #
+Print( A < B )      # < 小于 #
+Print( A <= B )     # <= 小于或等于 #
 ```
 ## 逻辑操作符
 逻辑操作符主要也被使用在判断语句中，用来进行逻辑运算（与、或、非）。
@@ -361,9 +361,9 @@ Prt( A <= B )     # <= 小于或等于 #
 ```
 A := True
 B := False
-Prt( A & B )     # & 与，两者同时为真才为真 #
-Prt( A | B )     # | 或，两者其中一者为真就为真 #
-Prt( ~A )        # ~ 非，布尔值取反 #
+Print( A & B )     # & 与，两者同时为真才为真 #
+Print( A | B )     # | 或，两者其中一者为真就为真 #
+Print( ~A )        # ~ 非，布尔值取反 #
 ```
 ## 赋值操作符
 赋值操作符主要用来将右边的数据赋值给左边的标识符，也可以附带一些快捷操作。
@@ -431,7 +431,7 @@ Array: [:]Int = ArrayOf(1,2,3,4,5)
 
 例如：
 ```
-Prt( List[1] )
+Print( List[1] )
 ```
 需要注意的是，在编程语言里，大多数列表起始索引都是从 `0` 开始的，`标识符[0]` 取得的才是第一个元素，往后的元素以此类推。
 ### 更改元素
@@ -477,7 +477,7 @@ DictionaryNumNum := [Int]Int{} # 空 #
 
 例如：
 ```
-Prt( Dictionary["a"] )
+Print( Dictionary["a"] )
 ```
 ### 更改元素
 和列表类似，我们也可以使用赋值语句来更改元素。
@@ -529,7 +529,7 @@ Length := Numbers.len           # 长度 #
 例如：
 ```
 ? True {
-    Prt("True")  # 真 #
+    Print("True")  # 真 #
 }
 ```
 ## 布尔判断
@@ -601,11 +601,11 @@ I ? 1 {
 例如：
 ```
 X ? :Int {          # 是否 Int #
-    Prt("Int")
+    Print("Int")
 } content:Str {     # 是否 Str #
-    Prt(content)
+    Print(content)
 } Nil {              # 是否为 Nil #
-    Prt("Nil")
+    Print("Nil")
 }
 ```
 ### 获取类型
@@ -628,7 +628,7 @@ X ? :Int {          # 是否 Int #
 ```
 Arr := {1, 2, 3, 4, 5}
 Arr @ item {
-    Prt(item)    # 打印每一个数字 #
+    Print(item)    # 打印每一个数字 #
 }
 ```
 
@@ -637,7 +637,7 @@ Arr @ item {
 例如：
 ```
 Arr @ [i]v {
-    Prt(""i":"v"")
+    Print(""i":"v"")
 }
 ```
 
@@ -650,7 +650,7 @@ Arr @ [i]v {
 例如：
 ```
 [0 <= 100] @ i {
-    Prt(i)      # 打印每一个数字 #
+    Print(i)      # 打印每一个数字 #
 }
 ```
 需要注意的是，`0 <= 100` 的意义是从 `0` 逐次读取到 `100` ，也就是一共执行了 `101` 次。迭代器会执行到最后一个数字被执行完毕，而不是提前一次结束。
@@ -817,7 +817,7 @@ TopSell() -> (name: Str, count: Int) {
 
 例如：
 ```
-Prt( TopSell() )      # 打印两个数值 #
+Print( TopSell() )      # 打印两个数值 #
 ```
 如果只有一个返回值，括号可带可不带。
 
@@ -859,7 +859,7 @@ Each_1_To_10(func: (Int) -> () ) -> () {
 例如：
 ```
 Print(item: Int) -> () {
-    Prt(item)
+    Print(item)
 }
 
 Each_1_To_10(Print)
@@ -878,9 +878,9 @@ Each_1_To_10(Print)
 例如：
 ```
 ForEach( {it -> 
-    Prt(it)
-    Prt(it * it)
-    Prt(it % 2)
+    Print(it)
+    Print(it * it)
+    Print(it % 2)
 })
 Take( {a, b -> a + b} )
 FindAll{ it -> it > 7 }  # 如果函数只有一个参数，还可以省略括号 #
@@ -893,7 +893,7 @@ FindAll{ it -> it > 7 }  # 如果函数只有一个参数，还可以省略括�
 例如：
 ```
 Each_1_To_10( (item: Int) -> () {
-    Prt(item)
+    Print(item)
 })
 ```
 
@@ -947,7 +947,7 @@ Peter := Student{}
 
 例如：
 ```
-Prt( Peter.name )      # 打印了某个学生的名字 #
+Print( Peter.name )      # 打印了某个学生的名字 #
 ```
 要更改属性的值也是一样的，它就相当于是个嵌套的标识符。我们可以直接用赋值语句去更改值。
 
@@ -1036,7 +1036,7 @@ Student -> {
 
 例如：
 ```
-Prt( Peter.getGirlFriend() ) 
+Print( Peter.getGirlFriend() ) 
 # 打印了某个早恋学生的女朋友名字 #
 ```
 与数据属性一样，函数也可以是私有标识符，使用私有标识符的函数也意味着只有结构体自己能访问。
@@ -1070,7 +1070,7 @@ ChineseStudent -> {
 例如：
 ```
 Chen := ChineseStudent{}
-Prt( Chen.student.name )
+Print( Chen.student.name )
 # 当然，因为没有赋值，所以什么也没有输出 #
 ```
 通过组合一层又一层的结构体，你可以自由拼装出任何一个你想要描述的事物。
@@ -1119,7 +1119,7 @@ ChineseStudent -> {
 例如：
 ```
 Peter := <Student>("peter", "060233")
-Prt(Peter.class)     # 打印出 2 #
+Print(Peter.class)     # 打印出 2 #
 ```
 
 如果需要使用带继承的构造函数，可在参数语法后面追加 `(params)` 即可。
@@ -1163,7 +1163,7 @@ GetSomething() -> (content: Str) {
 
 Main() -> () {
     # 打印 something #
-    Prt( GetSomething() )
+    Print( GetSomething() )
 }
 ```
 
@@ -1287,11 +1287,11 @@ Student -> {
 例如：
 ```
 Peter := Student{ count=999999 }
-Prt( Peter.count )
+Print( Peter.count )
 # 打印 999999，好多呀 #
 Peter.do()
 # 做了一次作业 #
-Prt( Peter.count )
+Print( Peter.count )
 # 打印 999998，还是好多呀 #
 ```
 如果只是这样使用，那和在结构体里直接定义这两个属性比就没什么优势了。
@@ -1321,16 +1321,16 @@ DoHomework(Student: Homework) -> () {
     student.do()
 }
 # 现在我们就可以更简单地让每个学生做作业了 #
-DoHomework(Student A)
-DoHomework(Student B)
-DoHomework(Student C)
+DoHomework(StudentA)
+DoHomework(StudentB)
+DoHomework(StudentC)
 ```
 当然，更好的做法是把这些学生都放进数组，这样我们就可以使用循环来处理这些重复的工作了。
 
 例如：
 ```
 Arr := []Homework{}
-Arr.add( Student A )
+Arr.add( StudentA )
 ...... # 塞进很多很多学生 #
 Arr @ i {
     DoHomework(i)
@@ -1433,7 +1433,7 @@ ReadFile(name: Str) -> () {
 } ex:IOException {
     !(ex)
 } e {
-    Prt(e.message)
+    Print(e.message)
 }
 ```
 当出现异常时，程序就会进入错误处理区块，`e` 为异常标识符，我们可以获取异常的信息，或者进行其它操作。
@@ -1790,7 +1790,7 @@ A := 1
 B := 2
 
 Swap(A!, B!)
-Prt(A, B)
+Print(A, B)
 # A = 2, B = 1 #
 ```
 
