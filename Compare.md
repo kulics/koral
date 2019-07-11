@@ -3,7 +3,7 @@
 ## Hello World
 ### Lite
 ```
-Prt("Hello, world!")
+Print("Hello, world!")
 ```
 ### C#
 ```
@@ -167,7 +167,7 @@ count = i + int(f)
 ### Lite
 ```
 [ 1 <= 5 ] @ index {
-    Prt("" index " times 5 is " index * 5 "")
+    Print("" index " times 5 is " index * 5 "")
 }
 ```
 ### C#
@@ -322,8 +322,8 @@ emptyDictionary ={}
 ## Functions
 ### Lite
 ```
-greet(name: Str, day: Str) -> (r: Str) {
-    <- ("Hello " name ", today is " day ".")
+greet(name: Str, day: Str -> r: Str) {
+    <- "Hello " name ", today is " day "."
 }
 greet("Bob", "Tuesday")
 ```
@@ -365,8 +365,8 @@ greet("Bob", "Tuesday")
 ## Tuple Return
 ### Lite
 ```
-getGasPrices() -> (a: Num, b: Num, c: Num) {
-    <- (3.59, 3.69, 3.79)
+getGasPrices(-> a: Num, b: Num, c: Num) {
+    <- 3.59, 3.69, 3.79
 }
 ```
 ### C#
@@ -400,11 +400,11 @@ def getGasPrices():
 ## Function Type
 ### Lite
 ```
-makeIncrementer() -> (fn: (Int) -> (Int)) {
-    addOne(number: Int) -> (number: Int) {
-        <- (1 + number)
+makeIncrementer(-> fn: (Int->Int)) {
+    addOne(number: Int -> number: Int) {
+        <- 1 + number
     }
-    <- (addOne)
+    <- addOne
 }
 increment := makeIncrementer()
 increment(7)
@@ -473,9 +473,9 @@ increment(7)
 Shape -> {
     numberOfSides := 0
 }
-(me: Shape) -> {
-    simpleDescription() -> (s: Str) {
-        <- ("A shape with " me.number of sides " sides.")
+me: Shape -> {
+    simpleDescription(-> s: Str) {
+        <- "A shape with " me.number of sides " sides."
     }
 }
 ```
@@ -568,9 +568,9 @@ NamedShape -> {
     name: Str
     numberOfSides := 0
 }
-(me: NamedShape) -> {
-    simpleDescription() -> (s: Str) {
-        <- ("A shape with " me.numberOfSides " sides.")
+me: NamedShape -> {
+    simpleDescription(-> s: Str) {
+        <- "A shape with " me.numberOfSides " sides."
     }
 } 
 
@@ -578,20 +578,20 @@ Square -> {
     :NamedShape
     sideLength: Num
 } 
-(me: Square) -> {
-    simpleDescription() -> (s: Str) {
-        <- ("A square with sides of length " me.sideLength ".")
+me: Square -> {
+    simpleDescription(-> s: Str) {
+        <- "A square with sides of length " me.sideLength "."
     }
 
-    init(sideLength: Num, name: Str) -> (v: Square) {
+    init(sideLength: Num, name: Str -> v: Square) {
         me.sideLength = sideLength
         me.numberOfSides = 4
         me.name = name
-        <- (me)
+        <- me
     }
 
-    area() -> (f: Num) {
-        <- (me.sideLength ** 2)
+    area(-> f: Num) {
+        <- me.sideLength ** 2
     }
 }
 
@@ -850,15 +850,15 @@ for item in library:
 ```
 nb := 42
 nb ? [0 <= 7], 8, 9 { 
-    Prt("single digit") 
+    Print("single digit") 
 } 10 { 
-    Prt("double digits") 
+    Print("double digits") 
 } [11 <= 99] { 
-    Prt("double digits") 
+    Print("double digits") 
 } [100 <= 999] { 
-    Prt("triple digits") 
+    Print("triple digits") 
 } _ { 
-    Prt("four or more digits") 
+    Print("four or more digits") 
 }
 ```
 ### C#
@@ -912,7 +912,7 @@ switch nb {
 ```
 someObjects @ current {
     current ? movie:Movie {
-        Prt("Movie: '" movie.name "', " +
+        Print("Movie: '" movie.name "', " +
             "dir. " movie.director "")
     }
 }
@@ -964,11 +964,11 @@ for current in someObjects:
 ### Lite
 ```
 Nameable <- {
-    name() -> (s: Str)
+    name(-> s: Str)
 }
 
-f(x: Nameable) -> () {
-    Prt("Name is " + x.name())
+f(x: Nameable ->) {
+    Print("Name is " + x.name())
 }
 ```
 ### C#
@@ -1017,13 +1017,14 @@ func f(x: Nameable) {
 ### Lite
 ```
 Dog -> {}
-(me:Dog) -> Nameable,Weight {
-    name() -> (n: Str) {
-        <- ("Dog")
+me:Dog -> Nameable {
+    name(-> n: Str) {
+        <- "Dog"
     }
-
-    getWeight() -> (w: Int) {
-        <- (30)
+}
+me:Dog -> Weight {
+    getWeight(-> w: Int) {
+        <- 30
     }
 }
 ```

@@ -29,11 +29,11 @@ This is the main source code repository for Lite. It contains the compiler, and 
     "System"
 }
 
-Main() -> () {
+Main(->) {
     SayHelloWorldNow("start now")
 }
 
-SayHelloWorldNow(begin: Str) -> () {
+SayHelloWorldNow(begin: Str ->) {
     Print(begin)
     GreetingsAroundTheWorld := {"Hello", "Hola", "Bonjour",
                 "Ciao", "こんにちは", "안녕하세요",
