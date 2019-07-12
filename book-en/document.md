@@ -90,7 +90,7 @@ You can write multiple import statements, and their order does not affect the im
 For more details on namespaces, please see [Namespace] (#Namespace)
 
 ## Main Entry
-We need to define a main entry to let the program know where to start. The main entry is declared via a function `Main() -> () {}`.
+We need to define a main entry to let the program know where to start. The main entry is declared via a function `Main(->) {}`.
 Depending on the target platform, the main entry may be declared differently, and the main function of C# is used by default.
 
 E.g:
@@ -99,7 +99,7 @@ E.g:
     "System"
 }
 
-Main() -> () {
+Main(->) {
 }
 ```
 The main entry function here is a function with no arguments and no return value. It is automatically recognized as the main entry. The main entry function is executed when the program starts, so we only need to write the function in the main entry function.
@@ -604,6 +604,17 @@ If this is not possible, it will go to the default processing area to execute.
 
 This can be thought of as a `switch case default` structure relative to other languages.
 
+If there are multiple conditions that need to be merged together, you can use `,` to separate them.
+
+E.g:
+```
+I ? 1,2,3 {
+     ......
+} 4 {
+     ......
+}
+```
+
 ### Pattern Matching
 Conditional judgment can do more, for example, we need to judge the type of the identifier,
 You can use the `value ? id:type{}` syntax to match types, and `id` can be omitted.
@@ -730,13 +741,13 @@ Usually we will package a series of task processing that needs to be reused into
 
 In practical engineering practice, given a certain input, the function that must accurately return the determined output is considered a better design. Therefore, it is recommended to maintain the independence of the function as much as possible.
 ## Definition
-We have seen the main entry function before, it is only defined using the fixed statement `Main() -> () {}`.
+We have seen the main entry function before, it is only defined using the fixed statement `Main(->) {}`.
 
-We only need to define a function using the `id() -> () {}` collocation. The parentheses in front are the input parameters, and the parentheses in the back are the parameters.
+We only need to define a function using the `id(->) {}` collocation. The parentheses in front are the input parameters, and the parentheses in the back are the parameters.
 
 E.g:
 ```
-Function() -> () {
+Function(->) {
     ......
 }
 ```
@@ -758,33 +769,32 @@ Very simple, we only need to declare the parameters using `id:type`.
 
 E.g:
 ```
-Func(x: Int) -> (y: Int) {
-    <- (x * 2)
+Func(x: Int -> y: Int) {
+    <- x * 2
 }
 ```
 The meaning of this function is that it accepts an `Int` parameter `x` of the input and returns a `Int` parameter `y`.
 
-The parentheses on the left are the parameters, and the parentheses on the right are the parameters. There is no limit on the number of parameters in the parentheses, but there are strict requirements on the order and type.
+The left are the in parameters, and the right are the out parameters. There is no limit on the number of parameters in the parentheses, but there are strict requirements on the order and type.
 ### Return
 At this point, even if you don't say it, you can guess that `<-` should be a statement related to the return.
 
-Yes, we only need to use `<-` to specify an explicit return statement. The following parentheses can be filled with the data to be returned, separated by commas.
+Yes, we only need to use `<-` to specify an explicit return statement.
 
 E.g:
 ```
-<- (1, 2, 3, "Hello")
+<- 1, 2, 3, "Hello"
 ```
 This will return four values ​​of `1, 2, 3, "Hello"`.
 
-As with our calling method expression, we also need to use a complete parenthesis to express a return statement, even if the function does not need to return any data.
+If you do not need to return data, you can omit the data.
 
 E.g:
 ```
-<- ()
+<-
 ```
-The purpose of this design is to maintain complete unity in grammar.
 
-But if it's a function that doesn't need to return a value, the language will automatically add an exit function at the end of the function, so we can optionally omit some of the return statements.
+If it's a function that doesn't need to return a value, the language will automatically add an exit function at the end of the function, so we can optionally omit some of the return statements.
 
 We can use the return statement to terminate the function early in any place within the function, which satisfies our need for logic control.
 
@@ -798,7 +808,7 @@ When we call a function, we need to fill the data in parentheses in the order de
 E.g:
 ```
 # Define a function that contains two input parameters #
-Sell(price: Int, name: Str) -> () {}
+Sell(price: Int, name: Str ->) {}
 # Fill in the required data according to the defined requirements #
 Sell(1.99, "cola")
 ```
@@ -807,9 +817,9 @@ Similar to the input parameters, the output parameter needs to be explicitly def
 
 E.g:
 ```
-TopSell() -> (name: Str, count: Int) {
+TopSell(-> name: Str, count: Int) {
      ......
-     <- ("cola", many)
+     <- "cola", many
 }
 ```
 ### Use of return value
@@ -858,7 +868,7 @@ There is no special way to define function arguments, just replace the argument 
 
 E.g:
 ```
-Each_1_To_10(func: (Int) -> () ) -> () {
+Each_1_To_10(func: (Int->) ->) {
      [1<=10] @ i {
          func(i)
      }
@@ -870,7 +880,7 @@ This way we can pass the details of the processing to the external incoming `fun
 
 E.g:
 ```
-Print(item: Int) -> () {
+Print(item: Int ->) {
      Print(item)
 }
 
@@ -904,7 +914,7 @@ Unlike the simplified notation above, we can also write a complete function dire
 
 E.g:
 ```
-Each_1_To_10( (item: Int) -> () {
+Each_1_To_10( (item: Int ->) {
     Prt(item)
 })
 ```
@@ -1030,13 +1040,13 @@ The private property of this structure can not be accessed, and can not be modif
 
 ## Structure Function
 If we need to make this structure come with a function that makes it easy to manipulate, we can additionally declare a function with a structure parameter.  
-Structure functions are declared in a similar way to structures, except that the specified identifier is required. The form is `(id: type) -> {}`.
+Structure functions are declared in a similar way to structures, except that the specified identifier is required. The form is `id: type -> {}`.
 
 E.g:
 ```
-(me: Student) -> {
-    getGirlFriend() -> (name: Str) {
-        <- (me._girlFriend)
+me: Student -> {
+    getGirlFriend(-> name: Str) {
+        <- me._girlFriend
     }
 }
 ```
@@ -1093,7 +1103,7 @@ The following are compatibility features, if not necessary, it is not recommende
 
 ### Inheritance
 If we want to define a new structure and fully inherit all the properties of a structure, we can use the inheritance syntax to declare properties without identifiers in the definition.
-If you want to override the properties of the original structure, you can add the parent identifier after the structure parameter of the structure function.
+If you want to override the properties of the original structure, you can add the parent identifier front the structure parameter of the structure function.
 
 E.g:
 ```
@@ -1103,20 +1113,20 @@ ChineseStudent -> {
 }
 
 # override #
-(me: ChineseStudent)(parent) -> {
-    getGirlFriend() -> (name: Str) {
-        <- (parent._girlFriend)
+(parent)me: ChineseStudent -> {
+    getGirlFriend(-> name: Str) {
+        <- parent._girlFriend
     }
 }
 ```
 ### Construction
 Sometimes we might use the constructor in .NET.
 
-We can use the special constructor statement `(id:type) <>() {}`.
+We can use the special constructor statement `id:type <>() {}`.
 
 E.g:
 ```
-(me: Student) <>(name: Str, number: Str) {
+me: Student <>(name: Str, number: Str) {
     me.name = name
     me.number = number
     # Calculate the class #
@@ -1139,13 +1149,13 @@ If you need to use a constructor with inheritance, you can append `(params)` to 
 
 E.g:
 ```
-(me: Parent) <>(a:Int) {
+me: Parent <>(a:Int) {
 }
 
 Child -> {
     :Parent
 }
-(me: Child) <>(a:Int)(a) {
+me: Child <>(a:Int)(a) {
 }
 ```
 
@@ -1161,8 +1171,8 @@ E.g:
 ```
 "Name/Space" {}
 
-GetSomething() -> (content: Str) {
-     <- ("something")
+GetSomething(-> content: Str) {
+     <- "something"
 }
 ```
 ## Import
@@ -1174,7 +1184,7 @@ E.g:
      "Name/Space"
 }
 
-Main() -> () {
+Main(->) {
      # Print something #
      Print( GetSomething() )
 }
@@ -1186,12 +1196,14 @@ The control type is a block of code that encapsulates a data operation.
 Often we will encapsulate some of the data control processing into a control type so that there is no need to perform additional methods when using the data.
 
 ## Get Operation
-If we want to set a get operation, we can add the `id:type -> ctrl{}` definition later.
+If we want to set a get operation, we can add the `id:type{ctrl}` definition later.
 
 E.g:
 ```
-Number: Int -> get {    # means get, equivalent to getter in other languages ​​#
-    <- (7)              # Only return 7 #
+Number: Int {
+    get {           # means get, equivalent to getter in other languages ​​#
+        <- 7        # Only return 7 #
+    }
 }
 ```
 Thus Number has a special get value method that will execute the internal logic when calling Number.
@@ -1202,8 +1214,10 @@ With the above examples, we can naturally think of how to set the operation chan
 
 E.g:
 ```
-Number: Int -> set(value) {     # Indicates the setting, which is equivalent to the setter in other languages ​​#
-    # ? ? ? Who should I give the value to? ? ? #
+Number: Int {
+    set(value) {     # Indicates the setting, which is equivalent to the setter in other languages ​​#
+        # ? ? ? Who should I give the value to? ? ? #
+    }
 }
 ```
 Yes, there is a problem here. The type of control is used to control the operation. When the operation is implemented, it cannot use itself to store data.
@@ -1213,18 +1227,23 @@ E.g:
 ```
 _Number := 0
 
-Number: Int -> set(value) {
-    _Number = value     # value represents the value entered #
+Number: Int {
+    set(value) {
+        _Number = value     # value represents the value entered #
+    }
 }
 ```
 
 A complete example of reading and writing is as follows:
 ```
 _Number := 0
-Number: Int -> get {
-    <- (_Number)
-} set(v) {
-    _Number = v
+Number: Int {
+    get {
+        <- _Number
+    }
+    set(v) {
+        _Number = v
+    }
 }
 ```
 
@@ -1250,8 +1269,8 @@ Next, let's design a difficult task that students need to accomplish... homework
 E.g:
 ```
 Homework <- {
-    count: Int -> get, set
-    do() -> ()
+    count: Int { get set }
+    do(->)
 }
 ```
 This is a job interface that has two properties, one is the number of jobs that need to be done, and the other is a function that completes the job.
@@ -1274,17 +1293,20 @@ Student -> {
      _count: Int
 }
 # Explicit implementation #
-(me:Student) -> Homework {
-     count: Int -> get {
-         <- (me._count)
-     } set(v) {
-         me._count = v
-     }
+me: Student -> Homework {
+    count: Int {
+        get {
+            <- me._count
+        }
+        set(v) {
+            me._count = v
+        }
+    }
 
-     do() -> () {
-         SpendTime(1)       # took an hour #
-         me.count -= 1      # completed a #
-     }
+    do(->) {
+        SpendTime(1)       # took an hour #
+        me.count -= 1      # completed a #
+    }
 }
 ```
 It is very difficult for our students to write homework...
@@ -1331,7 +1353,7 @@ A more efficient way is to write this function into the function, let the functi
 
 E.g:
 ```
-DoHomework(Student: Homework) -> () {
+DoHomework(Student: Homework ->) {
     Student.do()
 }
 # Now we can make each student do their homework more easily #
@@ -1362,7 +1384,7 @@ We can use `value == :type` or `value >< :type` to determine the type of data, a
 
 E.g:
 ```
-Func(hw: Homework) -> () {
+Func(hw: Homework ->) {
     # Determine if Chinese students #
     Hw == :ChineseStudent {
         # Convert to Chinese Student Data #
@@ -1428,7 +1450,7 @@ We can use `!()` to declare an exception data anywhere in the function.
 
 E.g:
 ```
-ReadFile(name: Str) -> () {
+ReadFile(name: Str ->) {
     ? name.len == 0 {
         !( Exception("something wrong") )
     }
@@ -1462,7 +1484,7 @@ E.g:
     Func()
 } ex {
     # Can be manually aborted #
-    # <- () #
+    # <- #
     !(ex)
 }
 ```
@@ -1474,7 +1496,7 @@ Quite simply, using `_ {}` at the end of the check can declare a statement that 
 
 E.g:
 ```
-Func() -> () {
+Func(->) {
     F: File
     ! {
         F = ReadFile("./somecode.xs")
@@ -1497,7 +1519,7 @@ E.g:
 ......
 _ {
     F.release()
-    <- ()   # error, can not use the return statement #
+    <-  # error, can not use the return statement #
 }
 ```
 
@@ -1524,12 +1546,12 @@ In other languages, it can be considered as the `async/await` of the asynchronou
 ## Asynchronous declaration
 So how do you declare a function to be asynchronous? Use `~>` to do it.
 
-That's right, it's really good to use `~>`.
+That's right, just use `~>`.
 
 E.g:
 ```
-Async() ~> (out: Int) {
-    <- (12)
+Async(~> out: Int) {
+    <- 12
 }
 ```
 Once a method is declared as an asynchronous method, the compiler will automatically wrap the return value with a `Task<>` type package, and this method can be executed asynchronously.
@@ -1556,14 +1578,14 @@ Asynchronous waits can only be used in functions declared asynchronously.
 E.g:
 ```
 # Yes #
-Async() ~> (out: Int) {
+Async(~> out: Int) {
     <~ Delay(5000)  # Wait for a while #
-    <- (12)
+    <- 12
 }
 # No #
-Async() -> (out: Int) {
+Async(-> out: Int) {
     <~ Delay(5000)  # Cannot be declared #
-    <- (12)
+    <- 12
 }
 ```
 ## Empty return value
@@ -1573,7 +1595,7 @@ We can choose to wait for no data, or we can choose not to wait for data.
 
 E.g:
 ```
-Async() ~> () {
+Async(~>) {
     <~ Delay(5000)      # Wait for a while #
 }
 
@@ -1608,12 +1630,12 @@ List<T> -> {
     Length := 0
 }
 
-(me: List<T>) -> {
-    get(index: Int) -> (item: T) {    # Get a generic data #
-        <- ( items.get( index ) )
+me: List<T> -> {
+    get(index: Int -> item: T) {    # Get a generic data #
+        <- items.get( index )
     }
 
-    add(item: T) -> () {      # Add a generic data to the list #
+    add(item: T ->) {      # Add a generic data to the list #
         Items.insert(length, item)
         Length += 1
     }
@@ -1633,7 +1655,7 @@ E.g:
 ```
 X := Def<Int>()
 Y := Def<Protocol>()
-Z := Def<()->()>()
+Z := Def<(->)>()
 ```
 
 This way we can use it in generics.
@@ -1662,17 +1684,17 @@ We can use generics in structures, functions, and interface types.
 
 E.g:
 ```
-Func<T>(data: T) -> (data: T) {
-    <- (data)
+Func<T>(data: T -> data: T) {
+    <- data
 }
 
 Protocol<T> <- {
-    Test<T>(in: T) -> () {}
+    test<T>(in: T ->) {}
 }
 
-Implement -> {}
-(me:Implement) -> Protocol<Implement> {
-    test<Implement>(in: Implement) -> () {
+Implement -> {} 
+me: Implement -> Protocol<Implement> {
+    test<Implement>(in: Implement ->) {
     }
 }
 ```
@@ -1735,7 +1757,7 @@ We can use Linq to query like C#, just declare the LINQ statement with `->`.
 
 E.g:
 ```
-Linq() -> () {
+Linq(->) {
      Numbers := { 0, 1, 2, 3, 4, 5, 6 }
      Linq := from num -> in Numbers ->
              Where (num % 2) == 0 ->
@@ -1796,7 +1818,7 @@ In this way, you can manipulate external variables inside the function, and you 
 
 E.g:
 ```
-Swap(x: !Int, y: !Int) -> () {
+Swap(x: !Int, y: !Int ->) {
     (x, y) = (y, x)
 }
 
