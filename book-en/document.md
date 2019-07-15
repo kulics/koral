@@ -385,17 +385,17 @@ A /= 1      # /= First divide and then assign value #
 A %= 1      # %= Take the first and then assign the value #
 ```
 ## Bit Operation
-In this language, no special symbols are set for bit operations, and function operations are used to perform bit operations.
+Bit operations are the basis for the underlying calculations and are also supported in this language.
 
 E.g:
 ```
 A := 1
-A.and(1)    # bitwise AND #
-A.or(1)     # bitwise OR #
-A.xor(1)    # bitwise XOR #
-A.not()     # bitwise inversion #
-A.lft(1)    # left shift #
-A.rht(1)    # right shift #
+A && 1  # bitwise AND #
+A || 1  # bitwise OR #
+A ^^ 1  # bitwise XOR #
+~~A     # bitwise inversion #
+A << 1  # left shift #
+A >> 1  # right shift #
 ```
 
 # Collection Types
@@ -1196,11 +1196,11 @@ The control type is a block of code that encapsulates a data operation.
 Often we will encapsulate some of the data control processing into a control type so that there is no need to perform additional methods when using the data.
 
 ## Get Operation
-If we want to set a get operation, we can add the `id:type{ctrl}` definition later.
+If we want to set a get operation, we can use the `()id:type{ctrl}` definition.
 
 E.g:
 ```
-Number: Int {
+()Number: Int {
     get {           # means get, equivalent to getter in other languages ​​#
         <- 7        # Only return 7 #
     }
@@ -1214,7 +1214,7 @@ With the above examples, we can naturally think of how to set the operation chan
 
 E.g:
 ```
-Number: Int {
+()Number: Int {
     set(value) {     # Indicates the setting, which is equivalent to the setter in other languages ​​#
         # ? ? ? Who should I give the value to? ? ? #
     }
@@ -1227,7 +1227,7 @@ E.g:
 ```
 _Number := 0
 
-Number: Int {
+()Number: Int {
     set(value) {
         _Number = value     # value represents the value entered #
     }
@@ -1237,7 +1237,7 @@ Number: Int {
 A complete example of reading and writing is as follows:
 ```
 _Number := 0
-Number: Int {
+()Number: Int {
     get {
         <- _Number
     }
@@ -1245,6 +1245,16 @@ Number: Int {
         _Number = v
     }
 }
+```
+
+Is this too much trouble?
+
+Yes, we have an easier way to directly indicate a reference data, and the control type will automatically declare all control operations.
+
+E.g:
+```
+_Number := 0
+(_Number)Number: Int # is equivalent to the above package #
 ```
 
 # Interface Type
@@ -1269,7 +1279,7 @@ Next, let's design a difficult task that students need to accomplish... homework
 E.g:
 ```
 Homework <- {
-    count: Int { get set }
+    ()count: Int
     do(->)
 }
 ```
@@ -1294,14 +1304,7 @@ Student -> {
 }
 # Explicit implementation #
 me: Student -> Homework {
-    count: Int {
-        get {
-            <- me._count
-        }
-        set(v) {
-            me._count = v
-        }
-    }
+    (me._count)count: Int
 
     do(->) {
         SpendTime(1)       # took an hour #

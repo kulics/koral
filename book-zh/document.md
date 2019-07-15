@@ -379,17 +379,17 @@ A /= 1  # /= 先相除再赋值 #
 A %= 1  # %= 先取余再赋值 #
 ```
 ## 位操作
-在本语言中，没有为位操作设定特殊的符号，使用函数的方式来执行位操作。
+位操作作为底层计算的基础，在本语言中也支持。
 
 例如：
 ```
 A := 1
-A.and(1)   # 按位与 #
-A.or(1)    # 按位或 #
-A.xor(1)   # 按位异或 #
-A.not()    # 按位取反 #
-A.lft(1)   # 左移 #
-A.rht(1)   # 右移 #
+A && 1  # 按位与 #
+A || 1  # 按位或 #
+A ^^ 1  # 按位异或 #
+~~A     # 按位取反 #
+A << 1  # 左移 #
+A >> 1  # 右移 #
 ```
 
 # 集合类型
@@ -1183,11 +1183,11 @@ Main(->) {
 通常我们会将一些数据控制处理封装成为控制类型，这样在使用数据时就无需执行额外的方法。
 
 ## 获取操作
-如果我们想设定一个获取的操作，我们可以在后面加入 `id:type{ctrl}` 定义。
+如果我们想设定一个获取的操作，我们可以使用 `()id:type{ctrl}` 定义。
 
 例如：
 ```
-Number: Int {
+()Number: Int {
     get {           # 表示获取，相当于其它语言中的getter #
         <- 7        # 只返回 7 #
     }
@@ -1201,7 +1201,7 @@ Number: Int {
 
 例如：
 ```
-Number: Int {
+()Number: Int {
     set(value) {  # 表示设置，相当于其它语言中的setter #
         # ？？？该把值给谁？？？ #
     }
@@ -1214,7 +1214,7 @@ Number: Int {
 ```
 _Number := 0
 
-Number: Int {
+()Number: Int {
     set(value) {
         _Number = value     # value代表输入的值 #
     }
@@ -1224,7 +1224,7 @@ Number: Int {
 一个完整的读写例子如下：
 ```
 _Number := 0
-Number: Int {
+()Number: Int {
     get {
         <- _Number
     }
@@ -1232,6 +1232,16 @@ Number: Int {
         _Number = v
     }
 }
+```
+
+这样做是不是太麻烦了？
+
+是的，我们有更简单的方式，直接指明一个引用数据，控制类型会自动声明所有控制操作。
+
+例如：
+```
+_Number := 0
+(_Number)Number: Int  # 等价于上面的封装 #
 ```
 
 # 接口类型
@@ -1256,7 +1266,7 @@ Protocol <- {
 例如：
 ```
 Homework <- {
-    count: Int { get set }
+    ()count: Int
     do(->)
 }
 ```
@@ -1280,14 +1290,7 @@ Student -> {
 }
 # 显式实现 #
 me: Student -> Homework {
-    count: Int {
-        get {
-            <- me._count
-        }
-        set(v) {
-            me._count = v
-        }
-    }
+    (me._count)count: Int
 
     do(->) {
         SpendTime(1)        # 花费了一个小时 #
