@@ -1196,11 +1196,11 @@ The control type is a block of code that encapsulates a data operation.
 Often we will encapsulate some of the data control processing into a control type so that there is no need to perform additional methods when using the data.
 
 ## Get Operation
-If we want to set a get operation, we can use the `()id:type{ctrl}` definition.
+If we want to set a get operation, we can use the `id():type{ctrl}` definition.
 
 E.g:
 ```
-()Number: Int {
+Number(): Int {
     get {           # means get, equivalent to getter in other languages ​​#
         <- 7        # Only return 7 #
     }
@@ -1214,7 +1214,7 @@ With the above examples, we can naturally think of how to set the operation chan
 
 E.g:
 ```
-()Number: Int {
+Number(): Int {
     set(value) {     # Indicates the setting, which is equivalent to the setter in other languages ​​#
         # ? ? ? Who should I give the value to? ? ? #
     }
@@ -1227,7 +1227,7 @@ E.g:
 ```
 _Number := 0
 
-()Number: Int {
+Number(): Int {
     set(value) {
         _Number = value     # value represents the value entered #
     }
@@ -1237,7 +1237,7 @@ _Number := 0
 A complete example of reading and writing is as follows:
 ```
 _Number := 0
-()Number: Int {
+Number(): Int {
     get {
         <- _Number
     }
@@ -1254,7 +1254,7 @@ Yes, we have an easier way to directly indicate a reference data, and the contro
 E.g:
 ```
 _Number := 0
-(_Number)Number: Int # is equivalent to the above package #
+Number(_Number): Int # is equivalent to the above package #
 ```
 
 # Interface Type
@@ -1279,7 +1279,7 @@ Next, let's design a difficult task that students need to accomplish... homework
 E.g:
 ```
 Homework <- {
-    ()count: Int
+    count(): Int
     do(->)
 }
 ```
@@ -1304,7 +1304,7 @@ Student -> {
 }
 # Explicit implementation #
 me: Student -> Homework {
-    (me._count)count: Int
+    count(me._count): Int
 
     do(->) {
         SpendTime(1)       # took an hour #
