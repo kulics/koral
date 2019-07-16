@@ -1183,11 +1183,11 @@ Main(->) {
 通常我们会将一些数据控制处理封装成为控制类型，这样在使用数据时就无需执行额外的方法。
 
 ## 获取操作
-如果我们想设定一个获取的操作，我们可以使用 `()id:type{ctrl}` 定义。
+如果我们想设定一个获取的操作，我们可以使用 `id():type{ctrl}` 定义。
 
 例如：
 ```
-()Number: Int {
+Number(): Int {
     get {           # 表示获取，相当于其它语言中的getter #
         <- 7        # 只返回 7 #
     }
@@ -1201,7 +1201,7 @@ Main(->) {
 
 例如：
 ```
-()Number: Int {
+Number(): Int {
     set(value) {  # 表示设置，相当于其它语言中的setter #
         # ？？？该把值给谁？？？ #
     }
@@ -1214,7 +1214,7 @@ Main(->) {
 ```
 _Number := 0
 
-()Number: Int {
+Number(): Int {
     set(value) {
         _Number = value     # value代表输入的值 #
     }
@@ -1224,7 +1224,7 @@ _Number := 0
 一个完整的读写例子如下：
 ```
 _Number := 0
-()Number: Int {
+Number(): Int {
     get {
         <- _Number
     }
@@ -1241,7 +1241,7 @@ _Number := 0
 例如：
 ```
 _Number := 0
-(_Number)Number: Int  # 等价于上面的封装 #
+Number(_Number): Int  # 等价于上面的封装 #
 ```
 
 # 接口类型
@@ -1266,7 +1266,7 @@ Protocol <- {
 例如：
 ```
 Homework <- {
-    ()count: Int
+    count(): Int
     do(->)
 }
 ```
@@ -1290,7 +1290,7 @@ Student -> {
 }
 # 显式实现 #
 me: Student -> Homework {
-    (me._count)count: Int
+    count(me._count): Int
 
     do(->) {
         SpendTime(1)        # 花费了一个小时 #
