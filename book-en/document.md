@@ -112,11 +112,11 @@ More details on the function will be explained in the following sections.
 ## Display information
 We use programs to get some useful information, so we need to have the ability to display information for us to browse, this function can be display, print or output.
 
-If we're writing a console program, we can use the `Print()` function, which displays data or text information to the console for us to browse.
+If we're writing a console program, we can use the `print()` function, which displays data or text information to the console for us to browse.
 
 E.g:
 ```
-Print("Hello world") # Output Hello world #
+print("Hello world") # Output Hello world #
 ```
 In the examples that follow, we will use the console as a demo environment.
 
@@ -135,7 +135,7 @@ We can create a new variable simply by using the `id:type` statement.
 
 E.g:
 ```
-A: Int
+A: int
 ```
 This will create an identifier for the name on the left and define it as the type on the right, in which case the identifier is a null value.
 
@@ -157,13 +157,13 @@ E.g:
 B := 10
 ```
 
-This defines the new variable `b`, which is equal to `10` and is automatically derived as the `Int` type.
+This defines the new variable `b`, which is equal to `10` and is automatically derived as the `int` type.
 
 If we don't want automatic derivation, we can also use the write statement definition to mark the type we need.
 
 E.g:
 ```
-B: I16 = 10
+B: int = 10
 ```
 
 ## Constant
@@ -172,7 +172,7 @@ A constant is a language that is determined at compile time. It cannot be change
 E.g:
 ```
 I :: 2      # Automated derivation #
-J: Int: 3   # Do not use automatic derivation #
+J: int: 3   # Do not use automatic derivation #
 ```
 
 ## Identifier
@@ -196,57 +196,57 @@ We only need a few simple basic types to do most of the work.
 ## Integer
 Since our current computer architecture is good at calculating integers, a separate integer type helps to improve the efficiency of the program.
 
-In this language, the default integer is the `Int` type, which is a 32-bit signed integer type data, an alias of type `I32`, which is equivalent.
+In this language, the default integer is the `int` type, which is a 32-bit signed integer type data, an alias of type `i32`, which is equivalent.
 
 E.g:
 ```
-Integer: Int = 3987349
+Integer: int = 3987349
 ```
 
 If we need integers in other numeric ranges, we can use other types. All supported integer types are listed below.
 ```
-I8      # 8 bit signed -128 to 127 #
-U8      # 8 bit unsigned 0 to 255 #
-I16     # 16-bit signed -32,768 to 32,767 #
-U16     # 16-bit unsigned 0 to 65,535 #
-I32     # 32-bit signed -2,147,483,648 to 2,147,483,647 #
-U32     # 32-bit unsigned 0 to 4,294,967,295 #
-I64     # 64-bit signed -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807 #
-U64     # 64-bit unsigned 0 to 18,446,744,073,709,551,615 #
+i8      # 8 bit signed -128 to 127 #
+u8,byte # 8 bit unsigned 0 to 255 #
+i16     # 16-bit signed -32,768 to 32,767 #
+u16     # 16-bit unsigned 0 to 65,535 #
+i32,int # 32-bit signed -2,147,483,648 to 2,147,483,647 #
+u32     # 32-bit unsigned 0 to 4,294,967,295 #
+i64     # 64-bit signed -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807 #
+u64     # 64-bit unsigned 0 to 18,446,744,073,709,551,615 #
 ```
 ## Basic Type Conversion
-Since the default integers are `Int`, how do we use other types of integers?
+Since the default integers are `int`, how do we use other types of integers?
 
-We can use the base type conversion to change the number to the type we need, just use the `toType()` method.
+We can use the base type conversion to change the number to the type we need, just use the `to_type()` method.
 
 E.g:
 ```
-Integer8 := (16).toI8()
+Integer8 := (16).to_i8()
 ```
 
 It should be noted that the underlying type conversion method is only owned by the base type.
-If you need all types of casts, use the `to<Type>()` method, which crashes against incompatible types, so use it with caution.
+If you need all types of casts, use the `to<type>()` method, which crashes against incompatible types, so use it with caution.
 
 ## Float Point Number
 Integers don't satisfy our needs for numbers, and we often need to deal with decimals.
 
-In this language, the default decimal is the `Num` type, which is a 64-bit double-precision floating-point data, an alias of the `F64` type, which is equivalent.
+In this language, the default decimal is the `num` type, which is a 64-bit double-precision floating-point data, an alias of the `f64` type, which is equivalent.
 
 E.g:
 ```
-Float1: Num = 855.544
-Float2: Num = 0.3141592653
+Float1: num = 855.544
+Float2: num = 0.3141592653
 ```
 
 It should be noted that due to the particularity of computer computing floating-point numbers, floating-point operations have certain accuracy problems, so the need for precision-sensitive requirements should consider special handling.
 
 All supported floating point types are as follows:
 ```
-F32     # 32 bits ±1.5e−45 to ±3.4e38 #
-F64     # 64 bits ±5.0e−324 to ±1.7e308 #
+f32     # 32 bits ±1.5e−45 to ±3.4e38 #
+f64,num # 64 bits ±5.0e−324 to ±1.7e308 #
 ```
 ## Character
-Computers usually use a specific number to encode characters, so a type is needed to express the characters. This is the `Chr` type.
+Computers usually use a specific number to encode characters, so a type is needed to express the characters. This is the `chr` type.
 
 It can only be a single character, it only represents the correspondence between a certain character and a number, so it is a character and a number.
 
@@ -254,19 +254,19 @@ You only need to wrap a character with `''`, it will be recognized as a characte
 
 E.g:
 ```
-Char: Chr = 'x'
-Char2: Chr = '8'
+Char: chr = 'x'
+Char2: chr = '8'
 ```
 ## String
 We are not living in a world where only numbers, so we also need to use text to display the information we need.
 
-In this language, the default text is the `Str` type, which is an unlimited length of string data.
+In this language, the default text is the `str` type, which is an unlimited length of string data.
 
 You only need to wrap a piece of text with `""`, which will be recognized as a string value.
 
 E.g:
 ```
-String: Str = "Hello world!"
+String: str = "Hello world!"
 ```
 
 It should be noted that a string is a type consisting of multiple characters, so in fact the string is a fixed-order list, and there is a correspondence between the two. Many times we can process strings as if they were lists.
@@ -277,7 +277,7 @@ E.g:
 ```
 Title := "Year:"
 Content := 2018
-String := "Hello world! " + Title + Content.toStr()
+String := "Hello world! " + Title + Content.to_str()
 # Hello world! Year:2018 #
 ```
 
@@ -293,26 +293,26 @@ String := "Hello world! " Title "" Content ""
 ## Boolean
 Boolean refers to logical values because they can only be true or false. It is often used to aid in the judgment logic.
 
-In this language, the default boolean is the `Bool` type, which is a type with only true and false values.
+In this language, the default boolean is the `bool` type, which is a type with only true and false values.
 
 E.g:
 ```
-Boolean1: Bool = True       # true #
-Boolean2: Bool = False      # false #
+Boolean1: bool = true       # true #
+Boolean2: bool = false      # false #
 ```
 ## Any Type
-In particular, sometimes a type that can be any object is needed to assist in the completion of the function, which is `Any`.
+In particular, sometimes a type that can be any object is needed to assist in the completion of the function, which is `any`.
 
 E.g:
 ```
-A: Any = 1  # Any Type #
+A: any = 1  # Any Type #
 ```
 ## Nil
-We need a value that can be any type of null value, so it is `Nil` .
+We need a value that can be any type of null value, so it is `nil` .
 
 E.g:
 ```
-A = Nil     # none value #
+A = nil     # none value #
 ```
 
 # Operators
@@ -327,16 +327,16 @@ E.g:
 ```
 A := 4
 B := 2
-Print( A + B )    # + plus #
-Print( A - B )    # - minus #
-Print( A * B )    # * multiply #
-Print( A / B )    # / divide #
-Print( A % B )    # % residual, meaning the remainder remaining after the divisibility, the result here is 2 #
-Print( A ** B )   # ** power #
-Print( A // B )   # // root #
-Print( A %% B )   # %% log #
+print( A + B )    # + plus #
+print( A - B )    # - minus #
+print( A * B )    # * multiply #
+print( A / B )    # / divide #
+print( A % B )    # % residual, meaning the remainder remaining after the divisibility, the result here is 2 #
+print( A ** B )   # ** power #
+print( A // B )   # // root #
+print( A %% B )   # %% log #
 ```
-In addition to numbers, there are other types that support arithmetic operations. For example, `Str` can use an addition operation to combine two paragraphs of text.
+In addition to numbers, there are other types that support arithmetic operations. For example, `str` can use an addition operation to combine two paragraphs of text.
 
 E.g:
 ```
@@ -346,29 +346,29 @@ C := A + " " + B    # C is "hello world" #
 ```
 
 ## Judging Operators
-The judgment operator is mainly used in the judgment statement to calculate the relationship between the two data. The result is in accordance with the expected value of `True` and the non-conformity is `False`.
+The judgment operator is mainly used in the judgment statement to calculate the relationship between the two data. The result is in accordance with the expected value of `true` and the non-conformity is `false`.
 
 E.g:
 ```
 A := 4
 B := 2
-Print( A == B )   # == equal to #
-Print( A >< B )   # >< not equal to #
-Print( A > B )    # > Greater than #
-Print( A >= B )   # >= Greater than or equal to #
-Print( A < B )    # < less than #
-Print( A <= B )   # <= less than or equal to #
+print( A == B )   # == equal to #
+print( A >< B )   # >< not equal to #
+print( A > B )    # > Greater than #
+print( A >= B )   # >= Greater than or equal to #
+print( A < B )    # < less than #
+print( A <= B )   # <= less than or equal to #
 ```
 ## Logical Operators
 Logical operators are also used primarily in decision statements to perform logical operations (AND, OR, and NOT).
 
 E.g:
 ```
-A := True
-B := False
-Print( A & B )    # & AND, both are true at the same time #
-Print( A | B )    # | OR, one of them is true. #
-Print( ~A )       # ~ NOT, boolean inversion #
+A := true
+B := false
+print( A & B )    # & AND, both are true at the same time #
+print( A | B )    # | OR, one of them is true. #
+print( ~A )       # ~ NOT, boolean inversion #
 ```
 
 ## Assignment Operator
@@ -414,7 +414,7 @@ E.g:
 ```
 List := { 1,2,3,4,5 }
 ```
-This will create a list of `Int` types containing `1` to `5`.
+This will create a list of `int` types containing `1` to `5`.
 
 If you need a list of explicit types, you can use the constructor to create them.
 
@@ -422,23 +422,23 @@ The representation of the list type is `[]type`.
 
 For example we need a list of strings:
 ```
-List := []Str{}     # empty #
+List := []str{}     # empty #
 ```
 
 #### Array
 If we need to use a native array type, we can use `[:]type` to indicate it.
-It can also be created directly using `ArrayOf(e1,e2,e3)`.
+It can also be created directly using `array_of(e1,e2,e3)`.
 
 E.g:
 ```
-Array: [:]Int = ArrayOf(1,2,3,4,5)
+Array: [:]int = array_of(1,2,3,4,5)
 ```
 ### Access
 If we need to access one of the elements in the list, we can access it with `identifier[index]`.
 
 E.g:
 ```
-Print( List[1] )
+print( List[1] )
 ```
 It should be noted that in the programming language, most of the list start index starts from `0`, the identifier [0]` gets the first element, and the next element and so on.
 ### Change Element
@@ -470,7 +470,7 @@ E.g:
 ```
 Dictionary := {["a"]1, ["b"]2, ["c"]3}
 ```
-This will create a `[Str]Int` type dictionary containing three entries for `a,b,c`.
+This will create a `[str]int` type dictionary containing three entries for `a,b,c`.
 
 If you need an explicit type of dictionary, you can also use the constructor to create it.
 
@@ -478,14 +478,14 @@ The representation of the dictionary type is `[type]type`.
 
 E.g:
 ```
-DictionaryNumNum := [Int]Int{}  # empty #
+DictionaryNumNum := [int]int{}  # empty #
 ```
 ### Access
 Similar to the list, we can also use the index to access the data directly.
 
 E.g:
 ```
-Print( Dictionary["a"] )
+print( Dictionary["a"] )
 ```
 ### Change Element
 Similar to lists, we can also use assignment statements to change elements.
@@ -512,7 +512,7 @@ E.g:
 ```
 Set := {["a"], ["b"], ["c"]}
 ```
-This will create a set of `[Str]` types containing three entries: `a,b,c`.
+This will create a set of `[str]` types containing three entries: `a,b,c`.
 
 If you need a set of explicit types, you can also create them using the constructor.
 
@@ -520,7 +520,7 @@ The representation of the set type is `[type]`.
 
 E.g:
 ```
-Numbers := [Int]{}      # empty #
+Numbers := [int]{}      # empty #
 ```
 ### Common Operations
 ```
@@ -531,28 +531,28 @@ Length := Numbers.len       # Length #
 ```
 
 # Judgment
-The judgment statement executes the program by one or more of the set conditions, executes the specified statement when the condition is `True`, and executes the specified statement when the condition is `False`.
+The judgment statement executes the program by one or more of the set conditions, executes the specified statement when the condition is `true`, and executes the specified statement when the condition is `false`.
 
 We only need to use `? value {}` to declare the judgment statement and enter the corresponding area according to the following values.
 
 E.g:
 ```
-? True {
-    Prt("True")     # true #
+? true {
+    print("true")     # true #
 }
 ```
 ## Boolean Judgment
-When the judgment value is only of the `Bool` type, the statement is executed only when it is `True`.
+When the judgment value is only of the `bool` type, the statement is executed only when it is `true`.
 If we need to deal with other situations at the same time, we can use `value {}` to continue to declare another processing statement.
-If you only need `False`, use `_ {}` to declare it.
+If you only need `false`, use `_ {}` to declare it.
 
 E.g:
 ```
-B := False
+B := false
 ? B {
-    ...... # Because B is False, so never enter this branch #
+    ...... # Because B is false, so never enter this branch #
 } _ {
-    ...... # proccess False #
+    ...... # proccess false #
 }
 ```
 
@@ -621,12 +621,12 @@ You can use the `value ? id:type{}` syntax to match types, and `id` can be omitt
 
 E.g:
 ```
-X ? :Int {          # is Int #
-     Print("Int")
-} content:Str {     # is Str #
-     Print(content)
-} Nil {             # is Nil #
-     Print("Nil")
+X ? :int {          # is int #
+     print("int")
+} content:str {     # is str #
+     print(content)
+} nil {             # is nil #
+     print("nil")
 }
 ```
 ### Get type
@@ -648,7 +648,7 @@ E.g:
 ```
 Arr := {1, 2, 3, 4, 5}
 Arr @ item {
-    Prt(item)   # print every number #
+    print(item)   # print every number #
 }
 ```
 
@@ -657,7 +657,7 @@ If we need to fetch the index and value at the same time, we can replace `id` wi
 E.g:
 ```
 Arr @ [i]v {
-    Prt(""i":"v"")
+    print(""i":"v"")
 }
 ```
 
@@ -670,7 +670,7 @@ The iterator can take the number from the start point to the end point loop. We 
 E.g:
 ```
 [0 <= 100] @ i {
-    Prt(i)  # print every number #
+    print(i)  # print every number #
 }
 ```
 It should be noted that the meaning of `0 <= 100` is read from `0` to `100`, that is, a total of `101` times. The iterator will execute until the last number is executed, rather than ending one at a time.
@@ -769,11 +769,11 @@ Very simple, we only need to declare the parameters using `id:type`.
 
 E.g:
 ```
-Func(x: Int -> y: Int) {
+Func(x: int -> y: int) {
     <- x * 2
 }
 ```
-The meaning of this function is that it accepts an `Int` parameter `x` of the input and returns a `Int` parameter `y`.
+The meaning of this function is that it accepts an `int` parameter `x` of the input and returns a `int` parameter `y`.
 
 The left are the in parameters, and the right are the out parameters. There is no limit on the number of parameters in the parentheses, but there are strict requirements on the order and type.
 ### Return
@@ -808,7 +808,7 @@ When we call a function, we need to fill the data in parentheses in the order de
 E.g:
 ```
 # Define a function that contains two input parameters #
-Sell(price: Int, name: Str ->) {}
+Sell(price: int, name: str ->) {}
 # Fill in the required data according to the defined requirements #
 Sell(1.99, "cola")
 ```
@@ -817,7 +817,7 @@ Similar to the input parameters, the output parameter needs to be explicitly def
 
 E.g:
 ```
-TopSell(-> name: Str, count: Int) {
+TopSell(-> name: str, count: int) {
      ......
      <- "cola", many
 }
@@ -838,7 +838,7 @@ You can use a definition or assignment statement to get the return value of the 
 
 E.g:
 ```
-Print( TopSell() )        # Print two values ​​#
+print( TopSell() )        # print two values ​​#
 ```
 If there is only one return value, the parentheses can be taken with or without.
 
@@ -868,7 +868,7 @@ There is no special way to define function arguments, just replace the argument 
 
 E.g:
 ```
-Each_1_To_10(func: (Int->) ->) {
+Each_1_To_10(func: (int->) ->) {
      [1<=10] @ i {
          func(i)
      }
@@ -880,11 +880,11 @@ This way we can pass the details of the processing to the external incoming `fun
 
 E.g:
 ```
-Print(item: Int ->) {
-     Print(item)
+print(item: int ->) {
+     print(item)
 }
 
-Each_1_To_10(Print)
+Each_1_To_10(print)
 ```
 Thus, we executed the `print` function in the loop inside `Each_1_To_10`.
 
@@ -900,9 +900,9 @@ Since the function argument is already determined at the time of declaration, we
 E.g:
 ```
 ForEach( {it ->
-    Prt(it)
-    Prt(it * it)
-    Prt(it % 2)
+    print(it)
+    print(it * it)
+    print(it % 2)
 })
 Take( {a, b -> a + b} )
 FindAll{ it -> it > 7 }     # If the function has only one argument, you can also omit the brackets #
@@ -914,8 +914,8 @@ Unlike the simplified notation above, we can also write a complete function dire
 
 E.g:
 ```
-Each_1_To_10( (item: Int ->) {
-    Prt(item)
+Each_1_To_10( (item: int ->) {
+    print(item)
 })
 ```
 
@@ -939,13 +939,13 @@ We can define this data in the structure of the body just like we would define a
 E.g:
 ```
 Student -> {
-    Name: Str = ""
-    Number: Str = ""
-    Class: Int = 0
-    Grade: Int = 0
+    Name: str = ""
+    Number: str = ""
+    Class: int = 0
+    Grade: int = 0
 }
 ```
-This way we get the student structure with these data attributes. This structure is like a type that can be used like `Int, Str, Bool`.
+This way we get the student structure with these data attributes. This structure is like a type that can be used like `int, str, bool`.
 
 Unlike our original base type, which only stores one type of data, this structure can store data such as name, student number, class, and grade.
 
@@ -969,7 +969,7 @@ Quite simply, we only need to use the `.` syntax to summon the properties we nee
 
 E.g:
 ```
-Print( Peter.name )   # Printed the name of a student #
+print( Peter.name )   # Printed the name of a student #
 ```
 The same is true for changing the value of an attribute, which is equivalent to a nested identifier. We can use the assignment statement to change the value directly.
 
@@ -998,8 +998,8 @@ Similarly, the way a collection is build is actually a build syntax, so we can a
 
 E.g:
 ```
-Array := []Int{ 1, 2, 3, 4, 5 }
-Dictionary := [Str]Int{ ["1"]1, ["2"]2, ["3"]3 }
+Array := []int{ 1, 2, 3, 4, 5 }
+Dictionary := [str]int{ ["1"]1, ["2"]2, ["3"]3 }
 ```
 ## Anonymous Structure
 If we only want to wrap some data directly, instead of defining the structure and then using it, can it be like an anonymous function?
@@ -1029,7 +1029,7 @@ E.g:
 ```
 Student -> {
     ......
-    _girlFriend: Str    # The first character is the identifier of _ is private #
+    _girlFriend: str    # The first character is the identifier of _ is private #
 }
 ```
 That's right, if you remember the definition of the identifier, this is how the private identifier is defined. The private identifier is not accessible to the outside world.
@@ -1045,7 +1045,7 @@ Structure functions are declared in a similar way to structures, except that the
 E.g:
 ```
 me: Student -> {
-    getGirlFriend(-> name: Str) {
+    getGirlFriend(-> name: str) {
         <- me._girlFriend
     }
 }
@@ -1059,7 +1059,7 @@ With this function, we can get the private property by calling the function.
 
 E.g:
 ```
-Print( Peter.getGirlFriend() )
+print( Peter.getGirlFriend() )
 # Printed the name of a girlfriend of a young love student #
 ```
 Like data attributes, functions can also be private identifiers. Functions that use private identifiers also mean that only structures can access them.
@@ -1070,11 +1070,11 @@ Now let us use our imagination. How do we define a structure that is specificall
 E.g:
 ```
 ChineseStudent -> {
-    Name: Str = ""
-    Number: Str = ""
-    Class: Int = 0
-    Grade: Int = 0
-    Kungfu: Bool = False    # not learn kungfu #
+    Name: str = ""
+    Number: str = ""
+    Class: int = 0
+    Grade: int = 0
+    Kungfu: bool = false    # not learn kungfu #
 }
 ```
 No, no, it's not very elegant to repeat the definition of data. We can reuse the student attributes and add an extra kung fu attribute.
@@ -1085,7 +1085,7 @@ E.g:
 ```
 ChineseStudent -> {
     Student := Student{}    # include the student attribute in it #
-    Kungfu := False         # not learn kungfu #
+    Kungfu := false         # not learn kungfu #
 }
 ```
 This way you can use common attributes through the student attributes in Chinese students.
@@ -1093,7 +1093,7 @@ This way you can use common attributes through the student attributes in Chinese
 E.g:
 ```
 Chen := ChineseStudent{}
-Print( Chen.student.name )
+print( Chen.student.name )
 # Of course, because there is no assignment, there is no output. #
 ```
 By combining layers of structure, you can freely assemble anything you want to describe.
@@ -1109,12 +1109,12 @@ E.g:
 ```
 ChineseStudent -> {
     :Student    # Inherited student #
-    Kungfu := False
+    Kungfu := false
 }
 
 # override #
 (parent)me: ChineseStudent -> {
-    getGirlFriend(-> name: Str) {
+    getGirlFriend(-> name: str) {
         <- parent._girlFriend
     }
 }
@@ -1126,7 +1126,7 @@ We can use the special constructor statement `id:type <>() {}`.
 
 E.g:
 ```
-me: Student <>(name: Str, number: Str) {
+me: Student <>(name: str, number: str) {
     me.name = name
     me.number = number
     # Calculate the class #
@@ -1142,20 +1142,20 @@ We need to use the constructor with the `<type>()` function.
 E.g:
 ```
 Peter := <Student>("peter", "060233")
-Print(Peter.class)    # Print out 2 #
+print(Peter.class)    # print out 2 #
 ```
 
 If you need to use a constructor with inheritance, you can append `(params)` to the argument syntax.
 
 E.g:
 ```
-me: Parent <>(a:Int) {
+me: Parent <>(a:int) {
 }
 
 Child -> {
     :Parent
 }
-me: Child <>(a:Int)(a) {
+me: Child <>(a:int)(a) {
 }
 ```
 
@@ -1171,7 +1171,7 @@ E.g:
 ```
 "Name/Space" {}
 
-GetSomething(-> content: Str) {
+GetSomething(-> content: str) {
      <- "something"
 }
 ```
@@ -1185,8 +1185,8 @@ E.g:
 }
 
 Main(->) {
-     # Print something #
-     Print( GetSomething() )
+     # print something #
+     print( GetSomething() )
 }
 ```
 
@@ -1200,7 +1200,7 @@ If we want to set a get operation, we can use the `id():type{ctrl}` definition.
 
 E.g:
 ```
-Number(): Int {
+Number(): int {
     get {           # means get, equivalent to getter in other languages ​​#
         <- 7        # Only return 7 #
     }
@@ -1214,7 +1214,7 @@ With the above examples, we can naturally think of how to set the operation chan
 
 E.g:
 ```
-Number(): Int {
+Number(): int {
     set(value) {     # Indicates the setting, which is equivalent to the setter in other languages ​​#
         # ? ? ? Who should I give the value to? ? ? #
     }
@@ -1227,7 +1227,7 @@ E.g:
 ```
 _Number := 0
 
-Number(): Int {
+Number(): int {
     set(value) {
         _Number = value     # value represents the value entered #
     }
@@ -1237,7 +1237,7 @@ Number(): Int {
 A complete example of reading and writing is as follows:
 ```
 _Number := 0
-Number(): Int {
+Number(): int {
     get {
         <- _Number
     }
@@ -1254,7 +1254,7 @@ Yes, we have an easier way to directly indicate a reference data, and the contro
 E.g:
 ```
 _Number := 0
-Number(_Number): Int # is equivalent to the above package #
+Number(_Number): int # is equivalent to the above package #
 ```
 
 # Interface Type
@@ -1279,7 +1279,7 @@ Next, let's design a difficult task that students need to accomplish... homework
 E.g:
 ```
 Homework <- {
-    count(): Int
+    count(): int
     do(->)
 }
 ```
@@ -1300,11 +1300,11 @@ E.g:
 ```
 Student -> {
      ......
-     _count: Int
+     _count: int
 }
 # Explicit implementation #
 me: Student -> Homework {
-    count(me._count): Int
+    count(me._count): int
 
     do(->) {
         SpendTime(1)       # took an hour #
@@ -1326,12 +1326,12 @@ After the interface is included, we can use the student who owns the interface.
 E.g:
 ```
 Peter := Student{ count=999999 }
-Print( Peter.count )
-# Print 999999, so much #
+print( Peter.count )
+# print 999999, so much #
 Peter.do()
 # Do somework #
-Print( Peter.count )
-# Print 999998, still so much #
+print( Peter.count )
+# print 999998, still so much #
 ```
 If you just use it, there is no advantage to defining these two properties directly in the structure.
 
@@ -1403,7 +1403,7 @@ We only need to use the `id -> type[id id id id]` statement.
 
 E.g:
 ```
-Color -> U8[
+Color -> u8[
      Red
      Green
      Blue
@@ -1431,7 +1431,7 @@ We can also assign a single identifier if needed, and unspecified will continue 
 
 E.g:
 ```
-Number -> U8[
+Number -> u8[
      A = 1  # 1 #
      B      # 2 #
      C = 1  # 1 #
@@ -1453,7 +1453,7 @@ We can use `!()` to declare an exception data anywhere in the function.
 
 E.g:
 ```
-ReadFile(name: Str ->) {
+ReadFile(name: str ->) {
     ? name.len == 0 {
         !( Exception("something wrong") )
     }
@@ -1472,7 +1472,7 @@ E.g:
 } ex:IOException {
     !(ex)
 } e {
-    Prt(e.message)
+    print(e.message)
 }
 ```
 When an exception occurs, the program enters the error handling block, and `e` is the exception identifier. We can get the exception information or perform other operations.
@@ -1504,7 +1504,7 @@ Func(->) {
     ! {
         F = ReadFile("./somecode.xs")
     } _ {
-        ? F >< Nil {
+        ? F >< nil {
             F.release()
         }
     }
@@ -1553,7 +1553,7 @@ That's right, just use `~>`.
 
 E.g:
 ```
-Async(~> out: Int) {
+Async(~> out: int) {
     <- 12
 }
 ```
@@ -1581,13 +1581,13 @@ Asynchronous waits can only be used in functions declared asynchronously.
 E.g:
 ```
 # Yes #
-Async(~> out: Int) {
-    <~ Delay(5000)  # Wait for a while #
+Async(~> out: int) {
+    <~ delay(5000)  # Wait for a while #
     <- 12
 }
 # No #
-Async(-> out: Int) {
-    <~ Delay(5000)  # Cannot be declared #
+Async(-> out: int) {
+    <~ delay(5000)  # Cannot be declared #
     <- 12
 }
 ```
@@ -1599,7 +1599,7 @@ We can choose to wait for no data, or we can choose not to wait for data.
 E.g:
 ```
 Async(~>) {
-    <~ Delay(5000)      # Wait for a while #
+    <~ delay(5000)      # Wait for a while #
 }
 
 <~ Async()              # correct #
@@ -1634,7 +1634,7 @@ List<T> -> {
 }
 
 me: List<T> -> {
-    get(index: Int -> item: T) {    # Get a generic data #
+    get(index: int -> item: T) {    # Get a generic data #
         <- items.get( index )
     }
 
@@ -1648,17 +1648,17 @@ So we define a structure that supports generics, `T` is a generic, in fact it ca
 
 Generic brackets support multiple generations like parameters, for example: `<T, H, Q>`.
 
-After the generics are defined, `T` is treated as a real type in the area of ​​the structure, and then we can use it like various places like `Int`.
+After the generics are defined, `T` is treated as a real type in the area of ​​the structure, and then we can use it like various places like `int`.
 
 It's important to note that because generics are typed on the fly, the compiler cannot infer the constructor of the generic. We can only use the default value creation method to construct generic data.
 
-We can use the default value creation method `Def<type>()` to specify a default value that contains the type.
+We can use the default value creation method `empty<type>()` to specify a default value that contains the type.
 
 E.g:
 ```
-X := Def<Int>()
-Y := Def<Protocol>()
-Z := Def<(->)>()
+X := empty<int>()
+Y := empty<protocol>()
+Z := empty<(->)>()
 ```
 
 This way we can use it in generics.
@@ -1666,7 +1666,7 @@ This way we can use it in generics.
 E.g:
 ```
 Package<T> -> {
-    Item := Def<T>()    # Initializes a default value of generic data #
+    Item := empty<T>()    # Initializes a default value of generic data #
 }
 ```
 So how do we use generics?
@@ -1675,13 +1675,13 @@ It's very simple, just use it as we declare it, just pass the real type when cal
 
 E.g:
 ```
-ListNumber := List<Int>{}   # Pass in integer type #
+ListNumber := List<int>{}   # Pass in integer type #
 ```
 So we have a list of integer types, is it like this:
 ```
-ListNumber := []Int{}
+ListNumber := []int{}
 ```
-That's right, in fact, our list and dictionary syntax are syntactic sugar, the actual types are `Lst` and `Dic`.
+That's right, in fact, our list and dictionary syntax are syntactic sugar.
 ## Supported types
 We can use generics in structures, functions, and interface types.
 
@@ -1727,11 +1727,11 @@ E.g:
 [Table("test")]
 Annotation -> {
         [Key,Column("id")]
-        Id: Str = ""
+        id: str = ""
         [Column("name")]
-        Name: Str = ""
+        name: str = ""
         [Column("data")]
-        Data: Str = ""
+        data: str = ""
 }
 ```
 We declare a structure of `annotation` that uses annotations to mark the table name `test`, primary key `id`, field `name`, and field `data`.
@@ -1775,7 +1775,7 @@ If a type is defined but not assigned, it will not be used.
 
 E.g:
 ```
-A: Int
+A: int
 B := A      # error, no assignment to A #
 ```
 
@@ -1786,16 +1786,16 @@ Just add `?` before any type, which is a nullable type.
 
 E.g:
 ```
-A: ?Int
-B := A      # B Assigned to an empty I32 #
+A: ?int
+B := A      # B Assigned to an empty i32 #
 ```
 
 Once an optional type has appeared, we need to strictly handle null values ​​to avoid program errors.
 
 E.g:
 ```
-? A >< Nil {
-    A.toStr()
+? A >< nil {
+    A.to_str()
 }
 ```
 
@@ -1804,15 +1804,15 @@ We can use `?` after the expression to use them, so that they will only be execu
 
 E.g:
 ```
-Arr?.toStr()
+Arr?.to_str()
 ```
 
 ## Merge operation
-If you want to use another default value when the value of the optional type is null, you can use the `id.or else(value)` function.
+If you want to use another default value when the value of the optional type is null, you can use the `id.or_else(value)` function.
 
 E.g:
 ```
-B := A.ofElse(128)
+B := A.or_else(128)
 ```
 
 ## Reference operation
@@ -1821,7 +1821,7 @@ In this way, you can manipulate external variables inside the function, and you 
 
 E.g:
 ```
-Swap(x: !Int, y: !Int ->) {
+Swap(x: !int, y: !int ->) {
     (x, y) = (y, x)
 }
 
@@ -1829,7 +1829,7 @@ A := 1
 B := 2
 
 Swap(A!, B!)
-Print(A, B)
+print(A, B)
 # A = 2, B = 1 #
 ```
 
