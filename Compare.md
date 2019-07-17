@@ -3,7 +3,7 @@
 ## Hello World
 ### Lite
 ```
-Print("Hello, world!")
+print("Hello, world!")
 ```
 ### C#
 ```
@@ -65,7 +65,7 @@ MYCONSTANT = 42
 ## Explicit Types
 ### Lite
 ```
-explicitDouble: Num = 70
+explicitDouble: num = 70
 ```
 ### C#
 ```
@@ -86,10 +86,10 @@ let explicitDouble: Double = 70
 ## Basic Types
 ### Lite
 ```
-I32 I16 I64 I8 
-F64 F32 
-Bool 
-Str
+i32 i16 i64 i8 
+f64 f32 
+bool 
+str
 ```
 ### C#
 ```
@@ -129,9 +129,9 @@ string
 ## Type Coercion
 ### Lite
 ```
-F := 6.0
-I := 94
-Count := I + F.toInt()
+f := 6.0
+i := 94
+count := i + f:(int)
 ```
 ### C#
 ```
@@ -167,7 +167,7 @@ count = i + int(f)
 ### Lite
 ```
 [ 1 <= 5 ] @ index {
-    Print("" index " times 5 is " index * 5 "")
+    print("" index " times 5 is " index * 5 "")
 }
 ```
 ### C#
@@ -289,8 +289,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Lite
 ```
-emptyArray := []Str{}
-emptyDictionary := [Str]F32{}
+emptyArray := []str{}
+emptyDictionary := [str]f32{}
 ```
 ### C#
 ```
@@ -322,7 +322,7 @@ emptyDictionary ={}
 ## Functions
 ### Lite
 ```
-greet(name: Str, day: Str -> r: Str) {
+greet(name: str, day: str -> r: str) {
     <- "Hello " name ", today is " day "."
 }
 greet("Bob", "Tuesday")
@@ -365,7 +365,7 @@ greet("Bob", "Tuesday")
 ## Tuple Return
 ### Lite
 ```
-getGasPrices(-> a: Num, b: Num, c: Num) {
+getGasPrices(-> a: num, b: num, c: num) {
     <- 3.59, 3.69, 3.79
 }
 ```
@@ -400,8 +400,8 @@ def getGasPrices():
 ## Function Type
 ### Lite
 ```
-makeIncrementer(-> fn: (Int->Int)) {
-    addOne(number: Int -> number: Int) {
+makeIncrementer(-> fn: (int->int)) {
+    addOne(number: int -> number: int) {
         <- 1 + number
     }
     <- addOne
@@ -474,7 +474,7 @@ Shape -> {
     numberOfSides := 0
 }
 me: Shape -> {
-    simpleDescription(-> s: Str) {
+    simpleDescription(-> s: str) {
         <- "A shape with " me.number of sides " sides."
     }
 }
@@ -565,32 +565,32 @@ shapeDescription = shape.simpleDescription()
 ### Lite
 ```
 NamedShape -> {
-    name: Str
+    name: str
     numberOfSides := 0
 }
 me: NamedShape -> {
-    simpleDescription(-> s: Str) {
+    simpleDescription(-> s: str) {
         <- "A shape with " me.numberOfSides " sides."
     }
 } 
 
 Square -> {
     :NamedShape
-    sideLength: Num
+    sideLength: num
 } 
 me: Square -> {
-    simpleDescription(-> s: Str) {
+    simpleDescription(-> s: str) {
         <- "A square with sides of length " me.sideLength "."
     }
 
-    init(sideLength: Num, name: Str -> v: Square) {
+    init(sideLength: num, name: str -> v: square) {
         me.sideLength = sideLength
         me.numberOfSides = 4
         me.name = name
         <- me
     }
 
-    area(-> f: Num) {
+    area(-> f: num) {
         <- me.sideLength ** 2
     }
 }
@@ -850,15 +850,15 @@ for item in library:
 ```
 nb := 42
 nb ? [0 <= 7], 8, 9 { 
-    Print("single digit") 
+    print("single digit") 
 } 10 { 
-    Print("double digits") 
+    print("double digits") 
 } [11 <= 99] { 
-    Print("double digits") 
+    print("double digits") 
 } [100 <= 999] { 
-    Print("triple digits") 
+    print("triple digits") 
 } _ { 
-    Print("four or more digits") 
+    print("four or more digits") 
 }
 ```
 ### C#
@@ -912,7 +912,7 @@ switch nb {
 ```
 someObjects @ current {
     current ? movie:Movie {
-        Print("Movie: '" movie.name "', " +
+        print("Movie: '" movie.name "', " +
             "dir. " movie.director "")
     }
 }
@@ -964,11 +964,11 @@ for current in someObjects:
 ### Lite
 ```
 Nameable <- {
-    name(-> s: Str)
+    name(-> s: str)
 }
 
 f(x: Nameable ->) {
-    Print("Name is " + x.name())
+    print("Name is " + x.name())
 }
 ```
 ### C#
@@ -1018,12 +1018,12 @@ func f(x: Nameable) {
 ```
 Dog -> {}
 me:Dog -> Nameable {
-    name(-> n: Str) {
+    name(-> n: str) {
         <- "Dog"
     }
 }
 me:Dog -> Weight {
-    getWeight(-> w: Int) {
+    getWeight(-> w: int) {
         <- 30
     }
 }
