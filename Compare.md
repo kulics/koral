@@ -28,9 +28,9 @@ print("Hello, world!")
 ## Variables And Constants
 ### Lite
 ```
-myVariable := 42
+myVariable = 42
 myVariable = 50
-myConstant :: 42
+myConstant : 42
 ```
 ### C#
 ```
@@ -65,7 +65,7 @@ MYCONSTANT = 42
 ## Explicit Types
 ### Lite
 ```
-explicitDouble: num = 70
+explicitDouble num = 70
 ```
 ### C#
 ```
@@ -129,9 +129,9 @@ string
 ## Type Coercion
 ### Lite
 ```
-f := 6.0
-i := 94
-count := i + f:(int)
+f = 6.0
+i = 94
+count = i + f.(int)
 ```
 ### C#
 ```
@@ -203,7 +203,7 @@ for index in range(1,6):
 ## Arrays
 ### Lite
 ```
-shoppingList := {"catfish", "water",
+shoppingList = {"catfish", "water",
     "tulips", "blue paint"}
 shoppingList[1] = "bottle of water"
 ```
@@ -240,7 +240,7 @@ shoppingList[1] = "bottle of water"
 ## Maps
 ### Lite
 ```
-occupations := {
+occupations = {
     ["Malcolm"]"Captain",
     ["Kaylee"]"Mechanic"
 }
@@ -289,8 +289,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Lite
 ```
-emptyArray := []str{}
-emptyDictionary := [str]f32{}
+emptyArray = []str{}
+emptyDictionary = [str]f32{}
 ```
 ### C#
 ```
@@ -322,7 +322,7 @@ emptyDictionary ={}
 ## Functions
 ### Lite
 ```
-greet(name: str, day: str -> r: str) {
+greet(name str, day str -> r str) {
     <- "Hello " name ", today is " day "."
 }
 greet("Bob", "Tuesday")
@@ -365,7 +365,7 @@ greet("Bob", "Tuesday")
 ## Tuple Return
 ### Lite
 ```
-getGasPrices(-> a: num, b: num, c: num) {
+getGasPrices(-> a num, b num, c num) {
     <- 3.59, 3.69, 3.79
 }
 ```
@@ -400,13 +400,13 @@ def getGasPrices():
 ## Function Type
 ### Lite
 ```
-makeIncrementer(-> fn: (int->int)) {
-    addOne(number: int -> number: int) {
+makeIncrementer(-> fn (int->int)) {
+    addOne(number int -> number int) {
         <- 1 + number
     }
     <- addOne
 }
-increment := makeIncrementer()
+increment = makeIncrementer()
 increment(7)
 ```
 ### C#
@@ -471,10 +471,10 @@ increment(7)
 ### Lite
 ```
 Shape -> {
-    numberOfSides := 0
+    numberOfSides = 0
 }
-me: Shape -> {
-    simpleDescription(-> s: str) {
+me Shape -> {
+    simpleDescription(-> s str) {
         <- "A shape with " me.number of sides " sides."
     }
 }
@@ -527,9 +527,9 @@ class Shape(object):
 ## Classes Usage
 ### Lite
 ```
-shape := Shape{}
+shape = Shape{}
 shape.numberOfSides = 7
-shapeDescription := shape.simpleDescription()
+shapeDescription = shape.simpleDescription()
 ```
 ### C#
 ```
@@ -565,37 +565,37 @@ shapeDescription = shape.simpleDescription()
 ### Lite
 ```
 NamedShape -> {
-    name: str
-    numberOfSides := 0
+    name str
+    numberOfSides = 0
 }
-me: NamedShape -> {
-    simpleDescription(-> s: str) {
+me NamedShape -> {
+    simpleDescription(-> s str) {
         <- "A shape with " me.numberOfSides " sides."
     }
 } 
 
 Square -> {
-    :NamedShape
-    sideLength: num
+    _ NamedShape
+    sideLength num
 } 
-me: Square -> {
-    simpleDescription(-> s: str) {
+me Square -> {
+    simpleDescription(-> s str) {
         <- "A square with sides of length " me.sideLength "."
     }
 
-    init(sideLength: num, name: str -> v: square) {
+    init(sideLength num, name str -> v square) {
         me.sideLength = sideLength
         me.numberOfSides = 4
         me.name = name
         <- me
     }
 
-    area(-> f: num) {
+    area(-> f num) {
         <- me.sideLength ** 2
     }
 }
 
-test := Square{}.init(5.2, "square")
+test = Square{}.init(5.2, "square")
 test.area()
 test.simpleDescription()
 ```
@@ -767,13 +767,13 @@ test.simpleDescription()
 ## Checking Type
 ### Lite
 ```
-movieCount := 0
-songCount := 0
+movieCount = 0
+songCount = 0
 
 library @ item {
-    item ? :Movie {
+    item ? _ Movie {
         movieCount += 1
-    } :Song {
+    } _ Song {
         songCount += 1
     }
 }
@@ -848,7 +848,7 @@ for item in library:
 ## Pattern Matching
 ### Lite
 ```
-nb := 42
+nb = 42
 nb ? [0 <= 7], 8, 9 { 
     print("single digit") 
 } 10 { 
@@ -911,7 +911,7 @@ switch nb {
 ### Lite
 ```
 someObjects @ current {
-    current ? movie:Movie {
+    current ? movie Movie {
         print("Movie: '" movie.name "', " +
             "dir. " movie.director "")
     }
@@ -964,10 +964,10 @@ for current in someObjects:
 ### Lite
 ```
 Nameable <- {
-    name(-> s: str)
+    name(-> s str)
 }
 
-f(x: Nameable ->) {
+f(x Nameable ->) {
     print("Name is " + x.name())
 }
 ```
@@ -1017,13 +1017,13 @@ func f(x: Nameable) {
 ### Lite
 ```
 Dog -> {}
-me:Dog -> Nameable {
-    name(-> n: str) {
+me Dog -> Nameable {
+    name(-> n str) {
         <- "Dog"
     }
 }
-me:Dog -> Weight {
-    getWeight(-> w: int) {
+me Dog -> Weight {
+    getWeight(-> w int) {
         <- 30
     }
 }

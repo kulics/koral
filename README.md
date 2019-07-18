@@ -33,9 +33,9 @@ Main(->) {
     say_hello_world_now("start now")
 }
 
-say_hello_world_now(begin: str ->) {
+say_hello_world_now(begin str ->) {
     print(begin)
-    greetings_around_the_world := {"Hello", "Hola", "Bonjour",
+    greetings_around_the_world = {"Hello", "Hola", "Bonjour",
                 "Ciao", "こんにちは", "안녕하세요",
                 "Cześć", "Olá", "Здравствуйте",
                 "Chào bạn", "你好"}
