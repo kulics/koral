@@ -454,7 +454,7 @@ It should be noted that we can only access the index of the existing data, if it
 List += 1           # Add to the end #
 List.insert(2, 3)   # Insert element 3 to index 2 #
 List -= 1           # Delete the specified location element #
-Length := List.len  # Length #
+Length = List.len  # Length #
 ```
 
 ## Dictionary
@@ -499,7 +499,7 @@ Different from the list, if the index is an index that does not exist, it will n
 ```
 Dictionary += {["d"]11}     # Add Element #
 Dictionary -= "c"           # Delete the specified index element #
-Length := Dictionary.len    # Length #
+Length = Dictionary.len    # Length #
 ```
 
 ## Set
@@ -525,9 +525,9 @@ Numbers = [int]{}      # empty #
 ### Common Operations
 ```
 Numbers.add(1)              # Add Element #
-Has := Numbers.contains(1)  # Determine whether to include #
+Has = Numbers.contains(1)  # Determine whether to include #
 Success = Numbers.remove(1) # Delete element #
-Length := Numbers.len       # Length #
+Length = Numbers.len       # Length #
 ```
 
 # Judgment
@@ -1070,7 +1070,7 @@ This way you can use common attributes through the student attributes in Chinese
 
 E.g:
 ```
-Chen := ChineseStudent{}
+Chen = ChineseStudent{}
 print( Chen.student.name )
 # Of course, because there is no assignment, there is no output. #
 ```
