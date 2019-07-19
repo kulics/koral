@@ -131,11 +131,11 @@ Comment
 #
 ```
 ## Definition
-We can create a new variable simply by using the `id:type` statement.
+We can create a new variable simply by using the `id type` statement.
 
 E.g:
 ```
-A: int
+A int
 ```
 This will create an identifier for the name on the left and define it as the type on the right, in which case the identifier is a null value.
 
@@ -150,20 +150,20 @@ A = 2
 ```
 But unlike the definition, the left side of the assignment can only be an identifier that has already been defined, otherwise the assignment statement does not hold.
 ## Automated derivation
-In most cases, you can use the simpler automatic derivation syntax `id := value`, we don't need to explicitly specify the type of data, the compiler will automatically infer the type for the data.
+In most cases, you can use the assignment to define new variable, we don't need to explicitly specify the type of data, the compiler will automatically infer the type for the data.
 
 E.g:
 ```
-B := 10
+B = 10
 ```
 
-This defines the new variable `b`, which is equal to `10` and is automatically derived as the `int` type.
+This defines the new variable `B`, which is equal to `10` and is automatically derived as the `int` type.
 
 If we don't want automatic derivation, we can also use the write statement definition to mark the type we need.
 
 E.g:
 ```
-B: int = 10
+B int = 10
 ```
 
 ## Constant
@@ -171,8 +171,8 @@ A constant is a language that is determined at compile time. It cannot be change
 
 E.g:
 ```
-I :: 2      # Automated derivation #
-J: int: 3   # Do not use automatic derivation #
+I : 2       # Automated derivation #
+J int : 3   # Do not use automatic derivation #
 ```
 
 ## Identifier
@@ -200,7 +200,7 @@ In this language, the default integer is the `int` type, which is a 32-bit signe
 
 E.g:
 ```
-Integer: int = 3987349
+Integer int = 3987349
 ```
 
 If we need integers in other numeric ranges, we can use other types. All supported integer types are listed below.
@@ -221,7 +221,7 @@ We can use the base type conversion to change the number to the type we need, ju
 
 E.g:
 ```
-Integer8 := (16).to_i8()
+Integer8 = (16).to_i8()
 ```
 
 It should be noted that the underlying type conversion method is only owned by the base type.
@@ -234,8 +234,8 @@ In this language, the default decimal is the `num` type, which is a 64-bit doubl
 
 E.g:
 ```
-Float1: num = 855.544
-Float2: num = 0.3141592653
+Float1 num = 855.544
+Float2 num = 0.3141592653
 ```
 
 It should be noted that due to the particularity of computer computing floating-point numbers, floating-point operations have certain accuracy problems, so the need for precision-sensitive requirements should consider special handling.
@@ -254,8 +254,8 @@ You only need to wrap a character with `''`, it will be recognized as a characte
 
 E.g:
 ```
-Char: chr = 'x'
-Char2: chr = '8'
+Char chr = 'x'
+Char2 chr = '8'
 ```
 ## String
 We are not living in a world where only numbers, so we also need to use text to display the information we need.
@@ -266,7 +266,7 @@ You only need to wrap a piece of text with `""`, which will be recognized as a s
 
 E.g:
 ```
-String: str = "Hello world!"
+String str = "Hello world!"
 ```
 
 It should be noted that a string is a type consisting of multiple characters, so in fact the string is a fixed-order list, and there is a correspondence between the two. Many times we can process strings as if they were lists.
@@ -275,9 +275,9 @@ Many times we need to insert other content into the string. What do we usually d
 
 E.g:
 ```
-Title := "Year:"
-Content := 2018
-String := "Hello world! " + Title + Content.to_str()
+Title = "Year:"
+Content = 2018
+String = "Hello world! " + Title + Content.to_str()
 # Hello world! Year:2018 #
 ```
 
@@ -286,7 +286,7 @@ We can insert elements directly in the middle of two strings, and the language w
 
 E.g:
 ```
-String := "Hello world! " Title "" Content ""
+String = "Hello world! " Title "" Content ""
 # Hello world! Year:2018 #
 ```
 
@@ -297,15 +297,15 @@ In this language, the default boolean is the `bool` type, which is a type with o
 
 E.g:
 ```
-Boolean1: bool = true       # true #
-Boolean2: bool = false      # false #
+Boolean1 bool = true       # true #
+Boolean2 bool = false      # false #
 ```
 ## Any Type
 In particular, sometimes a type that can be any object is needed to assist in the completion of the function, which is `any`.
 
 E.g:
 ```
-A: any = 1  # Any Type #
+A any = 1  # Any Type #
 ```
 ## Nil
 We need a value that can be any type of null value, so it is `nil` .
@@ -325,8 +325,8 @@ The arithmetic operators are mainly used for data operations of numeric types, a
 
 E.g:
 ```
-A := 4
-B := 2
+A = 4
+B = 2
 print( A + B )    # + plus #
 print( A - B )    # - minus #
 print( A * B )    # * multiply #
@@ -340,9 +340,9 @@ In addition to numbers, there are other types that support arithmetic operations
 
 E.g:
 ```
-A := "hello"
-B := "world"
-C := A + " " + B    # C is "hello world" #
+A = "hello"
+B = "world"
+C = A + " " + B     # C is "hello world" #
 ```
 
 ## Judging Operators
@@ -350,8 +350,8 @@ The judgment operator is mainly used in the judgment statement to calculate the 
 
 E.g:
 ```
-A := 4
-B := 2
+A = 4
+B = 2
 print( A == B )   # == equal to #
 print( A >< B )   # >< not equal to #
 print( A > B )    # > Greater than #
@@ -364,8 +364,8 @@ Logical operators are also used primarily in decision statements to perform logi
 
 E.g:
 ```
-A := true
-B := false
+A = true
+B = false
 print( A & B )    # & AND, both are true at the same time #
 print( A | B )    # | OR, one of them is true. #
 print( ~A )       # ~ NOT, boolean inversion #
@@ -376,7 +376,7 @@ The assignment operator is mainly used to assign the data on the right to the id
 
 E.g:
 ```
-A := 0
+A = 0
 A = 1       # = the simplest assignment #
 A += 1      # += Add before adding value #
 A -= 1      # -= First subtraction and then assignment #
@@ -389,7 +389,7 @@ Bit operations are the basis for the underlying calculations and are also suppor
 
 E.g:
 ```
-A := 1
+A = 1
 A && 1  # bitwise AND #
 A || 1  # bitwise OR #
 A ^^ 1  # bitwise XOR #
@@ -412,7 +412,7 @@ In most cases, data types can be automatically inferred from the language.
 
 E.g:
 ```
-List := { 1,2,3,4,5 }
+List = { 1,2,3,4,5 }
 ```
 This will create a list of `int` types containing `1` to `5`.
 
@@ -431,7 +431,7 @@ It can also be created directly using `array_of(e1,e2,e3)`.
 
 E.g:
 ```
-Array: [:]int = array_of(1,2,3,4,5)
+Array [:]int = array_of(1,2,3,4,5)
 ```
 ### Access
 If we need to access one of the elements in the list, we can access it with `identifier[index]`.
@@ -468,7 +468,7 @@ Similar to the list, the dictionary is also defined using `{}`, except that the 
 
 E.g:
 ```
-Dictionary := {["a"]1, ["b"]2, ["c"]3}
+Dictionary = {["a"]1, ["b"]2, ["c"]3}
 ```
 This will create a `[str]int` type dictionary containing three entries for `a,b,c`.
 
@@ -478,7 +478,7 @@ The representation of the dictionary type is `[type]type`.
 
 E.g:
 ```
-DictionaryNumNum := [int]int{}  # empty #
+DictionaryNumNum = [int]int{}  # empty #
 ```
 ### Access
 Similar to the list, we can also use the index to access the data directly.
@@ -510,7 +510,7 @@ Similar to lists, set are also defined using `{}` in the form `[value]`.
 
 E.g:
 ```
-Set := {["a"], ["b"], ["c"]}
+Set = {["a"], ["b"], ["c"]}
 ```
 This will create a set of `[str]` types containing three entries: `a,b,c`.
 
@@ -520,7 +520,7 @@ The representation of the set type is `[type]`.
 
 E.g:
 ```
-Numbers := [int]{}      # empty #
+Numbers = [int]{}      # empty #
 ```
 ### Common Operations
 ```
@@ -548,7 +548,7 @@ If you only need `false`, use `_ {}` to declare it.
 
 E.g:
 ```
-B := false
+B = false
 ? B {
     ...... # Because B is false, so never enter this branch #
 } _ {
@@ -560,7 +560,7 @@ We can also insert more judgments in the middle, and the language will automatic
 
 E.g:
 ```
-I := 3
+I = 3
 ? I == 0 {
     ......
 } I == 1 {
@@ -617,25 +617,24 @@ I ? 1,2,3 {
 
 ### Pattern Matching
 Conditional judgment can do more, for example, we need to judge the type of the identifier,
-You can use the `value ? id:type{}` syntax to match types, and `id` can be omitted.
+You can use the `value ? id:type{}` syntax to match types, and `id` can be discard.
 
 E.g:
 ```
-X ? :int {          # is int #
+X ? _ int {             # is int #
      print("int")
-} content:str {     # is str #
+} content str {         # is str #
      print(content)
-} nil {             # is nil #
+} nil {                 # is nil #
      print("nil")
 }
 ```
 ### Get type
-If we need to explicitly get the type value, we can use the `?(id)` or `?(:type)` syntax to get it.
+If we need to explicitly get the type value, we can use the `?(type)` syntax to get it.
 
 E.g:
 ```
-?(expr)     # Get expression type value #
-?(:type)    # Get the type value directly by type #
+?(type)     # Get the type value directly by type #
 ```
 # Loop
 Sometimes we may need to execute the same piece of code multiple times.
@@ -646,7 +645,7 @@ If we happen to have a collection that can be an array, a dictionary, or a piece
 
 E.g:
 ```
-Arr := {1, 2, 3, 4, 5}
+Arr = {1, 2, 3, 4, 5}
 Arr @ item {
     print(item)   # print every number #
 }
@@ -726,7 +725,7 @@ Add a condition to it.
 
 E.g:
 ```
-I := 0
+I = 0
 @ I < 6 {
     I += 1
 }
@@ -765,11 +764,11 @@ Function()  # Call Function #
 ## Parameters
 Although functions can perform specific functions without any parameters, more often we need to be able to receive some input data, or can return data, or both, and this requires parameters to help us complete task.
 
-Very simple, we only need to declare the parameters using `id:type`.
+Very simple, we only need to declare the parameters using `id type`.
 
 E.g:
 ```
-Func(x: int -> y: int) {
+Func(x int -> y int) {
     <- x * 2
 }
 ```
@@ -808,7 +807,7 @@ When we call a function, we need to fill the data in parentheses in the order de
 E.g:
 ```
 # Define a function that contains two input parameters #
-Sell(price: int, name: str ->) {}
+Sell(price int, name str ->) {}
 # Fill in the required data according to the defined requirements #
 Sell(1.99, "cola")
 ```
@@ -817,7 +816,7 @@ Similar to the input parameters, the output parameter needs to be explicitly def
 
 E.g:
 ```
-TopSell(-> name: str, count: int) {
+TopSell(-> name str, count int) {
      ......
      <- "cola", many
 }
@@ -831,34 +830,13 @@ The difference is that for multiple return values ​​we have to wrap each ide
 
 E.g:
 ```
-(n, c) := TopSell()     # Define the two values ​​returned to n and c #
-(n, c) = TopSell()      # Assign the returned two values ​​to n and c #
+n, c = TopSell()      # Assign the returned two values ​​to n and c #
 ```
 You can use a definition or assignment statement to get the return value of the function to use, or you can nest a function that meets the requirements into another function.
 
 E.g:
 ```
 print( TopSell() )        # print two values ​​#
-```
-If there is only one return value, the parentheses can be taken with or without.
-
-It should be noted that if a function with a return value is called, it is not allowed to receive the return value, because this often leads to inadvertent loss of important data.
-
-E.g:
-```
-TopSell()       # error, no explicit return value #
-```
-But sometimes, as a caller, we don't necessarily need all the return values. At this time, we can use the anonymous identifier `_` to help us discard the data. Just write it in the corresponding location.
-
-E.g:
-```
-(name, _) := TopSell()
-```
-If all the return values ​​are not needed, we can just discard all by writing a `_`. But why would you need to call such a function? Maybe we should review the code again.
-
-E.g:
-```
-_ = TopSell()   # For _, assignment and definition are equivalent #
 ```
 
 ## Function Input Parameter
@@ -868,7 +846,7 @@ There is no special way to define function arguments, just replace the argument 
 
 E.g:
 ```
-Each_1_To_10(func: (int->) ->) {
+Each_1_To_10(func (int->) ->) {
      [1<=10] @ i {
          func(i)
      }
@@ -880,7 +858,7 @@ This way we can pass the details of the processing to the external incoming `fun
 
 E.g:
 ```
-print(item: int ->) {
+print(item int ->) {
      print(item)
 }
 
@@ -914,7 +892,7 @@ Unlike the simplified notation above, we can also write a complete function dire
 
 E.g:
 ```
-Each_1_To_10( (item: int ->) {
+Each_1_To_10( (item int ->) {
     print(item)
 })
 ```
@@ -939,10 +917,10 @@ We can define this data in the structure of the body just like we would define a
 E.g:
 ```
 Student -> {
-    Name: str = ""
-    Number: str = ""
-    Class: int = 0
-    Grade: int = 0
+    Name str = ""
+    Number str = ""
+    Class int = 0
+    Grade int = 0
 }
 ```
 This way we get the student structure with these data attributes. This structure is like a type that can be used like `int, str, bool`.
@@ -956,7 +934,7 @@ So how do we build a new structure? As a whole, all of our types can be build us
 
 E.g:
 ```
-Peter := Student{}
+Peter = Student{}
 ```
 This build a `Peter` identifier, and all of the student's properties are initialized to `"","",0,0` as set in the definition.
 
@@ -988,7 +966,7 @@ Add `key=value` to the build syntax and separate the data with `,`.
 
 E.g:
 ```
-Peter := Student{
+Peter = Student{
     Name="peter", number="060233",
     Class=2, grade=6
 }
@@ -998,8 +976,8 @@ Similarly, the way a collection is build is actually a build syntax, so we can a
 
 E.g:
 ```
-Array := []int{ 1, 2, 3, 4, 5 }
-Dictionary := [str]int{ ["1"]1, ["2"]2, ["3"]3 }
+Array = []int{ 1, 2, 3, 4, 5 }
+Dictionary = [str]int{ ["1"]1, ["2"]2, ["3"]3 }
 ```
 ## Anonymous Structure
 If we only want to wrap some data directly, instead of defining the structure and then using it, can it be like an anonymous function?
@@ -1008,7 +986,7 @@ Of course, we can use the `{}` package directly, the same syntax as the collecti
 
 E.g:
 ```
-Peter := {
+Peter = {
     Name = "peter",
     Number = "060233",
     Class = 2,
@@ -1029,7 +1007,7 @@ E.g:
 ```
 Student -> {
     ......
-    _girlFriend: str    # The first character is the identifier of _ is private #
+    _girlFriend str    # The first character is the identifier of _ is private #
 }
 ```
 That's right, if you remember the definition of the identifier, this is how the private identifier is defined. The private identifier is not accessible to the outside world.
@@ -1040,12 +1018,12 @@ The private property of this structure can not be accessed, and can not be modif
 
 ## Structure Function
 If we need to make this structure come with a function that makes it easy to manipulate, we can additionally declare a function with a structure parameter.  
-Structure functions are declared in a similar way to structures, except that the specified identifier is required. The form is `id: type -> {}`.
+Structure functions are declared in a similar way to structures, except that the specified identifier is required. The form is `id type -> {}`.
 
 E.g:
 ```
-me: Student -> {
-    getGirlFriend(-> name: str) {
+me Student -> {
+    getGirlFriend(-> name str) {
         <- me._girlFriend
     }
 }
@@ -1070,11 +1048,11 @@ Now let us use our imagination. How do we define a structure that is specificall
 E.g:
 ```
 ChineseStudent -> {
-    Name: str = ""
-    Number: str = ""
-    Class: int = 0
-    Grade: int = 0
-    Kungfu: bool = false    # not learn kungfu #
+    Name str = ""
+    Number str = ""
+    Class int = 0
+    Grade int = 0
+    Kungfu bool = false    # not learn kungfu #
 }
 ```
 No, no, it's not very elegant to repeat the definition of data. We can reuse the student attributes and add an extra kung fu attribute.
@@ -1084,8 +1062,8 @@ We need to combine this feature, but it's not that complicated, just create a st
 E.g:
 ```
 ChineseStudent -> {
-    Student := Student{}    # include the student attribute in it #
-    Kungfu := false         # not learn kungfu #
+    Student = Student{}    # include the student attribute in it #
+    Kungfu = false         # not learn kungfu #
 }
 ```
 This way you can use common attributes through the student attributes in Chinese students.
@@ -1108,13 +1086,13 @@ If you want to override the properties of the original structure, you can add th
 E.g:
 ```
 ChineseStudent -> {
-    :Student    # Inherited student #
-    Kungfu := false
+    _ Student    # Inherited student #
+    Kungfu = false
 }
 
 # override #
-(parent)me: ChineseStudent -> {
-    getGirlFriend(-> name: str) {
+(parent)me ChineseStudent -> {
+    getGirlFriend(-> name str) {
         <- parent._girlFriend
     }
 }
@@ -1122,11 +1100,11 @@ ChineseStudent -> {
 ### Construction
 Sometimes we might use the constructor in .NET.
 
-We can use the special constructor statement `id:type <>() {}`.
+We can use the special constructor statement `id type <>() {}`.
 
 E.g:
 ```
-me: Student <>(name: str, number: str) {
+me Student <>(name str, number str) {
     me.name = name
     me.number = number
     # Calculate the class #
@@ -1141,7 +1119,7 @@ We need to use the constructor with the `<type>()` function.
 
 E.g:
 ```
-Peter := <Student>("peter", "060233")
+Peter = <Student>("peter", "060233")
 print(Peter.class)    # print out 2 #
 ```
 
@@ -1149,13 +1127,13 @@ If you need to use a constructor with inheritance, you can append `(params)` to 
 
 E.g:
 ```
-me: Parent <>(a:int) {
+me Parent <>(a int) {
 }
 
 Child -> {
-    :Parent
+    _ Parent
 }
-me: Child <>(a:int)(a) {
+me Child <>(a int)(a) {
 }
 ```
 
@@ -1165,13 +1143,11 @@ Namespace are designed to provide a way to separate a set of names from other na
 ## Export
 In order to facilitate our management of the code, we must write our code in the namespace, we can expose it to external use through public properties, or use private properties to complete our own business.
 
-The exported names can be nested in a loop so that they can be split as effectively as folders, and multiple namespaces need to be separated by `/`.
-
 E.g:
 ```
 "Name/Space" {}
 
-GetSomething(-> content: str) {
+GetSomething(-> content str) {
      <- "something"
 }
 ```
@@ -1196,11 +1172,11 @@ The control type is a block of code that encapsulates a data operation.
 Often we will encapsulate some of the data control processing into a control type so that there is no need to perform additional methods when using the data.
 
 ## Get Operation
-If we want to set a get operation, we can use the `id():type{ctrl}` definition.
+If we want to set a get operation, we can use the `id() type{ctrl}` definition.
 
 E.g:
 ```
-Number(): int {
+Number() int {
     get {           # means get, equivalent to getter in other languages ​​#
         <- 7        # Only return 7 #
     }
@@ -1214,7 +1190,7 @@ With the above examples, we can naturally think of how to set the operation chan
 
 E.g:
 ```
-Number(): int {
+Number() int {
     set(value) {     # Indicates the setting, which is equivalent to the setter in other languages ​​#
         # ? ? ? Who should I give the value to? ? ? #
     }
@@ -1225,9 +1201,9 @@ So we need to use another collocation data to use the control type.
 
 E.g:
 ```
-_Number := 0
+_Number = 0
 
-Number(): int {
+Number() int {
     set(value) {
         _Number = value     # value represents the value entered #
     }
@@ -1236,8 +1212,8 @@ Number(): int {
 
 A complete example of reading and writing is as follows:
 ```
-_Number := 0
-Number(): int {
+_Number = 0
+Number() int {
     get {
         <- _Number
     }
@@ -1253,12 +1229,12 @@ Yes, we have an easier way to directly indicate a reference data, and the contro
 
 E.g:
 ```
-_Number := 0
-Number(_Number): int # is equivalent to the above package #
+_Number = 0
+Number(_Number) int # is equivalent to the above package #
 ```
 
 # Interface Type
-In reality, we often use interfaces to specify specific rules, and people or things can do things according to the expected rules.
+In reality, we often use protocols to specify specific rules, and people or things can do things according to the expected rules.
 We often need to do this in the programming language. This function is the interface.
 
 The interface specifies the methods and properties necessary to implement a particular function, allowing the structure to comply.
@@ -1279,7 +1255,7 @@ Next, let's design a difficult task that students need to accomplish... homework
 E.g:
 ```
 Homework <- {
-    count(): int
+    count() int
     do(->)
 }
 ```
@@ -1300,11 +1276,11 @@ E.g:
 ```
 Student -> {
      ......
-     _count: int
+     _count int
 }
 # Explicit implementation #
-me: Student -> Homework {
-    count(me._count): int
+me Student -> Homework {
+    count(me._count) int
 
     do(->) {
         SpendTime(1)       # took an hour #
@@ -1325,7 +1301,7 @@ After the interface is included, we can use the student who owns the interface.
 
 E.g:
 ```
-Peter := Student{ count=999999 }
+Peter = Student{ count=999999 }
 print( Peter.count )
 # print 999999, so much #
 Peter.do()
@@ -1344,9 +1320,9 @@ Now we can create a variety of students, they all follow the same interface, we 
 E.g:
 ```
 # Created three different types of student structures #
-StudentA := ChineseStudent{}
-StudentB := AmericanStudent{}
-StudentC := JapaneseStudent{}
+StudentA = ChineseStudent{}
+StudentB = AmericanStudent{}
+StudentC = JapaneseStudent{}
 # Let them do their homework separately #
 StudentA.do()
 StudentB.do()
@@ -1356,7 +1332,7 @@ A more efficient way is to write this function into the function, let the functi
 
 E.g:
 ```
-DoHomework(Student: Homework ->) {
+DoHomework(Student Homework ->) {
     Student.do()
 }
 # Now we can make each student do their homework more easily #
@@ -1368,7 +1344,7 @@ Of course, it's better to put these students in an array so that we can use loop
 
 E.g:
 ```
-Arr := []Homework{}
+Arr = []Homework{}
 Arr.add( StudentA )
 ......  # Insert many many students #
 Arr @ i {
@@ -1383,15 +1359,15 @@ Because the structure type can be converted to an interface type, the original t
 
 But sometimes we need to get the raw type of data to deal with, we can use type judgment to help us accomplish this.
 
-We can use `value == :type` or `value >< :type` to determine the type of data, and `value:(type)` to convert the data to our type.
+We can use `value == <type>` or `value >< <type>` to determine the type of data, and `value.(type)` to convert the data to our type.
 
 E.g:
 ```
-Func(hw: Homework ->) {
+Func(hw Homework ->) {
     # Determine if Chinese students #
-    Hw == :ChineseStudent {
+    Hw == <ChineseStudent> {
         # Convert to Chinese Student Data #
-        Cs := hw:(ChineseStudent)
+        Cs = hw.(ChineseStudent)
     }
 }
 ```
@@ -1415,7 +1391,7 @@ This way we don't need to care about their values when we use them, and we can s
 
 E.g:
 ```
-C := Random color()     # Get a random color #
+C = Random color()     # Get a random color #
 C ? Color.Red {
       ......
 } Color.Green {
@@ -1453,7 +1429,7 @@ We can use `!()` to declare an exception data anywhere in the function.
 
 E.g:
 ```
-ReadFile(name: str ->) {
+ReadFile(name str ->) {
     ? name.len == 0 {
         !( Exception("something wrong") )
     }
@@ -1462,14 +1438,14 @@ ReadFile(name: str ->) {
 ```
 So we declare an exception, the exception description is `something wrong`, once the external caller uses the illegal length of `name`, the function will be forced to abort, report the exception up and hand it to the caller.
 ## Checking exceptions
-We can use the `! {}` statement to check for exceptions and `id:type {}` to handle exceptions.
-`:type` can be omitted, the default is `Exception`.
+We can use the `! {}` statement to check for exceptions and `id type {}` to handle exceptions.
+`type` can be omitted, the default is `Exception`.
 
 E.g:
 ```
 ! {
-    f := ReadFile("temp.txt")
-} ex:IOException {
+    f = ReadFile("temp.txt")
+} ex IOException {
     !(ex)
 } e {
     print(e.message)
@@ -1500,9 +1476,9 @@ Quite simply, using `_ {}` at the end of the check can declare a statement that 
 E.g:
 ```
 Func(->) {
-    F: File
+    F File
     ! {
-        F = ReadFile("./somecode.xs")
+        F = ReadFile("./somecode.lite")
     } _ {
         ? F >< nil {
             F.release()
@@ -1531,7 +1507,7 @@ For interfaces that implement an autorelease interface, we can use declaration s
 
 E.g:
 ```
-FileResource("/test.xs") ! Res
+! Res = FileResource("/test.lite")
 ......
 ```
 
@@ -1553,7 +1529,7 @@ That's right, just use `~>`.
 
 E.g:
 ```
-Async(~> out: int) {
+Async(~> out int) {
     <- 12
 }
 ```
@@ -1563,7 +1539,7 @@ A normal direct call will only get a `Task` data.
 
 E.g:
 ```
-Result := Async() # result is a Task data #
+Result = Async() # result is a Task data #
 ```
 Next we will look at how to make it asynchronously awaiting execution.
 ## Asynchronous waiting
@@ -1571,7 +1547,7 @@ As with declarations, we only need to declare an asynchronous method using `<~ f
 
 E.g:
 ```
-Result := <~ Async()
+Result = <~ Async()
 ......
 ```
 After the asynchronous wait is declared, the program will temporarily stop the following functions until the `Async` function is executed, and the value of `out` is assigned to `Result`, and then continue.
@@ -1581,12 +1557,12 @@ Asynchronous waits can only be used in functions declared asynchronously.
 E.g:
 ```
 # Yes #
-Async(~> out: int) {
+Async(~> out int) {
     <~ delay(5000)  # Wait for a while #
     <- 12
 }
 # No #
-Async(-> out: int) {
+Async(-> out int) {
     <~ delay(5000)  # Cannot be declared #
     <- 12
 }
@@ -1604,14 +1580,14 @@ Async(~>) {
 
 <~ Async()              # correct #
 
-Task := Async()         # Correct, got Task #
+Task = Async()         # Correct, got Task #
 ```
 ## Lambda
 For lambda, we can also use asynchronous, just use `~>`.
 
 E.g:
 ```
-_ = Arr.filter( {it ~> it > 5} )
+Arr.filter( {it ~> it > 5} )
 ```
 
 # Generics
@@ -1629,16 +1605,16 @@ This is a simplified implementation.
 E.g:
 ```
 List<T> -> {
-    Items := Storage{T}     # Create Storage #
-    Length := 0
+    Items = Storage{T}     # Create Storage #
+    Length = 0
 }
 
-me: List<T> -> {
-    get(index: int -> item: T) {    # Get a generic data #
+me List<T> -> {
+    get(index int -> item T) {    # Get a generic data #
         <- items.get( index )
     }
 
-    add(item: T ->) {      # Add a generic data to the list #
+    add(item T ->) {      # Add a generic data to the list #
         Items.insert(length, item)
         Length += 1
     }
@@ -1656,9 +1632,9 @@ We can use the default value creation method `empty<type>()` to specify a defaul
 
 E.g:
 ```
-X := empty<int>()
-Y := empty<protocol>()
-Z := empty<(->)>()
+X = empty<int>()
+Y = empty<protocol>()
+Z = empty<(->)>()
 ```
 
 This way we can use it in generics.
@@ -1666,7 +1642,7 @@ This way we can use it in generics.
 E.g:
 ```
 Package<T> -> {
-    Item := empty<T>()    # Initializes a default value of generic data #
+    Item = empty<T>()    # Initializes a default value of generic data #
 }
 ```
 So how do we use generics?
@@ -1675,11 +1651,11 @@ It's very simple, just use it as we declare it, just pass the real type when cal
 
 E.g:
 ```
-ListNumber := List<int>{}   # Pass in integer type #
+ListNumber = List<int>{}   # Pass in integer type #
 ```
 So we have a list of integer types, is it like this:
 ```
-ListNumber := []int{}
+ListNumber = []int{}
 ```
 That's right, in fact, our list and dictionary syntax are syntactic sugar.
 ## Supported types
@@ -1687,26 +1663,26 @@ We can use generics in structures, functions, and interface types.
 
 E.g:
 ```
-Func<T>(data: T -> data: T) {
+Func<T>(data T -> data T) {
     <- data
 }
 
 Protocol<T> <- {
-    test<T>(in: T ->) {}
+    test<T>(in T ->) {}
 }
 
 Implement -> {} 
-me: Implement -> Protocol<Implement> {
-    test<Implement>(in: Implement ->) {
+me Implement -> Protocol<Implement> {
+    test<Implement>(in Implement ->) {
     }
 }
 ```
 ## Generic constraints
-If we need to constrain the type of generics, we only need to use the `T:id` syntax.
+If we need to constrain the type of generics, we only need to use the `T id` syntax.
 
 E.g:
 ```
-Package<T:Student> -> {
+Package<T Student> -> {
 }
 ```
 
@@ -1727,11 +1703,11 @@ E.g:
 [Table("test")]
 Annotation -> {
         [Key,Column("id")]
-        id: str = ""
+        id str
         [Column("name")]
-        name: str = ""
+        name str
         [Column("data")]
-        data: str = ""
+        data str
 }
 ```
 We declare a structure of `annotation` that uses annotations to mark the table name `test`, primary key `id`, field `name`, and field `data`.
@@ -1761,8 +1737,8 @@ We can use Linq to query like C#, just declare the LINQ statement with `->`.
 E.g:
 ```
 Linq(->) {
-     Numbers := { 0, 1, 2, 3, 4, 5, 6 }
-     Linq := from num -> in Numbers ->
+     Numbers = { 0, 1, 2, 3, 4, 5, 6 }
+     Linq = from num -> in Numbers ->
              Where (num % 2) == 0 ->
              Orderby num -> descending ->
              Select num
@@ -1786,8 +1762,8 @@ Just add `?` before any type, which is a nullable type.
 
 E.g:
 ```
-A: ?int
-B := A      # B Assigned to an empty i32 #
+A ?int
+B = A      # B Assigned to an empty i32 #
 ```
 
 Once an optional type has appeared, we need to strictly handle null values ​​to avoid program errors.
@@ -1812,7 +1788,7 @@ If you want to use another default value when the value of the optional type is 
 
 E.g:
 ```
-B := A.or_else(128)
+B = A.or_else(128)
 ```
 
 ## Reference operation
@@ -1821,12 +1797,12 @@ In this way, you can manipulate external variables inside the function, and you 
 
 E.g:
 ```
-Swap(x: !int, y: !int ->) {
-    (x, y) = (y, x)
+Swap(x !int, y !int ->) {
+    x, y = y, x
 }
 
-A := 1
-B := 2
+A = 1
+B = 2
 
 Swap(A!, B!)
 print(A, B)
