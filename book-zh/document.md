@@ -447,7 +447,7 @@ List[0] = 5
 List += 1                   # 添加到末尾 #
 List.insert(2, 3)           # 插入元素 3 到索引 2 #
 List -= 1                   # 删除指定位置元素 #
-Length := List.len          # 长度 #
+Length = List.len          # 长度 #
 ```
 ## 字典
 字典是用来存储无序的相同类型数据的集合，字典每个值（value）都关联唯一的键（key），键作为字典中的这个值数据的标识符。
@@ -491,7 +491,7 @@ Dictionary["b"] = 5
 ```
 Dictionary += {["d"]11}         # 添加元素 #
 Dictionary -= "c"               # 删除指定索引元素 #
-Length := Dictionary.len        # 长度 #
+Length = Dictionary.len        # 长度 #
 ```
 ## 集合
 集合用来存储相同类型、没有确定顺序、且不重复的值。 
@@ -516,9 +516,9 @@ Numbers = [int]{} # 空 #
 ### 常用操作
 ```
 Numbers.add(1)                  # 添加元素 #
-Has :=  Numbers.contains(1)     # 判断是否包含 #
+Has =  Numbers.contains(1)     # 判断是否包含 #
 Success = Numbers.remove(1)     # 删除元素 #
-Length := Numbers.len           # 长度 #
+Length = Numbers.len           # 长度 #
 ```
 
 # 判断
@@ -1057,7 +1057,7 @@ ChineseStudent -> {
 
 例如：
 ```
-Chen := ChineseStudent{}
+Chen = ChineseStudent{}
 print( Chen.student.name )
 # 当然，因为没有赋值，所以什么也没有输出 #
 ```
