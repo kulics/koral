@@ -25,29 +25,25 @@ This is the main source code repository for Lite. It contains the compiler, and 
 
 ## Quick Preview
 ```
-"hello_world" {
-    "System"
-}
-
 Main(->) {
-    say_hello_world_now("start now")
-}
-
-say_hello_world_now(begin str ->) {
-    print(begin)
-    greetings_around_the_world = {"Hello", "Hola", "Bonjour",
-                "Ciao", "こんにちは", "안녕하세요",
-                "Cześć", "Olá", "Здравствуйте",
-                "Chào bạn", "你好"}
-    greetings_around_the_world @ greeting {
-        greeting ? "Hello" {
-            print(greeting + " World!")
-        } "你好" {
-            print(greeting + " 世界！")
+    print("Hello, world!")
+    greetings = get_greetings("love lite!")
+    greetings @ [index]value {
+        ? index == 0 {
+            print(value)
+        } index == 1 {
+            print(value + ", 世界!")
         } _ {
-            print(greeting + " Lite!")
+            print(value + ", world!")
         }
     }
+}
+
+get_greetings(first str -> result []str) {
+    <- first + {"你好", "Hola", "Bonjour",
+                "Ciao", "こんにちは", "안녕하세요",
+                "Cześć", "Olá", "Здравствуйте",
+                "Chào bạn"}
 }
 ```
 ## Roadmap
