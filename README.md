@@ -61,3 +61,9 @@ get_greetings(first str -> result []str) {
 ## Compare
 Compare with C#, Go, Kotlin, Swift, Python.
 Read detail from [Here](./Compare.md).  
+## Source Code
+[C#](https://github.com/kulics/lite-csharp)
+
+[Go](https://github.com/kulics/lite-go)
+
+[TypeScript](https://github.com/kulics/lite-typescript)
