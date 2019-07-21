@@ -24,28 +24,9 @@ This is the main source code repository for Lite. It contains the compiler, and 
 - [中文](./book-zh/document.md)
 
 ## Quick Preview
-```
-Main(->) {
-    print("Hello, world!")
-    greetings = get_greetings("love lite!")
-    greetings @ [index]value {
-        ? index == 0 {
-            print(value)
-        } index == 1 {
-            print(value + ", 世界!")
-        } _ {
-            print(value + ", world!")
-        }
-    }
-}
 
-get_greetings(first str -> result []str) {
-    <- first + {"你好", "Hola", "Bonjour",
-                "Ciao", "こんにちは", "안녕하세요",
-                "Cześć", "Olá", "Здравствуйте",
-                "Chào bạn"}
-}
-```
+![preview](./res/readme.jpg)
+
 ## Roadmap
 1. 2017.07 ~ 2018.03 
     1. Design syntax.
@@ -58,6 +39,7 @@ get_greetings(first str -> result []str) {
     1. Rewrite all Xylaga projects using Lite.
     1. Compile to more languages, including Go/TypeScript/LLVM.
     1. Improved compilation capabilities and support for language server protocols.
+
 ## Compare
 Compare with C#, Go, Kotlin, Swift, Python.
 Read detail from [Here](./Compare.md).  
