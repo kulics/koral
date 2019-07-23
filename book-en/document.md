@@ -641,12 +641,12 @@ Sometimes we may need to execute the same piece of code multiple times.
 
 In general, statements are executed in order, the first statement in the function is executed first, then the second statement, and so on.
 ## Collection loop
-If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can use the `value @ id {}` statement to iterate over the collection, taking each element out of `id`.
+If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can use the `id @ value {}` statement to iterate over the collection, taking each element out of `id`.
 
 E.g:
 ```
 Arr = {1, 2, 3, 4, 5}
-Arr @ item {
+item @ Arr {
     print(item)   # print every number #
 }
 ```
@@ -655,7 +655,7 @@ If we need to fetch the index and value at the same time, we can replace `id` wi
 
 E.g:
 ```
-Arr @ [i]v {
+[i]v @ Arr {
     print(""i":"v"")
 }
 ```
@@ -668,7 +668,7 @@ The iterator can take the number from the start point to the end point loop. We 
 
 E.g:
 ```
-[0 <= 100] @ i {
+i @ [0 <= 100] {
     print(i)  # print every number #
 }
 ```
@@ -680,7 +680,7 @@ The iterator defaults to increment `1` every interval. If we need to take every 
 
 E.g:
 ```
-[0 <= 100, 2] @ i {
+i @ [0 <= 100, 2] {
     ......
 }
 ```
@@ -690,7 +690,7 @@ We can also let it traverse in reverse order, just use `>=`.
 
 E.g:
 ```
-[100 >= 0] @ i {
+i @ [100 >= 0] {
     ......  # From 100 to 0 #
 }
 ```
@@ -1100,11 +1100,11 @@ ChineseStudent -> {
 ### Construction
 Sometimes we might use the constructor in .NET.
 
-We can use the special constructor statement `id type <>() {}`.
+We can use the special constructor statement `id type() {}`.
 
 E.g:
 ```
-me Student <>(name str, number str) {
+me Student(name str, number str) {
     me.name = name
     me.number = number
     # Calculate the class #
@@ -1115,11 +1115,11 @@ me Student <>(name str, number str) {
 ```
 This results in a structure with a constructor that automatically generates class and grade data when we create a new student.
 
-We need to use the constructor with the `<type>()` function.
+We need to use the constructor with the `type()` function.
 
 E.g:
 ```
-Peter = <Student>("peter", "060233")
+Peter = Student("peter", "060233")
 print(Peter.class)    # print out 2 #
 ```
 
@@ -1127,13 +1127,13 @@ If you need to use a constructor with inheritance, you can append `(params)` to 
 
 E.g:
 ```
-me Parent <>(a int) {
+me Parent(a int) {
 }
 
 Child -> {
     _ Parent
 }
-me Child <>(a int)(a) {
+me Child(a int)(a) {
 }
 ```
 
@@ -1347,7 +1347,7 @@ E.g:
 Arr = []Homework{}
 Arr.add( StudentA )
 ......  # Insert many many students #
-Arr @ i {
+i @ Arr {
     DoHomework(i)
 }
 ```
