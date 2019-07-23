@@ -630,11 +630,11 @@ X ? _ int {             # is int #
 }
 ```
 ### Get type
-If we need to explicitly get the type value, we can use the `?(type)` syntax to get it.
+If we need to explicitly get the type value, we can use the `typeof<type>()` function to get it.
 
 E.g:
 ```
-?(type)     # Get the type value directly by type #
+typeof<int>()     # Get the type value directly by type #
 ```
 # Loop
 Sometimes we may need to execute the same piece of code multiple times.
@@ -1425,13 +1425,13 @@ There may be a variety of exceptions in the program.
 Exceptions cannot be completely avoided, but we can choose some means to help us check and report exceptions.
 
 ## Reporting an exception
-We can use `!()` to declare an exception data anywhere in the function.
+We can use `throw()` function to declare an exception data anywhere in the function.
 
 E.g:
 ```
 ReadFile(name str ->) {
     ? name.len == 0 {
-        !( Exception("something wrong") )
+        throw( Exception("something wrong") )
     }
     ......
 }
@@ -1446,7 +1446,7 @@ E.g:
 ! {
     f = ReadFile("temp.txt")
 } ex IOException {
-    !(ex)
+    throw(ex)
 } e {
     print(e.message)
 }
@@ -1464,7 +1464,7 @@ E.g:
 } ex {
     # Can be manually aborted #
     # <- #
-    !(ex)
+    throw(ex)
 }
 ```
 

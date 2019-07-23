@@ -620,11 +620,11 @@ X ? _ int {             # 是否 int #
 }
 ```
 ### 获取类型
-如果我们需要明确获取类型值，可以使用 `?(type)` 语法来获取。
+如果我们需要明确获取类型值，可以使用 `typeof<type>()` 函数来获取。
 
 例如：
 ```
-?(type)  # 通过类型直接获取类型值 #
+typeof<int>()  # 通过类型直接获取类型值 #
 ```
 
 # 循环
@@ -1411,13 +1411,13 @@ Number -> u8[
 异常无法完全避免，但是我们可以选择一些手段帮助我们检查和报告异常。
 
 ## 报告异常
-我们可以在函数中的任何地方，使用 `!()` 来声明一个异常数据。
+我们可以在函数中的任何地方，使用 `throw()` 函数来声明一个异常数据。
 
 例如：
 ```
 ReadFile(name str ->) {
     ? name.len == 0 {
-        !( Exception("something wrong") )
+        throw( Exception("something wrong") )
     }
     ......
 }
@@ -1432,7 +1432,7 @@ ReadFile(name str ->) {
 ! {
     f = ReadFile("temp.txt")
 } ex IOException {
-    !(ex)
+    throw(ex)
 } e {
     print(e.message)
 }
@@ -1450,7 +1450,7 @@ ReadFile(name str ->) {
 } ex {
     # 可以手动中止 #
     # <- #
-    !(ex)
+    throw(ex)
 }
 ```
 
