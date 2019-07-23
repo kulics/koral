@@ -1359,13 +1359,13 @@ Because the structure type can be converted to an interface type, the original t
 
 But sometimes we need to get the raw type of data to deal with, we can use type judgment to help us accomplish this.
 
-We can use `value == <type>` or `value >< <type>` to determine the type of data, and `value.(type)` to convert the data to our type.
+We can use `is<type>()` to determine the type of data, and `value.(type)` to convert the data to our type.
 
 E.g:
 ```
 Func(hw Homework ->) {
     # Determine if Chinese students #
-    Hw == <ChineseStudent> {
+    Hw.is<ChineseStudent>() {
         # Convert to Chinese Student Data #
         Cs = hw.(ChineseStudent)
     }
