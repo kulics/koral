@@ -632,12 +632,12 @@ X ? _ int {             # 是否 int #
 
 一般情况下，语句是按顺序执行的，函数中的第一个语句先执行，接着是第二个语句，以此类推。
 ## 集合循环
-如果我们刚好有一个集合，可以是数组、字典、或是一段文本，那么我们就可以使用 `value @ id {}` 语句来遍历这个集合，取出的每一个元素为 `id`。
+如果我们刚好有一个集合，可以是数组、字典、或是一段文本，那么我们就可以使用 `id @ value {}` 语句来遍历这个集合，取出的每一个元素为 `id`。
 
 例如：
 ```
 Arr = {1, 2, 3, 4, 5}
-Arr @ item {
+item @ Arr {
     print(item)    # 打印每一个数字 #
 }
 ```
@@ -646,7 +646,7 @@ Arr @ item {
 
 例如：
 ```
-Arr @ [i]v {
+[i]v @ Arr {
     print(""i":"v"")
 }
 ```
@@ -659,7 +659,7 @@ Arr @ [i]v {
 
 例如：
 ```
-[0 <= 100] @ i {
+i @ [0 <= 100] {
     print(i)      # 打印每一个数字 #
 }
 ```
@@ -671,7 +671,7 @@ Arr @ [i]v {
 
 例如：
 ```
-[0 <= 100, 2] @ i {
+i @ [0 <= 100, 2] {
     ......
 }
 ```
@@ -681,7 +681,7 @@ Arr @ [i]v {
 
 例如：
 ```
-[100 >= 0] @ i {
+i @ [100 >= 0] {
     ......     # 从100到0 #
 }
 ```
@@ -835,7 +835,7 @@ print( TopSell() )      # 打印两个数值 #
 例如：
 ```
 Each_1_To_10(func (int->) ->) {
-    [1<=10] @ i {
+    i @ [1<=10] {
         func(i)
     }
 }
@@ -1087,11 +1087,11 @@ ChineseStudent -> {
 ### 构造
 有些时候，我们可能使用 .NET 中的构造方法。
 
-我们可以在使用特殊的构造函数语句 `id type <>() {}`。
+我们可以在使用特殊的构造函数语句 `id type() {}`。
 
 例如：
 ```
-me Student <>(name str, number str) {
+me Student(name str, number str) {
     me.name = name
     me.number = number
     # 计算得出班级 #
@@ -1102,11 +1102,11 @@ me Student <>(name str, number str) {
 ```
 这样就得到了一个带构造函数的结构体，我们在创建一个新学生的时候，就会自动产生班级和年级数据。
 
-我们需要使用 `<type>()` 函数来使用构造函数。
+我们需要使用 `type()` 函数来使用构造函数。
 
 例如：
 ```
-Peter = <Student>("peter", "060233")
+Peter = Student("peter", "060233")
 print(Peter.class)     # 打印出 2 #
 ```
 
@@ -1114,13 +1114,13 @@ print(Peter.class)     # 打印出 2 #
 
 例如：
 ```
-me Parent <>(a int) {
+me Parent(a int) {
 }
 
 Child -> {
     _ Parent
 }
-me Child <>(a int)(a) {
+me Child(a int)(a) {
 }
 ```
 
@@ -1333,7 +1333,7 @@ DoHomework(StudentC)
 Arr = []Homework{}
 Arr.add( StudentA )
 ...... # 塞进很多很多学生 #
-Arr @ i {
+i @ Arr {
     DoHomework(i)
 }
 ```
