@@ -708,17 +708,19 @@ E.g:
 ```
 This can be thought of as a `while` structure relative to other languages.
 ## Jump out
-So how do you jump out of the infinite loop? We can use the `<- @` statement to jump out.
+So how do you jump out of the infinite loop? We can use the `@..` statement to jump out.
 
 E.g:
 ```
 @ {
-    <- @    # Jumped out without executing anything #
+    @..    # Jumped out without executing anything #
 }
 ```
 In addition to infinite loops, bounces can also be used in other loops.
 
 It should be noted that if you jump out of a multi-level nested loop, you will only jump out of the loop that is closest to you.
+## Continue
+If you only need to jump out of the current loop, use the `..@` statement.
 ## Conditional loop
 What if we need a loop that only judges a certain condition?
 Add a condition to it.
@@ -730,8 +732,6 @@ I = 0
     I += 1
 }
 ```
-## Continue
-If you only need to jump out of the current loop, use the `-> @` statement.
 
 # Function Type
 Function is a separate block of code used to accomplish a specific task.
