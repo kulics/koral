@@ -25,7 +25,7 @@ This is the main source code repository for Lite. It contains the compiler, and 
 
 ## Quick Preview
 
-![preview](./res/readme.jpg)
+![preview](./res/readme.png)
 
 ## Roadmap
 1. 2017.07 ~ 2018.03 
