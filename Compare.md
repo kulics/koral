@@ -166,7 +166,7 @@ count = i + int(f)
 ## Inclusive Range Operator
 ### Lite
 ```
-index @ [ 1 <= 5 ] {
+index @ 1..<=5 {
     print("" index " times 5 is " index * 5 "")
 }
 ```
