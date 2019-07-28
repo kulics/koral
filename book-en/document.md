@@ -512,15 +512,15 @@ E.g:
 ```
 Set = {["a"], ["b"], ["c"]}
 ```
-This will create a set of `[str]` types containing three entries: `a,b,c`.
+This will create a set of `[][str]` types containing three entries: `a,b,c`.
 
 If you need a set of explicit types, you can also create them using the constructor.
 
-The representation of the set type is `[type]`.
+The representation of the set type is `[][type]`.
 
 E.g:
 ```
-Numbers = [int]{}      # empty #
+Numbers = [][int]{}      # empty #
 ```
 ### Common Operations
 ```
@@ -1086,7 +1086,7 @@ If you want to override the properties of the original structure, you can add th
 E.g:
 ```
 ChineseStudent -> {
-    _ Student    # Inherited student #
+    Student    # Inherited student #
     Kungfu = false
 }
 

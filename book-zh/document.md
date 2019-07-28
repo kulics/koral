@@ -503,15 +503,15 @@ Length = Dictionary.len        # 长度 #
 ```
 Set = {["a"], ["b"], ["c"]}
 ```
-这样便会创建一个包含 `a,b,c` 三个条目 的 `[str]` 类型集合。
+这样便会创建一个包含 `a,b,c` 三个条目 的 `[][str]` 类型集合。
 
 如果你需要一个明确类型的集合，同样可以使用构造函数来创建。
 
-集合类型的表示方法是 `[type]`。
+集合类型的表示方法是 `[][type]`。
 
 例如：
 ```
-Numbers = [int]{} # 空 #
+Numbers = [][int]{} # 空 #
 ```
 ### 常用操作
 ```
@@ -1073,7 +1073,7 @@ print( Chen.student.name )
 例如：
 ```
 ChineseStudent -> {
-    _ Student    # 继承 student #
+    Student    # 继承 student #
     kungfu = false
 }
 
