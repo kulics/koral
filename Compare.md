@@ -131,7 +131,7 @@ string
 ```
 f = 6.0
 i = 94
-count = i + f.(int)
+count = i + f.[int]
 ```
 ### C#
 ```
@@ -205,7 +205,7 @@ for index in range(1,6):
 ```
 shoppingList = {"catfish", "water",
     "tulips", "blue paint"}
-shoppingList[1] = "bottle of water"
+shoppingList.(1) = "bottle of water"
 ```
 ### C#
 ```
@@ -241,10 +241,10 @@ shoppingList[1] = "bottle of water"
 ### Lite
 ```
 occupations = {
-    ["Malcolm"]"Captain",
-    ["Kaylee"]"Mechanic"
+    "Malcolm":"Captain",
+    "Kaylee":"Mechanic"
 }
-occupations["Jayne"] = "Public Relations"
+occupations.("Jayne") = "Public Relations"
 ```
 ### C#
 ```
@@ -289,8 +289,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Lite
 ```
-emptyArray = []str{}
-emptyDictionary = [str]f32{}
+emptyArray = [str]{}
+emptyDictionary = [str:f32]{}
 ```
 ### C#
 ```
@@ -853,9 +853,9 @@ nb ? 0 ..<= 7, 8, 9 {
     print("single digit") 
 } 10 { 
     print("double digits") 
-} [11 <= 99] { 
+} 11 ..<= 99 { 
     print("double digits") 
-} [100 <= 999] { 
+} 100 ..<= 999 { 
     print("triple digits") 
 } _ { 
     print("four or more digits") 
