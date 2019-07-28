@@ -575,7 +575,7 @@ me NamedShape -> {
 } 
 
 Square -> {
-    _ NamedShape
+    NamedShape
     sideLength num
 } 
 me Square -> {
@@ -849,7 +849,7 @@ for item in library:
 ### Lite
 ```
 nb = 42
-nb ? [0 <= 7], 8, 9 { 
+nb ? 0 ..<= 7, 8, 9 { 
     print("single digit") 
 } 10 { 
     print("double digits") 
