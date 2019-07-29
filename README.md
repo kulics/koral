@@ -25,7 +25,28 @@ This is the main source code repository for Lite. It contains the compiler, and 
 
 ## Quick Preview
 
-![preview](./res/readme.png)
+```
+Main(->) {
+    print("Hello, world!")
+    greetings = get_greetings("love lite!")
+    index:value @ greetings {
+        ? index == 0 {
+            print(value)
+        } index == 1 {
+            print(value + ", 世界!")
+        } _ {
+            print(value + ", world!")
+        }
+    }
+}
+
+get_greetings(first str -> result []str) {
+    <- first + {"你好", "Hola", "Bonjour",
+                "Ciao", "こんにちは", "안녕하세요",
+                "Cześć", "Olá", "Здравствуйте",
+                "Chào bạn"}
+}
+```
 
 ## Roadmap
 1. 2017.07 ~ 2018.03 
