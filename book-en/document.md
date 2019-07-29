@@ -464,13 +464,13 @@ Unlike the data items in the list, the data items in the dictionary are not in a
 
 The dictionary keys can only use the `integer` and `string` types.
 ### Definition
-Similar to the list, the dictionary is also defined using `{}`, except that the dictionary type is a union type of `key` and `value`, and the form is `[]key:value`.
+Similar to the list, the dictionary is also defined using `{}`, except that the dictionary type is a union type of `key` and `value`, and the form is `key:value`.
 
 E.g:
 ```
 Dictionary = {"a":1, "b":2, "c":3}
 ```
-This will create a `[]str:int` type dictionary containing three entries for `a,b,c`.
+This will create a `str:int` type dictionary containing three entries for `a,b,c`.
 
 If you need an explicit type of dictionary, you can also use the constructor to create it.
 
@@ -506,13 +506,13 @@ Length = Dictionary.len    # Length #
 The Set is used to store values of the same type, without a determined order, and without repeating.
 That is to say, when the order of the elements is not important, or if you want to ensure that each element only appears once, you can use the set instead of the list.
 ### Definition
-Similar to lists, set are also defined using `{}` in the form `[]:value`.
+Similar to lists, set are also defined using `{}` in the form `:value`.
 
 E.g:
 ```
 Set = {:"a", :"b", :"c"}
 ```
-This will create a set of `[]:str` types containing three entries: `a,b,c`.
+This will create a set of `str` types containing three entries: `a,b,c`.
 
 If you need a set of explicit types, you can also create them using the constructor.
 
