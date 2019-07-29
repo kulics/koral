@@ -225,7 +225,7 @@ Integer8 = (16).to_i8()
 ```
 
 It should be noted that the underlying type conversion method is only owned by the base type.
-If you need all types of casts, use the `to<type>()` method, which crashes against incompatible types, so use it with caution.
+If you need all types of casts, use the `to[type]()` method, which crashes against incompatible types, so use it with caution.
 
 ## Float Point Number
 Integers don't satisfy our needs for numbers, and we often need to deal with decimals.
@@ -434,19 +434,19 @@ E.g:
 Array [:]int = array_of(1,2,3,4,5)
 ```
 ### Access
-If we need to access one of the elements in the list, we can access it with `identifier[index]`.
+If we need to access one of the elements in the list, we can access it with `identifier.(index)`.
 
 E.g:
 ```
-print( List[1] )
+print( List.(1) )
 ```
-It should be noted that in the programming language, most of the list start index starts from `0`, the identifier [0]` gets the first element, and the next element and so on.
+It should be noted that in the programming language, most of the list start index starts from `0`, the `identifier.(0)` gets the first element, and the next element and so on.
 ### Change Element
 If we need to change one of the elements in the list, we can access the element directly and use the assignment statement to change it.
 
 E.g:
 ```
-List[0] = 5
+List.(0) = 5
 ```
 It should be noted that we can only access the index of the existing data, if it does not exist, an error will occur.
 ### Common Operations
@@ -464,40 +464,40 @@ Unlike the data items in the list, the data items in the dictionary are not in a
 
 The dictionary keys can only use the `integer` and `string` types.
 ### Definition
-Similar to the list, the dictionary is also defined using `{}`, except that the dictionary type is a union type of `key` and `value`, and the form is `[key]value`.
+Similar to the list, the dictionary is also defined using `{}`, except that the dictionary type is a union type of `key` and `value`, and the form is `[]key:value`.
 
 E.g:
 ```
-Dictionary = {["a"]1, ["b"]2, ["c"]3}
+Dictionary = {"a":1, "b":2, "c":3}
 ```
-This will create a `[str]int` type dictionary containing three entries for `a,b,c`.
+This will create a `[]str:int` type dictionary containing three entries for `a,b,c`.
 
 If you need an explicit type of dictionary, you can also use the constructor to create it.
 
-The representation of the dictionary type is `[type]type`.
+The representation of the dictionary type is `[]type:type`.
 
 E.g:
 ```
-DictionaryNumNum = [int]int{}  # empty #
+DictionaryNumNum = []int:int{}  # empty #
 ```
 ### Access
 Similar to the list, we can also use the index to access the data directly.
 
 E.g:
 ```
-print( Dictionary["a"] )
+print( Dictionary.("a") )
 ```
 ### Change Element
 Similar to lists, we can also use assignment statements to change elements.
 
 E.g:
 ```
-Dictionary["b"] = 5
+Dictionary.("b") = 5
 ```
 Different from the list, if the index is an index that does not exist, it will not be wrong, and the value will be directly assigned to the new key.
 ### Common operations
 ```
-Dictionary += {["d"]11}     # Add Element #
+Dictionary += {"d":11}     # Add Element #
 Dictionary -= "c"           # Delete the specified index element #
 Length = Dictionary.len    # Length #
 ```
@@ -506,21 +506,21 @@ Length = Dictionary.len    # Length #
 The Set is used to store values of the same type, without a determined order, and without repeating.
 That is to say, when the order of the elements is not important, or if you want to ensure that each element only appears once, you can use the set instead of the list.
 ### Definition
-Similar to lists, set are also defined using `{}` in the form `[value]`.
+Similar to lists, set are also defined using `{}` in the form `[]:value`.
 
 E.g:
 ```
-Set = {["a"], ["b"], ["c"]}
+Set = {:"a", :"b", :"c"}
 ```
-This will create a set of `[][str]` types containing three entries: `a,b,c`.
+This will create a set of `[]:str` types containing three entries: `a,b,c`.
 
 If you need a set of explicit types, you can also create them using the constructor.
 
-The representation of the set type is `[][type]`.
+The representation of the set type is `[]:type`.
 
 E.g:
 ```
-Numbers = [][int]{}      # empty #
+Numbers = []:int{}      # empty #
 ```
 ### Common Operations
 ```
@@ -630,11 +630,11 @@ X ? _ int {             # is int #
 }
 ```
 ### Get type
-If we need to explicitly get the type value, we can use the `typeof<type>()` function to get it.
+If we need to explicitly get the type value, we can use the `typeof[type]()` function to get it.
 
 E.g:
 ```
-typeof<int>()     # Get the type value directly by type #
+typeof[int]()     # Get the type value directly by type #
 ```
 # Loop
 Sometimes we may need to execute the same piece of code multiple times.
@@ -651,11 +651,11 @@ item @ Arr {
 }
 ```
 
-If we need to fetch the index and value at the same time, we can replace `id` with the `[index]value` syntax, which is valid for both the list and the dictionary.
+If we need to fetch the index and value at the same time, we can replace `id` with the `index:value` syntax, which is valid for both the list and the dictionary.
 
 E.g:
 ```
-[i]v @ Arr {
+i:v @ Arr {
     print(""i":"v"")
 }
 ```
@@ -977,7 +977,7 @@ Similarly, the way a collection is build is actually a build syntax, so we can a
 E.g:
 ```
 Array = []int{ 1, 2, 3, 4, 5 }
-Dictionary = [str]int{ ["1"]1, ["2"]2, ["3"]3 }
+Dictionary = []str:int{ "1":1, "2":2, "3":3 }
 ```
 ## Anonymous Structure
 If we only want to wrap some data directly, instead of defining the structure and then using it, can it be like an anonymous function?
@@ -1091,7 +1091,7 @@ ChineseStudent -> {
 }
 
 # override #
-(parent)me ChineseStudent -> {
+parent me ChineseStudent -> {
     getGirlFriend(-> name str) {
         <- parent._girlFriend
     }
@@ -1359,15 +1359,15 @@ Because the structure type can be converted to an interface type, the original t
 
 But sometimes we need to get the raw type of data to deal with, we can use type judgment to help us accomplish this.
 
-We can use `is<type>()` to determine the type of data, and `value.(type)` to convert the data to our type.
+We can use `is[type]()` to determine the type of data, and `value.[type]` to convert the data to our type.
 
 E.g:
 ```
 Func(hw Homework ->) {
     # Determine if Chinese students #
-    Hw.is<ChineseStudent>() {
+    Hw.is[ChineseStudent]() {
         # Convert to Chinese Student Data #
-        Cs = hw.(ChineseStudent)
+        Cs = hw.[ChineseStudent]
     }
 }
 ```
@@ -1375,15 +1375,15 @@ Func(hw Homework ->) {
 # Enumeration Type
 The enumeration is a set of integer constants with independent names. It can usually be used to mark the type of some business data, which is convenient for judgment processing.
 ## Definition
-We only need to use the `id -> type[id id id id]` statement.
+We only need to use the `id -> type:{id id id id}` statement.
 
 E.g:
 ```
-Color -> u8[
+Color -> u8:{
      Red
      Green
      Blue
-]
+}
 ```
 The enumeration assigns values to the identifiers in order, resulting in a collection of `Red=0, Green=1, Blue=2`.
 
@@ -1407,12 +1407,12 @@ We can also assign a single identifier if needed, and unspecified will continue 
 
 E.g:
 ```
-Number -> u8[
+Number -> u8:{
      A = 1  # 1 #
      B      # 2 #
      C = 1  # 1 #
      D      # 2 #
-]
+}
 ```
 
 # Check
@@ -1533,7 +1533,7 @@ Async(~> out int) {
     <- 12
 }
 ```
-Once a method is declared as an asynchronous method, the compiler will automatically wrap the return value with a `Task<>` type package, and this method can be executed asynchronously.
+Once a method is declared as an asynchronous method, the compiler will automatically wrap the return value with a `Task[type]` type package, and this method can be executed asynchronously.
 
 A normal direct call will only get a `Task` data.
 
@@ -1598,18 +1598,18 @@ For example, we now need a collection that supports adding, deleting, and readin
 Our lists and dictionaries are actually implemented using generics.
 
 ## Declaration and use
-Let's see how to use generics to implement a list. We simply wrap the type of the type with the `<id>` symbol after the identifier.
+Let's see how to use generics to implement a list. We simply wrap the type of the type with the `[id]` symbol after the identifier.
 
 This is a simplified implementation.
 
 E.g:
 ```
-List<T> -> {
+List[T] -> {
     Items = Storage{T}     # Create Storage #
     Length = 0
 }
 
-me List<T> -> {
+me List[T] -> {
     get(index int -> item T) {    # Get a generic data #
         <- items.get( index )
     }
@@ -1622,27 +1622,27 @@ me List<T> -> {
 ```
 So we define a structure that supports generics, `T` is a generic, in fact it can be any identifier, but habitual we will use `T` as a proxy.
 
-Generic brackets support multiple generations like parameters, for example: `<T, H, Q>`.
+Generic brackets support multiple generations like parameters, for example: `[T, H, Q]`.
 
 After the generics are defined, `T` is treated as a real type in the area of ​​the structure, and then we can use it like various places like `int`.
 
 It's important to note that because generics are typed on the fly, the compiler cannot infer the constructor of the generic. We can only use the default value creation method to construct generic data.
 
-We can use the default value creation method `empty<type>()` to specify a default value that contains the type.
+We can use the default value creation method `empty[type]()` to specify a default value that contains the type.
 
 E.g:
 ```
-X = empty<int>()
-Y = empty<protocol>()
-Z = empty<(->)>()
+X = empty[int]()
+Y = empty[protocol]()
+Z = empty[(->)]()
 ```
 
 This way we can use it in generics.
 
 E.g:
 ```
-Package<T> -> {
-    Item = empty<T>()    # Initializes a default value of generic data #
+Package[T] -> {
+    Item = empty[T]()    # Initializes a default value of generic data #
 }
 ```
 So how do we use generics?
@@ -1651,7 +1651,7 @@ It's very simple, just use it as we declare it, just pass the real type when cal
 
 E.g:
 ```
-ListNumber = List<int>{}   # Pass in integer type #
+ListNumber = List[int]{}   # Pass in integer type #
 ```
 So we have a list of integer types, is it like this:
 ```
@@ -1663,17 +1663,17 @@ We can use generics in structures, functions, and interface types.
 
 E.g:
 ```
-Func<T>(data T -> data T) {
+Func[T](data T -> data T) {
     <- data
 }
 
-Protocol<T> <- {
-    test<T>(in T ->) {}
+Protocol[T] <- {
+    test[T](in T ->) {}
 }
 
 Implement -> {} 
-me Implement -> Protocol<Implement> {
-    test<Implement>(in Implement ->) {
+me Implement -> Protocol[Implement] {
+    test[Implement](in Implement ->) {
     }
 }
 ```
@@ -1682,7 +1682,7 @@ If we need to constrain the type of generics, we only need to use the `T id` syn
 
 E.g:
 ```
-Package<T Student> -> {
+Package[T Student] -> {
 }
 ```
 
@@ -1691,7 +1691,7 @@ Annotations are declarative tags used to pass feature information of various ele
 Usually we use the annotation feature in many scenes of reflection and data parsing.
 
 ## Annotation statement
-We only need to wrap the tagged content with `[]`.
+We only need to wrap the tagged content with `()`.
 If the annotation project has sub-properties, just use the `()` package. If you need to specify the specified attribute, you can use the `id = data` assignment as you would a simplified build of the structure.
 
 Note that it is valid to use before the identifier.
@@ -1700,13 +1700,13 @@ Let's take a look at the database data as a reference to see how to use annotati
 
 E.g:
 ```
-[Table("test")]
+(Table("test"))
 Annotation -> {
-        [Key,Column("id")]
+        (Key,Column("id"))
         id str
-        [Column("name")]
+        (Column("name"))
         name str
-        [Column("data")]
+        (Column("data"))
         data str
 }
 ```
