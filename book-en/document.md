@@ -697,30 +697,7 @@ i @ 100 ..>= 0 {
 Similarly, if you don't want to reach the last bit, you can use `100 > 0`.
 
 This can be thought of as a `for` structure relative to other languages.
-## Infinite loop
-At other times, we may need an infinite loop. Very easy, we only need to use the `@ {}` statement.
 
-E.g:
-```
-@ {
-    ......  # Never jump out #
-}
-```
-This can be thought of as a `while` structure relative to other languages.
-## Jump out
-So how do you jump out of the infinite loop? We can use the `@..` statement to jump out.
-
-E.g:
-```
-@ {
-    @..    # Jumped out without executing anything #
-}
-```
-In addition to infinite loops, bounces can also be used in other loops.
-
-It should be noted that if you jump out of a multi-level nested loop, you will only jump out of the loop that is closest to you.
-## Continue
-If you only need to jump out of the current loop, use the `..@` statement.
 ## Conditional loop
 What if we need a loop that only judges a certain condition?
 Add a condition to it.
@@ -732,6 +709,27 @@ I = 0
     I += 1
 }
 ```
+This can be thought of as a `while` structure relative to other languages.
+## Jump out
+So how do you jump out of the loop? We can use the `@..` statement to jump out.
+
+E.g:
+```
+@ {
+    @..    # Jumped out without executing anything #
+}
+```
+
+It should be noted that if you jump out of a multi-level nested loop, you will only jump out of the loop that is closest to you.
+## Continue
+If you only need to jump out of the current loop, use the `..@` statement.
+## Default Condition
+If you want to execute some other logic when the loop is not executed, just use the `_` declaration.
+@ 1 > 2 {
+    ...
+} _ {
+     # loop does not executed, so execute the logic here #
+}
 
 # Function Type
 Function is a separate block of code used to accomplish a specific task.
