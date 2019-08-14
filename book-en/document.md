@@ -915,10 +915,10 @@ We can define this data in the structure of the body just like we would define a
 E.g:
 ```
 Student -> {
-    Name str = ""
-    Number str = ""
-    Class int = 0
-    Grade int = 0
+    name str = ""
+    number str = ""
+    class int = 0
+    grade int = 0
 }
 ```
 This way we get the student structure with these data attributes. This structure is like a type that can be used like `int, str, bool`.
@@ -960,13 +960,13 @@ Peter.grade = 6
 ## Building Assignments
 Building a new structure like above and loading the data one by one is very cumbersome, and we can configure it using a simplified syntax.
 
-Add `key=value` to the build syntax and separate the data with `,`.
-
 E.g:
 ```
 Peter = Student{
-    Name="peter", number="060233",
-    Class=2, grade=6
+    name = "peter"
+    number = "060233"
+    class = 2
+    grade = 6
 }
 ```
 
@@ -980,15 +980,15 @@ Dictionary = []str:int{ "1":1, "2":2, "3":3 }
 ## Anonymous Structure
 If we only want to wrap some data directly, instead of defining the structure and then using it, can it be like an anonymous function?
 
-Of course, we can use the `{}` package directly, the same syntax as the collection, only the elements inside have different syntax.
+Of course, we can use the `{}` package directly.
 
 E.g:
 ```
 Peter = {
-    Name = "peter",
-    Number = "060233",
-    Class = 2,
-    Grade = 6
+    name = "peter"
+    number = "060233"
+    class = 2
+    grade = 6
 }
 ```
 
@@ -1046,11 +1046,11 @@ Now let us use our imagination. How do we define a structure that is specificall
 E.g:
 ```
 ChineseStudent -> {
-    Name str = ""
-    Number str = ""
-    Class int = 0
-    Grade int = 0
-    Kungfu bool = false    # not learn kungfu #
+    name str = ""
+    number str = ""
+    class int = 0
+    grade int = 0
+    kungfu bool = false    # not learn kungfu #
 }
 ```
 No, no, it's not very elegant to repeat the definition of data. We can reuse the student attributes and add an extra kung fu attribute.
@@ -1060,8 +1060,8 @@ We need to combine this feature, but it's not that complicated, just create a st
 E.g:
 ```
 ChineseStudent -> {
-    Student = Student{}    # include the student attribute in it #
-    Kungfu = false         # not learn kungfu #
+    student = Student{}    # include the student attribute in it #
+    kungfu = false         # not learn kungfu #
 }
 ```
 This way you can use common attributes through the student attributes in Chinese students.
@@ -1085,7 +1085,7 @@ E.g:
 ```
 ChineseStudent -> {
     Student    # Inherited student #
-    Kungfu = false
+    kungfu = false
 }
 
 # override #
