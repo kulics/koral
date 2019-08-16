@@ -16,7 +16,7 @@ This is the main source code repository for Lite. It contains the compiler, and 
 ## Features
 - Well designed grammar, easy to write and read.
 - The rules are clear and uniform, in line with intuition.
-- Currently supports output to C#/Go/TypeScript, and with their resources, we can already use this language in a very wide range of scenarios.
+- Currently supports output to C#/Go/TypeScript/Kotlin, and with their resources, we can already use this language in a very wide range of scenarios.
 - Output to LLVM will be supported in the future to support a more comprehensive scenario.
 
 ## Getting Started
@@ -70,3 +70,5 @@ Read detail from [Here](./Compare.md).
 [Go](https://github.com/kulics/lite-go)
 
 [TypeScript](https://github.com/kulics/lite-typescript)
+
+[Kotlin](https://github.com/kulics/lite-kotlin)
