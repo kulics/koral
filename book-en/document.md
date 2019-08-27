@@ -1372,11 +1372,11 @@ Func : (hw Homework ->) {
 # Enumeration Type
 The enumeration is a set of integer constants with independent names. It can usually be used to mark the type of some business data, which is convenient for judgment processing.
 ## Definition
-We only need to use the `id -> type:{id id id id}` statement.
+We only need to use the `id -> type?{id id id id}` statement.
 
 E.g:
 ```
-Color -> u8:{
+Color -> u8?{
      Red
      Green
      Blue
@@ -1404,7 +1404,7 @@ We can also assign a single identifier if needed, and unspecified will continue 
 
 E.g:
 ```
-Number := u8:{
+Number := u8?{
      A = 1  # 1 #
      B      # 2 #
      C = 1  # 1 #
