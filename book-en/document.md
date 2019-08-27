@@ -1094,19 +1094,19 @@ ChineseStudent := me $ {
 ### Construction
 Sometimes we might use the constructor in .NET.
 
-We can use the special constructor statement `%() {}`.
+We can use the special constructor statement `() {}`.
 
 E.g:
 ```
-Student := me ${
-    ......
-} % (name str, number str) {
+Student := me $ (name str, number str) {
     me.name = name
     me.number = number
     # Calculate the class #
     me.class = getSubText(number, 2, 3)
     # Calculate the grade #
     me.grade = getSubText(number, 0, 1)
+} % {
+    ......
 }
 ```
 This results in a structure with a constructor that automatically generates class and grade data when we create a new student.
