@@ -322,7 +322,7 @@ emptyDictionary ={}
 ## Functions
 ### Lite
 ```
-greet(name str, day str -> r str) {
+greet : (name str, day str -> r str) {
     <- "Hello " name ", today is " day "."
 }
 greet("Bob", "Tuesday")
@@ -365,7 +365,7 @@ greet("Bob", "Tuesday")
 ## Tuple Return
 ### Lite
 ```
-getGasPrices(-> a num, b num, c num) {
+getGasPrices : (-> a num, b num, c num) {
     <- 3.59, 3.69, 3.79
 }
 ```
@@ -400,8 +400,8 @@ def getGasPrices():
 ## Function Type
 ### Lite
 ```
-makeIncrementer(-> fn (int->int)) {
-    addOne(number int -> number int) {
+makeIncrementer : (-> fn (int->int)) {
+    addOne : (number int -> number int) {
         <- 1 + number
     }
     <- addOne
@@ -470,11 +470,9 @@ increment(7)
 ## Classes Declaration
 ### Lite
 ```
-Shape -> {
+Shape := me $ {
     numberOfSides = 0
-}
-me Shape -> {
-    simpleDescription(-> s str) {
+    simpleDescription : (-> s str) {
         <- "A shape with " me.number of sides " sides."
     }
 }
@@ -564,38 +562,32 @@ shapeDescription = shape.simpleDescription()
 ## Subclass
 ### Lite
 ```
-NamedShape -> {
+NamedShape := me $ {
     name str
     numberOfSides = 0
-}
-me NamedShape -> {
-    simpleDescription(-> s str) {
+    simpleDescription : (-> s str) {
         <- "A shape with " me.numberOfSides " sides."
     }
 } 
 
-Square -> {
+Square := me $ {
     NamedShape
     sideLength num
-} 
-me Square -> {
-    simpleDescription(-> s str) {
+
+    simpleDescription : (-> s str) {
         <- "A square with sides of length " me.sideLength "."
     }
 
-    init(sideLength num, name str -> v square) {
-        me.sideLength = sideLength
-        me.numberOfSides = 4
-        me.name = name
-        <- me
-    }
-
-    area(-> f num) {
+    area : (-> f num) {
         <- me.sideLength ** 2
     }
+} % (sideLength num, name str) {
+    me.sideLength = sideLength
+    me.numberOfSides = 4
+    me.name = name
 }
 
-test = Square{}.init(5.2, "square")
+test = Square(5.2, "square")
 test.area()
 test.simpleDescription()
 ```
@@ -963,8 +955,8 @@ for current in someObjects:
 ## Protocol
 ### Lite
 ```
-Nameable <- {
-    name(-> s str)
+Nameable := % {
+    name (-> s str)
 }
 
 f(x Nameable ->) {
@@ -1016,13 +1008,12 @@ func f(x: Nameable) {
 ## Implement
 ### Lite
 ```
-Dog -> {}
-me Dog -> Nameable {
+Dog := $ {
+} % Nameable {
     name(-> n str) {
         <- "Dog"
     }
-}
-me Dog -> Weight {
+} % Weight {
     getWeight(-> w int) {
         <- 30
     }
