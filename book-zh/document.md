@@ -1080,19 +1080,19 @@ ChineseStudent := me $ {
 ### 构造
 有些时候，我们可能使用 .NET 中的构造方法。
 
-我们可以在使用特殊的构造函数语句 `%() {}`。
+我们可以在使用特殊的构造函数语句 `() {}`。
 
 例如：
 ```
-Student := me ${
-    ......
-} % (name str, number str) {
+Student := me $ (name str, number str) {
     me.name = name
     me.number = number
     # 计算得出班级 #
     me.class = getSubText(number, 2, 3)
     # 计算得出年级 #
     me.grade = getSubText(number, 0, 1)
+} % {
+    ......
 }
 ```
 这样就得到了一个带构造函数的结构体，我们在创建一个新学生的时候，就会自动产生班级和年级数据。
