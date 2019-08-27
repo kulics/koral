@@ -8,7 +8,7 @@ By removing keywords, reducing grammatical features, and unifying expression spe
 ## Features
 - Well designed grammar, easy to write and read.
 - The rules are clear and uniform, in line with intuition.
-- Currently supports output to C#/Go/TypeScript, and with their resources, we can already use this language in a very wide range of scenarios.
+- Currently supports output to C#/Go/JavaScript/Kotlin, and with their resources, we can already use this language in a very wide range of scenarios.
 - Output to LLVM will be supported in the future to support a more comprehensive scenario.
 
 # Index
@@ -33,7 +33,7 @@ By removing keywords, reducing grammatical features, and unifying expression spe
 1. [Optional Type](#Optional-Type)
 
 # Install
-Currently `Lite` supports compilation to `C#/Go/TypeScript/Kotlin`, so you need to install `.NET Core/Go/NodeJS/JDK` environment on your system.
+Currently `Lite` supports compilation to `C#/Go/JavaScript/Kotlin`, so you need to install `.NET Core/Go/NodeJS/JDK` environment on your system.
 
 The execution compiler will scan the `.lite` file of the current folder and automatically translate it to the target file of the same name.
 
@@ -42,7 +42,7 @@ The execution compiler will scan the `.lite` file of the current folder and auto
 download:
 - C# <https://github.com/kulics/lite-csharp/releases>
 - Go <https://github.com/kulics/lite-go/releases>
-- TypeScript <https://github.com/kulics/lite-typescript/releases>
+- JavaScript <https://github.com/kulics/lite-typescript/releases>
 - Kotlin <https://github.com/kulics/lite-kotlin/releases>
 
 # Basic Grammar
@@ -91,7 +91,7 @@ You can write multiple import statements, and their order does not affect the im
 For more details on namespaces, please see [Namespace] (#Namespace)
 
 ## Main Entry
-We need to define a main entry to let the program know where to start. The main entry is declared via a function `Main(->) {}`.
+We need to define a main entry to let the program know where to start. The main entry is declared via a function `Main : (->) {}`.
 Depending on the target platform, the main entry may be declared differently, and the main function of C# is used by default.
 
 E.g:
@@ -100,7 +100,7 @@ E.g:
     "System"
 }
 
-Main(->) {
+Main : (->) {
 }
 ```
 The main entry function here is a function with no arguments and no return value. It is automatically recognized as the main entry. The main entry function is executed when the program starts, so we only need to write the function in the main entry function.
@@ -332,10 +332,10 @@ print( A + B )    # + plus #
 print( A - B )    # - minus #
 print( A * B )    # * multiply #
 print( A / B )    # / divide #
-print( A % B )    # % residual, meaning the remainder remaining after the divisibility, the result here is 2 #
+print( A \ B )    # \ residual, meaning the remainder remaining after the divisibility, the result here is 2 #
 print( A ** B )   # ** power #
 print( A // B )   # // root #
-print( A %% B )   # %% log #
+print( A \\ B )   # \\ log #
 ```
 In addition to numbers, there are other types that support arithmetic operations. For example, `str` can use an addition operation to combine two paragraphs of text.
 
@@ -383,7 +383,7 @@ A += 1      # += Add before adding value #
 A -= 1      # -= First subtraction and then assignment #
 A *= 1      # *= First multiply and then assign #
 A /= 1      # /= First divide and then assign value #
-A %= 1      # %= Take the first and then assign the value #
+A \= 1      # \= Take the first and then assign the value #
 ```
 ## Bit Operation
 Bit operations are the basis for the underlying calculations and are also supported in this language.
@@ -739,13 +739,13 @@ Usually we will package a series of task processing that needs to be reused into
 
 In practical engineering practice, given a certain input, the function that must accurately return the determined output is considered a better design. Therefore, it is recommended to maintain the independence of the function as much as possible.
 ## Definition
-We have seen the main entry function before, it is only defined using the fixed statement `Main(->) {}`.
+We have seen the main entry function before, it is only defined using the fixed statement `Main : (->) {}`.
 
-We only need to define a function using the `id(->) {}` collocation. The parentheses in front are the input parameters, and the parentheses in the back are the parameters.
+We only need to define a function using the `(->) {}` collocation. The parentheses in front are the input parameters, and the parentheses in the back are the parameters.
 
 E.g:
 ```
-Function(->) {
+Function : (->) {
     ......
 }
 ```
@@ -767,7 +767,7 @@ Very simple, we only need to declare the parameters using `id type`.
 
 E.g:
 ```
-Func(x int -> y int) {
+Func : (x int -> y int) {
     <- x * 2
 }
 ```
@@ -806,7 +806,7 @@ When we call a function, we need to fill the data in parentheses in the order de
 E.g:
 ```
 # Define a function that contains two input parameters #
-Sell(price int, name str ->) {}
+Sell : (price int, name str ->) {}
 # Fill in the required data according to the defined requirements #
 Sell(1.99, "cola")
 ```
@@ -815,7 +815,7 @@ Similar to the input parameters, the output parameter needs to be explicitly def
 
 E.g:
 ```
-TopSell(-> name str, count int) {
+TopSell : (-> name str, count int) {
      ......
      <- "cola", many
 }
@@ -845,7 +845,7 @@ There is no special way to define function arguments, just replace the argument 
 
 E.g:
 ```
-Each_1_To_10(func (int->) ->) {
+Each_1_To_10 : (func (int->) ->) {
      i @ 1..<=10 {
          func(i)
      }
@@ -857,7 +857,7 @@ This way we can pass the details of the processing to the external incoming `fun
 
 E.g:
 ```
-print(item int ->) {
+print = (item int ->) {
      print(item)
 }
 
@@ -903,11 +903,11 @@ So we need a feature that wraps data from different attributes to better describ
 
 Obviously, the function responsible for packaging data is the structure.
 ## Definition
-We can use the `id -> {}` statement to define a structure that has nothing.
+We can use the `id := $ {}` statement to define a structure that has nothing.
 
 E.g:
 ```
-Package -> {
+Package := $ {
 }
 ```
 Of course, we prefer to pack a few data, such as a student with a name, student number, class, and grade attribute.
@@ -915,7 +915,7 @@ We can define this data in the structure of the body just like we would define a
 
 E.g:
 ```
-Student -> {
+Student := $ {
     name str = ""
     number str = ""
     class int = 0
@@ -929,7 +929,7 @@ Unlike our original base type, which only stores one type of data, this structur
 This is very much like the concept of assembling different parts together into a whole in reality.
 
 ## Build
-So how do we build a new structure? As a whole, all of our types can be build using the constructor `type{}`.
+So how do we build a new structure? As a whole, all of our types can be build using the method `type{}`.
 
 E.g:
 ```
@@ -937,7 +937,7 @@ Peter = Student{}
 ```
 This build a `Peter` identifier, and all of the student's properties are initialized to `"","",0,0` as set in the definition.
 
-Let's review that our base types and collection types can be created using constructors, in fact they are all structures.
+Let's review that our base types and collection types can be created using method, in fact they are all structures.
 
 ## Using Properties
 Now that we have a `Peter`, how do we use the properties inside?
@@ -1004,7 +1004,7 @@ We can define private properties to store properties that we don't want to be ac
 
 E.g:
 ```
-Student -> {
+Student := $ {
     ......
     _girlFriend str    # The first character is the identifier of _ is private #
 }
@@ -1013,16 +1013,13 @@ That's right, if you remember the definition of the identifier, this is how the 
 
 So if we define a `Peter`, we can't get the value or modify the value through `Peter._girlFriend`.
 
-The private property of this structure can not be accessed, and can not be modified. What is the use? Don't worry, the structure has another attribute.
-
-## Structure Function
-If we need to make this structure come with a function that makes it easy to manipulate, we can additionally declare a function with a structure parameter.  
-Structure functions are declared in a similar way to structures, except that the specified identifier is required. The form is `id type -> {}`.
+The private property of this structure can not be accessed, and can not be modified. What is the use? Don't worry, we can use the functions.
 
 E.g:
 ```
-me Student -> {
-    getGirlFriend(-> name str) {
+Student := me $ { # declare me #
+    ......
+    getGirlFriend : (-> name str) {
         <- me._girlFriend
     }
 }
@@ -1046,7 +1043,7 @@ Now let us use our imagination. How do we define a structure that is specificall
 
 E.g:
 ```
-ChineseStudent -> {
+ChineseStudent := $ {
     name str = ""
     number str = ""
     class int = 0
@@ -1060,7 +1057,7 @@ We need to combine this feature, but it's not that complicated, just create a st
 
 E.g:
 ```
-ChineseStudent -> {
+ChineseStudent := $ {
     student = Student{}    # include the student attribute in it #
     kungfu = false         # not learn kungfu #
 }
@@ -1084,14 +1081,12 @@ If you want to override the properties of the original structure, you can add th
 
 E.g:
 ```
-ChineseStudent -> {
+ChineseStudent := me $ {
     Student    # Inherited student #
     kungfu = false
-}
 
-# override #
-parent me ChineseStudent -> {
-    getGirlFriend(-> name str) {
+    # override #
+    parent%getGirlFriend : (-> name str) {
         <- parent._girlFriend
     }
 }
@@ -1099,11 +1094,13 @@ parent me ChineseStudent -> {
 ### Construction
 Sometimes we might use the constructor in .NET.
 
-We can use the special constructor statement `id type() {}`.
+We can use the special constructor statement `%() {}`.
 
 E.g:
 ```
-me Student(name str, number str) {
+Student := me ${
+    ......
+} % (name str, number str) {
     me.name = name
     me.number = number
     # Calculate the class #
@@ -1126,13 +1123,16 @@ If you need to use a constructor with inheritance, you can append `(params)` to 
 
 E.g:
 ```
-me Parent(a int) {
+Parent := me ${
+    ......
+} %(a int) {
+    ......
 }
 
-Child -> {
-    _ Parent
-}
-me Child(a int)(a) {
+Child := me $ {
+    Parent
+} %(a int)(a) {
+    ......
 }
 ```
 
@@ -1146,7 +1146,7 @@ E.g:
 ```
 "Name/Space" {}
 
-GetSomething(-> content str) {
+GetSomething : (-> content str) {
      <- "something"
 }
 ```
@@ -1159,7 +1159,7 @@ E.g:
      "Name/Space"
 }
 
-Main(->) {
+Main : (->) {
      # print something #
      print( GetSomething() )
 }
@@ -1171,11 +1171,11 @@ The control type is a block of code that encapsulates a data operation.
 Often we will encapsulate some of the data control processing into a control type so that there is no need to perform additional methods when using the data.
 
 ## Get Operation
-If we want to set a get operation, we can use the `id() type{ctrl}` definition.
+If we want to set a get operation, we can use the `() type{ctrl}` definition.
 
 E.g:
 ```
-Number() int {
+Number : () int {
     get {           # means get, equivalent to getter in other languages ​​#
         <- 7        # Only return 7 #
     }
@@ -1189,7 +1189,7 @@ With the above examples, we can naturally think of how to set the operation chan
 
 E.g:
 ```
-Number() int {
+Number : () int {
     set(value) {     # Indicates the setting, which is equivalent to the setter in other languages ​​#
         # ? ? ? Who should I give the value to? ? ? #
     }
@@ -1202,7 +1202,7 @@ E.g:
 ```
 _Number = 0
 
-Number() int {
+Number : () int {
     set(value) {
         _Number = value     # value represents the value entered #
     }
@@ -1212,7 +1212,7 @@ Number() int {
 A complete example of reading and writing is as follows:
 ```
 _Number = 0
-Number() int {
+Number : () int {
     get {
         <- _Number
     }
@@ -1229,7 +1229,7 @@ Yes, we have an easier way to directly indicate a reference data, and the contro
 E.g:
 ```
 _Number = 0
-Number(_Number) int # is equivalent to the above package #
+Number : (_Number) int # is equivalent to the above package #
 ```
 
 # Interface Type
@@ -1240,11 +1240,11 @@ The interface specifies the methods and properties necessary to implement a part
 
 Our structure can introduce the interface we need like a signed interface, and then declare all the attributes required by the interface, so we think that this structure implements the interface.
 ## Definition
-We only need to define an interface using the `id <- {}` statement.
+We only need to define an interface using the `id := % {}` statement.
 
 E.g:
 ```
-Protocol <- {
+Protocol := % {
 }
 ```
 This is an empty interface.
@@ -1253,9 +1253,9 @@ Next, let's design a difficult task that students need to accomplish... homework
 
 E.g:
 ```
-Homework <- {
-    count() int
-    do(->)
+Homework := % {
+    count () int
+    do (->)
 }
 ```
 This is a job interface that has two properties, one is the number of jobs that need to be done, and the other is a function that completes the job.
@@ -1273,15 +1273,13 @@ For interfaces that need to be explicitly implemented, you can specify the inter
 
 E.g:
 ```
-Student -> {
+Student := me $ {
      ......
      _count int
-}
-# Explicit implementation #
-me Student -> Homework {
-    count(me._count) int
+} % Homework { # Explicit implementation #
+    count : (me._count) int
 
-    do(->) {
+    do : (->) {
         SpendTime(1)       # took an hour #
         me.count -= 1      # completed a #
     }
@@ -1331,7 +1329,7 @@ A more efficient way is to write this function into the function, let the functi
 
 E.g:
 ```
-DoHomework(Student Homework ->) {
+DoHomework : (Student Homework ->) {
     Student.do()
 }
 # Now we can make each student do their homework more easily #
@@ -1362,7 +1360,7 @@ We can use `is[type]()` to determine the type of data, and `value.[type]` to con
 
 E.g:
 ```
-Func(hw Homework ->) {
+Func : (hw Homework ->) {
     # Determine if Chinese students #
     Hw.is[ChineseStudent]() {
         # Convert to Chinese Student Data #
@@ -1406,7 +1404,7 @@ We can also assign a single identifier if needed, and unspecified will continue 
 
 E.g:
 ```
-Number -> u8:{
+Number := u8:{
      A = 1  # 1 #
      B      # 2 #
      C = 1  # 1 #
@@ -1428,7 +1426,7 @@ We can use `throw()` function to declare an exception data anywhere in the funct
 
 E.g:
 ```
-ReadFile(name str ->) {
+ReadFile : (name str ->) {
     ? name.len == 0 {
         throw( Exception("something wrong") )
     }
@@ -1474,7 +1472,7 @@ Quite simply, using `_ {}` at the end of the check can declare a statement that 
 
 E.g:
 ```
-Func(->) {
+Func : (->) {
     F File
     ! {
         F = ReadFile("./somecode.lite")
@@ -1528,7 +1526,7 @@ That's right, just use `~>`.
 
 E.g:
 ```
-Async(~> out int) {
+Async : (~> out int) {
     <- 12
 }
 ```
@@ -1556,12 +1554,12 @@ Asynchronous waits can only be used in functions declared asynchronously.
 E.g:
 ```
 # Yes #
-Async(~> out int) {
+Async : (~> out int) {
     <~ delay(5000)  # Wait for a while #
     <- 12
 }
 # No #
-Async(-> out int) {
+Async : (-> out int) {
     <~ delay(5000)  # Cannot be declared #
     <- 12
 }
@@ -1573,7 +1571,7 @@ We can choose to wait for no data, or we can choose not to wait for data.
 
 E.g:
 ```
-Async(~>) {
+Async : (~>) {
     <~ delay(5000)      # Wait for a while #
 }
 
@@ -1603,17 +1601,15 @@ This is a simplified implementation.
 
 E.g:
 ```
-List[T] -> {
+List[T] := me $ {
     Items = Storage{T}     # Create Storage #
     Length = 0
-}
 
-me List[T] -> {
-    get(index int -> item T) {    # Get a generic data #
+    get : (index int -> item T) {    # Get a generic data #
         <- items.get( index )
     }
 
-    add(item T ->) {      # Add a generic data to the list #
+    add : (item T ->) {      # Add a generic data to the list #
         Items.insert(length, item)
         Length += 1
     }
@@ -1640,7 +1636,7 @@ This way we can use it in generics.
 
 E.g:
 ```
-Package[T] -> {
+Package[T] := $ {
     Item = empty[T]()    # Initializes a default value of generic data #
 }
 ```
@@ -1662,17 +1658,18 @@ We can use generics in structures, functions, and interface types.
 
 E.g:
 ```
-Func[T](data T -> data T) {
+Func[T] : (data T -> data T) {
     <- data
 }
 
-Protocol[T] <- {
-    test[T](in T ->) {}
+Protocol[T] := % {
+    test[T] (in T ->) {}
 }
 
-Implement -> {} 
-me Implement -> Protocol[Implement] {
-    test[Implement](in Implement ->) {
+Implement := me $ {
+    ......
+} % Protocol[Implement] {
+    test[Implement] : (in Implement ->) {
     }
 }
 ```
@@ -1681,7 +1678,7 @@ If we need to constrain the type of generics, we only need to use the `T id` syn
 
 E.g:
 ```
-Package[T Student] -> {
+Package[T Student] := $ {
 }
 ```
 
@@ -1700,7 +1697,7 @@ Let's take a look at the database data as a reference to see how to use annotati
 E.g:
 ```
 (Table("test"))
-Annotation -> {
+Annotation := $ {
         (Key,Column("id"))
         id str
         (Column("name"))
@@ -1735,7 +1732,7 @@ We can use Linq to query like C#, just declare the LINQ statement with `->`.
 
 E.g:
 ```
-Linq(->) {
+Linq : (->) {
      Numbers = { 0, 1, 2, 3, 4, 5, 6 }
      Linq = from num -> in Numbers ->
              Where (num % 2) == 0 ->
@@ -1796,7 +1793,7 @@ In this way, you can manipulate external variables inside the function, and you 
 
 E.g:
 ```
-Swap(x !int, y !int ->) {
+Swap : (x !int, y !int ->) {
     x, y = y, x
 }
 

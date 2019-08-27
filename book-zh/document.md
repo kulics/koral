@@ -8,7 +8,7 @@ Lite 是一个专注于工程化的开源跨平台编程语言。
 ## 特性
 - 精心设计的语法，易于编写和阅读。
 - 规则明确并且统一，符合直觉。
-- 目前支持输出到 C#/Go/TypeScript，借助它们的资源，我们已经可以在非常广泛的场景下使用这门语言。
+- 目前支持输出到 C#/Go/JavaScript/Kotlin，借助它们的资源，我们已经可以在非常广泛的场景下使用这门语言。
 - 未来将会支持输出到LLVM，以支持更全面的场景。
 
 # 目录
@@ -33,7 +33,7 @@ Lite 是一个专注于工程化的开源跨平台编程语言。
 1. [可选类型](#可选类型)
 
 # 安装与使用
-目前 `Lite` 支持编译到 `C#/Go/TypeScript/Kotlin`，因此需要在系统中安装 `.NET Core/Go/NodeJS/JDK` 环境。  
+目前 `Lite` 支持编译到 `C#/Go/JavaScript/Kotlin`，因此需要在系统中安装 `.NET Core/Go/NodeJS/JDK` 环境。  
 
 执行编译器就会扫描当前文件夹的 `.lite` 文件，并且自动转译为同名的目标文件。  
 
@@ -42,7 +42,7 @@ Lite 是一个专注于工程化的开源跨平台编程语言。
 下载:
 - C# <https://github.com/kulics/lite-csharp/releases>
 - Go <https://github.com/kulics/lite-go/releases>
-- TypeScript <https://github.com/kulics/lite-typescript/releases>
+- JavaScript <https://github.com/kulics/lite-typescript/releases>
 - Kotlin <https://github.com/kulics/lite-kotlin/releases>
 
 # 基础语法
@@ -53,7 +53,7 @@ Lite 是一个专注于工程化的开源跨平台编程语言。
 ```
 语句内容;
 ```
-在本语言中，语法规则都是明确的，每一条语句都有明确的范围，必须由 `；` 或 `换行`结束。
+在本语言中，语法规则都是明确的，每一条语句都有明确的范围，必须由 `；` 或 `换行` 结束。
 因此在大多数情况下，我们都可以直接使用换行来结束。只有特殊需求的时候，可以选择使用 `;` 来维持当前行。
 
 所以我们更愿意这样写：
@@ -90,7 +90,7 @@ Lite 是一个专注于工程化的开源跨平台编程语言。
 更多关于命名空间的细节请查看[命名空间](#命名空间)
 
 ## 主入口
-我们需要定义一个主入口来让程序知道从哪里启动。主入口通过一个函数 `Main(->) {}` 声明。  
+我们需要定义一个主入口来让程序知道从哪里启动。主入口通过一个函数 `Main : (->) {}` 声明。  
 根据目标平台的不同，主入口的声明方式可能不同，这里默认使用 C# 的主函数。
 
 例如：
@@ -99,7 +99,7 @@ Lite 是一个专注于工程化的开源跨平台编程语言。
     "System"
 }
 
-Main(->) {
+Main : (->) {
 }
 ```
 这里的 主入口 函数是一个无参数无返回值的函数，它会被自动识别为主入口，程序启动时即会执行 主入口 函数，因此我们只需将功能写在 主入口 函数中即可。
@@ -328,10 +328,10 @@ print( A + B )    # + 加 #
 print( A - B )    # - 减 #
 print( A * B )    # * 乘 #
 print( A / B )    # / 除 #
-print( A % B )    # % 取余，意思是整除后剩下的余数，这里的结果为 2 #
+print( A \ B )    # \ 取余，意思是整除后剩下的余数，这里的结果为 2 #
 print( A ** B )   # ** 幂 #
 print( A // B )   # // 根 #
-print( A %% B )   # %% 对数 #
+print( A \\ B )   # \\ 对数 #
 ```
 除了数字之外，也有其它支持算术操作的类型，例如 `str` 可以使用加运算将两段文字合并起来。
 
@@ -377,7 +377,7 @@ A += 1  # += 先相加再赋值 #
 A -= 1  # -= 先相减再赋值 #
 A *= 1  # *= 先相乘再赋值 #
 A /= 1  # /= 先相除再赋值 #
-A %= 1  # %= 先取余再赋值 #
+A \= 1  # \= 先取余再赋值 #
 ```
 ## 位操作
 位操作作为底层计算的基础，在本语言中也支持。
@@ -729,13 +729,13 @@ I = 0
 
 在实际工程实践中，给与确定的输入，必定会准确返回确定输出的函数被视为是较好的设计。所以建议尽可能地保持函数地独立性。
 ## 定义
-之前我们已经见过了主入口函数，它只使用了固定语句 `Main(->) {}` 来定义。
+之前我们已经见过了主入口函数，它只使用了固定语句 `Main : (->) {}` 来定义。
 
-我们只需使用 `id(->) {}` 搭配来定义一个函数。
+我们只需使用 `(->) {}` 搭配来定义一个函数。
 
 例如：
 ```
-Function(->) {
+Function : (->) {
     ......
 }
 ```
@@ -756,7 +756,7 @@ Function()  # 调用了 Function #
 
 例如：
 ```
-Func(x int -> y int) {
+Func : (x int -> y int) {
     <- x * 2
 }
 ```
@@ -794,7 +794,7 @@ Func(x int -> y int) {
 例如：
 ```
 # 定义一个包含两个入参的函数 #
-Sell(price int, name str ->) {}
+Sell : (price int, name str ->) {}
 # 按照定义的要求，填入符合要求的数据 #
 Sell(1.99, "cola")
 ```
@@ -803,7 +803,7 @@ Sell(1.99, "cola")
 
 例如：
 ```
-TopSell(-> name str, count int) {
+TopSell : (-> name str, count int) {
     ......
     <- "cola", many
 }
@@ -832,7 +832,7 @@ print( TopSell() )      # 打印两个数值 #
 
 例如：
 ```
-Each_1_To_10(func (int->) ->) {
+Each_1_To_10 : (func (int->) ->) {
     i @ 1..<=10 {
         func(i)
     }
@@ -844,7 +844,7 @@ Each_1_To_10(func (int->) ->) {
 
 例如：
 ```
-print(item int ->) {
+print = (item int ->) {
     print(item)
 }
 
@@ -890,11 +890,11 @@ Each_1_To_10( (item int ->) {
 
 显而易见，这个负责包装数据的功能，就是结构体。
 ## 定义
-我们可以使用 `id -> {}` 语句来定义一个什么都没有的结构体。
+我们可以使用 `id := $ {}` 语句来定义一个什么都没有的结构体。
 
 例如：
 ```
-Package -> {
+Package := $ {
 }
 ```
 当然，我们更希望的是能包装几个数据，例如一个具有名称、学号、班级、年级属性的学生。
@@ -902,7 +902,7 @@ Package -> {
 
 例如：
 ```
-Student -> {
+Student := $ {
     name str = ""
     number str = ""
     class int = 0
@@ -916,7 +916,7 @@ Student -> {
 这非常像是我们现实中将不同的零件拼装在一起包装成一个整体的概念。
 
 ## 创建
-那么我们怎么创建一个新的结构体呢？老样子，我们所有的类型都可以使用构造函数 `type{}` 来创建。
+那么我们怎么创建一个新的结构体呢？老样子，我们所有的类型都可以使用构造方法 `type{}` 来创建。
 
 例如：
 ```
@@ -924,7 +924,7 @@ Peter = Student{}
 ```
 这样便创建了一个 `Peter` 标识符，这个学生的所有属性都根据定义中设置的那样被初始化为 `"","",0,0` 。
 
-让我们回顾一下，我们的基础类型、集合类型都可以使用构造函数来创建，实际上它们都是结构体.
+让我们回顾一下，我们的基础类型、集合类型都可以使用构造方法来创建，实际上它们都是结构体.
 
 ## 使用属性
 现在我们已经有了一个 `Peter` ，我们要怎么使用里面的属性呢？
@@ -990,7 +990,7 @@ Peter = {
 
 例如：
 ```
-Student -> {
+Student := $ {
     ......
     _girlFriend str # 第一个字符是 _ 的标识符是私有的 #
 }
@@ -999,16 +999,13 @@ Student -> {
 
 因此我们再定义一个 `Peter` 的话，也不能通过 `Peter._girlFriend` 来获取值或修改值。
 
-那这种结构体的私有属性又不能访问，又不能修改，有什么用呢？别急，结构体还有另外一种属性。
-
-## 结构体函数
-如果我们需要让这个结构体自带函数，让它能方便操作，我们可以另外声明一个带结构体参数的函数。
-结构体函数的声明方式与结构体类似，只是需要声明指定的标志符。形式为 `id type -> {}`。
+那这种结构体的私有属性又不能访问，又不能修改，有什么用呢？别急，我们可以用函数来操作。
 
 例如：
 ```
-me Student -> {
-    getGirlFriend(->name str) {
+Student := me $ { # 声明me #
+    ......
+    getGirlFriend : (->name str) {
         <- me._girlFriend
     }
 }
@@ -1032,7 +1029,7 @@ print( Peter.getGirlFriend() )
 
 例如：
 ```
-ChineseStudent -> {
+ChineseStudent := $ {
     name str = ""
     number str = ""
     class int = 0
@@ -1046,7 +1043,7 @@ ChineseStudent -> {
 
 例如：
 ```
-ChineseStudent -> {
+ChineseStudent := $ {
     student = Student{}   # 将学生属性包含其中 #
     kungfu = false        # 不会功夫 #
 }
@@ -1070,14 +1067,12 @@ print( Chen.student.name )
 
 例如：
 ```
-ChineseStudent -> {
+ChineseStudent := me $ {
     Student    # 继承 student #
     kungfu = false
-}
 
-# 重写 #
-parent me ChineseStudent -> {
-    getGirlFriend(-> name str) {
+    # 重写 #
+    parent%getGirlFriend : (-> name str) {
         <- parent._girlFriend
     }
 }
@@ -1085,11 +1080,13 @@ parent me ChineseStudent -> {
 ### 构造
 有些时候，我们可能使用 .NET 中的构造方法。
 
-我们可以在使用特殊的构造函数语句 `id type() {}`。
+我们可以在使用特殊的构造函数语句 `%() {}`。
 
 例如：
 ```
-me Student(name str, number str) {
+Student := me ${
+    ......
+} % (name str, number str) {
     me.name = name
     me.number = number
     # 计算得出班级 #
@@ -1112,13 +1109,16 @@ print(Peter.class)     # 打印出 2 #
 
 例如：
 ```
-me Parent(a int) {
+Parent := me ${
+    ......
+} %(a int) {
+    ......
 }
 
-Child -> {
-    _ Parent
-}
-me Child(a int)(a) {
+Child := me $ {
+    Parent
+} %(a int)(a) {
+    ......
 }
 ```
 
@@ -1132,7 +1132,7 @@ me Child(a int)(a) {
 ```
 "Name/Space" {}
 
-GetSomething(-> content str) {
+GetSomething : (-> content str) {
     <- "something"
 }
 ```
@@ -1145,7 +1145,7 @@ GetSomething(-> content str) {
     "Name/Space" 
 }
 
-Main(->) {
+Main : (->) {
     # 打印 something #
     print( GetSomething() )
 }
@@ -1157,11 +1157,11 @@ Main(->) {
 通常我们会将一些数据控制处理封装成为控制类型，这样在使用数据时就无需执行额外的方法。
 
 ## 获取操作
-如果我们想设定一个获取的操作，我们可以使用 `id() type{ctrl}` 定义。
+如果我们想设定一个获取的操作，我们可以使用 `() type{ctrl}` 定义。
 
 例如：
 ```
-Number() int {
+Number : () int {
     get {           # 表示获取，相当于其它语言中的getter #
         <- 7        # 只返回 7 #
     }
@@ -1175,7 +1175,7 @@ Number() int {
 
 例如：
 ```
-Number() int {
+Number : () int {
     set(value) {  # 表示设置，相当于其它语言中的setter #
         # ？？？该把值给谁？？？ #
     }
@@ -1188,7 +1188,7 @@ Number() int {
 ```
 _Number = 0
 
-Number() int {
+Number : () int {
     set(value) {
         _Number = value     # value代表输入的值 #
     }
@@ -1198,7 +1198,7 @@ Number() int {
 一个完整的读写例子如下：
 ```
 _Number = 0
-Number() int {
+Number : () int {
     get {
         <- _Number
     }
@@ -1215,7 +1215,7 @@ Number() int {
 例如：
 ```
 _Number = 0
-Number(_Number) int  # 等价于上面的封装 #
+Number : (_Number) int  # 等价于上面的封装 #
 ```
 
 # 接口类型
@@ -1226,11 +1226,11 @@ Number(_Number) int  # 等价于上面的封装 #
 
 我们的结构体可以像签署接口一样引入我们需要的接口，然后声明接口要求的所有属性，这样我们就认为这个结构体实现了接口。
 ## 定义
-我们只需要使用 `id <- {}` 语句就可以定义一个接口。
+我们只需要使用 `id := % {}` 语句就可以定义一个接口。
 
 例如：
 ```
-Protocol <- {
+Protocol := % {
 }
 ```
 这就是一个空的接口。
@@ -1239,9 +1239,9 @@ Protocol <- {
 
 例如：
 ```
-Homework <- {
-    count() int
-    do(->)
+Homework := % {
+    count () int
+    do (->)
 }
 ```
 这是一个作业接口，它有两个属性，一个是需要做作业的数量，一个是完成作业的函数。
@@ -1258,15 +1258,13 @@ Homework <- {
 
 例如：
 ```
-Student -> {
+Student := me $ {
     ......
     _count int
-}
-# 显式实现 #
-me Student -> Homework {
-    count(me._count) int
+} % Homework { # 显式实现 #
+    count : (me._count) int
 
-    do(->) {
+    do : (->) {
         SpendTime(1)        # 花费了一个小时 #
         me.count -= 1       # 完成了一个 #
     }
@@ -1316,7 +1314,7 @@ StudentC.do()
 
 例如：
 ```
-DoHomework(Student Homework ->) {
+DoHomework : (Student Homework ->) {
     student.do()
 }
 # 现在我们就可以更简单地让每个学生做作业了 #
@@ -1347,7 +1345,7 @@ i @ Arr {
 
 例如：
 ```
-Func(hw Homework ->) {
+Func : (hw Homework ->) {
     # 判断是否中国学生 #
     ? hw.is[ChineseStudent]() {
         # 转换为中国学生数据 #
@@ -1359,11 +1357,11 @@ Func(hw Homework ->) {
 # 枚举类型
 枚举是一组具有独立名称整数常量。通常可以用来标记一些业务数据的类型，方便判断处理。
 ## 定义
-我们只需要使用`id -> type:{id id id id}`语句即可。
+我们只需要使用`id := type:{id id id id}`语句即可。
 
 例如：
 ```
-Color -> u8:{
+Color := u8:{
     Red
     Green
     Blue
@@ -1391,7 +1389,7 @@ C ? Color.Red {
 
 例如:
 ```
-Number -> u8:{
+Number := u8:{
     A = 1   # 1 #
     B       # 2 #
     C = 1   # 1 #
@@ -1413,7 +1411,7 @@ Number -> u8:{
 
 例如：
 ```
-ReadFile(name str ->) {
+ReadFile : (name str ->) {
     ? name.len == 0 {
         throw( Exception("something wrong") )
     }
@@ -1459,7 +1457,7 @@ ReadFile(name str ->) {
 
 例如：
 ```
-func(->) {
+func : (->) {
     F File
     ! {
         F = ReadFile("./somecode.lite")
@@ -1513,7 +1511,7 @@ _ {
 
 例如：
 ```
-Async(~> out int) { 
+Async : (~> out int) { 
     <- 12
 }
 ```
@@ -1541,12 +1539,12 @@ Result = <~ Async()
 例如：
 ```
 # 正确 #
-Async(~> out int) {
+Async : (~> out int) {
     <~ delay(5000)    # 等待一段时间 #
     <- 12
 }
 # 错误 #
-Async(-> out int) {
+Async : (-> out int) {
     <~ delay(5000)    # 不能被声明 #
     <- 12
 }
@@ -1558,7 +1556,7 @@ Async(-> out int) {
 
 例如：
 ```
-Async(~>) {
+Async : (~>) {
     <~ delay(5000)    # 等待一段时间 #
 }
 
@@ -1588,17 +1586,15 @@ Arr.filter( {it ~> it > 5} )
 
 例如：
 ```
-List[T] -> {
+List[T] := me $ {
     items = Storage{T}    # 创建存储 #
     length = 0
-}
 
-me List[T] -> {
-    get(index int -> item T) {  # 获取某个泛型数据 #
+    get : (index int -> item T) {  # 获取某个泛型数据 #
         <- items.get( index )
     }
 
-    add(item T ->) {   # 将一个泛型数据添加进列表 #
+    add : (item T ->) {   # 将一个泛型数据添加进列表 #
         items.insert(length, item)
         length += 1
     }
@@ -1625,7 +1621,7 @@ Z = empty[(->)]()
 
 例如：
 ```
-Package[T] -> {
+Package[T] := $ {
     item = empty[T]()    # 初始化了一个缺省值的泛型数据 #
 }
 ```
@@ -1647,17 +1643,18 @@ ListNumber = []int{}
 
 例如：
 ```
-Func[T](data T -> data T) {
+Func[T] : (data T -> data T) {
     <- data
 }
 
-Protocol[T] <- {
-    test[T](in T ->) {}
+Protocol[T] := % {
+    test[T] (in T ->) {}
 }
 
-Implement -> {} 
-me Implement -> Protocol[Implement] {
-    test[Implement](in Implement ->) {
+Implement := me $ {
+    ......
+} % Protocol[Implement] {
+    test[Implement] : (in Implement ->) {
     }
 }
 ```
@@ -1666,7 +1663,7 @@ me Implement -> Protocol[Implement] {
 
 例如：
 ```
-Package[T Student] -> {
+Package[T Student] := $ {
 }
 ```
 
@@ -1685,7 +1682,7 @@ Package[T Student] -> {
 例如：
 ```
 (Table("test"))
-Annotation -> {
+Annotation := $ {
         (Key,Column("id"))
         id str
         (Column("name"))
@@ -1720,7 +1717,7 @@ Annotation -> {
 
 例如：
 ```
-Linq(->) {
+Linq : (->) {
     Numbers = { 0, 1, 2, 3, 4, 5, 6 }
     Linq = from num -> in Numbers ->
             where (num % 2) == 0 ->
@@ -1781,7 +1778,7 @@ B = A.or_else(128)
 
 例如：
 ```
-Swap(x !int, y !int ->) {
+Swap : (x !int, y !int ->) {
     x, y = y, x
 }
 
