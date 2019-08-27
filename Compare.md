@@ -959,7 +959,7 @@ Nameable := % {
     name (-> s str)
 }
 
-f(x Nameable ->) {
+f : (x Nameable ->) {
     print("Name is " + x.name())
 }
 ```
@@ -1010,11 +1010,11 @@ func f(x: Nameable) {
 ```
 Dog := $ {
 } % Nameable {
-    name(-> n str) {
+    name : (-> n str) {
         <- "Dog"
     }
 } % Weight {
-    getWeight(-> w int) {
+    getWeight : (-> w int) {
         <- 30
     }
 }
