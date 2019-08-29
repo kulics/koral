@@ -1269,7 +1269,7 @@ Next, we will let the students implement this interface.
 ## Implementing Interface
 We add functions directly to the structure to implement this interface.
 
-For interfaces that need to be explicitly implemented, you can specify the interface in the structure function, otherwise you can directly implement it.
+For interfaces that need to be explicitly implemented, you can specify the interface, otherwise you can directly implement it.
 
 E.g:
 ```
