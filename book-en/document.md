@@ -1698,12 +1698,12 @@ E.g:
 ```
 (Table("test"))
 Annotation := $ {
-        (Key,Column("id"))
-        id str
-        (Column("name"))
-        name str
-        (Column("data"))
-        data str
+    (Key,Column("id"))
+    id str
+    (Column("name"))
+    name str
+    (Column("data"))
+    data str
 }
 ```
 We declare a structure of `annotation` that uses annotations to mark the table name `test`, primary key `id`, field `name`, and field `data`.
