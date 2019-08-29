@@ -1683,12 +1683,12 @@ Package[T Student] := $ {
 ```
 (Table("test"))
 Annotation := $ {
-        (Key,Column("id"))
-        id str
-        (Column("name"))
-        name str
-        (Column("data"))
-        data str
+    (Key,Column("id"))
+    id str
+    (Column("name"))
+    name str
+    (Column("data"))
+    data str
 }
 ```
 我们声明了一个 `annotation` 的结构体，它使用注解标记了表名 `test`、主键 `id`、字段 `name`和字段 `data`。
