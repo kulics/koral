@@ -716,7 +716,7 @@ So how do you jump out of the loop? We can use the `@..` statement to jump out.
 
 E.g:
 ```
-@ {
+@ true {
     @..    # Jumped out without executing anything #
 }
 ```
