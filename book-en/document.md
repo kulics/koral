@@ -750,8 +750,6 @@ Function : (->) {
 }
 ```
 This defines a function with the identifier `Function`.
-
-It should be noted that functions can be defined in namespaces, structures, interfaces, or inside functions. When defining a function in a function, the internal function does not have a public property and belongs only to the private function of the current function.
 ## Call
 Unlike the main entry function, which cannot be called, regular functions can be called with an identifier. We only need to use the `id()` statement to use the wrapped function.
 
