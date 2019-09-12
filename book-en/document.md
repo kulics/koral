@@ -408,22 +408,22 @@ Our built-in collection types are both list and dictionary.
 The List uses an ordered list to store multiple values of the same type. The same value can appear multiple times in a different location in a list.
 
 ### Definition
-We only need to use the `{ e1,e2,e3 }` syntax to enclose the data we need, and use `,` to split each piece of data to create a list.
+We only need to use the `{ expression }` syntax to enclose the data we need to create a list.
 In most cases, data types can be automatically inferred from the language.
 
 E.g:
 ```
-List = { 1,2,3,4,5 }
+List = { 1;2;3;4;5 }
 ```
 This will create a list of `int` types containing `1` to `5`.
 
 If you need a list of explicit types, you can use the constructor to create them.
 
-The representation of the list type is `[]type`.
+The representation of the list type is `[type;]`.
 
 For example we need a list of strings:
 ```
-List := []str{}     # empty #
+List := [str;]{}     # empty #
 ```
 
 #### Array
@@ -465,21 +465,21 @@ Unlike the data items in the list, the data items in the dictionary are not in a
 
 The dictionary keys can only use the `integer` and `string` types.
 ### Definition
-Similar to the list, the dictionary is also defined using `{}`, except that the dictionary type is a union type of `key` and `value`, and the form is `key:value`.
+Similar to the list, the dictionary is also defined using `{}`, except that the dictionary type is a union type of `key` and `value`, and the form is `key=>value`.
 
 E.g:
 ```
-Dictionary = {"a":1, "b":2, "c":3}
+Dictionary = {"a"=>1; "b"=>2; "c"=>3}
 ```
-This will create a `str:int` type dictionary containing three entries for `a,b,c`.
+This will create a `str=>int` type dictionary containing three entries for `a,b,c`.
 
 If you need an explicit type of dictionary, you can also use the constructor to create it.
 
-The representation of the dictionary type is `[]type:type`.
+The representation of the dictionary type is `[type=>type]`.
 
 E.g:
 ```
-DictionaryNumNum = []int:int{}  # empty #
+DictionaryNumNum = [int=>int]{}  # empty #
 ```
 ### Access
 Similar to the list, we can also use the index to access the data directly.
@@ -498,7 +498,7 @@ Dictionary.("b") = 5
 Different from the list, if the index is an index that does not exist, it will not be wrong, and the value will be directly assigned to the new key.
 ### Common operations
 ```
-Dictionary += {"d":11}     # Add Element #
+Dictionary += {"d"=>11}     # Add Element #
 Dictionary -= "c"           # Delete the specified index element #
 Length = Dictionary.len    # Length #
 ```
@@ -507,21 +507,21 @@ Length = Dictionary.len    # Length #
 The Set is used to store values of the same type, without a determined order, and without repeating.
 That is to say, when the order of the elements is not important, or if you want to ensure that each element only appears once, you can use the set instead of the list.
 ### Definition
-Similar to lists, set are also defined using `{}` in the form `:value`.
+Similar to lists, set are also defined using `{}` in the form `value=>`.
 
 E.g:
 ```
-Set = {:"a", :"b", :"c"}
+Set = {"a"=>; "b"=>; "c"=>}
 ```
 This will create a set of `str` types containing three entries: `a,b,c`.
 
 If you need a set of explicit types, you can also create them using the constructor.
 
-The representation of the set type is `[]:type`.
+The representation of the set type is `[type=>]`.
 
 E.g:
 ```
-Numbers = []:int{}      # empty #
+Numbers = [int=>]{}      # empty #
 ```
 ### Common Operations
 ```
@@ -646,17 +646,17 @@ If we happen to have a collection that can be an array, a dictionary, or a piece
 
 E.g:
 ```
-Arr = {1, 2, 3, 4, 5}
+Arr = {1; 2; 3; 4; 5}
 item @ Arr {
     print(item)   # print every number #
 }
 ```
 
-If we need to fetch the index and value at the same time, we can replace `id` with the `index:value` syntax, which is valid for both the list and the dictionary.
+If we need to fetch the index and value at the same time, we can replace `id` with the `(index)value` syntax, which is valid for both the list and the dictionary.
 
 E.g:
 ```
-i:v @ Arr {
+(i)v @ Arr {
     print(""i":"v"")
 }
 ```
@@ -973,8 +973,8 @@ Similarly, the way a collection is build is actually a build syntax, so we can a
 
 E.g:
 ```
-Array = []int{ 1, 2, 3, 4, 5 }
-Dictionary = []str:int{ "1":1, "2":2, "3":3 }
+Array = [int;]{ 1; 2; 3; 4; 5 }
+Dictionary = [str=>int]{ "1"=>1; "2"=>2; "3"=>3 }
 ```
 ## Anonymous Structure
 If we only want to wrap some data directly, instead of defining the structure and then using it, can it be like an anonymous function?
@@ -984,16 +984,14 @@ Of course, we can use the `{}` package directly.
 E.g:
 ```
 Peter = {
-    name = "peter"
-    number = "060233"
+    name : "peter"
+    number : "060233"
     class = 2
     grade = 6
 }
 ```
 
-This creates a `Peter` data directly, which we can use directly, but we can't change it.
-
-Since the anonymous structure is not a structure with an explicit type, we only recommend it for use in some temporary situations, such as LINQ.
+This creates a `Peter` data directly, which we can use directly.
 
 ## Private Property
 Anyone will have some little secrets, and `Peter` is the same. Maybe he hides the name of a secret little girlfriend and doesn't want others to know.
@@ -1339,7 +1337,7 @@ Of course, it's better to put these students in an array so that we can use loop
 
 E.g:
 ```
-Arr = []Homework{}
+Arr = [Homework;]{}
 Arr.add( StudentA )
 ......  # Insert many many students #
 i @ Arr {
@@ -1648,7 +1646,7 @@ ListNumber = List[int]{}   # Pass in integer type #
 ```
 So we have a list of integer types, is it like this:
 ```
-ListNumber = []int{}
+ListNumber = [int;]{}
 ```
 That's right, in fact, our list and dictionary syntax are syntactic sugar.
 ## Supported types
@@ -1731,7 +1729,7 @@ We can use Linq to query like C#, just declare the LINQ statement with `->`.
 E.g:
 ```
 Linq : (->) {
-     Numbers = { 0, 1, 2, 3, 4, 5, 6 }
+     Numbers = { 0; 1; 2; 3; 4; 5; 6 }
      Linq = from num -> in Numbers ->
              Where (num % 2) == 0 ->
              Orderby num -> descending ->
