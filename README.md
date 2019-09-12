@@ -29,7 +29,7 @@ This is the main source code repository for Lite. It contains the compiler, and 
 main : (->) {
     print("Hello, world!")
     greetings = get_greetings("love lite!")
-    index:value @ greetings {
+    (index)value @ greetings {
         index ? 0 {
             print(value)
         } 1 {

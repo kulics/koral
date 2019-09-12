@@ -203,46 +203,40 @@ for index in range(1,6):
 ## Arrays
 ### Lite
 ```
-shoppingList = {"catfish", "water",
-    "tulips", "blue paint"}
+shoppingList = {"catfish"; "water"; "tulips"; "blue paint"}
 shoppingList.(1) = "bottle of water"
 ```
 ### C#
 ```
-var shoppingList = new List<string>(){"catfish", "water",
-    "tulips", "blue paint"};
+var shoppingList = new List<string>(){"catfish", "water", "tulips", "blue paint"};
 shoppingList[1] = "bottle of water";
 ```
 ### Go
 ```
-shoppingList := []string{"catfish", "water",
-    "tulips", "blue paint"}
+shoppingList := []string{"catfish", "water", "tulips", "blue paint"}
 shoppingList[1] = "bottle of water"
 ```
 ### Kotlin
 ```
-val shoppingList = arrayOf("catfish", "water",
-    "tulips", "blue paint")
+val shoppingList = arrayOf("catfish", "water", "tulips", "blue paint")
 shoppingList[1] = "bottle of water"
 ```
 ### Swift
 ```
-var shoppingList = ["catfish", "water",
-    "tulips", "blue paint"]
+var shoppingList = ["catfish", "water", "tulips", "blue paint"]
 shoppingList[1] = "bottle of water"
 ```
 ### Python
 ```
-shoppingList = ["catfish", "water",
-    "tulips", "blue paint"]
+shoppingList = ["catfish", "water", "tulips", "blue paint"]
 shoppingList[1] = "bottle of water"
 ```
 ## Maps
 ### Lite
 ```
 occupations = {
-    "Malcolm":"Captain",
-    "Kaylee":"Mechanic"
+    "Malcolm"=>"Captain"
+    "Kaylee"=>"Mechanic"
 }
 occupations.("Jayne") = "Public Relations"
 ```
@@ -289,8 +283,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Lite
 ```
-emptyArray = []str{}
-emptyDictionary = []str:f32{}
+emptyArray = [str;]{}
+emptyDictionary = [str=>f32]{}
 ```
 ### C#
 ```
