@@ -426,14 +426,6 @@ For example we need a list of strings:
 List := [str;]{}     # empty #
 ```
 
-#### Array
-If we need to use a native array type, we can use `[:]type` to indicate it.
-It can also be created directly using `array_of(e1,e2,e3)`.
-
-E.g:
-```
-Array [:]int = array_of(1,2,3,4,5)
-```
 ### Access
 If we need to access one of the elements in the list, we can access it with `identifier.(index)`.
 
