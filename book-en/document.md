@@ -1070,7 +1070,7 @@ If you want to override the properties of the original structure, you can add th
 E.g:
 ```
 ChineseStudent := me $ {
-    Student    # Inherited student #
+    $ Student    # Inherited student #
     kungfu = false
 
     # override #
@@ -1118,7 +1118,7 @@ Parent := me ${
 }
 
 Child := me $ {
-    Parent
+    $ Parent
 } %(a int)(a) {
     ......
 }

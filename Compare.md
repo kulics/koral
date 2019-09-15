@@ -565,7 +565,7 @@ NamedShape := me $ {
 } 
 
 Square := me $ {
-    NamedShape
+    $ NamedShape
     sideLength num
 
     simpleDescription : (-> s str) {
