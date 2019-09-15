@@ -1056,7 +1056,7 @@ print( Chen.student.name )
 例如：
 ```
 ChineseStudent := me $ {
-    Student    # 继承 student #
+    $ Student    # 继承 student #
     kungfu = false
 
     # 重写 #
@@ -1104,7 +1104,7 @@ Parent := me ${
 }
 
 Child := me $ {
-    Parent
+    $ Parent
 } %(a int)(a) {
     ......
 }
