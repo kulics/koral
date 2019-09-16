@@ -880,11 +880,11 @@ Each_1_To_10( (item int ->) {
 
 显而易见，这个负责包装数据的功能，就是结构体。
 ## 定义
-我们可以使用 `id := $ {}` 语句来定义一个什么都没有的结构体。
+我们可以使用 `id := % {}` 语句来定义一个什么都没有的结构体。
 
 例如：
 ```
-Package := $ {
+Package := % {
 }
 ```
 当然，我们更希望的是能包装几个数据，例如一个具有名称、学号、班级、年级属性的学生。
@@ -892,7 +892,7 @@ Package := $ {
 
 例如：
 ```
-Student := $ {
+Student := % {
     name str = ""
     number str = ""
     class int = 0
@@ -978,7 +978,7 @@ Peter = {
 
 例如：
 ```
-Student := $ {
+Student := % {
     ......
     _girlFriend str # 第一个字符是 _ 的标识符是私有的 #
 }
@@ -991,7 +991,7 @@ Student := $ {
 
 例如：
 ```
-Student := me $ { # 声明me #
+Student := me % { # 声明me #
     ......
     getGirlFriend : (->name str) {
         <- me._girlFriend
@@ -1017,7 +1017,7 @@ print( Peter.getGirlFriend() )
 
 例如：
 ```
-ChineseStudent := $ {
+ChineseStudent := % {
     name str = ""
     number str = ""
     class int = 0
@@ -1031,7 +1031,7 @@ ChineseStudent := $ {
 
 例如：
 ```
-ChineseStudent := $ {
+ChineseStudent := % {
     student = Student{}   # 将学生属性包含其中 #
     kungfu = false        # 不会功夫 #
 }
@@ -1055,8 +1055,8 @@ print( Chen.student.name )
 
 例如：
 ```
-ChineseStudent := me $ {
-    $ Student    # 继承 student #
+ChineseStudent := me % {
+    % Student    # 继承 student #
     kungfu = false
 
     # 重写 #
@@ -1072,7 +1072,7 @@ ChineseStudent := me $ {
 
 例如：
 ```
-Student := me $ (name str, number str) {
+Student := me % (name str, number str) {
     me.name = name
     me.number = number
     # 计算得出班级 #
@@ -1097,14 +1097,14 @@ print(Peter.class)     # 打印出 2 #
 
 例如：
 ```
-Parent := me ${
+Parent := me % {
     ......
 } %(a int) {
     ......
 }
 
-Child := me $ {
-    $ Parent
+Child := me % {
+    % Parent
 } %(a int)(a) {
     ......
 }
@@ -1214,11 +1214,11 @@ Number : (_Number) int  # 等价于上面的封装 #
 
 我们的结构体可以像签署接口一样引入我们需要的接口，然后声明接口要求的所有属性，这样我们就认为这个结构体实现了接口。
 ## 定义
-我们只需要使用 `id := % {}` 语句就可以定义一个接口。
+我们只需要使用 `id := _% {}` 语句就可以定义一个接口。
 
 例如：
 ```
-Protocol := % {
+Protocol := _% {
 }
 ```
 这就是一个空的接口。
@@ -1227,7 +1227,7 @@ Protocol := % {
 
 例如：
 ```
-Homework := % {
+Homework := _% {
     count () int
     do (->)
 }
@@ -1246,7 +1246,7 @@ Homework := % {
 
 例如：
 ```
-Student := me $ {
+Student := me % {
     ......
     _count int
 } % Homework { # 显式实现 #
@@ -1574,7 +1574,7 @@ Arr.filter( {it ~> it > 5} )
 
 例如：
 ```
-List[T] := me $ {
+List[T] := me % {
     items = Storage{T}    # 创建存储 #
     length = 0
 
@@ -1609,7 +1609,7 @@ Z = empty[(->)]()
 
 例如：
 ```
-Package[T] := $ {
+Package[T] := % {
     item = empty[T]()    # 初始化了一个缺省值的泛型数据 #
 }
 ```
@@ -1635,11 +1635,11 @@ Func[T] : (data T -> data T) {
     <- data
 }
 
-Protocol[T] := % {
+Protocol[T] := _% {
     test[T] (in T ->) {}
 }
 
-Implement := me $ {
+Implement := me % {
     ......
 } % Protocol[Implement] {
     test[Implement] : (in Implement ->) {
@@ -1651,7 +1651,7 @@ Implement := me $ {
 
 例如：
 ```
-Package[T Student] := $ {
+Package[T Student] := % {
 }
 ```
 
@@ -1670,7 +1670,7 @@ Package[T Student] := $ {
 例如：
 ```
 (Table("test"))
-Annotation := $ {
+Annotation := % {
     (Key,Column("id"))
     id str
     (Column("name"))

@@ -464,7 +464,7 @@ increment(7)
 ## Classes Declaration
 ### Lite
 ```
-Shape := me $ {
+Shape := me % {
     numberOfSides = 0
     simpleDescription : (-> s str) {
         <- "A shape with " me.number of sides " sides."
@@ -556,7 +556,7 @@ shapeDescription = shape.simpleDescription()
 ## Subclass
 ### Lite
 ```
-NamedShape := me $ {
+NamedShape := me % {
     name str
     numberOfSides = 0
     simpleDescription : (-> s str) {
@@ -564,8 +564,8 @@ NamedShape := me $ {
     }
 } 
 
-Square := me $ {
-    $ NamedShape
+Square := me % {
+    % NamedShape
     sideLength num
 
     simpleDescription : (-> s str) {
@@ -949,7 +949,7 @@ for current in someObjects:
 ## Protocol
 ### Lite
 ```
-Nameable := % {
+Nameable := _% {
     name (-> s str)
 }
 
@@ -1002,8 +1002,7 @@ func f(x: Nameable) {
 ## Implement
 ### Lite
 ```
-Dog := $ {
-} % Nameable {
+Dog := % Nameable {
     name : (-> n str) {
         <- "Dog"
     }
