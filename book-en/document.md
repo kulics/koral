@@ -718,12 +718,15 @@ It should be noted that if you jump out of a multi-level nested loop, you will o
 If you only need to jump out of the current loop, use the `..@` statement.
 ## Default Condition
 If you want to execute some other logic when the loop is not executed, just use the `_` declaration.
+
+E.g:
+```
 @ 1 > 2 {
     ...
 } _ {
      # loop does not executed, so execute the logic here #
 }
-
+```
 # Function Type
 Function is a separate block of code used to accomplish a specific task.
 
