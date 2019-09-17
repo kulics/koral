@@ -41,9 +41,9 @@ main : (->) {
 }
 
 get_greetings : (first str -> result [str;]) {
-    <- first + {"你好", "Hola", "Bonjour",
-                "Ciao", "こんにちは", "안녕하세요",
-                "Cześć", "Olá", "Здравствуйте",
+    <- first + {"你好"; "Hola"; "Bonjour"
+                "Ciao"; "こんにちは"; "안녕하세요"
+                "Cześć"; "Olá"; "Здравствуйте"
                 "Chào bạn"}
 }
 ```
