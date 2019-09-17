@@ -1066,7 +1066,7 @@ Top-level combinations extract attributes from the structure to the exterior, ju
 E.g:
 ```
 ChineseStudent := % {
-    # Top-level combination#
+    # top-level combination #
     % Student
     kungfu = false
 }
