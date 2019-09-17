@@ -1056,31 +1056,34 @@ E.g:
 ```
 Chen = ChineseStudent{}
 print( Chen.student.name )
-# Of course, because there is no assignment, there is no output. #
 ```
 By combining layers of structure, you can freely assemble anything you want to describe.
 
-## Compatible with .NET
-The following are compatibility features, if not necessary, it is not recommended
+More recently, if we want to include all the attributes of a structure directly instead of a combination, we can use the top-level combination statement, declared as `% type`.
 
-### Inheritance
-If we want to define a new structure and fully inherit all the properties of a structure, we can use the inheritance syntax to declare properties without identifiers in the definition.
-If you want to override the properties of the original structure, you can add the parent identifier front the structure parameter of the structure function.
+Top-level combinations extract attributes from the structure to the exterior, just as they contain corresponding attributes directly. This is conducive to the use and transmission of attributes.
 
 E.g:
 ```
-ChineseStudent := me % {
-    % Student    # Inherited student #
-    kungfu = false
-
-    # override #
-    parent%getGirlFriend : (-> name str) {
-        <- parent._girlFriend
-    }
+ChineseStudent := % {
+    # Top-level combination#
+    % Student
+    kungfu = false
 }
 ```
+
+In this way, we can call student attributes directly.
+
+E.g:
+```
+Chen = ChineseStudent{}
+print( Chen.name )
+```
+
+This approach is similar to class inheritance in other languages.
+
 ### Construction
-Sometimes we might use the constructor in .NET.
+Sometimes we might use the constructor method of structure.
 
 We can use the special constructor statement `() {}`.
 
@@ -1226,7 +1229,7 @@ We often need to do this in the programming language. This function is the inter
 
 The interface specifies the methods and properties necessary to implement a particular function, allowing the structure to comply.
 
-Our structure can introduce the interface we need like a signed interface, and then declare all the attributes required by the interface, so we think that this structure implements the interface.
+Our structure can introduce the interface we need like a signed protocol, and then declare all the attributes required by the interface, so we think that this structure implements the interface.
 ## Definition
 We only need to define an interface using the `id := _% {}` statement.
 
