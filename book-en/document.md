@@ -333,9 +333,9 @@ print( A - B )    # - minus #
 print( A * B )    # * multiply #
 print( A / B )    # / divide #
 print( A \ B )    # \ residual, meaning the remainder remaining after the divisibility, the result here is 2 #
-print( A ** B )   # ** power #
-print( A // B )   # // root #
-print( A \\ B )   # \\ log #
+print( A *^ B )   # *^ power #
+print( A /^ B )   # /^ root #
+print( A \^ B )   # \^ log #
 ```
 In addition to numbers, there are other types that support arithmetic operations. For example, `str` can use an addition operation to combine two paragraphs of text.
 
