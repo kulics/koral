@@ -657,37 +657,34 @@ This can be thought of as a `foreach` structure relative to other languages.
 ## Iterator loop
 Sometimes, we don't necessarily have a collection, but we need to take the number from `0` to `100`. We have an iterator syntax to accomplish such a task.
 
-The iterator can take the number from the start point to the end point loop. We use the expression of the set, separated by two numbers using the `..<=` symbol.
+The iterator can take the number from the start point to the end point loop. We use the expression of the set, separated by two numbers using the `++` symbol.
 
 E.g:
 ```
-i @ 0 ..<= 100 {
+i @ 0 ++ 100 {
     print(i)  # print every number #
 }
 ```
-It should be noted that the meaning of `0 ..<= 100` is read from `0` to `100`, that is, a total of `101` times. The iterator will execute until the last number is executed, rather than ending one at a time.
-
-So if we need to execute a hundred times, you can use `0 ..< 99` or `1 ..<= 100-1` and remember this difference.
+It should be noted that the meaning of `0 ++ 100` is read from `0` to `100`, that is, a total of `101` times. The iterator will execute until the last number is executed, rather than ending one at a time.
 
 The iterator defaults to increment `1` every interval. If we need to take every other number, we can add a condition for each step. Just insert `:` and a number after the start and end points are completed.
 
 E.g:
 ```
-i @ 0 ..<= 100 : 2 {
+i @ 0 ++ 100 : 2 {
     ......
 }
 ```
 So every time the interval is not `1` but `2`, we can set other numbers.
 
-We can also let it traverse in reverse order, just use `..>=`.
+We can also let it traverse in reverse order, just use `--`.
 
 E.g:
 ```
-i @ 100 ..>= 0 {
+i @ 100 -- 0 {
     ......  # From 100 to 0 #
 }
 ```
-Similarly, if you don't want to reach the last bit, you can use `100 > 0`.
 
 This can be thought of as a `for` structure relative to other languages.
 
@@ -839,7 +836,7 @@ There is no special way to define function arguments, just replace the argument 
 E.g:
 ```
 Each_1_To_10 : (func (int->) ->) {
-     i @ 1..<=10 {
+     i @ 1 ++ 10 {
          func(i)
      }
 }
