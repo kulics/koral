@@ -52,13 +52,13 @@ get_greetings : (first str -> result []str) {
 1. 2017.07 ~ 2018.03 
     1. Design syntax.
     1. Completed translator to C# compiler.
-1. 2018.03 ~ 2019.06
+1. 2018.03 ~ 2019.09
     1. Complete the implementation of bootstrap.
     1. Add standard library.
     1. Improve grammar to achieve grammatical stability.
-1. 2019.06 ~ 2021.06
+1. 2019.09 ~ 2021.06
     1. Rewrite all Xylaga projects using Lite.
-    1. Compile to more languages, including Go/TypeScript/LLVM.
+    1. Compile to more languages, including Go/Kotlin/JavaScript/LLVM.
     1. Improved compilation capabilities and support for language server protocols.
 
 ## Compare
