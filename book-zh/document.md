@@ -413,11 +413,11 @@ list = { 1;2;3;4;5 }
 
 如果你需要一个明确类型的列表，可以使用构造函数来创建。
 
-列表类型的表示方法是 `[type;]`。
+列表类型的表示方法是 `[]type`。
 
 例如我们需要一个字符串列表：
 ```
-List = [str;]{}         # 空 #
+List = []str{}         # 空 #
 ```
 ### 访问
 如果我们需要访问列表中的其中一个元素，我们可以用 `标识符.(索引)` 来访问。
@@ -459,11 +459,11 @@ Dictionary = {"a"=>1; "b"=>2; "c"=>3}
 
 如果你需要一个明确类型的字典，同样可以使用构造函数来创建。
 
-字典类型的表示方法是 `[type=>type]`。
+字典类型的表示方法是 `[]type=>type`。
 
 例如：
 ```
-DictionaryNumNum = [int=>int]{} # 空 #
+DictionaryNumNum = []int=>int{} # 空 #
 ```
 ### 访问
 和列表类似，我们也可以使用索引直接访问数据。
@@ -485,33 +485,6 @@ Dictionary.("b") = 5
 Dictionary += {"d"=>11}         # 添加元素 #
 Dictionary -= "c"               # 删除指定索引元素 #
 Length = Dictionary.len        # 长度 #
-```
-## 集合
-集合用来存储相同类型、没有确定顺序、且不重复的值。 
-也就是说当元素顺序不重要时，或者希望确保每个元素只出现一次时，可以使用集合而不是列表。
-### 定义
-和列表类似，集合也使用 `{}` 定义，形式是 `value=>`。
-
-例如：
-```
-Set = {"a"=>; "b"=>; "c"=>}
-```
-这样便会创建一个包含 `a,b,c` 三个条目 的 `str` 类型集合。
-
-如果你需要一个明确类型的集合，同样可以使用构造函数来创建。
-
-集合类型的表示方法是 `[type=>]`。
-
-例如：
-```
-Numbers = [int=>]{} # 空 #
-```
-### 常用操作
-```
-Numbers.add(1)                  # 添加元素 #
-Has =  Numbers.contains(1)     # 判断是否包含 #
-Success = Numbers.remove(1)     # 删除元素 #
-Length = Numbers.len           # 长度 #
 ```
 
 # 判断
@@ -951,8 +924,8 @@ Peter = Student{
 
 例如：
 ```
-Array = [int;]{ 1; 2; 3; 4; 5 }
-Dictionary = [str=>int]{ "1"=>1; "2"=>2; "3"=>3 }
+Array = []int{ 1; 2; 3; 4; 5 }
+Dictionary = []str=>int{ "1"=>1; "2"=>2; "3"=>3 }
 ```
 ## 匿名结构体
 如果我们只想直接包裹某些数据使用，而不是先定义结构体再使用，像匿名函数那样可以吗？
@@ -1317,7 +1290,7 @@ DoHomework(StudentC)
 
 例如：
 ```
-Arr = [Homework;]{}
+Arr = []Homework{}
 Arr.add( StudentA )
 ...... # 塞进很多很多学生 #
 i @ Arr {
@@ -1626,7 +1599,7 @@ ListNumber = List[int]{}      # 传入 integer 类型 #
 ```
 这样我们便拥有了一个整数类型的列表，是不是很像这个：
 ```
-ListNumber = [int;]{}
+ListNumber = []int{}
 ```
 没错，其实我们的列表和字典语法都是语法糖。
 ## 支持的类型
@@ -1711,7 +1684,7 @@ Annotation := % {
 Linq : (->) {
     Numbers = { 0; 1; 2; 3; 4; 5; 6 }
     Linq = from num -> in Numbers ->
-            where (num % 2) == 0 ->
+            where (num \ 2) == 0 ->
             orderby num -> descending ->
             select num
 }

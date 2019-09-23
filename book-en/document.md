@@ -419,11 +419,11 @@ This will create a list of `int` types containing `1` to `5`.
 
 If you need a list of explicit types, you can use the constructor to create them.
 
-The representation of the list type is `[type;]`.
+The representation of the list type is `[]type`.
 
 For example we need a list of strings:
 ```
-List := [str;]{}     # empty #
+List := []str{}     # empty #
 ```
 
 ### Access
@@ -467,11 +467,11 @@ This will create a `str=>int` type dictionary containing three entries for `a,b,
 
 If you need an explicit type of dictionary, you can also use the constructor to create it.
 
-The representation of the dictionary type is `[type=>type]`.
+The representation of the dictionary type is `[]type=>type`.
 
 E.g:
 ```
-DictionaryNumNum = [int=>int]{}  # empty #
+DictionaryNumNum = []int=>int{}  # empty #
 ```
 ### Access
 Similar to the list, we can also use the index to access the data directly.
@@ -493,34 +493,6 @@ Different from the list, if the index is an index that does not exist, it will n
 Dictionary += {"d"=>11}     # Add Element #
 Dictionary -= "c"           # Delete the specified index element #
 Length = Dictionary.len    # Length #
-```
-
-## Set
-The Set is used to store values of the same type, without a determined order, and without repeating.
-That is to say, when the order of the elements is not important, or if you want to ensure that each element only appears once, you can use the set instead of the list.
-### Definition
-Similar to lists, set are also defined using `{}` in the form `value=>`.
-
-E.g:
-```
-Set = {"a"=>; "b"=>; "c"=>}
-```
-This will create a set of `str` types containing three entries: `a,b,c`.
-
-If you need a set of explicit types, you can also create them using the constructor.
-
-The representation of the set type is `[type=>]`.
-
-E.g:
-```
-Numbers = [int=>]{}      # empty #
-```
-### Common Operations
-```
-Numbers.add(1)              # Add Element #
-Has = Numbers.contains(1)  # Determine whether to include #
-Success = Numbers.remove(1) # Delete element #
-Length = Numbers.len       # Length #
 ```
 
 # Judgment
@@ -965,8 +937,8 @@ Similarly, the way a collection is build is actually a build syntax, so we can a
 
 E.g:
 ```
-Array = [int;]{ 1; 2; 3; 4; 5 }
-Dictionary = [str=>int]{ "1"=>1; "2"=>2; "3"=>3 }
+Array = []int{ 1; 2; 3; 4; 5 }
+Dictionary = []str=>int{ "1"=>1; "2"=>2; "3"=>3 }
 ```
 ## Anonymous Structure
 If we only want to wrap some data directly, instead of defining the structure and then using it, can it be like an anonymous function?
@@ -1332,7 +1304,7 @@ Of course, it's better to put these students in an array so that we can use loop
 
 E.g:
 ```
-Arr = [Homework;]{}
+Arr = []Homework{}
 Arr.add( StudentA )
 ......  # Insert many many students #
 i @ Arr {
@@ -1641,7 +1613,7 @@ ListNumber = List[int]{}   # Pass in integer type #
 ```
 So we have a list of integer types, is it like this:
 ```
-ListNumber = [int;]{}
+ListNumber = []int{}
 ```
 That's right, in fact, our list and dictionary syntax are syntactic sugar.
 ## Supported types
@@ -1726,7 +1698,7 @@ E.g:
 Linq : (->) {
      Numbers = { 0; 1; 2; 3; 4; 5; 6 }
      Linq = from num -> in Numbers ->
-             Where (num % 2) == 0 ->
+             Where (num \ 2) == 0 ->
              Orderby num -> descending ->
              Select num
 }
