@@ -1697,7 +1697,7 @@ E.g:
 ```
 Linq : (->) {
      Numbers = { 0; 1; 2; 3; 4; 5; 6 }
-     Linq = from num -> in Numbers ->
+     Linq = num @ Numbers ->
              Where (num \ 2) == 0 ->
              Orderby num -> descending ->
              Select num
