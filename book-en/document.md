@@ -22,7 +22,6 @@ By removing keywords, reducing grammatical features, and unifying expression spe
 1. [Function Type](#Function-Type)
 1. [Structure Type](#Structure-Type)
 1. [Namespace](#Namespace)
-1. [Control Type](#Control-Type)
 1. [Interface Type](#Interface-Type)
 1. [Enumeration Type](#Enumeration-Type)
 1. [Check](#Check)
@@ -1128,73 +1127,6 @@ Main : (->) {
 }
 ```
 
-# Control Type
-The control type is a block of code that encapsulates a data operation.
-
-Often we will encapsulate some of the data control processing into a control type so that there is no need to perform additional methods when using the data.
-
-## Get Operation
-If we want to set a get operation, we can use the `() type{ctrl}` definition.
-
-E.g:
-```
-Number : () int {
-    get {           # means get, equivalent to getter in other languages ​​#
-        <- 7        # Only return 7 #
-    }
-}
-```
-Thus Number has a special get value method that will execute the internal logic when calling Number.
-
-It should be noted that this control data has only one get method, then it only supports the get operation, and the caller cannot assign it a value.
-## Set Operation
-With the above examples, we can naturally think of how to set the operation changes. Just add another parameter identifier.
-
-E.g:
-```
-Number : () int {
-    set(value) {     # Indicates the setting, which is equivalent to the setter in other languages ​​#
-        # ? ? ? Who should I give the value to? ? ? #
-    }
-}
-```
-Yes, there is a problem here. The type of control is used to control the operation. When the operation is implemented, it cannot use itself to store data.
-So we need to use another collocation data to use the control type.
-
-E.g:
-```
-_Number = 0
-
-Number : () int {
-    set(value) {
-        _Number = value     # value represents the value entered #
-    }
-}
-```
-
-A complete example of reading and writing is as follows:
-```
-_Number = 0
-Number : () int {
-    get {
-        <- _Number
-    }
-    set(v) {
-        _Number = v
-    }
-}
-```
-
-Is this too much trouble?
-
-Yes, we have an easier way to directly indicate a reference data, and the control type will automatically declare all control operations.
-
-E.g:
-```
-_Number = 0
-Number : (_Number) int # is equivalent to the above package #
-```
-
 # Interface Type
 In reality, we often use protocols to specify specific rules, and people or things can do things according to the expected rules.
 We often need to do this in the programming language. This function is the interface.
@@ -1217,15 +1149,13 @@ Next, let's design a difficult task that students need to accomplish... homework
 E.g:
 ```
 Homework := _% {
-    count () int
+    count int
     do (->)
 }
 ```
 This is a job interface that has two properties, one is the number of jobs that need to be done, and the other is a function that completes the job.
 
 The way it is defined is exactly the same as the way the structure defines properties in the body.
-
-Different from the structure, the attribute does not need specific numeric or function content when the interface is defined, only the type needs to be determined.
 
 Next, we will let the students implement this interface.
 
@@ -1238,9 +1168,8 @@ E.g:
 ```
 Student := me % {
      ......
-     _count int
 } % Homework { # Explicit implementation #
-    count : (me._count) int
+    count = 999999
 
     do : (->) {
         SpendTime(1)       # took an hour #
@@ -1626,7 +1555,7 @@ Func[T] : (data T -> data T) {
 }
 
 Protocol[T] := _% {
-    test[T] (in T ->) {}
+    test[T] (in T ->)
 }
 
 Implement := me % {
