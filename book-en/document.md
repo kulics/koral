@@ -1672,11 +1672,11 @@ Arr?.to_str()
 ```
 
 ## Merge operation
-If you want to use another default value when the value of the optional type is null, you can use the `id.or_else(value)` function.
+If you want to use another default value when the value of the optional type is null, you can use the `id?_(value)`.
 
 E.g:
 ```
-B = A.or_else(128)
+B = A?_(128)
 ```
 
 ## Reference operation
