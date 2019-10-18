@@ -1314,13 +1314,13 @@ There may be a variety of exceptions in the program.
 Exceptions cannot be completely avoided, but we can choose some means to help us check and report exceptions.
 
 ## Reporting an exception
-We can use `throw()` function to declare an exception data anywhere in the function.
+We can use `! <- expression` to declare an exception data anywhere in the function.
 
 E.g:
 ```
 ReadFile : (name str ->) {
     ? name.len == 0 {
-        throw( Exception("something wrong") )
+        ! <- Exception("something wrong")
     }
     ......
 }
@@ -1335,7 +1335,7 @@ E.g:
 ! {
     f = ReadFile("temp.txt")
 } ex IOException {
-    throw(ex)
+    ! <- ex
 } e {
     print(e.message)
 }
@@ -1353,7 +1353,7 @@ E.g:
 } ex {
     # Can be manually aborted #
     # <- #
-    throw(ex)
+    ! <- ex
 }
 ```
 
