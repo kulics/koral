@@ -1300,13 +1300,13 @@ Number := u8?{
 异常无法完全避免，但是我们可以选择一些手段帮助我们检查和报告异常。
 
 ## 报告异常
-我们可以在函数中的任何地方，使用 `throw()` 函数来声明一个异常数据。
+我们可以在函数中的任何地方，使用 `! <- expression` 来声明一个异常数据。
 
 例如：
 ```
 ReadFile : (name str ->) {
     ? name.len == 0 {
-        throw( Exception("something wrong") )
+        ! <- Exception("something wrong")
     }
     ......
 }
@@ -1321,7 +1321,7 @@ ReadFile : (name str ->) {
 ! {
     f = ReadFile("temp.txt")
 } ex IOException {
-    throw(ex)
+    ! <- ex
 } e {
     print(e.message)
 }
@@ -1339,7 +1339,7 @@ ReadFile : (name str ->) {
 } ex {
     # 可以手动中止 #
     # <- #
-    throw(ex)
+    ! <- ex
 }
 ```
 
