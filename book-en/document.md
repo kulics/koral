@@ -1314,7 +1314,7 @@ There may be a variety of exceptions in the program.
 Exceptions cannot be completely avoided, but we can choose some means to help us check and report exceptions.
 
 ## Reporting an exception
-We can use `! <- expression` to declare an exception data anywhere in the function.
+We can use `! <- value` to declare an exception data anywhere in the function.
 
 E.g:
 ```
@@ -1672,11 +1672,11 @@ Arr?.to_str()
 ```
 
 ## Merge operation
-If you want to use another default value when the value of the optional type is null, you can use the `id?_(value)`.
+If you want to use another default value when the value of the optional type is null, you can use the `id ?! value`.
 
 E.g:
 ```
-B = A?_(128)
+B = A ?! 128
 ```
 
 ## Reference operation
