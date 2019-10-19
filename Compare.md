@@ -949,7 +949,7 @@ for current in someObjects:
 ## Protocol
 ### Lite
 ```
-Nameable := _% {
+Nameable := % _ {
     name (-> s str)
 }
 
