@@ -1135,11 +1135,11 @@ The interface specifies the methods and properties necessary to implement a part
 
 Our structure can introduce the interface we need like a signed protocol, and then declare all the attributes required by the interface, so we think that this structure implements the interface.
 ## Definition
-We only need to define an interface using the `id := _% {}` statement.
+We only need to define an interface using the `id := %_ {}` statement.
 
 E.g:
 ```
-Protocol := _% {
+Protocol := %_ {
 }
 ```
 This is an empty interface.
@@ -1148,7 +1148,7 @@ Next, let's design a difficult task that students need to accomplish... homework
 
 E.g:
 ```
-Homework := _% {
+Homework := %_ {
     count int
     do (->)
 }
@@ -1264,11 +1264,11 @@ Func : (hw Homework ->) {
 # Enumeration Type
 The enumeration is a set of integer constants with independent names. It can usually be used to mark the type of some business data, which is convenient for judgment processing.
 ## Definition
-We only need to use the `id -> type?{id id id id}` statement.
+We only need to use the `id -> %? {}` statement.
 
 E.g:
 ```
-Color -> u8?{
+Color -> %? {
      Red
      Green
      Blue
@@ -1296,7 +1296,7 @@ We can also assign a single identifier if needed, and unspecified will continue 
 
 E.g:
 ```
-Number := u8?{
+Number := %? {
      A = 1  # 1 #
      B      # 2 #
      C = 1  # 1 #
@@ -1554,7 +1554,7 @@ Func[T] : (data T -> data T) {
     <- data
 }
 
-Protocol[T] := _% {
+Protocol[T] := %_ {
     test[T] (in T ->)
 }
 
