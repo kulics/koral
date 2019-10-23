@@ -39,10 +39,10 @@ Lite 是一个专注于工程化的开源跨平台编程语言。
 `Lite` 需要使用部分语言库的功能，所以请自行引用编译器对应的库。
 
 下载:
-- C# <https://github.com/kulics/lite-csharp/releases>
-- Go <https://github.com/kulics/lite-go/releases>
-- JavaScript <https://github.com/kulics/lite-typescript/releases>
-- Kotlin <https://github.com/kulics/lite-kotlin/releases>
+- C# <https://github.com/lite-works/lite-csharp/releases>
+- Go <https://github.com/lite-works/lite-go/releases>
+- JavaScript <https://github.com/lite-works/lite-javascript/releases>
+- Kotlin <https://github.com/lite-works/lite-kotlin/releases>
 
 # 基础语法
 ## 基本语句

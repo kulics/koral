@@ -16,7 +16,7 @@ This is the main source code repository for Lite. It contains the compiler, and 
 ## Features
 - Well designed grammar, easy to write and read.
 - The rules are clear and uniform, in line with intuition.
-- Currently supports output to C#/Go/TypeScript/Kotlin, and with their resources, we can already use this language in a very wide range of scenarios.
+- Currently supports output to C#/Go/JavaScript/Kotlin, and with their resources, we can already use this language in a very wide range of scenarios.
 - Output to LLVM will be supported in the future to support a more comprehensive scenario.
 
 ## Getting Started
@@ -65,10 +65,10 @@ get_greetings : (first str -> result [;str]) {
 Compare with C#, Go, Kotlin, Swift, Python.
 Read detail from [Here](./Compare.md).  
 ## Source Code
-[C#](https://github.com/kulics/lite-csharp)
+[C#](https://github.com/lite-works/lite-csharp)
 
-[Go](https://github.com/kulics/lite-go)
+[Go](https://github.com/lite-works/lite-go)
 
-[TypeScript](https://github.com/kulics/lite-typescript)
+[JavaScript](https://github.com/lite-works/lite-javascript)
 
-[Kotlin](https://github.com/kulics/lite-kotlin)
+[Kotlin](https://github.com/lite-works/lite-kotlin)
