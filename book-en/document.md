@@ -39,10 +39,10 @@ The execution compiler will scan the `.lite` file of the current folder and auto
 `Lite` needs to use the function of some language libraries, so please refer to the library corresponding to the compiler.
 
 download:
-- C# <https://github.com/kulics/lite-csharp/releases>
-- Go <https://github.com/kulics/lite-go/releases>
-- JavaScript <https://github.com/kulics/lite-typescript/releases>
-- Kotlin <https://github.com/kulics/lite-kotlin/releases>
+- C# <https://github.com/lite-works/lite-csharp/releases>
+- Go <https://github.com/lite-works/lite-go/releases>
+- JavaScript <https://github.com/lite-works/lite-javascript/releases>
+- Kotlin <https://github.com/lite-works/lite-kotlin/releases>
 
 # Basic Grammar
 ## basic statement
