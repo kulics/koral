@@ -1412,13 +1412,13 @@ Here we talk about how to handle threading problems more simply, that is, asynch
 In other languages, it can be considered as the `async/await` of the asynchronous programming final solution.
 
 ## Asynchronous declaration
-So how do you declare a function to be asynchronous? Use `~>` to do it.
+So how do you declare a function to be asynchronous? Use `->>` to do it.
 
-That's right, just use `~>`.
+That's right, just use `->>`.
 
 E.g:
 ```
-Async : (~> out int) {
+Async : (->> out int) {
     <- 12
 }
 ```
@@ -1432,11 +1432,11 @@ Result = Async() # result is a Task data #
 ```
 Next we will look at how to make it asynchronously awaiting execution.
 ## Asynchronous waiting
-As with declarations, we only need to declare an asynchronous method using `<~ function()`.
+As with declarations, we only need to declare an asynchronous method using `<< function()`.
 
 E.g:
 ```
-Result = <~ Async()
+Result = << Async()
 ......
 ```
 After the asynchronous wait is declared, the program will temporarily stop the following functions until the `Async` function is executed, and the value of `out` is assigned to `Result`, and then continue.
@@ -1446,13 +1446,13 @@ Asynchronous waits can only be used in functions declared asynchronously.
 E.g:
 ```
 # Yes #
-Async : (~> out int) {
-    <~ delay(5000)  # Wait for a while #
+Async : (->> out int) {
+    << delay(5000)  # Wait for a while #
     <- 12
 }
 # No #
 Async : (-> out int) {
-    <~ delay(5000)  # Cannot be declared #
+    << delay(5000)  # Cannot be declared #
     <- 12
 }
 ```
@@ -1463,20 +1463,20 @@ We can choose to wait for no data, or we can choose not to wait for data.
 
 E.g:
 ```
-Async : (~>) {
-    <~ delay(5000)      # Wait for a while #
+Async : (->>) {
+    << delay(5000)      # Wait for a while #
 }
 
-<~ Async()              # correct #
+<< Async()              # correct #
 
 Task = Async()         # Correct, got Task #
 ```
 ## Lambda
-For lambda, we can also use asynchronous, just use `~>`.
+For lambda, we can also use asynchronous, just use `->>`.
 
 E.g:
 ```
-Arr.filter( {it ~> it > 5} )
+Arr.filter( {it ->> it > 5} )
 ```
 
 # Generics
