@@ -464,10 +464,10 @@ increment(7)
 ## Classes Declaration
 ### Lite
 ```
-Shape := me % {
+Shape := % {
     numberOfSides = 0
     simpleDescription : (-> s str) {
-        <- "A shape with " me.number of sides " sides."
+        <- "A shape with " numberOfSides " sides."
     }
 }
 ```
@@ -556,11 +556,11 @@ shapeDescription = shape.simpleDescription()
 ## Subclass
 ### Lite
 ```
-NamedShape := me % {
+NamedShape := % {
     name str
     numberOfSides = 0
     simpleDescription : (-> s str) {
-        <- "A shape with " me.numberOfSides " sides."
+        <- "A shape with " numberOfSides " sides."
     }
 } 
 
@@ -569,11 +569,11 @@ Square := me % {
     sideLength num
 
     simpleDescription : (-> s str) {
-        <- "A square with sides of length " me.sideLength "."
+        <- "A square with sides of length " sideLength "."
     }
 
     area : (-> f num) {
-        <- me.sideLength ** 2
+        <- sideLength ** 2
     }
 } % (sideLength num, name str) {
     me.sideLength = sideLength

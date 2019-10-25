@@ -638,11 +638,11 @@ i @ 0 ++ 100 {
 ```
 It should be noted that the meaning of `0 ++ 100` is read from `0` to `100`, that is, a total of `101` times. The iterator will execute until the last number is executed, rather than ending one at a time.
 
-The iterator defaults to increment `1` every interval. If we need to take every other number, we can add a condition for each step. Just insert `:` and a number after the start and end points are completed.
+The iterator defaults to increment `1` every interval. If we need to take every other number, we can add a condition for each step. Just insert `^` and a number after the start and end points are completed.
 
 E.g:
 ```
-i @ 0 ++ 100 : 2 {
+i @ 0 ++ 100 ^ 2 {
     ......
 }
 ```
@@ -672,18 +672,18 @@ I = 0
 ```
 This can be thought of as a `while` structure relative to other languages.
 ## Jump out
-So how do you jump out of the loop? We can use the `@..` statement to jump out.
+So how do you jump out of the loop? We can use the `~@` statement to jump out.
 
 E.g:
 ```
 @ true {
-    @..    # Jumped out without executing anything #
+    ~@    # Jumped out without executing anything #
 }
 ```
 
 It should be noted that if you jump out of a multi-level nested loop, you will only jump out of the loop that is closest to you.
 ## Continue
-If you only need to jump out of the current loop, use the `..@` statement.
+If you only need to jump out of the current loop, use the `^@` statement.
 ## Default Condition
 If you want to execute some other logic when the loop is not executed, just use the `_` declaration.
 
