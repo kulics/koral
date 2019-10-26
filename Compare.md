@@ -283,7 +283,7 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Lite
 ```
-emptyArray = [;str]{}
+emptyArray = [..str]{}
 emptyDictionary = [str=>f32]{}
 ```
 ### C#

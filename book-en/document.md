@@ -418,11 +418,11 @@ This will create a list of `int` types containing `1` to `5`.
 
 If you need a list of explicit types, you can use the constructor to create them.
 
-The representation of the list type is `[;type]`.
+The representation of the list type is `[..type]`.
 
 For example we need a list of strings:
 ```
-List := [;str]{}     # empty #
+List := [..str]{}     # empty #
 ```
 
 ### Access
@@ -936,7 +936,7 @@ Similarly, the way a collection is build is actually a build syntax, so we can a
 
 E.g:
 ```
-Array = [;int]{ 1; 2; 3; 4; 5 }
+Array = [..int]{ 1; 2; 3; 4; 5 }
 Dictionary = [str=>int]{ "1"=>1; "2"=>2; "3"=>3 }
 ```
 ## Anonymous Structure
@@ -1233,7 +1233,7 @@ Of course, it's better to put these students in an array so that we can use loop
 
 E.g:
 ```
-Arr = [;Homework]{}
+Arr = [..Homework]{}
 Arr.add( StudentA )
 ......  # Insert many many students #
 i @ Arr {
@@ -1542,7 +1542,7 @@ ListNumber = List[int]{}   # Pass in integer type #
 ```
 So we have a list of integer types, is it like this:
 ```
-ListNumber = [;int]{}
+ListNumber = [..int]{}
 ```
 That's right, in fact, our list and dictionary syntax are syntactic sugar.
 ## Supported types
