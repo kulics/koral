@@ -422,7 +422,7 @@ The representation of the list type is `[..type]`.
 
 For example we need a list of strings:
 ```
-List := [..str]{}     # empty #
+List : [..str]{}     # empty #
 ```
 
 ### Access
@@ -864,11 +864,11 @@ So we need a feature that wraps data from different attributes to better describ
 
 Obviously, the function responsible for packaging data is the structure.
 ## Definition
-We can use the `id := % {}` statement to define a structure that has nothing.
+We can use the `id : % {}` statement to define a structure that has nothing.
 
 E.g:
 ```
-Package := % {
+Package : % {
 }
 ```
 Of course, we prefer to pack a few data, such as a student with a name, student number, class, and grade attribute.
@@ -876,7 +876,7 @@ We can define this data in the structure of the body just like we would define a
 
 E.g:
 ```
-Student := % {
+Student : % {
     name str = ""
     number str = ""
     class int = 0
@@ -963,7 +963,7 @@ We can define private properties to store properties that we don't want to be ac
 
 E.g:
 ```
-Student := % {
+Student : % {
     ......
     _girlFriend str    # The first character is the identifier of _ is private #
 }
@@ -976,7 +976,7 @@ The private property of this structure can not be accessed, and can not be modif
 
 E.g:
 ```
-Student := me % { # declare me #
+Student : % -> me { # declare me #
     ......
     getGirlFriend : (-> name str) {
         <- me._girlFriend
@@ -1002,7 +1002,7 @@ Now let us use our imagination. How do we define a structure that is specificall
 
 E.g:
 ```
-ChineseStudent := % {
+ChineseStudent : % {
     name str = ""
     number str = ""
     class int = 0
@@ -1016,7 +1016,7 @@ We need to combine this feature, but it's not that complicated, just create a st
 
 E.g:
 ```
-ChineseStudent := % {
+ChineseStudent : % {
     student = Student{}    # include the student attribute in it #
     kungfu = false         # not learn kungfu #
 }
@@ -1036,7 +1036,7 @@ Top-level combinations extract attributes from the structure to the exterior, ju
 
 E.g:
 ```
-ChineseStudent := % {
+ChineseStudent : % {
     # top-level combination #
     % Student
     kungfu = false
@@ -1060,7 +1060,7 @@ We can use the special constructor statement `() {}`.
 
 E.g:
 ```
-Student := me % (name str, number str) {
+Student : % (name str, number str) -> me {
     me.name = name
     me.number = number
     # Calculate the class #
@@ -1085,13 +1085,13 @@ If you need to use a constructor with inheritance, you can append `(params)` to 
 
 E.g:
 ```
-Parent := me % {
+Parent : % {
     ......
 } %(a int) {
     ......
 }
 
-Child := me % {
+Child : % {
     % Parent
 } %(a int)(a) {
     ......
@@ -1135,11 +1135,11 @@ The interface specifies the methods and properties necessary to implement a part
 
 Our structure can introduce the interface we need like a signed protocol, and then declare all the attributes required by the interface, so we think that this structure implements the interface.
 ## Definition
-We only need to define an interface using the `id := %_ {}` statement.
+We only need to define an interface using the `id : %_ {}` statement.
 
 E.g:
 ```
-Protocol := %_ {
+Protocol : %_ {
 }
 ```
 This is an empty interface.
@@ -1148,7 +1148,7 @@ Next, let's design a difficult task that students need to accomplish... homework
 
 E.g:
 ```
-Homework := %_ {
+Homework : %_ {
     count int
     do (->)
 }
@@ -1166,9 +1166,9 @@ For interfaces that need to be explicitly implemented, you can specify the inter
 
 E.g:
 ```
-Student := me % {
+Student : % {
      ......
-} % Homework { # Explicit implementation #
+} % Homework -> me { # Explicit implementation #
     count = 999999
 
     do : (->) {
@@ -1296,7 +1296,7 @@ We can also assign a single identifier if needed, and unspecified will continue 
 
 E.g:
 ```
-Number := %? {
+Number : %? {
      A = 1  # 1 #
      B      # 2 #
      C = 1  # 1 #
@@ -1493,7 +1493,7 @@ This is a simplified implementation.
 
 E.g:
 ```
-List[T] := me % {
+List[T] : % {
     Items = Storage{T}     # Create Storage #
     Length = 0
 
@@ -1528,7 +1528,7 @@ This way we can use it in generics.
 
 E.g:
 ```
-Package[T] := % {
+Package[T] : % {
     Item = empty[T]()    # Initializes a default value of generic data #
 }
 ```
@@ -1554,13 +1554,11 @@ Func[T] : (data T -> data T) {
     <- data
 }
 
-Protocol[T] := %_ {
+Protocol[T] : %_ {
     test[T] (in T ->)
 }
 
-Implement := me % {
-    ......
-} % Protocol[Implement] {
+Implement : % Protocol[Implement] {
     test[Implement] : (in Implement ->) {
     }
 }
@@ -1570,7 +1568,7 @@ If we need to constrain the type of generics, we only need to use the `T id` syn
 
 E.g:
 ```
-Package[T Student] := % {
+Package[T Student] : % {
 }
 ```
 
@@ -1589,7 +1587,7 @@ Let's take a look at the database data as a reference to see how to use annotati
 E.g:
 ```
 (Table("test"))
-Annotation := % {
+Annotation : % {
     (Key,Column("id"))
     id str
     (Column("name"))
@@ -1639,8 +1637,8 @@ If a type is defined but not assigned, it will not be used.
 
 E.g:
 ```
-A: int
-B := A      # error, no assignment to A #
+A int
+B = A      # error, no assignment to A #
 ```
 
 ## Declaration and use

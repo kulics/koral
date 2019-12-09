@@ -852,11 +852,11 @@ Each_1_To_10( (item int ->) {
 
 显而易见，这个负责包装数据的功能，就是结构体。
 ## 定义
-我们可以使用 `id := % {}` 语句来定义一个什么都没有的结构体。
+我们可以使用 `id : % {}` 语句来定义一个什么都没有的结构体。
 
 例如：
 ```
-Package := % {
+Package : % {
 }
 ```
 当然，我们更希望的是能包装几个数据，例如一个具有名称、学号、班级、年级属性的学生。
@@ -864,7 +864,7 @@ Package := % {
 
 例如：
 ```
-Student := % {
+Student : % {
     name str = ""
     number str = ""
     class int = 0
@@ -950,7 +950,7 @@ Peter = {
 
 例如：
 ```
-Student := % {
+Student : % {
     ......
     _girlFriend str # 第一个字符是 _ 的标识符是私有的 #
 }
@@ -963,7 +963,7 @@ Student := % {
 
 例如：
 ```
-Student := me % { # 声明me #
+Student : % -> me { # 声明me #
     ......
     getGirlFriend : (->name str) {
         <- me._girlFriend
@@ -989,7 +989,7 @@ print( Peter.getGirlFriend() )
 
 例如：
 ```
-ChineseStudent := % {
+ChineseStudent : % {
     name str = ""
     number str = ""
     class int = 0
@@ -1003,7 +1003,7 @@ ChineseStudent := % {
 
 例如：
 ```
-ChineseStudent := % {
+ChineseStudent : % {
     student = Student{}   # 将学生属性包含其中 #
     kungfu = false        # 不会功夫 #
 }
@@ -1023,7 +1023,7 @@ print( Chen.student.name )
 
 例如：
 ```
-ChineseStudent := % {
+ChineseStudent : % {
     # 顶层组合 #
     % Student
     kungfu = false
@@ -1047,7 +1047,7 @@ print( Chen.name )
 
 例如：
 ```
-Student := me % (name str, number str) {
+Student : % (name str, number str) -> me {
     me.name = name
     me.number = number
     # 计算得出班级 #
@@ -1072,13 +1072,13 @@ print(Peter.class)     # 打印出 2 #
 
 例如：
 ```
-Parent := me % {
+Parent : % {
     ......
 } %(a int) {
     ......
 }
 
-Child := me % {
+Child : % {
     % Parent
 } %(a int)(a) {
     ......
@@ -1122,11 +1122,11 @@ Main : (->) {
 
 我们的结构体可以像签署协议一样引入我们需要的接口，然后声明接口要求的所有属性，这样我们就认为这个结构体实现了接口。
 ## 定义
-我们只需要使用 `id := %_ {}` 语句就可以定义一个接口。
+我们只需要使用 `id : %_ {}` 语句就可以定义一个接口。
 
 例如：
 ```
-Protocol := %_ {
+Protocol : %_ {
 }
 ```
 这就是一个空的接口。
@@ -1135,7 +1135,7 @@ Protocol := %_ {
 
 例如：
 ```
-Homework := %_ {
+Homework : %_ {
     count int
     do (->)
 }
@@ -1152,9 +1152,9 @@ Homework := %_ {
 
 例如：
 ```
-Student := me % {
+Student : % {
     ......
-} % Homework { # 显式实现 #
+} % Homework -> me { # 显式实现 #
     count = 999999
 
     do : (->) {
@@ -1250,11 +1250,11 @@ Func : (hw Homework ->) {
 # 枚举类型
 枚举是一组具有独立名称整数常量。通常可以用来标记一些业务数据的类型，方便判断处理。
 ## 定义
-我们只需要使用`id := %? {}`语句即可。
+我们只需要使用`id : %? {}`语句即可。
 
 例如：
 ```
-Color := %? {
+Color : %? {
     Red
     Green
     Blue
@@ -1282,7 +1282,7 @@ C ? Color.Red {
 
 例如:
 ```
-Number := %? {
+Number : %? {
     A = 1   # 1 #
     B       # 2 #
     C = 1   # 1 #
@@ -1479,7 +1479,7 @@ Arr.filter( {it ->> it > 5} )
 
 例如：
 ```
-List[T] := me % {
+List[T] : % {
     items = Storage{T}    # 创建存储 #
     length = 0
 
@@ -1514,7 +1514,7 @@ Z = empty[(->)]()
 
 例如：
 ```
-Package[T] := % {
+Package[T] : % {
     item = empty[T]()    # 初始化了一个缺省值的泛型数据 #
 }
 ```
@@ -1540,13 +1540,11 @@ Func[T] : (data T -> data T) {
     <- data
 }
 
-Protocol[T] := %_ {
+Protocol[T] : %_ {
     test[T] (in T ->)
 }
 
-Implement := me % {
-    ......
-} % Protocol[Implement] {
+Implement : % Protocol[Implement] {
     test[Implement] : (in Implement ->) {
     }
 }
@@ -1556,7 +1554,7 @@ Implement := me % {
 
 例如：
 ```
-Package[T Student] := % {
+Package[T Student] : % {
 }
 ```
 
@@ -1575,7 +1573,7 @@ Package[T Student] := % {
 例如：
 ```
 (Table("test"))
-Annotation := % {
+Annotation : % {
     (Key,Column("id"))
     id str
     (Column("name"))
