@@ -965,7 +965,7 @@ Student : % {
 
 例如：
 ```
-Student : % -> me { # 声明me
+Student : % me <- { # 声明me
     ......
     getGirlFriend : (->name str) {
         <- me._girlFriend
@@ -1049,7 +1049,7 @@ print( Chen.name )
 
 例如：
 ```
-Student : % (name str, number str) -> me {
+Student : % me <- (name str, number str) {
     me.name = name
     me.number = number
     # 计算得出班级
@@ -1156,7 +1156,7 @@ Homework : %_ {
 ```
 Student : % {
     ......
-} % Homework -> me { # 显式实现
+} % me <- Homework { # 显式实现
     count = 999999
 
     do : (->) {

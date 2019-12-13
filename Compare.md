@@ -575,7 +575,7 @@ Square : % {
     area : (-> f num) {
         <- sideLength ** 2
     }
-} % (sideLength num, name str) -> me {
+} % me <- (sideLength num, name str) {
     me.sideLength = sideLength
     me.numberOfSides = 4
     me.name = name
