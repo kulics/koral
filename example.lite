@@ -57,13 +57,13 @@ Main : (->>) {
     read()
 }
 
-(get,set)
+<get,set>
 static_x = 0
 
-(get{i->i},set{i,v->i=v;})
+<get{i->i},set{i,v->i=v;}>
 static_y = "hello"
 
-(_get{->static_x},set{v->static_x=v;})
+<_get{->static_x},set{v->static_x=v;}>
 static_z int
 
 static_g i64
@@ -137,7 +137,7 @@ test_optional : (->) {
     C ?any = nil
     D ?app = nil
     E ?[..?int] = [..?int]{0}
-    E?.(0)?.to_str()?.to_str()
+    E?.[0]?.to_str()?.to_str()
     F = D?!app{}
 }
 
@@ -152,12 +152,12 @@ test_reference : (->) {
 
 test_type_convert : (->) {
     x = app{}
-    y = x.[program]
+    y = x![program]
     z1 = (12.34).to_f32()
     z2 = z1.to_i64()
     print( z2.to[any]().to[i64]() )
-    print( y.is[program]() )
-    print( x.[program].running )
+    print( y?[program] )
+    print( x![program].running )
     print( typeof[program]() )
 }
 
@@ -174,24 +174,24 @@ test_list : (->) {
     Numbers += 3 + 7
     Numbers -= 6
     three = 3
-    Numbers.(three) = 5
-    Take = Numbers.(0)
-    Take = in_package_array{}.arr.(2)
+    Numbers.[three] = 5
+    Take = Numbers.[0]
+    Take = in_package_array{}.arr.[2]
     Object = {"123"; 432; app{}}
     NumbersInNumbers = {{1;1;1}; {1;1;1}}
-    NumbersInNumbers.(0).(0) = 3
+    NumbersInNumbers.[0].[0] = 3
     Empty = [..[..int]]{}
     Array [...int] = array_of(1,2,3)
-    (i)v @ Numbers {
+    i=>v @ Numbers {
         print(i, ":", v)
     }
-    Slice = Numbers.(0++)
-    Slice2 = Numbers.(++3)
+    Slice = Numbers.[0++]
+    Slice2 = Numbers.[++3]
 }
 
 test_set : (->) {
-    Empty = [:>str]{}
-    Numbers [:>int] = {:>1;2;5;6;8;4}
+    Empty = [str=>_]{}
+    Numbers [int=>_] = {1=>_;2=>_;5=>_;6=>_;8=>_;4=>_}
     item @ Numbers {
         print(item)
     }
@@ -201,12 +201,12 @@ test_dictionary : (->) {
     Empty = [str=>[int=>int]]{}
     Temp = {"k1"=>1;"k2"=>2}
     Temp += {"k3"=>3}
-    (k)v @ Temp {
+    k=>v @ Temp {
         print(k)
         print(v)
     }
     Temp -= "k1"
-    print(Temp.("k2"))
+    print(Temp.["k2"])
 }
 
 test_stack : (->) {
@@ -238,9 +238,9 @@ test_switch : (->) {
     x any = 3
     x ? 1, 2, 3 {
         print("1,2,3")
-    } _ str {
+    } [str] {
         print("string")
-    } _ int {
+    } [int] {
         print("int")
     } nil {
         print("null")
@@ -459,7 +459,7 @@ test_define : (->) {
         } _ {
             a = 2
         }
-    } c int {
+    } c <- [int] {
         c = 2
         a = 1
     } _ {
@@ -501,7 +501,7 @@ app : % me <- {
     arr = {1;1;1;1}
     _priName = " program "
     _b = 5
-    (get{i->i},set{i,v->i=v;})
+    <get{i->i},set{i,v->i=v;}>
     a = 1
 
     test_package : (->) {
@@ -512,16 +512,16 @@ app : % me <- {
         }
         Item3 = [..int]{1;2;3;4;5}
         Item4 = [str=>int]{"1"=>1;"2"=>2;"3"=>3}
-        Item5 = [package_child](1,2) # New
+        Item5 = package_child.(1,2) # New
     }
 
     test_func_template[T1, T2] : (data1 T1, data2 T2 -> data app) {
         <- me
     }
 } % me <- protocol {
-    (get{->me._b}, set{v->me._b = v;})
+    <get{->me._b}, set{v->me._b = v;}>
     b int
-    (get,set)
+    <get,set>
     f str
 
     c : (x int -> y int) {
@@ -571,7 +571,7 @@ program : % {
 }
 
 program += % {
-    (get,set)
+    <get,set>
     name str
 }
 
@@ -584,13 +584,13 @@ protocol : % _ {
     g (-> @ v int)
 }
 
-(Table("test"))
+<Table("test")>
 test_annotation : % {
-    (Key, Column("id"))
+    <Key, Column("id")>
     id str
-    (Column("nick_name"))
+    <Column("nick_name")>
     nick_name str
-    (Column("profile"))
+    <Column("profile")>
     profile str
 }
 
@@ -607,13 +607,23 @@ package = % me <- {
         me.x = 21
         print("package")
     }
-} % me <- (y int = 3) {
-    me.x = ConstData
-    me.y = y
+} % . {
+    me <- (y int = 3) {
+        me.x = ConstData
+        me.y = y
+    }
+    new : (y int = 3 -> me package) {
+        <- package{
+            x = ConstData
+            y = y
+        }
+    }
 }
 
-package_child = % me <- (x int, y int)(y) {
-    me.x = x
+package_child = % . {
+    me <- (x int, y int)(y) {
+        me.x = x
+    }
 } % me,super <- {
     % package
     x int
@@ -622,4 +632,4 @@ package_child = % me <- (x int, y int)(y) {
         super.x = 64
         print("package child")
     }
-} 
+}
