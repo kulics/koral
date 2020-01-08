@@ -131,7 +131,7 @@ string
 ```
 f = 6.0
 i = 94
-count = i + f.[int]
+count = i + f int!
 ```
 ### C#
 ```
@@ -166,7 +166,7 @@ count = i + int(f)
 ## Inclusive Range Operator
 ### Lite
 ```
-index @ 1 ++ 5 {
+@ index = 1 ++ 5 {
     print("" index " times 5 is " index * 5 "")
 }
 ```
@@ -204,7 +204,7 @@ for index in range(1,6):
 ### Lite
 ```
 shoppingList = {"catfish"; "water"; "tulips"; "blue paint"}
-shoppingList.(1) = "bottle of water"
+shoppingList[1] = "bottle of water"
 ```
 ### C#
 ```
@@ -235,10 +235,10 @@ shoppingList[1] = "bottle of water"
 ### Lite
 ```
 occupations = {
-    "Malcolm"=>"Captain"
-    "Kaylee"=>"Mechanic"
+    ["Malcolm"] "Captain"
+    ["Kaylee"] "Mechanic"
 }
-occupations.("Jayne") = "Public Relations"
+occupations["Jayne"] = "Public Relations"
 ```
 ### C#
 ```
@@ -283,8 +283,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Lite
 ```
-emptyArray = [..str]{}
-emptyDictionary = [str=>f32]{}
+emptyArray = []str{}
+emptyDictionary = [str]f32{}
 ```
 ### C#
 ```
@@ -464,7 +464,7 @@ increment(7)
 ## Classes Declaration
 ### Lite
 ```
-Shape : % {
+Shape : $ {
     numberOfSides = 0
     simpleDescription : (-> s str) {
         <- "A shape with " numberOfSides " sides."
@@ -556,7 +556,7 @@ shapeDescription = shape.simpleDescription()
 ## Subclass
 ### Lite
 ```
-NamedShape : % {
+NamedShape : $ {
     name str
     numberOfSides = 0
     simpleDescription : (-> s str) {
@@ -564,8 +564,7 @@ NamedShape : % {
     }
 } 
 
-Square : % {
-    % NamedShape
+Square : NamedShape % $ {
     sideLength num
 
     simpleDescription : (-> s str) {
@@ -573,9 +572,9 @@ Square : % {
     }
 
     area : (-> f num) {
-        <- sideLength ** 2
+        <- sideLength * sideLength
     }
-} % me <- (sideLength num, name str) {
+} % (sideLength num, name str->me) {
     me.sideLength = sideLength
     me.numberOfSides = 4
     me.name = name
@@ -756,8 +755,8 @@ test.simpleDescription()
 movieCount = 0
 songCount = 0
 
-item @ library {
-    item ? _ Movie {
+@ item = library.. {
+    ? item.. _ Movie {
         movieCount += 1
     } _ Song {
         songCount += 1
@@ -835,7 +834,7 @@ for item in library:
 ### Lite
 ```
 nb = 42
-nb ? 0 ++ 7, 8, 9 { 
+? nb.. 0 ++ 7, 8, 9 { 
     print("single digit") 
 } 10 { 
     print("double digits") 
@@ -896,8 +895,8 @@ switch nb {
 ## Downcasting
 ### Lite
 ```
-current @ someObjects {
-    current ? movie Movie {
+@ current = someObjects.. {
+    ? current.. movie Movie {
         print("Movie: '" movie.name "', " +
             "dir. " movie.director "")
     }
@@ -949,7 +948,7 @@ for current in someObjects:
 ## Protocol
 ### Lite
 ```
-Nameable : % _ {
+Nameable : $ {
     name (-> s str)
 }
 
@@ -1002,11 +1001,11 @@ func f(x: Nameable) {
 ## Implement
 ### Lite
 ```
-Dog : % Nameable {
+Dog : $ Nameable {
     name : (-> n str) {
         <- "Dog"
     }
-} % Weight {
+} % $ Weight {
     getWeight : (-> w int) {
         <- 30
     }
