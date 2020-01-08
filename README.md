@@ -12,7 +12,7 @@ With well-designed grammar rules, this language can effectively reduce the burde
 This is the main source code repository for Lite. It contains the compiler, and documentation.
 
 ## Key Features
-- Easy to distinguish, modern grammar.
+- The moderm gramar, which is easy to distinguish.
 - Automatic memory management.
 - Generic.
 - Multi-paradigm programming.

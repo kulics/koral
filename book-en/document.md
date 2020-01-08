@@ -4,7 +4,7 @@ Lite is an open source programming language focused on efficiency. It can help y
 With well-designed grammar rules, this language can effectively reduce the burden of reading and writing, allowing you to focus on solving problems.
 
 ## Key Features
-- Easy to distinguish, modern grammar.
+- The moderm gramar, which is easy to distinguish.
 - Automatic memory management.
 - Generic.
 - Multi-paradigm programming.
