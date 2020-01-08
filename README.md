@@ -51,10 +51,10 @@ get_greetings : (first str -> result []str) {
 
 ## Roadmap
 1. 2017.07 ~ 2018.03 
-    1. Design syntax.
-    1. Completed C# compiler.
+    1. Design grammar.
+    1. Achieve the C# compiler.
 1. 2018.03 ~ 2020.01
-    1. Complete the implementation of bootstrap.
+    1. Achieve self-compilation.
     1. Include standard library.
     1. Improve grammar to achieve grammatical stability.
 1. 2020.01 ~ 2021.12

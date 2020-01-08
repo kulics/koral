@@ -46,7 +46,7 @@ download:
 - Kotlin <https://github.com/lite-works/lite-kotlin/releases>
 
 # Basic Grammar
-## basic statement
+## Basic Statement
 Within this language, any expression must be attributed to the statement.
 
 The basic form of the statement is:
@@ -1410,7 +1410,7 @@ Here we talk about how to handle threading problems more simply, that is, asynch
 
 In other languages, it can be considered as the `async/await` of the asynchronous programming final solution.
 
-## Asynchronous declaration
+## Asynchronous Declaration
 So how do you declare a function to be asynchronous? Use `->>` to do it.
 
 That's right, just use `->>`.
@@ -1430,7 +1430,7 @@ E.g:
 Result = Async() # result is a Task data
 ```
 Next we will look at how to make it asynchronously awaiting execution.
-## Asynchronous waiting
+## Asynchronous Waiting
 As with declarations, we only need to declare an asynchronous method using `<< function()`.
 
 E.g:
@@ -1439,7 +1439,7 @@ Result = << Async()
 ......
 ```
 After the asynchronous wait is declared, the program will temporarily stop the following functions until the `Async` function is executed, and the value of `out` is assigned to `Result`, and then continue.
-## Asynchronous use conditions
+## Asynchronous Use Conditions
 Asynchronous waits can only be used in functions declared asynchronously.
 
 E.g:
@@ -1455,7 +1455,7 @@ Async : (-> out int) {
     <- 12
 }
 ```
-## Empty return value
+## Empty Return Value
 If the asynchronous method does not return a value, it will also return a `Task` data, which can be waited for by an external call.
 
 We can choose to wait for no data, or we can choose not to wait for data.
@@ -1485,7 +1485,7 @@ For example, we now need a collection that supports adding, deleting, and readin
 
 Our lists and dictionaries are actually implemented using generics.
 
-## Declaration and use
+## Declaration and Use
 Let's see how to use generics to implement a list. We simply wrap the generics of the type with the `[identifier generics_identifier]` symbol.
 
 This is a simplified implementation.
@@ -1544,7 +1544,7 @@ So we have a list of integer types, is it like this:
 ListNumber = []int{}
 ```
 That's right, in fact, our list and dictionary syntax are syntactic sugar.
-## Supported types
+## Supported Types
 We can use generics in structures, functions, and interface types.
 
 E.g:
@@ -1562,7 +1562,7 @@ Implement : $ [Interface int] {
     }
 }
 ```
-## Generic constraints
+## Generic Constraints
 If we need to constrain the type of generics, we only need to use the `(T contract)` syntax.
 
 E.g:
@@ -1575,7 +1575,7 @@ E.g:
 Annotations are declarative tags used to pass feature information of various elements (such as structures, functions, components, etc.) in a program at runtime.
 Usually we use the annotation feature in many scenes of reflection and data parsing.
 
-## Annotation statement
+## Annotation Statement
 We only need to wrap the tagged content with `<>`.
 If the annotation project has sub-properties, just use the `<>` package. If you need to specify the specified attribute, you can use the `identifier = expression` assignment as you would a simplified build of the structure.
 
@@ -1640,7 +1640,7 @@ A int
 B = A      # error, no assignment to A
 ```
 
-## Declaration and use
+## Declaration and Use
 
 If you have to use a null type in some cases, you can use a nullable type.
 Just add `?` before any type, which is a nullable type.
@@ -1668,7 +1668,7 @@ E.g:
 Arr?.to_str()
 ```
 
-## Merge operation
+## Merge Operation
 If you want to use another default value when the value of the optional type is null, you can use the `id ?! value`.
 
 E.g:
@@ -1676,7 +1676,7 @@ E.g:
 B = A ?! 128
 ```
 
-## Reference operation
+## Reference Operation
 If we need to use a property that can modify itself in parameter passing, we can use the reference declaration `!type`.
 In this way, you can manipulate external variables inside the function, and you need to use the `value!` declaration to pass the reference.
 
