@@ -1,15 +1,16 @@
-# Lite programming language
-Lite is an open source cross-platform programming language focused on engineering.
+# Lite Programming Language
+Lite is an open source programming language focused on efficiency. It can help you easily build cross-platform software.
 
-The language is designed to be simple, readable, and understandable.
+With well-designed grammar rules, this language can effectively reduce the burden of reading and writing, allowing you to focus on solving problems.
 
-By removing keywords, reducing grammatical features, and unifying expression specifications, the language can effectively reduce the burden of reading and writing, allowing users to focus on solving problems.
-
-## Features
-- Well designed grammar, easy to write and read.
-- The rules are clear and uniform, in line with intuition.
-- Currently supports output to C#/Go/JavaScript/Kotlin, and with their resources, we can already use this language in a very wide range of scenarios.
-- Output to LLVM will be supported in the future to support a more comprehensive scenario.
+## Key Features
+- Easy to distinguish, modern grammar.
+- Automatic memory management.
+- Generic.
+- Multi-paradigm programming.
+- Cross-platform.
+- Multiple backends, support C # / Go / JavaScript / Kotlin.
+- LLVM will be supported soon.
 
 # Index
 1. [Install](#Install)
@@ -64,7 +65,7 @@ StatementContent
 ## Export Namespace
 All content in this language can only be defined in the namespace, which can effectively manage the content into distinct blocks to manage, you can freely define in a separate namespace without having to be too restrictive.
 
-We can use the `"id" {}` statement to define the namespace of the current file.
+We can use the `"name" {}` statement to define the namespace of the current file.
 
 E.g:
 ```
@@ -75,7 +76,7 @@ The meaning of this statement is to mark the content tag in the current code fil
 At the same time, the external area can import `Demo` to use the content, we will learn how to import.
 
 ## Import Namespaces
-We can use the `"id"` statement in the `{}` of the export statement to import other namespaces, libraries, and frameworks into a namespace.
+We can use the `"name"` statement in the `{}` of the export statement to import other namespaces, libraries, and frameworks into a namespace.
 
 E.g:
 ```
@@ -127,13 +128,13 @@ E.g:
 ```
 # Single-line Comment
 
-{#
+#=
     Multi-line
     Comment
-#}
+=#
 ```
 ## Definition
-We can create a new variable simply by using the `id type` statement.
+We can create a new variable simply by using the `identifier type` statement.
 
 E.g:
 ```
@@ -144,7 +145,7 @@ This will create an identifier for the name on the left and define it as the typ
 Once the identifier is created, its data type will not be changed within the active area.
 
 ## Assignment
-As with conventional programming languages, we need to use the `id = value` statement to assign the right data to the left identifier.
+As with conventional programming languages, we need to use the `identifier = value` statement to assign the right data to the left identifier.
 
 E.g:
 ```
@@ -169,7 +170,7 @@ B int = 10
 ```
 
 ## Constant
-A constant is a language that is determined at compile time. It cannot be changed. It only supports a special type of the underlying type. It is defined by `id: type: value`, and `type` can usually be omitted.
+A constant is a language that is determined at compile time. It cannot be changed. It only supports a special type of the underlying type. It is defined by `identifier type: value`, and `type` can usually be omitted.
 
 E.g:
 ```
@@ -227,7 +228,7 @@ Integer8 = (16).to_i8()
 ```
 
 It should be noted that the underlying type conversion method is only owned by the base type.
-If you need all types of casts, use the `to[type]()` method, which crashes against incompatible types, so use it with caution.
+If you need all types of casts, use the `[to type]()` method, which crashes against incompatible types, so use it with caution.
 
 ## Float Point Number
 Integers don't satisfy our needs for numbers, and we often need to deal with decimals.
@@ -420,27 +421,27 @@ This will create a list of `int` types containing `1` to `5`.
 
 If you need a list of explicit types, you can use the constructor to create them.
 
-The representation of the list type is `[..type]`.
+The representation of the list type is `[]element_type`.
 
 For example we need a list of strings:
 ```
-List : [..str]{}     # empty
+List : []str{}     # empty
 ```
 
 ### Access
-If we need to access one of the elements in the list, we can access it with `identifier.(index)`.
+If we need to access one of the elements in the list, we can access it with `identifier[index]`.
 
 E.g:
 ```
-print( List.(1) )
+print( List[1] )
 ```
-It should be noted that in the programming language, most of the list start index starts from `0`, the `identifier.(0)` gets the first element, and the next element and so on.
+It should be noted that in the programming language, most of the list start index starts from `0`, the `identifier[0]` gets the first element, and the next element and so on.
 ### Change Element
 If we need to change one of the elements in the list, we can access the element directly and use the assignment statement to change it.
 
 E.g:
 ```
-List.(0) = 5
+List[0] = 5
 ```
 It should be noted that we can only access the index of the existing data, if it does not exist, an error will occur.
 ### Common Operations
@@ -458,7 +459,7 @@ Unlike the data items in the list, the data items in the dictionary are not in a
 
 The dictionary keys can only use the `integer` and `string` types.
 ### Definition
-Similar to the list, the dictionary is also defined using `{}`, except that the dictionary type is a union type of `key` and `value`, and the form is `key=>value`.
+Similar to the list, the dictionary is also defined using `{}`, except that the dictionary type is a union type of `key` and `value`, and the form is `[key]value`.
 
 E.g:
 ```
@@ -468,30 +469,30 @@ This will create a `str=>int` type dictionary containing three entries for `a,b,
 
 If you need an explicit type of dictionary, you can also use the constructor to create it.
 
-The representation of the dictionary type is `[type=>type]`.
+The representation of the dictionary type is `[key_type]value_type`.
 
 E.g:
 ```
-DictionaryNumNum = [int=>int]{}  # empty
+DictionaryNumNum = [int]int{}  # empty
 ```
 ### Access
 Similar to the list, we can also use the index to access the data directly.
 
 E.g:
 ```
-print( Dictionary.("a") )
+print( Dictionary["a"] )
 ```
 ### Change Element
 Similar to lists, we can also use assignment statements to change elements.
 
 E.g:
 ```
-Dictionary.("b") = 5
+Dictionary["b"] = 5
 ```
 Different from the list, if the index is an index that does not exist, it will not be wrong, and the value will be directly assigned to the new key.
 ### Common operations
 ```
-Dictionary += {"d"=>11}     # Add Element
+Dictionary += {["d"]11}     # Add Element
 Dictionary -= "c"           # Delete the specified index element
 Length = Dictionary.len     # Length
 ```
@@ -499,7 +500,7 @@ Length = Dictionary.len     # Length
 # Judgment
 The judgment statement executes the program by one or more of the set conditions, executes the specified statement when the condition is `true`, and executes the specified statement when the condition is `false`.
 
-We only need to use `? value {}` to declare the judgment statement and enter the corresponding area according to the following values.
+We only need to use `? expression {}` to declare the judgment statement and enter the corresponding area according to the following values.
 
 E.g:
 ```
@@ -509,7 +510,7 @@ E.g:
 ```
 ## Boolean Judgment
 When the judgment value is only of the `bool` type, the statement is executed only when it is `true`.
-If we need to deal with other situations at the same time, we can use `value {}` to continue to declare another processing statement.
+If we need to deal with other situations at the same time, we can use `expression {}` to continue to declare another processing statement.
 If you only need `false`, use `_ {}` to declare it.
 
 E.g:
@@ -539,11 +540,11 @@ I = 3
 This can be thought of as an `if elseif else` structure relative to other languages.
 
 ## Condition Judgment
-If we need to judge a flag, we can use the `value ? case {}` statement, the statement implements multiple conditional matching, and the matching condition is used to execute the corresponding logic, so that it will only execute the statement with successful matching.
+If we need to judge a flag, we can use the `? expression.. expression {} expression {}` statement, the statement implements multiple conditional matching, and the matching condition is used to execute the corresponding logic, so that it will only execute the statement with successful matching.
 
 E.g:
 ```
-I ? 1 {
+? I.. 1 {
      ......
 } 2 {
      ......
@@ -553,41 +554,41 @@ This conditional judgment is very suitable for multi-conditional judgment of an 
 
 Yes, as with the Boolean judgment above, each condition here will be terminated after it is executed and will not continue to execute downward.
 
+If multiple conditions need to be merged together, you can use `,` to separate them.
+
+E.g:
+```
+? I.. 1,2,3 {
+    ......
+} 4 {
+    ......
+}
+```
+
 ### Default Condition
 What if you need a default condition to perform the logic? We can use an anonymous identifier `_` to accomplish this.
 
 E.g:
 ```
-I ? 1 {
-     ......
+? I.. 1 {
+    ......
 } 2 {
-     ......
+    ......
 } _ {
-     ......
+    ......
 }
 ```
 If this is not possible, it will go to the default processing area to execute.
 
 This can be thought of as a `switch case default` structure relative to other languages.
 
-If there are multiple conditions that need to be merged together, you can use `,` to separate them.
-
-E.g:
-```
-I ? 1,2,3 {
-     ......
-} 4 {
-     ......
-}
-```
-
 ### Pattern Matching
 Conditional judgment can do more, for example, we need to judge the type of the identifier,
-You can use the `value ? id:type{}` syntax to match types, and `id` can be discard.
+You can use the `identifier type{}` syntax to match types, and `identifier` can be discard.
 
 E.g:
 ```
-X ? _ int {             # is int
+? X.. _ int {           # is int
      print("int")
 } content str {         # is str
      print(content)
@@ -596,18 +597,18 @@ X ? _ int {             # is int
 }
 ```
 ### Get type
-If we need to explicitly get the type value, we can use the `typeof[type]()` function to get it.
+If we need to explicitly get the type value, we can use the `[typeof type]()` function to get it.
 
 E.g:
 ```
-typeof[int]()     # Get the type value directly by type
+[typeof int]()     # Get the type value directly by type
 ```
 # Loop
 Sometimes we may need to execute the same piece of code multiple times.
 
 In general, statements are executed in order, the first statement in the function is executed first, then the second statement, and so on.
 ## Collection loop
-If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can use the `id @ value {}` statement to iterate over the collection, taking each element out of `id`.
+If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can use the `@ identifier = expression {}` statement to iterate over the collection, taking each element out of `identifier`.
 
 E.g:
 ```
@@ -617,11 +618,11 @@ item @ Arr {
 }
 ```
 
-If we need to fetch the index and value at the same time, we can replace `id` with the `(index)value` syntax, which is valid for both the list and the dictionary.
+If we need to fetch the index and value at the same time, we can replace `identifier` with the `[index_identifier]value_identifier` syntax, which is valid for both the list and the dictionary.
 
 E.g:
 ```
-(i)v @ Arr {
+@ [i]v = Arr.. {
     print(""i":"v"")
 }
 ```
@@ -634,7 +635,7 @@ The iterator can take the number from the start point to the end point loop. We 
 
 E.g:
 ```
-i @ 0 ++ 100 {
+@ i = 0 ++ 100 {
     print(i)  # print every number
 }
 ```
@@ -644,7 +645,7 @@ The iterator defaults to increment `1` every interval. If we need to take every 
 
 E.g:
 ```
-i @ 0 ++ 100 ^ 2 {
+@ i = 0 ++ 100 ^ 2 {
     ......
 }
 ```
@@ -654,7 +655,7 @@ We can also let it traverse in reverse order, just use `--`.
 
 E.g:
 ```
-i @ 100 -- 0 {
+@ i = 100 -- 0 {
     ......  # From 100 to 0
 }
 ```
@@ -716,7 +717,7 @@ Function : (->) {
 ```
 This defines a function with the identifier `Function`.
 ## Call
-Unlike the main entry function, which cannot be called, regular functions can be called with an identifier. We only need to use the `id()` statement to use the wrapped function.
+Unlike the main entry function, which cannot be called, regular functions can be called with an identifier. We only need to use the `identifier()` statement to use the wrapped function.
 
 E.g:
 ```
@@ -726,7 +727,7 @@ Function()  # Call Function
 ## Parameters
 Although functions can perform specific functions without any parameters, more often we need to be able to receive some input data, or can return data, or both, and this requires parameters to help us complete task.
 
-Very simple, we only need to declare the parameters using `id type`.
+Very simple, we only need to declare the parameters using `identifier type`.
 
 E.g:
 ```
@@ -809,7 +810,7 @@ There is no special way to define function arguments, just replace the argument 
 E.g:
 ```
 Each_1_To_10 : (func (int->) ->) {
-     i @ 1 ++ 10 {
+     @ i = 1 ++ 10 {
          func(i)
      }
 }
@@ -835,7 +836,7 @@ It's sometimes awkward to define a function and then pass it in as above, becaus
 
 At this point we can use the syntax of the Lambda expression to simplify our code.
 
-Since the function argument is already determined at the time of declaration, we can use the simplified syntax `{id, id -> statements}` to express it, which means defining the argument identifier and executing the function statement.
+Since the function argument is already determined at the time of declaration, we can use the simplified syntax `{identifier, identifier -> statements}` to express it, which means defining the argument identifier and executing the function statement.
 
 E.g:
 ```
@@ -866,11 +867,11 @@ So we need a feature that wraps data from different attributes to better describ
 
 Obviously, the function responsible for packaging data is the structure.
 ## Definition
-We can use the `id : % {}` statement to define a structure that has nothing.
+We can use the `identifier : $ {}` statement to define a structure that has nothing.
 
 E.g:
 ```
-Package : % {
+Package : $ {
 }
 ```
 Of course, we prefer to pack a few data, such as a student with a name, student number, class, and grade attribute.
@@ -878,7 +879,7 @@ We can define this data in the structure of the body just like we would define a
 
 E.g:
 ```
-Student : % {
+Student : $ {
     name str = ""
     number str = ""
     class int = 0
@@ -938,8 +939,8 @@ Similarly, the way a collection is build is actually a build syntax, so we can a
 
 E.g:
 ```
-Array = [..int]{ 1; 2; 3; 4; 5 }
-Dictionary = [str=>int]{ "1"=>1; "2"=>2; "3"=>3 }
+Array = []int{ 1; 2; 3; 4; 5 }
+Dictionary = [str]int{ "1"=>1; "2"=>2; "3"=>3 }
 ```
 ## Anonymous Structure
 If we only want to wrap some data directly, instead of defining the structure and then using it, can it be like an anonymous function?
@@ -965,7 +966,7 @@ We can define private properties to store properties that we don't want to be ac
 
 E.g:
 ```
-Student : % {
+Student : $ {
     ......
     _girlFriend str    # The first character is the identifier of _ is private
 }
@@ -978,7 +979,7 @@ The private property of this structure can not be accessed, and can not be modif
 
 E.g:
 ```
-Student : % me <- { # declare me
+Student : $ (me) { # declare me
     ......
     getGirlFriend : (-> name str) {
         <- me._girlFriend
@@ -1004,7 +1005,7 @@ Now let us use our imagination. How do we define a structure that is specificall
 
 E.g:
 ```
-ChineseStudent : % {
+ChineseStudent : $ {
     name str = ""
     number str = ""
     class int = 0
@@ -1018,7 +1019,7 @@ We need to combine this feature, but it's not that complicated, just create a st
 
 E.g:
 ```
-ChineseStudent : % {
+ChineseStudent : $ {
     student = Student{}    # include the student attribute in it
     kungfu = false         # not learn kungfu
 }
@@ -1032,15 +1033,13 @@ print( Chen.student.name )
 ```
 By combining layers of structure, you can freely assemble anything you want to describe.
 
-More recently, if we want to include all the attributes of a structure directly instead of a combination, we can use the top-level combination statement, declared as `% type`.
+More recently, if we want to include all the attributes of a structure directly instead of a combination, we can use the top-level combination statement, declared as `type % struct`.
 
 Top-level combinations extract attributes from the structure to the exterior, just as they contain corresponding attributes directly. This is conducive to the use and transmission of attributes.
 
 E.g:
 ```
-ChineseStudent : % {
-    # top-level combination
-    % Student
+ChineseStudent : Student % $ { # top-level combination
     kungfu = false
 }
 ```
@@ -1058,18 +1057,18 @@ This approach is similar to class inheritance in other languages.
 ### Construction
 Sometimes we might use the constructor method of structure.
 
-We can use the special constructor statement `() {}`.
+We can use the special constructor statement `(->self_identifier) {}`.
 
 E.g:
 ```
-Student : % me <- (name str, number str) {
+Student : (name str, number str->me) {
     me.name = name
     me.number = number
     # Calculate the class
     me.class = getSubText(number, 2, 3)
     # Calculate the grade
     me.grade = getSubText(number, 0, 1)
-} % {
+} % $ {
     ......
 }
 ```
@@ -1087,15 +1086,15 @@ If you need to use a constructor with inheritance, you can append `(params)` to 
 
 E.g:
 ```
-Parent : % {
+Parent : $ {
     ......
-} %(a int) {
+} % (a int->me) {
     ......
 }
 
-Child : % {
-    % Parent
-} %(a int)(a) {
+Child : Parent % $ {
+    ......
+} % (a int->me)(a) {
     ......
 }
 ```
@@ -1137,20 +1136,20 @@ The interface specifies the methods and properties necessary to implement a part
 
 Our structure can introduce the interface we need like a signed protocol, and then declare all the attributes required by the interface, so we think that this structure implements the interface.
 ## Definition
-We only need to define an interface using the `id : %_ {}` statement.
+We only need to define an interface using the `id : $ {}` statement.
 
 E.g:
 ```
-Protocol : %_ {
+Protocol : $ {
 }
 ```
-This is an empty interface.
+This is an empty interface. Isn't this the same as a structure? Yes, an interface is defined in the same way as a structure. When a structure is used as an interface, the structure has the function of an interface.
 
 Next, let's design a difficult task that students need to accomplish... homework.
 
 E.g:
 ```
-Homework : %_ {
+Homework : $ {
     count int
     do (->)
 }
@@ -1168,14 +1167,14 @@ For interfaces that need to be explicitly implemented, you can specify the inter
 
 E.g:
 ```
-Student : % {
+Student : $ {
      ......
-} % me <- Homework { # Explicit implementation
+} % $ Homework { # Explicit implementation
     count = 999999
 
     do : (->) {
         SpendTime(1)       # took an hour
-        me.count -= 1      # completed a
+        count -= 1      # completed a
     }
 }
 ```
@@ -1235,10 +1234,10 @@ Of course, it's better to put these students in an array so that we can use loop
 
 E.g:
 ```
-Arr = [..Homework]{}
+Arr = []Homework{}
 Arr.add( StudentA )
 ......  # Insert many many students
-i @ Arr {
+@ i = Arr.. {
     DoHomework(i)
 }
 ```
@@ -1250,15 +1249,15 @@ Because the structure type can be converted to an interface type, the original t
 
 But sometimes we need to get the raw type of data to deal with, we can use type judgment to help us accomplish this.
 
-We can use `is[type]()` to determine the type of data, and `value.[type]` to convert the data to our type.
+We can use `expression type?` to determine the type of data, and `expression type!` to convert the data to our type.
 
 E.g:
 ```
-Func : (hw Homework ->) {
+Func : (he Homework ->) {
     # Determine if Chinese students
-    Hw.is[ChineseStudent]() {
+    ? he ChineseStudent? {
         # Convert to Chinese Student Data
-        Cs = hw.[ChineseStudent]
+        Cs = he ChineseStudent!
     }
 }
 ```
@@ -1266,11 +1265,11 @@ Func : (hw Homework ->) {
 # Enumeration Type
 The enumeration is a set of integer constants with independent names. It can usually be used to mark the type of some business data, which is convenient for judgment processing.
 ## Definition
-We only need to use the `id -> %? {}` statement.
+We only need to use the `id : .. {}` statement.
 
 E.g:
 ```
-Color -> %? {
+Color : .. {
      Red
      Green
      Blue
@@ -1283,7 +1282,7 @@ This way we don't need to care about their values when we use them, and we can s
 E.g:
 ```
 C = Random color()     # Get a random color
-C ? Color.Red {
+? C.. Color.Red {
       ......
 } Color.Green {
       ......
@@ -1298,7 +1297,7 @@ We can also assign a single identifier if needed, and unspecified will continue 
 
 E.g:
 ```
-Number : %? {
+Number : .. {
      A = 1  # 1
      B      # 2
      C = 1  # 1
@@ -1316,11 +1315,11 @@ There may be a variety of exceptions in the program.
 Exceptions cannot be completely avoided, but we can choose some means to help us check and report exceptions.
 
 ## Reporting an exception
-We can use `! <- value` to declare an exception data anywhere in the function.
+We can use `! <- exception` to declare an exception data anywhere in the function.
 
 E.g:
 ```
-ReadFile : (name str ->) {
+ReadFile : (name str ->!) { # Declaring a possible exception function
     ? name.len == 0 {
         ! <- Exception("something wrong")
     }
@@ -1329,7 +1328,7 @@ ReadFile : (name str ->) {
 ```
 So we declare an exception, the exception description is `something wrong`, once the external caller uses the illegal length of `name`, the function will be forced to abort, report the exception up and hand it to the caller.
 ## Checking exceptions
-We can use the `! {}` statement to check for exceptions and `id type {}` to handle exceptions.
+We can use the `! {}` statement to check for exceptions and `identifier type {}` to handle exceptions.
 `type` can be omitted, the default is `Exception`.
 
 E.g:
@@ -1407,8 +1406,6 @@ A thread is defined as the execution path of the program. Each thread defines a 
 
 Because the computer processor has a computational bottleneck, it is impossible to process everything one by one in a single-line order. In order to increase the processing capacity, we often need to use asynchronous parallel to solve the calculation problem.
 
-The .Net platform has its own thread library `System.Threading` , which can be used to query related interfaces.
-
 Here we talk about how to handle threading problems more simply, that is, asynchronous processing.
 
 In other languages, it can be considered as the `async/await` of the asynchronous programming final solution.
@@ -1424,7 +1421,7 @@ Async : (->> out int) {
     <- 12
 }
 ```
-Once a method is declared as an asynchronous method, the compiler will automatically wrap the return value with a `Task[type]` type package, and this method can be executed asynchronously.
+Once a method is declared as an asynchronous method, the compiler will automatically wrap the return value with a `[Task type]` type package, and this method can be executed asynchronously.
 
 A normal direct call will only get a `Task` data.
 
@@ -1489,49 +1486,49 @@ For example, we now need a collection that supports adding, deleting, and readin
 Our lists and dictionaries are actually implemented using generics.
 
 ## Declaration and use
-Let's see how to use generics to implement a list. We simply wrap the type of the type with the `[id]` symbol after the identifier.
+Let's see how to use generics to implement a list. We simply wrap the generics of the type with the `[identifier generics_identifier]` symbol.
 
 This is a simplified implementation.
 
 E.g:
 ```
-List[T] : % {
-    Items = Storage{T}     # Create Storage
-    Length = 0
+[List T] : % {
+    items = Storage{T}     # Create Storage
+    length = 0
 
     get : (index int -> item T) {    # Get a generic data
         <- items.get( index )
     }
 
     add : (item T ->) {      # Add a generic data to the list
-        Items.insert(length, item)
-        Length += 1
+        items.insert(length, item)
+        length += 1
     }
 }
 ```
 So we define a structure that supports generics, `T` is a generic, in fact it can be any identifier, but habitual we will use `T` as a proxy.
 
-Generic brackets support multiple generations like parameters, for example: `[T, H, Q]`.
+Generic brackets support multiple generations like parameters, for example: `[identifier T, H, Q]`.
 
 After the generics are defined, `T` is treated as a real type in the area of ​​the structure, and then we can use it like various places like `int`.
 
 It's important to note that because generics are typed on the fly, the compiler cannot infer the constructor of the generic. We can only use the default value creation method to construct generic data.
 
-We can use the default value creation method `empty[type]()` to specify a default value that contains the type.
+We can use the default value creation method `[empty type]()` to specify a default value that contains the type.
 
 E.g:
 ```
-X = empty[int]()
-Y = empty[protocol]()
-Z = empty[(->)]()
+X = [empty int]()
+Y = [empty interface]()
+Z = [empty (->)]()
 ```
 
 This way we can use it in generics.
 
 E.g:
 ```
-Package[T] : % {
-    Item = empty[T]()    # Initializes a default value of generic data
+[Package T] : $ {
+    item = [empty T]()    # Initializes a default value of generic data
 }
 ```
 So how do we use generics?
@@ -1540,11 +1537,11 @@ It's very simple, just use it as we declare it, just pass the real type when cal
 
 E.g:
 ```
-ListNumber = List[int]{}   # Pass in integer type
+ListNumber = [List int]{}   # Pass in int type
 ```
 So we have a list of integer types, is it like this:
 ```
-ListNumber = [..int]{}
+ListNumber = []int{}
 ```
 That's right, in fact, our list and dictionary syntax are syntactic sugar.
 ## Supported types
@@ -1552,25 +1549,25 @@ We can use generics in structures, functions, and interface types.
 
 E.g:
 ```
-Func[T] : (data T -> data T) {
+[Func T] : (data T -> data T) {
     <- data
 }
 
-Protocol[T] : %_ {
-    test[T] (in T ->)
+[Interface T] : $ {
+    [test T] (in T ->)
 }
 
-Implement : % Protocol[Implement] {
-    test[Implement] : (in Implement ->) {
+Implement : $ [Interface int] {
+    [test int] : (in int ->) {
     }
 }
 ```
 ## Generic constraints
-If we need to constrain the type of generics, we only need to use the `T id` syntax.
+If we need to constrain the type of generics, we only need to use the `(T contract)` syntax.
 
 E.g:
 ```
-Package[T Student] : % {
+[Package (T Student)] : $ {
 }
 ```
 
@@ -1579,8 +1576,8 @@ Annotations are declarative tags used to pass feature information of various ele
 Usually we use the annotation feature in many scenes of reflection and data parsing.
 
 ## Annotation statement
-We only need to wrap the tagged content with `()`.
-If the annotation project has sub-properties, just use the `()` package. If you need to specify the specified attribute, you can use the `id = data` assignment as you would a simplified build of the structure.
+We only need to wrap the tagged content with `<>`.
+If the annotation project has sub-properties, just use the `<>` package. If you need to specify the specified attribute, you can use the `identifier = expression` assignment as you would a simplified build of the structure.
 
 Note that it is valid to use before the identifier.
 
@@ -1588,13 +1585,13 @@ Let's take a look at the database data as a reference to see how to use annotati
 
 E.g:
 ```
-(Table("test"))
-Annotation : % {
-    (Key,Column("id"))
-    id str
-    (Column("name"))
-    name str
-    (Column("data"))
+<Table("test")>
+Annotation : $ {
+    <Key, Column("id")>
+    id str
+    <Column("name")>
+    name str
+    <Column("data")>
     data str
 }
 ```
@@ -1620,16 +1617,16 @@ More details about LINQ can be found at the following URL.
 [Microsoft Documentation](https://docs.microsoft.com/en-us/dotnet/csharp/programming-guide/concepts/linq/getting-started-with-linq)
 
 ## Statement
-We can use Linq to query like C#, just declare the LINQ statement with `->`.
+We can use Linq to query like C#, just declare the LINQ statement with `loop_expression -> linq_expression`.
 
 E.g:
 ```
 Linq : (->) {
-     Numbers = { 0; 1; 2; 3; 4; 5; 6 }
-     Linq = num @ Numbers ->
-             Where (num \ 2) == 0 ->
-             Orderby num -> descending ->
-             Select num
+    Numbers = { 0; 1; 2; 3; 4; 5; 6 }
+    Linq = @ num = Numbers.. ->
+            where (num \ 2) == 0 ->
+            orderby num -> descending ->
+            select num
 }
 ```
 
