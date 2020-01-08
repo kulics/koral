@@ -29,8 +29,8 @@ This is the main source code repository for Lite. It contains the compiler, and 
 main : (->) {
     print("Hello, world!")
     greetings = get_greetings("love lite!")
-    (index)value @ greetings {
-        index ? 0 {
+    @ [index]value = greetings.. {
+        ? index.. 0 {
             print(value)
         } 1 {
             print(value + ", 世界!")
@@ -40,7 +40,7 @@ main : (->) {
     }
 }
 
-get_greetings : (first str -> result [..str]) {
+get_greetings : (first str -> result []str) {
     <- first + {"你好"; "Hola"; "Bonjour"
                 "Ciao"; "こんにちは"; "안녕하세요"
                 "Cześć"; "Olá"; "Здравствуйте"

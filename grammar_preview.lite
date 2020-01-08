@@ -8,7 +8,7 @@
     "System/Threading/Tasks"
     "System/ComponentModel/DataAnnotations/Schema"
     "System/ComponentModel/DataAnnotations"
-    File. <- "IO" # 可以隐藏元素使用内容
+    File. = "IO" # 可以隐藏元素使用内容
 }
 
 Main : (->>) {
@@ -26,23 +26,23 @@ Main : (->>) {
     Format = "the value is "Integer","Number","Boolean""
 
     # List
-    List = [..int]{ 1;2;3;4;5 }
+    List = []int{ 1;2;3;4;5 }
     List2 = { 1;2;3;4;5 }
-    print( List.[0] ) # 使用下标获取
+    print( List[0] ) # 使用下标获取
 
     # Set
-    Set = [int=>_]{ 1=>_;2=>_;3=>_;4=>_;5=>_ }
-    Set2 = { 1=>_;2=>_;3=>_;4=>_;5=>_ }
+    Set = [int]_{ [1]_;[2]_;[3]_;[4]_;[5]_ }
+    Set2 = { [1]_;[2]_;[3]_;[4]_;[5]_ }
 
     # Dictionary, 前面为key，后面为value
-    Dictionary = {"1"=>false; "2"=>true}
-    Dictionary = [str=>bool]{ "1"=>false; "2"=>true}
-    print( Dictionary.["1"] ) # 使用key获取
+    Dictionary = {["1"]false; ["2"]true}
+    Dictionary = [str]bool{ ["1"]false; ["2"]true}
+    print( Dictionary["1"] ) # 使用key获取
 
-    Stack = [.>int]{}
-    Queue = [.<int]{}
+    Stack = [>]int{}
+    Queue = [<]int{}
 
-    Array [...int] = array_of(1,2,3)
+    Array [.]int = array_of(1,2,3)
     # Anonymous Package
     New = {
         title : "nnn"
@@ -75,7 +75,7 @@ Main : (->>) {
     }
 
     # pattern match
-    x ? 0++6, 7, 8, 9 {
+    ? x.. 0++6, 7, 8, 9 {
         do_something_a()
     } 14 {
         do_something_b()
@@ -84,34 +84,34 @@ Main : (->>) {
     }
 
     # type match
-    object ? [str] { 
+    ? object.. _ str { 
         print("string") 
-    } [int] { 
+    } _ int { 
         print("integer") 
-    } [num] { 
+    } _ num { 
         print("float") 
-    } [bool] { 
+    } _ bool { 
         print("boolean") 
-    } [any] {
+    } _ any {
         print("object")
     } nil { 
         print("null") 
     }
 
     # Loop, use identify to take out single item, default is it
-    item @ array {
+    @ item = array.. {
         print(item)
     }
     # take index and value, both worked at Dictionary
-    index=>value @ array {
+    @ [index]value = array.. {
         print(index, value)
     }
 
     # Iterator, Increment from++to:step, Decrement from--to:step, step can omit
-    it @ 0 ++ 100 ^ 2 {
+    @ it = 0 ++ 100 ^ 2 {
         print(it)
     }
-    it @ 10--1 {}
+    @ it = 10--1 {}
 
     # Infinite
     @ true {
@@ -130,14 +130,14 @@ Main : (->>) {
     }
     
     # Struct，支持 variable 类型，通常用来包装数据
-    View : % {
+    View : $ {
         width int
         height int
         background str
     }
 
     # 也支持包装方法，可以通过 me 来访问包自身属性或方法
-    Button : % me <- {
+    Button : $ (me) {
         width int
         height int
         background str
@@ -149,36 +149,36 @@ Main : (->>) {
         }
     }
 
-    Image : % me <- {
+    Image : $ (me) {
         # 私有属性，不能被外部访问，也不能被重包装
         _width = 0
         _height = 0
         _source = "" 
-    } % me <- (w int, h int, s str) { # 初始化方法
+    } % (w int, h int, s str->me) { # 初始化方法
         me._width, me._height, me._source = w,h,s
     }
 
     # Interface, implemented by package
-    Animation : % _ {
+    Animation : $ {
         speed () int { get set }    # 需求变量，导入的包必须实现定义
         move (s int ->)             # 需求方法，导入的包必须实现定义
     }
 
     # Combine Package，通过引入来复用属性和方法
-    Image_Button : % {
+    Image_Button : $ {
         # 通过包含其它包，来组合新的包使用
         % Image
         % Button
 
         title str
         _speed int
-    } % me <- Animation { # Implement protocol
+    } % $ Animation(me) { # Implement protocol
         speed : (me._speed) int
         move : (s int ->) {
             t = 5000/s
             play( s + t )
         }
-    } % me <- (w int, h int)(w, h , "img") {
+    } % (w int, h int->me)(w, h , "img") {
         me.title = "img btn"
     }
 
@@ -202,13 +202,13 @@ Main : (->>) {
     ImgBtn = Image_Button.(1, 1)
 
     # judge type
-    ? IB?[Image_Button] {
+    ? IB Image_Button? {
         # convert type
-        IB![View].show()
+        (IB View!).show()
     }
 
     # get type
-    print( typeof[Image_Button]() )
+    print( [typeof Image_Button]() )
 
     # Check, listen the Exception Function
     Fi = File("./test.xs")
@@ -220,26 +220,29 @@ Main : (->>) {
     } _ {
         Fi.Dispose()
     }
+    # yield
+    yield_function : (-> @ r int) {
+        # yield return
+        @ <- 123
+        # yield break
+        @ <-
+    }
 
-    # yield break
-    @ <-
-    # yield return
-    @ <- 123
 
     # Use ~> to declare Async Function
-    Task : (in int ->> out int) {
+    task : (in int ->> out int) {
         # make a function to await
         << do_some_thing_A()
-        do some thing B()
+        do_some_thing_B()
         << do_some_thing_C()
         <- in
     }
 
-    X = Task(6)
+    x = task(6)
 
     # Annotation
     <assemby-> Table("user"), D(false,Name="d",Hide=true)>
-    User : % {
+    User : $ {
         <Column("id"), Required, Key>
         id str
         <Column("nick_name"), Required>
@@ -258,20 +261,20 @@ Main : (->>) {
     F = A?!128
 
     # Reference
-    Swap : (x!int, y!int ->) {
+    swap : (x!int, y!int ->) {
         x, y = y, x
     }
-    Swap(A!, B!)
+    swap(A!, B!)
     
     # Generic package
-    Table[T] : % {
+    [table T] : $ {
         data T
-        setData : (d T ->) {
+        set_data : (d T ->) {
             data = d
         }
     }
     # Generic function
-    Add[T] : (x1 T, x2 T -> y T) {
+    [Add T] : (x1 T, x2 T -> y T) {
         <- x1 + x2
     }
 
@@ -288,15 +291,15 @@ Main : (->>) {
     })
 
     # linq
-    arr = id @ expr -> where expr -> order expr -> select expr
+    arr = @ id = expr.. -> where expr -> order expr -> select expr
 
     # event
-    EventHandle : % {
-        property_changed [?]PropertyChangedEventHandler
+    EventHandle : $ {
+        property_changed [->]PropertyChangedEventHandler
     }
 
     # control
-    Data : % {
+    Data : $ {
         <get,set>
         c int 
         d int
@@ -304,7 +307,7 @@ Main : (->>) {
         e PropertyChangedEventHandler
     }
 
-    Color : %?{
+    Color : .. {
         Red 
         Green
         Blue
