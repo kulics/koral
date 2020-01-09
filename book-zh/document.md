@@ -465,7 +465,7 @@ Dictionary = {["a"]1; ["b"]2; ["c"]3}
 
 例如：
 ```
-DictionaryNumNum = [int=>int]{}     # 空
+DictionaryNumNum = [int]int{}     # 空
 ```
 ### 访问
 和列表类似，我们也可以使用索引直接访问数据。
@@ -927,7 +927,7 @@ Peter = Student{
 例如：
 ```
 Array = []int{ 1; 2; 3; 4; 5 }
-Dictionary = [str]int{ "1"=>1; "2"=>2; "3"=>3 }
+Dictionary = [str]int{ ["1"]1; ["2"]2; ["3"]3 }
 ```
 ## 匿名结构体
 如果我们只想直接包裹某些数据使用，而不是先定义结构体再使用，像匿名函数那样可以吗？
