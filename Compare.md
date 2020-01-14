@@ -317,7 +317,7 @@ emptyDictionary ={}
 ### Lite
 ```
 greet : (name str, day str -> r str) {
-    <- "Hello " name ", today is " day "."
+    <- "Hello \{name}, today is \{day}."
 }
 greet("Bob", "Tuesday")
 ```
@@ -467,7 +467,7 @@ increment(7)
 Shape : $ {
     numberOfSides = 0
     simpleDescription : (-> s str) {
-        <- "A shape with " numberOfSides " sides."
+        <- "A shape with \{numberOfSides} sides."
     }
 }
 ```
@@ -560,7 +560,7 @@ NamedShape : $ {
     name str
     numberOfSides = 0
     simpleDescription : (-> s str) {
-        <- "A shape with " numberOfSides " sides."
+        <- "A shape with \{numberOfSides} sides."
     }
 } 
 
@@ -568,7 +568,7 @@ Square : NamedShape % $ {
     sideLength num
 
     simpleDescription : (-> s str) {
-        <- "A square with sides of length " sideLength "."
+        <- "A square with sides of length \{sideLength}."
     }
 
     area : (-> f num) {
@@ -896,8 +896,8 @@ switch nb {
 ```
 @ current = someObjects.. {
     ? current.. movie Movie {
-        print("Movie: '" movie.name "', " +
-            "dir. " movie.director "")
+        print("Movie: '\{movie.name}', " +
+            "dir. \{movie.director}")
     }
 }
 ```
