@@ -393,12 +393,12 @@ Bit operations are the basis for the underlying calculations and are also suppor
 E.g:
 ```
 A = 1
-A `&` 1  # bitwise AND
-A `|` 1  # bitwise OR
-A `^` 1  # bitwise XOR
-`~`A     # bitwise inversion
-A `<` 1  # left shift
-A `>` 1  # right shift
+A && 1  # bitwise AND
+A || 1  # bitwise OR
+A ^^ 1  # bitwise XOR
+~~A     # bitwise inversion
+A << 1  # left shift
+A >> 1  # right shift
 ```
 
 # Collection Types
