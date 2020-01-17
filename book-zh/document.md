@@ -1,5 +1,5 @@
-# Lite 编程语言
-Lite 是一个专注于效率的开源编程语言，它可以帮你轻松构建跨平台软件。
+# K 编程语言
+K 是一个专注于效率的开源编程语言，它可以帮你轻松构建跨平台软件。
 
 通过精心设计的语法规则，这门语言可以有效降低读写负担，让你能够把真正的注意力放在解决问题上。  
 
@@ -33,14 +33,14 @@ Lite 是一个专注于效率的开源编程语言，它可以帮你轻松构建
 1. [可选类型](#可选类型)
 
 # 安装与使用
-目前 `Lite` 支持编译到 `C#/Go/JavaScript/Kotlin`，因此需要在系统中安装 `.NET Core/Go/NodeJS/JDK` 环境。  
+目前 `K` 支持编译到 `C#/Go/JavaScript/Kotlin`，因此需要在系统中安装 `.NET Core/Go/NodeJS/JDK` 环境。  
 
-执行编译器就会扫描当前文件夹的 `.lite` 文件，并且自动转译为同名的目标文件。  
+执行编译器就会扫描当前文件夹的 `.k` 文件，并且自动转译为同名的目标文件。  
 
-`Lite` 需要使用部分语言库的功能，所以请自行引用编译器对应的库。
+我们需要使用部分语言库的功能，所以请自行引用编译器对应的库。
 
 下载:
-- C# <https://github.com/lite-works/lite-csharp/releases>
+- C# <https://github.com/lite-works/k-csharp/releases>
 - Go <https://github.com/lite-works/lite-go/releases>
 - JavaScript <https://github.com/lite-works/lite-javascript/releases>
 - Kotlin <https://github.com/lite-works/lite-kotlin/releases>
@@ -1354,7 +1354,7 @@ ReadFile : (name str ->!) { # 声明可能异常函数
 func : (->) {
     F File
     ! {
-        F = ReadFile("./somecode.lite")
+        F = ReadFile("./somecode.file")
     } _ {
         ? F >< nil {
             F.release()
@@ -1383,7 +1383,7 @@ _ {
 
 例如：
 ```
-! Res = FileResource("/test.lite")
+! Res = FileResource("/test.file")
 ......
 ```
 
@@ -1680,4 +1680,4 @@ print(A, B)
 # A = 2, B = 1
 ```
 
-## [完整示例](../example.lite)
+## [完整示例](../example.k)

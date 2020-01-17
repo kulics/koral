@@ -1,7 +1,7 @@
 
 # Compare
 ## Hello World
-### Lite
+### K
 ```
 print("Hello, world!")
 ```
@@ -26,7 +26,7 @@ print("Hello, world!")
 print("Hello, world!")
 ```
 ## Variables And Constants
-### Lite
+### K
 ```
 myVariable = 42
 myVariable = 50
@@ -63,7 +63,7 @@ myVariable = 50
 MYCONSTANT = 42
 ```
 ## Explicit Types
-### Lite
+### K
 ```
 explicitDouble num = 70
 ```
@@ -84,7 +84,7 @@ val explicitDouble: Double = 70.0
 let explicitDouble: Double = 70
 ```
 ## Basic Types
-### Lite
+### K
 ```
 i32 i16 i64 i8 
 f64 f32 
@@ -127,7 +127,7 @@ bool
 string
 ```
 ## Type Coercion
-### Lite
+### K
 ```
 f = 6.0
 i = 94
@@ -164,10 +164,10 @@ i = 94
 count = i + int(f)
 ```
 ## Inclusive Range Operator
-### Lite
+### K
 ```
 @ index = 1 ^ 5.. {
-    print("" index " times 5 is " index * 5 "")
+    print("\{index} times 5 is \{index * 5}")
 }
 ```
 ### C#
@@ -201,7 +201,7 @@ for index in range(1,6):
     print ("%d times 5 is %d" % (index,index*5))
 ```
 ## Arrays
-### Lite
+### K
 ```
 shoppingList = {"catfish"; "water"; "tulips"; "blue paint"}
 shoppingList[1] = "bottle of water"
@@ -232,7 +232,7 @@ shoppingList = ["catfish", "water", "tulips", "blue paint"]
 shoppingList[1] = "bottle of water"
 ```
 ## Maps
-### Lite
+### K
 ```
 occupations = {
     ["Malcolm"] "Captain"
@@ -281,7 +281,7 @@ occupations = {
 occupations["Jayne"] = "Public Relations"
 ```
 ## Empty Collections
-### Lite
+### K
 ```
 emptyArray = []str{}
 emptyDictionary = [str]f32{}
@@ -314,7 +314,7 @@ emptyArray = []
 emptyDictionary ={}
 ```
 ## Functions
-### Lite
+### K
 ```
 greet : (name str, day str -> r str) {
     <- "Hello \{name}, today is \{day}."
@@ -357,7 +357,7 @@ def greet(name,day):
 greet("Bob", "Tuesday")
 ```
 ## Tuple Return
-### Lite
+### K
 ```
 getGasPrices : (-> a num, b num, c num) {
     <- 3.59, 3.69, 3.79
@@ -392,7 +392,7 @@ def getGasPrices():
     return (3.59, 3.69, 3.79)
 ```
 ## Function Type
-### Lite
+### K
 ```
 makeIncrementer : (-> fn (int->int)) {
     addOne : (number int -> number int) {
@@ -462,7 +462,7 @@ increment = makeIncrementer()
 increment(7)
 ```
 ## Classes Declaration
-### Lite
+### K
 ```
 Shape : $ {
     numberOfSides = 0
@@ -517,7 +517,7 @@ class Shape(object):
         return 'A shape with' + numberOfSides +' sides.'
 ```
 ## Classes Usage
-### Lite
+### K
 ```
 shape = Shape{}
 shape.numberOfSides = 7
@@ -554,7 +554,7 @@ shape.numberOfSides = 7
 shapeDescription = shape.simpleDescription()
 ```
 ## Subclass
-### Lite
+### K
 ```
 NamedShape : $ {
     name str
@@ -749,7 +749,7 @@ test.area()
 test.simpleDescription()
 ```
 ## Checking Type
-### Lite
+### K
 ```
 movieCount = 0
 songCount = 0
@@ -830,7 +830,7 @@ for item in library:
         songCount+=1
 ```
 ## Pattern Matching
-### Lite
+### K
 ```
 nb = 42
 ? nb.. 0 ^ 7, 8, 9 { 
@@ -892,7 +892,7 @@ switch nb {
 }
 ```
 ## Downcasting
-### Lite
+### K
 ```
 @ current = someObjects.. {
     ? current.. movie Movie {
@@ -945,7 +945,7 @@ for current in someObjects:
         print('Movie: %s, dir. %s' % (movie.name, movie.director))
 ```
 ## Protocol
-### Lite
+### K
 ```
 Nameable : $ {
     name (-> s str)
@@ -998,7 +998,7 @@ func f(x: Nameable) {
 }
 ```
 ## Implement
-### Lite
+### K
 ```
 Dog : $ Nameable {
     name : (-> n str) {
