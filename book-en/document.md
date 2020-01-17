@@ -1,5 +1,5 @@
-# Lite Programming Language
-Lite is an open source programming language focused on efficiency. It can help you easily build cross-platform software.
+# The K Programming Language
+K is an open source programming language focused on efficiency. It can help you easily build cross-platform software.
 
 With well-designed grammar rules, this language can effectively reduce the burden of reading and writing, allowing you to focus on solving problems.
 
@@ -33,14 +33,14 @@ With well-designed grammar rules, this language can effectively reduce the burde
 1. [Optional Type](#Optional-Type)
 
 # Install
-Currently `Lite` supports compilation to `C#/Go/JavaScript/Kotlin`, so you need to install `.NET Core/Go/NodeJS/JDK` environment on your system.
+Currently `K` supports compilation to `C#/Go/JavaScript/Kotlin`, so you need to install `.NET Core/Go/NodeJS/JDK` environment on your system.
 
-The execution compiler will scan the `.lite` file of the current folder and automatically translate it to the target file of the same name.
+The execution compiler will scan the `.k` file of the current folder and automatically translate it to the target file of the same name.
 
-`Lite` needs to use the function of some language libraries, so please refer to the library corresponding to the compiler.
+we needs to use the function of some language libraries, so please refer to the library corresponding to the compiler.
 
 download:
-- C# <https://github.com/lite-works/lite-csharp/releases>
+- C# <https://github.com/lite-works/k-csharp/releases>
 - Go <https://github.com/lite-works/lite-go/releases>
 - JavaScript <https://github.com/lite-works/lite-javascript/releases>
 - Kotlin <https://github.com/lite-works/lite-kotlin/releases>
@@ -1368,7 +1368,7 @@ E.g:
 Func : (->) {
     F File
     ! {
-        F = ReadFile("./somecode.lite")
+        F = ReadFile("./somecode.file")
     } _ {
         ? F >< nil {
             F.release()
@@ -1397,7 +1397,7 @@ For interfaces that implement an autorelease interface, we can use declaration s
 
 E.g:
 ```
-! Res = FileResource("/test.lite")
+! Res = FileResource("/test.file")
 ......
 ```
 
@@ -1694,4 +1694,4 @@ print(A, B)
 # A = 2, B = 1
 ```
 
-## [Complete Example](../example.lite)
+## [Complete Example](../example.k)

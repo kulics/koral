@@ -1,4 +1,4 @@
-"lite" {
+"demo" {
     "System"
 }
 

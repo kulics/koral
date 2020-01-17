@@ -1,11 +1,11 @@
-"lite/example" {
+"example" {
     "System"
     "System/IO"
     "System/Linq"
     "System/ComponentModel/DataAnnotations/Schema"
     "System/ComponentModel/DataAnnotations"
 
-    example_static. = "lite/example" 
+    example_static. = "example" 
 }
 
 #=
@@ -39,7 +39,7 @@ Main : (->>) {
 
     y = test_tuple(1).to_str()
 
-    p = lite.example.app{}
+    p = example.app{}
 
     p.c(1)
     test_interface(p)
@@ -133,9 +133,9 @@ test_operator : (->) {
 }
 
 test_string : (->) {
-    @ ea = "love lite".. {
+    @ ea = "love programming".. {
         ? ea == 'e' {
-            print("love lite")
+            print("love programming")
         }
     }
 }
@@ -236,9 +236,9 @@ test_queue : (->) {
 test_combined_type : (->) {
     # swift: [int:[[str:[str:[str]]]]]
     # go: map[int][]map[str]map[str][]str
-    # csharp: map<int,list<map<str,map<str,list<str>>>>>
-    lite1 [int][][str][str][]str
-    lite2 [dictionary int, [list [dictionary str, [dictionary str, [list str]]]]]
+    # c#: map<int,list<map<str,map<str,list<str>>>>>
+    type1 [int][][str][str][]str
+    type2 [dictionary int, [list [dictionary str, [dictionary str, [list str]]]]]
 }
 
 test_switch : (->) {

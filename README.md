@@ -1,15 +1,15 @@
-# The Lite Programming Language
+# The K Programming Language
 <p>
   <a href="https://github.com/996icu/996.ICU/blob/master/LICENSE_CN">
     <img alt="996icu" src="https://img.shields.io/badge/license-NPL%20%28The%20996%20Prohibited%20License%29-blue.svg">
   </a>
 </p>
 
-Lite is an open source programming language focused on efficiency. It can help you easily build cross-platform software.
+K is an open source programming language focused on efficiency. It can help you easily build cross-platform software.
 
 With well-designed grammar rules, this language can effectively reduce the burden of reading and writing, allowing you to focus on solving problems.
 
-This is the main source code repository for Lite. It contains the compiler, and documentation.
+This is the main source code repository for K. It contains the compiler, and documentation.
 
 ## Key Features
 - The moderm gramar, which is easy to distinguish.
@@ -58,7 +58,7 @@ get_greetings : (first str -> result []str) {
     1. Include standard library.
     1. Improve grammar to achieve grammatical stability.
 1. 2020.01 ~ 2021.12
-    1. Write some projects using Lite.
+    1. Write some projects using K.
     1. Compile to more languages, including Go/Kotlin/JavaScript/LLVM.
     1. Improved compilation capabilities and support for language server protocols.
 
@@ -66,7 +66,7 @@ get_greetings : (first str -> result []str) {
 Compare with C#, Go, Kotlin, Swift, Python.
 Read detail from [Here](./Compare.md).  
 ## Source Code
-[C#](https://github.com/lite-works/lite-csharp)
+[C#](https://github.com/lite-works/k-csharp)
 
 [Go (not yet)](https://github.com/lite-works/lite-go)
 
