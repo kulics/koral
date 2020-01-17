@@ -9,6 +9,7 @@ With well-designed grammar rules, this language can effectively reduce the burde
 - Generic.
 - Multi-paradigm programming.
 - Cross-platform.
+- Unicode.
 - Multiple backends, support C # / Go / JavaScript / Kotlin.
 - LLVM will be supported soon.
 

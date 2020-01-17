@@ -17,6 +17,7 @@ This is the main source code repository for K. It contains the compiler, and doc
 - Generic.
 - Multi-paradigm programming.
 - Cross-platform.
+- Unicode.
 - Multiple backends, support C # / Go / JavaScript / Kotlin.
 - LLVM will be supported soon.
 
@@ -66,10 +67,10 @@ get_greetings : (first str -> result []str) {
 Compare with C#, Go, Kotlin, Swift, Python.
 Read detail from [Here](./Compare.md).  
 ## Source Code
-[C#](https://github.com/lite-works/k-csharp)
+[C#](https://github.com/kulics-works/k-csharp)
 
-[Go (not yet)](https://github.com/lite-works/lite-go)
+[Go (not yet)](https://github.com/kulics-works/k-go)
 
-[JavaScript (not yet)](https://github.com/lite-works/lite-javascript)
+[JavaScript (not yet)](https://github.com/kulics-works/k-javascript)
 
-[Kotlin (not yet)](https://github.com/lite-works/lite-kotlin)
+[Kotlin (not yet)](https://github.com/kulics-works/k-kotlin)
