@@ -41,10 +41,10 @@ K 是一个专注于效率的开源编程语言，它可以帮你轻松构建跨
 我们需要使用部分语言库的功能，所以请自行引用编译器对应的库。
 
 下载:
-- C# <https://github.com/lite-works/k-csharp/releases>
-- Go <https://github.com/lite-works/lite-go/releases>
-- JavaScript <https://github.com/lite-works/lite-javascript/releases>
-- Kotlin <https://github.com/lite-works/lite-kotlin/releases>
+- [C#](https://github.com/kulics-works/k-csharp/releases)
+- [Go](https://github.com/kulics-works/k-go/releases)
+- [JavaScript](https://github.com/kulics-works/k-javascript/releases)
+- [Kotlin](https://github.com/kulics-works/k-kotlin/releases)
 
 # 基础语法
 ## 基本语句

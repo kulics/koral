@@ -41,10 +41,10 @@ The execution compiler will scan the `.k` file of the current folder and automat
 we needs to use the function of some language libraries, so please refer to the library corresponding to the compiler.
 
 download:
-- C# <https://github.com/lite-works/k-csharp/releases>
-- Go <https://github.com/lite-works/lite-go/releases>
-- JavaScript <https://github.com/lite-works/lite-javascript/releases>
-- Kotlin <https://github.com/lite-works/lite-kotlin/releases>
+- [C#](https://github.com/kulics-works/k-csharp/releases)
+- [Go](https://github.com/kulics-works/k-go/releases)
+- [JavaScript](https://github.com/kulics-works/k-javascript/releases)
+- [Kotlin](https://github.com/kulics-works/k-kotlin/releases)
 
 # Basic Grammar
 ## Basic Statement
