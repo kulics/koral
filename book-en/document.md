@@ -336,9 +336,7 @@ print( A - B )    # - minus
 print( A * B )    # * multiply
 print( A / B )    # / divide
 print( A \ B )    # \ residual, meaning the remainder remaining after the divisibility, the result here is 2
-print( A {*} B )  # {*} power
-print( A {/} B )  # {/} root
-print( A {\} B )  # {\} log
+print( A ^ B )    # ^ power
 ```
 In addition to numbers, there are other types that support arithmetic operations. For example, `str` can use an addition operation to combine two paragraphs of text.
 
@@ -382,11 +380,12 @@ E.g:
 ```
 A = 0
 A = 1       # = the simplest assignment
-A += 1      # += Add before adding value
-A -= 1      # -= First subtraction and then assignment
+A += 1      # += First add and then assign
+A -= 1      # -= First subtraction and then assign
 A *= 1      # *= First multiply and then assign
-A /= 1      # /= First divide and then assign value
-A \= 1      # \= Take the first and then assign the value
+A /= 1      # /= First divide and then assign
+A \= 1      # \= First residual and then assign
+A ^= 1      # ^= First power and then assign
 ```
 ## Bit Operation
 Bit operations are the basis for the underlying calculations and are also supported in this language.
@@ -632,31 +631,31 @@ This can be thought of as a `foreach` structure relative to other languages.
 ## Iterator loop
 Sometimes, we don't necessarily have a collection, but we need to take the number from `0` to `100`. We have an iterator syntax to accomplish such a task.
 
-The iterator can take the number from the start point to the end point loop. We use the expression of the set, separated by two numbers using the `^` symbol.
+The iterator can take the number from the start point to the end point loop. We use the expression of the set, separated by two numbers using the `~` symbol.
 
 E.g:
 ```
-@ i = 0 ^ 100.. {
+@ i = 0 ~ 100.. {
     print(i)  # print every number
 }
 ```
-It should be noted that the meaning of `0 ^ 100` is read from `0` to `100`, that is, a total of `101` times. The iterator will execute until the last number is executed, rather than ending one at a time.
+It should be noted that the meaning of `0 ~ 100` is read from `0` to `100`, that is, a total of `101` times. The iterator will execute until the last number is executed, rather than ending one at a time.
 
 The iterator defaults to increment `1` every interval. If we need to take every other number, we can add a condition for each step. Just insert `(value)`.
 
 E.g:
 ```
-@ i = 0 ^(2) 100.. {
+@ i = 0 ~(2) 100.. {
     ......
 }
 ```
 So every time the interval is not `1` but `2`, we can set other numbers.
 
-We can also let it traverse in reverse order, just use `~^`.
+We can also let it traverse in reverse order, just use `~~`.
 
 E.g:
 ```
-@ i = 100 ~^ 0.. {
+@ i = 100 ~~ 0.. {
     ......  # From 100 to 0
 }
 ```
@@ -687,7 +686,7 @@ E.g:
 
 It should be noted that if you jump out of a multi-level nested loop, you will only jump out of the loop that is closest to you.
 ## Continue
-If you only need to jump out of the current loop, use the `^@` statement.
+If you only need to jump out of the current loop, use the `..@` statement.
 ## Default Condition
 If you want to execute some other logic when the loop is not executed, just use the `_` declaration.
 
@@ -811,7 +810,7 @@ There is no special way to define function arguments, just replace the argument 
 E.g:
 ```
 Each_1_To_10 : (func (int->) ->) {
-     @ i = 1 ^ 10.. {
+     @ i = 1 ~ 10.. {
          func(i)
      }
 }

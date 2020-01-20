@@ -102,13 +102,11 @@ test_operator : (->) {
     B = 0X56_fa_C4
     B += ConstData
     B = + - B
-    B -= 1
-    B *= 2
-    B /= 2
-    B \= 2
-    print("2 pow 2 = ",  2 {*} 2 ) 
-    print("4 extract root for 2 = ", 4 {/} 2 ) 
-    print("4 log with base 2 = ", 4 {\} 2 ) 
+    B = B + 1
+    B = B * 2
+    B = B / 2
+    B = B \ 2
+    B = (B ^ 2)int!
     print(" mark string int \b \{B}123\\{} \{I}")
     print(""" "raw" mark string \b
      int \{B}123\\{} 
@@ -197,8 +195,8 @@ test_list : (->) {
     @ [i]v = Numbers.. {
         print(i, ":", v)
     }
-    Slice = Numbers[0^]
-    Slice2 = Numbers[^3]
+    Slice = Numbers[0~_]
+    Slice2 = Numbers[_~3]
 }
 
 test_set : (->) {
@@ -282,17 +280,17 @@ test_if : (->) {
 
 test_foreach : (->) {
     print(" 0 to 10")
-    @ i = 0 ^ 10..  {
+    @ i = 0 ~ 10.. {
         print(i, ", ", "")
     }
     print(" ")
     print(" 0 to 8 step 2")
-    @ ea = 0 ^(2) 8.. {
+    @ ea = 0 ~(2) 8.. {
         print(ea, ", ", "")
     }
     print(" ")
     print(" 8 to 2 step 2")
-    @ ea = 8 ~^(2) 0.. {
+    @ ea = 8 ~~(2) 2.. {
         print(ea, ", ", "")
         ? ea == 6 {
             ..@
@@ -305,7 +303,7 @@ test_foreach : (->) {
     } _ {
         print("loop else")
     }
-    @ i = 7 ^ 7.. {
+    @ i = 7 ~ 7.. {
         print(i)
     } _ {
         print("loop else")
@@ -315,7 +313,7 @@ test_foreach : (->) {
     } _ {
         nil
     }
-    arr = @ i = 0 ^ 5.. -> {
+    arr = @ i = 0 ~ 5.. -> {
         i * 3
     }
 }
@@ -402,7 +400,7 @@ test_lambda : (->) {
 }
 
 test_yield : (-> @ v int) {
-    @ i = 1 ^ 10.. {
+    @ i = 1 ~ 10.. {
         ? i < 7 {
             @ <- i
         } _ {
@@ -413,7 +411,7 @@ test_yield : (-> @ v int) {
 
 test_async : (->> x int, y int, z str) {
     sleep(1000)
-    @ i = 1 ^ 10.. {
+    @ i = 1 ~ 10.. {
         go{ ->> 
             << delay(1000)
             print("task", i)
@@ -547,7 +545,7 @@ app : program % $ (me) {
     }
 
     g : (-> @ v int) {
-        @ i = 1 ^ 3.. {
+        @ i = 1 ~ 3.. {
             @ <- i
         }
     }
