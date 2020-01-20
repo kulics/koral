@@ -75,7 +75,7 @@ Main : (->>) {
     }
 
     # pattern match
-    ? x.. 0^6, 7, 8, 9 {
+    ? x.. 0~6, 7, 8, 9 {
         do_something_a()
     } 14 {
         do_something_b()
@@ -107,18 +107,18 @@ Main : (->>) {
         print(index, value)
     }
 
-    # Iterator, Increment from ^(step) to, Decrement from ~^(step) to, (step) can omit
-    @ it = 0 ^(2) 100.. {
+    # Iterator, Increment from ~(step) to, Decrement from ~~(step) to, (step) can omit
+    @ it = 0 ~(2) 100.. {
         print(it)
     }
-    @ it = 10 ~^ 1.. {}
+    @ it = 10 ~~ 1.. {}
 
     # Infinite
     @ true {
         ? a > b {
             ~@ # jump out loop
         } _ {
-            ^@ # continue
+            ..@ # continue
         }
     }
     # Conditional

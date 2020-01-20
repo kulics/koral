@@ -98,8 +98,8 @@ swap : (list []int, i int, j int->) {
 
 simple_sort : (list []int->) {
     print("Simple Sort")
-    @ i = 0 ^ list.len-1.. {
-        @ j = i+1 ^ list.len-1.. {
+    @ i = 0 ~ list.len-1.. {
+        @ j = i+1 ~ list.len-1.. {
             ? list[i] > list[j] {
                 swap(list, i , j)
             }
@@ -112,8 +112,8 @@ simple_sort : (list []int->) {
 
 bubble_sort : (list []int->) {
     print("Bubble Sort")
-    @ i = 0 ^ list.len-1.. {
-        @ j = list.len-2 ~^ i.. {
+    @ i = 0 ~ list.len-1.. {
+        @ j = list.len-2 ~~ i.. {
             ? list[j] > list[j+1] {
                 swap(list, j , j+1)
             }
