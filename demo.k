@@ -3,13 +3,13 @@
 }
 
 Main : (->) {
-    n0 = node.(0)
-    n1 = node.(1)
-    n2 = node.(2)
-    n3 = node.(3)
-    n4 = node.(4)
-    n5 = node.(5)
-    n6 = node.(6)
+    n0 = node(0)
+    n1 = node(1)
+    n2 = node(2)
+    n3 = node(3)
+    n4 = node(4)
+    n5 = node(5)
+    n6 = node(6)
 
     n0.left = n1
     n0.right = n2
@@ -45,7 +45,7 @@ Main : (->) {
     }
 
     print("oop")
-    app = app.("test", "Windows")
+    app = app("test", "Windows")
     app.start()
     app.stop()
     shutdown(app)
@@ -86,7 +86,7 @@ inverse_node : (node ?node -> node ?node) {
     node.left = inverse_node(node.left)
     node.right = inverse_node(node.right)
 
-    temp = node.(node.value)
+    temp = node(node.value)
     temp.left = node.right
     temp.right = node.left
     <- temp

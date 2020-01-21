@@ -519,7 +519,7 @@ app : program % $ (me) {
         }
         Item3 = []int{1;2;3;4;5}
         Item4 = [str]int{["1"]1;["2"]2;["3"]3}
-        Item5 = package_child.(1,2) # New
+        Item5 = package_child(1,2) # New
     }
 
     [test_func_template T1, T2] : (data1 T1, data2 T2 -> data app) {
