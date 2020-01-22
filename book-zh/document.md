@@ -831,7 +831,7 @@ Each_1_To_10(print)
 ForEach( {it -> 
     print(it)
     print(it * it)
-    print(it % 2)
+    print(it / 2)
 })
 Take( {a, b -> a + b} )
 FindAll{ it -> it > 7 }  # 如果函数只有一个参数，还可以省略括号
@@ -1160,7 +1160,7 @@ Student : $ {
 
     do : (->) {
         SpendTime(1)        # 花费了一个小时
-        count -= 1       # 完成了一个
+        count -= 1          # 完成了一个
     }
 }
 ```
