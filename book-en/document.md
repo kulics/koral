@@ -608,12 +608,12 @@ Sometimes we may need to execute the same piece of code multiple times.
 
 In general, statements are executed in order, the first statement in the function is executed first, then the second statement, and so on.
 ## Collection loop
-If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can use the `@ identifier = expression {}` statement to iterate over the collection, taking each element out of `identifier`.
+If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can use the `@ identifier = expression.. {}` statement to iterate over the collection, taking each element out of `identifier`.
 
 E.g:
 ```
 Arr = {1; 2; 3; 4; 5}
-item @ Arr {
+@ item = Arr.. {
     print(item)   # print every number
 }
 ```
@@ -843,7 +843,7 @@ E.g:
 ForEach( {it ->
     print(it)
     print(it * it)
-    print(it % 2)
+    print(it / 2)
 })
 Take( {a, b -> a + b} )
 FindAll{ it -> it > 7 }     # If the function has only one argument, you can also omit the brackets
@@ -1173,8 +1173,8 @@ Student : $ {
     count = 999999
 
     do : (->) {
-        SpendTime(1)       # took an hour
-        count -= 1      # completed a
+        SpendTime(1)        # took an hour
+        count -= 1          # completed one
     }
 }
 ```
@@ -1492,7 +1492,7 @@ This is a simplified implementation.
 
 E.g:
 ```
-[List T] : % {
+[List T] : $ {
     items = Storage{T}     # Create Storage
     length = 0
 
