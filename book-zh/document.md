@@ -331,7 +331,7 @@ print( A + B )    # + 加
 print( A - B )    # - 减
 print( A * B )    # * 乘
 print( A / B )    # / 除
-print( A \ B )    # \ 取余，意思是整除后剩下的余数，这里的结果为 2
+print( A % B )    # % 取余，意思是整除后剩下的余数，这里的结果为 2
 print( A ^ B )    # ^ 幂
 ```
 除了数字之外，也有其它支持算术操作的类型，例如 `str` 可以使用加运算将两段文字合并起来。
@@ -378,7 +378,7 @@ A += 1  # += 先相加再赋值
 A -= 1  # -= 先相减再赋值
 A *= 1  # *= 先相乘再赋值
 A /= 1  # /= 先相除再赋值
-A \= 1  # \= 先取余再赋值
+A %= 1  # %= 先取余再赋值
 A ^= 1  # ^= 先幂运算再赋值
 ```
 ## 位操作
@@ -1020,13 +1020,13 @@ print( Chen.student.name )
 ```
 通过组合一层又一层的结构体，你可以自由拼装出任何一个你想要描述的事物。
 
-更近一步，如果我们希望直接包含某个结构体的所有属性而不是组合，可以使用顶层组合语句，声明方式为`类型 % 结构体`。
+更近一步，如果我们希望直接包含某个结构体的所有属性而不是组合，可以使用顶层组合语句，声明方式为`类型 & 结构体`。
 
 顶层组合会将结构体内的属性提取到最外部，就像直接包含对应属性一样。这有利于我们实现属性使用和传递。
 
 例如：
 ```
-ChineseStudent : Student % $ { # 顶层组合
+ChineseStudent : Student & $ { # 顶层组合
     kungfu = false
 }
 ```
@@ -1055,7 +1055,7 @@ Student : (name str, number str->me) {
     me.class = getSubText(number, 2, 3)
     # 计算得出年级
     me.grade = getSubText(number, 0, 1)
-} % $ {
+} & $ {
     ......
 }
 ```
@@ -1075,13 +1075,13 @@ print(Peter.class)     # 打印出 2
 ```
 Parent : $ {
     ......
-} % (a int->me) {
+} & (a int->me) {
     ......
 }
 
-Child : Parent % $ {
+Child : Parent & $ {
     ......
-} % (a int->me)(a) {
+} & (a int->me)(a) {
     ......
 }
 ```
@@ -1155,7 +1155,7 @@ Homework : $ {
 ```
 Student : $ {
     ......
-} % $ Homework { # 显式实现
+} & $ Homework { # 显式实现
     count = 999999
 
     do : (->) {
@@ -1610,7 +1610,7 @@ Annotation : $ {
 Linq : (->) {
     Numbers = { 0; 1; 2; 3; 4; 5; 6 }
     Linq = @ num = Numbers.. ->
-            where (num \ 2) == 0 ->
+            where (num % 2) == 0 ->
             orderby num -> descending ->
             select num
 }

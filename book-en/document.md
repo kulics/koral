@@ -335,7 +335,7 @@ print( A + B )    # + plus
 print( A - B )    # - minus
 print( A * B )    # * multiply
 print( A / B )    # / divide
-print( A \ B )    # \ residual, meaning the remainder remaining after the divisibility, the result here is 2
+print( A % B )    # % residual, meaning the remainder remaining after the divisibility, the result here is 2
 print( A ^ B )    # ^ power
 ```
 In addition to numbers, there are other types that support arithmetic operations. For example, `str` can use an addition operation to combine two paragraphs of text.
@@ -384,7 +384,7 @@ A += 1      # += First add and then assign
 A -= 1      # -= First subtraction and then assign
 A *= 1      # *= First multiply and then assign
 A /= 1      # /= First divide and then assign
-A \= 1      # \= First residual and then assign
+A %= 1      # %= First residual and then assign
 A ^= 1      # ^= First power and then assign
 ```
 ## Bit Operation
@@ -1033,13 +1033,13 @@ print( Chen.student.name )
 ```
 By combining layers of structure, you can freely assemble anything you want to describe.
 
-More recently, if we want to include all the attributes of a structure directly instead of a combination, we can use the top-level combination statement, declared as `type % struct`.
+More recently, if we want to include all the attributes of a structure directly instead of a combination, we can use the top-level combination statement, declared as `type & struct`.
 
 Top-level combinations extract attributes from the structure to the exterior, just as they contain corresponding attributes directly. This is conducive to the use and transmission of attributes.
 
 E.g:
 ```
-ChineseStudent : Student % $ { # top-level combination
+ChineseStudent : Student & $ { # top-level combination
     kungfu = false
 }
 ```
@@ -1068,7 +1068,7 @@ Student : (name str, number str->me) {
     me.class = getSubText(number, 2, 3)
     # Calculate the grade
     me.grade = getSubText(number, 0, 1)
-} % $ {
+} & $ {
     ......
 }
 ```
@@ -1088,13 +1088,13 @@ E.g:
 ```
 Parent : $ {
     ......
-} % (a int->me) {
+} & (a int->me) {
     ......
 }
 
-Child : Parent % $ {
+Child : Parent & $ {
     ......
-} % (a int->me)(a) {
+} & (a int->me)(a) {
     ......
 }
 ```
@@ -1169,7 +1169,7 @@ E.g:
 ```
 Student : $ {
      ......
-} % $ Homework { # Explicit implementation
+} & $ Homework { # Explicit implementation
     count = 999999
 
     do : (->) {
@@ -1624,7 +1624,7 @@ E.g:
 Linq : (->) {
     Numbers = { 0; 1; 2; 3; 4; 5; 6 }
     Linq = @ num = Numbers.. ->
-            where (num \ 2) == 0 ->
+            where (num % 2) == 0 ->
             orderby num -> descending ->
             select num
 }

@@ -154,7 +154,7 @@ Main : (->>) {
         _width = 0
         _height = 0
         _source = "" 
-    } % (w int, h int, s str->me) { # 初始化方法
+    } & (w int, h int, s str->me) { # 初始化方法
         me._width, me._height, me._source = w,h,s
     }
 
@@ -165,16 +165,16 @@ Main : (->>) {
     }
 
     # Combine Package，通过引入来复用属性和方法
-    Image_Button : Image % Button % $ {
+    Image_Button : Image & Button & $ {
         title str
         _speed int
-    } % $ Animation(me) { # Implement protocol
+    } & $ Animation(me) { # Implement protocol
         speed : (me._speed) int
         move : (s int ->) {
             t = 5000/s
             play( s + t )
         }
-    } % (w int, h int->me)(w, h , "img") {
+    } & (w int, h int->me)(w, h , "img") {
         me.title = "img btn"
     }
 
@@ -253,10 +253,10 @@ Main : (->>) {
     # Safe Call
     E = A?.to_str()
     # OrElseValue
-    F = A?!128
+    F = A??128
 
     # Reference
-    swap : (x!int, y!int ->) {
+    swap : (x !int, y !int->) {
         x, y = y, x
     }
     swap(A!, B!)
