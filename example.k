@@ -107,7 +107,7 @@ test_operator : (->) {
     B = B / 2
     B = B % 2
     B = B ^ 2 int!
-    print(" mark string int \b \{B}123\\{} \{I}")
+    print(" mark string int \b \{B}123\\{} \{I;I}")
     print(""" "raw" mark string \b
      int \{B}123\\{} 
       \{I}

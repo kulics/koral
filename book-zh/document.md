@@ -283,11 +283,11 @@ String = "Hello world! " + Title + Content.to_str()
 ```
 
 这样做当然不影响功能，但是我们可以使用更直观方便的方式，那就是字符串模版。
-我们可以使用 `\{表达式, 表达式}` 语法直接插入表达式。
+我们可以使用 `\{表达式; 表达式}` 语法直接插入表达式。
 
 例如：
 ```
-String = "Hello world! \{Title, Content}"
+String = "Hello world! \{Title; Content}"
 # Hello world! Year:2018
 ```
 ## Boolean 布尔  
