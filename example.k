@@ -105,8 +105,8 @@ test_operator : (->) {
     B = B + 1
     B = B * 2
     B = B / 2
-    B = B \ 2
-    B = (B ^ 2)int!
+    B = B % 2
+    B = B ^ 2 int!
     print(" mark string int \b \{B}123\\{} \{I}")
     print(""" "raw" mark string \b
      int \{B}123\\{} 
@@ -148,14 +148,14 @@ test_optional : (->) {
     D ?app = nil
     E ?[]?int = []?int{0}
     E?[0]?.to_str()?.to_str()
-    F = D?!app{}
+    F = D??app{}
 }
 
 test_reference : (->) {
     x int = 1
     y ?int = 2
     swap : (a !int, b !?int ->) {
-        b, a = a, b?!2
+        b, a = a, b??2
     }
     swap(x!, y!)
 }
@@ -432,9 +432,9 @@ test_async : (->> x int, y int, z str) {
 
 test_linq : (->) {
     Numbers = {0; 1; 2; 3; 4; 5; 6}
-    Linq = @ i = Numbers.. -> where (i \ 2) == 0 ->
+    Linq = @ i = Numbers.. -> where (i % 2) == 0 ->
     orderby i -> descending -> select i
-    Lambda = Numbers.Where{ i -> i\2==0 }.OrderBy{ i -> i }.ToList()
+    Lambda = Numbers.Where{ i -> i%2==0 }.OrderBy{ i -> i }.ToList()
 }
 
 test_define : (->) {
@@ -497,13 +497,13 @@ in_package_array : $ {
     arr []int = {1;2;3;4;5;6;7}
 }
 
-defer : IDisposable % $ {
+defer : IDisposable & $ {
     data = ""
 
     Dispose : (->) {}
 }
 
-app : program % $ (me) { 
+app : program & $ (me) { 
     i = 555
     arr = {1;1;1;1}
     _priName = " program "
@@ -525,7 +525,7 @@ app : program % $ (me) {
     [test_func_template T1, T2] : (data1 T1, data2 T2 -> data app) {
         <- me
     }
-} % $ protocol(me) {
+} & $ protocol(me) {
     <get{->me._b}, set{v->me._b = v;}>
     b int
     <get,set>
@@ -614,21 +614,21 @@ package = $ (me) {
         me.x = 21
         print("package")
     }
-} % (y int = 3->me) {
+} & (y int = 3->me) {
     me.x = ConstData
     me.y = y
 }
 
-package_child = package % (x int, y int->me)(y) {
+package_child = package & (x int, y int->me)(y) {
     me.x = x
-} % $ (me,super) {
+} & $ (me,super) {
     x int
 
     .parentFunc : (->) {
         super.x = 64
         print("package child")
     }
-} % {
+} & {
     a = 7
     b : (->) {
         print("static")
