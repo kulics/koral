@@ -1664,11 +1664,11 @@ Arr?.to_str()
 ```
 
 ## Merge Operation
-If you want to use another default value when the value of the optional type is null, you can use the `id ?! value`.
+If you want to use another default value when the value of the optional type is null, you can use the `id ?? value`.
 
 E.g:
 ```
-B = A ?! 128
+B = A ?? 128
 ```
 
 ## Reference Operation
