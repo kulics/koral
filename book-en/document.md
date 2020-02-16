@@ -189,11 +189,6 @@ The identifier is the name given to a variable, function, structure, interface, 
 1. Within the different `{}`, you can define an identifier for the duplicate name, and the language will prefer the identifier defined in the current scope.
 1. In namespaces, structs, and interfaces, attributes and method names that begin with an underscore `_` are considered private and the rest are considered public.
 
-## Keyword
-none.
-
-Yes, you are not mistaken, we do not have keywords. So you can use any character as your identifier, regardless of the conflict.
-
 # Basic Types
 We only need a few simple basic types to do most of the work.
 
