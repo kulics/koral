@@ -1,11 +1,11 @@
-"example" {
-    "System"
-    "System/IO"
-    "System/Linq"
-    "System/ComponentModel/DataAnnotations/Schema"
-    "System/ComponentModel/DataAnnotations"
+example . {
+    System
+    System.IO
+    System.Linq
+    System.ComponentModel.DataAnnotations.Schema
+    System.ComponentModel.DataAnnotations
 
-    example_static. = "example" 
+    _ = example.example_static
 }
 
 #=

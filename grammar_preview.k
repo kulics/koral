@@ -1,14 +1,14 @@
 # Grammar Overview
 
 # Name Space
-"demo" {
-    "System"
-    "System/Linq"
-    "System/Text"
-    "System/Threading/Tasks"
-    "System/ComponentModel/DataAnnotations/Schema"
-    "System/ComponentModel/DataAnnotations"
-    File. = "IO" # 可以隐藏元素使用内容
+demo . {
+    System
+    System.Linq
+    System.Text
+    System.Threading.Tasks
+    System.ComponentModel.DataAnnotations.Schema
+    System.ComponentModel.DataAnnotations
+    _ = IO.File # 可以隐藏元素使用内容
 }
 
 Main : (->>) {
