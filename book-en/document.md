@@ -1052,11 +1052,11 @@ This approach is similar to class inheritance in other languages.
 ### Construction
 Sometimes we might use the constructor method of structure.
 
-We can use the special constructor statement `(->self_identifier) {}`.
+We can use the special constructor statement `(->$self_identifier) {}`, self_identifier can omit.
 
 E.g:
 ```
-Student : (name str, number str->me) {
+Student : (name str, number str->$me) {
     me.name = name
     me.number = number
     # Calculate the class
@@ -1083,13 +1083,13 @@ E.g:
 ```
 Parent : $ {
     ......
-} & (a int->me) {
+} & (a int->$) {
     ......
 }
 
 Child : Parent & $ {
     ......
-} & (a int->me)(a) {
+} & (a int->$)(a) {
     ......
 }
 ```

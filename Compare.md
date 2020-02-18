@@ -574,7 +574,7 @@ Square : NamedShape & $ {
     area : (-> f num) {
         <- sideLength * sideLength
     }
-} & (sideLength num, name str->me)(name) {
+} & (sideLength num, name str->$me)(name) {
     me.sideLength = sideLength
     me.numberOfSides = 4
 }
