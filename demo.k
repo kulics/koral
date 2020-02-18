@@ -1,5 +1,5 @@
-"demo" {
-    "System"
+demo . {
+    System
 }
 
 Main : (->) {
