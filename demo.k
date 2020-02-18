@@ -178,7 +178,7 @@ node : $ {
     value int
     left ?node
     right ?node
-} & (value int->me) {
+} & (value int->$me) {
     me.value = value
 }
 
@@ -202,12 +202,12 @@ program = control & $ {
         print("shutdown")
         _running = false
     }
-} & (name str->me) {
+} & (name str->$me) {
     me.name = name
 }
 
 app = program & $ { 
     platform str
-} & (name str, platform str->me)(name) {
+} & (name str, platform str->$me)(name) {
     me.platform = platform
 }

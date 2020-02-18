@@ -554,7 +554,7 @@ app : program & $ (me) {
 result : $ {
     data str
 }
-result += (data str->me) {
+result += (data str->$me) {
     me.data = data
 }
 
@@ -614,12 +614,12 @@ package = $ (me) {
         me.x = 21
         print("package")
     }
-} & (y int = 3->me) {
+} & (y int = 3->$me) {
     me.x = ConstData
     me.y = y
 }
 
-package_child = package & (x int, y int->me)(y) {
+package_child = package & (x int, y int->$me)(y) {
     me.x = x
 } & $ (me,super) {
     x int

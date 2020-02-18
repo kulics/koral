@@ -1039,11 +1039,11 @@ print( Chen.name )
 ### 构造
 有些时候，我们可能需要使用结构体的构造方法。
 
-我们可以在使用特殊的构造函数语句 `(->自标志符) {}`。
+我们可以使用特殊的构造函数语句 `(->$自标志符) {}`，自标志符可以省略。
 
 例如：
 ```
-Student : (name str, number str->me) {
+Student : (name str, number str->$me) {
     me.name = name
     me.number = number
     # 计算得出班级
@@ -1070,13 +1070,13 @@ print(Peter.class)     # 打印出 2
 ```
 Parent : $ {
     ......
-} & (a int->me) {
+} & (a int->$) {
     ......
 }
 
 Child : Parent & $ {
     ......
-} & (a int->me)(a) {
+} & (a int->$)(a) {
     ......
 }
 ```
