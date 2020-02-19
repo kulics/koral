@@ -5,7 +5,7 @@ example . {
     System.ComponentModel.DataAnnotations.Schema
     System.ComponentModel.DataAnnotations
 
-    _ = example.example_static
+    _ : example.example_static
 }
 
 #=
@@ -25,7 +25,7 @@ Main : (->>) {
     test_if()
     test_foreach()
     test_while()
-    x = test_func("testcall")
+    $ x = test_func("testcall")
     test_func_params(1, 2,
     (a int, b int, c int, d i8 -> z str, a int, b int, c int) {
         <- "", a, b, c
@@ -37,9 +37,9 @@ Main : (->>) {
     test_linq()
     << test_async()
 
-    y = test_tuple(1).to_str()
+    $ y = test_tuple(1).to_str()
 
-    p = example.app{}
+    $ p = example.app{}
 
     p.c(1)
     test_interface(p)
@@ -58,45 +58,45 @@ Main : (->>) {
 }
 
 <get,set>
-static_x = 0
+$ static_x = 0
 
 <get{i->i},set{i,v->i=v;}>
-static_y = "hello"
+$ static_y = "hello"
 
 <_get{->static_x},set{v->static_x=v;}>
-static_z int
+$ static_z int
 
-static_g i64
+$ static_g i64
 
 test_tuple : (i int -> v str) {
     <- "tuple"
 }
 
 test_type : (->) {
-    I1 i8 = 1              # sbyte
-    I2 i16 = 1             # short
-    I3 i32 = 1             # int
-    I4 i64 = 1             # long
-    U1 u8 = 1              # byte
-    U2 u16 = 1             # ushort
-    U3 u32 = 1             # uint
-    U4 u64 = 1             # ulong
-    F1 f32 = 1             # float
-    F2 f64 = 1             # double
-    Char1 chr = 'a'        # char
-    String1 str = "123"    # string
-    Bool1 bool = false     # bool
-    Int1 int = 1           # int
-    Num1 num = 1.0         # double
-    Byte1 byte = 1         # byte
-    Any1 any = 1           # object
+    I1 i8 : 1              # sbyte
+    I2 i16 : 1             # short
+    I3 i32 : 1             # int
+    I4 i64 : 1             # long
+    U1 u8 : 1              # byte
+    U2 u16 : 1             # ushort
+    U3 u32 : 1             # uint
+    U4 u64 : 1             # ulong
+    F1 f32 : 1             # float
+    F2 f64 : 1             # double
+    Char1 chr : 'a'        # char
+    String1 str : "123"    # string
+    Bool1 bool : false     # bool
+    Int1 int : 1           # int
+    Num1 num : 1.0         # double
+    Byte1 byte : 1         # byte
+    Any1 any : 1           # object
 }
 
 test_operator : (->) {
-    I str = "128.687"
+    $ I str = "128.687"
     I += ".890"
-    A = 003.141592653e3
-    B int
+    A : 003.141592653e3
+    $ B int
     B = 2020_01_16
     B = 0b1010_1101
     B = 0X56_fa_C4
@@ -116,7 +116,7 @@ test_operator : (->) {
        " raw "
         string
       """, """""")
-    C = false
+    $ C = false
     C = ~C
     C = 1 >< 2
     C = 3 == 3
@@ -124,14 +124,14 @@ test_operator : (->) {
     C = 1 <= 3
     C = true | false
     C = true & false
-    D = (2018.0309).to_int() 
+    $ D = (2018.0309).to_int() 
     D = ~~ D && 1 || 2 ^^ 3 << 1 >> 2
     D = 1 <> 2
     print(B.to_str(), D)
 }
 
 test_string : (->) {
-    @ ea = "love programming".. {
+    @ ea : "love programming".. {
         ? ea == 'e' {
             print("love programming")
         }
@@ -139,21 +139,21 @@ test_string : (->) {
 }
 
 test_optional : (->) {
-    A ?int
+    $ A ?int
     A = 1
     A?.to_str()
-    B ?str = ""
+    $ B ?str = ""
     B?.to_str()
-    C ?any = nil
-    D ?app = nil
-    E ?[]?int = []?int{0}
+    C ?any : nil
+    D ?app : nil
+    E ?[]?int : []?int{0}
     E?[0]?.to_str()?.to_str()
-    F = D??app{}
+    F : D ?? app{}
 }
 
 test_reference : (->) {
-    x int = 1
-    y ?int = 2
+    $ x int = 1
+    $ y ?int = 2
     swap : (a !int, b !?int ->) {
         b, a = a, b??2
     }
@@ -161,10 +161,10 @@ test_reference : (->) {
 }
 
 test_type_convert : (->) {
-    x = app{}
-    y = x program!
-    z1 = (12.34).to_f32()
-    z2 = z1.to_i64()
+    x : app{}
+    y : x program!
+    z1 : (12.34).to_f32()
+    z2 : z1.to_i64()
     print( z2.[to any]().[to i64]() )
     print( y program? )
     print( (x program!).running )
@@ -172,46 +172,46 @@ test_type_convert : (->) {
 }
 
 test_empty : (->) {
-    x = [empty program]()
-    y = [empty protocol]()
-    Z = [empty (int->int)]()
+    x : [empty program]()
+    y : [empty protocol]()
+    Z : [empty (int->int)]()
 }
 
 test_list : (->) {
-    Single = {1}
-    Numbers = {1;2;5;6;8;4}
+    Single : {1}
+    $ Numbers = {1;2;5;6;8;4}
     Numbers = Numbers + 0
     Numbers += 3 + 7
     Numbers -= 6
-    three = 3
+    three : 3
     Numbers[three] = 5
-    Take = Numbers[0]
+    $ Take = Numbers[0]
     Take = in_package_array{}.arr[2]
-    Object = {"123"; 432; app{}}
-    NumbersInNumbers = {{1;1;1}; {1;1;1}}
+    Object : {"123"; 432; app{}}
+    $ NumbersInNumbers = {{1;1;1}; {1;1;1}}
     NumbersInNumbers[0][0] = 3
-    Empty = [][]int{}
-    Array [.]int = array_of(1,2,3)
-    @ [i]v = Numbers.. {
+    Empty : [][]int{}
+    Array [.]int : array_of(1,2,3)
+    @ [i]v : Numbers.. {
         print(i, ":", v)
     }
-    Slice = Numbers[0~_]
-    Slice2 = Numbers[_~3]
+    Slice : Numbers[0~_]
+    Slice2 : Numbers[_~3]
 }
 
 test_set : (->) {
-    Empty = [str]_{}
-    Numbers [int]_ = {[1]_;[2]_;[5]_;[6]_;[8]_;[4]_}
-    @ item = Numbers.. {
+    Empty : [str]_{}
+    Numbers [int]_ : {[1]_;[2]_;[5]_;[6]_;[8]_;[4]_}
+    @ item : Numbers.. {
         print(item)
     }
 }
 
 test_dictionary : (->) {
-    Empty = [str][int]int{}
-    Temp = {["k1"]1;["k2"]2}
+    Empty : [str][int]int{}
+    $ Temp = {["k1"]1;["k2"]2}
     Temp += {["k3"]3}
-    @ [k]v = Temp.. {
+    @ [k]v : Temp.. {
         print(k)
         print(v)
     }
@@ -220,13 +220,13 @@ test_dictionary : (->) {
 }
 
 test_stack : (->) {
-    temp = [>]int{}
+    $ temp = [>]int{}
     temp.push(1)
     temp.pop()
 }
 
 test_queue : (->) {
-    temp = [<]int{}
+    $ temp = [<]int{}
     temp.enqueue(1)
     temp.dequeue()
 }
@@ -235,12 +235,12 @@ test_combined_type : (->) {
     # swift: [int:[[str:[str:[str]]]]]
     # go: map[int][]map[str]map[str][]str
     # c#: map<int,list<map<str,map<str,list<str>>>>>
-    type1 [int][][str][str][]str
-    type2 [dictionary int, [list [dictionary str, [dictionary str, [list str]]]]]
+    $ type1 [int][][str][str][]str
+    $ type2 [dictionary int, [list [dictionary str, [dictionary str, [list str]]]]]
 }
 
 test_switch : (->) {
-    x any = 3
+    x any : 3
     ? x.. 1, 2, 3 {
         print("1,2,3")
     } _ str {
@@ -252,7 +252,7 @@ test_switch : (->) {
     } _ {
         print("default")
     }
-    y = ? x.. -> 3 {
+    y : ? x.. -> 3 {
         12
     } _ {
         0
@@ -260,7 +260,7 @@ test_switch : (->) {
 }
 
 test_if : (->) {
-    x = 5
+    x : 5
     ? x == 2 {
         print(2)
     } x == 3 {
@@ -271,7 +271,7 @@ test_if : (->) {
     ? x == 5 {
         print("yes")
     }
-    y = ? -> x == 5 {
+    y : ? -> x == 5 {
         x * x
     } _ {
         0
@@ -280,47 +280,47 @@ test_if : (->) {
 
 test_foreach : (->) {
     print(" 0 to 10")
-    @ i = 0 ~ 10.. {
+    @ i : 0 ~ 10.. {
         print(i, ", ", "")
     }
     print(" ")
     print(" 0 to 8 step 2")
-    @ ea = 0 ~(2) 8.. {
+    @ ea : 0 ~(2) 8.. {
         print(ea, ", ", "")
     }
     print(" ")
     print(" 8 to 2 step 2")
-    @ ea = 8 ~~(2) 2.. {
+    @ ea : 8 ~~(2) 2.. {
         print(ea, ", ", "")
         ? ea == 6 {
             ..@
         }
     }
     print(" ")
-    arr = []int{}
-    @ i = arr.. {
+    $ arr = []int{}
+    @ i : arr.. {
         print(i)
     } _ {
         print("loop else")
     }
-    @ i = 7 ~ 7.. {
+    @ i : 7 ~ 7.. {
         print(i)
     } _ {
         print("loop else")
     }
-    arr = @ i = {1;2;3;4;5}.. -> {
+    arr = @ i : {1;2;3;4;5}.. -> {
         i * 2
     } _ {
         nil
     }
-    arr = @ i = 0 ~ 5.. -> {
+    arr = @ i : 0 ~ 5.. -> {
         i * 3
     }
 }
 
 test_while : (->) {
-    A = 0
-    B = 8
+    $ A = 0
+    B : 8
     @ A < B {
         A += 1
         ~@
@@ -330,13 +330,13 @@ test_while : (->) {
 }
 
 test_check : (->!) {
-    z1 ?defer = nil
-    ! z2 = defer{}
+    $ z1 ?defer = nil
+    ! z2 : defer{}
     ! {
         z1 = defer{}
-        ! z3 = defer{}
-        x = 1 * 1
-        y = 1 + 1
+        ! z3 : defer{}
+        x : 1 * 1
+        y : 1 + 1
     } ex IOException {
         ! <- ex
     } e {
@@ -355,8 +355,8 @@ test_check : (->!) {
 
 test_func : (s str = "test" -> out1 str, out2 int) {
     s = s + "test"
-    I1 = 1+1*3*9/8
-    I2 = I1 + 5 + (I1 + 8)
+    I1 : 1+1*3*9/8
+    I2 : I1 + 5 + (I1 + 8)
     # func in func
     Infunc : (->) {
         <-
@@ -373,12 +373,12 @@ test_func_params : (a int, b int, fn (int, int, int, i8 ->
 
 test_lambda : (->) {
     Test1 : (fn (int, int -> int, int)->) {
-        O1, O2 = fn(1, 2)
+        $ O1, O2 = fn(1, 2)
     }
     Test1( {i1,i2 -> i1,i2} )
 
     Test2 : (fn (->int) -> ) {
-        O1 = fn()
+        $ O1 = fn()
     }
     Test2{->1}
 
@@ -400,7 +400,7 @@ test_lambda : (->) {
 }
 
 test_yield : (-> @ v int) {
-    @ i = 1 ~ 10.. {
+    @ i : 1 ~ 10.. {
         ? i < 7 {
             @ <- i
         } _ {
@@ -411,7 +411,7 @@ test_yield : (-> @ v int) {
 
 test_async : (->> x int, y int, z str) {
     sleep(1000)
-    @ i = 1 ~ 10.. {
+    @ i : 1 ~ 10.. {
         go{ ->> 
             << delay(1000)
             print("task", i)
@@ -431,31 +431,31 @@ test_async : (->> x int, y int, z str) {
 }
 
 test_linq : (->) {
-    Numbers = {0; 1; 2; 3; 4; 5; 6}
-    Linq = @ i = Numbers.. -> where (i % 2) == 0 ->
+    Numbers : {0; 1; 2; 3; 4; 5; 6}
+    Linq : @ i : Numbers.. -> where (i % 2) == 0 ->
     orderby i -> descending -> select i
-    Lambda = Numbers.Where{ i -> i%2==0 }.OrderBy{ i -> i }.ToList()
+    Lambda : Numbers.Where{ i -> i%2==0 }.OrderBy{ i -> i }.ToList()
 }
 
 test_define : (->) {
-    a = 1
+    $ a = 1
     ? a == 1 {
-        b = 2
+        $ b = 2
         b = 3
         a = 3
     } a == 2 {
-        b = 2
+        $ b = 2
         b = 3
         ? b == 2 {
             a = 1
         }
     } _ {
-        b = 2
+        $ b = 2
         b = 3
         a = 3
     }
     ? a.. 1 {
-        b = 2
+        $ b = 2
         b = 3
         a = 3
         ? a == 3 {
@@ -468,7 +468,7 @@ test_define : (->) {
         c = 2
         a = 1
     } _ {
-        b = 2
+        $ b = 2
         b = 3
         a = 3
     }
@@ -489,37 +489,37 @@ ConstFunction : (->v int) {
 }
 
 测试中文 : (甲 int->乙 int) {
-    乙 = 甲 + 1
+    $ 乙 = 甲 + 1
     <- 乙
 }
 
 in_package_array : $ {
-    arr []int = {1;2;3;4;5;6;7}
+    $ arr []int = {1;2;3;4;5;6;7}
 }
 
 defer : IDisposable & $ {
-    data = ""
+    $ data = ""
 
     Dispose : (->) {}
 }
 
 app : program & $ (me) { 
-    i = 555
-    arr = {1;1;1;1}
-    _priName = " program "
-    _b = 5
+    $ i = 555
+    $ arr = {1;1;1;1}
+    $ _priName = " program "
+    $ _b = 5
     <get{i->i},set{i,v->i=v;}>
-    a = 1
+    $ a = 1
 
     test_package : (->) {
-        Item = program{name = "new program"; running = true}
-        Item2 = {
+        Item : program{name = "new program"; running = true}
+        Item2 : {
             name : "new program"
             running : true
         }
-        Item3 = []int{1;2;3;4;5}
-        Item4 = [str]int{["1"]1;["2"]2;["3"]3}
-        Item5 = package_child(1,2) # New
+        Item3 : []int{1;2;3;4;5}
+        Item4 : [str]int{["1"]1;["2"]2;["3"]3}
+        Item5 : package_child(1,2) # New
     }
 
     [test_func_template T1, T2] : (data1 T1, data2 T2 -> data app) {
@@ -527,9 +527,9 @@ app : program & $ (me) {
     }
 } & $ protocol(me) {
     <get{->me._b}, set{v->me._b = v;}>
-    b int
+    $ b int
     <get,set>
-    f str
+    $ f str
 
     c : (x int -> y int) {
         <- x + me.b
@@ -545,21 +545,21 @@ app : program & $ (me) {
     }
 
     g : (-> @ v int) {
-        @ i = 1 ~ 3.. {
+        @ i : 1 ~ 3.. {
             @ <- i
         }
     }
 }
 
 result : $ {
-    data str
+    $ data str
 }
 result += (data str->$me) {
     me.data = data
 }
 
 [test_package_template (T class)] : $ {
-    data T
+    $ data T
     generic : (a T -> ) {}
 }
 
@@ -574,41 +574,41 @@ test_implement_template : $ [test_protocol_template test_implement_template](me)
 }
 
 program : $ {
-    running bool
+    $ running bool
 }
 
 program += $ {
     <get,set>
-    name str
+    $ name str
 }
 
 protocol : $$ {
-    b int
+    $ b int
     c (x int -> y int)
     d (->>y int)
     e (->>)
-    f str
+    $ f str
     g (-> @ v int)
 }
 
 <Table("test")>
 test_annotation : $ {
     <Key, Column("id")>
-    id str
+    $ id str
     <Column("nick_name")>
-    nick_name str
+    $ nick_name str
     <Column("profile")>
-    profile str
+    $ profile str
 }
 
 test_enum : .. {
     ok
-    err = -1
+    err : -1
 }
 
-package = $ (me) {
-    x int
-    y int
+package : $ (me) {
+    $ x int
+    $ y int
 
     parentFunc : (->) {
         me.x = 21
@@ -619,17 +619,17 @@ package = $ (me) {
     me.y = y
 }
 
-package_child = package & (x int, y int->$me)(y) {
+package_child : package & (x int, y int->$me)(y) {
     me.x = x
 } & $ (me,super) {
-    x int
+    $ x int
 
     .parentFunc : (->) {
         super.x = 64
         print("package child")
     }
 } & {
-    a = 7
+    $ a = 7
     b : (->) {
         print("static")
     }
