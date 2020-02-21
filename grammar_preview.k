@@ -8,43 +8,43 @@ demo . {
     System.Threading.Tasks
     System.ComponentModel.DataAnnotations.Schema
     System.ComponentModel.DataAnnotations
-    _ = IO.File # 可以隐藏元素使用内容
+    _ : IO.File # 可以隐藏元素使用内容
 }
 
 Main : (->>) {
     # Define, 一般情况下编译器会自动判断类型
-    String = "10"   # str
-    Number = 1.2    # num
-    Integer = 123   # int
-    Boolean = true  # bool
-    SmallFloat = (1.2).to_f32() # basic type convert
+    String! = "10"   # str
+    Number! = 1.2    # num
+    Integer! = 123   # int
+    Boolean! = true  # bool
+    SmallFloat! = (1.2).to_f32() # basic type convert
 
     # Const
     PI : 3.141592653
 
     # Mark String
-    Format = "the value is \{Integer}, \{Number}, \{Boolean}"
+    Format! = "the value is \{Integer}, \{Number}, \{Boolean}"
 
     # List
-    List = []int{ 1;2;3;4;5 }
-    List2 = { 1;2;3;4;5 }
+    List! = []int{ 1;2;3;4;5 }
+    List = { 1;2;3;4;5 }
     print( List[0] ) # 使用下标获取
 
     # Set
-    Set = [int]_{ [1]_;[2]_;[3]_;[4]_;[5]_ }
-    Set2 = { [1]_;[2]_;[3]_;[4]_;[5]_ }
+    Set! = [int]_{ [1]_;[2]_;[3]_;[4]_;[5]_ }
+    Set = { [1]_;[2]_;[3]_;[4]_;[5]_ }
 
     # Dictionary, 前面为key，后面为value
-    Dictionary = {["1"]false; ["2"]true}
+    Dictionary! = {["1"]false; ["2"]true}
     Dictionary = [str]bool{ ["1"]false; ["2"]true}
     print( Dictionary["1"] ) # 使用key获取
 
-    Stack = [>]int{}
-    Queue = [<]int{}
+    Stack : [>]int{}
+    Queue : [<]int{}
 
-    Array [.]int = array_of(1,2,3)
+    Array [.]int : array_of(1,2,3)
     # Anonymous Package
-    New = {
+    New : {
         title : "nnn"
         number : 8
     }
@@ -65,7 +65,7 @@ Main : (->>) {
 
     B2C()
     # 使用 _ 舍弃返回值
-    _ = A2B(3, "test")
+    _ : A2B(3, "test")
 
     # Judge，当表达式的结果只有Bool时，相当于if，只当True时才执行
     ? 1+1 >< 2 {
@@ -99,19 +99,19 @@ Main : (->>) {
     }
 
     # Loop, use identify to take out single item, default is it
-    @ item = array.. {
+    @ item : array.. {
         print(item)
     }
     # take index and value, both worked at Dictionary
-    @ [index]value = array.. {
+    @ [index]value : array.. {
         print(index, value)
     }
 
     # Iterator, Increment from ~(step) to, Decrement from ~~(step) to, (step) can omit
-    @ it = 0 ~(2) 100.. {
+    @ it : 0 ~(2) 100.. {
         print(it)
     }
-    @ it = 10 ~~ 1.. {}
+    @ it : 10 ~~ 1.. {}
 
     # Infinite
     @ true {
@@ -122,7 +122,7 @@ Main : (->>) {
         }
     }
     # Conditional
-    a = 0
+    a! = 0
     @ a < 10 {
         a += 1
     } _ {
@@ -131,17 +131,17 @@ Main : (->>) {
     
     # Struct，支持 variable 类型，通常用来包装数据
     View : $ {
-        width int
-        height int
-        background str
+        width! int
+        height! int
+        background! str
     }
 
     # 也支持包装方法，可以通过 me 来访问包自身属性或方法
     Button : $ (me) {
-        width int
-        height int
-        background str
-        title str
+        width! int
+        height! int
+        background! str
+        title! str
         click : (->) {
             print( me.title )
             doSomeThingA()
@@ -160,14 +160,14 @@ Main : (->>) {
 
     # Interface, implemented by package
     Animation : $ {
-        speed () int { get set }    # 需求变量，导入的包必须实现定义
+        speed! int     # 需求变量，导入的包必须实现定义
         move (s int ->)             # 需求方法，导入的包必须实现定义
     }
 
     # Combine Package，通过引入来复用属性和方法
     Image_Button : Image & Button & $ {
-        title str
-        _speed int
+        title! str
+        _speed! int
     } & $ Animation(me) { # Implement protocol
         speed : (me._speed) int
         move : (s int ->) {
@@ -188,14 +188,14 @@ Main : (->>) {
     IB.move(6)
 
     # Create an object with simple assign
-    IB2 = Image_Button{
+    IB2! = Image_Button{
         title="Cancel"
         background="red"
     }
 
     # Create an object with params
-    Img = Image(30, 20, "./icon.png")
-    ImgBtn = Image_Button(1, 1)
+    Img! = Image(30, 20, "./icon.png")
+    ImgBtn! = Image_Button(1, 1)
 
     # judge type
     ? IB Image_Button? {
@@ -233,37 +233,37 @@ Main : (->>) {
         <- in
     }
 
-    x = task(6)
+    x! = task(6)
 
     # Annotation
     <assemby-> Table("user"), D(false,Name="d",Hide=true)>
     User : $ {
         <Column("id"), Required, Key>
-        id str
+        id! str
         <Column("nick_name"), Required>
-        nick_name str
+        nick_name! str
         <Column("time_update"), Required>
-        time_update int
+        time_update! int
     }
 
     # Pointer Type
-    A ?int = nil
+    A! ?int = nil
     # Get Pointer
-    C = A?
+    C! = A?
     # Safe Call
-    E = A?.to_str()
+    E! = A?.to_str()
     # OrElseValue
-    F = A??128
+    F! = A??128
 
     # Reference
-    swap : (x !int, y !int->) {
+    swap : (x! int, y! int->) {
         x, y = y, x
     }
-    swap(A!, B!)
+    swap(A, B)
     
     # Generic package
     [table T] : $ {
-        data T
+        data! T
         set_data : (d T ->) {
             data = d
         }
@@ -296,10 +296,10 @@ Main : (->>) {
     # control
     Data : $ {
         <get,set>
-        c int 
-        d int
+        c! int 
+        d! int
         <add,remove>
-        e PropertyChangedEventHandler
+        e! PropertyChangedEventHandler
     }
 
     Color : .. {
