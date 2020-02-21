@@ -23,7 +23,7 @@ Main : (->>) {
     PI : 3.141592653
 
     # Mark String
-    Format! = "the value is \{Integer}, \{Number}, \{Boolean}"
+    Format! = "the value is ${Integer}, ${Number}, ${Boolean}"
 
     # List
     List! = []int{ 1;2;3;4;5 }
