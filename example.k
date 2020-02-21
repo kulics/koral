@@ -25,7 +25,7 @@ Main : (->>) {
     test_if()
     test_foreach()
     test_while()
-    $ x = test_func("testcall")
+    x! = test_func("testcall")
     test_func_params(1, 2,
     (a int, b int, c int, d i8 -> z str, a int, b int, c int) {
         <- "", a, b, c
@@ -37,9 +37,9 @@ Main : (->>) {
     test_linq()
     << test_async()
 
-    $ y = test_tuple(1).to_str()
+    y! = test_tuple(1).to_str()
 
-    $ p = example.app{}
+    p! = example.app{}
 
     p.c(1)
     test_interface(p)
@@ -58,15 +58,15 @@ Main : (->>) {
 }
 
 <get,set>
-$ static_x = 0
+static_x! = 0
 
 <get{i->i},set{i,v->i=v;}>
-$ static_y = "hello"
+static_y! = "hello"
 
 <_get{->static_x},set{v->static_x=v;}>
-$ static_z int
+static_z! int
 
-$ static_g i64
+static_g! i64
 
 test_tuple : (i int -> v str) {
     <- "tuple"
@@ -93,10 +93,10 @@ test_type : (->) {
 }
 
 test_operator : (->) {
-    $ I str = "128.687"
+    I! str = "128.687"
     I += ".890"
     A : 003.141592653e3
-    $ B int
+    B! int
     B = 2020_01_16
     B = 0b1010_1101
     B = 0X56_fa_C4
@@ -116,7 +116,7 @@ test_operator : (->) {
        " raw "
         string
       """, """""")
-    $ C = false
+    C! = false
     C = ~C
     C = 1 >< 2
     C = 3 == 3
@@ -124,7 +124,7 @@ test_operator : (->) {
     C = 1 <= 3
     C = true | false
     C = true & false
-    $ D = (2018.0309).to_int() 
+    D! = (2018.0309).to_int() 
     D = ~~ D && 1 || 2 ^^ 3 << 1 >> 2
     D = 1 <> 2
     print(B.to_str(), D)
@@ -139,10 +139,10 @@ test_string : (->) {
 }
 
 test_optional : (->) {
-    $ A ?int
+    A! ?int
     A = 1
     A?.to_str()
-    $ B ?str = ""
+    B! ?str = ""
     B?.to_str()
     C ?any : nil
     D ?app : nil
@@ -152,10 +152,10 @@ test_optional : (->) {
 }
 
 test_reference : (->) {
-    $ x int = 1
-    $ y ?int = 2
-    swap : (a !int, b !?int ->) {
-        b, a = a, b??2
+    x! int = 1
+    y! ?int = 2
+    swap : (a! int, b! ?int ->) {
+        b, a = a, b ?? 2
     }
     swap(x!, y!)
 }
@@ -179,16 +179,16 @@ test_empty : (->) {
 
 test_list : (->) {
     Single : {1}
-    $ Numbers = {1;2;5;6;8;4}
+    Numbers! = {1;2;5;6;8;4}
     Numbers = Numbers + 0
     Numbers += 3 + 7
     Numbers -= 6
     three : 3
     Numbers[three] = 5
-    $ Take = Numbers[0]
+    Take! = Numbers[0]
     Take = in_package_array{}.arr[2]
     Object : {"123"; 432; app{}}
-    $ NumbersInNumbers = {{1;1;1}; {1;1;1}}
+    NumbersInNumbers! = {{1;1;1}; {1;1;1}}
     NumbersInNumbers[0][0] = 3
     Empty : [][]int{}
     Array [.]int : array_of(1,2,3)
@@ -209,7 +209,7 @@ test_set : (->) {
 
 test_dictionary : (->) {
     Empty : [str][int]int{}
-    $ Temp = {["k1"]1;["k2"]2}
+    Temp! = {["k1"]1;["k2"]2}
     Temp += {["k3"]3}
     @ [k]v : Temp.. {
         print(k)
@@ -220,13 +220,13 @@ test_dictionary : (->) {
 }
 
 test_stack : (->) {
-    $ temp = [>]int{}
+    temp : [>]int{}
     temp.push(1)
     temp.pop()
 }
 
 test_queue : (->) {
-    $ temp = [<]int{}
+    temp : [<]int{}
     temp.enqueue(1)
     temp.dequeue()
 }
@@ -235,8 +235,8 @@ test_combined_type : (->) {
     # swift: [int:[[str:[str:[str]]]]]
     # go: map[int][]map[str]map[str][]str
     # c#: map<int,list<map<str,map<str,list<str>>>>>
-    $ type1 [int][][str][str][]str
-    $ type2 [dictionary int, [list [dictionary str, [dictionary str, [list str]]]]]
+    type1! [int][][str][str][]str
+    type2! [dictionary int, [list [dictionary str, [dictionary str, [list str]]]]]
 }
 
 test_switch : (->) {
@@ -297,7 +297,7 @@ test_foreach : (->) {
         }
     }
     print(" ")
-    $ arr = []int{}
+    arr! = []int{}
     @ i : arr.. {
         print(i)
     } _ {
@@ -319,7 +319,7 @@ test_foreach : (->) {
 }
 
 test_while : (->) {
-    $ A = 0
+    A! = 0
     B : 8
     @ A < B {
         A += 1
@@ -330,7 +330,7 @@ test_while : (->) {
 }
 
 test_check : (->!) {
-    $ z1 ?defer = nil
+    z1! ?defer = nil
     ! z2 : defer{}
     ! {
         z1 = defer{}
@@ -373,12 +373,12 @@ test_func_params : (a int, b int, fn (int, int, int, i8 ->
 
 test_lambda : (->) {
     Test1 : (fn (int, int -> int, int)->) {
-        $ O1, O2 = fn(1, 2)
+        O1!, O2! = fn(1, 2)
     }
     Test1( {i1,i2 -> i1,i2} )
 
     Test2 : (fn (->int) -> ) {
-        $ O1 = fn()
+        O1! = fn()
     }
     Test2{->1}
 
@@ -438,24 +438,24 @@ test_linq : (->) {
 }
 
 test_define : (->) {
-    $ a = 1
+    a! = 1
     ? a == 1 {
-        $ b = 2
+        b! = 2
         b = 3
         a = 3
     } a == 2 {
-        $ b = 2
+        b! = 2
         b = 3
         ? b == 2 {
             a = 1
         }
     } _ {
-        $ b = 2
+        b! = 2
         b = 3
         a = 3
     }
     ? a.. 1 {
-        $ b = 2
+        b! = 2
         b = 3
         a = 3
         ? a == 3 {
@@ -468,7 +468,7 @@ test_define : (->) {
         c = 2
         a = 1
     } _ {
-        $ b = 2
+        b! = 2
         b = 3
         a = 3
     }
@@ -489,27 +489,27 @@ ConstFunction : (->v int) {
 }
 
 测试中文 : (甲 int->乙 int) {
-    $ 乙 = 甲 + 1
+    乙! = 甲 + 1
     <- 乙
 }
 
 in_package_array : $ {
-    $ arr []int = {1;2;3;4;5;6;7}
+    arr! []int = {1;2;3;4;5;6;7}
 }
 
 defer : IDisposable & $ {
-    $ data = ""
+    data! = ""
 
     Dispose : (->) {}
 }
 
 app : program & $ (me) { 
-    $ i = 555
-    $ arr = {1;1;1;1}
-    $ _priName = " program "
-    $ _b = 5
+    i! = 555
+    arr! = {1;1;1;1}
+    _priName! = " program "
+    _b! = 5
     <get{i->i},set{i,v->i=v;}>
-    $ a = 1
+    a! = 1
 
     test_package : (->) {
         Item : program{name = "new program"; running = true}
@@ -527,9 +527,9 @@ app : program & $ (me) {
     }
 } & $ protocol(me) {
     <get{->me._b}, set{v->me._b = v;}>
-    $ b int
+    b! int
     <get,set>
-    $ f str
+    f! str
 
     c : (x int -> y int) {
         <- x + me.b
@@ -552,14 +552,14 @@ app : program & $ (me) {
 }
 
 result : $ {
-    $ data str
+    data! str
 }
 result += (data str->$me) {
     me.data = data
 }
 
 [test_package_template (T class)] : $ {
-    $ data T
+    data! T
     generic : (a T -> ) {}
 }
 
@@ -574,31 +574,31 @@ test_implement_template : $ [test_protocol_template test_implement_template](me)
 }
 
 program : $ {
-    $ running bool
+    running! bool
 }
 
 program += $ {
     <get,set>
-    $ name str
+    name! str
 }
 
 protocol : $$ {
-    $ b int
+    b! int
     c (x int -> y int)
     d (->>y int)
     e (->>)
-    $ f str
+    f! str
     g (-> @ v int)
 }
 
 <Table("test")>
 test_annotation : $ {
     <Key, Column("id")>
-    $ id str
+    id! str
     <Column("nick_name")>
-    $ nick_name str
+    nick_name! str
     <Column("profile")>
-    $ profile str
+    profile! str
 }
 
 test_enum : .. {
@@ -607,8 +607,8 @@ test_enum : .. {
 }
 
 package : $ (me) {
-    $ x int
-    $ y int
+    x! int
+    y! int
 
     parentFunc : (->) {
         me.x = 21
@@ -622,14 +622,14 @@ package : $ (me) {
 package_child : package & (x int, y int->$me)(y) {
     me.x = x
 } & $ (me,super) {
-    $ x int
+    x! int
 
     .parentFunc : (->) {
         super.x = 64
         print("package child")
     }
 } & {
-    $ a = 7
+    a! = 7
     b : (->) {
         print("static")
     }
