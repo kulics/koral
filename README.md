@@ -30,8 +30,8 @@ This is the main source code repository for K. It contains the compiler, and doc
 ```
 main : (->) {
     print("Hello, world!")
-    greetings = get_greetings("love lite!")
-    @ [index]value = greetings.. {
+    greetings : get_greetings("love lite!")
+    @ [index]value : greetings.. {
         ? index.. 0 {
             print(value)
         } 1 {

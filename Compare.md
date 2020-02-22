@@ -28,7 +28,7 @@ print("Hello, world!")
 ## Variables And Constants
 ### K
 ```
-myVariable = 42
+myVariable! = 42
 myVariable = 50
 myConstant : 42
 ```
@@ -65,7 +65,7 @@ MYCONSTANT = 42
 ## Explicit Types
 ### K
 ```
-explicitDouble num = 70
+explicitDouble num : 70
 ```
 ### C#
 ```
@@ -129,9 +129,9 @@ string
 ## Type Coercion
 ### K
 ```
-f = 6.0
-i = 94
-count = i + (f int!)
+f : 6.0
+i : 94
+count : i + (f int!)
 ```
 ### C#
 ```
@@ -166,8 +166,8 @@ count = i + int(f)
 ## Inclusive Range Operator
 ### K
 ```
-@ index = 1 ~ 5.. {
-    print("\{index} times 5 is \{index * 5}")
+@ index : 1 ~ 5.. {
+    print("${index} times 5 is ${index * 5}")
 }
 ```
 ### C#
@@ -203,7 +203,7 @@ for index in range(1,6):
 ## Arrays
 ### K
 ```
-shoppingList = {"catfish"; "water"; "tulips"; "blue paint"}
+shoppingList : {"catfish"; "water"; "tulips"; "blue paint"}
 shoppingList[1] = "bottle of water"
 ```
 ### C#
@@ -234,7 +234,7 @@ shoppingList[1] = "bottle of water"
 ## Maps
 ### K
 ```
-occupations = {
+occupations : {
     ["Malcolm"] "Captain"
     ["Kaylee"] "Mechanic"
 }
@@ -283,8 +283,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### K
 ```
-emptyArray = []str{}
-emptyDictionary = [str]f32{}
+emptyArray : []str{}
+emptyDictionary : [str]f32{}
 ```
 ### C#
 ```
@@ -317,7 +317,7 @@ emptyDictionary ={}
 ### K
 ```
 greet : (name str, day str -> r str) {
-    <- "Hello \{name}, today is \{day}."
+    <- "Hello ${name}, today is ${day}."
 }
 greet("Bob", "Tuesday")
 ```
@@ -400,7 +400,7 @@ makeIncrementer : (-> fn (int->int)) {
     }
     <- addOne
 }
-increment = makeIncrementer()
+increment : makeIncrementer()
 increment(7)
 ```
 ### C#
@@ -465,9 +465,9 @@ increment(7)
 ### K
 ```
 Shape : $ {
-    numberOfSides = 0
+    numberOfSides! = 0
     simpleDescription : (-> s str) {
-        <- "A shape with \{numberOfSides} sides."
+        <- "A shape with ${numberOfSides} sides."
     }
 }
 ```
@@ -519,9 +519,9 @@ class Shape(object):
 ## Classes Usage
 ### K
 ```
-shape = Shape{}
+shape : Shape{}
 shape.numberOfSides = 7
-shapeDescription = shape.simpleDescription()
+shapeDescription : shape.simpleDescription()
 ```
 ### C#
 ```
@@ -557,18 +557,18 @@ shapeDescription = shape.simpleDescription()
 ### K
 ```
 NamedShape : $ {
-    name str
-    numberOfSides = 0
+    name! str
+    numberOfSides! = 0
     simpleDescription : (-> s str) {
-        <- "A shape with \{numberOfSides} sides."
+        <- "A shape with ${numberOfSides} sides."
     }
 } 
 
 Square : NamedShape & $ {
-    sideLength num
+    sideLength! num
 
     simpleDescription : (-> s str) {
-        <- "A square with sides of length \{sideLength}."
+        <- "A square with sides of length ${sideLength}."
     }
 
     area : (-> f num) {
@@ -579,7 +579,7 @@ Square : NamedShape & $ {
     me.numberOfSides = 4
 }
 
-test = Square(5.2, "square")
+test : Square(5.2, "square")
 test.area()
 test.simpleDescription()
 ```
@@ -751,10 +751,10 @@ test.simpleDescription()
 ## Checking Type
 ### K
 ```
-movieCount = 0
-songCount = 0
+movieCount! = 0
+songCount! = 0
 
-@ item = library.. {
+@ item : library.. {
     ? item.. _ Movie {
         movieCount += 1
     } _ Song {
@@ -832,7 +832,7 @@ for item in library:
 ## Pattern Matching
 ### K
 ```
-nb = 42
+nb : 42
 ? nb.. 0 ~ 7, 8, 9 { 
     print("single digit") 
 } 10 { 
@@ -894,10 +894,10 @@ switch nb {
 ## Downcasting
 ### K
 ```
-@ current = someObjects.. {
+@ current : someObjects.. {
     ? current.. movie Movie {
-        print("Movie: '\{movie.name}', " +
-            "dir. \{movie.director}")
+        print("Movie: '${movie.name}', " +
+            "dir. ${movie.director}")
     }
 }
 ```
