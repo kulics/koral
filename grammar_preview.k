@@ -286,7 +286,7 @@ Main : (->>) {
     })
 
     # linq
-    arr = @ id = expr.. -> where expr -> order expr -> select expr
+    arr = @ id ： expr.. -> where expr -> order expr -> select expr
 
     # event
     EventHandle : $ {
