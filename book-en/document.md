@@ -281,11 +281,11 @@ String = "Hello world! " + Title + Content.to_str()
 ```
 
 This certainly does not affect the functionality, but we can use a more intuitive and convenient way, that is, a string template.
-We can insert expressions directly using `\{expression; expression}` syntax.
+We can insert expressions directly using `${expression; expression}` syntax.
 
 E.g:
 ```
-String = "Hello world! \{Title; Content}"
+String = "Hello world! ${Title; Content}"
 # Hello world! Year:2018
 ```
 
@@ -618,7 +618,7 @@ If we need to fetch the index and value at the same time, we can replace `identi
 E.g:
 ```
 @ [i]v = Arr.. {
-    print("\{i}:\{v}")
+    print("${i}:${v}")
 }
 ```
 
