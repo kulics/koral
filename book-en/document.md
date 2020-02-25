@@ -134,49 +134,82 @@ E.g:
     Comment
 =#
 ```
-## Definition
-We can create a new variable simply by using the `identifier type` statement.
+
+## Constants
+### Definition
+Constants in this language refer to data that cannot be changed after initialization. We use `identifier type` to define constants.
 
 E.g:
 ```
 A int
+B bool
 ```
-This will create an identifier for the name on the left and define it as the type on the right, in which case the identifier is a null value.
+This creates an identifier for the name on the left and defines it as the type on the right, where the identifier is a null value.
 
-Once the identifier is created, its data type will not be changed within the active area.
+Once an identifier is created, its data type will not be changed in the valid area.
+### Initialization
+After we have defined the constant, the assignment statement is used to initialize it. The constant can only be assigned once.
 
-## Assignment
-As with conventional programming languages, we need to use the `identifier = value` statement to assign the right data to the left identifier.
+As with regular programming languages, we can use the `identifier = value` statement to assign the data on the right to the identifier on the left.
 
 E.g:
 ```
+A = 1
+B = true
+```
+But unlike the definition, the left-hand side of an assignment can only be an identifier that has already been defined, otherwise the assignment statement does not hold.
+
+### Binding
+If we need to define and initialize the constants once, we can use the `identifier type : value` statement for binding.
+
+E.g:
+```
+A int : 1
+B bool : false
+```
+
+Because this language has intelligent automatic derivation, we can usually omit `type` when the value is clear.
+
+E.g:
+```
+A : 1
+B : false
+```
+## Variable
+### Definition
+Variables in this language refer to data that can continue to change after initialization. We use `identifier! type` to define variables.
+
+E.g:
+```
+A! int
+B! bool
+```
+### Assignment
+Like constants, variables are assigned by the same assignment statement, except that variables can be assigned multiple times.
+
+E.g:
+```
+A = 1
 A = 2
+B = false
+B = true
 ```
-But unlike the definition, the left side of the assignment can only be an identifier that has already been defined, otherwise the assignment statement does not hold.
-## Automated derivation
-In most cases, you can use the assignment to define new variable, we don't need to explicitly specify the type of data, the compiler will automatically infer the type for the data.
+ 
+### Binding
+As with constants, if we need to define and initialize a variable once, we can use the `identifier! type : value` statement for binding.
 
 E.g:
 ```
-B = 10
+A! int : 1
+B! bool : false
 ```
 
-This defines the new variable `B`, which is equal to `10` and is automatically derived as the `int` type.
-
-If we don't want automatic derivation, we can also use the write statement definition to mark the type we need.
+Similarly, we can continue to use automatic derivation.
 
 E.g:
 ```
-B int = 10
-```
-
-## Constant
-A constant is a language that is determined at compile time. It cannot be changed. It only supports a special type of the underlying type. It is defined by `identifier type: value`, and `type` can usually be omitted.
-
-E.g:
-```
-I : 2       # Automated derivation
-J int : 3   # Do not use automatic derivation
+A! : 1
+B! : false
 ```
 
 ## Identifier
