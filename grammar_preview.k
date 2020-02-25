@@ -13,29 +13,29 @@ demo . {
 
 Main : (->>) {
     # Define, 一般情况下编译器会自动判断类型
-    String! = "10"   # str
-    Number! = 1.2    # num
-    Integer! = 123   # int
-    Boolean! = true  # bool
-    SmallFloat! = (1.2).to_f32() # basic type convert
+    String : "10"   # str
+    Number : 1.2    # num
+    Integer : 123   # int
+    Boolean : true  # bool
+    SmallFloat : (1.2).to_f32() # basic type convert
 
     # Const
     PI : 3.141592653
 
     # Mark String
-    Format! = "the value is ${Integer}, ${Number}, ${Boolean}"
+    Format : "the value is ${Integer}, ${Number}, ${Boolean}"
 
     # List
-    List! = []int{ 1;2;3;4;5 }
+    List! : []int{ 1;2;3;4;5 }
     List = { 1;2;3;4;5 }
     print( List[0] ) # 使用下标获取
 
     # Set
-    Set! = [int]_{ [1]_;[2]_;[3]_;[4]_;[5]_ }
+    Set! : [int]_{ [1]_;[2]_;[3]_;[4]_;[5]_ }
     Set = { [1]_;[2]_;[3]_;[4]_;[5]_ }
 
     # Dictionary, 前面为key，后面为value
-    Dictionary! = {["1"]false; ["2"]true}
+    Dictionary! : {["1"]false; ["2"]true}
     Dictionary = [str]bool{ ["1"]false; ["2"]true}
     print( Dictionary["1"] ) # 使用key获取
 
@@ -122,7 +122,7 @@ Main : (->>) {
         }
     }
     # Conditional
-    a! = 0
+    a! : 0
     @ a < 10 {
         a += 1
     } _ {
@@ -151,9 +151,9 @@ Main : (->>) {
 
     Image : $ (me) {
         # 私有属性，不能被外部访问，也不能被重包装
-        _width = 0
-        _height = 0
-        _source = "" 
+        _width! : 0
+        _height! : 0
+        _source! : "" 
     } & (w int, h int, s str->$me) { # 初始化方法
         me._width, me._height, me._source = w,h,s
     }
@@ -179,7 +179,7 @@ Main : (->>) {
     }
 
     # Create an package object
-    IB = Image_Button{}
+    IB : Image_Button{}
     # Calling property
     IB.title = "OK"
     # Calling method
@@ -188,14 +188,14 @@ Main : (->>) {
     IB.move(6)
 
     # Create an object with simple assign
-    IB2! = Image_Button{
+    IB2 : Image_Button{
         title="Cancel"
         background="red"
     }
 
     # Create an object with params
-    Img! = Image(30, 20, "./icon.png")
-    ImgBtn! = Image_Button(1, 1)
+    Img : Image(30, 20, "./icon.png")
+    ImgBtn : Image_Button(1, 1)
 
     # judge type
     ? IB Image_Button? {
@@ -207,8 +207,8 @@ Main : (->>) {
     print( [typeof Image_Button]() )
 
     # Check, listen the Exception Function
-    Fi = File("./test.xs")
-    ! F = Read_File("demo.xs")
+    Fi : File("./test.xs")
+    ! F : Read_File("demo.xs")
     ! {
         do_some_thing()
     } ex {
@@ -233,7 +233,7 @@ Main : (->>) {
         <- in
     }
 
-    x! = task(6)
+    x : task(6)
 
     # Annotation
     <assemby-> Table("user"), D(false,Name="d",Hide=true)>
@@ -247,13 +247,13 @@ Main : (->>) {
     }
 
     # Pointer Type
-    A! ?int = nil
+    A ?int : nil
     # Get Pointer
-    C! = A?
+    C : A?
     # Safe Call
-    E! = A?.to_str()
+    E : A?.to_str()
     # OrElseValue
-    F! = A??128
+    F : A??128
 
     # Reference
     swap : (x! int, y! int->) {

@@ -25,7 +25,7 @@ Main : (->>) {
     test_if()
     test_foreach()
     test_while()
-    x! = test_func("testcall")
+    x! : test_func("testcall")
     test_func_params(1, 2,
     (a int, b int, c int, d i8 -> z str, a int, b int, c int) {
         <- "", a, b, c
@@ -37,9 +37,9 @@ Main : (->>) {
     test_linq()
     << test_async()
 
-    y! = test_tuple(1).to_str()
+    y! : test_tuple(1).to_str()
 
-    p! = example.app{}
+    p! : example.app{}
 
     p.c(1)
     test_interface(p)
@@ -58,10 +58,10 @@ Main : (->>) {
 }
 
 <get,set>
-static_x! = 0
+static_x! : 0
 
 <get{i->i},set{i,v->i=v;}>
-static_y! = "hello"
+static_y! : "hello"
 
 <_get{->static_x},set{v->static_x=v;}>
 static_z! int
@@ -93,7 +93,7 @@ test_type : (->) {
 }
 
 test_operator : (->) {
-    I! str = "128.687"
+    I! str : "128.687"
     I += ".890"
     A : 003.141592653e3
     B! int
@@ -116,7 +116,7 @@ test_operator : (->) {
        " raw "
         string
       """, """""")
-    C! = false
+    C! : false
     C = ~C
     C = 1 >< 2
     C = 3 == 3
@@ -124,7 +124,7 @@ test_operator : (->) {
     C = 1 <= 3
     C = true | false
     C = true & false
-    D! = (2018.0309).to_int() 
+    D! : (2018.0309).to_int() 
     D = ~~ D && 1 || 2 ^^ 3 << 1 >> 2
     D = 1 <> 2
     print(B.to_str(), D)
@@ -142,7 +142,7 @@ test_optional : (->) {
     A! ?int
     A = 1
     A?.to_str()
-    B! ?str = ""
+    B! ?str : ""
     B?.to_str()
     C ?any : nil
     D ?app : nil
@@ -152,8 +152,8 @@ test_optional : (->) {
 }
 
 test_reference : (->) {
-    x! int = 1
-    y! ?int = 2
+    x! int : 1
+    y! ?int : 2
     swap : (a! int, b! ?int ->) {
         b, a = a, b ?? 2
     }
@@ -179,16 +179,16 @@ test_empty : (->) {
 
 test_list : (->) {
     Single : {1}
-    Numbers! = {1;2;5;6;8;4}
+    Numbers! : {1;2;5;6;8;4}
     Numbers = Numbers + 0
     Numbers += 3 + 7
     Numbers -= 6
     three : 3
     Numbers[three] = 5
-    Take! = Numbers[0]
+    Take! : Numbers[0]
     Take = in_package_array{}.arr[2]
     Object : {"123"; 432; app{}}
-    NumbersInNumbers! = {{1;1;1}; {1;1;1}}
+    NumbersInNumbers! : {{1;1;1}; {1;1;1}}
     NumbersInNumbers[0][0] = 3
     Empty : [][]int{}
     Array [.]int : array_of(1,2,3)
@@ -209,7 +209,7 @@ test_set : (->) {
 
 test_dictionary : (->) {
     Empty : [str][int]int{}
-    Temp! = {["k1"]1;["k2"]2}
+    Temp! : {["k1"]1;["k2"]2}
     Temp += {["k3"]3}
     @ [k]v : Temp.. {
         print(k)
@@ -297,7 +297,7 @@ test_foreach : (->) {
         }
     }
     print(" ")
-    arr! = []int{}
+    arr! : []int{}
     @ i : arr.. {
         print(i)
     } _ {
@@ -319,7 +319,7 @@ test_foreach : (->) {
 }
 
 test_while : (->) {
-    A! = 0
+    A! : 0
     B : 8
     @ A < B {
         A += 1
@@ -330,7 +330,7 @@ test_while : (->) {
 }
 
 test_check : (->!) {
-    z1! ?defer = nil
+    z1! ?defer : nil
     ! z2 : defer{}
     ! {
         z1 = defer{}
@@ -373,12 +373,12 @@ test_func_params : (a int, b int, fn (int, int, int, i8 ->
 
 test_lambda : (->) {
     Test1 : (fn (int, int -> int, int)->) {
-        O1!, O2! = fn(1, 2)
+        O1!, O2! : fn(1, 2)
     }
     Test1( {i1,i2 -> i1,i2} )
 
     Test2 : (fn (->int) -> ) {
-        O1! = fn()
+        O1! : fn()
     }
     Test2{->1}
 
@@ -438,24 +438,24 @@ test_linq : (->) {
 }
 
 test_define : (->) {
-    a! = 1
+    a! : 1
     ? a == 1 {
-        b! = 2
+        b! : 2
         b = 3
         a = 3
     } a == 2 {
-        b! = 2
+        b! : 2
         b = 3
         ? b == 2 {
             a = 1
         }
     } _ {
-        b! = 2
+        b! : 2
         b = 3
         a = 3
     }
     ? a.. 1 {
-        b! = 2
+        b! : 2
         b = 3
         a = 3
         ? a == 3 {
@@ -468,7 +468,7 @@ test_define : (->) {
         c = 2
         a = 1
     } _ {
-        b! = 2
+        b! : 2
         b = 3
         a = 3
     }
@@ -489,27 +489,27 @@ ConstFunction : (->v int) {
 }
 
 测试中文 : (甲 int->乙 int) {
-    乙! = 甲 + 1
+    乙! : 甲 + 1
     <- 乙
 }
 
 in_package_array : $ {
-    arr! []int = {1;2;3;4;5;6;7}
+    arr! []int : {1;2;3;4;5;6;7}
 }
 
 defer : IDisposable & $ {
-    data! = ""
+    data! : ""
 
     Dispose : (->) {}
 }
 
 app : program & $ (me) { 
-    i! = 555
-    arr! = {1;1;1;1}
-    _priName! = " program "
-    _b! = 5
+    i! : 555
+    arr! : {1;1;1;1}
+    _priName! : " program "
+    _b! : 5
     <get{i->i},set{i,v->i=v;}>
-    a! = 1
+    a! : 1
 
     test_package : (->) {
         Item : program{name = "new program"; running = true}
@@ -629,7 +629,7 @@ package_child : package & (x int, y int->$me)(y) {
         print("package child")
     }
 } & {
-    a! = 7
+    a! : 7
     b : (->) {
         print("static")
     }

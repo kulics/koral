@@ -28,7 +28,7 @@ print("Hello, world!")
 ## Variables And Constants
 ### K
 ```
-myVariable! = 42
+myVariable! : 42
 myVariable = 50
 myConstant : 42
 ```
@@ -465,7 +465,7 @@ increment(7)
 ### K
 ```
 Shape : $ {
-    numberOfSides! = 0
+    numberOfSides! : 0
     simpleDescription : (-> s str) {
         <- "A shape with ${numberOfSides} sides."
     }
@@ -558,7 +558,7 @@ shapeDescription = shape.simpleDescription()
 ```
 NamedShape : $ {
     name! str
-    numberOfSides! = 0
+    numberOfSides! : 0
     simpleDescription : (-> s str) {
         <- "A shape with ${numberOfSides} sides."
     }
@@ -751,8 +751,8 @@ test.simpleDescription()
 ## Checking Type
 ### K
 ```
-movieCount! = 0
-songCount! = 0
+movieCount! : 0
+songCount! : 0
 
 @ item : library.. {
     ? item.. _ Movie {

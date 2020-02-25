@@ -3,13 +3,13 @@ demo . {
 }
 
 Main : (->) {
-    n0! = node(0)
-    n1! = node(1)
-    n2! = node(2)
-    n3! = node(3)
-    n4! = node(4)
-    n5! = node(5)
-    n6! = node(6)
+    n0! : node(0)
+    n1! : node(1)
+    n2! : node(2)
+    n3! : node(3)
+    n4! : node(4)
+    n5! : node(5)
+    n6! : node(6)
 
     n0.left = n1
     n0.right = n2
@@ -27,11 +27,11 @@ Main : (->) {
     print("Post Order Traverse")
     post_order_traverse(n0)
 
-    n7! = inverse_node(n0)
+    n7! : inverse_node(n0)
     print("Inverse node")
     pre_order_traverse(n7)
 
-    arr! = {9;1;5;8;3;7;4;6;2}
+    arr! : {9;1;5;8;3;7;4;6;2}
     simple_sort(arr)
     arr = {9;1;5;8;3;7;4;6;2}
     bubble_sort(arr)
@@ -45,7 +45,7 @@ Main : (->) {
     }
 
     print("oop")
-    app! = app("test", "Windows")
+    app! : app("test", "Windows")
     app.start()
     app.stop()
     shutdown(app)
@@ -86,7 +86,7 @@ inverse_node : (node ?node -> node ?node) {
     node.left = inverse_node(node.left)
     node.right = inverse_node(node.right)
 
-    temp! = node(node.value)
+    temp : node(node.value)
     temp.left = node.right
     temp.right = node.left
     <- temp
@@ -133,7 +133,7 @@ quick_sort : (list []int->) {
 }
 
 quick_sort_implement : (list []int, low int, high int->) {
-    pivot! = 0
+    pivot! : 0
     ? low < high {
         pivot = partition(list, low, high)
 
@@ -143,7 +143,7 @@ quick_sort_implement : (list []int, low int, high int->) {
 }
 
 partition : (list []int, low int, high int -> position int) {
-    pivot_key! = list[low]
+    pivot_key! : list[low]
     
     @ low < high {
         @ low < high & list[high] >= pivot_key {
@@ -160,7 +160,7 @@ partition : (list []int, low int, high int -> position int) {
 }
 
 filter_list : (list []int, fn (int -> bool) -> l []int) {
-    filter! = []int{}
+    filter! : []int{}
 
     @ ea : list.. {
         ? fn(ea) {
@@ -188,7 +188,7 @@ control : $$ {
 
 program : control & $ {
     name! str
-    _running! = false
+    _running! : false
 
     start : (->) {
         print("Start")
