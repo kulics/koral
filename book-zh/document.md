@@ -1602,7 +1602,7 @@ Implement : $ [Interface int] {
 ```
 <Table("test")>
 Annotation : $ {
-    <Key, Column("id")>
+    <Key; Column("id")>
     id! str
     <Column("name")>
     name! str
