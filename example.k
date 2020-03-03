@@ -57,13 +57,13 @@ Main : (->>) {
     read()
 }
 
-<get,set>
+<get;set>
 static_x! : 0
 
-<get{i->i},set{i,v->i=v;}>
+<get{i->i};set{i,v->i=v;}>
 static_y! : "hello"
 
-<_get{->static_x},set{v->static_x=v;}>
+<_get{->static_x};set{v->static_x=v;}>
 static_z! int
 
 static_g! i64
@@ -508,7 +508,7 @@ app : program & $ (me) {
     arr! : {1;1;1;1}
     _priName! : " program "
     _b! : 5
-    <get{i->i},set{i,v->i=v;}>
+    <get{i->i};set{i,v->i=v;}>
     a! : 1
 
     test_package : (->) {
@@ -526,9 +526,9 @@ app : program & $ (me) {
         <- me
     }
 } & $ protocol(me) {
-    <get{->me._b}, set{v->me._b = v;}>
+    <get{->me._b}; set{v->me._b = v;}>
     b! int
-    <get,set>
+    <get;set>
     f! str
 
     c : (x int -> y int) {
@@ -578,7 +578,7 @@ program : $ {
 }
 
 program += $ {
-    <get,set>
+    <get;set>
     name! str
 }
 
@@ -593,7 +593,7 @@ protocol : $$ {
 
 <Table("test")>
 test_annotation : $ {
-    <Key, Column("id")>
+    <Key; Column("id")>
     id! str
     <Column("nick_name")>
     nick_name! str
