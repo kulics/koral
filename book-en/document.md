@@ -625,11 +625,11 @@ E.g:
 }
 ```
 ### Get type
-If we need to explicitly get the type value, we can use the `[typeof type]()` function to get it.
+If we need to explicitly get the type value, we can use the `typeof(type)` function to get it.
 
 E.g:
 ```
-[typeof int]()     # Get the type value directly by type
+typeof(int)     # Get the type value directly by type
 ```
 # Loop
 Sometimes we may need to execute the same piece of code multiple times.

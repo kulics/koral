@@ -204,7 +204,7 @@ Main : (->>) {
     }
 
     # get type
-    print( [typeof Image_Button]() )
+    print( typeof(Image_Button) )
 
     # Check, listen the Exception Function
     Fi : File("./test.xs")

@@ -168,7 +168,7 @@ test_type_convert : (->) {
     print( z2.[to any]().[to i64]() )
     print( y program? )
     print( (x program!).running )
-    print( [typeof program]() )
+    print( typeof(program) )
 }
 
 test_empty : (->) {
