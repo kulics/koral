@@ -1309,7 +1309,7 @@ This way we don't need to care about their values when we use them, and we can s
 
 E.g:
 ```
-C : Random color()     # Get a random color
+C : RandomColor()     # Get a random color
 ? C.. Color.Red {
       ......
 } Color.Green {

@@ -1296,7 +1296,7 @@ Color : .. {
 
 例如：
 ```
-C : Random color()     # 获取一个随机颜色
+C : RandomColor()     # 获取一个随机颜色
 ? C.. Color.Red {
      ......
 } Color.Green {
