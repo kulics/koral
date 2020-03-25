@@ -1191,15 +1191,10 @@ Next, we will let the students implement this interface.
 ## Implementing Interface
 We add functions directly to the structure to implement this interface.
 
-For interfaces that need to be explicitly implemented, you can specify the interface, otherwise you can directly implement it.
-
 E.g:
 ```
 Student : $ {
-     ......
-} & $ Homework { # Explicit implementation
     count! : 999999
-
     do : (->) {
         SpendTime(1)        # took an hour
         count -= 1          # completed one
@@ -1583,11 +1578,6 @@ E.g:
 
 [Interface T] : $ {
     [test T] (in T ->)
-}
-
-Implement : $ [Interface int] {
-    [test int] : (in int ->) {
-    }
 }
 ```
 ## Generic Constraints
