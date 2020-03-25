@@ -1000,11 +1000,12 @@ func f(x: Nameable) {
 ## Implement
 ### K
 ```
-Dog : $ Nameable {
+Dog : $ {
+    # Implement Nameable
     name : (-> n str) {
         <- "Dog"
     }
-} & $ Weight {
+    # Implement Weight 
     getWeight : (-> w int) {
         <- 30
     }

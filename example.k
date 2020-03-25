@@ -503,7 +503,7 @@ defer : IDisposable & $ {
     Dispose : (->) {}
 }
 
-app : program & $ (me) { 
+app : program & protocol & $ (me) { 
     i! : 555
     arr! : {1;1;1;1}
     _priName! : " program "
@@ -525,7 +525,7 @@ app : program & $ (me) {
     [test_func_template T1, T2] : (data1 T1, data2 T2 -> data app) {
         <- me
     }
-} & $ protocol(me) {
+
     <get{->me._b}; set{v->me._b = v;}>
     b! int
     <get;set>
@@ -568,7 +568,7 @@ result += (data str->$me) {
     test (in T -> )
 }
 
-test_implement_template : $ [test_protocol_template test_implement_template](me) {
+test_implement_template : [test_protocol_template test_implement_template] & $ (me) {
     test : (in test_implement_template -> ) {}
     [test (H class)] : (in H -> ) {}
 }

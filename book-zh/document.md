@@ -1178,15 +1178,10 @@ Homework : $ {
 ## 实现接口
 我们直接给结构体增加函数来实现这个接口。
 
-对于需要显式实现的接口，可以指定接口，否则可以直接实现。
-
 例如：
 ```
 Student : $ {
-    ......
-} & $ Homework { # 显式实现
     count! : 999999
-
     do : (->) {
         SpendTime(1)        # 花费了一个小时
         count -= 1          # 完成了一个
@@ -1570,11 +1565,6 @@ ListNumber : []int{}
 
 [Interface T] : $ {
     [test T] (in T ->)
-}
-
-Implement : $ [Interface int] {
-    [test int] : (in int ->) {
-    }
 }
 ```
 ## 泛型约束

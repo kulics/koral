@@ -165,10 +165,10 @@ Main : (->>) {
     }
 
     # Combine Package，通过引入来复用属性和方法
-    Image_Button : Image & Button & $ {
+    Image_Button : Image & Button & $ (me) {
         title! str
         _speed! int
-    } & $ Animation(me) { # Implement protocol
+        # Implement interface
         speed : (me._speed) int
         move : (s int ->) {
             t = 5000/s
