@@ -995,7 +995,7 @@ Student : $ {
 
 例如：
 ```
-Student : $ (me) { # 声明me
+Student : $ me { # 声明me
     ......
     getGirlFriend : (->name str) {
         <- me._girlFriend

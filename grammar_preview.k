@@ -137,7 +137,7 @@ Main : (->>) {
     }
 
     # 也支持包装方法，可以通过 me 来访问包自身属性或方法
-    Button : $ (me) {
+    Button : $ me {
         width! int
         height! int
         background! str
@@ -149,7 +149,7 @@ Main : (->>) {
         }
     }
 
-    Image : $ (me) {
+    Image : $ me {
         # 私有属性，不能被外部访问，也不能被重包装
         _width! : 0
         _height! : 0
@@ -165,7 +165,7 @@ Main : (->>) {
     }
 
     # Combine Package，通过引入来复用属性和方法
-    Image_Button : Image & Button & $ (me) {
+    Image_Button : Image & Button & $ me {
         title! str
         _speed! int
         # Implement interface
