@@ -1007,7 +1007,7 @@ The private property of this structure can not be accessed, and can not be modif
 
 E.g:
 ```
-Student : $ (me) { # declare me
+Student : $ me { # declare me
     ......
     getGirlFriend : (-> name str) {
         <- me._girlFriend

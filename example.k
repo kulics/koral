@@ -503,7 +503,7 @@ defer : IDisposable & $ {
     Dispose : (->) {}
 }
 
-app : program & protocol & $ (me) { 
+app : program & protocol & $ me { 
     i! : 555
     arr! : {1;1;1;1}
     _priName! : " program "
@@ -568,7 +568,7 @@ result += (data str->$me) {
     test (in T -> )
 }
 
-test_implement_template : [test_protocol_template test_implement_template] & $ (me) {
+test_implement_template : [test_protocol_template test_implement_template] & $ me {
     test : (in test_implement_template -> ) {}
     [test (H class)] : (in H -> ) {}
 }
@@ -606,7 +606,7 @@ test_enum : .. {
     err : -1
 }
 
-package : $ (me) {
+package : $ me {
     x! int
     y! int
 
@@ -621,7 +621,7 @@ package : $ (me) {
 
 package_child : package & (x int, y int->$me)(y) {
     me.x = x
-} & $ (me,super) {
+} & $ me, super {
     x! int
 
     .parentFunc : (->) {
