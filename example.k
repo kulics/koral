@@ -209,8 +209,8 @@ test_set : (->) {
 
 test_dictionary : (->) {
     Empty : [str][int]int{}
-    Temp! : {["k1"]1;["k2"]2}
-    Temp += {["k3"]3}
+    Temp! : {["k1"]=1;["k2"]=2}
+    Temp += {["k3"]=3}
     @ [k]v : Temp.. {
         print(k)
         print(v)
@@ -518,7 +518,7 @@ app : program & protocol & $ me {
             running : true
         }
         Item3 : []int{1;2;3;4;5}
-        Item4 : [str]int{["1"]1;["2"]2;["3"]3}
+        Item4 : [str]int{["1"]=1;["2"]=2;["3"]=3}
         Item5 : package_child(1,2) # New
     }
 
