@@ -31,8 +31,7 @@ Main : (->>) {
     print( List[0] ) # 使用下标获取
 
     # Set
-    Set! : [int]_{ [1]_;[2]_;[3]_;[4]_;[5]_ }
-    Set = { [1]_;[2]_;[3]_;[4]_;[5]_ }
+    Set : [int]_{ 1;2;3;4;5 }
 
     # Dictionary, 前面为key，后面为value
     Dictionary! : {["1"]=false; ["2"]=true}
