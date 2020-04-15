@@ -487,11 +487,11 @@ Unlike the data items in the list, the data items in the dictionary are not in a
 
 The dictionary keys can only use the `integer` and `string` types.
 ### Definition
-Similar to the list, the dictionary is also defined using `{}`, except that the dictionary type is a union type of `key` and `value`, and the form is `[key]value`.
+Similar to the list, the dictionary is also defined using `{}`, except that the dictionary type is a union type of `key` and `value`, and the form is `[key]=value`.
 
 E.g:
 ```
-Dictionary : {["a"]1; ["b"]2; ["c"]3}
+Dictionary : {["a"]=1; ["b"]=2; ["c"]=3}
 ```
 This will create a `[str]int` type dictionary containing three entries for `a,b,c`.
 
@@ -520,7 +520,7 @@ Dictionary["b"] = 5
 Different from the list, if the index is an index that does not exist, it will not be wrong, and the value will be directly assigned to the new key.
 ### Common operations
 ```
-Dictionary += {["d"]11}     # Add Element
+Dictionary += {["d"]=11}    # Add Element
 Dictionary -= "c"           # Delete the specified index element
 Length : Dictionary.len     # Length
 ```
