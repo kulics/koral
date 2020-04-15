@@ -35,8 +35,8 @@ Main : (->>) {
     Set = { [1]_;[2]_;[3]_;[4]_;[5]_ }
 
     # Dictionary, 前面为key，后面为value
-    Dictionary! : {["1"]false; ["2"]true}
-    Dictionary = [str]bool{ ["1"]false; ["2"]true}
+    Dictionary! : {["1"]=false; ["2"]=true}
+    Dictionary = [str]bool{ ["1"]=false; ["2"]=true}
     print( Dictionary["1"] ) # 使用key获取
 
     Stack : [>]int{}

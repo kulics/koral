@@ -235,8 +235,8 @@ shoppingList[1] = "bottle of water"
 ### K
 ```
 occupations : {
-    ["Malcolm"] "Captain"
-    ["Kaylee"] "Mechanic"
+    ["Malcolm"] = "Captain"
+    ["Kaylee"] = "Mechanic"
 }
 occupations["Jayne"] = "Public Relations"
 ```
