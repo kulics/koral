@@ -201,7 +201,7 @@ test_list : (->) {
 
 test_set : (->) {
     Empty : [str]_{}
-    Numbers [int]_ : {[1]_;[2]_;[5]_;[6]_;[8]_;[4]_}
+    Numbers : [int]_{1;2;5;6;8;4}
     @ item : Numbers.. {
         print(item)
     }
