@@ -11,6 +11,9 @@ With well-designed grammar rules, this language can effectively reduce the burde
 
 This is the main source code repository for K. It contains the compiler, and documentation.
 
+`Warning: This language is still in the experimental stage and cannot meet the production requirements. `
+`警告：这个语言目前还处于实验阶段，还未能满足生产要求。`
+
 ## Key Features
 - The moderm gramar, which is easy to distinguish.
 - Automatic memory management.
