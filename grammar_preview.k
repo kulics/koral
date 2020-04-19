@@ -117,7 +117,7 @@ Main : (->>) {
         ? a > b {
             ~@ # jump out loop
         } _ {
-            ..@ # continue
+            ->@ # continue
         }
     }
     # Conditional
