@@ -241,7 +241,7 @@ test_combined_type : (->) {
 
 test_switch : (->) {
     x any : 3
-    ? x.. 1, 2, 3 {
+    ? x : 1, 2, 3 {
         print("1,2,3")
     } _ str {
         print("string")
@@ -252,7 +252,7 @@ test_switch : (->) {
     } _ {
         print("default")
     }
-    y : ? x.. -> 3 {
+    y : ? x : -> 3 {
         12
     } _ {
         0
@@ -454,7 +454,7 @@ test_define : (->) {
         b = 3
         a = 3
     }
-    ? a.. 1 {
+    ? a : 1 {
         b! : 2
         b = 3
         a = 3

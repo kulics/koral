@@ -74,7 +74,7 @@ Main : (->>) {
     }
 
     # pattern match
-    ? x.. 0~6, 7, 8, 9 {
+    ? x : 0~6, 7, 8, 9 {
         do_something_a()
     } 14 {
         do_something_b()
@@ -83,7 +83,7 @@ Main : (->>) {
     }
 
     # type match
-    ? object.. _ str { 
+    ? object : _ str { 
         print("string") 
     } _ int { 
         print("integer") 
