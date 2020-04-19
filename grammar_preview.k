@@ -55,7 +55,7 @@ Main : (->>) {
     do_something_void : (->) {
         do_something_a()
         do_something_b()
-    }
+     }
 
     # Full Function with in params and out params
     do_something_with_params : (x int, y str -> a int, b str) {
@@ -98,19 +98,19 @@ Main : (->>) {
     }
 
     # Loop, use identify to take out single item, default is it
-    @ item : array.. {
+    @ item : array {
         print(item)
     }
     # take index and value, both worked at Dictionary
-    @ [index]value : array.. {
+    @ [index]value : array {
         print(index, value)
     }
 
     # Iterator, Increment from ~(step) to, Decrement from ~~(step) to, (step) can omit
-    @ it : 0 ~(2) 100.. {
+    @ it : 0 ~ 100 {
         print(it)
     }
-    @ it : 10 ~~ 1.. {}
+    @ it : 10 ~~ 1 {}
 
     # Infinite
     @ true {
@@ -285,7 +285,7 @@ Main : (->>) {
     })
 
     # linq
-    arr = @ id ： expr.. -> where expr -> order expr -> select expr
+    arr = @ id ： expr -> where expr -> order expr -> select expr
 
     # event
     EventHandle : $ {

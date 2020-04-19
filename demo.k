@@ -40,7 +40,7 @@ Main : (->) {
 
     print("Filter Array")
     arr = filter_list(arr, {it->it > 4})
-    @ ea : arr.. {
+    @ ea : arr {
         print(ea) 
     }
 
@@ -98,28 +98,28 @@ swap : (list []int, i int, j int->) {
 
 simple_sort : (list []int->) {
     print("Simple Sort")
-    @ i : 0 ~ list.len-1.. {
-        @ j : i+1 ~ list.len-1.. {
+    @ i : 0 ~ list.len-1 {
+        @ j : i+1 ~ list.len-1 {
             ? list[i] > list[j] {
                 swap(list, i , j)
             }
         }
     }
-    @ ea : list.. { 
+    @ ea : list { 
         print(ea) 
     }
 }
 
 bubble_sort : (list []int->) {
     print("Bubble Sort")
-    @ i : 0 ~ list.len-1.. {
-        @ j : list.len-2 ~~ i.. {
+    @ i : 0 ~ list.len-1 {
+        @ j : list.len-2 ~~ i {
             ? list[j] > list[j+1] {
                 swap(list, j , j+1)
             }
         }
     }
-    @ ea : list.. { 
+    @ ea : list { 
         print(ea) 
     }
 }
@@ -127,7 +127,7 @@ bubble_sort : (list []int->) {
 quick_sort : (list []int->) {
     print("Quick Sort")
     quick_sort_implement(list, 0, list.len-1)
-    @ ea : list.. { 
+    @ ea : list { 
         print(ea) 
     }
 }
@@ -162,7 +162,7 @@ partition : (list []int, low int, high int -> position int) {
 filter_list : (list []int, fn (int -> bool) -> l []int) {
     filter! : []int{}
 
-    @ ea : list.. {
+    @ ea : list {
         ? fn(ea) {
             filter += ea
         }
