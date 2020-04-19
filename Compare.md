@@ -755,7 +755,7 @@ movieCount! : 0
 songCount! : 0
 
 @ item : library {
-    ? item.. _ Movie {
+    ? item : _ Movie {
         movieCount += 1
     } _ Song {
         songCount += 1
@@ -833,7 +833,7 @@ for item in library:
 ### K
 ```
 nb : 42
-? nb.. 0 ~ 7, 8, 9 { 
+? nb : 0 ~ 7, 8, 9 { 
     print("single digit") 
 } 10 { 
     print("double digits") 
@@ -895,7 +895,7 @@ switch nb {
 ### K
 ```
 @ current : someObjects {
-    ? current.. movie Movie {
+    ? current : movie Movie {
         print("Movie: '${movie.name}', " +
             "dir. ${movie.director}")
     }
