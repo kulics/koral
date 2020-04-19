@@ -166,7 +166,7 @@ count = i + int(f)
 ## Inclusive Range Operator
 ### K
 ```
-@ index : 1 ~ 5.. {
+@ index : 1 ~ 5 {
     print("${index} times 5 is ${index * 5}")
 }
 ```
@@ -754,7 +754,7 @@ test.simpleDescription()
 movieCount! : 0
 songCount! : 0
 
-@ item : library.. {
+@ item : library {
     ? item.. _ Movie {
         movieCount += 1
     } _ Song {
@@ -894,7 +894,7 @@ switch nb {
 ## Downcasting
 ### K
 ```
-@ current : someObjects.. {
+@ current : someObjects {
     ? current.. movie Movie {
         print("Movie: '${movie.name}', " +
             "dir. ${movie.director}")

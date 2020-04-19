@@ -131,7 +131,7 @@ test_operator : (->) {
 }
 
 test_string : (->) {
-    @ ea : "love programming".. {
+    @ ea : "love programming" {
         ? ea == 'e' {
             print("love programming")
         }
@@ -192,7 +192,7 @@ test_list : (->) {
     NumbersInNumbers[0][0] = 3
     Empty : [][]int{}
     Array [.]int : array_of(1,2,3)
-    @ [i]v : Numbers.. {
+    @ [i]v : Numbers {
         print(i, ":", v)
     }
     Slice : Numbers[0~_]
@@ -202,7 +202,7 @@ test_list : (->) {
 test_set : (->) {
     Empty : [str]_{}
     Numbers : [int]_{1;2;5;6;8;4}
-    @ item : Numbers.. {
+    @ item : Numbers {
         print(item)
     }
 }
@@ -211,7 +211,7 @@ test_dictionary : (->) {
     Empty : [str][int]int{}
     Temp! : {["k1"]=1;["k2"]=2}
     Temp += {["k3"]=3}
-    @ [k]v : Temp.. {
+    @ [k]v : Temp {
         print(k)
         print(v)
     }
@@ -280,17 +280,17 @@ test_if : (->) {
 
 test_foreach : (->) {
     print(" 0 to 10")
-    @ i : 0 ~ 10.. {
+    @ i : 0 ~ 10 {
         print(i, ", ", "")
     }
     print(" ")
     print(" 0 to 8 step 2")
-    @ ea : 0 ~(2) 8.. {
+    @ ea : 0 ~(2) 8 {
         print(ea, ", ", "")
     }
     print(" ")
     print(" 8 to 2 step 2")
-    @ ea : 8 ~~(2) 2.. {
+    @ ea : 8 ~~(2) 2 {
         print(ea, ", ", "")
         ? ea == 6 {
             ..@
@@ -298,22 +298,22 @@ test_foreach : (->) {
     }
     print(" ")
     arr! : []int{}
-    @ i : arr.. {
+    @ i : arr {
         print(i)
     } _ {
         print("loop else")
     }
-    @ i : 7 ~ 7.. {
+    @ i : 7 ~ 7 {
         print(i)
     } _ {
         print("loop else")
     }
-    arr = @ i : {1;2;3;4;5}.. -> {
+    arr = @ i : {1;2;3;4;5} -> {
         i * 2
     } _ {
         nil
     }
-    arr = @ i : 0 ~ 5.. -> {
+    arr = @ i : 0 ~ 5 -> {
         i * 3
     }
 }
@@ -400,7 +400,7 @@ test_lambda : (->) {
 }
 
 test_yield : (-> @ v int) {
-    @ i : 1 ~ 10.. {
+    @ i : 1 ~ 10 {
         ? i < 7 {
             @ <- i
         } _ {
@@ -411,7 +411,7 @@ test_yield : (-> @ v int) {
 
 test_async : (->> x int, y int, z str) {
     sleep(1000)
-    @ i : 1 ~ 10.. {
+    @ i : 1 ~ 10 {
         go{ ->> 
             << delay(1000)
             print("task", i)
@@ -432,7 +432,7 @@ test_async : (->> x int, y int, z str) {
 
 test_linq : (->) {
     Numbers : {0; 1; 2; 3; 4; 5; 6}
-    Linq : @ i : Numbers.. -> where (i % 2) == 0 ->
+    Linq : @ i : Numbers -> where (i % 2) == 0 ->
     orderby i -> descending -> select i
     Lambda : Numbers.Where{ i -> i%2==0 }.OrderBy{ i -> i }.ToList()
 }
@@ -545,7 +545,7 @@ app : program & protocol & $ me {
     }
 
     g : (-> @ v int) {
-        @ i : 1 ~ 3.. {
+        @ i : 1 ~ 3 {
             @ <- i
         }
     }

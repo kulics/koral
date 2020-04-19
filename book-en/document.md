@@ -636,12 +636,12 @@ Sometimes we may need to execute the same piece of code multiple times.
 
 In general, statements are executed in order, the first statement in the function is executed first, then the second statement, and so on.
 ## Collection loop
-If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can use the `@ identifier : expression.. {}` statement to iterate over the collection, taking each element out of `identifier`.
+If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can use the `@ identifier : expression {}` statement to iterate over the collection, taking each element out of `identifier`.
 
 E.g:
 ```
 Arr : {1; 2; 3; 4; 5}
-@ item : Arr.. {
+@ item : Arr {
     print(item)   # print every number
 }
 ```
@@ -650,7 +650,7 @@ If we need to fetch the index and value at the same time, we can replace `identi
 
 E.g:
 ```
-@ [i]v : Arr.. {
+@ [i]v : Arr {
     print("${i}:${v}")
 }
 ```
@@ -663,7 +663,7 @@ The iterator can take the number from the start point to the end point loop. We 
 
 E.g:
 ```
-@ i : 0 ~ 100.. {
+@ i : 0 ~ 100 {
     print(i)  # print every number
 }
 ```
@@ -673,7 +673,7 @@ The iterator defaults to increment `1` every interval. If we need to take every 
 
 E.g:
 ```
-@ i : 0 ~(2) 100.. {
+@ i : 0 ~(2) 100 {
     ......
 }
 ```
@@ -683,7 +683,7 @@ We can also let it traverse in reverse order, just use `~~`.
 
 E.g:
 ```
-@ i : 100 ~~ 0.. {
+@ i : 100 ~~ 0 {
     ......  # From 100 to 0
 }
 ```
@@ -838,7 +838,7 @@ There is no special way to define function arguments, just replace the argument 
 E.g:
 ```
 Each_1_To_10 : (func (int->) ->) {
-     @ i : 1 ~ 10.. {
+     @ i : 1 ~ 10 {
          func(i)
      }
 }
@@ -1260,7 +1260,7 @@ E.g:
 Arr : []Homework{}
 Arr.add( StudentA )
 ......  # Insert many many students
-@ i : Arr.. {
+@ i : Arr {
     DoHomework(i)
 }
 ```
@@ -1641,7 +1641,7 @@ E.g:
 ```
 Linq : (->) {
     Numbers : { 0; 1; 2; 3; 4; 5; 6 }
-    Linq : @ num : Numbers.. ->
+    Linq : @ num : Numbers ->
             where (num % 2) == 0 ->
             orderby num -> descending ->
             select num
