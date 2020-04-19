@@ -293,7 +293,7 @@ test_foreach : (->) {
     @ ea : 8 ~~(2) 2 {
         print(ea, ", ", "")
         ? ea == 6 {
-            ..@
+            ->@
         }
     }
     print(" ")
