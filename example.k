@@ -353,7 +353,7 @@ test_check : (->!) {
     }
 }
 
-test_func : (s str = "test" -> out1 str, out2 int) {
+test_func : (s str : "test" -> out1 str, out2 int) {
     s = s + "test"
     I1 : 1+1*3*9/8
     I2 : I1 + 5 + (I1 + 8)
@@ -614,7 +614,7 @@ package : $ me {
         me.x = 21
         print("package")
     }
-} & (y int = 3->$me) {
+} & (y int : 3->$me) {
     me.x = ConstData
     me.y = y
 }
