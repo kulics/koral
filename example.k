@@ -568,7 +568,7 @@ result := (data str->$me) {
     test (in T -> )
 }
 
-test_implement_template : [test_protocol_template test_implement_template] & $ me {
+test_implement_template : [test_protocol_template test_implement_template] \/ $ me {
     test : (in test_implement_template -> ) {}
     [test (H class)] : (in H -> ) {}
 }
