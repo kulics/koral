@@ -554,7 +554,7 @@ app : program \/ protocol \/ $ me {
 result : $ {
     data! str
 }
-result += (data str->$me) {
+result := (data str->$me) {
     me.data = data
 }
 
@@ -577,7 +577,7 @@ program : $ {
     running! bool
 }
 
-program += $ {
+program := $ {
     <get;set>
     name! str
 }
