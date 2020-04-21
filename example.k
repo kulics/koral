@@ -497,13 +497,13 @@ in_package_array : $ {
     arr! []int : {1;2;3;4;5;6;7}
 }
 
-defer : IDisposable & $ {
+defer : IDisposable \/ $ {
     data! : ""
 
     Dispose : (->) {}
 }
 
-app : program & protocol & $ me { 
+app : program \/ protocol \/ $ me { 
     i! : 555
     arr! : {1;1;1;1}
     _priName! : " program "
@@ -614,21 +614,21 @@ package : $ me {
         me.x = 21
         print("package")
     }
-} & (y int : 3->$me) {
+} \/ (y int : 3->$me) {
     me.x = ConstData
     me.y = y
 }
 
-package_child : package & (x int, y int->$me)(y) {
+package_child : package \/ (x int, y int->$me)(y) {
     me.x = x
-} & $ me, super {
+} \/ $ me, super {
     x! int
 
     .parentFunc : (->) {
         super.x = 64
         print("package child")
     }
-} & {
+} \/ {
     a! : 7
     b : (->) {
         print("static")

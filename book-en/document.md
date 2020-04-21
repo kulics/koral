@@ -1061,13 +1061,13 @@ print( Chen.student.name )
 ```
 By combining layers of structure, you can freely assemble anything you want to describe.
 
-More recently, if we want to include all the attributes of a structure directly instead of a combination, we can use the top-level combination statement, declared as `type & struct`.
+More recently, if we want to include all the attributes of a structure directly instead of a combination, we can use the top-level combination statement, declared as `type \/ struct`.
 
 Top-level combinations extract attributes from the structure to the exterior, just as they contain corresponding attributes directly. This is conducive to the use and transmission of attributes.
 
 E.g:
 ```
-ChineseStudent : Student & $ { # top-level combination
+ChineseStudent : Student \/ $ { # top-level combination
     kungfu! : false
 }
 ```
@@ -1096,7 +1096,7 @@ Student : (name str, number str->$me) {
     me.class = getSubText(number, 2, 3)
     # Calculate the grade
     me.grade = getSubText(number, 0, 1)
-} & $ {
+} \/ $ {
     ......
 }
 ```
@@ -1116,13 +1116,13 @@ E.g:
 ```
 Parent : $ {
     ......
-} & (a int->$) {
+} \/ (a int->$) {
     ......
 }
 
-Child : Parent & $ {
+Child : Parent \/ $ {
     ......
-} & (a int->$)(a) {
+} \/ (a int->$)(a) {
     ......
 }
 ```

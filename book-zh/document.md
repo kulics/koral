@@ -1049,13 +1049,13 @@ print( Chen.student.name )
 ```
 通过组合一层又一层的结构体，你可以自由拼装出任何一个你想要描述的事物。
 
-更近一步，如果我们希望直接包含某个结构体的所有属性而不是组合，可以使用顶层组合语句，声明方式为`类型 & 结构体`。
+更近一步，如果我们希望直接包含某个结构体的所有属性而不是组合，可以使用顶层组合语句，声明方式为`类型 \/ 结构体`。
 
 顶层组合会将结构体内的属性提取到最外部，就像直接包含对应属性一样。这有利于我们实现属性使用和传递。
 
 例如：
 ```
-ChineseStudent : Student & $ { # 顶层组合
+ChineseStudent : Student \/ $ { # 顶层组合
     kungfu! : false
 }
 ```
@@ -1084,7 +1084,7 @@ Student : (name str, number str->$me) {
     me.class = getSubText(number, 2, 3)
     # 计算得出年级
     me.grade = getSubText(number, 0, 1)
-} & $ {
+} \/ $ {
     ......
 }
 ```
@@ -1104,13 +1104,13 @@ print(Peter.class)     # 打印出 2
 ```
 Parent : $ {
     ......
-} & (a int->$) {
+} \/ (a int->$) {
     ......
 }
 
-Child : Parent & $ {
+Child : Parent \/ $ {
     ......
-} & (a int->$)(a) {
+} \/ (a int->$)(a) {
     ......
 }
 ```

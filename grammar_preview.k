@@ -153,7 +153,7 @@ Main : (->>) {
         _width! : 0
         _height! : 0
         _source! : "" 
-    } & (w int, h int, s str->$me) { # 初始化方法
+    } \/ (w int, h int, s str->$me) { # 初始化方法
         me._width, me._height, me._source = w,h,s
     }
 
@@ -164,7 +164,7 @@ Main : (->>) {
     }
 
     # Combine Package，通过引入来复用属性和方法
-    Image_Button : Image & Button & $ me {
+    Image_Button : Image \/ Button \/ $ me {
         title! str
         _speed! int
         # Implement interface
@@ -173,7 +173,7 @@ Main : (->>) {
             t = 5000/s
             play( s + t )
         }
-    } & (w int, h int->$me)(w, h , "img") {
+    } \/ (w int, h int->$me)(w, h , "img") {
         me.title = "img btn"
     }
 
