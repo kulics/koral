@@ -968,7 +968,7 @@ Similarly, the way a collection is build is actually a build syntax, so we can a
 E.g:
 ```
 Array : []int{ 1; 2; 3; 4; 5 }
-Dictionary : [str]int{ ["1"]1; ["2"]2; ["3"]3 }
+Dictionary : [str]int{ ["1"]=1; ["2"]=2; ["3"]=3 }
 ```
 ## Anonymous Structure
 If we only want to wrap some data directly, instead of defining the structure and then using it, can it be like an anonymous function?
