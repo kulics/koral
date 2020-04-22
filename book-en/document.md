@@ -817,8 +817,6 @@ So how do we get the return value of a function?
 
 It's very simple, just like we do add, subtract, multiply and divide, just use the function.
 
-The difference is that for multiple return values ​​we have to wrap each identifier in parentheses like a parameter form.
-
 E.g:
 ```
 n, c = TopSell()        # Assign the returned two values ​​to n and c
