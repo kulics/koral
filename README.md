@@ -77,4 +77,4 @@ Read detail from [Here](./Compare.md).
 
 [JavaScript (not yet)](https://github.com/kulics-works/k-javascript)
 
-[Kotlin (not yet)](https://github.com/kulics-works/k-kotlin)
+[Kotlin](https://github.com/kulics-works/k-kotlin)
