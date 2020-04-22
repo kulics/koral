@@ -294,10 +294,10 @@ Main : (->>) {
 
     # control
     Data : $ {
-        <get,set>
+        <get;set>
         c! int 
         d! int
-        <add,remove>
+        <add;remove>
         e! PropertyChangedEventHandler
     }
 

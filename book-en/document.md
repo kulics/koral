@@ -1531,7 +1531,7 @@ E.g:
 ```
 So we define a structure that supports generics, `T` is a generic, in fact it can be any identifier, but habitual we will use `T` as a proxy.
 
-Generic brackets support multiple generations like parameters, for example: `[identifier T, H, Q]`.
+Generic brackets support multiple generations, for example: `[identifier T H Q]`.
 
 After the generics are defined, `T` is treated as a real type in the area of ​​the structure, and then we can use it like various places like `int`.
 
