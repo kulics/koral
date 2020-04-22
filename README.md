@@ -73,7 +73,7 @@ Read detail from [Here](./Compare.md).
 ## Source Code
 [C#](https://github.com/kulics-works/k-csharp)
 
-[Go (not yet)](https://github.com/kulics-works/k-go)
+[Go](https://github.com/kulics-works/k-go)
 
 [JavaScript (not yet)](https://github.com/kulics-works/k-javascript)
 
