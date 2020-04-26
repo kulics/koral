@@ -1286,17 +1286,17 @@ Func : (he Homework ->) {
 # Enumeration Type
 The enumeration is a set of integer constants with independent names. It can usually be used to mark the type of some business data, which is convenient for judgment processing.
 ## Definition
-We only need to use the `id : .. {}` statement.
+We only need to use the `id : [:] {}` statement.
 
 E.g:
 ```
-Color : .. {
+Color : [:] {
      Red
      Green
      Blue
 }
 ```
-The enumeration assigns values to the identifiers in order, resulting in a collection of `Red:0, Green:1, Blue:2`.
+The enumeration assigns values to the identifiers in order, resulting in a collection of `Red:0 Green:1 Blue:2`.
 
 This way we don't need to care about their values when we use them, and we can safely mark the business we need to handle.
 
@@ -1318,7 +1318,7 @@ We can also assign a single identifier if needed, and unspecified will continue 
 
 E.g:
 ```
-Number : .. {
+Number : [:] {
      A : 1  # 1
      B      # 2
      C : 1  # 1
