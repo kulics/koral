@@ -223,12 +223,11 @@ Main : (->>) {
         @ <-
     }
 
-    # Use ->> to declare Async Function
-    task : (in int ->> out int) {
+    task : (in int -> out int) {
         # make a function to await
-        << do_some_thing_A()
-        do_some_thing_B()
-        << do_some_thing_C()
+        do_some_thing_A..()
+        # make a function to async
+        do_some_thing_B.()
         <- in
     }
 
@@ -285,7 +284,7 @@ Main : (->>) {
     })
 
     # linq
-    arr = @ id ： expr -> where expr -> order expr -> select expr
+    arr = @ id : expr -> where expr -> order expr -> select expr
 
     # event
     EventHandle : $ {
