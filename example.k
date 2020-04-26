@@ -4,6 +4,7 @@ example . {
     System.Linq
     System.ComponentModel.DataAnnotations.Schema
     System.ComponentModel.DataAnnotations
+    System.Threading.Tasks
 
     _ : example.example_static
 }
@@ -35,7 +36,7 @@ Main : (->>) {
     test_empty()
     test_lambda()
     test_linq()
-    << test_async()
+    test_async..()
 
     y! : test_tuple(1).to_str()
 
@@ -44,7 +45,7 @@ Main : (->>) {
     p.c(1)
     test_interface(p)
 
-    p.[test_func_template int, str](1, "2").test_package()
+    p.[test_func_template int str](1, "2").test_package()
     
     @ true {
         ~@
@@ -191,7 +192,7 @@ test_list : (->) {
     NumbersInNumbers! : {{1;1;1}; {1;1;1}}
     NumbersInNumbers[0][0] = 3
     Empty : [][]int{}
-    Array [.]int : array_of(1,2,3)
+    Array [,]int : array_of(1,2,3)
     @ [i]v : Numbers {
         print(i, ":", v)
     }
@@ -236,7 +237,7 @@ test_combined_type : (->) {
     # go: map[int][]map[str]map[str][]str
     # c#: map<int,list<map<str,map<str,list<str>>>>>
     type1! [int][][str][str][]str
-    type2! [dictionary int, [list [dictionary str, [dictionary str, [list str]]]]]
+    type2! [dictionary int [list [dictionary str [dictionary str [list str]]]]]
 }
 
 test_switch : (->) {
@@ -367,7 +368,7 @@ test_func : (s str : "test" -> out1 str, out2 int) {
 }
 
 test_func_params : (a int, b int, fn (int, int, int, i8 ->
-    str, int, int, int), arr ...int -> a int, b str, c str) {
+    str, int, int, int), arr ,,,int -> a int, b str, c str) {
     <- 0, "", ""
 }
 
@@ -386,11 +387,11 @@ test_lambda : (->) {
         fn(1)
     }
     Test3( (it int ->> ) {
-        << delay(1000)
+        delay..(1000)
         print(it)
     })
     Test3{it ->>
-        << delay(1000)
+        delay..(1000)
         print(it)
     }
     Test4 : (fn (int ->> int) -> ) { 
@@ -412,22 +413,20 @@ test_yield : (-> @ v int) {
 test_async : (->> x int, y int, z str) {
     sleep(1000)
     @ i : 1 ~ 10 {
-        go{ ->> 
-            << delay(1000)
+        go{ ->>
+            <<- delay(1000)
+            delay..(1000)
             print("task", i)
         }
-        go{ -> 
-            <-
-        }
     }
-    AsyncVoid : (->>_) {
-        << delay(1000)
+    AsyncVoid : (->) {
+        delay..(1000)
     }
     FunWait : (->> x int, y int, z str) {
-        << delay(1000)
+        delay..(1000)
         <- 1, 2, "123"
     }
-    <<- FunWait()
+    <- FunWait..()
 }
 
 test_linq : (->) {
@@ -536,12 +535,12 @@ app : program \/ protocol \/ $ me {
     }
 
     d : (->> x int) {
-        << delay(1000)
+        delay..(1000)
         <- 3
     }
 
     e : (->>) {
-        << delay(1000)
+        delay..(1000)
     }
 
     g : (-> @ v int) {
@@ -601,7 +600,7 @@ test_annotation : $ {
     profile! str
 }
 
-test_enum : .. {
+test_enum : [:] {
     ok
     err : -1
 }
