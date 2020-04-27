@@ -166,7 +166,7 @@ count = i + int(f)
 ## Inclusive Range Operator
 ### K
 ```
-@ index : 1 ~ 5 {
+@ index : 1 .. 5 {
     print("${index} times 5 is ${index * 5}")
 }
 ```
@@ -833,13 +833,13 @@ for item in library:
 ### K
 ```
 nb : 42
-? nb : 0 ~ 7, 8, 9 { 
+? nb : 0 .. 7, 8, 9 { 
     print("single digit") 
 } 10 { 
     print("double digits") 
-} 11 ~ 99 { 
+} 11 .. 99 { 
     print("double digits") 
-} 100 ~ 999 { 
+} 100 .. 999 { 
     print("triple digits") 
 } _ { 
     print("four or more digits") 
