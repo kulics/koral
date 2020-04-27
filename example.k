@@ -296,7 +296,7 @@ test_foreach : (->) {
     }
     print(" ")
     print(" 8 to 2 step 2")
-    @ ea : 10 ...(2) 0 {
+    @ ea : 10 ... 0 {
         print(ea, ", ", "")
         ? ea == 6 {
             ->@
