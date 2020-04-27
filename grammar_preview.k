@@ -41,7 +41,7 @@ Main : (->>) {
     Stack : [>]int{}
     Queue : [<]int{}
 
-    Array [.]int : array_of(1,2,3)
+    Array [,]int : array_of(1,2,3)
     # Anonymous Package
     New : {
         title : "nnn"
@@ -74,7 +74,7 @@ Main : (->>) {
     }
 
     # pattern match
-    ? x : 0~6, 7, 8, 9 {
+    ? x : 0..6, 7, 8, 9 {
         do_something_a()
     } 14 {
         do_something_b()
