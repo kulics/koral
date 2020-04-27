@@ -36,7 +36,7 @@ Main : (->>) {
     test_empty()
     test_lambda()
     test_linq()
-    test_async..()
+    test_async~>()
 
     y! : test_tuple(1).to_str()
 
@@ -196,8 +196,8 @@ test_list : (->) {
     @ [i]v : Numbers {
         print(i, ":", v)
     }
-    Slice : Numbers[0~_]
-    Slice2 : Numbers[_~3]
+    Slice : Numbers[0..]
+    Slice2 : Numbers[..3]
 }
 
 test_set : (->) {
@@ -281,17 +281,17 @@ test_if : (->) {
 
 test_foreach : (->) {
     print(" 0 to 10")
-    @ i : 0 ~ 10 {
+    @ i : 0 .. 10 {
         print(i, ", ", "")
     }
     print(" ")
     print(" 0 to 8 step 2")
-    @ ea : 0 ~(2) 8 {
+    @ ea : 0 ..(2) 8 {
         print(ea, ", ", "")
     }
     print(" ")
     print(" 8 to 2 step 2")
-    @ ea : 8 ~~(2) 2 {
+    @ ea : 8 ...(2) 2 {
         print(ea, ", ", "")
         ? ea == 6 {
             ->@
@@ -304,7 +304,7 @@ test_foreach : (->) {
     } _ {
         print("loop else")
     }
-    @ i : 7 ~ 7 {
+    @ i : 7 .. 7 {
         print(i)
     } _ {
         print("loop else")
@@ -314,7 +314,7 @@ test_foreach : (->) {
     } _ {
         nil
     }
-    arr = @ i : 0 ~ 5 -> {
+    arr = @ i : 0 .. 5 -> {
         i * 3
     }
 }
@@ -387,11 +387,11 @@ test_lambda : (->) {
         fn(1)
     }
     Test3( (it int ->> ) {
-        delay..(1000)
+        delay~>(1000)
         print(it)
     })
     Test3{it ->>
-        delay..(1000)
+        delay~>(1000)
         print(it)
     }
     Test4 : (fn (int ->> int) -> ) { 
@@ -401,7 +401,7 @@ test_lambda : (->) {
 }
 
 test_yield : (-> @ v int) {
-    @ i : 1 ~ 10 {
+    @ i : 1 .. 10 {
         ? i < 7 {
             @ <- i
         } _ {
@@ -412,21 +412,20 @@ test_yield : (-> @ v int) {
 
 test_async : (->> x int, y int, z str) {
     sleep(1000)
-    @ i : 1 ~ 10 {
+    @ i : 1 .. 10 {
         go{ ->>
-            <<- delay(1000)
-            delay..(1000)
+            delay~>(1000)
             print("task", i)
         }
     }
     AsyncVoid : (->) {
-        delay..(1000)
+        delay~>(1000)
     }
     FunWait : (->> x int, y int, z str) {
-        delay..(1000)
-        <- 1, 2, "123"
+        delay(1000)
+        <<- 1, 2, "123"
     }
-    <- FunWait..()
+    <- FunWait~>()
 }
 
 test_linq : (->) {
@@ -535,16 +534,16 @@ app : program \/ protocol \/ $ me {
     }
 
     d : (->> x int) {
-        delay..(1000)
+        delay~>(1000)
         <- 3
     }
 
     e : (->>) {
-        delay..(1000)
+        delay~>(1000)
     }
 
     g : (-> @ v int) {
-        @ i : 1 ~ 3 {
+        @ i : 1 .. 3 {
             @ <- i
         }
     }

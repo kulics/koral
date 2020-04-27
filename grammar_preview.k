@@ -106,11 +106,11 @@ Main : (->>) {
         print(index, value)
     }
 
-    # Iterator, Increment from ~(step) to, Decrement from ~~(step) to, (step) can omit
-    @ it : 0 ~ 100 {
+    # Iterator, Increment from ..(step) to, Decrement from ...(step) to, (step) can omit
+    @ it : 0 .. 100 {
         print(it)
     }
-    @ it : 10 ~~ 1 {}
+    @ it : 10 ... 1 {}
 
     # Infinite
     @ true {
@@ -224,11 +224,16 @@ Main : (->>) {
     }
 
     task : (in int -> out int) {
-        # make a function to await
-        do_some_thing_A..()
         # make a function to async
-        do_some_thing_B.()
-        <- in
+        ~> do_some_thing_A()
+        # make a function to await
+        do_some_thing_B~>()
+        # make channel
+        chan : [~]int{}
+        # await
+        chan <~ in
+        # await
+        <- <~ chan
     }
 
     x : task(6)
@@ -300,7 +305,7 @@ Main : (->>) {
         e! PropertyChangedEventHandler
     }
 
-    Color : .. {
+    Color : [:] {
         Red 
         Green
         Blue
