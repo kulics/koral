@@ -1,6 +1,6 @@
-# Grammar Overview
+#: Grammar Overview
 
-# Name Space
+#: Name Space
 demo . {
     System
     System.Linq
@@ -8,81 +8,81 @@ demo . {
     System.Threading.Tasks
     System.ComponentModel.DataAnnotations.Schema
     System.ComponentModel.DataAnnotations
-    _ : IO.File # 可以隐藏元素使用内容
+    _ : IO.File #: 可以隐藏元素使用内容
 }
 
 Main : (->>) {
-    # Define, 一般情况下编译器会自动判断类型
-    String : "10"   # str
-    Number : 1.2    # num
-    Integer : 123   # int
-    Boolean : true  # bool
-    SmallFloat : (1.2).to_f32() # basic type convert
+    #: Define, 一般情况下编译器会自动判断类型
+    String : "10"   #: str
+    Number : 1.2    #: num
+    Integer : 123   #: int
+    Boolean : true  #: bool
+    SmallFloat : (1.2).to_f32() #: basic type convert
 
-    # Const
+    #: Const
     PI : 3.141592653
 
-    # Mark String
+    #: Mark String
     Format : "the value is ${Integer}, ${Number}, ${Boolean}"
 
-    # List
+    #: List
     List! : []int{ 1;2;3;4;5 }
     List = { 1;2;3;4;5 }
-    print( List[0] ) # 使用下标获取
+    print( List[0] ) #: 使用下标获取
 
-    # Set
+    #: Set
     Set : [int]_{ 1;2;3;4;5 }
 
-    # Dictionary, 前面为key，后面为value
+    #: Dictionary, 前面为key，后面为value
     Dictionary! : {["1"]=false; ["2"]=true}
     Dictionary = [str]bool{ ["1"]=false; ["2"]=true}
-    print( Dictionary["1"] ) # 使用key获取
+    print( Dictionary["1"] ) #: 使用key获取
 
     Stack : [>]int{}
     Queue : [<]int{}
 
     Array [,]int : array_of(1,2,3)
-    # Anonymous Package
+    #: Anonymous Package
     New : {
         title : "nnn"
         number : 8
     }
 
-    # Function
-    Fn : (in int -> out int) {} # (int->int)
+    #: Function
+    Fn : (in int -> out int) {} #: (int->int)
 
-    # Function with no params no return
+    #: Function with no params no return
     do_something_void : (->) {
         do_something_a()
         do_something_b()
      }
 
-    # Full Function with in params and out params
+    #: Full Function with in params and out params
     do_something_with_params : (x int, y str -> a int, b str) {
         <- x, y
     }
 
     B2C()
-    # 使用 _ 舍弃返回值
+    #: 使用 _ 舍弃返回值
     _ : A2B(3, "test")
 
-    # Judge，当表达式的结果只有Bool时，相当于if，只当True时才执行
+    #: Judge，当表达式的结果只有Bool时，相当于if，只当True时才执行
     ? 1+1 >< 2 {
         do_something_a()
-    } _ { # else
+    } _ { #: else
         do_something_b()
     }
 
-    # pattern match
+    #: pattern match
     ? x : 0..6, 7, 8, 9 {
         do_something_a()
     } 14 {
         do_something_b()
-    } _ { # default
+    } _ { #: default
         do_somethingC()
     }
 
-    # type match
+    #: type match
     ? object : _ str { 
         print("string") 
     } _ int { 
@@ -97,45 +97,45 @@ Main : (->>) {
         print("null") 
     }
 
-    # Loop, use identify to take out single item, default is it
+    #: Loop, use identify to take out single item, default is it
     @ item : array {
         print(item)
     }
-    # take index and value, both worked at Dictionary
+    #: take index and value, both worked at Dictionary
     @ [index]value : array {
         print(index, value)
     }
 
-    # Iterator, Increment from ..(step) to, Decrement from ...(step) to, (step) can omit
+    #: Iterator, Increment from ..(step) to, Decrement from ...(step) to, (step) can omit
     @ it : 0 .. 100 {
         print(it)
     }
     @ it : 10 ... 1 {}
 
-    # Infinite
+    #: Infinite
     @ true {
         ? a > b {
-            ~@ # jump out loop
+            ~@ #: jump out loop
         } _ {
-            ->@ # continue
+            ->@ #: continue
         }
     }
-    # Conditional
+    #: Conditional
     a! : 0
     @ a < 10 {
         a += 1
     } _ {
-        # Loop else
+        #: Loop else
     }
     
-    # Struct，支持 variable 类型，通常用来包装数据
+    #: Struct，支持 variable 类型，通常用来包装数据
     View : $ {
         width! int
         height! int
         background! str
     }
 
-    # 也支持包装方法，可以通过 me 来访问包自身属性或方法
+    #: 也支持包装方法，可以通过 me 来访问包自身属性或方法
     Button : $ me {
         width! int
         height! int
@@ -149,25 +149,25 @@ Main : (->>) {
     }
 
     Image : $ me {
-        # 私有属性，不能被外部访问，也不能被重包装
+        #: 私有属性，不能被外部访问，也不能被重包装
         _width! : 0
         _height! : 0
         _source! : "" 
-    } \/ (w int, h int, s str->$me) { # 初始化方法
+    } \/ (w int, h int, s str->$me) { #: 初始化方法
         me._width, me._height, me._source = w,h,s
     }
 
-    # Interface, implemented by package
+    #: Interface, implemented by package
     Animation : $ {
-        speed! int     # 需求变量，导入的包必须实现定义
-        move (s int ->)             # 需求方法，导入的包必须实现定义
+        speed! int     #: 需求变量，导入的包必须实现定义
+        move (s int ->)             #: 需求方法，导入的包必须实现定义
     }
 
-    # Combine Package，通过引入来复用属性和方法
+    #: Combine Package，通过引入来复用属性和方法
     Image_Button : Image \/ Button \/ $ me {
         title! str
         _speed! int
-        # Implement interface
+        #: Implement interface
         speed : (me._speed) int
         move : (s int ->) {
             t = 5000/s
@@ -177,68 +177,68 @@ Main : (->>) {
         me.title = "img btn"
     }
 
-    # Create an package object
+    #: Create an package object
     IB : Image_Button{}
-    # Calling property
+    #: Calling property
     IB.title = "OK"
-    # Calling method
+    #: Calling method
     IB.button.show()
-    # Calling protocol
+    #: Calling protocol
     IB.move(6)
 
-    # Create an object with simple assign
+    #: Create an object with simple assign
     IB2 : Image_Button{
         title="Cancel"
         background="red"
     }
 
-    # Create an object with params
+    #: Create an object with params
     Img : Image(30, 20, "./icon.png")
     ImgBtn : Image_Button(1, 1)
 
-    # judge type
+    #: judge type
     ? IB Image_Button? {
-        # convert type
+        #: convert type
         (IB View!).show()
     }
 
-    # get type
+    #: get type
     print( typeof(Image_Button) )
 
-    # Check, listen the Exception Function
+    #: Check, listen the Exception Function
     Fi : File("./test.xs")
     ! F : Read_File("demo.xs")
     ! {
         do_some_thing()
     } ex {
-        ! <- ex # Use ! <- to throw an Exception
+        ! <- ex #: Use ! <- to throw an Exception
     } _ {
         Fi.Dispose()
     }
-    # yield
+    #: yield
     yield_function : (-> @ r int) {
-        # yield return
+        #: yield return
         @ <- 123
-        # yield break
+        #: yield break
         @ <-
     }
 
     task : (in int -> out int) {
-        # make a function to async
+        #: make a function to async
         ~> do_some_thing_A()
-        # make a function to await
+        #: make a function to await
         do_some_thing_B~>()
-        # make channel
+        #: make channel
         chan : [~]int{}
-        # await
+        #: await
         chan <~ in
-        # await
+        #: await
         <- <~ chan
     }
 
     x : task(6)
 
-    # Annotation
+    #: Annotation
     <assemby -> Table("user"); D(false, Name="d", Hide=true)>
     User : $ {
         <Column("id"); Required; Key>
@@ -249,38 +249,38 @@ Main : (->>) {
         time_update! int
     }
 
-    # Pointer Type
+    #: Pointer Type
     A ?int : nil
-    # Get Pointer
+    #: Get Pointer
     C : A?
-    # Safe Call
+    #: Safe Call
     E : A?.to_str()
-    # OrElseValue
+    #: OrElseValue
     F : A??128
 
-    # Reference
+    #: Reference
     swap : (x! int, y! int->) {
         x, y = y, x
     }
     swap(A, B)
     
-    # Generic package
+    #: Generic package
     [table T] : $ {
         data! T
         set_data : (d T ->) {
             data = d
         }
     }
-    # Generic function
+    #: Generic function
     [Add T] : (x1 T, x2 T -> y T) {
         <- x1 + x2
     }
 
-    # Lambda Function
+    #: Lambda Function
     arr.select( {it -> it > 2} )
     arr.select{it -> it > 2}
 
-    # Func params
+    #: Func params
     Func : (in (int -> int) ->) {
         in(1)
     }
@@ -288,15 +288,15 @@ Main : (->>) {
         <- (y)
     })
 
-    # linq
+    #: linq
     arr = @ id : expr -> where expr -> order expr -> select expr
 
-    # event
+    #: event
     EventHandle : $ {
         property_changed [->]PropertyChangedEventHandler
     }
 
-    # control
+    #: control
     Data : $ {
         <get;set>
         c! int 

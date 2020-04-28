@@ -14,7 +14,7 @@ example . {
 =#
 Main : (->>) {
     print("main function")
-    # run test
+    # "run test"
     test_type()
     test_operator()
     test_string()
@@ -58,13 +58,13 @@ Main : (->>) {
     read()
 }
 
-<get;set>
+#get #set
 static_x! : 0
 
-<get{i->i};set{i,v->i=v;}>
+#get{i->i} #set{i,v->i=v;}
 static_y! : "hello"
 
-<_get{->static_x};set{v->static_x=v;}>
+#_get{->static_x} #set{v->static_x=v;}
 static_z! int
 
 static_g! i64
@@ -74,23 +74,23 @@ test_tuple : (i int -> v str) {
 }
 
 test_type : (->) {
-    I1 i8 : 1              # sbyte
-    I2 i16 : 1             # short
-    I3 i32 : 1             # int
-    I4 i64 : 1             # long
-    U1 u8 : 1              # byte
-    U2 u16 : 1             # ushort
-    U3 u32 : 1             # uint
-    U4 u64 : 1             # ulong
-    F1 f32 : 1             # float
-    F2 f64 : 1             # double
-    Char1 chr : 'a'        # char
-    String1 str : "123"    # string
-    Bool1 bool : false     # bool
-    Int1 int : 1           # int
-    Num1 num : 1.0         # double
-    Byte1 byte : 1         # byte
-    Any1 any : 1           # object
+    I1 i8 : 1              #: sbyte
+    I2 i16 : 1             #: short
+    I3 i32 : 1             #: int
+    I4 i64 : 1             #: long
+    U1 u8 : 1              #: byte
+    U2 u16 : 1             #: ushort
+    U3 u32 : 1             #: uint
+    U4 u64 : 1             #: ulong
+    F1 f32 : 1             #: float
+    F2 f64 : 1             #: double
+    Char1 chr : 'a'        #: char
+    String1 str : "123"    #: string
+    Bool1 bool : false     #: bool
+    Int1 int : 1           #: int
+    Num1 num : 1.0         #: double
+    Byte1 byte : 1         #: byte
+    Any1 any : 1           #: object
 }
 
 test_operator : (->) {
@@ -233,9 +233,9 @@ test_queue : (->) {
 }
 
 test_combined_type : (->) {
-    # swift: [int:[[str:[str:[str]]]]]
-    # go: map[int][]map[str]map[str][]str
-    # c#: map<int,list<map<str,map<str,list<str>>>>>
+    #: swift: [int:[[str:[str:[str]]]]]
+    #: go: map[int][]map[str]map[str][]str
+    #: c#: map<int,list<map<str,map<str,list<str>>>>>
     type1! [int][][str][str][]str
     type2! [dictionary int [list [dictionary str [dictionary str [list str]]]]]
 }
@@ -363,7 +363,6 @@ test_func : (s str : "test" -> out1 str, out2 int) {
     s = s + "test"
     I1 : 1+1*3*9/8
     I2 : I1 + 5 + (I1 + 8)
-    # func in func
     Infunc : (->) {
         <-
     }
@@ -511,7 +510,7 @@ app : program \/ protocol \/ $ me {
     arr! : {1;1;1;1}
     _priName! : " program "
     _b! : 5
-    <get{i->i};set{i,v->i=v;}>
+    #get{i->i} #set{i,v->i=v;}
     a! : 1
 
     test_package : (->) {
@@ -522,16 +521,16 @@ app : program \/ protocol \/ $ me {
         }
         Item3 : []int{1;2;3;4;5}
         Item4 : [str]int{["1"]=1;["2"]=2;["3"]=3}
-        Item5 : package_child(1,2) # New
+        Item5 : package_child(1,2)
     }
 
     [test_func_template T1 T2] : (data1 T1, data2 T2 -> data app) {
         <- me
     }
 
-    <get{->me._b}; set{v->me._b = v;}>
+    #get{->me._b} #set{v->me._b = v;}
     b! int
-    <get;set>
+    #get #set
     f! str
 
     c : (x int -> y int) {
@@ -581,7 +580,7 @@ program : $ {
 }
 
 program := $ {
-    <get;set>
+    #get #set
     name! str
 }
 
@@ -594,13 +593,14 @@ protocol : $$ {
     g (-> @ v int)
 }
 
-<Table("test")>
+#"SQL ORM"
+#Table("test")
 test_annotation : $ {
-    <Key; Column("id")>
+    #Key #Column("id")
     id! str
-    <Column("nick_name")>
+    #Column("nick_name")
     nick_name! str
-    <Column("profile")>
+    #Column("profile")
     profile! str
 }
 
