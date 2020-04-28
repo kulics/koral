@@ -239,13 +239,13 @@ Main : (->>) {
     x : task(6)
 
     #: Annotation
-    <assemby -> Table("user"); D(false, Name="d", Hide=true)>
+    #assemby -> Table("user") #D(false, Name="d", Hide=true)
     User : $ {
-        <Column("id"); Required; Key>
+        #Column("id") #Required #Key
         id! str
-        <Column("nick_name"); Required>
+        #Column("nick_name") #Required
         nick_name! str
-        <Column("time_update"); Required>
+        #Column("time_update") #Required
         time_update! int
     }
 
@@ -298,10 +298,10 @@ Main : (->>) {
 
     #: control
     Data : $ {
-        <get;set>
+        #get #set
         c! int 
         d! int
-        <add;remove>
+        #add #remove
         e! PropertyChangedEventHandler
     }
 
