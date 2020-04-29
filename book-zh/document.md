@@ -1407,8 +1407,9 @@ _ {
 
 例如：
 ```
-! Res : FileResource("/test.file")
-......
+! Res : FileResource("/test.file") {
+    ......
+}
 ```
 
 # 异步处理

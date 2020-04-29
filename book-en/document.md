@@ -1420,8 +1420,9 @@ For interfaces that implement an autorelease interface, we can use declaration s
 
 E.g:
 ```
-! Res : FileResource("/test.file")
-......
+! Res : FileResource("/test.file") {
+    ......
+}
 ```
 
 # Asynchronous Processing
