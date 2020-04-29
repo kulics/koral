@@ -322,4 +322,18 @@ Main : (->>) {
     List["0"] #: "512"
     ls : List{}
     ls[0]   #: 128
+
+    #: operator override
+    complex : $ {
+        v int
+        i int
+
+        + (x complex->y complex) {
+            <- complex{ v = v + x.v; i = i + x.i }
+        }
+    }
+    #=
+    # "addable interface"
+    [add T] : $ { add (T->T) }
+    =#
 }
