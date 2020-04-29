@@ -301,39 +301,41 @@ Main : (->>) {
     #: control
     Data : $ {
         #get #set
-        c! int 
+        c! int
         d! int
         #add #remove
         e! PropertyChangedEventHandler
     }
 
     Color : [:] {
-        Red 
+        Red
         Green
         Blue
     }
 
-    #: index
-    List : $ [i int->v int] {
-        <- 128
-    } \/ [i str->v str] {
-        <- "512"
-    }
-    List["0"] #: "512"
-    ls : List{}
-    ls[0]   #: 128
-
     #: operator override
     complex : $ {
-        v int
-        i int
-
+        v! int
+        i! int
+        # "add"
         + (x complex->y complex) {
             <- complex{ v = v + x.v; i = i + x.i }
         }
+        # "index get"
+        [] (x bool->y int) {
+            ? x {
+                <- v
+            } _ {
+                <- i
+            }
+        }
+        # "index set"
+        [] (x bool, y int->) {
+            ? x {
+                v = y
+            } _ {
+                i = y
+            }
+        }
     }
-    #=
-    # "addable interface"
-    [add T] : $ { add (T->T) }
-    =#
 }
