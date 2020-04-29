@@ -337,19 +337,21 @@ test_while : (->) {
 
 test_check : (->!) {
     z1! ?defer : nil
-    ! z2 : defer{}
-    ! {
-        z1 = defer{}
-        ! z3 : defer{}
-        x : 1 * 1
-        y : 1 + 1
-    } ex IOException {
-        ! <- ex
-    } e {
-        ! <- e
-    } _ {
-        ? z1 >< nil {
-            z1.Dispose()
+    ! z2 : defer{} {
+        ! {
+            z1 = defer{}
+            ! z3 : defer{} {
+                x : 1 * 1
+                y : 1 + 1
+            }
+        } ex IOException {
+            ! <- ex
+        } e {
+            ! <- e
+        } _ {
+            ? z1 >< nil {
+                z1.Dispose()
+            }
         }
     }
     z1 = ! -> {
