@@ -318,11 +318,11 @@ Main : (->>) {
         v! int
         i! int
         # "add"
-        + (x complex->y complex) {
+        + : (x complex->y complex) {
             <- complex{ v = v + x.v; i = i + x.i }
         }
         # "index get"
-        [] (x bool->y int) {
+        [] : (x bool->y int) {
             ? x {
                 <- v
             } _ {
@@ -330,7 +330,7 @@ Main : (->>) {
             }
         }
         # "index set"
-        [] (x bool, y int->) {
+        [] : (x bool->) = y int {
             ? x {
                 v = y
             } _ {
