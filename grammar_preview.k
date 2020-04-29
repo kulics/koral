@@ -207,7 +207,9 @@ Main : (->>) {
 
     #: Check, listen the Exception Function
     Fi : File("./test.xs")
-    ! F : Read_File("demo.xs")
+    ! F : Read_File("demo.xs") {
+        do_some_thing()
+    }
     ! {
         do_some_thing()
     } ex {
@@ -310,4 +312,14 @@ Main : (->>) {
         Green
         Blue
     }
+
+    #: index
+    List : $ [i int->v int] {
+        <- 128
+    } \/ [i str->v str] {
+        <- "512"
+    }
+    List["0"] #: "512"
+    ls : List{}
+    ls[0]   #: 128
 }
