@@ -317,24 +317,25 @@ Main : (->>) {
     complex : $ {
         v! int
         i! int
+
         # "add"
         + : (x complex->y complex) {
             <- complex{ v = v + x.v; i = i + x.i }
         }
-        # "index get"
+
+        # "index"
+        # set { ->
+            ? x {
+                v = y
+            } _ {
+                i = y
+            }
+        }
         [] : (x bool->y int) {
             ? x {
                 <- v
             } _ {
                 <- i
-            }
-        }
-        # "index set"
-        [] : (x bool->) = y int {
-            ? x {
-                v = y
-            } _ {
-                i = y
             }
         }
     }
