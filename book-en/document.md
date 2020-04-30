@@ -66,22 +66,24 @@ StatementContent
 ## Export Namespace
 All content in this language can only be defined in the namespace, which can effectively manage the content into distinct blocks to manage, you can freely define in a separate namespace without having to be too restrictive.
 
-We can use the `name . {}` statement to define the namespace of the current file.
+We can use the `<- name` statement to define the namespace of the current file.
 
 E.g:
 ```
-Demo . {}
+<- Demo
 ```
 The meaning of this statement is to mark the content tag in the current code file as `Demo`, so that the content naming inside is limited to the area, and it is not necessary to consider the naming conflict with the outside of the area.
 
 At the same time, the external area can import `Demo` to use the content, we will learn how to import.
 
 ## Import Namespaces
-We can use the `name` statement in the `{}` of the export statement to import other namespaces, libraries, and frameworks into a namespace.
+We can use the `name` statement in the import statement `-> {}` to import other namespaces, libraries, and frameworks into a namespace.
 
 E.g:
 ```
-Demo . {
+<- Demo
+
+-> {
     System
 }
 ```
@@ -97,7 +99,9 @@ Depending on the target platform, the main entry may be declared differently, an
 
 E.g:
 ```
-Demo . {
+<- Demo
+
+-> {
     System
 }
 
@@ -1135,7 +1139,7 @@ In order to facilitate our management of the code, we must write our code in the
 
 E.g:
 ```
-Name.Space . {}
+<- Name.Space
 
 GetSomething : (-> content str) {
     <- "something"
@@ -1146,7 +1150,9 @@ We can use other namespace content through the import function, and the namespac
 
 E.g:
 ```
-Run . { 
+<- Run
+
+-> { 
     Name.Space 
 }
 

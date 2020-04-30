@@ -1,4 +1,6 @@
-demo . {
+<- demo
+
+-> {
     System
 }
 

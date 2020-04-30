@@ -1,7 +1,10 @@
 #: Grammar Overview
 
-#: Name Space
-demo . {
+#: Export Name Space
+<- demo
+
+#: Import Name Space
+-> {
     System
     System.Linq
     System.Text
