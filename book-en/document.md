@@ -1438,74 +1438,98 @@ Because the computer processor has a computational bottleneck, it is impossible 
 
 Here we talk about how to handle threading problems more simply, that is, asynchronous processing.
 
-In other languages, it can be considered as the `async/await` of the asynchronous programming final solution.
+## Asynchronous execution
+So how to transform a synchronous function into an asynchronous function? Just use `~>`.
 
-## Asynchronous Declaration
-So how do you declare a function to be asynchronous? Use `->>` to do it.
-
-That's right, just use `->>`.
+That's right, it's really just using `~>`.
 
 E.g:
 ```
-Async : (->> out int) {
-    <- 12
+SayHello : (->v int) { 
+    print("hello")
+    <- 2020
 }
-```
-Once a method is declared as an asynchronous method, the compiler will automatically wrap the return value with a `[Task type]` type package, and this method can be executed asynchronously.
 
-A normal direct call will only get a `Task` data.
+~> SayHello()
+```
 
-E.g:
-```
-Result : Async()    #: result is a Task data
-```
-Next we will look at how to make it asynchronously awaiting execution.
-## Asynchronous Waiting
-As with declarations, we only need to declare an asynchronous method using `<< function()`.
+After converting a synchronous function into an asynchronous function, it will be transferred to a new thread for execution. 
+
+This allows our logic to be processed in parallel, but at the same time makes it impossible for us to directly obtain the return value of this function, because the time when the function execution ends becomes no longer under our control, the current logic will not wait for the asynchronous function, but will continue to execute .
+
+So the following code cannot be passed.
 
 E.g:
 ```
-Result : << Async()
+Result : ~> SayHello()
+#: Error, the current logic will continue to execute, and the return value cannot be obtained directly
+```
+
+## Asynchronous waiting
+If we need to convert a synchronous function into an asynchronous function and at the same time hope that the current logic can wait for the execution of this function to end, is it possible to write asynchronous code in a synchronous manner?
+
+The answer is yes, we can use a unique syntax `function~>()` to execute a synchronous function. This function will not only be executed asynchronously, but the current program will also wait for it to complete before continuing to execute down.
+
+In this way, we can get the results we want.
+
+E.g:
+```
+Result : SayHello~>()
+#: Correct, the current logic will wait for the asynchronous result before continuing execution
+...
+```
+
+## Use channel asynchronous communication
+For direct waterfall logic, the above syntax can already satisfy our use. But there are some other scenarios where we may need to manually handle more asynchronous details. At this time, we can use channels to pass data to complete our asynchronous tasks.
+
+The channel is a special collection, the type is `[~]type`, we can pass the specified type of data to the channel, use` id <~ value` to input data, and use `<~ id` to get data.
+
+E.g:
+```
+Channel : [~]int{}
+
+#: The current logic will wait for the data transfer to complete before continuing execution
+Channel <~ 666
+
+#: For the same reason, the current logic will be suspended when obtaining data
+print(<~ Channel)
 ......
 ```
-After the asynchronous wait is declared, the program will temporarily stop the following functions until the `Async` function is executed, and the value of `out` is assigned to `Result`, and then continue.
-## Asynchronous Use Conditions
-Asynchronous waits can only be used in functions declared asynchronously.
+
+With channels, we can implement asynchronous programming through simple assembly.
+
+E.g:
+
+```
+ch : [~]int{}
+
+#: Execute a concurrent function
+~> (->) {
+    @ i : 3 ... 0 {
+        ch <~ i
+    }
+}()
+
+#: Cyclic receive channel data
+@ true {
+    data : <~ ch
+    print(data)
+
+    #: When encountering data 0, exit the loop
+    ? data == 0 {
+        ~@
+    }
+}
+#: Output 3 2 1 0
+```
+
+Since the channel is a collection type, we can also use the traversal syntax.
 
 E.g:
 ```
-# Yes
-Async : (->> out int) {
-    << delay(5000)  #: Wait for a while
-    <- 12
+@ data : ch {
+    ......
 }
-# No
-Async : (-> out int) {
-    << delay(5000)  #: Cannot be declared
-    <- 12
-}
-```
-## Empty Return Value
-If the asynchronous method does not return a value, it will also return a `Task` data, which can be waited for by an external call.
-
-We can choose to wait for no data, or we can choose not to wait for data.
-
-E.g:
-```
-Async : (->>) {
-    << delay(5000)      #: Wait for a while
-}
-
-<< Async()              #: Correct
-
-Task : Async()          #: Correct, got Task
-```
-## Lambda
-For lambda, we can also use asynchronous, just use `->>`.
-
-E.g:
-```
-Arr.filter( {it ->> it > 5} )
 ```
 
 # Generics
