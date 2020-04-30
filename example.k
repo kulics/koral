@@ -1,4 +1,6 @@
-example . {
+<- example
+
+-> {
     System
     System.IO
     System.Linq
