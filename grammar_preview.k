@@ -323,19 +323,20 @@ Main : (->>) {
             <- complex{ v = v + x.v; i = i + x.i }
         }
 
-        # "index"
-        # set { ->
-            ? x {
-                v = y
-            } _ {
-                i = y
-            }
-        }
-        [] : (x bool->y int) {
+        # "index get"
+        [x bool->] : (->y int) {
             ? x {
                 <- v
             } _ {
                 <- i
+            }
+        }
+        # "index set"
+        [x bool->] : (y int->) {
+            ? x {
+                v = y
+            } _ {
+                i = y
             }
         }
     }
