@@ -1,9 +1,4 @@
 # The K Programming Language
-<p>
-  <a href="https://github.com/996icu/996.ICU/blob/master/LICENSE_CN">
-    <img alt="996icu" src="https://img.shields.io/badge/license-NPL%20%28The%20996%20Prohibited%20License%29-blue.svg">
-  </a>
-</p>
 
 K is an open source programming language focused on efficiency. It can help you easily build cross-platform software.
 
