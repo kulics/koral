@@ -1,5 +1,5 @@
-# The K Programming Language
-K is an open source programming language focused on efficiency. It can help you easily build cross-platform software.
+# The Feel Programming Language
+Feel is an open source programming language focused on efficiency. It can help you easily build cross-platform software.
 
 With well-designed grammar rules, this language can effectively reduce the burden of reading and writing, allowing you to focus on solving problems.
 
@@ -34,17 +34,17 @@ With well-designed grammar rules, this language can effectively reduce the burde
 1. [Optional Type](#Optional-Type)
 
 # Install
-Currently `K` supports compilation to `C#/Go/JavaScript/Kotlin`, so you need to install `.NET Core/Go/NodeJS/JDK` environment on your system.
+Currently `Feel` supports compilation to `C#/Go/JavaScript/Kotlin`, so you need to install `.NET Core/Go/NodeJS/JDK` environment on your system.
 
-The execution compiler will scan the `.k` file of the current folder and automatically translate it to the target file of the same name.
+The execution compiler will scan the `.feel` file of the current folder and automatically translate it to the target file of the same name.
 
 we needs to use the function of some language libraries, so please refer to the library corresponding to the compiler.
 
 download:
-- [C#](https://github.com/kulics-works/k-csharp/releases)
-- [Go](https://github.com/kulics-works/k-go/releases)
-- [JavaScript](https://github.com/kulics-works/k-javascript/releases)
-- [Kotlin](https://github.com/kulics-works/k-kotlin/releases)
+- [C#](https://github.com/kulics-works/feel-csharp/releases)
+- [Go](https://github.com/kulics-works/feel-go/releases)
+- [JavaScript](https://github.com/kulics-works/feel-javascript/releases)
+- [Kotlin](https://github.com/kulics-works/feel-kotlin/releases)
 
 # Basic Grammar
 ## Basic Statement
@@ -1729,4 +1729,4 @@ E.g:
 B : A ?? 128
 ```
 
-## [Complete Example](../example.k)
+## [Complete Example](../example.feel)

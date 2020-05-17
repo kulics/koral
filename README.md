@@ -1,10 +1,10 @@
-# The K Programming Language
+# The Feel Programming Language
 
-K is an open source programming language focused on efficiency. It can help you easily build cross-platform software.
+Feel is an open source programming language focused on efficiency. It can help you easily build cross-platform software.
 
 With well-designed grammar rules, this language can effectively reduce the burden of reading and writing, allowing you to focus on solving problems.
 
-This is the main source code repository for K. It contains the compiler, and documentation.
+This is the main source code repository for Feel. It contains the compiler, and documentation.
 
 `Warning: This language is still in the experimental stage and cannot meet the production requirements. `
 
@@ -58,7 +58,7 @@ get_greetings : (first str -> result []str) {
     1. Include standard library.
     1. Improve grammar to achieve grammatical stability.
 1. 2020.01 ~ 2021.12
-    1. Write some projects using K.
+    1. Write some projects using Feel.
     1. Compile to more languages, including Go/Kotlin/JavaScript/LLVM.
     1. Improved compilation capabilities and support for language server protocols.
 
@@ -66,10 +66,10 @@ get_greetings : (first str -> result []str) {
 Compare with C#, Go, Kotlin, Swift, Python.
 Read detail from [Here](./Compare.md).  
 ## Source Code
-[C#](https://github.com/kulics-works/k-csharp)
+[C#](https://github.com/kulics-works/feel-csharp)
 
-[Go](https://github.com/kulics-works/k-go)
+[Go](https://github.com/kulics-works/feel-go)
 
-[JavaScript (not yet)](https://github.com/kulics-works/k-javascript)
+[JavaScript (not yet)](https://github.com/kulics-works/feel-javascript)
 
-[Kotlin](https://github.com/kulics-works/k-kotlin)
+[Kotlin](https://github.com/kulics-works/feel-kotlin)
