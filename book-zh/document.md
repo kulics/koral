@@ -1,5 +1,5 @@
-# K 编程语言
-K 是一个专注于效率的开源编程语言，它可以帮你轻松构建跨平台软件。
+# Feel 编程语言
+Feel 是一个专注于效率的开源编程语言，它可以帮你轻松构建跨平台软件。
 
 通过精心设计的语法规则，这门语言可以有效降低读写负担，让你能够把真正的注意力放在解决问题上。  
 
@@ -34,17 +34,17 @@ K 是一个专注于效率的开源编程语言，它可以帮你轻松构建跨
 1. [可选类型](#可选类型)
 
 # 安装与使用
-目前 `K` 支持编译到 `C#/Go/JavaScript/Kotlin`，因此需要在系统中安装 `.NET Core/Go/NodeJS/JDK` 环境。  
+目前 `Feel` 支持编译到 `C#/Go/JavaScript/Kotlin`，因此需要在系统中安装 `.NET Core/Go/NodeJS/JDK` 环境。  
 
-执行编译器就会扫描当前文件夹的 `.k` 文件，并且自动转译为同名的目标文件。  
+执行编译器就会扫描当前文件夹的 `.feel` 文件，并且自动转译为同名的目标文件。  
 
 我们需要使用部分语言库的功能，所以请自行引用编译器对应的库。
 
 下载:
-- [C#](https://github.com/kulics-works/k-csharp/releases)
-- [Go](https://github.com/kulics-works/k-go/releases)
-- [JavaScript](https://github.com/kulics-works/k-javascript/releases)
-- [Kotlin](https://github.com/kulics-works/k-kotlin/releases)
+- [C#](https://github.com/kulics-works/feel-csharp/releases)
+- [Go](https://github.com/kulics-works/feel-go/releases)
+- [JavaScript](https://github.com/kulics-works/feel-javascript/releases)
+- [Kotlin](https://github.com/kulics-works/feel-kotlin/releases)
 
 # 基础语法
 ## 基本语句
@@ -1712,4 +1712,4 @@ Arr?.to_str()
 B : A ?? 128
 ```
 
-## [完整示例](../example.k)
+## [完整示例](../example.feel)

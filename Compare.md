@@ -1,7 +1,7 @@
 
 # Compare
 ## Hello World
-### K
+### Feel
 ```
 print("Hello, world!")
 ```
@@ -26,7 +26,7 @@ print("Hello, world!")
 print("Hello, world!")
 ```
 ## Variables And Constants
-### K
+### Feel
 ```
 myVariable! : 42
 myVariable = 50
@@ -63,7 +63,7 @@ myVariable = 50
 MYCONSTANT = 42
 ```
 ## Explicit Types
-### K
+### Feel
 ```
 explicitDouble num : 70
 ```
@@ -84,7 +84,7 @@ val explicitDouble: Double = 70.0
 let explicitDouble: Double = 70
 ```
 ## Basic Types
-### K
+### Feel
 ```
 i32 i16 i64 i8 
 f64 f32 
@@ -127,7 +127,7 @@ bool
 string
 ```
 ## Type Coercion
-### K
+### Feel
 ```
 f : 6.0
 i : 94
@@ -164,7 +164,7 @@ i = 94
 count = i + int(f)
 ```
 ## Inclusive Range Operator
-### K
+### Feel
 ```
 @ index : 1 .. 5 {
     print("${index} times 5 is ${index * 5}")
@@ -201,7 +201,7 @@ for index in range(1,6):
     print ("%d times 5 is %d" % (index,index*5))
 ```
 ## Arrays
-### K
+### Feel
 ```
 shoppingList : {"catfish"; "water"; "tulips"; "blue paint"}
 shoppingList[1] = "bottle of water"
@@ -232,7 +232,7 @@ shoppingList = ["catfish", "water", "tulips", "blue paint"]
 shoppingList[1] = "bottle of water"
 ```
 ## Maps
-### K
+### Feel
 ```
 occupations : {
     ["Malcolm"] = "Captain"
@@ -281,7 +281,7 @@ occupations = {
 occupations["Jayne"] = "Public Relations"
 ```
 ## Empty Collections
-### K
+### Feel
 ```
 emptyArray : []str{}
 emptyDictionary : [str]f32{}
@@ -314,7 +314,7 @@ emptyArray = []
 emptyDictionary ={}
 ```
 ## Functions
-### K
+### Feel
 ```
 greet : (name str, day str -> r str) {
     <- "Hello ${name}, today is ${day}."
@@ -357,7 +357,7 @@ def greet(name,day):
 greet("Bob", "Tuesday")
 ```
 ## Tuple Return
-### K
+### Feel
 ```
 getGasPrices : (-> a num, b num, c num) {
     <- 3.59, 3.69, 3.79
@@ -392,7 +392,7 @@ def getGasPrices():
     return (3.59, 3.69, 3.79)
 ```
 ## Function Type
-### K
+### Feel
 ```
 makeIncrementer : (-> fn (int->int)) {
     addOne : (number int -> number int) {
@@ -462,7 +462,7 @@ increment = makeIncrementer()
 increment(7)
 ```
 ## Classes Declaration
-### K
+### Feel
 ```
 Shape : $ {
     numberOfSides! : 0
@@ -517,7 +517,7 @@ class Shape(object):
         return 'A shape with' + numberOfSides +' sides.'
 ```
 ## Classes Usage
-### K
+### Feel
 ```
 shape : Shape{}
 shape.numberOfSides = 7
@@ -554,7 +554,7 @@ shape.numberOfSides = 7
 shapeDescription = shape.simpleDescription()
 ```
 ## Subclass
-### K
+### Feel
 ```
 NamedShape : $ {
     name! str
@@ -749,7 +749,7 @@ test.area()
 test.simpleDescription()
 ```
 ## Checking Type
-### K
+### Feel
 ```
 movieCount! : 0
 songCount! : 0
@@ -830,7 +830,7 @@ for item in library:
         songCount+=1
 ```
 ## Pattern Matching
-### K
+### Feel
 ```
 nb : 42
 ? nb : 0 .. 7, 8, 9 { 
@@ -892,7 +892,7 @@ switch nb {
 }
 ```
 ## Downcasting
-### K
+### Feel
 ```
 @ current : someObjects {
     ? current : movie Movie {
@@ -945,7 +945,7 @@ for current in someObjects:
         print('Movie: %s, dir. %s' % (movie.name, movie.director))
 ```
 ## Protocol
-### K
+### Feel
 ```
 Nameable : $ {
     name (-> s str)
@@ -998,14 +998,13 @@ func f(x: Nameable) {
 }
 ```
 ## Implement
-### K
+### Feel
 ```
 Dog : $ {
-    # Implement Nameable
     name : (-> n str) {
         <- "Dog"
     }
-    # Implement Weight 
+
     getWeight : (-> w int) {
         <- 30
     }
@@ -1030,11 +1029,11 @@ class Dog: Nameable, Weight
 ### Go
 ```
 type Dog struct {}
-// Implement Nameable
+
 func (p *Dog) Name() string {
     return "Dog"
 }
-// Implement Weight
+
 func (p *Dog) GetWeight() int {
     return 30
 }
