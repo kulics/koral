@@ -11,13 +11,13 @@ This is the main source code repository for Feel. It contains the compiler, and 
 `警告：这个语言目前还处于实验阶段，还未能满足生产要求。`
 
 ## Key Features
-- The moderm gramar, which is easy to distinguish.
+- A modern grammar, which is easy to distinguish.
 - Automatic memory management.
-- Generic.
+- Generics.
 - Multi-paradigm programming.
 - Cross-platform.
 - Unicode.
-- Multiple backends, support C # / Go / JavaScript / Kotlin.
+- Multiple backends, supporting C # / Go / JavaScript / Kotlin.
 - LLVM will be supported soon.
 
 ## Getting Started
