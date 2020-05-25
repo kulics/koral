@@ -1065,13 +1065,14 @@ print( Chen.student.name )
 ```
 By combining layers of structure, you can freely assemble anything you want to describe.
 
-More recently, if we want to include all the attributes of a structure directly instead of a combination, we can use the top-level combination statement, declared as `type \/ struct`.
+More recently, if we want to include all the attributes of a structure directly instead of a combination, we can use the top-level combination statement, declared as `type`.
 
 Top-level combinations extract attributes from the structure to the exterior, just as they contain corresponding attributes directly. This is conducive to the use and transmission of attributes.
 
 E.g:
 ```
-ChineseStudent : Student \/ $ { #: top-level combination
+ChineseStudent : $ { 
+    Student #: top-level combination
     kungfu! : false
 }
 ```
@@ -1085,51 +1086,6 @@ print( Chen.name )
 ```
 
 This approach is similar to class inheritance in other languages.
-
-### Construction
-Sometimes we might use the constructor method of structure.
-
-We can use the special constructor statement `(->$self_identifier) {}`, self_identifier can omit.
-
-E.g:
-```
-Student : (name str, number str->$me) {
-    me.name = name
-    me.number = number
-    #: Calculate the class
-    me.class = getSubText(number, 2, 3)
-    #: Calculate the grade
-    me.grade = getSubText(number, 0, 1)
-} \/ $ {
-    ......
-}
-```
-This results in a structure with a constructor that automatically generates class and grade data when we create a new student.
-
-We need to use the constructor with the `type()` function.
-
-E.g:
-```
-Peter : Student("peter", "060233")
-print(Peter.class)    #: print out 2
-```
-
-If you need to use a constructor with inheritance, you can append `(params)` to the argument syntax.
-
-E.g:
-```
-Parent : $ {
-    ......
-} \/ (a int->$) {
-    ......
-}
-
-Child : Parent \/ $ {
-    ......
-} \/ (a int->$)(a) {
-    ......
-}
-```
 
 # Namespace
 Namespace are designed to provide a way to separate a set of names from other names. A name declared in one namespace does not conflict with a name declared in another namespace.

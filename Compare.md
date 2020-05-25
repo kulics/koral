@@ -564,7 +564,8 @@ NamedShape : $ {
     }
 } 
 
-Square : NamedShape \/ $ {
+Square : $ me {
+    NamedShape
     sideLength! num
 
     simpleDescription : (-> s str) {
@@ -574,12 +575,16 @@ Square : NamedShape \/ $ {
     area : (-> f num) {
         <- sideLength * sideLength
     }
-} \/ (sideLength num, name str->$me)(name) {
-    me.sideLength = sideLength
-    me.numberOfSides = 4
+
+    init : (sideLength num, name str->v Square) {
+        me.name = name
+        me.sideLength = sideLength
+        me.numberOfSides = 4
+        <- me
+    }
 }
 
-test : Square(5.2, "square")
+test : Square{}.init(5.2, "square")
 test.area()
 test.simpleDescription()
 ```
