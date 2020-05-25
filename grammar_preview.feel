@@ -45,7 +45,7 @@ Main : (->>) {
     Queue : [<]int{}
 
     Array [,]int : array_of(1,2,3)
-    #: Anonymous Package
+    #: Anonymous Template
     New : {
         title : "nnn"
         number : 8
@@ -58,7 +58,7 @@ Main : (->>) {
     do_something_void : (->) {
         do_something_a()
         do_something_b()
-     }
+    }
 
     #: Full Function with in params and out params
     do_something_with_params : (x int, y str -> a int, b str) {
@@ -131,14 +131,14 @@ Main : (->>) {
         #: Loop else
     }
     
-    #: Struct，支持 variable 类型，通常用来包装数据
+    #: Template
     View : $ {
         width! int
         height! int
         background! str
     }
 
-    #: 也支持包装方法，可以通过 me 来访问包自身属性或方法
+    #: 可以通过 me 来访问包自身属性或方法
     Button : $ me {
         width! int
         height! int
@@ -152,22 +152,27 @@ Main : (->>) {
     }
 
     Image : $ me {
-        #: 私有属性，不能被外部访问，也不能被重包装
+        #: 私有属性，不能被外部访问
         _width! : 0
         _height! : 0
         _source! : "" 
-    } \/ (w int, h int, s str->$me) { #: 初始化方法
-        me._width, me._height, me._source = w,h,s
+
+        init : (w int, h int, s str->v Image) {
+            me._width, me._height, me._source = w, h, s
+            <- me
+        }
     }
 
-    #: Interface, implemented by package
+    #: Interface
     Animation : $ {
-        speed! int     #: 需求变量，导入的包必须实现定义
-        move (s int ->)             #: 需求方法，导入的包必须实现定义
+        speed! int
+        move (s int ->)
     }
 
-    #: Combine Package，通过引入来复用属性和方法
-    Image_Button : Image \/ Button \/ $ me {
+    #: Combine Template
+    ImageButton : $ me {
+        Image
+        Button
         title! str
         _speed! int
         #: Implement interface
@@ -176,12 +181,16 @@ Main : (->>) {
             t = 5000/s
             play( s + t )
         }
-    } \/ (w int, h int->$me)(w, h , "img") {
-        me.title = "img btn"
+
+        init : (w int, h int->v ImageButton) {
+            me.Image.init(w, h, "img")
+            me.title = "img btn"
+            <- me
+        }
     }
 
-    #: Create an package object
-    IB : Image_Button{}
+    #: Create an Template object
+    IB : ImageButton{}
     #: Calling property
     IB.title = "OK"
     #: Calling method
@@ -190,27 +199,27 @@ Main : (->>) {
     IB.move(6)
 
     #: Create an object with simple assign
-    IB2 : Image_Button{
+    IB2 : ImageButton{
         title="Cancel"
         background="red"
     }
 
     #: Create an object with params
-    Img : Image(30, 20, "./icon.png")
-    ImgBtn : Image_Button(1, 1)
+    Img : Image{}.init(30, 20, "./icon.png")
+    ImgBtn : ImageButton{}.init(1, 1)
 
     #: judge type
-    ? IB Image_Button? {
+    ? IB ImageButton? {
         #: convert type
         (IB View!).show()
     }
 
     #: get type
-    print( typeof(Image_Button) )
+    print( typeof(ImageButton) )
 
     #: Check, listen the Exception Function
-    Fi : File("./test.xs")
-    ! F : Read_File("demo.xs") {
+    Fi : File("./test.feel")
+    ! F : Read_File("demo.feel") {
         do_some_thing()
     }
     ! {
@@ -269,7 +278,7 @@ Main : (->>) {
     }
     swap(A, B)
     
-    #: Generic package
+    #: Generic Template
     [table T] : $ {
         data! T
         set_data : (d T ->) {
@@ -343,4 +352,32 @@ Main : (->>) {
             }
         }
     }
+
+    #=
+    #: union type
+    object : $ {
+        to_str : (->v str) {
+            <- "object"
+        }
+    }
+    union : object \/ $ t1 {
+        value str
+        to_str : (->v str) {
+            <- value + object.to_str()
+        }
+    } \/ $ t2 {
+        key str
+        to_str : (->v str) {
+            <- key + t1.to_str()
+        }
+    } \/ (->v str) {
+        <- to_str()
+    } \/ {
+        key str
+        value str
+        to_str : (->) {
+            <- key + value
+        }
+    }
+    =#
 }
