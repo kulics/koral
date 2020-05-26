@@ -4,13 +4,13 @@ Feel is an open source programming language focused on efficiency. It can help y
 With well-designed grammar rules, this language can effectively reduce the burden of reading and writing, allowing you to focus on solving problems.
 
 ## Key Features
-- The moderm gramar, which is easy to distinguish.
+- A modern grammar, which is easy to distinguish.
 - Automatic memory management.
-- Generic.
+- Generics.
 - Multi-paradigm programming.
 - Cross-platform.
 - Unicode.
-- Multiple backends, support C # / Go / JavaScript / Kotlin.
+- Multiple backends, supporting C # / Go / JavaScript / Kotlin.
 - LLVM will be supported soon.
 
 # Index
@@ -453,11 +453,11 @@ This will create a list of `int` types containing `1` to `5`.
 
 If you need a list of explicit types, you can use the constructor to create them.
 
-The representation of the list type is `[]element_type`.
+The representation of the list type is `[list element_type]`.
 
 For example we need a list of strings:
 ```
-List : []str{}     #: empty
+List : [list str]{}     #: empty
 ```
 
 ### Access
@@ -497,15 +497,15 @@ E.g:
 ```
 Dictionary : {["a"]=1; ["b"]=2; ["c"]=3}
 ```
-This will create a `[str]int` type dictionary containing three entries for `a,b,c`.
+This will create a `[dict str int]` type dictionary containing three entries for `a,b,c`.
 
 If you need an explicit type of dictionary, you can also use the constructor to create it.
 
-The representation of the dictionary type is `[key_type]value_type`.
+The representation of the dictionary type is `[dict key_type value_type]`.
 
 E.g:
 ```
-DictionaryNumNum : [int]int{}  #: empty
+DictionaryNumNum : [dict int int]{}  #: empty
 ```
 ### Access
 Similar to the list, we can also use the index to access the data directly.
@@ -971,8 +971,8 @@ Similarly, the way a collection is build is actually a build syntax, so we can a
 
 E.g:
 ```
-Array : []int{ 1; 2; 3; 4; 5 }
-Dictionary : [str]int{ ["1"]=1; ["2"]=2; ["3"]=3 }
+Array : [list int]{ 1; 2; 3; 4; 5 }
+Dictionary : [dict str int]{ ["1"]=1; ["2"]=2; ["3"]=3 }
 ```
 ## Anonymous Structure
 If we only want to wrap some data directly, instead of defining the structure and then using it, can it be like an anonymous function?
@@ -1219,7 +1219,7 @@ Of course, it's better to put these students in an array so that we can use loop
 
 E.g:
 ```
-Arr : []Homework{}
+Arr : [list Homework]{}
 Arr.add( StudentA )
 ......  #: Insert many many students
 @ i : Arr {
@@ -1438,11 +1438,11 @@ Result : SayHello~>()
 ## Use channel asynchronous communication
 For direct waterfall logic, the above syntax can already satisfy our use. But there are some other scenarios where we may need to manually handle more asynchronous details. At this time, we can use channels to pass data to complete our asynchronous tasks.
 
-The channel is a special collection, the type is `[~]type`, we can pass the specified type of data to the channel, use` id <~ value` to input data, and use `<~ id` to get data.
+The channel is a special collection, the type is `[chan type]`, we can pass the specified type of data to the channel, use` id <~ value` to input data, and use `<~ id` to get data.
 
 E.g:
 ```
-Channel : [~]int{}
+Channel : [chan int]{}
 
 #: The current logic will wait for the data transfer to complete before continuing execution
 Channel <~ 666
@@ -1457,7 +1457,7 @@ With channels, we can implement asynchronous programming through simple assembly
 E.g:
 
 ```
-ch : [~]int{}
+ch : [chan int]{}
 
 #: Execute a concurrent function
 ~> (->) {
@@ -1555,9 +1555,9 @@ ListNumber : [List int]{}   #: Pass in int type
 ```
 So we have a list of integer types, is it like this:
 ```
-ListNumber : []int{}
+ListNumber : [list int]{}
 ```
-That's right, in fact, our list and dictionary syntax are syntactic sugar.
+That's right, in fact, our list and dictionary syntax are generics.
 ## Supported Types
 We can use generics in structures, functions, and interface types.
 
