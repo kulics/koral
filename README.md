@@ -29,7 +29,7 @@ This is the main source code repository for Feel. It contains the compiler, and 
 ```
 main : (->) {
     print("Hello, world!")
-    greetings : get_greetings("love k!")
+    greetings : get_greetings("Fall in love with programming!")
     @ [index]value : greetings {
         ? index : 0 {
             print(value)
