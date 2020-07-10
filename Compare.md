@@ -28,9 +28,9 @@ print("Hello, world!")
 ## Variables And Constants
 ### Feel
 ```
-myVariable! : 42
+!myVariable := 42
 myVariable = 50
-myConstant : 42
+myConstant := 42
 ```
 ### C#
 ```
@@ -65,7 +65,7 @@ MYCONSTANT = 42
 ## Explicit Types
 ### Feel
 ```
-explicitDouble num : 70
+explicitDouble: num = 70
 ```
 ### C#
 ```
@@ -129,9 +129,9 @@ string
 ## Type Coercion
 ### Feel
 ```
-f : 6.0
-i : 94
-count : i + (f int!)
+f := 6.0
+i := 94
+count := i + (f: int!)
 ```
 ### C#
 ```
@@ -166,7 +166,7 @@ count = i + int(f)
 ## Inclusive Range Operator
 ### Feel
 ```
-@ index : 1 .. 5 {
+@ index := 1 .. 5 {
     print("${index} times 5 is ${index * 5}")
 }
 ```
@@ -203,7 +203,7 @@ for index in range(1,6):
 ## Arrays
 ### Feel
 ```
-shoppingList : {"catfish"; "water"; "tulips"; "blue paint"}
+shoppingList := {"catfish"; "water"; "tulips"; "blue paint"}
 shoppingList[1] = "bottle of water"
 ```
 ### C#
@@ -234,7 +234,7 @@ shoppingList[1] = "bottle of water"
 ## Maps
 ### Feel
 ```
-occupations : {
+occupations := {
     ["Malcolm"] = "Captain"
     ["Kaylee"] = "Mechanic"
 }
@@ -283,8 +283,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Feel
 ```
-emptyArray : [list str]{}
-emptyDictionary : [dict str f32]{}
+emptyArray := [list str]{}
+emptyDictionary := [dict str f32]{}
 ```
 ### C#
 ```
@@ -316,7 +316,7 @@ emptyDictionary ={}
 ## Functions
 ### Feel
 ```
-greet : (name str, day str -> r str) {
+greet := (name: str, day: str -> r: str) {
     <- "Hello ${name}, today is ${day}."
 }
 greet("Bob", "Tuesday")
@@ -359,7 +359,7 @@ greet("Bob", "Tuesday")
 ## Tuple Return
 ### Feel
 ```
-getGasPrices : (-> a num, b num, c num) {
+getGasPrices := (-> a: num, b: num, c: num) {
     <- 3.59, 3.69, 3.79
 }
 ```
@@ -394,13 +394,13 @@ def getGasPrices():
 ## Function Type
 ### Feel
 ```
-makeIncrementer : (-> fn (int->int)) {
-    addOne : (number int -> number int) {
+makeIncrementer := (-> fn: (int->int)) {
+    addOne := (number: int -> number: int) {
         <- 1 + number
     }
     <- addOne
 }
-increment : makeIncrementer()
+increment := makeIncrementer()
 increment(7)
 ```
 ### C#
@@ -464,9 +464,9 @@ increment(7)
 ## Classes Declaration
 ### Feel
 ```
-Shape : $ {
-    numberOfSides! : 0
-    simpleDescription : (-> s str) {
+Shape := $ {
+    !numberOfSides := 0
+    simpleDescription := (-> s: str) {
         <- "A shape with ${numberOfSides} sides."
     }
 }
@@ -519,9 +519,9 @@ class Shape(object):
 ## Classes Usage
 ### Feel
 ```
-shape : Shape{}
+shape := Shape{}
 shape.numberOfSides = 7
-shapeDescription : shape.simpleDescription()
+shapeDescription := shape.simpleDescription()
 ```
 ### C#
 ```
@@ -556,27 +556,27 @@ shapeDescription = shape.simpleDescription()
 ## Subclass
 ### Feel
 ```
-NamedShape : $ {
-    name! str
-    numberOfSides! : 0
-    simpleDescription : (-> s str) {
+NamedShape := $ {
+    !name: str
+    !numberOfSides := 0
+    simpleDescription := (-> s: str) {
         <- "A shape with ${numberOfSides} sides."
     }
 } 
 
-Square : $ me {
+Square := $ me {
     NamedShape
-    sideLength! num
+    !sideLength: num
 
-    simpleDescription : (-> s str) {
+    simpleDescription := (-> s: str) {
         <- "A square with sides of length ${sideLength}."
     }
 
-    area : (-> f num) {
+    area := (-> f: num) {
         <- sideLength * sideLength
     }
 
-    init : (sideLength num, name str->v Square) {
+    init := (sideLength: num, name: str->v: Square) {
         me.name = name
         me.sideLength = sideLength
         me.numberOfSides = 4
@@ -584,7 +584,7 @@ Square : $ me {
     }
 }
 
-test : Square{}.init(5.2, "square")
+test := Square{}.init(5.2, "square")
 test.area()
 test.simpleDescription()
 ```
@@ -756,13 +756,13 @@ test.simpleDescription()
 ## Checking Type
 ### Feel
 ```
-movieCount! : 0
-songCount! : 0
+!movieCount := 0
+!songCount := 0
 
-@ item : library {
-    ? item : _ Movie {
+@ item := library {
+    ? [item] _: Movie {
         movieCount += 1
-    } _ Song {
+    } _: Song {
         songCount += 1
     }
 }
@@ -790,9 +790,9 @@ var movieCount = 0
 var songCount = 0
 
 for _, item := range library {
-    if _, ok := item(Movie); ok {
+    if _, ok := item.(Movie); ok {
         movieCount++
-    } else if _, ok := item(Song); ok {
+    } else if _, ok := item.(Song); ok {
         songCount++
     }
 }
@@ -837,8 +837,8 @@ for item in library:
 ## Pattern Matching
 ### Feel
 ```
-nb : 42
-? nb : 0 .. 7, 8, 9 { 
+nb := 42
+? [nb] 0 .. 7, 8, 9 { 
     print("single digit") 
 } 10 { 
     print("double digits") 
@@ -899,8 +899,8 @@ switch nb {
 ## Downcasting
 ### Feel
 ```
-@ current : someObjects {
-    ? current : movie Movie {
+@ current := someObjects {
+    ? [current] movie: Movie {
         print("Movie: '${movie.name}', " +
             "dir. ${movie.director}")
     }
@@ -952,11 +952,11 @@ for current in someObjects:
 ## Protocol
 ### Feel
 ```
-Nameable : $ {
-    name (-> s str)
+Nameable := $ {
+    name: (-> s: str)
 }
 
-f : (x Nameable ->) {
+f := (x: Nameable ->) {
     print("Name is " + x.name())
 }
 ```
@@ -1005,12 +1005,12 @@ func f(x: Nameable) {
 ## Implement
 ### Feel
 ```
-Dog : $ {
-    name : (-> n str) {
+Dog := $ {
+    name := (-> n: str) {
         <- "Dog"
     }
 
-    getWeight : (-> w int) {
+    getWeight := (-> w: int) {
         <- 30
     }
 }
