@@ -94,7 +94,7 @@ You can write multiple import statements, and their order does not affect the im
 For more details on namespaces, please see [Namespace](#Namespace)
 
 ## Main Entry
-We need to define a main entry to let the program know where to start. The main entry is declared via a function `Main : (->) {}`.
+We need to define a main entry to let the program know where to start. The main entry is declared via a function `Main := (->) {}`.
 Depending on the target platform, the main entry may be declared differently, and the main function of C# is used by default.
 
 E.g:
@@ -105,7 +105,7 @@ E.g:
     System
 }
 
-Main : (->) {
+Main := (->) {
 }
 ```
 The main entry function here is a function with no arguments and no return value. It is automatically recognized as the main entry. The main entry function is executed when the program starts, so we only need to write the function in the main entry function.
@@ -141,12 +141,12 @@ E.g:
 
 ## Constants
 ### Definition
-Constants in this language refer to data that cannot be changed after initialization. We use `identifier type` to define constants.
+Constants in this language refer to data that cannot be changed after initialization. We use `identifier: type` to define constants.
 
 E.g:
 ```
-A int
-B bool
+A: int
+B: bool
 ```
 This creates an identifier for the name on the left and defines it as the type on the right, where the identifier is a null value.
 
@@ -164,29 +164,29 @@ B = true
 But unlike the definition, the left-hand side of an assignment can only be an identifier that has already been defined, otherwise the assignment statement does not hold.
 
 ### Binding
-If we need to define and initialize the constants once, we can use the `identifier type : value` statement for binding.
+If we need to define and initialize the constants once, we can use the `identifier: type = value` statement for binding.
 
 E.g:
 ```
-A int : 1
-B bool : false
+A: int = 1
+B: bool = false
 ```
 
 Because this language has intelligent automatic derivation, we can usually omit `type` when the value is clear.
 
 E.g:
 ```
-A : 1
-B : false
+A := 1
+B := false
 ```
 ## Variable
 ### Definition
-Variables in this language refer to data that can continue to change after initialization. We use `identifier! type` to define variables.
+Variables in this language refer to data that can continue to change after initialization. We use `!identifier: type` to define variables.
 
 E.g:
 ```
-A! int
-B! bool
+!A: int
+!B: bool
 ```
 ### Assignment
 Like constants, variables are assigned by the same assignment statement, except that variables can be assigned multiple times.
@@ -200,20 +200,20 @@ B = true
 ```
  
 ### Binding
-As with constants, if we need to define and initialize a variable once, we can use the `identifier! type : value` statement for binding.
+As with constants, if we need to define and initialize a variable once, we can use the `!identifier: type = value` statement for binding.
 
 E.g:
 ```
-A! int : 1
-B! bool : false
+!A: int = 1
+!B: bool = false
 ```
 
 Similarly, we can continue to use automatic derivation.
 
 E.g:
 ```
-A! : 1
-B! : false
+!A := 1
+!B := false
 ```
 
 ## Identifier
@@ -236,16 +236,16 @@ In this language, the default integer is the `int` type, which is a 32-bit signe
 
 E.g:
 ```
-Integer int : 3987349
+Integer: int = 3987349
 ```
 
 If we need integers in other numeric ranges, we can use other types. All supported integer types are listed below.
 ```
 i8          #: 8 bit signed -128 to 127
-u8,byte     #: 8 bit unsigned 0 to 255
+u8, byte    #: 8 bit unsigned 0 to 255
 i16         #: 16-bit signed -32,768 to 32,767
 u16         #: 16-bit unsigned 0 to 65,535
-i32,int     #: 32-bit signed -2,147,483,648 to 2,147,483,647
+i32, int    #: 32-bit signed -2,147,483,648 to 2,147,483,647
 u32         #: 32-bit unsigned 0 to 4,294,967,295
 i64         #: 64-bit signed -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807
 u64         #: 64-bit unsigned 0 to 18,446,744,073,709,551,615
@@ -257,7 +257,7 @@ We can use the base type conversion to change the number to the type we need, ju
 
 E.g:
 ```
-Integer8 : (16).to_i8()
+Integer8 := (16).to_i8()
 ```
 
 It should be noted that the underlying type conversion method is only owned by the base type.
@@ -270,8 +270,8 @@ In this language, the default decimal is the `num` type, which is a 64-bit doubl
 
 E.g:
 ```
-Float1 num : 855.544
-Float2 num : 0.3141592653
+Float1: num = 855.544
+Float2: num = 0.3141592653
 ```
 
 It should be noted that due to the particularity of computer computing floating-point numbers, floating-point operations have certain accuracy problems, so the need for precision-sensitive requirements should consider special handling.
@@ -279,7 +279,7 @@ It should be noted that due to the particularity of computer computing floating-
 All supported floating point types are as follows:
 ```
 f32         #: 32 bits ±1.5e−45 to ±3.4e38
-f64,num     #: 64 bits ±5.0e−324 to ±1.7e308
+f64, num    #: 64 bits ±5.0e−324 to ±1.7e308
 ```
 ## Character
 Computers usually use a specific number to encode characters, so a type is needed to express the characters. This is the `chr` type.
@@ -290,8 +290,8 @@ You only need to wrap a character with `''`, it will be recognized as a characte
 
 E.g:
 ```
-Char chr : 'x'
-Char2 chr : '8'
+Char: chr = 'x'
+Char2: chr = '8'
 ```
 ## String
 We are not living in a world where only numbers, so we also need to use text to display the information we need.
@@ -302,7 +302,7 @@ You only need to wrap a piece of text with `""`, which will be recognized as a s
 
 E.g:
 ```
-String str : "Hello world!"
+String: str = "Hello world!"
 ```
 
 It should be noted that a string is a type consisting of multiple characters, so in fact the string is a fixed-order list, and there is a correspondence between the two. Many times we can process strings as if they were lists.
@@ -311,9 +311,9 @@ Many times we need to insert other content into the string. What do we usually d
 
 E.g:
 ```
-Title : "Year:"
-Content : 2018
-String : "Hello world! " + Title + Content.to_str()
+Title := "Year:"
+Content := 2018
+String := "Hello world! " + Title + Content.to_str()
 #: Hello world! Year:2018
 ```
 
@@ -322,7 +322,7 @@ We can insert expressions directly using `${expression; expression}` syntax.
 
 E.g:
 ```
-String : "Hello world! ${Title; Content}"
+String := "Hello world! ${Title; Content}"
 #: Hello world! Year:2018
 ```
 
@@ -333,15 +333,15 @@ In this language, the default boolean is the `bool` type, which is a type with o
 
 E.g:
 ```
-Boolean1 bool : true       #: true
-Boolean2 bool : false      #: false
+Boolean1: bool = true       #: true
+Boolean2: bool = false      #: false
 ```
 ## Any Type
 In particular, sometimes a type that can be any object is needed to assist in the completion of the function, which is `any`.
 
 E.g:
 ```
-A any : 1   #: any type
+A: any = 1   #: any type
 ```
 ## Nil
 We need a value that can be any type of null value, so it is `nil` .
@@ -361,8 +361,8 @@ The arithmetic operators are mainly used for data operations of numeric types, a
 
 E.g:
 ```
-A : 4
-B : 2
+A := 4
+B := 2
 print( A + B )    #: + plus
 print( A - B )    #: - minus
 print( A * B )    #: * multiply
@@ -374,9 +374,9 @@ In addition to numbers, there are other types that support arithmetic operations
 
 E.g:
 ```
-A : "hello"
-B : "world"
-C : A + " " + B     #: C is "hello world"
+A := "hello"
+B := "world"
+C := A + " " + B     #: C is "hello world"
 ```
 
 ## Judging Operators
@@ -384,8 +384,8 @@ The judgment operator is mainly used in the judgment statement to calculate the 
 
 E.g:
 ```
-A : 4
-B : 2
+A := 4
+B := 2
 print( A == B )   #: == equal to
 print( A >< B )   #: >< not equal to
 print( A > B )    #: > Greater than
@@ -398,8 +398,8 @@ Logical operators are also used primarily in decision statements to perform logi
 
 E.g:
 ```
-A : true
-B : false
+A := true
+B := false
 print( A & B )    #: & AND, both are true at the same time
 print( A | B )    #: | OR, one of them is true
 print( ~A )       #: ~ NOT, boolean inversion
@@ -410,7 +410,7 @@ The assignment operator is mainly used to assign the data on the right to the id
 
 E.g:
 ```
-A! : 0
+!A := 0
 A = 1       #: = the simplest assignment
 A += 1      #: += First add and then assign
 A -= 1      #: -= First subtraction and then assign
@@ -424,7 +424,7 @@ Bit operations are the basis for the underlying calculations and are also suppor
 
 E.g:
 ```
-A : 1
+A := 1
 A && 1      #: bitwise AND
 A || 1      #: bitwise OR
 A ^^ 1      #: bitwise XOR
@@ -447,7 +447,7 @@ In most cases, data types can be automatically inferred from the language.
 
 E.g:
 ```
-List : { 1;2;3;4;5 }
+List := { 1;2;3;4;5 }
 ```
 This will create a list of `int` types containing `1` to `5`.
 
@@ -457,7 +457,7 @@ The representation of the list type is `[list element_type]`.
 
 For example we need a list of strings:
 ```
-List : [list str]{}     #: empty
+List := [list str]{}     #: empty
 ```
 
 ### Access
@@ -481,7 +481,7 @@ It should be noted that we can only access the index of the existing data, if it
 List += 1           #: Add to the end
 List.insert(2, 3)   #: Insert element 3 to index 2
 List -= 1           #: Delete the specified location element
-Length : List.len   #: Length
+Length := List.len   #: Length
 ```
 
 ## Dictionary
@@ -495,7 +495,7 @@ Similar to the list, the dictionary is also defined using `{}`, except that the 
 
 E.g:
 ```
-Dictionary : {["a"]=1; ["b"]=2; ["c"]=3}
+Dictionary := {["a"]=1; ["b"]=2; ["c"]=3}
 ```
 This will create a `[dict str int]` type dictionary containing three entries for `a,b,c`.
 
@@ -505,7 +505,7 @@ The representation of the dictionary type is `[dict key_type value_type]`.
 
 E.g:
 ```
-DictionaryNumNum : [dict int int]{}  #: empty
+DictionaryNumNum := [dict int int]{}  #: empty
 ```
 ### Access
 Similar to the list, we can also use the index to access the data directly.
@@ -526,7 +526,7 @@ Different from the list, if the index is an index that does not exist, it will n
 ```
 Dictionary += {["d"]=11}    #: Add Element
 Dictionary -= "c"           #: Delete the specified index element
-Length : Dictionary.len     #: Length
+Length := Dictionary.len     #: Length
 ```
 
 # Judgment
@@ -547,7 +547,7 @@ If you only need `false`, use `_ {}` to declare it.
 
 E.g:
 ```
-B : false
+B := false
 ? B {
     ...... #: Because B is false, so never enter this branch
 } _ {
@@ -559,7 +559,7 @@ We can also insert more judgments in the middle, and the language will automatic
 
 E.g:
 ```
-I : 3
+I := 3
 ? I == 0 {
     ......
 } I == 1 {
@@ -572,11 +572,11 @@ I : 3
 This can be thought of as an `if elseif else` structure relative to other languages.
 
 ## Condition Judgment
-If we need to judge a flag, we can use the `? expression : expression {} expression {}` statement, the statement implements multiple conditional matching, and the matching condition is used to execute the corresponding logic, so that it will only execute the statement with successful matching.
+If we need to judge a flag, we can use the `? [expression] expression {} expression {}` statement, the statement implements multiple conditional matching, and the matching condition is used to execute the corresponding logic, so that it will only execute the statement with successful matching.
 
 E.g:
 ```
-? I : 1 {
+? [I] 1 {
      ......
 } 2 {
      ......
@@ -590,7 +590,7 @@ If multiple conditions need to be merged together, you can use `,` to separate t
 
 E.g:
 ```
-? I : 1,2,3 {
+? [I] 1, 2, 3 {
     ......
 } 4 {
     ......
@@ -602,7 +602,7 @@ What if you need a default condition to perform the logic? We can use an anonymo
 
 E.g:
 ```
-? I : 1 {
+? [I] 1 {
     ......
 } 2 {
     ......
@@ -616,13 +616,13 @@ This can be thought of as a `switch case default` structure relative to other la
 
 ### Pattern Matching
 Conditional judgment can do more, for example, we need to judge the type of the identifier,
-You can use the `identifier type{}` syntax to match types, and `identifier` can be discard.
+You can use the `identifier: type{}` syntax to match types, and `identifier` can be discard.
 
 E.g:
 ```
-? X : _ int {           #: is int
+? [X] _: int {           #: is int
      print("int")
-} content str {         #: is str
+} content: str {         #: is str
      print(content)
 } nil {                 #: is nil
      print("nil")
@@ -640,12 +640,12 @@ Sometimes we may need to execute the same piece of code multiple times.
 
 In general, statements are executed in order, the first statement in the function is executed first, then the second statement, and so on.
 ## Collection loop
-If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can use the `@ identifier : expression {}` statement to iterate over the collection, taking each element out of `identifier`.
+If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can use the `@ identifier := expression {}` statement to iterate over the collection, taking each element out of `identifier`.
 
 E.g:
 ```
-Arr : {1; 2; 3; 4; 5}
-@ item : Arr {
+Arr := {1; 2; 3; 4; 5}
+@ item := Arr {
     print(item)   #: print every number
 }
 ```
@@ -654,7 +654,7 @@ If we need to fetch the index and value at the same time, we can replace `identi
 
 E.g:
 ```
-@ [i]v : Arr {
+@ [i]v := Arr {
     print("${i}:${v}")
 }
 ```
@@ -667,7 +667,7 @@ The iterator can take the number from the start point to the end point loop. We 
 
 E.g:
 ```
-@ i : 0 .. 100 {
+@ i := 0 .. 100 {
     print(i)  #: print every number
 }
 ```
@@ -677,7 +677,7 @@ The iterator defaults to increment `1` every interval. If we need to take every 
 
 E.g:
 ```
-@ i : 0 ..(2) 100 {
+@ i := 0 ..(2) 100 {
     ......
 }
 ```
@@ -687,7 +687,7 @@ We can also let it traverse in reverse order, just use `...`.
 
 E.g:
 ```
-@ i : 100 ... 0 {
+@ i := 100 ... 0 {
     ......  #: From 100 to 0
 }
 ```
@@ -702,7 +702,7 @@ Add a condition to it.
 
 E.g:
 ```
-I! : 0
+!I := 0
 @ I < 6 {
     I += 1
 }
@@ -739,13 +739,13 @@ Usually we will package a series of task processing that needs to be reused into
 
 In practical engineering practice, given a certain input, the function that must accurately return the determined output is considered a better design. Therefore, it is recommended to maintain the independence of the function as much as possible.
 ## Definition
-We have seen the main entry function before, it is only defined using the fixed statement `Main : (->) {}`.
+We have seen the main entry function before, it is only defined using the fixed statement `Main := (->) {}`.
 
 We only need to define a function using the `(->) {}` collocation. The parentheses in front are the input parameters, and the parentheses in the back are the parameters.
 
 E.g:
 ```
-Function : (->) {
+Function := (->) {
     ......
 }
 ```
@@ -761,11 +761,11 @@ Function()  #: Call Function
 ## Parameters
 Although functions can perform specific functions without any parameters, more often we need to be able to receive some input data, or can return data, or both, and this requires parameters to help us complete task.
 
-Very simple, we only need to declare the parameters using `identifier type`.
+Very simple, we only need to declare the parameters using `identifier: type`.
 
 E.g:
 ```
-Func : (x int -> y int) {
+Func := (x: int -> y: int) {
     <- x * 2
 }
 ```
@@ -804,7 +804,7 @@ When we call a function, we need to fill the data in parentheses in the order de
 E.g:
 ```
 #: Define a function that contains two input parameters
-Sell : (price int, name str ->) {}
+Sell := (price: int, name: str ->) {}
 #: Fill in the required data according to the defined requirements
 Sell(1.99, "cola")
 ```
@@ -813,7 +813,7 @@ Similar to the input parameters, the output parameter needs to be explicitly def
 
 E.g:
 ```
-TopSell : (-> name str, count int) {
+TopSell := (-> name: str, count: int) {
      ......
      <- "cola", many
 }
@@ -841,8 +841,8 @@ There is no special way to define function arguments, just replace the argument 
 
 E.g:
 ```
-Each_1_To_10 : (func (int->) ->) {
-     @ i : 1 .. 10 {
+Each_1_To_10 := (func: (int->) ->) {
+     @ i := 1 .. 10 {
          func(i)
      }
 }
@@ -853,7 +853,7 @@ This way we can pass the details of the processing to the external incoming `fun
 
 E.g:
 ```
-print : (item int ->) {
+print := (item: int ->) {
      print(item)
 }
 
@@ -887,7 +887,7 @@ Unlike the simplified notation above, we can also write a complete function dire
 
 E.g:
 ```
-Each_1_To_10( (item int ->) {
+Each_1_To_10( (item: int ->) {
     print(item)
 })
 ```
@@ -899,11 +899,11 @@ So we need a feature that wraps data from different attributes to better describ
 
 Obviously, the function responsible for packaging data is the structure.
 ## Definition
-We can use the `identifier : $ {}` statement to define a structure that has nothing.
+We can use the `identifier := $ {}` statement to define a structure that has nothing.
 
 E.g:
 ```
-Package : $ {
+Package := $ {
 }
 ```
 Of course, we prefer to pack a few data, such as a student with a name, student number, class, and grade attribute.
@@ -911,11 +911,11 @@ We can define this data in the structure of the body just like we would define a
 
 E.g:
 ```
-Student : $ {
-    name! str : ""
-    number! str : ""
-    class! int : 0
-    grade! int : 0
+Student := $ {
+    !name: str = ""
+    !number: str = ""
+    !class: int = 0
+    !grade: int = 0
 }
 ```
 This way we get the student structure with these data attributes. This structure is like a type that can be used like `int, str, bool`.
@@ -929,9 +929,9 @@ So how do we build a new structure? As a whole, all of our types can be build us
 
 E.g:
 ```
-Peter : Student{}
+Peter := Student{}
 ```
-This build a `Peter` identifier, and all of the student's properties are initialized to `"","",0,0` as set in the definition.
+This build a `Peter` identifier, and all of the student's properties are initialized to `"", "", 0, 0` as set in the definition.
 
 Let's review that our base types and collection types can be created using method, in fact they are all structures.
 
@@ -959,7 +959,7 @@ Building a new structure like above and loading the data one by one is very cumb
 
 E.g:
 ```
-Peter : Student{
+Peter := Student{
     name = "peter"
     number = "060233"
     class = 2
@@ -971,8 +971,8 @@ Similarly, the way a collection is build is actually a build syntax, so we can a
 
 E.g:
 ```
-Array : [list int]{ 1; 2; 3; 4; 5 }
-Dictionary : [dict str int]{ ["1"]=1; ["2"]=2; ["3"]=3 }
+Array := [list int]{ 1; 2; 3; 4; 5 }
+Dictionary := [dict str int]{ ["1"]=1; ["2"]=2; ["3"]=3 }
 ```
 ## Anonymous Structure
 If we only want to wrap some data directly, instead of defining the structure and then using it, can it be like an anonymous function?
@@ -981,11 +981,11 @@ Of course, we can use the `{}` package directly.
 
 E.g:
 ```
-Peter : {
-    name : "peter"
-    number : "060233"
-    class : 2
-    grade : 6
+Peter := {
+    name := "peter"
+    number := "060233"
+    class := 2
+    grade := 6
 }
 ```
 
@@ -998,9 +998,9 @@ We can define private properties to store properties that we don't want to be ac
 
 E.g:
 ```
-Student : $ {
+Student := $ {
     ......
-    _girlFriend! str    #: The first character is the identifier of _ is private
+    !_girlFriend: str    #: The first character is the identifier of _ is private
 }
 ```
 That's right, if you remember the definition of the identifier, this is how the private identifier is defined. The private identifier is not accessible to the outside world.
@@ -1011,9 +1011,9 @@ The private property of this structure can not be accessed, and can not be modif
 
 E.g:
 ```
-Student : $ me { #: declare me
+Student := $ me { #: declare me
     ......
-    getGirlFriend : (-> name str) {
+    getGirlFriend := (-> name: str) {
         <- me._girlFriend
     }
 }
@@ -1037,12 +1037,12 @@ Now let us use our imagination. How do we define a structure that is specificall
 
 E.g:
 ```
-ChineseStudent : $ {
-    name! str : ""
-    number! str : ""
-    class! int : 0
-    grade! int : 0
-    kungfu! bool : false    #: not learn kungfu
+ChineseStudent := $ {
+    !name: str = ""
+    !number: str = ""
+    !class: int = 0
+    !grade: int = 0
+    !kungfu: bool = false    #: not learn kungfu
 }
 ```
 No, no, it's not very elegant to repeat the definition of data. We can reuse the student attributes and add an extra kung fu attribute.
@@ -1052,15 +1052,15 @@ We need to combine this feature, but it's not that complicated, just create a st
 E.g:
 ```
 ChineseStudent : $ {
-    student! : Student{}    #: include the student attribute in it
-    kungfu! : false         #: not learn kungfu
+    !student := Student{}    #: include the student attribute in it
+    !kungfu := false         #: not learn kungfu
 }
 ```
 This way you can use common attributes through the student attributes in Chinese students.
 
 E.g:
 ```
-Chen : ChineseStudent{}
+Chen := ChineseStudent{}
 print( Chen.student.name )
 ```
 By combining layers of structure, you can freely assemble anything you want to describe.
@@ -1071,9 +1071,9 @@ Top-level combinations extract attributes from the structure to the exterior, ju
 
 E.g:
 ```
-ChineseStudent : $ { 
+ChineseStudent := $ { 
     Student #: top-level combination
-    kungfu! : false
+    !kungfu := false
 }
 ```
 
@@ -1081,7 +1081,7 @@ In this way, we can call student attributes directly.
 
 E.g:
 ```
-Chen : ChineseStudent{}
+Chen := ChineseStudent{}
 print( Chen.name )
 ```
 
@@ -1097,7 +1097,7 @@ E.g:
 ```
 <- Name.Space
 
-GetSomething : (-> content str) {
+GetSomething := (-> content: str) {
     <- "something"
 }
 ```
@@ -1112,7 +1112,7 @@ E.g:
     Name.Space 
 }
 
-Main : (->) {
+Main := (->) {
     #: print something
     print( GetSomething() )
 }
@@ -1126,11 +1126,11 @@ The interface specifies the methods and properties necessary to implement a part
 
 Our structure can introduce the interface we need like a signed protocol, and then declare all the attributes required by the interface, so we think that this structure implements the interface.
 ## Definition
-We only need to define an interface using the `id : $ {}` statement.
+We only need to define an interface using the `id := $ {}` statement.
 
 E.g:
 ```
-Protocol : $ {
+Protocol := $ {
 }
 ```
 This is an empty interface. Isn't this the same as a structure? Yes, an interface is defined in the same way as a structure. When a structure is used as an interface, the structure has the function of an interface.
@@ -1139,9 +1139,9 @@ Next, let's design a difficult task that students need to accomplish... homework
 
 E.g:
 ```
-Homework : $ {
-    count! int
-    do (->)
+Homework := $ {
+    !count: int
+    do: (->)
 }
 ```
 This is a job interface that has two properties, one is the number of jobs that need to be done, and the other is a function that completes the job.
@@ -1155,9 +1155,9 @@ We add functions directly to the structure to implement this interface.
 
 E.g:
 ```
-Student : $ {
-    count! : 999999
-    do : (->) {
+Student := $ {
+    !count := 999999
+    do := (->) {
         SpendTime(1)        #: took an hour
         count -= 1          #: completed one
     }
@@ -1176,7 +1176,7 @@ After the interface is included, we can use the student who owns the interface.
 
 E.g:
 ```
-Peter : Student{ count=999999 }
+Peter := Student{ count=999999 }
 print( Peter.count )
 #: print 999999, so much
 Peter.do()
@@ -1195,9 +1195,9 @@ Now we can create a variety of students, they all follow the same interface, we 
 E.g:
 ```
 #: Created three different types of student structures
-StudentA : ChineseStudent{}
-StudentB : AmericanStudent{}
-StudentC : JapaneseStudent{}
+StudentA := ChineseStudent{}
+StudentB := AmericanStudent{}
+StudentC := JapaneseStudent{}
 #: Let them do their homework separately
 StudentA.do()
 StudentB.do()
@@ -1207,7 +1207,7 @@ A more efficient way is to write this function into the function, let the functi
 
 E.g:
 ```
-DoHomework : (Student Homework ->) {
+DoHomework := (Student: Homework ->) {
     Student.do()
 }
 #: Now we can make each student do their homework more easily
@@ -1219,10 +1219,10 @@ Of course, it's better to put these students in an array so that we can use loop
 
 E.g:
 ```
-Arr : [list Homework]{}
+Arr := [list Homework]{}
 Arr.add( StudentA )
 ......  #: Insert many many students
-@ i : Arr {
+@ i := Arr {
     DoHomework(i)
 }
 ```
@@ -1234,15 +1234,15 @@ Because the structure type can be converted to an interface type, the original t
 
 But sometimes we need to get the raw type of data to deal with, we can use type judgment to help us accomplish this.
 
-We can use `expression type?` to determine the type of data, and `expression type!` to convert the data to our type.
+We can use `expression: type?` to determine the type of data, and `expression: type!` to convert the data to our type.
 
 E.g:
 ```
-Func : (he Homework ->) {
+Func := (he: Homework ->) {
     #: Determine if Chinese students
-    ? he ChineseStudent? {
+    ? he: ChineseStudent? {
         #: Convert to Chinese Student Data
-        Cs : he ChineseStudent!
+        Cs := he: ChineseStudent!
     }
 }
 ```
@@ -1250,24 +1250,24 @@ Func : (he Homework ->) {
 # Enumeration Type
 The enumeration is a set of integer constants with independent names. It can usually be used to mark the type of some business data, which is convenient for judgment processing.
 ## Definition
-We only need to use the `id : [:] {}` statement.
+We only need to use the `id := [:] {}` statement.
 
 E.g:
 ```
-Color : [:] {
+Color := [:] {
      Red
      Green
      Blue
 }
 ```
-The enumeration assigns values to the identifiers in order, resulting in a collection of `Red:0 Green:1 Blue:2`.
+The enumeration assigns values to the identifiers in order, resulting in a collection of `Red := 0; Green := 1; Blue := 2`.
 
 This way we don't need to care about their values when we use them, and we can safely mark the business we need to handle.
 
 E.g:
 ```
-C : RandomColor()     #: Get a random color
-? C : Color.Red {
+C := RandomColor()     #: Get a random color
+? [C] Color.Red {
       ......
 } Color.Green {
       ......
@@ -1282,10 +1282,10 @@ We can also assign a single identifier if needed, and unspecified will continue 
 
 E.g:
 ```
-Number : [:] {
-     A : 1  #: 1
+Number := [:] {
+     A = 1  #: 1
      B      #: 2
-     C : 1  #: 1
+     C = 1  #: 1
      D      #: 2
 }
 ```
@@ -1304,7 +1304,7 @@ We can use `! <- exception` to declare an exception data anywhere in the functio
 
 E.g:
 ```
-ReadFile : (name str ->!) { #: Declaring a possible exception function
+ReadFile := (name: str ->!) { #: Declaring a possible exception function
     ? name.len == 0 {
         ! <- Exception("something wrong")
     }
@@ -1313,14 +1313,14 @@ ReadFile : (name str ->!) { #: Declaring a possible exception function
 ```
 So we declare an exception, the exception description is `something wrong`, once the external caller uses the illegal length of `name`, the function will be forced to abort, report the exception up and hand it to the caller.
 ## Checking exceptions
-We can use the `! {}` statement to check for exceptions and `identifier type {}` to handle exceptions.
+We can use the `! {}` statement to check for exceptions and `identifier: type {}` to handle exceptions.
 `type` can be omitted, the default is `Exception`.
 
 E.g:
 ```
 ! {
-    f : ReadFile("temp.txt")
-} ex IOException {
+    f := ReadFile("temp.txt")
+} ex: IOException {
     ! <- ex
 } e {
     print(e.message)
@@ -1350,8 +1350,8 @@ Quite simply, using `_ {}` at the end of the check can declare a statement that 
 
 E.g:
 ```
-Func : (->) {
-    F File
+Func := (->) {
+    F: File
     ! {
         F = ReadFile("./somecode.file")
     } _ {
@@ -1382,7 +1382,7 @@ For interfaces that implement an autorelease interface, we can use declaration s
 
 E.g:
 ```
-! Res : FileResource("/test.file") {
+-> Res := FileResource("/test.file") {
     ......
 }
 ```
@@ -1401,7 +1401,7 @@ That's right, it's really just using `~>`.
 
 E.g:
 ```
-SayHello : (->v int) { 
+SayHello := (->v: int) { 
     print("hello")
     <- 2020
 }
@@ -1417,7 +1417,7 @@ So the following code cannot be passed.
 
 E.g:
 ```
-Result : ~> SayHello()
+Result := ~> SayHello()
 #: Error, the current logic will continue to execute, and the return value cannot be obtained directly
 ```
 
@@ -1430,7 +1430,7 @@ In this way, we can get the results we want.
 
 E.g:
 ```
-Result : SayHello~>()
+Result := SayHello~>()
 #: Correct, the current logic will wait for the asynchronous result before continuing execution
 ...
 ```
@@ -1442,7 +1442,7 @@ The channel is a special collection, the type is `[chan type]`, we can pass the 
 
 E.g:
 ```
-Channel : [chan int]{}
+Channel := [chan int]{}
 
 #: The current logic will wait for the data transfer to complete before continuing execution
 Channel <~ 666
@@ -1457,18 +1457,18 @@ With channels, we can implement asynchronous programming through simple assembly
 E.g:
 
 ```
-ch : [chan int]{}
+ch := [chan int]{}
 
 #: Execute a concurrent function
 ~> (->) {
-    @ i : 3 ... 0 {
+    @ i := 3 ... 0 {
         ch <~ i
     }
 }()
 
 #: Cyclic receive channel data
 @ true {
-    data : <~ ch
+    data := <~ ch
     print(data)
 
     #: When encountering data 0, exit the loop
@@ -1483,7 +1483,7 @@ Since the channel is a collection type, we can also use the traversal syntax.
 
 E.g:
 ```
-@ data : ch {
+@ data := ch {
     ......
 }
 ```
@@ -1502,19 +1502,18 @@ This is a simplified implementation.
 
 E.g:
 ```
-[List T] : $ {
+[List T] := $ {
     #: Create Storage
-    items! : Storage{T}     
-
-    length! : 0
+    !items := Storage{T}
+    !length := 0
 
     #: Get a generic data
-    get : (index int -> item T) {    
+    get := (index: int -> item: T) {    
         <- items.get( index )
     }
 
     #: Add a generic data to the list
-    add : (item T ->) {      
+    add := (item: T ->) {      
         items.insert(length, item)
         length += 1
     }
@@ -1532,17 +1531,17 @@ We can use the default value creation method `[empty type]()` to specify a defau
 
 E.g:
 ```
-X : [empty int]()
-Y : [empty interface]()
-Z : [empty (->)]()
+X := [empty int]()
+Y := [empty interface]()
+Z := [empty (->)]()
 ```
 
 This way we can use it in generics.
 
 E.g:
 ```
-[Package T] : $ {
-    item! : [empty T]()    #: Initializes a default value of generic data
+[Package T] := $ {
+    !item := [empty T]()    #: Initializes a default value of generic data
 }
 ```
 So how do we use generics?
@@ -1551,11 +1550,11 @@ It's very simple, just use it as we declare it, just pass the real type when cal
 
 E.g:
 ```
-ListNumber : [List int]{}   #: Pass in int type
+ListNumber := [List int]{}   #: Pass in int type
 ```
 So we have a list of integer types, is it like this:
 ```
-ListNumber : [list int]{}
+ListNumber := [list int]{}
 ```
 That's right, in fact, our list and dictionary syntax are generics.
 ## Supported Types
@@ -1563,12 +1562,12 @@ We can use generics in structures, functions, and interface types.
 
 E.g:
 ```
-[Func T] : (data T -> data T) {
+[Func T] := (data: T -> data: T) {
     <- data
 }
 
-[Interface T] : $ {
-    [test T] (in T ->)
+[Interface T] := $ {
+    [test T]: (in: T ->)
 }
 ```
 ## Generic Constraints
@@ -1576,7 +1575,7 @@ If we need to constrain the type of generics, we only need to use the `T:contrac
 
 E.g:
 ```
-[Package T:Student] : $ {
+[Package T:Student] := $ {
 }
 ```
 
@@ -1595,13 +1594,13 @@ Let's take a look at the database data as a reference to see how to use annotati
 E.g:
 ```
 #Table("test")
-Annotation : $ {
+Annotation := $ {
     #Key #Column("id")
-    id! str
+    !id: str
     #Column("name")
-    name! str
+    !name: str
     #Column("data")
-    data! str
+    !data: str
 }
 ```
 We declare a structure of `annotation` that uses annotations to mark the table name `test`, primary key `id`, field `name`, and field `data`.
@@ -1630,9 +1629,9 @@ We can use Linq to query like C#, just declare the LINQ statement with `loop_exp
 
 E.g:
 ```
-Linq : (->) {
-    Numbers : { 0; 1; 2; 3; 4; 5; 6 }
-    Linq : @ num : Numbers ->
+Linq := (->) {
+    Numbers := { 0; 1; 2; 3; 4; 5; 6 }
+    Linq := @ num := Numbers ->
             where (num % 2) == 0 ->
             orderby num -> descending ->
             select num
@@ -1645,8 +1644,8 @@ If a type is defined but not assigned, it will not be used.
 
 E.g:
 ```
-A int
-B : A      #: error, no assignment to A
+A: int
+B := A      #: error, no assignment to A
 ```
 
 ## Declaration and Use
@@ -1656,8 +1655,8 @@ Just add `?` before any type, which is a nullable type.
 
 E.g:
 ```
-A ?int
-B : A      #: B Assigned to an empty i32
+A: ?int
+B := A      #: B Assigned to an empty i32
 ```
 
 Once an optional type has appeared, we need to strictly handle null values ​​to avoid program errors.
@@ -1682,7 +1681,7 @@ If you want to use another default value when the value of the optional type is 
 
 E.g:
 ```
-B : A ?? 128
+B := A ?? 128
 ```
 
 ## [Complete Example](../example.feel)
