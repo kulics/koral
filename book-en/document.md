@@ -720,7 +720,7 @@ E.g:
 
 It should be noted that if you jump out of a multi-level nested loop, you will only jump out of the loop that is closest to you.
 ## Continue
-If you only need to jump out of the current loop, use the `->@` statement.
+If you only need to jump out of the current loop, use the `@` statement.
 ## Default Condition
 If you want to execute some other logic when the loop is not executed, just use the `_` declaration.
 
