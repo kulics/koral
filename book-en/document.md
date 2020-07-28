@@ -532,11 +532,11 @@ Length := Dictionary.len     #: Length
 # Judgment
 The judgment statement executes the program by one or more of the set conditions, executes the specified statement when the condition is `true`, and executes the specified statement when the condition is `false`.
 
-We only need to use `? expression {}` to declare the judgment statement and enter the corresponding area according to the following values.
+We only need to use `expression ? {}` to declare the judgment statement and enter the corresponding area according to the following values.
 
 E.g:
 ```
-? true {
+true ? {
     print("true")     #: true
 }
 ```
@@ -548,7 +548,7 @@ If you only need `false`, use `_ {}` to declare it.
 E.g:
 ```
 B := false
-? B {
+B ? {
     ...... #: Because B is false, so never enter this branch
 } _ {
     ...... #: proccess false
@@ -560,11 +560,11 @@ We can also insert more judgments in the middle, and the language will automatic
 E.g:
 ```
 I := 3
-? I == 0 {
+I == 0 ? {
     ......
-} I == 1 {
+} I == 1 ? {
     ......
-} I == 2 {
+} I == 2 ? {
     ......
 }
 ```
@@ -572,13 +572,13 @@ I := 3
 This can be thought of as an `if elseif else` structure relative to other languages.
 
 ## Condition Judgment
-If we need to judge a flag, we can use the `? [expression] expression {} expression {}` statement, the statement implements multiple conditional matching, and the matching condition is used to execute the corresponding logic, so that it will only execute the statement with successful matching.
+If we need to judge a flag, we can use the `[expression] expression ? {} expression ? {}` statement, the statement implements multiple conditional matching, and the matching condition is used to execute the corresponding logic, so that it will only execute the statement with successful matching.
 
 E.g:
 ```
-? [I] 1 {
+[I] 1 ? {
      ......
-} 2 {
+} 2 ? {
      ......
 }
 ```
@@ -590,9 +590,9 @@ If multiple conditions need to be merged together, you can use `,` to separate t
 
 E.g:
 ```
-? [I] 1, 2, 3 {
+[I] 1, 2, 3 ? {
     ......
-} 4 {
+} 4 ? {
     ......
 }
 ```
@@ -602,9 +602,9 @@ What if you need a default condition to perform the logic? We can use an anonymo
 
 E.g:
 ```
-? [I] 1 {
+[I] 1 ? {
     ......
-} 2 {
+} 2 ? {
     ......
 } _ {
     ......
@@ -616,15 +616,15 @@ This can be thought of as a `switch case default` structure relative to other la
 
 ### Pattern Matching
 Conditional judgment can do more, for example, we need to judge the type of the identifier,
-You can use the `identifier: type{}` syntax to match types, and `identifier` can be discard.
+You can use the `identifier: type ? {}` syntax to match types, and `identifier` can be discard.
 
 E.g:
 ```
-? [X] _: int {           #: is int
+[X] _: int ? {              #: is int
      print("int")
-} content: str {         #: is str
+} content: str ? {          #: is str
      print(content)
-} nil {                 #: is nil
+} nil ? {                   #: is nil
      print("nil")
 }
 ```
@@ -640,12 +640,12 @@ Sometimes we may need to execute the same piece of code multiple times.
 
 In general, statements are executed in order, the first statement in the function is executed first, then the second statement, and so on.
 ## Collection loop
-If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can use the `@ identifier := expression {}` statement to iterate over the collection, taking each element out of `identifier`.
+If we happen to have a collection that can be an array, a dictionary, or a piece of text, then we can use the `expression @ identifier {}` statement to iterate over the collection, taking each element out of `identifier`.
 
 E.g:
 ```
 Arr := {1; 2; 3; 4; 5}
-@ item := Arr {
+Arr @ item {
     print(item)   #: print every number
 }
 ```
@@ -654,7 +654,7 @@ If we need to fetch the index and value at the same time, we can replace `identi
 
 E.g:
 ```
-@ [i]v := Arr {
+Arr @ [i]v {
     print("${i}:${v}")
 }
 ```
@@ -667,7 +667,7 @@ The iterator can take the number from the start point to the end point loop. We 
 
 E.g:
 ```
-@ i := 0 .. 100 {
+0 .. 100 @ i {
     print(i)  #: print every number
 }
 ```
@@ -677,7 +677,7 @@ The iterator defaults to increment `1` every interval. If we need to take every 
 
 E.g:
 ```
-@ i := 0 ..(2) 100 {
+0 ..(2) 100 @ i {
     ......
 }
 ```
@@ -687,7 +687,7 @@ We can also let it traverse in reverse order, just use `...`.
 
 E.g:
 ```
-@ i := 100 ... 0 {
+100 ... 0 @ i {
     ......  #: From 100 to 0
 }
 ```
@@ -703,7 +703,7 @@ Add a condition to it.
 E.g:
 ```
 !I := 0
-@ I < 6 {
+I < 6 @ {
     I += 1
 }
 ```
@@ -713,7 +713,7 @@ So how do you jump out of the loop? We can use the `~@` statement to jump out.
 
 E.g:
 ```
-@ true {
+true @ {
     ~@    #: Jumped out without executing anything
 }
 ```
@@ -726,7 +726,7 @@ If you want to execute some other logic when the loop is not executed, just use 
 
 E.g:
 ```
-@ 1 > 2 {
+1 > 2 @ {
     ...
 } _ {
     #: loop does not executed, so execute the logic here
@@ -842,7 +842,7 @@ There is no special way to define function arguments, just replace the argument 
 E.g:
 ```
 Each_1_To_10 := (func: (int->) ->) {
-     @ i := 1 .. 10 {
+     1 .. 10 @ i {
          func(i)
      }
 }
@@ -1222,7 +1222,7 @@ E.g:
 Arr := [list Homework]{}
 Arr.add( StudentA )
 ......  #: Insert many many students
-@ i := Arr {
+Arr @ i {
     DoHomework(i)
 }
 ```
@@ -1234,15 +1234,15 @@ Because the structure type can be converted to an interface type, the original t
 
 But sometimes we need to get the raw type of data to deal with, we can use type judgment to help us accomplish this.
 
-We can use `expression: type?` to determine the type of data, and `expression: type!` to convert the data to our type.
+We can use `expression?: type` to determine the type of data, and `expression!: type` to convert the data to our type.
 
 E.g:
 ```
 Func := (he: Homework ->) {
     #: Determine if Chinese students
-    ? he: ChineseStudent? {
+    he?: ChineseStudent ? {
         #: Convert to Chinese Student Data
-        Cs := he: ChineseStudent!
+        Cs := he!: ChineseStudent
     }
 }
 ```
@@ -1267,11 +1267,11 @@ This way we don't need to care about their values when we use them, and we can s
 E.g:
 ```
 C := RandomColor()     #: Get a random color
-? [C] Color.Red {
+[C] Color.Red ? {
       ......
-} Color.Green {
+} Color.Green ? {
       ......
-} Color.Blue {
+} Color.Blue ? {
       ......
 }
 ```
@@ -1305,7 +1305,7 @@ We can use `! <- exception` to declare an exception data anywhere in the functio
 E.g:
 ```
 ReadFile := (name: str ->!) { #: Declaring a possible exception function
-    ? name.len == 0 {
+    name.len == 0 ? {
         ! <- Exception("something wrong")
     }
     ......
@@ -1355,7 +1355,7 @@ Func := (->) {
     ! {
         F = ReadFile("./somecode.file")
     } _ {
-        ? F >< nil {
+        F >< nil ? {
             F.release()
         }
     }
@@ -1461,18 +1461,18 @@ ch := [chan int]{}
 
 #: Execute a concurrent function
 ~> (->) {
-    @ i := 3 ... 0 {
+    3 ... 0 @ i {
         ch <~ i
     }
 }()
 
 #: Cyclic receive channel data
-@ true {
+true @ {
     data := <~ ch
     print(data)
 
     #: When encountering data 0, exit the loop
-    ? data == 0 {
+    data == 0 ? {
         ~@
     }
 }
@@ -1483,7 +1483,7 @@ Since the channel is a collection type, we can also use the traversal syntax.
 
 E.g:
 ```
-@ data := ch {
+ch @ data {
     ......
 }
 ```
@@ -1651,11 +1651,11 @@ B := A      #: error, no assignment to A
 ## Declaration and Use
 
 If you have to use a null type in some cases, you can use a nullable type.
-Just add `?` before any type, which is a nullable type.
+Just add `?` after any type, which is a nullable type.
 
 E.g:
 ```
-A: ?int
+A: int?
 B := A      #: B Assigned to an empty i32
 ```
 
@@ -1663,7 +1663,7 @@ Once an optional type has appeared, we need to strictly handle null values ​�
 
 E.g:
 ```
-? A >< nil {
+A >< nil ? {
     A.to_str()
 }
 ```
