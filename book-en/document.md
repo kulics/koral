@@ -1631,7 +1631,7 @@ E.g:
 ```
 Linq := (->) {
     Numbers := { 0; 1; 2; 3; 4; 5; 6 }
-    Linq := @ num := Numbers ->
+    Linq := Numbers @ num ->
             where (num % 2) == 0 ->
             orderby num -> descending ->
             select num
