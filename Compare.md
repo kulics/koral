@@ -166,7 +166,7 @@ count = i + int(f)
 ## Inclusive Range Operator
 ### Feel
 ```
-@ index := 1 .. 5 {
+1 .. 5 @ index {
     print("${index} times 5 is ${index * 5}")
 }
 ```
@@ -759,10 +759,10 @@ test.simpleDescription()
 !movieCount := 0
 !songCount := 0
 
-@ item := library {
-    ? [item] _: Movie {
+library @ item {
+    [item] _: Movie ? {
         movieCount += 1
-    } _: Song {
+    } _: Song ? {
         songCount += 1
     }
 }
@@ -838,13 +838,13 @@ for item in library:
 ### Feel
 ```
 nb := 42
-? [nb] 0 .. 7, 8, 9 { 
+[nb] 0 .. 7, 8, 9 ? { 
     print("single digit") 
-} 10 { 
+} 10 ? { 
     print("double digits") 
-} 11 .. 99 { 
+} 11 .. 99 ? { 
     print("double digits") 
-} 100 .. 999 { 
+} 100 .. 999 ? { 
     print("triple digits") 
 } _ { 
     print("four or more digits") 
@@ -899,8 +899,8 @@ switch nb {
 ## Downcasting
 ### Feel
 ```
-@ current := someObjects {
-    ? [current] movie: Movie {
+someObjects @ current {
+    [current] movie: Movie ? {
         print("Movie: '${movie.name}', " +
             "dir. ${movie.director}")
     }
