@@ -453,11 +453,11 @@ This will create a list of `int` types containing `1` to `5`.
 
 If you need a list of explicit types, you can use the constructor to create them.
 
-The representation of the list type is `[list element_type]`.
+The representation of the list type is `list element_type`.
 
 For example we need a list of strings:
 ```
-List := [list str]{}     #: empty
+List := list str{}     #: empty
 ```
 
 ### Access
@@ -478,10 +478,10 @@ List[0] = 5
 It should be noted that we can only access the index of the existing data, if it does not exist, an error will occur.
 ### Common Operations
 ```
-List += 1           #: Add to the end
-List.insert(2, 3)   #: Insert element 3 to index 2
-List -= 1           #: Delete the specified location element
-Length := List.len   #: Length
+List += 1               #: Add to the end
+List.insert(2, 3)       #: Insert element 3 to index 2
+List -= 1               #: Delete the specified location element
+Length := List.len      #: Length
 ```
 
 ## Dictionary
@@ -497,15 +497,15 @@ E.g:
 ```
 Dictionary := {["a"]=1; ["b"]=2; ["c"]=3}
 ```
-This will create a `[dict str int]` type dictionary containing three entries for `a,b,c`.
+This will create a `dict str int` type dictionary containing three entries for `a,b,c`.
 
 If you need an explicit type of dictionary, you can also use the constructor to create it.
 
-The representation of the dictionary type is `[dict key_type value_type]`.
+The representation of the dictionary type is `dict key_type value_type`.
 
 E.g:
 ```
-DictionaryNumNum := [dict int int]{}  #: empty
+DictionaryNumNum := dict int int{}  #: empty
 ```
 ### Access
 Similar to the list, we can also use the index to access the data directly.
@@ -971,8 +971,8 @@ Similarly, the way a collection is build is actually a build syntax, so we can a
 
 E.g:
 ```
-Array := [list int]{ 1; 2; 3; 4; 5 }
-Dictionary := [dict str int]{ ["1"]=1; ["2"]=2; ["3"]=3 }
+Array := list int{ 1; 2; 3; 4; 5 }
+Dictionary := dict str int{ ["1"]=1; ["2"]=2; ["3"]=3 }
 ```
 ## Anonymous Structure
 If we only want to wrap some data directly, instead of defining the structure and then using it, can it be like an anonymous function?
@@ -1219,7 +1219,7 @@ Of course, it's better to put these students in an array so that we can use loop
 
 E.g:
 ```
-Arr := [list Homework]{}
+Arr := list Homework{}
 Arr.add( StudentA )
 ......  #: Insert many many students
 Arr @ i {
@@ -1438,11 +1438,11 @@ Result := SayHello~>()
 ## Use channel asynchronous communication
 For direct waterfall logic, the above syntax can already satisfy our use. But there are some other scenarios where we may need to manually handle more asynchronous details. At this time, we can use channels to pass data to complete our asynchronous tasks.
 
-The channel is a special collection, the type is `[chan type]`, we can pass the specified type of data to the channel, use` id <~ value` to input data, and use `<~ id` to get data.
+The channel is a special collection, the type is `chan type`, we can pass the specified type of data to the channel, use` id <~ value` to input data, and use `<~ id` to get data.
 
 E.g:
 ```
-Channel := [chan int]{}
+Channel := chan int{}
 
 #: The current logic will wait for the data transfer to complete before continuing execution
 Channel <~ 666
@@ -1457,7 +1457,7 @@ With channels, we can implement asynchronous programming through simple assembly
 E.g:
 
 ```
-ch := [chan int]{}
+ch := chan int{}
 
 #: Execute a concurrent function
 ~> (->) {
@@ -1496,15 +1496,15 @@ For example, we now need a collection that supports adding, deleting, and readin
 Our lists and dictionaries are actually implemented using generics.
 
 ## Declaration and Use
-Let's see how to use generics to implement a list. We simply wrap the generics of the type with the `[identifier generics_identifier]` symbol.
+Let's see how to use generics to implement a list. We simply wrap the generics of the type with the `(generics_identifier)` symbol.
 
 This is a simplified implementation.
 
 E.g:
 ```
-[List T] := $ {
+List := (T) $ {
     #: Create Storage
-    !items := Storage{T}
+    !items := Storage T{}
     !length := 0
 
     #: Get a generic data
@@ -1521,27 +1521,27 @@ E.g:
 ```
 So we define a structure that supports generics, `T` is a generic, in fact it can be any identifier, but habitual we will use `T` as a proxy.
 
-Generic brackets support multiple generations, for example: `[identifier T H Q]`.
+Generic brackets support multiple generations, for example: `(T H Q)`.
 
 After the generics are defined, `T` is treated as a real type in the area of ​​the structure, and then we can use it like various places like `int`.
 
 It's important to note that because generics are typed on the fly, the compiler cannot infer the constructor of the generic. We can only use the default value creation method to construct generic data.
 
-We can use the default value creation method `[empty type]()` to specify a default value that contains the type.
+We can use the default value creation method `empty type()` to specify a default value that contains the type.
 
 E.g:
 ```
-X := [empty int]()
-Y := [empty interface]()
-Z := [empty (->)]()
+X := empty int()
+Y := empty interface()
+Z := empty (->)()
 ```
 
 This way we can use it in generics.
 
 E.g:
 ```
-[Package T] := $ {
-    !item := [empty T]()    #: Initializes a default value of generic data
+Package := (T) $ {
+    !item := empty T()    #: Initializes a default value of generic data
 }
 ```
 So how do we use generics?
@@ -1550,11 +1550,11 @@ It's very simple, just use it as we declare it, just pass the real type when cal
 
 E.g:
 ```
-ListNumber := [List int]{}   #: Pass in int type
+ListNumber := List int{}   #: Pass in int type
 ```
 So we have a list of integer types, is it like this:
 ```
-ListNumber := [list int]{}
+ListNumber := list int{}
 ```
 That's right, in fact, our list and dictionary syntax are generics.
 ## Supported Types
@@ -1562,12 +1562,12 @@ We can use generics in structures, functions, and interface types.
 
 E.g:
 ```
-[Func T] := (data: T -> data: T) {
+Func := (T) (data: T -> data: T) {
     <- data
 }
 
-[Interface T] := $ {
-    [test T]: (in: T ->)
+Interface := (T) $ {
+    test: (R) (in: R -> out: T)
 }
 ```
 ## Generic Constraints
@@ -1575,7 +1575,7 @@ If we need to constrain the type of generics, we only need to use the `T:contrac
 
 E.g:
 ```
-[Package T:Student] := $ {
+Package := (T:Student) $ {
 }
 ```
 
