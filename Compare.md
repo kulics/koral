@@ -131,7 +131,7 @@ string
 ```
 f := 6.0
 i := 94
-count := i + (f: int!)
+count := i + (f!: int)
 ```
 ### C#
 ```
@@ -283,8 +283,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Feel
 ```
-emptyArray := [list str]{}
-emptyDictionary := [dict str f32]{}
+emptyArray := list str{}
+emptyDictionary := dict str f32{}
 ```
 ### C#
 ```
