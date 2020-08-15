@@ -260,9 +260,6 @@ E.g:
 Integer8 := (16).to_i8()
 ```
 
-It should be noted that the underlying type conversion method is only owned by the base type.
-If you need all types of casts, use the `[to type]()` method, which crashes against incompatible types, so use it with caution.
-
 ## Float Point Number
 Integers don't satisfy our needs for numbers, and we often need to deal with decimals.
 
