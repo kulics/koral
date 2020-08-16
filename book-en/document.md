@@ -1493,13 +1493,13 @@ For example, we now need a collection that supports adding, deleting, and readin
 Our lists and dictionaries are actually implemented using generics.
 
 ## Declaration and Use
-Let's see how to use generics to implement a list. We simply wrap the generics of the type with the `(generics_identifier)` symbol.
+Let's see how to use generics to implement a list. We simply declare the generics of the type with the `generics_identifier` symbol.
 
 This is a simplified implementation.
 
 E.g:
 ```
-List := (T) $ {
+List := T $ {
     #: Create Storage
     !items := Storage T{}
     !length := 0
@@ -1518,7 +1518,7 @@ List := (T) $ {
 ```
 So we define a structure that supports generics, `T` is a generic, in fact it can be any identifier, but habitual we will use `T` as a proxy.
 
-Generic brackets support multiple generations, for example: `(T H Q)`.
+Generics support multiple generations, for example: `T H Q`.
 
 After the generics are defined, `T` is treated as a real type in the area of ​​the structure, and then we can use it like various places like `int`.
 
@@ -1537,7 +1537,7 @@ This way we can use it in generics.
 
 E.g:
 ```
-Package := (T) $ {
+Package := T $ {
     !item := empty T()    #: Initializes a default value of generic data
 }
 ```
@@ -1559,12 +1559,12 @@ We can use generics in structures, functions, and interface types.
 
 E.g:
 ```
-Func := (T) (data: T -> data: T) {
+Func := T (data: T -> data: T) {
     <- data
 }
 
-Interface := (T) $ {
-    test: (R) (in: R -> out: T)
+Interface := T $ {
+    test: R (in: R -> out: T)
 }
 ```
 ## Generic Constraints
@@ -1572,7 +1572,7 @@ If we need to constrain the type of generics, we only need to use the `T:contrac
 
 E.g:
 ```
-Package := (T:Student) $ {
+Package := T:Student $ {
 }
 ```
 
