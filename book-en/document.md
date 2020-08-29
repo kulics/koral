@@ -569,11 +569,11 @@ I == 0 ? {
 This can be thought of as an `if elseif else` structure relative to other languages.
 
 ## Condition Judgment
-If we need to judge a flag, we can use the `[expression] expression ? {} expression ? {}` statement, the statement implements multiple conditional matching, and the matching condition is used to execute the corresponding logic, so that it will only execute the statement with successful matching.
+If we need to judge a flag, we can use the `expression => expression ? {} expression ? {}` statement, the statement implements multiple conditional matching, and the matching condition is used to execute the corresponding logic, so that it will only execute the statement with successful matching.
 
 E.g:
 ```
-[I] 1 ? {
+I => 1 ? {
      ......
 } 2 ? {
      ......
@@ -587,7 +587,7 @@ If multiple conditions need to be merged together, you can use `,` to separate t
 
 E.g:
 ```
-[I] 1, 2, 3 ? {
+I => 1, 2, 3 ? {
     ......
 } 4 ? {
     ......
@@ -599,7 +599,7 @@ What if you need a default condition to perform the logic? We can use an anonymo
 
 E.g:
 ```
-[I] 1 ? {
+I => 1 ? {
     ......
 } 2 ? {
     ......
@@ -611,13 +611,13 @@ If this is not possible, it will go to the default processing area to execute.
 
 This can be thought of as a `switch case default` structure relative to other languages.
 
-### Pattern Matching
+### Type Matching
 Conditional judgment can do more, for example, we need to judge the type of the identifier,
 You can use the `identifier: type ? {}` syntax to match types, and `identifier` can be discard.
 
 E.g:
 ```
-[X] _: int ? {              #: is int
+X => _: int ? {              #: is int
      print("int")
 } content: str ? {          #: is str
      print(content)
@@ -1264,7 +1264,7 @@ This way we don't need to care about their values when we use them, and we can s
 E.g:
 ```
 C := RandomColor()     #: Get a random color
-[C] Color.Red ? {
+C => Color.Red ? {
       ......
 } Color.Green ? {
       ......
