@@ -1119,31 +1119,27 @@ Main := (->) {
 In reality, we often use protocols to specify specific rules, and people or things can do things according to the expected rules.
 We often need to do this in the programming language. This function is the interface.
 
-The interface specifies the methods and properties necessary to implement a particular function, allowing the structure to comply.
+An interface is used to specify the functions necessary for a particular function, and a structure is considered to implement an interface as long as it contains all the functions required by an interface.
 
-Our structure can introduce the interface we need like a signed protocol, and then declare all the attributes required by the interface, so we think that this structure implements the interface.
 ## Definition
-We only need to define an interface using the `id := $ {}` statement.
+The only difference between an interface and a structure is that there can only be immutable function variables inside, and they cannot have initial values.
 
 E.g:
 ```
 Protocol := $ {
 }
 ```
-This is an empty interface. Isn't this the same as a structure? Yes, an interface is defined in the same way as a structure. When a structure is used as an interface, the structure has the function of an interface.
 
 Next, let's design a difficult task that students need to accomplish... homework.
 
 E.g:
 ```
 Homework := $ {
-    !count: int
-    do: (->)
+    getCount: (->v int)
+    doHomework: (->)
 }
 ```
-This is a job interface that has two properties, one is the number of jobs that need to be done, and the other is a function that completes the job.
-
-The way it is defined is exactly the same as the way the structure defines properties in the body.
+This is a homework interface that has two functions, one to get the number of homeworks and one to complete them.
 
 Next, we will let the students implement this interface.
 
@@ -1154,7 +1150,10 @@ E.g:
 ```
 Student := $ {
     !count := 999999
-    do := (->) {
+    getCount := (->v int) {
+        <- count
+    }
+    doHomework := (->) {
         SpendTime(1)        #: took an hour
         count -= 1          #: completed one
     }
@@ -1164,9 +1163,9 @@ It is very difficult for our students to write homework...
 
 Let us explain what happened to this code:
 1. We implemented an interface, now `Student` is also considered to be the `Homework` type, we can use a `Student` as `Homework`.
-1. Within the interface we include two properties defined by the interface `count, do`, according to the regulations, one can not be less.
+1. Within the interface we include two properties defined by the interface `getCount, doHomework`, according to the regulations, one can not be less.
 1. We have written the actual values and functions for each of the two properties of the interface, so that these two properties become one of the valid sub-properties of `Student`.
-1. We did something in `do`, which reduced the total amount of work.
+1. We did something in `doHomework`, which reduced the total amount of work.
 
 ## Using the interface
 After the interface is included, we can use the student who owns the interface.
@@ -1174,16 +1173,16 @@ After the interface is included, we can use the student who owns the interface.
 E.g:
 ```
 Peter := Student{ count=999999 }
-print( Peter.count )
+print( Peter.getCount() )
 #: print 999999, so much
-Peter.do()
+Peter.doHomework()
 #: Do somework
-print( Peter.count )
+print( Peter.getCount() )
 #: print 999998, still so much
 ```
 If you just use it, there is no advantage to defining these two properties directly in the structure.
 
-Let's think back and forth about the role of the interface. The interface is such that each structure containing the interface has the same properties and methods as specified.
+Let's think back and forth about the role of the interface. The interface is such that each structure containing the interface has the same properties as specified.
 
 This way for the interface builder, there is no need to care about how the structure follows the interface. Just know that they are all followed and you can use them in the same way.
 
@@ -1196,16 +1195,16 @@ StudentA := ChineseStudent{}
 StudentB := AmericanStudent{}
 StudentC := JapaneseStudent{}
 #: Let them do their homework separately
-StudentA.do()
-StudentB.do()
-StudentC.do()
+StudentA.doHomework()
+StudentB.doHomework()
+StudentC.doHomework()
 ```
 A more efficient way is to write this function into the function, let the function help us repeat the function of the interface.
 
 E.g:
 ```
 DoHomework := (Student: Homework ->) {
-    Student.do()
+    Student.doHomework()
 }
 #: Now we can make each student do their homework more easily
 DoHomework(StudentA)
