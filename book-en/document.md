@@ -1323,16 +1323,16 @@ ReadFile = (name: str ->) {
 ```
 So we declare an exception, the exception description is `something wrong`, once the external caller uses the illegal length of `name`, the function will be forced to abort, report the exception up and hand it to the caller.
 ## Checking exceptions
-We can use the `! {}` statement to check for exceptions and `| identifier: type {}` to handle exceptions.
+We can use the `! {}` statement to check for exceptions and `& identifier: type {}` to handle exceptions.
 `type` can be omitted, the default is `Exception`.
 
 E.g:
 ```
 ! {
     f = ReadFile("temp.txt")
-} | ex: IOException {
+} & ex: IOException {
     ! <- ex
-} | e {
+} & e {
     print(e.message)
 }
 ```
@@ -1346,7 +1346,7 @@ E.g:
 ```
 ! {
     Func()
-} | ex {
+} & ex {
     #: Can be manually aborted
     #: <-
     ! <- ex
@@ -1356,7 +1356,7 @@ E.g:
 ## Checking the delay
 If we have a feature that we want to handle regardless of normal or abnormal procedures, such as the release of critical resources, we can use the check latency feature.
 
-Quite simply, using `& {}` at the end of the check can declare a statement that checks for delays.
+Quite simply, using `& _ {}` at the end of the check can declare a statement that checks for delays.
 
 E.g:
 ```
@@ -1364,7 +1364,7 @@ Func = (->) {
     F: File
     ! {
         F = ReadFile("./somecode.file")
-    } & {
+    } & _ {
         F >< nil ? {
             F.release()
         }
@@ -1381,7 +1381,7 @@ It should be noted that because the check delay is executed before the function 
 E.g:
 ```
 ......
-& {
+& _ {
     F.release()
     <-  #: error, can not use the return statement
 }
