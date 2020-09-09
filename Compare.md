@@ -28,9 +28,9 @@ print("Hello, world!")
 ## Variables And Constants
 ### Feel
 ```
-!myVariable := 42
-myVariable = 50
-myConstant := 42
+!myVariable = 42
+myVariable  = 50
+myConstant  = 42
 ```
 ### C#
 ```
@@ -129,9 +129,9 @@ string
 ## Type Coercion
 ### Feel
 ```
-f := 6.0
-i := 94
-count := i + (f!: int)
+f = 6.0
+i = 94
+count = i + (f!: int)
 ```
 ### C#
 ```
@@ -203,7 +203,7 @@ for index in range(1,6):
 ## Arrays
 ### Feel
 ```
-shoppingList := {"catfish"; "water"; "tulips"; "blue paint"}
+shoppingList = {"catfish"; "water"; "tulips"; "blue paint"}
 shoppingList[1] = "bottle of water"
 ```
 ### C#
@@ -234,7 +234,7 @@ shoppingList[1] = "bottle of water"
 ## Maps
 ### Feel
 ```
-occupations := {
+occupations = {
     ["Malcolm"] = "Captain"
     ["Kaylee"] = "Mechanic"
 }
@@ -283,8 +283,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Feel
 ```
-emptyArray := list str{}
-emptyDictionary := dict str f32{}
+emptyArray = list`str{}
+emptyDictionary = dict`str`f32{}
 ```
 ### C#
 ```
@@ -316,7 +316,7 @@ emptyDictionary ={}
 ## Functions
 ### Feel
 ```
-greet := (name: str, day: str -> r: str) {
+greet = (name: str, day: str -> r: str) {
     <- "Hello ${name}, today is ${day}."
 }
 greet("Bob", "Tuesday")
@@ -359,7 +359,7 @@ greet("Bob", "Tuesday")
 ## Tuple Return
 ### Feel
 ```
-getGasPrices := (-> a: num, b: num, c: num) {
+getGasPrices = (-> a: num, b: num, c: num) {
     <- 3.59, 3.69, 3.79
 }
 ```
@@ -394,13 +394,13 @@ def getGasPrices():
 ## Function Type
 ### Feel
 ```
-makeIncrementer := (-> fn: (int->int)) {
-    addOne := (number: int -> number: int) {
+makeIncrementer = (-> fn: (int->int)) {
+    addOne = (number: int -> number: int) {
         <- 1 + number
     }
     <- addOne
 }
-increment := makeIncrementer()
+increment = makeIncrementer()
 increment(7)
 ```
 ### C#
@@ -464,9 +464,9 @@ increment(7)
 ## Classes Declaration
 ### Feel
 ```
-Shape := $ {
-    !numberOfSides := 0
-    simpleDescription := (-> s: str) {
+Shape = $ {
+    !numberOfSides = 0
+    simpleDescription = (-> s: str) {
         <- "A shape with ${numberOfSides} sides."
     }
 }
@@ -519,9 +519,9 @@ class Shape(object):
 ## Classes Usage
 ### Feel
 ```
-shape := Shape{}
+shape = Shape{}
 shape.numberOfSides = 7
-shapeDescription := shape.simpleDescription()
+shapeDescription = shape.simpleDescription()
 ```
 ### C#
 ```
@@ -556,35 +556,36 @@ shapeDescription = shape.simpleDescription()
 ## Subclass
 ### Feel
 ```
-NamedShape := $ {
+NamedShape = $ {
     !name: str
-    !numberOfSides := 0
-    simpleDescription := (-> s: str) {
+    !numberOfSides = 0
+    simpleDescription = (-> s: str) {
         <- "A shape with ${numberOfSides} sides."
     }
 } 
 
-Square := $ me {
-    NamedShape
+Square = $ me {
+    . NamedShape
     !sideLength: num
 
-    simpleDescription := (-> s: str) {
+    simpleDescription = (-> s: str) {
         <- "A square with sides of length ${sideLength}."
     }
 
-    area := (-> f: num) {
+    area = (-> f: num) {
         <- sideLength * sideLength
-    }
-
-    init := (sideLength: num, name: str->v: Square) {
-        me.name = name
-        me.sideLength = sideLength
-        me.numberOfSides = 4
-        <- me
     }
 }
 
-test := Square{}.init(5.2, "square")
+NewSquare = (sideLength: num, name: str->v: Square) {
+    <- Square{
+        name = name;
+        sideLength = sideLength;
+        numberOfSides = 4
+    }
+}
+
+test = NewSquare(5.2, "square")
 test.area()
 test.simpleDescription()
 ```
@@ -756,15 +757,17 @@ test.simpleDescription()
 ## Checking Type
 ### Feel
 ```
-!movieCount := 0
-!songCount := 0
+!movieCount = 0
+!songCount = 0
 
 library @ item {
-    item => _: Movie ? {
-        movieCount += 1
-    } _: Song ? {
-        songCount += 1
-    }
+    item => 
+        | _: Movie ? {
+            movieCount += 1
+        }
+        | _: Song ? {
+            songCount += 1
+        }
 }
 ```
 ### C#
@@ -837,18 +840,23 @@ for item in library:
 ## Pattern Matching
 ### Feel
 ```
-nb := 42
-nb => 0..7, 8, 9 ? { 
-    print("single digit") 
-} 10 ? { 
-    print("double digits") 
-} 11..99 ? { 
-    print("double digits") 
-} 100..999 ? { 
-    print("triple digits") 
-} _ { 
-    print("four or more digits") 
-}
+nb = 42
+nb => 
+    | 0..7 | 8 | 9 ? { 
+        print("single digit") 
+    }
+    | 10 ? { 
+        print("double digits") 
+    }
+    | 11..99 ? { 
+        print("double digits") 
+    }
+    | 100..999 ? { 
+        print("triple digits") 
+    }
+    | _ { 
+        print("four or more digits") 
+    }
 ```
 ### C#
 ```
@@ -900,7 +908,7 @@ switch nb {
 ### Feel
 ```
 someObjects @ current {
-    current => movie: Movie ? {
+    current => | movie: Movie ? {
         print("Movie: '${movie.name}', " +
             "dir. ${movie.director}")
     }
@@ -952,11 +960,11 @@ for current in someObjects:
 ## Protocol
 ### Feel
 ```
-Nameable := $ {
+Nameable = $ {
     name: (-> s: str)
 }
 
-f := (x: Nameable ->) {
+f = (x: Nameable ->) {
     print("Name is " + x.name())
 }
 ```
@@ -1005,12 +1013,12 @@ func f(x: Nameable) {
 ## Implement
 ### Feel
 ```
-Dog := $ {
-    name := (-> n: str) {
+Dog = $ {
+    name = (-> n: str) {
         <- "Dog"
     }
 
-    getWeight := (-> w: int) {
+    getWeight = (-> w: int) {
         <- 30
     }
 }
