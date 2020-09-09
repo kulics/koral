@@ -27,21 +27,21 @@ This is the main source code repository for Feel. It contains the compiler, and 
 ## Quick Preview
 
 ```
-main := (->) {
+main = (->) {
     print("Hello, world!")
-    greetings := get_greetings("Fall in love with programming!")
+    greetings = get_greetings("Fall in love with programming!")
     greetings @ [index]value {
         index == 0 ? {
             print(value)
-        } index == 1 ? {
+        } | index == 1 ? {
             print(value + ", 世界!")
-        } _ {
+        } | _ {
             print(value + ", world!")
         }
     }
 }
 
-get_greetings := (input: str -> output: list str) {
+get_greetings = (input: str -> output: list`str) {
     <- input + {"你好"; "Hola"; "Bonjour"
                 "Ciao"; "こんにちは"; "안녕하세요"
                 "Cześć"; "Olá"; "Здравствуйте"
