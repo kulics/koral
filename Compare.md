@@ -579,8 +579,8 @@ Square = $ me {
 
 NewSquare = (sideLength: num, name: str->v: Square) {
     <- Square{
-        name = name;
-        sideLength = sideLength;
+        name = name
+        sideLength = sideLength
         numberOfSides = 4
     }
 }
