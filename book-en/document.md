@@ -58,7 +58,7 @@ So in most cases, we can end up using line breaks directly. When there is a spec
 
 So we prefer to write like this:
 ```
-StatementContent #: Automatic end
+StatementContent
 StatementContent
 ```
 
@@ -121,7 +121,7 @@ If we're writing a console program, we can use the `print()` function, which dis
 
 E.g:
 ```
-print("Hello world")    #: Output Hello world
+print("Hello world")    -- Output Hello world
 ```
 In the examples that follow, we will use the console as a demo environment.
 
@@ -130,12 +130,12 @@ Comments are only used to provide additional information to the user and are not
 
 E.g:
 ```
-#: Single-line Comment
+-- Single-line Comment
 
-#=
+++
     Multi-line
     Comment
-=#
+++
 ```
 
 ## Constants
@@ -242,14 +242,14 @@ Integer: int = 3987349
 
 If we need integers in other numeric ranges, we can use other types. All supported integer types are listed below.
 ```
-i8          #: 8 bit signed -128 to 127
-u8, byte    #: 8 bit unsigned 0 to 255
-i16         #: 16-bit signed -32,768 to 32,767
-u16         #: 16-bit unsigned 0 to 65,535
-i32, int    #: 32-bit signed -2,147,483,648 to 2,147,483,647
-u32         #: 32-bit unsigned 0 to 4,294,967,295
-i64         #: 64-bit signed -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807
-u64         #: 64-bit unsigned 0 to 18,446,744,073,709,551,615
+i8          -- 8 bit signed -128 to 127
+u8, byte    -- 8 bit unsigned 0 to 255
+i16         -- 16-bit signed -32,768 to 32,767
+u16         -- 16-bit unsigned 0 to 65,535
+i32, int    -- 32-bit signed -2,147,483,648 to 2,147,483,647
+u32         -- 32-bit unsigned 0 to 4,294,967,295
+i64         -- 64-bit signed -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807
+u64         -- 64-bit unsigned 0 to 18,446,744,073,709,551,615
 ```
 ## Basic Type Conversion
 Since the default integers are `int`, how do we use other types of integers?
@@ -276,8 +276,8 @@ It should be noted that due to the particularity of computer computing floating-
 
 All supported floating point types are as follows:
 ```
-f32         #: 32 bits ±1.5e−45 to ±3.4e38
-f64, num    #: 64 bits ±5.0e−324 to ±1.7e308
+f32         -- 32 bits ±1.5e−45 to ±3.4e38
+f64, num    -- 64 bits ±5.0e−324 to ±1.7e308
 ```
 ## Character
 Computers usually use a specific number to encode characters, so a type is needed to express the characters. This is the `chr` type.
@@ -312,7 +312,7 @@ E.g:
 Title   = "Year:"
 Content = 2018
 String  = "Hello world! " + Title + Content.to_str()
-#: Hello world! Year:2018
+-- Hello world! Year:2018
 ```
 
 This certainly does not affect the functionality, but we can use a more intuitive and convenient way, that is, a string template.
@@ -321,7 +321,7 @@ We can insert expressions directly using `${expression; expression}` syntax.
 E.g:
 ```
 String = "Hello world! ${Title; Content}"
-#: Hello world! Year:2018
+-- Hello world! Year:2018
 ```
 
 ## Boolean
@@ -331,22 +331,22 @@ In this language, the default boolean is the `bool` type, which is a type with o
 
 E.g:
 ```
-Boolean1: bool = true       #: true
-Boolean2: bool = false      #: false
+Boolean1: bool = true       -- true
+Boolean2: bool = false      -- false
 ```
 ## Any Type
 In particular, sometimes a type that can be any object is needed to assist in the completion of the function, which is `any`.
 
 E.g:
 ```
-A: any = 1   #: any type
+A: any = 1   -- any type
 ```
 ## Nil
 We need a value that can be any type of null value, so it is `nil` .
 
 E.g:
 ```
-A = nil     #: none value
+A = nil     -- none value
 ```
 
 # Operators
@@ -361,12 +361,12 @@ E.g:
 ```
 A = 4
 B = 2
-print( A + B )    #: + plus
-print( A - B )    #: - minus
-print( A * B )    #: * multiply
-print( A / B )    #: / divide
-print( A % B )    #: % residual, meaning the remainder remaining after the divisibility, the result here is 2
-print( A ^ B )    #: ^ power
+print( A + B )    -- + plus
+print( A - B )    -- - minus
+print( A * B )    -- * multiply
+print( A / B )    -- / divide
+print( A % B )    -- % residual, meaning the remainder remaining after the divisibility, the result here is 2
+print( A ^ B )    -- ^ power
 ```
 In addition to numbers, there are other types that support arithmetic operations. For example, `str` can use an addition operation to combine two paragraphs of text.
 
@@ -374,7 +374,7 @@ E.g:
 ```
 A = "hello"
 B = "world"
-C = A + " " + B     #: C is "hello world"
+C = A + " " + B     -- C is "hello world"
 ```
 
 ## Judging Operators
@@ -384,12 +384,12 @@ E.g:
 ```
 A = 4
 B = 2
-print( A == B )   #: == equal to
-print( A >< B )   #: >< not equal to
-print( A > B )    #: > Greater than
-print( A >= B )   #: >= Greater than or equal to
-print( A < B )    #: < less than
-print( A <= B )   #: <= less than or equal to
+print( A == B )   -- == equal to
+print( A >< B )   -- >< not equal to
+print( A > B )    -- > Greater than
+print( A >= B )   -- >= Greater than or equal to
+print( A < B )    -- < less than
+print( A <= B )   -- <= less than or equal to
 ```
 ## Logical Operators
 Logical operators are also used primarily in decision statements to perform logical operations (AND, OR, and NOT).
@@ -398,9 +398,9 @@ E.g:
 ```
 A = true
 B = false
-print( A && B )    #: && AND, both are true at the same time
-print( A || B )    #: || OR, one of them is true
-print( ~~A )       #: ~~ NOT, boolean inversion
+print( A && B )    -- && AND, both are true at the same time
+print( A || B )    -- || OR, one of them is true
+print( ~~A )       -- ~~ NOT, boolean inversion
 ```
 
 ## Assignment Operator
@@ -409,13 +409,13 @@ The assignment operator is mainly used to assign the data on the right to the id
 E.g:
 ```
 !A = 0
-A = 1       #: = the simplest assignment
-A += 1      #: += First add and then assign
-A -= 1      #: -= First subtraction and then assign
-A *= 1      #: *= First multiply and then assign
-A /= 1      #: /= First divide and then assign
-A %= 1      #: %= First residual and then assign
-A ^= 1      #: ^= First power and then assign
+A = 1       -- = the simplest assignment
+A += 1      -- += First add and then assign
+A -= 1      -- -= First subtraction and then assign
+A *= 1      -- *= First multiply and then assign
+A /= 1      -- /= First divide and then assign
+A %= 1      -- %= First residual and then assign
+A ^= 1      -- ^= First power and then assign
 ```
 ## Bit Operation
 Bit operations are the basis for the underlying calculations and are also supported in this language.
@@ -423,12 +423,12 @@ Bit operations are the basis for the underlying calculations and are also suppor
 E.g:
 ```
 A = 1
-A &&& 1      #: bitwise AND
-A ||| 1      #: bitwise OR
-A ^^^ 1      #: bitwise XOR
-~~~A         #: bitwise inversion
-A <<< 1      #: left shift
-A >>> 1      #: right shift
+A &&& 1      -- bitwise AND
+A ||| 1      -- bitwise OR
+A ^^^ 1      -- bitwise XOR
+~~~A         -- bitwise inversion
+A <<< 1      -- left shift
+A >>> 1      -- right shift
 ```
 
 # Collection Types
@@ -455,7 +455,7 @@ The representation of the list type is ``list`element_type``.
 
 For example we need a list of strings:
 ```
-List = list`str{}     #: empty
+List = list`str{}     -- empty
 ```
 
 ### Access
@@ -476,10 +476,10 @@ List[0] = 5
 It should be noted that we can only access the index of the existing data, if it does not exist, an error will occur.
 ### Common Operations
 ```
-List += 1               #: Add to the end
-List.insert(2, 3)       #: Insert element 3 to index 2
-List -= 1               #: Delete the specified location element
-Length = List.len       #: Length
+List += 1               -- Add to the end
+List.insert(2, 3)       -- Insert element 3 to index 2
+List -= 1               -- Delete the specified location element
+Length = List.len       -- Length
 ```
 
 ## Dictionary
@@ -503,7 +503,7 @@ The representation of the dictionary type is ``dict`key_type`value_type``.
 
 E.g:
 ```
-DictionaryNumNum = dict`int`int{}  #: empty
+DictionaryNumNum = dict`int`int{}  -- empty
 ```
 ### Access
 Similar to the list, we can also use the index to access the data directly.
@@ -522,9 +522,9 @@ Dictionary["b"] = 5
 Different from the list, if the index is an index that does not exist, it will not be wrong, and the value will be directly assigned to the new key.
 ### Common operations
 ```
-Dictionary += {["d"]=11}    #: Add Element
-Dictionary -= "c"           #: Delete the specified index element
-Length = Dictionary.len     #: Length
+Dictionary += {["d"]=11}    -- Add Element
+Dictionary -= "c"           -- Delete the specified index element
+Length = Dictionary.len     -- Length
 ```
 
 # Judgment
@@ -535,7 +535,7 @@ We only need to use `expression ? {}` to declare the judgment statement and ente
 E.g:
 ```
 true ? {
-    print("true")     #: true
+    print("true")     -- true
 }
 ```
 ## Boolean Judgment
@@ -547,9 +547,9 @@ E.g:
 ```
 B = false
 B ? {
-    ...... #: Because B is false, so never enter this branch
+    ...... -- Because B is false, so never enter this branch
 } | _ {
-    ...... #: proccess false
+    ...... -- proccess false
 }
 ```
 
@@ -626,13 +626,13 @@ You can use the `identifier: type ? {}` syntax to match types, and `identifier` 
 E.g:
 ```
 X => 
-    | _: int ? {            #: is int
+    | _: int ? {            -- is int
         print("int")
     }
-    | content: str ? {      #: is str
+    | content: str ? {      -- is str
         print(content)
     }
-    | nil ? {               #: is nil
+    | nil ? {               -- is nil
         print("nil")
     }
 ```
@@ -641,7 +641,7 @@ If we need to explicitly get the type value, we can use the `typeof(type)` funct
 
 E.g:
 ```
-typeof(int)     #: Get the type value directly by type
+typeof(int)     -- Get the type value directly by type
 ```
 # Loop
 Sometimes we may need to execute the same piece of code multiple times.
@@ -654,7 +654,7 @@ E.g:
 ```
 Arr = {1; 2; 3; 4; 5}
 Arr @ item {
-    print(item)   #: print every number
+    print(item)   -- print every number
 }
 ```
 
@@ -676,7 +676,7 @@ The iterator can take the number from the start point to the end point loop. We 
 E.g:
 ```
 0 .. 100 @ i {
-    print(i)  #: print every number
+    print(i)  -- print every number
 }
 ```
 It should be noted that the meaning of `0 .. 100` is read from `0` to `100`, that is, a total of `101` times. The iterator will execute until the last number is executed, rather than ending one at a time.
@@ -696,7 +696,7 @@ We can also let it traverse in reverse order, just use `...`.
 E.g:
 ```
 100 ... 0 @ i {
-    ......  #: From 100 to 0
+    ......  -- From 100 to 0
 }
 ```
 
@@ -722,7 +722,7 @@ So how do you jump out of the loop? We can use the `~@` statement to jump out.
 E.g:
 ```
 true @ {
-    ~@    #: Jumped out without executing anything
+    ~@    -- Jumped out without executing anything
 }
 ```
 
@@ -737,7 +737,7 @@ E.g:
 1 > 2 @ {
     ...
 } _ {
-    #: loop does not executed, so execute the logic here
+    -- loop does not executed, so execute the logic here
 }
 ```
 # Function Type
@@ -763,7 +763,7 @@ Unlike the main entry function, which cannot be called, regular functions can be
 
 E.g:
 ```
-Function()  #: Call Function
+Function()  -- Call Function
 ```
 
 ## Parameters
@@ -811,9 +811,9 @@ When we call a function, we need to fill the data in parentheses in the order de
 
 E.g:
 ```
-#: Define a function that contains two input parameters
+-- Define a function that contains two input parameters
 Sell = (price: int, name: str ->) {}
-#: Fill in the required data according to the defined requirements
+-- Fill in the required data according to the defined requirements
 Sell(1.99, "cola")
 ```
 ### Output Parameters
@@ -833,13 +833,13 @@ It's very simple, just like we do add, subtract, multiply and divide, just use t
 
 E.g:
 ```
-n, c = TopSell()        #: Assign the returned two values ​​to n and c
+n, c = TopSell()        -- Assign the returned two values ​​to n and c
 ```
 You can use a definition or assignment statement to get the return value of the function to use, or you can nest a function that meets the requirements into another function.
 
 E.g:
 ```
-print( TopSell() )      #: print two values ​
+print( TopSell() )      -- print two values ​
 ```
 
 ## Function Input Parameter
@@ -886,7 +886,7 @@ ForEach( {it ->
     print(it / 2)
 })
 Take( {a, b -> a + b} )
-FindAll{ it -> it > 7 }     #: If the function has only one argument, you can also omit the brackets
+FindAll{ it -> it > 7 }     -- If the function has only one argument, you can also omit the brackets
 ```
 Very simple, the difference from the expression of a function type is that you only need to declare the parameter identifier and execution logic, and neither the type nor the return value need to be declared.
 
@@ -950,7 +950,7 @@ Quite simply, we only need to use the `.` syntax to summon the properties we nee
 
 E.g:
 ```
-print( Peter.name )   #: Printed the name of a student
+print( Peter.name )   -- Printed the name of a student
 ```
 The same is true for changing the value of an attribute, which is equivalent to a nested identifier. We can use the assignment statement to change the value directly.
 
@@ -1008,7 +1008,7 @@ E.g:
 ```
 Student = $ {
     ......
-    !_girlFriend: str    #: The first character is the identifier of _ is private
+    !_girlFriend: str    -- The first character is the identifier of _ is private
 }
 ```
 That's right, if you remember the definition of the identifier, this is how the private identifier is defined. The private identifier is not accessible to the outside world.
@@ -1019,7 +1019,7 @@ The private property of this structure can not be accessed, and can not be modif
 
 E.g:
 ```
-Student = $ me { #: declare me
+Student = $ me { -- declare me
     ......
     getGirlFriend = (-> name: str) {
         <- me._girlFriend
@@ -1036,7 +1036,7 @@ With this function, we can get the private property by calling the function.
 E.g:
 ```
 print( Peter.getGirlFriend() )
-#: Printed the name of a girlfriend of a young love student
+-- Printed the name of a girlfriend of a young love student
 ```
 Like data attributes, functions can also be private identifiers. Functions that use private identifiers also mean that only structures can access them.
 
@@ -1050,7 +1050,7 @@ ChineseStudent = $ {
     !number: str    = ""
     !class: int     = 0
     !grade: int     = 0
-    !kungfu: bool   = false    #: not learn kungfu
+    !kungfu: bool   = false    -- not learn kungfu
 }
 ```
 No, no, it's not very elegant to repeat the definition of data. We can reuse the student attributes and add an extra kung fu attribute.
@@ -1060,8 +1060,8 @@ We need to combine this feature, but it's not that complicated, just create a st
 E.g:
 ```
 ChineseStudent = $ {
-    !student    = Student{}     #: include the student attribute in it
-    !kungfu     = false         #: not learn kungfu
+    !student    = Student{}     -- include the student attribute in it
+    !kungfu     = false         -- not learn kungfu
 }
 ```
 This way you can use common attributes through the student attributes in Chinese students.
@@ -1080,7 +1080,7 @@ Top-level combinations extract attributes from the structure to the exterior, ju
 E.g:
 ```
 ChineseStudent = $ { 
-    . Student   #: top-level combination
+    . Student   -- top-level combination
     !kungfu = false
 }
 ```
@@ -1121,7 +1121,7 @@ E.g:
 }
 
 Main = (->) {
-    #: print something
+    -- print something
     print( GetSomething() )
 }
 ```
@@ -1165,8 +1165,8 @@ Student = $ {
         <- count
     }
     doHomework = (->) {
-        SpendTime(1)        #: took an hour
-        count -= 1          #: completed one
+        SpendTime(1)        -- took an hour
+        count -= 1          -- completed one
     }
 }
 ```
@@ -1185,11 +1185,11 @@ E.g:
 ```
 Peter = Student{ count=999999 }
 print( Peter.getCount() )
-#: print 999999, so much
+-- print 999999, so much
 Peter.doHomework()
-#: Do somework
+-- Do somework
 print( Peter.getCount() )
-#: print 999998, still so much
+-- print 999998, still so much
 ```
 If you just use it, there is no advantage to defining these two properties directly in the structure.
 
@@ -1201,11 +1201,11 @@ Now we can create a variety of students, they all follow the same interface, we 
 
 E.g:
 ```
-#: Created three different types of student structures
+-- Created three different types of student structures
 StudentA = ChineseStudent{}
 StudentB = AmericanStudent{}
 StudentC = JapaneseStudent{}
-#: Let them do their homework separately
+-- Let them do their homework separately
 StudentA.doHomework()
 StudentB.doHomework()
 StudentC.doHomework()
@@ -1217,7 +1217,7 @@ E.g:
 DoHomework = (Student: Homework ->) {
     Student.doHomework()
 }
-#: Now we can make each student do their homework more easily
+-- Now we can make each student do their homework more easily
 DoHomework(StudentA)
 DoHomework(StudentB)
 DoHomework(StudentC)
@@ -1228,7 +1228,7 @@ E.g:
 ```
 Arr = list`Homework{}
 Arr.add( StudentA )
-......  #: Insert many many students
+......  -- Insert many many students
 Arr @ i {
     DoHomework(i)
 }
@@ -1246,9 +1246,9 @@ We can use `expression?: type` to determine the type of data, and `expression!: 
 E.g:
 ```
 Func = (he: Homework ->) {
-    #: Determine if Chinese students
+    -- Determine if Chinese students
     he?: ChineseStudent ? {
-        #: Convert to Chinese Student Data
+        -- Convert to Chinese Student Data
         Cs = he!: ChineseStudent
     }
 }
@@ -1273,7 +1273,7 @@ This way we don't need to care about their values when we use them, and we can s
 
 E.g:
 ```
-C = RandomColor()     #: Get a random color
+C = RandomColor()     -- Get a random color
 C => 
     | Color.Red ? {
         ......
@@ -1293,10 +1293,10 @@ We can also assign a single identifier if needed, and unspecified will continue 
 E.g:
 ```
 Number = $ {
-     | A = 1  #: 1
-     | B      #: 2
-     | C = 1  #: 1
-     | D      #: 2
+     | A = 1  -- 1
+     | B      -- 2
+     | C = 1  -- 1
+     | D      -- 2
 }
 ```
 
@@ -1347,8 +1347,8 @@ E.g:
 ! {
     Func()
 } & ex {
-    #: Can be manually aborted
-    #: <-
+    -- Can be manually aborted
+    -- <-
     ! <- ex
 }
 ```
@@ -1383,7 +1383,7 @@ E.g:
 ......
 & _ {
     F.release()
-    <-  #: error, can not use the return statement
+    <-  -- error, can not use the return statement
 }
 ```
 
@@ -1418,7 +1418,7 @@ So the following code cannot be passed.
 E.g:
 ```
 Result = ~> SayHello()
-#: Error, the current logic will continue to execute, and the return value cannot be obtained directly
+-- Error, the current logic will continue to execute, and the return value cannot be obtained directly
 ```
 
 ## Asynchronous waiting
@@ -1431,7 +1431,7 @@ In this way, we can get the results we want.
 E.g:
 ```
 Result = SayHello~>()
-#: Correct, the current logic will wait for the asynchronous result before continuing execution
+-- Correct, the current logic will wait for the asynchronous result before continuing execution
 ...
 ```
 
@@ -1444,10 +1444,10 @@ E.g:
 ```
 Channel = chan`int{}
 
-#: The current logic will wait for the data transfer to complete before continuing execution
+-- The current logic will wait for the data transfer to complete before continuing execution
 Channel <~ 666
 
-#: For the same reason, the current logic will be suspended when obtaining data
+-- For the same reason, the current logic will be suspended when obtaining data
 print(<~ Channel)
 ......
 ```
@@ -1459,24 +1459,24 @@ E.g:
 ```
 ch = chan`int{}
 
-#: Execute a concurrent function
+-- Execute a concurrent function
 ~> (->) {
     3 ... 0 @ i {
         ch <~ i
     }
 }()
 
-#: Cyclic receive channel data
+-- Cyclic receive channel data
 true @ {
     data = <~ ch
     print(data)
 
-    #: When encountering data 0, exit the loop
+    -- When encountering data 0, exit the loop
     data == 0 ? {
         ~@
     }
 }
-#: Output 3 2 1 0
+-- Output 3 2 1 0
 ```
 
 Since the channel is a collection type, we can also use the traversal syntax.
@@ -1503,16 +1503,16 @@ This is a simplified implementation.
 E.g:
 ```
 List = `T $ {
-    #: Create Storage
+    -- Create Storage
     !items  = Storage`T{}
     !length = 0
 
-    #: Get a generic data
+    -- Get a generic data
     get = (index: int -> item: T) {    
         <- items.get( index )
     }
 
-    #: Add a generic data to the list
+    -- Add a generic data to the list
     add = (item: T ->) {      
         items.insert(length, item)
         length += 1
@@ -1541,7 +1541,7 @@ This way we can use it in generics.
 E.g:
 ```
 Package = `T $ {
-    !item = empty`T()    #: Initializes a default value of generic data
+    !item = empty`T()    -- Initializes a default value of generic data
 }
 ```
 So how do we use generics?
@@ -1550,7 +1550,7 @@ It's very simple, just use it as we declare it, just pass the real type when cal
 
 E.g:
 ```
-ListNumber = List`int{}   #: Pass in int type
+ListNumber = List`int{}   -- Pass in int type
 ```
 So we have a list of integer types, is it like this:
 ```
@@ -1584,7 +1584,7 @@ Annotations are declarative tags used to pass feature information of various ele
 Usually we use the annotation feature in many scenes of reflection and data parsing.
 
 ## Annotation Statement
-We only use `#`.
+We only use `[]`.
 If you need to specify the specified attribute, you can use the `identifier = expression` assignment as you would a simplified build of the structure.
 
 Note that it is valid to use before the identifier.
@@ -1593,13 +1593,13 @@ Let's take a look at the database data as a reference to see how to use annotati
 
 E.g:
 ```
-#Table("test")
+[Table("test")]
 Annotation = $ {
-    #Key #Column("id")
+    [Key, Column("id")]
     !id: str
-    #Column("name")
+    [Column("name")]
     !name: str
-    #Column("data")
+    [Column("data")]
     !data: str
 }
 ```
@@ -1617,7 +1617,7 @@ If a type is defined but not assigned, it will not be used.
 E.g:
 ```
 A: int
-B = A      #: error, no assignment to A
+B = A      -- error, no assignment to A
 ```
 
 ## Declaration and Use
@@ -1628,7 +1628,7 @@ Just add `?` after any type, which is a nullable type.
 E.g:
 ```
 A: int?
-B = A      #: B Assigned to an empty i32
+B = A      -- B Assigned to an empty i32
 ```
 
 Once an optional type has appeared, we need to strictly handle null values ​​to avoid program errors.
