@@ -1584,7 +1584,7 @@ Annotations are declarative tags used to pass feature information of various ele
 Usually we use the annotation feature in many scenes of reflection and data parsing.
 
 ## Annotation Statement
-We only use `#`.
+We only use `[]`.
 If you need to specify the specified attribute, you can use the `identifier = expression` assignment as you would a simplified build of the structure.
 
 Note that it is valid to use before the identifier.
@@ -1593,13 +1593,13 @@ Let's take a look at the database data as a reference to see how to use annotati
 
 E.g:
 ```
-#Table("test")
+[Table("test")]
 Annotation = $ {
-    #Key #Column("id")
+    [Key, Column("id")]
     !id: str
-    #Column("name")
+    [Column("name")]
     !name: str
-    #Column("data")
+    [Column("data")]
     !data: str
 }
 ```
