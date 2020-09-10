@@ -1568,7 +1568,7 @@ Package = `T:Student $ {
 通常我们在很多反射、数据解析的场景种会使用到注解特性。
 
 ## 注解声明
-我们只需要使用 `#`。
+我们只需要使用 `[]`。
 如果需要注明指定属性，则如结构体的简化构建一样使用 `标识符 = 表达式` 赋值即可。
 
 注意要在标识符前面使用才有效。
@@ -1577,13 +1577,13 @@ Package = `T:Student $ {
 
 例如：
 ```
-#Table("test")
+[Table("test")]
 Annotation = $ {
-    #Key #Column("id")
+    [Key, Column("id")]
     !id: str
-    #Column("name")
+    [Column("name")]
     !name: str
-    #Column("data")
+    [Column("data")]
     !data: str
 }
 ```
