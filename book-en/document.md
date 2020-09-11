@@ -866,17 +866,16 @@ It's sometimes awkward to define a function and then pass it in as above, becaus
 
 At this point we can use the syntax of the Lambda expression to simplify our code.
 
-Since the function argument is already determined at the time of declaration, we can use the simplified syntax `{identifier, identifier -> statements}` to express it, which means defining the argument identifier and executing the function statement.
+Since the function argument is already determined at the time of declaration, we can use the simplified syntax `(identifier) {statements}` to express it, which means defining the argument identifier and executing the function statement.
 
 E.g:
 ```
-ForEach( {it ->
+ForEach( (it) { 
     print(it)
     print(it * it)
     print(it / 2)
 })
-Take( {a, b -> a + b} )
-FindAll{ it -> it > 7 }     -- If the function has only one argument, you can also omit the brackets
+Take( (a, b) {a + b} )
 ```
 Very simple, the difference from the expression of a function type is that you only need to declare the parameter identifier and execution logic, and neither the type nor the return value need to be declared.
 
