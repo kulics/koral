@@ -93,7 +93,7 @@ You can write multiple import statements, and their order does not affect the im
 For more details on namespaces, please see [Namespace](#Namespace)
 
 ## Main Entry
-We need to define a main entry to let the program know where to start. The main entry is declared via a function `Main = (->) {}`.
+We need to define a main entry to let the program know where to start. The main entry is declared via a function `Main = () {}`.
 Depending on the target platform, the main entry may be declared differently, and the main function of C# is used by default.
 
 E.g:
@@ -104,7 +104,7 @@ E.g:
     System
 }
 
-Main = (->) {
+Main = () {
 }
 ```
 The main entry function here is a function with no arguments and no return value. It is automatically recognized as the main entry. The main entry function is executed when the program starts, so we only need to write the function in the main entry function.
@@ -737,7 +737,7 @@ Usually we will package a series of task processing that needs to be reused into
 
 In practical engineering practice, given a certain input, the function that must accurately return the determined output is considered a better design. Therefore, it is recommended to maintain the independence of the function as much as possible.
 ## Definition
-We have seen the main entry function before, it is only defined using the fixed statement `Main = (->) {}`.
+We have seen the main entry function before, it is only defined using the fixed statement `Main = () {}`.
 
 We only need to define a function using the `(->) {}` collocation. The parentheses in front are the input parameters, and the parentheses in the back are the parameters.
 
@@ -813,9 +813,20 @@ E.g:
 ```
 TopSell = (-> name: str, count: int) {
      ......
-     <- "cola", many
+     <- "cola", 123
 }
 ```
+### Omit the Output Parameters
+When the language can infer the return value type, we can omit the Output Parameters and '->'.
+
+E.g:
+```
+TopSell = () {
+    ......
+    <- "cola", 123
+}
+```
+
 ### Use of return value
 So how do we get the return value of a function?
 
@@ -839,7 +850,7 @@ There is no special way to define function arguments, just replace the argument 
 
 E.g:
 ```
-Each_1_To_10 = (func: (int->) ->) {
+Each_1_To_10 = (func: (int->)) {
      1 .. 10 @ i {
          func(i)
      }
@@ -851,7 +862,7 @@ This way we can pass the details of the processing to the external incoming `fun
 
 E.g:
 ```
-print = (item: int ->) {
+print = (item: int) {
      print(item)
 }
 
@@ -1010,7 +1021,7 @@ E.g:
 ```
 Student = $ me { -- declare me
     ......
-    getGirlFriend = (-> name: str) {
+    getGirlFriend = () {
         <- me._girlFriend
     }
 }
@@ -1094,7 +1105,7 @@ E.g:
 ```
 <- Name.Space
 
-GetSomething = (-> content: str) {
+GetSomething = () {
     <- "something"
 }
 ```
@@ -1109,7 +1120,7 @@ E.g:
     Name.Space 
 }
 
-Main = (->) {
+Main = () {
     -- print something
     print( GetSomething() )
 }
@@ -1150,10 +1161,10 @@ E.g:
 ```
 Student = $ {
     !count = 999999
-    getCount = (->v int) {
+    getCount = () {
         <- count
     }
-    doHomework = (->) {
+    doHomework = () {
         SpendTime(1)        -- took an hour
         count -= 1          -- completed one
     }
@@ -1203,7 +1214,7 @@ A more efficient way is to write this function into the function, let the functi
 
 E.g:
 ```
-DoHomework = (Student: Homework ->) {
+DoHomework = (Student: Homework) {
     Student.doHomework()
 }
 -- Now we can make each student do their homework more easily
@@ -1234,7 +1245,7 @@ We can use `expression?: type` to determine the type of data, and `expression!: 
 
 E.g:
 ```
-Func = (he: Homework ->) {
+Func = (he: Homework) {
     -- Determine if Chinese students
     he?: ChineseStudent ? {
         -- Convert to Chinese Student Data
@@ -1303,7 +1314,7 @@ We can use `! <- exception` to declare an exception data anywhere in the functio
 
 E.g:
 ```
-ReadFile = (name: str ->) {
+ReadFile = (name: str) {
     name.len == 0 ? {
         ! <- Exception("something wrong")
     }
@@ -1349,7 +1360,7 @@ Quite simply, using `& _ {}` at the end of the check can declare a statement tha
 
 E.g:
 ```
-Func = (->) {
+Func = () {
     F: File
     ! {
         F = ReadFile("./somecode.file")
@@ -1390,7 +1401,7 @@ That's right, it's really just using `~>`.
 
 E.g:
 ```
-SayHello = (->v: int) { 
+SayHello = () { 
     print("hello")
     <- 2020
 }
@@ -1449,7 +1460,7 @@ E.g:
 ch = chan`int{}
 
 -- Execute a concurrent function
-~> (->) {
+~> () {
     3 ... 0 @ i {
         ch <~ i
     }
@@ -1502,7 +1513,7 @@ List = `T $ {
     }
 
     -- Add a generic data to the list
-    add = (item: T ->) {      
+    add = (item: T) {      
         items.insert(length, item)
         length += 1
     }
