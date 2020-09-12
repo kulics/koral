@@ -92,7 +92,7 @@ Feel 是一个专注于效率的开源编程语言，它可以帮你轻松构建
 更多关于命名空间的细节请查看[命名空间](#命名空间)
 
 ## 主入口
-我们需要定义一个主入口来让程序知道从哪里启动。主入口通过一个函数 `Main = (->) {}` 声明。  
+我们需要定义一个主入口来让程序知道从哪里启动。主入口通过一个函数 `Main = () {}` 声明。  
 根据目标平台的不同，主入口的声明方式可能不同，这里默认使用 C# 的主函数。
 
 例如：
@@ -103,7 +103,7 @@ Feel 是一个专注于效率的开源编程语言，它可以帮你轻松构建
     System
 }
 
-Main = (->) {
+Main = () {
 }
 ```
 这里的 主入口 函数是一个无参数无返回值的函数，它会被自动识别为主入口，程序启动时即会执行 主入口 函数，因此我们只需将功能写在 主入口 函数中即可。
@@ -729,7 +729,7 @@ true @ {
 
 在实际工程实践中，给与确定的输入，必定会准确返回确定输出的函数被视为是较好的设计。所以建议尽可能地保持函数地独立性。
 ## 定义
-之前我们已经见过了主入口函数，它只使用了固定语句 `Main = (->) {}` 来定义。
+之前我们已经见过了主入口函数，它只使用了固定语句 `Main = () {}` 来定义。
 
 我们只需使用 `(->) {}` 搭配来定义一个函数。
 
@@ -803,9 +803,20 @@ Sell(1.99, "cola")
 ```
 TopSell = (-> name: str, count: int) {
     ......
-    <- "cola", many
+    <- "cola", 123
 }
 ```
+### 省略出参
+当语言可以推断出返回值类型时，我们可以省略出参和`->`。
+
+例如：
+```
+TopSell = () {
+    ......
+    <- "cola", 123
+}
+```
+
 ### 返回值的使用
 那么我们如何获取一个函数的返回值呢？
 
@@ -828,7 +839,7 @@ print( TopSell() )      -- 打印两个数值
 
 例如：
 ```
-Each_1_To_10 = (func: (int->) ->) {
+Each_1_To_10 = (func: (int->)) {
     1 .. 10 @ i {
         func(i)
     }
@@ -840,7 +851,7 @@ Each_1_To_10 = (func: (int->) ->) {
 
 例如：
 ```
-print = (item: int ->) {
+print = (item: int) {
     print(item)
 }
 
@@ -998,7 +1009,7 @@ Student = $ {
 ```
 Student = $ me { -- 声明me
     ......
-    getGirlFriend = (->name: str) {
+    getGirlFriend = () {
         <- me._girlFriend
     }
 }
@@ -1082,7 +1093,7 @@ print( Chen.name )
 ```
 <- Name.Space
 
-GetSomething = (-> content: str) {
+GetSomething = () {
     <- "something"
 }
 ```
@@ -1097,7 +1108,7 @@ GetSomething = (-> content: str) {
     Name.Space 
 }
 
-Main = (->) {
+Main = () {
     -- 打印 something
     print( GetSomething() )
 }
@@ -1137,10 +1148,10 @@ Homework = $ {
 ```
 Student = $ {
     !count = 999999
-    getCount = (->v int) {
+    getCount = () {
         <- count
     }
-    doHomework = (->) {
+    doHomework = () {
         SpendTime(1)        -- 花费了一个小时
         count -= 1          -- 完成了一个
     }
@@ -1190,7 +1201,7 @@ StudentC.doHomework()
 
 例如：
 ```
-DoHomework = (Student: Homework ->) {
+DoHomework = (Student: Homework) {
     student.doHomework()
 }
 -- 现在我们就可以更简单地让每个学生做作业了
@@ -1221,7 +1232,7 @@ Arr @ i {
 
 例如：
 ```
-Func = (he: Homework ->) {
+Func = (he: Homework) {
     -- 判断是否中国学生
     he?: ChineseStudent ? {
         -- 转换为中国学生数据
@@ -1290,7 +1301,7 @@ Number = $ {
 
 例如：
 ```
-ReadFile = (name: str ->) {
+ReadFile = (name: str) {
     name.len == 0 ? {
         ! <- Exception("something wrong")
     }
@@ -1336,7 +1347,7 @@ ReadFile = (name: str ->) {
 
 例如：
 ```
-func = (->) {
+func = () {
     F: File
     ! {
         F = ReadFile("./somecode.file")
@@ -1377,7 +1388,7 @@ func = (->) {
 
 例如：
 ```
-SayHello = (->v: int) { 
+SayHello = () { 
     print("hello")
     <- 2020
 }
@@ -1434,7 +1445,7 @@ print(<~ Channel)
 ch = chan`int{}
 
 -- 执行一个并发函数
-~> (->) {
+~> () {
     3 ... 0 @ i {
         ch <~ i
     }
@@ -1486,7 +1497,7 @@ List = `T $ {
     }
 
     -- 将一个泛型数据添加进列表
-    add = (item: T ->) {   
+    add = (item: T) {   
         items.insert(length, item)
         length += 1
     }
