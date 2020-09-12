@@ -359,7 +359,7 @@ greet("Bob", "Tuesday")
 ## Tuple Return
 ### Feel
 ```
-getGasPrices = (-> a: num, b: num, c: num) {
+getGasPrices = () {
     <- 3.59, 3.69, 3.79
 }
 ```
@@ -394,8 +394,8 @@ def getGasPrices():
 ## Function Type
 ### Feel
 ```
-makeIncrementer = (-> fn: (int->int)) {
-    addOne = (number: int -> number: int) {
+makeIncrementer = () {
+    addOne = (number: int) {
         <- 1 + number
     }
     <- addOne
@@ -466,7 +466,7 @@ increment(7)
 ```
 Shape = $ {
     !numberOfSides = 0
-    simpleDescription = (-> s: str) {
+    simpleDescription = () {
         <- "A shape with ${numberOfSides} sides."
     }
 }
@@ -559,7 +559,7 @@ shapeDescription = shape.simpleDescription()
 NamedShape = $ {
     !name: str
     !numberOfSides = 0
-    simpleDescription = (-> s: str) {
+    simpleDescription = () {
         <- "A shape with ${numberOfSides} sides."
     }
 } 
@@ -568,16 +568,16 @@ Square = $ me {
     . NamedShape
     !sideLength: num
 
-    simpleDescription = (-> s: str) {
+    simpleDescription = () {
         <- "A square with sides of length ${sideLength}."
     }
 
-    area = (-> f: num) {
+    area = () {
         <- sideLength * sideLength
     }
 }
 
-NewSquare = (sideLength: num, name: str->v: Square) {
+NewSquare = (sideLength: num, name: str) {
     <- Square{
         name = name
         sideLength = sideLength
@@ -964,7 +964,7 @@ Nameable = $ {
     name: (-> s: str)
 }
 
-f = (x: Nameable ->) {
+f = (x: Nameable) {
     print("Name is " + x.name())
 }
 ```
@@ -1014,11 +1014,11 @@ func f(x: Nameable) {
 ### Feel
 ```
 Dog = $ {
-    name = (-> n: str) {
+    name = () {
         <- "Dog"
     }
 
-    getWeight = (-> w: int) {
+    getWeight = () {
         <- 30
     }
 }
