@@ -131,7 +131,7 @@ string
 ```
 f = 6.0
 i = 94
-count = i + (f!: int)
+count = i + int(f)
 ```
 ### C#
 ```
@@ -149,7 +149,7 @@ count := i + int(f)
 ```
 val f = 6.0
 val i = 94
-val count:Int = i + f
+val count: Int = i + f
 ```
 ### Swift
 ```
