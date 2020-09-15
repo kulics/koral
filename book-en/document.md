@@ -1241,15 +1241,15 @@ Because the structure type can be converted to an interface type, the original t
 
 But sometimes we need to get the raw type of data to deal with, we can use type judgment to help us accomplish this.
 
-We can use `expression?: type` to determine the type of data, and `expression!: type` to convert the data to our type.
+We can use `expression :: type` to determine the type of data, and `expression !! type` to convert the data to our type.
 
 E.g:
 ```
 Func = (he: Homework) {
     -- Determine if Chinese students
-    he?: ChineseStudent ? {
+    he :: ChineseStudent ? {
         -- Convert to Chinese Student Data
-        Cs = he!: ChineseStudent
+        Cs = he !! ChineseStudent
     }
 }
 ```
