@@ -32,10 +32,8 @@ main = () {
     greetings = get_greetings("Fall in love with programming!")
     greetings @ [index]value {
         index == 0 ? {
-            print(value)
-        } | index == 1 ? {
             print(value + ", 世界!")
-        } | _ {
+        } _ {
             print(value + ", world!")
         }
     }
