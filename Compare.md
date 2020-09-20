@@ -761,7 +761,7 @@ test.simpleDescription()
 !songCount = 0
 
 library @ item {
-    item :: ? {
+    item :: {
         | Movie ? 
             movieCount += 1
         | Song ? 
@@ -840,7 +840,7 @@ for item in library:
 ### Feel
 ```
 nb = 42
-nb ~ ? {
+nb .. {
     | @@ 0..7 | == 8 | == 9 ?
         print("single digit") 
     | == 10 ?
