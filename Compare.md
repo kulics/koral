@@ -761,11 +761,12 @@ test.simpleDescription()
 !songCount = 0
 
 library @ item {
-    item :: {
-        | Movie ? 
-            movieCount += 1
-        | Song ? 
-            songCount += 1
+    item :: 
+    | Movie ? {
+        movieCount += 1
+    }
+    | Song ? {
+        songCount += 1
     } 
 }
 ```
@@ -840,17 +841,21 @@ for item in library:
 ### Feel
 ```
 nb = 42
-nb .. {
-    | @@ 0..7 | == 8 | == 9 ?
-        print("single digit") 
-    | == 10 ?
-        print("double digits") 
-    | @@ 11..99 ?
-        print("double digits") 
-    | @@ 100..999 ?
-        print("triple digits") 
-    | _ ?
-        print("four or more digits") 
+nb
+| @@ 0..7 | == 8 | == 9 ? {
+    print("single digit") 
+}
+| == 10 ? {
+    print("double digits") 
+}
+| @@ 11..99 ? {
+    print("double digits") 
+}
+| @@ 100..999 ? {
+    print("triple digits") 
+}
+| ? {
+    print("four or more digits") 
 }
 ```
 ### C#
