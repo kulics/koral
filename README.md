@@ -33,7 +33,8 @@ main = () {
     greetings @ [index]value {
         index == 0 ? {
             print(value + ", 世界!")
-        } _ ? {
+        }
+        | ? {
             print(value + ", world!")
         }
     }
