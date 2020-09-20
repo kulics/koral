@@ -131,7 +131,7 @@ string
 ```
 f = 6.0
 i = 94
-count = i + (f!: int)
+count = i + int(f)
 ```
 ### C#
 ```
@@ -149,7 +149,7 @@ count := i + int(f)
 ```
 val f = 6.0
 val i = 94
-val count:Int = i + f
+val count: Int = i + f
 ```
 ### Swift
 ```
@@ -761,13 +761,13 @@ test.simpleDescription()
 !songCount = 0
 
 library @ item {
-    item => 
-        | _: Movie ? {
-            movieCount += 1
-        }
-        | _: Song ? {
-            songCount += 1
-        }
+    item :: 
+    | Movie ? {
+        movieCount += 1
+    }
+    | Song ? {
+        songCount += 1
+    } 
 }
 ```
 ### C#
@@ -841,22 +841,22 @@ for item in library:
 ### Feel
 ```
 nb = 42
-nb => 
-    | 0..7 | 8 | 9 ? { 
-        print("single digit") 
-    }
-    | 10 ? { 
-        print("double digits") 
-    }
-    | 11..99 ? { 
-        print("double digits") 
-    }
-    | 100..999 ? { 
-        print("triple digits") 
-    }
-    | _ { 
-        print("four or more digits") 
-    }
+nb
+| @@ 0..7 | == 8 | == 9 ? {
+    print("single digit") 
+}
+| == 10 ? {
+    print("double digits") 
+}
+| @@ 11..99 ? {
+    print("double digits") 
+}
+| @@ 100..999 ? {
+    print("triple digits") 
+}
+| ? {
+    print("four or more digits") 
+}
 ```
 ### C#
 ```
@@ -908,7 +908,7 @@ switch nb {
 ### Feel
 ```
 someObjects @ current {
-    current => | movie: Movie ? {
+    current :: Movie => movie ? {
         print("Movie: '${movie.name}', " +
             "dir. ${movie.director}")
     }
@@ -928,7 +928,7 @@ foreach (var current in someObjects)
 ### Go
 ```
 for _, object := range someObjects {
-    if movie,ok := object.(Movie); ok {
+    if movie, ok := object.(Movie); ok {
         fmt.Printf("Movie: '%s', dir. %s", movie.name, movie.director)
     }
 }

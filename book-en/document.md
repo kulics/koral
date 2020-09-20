@@ -538,111 +538,93 @@ true ? {
     print("true")     -- true
 }
 ```
-## Boolean Judgment
+## Simple Judgment
 When the judgment value is only of the `bool` type, the statement is executed only when it is `true`.
-If we need to deal with other situations at the same time, we can use `| expression ? {}` to continue to declare another processing statement.
-If you only need `false`, use `| _ {}` to declare it.
+
+If you only need `false`, use `| ? {}` to declare it.
 
 E.g:
 ```
 B = false
 B ? {
     ...... -- Because B is false, so never enter this branch
-} | _ {
+}
+| ? {
     ...... -- proccess false
 }
 ```
 
-We can also insert more judgments in the middle, and the language will automatically implement them as continuous processing.
+## Successive Judgment
+If we have a continuous condition to determine, we can insert the continuous syntax `| expression ? {}`.
 
 E.g:
 ```
 I = 3
 I == 0 ? {
-    ......
-} | I == 1 ? {
-    ......
-} | I == 2 ? {
-    ......
+    ......
+}
+| I == 1 ? {
+    ......
+}
+| I == 2 ? {
+    ......
+}
+| ? {
+    ......
 }
 ```
 
-This can be thought of as an `if elseif else` structure relative to other languages.
+## Successive Single-conditional Judgment
+If we need to make multiple consecutive equality decisions on an expression, we can use the `expression == | expression ? {}` statement.
 
-## Condition Judgment
-If we need to judge a flag, we can use the `expression => | expression ? {} | expression ? {}` statement, the statement implements multiple conditional matching, and the matching condition is used to execute the corresponding logic, so that it will only execute the statement with successful matching.
-
-E.g:
-```
-I => 
-    | 1 ? {
-        ......
-    }
-    | 2 ? {
-        ......
-    }
-```
-This conditional judgment is very suitable for multi-conditional judgment of an identifier, and avoids writing too many judgment conditions.
-
-Yes, as with the Boolean judgment above, each condition here will be terminated after it is executed and will not continue to execute downward.
+Yes, just like above, every condition here is ended when it is executed and does not continue downward.
 
 If multiple conditions need to be merged together, you can use `|` to separate them.
 
 E.g:
 ```
-I => 
-    | 1 | 2 | 3 ? {
-        ......
-    }
-    | 4 ? {
-        ......
-    }
+I == 
+| 1 | 2 | 3 ? {
+    ......
+}
+| 4 ? {
+    ......
+}
 ```
 
-### Default Condition
-What if you need a default condition to perform the logic? We can use an anonymous identifier `_` to accomplish this.
-
-E.g:
-```
-I => 
-    | 1 ? {
-        ......
-    }
-    | 2 ? {
-        ......
-    }
-    | _ {
-        ......
-    }
-```
-If this is not possible, it will go to the default processing area to execute.
-
-This can be thought of as a `switch case default` structure relative to other languages.
-
-### Type Matching
-Conditional judgment can do more, for example, we need to judge the type of the identifier,
-You can use the `identifier: type ? {}` syntax to match types, and `identifier` can be discard.
+This syntax can support all comparison operators.
 
 E.g:
 ```
-X => 
-    | _: int ? {            -- is int
-        print("int")
-    }
-    | content: str ? {      -- is str
-        print(content)
-    }
-    | nil ? {               -- is nil
-        print("nil")
-    }
-```
-### Get type
-If we need to explicitly get the type value, we can use the `typeof(type)` function to get it.
+I <= 
+| 0 ? {
+    ......
+}
+| 100 ? {
+    ......
+}
+| 500 ? {
+    ......
+}
+| ? {
+    ......
+}
 
-E.g:
+x :: 
+| int ? {
+    ......
+}
+| str ? {
+    ......
+}
+| num ? {
+    ......
+}
+| ? {
+    ......
+}
 ```
-typeof(int)     -- Get the type value directly by type
-```
+
 # Loop
 Sometimes we may need to execute the same piece of code multiple times.
 
@@ -667,7 +649,6 @@ Arr @ [i]v {
 }
 ```
 
-This can be thought of as a `foreach` structure relative to other languages.
 ## Iterator loop
 Sometimes, we don't necessarily have a collection, but we need to take the number from `0` to `100`. We have an iterator syntax to accomplish such a task.
 
@@ -702,8 +683,6 @@ E.g:
 
 If we need to remove the last digit, we can use `..<` (ascending order) and `..>` (descending order).
 
-This can be thought of as a `for` structure relative to other languages.
-
 ## Conditional loop
 What if we need a loop that only judges a certain condition?
 Add a condition to it.
@@ -715,7 +694,7 @@ I < 6 @ {
     I += 1
 }
 ```
-This can be thought of as a `while` structure relative to other languages.
+
 ## Jump out
 So how do you jump out of the loop? We can use the `~@` statement to jump out.
 
@@ -1027,7 +1006,7 @@ Student = $ me { -- declare me
 }
 ```
 
-The `me` here is used to declare the structure itself, so that you can easily access its own properties. This can be thought of as `this | self` in other languages, it's just a parameter, so you can freely use identifiers other than `me`.
+The `me` here is used to declare the structure itself, so that you can easily access its own properties. It's just a parameter, so you can freely use identifiers other than `me`.
 
 Through the function properties, we can obtain private properties, and can easily handle other data in the structure according to business needs.
 
@@ -1092,8 +1071,6 @@ E.g:
 Chen = ChineseStudent{}
 print( Chen.name )
 ```
-
-This approach is similar to class inheritance in other languages.
 
 # Namespace
 Namespace are designed to provide a way to separate a set of names from other names. A name declared in one namespace does not conflict with a name declared in another namespace.
@@ -1241,15 +1218,15 @@ Because the structure type can be converted to an interface type, the original t
 
 But sometimes we need to get the raw type of data to deal with, we can use type judgment to help us accomplish this.
 
-We can use `expression?: type` to determine the type of data, and `expression!: type` to convert the data to our type.
+We can use `expression :: type` to determine the type of data, and `expression !! type` to convert the data to our type.
 
 E.g:
 ```
 Func = (he: Homework) {
     -- Determine if Chinese students
-    he?: ChineseStudent ? {
+    he :: ChineseStudent ? {
         -- Convert to Chinese Student Data
-        Cs = he!: ChineseStudent
+        Cs = he !! ChineseStudent
     }
 }
 ```
@@ -1274,16 +1251,16 @@ This way we don't need to care about their values when we use them, and we can s
 E.g:
 ```
 C = RandomColor()     -- Get a random color
-C => 
-    | Color.Red ? {
-        ......
-    }
-    | Color.Green ? {
-        ......
-    }
-    | Color.Blue ? {
-        ......
-    }
+C == 
+| Color.Red ? {
+    ......
+}
+| Color.Green ? {
+    ......
+}
+| Color.Blue ? {
+    ......
+}
 ```
 
 It should be noted that enumerations can only be defined under the namespace.
@@ -1323,16 +1300,18 @@ ReadFile = (name: str) {
 ```
 So we declare an exception, the exception description is `something wrong`, once the external caller uses the illegal length of `name`, the function will be forced to abort, report the exception up and hand it to the caller.
 ## Checking exceptions
-We can use the `! {}` statement to check for exceptions and `& identifier: type {}` to handle exceptions.
+We can use the `{}` statement to check for exceptions and `& identifier: type ! {}` to handle exceptions.
 `type` can be omitted, the default is `Exception`.
 
 E.g:
 ```
-! {
+{
     f = ReadFile("temp.txt")
-} & ex: IOException {
+}
+& ex: IOException ! {
     ! <- ex
-} & e {
+}
+& e ! {
     print(e.message)
 }
 ```
@@ -1344,9 +1323,10 @@ In general, we can make early returns or data processing in exception handling. 
 
 E.g:
 ```
-! {
+{
     Func()
-} & ex {
+}
+& ex ! {
     -- Can be manually aborted
     -- <-
     ! <- ex
@@ -1356,15 +1336,16 @@ E.g:
 ## Checking the delay
 If we have a feature that we want to handle regardless of normal or abnormal procedures, such as the release of critical resources, we can use the check latency feature.
 
-Quite simply, using `& _ {}` at the end of the check can declare a statement that checks for delays.
+Quite simply, using `& ! {}` at the end of the check can declare a statement that checks for delays.
 
 E.g:
 ```
 Func = () {
     F: File
-    ! {
+    {
         F = ReadFile("./somecode.file")
-    } & _ {
+    }
+    & ! {
         F >< nil ? {
             F.release()
         }
@@ -1381,7 +1362,7 @@ It should be noted that because the check delay is executed before the function 
 E.g:
 ```
 ......
-& _ {
+& ! {
     F.release()
     <-  -- error, can not use the return statement
 }
@@ -1525,25 +1506,6 @@ Generics support multiple generations, for example: `T H Q`.
 
 After the generics are defined, `T` is treated as a real type in the area of ​​the structure, and then we can use it like various places like `int`.
 
-It's important to note that because generics are typed on the fly, the compiler cannot infer the constructor of the generic. We can only use the default value creation method to construct generic data.
-
-We can use the default value creation method ``empty`type()`` to specify a default value that contains the type.
-
-E.g:
-```
-X = empty`int()
-Y = empty`interface()
-Z = empty`(->)()
-```
-
-This way we can use it in generics.
-
-E.g:
-```
-Package = `T $ {
-    !item = empty`T()    -- Initializes a default value of generic data
-}
-```
 So how do we use generics?
 
 It's very simple, just use it as we declare it, just pass the real type when calling.
