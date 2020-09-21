@@ -662,11 +662,11 @@ E.g:
 ```
 It should be noted that the meaning of `0 .. 100` is read from `0` to `100`, that is, a total of `101` times. The iterator will execute until the last number is executed, rather than ending one at a time.
 
-The iterator defaults to increment `1` every interval. If we need to take every other number, we can add a condition for each step. Just insert `(value)`.
+The iterator defaults to increment `1` every interval. If we need to take every other number, we can add a condition for each step. Just insert `~ value`.
 
 E.g:
 ```
-0 ..(2) 100 @ i {
+0 ~ 2 .. 100 @ i {
     ......
 }
 ```
