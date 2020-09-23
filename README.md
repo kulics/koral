@@ -40,7 +40,7 @@ main = () {
     }
 }
 
-get_greetings = (input: str -> output: list`str) {
+get_greetings = (input : str -> output : list`str) {
     <- input + {"你好"; "Hola"; "Bonjour"
                 "Ciao"; "こんにちは"; "안녕하세요"
                 "Cześć"; "Olá"; "Здравствуйте"
