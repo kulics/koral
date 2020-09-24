@@ -69,42 +69,41 @@ We can use the `<- name` statement to define the namespace of the current file.
 
 E.g:
 ```
-<- Demo
+<- demo
 ```
-The meaning of this statement is to mark the content tag in the current code file as `Demo`, so that the content naming inside is limited to the area, and it is not necessary to consider the naming conflict with the outside of the area.
+The meaning of this statement is to mark the content tag in the current code file as `demo`, so that the content naming inside is limited to the area, and it is not necessary to consider the naming conflict with the outside of the area.
 
-At the same time, the external area can import `Demo` to use the content, we will learn how to import.
+At the same time, the external area can import `demo` to use the content, we will learn how to import.
 
 ## Import Namespaces
 We can use the `name` statement in the import statement `-> {}` to import other namespaces, libraries, and frameworks into a namespace.
 
 E.g:
 ```
-<- Demo
+<- demo
 
 -> {
-    System
+    system
 }
 ```
-This imports the `System` library in the `Demo` namespace and then you can use them in your program.
+This imports the `system` library in the `demo` namespace and then you can use them in your program.
 
 You can write multiple import statements, and their order does not affect the import function.
 
 For more details on namespaces, please see [Namespace](#Namespace)
 
 ## Main Entry
-We need to define a main entry to let the program know where to start. The main entry is declared via a function `Main = () {}`.
-Depending on the target platform, the main entry may be declared differently, and the main function of C# is used by default.
+We need to define a main entry to let the program know where to start. The main entry is declared via a function `main = () {}`.
 
 E.g:
 ```
-<- Demo
+<- demo
 
 -> {
-    System
+    system
 }
 
-Main = () {
+main = () {
 }
 ```
 The main entry function here is a function with no arguments and no return value. It is automatically recognized as the main entry. The main entry function is executed when the program starts, so we only need to write the function in the main entry function.
@@ -138,14 +137,14 @@ E.g:
 ++
 ```
 
-## Constants
+## Invariable
 ### Definition
-Constants in this language refer to data that cannot be changed after initialization. We use `identifier: type` to define constants.
+Invariable in this language refer to data that cannot be changed after initialization. We use `identifier : type` to define invariable.
 
 E.g:
 ```
-A: int
-B: bool
+a : int
+b : bool
 ```
 This creates an identifier for the name on the left and defines it as the type on the right, where the identifier is a null value.
 
@@ -157,64 +156,64 @@ As with regular programming languages, we can use the `identifier = value` state
 
 E.g:
 ```
-A = 1
-B = true
+a = 1
+b = true
 ```
 
 ### Binding
-If we need to define and initialize the constants once, we can use the `identifier: type = value` statement for binding.
+If we need to define and initialize the invariable once, we can use the `identifier : type = value` statement for binding.
 
 E.g:
 ```
-A: int = 1
-B: bool = false
+a : int = 1
+b : bool = false
 ```
 
-Because this language has intelligent automatic derivation, we can usually omit `:type` when the value is clear.
+Because this language has intelligent automatic derivation, we can usually omit `: type` when the value is clear.
 
 E.g:
 ```
-A = 1
-B = false
+a = 1
+b = false
 ```
 
-Since constants cannot be modified once they have been assigned, we can bind a new constant directly with an assignment.
+Since invariable cannot be modified once they have been assigned, we can bind a new constant directly with an assignment.
 
 ## Variable
 ### Definition
-Variables in this language refer to data that can continue to change after initialization. We use `!identifier: type` to define variables.
+Variables in this language refer to data that can continue to change after initialization. We use `!identifier : type` to define variables.
 
 E.g:
 ```
-!A: int
-!B: bool
+!a : int
+!b : bool
 ```
 ### Assignment
-Like constants, variables are assigned by the same assignment statement, except that variables can be assigned multiple times.
+Like invariable, variables are assigned by the same assignment statement, except that variables can be assigned multiple times.
 
 E.g:
 ```
-A = 1
-A = 2
-B = false
-B = true
+a = 1
+a = 2
+b = false
+b = true
 ```
  
 ### Binding
-As with constants, if we need to define and initialize a variable once, we can use the `!identifier: type = value` statement for binding.
+As with invariable, if we need to define and initialize a variable once, we can use the `!identifier : type = value` statement for binding.
 
 E.g:
 ```
-!A: int = 1
-!B: bool = false
+!a : int = 1
+!b : bool = false
 ```
 
 Similarly, we can continue to use automatic derivation.
 
 E.g:
 ```
-!A = 1
-!B = false
+!a = 1
+!b = false
 ```
 
 ## Identifier
@@ -237,7 +236,7 @@ In this language, the default integer is the `int` type, which is a 32-bit signe
 
 E.g:
 ```
-Integer: int = 3987349
+integer: int = 3987349
 ```
 
 If we need integers in other numeric ranges, we can use other types. All supported integer types are listed below.
@@ -258,7 +257,7 @@ We can use the base type conversion to change the number to the type we need, ju
 
 E.g:
 ```
-Integer8 = (16).to_i8()
+integer8 = (16).to_i8()
 ```
 
 ## Float Point Number
@@ -268,8 +267,8 @@ In this language, the default decimal is the `num` type, which is a 64-bit doubl
 
 E.g:
 ```
-Float1: num = 855.544
-Float2: num = 0.3141592653
+float1: num = 855.544
+float2: num = 0.3141592653
 ```
 
 It should be noted that due to the particularity of computer computing floating-point numbers, floating-point operations have certain accuracy problems, so the need for precision-sensitive requirements should consider special handling.
@@ -288,8 +287,8 @@ You only need to wrap a character with `''`, it will be recognized as a characte
 
 E.g:
 ```
-Char: chr = 'x'
-Char2: chr = '8'
+char: chr = 'x'
+char2: chr = '8'
 ```
 ## String
 We are not living in a world where only numbers, so we also need to use text to display the information we need.
@@ -300,7 +299,7 @@ You only need to wrap a piece of text with `""`, which will be recognized as a s
 
 E.g:
 ```
-String: str = "Hello world!"
+string: str = "Hello world!"
 ```
 
 It should be noted that a string is a type consisting of multiple characters, so in fact the string is a fixed-order list, and there is a correspondence between the two. Many times we can process strings as if they were lists.
@@ -309,9 +308,9 @@ Many times we need to insert other content into the string. What do we usually d
 
 E.g:
 ```
-Title   = "Year:"
-Content = 2018
-String  = "Hello world! " + Title + Content.to_str()
+title   = "Year:"
+content = 2018
+string  = "Hello world! " + title + content.to_str()
 -- Hello world! Year:2018
 ```
 
@@ -320,7 +319,7 @@ We can insert expressions directly using `${expression; expression}` syntax.
 
 E.g:
 ```
-String = "Hello world! ${Title; Content}"
+string = "Hello world! ${title; content}"
 -- Hello world! Year:2018
 ```
 
@@ -331,22 +330,22 @@ In this language, the default boolean is the `bool` type, which is a type with o
 
 E.g:
 ```
-Boolean1: bool = true       -- true
-Boolean2: bool = false      -- false
+boolean1: bool = true       -- true
+boolean2: bool = false      -- false
 ```
 ## Any Type
 In particular, sometimes a type that can be any object is needed to assist in the completion of the function, which is `any`.
 
 E.g:
 ```
-A: any = 1   -- any type
+a: any = 1   -- any type
 ```
 ## Nil
 We need a value that can be any type of null value, so it is `nil` .
 
 E.g:
 ```
-A = nil     -- none value
+a = nil     -- none value
 ```
 
 # Operators
@@ -359,22 +358,22 @@ The arithmetic operators are mainly used for data operations of numeric types, a
 
 E.g:
 ```
-A = 4
-B = 2
-print( A + B )    -- + plus
-print( A - B )    -- - minus
-print( A * B )    -- * multiply
-print( A / B )    -- / divide
-print( A % B )    -- % residual, meaning the remainder remaining after the divisibility, the result here is 2
-print( A ^ B )    -- ^ power
+a = 4
+b = 2
+print( a + b )    -- + plus
+print( a - b )    -- - minus
+print( a * b )    -- * multiply
+print( a / b )    -- / divide
+print( a % b )    -- % residual, meaning the remainder remaining after the divisibility, the result here is 2
+print( a ^ b )    -- ^ power
 ```
 In addition to numbers, there are other types that support arithmetic operations. For example, `str` can use an addition operation to combine two paragraphs of text.
 
 E.g:
 ```
-A = "hello"
-B = "world"
-C = A + " " + B     -- C is "hello world"
+a = "hello"
+b = "world"
+c = a + " " + b     -- "hello world"
 ```
 
 ## Judging Operators
@@ -382,25 +381,25 @@ The judgment operator is mainly used in the judgment statement to calculate the 
 
 E.g:
 ```
-A = 4
-B = 2
-print( A == B )   -- == equal to
-print( A >< B )   -- >< not equal to
-print( A > B )    -- > Greater than
-print( A >= B )   -- >= Greater than or equal to
-print( A < B )    -- < less than
-print( A <= B )   -- <= less than or equal to
+a = 4
+b = 2
+print( a == b )   -- == equal to
+print( a >< b )   -- >< not equal to
+print( a > b )    -- > Greater than
+print( a >= b )   -- >= Greater than or equal to
+print( a < b )    -- < less than
+print( a <= b )   -- <= less than or equal to
 ```
 ## Logical Operators
 Logical operators are also used primarily in decision statements to perform logical operations (AND, OR, and NOT).
 
 E.g:
 ```
-A = true
-B = false
-print( A && B )    -- && AND, both are true at the same time
-print( A || B )    -- || OR, one of them is true
-print( ~~A )       -- ~~ NOT, boolean inversion
+a = true
+b = false
+print( a && b )    -- && AND, both are true at the same time
+print( a || b )    -- || OR, one of them is true
+print( ~~a )       -- ~~ NOT, boolean inversion
 ```
 
 ## Assignment Operator
@@ -408,27 +407,27 @@ The assignment operator is mainly used to assign the data on the right to the id
 
 E.g:
 ```
-!A = 0
-A = 1       -- = the simplest assignment
-A += 1      -- += First add and then assign
-A -= 1      -- -= First subtraction and then assign
-A *= 1      -- *= First multiply and then assign
-A /= 1      -- /= First divide and then assign
-A %= 1      -- %= First residual and then assign
-A ^= 1      -- ^= First power and then assign
+!a = 0
+a = 1       -- = the simplest assignment
+a += 1      -- += First add and then assign
+a -= 1      -- -= First subtraction and then assign
+a *= 1      -- *= First multiply and then assign
+a /= 1      -- /= First divide and then assign
+a %= 1      -- %= First residual and then assign
+a ^= 1      -- ^= First power and then assign
 ```
 ## Bit Operation
 Bit operations are the basis for the underlying calculations and are also supported in this language.
 
 E.g:
 ```
-A = 1
-A &&& 1      -- bitwise AND
-A ||| 1      -- bitwise OR
-A ^^^ 1      -- bitwise XOR
-~~~A         -- bitwise inversion
-A <<< 1      -- left shift
-A >>> 1      -- right shift
+a = 1
+a &&& 1      -- bitwise AND
+a ||| 1      -- bitwise OR
+a ^^^ 1      -- bitwise XOR
+~~~a         -- bitwise inversion
+a <<< 1      -- left shift
+a >>> 1      -- right shift
 ```
 
 # Collection Types
@@ -445,7 +444,7 @@ In most cases, data types can be automatically inferred from the language.
 
 E.g:
 ```
-List = { 1;2;3;4;5 }
+list = { 1;2;3;4;5 }
 ```
 This will create a list of `int` types containing `1` to `5`.
 
@@ -455,7 +454,7 @@ The representation of the list type is ``list`element_type``.
 
 For example we need a list of strings:
 ```
-List = list`str{}     -- empty
+list = list`str{}     -- empty
 ```
 
 ### Access
@@ -463,7 +462,7 @@ If we need to access one of the elements in the list, we can access it with `ide
 
 E.g:
 ```
-print( List[1] )
+print( list[1] )
 ```
 It should be noted that in the programming language, most of the list start index starts from `0`, the `identifier[0]` gets the first element, and the next element and so on.
 ### Change Element
@@ -471,15 +470,15 @@ If we need to change one of the elements in the list, we can access the element 
 
 E.g:
 ```
-List[0] = 5
+list[0] = 5
 ```
 It should be noted that we can only access the index of the existing data, if it does not exist, an error will occur.
 ### Common Operations
 ```
-List += 1               -- Add to the end
-List.insert(2, 3)       -- Insert element 3 to index 2
-List -= 1               -- Delete the specified location element
-Length = List.len       -- Length
+list += 1               -- Add to the end
+list.insert(2, 3)       -- Insert element 3 to index 2
+list -= 1               -- Delete the specified location element
+length = list.len()     -- Length
 ```
 
 ## Dictionary
@@ -493,7 +492,7 @@ Similar to the list, the dictionary is also defined using `{}`, except that the 
 
 E.g:
 ```
-Dictionary = {["a"]=1; ["b"]=2; ["c"]=3}
+dictionary = {["a"]=1; ["b"]=2; ["c"]=3}
 ```
 This will create a ``dict`str`int`` type dictionary containing three entries for `a,b,c`.
 
@@ -503,28 +502,28 @@ The representation of the dictionary type is ``dict`key_type`value_type``.
 
 E.g:
 ```
-DictionaryNumNum = dict`int`int{}  -- empty
+dictionary = dict`int`int{}  -- empty
 ```
 ### Access
 Similar to the list, we can also use the index to access the data directly.
 
 E.g:
 ```
-print( Dictionary["a"] )
+print( dictionary["a"] )
 ```
 ### Change Element
 Similar to lists, we can also use assignment statements to change elements.
 
 E.g:
 ```
-Dictionary["b"] = 5
+dictionary["b"] = 5
 ```
 Different from the list, if the index is an index that does not exist, it will not be wrong, and the value will be directly assigned to the new key.
 ### Common operations
 ```
-Dictionary += {["d"]=11}    -- Add Element
-Dictionary -= "c"           -- Delete the specified index element
-Length = Dictionary.len     -- Length
+dictionary += {["d"]=11}    -- Add Element
+dictionary -= "c"           -- Delete the specified index element
+length = dictionary.len()   -- Length
 ```
 
 # Judgment
@@ -545,8 +544,8 @@ If you only need `false`, use `| ? {}` to declare it.
 
 E.g:
 ```
-B = false
-B ? {
+b = false
+b ? {
     ...... -- Because B is false, so never enter this branch
 }
 | ? {
@@ -559,14 +558,14 @@ If we have a continuous condition to determine, we can insert the continuous syn
 
 E.g:
 ```
-I = 3
-I == 0 ? {
+i = 3
+i == 0 ? {
     ......
 }
-| I == 1 ? {
+| i == 1 ? {
     ......
 }
-| I == 2 ? {
+| i == 2 ? {
     ......
 }
 | ? {
@@ -583,7 +582,7 @@ If multiple conditions need to be merged together, you can use `|` to separate t
 
 E.g:
 ```
-I == 
+i == 
 | 1 | 2 | 3 ? {
     ......
 }
@@ -596,7 +595,7 @@ This syntax can support all comparison operators.
 
 E.g:
 ```
-I <= 
+i <= 
 | 0 ? {
     ......
 }
@@ -634,8 +633,8 @@ If we happen to have a collection that can be an array, a dictionary, or a piece
 
 E.g:
 ```
-Arr = {1; 2; 3; 4; 5}
-Arr @ item {
+arr = {1; 2; 3; 4; 5}
+arr @ item {
     print(item)   -- print every number
 }
 ```
@@ -644,7 +643,7 @@ If we need to fetch the index and value at the same time, we can replace `identi
 
 E.g:
 ```
-Arr @ [i]v {
+arr @ [i]v {
     print("${i}:${v}")
 }
 ```
@@ -689,9 +688,9 @@ Add a condition to it.
 
 E.g:
 ```
-!I = 0
-I < 6 @ {
-    I += 1
+!i = 0
+i < 6 @ {
+    i += 1
 }
 ```
 
@@ -716,7 +715,7 @@ Usually we will package a series of task processing that needs to be reused into
 
 In practical engineering practice, given a certain input, the function that must accurately return the determined output is considered a better design. Therefore, it is recommended to maintain the independence of the function as much as possible.
 ## Definition
-We have seen the main entry function before, it is only defined using the fixed statement `Main = () {}`.
+We have seen the main entry function before, it is only defined using the fixed statement `main = () {}`.
 
 We only need to define a function using the `(->) {}` collocation. The parentheses in front are the input parameters, and the parentheses in the back are the parameters.
 
