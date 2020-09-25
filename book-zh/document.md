@@ -68,42 +68,41 @@ Feel 是一个专注于效率的开源编程语言，它可以帮你轻松构建
 
 例如：
 ```
-<- Demo
+<- demo
 ```
-这个语句的意思是将当前代码文件内的内容标记命名空间为 `Demo` ，这样里面的内容命名就被限定在区域内，不必考虑和区域外的命名冲突。  
+这个语句的意思是将当前代码文件内的内容标记命名空间为 `demo` ，这样里面的内容命名就被限定在区域内，不必考虑和区域外的命名冲突。  
 
-同时外部区域可以导入 `Demo` 来使用其中的内容，我们接下来就会了解到如何导入。
+同时外部区域可以导入 `demo` 来使用其中的内容，我们接下来就会了解到如何导入。
 
 ## 导入命名空间
 我们可以在导入语句`-> {}`中，使用 `名称` 语句来导入其它的命名空间、库、框架到某个命名空间中。  
 
 例如：
 ```
-<- Demo
+<- demo
 
 -> {
-    System
+    system
 }
 ```
-这样就在 `Demo` 命名空间中导入了 `System` 库，然后就可以在程序中使用他们。
+这样就在 `demo` 命名空间中导入了 `system` 库，然后就可以在程序中使用他们。
 
 你可以编写多个导入语句，他们的顺序不影响导入功能。
 
 更多关于命名空间的细节请查看[命名空间](#命名空间)
 
 ## 主入口
-我们需要定义一个主入口来让程序知道从哪里启动。主入口通过一个函数 `Main = () {}` 声明。  
-根据目标平台的不同，主入口的声明方式可能不同，这里默认使用 C# 的主函数。
+我们需要定义一个主入口来让程序知道从哪里启动。主入口通过一个函数 `main = () {}` 声明。  
 
 例如：
 ```
-<- Demo
+<- demo
 
 -> {
-    System
+    system
 }
 
-Main = () {
+main = () {
 }
 ```
 这里的 主入口 函数是一个无参数无返回值的函数，它会被自动识别为主入口，程序启动时即会执行 主入口 函数，因此我们只需将功能写在 主入口 函数中即可。
@@ -136,83 +135,83 @@ print("Hello world")    -- 输出 Hello world
 ++
 ```
 
-## 常量
+## 不变量
 ### 定义
-常量在这门语言中指的是在初始化后就不可更改的数据。我们使用 `标识符: 类型` 来定义常量。
+不变量在这门语言中指的是在初始化后就不可更改的数据。我们使用 `标识符 : 类型` 来定义不变量。
 
 例如：
 ```
-A: int
-B: bool
+a : int
+b : bool
 ```
 这会将左边的名称创建一个标识符，并且定义为右边的类型，此时这个标识符是一个空值。
 
 一旦标识符被创建之后，它的数据类型在有效区域内就不会再被改变。
 ### 初始化
-我们定义了常量之后，赋值语句来进行初始化，常量只能赋值一次。
+我们定义了不变量之后，赋值语句来进行初始化，不变量只能赋值一次。
 
 和常规的编程语言一样，我们用 `标识符 = 值` 语句就可以将右边的数据赋值给左边的标识符。
 
 例如：
 ```
-A = 1
-B = true
+a = 1
+b = true
 ```
 
 ### 绑定
-如果我们需要一次性定义并且初始化常量，我们可以使用 `标识符: 类型 = 值` 语句来进行绑定。
+如果我们需要一次性定义并且初始化不变量，我们可以使用 `标识符 : 类型 = 值` 语句来进行绑定。
 
 例如：
 ```
-A: int = 1
-B: bool = false
+a : int = 1
+b : bool = false
 ```
 
-由于这门语言具有智能的自动推导功能，所以在值明确的时候，我们通常可以省略 `:类型`。
+由于这门语言具有智能的自动推导功能，所以在值明确的时候，我们通常可以省略 `: 类型`。
 
 例如：
 ```
-A = 1
-B = false
+a = 1
+b = false
 ```
 
-因为常量一旦赋值后就无法修改，所以我们可以直接用赋值来绑定一个新常量。
+因为不变量一旦赋值后就无法修改，所以我们可以直接用赋值来绑定一个新不变量。
 
 ## 变量
 ### 定义
-变量在这门语言中指的是在初始化后可以继续更改的数据。我们使用 `!标识符: 类型` 来定义变量。
+变量在这门语言中指的是在初始化后可以继续更改的数据。我们使用 `!标识符 : 类型` 来定义变量。
 
 例如：
 ```
-!A: int
-!B: bool
+!a : int
+!b : bool
 ```
 ### 赋值
-与常量一样，变量也通过一样的赋值语句进行赋值，不同的是变量可以赋值多次。
+与不变量一样，变量也通过一样的赋值语句进行赋值，不同的是变量可以赋值多次。
 
 例如:
 ```
-A = 1
-A = 2
-B = false
-B = true
+a = 1
+a = 2
+b = false
+b = true
 ```
  
 ### 绑定
-与常量一样，如果我们需要一次性定义并且初始化变量，我们可以使用 `!标识符: 类型 = 值` 语句来进行绑定。
+与不变量一样，如果我们需要一次性定义并且初始化变量，我们可以使用 `!标识符 : 类型 = 值` 语句来进行绑定。
 
 例如：
 ```
-!A: int = 1
-!B: bool = false
+!a : int = 1
+!b : bool = false
 ```
 
 同样的，我们可以继续使用自动推导。
 
 例如：
 ```
-!A = 1
-!B = false
+!a = 1
+!b = false
 ```
 
 ## 标识符
@@ -235,7 +234,7 @@ B = true
 
 例如：
 ```
-Integer: int = 3987349
+integer: int = 3987349
 ```
 
 如果我们需要其它数值范围的整数，也可以使用其它类型，所有支持的整数类型如下表。
@@ -256,7 +255,7 @@ u64         -- 64位无符号    0 到 18,446,744,073,709,551,615
 
 例如：
 ```
-Integer8 = (16).to_i8()
+integer8 = (16).to_i8()
 ```
 
 ## Float 浮点数
@@ -266,8 +265,8 @@ Integer8 = (16).to_i8()
 
 例如：
 ```
-Float1: num = 855.544
-Float2: num = 0.3141592653
+float1: num = 855.544
+float2: num = 0.3141592653
 ```
 
 需要注意的是，由于计算机计算浮点数的特殊性，浮点数运算存在一定的精度问题，所以对精度敏感的需求应该考虑特殊处理。
@@ -286,8 +285,8 @@ f64, num    -- 64位     ±5.0e−324 到 ±1.7e308
 
 例如：
 ```
-Char: chr = 'x'
-Char2: chr = '8'
+char: chr = 'x'
+char2: chr = '8'
 ```
 ## String 字符串  
 我们在并不是生活在一个只有数字的世界，所以我们也非常需要使用文字来显示我们需要的信息。
@@ -298,7 +297,7 @@ Char2: chr = '8'
 
 例如：
 ```
-String: str = "Hello world!"
+string: str = "Hello world!"
 ```
 
 需要注意的是，字符串是由多个字符组成的类型，所以实际上字符串是一个固定顺序的列表，两者存在对应关系。很多时候我们可以像使用列表那样对字符串进行处理。
@@ -307,9 +306,9 @@ String: str = "Hello world!"
 
 例如：
 ```
-Title   = "Year:"
-Content = 2018
-String  = "Hello world! " + Title + Content.to_str()
+title   = "Year:"
+content = 2018
+string  = "Hello world! " + title + content.to_str()
 -- Hello world! Year:2018
 ```
 
@@ -318,7 +317,7 @@ String  = "Hello world! " + Title + Content.to_str()
 
 例如：
 ```
-String = "Hello world! ${Title; Content}"
+string = "Hello world! ${title; content}"
 -- Hello world! Year:2018
 ```
 ## Boolean 布尔  
@@ -328,22 +327,22 @@ String = "Hello world! ${Title; Content}"
 
 例如：
 ```
-Boolean1: bool = true      -- 真
-Boolean2: bool = false     -- 假
+boolean1: bool = true      -- 真
+boolean2: bool = false     -- 假
 ```
 ## 任意类型  
 特别的，有时候会需要一个可以是 任意对象 的 类型 来辅助完成功能，它就是 `any` 。
 
 例如：
 ```
-A: any = 1   -- 任意类型
+a: any = 1   -- 任意类型
 ```
 ## nil 空 
 我们需要一个可以是 任意类型空值 的 值 ，所以它就是 `nil` 。
 
 例如：
 ```
-A = nil     -- 空值
+a = nil     -- 空值
 ```
 
 # 操作符
@@ -356,74 +355,74 @@ A = nil     -- 空值
 
 例如：
 ```
-A = 4
-B = 2
-print( A + B )    -- + 加
-print( A - B )    -- - 减
-print( A * B )    -- * 乘
-print( A / B )    -- / 除
-print( A % B )    -- % 取余，意思是整除后剩下的余数，这里的结果为 2
-print( A ^ B )    -- ^ 幂
+a = 4
+b = 2
+print( a + b )    -- + 加
+print( a - b )    -- - 减
+print( a * b )    -- * 乘
+print( a / b )    -- / 除
+print( a % b )    -- % 取余，意思是整除后剩下的余数，这里的结果为 2
+print( a ^ b )    -- ^ 幂
 ```
 除了数字之外，也有其它支持算术操作的类型，例如 `str` 可以使用加运算将两段文字合并起来。
 
 例如：
 ```
-A = "hello"
-B = "world"
-C = A + " " + B     -- C 为 "hello world"
+a = "hello"
+b = "world"
+c = a + " " + b     -- "hello world"
 ```
 ## 判断操作符
 判断操作符主要被使用在判断语句中，用来计算两个数据的关系，结果符合预期的为`true`，不符合的为`false`。
 
 例如：
 ```
-A = 4
-B = 2
-print( A == B )     -- == 等于
-print( A >< B )     -- >< 不等于
-print( A > B )      -- > 大于
-print( A >= B )     -- >= 大于或等于
-print( A < B )      -- < 小于
-print( A <= B )     -- <= 小于或等于
+a = 4
+b = 2
+print( a == b )     -- == 等于
+print( a >< b )     -- >< 不等于
+print( a > b )      -- > 大于
+print( a >= b )     -- >= 大于或等于
+print( a < b )      -- < 小于
+print( a <= b )     -- <= 小于或等于
 ```
 ## 逻辑操作符
 逻辑操作符主要也被使用在判断语句中，用来进行逻辑运算（与、或、非）。
 
 例如：
 ```
-A = true
-B = false
-print( A && B )     -- && 与，两者同时为真才为真
-print( A || B )     -- || 或，两者其中一者为真就为真
-print( ~~A )        -- ~~ 非，布尔值取反
+a = true
+b = false
+print( a && b )     -- && 与，两者同时为真才为真
+print( a || b )     -- || 或，两者其中一者为真就为真
+print( ~~a )        -- ~~ 非，布尔值取反
 ```
 ## 赋值操作符
 赋值操作符主要用来将右边的数据赋值给左边的标识符，也可以附带一些快捷操作。
 
 例如：
 ```
-!A = 0
-A = 1       -- = 最简单的赋值
-A += 1      -- += 先相加再赋值
-A -= 1      -- -= 先相减再赋值
-A *= 1      -- *= 先相乘再赋值
-A /= 1      -- /= 先相除再赋值
-A %= 1      -- %= 先取余再赋值
-A ^= 1      -- ^= 先幂运算再赋值
+!a = 0
+a = 1       -- = 最简单的赋值
+a += 1      -- += 先相加再赋值
+a -= 1      -- -= 先相减再赋值
+a *= 1      -- *= 先相乘再赋值
+a /= 1      -- /= 先相除再赋值
+a %= 1      -- %= 先取余再赋值
+a ^= 1      -- ^= 先幂运算再赋值
 ```
 ## 位操作
 位操作作为底层计算的基础，在本语言中也支持。
 
 例如：
 ```
-A = 1
-A &&& 1      -- 按位与
-A ||| 1      -- 按位或
-A ^^^ 1      -- 按位异或
-~~~A         -- 按位取反
-A <<< 1      -- 左移
-A >>> 1      -- 右移
+a = 1
+a &&& 1      -- 按位与
+a ||| 1      -- 按位或
+a ^^^ 1      -- 按位异或
+~~~a         -- 按位取反
+a <<< 1      -- 左移
+a >>> 1      -- 右移
 ```
 
 # 集合类型
@@ -440,7 +439,7 @@ A >>> 1      -- 右移
 
 例如：
 ```
-List = { 1;2;3;4;5 }
+list = { 1;2;3;4;5 }
 ```
 这样便会创建一个包含 `1` 到 `5` 的 `int` 类型列表。
 
@@ -450,14 +449,14 @@ List = { 1;2;3;4;5 }
 
 例如我们需要一个字符串列表：
 ```
-List = list`str{}         -- 空
+list = list`str{}         -- 空
 ```
 ### 访问
 如果我们需要访问列表中的其中一个元素，我们可以用 `标识符[索引]` 来访问。
 
 例如：
 ```
-print( List[1] )
+print( list[1] )
 ```
 需要注意的是，在编程语言里，大多数列表起始索引都是从 `0` 开始的，`标识符[0]` 取得的才是第一个元素，往后的元素以此类推。
 ### 更改元素
@@ -465,15 +464,15 @@ print( List[1] )
 
 例如：
 ```
-List[0] = 5
+list[0] = 5
 ```
 需要注意的是，我们只能访问已经存在数据的索引，如果不存在，则会出现错误。
 ### 常用操作
 ```
-List += 1                   -- 添加到末尾
-List.insert(2, 3)           -- 插入元素 3 到索引 2
-List -= 1                   -- 删除指定位置元素
-Length = List.len           -- 长度
+list += 1                   -- 添加到末尾
+list.insert(2, 3)           -- 插入元素 3 到索引 2
+list -= 1                   -- 删除指定位置元素
+length = list.len()         -- 长度
 ```
 ## 字典
 字典是用来存储无序的相同类型数据的集合，字典每个值（value）都关联唯一的键（key），键作为字典中的这个值数据的标识符。
@@ -486,7 +485,7 @@ Length = List.len           -- 长度
 
 例如：
 ```
-Dictionary = {["a"]=1; ["b"]=2; ["c"]=3}
+dictionary = {["a"]=1; ["b"]=2; ["c"]=3}
 ```
 这样便会创建一个包含 `a,b,c` 三个条目 的 ``dict`str`int`` 类型字典。
 
@@ -496,28 +495,28 @@ Dictionary = {["a"]=1; ["b"]=2; ["c"]=3}
 
 例如：
 ```
-DictionaryNumNum = dict`int`int{}     -- 空
+dictionary = dict`int`int{}     -- 空
 ```
 ### 访问
 和列表类似，我们也可以使用索引直接访问数据。
 
 例如：
 ```
-print( Dictionary["a"] )
+print( dictionary["a"] )
 ```
 ### 更改元素
 和列表类似，我们也可以使用赋值语句来更改元素。
 
 例如：
 ```
-Dictionary["b"] = 5
+dictionary["b"] = 5
 ```
 和列表不同的是，如果赋值的是不存在的索引，也不会错误，会直接将值赋予给新的键。
 ### 常用操作
 ```
-Dictionary += {["d"]=11}        -- 添加元素
-Dictionary -= "c"               -- 删除指定索引元素
-Length = Dictionary.len         -- 长度
+dictionary += {["d"]=11}        -- 添加元素
+dictionary -= "c"               -- 删除指定索引元素
+length = dictionary.len()       -- 长度
 ```
 
 # 判断
@@ -538,8 +537,8 @@ true ? {
 
 例如：
 ```
-B = false
-B ? {
+b = false
+b ? {
     ...... -- 因为 B 为 false，所以永不会进入这个分支
 }
 | ? {
@@ -552,14 +551,14 @@ B ? {
 
 例如：
 ```
-I = 3
-I == 0 ? {
+i = 3
+i == 0 ? {
     ......
 }
-| I == 1 ? {
+| i == 1 ? {
     ......
 }
-| I == 2 ? {
+| i == 2 ? {
     ......
 }
 | ? {
@@ -572,7 +571,7 @@ I == 0 ? {
 
 例如：
 ```
-I == 
+i == 
 | 0 ? {
     ......
 }
@@ -594,7 +593,7 @@ I ==
 
 例如：
 ```
-I == 
+i == 
 | 1 | 2 | 3 ? {
     ......
 }
@@ -607,7 +606,7 @@ I ==
 
 例如：
 ```
-I <= 
+i <= 
 | 0 ? {
     ......
 }
@@ -645,8 +644,8 @@ x ::
 
 例如：
 ```
-Arr = {1; 2; 3; 4; 5}
-Arr @ item {
+arr = {1; 2; 3; 4; 5}
+arr @ item {
     print(item)    -- 打印每一个数字
 }
 ```
@@ -655,7 +654,7 @@ Arr @ item {
 
 例如：
 ```
-Arr @ [i]v {
+arr @ [i]v {
     print("${i}:${v}")
 }
 ```
@@ -700,9 +699,9 @@ Arr @ [i]v {
 
 例如：
 ```
-!I = 0
-I < 6 @ {
-    I += 1
+!i = 0
+i < 6 @ {
+    i += 1
 }
 ```
 
@@ -727,32 +726,32 @@ true @ {
 
 在实际工程实践中，给与确定的输入，必定会准确返回确定输出的函数被视为是较好的设计。所以建议尽可能地保持函数地独立性。
 ## 定义
-之前我们已经见过了主入口函数，它只使用了固定语句 `Main = () {}` 来定义。
+之前我们已经见过了主入口函数，它只使用了固定语句 `main = () {}` 来定义。
 
 我们只需使用 `(->) {}` 搭配来定义一个函数。
 
 例如：
 ```
-Function = (->) {
+function = (->) {
     ......
 }
 ```
-这样便定义了一个标识符为 `Function` 的函数。 
+这样便定义了一个标识符为 `function` 的函数。 
 ## 调用
 不像主入口函数不能被调用，常规函数都可以使用标识符来调用，我们只需要使用 `标识符()` 语句就可以使用封装好的函数。
 
 例如：
 ```
-Function()  -- 调用了 Function
+function()  -- 调用了 function
 ```
 ## 参数
 虽然函数可以没有任何参数只执行特定的功能，但是更多时候我们需要的是可以接收某些输入数据、或是可以返回数据、或者两者都有的功能，而这需要参数出场来帮助我们完成任务。
 
-非常简单的，我们只需要使用 `标识符: 类型` 就可以声明参数。
+非常简单的，我们只需要使用 `标识符 : 类型` 就可以声明参数。
 
 例如：
 ```
-Func = (x: int -> y: int) {
+func = (x : int -> y : int) {
     <- x * 2
 }
 ```
@@ -790,18 +789,18 @@ Func = (x: int -> y: int) {
 例如：
 ```
 -- 定义一个包含两个入参的函数
-Sell = (price: int, name: str ->) {}
+sell = (price : int, name : str ->) {}
 -- 按照定义的要求，填入符合要求的数据
-Sell(1.99, "cola")
+sell(1.99, "cola")
 ```
 ### 出参
 和入参类似，出参也需要在定义时明确带有标识符，这能让调用者更容易获取函数的作用信息。
 
 例如：
 ```
-TopSell = (-> name: str, count: int) {
-    ......
-    <- "cola", 123
+top_sell = (-> name : str, count : int) {
+     ......
+     <- "cola", 123
 }
 ```
 ### 省略出参
@@ -809,7 +808,7 @@ TopSell = (-> name: str, count: int) {
 
 例如：
 ```
-TopSell = () {
+top_sell = () {
     ......
     <- "cola", 123
 }
@@ -822,13 +821,13 @@ TopSell = () {
 
 例如:
 ```
-n, c = TopSell()        -- 将返回的两个值赋值给 n 和 c
+n, c = top_sell()        -- 将返回的两个值赋值给 n 和 c
 ```
 你可以使用定义或赋值语句去获得函数的返回值来使用，也可以将符合要求的函数嵌套到另一个函数里使用。
 
 例如：
 ```
-print( TopSell() )      -- 打印两个数值
+print( top_sell() )      -- 打印两个数值
 ```
 ## 函数入参
 如果我们希望函数的部分细节由外部定义，内部只执行其余的部分逻辑，比如对某个集合遍历处理一些功能，这时我们可以使用函数入参来完成这个目标。
@@ -837,7 +836,7 @@ print( TopSell() )      -- 打印两个数值
 
 例如：
 ```
-Each_1_To_10 = (func: (int->)) {
+each_1_to_10 = (func : (int->)) {
     1 .. 10 @ i {
         func(i)
     }
@@ -849,13 +848,13 @@ Each_1_To_10 = (func: (int->)) {
 
 例如：
 ```
-print = (item: int) {
+print = (item : int) {
     print(item)
 }
 
-Each_1_To_10(print)
+each_1_to_10(print)
 ```
-如此，我们就在 `Each_1_To_10` 内部的循环中执行了 `print`函数。
+如此，我们就在 `each_1_to_10` 内部的循环中执行了 `print`函数。
 
 函数入参只要求函数的参数类型相同，不要求参数的命名相同。
 
@@ -868,12 +867,12 @@ Each_1_To_10(print)
 
 例如：
 ```
-ForEach( (it) { 
+foreach( (it) { 
     print(it)
     print(it * it)
     print(it / 2)
 })
-Take( (a, b) {a + b} )
+take( (a, b) {a + b} )
 ```
 非常简单，和函数类型的表达的差异在于，只需要声明参数标识符和执行逻辑，类型与返回值都不需要声明。
 
@@ -882,7 +881,7 @@ Take( (a, b) {a + b} )
 
 例如：
 ```
-Each_1_To_10( (item: int ->) {
+each_1_to_10( (item : int ->) {
     print(item)
 })
 ```
@@ -898,7 +897,7 @@ Each_1_To_10( (item: int ->) {
 
 例如：
 ```
-Package = $ {
+package = $ {
 }
 ```
 当然，我们更希望的是能包装几个数据，例如一个具有名称、学号、班级、年级属性的学生。
@@ -906,11 +905,11 @@ Package = $ {
 
 例如：
 ```
-Student := $ {
-    !name: str = ""
-    !number: str = ""
-    !class: int = 0
-    !grade: int = 0
+student = $ {
+    !name : str = ""
+    !number : str = ""
+    !class : int = 0
+    !grade : int = 0
 }
 ```
 这样我们就得到了具有这几个数据属性的学生结构体。这个结构体现在就像 `int, str, bool` 一样成为了一个可以使用的类型。
@@ -924,36 +923,36 @@ Student := $ {
 
 例如：
 ```
-Peter = Student{}
+peter = student{}
 ```
-这样便创建了一个 `Peter` 标识符，这个学生的所有属性都根据定义中设置的那样被初始化为 `"", "", 0, 0` 。
+这样便创建了一个 `peter` 标识符，这个学生的所有属性都根据定义中设置的那样被初始化为 `"", "", 0, 0` 。
 
 让我们回顾一下，我们的基础类型、集合类型都可以使用构造方法来创建，实际上它们都是结构体.
 
 ## 使用属性
-现在我们已经有了一个 `Peter` ，我们要怎么使用里面的属性呢？
+现在我们已经有了一个 `peter` ，我们要怎么使用里面的属性呢？
 
 很简单，我们只需要使用 `.` 语法，就能召唤出我们需要的属性。
 
 例如：
 ```
-print( Peter.name )      -- 打印了某个学生的名字
+print( peter.name )      -- 打印了某个学生的名字
 ```
 要更改属性的值也是一样的，它就相当于是个嵌套的标识符。我们可以直接用赋值语句去更改值。
 
 例如：
 ```
-Peter.name      = "peter" 
-Peter.number    = "060233"
-Peter.class     = 2
-Peter.grade     = 6
+peter.name      = "peter" 
+peter.number    = "060233"
+peter.class     = 2
+peter.grade     = 6
 ```
 ## 构建赋值
 像上面那样创建一个新的结构体，再逐个装填数据非常麻烦，我们可以使用简化语法来配置。  
 
 例如：
 ```
-Peter = Student{
+peter = student{
     name    = "peter"
     number  = "060233"
     class   = 2
@@ -965,8 +964,8 @@ Peter = Student{
 
 例如：
 ```
-Array       = list`int{ 1; 2; 3; 4; 5 }
-Dictionary  = dict`str`int{ ["1"]=1; ["2"]=2; ["3"]=3 }
+list        = list`int{ 1; 2; 3; 4; 5 }
+dictionary  = dict`str`int{ ["1"]=1; ["2"]=2; ["3"]=3 }
 ```
 ## 匿名结构体
 如果我们只想直接包裹某些数据使用，而不是先定义结构体再使用，像匿名函数那样可以吗？
@@ -975,7 +974,7 @@ Dictionary  = dict`str`int{ ["1"]=1; ["2"]=2; ["3"]=3 }
 
 例如：
 ```
-Peter = ${
+peter = ${
     name    = "peter"
     number  = "060233"
     class   = 2
@@ -983,32 +982,32 @@ Peter = ${
 }{}
 ```
 
-这样就直接创建了一个 `Peter` 数据，我们可以直接使用这些数据。
+这样就直接创建了一个 `peter` 数据，我们可以直接使用这些数据。
 
 ## 私有属性
-任何人都会有些小秘密，`Peter` 也一样，也许他藏了一个秘密小女友的名字不想让其他人知道。
+任何人都会有些小秘密，`peter` 也一样，也许他藏了一个秘密小女友的名字不想让其他人知道。
 
 我们可以定义私有属性来存储一些不想被外界访问的属性。
 
 例如：
 ```
-Student = $ {
+student = $ {
     ......
-    !_girlFriend: str     -- 第一个字符是 _ 的标识符是私有的
+    !_girl_friend : str     -- 第一个字符是 _ 的标识符是私有的
 }
 ```
 没错，如果你还记得标识符的定义的话，这就是私有标识符的定义方式，私有标识符是不能被外界访问的。
 
-因此我们再定义一个 `Peter` 的话，也不能通过 `Peter._girlFriend` 来获取值或修改值。
+因此我们再定义一个 `peter` 的话，也不能通过 `peter._girl_friend` 来获取值或修改值。
 
 那这种结构体的私有属性又不能访问，又不能修改，有什么用呢？别急，我们可以用函数来操作。
 
 例如：
 ```
-Student = $ me { -- 声明me
+student = $ me { -- 声明me
     ......
-    getGirlFriend = () {
-        <- me._girlFriend
+    get_girl_friend = () {
+        <- me._girl_friend
     }
 }
 ```
@@ -1021,8 +1020,8 @@ Student = $ me { -- 声明me
 
 例如：
 ```
-print( Peter.getGirlFriend() ) 
--- 打印了某个早恋学生的女朋友名字
+print( peter.get_girl_friend() ) 
+-- 打印了某个学生的女朋友名字
 ```
 与数据属性一样，函数也可以是私有标识符，使用私有标识符的函数也意味着只有结构体自己能访问。
 
@@ -1031,12 +1030,12 @@ print( Peter.getGirlFriend() )
 
 例如：
 ```
-ChineseStudent = $ {
-    !name: str      = ""
-    !number: str    = ""
-    !class: int     = 0
-    !grade: int     = 0
-    !kungfu: bool   = false     -- 不会功夫的学生
+chinese_student = $ {
+    !name      = ""
+    !number    = ""
+    !class     = 0
+    !grade     = 0
+    !kungfu    = false     -- 不会功夫的学生
 }
 ```
 不不不，这样重复定义数据就很不优雅了，我们可以将学生属性复用，加上一个额外的功夫属性就可以了。
@@ -1045,8 +1044,8 @@ ChineseStudent = $ {
 
 例如：
 ```
-ChineseStudent = $ {
-    !student    = Student{}     -- 将学生属性包含其中
+chinese_student = $ {
+    !student    = student{}     -- 将学生属性包含其中
     !kungfu     = false         -- 不会功夫
 }
 ```
@@ -1054,8 +1053,8 @@ ChineseStudent = $ {
 
 例如：
 ```
-Chen = ChineseStudent{}
-print( Chen.student.name )
+chen = chinese_student{}
+print( chen.student.name )
 ```
 通过组合一层又一层的结构体，你可以自由拼装出任何一个你想要描述的事物。
 
@@ -1065,8 +1064,8 @@ print( Chen.student.name )
 
 例如：
 ```
-ChineseStudent = $ { 
-    . Student   -- 顶层组合
+chinese_student = $ { 
+    . student   -- 顶层组合
     !kungfu = false
 }
 ```
@@ -1075,8 +1074,8 @@ ChineseStudent = $ {
 
 例如：
 ```
-Chen = ChineseStudent{}
-print( Chen.name )
+chen = chinese_student{}
+print( chen.name )
 ```
 
 # 命名空间
@@ -1089,7 +1088,7 @@ print( Chen.name )
 ```
 <- Name.Space
 
-GetSomething = () {
+get_something = () {
     <- "something"
 }
 ```
@@ -1104,9 +1103,9 @@ GetSomething = () {
     Name.Space 
 }
 
-Main = () {
+main = () {
     -- 打印 something
-    print( GetSomething() )
+    print( get_something() )
 }
 ```
 
@@ -1121,7 +1120,7 @@ Main = () {
 
 例如：
 ```
-Protocol = $ {
+protocol = $ {
 }
 ```
 
@@ -1129,9 +1128,9 @@ Protocol = $ {
 
 例如：
 ```
-Homework = $ {
-    getCount: (->v int)
-    doHomework: (->)
+homework = $ {
+    get_count : (->v : int)
+    do_homework : (->)
 }
 ```
 这是一个作业接口，它有两个函数，一个获取作业的数量，一个完成作业。
@@ -1142,13 +1141,13 @@ Homework = $ {
 
 例如：
 ```
-Student = $ {
+student = $ {
     !count = 999999
-    getCount = () {
+    get_count = () {
         <- count
     }
-    doHomework = () {
-        SpendTime(1)        -- 花费了一个小时
+    do_homework = () {
+        spend_time(1)        -- 花费了一个小时
         count -= 1          -- 完成了一个
     }
 }
@@ -1156,22 +1155,22 @@ Student = $ {
 我们的学生写作业真是非常艰苦的……
 
 让我们来解释一下这段代码发生了什么：
-1. 我们实现了一个接口，现在 `Student` 也被认为是 `Homework` 类型了，我们可以将一个 `Student` 当作 `Homework` 一样去使用。
-1. 在接口内我们包含了接口规定的两个属性 `getCount, doHomework` ，根据规定，一个也不能少。
-1. 我们给接口的两个属性都分别编写了真实的值和函数，这样这两个属性就成为了 `Student` 的有效子属性之一。
-1. 我们在 `doHomework` 里面做了一些事情，减少了作业的总量。
+1. 我们实现了一个接口，现在 `student` 也被认为是 `homework` 类型了，我们可以将一个 `student` 当作 `homework` 一样去使用。
+1. 在接口内我们包含了接口规定的两个属性 `get_count, do_homework` ，根据规定，一个也不能少。
+1. 我们给接口的两个属性都分别编写了真实的值和函数，这样这两个属性就成为了 `student` 的有效子属性之一。
+1. 我们在 `do_homework` 里面做了一些事情，减少了作业的总量。
 
 ## 使用接口
 包含了接口之后，我们就能使用拥有接口的学生了。
 
 例如：
 ```
-Peter = Student{ count=999999 }
-print( Peter.getCount() )
+peter = student{ count=999999 }
+print( peter.get_count() )
 -- 打印 999999，好多呀
-Peter.doHomework()
+peter.do_homework()
 -- 做了一次作业
-print( Peter.getCount() )
+print( peter.get_count() )
 -- 打印 999998，还是好多呀
 ```
 如果只是这样使用，那和在结构体里直接定义这两个属性比就没什么优势了。
@@ -1185,35 +1184,35 @@ print( Peter.getCount() )
 例如:
 ```
 -- 创建了三个不同类型的学生结构体
-StudentA = ChineseStudent{}
-StudentB = AmericanStudent{}
-StudentC = JapaneseStudent{}
+student_a = chinese_student{}
+student_b = american_student{}
+student_c = japanese_student{}
 -- 让他们分别做作业
-StudentA.doHomework()
-StudentB.doHomework()
-StudentC.doHomework()
+student_a.do_homework()
+student_b.do_homework()
+student_c.do_homework()
 ```
 更有效率的做法是把这个功能写进函数，让函数来帮我们重复调用接口的功能。
 
 例如：
 ```
-DoHomework = (Student: Homework) {
-    student.doHomework()
+do_homework = (student : homework) {
+    student.do_homework()
 }
 -- 现在我们就可以更简单地让每个学生做作业了
-DoHomework(StudentA)
-DoHomework(StudentB)
-DoHomework(StudentC)
+do_homework(student_a)
+do_homework(student_b)
+do_homework(student_c)
 ```
 当然，更好的做法是把这些学生都放进数组，这样我们就可以使用循环来处理这些重复的工作了。
 
 例如：
 ```
-Arr = list`Homework{}
-Arr.add( StudentA )
+arr = list`homework{}
+arr.add( student_a )
 ...... -- 塞进很多很多学生
-Arr @ i {
-    DoHomework(i)
+arr @ i {
+    do_homework(i)
 }
 ```
 ╮（￣▽￣）╭  
@@ -1228,11 +1227,11 @@ Arr @ i {
 
 例如：
 ```
-Func = (he: Homework) {
+func = (he : homework) {
     -- 判断是否中国学生
-    he :: ChineseStudent ? {
+    he :: chinese_student ? {
         -- 转换为中国学生数据
-        Cs = he !! ChineseStudent
+        cs = he !! chinese_student
     }
 }
 ```
@@ -1244,27 +1243,27 @@ Func = (he: Homework) {
 
 例如：
 ```
-Color = $ {
-    | Red
-    | Green
-    | Blue
+color = $ {
+    | red
+    | green
+    | blue
 }
 ```
-枚举会按照顺序给标识符赋值，最终得到 `Red = 0; Green = 1; Blue = 2` 这样的集合。
+枚举会按照顺序给标识符赋值，最终得到 `red = 0; green = 1; blue = 2` 这样的集合。
 
 这样我们在使用时就无需关心它们的数值，放心标记我们需要处理的业务。
 
 例如：
 ```
-C = RandomColor()     -- 获取一个随机颜色
-C == 
-| Color.Red ? {
+c = random_color()     -- 获取一个随机颜色
+c == 
+| color.red ? {
     ......
 }
-| Color.Green ? {
+| color.green ? {
     ......
 }
-| Color.Blue ? {
+| color.blue ? {
     ......
 }
 ```
@@ -1275,11 +1274,11 @@ C ==
 
 例如:
 ```
-Number = $ {
-    | A = 1   -- 1
-    | B       -- 2
-    | C = 1   -- 1
-    | D       -- 2
+number = $ {
+    | a = 1   -- 1
+    | b       -- 2
+    | c = 1   -- 1
+    | d       -- 2
 }
 ```
 
@@ -1297,9 +1296,9 @@ Number = $ {
 
 例如：
 ```
-ReadFile = (name: str) {
-    name.len == 0 ? {
-        ! <- Exception("something wrong")
+read_file = (name : str) {
+    name.len == 0 ? {
+        ! <- exception("something wrong")
     }
     ......
 }
@@ -1307,15 +1306,15 @@ ReadFile = (name: str) {
 这样我们就声明了一个异常，异常说明是 `something wrong`，一旦外部调用者使用了不合法长度的 `name`，这个函数就会被强制中止，将这个异常向上报告，交给调用者处理。
 ## 检查异常
 我们可以使用 `{}` 语句来检查异常，使用 `& 标识符: 类型 ! {}` 来处理异常。
-`类型`可以省略，默认为`Exception`。   
+`类型`可以省略，默认为`exception`。   
 
 例如：
 ```
 {
-    f = ReadFile("temp.txt")
+    f = read_file("temp.txt")
 }
-& ex: IOException ! {
-    ! <- ex
+& ex: io_exception ! {
+    ! <- ex
 }
 & e ! {
     print(e.message)
@@ -1330,7 +1329,7 @@ ReadFile = (name: str) {
 例如：
 ```
 {
-    Func()
+    func()
 }
 & ex ! {
     -- 可以手动中止
@@ -1347,13 +1346,13 @@ ReadFile = (name: str) {
 例如：
 ```
 func = () {
-    F: File
-    {
-        F = ReadFile("./somecode.file")
-    }
+    f : file
+    {
+        f = read_file("./somecode.file")
+    }
     & ! {
-        F >< nil ? {
-            F.release()
+        f >< nil ? {
+            f.release()
         }
     }
     ......
@@ -1369,7 +1368,7 @@ func = () {
 ```
 ......
 & ! {
-    F.release()
+    f.release()
     <-  -- 错误，不能使用返回语句
 }
 ```
@@ -1388,12 +1387,12 @@ func = () {
 
 例如：
 ```
-SayHello = () { 
+say_hello = () { 
     print("hello")
     <- 2020
 }
 
-~> SayHello()
+~> say_hello()
 ```
 
 将一个同步函数转化为异步函数后，它就会被转移到一个新的线程中执行。这使得我们的逻辑可以并行处理，但同时也使得我们无法直接获得这个函数的返回值，因为函数执行结束的时间变得不再受我们控制，当前逻辑不会等待异步函数，而是会继续执行。
@@ -1402,7 +1401,7 @@ SayHello = () {
 
 例如：
 ```
-Result = ~> SayHello()
+result = ~> say_hello()
 #： 错误，当前逻辑会继续执行，无法直接获得返回值
 ```
 
@@ -1415,7 +1414,7 @@ Result = ~> SayHello()
 
 例如：
 ```
-Result = SayHello~>()
+result = say_hello~>()
 -- 正确，当前逻辑会等待异步结果，然后再继续执行
 ......
 ```
@@ -1427,13 +1426,13 @@ Result = SayHello~>()
 
 例如：
 ```
-Channel = chan`int{}
+channel = chan`int{}
 
 -- 当前逻辑会等待数据传递完成后再继续执行
-Channel <~ 666
+channel <~ 666
 
 -- 同样的道理，获取数据也会暂停当前逻辑
-print(<~ Channel)
+print(<~ channel)
 ......
 ```
 
@@ -1486,9 +1485,9 @@ ch @ data {
 
 例如：
 ```
-List = `T $ {
+List`T = $ {
     -- 创建存储
-    !items  = Storage`T{}    
+    !items  = storage`T{}    
     !length = 0
 
     -- 获取某个泛型数据
@@ -1515,11 +1514,11 @@ List = `T $ {
 
 例如：
 ```
-ListNumber = List`int{}      -- 传入 int 类型
+list_number = List`int{}      -- 传入 int 类型
 ```
 这样我们便拥有了一个整数类型的列表，是不是很像这个：
 ```
-ListNumber = list`int{}
+list_number = list`int{}
 ```
 没错，其实我们的列表和字典语法都是泛型。
 ## 支持的类型
@@ -1527,20 +1526,20 @@ ListNumber = list`int{}
 
 例如：
 ```
-Func = `T (data: T -> data: T) {
+func`t = (data : t -> data : t) {
     <- data
 }
 
-Interface = `T $ {
-    test: `R (in: R -> out: T)
+interface`t = $ {
+    test`r : (in : r -> out : t)
 }
 ```
 ## 泛型约束
-如果我们需要对泛型的类型进行约束，只需要使用`T:约束`语法即可。
+如果我们需要对泛型的类型进行约束，只需要使用` (t:约束) `语法即可。
 
 例如：
 ```
-Package = `T:Student $ {
+package`(t:student) = $ {
 }
 ```
 
@@ -1558,14 +1557,14 @@ Package = `T:Student $ {
 
 例如：
 ```
-[Table("test")]
-Annotation = $ {
-    [Key, Column("id")]
-    !id: str
-    [Column("name")]
-    !name: str
-    [Column("data")]
-    !data: str
+[table("test")]
+annotation = $ {
+    [key, column("id")]
+    !id : str
+    [column("name")]
+    !name : str
+    [column("data")]
+    !data : str
 }
 ```
 我们声明了一个 `annotation` 的结构体，它使用注解标记了表名 `test`、主键 `id`、字段 `name` 和字段 `data`。
@@ -1581,8 +1580,8 @@ Annotation = $ {
 
 例如：
 ```
-A: int
-B = A       -- 错误，并未给 A 赋值
+a : int
+b = a       -- 错误，并未给 a 赋值
 ```
 
 ## 声明与使用
@@ -1592,16 +1591,16 @@ B = A       -- 错误，并未给 A 赋值
 
 例如：
 ```
-A: int?
-B = A       -- B 赋值为空的I32
+a : int?
+b = a       -- b 赋值为空的 i32
 ```
 
 一旦出现了可选类型，我们就需要严格处理空值，避免程序错误。
 
 例如：
 ```
-A >< nil ? {
-    A.to_str()
+a >< nil ? {
+    a.to_str()
 }
 ```
 
@@ -1610,7 +1609,7 @@ A >< nil ? {
 
 例如：
 ```
-Arr?.to_str()
+arr?.to_str()
 ```
 
 ## 合并操作
@@ -1618,7 +1617,7 @@ Arr?.to_str()
 
 例如：
 ```
-B = A ?? 128
+b = a ?? 128
 ```
 
 ## [完整示例](../example.feel)
