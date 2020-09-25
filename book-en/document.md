@@ -721,27 +721,27 @@ We only need to define a function using the `(->) {}` collocation. The parenthes
 
 E.g:
 ```
-Function = (->) {
+function = (->) {
     ......
 }
 ```
-This defines a function with the identifier `Function`.
+This defines a function with the identifier `function`.
 ## Call
 Unlike the main entry function, which cannot be called, regular functions can be called with an identifier. We only need to use the `identifier()` statement to use the wrapped function.
 
 E.g:
 ```
-Function()  -- Call Function
+function()  -- Call function
 ```
 
 ## Parameters
 Although functions can perform specific functions without any parameters, more often we need to be able to receive some input data, or can return data, or both, and this requires parameters to help us complete task.
 
-Very simple, we only need to declare the parameters using `identifier: type`.
+Very simple, we only need to declare the parameters using `identifier : type`.
 
 E.g:
 ```
-Func = (x: int -> y: int) {
+func = (x : int -> y : int) {
     <- x * 2
 }
 ```
@@ -780,16 +780,16 @@ When we call a function, we need to fill the data in parentheses in the order de
 E.g:
 ```
 -- Define a function that contains two input parameters
-Sell = (price: int, name: str ->) {}
+sell = (price : int, name : str ->) {}
 -- Fill in the required data according to the defined requirements
-Sell(1.99, "cola")
+sell(1.99, "cola")
 ```
 ### Output Parameters
 Similar to the input parameters, the output parameter needs to be explicitly defined with an identifier, which makes it easier for the caller to get the function information of the function.
 
 E.g:
 ```
-TopSell = (-> name: str, count: int) {
+top_sell = (-> name : str, count : int) {
      ......
      <- "cola", 123
 }
@@ -799,7 +799,7 @@ When the language can infer the return value type, we can omit the Output Parame
 
 E.g:
 ```
-TopSell = () {
+top_sell = () {
     ......
     <- "cola", 123
 }
@@ -812,13 +812,13 @@ It's very simple, just like we do add, subtract, multiply and divide, just use t
 
 E.g:
 ```
-n, c = TopSell()        -- Assign the returned two values ​​to n and c
+n, c = top_sell()        -- Assign the returned two values ​​to n and c
 ```
 You can use a definition or assignment statement to get the return value of the function to use, or you can nest a function that meets the requirements into another function.
 
 E.g:
 ```
-print( TopSell() )      -- print two values ​
+print( top_sell() )      -- print two values ​
 ```
 
 ## Function Input Parameter
@@ -828,7 +828,7 @@ There is no special way to define function arguments, just replace the argument 
 
 E.g:
 ```
-Each_1_To_10 = (func: (int->)) {
+each_1_to_10 = (func : (int->)) {
      1 .. 10 @ i {
          func(i)
      }
@@ -840,13 +840,13 @@ This way we can pass the details of the processing to the external incoming `fun
 
 E.g:
 ```
-print = (item: int) {
+print = (item : int) {
      print(item)
 }
 
-Each_1_To_10(print)
+each_1_to_10(print)
 ```
-Thus, we executed the `print` function in the loop inside `Each_1_To_10`.
+Thus, we executed the `print` function in the loop inside `each_1_to_10`.
 
 The function input parameter only requires the same parameter type of the function, and does not require the same name of the parameter.
 
@@ -859,12 +859,12 @@ Since the function argument is already determined at the time of declaration, we
 
 E.g:
 ```
-ForEach( (it) { 
+foreach( (it) { 
     print(it)
     print(it * it)
     print(it / 2)
 })
-Take( (a, b) {a + b} )
+take( (a, b) {a + b} )
 ```
 Very simple, the difference from the expression of a function type is that you only need to declare the parameter identifier and execution logic, and neither the type nor the return value need to be declared.
 
@@ -873,7 +873,7 @@ Unlike the simplified notation above, we can also write a complete function dire
 
 E.g:
 ```
-Each_1_To_10( (item: int ->) {
+each_1_to_10( (item : int ->) {
     print(item)
 })
 ```
@@ -885,11 +885,11 @@ So we need a feature that wraps data from different attributes to better describ
 
 Obviously, the function responsible for packaging data is the structure.
 ## Definition
-We can use the `identifier := $ {}` statement to define a structure that has nothing.
+We can use the `identifier = $ {}` statement to define a structure that has nothing.
 
 E.g:
 ```
-Package = $ {
+package = $ {
 }
 ```
 Of course, we prefer to pack a few data, such as a student with a name, student number, class, and grade attribute.
@@ -897,11 +897,11 @@ We can define this data in the structure of the body just like we would define a
 
 E.g:
 ```
-Student = $ {
-    !name: str = ""
-    !number: str = ""
-    !class: int = 0
-    !grade: int = 0
+student = $ {
+    !name : str = ""
+    !number : str = ""
+    !class : int = 0
+    !grade : int = 0
 }
 ```
 This way we get the student structure with these data attributes. This structure is like a type that can be used like `int, str, bool`.
@@ -915,29 +915,29 @@ So how do we build a new structure? As a whole, all of our types can be build us
 
 E.g:
 ```
-Peter = Student{}
+peter = student{}
 ```
-This build a `Peter` identifier, and all of the student's properties are initialized to `"", "", 0, 0` as set in the definition.
+This build a `peter` identifier, and all of the student's properties are initialized to `"", "", 0, 0` as set in the definition.
 
 Let's review that our base types and collection types can be created using method, in fact they are all structures.
 
 ## Using Properties
-Now that we have a `Peter`, how do we use the properties inside?
+Now that we have a `peter`, how do we use the properties inside?
 
 Quite simply, we only need to use the `.` syntax to summon the properties we need.
 
 E.g:
 ```
-print( Peter.name )   -- Printed the name of a student
+print( peter.name )   -- Printed the name of a student
 ```
 The same is true for changing the value of an attribute, which is equivalent to a nested identifier. We can use the assignment statement to change the value directly.
 
 E.g:
 ```
-Peter.name      = "peter"
-Peter.number    = "060233"
-Peter.class     = 2
-Peter.grade     = 6
+peter.name      = "peter"
+peter.number    = "060233"
+peter.class     = 2
+peter.grade     = 6
 ```
 
 ## Building Assignments
@@ -945,7 +945,7 @@ Building a new structure like above and loading the data one by one is very cumb
 
 E.g:
 ```
-Peter = Student{
+peter = student{
     name    = "peter"
     number  = "060233"
     class   = 2
@@ -957,8 +957,8 @@ Similarly, the way a collection is build is actually a build syntax, so we can a
 
 E.g:
 ```
-Array       = list`int{ 1; 2; 3; 4; 5 }
-Dictionary  = dict`str`int{ ["1"]=1; ["2"]=2; ["3"]=3 }
+list        = list`int{ 1; 2; 3; 4; 5 }
+dictionary  = dict`str`int{ ["1"]=1; ["2"]=2; ["3"]=3 }
 ```
 ## Anonymous Structure
 If we only want to wrap some data directly, instead of defining the structure and then using it, can it be like an anonymous function?
@@ -967,7 +967,7 @@ Of course.
 
 E.g:
 ```
-Peter = ${
+peter = $ {
     name    = "peter"
     number  = "060233"
     class   = 2
@@ -975,32 +975,32 @@ Peter = ${
 }{}
 ```
 
-This creates a `Peter` data directly, which we can use directly.
+This creates a `peter` data directly, which we can use directly.
 
 ## Private Property
-Anyone will have some little secrets, and `Peter` is the same. Maybe he hides the name of a secret little girlfriend and doesn't want others to know.
+Anyone will have some little secrets, and `peter` is the same. Maybe he hides the name of a secret little girlfriend and doesn't want others to know.
 
 We can define private properties to store properties that we don't want to be accessed by the outside world.
 
 E.g:
 ```
-Student = $ {
+student = $ {
     ......
-    !_girlFriend: str    -- The first character is the identifier of _ is private
+    !_girl_friend : str    -- The first character is the identifier of _ is private
 }
 ```
 That's right, if you remember the definition of the identifier, this is how the private identifier is defined. The private identifier is not accessible to the outside world.
 
-So if we define a `Peter`, we can't get the value or modify the value through `Peter._girlFriend`.
+So if we define a `peter`, we can't get the value or modify the value through `peter._girl_friend`.
 
 The private property of this structure can not be accessed, and can not be modified. What is the use? Don't worry, we can use the functions.
 
 E.g:
 ```
-Student = $ me { -- declare me
+student = $ me { -- declare me
     ......
-    getGirlFriend = () {
-        <- me._girlFriend
+    get_girl_friend = () {
+        <- me._girl_friend
     }
 }
 ```
@@ -1013,8 +1013,8 @@ With this function, we can get the private property by calling the function.
 
 E.g:
 ```
-print( Peter.getGirlFriend() )
--- Printed the name of a girlfriend of a young love student
+print( peter.get_girl_friend() )
+-- Printed the name of a girlfriend of a student
 ```
 Like data attributes, functions can also be private identifiers. Functions that use private identifiers also mean that only structures can access them.
 
@@ -1023,12 +1023,12 @@ Now let us use our imagination. How do we define a structure that is specificall
 
 E.g:
 ```
-ChineseStudent = $ {
-    !name: str      = ""
-    !number: str    = ""
-    !class: int     = 0
-    !grade: int     = 0
-    !kungfu: bool   = false    -- not learn kungfu
+chinese_student = $ {
+    !name      = ""
+    !number    = ""
+    !class     = 0
+    !grade     = 0
+    !kungfu    = false    -- not learn kungfu
 }
 ```
 No, no, it's not very elegant to repeat the definition of data. We can reuse the student attributes and add an extra kung fu attribute.
@@ -1037,8 +1037,8 @@ We need to combine this feature, but it's not that complicated, just create a st
 
 E.g:
 ```
-ChineseStudent = $ {
-    !student    = Student{}     -- include the student attribute in it
+chinese_student = $ {
+    !student    = student{}     -- include the student attribute in it
     !kungfu     = false         -- not learn kungfu
 }
 ```
@@ -1046,8 +1046,8 @@ This way you can use common attributes through the student attributes in Chinese
 
 E.g:
 ```
-Chen = ChineseStudent{}
-print( Chen.student.name )
+chen = chinese_student{}
+print( chen.student.name )
 ```
 By combining layers of structure, you can freely assemble anything you want to describe.
 
@@ -1057,8 +1057,8 @@ Top-level combinations extract attributes from the structure to the exterior, ju
 
 E.g:
 ```
-ChineseStudent = $ { 
-    . Student   -- top-level combination
+chinese_student = $ { 
+    . student   -- top-level combination
     !kungfu = false
 }
 ```
@@ -1067,8 +1067,8 @@ In this way, we can call student attributes directly.
 
 E.g:
 ```
-Chen = ChineseStudent{}
-print( Chen.name )
+chen = chinese_student{}
+print( chen.name )
 ```
 
 # Namespace
@@ -1081,7 +1081,7 @@ E.g:
 ```
 <- Name.Space
 
-GetSomething = () {
+get_something = () {
     <- "something"
 }
 ```
@@ -1096,9 +1096,9 @@ E.g:
     Name.Space 
 }
 
-Main = () {
+main = () {
     -- print something
-    print( GetSomething() )
+    print( get_something() )
 }
 ```
 
@@ -1113,7 +1113,7 @@ The only difference between an interface and a structure is that there can only 
 
 E.g:
 ```
-Protocol = $ {
+protocol = $ {
 }
 ```
 
@@ -1121,9 +1121,9 @@ Next, let's design a difficult task that students need to accomplish... homework
 
 E.g:
 ```
-Homework = $ {
-    getCount: (->v int)
-    doHomework: (->)
+homework = $ {
+    get_count : (->v : int)
+    do_homework : (->)
 }
 ```
 This is a homework interface that has two functions, one to get the number of homeworks and one to complete them.
@@ -1135,13 +1135,13 @@ We add functions directly to the structure to implement this interface.
 
 E.g:
 ```
-Student = $ {
+student = $ {
     !count = 999999
-    getCount = () {
+    get_count = () {
         <- count
     }
-    doHomework = () {
-        SpendTime(1)        -- took an hour
+    do_homework = () {
+        spend_time(1)        -- took an hour
         count -= 1          -- completed one
     }
 }
@@ -1149,22 +1149,22 @@ Student = $ {
 It is very difficult for our students to write homework...
 
 Let us explain what happened to this code:
-1. We implemented an interface, now `Student` is also considered to be the `Homework` type, we can use a `Student` as `Homework`.
-1. Within the interface we include two properties defined by the interface `getCount, doHomework`, according to the regulations, one can not be less.
-1. We have written the actual values and functions for each of the two properties of the interface, so that these two properties become one of the valid sub-properties of `Student`.
-1. We did something in `doHomework`, which reduced the total amount of work.
+1. We implemented an interface, now `student` is also considered to be the `homework` type, we can use a `student` as `homework`.
+1. Within the interface we include two properties defined by the interface `get_count, do_homework`, according to the regulations, one can not be less.
+1. We have written the actual values and functions for each of the two properties of the interface, so that these two properties become one of the valid sub-properties of `student`.
+1. We did something in `do_homework`, which reduced the total amount of work.
 
 ## Using the interface
 After the interface is included, we can use the student who owns the interface.
 
 E.g:
 ```
-Peter = Student{ count=999999 }
-print( Peter.getCount() )
+peter = student{ count=999999 }
+print( peter.get_count() )
 -- print 999999, so much
-Peter.doHomework()
+peter.do_homework()
 -- Do somework
-print( Peter.getCount() )
+print( peter.get_count() )
 -- print 999998, still so much
 ```
 If you just use it, there is no advantage to defining these two properties directly in the structure.
@@ -1178,35 +1178,35 @@ Now we can create a variety of students, they all follow the same interface, we 
 E.g:
 ```
 -- Created three different types of student structures
-StudentA = ChineseStudent{}
-StudentB = AmericanStudent{}
-StudentC = JapaneseStudent{}
+student_a = chinese_student{}
+student_b = american_student{}
+student_c = japanese_student{}
 -- Let them do their homework separately
-StudentA.doHomework()
-StudentB.doHomework()
-StudentC.doHomework()
+student_a.do_homework()
+student_b.do_homework()
+student_c.do_homework()
 ```
 A more efficient way is to write this function into the function, let the function help us repeat the function of the interface.
 
 E.g:
 ```
-DoHomework = (Student: Homework) {
-    Student.doHomework()
+do_homework = (student : homework) {
+    student.do_homework()
 }
 -- Now we can make each student do their homework more easily
-DoHomework(StudentA)
-DoHomework(StudentB)
-DoHomework(StudentC)
+do_homework(student_a)
+do_homework(student_b)
+do_homework(student_c)
 ```
 Of course, it's better to put these students in an array so that we can use loops to handle these repetitive tasks.
 
 E.g:
 ```
-Arr = list`Homework{}
-Arr.add( StudentA )
+arr = list`homework{}
+arr.add( student_a )
 ......  -- Insert many many students
-Arr @ i {
-    DoHomework(i)
+arr @ i {
+    do_homework(i)
 }
 ```
 ╮( ̄▽ ̄)╭
@@ -1221,11 +1221,11 @@ We can use `expression :: type` to determine the type of data, and `expression !
 
 E.g:
 ```
-Func = (he: Homework) {
+func = (he : homework) {
     -- Determine if Chinese students
-    he :: ChineseStudent ? {
+    he :: chinese_student ? {
         -- Convert to Chinese Student Data
-        Cs = he !! ChineseStudent
+        cs = he !! chinese_student
     }
 }
 ```
@@ -1237,27 +1237,27 @@ We only need to use the `| id` statement.
 
 E.g:
 ```
-Color = $ {
-     | Red
-     | Green
-     | Blue
+color = $ {
+     | red
+     | green
+     | blue
 }
 ```
-The enumeration assigns values to the identifiers in order, resulting in a collection of `Red = 0; Green = 1; Blue = 2`.
+The enumeration assigns values to the identifiers in order, resulting in a collection of `red = 0; green = 1; blue = 2`.
 
 This way we don't need to care about their values when we use them, and we can safely mark the business we need to handle.
 
 E.g:
 ```
-C = RandomColor()     -- Get a random color
-C == 
-| Color.Red ? {
+c = random_color()     -- Get a random color
+c == 
+| color.red ? {
     ......
 }
-| Color.Green ? {
+| color.green ? {
     ......
 }
-| Color.Blue ? {
+| color.blue ? {
     ......
 }
 ```
@@ -1268,11 +1268,11 @@ We can also assign a single identifier if needed, and unspecified will continue 
 
 E.g:
 ```
-Number = $ {
-     | A = 1  -- 1
-     | B      -- 2
-     | C = 1  -- 1
-     | D      -- 2
+number = $ {
+    | a = 1   -- 1
+    | b       -- 2
+    | c = 1   -- 1
+    | d       -- 2
 }
 ```
 
@@ -1290,24 +1290,24 @@ We can use `! <- exception` to declare an exception data anywhere in the functio
 
 E.g:
 ```
-ReadFile = (name: str) {
+read_file = (name : str) {
     name.len == 0 ? {
-        ! <- Exception("something wrong")
+        ! <- exception("something wrong")
     }
     ......
 }
 ```
 So we declare an exception, the exception description is `something wrong`, once the external caller uses the illegal length of `name`, the function will be forced to abort, report the exception up and hand it to the caller.
 ## Checking exceptions
-We can use the `{}` statement to check for exceptions and `& identifier: type ! {}` to handle exceptions.
-`type` can be omitted, the default is `Exception`.
+We can use the `{}` statement to check for exceptions and `& identifier : type ! {}` to handle exceptions.
+`type` can be omitted, the default is `exception`.
 
 E.g:
 ```
 {
-    f = ReadFile("temp.txt")
+    f = read_file("temp.txt")
 }
-& ex: IOException ! {
+& ex: io_exception ! {
     ! <- ex
 }
 & e ! {
@@ -1323,7 +1323,7 @@ In general, we can make early returns or data processing in exception handling. 
 E.g:
 ```
 {
-    Func()
+    func()
 }
 & ex ! {
     -- Can be manually aborted
@@ -1339,14 +1339,14 @@ Quite simply, using `& ! {}` at the end of the check can declare a statement tha
 
 E.g:
 ```
-Func = () {
-    F: File
+func = () {
+    f : file
     {
-        F = ReadFile("./somecode.file")
+        f = read_file("./somecode.file")
     }
     & ! {
-        F >< nil ? {
-            F.release()
+        f >< nil ? {
+            f.release()
         }
     }
     ......
@@ -1362,7 +1362,7 @@ E.g:
 ```
 ......
 & ! {
-    F.release()
+    f.release()
     <-  -- error, can not use the return statement
 }
 ```
@@ -1381,12 +1381,12 @@ That's right, it's really just using `~>`.
 
 E.g:
 ```
-SayHello = () { 
+say_hello = () { 
     print("hello")
     <- 2020
 }
 
-~> SayHello()
+~> say_hello()
 ```
 
 After converting a synchronous function into an asynchronous function, it will be transferred to a new thread for execution. 
@@ -1397,7 +1397,7 @@ So the following code cannot be passed.
 
 E.g:
 ```
-Result = ~> SayHello()
+result = ~> say_hello()
 -- Error, the current logic will continue to execute, and the return value cannot be obtained directly
 ```
 
@@ -1410,7 +1410,7 @@ In this way, we can get the results we want.
 
 E.g:
 ```
-Result = SayHello~>()
+result = say_hello~>()
 -- Correct, the current logic will wait for the asynchronous result before continuing execution
 ...
 ```
@@ -1422,13 +1422,13 @@ The channel is a special collection, the type is ``chan`type``, we can pass the 
 
 E.g:
 ```
-Channel = chan`int{}
+channel = chan`int{}
 
 -- The current logic will wait for the data transfer to complete before continuing execution
-Channel <~ 666
+channel <~ 666
 
 -- For the same reason, the current logic will be suspended when obtaining data
-print(<~ Channel)
+print(<~ channel)
 ......
 ```
 
@@ -1482,18 +1482,18 @@ This is a simplified implementation.
 
 E.g:
 ```
-List = `T $ {
+List`T = $ {
     -- Create Storage
-    !items  = Storage`T{}
+    !items  = storage`T{}
     !length = 0
 
     -- Get a generic data
-    get = (index: int -> item: T) {    
+    get = (index : int -> item : T) {    
         <- items.get( index )
     }
 
     -- Add a generic data to the list
-    add = (item: T) {      
+    add = (item : T) {      
         items.insert(length, item)
         length += 1
     }
@@ -1511,11 +1511,11 @@ It's very simple, just use it as we declare it, just pass the real type when cal
 
 E.g:
 ```
-ListNumber = List`int{}   -- Pass in int type
+list_number = List`int{}   -- Pass in int type
 ```
 So we have a list of integer types, is it like this:
 ```
-ListNumber = list`int{}
+list_number = list`int{}
 ```
 That's right, in fact, our list and dictionary syntax are generics.
 ## Supported Types
@@ -1523,20 +1523,20 @@ We can use generics in structures, functions, and interface types.
 
 E.g:
 ```
-Func = `T (data: T -> data: T) {
+func`t = (data : t -> data : t) {
     <- data
 }
 
-Interface = `T $ {
-    test: `R (in: R -> out: T)
+interface`t = $ {
+    test`r : (in : r -> out : t)
 }
 ```
 ## Generic Constraints
-If we need to constrain the type of generics, we only need to use the `T:contract` syntax.
+If we need to constrain the type of generics, we only need to use the `(t:contract)` syntax.
 
 E.g:
 ```
-Package = `T:Student $ {
+package`(t:student) = $ {
 }
 ```
 
@@ -1554,14 +1554,14 @@ Let's take a look at the database data as a reference to see how to use annotati
 
 E.g:
 ```
-[Table("test")]
-Annotation = $ {
-    [Key, Column("id")]
-    !id: str
-    [Column("name")]
-    !name: str
-    [Column("data")]
-    !data: str
+[table("test")]
+annotation = $ {
+    [key, column("id")]
+    !id : str
+    [column("name")]
+    !name : str
+    [column("data")]
+    !data : str
 }
 ```
 We declare a structure of `annotation` that uses annotations to mark the table name `test`, primary key `id`, field `name`, and field `data`.
@@ -1577,8 +1577,8 @@ If a type is defined but not assigned, it will not be used.
 
 E.g:
 ```
-A: int
-B = A      -- error, no assignment to A
+a : int
+b = a      -- error, no assignment to a
 ```
 
 ## Declaration and Use
@@ -1588,16 +1588,16 @@ Just add `?` after any type, which is a nullable type.
 
 E.g:
 ```
-A: int?
-B = A      -- B Assigned to an empty i32
+a : int?
+b = a      -- b Assigned to an empty i32
 ```
 
 Once an optional type has appeared, we need to strictly handle null values ​​to avoid program errors.
 
 E.g:
 ```
-A >< nil ? {
-    A.to_str()
+a >< nil ? {
+    a.to_str()
 }
 ```
 
@@ -1606,7 +1606,7 @@ We can use `?` after the expression to use them, so that they will only be execu
 
 E.g:
 ```
-Arr?.to_str()
+arr?.to_str()
 ```
 
 ## Merge Operation
@@ -1614,7 +1614,7 @@ If you want to use another default value when the value of the optional type is 
 
 E.g:
 ```
-B = A ?? 128
+b = a ?? 128
 ```
 
 ## [Complete Example](../example.feel)
