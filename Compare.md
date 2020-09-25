@@ -65,7 +65,7 @@ MYCONSTANT = 42
 ## Explicit Types
 ### Feel
 ```
-explicitDouble: num = 70
+explicitDouble : num = 70
 ```
 ### C#
 ```
@@ -316,7 +316,7 @@ emptyDictionary ={}
 ## Functions
 ### Feel
 ```
-greet = (name: str, day: str -> r: str) {
+greet = (name : str, day : str -> r : str) {
     <- "Hello ${name}, today is ${day}."
 }
 greet("Bob", "Tuesday")
@@ -395,7 +395,7 @@ def getGasPrices():
 ### Feel
 ```
 makeIncrementer = () {
-    addOne = (number: int) {
+    addOne = (number : int) {
         <- 1 + number
     }
     <- addOne
@@ -557,7 +557,7 @@ shapeDescription = shape.simpleDescription()
 ### Feel
 ```
 NamedShape = $ {
-    !name: str
+    !name : str
     !numberOfSides = 0
     simpleDescription = () {
         <- "A shape with ${numberOfSides} sides."
@@ -566,7 +566,7 @@ NamedShape = $ {
 
 Square = $ me {
     . NamedShape
-    !sideLength: num
+    !sideLength : num
 
     simpleDescription = () {
         <- "A square with sides of length ${sideLength}."
@@ -577,7 +577,7 @@ Square = $ me {
     }
 }
 
-NewSquare = (sideLength: num, name: str) {
+NewSquare = (sideLength : num, name : str) {
     <- Square{
         name = name
         sideLength = sideLength
@@ -961,10 +961,10 @@ for current in someObjects:
 ### Feel
 ```
 Nameable = $ {
-    name: (-> s: str)
+    name : (-> s : str)
 }
 
-f = (x: Nameable) {
+f = (x : Nameable) {
     print("Name is " + x.name())
 }
 ```
