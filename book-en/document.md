@@ -236,7 +236,7 @@ In this language, the default integer is the `int` type, which is a 32-bit signe
 
 E.g:
 ```
-integer: int = 3987349
+integer : int = 3987349
 ```
 
 If we need integers in other numeric ranges, we can use other types. All supported integer types are listed below.
@@ -267,8 +267,8 @@ In this language, the default decimal is the `num` type, which is a 64-bit doubl
 
 E.g:
 ```
-float1: num = 855.544
-float2: num = 0.3141592653
+float1 : num = 855.544
+float2 : num = 0.3141592653
 ```
 
 It should be noted that due to the particularity of computer computing floating-point numbers, floating-point operations have certain accuracy problems, so the need for precision-sensitive requirements should consider special handling.
@@ -287,8 +287,8 @@ You only need to wrap a character with `''`, it will be recognized as a characte
 
 E.g:
 ```
-char: chr = 'x'
-char2: chr = '8'
+char1 : chr = 'x'
+char2 : chr = '8'
 ```
 ## String
 We are not living in a world where only numbers, so we also need to use text to display the information we need.
@@ -299,7 +299,7 @@ You only need to wrap a piece of text with `""`, which will be recognized as a s
 
 E.g:
 ```
-string: str = "Hello world!"
+string : str = "Hello world!"
 ```
 
 It should be noted that a string is a type consisting of multiple characters, so in fact the string is a fixed-order list, and there is a correspondence between the two. Many times we can process strings as if they were lists.
@@ -330,22 +330,15 @@ In this language, the default boolean is the `bool` type, which is a type with o
 
 E.g:
 ```
-boolean1: bool = true       -- true
-boolean2: bool = false      -- false
+boolean1 : bool = true       -- true
+boolean2 : bool = false      -- false
 ```
 ## Any Type
 In particular, sometimes a type that can be any object is needed to assist in the completion of the function, which is `any`.
 
 E.g:
 ```
-a: any = 1   -- any type
-```
-## Nil
-We need a value that can be any type of null value, so it is `nil` .
-
-E.g:
-```
-a = nil     -- none value
+a : any = 1   -- any type
 ```
 
 # Operators
@@ -1590,6 +1583,14 @@ E.g:
 ```
 a : int?
 b = a      -- b Assigned to an empty i32
+```
+
+## Nil
+We need a value that can be any type of null value, so it is `nil` .
+
+E.g:
+```
+a = nil     -- none value
 ```
 
 Once an optional type has appeared, we need to strictly handle null values ​​to avoid program errors.
