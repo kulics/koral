@@ -377,7 +377,7 @@ E.g:
 a = 4
 b = 2
 print( a == b )   -- == equal to
-print( a >< b )   -- >< not equal to
+print( a <> b )   -- <> not equal to
 print( a > b )    -- > Greater than
 print( a >= b )   -- >= Greater than or equal to
 print( a < b )    -- < less than
@@ -1044,14 +1044,14 @@ print( chen.student.name )
 ```
 By combining layers of structure, you can freely assemble anything you want to describe.
 
-More recently, if we want to include all the attributes of a structure directly instead of a combination, we can use the top-level combination statement, declared as `.type`.
+More recently, if we want to include all the attributes of a structure directly instead of a combination, we can use the top-level combination statement, declared as `type`.
 
 Top-level combinations extract attributes from the structure to the exterior, just as they contain corresponding attributes directly. This is conducive to the use and transmission of attributes.
 
 E.g:
 ```
 chinese_student = $ { 
-    . student   -- top-level combination
+    student   -- top-level combination
     !kungfu = false
 }
 ```
@@ -1338,7 +1338,7 @@ func = () {
         f = read_file("./somecode.file")
     }
     & ! {
-        f >< nil ? {
+        f <> nil ? {
             f.release()
         }
     }
@@ -1597,7 +1597,7 @@ Once an optional type has appeared, we need to strictly handle null values ​�
 
 E.g:
 ```
-a >< nil ? {
+a <> nil ? {
     a.to_str()
 }
 ```
