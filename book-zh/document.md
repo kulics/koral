@@ -1109,11 +1109,11 @@ main = () {
 接口用来规定某一特定功能所必需的函数，只要一个结构体包含一个接口所要求的所有函数，就认为结构体实现了接口。
 
 ## 定义
-接口与结构体唯一的不同是里面只能存在不可变的函数变量，并且它们不能有初始值。
+接口直接使用 `{}` 定义，与结构体不同是它的成员都没有初始值。
 
 例如：
 ```
-protocol = $ {
+protocol = {
 }
 ```
 
@@ -1121,7 +1121,7 @@ protocol = $ {
 
 例如：
 ```
-homework = $ {
+homework = {
     get_count : (->v : int)
     do_homework : (->)
 }
@@ -1523,7 +1523,7 @@ func`t = (data : t -> data : t) {
     <- data
 }
 
-interface`t = $ {
+interface`t = {
     test`r : (in : r -> out : t)
 }
 ```
