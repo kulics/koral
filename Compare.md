@@ -960,7 +960,7 @@ for current in someObjects:
 ## Protocol
 ### Feel
 ```
-Nameable = $ {
+Nameable = {
     name : (-> s : str)
 }
 

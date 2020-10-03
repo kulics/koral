@@ -1102,11 +1102,11 @@ We often need to do this in the programming language. This function is the inter
 An interface is used to specify the functions necessary for a particular function, and a structure is considered to implement an interface as long as it contains all the functions required by an interface.
 
 ## Definition
-The only difference between an interface and a structure is that there can only be immutable function variables inside, and they cannot have initial values.
+Interfaces are defined directly using `{}` and, unlike constructs, none of their members have initial values.
 
 E.g:
 ```
-protocol = $ {
+protocol = {
 }
 ```
 
@@ -1114,7 +1114,7 @@ Next, let's design a difficult task that students need to accomplish... homework
 
 E.g:
 ```
-homework = $ {
+homework = {
     get_count : (->v : int)
     do_homework : (->)
 }
@@ -1520,7 +1520,7 @@ func`t = (data : t -> data : t) {
     <- data
 }
 
-interface`t = $ {
+interface`t = {
     test`r : (in : r -> out : t)
 }
 ```
