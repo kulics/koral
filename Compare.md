@@ -131,7 +131,7 @@ string
 ```
 f = 6.0
 i = 94
-count = i + int(f)
+count = i + Int(f)
 ```
 ### C#
 ```
@@ -167,7 +167,7 @@ count = i + int(f)
 ### Feel
 ```
 1 .. 5 @ index {
-    print("${index} times 5 is ${index * 5}")
+    print("\{index} times 5 is \{index * 5}")
 }
 ```
 ### C#
@@ -283,8 +283,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Feel
 ```
-emptyArray = List`Str{}
-emptyDictionary = Dict`Str`F32{}
+emptyArray = (Str)List{}
+emptyDictionary = (Str, F32)Dict{}
 ```
 ### C#
 ```
@@ -317,7 +317,7 @@ emptyDictionary ={}
 ### Feel
 ```
 greet = (name : Str, day : Str -> r : Str) {
-    <- "Hello ${name}, today is ${day}."
+    <- "Hello \{name}, today is \{day}."
 }
 greet("Bob", "Tuesday")
 ```
@@ -467,7 +467,7 @@ increment(7)
 Shape = $ {
     numberOfSides = 0
     simpleDescription = () {
-        <- "A shape with ${numberOfSides} sides."
+        <- "A shape with \{numberOfSides} sides."
     }
 }
 ```
@@ -560,7 +560,7 @@ NamedShape = $ {
     name : Str
     numberOfSides = 0
     simpleDescription = () {
-        <- "A shape with ${numberOfSides} sides."
+        <- "A shape with \{numberOfSides} sides."
     }
 } 
 
@@ -569,7 +569,7 @@ Square = $ me {
     sideLength : Num
 
     simpleDescription = () {
-        <- "A square with sides of length ${sideLength}."
+        <- "A square with sides of length \{sideLength}."
     }
 
     area = () {
@@ -909,8 +909,8 @@ switch nb {
 ```
 someObjects @ current {
     current :: Movie => movie ? {
-        print("Movie: '${movie.name}', " +
-            "dir. ${movie.director}")
+        print("Movie: '\{movie.name}', " +
+            "dir. \{movie.director}")
     }
 }
 ```
