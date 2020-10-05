@@ -377,7 +377,7 @@ E.g:
 a = 4
 b = 2
 print( a == b )   -- == equal to
-print( a >< b )   -- >< not equal to
+print( a <> b )   -- <> not equal to
 print( a > b )    -- > Greater than
 print( a >= b )   -- >= Greater than or equal to
 print( a < b )    -- < less than
@@ -654,11 +654,11 @@ E.g:
 ```
 It should be noted that the meaning of `0 .. 100` is read from `0` to `100`, that is, a total of `101` times. The iterator will execute until the last number is executed, rather than ending one at a time.
 
-The iterator defaults to increment `1` every interval. If we need to take every other number, we can add a condition for each step. Just insert `~ value`.
+The iterator defaults to increment `1` every interval. If we need to take every other number, we can add a condition for each step. Just insert `^^ value`.
 
 E.g:
 ```
-0 ~ 2 .. 100 @ i {
+0 .. 100 ^^ 2 @ i {
     ......
 }
 ```
@@ -1044,14 +1044,14 @@ print( chen.student.name )
 ```
 By combining layers of structure, you can freely assemble anything you want to describe.
 
-More recently, if we want to include all the attributes of a structure directly instead of a combination, we can use the top-level combination statement, declared as `.type`.
+More recently, if we want to include all the attributes of a structure directly instead of a combination, we can use the top-level combination statement, declared as `type`.
 
 Top-level combinations extract attributes from the structure to the exterior, just as they contain corresponding attributes directly. This is conducive to the use and transmission of attributes.
 
 E.g:
 ```
 chinese_student = $ { 
-    . student   -- top-level combination
+    student   -- top-level combination
     !kungfu = false
 }
 ```
@@ -1102,11 +1102,11 @@ We often need to do this in the programming language. This function is the inter
 An interface is used to specify the functions necessary for a particular function, and a structure is considered to implement an interface as long as it contains all the functions required by an interface.
 
 ## Definition
-The only difference between an interface and a structure is that there can only be immutable function variables inside, and they cannot have initial values.
+Interfaces are defined directly using `{}` and, unlike constructs, none of their members have initial values.
 
 E.g:
 ```
-protocol = $ {
+protocol = {
 }
 ```
 
@@ -1114,7 +1114,7 @@ Next, let's design a difficult task that students need to accomplish... homework
 
 E.g:
 ```
-homework = $ {
+homework = {
     get_count : (->v : int)
     do_homework : (->)
 }
@@ -1338,7 +1338,7 @@ func = () {
         f = read_file("./somecode.file")
     }
     & ! {
-        f >< nil ? {
+        f <> nil ? {
             f.release()
         }
     }
@@ -1520,7 +1520,7 @@ func`t = (data : t -> data : t) {
     <- data
 }
 
-interface`t = $ {
+interface`t = {
     test`r : (in : r -> out : t)
 }
 ```
@@ -1597,7 +1597,7 @@ Once an optional type has appeared, we need to strictly handle null values ​�
 
 E.g:
 ```
-a >< nil ? {
+a <> nil ? {
     a.to_str()
 }
 ```

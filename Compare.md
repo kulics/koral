@@ -3,7 +3,7 @@
 ## Hello World
 ### Feel
 ```
-print("Hello, world!")
+Print("Hello, world!")
 ```
 ### C#
 ```
@@ -28,9 +28,9 @@ print("Hello, world!")
 ## Variables And Constants
 ### Feel
 ```
-!myVariable = 42
-myVariable  = 50
-myConstant  = 42
+myVariable = 42
+myVariable = 50
+MyConstant = 42
 ```
 ### C#
 ```
@@ -65,7 +65,7 @@ MYCONSTANT = 42
 ## Explicit Types
 ### Feel
 ```
-explicitDouble : num = 70
+explicitDouble : Num = 70
 ```
 ### C#
 ```
@@ -86,10 +86,10 @@ let explicitDouble: Double = 70
 ## Basic Types
 ### Feel
 ```
-i32 i16 i64 i8 
-f64 f32 
-bool 
-str
+I32 I16 I64 I8 
+F64 F32 
+Bool 
+Str
 ```
 ### C#
 ```
@@ -131,7 +131,7 @@ string
 ```
 f = 6.0
 i = 94
-count = i + int(f)
+count = i + Int(f)
 ```
 ### C#
 ```
@@ -167,7 +167,7 @@ count = i + int(f)
 ### Feel
 ```
 1 .. 5 @ index {
-    print("${index} times 5 is ${index * 5}")
+    print("\{index} times 5 is \{index * 5}")
 }
 ```
 ### C#
@@ -283,8 +283,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Feel
 ```
-emptyArray = list`str{}
-emptyDictionary = dict`str`f32{}
+emptyArray = (Str)List{}
+emptyDictionary = (Str, F32)Dict{}
 ```
 ### C#
 ```
@@ -316,8 +316,8 @@ emptyDictionary ={}
 ## Functions
 ### Feel
 ```
-greet = (name : str, day : str -> r : str) {
-    <- "Hello ${name}, today is ${day}."
+greet = (name : Str, day : Str -> r : Str) {
+    <- "Hello \{name}, today is \{day}."
 }
 greet("Bob", "Tuesday")
 ```
@@ -395,7 +395,7 @@ def getGasPrices():
 ### Feel
 ```
 makeIncrementer = () {
-    addOne = (number : int) {
+    addOne = (number : Int) {
         <- 1 + number
     }
     <- addOne
@@ -465,9 +465,9 @@ increment(7)
 ### Feel
 ```
 Shape = $ {
-    !numberOfSides = 0
+    numberOfSides = 0
     simpleDescription = () {
-        <- "A shape with ${numberOfSides} sides."
+        <- "A shape with \{numberOfSides} sides."
     }
 }
 ```
@@ -557,19 +557,19 @@ shapeDescription = shape.simpleDescription()
 ### Feel
 ```
 NamedShape = $ {
-    !name : str
-    !numberOfSides = 0
+    name : Str
+    numberOfSides = 0
     simpleDescription = () {
-        <- "A shape with ${numberOfSides} sides."
+        <- "A shape with \{numberOfSides} sides."
     }
 } 
 
 Square = $ me {
-    . NamedShape
-    !sideLength : num
+    NamedShape
+    sideLength : Num
 
     simpleDescription = () {
-        <- "A square with sides of length ${sideLength}."
+        <- "A square with sides of length \{sideLength}."
     }
 
     area = () {
@@ -577,7 +577,7 @@ Square = $ me {
     }
 }
 
-NewSquare = (sideLength : num, name : str) {
+NewSquare = (sideLength : Num, name : Str) {
     <- Square{
         name = name
         sideLength = sideLength
@@ -757,8 +757,8 @@ test.simpleDescription()
 ## Checking Type
 ### Feel
 ```
-!movieCount = 0
-!songCount = 0
+movieCount = 0
+songCount = 0
 
 library @ item {
     item :: 
@@ -909,8 +909,8 @@ switch nb {
 ```
 someObjects @ current {
     current :: Movie => movie ? {
-        print("Movie: '${movie.name}', " +
-            "dir. ${movie.director}")
+        print("Movie: '\{movie.name}', " +
+            "dir. \{movie.director}")
     }
 }
 ```
@@ -960,8 +960,8 @@ for current in someObjects:
 ## Protocol
 ### Feel
 ```
-Nameable = $ {
-    name : (-> s : str)
+Nameable = {
+    name : (-> s : Str)
 }
 
 f = (x : Nameable) {
