@@ -120,7 +120,7 @@ If we're writing a console program, we can use the `Print()` function, which dis
 
 E.g:
 ```
-Print("Hello world")    -- Output Hello world
+Print("Hello world")    ` Output Hello world `
 ```
 In the examples that follow, we will use the console as a demo environment.
 
