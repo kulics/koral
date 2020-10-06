@@ -119,7 +119,7 @@ Main = () {
 
 例如：
 ```
-Print("Hello world")    -- 输出 Hello world
+Print("Hello world")    ` 输出 Hello world `
 ```
 在往后的例子中，我们都会使用控制台作为演示环境。
 ## 注释
