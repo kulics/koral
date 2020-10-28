@@ -203,7 +203,7 @@ for index in range(1,6):
 ## Arrays
 ### Feel
 ```
-shoppingList = {"catfish"; "water"; "tulips"; "blue paint"}
+shoppingList = List_of("catfish", "water", "tulips", "blue paint")
 shoppingList[1] = "bottle of water"
 ```
 ### C#
@@ -234,10 +234,10 @@ shoppingList[1] = "bottle of water"
 ## Maps
 ### Feel
 ```
-occupations = {
-    ["Malcolm"] = "Captain"
-    ["Kaylee"] = "Mechanic"
-}
+occupations = Dict_of(
+    Pair_of("Malcolm", "Captain"),
+    Pair_of("Kaylee", "Mechanic")
+)
 occupations["Jayne"] = "Public Relations"
 ```
 ### C#
@@ -283,8 +283,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Feel
 ```
-emptyArray = (Str)List{}
-emptyDictionary = (Str, F32)Dict{}
+emptyArray = (Str)List_of()
+emptyDictionary = (Str, F32)Dict_of()
 ```
 ### C#
 ```
@@ -464,9 +464,8 @@ increment(7)
 ## Classes Declaration
 ### Feel
 ```
-Shape = $ {
-    numberOfSides = 0
-    simpleDescription = () {
+Shape = $ (numberOfSides : Int) {
+    SimpleDescription = () {
         <- "A shape with \{numberOfSides} sides."
     }
 }
@@ -493,8 +492,7 @@ func (p *Shape) simpleDescription() string {
 ```
 ### Kotlin
 ```
-class Shape {
-    var numberOfSides = 0
+class Shape(var numberOfSides: Int) {
     fun simpleDescription() =
         "A shape with $numberOfSides sides."
 }
@@ -519,9 +517,9 @@ class Shape(object):
 ## Classes Usage
 ### Feel
 ```
-shape = Shape{}
+shape = Shape$()
 shape.numberOfSides = 7
-shapeDescription = shape.simpleDescription()
+shapeDescription = shape.SimpleDescription()
 ```
 ### C#
 ```
@@ -556,38 +554,29 @@ shapeDescription = shape.simpleDescription()
 ## Subclass
 ### Feel
 ```
-NamedShape = $ {
-    name : Str
-    numberOfSides = 0
-    simpleDescription = () {
+NamedShape = $ (name : Str, numberOfSides : Int) {
+    SimpleDescription = () {
         <- "A shape with \{numberOfSides} sides."
     }
 } 
 
-Square = $ me {
-    NamedShape
-    sideLength : Num
-
-    simpleDescription = () {
+Square = $ (NamedShape, sideLength : Num) {
+    SimpleDescription = () {
         <- "A square with sides of length \{sideLength}."
     }
 
-    area = () {
+    Area = () {
         <- sideLength * sideLength
     }
 }
 
 NewSquare = (sideLength : Num, name : Str) {
-    <- Square{
-        name = name
-        sideLength = sideLength
-        numberOfSides = 4
-    }
+    <- Square$(NamedShape$(name, 4), sideLength)
 }
 
 test = NewSquare(5.2, "square")
-test.area()
-test.simpleDescription()
+test.Area()
+test.SimpleDescription()
 ```
 ### C#
 ```
@@ -843,19 +832,19 @@ for item in library:
 nb = 42
 nb
 | @@ 0...7 | == 8 | == 9 ? {
-    print("single digit") 
+    Print("single digit") 
 }
 | == 10 ? {
-    print("double digits") 
+    Print("double digits") 
 }
 | @@ 11...99 ? {
-    print("double digits") 
+    Print("double digits") 
 }
 | @@ 100...999 ? {
-    print("triple digits") 
+    Print("triple digits") 
 }
 | ? {
-    print("four or more digits") 
+    Print("four or more digits") 
 }
 ```
 ### C#
@@ -960,12 +949,12 @@ for current in someObjects:
 ## Protocol
 ### Feel
 ```
-Nameable = {
-    name : (-> s : Str)
+Nameable = $ {
+    Name : (-> s : Str)
 }
 
 f = (x : Nameable) {
-    print("Name is " + x.name())
+    Print("Name is " + x.Name())
 }
 ```
 ### C#
@@ -1013,12 +1002,12 @@ func f(x: Nameable) {
 ## Implement
 ### Feel
 ```
-Dog = $ {
-    name = () {
+Dog = $ () {
+    Name = () {
         <- "Dog"
     }
 
-    getWeight = () {
+    Weight = () {
         <- 30
     }
 }
@@ -1032,7 +1021,7 @@ class Dog: Nameable, Weight
         return "Dog";
     }
 
-    public int getWeight() 
+    public int weight() 
     {
         return 30;
     }
@@ -1043,11 +1032,11 @@ class Dog: Nameable, Weight
 ```
 type Dog struct {}
 
-func (p *Dog) Name() string {
+func (p *Dog) name() string {
     return "Dog"
 }
 
-func (p *Dog) GetWeight() int {
+func (p *Dog) weight() int {
     return 30
 }
 ```
@@ -1058,7 +1047,7 @@ class Dog: Nameable, Weight {
         return "Dog"
     }
 
-    override fun getWeight(): Int {
+    override fun weight(): Int {
         return 30
     }
 }
@@ -1070,7 +1059,7 @@ class Dog: Nameable, Weight {
         return "Dog"
     }
 
-    func getWeight() -> Int {
+    func weight() -> Int {
         return 30
     }
 }
