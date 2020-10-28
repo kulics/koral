@@ -41,10 +41,10 @@ Main = () {
 }
 
 Make_greetings = (input : Str -> output : (Str)List) {
-    <- input + {"你好"; "Hola"; "Bonjour"
-                "Ciao"; "こんにちは"; "안녕하세요"
-                "Cześć"; "Olá"; "Здравствуйте"
-                "Chào bạn"}
+    <- List_of(input, "你好", "Hola", "Bonjour",
+                "Ciao", "こんにちは", "안녕하세요",
+                "Cześć", "Olá", "Здравствуйте",
+                "Chào bạn")
 }
 ```
 
