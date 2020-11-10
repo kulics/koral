@@ -166,9 +166,8 @@ count = i + int(f)
 ## Inclusive Range Operator
 ### Feel
 ```
-1 ... 5 @ index {
-    print("\{index} times 5 is \{index * 5}")
-}
+1 ... 5 => index @
+    Print("\{index} times 5 is \{index * 5}")
 ```
 ### C#
 ```
@@ -316,7 +315,7 @@ emptyDictionary ={}
 ## Functions
 ### Feel
 ```
-greet = (name : Str, day : Str -> r : Str) {
+greet = (name : Str, day : Str -> r : Str) -> {
     <- "Hello \{name}, today is \{day}."
 }
 greet("Bob", "Tuesday")
@@ -359,9 +358,7 @@ greet("Bob", "Tuesday")
 ## Tuple Return
 ### Feel
 ```
-getGasPrices = () {
-    <- 3.59, 3.69, 3.79
-}
+getGasPrices = () -> 3.59, 3.69, 3.79
 ```
 ### C#
 ```
@@ -394,12 +391,7 @@ def getGasPrices():
 ## Function Type
 ### Feel
 ```
-makeIncrementer = () {
-    addOne = (number : Int) {
-        <- 1 + number
-    }
-    <- addOne
-}
+makeIncrementer = () -> (number : Int) -> 1 + number
 increment = makeIncrementer()
 increment(7)
 ```
@@ -465,9 +457,7 @@ increment(7)
 ### Feel
 ```
 Shape = $ (numberOfSides : Int) {
-    SimpleDescription = () {
-        <- "A shape with \{numberOfSides} sides."
-    }
+    SimpleDescription = () -> "A shape with \{numberOfSides} sides."
 }
 ```
 ### C#
@@ -555,22 +545,18 @@ shapeDescription = shape.simpleDescription()
 ### Feel
 ```
 NamedShape = $ (name : Str, numberOfSides : Int) {
-    SimpleDescription = () {
-        <- "A shape with \{numberOfSides} sides."
-    }
+    SimpleDescription = () -> "A shape with \{numberOfSides} sides."
 } 
 
-Square = $ (NamedShape, sideLength : Num) {
-    SimpleDescription = () {
-        <- "A square with sides of length \{sideLength}."
-    }
+Square = $ (_namedShape : NamedShape, sideLength : Num) {
+    _namedShape
 
-    Area = () {
-        <- sideLength * sideLength
-    }
+    SimpleDescription = () -> "A square with sides of length \{sideLength}."
+
+    Area = () -> sideLength * sideLength
 }
 
-NewSquare = (sideLength : Num, name : Str) {
+NewSquare = (sideLength : Num, name : Str) -> {
     <- Square$(NamedShape$(name, 4), sideLength)
 }
 
@@ -749,15 +735,11 @@ test.simpleDescription()
 movieCount = 0
 songCount = 0
 
-library @ item {
-    item :: 
-    | Movie ? {
+library => item @ 
+    item :: Movie ? 
         movieCount += 1
-    }
-    | Song ? {
+    | item :: Song ? 
         songCount += 1
-    } 
-}
 ```
 ### C#
 ```
@@ -830,22 +812,17 @@ for item in library:
 ### Feel
 ```
 nb = 42
-nb
-| @@ 0...7 | == 8 | == 9 ? {
+nb ?
+| @@ 0...7 | == 8, 9 ? 
     Print("single digit") 
-}
-| == 10 ? {
+| == 10 ? 
     Print("double digits") 
-}
-| @@ 11...99 ? {
+| @@ 11...99 ? 
     Print("double digits") 
-}
-| @@ 100...999 ? {
+| @@ 100...999 ? 
     Print("triple digits") 
-}
-| ? {
+| 
     Print("four or more digits") 
-}
 ```
 ### C#
 ```
@@ -896,12 +873,10 @@ switch nb {
 ## Downcasting
 ### Feel
 ```
-someObjects @ current {
-    current :: Movie => movie ? {
-        print("Movie: '\{movie.name}', " +
+someObjects => current @ 
+    current :: Movie => movie ? 
+        Print("Movie: '\{movie.name}', " +
             "dir. \{movie.director}")
-    }
-}
 ```
 ### C#
 ```
@@ -953,9 +928,7 @@ Nameable = $ {
     Name : (-> s : Str)
 }
 
-f = (x : Nameable) {
-    Print("Name is " + x.Name())
-}
+f = (x : Nameable) -> Print("Name is " + x.Name())
 ```
 ### C#
 ```
@@ -1003,13 +976,9 @@ func f(x: Nameable) {
 ### Feel
 ```
 Dog = $ () {
-    Name = () {
-        <- "Dog"
-    }
+    Name = () -> "Dog"
 
-    Weight = () {
-        <- 30
-    }
+    Weight = () -> 30
 }
 ```
 ### C#
