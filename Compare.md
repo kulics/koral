@@ -166,8 +166,9 @@ count = i + int(f)
 ## Inclusive Range Operator
 ### Feel
 ```
-1 ... 5 => index @
+@ 1 ... 5 => index {
     Print("\{index} times 5 is \{index * 5}")
+}
 ```
 ### C#
 ```
@@ -735,11 +736,14 @@ test.simpleDescription()
 movieCount = 0
 songCount = 0
 
-library => item @ 
-    item :: Movie ? 
+@ library => item {
+    ? item :: Movie {
         movieCount += 1
-    | item :: Song ? 
+    }
+    | ? item :: Song {
         songCount += 1
+    }
+}
 ```
 ### C#
 ```
@@ -812,17 +816,17 @@ for item in library:
 ### Feel
 ```
 nb = 42
-nb ?
-| @@ 0...7 | == 8, 9 ? 
-    Print("single digit") 
-| == 10 ? 
+? nb @@ 0...7 | == 8, 9 {
+    Print("single digit")
+} | == 10 {
+    Print("double digits")
+} | @@ 11...99 {
     Print("double digits") 
-| @@ 11...99 ? 
-    Print("double digits") 
-| @@ 100...999 ? 
-    Print("triple digits") 
-| 
-    Print("four or more digits") 
+} | @@ 100...999 {
+    Print("triple digits")
+} | {
+    Print("four or more digits")
+}
 ```
 ### C#
 ```
@@ -873,10 +877,12 @@ switch nb {
 ## Downcasting
 ### Feel
 ```
-someObjects => current @ 
-    current :: Movie => movie ? 
+@ someObjects => current {
+    ? current :: Movie => movie {
         Print("Movie: '\{movie.name}', " +
             "dir. \{movie.director}")
+    }
+}
 ```
 ### C#
 ```
