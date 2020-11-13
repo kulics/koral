@@ -30,8 +30,13 @@ This is the main source code repository for Feel. It contains the compiler, and 
 Main = () -> {
     Print("Hello, world!")
     Greetings = Make_greetings("Fall in love with programming!")
-    Greetings => [index]value @ 
-        Print(value, index == 0 ? ", 世界!" | ", world!")
+    @ Greetings => [index]value {
+        ? index == 0 { 
+            Print(value, ", 世界!")
+        } | {
+            Print(value, ", world!")
+        }
+    }
 }
 
 Make_greetings = (input : Str -> output : (Str)List) -> {
