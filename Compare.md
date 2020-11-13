@@ -316,7 +316,7 @@ emptyDictionary ={}
 ## Functions
 ### Feel
 ```
-greet = (name : Str, day : Str -> r : Str) -> {
+greet = (name : Str, day : Str -> r : Str) {
     <- "Hello \{name}, today is \{day}."
 }
 greet("Bob", "Tuesday")
@@ -359,7 +359,7 @@ greet("Bob", "Tuesday")
 ## Tuple Return
 ### Feel
 ```
-getGasPrices = () -> 3.59, 3.69, 3.79
+getGasPrices = () { 3.59, 3.69, 3.79 }
 ```
 ### C#
 ```
@@ -392,7 +392,12 @@ def getGasPrices():
 ## Function Type
 ### Feel
 ```
-makeIncrementer = () -> (number : Int) -> 1 + number
+makeIncrementer = () { 
+    addOne = (number : Int) { 
+        1 + number 
+    }
+    <- addOne
+}
 increment = makeIncrementer()
 increment(7)
 ```
@@ -458,7 +463,9 @@ increment(7)
 ### Feel
 ```
 Shape = $ (numberOfSides : Int) {
-    SimpleDescription = () -> "A shape with \{numberOfSides} sides."
+    SimpleDescription = () {
+        "A shape with \{numberOfSides} sides."
+    }
 }
 ```
 ### C#
@@ -546,19 +553,25 @@ shapeDescription = shape.simpleDescription()
 ### Feel
 ```
 NamedShape = $ (name : Str, numberOfSides : Int) {
-    SimpleDescription = () -> "A shape with \{numberOfSides} sides."
+    SimpleDescription = () {
+        "A shape with \{numberOfSides} sides."
+    }
 } 
 
 Square = $ (_namedShape : NamedShape, sideLength : Num) {
     _namedShape
 
-    SimpleDescription = () -> "A square with sides of length \{sideLength}."
+    SimpleDescription = () {
+        "A square with sides of length \{sideLength}."
+    }
 
-    Area = () -> sideLength * sideLength
+    Area = () {
+        sideLength * sideLength
+    }
 }
 
-NewSquare = (sideLength : Num, name : Str) -> {
-    <- Square$(NamedShape$(name, 4), sideLength)
+NewSquare = (sideLength : Num, name : Str) {
+    Square$(NamedShape$(name, 4), sideLength)
 }
 
 test = NewSquare(5.2, "square")
@@ -739,8 +752,7 @@ songCount = 0
 @ library => item {
     ? item :: Movie {
         movieCount += 1
-    }
-    | ? item :: Song {
+    } | item :: Song {
         songCount += 1
     }
 }
@@ -934,7 +946,9 @@ Nameable = $ {
     Name : (-> s : Str)
 }
 
-f = (x : Nameable) -> Print("Name is " + x.Name())
+f = (x : Nameable) {
+    Print("Name is " + x.Name())
+}
 ```
 ### C#
 ```
@@ -982,9 +996,9 @@ func f(x: Nameable) {
 ### Feel
 ```
 Dog = $ () {
-    Name = () -> "Dog"
+    Name = () { "Dog" }
 
-    Weight = () -> 30
+    Weight = () { 30 }
 }
 ```
 ### C#
