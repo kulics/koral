@@ -235,8 +235,8 @@ shoppingList[1] = "bottle of water"
 ### Feel
 ```
 occupations = Dict_of(
-    Pair_of("Malcolm", "Captain"),
-    Pair_of("Kaylee", "Mechanic")
+    $("Malcolm", "Captain"),
+    $("Kaylee", "Mechanic")
 )
 occupations["Jayne"] = "Public Relations"
 ```
