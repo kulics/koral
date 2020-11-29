@@ -204,7 +204,7 @@ for index in range(1,6):
 ### Feel
 ```
 shoppingList = List_of("catfish", "water", "tulips", "blue paint")
-shoppingList[1] = "bottle of water"
+shoppingList.(1) = "bottle of water"
 ```
 ### C#
 ```
@@ -238,7 +238,7 @@ occupations = Dict_of(
     $("Malcolm", "Captain"),
     $("Kaylee", "Mechanic")
 )
-occupations["Jayne"] = "Public Relations"
+occupations.("Jayne") = "Public Relations"
 ```
 ### C#
 ```
@@ -283,8 +283,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Feel
 ```
-emptyArray = (Str)List_of()
-emptyDictionary = (Str, F32)Dict_of()
+emptyArray = List_of[Str]()
+emptyDictionary = Dict_of[Str, F32]()
 ```
 ### C#
 ```
@@ -462,7 +462,7 @@ increment(7)
 ## Classes Declaration
 ### Feel
 ```
-Shape = $ (numberOfSides : Int) {
+Shape = $(numberOfSides : Int) {
     SimpleDescription = () {
         "A shape with \{numberOfSides} sides."
     }
@@ -552,13 +552,13 @@ shapeDescription = shape.simpleDescription()
 ## Subclass
 ### Feel
 ```
-NamedShape = $ (name : Str, numberOfSides : Int) {
+NamedShape = $(name : Str, numberOfSides : Int) {
     SimpleDescription = () {
         "A shape with \{numberOfSides} sides."
     }
 } 
 
-Square = $ (_namedShape : NamedShape, sideLength : Num) {
+Square = $(_namedShape : NamedShape, sideLength : Num) {
     _namedShape
 
     SimpleDescription = () {
@@ -828,7 +828,9 @@ for item in library:
 ### Feel
 ```
 nb = 42
-? nb @@ 0...7 | == 8, 9 {
+? nb @@ 0...7 {
+    Print("single digit")
+} | == 8, 9 {
     Print("single digit")
 } | == 10 {
     Print("double digits")
@@ -995,7 +997,7 @@ func f(x: Nameable) {
 ## Implement
 ### Feel
 ```
-Dog = $ () {
+Dog = $() {
     Name = () { "Dog" }
 
     Weight = () { 30 }
