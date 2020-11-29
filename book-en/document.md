@@ -584,11 +584,11 @@ E.g:
 
 Yes, just like above, every condition here is ended when it is executed and does not continue downward.
 
-If multiple conditions need to be merged together, you can use `|` to separate them.
+If multiple conditions need to be merged together, you can use `,` to separate them.
 
 E.g:
 ```
-? i == 1 | 2 | 3 {
+? i == 1, 2, 3 {
     ......
 } | == 4 {
     ......
@@ -706,7 +706,6 @@ Function is a separate block of code used to accomplish a specific task.
 
 Usually we will package a series of task processing that needs to be reused into a function, which is convenient for reuse in other places.
 
-In practical engineering practice, given a certain input, the function that must accurately return the determined output is considered a better design. Therefore, it is recommended to maintain the independence of the function as much as possible.
 ## Definition
 We have seen the main entry function before, it is only defined using the fixed statement `Main = () {}`.
 
@@ -1039,10 +1038,10 @@ Top-level combinations extract attributes from the structure to the exterior, ju
 E.g:
 ```
 Chinese_Student = $ (
-    student : Student,
-    kungfu  : Bool
+    super  : Student,
+    kungfu : Bool
 ) {
-    Student   ` top-level combination `
+    super ` top-level combination `
 }
 ```
 
@@ -1218,18 +1217,18 @@ E.g:
 ```
 Color = $ [Red, Green, Blue] {}
 ```
-The enumeration assigns values to the identifiers in order, resulting in a collection of `Red = 0; Green = 1; Blue = 2`.
+The enumeration assigns values to the identifiers in order, resulting in a collection of `Red = 0, Green = 1, Blue = 2`.
 
 This way we don't need to care about their values when we use them, and we can safely mark the business we need to handle.
 
 E.g:
 ```
 c = Random_color()     ` Get a random color `
-? c == Color.Red {
+? c == $Red {
     ......
-} | == Color.Green {
+} | == $Green {
     ......
-} | == Color.Blue {
+} | == $Blue {
     ......
 }
 ```
