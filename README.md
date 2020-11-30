@@ -30,7 +30,7 @@ This is the main source code repository for Feel. It contains the compiler, and 
 Main = () {
     Print("Hello, world!")
     Greetings = Make_greetings("Fall in love with programming!")
-    @ Greetings => [index]value {
+    @ Greetings.WithIndex() => index, value {
         ? index == 0 { 
             Print(value, ", 世界!")
         } | {
