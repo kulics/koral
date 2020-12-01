@@ -131,7 +131,7 @@ string
 ```
 f = 6.0
 i = 94
-count = i + Int(f)
+count = i + f.[Int]
 ```
 ### C#
 ```
