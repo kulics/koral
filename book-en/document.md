@@ -770,7 +770,7 @@ Similar to the input parameters, the output parameter needs to be explicitly def
 
 E.g:
 ```
-top_sell = (-> name : Str, count : Int) {
+top_sell := (-> name : Str, count : Int) {
      <- "cola", 123
 }
 ```
@@ -779,7 +779,7 @@ When the language can infer the return value type, we can omit the Output Parame
 
 E.g:
 ```
-top_sell = () {
+top_sell := () {
     <- "cola", 123
 }
 ```
@@ -791,7 +791,7 @@ It's very simple, just like we do add, subtract, multiply and divide, just use t
 
 E.g:
 ```
-n, c = top_sell()        // Assign the returned two values ​​to n and c
+n, c := top_sell()        // Assign the returned two values ​​to n and c
 ```
 You can use a definition or assignment statement to get the return value of the function to use, or you can nest a function that meets the requirements into another function.
 
@@ -963,7 +963,7 @@ The private property of this structure can not be accessed, and can not be modif
 
 E.g:
 ```
-Student = $(
+Student := $(
     ......
 ) {
     Get_girl_friend := () {
@@ -1205,7 +1205,7 @@ This way we don't need to care about their values when we use them, and we can s
 
 E.g:
 ```
-c := Random_color()     // Get a random color
+c := Color$Red     // Get a color
 ? c == $Red {
     ......
 } | == $Green {

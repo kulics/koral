@@ -770,7 +770,7 @@ top_sell := (-> name : Str, count : Int) {
 
 例如：
 ```
-top_sell = () {
+top_sell := () {
     <- "cola", 123
 }
 ```
@@ -782,7 +782,7 @@ top_sell = () {
 
 例如:
 ```
-n, c = top_sell()        // 将返回的两个值赋值给 n 和 c
+n, c := top_sell()        // 将返回的两个值赋值给 n 和 c
 ```
 你可以使用定义或赋值语句去获得函数的返回值来使用，也可以将符合要求的函数嵌套到另一个函数里使用。
 
@@ -952,7 +952,7 @@ Student := $(
 
 例如：
 ```
-Student = $(
+Student := $(
     ......
 ) {
     Get_girl_friend := () {
@@ -1193,7 +1193,7 @@ Color := $[Red, Green, Blue] {}
 
 例如：
 ```
-c := Random_color()     // 获取一个随机颜色
+c := Color$Red     // 获取一个颜色
 ? c == $Red {
     ......
 } | == $Green {
