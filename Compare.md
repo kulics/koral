@@ -28,9 +28,9 @@ print("Hello, world!")
 ## Variables And Constants
 ### Feel
 ```
-myVariable = 42
+myVariable := 42
 myVariable = 50
-MyConstant = 42
+MyConstant := 42
 ```
 ### C#
 ```
@@ -129,9 +129,9 @@ string
 ## Type Coercion
 ### Feel
 ```
-f = 6.0
-i = 94
-count = i + f.[Int]
+f := 6.0
+i := 94
+count := i + f.[Int]
 ```
 ### C#
 ```
@@ -166,7 +166,7 @@ count = i + int(f)
 ## Inclusive Range Operator
 ### Feel
 ```
-@ index = 1.Up_to(5)... {
+@ index := 1.Up_to(5)... {
     Print("\{index} times 5 is \{index * 5}")
 }
 ```
@@ -203,7 +203,7 @@ for index in range(1,6):
 ## Arrays
 ### Feel
 ```
-shoppingList = List_of("catfish", "water", "tulips", "blue paint")
+shoppingList := List_of("catfish", "water", "tulips", "blue paint")
 shoppingList.(1) = "bottle of water"
 ```
 ### C#
@@ -234,7 +234,7 @@ shoppingList[1] = "bottle of water"
 ## Maps
 ### Feel
 ```
-occupations = Dict_of(
+occupations := Dict_of(
     $("Malcolm", "Captain"),
     $("Kaylee", "Mechanic")
 )
@@ -283,8 +283,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Feel
 ```
-emptyArray = List_of[Str]()
-emptyDictionary = Dict_of[Str, F32]()
+emptyArray := List_of[Str]()
+emptyDictionary := Dict_of[Str, F32]()
 ```
 ### C#
 ```
@@ -316,7 +316,7 @@ emptyDictionary ={}
 ## Functions
 ### Feel
 ```
-greet = (name : Str, day : Str -> r : Str) {
+greet := (name : Str, day : Str -> r : Str) {
     <- "Hello \{name}, today is \{day}."
 }
 greet("Bob", "Tuesday")
@@ -359,7 +359,7 @@ greet("Bob", "Tuesday")
 ## Tuple Return
 ### Feel
 ```
-getGasPrices = () { 3.59, 3.69, 3.79 }
+getGasPrices := () { 3.59, 3.69, 3.79 }
 ```
 ### C#
 ```
@@ -392,13 +392,13 @@ def getGasPrices():
 ## Function Type
 ### Feel
 ```
-makeIncrementer = () { 
-    addOne = (number : Int) { 
+makeIncrementer := () { 
+    addOne := (number : Int) { 
         1 + number 
     }
     <- addOne
 }
-increment = makeIncrementer()
+increment := makeIncrementer()
 increment(7)
 ```
 ### C#
@@ -462,8 +462,8 @@ increment(7)
 ## Classes Declaration
 ### Feel
 ```
-Shape = $(numberOfSides : Int) {
-    SimpleDescription = () {
+Shape := $(numberOfSides : Int) {
+    SimpleDescription := () {
         "A shape with \{numberOfSides} sides."
     }
 }
@@ -515,9 +515,9 @@ class Shape(object):
 ## Classes Usage
 ### Feel
 ```
-shape = Shape$()
+shape := Shape$()
 shape.numberOfSides = 7
-shapeDescription = shape.SimpleDescription()
+shapeDescription := shape.SimpleDescription()
 ```
 ### C#
 ```
@@ -552,29 +552,29 @@ shapeDescription = shape.simpleDescription()
 ## Subclass
 ### Feel
 ```
-NamedShape = $(name : Str, numberOfSides : Int) {
-    SimpleDescription = () {
+NamedShape := $(name : Str, numberOfSides : Int) {
+    SimpleDescription := () {
         "A shape with \{numberOfSides} sides."
     }
 } 
 
-Square = $(_namedShape : NamedShape, sideLength : Num) {
+Square := $(_namedShape : NamedShape, sideLength : Num) {
     _namedShape
 
-    SimpleDescription = () {
+    SimpleDescription := () {
         "A square with sides of length \{sideLength}."
     }
 
-    Area = () {
+    Area := () {
         sideLength * sideLength
     }
 }
 
-NewSquare = (sideLength : Num, name : Str) {
+NewSquare := (sideLength : Num, name : Str) {
     Square$(NamedShape$(name, 4), sideLength)
 }
 
-test = NewSquare(5.2, "square")
+test := NewSquare(5.2, "square")
 test.Area()
 test.SimpleDescription()
 ```
@@ -746,10 +746,10 @@ test.simpleDescription()
 ## Checking Type
 ### Feel
 ```
-movieCount = 0
-songCount = 0
+movieCount := 0
+songCount := 0
 
-@ item = library... {
+@ item := library... {
     ? item :: Movie {
         movieCount += 1
     } | item :: Song {
@@ -827,7 +827,7 @@ for item in library:
 ## Pattern Matching
 ### Feel
 ```
-nb = 42
+nb := 42
 ? nb >= 0 & <= 7 {
     Print("single digit")
 } | == 8, 9 {
@@ -891,7 +891,7 @@ switch nb {
 ## Downcasting
 ### Feel
 ```
-@ current = someObjects... {
+@ current := someObjects... {
     ? current :: Movie => movie {
         Print("Movie: '\{movie.name}', " +
             "dir. \{movie.director}")
@@ -944,11 +944,11 @@ for current in someObjects:
 ## Protocol
 ### Feel
 ```
-Nameable = $ {
+Nameable := $ {
     Name : (-> s : Str)
 }
 
-f = (x : Nameable) {
+f := (x : Nameable) {
     Print("Name is " + x.Name())
 }
 ```
@@ -997,10 +997,10 @@ func f(x: Nameable) {
 ## Implement
 ### Feel
 ```
-Dog = $() {
-    Name = () { "Dog" }
+Dog := $() {
+    Name := () { "Dog" }
 
-    Weight = () { 30 }
+    Weight := () { 30 }
 }
 ```
 ### C#
