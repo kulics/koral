@@ -17,8 +17,6 @@ This is the main source code repository for Feel. It contains the compiler, and 
 - Multi-paradigm programming.
 - Cross-platform.
 - Unicode.
-- Multiple backends, supporting C # / Go / JavaScript / Kotlin.
-- LLVM will be supported soon.
 
 ## Getting Started
 - [English](./book-en/document.md)
@@ -27,24 +25,23 @@ This is the main source code repository for Feel. It contains the compiler, and 
 ## Quick Preview
 
 ```
-Main = () {
+Main := () {
     Print("Hello, world!")
-    Greetings = Make_greetings("Fall in love with programming!")
-    Greetings @ [index]value {
-        index == 0 ? {
-            Print(value + ", 世界!")
-        }
-        | ? {
-            Print(value + ", world!")
+    Greetings := Make_greetings("Fall in love with programming!")
+    @ index, value := Greetings.WithIndex()... {
+        ? index == 0 { 
+            Print(value, ", 世界!")
+        } | {
+            Print(value, ", world!")
         }
     }
 }
 
-Make_greetings = (input : Str -> output : (Str)List) {
-    <- input + {"你好"; "Hola"; "Bonjour"
-                "Ciao"; "こんにちは"; "안녕하세요"
-                "Cześć"; "Olá"; "Здравствуйте"
-                "Chào bạn"}
+Make_greetings := (input : Str -> output : List[Str]) {
+    <- List_of(input, "你好", "Hola", "Bonjour",
+                "Ciao", "こんにちは", "안녕하세요",
+                "Cześć", "Olá", "Здравствуйте",
+                "Chào bạn")
 }
 ```
 
@@ -58,7 +55,7 @@ Make_greetings = (input : Str -> output : (Str)List) {
     1. Improve grammar to achieve grammatical stability.
 1. 2020.01 ~ 2021.12
     1. Write some projects using Feel.
-    1. Compile to more languages, including Go/Kotlin/JavaScript/LLVM.
+    1. Compile to more backend, including Kotlin/LLVM.
     1. Improved compilation capabilities and support for language server protocols.
 
 ## Compare
@@ -66,9 +63,5 @@ Compare with C#, Go, Kotlin, Swift, Python.
 Read detail from [Here](./Compare.md).  
 ## Source Code
 [C#](https://github.com/kulics-works/feel-csharp)
-
-[Go](https://github.com/kulics-works/feel-go)
-
-[JavaScript (not yet)](https://github.com/kulics-works/feel-javascript)
 
 [Kotlin](https://github.com/kulics-works/feel-kotlin)
