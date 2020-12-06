@@ -28,9 +28,9 @@ print("Hello, world!")
 ## Variables And Constants
 ### Feel
 ```
-myVariable = 42
+myVariable := 42
 myVariable = 50
-MyConstant = 42
+MyConstant := 42
 ```
 ### C#
 ```
@@ -129,9 +129,9 @@ string
 ## Type Coercion
 ### Feel
 ```
-f = 6.0
-i = 94
-count = i + Int(f)
+f := 6.0
+i := 94
+count := i + f.[Int]
 ```
 ### C#
 ```
@@ -166,8 +166,8 @@ count = i + int(f)
 ## Inclusive Range Operator
 ### Feel
 ```
-1 ... 5 @ index {
-    print("\{index} times 5 is \{index * 5}")
+@ index := 1.Up_to(5)... {
+    Print("\{index} times 5 is \{index * 5}")
 }
 ```
 ### C#
@@ -203,8 +203,8 @@ for index in range(1,6):
 ## Arrays
 ### Feel
 ```
-shoppingList = {"catfish"; "water"; "tulips"; "blue paint"}
-shoppingList[1] = "bottle of water"
+shoppingList := List_of("catfish", "water", "tulips", "blue paint")
+shoppingList.(1) = "bottle of water"
 ```
 ### C#
 ```
@@ -234,11 +234,11 @@ shoppingList[1] = "bottle of water"
 ## Maps
 ### Feel
 ```
-occupations = {
-    ["Malcolm"] = "Captain"
-    ["Kaylee"] = "Mechanic"
-}
-occupations["Jayne"] = "Public Relations"
+occupations := Dict_of(
+    $("Malcolm", "Captain"),
+    $("Kaylee", "Mechanic")
+)
+occupations.("Jayne") = "Public Relations"
 ```
 ### C#
 ```
@@ -283,8 +283,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Feel
 ```
-emptyArray = (Str)List{}
-emptyDictionary = (Str, F32)Dict{}
+emptyArray := List_of[Str]()
+emptyDictionary := Dict_of[Str, F32]()
 ```
 ### C#
 ```
@@ -316,7 +316,7 @@ emptyDictionary ={}
 ## Functions
 ### Feel
 ```
-greet = (name : Str, day : Str -> r : Str) {
+greet := (name : Str, day : Str -> r : Str) {
     <- "Hello \{name}, today is \{day}."
 }
 greet("Bob", "Tuesday")
@@ -359,9 +359,7 @@ greet("Bob", "Tuesday")
 ## Tuple Return
 ### Feel
 ```
-getGasPrices = () {
-    <- 3.59, 3.69, 3.79
-}
+getGasPrices := () { 3.59, 3.69, 3.79 }
 ```
 ### C#
 ```
@@ -394,13 +392,13 @@ def getGasPrices():
 ## Function Type
 ### Feel
 ```
-makeIncrementer = () {
-    addOne = (number : Int) {
-        <- 1 + number
+makeIncrementer := () { 
+    addOne := (number : Int) { 
+        1 + number 
     }
     <- addOne
 }
-increment = makeIncrementer()
+increment := makeIncrementer()
 increment(7)
 ```
 ### C#
@@ -464,10 +462,9 @@ increment(7)
 ## Classes Declaration
 ### Feel
 ```
-Shape = $ {
-    numberOfSides = 0
-    simpleDescription = () {
-        <- "A shape with \{numberOfSides} sides."
+Shape := $(numberOfSides : Int) {
+    SimpleDescription := () {
+        "A shape with \{numberOfSides} sides."
     }
 }
 ```
@@ -493,8 +490,7 @@ func (p *Shape) simpleDescription() string {
 ```
 ### Kotlin
 ```
-class Shape {
-    var numberOfSides = 0
+class Shape(var numberOfSides: Int) {
     fun simpleDescription() =
         "A shape with $numberOfSides sides."
 }
@@ -519,9 +515,9 @@ class Shape(object):
 ## Classes Usage
 ### Feel
 ```
-shape = Shape{}
+shape := Shape$()
 shape.numberOfSides = 7
-shapeDescription = shape.simpleDescription()
+shapeDescription := shape.SimpleDescription()
 ```
 ### C#
 ```
@@ -556,38 +552,31 @@ shapeDescription = shape.simpleDescription()
 ## Subclass
 ### Feel
 ```
-NamedShape = $ {
-    name : Str
-    numberOfSides = 0
-    simpleDescription = () {
-        <- "A shape with \{numberOfSides} sides."
+NamedShape := $(name : Str, numberOfSides : Int) {
+    SimpleDescription := () {
+        "A shape with \{numberOfSides} sides."
     }
 } 
 
-Square = $ me {
-    NamedShape
-    sideLength : Num
+Square := $(_namedShape : NamedShape, sideLength : Num) {
+    _namedShape
 
-    simpleDescription = () {
-        <- "A square with sides of length \{sideLength}."
+    SimpleDescription := () {
+        "A square with sides of length \{sideLength}."
     }
 
-    area = () {
-        <- sideLength * sideLength
-    }
-}
-
-NewSquare = (sideLength : Num, name : Str) {
-    <- Square{
-        name = name
-        sideLength = sideLength
-        numberOfSides = 4
+    Area := () {
+        sideLength * sideLength
     }
 }
 
-test = NewSquare(5.2, "square")
-test.area()
-test.simpleDescription()
+NewSquare := (sideLength : Num, name : Str) {
+    Square$(NamedShape$(name, 4), sideLength)
+}
+
+test := NewSquare(5.2, "square")
+test.Area()
+test.SimpleDescription()
 ```
 ### C#
 ```
@@ -757,17 +746,15 @@ test.simpleDescription()
 ## Checking Type
 ### Feel
 ```
-movieCount = 0
-songCount = 0
+movieCount := 0
+songCount := 0
 
-library @ item {
-    item :: 
-    | Movie ? {
+@ item := library... {
+    ? item :: Movie {
         movieCount += 1
-    }
-    | Song ? {
+    } | item :: Song {
         songCount += 1
-    } 
+    }
 }
 ```
 ### C#
@@ -840,22 +827,19 @@ for item in library:
 ## Pattern Matching
 ### Feel
 ```
-nb = 42
-nb
-| @@ 0...7 | == 8 | == 9 ? {
-    print("single digit") 
-}
-| == 10 ? {
-    print("double digits") 
-}
-| @@ 11...99 ? {
-    print("double digits") 
-}
-| @@ 100...999 ? {
-    print("triple digits") 
-}
-| ? {
-    print("four or more digits") 
+nb := 42
+? nb >= 0 & <= 7 {
+    Print("single digit")
+} | == 8, 9 {
+    Print("single digit")
+} | == 10 {
+    Print("double digits")
+} | >= 11 & <= 99 {
+    Print("double digits") 
+} | >= 100 & <= 999 {
+    Print("triple digits")
+} | {
+    Print("four or more digits")
 }
 ```
 ### C#
@@ -907,9 +891,9 @@ switch nb {
 ## Downcasting
 ### Feel
 ```
-someObjects @ current {
-    current :: Movie => movie ? {
-        print("Movie: '\{movie.name}', " +
+@ current := someObjects... {
+    ? current :: Movie => movie {
+        Print("Movie: '\{movie.name}', " +
             "dir. \{movie.director}")
     }
 }
@@ -960,12 +944,12 @@ for current in someObjects:
 ## Protocol
 ### Feel
 ```
-Nameable = {
-    name : (-> s : Str)
+Nameable := $ {
+    Name : (-> s : Str)
 }
 
-f = (x : Nameable) {
-    print("Name is " + x.name())
+f := (x : Nameable) {
+    Print("Name is " + x.Name())
 }
 ```
 ### C#
@@ -1013,14 +997,10 @@ func f(x: Nameable) {
 ## Implement
 ### Feel
 ```
-Dog = $ {
-    name = () {
-        <- "Dog"
-    }
+Dog := $() {
+    Name := () { "Dog" }
 
-    getWeight = () {
-        <- 30
-    }
+    Weight := () { 30 }
 }
 ```
 ### C#
@@ -1032,7 +1012,7 @@ class Dog: Nameable, Weight
         return "Dog";
     }
 
-    public int getWeight() 
+    public int weight() 
     {
         return 30;
     }
@@ -1043,11 +1023,11 @@ class Dog: Nameable, Weight
 ```
 type Dog struct {}
 
-func (p *Dog) Name() string {
+func (p *Dog) name() string {
     return "Dog"
 }
 
-func (p *Dog) GetWeight() int {
+func (p *Dog) weight() int {
     return 30
 }
 ```
@@ -1058,7 +1038,7 @@ class Dog: Nameable, Weight {
         return "Dog"
     }
 
-    override fun getWeight(): Int {
+    override fun weight(): Int {
         return 30
     }
 }
@@ -1070,7 +1050,7 @@ class Dog: Nameable, Weight {
         return "Dog"
     }
 
-    func getWeight() -> Int {
+    func weight() -> Int {
         return 30
     }
 }
