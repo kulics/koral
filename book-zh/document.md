@@ -324,19 +324,19 @@ string := "Hello world! \{title}\{content}"
 ## Boolean 布尔  
 布尔指逻辑上的值，因为它们只能是真或者假。它经常用以辅助判断逻辑。
 
-在本语言中，默认的布尔为 `Bool` 类型，它是一个只有真值和假值的类型。
+在本语言中，默认的布尔为 `Bool` 类型，它是一个只有 true 值和 false 值的类型。
 
 例如：
 ```
-boolean1 : Bool = true      ` 真 `
-boolean2 : Bool = false     ` 假 `
+boolean1 : Bool = true
+boolean2 : Bool = false
 ```
 ## 任意类型  
 特别的，有时候会需要一个可以是 任意对象 的 类型 来辅助完成功能，它就是 `Any` 。
 
 例如：
 ```
-a : Any = 1   // 任意类型
+a : Any = 1
 ```
 
 # 操作符
@@ -896,7 +896,7 @@ peter := Student$("", "", 0, 0)
 
 例如：
 ```
-Print( peter.name )      ` 打印了某个学生的名字 `
+Print( peter.name )
 ```
 要更改属性的值也是一样的，它就相当于是个嵌套的标识符。我们可以直接用赋值语句去更改值。
 
@@ -1525,7 +1525,7 @@ b := a       // b 赋值为空的 Int
 
 例如：
 ```
-a = nil     ` 空值 `
+a = nil     // 空值
 ```
 
 一旦出现了可选类型，我们就需要严格处理空值，避免程序错误。
