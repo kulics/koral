@@ -331,15 +331,15 @@ In this language, the default boolean is the `Bool` type, which is a type with o
 
 E.g:
 ```
-boolean1 : Bool = true       ` true `
-boolean2 : Bool = false      ` false `
+boolean1 : Bool = true
+boolean2 : Bool = false
 ```
 ## Any Type
 In particular, sometimes a type that can be any object is needed to assist in the completion of the function, which is `Any`.
 
 E.g:
 ```
-a : Any = 1   // any type
+a : Any = 1
 ```
 
 # Operators
@@ -906,7 +906,7 @@ Quite simply, we only need to use the `.` syntax to summon the properties we nee
 
 E.g:
 ```
-Print( peter.name )   ` Printed the name of a student `
+Print( peter.name )
 ```
 The same is true for changing the value of an attribute, which is equivalent to a nested identifier. We can use the assignment statement to change the value directly.
 
@@ -1538,7 +1538,7 @@ We need a value that can be any type of null value, so it is `nil` .
 
 E.g:
 ```
-a = nil     ` nil value `
+a = nil     // nil value
 ```
 
 Once an optional type has appeared, we need to strictly handle null values ​​to avoid program errors.
