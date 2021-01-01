@@ -1191,20 +1191,15 @@ func := (he : Homework) {
 ```
 
 # Enumeration Type
-The enumeration is a set of integer constants with independent names. It can usually be used to mark the type of some business data, which is convenient for judgment processing.
+An enumeration is a special type of data type that contains only custom specific data, it is a collection of data with common characteristics. The values defined in an enumeration have mutually exclusive relationships.
+
 ## Definition
-We only need to use the `$(|id) {}` statement.
+We only need to use the `$id|id2 {}` statement.
 
 E.g:
 ```
-Color := $(|Red |Green |Blue) {}
-```
-The enumeration assigns values to the identifiers in order, resulting in a collection of `Red = 0, Green = 1, Blue = 2`.
+Color := $Red|Green|Blue {}
 
-This way we don't need to care about their values when we use them, and we can safely mark the business we need to handle.
-
-E.g:
-```
 c := Color$Red     // Get a color
 ? c == $Red {
     ......
@@ -1213,20 +1208,6 @@ c := Color$Red     // Get a color
 } | == $Blue {
     ......
 }
-```
-
-It should be noted that enumerations can only be defined under the namespace.
-## Specified value
-We can also assign a single identifier if needed, and unspecified will continue to accumulate 1 in the order of the previous identifier.
-
-E.g:
-```
-Number := $(
-    |A = 1  // 1
-    |B      // 2
-    |C = 1  // 1
-    |D      // 2
-) {}
 ```
 
 # Check
