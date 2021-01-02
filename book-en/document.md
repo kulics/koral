@@ -451,19 +451,19 @@ list : List[Str] = List_of[Str]()   // empty
 ```
 
 ### Access
-If we need to access one of the elements in the list, we can access it with `identifier.(index)`.
+If we need to access one of the elements in the list, we can access it with `Get` function.
 
 E.g:
 ```
-Print( list.(1) )
+Print( list.Get(1) )
 ```
-It should be noted that in the programming language, most of the list start index starts from `0`, the `identifier.(0)` gets the first element, and the next element and so on.
+It should be noted that in the programming language, most of the list start index starts from `0`, the `Get(0)` gets the first element, and the next element and so on.
 ### Change Element
-If we need to change one of the elements in the list, we can access the element directly and use the assignment statement to change it.
+If we need to change one of the elements in the list, we can access the element directly and use the `Set` function to change it.
 
 E.g:
 ```
-list.(0) = 5
+list.Set(0, 5)
 ```
 It should be noted that we can only access the index of the existing data, if it does not exist, an error will occur.
 ### Common Operations
@@ -498,23 +498,23 @@ E.g:
 dictionary : Dict[Int, Int] = Dict_of[Int, Int]()  // empty
 ```
 ### Access
-Similar to the list, we can also use the index to access the data directly.
+Similar to the list, we can also use the `Get` function to access the data directly.
 
 E.g:
 ```
-Print( dictionary.("a") )
+Print( dictionary.Get("a") )
 ```
 ### Change Element
-Similar to lists, we can also use assignment statements to change elements.
+Similar to lists, we can also use `Set` function to change elements.
 
 E.g:
 ```
-dictionary.("b") = 5
+dictionary.Set("b", 5)
 ```
 Different from the list, if the index is an index that does not exist, it will not be wrong, and the value will be directly assigned to the new key.
 ### Common operations
 ```
-dictionary.("d") = 11        // Add Element
+dictionary.Set("d", 11)      // Add Element
 dictionary.Remove("c")       // Delete the specified index element
 length := dictionary.Size()  // Length
 ```
