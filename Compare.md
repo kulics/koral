@@ -204,7 +204,7 @@ for index in range(1,6):
 ### Feel
 ```
 shoppingList := List_of("catfish", "water", "tulips", "blue paint")
-shoppingList.Set(1, "bottle of water")
+shoppingList.(1) = "bottle of water"
 ```
 ### C#
 ```
@@ -238,7 +238,7 @@ occupations := Dict_of(
     Pair_of("Malcolm", "Captain"),
     Pair_of("Kaylee", "Mechanic")
 )
-occupations.Set("Jayne", "Public Relations")
+occupations.("Jayne") = "Public Relations"
 ```
 ### C#
 ```
