@@ -443,27 +443,27 @@ This will create a list of `Int` types containing `1` to `5`.
 
 If you need a list of explicit types, you can use the constructor to create them.
 
-The representation of the list type is `List[element_type]`.
+The representation of the list type is `List{element_type}`.
 
 For example we need a list of strings:
 ```
-list : List[Str] = List_of[Str]()   // empty
+list : List{Str} = List_of{Str}()   // empty
 ```
 
 ### Access
-If we need to access one of the elements in the list, we can access it with `identifier.(index)`.
+If we need to access one of the elements in the list, we can access it with `identifier[index]`.
 
 E.g:
 ```
-Print( list.(1) )
+Print( list[1] )
 ```
-It should be noted that in the programming language, most of the list start index starts from `0`, the `identifier.(0)` gets the first element, and the next element and so on.
+It should be noted that in the programming language, most of the list start index starts from `0`, the `identifier[0]` gets the first element, and the next element and so on.
 ### Change Element
 If we need to change one of the elements in the list, we can access the element directly and use the assignment statement to change it.
 
 E.g:
 ```
-list.(0) = 5
+list[0] = 5
 ```
 It should be noted that we can only access the index of the existing data, if it does not exist, an error will occur.
 ### Common Operations
@@ -487,34 +487,34 @@ E.g:
 ```
 dictionary := Dict_of(Pair_of("a", 1), Pair_of("b", 2), Pair_of("c", 3))
 ```
-This will create a `Dict[Str, Int]` type dictionary containing three entries for `a,b,c`.
+This will create a `Dict{Str, Int}` type dictionary containing three entries for `a,b,c`.
 
 If you need an explicit type of dictionary, you can also use the constructor to create it.
 
-The representation of the dictionary type is `Dict[key_type, value_type]`.
+The representation of the dictionary type is `Dict{key_type, value_type}`.
 
 E.g:
 ```
-dictionary : Dict[Int, Int] = Dict_of[Int, Int]()  // empty
+dictionary : Dict{Int, Int} = Dict_of{Int, Int}()  // empty
 ```
 ### Access
 Similar to the list, we can also use the index to access the data directly.
 
 E.g:
 ```
-Print( dictionary.("a") )
+Print( dictionary["a"] )
 ```
 ### Change Element
 Similar to lists, we can also use assignment statements to change elements.
 
 E.g:
 ```
-dictionary.("b") = 5
+dictionary["b"] = 5
 ```
 Different from the list, if the index is an index that does not exist, it will not be wrong, and the value will be directly assigned to the new key.
 ### Common operations
 ```
-dictionary.("d") = 11        // Add Element
+dictionary["d"] = 11         // Add Element
 dictionary.Remove("c")       // Delete the specified index element
 length := dictionary.Size()  // Length
 ```
@@ -1164,7 +1164,7 @@ Of course, it's better to put these students in an array so that we can use loop
 
 E.g:
 ```
-arr := List_of[Homework](......)
+arr := List_of{Homework}(......)
 @ i := arr... {
     do_homework(i)
 }
@@ -1177,7 +1177,7 @@ Because the structure type can be converted to an interface type, the original t
 
 But sometimes we need to get the raw type of data to deal with, we can use type judgment to help us accomplish this.
 
-We can use `expression :: type` to determine the type of data, and `expression.[type]` to convert the data to our type.
+We can use `expression :: type` to determine the type of data, and `expression.{type}` to convert the data to our type.
 
 E.g:
 ```
@@ -1185,26 +1185,21 @@ func := (he : Homework) {
     // Determine if Chinese students
     ? he :: Chinese_Student {
         // Convert to Chinese Student Data
-        cs := he.[Chinese_Student]
+        cs := he.{Chinese_Student}
     }
 }
 ```
 
 # Enumeration Type
-The enumeration is a set of integer constants with independent names. It can usually be used to mark the type of some business data, which is convenient for judgment processing.
+An enumeration is a special type of data type that contains only custom specific data, it is a collection of data with common characteristics. The values defined in an enumeration have mutually exclusive relationships.
+
 ## Definition
-We only need to use the `$[] {}` statement.
+We only need to use the `$id|id2 {}` statement.
 
 E.g:
 ```
-Color := $[Red, Green, Blue] {}
-```
-The enumeration assigns values to the identifiers in order, resulting in a collection of `Red = 0, Green = 1, Blue = 2`.
+Color := $Red|Green|Blue {}
 
-This way we don't need to care about their values when we use them, and we can safely mark the business we need to handle.
-
-E.g:
-```
 c := Color$Red     // Get a color
 ? c == $Red {
     ......
@@ -1213,20 +1208,6 @@ c := Color$Red     // Get a color
 } | == $Blue {
     ......
 }
-```
-
-It should be noted that enumerations can only be defined under the namespace.
-## Specified value
-We can also assign a single identifier if needed, and unspecified will continue to accumulate 1 in the order of the previous identifier.
-
-E.g:
-```
-Number := $[
-    A = 1,  // 1
-    B,      // 2
-    C = 1,  // 1
-    D       // 2
-] {}
 ```
 
 # Check
@@ -1363,11 +1344,11 @@ result := say_hello~>()
 ## Use channel asynchronous communication
 For direct waterfall logic, the above syntax can already satisfy our use. But there are some other scenarios where we may need to manually handle more asynchronous details. At this time, we can use channels to pass data to complete our asynchronous tasks.
 
-The channel is a special collection, the type is `Chan[type]`, we can pass the specified type of data to the channel, use` id <~ value` to input data, and use `<~ id` to get data.
+The channel is a special collection, the type is `Chan{type}`, we can pass the specified type of data to the channel, use` id <~ value` to input data, and use `<~ id` to get data.
 
 E.g:
 ```
-channel := Chan[Int]$()
+channel := Chan{Int}$()
 
 // The current logic will wait for the data transfer to complete before continuing execution
 channel <~ 666
@@ -1381,7 +1362,7 @@ With channels, we can implement asynchronous programming through simple assembly
 E.g:
 
 ```
-ch := Chan[Int]$()
+ch := Chan{Int}$()
 
 // Execute a concurrent function
 ~> () {
@@ -1419,19 +1400,19 @@ For example, we now need a collection that supports adding, deleting, and readin
 Our lists and dictionaries are actually implemented using generics.
 
 ## Declaration and Use
-Let's see how to use generics to implement a list. We simply declare the generics of the type with the `[generics_identifier]` symbol.
+Let's see how to use generics to implement a list. We simply declare the generics of the type with the `{generics_identifier}` symbol.
 
 This is a simplified implementation.
 
 E.g:
 ```
-MyList := [T]$(
-    items  : Storage[T], 
+MyList := {T}$(
+    items  : Storage{T}, 
     length : Int
 ) {
     // Get a generic data
     Get := (index : Int -> item : T) {  
-        <- items.Get( index )
+        <- items[index]
     }
 
     // Add a generic data to the list
@@ -1443,7 +1424,7 @@ MyList := [T]$(
 ```
 So we define a structure that supports generics, `T` is a generic, in fact it can be any identifier, but habitual we will use `T` as a proxy.
 
-Generics support multiple generations, for example: `[T, H, Q]`.
+Generics support multiple generations, for example: `{T, H, Q}`.
 
 After the generics are defined, `T` is treated as a real type in the area of ​​the structure, and then we can use it like various places like `Int`.
 
@@ -1453,11 +1434,11 @@ It's very simple, just use it as we declare it, just pass the real type when cal
 
 E.g:
 ```
-int_list := MyList[Int]$(......)   // Pass in Int type
+int_list := MyList{Int}$(......)   // Pass in Int type
 ```
 So we have a list of integer types, is it like this:
 ```
-int_list := List_of[Int]()
+int_list := List_of{Int}()
 ```
 That's right, in fact, our list and dictionary syntax are generics.
 ## Supported Types
@@ -1465,20 +1446,20 @@ We can use generics in structures, functions, and interface types.
 
 E.g:
 ```
-Func := [T](data : T -> data : T) {
+Func := {T}(data : T -> data : T) {
     <- data
 }
 
-Interface := [T]$ {
-    Test : [R](in : T -> out : R)
+Interface := {T}$ {
+    Test : {R}(in : T -> out : R)
 }
 ```
 ## Generic Constraints
-If we need to constrain the type of generics, we only need to use the `[T:contract]` syntax.
+If we need to constrain the type of generics, we only need to use the `{T:contract}` syntax.
 
 E.g:
 ```
-StudentGroup := [T:Homework]$() {}
+StudentGroup := {T:Homework}$() {}
 ```
 
 # Annotations
