@@ -10,7 +10,7 @@
     System.Threading.Tasks
     System.ComponentModel.DataAnnotations.Schema
     System.ComponentModel.DataAnnotations
-    IO.File => . // 可以隐藏元素使用内容
+    . = IO.File // 可以隐藏元素使用内容
 }
 
 Main := () {
@@ -28,22 +28,24 @@ Main := () {
     format := "the value is \{integer}, \{number}, \{boolean}"
 
     // Array
-    array : Array{Int} = Array_of(1, 2, 3)
+    array : Array[Int] = Array_of(1, 2, 3)
 
     // List
-    list : List{Int} = List_of(1, 2, 3, 4, 5)
-    Print( list[0] ) // 使用下标获取
+    list : List[Int] = List_of(1, 2, 3, 4, 5)
+    Print( list.[0] ) // 使用下标获取
 
     // Dictionary, 前面为key，后面为value
-    dict : Dict{Str, Bool} = Dict_of($("1", false), $("2", true))
-    Print( dict["1"] ) // 使用key获取
+    dict : Dict[Str, Bool] = Dict_of($("1", false), $("2", true))
+    Print( dict.["1"] ) // 使用key获取
 
     // Anonymous Template
     new := $(title : Str, number : Int){}$("nnn", 8)
     new2 := $(title, number){}$("nnn", 8) // Type infer
 
     // Function
-    fn : (Int->Int) = (in : Int -> out : Int) { in }
+    fn : (Int->Int) = (in : Int -> out : Int) {
+        <- in
+    }
 
     // Function with no params no return
     do_something_void := () {
@@ -57,14 +59,20 @@ Main := () {
     }
 
     // Function can omit return type
-    funtion := (x : Int, y : Int) { x + y }
+    funtion := (x : Int, y : Int) {
+        <- x + y
+    }
 
     do_something_void()
     // 使用 _ 舍弃返回值
     _ = do_something_with_params(3, "test")
 
     // Judge，当表达式的结果只有Bool时，相当于if，只当True时才执行
-    ? 1 + 1 <> 2 { do_something_a() } | { do_something_b() }
+    ? 1 + 1 <> 2 {
+        do_something_a()
+    } | {
+        do_something_b()
+    }
 
     ? 1 + 1 <> 2 {
         Print(2)
@@ -81,13 +89,12 @@ Main := () {
     }
 
     // Judge type
-    ? ib :: Image_Button {
-        // Convert type
-        ib.{View}.show()
+    ? ib :: Image_Button -> it {
+        it.show()
     }
 
     // Complex Judge
-    ? x >= 0 & <= 6 | == 7, 8, 9 {
+    ? x... >= 0 & <= 6 | == 7, 8, 9 {
         do_something_a()
     } | == 14 {
         do_something_b()
@@ -95,8 +102,10 @@ Main := () {
         do_something_c()
     } | > 18 & < 32 {
         do_something_d()
-    } | :: Int => it {
+    } | :: Int -> it {
         do_something_e()
+    } | :: Option$Some(-> v) {
+        Print(v)
     } | {
         do_something()
     }
@@ -121,8 +130,8 @@ Main := () {
         Print(it)
     }
     /*
-    Up := [T]$To(from : T, to : T) | Until(from : T, to : T) {}
-    Down := [T]$To(from : T, to : T) | Until(from : T, to : T) {}
+    Up := $To(from : Int, to : Int) | Until(from : Int, to : Int) {}
+    Down := $To(from : Int, to : Int) | Until(from : Int, to : Int) {}
     */
 
     // Infinite
@@ -147,7 +156,7 @@ Main := () {
     }
     ! {
         do_some_thing()
-    } | :: Exception => ex {
+    } | :: Exception -> ex {
         ! <- ex // Use ! <- to throw an Exception
     } & {
         fi.dispose()
@@ -277,17 +286,17 @@ Main := () {
     swap(a@, b@)
     
     // Generic Template
-    Table := {T}$(data : T) {
+    Table := [T]$(data : T) {
         Set_data := (d : T) {
             data = d
         }
     }
-    Table{Int}$(1)
+    Table[Int]$(1)
     // Generic function
-    Add := {T}(x1 : T, x2 : T -> y : T) {
+    Add := [T](x1 : T, x2 : T -> y : T) {
         <- x1 + x2
     }
-    Add{Int}(1, 2)
+    Add[Int](1, 2)
 
     // Lambda Function
     arr.select((it){ it > 2 })
@@ -304,16 +313,19 @@ Main := () {
     ? x :: $Red|Green|Blue{} {}
     Unit := $Unit{}
     Bool := $False|True{}
-    List := {A}$Empty|Cons(head : A, tail : List{A}){}
+    List := [A]$Empty|Cons(head : A, tail : List(:A)){}
     Person := $(age : Int, name : Str){}
     VIP := $(person : Person) { Person <- person }
-    Option := {V}$None|Some(v : V){}
-    Result := {V}$Failure(e : Error)|Success(v : V){}
+    Option := [V]$None|Some(v : V){}
+    Result := [V]$Failure(e : Error)|Success(v : V){}
     Function := (age : Int, name : Str) {}
 
     op := Option$None
     op = Option$Some(1)
     op = $Some(1)
+    ? op == $Some(->v) {
+        v
+    }
     int_op := $None|Some(v: Int){ GetOrThrow:=(){} }$Some(1).do()
     Foo := $(){}
     foo := Foo$()
@@ -325,14 +337,14 @@ Main := () {
             <- Complex$(v + x.v, i + x.i)
         }
 
-        // y = Complex[x]
+        // y = Complex.[x]
         Get := (x : Bool->y : Int) {
             ? x {
                 <- v
             }
             <- i
         }
-        // Complex[x] = y
+        // Complex.[x] = y
         Set := (x : Bool, y : Int->) {
             ? x {
                 v = y
