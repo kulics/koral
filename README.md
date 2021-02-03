@@ -28,8 +28,8 @@ This is the main source code repository for Feel. It contains the compiler, and 
 Main := () {
     Print("Hello, world!")
     Greetings := Make_greetings("Fall in love with programming!")
-    @ index, value := Greetings.With_index()... {
-        ? index == 0 { 
+    @ (index, value := Greetings.With_index()...) {
+        ? (index == 0) { 
             Print(value, ", 世界!")
         } | {
             Print(value, ", world!")
