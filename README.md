@@ -25,23 +25,22 @@ This is the main source code repository for Feel. It contains the compiler, and 
 ## Quick Preview
 
 ```
-Main := () {
+fun Main() {
     Print("Hello, world!")
-    Greetings := Make_greetings("Fall in love with programming!")
-    @ (index, value := Greetings.With_index()...) {
-        ? (index == 0) { 
+    var Greetings = Make_greetings("Fall in love with programming!")
+    for index, value in Greetings.With_index() {
+        if index == 0 {
             Print(value, ", 世界!")
-        } | {
+        } else {
             Print(value, ", world!")
         }
     }
 }
 
-Make_greetings := (input : Str -> output : List[Str]) {
-    <- List_of(input, "你好", "Hola", "Bonjour",
-                "Ciao", "こんにちは", "안녕하세요",
-                "Cześć", "Olá", "Здравствуйте",
-                "Chào bạn")
+fun Make_greetings(input Str) {
+    ret List_of(input, "你好", "Hola", "Bonjour",
+        "Ciao", "こんにちは", "안녕하세요", "Cześć",
+         "Olá", "Здравствуйте", "Chào bạn")
 }
 ```
 

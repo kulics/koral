@@ -28,9 +28,9 @@ print("Hello, world!")
 ## Variables And Constants
 ### Feel
 ```
-myVariable := 42
+var myVariable = 42
 myVariable = 50
-MyConstant := 42
+var MyConstant = 42
 ```
 ### C#
 ```
@@ -65,7 +65,7 @@ MYCONSTANT = 42
 ## Explicit Types
 ### Feel
 ```
-explicitDouble : Num = 70
+var explicitDouble Num = 70
 ```
 ### C#
 ```
@@ -129,9 +129,9 @@ string
 ## Type Coercion
 ### Feel
 ```
-f := 6.0
-i := 94
-count := i + f.{Int}
+var f = 6.0
+var i = 94
+var count = i + f.Int()
 ```
 ### C#
 ```
@@ -166,9 +166,9 @@ count = i + int(f)
 ## Inclusive Range Operator
 ### Feel
 ```
-@ index := 1.Up_to(5)... {
+for index in 1 to 5 {
     Print("\{index} times 5 is \{index * 5}")
-}
+} 
 ```
 ### C#
 ```
@@ -179,15 +179,14 @@ for (int index = 1; index <= 5; index++)
 ```
 ### Go
 ```
-for index := 1; index <= 5; index++  {
+for index := 1; index <= 5; index++ {
     fmt.Printf("%d times 5 is %d", index, index*5)
 }
 ```
 ### Kotlin
 ```
-for (index in 1..5) {
+for (index in 1..5) 
     println("$index times 5 is ${index * 5}")
-}
 ```
 ### Swift
 ```
@@ -203,8 +202,8 @@ for index in range(1,6):
 ## Arrays
 ### Feel
 ```
-shoppingList := List_of("catfish", "water", "tulips", "blue paint")
-shoppingList[1] = "bottle of water"
+var shoppingList = List_of("catfish", "water", "tulips", "blue paint")
+shoppingList.[1] = "bottle of water"
 ```
 ### C#
 ```
@@ -234,11 +233,11 @@ shoppingList[1] = "bottle of water"
 ## Maps
 ### Feel
 ```
-occupations := Dict_of(
+var occupations = Dict_of(
     Pair_of("Malcolm", "Captain"),
     Pair_of("Kaylee", "Mechanic")
 )
-occupations["Jayne"] = "Public Relations"
+occupations.["Jayne"] = "Public Relations"
 ```
 ### C#
 ```
@@ -283,8 +282,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Feel
 ```
-emptyArray := List_of{Str}()
-emptyDictionary := Dict_of{Str, F32}()
+var emptyArray = List_of[Str]()
+var emptyDictionary = Dict_of[Str, F32]()
 ```
 ### C#
 ```
@@ -316,8 +315,8 @@ emptyDictionary ={}
 ## Functions
 ### Feel
 ```
-greet := (name : Str, day : Str -> r : Str) {
-    <- "Hello \{name}, today is \{day}."
+fun greet(name Str, day Str) Str {
+    "Hello \{name}, today is \{day}."
 }
 greet("Bob", "Tuesday")
 ```
@@ -359,7 +358,9 @@ greet("Bob", "Tuesday")
 ## Tuple Return
 ### Feel
 ```
-getGasPrices := () { 3.59, 3.69, 3.79 }
+fun getGasPrices() {
+    ret Triple(3.59, 3.69, 3.79)
+}
 ```
 ### C#
 ```
@@ -392,13 +393,11 @@ def getGasPrices():
 ## Function Type
 ### Feel
 ```
-makeIncrementer := () { 
-    addOne := (number : Int) { 
-        1 + number 
-    }
-    <- addOne
+fun makeIncrementer() { 
+    var addOne = fun number Int do 1 + number 
+    ret addOne
 }
-increment := makeIncrementer()
+var increment = makeIncrementer()
 increment(7)
 ```
 ### C#
@@ -746,13 +745,13 @@ test.simpleDescription()
 ## Checking Type
 ### Feel
 ```
-movieCount := 0
-songCount := 0
+var movieCount = 0
+var songCount = 0
 
-@ item := library... {
-    ? item :: Movie {
+for item in library {
+    if item is Movie {
         movieCount += 1
-    } | item :: Song {
+    } else if item is Song {
         songCount += 1
     }
 }
@@ -827,20 +826,18 @@ for item in library:
 ## Pattern Matching
 ### Feel
 ```
-nb := 42
-? nb >= 0 & <= 7 {
+var nb = 42
+if nb case in 0 to 7, 8, 9 {
     Print("single digit")
-} | == 8, 9 {
-    Print("single digit")
-} | == 10 {
+} case == 10 {
     Print("double digits")
-} | >= 11 & <= 99 {
+} case in 11 to 99 {
     Print("double digits") 
-} | >= 100 & <= 999 {
+} case in 100 to 999 {
     Print("triple digits")
-} | {
+} else {
     Print("four or more digits")
-}
+} 
 ```
 ### C#
 ```
@@ -891,8 +888,8 @@ switch nb {
 ## Downcasting
 ### Feel
 ```
-@ current := someObjects... {
-    ? current :: Movie => movie {
+for current in someObjects {
+    if current is Movie movie {
         Print("Movie: '\{movie.name}', " +
             "dir. \{movie.director}")
     }
@@ -919,12 +916,10 @@ for _, object := range someObjects {
 ```
 ### Kotlin
 ```
-for (current in someObjects) {
-    if (current is Movie) {
+for (current in someObjects) 
+    if (current is Movie) 
         println("Movie: '${current.name}', " +
 	    "dir. ${current.director}")
-    }
-}
 ```
 ### Swift
 ```
