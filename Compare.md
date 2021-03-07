@@ -394,7 +394,7 @@ def getGasPrices():
 ### Feel
 ```
 fun makeIncrementer() { 
-    var addOne = fun number Int do 1 + number 
+    var addOne = fun number Int { ret 1 + number } 
     ret addOne
 }
 var increment = makeIncrementer()
