@@ -28,7 +28,7 @@ This is the main source code repository for Feel. It contains the compiler, and 
 fun Main() {
     Print("Hello, world!")
     var Greetings = Make_greetings("Fall in love with programming!")
-    for index, value in Greetings.With_index() {
+    for Greetings.With_index() case index, value {
         if index == 0 {
             Print(value, ", 世界!")
         } else {
