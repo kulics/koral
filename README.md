@@ -6,9 +6,7 @@ With well-designed grammar rules, this language can effectively reduce the burde
 
 This is the main source code repository for Feel. It contains the compiler, and documentation.
 
-`Warning: This language is still in the experimental stage and cannot meet the production requirements. `
-
-`警告：这个语言目前还处于实验阶段，还未能满足生产要求。`
+> Warning: This language is still in the experimental stage and cannot meet the production requirements.
 
 ## Key Features
 - A modern grammar, which is easy to distinguish.
@@ -25,23 +23,21 @@ This is the main source code repository for Feel. It contains the compiler, and 
 ## Quick Preview
 
 ```
-fun Main() {
-    Print("Hello, world!")
-    var Greetings = Make_greetings("Fall in love with programming!")
-    for Greetings.With_index() case index, value {
-        if index == 0 {
-            Print(value, ", 世界!")
+let main() Void = {
+    println("Hello, world!");
+    let greetings = makeGreetings("Fall in love with programming!");
+    for (greetings.withIndex() is (index, value)) {
+        if (index == 0) {
+            println(value, ", 世界!");
         } else {
-            Print(value, ", world!")
-        }
-    }
-}
+            println(value, ", world!");
+        };
+    };
+};
 
-fun Make_greetings(input Str) {
-    ret List_of(input, "你好", "Hola", "Bonjour",
+let makeGreetings(input Str) Str = listOf(input, "你好", "Hola", "Bonjour",
         "Ciao", "こんにちは", "안녕하세요", "Cześć",
-         "Olá", "Здравствуйте", "Chào bạn")
-}
+         "Olá", "Здравствуйте", "Chào bạn");
 ```
 
 ## Roadmap

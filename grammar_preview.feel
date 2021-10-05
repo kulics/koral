@@ -32,32 +32,26 @@ let main() Void = {
 
     // List
     let list List[Int] = list_of(1, 2, 3, 4, 5);
-    Print( list(0) ); // 使用下标获取
+    print( list.get(0) ); // 使用下标获取
 
     // Dictionary, 前面为key，后面为value
-    let dict Dict[Str, Bool] = dict_of(new("1", false), new("2", true));
-    Print( dict("1") ); // 使用key获取
-
-    // Anonymous Template
-    let v1 = case(title Str, number Int)("nnn", 8);
-    let v2 = case(title, number)("nnn", 8); // obj infer
+    let dict Dict[Str, Bool] = dict_of(("1", false), ("2", true));
+    print( dict.get("1") ); // 使用key获取
 
     // Function
     let f(a Int) Int = a;
 
     // Function with no params no return
-    let do_something_void() = {
+    let do_something_void() Void = {
         do_something_a();
         do_something_b();
     };
 
     // Full Function with in params and out params
-    let do_something_with_params(x Int, y Str) case(x Int, y Str) = {
-        new(x, y)
-    };
+    let do_something_with_params(x Int, y Str) Pair[Int, Str] = (x, y);
 
     // Function can omit return obj
-    let f fn(Int,Int) Int = fn(x Int, y Int) { x + y };
+    let f fn(Int, Int) Int = fn(x Int, y Int) { x + y };
 
     // Currying
     let add = fn(x) { fn(y) { x + y } } ;
@@ -117,11 +111,11 @@ let main() Void = {
 
     // Loop, use identify to take out single item
     for (array is item) {
-        Print(item)
+        print(item)
     };
     // take index and value, both worked at Dictionary
     for (array.withIndex() is (index, value)) {
-        Print(index, value)
+        print(index, value)
     };
     
     // Conditional
@@ -133,50 +127,38 @@ let main() Void = {
         i += 1;
     };
 
-    // Template
-    def View = case(width Int, height Int, background Str);
-
     // 可以通过 this 来访问包自身属性或方法，当作为指针类型使用时 this 是指针，否则是值类型。 this 可以自定义。
-    def Button = case(width Int, height Int, background Str, title Str) {
+    def Button(width Int, height Int, background Str, title Str) {
         Click() Void = {
-            Print( title );
+            print( title );
             doSomeThingA();
             doSomeThingB();
         };
     }
     // 私有属性，不能被外部访问
-    def Image = case(_width Int, _height Int, _source Str) {
-        Init(w Int, h Int, s Str) Image = {
-            this._width, this._height, this._source = w, h, s;
-            this
-        };
-    }
+    def Image(mut _width Int, mut _height Int, mut _source Str)
 
     // Interface
-    def Animation = any {
+    def Animation {
         Move(s Int) Void;
         Stop() Void;
     };
 
     // Combine Template
-    def Image_Button = case(as Image, as Button, title Str) {
+    def Image_Button(as image Image, as button Button) Animation {
         // Implement Interface
         Move(s Int) Void = {
             t = 5000/s;
             play( s + t );
         };
         Stop() Void = {};
-
-        Init(w Int, h Int) Image_Button = {
-            this.Image.Init(w, h, "img");
-            this.title = "img btn";
-            this
-        };
     }
 
     // Create an Template object
-    let mut ib = Image_Button(1, 2);
-    ib = (2, 1);
+    let btn = Button(1, 2, "Cancel")
+    let img = Image(1, 2, "?.jpg")
+    let mut ib Image_Button = Image(img, btn);
+    ib = (img, btn);
     // Calling property
     ib.title = "OK";
     // Calling method
@@ -191,21 +173,9 @@ let main() Void = {
     };
     play_animation(ib);
 
-    // Create an object with simple assign
-    let ib2 = Image_Button(
-        title = "Cancel",
-        background = "red"
-    );
-
-    // Create an object with params
-    let img = Image(30, 20, "./icon.png");
-    let imgbtn = Image_Button().Init(1, 1);
-
-    let x = task(6)
-
     // Annotation
     `table("user"), property(false, name = "d", hide = true)`
-    def User = case(
+    def User(
         `column("id"), required, key`
         id Str,
         `column("nick_name"), required)`
@@ -215,14 +185,14 @@ let main() Void = {
     );
 
     // Optional obj
-    let a Opt[Int] = nil;
+    let a Option[Int] = nil;
     // Safe Call
     let e = a?.To_Str();
     // OrElseValue
     let f = a ?: 128;
     
     // Generic Template
-    def Table[T Any] = case(data T) {
+    def Table[T Any](data T) {
         Set_data(d T) Void = {
             data = d;
         };
@@ -239,23 +209,30 @@ let main() Void = {
     let f(i fn(Int) Int) = i(1);
     f(fn(x) Int { y })
 
-    def Color is Red() | Green() | Blue();
+    def sealed Color;
+    def Red() Color;
+    def Green() Color;
+    def Blue() Color;
     def Unit();
     def Person(age Int, name Str);
-    def Option[T] is None() | Some(v T);
-    def Result[T] is Err(msg Error) | Ok(v T);
+    def sealed Option[T Any];
+    def None[T Any]() Option[T];
+    def Some[T Any](v T) Option[T];
+    def sealed Result[T Any];
+    def Err[T Any](msg Error) Result[T];
+    def Ok[T Any](v T) Result[T];
     def Error {
         error() Str;
     };
-    let mut op Option[Int] = None;
+    let mut op Option[Int] = None();
     op = Some(1);
-    if (op is Int v) {
-        Print(v);
+    if (op is Some(v)) {
+        print(v);
     };
 };
 
 // operator override
-def MyList[T Any](arr Array[T]) {
+def MyList[T Any](arr Array[T]) Addable[T] & MutIndexable[] {
     // a + e
     plus(element T) Void = {
         arr = arr.append(element);
@@ -277,16 +254,19 @@ def Iterable[T Any] {
     iter() Iterator[T];
 };
 
-def List[T Any] is Nil | Cons(head T, tail List[T]) {
+def sealed List[T Any] {
     iter() Iterator[T] = ListIterator(this)
 };
+
+def Nil[T Any]() List[T];
+def Cons[T Any](head T, tail List[T]) List[T];
 
 def ListIterator[T Any](mut li List[T]) {
     next() Option[T] = if (li is Cons(h, t)) {
         li = t;
-        h
+        Some(h)
     } else {
-        None
+        None()
     };
 };
 
@@ -316,66 +296,4 @@ def ListIterator[T Any](mut li List[T]) {
 1. 没有值类型，统一是引用类型
 1. 没有构造函数
 1. 强制分号
-*/
-
-class Eq[T] as {
-    T.equals[R](rhs R) Bool;
-}
-
-impl Eq[Int] {
-    Int.equals[R](rhs R) Bool = this == rhs;
-}
-
-let f[T Eq[T]](a T, b T) Bool = a.equals(b);
-let a = f[Int](1, 1);
-let g(a Eq[Int]) = a;
-let b = g(1);
-
-/*
-fun main(args: Array<String>) {
-    println("Hello World!")
-    val a = Foo(1)
-    val b: I = DelegateFoo(a)
-    val c = b.getRawObject()
-    if (c is Foo) {
-        println(c.v)
-    }
-    g(ImplIForFoo, a)
-}
-
-interface RawObject {
-    fun getRawObject(): Any
-}
-
-interface I : RawObject {
-    fun f(a: Int): Int
-}
-
-interface IClass<T> {
-    fun f(self: T, a: Int): Int
-}
-
-class Foo(val v: Int)
-
-fun Foo.f(a: Int): Int = v + a
-
-object ImplIForFoo : IClass<Foo> {
-    override fun f(self: Foo, a: Int): Int {
-        return self.f(a)
-    }
-}
-
-class DelegateFoo(private val rawObject: Foo) : I {
-    override fun f(a: Int): Int {
-        return rawObject.f(a)
-    }
-
-    override fun getRawObject(): Any {
-        return rawObject
-    }
-}
-
-fun <T> g(instance: IClass<T>, x: T): Int {
-    return instance.f(x, 1)
-}
 */
