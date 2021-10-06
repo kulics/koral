@@ -22,16 +22,12 @@ This is the main source code repository for Feel. It contains the compiler, and 
 
 ## Quick Preview
 
-```
+```feel
 let main() Void = {
     println("Hello, world!");
     let greetings = makeGreetings("Fall in love with programming!");
-    for (greetings.withIndex() is (index, value)) {
-        if (index == 0) {
-            println(value, ", 世界!");
-        } else {
-            println(value, ", world!");
-        };
+    for greetings.withIndex() is (index, value) loop {
+        println(value, if index == 0 then ", 世界!" else ", world!");
     };
 };
 
@@ -54,7 +50,7 @@ let makeGreetings(input Str) Str = listOf(input, "你好", "Hola", "Bonjour",
     1. Improved compilation capabilities and support for language server protocols.
 
 ## Compare
-Compare with C#, Go, Kotlin, Swift, Python.
+Compare with C#, Go, Kotlin, Swift.
 Read detail from [Here](./Compare.md).  
 ## Source Code
 [C#](https://github.com/kulics-works/feel-csharp)

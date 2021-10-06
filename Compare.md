@@ -21,10 +21,6 @@ println("Hello, world!")
 ```
 print("Hello, world!")
 ```
-### Python
-```
-print("Hello, world!")
-```
 ## Variables And Constants
 ### Feel
 ```
@@ -56,12 +52,6 @@ var myVariable = 42
 myVariable = 50
 let myConstant = 42
 ```
-### Python
-```
-myVariable = 42
-myVariable = 50
-MYCONSTANT = 42
-```
 ## Explicit Types
 ### Feel
 ```
@@ -88,8 +78,8 @@ let explicitDouble: Double = 70
 ```
 I32 I16 I64 I8 
 F64 F32 
-Bool 
-Str
+Bool
+String
 ```
 ### C#
 ```
@@ -118,13 +108,6 @@ Int32 Int16 Int64 Int8
 Double Float 
 Bool 
 String
-```
-### Python
-```
-int long 
-double float 
-bool
-string
 ```
 ## Type Coercion
 ### Feel
@@ -157,12 +140,6 @@ let f = 6.0
 let i = 94
 let count = i + Int(f)
 ```
-### Python
-```
-f = 6.0
-i = 94
-count = i + int(f)
-```
 ## Inclusive Range Operator
 ### Feel
 ```
@@ -194,11 +171,6 @@ for index in 1...5 {
     print("\(index) times 5 is \(index * 5)")
 }
 ```
-### Python
-```
-for index in range(1,6):
-    print ("%d times 5 is %d" % (index,index*5))
-```
 ## Arrays
 ### Feel
 ```
@@ -223,11 +195,6 @@ shoppingList[1] = "bottle of water"
 ### Swift
 ```
 var shoppingList = ["catfish", "water", "tulips", "blue paint"]
-shoppingList[1] = "bottle of water"
-```
-### Python
-```
-shoppingList = ["catfish", "water", "tulips", "blue paint"]
 shoppingList[1] = "bottle of water"
 ```
 ## Maps
@@ -271,19 +238,11 @@ var occupations = [
 ]
 occupations["Jayne"] = "Public Relations"
 ```
-### Python
-```
-occupations = {
-    "Malcolm":"Captain",
-    "Kaylee":"Mechanic"
-}
-occupations["Jayne"] = "Public Relations"
-```
 ## Empty Collections
 ### Feel
 ```
-let emptyArray = listOf[Str]()
-let emptyDictionary = dictOf[Str, F32]()
+let emptyArray = listOf[String]()
+let emptyDictionary = dictOf[String, F32]()
 ```
 ### C#
 ```
@@ -307,15 +266,10 @@ val emptyMap = mapOf<String, Float>()
 let emptyArray = [String]()
 let emptyDictionary = [String: Float]()
 ```
-### Python
-```
-emptyArray = []
-emptyDictionary ={}
-```
 ## Functions
 ### Feel
 ```
-let greet(name Str, day Str) Str = "Hello \{name}, today is \{day}.";
+let greet(name String, day String) String = "Hello \{name}, today is \{day}.";
 greet("Bob", "Tuesday")
 ```
 ### C#
@@ -347,12 +301,6 @@ func greet(_ name: String,_ day: String) -> String {
 }
 greet("Bob", "Tuesday")
 ```
-### Python
-```
-def greet(name,day):
-    return 'hello ' + name + ',today is '+ day
-greet("Bob", "Tuesday")
-```
 ## Tuple Return
 ### Feel
 ```
@@ -381,16 +329,11 @@ func getGasPrices() -> (Double, Double, Double) {
     return (3.59, 3.69, 3.79)
 }
 ```
-### Python
-```
-def getGasPrices():
-    return (3.59, 3.69, 3.79)
-```
 ## Function Type
 ### Feel
 ```
-let makeIncrementer() fun(number) Int = { 
-    var addOne = fun(number) Int { ret 1 + number };
+let makeIncrementer() fn(Int) Int = {
+    let addOne(number Int) = 1 + number;
     addOne
 };
 let increment = makeIncrementer();
@@ -445,20 +388,11 @@ func makeIncrementer() -> ((Int) -> Int) {
 let increment = makeIncrementer()
 increment(7)
 ```
-### Python
-```
-def makeIncrementer():
-    def addOne(number):
-        return 1 + number
-    return addOne
-increment = makeIncrementer()
-increment(7)
-```
 ## Classes Declaration
 ### Feel
 ```
 def Shape(numberOfSides Int) {
-    simpleDescription() Str =
+    simpleDescription() String =
         "A shape with \{numberOfSides} sides.";
 }
 ```
@@ -498,14 +432,6 @@ class Shape {
     }
 }
 ```
-### Python
-```
-class Shape(object):
-    def __init__(self):
-        self.numberOfSides = 0
-    def simpleDescription(self):
-        return 'A shape with' + numberOfSides +' sides.'
-```
 ## Classes Usage
 ### Feel
 ```
@@ -537,28 +463,22 @@ var shape = Shape()
 shape.numberOfSides = 7
 var shapeDescription = shape.simpleDescription()
 ```
-### Python
-```
-shape = Shape()
-shape.numberOfSides = 7
-shapeDescription = shape.simpleDescription()
-```
 ## Subclass
 ### Feel
 ```
-def NamedShape(name Str, numberOfSides Int) {
-    simpleDescription() Str =
+def NamedShape(name String, numberOfSides Int) {
+    simpleDescription() String =
         "A shape with \{numberOfSides} sides.";
 } 
 
 def Square(as namedShape NamedShape, sideLength Num) {
-    simpleDescription() Str =
+    simpleDescription() String =
         "A square with sides of length \{sideLength}.";
 
     area() Num = sideLength * sideLength;
 }
 
-let newSquare(sideLength Num, name Str) Square = ((name, 4), sideLength);
+let newSquare(sideLength Num, name String) Square = ((name, 4), sideLength);
 
 let test = newSquare(5.2, "square");
 test.area();
@@ -705,30 +625,6 @@ let test = Square(sideLength: 5.2, name: "square")
 test.area()
 test.simpleDescription()
 ```
-## Python
-```
-class NamedShape(object):
-    def __init__(self,name):
-        self.numberOfSides = 0
-        self.name = name
-    def simpleDescription(self):
-        return 'A shape with ' + str(self.numberOfSides) + ' sides.'
-
-
-class Square(NamedShape):
-    def __init__(self,sideLength,name):
-        NamedShape.__init__(self,name)
-        self.sideLength = sideLength
-        self.numberOfSides = 4
-    def area(self):
-        return self.sideLength * self.sideLength
-    def simpleDescription(self):
-        return 'A square with sides of length ' + str(self.sideLength)
-
-test = Square(5.2,'square')
-test.area()
-test.simpleDescription()
-```
 ## Checking Type
 ### Feel
 ```
@@ -736,9 +632,9 @@ let mut movieCount = 0;
 let mut songCount = 0;
 
 for (library is item) {
-    if (item is Movie _) {
+    if item is Movie _ then {
         movieCount += 1;
-    } else if (item is Song _) {
+    } else if item is Song _ then {
         songCount += 1;
     };
 };
@@ -798,17 +694,6 @@ for item in library {
         songCount += 1
     }
 }
-```
-### Python
-```
-movieCount = 0
-songCount = 0
-
-for item in library:
-    if item is Movie:
-        movieCount+=1
-    elif item is Song:
-        songCount+=1
 ```
 ## Pattern Matching
 ### Feel
@@ -872,8 +757,8 @@ switch nb {
 ### Feel
 ```
 for (someObjects is current) {
-    if (current is Movie movie) {
-        print("Movie: '\{movie.name}', " +
+    if current is Movie movie then {
+        println("Movie: '\{movie.name}', " +
             "dir. \{movie.director}");
     };
 };
@@ -913,20 +798,14 @@ for current in someObjects {
     }
 }
 ```
-### Python
-```
-for current in someObjects:
-    if current is Movie:
-        print('Movie: %s, dir. %s' % (movie.name, movie.director))
-```
 ## Protocol
 ### Feel
 ```
 def Nameable {
-    name() Str;
+    name() String;
 };
 
-let f(x Nameable) Void = print("Name is " + x.Name());
+let f(x Nameable) Void = println("Name is " + x.Name());
 ```
 ### C#
 ```
@@ -974,7 +853,7 @@ func f(x: Nameable) {
 ### Feel
 ```
 def Dog() Nameable & Weight {
-    name() Str = "Dog";
+    name() String = "Dog";
 
     weight() Int = 30;
 };
