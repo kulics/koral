@@ -450,15 +450,15 @@ let a = add(1, 2); // a == 3
 
 In Feel, a function is a type just like Int, Float, etc. Similarly, a function can be used as an expression.
 
-The type of a function is declared using the fn keyword, and the function definition requires the same declaration of the argument type and return type.
+The type of a function is declared using the `(T) -> R` syntax, and the function definition requires the same declaration of the argument type and return type.
 
 Once a function is defined, the function name can be used as an expression and can be assigned to other variables or used as parameters and return values.
 
 Variables of function types are called with the same `()` syntax as functions.
 
 ```feel
-let sqrt(x Int) = x * x; // sqrt fn(Int) Int
-let f fn(Int) Int = sqrt;
+let sqrt(x Int) = x * x; // sqrt (Int) -> Int
+let f (Int) -> Int = sqrt;
 let a = f(2); // a == 4
 ```
 
@@ -466,7 +466,7 @@ For example, with this feature, we can also define parameters or return values f
 
 ```feel
 let hello() = println("Hello, world!");
-let run(f fn() Void) = f();
+let run(f () -> Void) = f();
 let toRun() = run;
 let main() = {
     toRun()(hello);
@@ -481,13 +481,13 @@ It's sometimes awkward to define a function and then pass it in as above, becaus
 
 At this point we can use the syntax of the Lambda expression to simplify our code.
 
-Lambda expressions are very similar to function definitions, except that they are declared using the fn keyword and cannot be specified by name.
+Lambda expressions are very similar to function definitions.
 
 As shown in the code below, the value of f2 is a lambda, which is the same type as f1 and has a very similar syntax, with lambda's also declaring parameters and return types, and requiring an expression as the return value.
 
 ```feel
-let f1(x Int) Int = x + 1; // f1 fn() Int
-let f2 = fn(x Int) Int = x + 1; // f2 fn() Int
+let f1(x Int) Int = x + 1; // f1 () -> Int
+let f2 = (x Int) Int -> x + 1; // f2 () -> Int
 let a = f1(1) + f2(1); // a == 4
 ```
 
