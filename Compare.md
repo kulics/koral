@@ -332,7 +332,7 @@ func getGasPrices() -> (Double, Double, Double) {
 ## Function Type
 ### Feel
 ```
-let makeIncrementer() fn(Int) Int = {
+let makeIncrementer() (Int) -> Int = {
     let addOne(number Int) = 1 + number;
     addOne
 };
