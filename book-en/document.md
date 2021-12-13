@@ -314,6 +314,8 @@ let main() = if 1 == 1 then println("yes") else println("no");
 
 Executing the above program will show `yes`.
 
+If is also an expression, then and else branches must be followed by an expression, and depending on the condition of if, the value of the if expression may be one of then or else.
+
 Therefore, we can write the above program in the same way, and the results are equivalent in both ways.
 
 ```feel
