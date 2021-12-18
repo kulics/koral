@@ -144,7 +144,7 @@ let count = i + Int(f)
 ### Feel
 ```
 for (range(1, 5) is index) {
-    print("\{index} times 5 is \{index * 5}");
+    println("\{index} times 5 is \{index * 5}");
 };
 ```
 ### C#
@@ -269,7 +269,7 @@ let emptyDictionary = [String: Float]()
 ## Functions
 ### Feel
 ```
-let greet(name String, day String) String = "Hello \{name}, today is \{day}.";
+let greet(name String, day String) String => "Hello \{name}, today is \{day}.";
 greet("Bob", "Tuesday")
 ```
 ### C#
@@ -304,7 +304,7 @@ greet("Bob", "Tuesday")
 ## Tuple Return
 ### Feel
 ```
-let getGasPrices() = Triple(3.59, 3.69, 3.79);
+let getGasPrices() => (3.59, 3.69, 3.79);
 ```
 ### C#
 ```
@@ -332,8 +332,8 @@ func getGasPrices() -> (Double, Double, Double) {
 ## Function Type
 ### Feel
 ```
-let makeIncrementer() (Int) -> Int = {
-    let addOne(number Int) = 1 + number;
+let makeIncrementer() (Int) -> Int => {
+    let addOne(number Int) => 1 + number;
     addOne
 };
 let increment = makeIncrementer();
@@ -392,9 +392,9 @@ increment(7)
 ### Feel
 ```
 def Shape(numberOfSides Int) {
-    simpleDescription() String =
+    simpleDescription() String =>
         "A shape with \{numberOfSides} sides.";
-}
+};
 ```
 ### C#
 ```
@@ -467,18 +467,18 @@ var shapeDescription = shape.simpleDescription()
 ### Feel
 ```
 def NamedShape(name String, numberOfSides Int) {
-    simpleDescription() String =
+    simpleDescription() String =>
         "A shape with \{numberOfSides} sides.";
-} 
+};
 
 def Square(as namedShape NamedShape, sideLength Num) {
-    simpleDescription() String =
+    simpleDescription() String =>
         "A square with sides of length \{sideLength}.";
 
-    area() Num = sideLength * sideLength;
-}
+    area() Num => sideLength * sideLength;
+};
 
-let newSquare(sideLength Num, name String) Square = ((name, 4), sideLength);
+let newSquare(sideLength Num, name String) Square => ((name, 4), sideLength);
 
 let test = newSquare(5.2, "square");
 test.area();
@@ -805,7 +805,7 @@ def Nameable {
     name() String;
 };
 
-let f(x Nameable) Void = println("Name is " + x.Name());
+let f(x Nameable) Void => println("Name is " + x.Name());
 ```
 ### C#
 ```
@@ -853,9 +853,9 @@ func f(x: Nameable) {
 ### Feel
 ```
 def Dog() Nameable & Weight {
-    name() String = "Dog";
+    name() String => "Dog";
 
-    weight() Int = 30;
+    weight() Int => 30;
 };
 ```
 ### C#

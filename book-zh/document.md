@@ -61,7 +61,7 @@ let a = 1 + 1 + 1
 我们需要定义一个入口来让程序知道从哪里启动，我们可以通过 main 函数声明。
 
 ```feel
-let main() = {};
+let main() => {};
 ```
 
 这里我们声明了一个名称为 main 的函数，`=` 右边是这个函数的返回值，`{}` 表示这个函数什么也不执行。
@@ -73,7 +73,7 @@ let main() = {};
 现在让我们的程序输出一些内容看看，我们可以使用 `println` 函数向控制台打印一些信息。
 
 ```feel
-let main() = println("Hello, world!");
+let main() => println("Hello, world!");
 ```
 
 现在尝试执行这个程序，我们可以看到控制台上显示了 `Hello, world!`。
@@ -308,7 +308,7 @@ println( ~~a );        // ~~ 非，布尔值取反
 例如：
 
 ```feel
-let main() = if 1 == 1 then println("yes") else println("no");
+let main() => if 1 == 1 then println("yes") else println("no");
 ```
 
 执行上面的程序会看到 `yes`。
@@ -318,7 +318,7 @@ if 同样也是表达式，then 和 else 分支后面都必须是表达式，根
 因此上面那段程序我们也可以这样写，两种写法结果等价。
 
 ```feel
-let main() = println(if 1 == 1 then "yes" else "no");
+let main() => println(if 1 == 1 then "yes" else "no");
 ```
 
 由于 if 本身也是表达式，因此 else 后面自然也可以接另外一个 if 表达式，这样我们就可以实现连续的条件判断。
@@ -331,7 +331,7 @@ let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less";
 当我们不需要处理 else 分支时，可以省略 else 分支，这种没有 else 分支的 if 语法不是表达式而是语句，then 分支后必须接块表达式。
 
 ```feel
-let main() = {
+let main() => {
     if 1 == 1 then {
         println("yes");
     };
@@ -349,7 +349,7 @@ let main() = {
 例如：
 
 ```feel
-let main() = {
+let main() => {
     let mut i = 0;
     while i <= 10 then {
         println(i);
@@ -363,7 +363,7 @@ let main() = {
 当我们需要在循环中主动退出循环时，可以使用 break 语句。程序会在执行到 break 时退出当前最近的一层循环。
 
 ```feel
-let main() = {
+let main() => {
     let mut i = 0;
     while true then {
         if i > 20 then {
@@ -380,7 +380,7 @@ let main() = {
 如果我们需要在循环中跳过某些轮，可以使用 continue 语句。程序会在执行到 continue 时跳过当前一轮循环，继续执行下一次循环。
 
 ```feel
-let main() = {
+let main() => {
     let mut i = 0;
     while i <= 10 then {
         if i % 2 == 0 then {
@@ -408,11 +408,11 @@ let main() = {
 
 函数通过 let 关键字定义，函数的名字后面使用 `()` 表示这个函数接受的参数，括号后面是这个函数的返回类型。返回类型在上下文明确时可以省略，由编译器推断返回类型。
 
-函数的 `=` 右边必须声明一个表达式，这个表达式的值就是函数的返回值。
+函数的 `=>` 右边必须声明一个表达式，这个表达式的值就是函数的返回值。
 
 ```feel
-let f1() Int = 1;
-let f2(a Int) = a + 1;
+let f1() Int => 1;
+let f2(a Int) => a + 1;
 ```
 
 ### 调用
@@ -435,7 +435,7 @@ let b = f2(1);
 非常简单的，我们只需要使用 `参数名 类型` 就可以声明参数。
 
 ```feel
-let sqrt(x Int) = x * x;
+let sqrt(x Int) => x * x;
 let a = sqrt(x); // a == 4
 ```
 
@@ -444,7 +444,7 @@ sqrt 接收一个 Int 类型的参数 x，然后返回它的平方值。调用 s
 如果我们需要多个参数，可以按顺序逐个声明它们，中间使用 `,` 分割。调用也需要按同样的顺序给出表达式。
 
 ```feel
-let add(x Int, y Int) = x + y;
+let add(x Int, y Int) => x + y;
 let a = add(1, 2); // a == 3
 ```
 
@@ -459,7 +459,7 @@ let a = add(1, 2); // a == 3
 函数类型的变量跟函数一样使用 `()` 语法调用。
 
 ```feel
-let sqrt(x Int) = x * x; // sqrt (Int) -> Int
+let sqrt(x Int) => x * x; // sqrt (Int) -> Int
 let f (Int) -> Int = sqrt;
 let a = f(2); // a == 4
 ```
@@ -467,10 +467,10 @@ let a = f(2); // a == 4
 例如这个特性，我们也可以定义函数类型的参数或者返回值。
 
 ```feel
-let hello() = println("Hello, world!");
+let hello() => println("Hello, world!");
 let run(f () -> Void) = f();
-let toRun() = run;
-let main() = {
+let toRun() => run;
+let main() => {
     toRun()(hello);
 };
 ```
@@ -488,9 +488,16 @@ Lambda 表达式与函数定义很相似。
 如下面的代码所示，f2 的值是一个 lambda，它们的类型与 f1 一样，语法上上也非常相似，lambda 的同样需要声明参数和返回类型，并且需要一个表达式作为返回值。
 
 ```feel
-let f1(x Int) Int = x + 1; // f1 () -> Int
-let f2 = (x Int) Int -> x + 1; // f2 () -> Int
+let f1(x Int) Int => x + 1; // f1 () -> Int
+let f2 = (x Int) Int => x + 1; // f2 () -> Int
 let a = f1(1) + f2(1); // a == 4
+```
+
+我们看到，实际上函数语法与 lambda 表达式语法是高度一致的，我们可以很容易写出柯里化函数。
+
+```feel
+let sum(a Int) => (b Int) => (c Int) => a + b + c;
+let a = sum(1)(2)(3); // a == 6
 ```
 
 ## 结构
@@ -536,7 +543,7 @@ let a Point = Point(0, 0);
 ```feel
 def Point(x Int, y Int);
 
-let main() = {
+let main() => {
     let a = Point(64, 128);
     println(a.x);
     println(a.y);
@@ -552,7 +559,7 @@ let main() = {
 ```feel
 def Point(x Int, y Int);
 
-let main() = {
+let main() => {
     let a = Point(64, 128);
     a.x = 2; // 错误
 };
@@ -563,7 +570,7 @@ let main() = {
 ```feel
 def Point(mut x Int, mut y Int);
 
-let main() = {
+let main() => {
     let a = Point(64, 128);
     a.x = 2;
     a.y = 0;
