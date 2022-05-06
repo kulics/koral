@@ -55,7 +55,7 @@ let myConstant = 42
 ## Explicit Types
 ### Feel
 ```
-let explicitDouble Num = 70.0;
+let explicitDouble : Float = 70.0;
 ```
 ### C#
 ```
@@ -76,8 +76,8 @@ let explicitDouble: Double = 70
 ## Basic Types
 ### Feel
 ```
-I32 I16 I64 I8 
-F64 F32 
+Int32 Int16 Int64 Int8 
+Float64 Float32 
 Bool
 String
 ```
@@ -114,7 +114,7 @@ String
 ```
 let f = 6.0
 let i = 94
-let count = i + f.toInt()
+let count = i + f.to_Int()
 ```
 ### C#
 ```
@@ -174,7 +174,7 @@ for index in 1...5 {
 ## Arrays
 ### Feel
 ```
-let shoppingList = arrayOf("catfish", "water", "tulips", "blue paint");
+let shoppingList = array_of("catfish", "water", "tulips", "blue paint");
 shoppingList.set(1, "bottle of water");
 ```
 ### C#
@@ -200,7 +200,7 @@ shoppingList[1] = "bottle of water"
 ## Maps
 ### Feel
 ```
-let occupations = dictOf(
+let occupations = dict_of(
     ("Malcolm", "Captain"),
     ("Kaylee", "Mechanic")
 );
@@ -241,8 +241,8 @@ occupations["Jayne"] = "Public Relations"
 ## Empty Collections
 ### Feel
 ```
-let emptyArray = listOf[String]()
-let emptyDictionary = dictOf[String, F32]()
+let emptyArray = list_of[String]()
+let emptyDictionary = dict_of[String, Float32]()
 ```
 ### C#
 ```
@@ -269,8 +269,8 @@ let emptyDictionary = [String: Float]()
 ## Functions
 ### Feel
 ```
-let greet(name String, day String) String => "Hello \{name}, today is \{day}.";
-greet("Bob", "Tuesday")
+let greet(name : String, day : String) : String => "Hello \{name}, today is \{day}.";
+greet("Bob", "Tuesday");
 ```
 ### C#
 ```
@@ -332,8 +332,8 @@ func getGasPrices() -> (Double, Double, Double) {
 ## Function Type
 ### Feel
 ```
-let makeIncrementer() (Int) -> Int => {
-    let addOne(number Int) => 1 + number;
+let makeIncrementer() : Int -> Int => {
+    let addOne(number : Int) => 1 + number;
     addOne
 };
 let increment = makeIncrementer();
@@ -391,8 +391,8 @@ increment(7)
 ## Classes Declaration
 ### Feel
 ```
-def Shape(numberOfSides Int) {
-    simpleDescription() String =>
+let Shape(numberOfSides : Int) {
+    simpleDescription() : String =>
         "A shape with \{numberOfSides} sides.";
 };
 ```
@@ -466,19 +466,19 @@ var shapeDescription = shape.simpleDescription()
 ## Subclass
 ### Feel
 ```
-def NamedShape(name String, numberOfSides Int) {
-    simpleDescription() String =>
+let NamedShape(name : String, numberOfSides : Int) {
+    simpleDescription() : String =>
         "A shape with \{numberOfSides} sides.";
 };
 
-def Square(as namedShape NamedShape, sideLength Num) {
-    simpleDescription() String =>
+let Square(as namedShape : NamedShape, sideLength : Float) {
+    simpleDescription() : String =>
         "A square with sides of length \{sideLength}.";
 
-    area() Num => sideLength * sideLength;
+    area() : Float => sideLength * sideLength;
 };
 
-let newSquare(sideLength Num, name String) Square => ((name, 4), sideLength);
+let newSquare(sideLength : Float, name : String) : Square => Square(NamedShape(name, 4), sideLength);
 
 let test = newSquare(5.2, "square");
 test.area();
@@ -632,9 +632,9 @@ let mut movieCount = 0;
 let mut songCount = 0;
 
 for (library is item) {
-    if item is Movie _ then {
+    if item is Movie then {
         movieCount += 1;
-    } else if item is Song _ then {
+    } else if item is Song then {
         songCount += 1;
     };
 };
@@ -700,11 +700,11 @@ for item in library {
 ```
 let nb = 42;
 when (nb) {
-    is x where x >= 0 && x <= 9 -> print("single digit")
+    is x where x >= 0 && x <= 9 then print("single digit")
     is 10 -> print("double digits")
-    is x where x >= 11 && x < 99 -> print("double digits")
-    is x where x >= 100 && x < 999 -> print("triple digits")
-    is _ -> print("four or more digits")
+    is x where x >= 11 && x < 99 then print("double digits")
+    is x where x >= 100 && x < 999 then print("triple digits")
+    is _ then print("four or more digits")
 };
 ```
 ### C#
@@ -757,7 +757,7 @@ switch nb {
 ### Feel
 ```
 for (someObjects is current) {
-    if current is Movie movie then {
+    if current is movie : Movie then {
         println("Movie: '\{movie.name}', " +
             "dir. \{movie.director}");
     };
@@ -801,11 +801,11 @@ for current in someObjects {
 ## Protocol
 ### Feel
 ```
-def Nameable {
-    name() String;
+let Nameable {
+    name() : String;
 };
 
-let f(x Nameable) Void => println("Name is " + x.Name());
+let f(x : Nameable) : Void => println("Name is " + x.name());
 ```
 ### C#
 ```
@@ -852,10 +852,10 @@ func f(x: Nameable) {
 ## Implement
 ### Feel
 ```
-def Dog() Nameable & Weight {
-    name() String => "Dog";
+let Dog() : Nameable & Weight {
+    name() : String => "Dog";
 
-    weight() Int => 30;
+    weight() : Int => 30;
 };
 ```
 ### C#
