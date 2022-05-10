@@ -175,7 +175,7 @@ for index in 1...5 {
 ### Feel
 ```
 let shoppingList = array_of("catfish", "water", "tulips", "blue paint");
-shoppingList.set(1, "bottle of water");
+shoppingList[1] = "bottle of water";
 ```
 ### C#
 ```
@@ -204,7 +204,7 @@ let occupations = dict_of(
     ("Malcolm", "Captain"),
     ("Kaylee", "Mechanic")
 );
-occupations.set("Jayne", "Public Relations");
+occupations["Jayne"] = "Public Relations";
 ```
 ### C#
 ```
@@ -332,7 +332,7 @@ func getGasPrices() -> (Double, Double, Double) {
 ## Function Type
 ### Feel
 ```
-let makeIncrementer() : Int -> Int => {
+let makeIncrementer() : (Int) -> Int => {
     let addOne(number : Int) => 1 + number;
     addOne
 };
