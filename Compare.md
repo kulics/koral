@@ -1,346 +1,472 @@
 
 # Compare
+
 ## Hello World
+
 ### Feel
-```
-println("Hello, world!");
-```
-### C#
-```
-Console.WriteLine("Hello, world!");
-```
-### Go
-```
-print("Hello, world!")
-```
-### Kotlin
+
 ```
 println("Hello, world!")
 ```
-### Swift
+
+### C#
+
+```csharp
+Console.WriteLine("Hello, world!");
 ```
+
+### Go
+
+```go
 print("Hello, world!")
 ```
+
+### Kotlin
+
+```kotlin
+println("Hello, world!")
+```
+
+### Swift
+
+```swift
+print("Hello, world!")
+```
+
 ## Variables And Constants
+
 ### Feel
+
 ```
-let mut myVariable = 42;
-myVariable = 50;
-let myConstant = 42;
+let mut myVariable = 42
+myVariable = 50
+let myConstant = 42
 ```
+
 ### C#
-```
+
+```csharp
 var myVariable = 42;
 myVariable = 50;
 const int myConstant = 42;
 ```
+
 ### Go
-```
+
+```go
 myVariable := 42
 myVariable = 50
 const myConstant = 42
 ```
+
 ### Kotlin
-```
+
+```kotlin
 var myVariable = 42
 myVariable = 50
 val myConstant = 42
 ```
+
 ### Swift
-```
+
+```swift
 var myVariable = 42
 myVariable = 50
 let myConstant = 42
 ```
+
 ## Explicit Types
+
 ### Feel
+
 ```
-let explicitDouble : Float = 70.0;
+let explicitDouble: Float = 70.0
 ```
+
 ### C#
-```
+
+```csharp
 double explicitDouble = 70;
 ```
+
 ### Go
-```
+
+```go
 var explicitDouble float64 = 70.0
 ```
+
 ### Kotlin
-```
+
+```kotlin
 val explicitDouble: Double = 70.0
 ```
+
 ### Swift
-```
+
+```swift
 let explicitDouble: Double = 70
 ```
+
 ## Basic Types
+
 ### Feel
+
 ```
 Int32 Int16 Int64 Int8 
 Float64 Float32 
 Bool
 String
 ```
+
 ### C#
-```
+
+```csharp
 int short long byte 
 double float 
 bool 
 string
 ```
+
 ### Go
-```
+
+```go
 int32 int16 int64 int8 
 float64 float32 
 bool 
 string
 ```
+
 ### Kotlin
-```
+
+```kotlin
 Int Short Long Byte 
 Double Float 
 Boolean 
 String
 ```
+
 ### Swift
-```
+
+```swift
 Int32 Int16 Int64 Int8 
 Double Float 
 Bool 
 String
 ```
+
 ## Type Coercion
+
 ### Feel
+
 ```
 let f = 6.0
 let i = 94
-let count = i + f.to_Int()
+let count = i + f.toInt()
 ```
+
 ### C#
-```
+
+```csharp
 double f = 6;
 int i = 94;
 int count = i + (int)f;
 ```
+
 ### Go
-```
+
+```go
 f := 6.0
 i := 94
 count := i + int(f)
 ```
+
 ### Kotlin
-```
+
+```kotlin
 val f = 6.0
 val i = 94
 val count: Int = i + f
 ```
+
 ### Swift
-```
+
+```swift
 let f = 6.0
 let i = 94
 let count = i + Int(f)
 ```
+
 ## Inclusive Range Operator
+
 ### Feel
+
 ```
 for (range(1, 5) is index) {
-    println("\{index} times 5 is \{index * 5}");
-};
+    printLine("\{index} times 5 is \{index * 5}")
+}
 ```
+
 ### C#
-```
+
+```csharp
 for (int index = 1; index <= 5; index++) 
 {
     Console.Write($"{index} times 5 is {index * 5}");
 }
 ```
+
 ### Go
-```
+
+```go
 for index := 1; index <= 5; index++ {
     fmt.Printf("%d times 5 is %d", index, index*5)
 }
 ```
+
 ### Kotlin
-```
+
+```kotlin
 for (index in 1..5) 
     println("$index times 5 is ${index * 5}")
 ```
+
 ### Swift
-```
+
+```swift
 for index in 1...5 {
     print("\(index) times 5 is \(index * 5)")
 }
 ```
+
 ## Arrays
+
 ### Feel
+
 ```
-let shoppingList = array_of("catfish", "water", "tulips", "blue paint");
-shoppingList[1] = "bottle of water";
+let shoppingList = arrayOf("catfish", "water", "tulips", "blue paint")
+shoppingList.[1] = "bottle of water"
 ```
+
 ### C#
-```
+
+```csharp
 var shoppingList = new List<string>(){"catfish", "water", "tulips", "blue paint"};
 shoppingList[1] = "bottle of water";
 ```
+
 ### Go
-```
+
+```go
 shoppingList := []string{"catfish", "water", "tulips", "blue paint"}
 shoppingList[1] = "bottle of water"
 ```
+
 ### Kotlin
-```
+
+```kotlin
 val shoppingList = arrayOf("catfish", "water", "tulips", "blue paint")
 shoppingList[1] = "bottle of water"
 ```
+
 ### Swift
-```
+
+```swift
 var shoppingList = ["catfish", "water", "tulips", "blue paint"]
 shoppingList[1] = "bottle of water"
 ```
+
 ## Maps
+
 ### Feel
+
 ```
-let occupations = dict_of(
+let occupations = mapOf(
     ("Malcolm", "Captain"),
     ("Kaylee", "Mechanic")
-);
-occupations["Jayne"] = "Public Relations";
+)
+occupations.["Jayne"] = "Public Relations"
 ```
+
 ### C#
-```
+
+```csharp
 var occupations = new Dictionary<string,string>(){
     {"Malcolm", "Captain"},
     {"Kaylee", "Mechanic"}
 };
 occupations["Jayne"] = "Public Relations";
 ```
+
 ### Go
-```
+
+```go
 occupations := map[string]string{
     "Malcolm": "Captain",
     "Kaylee": "Mechanic",
 }
 occupations["Jayne"] = "Public Relations"
 ```
+
 ### Kotlin
-```
+
+```kotlin
 val occupations = mutableMapOf(
     "Malcolm" to "Captain",
     "Kaylee" to "Mechanic"
 )
 occupations["Jayne"] = "Public Relations"
 ```
+
 ### Swift
-```
+
+```swift
 var occupations = [
     "Malcolm": "Captain",
     "Kaylee": "Mechanic",
 ]
 occupations["Jayne"] = "Public Relations"
 ```
+
 ## Empty Collections
+
 ### Feel
+
 ```
-let emptyArray = list_of[String]()
-let emptyDictionary = dict_of[String, Float32]()
+let emptyArray = listOf[String]()
+let emptyDictionary = mapOf[String, Float32]()
 ```
+
 ### C#
-```
+
+```csharp
 var emptyArray = new List<string>();
 var emptyDictionary = new Dictionary<string, float>();
 ```
+
 ### Go
-```
+
+```go
 var (
     emptyArray []string
     emptyMap = make(map[string]float)
 )
 ```
+
 ### Kotlin
-```
+
+```kotlin
 val emptyArray = arrayOf<String>()
 val emptyMap = mapOf<String, Float>()
 ```
+
 ### Swift
-```
+
+```swift
 let emptyArray = [String]()
 let emptyDictionary = [String: Float]()
 ```
+
 ## Functions
+
 ### Feel
+
 ```
-let greet(name : String, day : String) : String => "Hello \{name}, today is \{day}.";
-greet("Bob", "Tuesday");
+let greet(name: String, day: String): String => "Hello \{name}, today is \{day}."
+greet("Bob", "Tuesday")
 ```
+
 ### C#
-```
+
+```csharp
 string greet(string name, string day) 
 {
     return $"Hello {name}, today is {day}.";
 }
 greet("Bob", "Tuesday");
 ```
+
 ### Go
-```
+
+```go
 func greet(name, day string) string {
     return fmt.Sprintf("Hello %v, today is %v.", name, day)
 }
 greet("Bob", "Tuesday")
 ```
+
 ### Kotlin
-```
+
+```kotlin
 fun greet(name: String, day: String): String {
     return "Hello $name, today is $day."
 }
 greet("Bob", "Tuesday")
 ```
+
 ### Swift
-```
+
+```swift
 func greet(_ name: String,_ day: String) -> String {
     return "Hello \(name), today is \(day)."
 }
 greet("Bob", "Tuesday")
 ```
+
 ## Tuple Return
+
 ### Feel
+
 ```
-let getGasPrices() => (3.59, 3.69, 3.79);
+let getGasPrices() => (3.59, 3.69, 3.79)
 ```
+
 ### C#
-```
+
+```csharp
 (double, double, double) getGasPrices() 
 {
     return (3.59, 3.69, 3.79);
 }
 ```
+
 ### Go
-```
+
+```go
 func getGasPrices() (float64, float64, float64) {
     return 3.59, 3.69, 3.79
 }
 ```
+
 ### Kotlin
-```
+
+```kotlin
 fun getGasPrices() = Triple(3.59, 3.69, 3.79)
 ```
+
 ### Swift
-```
+
+```swift
 func getGasPrices() -> (Double, Double, Double) {
     return (3.59, 3.69, 3.79)
 }
 ```
+
 ## Function Type
+
 ### Feel
+
 ```
-let makeIncrementer() : (Int) -> Int => {
-    let addOne(number : Int) => 1 + number;
+let makeIncrementer(): (Int) -> Int => {
+    let addOne(number: Int) => 1 + number
     addOne
-};
-let increment = makeIncrementer();
-increment(7);
+}
+let increment = makeIncrementer()
+increment(7)
 ```
+
 ### C#
-```
+
+```csharp
 Func<int, int> makeIncrementer() 
 {
     int addOne(int number) 
@@ -352,8 +478,10 @@ Func<int, int> makeIncrementer()
 Func<int,int> increment = makeIncrementer();
 increment(7);
 ```
+
 ### Go
-```
+
+```go
 func makeIncrementer() func(int) int {
     addOne := func (number int) int {
         return 1 + number
@@ -363,8 +491,10 @@ func makeIncrementer() func(int) int {
 increment := makeIncrementer()
 increment(7)
 ```
+
 ### Kotlin
-```
+
+```kotlin
 fun makeIncrementer(): (Int) -> Int {
     val addOne = fun(number: Int): Int {
         return 1 + number
@@ -377,8 +507,10 @@ increment(7)
 // makeIncrementer can also be written in a shorter way:
 fun makeIncrementer() = fun(number: Int) = 1 + number
 ```
+
 ### Swift
-```
+
+```swift
 func makeIncrementer() -> ((Int) -> Int) {
     func addOne(number: Int) -> Int {
         return 1 + number
@@ -388,16 +520,20 @@ func makeIncrementer() -> ((Int) -> Int) {
 let increment = makeIncrementer()
 increment(7)
 ```
+
 ## Classes Declaration
+
 ### Feel
+
 ```
-let Shape(numberOfSides : Int) {
-    simpleDescription() : String =>
-        "A shape with \{numberOfSides} sides.";
-};
+type Shape(numberOfSides: Int) 
+let Shape.simpleDescription(): String =>
+        "A shape with \{this.numberOfSides} sides."
 ```
+
 ### C#
-```
+
+```csharp
 class Shape 
 {
     public int numberOfSides = 0;
@@ -407,8 +543,10 @@ class Shape
     }
 }
 ```
+
 ### Go
-```
+
+```go
 type Shape struct {
     numberOfSides int
 }
@@ -416,15 +554,19 @@ func (p *Shape) simpleDescription() string {
     return fmt.Sprintf("A shape with %d sides.", p.numberOfSides)
 }
 ```
+
 ### Kotlin
-```
+
+```kotlin
 class Shape(var numberOfSides: Int) {
     fun simpleDescription() =
         "A shape with $numberOfSides sides."
 }
 ```
+
 ### Swift
-```
+
+```swift
 class Shape {
     var numberOfSides = 0
     func simpleDescription() -> String {
@@ -432,60 +574,75 @@ class Shape {
     }
 }
 ```
+
 ## Classes Usage
+
 ### Feel
+
 ```
-let shape = Shape(0);
-shape.numberOfSides = 7;
-let shapeDescription = shape.simpleDescription();
+let shape = Shape(0)
+shape.numberOfSides = 7
+let shapeDescription = shape.simpleDescription()
 ```
+
 ### C#
-```
+
+```csharp
 var shape = new Shape();
 shape.numberOfSides = 7;
 var shapeDescription = shape.simpleDescription();
 ```
+
 ### Go
-```
+
+```go
 shape := Shape{}
 shape.numberOfSides = 7
 shapeDescription := shape.simpleDescription()
 ```
+
 ### Kotlin
-```
+
+```kotlin
 var shape = Shape()
 shape.numberOfSides = 7
 var shapeDescription = shape.simpleDescription()
 ```
+
 ### Swift
-```
+
+```swift
 var shape = Shape()
 shape.numberOfSides = 7
 var shapeDescription = shape.simpleDescription()
 ```
+
 ## Subclass
+
 ### Feel
+
 ```
-let NamedShape(name : String, numberOfSides : Int) {
-    simpleDescription() : String =>
-        "A shape with \{numberOfSides} sides.";
-};
+type NamedShape(name: String, numberOfSides: Int)
 
-let Square(as namedShape : NamedShape, sideLength : Float) {
-    simpleDescription() : String =>
-        "A square with sides of length \{sideLength}.";
+let NamedShape.simpleDescription(): String =>
+        "A shape with \{this.numberOfSides} sides."
 
-    area() : Float => sideLength * sideLength;
-};
+type Square(as namedShape: NamedShape, sideLength: Float)
 
-let newSquare(sideLength : Float, name : String) : Square => Square(NamedShape(name, 4), sideLength);
+let Square.simpleDescription(): String =>
+        "A square with sides of length \{this.sideLength}."
 
-let test = newSquare(5.2, "square");
-test.area();
-test.simpleDescription();
+let Square.area(): Float => sideLength * sideLength
+
+let newSquare(sideLength: Float, name: String): Square => Square(NamedShape(name, 4), sideLength)
+
+let test = newSquare(5.2, "square")
+test.area()
+test.simpleDescription()
 ```
 ### C#
-```
+
+```csharp
 class NamedShape 
 {
     public int numberOfSides = 0;
@@ -527,8 +684,10 @@ var test = new Square(5.2, "square");
 test.area();
 test.simpleDescription();
 ```
+
 ### Go
-```
+
+```go
 type NamedShape struct {
     numberOfSides int
     name string
@@ -563,8 +722,10 @@ a := NewSquare(5.2, "square")
 a.Area()
 a.SimpleDescription()
 ```
+
 ### Kotlin
-```
+
+```kotlin
 open class NamedShape(val name: String) {
     var numberOfSides = 0
 
@@ -588,8 +749,10 @@ val test = Square(BigDecimal("5.2"), "square")
 test.area()
 test.simpleDescription()
 ```
+
 ### Swift
-```
+
+```swift
 class NamedShape {
     var numberOfSides: Int = 0
     let name: String
@@ -625,22 +788,27 @@ let test = Square(sideLength: 5.2, name: "square")
 test.area()
 test.simpleDescription()
 ```
+
 ## Checking Type
+
 ### Feel
+
 ```
-let mut movieCount = 0;
-let mut songCount = 0;
+let mut movieCount = 0
+let mut songCount = 0
 
 for (library is item) {
     if item is Movie then {
-        movieCount += 1;
+        movieCount += 1
     } else if item is Song then {
-        songCount += 1;
-    };
-};
+        songCount += 1
+    }
+}
 ```
+
 ### C#
-```
+
+```csharp
 var movieCount = 0;
 var songCount = 0;
 
@@ -656,8 +824,10 @@ foreach (var item in library)
     }
 }
 ```
+
 ### Go
-```
+
+```go
 var movieCount = 0
 var songCount = 0
 
@@ -669,8 +839,10 @@ for _, item := range library {
     }
 }
 ```
+
 ### Kotlin
-```
+
+```kotlin
 var movieCount = 0
 var songCount = 0
 
@@ -682,8 +854,10 @@ for (item in library) {
     }
 }
 ```
+
 ### Swift
-```
+
+```swift
 var movieCount = 0
 var songCount = 0
 
@@ -695,20 +869,25 @@ for item in library {
     }
 }
 ```
+
 ## Pattern Matching
+
 ### Feel
+
 ```
-let nb = 42;
+let nb = 42
 when (nb) {
     is x where x >= 0 && x <= 9 then print("single digit")
     is 10 -> print("double digits")
     is x where x >= 11 && x < 99 then print("double digits")
     is x where x >= 100 && x < 999 then print("triple digits")
     is _ then print("four or more digits")
-};
+}
 ```
+
 ### C#
-```
+
+```csharp
 var nb = 42;
 switch (nb) 
 {
@@ -731,8 +910,10 @@ switch (nb)
         break;
 }
 ```
+
 ### Kotlin
-```
+
+```kotlin
 val nb = 42
 when (nb) {
     in 0..7, 8, 9 -> println("single digit")
@@ -742,8 +923,10 @@ when (nb) {
     else -> println("four or more digits")
 }
 ```
+
 ### Swift
-```
+
+```swift
 let nb = 42
 switch nb {
     case 0...7, 8, 9: print("single digit")
@@ -753,8 +936,11 @@ switch nb {
     default: print("four or more digits")
 }
 ```
+
 ## Downcasting
+
 ### Feel
+
 ```
 for (someObjects is current) {
     if current is movie : Movie then {
@@ -763,8 +949,10 @@ for (someObjects is current) {
     };
 };
 ```
+
 ### C#
-```
+
+```csharp
 foreach (var current in someObjects) 
 {
     if (current is Movie movie) 
@@ -774,23 +962,29 @@ foreach (var current in someObjects)
     }
 }
 ```
+
 ### Go
-```
+
+```go
 for _, object := range someObjects {
     if movie, ok := object.(Movie); ok {
         fmt.Printf("Movie: '%s', dir. %s", movie.name, movie.director)
     }
 }
 ```
+
 ### Kotlin
-```
+
+```kotlin
 for (current in someObjects) 
     if (current is Movie) 
         println("Movie: '${current.name}', " +
 	    "dir. ${current.director}")
 ```
+
 ### Swift
-```
+
+```swift
 for current in someObjects {
     if let movie = current as? Movie {
         print("Movie: '\(movie.name)', " +
@@ -798,17 +992,22 @@ for current in someObjects {
     }
 }
 ```
-## Protocol
-### Feel
-```
-let Nameable {
-    name() : String;
-};
 
-let f(x : Nameable) : Void => println("Name is " + x.name());
+## Interface
+
+### Feel
+
 ```
+type Nameable = {
+    name(): String
+}
+
+let f(x: Nameable): Void => println("Name is " + x.name())
+```
+
 ### C#
-```
+
+```csharp
 interface Nameable 
 {
     string name();
@@ -819,18 +1018,22 @@ void f(Nameable x)
     Console.WriteLine("Name is " + x.name());
 }
 ```
+
 ### Go
-```
+
+```go
 type Nameable interface {
-    func Name() string
+    Name() string
 }
 
 func F(x Nameable) {
     fmt.Println("Name is " + x.Name())
 }
 ```
+
 ### Kotlin
-```
+
+```kotlin
 interface Nameable {
     fun name(): String
 }
@@ -839,8 +1042,10 @@ fun f(x: Nameable) {
     println("Name is " + x.name())
 }
 ```
+
 ### Swift
-```
+
+```swift
 protocol Nameable {
     func name() -> String
 }
@@ -849,17 +1054,20 @@ func f(x: Nameable) {
     print("Name is " + x.name())
 }
 ```
+
 ## Implement
+
 ### Feel
 ```
-let Dog() : Nameable & Weight {
-    name() : String => "Dog";
+type Dog(): Nameable & Weight
 
-    weight() : Int => 30;
-};
+let Dog.name(): String => "Dog"
+
+let Dog.weight(): Int => 30
 ```
 ### C#
-```
+
+```csharp
 class Dog: Nameable, Weight
 {
     public string name()
@@ -875,7 +1083,8 @@ class Dog: Nameable, Weight
 ```
 
 ### Go
-```
+
+```go
 type Dog struct {}
 
 func (p *Dog) name() string {
@@ -886,8 +1095,10 @@ func (p *Dog) weight() int {
     return 30
 }
 ```
+
 ### Kotlin
-```
+
+```kotlin
 class Dog: Nameable, Weight {
     override fun name(): String {
         return "Dog"
@@ -898,8 +1109,10 @@ class Dog: Nameable, Weight {
     }
 }
 ```
+
 ### Swift
-```
+
+```swift
 class Dog: Nameable, Weight {
     func name() -> String {
         return "Dog"
