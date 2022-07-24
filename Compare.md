@@ -6,7 +6,7 @@
 ### Feel
 
 ```
-println("Hello, world!")
+printLine("Hello, world!")
 ```
 
 ### C#
@@ -201,7 +201,7 @@ let count = i + Int(f)
 ### Feel
 
 ```
-for (range(1, 5) is index) {
+for (index in Range(1, 5)) {
     printLine("\{index} times 5 is \{index * 5}")
 }
 ```
@@ -332,7 +332,7 @@ occupations["Jayne"] = "Public Relations"
 ### Feel
 
 ```
-let emptyArray = listOf[String]()
+let emptyArray = arrayOf[String]()
 let emptyDictionary = mapOf[String, Float32]()
 ```
 
@@ -634,9 +634,9 @@ let Square.simpleDescription(): String =>
 
 let Square.area(): Float => sideLength * sideLength
 
-let newSquare(sideLength: Float, name: String): Square => Square(NamedShape(name, 4), sideLength)
+let Square.New(sideLength: Float, name: String): Square => Square(NamedShape(name, 4), sideLength)
 
-let test = newSquare(5.2, "square")
+let test = Square.New(5.2, "square")
 test.area()
 test.simpleDescription()
 ```
@@ -797,10 +797,10 @@ test.simpleDescription()
 let mut movieCount = 0
 let mut songCount = 0
 
-for (library is item) {
-    if item is Movie then {
+for (item in library) {
+    if (item is Movie) {
         movieCount += 1
-    } else if item is Song then {
+    } else if (item is Song) {
         songCount += 1
     }
 }
@@ -877,11 +877,11 @@ for item in library {
 ```
 let nb = 42
 when (nb) {
-    is x where x >= 0 && x <= 9 then print("single digit")
-    is 10 -> print("double digits")
-    is x where x >= 11 && x < 99 then print("double digits")
-    is x where x >= 100 && x < 999 then print("triple digits")
-    is _ then print("four or more digits")
+    is x where x >= 0 && x <= 9 => print("single digit")
+    is 10 => print("double digits")
+    is x where x >= 11 && x < 99 => print("double digits")
+    is x where x >= 100 && x < 999 => print("triple digits")
+    is _ => print("four or more digits")
 }
 ```
 
@@ -942,8 +942,8 @@ switch nb {
 ### Feel
 
 ```
-for (someObjects is current) {
-    if current is movie : Movie then {
+for (current in someObjects) {
+    if (current is movie: Movie) {
         println("Movie: '\{movie.name}', " +
             "dir. \{movie.director}");
     };
