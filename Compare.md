@@ -201,7 +201,7 @@ let count = i + Int(f)
 ### Feel
 
 ```
-for (index in Range(1, 5)) {
+for (index in 1..=5) {
     printLine("\{index} times 5 is \{index * 5}")
 }
 ```
@@ -417,7 +417,7 @@ greet("Bob", "Tuesday")
 ### Feel
 
 ```
-let getGasPrices() => (3.59, 3.69, 3.79)
+let getGasPrices() = (3.59, 3.69, 3.79)
 ```
 
 ### C#
@@ -456,8 +456,8 @@ func getGasPrices() -> (Double, Double, Double) {
 ### Feel
 
 ```
-let makeIncrementer(): (Int) -> Int => {
-    let addOne(number: Int) => 1 + number
+let makeIncrementer(): (Int) -> Int = {
+    let addOne(number: Int) = 1 + number
     addOne
 }
 let increment = makeIncrementer()
@@ -527,7 +527,7 @@ increment(7)
 
 ```
 type Shape(numberOfSides: Int) 
-let Shape.simpleDescription(): String =>
+let Shape.simpleDescription(): String =
         "A shape with \{this.numberOfSides} sides."
 ```
 
@@ -624,22 +624,23 @@ var shapeDescription = shape.simpleDescription()
 ```
 type NamedShape(name: String, numberOfSides: Int)
 
-let NamedShape.simpleDescription(): String =>
+let NamedShape.simpleDescription(): String =
         "A shape with \{this.numberOfSides} sides."
 
 type Square(as namedShape: NamedShape, sideLength: Float)
 
-let Square.simpleDescription(): String =>
+let Square.simpleDescription(): String =
         "A square with sides of length \{this.sideLength}."
 
-let Square.area(): Float => sideLength * sideLength
+let Square.area(): Float = sideLength * sideLength
 
-let Square.New(sideLength: Float, name: String): Square => Square(NamedShape(name, 4), sideLength)
+let Square.New(sideLength: Float, name: String): Square = Square(NamedShape(name, 4), sideLength)
 
 let test = Square.New(5.2, "square")
 test.area()
 test.simpleDescription()
 ```
+
 ### C#
 
 ```csharp
@@ -1002,7 +1003,7 @@ type Nameable = {
     name(): String
 }
 
-let f(x: Nameable): Void => println("Name is " + x.name())
+let f(x: Nameable): Void = println("Name is " + x.name())
 ```
 
 ### C#
@@ -1061,9 +1062,9 @@ func f(x: Nameable) {
 ```
 type Dog(): Nameable & Weight
 
-let Dog.name(): String => "Dog"
+let Dog.name(): String = "Dog"
 
-let Dog.weight(): Int => 30
+let Dog.weight(): Int = 30
 ```
 ### C#
 
