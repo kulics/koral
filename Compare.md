@@ -798,10 +798,10 @@ test.simpleDescription()
 let mut movieCount = 0
 let mut songCount = 0
 
-for item in library {
-    if item is Movie {
+for item in library do {
+    if item is Movie then {
         movieCount += 1
-    } else if item is Song {
+    } else if item is Song then {
         songCount += 1
     }
 }
@@ -877,12 +877,12 @@ for item in library {
 
 ```
 let nb = 42
-when nb {
-    is x where x >= 0 && x <= 9 => print("single digit")
-    is 10 => print("double digits")
-    is x where x >= 11 && x < 99 => print("double digits")
-    is x where x >= 100 && x < 999 => print("triple digits")
-    is _ => print("four or more digits")
+nb which {
+    is x where x >= 0 && x <= 9 -> print("single digit")
+    is 10 -> print("double digits")
+    is x where x >= 11 && x < 99 -> print("double digits")
+    is x where x >= 100 && x < 999 -> print("triple digits")
+    is _ -> print("four or more digits")
 }
 ```
 
@@ -943,9 +943,9 @@ switch nb {
 ### Feel
 
 ```
-for current in someObjects {
-    if current is movie: Movie {
-        println("Movie: '\{movie.name}', " +
+for current in someObjects do {
+    if current is movie: Movie then {
+        printLine("Movie: '\{movie.name}', " +
             "dir. \{movie.director}");
     };
 };
