@@ -201,18 +201,15 @@ let count = i + Int(f)
 ### Feel
 
 ```
-for (index in 1..=5) {
+for 1..=5 as index do 
     printLine("\{index} times 5 is \{index * 5}")
-}
 ```
 
 ### C#
 
 ```csharp
 for (int index = 1; index <= 5; index++) 
-{
     Console.Write($"{index} times 5 is {index * 5}");
-}
 ```
 
 ### Go
@@ -371,7 +368,9 @@ let emptyDictionary = [String: Float]()
 ### Feel
 
 ```
-let greet(name: String, day: String): String => "Hello \{name}, today is \{day}."
+let greet(name: String, day: String): String = {
+    "Hello \{name}, today is \{day}."
+}
 greet("Bob", "Tuesday")
 ```
 
@@ -798,10 +797,10 @@ test.simpleDescription()
 let mut movieCount = 0
 let mut songCount = 0
 
-for item in library do {
-    if item is Movie then {
+for library as item do {
+    if item as Movie then {
         movieCount += 1
-    } else if item is Song then {
+    } else if item as Song do {
         songCount += 1
     }
 }
@@ -877,12 +876,12 @@ for item in library {
 
 ```
 let nb = 42
-nb which {
-    is x where x >= 0 && x <= 9 -> print("single digit")
-    is 10 -> print("double digits")
-    is x where x >= 11 && x < 99 -> print("double digits")
-    is x where x >= 100 && x < 999 -> print("triple digits")
-    is _ -> print("four or more digits")
+when nb as {
+    0..=7, 8, 9 then print("single digit")
+    10 then print("double digits")
+    11..=99 then print("double digits")
+    100..=999 then print("triple digits")
+    _ then print("four or more digits")
 }
 ```
 
@@ -943,12 +942,8 @@ switch nb {
 ### Feel
 
 ```
-for current in someObjects do {
-    if current is movie: Movie then {
-        printLine("Movie: '\{movie.name}', " +
-            "dir. \{movie.director}");
-    };
-};
+for someObjects as movie: Movie do
+    printLine("Movie: '\{movie.name}', dir. \{movie.director}")
 ```
 
 ### C#
@@ -986,11 +981,8 @@ for (current in someObjects)
 ### Swift
 
 ```swift
-for current in someObjects {
-    if let movie = current as? Movie {
-        print("Movie: '\(movie.name)', " +
-            "dir. \(movie.director)")
-    }
+for case movie as Movie in someObjects {
+    print("Movie: '\(movie.name)', dir. \(movie.director)")
 }
 ```
 
@@ -1003,7 +995,7 @@ type Nameable = {
     name(): String
 }
 
-let f(x: Nameable): Void = println("Name is " + x.name())
+let f(x: Nameable): Void = printLine("Name is " + x.name())
 ```
 
 ### C#
