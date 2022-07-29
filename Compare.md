@@ -368,9 +368,8 @@ let emptyDictionary = [String: Float]()
 ### Feel
 
 ```
-let greet(name: String, day: String): String = {
+let greet(name: String, day: String): String = 
     "Hello \{name}, today is \{day}."
-}
 greet("Bob", "Tuesday")
 ```
 
@@ -416,7 +415,7 @@ greet("Bob", "Tuesday")
 ### Feel
 
 ```
-let getGasPrices() = (3.59, 3.69, 3.79)
+let getGasPrices(): (Float, Float, Float) = (3.59, 3.69, 3.79)
 ```
 
 ### C#
@@ -797,10 +796,11 @@ test.simpleDescription()
 let mut movieCount = 0
 let mut songCount = 0
 
-for library as item do {
-    if item as Movie then {
+for library as {
+    Movie do {
         movieCount += 1
-    } else if item as Song do {
+    }
+    Song do {
         songCount += 1
     }
 }
