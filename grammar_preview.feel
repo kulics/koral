@@ -167,11 +167,12 @@ let main() = {
     }
     
     // 可以通过 this 来访问包自身属性或方法，当作为指针类型使用时 this 是指针，否则是值类型。 this 可以自定义。
-    type Button(width: Int, height: Int, background: String, title: String)
-    let Button.click(): Void = {
-        printLine(title)
-        doSomeThingA()
-        doSomeThingB()
+    type Button(width: Int, height: Int, background: String, title: String) {
+        click(): Void = {
+            printLine(title)
+            doSomeThingA()
+            doSomeThingB()
+        }
     }
     // 私有属性，不能被外部访问
     type Image(_width: Int, _height: Int, _source: String)
@@ -183,13 +184,14 @@ let main() = {
     }
 
     // Combine Template
-    type ImageButton(as image: Image, as button: Button): Animation
-    // Implement Interface
-    let ImageButton.move(s: Int): Void = {
-        t = 5000/s
-        play( s + t )
+    type ImageButton(as image: Image, as button: Button): Animation {
+        // Implement Interface
+        move(this: This, s: Int): Void = {
+            t = 5000/s
+            play( s + t )
+        }
+        stop(this: This): Void = {}
     }
-    let ImageButton.stop(): Void = {}
 
     // Create an Template object
     let btn = Button(1, 2, "Cancel")
@@ -222,9 +224,10 @@ let main() = {
     )
     
     // Generic Template
-    type Table[T](data: T)
-    let [T]Table[T].setData(d: T): Void = {
-        data = d
+    type Table[T](data: T) {
+        setData(this: This, d: T): Void = {
+            data = d
+        }
     }
     Table[Int](1)
     // Generic function
@@ -257,50 +260,41 @@ let main() = {
         }
     }
 
-    type Foo(v: Int)
-    let Foo.getV(): Int = this.v
-    let Foo.typeName(): String = "Foo"
-    type Bar(v: Int)
-
-    type I = {
-        getV(): Int
-        typeName(): String
-    }
-
     // operator override
-    type MyList[T: Any](arr: [T]): Addable[T] & MutIndexable[T]
-     
-    // a + e
-    let [T]MyList[T].plus(element: T): Void = {
-        this.arr = this.arr.append(element)
+    type MyList[T: Any](arr: [T]): Addable[T] & MutIndexable[T] {
+        // a + e
+        plus(this: This, element: T): Void = {
+            this.arr = this.arr.append(element)
+        }
+        // e = a[i]
+        get(this: This, index: Int): T = this.arr[index]
+        // a[i] = e
+        set(this: This, element: T, index: Int): Void = this.arr[index] = element
     }
-    // e = a[i]
-    let [T]MyList[T].get(index: Int): T = this.arr[index]
-    // a[i] = e
-    let [T]MyList[T].set(element: T, index: Int): Void = this.arr[index] = element
     
 
     // Iterator pattern
     type Iterator[T: Any] = {
-        next(): Option[T]
+        next(this: This): Option[T]
     }
 
     type Iterable[T: Any] = {
-        iter(): Iterator[T]
+        iter(this: This): Iterator[T]
     }
 
-    type ListNode[T: Any] = Empty() | Node(head: T, tail: ListNode[T])
+    type ListNode[T: Any] = Empty() | Node(head: T, tail: ListNode[T]) {
+        iter(this: This): Iterator[T] = ListNodeIterator(this)
+    }
 
-    let [T]ListNode[T].iter(): Iterator[T] = ListNodeIterator(this)
-
-    type ListIterator[T: Any](mut li: ListNode[T])
-    let [T]ListIterator[T].next(): Option[T] =
-        if li as Node(h, t) then {
-            li = t
-            Some(h)
-        } else {
-            None()
-        }
+    type ListIterator[T: Any](mut li: ListNode[T]) {
+        next(this: This): Option[T] =
+            if this.li as Node(h, t) then {
+                this.li = t
+                Some(h)
+            } else {
+                None()
+            }
+    }
 
     type TreeNode = Empty() | Node(val: Int, left: TreeNode, right: TreeNode)
 
@@ -338,27 +332,25 @@ type Password(hash: Hash)
 type Identify = UserName | Password
 type HashKey[T] = Equatable[T] & Hashable
 
-let[T] Option[T] with {
+type OptionToString[T: ToString] extends Option[T] {
     toString(this: This): String = 
         if this is Some(v) then "Some(\{v})" else "None()"
 }
 
-let Foo with {
+type FooToString extends Foo {
     toString(this: This): String = "foo"
 }
 
-let Show with {
+type Print[T: ToString] extends T {
     print(this: This): Void = stdout.write(this.toString())
 }
 
-let[T, R] T->R with {
+type FuncToAny[T, R] extends T->R {
     toAny(this: This): Any = this
 }
 
-type List[T](_arr: Array[T])
-
-let[T] List[T] with {
-    New(): This = This([])
+type List[T](_arr: Array[T]) {
+    new(): This = This([])
 
     get(this: This, index: Int): T = this._arr.get(index)
 
@@ -367,36 +359,32 @@ let[T] List[T] with {
     map[R](this: This, f: T->R): Iterator[R] = MapIter[T, R](this, f)
 }
 
-let[T: ToString] List[T] with {
-    toString(this: This): String = join_String(this.Iterator())
-}
-
-let List[Int] with {
+type ListInt extends List[Int] {
     sum(this: This): Int = reduce(this.Iterator(), 0, (l, r) -> l + r)
 }
 
-let List[String] with {
+type ListString extends List[String] {
     toString(this: This): String = join_String(this.Iterator())
 }
 
-let[T: ToString] List[T] with {
+type ListToString[T: ToString] extends List[T] {
     toString(this: This): String = join_String(this.Iterator())
 }
 
-let Int with {
+type IntToString extends Int {
     toString(this: This): String = cprint(this)
 }
 
-let Int with {
-    Default(): This = 0
+type DefaultInt extends Int {
+    default(): This = 0
 }
 
-let String with {
-    Default(): This = ""
+type DefaultString extends String {
+    default(): This = ""
 }
 
-let[T] Array[T] with {
-    Default(): This = arrayOf[T]()
+type DefaultArray[T] extends Array[T] {
+    default(): This = arrayOf[T]()
 }
 
 type ToString = {
