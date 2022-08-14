@@ -525,8 +525,10 @@ increment(7)
 
 ```
 type Shape(numberOfSides: Int) 
-let Shape.simpleDescription(): String =
+type Shape with {
+    simpleDescription(): String =
         "A shape with \{this.numberOfSides} sides."
+}
 ```
 
 ### C#
@@ -622,19 +624,23 @@ var shapeDescription = shape.simpleDescription()
 ```
 type NamedShape(name: String, numberOfSides: Int)
 
-let NamedShape.simpleDescription(): String =
+type NamedShape with {
+    simpleDescription(): String =
         "A shape with \{this.numberOfSides} sides."
+}
 
 type Square(as namedShape: NamedShape, sideLength: Float)
 
-let Square.simpleDescription(): String =
+type Square with {
+    new(sideLength: Float, name: String): Square = Square(NamedShape(name, 4), sideLength)
+
+    simpleDescription(): String =
         "A square with sides of length \{this.sideLength}."
 
-let Square.area(): Float = sideLength * sideLength
+    area(): Float = sideLength * sideLength
+}
 
-let Square.New(sideLength: Float, name: String): Square = Square(NamedShape(name, 4), sideLength)
-
-let test = Square.New(5.2, "square")
+let test = Square.new(5.2, "square")
 test.area()
 test.simpleDescription()
 ```
@@ -1051,13 +1057,17 @@ func f(x: Nameable) {
 ## Implement
 
 ### Feel
+
 ```
 type Dog(): Nameable & Weight
 
-let Dog.name(): String = "Dog"
+type Dog with {
+    name(): String = "Dog"
 
-let Dog.weight(): Int = 30
+    weight(): Int = 30
+}
 ```
+
 ### C#
 
 ```csharp
