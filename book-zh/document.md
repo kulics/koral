@@ -61,7 +61,7 @@ let a = 1 + 1 + 1
 我们需要定义一个入口来让程序知道从哪里启动，我们可以通过 main 函数声明。
 
 ```feel
-let main() => {};
+let main() = {};
 ```
 
 这里我们声明了一个名称为 main 的函数，`=` 右边是这个函数的返回值，`{}` 表示这个函数什么也不执行。
@@ -70,10 +70,10 @@ let main() => {};
 
 ### 显示信息
 
-现在让我们的程序输出一些内容看看，我们可以使用 `println` 函数向控制台打印一些信息。
+现在让我们的程序输出一些内容看看，我们可以使用 `printLine` 函数向控制台打印一些信息。
 
 ```feel
-let main() => println("Hello, world!");
+let main() = printLine("Hello, world!");
 ```
 
 现在尝试执行这个程序，我们可以看到控制台上显示了 `Hello, world!`。
@@ -100,12 +100,12 @@ Feel 的变量是一种绑定语义，相当于是把一个变量名和一个值
 
 在 Feel 中是通过 let 关键字来声明不可变变量的，变量遵循先声明后使用的原则。
 
-Feel 通过静态类型确保类型安全，变量绑定可以在声明时显式标注类型，在上下文中有足够的信息时，我们也可以省略类型，编译器回从上下文中推断出变量的类型。
+Feel 通过静态类型确保类型安全，变量绑定可以在声明时显式通过 `: type` 标注类型，在上下文中有足够的信息时，我们也可以省略类型，编译器回从上下文中推断出变量的类型。
 
 示例代码如下：
 
 ```feel
-let a Int = 5; // 显式标注类型
+let a: Int = 5; // 显式标注类型
 let b = 123; // 自动推断类型
 ```
 
@@ -127,7 +127,7 @@ a = 6; // 错误
 示例代码如下：
 
 ```feel
-let mut a Int = 5; // 显式标注类型
+let mut a: Int = 5; // 显式标注类型
 let mut b = 123; // 自动推断类型
 ```
 
@@ -154,8 +154,8 @@ a = 2;
 通过块表达式可以组合一系列操作，比如多步初始化某个复杂的值。
 
 ```feel
-let a Void = {};
-let b Int = {
+let a: Void = {};
+let b: Int = {
     let c = 7; 
     let d = c + 14;
     (c + 3) * 5 + d / 3
@@ -185,7 +185,7 @@ let b Int = {
 例如：
 
 ```feel
-let i Int = 3987349;
+let i: Int = 3987349;
 ```
 
 ### Float 浮点数
@@ -197,8 +197,8 @@ let i Int = 3987349;
 例如：
 
 ```feel
-let f1 float = 855.544;
-let f2 float = 0.3141592653;
+let f1: Float = 855.544;
+let f2: Float = 0.3141592653;
 ```
 
 ### Character 字符
@@ -212,8 +212,8 @@ let f2 float = 0.3141592653;
 例如：
 
 ```feel
-let c1 Char = 'x';
-let c2 Char = '8';
+let c1: Char = 'x';
+let c2: Char = '8';
 ```
 
 ### String 字符串  
@@ -227,7 +227,7 @@ let c2 Char = '8';
 例如：
 
 ```feel
-let s String = "Hello, world!";
+let s: String = "Hello, world!";
 ```
 
 需要注意的是，字符串是由多个字符组成的类型，所以实际上字符串是一个固定顺序的列表，两者存在对应关系。很多时候我们可以像使用列表那样对字符串进行处理。
@@ -242,8 +242,8 @@ let s String = "Hello, world!";
 例如：
 
 ```feel
-let b1 Bool = true;
-let b2 Bool = false;
+let b1: Bool = true;
+let b2: Bool = false;
 ```
 
 ## 操作符
@@ -261,11 +261,11 @@ let b2 Bool = false;
 ```feel
 let a = 4;
 let b = 2;
-println( a + b );    // + 加
-println( a - b );    // - 减
-println( a * b );    // * 乘
-println( a / b );    // / 除
-println( a % b );    // % 取余，意思是整除后剩下的余数，这里的结果为 2
+printLine( a + b );    // + 加
+printLine( a - b );    // - 减
+printLine( a * b );    // * 乘
+printLine( a / b );    // / 除
+printLine( a % b );    // % 取余，意思是整除后剩下的余数，这里的结果为 2
 ```
 
 ### 比较操作符
@@ -277,12 +277,12 @@ println( a % b );    // % 取余，意思是整除后剩下的余数，这里的
 ```feel
 let a = 4;
 let b = 2;
-println( a == b );     // == 等于
-println( a <> b );     // <> 不等于
-println( a > b );      // > 大于
-println( a >= b );     // >= 大于或等于
-println( a < b );      // < 小于
-println( a <= b );     // <= 小于或等于
+printLine( a == b );     // == 等于
+printLine( a != b );     // != 不等于
+printLine( a > b );      // > 大于
+printLine( a >= b );     // >= 大于或等于
+printLine( a < b );      // < 小于
+printLine( a <= b );     // <= 小于或等于
 ```
 
 ### 逻辑操作符
@@ -294,9 +294,9 @@ println( a <= b );     // <= 小于或等于
 ```feel
 let a = true;
 let b = false;
-println( a && b );     // && 与，两者同时为真才为真
-println( a || b );     // || 或，两者其中一者为真就为真
-println( ~~a );        // ~~ 非，布尔值取反
+printLine( a && b );     // && 与，两者同时为真才为真
+printLine( a || b );     // || 或，两者其中一者为真就为真
+printLine( ~~a );        // ~~ 非，布尔值取反
 ```
 
 ## 选择结构
@@ -308,7 +308,7 @@ println( ~~a );        // ~~ 非，布尔值取反
 例如：
 
 ```feel
-let main() => if 1 == 1 then println("yes") else println("no");
+let main() = if 1 == 1 then printLine("yes") else printLine("no");
 ```
 
 执行上面的程序会看到 `yes`。
@@ -318,7 +318,7 @@ if 同样也是表达式，then 和 else 分支后面都必须是表达式，根
 因此上面那段程序我们也可以这样写，两种写法结果等价。
 
 ```feel
-let main() => println(if 1 == 1 then "yes" else "no");
+let main() = printLine(if 1 == 1 then "yes" else "no");
 ```
 
 由于 if 本身也是表达式，因此 else 后面自然也可以接另外一个 if 表达式，这样我们就可以实现连续的条件判断。
@@ -328,33 +328,29 @@ let x = 0;
 let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less";
 ```
 
-当我们不需要处理 else 分支时，可以省略 else 分支，这种没有 else 分支的 if 语法不是表达式而是语句，then 分支后必须接块表达式。
+当我们不需要处理 else 分支时，可以使用 if-do 语法，do 后面必须是表达式。
 
 ```feel
-let main() => {
-    if 1 == 1 then {
-        println("yes");
-    };
-};
+let main() = if 1 == 1 do printLine("yes");
 ```
 
 ## 循环结构
 
 循环结构是指在程序中需要反复执行某个功能而设置的一种程序结构。它由循环体中的条件，判断继续执行某个功能还是退出循环。
 
-在 Feel 中循环结构使用 while 语法表示，while 后面紧跟判断条件，在条件为  `true` 时执行 then 关键字后面的分支，然后重新回到判断条件处进行判断进入下一轮循环，在条件为 `false` 结束循环。
+在 Feel 中循环结构使用 while 语法表示，while 后面紧跟判断条件，在条件为  `true` 时执行 do 关键字后面的分支，然后重新回到判断条件处进行判断进入下一轮循环，在条件为 `false` 结束循环。
 
-这种 while 语法是语句而不是表达式。
+这种 while 语法是表达式。
 
 例如：
 
 ```feel
-let main() => {
+let main() = {
     let mut i = 0;
-    while i <= 10 then {
-        println(i);
-        i = i + 1;
-    };
+    while i <= 10 do {
+        printLine(i);
+        i = i + 1
+    }
 };
 ```
 
@@ -363,15 +359,13 @@ let main() => {
 当我们需要在循环中主动退出循环时，可以使用 break 语句。程序会在执行到 break 时退出当前最近的一层循环。
 
 ```feel
-let main() => {
+let main() = {
     let mut i = 0;
-    while true then {
-        if i > 20 then {
-            break;
-        };
-        println(i);
-        i = i + 1;
-    };
+    while true do {
+        if i > 20 do break;
+        printLine(i);
+        i = i + 1
+    }
 };
 ```
 
@@ -380,15 +374,13 @@ let main() => {
 如果我们需要在循环中跳过某些轮，可以使用 continue 语句。程序会在执行到 continue 时跳过当前一轮循环，继续执行下一次循环。
 
 ```feel
-let main() => {
+let main() = {
     let mut i = 0;
-    while i <= 10 then {
-        if i % 2 == 0 then {
-            continue;
-        };
-        println(i);
-        i = i + 1;
-    };
+    while i <= 10 do {
+        if i % 2 == 0 do continue;
+        printLine(i);
+        i = i + 1
+    }
 };
 ```
 
@@ -408,11 +400,11 @@ let main() => {
 
 函数通过 let 关键字定义，函数的名字后面使用 `()` 表示这个函数接受的参数，括号后面是这个函数的返回类型。返回类型在上下文明确时可以省略，由编译器推断返回类型。
 
-函数的 `=>` 右边必须声明一个表达式，这个表达式的值就是函数的返回值。
+函数的 `=` 右边必须声明一个表达式，这个表达式的值就是函数的返回值。
 
 ```feel
-let f1() Int => 1;
-let f2(a Int) => a + 1;
+let f1(): Int = 1;
+let f2(a: Int) = a + 1;
 ```
 
 ### 调用
@@ -432,10 +424,10 @@ let b = f2(1);
 
 比如我们可以实现一个平方函数，每次调用可以返回参数的平方值。
 
-非常简单的，我们只需要使用 `参数名 类型` 就可以声明参数。
+非常简单的，我们只需要使用 `参数名: 类型` 就可以声明参数。
 
 ```feel
-let sqrt(x Int) => x * x;
+let sqrt(x: Int) = x * x;
 let a = sqrt(x); // a == 4
 ```
 
@@ -444,7 +436,7 @@ sqrt 接收一个 Int 类型的参数 x，然后返回它的平方值。调用 s
 如果我们需要多个参数，可以按顺序逐个声明它们，中间使用 `,` 分割。调用也需要按同样的顺序给出表达式。
 
 ```feel
-let add(x Int, y Int) => x + y;
+let add(x: Int, y: Int) = x + y;
 let a = add(1, 2); // a == 3
 ```
 
@@ -459,20 +451,19 @@ let a = add(1, 2); // a == 3
 函数类型的变量跟函数一样使用 `()` 语法调用。
 
 ```feel
-let sqrt(x Int) => x * x; // sqrt (Int) -> Int
-let f (Int) -> Int = sqrt;
+let sqrt(x: Int) = x * x; // sqrt: (Int) -> Int
+let f: (Int) -> Int = sqrt;
 let a = f(2); // a == 4
 ```
 
 例如这个特性，我们也可以定义函数类型的参数或者返回值。
 
 ```feel
-let hello() => println("Hello, world!");
-let run(f () -> Void) = f();
-let toRun() => run;
-let main() => {
-    toRun()(hello);
-};
+let hello() = printLine("Hello, world!");
+let run(f: () -> Void) = f();
+let toRun() = run;
+
+let main() = toRun()(hello);
 ```
 
 执行上面的代码我们会看到 `Hello, world!`。
@@ -488,16 +479,9 @@ Lambda 表达式与函数定义很相似。
 如下面的代码所示，f2 的值是一个 lambda，它们的类型与 f1 一样，语法上上也非常相似，lambda 的同样需要声明参数和返回类型，并且需要一个表达式作为返回值。
 
 ```feel
-let f1(x Int) Int => x + 1; // f1 () -> Int
-let f2 = (x Int) Int => x + 1; // f2 () -> Int
+let f1(x: Int): Int = x + 1; // f1: () -> Int
+let f2 = (x: Int): Int -> x + 1; // f2: () -> Int
 let a = f1(1) + f2(1); // a == 4
-```
-
-我们看到，实际上函数语法与 lambda 表达式语法是高度一致的，我们可以很容易写出柯里化函数。
-
-```feel
-let sum(a Int) => (b Int) => (c Int) => a + b + c;
-let a = sum(1)(2)(3); // a == 6
 ```
 
 ## 结构
@@ -508,10 +492,10 @@ let a = sum(1)(2)(3); // a == 6
 
 ### 定义
 
-我们可以使用 def 关键字声明一个新结构，结构需要使用 `()` 声明它所拥有的成员变量，与函数的参数类似。
+我们可以使用 `type` 关键字声明一个新结构，结构需要使用 `()` 声明它所拥有的成员变量，与函数的参数类似。
 
 ```feel
-def Empty();
+type Empty();
 ```
 
 上面我们声明了一个名叫 Empty 的新结构，这个结构什么数据都不包含。
@@ -519,7 +503,7 @@ def Empty();
 接下来让我们定义一些更有意义的结构试试。
 
 ```feel
-def Point(x Int, y Int);
+type Point(x: Int, y: Int);
 ```
 
 Point 是一个具有 x 和 y 两个成员变量的结构，它可以用来表示二维坐标系中的某一个点。这样我们就可以使用 Point 这个类型表示我们在坐标系中的数据，而不用总是使用两个独立的 Int 数据。
@@ -531,7 +515,7 @@ Point 是一个具有 x 和 y 两个成员变量的结构，它可以用来表�
 和函数类型，我们同样使用 `()` 语法来调用我们的结构，就可以得到我们需要的数据。
 
 ```feel
-let a Point = Point(0, 0);
+let a: Point = Point(0, 0);
 ```
 
 ### 使用成员变量
@@ -541,12 +525,12 @@ let a Point = Point(0, 0);
 很简单，我们只需要使用 `.` 语法，就能访问它们了。
 
 ```feel
-def Point(x Int, y Int);
+type Point(x: Int, y: Int);
 
-let main() => {
+let main() = {
     let a = Point(64, 128);
-    println(a.x);
-    println(a.y);
+    printLine(a.x);
+    printLine(a.y);
 };
 ```
 
@@ -557,10 +541,10 @@ let main() => {
 成员变量与变量一样，默认都是不可变的。所以我们不能对 Point 中的 x 和 y 再次赋值。如果我们尝试这么做，编译器会报错。
 
 ```feel
-def Point(x Int, y Int);
+type Point(x: Int, y: Int);
 
-let main() => {
-    let a = Point(64, 128);
+let main() = {
+    let a = Point(64, 28);
     a.x = 2; // 错误
 };
 ```
@@ -568,9 +552,9 @@ let main() => {
 我们可以像可变变量一样给成员变量标注 mut 关键字，这样它就会成为可变成员变量，就可以被重新赋值了。
 
 ```feel
-def Point(mut x Int, mut y Int);
+type Point(mut x: Int, mut y: Int);
 
-let main() => {
+let main() = {
     let a = Point(64, 128);
     a.x = 2;
     a.y = 0;

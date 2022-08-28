@@ -61,7 +61,7 @@ let a = 1 + 1 + 1
 We need to define an entry point to let the program know where to start from, which we can declare via the main function.
 
 ```feel
-let main() => {};
+let main() = {};
 ```
 
 Here we declare a function named main, `=` with the return value of the function on the right, and `{}` indicating that the function does not execute anything.
@@ -70,12 +70,12 @@ More details on the function will be explained in the following sections.
 
 ### Display information
 
-Now let's have our program output something to see, we can use the `println` function to print some information to the console.
+Now let's have our program output something to see, we can use the `printLine` function to print some information to the console.
 
 E.g.
 
 ```feel
-let main() => println("Hello, world!");
+let main() = printLine("Hello, world!");
 ```
 
 Now try to execute this program and we can see `Hello, world!` displayed on the console.
@@ -102,12 +102,12 @@ Feel's variables are a kind of binding semantics, equivalent to binding a variab
 
 Immutable variables are declared in Feel using the let keyword, and variables are declared first and used later.
 
-Feel ensures type safety through static typing, and variable bindings can be explicitly typed at declaration time, or we can omit the type if there is enough information in the context, and the compiler will infer the type of the variable from the context.
+Feel ensures type safety through static typing, and variable bindings can be explicitly typed at declaration time with `: type`, or we can omit the type when there is enough information in the context, and the compiler will infer the type of the variable from the context.
 
 The sample code is as follows.
 
 ```feel
-let a Int = 5; // Explicitly labeled type
+let a: Int = 5; // Explicitly labeled type
 let b = 123; // Auto-inferred type
 ```
 
@@ -129,7 +129,7 @@ Mutable variables are declared in Feel with the let mut keyword, again following
 The sample code is as follows.
 
 ```feel
-let mut a Int = 5; // Explicitly labeled type
+let mut a: Int = 5; // Explicitly labeled type
 let mut b = 123; // Auto-inferred type
 ```
 
@@ -156,8 +156,8 @@ The value of the last expression in a block expression is the value of the block
 A block expression allows you to combine a series of operations, such as multi-step initialization of a complex value.
 
 ```feel
-let a Void = {};
-let b Int = {
+let a: Void = {};
+let b: Int = {
     let c = 7; 
     let d = c + 14;
     (c + 3) * 5 + d / 3
@@ -187,7 +187,7 @@ In Feel, the default integer is of type `Int`, which can represent signed intege
 E.g:
 
 ```feel
-let i Int = 3987349;
+let i: Int = 3987349;
 ```
 
 ### Float Point Number
@@ -199,8 +199,8 @@ In Feel, the default decimal is of type `Float`, which can represent floating-po
 E.g:
 
 ```feel
-let f1 float = 855.544;
-let f2 float = 0.3141592653;
+let f1: Float = 855.544;
+let f2: Float = 0.3141592653;
 ```
 
 ### Character
@@ -214,8 +214,8 @@ You only need to wrap a character with `''`, it will be recognized as a characte
 E.g:
 
 ```feel
-let c1 Char = 'x';
-let c2 Char = '8';
+let c1: Char = 'x';
+let c2: Char = '8';
 ```
 
 ### String
@@ -229,7 +229,7 @@ You only need to wrap a piece of text with `""`, which will be recognized as a s
 E.g:
 
 ```feel
-let s String = "Hello, world!";
+let s: String = "Hello, world!";
 ```
 
 It should be noted that a string is a type consisting of multiple characters, so in fact the string is a fixed-order list, and there is a correspondence between the two. Many times we can process strings as if they were lists.
@@ -243,8 +243,8 @@ In this language, the default boolean is the `Bool` type, which is a type with o
 E.g:
 
 ```feel
-let b1 Bool = true;
-let b2 Bool = false;
+let b1: Bool = true;
+let b2: Bool = false;
 ```
 
 ## Operators
@@ -262,11 +262,11 @@ E.g:
 ```feel
 let a = 4;
 let b = 2;
-println( a + b );    // + plus
-println( a - b );    // - minus
-println( a * b );    // * multiply
-println( a / b );    // / divide
-println( a % b );    // % residual, meaning the remainder remaining after the divisibility, the result here is 2
+printLine( a + b );    // + plus
+printLine( a - b );    // - minus
+printLine( a * b );    // * multiply
+printLine( a / b );    // / divide
+printLine( a % b );    // % residual, meaning the remainder remaining after the divisibility, the result here is 2
 ```
 
 ### Comparison Operators
@@ -278,12 +278,12 @@ E.g:
 ```feel
 let a = 4;
 let b = 2;
-println( a == b );   // == equal to
-println( a <> b );   // <> not equal to
-println( a > b );    // > Greater than
-println( a >= b );   // >= Greater than or equal to
-println( a < b );    // < less than
-println( a <= b );   // <= less than or equal to
+printLine( a == b );   // == equal to
+printLine( a != b );   // != not equal to
+printLine( a > b );    // > Greater than
+printLine( a >= b );   // >= Greater than or equal to
+printLine( a < b );    // < less than
+printLine( a <= b );   // <= less than or equal to
 ```
 
 ### Logical Operators
@@ -295,9 +295,9 @@ E.g:
 ```feel
 let a = true;
 let b = false;
-println( a && b );    // && AND, both are true at the same time
-println( a || b );    // || OR, one of them is true
-println( ~~a );       // ~~ NOT, boolean inversion
+printLine( a && b );    // && AND, both are true at the same time
+printLine( a || b );    // || OR, one of them is true
+printLine( ~~a );       // ~~ NOT, boolean inversion
 ```
 
 ## Select Structure
@@ -309,7 +309,7 @@ We only need to use `? expression {}` to declare the judgment statement and ente
 E.g:
 
 ```feel
-let main() => if 1 == 1 then println("yes") else println("no");
+let main() = if 1 == 1 then printLine("yes") else printLine("no");
 ```
 
 Executing the above program will show `yes`.
@@ -319,7 +319,7 @@ If is also an expression, then and else branches must be followed by an expressi
 Therefore, we can write the above program in the same way, and the results are equivalent in both ways.
 
 ```feel
-let main() => println(if 1 == 1 then "yes" else "no");
+let main() = printLine(if 1 == 1 then "yes" else "no");
 ```
 
 Since if is itself an expression, it is natural that else can be followed by another if expression, so that we can achieve a continuous conditional judgment.
@@ -329,33 +329,29 @@ let x = 0;
 let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less";
 ```
 
-When we don't need to handle else branches, we can omit the else branch. This if syntax without an else branch is not an expression but a statement, and the then branch must be followed by a block expression.
+When we don't need to handle the else branch, we can use the if-do syntax, and the do must be followed by an expression.
 
 ```feel
-let main() => {
-    if 1 == 1 then {
-        println("yes");
-    };
-};
+let main() = if 1 == 1 do printLine("yes");
 ```
 
 ## Loop Structure
 
 A loop structure is a program structure that is set up when a function needs to be executed repeatedly in a program. It is a condition in the loop body that determines whether to continue executing a function or to exit the loop.
 
-In Feel, the loop structure is represented by the while syntax, where the while is followed by a judgment condition, and the branch after the then keyword is executed when the condition is `true`, and then it returns to the judgment condition for the next loop, and ends the loop when the condition is `false`.
+In Feel, the loop structure is represented by the while syntax, where the while is followed by a judgment condition, and the branch after the do keyword is executed when the condition is `true`, and then it returns to the judgment condition for the next loop, and ends the loop when the condition is `false`.
 
-This while syntax is a statement and not an expression.
+This while syntax is an expression.
 
 E.g:
 
 ```feel
-let main() => {
+let main() = {
     let mut i = 0;
-    while i <= 10 then {
-        println(i);
-        i = i + 1;
-    };
+    while i <= 10 do {
+        printLine(i);
+        i = i + 1
+    }
 };
 ```
 
@@ -364,15 +360,13 @@ Executing the above program will print 0 to 10.
 The break statement can be used when we need to actively exit the loop in the middle of a loop. The program will exit the current nearest level of the loop when it reaches break.
 
 ```feel
-let main() => {
+let main() = {
     let mut i = 0;
-    while true then {
-        if i > 20 then {
-            break;
-        };
-        println(i);
-        i = i + 1;
-    };
+    while true do {
+        if i > 20 do break;
+        printLine(i);
+        i = i + 1
+    }
 };
 ```
 
@@ -381,15 +375,13 @@ Executing the above program will print 0 to 20.
 If we need to skip some rounds in the loop, we can use the continue statement. The program will skip the current round when it reaches continue and continue with the next loop.
 
 ```feel
-let main() => {
+let main() = {
     let mut i = 0;
-    while i <= 10 then {
-        if i % 2 == 0 then {
-            continue;
-        };
-        println(i);
-        i = i + 1;
-    };
+    while i <= 10 do {
+        if i % 2 == 0 do continue;
+        printLine(i);
+        i = i + 1
+    }
 };
 ```
 
@@ -409,11 +401,11 @@ When we need to define other functions, we can use the same syntax to define fun
 
 The function is defined by the let keyword. The function name is followed by `()` to indicate the parameters accepted by the function, and the return type of the function is enclosed in parentheses. The return type can be omitted when the context is clear, and the compiler infers the return type.
 
-An expression must be declared to the right of the function `=>`, and the value of this expression is the return value of the function.
+An expression must be declared to the right of the function `=`, and the value of this expression is the return value of the function.
 
 ```feel
-let f1() Int => 1;
-let f2(a Int) => a + 1;
+let f1(): Int = 1;
+let f2(a: Int) = a + 1;
 ```
 
 ### Call
@@ -434,17 +426,17 @@ Parameters are the data that a function can receive when it is executed, and wit
 
 For example, we can implement a square function that returns the square value of the argument each time it is called.
 
-It is very simple, we only need to use `parameterName type` to declare parameters.
+It is very simple, we only need to use `parameterName: type` to declare parameters.
 
 ```feel
-let sqrt(x Int) Int => x * x;
+let sqrt(x: Int) = x * x;
 let a = sqrt(x); // a == 4
 ```
 
 sqrt takes an argument of type Int, x, and returns the square of it. When calling sqrt we need to give the expression of the corresponding Int type to complete the call.
 
 ```feel
-let add(x Int, y Int) Int => x + y;
+let add(x: Int, y: Int) = x + y;
 let a = add(1, 2); // a == 3
 ```
 
@@ -459,20 +451,19 @@ Once a function is defined, the function name can be used as an expression and c
 Variables of function types are called with the same `()` syntax as functions.
 
 ```feel
-let sqrt(x Int) => x * x; // sqrt (Int) -> Int
-let f (Int) -> Int = sqrt;
+let sqrt(x: Int) = x * x; // sqrt: (Int) -> Int
+let f: (Int) -> Int = sqrt;
 let a = f(2); // a == 4
 ```
 
 For example, with this feature, we can also define parameters or return values for function types.
 
 ```feel
-let hello() => println("Hello, world!");
-let run(f () -> Void) => f();
-let toRun() => run;
-let main() => {
-    toRun()(hello);
-};
+let hello() = printLine("Hello, world!");
+let run(f: () -> Void) = f();
+let toRun() = run;
+
+let main() = toRun()(hello);
 ```
 
 Executing the above code we see `Hello, world!`.
@@ -488,16 +479,9 @@ Lambda expressions are very similar to function definitions.
 As shown in the code below, the value of f2 is a lambda, which is the same type as f1 and has a very similar syntax, with lambda's also declaring parameters and return types, and requiring an expression as the return value.
 
 ```feel
-let f1(x Int) Int => x + 1; // f1 () -> Int
-let f2 = (x Int) Int => x + 1; // f2 () -> Int
+let f1(x: Int): Int = x + 1; // f1: () -> Int
+let f2 = (x: Int): Int -> x + 1; // f2: () -> Int
 let a = f1(1) + f2(1); // a == 4
-```
-
-We see that in fact the function syntax is highly consistent with the lambda expression syntax, and we can easily write currying functions.
-
-```feel
-let sum(a Int) => (b Int) => (c Int) => a + b + c;
-let a = sum(1)(2)(3); // a == 6
 ```
 
 ## Structure
@@ -508,10 +492,10 @@ Obviously, structures are suitable for packing different data together to form a
 
 ### Definition
 
-We can declare a new structure using the def keyword. The structure needs to declare the member variables it has using `()`, similar to the parameters of a function.
+We can declare a new structure using the `type` keyword. The structure needs to declare the member variables it has using `()`, similar to the parameters of a function.
 
 ```feel
-def Empty();
+type Empty();
 ```
 
 Above we declared a new structure called Empty, which contains no data at all.
@@ -519,7 +503,7 @@ Above we declared a new structure called Empty, which contains no data at all.
 Next let's try defining some more meaningful structures.
 
 ```feel
-def Point(x Int, y Int);
+type Point(x: Int, y: Int);
 ```
 
 Point is a structure with two member variables, x and y, that can be used to represent a point in a two-dimensional coordinate system. This allows us to use the Point type to represent our data in the coordinate system, instead of always using two separate Int data.
@@ -531,7 +515,7 @@ So how do we construct a new Point data?
 As with the function type, we use the same `()` syntax to call our structure and we get the data we need.
 
 ```feel
-let a Point = Point(0, 0);
+let a: Point = Point(0, 0);
 ```
 
 ### Using Member Variables
@@ -541,12 +525,12 @@ Now that we have a Point data, how do we use the x and y in it?
 It's simple, we just need to use the `. ` syntax to access them.
 
 ```feel
-def Point(x Int, y Int);
+type Point(x: Int, y: Int);
 
-let main() => {
+let main() = {
     let a = Point(64, 128);
-    println(a.x);
-    println(a.y);
+    printLine(a.x);
+    printLine(a.y);
 };
 ```
 
@@ -557,9 +541,9 @@ Executing the above program, we can see 64 and 128.
 Member variables, like variables, are immutable by default. So we can't reassign values to x and y in Point. If we try to do so, the compiler will report an error.
 
 ```feel
-def Point(x Int, y Int);
+type Point(x: Int, y: Int);
 
-let main() => {
+let main() = {
     let a = Point(64, 128);
     a.x = 2; // error
 };
@@ -568,9 +552,9 @@ let main() => {
 We can mark a member variable with the mut keyword just like a mutable variable, so that it becomes a mutable member variable and can be reassigned.
 
 ```feel
-def Point(mut x Int, mut y Int);
+type Point(mut x: Int, mut y: Int);
 
-let main() => {
+let main() = {
     let a = Point(64, 128);
     a.x = 2;
     a.y = 0;
