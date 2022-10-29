@@ -267,7 +267,7 @@ printLine( a + b )    // + plus
 printLine( a - b )    // - minus
 printLine( a * b )    // * multiply
 printLine( a / b )    // / divide
-printLine( a % b )    // % residual, meaning the remainder remaining after the divisibility, the result here is 2
+printLine( a % b )    // % residual, meaning the remainder remaining after the divisibility
 ```
 
 ### Comparison Operators
