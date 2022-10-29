@@ -266,7 +266,7 @@ printLine( a + b )    // + 加
 printLine( a - b )    // - 减
 printLine( a * b )    // * 乘
 printLine( a / b )    // / 除
-printLine( a % b )    // % 取余，意思是整除后剩下的余数，这里的结果为 2
+printLine( a % b )    // % 取余，意思是整除后剩下的余数
 ```
 
 ### 比较操作符
