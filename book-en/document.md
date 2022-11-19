@@ -296,9 +296,9 @@ E.g:
 ```feel
 let a = true
 let b = false
-printLine( a && b )    // && AND, both are true at the same time
-printLine( a || b )    // || OR, one of them is true
-printLine( ~~a )       // ~~ NOT, boolean inversion
+printLine( a and b )    // AND, both are true at the same time
+printLine( a or b )     // OR, one of them is true
+printLine( not a )      // NOT, boolean inversion
 ```
 
 ## Select Structure
