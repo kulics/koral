@@ -241,13 +241,13 @@ for index in 1...5 {
 
 ```
 let shoppingList = arrayOf("catfish", "water", "tulips", "blue paint")
-shoppingList.[1] = "bottle of water"
+shoppingList[1] = "bottle of water"
 ```
 
 ### C#
 
 ```csharp
-var shoppingList = new List<string>(){"catfish", "water", "tulips", "blue paint"};
+var shoppingList = new string[]{"catfish", "water", "tulips", "blue paint"};
 shoppingList[1] = "bottle of water";
 ```
 
@@ -281,7 +281,7 @@ let occupations = mapOf(
     ("Malcolm", "Captain"),
     ("Kaylee", "Mechanic")
 )
-occupations.["Jayne"] = "Public Relations"
+occupations["Jayne"] = "Public Relations"
 ```
 
 ### C#
@@ -329,14 +329,14 @@ occupations["Jayne"] = "Public Relations"
 ### Feel
 
 ```
-let emptyArray = arrayOf[String]()
-let emptyDictionary = mapOf[String, Float32]()
+let emptyArray = arrayOf(String)()
+let emptyDictionary = mapOf(String, Float32)()
 ```
 
 ### C#
 
 ```csharp
-var emptyArray = new List<string>();
+var emptyArray = new string[]{};
 var emptyDictionary = new Dictionary<string, float>();
 ```
 
@@ -525,8 +525,8 @@ increment(7)
 
 ```
 type Shape(numberOfSides: Int) 
-type Shape with {
-    simpleDescription(): String =
+give Shape with {
+    simpleDescription(this): String =
         "A shape with \{this.numberOfSides} sides."
 }
 ```
@@ -624,20 +624,20 @@ var shapeDescription = shape.simpleDescription()
 ```
 type NamedShape(name: String, numberOfSides: Int)
 
-type NamedShape with {
-    simpleDescription(): String =
+give NamedShape with {
+    simpleDescription(this): String =
         "A shape with \{this.numberOfSides} sides."
 }
 
 type Square(as namedShape: NamedShape, sideLength: Float)
 
-type Square with {
+give Square with {
     new(sideLength: Float, name: String): Square = Square(NamedShape(name, 4), sideLength)
 
-    simpleDescription(): String =
+    simpleDescription(this): String =
         "A square with sides of length \{this.sideLength}."
 
-    area(): Float = sideLength * sideLength
+    area(this): Float = sideLength * sideLength
 }
 
 let test = Square.new(5.2, "square")
@@ -1049,7 +1049,7 @@ protocol Nameable {
     func name() -> String
 }
 
-func f(x: Nameable) {
+func f(x: any Nameable) {
     print("Name is " + x.name())
 }
 ```
@@ -1059,13 +1059,11 @@ func f(x: Nameable) {
 ### Feel
 
 ```
-type Dog(): Nameable & Weight
+type Dog()
 
-type Dog with {
-    name(): String = "Dog"
+give Dog: Nameable with name(): String = "Dog"
 
-    weight(): Int = 30
-}
+give Dog: Weight with weight(): Int = 30
 ```
 
 ### C#

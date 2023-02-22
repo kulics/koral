@@ -32,12 +32,12 @@ let main() = {
     let array2: [Int] = [1, 2, 3]
 
     // List
-    let list: List[Int] = listOf(1, 2, 3, 4, 5)
-    print( list.(0) ) // 使用下标获取
+    let list: List(Int) = listOf(1, 2, 3, 4, 5)
+    print( list[0] ) // 使用下标获取
 
     // Map, 前面为 key，后面为 value
-    let map: Map[String, Bool] = mapOf(("1", false), ("2", true))
-    print( map.("1") ) // 使用key获取
+    let map: Map(String, Bool) = mapOf(("1", false), ("2", true))
+    print( map["1"] ) // 使用key获取
 
     // Function
     let f(a: Int): Int = a
@@ -100,7 +100,7 @@ let main() = {
     else if b then ...
     else ...
 
-    let op: Option[Int] = Some(1)
+    let op: Option(Int) = Some(1)
     if op as Some(v) do {
         printLine(v)
     }
@@ -123,7 +123,7 @@ let main() = {
         ...
     }
 
-    let iter: Iterator[Int] = listOf(1,2,3).Iter()
+    let iter: Iterator(Int) = listOf(1,2,3).Iter()
     while iter.next() as Some(v) do {
         printLine(v)
     }
@@ -167,8 +167,9 @@ let main() = {
     }
     
     // 可以通过 this 来访问包自身属性或方法，当作为指针类型使用时 this 是指针，否则是值类型。 this 可以自定义。
-    type Button(width: Int, height: Int, background: String, title: String) = {
-        click(): Void = {
+    type Button(width: Int, height: Int, background: String, title: String)
+    give Button with {
+        click(this): Void = {
             printLine(title)
             doSomeThingA()
             doSomeThingB()
@@ -179,18 +180,19 @@ let main() = {
 
     // Interface
     type Animation = {
-        move(s: Int): Void
-        stop(): Void
+        move(this, s: Int): Void
+        stop(this): Void
     }
 
     // Combine Template
-    type ImageButton(as image: Image, as button: Button): Animation = {
+    type ImageButton(as image: Image, as button: Button)
+    give ImageButton: Animation with {
         // Implement Interface
-        move(this: This, s: Int): Void = {
+        move(this, s: Int): Void = {
             t = 5000/s
             play( s + t )
         }
-        stop(this: This): Void = {}
+        stop(this): Void = {}
     }
 
     // Create an Template object
@@ -213,26 +215,27 @@ let main() = {
     play_animation(ib)
 
     // Annotation
-    `table("user"), property(false, name = "d", hide = true)`
+    [table("user"), property(false, name = "d", hide = true)]
     type User(
-        `column("id"), required, key`
+        [column("id"), required, key]
         id: String,
-        `column("nick_name"), required)`
+        [column("nick_name"), required]
         nick_name: String,
-        `column("time_update"), required)`
+        [column("time_update"), required]
         time_update: Int,
     )
     
     // Generic Template
-    type Table[T](data: T) = {
-        setData(this: This, d: T): Void = {
+    type Table(T: Any)(data: T)
+    give(T: Any) Table(T) with {
+        setData(this, d: T): Void = {
             data = d
         }
     }
-    Table[Int](1)
+    Table(Int)(1)
     // Generic function
-    let add[T: Addable](x1: T, x2: T): T = x1 + x2
-    add[Int](1, 2)
+    let add(T: Addable)(x1: T, x2: T): T = x1 + x2
+    add(Int)(1, 2)
 
     type Void()
 
@@ -240,19 +243,19 @@ let main() = {
 
     type Point(x: Int, y: Int)
 
-    type Pair[T1: Any, T2: Any](first: T1, second: T2)
+    type Pair(T1: Any, T2: Any)(first: T1, second: T2)
 
-    type Option[T: Any] = { Some(value: T); None() }
+    type Option(T: Any) = { Some(value: T); None() }
 
     let opt() = {
-        let mut a: Option[Int] = Some(1)
+        let mut a: Option(Int) = Some(1)
         a = None()
         when a as {
             Some(v) then printLine(v)
             None then printLine("none")
         }
 
-        let b: Option[Option[Int]] = Some(Some(2))
+        let b: Option(Option(Int)) = Some(Some(2))
         when b as {
             Some(Some(v)) then printLine(v)
             Some(None) then printLine("some(none)")
@@ -260,37 +263,41 @@ let main() = {
         }
     }
 
+    type MyList(T: Any)(arr: [T])
     // operator override
-    type MyList[T: Any](arr: [T]): Addable[T] & MutIndexable[T] = {
+    give(T: Any) MyList(T): Addable(T) with {
         // a + e
-        plus(this: This, element: T): Void = {
+        plus(this, element: T): Void = {
             this.arr = this.arr.append(element)
         }
+    }
+    give(T: Any) MyList(T): MutIndexable(T) with { 
         // e = a[i]
-        get(this: This, index: Int): T = this.arr[index]
+        get(this, index: Int): T = this.arr[index]
         // a[i] = e
-        set(this: This, element: T, index: Int): Void = this.arr[index] = element
+        set(mut this, element: T, index: Int): Void = this.arr[index] = element
     }
     
-
     // Iterator pattern
-    type Iterator[T: Any] = {
-        next(this: This): Option[T]
+    type Iterator(T: Any) = {
+        next(this): Option(T)
     }
 
-    type Iterable[T: Any] = {
-        iter(this: This): Iterator[T]
+    type Iterable(T: Any) = {
+        iter(this): Iterator(T)
     }
 
-    type ListNode[T: Any] = {
+    type ListNode(T: Any) = {
         Empty()
-        Node(head: T, tail: ListNode[T])
-
-        iter(this: This): Iterator[T] = ListNodeIterator(this)
+        Node(head: T, tail: ListNode(T))
+    } with {
+        iter(this): Iterator(T) = ListNodeIterator(this)
     }
 
-    type ListIterator[T: Any](mut li: ListNode[T]) = {
-        next(this: This): Option[T] =
+    type ListIterator(T: Any)(mut li: ListNode(T))
+
+    give(T: Any) ListIterator(T) with {
+        next(this): Option(T) =
             if this.li as Node(h, t) then {
                 this.li = t
                 Some(h)
@@ -325,42 +332,43 @@ type Planet(mass: Float, radius: Float) = {
     Neptune(1.024e+26, 2.4746e7)
 }
 
-type Option[T] = { Some(value: T); None() }
+type Option(T: Any) = { Some(value: T); None() }
 
-type Expr[T] = {
-    IntExpr(value: Int): Expr[Int]
-    EqualExpr(left: Expr[Int], right: Expr[Int]): Expr[Bool]
-    AddExpr(left: Expr[Int], right: Expr[Int]): Expr[Int]
+type Expr(T: Any) = {
+    IntExpr(value: Int): Expr(Int)
+    EqualExpr(left: Expr(Int), right: Expr(Int)): Expr(Bool)
+    AddExpr(left: Expr(Int), right: Expr(Int)): Expr(Int)
 }
 
 type UserName(name: String)
 type Password(hash: Hash)
 type Identify = UserName | Password
-type HashKey[T] = Equatable[T] & Hashable
+type HashKey(T: Any) = Equatable(T) & Hashable
 
-type OptionToString[T: ToString] = Option[T] with {
-    toString(this: This): String = 
-        if this is Some(v) then "Some(\{v})" else "None()"
+give(T: ToString) Option(T) with {
+    toString(this): String = 
+        if this is Some(v)
+            then "Some(\{v})" 
+            else "None()"
 }
 
-type FooToString = Foo with {
-    toString(this: This): String = "foo"
+give Foo: ToString with {
+    toString(this): String = "foo"
+}
+give(T: Any, R: Any) T->R with {
+    toAny(this): Any = this
 }
 
-type FuncToAny[T, R] = T->R with {
-    toAny(this: This): Any = this
-}
-
-type LinkedList[T] = {
-    Cons(head: T, tail: LinkedList[T])
+type LinkedList(T: Any) = {
+    Cons(head: T, tail: LinkedList(T))
     Empty()
 }
 
-type LinkedList[T] with {
+give(T: Any) LinkedList(T) with {
     new(): This = Empty()
 }
 
-type List[T] = {
+give(T: Any) List(T) with {
     new(): This
 
     get(this, index: Int): T
@@ -368,59 +376,58 @@ type List[T] = {
     set(this, index: Int, element: T): Void
 }
 
-type ArrayList[T] = { ArrayList(_arr: Array[T]) }
-type ArrayList[T](_arr: Array[T])
+type ArrayList(T: Any) = { ArrayList(_arr: Array(T)) }
+type ArrayList(T: Any)(_arr: Array(T))
 
-type ArrayList[T] with {
+give(T: Any) ArrayList(T) with {
     new(): This = This([])
 
-    get(this: This, index: Int): T = this._arr.get(index)
+    get(this, index: Int): T = this._arr.get(index)
 
-    set(this: This, index: Int, element: T): Void = this._arr.set(index, element)
+    set(mut this, index: Int, element: T): Void = this._arr.set(index, element)
 
-    map[R](this: This, f: T->R): Iterator[R] = MapIter[T, R](this, f)
+    map(R: Any)(this, f: T->R): Iterator(R) = MapIter(type T, R)(this, f)
 }
 
-type ArrayList[Int] with {
-    sum(this: This): Int = reduce(this.Iterator(), 0, (l, r) -> l + r)
-}
-
-type ArrayList[String] with {
-    toString(this: This): String = join_String(this.Iterator())
-}
-
-type ArrayListToString[T: ToString] = ArrayList[T] with {
-    toString(this: This): String = join_String(this.Iterator())
-}
-
-type Int with {
-    toString(this: This): String = cprint(this)
-}
-
-type Int with {
-    default(): This = 0
-}
-
-type String with {
-    default(): This = ""
-}
-
-type Array[T] with {
-    default(): This = arrayOf[T]()
+give ArrayList(Int) with {
+    sum(this): Int = reduce(this.Iterator(), 0, (l, r) -> l + r)
 }
 
 type ToString = {
-    toString(this: This): String
+    toString(this): String
+}
+
+give Int: ToString with {
+    toString(this): String = cprintf(this)
+}
+
+give(T: ToString) ArrayList(T): ToString with {
+    toString(this): String = join_String(this.Iterator())
+}
+
+give Int with {
+    default(): This = 0
+}
+
+give String with {
+    default(): This = ""
+}
+
+give(T: Any) Array(T) with {
+    default(): This = arrayOf(type T)()
+}
+
+type ToString = {
+    toString(this): String
 }
 
 type InputStream = {
-    read(this: This, to: Array[Byte]): Int
-    length(this: This): Int
+    read(mut this, to: mut Array(Byte)): Int
 }
 
 type OutputStream = {
-    write(this: This, from: Array[Byte]): Int
-    flush(this: This): Void
+    write(mut this, from: Array(Byte)): Int
+    flush(mut this): Void
 }
 
 /*
