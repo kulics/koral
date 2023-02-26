@@ -404,7 +404,7 @@ greet("Bob", "Tuesday")
 ### Swift
 
 ```swift
-func greet(_ name: String,_ day: String) -> String {
+func greet(_ name: String, _ day: String) -> String {
     return "Hello \(name), today is \(day)."
 }
 greet("Bob", "Tuesday")
@@ -454,7 +454,7 @@ func getGasPrices() -> (Double, Double, Double) {
 ### Feel
 
 ```
-let makeIncrementer(): Int -> Int = {
+let makeIncrementer(): (Int) -> Int = {
     let addOne(number: Int) = 1 + number
     addOne
 }
