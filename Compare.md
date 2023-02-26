@@ -454,7 +454,7 @@ func getGasPrices() -> (Double, Double, Double) {
 ### Feel
 
 ```
-let makeIncrementer(): (Int) -> Int = {
+let makeIncrementer(): Int -> Int = {
     let addOne(number: Int) = 1 + number
     addOne
 }
@@ -509,7 +509,7 @@ fun makeIncrementer() = fun(number: Int) = 1 + number
 ### Swift
 
 ```swift
-func makeIncrementer() -> ((Int) -> Int) {
+func makeIncrementer() -> (Int) -> Int {
     func addOne(number: Int) -> Int {
         return 1 + number
     }
