@@ -525,7 +525,7 @@ increment(7)
 
 ```
 type Shape(numberOfSides: Int) 
-give Shape with {
+given Shape with {
     simpleDescription(this): String =
         "A shape with \{this.numberOfSides} sides."
 }
@@ -624,14 +624,14 @@ var shapeDescription = shape.simpleDescription()
 ```
 type NamedShape(name: String, numberOfSides: Int)
 
-give NamedShape with {
+given NamedShape with {
     simpleDescription(this): String =
         "A shape with \{this.numberOfSides} sides."
 }
 
 type Square(as namedShape: NamedShape, sideLength: Float)
 
-give Square with {
+given Square with {
     new(sideLength: Float, name: String): Square = Square(NamedShape(name, 4), sideLength)
 
     simpleDescription(this): String =
@@ -1061,9 +1061,9 @@ func f(x: any Nameable) {
 ```
 type Dog()
 
-give Dog: Nameable with name(): String = "Dog"
+given Dog: Nameable with name(): String = "Dog"
 
-give Dog: Weight with weight(): Int = 30
+given Dog: Weight with weight(): Int = 30
 ```
 
 ### C#
