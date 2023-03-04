@@ -279,7 +279,7 @@ shoppingList[1] = "bottle of water"
 ```
 let occupations = mapOf(
     ("Malcolm", "Captain"),
-    ("Kaylee", "Mechanic")
+    ("Kaylee", "Mechanic"),
 );
 occupations["Jayne"] = "Public Relations";
 ```
@@ -803,8 +803,8 @@ let mut movieCount = 0;
 let mut songCount = 0;
 
 for library as {
-    Movie then movieCount += 1;
-    Song then songCount += 1;
+    Movie then movieCount += 1,
+    Song then songCount += 1,
 }
 ```
 
@@ -879,11 +879,11 @@ for item in library {
 ```
 let nb = 42;
 when nb as {
-    0..=7, 8, 9 then print("single digit");
-    10 then print("double digits");
-    11..=99 then print("double digits");
-    100..=999 then print("triple digits");
-    _ then print("four or more digits");
+    0..=7, 8, 9 then print("single digit"),
+    10 then print("double digits"),
+    11..=99 then print("double digits"),
+    100..=999 then print("triple digits"),
+    _ then print("four or more digits"),
 }
 ```
 
