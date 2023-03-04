@@ -87,12 +87,12 @@ Comments are only used to provide additional information to the user and are not
 
 E.g:
 ```
-// Comment
+## Line Comment
 
-/*
-    Complicated
+#*
+    Block
     Comment
-*/
+*#
 ```
 
 ### Variable
@@ -108,8 +108,8 @@ Feel ensures type safety through static typing, and variable bindings can be exp
 The sample code is as follows.
 
 ```feel
-let a: Int = 5; // Explicitly labeled type
-let b = 123; // Auto-inferred type
+let a: Int = 5; ## Explicitly labeled type
+let b = 123; ## Auto-inferred type
 ```
 
 Once an immutable variable has been declared, its type and value will not be changed in the current scope.
@@ -118,7 +118,7 @@ If we try to assign a value to an immutable variable, the compiler will report a
 
 ```feel
 let a = 5;
-a = 6; // Error
+a = 6; ## Error
 ```
 
 #### Mutable Variable
@@ -130,8 +130,8 @@ Mutable variables are declared in Feel with the let mut keyword, again following
 The sample code is as follows.
 
 ```feel
-let mut a: Int = 5; // Explicitly labeled type
-let mut b = 123; // Auto-inferred type
+let mut a: Int = 5; ## Explicitly labeled type
+let mut b = 123; ## Auto-inferred type
 ```
 
 ### Assignment
@@ -264,11 +264,11 @@ E.g:
 ```feel
 let a = 4;
 let b = 2;
-printLine( a + b );    // + plus
-printLine( a - b );    // - minus
-printLine( a * b );    // * multiply
-printLine( a / b );    // / divide
-printLine( a % b );    // % residual, meaning the remainder remaining after the divisibility
+printLine( a + b );    ## + plus
+printLine( a - b );    ## - minus
+printLine( a * b );    ## * multiply
+printLine( a / b );    ## / divide
+printLine( a % b );    ## % residual, meaning the remainder remaining after the divisibility
 ```
 
 ### Comparison Operators
@@ -280,12 +280,12 @@ E.g:
 ```feel
 let a = 4;
 let b = 2;
-printLine( a == b );   // == equal to
-printLine( a != b );   // != not equal to
-printLine( a > b );    // > Greater than
-printLine( a >= b );   // >= Greater than or equal to
-printLine( a < b );    // < less than
-printLine( a <= b );   // <= less than or equal to
+printLine( a == b );   ## == equal to
+printLine( a != b );   ## != not equal to
+printLine( a > b );    ## > Greater than
+printLine( a >= b );   ## >= Greater than or equal to
+printLine( a < b );    ## < less than
+printLine( a <= b );   ## <= less than or equal to
 ```
 
 ### Logical Operators
@@ -297,9 +297,9 @@ E.g:
 ```feel
 let a = true;
 let b = false;
-printLine( a and b );    // AND, both are true at the same time
-printLine( a or b );     // OR, one of them is true
-printLine( not a );      // NOT, boolean inversion
+printLine( a and b );    ## AND, both are true at the same time
+printLine( a or b );     ## OR, one of them is true
+printLine( not a );      ## NOT, boolean inversion
 ```
 
 ## Select Structure
@@ -432,14 +432,14 @@ It is very simple, we only need to use `parameterName: type` to declare paramete
 
 ```feel
 let sqrt(x: Int) = x * x;
-let a = sqrt(x); // a == 4
+let a = sqrt(x); ## a == 4
 ```
 
 sqrt takes an argument of type Int, x, and returns the square of it. When calling sqrt we need to give the expression of the corresponding Int type to complete the call.
 
 ```feel
 let add(x: Int, y: Int) = x + y;
-let a = add(1, 2); // a == 3
+let a = add(1, 2); ## a == 3
 ```
 
 ### Function Type
@@ -453,9 +453,9 @@ Once a function is defined, the function name can be used as an expression and c
 Variables of function types are called with the same `()` syntax as functions.
 
 ```feel
-let sqrt(x: Int) = x * x; // sqrt: (Int) -> Int
+let sqrt(x: Int) = x * x; ## sqrt: (Int) -> Int
 let f: (Int) -> Int = sqrt;
-let a = f(2); // a == 4
+let a = f(2); ## a == 4
 ```
 
 For example, with this feature, we can also define parameters or return values for function types.
@@ -481,9 +481,9 @@ Lambda expressions are very similar to function definitions, except that the let
 As shown in the code below, the value of f2 is a lambda, which is the same type as f1 and has a very similar syntax, with lambda's also declaring parameters and return types, and requiring an expression as the return value.
 
 ```feel
-let f1(x: Int): Int = x + 1; // f1: (Int) -> Int
-let f2 = fn(x: Int): Int = x + 1; // f2: (Int) -> Int
-let a = f1(1) + f2(1); // a == 4
+let f1(x: Int): Int = x + 1; ## f1: (Int) -> Int
+let f2 = fn(x: Int): Int = x + 1; ## f2: (Int) -> Int
+let a = f1(1) + f2(1); ## a == 4
 ```
 
 When the type of the lambda is known in our context, we can omit its argument type and return type.
@@ -553,7 +553,7 @@ type Point(x: Int, y: Int);
 
 let main() = {
     let a = Point(64, 128);
-    a.x = 2 // error
+    a.x = 2 ## error
 }
 ```
 
