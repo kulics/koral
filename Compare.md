@@ -6,7 +6,7 @@
 ### Feel
 
 ```
-printLine("Hello, world!")
+printLine("Hello, world!");
 ```
 
 ### C#
@@ -38,9 +38,9 @@ print("Hello, world!")
 ### Feel
 
 ```
-let mut myVariable = 42
-myVariable = 50
-let myConstant = 42
+let mut myVariable = 42;
+myVariable = 50;
+let myConstant = 42;
 ```
 
 ### C#
@@ -80,7 +80,7 @@ let myConstant = 42
 ### Feel
 
 ```
-let explicitDouble: Float = 70.0
+let explicitDouble: Float = 70.0;
 ```
 
 ### C#
@@ -159,9 +159,9 @@ String
 ### Feel
 
 ```
-let f = 6.0
-let i = 94
-let count = i + f.toInt()
+let f = 6.0;
+let i = 94;
+let count = i + f.toInt();
 ```
 
 ### C#
@@ -202,7 +202,7 @@ let count = i + Int(f)
 
 ```
 for 1..=5 as index do 
-    printLine("\{index} times 5 is \{index * 5}")
+    printLine("\{index} times 5 is \{index * 5}");
 ```
 
 ### C#
@@ -240,8 +240,8 @@ for index in 1...5 {
 ### Feel
 
 ```
-let shoppingList = arrayOf("catfish", "water", "tulips", "blue paint")
-shoppingList[1] = "bottle of water"
+let shoppingList = arrayOf("catfish", "water", "tulips", "blue paint");
+shoppingList[1] = "bottle of water";
 ```
 
 ### C#
@@ -280,8 +280,8 @@ shoppingList[1] = "bottle of water"
 let occupations = mapOf(
     ("Malcolm", "Captain"),
     ("Kaylee", "Mechanic")
-)
-occupations["Jayne"] = "Public Relations"
+);
+occupations["Jayne"] = "Public Relations";
 ```
 
 ### C#
@@ -329,8 +329,8 @@ occupations["Jayne"] = "Public Relations"
 ### Feel
 
 ```
-let emptyArray = arrayOf(String)()
-let emptyDictionary = mapOf(String, Float32)()
+let emptyArray = arrayOf(String)();
+let emptyDictionary = mapOf(String, Float32)();
 ```
 
 ### C#
@@ -369,8 +369,8 @@ let emptyDictionary = [String: Float]()
 
 ```
 let greet(name: String, day: String): String = 
-    "Hello \{name}, today is \{day}."
-greet("Bob", "Tuesday")
+    "Hello \{name}, today is \{day}.";
+greet("Bob", "Tuesday");
 ```
 
 ### C#
@@ -415,7 +415,7 @@ greet("Bob", "Tuesday")
 ### Feel
 
 ```
-let getGasPrices(): (Float, Float, Float) = (3.59, 3.69, 3.79)
+let getGasPrices(): (Float, Float, Float) = (3.59, 3.69, 3.79);
 ```
 
 ### C#
@@ -455,11 +455,11 @@ func getGasPrices() -> (Double, Double, Double) {
 
 ```
 let makeIncrementer(): (Int) -> Int = {
-    let addOne(number: Int) = 1 + number
+    let addOne(number: Int) = 1 + number;
     addOne
 }
-let increment = makeIncrementer()
-increment(7)
+let increment = makeIncrementer();
+increment(7);
 ```
 
 ### C#
@@ -524,10 +524,10 @@ increment(7)
 ### Feel
 
 ```
-type Shape(numberOfSides: Int) 
+type Shape(numberOfSides: Int);
 given Shape with {
     simpleDescription(this): String =
-        "A shape with \{this.numberOfSides} sides."
+        "A shape with \{this.numberOfSides} sides.";
 }
 ```
 
@@ -580,9 +580,9 @@ class Shape {
 ### Feel
 
 ```
-let shape = Shape(0)
-shape.numberOfSides = 7
-let shapeDescription = shape.simpleDescription()
+let shape = Shape(0);
+shape.numberOfSides = 7;
+let shapeDescription = shape.simpleDescription();
 ```
 
 ### C#
@@ -622,27 +622,27 @@ var shapeDescription = shape.simpleDescription()
 ### Feel
 
 ```
-type NamedShape(name: String, numberOfSides: Int)
+type NamedShape(name: String, numberOfSides: Int);
 
 given NamedShape with {
     simpleDescription(this): String =
-        "A shape with \{this.numberOfSides} sides."
+        "A shape with \{this.numberOfSides} sides.";
 }
 
-type Square(as namedShape: NamedShape, sideLength: Float)
+type Square(as namedShape: NamedShape, sideLength: Float);
 
 given Square with {
-    new(sideLength: Float, name: String): Square = Square(NamedShape(name, 4), sideLength)
+    new(sideLength: Float, name: String): Square = Square(NamedShape(name, 4), sideLength);
 
     simpleDescription(this): String =
-        "A square with sides of length \{this.sideLength}."
+        "A square with sides of length \{this.sideLength}.";
 
-    area(this): Float = sideLength * sideLength
+    area(this): Float = sideLength * sideLength;
 }
 
-let test = Square.new(5.2, "square")
-test.area()
-test.simpleDescription()
+let test = Square.new(5.2, "square");
+test.area();
+test.simpleDescription();
 ```
 
 ### C#
@@ -799,16 +799,12 @@ test.simpleDescription()
 ### Feel
 
 ```
-let mut movieCount = 0
-let mut songCount = 0
+let mut movieCount = 0;
+let mut songCount = 0;
 
 for library as {
-    Movie do {
-        movieCount += 1
-    }
-    Song do {
-        songCount += 1
-    }
+    Movie then movieCount += 1;
+    Song then songCount += 1;
 }
 ```
 
@@ -881,13 +877,13 @@ for item in library {
 ### Feel
 
 ```
-let nb = 42
+let nb = 42;
 when nb as {
-    0..=7, 8, 9 then print("single digit")
-    10 then print("double digits")
-    11..=99 then print("double digits")
-    100..=999 then print("triple digits")
-    _ then print("four or more digits")
+    0..=7, 8, 9 then print("single digit");
+    10 then print("double digits");
+    11..=99 then print("double digits");
+    100..=999 then print("triple digits");
+    _ then print("four or more digits");
 }
 ```
 
@@ -949,7 +945,7 @@ switch nb {
 
 ```
 for someObjects as movie: Movie do
-    printLine("Movie: '\{movie.name}', dir. \{movie.director}")
+    printLine("Movie: '\{movie.name}', dir. \{movie.director}");
 ```
 
 ### C#
@@ -998,10 +994,10 @@ for case movie as Movie in someObjects {
 
 ```
 type Nameable = {
-    name(): String
+    name(): String;
 }
 
-let f(x: Nameable): Void = printLine("Name is " + x.name())
+let f(x: Nameable): Void = printLine("Name is " + x.name());
 ```
 
 ### C#
@@ -1059,11 +1055,11 @@ func f(x: any Nameable) {
 ### Feel
 
 ```
-type Dog()
+type Dog();
 
-given Dog: Nameable with name(): String = "Dog"
+given Dog: Nameable with name(): String = "Dog";
 
-given Dog: Weight with weight(): Int = 30
+given Dog: Weight with weight(): Int = 30;
 ```
 
 ### C#
