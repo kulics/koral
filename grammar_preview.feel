@@ -243,11 +243,11 @@ let main() = {
         time_update: Int,
     );
     
-    ## Generic Template
+    ## Generic Type
     type Table(T)(data: T);
     given(T) Table(T) with {
-        setData(this, d: T): Void = {
-            data = d
+        setData(mut this, d: T): Void = {
+            data = d;
         }
     }
     Table(Int)(1);
@@ -285,44 +285,44 @@ let main() = {
     ## operator override
     given(T) MyList(T): Addable(T) with {
         ## a + e
-        plus(this, element: T): Void = {
+        plus(mut this, element: T): Void = {
             this.arr = this.arr.append(element)
         }
     }
     given(T) MyList(T): MutIndexable(T) with { 
         ## e = a[i]
-        get(this, index: Int): T = this.arr[index];
+        get(in this, index: Int): T = this.arr[index];
         ## a[i] = e
-        set(mut this, element: T, index: Int): Void = this.arr[index] = element;
+        set(mut this, index: Int, element: T): Void = this.arr[index] = element;
     }
     
     ## Iterator pattern
     type Iterator(T) = {
-        next(this): Option(T);
+        next(mut this): Option(T);
     }
 
     type Iterable(T) = {
-        iter(this): Iterator(T);
+        iter(in this): mut Iterator(T);
     }
 
     type ListNode(T) = {
         Empty(),
         Node(head: T, tail: ListNode(T)),
     } with {
-        iter(this): Iterator(T) = ListNodeIterator(this);
+        iter(this): mut Iterator(T) = ListNodeIterator(this);
     }
 
-    type ListIterator(T)(mut li: ListNode(T));
+    type ListIterator(T)(li: ListNode(T));
 
-    given(T) ListIterator(T) with {
-        next(this): Option(T) =
-            if this.li as Node(h, t) then {
+    given(T) ListIterator(T) with
+        next(mut this): Option(T) =
+            if this.li as Node(h, t) 
+            then {
                 this.li = t;
                 Some(h)
             } else {
                 None()
             }
-    }
 
     type TreeNode = { Empty(), Node(val: Int, left: TreeNode, right: TreeNode) }
 
@@ -437,7 +437,7 @@ given(T) Array(T) with {
 }
 
 type ToString = {
-    toString(this): String;
+    toString(in this): String;
 }
 
 type InputStream = {
@@ -445,12 +445,12 @@ type InputStream = {
 }
 
 type OutputStream = {
-    write(mut this, from: Array(Byte)): Int;
+    write(mut this, from: in Array(Byte)): Int;
     flush(mut this): Void;
 }
 
-type String(_data: mut Array(Byte)) with {
-    of(data: Array(Byte)): out String = out String(data.clone());
+type String(_data: mut Array(Char)) with {
+    of(data: in Array(Char)): out String = out String(data.clone());
 
     append(mut this, other: in String): Void = {
         let newData = mut Array(size: this._data.size() + other._data.size(), item: 0);
@@ -459,12 +459,8 @@ type String(_data: mut Array(Byte)) with {
         this._data = newData;
     }
 
-    reset(mut this, newString: in String): Void = {
-        this._data = newString._data.clone();
-        return this;
-    }
-
-    toString(this): String = this;
+    toString(in this): String = 
+        if this as a: String then a else String(this._data.clone())
 
     intoString(mut this): String = {
         let temp = this._data;
@@ -472,14 +468,21 @@ type String(_data: mut Array(Byte)) with {
         String(temp);
     }
 
-    clone(in this): out String = String(this._data.clone());
+    clone(in this): out String = out String(this._data.clone());
+
+    iter(in this): mut StringIterator = StringIterator.of(this);
 }
 
-type Person(name: String, age: Int) with {
-    changeName(mut this, newName: in String): Void = {
-        ## 报错
-        this.name.reset(newName);
-    }
+type StringIterator(_source: in String, index: Int): Iterator(Char) with {
+    of(source: in String) = mut StringIterator(source, -1);
+    
+    next(mut this): Option(Char) = 
+        if this.index < this._source._data.size() then {
+            this.index += 1
+            Some(this._source[this.index])
+        } else {
+            None()
+        }
 }
 
 let mutability() {
@@ -491,6 +494,34 @@ let mutability() {
     let b: String = a;
     ## b 不可修改，编译报错
     ## b.append("error");
+}
+
+type Array(T)(_source: mut RawArray(T), _start: Int, _len: Int) with {
+    create(size: Int, item: T) = out Array(T)(RawArray.new(size, item), 0, size);
+
+    size(in this) = this._len;
+
+    get(in this, index: Int) = this._source[index+_start];
+
+    set(mut this, index: Int, value: T) = this._source[index+_start] = value;
+
+    slice(this, start: Int, len: Int): Array(T) = 
+        Array(T)(this._source, start, len);
+    
+    sliceMut(mut this, start: Int, len: Int): mut Array(T) = 
+        mut Array(T)(this._source, start, len);
+}
+
+type ArrayIterator(T)(_source: in Array(T), index: Int): Iterator(T) with {
+    of(source: in Array(T)) = mut ArrayIterator(source, -1);
+    
+    next(mut this): Option(T) = 
+        if this.index < this._source.size() then {
+            this.index += 1
+            Some(this._source[this.index])
+        } else {
+            None()
+        }
 }
 
 #*
