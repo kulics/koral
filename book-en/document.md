@@ -22,7 +22,7 @@ With well-designed grammar rules, this language can effectively reduce the burde
 1. [Select Structure](#Select-Structure)
 1. [Loop Structure](#Loop-Structure)
 1. [Function](#Function)
-1. [Structure](#Structure)
+1. [Data Type](#Data-Type)
 
 ## Install
 
@@ -492,29 +492,29 @@ When the type of the lambda is known in our context, we can omit its argument ty
 let f: (Int) -> Int = fn(x) = x + 1;
 ```
 
-## Structure
+## Data Type
 
-A structure is a collection of data that consists of a series of data with the same type or different types; it is a composite data type.
+A data type is a collection of data that consists of a series of data with the same type or different types; it is a composite data type.
 
-Obviously, structures are suitable for packing different data together to form a new type that facilitates the manipulation of complex data.
+Obviously, data types are suitable for packing different data together to form a new type that facilitates the manipulation of complex data.
 
 ### Definition
 
-We can declare a new structure using the `type` keyword. The structure needs to declare the member variables it has using `()`, similar to the parameters of a function.
+We can declare a new data type using the `type` keyword. The data type needs to declare the member variables it has using `()`, similar to the parameters of a function.
 
 ```feel
 type Empty();
 ```
 
-Above we declared a new structure called Empty, which contains no data at all.
+Above we declared a new data type called Empty, which contains no data at all.
 
-Next let's try defining some more meaningful structures.
+Next let's try defining some more meaningful data types.
 
 ```feel
 type Point(x: Int, y: Int);
 ```
 
-Point is a structure with two member variables, x and y, that can be used to represent a point in a two-dimensional coordinate system. This allows us to use the Point type to represent our data in the coordinate system, instead of always using two separate Int data.
+Point is a data type with two member variables, x and y, that can be used to represent a point in a two-dimensional coordinate system. This allows us to use the Point type to represent our data in the coordinate system, instead of always using two separate Int data.
 
 ### Construct
 
@@ -559,11 +559,15 @@ let main() = {
 
 We can mark a member variable with the mut keyword just like a mutable variable, so that it becomes a mutable member variable and can be reassigned.
 
+Note that if our datatype wishes to provide mutable member variables, the datatype itself needs to be declared as mut. this helps us distinguish more easily between mutable and immutable types.
+
+The mutability of member variables follows the type and has nothing to do with whether the instance variables are mutable or not, so we can modify mutable member variables even if we have declared immutable variables.
+
 ```feel
-type Point(mut x: Int, mut y: Int);
+type mut Point(mut x: Int, mut y: Int);
 
 let main() = {
-    let a = Point(64, 128);
+    let a = Point(64, 128); ## `a` does not need to be declared as mut
     a.x = 2;
     a.y = 0
 }

@@ -524,9 +524,9 @@ increment(7)
 ### Feel
 
 ```
-type Shape(numberOfSides: Int);
+type mut Shape(mut numberOfSides: Int);
 given Shape with {
-    simpleDescription(this): String =
+    this.simpleDescription(): String =
         "A shape with \{this.numberOfSides} sides.";
 }
 ```
@@ -625,7 +625,7 @@ var shapeDescription = shape.simpleDescription()
 type NamedShape(name: String, numberOfSides: Int);
 
 given NamedShape with {
-    simpleDescription(this): String =
+    this.simpleDescription(): String =
         "A shape with \{this.numberOfSides} sides.";
 }
 
@@ -634,10 +634,10 @@ type Square(as namedShape: NamedShape, sideLength: Float);
 given Square with {
     new(sideLength: Float, name: String): Square = Square(NamedShape(name, 4), sideLength);
 
-    simpleDescription(this): String =
+    this.simpleDescription(): String =
         "A square with sides of length \{this.sideLength}.";
 
-    area(this): Float = sideLength * sideLength;
+    this.area(): Float = sideLength * sideLength;
 }
 
 let test = Square.new(5.2, "square");
@@ -994,7 +994,7 @@ for case movie as Movie in someObjects {
 
 ```
 type Nameable = {
-    name(): String;
+    this.name(): String;
 }
 
 let f(x: Nameable): Void = printLine("Name is " + x.name());
@@ -1057,9 +1057,9 @@ func f(x: any Nameable) {
 ```
 type Dog();
 
-given Dog: Nameable with name(): String = "Dog";
+given Dog: Nameable with this.name(): String = "Dog";
 
-given Dog: Weight with weight(): Int = 30;
+given Dog: Weight with this.weight(): Int = 30;
 ```
 
 ### C#
