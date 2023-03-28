@@ -54,7 +54,7 @@ E.g.
 ```feel
 let a = { 1 + 1 + 1
         + 1 + 1 }
-let b = 1
+let b = 1;
 ```
 
 ### Entry Function
