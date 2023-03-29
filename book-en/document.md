@@ -99,9 +99,9 @@ E.g:
 
 Feel's variables are a kind of binding semantics, equivalent to binding a variable name and a value together, thus establishing an association, similar to a key-value pair. For security reasons, Feel's variables cannot be changed by default, but Feel also provides another kind of variables - mutable variables.
 
-#### Immutable Variable
+#### Readonly Variable
 
-Immutable variables are declared in Feel using the let keyword, and variables are declared first and used later.
+Readonly variables are declared in Feel using the let keyword, and variables are declared first and used later.
 
 Feel ensures type safety through static typing, and variable bindings can be explicitly typed at declaration time with `: type`, or we can omit the type when there is enough information in the context, and the compiler will infer the type of the variable from the context.
 
@@ -112,9 +112,9 @@ let a: Int = 5; ## Explicitly labeled type
 let b = 123; ## Auto-inferred type
 ```
 
-Once an immutable variable has been declared, its type and value will not be changed in the current scope.
+Once an readonly variable has been declared, its type and value will not be changed in the current scope.
 
-If we try to assign a value to an immutable variable, the compiler will report an error.
+If we try to assign a value to an readonly variable, the compiler will report an error.
 
 ```feel
 let a = 5;
@@ -546,7 +546,7 @@ Executing the above program, we can see 64 and 128.
 
 ### Mutable Member Variables
 
-Member variables, like variables, are immutable by default. So we can't reassign values to x and y in Point. If we try to do so, the compiler will report an error.
+Member variables, like variables, are readonly by default. So we can't reassign values to x and y in Point. If we try to do so, the compiler will report an error.
 
 ```feel
 type Point(x: Int, y: Int);
@@ -559,9 +559,9 @@ let main() = {
 
 We can mark a member variable with the mut keyword just like a mutable variable, so that it becomes a mutable member variable and can be reassigned.
 
-Note that if our datatype wishes to provide mutable member variables, the datatype itself needs to be declared as mut. this helps us distinguish more easily between mutable and immutable types.
+Note that if our datatype wishes to provide mutable member variables, the datatype itself needs to be declared as mut. this helps us distinguish more easily between mutable and readonly types.
 
-The mutability of member variables follows the type and has nothing to do with whether the instance variables are mutable or not, so we can modify mutable member variables even if we have declared immutable variables.
+The mutability of member variables follows the type and has nothing to do with whether the instance variables are mutable or not, so we can modify mutable member variables even if we have declared readonly variables.
 
 ```feel
 type mut Point(mut x: Int, mut y: Int);
