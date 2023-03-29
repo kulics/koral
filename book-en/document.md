@@ -544,7 +544,7 @@ let main() = {
 
 Executing the above program, we can see 64 and 128.
 
-### Mutable Member Variables
+### Mutable Types
 
 Member variables, like variables, are readonly by default. So we can't reassign values to x and y in Point. If we try to do so, the compiler will report an error.
 
@@ -557,19 +557,41 @@ let main() = {
 }
 ```
 
-We can mark a member variable with the mut keyword just like a mutable variable, so that it becomes a mutable member variable and can be reassigned.
+We can mark the type with the mut keyword so that it is allowed to be constructed as a mutable type at construction time, and then we can assign values to the member variables in the mutable type.
 
-Note that if our datatype wishes to provide mutable member variables, the datatype itself needs to be declared as mut. this helps us distinguish more easily between mutable and readonly types.
+Constructing an instance of a mutable type requires the mut keyword to be marked in front of the construction syntax.
 
-The mutability of member variables follows the type and has nothing to do with whether the instance variables are mutable or not, so we can modify mutable member variables even if we have declared readonly variables.
+The mutability of member variables follows the type and has nothing to do with whether the instance variables are mutable or not, so we can modify mutable member variables even if we declare read-only variables.
+
+Translated with www.DeepL.com/Translator (free version)
 
 ```feel
-type mut Point(mut x: Int, mut y: Int);
+type mut Point(x: Int, y: Int);
 
 let main() = {
-    let a = Point(64, 128); ## `a` does not need to be declared as mut
-    a.x = 2;
-    a.y = 0
+    let a: mut Point = mut Point(64, 128); ## `a` no need to declare as mut
+    a.x = 2; ## ok
+    a.y = 0 ## ok
 }
 ```
 
+When we define a mutable type, it can be used as a mutable type and also as a read-only type, depending on whether we mark it with the mut keyword at the point of use.
+
+Mutable types are designed to be subtypes of read-only types, so instances of mutable types can be assigned or passed to read-only types. When we convert a mutable type for use as a read-only type, it will still point to the original instance, so modifications to the mutable type instance will still cause changes to be observed on the read-only side of the type.
+
+Translated with www.DeepL.com/Translator (free version)
+
+```feel
+type mut Point(x: Int, y: Int);
+
+let main() = {
+    let a: mut Point = mut Point(64, 128); 
+    let b: Point = a; ## ok
+    printLine(a.x); ## 64
+    printLine(b.x); ## 64
+    a.x = 128;
+    printLine(a.x); ## 128
+    printLine(b.x); ## 128
+    b.x = 256; ## error
+}
+```
