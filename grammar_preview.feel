@@ -207,7 +207,7 @@ let main() = {
     given ImageButton: Animation with {
         ## Implement Interface
         this.move(s: Int): Void = {
-            t = 5000/s;
+            let t = 5000/s;
             play( s + t );
         }
         this.stop(): Void = {}
@@ -234,7 +234,7 @@ let main() = {
 
     ## Annotation
     #table("user") #property(false, name = "d", hide = true)
-    type User(
+    type mut User(
         #column("id") #required #key
         id: String,
         #column("nick_name") #required
@@ -244,9 +244,9 @@ let main() = {
     );
     
     ## Generic Type
-    type mut Table(T)(mut data: T);
+    type mut Table(T)(data: T);
     given(T) Table(T) with {
-        this.setData(d: T): Void = {
+        mut this.setData(d: T): Void = {
             this.data = d;
         }
     }
@@ -281,41 +281,41 @@ let main() = {
         }
     }
 
-    type mut MyList(T)(mut arr: [T]);
+    type mut MyList(T)(arr: [T]);
     ## operator override
     given(T) MyList(T): Addable(T) with {
         ## a + e
-        this.plus(element: T): Void = {
+        mut this.plus(element: T): Void = {
             this.arr = this.arr.append(element);
         }
     }
-    given(T) MyList(T): MutIndexable(T) with { 
+    given(T) MyList(T): MutIndexable(T) with {
         ## e = a[i]
         this.get(index: Int): T = this.arr[index];
         ## a[i] = e
-        this.set(index: Int, element: T): Void = this.arr[index] = element;
+        mut this.set(index: Int, element: T): Void = this.arr[index] = element;
     }
     
     ## Iterator pattern
-    type Iterator(T) = {
-        this.next(): Option(T);
+    type mut Iterator(T) = {
+        mut this.next(): Option(T);
     }
 
     type Iterable(T) = {
-        this.iter(): Iterator(T);
+        this.iter(): mut Iterator(T);
     }
 
     type ListNode(T) = {
         Empty(),
         Node(head: T, tail: ListNode(T)),
     } with {
-        this.iter(): Iterator(T) = ListNodeIterator(this);
+        this.iter(): mut Iterator(T) = mut ListNodeIterator(this);
     }
 
-    type mut ListIterator(T)(mut li: ListNode(T));
+    type mut ListIterator(T)(li: ListNode(T));
 
     given(T) ListIterator(T) with
-        this.next(): Option(T) =
+        mut this.next(): Option(T) =
             if this.li as Node(h, t) then {
                 this.li = t;
                 Some(h)
@@ -386,23 +386,21 @@ given(T) LinkedList(T) with {
     new(): This = Empty();
 }
 
-type List(T) = {
-    new(): This;
-
+type mut List(T) = {
     this.get(index: Int): T;
 
-    this.set(index: Int, element: T): Void;
+    mut this.set(index: Int, element: T): Void;
 }
 
-type mut ArrayList(T) = { ArrayList(mut _arr: Array(T)) }
-type mut ArrayList(T)(mut _arr: Array(T));
+type mut ArrayList(T) = { ArrayList(_arr: Array(T), size: Int) }
+type mut ArrayList(T)(_arr: Array(T), size: Int);
 
 given(T) ArrayList(T): List(T) with {
-    new(): This = This([]);
+    new(): mut This = mut This([], 0);
 
     this.get(index: Int): T = this._arr.get(index);
 
-    this.set(index: Int, element: T): Void = this._arr.set(index, element);
+    mut this.set(index: Int, element: T): Void = this._arr.set(index, element);
 
     this.map(R)(f: (T)->R): Iterator(R) = MapIter(T, R)(this, f);
 }
@@ -439,32 +437,35 @@ type ToString = {
     this.toString(): String;
 }
 
-type InputStream = {
-    this.read(to: Array(Byte)): Int;
+type mut InputStream = {
+    mut this.read(to: Array(Byte)): Int;
 }
 
-type OutputStream = {
-    this.write(from: Array(Byte)): Int;
-    this.flush(): Void;
+type mut OutputStream = {
+    mut this.write(from: mut Array(Byte)): Int;
+    mut this.flush(): Void;
 }
 
 type mut Array(T)(_source: RawArray(T), _start: Int, _len: Int) with {
-    create(size: Int, item: T) = Array(T)(RawArray.new(size, item), 0, size);
+    create(size: Int, item: T) = mut Array(T)(RawArray.new(size, item), 0, size);
 
     this.size() = this._len;
 
     this.get(index: Int) = this._source[index + _start];
     
-    this.set(index: Int, value: T) = this._source[index + _start] = value;
+    mut this.set(index: Int, value: T) = this._source[index + _start] = value;
     
     this.slice(start: Int, len: Int): Array(T) = 
         Array(T)(this._source, start, len);
+
+    mut this.sliceMut(start: Int, len: Int): mut Array(T) = 
+        mut Array(T)(this._source, start, len);
 }
 
-type mut ArrayIterator(T)(_source: Array(T), mut index: Int): Iterator(T) with {
+type mut ArrayIterator(T)(_source: Array(T), index: Int): Iterator(T) with {
     of(source: Array(T)) = ArrayIterator(source, -1);
     
-    this.next(): Option(T) = 
+    mut this.next(): Option(T) = 
         if this.index < this._source.size() then {
             this.index += 1
             Some(this._source[this.index])
@@ -480,19 +481,34 @@ type String(_data: Array(Char)) with {
 
     this.clone(): String = String(this._data.clone());
 
-    this.iter(): StringIterator = StringIterator.of(this);
+    this.iter(): mut StringIterator = StringIterator.of(this);
 }
 
-type mut StringIterator(_source: String, mut index: Int): Iterator(Char) with {
-    of(source: String) = StringIterator(source, -1);
+type mut StringIterator(_source: String, index: Int): Iterator(Char) with {
+    of(source: String) = mut StringIterator(source, -1);
     
-    this.next(): Option(Char) = 
+    mut this.next(): Option(Char) = 
         if this.index < this._source._data.size() then {
             this.index += 1
             Some(this._source[this.index])
         } else {
             None()
         }
+}
+
+type mut Node(T)(value: T, next: Option(Node(T)));
+
+type mut LinkedList(T)(head: Option(Node(T)), size: Int) with {
+    mut this.prepend(v: T): Void = {
+        let node = mut Node(v, None());
+        if this.head as None then {
+            this.head = node;
+        } else {
+            node.next = this.head;
+            this.head = node;
+        }
+        this.size += 1;
+    }
 }
 
 #*
