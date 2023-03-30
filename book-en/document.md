@@ -563,8 +563,6 @@ Constructing an instance of a mutable type requires the mut keyword to be marked
 
 The mutability of member variables follows the type and has nothing to do with whether the instance variables are mutable or not, so we can modify mutable member variables even if we declare read-only variables.
 
-Translated with www.DeepL.com/Translator (free version)
-
 ```feel
 type mut Point(x: Int, y: Int);
 
@@ -578,8 +576,6 @@ let main() = {
 When we define a mutable type, it can be used as a mutable type and also as a read-only type, depending on whether we mark it with the mut keyword at the point of use.
 
 Mutable types are designed to be subtypes of read-only types, so instances of mutable types can be assigned or passed to read-only types. When we convert a mutable type for use as a read-only type, it will still point to the original instance, so modifications to the mutable type instance will still cause changes to be observed on the read-only side of the type.
-
-Translated with www.DeepL.com/Translator (free version)
 
 ```feel
 type mut Point(x: Int, y: Int);
