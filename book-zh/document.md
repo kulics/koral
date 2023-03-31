@@ -295,9 +295,9 @@ printLine( a <= b );     ## <= 小于或等于
 ```feel
 let a = true;
 let b = false;
-printLine( a and b );     ## 与，两者同时为真才为真
-printLine( a or b );      ## 或，两者其中一者为真就为真
-printLine( not a );       ## 非，布尔值取反
+printLine( a & b );     ## 与，两者同时为真才为真
+printLine( a | b );     ## 或，两者其中一者为真就为真
+printLine( !a );        ## 非，布尔值取反
 ```
 
 ## 选择结构
