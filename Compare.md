@@ -803,8 +803,8 @@ let mut movieCount = 0;
 let mut songCount = 0;
 
 for library as {
-    Movie then movieCount += 1,
-    Song then songCount += 1,
+    Movie then movieCount += 1;
+    Song then songCount += 1;
 }
 ```
 
@@ -879,11 +879,11 @@ for item in library {
 ```
 let nb = 42;
 when nb as {
-    0..=7, 8, 9 then print("single digit"),
-    10 then print("double digits"),
-    11..=99 then print("double digits"),
-    100..=999 then print("triple digits"),
-    _ then print("four or more digits"),
+    >= 0 & <= 7 | 8 | 9 then print("single digit");
+    10 then print("double digits");
+    >= 11 & <= 99 then print("double digits");
+    >= 100 & <= 999 then print("triple digits");
+    _ then print("four or more digits");
 }
 ```
 
@@ -891,20 +891,18 @@ when nb as {
 
 ```csharp
 var nb = 42;
-switch (nb) 
+switch (nb)
 {
-    case int x when x <= 7 && x >=0: 
-    case 8:
-    case 9:
+    case <= 7 and >= 0 or 8 or 9: 
         Console.WriteLine("single digit");
         break;
     case 10: 
         Console.WriteLine("double digits");
         break;
-    case int x when x >=11 && x <=99: 
+    case >= 11 and <= 99: 
         Console.WriteLine("double digits");
         break;
-    case int x when x >= 100 && x <= 999: 
+    case >= 100 and <= 999: 
         Console.WriteLine("triple digits");
         break;
     default: 
