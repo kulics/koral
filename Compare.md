@@ -329,8 +329,8 @@ occupations["Jayne"] = "Public Relations"
 ### Feel
 
 ```
-let emptyArray = arrayOf(String)();
-let emptyDictionary = mapOf(String, Float32)();
+let emptyArray = (String)arrayOf();
+let emptyDictionary = (String, Float32)mapOf();
 ```
 
 ### C#
