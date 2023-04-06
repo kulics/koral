@@ -337,6 +337,30 @@ When we don't need to handle the else branch, we can use the if-do syntax, and t
 let main() = if 1 == 1 do printLine("yes");
 ```
 
+### Short circuit logic operation
+
+In the conditions of the select structure, we can use short-circuit logic operations `and` and `or` to combine the logic. The short-circuit logic operation's can skip some unnecessary computations to save computational resources or avoid side effects.
+
+The short-circuit logic is represented by `and`, and when the condition on the left side is `false`, the condition on the right side will be skipped.
+
+```feel
+let main() = {
+    if false and f() do { ## will not execute f()
+        ...
+    }
+}
+```
+
+Short-circuit logic or is represented by `or`, when the condition on the left side is `true`, the condition on the right side will be skipped.
+
+```feel
+let main() = {
+    if true or f() do { ## will not execute f()
+        ...
+    }
+}
+```
+
 ## Loop Structure
 
 A loop structure is a program structure that is set up when a function needs to be executed repeatedly in a program. It is a condition in the loop body that determines whether to continue executing a function or to exit the loop.
@@ -520,7 +544,7 @@ Point is a data type with two member variables, x and y, that can be used to rep
 
 So how do we construct a new Point data?
 
-As with the function type, we use the same `()` syntax to call our structure and we get the data we need.
+Similar to function types, we use the same `()` syntax to call our constructor and we get the data we need.
 
 ```feel
 let a: Point = Point(0, 0);
