@@ -802,7 +802,7 @@ for item in library do {
         movieCount += 1
     } else if Song in item do {
         songCount += 1
-    }   
+    }
 }
 ```
 
