@@ -524,8 +524,7 @@ increment(7)
 ### Feel
 
 ```
-type mut Shape(mut numberOfSides: Int);
-given Shape with {
+type mut Shape(numberOfSides: Int) with {
     this.simpleDescription(): String =
         "A shape with \{this.numberOfSides} sides.";
 }
@@ -622,16 +621,12 @@ var shapeDescription = shape.simpleDescription()
 ### Feel
 
 ```
-type NamedShape(name: String, numberOfSides: Int);
-
-given NamedShape with {
+type NamedShape(name: String, numberOfSides: Int) with {
     this.simpleDescription(): String =
         "A shape with \{this.numberOfSides} sides.";
 }
 
-type Square(as namedShape: NamedShape, sideLength: Float);
-
-given Square with {
+type Square(as namedShape: NamedShape, sideLength: Float) with {
     new(sideLength: Float, name: String): Square = Square(NamedShape(name, 4), sideLength);
 
     this.simpleDescription(): String =
@@ -802,9 +797,12 @@ test.simpleDescription()
 let mut movieCount = 0;
 let mut songCount = 0;
 
-for library as {
-    Movie then movieCount += 1;
-    Song then songCount += 1;
+for item in library do {
+    if Movie in item then {
+        movieCount += 1
+    } else if Song in item do {
+        songCount += 1
+    }   
 }
 ```
 
@@ -878,12 +876,17 @@ for item in library {
 
 ```
 let nb = 42;
-when nb as {
-    >= 0 & <= 7 | 8 | 9 then print("single digit");
-    10 then print("double digits");
-    >= 11 & <= 99 then print("double digits");
-    >= 100 & <= 999 then print("triple digits");
-    _ then print("four or more digits");
+when nb in {
+    case >= 0 & <= 7 | 8 | 9 then 
+        print("single digit")
+    case 10 then 
+        print("double digits")
+    case >= 11 & <= 99 then 
+        print("double digits")
+    case >= 100 & <= 999 then 
+        print("triple digits")
+    case _ then 
+        print("four or more digits")
 }
 ```
 
@@ -942,7 +945,7 @@ switch nb {
 ### Feel
 
 ```
-for someObjects as movie: Movie do
+for case movie: Movie in someObjects do
     printLine("Movie: '\{movie.name}', dir. \{movie.director}");
 ```
 
