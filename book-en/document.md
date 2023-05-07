@@ -22,7 +22,10 @@ With well-designed grammar rules, this language can effectively reduce the burde
 1. [Select Structure](#Select-Structure)
 1. [Loop Structure](#Loop-Structure)
 1. [Function](#Function)
-1. [Data Type](#Data-Type)
+1. [Data Types](#Data-Types)
+1. [Generic Data Types](#Generic-Data-Types)
+1. [Array Type](#Array-Type)
+1. [Generic Functions](#Generic-Functions)
 
 ## Install
 
@@ -365,7 +368,7 @@ let main() = {
 
 A loop structure is a program structure that is set up when a function needs to be executed repeatedly in a program. It is a condition in the loop body that determines whether to continue executing a function or to exit the loop.
 
-In Feel, the loop structure is represented by the while syntax, where the while is followed by a judgment condition, and the branch after the do keyword is executed when the condition is `true`, and then it returns to the judgment condition for the next loop, and ends the loop when the condition is `false`.
+In Feel, the loop structure is represented by the while syntax, where the while is followed by a judgment condition, and the branch after the do keyword is executed when the condition is `true`, and then it returns to the judgment condition for the next loop, and ends the loop when the condition is `false`. The do branch must be followed by an expression.
 
 This while syntax is an expression.
 
@@ -516,7 +519,7 @@ When the type of the lambda is known in our context, we can omit its argument ty
 let f: (Int) -> Int = (x) => x + 1;
 ```
 
-## Data Type
+## Data Types
 
 A data type is a collection of data that consists of a series of data with the same type or different types; it is a composite data type.
 
@@ -613,5 +616,230 @@ let main() = {
     printLine(a.x); ## 128
     printLine(b.x); ## 128
     b.x = 256; ## error
+}
+```
+
+### Member Functions
+
+In addition to member variables, data types can also define member functions. Member functions allow our types to provide rich functionality directly, without relying on external functions.
+
+Defining a member function is as simple as using the `with` keyword after the type definition and declaring a block containing the member function.
+
+```feel
+type Rectangle(length: Int, width: Int) with {
+    this.area(): Int = this.length * this.width;
+}
+```
+
+As the above code shows, we define a member function `area`, which is used to calculate the area of the Rectangle.
+
+Unlike normal function definitions, the member function does not need to start with `let` and is usually preceded by `this.`. It is used to represent the current type of the instance parameter.
+
+As you may have noticed, accessing member variables in a member function is similar to accessing them externally, except that we need to use `this` to indicate the variable name of the instance.
+
+As with accessing member variables, we only need to use the `.` syntax to access member functions.
+
+```feel
+let main() = {
+    let r = Rectangle(2, 4);
+    printLine(r.area())
+}
+```
+
+Executing the above program, we can see that 8.
+
+This means that we cannot modify member variables in member functions. If we need to modify it, we need to add the `mut` modifier in front of this. `mut this` means that the current instance type is mutable, so it can modify member variables, which also requires that only instances of mutable types can access mutable member functions.
+
+```feel
+type mut Rectangle(length: Int, width: Int) with {
+    mut this.setLength(l: Int): Void = this.length = l;
+}
+
+let main() = {
+    let a: Rectangle = Rectangle(2, 4);
+    a.setLength(4); ## error, a is not mut Rectangle, can't call mut member function
+    let b: mut Rectangle = mut Rectangle(2, 4);
+    b.setLength(4); ## ok
+}
+```
+
+In addition to member functions that contain this, we can also define member functions that do not contain this.
+
+This class of functions cannot be accessed using instances and can only be accessed using type names. It allows us to define functions that are highly type-associated but do not require an instance as an argument.
+
+```feel
+type Point(x: Int, y: Int) with {
+    default(): Point = Point(0, 0);
+}
+
+let main() = {
+    let a = Point.default();
+    printLine(a.x); ## 0
+    printLine(a.y); ## 0
+}
+```
+
+For example, in the above example, we define a member function for Point that constructs a default value. Then it was called using `Point.default`.
+
+## Generic Data Types
+
+Let's think about a scenario where we want to return two values on the return type of a function.
+
+For the simple case, we can define a fixed type to wrap the two values.
+
+```feel
+type Pair(left: Int, right: Int);
+
+let f(): Pair = Pair(1, 2);
+```
+
+But if we have many different types to wrap, the above approach is not general enough.
+
+We need a Pair that can represent any type, and we can define it with the help of a generic data type.
+
+A generic data type differs from a datatype in that it requires additional declarations of type parameters that indicate future substitution by the actual type passed in, thus allowing the type of a member variable or member function to be substituted for the specific type when it is subsequently instantiated.
+
+```feel
+type (T1, T2)Pair(left: T1, right: T2);
+```
+
+As shown in the code above, we have declared two type parameters, T1 and T2, on the left side of `Pair` in the form of another parameter.
+
+If we need more than one type parameter, we can declare them one by one in order, splitting them with `,`. The call also needs to give the actual types in the same order.
+
+Unlike normal parameters, the identifier of a type parameter always starts with an uppercase letter and has no type annotation.
+
+Next we look at how to construct generic data types.
+
+```feel
+let main() = {
+    lef a1: (Int, Int)Pair = (Int, Int)Pair(1, 2);
+    ## a1.left: Int, a1.right: Int
+    lef a2: (Bool, Bool)Pair = (Bool, Bool)Pair(true, false);
+    ## a2.left: Bool, a2.right: Bool
+    lef a3: (Int, String)Pair = (Int, String)Pair(1, "a");
+    ## a3.left: Int, a3.right: String
+}
+```
+
+As the above code shows, when we use the generic Pair, we need to pass the actual type in the place of the generic parameter. Depending on the type we pass in, the left and right types of the corresponding variables will be different.
+
+This gives us a generic enough Pair type that we can use it as our return type for two values of any type, greatly simplifying the number of types we need to define.
+
+The above code is still cumbersome to write, and we can actually omit the type parameter when the generic type is constructed when the context type is explicit. So we can use a more concise way to achieve the above functionality.
+
+Like the following code, which is equivalent to the above code.
+
+```feel
+let main() = {
+    lef a1 = Pair(1, 2);
+    ## a1: (Int, Int)Pair
+    lef a2 = Pair(true, false);
+    ## a2: (Bool, Bool)Pair
+    lef a3 = Pair(1, "a");
+    ## a3: (Int, String)Pair
+}
+```
+
+## Array Type
+
+An array is a generic data type that stores a set of data elements of the same type, each of which has an index to indicate its position in the array. The length of an array is fixed, and it can be accessed quickly by indexing any element.
+
+We use `(T)Array` to denote the array type, where `T` can be of any type.
+
+The array type can be initialized using the array literal (`[elem1, elem2, ...]`), where `elem1` and `elem2` denote the elements at the corresponding positions, with different elements separated by (`,`), and we can pass in any expression, but all elements must be of the same type. 
+
+```feel
+let x: (Int)Array = [1, 2, 3, 4, 5];
+```
+
+As shown in the code above, we use the array literal syntax to create a `(Int)Array` whose elements are `1, 2, 3, 4, 5` just as the literal represents.
+
+In addition to this type of literal that lists the elements, we can also construct another type of literal that creates an array with a specified size and default value (`[default; size]`), where `default` is the default value and `size` is the number of elements.
+
+```feel
+let y: (Int)Array = [0; 3];
+## y == [0, 0, 0]
+```
+
+We can use the `size` member function of an array to get the number of elements in it.
+
+```feel
+printLine(x.size()); ## 5
+```
+
+We can use the subscript syntax `[index]` to access the elements at the specified index, `index` can only be a value of type `Int`. The subscript starts at 0, `[0]` corresponds to the first element, and so on for subsequent elements.
+
+```feel
+printLine(x[0]); ## 1
+printLine(x[2]); ## 3
+printLine(x[4]); ## 5
+```
+
+With the `while` syntax, we can iterate over the elements of an array, as in the following code.
+
+```feel
+let main() = {
+    let x = [1, 2, 3, 4, 5];
+    let mut n = 0;
+    let size = x.size();
+    while n < size do {
+        printLine(x[n]);
+        n = n + 1;
+    }
+}
+```
+
+An array, like any other type, is read-only by default, which means we can't modify its elements. If we need an array whose elements can be modified, we declare it as `mut` at construction time, just like any other type, so that we can get a mutable array.
+
+Modifying the elements of an array is similar to assigning values to member variables, except that it requires the use of subscript syntax.
+
+```feel
+let main() = {
+    let x: mut (Int)Array = mut [1, 2, 3, 4, 5];
+    printLine(x[0]); ## 1
+    x[0] = 5;
+    printLine(x[0]); ## 5
+}
+```
+
+As shown in the code above, we declare x as a mutable array, and then we can assign values to the elements of the specified subscript using `[index] = value`.
+
+## Generic Functions
+
+Now we have powerful generic data types, but we don't yet have a way to implement functions on an arbitrary type of generic type, such as merging any two arrays of the same type.
+
+Yes, we need functions with generic types to implement it.
+
+Generic functions are very similar to generic types in that they use the same syntax to define generic parameters in front of the identifier.
+
+```feel
+let (T)mergeArray(a: (T)Array, b: (T)Array) = {
+    ...
+}
+```
+
+As you can see in the code above, we have declared the T type parameter on the left side of `mergeArray` using the same generic syntax.
+
+Next, let's see how to call the generic function.
+
+```feel
+let main() = {
+    let x = [1, 2, 3];
+    let y = [4, 5, 6];
+    let z = (Int)mergeArray(x, y);
+    ## z == [1, 2, 3, 4, 5, 6]
+}
+```
+
+As the above code shows, it is pretty much the same as a normal function call, except that the type parameter is added in front of the function name, just like the construction of a generic data type.
+
+By the same token, we can omit the type parameter when the context is clear, and the following code is equivalent to the above code.
+
+```feel
+let main() = {
+    let x = [1, 2, 3];
+    let y = [4, 5, 6];
+    let z = mergeArray(x, y);
 }
 ```
