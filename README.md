@@ -1,10 +1,10 @@
-# The Feel Programming Language
+# The K Programming Language
 
-Feel is an open source programming language focused on efficiency. It can help you easily build cross-platform software.
+K is an open source programming language focused on efficiency. It can help you easily build cross-platform software.
 
 With well-designed grammar rules, this language can effectively reduce the burden of reading and writing, allowing you to focus on solving problems.
 
-This is the main source code repository for Feel. It contains the compiler, and documentation.
+This is the main source code repository for K. It contains the compiler, and documentation.
 
 > Warning: This language is still in the experimental stage and cannot meet the production requirements.
 
@@ -29,4 +29,4 @@ Read detail from [Here](./Compare.md).
 
 ## Source Code
 
-[JVM](https://github.com/kulics-works/feel-jvm)
+[JVM](https://github.com/kulics-works/k-jvm)
