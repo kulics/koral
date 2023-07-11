@@ -1,6 +1,6 @@
-# The Feel Programming Language
+# The K Programming Language
 
-Feel is an open source programming language focused on efficiency. It can help you easily build cross-platform software.
+K is an open source programming language focused on efficiency. It can help you easily build cross-platform software.
 
 With well-designed grammar rules, this language can effectively reduce the burden of reading and writing, allowing you to focus on solving problems.
 
@@ -29,19 +29,19 @@ With well-designed grammar rules, this language can effectively reduce the burde
 
 ## Install
 
-Currently `Feel` supports compilation to `JVM`, so you need to install `JVM` environment on your system.
+Currently `K` supports compilation to `JVM`, so you need to install `JVM` environment on your system.
 
-The execution compiler will scan the `.feel` file of the current folder and automatically translate it to the target file of the same name.
+The execution compiler will scan the `.k` file of the current folder and automatically translate it to the target file of the same name.
 
 download:
 
-- [JVM](https://github.com/kulics-works/feel-jvm)
+- [JVM](https://github.com/kulics-works/k-jvm)
 
 ## Basic Grammar
 
 ### Basic Statement
 
-Within Feel, statements are the smallest unit of composition.
+Within K, statements are the smallest unit of composition.
 
 The basic form of the statement is as follows.
 
@@ -100,13 +100,13 @@ E.g:
 
 ### Variable
 
-Feel's variables are a kind of binding semantics, equivalent to binding a variable name and a value together, thus establishing an association, similar to a key-value pair. For security reasons, Feel's variables cannot be changed by default, but Feel also provides another kind of variables - mutable variables.
+K's variables are a kind of binding semantics, equivalent to binding a variable name and a value together, thus establishing an association, similar to a key-value pair. For security reasons, K's variables cannot be changed by default, but K also provides another kind of variables - mutable variables.
 
 #### Readonly Variable
 
-Readonly variables are declared in Feel using the let keyword, and variables are declared first and used later.
+Readonly variables are declared in K using the let keyword, and variables are declared first and used later.
 
-Feel ensures type safety through static typing, and variable bindings can be explicitly typed at declaration time with `: type`, or we can omit the type when there is enough information in the context, and the compiler will infer the type of the variable from the context.
+K ensures type safety through static typing, and variable bindings can be explicitly typed at declaration time with `: type`, or we can omit the type when there is enough information in the context, and the compiler will infer the type of the variable from the context.
 
 The sample code is as follows.
 
@@ -128,7 +128,7 @@ a = 6; ## Error
 
 If we need a variable that can be reassigned, we can use a mutable variable declaration.
 
-Mutable variables are declared in Feel with the let mut keyword, again following the first-declared-first-used principle.
+Mutable variables are declared in K with the let mut keyword, again following the first-declared-first-used principle.
 
 The sample code is as follows.
 
@@ -141,7 +141,7 @@ let mut b = 123; ## Auto-inferred type
 
 For mutable variables, we can change their value as many times as we need to.
 
-Feel's assignment statement, like most languages, uses the `=` declaration. The left side of `=` must be a variable that can be assigned, and the program will assign the value on the right side of `=` to the variable on the left.
+K's assignment statement, like most languages, uses the `=` declaration. The left side of `=` must be a variable that can be assigned, and the program will assign the value on the right side of `=` to the variable on the left.
 
 The sample code is as follows.
 
@@ -153,7 +153,7 @@ a = 2;
 
 ### Block Expression
 
-In Feel, `{}` represents a block expression, which can contain a series of statements and an optional last expression, and the result of the block expression is also an expression.
+In K, `{}` represents a block expression, which can contain a series of statements and an optional last expression, and the result of the block expression is also an expression.
 
 The value of the last expression in a block expression is the value of the block. If there is no last expression, then the value of the block is the Void.
 
@@ -187,7 +187,7 @@ We only need a few simple basic types to do most of the work.
 
 Since our current computer architecture is good at calculating integers, a separate integer type helps to improve the efficiency of the program.
 
-In Feel, the default integer is of type `Int`, which can represent signed integer type data.
+In K, the default integer is of type `Int`, which can represent signed integer type data.
 
 E.g:
 
@@ -199,7 +199,7 @@ let i: Int = 3987349;
 
 Integers don't satisfy our needs for numbers, and we often need to deal with decimals.
 
-In Feel, the default decimal is of type `Float`, which can represent floating-point data.
+In K, the default decimal is of type `Float`, which can represent floating-point data.
 
 E.g:
 
@@ -368,7 +368,7 @@ let main() = {
 
 A loop structure is a program structure that is set up when a function needs to be executed repeatedly in a program. It is a condition in the loop body that determines whether to continue executing a function or to exit the loop.
 
-In Feel, the loop structure is represented by the while syntax, where the while is followed by a judgment condition, and the branch after the do keyword is executed when the condition is `true`, and then it returns to the judgment condition for the next loop, and ends the loop when the condition is `false`. The do branch must be followed by an expression.
+In K, the loop structure is represented by the while syntax, where the while is followed by a judgment condition, and the branch after the do keyword is executed when the condition is `true`, and then it returns to the judgment condition for the next loop, and ends the loop when the condition is `false`. The do branch must be followed by an expression.
 
 This while syntax is an expression.
 
@@ -471,7 +471,7 @@ let a = add(1, 2); ## a == 3
 
 ### Function Type
 
-In Feel, a function is a type just like Int, Float, etc. Similarly, a function can be used as an expression.
+In K, a function is a type just like Int, Float, etc. Similarly, a function can be used as an expression.
 
 The type of a function is declared using the `(T) -> R` syntax, and the function definition requires the same declaration of the argument type and return type.
 

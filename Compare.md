@@ -3,7 +3,7 @@
 
 ## Hello World
 
-### Feel
+### K
 
 ```
 printLine("Hello, world!");
@@ -35,7 +35,7 @@ print("Hello, world!")
 
 ## Variables And Constants
 
-### Feel
+### K
 
 ```
 let mut myVariable = 42;
@@ -77,7 +77,7 @@ let myConstant = 42
 
 ## Explicit Types
 
-### Feel
+### K
 
 ```
 let explicitDouble: Float = 70.0;
@@ -109,7 +109,7 @@ let explicitDouble: Double = 70
 
 ## Basic Types
 
-### Feel
+### K
 
 ```
 Int32 Int16 Int64 Int8 
@@ -156,7 +156,7 @@ String
 
 ## Type Coercion
 
-### Feel
+### K
 
 ```
 let f = 6.0;
@@ -198,7 +198,7 @@ let count = i + Int(f)
 
 ## Inclusive Range Operator
 
-### Feel
+### K
 
 ```
 for 1..=5 as index do 
@@ -237,7 +237,7 @@ for index in 1...5 {
 
 ## Arrays
 
-### Feel
+### K
 
 ```
 let shoppingList = arrayOf("catfish", "water", "tulips", "blue paint");
@@ -274,7 +274,7 @@ shoppingList[1] = "bottle of water"
 
 ## Maps
 
-### Feel
+### K
 
 ```
 let occupations = mapOf(
@@ -326,7 +326,7 @@ occupations["Jayne"] = "Public Relations"
 
 ## Empty Collections
 
-### Feel
+### K
 
 ```
 let emptyArray = (String)arrayOf();
@@ -365,7 +365,7 @@ let emptyDictionary = [String: Float]()
 
 ## Functions
 
-### Feel
+### K
 
 ```
 let greet(name: String, day: String): String = 
@@ -412,7 +412,7 @@ greet("Bob", "Tuesday")
 
 ## Tuple Return
 
-### Feel
+### K
 
 ```
 let getGasPrices(): (Float, Float, Float) = (3.59, 3.69, 3.79);
@@ -451,7 +451,7 @@ func getGasPrices() -> (Double, Double, Double) {
 
 ## Function Type
 
-### Feel
+### K
 
 ```
 let makeIncrementer(): (Int) -> Int = {
@@ -521,7 +521,7 @@ increment(7)
 
 ## Classes Declaration
 
-### Feel
+### K
 
 ```
 type mut Shape(numberOfSides: Int) with {
@@ -576,7 +576,7 @@ class Shape {
 
 ## Classes Usage
 
-### Feel
+### K
 
 ```
 let shape = Shape(0);
@@ -618,7 +618,7 @@ var shapeDescription = shape.simpleDescription()
 
 ## Subclass
 
-### Feel
+### K
 
 ```
 type NamedShape(name: String, numberOfSides: Int) with {
@@ -791,7 +791,7 @@ test.simpleDescription()
 
 ## Checking Type
 
-### Feel
+### K
 
 ```
 let mut movieCount = 0;
@@ -872,7 +872,7 @@ for item in library {
 
 ## Pattern Matching
 
-### Feel
+### K
 
 ```
 let nb = 42;
@@ -942,7 +942,7 @@ switch nb {
 
 ## Downcasting
 
-### Feel
+### K
 
 ```
 for case movie: Movie in someObjects do
@@ -991,7 +991,7 @@ for case movie as Movie in someObjects {
 
 ## Interface
 
-### Feel
+### K
 
 ```
 type Nameable = {
@@ -1053,7 +1053,7 @@ func f(x: any Nameable) {
 
 ## Implement
 
-### Feel
+### K
 
 ```
 type Dog();
