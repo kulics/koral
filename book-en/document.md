@@ -208,21 +208,6 @@ let f1: Float = 855.544;
 let f2: Float = 0.3141592653;
 ```
 
-### Character
-
-Computers usually use a specific number to encode characters, so a type is needed to express the characters. This is the `Char` type.
-
-It can only be a single character, it only represents the correspondence between a certain character and a number, so it is a character and a number.
-
-You only need to wrap a character with `''`, it will be recognized as a character value.
-
-E.g:
-
-```feel
-let c1: Char = 'x';
-let c2: Char = '8';
-```
-
 ### String
 
 We are not living in a world where only numbers, so we also need to use text to display the information we need.
