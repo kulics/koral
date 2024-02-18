@@ -71,7 +71,7 @@ let main() = {
 
     ## Func params
     let f(i Int->Int) = i(1);
-    f((x Int): Int => x);
+    f((x Int) Int => x);
     f(x => x);
 
     do_something_void();
@@ -101,7 +101,7 @@ let main() = {
     else ...;
 
     let op Option(Int) = Some(1);
-    if Some(v) in op do {
+    if op is Some(v) do {
         printLine(v)
     }
 
@@ -124,20 +124,19 @@ let main() = {
     }
 
     let iter Iterator(Int) = listOf(1,2,3).iterator();
-    while Some(v) in iter.next() do {
+    while iter.next() is Some(v) do {
         printLine(v)
     }
 
-    ## when
-    when x in {
+    ## match
+    x match {
         case 1 then "a"
         case 2 then "b"
         case 3 then "c"
         case _ then "d"
     }
 
-    ## with-init
-    when let x = makeInt(); x in {
+    x match {
         case 1 then "a"
         case 2 then "b"
         case 3 then "c"
@@ -176,7 +175,7 @@ let main() = {
     for i in 0..100 where i % 2 == 0 do print(i);
     
     for item in array do {
-        when item in {
+        item match {
             case 1 then "a"
             case 2 then "b"
             case 3 then "c"
@@ -185,7 +184,7 @@ let main() = {
     }
 
     let nb = 42;
-    when nb in {
+    nb match {
         case >= 0 & <= 7 | 8 | 9 then 
             print("single digit")
         case 10 then 
@@ -198,18 +197,18 @@ let main() = {
             print("four or more digits")
     }
 
-    if A(x) in foo() && B(y) in bar(x) then {
+    if foo() is A(x) and bar(x) is B(y) then {
         do_stuff_with(x, y)
     } else {
         some_long_expression
     }
 
-    let param_env(tcx: TyCtxt, def_id: DefId): ParamEnv = {
-        if case Some(Def.Existential(_)) in tcx.describe_def(def_id)
-            && case Some(node_id) in tcx.hir.as_local_node_id(def_id)
-            && case hir.map.NodeItem(item) in tcx.hir.get(node_id)
-            && case hir.ItemExistential(exist_ty) in item.node
-            && case Some(parent) in exist_ty.impl_trait_fn
+    let param_env(tcx TyCtxt, def_id DefId) ParamEnv = {
+        if tcx.describe_def(def_id) is Some(Def.Existential(_))
+            and tcx.hir.as_local_node_id(def_id) is Some(node_id)
+            and tcx.hir.get(node_id) is hir.map.NodeItem(item)
+            and item.node is hir.ItemExistential(exist_ty)
+            and exist_ty.impl_trait_fn is Some(parent)
         do return param_env(tcx, parent);
 
         ...
@@ -300,13 +299,13 @@ let main() = {
     let opt() = {
         let mut a Option(Int) = Some(1);
         a = None();
-        when a in {
+        a match {
             case Some(v) then printLine(v)
             case None then printLine("none")
         }
 
         let b Option(Option(Int)) = Some(Option(Int))(Some(Int)(2));
-        when b in {
+        b match {
             case Some(Some(v)) then printLine(v)
             case Some(None) then printLine("some(none)")
             case None then printLine("none")
@@ -348,7 +347,7 @@ let main() = {
 
     given(T) ListIterator(T) with
         mut this.next() Option(T) =
-            if Node(h, t) in this.li then {
+            if this.li is Node(h, t) then {
                 this.li = t;
                 Some(h)
             } else {
@@ -395,9 +394,9 @@ type Password(hash Hash);
 type Identify = UserName | Password;
 type HashKey(T) = Equatable(T) & Hashable;
 
-given(T) Option(T) where T: ToString with {
+given(T ToString) Option(T) with {
     this.toString() String = 
-        if Some(v) in this
+        if this is Some(v)
         then "Some(\{v})" 
         else "None()";
 }
@@ -475,7 +474,7 @@ type Iterator(T) = {
 
 given(T) Iterator(T) with {
     mut this.reduce(R)(mut r R, f (R, T)-> R) = {
-        while Some(v) in this.next() do {
+        while this.next() is Some(v) do {
             r = f(r, v)
         }
         r
@@ -546,7 +545,7 @@ type mut Node(T)(value T, next Option(Node(T)));
 type mut LinkedList(T)(head Option(Node(T)), size Int) with {
     mut this.prepend(v T) Void = {
         let node = mut Node(v, None());
-        if None in this.head then {
+        if this.head is None then {
             this.head = node;
         } else {
             node.next = this.head;
