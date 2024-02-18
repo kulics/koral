@@ -45,7 +45,7 @@ K 是一个专注于效率的开源编程语言，它可以帮你轻松构建跨
 
 语句的基本形式如下。
 
-```feel
+```
 let a = 0;
 let b = 1;
 ```
@@ -54,7 +54,7 @@ let b = 1;
 
 例如：
 
-```feel
+```
 let a = { 1 + 1 + 1
         + 1 + 1 }
 let b = 1;
@@ -64,7 +64,7 @@ let b = 1;
 
 我们需要定义一个入口来让程序知道从哪里启动，我们可以通过 main 函数声明。
 
-```feel
+```
 let main() = {}
 ```
 
@@ -76,7 +76,7 @@ let main() = {}
 
 现在让我们的程序输出一些内容看看，我们可以使用 `printLine` 函数向控制台打印一些信息。
 
-```feel
+```
 let main() = printLine("Hello, world!");
 ```
 
@@ -104,12 +104,12 @@ K 的变量是一种绑定语义，相当于是把一个变量名和一个值绑
 
 在 K 中是通过 let 关键字来声明只读变量的，变量遵循先声明后使用的原则。
 
-K 通过静态类型确保类型安全，变量绑定可以在声明时显式通过 `: type` 标注类型，在上下文中有足够的信息时，我们也可以省略类型，编译器回从上下文中推断出变量的类型。
+K 通过静态类型确保类型安全，变量绑定可以在声明时显式通过 `type` 标注类型，在上下文中有足够的信息时，我们也可以省略类型，编译器回从上下文中推断出变量的类型。
 
 示例代码如下：
 
-```feel
-let a: Int = 5; ## 显式标注类型
+```
+let a Int = 5; ## 显式标注类型
 let b = 123; ## 自动推断类型
 ```
 
@@ -117,7 +117,7 @@ let b = 123; ## 自动推断类型
 
 如果我们尝试对只读变量赋值，编译器会报错。
 
-```feel
+```
 let a = 5;
 a = 6; ## 错误
 ```
@@ -130,8 +130,8 @@ a = 6; ## 错误
 
 示例代码如下：
 
-```feel
-let mut a: Int = 5; ## 显式标注类型
+```
+let mut a Int = 5; ## 显式标注类型
 let mut b = 123; ## 自动推断类型
 ```
 
@@ -143,7 +143,7 @@ K 的赋值语句与大多数语言一样，都使用 `=` 声明，`=` 左边必
 
 示例代码如下：
 
-```feel
+```
 let mut a = 0;
 a = 1;
 a = 2;
@@ -157,9 +157,9 @@ a = 2;
 
 通过块表达式可以组合一系列操作，比如多步初始化某个复杂的值。
 
-```feel
-let a: Void = {}
-let b: Int = {
+```
+let a Void = {}
+let b Int = {
     let c = 7;
     let d = c + 14;
     (c + 3) * 5 + d / 3
@@ -189,8 +189,8 @@ let b: Int = {
 
 例如：
 
-```feel
-let i: Int = 3987349;
+```
+let i Int = 3987349;
 ```
 
 ### Float 浮点数
@@ -201,9 +201,9 @@ let i: Int = 3987349;
 
 例如：
 
-```feel
-let f1: Float = 855.544;
-let f2: Float = 0.3141592653;
+```
+let f1 Float = 855.544;
+let f2 Float = 0.3141592653;
 ```
 
 ### String 字符串  
@@ -216,8 +216,8 @@ let f2: Float = 0.3141592653;
 
 例如：
 
-```feel
-let s: String = "Hello, world!";
+```
+let s String = "Hello, world!";
 ```
 
 需要注意的是，字符串是由多个字符组成的类型，所以实际上字符串是一个固定顺序的列表，两者存在对应关系。很多时候我们可以像使用列表那样对字符串进行处理。
@@ -230,9 +230,9 @@ let s: String = "Hello, world!";
 
 例如：
 
-```feel
-let b1: Bool = true;
-let b2: Bool = false;
+```
+let b1 Bool = true;
+let b2 Bool = false;
 ```
 
 ## 操作符
@@ -247,7 +247,7 @@ let b2: Bool = false;
 
 例如：
 
-```feel
+```
 let a = 4;
 let b = 2;
 printLine( a + b );    ## + 加
@@ -263,7 +263,7 @@ printLine( a % b );    ## % 取余，意思是整除后剩下的余数
 
 例如：
 
-```feel
+```
 let a = 4;
 let b = 2;
 printLine( a == b );     ## == 等于
@@ -280,7 +280,7 @@ printLine( a <= b );     ## <= 小于或等于
 
 例如：
 
-```feel
+```
 let a = true;
 let b = false;
 printLine( a & b );     ## 与，两者同时为真才为真
@@ -296,7 +296,7 @@ printLine( !a );        ## 非，布尔值取反
 
 例如：
 
-```feel
+```
 let main() = if 1 == 1 then printLine("yes") else printLine("no");
 ```
 
@@ -306,42 +306,42 @@ if 同样也是表达式，then 和 else 分支后面都必须是表达式，根
 
 因此上面那段程序我们也可以这样写，两种写法结果等价。
 
-```feel
+```
 let main() = printLine(if 1 == 1 then "yes" else "no");
 ```
 
 由于 if 本身也是表达式，因此 else 后面自然也可以接另外一个 if 表达式，这样我们就可以实现连续的条件判断。
 
-```feel
+```
 let x = 0;
 let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less";
 ```
 
 当我们不需要处理 else 分支时，可以使用 if-do 语法，do 后面必须是表达式。
 
-```feel
+```
 let main() = if 1 == 1 do printLine("yes");
 ```
 
 ### 短路逻辑运算
 
-在选择结构或循环结构的条件中，我们可以使用短路逻辑运算 `&&` 和 `||` 来组合逻辑。短路逻辑运算的可以跳过部分不必要的计算，以节省计算资源或避免副作用。
+在选择结构或循环结构的条件中，我们可以使用短路逻辑运算 `and` 和 `or` 来组合逻辑。短路逻辑运算的可以跳过部分不必要的计算，以节省计算资源或避免副作用。
 
-短路逻辑与用 `&&` 表示，当左侧的条件为 `false` 时，将会跳过右侧的条件计算。
+短路逻辑与用 `and` 表示，当左侧的条件为 `false` 时，将会跳过右侧的条件计算。
 
-```feel
+```
 let main() = {
-    if false && f() do { ## 不会执行 f()
+    if false and f() do { ## 不会执行 f()
         ...
     }
 }
 ```
 
-短路逻辑或用 `||` 表示，当左侧的条件为 `true` 时，将会跳过右侧的条件计算。
+短路逻辑或用 `or` 表示，当左侧的条件为 `true` 时，将会跳过右侧的条件计算。
 
-```feel
+```
 let main() = {
-    if true || f() do { ## 不会执行 f()
+    if true or f() do { ## 不会执行 f()
         ...
     }
 }
@@ -357,7 +357,7 @@ let main() = {
 
 例如：
 
-```feel
+```
 let main() = {
     let mut i = 0;
     while i <= 10 do {
@@ -371,7 +371,7 @@ let main() = {
 
 当我们需要在循环中主动退出循环时，可以使用 break 语句。程序会在执行到 break 时退出当前最近的一层循环。
 
-```feel
+```
 let main() = {
     let mut i = 0;
     while true do {
@@ -386,7 +386,7 @@ let main() = {
 
 如果我们需要在循环中跳过某些轮，可以使用 continue 语句。程序会在执行到 continue 时跳过当前一轮循环，继续执行下一次循环。
 
-```feel
+```
 let main() = {
     let mut i = 0;
     while i <= 10 do {
@@ -415,9 +415,9 @@ let main() = {
 
 函数的 `=` 右边必须声明一个表达式，这个表达式的值就是函数的返回值。
 
-```feel
-let f1(): Int = 1;
-let f2(a: Int) = a + 1;
+```
+let f1() Int = 1;
+let f2(a Int) = a + 1;
 ```
 
 ### 调用
@@ -426,7 +426,7 @@ let f2(a: Int) = a + 1;
 
 `()` 必须按函数定义的参数要求传入对应类型的参数。
 
-```feel
+```
 let a = f1();
 let b = f2(1);
 ```
@@ -437,10 +437,10 @@ let b = f2(1);
 
 比如我们可以实现一个平方函数，每次调用可以返回参数的平方值。
 
-非常简单的，我们只需要使用 `参数名: 类型` 就可以声明参数。
+非常简单的，我们只需要使用 `参数名 类型` 就可以声明参数。
 
-```feel
-let sqrt(x: Int) = x * x;
+```
+let sqrt(x Int) = x * x;
 let a = sqrt(x); ## a == 4
 ```
 
@@ -448,8 +448,8 @@ sqrt 接收一个 Int 类型的参数 x，然后返回它的平方值。调用 s
 
 如果我们需要多个参数，可以按顺序逐个声明它们，中间使用 `,` 分割。调用也需要按同样的顺序给出表达式。
 
-```feel
-let add(x: Int, y: Int) = x + y;
+```
+let add(x Int, y Int) = x + y;
 let a = add(1, 2); ## a == 3
 ```
 
@@ -463,17 +463,17 @@ let a = add(1, 2); ## a == 3
 
 函数类型的变量跟函数一样使用 `()` 语法调用。
 
-```feel
-let sqrt(x: Int) = x * x; ## sqrt: (Int) -> Int
-let f: (Int) -> Int = sqrt;
+```
+let sqrt(x Int) = x * x; ## (Int) -> Int
+let f (Int) -> Int = sqrt;
 let a = f(2); ## a == 4
 ```
 
 例如这个特性，我们也可以定义函数类型的参数或者返回值。
 
-```feel
+```
 let hello() = printLine("Hello, world!");
-let run(f: () -> Void) = f();
+let run(f () -> Void) = f();
 let toRun() = run;
 
 let main() = toRun()(hello);
@@ -491,16 +491,16 @@ Lambda 表达式与函数定义很相似，只是 `=` 换成了 `=>`，并且没
 
 如下面的代码所示，f2 的值是一个 lambda，它们的类型与 f1 一样，语法上也非常相似，lambda 的同样需要声明参数和返回类型，并且需要一个表达式作为返回值。
 
-```feel
-let f1(x: Int): Int = x + 1; ## f1: (Int) -> Int
-let f2 = (x: Int): Int => x + 1; ## f2: (Int) -> Int
+```
+let f1(x Int) Int = x + 1; ## (Int) -> Int
+let f2 = (x Int) Int => x + 1; ## (Int) -> Int
 let a = f1(1) + f2(1); ## a == 4
 ```
 
 在我们的上下文中可以得知 lambda 的类型时，我们可以省略它的参数类型和返回类型。
 
-```feel
-let f: (Int) -> Int = (x) => x + 1;
+```
+let f (Int) -> Int = (x) => x + 1;
 ```
 
 ## 数据类型
@@ -513,7 +513,7 @@ let f: (Int) -> Int = (x) => x + 1;
 
 我们可以使用 `type` 关键字声明一个新数据类型，数据类型需要使用 `()` 声明它所拥有的成员变量，与函数的参数类似。
 
-```feel
+```
 type Empty();
 ```
 
@@ -521,8 +521,8 @@ type Empty();
 
 接下来让我们定义一些更有意义的数据类型试试。
 
-```feel
-type Point(x: Int, y: Int);
+```
+type Point(x Int, y Int);
 ```
 
 Point 是一个具有 x 和 y 两个成员变量的数据类型，它可以用来表示二维坐标系中的某一个点。这样我们就可以使用 Point 这个类型表示我们在坐标系中的数据，而不用总是使用两个独立的 Int 数据。
@@ -533,8 +533,8 @@ Point 是一个具有 x 和 y 两个成员变量的数据类型，它可以用�
 
 和函数类型类似，我们同样使用 `()` 语法来调用我们的构造器，就可以得到我们需要的数据。
 
-```feel
-let a: Point = Point(0, 0);
+```
+let a Point = Point(0, 0);
 ```
 
 ### 使用成员变量
@@ -543,8 +543,8 @@ let a: Point = Point(0, 0);
 
 很简单，我们只需要使用 `.` 语法，就能访问它们了。
 
-```feel
-type Point(x: Int, y: Int);
+```
+type Point(x Int, y Int);
 
 let main() = {
     let a = Point(64, 128);
@@ -559,8 +559,8 @@ let main() = {
 
 成员变量与变量一样，默认都是只读的。所以我们不能对 Point 中的 x 和 y 再次赋值。如果我们尝试这么做，编译器会报错。
 
-```feel
-type Point(x: Int, y: Int);
+```
+type Point(x Int, y Int);
 
 let main() = {
     let a = Point(64, 28);
@@ -574,11 +574,11 @@ let main() = {
 
 成员变量的可变性是跟随类型的，与实例变量是否可变没有关系，所以我们即使声明了只读变量也可以修改可变成员变量。
 
-```feel
-type mut Point(x: Int, y: Int);
+```
+type mut Point(x Int, y Int);
 
 let main() = {
-    let a: mut Point = mut Point(64, 128); ## `a` 不需要声明为 mut
+    let a mut Point = mut Point(64, 128); ## `a` 不需要声明为 mut
     a.x = 2; ## ok
     a.y = 0 ## ok
 }
@@ -588,12 +588,12 @@ let main() = {
 
 可变类型被设计为是只读类型的子类型，所以可变类型的实例可以赋值或传递给只读类型。当我们将一个可变类型转换为只读类型使用时，它仍然会指向原来的实例，所以可变类型实例的修改仍然会导致只读类型那边观察到变化。
 
-```feel
-type mut Point(x: Int, y: Int);
+```
+type mut Point(x Int, y Int);
 
 let main() = {
-    let a: mut Point = mut Point(64, 128); 
-    let b: Point = a; ## ok
+    let a mut Point = mut Point(64, 128); 
+    let b Point = a; ## ok
     printLine(a.x); ## 64
     printLine(b.x); ## 64
     a.x = 128;
@@ -609,9 +609,9 @@ let main() = {
 
 定义成员函数很简单，在类型定义的后面使用 `with` 关键字，再声明一个包含成员函数的块即可。
 
-```feel
-type Rectangle(length: Int, width: Int) with {
-    this.area(): Int = this.length * this.width;
+```
+type Rectangle(length Int, width Int) with {
+    this.area() Int = this.length * this.width;
 }
 ```
 
@@ -623,7 +623,7 @@ type Rectangle(length: Int, width: Int) with {
 
 和成员变量的访问一样，我们只需要使用 `.` 语法，就能访问成员函数了。
 
-```feel
+```
 let main() = {
     let r = Rectangle(2, 4);
     printLine(r.area())
@@ -634,15 +634,15 @@ let main() = {
 
 成员函数的 this 默认是只读的，这意味着我们不能在成员函数中修改成员变量。如果我们需要修改，需要在 this 的前面加上 `mut` 修饰。`mut this` 表示当前的实例类型是可变类型，所以它可以修改成员变量，这同时也要求只有可变类型的实例能访问可变成员函数。
 
-```feel
-type mut Rectangle(length: Int, width: Int) with {
-    mut this.setLength(l: Int): Void = this.length = l;
+```
+type mut Rectangle(length Int, width Int) with {
+    mut this.setLength(l Int) Void = this.length = l;
 }
 
 let main() = {
-    let a: Rectangle = Rectangle(2, 4);
+    let a Rectangle = Rectangle(2, 4);
     a.setLength(4); ## 错误，a 不是 mut Rectangle，不能调用 mut 成员函数
-    let b: mut Rectangle = mut Rectangle(2, 4);
+    let b mut Rectangle = mut Rectangle(2, 4);
     b.setLength(4); ## ok
 }
 ```
@@ -651,9 +651,9 @@ let main() = {
 
 这一类函数不能使用实例访问，只能使用类型名称访问。它可以让我们定义一些与类型关联性很高的函数但不需要实例作为参数的函数。
 
-```feel
-type Point(x: Int, y: Int) with {
-    default(): Point = Point(0, 0);
+```
+type Point(x Int, y Int) with {
+    default() Point = Point(0, 0);
 }
 
 let main() = {
@@ -671,10 +671,10 @@ let main() = {
 
 对于简单的情况，我们可以定义出一个固定的类型来包装两个值。
 
-```feel
-type Pair(left: Int, right: Int);
+```
+type Pair(left Int, right Int);
 
-let f(): Pair = Pair(1, 2);
+let f() Pair = Pair(1, 2);
 ```
 
 但如果我们有很多不同的类型需要包装，以上这种方式就显得不够通用了。
@@ -683,11 +683,11 @@ let f(): Pair = Pair(1, 2);
 
 泛型数据类型与数据类型的区别在于它需要额外声明类型参数，这些类型参数表示将来会由实际传入的类型替换，从而让成员变量或成员函数的类型可以在后续实例化的时候替换为具体的类型。
 
-```feel
-type (T1, T2)Pair(left: T1, right: T2);
+```
+type Pair(T1, T2)(left T1, right T2);
 ```
 
-如上代码所示，我们在 `Pair` 的左边用另一种参数的形式声明了 T1 和 T2 两个类型参数。
+如上代码所示，我们在 `Pair` 的右边用另一种参数的形式声明了 T1 和 T2 两个类型参数。
 
 如果我们需要多个类型参数，可以按顺序逐个声明它们，中间使用 `,` 分割。调用也需要按同样的顺序给出实际类型。
 
@@ -695,14 +695,14 @@ type (T1, T2)Pair(left: T1, right: T2);
 
 接下来我们看看如何构造泛型数据类型。
 
-```feel
+```
 let main() = {
-    lef a1: (Int, Int)Pair = (Int, Int)Pair(1, 2);
-    ## a1.left: Int, a1.right: Int
-    lef a2: (Bool, Bool)Pair = (Bool, Bool)Pair(true, false);
-    ## a2.left: Bool, a2.right: Bool
-    lef a3: (Int, String)Pair = (Int, String)Pair(1, "a");
-    ## a3.left: Int, a3.right: String
+    lef a1 Pair(Int, Int) = Pair(Int, Int)(1, 2);
+    ## a1.left Int, a1.right Int
+    lef a2 Pair(Bool, Bool) = Pair(Bool, Bool)(true, false);
+    ## a2.left Bool, a2.right Bool
+    lef a3 Pair(Int, String) = Pair(Int, String)(1, "a");
+    ## a3.left Int, a3.right String
 }
 ```
 
@@ -714,14 +714,14 @@ let main() = {
 
 就像下面的代码这样，它和上面的代码是等价的。
 
-```feel
+```
 let main() = {
     lef a1 = Pair(1, 2);
-    ## a1: (Int, Int)Pair
+    ## a1 Pair(Int, Int)
     lef a2 = Pair(true, false);
-    ## a2: (Bool, Bool)Pair
+    ## a2 Pair(Bool, Bool)
     lef a3 = Pair(1, "a");
-    ## a3: (Int, String)Pair
+    ## a3 Pair(Int, String)
 }
 ```
 
@@ -729,32 +729,32 @@ let main() = {
 
 数组是一种泛型的数据类型，它可以存储一组相同类型的数据元素，每个元素都有一个索引来表示它在数组中的位置。数组的长度是固定的，它可以通过索引快速访问任意元素。
 
-我们使用 `(T)Array` 来表示数组类型，其中 `T` 可以是任意类型。
+我们使用 `Array(T)` 来表示数组类型，其中 `T` 可以是任意类型。
 
 数组类型可以使用数组字面量(`[elem1, elem2, …]`)的方式来初始化，其中 `elem1` 和 `elem2` 表示对应位置的元素，不同的元素之间使用 (`,`) 分割，我们可以传入任何表达式，但所有的元素必须是相同的类型。 
 
-```feel
-let x: (Int)Array = [1, 2, 3, 4, 5];
+```
+let x Array(Int) = [1, 2, 3, 4, 5];
 ```
 
-如上面的代码所示，我们使用数组字面量语法创建了一个 `(Int)Array`，它的元素就像字面量表示的那样是 `1, 2, 3, 4, 5`。
+如上面的代码所示，我们使用数组字面量语法创建了一个 `Array(Int)`，它的元素就像字面量表示的那样是 `1, 2, 3, 4, 5`。
 
 除了这种列举元素的字面量以外，我们也可以用另一种创建一个指定大小和默认值的数组字面量(`[default; size]`)来构造，`default` 是默认值，`size` 是元素的个数。
 
-```feel
-let y: (Int)Array = [0; 3];
+```
+let y Array(Int) = [0; 3];
 ## y == [0, 0, 0]
 ```
 
 我们可以使用数组的 `size` 成员函数来获取它的元素个数。
 
-```feel
+```
 printLine(x.size()); ## 5
 ```
 
 我们可以使用下标语法 `[index]` 的方式来访问指定索引的元素，`index` 只能是 `Int` 类型的值。下标的起始是 0，`[0]` 对应第一个元素，后续元素以此类推。
 
-```feel
+```
 printLine(x[0]); ## 1
 printLine(x[2]); ## 3
 printLine(x[4]); ## 5
@@ -762,7 +762,7 @@ printLine(x[4]); ## 5
 
 配合 `while` 语法，我们就可以对数组的元素实现遍历，就像下面的代码一样。
 
-```feel
+```
 let main() = {
     let x = [1, 2, 3, 4, 5];
     let mut n = 0;
@@ -778,9 +778,9 @@ let main() = {
 
 对数组元素的修改和对成员变量进行赋值是类似的，只不过需要使用下标语法。
 
-```feel
+```
 let main() = {
-    let x: mut (Int)Array = mut [1, 2, 3, 4, 5];
+    let x mut Array(Int) = mut [1, 2, 3, 4, 5];
     printLine(x[0]); ## 1
     x[0] = 5;
     printLine(x[0]); ## 5
@@ -797,21 +797,21 @@ let main() = {
 
 泛型函数和泛型类型很类似，都是在标识符的前面使用相同的语法定义泛型参数。
 
-```feel
-let (T)mergeArray(a: (T)Array, b: (T)Array) = {
+```
+let mergeArray(T)(a Array(T), b Array(T)) = {
     ...
 }
 ```
 
-如上代码所示，我们在 `mergeArray` 的左边用同样的泛型语法声明了 T 这个类型参数。
+如上代码所示，我们在 `mergeArray` 的右边用同样的泛型语法声明了 T 这个类型参数。
 
 接下来我们看看如何调用泛型函数。
 
-```feel
+```
 let main() = {
     let x = [1, 2, 3];
     let y = [4, 5, 6];
-    let z = (Int)mergeArray(x, y);
+    let z = mergeArray(Int)(x, y);
     ## z == [1, 2, 3, 4, 5, 6]
 }
 ```
@@ -820,7 +820,7 @@ let main() = {
 
 同样的道理，在上下文明确的时候，我们也可以省略类型参数，下面的代码等价于上面的代码。
 
-```feel
+```
 let main() = {
     let x = [1, 2, 3];
     let y = [4, 5, 6];

@@ -80,7 +80,7 @@ let myConstant = 42
 ### K
 
 ```
-let explicitDouble: Float = 70.0;
+let explicitDouble Float = 70.0;
 ```
 
 ### C#
@@ -329,8 +329,8 @@ occupations["Jayne"] = "Public Relations"
 ### K
 
 ```
-let emptyArray = (String)arrayOf();
-let emptyDictionary = (String, Float32)mapOf();
+let emptyArray = arrayOf(String)();
+let emptyDictionary = mapOf(String, Float32)();
 ```
 
 ### C#
@@ -368,7 +368,7 @@ let emptyDictionary = [String: Float]()
 ### K
 
 ```
-let greet(name: String, day: String): String = 
+let greet(name String, day String) String = 
     "Hello \{name}, today is \{day}.";
 greet("Bob", "Tuesday");
 ```
@@ -415,7 +415,7 @@ greet("Bob", "Tuesday")
 ### K
 
 ```
-let getGasPrices(): (Float, Float, Float) = (3.59, 3.69, 3.79);
+let getGasPrices() type(Float, Float, Float) = (3.59, 3.69, 3.79);
 ```
 
 ### C#
@@ -454,8 +454,8 @@ func getGasPrices() -> (Double, Double, Double) {
 ### K
 
 ```
-let makeIncrementer(): (Int) -> Int = {
-    let addOne(number: Int) = 1 + number;
+let makeIncrementer() (Int) -> Int = {
+    let addOne(number Int) = 1 + number;
     addOne
 }
 let increment = makeIncrementer();
@@ -524,8 +524,8 @@ increment(7)
 ### K
 
 ```
-type mut Shape(numberOfSides: Int) with {
-    this.simpleDescription(): String =
+type mut Shape(numberOfSides Int) with {
+    this.simpleDescription() String =
         "A shape with \{this.numberOfSides} sides.";
 }
 ```
@@ -621,18 +621,18 @@ var shapeDescription = shape.simpleDescription()
 ### K
 
 ```
-type NamedShape(name: String, numberOfSides: Int) with {
-    this.simpleDescription(): String =
+type NamedShape(name String, numberOfSides Int) with {
+    this.simpleDescription() String =
         "A shape with \{this.numberOfSides} sides.";
 }
 
-type Square(as namedShape: NamedShape, sideLength: Float) with {
-    new(sideLength: Float, name: String): Square = Square(NamedShape(name, 4), sideLength);
+type Square(as namedShape NamedShape, sideLength Float) with {
+    new(sideLength Float, name String): Square = Square(NamedShape(name, 4), sideLength);
 
-    this.simpleDescription(): String =
+    this.simpleDescription() String =
         "A square with sides of length \{this.sideLength}.";
 
-    this.area(): Float = sideLength * sideLength;
+    this.area() Float = sideLength * sideLength;
 }
 
 let test = Square.new(5.2, "square");
@@ -995,10 +995,10 @@ for case movie as Movie in someObjects {
 
 ```
 type Nameable = {
-    this.name(): String;
+    this.name() String;
 }
 
-let f(x: Nameable): Void = printLine("Name is " + x.name());
+let f(x Nameable) Void = printLine("Name is " + x.name());
 ```
 
 ### C#
@@ -1058,9 +1058,9 @@ func f(x: any Nameable) {
 ```
 type Dog();
 
-given Dog: Nameable with this.name(): String = "Dog";
+given Dog: Nameable with this.name() String = "Dog";
 
-given Dog: Weight with this.weight(): Int = 30;
+given Dog: Weight with this.weight() Int = 30;
 ```
 
 ### C#

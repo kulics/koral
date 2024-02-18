@@ -15,10 +15,10 @@ use {
 
 let main() = {
     ## Define, 一般情况下编译器会自动判断类型
-    let string: String = "10";
-    let number: Float = 1.2;
-    let integer: Int = 123;
-    let boolean: Bool = true;
+    let string String = "10";
+    let number Float = 1.2;
+    let integer Int = 123;
+    let boolean Bool = true;
     let smallFloat = (1.2).toFloat32(); ## basic obj convert
 
     ## Const
@@ -28,50 +28,50 @@ let main() = {
     let format = "the value is \{integer}, \{number}, \{boolean}";
 
     ## Array
-    let array: (Int)Array = arrayOf(1, 2, 3);
-    let array2: (Int)Array = [1, 2, 3];
+    let array Array(Int) = arrayOf(1, 2, 3);
+    let array2 Array(Int) = [1, 2, 3];
 
     ## List
-    let list: (Int)List = [1, 2, 3, 4, 5];
+    let list List(Int) = [1, 2, 3, 4, 5];
     print( list[0] ); ## 使用下标获取
 
     ## Map, 前面为 key，后面为 value
-    let map: (String, Bool)Map = [("1", false), ("2", true)];
+    let map Map(String, Bool) = [("1", false), ("2", true)];
     print( map["1"] ); ## 使用key获取
 
     ## Function
-    let f(a: Int): Int = a;
+    let f(a Int) Int = a;
 
     ## Function with no params no return
-    let do_something_void(): Void = {
+    let do_something_void() Void = {
         do_something_a();
         do_something_b();
     }
 
     ## Full Function with params and return
-    let do_something_with_params(x: Int, y: String): (a: Int, b: String) = (x, y);
+    let do_something_with_params(x Int, y String) type(a Int, b String) = (x, y);
 
     ## Function type
-    let f: (Int, Int)->Int = (x: Int, y: Int): Int => x + y;
-    let f: (Int, Int)->Int = (x, y) => x + y;
-    let f(x: Int, y: Int): Int = x + y;
-    let f(x: Int, y: Int) = x + y;
-    let g(): Void = {}
-    let g: ()->Void = () => {}
+    let f (Int, Int)->Int = (x Int, y Int) Int => x + y;
+    let f (Int, Int)->Int = (x, y) => x + y;
+    let f(x Int, y Int) Int = x + y;
+    let f(x Int, y Int) = x + y;
+    let g() Void = {}
+    let g ()->Void = () => {}
 
     ## Currying
-    let add = (x: Int) => (y: Int) => x + y;
-    let add: (Int)->(Int)->Int = (x) => (y) => x + y;
-    let add: Int->Int->Int = x => y => x + y;
-    let add(x: Int) = (y: Int) => x + y;
+    let add = (x Int) => (y Int) => x + y;
+    let add (Int)->(Int)->Int = (x) => (y) => x + y;
+    let add Int->Int->Int = x => y => x + y;
+    let add(x Int) = (y Int) => x + y;
     let v = add(1)(2);
 
     ## Lambda Function
     listOf(1, 2, 3, 4).filter(x => x % 2 == 0).map(x => x * x).sum();
 
     ## Func params
-    let f(i: Int->Int) = i(1);
-    f((x: Int): Int => x);
+    let f(i Int->Int) = i(1);
+    f((x Int): Int => x);
     f(x => x);
 
     do_something_void();
@@ -100,7 +100,7 @@ let main() = {
     else if b then ...
     else ...;
 
-    let op: (Int)Option = Some(1);
+    let op Option(Int) = Some(1);
     if Some(v) in op do {
         printLine(v)
     }
@@ -123,7 +123,7 @@ let main() = {
         ...
     }
 
-    let iter: (Int)Iterator = listOf(1,2,3).iterator();
+    let iter Iterator(Int) = listOf(1,2,3).iterator();
     while Some(v) in iter.next() do {
         printLine(v)
     }
@@ -216,38 +216,38 @@ let main() = {
     }
 
     ## data type define
-    type Button(width: Int, height: Int, background: String, title: String);
+    type Button(width Int, height Int, background String, title String);
     given Button with {
-        this.click(): Void = {
+        this.click() Void = {
             printLine(title);
             doSomeThingA();
             doSomeThingB();
         }
     }
     ## privite members
-    type Image(_width: Int, _height: Int, _source: String);
+    type Image(_width Int, _height Int, _source String);
 
     ## abstract type define
     type Animation = {
-        this.move(s: Int): Void;
-        this.stop(): Void;
+        this.move(s Int) Void;
+        this.stop() Void;
     }
 
     ## Combine Template
-    type ImageButton(as image: Image, as button: Button);
+    type ImageButton(as image Image, as button Button);
     given ImageButton: Animation with {
         ## Implement Interface
-        this.move(s: Int): Void = {
+        this.move(s Int) Void = {
             let t = 5000/s;
             play( s + t );
         }
-        this.stop(): Void = {}
+        this.stop() Void = {}
     }
 
     ## Create an Template object
     let btn = Button(1, 2, "Cancel");
     let img = Image(1, 2, "?.jpg");
-    let mut ib: ImageButton = Image(img, btn);
+    let mut ib ImageButton = Image(img, btn);
     ib = (img, btn);
     ## Calling property
     ib.title = "OK";
@@ -257,55 +257,55 @@ let main() = {
     ib.move(6);
 
     ## Use Interface
-    let play_animation(a: Animation) = {
+    let play_animation(a Animation) = {
         a.move(1000);
         a.stop();
     }
     play_animation(ib);
 
     ## Annotation
-    [Table("user"), Property(false, name = "d", hide = true)]
+    #Table("user") #Property(false, name = "d", hide = true)
     type mut User(
-        [Column("id"), Required, Key]
-        id: String,
-        [Column("nick_name"), Required]
-        nick_name: String,
-        [Column("time_update"), Required]
-        time_update: Int,
+        #Column("id") #Required #Key
+        id String,
+        #Column("nick_name") #Required
+        nick_name String,
+        #Column("time_update") #Required
+        time_update Int,
     );
     
     ## Generic Type
-    type mut (T)Table(data: T);
-    given(T)->> (T)Table with {
-        mut this.setData(d: T): Void = {
+    type mut Table(T)(data T);
+    given(T) Table(T) with {
+        mut this.setData(d T) Void = {
             this.data = d;
         }
     }
-    (Int)Table(1);
+    Table(Int)(1);
 
     ## Generic function
-    let (T)add(x1: T, x2: T): T where T: Addable = x1 + x2;
-    (Int)add(1, 2);
+    let add(T Addable)(x1 T, x2 T) T = x1 + x2;
+    add(Int)(1, 2);
 
     type Void();
 
     type Color = { Red(); Green(); Blue() }
 
-    type Point(x: Int, y: Int);
+    type Point(x Int, y Int);
 
-    type (T1, T2)Pair(first: T1, second: T2);
+    type Pair(T1, T2)(first T1, second T2);
 
-    type (T)Option = { Some(value: T); None() }
+    type Option(T) = { Some(value T); None() }
 
     let opt() = {
-        let mut a: (Int)Option = Some(1);
+        let mut a Option(Int) = Some(1);
         a = None();
         when a in {
             case Some(v) then printLine(v)
             case None then printLine("none")
         }
 
-        let b: ((Int)Option)Option = ((Int)Option)Some((Int)Some(2));
+        let b Option(Option(Int)) = Some(Option(Int))(Some(Int)(2));
         when b in {
             case Some(Some(v)) then printLine(v)
             case Some(None) then printLine("some(none)")
@@ -313,41 +313,41 @@ let main() = {
         }
     }
 
-    type mut (T)MyList(arr: [T]);
+    type mut MyList(T)(arr [T]);
     ## operator override
-    given(T)->> (T)MyList: (T)Addable with {
+    given(T) MyList(T): Addable(T) with {
         ## a + e
-        mut this.plus(element: T): Void = {
+        mut this.plus(element T) Void = {
             this.arr = this.arr.append(element);
         }
     }
-    given(T)->> (T)MyList: (T)MutIndexable with {
+    given(T) MyList(T): MutIndexable(T) with {
         ## e = a[i]
-        this.get(index: Int): T = this.arr[index];
+        this.get(index Int) T = this.arr[index];
         ## a[i] = e
-        mut this.set(index: Int, element: T): Void = this.arr[index] = element;
+        mut this.set(index Int, element T) Void = this.arr[index] = element;
     }
     
     ## Iterator pattern
-    type mut (T)Iterator = {
-        mut this.next(): (T)Option;
+    type mut Iterator(T) = {
+        mut this.next() Option(T);
     }
 
-    type (T)Iterable = {
-        this.iter(): mut (T)Iterator;
+    type Iterable(T) = {
+        this.iter(): mut Iterator(T);
     }
 
-    type (T)ListNode = {
+    type ListNode(T) = {
         Empty();
-        Node(head: T, tail: (T)ListNode);
+        Node(head T, tail ListNode(T));
     } with {
-        this.iter(): mut (T)Iterator = mut ListNodeIterator(this);
+        this.iter() mut Iterator(T) = mut ListNodeIterator(this);
     }
 
-    type mut (T)ListIterator(li: (T)ListNode);
+    type mut ListIterator(T)(li ListNode(T));
 
-    given(T)->> (T)ListIterator with
-        mut this.next(): (T)Option =
+    given(T) ListIterator(T) with
+        mut this.next() Option(T) =
             if Node(h, t) in this.li then {
                 this.li = t;
                 Some(h)
@@ -355,22 +355,22 @@ let main() = {
                 None()
             }
 
-    type TreeNode = { Empty(); Node(val: Int, left: TreeNode, right: TreeNode) }
+    type TreeNode = { Empty(); Node(val Int, left TreeNode, right TreeNode) }
 
-    type Nat = { Zero(); Suc(n: Nat) }
+    type Nat = { Zero(); Suc(n Nat) }
 }
 
-type Foo(value: Int);
+type Foo(value Int);
 
 type Color = { Red(); Green(); Blue() }
 
-type Color(rgb: String) = {
+type Color(rgb String) = {
     Red("ff0000");
     Green("00ff00");
     Blue("0000ff");
 }
 
-type Planet(mass: Float, radius: Float) = {
+type Planet(mass Float, radius Float) = {
     Mercury(3.303e+23, 2.4397e6);
     Venus(4.869e+24, 6.0518e6);
     Earth(5.976e+24, 6.37814e6);
@@ -381,100 +381,100 @@ type Planet(mass: Float, radius: Float) = {
     Neptune(1.024e+26, 2.4746e7);
 }
 
-type (T)Option = { Some(value: T); None() }
+type Option(T) = { Some(value T); None() }
 
-type (T)Expr = {
-    IntExpr(value: Int): (Int)Expr;
-    BoolExpr(value: Bool): (Bool)Expr;
-    EqualExpr(left: (T)Expr, right: (T)Expr): (Bool)Expr;
-    AddExpr(left: (Int)Expr, right: (Int)Expr): (Int)Expr;
+type Expr(T) = {
+    IntExpr(value Int): Expr(Int);
+    BoolExpr(value Bool): Expr(Bool);
+    EqualExpr(left Expr(T), right Expr(T)): Expr(Bool);
+    AddExpr(left Expr(Int), right Expr(Int)): Expr(Int);
 }
 
-type UserName(name: String);
-type Password(hash: Hash);
+type UserName(name String);
+type Password(hash Hash);
 type Identify = UserName | Password;
-type (T)HashKey = (T)Equatable & Hashable;
+type HashKey(T) = Equatable(T) & Hashable;
 
-given(T)->> (T)Option where T: ToString with {
-    this.toString(): String = 
+given(T) Option(T) where T: ToString with {
+    this.toString() String = 
         if Some(v) in this
         then "Some(\{v})" 
         else "None()";
 }
 
 given Foo: ToString with {
-    this.toString(): String = "foo";
+    this.toString() String = "foo";
 }
-given(T, R)->> (T)->R with {
-    this.toAny(): Any = this;
+given(T, R) (T)->R with {
+    this.toAny() Any = this;
 }
 
-type (T)LinkedList = {
-    Cons(head: T, tail: (T)LinkedList);
+type LinkedList(T) = {
+    Cons(head T, tail LinkedList(T));
     Empty();
 }
 
-given(T)->> (T)LinkedList with {
-    new(): This = Empty();
+given(T) LinkedList(T) with {
+    new() This = Empty();
 }
 
-type mut (T)List = {
-    this.get(index: Int): T;
+type mut List(T) = {
+    this.get(index Int) T;
 
-    mut this.set(index: Int, element: T): Void;
+    mut this.set(index Int, element T) Void;
 }
 
-type mut (T)ArrayList = { ArrayList(_arr: (T)Array, size: Int) }
-type mut (T)ArrayList(_arr: (T)Array, size: Int);
+type mut ArrayList(T) = { ArrayList(_arr Array(T), size Int) }
+type mut ArrayList(T)(_arr Array(T), size Int);
 
-given(T)->> (T)ArrayList: (T)List with {
-    new(): mut This = mut This([], 0);
+given(T) ArrayList(T): List(T) with {
+    new() mut This = mut This([], 0);
 
-    this.get(index: Int): T = this._arr.get(index);
+    this.get(index Int) T = this._arr.get(index);
 
-    mut this.set(index: Int, element: T): Void = this._arr.set(index, element);
+    mut this.set(index Int, element T) Void = this._arr.set(index, element);
 
-    this.(R)map(f: (T)->R): (R)Iterator = (T, R)MapIter(this, f);
+    this.map(R)(f (T)->R) Iterator(R) = MapIter(T, R)(this, f);
 }
 
-given (Int)ArrayList with {
-    this.sum(): Int = reduce(this.iterator(), 0, (l, r) => l + r);
+given ArrayList(Int) with {
+    this.sum() Int = reduce(this.iterator(), 0, (l, r) => l + r);
 }
 
 type ToString = {
-    this.toString(): String;
+    this.toString() String;
 }
 
 given Int: ToString with {
-    this.toString(): String = cprintf(this);
+    this.toString() String = cprintf(this);
 }
 
-given(T)->> (T)ArrayList: ToString where T: ToString with {
-    this.toString(): String = join_String(this.iterator());
+given(T ToString) ArrayList(T): ToString with {
+    this.toString() String = join_String(this.iterator());
 }
 
 given Int with {
-    default(): This = 0;
+    default() This = 0;
 }
 
 given String with {
-    default(): This = "";
+    default() This = "";
 }
 
-given(T)->> (T)Array with {
-    default(): This = (T)arrayOf();
+given(T) Array(T) with {
+    default() This = arrayOf(T)();
 }
 
 type Any = {}
 
-given(T)->> T: Any with {}
+given(T) T: Any with {}
 
-type (T)Iterator = {
-    mut this.next(): (T)Option
+type Iterator(T) = {
+    mut this.next() Option(T)
 }
 
-given(T)->> (T)Iterator with {
-    mut this.(R)reduce(mut r: R, f: (R, T)-> R) = {
+given(T) Iterator(T) with {
+    mut this.reduce(R)(mut r R, f (R, T)-> R) = {
         while Some(v) in this.next() do {
             r = f(r, v)
         }
@@ -483,34 +483,34 @@ given(T)->> (T)Iterator with {
 }
 
 type mut InputStream = {
-    mut this.read(to: (Byte)Array): Int;
+    mut this.read(to Array(Byte)) Int;
 }
 
 type mut OutputStream = {
-    mut this.write(from: mut (Byte)Array): Int;
-    mut this.flush(): Void;
+    mut this.write(from mut Array(Byte)) Int;
+    mut this.flush() Void;
 }
 
-type mut (T)Array(_source: (T)RawArray, _start: Int, _len: Int) with {
-    create(size: Int, item: T) = mut (T)Array(RawArray.new(size, item), 0, size);
+type mut Array(T)(_source RawArray(T), _start Int, _len Int) with {
+    create(size Int, item T) = mut Array(T)(RawArray.new(size, item), 0, size);
 
     this.size() = this._len;
 
-    this.get(index: Int) = this._source[index + _start];
+    this.get(index Int) = this._source[index + _start];
     
-    mut this.set(index: Int, value: T) = this._source[index + _start] = value;
+    mut this.set(index Int, value T) = this._source[index + _start] = value;
     
-    this.slice(start: Int, len: Int): (T)Array = 
-        (T)Array(this._source, start, len);
+    this.slice(start Int, len Int) Array(T) = 
+        Array(T)(this._source, start, len);
 
-    mut this.sliceMut(start: Int, len: Int): mut (T)Array = 
-        mut (T)Array(this._source, start, len);
+    mut this.sliceMut(start Int, len Int) mut Array(T) = 
+        mut Array(T)(this._source, start, len);
 }
 
-type mut (T)ArrayIterator(_source: (T)Array, index: Int): (T)Iterator with {
-    of(source: (T)Array) = ArrayIterator(source, -1);
+type mut ArrayIterator(T)(_source Array(T), index Int): Iterator(T) with {
+    of(source Array(T)) = ArrayIterator(source, -1);
     
-    mut this.next(): (T)Option = 
+    mut this.next() Option(T) = 
         if this.index < this._source.size() then {
             this.index += 1;
             Some(this._source[this.index])
@@ -519,20 +519,20 @@ type mut (T)ArrayIterator(_source: (T)Array, index: Int): (T)Iterator with {
         }
 }
 
-type String(_data: (Char)Array) with {
-    of(data: (Char)Array): String = String(data.clone());
+type String(_data Array(Char)) with {
+    of(data Array(Char)) String = String(data.clone());
 
-    this.toString(): String = String(this._data.clone());
+    this.toString() String = String(this._data.clone());
 
-    this.clone(): String = String(this._data.clone());
+    this.clone() String = String(this._data.clone());
 
-    this.iter(): mut StringIterator = StringIterator.of(this);
+    this.iter() mut StringIterator = StringIterator.of(this);
 }
 
-type mut StringIterator(_source: String, index: Int): (Char)Iterator with {
-    of(source: String) = mut StringIterator(source, -1);
+type mut StringIterator(_source String, index Int): Iterator(Char) with {
+    of(source String) = mut StringIterator(source, -1);
     
-    mut this.next(): (Char)Option = 
+    mut this.next() Option(Char) = 
         if this.index < this._source._data.size() then {
             this.index += 1;
             Some(this._source[this.index])
@@ -541,10 +541,10 @@ type mut StringIterator(_source: String, index: Int): (Char)Iterator with {
         }
 }
 
-type mut (T)Node(value: T, next: ((T)Node)Option);
+type mut Node(T)(value T, next Option(Node(T)));
 
-type mut (T)LinkedList(head: ((T)Node)Option, size: Int) with {
-    mut this.prepend(v: T): Void = {
+type mut LinkedList(T)(head Option(Node(T)), size Int) with {
+    mut this.prepend(v T) Void = {
         let node = mut Node(v, None());
         if None in this.head then {
             this.head = node;
@@ -556,24 +556,3 @@ type mut (T)LinkedList(head: ((T)Node)Option, size: Int) with {
     }
 }
 
-#*
-1. 数据是事物本身既有的
-1. 事物的行为是由事物的数据决定的
-1. 事物的行为可以根据所在环境的不同而有差异
-1. 分类是对事物的抽象，通常形成于事物出现之后。
-1. 分类描述某些特征，以此区分不同的事物。
-
-1. 使用实例成员函数重载操作符
-1. 默认数字类型是平台相关类型
-1. 没有空指针
-1. 没有继承
-1. 没有函数重载
-1. 没有字面量重载
-1. 没有集合字面量
-1. 没有隐式转换
-1. 泛型
-1. 模式匹配
-1. 变长参数
-1. 没有构造函数
-1. 类型上区分可变和不可变
-*#

@@ -45,7 +45,7 @@ Within K, statements are the smallest unit of composition.
 
 The basic form of the statement is as follows.
 
-```feel
+```
 let a = 0;
 let b = 1;
 ```
@@ -54,7 +54,7 @@ A statement usually ends with an explicit semicolon. However, if the statement e
 
 E.g.
 
-```feel
+```
 let a = { 1 + 1 + 1
         + 1 + 1 }
 let b = 1;
@@ -64,7 +64,7 @@ let b = 1;
 
 We need to define an entry point to let the program know where to start from, which we can declare via the main function.
 
-```feel
+```
 let main() = {}
 ```
 
@@ -78,7 +78,7 @@ Now let's have our program output something to see, we can use the `printLine` f
 
 E.g.
 
-```feel
+```
 let main() = printLine("Hello, world!");
 ```
 
@@ -106,12 +106,12 @@ K's variables are a kind of binding semantics, equivalent to binding a variable 
 
 Readonly variables are declared in K using the let keyword, and variables are declared first and used later.
 
-K ensures type safety through static typing, and variable bindings can be explicitly typed at declaration time with `: type`, or we can omit the type when there is enough information in the context, and the compiler will infer the type of the variable from the context.
+K ensures type safety through static typing, and variable bindings can be explicitly typed at declaration time with `type`, or we can omit the type when there is enough information in the context, and the compiler will infer the type of the variable from the context.
 
 The sample code is as follows.
 
-```feel
-let a: Int = 5; ## Explicitly labeled type
+```
+let a Int = 5; ## Explicitly labeled type
 let b = 123; ## Auto-inferred type
 ```
 
@@ -119,7 +119,7 @@ Once an readonly variable has been declared, its type and value will not be chan
 
 If we try to assign a value to an readonly variable, the compiler will report an error.
 
-```feel
+```
 let a = 5;
 a = 6; ## Error
 ```
@@ -132,8 +132,8 @@ Mutable variables are declared in K with the let mut keyword, again following th
 
 The sample code is as follows.
 
-```feel
-let mut a: Int = 5; ## Explicitly labeled type
+```
+let mut a Int = 5; ## Explicitly labeled type
 let mut b = 123; ## Auto-inferred type
 ```
 
@@ -145,7 +145,7 @@ K's assignment statement, like most languages, uses the `=` declaration. The lef
 
 The sample code is as follows.
 
-```feel
+```
 let mut a = 0;
 a = 1;
 a = 2;
@@ -159,9 +159,9 @@ The value of the last expression in a block expression is the value of the block
 
 A block expression allows you to combine a series of operations, such as multi-step initialization of a complex value.
 
-```feel
-let a: Void = {}
-let b: Int = {
+```
+let a Void = {}
+let b Int = {
     let c = 7;
     let d = c + 14;
     (c + 3) * 5 + d / 3
@@ -191,8 +191,8 @@ In K, the default integer is of type `Int`, which can represent signed integer t
 
 E.g:
 
-```feel
-let i: Int = 3987349;
+```
+let i Int = 3987349;
 ```
 
 ### Float Point Number
@@ -203,9 +203,9 @@ In K, the default decimal is of type `Float`, which can represent floating-point
 
 E.g:
 
-```feel
-let f1: Float = 855.544;
-let f2: Float = 0.3141592653;
+```
+let f1 Float = 855.544;
+let f2 Float = 0.3141592653;
 ```
 
 ### String
@@ -218,8 +218,8 @@ You only need to wrap a piece of text with `""`, which will be recognized as a s
 
 E.g:
 
-```feel
-let s: String = "Hello, world!";
+```
+let s String = "Hello, world!";
 ```
 
 It should be noted that a string is a type consisting of multiple characters, so in fact the string is a fixed-order list, and there is a correspondence between the two. Many times we can process strings as if they were lists.
@@ -232,9 +232,9 @@ In this language, the default boolean is the `Bool` type, which is a type with o
 
 E.g:
 
-```feel
-let b1: Bool = true;
-let b2: Bool = false;
+```
+let b1 Bool = true;
+let b2 Bool = false;
 ```
 
 ## Operators
@@ -249,7 +249,7 @@ The arithmetic operators are mainly used for data operations of numeric types, a
 
 E.g:
 
-```feel
+```
 let a = 4;
 let b = 2;
 printLine( a + b );    ## + plus
@@ -265,7 +265,7 @@ The comparison operator is mainly used in judgment conditions to calculate the r
 
 E.g:
 
-```feel
+```
 let a = 4;
 let b = 2;
 printLine( a == b );   ## == equal to
@@ -282,7 +282,7 @@ Logical operators are also used primarily in judgment conditions to perform logi
 
 E.g:
 
-```feel
+```
 let a = true;
 let b = false;
 printLine( a & b );     ## AND, both are true at the same time
@@ -298,7 +298,7 @@ We only need to use `? expression {}` to declare the judgment statement and ente
 
 E.g:
 
-```feel
+```
 let main() = if 1 == 1 then printLine("yes") else printLine("no");
 ```
 
@@ -308,20 +308,20 @@ If is also an expression, then and else branches must be followed by an expressi
 
 Therefore, we can write the above program in the same way, and the results are equivalent in both ways.
 
-```feel
+```
 let main() = printLine(if 1 == 1 then "yes" else "no");
 ```
 
 Since if is itself an expression, it is natural that else can be followed by another if expression, so that we can achieve a continuous conditional judgment.
 
-```feel
+```
 let x = 0;
 let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less";
 ```
 
 When we don't need to handle the else branch, we can use the if-do syntax, and the do must be followed by an expression.
 
-```feel
+```
 let main() = if 1 == 1 do printLine("yes");
 ```
 
@@ -331,19 +331,19 @@ In the conditions of the select structure or the loop structure, we can use shor
 
 The short-circuit logic and is represented by `&&`, and when the condition on the left side is `false`, the condition on the right side will be skipped.
 
-```feel
+```
 let main() = {
-    if false && f() do { ## will not execute f()
+    if false and f() do { ## will not execute f()
         ...
     }
 }
 ```
 
-The short-circuit logic or is represented by `||`, and when the condition on the left side is `true`, the condition on the right side will be skipped.
+The short-circuit logic or is represented by `or`, and when the condition on the left side is `true`, the condition on the right side will be skipped.
 
-```feel
+```
 let main() = {
-    if true || f() do { ## will not execute f()
+    if true or f() do { ## will not execute f()
         ...
     }
 }
@@ -359,7 +359,7 @@ This while syntax is an expression.
 
 E.g:
 
-```feel
+```
 let main() = {
     let mut i = 0;
     while i <= 10 do {
@@ -373,7 +373,7 @@ Executing the above program will print 0 to 10.
 
 The break statement can be used when we need to actively exit the loop in the middle of a loop. The program will exit the current nearest level of the loop when it reaches break.
 
-```feel
+```
 let main() = {
     let mut i = 0;
     while true do {
@@ -388,7 +388,7 @@ Executing the above program will print 0 to 20.
 
 If we need to skip some rounds in the loop, we can use the continue statement. The program will skip the current round when it reaches continue and continue with the next loop.
 
-```feel
+```
 let main() = {
     let mut i = 0;
     while i <= 10 do {
@@ -417,9 +417,9 @@ The function is defined by the let keyword. The function name is followed by `()
 
 An expression must be declared to the right of the function `=`, and the value of this expression is the return value of the function.
 
-```feel
-let f1(): Int = 1;
-let f2(a: Int) = a + 1;
+```
+let f1() Int = 1;
+let f2(a Int) = a + 1;
 ```
 
 ### Call
@@ -429,7 +429,7 @@ So how do we use these defined functions? We just use the `()` syntax after the 
 `()` must be passed with the corresponding type of arguments as required by the function definition.
 
 
-```feel
+```
 let a = f1();
 let b = f2(1);
 ```
@@ -440,17 +440,17 @@ Parameters are the data that a function can receive when it is executed, and wit
 
 For example, we can implement a square function that returns the square value of the argument each time it is called.
 
-It is very simple, we only need to use `parameterName: type` to declare parameters.
+It is very simple, we only need to use `parameterName type` to declare parameters.
 
-```feel
-let sqrt(x: Int) = x * x;
+```
+let sqrt(x Int) = x * x;
 let a = sqrt(x); ## a == 4
 ```
 
 sqrt takes an argument of type Int, x, and returns the square of it. When calling sqrt we need to give the expression of the corresponding Int type to complete the call.
 
-```feel
-let add(x: Int, y: Int) = x + y;
+```
+let add(x Int, y Int) = x + y;
 let a = add(1, 2); ## a == 3
 ```
 
@@ -464,17 +464,17 @@ Once a function is defined, the function name can be used as an expression and c
 
 Variables of function types are called with the same `()` syntax as functions.
 
-```feel
-let sqrt(x: Int) = x * x; ## sqrt: (Int) -> Int
-let f: (Int) -> Int = sqrt;
+```
+let sqrt(x Int) = x * x; ## (Int) -> Int
+let f (Int) -> Int = sqrt;
 let a = f(2); ## a == 4
 ```
 
 For example, with this feature, we can also define parameters or return values for function types.
 
-```feel
+```
 let hello() = printLine("Hello, world!");
-let run(f: () -> Void) = f();
+let run(f () -> Void) = f();
 let toRun() = run;
 
 let main() = toRun()(hello);
@@ -492,16 +492,16 @@ Lambda expressions are very similar to function definitions, except that the `=`
 
 As shown in the code below, the value of f2 is a lambda, which is the same type as f1 and has a very similar syntax, with lambda's also declaring parameters and return types, and requiring an expression as the return value.
 
-```feel
-let f1(x: Int): Int = x + 1; ## f1: (Int) -> Int
-let f2 = (x: Int): Int => x + 1; ## f2: (Int) -> Int
+```
+let f1(x Int) Int = x + 1; ## (Int) -> Int
+let f2 = (x Int) Int => x + 1; ## (Int) -> Int
 let a = f1(1) + f2(1); ## a == 4
 ```
 
 When the type of the lambda is known in our context, we can omit its argument type and return type.
 
-```feel
-let f: (Int) -> Int = (x) => x + 1;
+```
+let f (Int) -> Int = (x) => x + 1;
 ```
 
 ## Data Types
@@ -514,7 +514,7 @@ Obviously, data types are suitable for packing different data together to form a
 
 We can declare a new data type using the `type` keyword. The data type needs to declare the member variables it has using `()`, similar to the parameters of a function.
 
-```feel
+```
 type Empty();
 ```
 
@@ -522,8 +522,8 @@ Above we declared a new data type called Empty, which contains no data at all.
 
 Next let's try defining some more meaningful data types.
 
-```feel
-type Point(x: Int, y: Int);
+```
+type Point(x Int, y Int);
 ```
 
 Point is a data type with two member variables, x and y, that can be used to represent a point in a two-dimensional coordinate system. This allows us to use the Point type to represent our data in the coordinate system, instead of always using two separate Int data.
@@ -534,8 +534,8 @@ So how do we construct a new Point data?
 
 Similar to function types, we use the same `()` syntax to call our constructor and we get the data we need.
 
-```feel
-let a: Point = Point(0, 0);
+```
+let a Point = Point(0, 0);
 ```
 
 ### Using Member Variables
@@ -544,8 +544,8 @@ Now that we have a Point data, how do we use the x and y in it?
 
 It's simple, we just need to use the `. ` syntax to access them.
 
-```feel
-type Point(x: Int, y: Int);
+```
+type Point(x Int, y Int);
 
 let main() = {
     let a = Point(64, 128);
@@ -560,8 +560,8 @@ Executing the above program, we can see 64 and 128.
 
 Member variables, like variables, are readonly by default. So we can't reassign values to x and y in Point. If we try to do so, the compiler will report an error.
 
-```feel
-type Point(x: Int, y: Int);
+```
+type Point(x Int, y Int);
 
 let main() = {
     let a = Point(64, 128);
@@ -575,11 +575,11 @@ Constructing an instance of a mutable type requires the mut keyword to be marked
 
 The mutability of member variables follows the type and has nothing to do with whether the instance variables are mutable or not, so we can modify mutable member variables even if we declare read-only variables.
 
-```feel
-type mut Point(x: Int, y: Int);
+```
+type mut Point(x Int, y Int);
 
 let main() = {
-    let a: mut Point = mut Point(64, 128); ## `a` no need to declare as mut
+    let a mut Point = mut Point(64, 128); ## `a` no need to declare as mut
     a.x = 2; ## ok
     a.y = 0 ## ok
 }
@@ -589,12 +589,12 @@ When we define a mutable type, it can be used as a mutable type and also as a re
 
 Mutable types are designed to be subtypes of read-only types, so instances of mutable types can be assigned or passed to read-only types. When we convert a mutable type for use as a read-only type, it will still point to the original instance, so modifications to the mutable type instance will still cause changes to be observed on the read-only side of the type.
 
-```feel
-type mut Point(x: Int, y: Int);
+```
+type mut Point(x Int, y Int);
 
 let main() = {
-    let a: mut Point = mut Point(64, 128); 
-    let b: Point = a; ## ok
+    let a mut Point = mut Point(64, 128); 
+    let b Point = a; ## ok
     printLine(a.x); ## 64
     printLine(b.x); ## 64
     a.x = 128;
@@ -610,9 +610,9 @@ In addition to member variables, data types can also define member functions. Me
 
 Defining a member function is as simple as using the `with` keyword after the type definition and declaring a block containing the member function.
 
-```feel
-type Rectangle(length: Int, width: Int) with {
-    this.area(): Int = this.length * this.width;
+```
+type Rectangle(length Int, width Int) with {
+    this.area() Int = this.length * this.width;
 }
 ```
 
@@ -624,7 +624,7 @@ As you may have noticed, accessing member variables in a member function is simi
 
 As with accessing member variables, we only need to use the `.` syntax to access member functions.
 
-```feel
+```
 let main() = {
     let r = Rectangle(2, 4);
     printLine(r.area())
@@ -635,15 +635,15 @@ Executing the above program, we can see that 8.
 
 This means that we cannot modify member variables in member functions. If we need to modify it, we need to add the `mut` modifier in front of this. `mut this` means that the current instance type is mutable, so it can modify member variables, which also requires that only instances of mutable types can access mutable member functions.
 
-```feel
-type mut Rectangle(length: Int, width: Int) with {
-    mut this.setLength(l: Int): Void = this.length = l;
+```
+type mut Rectangle(length Int, width Int) with {
+    mut this.setLength(l Int): Void = this.length = l;
 }
 
 let main() = {
-    let a: Rectangle = Rectangle(2, 4);
+    let a Rectangle = Rectangle(2, 4);
     a.setLength(4); ## error, a is not mut Rectangle, can't call mut member function
-    let b: mut Rectangle = mut Rectangle(2, 4);
+    let b mut Rectangle = mut Rectangle(2, 4);
     b.setLength(4); ## ok
 }
 ```
@@ -652,9 +652,9 @@ In addition to member functions that contain this, we can also define member fun
 
 This class of functions cannot be accessed using instances and can only be accessed using type names. It allows us to define functions that are highly type-associated but do not require an instance as an argument.
 
-```feel
-type Point(x: Int, y: Int) with {
-    default(): Point = Point(0, 0);
+```
+type Point(x Int, y Int) with {
+    default() Point = Point(0, 0);
 }
 
 let main() = {
@@ -672,10 +672,10 @@ Let's think about a scenario where we want to return two values on the return ty
 
 For the simple case, we can define a fixed type to wrap the two values.
 
-```feel
-type Pair(left: Int, right: Int);
+```
+type Pair(left Int, right Int);
 
-let f(): Pair = Pair(1, 2);
+let f() Pair = Pair(1, 2);
 ```
 
 But if we have many different types to wrap, the above approach is not general enough.
@@ -684,11 +684,11 @@ We need a Pair that can represent any type, and we can define it with the help o
 
 A generic data type differs from a datatype in that it requires additional declarations of type parameters that indicate future substitution by the actual type passed in, thus allowing the type of a member variable or member function to be substituted for the specific type when it is subsequently instantiated.
 
-```feel
-type (T1, T2)Pair(left: T1, right: T2);
+```
+type Pair(T1, T2)(left T1, right T2);
 ```
 
-As shown in the code above, we have declared two type parameters, T1 and T2, on the left side of `Pair` in the form of another parameter.
+As shown in the code above, we have declared two type parameters, T1 and T2, on the right side of `Pair` in the form of another parameter.
 
 If we need more than one type parameter, we can declare them one by one in order, splitting them with `,`. The call also needs to give the actual types in the same order.
 
@@ -696,14 +696,14 @@ Unlike normal parameters, the identifier of a type parameter always starts with 
 
 Next we look at how to construct generic data types.
 
-```feel
+```
 let main() = {
-    lef a1: (Int, Int)Pair = (Int, Int)Pair(1, 2);
-    ## a1.left: Int, a1.right: Int
-    lef a2: (Bool, Bool)Pair = (Bool, Bool)Pair(true, false);
-    ## a2.left: Bool, a2.right: Bool
-    lef a3: (Int, String)Pair = (Int, String)Pair(1, "a");
-    ## a3.left: Int, a3.right: String
+    lef a1 Pair(Int, Int) = Pair(Int, Int)(1, 2);
+    ## a1.left Int, a1.right Int
+    lef a2 Pair(Bool, Bool) = Pair(Bool, Bool)(true, false);
+    ## a2.left Bool, a2.right Bool
+    lef a3 Pair(Int, String) = Pair(Int, String)(1, "a");
+    ## a3.left Int, a3.right String
 }
 ```
 
@@ -715,14 +715,14 @@ The above code is still cumbersome to write, and we can actually omit the type p
 
 Like the following code, which is equivalent to the above code.
 
-```feel
+```
 let main() = {
     lef a1 = Pair(1, 2);
-    ## a1: (Int, Int)Pair
+    ## a1 Pair(Int, Int)
     lef a2 = Pair(true, false);
-    ## a2: (Bool, Bool)Pair
+    ## a2 Pair(Bool, Bool)
     lef a3 = Pair(1, "a");
-    ## a3: (Int, String)Pair
+    ## a3 Pair(Int, String)
 }
 ```
 
@@ -730,32 +730,32 @@ let main() = {
 
 An array is a generic data type that stores a set of data elements of the same type, each of which has an index to indicate its position in the array. The length of an array is fixed, and it can be accessed quickly by indexing any element.
 
-We use `(T)Array` to denote the array type, where `T` can be of any type.
+We use `Array(T)` to denote the array type, where `T` can be of any type.
 
 The array type can be initialized using the array literal (`[elem1, elem2, ...]`), where `elem1` and `elem2` denote the elements at the corresponding positions, with different elements separated by (`,`), and we can pass in any expression, but all elements must be of the same type. 
 
-```feel
-let x: (Int)Array = [1, 2, 3, 4, 5];
+```
+let x Array(Int) = [1, 2, 3, 4, 5];
 ```
 
-As shown in the code above, we use the array literal syntax to create a `(Int)Array` whose elements are `1, 2, 3, 4, 5` just as the literal represents.
+As shown in the code above, we use the array literal syntax to create a `Array(Int)` whose elements are `1, 2, 3, 4, 5` just as the literal represents.
 
 In addition to this type of literal that lists the elements, we can also construct another type of literal that creates an array with a specified size and default value (`[default; size]`), where `default` is the default value and `size` is the number of elements.
 
-```feel
-let y: (Int)Array = [0; 3];
+```
+let y Array(Int) = [0; 3];
 ## y == [0, 0, 0]
 ```
 
 We can use the `size` member function of an array to get the number of elements in it.
 
-```feel
+```
 printLine(x.size()); ## 5
 ```
 
 We can use the subscript syntax `[index]` to access the elements at the specified index, `index` can only be a value of type `Int`. The subscript starts at 0, `[0]` corresponds to the first element, and so on for subsequent elements.
 
-```feel
+```
 printLine(x[0]); ## 1
 printLine(x[2]); ## 3
 printLine(x[4]); ## 5
@@ -763,7 +763,7 @@ printLine(x[4]); ## 5
 
 With the `while` syntax, we can iterate over the elements of an array, as in the following code.
 
-```feel
+```
 let main() = {
     let x = [1, 2, 3, 4, 5];
     let mut n = 0;
@@ -779,9 +779,9 @@ An array, like any other type, is read-only by default, which means we can't mod
 
 Modifying the elements of an array is similar to assigning values to member variables, except that it requires the use of subscript syntax.
 
-```feel
+```
 let main() = {
-    let x: mut (Int)Array = mut [1, 2, 3, 4, 5];
+    let x mut Array(Int) = mut [1, 2, 3, 4, 5];
     printLine(x[0]); ## 1
     x[0] = 5;
     printLine(x[0]); ## 5
@@ -798,21 +798,21 @@ Yes, we need functions with generic types to implement it.
 
 Generic functions are very similar to generic types in that they use the same syntax to define generic parameters in front of the identifier.
 
-```feel
-let (T)mergeArray(a: (T)Array, b: (T)Array) = {
+```
+let mergeArray(T)(a Array(T), b Array(T)) = {
     ...
 }
 ```
 
-As you can see in the code above, we have declared the T type parameter on the left side of `mergeArray` using the same generic syntax.
+As you can see in the code above, we have declared the T type parameter on the right side of `mergeArray` using the same generic syntax.
 
 Next, let's see how to call the generic function.
 
-```feel
+```
 let main() = {
     let x = [1, 2, 3];
     let y = [4, 5, 6];
-    let z = (Int)mergeArray(x, y);
+    let z = mergeArray(Int)(x, y);
     ## z == [1, 2, 3, 4, 5, 6]
 }
 ```
@@ -821,7 +821,7 @@ As the above code shows, it is pretty much the same as a normal function call, e
 
 By the same token, we can omit the type parameter when the context is clear, and the following code is equivalent to the above code.
 
-```feel
+```
 let main() = {
     let x = [1, 2, 3];
     let y = [4, 5, 6];
