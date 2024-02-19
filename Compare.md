@@ -201,7 +201,7 @@ let count = i + Int(f)
 ### K
 
 ```
-for 1..=5 as index do 
+1..=5 foreach index do 
     printLine("\{index} times 5 is \{index * 5}");
 ```
 
@@ -797,10 +797,10 @@ test.simpleDescription()
 let mut movieCount = 0;
 let mut songCount = 0;
 
-for item in library do {
-    if Movie in item then {
+library foreach item do {
+    if item is Movie then {
         movieCount += 1
-    } else if Song in item do {
+    } else if item is Song do {
         songCount += 1
     }
 }
@@ -876,7 +876,7 @@ for item in library {
 
 ```
 let nb = 42;
-when nb in {
+nb match {
     case >= 0 & <= 7 | 8 | 9 then 
         print("single digit")
     case 10 then 
@@ -945,8 +945,9 @@ switch nb {
 ### K
 
 ```
-for case movie: Movie in someObjects do
-    printLine("Movie: '\{movie.name}', dir. \{movie.director}");
+someObjects foreach current do
+    if current is movie Movie do
+        printLine("Movie: '\{movie.name}', dir. \{movie.director}");
 ```
 
 ### C#

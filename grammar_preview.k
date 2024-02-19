@@ -142,45 +142,33 @@ let main() = {
         case 3 then "c"
         case _ then "d"
     }
+    ## same as let-in
+    somePair match (a, b) do a + b;
 
-    ## for
-    let mut count = 0;
-    let c = for do {
-        count += 1;
-        if count > 5 do break count;
-    }
-
-    ## for-in
-    for item in array do {
-        ...
-    }
-
-    ## with-init
-    for let arr = makeArray(); item in arr do {
+    ## foreach-do
+    array foreach item do {
         ...
     }
 
     ## Loop, use identify to take out single item
-    for item in array do printLine(item);
+    array foreach item do printLine(item);
     
     ## take index and value, both worked at Dictionary
-    for (index, value) in array.withIndex() do {
+    array.withIndex() foreach (index, value) do {
         printLine((index, value))
     }
     
-    for i in 0..10 do {
+    0..10 foreach i do {
         printLine(i)
     }
 
-    for i in 0..100 where i % 2 == 0 do print(i);
+    0..100 foreach i do if i % 2 == 0 do print(i);
     
-    for item in array do {
-        item match {
-            case 1 then "a"
-            case 2 then "b"
-            case 3 then "c"
-            case _ then "d"
-        }
+    array foreach {
+        case 1 then "a"
+        case 2 then "b"
+        case 3 then "c"
+        case _ then "d"
     }
 
     let nb = 42;
