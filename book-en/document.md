@@ -327,9 +327,9 @@ let main() = if 1 == 1 do printLine("yes");
 
 ### Short circuit logic operation
 
-In the conditions of the select structure or the loop structure, we can use short-circuit logic operations `&&` and `||` to combine the logic. The short-circuit logic operation's can skip some unnecessary computations to save computational resources or avoid side effects.
+In the conditions of the select structure or the loop structure, we can use short-circuit logic operations `and` and `or` to combine the logic. The short-circuit logic operation's can skip some unnecessary computations to save computational resources or avoid side effects.
 
-The short-circuit logic and is represented by `&&`, and when the condition on the left side is `false`, the condition on the right side will be skipped.
+The short-circuit logic and is represented by `and`, and when the condition on the left side is `false`, the condition on the right side will be skipped.
 
 ```
 let main() = {
