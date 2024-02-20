@@ -488,20 +488,20 @@ It's sometimes awkward to define a function and then pass it in as above, becaus
 
 At this point we can use the syntax of the Lambda expression to simplify our code.
 
-Lambda expressions are very similar to function definitions, except that the `=` is replaced with the `=>`, and there is no function name or let keyword.
+Lambda expressions are very similar to function definitions, except that the `=` is replaced with the `->`, and there is no function name or let keyword.
 
 As shown in the code below, the value of f2 is a lambda, which is the same type as f1 and has a very similar syntax, with lambda's also declaring parameters and return types, and requiring an expression as the return value.
 
 ```
 let f1(x Int) Int = x + 1; ## fn(x Int) Int
-let f2 = (x Int) Int => x + 1; ## fn(x Int) Int
+let f2 = (x Int) Int -> x + 1; ## fn(x Int) Int
 let a = f1(1) + f2(1); ## a == 4
 ```
 
 When the type of the lambda is known in our context, we can omit its argument type and return type.
 
 ```
-let f fn(x Int) Int = (x) => x + 1;
+let f fn(x Int) Int = (x) -> x + 1;
 ```
 
 ## Data Types

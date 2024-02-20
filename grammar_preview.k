@@ -52,27 +52,27 @@ let main() = {
     let do_something_with_params(x Int, y String) type(a Int, b String) = (x, y);
 
     ## Function type
-    let f fn(x Int, y Int) Int = (x Int, y Int) Int => x + y;
-    let f fn(x Int, y Int) Int = (x, y) => x + y;
+    let f fn(x Int, y Int) Int = (x Int, y Int) Int -> x + y;
+    let f fn(x Int, y Int) Int = (x, y) -> x + y;
     let f(x Int, y Int) Int = x + y;
     let f(x Int, y Int) = x + y;
     let g() Void = {}
-    let g fn() Void = () => {}
+    let g fn() Void = () -> {}
 
     ## Currying
-    let add = (x Int) => (y Int) => x + y;
-    let add fn(x Int) fn(y Int) Int = (x) => (y) => x + y;
-    let add fn(x Int)(y Int) Int = x => y => x + y;
-    let add(x Int)(y Int) => x + y;
+    let add = (x Int) -> (y Int) -> x + y;
+    let add fn(x Int) fn(y Int) Int = (x) -> (y) -> x + y;
+    let add fn(x Int)(y Int) Int = x -> y -> x + y;
+    let add(x Int)(y Int) -> x + y;
     let v = add(1)(2);
 
     ## Lambda Function
-    listOf(1, 2, 3, 4).filter(x => x % 2 == 0).map(x => x * x).sum();
+    listOf(1, 2, 3, 4).filter(x -> x % 2 == 0).map(x -> x * x).sum();
 
     ## Func params
     let f(i fn(x Int) Int) = i(1);
-    f((x Int) Int => x);
-    f(x => x);
+    f((x Int) Int -> x);
+    f(x -> x);
 
     do_something_void();
     ## use _ discard return value
@@ -425,7 +425,7 @@ given(T Any) ArrayList(T): List(T) with {
 }
 
 given ArrayList(Int) with {
-    this.sum() Int = reduce(this.iterator(), 0, (l, r) => l + r);
+    this.sum() Int = reduce(this.iterator(), 0, (l, r) -> l + r);
 }
 
 type ToString = {

@@ -487,20 +487,20 @@ let main() = toRun()(hello);
 
 这时我们可以使用 Lambda 表达式 的语法来简化我们的代码。
 
-Lambda 表达式与函数定义很相似，只是 `=` 换成了 `=>`，并且没有函数名和 let 关键字。
+Lambda 表达式与函数定义很相似，只是 `=` 换成了 `->`，并且没有函数名和 let 关键字。
 
 如下面的代码所示，f2 的值是一个 lambda，它们的类型与 f1 一样，语法上也非常相似，lambda 的同样需要声明参数和返回类型，并且需要一个表达式作为返回值。
 
 ```
 let f1(x Int) Int = x + 1; ## fn(x Int) Int
-let f2 = (x Int) Int => x + 1; ## fn(x Int) Int
+let f2 = (x Int) Int -> x + 1; ## fn(x Int) Int
 let a = f1(1) + f2(1); ## a == 4
 ```
 
 在我们的上下文中可以得知 lambda 的类型时，我们可以省略它的参数类型和返回类型。
 
 ```
-let f fn(x Int) Int = (x) => x + 1;
+let f fn(x Int) Int = (x) -> x + 1;
 ```
 
 ## 数据类型
