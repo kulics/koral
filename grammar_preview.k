@@ -52,25 +52,25 @@ let main() = {
     let do_something_with_params(x Int, y String) type(a Int, b String) = (x, y);
 
     ## Function type
-    let f (Int, Int)->Int = (x Int, y Int) Int => x + y;
-    let f (Int, Int)->Int = (x, y) => x + y;
+    let f fn(x Int, y Int) Int = (x Int, y Int) Int => x + y;
+    let f fn(x Int, y Int) Int = (x, y) => x + y;
     let f(x Int, y Int) Int = x + y;
     let f(x Int, y Int) = x + y;
     let g() Void = {}
-    let g ()->Void = () => {}
+    let g fn() Void = () => {}
 
     ## Currying
     let add = (x Int) => (y Int) => x + y;
-    let add (Int)->(Int)->Int = (x) => (y) => x + y;
-    let add Int->Int->Int = x => y => x + y;
-    let add(x Int) = (y Int) => x + y;
+    let add fn(x Int) fn(y Int) Int = (x) => (y) => x + y;
+    let add fn(x Int)(y Int) Int = x => y => x + y;
+    let add(x Int)(y Int) => x + y;
     let v = add(1)(2);
 
     ## Lambda Function
     listOf(1, 2, 3, 4).filter(x => x % 2 == 0).map(x => x * x).sum();
 
     ## Func params
-    let f(i Int->Int) = i(1);
+    let f(i fn(x Int) Int) = i(1);
     f((x Int) Int => x);
     f(x => x);
 
@@ -262,8 +262,8 @@ let main() = {
     );
     
     ## Generic Type
-    type mut Table(T)(data T);
-    given(T) Table(T) with {
+    type mut Table(T Any)(data T);
+    given(T Any) Table(T) with {
         mut this.setData(d T) Void = {
             this.data = d;
         }
@@ -282,7 +282,7 @@ let main() = {
 
     type Pair(T1, T2)(first T1, second T2);
 
-    type Option(T) = { Some(value T); None() }
+    type Option(T Any) = { Some(value T); None() }
 
     let opt() = {
         let mut a Option(Int) = Some(1);
@@ -300,15 +300,15 @@ let main() = {
         }
     }
 
-    type mut MyList(T)(arr [T]);
+    type mut MyList(T Any)(arr [T]);
     ## operator override
-    given(T) MyList(T): Addable(T) with {
+    given(T Any) MyList(T): Addable(T) with {
         ## a + e
         mut this.plus(element T) Void = {
             this.arr = this.arr.append(element);
         }
     }
-    given(T) MyList(T): MutIndexable(T) with {
+    given(T Any) MyList(T): MutIndexable(T) with {
         ## e = a[i]
         this.get(index Int) T = this.arr[index];
         ## a[i] = e
@@ -316,24 +316,24 @@ let main() = {
     }
     
     ## Iterator pattern
-    type mut Iterator(T) = {
+    type mut Iterator(T Any) = {
         mut this.next() Option(T);
     }
 
-    type Iterable(T) = {
+    type Iterable(T Any) = {
         this.iter(): mut Iterator(T);
     }
 
-    type ListNode(T) = {
+    type ListNode(T Any) = {
         Empty();
         Node(head T, tail ListNode(T));
     } with {
         this.iter() mut Iterator(T) = mut ListNodeIterator(this);
     }
 
-    type mut ListIterator(T)(li ListNode(T));
+    type mut ListIterator(T Any)(li ListNode(T));
 
-    given(T) ListIterator(T) with
+    given(T Any) ListIterator(T) with
         mut this.next() Option(T) =
             if this.li is Node(h, t) then {
                 this.li = t;
@@ -368,9 +368,9 @@ type Planet(mass Float, radius Float) = {
     Neptune(1.024e+26, 2.4746e7);
 }
 
-type Option(T) = { Some(value T); None() }
+type Option(T Any) = { Some(value T); None() }
 
-type Expr(T) = {
+type Expr(T Any) = {
     IntExpr(value Int): Expr(Int);
     BoolExpr(value Bool): Expr(Bool);
     EqualExpr(left Expr(T), right Expr(T)): Expr(Bool);
@@ -380,7 +380,7 @@ type Expr(T) = {
 type UserName(name String);
 type Password(hash Hash);
 type Identify = UserName | Password;
-type HashKey(T) = Equatable(T) & Hashable;
+type HashKey(T Any) = Equatable(T) & Hashable;
 
 given(T ToString) Option(T) with {
     this.toString() String = 
@@ -392,36 +392,36 @@ given(T ToString) Option(T) with {
 given Foo: ToString with {
     this.toString() String = "foo";
 }
-given(T, R) (T)->R with {
+given(T Any, R Any) fn(x T) R with {
     this.toAny() Any = this;
 }
 
-type LinkedList(T) = {
+type LinkedList(T Any) = {
     Cons(head T, tail LinkedList(T));
     Empty();
 }
 
-given(T) LinkedList(T) with {
+given(T Any) LinkedList(T) with {
     new() This = Empty();
 }
 
-type mut List(T) = {
+type mut List(T Any) = {
     this.get(index Int) T;
 
     mut this.set(index Int, element T) Void;
 }
 
-type mut ArrayList(T) = { ArrayList(_arr Array(T), size Int) }
-type mut ArrayList(T)(_arr Array(T), size Int);
+type mut ArrayList(T Any) = { ArrayList(_arr Array(T), size Int) }
+type mut ArrayList(T Any)(_arr Array(T), size Int);
 
-given(T) ArrayList(T): List(T) with {
+given(T Any) ArrayList(T): List(T) with {
     new() mut This = mut This([], 0);
 
     this.get(index Int) T = this._arr.get(index);
 
     mut this.set(index Int, element T) Void = this._arr.set(index, element);
 
-    this.map(R)(f (T)->R) Iterator(R) = MapIter(T, R)(this, f);
+    this.map(R)(f fn(x T) R) Iterator(R) = MapIter(T, R)(this, f);
 }
 
 given ArrayList(Int) with {
@@ -448,20 +448,20 @@ given String with {
     default() This = "";
 }
 
-given(T) Array(T) with {
+given(T Any) Array(T) with {
     default() This = arrayOf(T)();
 }
 
 type Any = {}
 
-given(T) T: Any with {}
+given(T Any) T: Any with {}
 
 type Iterator(T) = {
     mut this.next() Option(T)
 }
 
-given(T) Iterator(T) with {
-    mut this.reduce(R)(mut r R, f (R, T)-> R) = {
+given(T Any) Iterator(T) with {
+    mut this.reduce(R Any)(mut r R, f fn(a R, b T) R) = {
         while this.next() is Some(v) do {
             r = f(r, v)
         }
@@ -478,7 +478,7 @@ type mut OutputStream = {
     mut this.flush() Void;
 }
 
-type mut Array(T)(_source RawArray(T), _start Int, _len Int) with {
+type mut Array(T Any)(_source RawArray(T), _start Int, _len Int) with {
     create(size Int, item T) = mut Array(T)(RawArray.new(size, item), 0, size);
 
     this.size() = this._len;
@@ -494,7 +494,7 @@ type mut Array(T)(_source RawArray(T), _start Int, _len Int) with {
         mut Array(T)(this._source, start, len);
 }
 
-type mut ArrayIterator(T)(_source Array(T), index Int): Iterator(T) with {
+type mut ArrayIterator(T Any)(_source Array(T), index Int): Iterator(T) with {
     of(source Array(T)) = ArrayIterator(source, -1);
     
     mut this.next() Option(T) = 
@@ -528,9 +528,9 @@ type mut StringIterator(_source String, index Int): Iterator(Char) with {
         }
 }
 
-type mut Node(T)(value T, next Option(Node(T)));
+type mut Node(T Any)(value T, next Option(Node(T)));
 
-type mut LinkedList(T)(head Option(Node(T)), size Int) with {
+type mut LinkedList(T Any)(head Option(Node(T)), size Int) with {
     mut this.prepend(v T) Void = {
         let node = mut Node(v, None());
         if this.head is None then {
