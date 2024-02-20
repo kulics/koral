@@ -454,7 +454,7 @@ func getGasPrices() -> (Double, Double, Double) {
 ### K
 
 ```
-let makeIncrementer() (Int) -> Int = {
+let makeIncrementer() fn(n Int) Int = {
     let addOne(number Int) = 1 + number;
     addOne
 }
