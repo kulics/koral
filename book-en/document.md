@@ -319,7 +319,7 @@ let x = 0;
 let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less";
 ```
 
-When we don't need to handle the else branch, we can use the if-do syntax, and the do must be followed by an expression.
+When we don't need to handle the else branch, we can use the if-then syntax, and the then must be followed by an expression.
 
 ```
 let main() = if 1 == 1 do printLine("yes");
@@ -333,7 +333,7 @@ The short-circuit logic and is represented by `and`, and when the condition on t
 
 ```
 let main() = {
-    if false and f() do { ## will not execute f()
+    if false and f() then { ## will not execute f()
         ...
     }
 }
@@ -343,7 +343,7 @@ The short-circuit logic or is represented by `or`, and when the condition on the
 
 ```
 let main() = {
-    if true or f() do { ## will not execute f()
+    if true or f() then { ## will not execute f()
         ...
     }
 }
@@ -353,7 +353,7 @@ let main() = {
 
 A loop structure is a program structure that is set up when a function needs to be executed repeatedly in a program. It is a condition in the loop body that determines whether to continue executing a function or to exit the loop.
 
-In Koral, the loop structure is represented by the while syntax, where the while is followed by a judgment condition, and the branch after the do keyword is executed when the condition is `true`, and then it returns to the judgment condition for the next loop, and ends the loop when the condition is `false`. The do branch must be followed by an expression.
+In Koral, the loop structure is represented by the while syntax, where the while is followed by a judgment condition, and the branch after the then keyword is executed when the condition is `true`, and then it returns to the judgment condition for the next loop, and ends the loop when the condition is `false`. The then branch must be followed by an expression.
 
 This while syntax is an expression.
 
@@ -362,7 +362,7 @@ E.g:
 ```
 let main() = {
     let mut i = 0;
-    while i <= 10 do {
+    while i <= 10 then {
         printLine(i);
         i = i + 1
     }
@@ -376,8 +376,8 @@ The break statement can be used when we need to actively exit the loop in the mi
 ```
 let main() = {
     let mut i = 0;
-    while true do {
-        if i > 20 do break;
+    while true then {
+        if i > 20 then break;
         printLine(i);
         i = i + 1
     }
@@ -391,8 +391,8 @@ If we need to skip some rounds in the loop, we can use the continue statement. T
 ```
 let main() = {
     let mut i = 0;
-    while i <= 10 do {
-        if i % 2 == 0 do continue;
+    while i <= 10 then {
+        if i % 2 == 0 then continue;
         printLine(i);
         i = i + 1
     }
@@ -768,7 +768,7 @@ let main() = {
     let x = [1, 2, 3, 4, 5];
     let mut n = 0;
     let size = x.size();
-    while n < size do {
+    while n < size then {
         printLine(x[n]);
         n = n + 1;
     }
