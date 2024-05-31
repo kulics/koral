@@ -3,7 +3,7 @@
 
 ## Hello World
 
-### K
+### Koral
 
 ```
 printLine("Hello, world!");
@@ -35,7 +35,7 @@ print("Hello, world!")
 
 ## Variables And Constants
 
-### K
+### Koral
 
 ```
 let mut myVariable = 42;
@@ -77,7 +77,7 @@ let myConstant = 42
 
 ## Explicit Types
 
-### K
+### Koral
 
 ```
 let explicitDouble Float = 70.0;
@@ -109,7 +109,7 @@ let explicitDouble: Double = 70
 
 ## Basic Types
 
-### K
+### Koral
 
 ```
 Int32 Int16 Int64 Int8 
@@ -156,7 +156,7 @@ String
 
 ## Type Coercion
 
-### K
+### Koral
 
 ```
 let f = 6.0;
@@ -198,7 +198,7 @@ let count = i + Int(f)
 
 ## Inclusive Range Operator
 
-### K
+### Koral
 
 ```
 1..=5 foreach index do 
@@ -237,7 +237,7 @@ for index in 1...5 {
 
 ## Arrays
 
-### K
+### Koral
 
 ```
 let shoppingList = arrayOf("catfish", "water", "tulips", "blue paint");
@@ -274,7 +274,7 @@ shoppingList[1] = "bottle of water"
 
 ## Maps
 
-### K
+### Koral
 
 ```
 let occupations = mapOf(
@@ -326,11 +326,11 @@ occupations["Jayne"] = "Public Relations"
 
 ## Empty Collections
 
-### K
+### Koral
 
 ```
-let emptyArray = arrayOf(String)();
-let emptyDictionary = mapOf(String, Float32)();
+let emptyArray = [String]arrayOf();
+let emptyDictionary = [String, Float32]mapOf();
 ```
 
 ### C#
@@ -365,7 +365,7 @@ let emptyDictionary = [String: Float]()
 
 ## Functions
 
-### K
+### Koral
 
 ```
 let greet(name String, day String) String = 
@@ -412,7 +412,7 @@ greet("Bob", "Tuesday")
 
 ## Tuple Return
 
-### K
+### Koral
 
 ```
 let getGasPrices() type(Float, Float, Float) = (3.59, 3.69, 3.79);
@@ -451,7 +451,7 @@ func getGasPrices() -> (Double, Double, Double) {
 
 ## Function Type
 
-### K
+### Koral
 
 ```
 let makeIncrementer() fn(n Int) Int = {
@@ -521,7 +521,7 @@ increment(7)
 
 ## Classes Declaration
 
-### K
+### Koral
 
 ```
 type mut Shape(numberOfSides Int) with {
@@ -576,7 +576,7 @@ class Shape {
 
 ## Classes Usage
 
-### K
+### Koral
 
 ```
 let shape = Shape(0);
@@ -618,7 +618,7 @@ var shapeDescription = shape.simpleDescription()
 
 ## Subclass
 
-### K
+### Koral
 
 ```
 type NamedShape(name String, numberOfSides Int) with {
@@ -791,7 +791,7 @@ test.simpleDescription()
 
 ## Checking Type
 
-### K
+### Koral
 
 ```
 let mut movieCount = 0;
@@ -872,21 +872,21 @@ for item in library {
 
 ## Pattern Matching
 
-### K
+### Koral
 
 ```
 let nb = 42;
 nb match {
-    case >= 0 & <= 7 | 8 | 9 then 
-        print("single digit")
-    case 10 then 
-        print("double digits")
-    case >= 11 & <= 99 then 
-        print("double digits")
-    case >= 100 & <= 999 then 
-        print("triple digits")
-    case _ then 
-        print("four or more digits")
+    >= 0 & <= 7 | 8 | 9 then 
+        print("single digit"),
+    10 then 
+        print("double digits"),
+    >= 11 & <= 99 then 
+        print("double digits"),
+    >= 100 & <= 999 then 
+        print("triple digits"),
+    _ then 
+        print("four or more digits"),
 }
 ```
 
@@ -992,7 +992,7 @@ for case movie as Movie in someObjects {
 
 ## Interface
 
-### K
+### Koral
 
 ```
 type Nameable = {
@@ -1054,7 +1054,7 @@ func f(x: any Nameable) {
 
 ## Implement
 
-### K
+### Koral
 
 ```
 type Dog();

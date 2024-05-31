@@ -1,6 +1,6 @@
-# The K Programming Language
+# The Koral Programming Language
 
-K is an open source programming language focused on efficiency. It can help you easily build cross-platform software.
+Koral is an open source programming language focused on efficiency. It can help you easily build cross-platform software.
 
 With well-designed grammar rules, this language can effectively reduce the burden of reading and writing, allowing you to focus on solving problems.
 
@@ -29,7 +29,7 @@ With well-designed grammar rules, this language can effectively reduce the burde
 
 ## Install
 
-Currently `K` supports compilation to `JVM`, so you need to install `JVM` environment on your system.
+Currently `Koral` supports compilation to `JVM`, so you need to install `JVM` environment on your system.
 
 The execution compiler will scan the `.k` file of the current folder and automatically translate it to the target file of the same name.
 
@@ -41,7 +41,7 @@ download:
 
 ### Basic Statement
 
-Within K, statements are the smallest unit of composition.
+Within Koral, statements are the smallest unit of composition.
 
 The basic form of the statement is as follows.
 
@@ -100,13 +100,13 @@ E.g:
 
 ### Variable
 
-K's variables are a kind of binding semantics, equivalent to binding a variable name and a value together, thus establishing an association, similar to a key-value pair. For security reasons, K's variables cannot be changed by default, but K also provides another kind of variables - mutable variables.
+Koral's variables are a kind of binding semantics, equivalent to binding a variable name and a value together, thus establishing an association, similar to a key-value pair. For security reasons, K's variables cannot be changed by default, but K also provides another kind of variables - mutable variables.
 
 #### Readonly Variable
 
-Readonly variables are declared in K using the let keyword, and variables are declared first and used later.
+Readonly variables are declared in Koral using the let keyword, and variables are declared first and used later.
 
-K ensures type safety through static typing, and variable bindings can be explicitly typed at declaration time with `type`, or we can omit the type when there is enough information in the context, and the compiler will infer the type of the variable from the context.
+Koral ensures type safety through static typing, and variable bindings can be explicitly typed at declaration time with `type`, or we can omit the type when there is enough information in the context, and the compiler will infer the type of the variable from the context.
 
 The sample code is as follows.
 
@@ -128,7 +128,7 @@ a = 6; ## Error
 
 If we need a variable that can be reassigned, we can use a mutable variable declaration.
 
-Mutable variables are declared in K with the let mut keyword, again following the first-declared-first-used principle.
+Mutable variables are declared in Koral with the let mut keyword, again following the first-declared-first-used principle.
 
 The sample code is as follows.
 
@@ -141,7 +141,7 @@ let mut b = 123; ## Auto-inferred type
 
 For mutable variables, we can change their value as many times as we need to.
 
-K's assignment statement, like most languages, uses the `=` declaration. The left side of `=` must be a variable that can be assigned, and the program will assign the value on the right side of `=` to the variable on the left.
+Koral's assignment statement, like most languages, uses the `=` declaration. The left side of `=` must be a variable that can be assigned, and the program will assign the value on the right side of `=` to the variable on the left.
 
 The sample code is as follows.
 
@@ -153,7 +153,7 @@ a = 2;
 
 ### Block Expression
 
-In K, `{}` represents a block expression, which can contain a series of statements and an optional last expression, and the result of the block expression is also an expression.
+In Koral, `{}` represents a block expression, which can contain a series of statements and an optional last expression, and the result of the block expression is also an expression.
 
 The value of the last expression in a block expression is the value of the block. If there is no last expression, then the value of the block is the Void.
 
@@ -187,7 +187,7 @@ We only need a few simple basic types to do most of the work.
 
 Since our current computer architecture is good at calculating integers, a separate integer type helps to improve the efficiency of the program.
 
-In K, the default integer is of type `Int`, which can represent signed integer type data.
+In Koral, the default integer is of type `Int`, which can represent signed integer type data.
 
 E.g:
 
@@ -199,7 +199,7 @@ let i Int = 3987349;
 
 Integers don't satisfy our needs for numbers, and we often need to deal with decimals.
 
-In K, the default decimal is of type `Float`, which can represent floating-point data.
+In Koral, the default decimal is of type `Float`, which can represent floating-point data.
 
 E.g:
 
@@ -292,9 +292,9 @@ printLine( !a );        ## NOT, boolean inversion
 
 ## Select Structure
 
-The judgment statement executes the program by one or more of the set conditions, executes the specified statement when the condition is `true`, and executes the specified statement when the condition is `false`.
+Selection structures are used to judge a given condition, to judge certain conditions based on the result of the judgment, and to control the flow of the program based on the result of the judgment.
 
-We only need to use `? expression {}` to declare the judgment statement and enter the corresponding area according to the following values.
+In Koral, selection structures are represented by the if syntax, where if is immediately followed by a judgment condition, and the branch after the then keyword is executed when the condition is `true', and the branch after the else keyword is executed when the condition is `false'.
 
 E.g:
 
@@ -353,7 +353,7 @@ let main() = {
 
 A loop structure is a program structure that is set up when a function needs to be executed repeatedly in a program. It is a condition in the loop body that determines whether to continue executing a function or to exit the loop.
 
-In K, the loop structure is represented by the while syntax, where the while is followed by a judgment condition, and the branch after the do keyword is executed when the condition is `true`, and then it returns to the judgment condition for the next loop, and ends the loop when the condition is `false`. The do branch must be followed by an expression.
+In Koral, the loop structure is represented by the while syntax, where the while is followed by a judgment condition, and the branch after the do keyword is executed when the condition is `true`, and then it returns to the judgment condition for the next loop, and ends the loop when the condition is `false`. The do branch must be followed by an expression.
 
 This while syntax is an expression.
 
@@ -456,7 +456,7 @@ let a = add(1, 2); ## a == 3
 
 ### Function Type
 
-In K, a function is a type just like Int, Float, etc. Similarly, a function can be used as an expression.
+In Koral, a function is a type just like Int, Float, etc. Similarly, a function can be used as an expression.
 
 The type of a function is declared using the `fn(x T) R` syntax, and the function type requires the same declaration of the arguments and return type.
 
@@ -685,10 +685,10 @@ We need a Pair that can represent any type, and we can define it with the help o
 A generic data type differs from a datatype in that it requires additional declarations of type parameters that indicate future substitution by the actual type passed in, thus allowing the type of a member variable or member function to be substituted for the specific type when it is subsequently instantiated.
 
 ```
-type Pair(T1, T2)(left T1, right T2);
+type [T1, T2]Pair(left T1, right T2);
 ```
 
-As shown in the code above, we have declared two type parameters, T1 and T2, on the right side of `Pair` in the form of another parameter.
+As shown in the code above, we have declared two type parameters, T1 and T2, on the left side of `Pair` in the form of another parameter.
 
 If we need more than one type parameter, we can declare them one by one in order, splitting them with `,`. The call also needs to give the actual types in the same order.
 
@@ -698,11 +698,11 @@ Next we look at how to construct generic data types.
 
 ```
 let main() = {
-    lef a1 Pair(Int, Int) = Pair(Int, Int)(1, 2);
+    lef a1 [Int, Int]Pair = [Int, Int]Pair(1, 2);
     ## a1.left Int, a1.right Int
-    lef a2 Pair(Bool, Bool) = Pair(Bool, Bool)(true, false);
+    lef a2 [Bool, Bool]Pair = [Bool, Bool]Pair(true, false);
     ## a2.left Bool, a2.right Bool
-    lef a3 Pair(Int, String) = Pair(Int, String)(1, "a");
+    lef a3 [Int, String]Pair = [Int, String]Pair(1, "a");
     ## a3.left Int, a3.right String
 }
 ```
@@ -730,20 +730,20 @@ let main() = {
 
 An array is a generic data type that stores a set of data elements of the same type, each of which has an index to indicate its position in the array. The length of an array is fixed, and it can be accessed quickly by indexing any element.
 
-We use `Array(T)` to denote the array type, where `T` can be of any type.
+We use `[T]Array` to denote the array type, where `T` can be of any type.
 
 The array type can be initialized using the array literal (`[elem1, elem2, ...]`), where `elem1` and `elem2` denote the elements at the corresponding positions, with different elements separated by (`,`), and we can pass in any expression, but all elements must be of the same type. 
 
 ```
-let x Array(Int) = [1, 2, 3, 4, 5];
+let x [Int]Array = [1, 2, 3, 4, 5];
 ```
 
-As shown in the code above, we use the array literal syntax to create a `Array(Int)` whose elements are `1, 2, 3, 4, 5` just as the literal represents.
+As shown in the code above, we use the array literal syntax to create a `[Int]Array` whose elements are `1, 2, 3, 4, 5` just as the literal represents.
 
 In addition to this type of literal that lists the elements, we can also construct another type of literal that creates an array with a specified size and default value (`[default; size]`), where `default` is the default value and `size` is the number of elements.
 
 ```
-let y Array(Int) = [0; 3];
+let y [Int]Array = [0; 3];
 ## y == [0, 0, 0]
 ```
 
@@ -781,7 +781,7 @@ Modifying the elements of an array is similar to assigning values to member vari
 
 ```
 let main() = {
-    let x mut Array(Int) = mut [1, 2, 3, 4, 5];
+    let x mut [Int]Array = mut [1, 2, 3, 4, 5];
     printLine(x[0]); ## 1
     x[0] = 5;
     printLine(x[0]); ## 5
@@ -799,12 +799,12 @@ Yes, we need functions with generic types to implement it.
 Generic functions are very similar to generic types in that they use the same syntax to define generic parameters in front of the identifier.
 
 ```
-let mergeArray(T)(a Array(T), b Array(T)) = {
+let [T]mergeArray(a [T]Array, b [T]Array) = {
     ...
 }
 ```
 
-As you can see in the code above, we have declared the T type parameter on the right side of `mergeArray` using the same generic syntax.
+As you can see in the code above, we have declared the T type parameter on the left side of `mergeArray` using the same generic syntax.
 
 Next, let's see how to call the generic function.
 
@@ -812,7 +812,7 @@ Next, let's see how to call the generic function.
 let main() = {
     let x = [1, 2, 3];
     let y = [4, 5, 6];
-    let z = mergeArray(Int)(x, y);
+    let z = [Int]mergeArray(x, y);
     ## z == [1, 2, 3, 4, 5, 6]
 }
 ```
