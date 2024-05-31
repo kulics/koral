@@ -201,7 +201,7 @@ let count = i + Int(f)
 ### Koral
 
 ```
-1..=5 foreach index do 
+1..=5 foreach index then 
     printLine("\{index} times 5 is \{index * 5}");
 ```
 
@@ -797,10 +797,10 @@ test.simpleDescription()
 let mut movieCount = 0;
 let mut songCount = 0;
 
-library foreach item do {
+library foreach item then {
     if item is Movie then {
         movieCount += 1
-    } else if item is Song do {
+    } else if item is Song then {
         songCount += 1
     }
 }
@@ -945,8 +945,8 @@ switch nb {
 ### K
 
 ```
-someObjects foreach current do
-    if current is movie Movie do
+someObjects foreach current then
+    if current is movie Movie then
         printLine("Movie: '\{movie.name}', dir. \{movie.director}");
 ```
 

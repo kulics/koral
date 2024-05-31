@@ -317,7 +317,7 @@ let x = 0;
 let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less";
 ```
 
-当我们不需要处理 else 分支时，可以使用 if-do 语法，do 后面必须是表达式。
+当我们不需要处理 else 分支时，可以使用 if-then 语法，then 后面必须是表达式。
 
 ```
 let main() = if 1 == 1 do printLine("yes");
@@ -331,7 +331,7 @@ let main() = if 1 == 1 do printLine("yes");
 
 ```
 let main() = {
-    if false and f() do { ## 不会执行 f()
+    if false and f() then { ## 不会执行 f()
         ...
     }
 }
@@ -341,7 +341,7 @@ let main() = {
 
 ```
 let main() = {
-    if true or f() do { ## 不会执行 f()
+    if true or f() then { ## 不会执行 f()
         ...
     }
 }
@@ -351,7 +351,7 @@ let main() = {
 
 循环结构是指在程序中需要反复执行某个功能而设置的一种程序结构。它由循环体中的条件，判断继续执行某个功能还是退出循环。
 
-在 Koral 中循环结构使用 while 语法表示，while 后面紧跟判断条件，在条件为 `true` 时执行 do 关键字后面的分支，然后重新回到判断条件处进行判断进入下一轮循环，在条件为 `false` 结束循环。do 分支后面必须是表达式。
+在 Koral 中循环结构使用 while 语法表示，while 后面紧跟判断条件，在条件为 `true` 时执行 then 关键字后面的分支，然后重新回到判断条件处进行判断进入下一轮循环，在条件为 `false` 结束循环。then 分支后面必须是表达式。
 
 这种 while 语法是表达式。
 
@@ -360,7 +360,7 @@ let main() = {
 ```
 let main() = {
     let mut i = 0;
-    while i <= 10 do {
+    while i <= 10 then {
         printLine(i);
         i = i + 1
     }
@@ -374,8 +374,8 @@ let main() = {
 ```
 let main() = {
     let mut i = 0;
-    while true do {
-        if i > 20 do break;
+    while true then {
+        if i > 20 then break;
         printLine(i);
         i = i + 1
     }
@@ -389,8 +389,8 @@ let main() = {
 ```
 let main() = {
     let mut i = 0;
-    while i <= 10 do {
-        if i % 2 == 0 do continue;
+    while i <= 10 then {
+        if i % 2 == 0 then continue;
         printLine(i);
         i = i + 1
     }
@@ -767,7 +767,7 @@ let main() = {
     let x = [1, 2, 3, 4, 5];
     let mut n = 0;
     let size = x.size();
-    while n < size do {
+    while n < size then {
         printLine(x[n]);
         n = n + 1;
     }
