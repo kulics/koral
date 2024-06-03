@@ -458,15 +458,15 @@ let a = add(1, 2); ## a == 3
 
 In Koral, a function is a type just like Int, Float, etc. Similarly, a function can be used as an expression.
 
-The type of a function is declared using the `fn(x T) R` syntax, and the function type requires the same declaration of the arguments and return type.
+The type of a function is declared using the `type(x T) R` syntax, and the function type requires the same declaration of the arguments and return type.
 
 Once a function is defined, the function name can be used as an expression and can be assigned to other variables or used as parameters and return values.
 
 Variables of function types are called with the same `()` syntax as functions.
 
 ```
-let sqrt(x Int) = x * x; ## fn(x Int) Int
-let f fn(x Int) Int = sqrt;
+let sqrt(x Int) = x * x; ## type(x Int) Int
+let f type(x Int) Int = sqrt;
 let a = f(2); ## a == 4
 ```
 
@@ -474,7 +474,7 @@ For example, with this feature, we can also define parameters or return values f
 
 ```
 let hello() = printLine("Hello, world!");
-let run(f fn() Void) = f();
+let run(f type() Void) = f();
 let toRun() = run;
 
 let main() = toRun()(hello);
@@ -493,15 +493,15 @@ Lambda expressions are very similar to function definitions, except that the `=`
 As shown in the code below, the value of f2 is a lambda, which is the same type as f1 and has a very similar syntax, with lambda's also declaring parameters and return types, and requiring an expression as the return value.
 
 ```
-let f1(x Int) Int = x + 1; ## fn(x Int) Int
-let f2 = (x Int) Int -> x + 1; ## fn(x Int) Int
+let f1(x Int) Int = x + 1; ## type(x Int) Int
+let f2 = (x Int) Int -> x + 1; ## type(x Int) Int
 let a = f1(1) + f2(1); ## a == 4
 ```
 
 When the type of the lambda is known in our context, we can omit its argument type and return type.
 
 ```
-let f fn(x Int) Int = (x) -> x + 1;
+let f type(x Int) Int = (x) -> x + 1;
 ```
 
 ## Data Types

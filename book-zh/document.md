@@ -457,15 +457,15 @@ let a = add(1, 2); ## a == 3
 
 在 Koral 中，函数与 Int、Float 等类型一样，也是一种类型，同理函数也可以作为表达式使用。
 
-函数的类型使用 `fn(x T) R` 语法声明，跟函数定义一样需要声明参数和返回类型。
+函数的类型使用 `type(x T) R` 语法声明，跟函数定义一样需要声明参数和返回类型。
 
 函数定义之后，这个函数名就可以作为表达式使用，可以赋值给其它变量或者作为参数和返回值。
 
 函数类型的变量跟函数一样使用 `()` 语法调用。
 
 ```
-let sqrt(x Int) = x * x; ## fn(x Int) Int
-let f fn(x Int) Int = sqrt;
+let sqrt(x Int) = x * x; ## type(x Int) Int
+let f type(x Int) Int = sqrt;
 let a = f(2); ## a == 4
 ```
 
@@ -473,7 +473,7 @@ let a = f(2); ## a == 4
 
 ```
 let hello() = printLine("Hello, world!");
-let run(f fn() Void) = f();
+let run(f type() Void) = f();
 let toRun() = run;
 
 let main() = toRun()(hello);
@@ -492,15 +492,15 @@ Lambda 表达式与函数定义很相似，只是 `=` 换成了 `->`，并且没
 如下面的代码所示，f2 的值是一个 lambda，它们的类型与 f1 一样，语法上也非常相似，lambda 的同样需要声明参数和返回类型，并且需要一个表达式作为返回值。
 
 ```
-let f1(x Int) Int = x + 1; ## fn(x Int) Int
-let f2 = (x Int) Int -> x + 1; ## fn(x Int) Int
+let f1(x Int) Int = x + 1; ## type(x Int) Int
+let f2 = (x Int) Int -> x + 1; ## type(x Int) Int
 let a = f1(1) + f2(1); ## a == 4
 ```
 
 在我们的上下文中可以得知 lambda 的类型时，我们可以省略它的参数类型和返回类型。
 
 ```
-let f fn(x Int) Int = (x) -> x + 1;
+let f type(x Int) Int = (x) -> x + 1;
 ```
 
 ## 数据类型
