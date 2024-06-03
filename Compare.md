@@ -454,7 +454,7 @@ func getGasPrices() -> (Double, Double, Double) {
 ### Koral
 
 ```
-let makeIncrementer() fn(n Int) Int = {
+let makeIncrementer() type(n Int) Int = {
     let addOne(number Int) = 1 + number;
     addOne
 }
