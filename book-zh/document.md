@@ -320,7 +320,7 @@ let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less";
 当我们不需要处理 else 分支时，可以使用 if-then 语法，then 后面必须是表达式。
 
 ```
-let main() = if 1 == 1 do printLine("yes");
+let main() = if 1 == 1 then printLine("yes");
 ```
 
 ### 短路逻辑运算

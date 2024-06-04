@@ -322,7 +322,7 @@ let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less";
 When we don't need to handle the else branch, we can use the if-then syntax, and the then must be followed by an expression.
 
 ```
-let main() = if 1 == 1 do printLine("yes");
+let main() = if 1 == 1 then printLine("yes");
 ```
 
 ### Short circuit logic operation
