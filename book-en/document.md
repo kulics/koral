@@ -100,7 +100,7 @@ E.g:
 
 ### Variable
 
-Koral's variables are a kind of binding semantics, equivalent to binding a variable name and a value together, thus establishing an association, similar to a key-value pair. For security reasons, K's variables cannot be changed by default, but K also provides another kind of variables - mutable variables.
+Koral's variables are a kind of binding semantics, equivalent to binding a variable name and a value together, thus establishing an association, similar to a key-value pair. For security reasons, the variables cannot be changed by default, but we also provides another kind of variables - mutable variables.
 
 #### Readonly Variable
 
