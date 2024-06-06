@@ -173,7 +173,7 @@ let b Int = {
 The identifier is the name given to a variable, function, structure, interface, etc. The letters that make up an identifier have a certain specification. The naming rules for identifiers in this language are as follows:
 
 1. Case sensitive, Myname and myname are two different identifiers;
-1. Types and constructors can only be declared in uppercase, and variables and functions can only be declared in lowercase.
+Types and constructors can only start with uppercase letters, variables and functions can only start with lowercase letters, followed by other characters.
 1. The first character of the identifier can begin with an underscore `_` or a letter, but cannot be a number;
 1. Other characters in the identifier can be underscore `_`, letters or numbers.
 1. Within the same `{}`, identifiers of the same name cannot be defined repeatedly.
