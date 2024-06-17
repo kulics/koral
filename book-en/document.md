@@ -294,35 +294,35 @@ printLine( !a );        ## NOT, boolean inversion
 
 Selection structures are used to judge a given condition, to judge certain conditions based on the result of the judgment, and to control the flow of the program based on the result of the judgment.
 
-In Koral, selection structures are represented by the if syntax, where if is immediately followed by a judgment condition, and the branch after the then keyword is executed when the condition is `true', and the branch after the else keyword is executed when the condition is `false'.
+In Koral, selection structures are represented by the if syntax, where if is immediately followed by a judgment condition, and the `then` branch after the condition is executed when the condition is `true`, and the `else` branch after the else keyword is executed when the condition is `false'.
 
 E.g:
 
 ```
-let main() = if 1 == 1 then printLine("yes") else printLine("no");
+let main() = if (1 == 1) printLine("yes") else printLine("no");
 ```
 
 Executing the above program will show `yes`.
 
-If is also an expression, then and else branches must be followed by an expression, and depending on the condition of if, the value of the if expression may be one of then or else.
+If is also an expression, `then` and `else` branches must be followed by an expression, and depending on the condition of if, the value of the if expression may be one of `then` or `else` branches.
 
 Therefore, we can write the above program in the same way, and the results are equivalent in both ways.
 
 ```
-let main() = printLine(if 1 == 1 then "yes" else "no");
+let main() = printLine(if (1 == 1) "yes" else "no");
 ```
 
 Since if is itself an expression, it is natural that else can be followed by another if expression, so that we can achieve a continuous conditional judgment.
 
 ```
 let x = 0;
-let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less";
+let y = if (x > 0) "bigger" else if (x == 0) "equal" else "less";
 ```
 
-When we don't need to handle the else branch, we can use the if-then syntax, and the then must be followed by an expression.
+When we don't need to deal with else branching, we can omit the else branching, which takes the value of Void.
 
 ```
-let main() = if 1 == 1 then printLine("yes");
+let main() = if (1 == 1) printLine("yes");
 ```
 
 ### Short circuit logic operation
@@ -333,7 +333,7 @@ The short-circuit logic and is represented by `and`, and when the condition on t
 
 ```
 let main() = {
-    if false and f() then { ## will not execute f()
+    if (false and f()) { ## will not execute f()
         ...
     }
 }
@@ -343,7 +343,7 @@ The short-circuit logic or is represented by `or`, and when the condition on the
 
 ```
 let main() = {
-    if true or f() then { ## will not execute f()
+    if (true or f()) { ## will not execute f()
         ...
     }
 }
@@ -353,7 +353,7 @@ let main() = {
 
 A loop structure is a program structure that is set up when a function needs to be executed repeatedly in a program. It is a condition in the loop body that determines whether to continue executing a function or to exit the loop.
 
-In Koral, the loop structure is represented by the while syntax, where the while is followed by a judgment condition, and the branch after the then keyword is executed when the condition is `true`, and then it returns to the judgment condition for the next loop, and ends the loop when the condition is `false`. The then branch must be followed by an expression.
+In Koral, the loop structure is represented by the while syntax, where the while is followed by a judgment condition, and the expression after the condition is executed when the condition is `true`, and then it returns to the judgment condition for the next loop, and ends the loop when the condition is `false`. 
 
 This while syntax is an expression.
 
@@ -362,7 +362,7 @@ E.g:
 ```
 let main() = {
     let mut i = 0;
-    while i <= 10 then {
+    while (i <= 10) {
         printLine(i);
         i = i + 1
     }
@@ -376,8 +376,8 @@ The break statement can be used when we need to actively exit the loop in the mi
 ```
 let main() = {
     let mut i = 0;
-    while true then {
-        if i > 20 then break;
+    while (true) {
+        if (i > 20) break;
         printLine(i);
         i = i + 1
     }
@@ -391,8 +391,8 @@ If we need to skip some rounds in the loop, we can use the continue statement. T
 ```
 let main() = {
     let mut i = 0;
-    while i <= 10 then {
-        if i % 2 == 0 then continue;
+    while (i <= 10) {
+        if (i % 2 == 0) continue;
         printLine(i);
         i = i + 1
     }
@@ -768,7 +768,7 @@ let main() = {
     let x = [1, 2, 3, 4, 5];
     let mut n = 0;
     let size = x.size();
-    while n < size then {
+    while (n < size) {
         printLine(x[n]);
         n = n + 1;
     }

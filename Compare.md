@@ -201,7 +201,7 @@ let count = i + Int(f)
 ### Koral
 
 ```
-1..=5 foreach index then 
+for (index : 1..=5) 
     printLine("\{index} times 5 is \{index * 5}");
 ```
 
@@ -797,10 +797,10 @@ test.simpleDescription()
 let mut movieCount = 0;
 let mut songCount = 0;
 
-library foreach item then {
-    if item is Movie then {
+for (item : library) {
+    if (Movie : item) {
         movieCount += 1
-    } else if item is Song then {
+    } else if (Song : item) {
         songCount += 1
     }
 }
@@ -876,16 +876,16 @@ for item in library {
 
 ```
 let nb = 42;
-nb match {
-    >= 0 & <= 7 | 8 | 9 then 
+switch (nb) {
+    >= 0 & <= 7 | 8 | 9 : 
         print("single digit"),
-    10 then 
+    10 : 
         print("double digits"),
-    >= 11 & <= 99 then 
+    >= 11 & <= 99 : 
         print("double digits"),
-    >= 100 & <= 999 then 
+    >= 100 & <= 999 : 
         print("triple digits"),
-    _ then 
+    _ : 
         print("four or more digits"),
 }
 ```
@@ -942,11 +942,11 @@ switch nb {
 
 ## Downcasting
 
-### K
+### Koral
 
 ```
-someObjects foreach current then
-    if current is movie Movie then
+for (current : someObjects)
+    if (movie Movie : current)
         printLine("Movie: '\{movie.name}', dir. \{movie.director}");
 ```
 

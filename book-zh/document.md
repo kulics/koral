@@ -292,35 +292,35 @@ printLine( !a );        ## 非，布尔值取反
 
 选择结构用于判断给定的条件，根据判断的结果判断某些条件，根据判断的结果来控制程序的流程。
 
-在 Koral 中选择结构使用 if 语法表示，if 后面紧跟判断条件，在条件为 `true` 时执行 then 关键字后面的分支，在条件为 `false` 时执行 else 关键字后面的分支。
+在 Koral 中选择结构使用 if 语法表示，if 后面紧跟判断条件，在条件为 `true` 时执行条件后面的 `then` 分支，在条件为 `false` 时执行 else 关键字后面的 `else` 分支。
 
 例如：
 
 ```
-let main() = if 1 == 1 then printLine("yes") else printLine("no");
+let main() = if (1 == 1) printLine("yes") else printLine("no");
 ```
 
 执行上面的程序会看到 `yes`。
 
-if 同样也是表达式，then 和 else 分支后面都必须是表达式，根据 if 的条件，if 表达式的值可能是 then 或 else 其中的一个。
+if 同样也是表达式，`then` 和 `else` 分支后面都必须是表达式，根据 if 的条件，if 表达式的值可能是 `then` 或 `else` 分支其中的一个。
 
 因此上面那段程序我们也可以这样写，两种写法结果等价。
 
 ```
-let main() = printLine(if 1 == 1 then "yes" else "no");
+let main() = printLine(if (1 == 1) "yes" else "no");
 ```
 
 由于 if 本身也是表达式，因此 else 后面自然也可以接另外一个 if 表达式，这样我们就可以实现连续的条件判断。
 
 ```
 let x = 0;
-let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less";
+let y = if (x > 0) "bigger" else if (x == 0) "equal" else "less";
 ```
 
-当我们不需要处理 else 分支时，可以使用 if-then 语法，then 后面必须是表达式。
+当我们不需要处理 else 分支时，可以省略 else 分支，这时它的值是 Void。
 
 ```
-let main() = if 1 == 1 then printLine("yes");
+let main() = if (1 == 1) printLine("yes");
 ```
 
 ### 短路逻辑运算
@@ -331,7 +331,7 @@ let main() = if 1 == 1 then printLine("yes");
 
 ```
 let main() = {
-    if false and f() then { ## 不会执行 f()
+    if (false and f()) { ## 不会执行 f()
         ...
     }
 }
@@ -341,7 +341,7 @@ let main() = {
 
 ```
 let main() = {
-    if true or f() then { ## 不会执行 f()
+    if (true or f()) { ## 不会执行 f()
         ...
     }
 }
@@ -351,7 +351,7 @@ let main() = {
 
 循环结构是指在程序中需要反复执行某个功能而设置的一种程序结构。它由循环体中的条件，判断继续执行某个功能还是退出循环。
 
-在 Koral 中循环结构使用 while 语法表示，while 后面紧跟判断条件，在条件为 `true` 时执行 then 关键字后面的分支，然后重新回到判断条件处进行判断进入下一轮循环，在条件为 `false` 结束循环。then 分支后面必须是表达式。
+在 Koral 中循环结构使用 while 语法表示，while 后面紧跟判断条件，在条件为 `true` 时执行后面biaodashi ，然后重新回到判断条件处进行判断进入下一轮循环，在条件为 `false` 结束循环。
 
 这种 while 语法是表达式。
 
@@ -360,7 +360,7 @@ let main() = {
 ```
 let main() = {
     let mut i = 0;
-    while i <= 10 then {
+    while (i <= 10) {
         printLine(i);
         i = i + 1
     }
@@ -374,8 +374,8 @@ let main() = {
 ```
 let main() = {
     let mut i = 0;
-    while true then {
-        if i > 20 then break;
+    while (true) {
+        if (i > 20) break;
         printLine(i);
         i = i + 1
     }
@@ -389,8 +389,8 @@ let main() = {
 ```
 let main() = {
     let mut i = 0;
-    while i <= 10 then {
-        if i % 2 == 0 then continue;
+    while (i <= 10) {
+        if (i % 2 == 0) continue;
         printLine(i);
         i = i + 1
     }
@@ -767,7 +767,7 @@ let main() = {
     let x = [1, 2, 3, 4, 5];
     let mut n = 0;
     let size = x.size();
-    while n < size then {
+    while (n < size) {
         printLine(x[n]);
         n = n + 1;
     }
