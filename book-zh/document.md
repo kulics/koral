@@ -612,9 +612,7 @@ let main() = {
 }
 ```
 
-我们可以给类型标注 mut 关键字，这样它就在构造的时候就允许被构造为可变类型，然后我们就可以对可变类型中的成员变量进行赋值了。
-
-构造可变类型的实例需要在构造语法的前面使用 mut 关键字标注。
+我们可以在类型定义的时候标注 mut 关键字，这样它就会被定义为是一个可变类型。对于可变类型的实例，我们可以对其中的成员变量进行赋值。
 
 成员变量的可变性是跟随类型的，与实例变量是否可变没有关系，所以我们即使声明了只读变量也可以修改可变成员变量。
 
@@ -622,28 +620,25 @@ let main() = {
 type mut Point(x Int, y Int);
 
 let main() = {
-    let a mut Point = mut Point(64, 128); ## `a` 不需要声明为 mut
+    let a Point = Point(64, 128); ## `a` 不需要声明为 mut
     a.x = 2; ## ok
     a.y = 0 ## ok
 }
 ```
 
-当我们定义了一个可变类型，它可以作为可变类型使用，同时也可做为只读类型使用，这取决于我们在使用处是否使用 mut 关键字标注。
-
-可变类型被设计为是只读类型的子类型，所以可变类型的实例可以赋值或传递给只读类型。当我们将一个可变类型转换为只读类型使用时，它仍然会指向原来的实例，所以可变类型实例的修改仍然会导致只读类型那边观察到变化。
+当我们将一个可变类型的变量赋值给另一个变量使用时，两个变量都会会指向同一个实例，所以我们对成员变量的修改会影响到所有相同引用的变量。换句话说，可变类型可以被认为是其它语言中的引用类型。
 
 ```
 type mut Point(x Int, y Int);
 
 let main() = {
-    let a mut Point = mut Point(64, 128); 
+    let a Point = Point(64, 128); 
     let b Point = a; ## ok
     printLine(a.x); ## 64
     printLine(b.x); ## 64
     a.x = 128;
     printLine(a.x); ## 128
     printLine(b.x); ## 128
-    b.x = 256; ## error
 }
 ```
 
@@ -651,10 +646,10 @@ let main() = {
 
 除了成员变量以外，数据类型还可以定义成员函数。成员函数能让我们的类型直接提供丰富的功能，而不需要依赖外部函数。
 
-定义成员函数很简单，在类型定义的后面使用 `with` 关键字，再声明一个包含成员函数的块即可。
+定义成员函数很简单，在类型定义的后面声明一个包含成员函数的块即可。
 
 ```
-type Rectangle(length Int, width Int) with {
+type Rectangle(length Int, width Int) {
     this.area() Int = this.length * this.width;
 }
 ```
@@ -676,27 +671,12 @@ let main() = {
 
 执行上面的程序，我们可以看到 8。
 
-成员函数的 this 默认是只读的，这意味着我们不能在成员函数中修改成员变量。如果我们需要修改，需要在 this 的前面加上 `mut` 修饰。`mut this` 表示当前的实例类型是可变类型，所以它可以修改成员变量，这同时也要求只有可变类型的实例能访问可变成员函数。
-
-```
-type mut Rectangle(length Int, width Int) with {
-    mut this.setLength(l Int) Void = this.length = l;
-}
-
-let main() = {
-    let a Rectangle = Rectangle(2, 4);
-    a.setLength(4); ## 错误，a 不是 mut Rectangle，不能调用 mut 成员函数
-    let b mut Rectangle = mut Rectangle(2, 4);
-    b.setLength(4); ## ok
-}
-```
-
 除了包含 this 的成员函数以外，我们还可以定义不包含 this 的成员函数。
 
 这一类函数不能使用实例访问，只能使用类型名称访问。它可以让我们定义一些与类型关联性很高的函数但不需要实例作为参数的函数。
 
 ```
-type Point(x Int, y Int) with {
+type Point(x Int, y Int) {
     default() Point = Point(0, 0);
 }
 
@@ -818,20 +798,18 @@ let main() = {
 }
 ```
 
-数组和其它类型一样，默认是只读的，这意味着我们不能修改它的元素。如果我们需要一个可以修改元素的数组，我们和其它类型一样，在构造时声明为 `mut`，这样我们就可以得到一个可变的数组。
-
-对数组元素的修改和对成员变量进行赋值是类似的，只不过需要使用下标语法。
+数组也是一种可变类型。对数组元素的修改和对成员变量进行赋值是类似的，只不过需要使用下标语法。
 
 ```
 let main() = {
-    let x mut [Int]Array = mut [1, 2, 3, 4, 5];
+    let x [Int]Array = [1, 2, 3, 4, 5];
     printLine(x[0]); ## 1
     x[0] = 5;
     printLine(x[0]); ## 5
 }
 ```
 
-如上面的代码所示，我们将 x 声明为可变的数组，然后就可以使用 `[index] = value` 的方式对指定下标的元素进行赋值。
+如上面的代码所示，我们将 x 声明为数组，然后就可以使用 `[index] = value` 的方式对指定下标的元素进行赋值。
 
 ## 泛型函数
 
