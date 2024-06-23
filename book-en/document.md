@@ -29,13 +29,9 @@ With well-designed grammar rules, this language can effectively reduce the burde
 
 ## Install
 
-Currently `Koral` supports compilation to `JVM`, so you need to install `JVM` environment on your system.
+Currently `Koral` supports compilation to `LLVM`, so you need to install `LLVM` environment on your system.
 
-The execution compiler will scan the `.k` file of the current folder and automatically translate it to the target file of the same name.
-
-download:
-
-- [JVM](https://github.com/kulics-works/k-jvm)
+The execution compiler will scan the `.koral` file of the current folder and automatically translate it to the target file of the same name.
 
 ## Basic Grammar
 
@@ -214,12 +210,13 @@ We are not living in a world where only numbers, so we also need to use text to 
 
 In this language, the default text is the `String` type, which is an unlimited length of string data.
 
-You only need to wrap a piece of text with `""`, which will be recognized as a string value.
+You only need to wrap a piece of text with `""` or `''`, which will be recognized as a string value.
 
 E.g:
 
 ```
-let s String = "Hello, world!";
+let s1 String = "Hello, world!";
+let s2 String = 'Hello, world!'; ## same as s1
 ```
 
 It should be noted that a string is a type consisting of multiple characters, so in fact the string is a fixed-order list, and there is a correspondence between the two. Many times we can process strings as if they were lists.
@@ -327,7 +324,7 @@ let main() = if (1 == 1) printLine("yes");
 
 ### Short circuit logic operation
 
-In the conditions of the select structure or the loop structure, we can use short-circuit logic operations `and` and `or` to combine the logic. The short-circuit logic operation's can skip some unnecessary computations to save computational resources or avoid side effects.
+In the conditions of the select or the loop structure, we can use short-circuit logic operations `and` and `or` to combine the logic. The short-circuit logic operation's can skip some unnecessary computations to save computational resources or avoid side effects.
 
 The short-circuit logic and is represented by `and`, and when the condition on the left side is `false`, the condition on the right side will be skipped.
 
@@ -348,6 +345,37 @@ let main() = {
     }
 }
 ```
+
+### Initialization Statements
+
+In the conditional of a selection or loop structure, you can include an additional initialization statement (e.g., to define a new variable). Variables defined in this syntax can only be used in the block of code that follows the current selection or loop structure (including the block of code that follows else).
+
+We might write it this way without an initialization statement to achieve the effect of narrowing the scope:
+
+```
+{
+    let val = getValue();
+    if(condition(val)) {
+        ## some codes if is true
+    } else {
+        ## some codes if is false
+    }
+}
+```
+
+As you can see, val belongs in a separate block expression, which does not expose val to scopes other than if.
+
+If we were using an initialization statement, we could write it like this:
+
+```
+if(let val = getValue(); condition(val)) {
+    ## some codes if is true
+} else {
+    ## some codes if is false
+}
+```
+
+This way, val is only visible in if and else, and doesn't leak into other scopes.
 
 ## Loop Structure
 
@@ -400,6 +428,22 @@ let main() = {
 ```
 
 Executing the above program will print an odd number between 0 and 10.
+
+### Update Statements
+
+In the conditional of a select or loop structure, if we have included an initialization statement and a condition, then we can additionally include an update statement (e.g., to update a variable).
+
+When the condition evaluates to true and the following expression is executed, the logic in the update statement is additionally executed.
+
+Often we might use update statements to do something like increment a variable, or to execute logic that needs to be deferred.
+
+When we combine the initialization statement with the update statement in while, we can easily express some looping algorithms, very similar to the classic for loop structure in c.
+
+```
+while(let mut a = 10; a < 20; a = a + 1 ) {
+    printLine(a);
+}
+```
 
 ## Function
 
