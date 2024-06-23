@@ -613,9 +613,7 @@ let main() = {
 }
 ```
 
-We can mark the type with the mut keyword so that it is allowed to be constructed as a mutable type at construction time, and then we can assign values to the member variables in the mutable type.
-
-Constructing an instance of a mutable type requires the mut keyword to be marked in front of the construction syntax.
+We can label the type definition with the mut keyword so that it is defined as being a mutable type. For instances of mutable types, we can assign values to the member variables in them.
 
 The mutability of member variables follows the type and has nothing to do with whether the instance variables are mutable or not, so we can modify mutable member variables even if we declare read-only variables.
 
@@ -623,28 +621,25 @@ The mutability of member variables follows the type and has nothing to do with w
 type mut Point(x Int, y Int);
 
 let main() = {
-    let a mut Point = mut Point(64, 128); ## `a` no need to declare as mut
+    let a Point = Point(64, 128); ## `a` no need to declare as mut
     a.x = 2; ## ok
     a.y = 0 ## ok
 }
 ```
 
-When we define a mutable type, it can be used as a mutable type and also as a read-only type, depending on whether we mark it with the mut keyword at the point of use.
-
-Mutable types are designed to be subtypes of read-only types, so instances of mutable types can be assigned or passed to read-only types. When we convert a mutable type for use as a read-only type, it will still point to the original instance, so modifications to the mutable type instance will still cause changes to be observed on the read-only side of the type.
+When we assign a variable of variable type to another variable for use, both variables will point to the same instance, so our modifications to the member variables will affect all the identically referenced variables. In other words, variable types can be thought of as reference types in other languages.
 
 ```
 type mut Point(x Int, y Int);
 
 let main() = {
-    let a mut Point = mut Point(64, 128); 
+    let a Point = Point(64, 128); 
     let b Point = a; ## ok
     printLine(a.x); ## 64
     printLine(b.x); ## 64
     a.x = 128;
     printLine(a.x); ## 128
     printLine(b.x); ## 128
-    b.x = 256; ## error
 }
 ```
 
@@ -652,10 +647,10 @@ let main() = {
 
 In addition to member variables, data types can also define member functions. Member functions allow our types to provide rich functionality directly, without relying on external functions.
 
-Defining a member function is as simple as using the `with` keyword after the type definition and declaring a block containing the member function.
+Defining a member function is as simple as declaring a block containing the member function.
 
 ```
-type Rectangle(length Int, width Int) with {
+type Rectangle(length Int, width Int) {
     this.area() Int = this.length * this.width;
 }
 ```
@@ -677,27 +672,12 @@ let main() = {
 
 Executing the above program, we can see that 8.
 
-This means that we cannot modify member variables in member functions. If we need to modify it, we need to add the `mut` modifier in front of this. `mut this` means that the current instance type is mutable, so it can modify member variables, which also requires that only instances of mutable types can access mutable member functions.
-
-```
-type mut Rectangle(length Int, width Int) with {
-    mut this.setLength(l Int): Void = this.length = l;
-}
-
-let main() = {
-    let a Rectangle = Rectangle(2, 4);
-    a.setLength(4); ## error, a is not mut Rectangle, can't call mut member function
-    let b mut Rectangle = mut Rectangle(2, 4);
-    b.setLength(4); ## ok
-}
-```
-
 In addition to member functions that contain this, we can also define member functions that do not contain this.
 
 This class of functions cannot be accessed using instances and can only be accessed using type names. It allows us to define functions that are highly type-associated but do not require an instance as an argument.
 
 ```
-type Point(x Int, y Int) with {
+type Point(x Int, y Int) {
     default() Point = Point(0, 0);
 }
 
@@ -819,20 +799,18 @@ let main() = {
 }
 ```
 
-An array, like any other type, is read-only by default, which means we can't modify its elements. If we need an array whose elements can be modified, we declare it as `mut` at construction time, just like any other type, so that we can get a mutable array.
-
-Modifying the elements of an array is similar to assigning values to member variables, except that it requires the use of subscript syntax.
+Arrays are also a mutable type. Modifying the elements of an array is similar to assigning values to member variables, except that it requires the use of subscript syntax.
 
 ```
 let main() = {
-    let x mut [Int]Array = mut [1, 2, 3, 4, 5];
+    let x [Int]Array = [1, 2, 3, 4, 5];
     printLine(x[0]); ## 1
     x[0] = 5;
     printLine(x[0]); ## 5
 }
 ```
 
-As shown in the code above, we declare x as a mutable array, and then we can assign values to the elements of the specified subscript using `[index] = value`.
+As shown in the code above, we declare x as a array, and then we can assign values to the elements of the specified subscript using `[index] = value`.
 
 ## Generic Functions
 
