@@ -524,9 +524,9 @@ increment(7)
 ### Koral
 
 ```
-type mut Shape(numberOfSides Int) with {
-    this.simpleDescription() String =
-        "A shape with \{this.numberOfSides} sides.";
+type mut Shape(numberOfSides Int) {
+    self.simpleDescription() String =
+        "A shape with \{self.numberOfSides} sides.";
 }
 ```
 
@@ -622,17 +622,17 @@ var shapeDescription = shape.simpleDescription()
 
 ```
 type NamedShape(name String, numberOfSides Int) with {
-    this.simpleDescription() String =
-        "A shape with \{this.numberOfSides} sides.";
+    self.simpleDescription() String =
+        "A shape with \{self.numberOfSides} sides.";
 }
 
 type Square(as namedShape NamedShape, sideLength Float) with {
     new(sideLength Float, name String): Square = Square(NamedShape(name, 4), sideLength);
 
-    this.simpleDescription() String =
-        "A square with sides of length \{this.sideLength}.";
+    self.simpleDescription() String =
+        "A square with sides of length \{self.sideLength}.";
 
-    this.area() Float = sideLength * sideLength;
+    self.area() Float = sideLength * sideLength;
 }
 
 let test = Square.new(5.2, "square");
@@ -995,8 +995,8 @@ for case movie as Movie in someObjects {
 ### Koral
 
 ```
-type Nameable = {
-    this.name() String;
+type Nameable {
+    self.name() String;
 }
 
 let f(x Nameable) Void = printLine("Name is " + x.name());
@@ -1059,9 +1059,11 @@ func f(x: any Nameable) {
 ```
 type Dog();
 
-given Dog: Nameable with this.name() String = "Dog";
+given Dog {
+    self.name() String = "Dog";
 
-given Dog: Weight with this.weight() Int = 30;
+    self.weight() Int = 30;
+}
 ```
 
 ### C#

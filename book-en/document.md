@@ -651,15 +651,15 @@ Defining a member function is as simple as declaring a block containing the memb
 
 ```
 type Rectangle(length Int, width Int) {
-    this.area() Int = this.length * this.width;
+    self.area() Int = self.length * self.width;
 }
 ```
 
 As the above code shows, we define a member function `area`, which is used to calculate the area of the Rectangle.
 
-Unlike normal function definitions, the member function does not need to start with `let` and is usually preceded by `this.`. It is used to represent the current type of the instance parameter.
+Unlike normal function definitions, the member function does not need to start with `let` and is usually preceded by `self.`. It is used to represent the current type of the instance parameter.
 
-As you may have noticed, accessing member variables in a member function is similar to accessing them externally, except that we need to use `this` to indicate the variable name of the instance.
+As you may have noticed, accessing member variables in a member function is similar to accessing them externally, except that we need to use `self` to indicate the variable name of the instance.
 
 As with accessing member variables, we only need to use the `.` syntax to access member functions.
 
@@ -672,7 +672,7 @@ let main() = {
 
 Executing the above program, we can see that 8.
 
-In addition to member functions that contain this, we can also define member functions that do not contain this.
+In addition to member functions that contain `self`, we can also define member functions that do not contain `self`.
 
 This class of functions cannot be accessed using instances and can only be accessed using type names. It allows us to define functions that are highly type-associated but do not require an instance as an argument.
 
