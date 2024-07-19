@@ -438,7 +438,7 @@ let main() = {
 当我们组合使用 while 中的初始化语句和更新语句时，我们可以很容易表达一些循环算法，很类似 c 语言中经典的 for 循环结构。
 
 ```
-while(let mut a = 10; a < 20; a = a + 1 ) {
+while(let mut a = 10; a < 20; a = a + 1) {
     printLine(a);
 }
 ```

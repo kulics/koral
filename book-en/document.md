@@ -440,7 +440,7 @@ Often we might use update statements to do something like increment a variable, 
 When we combine the initialization statement with the update statement in while, we can easily express some looping algorithms, very similar to the classic for loop structure in c.
 
 ```
-while(let mut a = 10; a < 20; a = a + 1 ) {
+while(let mut a = 10; a < 20; a = a + 1) {
     printLine(a);
 }
 ```
