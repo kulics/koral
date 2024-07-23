@@ -621,12 +621,12 @@ var shapeDescription = shape.simpleDescription()
 ### Koral
 
 ```
-type NamedShape(name String, numberOfSides Int) with {
+type NamedShape(name String, numberOfSides Int) {
     self.simpleDescription() String =
         "A shape with \{self.numberOfSides} sides.";
 }
 
-type Square(as namedShape NamedShape, sideLength Float) with {
+type Square(as namedShape NamedShape, sideLength Float) {
     new(sideLength Float, name String): Square = Square(NamedShape(name, 4), sideLength);
 
     self.simpleDescription() String =
@@ -878,15 +878,15 @@ for item in library {
 let nb = 42;
 switch (nb) {
     >= 0 & <= 7 | 8 | 9 ->
-        print("single digit"),
+        print("single digit");
     10 ->
-        print("double digits"),
+        print("double digits");
     >= 11 & <= 99 ->
-        print("double digits"),
+        print("double digits");
     >= 100 & <= 999 ->
-        print("triple digits"),
+        print("triple digits");
     _ ->
-        print("four or more digits"),
+        print("four or more digits");
 }
 ```
 
