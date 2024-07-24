@@ -429,22 +429,6 @@ let main() = {
 
 Executing the above program will print an odd number between 0 and 10.
 
-### Update Statements
-
-In the conditional of a select or loop structure, if we have included an initialization statement and a condition, then we can additionally include an update statement (e.g., to update a variable).
-
-When the condition evaluates to true and the following expression is executed, the logic in the update statement is additionally executed.
-
-Often we might use update statements to do something like increment a variable, or to execute logic that needs to be deferred.
-
-When we combine the initialization statement with the update statement in while, we can easily express some looping algorithms, very similar to the classic for loop structure in c.
-
-```
-while(let mut a = 10; a < 20; a = a + 1) {
-    printLine(a);
-}
-```
-
 ## Function
 
 Function is a separate block of code used to accomplish a specific task.
