@@ -294,7 +294,7 @@ printLine( !a );        ## 非，布尔值取反
 例如：
 
 ```
-let main() = if (1 == 1) printLine("yes") else printLine("no");
+let main() = if 1 == 1 then printLine("yes") else printLine("no");
 ```
 
 执行上面的程序会看到 `yes`。
@@ -304,20 +304,20 @@ if 同样也是表达式，`then` 和 `else` 分支后面都必须是表达式�
 因此上面那段程序我们也可以这样写，两种写法结果等价。
 
 ```
-let main() = printLine(if (1 == 1) "yes" else "no");
+let main() = printLine(if 1 == 1 then "yes" else "no");
 ```
 
 由于 if 本身也是表达式，因此 else 后面自然也可以接另外一个 if 表达式，这样我们就可以实现连续的条件判断。
 
 ```
 let x = 0;
-let y = if (x > 0) "bigger" else if (x == 0) "equal" else "less";
+let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less";
 ```
 
 当我们不需要处理 else 分支时，可以省略 else 分支，这时它的值是 Void。
 
 ```
-let main() = if (1 == 1) printLine("yes");
+let main() = if 1 == 1 then printLine("yes");
 ```
 
 ### 短路逻辑运算
@@ -328,7 +328,7 @@ let main() = if (1 == 1) printLine("yes");
 
 ```
 let main() = {
-    if (false and f()) { ## 不会执行 f()
+    if false and f() then { ## 不会执行 f()
         ...
     }
 }
@@ -338,7 +338,7 @@ let main() = {
 
 ```
 let main() = {
-    if (true or f()) { ## 不会执行 f()
+    if true or f() then { ## 不会执行 f()
         ...
     }
 }
@@ -353,7 +353,7 @@ let main() = {
 ```
 {
     let val = getValue();
-    if(condition(val)) {
+    if condition(val) then {
         ## some codes if is true
     } else {
         ## some codes if is false
@@ -366,7 +366,7 @@ let main() = {
 使用初始化语句的话我们可以这样写：
 
 ```
-if(let val = getValue(); condition(val)) {
+if let val = getValue(); condition(val) then {
     ## some codes if is true
 } else {
     ## some codes if is false
@@ -388,7 +388,7 @@ if(let val = getValue(); condition(val)) {
 ```
 let main() = {
     let mut i = 0;
-    while (i <= 10) {
+    while i <= 10 then {
         printLine(i);
         i = i + 1
     }
@@ -402,8 +402,8 @@ let main() = {
 ```
 let main() = {
     let mut i = 0;
-    while (true) {
-        if (i > 20) break;
+    while true then {
+        if i > 20 then break;
         printLine(i);
         i = i + 1
     }
@@ -417,8 +417,8 @@ let main() = {
 ```
 let main() = {
     let mut i = 0;
-    while (i <= 10) {
-        if (i % 2 == 0) continue;
+    while i <= 10 then {
+        if i % 2 == 0 then continue;
         printLine(i);
         i = i + 1
     }
@@ -773,9 +773,7 @@ printLine(x[4]); ## 5
 ```
 let main() = {
     let x = [1, 2, 3, 4, 5];
-    let mut n = 0;
-    let size = x.size();
-    while (n < size) {
+    while let mut n = 0; n < x.size() then {
         printLine(x[n]);
         n = n + 1;
     }

@@ -296,7 +296,7 @@ In Koral, selection structures are represented by the if syntax, where if is imm
 E.g:
 
 ```
-let main() = if (1 == 1) printLine("yes") else printLine("no");
+let main() = if 1 == 1 then printLine("yes") else printLine("no");
 ```
 
 Executing the above program will show `yes`.
@@ -306,20 +306,20 @@ If is also an expression, `then` and `else` branches must be followed by an expr
 Therefore, we can write the above program in the same way, and the results are equivalent in both ways.
 
 ```
-let main() = printLine(if (1 == 1) "yes" else "no");
+let main() = printLine(if 1 == 1 then "yes" else "no");
 ```
 
 Since if is itself an expression, it is natural that else can be followed by another if expression, so that we can achieve a continuous conditional judgment.
 
 ```
 let x = 0;
-let y = if (x > 0) "bigger" else if (x == 0) "equal" else "less";
+let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less";
 ```
 
 When we don't need to deal with else branching, we can omit the else branching, which takes the value of Void.
 
 ```
-let main() = if (1 == 1) printLine("yes");
+let main() = if 1 == 1 then printLine("yes");
 ```
 
 ### Short circuit logic operation
@@ -330,7 +330,7 @@ The short-circuit logic and is represented by `and`, and when the condition on t
 
 ```
 let main() = {
-    if (false and f()) { ## will not execute f()
+    if false and f() then { ## will not execute f()
         ...
     }
 }
@@ -340,7 +340,7 @@ The short-circuit logic or is represented by `or`, and when the condition on the
 
 ```
 let main() = {
-    if (true or f()) { ## will not execute f()
+    if true or f() then { ## will not execute f()
         ...
     }
 }
@@ -355,7 +355,7 @@ We might write it this way without an initialization statement to achieve the ef
 ```
 {
     let val = getValue();
-    if(condition(val)) {
+    if condition(val) then {
         ## some codes if is true
     } else {
         ## some codes if is false
@@ -368,7 +368,7 @@ As you can see, val belongs in a separate block expression, which does not expos
 If we were using an initialization statement, we could write it like this:
 
 ```
-if(let val = getValue(); condition(val)) {
+if let val = getValue(); condition(val) then {
     ## some codes if is true
 } else {
     ## some codes if is false
@@ -390,7 +390,7 @@ E.g:
 ```
 let main() = {
     let mut i = 0;
-    while (i <= 10) {
+    while i <= 10 then {
         printLine(i);
         i = i + 1
     }
@@ -404,8 +404,8 @@ The break statement can be used when we need to actively exit the loop in the mi
 ```
 let main() = {
     let mut i = 0;
-    while (true) {
-        if (i > 20) break;
+    while true {
+        if i > 20 then break;
         printLine(i);
         i = i + 1
     }
@@ -419,8 +419,8 @@ If we need to skip some rounds in the loop, we can use the continue statement. T
 ```
 let main() = {
     let mut i = 0;
-    while (i <= 10) {
-        if (i % 2 == 0) continue;
+    while i <= 10 then {
+        if i % 2 == 0 then continue;
         printLine(i);
         i = i + 1
     }
@@ -774,9 +774,7 @@ With the `while` syntax, we can iterate over the elements of an array, as in the
 ```
 let main() = {
     let x = [1, 2, 3, 4, 5];
-    let mut n = 0;
-    let size = x.size();
-    while (n < size) {
+    while let mut n = 0; n < x.size() then {
         printLine(x[n]);
         n = n + 1;
     }

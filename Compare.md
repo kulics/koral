@@ -201,7 +201,7 @@ let count = i + Int(f)
 ### Koral
 
 ```
-for (index <- 1..=5) 
+for index <- 1..<=5 then
     printLine("\{index} times 5 is \{index * 5}");
 ```
 
@@ -797,13 +797,11 @@ test.simpleDescription()
 let mut movieCount = 0;
 let mut songCount = 0;
 
-for (item <- library) {
-    if (Movie <- item) {
+for item <- library then
+    if Movie <- item then 
         movieCount += 1
-    } else if (Song <- item) {
-        songCount += 1
-    }
-}
+    else if Song <- item then
+        songCount += 1;
 ```
 
 ### C#
@@ -876,7 +874,7 @@ for item in library {
 
 ```
 let nb = 42;
-switch (nb) {
+nb switch {
     >= 0 & <= 7 | 8 | 9 ->
         print("single digit");
     10 ->
@@ -945,8 +943,8 @@ switch nb {
 ### Koral
 
 ```
-for (current <- someObjects)
-    if (movie Movie <- current)
+for current <- someObjects then
+    if movie Movie <- current then
         printLine("Movie: '\{movie.name}', dir. \{movie.director}");
 ```
 
