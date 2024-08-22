@@ -240,7 +240,7 @@ for index in 1...5 {
 ### Koral
 
 ```
-let shoppingList = arrayOf("catfish", "water", "tulips", "blue paint");
+let shoppingList = Array.of("catfish", "water", "tulips", "blue paint");
 shoppingList[1] = "bottle of water";
 ```
 
@@ -277,7 +277,7 @@ shoppingList[1] = "bottle of water"
 ### Koral
 
 ```
-let occupations = mapOf(
+let occupations = Map.of(
     ("Malcolm", "Captain"),
     ("Kaylee", "Mechanic"),
 );
@@ -329,8 +329,8 @@ occupations["Jayne"] = "Public Relations"
 ### Koral
 
 ```
-let emptyArray = [String]arrayOf();
-let emptyDictionary = [String, Float32]mapOf();
+let emptyArray = Array(String).of();
+let emptyMap = Map(String, Float32).of();
 ```
 
 ### C#
@@ -454,7 +454,7 @@ func getGasPrices() -> (Double, Double, Double) {
 ### Koral
 
 ```
-let makeIncrementer() type(n Int) Int = {
+let makeIncrementer() type(Int) Int = {
     let addOne(number Int) = 1 + number;
     addOne
 }

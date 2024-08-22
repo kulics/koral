@@ -692,7 +692,7 @@ let f() Pair = Pair(1, 2);
 泛型数据类型与数据类型的区别在于它需要额外声明类型参数，这些类型参数表示将来会由实际传入的类型替换，从而让成员变量或成员函数的类型可以在后续实例化的时候替换为具体的类型。
 
 ```
-type [T1, T2]Pair(left T1, right T2);
+type Pair(T1, T2)(left T1, right T2);
 ```
 
 如上代码所示，我们在 `Pair` 的左边用另一种参数的形式声明了 T1 和 T2 两个类型参数。
@@ -705,11 +705,11 @@ type [T1, T2]Pair(left T1, right T2);
 
 ```
 let main() = {
-    lef a1 [Int, Int]Pair = [Int, Int]Pair(1, 2);
+    lef a1 Pair(Int, Int) = Pair(Int, Int)(1, 2);
     ## a1.left Int, a1.right Int
-    lef a2 [Bool, Bool]Pair = [Bool, Bool]Pair(true, false);
+    lef a2 Pair(Bool, Bool) = Pair(Bool, Bool)(true, false);
     ## a2.left Bool, a2.right Bool
-    lef a3 [Int, String]Pair = [Int, String]Pair(1, "a");
+    lef a3 Pair(Int, String) = Pair(Int, String)(1, "a");
     ## a3.left Int, a3.right String
 }
 ```
@@ -737,20 +737,20 @@ let main() = {
 
 数组是一种泛型的数据类型，它可以存储一组相同类型的数据元素，每个元素都有一个索引来表示它在数组中的位置。数组的长度是固定的，它可以通过索引快速访问任意元素。
 
-我们使用 `[T]Array` 来表示数组类型，其中 `T` 可以是任意类型。
+我们使用 `Array(T)` 来表示数组类型，其中 `T` 可以是任意类型。
 
 数组类型可以使用数组字面量(`[elem1, elem2, …]`)的方式来初始化，其中 `elem1` 和 `elem2` 表示对应位置的元素，不同的元素之间使用 (`,`) 分割，我们可以传入任何表达式，但所有的元素必须是相同的类型。 
 
 ```
-let x [Int]Array = [1, 2, 3, 4, 5];
+let x Array(Int) = [1, 2, 3, 4, 5];
 ```
 
-如上面的代码所示，我们使用数组字面量语法创建了一个 `[Int]Array`，它的元素就像字面量表示的那样是 `1, 2, 3, 4, 5`。
+如上面的代码所示，我们使用数组字面量语法创建了一个 `Array(Int)`，它的元素就像字面量表示的那样是 `1, 2, 3, 4, 5`。
 
 除了这种列举元素的字面量以外，我们也可以用另一种创建一个指定大小和默认值的数组字面量(`[default; size]`)来构造，`default` 是默认值，`size` 是元素的个数。
 
 ```
-let y [Int]Array = [0; 3];
+let y Array(Int) = [0; 3];
 ## y == [0, 0, 0]
 ```
 
@@ -784,7 +784,7 @@ let main() = {
 
 ```
 let main() = {
-    let x [Int]Array = [1, 2, 3, 4, 5];
+    let x = [1, 2, 3, 4, 5];
     printLine(x[0]); ## 1
     x[0] = 5;
     printLine(x[0]); ## 5
@@ -802,7 +802,7 @@ let main() = {
 泛型函数和泛型类型很类似，都是在标识符的前面使用相同的语法定义泛型参数。
 
 ```
-let [T]mergeArray(a [T]Array, b [T]Array) = {
+let mergeArray(T)(a Array(T), b Array(T)) = {
     ...
 }
 ```
@@ -815,7 +815,7 @@ let [T]mergeArray(a [T]Array, b [T]Array) = {
 let main() = {
     let x = [1, 2, 3];
     let y = [4, 5, 6];
-    let z = [Int]mergeArray(x, y);
+    let z = mergeArray(Int)(x, y);
     ## z == [1, 2, 3, 4, 5, 6]
 }
 ```
