@@ -693,7 +693,7 @@ We need a Pair that can represent any type, and we can define it with the help o
 A generic data type differs from a datatype in that it requires additional declarations of type parameters that indicate future substitution by the actual type passed in, thus allowing the type of a member variable or member function to be substituted for the specific type when it is subsequently instantiated.
 
 ```
-type [T1, T2]Pair(left T1, right T2);
+type Pair(T1, T2)(left T1, right T2);
 ```
 
 As shown in the code above, we have declared two type parameters, T1 and T2, on the left side of `Pair` in the form of another parameter.
@@ -706,11 +706,11 @@ Next we look at how to construct generic data types.
 
 ```
 let main() = {
-    lef a1 [Int, Int]Pair = [Int, Int]Pair(1, 2);
+    lef a1 Pair(Int, Int) = Pair(Int, Int)(1, 2);
     ## a1.left Int, a1.right Int
-    lef a2 [Bool, Bool]Pair = [Bool, Bool]Pair(true, false);
+    lef a2 Pair(Bool, Bool) = Pair(Bool, Bool)(true, false);
     ## a2.left Bool, a2.right Bool
-    lef a3 [Int, String]Pair = [Int, String]Pair(1, "a");
+    lef a3 Pair(Int, String) = Pair(Int, String)(1, "a");
     ## a3.left Int, a3.right String
 }
 ```
@@ -738,20 +738,20 @@ let main() = {
 
 An array is a generic data type that stores a set of data elements of the same type, each of which has an index to indicate its position in the array. The length of an array is fixed, and it can be accessed quickly by indexing any element.
 
-We use `[T]Array` to denote the array type, where `T` can be of any type.
+We use `Array(T)` to denote the array type, where `T` can be of any type.
 
 The array type can be initialized using the array literal (`[elem1, elem2, ...]`), where `elem1` and `elem2` denote the elements at the corresponding positions, with different elements separated by (`,`), and we can pass in any expression, but all elements must be of the same type. 
 
 ```
-let x [Int]Array = [1, 2, 3, 4, 5];
+let x Array(Int) = [1, 2, 3, 4, 5];
 ```
 
-As shown in the code above, we use the array literal syntax to create a `[Int]Array` whose elements are `1, 2, 3, 4, 5` just as the literal represents.
+As shown in the code above, we use the array literal syntax to create a `Array(Int)` whose elements are `1, 2, 3, 4, 5` just as the literal represents.
 
 In addition to this type of literal that lists the elements, we can also construct another type of literal that creates an array with a specified size and default value (`[default; size]`), where `default` is the default value and `size` is the number of elements.
 
 ```
-let y [Int]Array = [0; 3];
+let y Array(Int) = [0; 3];
 ## y == [0, 0, 0]
 ```
 
@@ -785,7 +785,7 @@ Arrays are also a mutable type. Modifying the elements of an array is similar to
 
 ```
 let main() = {
-    let x [Int]Array = [1, 2, 3, 4, 5];
+    let x = [1, 2, 3, 4, 5];
     printLine(x[0]); ## 1
     x[0] = 5;
     printLine(x[0]); ## 5
@@ -803,7 +803,7 @@ Yes, we need functions with generic types to implement it.
 Generic functions are very similar to generic types in that they use the same syntax to define generic parameters in front of the identifier.
 
 ```
-let [T]mergeArray(a [T]Array, b [T]Array) = {
+let mergeArray(T)(a Array(T), b Array(T)) = {
     ...
 }
 ```
@@ -816,7 +816,7 @@ Next, let's see how to call the generic function.
 let main() = {
     let x = [1, 2, 3];
     let y = [4, 5, 6];
-    let z = [Int]mergeArray(x, y);
+    let z = mergeArray(Int)(x, y);
     ## z == [1, 2, 3, 4, 5, 6]
 }
 ```
