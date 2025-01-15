@@ -86,12 +86,12 @@ Comments are only used to provide additional information to the user and are not
 
 E.g:
 ```
-## Line Comment
+// Line Comment
 
-#*
+/*
     Block
     Comment
-*#
+*/
 ```
 
 ### Variable
@@ -107,8 +107,8 @@ Koral ensures type safety through static typing, and variable bindings can be ex
 The sample code is as follows.
 
 ```
-let a Int = 5; ## Explicitly labeled type
-let b = 123; ## Auto-inferred type
+let a Int = 5; // Explicitly labeled type
+let b = 123; // Auto-inferred type
 ```
 
 Once an readonly variable has been declared, its type and value will not be changed in the current scope.
@@ -117,7 +117,7 @@ If we try to assign a value to an readonly variable, the compiler will report an
 
 ```
 let a = 5;
-a = 6; ## Error
+a = 6; // Error
 ```
 
 #### Mutable Variable
@@ -129,8 +129,8 @@ Mutable variables are declared in Koral with the let mut keyword, again followin
 The sample code is as follows.
 
 ```
-let mut a Int = 5; ## Explicitly labeled type
-let mut b = 123; ## Auto-inferred type
+let mut a Int = 5; // Explicitly labeled type
+let mut b = 123; // Auto-inferred type
 ```
 
 ### Assignment
@@ -216,7 +216,7 @@ E.g:
 
 ```
 let s1 String = "Hello, world!";
-let s2 String = 'Hello, world!'; ## same as s1
+let s2 String = 'Hello, world!'; // same as s1
 ```
 
 It should be noted that a string is a type consisting of multiple characters, so in fact the string is a fixed-order list, and there is a correspondence between the two. Many times we can process strings as if they were lists.
@@ -249,11 +249,11 @@ E.g:
 ```
 let a = 4;
 let b = 2;
-printLine( a + b );    ## + plus
-printLine( a - b );    ## - minus
-printLine( a * b );    ## * multiply
-printLine( a / b );    ## / divide
-printLine( a % b );    ## % residual, meaning the remainder remaining after the divisibility
+printLine( a + b );    // + plus
+printLine( a - b );    // - minus
+printLine( a * b );    // * multiply
+printLine( a / b );    // / divide
+printLine( a % b );    // % residual, meaning the remainder remaining after the divisibility
 ```
 
 ### Comparison Operators
@@ -265,12 +265,12 @@ E.g:
 ```
 let a = 4;
 let b = 2;
-printLine( a == b );   ## == equal to
-printLine( a != b );   ## != not equal to
-printLine( a > b );    ## > Greater than
-printLine( a >= b );   ## >= Greater than or equal to
-printLine( a < b );    ## < less than
-printLine( a <= b );   ## <= less than or equal to
+printLine( a == b );   // == equal to
+printLine( a != b );   // != not equal to
+printLine( a > b );    // > Greater than
+printLine( a >= b );   // >= Greater than or equal to
+printLine( a < b );    // < less than
+printLine( a <= b );   // <= less than or equal to
 ```
 
 ### Logical Operators
@@ -282,9 +282,9 @@ E.g:
 ```
 let a = true;
 let b = false;
-printLine( a & b );     ## AND, both are true at the same time
-printLine( a | b );     ## OR, one of them is true
-printLine( !a );        ## NOT, boolean inversion
+printLine( a & b );     // AND, both are true at the same time
+printLine( a | b );     // OR, one of them is true
+printLine( !a );        // NOT, boolean inversion
 ```
 
 ## Select Structure
@@ -330,7 +330,7 @@ The short-circuit logic and is represented by `and`, and when the condition on t
 
 ```
 let main() = {
-    if false and f() then { ## will not execute f()
+    if false and f() then { // will not execute f()
         ...
     }
 }
@@ -340,7 +340,7 @@ The short-circuit logic or is represented by `or`, and when the condition on the
 
 ```
 let main() = {
-    if true or f() then { ## will not execute f()
+    if true or f() then { // will not execute f()
         ...
     }
 }
@@ -356,9 +356,9 @@ We might write it this way without an initialization statement to achieve the ef
 {
     let val = getValue();
     if condition(val) then {
-        ## some codes if is true
+        // some codes if is true
     } else {
-        ## some codes if is false
+        // some codes if is false
     }
 }
 ```
@@ -369,9 +369,9 @@ If we were using an initialization statement, we could write it like this:
 
 ```
 if let val = getValue(); condition(val) then {
-    ## some codes if is true
+    // some codes if is true
 } else {
-    ## some codes if is false
+    // some codes if is false
 }
 ```
 
@@ -472,37 +472,37 @@ It is very simple, we only need to use `parameterName type` to declare parameter
 
 ```
 let sqrt(x Int) = x * x;
-let a = sqrt(x); ## a == 4
+let a = sqrt(x); // a == 4
 ```
 
 sqrt takes an argument of type Int, x, and returns the square of it. When calling sqrt we need to give the expression of the corresponding Int type to complete the call.
 
 ```
 let add(x Int, y Int) = x + y;
-let a = add(1, 2); ## a == 3
+let a = add(1, 2); // a == 3
 ```
 
 ### Function Type
 
 In Koral, a function is a type just like Int, Float, etc. Similarly, a function can be used as an expression.
 
-The type of a function is declared using the `type(x T) R` syntax, and the function type requires the same declaration of the arguments and return type.
+The type of a function is declared using the `(T1, T2, T3,... R)Func` syntax, and the function type requires the same declaration of the arguments and return type. Among them, the part of T1, T2, T3,... is the sequence of parameter types. When there are no parameters, it is empty. Otherwise, the parameter types are arranged in sequence until all parameter types are listed. R is the return type.
 
 Once a function is defined, the function name can be used as an expression and can be assigned to other variables or used as parameters and return values.
 
 Variables of function types are called with the same `()` syntax as functions.
 
 ```
-let sqrt(x Int) = x * x; ## type(x Int) Int
-let f type(x Int) Int = sqrt;
-let a = f(2); ## a == 4
+let sqrt(x Int) = x * x; // (Int, Int)Func
+let f (Int, Int)Func = sqrt;
+let a = f(2); // a == 4
 ```
 
-For example, with this feature, we can also define parameters or return values for function types.
+With this feature, we can also define parameters or return values for function types.
 
 ```
 let hello() = printLine("Hello, world!");
-let run(f type() Void) = f();
+let run(f (Void)Func) = f();
 let toRun() = run;
 
 let main() = toRun()(hello);
@@ -521,15 +521,15 @@ Lambda expressions are very similar to function definitions, except that the `=`
 As shown in the code below, the value of f2 is a lambda, which is the same type as f1 and has a very similar syntax, with lambda's also declaring parameters and return types, and requiring an expression as the return value.
 
 ```
-let f1(x Int) Int = x + 1; ## type(x Int) Int
-let f2 = (x Int) Int -> x + 1; ## type(x Int) Int
-let a = f1(1) + f2(1); ## a == 4
+let f1(x Int) Int = x + 1; // (Int, Int)Func
+let f2 = (x Int) Int -> x + 1; // (Int, Int)Func
+let a = f1(1) + f2(1); // a == 4
 ```
 
 When the type of the lambda is known in our context, we can omit its argument type and return type.
 
 ```
-let f type(x Int) Int = (x) -> x + 1;
+let f (Int, Int)Func = (x) -> x + 1;
 ```
 
 ## Data Types
@@ -593,7 +593,7 @@ type Point(x Int, y Int);
 
 let main() = {
     let a = Point(64, 128);
-    a.x = 2 ## error
+    a.x = 2 // error
 }
 ```
 
@@ -605,9 +605,9 @@ The mutability of member variables follows the type and has nothing to do with w
 type mut Point(x Int, y Int);
 
 let main() = {
-    let a Point = Point(64, 128); ## `a` no need to declare as mut
-    a.x = 2; ## ok
-    a.y = 0 ## ok
+    let a Point = Point(64, 128); // `a` no need to declare as mut
+    a.x = 2; // ok
+    a.y = 0 // ok
 }
 ```
 
@@ -618,12 +618,12 @@ type mut Point(x Int, y Int);
 
 let main() = {
     let a Point = Point(64, 128); 
-    let b Point = a; ## ok
-    printLine(a.x); ## 64
-    printLine(b.x); ## 64
+    let b Point = a; // ok
+    printLine(a.x); // 64
+    printLine(b.x); // 64
     a.x = 128;
-    printLine(a.x); ## 128
-    printLine(b.x); ## 128
+    printLine(a.x); // 128
+    printLine(b.x); // 128
 }
 ```
 
@@ -667,8 +667,8 @@ type Point(x Int, y Int) {
 
 let main() = {
     let a = Point.default();
-    printLine(a.x); ## 0
-    printLine(a.y); ## 0
+    printLine(a.x); // 0
+    printLine(a.y); // 0
 }
 ```
 
@@ -693,7 +693,7 @@ We need a Pair that can represent any type, and we can define it with the help o
 A generic data type differs from a datatype in that it requires additional declarations of type parameters that indicate future substitution by the actual type passed in, thus allowing the type of a member variable or member function to be substituted for the specific type when it is subsequently instantiated.
 
 ```
-type Pair(T1, T2)(left T1, right T2);
+type (T1, T2)Pair(left T1, right T2);
 ```
 
 As shown in the code above, we have declared two type parameters, T1 and T2, on the left side of `Pair` in the form of another parameter.
@@ -706,12 +706,12 @@ Next we look at how to construct generic data types.
 
 ```
 let main() = {
-    lef a1 Pair(Int, Int) = Pair(Int, Int)(1, 2);
-    ## a1.left Int, a1.right Int
-    lef a2 Pair(Bool, Bool) = Pair(Bool, Bool)(true, false);
-    ## a2.left Bool, a2.right Bool
-    lef a3 Pair(Int, String) = Pair(Int, String)(1, "a");
-    ## a3.left Int, a3.right String
+    lef a1 (Int, Int)Pair = (Int, Int)Pair(1, 2);
+    // a1.left Int, a1.right Int
+    lef a2 (Bool, Bool)Pair = (Bool, Bool)Pair(true, false);
+    // a2.left Bool, a2.right Bool
+    lef a3 (Int, String)Pair = (Int, String)Pair(1, "a");
+    // a3.left Int, a3.right String
 }
 ```
 
@@ -726,11 +726,11 @@ Like the following code, which is equivalent to the above code.
 ```
 let main() = {
     lef a1 = Pair(1, 2);
-    ## a1 Pair(Int, Int)
+    // a1 (Int, Int)Pair
     lef a2 = Pair(true, false);
-    ## a2 Pair(Bool, Bool)
+    // a2 (Bool, Bool)Pair
     lef a3 = Pair(1, "a");
-    ## a3 Pair(Int, String)
+    // a3 (Int, String)Pair
 }
 ```
 
@@ -738,35 +738,35 @@ let main() = {
 
 An array is a generic data type that stores a set of data elements of the same type, each of which has an index to indicate its position in the array. The length of an array is fixed, and it can be accessed quickly by indexing any element.
 
-We use `Array(T)` to denote the array type, where `T` can be of any type.
+We use `(T)Array` to denote the array type, where `T` can be of any type.
 
 The array type can be initialized using the array literal (`[elem1, elem2, ...]`), where `elem1` and `elem2` denote the elements at the corresponding positions, with different elements separated by (`,`), and we can pass in any expression, but all elements must be of the same type. 
 
 ```
-let x Array(Int) = [1, 2, 3, 4, 5];
+let x (Int)Array = [1, 2, 3, 4, 5];
 ```
 
-As shown in the code above, we use the array literal syntax to create a `Array(Int)` whose elements are `1, 2, 3, 4, 5` just as the literal represents.
+As shown in the code above, we use the array literal syntax to create a `(Int)Array` whose elements are `1, 2, 3, 4, 5` just as the literal represents.
 
 In addition to this type of literal that lists the elements, we can also construct another type of literal that creates an array with a specified size and default value (`[default; size]`), where `default` is the default value and `size` is the number of elements.
 
 ```
-let y Array(Int) = [0; 3];
-## y == [0, 0, 0]
+let y (Int)Array = [0; 3];
+// y == [0, 0, 0]
 ```
 
 We can use the `size` member function of an array to get the number of elements in it.
 
 ```
-printLine(x.size()); ## 5
+printLine(x.size()); // 5
 ```
 
 We can use the subscript syntax `[index]` to access the elements at the specified index, `index` can only be a value of type `Int`. The subscript starts at 0, `[0]` corresponds to the first element, and so on for subsequent elements.
 
 ```
-printLine(x[0]); ## 1
-printLine(x[2]); ## 3
-printLine(x[4]); ## 5
+printLine(x[0]); // 1
+printLine(x[2]); // 3
+printLine(x[4]); // 5
 ```
 
 With the `while` syntax, we can iterate over the elements of an array, as in the following code.
@@ -786,9 +786,9 @@ Arrays are also a mutable type. Modifying the elements of an array is similar to
 ```
 let main() = {
     let x = [1, 2, 3, 4, 5];
-    printLine(x[0]); ## 1
+    printLine(x[0]); // 1
     x[0] = 5;
-    printLine(x[0]); ## 5
+    printLine(x[0]); // 5
 }
 ```
 
@@ -803,7 +803,7 @@ Yes, we need functions with generic types to implement it.
 Generic functions are very similar to generic types in that they use the same syntax to define generic parameters in front of the identifier.
 
 ```
-let mergeArray(T)(a Array(T), b Array(T)) = {
+let (T)mergeArray(a (T)Array, b (T)Array) = {
     ...
 }
 ```
@@ -816,8 +816,8 @@ Next, let's see how to call the generic function.
 let main() = {
     let x = [1, 2, 3];
     let y = [4, 5, 6];
-    let z = mergeArray(Int)(x, y);
-    ## z == [1, 2, 3, 4, 5, 6]
+    let z = (Int)mergeArray(x, y);
+    // z == [1, 2, 3, 4, 5, 6]
 }
 ```
 
