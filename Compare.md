@@ -80,7 +80,7 @@ let myConstant = 42
 ### Koral
 
 ```
-let explicitDouble Float = 70.0;
+let explicitDouble Float64 = 70.0;
 ```
 
 ### C#
@@ -201,7 +201,7 @@ let count = i + Int(f)
 ### Koral
 
 ```
-for index <- 1..<=5 then
+for 1..<=5 as index then
     printLine("\{index} times 5 is \{index * 5}");
 ```
 
@@ -329,8 +329,8 @@ occupations["Jayne"] = "Public Relations"
 ### Koral
 
 ```
-let emptyArray = Array(String).of();
-let emptyMap = Map(String, Float32).of();
+let emptyArray = (String)Array.empty();
+let emptyMap = (String, Float32)Map.empty();
 ```
 
 ### C#
@@ -415,7 +415,7 @@ greet("Bob", "Tuesday")
 ### Koral
 
 ```
-let getGasPrices() type(Float, Float, Float) = (3.59, 3.69, 3.79);
+let getGasPrices() (Float, Float, Float)Tuple = (3.59, 3.69, 3.79);
 ```
 
 ### C#
@@ -454,7 +454,7 @@ func getGasPrices() -> (Double, Double, Double) {
 ### Koral
 
 ```
-let makeIncrementer() type(Int) Int = {
+let makeIncrementer() (Int, Int)Func = {
     let addOne(number Int) = 1 + number;
     addOne
 }
@@ -797,10 +797,10 @@ test.simpleDescription()
 let mut movieCount = 0;
 let mut songCount = 0;
 
-for item <- library then
-    if Movie <- item then 
+for library as item then
+    if item is Movie then 
         movieCount += 1
-    else if Song <- item then
+    else if item is Song then
         songCount += 1;
 ```
 
@@ -874,7 +874,7 @@ for item in library {
 
 ```
 let nb = 42;
-nb switch {
+when nb is {
     >= 0 & <= 7 | 8 | 9 ->
         print("single digit");
     10 ->
@@ -943,8 +943,8 @@ switch nb {
 ### Koral
 
 ```
-for current <- someObjects then
-    if movie Movie <- current then
+for someObjects as current then
+    if current as movie Movie then
         printLine("Movie: '\{movie.name}', dir. \{movie.director}");
 ```
 
