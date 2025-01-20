@@ -944,7 +944,7 @@ switch nb {
 
 ```
 for someObjects as current then
-    if current as movie Movie then
+    if current is movie Movie then
         printLine("Movie: '\{movie.name}', dir. \{movie.director}");
 ```
 
