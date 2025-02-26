@@ -342,16 +342,16 @@ let main() = {
 
 type Foo(value Int);
 
-type TreeNode = Empty() | Node(val Int, left TreeNode, right TreeNode);
+type TreeNode of Empty() | Node(val Int, left TreeNode, right TreeNode);
 
-type Color = Red() | Green() | Blue();
+type Color of Red() | Green() | Blue();
 
-type Color(rgb String) =
+type Color(rgb String) of
     Red("ff0000") |
     Green("00ff00") |
     Blue("0000ff");
 
-type Planet(mass Float, radius Float) =
+type Planet(mass Float, radius Float) of
     Mercury(3.303e+23, 2.4397e6) |
     Venus(4.869e+24, 6.0518e6) |
     Earth(5.976e+24, 6.37814e6) |
@@ -361,9 +361,9 @@ type Planet(mass Float, radius Float) =
     Uranus(8.686e+25, 2.5559e7) |
     Neptune(1.024e+26, 2.4746e7);
 
-type (T Any)Option = Some(value T) | None();
+type (T Any)Option of Some(value T) | None();
 
-type (T Any)Expr =
+type (T Any)Expr of
     IntExpr(value Int) (Int)Expr |
     BoolExpr(value Bool) (Bool)Expr |
     EqualExpr(left (T)Expr, right (T)Expr) (Bool)Expr |
@@ -374,60 +374,66 @@ type Password(hash Hash);
 type Identify = UserName | Password;
 type (T Any)HashKey = (T)Equatable & Hashable;
 
+// escape annotation
+let borrow(a consuming Foo) Foo = ...;
+let view(a consuming Foo) consuming WrapperFoo = ...;
+let new() producing Foo = ...;
+let transfer(a producing) producing WrapperFoo = ...;
+
 given(T ToString) (T)Option {
-    self.toString() String = 
+    consuming self.toString() String = 
         if self is Some(v) 
         then "Some(\{v})" 
         else "None()";
 }
 
 given Foo {
-    self.toString() String = "foo";
+    consuming self.toString() String = "foo";
 }
 given(T Any, R Any) (T, R)Func {
-    self.toAny() Any = self;
+    producing self.toAny() producing Any = self;
 }
 
-type (T Any)LinkedList =
+type (T Any)LinkedList of
     Cons(head T, tail (T)LinkedList) |
     Empty();
 
 given(T Any) (T)LinkedList {
-    new() Self = Empty();
+    new() producing Self = Empty();
 }
 
 type (T Any)List {
-    self.get(index Int) T;
+    consuming self.get(index Int) T;
 
-    self.set(index Int, element T) Void;
+    consuming self.set(index Int, element T) Void;
 }
 
 type mut (T Any)ArrayList(_arr (T)Array, size Int);
 
 given(T Any) (T)ArrayList {
-    new() Self = Self([], 0);
+    new() producing Self = Self([], 0);
 
-    self.get(index Int) T = self._arr.get(index);
+    consuming self.get(index Int) T = self._arr.get(index);
 
-    self.set(index Int, element T) Void = self._arr.set(index, element);
+    consuming self.set(index Int, element T) Void = self._arr.set(index, element);
 
-    self.(R Any)map(f (T, R)Func) (R)ArrayList = (T, R)Map(self, f);
+    producing self.(R Any)map(f (T, R)Func) producing (R)ArrayList = (T, R)Map(self, f);
 }
 
 given (Int)ArrayList {
-    self.sum() Int = self.reduce(0, (l, r) -> l + r);
+    consuming self.sum() Int = self.reduce(0, (l, r) -> l + r);
 }
 
 type ToString {
-    self.toString() String;
+    consuming self.toString() String;
 }
 
 given Int {
-    self.toString() String = cprintf(self);
+    consuming self.toString() String = cprintf(self);
 }
 
 given(T ToString) (T)ArrayList {
-    self.toString() String = join_String(self);
+    consuming self.toString() String = join_String(self);
 }
 
 given Int {
@@ -445,46 +451,57 @@ given(T Any) (T)Array {
 type Any {}
 
 type (T Any)Sequence {
-    self.iterator() (T)Iterator;
+    producing self.iterator() producing (T)Iterator;
 }
 
 type (T Any)Iterator {
-    self.next() (T)Option;
+    consuming self.next() (T)Option;
 }
 
 given(T Any) (T)Iterator {
-    self.(R Any)reduce(r R, f (R, T, R)Func) = {
+    consuming self.(R Any)reduce(r R, f (R, T, R)Func) = {
         while self.next() is Some(v) then r = f(r, v);
         r
     }
 }
 
 type InputStream {
-    self.read(to (Byte)Array) Int;
+    consuming self.read(to consuming (Byte)Array) Int;
 }
 
 type OutputStream {
-    self.write(from (Byte)Array) Int;
-    self.flush() Void;
+    consuming self.write(from consuming (Byte)Array) Int;
+    consuming self.flush() Void;
 }
 
-type (T Any)ArrayView(_source (T)Array, _start Int, _len Int) {
-    create(size Int, item T) = (T)ArrayView(Array.new(size, item), 0, size);
+type (T Any)Array(_source (T)Ptr, _len Int) {
+    create(size Int, item T) producing Self = Array((T)malloc(size, default: item), _len);
 
-    self.size() = self._len;
+    consuming self.size() Int = self._len;
 
-    self.get(index Int) = self._source[index + _start];
+    consuming self.get(index Int) T = self._source[index];
     
-    self.set(index Int, value T) = self._source[index + _start] = value;
+    consuming self.set(index Int, value T) Void = self._source[index] = value;
     
-    self.slice(start Int, len Int) (T)ArrayView = 
+    consuming self.slice(start Int, len Int) consuming (T)ArrayView = 
+        (T)ArrayView(self._source, start, len);
+}
+
+type (T Any)ArrayView(_source (T)Ptr, _start Int, _len Int) {
+    consuming self.size() Int = self._len;
+
+    consuming self.get(index Int) T = self._source[index + _start];
+    
+    consuming self.set(index Int, value T) Void = self._source[index + _start] = value;
+    
+    consuming self.slice(start Int, len Int) consuming (T)ArrayView = 
         (T)ArrayView(self._source, start, len);
 }
 
 type mut (T Any)ArrayIterator(_source (T)Array, index Int) {
-    of(source (T)Array) = ArrayIterator(source, -1);
+    of(source producing (T)Array) producing Self = ArrayIterator(source, -1);
     
-    self.next() (T)Option = 
+    consuming self.next() (T)Option = 
         if self.index < self._source.size() then {
             self.index += 1;
             Some(self._source[self.index])
@@ -494,21 +511,21 @@ type mut (T Any)ArrayIterator(_source (T)Array, index Int) {
 }
 
 type String(_data (Rune)Array) {
-    of(data (Rune)Array) String = String(data.clone());
+    of(data (Rune)Array) producing Self = String(data.clone());
 
-    self.toString() String = String(self._data.clone());
+    consuming self.toString() String = String(self._data.clone());
 
-    self.clone() String = String(self._data.clone());
+    consuming self.clone() String = String(self._data.clone());
 
-    self.iterator() StringIterator = StringIterator.of(self);
+    producing self.iterator() producing StringIterator = StringIterator.of(self);
 }
 
 type mut StringIterator(_source String, index Int);
 
 given StringIterator {
-    of(source String) = StringIterator(source, -1);
+    of(source producing String) producing Self = StringIterator(source, -1);
 
-    self.next() (Rune)Option = 
+    consuming self.next() (Rune)Option = 
         if self.index < self._source._data.size() then {
             self.index += 1;
             Some(self._source[self.index])
@@ -522,7 +539,7 @@ type mut (T Any)Node(value T, next ((T)Node)Option);
 type mut (T Any)LinkedList(head ((T)Node)Option, size Int);
 
 given(T Any) (T)LinkedList {
-    self.prepend(v T) Void = {
+    consuming self.prepend(v T) Void = {
         let node = Node(v, None());
         if self.head is None then {
             self.head = node;
@@ -537,7 +554,7 @@ given(T Any) (T)LinkedList {
 /*
 不可变可以自动优化成值类型
 可变类型使用ARC
+用显式逃逸分析标记参数和返回类型优化引用计数
 有静态函数
 有受限的继承，在当前编译单元内
-
 */
