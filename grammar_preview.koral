@@ -381,7 +381,7 @@ let new() out Foo = ...;
 let transfer(a out Foo) out WrapperFoo = ...;
 
 given(T ToString) (T)Option {
-    in self.toString() String = 
+    self.toString() String = 
         if self is Some(v) 
         then "Some(\{v})" 
         else "None()";
@@ -450,21 +450,6 @@ given(T Any) (T)Array {
 
 type Any {}
 
-type (T Any)Sequence {
-    self.iterator() out (T)Iterator;
-}
-
-type (T Any)Iterator {
-    in self.next() (T)Option;
-}
-
-given(T Any) (T)Iterator {
-    in self.(R Any)reduce(r R, f (R, T, R)Func) = {
-        while self.next() is Some(v) then r = f(r, v);
-        r
-    }
-}
-
 type InputStream {
     in self.read(to in (Byte)Array) Int;
 }
@@ -472,6 +457,14 @@ type InputStream {
 type OutputStream {
     in self.write(from in (Byte)Array) Int;
     in self.flush() Void;
+}
+
+type (T Any)Sequence {
+    in self.iterator() in (T)Iterator;
+}
+
+type (T Any)Iterator {
+    in self.next() (T)Option;
 }
 
 type (T Any)Array(_source (T)Ptr, _len Int) {
@@ -486,7 +479,7 @@ type (T Any)Array(_source (T)Ptr, _len Int) {
     in self.slice(start Int, len Int) in (T)ArrayView = 
         (T)ArrayView(self._source, start, len);
 
-    self.iterator() out (T)ArrayIterator =
+    in self.iterator() in (T)ArrayIterator =
         (T)ArrayIterator(_source, 0, self._len);
 }
 
@@ -500,7 +493,7 @@ type (T Any)ArrayView(_source (T)Ptr, _start Int, _len Int) {
     in self.slice(start Int, len Int) in (T)ArrayView = 
         (T)ArrayView(self._source, start, len);
 
-    self.iterator() out (T)ArrayIterator =
+    in self.iterator() in (T)ArrayIterator =
         (T)ArrayIterator(_source, self._start, self._len);
 }
 
@@ -514,6 +507,37 @@ type mut (T Any)ArrayIterator(_source (T)Ptr, _index Int, _len Int) {
         }
 }
 
+given(T Any) (T)Sequence {
+    in self.(R Any)reduce(r R, f (R, T, R)Func) = {
+        for self as v then r = f(r, v);
+        r
+    }
+    out self.filter(f (T, Bool)Func) out (T)FilterSequence = FilterSequence(self, f);
+    out self.(R Any)map(f (T, R)Func) out (T, R)MapSequence = MapSequence(self, f);
+}
+
+type (T Any)FilterSequence(seq (T)Sequence, filter (T, Bool)Func) {
+    in self.iterator() in (T)FilterIterator = FilterIterator(self.seq.iterator(), f);
+}
+
+type (T Any)FilterIterator(iter (T)Iterator, filter (T, Bool)Func) {
+    in self.next() (T)Option = {
+        while self.iter.next() is Some(v) then {
+            if filter(v) then return Some(v) else continue;
+        }
+        return None();
+    }
+}
+
+type (T Any, R Any)MapSequence(seq (T)Sequence, mapper (T, R)Func) {
+    in self.iterator() in (T)MapIterator = MapIterator(self.seq.iterator(), mapper);
+}
+
+type (T Any, R Any)MapIterator(iter (T)Iterator, mapper (T, R)Func) {
+    in self.next() (R)Option = 
+        if self.iter.next() is Some(v) then Some(mapper(v)) else None();
+}
+
 type String(_data (Rune)Array) {
     of(data (Rune)Array) out Self = String(data.clone());
 
@@ -521,7 +545,7 @@ type String(_data (Rune)Array) {
 
     in self.clone() String = String(self._data.clone());
 
-    self.iterator() out StringIterator = StringIterator.of(self);
+    in self.iterator() in StringIterator = StringIterator.of(self);
 }
 
 type mut StringIterator(_source String, index Int);
