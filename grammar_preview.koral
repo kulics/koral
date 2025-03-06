@@ -374,66 +374,10 @@ type Password(hash Hash);
 type Identify = UserName | Password;
 type (T Any)HashKey = (T)Equatable & Hashable;
 
-// escape annotation
-let borrow(a in Foo) Foo = ...;
-let view(a in Foo) in WrapperFoo = ...;
-let new() out Foo = ...;
-let transfer(a out Foo) out WrapperFoo = ...;
+type Any {}
 
-given(T ToString) (T)Option {
-    self.toString() String = 
-        if self is Some(v) 
-        then "Some(\{v})" 
-        else "None()";
-}
-
-given Foo {
-    self.toString() String = "foo";
-}
 given(T Any, R Any) (T, R)Func {
     self.toAny() Any = self;
-}
-
-type (T Any)LinkedList of
-    Cons(head T, tail (T)LinkedList) |
-    Empty();
-
-given(T Any) (T)LinkedList {
-    new() out Self = Empty();
-}
-
-type (T Any)List {
-    in self.get(index Int) T;
-
-    in self.set(index Int, element T) Void;
-}
-
-type mut (T Any)ArrayList(_arr (T)Array, size Int);
-
-given(T Any) (T)ArrayList {
-    new() out Self = Self([], 0);
-
-    in self.get(index Int) T = self._arr.get(index);
-
-    in self.set(index Int, element T) Void = self._arr.set(index, element);
-
-    out self.(R Any)map(f (T, R)Func) out (R)ArrayList = (T, R)Map(self, f);
-}
-
-given (Int)ArrayList {
-    in self.sum() Int = self.reduce(0, (l, r) -> l + r);
-}
-
-type ToString {
-    self.toString() String;
-}
-
-given Int {
-    self.toString() String = cprintf(self);
-}
-
-given(T ToString) (T)ArrayList {
-    self.toString() String = join_String(self);
 }
 
 given Int {
@@ -448,26 +392,82 @@ given(T Any) (T)Array {
     default() Self = (T)arrayOf();
 }
 
-type Any {}
+// escape annotation
+let borrow(a in Foo) Foo = ...;
+let view(a in Foo) inout WrapperFoo = ...;
+let new() out Foo = ...;
+let transfer(a inout Foo) out WrapperFoo = ...;
+
+type ToString {
+    in self.toString() String;
+}
+
+given Int {
+    in self.toString() String = cprintf(self);
+}
+
+given(T ToString) (T)ArrayList {
+    in self.toString() String = join_String(self);
+}
+
+given(T ToString) (T)Option {
+    in self.toString() String = 
+        if self is Some(v) 
+        then "Some(\{v})" 
+        else "None()";
+}
+
+given Foo {
+    in self.toString() String = "foo";
+}
+
+type (T Any)LinkedList of
+    Cons(head T, tail (T)LinkedList) |
+    Empty();
+
+type (T Any)List {
+    in self.get(index Int) T;
+    in self.set(index Int, element T) Void;
+}
+
+type mut (T Any)ArrayList(_arr (T)Array, size Int);
+
+given(T Any) (T)ArrayList {
+    new() out Self = Self([], 0);
+
+    in self.get(index Int) T = self._arr.get(index);
+    in self.set(index Int, element T) Void = self._arr.set(index, element);
+    in self.add(element T) Void = ...;
+
+    in self.(R Any)map(f (T, R)Func) out (R)ArrayList = {
+        let newList = Self.new();
+        for self as item then newList.add(map(item));
+        newList
+    }
+}
+
+given (Int)ArrayList {
+    in self.sum() Int = self.reduce(0, (l, r) -> l + r);
+}
 
 type InputStream {
-    in self.read(to in (Byte)Array) Int;
+    in self.read(to in (Byte)ArrayView) Int;
 }
 
 type OutputStream {
-    in self.write(from in (Byte)Array) Int;
+    in self.write(from in (Byte)ArrayView) Int;
     in self.flush() Void;
 }
 
 type (T Any)Sequence {
-    in self.iterator() in (T)Iterator;
+    in self.iterator() inout (T)Iterator;
 }
 
 type (T Any)Iterator {
     in self.next() (T)Option;
 }
 
-type (T Any)Array(_source (T)Ptr, _len Int) {
+type mut (T Any)Array(_source (T)Ptr, _len Int) {
     create(size Int, item T) out Self = Array((T)malloc(size, default: item), _len);
 
     in self.size() Int = self._len;
@@ -476,28 +476,28 @@ type (T Any)Array(_source (T)Ptr, _len Int) {
     
     in self.set(index Int, value T) Void = self._source[index] = value;
     
-    in self.slice(start Int, len Int) in (T)ArrayView = 
-        (T)ArrayView(self._source, start, len);
+    in self.slice(start Int, len Int) inout (T)ArrayView = 
+        (T)ArrayView(self._source + start, len);
 
-    in self.iterator() in (T)ArrayIterator =
+    in self.iterator() inout (T)ArrayIterator =
         (T)ArrayIterator(_source, 0, self._len);
 }
 
-type (T Any)ArrayView(_source (T)Ptr, _start Int, _len Int) {
+type inout (T Any)ArrayView(_source in (T)Ptr, _len Int) {
     in self.size() Int = self._len;
 
-    in self.get(index Int) T = self._source[index + _start];
+    in self.get(index Int) T = self._source[index];
     
-    in self.set(index Int, value T) Void = self._source[index + _start] = value;
+    in self.set(index Int, value T) Void = self._source[index] = value;
     
-    in self.slice(start Int, len Int) in (T)ArrayView = 
-        (T)ArrayView(self._source, start, len);
+    in self.slice(start Int, len Int) inout (T)ArrayView = 
+        (T)ArrayView(self._source + start, len);
 
-    in self.iterator() in (T)ArrayIterator =
-        (T)ArrayIterator(_source, self._start, self._len);
+    in self.iterator() inout (T)ArrayIterator =
+        (T)ArrayIterator(_source, 0, self._len);
 }
 
-type mut (T Any)ArrayIterator(_source (T)Ptr, _index Int, _len Int) {   
+type inout (T Any)ArrayIterator(_source in (T)Ptr, _index Int, _len Int) {   
     in self.next() (T)Option = 
         if self._index < self._len then {
             self._index += 1;
@@ -512,47 +512,43 @@ given(T Any) (T)Sequence {
         for self as v then r = f(r, v);
         r
     }
-    out self.filter(f (T, Bool)Func) out (T)FilterSequence = FilterSequence(self, f);
-    out self.(R Any)map(f (T, R)Func) out (T, R)MapSequence = MapSequence(self, f);
+    inout self.filter(f (T, Bool)Func) out (T)FilterSequence = FilterSequence(self, f);
+    inout self.(R Any)map(f (T, R)Func) out (T, R)MapSequence = MapSequence(self, f);
 }
 
 type (T Any)FilterSequence(seq (T)Sequence, filter (T, Bool)Func) {
-    in self.iterator() in (T)FilterIterator = FilterIterator(self.seq.iterator(), f);
+    in self.iterator() inout (T)FilterIterator = FilterIterator(self.seq.iterator(), self.filter);
 }
 
-type (T Any)FilterIterator(iter (T)Iterator, filter (T, Bool)Func) {
-    in self.next() (T)Option = {
+type inout (T Any)FilterIterator(iter in (T)Iterator, filter (T, Bool)Func) {
+    in self.next() (T)Option = 
         while self.iter.next() is Some(v) then {
-            if filter(v) then return Some(v) else continue;
-        }
-        return None();
-    }
+            if self.filter(v) then return Some(v);
+        } else None();
 }
 
 type (T Any, R Any)MapSequence(seq (T)Sequence, mapper (T, R)Func) {
-    in self.iterator() in (T)MapIterator = MapIterator(self.seq.iterator(), mapper);
+    in self.iterator() inout (T)MapIterator = MapIterator(self.seq.iterator(), self.mapper);
 }
 
-type (T Any, R Any)MapIterator(iter (T)Iterator, mapper (T, R)Func) {
+type inout (T Any, R Any)MapIterator(iter in (T)Iterator, mapper (T, R)Func) {
     in self.next() (R)Option = 
         if self.iter.next() is Some(v) then Some(mapper(v)) else None();
 }
 
 type String(_data (Rune)Array) {
-    of(data (Rune)Array) out Self = String(data.clone());
+    of(data in (Rune)Array) out Self = String(data.clone());
 
-    self.toString() String = String(self._data.clone());
+    in self.toString() String = String(self._data.clone());
 
     in self.clone() String = String(self._data.clone());
 
-    in self.iterator() in StringIterator = StringIterator.of(self);
+    in self.iterator() inout StringIterator = StringIterator(self, -1);
 }
 
-type mut StringIterator(_source String, index Int);
+type inout StringIterator(_source in String, index Int);
 
 given StringIterator {
-    of(source out String) out Self = StringIterator(source, -1);
-
     in self.next() (Rune)Option = 
         if self.index < self._source._data.size() then {
             self.index += 1;
