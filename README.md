@@ -19,14 +19,10 @@ This is the main source code repository for Koral. It contains the compiler, and
 
 ## Getting Started
 
-- [English](./book-en/document.md)
-- [中文](./book-zh/document.md)
+- [English](./docs/book-en/document.md)
+- [中文](./docs/book-zh/document.md)
 
 ## Compare
 
 Compare with C#, Go, Kotlin, Swift.
 Read detail from [Here](./Compare.md).  
-
-## Source Code
-
-[JVM](https://github.com/kulics-works/k-jvm)
