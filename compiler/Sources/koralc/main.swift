@@ -15,11 +15,15 @@ do {
     let lexer = Lexer(input: input)
     let parser = Parser(lexer: lexer)
     let ast = try parser.parse()
+    // printAST(ast)
     let typeChecker = TypeChecker(ast: ast)
-    try typeChecker.check()
+    let typedAST = try typeChecker.check()
     print("type check pass!")
-    // let codeGen = CodeGen(ast: ast)
-    // let code = codeGen.generate()
+    // printTypedAST(typedAST)
+    let codeGen = CodeGen(ast: typedAST)
+    let code = codeGen.generate()
+    print("\nGenerated C code:")
+    print(code)
 } catch let error as ParserError {
     print("parser error: \(error)")
 } catch let error as LexerError {

@@ -7,17 +7,20 @@ public class TypeChecker {
         self.ast = ast
     }
     
-    // Check entire AST
-    public func check() throws {
+    // Changed to return TypedProgram
+    public func check() throws -> TypedProgram {
         switch self.ast {
         case let .program(declarations):
+            var typedDeclarations: [TypedGlobalNode] = []
             for decl in declarations {
-                try checkGlobalDeclaration(decl)
+                let typedDecl = try checkGlobalDeclaration(decl)
+                typedDeclarations.append(typedDecl)
             }
+            return .program(globalNodes: typedDeclarations)
         }
     }
 
-    private func checkGlobalDeclaration(_ decl: GlobalNode) throws {
+    private func checkGlobalDeclaration(_ decl: GlobalNode) throws -> TypedGlobalNode {
         switch decl {
         case let .globalVariableDeclaration(name, typeNode, value, isMut):
             guard case nil = currentScope.lookup(name) else {
@@ -27,11 +30,17 @@ public class TypeChecker {
                 throw SemanticError.invalidNode
             }
             let type = try Type(type: typeStr)
-            let valueType = try inferType(value)
-            if valueType != type {
-                throw SemanticError.typeMismatch(expected: type.description, got: valueType.description)
+            let typedValue = try inferTypedExpression(value)
+            if typedValue.type != type {
+                throw SemanticError.typeMismatch(expected: type.description, got: typedValue.type.description)
             }
             currentScope.define(name, type, mutable: isMut)
+            return .globalVariable(
+                identifier: TypedIdentifierNode(name: name, type: type),
+                value: typedValue,
+                mutable: isMut
+            )
+
         case let .globalFunctionDeclaration(name, parameters, returnTypeNode, body):
             guard case nil = currentScope.lookup(name) else {
                 throw SemanticError.duplicateDefinition(name)
@@ -40,120 +49,108 @@ public class TypeChecker {
                 throw SemanticError.invalidNode
             }
             let returnType = try Type(type: returnTypeStr)
-            let params = try parameters.map { param -> (String, Type) in 
+            let params = try parameters.map { param -> TypedIdentifierNode in 
                 guard case let .identifier(typeStr) = param.type else {
                     throw SemanticError.invalidNode
                 }
-                return (param.name, try Type(type: typeStr))
+                let paramType = try Type(type: typeStr)
+                return TypedIdentifierNode(name: param.name, type: paramType)
             }
-            return try checkFunction(name, params, returnType, body)
+            let (typedBody, functionType) = try checkFunctionBody(params, returnType, body)
+            currentScope.define(name, functionType)
+            return .globalFunction(
+                identifier: TypedIdentifierNode(name: name, type: functionType),
+                parameters: params,
+                body: typedBody
+            )
         }
     }
 
-    private func checkStatement(_ stmt: StatementNode) throws {
-        switch stmt {
-        case let .variableDeclaration(name, typeNode, value, mutable):
-            guard case let .identifier(typeStr) = typeNode else {
-                throw SemanticError.invalidNode
-            }
-            let initType = try inferType(value)
-            let type = try Type(type: typeStr)
-            if initType != type {
-                throw SemanticError.typeMismatch(expected: type.description, got: initType.description)
-            }
-            currentScope.define(name, type, mutable: mutable)
-            
-        case let .assignment(name, value):
-            guard let varType = currentScope.lookup(name) else {
-                throw SemanticError.undefinedVariable(name)
-            }
-            guard currentScope.isMutable(name) else {
-                throw SemanticError.assignToImmutable(name)
-            }
-            let valueType = try inferType(value)
-            if valueType != varType {
-                throw SemanticError.typeMismatch(expected: varType.description, got: valueType.description)
-            }
-            
-        case let .expression(expr):
-            _ = try inferType(expr)
-        }
-    }
-    
-    private func withNewScope(_ body: () throws -> Type) rethrows -> Type {
-        let previousScope = currentScope
-        currentScope = currentScope.createChild()
-        defer { currentScope = previousScope }
-        return try body()
-    }
-
-    private func checkFunction(_ name: String, 
-                            _ params: [(String, Type)],
-                            _ returnType: Type,
-                            _ body: ExpressionNode) throws {
-        // Add function to current scope
-        currentScope.define(name, .function(params: params.map { $0.1 }, returns: returnType))
-        
-        // Create new scope for function body
-        _ = try withNewScope {
+    private func checkFunctionBody(_ params: [TypedIdentifierNode], 
+                                 _ returnType: Type,
+                                 _ body: ExpressionNode) throws -> (TypedExpressionNode, Type) {
+        return try withNewScope {
             // Add parameters to new scope
             for param in params {
-                currentScope.define(param.0, param.1)
+                currentScope.define(param.name, param.type)
             }
             
-            // Check function body
-            let bodyType = try inferType(body)
-            if bodyType != returnType {
-                throw SemanticError.typeMismatch(expected: returnType.description, got: bodyType.description)
+            let typedBody = try inferTypedExpression(body)
+            if typedBody.type != returnType {
+                throw SemanticError.typeMismatch(expected: returnType.description, got: typedBody.type.description)
             }
-            return bodyType
+            let functionType = Type.function(params: params.map { $0.type }, returns: returnType)
+            return (typedBody, functionType)
         }
     }
 
-    private func inferType(_ expr: ExpressionNode) throws -> Type {
+    // 新增用于返回带类型的表达式的类型推导函数
+    private func inferTypedExpression(_ expr: ExpressionNode) throws -> TypedExpressionNode {
         switch expr {
-        case .integerLiteral(_):
-            return .int
-        case .floatLiteral(_):
-            return .float
-        case .stringLiteral(_):
-            return .string
-        case .boolLiteral(_):
-            return .bool
-        case .identifier(let name):
+        case let .integerLiteral(value):
+            return .intLiteral(value: value, type: .int)
+            
+        case let .floatLiteral(value):
+            return .floatLiteral(value: value, type: .float)
+            
+        case let .stringLiteral(value):
+            return .stringLiteral(value: value, type: .string)
+            
+        case let .boolLiteral(value):
+            return .boolLiteral(value: value, type: .bool)
+            
+        case let .identifier(name):
             guard let type = currentScope.lookup(name) else {
                 throw SemanticError.undefinedVariable(name)
             }
-            return type
+            return .variable(identifier: TypedIdentifierNode(name: name, type: type))
+            
         case let .blockExpression(statements, finalExpression):
             return try withNewScope {
+                var typedStatements: [TypedStatementNode] = []
                 for stmt in statements {
-                    try checkStatement(stmt)
+                    let typedStmt = try checkStatement(stmt)
+                    typedStatements.append(typedStmt)
                 }
                 if let finalExpr = finalExpression {
-                    return try inferType(finalExpr)
+                    let typedFinalExpr = try inferTypedExpression(finalExpr)
+                    return .block(statements: typedStatements, finalExpr: typedFinalExpr, type: typedFinalExpr.type)
                 }
-                return .void
+                return .block(statements: typedStatements, finalExpr: nil, type: .void)
             }
+            
         case let .arithmeticExpression(left, op, right):
-            let leftType = try inferType(left)
-            let rightType = try inferType(right)
-            return try checkArithmeticOp(op, leftType, rightType)
+            let typedLeft = try inferTypedExpression(left)
+            let typedRight = try inferTypedExpression(right)
+            let resultType = try checkArithmeticOp(op, typedLeft.type, typedRight.type)
+            return .arithmeticOp(left: typedLeft, op: op, right: typedRight, type: resultType)
+            
         case let .comparisonExpression(left, op, right):
-            let leftType = try inferType(left)
-            let rightType = try inferType(right)
-            return try checkComparisonOp(op, leftType, rightType)
+            let typedLeft = try inferTypedExpression(left)
+            let typedRight = try inferTypedExpression(right)
+            let resultType = try checkComparisonOp(op, typedLeft.type, typedRight.type)
+            return .comparisonOp(left: typedLeft, op: op, right: typedRight, type: resultType)
+            
         case let .ifExpression(condition, thenBranch, elseBranch):
-            let conditionType = try inferType(condition)
-            if conditionType != .bool {
-                throw SemanticError.typeMismatch(expected: "Bool", got: conditionType.description)
+            let typedCondition = try inferTypedExpression(condition)
+            if typedCondition.type != .bool {
+                throw SemanticError.typeMismatch(expected: "Bool", got: typedCondition.type.description)
             }
-            let thenType = try inferType(thenBranch)
-            let elseType = try inferType(elseBranch)
-            if thenType != elseType {
-                throw SemanticError.typeMismatch(expected: thenType.description, got: elseType.description)
+            let typedThen = try inferTypedExpression(thenBranch)
+            let typedElse = try inferTypedExpression(elseBranch)
+            if typedThen.type != typedElse.type {
+                throw SemanticError.typeMismatch(
+                    expected: typedThen.type.description,
+                    got: typedElse.type.description
+                )
             }
-            return thenType
+            return .ifExpr(
+                condition: typedCondition,
+                thenBranch: typedThen,
+                elseBranch: typedElse,
+                type: typedThen.type
+            )
+            
         case let .functionCall(name, arguments):
             guard let type = currentScope.lookup(name) else {
                 throw SemanticError.functionNotFound(name)
@@ -171,21 +168,74 @@ public class TypeChecker {
                 )
             }
             
-            // 检查每个参数的类型
+            var typedArguments: [TypedExpressionNode] = []
             for (arg, expectedType) in zip(arguments, params) {
-                let argType = try inferType(arg)
-                if argType != expectedType {
+                let typedArg = try inferTypedExpression(arg)
+                if typedArg.type != expectedType {
                     throw SemanticError.typeMismatch(
                         expected: expectedType.description,
-                        got: argType.description
+                        got: typedArg.type.description
                     )
                 }
+                typedArguments.append(typedArg)
             }
             
-            return returns
+            return .functionCall(
+                identifier: TypedIdentifierNode(name: name, type: type),
+                arguments: typedArguments,
+                type: returns
+            )
         }
     }
-    
+
+    // 新增用于返回带类型的语句的检查函数
+    private func checkStatement(_ stmt: StatementNode) throws -> TypedStatementNode {
+        switch stmt {
+        case let .variableDeclaration(name, typeNode, value, mutable):
+            guard case let .identifier(typeStr) = typeNode else {
+                throw SemanticError.invalidNode
+            }
+            let type = try Type(type: typeStr)
+            let typedValue = try inferTypedExpression(value)
+            if typedValue.type != type {
+                throw SemanticError.typeMismatch(expected: type.description, got: typedValue.type.description)
+            }
+            currentScope.define(name, type, mutable: mutable)
+            return .variableDecl(
+                identifier: TypedIdentifierNode(name: name, type: type),
+                value: typedValue,
+                mutable: mutable
+            )
+            
+        case let .assignment(name, value):
+            guard let varType = currentScope.lookup(name) else {
+                throw SemanticError.undefinedVariable(name)
+            }
+            guard currentScope.isMutable(name) else {
+                throw SemanticError.assignToImmutable(name)
+            }
+            let typedValue = try inferTypedExpression(value)
+            if typedValue.type != varType {
+                throw SemanticError.typeMismatch(expected: varType.description, got: typedValue.type.description)
+            }
+            return .assignment(
+                identifier: TypedIdentifierNode(name: name, type: varType),
+                value: typedValue
+            )
+            
+        case let .expression(expr):
+            let typedExpr = try inferTypedExpression(expr)
+            return .expression(typedExpr)
+        }
+    }
+
+    private func withNewScope<R>(_ body: () throws -> R) rethrows -> R {
+        let previousScope = currentScope
+        currentScope = currentScope.createChild()
+        defer { currentScope = previousScope }
+        return try body()
+    }
+
     private func checkArithmeticOp(_ op: ArithmeticOperator, _ lhs: Type, _ rhs: Type) throws -> Type {
         if lhs == .int && rhs == .int {
             return .int
