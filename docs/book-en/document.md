@@ -26,6 +26,7 @@ With well-designed grammar rules, this language can effectively reduce the burde
 1. [Generic Data Types](#Generic-Data-Types)
 1. [Array Type](#Array-Type)
 1. [Generic Functions](#Generic-Functions)
+1. [Non-escaping Modifiers](#Non-escaping-Modifiers)
 
 ## Install
 
@@ -830,5 +831,92 @@ let main() = {
     let x = [1, 2, 3];
     let y = [4, 5, 6];
     let z = mergeArray(x, y);
+}
+```
+
+## Non-escaping Modifiers
+
+In Koral, we can use non-escaping modifiers to control the lifetime of parameters and return types. These modifiers include the `in` parameter modifier, `out` return type modifier, `inout` parameter modifier. When these modifiers are explicitly marked, the compiler can perform maximum escape analysis, thereby reducing heap object allocation and improving performance.
+
+### in Parameter Modifier
+
+The `in` parameter modifier indicates that this parameter can only be accessed or passed to other `in` parameters within the function body, and the parameter itself cannot escape outside the function body, including not being assigned to other variables or used as return values.
+
+```koral
+type Foo(x Int, y Int);
+let sum(a in Foo) Int = {
+    a.x + a.y // ok
+}
+let escape(a in Foo) Foo = {
+    a // error
+}
+```
+
+In the code above, parameter `a` is marked as `in`, indicating that it can only be used within the function body and cannot escape outside the function body. If the compiler detects an escape, it will report a compilation error.
+
+The `in` parameter is used with the same syntax as normal parameters when calling.
+
+```koral
+let main() = {
+    let b = Foo(1, 2);
+    let use(a in Foo) Int = sum(a); // ok
+    use(b); // ok
+}
+```
+
+### out Return Type Modifier
+
+The `out` return type modifier indicates that the return value of this function will not escape beyond the caller's scope. The return value within the function can only be a locally constructed value or from other `out` return function calls, and cannot come from variables or variable members.
+
+```koral
+type Foo(x Int, y Int);
+let new() out Foo = {
+    Foo(1, 2) // ok
+}
+let mut b Foo = Foo(2, 1);
+let escape(a Foo) out Foo = {
+    return a; // error
+    let c = Foo(1, 2);
+    b = c;
+    c // error, c has already escaped
+}
+```
+
+In the code above, the return type `Foo` is marked as `out`, indicating that it can only construct new values locally within the function body, and this new value cannot escape except through return. All other cases will result in compilation errors.
+
+The `out` return value is used with the same syntax as normal parameters when calling.
+
+```koral
+let main() = {
+    let inner_new() Foo = new(); // ok
+    let temp = inner_new();
+}
+```
+
+### inout Parameter Modifier
+
+The `inout` parameter modifier must be used in conjunction with the `out` return type modifier. `inout` indicates that the parameter must be consumed by the return value and cannot escape elsewhere, meaning that ownership of the parameter is transferred to the return value.
+
+```koral
+type Foo(x Int, y Int);
+type WrapperFoo(foo Foo);
+
+let transfer(a inout Foo) out WrapperFoo = {
+    WrapperFoo(a) // ok
+}
+let escape(a inout Foo) Foo = {
+    a // error
+}
+```
+
+In the code above, parameter `a` is marked as `inout`, indicating that its lifetime will remain consistent with the lifetime of `WrapperFoo` in the function body. If the compiler detects an escape, it will report a compilation error.
+
+The `inout` parameter is used with the same syntax as normal parameters when calling.
+
+```koral
+let main() = {
+    let b = Foo(1, 2);
+    let trans(a inout Foo) out WrapperFoo = transfer(a); // ok
+    let wrapped = trans(b); // ok
 }
 ```

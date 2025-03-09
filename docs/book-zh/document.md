@@ -26,6 +26,7 @@ Koral 是一个专注于效率的开源编程语言，它可以帮你轻松构�
 1. [泛型数据类型](#泛型数据类型)
 1. [数组类型](#数组类型)
 1. [泛型函数](#泛型函数)
+1. [非逃逸修饰符](#非逃逸修饰符)
 
 ## 安装与使用
 
@@ -831,3 +832,91 @@ let main() = {
     let z = mergeArray(x, y);
 }
 ```
+
+## 非逃逸修饰符
+
+在 Koral 中，我们可以使用非逃逸修饰符来控制参数和返回类型的生命周期。这些修饰符包括 `in` 参数修饰符，`out` 返回类型修饰符，`inout` 参数修饰符。在显式标记这些修饰符的情况下，编译器可以进行最大程度的逃逸分析，从而减少堆对象的分配，提升性能表现。
+
+### in 参数修饰符
+
+`in` 参数修饰符表示这个参数只能在函数体内访问其成员或传递给其它 `in` 参数，该参数本身不能逃逸到函数体外，包括不能赋值给其它变量以及作为返回值。
+
+```koral
+type Foo(x Int, y Int);
+let sum(a in Foo) Int = {
+    a.x + a.y // ok
+}
+let escape(a in Foo) Foo = {
+    a // error
+}
+```
+
+在上面的代码中，参数 `a` 被标记为 `in`，表示它只能在函数体内使用，不能逃逸到函数体外。如果编译器检查发现了逃逸，就会报出编译错误。
+
+`in` 参数在调用时和普通参数的语法一样。
+
+```koral
+let main() = {
+    let b = Foo(1, 2);
+    let use(a in Foo) Int = sum(a); // ok
+    use(b); // ok
+}
+```
+
+### out 返回类型修饰符
+
+`out` 返回类型修饰符表示这个函数的返回值不会逃逸到调用者的作用域之外，函数内的返回值只能是就地构造的值或者是来自其它 `out` 返回的函数调用，而不能来自于变量或变量的成员。
+
+```koral
+type Foo(x Int, y Int);
+let new() out Foo = {
+    Foo(1, 2) // ok
+}
+let mut b Foo = Foo(2, 1);
+let escape(a Foo) out Foo = {
+    return a; // error
+    let c = Foo(1, 2);
+    b = c;
+    c // error, c has already escaped
+}
+```
+
+在上面的代码中，返回类型 `Foo` 被标记为 `out`，表示它只能在函数体内原地构造新值，这个新值除了返回以外不能逃逸。其它情况都会报出编译错误。
+
+`out` 返回的值在调用时和普通参数的语法一样。
+
+```koral
+let main() = {
+    let inner_new() Foo = new(); // ok
+    let temp = inner_new();
+}
+```
+
+### inout 参数修饰符
+
+`inout` 参数修饰符必须和 `out` 返回类型修饰符搭配使用，`inout` 表示该参数必须被消费给返回值，而不能发生其它逃逸，这意味着参数的所有权被转移给了返回值。
+
+```koral
+type Foo(x Int, y Int);
+type WrapperFoo(foo Foo);
+
+let transfer(a inout Foo) out WrapperFoo = {
+    WrapperFoo(a) // ok
+}
+let escape(a inout Foo) Foo = {
+    a // error
+}
+```
+
+在上面的代码中，参数 `a` 被标记为 `inout`，表示它的生命周期会与函数体内的 `WrapperFoo` 的生命周期保持一致。如果编译器检查发现了逃逸，就会报出编译错误。
+
+`inout` 参数在调用时和普通参数的语法一样。
+
+```koral
+let main() = {
+    let b = Foo(1, 2);
+    let trans(a inout Foo) out WrapperFoo = transfer(a); // ok
+    let wrapped = trans(b); // ok
+}
+```
+
