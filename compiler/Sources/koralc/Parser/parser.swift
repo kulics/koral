@@ -1,38 +1,3 @@
-// Define AST node types using enums
-public indirect enum ASTNode {
-    case program(globalNodes: [GlobalNode])
-}
-
-public indirect enum TypeNode {
-    case identifier(String)
-}
-
-public indirect enum GlobalNode {
-    case globalVariableDeclaration(name: String, type: TypeNode, value: ExpressionNode, mutable: Bool)
-    case globalFunctionDeclaration(
-        name: String, 
-        parameters: [(name: String, type: TypeNode)], 
-        returnType: TypeNode, 
-        body: ExpressionNode
-    )
-}
-
-public indirect enum StatementNode {
-    case variableDeclaration(name: String, type: TypeNode, value: ExpressionNode, mutable: Bool)
-    case assignment(name: String, value: ExpressionNode)
-    case expression(ExpressionNode)
-}
-
-public indirect enum ExpressionNode {
-    case integerLiteral(Int)
-    case floatLiteral(Double)
-    case stringLiteral(String)
-    case boolLiteral(Bool)
-    case binaryExpression(left: ExpressionNode, operatorToken: Token, right: ExpressionNode)
-    case identifier(String)
-    case blockExpression(statements: [StatementNode], finalExpression: ExpressionNode)
-}
-
 public enum ParserError: Error {
     case unexpectedToken(line: Int, got: String, expected: String? = nil)
     case expectedIdentifier(line: Int, got: String)
@@ -196,7 +161,11 @@ public class Parser {
                 let value = try expression()
                 return .assignment(name: name, value: value)
             }
-            // If not assignment, treat as expression
+            // If not assignment, treat as expression or function call
+            // check if it's a function call
+            if currentToken === .leftParen {
+                return .expression(try parseFunctionCall(name))
+            }
             return .expression(.identifier(name))
         } else {
             return .expression(try expression())
@@ -226,30 +195,89 @@ public class Parser {
     private func expression() throws -> ExpressionNode {
         if currentToken === .leftBrace {
             return try blockExpression()
+        } else if currentToken === .ifKeyword {
+            return try ifExpression()
         }
         var left = try term()
         while currentToken === .plus ||
-         currentToken === .minus ||
-          currentToken === .multiply ||
-           currentToken === .divide ||
+            currentToken === .minus ||
+            currentToken === .multiply ||
+            currentToken === .divide ||
             currentToken === .modulo ||
-             currentToken === .equalEqual ||
-              currentToken === .notEqual ||
-               currentToken === .greater ||
-                currentToken === .less ||
-                 currentToken === .greaterEqual ||
-                  currentToken === .lessEqual {
+            currentToken === .equalEqual ||
+            currentToken === .notEqual ||
+            currentToken === .greater ||
+            currentToken === .less ||
+            currentToken === .greaterEqual ||
+            currentToken === .lessEqual {
             let op = currentToken
-            try match(op)
+            try match(currentToken)
             let right = try term()
-            left = .binaryExpression(left: left, operatorToken: op, right: right)
+            
+            // 区分算术运算符和比较运算符
+            switch op {
+            case .plus, .minus, .multiply, .divide, .modulo:
+                left = .arithmeticExpression(
+                    left: left,
+                    operator: tokenToArithmeticOperator(op),
+                    right: right
+                )
+            case .equalEqual, .notEqual, .greater, .less, .greaterEqual, .lessEqual:
+                left = .comparisonExpression(
+                    left: left,
+                    operator: tokenToComparisonOperator(op),
+                    right: right
+                )
+            default:
+                throw ParserError.unexpectedToken(line: lexer.currentLine, got: op.description)
+            }
         }
         return left
+    }
+
+    private func ifExpression() throws -> ExpressionNode {
+        try match(.ifKeyword)
+        let condition = try expression()
+        try match(.thenKeyword)
+        let thenBranch = try expression()
+        try match(.elseKeyword)
+        let elseBranch = try expression()
+        return .ifExpression(condition: condition, thenBranch: thenBranch, elseBranch: elseBranch)
+    }
+
+    private func tokenToArithmeticOperator(_ token: Token) -> ArithmeticOperator {
+        switch token {
+        case .plus: return .plus
+        case .minus: return .minus
+        case .multiply: return .multiply
+        case .divide: return .divide
+        case .modulo: return .modulo
+        default: fatalError("Invalid arithmetic operator token")
+        }
+    }
+
+    private func tokenToComparisonOperator(_ token: Token) -> ComparisonOperator {
+        switch token {
+        case .equalEqual: return .equal
+        case .notEqual: return .notEqual
+        case .greater: return .greater
+        case .less: return .less
+        case .greaterEqual: return .greaterEqual
+        case .lessEqual: return .lessEqual
+        default: fatalError("Invalid comparison operator token")
+        }
     }
 
     // Parse term
     private func term() throws -> ExpressionNode {
         switch currentToken {
+        case let .identifier(name):
+            try match(.identifier(name))
+            // check if it's a function call
+            if currentToken === .leftParen {
+                return try parseFunctionCall(name)
+            }
+            return .identifier(name)
         case let .integer(num):
             try match(.integer(num))
             return .integerLiteral(num)
@@ -259,9 +287,6 @@ public class Parser {
         case let .string(str):
             try match(.string(str))
             return .stringLiteral(str)
-        case let .identifier(name):
-            try match(.identifier(name))
-            return .identifier(name)
         case let .bool(value):
             try match(.bool(value))
             return .boolLiteral(value)
@@ -274,11 +299,40 @@ public class Parser {
         }
     }
 
+    private func parseFunctionCall(_ name: String) throws -> ExpressionNode {
+        try match(.leftParen)
+        var arguments: [ExpressionNode] = []
+        
+        if currentToken !== .rightParen {
+            func getNextComma() throws -> Bool {
+                if currentToken === .comma {
+                    try match(.comma)
+                    return true
+                }
+                return false
+            }
+            repeat {
+                let arg = try expression()
+                arguments.append(arg)
+            } while try getNextComma()
+        }
+        
+        try match(.rightParen)
+        return .functionCall(name: name, arguments: arguments)
+    }
+
     // Parse block expression
     private func blockExpression() throws -> ExpressionNode {
         try match(.leftBrace)
         var statements: [StatementNode] = []
-        // Parse statements until we find the final expression
+        
+        // Process empty block
+        if currentToken === .rightBrace {
+            try match(.rightBrace)
+            return .blockExpression(statements: [], finalExpression: nil)
+        }
+        
+        // Parse statements
         while currentToken !== .rightBrace {
             if currentToken === .eof {
                 throw ParserError.unexpectedEndOfFile(line: lexer.currentLine)
@@ -292,116 +346,21 @@ public class Parser {
             if case .expression(let expr) = stmt {
                 if currentToken === .rightBrace {
                     try match(.rightBrace)
-                    return .blockExpression(statements: Array(statements.dropLast()), 
-                                        finalExpression: expr)
+                    return .blockExpression(
+                        statements: Array(statements.dropLast()), 
+                        finalExpression: expr
+                    )
                 }
             }
             
-            // Statements must be followed by semicolons
             try match(.semicolon)
+            
+            // if next token is right brace, return block expression
+            if currentToken === .rightBrace {
+                try match(.rightBrace)
+                return .blockExpression(statements: statements, finalExpression: nil)
+            }
         }
-        throw ParserError.expectedFinalExpression(line: lexer.currentLine)
-    }
-}
-
-// Helper functions: Print AST
-func printAST(_ node: ASTNode, indent: String = "") {
-    switch node {
-    case let .program(statements):
-        print("\(indent)Program:")
-        for statement in statements {
-            printGlobalNode(statement, indent: indent + "  ")
-        }
-    }
-}
-
-func printGlobalNode(_ node: GlobalNode, indent: String = "") {
-    switch node {
-    case let .globalVariableDeclaration(name, type, value, mutable):
-        print("\(indent)GlobalVariableDeclaration:")
-        print("\(indent)  Name: \(name)")
-        print("\(indent)  Type: \(type)")
-        print("\(indent)  Mutable: \(mutable)")
-        printExpression(value, indent: indent + "  ")
-    case let .globalFunctionDeclaration(name, parameters, returnType, body):
-        print("\(indent)GlobalFunctionDeclaration:")
-        print("\(indent)  Name: \(name)")
-        print("\(indent)  Parameters:")
-        for param in parameters {
-            print("\(indent)    \(param.name): \(param.type)")
-        }
-        print("\(indent)  ReturnType: \(returnType)")
-        print("\(indent)  Body:")
-        printExpression(body, indent: indent + "    ")
-    }
-}
-
-func printStatement(_ node: StatementNode, indent: String = "") {
-    switch node {
-    case let .variableDeclaration(name, type, value, mutable):
-        print("\(indent)VariableDeclaration:")
-        print("\(indent)  Name: \(name)")
-        print("\(indent)  Type: \(type)")
-        print("\(indent)  Mutable: \(mutable)")
-        printExpression(value, indent: indent + "  ")
-    case let .assignment(name, value):
-        print("\(indent)Assignment:")
-        print("\(indent)  Name: \(name)")
-        print("\(indent)  Value:")
-        printExpression(value, indent: indent + "    ")
-    case let .expression(expr):
-        printExpression(expr, indent: indent)
-    }
-}
-
-func printExpression(_ node: ExpressionNode, indent: String = "") {
-    switch node {
-    case let .integerLiteral(value):
-        print("\(indent)IntegerLiteral: \(value)")
-    case let .floatLiteral(value):
-        print("\(indent)FloatLiteral: \(value)")
-    case let .stringLiteral(str):
-        print("\(indent)StringLiteral: \(str)")
-    case let .boolLiteral(value):
-        print("\(indent)BoolLiteral: \(value)")
-    case let .binaryExpression(left, operatorToken, right):
-        print("\(indent)BinaryExpression:")
-        printExpression(left, indent: indent + "  ")
-        switch operatorToken {
-        case .plus:
-            print("\(indent)  Operator: +")
-        case .minus:
-            print("\(indent)  Operator: -")
-        case .multiply:
-            print("\(indent)  Operator: *")
-        case .divide:
-            print("\(indent)  Operator: /")
-        case .modulo:
-            print("\(indent)  Operator: %")
-        case .equalEqual:
-            print("\(indent)  Operator: ==")
-        case .notEqual:
-            print("\(indent)  Operator: !=")
-        case .greater:
-            print("\(indent)  Operator: >")
-        case .less:
-            print("\(indent)  Operator: <")
-        case .greaterEqual:
-            print("\(indent)  Operator: >=")
-        case .lessEqual:
-            print("\(indent)  Operator: <=")
-        default:
-            fatalError("Unexpected operator token in BinaryExpression.")
-        }
-        printExpression(right, indent: indent + "  ")
-    case let .identifier(name):
-        print("\(indent)Identifier: \(name)")
-    case let .blockExpression(statements, finalExpression):
-        print("\(indent)BlockExpression:")
-        for statement in statements {
-            printStatement(statement, indent: indent + "  ")
-        }
-        print("\(indent)  FinalExpression:")
-        printExpression(finalExpression, indent: indent + "    ")
+        throw ParserError.unexpectedToken(line: lexer.currentLine, got: currentToken.description)
     }
 }
