@@ -27,6 +27,9 @@ public enum Token: CustomStringConvertible {
     case leftBrace      // Left brace '{'
     case rightBrace     // Right brace '}'
     case bool(Bool)     // Boolean literal, e.g.: true, false
+    case ifKeyword      // 'if' keyword
+    case thenKeyword    // 'then' keyword
+    case elseKeyword    // 'else' keyword
 
     // Add static operator function to compare if the same item
     public static func ===(lhs: Token, rhs: Token) -> Bool {
@@ -56,7 +59,10 @@ public enum Token: CustomStringConvertible {
              (.leftBrace, .leftBrace),
              (.rightBrace, .rightBrace),
              (.eof, .eof),
-             (.bool, .bool):
+             (.bool, .bool),
+             (.ifKeyword, .ifKeyword),
+             (.thenKeyword, .thenKeyword),
+             (.elseKeyword, .elseKeyword):
             return true
         default:
             return false
@@ -123,6 +129,12 @@ public enum Token: CustomStringConvertible {
             return "BOF"
         case .bool(let value):
             return "Bool(\(value))"
+        case .ifKeyword:
+            return "if"
+        case .thenKeyword:
+            return "then"
+        case .elseKeyword:
+            return "else"
         }
     }
 }
@@ -341,6 +353,12 @@ public class Lexer {
                 return .bool(true)
             } else if id == "false" {
                 return .bool(false)
+            } else if id == "if" {
+                return .ifKeyword
+            } else if id == "then" {
+                return .thenKeyword
+            } else if id == "else" {
+                return .elseKeyword
             }
             return .identifier(id)
         default:

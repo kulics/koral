@@ -125,40 +125,82 @@ public class TypeChecker {
                 throw SemanticError.undefinedVariable(name)
             }
             return type
-        case let .binaryExpression(left, operatorToken, right):
-            let leftType = try inferType(left)
-            let rightType = try inferType(right)
-            return try checkBinaryOp(operatorToken, leftType, rightType)
         case let .blockExpression(statements, finalExpression):
             return try withNewScope {
                 for stmt in statements {
                     try checkStatement(stmt)
                 }
-                return try inferType(finalExpression)
+                if let finalExpr = finalExpression {
+                    return try inferType(finalExpr)
+                }
+                return .void
             }
+        case let .arithmeticExpression(left, op, right):
+            let leftType = try inferType(left)
+            let rightType = try inferType(right)
+            return try checkArithmeticOp(op, leftType, rightType)
+        case let .comparisonExpression(left, op, right):
+            let leftType = try inferType(left)
+            let rightType = try inferType(right)
+            return try checkComparisonOp(op, leftType, rightType)
+        case let .ifExpression(condition, thenBranch, elseBranch):
+            let conditionType = try inferType(condition)
+            if conditionType != .bool {
+                throw SemanticError.typeMismatch(expected: "Bool", got: conditionType.description)
+            }
+            let thenType = try inferType(thenBranch)
+            let elseType = try inferType(elseBranch)
+            if thenType != elseType {
+                throw SemanticError.typeMismatch(expected: thenType.description, got: elseType.description)
+            }
+            return thenType
+        case let .functionCall(name, arguments):
+            guard let type = currentScope.lookup(name) else {
+                throw SemanticError.functionNotFound(name)
+            }
+            
+            guard case let .function(params, returns) = type else {
+                throw SemanticError.invalidOperation(op: "call", type1: type.description, type2: "")
+            }
+            
+            if arguments.count != params.count {
+                throw SemanticError.invalidArgumentCount(
+                    function: name,
+                    expected: params.count,
+                    got: arguments.count
+                )
+            }
+            
+            // 检查每个参数的类型
+            for (arg, expectedType) in zip(arguments, params) {
+                let argType = try inferType(arg)
+                if argType != expectedType {
+                    throw SemanticError.typeMismatch(
+                        expected: expectedType.description,
+                        got: argType.description
+                    )
+                }
+            }
+            
+            return returns
         }
     }
     
-    private func checkBinaryOp(_ op: Token, _ lhs: Type, _ rhs: Type) throws -> Type {
-        switch op {
-        case .plus, .minus, .multiply, .divide, .modulo:
-            // Check numeric operations
-            if lhs == .int && rhs == .int {
-                return .int
-            }
-            if lhs == .float && rhs == .float {
-                return .float
-            }
-            throw SemanticError.invalidOperation(op: op.description, type1: lhs.description, type2: rhs.description)
-        case .equalEqual, .notEqual, .greater, .less, .greaterEqual, .lessEqual:
-            // Check comparison operations
-            if lhs == rhs {
-                return .bool
-            }
-            throw SemanticError.invalidOperation(op: op.description, type1: lhs.description, type2: rhs.description)
-        default:
-            throw SemanticError.invalidOperation(op: op.description, type1: lhs.description, type2: rhs.description)
+    private func checkArithmeticOp(_ op: ArithmeticOperator, _ lhs: Type, _ rhs: Type) throws -> Type {
+        if lhs == .int && rhs == .int {
+            return .int
         }
+        if lhs == .float && rhs == .float {
+            return .float
+        }
+        throw SemanticError.invalidOperation(op: String(describing: op), type1: lhs.description, type2: rhs.description)
+    }
+    
+    private func checkComparisonOp(_ op: ComparisonOperator, _ lhs: Type, _ rhs: Type) throws -> Type {
+        if lhs == rhs {
+            return .bool
+        }
+        throw SemanticError.invalidOperation(op: String(describing: op), type1: lhs.description, type2: rhs.description)
     }
 }
 
@@ -171,6 +213,8 @@ public indirect enum SemanticError: Error {
     case duplicateDefinition(String)
     case invalidType(String)
     case assignToImmutable(String)
+    case functionNotFound(String)
+    case invalidArgumentCount(function: String, expected: Int, got: Int)
 }
 
 extension SemanticError: CustomStringConvertible {
@@ -190,6 +234,10 @@ extension SemanticError: CustomStringConvertible {
             return "Invalid type: \(type)"
         case let .assignToImmutable(name):
             return "Cannot assign to immutable variable: \(name)"
+        case let .functionNotFound(name):
+            return "Function not found: \(name)"
+        case let .invalidArgumentCount(function, expected, got):
+            return "Invalid argument count for function \(function): expected \(expected), got \(got)"
         }
     }
 }
@@ -200,6 +248,7 @@ public indirect enum Type: Equatable, CustomStringConvertible {
     case string
     case bool
     case function(params: [Type], returns: Type)
+    case void
     
     public init(type: String) throws {
         switch type {
@@ -211,6 +260,8 @@ public indirect enum Type: Equatable, CustomStringConvertible {
             self = .string
         case "Bool":
             self = .bool
+        case "Void":
+            self = .void
         default:
             throw SemanticError.invalidType(type)
         }
@@ -221,7 +272,8 @@ public indirect enum Type: Equatable, CustomStringConvertible {
         case (.int, .int),
              (.float, .float),
              (.string, .string),
-             (.bool, .bool):
+             (.bool, .bool),
+             (.void, .void):
             return true
         case let (.function(params1, returns1), .function(params2, returns2)):
             return params1 == params2 && returns1 == returns2
@@ -243,6 +295,8 @@ public indirect enum Type: Equatable, CustomStringConvertible {
         case let .function(params, returns):
             let paramsStr = params.map { $0.description }.joined(separator: ", ")
             return "(\(paramsStr)) -> \(returns.description)"
+        case .void:
+            return "Void"
         }
     }
 }

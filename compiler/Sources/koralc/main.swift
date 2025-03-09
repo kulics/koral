@@ -43,6 +43,20 @@ let change_x() Int = {
     x_mut = 10;
     x_mut
 };
+let ifExample(x Int, y Int) Int = {
+    if x > y then {
+        x
+    } else {
+        y
+    }
+};
+let callFunction() Int = {
+    add(1, 2)
+};
+let voidFunction() Void = {};
+let voidFunction2() Void = {
+    let x Int = 5;
+};
 """
 let lexer = Lexer(input: input)
 let parser = Parser(lexer: lexer)
