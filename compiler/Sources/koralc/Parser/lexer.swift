@@ -186,7 +186,7 @@ public class Lexer {
         guard position < input.endIndex else { return nil }
         let char = input[position]
         position = input.index(after: position)
-        if char == "\n" {
+        if char.isNewline {
             _line += 1
         }
         return char
@@ -201,11 +201,11 @@ public class Lexer {
             }
         }
     }
-
+    
     // Skip line comments
     private func skipLineComment() {
         while let char = getNextChar() {
-            if char == "\n" {
+            if char.isNewline {
                 break
             }
         }
@@ -272,7 +272,6 @@ public class Lexer {
         guard let char = getNextChar() else {
             return .eof
         }
-
         switch char {
         case "+":
             return .plus

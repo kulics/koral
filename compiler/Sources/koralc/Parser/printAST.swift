@@ -1,45 +1,27 @@
 // Helper functions for printing AST nodes
-public class ASTPrinter {
-    private var indent: String = ""
+public func printAST(_ node: ASTNode) {
+    var indent: String = ""
     
-    public init() {}
-    
-    public func print(_ node: ASTNode) {
-        printAST(node)
-    }
-    
-    private func printAST(_ node: ASTNode) {
-        switch node {
-        case let .program(statements):
-            Swift.print("\(indent)Program:")
-            withIndent {
-                for statement in statements {
-                    printGlobalNode(statement)
-                }
-            }
-        }
-    }
-
-    private func printGlobalNode(_ node: GlobalNode) {
+    func printGlobalNode(_ node: GlobalNode) {
         switch node {
         case let .globalVariableDeclaration(name, type, value, mutable):
-            Swift.print("\(indent)GlobalVariableDeclaration:")
-            Swift.print("\(indent)  Name: \(name)")
-            Swift.print("\(indent)  Type: \(type)")
-            Swift.print("\(indent)  Mutable: \(mutable)")
+            print("\(indent)GlobalVariableDeclaration:")
+            print("\(indent)  Name: \(name)")
+            print("\(indent)  Type: \(type)")
+            print("\(indent)  Mutable: \(mutable)")
             withIndent {
                 printExpression(value)
             }
             
         case let .globalFunctionDeclaration(name, parameters, returnType, body):
-            Swift.print("\(indent)GlobalFunctionDeclaration:")
-            Swift.print("\(indent)  Name: \(name)")
-            Swift.print("\(indent)  Parameters:")
+            print("\(indent)GlobalFunctionDeclaration:")
+            print("\(indent)  Name: \(name)")
+            print("\(indent)  Parameters:")
             for param in parameters {
-                Swift.print("\(indent)    \(param.name): \(param.type)")
+                print("\(indent)    \(param.name): \(param.type)")
             }
-            Swift.print("\(indent)  ReturnType: \(returnType)")
-            Swift.print("\(indent)  Body:")
+            print("\(indent)  ReturnType: \(returnType)")
+            print("\(indent)  Body:")
             withIndent {
                 withIndent {
                     printExpression(body)
@@ -48,21 +30,21 @@ public class ASTPrinter {
         }
     }
 
-    private func printStatement(_ node: StatementNode) {
+    func printStatement(_ node: StatementNode) {
         switch node {
         case let .variableDeclaration(name, type, value, mutable):
-            Swift.print("\(indent)VariableDeclaration:")
-            Swift.print("\(indent)  Name: \(name)")
-            Swift.print("\(indent)  Type: \(type)")
-            Swift.print("\(indent)  Mutable: \(mutable)")
+            print("\(indent)VariableDeclaration:")
+            print("\(indent)  Name: \(name)")
+            print("\(indent)  Type: \(type)")
+            print("\(indent)  Mutable: \(mutable)")
             withIndent {
                 printExpression(value)
             }
             
         case let .assignment(name, value):
-            Swift.print("\(indent)Assignment:")
-            Swift.print("\(indent)  Name: \(name)")
-            Swift.print("\(indent)  Value:")
+            print("\(indent)Assignment:")
+            print("\(indent)  Name: \(name)")
+            print("\(indent)  Value:")
             withIndent {
                 withIndent {
                     printExpression(value)
@@ -74,69 +56,69 @@ public class ASTPrinter {
         }
     }
 
-    private func printExpression(_ node: ExpressionNode) {
+    func printExpression(_ node: ExpressionNode) {
         switch node {
         case let .integerLiteral(value):
-            Swift.print("\(indent)IntegerLiteral: \(value)")
+            print("\(indent)IntegerLiteral: \(value)")
         case let .floatLiteral(value):
-            Swift.print("\(indent)FloatLiteral: \(value)")
+            print("\(indent)FloatLiteral: \(value)")
         case let .stringLiteral(str):
-            Swift.print("\(indent)StringLiteral: \(str)")
+            print("\(indent)StringLiteral: \(str)")
         case let .boolLiteral(value):
-            Swift.print("\(indent)BoolLiteral: \(value)")
+            print("\(indent)BoolLiteral: \(value)")
         case let .identifier(name):
-            Swift.print("\(indent)Identifier: \(name)")
+            print("\(indent)Identifier: \(name)")
         case let .blockExpression(statements, finalExpression):
-            Swift.print("\(indent)BlockExpression:")
+            print("\(indent)BlockExpression:")
             withIndent {
                 for statement in statements {
                     printStatement(statement)
                 }
                 if let finalExpr = finalExpression {
-                    Swift.print("\(indent)FinalExpression:")
+                    print("\(indent)FinalExpression:")
                     withIndent {
                         printExpression(finalExpr)
                     }
                 }
             }
         case let .arithmeticExpression(left, op, right):
-            Swift.print("\(indent)ArithmeticExpression:")
+            print("\(indent)ArithmeticExpression:")
             withIndent {
                 printExpression(left)
-                Swift.print("\(indent)Operator: \(op)")
+                print("\(indent)Operator: \(op)")
                 printExpression(right)
             }
         case let .comparisonExpression(left, op, right):
-            Swift.print("\(indent)ComparisonExpression:")
+            print("\(indent)ComparisonExpression:")
             withIndent {
                 printExpression(left)
-                Swift.print("\(indent)Operator: \(op)")
+                print("\(indent)Operator: \(op)")
                 printExpression(right)
             }
         case let .ifExpression(condition, thenBranch, elseBranch):
-            Swift.print("\(indent)IfExpression:")
-            Swift.print("\(indent)  Condition:")
+            print("\(indent)IfExpression:")
+            print("\(indent)  Condition:")
             withIndent {
                 withIndent {
                     printExpression(condition)
                 }
             }
-            Swift.print("\(indent)  ThenBranch:")
+            print("\(indent)  ThenBranch:")
             withIndent {
                 withIndent {
                     printExpression(thenBranch)
                 }
             }
-            Swift.print("\(indent)  ElseBranch:")
+            print("\(indent)  ElseBranch:")
             withIndent {
                 withIndent {
                     printExpression(elseBranch)
                 }
             }
         case let .functionCall(name, arguments):
-            Swift.print("\(indent)FunctionCall:")
-            Swift.print("\(indent)  Name: \(name)")
-            Swift.print("\(indent)  Arguments:")
+            print("\(indent)FunctionCall:")
+            print("\(indent)  Name: \(name)")
+            print("\(indent)  Arguments:")
             withIndent {
                 withIndent {
                     for arg in arguments {
@@ -147,10 +129,20 @@ public class ASTPrinter {
         }
     }
     
-    private func withIndent(_ body: () -> Void) {
+    func withIndent(_ body: () -> Void) {
         let oldIndent = indent
         indent += "  "
         body()
         indent = oldIndent
+    }
+
+    switch node {
+    case let .program(statements):
+        print("\(indent)Program:")
+        withIndent {
+            for statement in statements {
+                printGlobalNode(statement)
+            }
+        }
     }
 }
