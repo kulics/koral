@@ -138,6 +138,19 @@ public func printTypedAST(_ node: TypedProgram) {
                     }
                 }
             }
+            
+        case let .whileExpr(condition, body, type):
+            print("\(indent)WhileExpression: \(type)")
+            withIndent {
+                print("\(indent)Condition:")
+                withIndent {
+                    printTypedExpression(condition)
+                }
+                print("\(indent)Body:")
+                withIndent {
+                    printTypedExpression(body)
+                }
+            }
         }
     }
     
