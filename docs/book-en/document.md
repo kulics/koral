@@ -1,55 +1,55 @@
 # The Koral Programming Language
 
-Koral is an open source programming language focused on efficiency. It can help you easily build cross-platform software.
+Koral is an efficiency-focused open source programming language that helps you easily build cross-platform software.
 
-With well-designed grammar rules, this language can effectively reduce the burden of reading and writing, allowing you to focus on solving problems.
+Through carefully designed syntax rules, this language can effectively reduce reading and writing burden, allowing you to put your real attention on solving problems.
 
 ## Key Features
 
-- A modern grammar, which is easy to distinguish.
-- Automatic memory management.
+- Easy to distinguish, modern syntax.
+- Automatic memory management. 
 - Generics.
 - Multi-paradigm programming.
 - Cross-platform.
 - Unicode.
 
-## Index
+## Contents
 
-1. [Install](#Install)
-1. [Basic Grammar](#Basic-Grammar)
-1. [Basic Types](#Basic-Types)
-1. [Operators](#Operators)
-1. [Select Structure](#Select-Structure)
-1. [Loop Structure](#Loop-Structure)
-1. [Function](#Function)
-1. [Data Types](#Data-Types)
-1. [Generic Data Types](#Generic-Data-Types)
-1. [Array Type](#Array-Type)
-1. [Generic Functions](#Generic-Functions)
-1. [Non-escaping Modifiers](#Non-escaping-Modifiers)
+1. [Installation and Usage](#installation-and-usage)
+1. [Basic Syntax](#basic-syntax)
+1. [Basic Types](#basic-types)
+1. [Operators](#operators)
+1. [Selection Structure](#selection-structure) 
+1. [Loop Structure](#loop-structure)
+1. [Functions](#functions)
+1. [Data Types](#data-types)
+1. [Generic Data Types](#generic-data-types)
+1. [Array Types](#array-types)
+1. [Generic Functions](#generic-functions)
+1. [Non-escaping Modifiers](#non-escaping-modifiers)
 
-## Install
+## Installation and Usage
 
-Currently `Koral` supports compilation to `LLVM`, so you need to install `LLVM` environment on your system.
+Currently `Koral` supports compiling to `C`, so a C compiler needs to be installed on the system.
 
-The execution compiler will scan the `.koral` file of the current folder and automatically translate it to the target file of the same name.
+Running the compiler will scan `.koral` files in the current folder and automatically translate them to target files with the same name.
 
-## Basic Grammar
+## Basic Syntax
 
-### Basic Statement
+### Basic Statements 
 
-Within Koral, statements are the smallest unit of composition.
+In Koral, statements are the smallest unit of composition.
 
-The basic form of the statement is as follows.
+The basic form of statements is as follows.
 
 ```
 let a = 0;
 let b = 1;
 ```
 
-A statement usually ends with an explicit semicolon. However, if the statement ends with `}` and a newline, we can choose to omit the semicolon.
+A statement usually ends with an explicit semicolon. However, if the statement ends with a `}` and a newline, we can choose to omit the semicolon.
 
-E.g.
+For example:
 
 ```
 let a = { 1 + 1 + 1
@@ -73,7 +73,7 @@ More details on the function will be explained in the following sections.
 
 Now let's have our program output something to see, we can use the `printLine` function to print some information to the console.
 
-E.g.
+For example:
 
 ```
 let main() = printLine("Hello, world!");
@@ -85,7 +85,7 @@ Now try to execute this program and we can see `Hello, world!` displayed on the 
 
 Comments are only used to provide additional information to the user and are not actually compiled into the executable program.
 
-E.g:
+For example:
 ```
 // Line Comment
 
@@ -186,7 +186,7 @@ Since our current computer architecture is good at calculating integers, a separ
 
 In Koral, the default integer is of type `Int`, which can represent signed integer type data.
 
-E.g:
+For example:
 
 ```
 let i Int = 3987349;
@@ -198,7 +198,7 @@ Integers don't satisfy our needs for numbers, and we often need to deal with dec
 
 In Koral, the default decimal is of type `Float`, which can represent floating-point data.
 
-E.g:
+For example:
 
 ```
 let f1 Float = 855.544;
@@ -213,7 +213,7 @@ In this language, the default text is the `String` type, which is an unlimited l
 
 You only need to wrap a piece of text with `""` or `''`, which will be recognized as a string value.
 
-E.g:
+For example:
 
 ```
 let s1 String = "Hello, world!";
@@ -228,7 +228,7 @@ Boolean refers to logical values, they can only be true or false. It is often us
 
 In this language, the default boolean is the `Bool` type, which is a type with only true and false values.
 
-E.g:
+For example:
 
 ```
 let b1 Bool = true;
@@ -245,7 +245,7 @@ We can simply understand the computational notation in mathematics, but programm
 
 The arithmetic operators are mainly used for data operations of numeric types, and most of the statements conform to the expectations in mathematics.
 
-E.g:
+For example:
 
 ```
 let a = 4;
@@ -261,7 +261,7 @@ printLine( a % b );    // % residual, meaning the remainder remaining after the 
 
 The comparison operator is mainly used in judgment conditions to calculate the relationship between two data, with the result being `true` if it meets the expectation and `false` if it doesn't.
 
-E.g:
+For example:
 
 ```
 let a = 4;
@@ -278,7 +278,7 @@ printLine( a <= b );   // <= less than or equal to
 
 Logical operators are also used primarily in judgment conditions to perform logical operations (AND, OR, and NOT).
 
-E.g:
+For example:
 
 ```
 let a = true;
@@ -288,13 +288,13 @@ printLine( a | b );     // OR, one of them is true
 printLine( !a );        // NOT, boolean inversion
 ```
 
-## Select Structure
+## Selection Structure
 
 Selection structures are used to judge a given condition, to judge certain conditions based on the result of the judgment, and to control the flow of the program based on the result of the judgment.
 
 In Koral, selection structures are represented by the if syntax, where if is immediately followed by a judgment condition, and the `then` branch after the condition is executed when the condition is `true`, and the `else` branch after the else keyword is executed when the condition is `false'.
 
-E.g:
+For example:
 
 ```
 let main() = if 1 == 1 then printLine("yes") else printLine("no");
@@ -386,7 +386,7 @@ In Koral, the loop structure is represented by the while syntax, where the while
 
 This while syntax is an expression.
 
-E.g:
+For example:
 
 ```
 let main() = {
@@ -430,7 +430,7 @@ let main() = {
 
 Executing the above program will print an odd number between 0 and 10.
 
-## Function
+## Functions
 
 Function is a separate block of code used to accomplish a specific task.
 
@@ -735,7 +735,7 @@ let main() = {
 }
 ```
 
-## Array Type
+## Array Types
 
 An array is a generic data type that stores a set of data elements of the same type, each of which has an index to indicate its position in the array. The length of an array is fixed, and it can be accessed quickly by indexing any element.
 
