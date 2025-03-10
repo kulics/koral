@@ -30,6 +30,7 @@ public enum Token: CustomStringConvertible {
     case ifKeyword      // 'if' keyword
     case thenKeyword    // 'then' keyword
     case elseKeyword    // 'else' keyword
+    case whileKeyword   // 'while' keyword
 
     // Add static operator function to compare if the same item
     public static func ===(lhs: Token, rhs: Token) -> Bool {
@@ -62,7 +63,8 @@ public enum Token: CustomStringConvertible {
              (.bool, .bool),
              (.ifKeyword, .ifKeyword),
              (.thenKeyword, .thenKeyword),
-             (.elseKeyword, .elseKeyword):
+             (.elseKeyword, .elseKeyword),
+             (.whileKeyword, .whileKeyword):
             return true
         default:
             return false
@@ -135,6 +137,8 @@ public enum Token: CustomStringConvertible {
             return "then"
         case .elseKeyword:
             return "else"
+        case .whileKeyword:
+            return "while"
         }
     }
 }
@@ -358,6 +362,8 @@ public class Lexer {
                 return .thenKeyword
             } else if id == "else" {
                 return .elseKeyword
+            } else if id == "while" {
+                return .whileKeyword
             }
             return .identifier(id)
         default:

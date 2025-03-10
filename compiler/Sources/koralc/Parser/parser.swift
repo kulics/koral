@@ -197,6 +197,8 @@ public class Parser {
             return try blockExpression()
         } else if currentToken === .ifKeyword {
             return try ifExpression()
+        } else if currentToken === .whileKeyword {
+            return try whileExpression()
         }
         var left = try term()
         while currentToken === .plus ||
@@ -243,6 +245,14 @@ public class Parser {
         try match(.elseKeyword)
         let elseBranch = try expression()
         return .ifExpression(condition: condition, thenBranch: thenBranch, elseBranch: elseBranch)
+    }
+
+    private func whileExpression() throws -> ExpressionNode {
+        try match(.whileKeyword)
+        let condition = try expression()
+        try match(.thenKeyword)
+        let body = try expression()
+        return .whileExpression(condition: condition, body: body)
     }
 
     private func tokenToArithmeticOperator(_ token: Token) -> ArithmeticOperator {

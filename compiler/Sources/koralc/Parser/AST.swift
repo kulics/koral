@@ -51,4 +51,5 @@ public indirect enum ExpressionNode {
     case blockExpression(statements: [StatementNode], finalExpression: ExpressionNode?)
     case ifExpression(condition: ExpressionNode, thenBranch: ExpressionNode, elseBranch: ExpressionNode)
     case functionCall(name: String, arguments: [ExpressionNode])
+    case whileExpression(condition: ExpressionNode, body: ExpressionNode)
 }

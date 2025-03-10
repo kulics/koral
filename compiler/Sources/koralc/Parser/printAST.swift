@@ -126,6 +126,20 @@ public func printAST(_ node: ASTNode) {
                     }
                 }
             }
+        case let .whileExpression(condition, body):
+            print("\(indent)WhileExpression:")
+            print("\(indent)  Condition:")
+            withIndent {
+                withIndent {
+                    printExpression(condition)
+                }
+            }
+            print("\(indent)  Body:")
+            withIndent {
+                withIndent {
+                    printExpression(body)
+                }
+            }
         }
     }
     

@@ -185,6 +185,18 @@ public class TypeChecker {
                 arguments: typedArguments,
                 type: returns
             )
+            
+        case let .whileExpression(condition, body):
+            let typedCondition = try inferTypedExpression(condition)
+            if (typedCondition.type != .bool) {
+                throw SemanticError.typeMismatch(expected: "Bool", got: typedCondition.type.description)
+            }
+            let typedBody = try inferTypedExpression(body)
+            return .whileExpr(
+                condition: typedCondition,
+                body: typedBody,
+                type: .void
+            )
         }
     }
 

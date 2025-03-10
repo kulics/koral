@@ -34,6 +34,7 @@ public indirect enum TypedExpressionNode {
     case block(statements: [TypedStatementNode], finalExpr: TypedExpressionNode?, type: Type)
     case ifExpr(condition: TypedExpressionNode, thenBranch: TypedExpressionNode, elseBranch: TypedExpressionNode, type: Type)
     case functionCall(identifier: TypedIdentifierNode, arguments: [TypedExpressionNode], type: Type)
+    case whileExpr(condition: TypedExpressionNode, body: TypedExpressionNode, type: Type)
 }
 
 extension TypedExpressionNode {
@@ -47,7 +48,8 @@ extension TypedExpressionNode {
              .comparisonOp(_, _, _, let type),
              .block(_, _, let type),
              .ifExpr(_, _, _, let type),
-             .functionCall(_, _, let type):
+             .functionCall(_, _, let type),
+             .whileExpr(_, _, let type):
             return type
         case .variable(let identifier):
             return identifier.type
