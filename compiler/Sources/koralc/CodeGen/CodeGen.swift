@@ -3,6 +3,7 @@ public class CodeGen {
     private var indent: String = ""
     private var buffer: String = ""
     private var tempVarCounter = 0
+    private var globalInitializations: [(String, TypedExpressionNode)] = []
 
     public init(ast: TypedProgram) {
         self.ast = ast
@@ -24,21 +25,7 @@ public class CodeGen {
     private func generateProgram(_ program: TypedProgram) {
         switch program {
         case let .program(nodes):
-            var globalInitFunctions: [(String, TypedExpressionNode)] = []  // 新增
-            // 收集全局变量初始化表达式
-            for node in nodes {
-                if case let .globalVariable(identifier, value, _) = node {
-                    let initFuncName = "_init_" + identifier.name
-                    globalInitFunctions.append((initFuncName, value))
-                }
-            }
-            
-            // 先生成所有初始化函数声明
-            for (funcName, value) in globalInitFunctions {
-                buffer += "\(getCType(value.type)) \(funcName)();\n"
-            }
-            
-            // 生成所有函数声明
+            // 先生成所有函数声明
             for node in nodes {
                 if case let .globalFunction(identifier, params, _) = node {
                     generateFunctionDeclaration(identifier, params)
@@ -46,23 +33,55 @@ public class CodeGen {
             }
             buffer += "\n"
             
-            // 生成初始化函数实现
-            for (funcName, value) in globalInitFunctions {
-                buffer += "\(getCType(value.type)) \(funcName)() {\n"
-                withIndent {
-                    let resultVar = generateExpressionSSA(value)
-                    addIndent()
-                    buffer += "return \(resultVar);\n"
-                }
-                buffer += "}\n\n"
-            }
-            
-            // 生成其他全局实现
+            // 生成全局变量声明
             for node in nodes {
-                generateGlobalNode(node)
-                buffer += "\n"
+                if case let .globalVariable(identifier, value, _) = node {
+                    let cType = getCType(identifier.type)
+                    
+                    // 简单表达式直接初始化
+                    switch value {
+                        case .intLiteral(_,_), .floatLiteral(_,_), 
+                            .stringLiteral(_,_), .boolLiteral(_,_):
+                            buffer += "\(cType) \(identifier.name) = "
+                            buffer += generateExpressionSSA(value)
+                            buffer += ";\n"
+                        default:
+                            // 复杂表达式延迟到 main 函数中初始化
+                            buffer += "\(cType) \(identifier.name);\n"
+                            globalInitializations.append((identifier.name, value))
+                    }
+                }
+            }
+            buffer += "\n"
+            
+            // 生成函数实现
+            for node in nodes {
+                if case let .globalFunction(identifier, params, body) = node {
+                    generateGlobalFunction(identifier, params, body)
+                }
+            }
+
+            // 生成 main 函数用于初始化全局变量
+            if !globalInitializations.isEmpty {
+                generateMainFunction()
             }
         }
+    }
+
+    private func generateMainFunction() {
+        buffer += "\nint main() {\n"
+        withIndent {
+            // 生成全局变量初始化
+            for (name, value) in globalInitializations {
+                let resultVar = generateExpressionSSA(value)
+                addIndent()
+                buffer += "\(name) = \(resultVar);\n"
+            }
+            // 如果需要的话，这里可以调用用户定义的 main 函数
+            addIndent()
+            buffer += "return 0;\n"
+        }
+        buffer += "}\n"
     }
 
     private func generateFunctionDeclaration(_ identifier: TypedIdentifierNode, _ params: [TypedIdentifierNode]) {
@@ -71,22 +90,16 @@ public class CodeGen {
         buffer += "\(returnType) \(identifier.name)(\(paramList));\n"
     }
 
-    private func generateGlobalNode(_ node: TypedGlobalNode) {
-        switch node {
-        case let .globalVariable(identifier, _, _):
-            let cType = getCType(identifier.type)
-            let initFuncName = "_init_" + identifier.name
-            buffer += "\(cType) \(identifier.name) = \(initFuncName)();\n"
-            
-        case let .globalFunction(identifier, params, body):
-            let returnType = getFunctionReturnType(identifier.type)
-            let paramList = params.map { getCType($0.type) + " " + $0.name }.joined(separator: ", ")
-            buffer += "\(returnType) \(identifier.name)(\(paramList)) {\n"
-            withIndent {
-                generateFunctionBody(body)
-            }
-            buffer += "}\n"
+    private func generateGlobalFunction(_ identifier: TypedIdentifierNode, 
+                                     _ params: [TypedIdentifierNode], 
+                                     _ body: TypedExpressionNode) {
+        let returnType = getFunctionReturnType(identifier.type)
+        let paramList = params.map { getCType($0.type) + " " + $0.name }.joined(separator: ", ")
+        buffer += "\(returnType) \(identifier.name)(\(paramList)) {\n"
+        withIndent {
+            generateFunctionBody(body)
         }
+        buffer += "}\n"
     }
 
     private func generateFunctionBody(_ body: TypedExpressionNode) {
