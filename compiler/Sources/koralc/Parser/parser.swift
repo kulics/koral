@@ -193,46 +193,97 @@ public class Parser {
 
     // Parse expression rule
     private func expression() throws -> ExpressionNode {
-        if currentToken === .leftBrace {
-            return try blockExpression()
+        return if currentToken === .leftBrace {
+            try blockExpression()
         } else if currentToken === .ifKeyword {
-            return try ifExpression()
+            try ifExpression()
         } else if currentToken === .whileKeyword {
-            return try whileExpression()
+            try whileExpression()
+        } else {
+            try parseOrExpression()
         }
-        var left = try term()
-        while currentToken === .plus ||
-            currentToken === .minus ||
-            currentToken === .multiply ||
-            currentToken === .divide ||
-            currentToken === .modulo ||
-            currentToken === .equalEqual ||
-            currentToken === .notEqual ||
-            currentToken === .greater ||
-            currentToken === .less ||
-            currentToken === .greaterEqual ||
-            currentToken === .lessEqual {
+    }
+
+    private func parseOrExpression() throws -> ExpressionNode {
+        var left = try parseAndExpression()
+        
+        while currentToken === .orKeyword {
+            try match(.orKeyword)
+            let right = try parseAndExpression()
+            left = .orExpression(left: left, right: right)
+        }
+        return left
+    }
+
+    private func parseAndExpression() throws -> ExpressionNode {
+        var left = try parseNotExpression()
+        
+        while currentToken === .andKeyword {
+            try match(.andKeyword)
+            let right = try parseNotExpression()
+            left = .andExpression(left: left, right: right)
+        }
+        return left
+    }
+
+    private func parseNotExpression() throws -> ExpressionNode {
+        if currentToken === .notKeyword {
+            try match(.notKeyword)
+            let expr = try parseComparisonExpression()
+            return .notExpression(expr)
+        }
+        return try parseComparisonExpression()
+    }
+
+    // Fourth level: Comparisons
+    private func parseComparisonExpression() throws -> ExpressionNode {
+        var left = try parseAdditiveExpression()
+        
+        while currentToken === .equalEqual || currentToken === .notEqual ||
+            currentToken === .greater || currentToken === .less ||
+            currentToken === .greaterEqual || currentToken === .lessEqual {
             let op = currentToken
-            try match(currentToken)
+            try match(op)
+            let right = try parseAdditiveExpression()
+            left = .comparisonExpression(
+                left: left,
+                operator: tokenToComparisonOperator(op),
+                right: right
+            )
+        }
+        return left
+    }
+
+    // Fifth level: Addition and subtraction
+    private func parseAdditiveExpression() throws -> ExpressionNode {
+        var left = try parseMultiplicativeExpression()
+        
+        while currentToken === .plus || currentToken === .minus {
+            let op = currentToken
+            try match(op)
+            let right = try parseMultiplicativeExpression()
+            left = .arithmeticExpression(
+                left: left,
+                operator: tokenToArithmeticOperator(op),
+                right: right
+            )
+        }
+        return left
+    }
+
+    // Sixth level: Multiplication, division, and modulo
+    private func parseMultiplicativeExpression() throws -> ExpressionNode {
+        var left = try term()
+        
+        while currentToken === .multiply || currentToken === .divide || currentToken === .modulo {
+            let op = currentToken
+            try match(op)
             let right = try term()
-            
-            // 区分算术运算符和比较运算符
-            switch op {
-            case .plus, .minus, .multiply, .divide, .modulo:
-                left = .arithmeticExpression(
-                    left: left,
-                    operator: tokenToArithmeticOperator(op),
-                    right: right
-                )
-            case .equalEqual, .notEqual, .greater, .less, .greaterEqual, .lessEqual:
-                left = .comparisonExpression(
-                    left: left,
-                    operator: tokenToComparisonOperator(op),
-                    right: right
-                )
-            default:
-                throw ParserError.unexpectedToken(line: lexer.currentLine, got: op.description)
-            }
+            left = .arithmeticExpression(
+                left: left,
+                operator: tokenToArithmeticOperator(op),
+                right: right
+            )
         }
         return left
     }

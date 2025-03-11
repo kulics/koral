@@ -115,17 +115,6 @@ public func printAST(_ node: ASTNode) {
                     printExpression(elseBranch)
                 }
             }
-        case let .functionCall(name, arguments):
-            print("\(indent)FunctionCall:")
-            print("\(indent)  Name: \(name)")
-            print("\(indent)  Arguments:")
-            withIndent {
-                withIndent {
-                    for arg in arguments {
-                        printExpression(arg)
-                    }
-                }
-            }
         case let .whileExpression(condition, body):
             print("\(indent)WhileExpression:")
             print("\(indent)  Condition:")
@@ -139,6 +128,48 @@ public func printAST(_ node: ASTNode) {
                 withIndent {
                     printExpression(body)
                 }
+            }
+        case let .functionCall(name, arguments):
+            print("\(indent)FunctionCall:")
+            print("\(indent)  Name: \(name)")
+            print("\(indent)  Arguments:")
+            withIndent {
+                withIndent {
+                    for arg in arguments {
+                        printExpression(arg)
+                    }
+                }
+            }
+        case let .andExpression(left, right):
+            print("\(indent)AndExpression:")
+            withIndent {
+                print("\(indent)Left:")
+                withIndent {
+                    printExpression(left)
+                }
+                print("\(indent)Right:")
+                withIndent {
+                    printExpression(right)
+                }
+            }
+            
+        case let .orExpression(left, right):
+            print("\(indent)OrExpression:")
+            withIndent {
+                print("\(indent)Left:")
+                withIndent {
+                    printExpression(left)
+                }
+                print("\(indent)Right:")
+                withIndent {
+                    printExpression(right)
+                }
+            }
+            
+        case let .notExpression(expr):
+            print("\(indent)NotExpression:")
+            withIndent {
+                printExpression(expr)
             }
         }
     }

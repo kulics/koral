@@ -19,7 +19,7 @@ do {
     let typeChecker = TypeChecker(ast: ast)
     let typedAST = try typeChecker.check()
     print("type check pass!")
-    // printTypedAST(typedAST)
+    printTypedAST(typedAST)
     let codeGen = CodeGen(ast: typedAST)
     let code = codeGen.generate()
     print("\nGenerated C code:")
