@@ -53,7 +53,7 @@ public func printTypedAST(_ node: TypedProgram) {
             printTypedExpression(expr)
         }
     }
-    
+
     func printTypedExpression(_ expr: TypedExpressionNode) {
         switch expr {
         case let .intLiteral(value, type):
@@ -127,18 +127,7 @@ public func printTypedAST(_ node: TypedProgram) {
                     printTypedExpression(elseBranch)
                 }
             }
-            
-        case let .functionCall(identifier, arguments, type):
-            print("\(indent)FunctionCall: \(identifier.name) : \(type)")
-            withIndent {
-                print("\(indent)Arguments:")
-                withIndent {
-                    for arg in arguments {
-                        printTypedExpression(arg)
-                    }
-                }
-            }
-            
+
         case let .whileExpr(condition, body, type):
             print("\(indent)WhileExpression: \(type)")
             withIndent {
@@ -150,6 +139,49 @@ public func printTypedAST(_ node: TypedProgram) {
                 withIndent {
                     printTypedExpression(body)
                 }
+            }
+            
+        case let .functionCall(identifier, arguments, type):
+            print("\(indent)FunctionCall: \(identifier.name) : \(type)")
+            withIndent {
+                print("\(indent)Arguments:")
+                withIndent {
+                    for arg in arguments {
+                        printTypedExpression(arg)
+                    }
+                }
+            }
+
+        case let .andOp(left, right, type):
+            print("\(indent)AndOperation: \(type)")
+            withIndent {
+                print("\(indent)Left:")
+                withIndent {
+                    printTypedExpression(left)
+                }
+                print("\(indent)Right:")
+                withIndent {
+                    printTypedExpression(right)
+                }
+            }
+
+        case let .orOp(left, right, type):
+            print("\(indent)OrOperation: \(type)")
+            withIndent {
+                print("\(indent)Left:")
+                withIndent {
+                    printTypedExpression(left)
+                }
+                print("\(indent)Right:")
+                withIndent {
+                    printTypedExpression(right)
+                }
+            }
+
+        case let .notOp(expr, type):
+            print("\(indent)NotOperation: \(type)")
+            withIndent {
+                printTypedExpression(expr)
             }
         }
     }

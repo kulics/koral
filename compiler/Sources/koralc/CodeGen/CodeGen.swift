@@ -188,7 +188,7 @@ public class CodeGen {
                 buffer += "}\n"
                 return resultVar
             }
-            
+
         case let .functionCall(identifier, arguments, type):
             let argResults = arguments.map(generateExpressionSSA)
             
@@ -220,6 +220,61 @@ public class CodeGen {
             addIndent()
             buffer += "\(labelPrefix)_end:\n"
             return ""
+            
+        case let .andOp(left, right, _):
+            let result = nextTemp()
+            let leftResult = generateExpressionSSA(left)
+            let endLabel = nextTemp()
+            
+            addIndent()
+            buffer += "bool \(result);\n"
+            addIndent()
+            buffer += "if (!\(leftResult)) {\n"
+            withIndent {
+                addIndent()
+                buffer += "\(result) = false;\n"
+                addIndent() 
+                buffer += "goto \(endLabel);\n"
+            }
+            addIndent()
+            buffer += "}\n"
+            let rightResult = generateExpressionSSA(right)
+            addIndent()
+            buffer += "\(result) = \(rightResult);\n"
+            addIndent()
+            buffer += "\(endLabel):\n"
+            return result
+            
+        case let .orOp(left, right, _):
+            let result = nextTemp()
+            let leftResult = generateExpressionSSA(left) 
+            let endLabel = nextTemp()
+            
+            addIndent()
+            buffer += "bool \(result);\n"
+            addIndent()
+            buffer += "if (\(leftResult)) {\n"
+            withIndent {
+                addIndent()
+                buffer += "\(result) = true;\n"
+                addIndent()
+                buffer += "goto \(endLabel);\n"
+            }
+            addIndent()
+            buffer += "}\n"
+            let rightResult = generateExpressionSSA(right)
+            addIndent()
+            buffer += "\(result) = \(rightResult);\n"
+            addIndent()
+            buffer += "\(endLabel):\n"
+            return result
+            
+        case let .notOp(expr, _):
+            let exprResult = generateExpressionSSA(expr)
+            let result = nextTemp()
+            addIndent()
+            buffer += "bool \(result) = !\(exprResult);\n"
+            return result
         }
     }
 

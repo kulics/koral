@@ -150,7 +150,19 @@ public class TypeChecker {
                 elseBranch: typedElse,
                 type: typedThen.type
             )
-            
+        
+        case let .whileExpression(condition, body):
+            let typedCondition = try inferTypedExpression(condition)
+            if typedCondition.type != .bool {
+                throw SemanticError.typeMismatch(expected: "Bool", got: typedCondition.type.description)
+            }
+            let typedBody = try inferTypedExpression(body)
+            return .whileExpr(
+                condition: typedCondition,
+                body: typedBody,
+                type: .void
+            )
+        
         case let .functionCall(name, arguments):
             guard let type = currentScope.lookup(name) else {
                 throw SemanticError.functionNotFound(name)
@@ -186,17 +198,28 @@ public class TypeChecker {
                 type: returns
             )
             
-        case let .whileExpression(condition, body):
-            let typedCondition = try inferTypedExpression(condition)
-            if (typedCondition.type != .bool) {
-                throw SemanticError.typeMismatch(expected: "Bool", got: typedCondition.type.description)
+        case let .andExpression(left, right):
+            let typedLeft = try inferTypedExpression(left)
+            let typedRight = try inferTypedExpression(right)
+            if typedLeft.type != .bool || typedRight.type != .bool {
+                throw SemanticError.typeMismatch(expected: "Bool", got: "\(typedLeft.type) and \(typedRight.type)")
             }
-            let typedBody = try inferTypedExpression(body)
-            return .whileExpr(
-                condition: typedCondition,
-                body: typedBody,
-                type: .void
-            )
+            return .andOp(left: typedLeft, right: typedRight, type: .bool)
+            
+        case let .orExpression(left, right):
+            let typedLeft = try inferTypedExpression(left)
+            let typedRight = try inferTypedExpression(right)
+            if typedLeft.type != .bool || typedRight.type != .bool {
+                throw SemanticError.typeMismatch(expected: "Bool", got: "\(typedLeft.type) and \(typedRight.type)")
+            }
+            return .orOp(left: typedLeft, right: typedRight, type: .bool)
+            
+        case let .notExpression(expr):
+            let typedExpr = try inferTypedExpression(expr)
+            if typedExpr.type != .bool {
+                throw SemanticError.typeMismatch(expected: "Bool", got: typedExpr.type.description)
+            }
+            return .notOp(expr: typedExpr, type: .bool)
         }
     }
 

@@ -276,16 +276,30 @@ printLine( a <= b );   // <= less than or equal to
 
 ### Logical Operators
 
-Logical operators are also used primarily in judgment conditions to perform logical operations (AND, OR, and NOT).
+Logical operators are mainly used to perform logical operations (AND, OR, and NOT) on two Bool type operands.
 
 For example:
 
 ```
 let a = true;
 let b = false;
-printLine( a & b );     // AND, both are true at the same time
-printLine( a | b );     // OR, one of them is true
-printLine( !a );        // NOT, boolean inversion
+printLine( a and b );       // AND, both must be true to be true
+printLine( a or b );        // OR, true if either one is true
+printLine( not a );         // NOT, boolean inversion
+```
+
+The `and` and `or` operators have short-circuit semantics. Short-circuit logic operations can skip some unnecessary calculations to save computational resources or avoid side effects.
+
+When the value of the expression on the left side of the `and` operator is `false`, the evaluation of the expression on the right side of the `and` operator will be skipped.
+
+```
+let a = false and f(); // will not execute f()
+```
+
+When the value of the expression on the left side of the `or` operator is `true`, the evaluation of the expression on the right side of the `or` operator will be skipped.
+
+```
+let a = true or f(); // will not execute f()
 ```
 
 ## Selection Structure
@@ -321,30 +335,6 @@ When we don't need to deal with else branching, we can omit the else branching, 
 
 ```
 let main() = if 1 == 1 then printLine("yes");
-```
-
-### Short circuit logic operation
-
-In the conditions of the select or the loop structure, we can use short-circuit logic operations `and` and `or` to combine the logic. The short-circuit logic operation's can skip some unnecessary computations to save computational resources or avoid side effects.
-
-The short-circuit logic and is represented by `and`, and when the condition on the left side is `false`, the condition on the right side will be skipped.
-
-```
-let main() = {
-    if false and f() then { // will not execute f()
-        ...
-    }
-}
-```
-
-The short-circuit logic or is represented by `or`, and when the condition on the left side is `true`, the condition on the right side will be skipped.
-
-```
-let main() = {
-    if true or f() then { // will not execute f()
-        ...
-    }
-}
 ```
 
 ### Initialization Statements

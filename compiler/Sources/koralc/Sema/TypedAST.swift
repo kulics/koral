@@ -30,6 +30,9 @@ public indirect enum TypedExpressionNode {
     case boolLiteral(value: Bool, type: Type)
     case arithmeticOp(left: TypedExpressionNode, op: ArithmeticOperator, right: TypedExpressionNode, type: Type)
     case comparisonOp(left: TypedExpressionNode, op: ComparisonOperator, right: TypedExpressionNode, type: Type)
+    case andOp(left: TypedExpressionNode, right: TypedExpressionNode, type: Type) 
+    case orOp(left: TypedExpressionNode, right: TypedExpressionNode, type: Type)
+    case notOp(expr: TypedExpressionNode, type: Type)
     case variable(identifier: TypedIdentifierNode)
     case block(statements: [TypedStatementNode], finalExpr: TypedExpressionNode?, type: Type)
     case ifExpr(condition: TypedExpressionNode, thenBranch: TypedExpressionNode, elseBranch: TypedExpressionNode, type: Type)
@@ -46,6 +49,9 @@ extension TypedExpressionNode {
              .boolLiteral(_, let type),
              .arithmeticOp(_, _, _, let type),
              .comparisonOp(_, _, _, let type),
+             .andOp(_, _, let type),
+             .orOp(_, _, let type),
+             .notOp(_, let type),
              .block(_, _, let type),
              .ifExpr(_, _, _, let type),
              .functionCall(_, _, let type),

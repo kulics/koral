@@ -31,6 +31,9 @@ public enum Token: CustomStringConvertible {
     case thenKeyword    // 'then' keyword
     case elseKeyword    // 'else' keyword
     case whileKeyword   // 'while' keyword
+    case andKeyword     // 'and' keyword
+    case orKeyword      // 'or' keyword
+    case notKeyword     // 'not' keyword
 
     // Add static operator function to compare if the same item
     public static func ===(lhs: Token, rhs: Token) -> Bool {
@@ -64,7 +67,10 @@ public enum Token: CustomStringConvertible {
              (.ifKeyword, .ifKeyword),
              (.thenKeyword, .thenKeyword),
              (.elseKeyword, .elseKeyword),
-             (.whileKeyword, .whileKeyword):
+             (.whileKeyword, .whileKeyword),
+             (.andKeyword, .andKeyword),
+             (.orKeyword, .orKeyword),
+             (.notKeyword, .notKeyword):
             return true
         default:
             return false
@@ -139,6 +145,12 @@ public enum Token: CustomStringConvertible {
             return "else"
         case .whileKeyword:
             return "while"
+        case .andKeyword:
+            return "and"
+        case .orKeyword:
+            return "or"
+        case .notKeyword:
+            return "not"
         }
     }
 }
@@ -160,11 +172,11 @@ extension LexerError: CustomStringConvertible {
     public var description: String {
         switch self {
         case let .invalidFloat(line, msg):
-            return "Line \(line): Invalid float number: \(msg)"
+            "Line \(line): Invalid float number: \(msg)"
         case let .invalidString(line, msg):
-            return "Line \(line): Invalid string: \(msg)"
+            "Line \(line): Invalid string: \(msg)"
         case let .unexpectedCharacter(line, msg):
-            return "Line \(line): Unexpected character: \(msg)"
+            "Line \(line): Unexpected character: \(msg)"
         }
     }
 }
@@ -177,7 +189,7 @@ public class Lexer {
     
     // Current line number property
     public var currentLine: Int {
-        return _line
+        self._line
     }
 
     public init(input: String) {
@@ -234,10 +246,10 @@ public class Lexer {
             }
         }
 
-        if hasDot {
-            return .float(Double(numStr)!)
+        return if hasDot {
+            .float(Double(numStr)!)
         } else {
-            return .integer(Int(numStr)!)
+            .integer(Int(numStr)!)
         }
     }
 
@@ -339,33 +351,29 @@ public class Lexer {
         case let c where c.isNumber:
             position = input.index(before: position)
             let numberLiteral = try readNumber()
-            switch numberLiteral {
+            return switch numberLiteral {
             case let .integer(num):
-                return .integer(num)
+                .integer(num)
             case let .float(num):
-                return .float(num)
+                .float(num)
             }
         case let c where c.isLetter:
             position = input.index(before: position)
             let id = readIdentifier()
-            if id == "let" {
-                return .letKeyword
-            } else if id == "mut" {
-                return .mutKeyword
-            } else if id == "true" {
-                return .bool(true)
-            } else if id == "false" {
-                return .bool(false)
-            } else if id == "if" {
-                return .ifKeyword
-            } else if id == "then" {
-                return .thenKeyword
-            } else if id == "else" {
-                return .elseKeyword
-            } else if id == "while" {
-                return .whileKeyword
+            return switch id {
+                case "let": .letKeyword
+                case "mut": .mutKeyword
+                case "true": .bool(true)
+                case "false": .bool(false)
+                case "if": .ifKeyword
+                case "then": .thenKeyword
+                case "else": .elseKeyword
+                case "while": .whileKeyword
+                case "and": .andKeyword
+                case "or": .orKeyword
+                case "not": .notKeyword
+                default:  .identifier(id)
             }
-            return .identifier(id)
         default:
             throw LexerError.unexpectedCharacter(line: _line, String(char))
         }
