@@ -352,7 +352,7 @@ public class Parser {
             return .stringLiteral(str)
         case let .bool(value):
             try match(.bool(value))
-            return .boolLiteral(value)
+            return .booleanLiteral(value)
         default:
             throw ParserError.unexpectedToken(
                 line: lexer.currentLine, 

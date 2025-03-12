@@ -40,8 +40,8 @@ public class CodeGen {
                     
                     // 简单表达式直接初始化
                     switch value {
-                        case .intLiteral(_,_), .floatLiteral(_,_), 
-                            .stringLiteral(_,_), .boolLiteral(_,_):
+                        case .integerLiteral(_,_), .floatLiteral(_,_), 
+                            .stringLiteral(_,_), .booleanLiteral(_,_):
                             buffer += "\(cType) \(identifier.name) = "
                             buffer += generateExpressionSSA(value)
                             buffer += ";\n"
@@ -112,7 +112,7 @@ public class CodeGen {
 
     private func generateExpressionSSA(_ expr: TypedExpressionNode) -> String {
         switch expr {
-        case let .intLiteral(value, _):
+        case let .integerLiteral(value, _):
             return String(value)
             
         case let .floatLiteral(value, _):
@@ -121,13 +121,13 @@ public class CodeGen {
         case let .stringLiteral(value, _):
             return "\"\(value)\""
             
-        case let .boolLiteral(value, _):
+        case let .booleanLiteral(value, _):
             return value ? "true" : "false"
             
         case let .variable(identifier):
             return identifier.name
             
-        case let .block(statements, finalExpr, type):
+        case let .blockExpression(statements, finalExpr, type):
             for stmt in statements {
                 generateStatement(stmt)
             }
@@ -146,7 +146,7 @@ public class CodeGen {
             }
             return ""
             
-        case let .arithmeticOp(left, op, right, type):
+        case let .arithmeticExpression(left, op, right, type):
             let leftResult = generateExpressionSSA(left)
             let rightResult = generateExpressionSSA(right)
             let result = nextTemp()
@@ -154,7 +154,7 @@ public class CodeGen {
             buffer += "\(getCType(type)) \(result) = \(leftResult) \(arithmeticOpToC(op)) \(rightResult);\n"
             return result
             
-        case let .comparisonOp(left, op, right, type):
+        case let .comparisonExpression(left, op, right, type):
             let leftResult = generateExpressionSSA(left)
             let rightResult = generateExpressionSSA(right)
             let result = nextTemp()
@@ -162,7 +162,7 @@ public class CodeGen {
             buffer += "\(getCType(type)) \(result) = \(leftResult) \(comparisonOpToC(op)) \(rightResult);\n"
             return result
             
-        case let .ifExpr(condition, thenBranch, elseBranch, type):
+        case let .ifExpression(condition, thenBranch, elseBranch, type):
             let conditionVar = generateExpressionSSA(condition)
             
             if type == .void {
@@ -220,7 +220,7 @@ public class CodeGen {
                 return result
             }
 
-        case let .whileExpr(condition, body, _):
+        case let .whileExpression(condition, body, _):
             let labelPrefix = nextTemp()
             addIndent()
             buffer += "\(labelPrefix)_start:\n"
@@ -234,7 +234,7 @@ public class CodeGen {
             buffer += "\(labelPrefix)_end:\n"
             return ""
             
-        case let .andOp(left, right, _):
+        case let .andExpression(left, right, _):
             let result = nextTemp()
             let leftResult = generateExpressionSSA(left)
             let endLabel = nextTemp()
@@ -258,7 +258,7 @@ public class CodeGen {
             buffer += "\(endLabel):\n"
             return result
             
-        case let .orOp(left, right, _):
+        case let .orExpression(left, right, _):
             let result = nextTemp()
             let leftResult = generateExpressionSSA(left) 
             let endLabel = nextTemp()
@@ -282,7 +282,7 @@ public class CodeGen {
             buffer += "\(endLabel):\n"
             return result
             
-        case let .notOp(expr, _):
+        case let .notExpression(expr, _):
             let exprResult = generateExpressionSSA(expr)
             let result = nextTemp()
             addIndent()
@@ -298,7 +298,7 @@ public class CodeGen {
 
     private func generateStatement(_ stmt: TypedStatementNode) {
         switch stmt {
-        case let .variableDecl(identifier, value, _):
+        case let .variableDeclaration(identifier, value, _):
             // void 类型的值不能赋给变量
             if value.type == .void {
                 _ = generateExpressionSSA(value)

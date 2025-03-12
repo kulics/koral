@@ -44,7 +44,7 @@ public indirect enum ExpressionNode {
     case integerLiteral(Int)
     case floatLiteral(Double)
     case stringLiteral(String)
-    case boolLiteral(Bool)
+    case booleanLiteral(Bool)
     case arithmeticExpression(left: ExpressionNode, operator: ArithmeticOperator, right: ExpressionNode)
     case comparisonExpression(left: ExpressionNode, operator: ComparisonOperator, right: ExpressionNode)
     case andExpression(left: ExpressionNode, right: ExpressionNode)

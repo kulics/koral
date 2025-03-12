@@ -32,7 +32,7 @@ public func printTypedAST(_ node: TypedProgram) {
     
     func printTypedStatement(_ stmt: TypedStatementNode) {
         switch stmt {
-        case let .variableDecl(identifier, value, mutable):
+        case let .variableDeclaration(identifier, value, mutable):
             print("\(indent)VariableDeclaration:")
             print("\(indent)  Identifier: \(identifier.name): \(identifier.type)")
             print("\(indent)  Mutable: \(mutable)")
@@ -56,7 +56,7 @@ public func printTypedAST(_ node: TypedProgram) {
 
     func printTypedExpression(_ expr: TypedExpressionNode) {
         switch expr {
-        case let .intLiteral(value, type):
+        case let .integerLiteral(value, type):
             print("\(indent)IntLiteral: \(value) : \(type)")
             
         case let .floatLiteral(value, type):
@@ -65,13 +65,13 @@ public func printTypedAST(_ node: TypedProgram) {
         case let .stringLiteral(value, type):
             print("\(indent)StringLiteral: \"\(value)\" : \(type)")
             
-        case let .boolLiteral(value, type):
+        case let .booleanLiteral(value, type):
             print("\(indent)BoolLiteral: \(value) : \(type)")
             
         case let .variable(identifier):
             print("\(indent)Variable: \(identifier.name) : \(identifier.type)")
             
-        case let .block(statements, finalExpr, type):
+        case let .blockExpression(statements, finalExpr, type):
             print("\(indent)Block: \(type)")
             withIndent {
                 for stmt in statements {
@@ -85,8 +85,8 @@ public func printTypedAST(_ node: TypedProgram) {
                 }
             }
             
-        case let .arithmeticOp(left, op, right, type):
-            print("\(indent)ArithmeticOperation: \(op) : \(type)")
+        case let .arithmeticExpression(left, op, right, type):
+            print("\(indent)ArithmeticExpression: \(op) : \(type)")
             withIndent {
                 print("\(indent)Left:")
                 withIndent {
@@ -98,8 +98,8 @@ public func printTypedAST(_ node: TypedProgram) {
                 }
             }
             
-        case let .comparisonOp(left, op, right, type):
-            print("\(indent)ComparisonOperation: \(op) : \(type)")
+        case let .comparisonExpression(left, op, right, type):
+            print("\(indent)ComparisonExpression: \(op) : \(type)")
             withIndent {
                 print("\(indent)Left:")
                 withIndent {
@@ -111,7 +111,7 @@ public func printTypedAST(_ node: TypedProgram) {
                 }
             }
             
-        case let .ifExpr(condition, thenBranch, elseBranch, type):
+        case let .ifExpression(condition, thenBranch, elseBranch, type):
             print("\(indent)IfExpression: \(type)")
             withIndent {
                 print("\(indent)Condition:")
@@ -128,7 +128,7 @@ public func printTypedAST(_ node: TypedProgram) {
                 }
             }
 
-        case let .whileExpr(condition, body, type):
+        case let .whileExpression(condition, body, type):
             print("\(indent)WhileExpression: \(type)")
             withIndent {
                 print("\(indent)Condition:")
@@ -152,8 +152,8 @@ public func printTypedAST(_ node: TypedProgram) {
                 }
             }
 
-        case let .andOp(left, right, type):
-            print("\(indent)AndOperation: \(type)")
+        case let .andExpression(left, right, type):
+            print("\(indent)AndExpression: \(type)")
             withIndent {
                 print("\(indent)Left:")
                 withIndent {
@@ -165,8 +165,8 @@ public func printTypedAST(_ node: TypedProgram) {
                 }
             }
 
-        case let .orOp(left, right, type):
-            print("\(indent)OrOperation: \(type)")
+        case let .orExpression(left, right, type):
+            print("\(indent)OrExpression: \(type)")
             withIndent {
                 print("\(indent)Left:")
                 withIndent {
@@ -178,8 +178,8 @@ public func printTypedAST(_ node: TypedProgram) {
                 }
             }
 
-        case let .notOp(expr, type):
-            print("\(indent)NotOperation: \(type)")
+        case let .notExpression(expr, type):
+            print("\(indent)NotExpression: \(type)")
             withIndent {
                 printTypedExpression(expr)
             }

@@ -88,7 +88,7 @@ public class TypeChecker {
     private func inferTypedExpression(_ expr: ExpressionNode) throws -> TypedExpressionNode {
         switch expr {
         case let .integerLiteral(value):
-            return .intLiteral(value: value, type: .int)
+            return .integerLiteral(value: value, type: .int)
             
         case let .floatLiteral(value):
             return .floatLiteral(value: value, type: .float)
@@ -96,8 +96,8 @@ public class TypeChecker {
         case let .stringLiteral(value):
             return .stringLiteral(value: value, type: .string)
             
-        case let .boolLiteral(value):
-            return .boolLiteral(value: value, type: .bool)
+        case let .booleanLiteral(value):
+            return .booleanLiteral(value: value, type: .bool)
             
         case let .identifier(name):
             guard let type = currentScope.lookup(name) else {
@@ -114,22 +114,22 @@ public class TypeChecker {
                 }
                 if let finalExpr = finalExpression {
                     let typedFinalExpr = try inferTypedExpression(finalExpr)
-                    return .block(statements: typedStatements, finalExpr: typedFinalExpr, type: typedFinalExpr.type)
+                    return .blockExpression(statements: typedStatements, finalExpression: typedFinalExpr, type: typedFinalExpr.type)
                 }
-                return .block(statements: typedStatements, finalExpr: nil, type: .void)
+                return .blockExpression(statements: typedStatements, finalExpression: nil, type: .void)
             }
             
         case let .arithmeticExpression(left, op, right):
             let typedLeft = try inferTypedExpression(left)
             let typedRight = try inferTypedExpression(right)
             let resultType = try checkArithmeticOp(op, typedLeft.type, typedRight.type)
-            return .arithmeticOp(left: typedLeft, op: op, right: typedRight, type: resultType)
+            return .arithmeticExpression(left: typedLeft, op: op, right: typedRight, type: resultType)
             
         case let .comparisonExpression(left, op, right):
             let typedLeft = try inferTypedExpression(left)
             let typedRight = try inferTypedExpression(right)
             let resultType = try checkComparisonOp(op, typedLeft.type, typedRight.type)
-            return .comparisonOp(left: typedLeft, op: op, right: typedRight, type: resultType)
+            return .comparisonExpression(left: typedLeft, op: op, right: typedRight, type: resultType)
             
         case let .ifExpression(condition, thenBranch, elseBranch):
             let typedCondition = try inferTypedExpression(condition)
@@ -144,7 +144,7 @@ public class TypeChecker {
                     got: typedElse.type.description
                 )
             }
-            return .ifExpr(
+            return .ifExpression(
                 condition: typedCondition,
                 thenBranch: typedThen,
                 elseBranch: typedElse,
@@ -157,7 +157,7 @@ public class TypeChecker {
                 throw SemanticError.typeMismatch(expected: "Bool", got: typedCondition.type.description)
             }
             let typedBody = try inferTypedExpression(body)
-            return .whileExpr(
+            return .whileExpression(
                 condition: typedCondition,
                 body: typedBody,
                 type: .void
@@ -204,7 +204,7 @@ public class TypeChecker {
             if typedLeft.type != .bool || typedRight.type != .bool {
                 throw SemanticError.typeMismatch(expected: "Bool", got: "\(typedLeft.type) and \(typedRight.type)")
             }
-            return .andOp(left: typedLeft, right: typedRight, type: .bool)
+            return .andExpression(left: typedLeft, right: typedRight, type: .bool)
             
         case let .orExpression(left, right):
             let typedLeft = try inferTypedExpression(left)
@@ -212,14 +212,14 @@ public class TypeChecker {
             if typedLeft.type != .bool || typedRight.type != .bool {
                 throw SemanticError.typeMismatch(expected: "Bool", got: "\(typedLeft.type) and \(typedRight.type)")
             }
-            return .orOp(left: typedLeft, right: typedRight, type: .bool)
+            return .orExpression(left: typedLeft, right: typedRight, type: .bool)
             
         case let .notExpression(expr):
             let typedExpr = try inferTypedExpression(expr)
             if typedExpr.type != .bool {
                 throw SemanticError.typeMismatch(expected: "Bool", got: typedExpr.type.description)
             }
-            return .notOp(expr: typedExpr, type: .bool)
+            return .notExpression(expression: typedExpr, type: .bool)
         }
     }
 
@@ -236,7 +236,7 @@ public class TypeChecker {
                 throw SemanticError.typeMismatch(expected: type.description, got: typedValue.type.description)
             }
             currentScope.define(name, type, mutable: mutable)
-            return .variableDecl(
+            return .variableDeclaration(
                 identifier: TypedIdentifierNode(name: name, type: type),
                 value: typedValue,
                 mutable: mutable
