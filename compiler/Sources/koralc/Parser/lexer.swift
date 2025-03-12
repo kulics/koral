@@ -34,6 +34,7 @@ public enum Token: CustomStringConvertible {
     case andKeyword     // 'and' keyword
     case orKeyword      // 'or' keyword
     case notKeyword     // 'not' keyword
+    case colon          // Colon ':'
 
     // Add static operator function to compare if the same item
     public static func ===(lhs: Token, rhs: Token) -> Bool {
@@ -70,7 +71,8 @@ public enum Token: CustomStringConvertible {
              (.whileKeyword, .whileKeyword),
              (.andKeyword, .andKeyword),
              (.orKeyword, .orKeyword),
-             (.notKeyword, .notKeyword):
+             (.notKeyword, .notKeyword),
+             (.colon, .colon):
             return true
         default:
             return false
@@ -151,6 +153,8 @@ public enum Token: CustomStringConvertible {
             return "or"
         case .notKeyword:
             return "not"
+        case .colon:
+            return ":"
         }
     }
 }
@@ -344,6 +348,8 @@ public class Lexer {
             return .leftBrace
         case "}":
             return .rightBrace
+        case ":":
+            return .colon
         case "\"":
             position = input.index(before: position)
             let str = try readString()

@@ -9,6 +9,7 @@ public func printAST(_ node: ASTNode) {
             print("\(indent)  Name: \(name)")
             print("\(indent)  Type: \(type)")
             print("\(indent)  Mutable: \(mutable)")
+            print("\(indent)  Value:")
             withIndent {
                 printExpression(value)
             }
