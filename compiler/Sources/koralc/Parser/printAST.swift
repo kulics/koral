@@ -65,7 +65,7 @@ public func printAST(_ node: ASTNode) {
             print("\(indent)FloatLiteral: \(value)")
         case let .stringLiteral(str):
             print("\(indent)StringLiteral: \(str)")
-        case let .boolLiteral(value):
+        case let .booleanLiteral(value):
             print("\(indent)BoolLiteral: \(value)")
         case let .identifier(name):
             print("\(indent)Identifier: \(name)")
