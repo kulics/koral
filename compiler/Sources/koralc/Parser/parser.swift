@@ -109,6 +109,7 @@ public class Parser {
 
     // Parse global variable declaration
     private func globalVariableDeclaration(name: String, mutable: Bool) throws -> GlobalNode {
+        try match(.colon)
         let type = try parseType()
         try match(.equal)
         let value = try expression()
@@ -125,7 +126,7 @@ public class Parser {
                 throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
             }
             try match(.identifier(paramName))
-            
+            try match(.colon)
             let paramType = try parseType()
             
             parameters.append((name: paramName, type: paramType))
@@ -136,6 +137,7 @@ public class Parser {
         }
         try match(.rightParen)
         
+        try match(.colon)
         let returnType = try parseType()
         
         try match(.equal)
@@ -184,7 +186,7 @@ public class Parser {
             throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
         }
         try match(.identifier(name))
-
+        try match(.colon)
         let type = try parseType()
         try match(.equal)
         let value = try expression()

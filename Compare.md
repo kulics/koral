@@ -80,7 +80,7 @@ let myConstant = 42
 ### Koral
 
 ```
-let explicitDouble Float64 = 70.0;
+let explicitDouble: Float64 = 70.0;
 ```
 
 ### C#
@@ -368,7 +368,7 @@ let emptyDictionary = [String: Float]()
 ### Koral
 
 ```
-let greet(name String, day String) String = 
+let greet(name: String, day: String): String = 
     "Hello \{name}, today is \{day}.";
 greet("Bob", "Tuesday");
 ```
@@ -415,7 +415,7 @@ greet("Bob", "Tuesday")
 ### Koral
 
 ```
-let getGasPrices() (Float, Float, Float)Tuple = (3.59, 3.69, 3.79);
+let getGasPrices(): (Float, Float, Float)Tuple = (3.59, 3.69, 3.79);
 ```
 
 ### C#
@@ -454,8 +454,8 @@ func getGasPrices() -> (Double, Double, Double) {
 ### Koral
 
 ```
-let makeIncrementer() (Int, Int)Func = {
-    let addOne(number Int) = 1 + number;
+let makeIncrementer(): (Int, Int)Func = {
+    let addOne(number: Int) = 1 + number;
     addOne
 }
 let increment = makeIncrementer();
@@ -524,8 +524,8 @@ increment(7)
 ### Koral
 
 ```
-type mut Shape(numberOfSides Int) {
-    self.simpleDescription() String =
+type mut Shape(numberOfSides: Int) {
+    self.simpleDescription(): String =
         "A shape with \{self.numberOfSides} sides.";
 }
 ```
@@ -621,18 +621,18 @@ var shapeDescription = shape.simpleDescription()
 ### Koral
 
 ```
-type NamedShape(name String, numberOfSides Int) {
-    self.simpleDescription() String =
+type NamedShape(name: String, numberOfSides: Int) {
+    self.simpleDescription(): String =
         "A shape with \{self.numberOfSides} sides.";
 }
 
-type Square(as namedShape NamedShape, sideLength Float) {
-    new(sideLength Float, name String): Square = Square(NamedShape(name, 4), sideLength);
+type Square(as namedShape: NamedShape, sideLength: Float) {
+    new(sideLength: Float, name: String): Square = Square(NamedShape(name, 4), sideLength);
 
-    self.simpleDescription() String =
+    self.simpleDescription(): String =
         "A square with sides of length \{self.sideLength}.";
 
-    self.area() Float = sideLength * sideLength;
+    self.area(): Float = sideLength * sideLength;
 }
 
 let test = Square.new(5.2, "square");
@@ -994,10 +994,10 @@ for case movie as Movie in someObjects {
 
 ```
 type Nameable {
-    self.name() String;
+    self.name(): String;
 }
 
-let f(x Nameable) Void = printLine("Name is " + x.name());
+let f(x: Nameable): Void = printLine("Name is " + x.name());
 ```
 
 ### C#
@@ -1058,9 +1058,9 @@ func f(x: any Nameable) {
 type Dog();
 
 given Dog {
-    self.name() String = "Dog";
+    self.name(): String = "Dog";
 
-    self.weight() Int = 30;
+    self.weight(): Int = 30;
 }
 ```
 
