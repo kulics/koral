@@ -267,7 +267,7 @@ For example:
 let a = 4;
 let b = 2;
 printLine( a == b );   // == equal to
-printLine( a != b );   // != not equal to
+printLine( a <> b );   // <> not equal to
 printLine( a > b );    // > Greater than
 printLine( a >= b );   // >= Greater than or equal to
 printLine( a < b );    // < less than
