@@ -12,7 +12,7 @@ public enum Token: CustomStringConvertible {
     case modulo         // Modulo operator '%'
     case equal          // Equal sign '='
     case equalEqual     // Equals operator '=='
-    case notEqual       // Not equals operator '!='
+    case notEqual       // Not equals operator '<>'
     case greater        // Greater than operator '>'
     case less           // Less than operator '<'
     case greaterEqual   // Greater than or equal operator '>='
@@ -316,12 +316,6 @@ public class Lexer {
                 position = input.index(before: position)
                 return .equal
             }
-        case "!":
-            if let nextChar = getNextChar(), nextChar == "=" {
-                return .notEqual
-            } else {
-                throw LexerError.unexpectedCharacter(line: _line, "!")
-            }
         case ">":
             if let nextChar = getNextChar(), nextChar == "=" {
                 return .greaterEqual
@@ -330,7 +324,9 @@ public class Lexer {
                 return .greater
             }
         case "<":
-            if let nextChar = getNextChar(), nextChar == "=" {
+            if let nextChar = getNextChar(), nextChar == ">" {
+                return .notEqual
+            } else if let nextChar = getNextChar(), nextChar == "=" {
                 return .lessEqual
             } else {
                 position = input.index(before: position)

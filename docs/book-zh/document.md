@@ -265,7 +265,7 @@ printLine( a % b );    // % 取余，意思是整除后剩下的余数
 let a = 4;
 let b = 2;
 printLine( a == b );     // == 等于
-printLine( a != b );     // != 不等于
+printLine( a <> b );     // <> 不等于 
 printLine( a > b );      // > 大于
 printLine( a >= b );     // >= 大于或等于
 printLine( a < b );      // < 小于
