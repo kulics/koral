@@ -5,10 +5,11 @@ let currentPath = fileManager.currentDirectoryPath
 
 // use test file for now
 let testPath = currentPath
-                        .appendingPathComponent("Tests")
-                        .appendingPathComponent("koralcTests")
-                        .appendingPathComponent("test.koral")
+                        
 let fileURL = URL(fileURLWithPath: testPath)
+                .appendingPathComponent("Tests")
+                .appendingPathComponent("koralcTests")
+                .appendingPathComponent("test.koral")
 
 do {
     let input = try String(contentsOf: fileURL, encoding: .utf8)
