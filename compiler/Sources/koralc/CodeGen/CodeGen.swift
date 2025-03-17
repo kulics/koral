@@ -25,6 +25,14 @@ public class CodeGen {
     private func generateProgram(_ program: TypedProgram) {
         switch program {
         case let .program(nodes):
+            // 先生成所有类型声明
+            for node in nodes {
+                if case let .globalTypeDeclaration(identifier, parameters) = node {
+                    generateTypeDeclaration(identifier, parameters)
+                }
+            }
+            buffer += "\n"
+            
             // 先生成所有函数声明
             for node in nodes {
                 if case let .globalFunction(identifier, params, _) = node {
@@ -351,6 +359,8 @@ public class CodeGen {
         case .void: return "void"
         case .function(_, _):
             fatalError("Function type not supported in getCType")
+        case let .userDefined(name, _):
+            return "struct \(name)"
         }
     }
 
@@ -372,5 +382,16 @@ public class CodeGen {
         indent += "    "
         body()
         indent = oldIndent
+    }
+
+    private func generateTypeDeclaration(_ identifier: TypedIdentifierNode, _ parameters: [TypedIdentifierNode]) {
+        buffer += "struct \(identifier.name) {\n"
+        withIndent {
+            for param in parameters {
+                addIndent()
+                buffer += "\(getCType(param.type)) \(param.name);\n"
+            }
+        }
+        buffer += "};\n"
     }
 }

@@ -15,6 +15,10 @@ public indirect enum TypedGlobalNode {
         parameters: [TypedIdentifierNode],
         body: TypedExpressionNode
     )
+    case globalTypeDeclaration(
+        identifier: TypedIdentifierNode,
+        parameters: [TypedIdentifierNode]
+    )
 }
 
 public indirect enum TypedStatementNode {

@@ -15,6 +15,10 @@ public indirect enum GlobalNode {
         returnType: TypeNode, 
         body: ExpressionNode
     )
+    case globalTypeDeclaration(
+        name: String,
+        parameters: [(name: String, type: TypeNode)]
+    )
 }
 
 public indirect enum StatementNode {
