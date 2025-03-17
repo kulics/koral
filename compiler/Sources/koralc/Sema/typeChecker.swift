@@ -29,7 +29,9 @@ public class TypeChecker {
             guard case let .identifier(typeStr) = typeNode else {
                 throw SemanticError.invalidNode
             }
-            let type = try Type(type: typeStr)
+            guard let type = currentScope.resolveType(typeStr) else {
+                throw SemanticError.undefinedType(typeStr)
+            }
             let typedValue = try inferTypedExpression(value)
             if typedValue.type != type {
                 throw SemanticError.typeMismatch(expected: type.description, got: typedValue.type.description)
@@ -48,12 +50,16 @@ public class TypeChecker {
             guard case let .identifier(returnTypeStr) = returnTypeNode else {
                 throw SemanticError.invalidNode
             }
-            let returnType = try Type(type: returnTypeStr)
+            guard let returnType = currentScope.resolveType(returnTypeStr) else {
+                throw SemanticError.undefinedType(returnTypeStr)
+            }
             let params = try parameters.map { param -> TypedIdentifierNode in 
                 guard case let .identifier(typeStr) = param.type else {
                     throw SemanticError.invalidNode
                 }
-                let paramType = try Type(type: typeStr)
+                guard let paramType = currentScope.resolveType(typeStr) else {
+                    throw SemanticError.undefinedType(typeStr)
+                }
                 return TypedIdentifierNode(name: param.name, type: paramType)
             }
             let (typedBody, functionType) = try checkFunctionBody(params, returnType, body)
@@ -73,7 +79,9 @@ public class TypeChecker {
                 guard case let .identifier(typeStr) = param.type else {
                     throw SemanticError.invalidNode
                 }
-                let paramType = try Type(type: typeStr)
+                guard let paramType = currentScope.resolveType(typeStr) else {
+                    throw SemanticError.undefinedType(typeStr)
+                }
                 return TypedIdentifierNode(name: param.name, type: paramType)
             }
             
@@ -252,7 +260,10 @@ public class TypeChecker {
             guard case let .identifier(typeStr) = typeNode else {
                 throw SemanticError.invalidNode
             }
-            let type = try Type(type: typeStr)
+            guard let type = currentScope.resolveType(typeStr) else {
+                throw SemanticError.undefinedType(typeStr)
+            }
+            
             let typedValue = try inferTypedExpression(value)
             if typedValue.type != type {
                 throw SemanticError.typeMismatch(expected: type.description, got: typedValue.type.description)

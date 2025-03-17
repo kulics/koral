@@ -2,7 +2,7 @@ public class Scope {
     private var symbols: [String: (Type, Bool)]  // (type, mutability)
     private let parent: Scope?
     private var types: [String: Type] = [:]
-    
+       
     public init(parent: Scope? = nil) {
         self.symbols = [:]
         self.parent = parent
@@ -39,5 +39,22 @@ public class Scope {
             return type
         }
         return parent?.lookupType(name)
+    }
+    
+    public func resolveType(_ name: String) -> Type? {
+        return switch name {
+        case "Int":
+            .int
+        case "Float":
+            .float
+        case "String":
+            .string
+        case "Bool":
+            .bool
+        case "Void":
+            .void
+        default:
+            lookupType(name)
+        }
     }
 }
