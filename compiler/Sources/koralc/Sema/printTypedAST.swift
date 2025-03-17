@@ -193,6 +193,17 @@ public func printTypedAST(_ node: TypedProgram) {
             withIndent {
                 printTypedExpression(expr)
             }
+            
+        case let .typeConstruction(identifier, arguments, type):
+            print("\(indent)TypeConstruction: \(identifier.name) : \(type)")
+            withIndent {
+                print("\(indent)Arguments:")
+                withIndent {
+                    for arg in arguments {
+                        printTypedExpression(arg)
+                    }
+                }
+            }
         }
     }
     

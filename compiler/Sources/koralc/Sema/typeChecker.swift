@@ -194,6 +194,40 @@ public class TypeChecker {
             )
         
         case let .functionCall(name, arguments):
+            // 先检查是否是类型构造
+            if let type = currentScope.lookupType(name) {
+                guard case let .userDefined(_, parameters) = type else {
+                    throw SemanticError.invalidOperation(op: "construct", type1: type.description, type2: "")
+                }
+                
+                if arguments.count != parameters.count {
+                    throw SemanticError.invalidArgumentCount(
+                        function: name,
+                        expected: parameters.count,
+                        got: arguments.count
+                    )
+                }
+                
+                var typedArguments: [TypedExpressionNode] = []
+                for (arg, expectedType) in zip(arguments, parameters) {
+                    let typedArg = try inferTypedExpression(arg)
+                    if typedArg.type != expectedType {
+                        throw SemanticError.typeMismatch(
+                            expected: expectedType.description,
+                            got: typedArg.type.description
+                        )
+                    }
+                    typedArguments.append(typedArg)
+                }
+                
+                return .typeConstruction(
+                    identifier: TypedIdentifierNode(name: name, type: type),
+                    arguments: typedArguments,
+                    type: type
+                )
+            }
+            
+            // 如果不是类型构造，按原来的函数调用处理
             guard let type = currentScope.lookup(name) else {
                 throw SemanticError.functionNotFound(name)
             }
