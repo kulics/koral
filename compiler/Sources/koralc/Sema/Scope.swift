@@ -1,6 +1,7 @@
 public class Scope {
     private var symbols: [String: (Type, Bool)]  // (type, mutability)
     private let parent: Scope?
+    private var types: [String: Type] = [:]
     
     public init(parent: Scope? = nil) {
         self.symbols = [:]
@@ -27,5 +28,16 @@ public class Scope {
     
     public func createChild() -> Scope {
         return Scope(parent: self)
+    }
+    
+    public func defineType(_ name: String, type: Type) throws {
+        types[name] = type
+    }
+    
+    public func lookupType(_ name: String) -> Type? {
+        if let type = types[name] {
+            return type
+        }
+        return parent?.lookupType(name)
     }
 }

@@ -28,6 +28,12 @@ public func printAST(_ node: ASTNode) {
                     printExpression(body)
                 }
             }
+            
+        case let .globalTypeDeclaration(name, parameters):
+            print("\(indent)TypeDeclaration \(name)")
+            for param in parameters {
+                print("\(indent)  \(param.name): \(param.type)")
+            }
         }
     }
 

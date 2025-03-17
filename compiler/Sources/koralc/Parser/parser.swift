@@ -93,6 +93,13 @@ public class Parser {
             } else {
                 return try globalVariableDeclaration(name: name, mutable: false)
             }
+        } else if currentToken === .typeKeyword {
+            try match(.typeKeyword)
+            guard case let .identifier(name) = currentToken else {
+                throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+            }
+            try match(.identifier(name))
+            return try parseTypeDeclaration(name)
         } else {
             throw ParserError.unexpectedToken(line: lexer.currentLine, got: currentToken.description)
         }
@@ -149,6 +156,30 @@ public class Parser {
             returnType: returnType,
             body: body
         )
+    }
+
+    // Parse type declaration
+    private func parseTypeDeclaration(_ name: String) throws -> GlobalNode {
+        try match(.leftParen)
+        
+        var parameters: [(name: String, type: TypeNode)] = []
+        while currentToken !== .rightParen {
+            guard case let .identifier(paramName) = currentToken else {
+                throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+            }
+            try match(.identifier(paramName))
+            try match(.colon)
+            let paramType = try parseType()
+            
+            parameters.append((name: paramName, type: paramType))
+            
+            if currentToken === .comma {
+                try match(.comma)
+            }
+        }
+        try match(.rightParen)
+        
+        return .globalTypeDeclaration(name: name, parameters: parameters)
     }
 
     // Parse statement
