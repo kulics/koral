@@ -296,6 +296,18 @@ public class CodeGen {
             addIndent()
             buffer += "bool \(result) = !\(exprResult);\n"
             return result
+
+        case let .typeConstruction(identifier, arguments, _):
+            // 先求值所有参数
+            let argResults = arguments.map(generateExpressionSSA)
+            
+            // 使用 C 语言的复合字面量语法进行初始化
+            let result = nextTemp()
+            addIndent()
+            buffer += "struct \(identifier.name) \(result) = {" 
+            buffer += argResults.joined(separator: ", ")
+            buffer += "};\n"
+            return result
         }
     }
 
