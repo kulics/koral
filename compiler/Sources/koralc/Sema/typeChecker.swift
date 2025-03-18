@@ -86,7 +86,10 @@ public class TypeChecker {
             }
             
             // Define the new type
-            let typeType = Type.userDefined(name, parameters: params.map { $0.type })
+            let typeType = Type.userDefined(
+                name: name, 
+                members: params.map { (name: $0.name, type: $0.type) }
+            )
             try currentScope.defineType(name, type: typeType)
             
             return .globalTypeDeclaration(
@@ -209,11 +212,11 @@ public class TypeChecker {
                 }
                 
                 var typedArguments: [TypedExpressionNode] = []
-                for (arg, expectedType) in zip(arguments, parameters) {
+                for (arg, expectedMember) in zip(arguments, parameters) {
                     let typedArg = try inferTypedExpression(arg)
-                    if typedArg.type != expectedType {
+                    if typedArg.type != expectedMember.type {
                         throw SemanticError.typeMismatch(
-                            expected: expectedType.description,
+                            expected: expectedMember.type.description,
                             got: typedArg.type.description
                         )
                     }
@@ -284,6 +287,28 @@ public class TypeChecker {
                 throw SemanticError.typeMismatch(expected: "Bool", got: typedExpr.type.description)
             }
             return .notExpression(expression: typedExpr, type: .bool)
+            
+        case let .memberAccess(expr, member):
+            let typedExpr = try inferTypedExpression(expr)
+            
+            // 检查基础表达式的类型是否是用户定义的类型
+            guard case let .userDefined(typeName, members) = typedExpr.type else {
+                throw SemanticError.invalidOperation(
+                    op: "member access",
+                    type1: typedExpr.type.description,
+                    type2: ""
+                )
+            }
+            
+            // 从成员列表中查找成员类型
+            guard let memberType = members.first(where: { $0.name == member })?.type else {
+                throw SemanticError.undefinedMember(member, typeName)
+            }
+            
+            return .memberAccess(
+                source: typedExpr,
+                member: TypedIdentifierNode(name: member, type: memberType)
+            )
         }
     }
 

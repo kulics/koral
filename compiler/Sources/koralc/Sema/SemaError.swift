@@ -1,4 +1,3 @@
-
 // Semantic error types
 public indirect enum SemanticError: Error {
     case typeMismatch(expected: String, got: String)
@@ -12,6 +11,7 @@ public indirect enum SemanticError: Error {
     case invalidArgumentCount(function: String, expected: Int, got: Int)
     case duplicateTypeDefinition(String)
     case undefinedType(String)
+    case undefinedMember(String, String) // member name, type name
 }
 
 extension SemanticError: CustomStringConvertible {
@@ -39,6 +39,8 @@ extension SemanticError: CustomStringConvertible {
             return "Duplicate type definition: \(name)"
         case let .undefinedType(name):
             return "Undefined type: \(name)"
+        case let .undefinedMember(member, type):
+            return "Member '\(member)' not found in type '\(type)'"
         }
     }
 }

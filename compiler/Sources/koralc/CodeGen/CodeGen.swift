@@ -298,15 +298,26 @@ public class CodeGen {
             return result
 
         case let .typeConstruction(identifier, arguments, _):
-            // 先求值所有参数
-            let argResults = arguments.map(generateExpressionSSA)
+            guard case let .userDefined(_, members) = identifier.type else {
+                fatalError("Expected user defined type")
+            }
             
-            // 使用 C 语言的复合字面量语法进行初始化
+            // 确保参数数量与成员数量匹配
+            assert(arguments.count == members.count)
+            
+            let argResults = arguments.map(generateExpressionSSA)
             let result = nextTemp()
             addIndent()
             buffer += "struct \(identifier.name) \(result) = {" 
             buffer += argResults.joined(separator: ", ")
             buffer += "};\n"
+            return result
+
+        case let .memberAccess(source, member):
+            let sourceResult = generateExpressionSSA(source)
+            let result = nextTemp()
+            addIndent()
+            buffer += "\(getCType(member.type)) \(result) = \(sourceResult).\(member.name);\n"
             return result
         }
     }
