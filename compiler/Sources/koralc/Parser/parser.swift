@@ -4,6 +4,9 @@ public enum ParserError: Error {
     case expectedTypeIdentifier(line: Int, got: String)
     case unexpectedEndOfFile(line: Int)
     case expectedFinalExpression(line: Int)
+    case invalidVariableName(line: Int, name: String)
+    case invalidFunctionName(line: Int, name: String)
+    case invalidTypeName(line: Int, name: String)
 }
 
 extension ParserError: CustomStringConvertible {
@@ -22,6 +25,12 @@ extension ParserError: CustomStringConvertible {
             return "Line \(line): Unexpected end of file"
         case let .expectedFinalExpression(line):
             return "Line \(line): Expected final expression in block expression"
+        case let .invalidVariableName(line, name):
+            return "Line \(line): Variable name '\(name)' must start with a lowercase letter"
+        case let .invalidFunctionName(line, name):
+            return "Line \(line): Function name '\(name)' must start with a lowercase letter"
+        case let .invalidTypeName(line, name):
+            return "Line \(line): Type name '\(name)' must start with an uppercase letter"
         }
     }
 }
@@ -77,6 +86,11 @@ public class Parser {
             guard case let .identifier(name) = currentToken else {
                 throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
             }
+            
+            if !isValidVariableName(name) {
+                throw ParserError.invalidVariableName(line: lexer.currentLine, name: name)
+            }
+            
             try match(.identifier(name))
             
             // If mut keyword was detected, it must be a variable declaration
@@ -98,6 +112,11 @@ public class Parser {
             guard case let .identifier(name) = currentToken else {
                 throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
             }
+            
+            if !isValidTypeName(name) {
+                throw ParserError.invalidTypeName(line: lexer.currentLine, name: name)
+            }
+            
             try match(.identifier(name))
             return try parseTypeDeclaration(name)
         } else {
@@ -110,6 +129,11 @@ public class Parser {
         guard case let .identifier(name) = currentToken else {
             throw ParserError.expectedTypeIdentifier(line: lexer.currentLine, got: currentToken.description)
         }
+        
+        if !isValidTypeName(name) {
+            throw ParserError.invalidTypeName(line: lexer.currentLine, name: name)
+        }
+        
         try match(.identifier(name))
         return .identifier(name)
     }
@@ -216,6 +240,11 @@ public class Parser {
         guard case let .identifier(name) = currentToken else {
             throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
         }
+        
+        if !isValidVariableName(name) {
+            throw ParserError.invalidVariableName(line: lexer.currentLine, name: name)
+        }
+        
         try match(.identifier(name))
         try match(.colon)
         let type = try parseType()
@@ -456,5 +485,15 @@ public class Parser {
             }
         }
         throw ParserError.unexpectedToken(line: lexer.currentLine, got: currentToken.description)
+    }
+
+    private func isValidVariableName(_ name: String) -> Bool {
+        guard let first = name.first else { return false }
+        return first.isLowercase
+    }
+
+    private func isValidTypeName(_ name: String) -> Bool {
+        guard let first = name.first else { return false }
+        return first.isUppercase
     }
 }
