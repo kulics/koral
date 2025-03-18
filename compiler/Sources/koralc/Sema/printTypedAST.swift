@@ -204,6 +204,13 @@ public func printTypedAST(_ node: TypedProgram) {
                     }
                 }
             }
+
+        case let .memberAccess(source, member):
+            print("\(indent)MemberAccess: \(member.type)")
+            print("\(indent)  Member: \(member.name)")
+            withIndent {
+                printTypedExpression(source)
+            }
         }
     }
     

@@ -36,6 +36,7 @@ public enum Token: CustomStringConvertible {
     case notKeyword     // 'not' keyword
     case colon          // Colon ':'
     case typeKeyword    // 'type' keyword
+    case dot            // Dot operator '.'
 
     // Add static operator function to compare if the same item
     public static func ===(lhs: Token, rhs: Token) -> Bool {
@@ -74,7 +75,8 @@ public enum Token: CustomStringConvertible {
              (.orKeyword, .orKeyword),
              (.notKeyword, .notKeyword),
              (.colon, .colon),
-             (.typeKeyword, .typeKeyword):
+             (.typeKeyword, .typeKeyword),
+             (.dot, .dot):
             return true
         default:
             return false
@@ -159,6 +161,8 @@ public enum Token: CustomStringConvertible {
             return ":"
         case .typeKeyword:
             return "type"
+        case .dot:
+            return "."
         }
     }
 }
@@ -167,26 +171,6 @@ public enum Token: CustomStringConvertible {
 private enum NumberLiteral {
     case integer(Int)
     case float(Double)
-}
-
-// Define lexer error types
-public enum LexerError: Error {
-    case invalidFloat(line: Int, String)
-    case invalidString(line: Int, String)
-    case unexpectedCharacter(line: Int, String)
-}
-
-extension LexerError: CustomStringConvertible {
-    public var description: String {
-        switch self {
-        case let .invalidFloat(line, msg):
-            "Line \(line): Invalid float number: \(msg)"
-        case let .invalidString(line, msg):
-            "Line \(line): Invalid string: \(msg)"
-        case let .unexpectedCharacter(line, msg):
-            "Line \(line): Unexpected character: \(msg)"
-        }
-    }
 }
 
 // Lexical analyzer class
@@ -350,6 +334,8 @@ public class Lexer {
             return .rightBrace
         case ":":
             return .colon
+        case ".":
+            return .dot
         case "\"":
             position = input.index(before: position)
             let str = try readString()

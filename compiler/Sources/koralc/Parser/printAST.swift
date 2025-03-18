@@ -178,6 +178,13 @@ public func printAST(_ node: ASTNode) {
             withIndent {
                 printExpression(expr)
             }
+            
+        case let .memberAccess(expr, member):
+            print("\(indent)MemberAccess:")
+            print("\(indent)  Member: \(member)")
+            withIndent {
+                printExpression(expr)
+            }
         }
     }
     

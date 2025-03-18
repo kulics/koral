@@ -43,6 +43,7 @@ public indirect enum TypedExpressionNode {
     case functionCall(identifier: TypedIdentifierNode, arguments: [TypedExpressionNode], type: Type)
     case whileExpression(condition: TypedExpressionNode, body: TypedExpressionNode, type: Type)
     case typeConstruction(identifier: TypedIdentifierNode, arguments: [TypedExpressionNode], type: Type)
+    case memberAccess(source: TypedExpressionNode, member: TypedIdentifierNode)
 }
 
 extension TypedExpressionNode {
@@ -65,6 +66,8 @@ extension TypedExpressionNode {
             return type
         case .variable(let identifier):
             return identifier.type
+        case .memberAccess(_, let member):
+            return member.type
         }
     }
 }
