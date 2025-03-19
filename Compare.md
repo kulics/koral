@@ -875,13 +875,13 @@ for item in library {
 ```
 let nb = 42;
 when nb is {
-    >= 0 & <= 7 | 8 | 9 ->
+    >= 0 and <= 7 or 8 or 9 ->
         print("single digit");
     10 ->
         print("double digits");
-    >= 11 & <= 99 ->
+    >= 11 and <= 99 ->
         print("double digits");
-    >= 100 & <= 999 ->
+    >= 100 and <= 999 ->
         print("triple digits");
     _ ->
         print("four or more digits");
@@ -944,7 +944,7 @@ switch nb {
 
 ```
 for someObjects as current then
-    if current is movie Movie then
+    if current is movie: Movie then
         printLine("Movie: '\{movie.name}', dir. \{movie.director}");
 ```
 
