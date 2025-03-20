@@ -36,14 +36,8 @@ extension Type : Equatable {
         case let (.function(lParams, lReturns), .function(rParams, rReturns)):
             return lParams == rParams && lReturns == rReturns
             
-        case let (.userDefined(lName, lMembers, lmutable), .userDefined(rName, rMembers, rmutable)):
-            guard lName == rName else { return false }
-            guard lmutable == rmutable else { return false }
-            guard lMembers.count == rMembers.count else { return false }
-            // 检查每个成员的名称和类型是否匹配
-            return zip(lMembers, rMembers).allSatisfy { lMember, rMember in
-                lMember.name == rMember.name && lMember.type == rMember.type
-            }
+        case let (.userDefined(lName, _, _), .userDefined(rName, _, _)):
+            return lName == rName
             
         default:
             return false
