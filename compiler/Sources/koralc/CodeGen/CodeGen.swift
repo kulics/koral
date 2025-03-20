@@ -265,12 +265,12 @@ public class CodeGen {
             let endLabel = nextTemp()
             
             addIndent()
-            buffer += "bool \(result);\n"
+            buffer += "_Bool \(result);\n"
             addIndent()
             buffer += "if (!\(leftResult)) {\n"
             withIndent {
                 addIndent()
-                buffer += "\(result) = false;\n"
+                buffer += "\(result) = 0;\n"
                 addIndent() 
                 buffer += "goto \(endLabel);\n"
             }
@@ -294,12 +294,12 @@ public class CodeGen {
             let endLabel = nextTemp()
             
             addIndent()
-            buffer += "bool \(result);\n"
+            buffer += "_Bool \(result);\n"
             addIndent()
             buffer += "if (\(leftResult)) {\n"
             withIndent {
                 addIndent()
-                buffer += "\(result) = true;\n"
+                buffer += "\(result) = 1;\n"
                 addIndent()
                 buffer += "goto \(endLabel);\n"
             }
@@ -321,7 +321,7 @@ public class CodeGen {
             let exprResult = generateExpressionSSA(expr)
             let result = nextTemp()
             addIndent()
-            buffer += "bool \(result) = !\(exprResult);\n"
+            buffer += "_Bool \(result) = !\(exprResult);\n"
             return result
 
         case let .typeConstruction(identifier, arguments, _):
