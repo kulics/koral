@@ -1,5 +1,3 @@
-
-
 // Parser class
 public class Parser {
     private let lexer: Lexer
@@ -74,6 +72,13 @@ public class Parser {
             }
         } else if currentToken === .typeKeyword {
             try match(.typeKeyword)
+
+            var mutable = false
+            if currentToken === .mutKeyword {
+                try match(.mutKeyword)
+                mutable = true
+            }
+
             guard case let .identifier(name) = currentToken else {
                 throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
             }
@@ -83,7 +88,7 @@ public class Parser {
             }
             
             try match(.identifier(name))
-            return try parseTypeDeclaration(name)
+            return try parseTypeDeclaration(name, mutable: mutable)
         } else {
             throw ParserError.unexpectedToken(line: lexer.currentLine, got: currentToken.description)
         }
@@ -148,9 +153,8 @@ public class Parser {
     }
 
     // Parse type declaration
-    private func parseTypeDeclaration(_ name: String) throws -> GlobalNode {
+    private func parseTypeDeclaration(_ name: String, mutable: Bool) throws -> GlobalNode {        
         try match(.leftParen)
-        
         var parameters: [(name: String, type: TypeNode)] = []
         while currentToken !== .rightParen {
             guard case let .identifier(paramName) = currentToken else {
@@ -168,7 +172,11 @@ public class Parser {
         }
         try match(.rightParen)
         
-        return .globalTypeDeclaration(name: name, parameters: parameters)
+        return .globalTypeDeclaration(
+            name: name, 
+            parameters: parameters,
+            mutable: mutable
+        )
     }
 
     // Parse statement

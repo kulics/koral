@@ -17,7 +17,8 @@ public indirect enum TypedGlobalNode {
     )
     case globalTypeDeclaration(
         identifier: TypedIdentifierNode,
-        parameters: [TypedIdentifierNode]
+        parameters: [TypedIdentifierNode],
+        mutable: Bool
     )
 }
 
