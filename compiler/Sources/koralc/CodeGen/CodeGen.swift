@@ -32,7 +32,6 @@ public class CodeGen {
     public func generate() -> String {
         buffer = """
         #include <stdio.h>
-        #include <stdbool.h>
         #include <stdlib.h>
         #include <stdatomic.h>
 
@@ -163,7 +162,7 @@ public class CodeGen {
             return "\"\(value)\""
             
         case let .booleanLiteral(value, _):
-            return value ? "true" : "false"
+            return value ? "1" : "0"
             
         case let .variable(identifier):
             return identifier.name
@@ -241,17 +240,23 @@ public class CodeGen {
         case let .whileExpression(condition, body, _):
             let labelPrefix = nextTemp()
             addIndent()
-            buffer += "\(labelPrefix)_start:\n"
-            let conditionVar = generateExpressionSSA(condition)
+            buffer += "\(labelPrefix)_start: {\n"
+            withIndent {
+                let conditionVar = generateExpressionSSA(condition)
+                addIndent()
+                buffer += "if (!\(conditionVar)) { goto \(labelPrefix)_end; }\n"
+                pushScope()
+                _ = generateExpressionSSA(body)
+                popScope()
+                addIndent()
+                buffer += "goto \(labelPrefix)_start;\n"
+            }
             addIndent()
-            buffer += "if (!\(conditionVar)) { goto \(labelPrefix)_end; }\n"
-            pushScope()
-            _ = generateExpressionSSA(body)
-            popScope()
+            buffer += "}\n"
             addIndent()
-            buffer += "goto \(labelPrefix)_start;\n"
+            buffer += "\(labelPrefix)_end: {\n"
             addIndent()
-            buffer += "\(labelPrefix)_end:\n"
+            buffer += "}\n"
             return ""
             
         case let .andExpression(left, right, _):
@@ -278,7 +283,9 @@ public class CodeGen {
             buffer += "\(result) = \(rightResult);\n"
             popScope()
             addIndent()
-            buffer += "\(endLabel):\n"
+            buffer += "\(endLabel): {\n"
+            addIndent()
+            buffer += "}\n"
             return result
             
         case let .orExpression(left, right, _):
@@ -305,7 +312,9 @@ public class CodeGen {
             buffer += "\(result) = \(rightResult);\n"
             popScope()
             addIndent()
-            buffer += "\(endLabel):\n"
+            buffer += "\(endLabel): {\n"
+            addIndent()
+            buffer += "}\n"
             return result
             
         case let .notExpression(expr, _):
@@ -407,7 +416,7 @@ public class CodeGen {
         case .int: return "int"
         case .float: return "double"
         case .string: return "const char*"
-        case .bool: return "bool"
+        case .bool: return "_Bool"
         case .void: return "void"
         case .function(_, _):
             fatalError("Function type not supported in getCType")
