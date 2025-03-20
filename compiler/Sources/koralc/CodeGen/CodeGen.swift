@@ -4,17 +4,39 @@ public class CodeGen {
     private var buffer: String = ""
     private var tempVarCounter = 0
     private var globalInitializations: [(String, TypedExpressionNode)] = []
+    private var rcscopeStack: [[(String, Type)]] = []
 
     public init(ast: TypedProgram) {
         self.ast = ast
     }
 
+    private func pushScope() {
+        rcscopeStack.append([])
+    }
+
+    private func popScope() {
+        let vars = rcscopeStack.removeLast()
+        // 反向遍历变量列表,对可变类型变量调用 destroy
+        for (name, type) in vars.reversed() {
+            if case let .userDefined(typeName, _, true) = type {
+                addIndent()
+                buffer += "\(typeName)_destroy(\(name));\n"
+            }
+        }
+    }
+
+    private func registerVariable(_ name: String, _ type: Type) {
+        rcscopeStack[rcscopeStack.count-1].append((name, type))
+    }
+
     public func generate() -> String {
-        // 添加标准头文件
         buffer = """
         #include <stdio.h>
         #include <stdbool.h>
-        
+        #include <stdlib.h>
+        #include <pthread.h>
+        #include <stdatomic.h>
+
         """
         
         // 生成程序体
@@ -27,8 +49,8 @@ public class CodeGen {
         case let .program(nodes):
             // 先生成所有类型声明
             for node in nodes {
-                if case let .globalTypeDeclaration(identifier, parameters) = node {
-                    generateTypeDeclaration(identifier, parameters)
+                if case let .globalTypeDeclaration(identifier, parameters, mutable) = node {
+                    generateTypeDeclaration(identifier, parameters, mutable)
                 }
             }
             buffer += "\n"
@@ -70,7 +92,7 @@ public class CodeGen {
             }
 
             // 生成 main 函数用于初始化全局变量
-            if !globalInitializations.isEmpty {
+            if (!globalInitializations.isEmpty) {
                 generateMainFunction()
             }
         }
@@ -80,11 +102,13 @@ public class CodeGen {
         buffer += "\nint main() {\n"
         withIndent {
             // 生成全局变量初始化
+            pushScope()
             for (name, value) in globalInitializations {
                 let resultVar = generateExpressionSSA(value)
                 addIndent()
                 buffer += "\(name) = \(resultVar);\n"
             }
+            popScope()
             // 如果需要的话，这里可以调用用户定义的 main 函数
             addIndent()
             buffer += "return 0;\n"
@@ -105,13 +129,23 @@ public class CodeGen {
         let paramList = params.map { getCType($0.type) + " " + $0.name }.joined(separator: ", ")
         buffer += "\(returnType) \(identifier.name)(\(paramList)) {\n"
         withIndent {
-            generateFunctionBody(body)
+            generateFunctionBody(body, params)
         }
         buffer += "}\n"
     }
 
-    private func generateFunctionBody(_ body: TypedExpressionNode) {
+    private func generateFunctionBody(_ body: TypedExpressionNode, _ params: [TypedIdentifierNode]) {
+        pushScope()
+        for param in params {
+            registerVariable(param.name, param.type)
+        }
         let resultVar = generateExpressionSSA(body)
+        if case let .userDefined(typeName, _, true) = body.type {
+            addIndent()
+            buffer += "\(typeName)_copy(\(resultVar));\n"
+        }
+        popScope()
+        
         if body.type != .void {
             addIndent()
             buffer += "return \(resultVar);\n"
@@ -136,23 +170,7 @@ public class CodeGen {
             return identifier.name
             
         case let .blockExpression(statements, finalExpr, type):
-            for stmt in statements {
-                generateStatement(stmt)
-            }
-            
-            if let finalExpr = finalExpr {
-                if type == .void {
-                    _ = generateExpressionSSA(finalExpr)
-                    return ""
-                } else {
-                    let result = nextTemp()
-                    let lastName = generateExpressionSSA(finalExpr)
-                    addIndent()
-                    buffer += "\(getCType(type)) \(result) = \(lastName);\n"
-                    return result
-                }
-            }
-            return ""
+            return generateBlockScope(statements, finalExpr: finalExpr)
             
         case let .arithmeticExpression(left, op, right, type):
             let leftResult = generateExpressionSSA(left)
@@ -177,12 +195,16 @@ public class CodeGen {
                 addIndent()
                 buffer += "if (\(conditionVar)) {\n"
                 withIndent {
+                    pushScope()
                     _ = generateExpressionSSA(thenBranch)
+                    popScope()
                 }
                 addIndent()
                 buffer += "} else {\n"
                 withIndent {
+                    pushScope()
                     _ = generateExpressionSSA(elseBranch)
+                    popScope()
                 }
                 addIndent()
                 buffer += "}\n"
@@ -194,16 +216,20 @@ public class CodeGen {
                 addIndent()
                 buffer += "if (\(conditionVar)) {\n"
                 withIndent {
+                    pushScope()
                     let thenResult = generateExpressionSSA(thenBranch)
                     addIndent()
                     buffer += "\(resultVar) = \(thenResult);\n"
+                    popScope()
                 }
                 addIndent()
                 buffer += "} else {\n"
                 withIndent {
+                    pushScope()
                     let elseResult = generateExpressionSSA(elseBranch)
                     addIndent()
                     buffer += "\(resultVar) = \(elseResult);\n"
+                    popScope()
                 }
                 addIndent()
                 buffer += "}\n"
@@ -211,22 +237,7 @@ public class CodeGen {
             }
 
         case let .functionCall(identifier, arguments, type):
-            let argResults = arguments.map(generateExpressionSSA)
-            
-            if type == .void {
-                addIndent()
-                buffer += "\(identifier.name)("
-                buffer += argResults.joined(separator: ", ")
-                buffer += ");\n"
-                return ""
-            } else {
-                let result = nextTemp()
-                addIndent()
-                buffer += "\(getCType(type)) \(result) = \(identifier.name)("
-                buffer += argResults.joined(separator: ", ")
-                buffer += ");\n"
-                return result
-            }
+            return generateFunctionCall(identifier, arguments, type)
 
         case let .whileExpression(condition, body, _):
             let labelPrefix = nextTemp()
@@ -235,7 +246,9 @@ public class CodeGen {
             let conditionVar = generateExpressionSSA(condition)
             addIndent()
             buffer += "if (!\(conditionVar)) { goto \(labelPrefix)_end; }\n"
+            pushScope()
             _ = generateExpressionSSA(body)
+            popScope()
             addIndent()
             buffer += "goto \(labelPrefix)_start;\n"
             addIndent()
@@ -259,9 +272,12 @@ public class CodeGen {
             }
             addIndent()
             buffer += "}\n"
+            // 单独处理短路时的临时对象
+            pushScope()
             let rightResult = generateExpressionSSA(right)
             addIndent()
             buffer += "\(result) = \(rightResult);\n"
+            popScope()
             addIndent()
             buffer += "\(endLabel):\n"
             return result
@@ -283,9 +299,12 @@ public class CodeGen {
             }
             addIndent()
             buffer += "}\n"
+            // 单独处理短路时的临时对象
+            pushScope()
             let rightResult = generateExpressionSSA(right)
             addIndent()
             buffer += "\(result) = \(rightResult);\n"
+            popScope()
             addIndent()
             buffer += "\(endLabel):\n"
             return result
@@ -298,27 +317,41 @@ public class CodeGen {
             return result
 
         case let .typeConstruction(identifier, arguments, _):
-            guard case let .userDefined(_, members) = identifier.type else {
-                fatalError("Expected user defined type")
-            }
-            
-            // 确保参数数量与成员数量匹配
-            assert(arguments.count == members.count)
-            
-            let argResults = arguments.map(generateExpressionSSA)
             let result = nextTemp()
-            addIndent()
-            buffer += "struct \(identifier.name) \(result) = {" 
-            buffer += argResults.joined(separator: ", ")
-            buffer += "};\n"
-            return result
+            var argResults: [String] = []
+            for arg in arguments {
+                let argResult = generateExpressionSSA(arg)
+                argResults.append(argResult)
 
-        case let .memberAccess(source, member):
-            let sourceResult = generateExpressionSSA(source)
-            let result = nextTemp()
-            addIndent()
-            buffer += "\(getCType(member.type)) \(result) = \(sourceResult).\(member.name);\n"
+                // 如果是可变类型,增加引用计数
+                if case let .userDefined(typeName, _, true) = arg.type {
+                    addIndent()
+                    buffer += "\(typeName)_copy(\(argResult));\n"
+                }
+            }
+
+            if case let .userDefined(typeName, parameters, true) = identifier.type {
+                // 可变类型构造 - 现在返回指针
+                addIndent()
+                buffer += "\(getCType(identifier.type)) \(result) = \(typeName)_new();\n"
+                
+                // 初始化字段
+                for (idx, arg) in argResults.enumerated() {
+                    addIndent()
+                    buffer += "\(result)->\(parameters[idx].name) = \(arg);\n"
+                }
+
+                registerVariable(result, identifier.type)
+            } else {
+                // 不可变类型构造保持不变
+                addIndent()
+                buffer += "\(getCType(identifier.type)) \(result) = {"
+                buffer += argResults.joined(separator: ", ")
+                buffer += "};\n"
+            }
             return result
+        case let .memberAccess(source, member):
+            return generateMemberAccess(source, member)
         }
     }
 
@@ -330,23 +363,20 @@ public class CodeGen {
     private func generateStatement(_ stmt: TypedStatementNode) {
         switch stmt {
         case let .variableDeclaration(identifier, value, _):
+            let valueResult = generateExpressionSSA(value)
             // void 类型的值不能赋给变量
-            if value.type == .void {
-                _ = generateExpressionSSA(value)
-            } else {
-                let valueResult = generateExpressionSSA(value)
+            if value.type != .void {
+                // 如果是可变类型，增加引用计数
+                if case .userDefined(let typeName, _, true) = identifier.type {
+                    addIndent()
+                    buffer += "\(typeName)_copy(\(valueResult));\n"
+                    registerVariable(identifier.name, identifier.type)
+                }
                 addIndent()
                 buffer += "\(getCType(identifier.type)) \(identifier.name) = \(valueResult);\n"
             }
         case let .assignment(identifier, value):
-            // void 类型的值不能赋值
-            if value.type == .void {
-                _ = generateExpressionSSA(value)
-            } else {
-                let valueResult = generateExpressionSSA(value)
-                addIndent()
-                buffer += "\(identifier.name) = \(valueResult);\n"
-            }
+            generateAssignment(identifier, value)
         case let .expression(expr):
             _ = generateExpressionSSA(expr)
         }
@@ -382,8 +412,10 @@ public class CodeGen {
         case .void: return "void"
         case .function(_, _):
             fatalError("Function type not supported in getCType")
-        case let .userDefined(name, _):
-            return "struct \(name)"
+        case let .userDefined(name, _, true):
+            return "struct \(name)*"  // 可变类型使用指针
+        case let .userDefined(name, _, false):
+            return "struct \(name)"   // 不可变类型使用结构体值
         }
     }
 
@@ -407,14 +439,139 @@ public class CodeGen {
         indent = oldIndent
     }
 
-    private func generateTypeDeclaration(_ identifier: TypedIdentifierNode, _ parameters: [TypedIdentifierNode]) {
-        buffer += "struct \(identifier.name) {\n"
-        withIndent {
-            for param in parameters {
+    private func generateTypeDeclaration(_ identifier: TypedIdentifierNode, _ parameters: [TypedIdentifierNode], _ mutable: Bool) {
+        let name = identifier.name
+        if mutable {
+            buffer += "struct \(name) {\n"
+            withIndent {
                 addIndent()
-                buffer += "\(getCType(param.type)) \(param.name);\n"
+                buffer += "atomic_size_t _rc_count;\n"  // 直接声明引用计数字段
+                for param in parameters {
+                    addIndent()
+                    buffer += "\(getCType(param.type)) \(param.name);\n"
+                }
+            }
+            buffer += "};\n\n"
+            
+            buffer += """
+            struct \(name)* \(name)_new() {
+                struct \(name)* ptr = malloc(sizeof(struct \(name)));
+                atomic_init(&ptr->_rc_count, 1);
+                return ptr;
+            }
+            
+            void \(name)_destroy(struct \(name)* value) {
+                if (!value) return;
+                if (atomic_fetch_sub(&value->_rc_count, 1) == 1) {
+                    free(value);
+                }
+            }
+            
+            struct \(name)* \(name)_copy(struct \(name)* other) {
+                if (other) {
+                    atomic_fetch_add(&other->_rc_count, 1);
+                }
+                return other;
+            }
+
+            """
+        } else {
+            buffer += "struct \(identifier.name) {\n"
+            withIndent {
+                for param in parameters {
+                    addIndent()
+                    buffer += "\(getCType(param.type)) \(param.name);\n"
+                }
+            }
+            buffer += "};\n\n"
+        }
+    }
+
+    private func generateBlockScope(_ statements: [TypedStatementNode], finalExpr: TypedExpressionNode?) -> String {       
+        pushScope()
+        // 先处理所有语句
+        for stmt in statements {
+            generateStatement(stmt)
+        }
+        
+        // 生成最终表达式
+        var result = ""
+        if let finalExpr = finalExpr {
+            let temp = generateExpressionSSA(finalExpr)
+            if finalExpr.type != .void {
+                let resultVar = nextTemp()
+                addIndent()
+                buffer += "\(getCType(finalExpr.type)) \(resultVar) = \(temp);\n"
+                result = resultVar
             }
         }
-        buffer += "};\n"
+        popScope()
+        return result
+    }
+
+    private func generateAssignment(_ identifier: TypedIdentifierNode, _ value: TypedExpressionNode) {
+        if value.type == .void {
+            _ = generateExpressionSSA(value)
+            return
+        }
+        let valueResult = generateExpressionSSA(value)
+        if case let .userDefined(typeName, _, true) = identifier.type {
+            addIndent()
+            buffer += "\(typeName)_destroy(\(identifier.name));\n"
+            addIndent()
+            buffer += "\(typeName)_copy(\(valueResult));\n"
+        }
+        addIndent()
+        buffer += "\(identifier.name) = \(valueResult);\n"
+    }
+
+    // 更新函数调用生成
+    private func generateFunctionCall(_ identifier: TypedIdentifierNode, _ arguments: [TypedExpressionNode], _ type: Type) -> String {
+        var paramResults: [String] = []
+        
+        // 处理参数传递
+        for arg in arguments {
+            let result = generateExpressionSSA(arg)
+            // 如果参数是可变类型且需要传递引用,使用复制构造
+            if case let .userDefined(typeName, _, true) = arg.type {
+                let copyResult = nextTemp()
+                addIndent()
+                buffer += "\(getCType(arg.type)) \(copyResult) = \(typeName)_copy(\(result));\n"
+                paramResults.append(copyResult)
+            } else {
+                paramResults.append(result)
+            }
+        }
+        
+        addIndent()
+        if (type == .void) {
+            buffer += "\(identifier.name)("
+            buffer += paramResults.joined(separator: ", ")
+            buffer += ");\n"
+            return ""
+        } else {
+            let result = nextTemp()
+            buffer += "\(getCType(type)) \(result) = \(identifier.name)("
+            buffer += paramResults.joined(separator: ", ")
+            buffer += ");\n"
+            if case .userDefined(_, _, true) = type {
+                registerVariable(result, type)
+            }
+            return result
+        }
+    }
+    
+    private func generateMemberAccess(_ source: TypedExpressionNode, _ member: TypedIdentifierNode) -> String {
+        let sourceResult = generateExpressionSSA(source)
+        let result = nextTemp()
+        
+        addIndent()
+        // 如果源表达式是可变类型,使用 -> 运算符
+        if case .userDefined(_, _, true) = source.type {
+            buffer += "\(getCType(member.type)) \(result) = \(sourceResult)->\(member.name);\n"
+        } else {
+            buffer += "\(getCType(member.type)) \(result) = \(sourceResult).\(member.name);\n"
+        }
+        return result
     }
 }

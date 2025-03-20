@@ -69,7 +69,7 @@ public class TypeChecker {
                 parameters: params,
                 body: typedBody
             )
-        case let .globalTypeDeclaration(name, parameters):
+        case let .globalTypeDeclaration(name, parameters, mutable):
             // Check if type already exists
             if currentScope.lookupType(name) != nil {
                 throw SemanticError.duplicateTypeDefinition(name)
@@ -88,13 +88,15 @@ public class TypeChecker {
             // Define the new type
             let typeType = Type.userDefined(
                 name: name, 
-                members: params.map { (name: $0.name, type: $0.type) }
+                members: params.map { (name: $0.name, type: $0.type) },
+                mutable: mutable
             )
             try currentScope.defineType(name, type: typeType)
             
             return .globalTypeDeclaration(
                 identifier: TypedIdentifierNode(name: name, type: typeType),
-                parameters: params
+                parameters: params,
+                mutable: mutable  // 传递 mutable 参数
             )
         }
     }
@@ -199,7 +201,7 @@ public class TypeChecker {
         case let .functionCall(name, arguments):
             // 先检查是否是类型构造
             if let type = currentScope.lookupType(name) {
-                guard case let .userDefined(_, parameters) = type else {
+                guard case let .userDefined(_, parameters, _) = type else {
                     throw SemanticError.invalidOperation(op: "construct", type1: type.description, type2: "")
                 }
                 
@@ -292,7 +294,7 @@ public class TypeChecker {
             let typedExpr = try inferTypedExpression(expr)
             
             // 检查基础表达式的类型是否是用户定义的类型
-            guard case let .userDefined(typeName, members) = typedExpr.type else {
+            guard case let .userDefined(typeName, members, _) = typedExpr.type else {
                 throw SemanticError.invalidOperation(
                     op: "member access",
                     type1: typedExpr.type.description,
