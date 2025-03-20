@@ -7,8 +7,7 @@ let currentPath = fileManager.currentDirectoryPath
 let testPath = currentPath
                         
 let fileURL = URL(fileURLWithPath: testPath)
-                .appendingPathComponent("Tests")
-                .appendingPathComponent("koralcTests")
+                .appendingPathComponent("LanguageTest")
                 .appendingPathComponent("test.koral")
 
 do {
@@ -24,7 +23,17 @@ do {
     let codeGen = CodeGen(ast: typedAST)
     let code = codeGen.generate()
     print("\nGenerated C code:")
-    print(code)
+    
+    // Get the directory and base filename
+    let directory = fileURL.deletingLastPathComponent()
+    let baseFilename = fileURL.deletingPathExtension().lastPathComponent
+    
+    // Create the output file URL with .c extension
+    let outputFileURL = directory.appendingPathComponent("\(baseFilename).c")
+    
+    // Write the code to the output file
+    try code.write(to: outputFileURL, atomically: true, encoding: .utf8)
+    print("\nC code written to: \(outputFileURL.path)")
 } catch let error as ParserError {
     print("parser error: \(error)")
 } catch let error as LexerError {
