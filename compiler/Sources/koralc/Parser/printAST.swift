@@ -34,6 +34,7 @@ public func printAST(_ node: ASTNode) {
             print("\(indent)  IsValue: \(isValue)")
             for param in parameters {
                 print("\(indent)  \(param.name): \(param.type)")
+                print("\(indent)  Mutable: \(param.mutable)")
             }
         }
     }

@@ -170,7 +170,7 @@ let b: Int = {
 The identifier is the name given to a variable, function, structure, interface, etc. The letters that make up an identifier have a certain specification. The naming rules for identifiers in this language are as follows:
 
 1. Case sensitive, Myname and myname are two different identifiers;
-Types and constructors can only start with uppercase letters, variables and functions can only start with lowercase letters, followed by other characters.
+1. Types and constructors can only start with uppercase letters, variables and functions can only start with lowercase letters, followed by other characters.
 1. The first character of the identifier can begin with an underscore `_` or a letter, but cannot be a number;
 1. Other characters in the identifier can be underscore `_`, letters or numbers.
 1. Within the same `{}`, identifiers of the same name cannot be defined repeatedly.
@@ -576,37 +576,37 @@ let main() = {
 
 Executing the above program, we can see 64 and 128.
 
-### Mutable Types
+### Mutable Member Variables
 
-Member variables, like variables, are readonly by default. So we can't reassign values to x and y in Point. If we try to do so, the compiler will report an error.
+Member variables, like regular variables, are read-only by default. Therefore, we cannot reassign values to the x and y in Point. If we try to do this, the compiler will report an error.
 
 ```
 type Point(x: Int, y: Int);
 
 let main() = {
-    let a = Point(64, 128);
+    let a = Point(64, 28);
     a.x = 2 // error
 }
 ```
 
-We can label the type definition with the mut keyword so that it is defined as being a mutable type. For instances of mutable types, we can assign values to the member variables in them.
+We can mark member variables with the mut keyword when defining the type, which will define them as mutable member variables. For mutable member variables, we can assign new values to them.
 
-The mutability of member variables follows the type and has nothing to do with whether the instance variables are mutable or not, so we can modify mutable member variables even if we declare read-only variables.
+The mutability of member variables follows the type, not whether the instance variable is mutable. Therefore, even if we declare a read-only variable, we can still modify its mutable member variables.
 
 ```
-type mut Point(x: Int, y: Int);
+type Point(mut x: Int, mut y: Int);
 
 let main() = {
-    let a: Point = Point(64, 128); // `a` no need to declare as mut
+    let a: Point = Point(64, 128); // `a` doesn't need to be declared as mut
     a.x = 2; // ok
     a.y = 0 // ok
 }
 ```
 
-When we assign a variable of variable type to another variable for use, both variables will point to the same instance, so our modifications to the member variables will affect all the identically referenced variables. In other words, variable types can be thought of as reference types in other languages.
+When we assign a type variable to another variable, both variables will point to the same instance, so any modifications we make to the member variables will affect all variables referencing the same instance. In other words, the Point type can be considered a reference type as in other languages.
 
 ```
-type mut Point(x: Int, y: Int);
+type Point(mut x: Int, mut y: Int);
 
 let main() = {
     let a: Point = Point(64, 128); 
