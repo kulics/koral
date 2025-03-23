@@ -524,7 +524,7 @@ increment(7)
 ### Koral
 
 ```
-type mut Shape(numberOfSides: Int) {
+type Shape(mut numberOfSides: Int) {
     self.simpleDescription(): String =
         "A shape with \{self.numberOfSides} sides.";
 }
