@@ -73,10 +73,10 @@ public class Parser {
         } else if currentToken === .typeKeyword {
             try match(.typeKeyword)
 
-            var mutable = false
-            if currentToken === .mutKeyword {
-                try match(.mutKeyword)
-                mutable = true
+            var isValue = false
+            if currentToken === .valKeyword {
+                try match(.valKeyword)
+                isValue = true
             }
 
             guard case let .identifier(name) = currentToken else {
@@ -88,7 +88,7 @@ public class Parser {
             }
             
             try match(.identifier(name))
-            return try parseTypeDeclaration(name, mutable: mutable)
+            return try parseTypeDeclaration(name, isValue: isValue)
         } else {
             throw ParserError.unexpectedToken(line: lexer.currentLine, got: currentToken.description)
         }
@@ -153,10 +153,17 @@ public class Parser {
     }
 
     // Parse type declaration
-    private func parseTypeDeclaration(_ name: String, mutable: Bool) throws -> GlobalNode {        
+    private func parseTypeDeclaration(_ name: String, isValue: Bool) throws -> GlobalNode {        
         try match(.leftParen)
-        var parameters: [(name: String, type: TypeNode)] = []
+        var parameters: [(name: String, type: TypeNode, mutable: Bool)] = []
         while currentToken !== .rightParen {
+            // Check for mut keyword for the field
+            var fieldMutable = false
+            if currentToken === .mutKeyword {
+                try match(.mutKeyword)
+                fieldMutable = true
+            }
+            
             guard case let .identifier(paramName) = currentToken else {
                 throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
             }
@@ -164,7 +171,7 @@ public class Parser {
             try match(.colon)
             let paramType = try parseType()
             
-            parameters.append((name: paramName, type: paramType))
+            parameters.append((name: paramName, type: paramType, mutable: fieldMutable))
             
             if currentToken === .comma {
                 try match(.comma)
@@ -175,7 +182,7 @@ public class Parser {
         return .globalTypeDeclaration(
             name: name, 
             parameters: parameters,
-            mutable: mutable
+            isValue: isValue
         )
     }
 

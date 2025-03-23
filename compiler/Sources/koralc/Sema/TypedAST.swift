@@ -1,6 +1,13 @@
 public struct TypedIdentifierNode {
     public let name: String
     public let type: Type
+    public let mutable: Bool
+    
+    public init(name: String, type: Type, mutable: Bool = false) {
+        self.name = name
+        self.type = type
+        self.mutable = mutable
+    }
 }
 
 // Typed AST node definitions for semantic analysis phase
@@ -18,7 +25,7 @@ public indirect enum TypedGlobalNode {
     case globalTypeDeclaration(
         identifier: TypedIdentifierNode,
         parameters: [TypedIdentifierNode],
-        mutable: Bool
+        isValue: Bool
     )
 }
 

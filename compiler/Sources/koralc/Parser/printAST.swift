@@ -29,9 +29,9 @@ public func printAST(_ node: ASTNode) {
                 }
             }
             
-        case let .globalTypeDeclaration(name, parameters, mutable):
+        case let .globalTypeDeclaration(name, parameters, isValue):
             print("\(indent)TypeDeclaration \(name)")
-            print("\(indent)  Mutable: \(mutable)")
+            print("\(indent)  IsValue: \(isValue)")
             for param in parameters {
                 print("\(indent)  \(param.name): \(param.type)")
             }

@@ -5,7 +5,7 @@ public indirect enum Type {
     case bool
     case void
     case function(parameters: [Type], returns: Type)
-    case userDefined(name: String, members: [(name: String, type: Type)], mutable: Bool)
+    case userDefined(name: String, members: [(name: String, type: Type, mutable: Bool)], isValue: Bool)
 
     public var description: String {
         switch self {

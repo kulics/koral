@@ -69,7 +69,7 @@ public class TypeChecker {
                 parameters: params,
                 body: typedBody
             )
-        case let .globalTypeDeclaration(name, parameters, mutable):
+        case let .globalTypeDeclaration(name, parameters, isValue):
             // Check if type already exists
             if currentScope.lookupType(name) != nil {
                 throw SemanticError.duplicateTypeDefinition(name)
@@ -82,22 +82,55 @@ public class TypeChecker {
                 guard let paramType = currentScope.resolveType(typeStr) else {
                     throw SemanticError.undefinedType(typeStr)
                 }
-                return TypedIdentifierNode(name: param.name, type: paramType)
+                
+                return TypedIdentifierNode(name: param.name, type: paramType, mutable: param.mutable)
             }
             
+            // For val types, check that all fields are also val types
+            if isValue {
+                for param in params {
+                    if !isValType(param.type) {
+                        throw SemanticError.invalidFieldTypeInValueType(
+                            type: name, 
+                            field: param.name, 
+                            fieldType: param.type.description
+                        )
+                    } else if param.mutable {
+                        throw SemanticError.invalidMutableFieldInValueType(
+                            type: name,
+                            field: param.name
+                        )
+                    }
+                }
+            }
+
             // Define the new type
             let typeType = Type.userDefined(
                 name: name, 
-                members: params.map { (name: $0.name, type: $0.type) },
-                mutable: mutable
+                members: params.map { (name: $0.name, type: $0.type, mutable: $0.mutable) },
+                isValue: isValue
             )
             try currentScope.defineType(name, type: typeType)
             
             return .globalTypeDeclaration(
                 identifier: TypedIdentifierNode(name: name, type: typeType),
                 parameters: params,
-                mutable: mutable  // 传递 mutable 参数
+                isValue: isValue
             )
+        }
+    }
+
+    // Helper function to check if a type is a val type
+    private func isValType(_ type: Type) -> Bool {
+        switch type {
+        case .int, .float, .bool, .void:
+            return true
+        case .string:
+            return false // Strings are not val types
+        case let .userDefined(_, _, isValue):
+            return isValue
+        case .function:
+            return true // Functions are considered val types
         }
     }
 
@@ -337,7 +370,7 @@ public class TypeChecker {
             )
             
         case let .assignment(name, value):
-            guard let varType = currentScope.lookup(name) else {
+                        guard let varType = currentScope.lookup(name) else {
                 throw SemanticError.undefinedVariable(name)
             }
             guard currentScope.isMutable(name) else {
@@ -348,7 +381,7 @@ public class TypeChecker {
                 throw SemanticError.typeMismatch(expected: varType.description, got: typedValue.type.description)
             }
             return .assignment(
-                identifier: TypedIdentifierNode(name: name, type: varType),
+                identifier: TypedIdentifierNode(name: name, type: varType, mutable: true),
                 value: typedValue
             )
             
