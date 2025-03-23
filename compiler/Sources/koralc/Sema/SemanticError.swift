@@ -11,7 +11,10 @@ public indirect enum SemanticError: Error {
     case invalidArgumentCount(function: String, expected: Int, got: Int)
     case duplicateTypeDefinition(String)
     case undefinedType(String)
-    case undefinedMember(String, String) // member name, type name
+    case undefinedMember(String, String)
+    case invalidFieldTypeInValueType(type: String, field: String, fieldType: String)
+    case invalidMutableFieldInValueType(type: String, field: String)
+    case immutableFieldAssignment(field: String)
 }
 
 extension SemanticError: CustomStringConvertible {
@@ -41,6 +44,12 @@ extension SemanticError: CustomStringConvertible {
             return "Undefined type: \(name)"
         case let .undefinedMember(member, type):
             return "Member '\(member)' not found in type '\(type)'"
+        case let .invalidFieldTypeInValueType(type, field, fieldType):
+            return "Value type '\(type)' cannot have field '\(field)' of reference type '\(fieldType)'"
+        case let .invalidMutableFieldInValueType(type, field):
+            return "Value type '\(type)' cannot have mutable field '\(field)'"
+        case let .immutableFieldAssignment(field):
+            return "Cannot assign to immutable field '\(field)'"
         }
     }
 }

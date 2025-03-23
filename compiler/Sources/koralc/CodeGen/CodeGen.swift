@@ -5,7 +5,6 @@ public class CodeGen {
     private var tempVarCounter = 0
     private var globalInitializations: [(String, TypedExpressionNode)] = []
     private var rcscopeStack: [[(String, Type)]] = []
-    private var immutableRefTypes: [String: Bool] = [:]
 
     public init(ast: TypedProgram) {
         self.ast = ast
@@ -19,7 +18,7 @@ public class CodeGen {
         let vars = rcscopeStack.removeLast()
         // 反向遍历变量列表,对可变类型变量调用 destroy
         for (name, type) in vars.reversed() {
-            if case .userDefined(let typeName, _, _) = type, isReferenceType(type) {
+            if case .userDefined(let typeName, _, false) = type {
                 addIndent()
                 buffer += "\(typeName)_destroy(\(name));\n"
             }
@@ -48,8 +47,8 @@ public class CodeGen {
         case let .program(nodes):
             // 先生成所有类型声明
             for node in nodes {
-                if case let .globalTypeDeclaration(identifier, parameters, mutable) = node {
-                    generateTypeDeclaration(identifier, parameters, mutable)
+                if case let .globalTypeDeclaration(identifier, parameters, isValue) = node {
+                    generateTypeDeclaration(identifier, parameters, isValue)
                 }
             }
             buffer += "\n"
@@ -139,7 +138,7 @@ public class CodeGen {
             registerVariable(param.name, param.type)
         }
         let resultVar = generateExpressionSSA(body)
-        if case let .userDefined(typeName, _, _) = body.type, isReferenceType(body.type) {
+        if case let .userDefined(typeName, _, false) = body.type {
             addIndent()
             buffer += "\(typeName)_copy(\(resultVar));\n"
         }
@@ -333,13 +332,13 @@ public class CodeGen {
                 argResults.append(argResult)
 
                 // 如果是引用类型,增加引用计数
-                if case let .userDefined(typeName, _, _) = arg.type, isReferenceType(arg.type) {
+                if case let .userDefined(typeName, _, false) = arg.type {
                     addIndent()
                     buffer += "\(typeName)_copy(\(argResult));\n"
                 }
             }
 
-            if case let .userDefined(typeName, parameters, _) = identifier.type, isReferenceType(identifier.type) {
+            if case let .userDefined(typeName, parameters, false) = identifier.type {
                 // 可变类型构造 - 现在返回指针
                 addIndent()
                 buffer += "\(getCType(identifier.type)) \(result) = \(typeName)_new();\n"
@@ -376,7 +375,7 @@ public class CodeGen {
             // void 类型的值不能赋给变量
             if value.type != .void {
                 // 如果是可变类型，增加引用计数
-                if case .userDefined(let typeName, _, _) = identifier.type, isReferenceType(identifier.type) {
+                if case .userDefined(let typeName, _, false) = identifier.type {
                     addIndent()
                     buffer += "\(typeName)_copy(\(valueResult));\n"
                     registerVariable(identifier.name, identifier.type)
@@ -421,11 +420,11 @@ public class CodeGen {
         case .void: return "void"
         case .function(_, _):
             fatalError("Function type not supported in getCType")
-        case let .userDefined(name, _, _):
-            if isReferenceType(type) {
-                return "struct \(name)*"
-            } else {
+        case let .userDefined(name, _, isValue):
+            if isValue {
                 return "struct \(name)"
+            } else {
+                return "struct \(name)*"
             }
         }
     }
@@ -450,13 +449,26 @@ public class CodeGen {
         indent = oldIndent
     }
 
-    private func generateTypeDeclaration(_ identifier: TypedIdentifierNode, _ parameters: [TypedIdentifierNode], _ mutable: Bool) {
+    private func generateTypeDeclaration(_ identifier: TypedIdentifierNode, 
+                                   _ parameters: [TypedIdentifierNode], 
+                                   _ isValue: Bool) {
         let name = identifier.name
-        if isReferenceType(identifier.type) {
+        if isValue {
+            // Handle value types
+            buffer += "struct \(name) {\n"
+            withIndent {
+                for param in parameters {
+                    addIndent()
+                    buffer += "\(getCType(param.type)) \(param.name);\n"
+                }
+            }
+            buffer += "};\n\n"
+        } else {
+            // Handle reference types
             buffer += "struct \(name) {\n"
             withIndent {
                 addIndent()
-                buffer += "atomic_size_t _rc_count;\n"  // 直接声明引用计数字段
+                buffer += "atomic_size_t _rc_count;\n"  // Reference counting field
                 for param in parameters {
                     addIndent()
                     buffer += "\(getCType(param.type)) \(param.name);\n"
@@ -476,11 +488,11 @@ public class CodeGen {
                 if (!value) return;
                 if (atomic_fetch_sub(&value->_rc_count, 1) == 1) {\n
             """
-            // 检查并销毁引用类型字段
+            // Destroy reference type fields
             for param in parameters {
                 withIndent {
-                    if case let .userDefined(fieldTypeName, _, _) = param.type,
-                        isReferenceType(param.type) {
+                    if case let .userDefined(fieldTypeName, _, fieldIsVal) = param.type,
+                        !fieldIsVal {
                         addIndent()
                         addIndent()
                         buffer += "\(fieldTypeName)_destroy(value->\(param.name));\n"
@@ -500,39 +512,9 @@ public class CodeGen {
                 return other;
             }\n\n
             """
-        } else {
-            buffer += "struct \(name) {\n"
-            withIndent {
-                for param in parameters {
-                    addIndent()
-                    buffer += "\(getCType(param.type)) \(param.name);\n"
-                }
-            }
-            buffer += "};\n\n"
-        }
+        } 
     }
-
-    private func isReferenceType(_ type: Type) -> Bool {
-        switch type {
-        case .userDefined(_, _, true):
-            return true
-        case .userDefined(let typeName, let parameters, false):
-            // 如果这个类型已经被处理过，直接返回结果
-            if let isRef = immutableRefTypes[typeName] {
-                return isRef
-            } else {
-                for param in parameters where isReferenceType(param.type) {
-                    immutableRefTypes[typeName] = true
-                    return true
-                }
-                immutableRefTypes[typeName] = false
-                return false
-            }
-        default:
-            return false
-        }
-    }
-
+    
     private func generateBlockScope(_ statements: [TypedStatementNode], finalExpr: TypedExpressionNode?) -> String {       
         pushScope()
         // 先处理所有语句
@@ -561,7 +543,7 @@ public class CodeGen {
             return
         }
         let valueResult = generateExpressionSSA(value)
-        if case let .userDefined(typeName, _, _) = identifier.type, isReferenceType(identifier.type) {
+        if case let .userDefined(typeName, _, false) = identifier.type {
             addIndent()
             buffer += "\(typeName)_destroy(\(identifier.name));\n"
             addIndent()
@@ -579,7 +561,7 @@ public class CodeGen {
         for arg in arguments {
             let result = generateExpressionSSA(arg)
             // 如果参数是引用类型且需要传递引用,使用复制构造
-            if case let .userDefined(typeName, _, _) = arg.type, isReferenceType(arg.type) {
+            if case let .userDefined(typeName, _, false) = arg.type {
                 let copyResult = nextTemp()
                 addIndent()
                 buffer += "\(getCType(arg.type)) \(copyResult) = \(typeName)_copy(\(result));\n"
@@ -600,7 +582,7 @@ public class CodeGen {
             buffer += "\(getCType(type)) \(result) = \(identifier.name)("
             buffer += paramResults.joined(separator: ", ")
             buffer += ");\n"
-            if isReferenceType(type) {
+            if case .userDefined(_, _, false) = type {
                 registerVariable(result, type)
             }
             return result
@@ -610,10 +592,10 @@ public class CodeGen {
     private func generateMemberAccess(_ source: TypedExpressionNode, _ member: TypedIdentifierNode) -> String {
         let sourceResult = generateExpressionSSA(source)
         let result = nextTemp()
-        
+               
         addIndent()
-        // 如果源表达式是可变类型,使用 -> 运算符
-        if isReferenceType(source.type)  {
+        // If source expression is a reference type, use -> operator
+        if case .userDefined(_, _, false) = source.type {
             buffer += "\(getCType(member.type)) \(result) = \(sourceResult)->\(member.name);\n"
         } else {
             buffer += "\(getCType(member.type)) \(result) = \(sourceResult).\(member.name);\n"
