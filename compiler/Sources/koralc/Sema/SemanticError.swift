@@ -14,7 +14,7 @@ public indirect enum SemanticError: Error {
     case undefinedMember(String, String)
     case invalidFieldTypeInValueType(type: String, field: String, fieldType: String)
     case invalidMutableFieldInValueType(type: String, field: String)
-    case immutableFieldAssignment(field: String)
+    case immutableFieldAssignment(type: String, field: String)
 }
 
 extension SemanticError: CustomStringConvertible {
@@ -48,8 +48,8 @@ extension SemanticError: CustomStringConvertible {
             return "Value type '\(type)' cannot have field '\(field)' of reference type '\(fieldType)'"
         case let .invalidMutableFieldInValueType(type, field):
             return "Value type '\(type)' cannot have mutable field '\(field)'"
-        case let .immutableFieldAssignment(field):
-            return "Cannot assign to immutable field '\(field)'"
+        case let .immutableFieldAssignment(type, field):
+            return "Cannot assign to immutable field '\(field)' of type '\(type)'"
         }
     }
 }

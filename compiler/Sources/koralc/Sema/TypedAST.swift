@@ -31,8 +31,13 @@ public indirect enum TypedGlobalNode {
 
 public indirect enum TypedStatementNode {
     case variableDeclaration(identifier: TypedIdentifierNode, value: TypedExpressionNode, mutable: Bool)
-    case assignment(identifier: TypedIdentifierNode, value: TypedExpressionNode)
+    case assignment(target: TypedAssignmentTarget, value: TypedExpressionNode)
     case expression(TypedExpressionNode)
+}
+
+public enum TypedAssignmentTarget {
+    case variable(identifier: TypedIdentifierNode)
+    case memberAccess(base: TypedIdentifierNode, memberPath: [TypedIdentifierNode])
 }
 
 public indirect enum TypedExpressionNode {

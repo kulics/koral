@@ -369,21 +369,78 @@ public class TypeChecker {
                 mutable: mutable
             )
             
-        case let .assignment(name, value):
-                        guard let varType = currentScope.lookup(name) else {
-                throw SemanticError.undefinedVariable(name)
+        case let .assignment(target, value):
+            switch target {
+            case let .variable(name):
+                guard let varType = currentScope.lookup(name) else {
+                    throw SemanticError.undefinedVariable(name)
+                }
+                guard currentScope.isMutable(name) else {
+                    throw SemanticError.assignToImmutable(name)
+                }
+                let typedValue = try inferTypedExpression(value)
+                if typedValue.type != varType {
+                    throw SemanticError.typeMismatch(expected: varType.description, got: typedValue.type.description)
+                }
+                return .assignment(
+                    target: .variable(identifier: TypedIdentifierNode(name: name, type: varType, mutable: true)),
+                    value: typedValue
+                )
+                
+            case let .memberAccess(base, memberPath):
+                // First check that the base variable exists
+                guard let baseType = currentScope.lookup(base) else {
+                    throw SemanticError.undefinedVariable(base)
+                }
+                
+                var currentType = baseType
+                var typedPath: [TypedIdentifierNode] = []
+                
+                // Validate each member in the path
+                for (index, memberName) in memberPath.enumerated() {
+                    // Check that current type is a user-defined type
+                    guard case let .userDefined(typeName, members, _) = currentType else {
+                        throw SemanticError.invalidOperation(
+                            op: "member access",
+                            type1: currentType.description,
+                            type2: ""
+                        )
+                    }
+                    
+                    // Find the member in the type definition
+                    guard let member = members.first(where: { $0.name == memberName }) else {
+                        throw SemanticError.undefinedMember(memberName, typeName)
+                    }
+                    
+                    // For final member in path, check if it's mutable
+                    if index == memberPath.count - 1 {
+                        guard member.mutable else {
+                            throw SemanticError.immutableFieldAssignment(type: typeName, field: memberName)
+                        }
+                    }
+                    
+                    let memberIdentifier = TypedIdentifierNode(name: memberName, type: member.type, mutable: member.mutable)
+                    typedPath.append((memberIdentifier))
+                    
+                    // Update current type for next iteration
+                    currentType = member.type
+                }
+                
+                // Check value type matches final member type
+                let finalMemberType = typedPath.last!.type
+                let typedValue = try inferTypedExpression(value)
+                if typedValue.type != finalMemberType {
+                    throw SemanticError.typeMismatch(expected: finalMemberType.description, got: typedValue.type.description)
+                }
+                
+                return .assignment(
+                    target: .memberAccess(
+                        base: TypedIdentifierNode(name: base, type: baseType),
+                        memberPath: typedPath
+                    ),
+                    value: typedValue
+                )
             }
-            guard currentScope.isMutable(name) else {
-                throw SemanticError.assignToImmutable(name)
-            }
-            let typedValue = try inferTypedExpression(value)
-            if typedValue.type != varType {
-                throw SemanticError.typeMismatch(expected: varType.description, got: typedValue.type.description)
-            }
-            return .assignment(
-                identifier: TypedIdentifierNode(name: name, type: varType, mutable: true),
-                value: typedValue
-            )
             
         case let .expression(expr):
             let typedExpr = try inferTypedExpression(expr)
