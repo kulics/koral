@@ -188,23 +188,56 @@ public class Parser {
 
     // Parse statement
     private func statement() throws -> StatementNode {
-        if currentToken === .letKeyword {
+        switch currentToken {
+        case .letKeyword:
             return try variableDeclaration()
-        } else if case let .identifier(name) = currentToken {
-            // Check if it's an assignment statement
+        case .identifier(_):
+            guard case let .identifier(name) = currentToken else {
+                throw ParserError.unexpectedToken(line: lexer.currentLine, got: currentToken.description)
+            }
             try match(.identifier(name))
+            
+            // Check if it's a function call
+            if currentToken === .leftParen {
+                let functionCall = try parseFunctionCall(name)
+                return .expression(functionCall)
+            }
+            
+            // Parse optional member access chain
+            var memberPath: [String] = []
+            while currentToken === .dot {
+                try match(.dot)
+                guard case let .identifier(member) = currentToken else {
+                    throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+                }
+                try match(.identifier(member))
+                memberPath.append(member)
+            }
+            
+            // Check if it's an assignment
             if currentToken === .equal {
                 try match(.equal)
+                
+                // Determine assignment target type
+                let target: AssignmentTarget
+                if memberPath.isEmpty {
+                    target = .variable(name: name)
+                } else {
+                    target = .memberAccess(base: name, memberPath: memberPath)
+                }
+                
                 let value = try expression()
-                return .assignment(name: name, value: value)
+                return .assignment(target: target, value: value)
             }
-            // If not assignment, treat as expression or function call
-            // check if it's a function call
-            if currentToken === .leftParen {
-                return .expression(try parseFunctionCall(name))
+
+            // If not assignment, treat as expression
+            // Need to reconstruct the expression from the parsed name and member path
+            var expr: ExpressionNode = .identifier(name)
+            for member in memberPath {
+                expr = .memberAccess(expr: expr, member: member)
             }
-            return .expression(.identifier(name))
-        } else {
+            return .expression(expr)
+        default:
             return .expression(try expression())
         }
     }
@@ -231,6 +264,21 @@ public class Parser {
         try match(.equal)
         let value = try expression()
         return .variableDeclaration(name: name, type: type, value: value, mutable: mutable)
+    }
+
+    private func parseMemberAccess() throws -> ExpressionNode {
+        var expr = try term()
+        
+        while currentToken === .dot {
+            try match(.dot)
+            guard case let .identifier(member) = currentToken else {
+                throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+            }
+            try match(.identifier(member))
+            expr = .memberAccess(expr: expr, member: member)
+        }
+        
+        return expr
     }
 
     // Parse expression rule
@@ -400,22 +448,6 @@ public class Parser {
                 expected: "number, identifier, or boolean literal"
             )
         }
-    }
-
-    // 新增parseMemberAccess作为最高优先级
-    private func parseMemberAccess() throws -> ExpressionNode {
-        var expr = try term()
-        
-        while currentToken === .dot {
-            try match(.dot)
-            guard case let .identifier(member) = currentToken else {
-                throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
-            }
-            try match(.identifier(member))
-            expr = .memberAccess(expr: expr, member: member)
-        }
-        
-        return expr
     }
 
     // Parse function call

@@ -24,8 +24,13 @@ public indirect enum GlobalNode {
 
 public indirect enum StatementNode {
     case variableDeclaration(name: String, type: TypeNode, value: ExpressionNode, mutable: Bool)
-    case assignment(name: String, value: ExpressionNode)
+    case assignment(target: AssignmentTarget, value: ExpressionNode)
     case expression(ExpressionNode)
+}
+
+public enum AssignmentTarget {
+    case variable(name: String)
+    case memberAccess(base: String, memberPath: [String])
 }
 
 public enum ArithmeticOperator {

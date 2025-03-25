@@ -50,9 +50,16 @@ public func printAST(_ node: ASTNode) {
                 printExpression(value)
             }
             
-        case let .assignment(name, value):
+        case let .assignment(target, value):
             print("\(indent)Assignment:")
-            print("\(indent)  Name: \(name)")
+            
+            switch target {
+            case let .variable(name):
+                print("\(indent)  Target: \(name)")
+            case let .memberAccess(base, memberPath):
+                print("\(indent)  Target: \(base).\(memberPath.joined(separator: "."))")
+            }
+            
             print("\(indent)  Value:")
             withIndent {
                 withIndent {

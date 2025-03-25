@@ -383,8 +383,13 @@ public class CodeGen {
                 addIndent()
                 buffer += "\(getCType(identifier.type)) \(identifier.name) = \(valueResult);\n"
             }
-        case let .assignment(identifier, value):
-            generateAssignment(identifier, value)
+        case let .assignment(target, value):
+            switch target {
+            case .variable(let identifier):
+                generateAssignment(identifier, value)
+            case .memberAccess(let base, let memberPath):
+                generateMemberAccessAssignment(base, memberPath, value)
+            }
         case let .expression(expr):
             _ = generateExpressionSSA(expr)
         }
@@ -553,7 +558,52 @@ public class CodeGen {
         buffer += "\(identifier.name) = \(valueResult);\n"
     }
 
-    // 更新函数调用生成
+    private func generateMemberAccessAssignment(_ base: TypedIdentifierNode,
+                     _ memberPath: [TypedIdentifierNode], _ value: TypedExpressionNode) {
+        if value.type == .void {
+            _ = generateExpressionSSA(value)
+            return
+        }
+        
+        // Start with the base variable
+        let baseResult = base.name
+        let valueResult = generateExpressionSSA(value)
+        
+        // Generate the full access path for the final assignment
+        var accessPath = baseResult
+        var currentType = base.type
+        
+        // Build up the access chain
+        for (index, item) in memberPath.enumerated() {
+            let isLast = index == memberPath.count - 1
+            let memberName = item.name
+            let memberType = item.type
+            
+            // Determine the access operator (. or ->)
+            if case .userDefined(_, _, false) = currentType {
+                accessPath += "->\(memberName)"
+            } else {
+                accessPath += ".\(memberName)"
+            }
+            
+            // Update current type for next iteration
+            currentType = memberType
+            
+            // If this is the last member and it's a reference type, handle memory management
+            if isLast, case let .userDefined(typeName, _, false) = memberType {
+                addIndent()
+                buffer += "\(typeName)_destroy(\(accessPath));\n"
+                addIndent()
+                buffer += "\(accessPath) = \(typeName)_copy(\(valueResult));\n"
+                return
+            }
+        }
+        
+        // For value types or if there's no special memory management needed
+        addIndent()
+        buffer += "\(accessPath) = \(valueResult);\n"
+    }
+
     private func generateFunctionCall(_ identifier: TypedIdentifierNode, _ arguments: [TypedExpressionNode], _ type: Type) -> String {
         var paramResults: [String] = []
         
