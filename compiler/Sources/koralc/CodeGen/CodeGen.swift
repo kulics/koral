@@ -591,10 +591,13 @@ public class CodeGen {
             
             // If this is the last member and it's a reference type, handle memory management
             if isLast, case let .userDefined(typeName, _, false) = memberType {
+                let tempRef = nextTemp()
                 addIndent()
-                buffer += "\(typeName)_destroy(\(accessPath));\n"
+                buffer += "\(getCType(memberType))* \(tempRef) = &(\(accessPath));\n"
                 addIndent()
-                buffer += "\(accessPath) = \(typeName)_copy(\(valueResult));\n"
+                buffer += "\(typeName)_destroy(*\(tempRef));\n"
+                addIndent()
+                buffer += "*\(tempRef) = \(typeName)_copy(\(valueResult));\n"
                 return
             }
         }
