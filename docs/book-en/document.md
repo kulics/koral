@@ -103,12 +103,12 @@ Koral's variables are a kind of binding semantics, equivalent to binding a varia
 
 Readonly variables are declared in Koral using the let keyword, and variables are declared first and used later.
 
-Koral ensures type safety through static typing, and variable bindings can be explicitly typed at declaration time with `: type`, or we can omit the type when there is enough information in the context, and the compiler will infer the type of the variable from the context.
+Koral ensures type safety through static typing, and variable bindings can be explicitly typed at declaration time with `type`, or we can omit the type when there is enough information in the context, and the compiler will infer the type of the variable from the context.
 
 The sample code is as follows.
 
 ```
-let a: Int = 5; // Explicitly labeled type
+let a Int = 5; // Explicitly labeled type
 let b = 123; // Auto-inferred type
 ```
 
@@ -130,7 +130,7 @@ Mutable variables are declared in Koral with the let mut keyword, again followin
 The sample code is as follows.
 
 ```
-let mut a: Int = 5; // Explicitly labeled type
+let mut a Int = 5; // Explicitly labeled type
 let mut b = 123; // Auto-inferred type
 ```
 
@@ -157,8 +157,8 @@ The value of the last expression in a block expression is the value of the block
 A block expression allows you to combine a series of operations, such as multi-step initialization of a complex value.
 
 ```
-let a: Void = {}
-let b: Int = {
+let a Void = {}
+let b Int = {
     let c = 7;
     let d = c + 14;
     (c + 3) * 5 + d / 3
@@ -189,7 +189,7 @@ In Koral, the default integer is of type `Int`, which can represent signed integ
 For example:
 
 ```
-let i: Int = 3987349;
+let i Int = 3987349;
 ```
 
 ### Float Point Number
@@ -201,8 +201,8 @@ In Koral, the default decimal is of type `Float`, which can represent floating-p
 For example:
 
 ```
-let f1: Float = 855.544;
-let f2: Float = 0.3141592653;
+let f1 Float = 855.544;
+let f2 Float = 0.3141592653;
 ```
 
 ### String
@@ -216,8 +216,8 @@ You only need to wrap a piece of text with `""` or `''`, which will be recognize
 For example:
 
 ```
-let s1: String = "Hello, world!";
-let s2: String = 'Hello, world!'; // same as s1
+let s1 String = "Hello, world!";
+let s2 String = 'Hello, world!'; // same as s1
 ```
 
 It should be noted that a string is a type consisting of multiple characters, so in fact the string is a fixed-order list, and there is a correspondence between the two. Many times we can process strings as if they were lists.
@@ -231,8 +231,8 @@ In this language, the default boolean is the `Bool` type, which is a type with o
 For example:
 
 ```
-let b1: Bool = true;
-let b2: Bool = false;
+let b1 Bool = true;
+let b2 Bool = false;
 ```
 
 ## Operators
@@ -437,9 +437,9 @@ The function is defined by the let keyword. The function name is followed by `()
 An expression must be declared to the right of the function `=`, and the value of this expression is the return value of the function.
 
 ```
-let f1(): Int = 1;
-let f2(a: Int): Int = a + 1;
-let f3(a: Int) = a + 1;
+let f1() Int = 1;
+let f2(a Int) Int = a + 1;
+let f3(a Int) = a + 1;
 ```
 
 ### Call
@@ -460,17 +460,17 @@ Parameters are the data that a function can receive when it is executed, and wit
 
 For example, we can implement a square function that returns the square value of the argument each time it is called.
 
-It is very simple, we only need to use `parameterName: type` to declare parameters.
+It is very simple, we only need to use `parameterName type` to declare parameters.
 
 ```
-let sqrt(x: Int) = x * x;
+let sqrt(x Int) = x * x;
 let a = sqrt(x); // a == 4
 ```
 
 sqrt takes an argument of type Int, x, and returns the square of it. When calling sqrt we need to give the expression of the corresponding Int type to complete the call.
 
 ```
-let add(x: Int, y: Int) = x + y;
+let add(x Int, y Int) = x + y;
 let a = add(1, 2); // a == 3
 ```
 
@@ -478,15 +478,15 @@ let a = add(1, 2); // a == 3
 
 In Koral, a function is a type just like Int, Float, etc. Similarly, a function can be used as an expression.
 
-The type of a function is declared using the `(T1, T2, T3,... R)Func` syntax, and the function type requires the same declaration of the arguments and return type. Among them, the part of T1, T2, T3,... is the sequence of parameter types. When there are no parameters, it is empty. Otherwise, the parameter types are arranged in sequence until all parameter types are listed. R is the return type.
+The type of a function is declared using the `[T1, T2, T3,... R]Func` syntax, and the function type requires the same declaration of the arguments and return type. Among them, the part of T1, T2, T3,... is the sequence of parameter types. When there are no parameters, it is empty. Otherwise, the parameter types are arranged in sequence until all parameter types are listed. R is the return type.
 
 Once a function is defined, the function name can be used as an expression and can be assigned to other variables or used as parameters and return values.
 
 Variables of function types are called with the same `()` syntax as functions.
 
 ```
-let sqrt(x: Int) = x * x; // (Int, Int)Func
-let f: (Int, Int)Func = sqrt;
+let sqrt(x Int) = x * x; // [Int, Int]Func
+let f [Int, Int]Func = sqrt;
 let a = f(2); // a == 4
 ```
 
@@ -494,7 +494,7 @@ With this feature, we can also define parameters or return values for function t
 
 ```
 let hello() = printLine("Hello, world!");
-let run(f: (Void)Func) = f();
+let run(f [Void]Func) = f();
 let toRun() = run;
 
 let main() = toRun()(hello);
@@ -513,15 +513,15 @@ Lambda expressions are very similar to function definitions, except that the `=`
 As shown in the code below, the value of f2 is a lambda, which is the same type as f1 and has a very similar syntax, with lambda's also declaring parameters and return types, and requiring an expression as the return value.
 
 ```
-let f1(x: Int): Int = x + 1; // (Int, Int)Func
-let f2 = (x: Int): Int -> x + 1; // (Int, Int)Func
+let f1(x Int) Int = x + 1; // [Int, Int]Func
+let f2 = (x Int) Int -> x + 1; // [Int, Int]Func
 let a = f1(1) + f2(1); // a == 4
 ```
 
 When the type of the lambda is known in our context, we can omit its argument type and return type.
 
 ```
-let f: (Int, Int)Func = (x) -> x + 1;
+let f [Int, Int]Func = (x) -> x + 1;
 ```
 
 ## Data Types
@@ -543,7 +543,7 @@ Above we declared a new data type called Empty, which contains no data at all.
 Next let's try defining some more meaningful data types.
 
 ```
-type Point(x: Int, y: Int);
+type Point(x Int, y Int);
 ```
 
 Point is a data type with two member variables, x and y, that can be used to represent a point in a two-dimensional coordinate system. This allows us to use the Point type to represent our data in the coordinate system, instead of always using two separate Int data.
@@ -555,7 +555,7 @@ So how do we construct a new Point data?
 Similar to function types, we use the same `()` syntax to call our constructor and we get the data we need.
 
 ```
-let a: Point = Point(0, 0);
+let a Point = Point(0, 0);
 ```
 
 ### Using Member Variables
@@ -565,7 +565,7 @@ Now that we have a Point data, how do we use the x and y in it?
 It's simple, we just need to use the `. ` syntax to access them.
 
 ```
-type Point(x: Int, y: Int);
+type Point(x Int, y Int);
 
 let main() = {
     let a = Point(64, 128);
@@ -581,7 +581,7 @@ Executing the above program, we can see 64 and 128.
 Member variables, like regular variables, are read-only by default. Therefore, we cannot reassign values to the x and y in Point. If we try to do this, the compiler will report an error.
 
 ```
-type Point(x: Int, y: Int);
+type Point(x Int, y Int);
 
 let main() = {
     let a = Point(64, 28);
@@ -594,10 +594,10 @@ We can mark member variables with the mut keyword when defining the type, which 
 The mutability of member variables follows the type, not whether the instance variable is mutable. Therefore, even if we declare a read-only variable, we can still modify its mutable member variables.
 
 ```
-type Point(mut x: Int, mut y: Int);
+type Point(mut x Int, mut y Int);
 
 let main() = {
-    let a: Point = Point(64, 128); // `a` doesn't need to be declared as mut
+    let a Point = Point(64, 128); // `a` doesn't need to be declared as mut
     a.x = 2; // ok
     a.y = 0 // ok
 }
@@ -606,11 +606,11 @@ let main() = {
 When we assign a type variable to another variable, both variables will point to the same instance, so any modifications we make to the member variables will affect all variables referencing the same instance. In other words, the Point type can be considered a reference type as in other languages.
 
 ```
-type Point(mut x: Int, mut y: Int);
+type Point(mut x Int, mut y Int);
 
 let main() = {
-    let a: Point = Point(64, 128); 
-    let b: Point = a; // ok
+    let a Point = Point(64, 128); 
+    let b Point = a; // ok
     printLine(a.x); // 64
     printLine(b.x); // 64
     a.x = 128;
@@ -626,8 +626,8 @@ In addition to member variables, data types can also define member functions. Me
 Defining a member function is as simple as declaring a block containing the member function.
 
 ```
-type Rectangle(length: Int, width: Int) {
-    self.area(): Int = self.length * self.width;
+type Rectangle(length Int, width Int) {
+    self.area() Int = self.length * self.width;
 }
 ```
 
@@ -653,7 +653,7 @@ In addition to member functions that contain `self`, we can also define member f
 This class of functions cannot be accessed using instances and can only be accessed using type names. It allows us to define functions that are highly type-associated but do not require an instance as an argument.
 
 ```
-type Point(x: Int, y: Int) {
+type Point(x Int, y Int) {
     default(): Point = Point(0, 0);
 }
 
@@ -673,9 +673,9 @@ Let's think about a scenario where we want to return two values on the return ty
 For the simple case, we can define a fixed type to wrap the two values.
 
 ```
-type Pair(left: Int, right: Int);
+type Pair(left Int, right Int);
 
-let f(): Pair = Pair(1, 2);
+let f() Pair = Pair(1, 2);
 ```
 
 But if we have many different types to wrap, the above approach is not general enough.
@@ -685,7 +685,7 @@ We need a Pair that can represent any type, and we can define it with the help o
 A generic data type differs from a datatype in that it requires additional declarations of type parameters that indicate future substitution by the actual type passed in, thus allowing the type of a member variable or member function to be substituted for the specific type when it is subsequently instantiated.
 
 ```
-type (T1, T2)Pair(left: T1, right: T2);
+type [T1, T2]Pair(left T1, right T2);
 ```
 
 As shown in the code above, we have declared two type parameters, T1 and T2, on the left side of `Pair` in the form of another parameter.
@@ -698,11 +698,11 @@ Next we look at how to construct generic data types.
 
 ```
 let main() = {
-    lef a1: (Int, Int)Pair = (Int, Int)Pair(1, 2);
+    lef a1 [Int, Int]Pair = [Int, Int]Pair(1, 2);
     // a1.left Int, a1.right Int
-    lef a2: (Bool, Bool)Pair = (Bool, Bool)Pair(true, false);
+    lef a2 [Bool, Bool]Pair = [Bool, Bool]Pair(true, false);
     // a2.left Bool, a2.right Bool
-    lef a3: (Int, String)Pair = (Int, String)Pair(1, "a");
+    lef a3 [Int, String]Pair = [Int, String]Pair(1, "a");
     // a3.left Int, a3.right String
 }
 ```
@@ -718,11 +718,11 @@ Like the following code, which is equivalent to the above code.
 ```
 let main() = {
     lef a1 = Pair(1, 2);
-    // a1: (Int, Int)Pair
+    // a1 [Int, Int]Pair
     lef a2 = Pair(true, false);
-    // a2: (Bool, Bool)Pair
+    // a2 [Bool, Bool]Pair
     lef a3 = Pair(1, "a");
-    // a3: (Int, String)Pair
+    // a3 [Int, String]Pair
 }
 ```
 
@@ -730,20 +730,20 @@ let main() = {
 
 An array is a generic data type that stores a set of data elements of the same type, each of which has an index to indicate its position in the array. The length of an array is fixed, and it can be accessed quickly by indexing any element.
 
-We use `(T)Array` to denote the array type, where `T` can be of any type.
+We use `[T]Array` to denote the array type, where `T` can be of any type.
 
 The array type can be initialized using the array literal (`[elem1, elem2, ...]`), where `elem1` and `elem2` denote the elements at the corresponding positions, with different elements separated by (`,`), and we can pass in any expression, but all elements must be of the same type. 
 
 ```
-let x: (Int)Array = [1, 2, 3, 4, 5];
+let x [Int]Array = [1, 2, 3, 4, 5];
 ```
 
-As shown in the code above, we use the array literal syntax to create a `(Int)Array` whose elements are `1, 2, 3, 4, 5` just as the literal represents.
+As shown in the code above, we use the array literal syntax to create a `[Int]Array` whose elements are `1, 2, 3, 4, 5` just as the literal represents.
 
 In addition to this type of literal that lists the elements, we can also construct another type of literal that creates an array with a specified size and default value (`[default; size]`), where `default` is the default value and `size` is the number of elements.
 
 ```
-let y: (Int)Array = [0; 3];
+let y [Int]Array = [0; 3];
 // y == [0, 0, 0]
 ```
 
@@ -795,7 +795,7 @@ Yes, we need functions with generic types to implement it.
 Generic functions are very similar to generic types in that they use the same syntax to define generic parameters in front of the identifier.
 
 ```
-let (T)mergeArray(a: (T)Array, b: (T)Array) = {
+let [T]mergeArray(a [T]Array, b [T]Array) = {
     ...
 }
 ```
@@ -808,7 +808,7 @@ Next, let's see how to call the generic function.
 let main() = {
     let x = [1, 2, 3];
     let y = [4, 5, 6];
-    let z = (Int)mergeArray(x, y);
+    let z = [Int]mergeArray(x, y);
     // z == [1, 2, 3, 4, 5, 6]
 }
 ```
@@ -834,11 +834,11 @@ In Koral, we can use non-escaping modifiers to control the lifetime of parameter
 The `in` parameter modifier indicates that this parameter can only be accessed or passed to other `in` parameters within the function body, and the parameter itself cannot escape outside the function body, including not being assigned to other variables or used as return values.
 
 ```koral
-type Foo(x: Int, y: Int);
-let sum(a: in Foo): Int = {
+type Foo(x Int, y Int);
+let sum(in a Foo) Int = {
     a.x + a.y // ok
 }
-let escape(a: in Foo): Foo = {
+let escape(in a Foo) Foo = {
     a // error
 }
 ```
@@ -850,7 +850,7 @@ The `in` parameter is used with the same syntax as normal parameters when callin
 ```koral
 let main() = {
     let b = Foo(1, 2);
-    let use(a: in Foo): Int = sum(a); // ok
+    let use(in a Foo): Int = sum(a); // ok
     use(b); // ok
 }
 ```
@@ -860,12 +860,12 @@ let main() = {
 The `out` return type modifier indicates that the return value of this function will not escape beyond the caller's scope. The return value within the function can only be a locally constructed value or from other `out` return function calls, and cannot come from variables or variable members.
 
 ```koral
-type Foo(x: Int, y: Int);
-let new(): out Foo = {
+type Foo(x Int, y Int);
+let new() out Foo = {
     Foo(1, 2) // ok
 }
-let mut b: Foo = Foo(2, 1);
-let escape(a: Foo): out Foo = {
+let mut b Foo = Foo(2, 1);
+let escape(a Foo) out Foo = {
     return a; // error
     let c = Foo(1, 2);
     b = c;
@@ -879,7 +879,7 @@ The `out` return value is used with the same syntax as normal parameters when ca
 
 ```koral
 let main() = {
-    let inner_new(): Foo = new(); // ok
+    let inner_new() Foo = new(); // ok
     let temp = inner_new();
 }
 ```
@@ -889,13 +889,13 @@ let main() = {
 The `inout` parameter modifier must be used in conjunction with the `out` return type modifier. `inout` indicates that the parameter must be consumed by the return value and cannot escape elsewhere, meaning that ownership of the parameter is transferred to the return value.
 
 ```koral
-type Foo(x: Int, y: Int);
-type WrapperFoo(foo: Foo);
+type Foo(x Int, y Int);
+type WrapperFoo(foo Foo);
 
-let transfer(a: inout Foo): out WrapperFoo = {
+let transfer(inout a Foo) out WrapperFoo = {
     WrapperFoo(a) // ok
 }
-let escape(a: inout Foo): Foo = {
+let escape(inout a Foo) Foo = {
     a // error
 }
 ```
@@ -907,7 +907,7 @@ The `inout` parameter is used with the same syntax as normal parameters when cal
 ```koral
 let main() = {
     let b = Foo(1, 2);
-    let trans(a: inout Foo): out WrapperFoo = transfer(a); // ok
+    let trans(inout a Foo) out WrapperFoo = transfer(a); // ok
     let wrapped = trans(b); // ok
 }
 ```
