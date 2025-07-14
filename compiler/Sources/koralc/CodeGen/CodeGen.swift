@@ -114,14 +114,14 @@ public class CodeGen {
         buffer += "}\n"
     }
 
-    private func generateFunctionDeclaration(_ identifier: TypedIdentifierNode, _ params: [TypedIdentifierNode]) {
+    private func generateFunctionDeclaration(_ identifier: Symbol, _ params: [Symbol]) {
         let returnType = getFunctionReturnType(identifier.type)
         let paramList = params.map { getCType($0.type) + " " + $0.name }.joined(separator: ", ")
         buffer += "\(returnType) \(identifier.name)(\(paramList));\n"
     }
 
-    private func generateGlobalFunction(_ identifier: TypedIdentifierNode, 
-                                     _ params: [TypedIdentifierNode], 
+    private func generateGlobalFunction(_ identifier: Symbol, 
+                                     _ params: [Symbol], 
                                      _ body: TypedExpressionNode) {
         let returnType = getFunctionReturnType(identifier.type)
         let paramList = params.map { getCType($0.type) + " " + $0.name }.joined(separator: ", ")
@@ -132,7 +132,7 @@ public class CodeGen {
         buffer += "}\n"
     }
 
-    private func generateFunctionBody(_ body: TypedExpressionNode, _ params: [TypedIdentifierNode]) {
+    private func generateFunctionBody(_ body: TypedExpressionNode, _ params: [Symbol]) {
         pushScope()
         for param in params {
             registerVariable(param.name, param.type)
@@ -454,8 +454,8 @@ public class CodeGen {
         indent = oldIndent
     }
 
-    private func generateTypeDeclaration(_ identifier: TypedIdentifierNode, 
-                                   _ parameters: [TypedIdentifierNode], 
+    private func generateTypeDeclaration(_ identifier: Symbol, 
+                                   _ parameters: [Symbol], 
                                    _ isValue: Bool) {
         let name = identifier.name
         if isValue {
@@ -542,7 +542,7 @@ public class CodeGen {
         return result
     }
 
-    private func generateAssignment(_ identifier: TypedIdentifierNode, _ value: TypedExpressionNode) {
+    private func generateAssignment(_ identifier: Symbol, _ value: TypedExpressionNode) {
         if value.type == .void {
             _ = generateExpressionSSA(value)
             return
@@ -558,8 +558,8 @@ public class CodeGen {
         buffer += "\(identifier.name) = \(valueResult);\n"
     }
 
-    private func generateMemberAccessAssignment(_ base: TypedIdentifierNode,
-                     _ memberPath: [TypedIdentifierNode], _ value: TypedExpressionNode) {
+    private func generateMemberAccessAssignment(_ base: Symbol,
+                     _ memberPath: [Symbol], _ value: TypedExpressionNode) {
         if value.type == .void {
             _ = generateExpressionSSA(value)
             return
@@ -607,7 +607,7 @@ public class CodeGen {
         buffer += "\(accessPath) = \(valueResult);\n"
     }
 
-    private func generateFunctionCall(_ identifier: TypedIdentifierNode, _ arguments: [TypedExpressionNode], _ type: Type) -> String {
+    private func generateFunctionCall(_ identifier: Symbol, _ arguments: [TypedExpressionNode], _ type: Type) -> String {
         var paramResults: [String] = []
         
         // 处理参数传递
@@ -642,7 +642,7 @@ public class CodeGen {
         }
     }
     
-    private func generateMemberAccess(_ source: TypedExpressionNode, _ member: TypedIdentifierNode) -> String {
+    private func generateMemberAccess(_ source: TypedExpressionNode, _ member: Symbol) -> String {
         let sourceResult = generateExpressionSSA(source)
         let result = nextTemp()
                

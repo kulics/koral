@@ -11,6 +11,7 @@ public indirect enum GlobalNode {
     case globalVariableDeclaration(name: String, type: TypeNode, value: ExpressionNode, mutable: Bool)
     case globalFunctionDeclaration(
         name: String, 
+        typeParameters: [String],
         parameters: [(name: String, type: TypeNode)], 
         returnType: TypeNode, 
         body: ExpressionNode
@@ -63,7 +64,7 @@ public indirect enum ExpressionNode {
     case identifier(String)
     case blockExpression(statements: [StatementNode], finalExpression: ExpressionNode?)
     case ifExpression(condition: ExpressionNode, thenBranch: ExpressionNode, elseBranch: ExpressionNode)
-    case functionCall(name: String, arguments: [ExpressionNode])
+    case functionCall(name: String, typeArguments: [TypeNode], arguments: [ExpressionNode])
     case whileExpression(condition: ExpressionNode, body: ExpressionNode)
     case memberAccess(expr: ExpressionNode, member: String)
 }

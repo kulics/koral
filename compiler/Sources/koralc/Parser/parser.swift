@@ -45,6 +45,8 @@ public class Parser {
                 try match(.mutKeyword)
                 mutable = true
             }
+
+            let typePrams = try parseTypeParameters()
             
             guard case let .identifier(name) = currentToken else {
                 throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
@@ -66,7 +68,7 @@ public class Parser {
             
             // Otherwise check for left paren to determine if it's a function or variable
             if currentToken === .leftParen {
-                return try globalFunctionDeclaration(name: name)
+                return try globalFunctionDeclaration(name: name, typeParams: typePrams)
             } else {
                 return try globalVariableDeclaration(name: name, mutable: false)
             }
@@ -110,15 +112,35 @@ public class Parser {
 
     // Parse global variable declaration
     private func globalVariableDeclaration(name: String, mutable: Bool) throws -> GlobalNode {
-        try match(.colon)
         let type = try parseType()
         try match(.equal)
         let value = try expression()
         return .globalVariableDeclaration(name: name, type: type, value: value, mutable: mutable)
     }
 
+    private func parseTypeParameters() throws -> [String] {
+        var parameters: [String] = []
+        if currentToken === .leftBracket {
+            try match(.leftBracket)
+            while currentToken !== .rightBracket {
+                guard case let .identifier(paramName) = currentToken else {
+                    throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+                }
+                try match(.identifier(paramName))
+                
+                parameters.append(paramName)
+                
+                if currentToken === .comma {
+                    try match(.comma)
+                }
+            }
+            try match(.rightBracket)
+        }
+        return parameters
+    }
+
     // Parse global function declaration
-    private func globalFunctionDeclaration(name: String) throws -> GlobalNode {
+    private func globalFunctionDeclaration(name: String, typeParams: [String]) throws -> GlobalNode {
         try match(.leftParen)
         
         var parameters: [(name: String, type: TypeNode)] = []
@@ -127,7 +149,6 @@ public class Parser {
                 throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
             }
             try match(.identifier(paramName))
-            try match(.colon)
             let paramType = try parseType()
             
             parameters.append((name: paramName, type: paramType))
@@ -138,7 +159,6 @@ public class Parser {
         }
         try match(.rightParen)
         
-        try match(.colon)
         let returnType = try parseType()
         
         try match(.equal)
@@ -146,6 +166,7 @@ public class Parser {
         
         return .globalFunctionDeclaration(
             name: name,
+            typeParameters: typeParams,
             parameters: parameters,
             returnType: returnType,
             body: body
@@ -168,7 +189,6 @@ public class Parser {
                 throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
             }
             try match(.identifier(paramName))
-            try match(.colon)
             let paramType = try parseType()
             
             parameters.append((name: paramName, type: paramType, mutable: fieldMutable))
@@ -259,7 +279,6 @@ public class Parser {
         }
         
         try match(.identifier(name))
-        try match(.colon)
         let type = try parseType()
         try match(.equal)
         let value = try expression()
@@ -470,7 +489,7 @@ public class Parser {
         }
         
         try match(.rightParen)
-        return .functionCall(name: name, arguments: arguments)
+        return .functionCall(name: name, typeArguments: [], arguments: arguments)
     }
 
     // Parse block expression

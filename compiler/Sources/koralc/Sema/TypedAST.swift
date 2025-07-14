@@ -1,4 +1,4 @@
-public struct TypedIdentifierNode {
+public struct Symbol {
     public let name: String
     public let type: Type
     public let mutable: Bool
@@ -16,28 +16,28 @@ public indirect enum TypedProgram {
 }
 
 public indirect enum TypedGlobalNode {
-    case globalVariable(identifier: TypedIdentifierNode, value: TypedExpressionNode, mutable: Bool)
+    case globalVariable(identifier: Symbol, value: TypedExpressionNode, mutable: Bool)
     case globalFunction(
-        identifier: TypedIdentifierNode,
-        parameters: [TypedIdentifierNode],
+        identifier: Symbol,
+        parameters: [Symbol],
         body: TypedExpressionNode
     )
     case globalTypeDeclaration(
-        identifier: TypedIdentifierNode,
-        parameters: [TypedIdentifierNode],
+        identifier: Symbol,
+        parameters: [Symbol],
         isValue: Bool
     )
 }
 
 public indirect enum TypedStatementNode {
-    case variableDeclaration(identifier: TypedIdentifierNode, value: TypedExpressionNode, mutable: Bool)
+    case variableDeclaration(identifier: Symbol, value: TypedExpressionNode, mutable: Bool)
     case assignment(target: TypedAssignmentTarget, value: TypedExpressionNode)
     case expression(TypedExpressionNode)
 }
 
 public enum TypedAssignmentTarget {
-    case variable(identifier: TypedIdentifierNode)
-    case memberAccess(base: TypedIdentifierNode, memberPath: [TypedIdentifierNode])
+    case variable(identifier: Symbol)
+    case memberAccess(base: Symbol, memberPath: [Symbol])
 }
 
 public indirect enum TypedExpressionNode {
@@ -50,13 +50,13 @@ public indirect enum TypedExpressionNode {
     case andExpression(left: TypedExpressionNode, right: TypedExpressionNode, type: Type) 
     case orExpression(left: TypedExpressionNode, right: TypedExpressionNode, type: Type)
     case notExpression(expression: TypedExpressionNode, type: Type)
-    case variable(identifier: TypedIdentifierNode)
+    case variable(identifier: Symbol)
     case blockExpression(statements: [TypedStatementNode], finalExpression: TypedExpressionNode?, type: Type)
     case ifExpression(condition: TypedExpressionNode, thenBranch: TypedExpressionNode, elseBranch: TypedExpressionNode, type: Type)
-    case functionCall(identifier: TypedIdentifierNode, arguments: [TypedExpressionNode], type: Type)
+    case functionCall(identifier: Symbol, arguments: [TypedExpressionNode], type: Type)
     case whileExpression(condition: TypedExpressionNode, body: TypedExpressionNode, type: Type)
-    case typeConstruction(identifier: TypedIdentifierNode, arguments: [TypedExpressionNode], type: Type)
-    case memberAccess(source: TypedExpressionNode, member: TypedIdentifierNode)
+    case typeConstruction(identifier: Symbol, arguments: [TypedExpressionNode], type: Type)
+    case memberAccess(source: TypedExpressionNode, member: Symbol)
 }
 
 extension TypedExpressionNode {

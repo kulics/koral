@@ -14,9 +14,13 @@ public func printAST(_ node: ASTNode) {
                 printExpression(value)
             }
             
-        case let .globalFunctionDeclaration(name, parameters, returnType, body):
+        case let .globalFunctionDeclaration(name, typeParameters, parameters, returnType, body):
             print("\(indent)GlobalFunctionDeclaration:")
             print("\(indent)  Name: \(name)")
+            print("\(indent)  TypeParameters:")
+            for param in typeParameters {
+                print("\(indent)    \(param)")
+            }
             print("\(indent)  Parameters:")
             for param in parameters {
                 print("\(indent)    \(param.name): \(param.type)")
@@ -145,9 +149,17 @@ public func printAST(_ node: ASTNode) {
                     printExpression(body)
                 }
             }
-        case let .functionCall(name, arguments):
+        case let .functionCall(name, typeArguments, arguments):
             print("\(indent)FunctionCall:")
             print("\(indent)  Name: \(name)")
+            print("\(indent)  TypeArguments:")
+            withIndent {
+                withIndent {
+                    for arg in typeArguments {
+                        print(arg)
+                    }
+                }
+            }
             print("\(indent)  Arguments:")
             withIndent {
                 withIndent {

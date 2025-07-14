@@ -26,6 +26,8 @@ public enum Token: CustomStringConvertible {
     case comma          // Comma ','
     case leftBrace      // Left brace '{'
     case rightBrace     // Right brace '}'
+    case leftBracket    // Left bracket '['
+    case rightBracket   // Right bracket ']'
     case bool(Bool)     // Boolean literal, e.g.: true, false
     case ifKeyword      // 'if' keyword
     case thenKeyword    // 'then' keyword
@@ -66,6 +68,8 @@ public enum Token: CustomStringConvertible {
              (.comma, .comma),
              (.leftBrace, .leftBrace),
              (.rightBrace, .rightBrace),
+             (.leftBracket, .leftBracket),
+             (.rightBracket, .rightBracket),
              (.eof, .eof),
              (.bool, .bool),
              (.ifKeyword, .ifKeyword),
@@ -139,6 +143,10 @@ public enum Token: CustomStringConvertible {
             return "{"
         case .rightBrace:
             return "}"
+        case .leftBracket:
+            return "["
+        case .rightBracket:
+            return "]"
         case .eof:
             return "EOF"
         case .bof:
@@ -336,6 +344,10 @@ public class Lexer {
             return .leftBrace
         case "}":
             return .rightBrace
+        case "[":
+            return .leftBracket
+        case "]":
+            return .rightBracket
         case ":":
             return .colon
         case ".":
