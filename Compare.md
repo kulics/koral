@@ -201,7 +201,7 @@ let count = i + Int(f)
 ### Koral
 
 ```
-for 1..<=5 as index then
+for 1..5 as index then
     printLine("\{index} times 5 is \{index * 5}");
 ```
 
@@ -875,15 +875,15 @@ for item in library {
 ```
 let nb = 42;
 when nb is {
-    >= 0 and <= 7 or 8 or 9 ->
+    0..7 or 8 or 9 :
         print("single digit");
-    10 ->
+    10 :
         print("double digits");
-    >= 11 and <= 99 ->
+    11..99 :
         print("double digits");
-    >= 100 and <= 999 ->
+    100..999 :
         print("triple digits");
-    _ ->
+    _ :
         print("four or more digits");
 }
 ```
