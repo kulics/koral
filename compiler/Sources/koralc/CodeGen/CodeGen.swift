@@ -18,7 +18,7 @@ public class CodeGen {
         let vars = rcscopeStack.removeLast()
         // 反向遍历变量列表,对可变类型变量调用 destroy
         for (name, type) in vars.reversed() {
-            if case .userDefined(let typeName, _, false) = type {
+            if case .structure(let typeName, _, false) = type {
                 addIndent()
                 buffer += "\(typeName)_destroy(\(name));\n"
             }
@@ -138,7 +138,7 @@ public class CodeGen {
             registerVariable(param.name, param.type)
         }
         let resultVar = generateExpressionSSA(body)
-        if case let .userDefined(typeName, _, false) = body.type {
+        if case let .structure(typeName, _, false) = body.type {
             addIndent()
             buffer += "\(typeName)_copy(\(resultVar));\n"
         }
@@ -332,13 +332,13 @@ public class CodeGen {
                 argResults.append(argResult)
 
                 // 如果是引用类型,增加引用计数
-                if case let .userDefined(typeName, _, false) = arg.type {
+                if case let .structure(typeName, _, false) = arg.type {
                     addIndent()
                     buffer += "\(typeName)_copy(\(argResult));\n"
                 }
             }
 
-            if case let .userDefined(typeName, parameters, false) = identifier.type {
+            if case let .structure(typeName, parameters, false) = identifier.type {
                 // 可变类型构造 - 现在返回指针
                 addIndent()
                 buffer += "\(getCType(identifier.type)) \(result) = \(typeName)_new();\n"
@@ -375,7 +375,7 @@ public class CodeGen {
             // void 类型的值不能赋给变量
             if value.type != .void {
                 // 如果是可变类型，增加引用计数
-                if case .userDefined(let typeName, _, false) = identifier.type {
+                if case .structure(let typeName, _, false) = identifier.type {
                     addIndent()
                     buffer += "\(typeName)_copy(\(valueResult));\n"
                     registerVariable(identifier.name, identifier.type)
@@ -425,7 +425,7 @@ public class CodeGen {
         case .void: return "void"
         case .function(_, _):
             fatalError("Function type not supported in getCType")
-        case let .userDefined(name, _, isValue):
+        case let .structure(name, _, isValue):
             if isValue {
                 return "struct \(name)"
             } else {
@@ -496,7 +496,7 @@ public class CodeGen {
             // Destroy reference type fields
             for param in parameters {
                 withIndent {
-                    if case let .userDefined(fieldTypeName, _, fieldIsVal) = param.type,
+                    if case let .structure(fieldTypeName, _, fieldIsVal) = param.type,
                         !fieldIsVal {
                         addIndent()
                         addIndent()
@@ -548,7 +548,7 @@ public class CodeGen {
             return
         }
         let valueResult = generateExpressionSSA(value)
-        if case let .userDefined(typeName, _, false) = identifier.type {
+        if case let .structure(typeName, _, false) = identifier.type {
             addIndent()
             buffer += "\(typeName)_destroy(\(identifier.name));\n"
             addIndent()
@@ -580,7 +580,7 @@ public class CodeGen {
             let memberType = item.type
             
             // Determine the access operator (. or ->)
-            if case .userDefined(_, _, false) = currentType {
+            if case .structure(_, _, false) = currentType {
                 accessPath += "->\(memberName)"
             } else {
                 accessPath += ".\(memberName)"
@@ -590,7 +590,7 @@ public class CodeGen {
             currentType = memberType
             
             // If this is the last member and it's a reference type, handle memory management
-            if isLast, case let .userDefined(typeName, _, false) = memberType {
+            if isLast, case let .structure(typeName, _, false) = memberType {
                 let tempRef = nextTemp()
                 addIndent()
                 buffer += "\(getCType(memberType))* \(tempRef) = &(\(accessPath));\n"
@@ -614,7 +614,7 @@ public class CodeGen {
         for arg in arguments {
             let result = generateExpressionSSA(arg)
             // 如果参数是引用类型且需要传递引用,使用复制构造
-            if case let .userDefined(typeName, _, false) = arg.type {
+            if case let .structure(typeName, _, false) = arg.type {
                 let copyResult = nextTemp()
                 addIndent()
                 buffer += "\(getCType(arg.type)) \(copyResult) = \(typeName)_copy(\(result));\n"
@@ -635,7 +635,7 @@ public class CodeGen {
             buffer += "\(getCType(type)) \(result) = \(identifier.name)("
             buffer += paramResults.joined(separator: ", ")
             buffer += ");\n"
-            if case .userDefined(_, _, false) = type {
+            if case .structure(_, _, false) = type {
                 registerVariable(result, type)
             }
             return result
@@ -648,7 +648,7 @@ public class CodeGen {
                
         addIndent()
         // If source expression is a reference type, use -> operator
-        if case .userDefined(_, _, false) = source.type {
+        if case .structure(_, _, false) = source.type {
             buffer += "\(getCType(member.type)) \(result) = \(sourceResult)->\(member.name);\n"
         } else {
             buffer += "\(getCType(member.type)) \(result) = \(sourceResult).\(member.name);\n"
