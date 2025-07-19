@@ -5,7 +5,7 @@ public indirect enum Type {
     case bool
     case void
     case function(parameters: [Type], returns: Type)
-    case userDefined(name: String, members: [(name: String, type: Type, mutable: Bool)], isValue: Bool)
+    case structure(name: String, members: [(name: String, type: Type, mutable: Bool)], isValue: Bool)
 
     public var description: String {
         switch self {
@@ -17,7 +17,7 @@ public indirect enum Type {
         case let .function(params, returns):
             let paramTypes = params.map { $0.description }.joined(separator: ", ")
             return "(\(paramTypes)) -> \(returns)"
-        case let .userDefined(name, _, _):
+        case let .structure(name, _, _):
             return name
         }
     }
@@ -36,7 +36,7 @@ extension Type : Equatable {
         case let (.function(lParams, lReturns), .function(rParams, rReturns)):
             return lParams == rParams && lReturns == rReturns
             
-        case let (.userDefined(lName, _, _), .userDefined(rName, _, _)):
+        case let (.structure(lName, _, _), .structure(rName, _, _)):
             return lName == rName
             
         default:

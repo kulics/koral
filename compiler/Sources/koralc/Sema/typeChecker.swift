@@ -52,7 +52,7 @@ public class TypeChecker {
                 // introduce generic type
                 for typeParam in typeParameters {
                     // Define the new type
-                    let typeType = Type.userDefined(
+                    let typeType = Type.structure(
                         name: typeParam,
                         members: [],
                         isValue: false
@@ -120,7 +120,7 @@ public class TypeChecker {
             }
 
             // Define the new type
-            let typeType = Type.userDefined(
+            let typeType = Type.structure(
                 name: name,
                 members: params.map { (name: $0.name, type: $0.type, mutable: $0.mutable) },
                 isValue: isValue
@@ -142,7 +142,7 @@ public class TypeChecker {
             return true
         case .string:
             return false  // Strings are not val types
-        case let .userDefined(_, _, isValue):
+        case let .structure(_, _, isValue):
             return isValue
         case .function:
             return true  // Functions are considered val types
@@ -260,7 +260,7 @@ public class TypeChecker {
         case let .functionCall(name, _, arguments):
             // 先检查是否是类型构造
             if let type = currentScope.lookupType(name) {
-                guard case let .userDefined(_, parameters, _) = type else {
+                guard case let .structure(_, parameters, _) = type else {
                     throw SemanticError.invalidOperation(
                         op: "construct", type1: type.description, type2: "")
                 }
@@ -356,7 +356,7 @@ public class TypeChecker {
             let typedExpr = try inferTypedExpression(expr)
 
             // 检查基础表达式的类型是否是用户定义的类型
-            guard case let .userDefined(typeName, members, _) = typedExpr.type else {
+            guard case let .structure(typeName, members, _) = typedExpr.type else {
                 throw SemanticError.invalidOperation(
                     op: "member access",
                     type1: typedExpr.type.description,
@@ -431,7 +431,7 @@ public class TypeChecker {
                 // Validate each member in the path
                 for (index, memberName) in memberPath.enumerated() {
                     // Check that current type is a user-defined type
-                    guard case let .userDefined(typeName, members, _) = currentType else {
+                    guard case let .structure(typeName, members, _) = currentType else {
                         throw SemanticError.invalidOperation(
                             op: "member access",
                             type1: currentType.description,
