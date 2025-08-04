@@ -393,7 +393,7 @@ type Foo(value Int);
 // adt
 type TreeNode {
     Empty();
-    Node(val Int, left [TreeNode]Ref, right [TreeNode]Ref);
+    Node(val Int, left [TreeNode]Box, right [TreeNode]Box);
 }
 
 type Color {
@@ -427,8 +427,8 @@ type [T Any]Option {
 type [T Any]Expr {
     IntExpr(value Int) [Int]Expr;
     BoolExpr(value Bool) [Bool]Expr;
-    EqualExpr(left [[T]Expr]Ref, right [[T]Expr]Ref) [Bool]Expr;
-    AddExpr(left [[Int]Expr]Ref, right [[Int]Expr]Ref) [Int]Expr;
+    EqualExpr(left [[T]Expr]Box, right [[T]Expr]Box) [Bool]Expr;
+    AddExpr(left [[Int]Expr]Box, right [[Int]Expr]Box) [Int]Expr;
 }
 
 type Any {}
@@ -524,18 +524,18 @@ let atomic_load(ptr [Int]Ptr) = ...;
 let atomic_increment(ptr [Int]Ptr) Int = ...;
 let atomic_decrement(ptr [Int]Ptr) Int = ...;
 
-let [T Any]new(v T) [T]Ref = {
+let [T Any]new(v T) [T]Box = {
     let ptr = malloc(sizeof([T]ArcData));
     memcpy(ptr, value);
-    Ref(ptr)
+    Box(ptr)
 }
 
-let [T Any]weak(r [T]Ref) [T]WeakRef = {
+let [T Any]weak(r [T]Box) [T]WeakBox = {
     atomic_increment(r.ptr.weak_count);
-    WeakRef(r.ptr)
+    WeakBox(r.ptr)
 }
 
-type [T Any]Ref(ptr [[T]ArcData]Ptr) {
+type [T Any]Box(ptr [[T]ArcData]Ptr) {
     ref self.copy() Self = {
         atomic_increment(self.ptr.strong_count);
         Self(self.ptr)
@@ -558,7 +558,7 @@ unsafe let [T Any]ref_cast(p [T]Ptr) ref T;
 @Intrinsic
 unsafe let [T Any]mut_ref_cast(p [T]Ptr) mut ref T;
 
-type [T Any]WeakRef(ptr [[T]ArcData]Ptr) {
+type [T Any]WeakBox(ptr [[T]ArcData]Ptr) {
     ref self.copy() Self = {
         atomic_increment(self.ptr.weak_count);
         Self(self.ptr)
@@ -570,14 +570,14 @@ type [T Any]WeakRef(ptr [[T]ArcData]Ptr) {
         }
     }
     
-    ref self.upgrade() [[T]Ref]Option = try_upgrade(self.ptr);
+    ref self.upgrade() [[T]Box]Option = try_upgrade(self.ptr);
 }
 
 type [T Any]_ArrayBuffer(ptr [T]Ptr, length Int) {
     mut ref self.drop() Void = free(self.ptr);
 }
 
-type [T Any]Array(private mut source [[T]_ArrayBuffer]Ref, private mut len Int) {
+type [T Any]Array(private mut source [[T]_ArrayBuffer]Box, private mut len Int) {
     new() Self = Array(new(_ArrayBuffer(null, 0)), 0);
 
     ref self.size() Int = self.len;
@@ -633,15 +633,15 @@ given StringIterator {
         }
 }
 
-type [T Any]Node(mut value T, mut next [[[T]Node]Ref]Option, mut prev [[[T]Node]WeakRef]Option);
+type [T Any]Node(mut value T, mut next [[[T]Node]Box]Option, mut prev [[[T]Node]WeakBox]Option);
 
-type [T Any]LinkedList(mut head [[[T]Node]Ref]Option, mut tail [[[T]Node]Ref]Option, mut size Int);
+type [T Any]LinkedList(mut head [[[T]Node]Box]Option, mut tail [[[T]Node]Box]Option, mut size Int);
 
 private type _FileHandle(fd UInt) {
     mut ref self.drop() Void = fclose(self.fd);
 }
 
-type File(private handle [_FileHandle]Ref) {
+type File(private handle [_FileHandle]Box) {
     open(path String) File = File(new(_FileHandle(fopen(path, ...))));
 
     ref self.read(mut ref buf [Byte]Array) Int = fread(self.handle.fd, buf, 0, buf.size());
