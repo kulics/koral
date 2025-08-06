@@ -454,39 +454,39 @@ let borrowing(ref a Foo) = ...;
 let mutating(mut ref a Foo) = ...;
 
 type ToString {
-    ref self.toString() String;
+    self.toString() String;
 }
 
 given Foo { // 隐式实现
-    ref self.toString() String = ...;
+    self.toString() String = ...;
 }
 
 given Bar ToString { // 可选显式实现
-    ref self.toString() String = ...;
+    self.toString() String = ...;
 }
 
 given[T ToString] [T]Array {
-    ref self.toString() String = ...;
+    self.toString() String = ...;
 }
 
 given[T ToString] [T]Option {
-    ref self.toString() String = 
+    self.toString() String = 
         if self is Some(v) 
         then "Some(\{v})" 
         else "None()";
 }
 
 given Foo {
-    ref self.toString() String = "foo";
+    self.toString() String = "foo";
 }
 
 type InputStream {
-    ref self.read(mut ref to [Byte]Array) Int;
+    self.read(mut ref to [Byte]Array) Int;
 }
 
 type OutputStream {
-    ref self.write(ref from [Byte]Array) Int;
-    ref self.flush() Void;
+    self.write(ref from [Byte]Array) Int;
+    self.flush() Void;
 }
 
 type [T Any]Sequence {
@@ -494,7 +494,7 @@ type [T Any]Sequence {
 }
 
 type [T Any]Iterator {
-    mut ref self.next() [T]Option;
+    mut self.next() [T]Option;
 }
 
 given[T Any] [T]Iterator {
@@ -507,14 +507,14 @@ given[T Any] [T]Iterator {
 }
 
 type [T Any]FilterIterator(iter [T]Iterator, filter [T, Bool]Func) {
-    mut ref self.next() [T]Option = 
+    mut self.next() [T]Option = 
         while self.iter.next() is Some(v) then {
             if self.filter(v) then return Some(v);
         } else None();
 }
 
 type [T Any, R Any]MapIterator(iter [T]Iterator, mapper [T, R]Func) {
-    mut ref self.next() [R]Option = 
+    mut self.next() [R]Option = 
         if self.iter.next() is Some(v) then Some(mapper(v)) else None();
 }
 
@@ -536,12 +536,12 @@ let [T Any]weak(r [T]Box) [T]WeakBox = {
 }
 
 type [T Any]Box(ptr [[T]ArcData]Ptr) {
-    ref self.copy() Self = {
+    self.copy() Self = {
         atomic_increment(self.ptr.strong_count);
         Self(self.ptr)
     }
 
-    mut ref self.drop() Void = {
+    mut self.drop() Void = {
         if atomic_decrement(self.ptr.strong_count) == 0 then {
             self.ptr.value.drop();
             if atomic_load(self.ptr.weak_count) == 0 then {
@@ -550,7 +550,7 @@ type [T Any]Box(ptr [[T]ArcData]Ptr) {
         }
     }
 
-    ref self.deref() mut ref T = unsafe { mut_ref_cast(self.ptr) };
+    self.deref() mut ref T = unsafe { mut_ref_cast(self.ptr) };
 }
 
 @Intrinsic
@@ -559,42 +559,42 @@ unsafe let [T Any]ref_cast(p [T]Ptr) ref T;
 unsafe let [T Any]mut_ref_cast(p [T]Ptr) mut ref T;
 
 type [T Any]WeakBox(ptr [[T]ArcData]Ptr) {
-    ref self.copy() Self = {
+    self.copy() Self = {
         atomic_increment(self.ptr.weak_count);
         Self(self.ptr)
     }
     
-    mut ref self.drop() Void = {
+    mut self.drop() Void = {
         if atomic_decrement(self.ptr.weak_count) == 0 then {
             free(self.value);
         }
     }
     
-    ref self.upgrade() [[T]Box]Option = try_upgrade(self.ptr);
+    self.upgrade() [[T]Box]Option = try_upgrade(self.ptr);
 }
 
 type [T Any]_ArrayBuffer(ptr [T]Ptr, length Int) {
-    mut ref self.drop() Void = free(self.ptr);
+    mut self.drop() Void = free(self.ptr);
 }
 
 type [T Any]Array(private mut source [[T]_ArrayBuffer]Box, private mut len Int) {
     new() Self = Array(new(_ArrayBuffer(null, 0)), 0);
 
-    ref self.size() Int = self.len;
+    self.size() Int = self.len;
 
-    ref self.get(index Int) T = self.source.ptr[index];
+    self.get(index Int) T = self.source.ptr[index];
     
-    mut ref self.set(index Int, value T) Void = {
+    mut self.set(index Int, value T) Void = {
         make_sure_unique(self);
         self.source[index] = value;
     }
 
-    mut ref self.insert(index Int, value T) Void = {
+    mut self.insert(index Int, value T) Void = {
         make_sure_unique(self);
         ...
     }
 
-    mut ref self.remove(index Int) Void = {
+    mut self.remove(index Int) Void = {
         make_sure_unique(self);
         ...
     }
@@ -604,7 +604,7 @@ type [T Any]Array(private mut source [[T]_ArrayBuffer]Box, private mut len Int) 
 }
 
 type [T Any]ArrayIterator(source [T]Array, mut index Int) {
-    mut ref self.next() [T]Option = 
+    mut self.next() [T]Option = 
         if self.index < self.source.size() then {
             self.index += 1;
             Some(self.source[self.index])
@@ -616,7 +616,7 @@ type [T Any]ArrayIterator(source [T]Array, mut index Int) {
 type String(data [Rune]Array) {
     of(data [Rune]Array) Self = String(self.data);
 
-    ref self.toString() Self = String(self.data);
+    self.toString() Self = String(self.data);
 
     self.iterator() StringIterator = StringIterator(self, -1);
 }
@@ -624,7 +624,7 @@ type String(data [Rune]Array) {
 type StringIterator(_source String, mut index Int);
 
 given StringIterator {
-    mut ref self.next() [Rune]Option = 
+    mut self.next() [Rune]Option = 
         if self.index < self._source.data.size() then {
             self.index += 1;
             Some(self._source.data[self.index])
@@ -638,14 +638,14 @@ type [T Any]Node(mut value T, mut next [[[T]Node]Box]Option, mut prev [[[T]Node]
 type [T Any]LinkedList(mut head [[[T]Node]Box]Option, mut tail [[[T]Node]Box]Option, mut size Int);
 
 private type _FileHandle(fd UInt) {
-    mut ref self.drop() Void = fclose(self.fd);
+    mut self.drop() Void = fclose(self.fd);
 }
 
 type File(private handle [_FileHandle]Box) {
     open(path String) File = File(new(_FileHandle(fopen(path, ...))));
 
-    ref self.read(mut ref buf [Byte]Array) Int = fread(self.handle.fd, buf, 0, buf.size());
-    ref self.write(ref buf [Byte]Array) Int = fwrite(self.handle.fd, buf, 0, buf.size());
+    self.read(mut ref buf [Byte]Array) Int = fread(self.handle.fd, buf, 0, buf.size());
+    self.write(ref buf [Byte]Array) Int = fwrite(self.handle.fd, buf, 0, buf.size());
 }
 
 /*
