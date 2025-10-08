@@ -393,7 +393,7 @@ type Foo(value Int);
 // adt
 type TreeNode {
     Empty();
-    Node(val Int, left [TreeNode]Box, right [TreeNode]Box);
+    Node(val Int, left TreeNode ref, right TreeNode ref);
 }
 
 type Color {
@@ -427,8 +427,8 @@ type [T Any]Option {
 type [T Any]Expr {
     IntExpr(value Int) [Int]Expr;
     BoolExpr(value Bool) [Bool]Expr;
-    EqualExpr(left [[T]Expr]Box, right [[T]Expr]Box) [Bool]Expr;
-    AddExpr(left [[Int]Expr]Box, right [[Int]Expr]Box) [Int]Expr;
+    EqualExpr(left [T]Expr ref, right [T]Expr ref) [Bool]Expr;
+    AddExpr(left [Int]Expr ref, right [Int]Expr ref) [Int]Expr;
 }
 
 type Equatable {
@@ -457,56 +457,52 @@ given[T Any] [T]Array {
     default() Self = [];
 }
 
-// parameter reference
-let borrowing(ref a Foo) = ...;
-let mutating(mut ref a Foo) = ...;
-
 type ToString {
-    self.toString() String;
+    ref self.toString() String;
 }
 
 given Foo { // 隐式实现
-    self.toString() String = ...;
+    ref self.toString() String = ...;
 }
 
 given Bar ToString { // 可选显式实现
-    self.toString() String = ...;
+    ref self.toString() String = ...;
 }
 
 given[T ToString] [T]Array {
-    self.toString() String = ...;
+    ref self.toString() String = ...;
 }
 
 given[T ToString] [T]Option {
-    self.toString() String = 
+    ref self.toString() String = 
         if self is Some(v) 
         then "Some(\{v})" 
         else "None()";
 }
 
 given Foo {
-    self.toString() String = "foo";
+    ref self.toString() String = "foo";
 }
 
 type InputStream {
-    self.read(mut ref to [Byte]Array) Int;
+    mut ref self.read(to [Byte]Array mut ref) Int;
 }
 
 type OutputStream {
-    self.write(ref from [Byte]Array) Int;
-    self.flush() Void;
+    mut ref self.write(from [Byte]Array ref) Int;
+    mut ref self.flush() Void;
 }
 
 type [T Any]Sequence {
-    self.iterator() [T]Iterator;
+    ref self.iterator() [T]Iterator mut ref;
 }
 
 type [T Any]Iterator {
-    mut self.next() [T]Option;
+    mut ref self.next() [T]Option;
 }
 
 given[T Any] [T]Iterator {
-    self.[R Any]reduce(mut r R, f [R, T, R]Func) R = {
+    mut self.[R Any]reduce(mut r R, f [R, T, R]Func) R = {
         for self as v then r = f(r, v);
         r
     }
@@ -515,104 +511,89 @@ given[T Any] [T]Iterator {
 }
 
 type [T Any]FilterIterator(iter [T]Iterator, filter [T, Bool]Func) {
-    mut self.next() [T]Option = 
+    mut ref self.next() [T]Option = 
         while self.iter.next() is Some(v) then {
             if self.filter(v) then return Some(v);
         } else None();
 }
 
 type [T Any, R Any]MapIterator(iter [T]Iterator, mapper [T, R]Func) {
-    mut self.next() [R]Option = 
+    mut ref self.next() [R]Option = 
         if self.iter.next() is Some(v) then Some(mapper(v)) else None();
 }
 
-type [T Any]ArcData(mut value T, mut strong_count Int, mut weak_count Int);
+/*
+type own File(xxx);
 
-let atomic_load(ptr [Int]Ptr) = ...;
-let atomic_increment(ptr [Int]Ptr) Int = ...;
-let atomic_decrement(ptr [Int]Ptr) Int = ...;
+let mut a File = File(xxx);
+let r File ref = ref a;
+let r2 File mut ref = mut ref a;
+let a4 File weak ref = r2.downgrade();
+let a5 File = deref r2;
 
-let [T Any]new(v T) [T]Box = {
-    let ptr = malloc(sizeof([T]ArcData));
-    memcpy(ptr, value);
-    Box(ptr)
+struct RefBlock {
+    size_t strong_count;
+    size_t weak_count;
 }
 
-let [T Any]weak(r [T]Box) [T]WeakBox = {
-    atomic_increment(r.ptr.weak_count);
-    WeakBox(r.ptr)
+struct ref {
+    *RefBlock ref_block;
+    *void data;
 }
 
-type [T Any]Box(ptr [[T]ArcData]Ptr) {
-    self.copy() Self = {
-        atomic_increment(self.ptr.strong_count);
-        Self(self.ptr)
+void strong_inc(ref r) {
+    if (r->ref_block == null) {
+        return;
     }
+    ...
+}
 
-    mut self.drop() Void = {
-        if atomic_decrement(self.ptr.strong_count) == 0 then {
-            self.ptr.value.drop();
-            if atomic_load(self.ptr.weak_count) == 0 then {
-                free(self.value);
+void stong_dec() {
+    ...
+}
+
+let mut x File = File.open(xxx);
+x.read();
+// File.read(mut ref x);
+// File.read(ref{ data: &x, ref_block: null });
+*/
+
+type [T Any]Array(mut source T raw_ref, mut len Int, mut cap Int) {
+    new() Self = Array([T]make_raw_ref(0), 0);
+
+    mut ref self.drop() = {
+        if is_unique(self) then {
+            for 0..self.source.len as i then {
+                drop(self.source[i]);
             }
         }
     }
 
-    self.deref() mut ref T = unsafe { mut_ref_cast(self.ptr) };
-}
+    ref self.size() Int = self.len;
 
-@Intrinsic
-unsafe let [T Any]ref_cast(p [T]Ptr) ref T;
-@Intrinsic
-unsafe let [T Any]mut_ref_cast(p [T]Ptr) mut ref T;
-
-type [T Any]WeakBox(ptr [[T]ArcData]Ptr) {
-    self.copy() Self = {
-        atomic_increment(self.ptr.weak_count);
-        Self(self.ptr)
-    }
+    ref self.get(index Int) T = self.source[index];
     
-    mut self.drop() Void = {
-        if atomic_decrement(self.ptr.weak_count) == 0 then {
-            free(self.value);
-        }
-    }
-    
-    self.upgrade() [[T]Box]Option = try_upgrade(self.ptr);
-}
-
-type [T Any]_ArrayBuffer(ptr [T]Ptr, length Int) {
-    mut self.drop() Void = free(self.ptr);
-}
-
-type [T Any]Array(private mut source [[T]_ArrayBuffer]Box, private mut len Int) {
-    new() Self = Array(new(_ArrayBuffer(null, 0)), 0);
-
-    self.size() Int = self.len;
-
-    self.get(index Int) T = self.source.ptr[index];
-    
-    mut self.set(index Int, value T) Void = {
+    mut ref self.set(index Int, value T) Void = {
         make_sure_unique(self);
         self.source[index] = value;
     }
 
-    mut self.insert(index Int, value T) Void = {
+    mut ref self.insert(index Int, value T) Void = {
         make_sure_unique(self);
         ...
     }
 
-    mut self.remove(index Int) Void = {
+    mut ref self.remove(index Int) Void = {
         make_sure_unique(self);
         ...
     }
 
-    self.iterator() [T]ArrayIterator =
+    ref self.iterator() [T]ArrayIterator =
         [T]ArrayIterator(self, 0);
 }
 
-type [T Any]ArrayIterator(source [T]Array, mut index Int) {
-    mut self.next() [T]Option = 
+type [T Any]ArrayIterator(source [T]Array ref, mut index Int) {
+    mut ref self.next() [T]Option = 
         if self.index < self.source.size() then {
             self.index += 1;
             Some(self.source[self.index])
@@ -624,15 +605,15 @@ type [T Any]ArrayIterator(source [T]Array, mut index Int) {
 type String(data [Rune]Array) {
     of(data [Rune]Array) Self = String(self.data);
 
-    self.toString() Self = String(self.data);
+    ref self.toString() Self = String(self.data);
 
-    self.iterator() StringIterator = StringIterator(self, -1);
+    ref self.iterator() StringIterator = StringIterator(self, -1);
 }
 
-type StringIterator(_source String, mut index Int);
+type StringIterator(_source String ref, mut index Int);
 
 given StringIterator {
-    mut self.next() [Rune]Option = 
+    mut ref self.next() [Rune]Option = 
         if self.index < self._source.data.size() then {
             self.index += 1;
             Some(self._source.data[self.index])
@@ -641,19 +622,17 @@ given StringIterator {
         }
 }
 
-type [T Any]Node(mut value T, mut next [[[T]Node]Box]Option, mut prev [[[T]Node]WeakBox]Option);
+type [T Any]Node(mut value T, mut next [[T]Node ref]Option, mut prev [[T]Node weak ref]Option);
 
-type [T Any]LinkedList(mut head [[[T]Node]Box]Option, mut tail [[[T]Node]Box]Option, mut size Int);
+type [T Any]LinkedList(mut head [[T]Node]Option, mut tail [[T]Node]Option, mut size Int);
 
-private type _FileHandle(fd UInt) {
-    mut self.drop() Void = fclose(self.fd);
-}
+type owned File(private fd UInt) {
+    open(path String) File = File(fopen(path, ...));
 
-type File(private handle [_FileHandle]Box) {
-    open(path String) File = File(new(_FileHandle(fopen(path, ...))));
+    mut ref self.drop() Void = fclose(self.fd);
 
-    self.read(mut ref buf [Byte]Array) Int = fread(self.handle.fd, buf, 0, buf.size());
-    self.write(ref buf [Byte]Array) Int = fwrite(self.handle.fd, buf, 0, buf.size());
+    ref self.read(buf [Byte]Array mut ref) Int = fread(self.fd, buf, 0, buf.size());
+    ref self.write(buf [Byte]Array ref) Int = fwrite(self.fd, buf, 0, buf.size());
 }
 
 /*
