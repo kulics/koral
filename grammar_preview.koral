@@ -393,7 +393,7 @@ type Foo(value Int);
 // adt
 type TreeNode {
     Empty();
-    Node(val Int, left TreeNode ref, right TreeNode ref);
+    Node(val Int, left [TreeNode]Box, right [TreeNode]Box);
 }
 
 type Color {
@@ -427,16 +427,16 @@ type [T Any]Option {
 type [T Any]Expr {
     IntExpr(value Int) [Int]Expr;
     BoolExpr(value Bool) [Bool]Expr;
-    EqualExpr(left [T]Expr ref, right [T]Expr ref) [Bool]Expr;
-    AddExpr(left [Int]Expr ref, right [Int]Expr ref) [Int]Expr;
+    EqualExpr(left [[T]Expr]Box, right [[T]Expr]Box) [Bool]Expr;
+    AddExpr(left [[Int]Expr]Box, right [[Int]Expr]Box) [Int]Expr;
 }
 
 type Equatable {
-    self.equals(r Self) Bool;
+    ref self.equals(ref r Self) Bool;
 }
 
 type Comparable where Self is Equatable {
-    self.compare(r Self) Int;
+    ref self.compare(ref r Self) Int;
 }
 
 type Any {}
@@ -485,16 +485,16 @@ given Foo {
 }
 
 type InputStream {
-    mut ref self.read(to [Byte]Array mut ref) Int;
+    mut ref self.read(mut ref to [Byte]Array) Int;
 }
 
 type OutputStream {
-    mut ref self.write(from [Byte]Array ref) Int;
+    mut ref self.write(ref from [Byte]Array) Int;
     mut ref self.flush() Void;
 }
 
-type [T Any]Sequence {
-    ref self.iterator() [T]Iterator mut ref;
+type [T Any, I [T]Iterator]Sequence {
+    ref self.iterator() I;
 }
 
 type [T Any]Iterator {
@@ -522,60 +522,45 @@ type [T Any, R Any]MapIterator(iter [T]Iterator, mapper [T, R]Func) {
         if self.iter.next() is Some(v) then Some(mapper(v)) else None();
 }
 
-/*
-type own File(xxx);
-
-let mut a File = File(xxx);
-let r File ref = ref a;
-let r2 File mut ref = mut ref a;
-let a4 File weak ref = r2.downgrade();
-let a5 File = deref r2;
-
-struct RefBlock {
-    size_t strong_count;
-    size_t weak_count;
+type [T Any]UnsafaPointer(addr UInt) {
+    // primitive implement
+    alloc(count Int) Self = {...}
+    // primitive implement
+    ref self.as_ref() mut ref T = {...}
+    // primitive implement
+    ref self.offset(n Int) Self = {...}
+    // primitive implement
+    self.free() Void = {...}
 }
 
-struct ref {
-    *RefBlock ref_block;
-    *void data;
+let [T Any]new(v T) [T]Box = {...}
+
+type [T Any]BoxImpl(data T, strong Int, weak Int);
+
+type [T Any]Box(inner [[T]BoxImpl]UnsafaPointer) {
+    ref self.copy() Self = {...}
+    mut ref self.drop() Void = {...}
+    ref self.deref() mut ref T = {...}
 }
 
-void strong_inc(ref r) {
-    if (r->ref_block == null) {
-        return;
-    }
-    ...
-}
-
-void stong_dec() {
-    ...
-}
-
-let mut x File = File.open(xxx);
-x.read();
-// File.read(mut ref x);
-// File.read(ref{ data: &x, ref_block: null });
-*/
-
-type [T Any]Array(mut source T raw_ref, mut len Int, mut cap Int) {
-    new() Self = Array([T]make_raw_ref(0), 0);
+type [T Any]Array(mut source [T]UnsafaPointer, mut len Int, mut cap Int) {
+    new() Self = Array([T]UnsafaPointer.alloc(0), 0);
 
     mut ref self.drop() = {
         if is_unique(self) then {
-            for 0..self.source.len as i then {
-                drop(self.source[i]);
+            for 0..self.len as i then {
+                self.source.offset(i).as_ref().drop();
             }
         }
     }
 
     ref self.size() Int = self.len;
 
-    ref self.get(index Int) T = self.source[index];
+    ref self.get(index Int) T = self.source.offset(i).as_ref();
     
     mut ref self.set(index Int, value T) Void = {
         make_sure_unique(self);
-        self.source[index] = value;
+        self.source.offset(i).as_ref() = value;
     }
 
     mut ref self.insert(index Int, value T) Void = {
@@ -592,7 +577,7 @@ type [T Any]Array(mut source T raw_ref, mut len Int, mut cap Int) {
         [T]ArrayIterator(self, 0);
 }
 
-type [T Any]ArrayIterator(source [T]Array ref, mut index Int) {
+type ref [T Any]ArrayIterator(ref source [T]Array, mut index Int) {
     mut ref self.next() [T]Option = 
         if self.index < self.source.size() then {
             self.index += 1;
@@ -610,7 +595,7 @@ type String(data [Rune]Array) {
     ref self.iterator() StringIterator = StringIterator(self, -1);
 }
 
-type StringIterator(_source String ref, mut index Int);
+type ref StringIterator(ref _source String, mut index Int);
 
 given StringIterator {
     mut ref self.next() [Rune]Option = 
@@ -622,17 +607,19 @@ given StringIterator {
         }
 }
 
-type [T Any]Node(mut value T, mut next [[T]Node ref]Option, mut prev [[T]Node weak ref]Option);
+type [T Any]Node(mut value T, mut next [[[T]Node]Box]Option, mut prev [[[T]Node]WeakBox]Option);
 
 type [T Any]LinkedList(mut head [[T]Node]Option, mut tail [[T]Node]Option, mut size Int);
 
-type owned File(private fd UInt) {
-    open(path String) File = File(fopen(path, ...));
-
+private type FileImpl(fd UInt) {
     mut ref self.drop() Void = fclose(self.fd);
+}
 
-    ref self.read(buf [Byte]Array mut ref) Int = fread(self.fd, buf, 0, buf.size());
-    ref self.write(buf [Byte]Array ref) Int = fwrite(self.fd, buf, 0, buf.size());
+type File(inner [FileImpl]Box) {
+    open(path String) File = File(new(fopen(path, ...)));
+
+    ref self.read(mut ref buf [Byte]Array) Int = fread(self.fd, buf, 0, buf.size());
+    ref self.write(ref buf [Byte]Array) Int = fwrite(self.fd, buf, 0, buf.size());
 }
 
 /*
