@@ -347,7 +347,7 @@ let main() = {
     // Generic Type
     type [T Any]Table(mut data T);
     given[T Any] [T]Table {
-        self.setData(d T) Void = {
+        mut self.set_data(d T) Void = {
             self.data = d;
         }
     }
@@ -539,7 +539,7 @@ type [T Any]BoxImpl(strong Int, weak Int, data T);
 
 type [T Any]Box(inner [[T]BoxImpl]UnsafaPointer) {
     self.copy() Self = {...}
-    mut self.drop() Void = {...}
+    own self.drop() Void = {...}
     self.deref() mut ref T = {...}
 }
 
@@ -548,7 +548,7 @@ type [T Copy and Drop]Array(mut source [T]UnsafaPointer, mut len Int, mut cap In
 
     self.copy() Self = {...}
 
-    mut self.drop() = {
+    own self.drop() = {
         ... // ref_count--
         if ref_count_zero(self) then {
             for 0..self.len as i then {
@@ -627,28 +627,26 @@ type File(fd UInt) is not Copy and not Drop {
 /*
 1. 默认声明的类型都是值类型，等价于 c struct，但不是所有类型都能直接 copy。
 2-1. 任意类型只要实现了 copy 函数，编译器就会自动根据需要调用 copy 来产生新实例。
-2-2. 任意类型可以给自己声明 `is not Copy` 来标记不自动生成 copy 实现，如果类型内存在 copy 实现则会编译报错。
+2-2. 任意类型可以给自己声明 `is not Copy` 来标记不实现 Copy，编译器不会自动生成 copy 实现，如果类型内存在 copy 实现则会编译报错。
 2-3. 任意类型内包含的成员变量如果全部都是 copy 类型，且没有标记为 `is not Copy`，那么编译器会给这个类型自动实现 copy（递归成员实现）。
 3-1. 任意类型只要实现了 drop 函数，其实例生命周期结束时就由编译器插入调用 drop 来销毁。
-3-2. 任意类型可以给自己声明 `is not Drop` 来标记不自动生成 drop 实现，如果类型内存在 drop 实现则会编译报错。
+3-2. 任意类型可以给自己声明 `is not Drop` 来标记不实现 Drop，编译器不会自动生成 drop 实现，如果类型内存在 drop 实现则会编译报错。
 3-3. 任意类型内包含的成员变量如果全部都是 drop 类型，且没有标记为 `is not Drop`，那么编译器会给这个类型自动实现 drop（递归成员实现）。
 3-4. 没有实现 Drop 的类型，需要手动消费所有权，不会自动销毁（等价于 linear type）。
 4-1. 变量可以通过只读引用或者读写引用来传递，使用引用不会触发 copy 和 drop。
 4-2. 只读变量只能获取只读引用，可变变量可以获取只读引用或读写引用。
 4-3. 读写引用具有独占性，编译器在作用域内做独占性检查，防止同一个来源同时存在多个读写引用或读写与只读引用重叠。
 4-4. 引用的生命周期不能超过被引用对象的作用域，防止悬垂引用。
+4-5. 引用不可逃逸（不能存入堆/闭包/跨线程）。
 4-5. 引用的变量不会自动插入 copy，需要手动调用。
 5. 如果编译器判断某个非引用变量的所有权被转移，则不会调用 copy 和 drop，只会 move 值。
 6. 函数参数的默认修饰符是 own（拥有所有权），self 的默认修饰符是 ref（只能借用）。
 
 lifetime 规则：
-作用域包含函数体，if的then、else分支，while的then分支。
-1. 函数参数在函数结束后 drop
-2. 本地变量在作用域结束后 drop
-3. 由函数调用和类型构造产生的临时对象，在作用域结束后 drop
-4. 赋值时对原变量 drop，再对新值 copy
-5. 传参时对参数值 copy
-6. 返回值 copy
-7. 初始化对值 copy
-8. and 和 or 短路后只处理左侧表达式的临时对象 drop
+作用域包含函数体，if 的 then、else 分支，while 的 then 分支。
+1. 变量（本地变量/函数参数/由函数调用和类型构造产生的隐藏变量）在作用域结束前必须被消费。
+2. 消费包含 own 语义的绑定、解构、赋值、传参、返回、捕获，ref 语义的不会产生消费。
+3. 对于实现了 Drop 的变量，如果没有显式的消费，则会在作用域结束前由编译器插入 drop 调用来消费。
+4. 对于实现了 Copy 的变量，如果作用域内存在多于 1 次的消费，那么最后一次之前的消费会由编译器插入 copy 调用来产生新实例。
+5. and 和 or 短路后只处理左侧表达式的临时对象生命周期，右侧未求值则无临时对象，已求值则按正常规则处理。
 */
