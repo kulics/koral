@@ -139,35 +139,65 @@ public class Parser {
         return parameters
     }
 
-    // Parse global function declaration
+    // Parse global function declaration with optional 'own'/'ref' modifiers for params and return type
     private func globalFunctionDeclaration(name: String, typeParams: [String]) throws -> GlobalNode {
         try match(.leftParen)
-        
-        var parameters: [(name: String, type: TypeNode)] = []
+        var parameters: [(name: String, modifier: OwnershipModifier, type: TypeNode)] = []
         while currentToken !== .rightParen {
-            guard case let .identifier(paramName) = currentToken else {
+            // Optional 'own' or 'ref' modifier for parameter
+            var paramModifier: OwnershipModifier = .none
+            // Allow sequences: mut, mut ref, mut own, ref, own
+            var sawMut = false
+            if currentToken === .mutKeyword {
+                sawMut = true
+                try match(.mutKeyword)
+            }
+            if currentToken === .refKeyword {
+                try match(.refKeyword)
+                paramModifier = sawMut ? .mutRef : .ref
+            } else if currentToken === .ownKeyword {
+                try match(.ownKeyword)
+                paramModifier = sawMut ? .mutOwn : .own
+            } else if sawMut {
+                // plain mut without ref/own
+                paramModifier = .mut
+            }
+            guard case let .identifier(pname) = currentToken else {
                 throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
             }
-            try match(.identifier(paramName))
+            try match(.identifier(pname))
             let paramType = try parseType()
-            
-            parameters.append((name: paramName, type: paramType))
-            
+            parameters.append((name: pname, modifier: paramModifier, type: paramType))
             if currentToken === .comma {
                 try match(.comma)
             }
         }
         try match(.rightParen)
-        
+        // Optional 'own' or 'ref' modifier for return type
+        var returnModifier: OwnershipModifier = .none
+        // Support mut modifiers for return too: mut, mut ref, mut own, ref, own
+        var retSawMut = false
+        if currentToken === .mutKeyword {
+            retSawMut = true
+            try match(.mutKeyword)
+        }
+        if currentToken === .refKeyword {
+            try match(.refKeyword)
+            returnModifier = retSawMut ? .mutRef : .ref
+        } else if currentToken === .ownKeyword {
+            try match(.ownKeyword)
+            returnModifier = retSawMut ? .mutOwn : .own
+        } else if retSawMut {
+            returnModifier = .mut
+        }
         let returnType = try parseType()
-        
         try match(.equal)
         let body = try expression()
-        
         return .globalFunctionDeclaration(
             name: name,
             typeParameters: typeParams,
             parameters: parameters,
+            returnModifier: returnModifier,
             returnType: returnType,
             body: body
         )

@@ -1,3 +1,8 @@
+public enum ValueCategory {
+    case lvalue
+    case rvalue
+}
+
 public struct Symbol {
     public let name: String
     public let type: Type
@@ -81,6 +86,18 @@ extension TypedExpressionNode {
             return identifier.type
         case .memberAccess(_, let member):
             return member.type
+        }
+    }
+
+    var valueCategory: ValueCategory {
+        switch self {
+        case .variable:
+            return .lvalue
+        case .memberAccess(let source, _):
+            // member access is lvalue if the source is lvalue
+            return source.valueCategory
+        default:
+            return .rvalue
         }
     }
 }

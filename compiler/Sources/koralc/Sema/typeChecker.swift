@@ -44,7 +44,7 @@ public class TypeChecker {
                 mutable: isMut
             )
 
-        case let .globalFunctionDeclaration(name, typeParameters, parameters, returnTypeNode, body):
+    case let .globalFunctionDeclaration(name, typeParameters, parameters, _, returnTypeNode, body):
             guard case nil = currentScope.lookup(name) else {
                 throw SemanticError.duplicateDefinition(name)
             }
@@ -72,12 +72,12 @@ public class TypeChecker {
                     guard let paramType = currentScope.resolveType(typeStr) else {
                         throw SemanticError.undefinedType(typeStr)
                     }
-                    return Symbol(name: param.name, type: paramType)
+                    return Symbol(name: param.name, type: paramType, mutable: TypeChecker.modifierMutable(param.modifier))
                 }
                 let (typedBody, functionType) = try checkFunctionBody(params, returnType, body)
                 return (functionType, typedBody, params)
             }
-            currentScope.define(name, functionType)
+            currentScope.define(name, functionType, mutable: false)
             return .globalFunction(
                 identifier: Symbol(name: name, type: functionType),
                 parameters: params,
@@ -157,7 +157,7 @@ public class TypeChecker {
         return try withNewScope {
             // Add parameters to new scope
             for param in params {
-                currentScope.define(param.name, param.type)
+                currentScope.define(param.name, param.type, mutable: param.mutable)
             }
 
             let typedBody = try inferTypedExpression(body)
@@ -376,6 +376,15 @@ public class TypeChecker {
         }
     }
 
+    private static func modifierMutable(_ modifier: OwnershipModifier) -> Bool {
+        switch modifier {
+        case .mut, .mutOwn, .mutRef:
+            return true
+        default:
+            return false
+        }
+    }
+
     // 新增用于返回带类型的语句的检查函数
     private func checkStatement(_ stmt: StatementNode) throws -> TypedStatementNode {
         switch stmt {
@@ -424,12 +433,17 @@ public class TypeChecker {
                 guard let baseType = currentScope.lookup(base) else {
                     throw SemanticError.undefinedVariable(base)
                 }
+                // Base binding must be mutable to assign through member access under value semantics
+                guard currentScope.isMutable(base) else {
+                    throw SemanticError.assignToImmutable(base)
+                }
 
                 var currentType = baseType
                 var typedPath: [Symbol] = []
 
-                // Validate each member in the path
-                for (index, memberName) in memberPath.enumerated() {
+
+                // Validate each member in the path: all must be mutable for assignment
+                for (_, memberName) in memberPath.enumerated() {
                     // Check that current type is a user-defined type
                     guard case let .structure(typeName, members, _) = currentType else {
                         throw SemanticError.invalidOperation(
@@ -444,12 +458,10 @@ public class TypeChecker {
                         throw SemanticError.undefinedMember(memberName, typeName)
                     }
 
-                    // For final member in path, check if it's mutable
-                    if index == memberPath.count - 1 {
-                        guard member.mutable else {
-                            throw SemanticError.immutableFieldAssignment(
-                                type: typeName, field: memberName)
-                        }
+                    // All members in the chain must be mutable for assignment
+                    guard member.mutable else {
+                        throw SemanticError.immutableFieldAssignment(
+                            type: typeName, field: memberName)
                     }
 
                     let memberIdentifier = Symbol(
