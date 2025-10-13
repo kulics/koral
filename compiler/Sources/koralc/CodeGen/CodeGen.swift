@@ -4,29 +4,29 @@ public class CodeGen {
     private var buffer: String = ""
     private var tempVarCounter = 0
     private var globalInitializations: [(String, TypedExpressionNode)] = []
-    private var rcscopeStack: [[(String, Type)]] = []
+    private var lifetimeScopeStack: [[(String, Type)]] = []
 
     public init(ast: TypedProgram) {
         self.ast = ast
     }
 
     private func pushScope() {
-        rcscopeStack.append([])
+        lifetimeScopeStack.append([])
     }
 
     private func popScope() {
-        let vars = rcscopeStack.removeLast()
+        let vars = lifetimeScopeStack.removeLast()
         // 反向遍历变量列表,对可变类型变量调用 destroy
         for (name, type) in vars.reversed() {
             if case .structure(let typeName, _, false) = type {
                 addIndent()
-                buffer += "\(typeName)_destroy(\(name));\n"
+                buffer += "\(typeName)_drop(\(name));\n"
             }
         }
     }
 
     private func registerVariable(_ name: String, _ type: Type) {
-        rcscopeStack[rcscopeStack.count-1].append((name, type))
+        lifetimeScopeStack[lifetimeScopeStack.count-1].append((name, type))
     }
 
     public func generate() -> String {
@@ -65,7 +65,6 @@ public class CodeGen {
             for node in nodes {
                 if case let .globalVariable(identifier, value, _) = node {
                     let cType = getCType(identifier.type)
-                    
                     // 简单表达式直接初始化
                     switch value {
                         case .integerLiteral(_,_), .floatLiteral(_,_), 
@@ -138,15 +137,23 @@ public class CodeGen {
             registerVariable(param.name, param.type)
         }
         let resultVar = generateExpressionSSA(body)
+        let result = nextTemp()
         if case let .structure(typeName, _, false) = body.type {
             addIndent()
-            buffer += "\(typeName)_copy(\(resultVar));\n"
+            if body.valueCategory == .lvalue {
+                buffer += "\(getCType(body.type)) \(result) = \(typeName)_copy(&\(resultVar));\n"
+            } else {
+                buffer += "\(getCType(body.type)) \(result) = \(resultVar);\n"
+            }
+        } else if body.type != .void {
+            addIndent()
+            buffer += "\(getCType(body.type)) \(result) = \(resultVar);\n"
         }
         popScope()
         
         if body.type != .void {
             addIndent()
-            buffer += "return \(resultVar);\n"
+            buffer += "return \(result);\n"
         }
     }
 
@@ -329,34 +336,25 @@ public class CodeGen {
             var argResults: [String] = []
             for arg in arguments {
                 let argResult = generateExpressionSSA(arg)
-                argResults.append(argResult)
-
-                // 如果是引用类型,增加引用计数
+                
                 if case let .structure(typeName, _, false) = arg.type {
                     addIndent()
-                    buffer += "\(typeName)_copy(\(argResult));\n"
+                    let argCopy = nextTemp()
+                    if arg.valueCategory == .lvalue {
+                        buffer += "\(getCType(arg.type)) \(argCopy) = \(typeName)_copy(&\(argResult));\n"
+                    } else {
+                        buffer += "\(getCType(arg.type)) \(argCopy) = \(argResult);\n"
+                    }
+                    argResults.append(argCopy)
+                } else {
+                    argResults.append(argResult)
                 }
             }
 
-            if case let .structure(typeName, parameters, false) = identifier.type {
-                // 可变类型构造 - 现在返回指针
-                addIndent()
-                buffer += "\(getCType(identifier.type)) \(result) = \(typeName)_new();\n"
-                
-                // 初始化字段
-                for (idx, arg) in argResults.enumerated() {
-                    addIndent()
-                    buffer += "\(result)->\(parameters[idx].name) = \(arg);\n"
-                }
-
-                registerVariable(result, identifier.type)
-            } else {
-                // 不可变类型构造保持不变
-                addIndent()
-                buffer += "\(getCType(identifier.type)) \(result) = {"
-                buffer += argResults.joined(separator: ", ")
-                buffer += "};\n"
-            }
+            addIndent()
+            buffer += "\(getCType(identifier.type)) \(result) = {"
+            buffer += argResults.joined(separator: ", ")
+            buffer += "};\n"
             return result
         case let .memberAccess(source, member):
             return generateMemberAccess(source, member)
@@ -377,11 +375,17 @@ public class CodeGen {
                 // 如果是可变类型，增加引用计数
                 if case .structure(let typeName, _, false) = identifier.type {
                     addIndent()
-                    buffer += "\(typeName)_copy(\(valueResult));\n"
+                    buffer += "\(getCType(identifier.type)) \(identifier.name) = "
+                    if value.valueCategory == .lvalue {
+                        buffer += "\(typeName)_copy(&\(valueResult));\n"
+                    } else {
+                        buffer += "\(valueResult);\n"
+                    }
                     registerVariable(identifier.name, identifier.type)
+                } else {
+                    addIndent()
+                    buffer += "\(getCType(identifier.type)) \(identifier.name) = \(valueResult);\n"
                 }
-                addIndent()
-                buffer += "\(getCType(identifier.type)) \(identifier.name) = \(valueResult);\n"
             }
         case let .assignment(target, value):
             switch target {
@@ -425,12 +429,8 @@ public class CodeGen {
         case .void: return "void"
         case .function(_, _):
             fatalError("Function type not supported in getCType")
-        case let .structure(name, _, isValue):
-            if isValue {
-                return "struct \(name)"
-            } else {
-                return "struct \(name)*"
-            }
+        case let .structure(name, _, _):
+            return "struct \(name)"
         }
     }
 
@@ -458,66 +458,41 @@ public class CodeGen {
                                    _ parameters: [Symbol], 
                                    _ isValue: Bool) {
         let name = identifier.name
-        if isValue {
-            // Handle value types
-            buffer += "struct \(name) {\n"
-            withIndent {
-                for param in parameters {
-                    addIndent()
-                    buffer += "\(getCType(param.type)) \(param.name);\n"
-                }
-            }
-            buffer += "};\n\n"
-        } else {
-            // Handle reference types
-            buffer += "struct \(name) {\n"
-            withIndent {
-                addIndent()
-                buffer += "atomic_size_t _rc_count;\n"  // Reference counting field
-                for param in parameters {
-                    addIndent()
-                    buffer += "\(getCType(param.type)) \(param.name);\n"
-                }
-            }
-            buffer += "};\n\n"
-            
-            buffer += """
-            struct \(name)* \(name)_new() {
-                struct \(name)* ptr = malloc(sizeof(struct \(name)));
-                atomic_init(&ptr->_rc_count, 1);
-                return ptr;
-            }\n\n
-            """
-            buffer += """
-            void \(name)_destroy(struct \(name)* value) {
-                if (!value) return;
-                if (atomic_fetch_sub(&value->_rc_count, 1) == 1) {\n
-            """
-            // Destroy reference type fields
+        // 所有类型都生成 struct，字段为值类型
+        buffer += "struct \(name) {\n"
+        withIndent {
             for param in parameters {
-                withIndent {
-                    if case let .structure(fieldTypeName, _, fieldIsVal) = param.type,
-                        !fieldIsVal {
-                        addIndent()
-                        addIndent()
-                        buffer += "\(fieldTypeName)_destroy(value->\(param.name));\n"
-                    }
+                addIndent()
+                buffer += "\(getCType(param.type)) \(param.name);\n"
+            }
+        }
+        buffer += "};\n\n"
+
+        // 自动生成 copy/drop，仅 isValue==false 的类型需要递归处理
+        buffer += "struct \(name) \(name)_copy(const struct \(name) *self) {\n"
+        withIndent {
+            buffer += "    struct \(name) result;\n"
+            for param in parameters {
+                buffer += "    result.\(param.name) = "
+                if case let .structure(fieldTypeName, _, fieldIsVal) = param.type, !fieldIsVal {
+                    buffer += "\(fieldTypeName)_copy(&self->\(param.name));\n"
+                } else {
+                    buffer += "self->\(param.name);\n"
                 }
             }
-            
-            buffer += """
-                    free(value);
+            buffer += "    return result;\n"
+        }
+        buffer += "}\n\n"
+
+        buffer += "void \(name)_drop(struct \(name) self) {\n"
+        withIndent {
+            for param in parameters {
+                if case let .structure(fieldTypeName, _, fieldIsVal) = param.type, !fieldIsVal {
+                    buffer += "    \(fieldTypeName)_drop(self.\(param.name));\n"
                 }
             }
-            
-            struct \(name)* \(name)_copy(struct \(name)* other) {
-                if (other) {
-                    atomic_fetch_add(&other->_rc_count, 1);
-                }
-                return other;
-            }\n\n
-            """
-        } 
+        }
+        buffer += "}\n\n"
     }
     
     private func generateBlockScope(_ statements: [TypedStatementNode], finalExpr: TypedExpressionNode?) -> String {       
@@ -549,13 +524,24 @@ public class CodeGen {
         }
         let valueResult = generateExpressionSSA(value)
         if case let .structure(typeName, _, false) = identifier.type {
+            if value.valueCategory == .lvalue {
+                let copyResult = nextTemp()
+                addIndent()
+                buffer += "\(getCType(value.type)) \(copyResult) = \(typeName)_copy(&\(valueResult));\n"
+                addIndent()
+                buffer += "\(typeName)_drop(\(identifier.name));\n"
+                addIndent()
+                buffer += "\(identifier.name) = \(copyResult);\n"
+            } else {
+                addIndent()
+                buffer += "\(typeName)_drop(\(identifier.name));\n"
+                addIndent()
+                buffer += "\(identifier.name) = \(valueResult);\n"
+            }
+        } else {
             addIndent()
-            buffer += "\(typeName)_destroy(\(identifier.name));\n"
-            addIndent()
-            buffer += "\(typeName)_copy(\(valueResult));\n"
+            buffer += "\(identifier.name) = \(valueResult);\n"
         }
-        addIndent()
-        buffer += "\(identifier.name) = \(valueResult);\n"
     }
 
     private func generateMemberAccessAssignment(_ base: Symbol,
@@ -564,66 +550,54 @@ public class CodeGen {
             _ = generateExpressionSSA(value)
             return
         }
-        
-        // Start with the base variable
         let baseResult = base.name
         let valueResult = generateExpressionSSA(value)
-        
-        // Generate the full access path for the final assignment
         var accessPath = baseResult
-        var currentType = base.type
-        
-        // Build up the access chain
         for (index, item) in memberPath.enumerated() {
             let isLast = index == memberPath.count - 1
             let memberName = item.name
             let memberType = item.type
-            
-            // Determine the access operator (. or ->)
-            if case .structure(_, _, false) = currentType {
-                accessPath += "->\(memberName)"
-            } else {
-                accessPath += ".\(memberName)"
-            }
-            
-            // Update current type for next iteration
-            currentType = memberType
-            
-            // If this is the last member and it's a reference type, handle memory management
+            accessPath += ".\(memberName)"
             if isLast, case let .structure(typeName, _, false) = memberType {
-                let tempRef = nextTemp()
-                addIndent()
-                buffer += "\(getCType(memberType))* \(tempRef) = &(\(accessPath));\n"
-                addIndent()
-                buffer += "\(typeName)_destroy(*\(tempRef));\n"
-                addIndent()
-                buffer += "*\(tempRef) = \(typeName)_copy(\(valueResult));\n"
+                if value.valueCategory == .lvalue {
+                    let copyResult = nextTemp()
+                    addIndent()
+                    buffer += "\(getCType(value.type)) \(copyResult) = \(typeName)_copy(&\(valueResult));\n"
+                    addIndent()
+                    buffer += "\(typeName)_drop(\(accessPath));\n"
+                    addIndent()
+                    buffer += "\(accessPath) = \(copyResult);\n"
+                } else {
+                    addIndent()
+                    buffer += "\(typeName)_drop(\(accessPath));\n"
+                    addIndent()
+                    buffer += "\(accessPath) = \(valueResult);\n"
+                }
                 return
             }
         }
-        
-        // For value types or if there's no special memory management needed
         addIndent()
         buffer += "\(accessPath) = \(valueResult);\n"
     }
 
     private func generateFunctionCall(_ identifier: Symbol, _ arguments: [TypedExpressionNode], _ type: Type) -> String {
         var paramResults: [String] = []
-        
-        // 处理参数传递
+        // struct类型参数传递用值，isValue==false 的 struct 参数自动递归 copy
         for arg in arguments {
             let result = generateExpressionSSA(arg)
-            // 如果参数是引用类型且需要传递引用,使用复制构造
             if case let .structure(typeName, _, false) = arg.type {
-                let copyResult = nextTemp()
-                addIndent()
-                buffer += "\(getCType(arg.type)) \(copyResult) = \(typeName)_copy(\(result));\n"
-                paramResults.append(copyResult)
+                if arg.valueCategory == .lvalue {
+                    let copyResult = nextTemp()
+                    addIndent()
+                    buffer += "\(getCType(arg.type)) \(copyResult) = \(typeName)_copy(&\(result));\n"
+                    paramResults.append(copyResult)
+                } else {
+                    paramResults.append(result)
+                }
             } else {
                 paramResults.append(result)
             }
         }
-        
         addIndent()
         if (type == .void) {
             buffer += "\(identifier.name)("
@@ -635,9 +609,6 @@ public class CodeGen {
             buffer += "\(getCType(type)) \(result) = \(identifier.name)("
             buffer += paramResults.joined(separator: ", ")
             buffer += ");\n"
-            if case .structure(_, _, false) = type {
-                registerVariable(result, type)
-            }
             return result
         }
     }
@@ -649,7 +620,7 @@ public class CodeGen {
         addIndent()
         // If source expression is a reference type, use -> operator
         if case .structure(_, _, false) = source.type {
-            buffer += "\(getCType(member.type)) \(result) = \(sourceResult)->\(member.name);\n"
+            buffer += "\(getCType(member.type)) \(result) = \(sourceResult).\(member.name);\n"
         } else {
             buffer += "\(getCType(member.type)) \(result) = \(sourceResult).\(member.name);\n"
         }

@@ -8,7 +8,7 @@ public class Scope {
         self.parent = parent
     }
     
-    public func define(_ name: String, _ type: Type, mutable: Bool = false) {
+    public func define(_ name: String, _ type: Type, mutable: Bool) {
         symbols[name] = (type, mutable)
     }
     

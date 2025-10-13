@@ -7,13 +7,23 @@ public indirect enum TypeNode {
     case identifier(String)
 }
 
+public enum OwnershipModifier {
+    case none
+    case ref
+    case own
+    case mut
+    case mutRef
+    case mutOwn
+}
+
 public indirect enum GlobalNode {
     case globalVariableDeclaration(name: String, type: TypeNode, value: ExpressionNode, mutable: Bool)
     case globalFunctionDeclaration(
-        name: String, 
+        name: String,
         typeParameters: [String],
-        parameters: [(name: String, type: TypeNode)], 
-        returnType: TypeNode, 
+        parameters: [(name: String, modifier: OwnershipModifier, type: TypeNode)],
+        returnModifier: OwnershipModifier,
+        returnType: TypeNode,
         body: ExpressionNode
     )
     case globalTypeDeclaration(
