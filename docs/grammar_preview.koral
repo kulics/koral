@@ -347,7 +347,7 @@ let main() = {
     // Generic Type
     type [T Any]Table(mut data T);
     given[T Any] [T]Table {
-        mut self.set_data(d T) Void = {
+        self.set_data(d T) Void = {
             self.data = d;
         }
     }
@@ -432,11 +432,11 @@ type [T Any]Expr {
 }
 
 type Equatable {
-    self.equals(ref r Self) Bool;
+    ref self.equals(r Self ref) Bool;
 }
 
 type Comparable where Self is Equatable {
-    self.compare(ref r Self) Int;
+    ref self.compare(r Self ref) Int;
 }
 
 type Any {}
@@ -458,39 +458,39 @@ given[T Any] [T]Array {
 }
 
 type ToString {
-    self.toString() String;
+    ref self.toString() String;
 }
 
 given Foo { // 隐式实现
-    self.toString() String = ...;
+    ref self.toString() String = ...;
 }
 
 given Bar ToString { // 可选显式实现
-    self.toString() String = ...;
+    ref self.toString() String = ...;
 }
 
 given[T ToString] [T]Array {
-    self.toString() String = ...;
+    ref self.toString() String = ...;
 }
 
 given[T ToString] [T]Option {
-    self.toString() String = 
+    ref self.toString() String = 
         if self is Some(v) 
         then "Some(\{v})" 
         else "None()";
 }
 
 given Foo {
-    self.toString() String = "foo";
+    ref self.toString() String = "foo";
 }
 
 type InputStream {
-    mut self.read(mut ref to [Byte]Array) Int;
+    ref self.read(to [Byte]Array ref) Int;
 }
 
 type OutputStream {
-    mut self.write(ref from [Byte]Array) Int;
-    mut self.flush() Void;
+    ref self.write(from [Byte]Array ref) Int;
+    ref self.flush() Void;
 }
 
 type [T Any, I [T]Iterator]Sequence {
@@ -498,27 +498,27 @@ type [T Any, I [T]Iterator]Sequence {
 }
 
 type [T Any]Iterator {
-    mut self.next() [T]Option;
+    ref self.next() [T]Option;
 }
 
 given[T Any] [T]Iterator {
-    mut own self.[R Any]reduce(mut r R, f [R, T, R]Func) R = {
+    self.[R Any]reduce(mut r R, f [R, T, R]Func) R = {
         for self as v then r = f(r, v);
         r
     }
-    own self.filter(f [T, Bool]Func) [T]FilterIterator = FilterIterator(self, f);
-    own self.[R Any]map(f [T, R]Func) [T, R]MapIterator = MapIterator(self, f);
+    self.filter(f [T, Bool]Func) [T]FilterIterator = FilterIterator(self, f);
+    self.[R Any]map(f [T, R]Func) [T, R]MapIterator = MapIterator(self, f);
 }
 
 type [T Any]FilterIterator(iter [T]Iterator, filter [T, Bool]Func) {
-    mut self.next() [T]Option = 
+    ref self.next() [T]Option = 
         while self.iter.next() is Some(v) then {
             if self.filter(v) then return Some(v);
         } else None();
 }
 
 type [T Any, R Any]MapIterator(iter [T]Iterator, mapper [T, R]Func) {
-    mut self.next() [R]Option = 
+    ref self.next() [R]Option = 
         if self.iter.next() is Some(v) then Some(mapper(v)) else None();
 }
 
@@ -526,7 +526,11 @@ type [T Any]UnsafaPointer(addr UInt) {
     // primitive implement
     alloc(count Int) Self = {...}
     // primitive implement
-    self.as_ref() mut ref T = {...}
+    ref self.as_ref() T ref = {...}
+    // primitive implement
+    ref self.store(v T) Void = {...}
+    // primitive implement
+    ref self.load() T = {...}
     // primitive implement
     self.offset(n Int) Self = {...}
     // primitive implement
@@ -535,22 +539,22 @@ type [T Any]UnsafaPointer(addr UInt) {
 
 let [T Any]new(v T) [T]Box = {...}
 
-type [T Any]BoxImpl(strong Int, weak Int, data T);
+type [T Any]BoxImpl(mut strong Int, mut weak Int, mut data T);
 
 type [T Any]Box(inner [[T]BoxImpl]UnsafaPointer) {
-    self.copy() Self = {...}
-    own self.drop() Void = {...}
-    self.deref() mut ref T = {...}
+    ref self.copy() Self = {...}
+    self.drop() Void = {...}
+    ref self.as_ref() T ref = {...}
 }
 
 type [T Copy and Drop]Array(mut source [T]UnsafaPointer, mut len Int, mut cap Int) {
     new() Self = Array([T]UnsafaPointer.alloc(0), 0);
 
-    self.copy() Self = {...}
+    ref self.copy() Self = {...}
 
-    own self.drop() = {
+    self.drop() = {
         ... // ref_count--
-        if ref_count_zero(self) then {
+        if ref_count_zero(self.source) then {
             for 0..self.len as i then {
                 self.source.offset(i).as_ref().drop();
             }
@@ -558,21 +562,21 @@ type [T Copy and Drop]Array(mut source [T]UnsafaPointer, mut len Int, mut cap In
         }
     }
 
-    self.size() Int = self.len;
+    ref self.size() Int = self.len;
 
-    self.get(index Int) T = self.source.offset(i).as_ref();
+    ref self.get(index Int) T ref = self.source.offset(i).as_ref();
     
-    mut self.set(index Int, value T) Void = {
+    ref self.set(index Int, value T) Void = {
         make_sure_unique(self);
         self.source.offset(i).as_ref() = value;
     }
 
-    mut self.insert(index Int, value T) Void = {
+    ref self.insert(index Int, value T) Void = {
         make_sure_unique(self);
         ...
     }
 
-    mut self.remove(index Int) Void = {
+    ref self.remove(index Int) Void = {
         make_sure_unique(self);
         ...
     }
@@ -582,7 +586,7 @@ type [T Copy and Drop]Array(mut source [T]UnsafaPointer, mut len Int, mut cap In
 }
 
 type [T Copy and Drop]ArrayIterator(source [T]Array, mut index Int) {
-    mut self.next() [T]Option = 
+    ref self.next() [T]Option = 
         if self.index < self.source.size() then {
             self.index += 1;
             Some(self.source[self.index])
@@ -594,7 +598,7 @@ type [T Copy and Drop]ArrayIterator(source [T]Array, mut index Int) {
 type String(data [Rune]Array) {
     of(data [Rune]Array) Self = String(self.data);
 
-    self.toString() Self = String(self.data);
+    ref self.toString() Self = String(self.data);
 
     self.iterator() StringIterator = StringIterator(self, -1);
 }
@@ -602,7 +606,7 @@ type String(data [Rune]Array) {
 type StringIterator(_source String, mut index Int);
 
 given StringIterator {
-    mut self.next() [Rune]Option = 
+    ref self.next() [Rune]Option = 
         if self.index < self._source.data.size() then {
             self.index += 1;
             Some(self._source.data[self.index])
@@ -618,10 +622,10 @@ type [T Copy and Drop]LinkedList(mut head [[T]Node]Option, mut tail [[T]Node]Opt
 type File(fd UInt) is not Copy and not Drop {
     open(path String) File = File(fopen(path, ...));
 
-    self.read(mut ref buf [Byte]Array) Int = fread(self.fd, buf, 0, buf.size());
-    self.write(ref buf [Byte]Array) Int = fwrite(self.fd, buf, 0, buf.size());
+    ref self.read(buf [Byte]Array ref) Int = fread(self.fd, buf, 0, buf.size());
+    ref self.write(buf [Byte]Array ref) Int = fwrite(self.fd, buf, 0, buf.size());
 
-    own self.close() Void = fclose(self.fd);
+    self.close() Void = fclose(self.fd);
 }
 
 /*
@@ -633,14 +637,13 @@ type File(fd UInt) is not Copy and not Drop {
 3-2. 任意类型可以给自己声明 `is not Drop` 来标记不实现 Drop，编译器不会自动生成 drop 实现，如果类型内存在 drop 实现则会编译报错。
 3-3. 任意类型内包含的成员变量如果全部都是 drop 类型，且没有标记为 `is not Drop`，那么编译器会给这个类型自动实现 drop（递归成员实现）。
 3-4. 没有实现 Drop 的类型，需要手动消费所有权，不会自动销毁（等价于 linear type）。
-4-1. 变量可以通过只读引用或者读写引用来传递，使用引用不会触发 copy 和 drop。
-4-2. 只读变量只能获取只读引用，可变变量可以获取只读引用或读写引用。
-4-3. 读写引用具有独占性，编译器在作用域内做独占性检查，防止同一个来源同时存在多个读写引用或读写与只读引用重叠。
+4-1. 变量可以通过引用来传递，使用引用不会触发 copy 和 drop。
+4-2. 只读和读写变量都能获取引用。
+4-3. 引用具有独占性，编译器在作用域内做独占性检查，防止同一个来源同时存在多个引用重叠。
 4-4. 引用的生命周期不能超过被引用对象的作用域，防止悬垂引用。
 4-5. 引用不可逃逸（不能存入堆/闭包/跨线程）。
 4-5. 引用的变量不会自动插入 copy，需要手动调用。
 5. 如果编译器判断某个非引用变量的所有权被转移，则不会调用 copy 和 drop，只会 move 值。
-6. 函数参数的默认修饰符是 own（拥有所有权），self 的默认修饰符是 ref（只能借用）。
 
 lifetime 规则：
 作用域包含函数体，if 的 then、else 分支，while 的 then 分支。
