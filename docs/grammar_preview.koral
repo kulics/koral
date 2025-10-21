@@ -279,7 +279,7 @@ let main() = {
 
     // data type define
     type Button(width Int, height Int, background String, title String) {
-        self.click() Void = {
+        click(self ref) Void = {
             printLine(title);
             doSomeThingA();
             doSomeThingB();
@@ -295,18 +295,18 @@ let main() = {
 
     // abstract type define
     type Animation {
-        self.move(s Int) Void;
-        self.stop() Void;
+        move(self ref, s Int) Void;
+        stop(self ref) Void;
     }
 
     // Combine Template
     type ImageButton(image Image, button Button);
     given ImageButton {
-        self.move(s Int) Void = {
+        move(self ref, s Int) Void = {
             let t = 5000/s;
             play( s + t );
         }
-        self.stop() Void = {}
+        stop(self ref) Void = {}
     }
 
     // Create an Template object
@@ -347,7 +347,7 @@ let main() = {
     // Generic Type
     type [T Any]Table(mut data T);
     given[T Any] [T]Table {
-        self.set_data(d T) Void = {
+        set_data(self ref, d T) Void = {
             self.data = d;
         }
     }
@@ -380,10 +380,10 @@ let main() = {
     // operator override
     given[T Any] [T]MyList {
         // self[i]
-        self.get(index Int) T = self.arr[index];
+        get(self ref, index Int) T = self.arr[index];
 
         // self[i] = e
-        self.set(index Int, element T) Void = self.arr[index] = element;
+        set(self ref, index Int, element T) Void = self.arr[index] = element;
     }
 }
 
@@ -432,17 +432,17 @@ type [T Any]Expr {
 }
 
 type Equatable {
-    ref self.equals(r Self ref) Bool;
+    equals(self ref, r Self ref) Bool;
 }
 
 type Comparable where Self is Equatable {
-    ref self.compare(r Self ref) Int;
+    compare(self ref, r Self ref) Int;
 }
 
 type Any {}
 
 given[T Any, R Any] [T, R]Func {
-    self.toAny() Any = self;
+    toAny(self) Any = self;
 }
 
 given Int {
@@ -458,101 +458,101 @@ given[T Any] [T]Array {
 }
 
 type ToString {
-    ref self.toString() String;
+    toString(self ref) String;
 }
 
 given Foo { // 隐式实现
-    ref self.toString() String = ...;
+    toString(self ref) String = ...;
 }
 
 given Bar ToString { // 可选显式实现
-    ref self.toString() String = ...;
+    toString(self ref) String = ...;
 }
 
 given[T ToString] [T]Array {
-    ref self.toString() String = ...;
+    toString(self ref) String = ...;
 }
 
 given[T ToString] [T]Option {
-    ref self.toString() String = 
+    toString(self ref) String = 
         if self is Some(v) 
         then "Some(\{v})" 
         else "None()";
 }
 
 given Foo {
-    ref self.toString() String = "foo";
+    toString(self ref) String = "foo";
 }
 
 type InputStream {
-    ref self.read(to [Byte]Array ref) Int;
+    read(self ref, to [Byte]Array ref) Int;
 }
 
 type OutputStream {
-    ref self.write(from [Byte]Array ref) Int;
-    ref self.flush() Void;
+    write(self ref, from [Byte]Array ref) Int;
+    flush(self ref) Void;
 }
 
 type [T Any, I [T]Iterator]Sequence {
-    self.iterator() I;
+    iterator(self) I;
 }
 
 type [T Any]Iterator {
-    ref self.next() [T]Option;
+    next(self ref) [T]Option;
 }
 
 given[T Any] [T]Iterator {
-    self.[R Any]reduce(mut r R, f [R, T, R]Func) R = {
+    [R Any]reduce(self, mut r R, f [R, T, R]Func) R = {
         for self as v then r = f(r, v);
         r
     }
-    self.filter(f [T, Bool]Func) [T]FilterIterator = FilterIterator(self, f);
-    self.[R Any]map(f [T, R]Func) [T, R]MapIterator = MapIterator(self, f);
+    filter(self, f [T, Bool]Func) [T]FilterIterator = FilterIterator(self, f);
+    [R Any]map(self, f [T, R]Func) [T, R]MapIterator = MapIterator(self, f);
 }
 
 type [T Any]FilterIterator(iter [T]Iterator, filter [T, Bool]Func) {
-    ref self.next() [T]Option = 
+    next(self ref) [T]Option = 
         while self.iter.next() is Some(v) then {
             if self.filter(v) then return Some(v);
         } else None();
 }
 
 type [T Any, R Any]MapIterator(iter [T]Iterator, mapper [T, R]Func) {
-    ref self.next() [R]Option = 
+    next(self ref) [R]Option = 
         if self.iter.next() is Some(v) then Some(mapper(v)) else None();
 }
 
-type [T Any]UnsafaPointer(addr UInt) {
+type [T Any]UnsafePointer(addr UInt) {
     // primitive implement
     alloc(count Int) Self = {...}
     // primitive implement
-    ref self.as_ref() T ref = {...}
+    as_ref(self ref) T ref = {...}
     // primitive implement
-    ref self.store(v T) Void = {...}
+    store(self ref, v T) Void = {...}
     // primitive implement
-    ref self.load() T = {...}
+    load(self ref) T = {...}
     // primitive implement
-    self.offset(n Int) Self = {...}
+    offset(self ref, n Int) Self = {...}
     // primitive implement
-    self.free() Void = {...}
+    free(self ref) Void = {...}
 }
 
 let [T Any]new(v T) [T]Box = {...}
 
 type [T Any]BoxImpl(mut strong Int, mut weak Int, mut data T);
 
-type [T Any]Box(inner [[T]BoxImpl]UnsafaPointer) {
-    ref self.copy() Self = {...}
-    self.drop() Void = {...}
-    ref self.as_ref() T ref = {...}
+type [T Any]Box(inner [[T]BoxImpl]UnsafePointer) {
+    copy(self ref) Self = {...}
+    drop(self) Void = {...}
+    as_ref(self ref) T ref = {...}
 }
 
 type [T Copy and Drop]Array(mut source [T]UnsafaPointer, mut len Int, mut cap Int) {
     new() Self = Array([T]UnsafaPointer.alloc(0), 0);
 
-    ref self.copy() Self = {...}
+    copy(self ref) Self = {...}
 
-    self.drop() = {
+    drop(self) = {
         ... // ref_count--
         if ref_count_zero(self.source) then {
             for 0..self.len as i then {
@@ -562,31 +562,31 @@ type [T Copy and Drop]Array(mut source [T]UnsafaPointer, mut len Int, mut cap In
         }
     }
 
-    ref self.size() Int = self.len;
+    count(self ref) Int = self.len;
 
-    ref self.get(index Int) T ref = self.source.offset(i).as_ref();
+    get(self ref, index Int) T ref = self.source.offset(i).as_ref();
     
-    ref self.set(index Int, value T) Void = {
+    set(self ref, index Int, value T) Void = {
         make_sure_unique(self);
         self.source.offset(i).as_ref() = value;
     }
 
-    ref self.insert(index Int, value T) Void = {
+    insert(self ref, index Int, value T) Void = {
         make_sure_unique(self);
         ...
     }
 
-    ref self.remove(index Int) Void = {
+    remove(self ref, index Int) Void = {
         make_sure_unique(self);
         ...
     }
 
-    self.iterator() [T]ArrayIterator =
+    iterator(self) [T]ArrayIterator =
         [T]ArrayIterator(self, 0);
 }
 
 type [T Copy and Drop]ArrayIterator(source [T]Array, mut index Int) {
-    ref self.next() [T]Option = 
+    next(self ref) [T]Option = 
         if self.index < self.source.size() then {
             self.index += 1;
             Some(self.source[self.index])
@@ -598,15 +598,15 @@ type [T Copy and Drop]ArrayIterator(source [T]Array, mut index Int) {
 type String(data [Rune]Array) {
     of(data [Rune]Array) Self = String(self.data);
 
-    ref self.toString() Self = String(self.data);
+    toString(self ref) Self = String(self.data);
 
-    self.iterator() StringIterator = StringIterator(self, -1);
+    iterator(self) StringIterator = StringIterator(self, -1);
 }
 
 type StringIterator(_source String, mut index Int);
 
 given StringIterator {
-    ref self.next() [Rune]Option = 
+    next(self ref) [Rune]Option = 
         if self.index < self._source.data.size() then {
             self.index += 1;
             Some(self._source.data[self.index])
@@ -622,10 +622,10 @@ type [T Copy and Drop]LinkedList(mut head [[T]Node]Option, mut tail [[T]Node]Opt
 type File(fd UInt) is not Copy and not Drop {
     open(path String) File = File(fopen(path, ...));
 
-    ref self.read(buf [Byte]Array ref) Int = fread(self.fd, buf, 0, buf.size());
-    ref self.write(buf [Byte]Array ref) Int = fwrite(self.fd, buf, 0, buf.size());
+    read(self ref, buf [Byte]Array ref) Int = fread(self.fd, buf, 0, buf.size());
+    write(self ref, buf [Byte]Array ref) Int = fwrite(self.fd, buf, 0, buf.size());
 
-    self.close() Void = fclose(self.fd);
+    close(self) Void = fclose(self.fd);
 }
 
 /*

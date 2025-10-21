@@ -525,7 +525,7 @@ increment(7)
 
 ```
 type Shape(mut numberOfSides Int) {
-    self.simpleDescription() String =
+    simpleDescription(self ref) String =
         "A shape with \{self.numberOfSides} sides.";
 }
 ```
@@ -622,17 +622,17 @@ var shapeDescription = shape.simpleDescription()
 
 ```
 type NamedShape(name String, numberOfSides Int) {
-    self.simpleDescription() String =
+    simpleDescription(self ref) String =
         "A shape with \{self.numberOfSides} sides.";
 }
 
 type Square(as namedShape NamedShape, sideLength Float) {
     new(sideLength Float, name String) Square = Square(NamedShape(name, 4), sideLength);
 
-    self.simpleDescription() String =
+    simpleDescription(self ref) String =
         "A square with sides of length \{self.sideLength}.";
 
-    self.area() Float = sideLength * sideLength;
+    area(self ref) Float = sideLength * sideLength;
 }
 
 let test = Square.new(5.2, "square");
@@ -994,7 +994,7 @@ for case movie as Movie in someObjects {
 
 ```
 type Nameable {
-    self.name() String;
+    name(self ref) String;
 }
 
 let f(x Nameable) Void = printLine("Name is " + x.name());
@@ -1058,9 +1058,9 @@ func f(x: any Nameable) {
 type Dog();
 
 given Dog {
-    self.name() String = "Dog";
+    name(self ref) String = "Dog";
 
-    self.weight() Int = 30;
+    weight(self ref) Int = 30;
 }
 ```
 
