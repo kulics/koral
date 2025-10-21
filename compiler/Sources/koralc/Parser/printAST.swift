@@ -14,7 +14,7 @@ public func printAST(_ node: ASTNode) {
                 printExpression(value)
             }
             
-        case let .globalFunctionDeclaration(name, typeParameters, parameters, returnModifier, returnType, body):
+    case let .globalFunctionDeclaration(name, typeParameters, parameters, returnType, body):
             print("\(indent)GlobalFunctionDeclaration:")
             print("\(indent)  Name: \(name)")
             print("\(indent)  TypeParameters:")
@@ -23,27 +23,10 @@ public func printAST(_ node: ASTNode) {
             }
             print("\(indent)  Parameters:")
             for param in parameters {
-                let modStr: String
-                switch param.modifier {
-                case .none: modStr = ""
-                case .ref: modStr = "ref "
-                case .own: modStr = "own "
-                case .mut: modStr = "mut "
-                case .mutRef: modStr = "mut ref "
-                case .mutOwn: modStr = "mut own "
-                }
+                let modStr = param.mutable ? "mut " : ""
                 print("\(indent)    \(modStr)\(param.name): \(param.type)")
             }
-            let retModStr: String
-            switch returnModifier {
-            case .none: retModStr = ""
-            case .ref: retModStr = "ref "
-            case .own: retModStr = "own "
-            case .mut: retModStr = "mut "
-            case .mutRef: retModStr = "mut ref "
-            case .mutOwn: retModStr = "mut own "
-            }
-            print("\(indent)  ReturnType: \(retModStr)\(returnType)")
+            print("\(indent)  ReturnType: \(returnType)")
             print("\(indent)  Body:")
             withIndent {
                 withIndent {

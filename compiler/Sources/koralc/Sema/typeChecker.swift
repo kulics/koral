@@ -26,12 +26,7 @@ public class TypeChecker {
             guard case nil = currentScope.lookup(name) else {
                 throw SemanticError.duplicateDefinition(name)
             }
-            guard case let .identifier(typeStr) = typeNode else {
-                throw SemanticError.invalidNode
-            }
-            guard let type = currentScope.resolveType(typeStr) else {
-                throw SemanticError.undefinedType(typeStr)
-            }
+            let type = try resolveTypeNode(typeNode)
             let typedValue = try inferTypedExpression(value)
             if typedValue.type != type {
                 throw SemanticError.typeMismatch(
@@ -39,13 +34,13 @@ public class TypeChecker {
             }
             currentScope.define(name, type, mutable: isMut)
             return .globalVariable(
-                identifier: Symbol(name: name, type: type),
+                identifier: Symbol(name: name, type: type, kind: .variable(isMut ? .MutableValue : .Value)),
                 value: typedValue,
-                mutable: isMut
+                kind: isMut ? .MutableValue : .Value
             )
 
-    case let .globalFunctionDeclaration(name, typeParameters, parameters, _, returnTypeNode, body):
-            guard case nil = currentScope.lookup(name) else {
+    case let .globalFunctionDeclaration(name, typeParameters, parameters, returnTypeNode, body):
+                guard case nil = currentScope.lookup(name) else {
                 throw SemanticError.duplicateDefinition(name)
             }
             let (functionType, typedBody, params) = try withNewScope {
@@ -59,27 +54,17 @@ public class TypeChecker {
                     )
                     try currentScope.defineType(typeParam, type: typeType)
                 }
-                guard case let .identifier(returnTypeStr) = returnTypeNode else {
-                    throw SemanticError.invalidNode
-                }
-                guard let returnType = currentScope.resolveType(returnTypeStr) else {
-                    throw SemanticError.undefinedType(returnTypeStr)
-                }
+                let returnType = try resolveTypeNode(returnTypeNode)
                 let params = try parameters.map { param -> Symbol in
-                    guard case let .identifier(typeStr) = param.type else {
-                        throw SemanticError.invalidNode
-                    }
-                    guard let paramType = currentScope.resolveType(typeStr) else {
-                        throw SemanticError.undefinedType(typeStr)
-                    }
-                    return Symbol(name: param.name, type: paramType, mutable: TypeChecker.modifierMutable(param.modifier))
+                    let paramType = try resolveTypeNode(param.type)
+                    return Symbol(name: param.name, type: paramType, kind: .variable(param.mutable ? .MutableValue : .Value))
                 }
                 let (typedBody, functionType) = try checkFunctionBody(params, returnType, body)
                 return (functionType, typedBody, params)
             }
             currentScope.define(name, functionType, mutable: false)
             return .globalFunction(
-                identifier: Symbol(name: name, type: functionType),
+                identifier: Symbol(name: name, type: functionType, kind: .function),
                 parameters: params,
                 body: typedBody
             )
@@ -90,15 +75,9 @@ public class TypeChecker {
             }
 
             let params = try parameters.map { param -> Symbol in
-                guard case let .identifier(typeStr) = param.type else {
-                    throw SemanticError.invalidNode
-                }
-                guard let paramType = currentScope.resolveType(typeStr) else {
-                    throw SemanticError.undefinedType(typeStr)
-                }
-
+                let paramType = try resolveTypeNode(param.type)
                 return Symbol(
-                    name: param.name, type: paramType, mutable: param.mutable)
+                    name: param.name, type: paramType, kind: param.mutable ? .variable(.MutableValue) : .variable(.Value))
             }
 
             // For val types, check that all fields are also val types
@@ -110,7 +89,7 @@ public class TypeChecker {
                             field: param.name,
                             fieldType: param.type.description
                         )
-                    } else if param.mutable {
+                    } else if param.isMutable() {
                         throw SemanticError.invalidMutableFieldInValueType(
                             type: name,
                             field: param.name
@@ -122,13 +101,13 @@ public class TypeChecker {
             // Define the new type
             let typeType = Type.structure(
                 name: name,
-                members: params.map { (name: $0.name, type: $0.type, mutable: $0.mutable) },
+                members: params.map { (name: $0.name, type: $0.type, mutable: $0.isMutable()) },
                 isValue: isValue
             )
             try currentScope.defineType(name, type: typeType)
 
             return .globalTypeDeclaration(
-                identifier: Symbol(name: name, type: typeType),
+                identifier: Symbol(name: name, type: typeType, kind: .type),
                 parameters: params,
                 isValue: isValue
             )
@@ -146,6 +125,8 @@ public class TypeChecker {
             return isValue
         case .function:
             return true  // Functions are considered val types
+        case .reference:
+            return false  // References are not val types
         }
     }
 
@@ -157,7 +138,7 @@ public class TypeChecker {
         return try withNewScope {
             // Add parameters to new scope
             for param in params {
-                currentScope.define(param.name, param.type, mutable: param.mutable)
+                currentScope.define(param.name, param.type, mutable: param.isMutable())
             }
 
             let typedBody = try inferTypedExpression(body)
@@ -166,7 +147,7 @@ public class TypeChecker {
                     expected: returnType.description, got: typedBody.type.description)
             }
             let functionType = Type.function(
-                parameters: params.map { $0.type }, returns: returnType)
+                parameters: params.map { Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind)) }, returns: returnType)
             return (typedBody, functionType)
         }
     }
@@ -190,7 +171,7 @@ public class TypeChecker {
             guard let type = currentScope.lookup(name) else {
                 throw SemanticError.undefinedVariable(name)
             }
-            return .variable(identifier: Symbol(name: name, type: type))
+            return .variable(identifier: Symbol(name: name, type: type, kind: .variable(.Value)))
 
         case let .blockExpression(statements, finalExpression):
             return try withNewScope {
@@ -286,7 +267,7 @@ public class TypeChecker {
                 }
 
                 return .typeConstruction(
-                    identifier: Symbol(name: name, type: type),
+                    identifier: Symbol(name: name, type: type, kind: .type),
                     arguments: typedArguments,
                     type: type
                 )
@@ -310,11 +291,11 @@ public class TypeChecker {
             }
 
             var typedArguments: [TypedExpressionNode] = []
-            for (arg, expectedType) in zip(arguments, params) {
+            for (arg, param) in zip(arguments, params) {
                 let typedArg = try inferTypedExpression(arg)
-                if typedArg.type != expectedType {
+                if typedArg.type != param.type {
                     throw SemanticError.typeMismatch(
-                        expected: expectedType.description,
+                        expected: param.type.description,
                         got: typedArg.type.description
                     )
                 }
@@ -322,7 +303,7 @@ public class TypeChecker {
             }
 
             return .functionCall(
-                identifier: Symbol(name: name, type: type),
+                identifier: Symbol(name: name, type: type, kind: .function),
                 arguments: typedArguments,
                 type: returns
             )
@@ -355,11 +336,19 @@ public class TypeChecker {
         case let .memberAccess(expr, member):
             let typedExpr = try inferTypedExpression(expr)
 
+            // 对于 T ref，允许访问 T 的成员：解开一层 reference 后再查找
+            let baseType: Type = {
+                switch typedExpr.type {
+                case let .reference(inner): return inner
+                default: return typedExpr.type
+                }
+            }()
+
             // 检查基础表达式的类型是否是用户定义的类型
-            guard case let .structure(typeName, members, _) = typedExpr.type else {
+            guard case let .structure(typeName, members, _) = baseType else {
                 throw SemanticError.invalidOperation(
                     op: "member access",
-                    type1: typedExpr.type.description,
+                    type1: baseType.description,
                     type2: ""
                 )
             }
@@ -371,30 +360,17 @@ public class TypeChecker {
 
             return .memberAccess(
                 source: typedExpr,
-                member: Symbol(name: member, type: memberType)
+                member: Symbol(name: member, type: memberType, kind: .variable(.Value))
             )
         }
     }
 
-    private static func modifierMutable(_ modifier: OwnershipModifier) -> Bool {
-        switch modifier {
-        case .mut, .mutOwn, .mutRef:
-            return true
-        default:
-            return false
-        }
-    }
 
     // 新增用于返回带类型的语句的检查函数
     private func checkStatement(_ stmt: StatementNode) throws -> TypedStatementNode {
         switch stmt {
         case let .variableDeclaration(name, typeNode, value, mutable):
-            guard case let .identifier(typeStr) = typeNode else {
-                throw SemanticError.invalidNode
-            }
-            guard let type = currentScope.resolveType(typeStr) else {
-                throw SemanticError.undefinedType(typeStr)
-            }
+            let type = try resolveTypeNode(typeNode)
 
             let typedValue = try inferTypedExpression(value)
             if typedValue.type != type {
@@ -403,7 +379,7 @@ public class TypeChecker {
             }
             currentScope.define(name, type, mutable: mutable)
             return .variableDeclaration(
-                identifier: Symbol(name: name, type: type),
+                identifier: Symbol(name: name, type: type, kind: mutable ? .variable(.MutableValue) : .variable(.Value)),
                 value: typedValue,
                 mutable: mutable
             )
@@ -424,7 +400,7 @@ public class TypeChecker {
                 }
                 return .assignment(
                     target: .variable(
-                        identifier: Symbol(name: name, type: varType, mutable: true)),
+                        identifier: Symbol(name: name, type: varType, kind: .variable(.MutableValue))),
                     value: typedValue
                 )
 
@@ -433,17 +409,14 @@ public class TypeChecker {
                 guard let baseType = currentScope.lookup(base) else {
                     throw SemanticError.undefinedVariable(base)
                 }
-                // Base binding must be mutable to assign through member access under value semantics
-                guard currentScope.isMutable(base) else {
-                    throw SemanticError.assignToImmutable(base)
-                }
 
                 var currentType = baseType
                 var typedPath: [Symbol] = []
 
 
-                // Validate each member in the path: all must be mutable for assignment
-                for (_, memberName) in memberPath.enumerated() {
+                // Validate member path: 仅最后一段字段需要可变
+                for (idx, memberName) in memberPath.enumerated() {
+                    let isLast = idx == memberPath.count - 1
                     // Check that current type is a user-defined type
                     guard case let .structure(typeName, members, _) = currentType else {
                         throw SemanticError.invalidOperation(
@@ -458,14 +431,16 @@ public class TypeChecker {
                         throw SemanticError.undefinedMember(memberName, typeName)
                     }
 
-                    // All members in the chain must be mutable for assignment
-                    guard member.mutable else {
-                        throw SemanticError.immutableFieldAssignment(
-                            type: typeName, field: memberName)
+                    // 只有最后一个成员需要是可变字段
+                    if isLast {
+                        guard member.mutable else {
+                            throw SemanticError.immutableFieldAssignment(
+                                type: typeName, field: memberName)
+                        }
                     }
 
                     let memberIdentifier = Symbol(
-                        name: memberName, type: member.type, mutable: member.mutable)
+                        name: memberName, type: member.type, kind: .variable(member.mutable ? .MutableValue : .Value))
                     typedPath.append((memberIdentifier))
 
                     // Update current type for next iteration
@@ -482,7 +457,8 @@ public class TypeChecker {
 
                 return .assignment(
                     target: .memberAccess(
-                        base: Symbol(name: base, type: baseType),
+                        // 不再要求基变量可变；只根据类型声明的字段可变性做检查
+                        base: Symbol(name: base, type: baseType, kind: .variable(.Value)),
                         memberPath: typedPath
                     ),
                     value: typedValue
@@ -492,6 +468,21 @@ public class TypeChecker {
         case let .expression(expr):
             let typedExpr = try inferTypedExpression(expr)
             return .expression(typedExpr)
+        }
+    }
+
+    // 将 TypeNode 解析为语义层 Type，支持函数参数/返回位置的一层 reference(T)
+    private func resolveTypeNode(_ node: TypeNode) throws -> Type {
+        switch node {
+        case let .identifier(name):
+            guard let t = currentScope.resolveType(name) else {
+                throw SemanticError.undefinedType(name)
+            }
+            return t
+        case let .reference(inner):
+            // 仅支持一层，在 parser 已限制；此处直接映射到 Type.reference
+            let base = try resolveTypeNode(inner)
+            return .reference(inner: base)
         }
     }
 

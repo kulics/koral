@@ -142,62 +142,49 @@ public class Parser {
     // Parse global function declaration with optional 'own'/'ref' modifiers for params and return type
     private func globalFunctionDeclaration(name: String, typeParams: [String]) throws -> GlobalNode {
         try match(.leftParen)
-        var parameters: [(name: String, modifier: OwnershipModifier, type: TypeNode)] = []
-        while currentToken !== .rightParen {
-            // Optional 'own' or 'ref' modifier for parameter
-            var paramModifier: OwnershipModifier = .none
-            // Allow sequences: mut, mut ref, mut own, ref, own
-            var sawMut = false
+        var parameters: [(name: String, mutable: Bool, type: TypeNode)] = []
+    while currentToken !== .rightParen {
+            // 仅支持可选的前缀 mut；不再支持 own/ref
+            var isMut = false
             if currentToken === .mutKeyword {
-                sawMut = true
+                isMut = true
                 try match(.mutKeyword)
-            }
-            if currentToken === .refKeyword {
-                try match(.refKeyword)
-                paramModifier = sawMut ? .mutRef : .ref
-            } else if currentToken === .ownKeyword {
-                try match(.ownKeyword)
-                paramModifier = sawMut ? .mutOwn : .own
-            } else if sawMut {
-                // plain mut without ref/own
-                paramModifier = .mut
             }
             guard case let .identifier(pname) = currentToken else {
                 throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
             }
             try match(.identifier(pname))
-            let paramType = try parseType()
-            parameters.append((name: pname, modifier: paramModifier, type: paramType))
+            var paramType = try parseType()
+            // 参数类型处允许一个后缀 ref
+            if currentToken === .refKeyword {
+                try match(.refKeyword)
+                paramType = .reference(paramType)
+                // 禁止重复 ref
+                if currentToken === .refKeyword {
+                    throw ParserError.unexpectedToken(line: lexer.currentLine, got: currentToken.description, expected: "only one 'ref' allowed")
+                }
+            }
+            parameters.append((name: pname, mutable: isMut, type: paramType))
             if currentToken === .comma {
                 try match(.comma)
             }
         }
         try match(.rightParen)
-        // Optional 'own' or 'ref' modifier for return type
-        var returnModifier: OwnershipModifier = .none
-        // Support mut modifiers for return too: mut, mut ref, mut own, ref, own
-        var retSawMut = false
-        if currentToken === .mutKeyword {
-            retSawMut = true
-            try match(.mutKeyword)
-        }
+        var returnType = try parseType()
+        // 返回类型处允许一个后缀 ref
         if currentToken === .refKeyword {
             try match(.refKeyword)
-            returnModifier = retSawMut ? .mutRef : .ref
-        } else if currentToken === .ownKeyword {
-            try match(.ownKeyword)
-            returnModifier = retSawMut ? .mutOwn : .own
-        } else if retSawMut {
-            returnModifier = .mut
+            returnType = .reference(returnType)
+            if currentToken === .refKeyword {
+                throw ParserError.unexpectedToken(line: lexer.currentLine, got: currentToken.description, expected: "only one 'ref' allowed")
+            }
         }
-        let returnType = try parseType()
         try match(.equal)
         let body = try expression()
         return .globalFunctionDeclaration(
             name: name,
             typeParameters: typeParams,
             parameters: parameters,
-            returnModifier: returnModifier,
             returnType: returnType,
             body: body
         )
