@@ -3,15 +3,51 @@ public enum ValueCategory {
     case rvalue
 }
 
+public enum SymbolKind {
+    case variable(VariableKind)
+    case function
+    case type
+}
+
+public enum VariableKind {
+    case Value
+    case MutableValue
+    case Reference
+    case MutableReference
+
+    public var isMutable: Bool {
+        switch self {
+        case .MutableValue, .MutableReference:
+            return true
+        case .Value, .Reference:
+            return false
+        }
+    }
+}
+
 public struct Symbol {
     public let name: String
     public let type: Type
-    public let mutable: Bool
-    
-    public init(name: String, type: Type, mutable: Bool = false) {
+    public let kind: SymbolKind
+
+    public init(name: String, type: Type, kind: SymbolKind) {
         self.name = name
         self.type = type
-        self.mutable = mutable
+        self.kind = kind
+    }
+
+    public func isMutable() -> Bool {
+        switch kind {
+        case .variable(let varKind):
+            switch varKind {
+            case .MutableValue, .MutableReference:
+                return true
+            case .Value, .Reference:
+                return false
+            }
+        case .function, .type:
+            return false
+        }
     }
 }
 
@@ -21,7 +57,7 @@ public indirect enum TypedProgram {
 }
 
 public indirect enum TypedGlobalNode {
-    case globalVariable(identifier: Symbol, value: TypedExpressionNode, mutable: Bool)
+    case globalVariable(identifier: Symbol, value: TypedExpressionNode, kind: VariableKind)
     case globalFunction(
         identifier: Symbol,
         parameters: [Symbol],

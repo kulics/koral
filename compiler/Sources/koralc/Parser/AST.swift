@@ -5,15 +5,7 @@ public indirect enum ASTNode {
 
 public indirect enum TypeNode {
     case identifier(String)
-}
-
-public enum OwnershipModifier {
-    case none
-    case ref
-    case own
-    case mut
-    case mutRef
-    case mutOwn
+    case reference(TypeNode)
 }
 
 public indirect enum GlobalNode {
@@ -21,8 +13,7 @@ public indirect enum GlobalNode {
     case globalFunctionDeclaration(
         name: String,
         typeParameters: [String],
-        parameters: [(name: String, modifier: OwnershipModifier, type: TypeNode)],
-        returnModifier: OwnershipModifier,
+        parameters: [(name: String, mutable: Bool, type: TypeNode)],
         returnType: TypeNode,
         body: ExpressionNode
     )

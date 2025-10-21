@@ -36,7 +36,7 @@ public func printTypedAST(_ node: TypedProgram) {
             withIndent {
                 for param in parameters {
                     print("\(indent)\(param.name): \(param.type)")
-                    print("\(indent)  Mutable: \(param.mutable)")
+                    print("\(indent)  Mutable: \(param.isMutable())")
                 }
             }
         }

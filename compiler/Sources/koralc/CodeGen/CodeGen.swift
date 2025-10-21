@@ -115,7 +115,7 @@ public class CodeGen {
 
     private func generateFunctionDeclaration(_ identifier: Symbol, _ params: [Symbol]) {
         let returnType = getFunctionReturnType(identifier.type)
-        let paramList = params.map { getCType($0.type) + " " + $0.name }.joined(separator: ", ")
+        let paramList = params.map { getParamCDecl($0) }.joined(separator: ", ")
         buffer += "\(returnType) \(identifier.name)(\(paramList));\n"
     }
 
@@ -123,12 +123,18 @@ public class CodeGen {
                                      _ params: [Symbol], 
                                      _ body: TypedExpressionNode) {
         let returnType = getFunctionReturnType(identifier.type)
-        let paramList = params.map { getCType($0.type) + " " + $0.name }.joined(separator: ", ")
+        let paramList = params.map { getParamCDecl($0) }.joined(separator: ", ")
         buffer += "\(returnType) \(identifier.name)(\(paramList)) {\n"
+
         withIndent {
             generateFunctionBody(body, params)
         }
         buffer += "}\n"
+    }
+
+    // 生成参数的 C 声明：类型若为 reference(T) 则 getCType 返回 T*
+    private func getParamCDecl(_ param: Symbol) -> String {
+        return "\(getCType(param.type)) \(param.name)"
     }
 
     private func generateFunctionBody(_ body: TypedExpressionNode, _ params: [Symbol]) {
@@ -431,6 +437,8 @@ public class CodeGen {
             fatalError("Function type not supported in getCType")
         case let .structure(name, _, _):
             return "struct \(name)"
+        case let .reference(inner):
+            return "\(getCType(inner)) *"
         }
     }
 
@@ -553,11 +561,16 @@ public class CodeGen {
         let baseResult = base.name
         let valueResult = generateExpressionSSA(value)
         var accessPath = baseResult
+        let firstOp = ( { if case .reference(_) = base.type { return "->" } else { return "." } } )()
         for (index, item) in memberPath.enumerated() {
             let isLast = index == memberPath.count - 1
             let memberName = item.name
             let memberType = item.type
-            accessPath += ".\(memberName)"
+            if index == 0 {
+                accessPath += "\(firstOp)\(memberName)"
+            } else {
+                accessPath += ".\(memberName)"
+            }
             if isLast, case let .structure(typeName, _, false) = memberType {
                 if value.valueCategory == .lvalue {
                     let copyResult = nextTemp()
@@ -618,12 +631,9 @@ public class CodeGen {
         let result = nextTemp()
                
         addIndent()
-        // If source expression is a reference type, use -> operator
-        if case .structure(_, _, false) = source.type {
-            buffer += "\(getCType(member.type)) \(result) = \(sourceResult).\(member.name);\n"
-        } else {
-            buffer += "\(getCType(member.type)) \(result) = \(sourceResult).\(member.name);\n"
-        }
+        // For reference base use '->', otherwise use '.'
+        let op: String = if case .reference(_) = source.type { "->" } else { "." }
+        buffer += "\(getCType(member.type)) \(result) = \(sourceResult)\(op)\(member.name);\n"
         return result
     }
 }
