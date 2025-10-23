@@ -268,12 +268,12 @@ public class Parser {
             }
 
             // If not assignment, treat as expression
-            // Need to reconstruct the expression from the parsed name and member path
-            var expr: ExpressionNode = .identifier(name)
-            for member in memberPath {
-                expr = .memberAccess(expr: expr, member: member)
+            // Build as aggregated memberPath when exists
+            if memberPath.isEmpty {
+                return .expression(.identifier(name))
+            } else {
+                return .expression(.memberPath(base: .identifier(name), path: memberPath))
             }
-            return .expression(expr)
         default:
             return .expression(try expression())
         }
@@ -303,18 +303,18 @@ public class Parser {
     }
 
     private func parseMemberAccess() throws -> ExpressionNode {
-        var expr = try term()
-        
+        let base = try term()
+        var path: [String] = []
         while currentToken === .dot {
             try match(.dot)
             guard case let .identifier(member) = currentToken else {
                 throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
             }
             try match(.identifier(member))
-            expr = .memberAccess(expr: expr, member: member)
+            path.append(member)
         }
-        
-        return expr
+        if path.isEmpty { return base }
+        return .memberPath(base: base, path: path)
     }
 
     // Parse expression rule

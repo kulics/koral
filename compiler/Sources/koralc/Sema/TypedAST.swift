@@ -98,7 +98,7 @@ public indirect enum TypedExpressionNode {
     case functionCall(identifier: Symbol, arguments: [TypedExpressionNode], type: Type)
     case whileExpression(condition: TypedExpressionNode, body: TypedExpressionNode, type: Type)
     case typeConstruction(identifier: Symbol, arguments: [TypedExpressionNode], type: Type)
-    case memberAccess(source: TypedExpressionNode, member: Symbol)
+    case memberPath(source: TypedExpressionNode, path: [Symbol])
 }
 
 extension TypedExpressionNode {
@@ -122,8 +122,8 @@ extension TypedExpressionNode {
             return type
         case .variable(let identifier):
             return identifier.type
-        case .memberAccess(_, let member):
-            return member.type
+        case .memberPath(_, let path):
+            return path.last?.type ?? .void
         }
     }
 
@@ -131,7 +131,7 @@ extension TypedExpressionNode {
         switch self {
         case .variable:
             return .lvalue
-        case .memberAccess(let source, _):
+        case .memberPath(let source, _):
             // member access is lvalue if the source is lvalue
             return source.valueCategory
         case .referenceExpression:
