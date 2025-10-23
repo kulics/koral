@@ -225,9 +225,10 @@ public func printTypedAST(_ node: TypedProgram) {
                 }
             }
 
-        case let .memberAccess(source, member):
-            print("\(indent)MemberAccess: \(member.type)")
-            print("\(indent)  Member: \(member.name)")
+        case let .memberPath(source, path):
+            let t = path.last?.type ?? .void
+            print("\(indent)MemberPath: \(t)")
+            print("\(indent)  Path: \(path.map{ $0.name }.joined(separator: "."))")
             withIndent {
                 printTypedExpression(source)
             }

@@ -345,35 +345,25 @@ public class TypeChecker {
             }
             return .referenceExpression(expression: typedInner, type: .reference(inner: typedInner.type))
 
-        case let .memberAccess(expr, member):
-            let typedExpr = try inferTypedExpression(expr)
-
-            // 对于 T ref，允许访问 T 的成员：解开一层 reference 后再查找
-            let baseType: Type = {
-                switch typedExpr.type {
-                case let .reference(inner): return inner
-                default: return typedExpr.type
-                }
+        case let .memberPath(baseExpr, path):
+            let typedBase = try inferTypedExpression(baseExpr)
+            // T ref: 解一层 reference 再查找
+            var currentType: Type = {
+                if case let .reference(inner) = typedBase.type { return inner }
+                return typedBase.type
             }()
-
-            // 检查基础表达式的类型是否是用户定义的类型
-            guard case let .structure(typeName, members, _) = baseType else {
-                throw SemanticError.invalidOperation(
-                    op: "member access",
-                    type1: baseType.description,
-                    type2: ""
-                )
+            var typedPath: [Symbol] = []
+            for memberName in path {
+                guard case let .structure(typeName, members, _) = currentType else {
+                    throw SemanticError.invalidOperation(op: "member access", type1: currentType.description, type2: "")
+                }
+                guard let mem = members.first(where: { $0.name == memberName }) else {
+                    throw SemanticError.undefinedMember(memberName, typeName)
+                }
+                typedPath.append(Symbol(name: mem.name, type: mem.type, kind: .variable(mem.mutable ? .MutableValue : .Value)))
+                currentType = mem.type
             }
-
-            // 从成员列表中查找成员类型
-            guard let memberType = members.first(where: { $0.name == member })?.type else {
-                throw SemanticError.undefinedMember(member, typeName)
-            }
-
-            return .memberAccess(
-                source: typedExpr,
-                member: Symbol(name: member, type: memberType, kind: .variable(.Value))
-            )
+            return .memberPath(source: typedBase, path: typedPath)
         }
     }
 

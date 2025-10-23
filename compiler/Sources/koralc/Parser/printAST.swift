@@ -207,11 +207,11 @@ public func printAST(_ node: ASTNode) {
                 printExpression(expr)
             }
             
-        case let .memberAccess(expr, member):
-            print("\(indent)MemberAccess:")
-            print("\(indent)  Member: \(member)")
+        case let .memberPath(base, path):
+            print("\(indent)MemberPath: \(path.joined(separator: "."))")
+            print("\(indent)  Base:")
             withIndent {
-                printExpression(expr)
+                printExpression(base)
             }
         }
     }

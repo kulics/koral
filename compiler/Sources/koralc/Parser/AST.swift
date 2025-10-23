@@ -68,5 +68,6 @@ public indirect enum ExpressionNode {
     case ifExpression(condition: ExpressionNode, thenBranch: ExpressionNode, elseBranch: ExpressionNode)
     case functionCall(name: String, typeArguments: [TypeNode], arguments: [ExpressionNode])
     case whileExpression(condition: ExpressionNode, body: ExpressionNode)
-    case memberAccess(expr: ExpressionNode, member: String)
+    // 连续成员访问聚合为路径
+    case memberPath(base: ExpressionNode, path: [String])
 }

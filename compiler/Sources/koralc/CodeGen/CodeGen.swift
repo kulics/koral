@@ -366,8 +366,8 @@ public class CodeGen {
             buffer += argResults.joined(separator: ", ")
             buffer += "};\n"
             return result
-        case let .memberAccess(source, member):
-            return generateMemberAccess(source, member)
+        case let .memberPath(source, path):
+            return generateMemberPath(source, path)
         }
     }
 
@@ -376,10 +376,15 @@ public class CodeGen {
         switch expr {
         case let .variable(identifier):
             return identifier.name
-        case let .memberAccess(source, member):
-            let base = buildLValuePath(source)
-            let op: String = { if case .reference(_) = source.type { return "->" } else { return "." } }()
-            return "\(base)\(op)\(member.name)"
+        case let .memberPath(source, path):
+            var base = buildLValuePath(source)
+            var curType = source.type
+            for member in path {
+                let op: String = { if case .reference(_) = curType { return "->" } else { return "." } }()
+                base += "\(op)\(member.name)"
+                curType = member.type
+            }
+            return base
         default:
             fatalError("ref requires lvalue (variable or memberAccess)")
         }
@@ -644,14 +649,18 @@ public class CodeGen {
         }
     }
     
-    private func generateMemberAccess(_ source: TypedExpressionNode, _ member: Symbol) -> String {
+    private func generateMemberPath(_ source: TypedExpressionNode, _ path: [Symbol]) -> String {
         let sourceResult = generateExpressionSSA(source)
+        var access = sourceResult
+        var curType = source.type
+        for member in path {
+            let op: String = { if case .reference(_) = curType { return "->" } else { return "." } }()
+            access += "\(op)\(member.name)"
+            curType = member.type
+        }
         let result = nextTemp()
-               
         addIndent()
-        // For reference base use '->', otherwise use '.'
-        let op: String = if case .reference(_) = source.type { "->" } else { "." }
-        buffer += "\(getCType(member.type)) \(result) = \(sourceResult)\(op)\(member.name);\n"
+        buffer += "\(getCType(path.last?.type ?? .void)) \(result) = \(access);\n"
         return result
     }
 }
