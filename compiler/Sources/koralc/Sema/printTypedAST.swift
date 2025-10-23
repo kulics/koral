@@ -207,6 +207,12 @@ public func printTypedAST(_ node: TypedProgram) {
             withIndent {
                 printTypedExpression(expr)
             }
+
+        case let .referenceExpression(expression, type):
+            print("\(indent)ReferenceExpression: \(type)")
+            withIndent {
+                printTypedExpression(expression)
+            }
             
         case let .typeConstruction(identifier, arguments, type):
             print("\(indent)TypeConstruction: \(identifier.name) : \(type)")

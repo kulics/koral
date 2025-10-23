@@ -91,6 +91,7 @@ public indirect enum TypedExpressionNode {
     case andExpression(left: TypedExpressionNode, right: TypedExpressionNode, type: Type) 
     case orExpression(left: TypedExpressionNode, right: TypedExpressionNode, type: Type)
     case notExpression(expression: TypedExpressionNode, type: Type)
+    case referenceExpression(expression: TypedExpressionNode, type: Type)
     case variable(identifier: Symbol)
     case blockExpression(statements: [TypedStatementNode], finalExpression: TypedExpressionNode?, type: Type)
     case ifExpression(condition: TypedExpressionNode, thenBranch: TypedExpressionNode, elseBranch: TypedExpressionNode, type: Type)
@@ -111,7 +112,8 @@ extension TypedExpressionNode {
              .comparisonExpression(_, _, _, let type),
              .andExpression(_, _, let type),
              .orExpression(_, _, let type),
-             .notExpression(_, let type),
+           .notExpression(_, let type),
+           .referenceExpression(_, let type),
              .blockExpression(_, _, let type),
              .ifExpression(_, _, _, let type),
              .functionCall(_, _, let type),
@@ -132,6 +134,9 @@ extension TypedExpressionNode {
         case .memberAccess(let source, _):
             // member access is lvalue if the source is lvalue
             return source.valueCategory
+        case .referenceExpression:
+            // &expr 是一个临时值（指针）
+            return .rvalue
         default:
             return .rvalue
         }

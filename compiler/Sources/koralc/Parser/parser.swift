@@ -357,6 +357,11 @@ public class Parser {
             try match(.notKeyword)
             let expr = try parseComparisonExpression()
             return .notExpression(expr)
+        } else if currentToken === .refKeyword {
+            // 前缀 ref 表达式
+            try match(.refKeyword)
+            let expr = try parseComparisonExpression()
+            return .refExpression(expr)
         }
         return try parseComparisonExpression()
     }
