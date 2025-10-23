@@ -249,6 +249,10 @@ public class CodeGen {
 
         case let .functionCall(identifier, arguments, type):
             return generateFunctionCall(identifier, arguments, type)
+        case let .referenceExpression(inner, _):
+            // 取引用：对左值构建可寻址路径，然后取地址
+            let lvaluePath = buildLValuePath(inner)
+            return "&\(lvaluePath)"
 
         case let .whileExpression(condition, body, _):
             let labelPrefix = nextTemp()
@@ -364,6 +368,20 @@ public class CodeGen {
             return result
         case let .memberAccess(source, member):
             return generateMemberAccess(source, member)
+        }
+    }
+
+    // 构建可作为左值的访问路径字符串，仅支持变量与成员访问
+    private func buildLValuePath(_ expr: TypedExpressionNode) -> String {
+        switch expr {
+        case let .variable(identifier):
+            return identifier.name
+        case let .memberAccess(source, member):
+            let base = buildLValuePath(source)
+            let op: String = { if case .reference(_) = source.type { return "->" } else { return "." } }()
+            return "\(base)\(op)\(member.name)"
+        default:
+            fatalError("ref requires lvalue (variable or memberAccess)")
         }
     }
 

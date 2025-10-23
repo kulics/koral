@@ -62,6 +62,7 @@ public indirect enum ExpressionNode {
     case andExpression(left: ExpressionNode, right: ExpressionNode)
     case orExpression(left: ExpressionNode, right: ExpressionNode)
     case notExpression(ExpressionNode)
+    case refExpression(ExpressionNode)
     case identifier(String)
     case blockExpression(statements: [StatementNode], finalExpression: ExpressionNode?)
     case ifExpression(condition: ExpressionNode, thenBranch: ExpressionNode, elseBranch: ExpressionNode)

@@ -200,6 +200,12 @@ public func printAST(_ node: ASTNode) {
             withIndent {
                 printExpression(expr)
             }
+        
+        case let .refExpression(expr):
+            print("\(indent)RefExpression:")
+            withIndent {
+                printExpression(expr)
+            }
             
         case let .memberAccess(expr, member):
             print("\(indent)MemberAccess:")
