@@ -584,16 +584,14 @@ public class CodeGen {
         let baseResult = base.name
         let valueResult = generateExpressionSSA(value)
         var accessPath = baseResult
-        let firstOp = ( { if case .reference(_) = base.type { return "->" } else { return "." } } )()
+        var curType = base.type
         for (index, item) in memberPath.enumerated() {
             let isLast = index == memberPath.count - 1
             let memberName = item.name
             let memberType = item.type
-            if index == 0 {
-                accessPath += "\(firstOp)\(memberName)"
-            } else {
-                accessPath += ".\(memberName)"
-            }
+            let op: String = { if case .reference(_) = curType { return "->" } else { return "." } }()
+            accessPath += "\(op)\(memberName)"
+            curType = memberType
             if isLast, case let .structure(typeName, _, false) = memberType {
                 if value.valueCategory == .lvalue {
                     let copyResult = nextTemp()
