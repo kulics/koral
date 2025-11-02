@@ -524,7 +524,9 @@ increment(7)
 ### Koral
 
 ```
-type Shape(mut numberOfSides Int) {
+type Shape(mut numberOfSides Int);
+
+given Shape {
     simpleDescription(self ref) String =
         "A shape with \{self.numberOfSides} sides.";
 }
@@ -621,12 +623,16 @@ var shapeDescription = shape.simpleDescription()
 ### Koral
 
 ```
-type NamedShape(name String, numberOfSides Int) {
+type NamedShape(name String, numberOfSides Int);
+
+given NamedShape {
     simpleDescription(self ref) String =
         "A shape with \{self.numberOfSides} sides.";
 }
 
-type Square(as namedShape NamedShape, sideLength Float) {
+type Square(as namedShape NamedShape, sideLength Float);
+
+given Square {
     new(sideLength Float, name String) Square = Square(NamedShape(name, 4), sideLength);
 
     simpleDescription(self ref) String =
