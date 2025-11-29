@@ -201,7 +201,7 @@ let count = i + Int(f)
 ### Koral
 
 ```
-for 1..5 as index then
+for index = 1..5 then
     printLine("\{index} times 5 is \{index * 5}");
 ```
 
@@ -803,7 +803,7 @@ test.simpleDescription()
 let mut movieCount = 0;
 let mut songCount = 0;
 
-for library as item then
+for item = library then
     if item is Movie then 
         movieCount += 1
     else if item is Song then
@@ -949,7 +949,7 @@ switch nb {
 ### Koral
 
 ```
-for someObjects as current then
+for current = someObjects then
     if current is movie Movie then
         printLine("Movie: '\{movie.name}', dir. \{movie.director}");
 ```
