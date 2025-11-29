@@ -880,7 +880,7 @@ for item in library {
 
 ```
 let nb = 42;
-when nb is {
+nb match {
     0..7 or 8 or 9 ->
         print("single digit");
     10 ->
