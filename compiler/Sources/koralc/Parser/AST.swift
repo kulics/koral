@@ -22,6 +22,31 @@ public indirect enum GlobalNode {
         parameters: [(name: String, type: TypeNode, mutable: Bool)],
         isValue: Bool
     )
+    // given Type { ...methods... }
+    case givenDeclaration(type: TypeNode, methods: [MethodDeclaration])
+}
+
+// Method declaration used inside given blocks; same shape as a global function
+public struct MethodDeclaration {
+    public let name: String
+    public let typeParameters: [String]
+    public let parameters: [(name: String, mutable: Bool, type: TypeNode)]
+    public let returnType: TypeNode
+    public let body: ExpressionNode
+
+    public init(
+        name: String,
+        typeParameters: [String],
+        parameters: [(name: String, mutable: Bool, type: TypeNode)],
+        returnType: TypeNode,
+        body: ExpressionNode
+    ) {
+        self.name = name
+        self.typeParameters = typeParameters
+        self.parameters = parameters
+        self.returnType = returnType
+        self.body = body
+    }
 }
 
 public indirect enum StatementNode {
