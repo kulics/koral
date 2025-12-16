@@ -213,6 +213,14 @@ public class Lexer {
         self.position = input.startIndex
     }
 
+    // Step back one character, fixing line counter if we rewound over a newline
+    private func unreadChar(_ char: Character) {
+        position = input.index(before: position)
+        if char.isNewline {
+            _line -= 1
+        }
+    }
+
     // Get next character
     private func getNextChar() -> Character? {
         guard position < input.endIndex else { return nil }
@@ -228,7 +236,7 @@ public class Lexer {
     private func skipWhitespace() {
         while let char = getNextChar() {
             if (!char.isWhitespace) {
-                position = input.index(before: position)
+                unreadChar(char)
                 break
             }
         }
@@ -257,7 +265,7 @@ public class Lexer {
                 hasDot = true
                 numStr.append(char)
             } else {
-                position = input.index(before: position)
+                unreadChar(char)
                 break
             }
         }
@@ -291,7 +299,7 @@ public class Lexer {
             if char.isLetter || char.isNumber || char == "_" {
                 idStr.append(char)
             } else {
-                position = input.index(before: position)
+                unreadChar(char)
                 break
             }
         }
@@ -312,38 +320,44 @@ public class Lexer {
         case "*":
             return .multiply
         case "/":
-            if let nextChar = getNextChar(), nextChar == "/" {
-                skipLineComment()
-                return try getNextToken()
-            } else {
-                position = input.index(before: position)
-                return .divide
+            if let nextChar = getNextChar() {
+                if nextChar == "/" {
+                    skipLineComment()
+                    return try getNextToken()
+                } else {
+                    unreadChar(nextChar)
+                }
             }
+            return .divide
         case "%":
             return .modulo
         case "=":
-            if let nextChar = getNextChar(), nextChar == "=" {
-                return .equalEqual
-            } else {
-                position = input.index(before: position)
-                return .equal
+            if let nextChar = getNextChar() {
+                if nextChar == "=" {
+                    return .equalEqual
+                }
+                unreadChar(nextChar)
             }
+            return .equal
         case ">":
-            if let nextChar = getNextChar(), nextChar == "=" {
-                return .greaterEqual
-            } else {
-                position = input.index(before: position)
-                return .greater
+            if let nextChar = getNextChar() {
+                if nextChar == "=" {
+                    return .greaterEqual
+                }
+                unreadChar(nextChar)
             }
+            return .greater
         case "<":
-            if let nextChar = getNextChar(), nextChar == ">" {
-                return .notEqual
-            } else if let nextChar = getNextChar(), nextChar == "=" {
-                return .lessEqual
-            } else {
-                position = input.index(before: position)
-                return .less
+            if let nextChar = getNextChar() {
+                if nextChar == ">" {
+                    return .notEqual
+                }
+                if nextChar == "=" {
+                    return .lessEqual
+                }
+                unreadChar(nextChar)
             }
+            return .less
         case ";":
             return .semicolon
         case "(":
@@ -365,11 +379,11 @@ public class Lexer {
         case ".":
             return .dot
         case "\"":
-            position = input.index(before: position)
+            unreadChar(char)
             let str = try readString()
             return .string(str)
         case let c where c.isNumber:
-            position = input.index(before: position)
+            unreadChar(c)
             let numberLiteral = try readNumber()
             return switch numberLiteral {
             case let .integer(num):
@@ -378,7 +392,7 @@ public class Lexer {
                 .float(num)
             }
         case let c where c.isLetter:
-            position = input.index(before: position)
+            unreadChar(c)
             let id = readIdentifier()
             return switch id {
                 case "let": .letKeyword
