@@ -42,7 +42,6 @@ public enum Token: CustomStringConvertible {
     case valKeyword     // 'val' keyword
     case isKeyword      // 'is' keyword
     case refKeyword     // 'ref' keyword
-    case ownKeyword     // 'own' keyword
 
     // Add static operator function to compare if the same item
     public static func ===(lhs: Token, rhs: Token) -> Bool {
@@ -87,8 +86,7 @@ public enum Token: CustomStringConvertible {
              (.dot, .dot),
              (.valKeyword, .valKeyword),
              (.isKeyword, .isKeyword),
-             (.refKeyword, .refKeyword),
-             (.ownKeyword, .ownKeyword):
+             (.refKeyword, .refKeyword):
             return true
         default:
             return false
@@ -185,8 +183,6 @@ public enum Token: CustomStringConvertible {
             return "is"
         case .refKeyword:
             return "ref"
-        case .ownKeyword:
-            return "own"
         }
     }
 }
@@ -410,7 +406,6 @@ public class Lexer {
                 case "val": .valKeyword
                 case "is": .isKeyword
                 case "ref": .refKeyword
-                case "own": .ownKeyword
                 default:  .identifier(id)
             }
         default:
