@@ -240,7 +240,7 @@ for index in 1...5 {
 ### Koral
 
 ```
-let shoppingList = Array.of("catfish", "water", "tulips", "blue paint");
+let shoppingList = List.of("catfish", "water", "tulips", "blue paint");
 shoppingList[1] = "bottle of water";
 ```
 
