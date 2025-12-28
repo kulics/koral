@@ -8,7 +8,6 @@ import {
     System;
     System.Text;
     System.Threading.Tasks;
-    IO.File.*; // import all
 }
 
 let main() = {
@@ -476,11 +475,11 @@ given[T Any, R Any] [T, R]MapIterator  {
 
 type [T Any]UnsafePointer(addr UInt);
 
-given[T Any] [T]UnsafePointer {
+given[T Any] [T]UnsafePointer Copy and Deref {
     // primitive implement
     alloc(count Int) Self = {todo()}
     // primitive implement
-    as_ref(self) T ref = {todo()}
+    deref(self) T ref = {todo()}
     // primitive implement
     store(self, v T) Void = {todo()}
     // primitive implement
@@ -499,10 +498,10 @@ type [T Any]BoxImpl(mut strong Int, mut weak Int, mut data T);
 
 type [T Any]Box(inner [[T]BoxImpl]UnsafePointer);
 
-given[T Any] [T]Box {
+given[T Any] [T]Box Copy and Deref {
     copy(self ref) Self = {todo()}
     drop(self) Void = {todo()}
-    as_ref(self ref) T ref = {todo()}
+    deref(self ref) T ref = {todo()}
 }
 
 type [T Copy and Drop]Array(mut source [T]UnsafaPointer, mut len Int, mut cap Int);
@@ -604,11 +603,13 @@ given File {
 3-3. 任意类型内包含的成员变量如果全部都是 drop 类型，且没有标记为 `not Drop`，那么编译器会给这个类型自动实现 drop（递归成员实现）。
 3-4. 没有实现 Drop 的类型，需要手动消费所有权，不会自动销毁（等价于 linear type）。
 4-1. 变量可以通过引用来传递，使用引用不会触发 copy 和 drop。
-4-2. 只读和读写变量都能获取引用。
+4-2. 只读和读写变量都能获取引用，且只能从有所有权的变量上获取引用。
 4-3. 引用具有独占性，编译器在作用域内做独占性检查，防止同一个来源同时存在多个引用重叠。
 4-4. 引用的生命周期不能超过被引用对象的作用域，防止悬垂引用。
 4-5. 引用不可逃逸（不能存入堆/闭包/跨线程）。
-4-5. 引用的变量不会自动插入 copy，需要手动调用。
+4-6. 引用的变量不会自动插入 copy，需要手动调用。
+4-7. 一个类型如果实现了 Deref 特征，那么它可以被编译器自动识别为 ref 类型使用。Deref 类型必须同时实现 Copy 和 Drop，该 Copy 语义应为浅拷贝/引用计数 +1（而非深拷贝）。
+4-8. 若 Deref 源不是当前作用域本地变量，编译器在取 ref 前会先对源执行 copy 生成一个临时拥有者，再从该临时取 ref。该临时的生命周期覆盖 ref 的使用范围，作用域结束自动 drop。
 5. 如果编译器判断某个非引用变量的所有权被转移，则不会调用 copy 和 drop，只会 move 值。
 
 lifetime 规则：
