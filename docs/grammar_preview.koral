@@ -473,9 +473,23 @@ given[T Any, R Any] [T, R]MapIterator  {
         if self.iter.next() is .Some(v) then .Some(mapper(v)) else .None();
 }
 
+trait Copy {
+    copy(self ref) Self;
+}
+
+trait Drop {
+    drop(self) Void;
+}
+
+trait Deref Copy and Drop {
+    deref(self ref) T ref;
+    copy(self ref) Self;
+    drop(self) Void;
+}
+
 type [T Any]UnsafePointer(addr UInt);
 
-given[T Any] [T]UnsafePointer Copy and Deref {
+given[T Any] [T]UnsafePointer {
     // primitive implement
     alloc(count Int) Self = {todo()}
     // primitive implement
@@ -494,14 +508,26 @@ given[T Any] [T]UnsafePointer Copy and Deref {
 
 let [T Any]new(v T) [T]Box = {todo()}
 
-type [T Any]BoxImpl(mut strong Int, mut weak Int, mut data T);
+type BoxControl(mut strong Int);
 
-type [T Any]Box(inner [[T]BoxImpl]UnsafePointer);
+type [T Drop]Box(data [T]UnsafePointer, control [BoxControl]UnsafePointer);
 
-given[T Any] [T]Box Copy and Deref {
-    copy(self ref) Self = {todo()}
-    drop(self) Void = {todo()}
-    deref(self ref) T ref = {todo()}
+given[T Drop] [T]Box Deref {
+    copy(self ref) Self = {
+        self.control.deref().strong += 1;
+        Self(self.data, self.control)
+    }
+    drop(self) Void = {
+        self.control.deref().strong -= 1;
+        if self.control.deref().strong == 0 then {
+            self.data.load().drop();
+            free(self.data)
+            free(self.control)
+        }
+    }
+    deref(self ref) T ref = {
+        self.data.deref()
+    }
 }
 
 type [T Copy and Drop]Array(mut source [T]UnsafaPointer, mut len Int, mut cap Int);
@@ -515,7 +541,7 @@ given[T Copy and Drop] [T]Array {
         todo() // ref_count--
         if ref_count_zero(self.source) then {
             for i = 0..<self.len then {
-                self.source.offset(i).as_ref().drop();
+                self.source.offset(i).load().drop();
             }
             self.source.free()
         }
