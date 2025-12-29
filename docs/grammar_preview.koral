@@ -359,7 +359,7 @@ type Foo(value Int);
 // sum types
 type TreeNode {
     Empty();
-    Node(val Int, left [TreeNode]Box, right [TreeNode]Box);
+    Node(val Int, left TreeNode ref, right TreeNode ref);
 }
 // adt
 type [T Any]Option {
@@ -370,8 +370,8 @@ type [T Any]Option {
 type [T Any]Expr {
     IntExpr(value Int) [Int]Expr;
     BoolExpr(value Bool) [Bool]Expr;
-    EqualExpr(left [[T]Expr]Box, right [[T]Expr]Box) [Bool]Expr;
-    AddExpr(left [[Int]Expr]Box, right [[Int]Expr]Box) [Int]Expr;
+    EqualExpr(left [T]Expr ref, right [T]Expr ref) [Bool]Expr;
+    AddExpr(left [Int]Expr ref, right [Int]Expr ref) [Int]Expr;
 }
 // type alias
 type Byte = UInt8;
@@ -481,11 +481,7 @@ trait Drop {
     drop(self) Void;
 }
 
-trait Deref Copy and Drop {
-    deref(self ref) T ref;
-    copy(self ref) Self;
-    drop(self) Void;
-}
+let [T Any]new(v T) T ref = {todo()}
 
 type [T Any]UnsafePointer(addr UInt);
 
@@ -504,28 +500,6 @@ given[T Any] [T]UnsafePointer {
     free(self) Void = {todo()}
     // primitive implement
     [R Any]cast(self) [R]UnsafePointer = {todo()}
-}
-
-let [T Any]new(v T) [T]Box = {todo()}
-
-type BoxControl(mut strong Int);
-
-type [T Drop]Box(data [T]UnsafePointer, control [BoxControl]UnsafePointer);
-
-given[T Drop] [T]Box Deref {
-    copy(self ref) Self = {
-        self.control.deref().strong += 1;
-        Self(self.data, self.control)
-    }
-    drop(self) Void = {
-        self.control.deref().strong -= 1;
-        if self.control.deref().strong == 0 then {
-            self.data.load().drop();
-            free(self.data);
-            free(self.control);
-        }
-    }
-    deref(self ref) T ref = self.data.deref();
 }
 
 type [T Copy and Drop]Array(mut source [T]UnsafaPointer, mut len Int, mut cap Int);
@@ -602,7 +576,7 @@ given StringIterator {
         }
 }
 
-type [T Copy and Drop]Node(mut value T, mut next [[[T]Node]Box]Option, mut prev [[[T]Node]WeakBox]Option);
+type [T Copy and Drop]Node(mut value T, mut next [[T]Node ref]Option, mut prev [[T]Node weakref]Option);
 
 type [T Copy and Drop]LinkedList(mut head [[T]Node]Option, mut tail [[T]Node]Option, mut size Int);
 
@@ -626,14 +600,12 @@ given File {
 3-2. 任意类型可以给自己声明 `not Drop` 来标记不实现 Drop，编译器不会自动生成 drop 实现，如果类型内存在 drop 实现则会编译报错。
 3-3. 任意类型内包含的成员变量如果全部都是 drop 类型，且没有标记为 `not Drop`，那么编译器会给这个类型自动实现 drop（递归成员实现）。
 3-4. 没有实现 Drop 的类型，需要手动消费所有权，不会自动销毁（等价于 linear type）。
-4-1. 变量可以通过引用来传递，使用引用不会触发 copy 和 drop。
-4-2. 只读和读写变量都能获取引用，且只能从有所有权的变量上获取引用。
-4-3. 引用具有独占性，编译器在作用域内做独占性检查，防止同一个来源同时存在多个引用重叠。
-4-4. 引用的生命周期不能超过被引用对象的作用域，防止悬垂引用。
-4-5. 引用不可逃逸（不能存入堆/闭包/跨线程）。
-4-6. 引用的变量不会自动插入 copy，需要手动调用。
-4-7. 一个类型如果实现了 Deref 特征，那么它可以被编译器自动识别为 ref 类型使用。Deref 类型必须同时实现 Copy 和 Drop，该 Copy 语义应为浅拷贝/引用计数 +1（而非深拷贝）。
-4-8. 若 Deref 源不是当前作用域本地变量，编译器在取 ref 前会先对源执行 copy 生成一个临时拥有者，再从该临时取 ref。该临时的生命周期覆盖 ref 的使用范围，作用域结束自动 drop。
+4-1. ref 是内置的智能指针类型，ref 可以从变量获取或者通过 new 函数主动分配，ref 实现了 Copy 和 Drop。
+4-2. 只读和读写变量都能获取引用（ref）。当获取的 ref 会发生逃逸时，编译器会自动将变量分配在堆上。
+4-3. ref 内部使用了自动引用计数，当 ref 发生 copy 时，引用计数会加1；当 ref 发生 drop 时，引用计数会减1，当计数为 0 时，会调用 ref 源的 drop 释放。
+4-4. ref 是共享所有权，所有 ref 都会指向原来产生的变量或者分配的对象。
+4-5. T ref 的成员/方法访问自动解引用；若需要获得值的副本，需调用 T 的 copy，或通过方法返回值。
+4-6. 当 ref 存在环引用时，需要通过 weakref 解开环引用。weakref 只操作弱计数，不影响对象存活，弱计数归零释放控制块。
 5. 如果编译器判断某个非引用变量的所有权被转移，则不会调用 copy 和 drop，只会 move 值。
 
 lifetime 规则：
