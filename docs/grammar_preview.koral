@@ -478,7 +478,8 @@ trait Copy {
 }
 
 trait Drop {
-    drop(self) Void;
+    // drop 只由编译器自动插入调用，用户代码禁止显式调用
+    drop(self ref) Void;
 }
 
 let [T Any]new(v T) T ref = {todo()}
@@ -502,18 +503,18 @@ given[T Any] [T]UnsafePointer {
     [R Any]cast(self) [R]UnsafePointer = {todo()}
 }
 
-type [T Copy and Drop]Array(mut source [T]UnsafaPointer, mut len Int, mut cap Int);
+type [T Copy]Array(mut source [T]UnsafaPointer, mut len Int, mut cap Int);
 
-given[T Copy and Drop] [T]Array {
+given[T Copy] [T]Array {
     new() Self = Array([T]UnsafaPointer.alloc(0), 0);
 
     copy(self ref) Self = {todo()}
 
-    drop(self) = {
+    drop(self ref) = {
         todo() // ref_count--
         if ref_count_zero(self.source) then {
             for i = 0..<self.len then {
-                self.source.offset(i).load().drop();
+                let _ = self.source.offset(i).load(); // move out; drop is inserted by compiler
             }
             self.source.free();
         }
@@ -542,9 +543,9 @@ given[T Copy and Drop] [T]Array {
         [T]ArrayIterator(self, 0);
 }
 
-type [T Copy and Drop]ArrayIterator(source [T]Array, mut index Int);
+type [T Copy]ArrayIterator(source [T]Array, mut index Int);
 
-given[T Copy and Drop] [T]ArrayIterator {
+given[T Copy] [T]ArrayIterator {
     next(self ref) [T]Option = 
         if self.index < self.source.size() then {
             self.index += 1;
@@ -576,11 +577,11 @@ given StringIterator {
         }
 }
 
-type [T Copy and Drop]Node(mut value T, mut next [[T]Node ref]Option, mut prev [[T]Node weakref]Option);
+type [T Copy]Node(mut value T, mut next [[T]Node ref]Option, mut prev [[T]Node weakref]Option);
 
-type [T Copy and Drop]LinkedList(mut head [[T]Node]Option, mut tail [[T]Node]Option, mut size Int);
+type [T Copy]LinkedList(mut head [[T]Node]Option, mut tail [[T]Node]Option, mut size Int);
 
-type File(fd UInt) not Copy and not Drop;
+type File(fd UInt) not Copy;
 
 given File {
     open(path String) File = File(fopen(path, todo()));
@@ -588,7 +589,7 @@ given File {
     read(self ref, buf [Byte]Array ref) Int = fread(self.fd, buf, 0, buf.size());
     write(self ref, buf [Byte]Array ref) Int = fwrite(self.fd, buf, 0, buf.size());
 
-    close(self) Void = fclose(self.fd);
+    drop(self ref) Void = fclose(self.fd);
 }
 
 /*
@@ -596,10 +597,12 @@ given File {
 2-1. 任意类型只要实现了 copy 函数，编译器就会自动根据需要调用 copy 来产生新实例。
 2-2. 任意类型可以给自己声明 `not Copy` 来标记不实现 Copy，编译器不会自动生成 copy 实现，如果类型内存在 copy 实现则会编译报错。
 2-3. 任意类型内包含的成员变量如果全部都是 copy 类型，且没有标记为 `not Copy`，那么编译器会给这个类型自动实现 copy（递归成员实现）。
-3-1. 任意类型只要实现了 drop 函数，其实例生命周期结束时就由编译器插入调用 drop 来销毁。
-3-2. 任意类型可以给自己声明 `not Drop` 来标记不实现 Drop，编译器不会自动生成 drop 实现，如果类型内存在 drop 实现则会编译报错。
-3-3. 任意类型内包含的成员变量如果全部都是 drop 类型，且没有标记为 `not Drop`，那么编译器会给这个类型自动实现 drop（递归成员实现）。
-3-4. 没有实现 Drop 的类型，需要手动消费所有权，不会自动销毁（等价于 linear type）。
+2-4. 类型可以同时实现 Copy 与 Drop，编译器会在 Copy 时保持原值有效，在 Drop 时按实例逐个释放。
+3-1. 任意类型只要显式实现了 drop 函数，其实例生命周期结束时就由编译器插入调用 drop 来销毁。
+3-2. 任意类型如果没有显式实现 drop 函数，那么编译器会给这个类型自动实现 drop（递归成员实现）。
+3-3. drop 函数不能手动调用。编译器会对手动调用 drop 的代码进行报错。
+3-4. 在 drop 实现中移动出成员后，编译器会对被移动的值自动插入 drop，用户代码不需要也不应显式调用成员的 drop。
+3-5. drop 函数虽然签名为 drop(self ref)，但调用点视为终结消费，调用后该值不可再读写或移动。
 4-1. ref 是内置的智能指针类型，ref 可以从变量获取或者通过 new 函数主动分配，ref 实现了 Copy 和 Drop。
 4-2. 只读和读写变量都能获取引用（ref）。当获取的 ref 会发生逃逸时，编译器会自动将变量分配在堆上。
 4-3. ref 内部使用了自动引用计数，当 ref 发生 copy 时，引用计数会加1；当 ref 发生 drop 时，引用计数会减1，当计数为 0 时，会调用 ref 源的 drop 释放。
@@ -611,8 +614,8 @@ given File {
 lifetime 规则：
 作用域包含函数体，if 的 then、else 分支，while 的 then 分支。
 1. 变量（本地变量/函数参数/由函数调用和类型构造产生的隐藏变量）在作用域结束前必须被消费。
-2. 消费包含 own 语义的绑定、解构、赋值、传参、返回、捕获，ref 语义的不会产生消费。
-3. 对于实现了 Drop 的变量，如果没有显式的消费，则会在作用域结束前由编译器插入 drop 调用来消费。
-4. 对于实现了 Copy 的变量，如果作用域内存在多于 1 次的消费，那么最后一次之前的消费会由编译器插入 copy 调用来产生新实例。
+2. 消费包含 own 语义的绑定、解构、赋值、传参、返回、捕获。
+3. 对于实现了 Copy 的变量，如果作用域内存在多于 1 次的消费，那么最后一次之前的消费会由编译器插入 copy 调用来产生新实例。
+4. 从变量中获取 ref 并且没有逃逸的话，该变量不会被消耗。如果发生了逃逸，那变量的所有权会转移到 ref 上。 
 5. and 和 or 短路后只处理左侧表达式的临时对象生命周期，右侧未求值则无临时对象，已求值则按正常规则处理。
 */
