@@ -41,7 +41,7 @@
 <trait-member> ::= <function-decl-signature> ";"
 
 <given-decl> ::= "given" <given-head> <trait-impls>? "{" <given-member>* "}" ";"?
-<given-head> ::= <generic-params>? <type-ref>
+<given-head> ::= <generic-params>? <type-name>
 <trait-impls> ::= <type-annotation> ("and" <type-annotation>)*
 <given-member> ::= <function-decl>
 
@@ -62,7 +62,7 @@
               | <expression-statement>
 
 <assignment> ::= <lhs> <assign-op> <expression>
-<assign-op> ::= "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "^=" | "and=" | "or=" | "xor=" | "shl=" | "shr="
+<assign-op> ::= "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "^=" | "bitand=" | "bitor=" | "bitxor=" | "bitshl=" | "bitshr="
 <lhs> ::= <identifier> | <postfix-expression>
 
 <expression-statement> ::= <expression> ";"?
@@ -94,34 +94,40 @@
 <lambda-params> ::= <identifier>
                   | "(" <param-list>? ")"
 
-<binary-expression> ::= <or-expression>
-<or-expression> ::= <and-expression> ("or" <and-expression>)*
-<and-expression> ::= <is-expression> ("and" <is-expression>)*
-<is-expression> ::= <comparison-expression> ("is" <pattern>)*
-<comparison-expression> ::= <bitwise-expression> (<comparison-operator> <bitwise-expression>)*
-<comparison-operator> ::= "==" | "<>" | ">" | "<" | ">=" | "<="
-<bitwise-expression> ::= <additive-expression> (("and" | "or" | "xor" | "shl" | "shr") <additive-expression>)*
+<binary-expression> ::= <logical-or-expression>
+<logical-or-expression> ::= <logical-and-expression> ("or" <logical-and-expression>)*
+<logical-and-expression> ::= <is-expression> ("and" <is-expression>)*
+<is-expression> ::= <bitwise-or-expression> ("is" <pattern>)*
+<bitwise-or-expression> ::= <bitwise-xor-expression> ("bitor" <bitwise-xor-expression>)*
+<bitwise-xor-expression> ::= <bitwise-and-expression> ("bitxor" <bitwise-and-expression>)*
+<bitwise-and-expression> ::= <equality-expression> ("bitand" <equality-expression>)*
+<equality-expression> ::= <relational-expression> (("==" | "<>") <relational-expression>)*
+<relational-expression> ::= <shift-expression> ((">" | "<" | ">=" | "<=") <shift-expression>)*
+<shift-expression> ::= <additive-expression> (("bitshl" | "bitshr") <additive-expression>)*
 <additive-expression> ::= <multiplicative-expression> (("+" | "-") <multiplicative-expression>)*
-<multiplicative-expression> ::= <prefix-expression> (("*" | "/" | "%") <prefix-expression>)*
-<prefix-expression> ::= ("not" | "+" | "-") <prefix-expression> | <postfix-expression>
+<multiplicative-expression> ::= <power-expression> (("*" | "/" | "%") <power-expression>)*
+<power-expression> ::= <prefix-expression> ("^" <power-expression>)?
+<prefix-expression> ::= ("not" | "bitnot" | "+" | "-") <prefix-expression> | <postfix-expression>
 <postfix-expression> ::= <primary-expression> <postfix-suffix>*
 <postfix-suffix> ::= <call-suffix> | <index-suffix> | <member-suffix>
 <call-suffix> ::= "(" <argument-list>? ")"
 <index-suffix> ::= "[" <expression> "]"
-<member-suffix> ::= "." <identifier>
+<member-suffix> ::= "." <generic-args>? <identifier>
 
 <primary-expression> ::= <literal>
                        | <identifier>
-                       | <type-head>? <type-constructor>
-                       | <type-head>? <enum-constructor>
+                       | <type-constructor>
+                       | <enum-constructor>
                        | <tuple-expression>
                        | <array-expression>
                        | <range-expression>
                        | <block>
+                       | "(" <type> ")" <expression>
                        | "(" <expression> ")"
 
-<type-constructor> ::= <identifier> "(" <argument-list>? ")"
-<enum-constructor> ::= "." <identifier> "(" <argument-list>? ")"
+<type-constructor> ::= <type-name> "(" <argument-list>? ")"
+<enum-constructor> ::= <type-name>? "." <identifier> "(" <argument-list>? ")"
+<generic-args> ::= "[" <type-list> "]"
 <tuple-expression> ::= "(" <expression-list>? ")"
 <array-expression> ::= "[" <expression-list>? "]"
 <expression-list> ::= <expression> ("," <expression>)*
@@ -132,26 +138,31 @@
                     | "...."
 
 <pattern> ::= "_"
+            | <range-pattern>
             | <literal>
-            | <identifier>
-            | "mut" <identifier>
+            | "mut"? <identifier>
             | <identifier> <type-annotation>
-            | <type-ref>
+            | <type>
             | <tuple-pattern>
             | <constructor-pattern>
             | <enum-pattern>
+
+<range-pattern> ::= <literal> (".." | "..<" | "<.." | "<..<") <literal>
+                  | <literal> ("..." | "<...")
+                  | ("..." | "...<") <literal>
+                  | "...."
 
 <tuple-pattern> ::= "(" <pattern-list>? ")"
 <constructor-pattern> ::= <identifier> "(" <pattern-list>? ")"
 <pattern-list> ::= <pattern> ("," <pattern>)*
 <enum-pattern> ::= "." <identifier> ("(" <pattern-list>? ")")?
 
-<type> ::= <type-ref>
-         | "[" <type-list> "]" <identifier>
-         | "[" <integer-literal> "," <type-list> "]" <identifier>
+<type> ::= <type-name> ("ref")*
 
-<type-ref> ::= <type-head> <type>
-<type-head> ::= <identifier> ("." <identifier>)* "."
+<type-name> ::= <identifier> ("." <identifier>)*
+              | (<identifier> ".")* "[" <type-list> "]" <identifier>
+              | (<identifier> ".")* "[" <integer-literal> "," <type-list> "]" <identifier>
+
 <type-list> ::= <type> ("," <type>)*
 
 <argument-list> ::= <expression> ("," <expression>)*
