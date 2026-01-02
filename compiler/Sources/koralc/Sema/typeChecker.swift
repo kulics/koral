@@ -313,7 +313,7 @@ public class TypeChecker {
       let typedCallee = try inferTypedExpression(callee)
 
       // Method call
-      if case .methodReference(let base, let method, _) = typedCallee {
+      if case .methodReference(let base, let method, let methodType) = typedCallee {
         if case .function(let params, let returns) = method.type {
           if arguments.count != params.count - 1 {
             throw SemanticError.invalidArgumentCount(
@@ -324,14 +324,27 @@ public class TypeChecker {
           }
 
           // Check base type against first param
+          var finalBase = base
           if let firstParam = params.first {
             if base.type != firstParam.type {
-              throw SemanticError.typeMismatch(
-                expected: firstParam.type.description,
-                got: base.type.description
-              )
+              // 尝试自动取引用：期望 T ref，实际是 T
+              if case .reference(let inner) = firstParam.type, inner == base.type {
+                if base.valueCategory == .lvalue {
+                  finalBase = .referenceExpression(expression: base, type: firstParam.type)
+                } else {
+                  throw SemanticError.invalidOperation(
+                    op: "implicit ref", type1: base.type.description, type2: "rvalue")
+                }
+              } else {
+                throw SemanticError.typeMismatch(
+                  expected: firstParam.type.description,
+                  got: base.type.description
+                )
+              }
             }
           }
+
+          let finalCallee: TypedExpressionNode = .methodReference(base: finalBase, method: method, type: methodType)
 
           var typedArguments: [TypedExpressionNode] = []
           for (arg, param) in zip(arguments, params.dropFirst()) {
@@ -345,7 +358,7 @@ public class TypeChecker {
             typedArguments.append(typedArg)
           }
 
-          return .call(callee: typedCallee, arguments: typedArguments, type: returns)
+          return .call(callee: finalCallee, arguments: typedArguments, type: returns)
         }
       }
 
