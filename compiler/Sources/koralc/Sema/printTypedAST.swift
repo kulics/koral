@@ -28,10 +28,9 @@ public func printTypedAST(_ node: TypedProgram) {
                 printTypedExpression(body)
             }
             
-        case let .globalTypeDeclaration(identifier, parameters, isValue):
+        case let .globalTypeDeclaration(identifier, parameters):
             print("\(indent)TypeDeclaration:")
             print("\(indent)  Name: \(identifier.name): \(identifier.type)")
-            print("\(indent)  IsValue: \(isValue)")
             print("\(indent)  Parameters:")
             withIndent {
                 for param in parameters {

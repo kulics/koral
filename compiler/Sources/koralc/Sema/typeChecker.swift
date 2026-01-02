@@ -51,8 +51,7 @@ public class TypeChecker {
                     // Define the new type
                     let typeType = Type.structure(
                         name: typeParam,
-                        members: [],
-                        isValue: false
+                        members: []
                     )
                     try currentScope.defineType(typeParam, type: typeType)
                 }
@@ -73,7 +72,7 @@ public class TypeChecker {
 
         case let .givenDeclaration(typeNode, methods):
             let type = try resolveTypeNode(typeNode)
-            guard case let .structure(typeName, _, _) = type else {
+            guard case let .structure(typeName, _) = type else {
                  throw SemanticError.invalidOperation(op: "given", type1: type.description, type2: "")
             }
             
@@ -82,7 +81,7 @@ public class TypeChecker {
             for method in methods {
                 let (methodType, typedBody, params, returnType) = try withNewScope {
                     for typeParam in method.typeParameters {
-                        let typeType = Type.structure(name: typeParam, members: [], isValue: false)
+                        let typeType = Type.structure(name: typeParam, members: [])
                         try currentScope.defineType(typeParam, type: typeType)
                     }
                     
@@ -128,7 +127,7 @@ public class TypeChecker {
             
             return .givenDeclaration(type: type, methods: typedMethods)
 
-        case let .globalTypeDeclaration(name, parameters, isValue):
+        case let .globalTypeDeclaration(name, parameters):
             // Check if type already exists
             if currentScope.lookupType(name) != nil {
                 throw SemanticError.duplicateTypeDefinition(name)
@@ -140,55 +139,21 @@ public class TypeChecker {
                     name: param.name, type: paramType, kind: param.mutable ? .variable(.MutableValue) : .variable(.Value))
             }
 
-            // For val types, check that all fields are also val types
-            if isValue {
-                for param in params {
-                    if !isValType(param.type) {
-                        throw SemanticError.invalidFieldTypeInValueType(
-                            type: name,
-                            field: param.name,
-                            fieldType: param.type.description
-                        )
-                    } else if param.isMutable() {
-                        throw SemanticError.invalidMutableFieldInValueType(
-                            type: name,
-                            field: param.name
-                        )
-                    }
-                }
-            }
-
             // Define the new type
             let typeType = Type.structure(
                 name: name,
-                members: params.map { (name: $0.name, type: $0.type, mutable: $0.isMutable()) },
-                isValue: isValue
+                members: params.map { (name: $0.name, type: $0.type, mutable: $0.isMutable()) }
             )
             try currentScope.defineType(name, type: typeType)
 
             return .globalTypeDeclaration(
                 identifier: Symbol(name: name, type: typeType, kind: .type),
-                parameters: params,
-                isValue: isValue
+                parameters: params
             )
         }
     }
 
-    // Helper function to check if a type is a val type
-    private func isValType(_ type: Type) -> Bool {
-        switch type {
-        case .int, .float, .bool, .void:
-            return true
-        case .string:
-            return false  // Strings are not val types
-        case let .structure(_, _, isValue):
-            return isValue
-        case .function:
-            return true  // Functions are considered val types
-        case .reference:
-            return false  // References are not val types
-        }
-    }
+
 
     private func checkFunctionBody(
         _ params: [Symbol],
@@ -302,7 +267,7 @@ public class TypeChecker {
             // Check if it is a constructor call
             if case let .identifier(name) = callee {
                 if let type = currentScope.lookupType(name) {
-                    guard case let .structure(_, parameters, _) = type else {
+                    guard case let .structure(_, parameters) = type else {
                         throw SemanticError.invalidOperation(
                             op: "construct", type1: type.description, type2: "")
                     }
@@ -458,7 +423,7 @@ public class TypeChecker {
                     return currentType
                 }()
                 
-                guard case let .structure(typeName, members, _) = typeToLookup else {
+                guard case let .structure(typeName, members) = typeToLookup else {
                     throw SemanticError.invalidOperation(op: "member access", type1: typeToLookup.description, type2: "")
                 }
                 
@@ -544,7 +509,7 @@ public class TypeChecker {
                 for (idx, memberName) in memberPath.enumerated() {
                     let isLast = idx == memberPath.count - 1
                     // Check that current type is a user-defined type
-                    guard case let .structure(typeName, members, _) = currentType else {
+                    guard case let .structure(typeName, members) = currentType else {
                         throw SemanticError.invalidOperation(
                             op: "member access",
                             type1: currentType.description,
@@ -556,7 +521,6 @@ public class TypeChecker {
                     guard let member = members.first(where: { $0.name == memberName }) else {
                         throw SemanticError.undefinedMember(memberName, typeName)
                     }
-
                     // 只有最后一个成员需要是可变字段
                     if isLast {
                         guard member.mutable else {
@@ -564,7 +528,6 @@ public class TypeChecker {
                                 type: typeName, field: memberName)
                         }
                     }
-
                     let memberIdentifier = Symbol(
                         name: memberName, type: member.type, kind: .variable(member.mutable ? .MutableValue : .Value))
                     typedPath.append((memberIdentifier))
