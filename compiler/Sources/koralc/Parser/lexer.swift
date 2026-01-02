@@ -43,6 +43,30 @@ public enum Token: CustomStringConvertible {
     case isKeyword      // 'is' keyword
     case refKeyword     // 'ref' keyword
     case givenKeyword   // 'given' keyword
+    case traitKeyword   // 'trait' keyword
+    case matchKeyword   // 'match' keyword
+    case bitandKeyword  // 'bitand' keyword
+    case bitorKeyword   // 'bitor' keyword
+    case bitxorKeyword  // 'bitxor' keyword
+    case bitnotKeyword  // 'bitnot' keyword
+    case bitshlKeyword  // 'bitshl' keyword
+    case bitshrKeyword  // 'bitshr' keyword
+    case arrow          // '->'
+    case power          // '^'
+    case plusEqual      // '+='
+    case minusEqual     // '-='
+    case multiplyEqual  // '*='
+    case divideEqual    // '/='
+    case moduloEqual    // '%='
+    case powerEqual     // '^='
+    case range          // '..'
+    case rangeLess      // '..<'
+    case lessRange      // '<..'
+    case lessRangeLess  // '<..<'
+    case unboundedRange // '...'
+    case lessUnboundedRange // '<...'
+    case unboundedRangeLess // '...<'
+    case fullRange      // '....'
 
     // Add static operator function to compare if the same item
     public static func ===(lhs: Token, rhs: Token) -> Bool {
@@ -88,7 +112,28 @@ public enum Token: CustomStringConvertible {
              (.valKeyword, .valKeyword),
              (.isKeyword, .isKeyword),
              (.refKeyword, .refKeyword),
-             (.givenKeyword, .givenKeyword):
+             (.givenKeyword, .givenKeyword),
+             (.traitKeyword, .traitKeyword),
+             (.matchKeyword, .matchKeyword),
+             (.bitnotKeyword, .bitnotKeyword),
+             (.bitshlKeyword, .bitshlKeyword),
+             (.bitshrKeyword, .bitshrKeyword),
+             (.arrow, .arrow),
+             (.power, .power),
+             (.plusEqual, .plusEqual),
+             (.minusEqual, .minusEqual),
+             (.multiplyEqual, .multiplyEqual),
+             (.divideEqual, .divideEqual),
+             (.moduloEqual, .moduloEqual),
+             (.powerEqual, .powerEqual),
+             (.range, .range),
+             (.rangeLess, .rangeLess),
+             (.lessRange, .lessRange),
+             (.lessRangeLess, .lessRangeLess),
+             (.unboundedRange, .unboundedRange),
+             (.lessUnboundedRange, .lessUnboundedRange),
+             (.unboundedRangeLess, .unboundedRangeLess),
+             (.fullRange, .fullRange):
             return true
         default:
             return false
@@ -187,6 +232,54 @@ public enum Token: CustomStringConvertible {
             return "ref"
         case .givenKeyword:
             return "given"
+        case .traitKeyword:
+            return "trait"
+        case .matchKeyword:
+            return "match"
+        case .bitandKeyword:
+            return "bitand"
+        case .bitorKeyword:
+            return "bitor"
+        case .bitxorKeyword:
+            return "bitxor"
+        case .bitnotKeyword:
+            return "bitnot"
+        case .bitshlKeyword:
+            return "bitshl"
+        case .bitshrKeyword:
+            return "bitshr"
+        case .arrow:
+            return "->"
+        case .power:
+            return "^"
+        case .plusEqual:
+            return "+="
+        case .minusEqual:
+            return "-="
+        case .multiplyEqual:
+            return "*="
+        case .divideEqual:
+            return "/="
+        case .moduloEqual:
+            return "%="
+        case .powerEqual:
+            return "^="
+        case .range:
+            return ".."
+        case .rangeLess:
+            return "..<"
+        case .lessRange:
+            return "<.."
+        case .lessRangeLess:
+            return "<..<"
+        case .unboundedRange:
+            return "..."
+        case .lessUnboundedRange:
+            return "<..."
+        case .unboundedRangeLess:
+            return "...<"
+        case .fullRange:
+            return "...."
         }
     }
 }
@@ -314,23 +407,48 @@ public class Lexer {
         }
         switch char {
         case "+":
+            if let nextChar = getNextChar() {
+                if nextChar == "=" { return .plusEqual }
+                unreadChar(nextChar)
+            }
             return .plus
         case "-":
+            if let nextChar = getNextChar() {
+                if nextChar == "=" { return .minusEqual }
+                if nextChar == ">" { return .arrow }
+                unreadChar(nextChar)
+            }
             return .minus
         case "*":
+            if let nextChar = getNextChar() {
+                if nextChar == "=" { return .multiplyEqual }
+                unreadChar(nextChar)
+            }
             return .multiply
         case "/":
             if let nextChar = getNextChar() {
                 if nextChar == "/" {
                     skipLineComment()
                     return try getNextToken()
+                } else if nextChar == "=" {
+                    return .divideEqual
                 } else {
                     unreadChar(nextChar)
                 }
             }
             return .divide
         case "%":
+            if let nextChar = getNextChar() {
+                if nextChar == "=" { return .moduloEqual }
+                unreadChar(nextChar)
+            }
             return .modulo
+        case "^":
+            if let nextChar = getNextChar() {
+                if nextChar == "=" { return .powerEqual }
+                unreadChar(nextChar)
+            }
+            return .power
         case "=":
             if let nextChar = getNextChar() {
                 if nextChar == "=" {
@@ -355,6 +473,23 @@ public class Lexer {
                 if nextChar == "=" {
                     return .lessEqual
                 }
+                if nextChar == "." {
+                    if let nextNextChar = getNextChar() {
+                        if nextNextChar == "." {
+                            if let nextNextNextChar = getNextChar() {
+                                if nextNextNextChar == "." {
+                                    return .lessUnboundedRange
+                                } else if nextNextNextChar == "<" {
+                                    return .lessRangeLess
+                                }
+                                unreadChar(nextNextNextChar)
+                            }
+                            return .lessRange
+                        }
+                        unreadChar(nextNextChar)
+                    }
+                    unreadChar(nextChar)
+                }
                 unreadChar(nextChar)
             }
             return .less
@@ -377,6 +512,28 @@ public class Lexer {
         case ":":
             return .colon
         case ".":
+            if let nextChar = getNextChar() {
+                if nextChar == "." {
+                    if let nextNextChar = getNextChar() {
+                        if nextNextChar == "." {
+                            if let nextNextNextChar = getNextChar() {
+                                if nextNextNextChar == "." {
+                                    return .fullRange
+                                } else if nextNextNextChar == "<" {
+                                    return .unboundedRangeLess
+                                }
+                                unreadChar(nextNextNextChar)
+                            }
+                            return .unboundedRange
+                        } else if nextNextChar == "<" {
+                            return .rangeLess
+                        }
+                        unreadChar(nextNextChar)
+                    }
+                    return .range
+                }
+                unreadChar(nextChar)
+            }
             return .dot
         case "\"":
             unreadChar(char)
@@ -411,6 +568,14 @@ public class Lexer {
                 case "is": .isKeyword
                 case "ref": .refKeyword
                 case "given": .givenKeyword
+                case "trait": .traitKeyword
+                case "match": .matchKeyword
+                case "bitand": .bitandKeyword
+                case "bitor": .bitorKeyword
+                case "bitxor": .bitxorKeyword
+                case "bitnot": .bitnotKeyword
+                case "bitshl": .bitshlKeyword
+                case "bitshr": .bitshrKeyword
                 default:  .identifier(id)
             }
         default:
