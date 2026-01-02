@@ -240,7 +240,7 @@ for index in 1...5 {
 ### Koral
 
 ```
-let shoppingList = List.of("catfish", "water", "tulips", "blue paint");
+let shoppingList = ["catfish", "water", "tulips", "blue paint"];
 shoppingList[1] = "bottle of water";
 ```
 
@@ -329,8 +329,8 @@ occupations["Jayne"] = "Public Relations"
 ### Koral
 
 ```
-let emptyArray = [String]Array.empty();
-let emptyMap = [String, Float32]Map.empty();
+let emptyArray [String]List = [];
+let emptyMap [String, Float32]Map = [];
 ```
 
 ### C#
@@ -630,7 +630,7 @@ given NamedShape {
         "A shape with \{self.numberOfSides} sides.";
 }
 
-type Square(as namedShape NamedShape, sideLength Float);
+type Square(namedShape NamedShape, sideLength Float);
 
 given Square {
     new(sideLength Float, name String) Square = Square(NamedShape(name, 4), sideLength);
@@ -638,7 +638,7 @@ given Square {
     simpleDescription(self ref) String =
         "A square with sides of length \{self.sideLength}.";
 
-    area(self ref) Float = sideLength * sideLength;
+    area(self ref) Float = self.sideLength * self.sideLength;
 }
 
 let test = Square.new(5.2, "square");
@@ -881,16 +881,16 @@ for item in library {
 ```
 let nb = 42;
 nb match {
-    0..7 or 8 or 9 ->
-        print("single digit");
+    0..9 ->
+        printLine("single digit");
     10 ->
-        print("double digits");
+        printLine("double digits");
     11..99 ->
-        print("double digits");
+        printLine("double digits");
     100..999 ->
-        print("triple digits");
+        printLine("triple digits");
     _ ->
-        print("four or more digits");
+        printLine("four or more digits");
 }
 ```
 
@@ -999,7 +999,7 @@ for case movie as Movie in someObjects {
 ### Koral
 
 ```
-type Nameable {
+trait Nameable {
     name(self ref) String;
 }
 
@@ -1063,7 +1063,7 @@ func f(x: any Nameable) {
 ```
 type Dog();
 
-given Dog {
+given Dog Nameable and Weight {
     name(self ref) String = "Dog";
 
     weight(self ref) Int = 30;
