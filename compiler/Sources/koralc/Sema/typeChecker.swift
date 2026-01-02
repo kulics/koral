@@ -490,13 +490,19 @@ public class TypeChecker {
     private func checkStatement(_ stmt: StatementNode) throws -> TypedStatementNode {
         switch stmt {
         case let .variableDeclaration(name, typeNode, value, mutable):
-            let type = try resolveTypeNode(typeNode)
-
             let typedValue = try inferTypedExpression(value)
-            if typedValue.type != type {
-                throw SemanticError.typeMismatch(
-                    expected: type.description, got: typedValue.type.description)
+            let type: Type
+            
+            if let typeNode = typeNode {
+                type = try resolveTypeNode(typeNode)
+                if typedValue.type != type {
+                    throw SemanticError.typeMismatch(
+                        expected: type.description, got: typedValue.type.description)
+                }
+            } else {
+                type = typedValue.type
             }
+
             currentScope.define(name, type, mutable: mutable)
             return .variableDeclaration(
                 identifier: Symbol(name: name, type: type, kind: mutable ? .variable(.MutableValue) : .variable(.Value)),

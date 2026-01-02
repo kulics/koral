@@ -77,7 +77,11 @@ public func printAST(_ node: ASTNode) {
         case .variableDeclaration(let name, let type, let value, let mutable):
             print("\(indent)VariableDeclaration:")
             print("\(indent)  Name: \(name)")
-            print("\(indent)  Type: \(type)")
+            if let type = type {
+                print("\(indent)  Type: \(type)")
+            } else {
+                print("\(indent)  Type: Inferred")
+            }
             print("\(indent)  Mutable: \(mutable)")
             withIndent {
                 printExpression(value)
