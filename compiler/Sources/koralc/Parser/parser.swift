@@ -91,9 +91,75 @@ public class Parser {
             
             try match(.identifier(name))
             return try parseTypeDeclaration(name, isValue: isValue)
+        } else if currentToken === .givenKeyword {
+            return try parseGivenDeclaration()
         } else {
             throw ParserError.unexpectedToken(line: lexer.currentLine, got: currentToken.description)
         }
+    }
+
+    private func parseGivenDeclaration() throws -> GlobalNode {
+        try match(.givenKeyword)
+        let type = try parseType()
+        try match(.leftBrace)
+        var methods: [MethodDeclaration] = []
+        while currentToken !== .rightBrace {
+            let typeParams = try parseTypeParameters()
+            
+            guard case let .identifier(name) = currentToken else {
+                throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+            }
+            try match(.identifier(name))
+            
+            try match(.leftParen)
+            var parameters: [(name: String, mutable: Bool, type: TypeNode)] = []
+            while currentToken !== .rightParen {
+                var isMut = false
+                if currentToken === .mutKeyword {
+                    isMut = true
+                    try match(.mutKeyword)
+                }
+                guard case let .identifier(pname) = currentToken else {
+                    throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+                }
+                try match(.identifier(pname))
+                var paramType = try parseType()
+                if currentToken === .refKeyword {
+                    try match(.refKeyword)
+                    paramType = .reference(paramType)
+                }
+                parameters.append((name: pname, mutable: isMut, type: paramType))
+                if currentToken === .comma {
+                    try match(.comma)
+                }
+            }
+            try match(.rightParen)
+            
+            var returnType: TypeNode = .identifier("Void")
+            if currentToken !== .equal {
+                returnType = try parseType()
+                if currentToken === .refKeyword {
+                    try match(.refKeyword)
+                    returnType = .reference(returnType)
+                }
+            }
+            
+            try match(.equal)
+            let body = try expression()
+            if currentToken === .semicolon {
+                try match(.semicolon)
+            }
+            
+            methods.append(MethodDeclaration(
+                name: name,
+                typeParameters: typeParams,
+                parameters: parameters,
+                returnType: returnType,
+                body: body
+            ))
+        }
+        try match(.rightBrace)
+        return .givenDeclaration(type: type, methods: methods)
     }
 
     // Parse type identifier
@@ -229,51 +295,28 @@ public class Parser {
         case .letKeyword:
             return try variableDeclaration()
         case .identifier(_):
-            guard case let .identifier(name) = currentToken else {
-                throw ParserError.unexpectedToken(line: lexer.currentLine, got: currentToken.description)
-            }
-            try match(.identifier(name))
+            let expr = try parsePostfixExpression()
             
-            // Check if it's a function call
-            if currentToken === .leftParen {
-                let functionCall = try parseFunctionCall(name)
-                return .expression(functionCall)
-            }
-            
-            // Parse optional member access chain
-            var memberPath: [String] = []
-            while currentToken === .dot {
-                try match(.dot)
-                guard case let .identifier(member) = currentToken else {
-                    throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
-                }
-                try match(.identifier(member))
-                memberPath.append(member)
-            }
-            
-            // Check if it's an assignment
             if currentToken === .equal {
                 try match(.equal)
-                
-                // Determine assignment target type
                 let target: AssignmentTarget
-                if memberPath.isEmpty {
+                switch expr {
+                case let .identifier(name):
                     target = .variable(name: name)
-                } else {
-                    target = .memberAccess(base: name, memberPath: memberPath)
+                case let .memberPath(base, path):
+                    if case let .identifier(baseName) = base {
+                        target = .memberAccess(base: baseName, memberPath: path)
+                    } else {
+                         throw ParserError.unexpectedToken(line: lexer.currentLine, got: "invalid assignment target")
+                    }
+                default:
+                     throw ParserError.unexpectedToken(line: lexer.currentLine, got: "invalid assignment target")
                 }
                 
                 let value = try expression()
                 return .assignment(target: target, value: value)
             }
-
-            // If not assignment, treat as expression
-            // Build as aggregated memberPath when exists
-            if memberPath.isEmpty {
-                return .expression(.identifier(name))
-            } else {
-                return .expression(.memberPath(base: .identifier(name), path: memberPath))
-            }
+            return .expression(expr)
         default:
             return .expression(try expression())
         }
@@ -302,19 +345,49 @@ public class Parser {
         return .variableDeclaration(name: name, type: type, value: value, mutable: mutable)
     }
 
-    private func parseMemberAccess() throws -> ExpressionNode {
-        let base = try term()
-        var path: [String] = []
-        while currentToken === .dot {
-            try match(.dot)
-            guard case let .identifier(member) = currentToken else {
-                throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+    private func parsePostfixExpression() throws -> ExpressionNode {
+        var expr = try term()
+        while true {
+            if currentToken === .dot {
+                try match(.dot)
+                guard case let .identifier(member) = currentToken else {
+                    throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+                }
+                try match(.identifier(member))
+                if case let .memberPath(base, path) = expr {
+                    expr = .memberPath(base: base, path: path + [member])
+                } else {
+                    expr = .memberPath(base: expr, path: [member])
+                }
+            } else if currentToken === .leftParen {
+                expr = try parseCall(expr)
+            } else {
+                break
             }
-            try match(.identifier(member))
-            path.append(member)
         }
-        if path.isEmpty { return base }
-        return .memberPath(base: base, path: path)
+        return expr
+    }
+
+    private func parseCall(_ callee: ExpressionNode) throws -> ExpressionNode {
+        try match(.leftParen)
+        var arguments: [ExpressionNode] = []
+        
+        if currentToken !== .rightParen {
+            func getNextComma() throws -> Bool {
+                if currentToken === .comma {
+                    try match(.comma)
+                    return true
+                }
+                return false
+            }
+            repeat {
+                let arg = try expression()
+                arguments.append(arg)
+            } while try getNextComma()
+        }
+        
+        try match(.rightParen)
+        return .call(callee: callee, arguments: arguments)
     }
 
     // Parse expression rule
@@ -404,12 +477,12 @@ public class Parser {
 
     // Sixth level: Multiplication, division, and modulo
     private func parseMultiplicativeExpression() throws -> ExpressionNode {
-        var left = try parseMemberAccess()
+        var left = try parsePostfixExpression()
         
         while currentToken === .multiply || currentToken === .divide || currentToken === .modulo {
             let op = currentToken
             try match(op)
-            let right = try parseMemberAccess()
+            let right = try parsePostfixExpression()
             left = .arithmeticExpression(
                 left: left,
                 operator: tokenToArithmeticOperator(op),
@@ -465,10 +538,6 @@ public class Parser {
         switch currentToken {
         case let .identifier(name):
             try match(.identifier(name))
-            // check if it's a function call
-            if currentToken === .leftParen {
-                return try parseFunctionCall(name)
-            }
             return .identifier(name)
         case let .integer(num):
             try match(.integer(num))
@@ -491,28 +560,7 @@ public class Parser {
         }
     }
 
-    // Parse function call
-    private func parseFunctionCall(_ name: String) throws -> ExpressionNode {
-        try match(.leftParen)
-        var arguments: [ExpressionNode] = []
-        
-        if currentToken !== .rightParen {
-            func getNextComma() throws -> Bool {
-                if currentToken === .comma {
-                    try match(.comma)
-                    return true
-                }
-                return false
-            }
-            repeat {
-                let arg = try expression()
-                arguments.append(arg)
-            } while try getNextComma()
-        }
-        
-        try match(.rightParen)
-        return .functionCall(name: name, typeArguments: [], arguments: arguments)
-    }
+
 
     // Parse block expression
     private func blockExpression() throws -> ExpressionNode {

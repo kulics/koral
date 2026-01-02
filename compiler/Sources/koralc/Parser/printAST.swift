@@ -178,16 +178,11 @@ public func printAST(_ node: ASTNode) {
                     printExpression(body)
                 }
             }
-        case .functionCall(let name, let typeArguments, let arguments):
-            print("\(indent)FunctionCall:")
-            print("\(indent)  Name: \(name)")
-            print("\(indent)  TypeArguments:")
+        case .call(let callee, let arguments):
+            print("\(indent)Call:")
+            print("\(indent)  Callee:")
             withIndent {
-                withIndent {
-                    for arg in typeArguments {
-                        print(arg)
-                    }
-                }
+                printExpression(callee)
             }
             print("\(indent)  Arguments:")
             withIndent {
