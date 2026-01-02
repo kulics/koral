@@ -1,10 +1,10 @@
 // Helper functions for printing AST nodes
 public func printAST(_ node: ASTNode) {
     var indent: String = ""
-    
+
     func printGlobalNode(_ node: GlobalNode) {
         switch node {
-        case let .globalVariableDeclaration(name, type, value, mutable):
+        case .globalVariableDeclaration(let name, let type, let value, let mutable):
             print("\(indent)GlobalVariableDeclaration:")
             print("\(indent)  Name: \(name)")
             print("\(indent)  Type: \(type)")
@@ -13,8 +13,9 @@ public func printAST(_ node: ASTNode) {
             withIndent {
                 printExpression(value)
             }
-            
-    case let .globalFunctionDeclaration(name, typeParameters, parameters, returnType, body):
+
+        case .globalFunctionDeclaration(
+            let name, let typeParameters, let parameters, let returnType, let body):
             print("\(indent)GlobalFunctionDeclaration:")
             print("\(indent)  Name: \(name)")
             print("\(indent)  TypeParameters:")
@@ -33,20 +34,47 @@ public func printAST(_ node: ASTNode) {
                     printExpression(body)
                 }
             }
-            
-        case let .globalTypeDeclaration(name, parameters, isValue):
+
+        case .globalTypeDeclaration(let name, let parameters, let isValue):
             print("\(indent)TypeDeclaration \(name)")
             print("\(indent)  IsValue: \(isValue)")
             for param in parameters {
                 print("\(indent)  \(param.name): \(param.type)")
                 print("\(indent)  Mutable: \(param.mutable)")
             }
+
+        case .givenDeclaration(let type, let methods):
+            print("\(indent)GivenDeclaration:")
+            print("\(indent)  Type: \(type)")
+            print("\(indent)  Methods:")
+            withIndent {
+                for method in methods {
+                    print("\(indent)MethodDeclaration:")
+                    print("\(indent)  Name: \(method.name)")
+                    print("\(indent)  TypeParameters:")
+                    for param in method.typeParameters {
+                        print("\(indent)    \(param)")
+                    }
+                    print("\(indent)  Parameters:")
+                    for param in method.parameters {
+                        let modStr = param.mutable ? "mut " : ""
+                        print("\(indent)    \(modStr)\(param.name): \(param.type)")
+                    }
+                    print("\(indent)  ReturnType: \(method.returnType)")
+                    print("\(indent)  Body:")
+                    withIndent {
+                        withIndent {
+                            printExpression(method.body)
+                        }
+                    }
+                }
+            }
         }
     }
 
     func printStatement(_ node: StatementNode) {
         switch node {
-        case let .variableDeclaration(name, type, value, mutable):
+        case .variableDeclaration(let name, let type, let value, let mutable):
             print("\(indent)VariableDeclaration:")
             print("\(indent)  Name: \(name)")
             print("\(indent)  Type: \(type)")
@@ -54,42 +82,42 @@ public func printAST(_ node: ASTNode) {
             withIndent {
                 printExpression(value)
             }
-            
-        case let .assignment(target, value):
+
+        case .assignment(let target, let value):
             print("\(indent)Assignment:")
-            
+
             switch target {
-            case let .variable(name):
+            case .variable(let name):
                 print("\(indent)  Target: \(name)")
-            case let .memberAccess(base, memberPath):
+            case .memberAccess(let base, let memberPath):
                 print("\(indent)  Target: \(base).\(memberPath.joined(separator: "."))")
             }
-            
+
             print("\(indent)  Value:")
             withIndent {
                 withIndent {
                     printExpression(value)
                 }
             }
-            
-        case let .expression(expr):
+
+        case .expression(let expr):
             printExpression(expr)
         }
     }
 
     func printExpression(_ node: ExpressionNode) {
         switch node {
-        case let .integerLiteral(value):
+        case .integerLiteral(let value):
             print("\(indent)IntegerLiteral: \(value)")
-        case let .floatLiteral(value):
+        case .floatLiteral(let value):
             print("\(indent)FloatLiteral: \(value)")
-        case let .stringLiteral(str):
+        case .stringLiteral(let str):
             print("\(indent)StringLiteral: \(str)")
-        case let .booleanLiteral(value):
+        case .booleanLiteral(let value):
             print("\(indent)BoolLiteral: \(value)")
-        case let .identifier(name):
+        case .identifier(let name):
             print("\(indent)Identifier: \(name)")
-        case let .blockExpression(statements, finalExpression):
+        case .blockExpression(let statements, let finalExpression):
             print("\(indent)BlockExpression:")
             withIndent {
                 for statement in statements {
@@ -102,21 +130,21 @@ public func printAST(_ node: ASTNode) {
                     }
                 }
             }
-        case let .arithmeticExpression(left, op, right):
+        case .arithmeticExpression(let left, let op, let right):
             print("\(indent)ArithmeticExpression:")
             withIndent {
                 printExpression(left)
                 print("\(indent)Operator: \(op)")
                 printExpression(right)
             }
-        case let .comparisonExpression(left, op, right):
+        case .comparisonExpression(let left, let op, let right):
             print("\(indent)ComparisonExpression:")
             withIndent {
                 printExpression(left)
                 print("\(indent)Operator: \(op)")
                 printExpression(right)
             }
-        case let .ifExpression(condition, thenBranch, elseBranch):
+        case .ifExpression(let condition, let thenBranch, let elseBranch):
             print("\(indent)IfExpression:")
             print("\(indent)  Condition:")
             withIndent {
@@ -136,7 +164,7 @@ public func printAST(_ node: ASTNode) {
                     printExpression(elseBranch)
                 }
             }
-        case let .whileExpression(condition, body):
+        case .whileExpression(let condition, let body):
             print("\(indent)WhileExpression:")
             print("\(indent)  Condition:")
             withIndent {
@@ -150,7 +178,7 @@ public func printAST(_ node: ASTNode) {
                     printExpression(body)
                 }
             }
-        case let .functionCall(name, typeArguments, arguments):
+        case .functionCall(let name, let typeArguments, let arguments):
             print("\(indent)FunctionCall:")
             print("\(indent)  Name: \(name)")
             print("\(indent)  TypeArguments:")
@@ -169,7 +197,7 @@ public func printAST(_ node: ASTNode) {
                     }
                 }
             }
-        case let .andExpression(left, right):
+        case .andExpression(let left, let right):
             print("\(indent)AndExpression:")
             withIndent {
                 print("\(indent)Left:")
@@ -181,8 +209,8 @@ public func printAST(_ node: ASTNode) {
                     printExpression(right)
                 }
             }
-            
-        case let .orExpression(left, right):
+
+        case .orExpression(let left, let right):
             print("\(indent)OrExpression:")
             withIndent {
                 print("\(indent)Left:")
@@ -194,20 +222,20 @@ public func printAST(_ node: ASTNode) {
                     printExpression(right)
                 }
             }
-            
-        case let .notExpression(expr):
+
+        case .notExpression(let expr):
             print("\(indent)NotExpression:")
             withIndent {
                 printExpression(expr)
             }
-        
-        case let .refExpression(expr):
+
+        case .refExpression(let expr):
             print("\(indent)RefExpression:")
             withIndent {
                 printExpression(expr)
             }
-            
-        case let .memberPath(base, path):
+
+        case .memberPath(let base, let path):
             print("\(indent)MemberPath: \(path.joined(separator: "."))")
             print("\(indent)  Base:")
             withIndent {
@@ -215,7 +243,7 @@ public func printAST(_ node: ASTNode) {
             }
         }
     }
-    
+
     func withIndent(_ body: () -> Void) {
         let oldIndent = indent
         indent += "  "
@@ -224,7 +252,7 @@ public func printAST(_ node: ASTNode) {
     }
 
     switch node {
-    case let .program(statements):
+    case .program(let statements):
         print("\(indent)Program:")
         withIndent {
             for statement in statements {
