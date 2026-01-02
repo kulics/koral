@@ -65,8 +65,7 @@ public indirect enum TypedGlobalNode {
     )
     case globalTypeDeclaration(
         identifier: Symbol,
-        parameters: [Symbol],
-        isValue: Bool
+        parameters: [Symbol]
     )
     case givenDeclaration(type: Type, methods: [TypedMethodDeclaration])
 }

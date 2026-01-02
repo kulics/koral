@@ -19,8 +19,7 @@ public indirect enum GlobalNode {
     )
     case globalTypeDeclaration(
         name: String,
-        parameters: [(name: String, type: TypeNode, mutable: Bool)],
-        isValue: Bool
+        parameters: [(name: String, type: TypeNode, mutable: Bool)]
     )
     // given Type { ...methods... }
     case givenDeclaration(type: TypeNode, methods: [MethodDeclaration])

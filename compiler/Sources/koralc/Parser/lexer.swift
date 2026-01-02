@@ -39,7 +39,6 @@ public enum Token: CustomStringConvertible {
     case colon          // Colon ':'
     case typeKeyword    // 'type' keyword
     case dot            // Dot operator '.'
-    case valKeyword     // 'val' keyword
     case isKeyword      // 'is' keyword
     case refKeyword     // 'ref' keyword
     case givenKeyword   // 'given' keyword
@@ -109,7 +108,6 @@ public enum Token: CustomStringConvertible {
              (.colon, .colon),
              (.typeKeyword, .typeKeyword),
              (.dot, .dot),
-             (.valKeyword, .valKeyword),
              (.isKeyword, .isKeyword),
              (.refKeyword, .refKeyword),
              (.givenKeyword, .givenKeyword),
@@ -224,8 +222,6 @@ public enum Token: CustomStringConvertible {
             return "type"
         case .dot:
             return "."
-        case .valKeyword:
-            return "val"
         case .isKeyword:
             return "is"
         case .refKeyword:
@@ -564,7 +560,6 @@ public class Lexer {
                 case "or": .orKeyword
                 case "not": .notKeyword
                 case "type": .typeKeyword
-                case "val": .valKeyword
                 case "is": .isKeyword
                 case "ref": .refKeyword
                 case "given": .givenKeyword

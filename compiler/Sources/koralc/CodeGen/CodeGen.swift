@@ -18,7 +18,7 @@ public class CodeGen {
         let vars = lifetimeScopeStack.removeLast()
         // 反向遍历变量列表,对可变类型变量调用 destroy
         for (name, type) in vars.reversed() {
-            if case .structure(let typeName, _, false) = type {
+            if case .structure(let typeName, _) = type {
                 addIndent()
                 buffer += "\(typeName)_drop(\(name));\n"
             }
@@ -47,8 +47,8 @@ public class CodeGen {
         case let .program(nodes):
             // 先生成所有类型声明
             for node in nodes {
-                if case let .globalTypeDeclaration(identifier, parameters, isValue) = node {
-                    generateTypeDeclaration(identifier, parameters, isValue)
+                if case let .globalTypeDeclaration(identifier, parameters) = node {
+                    generateTypeDeclaration(identifier, parameters)
                 }
             }
             buffer += "\n"
@@ -154,7 +154,7 @@ public class CodeGen {
         }
         let resultVar = generateExpressionSSA(body)
         let result = nextTemp()
-        if case let .structure(typeName, _, false) = body.type {
+        if case let .structure(typeName, _) = body.type {
             addIndent()
             if body.valueCategory == .lvalue {
                 buffer += "\(getCType(body.type)) \(result) = \(typeName)_copy(&\(resultVar));\n"
@@ -359,7 +359,7 @@ public class CodeGen {
             for arg in arguments {
                 let argResult = generateExpressionSSA(arg)
                 
-                if case let .structure(typeName, _, false) = arg.type {
+                if case let .structure(typeName, _) = arg.type {
                     addIndent()
                     let argCopy = nextTemp()
                     if arg.valueCategory == .lvalue {
@@ -414,7 +414,7 @@ public class CodeGen {
             // void 类型的值不能赋给变量
             if value.type != .void {
                 // 如果是可变类型，增加引用计数
-                if case .structure(let typeName, _, false) = identifier.type {
+                if case .structure(let typeName, _) = identifier.type {
                     addIndent()
                     buffer += "\(getCType(identifier.type)) \(identifier.name) = "
                     if value.valueCategory == .lvalue {
@@ -470,7 +470,7 @@ public class CodeGen {
         case .void: return "void"
         case .function(_, _):
             fatalError("Function type not supported in getCType")
-        case let .structure(name, _, _):
+        case let .structure(name, _):
             return "struct \(name)"
         case let .reference(inner):
             return "\(getCType(inner)) *"
@@ -498,8 +498,7 @@ public class CodeGen {
     }
 
     private func generateTypeDeclaration(_ identifier: Symbol, 
-                                   _ parameters: [Symbol], 
-                                   _ isValue: Bool) {
+                                   _ parameters: [Symbol]) {
         let name = identifier.name
         // 所有类型都生成 struct，字段为值类型
         buffer += "struct \(name) {\n"
@@ -517,7 +516,7 @@ public class CodeGen {
             buffer += "    struct \(name) result;\n"
             for param in parameters {
                 buffer += "    result.\(param.name) = "
-                if case let .structure(fieldTypeName, _, fieldIsVal) = param.type, !fieldIsVal {
+                if case let .structure(fieldTypeName, _) = param.type {
                     buffer += "\(fieldTypeName)_copy(&self->\(param.name));\n"
                 } else {
                     buffer += "self->\(param.name);\n"
@@ -530,7 +529,7 @@ public class CodeGen {
         buffer += "void \(name)_drop(struct \(name) self) {\n"
         withIndent {
             for param in parameters {
-                if case let .structure(fieldTypeName, _, fieldIsVal) = param.type, !fieldIsVal {
+                if case let .structure(fieldTypeName, _) = param.type {
                     buffer += "    \(fieldTypeName)_drop(self.\(param.name));\n"
                 }
             }
@@ -566,7 +565,7 @@ public class CodeGen {
             return
         }
         let valueResult = generateExpressionSSA(value)
-        if case let .structure(typeName, _, false) = identifier.type {
+        if case let .structure(typeName, _) = identifier.type {
             if value.valueCategory == .lvalue {
                 let copyResult = nextTemp()
                 addIndent()
@@ -604,7 +603,7 @@ public class CodeGen {
             let op: String = { if case .reference(_) = curType { return "->" } else { return "." } }()
             accessPath += "\(op)\(memberName)"
             curType = memberType
-            if isLast, case let .structure(typeName, _, false) = memberType {
+            if isLast, case let .structure(typeName, _) = memberType {
                 if value.valueCategory == .lvalue {
                     let copyResult = nextTemp()
                     addIndent()
@@ -645,7 +644,7 @@ public class CodeGen {
         // struct类型参数传递用值，isValue==false 的 struct 参数自动递归 copy
         for arg in arguments {
             let result = generateExpressionSSA(arg)
-            if case let .structure(typeName, _, false) = arg.type {
+            if case let .structure(typeName, _) = arg.type {
                 if arg.valueCategory == .lvalue {
                     let copyResult = nextTemp()
                     addIndent()

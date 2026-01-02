@@ -75,12 +75,6 @@ public class Parser {
         } else if currentToken === .typeKeyword {
             try match(.typeKeyword)
 
-            var isValue = false
-            if currentToken === .valKeyword {
-                try match(.valKeyword)
-                isValue = true
-            }
-
             guard case let .identifier(name) = currentToken else {
                 throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
             }
@@ -90,7 +84,7 @@ public class Parser {
             }
             
             try match(.identifier(name))
-            return try parseTypeDeclaration(name, isValue: isValue)
+            return try parseTypeDeclaration(name)
         } else if currentToken === .givenKeyword {
             return try parseGivenDeclaration()
         } else {
@@ -257,7 +251,7 @@ public class Parser {
     }
 
     // Parse type declaration
-    private func parseTypeDeclaration(_ name: String, isValue: Bool) throws -> GlobalNode {        
+    private func parseTypeDeclaration(_ name: String) throws -> GlobalNode {        
         try match(.leftParen)
         var parameters: [(name: String, type: TypeNode, mutable: Bool)] = []
         while currentToken !== .rightParen {
@@ -284,8 +278,7 @@ public class Parser {
         
         return .globalTypeDeclaration(
             name: name, 
-            parameters: parameters,
-            isValue: isValue
+            parameters: parameters
         )
     }
 
