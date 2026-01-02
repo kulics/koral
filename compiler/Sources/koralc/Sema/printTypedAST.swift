@@ -39,6 +39,24 @@ public func printTypedAST(_ node: TypedProgram) {
                     print("\(indent)  Mutable: \(param.isMutable())")
                 }
             }
+
+        case let .givenDeclaration(type, methods):
+            print("\(indent)GivenDeclaration: \(type)")
+            withIndent {
+                for method in methods {
+                    print("\(indent)Method: \(method.identifier.name) : \(method.identifier.type)")
+                    print("\(indent)  Parameters:")
+                    withIndent {
+                        for param in method.parameters {
+                            print("\(indent)\(param.name): \(param.type)")
+                        }
+                    }
+                    print("\(indent)  Body:")
+                    withIndent {
+                        printTypedExpression(method.body)
+                    }
+                }
+            }
         }
     }
     
@@ -165,14 +183,36 @@ public func printTypedAST(_ node: TypedProgram) {
                 }
             }
             
-        case let .functionCall(identifier, arguments, type):
-            print("\(indent)FunctionCall: \(identifier.name) : \(type)")
+        case let .call(callee, arguments, type):
+            print("\(indent)Call: \(type)")
             withIndent {
+                print("\(indent)Callee:")
+                withIndent {
+                    printTypedExpression(callee)
+                }
                 print("\(indent)Arguments:")
                 withIndent {
                     for arg in arguments {
                         printTypedExpression(arg)
                     }
+                }
+            }
+
+        case let .methodReference(base, method, type):
+            print("\(indent)MethodReference: \(method.name) : \(type)")
+            withIndent {
+                print("\(indent)Base:")
+                withIndent {
+                    printTypedExpression(base)
+                }
+            }
+
+        case let .memberPath(source, path):
+            print("\(indent)MemberPath: \(path.map { $0.name }.joined(separator: "."))")
+            withIndent {
+                print("\(indent)Source:")
+                withIndent {
+                    printTypedExpression(source)
                 }
             }
 
@@ -223,14 +263,6 @@ public func printTypedAST(_ node: TypedProgram) {
                         printTypedExpression(arg)
                     }
                 }
-            }
-
-        case let .memberPath(source, path):
-            let t = path.last?.type ?? .void
-            print("\(indent)MemberPath: \(t)")
-            print("\(indent)  Path: \(path.map{ $0.name }.joined(separator: "."))")
-            withIndent {
-                printTypedExpression(source)
             }
         }
     }

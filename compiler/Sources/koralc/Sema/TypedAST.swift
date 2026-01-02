@@ -68,6 +68,14 @@ public indirect enum TypedGlobalNode {
         parameters: [Symbol],
         isValue: Bool
     )
+    case givenDeclaration(type: Type, methods: [TypedMethodDeclaration])
+}
+
+public struct TypedMethodDeclaration {
+    public let identifier: Symbol
+    public let parameters: [Symbol]
+    public let body: TypedExpressionNode
+    public let returnType: Type
 }
 
 public indirect enum TypedStatementNode {
@@ -95,7 +103,8 @@ public indirect enum TypedExpressionNode {
     case variable(identifier: Symbol)
     case blockExpression(statements: [TypedStatementNode], finalExpression: TypedExpressionNode?, type: Type)
     case ifExpression(condition: TypedExpressionNode, thenBranch: TypedExpressionNode, elseBranch: TypedExpressionNode, type: Type)
-    case functionCall(identifier: Symbol, arguments: [TypedExpressionNode], type: Type)
+    case call(callee: TypedExpressionNode, arguments: [TypedExpressionNode], type: Type)
+    case methodReference(base: TypedExpressionNode, method: Symbol, type: Type)
     case whileExpression(condition: TypedExpressionNode, body: TypedExpressionNode, type: Type)
     case typeConstruction(identifier: Symbol, arguments: [TypedExpressionNode], type: Type)
     case memberPath(source: TypedExpressionNode, path: [Symbol])
@@ -116,7 +125,8 @@ extension TypedExpressionNode {
            .referenceExpression(_, let type),
              .blockExpression(_, _, let type),
              .ifExpression(_, _, _, let type),
-             .functionCall(_, _, let type),
+             .call(_, _, let type),
+             .methodReference(_, _, let type),
              .whileExpression(_, _, let type),
              .typeConstruction(_, _, let type):
             return type

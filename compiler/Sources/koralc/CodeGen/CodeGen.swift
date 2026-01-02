@@ -58,6 +58,11 @@ public class CodeGen {
                 if case let .globalFunction(identifier, params, _) = node {
                     generateFunctionDeclaration(identifier, params)
                 }
+                if case let .givenDeclaration(_, methods) = node {
+                    for method in methods {
+                        generateFunctionDeclaration(method.identifier, method.parameters)
+                    }
+                }
             }
             buffer += "\n"
             
@@ -85,6 +90,11 @@ public class CodeGen {
             for node in nodes {
                 if case let .globalFunction(identifier, params, body) = node {
                     generateGlobalFunction(identifier, params, body)
+                }
+                if case let .givenDeclaration(_, methods) = node {
+                    for method in methods {
+                        generateGlobalFunction(method.identifier, method.parameters, method.body)
+                    }
                 }
             }
 
@@ -247,8 +257,10 @@ public class CodeGen {
                 return resultVar
             }
 
-        case let .functionCall(identifier, arguments, type):
-            return generateFunctionCall(identifier, arguments, type)
+        case let .call(callee, arguments, type):
+            return generateCall(callee, arguments, type)
+        case .methodReference:
+            fatalError("Method reference not in call position is not supported yet")
         case let .referenceExpression(inner, _):
             // 取引用：对左值构建可寻址路径，然后取地址
             let lvaluePath = buildLValuePath(inner)
@@ -612,6 +624,20 @@ public class CodeGen {
         }
         addIndent()
         buffer += "\(accessPath) = \(valueResult);\n"
+    }
+
+    private func generateCall(_ callee: TypedExpressionNode, _ arguments: [TypedExpressionNode], _ type: Type) -> String {
+        if case let .methodReference(base, method, _) = callee {
+            var allArgs = [base]
+            allArgs.append(contentsOf: arguments)
+            return generateFunctionCall(method, allArgs, type)
+        }
+        
+        if case let .variable(identifier) = callee {
+            return generateFunctionCall(identifier, arguments, type)
+        }
+        
+        fatalError("Indirect call not supported yet")
     }
 
     private func generateFunctionCall(_ identifier: Symbol, _ arguments: [TypedExpressionNode], _ type: Type) -> String {

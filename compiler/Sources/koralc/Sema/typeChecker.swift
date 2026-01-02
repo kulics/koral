@@ -2,6 +2,8 @@ public class TypeChecker {
     // Store type information for variables and functions
     private var currentScope: Scope = Scope()
     private let ast: ASTNode
+    // TypeName -> MethodName -> MethodSymbol
+    private var extensionMethods: [String: [String: Symbol]] = [:]
 
     public init(ast: ASTNode) {
         self.ast = ast
@@ -68,6 +70,64 @@ public class TypeChecker {
                 parameters: params,
                 body: typedBody
             )
+
+        case let .givenDeclaration(typeNode, methods):
+            let type = try resolveTypeNode(typeNode)
+            guard case let .structure(typeName, _, _) = type else {
+                 throw SemanticError.invalidOperation(op: "given", type1: type.description, type2: "")
+            }
+            
+            var typedMethods: [TypedMethodDeclaration] = []
+            
+            for method in methods {
+                let (methodType, typedBody, params, returnType) = try withNewScope {
+                    for typeParam in method.typeParameters {
+                        let typeType = Type.structure(name: typeParam, members: [], isValue: false)
+                        try currentScope.defineType(typeParam, type: typeType)
+                    }
+                    
+                    currentScope.define("self", type, mutable: false)
+                    
+                    let returnType = try resolveTypeNode(method.returnType)
+                    let params = try method.parameters.map { param -> Symbol in
+                        let paramType = try resolveTypeNode(param.type)
+                        return Symbol(name: param.name, type: paramType, kind: .variable(param.mutable ? .MutableValue : .Value))
+                    }
+                    
+                    for param in params {
+                        currentScope.define(param.name, param.type, mutable: param.isMutable())
+                    }
+                    
+                    let typedBody = try inferTypedExpression(method.body)
+                    if typedBody.type != returnType {
+                        throw SemanticError.typeMismatch(expected: returnType.description, got: typedBody.type.description)
+                    }
+                    
+                    let functionType = Type.function(
+                        parameters: params.map { Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind)) },
+                        returns: returnType
+                    )
+                    return (functionType, typedBody, params, returnType)
+                }
+                
+                let mangledName = "\(typeName)_\(method.name)"
+                let methodSymbol = Symbol(name: mangledName, type: methodType, kind: .function)
+                
+                typedMethods.append(TypedMethodDeclaration(
+                    identifier: methodSymbol,
+                    parameters: params,
+                    body: typedBody,
+                    returnType: returnType
+                ))
+                
+                if extensionMethods[typeName] == nil {
+                    extensionMethods[typeName] = [:]
+                }
+                extensionMethods[typeName]![method.name] = methodSymbol
+            }
+            
+            return .givenDeclaration(type: type, methods: typedMethods)
+
         case let .globalTypeDeclaration(name, parameters, isValue):
             // Check if type already exists
             if currentScope.lookupType(name) != nil {
@@ -238,75 +298,112 @@ public class TypeChecker {
                 type: .void
             )
 
-        case let .functionCall(name, _, arguments):
-            // 先检查是否是类型构造
-            if let type = currentScope.lookupType(name) {
-                guard case let .structure(_, parameters, _) = type else {
-                    throw SemanticError.invalidOperation(
-                        op: "construct", type1: type.description, type2: "")
-                }
+        case let .call(callee, arguments):
+            // Check if it is a constructor call
+            if case let .identifier(name) = callee {
+                if let type = currentScope.lookupType(name) {
+                    guard case let .structure(_, parameters, _) = type else {
+                        throw SemanticError.invalidOperation(
+                            op: "construct", type1: type.description, type2: "")
+                    }
 
-                if arguments.count != parameters.count {
+                    if arguments.count != parameters.count {
+                        throw SemanticError.invalidArgumentCount(
+                            function: name,
+                            expected: parameters.count,
+                            got: arguments.count
+                        )
+                    }
+
+                    var typedArguments: [TypedExpressionNode] = []
+                    for (arg, expectedMember) in zip(arguments, parameters) {
+                        let typedArg = try inferTypedExpression(arg)
+                        if typedArg.type != expectedMember.type {
+                            throw SemanticError.typeMismatch(
+                                expected: expectedMember.type.description,
+                                got: typedArg.type.description
+                            )
+                        }
+                        typedArguments.append(typedArg)
+                    }
+
+                    return .typeConstruction(
+                        identifier: Symbol(name: name, type: type, kind: .type),
+                        arguments: typedArguments,
+                        type: type
+                    )
+                }
+            }
+
+            let typedCallee = try inferTypedExpression(callee)
+            
+            // Method call
+            if case let .methodReference(base, method, _) = typedCallee {
+                if case let .function(params, returns) = method.type {
+                    if arguments.count != params.count - 1 {
+                        throw SemanticError.invalidArgumentCount(
+                            function: method.name,
+                            expected: params.count - 1,
+                            got: arguments.count
+                        )
+                    }
+                    
+                    // Check base type against first param
+                    if let firstParam = params.first {
+                         if base.type != firstParam.type {
+                             throw SemanticError.typeMismatch(
+                                expected: firstParam.type.description,
+                                got: base.type.description
+                            )
+                         }
+                    }
+                    
+                    var typedArguments: [TypedExpressionNode] = []
+                    for (arg, param) in zip(arguments, params.dropFirst()) {
+                        let typedArg = try inferTypedExpression(arg)
+                        if typedArg.type != param.type {
+                            throw SemanticError.typeMismatch(
+                                expected: param.type.description,
+                                got: typedArg.type.description
+                            )
+                        }
+                        typedArguments.append(typedArg)
+                    }
+                    
+                    return .call(callee: typedCallee, arguments: typedArguments, type: returns)
+                }
+            }
+
+            // Function call
+            if case let .function(params, returns) = typedCallee.type {
+                if arguments.count != params.count {
                     throw SemanticError.invalidArgumentCount(
-                        function: name,
-                        expected: parameters.count,
+                        function: "expression",
+                        expected: params.count,
                         got: arguments.count
                     )
                 }
 
                 var typedArguments: [TypedExpressionNode] = []
-                for (arg, expectedMember) in zip(arguments, parameters) {
+                for (arg, param) in zip(arguments, params) {
                     let typedArg = try inferTypedExpression(arg)
-                    if typedArg.type != expectedMember.type {
+                    if typedArg.type != param.type {
                         throw SemanticError.typeMismatch(
-                            expected: expectedMember.type.description,
+                            expected: param.type.description,
                             got: typedArg.type.description
                         )
                     }
                     typedArguments.append(typedArg)
                 }
 
-                return .typeConstruction(
-                    identifier: Symbol(name: name, type: type, kind: .type),
+                return .call(
+                    callee: typedCallee,
                     arguments: typedArguments,
-                    type: type
+                    type: returns
                 )
             }
-
-            // 如果不是类型构造，按原来的函数调用处理
-            guard let type = currentScope.lookup(name) else {
-                throw SemanticError.functionNotFound(name)
-            }
-
-            guard case let .function(params, returns) = type else {
-                throw SemanticError.invalidOperation(op: "call", type1: type.description, type2: "")
-            }
-
-            if arguments.count != params.count {
-                throw SemanticError.invalidArgumentCount(
-                    function: name,
-                    expected: params.count,
-                    got: arguments.count
-                )
-            }
-
-            var typedArguments: [TypedExpressionNode] = []
-            for (arg, param) in zip(arguments, params) {
-                let typedArg = try inferTypedExpression(arg)
-                if typedArg.type != param.type {
-                    throw SemanticError.typeMismatch(
-                        expected: param.type.description,
-                        got: typedArg.type.description
-                    )
-                }
-                typedArguments.append(typedArg)
-            }
-
-            return .functionCall(
-                identifier: Symbol(name: name, type: type, kind: .function),
-                arguments: typedArguments,
-                type: returns
-            )
+            
+            throw SemanticError.invalidOperation(op: "call", type1: typedCallee.type.description, type2: "")
 
         case let .andExpression(left, right):
             let typedLeft = try inferTypedExpression(left)
@@ -347,21 +444,42 @@ public class TypeChecker {
 
         case let .memberPath(baseExpr, path):
             let typedBase = try inferTypedExpression(baseExpr)
-            // T ref: 解一层 reference 再查找
             var currentType: Type = {
                 if case let .reference(inner) = typedBase.type { return inner }
                 return typedBase.type
             }()
             var typedPath: [Symbol] = []
-            for memberName in path {
-                guard case let .structure(typeName, members, _) = currentType else {
-                    throw SemanticError.invalidOperation(op: "member access", type1: currentType.description, type2: "")
+            
+            for (index, memberName) in path.enumerated() {
+                let isLast = index == path.count - 1
+                
+                let typeToLookup = {
+                    if case let .reference(inner) = currentType { return inner }
+                    return currentType
+                }()
+                
+                guard case let .structure(typeName, members, _) = typeToLookup else {
+                    throw SemanticError.invalidOperation(op: "member access", type1: typeToLookup.description, type2: "")
                 }
-                guard let mem = members.first(where: { $0.name == memberName }) else {
+                
+                if let mem = members.first(where: { $0.name == memberName }) {
+                    let sym = Symbol(name: mem.name, type: mem.type, kind: .variable(mem.mutable ? .MutableValue : .Value))
+                    typedPath.append(sym)
+                    currentType = mem.type
+                } else {
+                    if isLast {
+                        if let methods = extensionMethods[typeName], let methodSym = methods[memberName] {
+                            let base: TypedExpressionNode
+                            if typedPath.isEmpty {
+                                base = typedBase
+                            } else {
+                                base = .memberPath(source: typedBase, path: typedPath)
+                            }
+                            return .methodReference(base: base, method: methodSym, type: methodSym.type)
+                        }
+                    }
                     throw SemanticError.undefinedMember(memberName, typeName)
                 }
-                typedPath.append(Symbol(name: mem.name, type: mem.type, kind: .variable(mem.mutable ? .MutableValue : .Value)))
-                currentType = mem.type
             }
             return .memberPath(source: typedBase, path: typedPath)
         }
