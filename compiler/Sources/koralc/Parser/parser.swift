@@ -295,7 +295,7 @@ public class Parser {
         case .letKeyword:
             return try variableDeclaration()
         case .identifier(_):
-            let expr = try parsePostfixExpression()
+            let expr = try expression()
             
             if currentToken === .equal {
                 try match(.equal)
@@ -339,7 +339,12 @@ public class Parser {
         }
         
         try match(.identifier(name))
-        let type = try parseType()
+        
+        var type: TypeNode? = nil
+        if currentToken !== .equal {
+            type = try parseType()
+        }
+        
         try match(.equal)
         let value = try expression()
         return .variableDeclaration(name: name, type: type, value: value, mutable: mutable)

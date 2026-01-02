@@ -50,7 +50,7 @@ public struct MethodDeclaration {
 }
 
 public indirect enum StatementNode {
-    case variableDeclaration(name: String, type: TypeNode, value: ExpressionNode, mutable: Bool)
+    case variableDeclaration(name: String, type: TypeNode?, value: ExpressionNode, mutable: Bool)
     case assignment(target: AssignmentTarget, value: ExpressionNode)
     case expression(ExpressionNode)
 }
