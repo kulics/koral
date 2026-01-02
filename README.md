@@ -10,12 +10,11 @@ This is the main source code repository for Koral. It contains the compiler, and
 
 ## Key Features
 
-- A modern grammar, which is easy to distinguish.
-- Automatic memory management.
-- Generics.
-- Multi-paradigm programming.
+- Easy to distinguish, modern syntax.
+- Automatic memory management (based on reference counting and ownership).
+- Generics and Trait system.
+- Multi-paradigm programming (combining functional and imperative).
 - Cross-platform.
-- Unicode.
 
 ## Getting Started
 
@@ -25,4 +24,4 @@ This is the main source code repository for Koral. It contains the compiler, and
 ## Compare
 
 Compare with C#, Go, Kotlin, Swift.
-Read detail from [Here](./Compare.md).  
+Read detail from [Here](./docs/Compare.md).  
