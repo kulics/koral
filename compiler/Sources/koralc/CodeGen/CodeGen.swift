@@ -35,6 +35,13 @@ public class CodeGen {
       #include <stdlib.h>
       #include <stdatomic.h>
 
+      // Basic Ref types
+      struct Ref_Int { int* ptr; void* control; };
+      struct Ref_Float { double* ptr; void* control; };
+      struct Ref_Bool { _Bool* ptr; void* control; };
+      struct Ref_String { const char** ptr; void* control; };
+      struct Ref_Void { void* ptr; void* control; };
+
       """
 
     // 生成程序体
@@ -265,10 +272,17 @@ public class CodeGen {
       return generateCall(callee, arguments, type)
     case .methodReference:
       fatalError("Method reference not in call position is not supported yet")
-    case .referenceExpression(let inner, _):
-      // 取引用：对左值构建可寻址路径，然后取地址
+    case .referenceExpression(let inner, let type):
+      // 取引用：构造 Ref 结构体
       let lvaluePath = buildLValuePath(inner)
-      return "&\(lvaluePath)"
+      let result = nextTemp()
+      addIndent()
+      buffer += "\(getCType(type)) \(result);\n"
+      addIndent()
+      buffer += "\(result).ptr = &\(lvaluePath);\n"
+      addIndent()
+      buffer += "\(result).control = NULL;\n"
+      return result
 
     case .whileExpression(let condition, let body, _):
       let labelPrefix = nextTemp()
@@ -396,7 +410,7 @@ public class CodeGen {
       var base = buildLValuePath(source)
       var curType = source.type
       for member in path {
-        let op: String = { if case .reference(_) = curType { return "->" } else { return "." } }()
+        let op: String = { if case .reference(_) = curType { return ".ptr->" } else { return "." } }()
         base += "\(op)\(member.name)"
         curType = member.type
       }
@@ -477,7 +491,16 @@ public class CodeGen {
     case .structure(let name, _):
       return "struct \(name)"
     case .reference(let inner):
-      return "\(getCType(inner)) *"
+      switch inner {
+      case .int: return "struct Ref_Int"
+      case .float: return "struct Ref_Float"
+      case .bool: return "struct Ref_Bool"
+      case .string: return "struct Ref_String"
+      case .void: return "struct Ref_Void"
+      case .structure(let name, _): return "struct Ref_\(name)"
+      case .function(_, _): fatalError("Ref to function not supported")
+      case .reference(_): fatalError("Ref to ref not supported")
+      }
     }
   }
 
@@ -515,6 +538,9 @@ public class CodeGen {
       }
     }
     buffer += "};\n\n"
+
+    // Generate Ref struct for this type
+    buffer += "struct Ref_\(name) { struct \(name)* ptr; void* control; };\n\n"
 
     // 自动生成 copy/drop，仅 isValue==false 的类型需要递归处理
     buffer += "struct \(name) \(name)_copy(const struct \(name) *self) {\n"
@@ -610,7 +636,7 @@ public class CodeGen {
       let isLast = index == memberPath.count - 1
       let memberName = item.name
       let memberType = item.type
-      let op: String = { if case .reference(_) = curType { return "->" } else { return "." } }()
+      let op: String = { if case .reference(_) = curType { return ".ptr->" } else { return "." } }()
       accessPath += "\(op)\(memberName)"
       curType = memberType
       if isLast, case .structure(let typeName, _) = memberType {
@@ -691,7 +717,7 @@ public class CodeGen {
     var access = sourceResult
     var curType = source.type
     for member in path {
-      let op: String = { if case .reference(_) = curType { return "->" } else { return "." } }()
+      let op: String = { if case .reference(_) = curType { return ".ptr->" } else { return "." } }()
       access += "\(op)\(member.name)"
       curType = member.type
     }
