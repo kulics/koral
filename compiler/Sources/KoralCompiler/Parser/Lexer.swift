@@ -372,11 +372,12 @@ public class Lexer {
   // Read a string literal
   private func readString() throws -> String {
     var str = ""
-    guard let startChar = getNextChar(), startChar == "\"" else {
-      throw LexerError.invalidString(line: _line, "expected string start with \"")
+    guard let startChar = getNextChar(), (startChar == "\"" || startChar == "'") else {
+      throw LexerError.invalidString(line: _line, "expected string start with \" or '")
     }
+    let quote = startChar
     while let char = getNextChar() {
-      if char == "\"" {
+      if char == quote {
         break
       }
       str.append(char)
@@ -534,7 +535,7 @@ public class Lexer {
         unreadChar(nextChar)
       }
       return .dot
-    case "\"":
+    case "\"", "'":
       unreadChar(char)
       let str = try readString()
       return .string(str)
