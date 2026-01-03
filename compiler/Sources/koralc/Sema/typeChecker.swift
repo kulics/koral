@@ -421,11 +421,6 @@ public class TypeChecker {
 
     case .refExpression(let inner):
       let typedInner = try inferTypedExpression(inner)
-      // 仅允许对左值取引用
-      if typedInner.valueCategory != .lvalue {
-        throw SemanticError.invalidOperation(
-          op: "ref", type1: typedInner.type.description, type2: "")
-      }
       // 禁止对引用再次取引用（仅单层）
       if case .reference(_) = typedInner.type {
         throw SemanticError.invalidOperation(

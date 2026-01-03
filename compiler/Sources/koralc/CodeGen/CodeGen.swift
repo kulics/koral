@@ -318,18 +318,61 @@ public class CodeGen {
     case .methodReference:
       fatalError("Method reference not in call position is not supported yet")
     case .referenceExpression(let inner, let type):
-      // 取引用：构造 Ref 结构体
-      let (lvaluePath, controlPath) = buildRefComponents(inner)
-      let result = nextTemp()
-      addIndent()
-      buffer += "\(getCType(type)) \(result);\n"
-      addIndent()
-      buffer += "\(result).ptr = &\(lvaluePath);\n"
-      addIndent()
-      buffer += "\(result).control = \(controlPath);\n"
-      addIndent()
-      buffer += "koral_retain(\(result).control);\n"
-      return result
+      if inner.valueCategory == .lvalue {
+        // 取引用：构造 Ref 结构体
+        let (lvaluePath, controlPath) = buildRefComponents(inner)
+        let result = nextTemp()
+        addIndent()
+        buffer += "\(getCType(type)) \(result);\n"
+        addIndent()
+        buffer += "\(result).ptr = &\(lvaluePath);\n"
+        addIndent()
+        buffer += "\(result).control = \(controlPath);\n"
+        addIndent()
+        buffer += "koral_retain(\(result).control);\n"
+        return result
+      } else {
+        // 堆分配：构造 Ref 结构体
+        let innerResult = generateExpressionSSA(inner)
+        let result = nextTemp()
+        let innerType = inner.type
+        let innerCType = getCType(innerType)
+
+        addIndent()
+        buffer += "\(getCType(type)) \(result);\n"
+
+        // 1. 分配数据内存
+        addIndent()
+        buffer += "\(result).ptr = (\(innerCType)*)malloc(sizeof(\(innerCType)));\n"
+
+        // 2. 初始化数据
+        if case .structure(let typeName, _) = innerType {
+          addIndent()
+          buffer += "*\(result).ptr = \(typeName)_copy(&\(innerResult));\n"
+        } else {
+          addIndent()
+          buffer += "*\(result).ptr = \(innerResult);\n"
+        }
+
+        // 3. 分配控制块
+        addIndent()
+        buffer += "\(result).control = malloc(sizeof(struct Koral_Control));\n"
+        addIndent()
+        buffer += "((struct Koral_Control*)\(result).control)->count = 1;\n"
+        addIndent()
+        buffer += "((struct Koral_Control*)\(result).control)->ptr = \(result).ptr;\n"
+
+        // 4. 设置析构函数
+        if case .structure(let typeName, _) = innerType {
+          addIndent()
+          buffer += "((struct Koral_Control*)\(result).control)->dtor = \(typeName)_drop_ptr;\n"
+        } else {
+          addIndent()
+          buffer += "((struct Koral_Control*)\(result).control)->dtor = NULL;\n"
+        }
+
+        return result
+      }
 
     case .whileExpression(let condition, let body, _):
       let labelPrefix = nextTemp()

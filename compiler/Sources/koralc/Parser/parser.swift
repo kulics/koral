@@ -118,10 +118,11 @@ public class Parser {
             line: lexer.currentLine, got: currentToken.description)
         }
         try match(.identifier(pname))
-        var paramType = try parseType()
+        let paramType = try parseType()
         if currentToken === .refKeyword {
-          try match(.refKeyword)
-          paramType = .reference(paramType)
+           throw ParserError.unexpectedToken(
+            line: lexer.currentLine, got: currentToken.description,
+            expected: "only one 'ref' allowed")
         }
         parameters.append((name: pname, mutable: isMut, type: paramType))
         if currentToken === .comma {
@@ -134,8 +135,9 @@ public class Parser {
       if currentToken !== .equal {
         returnType = try parseType()
         if currentToken === .refKeyword {
-          try match(.refKeyword)
-          returnType = .reference(returnType)
+           throw ParserError.unexpectedToken(
+            line: lexer.currentLine, got: currentToken.description,
+            expected: "only one 'ref' allowed")
         }
       }
 
@@ -170,7 +172,14 @@ public class Parser {
     }
 
     try match(.identifier(name))
-    return .identifier(name)
+    var type: TypeNode = .identifier(name)
+    
+    if currentToken === .refKeyword {
+      try match(.refKeyword)
+      type = .reference(type)
+    }
+    
+    return type
   }
 
   // Parse global variable declaration
@@ -218,17 +227,12 @@ public class Parser {
         throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
       }
       try match(.identifier(pname))
-      var paramType = try parseType()
+      let paramType = try parseType()
       // 参数类型处允许一个后缀 ref
       if currentToken === .refKeyword {
-        try match(.refKeyword)
-        paramType = .reference(paramType)
-        // 禁止重复 ref
-        if currentToken === .refKeyword {
-          throw ParserError.unexpectedToken(
+        throw ParserError.unexpectedToken(
             line: lexer.currentLine, got: currentToken.description,
             expected: "only one 'ref' allowed")
-        }
       }
       parameters.append((name: pname, mutable: isMut, type: paramType))
       if currentToken === .comma {
@@ -236,16 +240,12 @@ public class Parser {
       }
     }
     try match(.rightParen)
-    var returnType = try parseType()
+    let returnType = try parseType()
     // 返回类型处允许一个后缀 ref
     if currentToken === .refKeyword {
-      try match(.refKeyword)
-      returnType = .reference(returnType)
-      if currentToken === .refKeyword {
-        throw ParserError.unexpectedToken(
+      throw ParserError.unexpectedToken(
           line: lexer.currentLine, got: currentToken.description, expected: "only one 'ref' allowed"
         )
-      }
     }
     try match(.equal)
     let body = try expression()
