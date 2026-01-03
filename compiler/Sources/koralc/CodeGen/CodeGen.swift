@@ -602,8 +602,41 @@ public class CodeGen {
       case .memberAccess(let base, let memberPath):
         generateMemberAccessAssignment(base, memberPath, value)
       }
+    case .compoundAssignment(let target, let op, let value):
+      let valueResult = generateExpressionSSA(value)
+      let opStr = compoundOpToC(op)
+
+      switch target {
+      case .variable(let identifier):
+        addIndent()
+        buffer += "\(identifier.name) \(opStr) \(valueResult);\n"
+      case .memberAccess(let base, let memberPath):
+        var path = base.name
+        var currentType = base.type
+
+        for member in memberPath {
+          if case .reference(_) = currentType {
+            path += ".ptr->\(member.name)"
+          } else {
+            path += ".\(member.name)"
+          }
+          currentType = member.type
+        }
+        addIndent()
+        buffer += "\(path) \(opStr) \(valueResult);\n"
+      }
     case .expression(let expr):
       _ = generateExpressionSSA(expr)
+    }
+  }
+
+  private func compoundOpToC(_ op: CompoundAssignmentOperator) -> String {
+    switch op {
+    case .plus: return "+="
+    case .minus: return "-="
+    case .multiply: return "*="
+    case .divide: return "/="
+    case .modulo: return "%="
     }
   }
 

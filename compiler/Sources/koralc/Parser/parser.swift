@@ -318,10 +318,40 @@ public class Parser {
 
         let value = try expression()
         return .assignment(target: target, value: value)
+      } else if let op = getCompoundAssignmentOperator(currentToken) {
+        try match(currentToken)
+        let target: AssignmentTarget
+        switch expr {
+        case .identifier(let name):
+          target = .variable(name: name)
+        case .memberPath(let base, let path):
+          if case .identifier(let baseName) = base {
+            target = .memberAccess(base: baseName, memberPath: path)
+          } else {
+            throw ParserError.unexpectedToken(
+              line: lexer.currentLine, got: "invalid assignment target")
+          }
+        default:
+          throw ParserError.unexpectedToken(
+            line: lexer.currentLine, got: "invalid assignment target")
+        }
+        let value = try expression()
+        return .compoundAssignment(target: target, operator: op, value: value)
       }
       return .expression(expr)
     default:
       return .expression(try expression())
+    }
+  }
+
+  private func getCompoundAssignmentOperator(_ token: Token) -> CompoundAssignmentOperator? {
+    switch token {
+    case .plusEqual: return .plus
+    case .minusEqual: return .minus
+    case .multiplyEqual: return .multiply
+    case .divideEqual: return .divide
+    case .moduloEqual: return .modulo
+    default: return nil
     }
   }
 

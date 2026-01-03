@@ -103,6 +103,21 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
+    case .compoundAssignment(let target, let op, let value):
+      print("\(indent)CompoundAssignment: \(op)")
+      switch target {
+      case .variable(let name):
+        print("\(indent)  Target: \(name)")
+      case .memberAccess(let base, let memberPath):
+        print("\(indent)  Target: \(base).\(memberPath.joined(separator: "."))")
+      }
+      print("\(indent)  Value:")
+      withIndent {
+        withIndent {
+          printExpression(value)
+        }
+      }
+
     case .expression(let expr):
       printExpression(expr)
     }
