@@ -196,6 +196,23 @@ public func printAST(_ node: ASTNode) {
           printExpression(body)
         }
       }
+    case .letExpression(let name, let type, let value, let mutable, let body):
+      print("\(indent)LetExpression: \(mutable ? "mut " : "")\(name)")
+      if let type = type {
+        print("\(indent)  Type: \(type)")
+      }
+      print("\(indent)  Value:")
+      withIndent {
+        withIndent {
+          printExpression(value)
+        }
+      }
+      print("\(indent)  Body:")
+      withIndent {
+        withIndent {
+          printExpression(body)
+        }
+      }
     case .call(let callee, let arguments):
       print("\(indent)Call:")
       print("\(indent)  Callee:")

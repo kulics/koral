@@ -7,60 +7,60 @@ public class TypeChecker {
 
   public init(ast: ASTNode) {
     self.ast = ast
-    
+
     // Built-in functions
     // printString(message String) Void
     currentScope.define(
-        "printString",
-        .function(parameters: [Parameter(type: .string, kind: .byVal)], returns: .void),
-        mutable: false
+      "printString",
+      .function(parameters: [Parameter(type: .string, kind: .byVal)], returns: .void),
+      mutable: false
     )
     // printInt(value Int) Void
     currentScope.define(
-        "printInt",
-        .function(parameters: [Parameter(type: .int, kind: .byVal)], returns: .void),
-        mutable: false
+      "printInt",
+      .function(parameters: [Parameter(type: .int, kind: .byVal)], returns: .void),
+      mutable: false
     )
     // printBool(value Bool) Void
     currentScope.define(
-        "printBool",
-        .function(parameters: [Parameter(type: .bool, kind: .byVal)], returns: .void),
-        mutable: false
+      "printBool",
+      .function(parameters: [Parameter(type: .bool, kind: .byVal)], returns: .void),
+      mutable: false
     )
 
     // Built-in methods
     // Int.copy(self ref) Int
     extensionMethods["Int"] = [
-        "copy": Symbol(
-            name: "Int_copy",
-            type: .function(
-                parameters: [Parameter(type: .reference(inner: .int), kind: .byVal)],
-                returns: .int
-            ),
-            kind: .function
-        )
+      "copy": Symbol(
+        name: "Int_copy",
+        type: .function(
+          parameters: [Parameter(type: .reference(inner: .int), kind: .byVal)],
+          returns: .int
+        ),
+        kind: .function
+      )
     ]
     // Float.copy(self ref) Float
     extensionMethods["Float"] = [
-        "copy": Symbol(
-            name: "Float_copy",
-            type: .function(
-                parameters: [Parameter(type: .reference(inner: .float), kind: .byVal)],
-                returns: .float
-            ),
-            kind: .function
-        )
+      "copy": Symbol(
+        name: "Float_copy",
+        type: .function(
+          parameters: [Parameter(type: .reference(inner: .float), kind: .byVal)],
+          returns: .float
+        ),
+        kind: .function
+      )
     ]
     // Bool.copy(self ref) Bool
     extensionMethods["Bool"] = [
-        "copy": Symbol(
-            name: "Bool_copy",
-            type: .function(
-                parameters: [Parameter(type: .reference(inner: .bool), kind: .byVal)],
-                returns: .bool
-            ),
-            kind: .function
-        )
+      "copy": Symbol(
+        name: "Bool_copy",
+        type: .function(
+          parameters: [Parameter(type: .reference(inner: .bool), kind: .byVal)],
+          returns: .bool
+        ),
+        kind: .function
+      )
     ]
   }
 
@@ -294,6 +294,28 @@ public class TypeChecker {
       return .comparisonExpression(
         left: typedLeft, op: op, right: typedRight, type: resultType)
 
+    case .letExpression(let name, let typeNode, let value, let mutable, let body):
+      let typedValue = try inferTypedExpression(value)
+
+      if let typeNode = typeNode {
+        let type = try resolveTypeNode(typeNode)
+        if typedValue.type != type {
+          throw SemanticError.typeMismatch(
+            expected: type.description, got: typedValue.type.description)
+        }
+      }
+
+      return try withNewScope {
+        currentScope.define(name, typedValue.type, mutable: mutable)
+        let symbol = Symbol(
+          name: name, type: typedValue.type, kind: .variable(mutable ? .MutableValue : .Value))
+
+        let typedBody = try inferTypedExpression(body)
+
+        return .letExpression(
+          identifier: symbol, value: typedValue, body: typedBody, type: typedBody.type)
+      }
+
     case .ifExpression(let condition, let thenBranch, let elseBranch):
       let typedCondition = try inferTypedExpression(condition)
       if typedCondition.type != .bool {
@@ -399,7 +421,8 @@ public class TypeChecker {
             }
           }
 
-          let finalCallee: TypedExpressionNode = .methodReference(base: finalBase, method: method, type: methodType)
+          let finalCallee: TypedExpressionNode = .methodReference(
+            base: finalBase, method: method, type: methodType)
 
           var typedArguments: [TypedExpressionNode] = []
           for (arg, param) in zip(arguments, params.dropFirst()) {
@@ -518,13 +541,13 @@ public class TypeChecker {
         // Check if it is a structure to access members
         var foundMember = false
         if case .structure(_, let members) = typeToLookup {
-            if let mem = members.first(where: { $0.name == memberName }) {
-              let sym = Symbol(
-                name: mem.name, type: mem.type, kind: .variable(mem.mutable ? .MutableValue : .Value))
-              typedPath.append(sym)
-              currentType = mem.type
-              foundMember = true
-            }
+          if let mem = members.first(where: { $0.name == memberName }) {
+            let sym = Symbol(
+              name: mem.name, type: mem.type, kind: .variable(mem.mutable ? .MutableValue : .Value))
+            typedPath.append(sym)
+            currentType = mem.type
+            foundMember = true
+          }
         }
 
         if !foundMember {
@@ -540,12 +563,12 @@ public class TypeChecker {
               return .methodReference(base: base, method: methodSym, type: methodSym.type)
             }
           }
-          
+
           if case .structure(let typeName, _) = typeToLookup {
-             throw SemanticError.undefinedMember(memberName, typeName)
+            throw SemanticError.undefinedMember(memberName, typeName)
           } else {
-             throw SemanticError.invalidOperation(
-                op: "member access", type1: typeToLookup.description, type2: "")
+            throw SemanticError.invalidOperation(
+              op: "member access", type1: typeToLookup.description, type2: "")
           }
         }
       }

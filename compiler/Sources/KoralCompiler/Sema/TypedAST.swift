@@ -1,14 +1,14 @@
+// Typed AST node definitions for semantic analysis phase
+
 public enum ValueCategory {
   case lvalue
   case rvalue
 }
-
 public enum SymbolKind {
   case variable(VariableKind)
   case function
   case type
 }
-
 public enum VariableKind {
   case Value
   case MutableValue
@@ -24,7 +24,6 @@ public enum VariableKind {
     }
   }
 }
-
 public struct Symbol {
   public let name: String
   public let type: Type
@@ -50,12 +49,9 @@ public struct Symbol {
     }
   }
 }
-
-// Typed AST node definitions for semantic analysis phase
 public indirect enum TypedProgram {
   case program(globalNodes: [TypedGlobalNode])
 }
-
 public indirect enum TypedGlobalNode {
   case globalVariable(identifier: Symbol, value: TypedExpressionNode, kind: VariableKind)
   case globalFunction(
@@ -69,26 +65,23 @@ public indirect enum TypedGlobalNode {
   )
   case givenDeclaration(type: Type, methods: [TypedMethodDeclaration])
 }
-
 public struct TypedMethodDeclaration {
   public let identifier: Symbol
   public let parameters: [Symbol]
   public let body: TypedExpressionNode
   public let returnType: Type
 }
-
 public indirect enum TypedStatementNode {
   case variableDeclaration(identifier: Symbol, value: TypedExpressionNode, mutable: Bool)
   case assignment(target: TypedAssignmentTarget, value: TypedExpressionNode)
-  case compoundAssignment(target: TypedAssignmentTarget, operator: CompoundAssignmentOperator, value: TypedExpressionNode)
+  case compoundAssignment(
+    target: TypedAssignmentTarget, operator: CompoundAssignmentOperator, value: TypedExpressionNode)
   case expression(TypedExpressionNode)
 }
-
 public enum TypedAssignmentTarget {
   case variable(identifier: Symbol)
   case memberAccess(base: Symbol, memberPath: [Symbol])
 }
-
 public indirect enum TypedExpressionNode {
   case integerLiteral(value: Int, type: Type)
   case floatLiteral(value: Double, type: Type)
@@ -98,6 +91,8 @@ public indirect enum TypedExpressionNode {
     left: TypedExpressionNode, op: ArithmeticOperator, right: TypedExpressionNode, type: Type)
   case comparisonExpression(
     left: TypedExpressionNode, op: ComparisonOperator, right: TypedExpressionNode, type: Type)
+  case letExpression(
+    identifier: Symbol, value: TypedExpressionNode, body: TypedExpressionNode, type: Type)
   case andExpression(left: TypedExpressionNode, right: TypedExpressionNode, type: Type)
   case orExpression(left: TypedExpressionNode, right: TypedExpressionNode, type: Type)
   case notExpression(expression: TypedExpressionNode, type: Type)
@@ -117,7 +112,6 @@ public indirect enum TypedExpressionNode {
   case typeConstruction(identifier: Symbol, arguments: [TypedExpressionNode], type: Type)
   case memberPath(source: TypedExpressionNode, path: [Symbol])
 }
-
 extension TypedExpressionNode {
   var type: Type {
     switch self {
@@ -138,7 +132,8 @@ extension TypedExpressionNode {
       .call(_, _, let type),
       .methodReference(_, _, let type),
       .whileExpression(_, _, let type),
-      .typeConstruction(_, _, let type):
+      .typeConstruction(_, _, let type),
+      .letExpression(_, _, _, let type):
       return type
     case .variable(let identifier):
       return identifier.type

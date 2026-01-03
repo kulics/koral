@@ -120,7 +120,7 @@ public class Parser {
         try match(.identifier(pname))
         let paramType = try parseType()
         if currentToken === .refKeyword {
-           throw ParserError.unexpectedToken(
+          throw ParserError.unexpectedToken(
             line: lexer.currentLine, got: currentToken.description,
             expected: "only one 'ref' allowed")
         }
@@ -135,7 +135,7 @@ public class Parser {
       if currentToken !== .equal {
         returnType = try parseType()
         if currentToken === .refKeyword {
-           throw ParserError.unexpectedToken(
+          throw ParserError.unexpectedToken(
             line: lexer.currentLine, got: currentToken.description,
             expected: "only one 'ref' allowed")
         }
@@ -173,12 +173,12 @@ public class Parser {
 
     try match(.identifier(name))
     var type: TypeNode = .identifier(name)
-    
+
     if currentToken === .refKeyword {
       try match(.refKeyword)
       type = .reference(type)
     }
-    
+
     return type
   }
 
@@ -231,8 +231,8 @@ public class Parser {
       // 参数类型处允许一个后缀 ref
       if currentToken === .refKeyword {
         throw ParserError.unexpectedToken(
-            line: lexer.currentLine, got: currentToken.description,
-            expected: "only one 'ref' allowed")
+          line: lexer.currentLine, got: currentToken.description,
+          expected: "only one 'ref' allowed")
       }
       parameters.append((name: pname, mutable: isMut, type: paramType))
       if currentToken === .comma {
@@ -244,8 +244,8 @@ public class Parser {
     // 返回类型处允许一个后缀 ref
     if currentToken === .refKeyword {
       throw ParserError.unexpectedToken(
-          line: lexer.currentLine, got: currentToken.description, expected: "only one 'ref' allowed"
-        )
+        line: lexer.currentLine, got: currentToken.description, expected: "only one 'ref' allowed"
+      )
     }
     try match(.equal)
     let body = try expression()
@@ -355,8 +355,9 @@ public class Parser {
     }
   }
 
-  // Parse variable declaration
-  private func variableDeclaration() throws -> StatementNode {
+  private func parseLetContent() throws -> (
+    name: String, type: TypeNode?, value: ExpressionNode, mutable: Bool
+  ) {
     try match(.letKeyword)
     var mutable = false
     if currentToken === .mutKeyword {
@@ -380,7 +381,28 @@ public class Parser {
 
     try match(.equal)
     let value = try expression()
+    return (name, type, value, mutable)
+  }
+
+  // Parse variable declaration
+  private func variableDeclaration() throws -> StatementNode {
+    let (name, type, value, mutable) = try parseLetContent()
+
+    if currentToken === .thenKeyword {
+      try match(.thenKeyword)
+      let body = try expression()
+      return .expression(
+        .letExpression(name: name, type: type, value: value, mutable: mutable, body: body))
+    }
+
     return .variableDeclaration(name: name, type: type, value: value, mutable: mutable)
+  }
+
+  private func letExpression() throws -> ExpressionNode {
+    let (name, type, value, mutable) = try parseLetContent()
+    try match(.thenKeyword)
+    let body = try expression()
+    return .letExpression(name: name, type: type, value: value, mutable: mutable, body: body)
   }
 
   private func parsePostfixExpression() throws -> ExpressionNode {
@@ -431,7 +453,9 @@ public class Parser {
 
   // Parse expression rule
   private func expression() throws -> ExpressionNode {
-    if currentToken === .ifKeyword {
+    if currentToken === .letKeyword {
+      return try letExpression()
+    } else if currentToken === .ifKeyword {
       return try ifExpression()
     } else if currentToken === .whileKeyword {
       return try whileExpression()
@@ -640,6 +664,11 @@ public class Parser {
       return .booleanLiteral(value)
     case .leftBrace:
       return try blockExpression()
+    case .leftParen:
+      try match(.leftParen)
+      let expr = try expression()
+      try match(.rightParen)
+      return expr
     default:
       throw ParserError.unexpectedToken(
         line: lexer.currentLine,

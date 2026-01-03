@@ -1,13 +1,14 @@
 // Define AST node types using enums
+
+// Method declaration used inside given blocks; same shape as a global function
+
 public indirect enum ASTNode {
   case program(globalNodes: [GlobalNode])
 }
-
 public indirect enum TypeNode {
   case identifier(String)
   case reference(TypeNode)
 }
-
 public indirect enum GlobalNode {
   case globalVariableDeclaration(name: String, type: TypeNode, value: ExpressionNode, mutable: Bool)
   case globalFunctionDeclaration(
@@ -24,8 +25,6 @@ public indirect enum GlobalNode {
   // given Type { ...methods... }
   case givenDeclaration(type: TypeNode, methods: [MethodDeclaration])
 }
-
-// Method declaration used inside given blocks; same shape as a global function
 public struct MethodDeclaration {
   public let name: String
   public let typeParameters: [String]
@@ -47,14 +46,13 @@ public struct MethodDeclaration {
     self.body = body
   }
 }
-
 public indirect enum StatementNode {
   case variableDeclaration(name: String, type: TypeNode?, value: ExpressionNode, mutable: Bool)
   case assignment(target: AssignmentTarget, value: ExpressionNode)
-  case compoundAssignment(target: AssignmentTarget, operator: CompoundAssignmentOperator, value: ExpressionNode)
+  case compoundAssignment(
+    target: AssignmentTarget, operator: CompoundAssignmentOperator, value: ExpressionNode)
   case expression(ExpressionNode)
 }
-
 public enum CompoundAssignmentOperator {
   case plus
   case minus
@@ -62,12 +60,10 @@ public enum CompoundAssignmentOperator {
   case divide
   case modulo
 }
-
 public enum AssignmentTarget {
   case variable(name: String)
   case memberAccess(base: String, memberPath: [String])
 }
-
 public enum ArithmeticOperator {
   case plus
   case minus
@@ -75,7 +71,6 @@ public enum ArithmeticOperator {
   case divide
   case modulo
 }
-
 public enum ComparisonOperator {
   case equal
   case notEqual
@@ -84,7 +79,6 @@ public enum ComparisonOperator {
   case greaterEqual
   case lessEqual
 }
-
 public enum BitwiseOperator {
   case and
   case or
@@ -92,7 +86,6 @@ public enum BitwiseOperator {
   case shiftLeft
   case shiftRight
 }
-
 public indirect enum ExpressionNode {
   case integerLiteral(Int)
   case floatLiteral(Double)
@@ -115,6 +108,8 @@ public indirect enum ExpressionNode {
     condition: ExpressionNode, thenBranch: ExpressionNode, elseBranch: ExpressionNode)
   case call(callee: ExpressionNode, arguments: [ExpressionNode])
   case whileExpression(condition: ExpressionNode, body: ExpressionNode)
+  case letExpression(
+    name: String, type: TypeNode?, value: ExpressionNode, mutable: Bool, body: ExpressionNode)
   // 连续成员访问聚合为路径
   case memberPath(base: ExpressionNode, path: [String])
 }
