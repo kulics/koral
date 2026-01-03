@@ -401,14 +401,12 @@ public class Parser {
 
   // Parse expression rule
   private func expression() throws -> ExpressionNode {
-    return if currentToken === .leftBrace {
-      try blockExpression()
-    } else if currentToken === .ifKeyword {
-      try ifExpression()
+    if currentToken === .ifKeyword {
+      return try ifExpression()
     } else if currentToken === .whileKeyword {
-      try whileExpression()
+      return try whileExpression()
     } else {
-      try parseOrExpression()
+      return try parseOrExpression()
     }
   }
 
@@ -610,6 +608,8 @@ public class Parser {
     case .bool(let value):
       try match(.bool(value))
       return .booleanLiteral(value)
+    case .leftBrace:
+      return try blockExpression()
     default:
       throw ParserError.unexpectedToken(
         line: lexer.currentLine,
