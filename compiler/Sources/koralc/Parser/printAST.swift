@@ -195,6 +195,18 @@ public func printAST(_ node: ASTNode) {
           }
         }
       }
+    case .bitwiseExpression(let left, let op, let right):
+      print("\(indent)BitwiseExpression:")
+      withIndent {
+        printExpression(left)
+        print("\(indent)Operator: \(op)")
+        printExpression(right)
+      }
+    case .bitwiseNotExpression(let operand):
+      print("\(indent)BitwiseNotExpression:")
+      withIndent {
+        printExpression(operand)
+      }
     case .andExpression(let left, let right):
       print("\(indent)AndExpression:")
       withIndent {

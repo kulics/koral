@@ -424,45 +424,82 @@ public class Parser {
   }
 
   private func parseAndExpression() throws -> ExpressionNode {
-    var left = try parseNotExpression()
+    var left = try parseLogicalNotExpression()
 
     while currentToken === .andKeyword {
       try match(.andKeyword)
-      let right = try parseNotExpression()
+      let right = try parseLogicalNotExpression()
       left = .andExpression(left: left, right: right)
     }
     return left
   }
 
-  private func parseNotExpression() throws -> ExpressionNode {
+  private func parseLogicalNotExpression() throws -> ExpressionNode {
     if currentToken === .notKeyword {
       try match(.notKeyword)
-      let expr = try parseComparisonExpression()
+      let expr = try parseBitwiseOrExpression()
       return .notExpression(expr)
-    } else if currentToken === .refKeyword {
-      // 前缀 ref 表达式
-      try match(.refKeyword)
-      let expr = try parseComparisonExpression()
-      return .refExpression(expr)
     }
-    return try parseComparisonExpression()
+    return try parseBitwiseOrExpression()
+  }
+
+  private func parseBitwiseOrExpression() throws -> ExpressionNode {
+    var left = try parseBitwiseXorExpression()
+    while currentToken === .bitorKeyword {
+      try match(.bitorKeyword)
+      let right = try parseBitwiseXorExpression()
+      left = .bitwiseExpression(left: left, operator: .or, right: right)
+    }
+    return left
+  }
+
+  private func parseBitwiseXorExpression() throws -> ExpressionNode {
+    var left = try parseBitwiseAndExpression()
+    while currentToken === .bitxorKeyword {
+      try match(.bitxorKeyword)
+      let right = try parseBitwiseAndExpression()
+      left = .bitwiseExpression(left: left, operator: .xor, right: right)
+    }
+    return left
+  }
+
+  private func parseBitwiseAndExpression() throws -> ExpressionNode {
+    var left = try parseComparisonExpression()
+    while currentToken === .bitandKeyword {
+      try match(.bitandKeyword)
+      let right = try parseComparisonExpression()
+      left = .bitwiseExpression(left: left, operator: .and, right: right)
+    }
+    return left
   }
 
   // Fourth level: Comparisons
   private func parseComparisonExpression() throws -> ExpressionNode {
-    var left = try parseAdditiveExpression()
+    var left = try parseShiftExpression()
 
     while currentToken === .equalEqual || currentToken === .notEqual || currentToken === .greater
       || currentToken === .less || currentToken === .greaterEqual || currentToken === .lessEqual
     {
       let op = currentToken
       try match(op)
-      let right = try parseAdditiveExpression()
+      let right = try parseShiftExpression()
       left = .comparisonExpression(
         left: left,
         operator: tokenToComparisonOperator(op),
         right: right
       )
+    }
+    return left
+  }
+
+  private func parseShiftExpression() throws -> ExpressionNode {
+    var left = try parseAdditiveExpression()
+    while currentToken === .bitshlKeyword || currentToken === .bitshrKeyword {
+      let op = currentToken
+      try match(op)
+      let right = try parseAdditiveExpression()
+      let bitOp: BitwiseOperator = (op === .bitshlKeyword) ? .shiftLeft : .shiftRight
+      left = .bitwiseExpression(left: left, operator: bitOp, right: right)
     }
     return left
   }
@@ -486,12 +523,12 @@ public class Parser {
 
   // Sixth level: Multiplication, division, and modulo
   private func parseMultiplicativeExpression() throws -> ExpressionNode {
-    var left = try parsePostfixExpression()
+    var left = try parsePrefixExpression()
 
     while currentToken === .multiply || currentToken === .divide || currentToken === .modulo {
       let op = currentToken
       try match(op)
-      let right = try parsePostfixExpression()
+      let right = try parsePrefixExpression()
       left = .arithmeticExpression(
         left: left,
         operator: tokenToArithmeticOperator(op),
@@ -499,6 +536,19 @@ public class Parser {
       )
     }
     return left
+  }
+
+  private func parsePrefixExpression() throws -> ExpressionNode {
+    if currentToken === .refKeyword {
+      try match(.refKeyword)
+      let expr = try parsePrefixExpression()
+      return .refExpression(expr)
+    } else if currentToken === .bitnotKeyword {
+      try match(.bitnotKeyword)
+      let expr = try parsePrefixExpression()
+      return .bitwiseNotExpression(expr)
+    }
+    return try parsePostfixExpression()
   }
 
   private func ifExpression() throws -> ExpressionNode {

@@ -76,6 +76,14 @@ public enum ComparisonOperator {
   case lessEqual
 }
 
+public enum BitwiseOperator {
+  case and
+  case or
+  case xor
+  case shiftLeft
+  case shiftRight
+}
+
 public indirect enum ExpressionNode {
   case integerLiteral(Int)
   case floatLiteral(Double)
@@ -85,9 +93,12 @@ public indirect enum ExpressionNode {
     left: ExpressionNode, operator: ArithmeticOperator, right: ExpressionNode)
   case comparisonExpression(
     left: ExpressionNode, operator: ComparisonOperator, right: ExpressionNode)
+  case bitwiseExpression(
+    left: ExpressionNode, operator: BitwiseOperator, right: ExpressionNode)
   case andExpression(left: ExpressionNode, right: ExpressionNode)
   case orExpression(left: ExpressionNode, right: ExpressionNode)
   case notExpression(ExpressionNode)
+  case bitwiseNotExpression(ExpressionNode)
   case refExpression(ExpressionNode)
   case identifier(String)
   case blockExpression(statements: [StatementNode], finalExpression: ExpressionNode?)

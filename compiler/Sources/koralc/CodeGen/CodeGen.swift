@@ -485,6 +485,21 @@ public class CodeGen {
       buffer += "_Bool \(result) = !\(exprResult);\n"
       return result
 
+    case .bitwiseExpression(let left, let op, let right, _):
+      let leftResult = generateExpressionSSA(left)
+      let rightResult = generateExpressionSSA(right)
+      let result = nextTemp()
+      addIndent()
+      buffer += "int \(result) = \(leftResult) \(bitwiseOpToC(op)) \(rightResult);\n"
+      return result
+
+    case .bitwiseNotExpression(let expr, _):
+      let exprResult = generateExpressionSSA(expr)
+      let result = nextTemp()
+      addIndent()
+      buffer += "int \(result) = ~\(exprResult);\n"
+      return result
+
     case .typeConstruction(let identifier, let arguments, _):
       let result = nextTemp()
       var argResults: [String] = []
@@ -610,6 +625,16 @@ public class CodeGen {
     case .less: return "<"
     case .greaterEqual: return ">="
     case .lessEqual: return "<="
+    }
+  }
+
+  private func bitwiseOpToC(_ op: BitwiseOperator) -> String {
+    switch op {
+    case .and: return "&"
+    case .or: return "|"
+    case .xor: return "^"
+    case .shiftLeft: return "<<"
+    case .shiftRight: return ">>"
     }
   }
 

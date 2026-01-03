@@ -1,4 +1,4 @@
-public indirect enum Type {
+public indirect enum Type: CustomStringConvertible {
   case int
   case float
   case string

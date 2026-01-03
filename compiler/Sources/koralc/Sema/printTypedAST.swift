@@ -152,6 +152,28 @@ public func printTypedAST(_ node: TypedProgram) {
         }
       }
 
+    case .bitwiseExpression(let left, let op, let right, let type):
+      print("\(indent)BitwiseExpression: \(op) : \(type)")
+      withIndent {
+        print("\(indent)Left:")
+        withIndent {
+          printTypedExpression(left)
+        }
+        print("\(indent)Right:")
+        withIndent {
+          printTypedExpression(right)
+        }
+      }
+
+    case .bitwiseNotExpression(let operand, let type):
+      print("\(indent)BitwiseNotExpression: : \(type)")
+      withIndent {
+        print("\(indent)Operand:")
+        withIndent {
+          printTypedExpression(operand)
+        }
+      }
+
     case .ifExpression(let condition, let thenBranch, let elseBranch, let type):
       print("\(indent)IfExpression: \(type)")
       withIndent {
