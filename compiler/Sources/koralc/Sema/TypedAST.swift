@@ -80,6 +80,7 @@ public struct TypedMethodDeclaration {
 public indirect enum TypedStatementNode {
   case variableDeclaration(identifier: Symbol, value: TypedExpressionNode, mutable: Bool)
   case assignment(target: TypedAssignmentTarget, value: TypedExpressionNode)
+  case compoundAssignment(target: TypedAssignmentTarget, operator: CompoundAssignmentOperator, value: TypedExpressionNode)
   case expression(TypedExpressionNode)
 }
 

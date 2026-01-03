@@ -657,9 +657,88 @@ public class TypeChecker {
         )
       }
 
+    case .compoundAssignment(let target, let op, let value):
+      let typedTarget: TypedAssignmentTarget
+      let targetType: Type
+
+      switch target {
+      case .variable(let name):
+        guard let varType = currentScope.lookup(name) else {
+          throw SemanticError.undefinedVariable(name)
+        }
+        guard currentScope.isMutable(name) else {
+          throw SemanticError.assignToImmutable(name)
+        }
+        typedTarget = .variable(
+          identifier: Symbol(name: name, type: varType, kind: .variable(.MutableValue)))
+        targetType = varType
+
+      case .memberAccess(let base, let memberPath):
+        guard let baseType = currentScope.lookup(base) else {
+          throw SemanticError.undefinedVariable(base)
+        }
+
+        var currentType = baseType
+        var typedPath: [Symbol] = []
+
+        for (idx, memberName) in memberPath.enumerated() {
+          let isLast = idx == memberPath.count - 1
+          guard case .structure(let typeName, let members) = currentType else {
+            throw SemanticError.invalidOperation(
+              op: "member access",
+              type1: currentType.description,
+              type2: ""
+            )
+          }
+
+          guard let member = members.first(where: { $0.name == memberName }) else {
+            throw SemanticError.undefinedMember(memberName, typeName)
+          }
+          if isLast {
+            guard member.mutable else {
+              throw SemanticError.immutableFieldAssignment(
+                type: typeName, field: memberName)
+            }
+          }
+          let memberIdentifier = Symbol(
+            name: memberName, type: member.type,
+            kind: .variable(member.mutable ? .MutableValue : .Value))
+          typedPath.append((memberIdentifier))
+
+          currentType = member.type
+        }
+
+        typedTarget = .memberAccess(
+          base: Symbol(name: base, type: baseType, kind: .variable(.Value)),
+          memberPath: typedPath
+        )
+        targetType = typedPath.last!.type
+      }
+
+      let typedValue = try inferTypedExpression(value)
+      let resultType = try checkArithmeticOp(
+        compoundOpToArithmeticOp(op), targetType, typedValue.type)
+
+      if resultType != targetType {
+        throw SemanticError.typeMismatch(
+          expected: targetType.description, got: resultType.description)
+      }
+
+      return .compoundAssignment(target: typedTarget, operator: op, value: typedValue)
+
     case .expression(let expr):
       let typedExpr = try inferTypedExpression(expr)
       return .expression(typedExpr)
+    }
+  }
+
+  private func compoundOpToArithmeticOp(_ op: CompoundAssignmentOperator) -> ArithmeticOperator {
+    switch op {
+    case .plus: return .plus
+    case .minus: return .minus
+    case .multiply: return .multiply
+    case .divide: return .divide
+    case .modulo: return .modulo
     }
   }
 

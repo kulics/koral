@@ -90,6 +90,26 @@ public func printTypedAST(_ node: TypedProgram) {
         printTypedExpression(value)
       }
 
+    case .compoundAssignment(let target, let op, let value):
+      print("\(indent)CompoundAssignment: \(op)")
+
+      switch target {
+      case .variable(let identifier):
+        print("\(indent)  Target: \(identifier.name): \(identifier.type)")
+      case .memberAccess(let base, let memberPath):
+        print("\(indent)  Target: MemberAccess Chain")
+        print("\(indent)    Base: \(base.name): \(base.type)")
+        print("\(indent)    Path: \(memberPath.map { $0.name }.joined(separator: "."))")
+        for (index, item) in memberPath.enumerated() {
+          print("\(indent)      Member[\(index)]: \(item.name): \(item.type)")
+        }
+      }
+
+      print("\(indent)  Value:")
+      withIndent {
+        printTypedExpression(value)
+      }
+
     case .expression(let expr):
       printTypedExpression(expr)
     }
