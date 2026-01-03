@@ -6,8 +6,10 @@ enum DriverCommand: String {
   case emitC = "emit-c"
 }
 
-class Driver {
-  func run(args: [String]) {
+public class Driver {
+  public init() {}
+
+  public func run(args: [String]) {
     guard args.count > 1 else {
       printUsage()
       return
@@ -84,14 +86,13 @@ class Driver {
 
   func process(file: String, mode: DriverCommand, outputDir: String? = nil) throws {
     let fileManager = FileManager.default
-    let currentPath = fileManager.currentDirectoryPath
-    let inputURL = URL(fileURLWithPath: file, relativeTo: URL(fileURLWithPath: currentPath))
+    let inputURL = URL(fileURLWithPath: file)
     
     let baseName = inputURL.deletingPathExtension().lastPathComponent
     
     let outputDirectory: URL
     if let outDir = outputDir {
-        outputDirectory = URL(fileURLWithPath: outDir, relativeTo: URL(fileURLWithPath: currentPath))
+        outputDirectory = URL(fileURLWithPath: outDir)
         // Create output directory if it doesn't exist
         if !fileManager.fileExists(atPath: outputDirectory.path) {
             try fileManager.createDirectory(at: outputDirectory, withIntermediateDirectories: true, attributes: nil)
@@ -101,7 +102,7 @@ class Driver {
     }
 
     // 1. Compile Koral to C
-    let koralSource = try String(contentsOf: inputURL, encoding: .utf8)
+    let koralSource = try String(contentsOfFile: file, encoding: .utf8)
 
     let lexer = Lexer(input: koralSource)
     let parser = Parser(lexer: lexer)
@@ -126,8 +127,8 @@ class Driver {
     // Suppress warnings to keep output clean
     let clangArgs = [cFileURL.path, "-o", exeURL.path, "-Wno-everything"]
     
-    // print("Invoking clang...")
-    let clangResult = try runSubprocess(executable: "/usr/bin/clang", args: clangArgs)
+    let clangPath = findExecutable("clang") ?? "/usr/bin/clang"
+    let clangResult = try runSubprocess(executable: clangPath, args: clangArgs)
     if clangResult != 0 {
       throw NSError(
         domain: "Driver", code: 1,
@@ -156,6 +157,30 @@ class Driver {
     try process.run()
     process.waitUntilExit()
     return process.terminationStatus
+  }
+
+  func findExecutable(_ name: String) -> String? {
+    #if os(Windows)
+    let pathSeparator: Character = ";"
+    let extensions = [".exe", ".cmd", ".bat", ""]
+    #else
+    let pathSeparator: Character = ":"
+    let extensions = [""]
+    #endif
+    
+    let pathEnv = ProcessInfo.processInfo.environment["PATH"] ?? ""
+    let paths = pathEnv.split(separator: pathSeparator).map(String.init)
+    
+    for path in paths {
+        let dirURL = URL(fileURLWithPath: path)
+        for ext in extensions {
+            let exeURL = dirURL.appendingPathComponent(name + ext)
+            if FileManager.default.fileExists(atPath: exeURL.path) {
+                return exeURL.path
+            }
+        }
+    }
+    return nil
   }
 
   func printUsage() {

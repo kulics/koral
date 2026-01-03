@@ -63,7 +63,10 @@ class IntegrationTests: XCTestCase {
 
         // 3. Run compiler
         // We use the built binary directly to avoid swift run lock
-        let koralcBinary = projectRoot.appendingPathComponent(".build/debug/koralc")
+        var koralcBinary = projectRoot.appendingPathComponent(".build/debug/koralc")
+        #if os(Windows)
+        koralcBinary.appendPathExtension("exe")
+        #endif
         
         guard FileManager.default.fileExists(atPath: koralcBinary.path) else {
             XCTFail("koralc binary not found at \(koralcBinary.path). Please build first.")
