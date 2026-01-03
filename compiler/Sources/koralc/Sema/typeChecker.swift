@@ -7,6 +7,26 @@ public class TypeChecker {
 
   public init(ast: ASTNode) {
     self.ast = ast
+    
+    // Built-in functions
+    // printLine(message String) Void
+    currentScope.define(
+        "printLine",
+        .function(parameters: [Parameter(type: .string, kind: .byVal)], returns: .void),
+        mutable: false
+    )
+    // printInt(value Int) Void
+    currentScope.define(
+        "printInt",
+        .function(parameters: [Parameter(type: .int, kind: .byVal)], returns: .void),
+        mutable: false
+    )
+    // printBool(value Bool) Void
+    currentScope.define(
+        "printBool",
+        .function(parameters: [Parameter(type: .bool, kind: .byVal)], returns: .void),
+        mutable: false
+    )
   }
 
   // Changed to return TypedProgram
