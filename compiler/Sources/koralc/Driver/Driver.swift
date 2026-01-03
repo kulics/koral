@@ -18,21 +18,28 @@ class Driver {
 
     let filePath: String
     let mode: DriverCommand
+    var remainingArgs: [String] = []
 
     if let cmd = command {
-      // koralc <command> <file>
+      // koralc <command> <file> [options]
       guard args.count > 2 else {
         print("Error: Missing file path for command '\(cmd.rawValue)'")
         return
       }
       mode = cmd
       filePath = args[2]
+      if args.count > 3 {
+        remainingArgs = Array(args[3...])
+      }
     } else {
-      // koralc <file> (default to build)
+      // koralc <file> [options] (default to build)
       // Check if the first argument looks like a file
       if commandStr.hasSuffix(".koral") {
         mode = .build
         filePath = commandStr
+        if args.count > 2 {
+          remainingArgs = Array(args[2...])
+        }
       } else {
         print("Unknown command or file: \(commandStr)")
         printUsage()
@@ -40,8 +47,26 @@ class Driver {
       }
     }
 
+    // Parse options
+    var outputDir: String?
+    var i = 0
+    while i < remainingArgs.count {
+      let arg = remainingArgs[i]
+      if arg == "-o" || arg == "--output" {
+        if i + 1 < remainingArgs.count {
+          outputDir = remainingArgs[i + 1]
+          i += 2
+        } else {
+          print("Error: Missing path for -o option")
+          exit(1)
+        }
+      } else {
+        i += 1
+      }
+    }
+
     do {
-      try process(file: filePath, mode: mode)
+      try process(file: filePath, mode: mode, outputDir: outputDir)
     } catch let error as ParserError {
       print("Parser Error: \(error)")
       exit(1)
@@ -57,13 +82,23 @@ class Driver {
     }
   }
 
-  func process(file: String, mode: DriverCommand) throws {
+  func process(file: String, mode: DriverCommand, outputDir: String? = nil) throws {
     let fileManager = FileManager.default
     let currentPath = fileManager.currentDirectoryPath
     let inputURL = URL(fileURLWithPath: file, relativeTo: URL(fileURLWithPath: currentPath))
     
     let baseName = inputURL.deletingPathExtension().lastPathComponent
-    let directory = inputURL.deletingLastPathComponent()
+    
+    let outputDirectory: URL
+    if let outDir = outputDir {
+        outputDirectory = URL(fileURLWithPath: outDir, relativeTo: URL(fileURLWithPath: currentPath))
+        // Create output directory if it doesn't exist
+        if !fileManager.fileExists(atPath: outputDirectory.path) {
+            try fileManager.createDirectory(at: outputDirectory, withIntermediateDirectories: true, attributes: nil)
+        }
+    } else {
+        outputDirectory = inputURL.deletingLastPathComponent()
+    }
 
     // 1. Compile Koral to C
     let koralSource = try String(contentsOf: inputURL, encoding: .utf8)
@@ -78,7 +113,7 @@ class Driver {
     let codeGen = CodeGen(ast: typedAST)
     let cSource = codeGen.generate()
 
-    let cFileURL = directory.appendingPathComponent("\(baseName).c")
+    let cFileURL = outputDirectory.appendingPathComponent("\(baseName).c")
     try cSource.write(to: cFileURL, atomically: true, encoding: .utf8)
 
     if mode == .emitC {
@@ -86,7 +121,7 @@ class Driver {
     }
 
     // 2. Compile C to Executable using Clang
-    let exeURL = directory.appendingPathComponent(baseName)
+    let exeURL = outputDirectory.appendingPathComponent(baseName)
     
     // Suppress warnings to keep output clean
     let clangArgs = [cFileURL.path, "-o", exeURL.path, "-Wno-everything"]
