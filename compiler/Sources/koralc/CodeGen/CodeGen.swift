@@ -21,6 +21,9 @@ public class CodeGen {
       if case .structure(let typeName, _) = type {
         addIndent()
         buffer += "\(typeName)_drop(\(name));\n"
+      } else if case .reference(_) = type {
+        addIndent()
+        buffer += "koral_release(\(name).control);\n"
       }
     }
   }
@@ -41,6 +44,33 @@ public class CodeGen {
       struct Ref_Bool { _Bool* ptr; void* control; };
       struct Ref_String { const char** ptr; void* control; };
       struct Ref_Void { void* ptr; void* control; };
+
+      typedef void (*Koral_Dtor)(void*);
+
+      struct Koral_Control {
+          _Atomic int count;
+          Koral_Dtor dtor;
+          void* ptr;
+      };
+
+      void koral_retain(void* raw_control) {
+          if (!raw_control) return;
+          struct Koral_Control* control = (struct Koral_Control*)raw_control;
+          atomic_fetch_add(&control->count, 1);
+      }
+
+      void koral_release(void* raw_control) {
+          if (!raw_control) return;
+          struct Koral_Control* control = (struct Koral_Control*)raw_control;
+          int prev = atomic_fetch_sub(&control->count, 1);
+          if (prev == 1) {
+              if (control->dtor) {
+                  control->dtor(control->ptr);
+              }
+              free(control->ptr);
+              free(control);
+          }
+      }
 
       """
 
@@ -170,6 +200,13 @@ public class CodeGen {
       } else {
         buffer += "\(getCType(body.type)) \(result) = \(resultVar);\n"
       }
+    } else if case .reference(_) = body.type {
+      addIndent()
+      buffer += "\(getCType(body.type)) \(result) = \(resultVar);\n"
+      if body.valueCategory == .lvalue {
+        addIndent()
+        buffer += "koral_retain(\(result).control);\n"
+      }
     } else if body.type != .void {
       addIndent()
       buffer += "\(getCType(body.type)) \(result) = \(resultVar);\n"
@@ -252,6 +289,10 @@ public class CodeGen {
           let thenResult = generateExpressionSSA(thenBranch)
           addIndent()
           buffer += "\(resultVar) = \(thenResult);\n"
+          if case .reference(_) = type, thenBranch.valueCategory == .lvalue {
+            addIndent()
+            buffer += "koral_retain(\(resultVar).control);\n"
+          }
           popScope()
         }
         addIndent()
@@ -261,6 +302,10 @@ public class CodeGen {
           let elseResult = generateExpressionSSA(elseBranch)
           addIndent()
           buffer += "\(resultVar) = \(elseResult);\n"
+          if case .reference(_) = type, elseBranch.valueCategory == .lvalue {
+            addIndent()
+            buffer += "koral_retain(\(resultVar).control);\n"
+          }
           popScope()
         }
         addIndent()
@@ -274,14 +319,16 @@ public class CodeGen {
       fatalError("Method reference not in call position is not supported yet")
     case .referenceExpression(let inner, let type):
       // 取引用：构造 Ref 结构体
-      let lvaluePath = buildLValuePath(inner)
+      let (lvaluePath, controlPath) = buildRefComponents(inner)
       let result = nextTemp()
       addIndent()
       buffer += "\(getCType(type)) \(result);\n"
       addIndent()
       buffer += "\(result).ptr = &\(lvaluePath);\n"
       addIndent()
-      buffer += "\(result).control = NULL;\n"
+      buffer += "\(result).control = \(controlPath);\n"
+      addIndent()
+      buffer += "koral_retain(\(result).control);\n"
       return result
 
     case .whileExpression(let condition, let body, _):
@@ -401,20 +448,32 @@ public class CodeGen {
     }
   }
 
-  // 构建可作为左值的访问路径字符串，仅支持变量与成员访问
-  private func buildLValuePath(_ expr: TypedExpressionNode) -> String {
+  // 构建引用组件：返回 (访问路径, 控制块指针)
+  private func buildRefComponents(_ expr: TypedExpressionNode) -> (path: String, control: String) {
     switch expr {
     case .variable(let identifier):
-      return identifier.name
+      let path = identifier.name
+      if case .reference(_) = identifier.type {
+        return (path, "\(path).control")
+      } else {
+        return (path, "NULL")
+      }
     case .memberPath(let source, let path):
-      var base = buildLValuePath(source)
+      var (basePath, baseControl) = buildRefComponents(source)
       var curType = source.type
+
       for member in path {
-        let op: String = { if case .reference(_) = curType { return ".ptr->" } else { return "." } }()
-        base += "\(op)\(member.name)"
+        if case .reference(_) = curType {
+          // Dereferencing a ref type updates the control block
+          baseControl = "\(basePath).control"
+          basePath = "\(basePath).ptr->\(member.name)"
+        } else {
+          // Accessing member of value type keeps the same control block
+          basePath += ".\(member.name)"
+        }
         curType = member.type
       }
-      return base
+      return (basePath, baseControl)
     default:
       fatalError("ref requires lvalue (variable or memberAccess)")
     }
@@ -439,6 +498,14 @@ public class CodeGen {
             buffer += "\(typeName)_copy(&\(valueResult));\n"
           } else {
             buffer += "\(valueResult);\n"
+          }
+          registerVariable(identifier.name, identifier.type)
+        } else if case .reference(_) = identifier.type {
+          addIndent()
+          buffer += "\(getCType(identifier.type)) \(identifier.name) = \(valueResult);\n"
+          if value.valueCategory == .lvalue {
+            addIndent()
+            buffer += "koral_retain(\(identifier.name).control);\n"
           }
           registerVariable(identifier.name, identifier.type)
         } else {
@@ -567,6 +634,10 @@ public class CodeGen {
       }
     }
     buffer += "}\n\n"
+
+    buffer += "void \(name)_drop_ptr(void* self) {\n"
+    buffer += "    \(name)_drop(*(struct \(name)*)self);\n"
+    buffer += "}\n\n"
   }
 
   private func generateBlockScope(
@@ -586,6 +657,10 @@ public class CodeGen {
         let resultVar = nextTemp()
         addIndent()
         buffer += "\(getCType(finalExpr.type)) \(resultVar) = \(temp);\n"
+        if case .reference(_) = finalExpr.type, finalExpr.valueCategory == .lvalue {
+          addIndent()
+          buffer += "koral_retain(\(resultVar).control);\n"
+        }
         result = resultVar
       }
     }
@@ -613,6 +688,15 @@ public class CodeGen {
         buffer += "\(typeName)_drop(\(identifier.name));\n"
         addIndent()
         buffer += "\(identifier.name) = \(valueResult);\n"
+      }
+    } else if case .reference(_) = identifier.type {
+      addIndent()
+      buffer += "koral_release(\(identifier.name).control);\n"
+      addIndent()
+      buffer += "\(identifier.name) = \(valueResult);\n"
+      if value.valueCategory == .lvalue {
+        addIndent()
+        buffer += "koral_retain(\(identifier.name).control);\n"
       }
     } else {
       addIndent()
@@ -693,6 +777,12 @@ public class CodeGen {
         } else {
           paramResults.append(result)
         }
+      } else if case .reference(_) = arg.type {
+        if arg.valueCategory == .lvalue {
+          addIndent()
+          buffer += "koral_retain(\(result).control);\n"
+        }
+        paramResults.append(result)
       } else {
         paramResults.append(result)
       }
