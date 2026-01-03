@@ -72,6 +72,18 @@ public class CodeGen {
           }
       }
 
+      void printLine(const char* message) {
+          printf("%s\\n", message);
+      }
+
+      void printInt(int value) {
+          printf("%d\\n", value);
+      }
+
+      void printBool(_Bool value) {
+          printf("%s\\n", value ? "true" : "false");
+      }
+
       """
 
     // 生成程序体
