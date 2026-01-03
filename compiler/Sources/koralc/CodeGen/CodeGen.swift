@@ -72,7 +72,7 @@ public class CodeGen {
           }
       }
 
-      void printLine(const char* message) {
+      void printString(const char* message) {
           printf("%s\\n", message);
       }
 
