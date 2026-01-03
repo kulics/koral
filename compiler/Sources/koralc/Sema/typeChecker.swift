@@ -9,9 +9,9 @@ public class TypeChecker {
     self.ast = ast
     
     // Built-in functions
-    // printLine(message String) Void
+    // printString(message String) Void
     currentScope.define(
-        "printLine",
+        "printString",
         .function(parameters: [Parameter(type: .string, kind: .byVal)], returns: .void),
         mutable: false
     )
