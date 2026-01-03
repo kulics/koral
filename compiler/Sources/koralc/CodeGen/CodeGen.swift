@@ -84,6 +84,18 @@ public class CodeGen {
           printf("%s\\n", value ? "true" : "false");
       }
 
+      int Int_copy(struct Ref_Int ref) {
+          return *ref.ptr;
+      }
+
+      double Float_copy(struct Ref_Float ref) {
+          return *ref.ptr;
+      }
+
+      _Bool Bool_copy(struct Ref_Bool ref) {
+          return *ref.ptr;
+      }
+
       """
 
     // 生成程序体
