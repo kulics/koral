@@ -75,6 +75,8 @@ public class Parser {
     } else if currentToken === .typeKeyword {
       try match(.typeKeyword)
 
+      let typeParams = try parseTypeParameters()
+
       guard case .identifier(let name) = currentToken else {
         throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
       }
@@ -84,7 +86,7 @@ public class Parser {
       }
 
       try match(.identifier(name))
-      return try parseTypeDeclaration(name)
+      return try parseTypeDeclaration(name, typeParams: typeParams)
     } else if currentToken === .givenKeyword {
       return try parseGivenDeclaration()
     } else {
@@ -162,6 +164,31 @@ public class Parser {
 
   // Parse type identifier
   private func parseType() throws -> TypeNode {
+    if currentToken === .leftBracket {
+      try match(.leftBracket)
+      var args: [TypeNode] = []
+      while currentToken !== .rightBracket {
+        args.append(try parseType())
+        if currentToken === .comma {
+          try match(.comma)
+        }
+      }
+      try match(.rightBracket)
+
+      guard case .identifier(let name) = currentToken else {
+        throw ParserError.expectedTypeIdentifier(
+          line: lexer.currentLine, got: currentToken.description)
+      }
+      try match(.identifier(name))
+      
+      var type = TypeNode.generic(base: name, args: args)
+      if currentToken === .refKeyword {
+        try match(.refKeyword)
+        type = .reference(type)
+      }
+      return type
+    }
+
     guard case .identifier(let name) = currentToken else {
       throw ParserError.expectedTypeIdentifier(
         line: lexer.currentLine, got: currentToken.description)
@@ -259,7 +286,7 @@ public class Parser {
   }
 
   // Parse type declaration
-  private func parseTypeDeclaration(_ name: String) throws -> GlobalNode {
+  private func parseTypeDeclaration(_ name: String, typeParams: [String]) throws -> GlobalNode {
     try match(.leftParen)
     var parameters: [(name: String, type: TypeNode, mutable: Bool)] = []
     while currentToken !== .rightParen {
@@ -286,6 +313,7 @@ public class Parser {
 
     return .globalTypeDeclaration(
       name: name,
+      typeParameters: typeParams,
       parameters: parameters
     )
   }

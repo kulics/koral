@@ -8,6 +8,7 @@ public indirect enum ASTNode {
 public indirect enum TypeNode {
   case identifier(String)
   case reference(TypeNode)
+  case generic(base: String, args: [TypeNode])
 }
 public indirect enum GlobalNode {
   case globalVariableDeclaration(name: String, type: TypeNode, value: ExpressionNode, mutable: Bool)
@@ -20,6 +21,7 @@ public indirect enum GlobalNode {
   )
   case globalTypeDeclaration(
     name: String,
+    typeParameters: [String],
     parameters: [(name: String, type: TypeNode, mutable: Bool)]
   )
   // given Type { ...methods... }

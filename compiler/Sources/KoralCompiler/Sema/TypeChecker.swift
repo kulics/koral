@@ -191,10 +191,15 @@ public class TypeChecker {
 
       return .givenDeclaration(type: type, methods: typedMethods)
 
-    case .globalTypeDeclaration(let name, let parameters):
+    case .globalTypeDeclaration(let name, let typeParameters, let parameters):
       // Check if type already exists
       if currentScope.lookupType(name) != nil {
         throw SemanticError.duplicateTypeDefinition(name)
+      }
+      
+      if !typeParameters.isEmpty {
+          // TODO: Register generic template
+          print("Warning: Generic type parameters for \(name) are ignored for now.")
       }
 
       let params = try parameters.map { param -> Symbol in
@@ -777,6 +782,8 @@ public class TypeChecker {
       // 仅支持一层，在 parser 已限制；此处直接映射到 Type.reference
       let base = try resolveTypeNode(inner)
       return .reference(inner: base)
+    case .generic(let base, _):
+      throw SemanticError.undefinedType("\(base)<...> (Generics not implemented yet)")
     }
   }
 

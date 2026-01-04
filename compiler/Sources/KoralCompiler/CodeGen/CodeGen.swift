@@ -35,66 +35,66 @@ public class CodeGen {
   public func generate() -> String {
     buffer = """
       #include <stdio.h>
-#include <stdlib.h>
-#include <stdatomic.h>
+      #include <stdlib.h>
+      #include <stdatomic.h>
 
-// Basic Ref types
-struct Ref_Int { int* ptr; void* control; };
-struct Ref_Float { double* ptr; void* control; };
-struct Ref_Bool { _Bool* ptr; void* control; };
-struct Ref_String { const char** ptr; void* control; };
-struct Ref_Void { void* ptr; void* control; };
+      // Basic Ref types
+      struct Ref_Int { int* ptr; void* control; };
+      struct Ref_Float { double* ptr; void* control; };
+      struct Ref_Bool { _Bool* ptr; void* control; };
+      struct Ref_String { const char** ptr; void* control; };
+      struct Ref_Void { void* ptr; void* control; };
 
-typedef void (*Koral_Dtor)(void*);
+      typedef void (*Koral_Dtor)(void*);
 
-struct Koral_Control {
-    _Atomic int count;
-    Koral_Dtor dtor;
-    void* ptr;
-};
+      struct Koral_Control {
+          _Atomic int count;
+          Koral_Dtor dtor;
+          void* ptr;
+      };
 
-void koral_retain(void* raw_control) {
-    if (!raw_control) return;
-    struct Koral_Control* control = (struct Koral_Control*)raw_control;
-    atomic_fetch_add(&control->count, 1);
-}
+      void koral_retain(void* raw_control) {
+          if (!raw_control) return;
+          struct Koral_Control* control = (struct Koral_Control*)raw_control;
+          atomic_fetch_add(&control->count, 1);
+      }
 
-void koral_release(void* raw_control) {
-    if (!raw_control) return;
-    struct Koral_Control* control = (struct Koral_Control*)raw_control;
-    int prev = atomic_fetch_sub(&control->count, 1);
-    if (prev == 1) {
-        if (control->dtor) {
-            control->dtor(control->ptr);
-        }
-        free(control->ptr);
-        free(control);
-    }
-}
+      void koral_release(void* raw_control) {
+          if (!raw_control) return;
+          struct Koral_Control* control = (struct Koral_Control*)raw_control;
+          int prev = atomic_fetch_sub(&control->count, 1);
+          if (prev == 1) {
+              if (control->dtor) {
+                  control->dtor(control->ptr);
+              }
+              free(control->ptr);
+              free(control);
+          }
+      }
 
-void printString(const char* message) {
-    printf("%s\\n", message);
-}
+      void printString(const char* message) {
+          printf("%s\\n", message);
+      }
 
-void printInt(int value) {
-    printf("%d\\n", value);
-}
+      void printInt(int value) {
+          printf("%d\\n", value);
+      }
 
-void printBool(_Bool value) {
-    printf("%s\\n", value ? "true" : "false");
-}
+      void printBool(_Bool value) {
+          printf("%s\\n", value ? "true" : "false");
+      }
 
-int Int_copy(struct Ref_Int ref) {
-    return *ref.ptr;
-}
+      int Int_copy(struct Ref_Int ref) {
+          return *ref.ptr;
+      }
 
-double Float_copy(struct Ref_Float ref) {
-    return *ref.ptr;
-}
+      double Float_copy(struct Ref_Float ref) {
+          return *ref.ptr;
+      }
 
-_Bool Bool_copy(struct Ref_Bool ref) {
-    return *ref.ptr;
-}
+      _Bool Bool_copy(struct Ref_Bool ref) {
+          return *ref.ptr;
+      }
 
       """
 
@@ -731,6 +731,8 @@ _Bool Bool_copy(struct Ref_Bool ref) {
       fatalError("Function type not supported in getCType")
     case .structure(let name, _):
       return "struct \(name)"
+    case .genericParameter(let name):
+      fatalError("Generic parameter \(name) should be resolved before CodeGen")
     case .reference(let inner):
       switch inner {
       case .int: return "struct Ref_Int"
@@ -741,6 +743,7 @@ _Bool Bool_copy(struct Ref_Bool ref) {
       case .structure(let name, _): return "struct Ref_\(name)"
       case .function(_, _): fatalError("Ref to function not supported")
       case .reference(_): fatalError("Ref to ref not supported")
+      case .genericParameter(_): fatalError("Ref to generic param not supported")
       }
     }
   }
