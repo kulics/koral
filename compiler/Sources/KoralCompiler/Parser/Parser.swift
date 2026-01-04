@@ -692,11 +692,6 @@ public class Parser {
       return .booleanLiteral(value)
     case .leftBrace:
       return try blockExpression()
-    case .leftParen:
-      try match(.leftParen)
-      let expr = try expression()
-      try match(.rightParen)
-      return expr
     default:
       throw ParserError.unexpectedToken(
         line: lexer.currentLine,
