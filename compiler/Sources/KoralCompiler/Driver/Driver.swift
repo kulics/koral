@@ -125,7 +125,13 @@ public class Driver {
     let exeURL = outputDirectory.appendingPathComponent(baseName)
     
     // Suppress warnings to keep output clean
-    let clangArgs = [cFileURL.path, "-o", exeURL.path, "-Wno-everything"]
+    var clangArgs = [cFileURL.path, "-o", exeURL.path, "-Wno-everything"]
+
+    #if os(macOS)
+    if let sdkPath = getSDKPath() {
+        clangArgs.append(contentsOf: ["-isysroot", sdkPath])
+    }
+    #endif
     
     let clangPath = findExecutable("clang") ?? "/usr/bin/clang"
     let clangResult = try runSubprocess(executable: clangPath, args: clangArgs)
@@ -147,6 +153,28 @@ public class Driver {
           exit(runResult)
       }
     }
+  }
+
+  func getSDKPath() -> String? {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+    process.arguments = ["--show-sdk-path"]
+    
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    
+    do {
+        try process.run()
+        process.waitUntilExit()
+        
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        if let output = String(data: data, encoding: .utf8) {
+            return output.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    } catch {
+        return nil
+    }
+    return nil
   }
 
   func runSubprocess(executable: String, args: [String]) throws -> Int32 {
