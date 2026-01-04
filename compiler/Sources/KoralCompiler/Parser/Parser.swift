@@ -121,11 +121,6 @@ public class Parser {
         }
         try match(.identifier(pname))
         let paramType = try parseType()
-        if currentToken === .refKeyword {
-          throw ParserError.unexpectedToken(
-            line: lexer.currentLine, got: currentToken.description,
-            expected: "only one 'ref' allowed")
-        }
         parameters.append((name: pname, mutable: isMut, type: paramType))
         if currentToken === .comma {
           try match(.comma)
@@ -136,11 +131,6 @@ public class Parser {
       var returnType: TypeNode = .identifier("Void")
       if currentToken !== .equal {
         returnType = try parseType()
-        if currentToken === .refKeyword {
-          throw ParserError.unexpectedToken(
-            line: lexer.currentLine, got: currentToken.description,
-            expected: "only one 'ref' allowed")
-        }
       }
 
       try match(.equal)
@@ -255,24 +245,16 @@ public class Parser {
       }
       try match(.identifier(pname))
       let paramType = try parseType()
-      // 参数类型处允许一个后缀 ref
-      if currentToken === .refKeyword {
-        throw ParserError.unexpectedToken(
-          line: lexer.currentLine, got: currentToken.description,
-          expected: "only one 'ref' allowed")
-      }
       parameters.append((name: pname, mutable: isMut, type: paramType))
       if currentToken === .comma {
         try match(.comma)
       }
     }
     try match(.rightParen)
-    let returnType = try parseType()
-    // 返回类型处允许一个后缀 ref
-    if currentToken === .refKeyword {
-      throw ParserError.unexpectedToken(
-        line: lexer.currentLine, got: currentToken.description, expected: "only one 'ref' allowed"
-      )
+    
+    var returnType: TypeNode = .identifier("Void")
+    if currentToken !== .equal {
+      returnType = try parseType()
     }
     try match(.equal)
     let body = try expression()
@@ -284,7 +266,7 @@ public class Parser {
       body: body
     )
   }
-
+    
   // Parse type declaration
   private func parseTypeDeclaration(_ name: String, typeParams: [String]) throws -> GlobalNode {
     try match(.leftParen)
@@ -692,6 +674,30 @@ public class Parser {
       return .booleanLiteral(value)
     case .leftBrace:
       return try blockExpression()
+    case .leftBracket:
+      try match(.leftBracket)
+      var args: [TypeNode] = []
+      while currentToken !== .rightBracket {
+        args.append(try parseType())
+        if currentToken === .comma {
+          try match(.comma)
+        }
+      }
+      try match(.rightBracket)
+
+      guard case .identifier(let name) = currentToken else {
+        throw ParserError.expectedIdentifier(
+          line: lexer.currentLine, got: currentToken.description)
+      }
+      try match(.identifier(name))
+      
+      // Check if it's a call
+      if currentToken === .leftParen {
+        let callee = ExpressionNode.genericInstantiation(base: name, args: args)
+        return try parseCall(callee)
+      }
+      
+      return .genericInstantiation(base: name, args: args)
     default:
       throw ParserError.unexpectedToken(
         line: lexer.currentLine,

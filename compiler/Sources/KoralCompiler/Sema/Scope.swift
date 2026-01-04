@@ -1,7 +1,14 @@
+public struct GenericTemplate {
+  public let name: String
+  public let typeParameters: [String]
+  public let parameters: [(name: String, type: TypeNode, mutable: Bool)]
+}
+
 public class Scope {
   private var symbols: [String: (Type, Bool)]  // (type, mutability)
   private let parent: Scope?
   private var types: [String: Type] = [:]
+  private var genericTemplates: [String: GenericTemplate] = [:]
 
   public init(parent: Scope? = nil) {
     self.symbols = [:]
@@ -10,6 +17,17 @@ public class Scope {
 
   public func define(_ name: String, _ type: Type, mutable: Bool) {
     symbols[name] = (type, mutable)
+  }
+
+  public func defineGenericTemplate(_ name: String, template: GenericTemplate) {
+    genericTemplates[name] = template
+  }
+
+  public func lookupGenericTemplate(_ name: String) -> GenericTemplate? {
+    if let template = genericTemplates[name] {
+      return template
+    }
+    return parent?.lookupGenericTemplate(name)
   }
 
   public func lookup(_ name: String) -> Type? {

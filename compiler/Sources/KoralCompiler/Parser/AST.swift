@@ -114,4 +114,5 @@ public indirect enum ExpressionNode {
     name: String, type: TypeNode?, value: ExpressionNode, mutable: Bool, body: ExpressionNode)
   // 连续成员访问聚合为路径
   case memberPath(base: ExpressionNode, path: [String])
+  case genericInstantiation(base: String, args: [TypeNode])
 }

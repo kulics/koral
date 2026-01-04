@@ -4,6 +4,13 @@ public class TypeChecker {
   private let ast: ASTNode
   // TypeName -> MethodName -> MethodSymbol
   private var extensionMethods: [String: [String: Symbol]] = [:]
+  
+  // Cache for instantiated types: "TemplateName<Arg1,Arg2>" -> Type
+  private var instantiatedTypes: [String: Type] = [:]
+  // Generated global nodes for instantiated types (canonical versions)
+  private var extraGlobalNodes: [TypedGlobalNode] = []
+  // Track which layout names have been generated to avoid duplicates
+  private var generatedLayouts: Set<String> = []
 
   public init(ast: ASTNode) {
     self.ast = ast
@@ -73,6 +80,8 @@ public class TypeChecker {
         let typedDecl = try checkGlobalDeclaration(decl)
         typedDeclarations.append(typedDecl)
       }
+      // Append instantiated generic types
+      typedDeclarations.append(contentsOf: extraGlobalNodes)
       return .program(globalNodes: typedDeclarations)
     }
   }
@@ -107,7 +116,8 @@ public class TypeChecker {
           // Define the new type
           let typeType = Type.structure(
             name: typeParam,
-            members: []
+            members: [],
+            isGenericInstantiation: false
           )
           try currentScope.defineType(typeParam, type: typeType)
         }
@@ -130,7 +140,7 @@ public class TypeChecker {
 
     case .givenDeclaration(let typeNode, let methods):
       let type = try resolveTypeNode(typeNode)
-      guard case .structure(let typeName, _) = type else {
+      guard case .structure(let typeName, _, _) = type else {
         throw SemanticError.invalidOperation(op: "given", type1: type.description, type2: "")
       }
 
@@ -139,7 +149,7 @@ public class TypeChecker {
       for method in methods {
         let (methodType, typedBody, params, returnType) = try withNewScope {
           for typeParam in method.typeParameters {
-            let typeType = Type.structure(name: typeParam, members: [])
+            let typeType = Type.structure(name: typeParam, members: [], isGenericInstantiation: false)
             try currentScope.defineType(typeParam, type: typeType)
           }
 
@@ -198,8 +208,9 @@ public class TypeChecker {
       }
       
       if !typeParameters.isEmpty {
-          // TODO: Register generic template
-          print("Warning: Generic type parameters for \(name) are ignored for now.")
+          let template = GenericTemplate(name: name, typeParameters: typeParameters, parameters: parameters)
+          currentScope.defineGenericTemplate(name, template: template)
+          return .genericTypeTemplate(name: name)
       }
 
       let params = try parameters.map { param -> Symbol in
@@ -212,7 +223,8 @@ public class TypeChecker {
       // Define the new type
       let typeType = Type.structure(
         name: name,
-        members: params.map { (name: $0.name, type: $0.type, mutable: $0.isMutable()) }
+        members: params.map { (name: $0.name, type: $0.type, mutable: $0.isMutable()) },
+        isGenericInstantiation: false
       )
       try currentScope.defineType(name, type: typeType)
 
@@ -356,10 +368,49 @@ public class TypeChecker {
       )
 
     case .call(let callee, let arguments):
+      // Check if callee is a generic instantiation (Constructor call)
+      if case .genericInstantiation(let base, let args) = callee {
+        guard let template = currentScope.lookupGenericTemplate(base) else {
+          throw SemanticError.undefinedType(base)
+        }
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        let instantiatedType = try instantiate(template: template, args: resolvedArgs)
+
+        guard case .structure(let typeName, let members, _) = instantiatedType else {
+          fatalError("Instantiated type must be a structure")
+        }
+
+        if arguments.count != members.count {
+          throw SemanticError.invalidArgumentCount(
+            function: typeName,
+            expected: members.count,
+            got: arguments.count
+          )
+        }
+
+        var typedArguments: [TypedExpressionNode] = []
+        for (arg, expectedMember) in zip(arguments, members) {
+          let typedArg = try inferTypedExpression(arg)
+          if typedArg.type != expectedMember.type {
+            throw SemanticError.typeMismatch(
+              expected: expectedMember.type.description,
+              got: typedArg.type.description
+            )
+          }
+          typedArguments.append(typedArg)
+        }
+
+        return .typeConstruction(
+          identifier: Symbol(name: typeName, type: instantiatedType, kind: .type),
+          arguments: typedArguments,
+          type: instantiatedType
+        )
+      }
+
       // Check if it is a constructor call
       if case .identifier(let name) = callee {
         if let type = currentScope.lookupType(name) {
-          guard case .structure(_, let parameters) = type else {
+          guard case .structure(_, let parameters, _) = type else {
             throw SemanticError.invalidOperation(
               op: "construct", type1: type.description, type2: "")
           }
@@ -545,7 +596,7 @@ public class TypeChecker {
 
         // Check if it is a structure to access members
         var foundMember = false
-        if case .structure(_, let members) = typeToLookup {
+        if case .structure(_, let members, _) = typeToLookup {
           if let mem = members.first(where: { $0.name == memberName }) {
             let sym = Symbol(
               name: mem.name, type: mem.type, kind: .variable(mem.mutable ? .MutableValue : .Value))
@@ -569,7 +620,7 @@ public class TypeChecker {
             }
           }
 
-          if case .structure(let typeName, _) = typeToLookup {
+          if case .structure(let typeName, _, _) = typeToLookup {
             throw SemanticError.undefinedMember(memberName, typeName)
           } else {
             throw SemanticError.invalidOperation(
@@ -578,6 +629,9 @@ public class TypeChecker {
         }
       }
       return .memberPath(source: typedBase, path: typedPath)
+
+    case .genericInstantiation(let base, _):
+      throw SemanticError.invalidOperation(op: "use type as value", type1: base, type2: "")
     }
   }
 
@@ -639,7 +693,7 @@ public class TypeChecker {
         for (idx, memberName) in memberPath.enumerated() {
           let isLast = idx == memberPath.count - 1
           // Check that current type is a user-defined type
-          guard case .structure(let typeName, let members) = currentType else {
+          guard case .structure(let typeName, let members, _) = currentType else {
             throw SemanticError.invalidOperation(
               op: "member access",
               type1: currentType.description,
@@ -711,7 +765,7 @@ public class TypeChecker {
 
         for (idx, memberName) in memberPath.enumerated() {
           let isLast = idx == memberPath.count - 1
-          guard case .structure(let typeName, let members) = currentType else {
+          guard case .structure(let typeName, let members, _) = currentType else {
             throw SemanticError.invalidOperation(
               op: "member access",
               type1: currentType.description,
@@ -782,9 +836,85 @@ public class TypeChecker {
       // 仅支持一层，在 parser 已限制；此处直接映射到 Type.reference
       let base = try resolveTypeNode(inner)
       return .reference(inner: base)
-    case .generic(let base, _):
-      throw SemanticError.undefinedType("\(base)<...> (Generics not implemented yet)")
+    case .generic(let base, let args):
+      guard let template = currentScope.lookupGenericTemplate(base) else {
+        throw SemanticError.undefinedType(base)
+      }
+      let resolvedArgs = try args.map { try resolveTypeNode($0) }
+      return try instantiate(template: template, args: resolvedArgs)
     }
+  }
+
+  private func instantiate(template: GenericTemplate, args: [Type]) throws -> Type {
+    guard template.typeParameters.count == args.count else {
+      throw SemanticError.typeMismatch(
+        expected: "\(template.typeParameters.count) generic arguments",
+        got: "\(args.count)"
+      )
+    }
+
+    let key = "\(template.name)<\(args.map { $0.description }.joined(separator: ","))>"
+    if let cached = instantiatedTypes[key] {
+      return cached
+    }
+
+    // 1. Resolve members with specific types
+    var resolvedMembers: [(name: String, type: Type, mutable: Bool)] = []
+    try withNewScope {
+      for (i, paramName) in template.typeParameters.enumerated() {
+        try currentScope.defineType(paramName, type: args[i])
+      }
+      for param in template.parameters {
+        let fieldType = try resolveTypeNode(param.type)
+        resolvedMembers.append((name: param.name, type: fieldType, mutable: param.mutable))
+      }
+    }
+
+    // 2. Calculate Layout Key and Layout Name
+    // Layout Name = TemplateName + "_" + ArgLayoutKeys
+    let argLayoutKeys = args.map { $0.layoutKey }.joined(separator: "_")
+    let layoutName = "\(template.name)_\(argLayoutKeys)"
+
+    // 3. Create Specific Type
+    // We use the layoutName as the struct name so CodeGen uses it.
+    // But this means Box<Int> and Box<Float> have different names Box_I and Box_F.
+    // And Box<Ref<Int>> and Box<Ref<String>> have SAME name Box_R.
+    let specificType = Type.structure(name: layoutName, members: resolvedMembers, isGenericInstantiation: true)
+    instantiatedTypes[key] = specificType
+
+    // 4. Register Global Type Declaration if not already generated
+    if !generatedLayouts.contains(layoutName) {
+      generatedLayouts.insert(layoutName)
+
+      // Create Canonical Members for the C struct definition
+      // Map T -> Canonical(T)
+      var canonicalMembers: [(name: String, type: Type, mutable: Bool)] = []
+      try withNewScope {
+        for (i, paramName) in template.typeParameters.enumerated() {
+          try currentScope.defineType(paramName, type: args[i].canonical)
+        }
+        for param in template.parameters {
+          let fieldType = try resolveTypeNode(param.type)
+          canonicalMembers.append((name: param.name, type: fieldType, mutable: param.mutable))
+        }
+      }
+
+      // Create Canonical Type
+      let canonicalType = Type.structure(name: layoutName, members: canonicalMembers, isGenericInstantiation: true)
+      
+      // Convert to TypedGlobalNode
+      let params = canonicalMembers.map { param in
+        Symbol(
+          name: param.name, type: param.type,
+          kind: param.mutable ? .variable(.MutableValue) : .variable(.Value))
+      }
+      
+      // We use a dummy symbol for the type identifier, only name matters for CodeGen
+      let typeSymbol = Symbol(name: layoutName, type: canonicalType, kind: .type)
+      extraGlobalNodes.append(.globalTypeDeclaration(identifier: typeSymbol, parameters: params))
+    }
+
+    return specificType
   }
 
   private func withNewScope<R>(_ body: () throws -> R) rethrows -> R {
