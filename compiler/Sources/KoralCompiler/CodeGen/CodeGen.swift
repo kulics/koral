@@ -564,6 +564,10 @@ public class CodeGen {
             buffer += "\(getCType(arg.type)) \(argCopy) = \(argResult);\n"
           }
           argResults.append(argCopy)
+        } else if case .reference(_) = arg.type {
+          addIndent()
+          buffer += "koral_retain(\(argResult).control);\n"
+          argResults.append(argResult)
         } else {
           argResults.append(argResult)
         }
@@ -791,11 +795,13 @@ public class CodeGen {
     withIndent {
       buffer += "    struct \(name) result;\n"
       for param in parameters {
-        buffer += "    result.\(param.name) = "
         if case .structure(let fieldTypeName, _) = param.type {
-          buffer += "\(fieldTypeName)_copy(&self->\(param.name));\n"
+          buffer += "    result.\(param.name) = \(fieldTypeName)_copy(&self->\(param.name));\n"
+        } else if case .reference(_) = param.type {
+          buffer += "    result.\(param.name) = self->\(param.name);\n"
+          buffer += "    koral_retain(result.\(param.name).control);\n"
         } else {
-          buffer += "self->\(param.name);\n"
+          buffer += "    result.\(param.name) = self->\(param.name);\n"
         }
       }
       buffer += "    return result;\n"
@@ -807,6 +813,8 @@ public class CodeGen {
       for param in parameters {
         if case .structure(let fieldTypeName, _) = param.type {
           buffer += "    \(fieldTypeName)_drop(self.\(param.name));\n"
+        } else if case .reference(_) = param.type {
+          buffer += "    koral_release(self.\(param.name).control);\n"
         }
       }
     }
