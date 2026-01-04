@@ -5,7 +5,7 @@ public indirect enum Type: CustomStringConvertible {
   case bool
   case void
   case function(parameters: [Parameter], returns: Type)
-  case structure(name: String, members: [(name: String, type: Type, mutable: Bool)])
+  case structure(name: String, members: [(name: String, type: Type, mutable: Bool)], isGenericInstantiation: Bool)
   case reference(inner: Type)
   case genericParameter(name: String)
 
@@ -19,7 +19,7 @@ public indirect enum Type: CustomStringConvertible {
     case .function(let params, let returns):
       let paramTypes = params.map { $0.type.description }.joined(separator: ", ")
       return "(\(paramTypes)) -> \(returns)"
-    case .structure(let name, _):
+    case .structure(let name, _, _):
       return name
     case .reference(let inner):
       return "\(inner.description) ref"
@@ -37,11 +37,27 @@ public indirect enum Type: CustomStringConvertible {
     case .void: return "V"
     case .function: return "Fn"
     case .reference: return "R"
-    case .structure(_, let members):
+    case .structure(_, let members, _):
       let memberKeys = members.map { $0.type.layoutKey }.joined(separator: "_")
       return "Struct_\(memberKeys)"
     case .genericParameter(let name):
       return "Param_\(name)"
+    }
+  }
+
+  public var canonical: Type {
+    switch self {
+    case .int, .float, .bool, .void, .string: return self
+    case .reference(_): return .reference(inner: .void)
+    case .structure(let name, let members, let isGenericInstantiation):
+      if isGenericInstantiation {
+        let newMembers = members.map { ($0.name, $0.type.canonical, $0.mutable) }
+        return .structure(name: name, members: newMembers, isGenericInstantiation: true)
+      } else {
+        return self
+      }
+    case .function: return self
+    case .genericParameter: return self
     }
   }
 }
@@ -88,7 +104,7 @@ extension Type: Equatable {
     case (.function(let lParams, let lReturns), .function(let rParams, let rReturns)):
       return lParams == rParams && lReturns == rReturns
 
-    case (.structure(let lName, _), .structure(let rName, _)):
+    case (.structure(let lName, _, _), .structure(let rName, _, _)):
       return lName == rName
     case (.reference(let l), .reference(let r)):
       return l == r

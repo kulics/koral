@@ -63,6 +63,7 @@ public indirect enum TypedGlobalNode {
     identifier: Symbol,
     parameters: [Symbol]
   )
+  case genericTypeTemplate(name: String)
   case givenDeclaration(type: Type, methods: [TypedMethodDeclaration])
 }
 public struct TypedMethodDeclaration {

@@ -18,7 +18,7 @@ public class CodeGen {
     let vars = lifetimeScopeStack.removeLast()
     // 反向遍历变量列表,对可变类型变量调用 destroy
     for (name, type) in vars.reversed() {
-      if case .structure(let typeName, _) = type {
+      if case .structure(let typeName, _, _) = type {
         addIndent()
         buffer += "\(typeName)_drop(\(name));\n"
       } else if case .reference(_) = type {
@@ -217,7 +217,7 @@ public class CodeGen {
     }
     let resultVar = generateExpressionSSA(body)
     let result = nextTemp()
-    if case .structure(let typeName, _) = body.type {
+    if case .structure(let typeName, _, _) = body.type {
       addIndent()
       if body.valueCategory == .lvalue {
         buffer += "\(getCType(body.type)) \(result) = \(typeName)_copy(&\(resultVar));\n"
@@ -303,7 +303,7 @@ public class CodeGen {
         let bodyResultVar = generateExpressionSSA(body)
 
         if type != .void {
-          if case .structure(let typeName, _) = type {
+          if case .structure(let typeName, _, _) = type {
             addIndent()
             if body.valueCategory == .lvalue {
               buffer += "\(resultVar) = \(typeName)_copy(&\(bodyResultVar));\n"
@@ -419,7 +419,7 @@ public class CodeGen {
         buffer += "\(result).ptr = (\(innerCType)*)malloc(sizeof(\(innerCType)));\n"
 
         // 2. 初始化数据
-        if case .structure(let typeName, _) = innerType {
+        if case .structure(let typeName, _, _) = innerType {
           addIndent()
           buffer += "*\(result).ptr = \(typeName)_copy(&\(innerResult));\n"
         } else {
@@ -436,7 +436,7 @@ public class CodeGen {
         buffer += "((struct Koral_Control*)\(result).control)->ptr = \(result).ptr;\n"
 
         // 4. 设置析构函数
-        if case .structure(let typeName, _) = innerType {
+        if case .structure(let typeName, _, _) = innerType {
           addIndent()
           buffer += "((struct Koral_Control*)\(result).control)->dtor = \(typeName)_drop_ptr;\n"
         } else {
@@ -552,10 +552,20 @@ public class CodeGen {
     case .typeConstruction(let identifier, let arguments, _):
       let result = nextTemp()
       var argResults: [String] = []
-      for arg in arguments {
+      
+      // Get canonical members to check for casts
+      let canonicalMembers: [(name: String, type: Type, mutable: Bool)]
+      if case .structure(_, let members, _) = identifier.type.canonical {
+          canonicalMembers = members
+      } else {
+          canonicalMembers = []
+      }
+      
+      for (index, arg) in arguments.enumerated() {
         let argResult = generateExpressionSSA(arg)
+        var finalArg = argResult
 
-        if case .structure(let typeName, _) = arg.type {
+        if case .structure(let typeName, _, _) = arg.type {
           addIndent()
           let argCopy = nextTemp()
           if arg.valueCategory == .lvalue {
@@ -563,14 +573,32 @@ public class CodeGen {
           } else {
             buffer += "\(getCType(arg.type)) \(argCopy) = \(argResult);\n"
           }
-          argResults.append(argCopy)
+          finalArg = argCopy
         } else if case .reference(_) = arg.type {
           addIndent()
           buffer += "koral_retain(\(argResult).control);\n"
-          argResults.append(argResult)
-        } else {
-          argResults.append(argResult)
+          finalArg = argResult
         }
+        
+        // Check for cast
+        if index < canonicalMembers.count {
+            let canonicalType = canonicalMembers[index].type
+            if canonicalType != arg.type {
+                let targetCType = getCType(canonicalType)
+                // Cast the value to the canonical type
+                // For structs (like Ref_Int -> Ref_Void), we need to cast the value.
+                // Since we are initializing a struct member, we can cast the expression.
+                // `(struct Ref_Void) { ... }`? No, C doesn't support casting structs easily unless they are pointers.
+                // But here we are initializing `struct Box_R { struct Ref_Void val; }`.
+                // We are providing `{ arg }`.
+                // If `arg` is `struct Ref_Int`, we can't just cast it to `struct Ref_Void`.
+                // We need to reinterpret cast? `*(struct Ref_Void*)&arg`.
+                
+                finalArg = "*(\(targetCType)*)&(\(finalArg))"
+            }
+        }
+        
+        argResults.append(finalArg)
       }
 
       addIndent()
@@ -626,7 +654,7 @@ public class CodeGen {
       // void 类型的值不能赋给变量
       if value.type != .void {
         // 如果是可变类型，增加引用计数
-        if case .structure(let typeName, _) = identifier.type {
+        if case .structure(let typeName, _, _) = identifier.type {
           addIndent()
           buffer += "\(getCType(identifier.type)) \(identifier.name) = "
           if value.valueCategory == .lvalue {
@@ -733,7 +761,7 @@ public class CodeGen {
     case .void: return "void"
     case .function(_, _):
       fatalError("Function type not supported in getCType")
-    case .structure(let name, _):
+    case .structure(let name, _, _):
       return "struct \(name)"
     case .genericParameter(let name):
       fatalError("Generic parameter \(name) should be resolved before CodeGen")
@@ -744,7 +772,7 @@ public class CodeGen {
       case .bool: return "struct Ref_Bool"
       case .string: return "struct Ref_String"
       case .void: return "struct Ref_Void"
-      case .structure(let name, _): return "struct Ref_\(name)"
+      case .structure(let name, _, _): return "struct Ref_\(name)"
       case .function(_, _): fatalError("Ref to function not supported")
       case .reference(_): fatalError("Ref to ref not supported")
       case .genericParameter(_): fatalError("Ref to generic param not supported")
@@ -795,7 +823,7 @@ public class CodeGen {
     withIndent {
       buffer += "    struct \(name) result;\n"
       for param in parameters {
-        if case .structure(let fieldTypeName, _) = param.type {
+        if case .structure(let fieldTypeName, _, _) = param.type {
           buffer += "    result.\(param.name) = \(fieldTypeName)_copy(&self->\(param.name));\n"
         } else if case .reference(_) = param.type {
           buffer += "    result.\(param.name) = self->\(param.name);\n"
@@ -811,7 +839,7 @@ public class CodeGen {
     buffer += "void \(name)_drop(struct \(name) self) {\n"
     withIndent {
       for param in parameters {
-        if case .structure(let fieldTypeName, _) = param.type {
+        if case .structure(let fieldTypeName, _, _) = param.type {
           buffer += "    \(fieldTypeName)_drop(self.\(param.name));\n"
         } else if case .reference(_) = param.type {
           buffer += "    koral_release(self.\(param.name).control);\n"
@@ -859,7 +887,7 @@ public class CodeGen {
       return
     }
     let valueResult = generateExpressionSSA(value)
-    if case .structure(let typeName, _) = identifier.type {
+    if case .structure(let typeName, _, _) = identifier.type {
       if value.valueCategory == .lvalue {
         let copyResult = nextTemp()
         addIndent()
@@ -906,9 +934,22 @@ public class CodeGen {
       let memberName = item.name
       let memberType = item.type
       let op: String = { if case .reference(_) = curType { return ".ptr->" } else { return "." } }()
-      accessPath += "\(op)\(memberName)"
+      
+      var memberAccess = "\(accessPath)\(op)\(memberName)"
+      
+      if case .structure(_, let members, _) = curType.canonical {
+        if let canonicalMember = members.first(where: { $0.name == memberName }) {
+          if canonicalMember.type != memberType {
+            let targetCType = getCType(memberType)
+            memberAccess = "*(\(targetCType)*)&(\(memberAccess))"
+          }
+        }
+      }
+      
+      accessPath = memberAccess
       curType = memberType
-      if isLast, case .structure(let typeName, _) = memberType {
+      
+      if isLast, case .structure(let typeName, _, _) = memberType {
         if value.valueCategory == .lvalue {
           let copyResult = nextTemp()
           addIndent()
@@ -953,7 +994,7 @@ public class CodeGen {
     // struct类型参数传递用值，isValue==false 的 struct 参数自动递归 copy
     for arg in arguments {
       let result = generateExpressionSSA(arg)
-      if case .structure(let typeName, _) = arg.type {
+      if case .structure(let typeName, _, _) = arg.type {
         if arg.valueCategory == .lvalue {
           let copyResult = nextTemp()
           addIndent()
@@ -993,7 +1034,19 @@ public class CodeGen {
     var curType = source.type
     for member in path {
       let op: String = { if case .reference(_) = curType { return ".ptr->" } else { return "." } }()
-      access += "\(op)\(member.name)"
+      
+      var memberAccess = "\(access)\(op)\(member.name)"
+      
+      if case .structure(_, let members, _) = curType.canonical {
+        if let canonicalMember = members.first(where: { $0.name == member.name }) {
+          if canonicalMember.type != member.type {
+            let targetCType = getCType(member.type)
+            memberAccess = "*(\(targetCType)*)&(\(memberAccess))"
+          }
+        }
+      }
+      
+      access = memberAccess
       curType = member.type
     }
     let result = nextTemp()

@@ -286,6 +286,10 @@ public func printAST(_ node: ASTNode) {
       withIndent {
         printExpression(base)
       }
+
+    case .genericInstantiation(let base, let args):
+      print("\(indent)GenericInstantiation: \(base)")
+      print("\(indent)  Args: \(args)")
     }
   }
 
