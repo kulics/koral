@@ -7,6 +7,7 @@ public indirect enum Type: CustomStringConvertible {
   case function(parameters: [Parameter], returns: Type)
   case structure(name: String, members: [(name: String, type: Type, mutable: Bool)])
   case reference(inner: Type)
+  case genericParameter(name: String)
 
   public var description: String {
     switch self {
@@ -22,6 +23,25 @@ public indirect enum Type: CustomStringConvertible {
       return name
     case .reference(let inner):
       return "\(inner.description) ref"
+    case .genericParameter(let name):
+      return name
+    }
+  }
+
+  public var layoutKey: String {
+    switch self {
+    case .int: return "I"
+    case .float: return "F"
+    case .string: return "S"
+    case .bool: return "B"
+    case .void: return "V"
+    case .function: return "Fn"
+    case .reference: return "R"
+    case .structure(_, let members):
+      let memberKeys = members.map { $0.type.layoutKey }.joined(separator: "_")
+      return "Struct_\(memberKeys)"
+    case .genericParameter(let name):
+      return "Param_\(name)"
     }
   }
 }
@@ -71,6 +91,8 @@ extension Type: Equatable {
     case (.structure(let lName, _), .structure(let rName, _)):
       return lName == rName
     case (.reference(let l), .reference(let r)):
+      return l == r
+    case (.genericParameter(let l), .genericParameter(let r)):
       return l == r
 
     default:
