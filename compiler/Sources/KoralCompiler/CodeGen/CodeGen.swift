@@ -220,7 +220,7 @@ public class CodeGen {
     if case .structure(let typeName, _, _) = body.type {
       addIndent()
       if body.valueCategory == .lvalue {
-        buffer += "\(getCType(body.type)) \(result) = \(typeName)_copy(&\(resultVar));\n"
+        buffer += "\(getCType(body.type)) \(result) = \(typeName)__copy(&\(resultVar));\n"
       } else {
         buffer += "\(getCType(body.type)) \(result) = \(resultVar);\n"
       }
@@ -306,7 +306,7 @@ public class CodeGen {
           if case .structure(let typeName, _, _) = type {
             addIndent()
             if body.valueCategory == .lvalue {
-              buffer += "\(resultVar) = \(typeName)_copy(&\(bodyResultVar));\n"
+              buffer += "\(resultVar) = \(typeName)__copy(&\(bodyResultVar));\n"
             } else {
               buffer += "\(resultVar) = \(bodyResultVar);\n"
             }
@@ -421,7 +421,7 @@ public class CodeGen {
         // 2. 初始化数据
         if case .structure(let typeName, _, _) = innerType {
           addIndent()
-          buffer += "*\(result).ptr = \(typeName)_copy(&\(innerResult));\n"
+          buffer += "*\(result).ptr = \(typeName)__copy(&\(innerResult));\n"
         } else {
           addIndent()
           buffer += "*\(result).ptr = \(innerResult);\n"
@@ -569,7 +569,7 @@ public class CodeGen {
           addIndent()
           let argCopy = nextTemp()
           if arg.valueCategory == .lvalue {
-            buffer += "\(getCType(arg.type)) \(argCopy) = \(typeName)_copy(&\(argResult));\n"
+            buffer += "\(getCType(arg.type)) \(argCopy) = \(typeName)__copy(&\(argResult));\n"
           } else {
             buffer += "\(getCType(arg.type)) \(argCopy) = \(argResult);\n"
           }
@@ -658,7 +658,7 @@ public class CodeGen {
           addIndent()
           buffer += "\(getCType(identifier.type)) \(identifier.name) = "
           if value.valueCategory == .lvalue {
-            buffer += "\(typeName)_copy(&\(valueResult));\n"
+            buffer += "\(typeName)__copy(&\(valueResult));\n"
           } else {
             buffer += "\(valueResult);\n"
           }
@@ -819,12 +819,12 @@ public class CodeGen {
     buffer += "struct Ref_\(name) { struct \(name)* ptr; void* control; };\n\n"
 
     // 自动生成 copy/drop，仅 isValue==false 的类型需要递归处理
-    buffer += "struct \(name) \(name)_copy(const struct \(name) *self) {\n"
+    buffer += "struct \(name) \(name)__copy(const struct \(name) *self) {\n"
     withIndent {
       buffer += "    struct \(name) result;\n"
       for param in parameters {
         if case .structure(let fieldTypeName, _, _) = param.type {
-          buffer += "    result.\(param.name) = \(fieldTypeName)_copy(&self->\(param.name));\n"
+          buffer += "    result.\(param.name) = \(fieldTypeName)__copy(&self->\(param.name));\n"
         } else if case .reference(_) = param.type {
           buffer += "    result.\(param.name) = self->\(param.name);\n"
           buffer += "    koral_retain(result.\(param.name).control);\n"
@@ -891,7 +891,7 @@ public class CodeGen {
       if value.valueCategory == .lvalue {
         let copyResult = nextTemp()
         addIndent()
-        buffer += "\(getCType(value.type)) \(copyResult) = \(typeName)_copy(&\(valueResult));\n"
+        buffer += "\(getCType(value.type)) \(copyResult) = \(typeName)__copy(&\(valueResult));\n"
         addIndent()
         buffer += "\(typeName)_drop(\(identifier.name));\n"
         addIndent()
@@ -953,7 +953,7 @@ public class CodeGen {
         if value.valueCategory == .lvalue {
           let copyResult = nextTemp()
           addIndent()
-          buffer += "\(getCType(value.type)) \(copyResult) = \(typeName)_copy(&\(valueResult));\n"
+          buffer += "\(getCType(value.type)) \(copyResult) = \(typeName)__copy(&\(valueResult));\n"
           addIndent()
           buffer += "\(typeName)_drop(\(accessPath));\n"
           addIndent()
@@ -998,7 +998,7 @@ public class CodeGen {
         if arg.valueCategory == .lvalue {
           let copyResult = nextTemp()
           addIndent()
-          buffer += "\(getCType(arg.type)) \(copyResult) = \(typeName)_copy(&\(result));\n"
+          buffer += "\(getCType(arg.type)) \(copyResult) = \(typeName)__copy(&\(result));\n"
           paramResults.append(copyResult)
         } else {
           paramResults.append(result)
