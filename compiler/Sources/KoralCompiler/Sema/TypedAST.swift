@@ -65,6 +65,7 @@ public indirect enum TypedGlobalNode {
   )
   case genericTypeTemplate(name: String)
   case givenDeclaration(type: Type, methods: [TypedMethodDeclaration])
+  case genericFunctionTemplate(name: String)
 }
 public struct TypedMethodDeclaration {
   public let identifier: Symbol

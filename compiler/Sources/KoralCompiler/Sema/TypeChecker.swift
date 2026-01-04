@@ -7,6 +7,8 @@ public class TypeChecker {
   
   // Cache for instantiated types: "TemplateName<Arg1,Arg2>" -> Type
   private var instantiatedTypes: [String: Type] = [:]
+  // Cache for instantiated functions: "TemplateName<Arg1,Arg2>" -> (MangledName, Type)
+  private var instantiatedFunctions: [String: (String, Type)] = [:]
   // Generated global nodes for instantiated types (canonical versions)
   private var extraGlobalNodes: [TypedGlobalNode] = []
   // Track which layout names have been generated to avoid duplicates
@@ -110,6 +112,19 @@ public class TypeChecker {
       guard case nil = currentScope.lookup(name) else {
         throw SemanticError.duplicateDefinition(name)
       }
+
+      if !typeParameters.isEmpty {
+        let template = GenericFunctionTemplate(
+          name: name,
+          typeParameters: typeParameters,
+          parameters: parameters,
+          returnType: returnTypeNode,
+          body: body
+        )
+        currentScope.defineGenericFunctionTemplate(name, template: template)
+        return .genericFunctionTemplate(name: name)
+      }
+
       let (functionType, typedBody, params) = try withNewScope {
         // introduce generic type
         for typeParam in typeParameters {
@@ -368,47 +383,120 @@ public class TypeChecker {
       )
 
     case .call(let callee, let arguments):
-      // Check if callee is a generic instantiation (Constructor call)
+      // Check if callee is a generic instantiation (Constructor call or Function call)
       if case .genericInstantiation(let base, let args) = callee {
-        guard let template = currentScope.lookupGenericTemplate(base) else {
+        if let template = currentScope.lookupGenericTemplate(base) {
+          let resolvedArgs = try args.map { try resolveTypeNode($0) }
+          let instantiatedType = try instantiate(template: template, args: resolvedArgs)
+
+          guard case .structure(let typeName, let members, _) = instantiatedType else {
+            fatalError("Instantiated type must be a structure")
+          }
+
+          if arguments.count != members.count {
+            throw SemanticError.invalidArgumentCount(
+              function: typeName,
+              expected: members.count,
+              got: arguments.count
+            )
+          }
+
+          var typedArguments: [TypedExpressionNode] = []
+          for (arg, expectedMember) in zip(arguments, members) {
+            let typedArg = try inferTypedExpression(arg)
+            if typedArg.type != expectedMember.type {
+              throw SemanticError.typeMismatch(
+                expected: expectedMember.type.description,
+                got: typedArg.type.description
+              )
+            }
+            typedArguments.append(typedArg)
+          }
+
+          return .typeConstruction(
+            identifier: Symbol(name: typeName, type: instantiatedType, kind: .type),
+            arguments: typedArguments,
+            type: instantiatedType
+          )
+        } else if let template = currentScope.lookupGenericFunctionTemplate(base) {
+          let resolvedArgs = try args.map { try resolveTypeNode($0) }
+          let (instantiatedName, instantiatedType) = try instantiateFunction(template: template, args: resolvedArgs)
+
+          guard case .function(let params, let returns) = instantiatedType else {
+            fatalError("Instantiated function must have function type")
+          }
+
+          if arguments.count != params.count {
+            throw SemanticError.invalidArgumentCount(
+              function: instantiatedName,
+              expected: params.count,
+              got: arguments.count
+            )
+          }
+
+          var typedArguments: [TypedExpressionNode] = []
+          for (arg, expectedParam) in zip(arguments, params) {
+            let typedArg = try inferTypedExpression(arg)
+            if typedArg.type != expectedParam.type {
+              throw SemanticError.typeMismatch(
+                expected: expectedParam.type.description,
+                got: typedArg.type.description
+              )
+            }
+            typedArguments.append(typedArg)
+          }
+
+          return .call(
+            callee: .variable(identifier: Symbol(name: instantiatedName, type: instantiatedType, kind: .function)),
+            arguments: typedArguments,
+            type: returns
+          )
+        } else {
           throw SemanticError.undefinedType(base)
         }
-        let resolvedArgs = try args.map { try resolveTypeNode($0) }
-        let instantiatedType = try instantiate(template: template, args: resolvedArgs)
+      }
 
-        guard case .structure(let typeName, let members, _) = instantiatedType else {
-          fatalError("Instantiated type must be a structure")
-        }
+      // Check if it is a constructor call OR implicit generic function call
+      if case .identifier(let name) = callee {
+        // 1. Try Generic Function Template (Implicit Inference)
+        if let template = currentScope.lookupGenericFunctionTemplate(name) {
+          var inferred: [String: Type] = [:]
 
-        if arguments.count != members.count {
-          throw SemanticError.invalidArgumentCount(
-            function: typeName,
-            expected: members.count,
-            got: arguments.count
+          if arguments.count != template.parameters.count {
+            throw SemanticError.invalidArgumentCount(
+              function: name,
+              expected: template.parameters.count,
+              got: arguments.count
+            )
+          }
+
+          var typedArguments: [TypedExpressionNode] = []
+          for (argExpr, param) in zip(arguments, template.parameters) {
+            let typedArg = try inferTypedExpression(argExpr)
+            typedArguments.append(typedArg)
+            try unify(node: param.type, type: typedArg.type, inferred: &inferred, typeParams: template.typeParameters)
+          }
+
+          let resolvedArgs = try template.typeParameters.map { param -> Type in
+            guard let type = inferred[param] else {
+              throw SemanticError.typeMismatch(expected: "inferred type for \(param)", got: "unknown")
+            }
+            return type
+          }
+
+          let (instantiatedName, instantiatedType) = try instantiateFunction(
+            template: template, args: resolvedArgs)
+
+          guard case .function(_, let returns) = instantiatedType else { fatalError() }
+
+          return .call(
+            callee: .variable(
+              identifier: Symbol(name: instantiatedName, type: instantiatedType, kind: .function)),
+            arguments: typedArguments,
+            type: returns
           )
         }
 
-        var typedArguments: [TypedExpressionNode] = []
-        for (arg, expectedMember) in zip(arguments, members) {
-          let typedArg = try inferTypedExpression(arg)
-          if typedArg.type != expectedMember.type {
-            throw SemanticError.typeMismatch(
-              expected: expectedMember.type.description,
-              got: typedArg.type.description
-            )
-          }
-          typedArguments.append(typedArg)
-        }
-
-        return .typeConstruction(
-          identifier: Symbol(name: typeName, type: instantiatedType, kind: .type),
-          arguments: typedArguments,
-          type: instantiatedType
-        )
-      }
-
-      // Check if it is a constructor call
-      if case .identifier(let name) = callee {
         if let type = currentScope.lookupType(name) {
           guard case .structure(_, let parameters, _) = type else {
             throw SemanticError.invalidOperation(
@@ -915,6 +1003,78 @@ public class TypeChecker {
     }
 
     return specificType
+  }
+
+  private func instantiateFunction(template: GenericFunctionTemplate, args: [Type]) throws -> (String, Type) {
+    guard template.typeParameters.count == args.count else {
+      throw SemanticError.typeMismatch(
+        expected: "\(template.typeParameters.count) generic arguments",
+        got: "\(args.count)"
+      )
+    }
+
+    let key = "\(template.name)<\(args.map { $0.description }.joined(separator: ","))>"
+    if let cached = instantiatedFunctions[key] {
+      return cached
+    }
+
+    // 1. Resolve parameters and return type with specific types
+    let (functionType, typedBody, params) = try withNewScope {
+      for (i, paramName) in template.typeParameters.enumerated() {
+        try currentScope.defineType(paramName, type: args[i])
+      }
+      
+      let returnType = try resolveTypeNode(template.returnType)
+      let params = try template.parameters.map { param -> Symbol in
+        let paramType = try resolveTypeNode(param.type)
+        return Symbol(
+          name: param.name, type: paramType,
+          kind: .variable(param.mutable ? .MutableValue : .Value))
+      }
+      
+      let (typedBody, functionType) = try checkFunctionBody(params, returnType, template.body)
+      return (functionType, typedBody, params)
+    }
+
+    // 2. Generate Mangled Name using Layout Keys
+    let argLayoutKeys = args.map { $0.layoutKey }.joined(separator: "_")
+    let mangledName = "\(template.name)_\(argLayoutKeys)"
+
+    // 3. Register Global Function if not already generated
+    if !generatedLayouts.contains(mangledName) {
+      generatedLayouts.insert(mangledName)
+      
+      let functionNode = TypedGlobalNode.globalFunction(
+        identifier: Symbol(name: mangledName, type: functionType, kind: .function),
+        parameters: params,
+        body: typedBody
+      )
+      extraGlobalNodes.append(functionNode)
+    }
+
+    instantiatedFunctions[key] = (mangledName, functionType)
+    return (mangledName, functionType)
+  }
+
+  private func unify(node: TypeNode, type: Type, inferred: inout [String: Type], typeParams: [String]) throws {
+    switch node {
+    case .identifier(let name):
+      if typeParams.contains(name) {
+        if let existing = inferred[name] {
+          if existing != type {
+             // Mismatch
+          }
+        } else {
+          inferred[name] = type
+        }
+      }
+    case .reference(let inner):
+      if case .reference(let innerType) = type {
+        try unify(node: inner, type: innerType, inferred: &inferred, typeParams: typeParams)
+      }
+    default:
+      break
+    }
   }
 
   private func withNewScope<R>(_ body: () throws -> R) rethrows -> R {

@@ -42,6 +42,9 @@ public func printTypedAST(_ node: TypedProgram) {
     case .genericTypeTemplate(let name):
       print("\(indent)GenericTypeTemplate: \(name)")
 
+    case .genericFunctionTemplate(let name):
+      print("\(indent)GenericFunctionTemplate: \(name)")
+
     case .givenDeclaration(let type, let methods):
       print("\(indent)GivenDeclaration: \(type)")
       withIndent {
