@@ -80,18 +80,6 @@ public class CodeGen {
           printf("%s\\n", value ? "true" : "false");
       }
 
-      int Int_copy(struct Ref ref) {
-          return *(int*)ref.ptr;
-      }
-
-      double Float_copy(struct Ref ref) {
-          return *(double*)ref.ptr;
-      }
-
-      _Bool Bool_copy(struct Ref ref) {
-          return *(_Bool*)ref.ptr;
-      }
-
       """
 
     // 生成程序体
@@ -386,6 +374,31 @@ public class CodeGen {
       return generateCall(callee, arguments, type)
     case .methodReference:
       fatalError("Method reference not in call position is not supported yet")
+    case .derefExpression(let inner, let type):
+      let innerResult = generateExpressionSSA(inner)
+      let result = nextTemp()
+      
+      addIndent()
+      buffer += "\(getCType(type)) \(result);\n"
+      
+      if case .structure(let typeName, _, _) = type {
+        // Struct: call copy constructor
+        addIndent()
+        buffer += "\(result) = \(typeName)__copy((struct \(typeName)*)\(innerResult).ptr);\n"
+      } else if case .reference(_) = type {
+        // Reference: copy struct Ref and retain
+        addIndent()
+        buffer += "\(result) = *(struct Ref*)\(innerResult).ptr;\n"
+        addIndent()
+        buffer += "koral_retain(\(result).control);\n"
+      } else {
+        // Primitive: direct dereference
+        let cType = getCType(type)
+        addIndent()
+        buffer += "\(result) = *(\(cType)*)\(innerResult).ptr;\n"
+      }
+      return result
+
     case .referenceExpression(let inner, let type):
       if inner.valueCategory == .lvalue {
         // 取引用：构造 Ref 结构体

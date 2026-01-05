@@ -48,6 +48,7 @@ public enum Token: CustomStringConvertible {
   case bitorKeyword  // 'bitor' keyword
   case bitxorKeyword  // 'bitxor' keyword
   case bitnotKeyword  // 'bitnot' keyword
+  case derefKeyword   // 'deref' keyword
   case bitshlKeyword  // 'bitshl' keyword
   case bitshrKeyword  // 'bitshr' keyword
   case arrow  // '->'
@@ -117,6 +118,7 @@ public enum Token: CustomStringConvertible {
       (.bitorKeyword, .bitorKeyword),
       (.bitxorKeyword, .bitxorKeyword),
       (.bitnotKeyword, .bitnotKeyword),
+      (.derefKeyword, .derefKeyword),
       (.bitshlKeyword, .bitshlKeyword),
       (.bitshrKeyword, .bitshrKeyword),
       (.arrow, .arrow),
@@ -243,6 +245,8 @@ public enum Token: CustomStringConvertible {
       return "bitxor"
     case .bitnotKeyword:
       return "bitnot"
+    case .derefKeyword:
+      return "deref"
     case .bitshlKeyword:
       return "bitshl"
     case .bitshrKeyword:
@@ -573,6 +577,7 @@ public class Lexer {
       case "bitor": .bitorKeyword
       case "bitxor": .bitxorKeyword
       case "bitnot": .bitnotKeyword
+      case "deref": .derefKeyword
       case "bitshl": .bitshlKeyword
       case "bitshr": .bitshrKeyword
       default: .identifier(id)

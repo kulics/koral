@@ -36,41 +36,6 @@ public class TypeChecker {
       .function(parameters: [Parameter(type: .bool, kind: .byVal)], returns: .void),
       mutable: false
     )
-
-    // Built-in methods
-    // Int.copy(self ref) Int
-    extensionMethods["Int"] = [
-      "copy": Symbol(
-        name: "Int_copy",
-        type: .function(
-          parameters: [Parameter(type: .reference(inner: .int), kind: .byVal)],
-          returns: .int
-        ),
-        kind: .function
-      )
-    ]
-    // Float.copy(self ref) Float
-    extensionMethods["Float"] = [
-      "copy": Symbol(
-        name: "Float_copy",
-        type: .function(
-          parameters: [Parameter(type: .reference(inner: .float), kind: .byVal)],
-          returns: .float
-        ),
-        kind: .function
-      )
-    ]
-    // Bool.copy(self ref) Bool
-    extensionMethods["Bool"] = [
-      "copy": Symbol(
-        name: "Bool_copy",
-        type: .function(
-          parameters: [Parameter(type: .reference(inner: .bool), kind: .byVal)],
-          returns: .bool
-        ),
-        kind: .function
-      )
-    ]
   }
 
   // Changed to return TypedProgram
@@ -656,6 +621,17 @@ public class TypeChecker {
         throw SemanticError.typeMismatch(expected: "Int", got: typedExpr.type.description)
       }
       return .bitwiseNotExpression(expression: typedExpr, type: .int)
+
+    case .derefExpression(let inner):
+      let typedInner = try inferTypedExpression(inner)
+      if case .reference(let innerType) = typedInner.type {
+        return .derefExpression(expression: typedInner, type: innerType)
+      } else {
+        throw SemanticError.typeMismatch(
+          expected: "Reference type",
+          got: typedInner.type.description
+        )
+      }
 
     case .refExpression(let inner):
       let typedInner = try inferTypedExpression(inner)

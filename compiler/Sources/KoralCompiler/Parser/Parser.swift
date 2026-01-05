@@ -605,6 +605,10 @@ public class Parser {
       try match(.refKeyword)
       let expr = try parsePrefixExpression()
       return .refExpression(expr)
+    } else if currentToken === .derefKeyword {
+      try match(.derefKeyword)
+      let expr = try parsePrefixExpression()
+      return .derefExpression(expr)
     } else if currentToken === .bitnotKeyword {
       try match(.bitnotKeyword)
       let expr = try parsePrefixExpression()
@@ -672,6 +676,11 @@ public class Parser {
     case .bool(let value):
       try match(.bool(value))
       return .booleanLiteral(value)
+    case .leftParen:
+      try match(.leftParen)
+      let expr = try expression()
+      try match(.rightParen)
+      return expr
     case .leftBrace:
       return try blockExpression()
     case .leftBracket:

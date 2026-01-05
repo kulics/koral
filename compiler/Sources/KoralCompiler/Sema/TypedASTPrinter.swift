@@ -200,6 +200,15 @@ public func printTypedAST(_ node: TypedProgram) {
         }
       }
 
+    case .derefExpression(let operand, let type):
+      print("\(indent)DerefExpression: : \(type)")
+      withIndent {
+        print("\(indent)Operand:")
+        withIndent {
+          printTypedExpression(operand)
+        }
+      }
+
     case .letExpression(let identifier, let value, let body, let type):
       print("\(indent)LetExpression: \(identifier.name) : \(type)")
       withIndent {
