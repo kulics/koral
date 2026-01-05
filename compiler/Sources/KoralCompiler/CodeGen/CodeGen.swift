@@ -20,7 +20,7 @@ public class CodeGen {
     for (name, type) in vars.reversed() {
       if case .structure(let typeName, _, _) = type {
         addIndent()
-        buffer += "\(typeName)_drop(\(name));\n"
+        buffer += "\(typeName)_drop(&\(name));\n"
       } else if case .reference(_) = type {
         addIndent()
         buffer += "koral_release(\(name).control);\n"
@@ -447,7 +447,7 @@ public class CodeGen {
         // 4. 设置析构函数
         if case .structure(let typeName, _, _) = innerType {
           addIndent()
-          buffer += "((struct Koral_Control*)\(result).control)->dtor = \(typeName)_drop_ptr;\n"
+          buffer += "((struct Koral_Control*)\(result).control)->dtor = \(typeName)_drop;\n"
         } else {
           addIndent()
           buffer += "((struct Koral_Control*)\(result).control)->dtor = NULL;\n"
@@ -815,7 +815,7 @@ public class CodeGen {
     }
     buffer += "};\n\n"
 
-    // 自动生成 copy/drop，仅 isValue==false 的类型需要递归处理
+    // 自动生成 copy/drop，需要递归处理
     buffer += "struct \(name) \(name)__copy(const struct \(name) *self) {\n"
     withIndent {
       buffer += "    struct \(name) result;\n"
@@ -833,20 +833,17 @@ public class CodeGen {
     }
     buffer += "}\n\n"
 
-    buffer += "void \(name)_drop(struct \(name) self) {\n"
+    buffer += "void \(name)_drop(void* raw_self) {\n"
     withIndent {
+      buffer += "    struct \(name)* self = (struct \(name)*)raw_self;\n"
       for param in parameters {
         if case .structure(let fieldTypeName, _, _) = param.type {
-          buffer += "    \(fieldTypeName)_drop(self.\(param.name));\n"
+          buffer += "    \(fieldTypeName)_drop(&self->\(param.name));\n"
         } else if case .reference(_) = param.type {
-          buffer += "    koral_release(self.\(param.name).control);\n"
+          buffer += "    koral_release(self->\(param.name).control);\n"
         }
       }
     }
-    buffer += "}\n\n"
-
-    buffer += "void \(name)_drop_ptr(void* self) {\n"
-    buffer += "    \(name)_drop(*(struct \(name)*)self);\n"
     buffer += "}\n\n"
   }
 
@@ -890,12 +887,12 @@ public class CodeGen {
         addIndent()
         buffer += "\(getCType(value.type)) \(copyResult) = \(typeName)__copy(&\(valueResult));\n"
         addIndent()
-        buffer += "\(typeName)_drop(\(identifier.name));\n"
+        buffer += "\(typeName)_drop(&\(identifier.name));\n"
         addIndent()
         buffer += "\(identifier.name) = \(copyResult);\n"
       } else {
         addIndent()
-        buffer += "\(typeName)_drop(\(identifier.name));\n"
+        buffer += "\(typeName)_drop(&\(identifier.name));\n"
         addIndent()
         buffer += "\(identifier.name) = \(valueResult);\n"
       }
@@ -957,12 +954,12 @@ public class CodeGen {
           addIndent()
           buffer += "\(getCType(value.type)) \(copyResult) = \(typeName)__copy(&\(valueResult));\n"
           addIndent()
-          buffer += "\(typeName)_drop(\(accessPath));\n"
+          buffer += "\(typeName)_drop(&\(accessPath));\n"
           addIndent()
           buffer += "\(accessPath) = \(copyResult);\n"
         } else {
           addIndent()
-          buffer += "\(typeName)_drop(\(accessPath));\n"
+          buffer += "\(typeName)_drop(&\(accessPath));\n"
           addIndent()
           buffer += "\(accessPath) = \(valueResult);\n"
         }
