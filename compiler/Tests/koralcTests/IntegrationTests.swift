@@ -54,11 +54,41 @@ class IntegrationTests: XCTestCase {
             }
         }
         
-        // 2. Prepare output directory
-        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true, attributes: nil)
+        // 2. Prepare output and cleanup
+        // Check environment variable to decide whether to keep generated C files
+        // Set KORAL_TEST_KEEP_C=1 to keep .c files in the source directory
+        let keepCFiles = ProcessInfo.processInfo.environment["KORAL_TEST_KEEP_C"] != nil
+        
+        let outputDir: URL
+        let cleanup: () -> Void
+
+        if keepCFiles {
+            // Output to same directory as source file
+            outputDir = file.deletingLastPathComponent()
+            
+            // Only remove the executable, keep the .c file
+            let baseName = file.deletingPathExtension().lastPathComponent
+            let exePath = outputDir.appendingPathComponent(baseName)
+            let exePathWindows = outputDir.appendingPathComponent(baseName + ".exe")
+            
+            cleanup = {
+                try? FileManager.default.removeItem(at: exePath)
+                try? FileManager.default.removeItem(at: exePathWindows)
+            }
+        } else {
+            // Output to a temporary directory
+            let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true, attributes: nil)
+            outputDir = tempDir
+            
+            // Remove the entire temporary directory
+            cleanup = {
+                try? FileManager.default.removeItem(at: tempDir)
+            }
+        }
+        
         defer {
-            try? FileManager.default.removeItem(at: tempDir)
+            cleanup()
         }
 
         // 3. Run compiler
@@ -75,7 +105,7 @@ class IntegrationTests: XCTestCase {
         
         let process = Process()
         process.executableURL = koralcBinary
-        process.arguments = ["run", file.path, "-o", tempDir.path]
+        process.arguments = ["run", file.path, "-o", outputDir.path]
         process.currentDirectoryURL = projectRoot
         
         let pipe = Pipe()
