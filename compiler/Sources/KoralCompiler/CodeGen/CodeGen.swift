@@ -38,12 +38,8 @@ public class CodeGen {
       #include <stdlib.h>
       #include <stdatomic.h>
 
-      // Basic Ref types
-      struct Ref_Int { int* ptr; void* control; };
-      struct Ref_Float { double* ptr; void* control; };
-      struct Ref_Bool { _Bool* ptr; void* control; };
-      struct Ref_String { const char** ptr; void* control; };
-      struct Ref_Void { void* ptr; void* control; };
+      // Generic Ref type
+      struct Ref { void* ptr; void* control; };
 
       typedef void (*Koral_Dtor)(void*);
 
@@ -84,16 +80,16 @@ public class CodeGen {
           printf("%s\\n", value ? "true" : "false");
       }
 
-      int Int_copy(struct Ref_Int ref) {
-          return *ref.ptr;
+      int Int_copy(struct Ref ref) {
+          return *(int*)ref.ptr;
       }
 
-      double Float_copy(struct Ref_Float ref) {
-          return *ref.ptr;
+      double Float_copy(struct Ref ref) {
+          return *(double*)ref.ptr;
       }
 
-      _Bool Bool_copy(struct Ref_Bool ref) {
-          return *ref.ptr;
+      _Bool Bool_copy(struct Ref ref) {
+          return *(_Bool*)ref.ptr;
       }
 
       """
@@ -416,15 +412,15 @@ public class CodeGen {
 
         // 1. 分配数据内存
         addIndent()
-        buffer += "\(result).ptr = (\(innerCType)*)malloc(sizeof(\(innerCType)));\n"
+        buffer += "\(result).ptr = malloc(sizeof(\(innerCType)));\n"
 
         // 2. 初始化数据
         if case .structure(let typeName, _, _) = innerType {
           addIndent()
-          buffer += "*\(result).ptr = \(typeName)__copy(&\(innerResult));\n"
+          buffer += "*(\(innerCType)*)\(result).ptr = \(typeName)__copy(&\(innerResult));\n"
         } else {
           addIndent()
-          buffer += "*\(result).ptr = \(innerResult);\n"
+          buffer += "*(\(innerCType)*)\(result).ptr = \(innerResult);\n"
         }
 
         // 3. 分配控制块
@@ -626,10 +622,11 @@ public class CodeGen {
       var curType = source.type
 
       for member in path {
-        if case .reference(_) = curType {
+        if case .reference(let inner) = curType {
           // Dereferencing a ref type updates the control block
           baseControl = "\(basePath).control"
-          basePath = "\(basePath).ptr->\(member.name)"
+          let innerCType = getCType(inner)
+          basePath = "((\(innerCType)*)\(basePath).ptr)->\(member.name)"
         } else {
           // Accessing member of value type keeps the same control block
           basePath += ".\(member.name)"
@@ -765,18 +762,8 @@ public class CodeGen {
       return "struct \(name)"
     case .genericParameter(let name):
       fatalError("Generic parameter \(name) should be resolved before CodeGen")
-    case .reference(let inner):
-      switch inner {
-      case .int: return "struct Ref_Int"
-      case .float: return "struct Ref_Float"
-      case .bool: return "struct Ref_Bool"
-      case .string: return "struct Ref_String"
-      case .void: return "struct Ref_Void"
-      case .structure(let name, _, _): return "struct Ref_\(name)"
-      case .function(_, _): fatalError("Ref to function not supported")
-      case .reference(_): fatalError("Ref to ref not supported")
-      case .genericParameter(_): fatalError("Ref to generic param not supported")
-      }
+    case .reference(_):
+      return "struct Ref"
     }
   }
 
@@ -814,9 +801,6 @@ public class CodeGen {
       }
     }
     buffer += "};\n\n"
-
-    // Generate Ref struct for this type
-    buffer += "struct Ref_\(name) { struct \(name)* ptr; void* control; };\n\n"
 
     // 自动生成 copy/drop，仅 isValue==false 的类型需要递归处理
     buffer += "struct \(name) \(name)__copy(const struct \(name) *self) {\n"
@@ -933,9 +917,14 @@ public class CodeGen {
       let isLast = index == memberPath.count - 1
       let memberName = item.name
       let memberType = item.type
-      let op: String = { if case .reference(_) = curType { return ".ptr->" } else { return "." } }()
       
-      var memberAccess = "\(accessPath)\(op)\(memberName)"
+      var memberAccess: String
+      if case .reference(let inner) = curType {
+          let innerCType = getCType(inner)
+          memberAccess = "((\(innerCType)*)\(accessPath).ptr)->\(memberName)"
+      } else {
+          memberAccess = "\(accessPath).\(memberName)"
+      }
       
       if case .structure(_, let members, _) = curType.canonical {
         if let canonicalMember = members.first(where: { $0.name == memberName }) {
@@ -1033,9 +1022,13 @@ public class CodeGen {
     var access = sourceResult
     var curType = source.type
     for member in path {
-      let op: String = { if case .reference(_) = curType { return ".ptr->" } else { return "." } }()
-      
-      var memberAccess = "\(access)\(op)\(member.name)"
+      var memberAccess: String
+      if case .reference(let inner) = curType {
+          let innerCType = getCType(inner)
+          memberAccess = "((\(innerCType)*)\(access).ptr)->\(member.name)"
+      } else {
+          memberAccess = "\(access).\(member.name)"
+      }
       
       if case .structure(_, let members, _) = curType.canonical {
         if let canonicalMember = members.first(where: { $0.name == member.name }) {
