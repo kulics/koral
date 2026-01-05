@@ -274,6 +274,12 @@ public func printAST(_ node: ASTNode) {
         printExpression(expr)
       }
 
+    case .derefExpression(let expr):
+      print("\(indent)DerefExpression:")
+      withIndent {
+        printExpression(expr)
+      }
+
     case .refExpression(let expr):
       print("\(indent)RefExpression:")
       withIndent {

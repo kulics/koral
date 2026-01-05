@@ -101,6 +101,7 @@ public indirect enum TypedExpressionNode {
   case bitwiseExpression(
     left: TypedExpressionNode, op: BitwiseOperator, right: TypedExpressionNode, type: Type)
   case bitwiseNotExpression(expression: TypedExpressionNode, type: Type)
+  case derefExpression(expression: TypedExpressionNode, type: Type)
   case referenceExpression(expression: TypedExpressionNode, type: Type)
   case variable(identifier: Symbol)
   case blockExpression(
@@ -128,6 +129,7 @@ extension TypedExpressionNode {
       .notExpression(_, let type),
       .bitwiseExpression(_, _, _, let type),
       .bitwiseNotExpression(_, let type),
+      .derefExpression(_, let type),
       .referenceExpression(_, let type),
       .blockExpression(_, _, let type),
       .ifExpression(_, _, _, let type),

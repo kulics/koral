@@ -103,6 +103,7 @@ public indirect enum ExpressionNode {
   case orExpression(left: ExpressionNode, right: ExpressionNode)
   case notExpression(ExpressionNode)
   case bitwiseNotExpression(ExpressionNode)
+  case derefExpression(ExpressionNode)
   case refExpression(ExpressionNode)
   case identifier(String)
   case blockExpression(statements: [StatementNode], finalExpression: ExpressionNode?)
