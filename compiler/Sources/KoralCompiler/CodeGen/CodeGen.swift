@@ -20,10 +20,10 @@ public class CodeGen {
     for (name, type) in vars.reversed() {
       if case .structure(let typeName, _, _) = type {
         addIndent()
-        buffer += "\(typeName)_drop(&\(name));\n"
+        buffer += "__koral_\(typeName)_drop(&\(name));\n"
       } else if case .reference(_) = type {
         addIndent()
-        buffer += "koral_release(\(name).control);\n"
+        buffer += "__koral_release(\(name).control);\n"
       }
     }
   }
@@ -49,13 +49,13 @@ public class CodeGen {
           void* ptr;
       };
 
-      void koral_retain(void* raw_control) {
+      void __koral_retain(void* raw_control) {
           if (!raw_control) return;
           struct Koral_Control* control = (struct Koral_Control*)raw_control;
           atomic_fetch_add(&control->count, 1);
       }
 
-      void koral_release(void* raw_control) {
+      void __koral_release(void* raw_control) {
           if (!raw_control) return;
           struct Koral_Control* control = (struct Koral_Control*)raw_control;
           int prev = atomic_fetch_sub(&control->count, 1);
@@ -204,7 +204,7 @@ public class CodeGen {
     if case .structure(let typeName, _, _) = body.type {
       addIndent()
       if body.valueCategory == .lvalue {
-        buffer += "\(getCType(body.type)) \(result) = \(typeName)__copy(&\(resultVar));\n"
+        buffer += "\(getCType(body.type)) \(result) = __koral_\(typeName)_copy(&\(resultVar));\n"
       } else {
         buffer += "\(getCType(body.type)) \(result) = \(resultVar);\n"
       }
@@ -213,7 +213,7 @@ public class CodeGen {
       buffer += "\(getCType(body.type)) \(result) = \(resultVar);\n"
       if body.valueCategory == .lvalue {
         addIndent()
-        buffer += "koral_retain(\(result).control);\n"
+        buffer += "__koral_retain(\(result).control);\n"
       }
     } else if body.type != .void {
       addIndent()
@@ -290,7 +290,7 @@ public class CodeGen {
           if case .structure(let typeName, _, _) = type {
             addIndent()
             if body.valueCategory == .lvalue {
-              buffer += "\(resultVar) = \(typeName)__copy(&\(bodyResultVar));\n"
+              buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(bodyResultVar));\n"
             } else {
               buffer += "\(resultVar) = \(bodyResultVar);\n"
             }
@@ -299,7 +299,7 @@ public class CodeGen {
             buffer += "\(resultVar) = \(bodyResultVar);\n"
             if body.valueCategory == .lvalue {
               addIndent()
-              buffer += "koral_retain(\(resultVar).control);\n"
+              buffer += "__koral_retain(\(resultVar).control);\n"
             }
           } else {
             addIndent()
@@ -348,7 +348,7 @@ public class CodeGen {
           buffer += "\(resultVar) = \(thenResult);\n"
           if case .reference(_) = type, thenBranch.valueCategory == .lvalue {
             addIndent()
-            buffer += "koral_retain(\(resultVar).control);\n"
+            buffer += "__koral_retain(\(resultVar).control);\n"
           }
           popScope()
         }
@@ -361,7 +361,7 @@ public class CodeGen {
           buffer += "\(resultVar) = \(elseResult);\n"
           if case .reference(_) = type, elseBranch.valueCategory == .lvalue {
             addIndent()
-            buffer += "koral_retain(\(resultVar).control);\n"
+            buffer += "__koral_retain(\(resultVar).control);\n"
           }
           popScope()
         }
@@ -384,13 +384,13 @@ public class CodeGen {
       if case .structure(let typeName, _, _) = type {
         // Struct: call copy constructor
         addIndent()
-        buffer += "\(result) = \(typeName)__copy((struct \(typeName)*)\(innerResult).ptr);\n"
+        buffer += "\(result) = __koral_\(typeName)_copy((struct \(typeName)*)\(innerResult).ptr);\n"
       } else if case .reference(_) = type {
         // Reference: copy struct Ref and retain
         addIndent()
         buffer += "\(result) = *(struct Ref*)\(innerResult).ptr;\n"
         addIndent()
-        buffer += "koral_retain(\(result).control);\n"
+        buffer += "__koral_retain(\(result).control);\n"
       } else {
         // Primitive: direct dereference
         let cType = getCType(type)
@@ -411,7 +411,7 @@ public class CodeGen {
         addIndent()
         buffer += "\(result).control = \(controlPath);\n"
         addIndent()
-        buffer += "koral_retain(\(result).control);\n"
+        buffer += "__koral_retain(\(result).control);\n"
         return result
       } else {
         // 堆分配：构造 Ref 结构体
@@ -430,7 +430,7 @@ public class CodeGen {
         // 2. 初始化数据
         if case .structure(let typeName, _, _) = innerType {
           addIndent()
-          buffer += "*(\(innerCType)*)\(result).ptr = \(typeName)__copy(&\(innerResult));\n"
+          buffer += "*(\(innerCType)*)\(result).ptr = __koral_\(typeName)_copy(&\(innerResult));\n"
         } else {
           addIndent()
           buffer += "*(\(innerCType)*)\(result).ptr = \(innerResult);\n"
@@ -447,7 +447,7 @@ public class CodeGen {
         // 4. 设置析构函数
         if case .structure(let typeName, _, _) = innerType {
           addIndent()
-          buffer += "((struct Koral_Control*)\(result).control)->dtor = \(typeName)_drop;\n"
+          buffer += "((struct Koral_Control*)\(result).control)->dtor = __koral_\(typeName)_drop;\n"
         } else {
           addIndent()
           buffer += "((struct Koral_Control*)\(result).control)->dtor = NULL;\n"
@@ -578,14 +578,14 @@ public class CodeGen {
           addIndent()
           let argCopy = nextTemp()
           if arg.valueCategory == .lvalue {
-            buffer += "\(getCType(arg.type)) \(argCopy) = \(typeName)__copy(&\(argResult));\n"
+            buffer += "\(getCType(arg.type)) \(argCopy) = __koral_\(typeName)_copy(&\(argResult));\n"
           } else {
             buffer += "\(getCType(arg.type)) \(argCopy) = \(argResult);\n"
           }
           finalArg = argCopy
         } else if case .reference(_) = arg.type {
           addIndent()
-          buffer += "koral_retain(\(argResult).control);\n"
+          buffer += "__koral_retain(\(argResult).control);\n"
           finalArg = argResult
         }
         
@@ -668,7 +668,7 @@ public class CodeGen {
           addIndent()
           buffer += "\(getCType(identifier.type)) \(identifier.name) = "
           if value.valueCategory == .lvalue {
-            buffer += "\(typeName)__copy(&\(valueResult));\n"
+            buffer += "__koral_\(typeName)_copy(&\(valueResult));\n"
           } else {
             buffer += "\(valueResult);\n"
           }
@@ -678,7 +678,7 @@ public class CodeGen {
           buffer += "\(getCType(identifier.type)) \(identifier.name) = \(valueResult);\n"
           if value.valueCategory == .lvalue {
             addIndent()
-            buffer += "koral_retain(\(identifier.name).control);\n"
+            buffer += "__koral_retain(\(identifier.name).control);\n"
           }
           registerVariable(identifier.name, identifier.type)
         } else {
@@ -816,15 +816,15 @@ public class CodeGen {
     buffer += "};\n\n"
 
     // 自动生成 copy/drop，需要递归处理
-    buffer += "struct \(name) \(name)__copy(const struct \(name) *self) {\n"
+    buffer += "struct \(name) __koral_\(name)_copy(const struct \(name) *self) {\n"
     withIndent {
       buffer += "    struct \(name) result;\n"
       for param in parameters {
         if case .structure(let fieldTypeName, _, _) = param.type {
-          buffer += "    result.\(param.name) = \(fieldTypeName)__copy(&self->\(param.name));\n"
+          buffer += "    result.\(param.name) = __koral_\(fieldTypeName)_copy(&self->\(param.name));\n"
         } else if case .reference(_) = param.type {
           buffer += "    result.\(param.name) = self->\(param.name);\n"
-          buffer += "    koral_retain(result.\(param.name).control);\n"
+          buffer += "    __koral_retain(result.\(param.name).control);\n"
         } else {
           buffer += "    result.\(param.name) = self->\(param.name);\n"
         }
@@ -833,14 +833,14 @@ public class CodeGen {
     }
     buffer += "}\n\n"
 
-    buffer += "void \(name)_drop(void* raw_self) {\n"
+    buffer += "void __koral_\(name)_drop(void* raw_self) {\n"
     withIndent {
       buffer += "    struct \(name)* self = (struct \(name)*)raw_self;\n"
       for param in parameters {
         if case .structure(let fieldTypeName, _, _) = param.type {
-          buffer += "    \(fieldTypeName)_drop(&self->\(param.name));\n"
+          buffer += "    __koral_\(fieldTypeName)_drop(&self->\(param.name));\n"
         } else if case .reference(_) = param.type {
-          buffer += "    koral_release(self->\(param.name).control);\n"
+          buffer += "    __koral_release(self->\(param.name).control);\n"
         }
       }
     }
@@ -866,7 +866,7 @@ public class CodeGen {
         buffer += "\(getCType(finalExpr.type)) \(resultVar) = \(temp);\n"
         if case .reference(_) = finalExpr.type, finalExpr.valueCategory == .lvalue {
           addIndent()
-          buffer += "koral_retain(\(resultVar).control);\n"
+          buffer += "__koral_retain(\(resultVar).control);\n"
         }
         result = resultVar
       }
@@ -885,25 +885,25 @@ public class CodeGen {
       if value.valueCategory == .lvalue {
         let copyResult = nextTemp()
         addIndent()
-        buffer += "\(getCType(value.type)) \(copyResult) = \(typeName)__copy(&\(valueResult));\n"
+        buffer += "\(getCType(value.type)) \(copyResult) = __koral_\(typeName)_copy(&\(valueResult));\n"
         addIndent()
-        buffer += "\(typeName)_drop(&\(identifier.name));\n"
+        buffer += "__koral_\(typeName)_drop(&\(identifier.name));\n"
         addIndent()
         buffer += "\(identifier.name) = \(copyResult);\n"
       } else {
         addIndent()
-        buffer += "\(typeName)_drop(&\(identifier.name));\n"
+        buffer += "__koral_\(typeName)_drop(&\(identifier.name));\n"
         addIndent()
         buffer += "\(identifier.name) = \(valueResult);\n"
       }
     } else if case .reference(_) = identifier.type {
       addIndent()
-      buffer += "koral_release(\(identifier.name).control);\n"
+      buffer += "__koral_release(\(identifier.name).control);\n"
       addIndent()
       buffer += "\(identifier.name) = \(valueResult);\n"
       if value.valueCategory == .lvalue {
         addIndent()
-        buffer += "koral_retain(\(identifier.name).control);\n"
+        buffer += "__koral_retain(\(identifier.name).control);\n"
       }
     } else {
       addIndent()
@@ -952,14 +952,14 @@ public class CodeGen {
         if value.valueCategory == .lvalue {
           let copyResult = nextTemp()
           addIndent()
-          buffer += "\(getCType(value.type)) \(copyResult) = \(typeName)__copy(&\(valueResult));\n"
+          buffer += "\(getCType(value.type)) \(copyResult) = __koral_\(typeName)_copy(&\(valueResult));\n"
           addIndent()
-          buffer += "\(typeName)_drop(&\(accessPath));\n"
+          buffer += "__koral_\(typeName)_drop(&\(accessPath));\n"
           addIndent()
           buffer += "\(accessPath) = \(copyResult);\n"
         } else {
           addIndent()
-          buffer += "\(typeName)_drop(&\(accessPath));\n"
+          buffer += "__koral_\(typeName)_drop(&\(accessPath));\n"
           addIndent()
           buffer += "\(accessPath) = \(valueResult);\n"
         }
@@ -997,7 +997,7 @@ public class CodeGen {
         if arg.valueCategory == .lvalue {
           let copyResult = nextTemp()
           addIndent()
-          buffer += "\(getCType(arg.type)) \(copyResult) = \(typeName)__copy(&\(result));\n"
+          buffer += "\(getCType(arg.type)) \(copyResult) = __koral_\(typeName)_copy(&\(result));\n"
           paramResults.append(copyResult)
         } else {
           paramResults.append(result)
@@ -1005,7 +1005,7 @@ public class CodeGen {
       } else if case .reference(_) = arg.type {
         if arg.valueCategory == .lvalue {
           addIndent()
-          buffer += "koral_retain(\(result).control);\n"
+          buffer += "__koral_retain(\(result).control);\n"
         }
         paramResults.append(result)
       } else {
