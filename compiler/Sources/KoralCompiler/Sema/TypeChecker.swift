@@ -79,6 +79,23 @@ public class TypeChecker {
       }
 
       if !typeParameters.isEmpty {
+        // Perform declaration-site checking
+        try withNewScope {
+          for typeParam in typeParameters {
+            try currentScope.defineType(typeParam, type: .genericParameter(name: typeParam))
+          }
+          
+          let returnType = try resolveTypeNode(returnTypeNode)
+          let params = try parameters.map { param -> Symbol in
+            let paramType = try resolveTypeNode(param.type)
+            return Symbol(
+              name: param.name, type: paramType,
+              kind: .variable(param.mutable ? .MutableValue : .Value))
+          }
+          
+          _ = try checkFunctionBody(params, returnType, body)
+        }
+
         let template = GenericFunctionTemplate(
           name: name,
           typeParameters: typeParameters,
@@ -946,6 +963,10 @@ public class TypeChecker {
     let specificType = Type.structure(name: layoutName, members: resolvedMembers, isGenericInstantiation: true)
     instantiatedTypes[key] = specificType
 
+    if specificType.containsGenericParameter {
+      return specificType
+    }
+
     // 4. Register Global Type Declaration if not already generated
     if !generatedLayouts.contains(layoutName) {
       generatedLayouts.insert(layoutName)
@@ -1010,6 +1031,10 @@ public class TypeChecker {
       
       let (typedBody, functionType) = try checkFunctionBody(params, returnType, template.body)
       return (functionType, typedBody, params)
+    }
+
+    if functionType.containsGenericParameter {
+      return ("", functionType)
     }
 
     // 2. Generate Mangled Name using Layout Keys

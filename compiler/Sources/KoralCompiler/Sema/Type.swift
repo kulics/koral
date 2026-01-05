@@ -45,6 +45,21 @@ public indirect enum Type: CustomStringConvertible {
     }
   }
 
+  public var containsGenericParameter: Bool {
+    switch self {
+    case .int, .float, .string, .bool, .void:
+      return false
+    case .function(let params, let returns):
+      return returns.containsGenericParameter || params.contains { $0.type.containsGenericParameter }
+    case .structure(_, let members, _):
+      return members.contains { $0.type.containsGenericParameter }
+    case .reference(let inner):
+      return inner.containsGenericParameter
+    case .genericParameter:
+      return true
+    }
+  }
+
   public var canonical: Type {
     switch self {
     case .int, .float, .bool, .void, .string: return self
