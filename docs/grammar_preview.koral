@@ -494,7 +494,6 @@ given[T Any, R Any] [T, R]MapIterator  {
 }
 
 trait Copy {
-    copy(self ref) Self;
 }
 
 trait Drop {
@@ -523,30 +522,30 @@ given[T Any] [T]UnsafePointer {
     [R Any]cast(self) [R]UnsafePointer = {todo()}
 }
 
-type [T Copy]List(mut source [T]UnsafaPointer, mut len Int, mut cap Int);
+type [T Copy]ListStorage(mut source [T]UnsafaPointer, mut len Int, mut cap Int);
+
+type [T Copy]List(storage [T]ListStorage ref);
 
 given[T Copy] [T]List {
-    new() Self = List([T]UnsafaPointer.alloc(0), 0);
-
-    copy(self ref) Self = {todo()}
+    new() Self = List(ref ListStorage([T]UnsafaPointer.alloc(0), 0, 0));
 
     drop(self ref) = {
         todo() // ref_count--
-        if ref_count_zero(self.source) then {
-            for i = 0..<self.len then {
-                let _ = self.source.offset(i).load(); // move out; drop is inserted by compiler
+        if ref_count_zero(self.storage.source) then {
+            for i = 0..<self.storage.len then {
+                let _ = self.storage.source.offset(i).load(); // move out; drop is inserted by compiler
             }
-            self.source.free();
+            self.storage.source.free();
         }
     }
 
-    count(self ref) Int = self.len;
+    count(self ref) Int = self.storage.len;
 
-    get(self ref, index Int) T ref = self.source.offset(i).as_ref();
+    get(self ref, index Int) T ref = self.storage.source.offset(i).as_ref();
     
     set(self ref, index Int, value T) Void = {
         make_sure_unique(self);
-        self.source.offset(i).as_ref() = value;
+        self.storage.source.offset(i).as_ref() = value;
     }
 
     insert(self ref, index Int, value T) Void = {
@@ -614,10 +613,10 @@ given File {
 
 /*
 1. 默认声明的类型都是值类型，等价于 c struct，但不是所有类型都能直接 copy。
-2-1. 任意类型只要实现了 copy 函数，编译器就会自动根据需要调用 copy 来产生新实例。
-2-2. 任意类型可以给自己声明 `not Copy` 来标记不实现 Copy，编译器不会自动生成 copy 实现，如果类型内存在 copy 实现则会编译报错。
-2-3. 任意类型内包含的成员变量如果全部都是 copy 类型，且没有标记为 `not Copy`，那么编译器会给这个类型自动实现 copy（递归成员实现）。
-2-4. 类型可以同时实现 Copy 与 Drop，编译器会在 Copy 时保持原值有效，在 Drop 时按实例逐个释放。
+2-1. 任意类型默认都实现了 `Copy`，编译器就会自动根据需要使用 `Copy` 实现来产生新实例。
+2-2. 任意类型可以给自己声明 `not Copy` 来标记不实现 Copy，编译器不会自动生成 `Copy` 实现。
+2-3. 任意类型内包含的成员变量如果全部都是 `Copy` 类型，且没有标记为 `not Copy`，那么编译器会给这个类型自动实现 `Copy`（递归成员实现）。
+2-4. 类型可以同时实现 `Copy` 与 `Drop`，编译器会在 `Copy` 时保持原值有效，在 `Drop` 时按实例逐个释放。
 3-1. 任意类型只要显式实现了 drop 函数，其实例生命周期结束时就由编译器插入调用 drop 来销毁。
 3-2. 任意类型如果没有显式实现 drop 函数，那么编译器会给这个类型自动实现 drop（递归成员实现）。
 3-3. drop 函数不能手动调用。编译器会对手动调用 drop 的代码进行报错。
@@ -627,7 +626,7 @@ given File {
 4-2. 只读和读写变量都能获取引用（ref）。当获取的 ref 会发生逃逸时，编译器会自动将变量分配在堆上。
 4-3. ref 内部使用了自动引用计数，当 ref 发生 copy 时，引用计数会加1；当 ref 发生 drop 时，引用计数会减1，当计数为 0 时，会调用 ref 源的 drop 释放。
 4-4. ref 是共享所有权，所有 ref 都会指向原来产生的变量或者分配的对象。
-4-5. T ref 的成员/方法访问自动解引用；若需要获得值的副本，需调用 T 的 copy，或通过方法返回值。
+4-5. T ref 的成员/方法访问自动解引用；若需要获得值的副本，需使用 `deref` 语法调用 T 的 `Copy` 实现。
 4-6. 当 ref 存在环引用时，需要通过 weakref 解开环引用。weakref 只操作弱计数，不影响对象存活，弱计数归零释放控制块。
 5. 如果编译器判断某个非引用变量的所有权被转移，则不会调用 copy 和 drop，只会 move 值。
 
