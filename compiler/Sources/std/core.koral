@@ -1,107 +1,197 @@
-export std;
+// builtin
+// type Bool;
 
-primitive type Int;
+// builtin
+// type Int;
+// type Int8;
+// type Int16;
+// type Int32;
+// type Int64;
 
-primitive type Int8;
+// builtin
+// type UInt;
+// type UInt8;
+// type UInt16;
+// type UInt32;
+// type UInt64;
 
-primitive type Int16;
+// builtin
+// type Float16;
+// type Float32;
+// type Float64;
 
-primitive type Int32;
-
-primitive type Int64;
-
-primitive type UInt;
-
-primitive type UInt8;
-
-primitive type UInt16;
-
-primitive type UInt32;
-
-primitive type UInt64;
-
-primitive type Bool;
+// builtin
+// 映射为 C 的 T*
+// type [T Any]Pointer;
 
 type Byte = UInt8;
+type Rune = UInt32;
 
-primitive type Float16;
+// builtin
+// trait Any {}
 
-primitive type Float32;
+/* builtin
+given[T Any] [T]Pointer {
+    // 生命周期管理 (Lifecycle)
+    allocate(capacity Int) Self;
+    deallocate(self) Void;
 
-primitive type Float64;
+    // 内存访问 (Access)
+    // Unsafe 版本，不带copy和drop语义
+    load(self) T;
+    store(self, v T) Void;
+    // Safe 版本，带copy和drop语义
+    read(self) T;
+    write(self, v T) Void;
+    
+    // 指针运算 (Arithmetic)
+    advanced(self, n Int) Self;
+    
+    // 类型转换 (Casting)
+    [U Any]cast(self) [U]Pointer;
+}
+*/
+// builtin
+// let [T Any]ref_count(r T ref) Int;
 
-type Any;
+type [T Copy]ListStorage(mut source [T]Pointer, mut len Int, mut cap Int);
 
-primitive type [T Any]Ptr;
+public type [T Copy]List(storage [T]ListStorage ref);
 
-given[T Any] [T]Ptr {
-    primitive unsafe self.read(offset UInt) T;
+given[T Copy] [T]List {
+    public new() Self = List(ref ListStorage([T]Pointer.allocate(10), 0, 10));
 
-    primitive unsafe self.write(offset UInt, value T) Void;
+    drop(self ref) = {
+        if ref_count(self.storage) == 1 then {
+            for i = 0..<self.storage.len then {
+                let drop_item = self.storage.source.advanced(i).load(); // move out; drop is inserted by compiler
+            }
+            self.storage.source.deallocate();
+        }
+    }
 
-    primitive self.is_null() Bool;
+    public count(self ref) Int = self.storage.len;
 
-    primitive malloc(count UInt) [T]Ptr;
+    public get(self ref, index Int) T = self.storage.source.advanced(index).read();
+    
+    public set(self ref, index Int, value T) Void = {
+        make_sure_unique(self);
+        self.storage.source.advanced(index).write(value);
+    }
 
-    primitive unsafe free(ptr [T]Ptr) Void;
+    public push(self ref, value T) Void = {
+        make_sure_unique(self);
+        // todo, make sure the cap is enough
+        self.storage.source.advanced(self.storage.len).store(value);
+        self.storage.len += 1;
+    }
+
+    public insert(self ref, index Int, value T) Void = {
+        make_sure_unique(self);
+        // todo
+    }
+
+    public remove(self ref, index Int) Void = {
+        make_sure_unique(self);
+        // todo
+    }
+
+    public iterator(self) [T]ListIterator = [T]ListIterator(self, 0);
+
+    make_sure_unique(self ref) = { 
+        // todo
+    }
 }
 
-type [T Any]Array(private ptr [T]Ptr, private len UInt);
+public type [T Copy]ListIterator(source [T]List ref, mut index Int);
 
-given[T Any] [T]Array {
-    new(size UInt) [T]Array = Array(Ptr.malloc(size), size);
-
-    self.size() UInt = self.len;
-
-    self.get(index UInt) T = self.ptr.read(index);
-
-    self.set(index UInt, value T) Void = self.ptr.write(index, value);
+given[T Copy] [T]ListIterator {
+    public next(self ref) [T]Option = 
+        if self.index < self.source.count() then {
+            self.index += 1;
+            .Some(self.source[self.index])
+        } else {
+            .None()
+        }
 }
 
-type String(private src [Byte]Array);
+/*
+public type String(source [Byte]List);
 
 given String {
-    self.size() UInt = self.src.size();
+    public of_utf8_bytes(data [Byte]List) Self = String(data);
+
+    public count(self ref) Int = self.source.count();
+
+    public iterator(self) StringIterator = StringIterator(self, -1);
 }
 
-type Comparable {
-    compare(src Self, dst Self) Int;
+public type StringIterator(source String, mut index Int);
+
+given StringIterator {
+    public next(self ref) [Rune]Option = 
+        if self.index < self._source.data.size() then {
+            self.index += 1;
+            .Some((Rune){deref self.source.source.get(self.index)})
+        } else {
+            .None()
+        }
 }
 
-let [T Comparable]max(a T, b T) T = if compare(a, b) > 0 then a else b;
-let [T Comparable]min(a T, b T) T = if compare(a, b) < 0 then a else b;
-
-type [T Any]Option {
+public type [T Any]Option {
     Some(value T);
     None();
 }
 
 given[T Any] [T]Option {
-    self.[R Any]map(fn [T, R]Func) [R]Option = if self is Some(v) then Some(fn(v)) else None();
+    public [U Any]map(self, fn [T, U]Func) [U]Option = if self is .Some(v) then .Some(fn(v)) else .None();
 }
 
-type [T Any]Iterator {
-    self.next() [T]Option;
+public trait [T Any]Iterator {
+    next(self ref) [T]Option;
 }
 
-given[T Any] [T]Iterator {
-    self.filter(fn [T, Bool]Func) [T]Iterator = [T]FilterIterator;
-    self.[R Any]map(fn [T, R]Func) [R]Iterator = [T, R]MapIterator;
+public trait [T Any, I [T]Iterator]IntoIterator {
+    iterator(self) I;
 }
 
-type [T Any]FilterIterator(it [T]Iterator, fn [T, Bool]Func);
+public let [T Any, I [T]Iterator]lazy(iter I) [T, I]Sequence = Sequence(iter);
 
-given[T Any] [T]FilterIterator {
-    self.next() [T]Option = {
-        while self.it.next() is Some(v) then {
-            if self.fn(v) then return Some(v);
-        }
-        return None();
+public type [T Any, I [T]Iterator]Sequence(iter I);
+
+given[T Any, I [T]Iterator] [T, I]Sequence {
+    public [R Any]reduce(self, mut r R, f [R, T, R]Func) R = {
+        for v = self then r = f(r, v);
+        r
     }
+    public filter(self, f [T, Bool]Func) [T, I]FilterSequence = FilterSequence(self, f);
+    public [R Any]map(self, f [T, R]Func) [T, R, I]MapSequence = MapSequence(self, f);
 }
 
-type [T Any, R Any]MapIterator(it [T]Iterator, fn [T, R]Func);
+public type [T Any, I [T]Iterator]FilterSequence(iter I, filter [T, Bool]Func);
 
-given[T Any, R Any] [T, R]MapIterator {
-    self.next() [R]Option = self.it.next().map(fn);
+given[T Any, I [T]Iterator] [T, I]FilterSequence {
+    public next(self ref) [T]Option = 
+        while self.iter.next() is .Some(v) then {
+            if self.filter(v) then return .Some(v);
+        } else .None();
 }
+
+public type [T Any, R Any, I [T]Iterator]MapSequence(iter I, mapper [T, R]Func);
+
+given[T Any, R Any, I [T]Iterator] [T, R, I]MapSequence  {
+    next(self ref) [R]Option = 
+        if self.iter.next() is .Some(v) then .Some(mapper(v)) else .None();
+}
+
+public trait Equatable {
+    equals(self ref, r Self ref) Bool;
+}
+
+public trait Comparable Equatable {
+    compare(self ref, r Self ref) Int;
+}
+
+public let [T Comparable]max(a T, b T) T = if compare(a, b) > 0 then a else b;
+public let [T Comparable]min(a T, b T) T = if compare(a, b) < 0 then a else b;
+*/
