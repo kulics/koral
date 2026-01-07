@@ -31,24 +31,60 @@ type Rune = UInt32;
 // trait Any {}
 
 /* builtin
+// Most pointer operations are available for Any type [T].
 given[T Any] [T]Pointer {
-    // 生命周期管理 (Lifecycle)
+    // --- Lifecycle ---
+
+    // Allocates uninitialized memory for `capacity` number of elements.
+    // The caller is responsible for deallocating this memory later.
     allocate(capacity Int) Self;
+
+    // Deallocates the memory pointed to by `self`.
+    // PRECONDITION: The memory must be deinitialized (i.e. uninitialized).
+    // If the memory contains values that need to be dropped, call `deinitialize()` first.
     deallocate(self) Void;
 
-    // 内存访问 (Access)
-    // Unsafe 版本，不带copy和drop语义
-    load(self) T;
-    store(self, v T) Void;
-    // Safe 版本，带copy和drop语义
-    read(self) T;
-    write(self, v T) Void;
-    
-    // 指针运算 (Arithmetic)
-    advanced(self, n Int) Self;
-    
-    // 类型转换 (Casting)
-    [U Any]cast(self) [U]Pointer;
+    // --- Access & Mutation ---
+
+    // Initializes this pointer’s memory with the given value.
+    // This writes to *uninitialized* memory and does NOT drop any existing value.
+    // POSTCONDITION: Memory at `self` is initialized.
+    initialize(self, v T) Void;
+
+    // Deinitializes the memory at `self`.
+    // This drops the value and returns the memory to an uninitialized state.
+    // PRECONDITION: Memory at `self` must be initialized.
+    deinitialize(self) Void;
+
+    // Puts a new value `v` into *initialized* memory.
+    // This drops the existing value at `self` and replaces it with `v`.
+    // PRECONDITION: Memory at `self` must be initialized.
+    put(self, v T) Void;
+
+    // Retrieves the value from `self`, leaving the memory uninitialized.
+    // Ideally used for moving values out of the pointer.
+    // PRECONDITION: Memory at `self` must be initialized.
+    // POSTCONDITION: Memory at `self` is uninitialized.
+    take(self) T;
+
+    // Replaces the value at `self` with `v`, returning the old value.
+    // Neither the old value nor the new value is dropped.
+    // PRECONDITION: Memory at `self` must be initialized.
+    replace(self, v T) T;
+
+    // --- Arithmetic ---
+
+    // Returns a new pointer moved forward by `n` elements from `self`.
+    // The offset is in units of T (stride), not bytes.
+    advance(self, n Int) Self;
+}
+
+// Peek is restricted to Copy types because it duplicates the value from the container.
+given[T Copy] [T]Pointer {
+    // Peeks the value from `self` without removing or invalidating it.
+    // Returns a copy of the value.
+    // PRECONDITION: Memory at `self` must be initialized.
+    peek(self) T;
 }
 */
 // builtin
@@ -64,7 +100,7 @@ given[T Copy] [T]List {
     drop(self ref) = {
         if ref_count(self.storage) == 1 then {
             for i = 0..<self.storage.len then {
-                let drop_item = self.storage.source.advanced(i).load(); // move out; drop is inserted by compiler
+                self.storage.source.advance(i).deinitialize();
             }
             self.storage.source.deallocate();
         }
@@ -72,28 +108,66 @@ given[T Copy] [T]List {
 
     public count(self ref) Int = self.storage.len;
 
-    public get(self ref, index Int) T = self.storage.source.advanced(index).read();
+    public get(self ref, index Int) T = self.storage.source.advance(index).peek();
     
     public set(self ref, index Int, value T) Void = {
         make_sure_unique(self);
-        self.storage.source.advanced(index).write(value);
+        self.storage.source.advance(index).put(value);
     }
 
     public push(self ref, value T) Void = {
         make_sure_unique(self);
         // todo, make sure the cap is enough
-        self.storage.source.advanced(self.storage.len).store(value);
+        self.storage.source.advance(self.storage.len).initialize(value);
         self.storage.len += 1;
     }
 
     public insert(self ref, index Int, value T) Void = {
         make_sure_unique(self);
-        // todo
+        // todo, make sure the cap is enough
+        if index < self.storage.len then {
+            // Move elements to create space from back to front
+            // Handle the last element first: move it to uninitialized memory
+            let last = self.storage.source.advance(self.storage.len - 1).take();
+            self.storage.source.advance(self.storage.len).initialize(last);
+            
+            // Shift the rest
+            for i = self.storage.len - 1 ..< index step -1 then {
+                 // Move [i-1] to [i]
+                 let prev = self.storage.source.advance(i - 1).take();
+                 // Slot [i] is now logically uninitialized (because we moved out of it in previous step? NO)
+                 // Wait, loop logic:
+                 // Iteration 1 (i = len-1): We want to move [len-2] to [len-1].
+                 // [len-1] was moved out in "Handle the last element first". So it IS uninitialized.
+                 // So we use initialize.
+                 self.storage.source.advance(i).initialize(prev);
+            }
+            // After loop, slot [index] is uninitialized.
+            self.storage.source.advance(index).initialize(value);
+        } else {
+             self.storage.source.advance(self.storage.len).initialize(value);
+        }
+        self.storage.len += 1;
     }
 
     public remove(self ref, index Int) Void = {
         make_sure_unique(self);
-        // todo
+        
+        // 1. Drop the element at index
+        self.storage.source.advance(index).deinitialize();
+        
+        // 2. Shift remaining elements down
+        for i = index ..< self.storage.len - 1 then {
+            // We want to move [i+1] to [i]
+            // Slot [i] is uninitialized (either dropped above, or moved out in previous iter)
+            let next_val = self.storage.source.advance(i + 1).take();
+            self.storage.source.advance(i).initialize(next_val);
+        }
+        
+        // 3. The last element slot is now uninitialized because we moved from it in the last iteration.
+        // So we don't need to deinitialize it! It's already empty.
+        
+        self.storage.len -= 1;
     }
 
     public iterator(self) [T]ListIterator = [T]ListIterator(self, 0);
