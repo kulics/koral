@@ -20,19 +20,19 @@ public class TypeChecker {
     // Built-in functions
     // printString(message String) Void
     currentScope.define(
-      "printString",
+      "print_string",
       .function(parameters: [Parameter(type: .string, kind: .byVal)], returns: .void),
       mutable: false
     )
     // printInt(value Int) Void
     currentScope.define(
-      "printInt",
+      "print_int",
       .function(parameters: [Parameter(type: .int, kind: .byVal)], returns: .void),
       mutable: false
     )
     // printBool(value Bool) Void
     currentScope.define(
-      "printBool",
+      "print_bool",
       .function(parameters: [Parameter(type: .bool, kind: .byVal)], returns: .void),
       mutable: false
     )

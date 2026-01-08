@@ -24,8 +24,8 @@
 // 映射为 C 的 T*
 // type [T Any]Pointer;
 
-type Byte = UInt8;
-type Rune = UInt32;
+// type Byte = UInt8;
+// type Rune = UInt32;
 
 // builtin
 // trait Any {}
@@ -33,28 +33,22 @@ type Rune = UInt32;
 /* builtin
 // Most pointer operations are available for Any type [T].
 given[T Any] [T]Pointer {
-    // --- Lifecycle ---
-
-    // Allocates uninitialized memory for `capacity` number of elements.
-    // The caller is responsible for deallocating this memory later.
-    allocate(capacity Int) Self;
-
-    // Deallocates the memory pointed to by `self`.
-    // PRECONDITION: The memory must be deinitialized (i.e. uninitialized).
-    // If the memory contains values that need to be dropped, call `deinitialize()` first.
-    deallocate(self) Void;
-
     // --- Access & Mutation ---
 
     // Initializes this pointer’s memory with the given value.
     // This writes to *uninitialized* memory and does NOT drop any existing value.
     // POSTCONDITION: Memory at `self` is initialized.
-    initialize(self, v T) Void;
+    init(self, v T) Void;
 
     // Deinitializes the memory at `self`.
     // This drops the value and returns the memory to an uninitialized state.
     // PRECONDITION: Memory at `self` must be initialized.
-    deinitialize(self) Void;
+    deinit(self) Void;
+
+    // Accesses the value pointed to by `self` without removing or invalidating it.
+    // Returns a reference of the value.
+    // PRECONDITION: Memory at `self` must be initialized.
+    peek(self) T ref;
 
     // Puts a new value `v` into *initialized* memory.
     // This drops the existing value at `self` and replaces it with `v`.
@@ -76,49 +70,67 @@ given[T Any] [T]Pointer {
 
     // Returns a new pointer moved forward by `n` elements from `self`.
     // The offset is in units of T (stride), not bytes.
-    advance(self, n Int) Self;
-}
-
-// Peek is restricted to Copy types because it duplicates the value from the container.
-given[T Copy] [T]Pointer {
-    // Peeks the value from `self` without removing or invalidating it.
-    // Returns a copy of the value.
-    // PRECONDITION: Memory at `self` must be initialized.
-    peek(self) T;
+    offset(self, n Int) Self;
 }
 */
+
 // builtin
 // let [T Any]ref_count(r T ref) Int;
+
+// builtin
+// Allocates uninitialized memory for `capacity` number of elements.
+// The caller is responsible for deallocating this memory later.
+// let [T Any]alloc_memory(capacity Int) [T]Pointer;
+
+// builtin
+// Deallocates the memory pointed to by `ptr`.
+// PRECONDITION: The memory must be deinitialized (i.e. uninitialized).
+// If the memory contains values that need to be dropped, call `ptr.deinit()` first.
+// let [T Any]dealloc_memory(ptr [T]Pointer) Void;
+
+// builtin
+// Copies `count` elements from `source` to `dest`.
+// The memory regions must NOT overlap.
+// PRECONDITION: Memory at `dest` must be uninitialized. `source` must be initialized.
+// POSTCONDITION: Memory at `dest` is initialized. `source` remains initialized.
+// let [T Any]copy_memory(dest [T]Pointer, source [T]Pointer, count Int) Void;
+
+// builtin
+// Moves `count` elements from `source` to `dest`.
+// The memory regions may overlap.
+// PRECONDITION: Memory at `dest` must be uninitialized. `source` must be initialized.
+// POSTCONDITION: Memory at `dest` is initialized. Memory at `source` becomes uninitialized.
+// let [T Any]move_memory(dest [T]Pointer, source [T]Pointer, count Int) Void;
 
 type [T Copy]ListStorage(mut source [T]Pointer, mut len Int, mut cap Int);
 
 public type [T Copy]List(storage [T]ListStorage ref);
 
 given[T Copy] [T]List {
-    public new() Self = List(ref ListStorage([T]Pointer.allocate(10), 0, 10));
+    public new() Self = List(ref ListStorage(alloc_memory(10), 0, 10));
 
     drop(self ref) = {
         if ref_count(self.storage) == 1 then {
             for i = 0..<self.storage.len then {
-                self.storage.source.advance(i).deinitialize();
+                self.storage.source.offset(i).deinit();
             }
-            self.storage.source.deallocate();
+            dealloc_memory(self.storage.source);
         }
     }
 
     public count(self ref) Int = self.storage.len;
 
-    public get(self ref, index Int) T = self.storage.source.advance(index).peek();
+    public get(self ref, index Int) T = deref self.storage.source.offset(index).peek();
     
     public set(self ref, index Int, value T) Void = {
         make_sure_unique(self);
-        self.storage.source.advance(index).put(value);
+        self.storage.source.offset(index).put(value);
     }
 
     public push(self ref, value T) Void = {
         make_sure_unique(self);
         // todo, make sure the cap is enough
-        self.storage.source.advance(self.storage.len).initialize(value);
+        self.storage.source.offset(self.storage.len).init(value);
         self.storage.len += 1;
     }
 
@@ -126,26 +138,21 @@ given[T Copy] [T]List {
         make_sure_unique(self);
         // todo, make sure the cap is enough
         if index < self.storage.len then {
-            // Move elements to create space from back to front
-            // Handle the last element first: move it to uninitialized memory
-            let last = self.storage.source.advance(self.storage.len - 1).take();
-            self.storage.source.advance(self.storage.len).initialize(last);
+            // Move elements to create space
+            let src = self.storage.source.offset(index);
+            let dest = self.storage.source.offset(index + 1);
+            let count = self.storage.len - index;
             
-            // Shift the rest
-            for i = self.storage.len - 1 ..< index step -1 then {
-                 // Move [i-1] to [i]
-                 let prev = self.storage.source.advance(i - 1).take();
-                 // Slot [i] is now logically uninitialized (because we moved out of it in previous step? NO)
-                 // Wait, loop logic:
-                 // Iteration 1 (i = len-1): We want to move [len-2] to [len-1].
-                 // [len-1] was moved out in "Handle the last element first". So it IS uninitialized.
-                 // So we use initialize.
-                 self.storage.source.advance(i).initialize(prev);
-            }
-            // After loop, slot [index] is uninitialized.
-            self.storage.source.advance(index).initialize(value);
+            // Move [index...len-1] to [index+1...len]
+            // dest overlaps src, so we must use move_memory (memmove)
+            // Note: In our definition, move_memory leaves src uninitialized. 
+            // This perfectly matches the logic:
+            // The slot at `index` becomes logically uninitialized (a "hole"), ready for `init(value)`.
+            move_memory(dest, src, count);
+            
+            self.storage.source.offset(index).init(value);
         } else {
-             self.storage.source.advance(self.storage.len).initialize(value);
+             self.storage.source.offset(self.storage.len).init(value);
         }
         self.storage.len += 1;
     }
@@ -154,23 +161,22 @@ given[T Copy] [T]List {
         make_sure_unique(self);
         
         // 1. Drop the element at index
-        self.storage.source.advance(index).deinitialize();
+        self.storage.source.offset(index).deinit();
         
         // 2. Shift remaining elements down
-        for i = index ..< self.storage.len - 1 then {
-            // We want to move [i+1] to [i]
-            // Slot [i] is uninitialized (either dropped above, or moved out in previous iter)
-            let next_val = self.storage.source.advance(i + 1).take();
-            self.storage.source.advance(i).initialize(next_val);
+        if index < self.storage.len - 1 then {
+            let src = self.storage.source.offset(index + 1);
+            let dest = self.storage.source.offset(index);
+            let count = self.storage.len - 1 - index;
+            
+            // Move [index+1...len-1] to [index...len-2]
+            move_memory(dest, src, count);
         }
-        
-        // 3. The last element slot is now uninitialized because we moved from it in the last iteration.
-        // So we don't need to deinitialize it! It's already empty.
         
         self.storage.len -= 1;
     }
 
-    public iterator(self) [T]ListIterator = [T]ListIterator(self, 0);
+    public iterator(self) [T]ListIterator = [T]ListIterator(self, -1);
 
     make_sure_unique(self ref) = { 
         // todo

@@ -68,15 +68,15 @@ public class CodeGen {
           }
       }
 
-      void printString(const char* message) {
+      void print_string(const char* message) {
           printf("%s\\n", message);
       }
 
-      void printInt(int value) {
+      void print_int(int value) {
           printf("%d\\n", value);
       }
 
-      void printBool(_Bool value) {
+      void print_bool(_Bool value) {
           printf("%s\\n", value ? "true" : "false");
       }
 
