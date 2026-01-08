@@ -2,6 +2,13 @@
 
 // Method declaration used inside given blocks; same shape as a global function
 
+public enum AccessModifier: String {
+  case `public`
+  case `private`
+  case `protected`
+  case `default`
+}
+
 public indirect enum ASTNode {
   case program(globalNodes: [GlobalNode])
 }
@@ -11,18 +18,20 @@ public indirect enum TypeNode {
   case generic(base: String, args: [TypeNode])
 }
 public indirect enum GlobalNode {
-  case globalVariableDeclaration(name: String, type: TypeNode, value: ExpressionNode, mutable: Bool)
+  case globalVariableDeclaration(name: String, type: TypeNode, value: ExpressionNode, mutable: Bool, access: AccessModifier)
   case globalFunctionDeclaration(
     name: String,
     typeParameters: [String],
     parameters: [(name: String, mutable: Bool, type: TypeNode)],
     returnType: TypeNode,
-    body: ExpressionNode
+    body: ExpressionNode,
+    access: AccessModifier
   )
   case globalTypeDeclaration(
     name: String,
     typeParameters: [String],
-    parameters: [(name: String, type: TypeNode, mutable: Bool)]
+    parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier)],
+    access: AccessModifier
   )
   // given [T] Type { ...methods... }
   case givenDeclaration(typeParams: [String] = [], type: TypeNode, methods: [MethodDeclaration])
@@ -33,19 +42,22 @@ public struct MethodDeclaration {
   public let parameters: [(name: String, mutable: Bool, type: TypeNode)]
   public let returnType: TypeNode
   public let body: ExpressionNode
+  public let access: AccessModifier
 
   public init(
     name: String,
     typeParameters: [String],
     parameters: [(name: String, mutable: Bool, type: TypeNode)],
     returnType: TypeNode,
-    body: ExpressionNode
+    body: ExpressionNode,
+    access: AccessModifier
   ) {
     self.name = name
     self.typeParameters = typeParameters
     self.parameters = parameters
     self.returnType = returnType
     self.body = body
+    self.access = access
   }
 }
 public indirect enum StatementNode {

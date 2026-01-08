@@ -61,7 +61,7 @@ public class TypeChecker {
 
   private func checkGlobalDeclaration(_ decl: GlobalNode) throws -> TypedGlobalNode? {
     switch decl {
-    case .globalVariableDeclaration(let name, let typeNode, let value, let isMut):
+    case .globalVariableDeclaration(let name, let typeNode, let value, let isMut, _):
       guard case nil = currentScope.lookup(name) else {
         throw SemanticError.duplicateDefinition(name)
       }
@@ -79,7 +79,7 @@ public class TypeChecker {
       )
 
     case .globalFunctionDeclaration(
-      let name, let typeParameters, let parameters, let returnTypeNode, let body):
+      let name, let typeParameters, let parameters, let returnTypeNode, let body, let access):
       guard case nil = currentScope.lookup(name) else {
         throw SemanticError.duplicateDefinition(name)
       }
@@ -107,7 +107,8 @@ public class TypeChecker {
           typeParameters: typeParameters,
           parameters: parameters,
           returnType: returnTypeNode,
-          body: body
+          body: body,
+          access: access
         )
         currentScope.defineGenericFunctionTemplate(name, template: template)
         return .genericFunctionTemplate(name: name)
@@ -232,7 +233,7 @@ public class TypeChecker {
 
       return .givenDeclaration(type: type, methods: typedMethods)
 
-    case .globalTypeDeclaration(let name, let typeParameters, let parameters):
+    case .globalTypeDeclaration(let name, let typeParameters, let parameters, _):
       // Check if type already exists
       if currentScope.lookupType(name) != nil {
         throw SemanticError.duplicateTypeDefinition(name)

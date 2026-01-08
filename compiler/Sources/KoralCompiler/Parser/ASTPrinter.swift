@@ -4,8 +4,9 @@ public func printAST(_ node: ASTNode) {
 
   func printGlobalNode(_ node: GlobalNode) {
     switch node {
-    case .globalVariableDeclaration(let name, let type, let value, let mutable):
+    case .globalVariableDeclaration(let name, let type, let value, let mutable, let access):
       print("\(indent)GlobalVariableDeclaration:")
+      print("\(indent)  Access: \(access)")
       print("\(indent)  Name: \(name)")
       print("\(indent)  Type: \(type)")
       print("\(indent)  Mutable: \(mutable)")
@@ -15,8 +16,9 @@ public func printAST(_ node: ASTNode) {
       }
 
     case .globalFunctionDeclaration(
-      let name, let typeParameters, let parameters, let returnType, let body):
+      let name, let typeParameters, let parameters, let returnType, let body, let access):
       print("\(indent)GlobalFunctionDeclaration:")
+      print("\(indent)  Access: \(access)")
       print("\(indent)  Name: \(name)")
       print("\(indent)  TypeParameters:")
       for param in typeParameters {
@@ -35,14 +37,16 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .globalTypeDeclaration(let name, let typeParameters, let parameters):
+    case .globalTypeDeclaration(let name, let typeParameters, let parameters, let access):
       print("\(indent)TypeDeclaration \(name)")
+      print("\(indent)  Access: \(access)")
       if !typeParameters.isEmpty {
         print("\(indent)  TypeParameters: \(typeParameters)")
       }
       for param in parameters {
         print("\(indent)  \(param.name): \(param.type)")
         print("\(indent)  Mutable: \(param.mutable)")
+        print("\(indent)  Access: \(param.access)")
       }
 
     case .givenDeclaration(let typeParams, let type, let methods):
@@ -55,6 +59,7 @@ public func printAST(_ node: ASTNode) {
       withIndent {
         for method in methods {
           print("\(indent)MethodDeclaration:")
+          print("\(indent)  Access: \(method.access)")
           print("\(indent)  Name: \(method.name)")
           print("\(indent)  TypeParameters:")
           for param in method.typeParameters {
