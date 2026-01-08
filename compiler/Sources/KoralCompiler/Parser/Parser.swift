@@ -36,6 +36,8 @@ public class Parser {
 
   // Parse global declaration
   private func parseGlobalDeclaration() throws -> GlobalNode {
+    let access = try parseAccessModifier()
+
     if currentToken === .letKeyword {
       try match(.letKeyword)
 
@@ -63,14 +65,14 @@ public class Parser {
         if currentToken === .leftParen {
           throw ParserError.unexpectedToken(line: lexer.currentLine, got: currentToken.description)
         }
-        return try globalVariableDeclaration(name: name, mutable: true)
+        return try globalVariableDeclaration(name: name, mutable: true, access: access)
       }
 
       // Otherwise check for left paren to determine if it's a function or variable
       if currentToken === .leftParen {
-        return try globalFunctionDeclaration(name: name, typeParams: typePrams)
+        return try globalFunctionDeclaration(name: name, typeParams: typePrams, access: access)
       } else {
-        return try globalVariableDeclaration(name: name, mutable: false)
+        return try globalVariableDeclaration(name: name, mutable: false, access: access)
       }
     } else if currentToken === .typeKeyword {
       try match(.typeKeyword)
@@ -86,8 +88,19 @@ public class Parser {
       }
 
       try match(.identifier(name))
-      return try parseTypeDeclaration(name, typeParams: typeParams)
+      return try parseTypeDeclaration(name, typeParams: typeParams, access: access)
     } else if currentToken === .givenKeyword {
+      if access != .default {
+         // Optionally throw error, or allow. 
+         // Since AST doesn't support access for givenDeclaration, we can't persist it.
+         // Effectively ignoring it but allowing syntax "private given ..." -> parses as "given ..."
+         // The user instruction implies "global variables, global functions, global type declarations, methods in given, fields in type"
+         // It *skips* "given declaration itself".
+         // So `private given` is arguably invalid or at least not requested.
+         // But if I parse it, I am consuming the token.
+         // If I error:
+         throw ParserError.unexpectedToken(line: lexer.currentLine, got: "Access modifier on given declaration")
+      }
       return try parseGivenDeclaration()
     } else {
       throw ParserError.unexpectedToken(line: lexer.currentLine, got: currentToken.description)
@@ -101,6 +114,7 @@ public class Parser {
     try match(.leftBrace)
     var methods: [MethodDeclaration] = []
     while currentToken !== .rightBrace {
+      let methodAccess = try parseAccessModifier()
       let typeParams = try parseTypeParameters()
 
       guard case .identifier(let name) = currentToken else {
@@ -146,11 +160,26 @@ public class Parser {
           typeParameters: typeParams,
           parameters: parameters,
           returnType: returnType,
-          body: body
+          body: body,
+          access: methodAccess
         ))
     }
     try match(.rightBrace)
     return .givenDeclaration(typeParams: typeParams, type: type, methods: methods)
+  }
+
+  private func parseAccessModifier() throws -> AccessModifier {
+    if currentToken === .privateKeyword {
+      try match(.privateKeyword)
+      return .private
+    } else if currentToken === .protectedKeyword {
+      try match(.protectedKeyword)
+      return .protected
+    } else if currentToken === .publicKeyword {
+      try match(.publicKeyword)
+      return .public
+    }
+    return .default
   }
 
   // Parse type identifier
@@ -201,11 +230,11 @@ public class Parser {
   }
 
   // Parse global variable declaration
-  private func globalVariableDeclaration(name: String, mutable: Bool) throws -> GlobalNode {
+  private func globalVariableDeclaration(name: String, mutable: Bool, access: AccessModifier) throws -> GlobalNode {
     let type = try parseType()
     try match(.equal)
     let value = try expression()
-    return .globalVariableDeclaration(name: name, type: type, value: value, mutable: mutable)
+    return .globalVariableDeclaration(name: name, type: type, value: value, mutable: mutable, access: access)
   }
 
   private func parseTypeParameters() throws -> [String] {
@@ -236,7 +265,7 @@ public class Parser {
   }
 
   // Parse global function declaration with optional 'own'/'ref' modifiers for params and return type
-  private func globalFunctionDeclaration(name: String, typeParams: [String]) throws -> GlobalNode {
+  private func globalFunctionDeclaration(name: String, typeParams: [String], access: AccessModifier) throws -> GlobalNode {
     try match(.leftParen)
     var parameters: [(name: String, mutable: Bool, type: TypeNode)] = []
     while currentToken !== .rightParen {
@@ -269,15 +298,18 @@ public class Parser {
       typeParameters: typeParams,
       parameters: parameters,
       returnType: returnType,
-      body: body
+      body: body,
+      access: access
     )
   }
     
   // Parse type declaration
-  private func parseTypeDeclaration(_ name: String, typeParams: [String]) throws -> GlobalNode {
+  private func parseTypeDeclaration(_ name: String, typeParams: [String], access: AccessModifier) throws -> GlobalNode {
     try match(.leftParen)
-    var parameters: [(name: String, type: TypeNode, mutable: Bool)] = []
+    var parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier)] = []
     while currentToken !== .rightParen {
+      let fieldAccess = try parseAccessModifier()
+      
       // Check for mut keyword for the field
       var fieldMutable = false
       if currentToken === .mutKeyword {
@@ -291,7 +323,7 @@ public class Parser {
       try match(.identifier(paramName))
       let paramType = try parseType()
 
-      parameters.append((name: paramName, type: paramType, mutable: fieldMutable))
+      parameters.append((name: paramName, type: paramType, mutable: fieldMutable, access: fieldAccess))
 
       if currentToken === .comma {
         try match(.comma)
@@ -302,7 +334,8 @@ public class Parser {
     return .globalTypeDeclaration(
       name: name,
       typeParameters: typeParams,
-      parameters: parameters
+      parameters: parameters,
+      access: access
     )
   }
 
