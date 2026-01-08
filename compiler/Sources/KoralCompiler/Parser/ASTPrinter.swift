@@ -45,8 +45,11 @@ public func printAST(_ node: ASTNode) {
         print("\(indent)  Mutable: \(param.mutable)")
       }
 
-    case .givenDeclaration(let type, let methods):
+    case .givenDeclaration(let typeParams, let type, let methods):
       print("\(indent)GivenDeclaration:")
+      if !typeParams.isEmpty {
+        print("\(indent)  TypeParameters: \(typeParams)")
+      }
       print("\(indent)  Type: \(type)")
       print("\(indent)  Methods:")
       withIndent {

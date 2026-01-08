@@ -96,6 +96,7 @@ public class Parser {
 
   private func parseGivenDeclaration() throws -> GlobalNode {
     try match(.givenKeyword)
+    let typeParams = try parseTypeParameters()
     let type = try parseType()
     try match(.leftBrace)
     var methods: [MethodDeclaration] = []
@@ -149,7 +150,7 @@ public class Parser {
         ))
     }
     try match(.rightBrace)
-    return .givenDeclaration(type: type, methods: methods)
+    return .givenDeclaration(typeParams: typeParams, type: type, methods: methods)
   }
 
   // Parse type identifier
@@ -219,6 +220,11 @@ public class Parser {
         try match(.identifier(paramName))
 
         parameters.append(paramName)
+
+        // Consume optional type bound/constraint (ignored for now)
+        if currentToken !== .comma && currentToken !== .rightBracket {
+             _ = try parseType()
+        }
 
         if currentToken === .comma {
           try match(.comma)
