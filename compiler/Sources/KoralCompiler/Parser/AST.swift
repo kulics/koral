@@ -24,8 +24,8 @@ public indirect enum GlobalNode {
     typeParameters: [String],
     parameters: [(name: String, type: TypeNode, mutable: Bool)]
   )
-  // given Type { ...methods... }
-  case givenDeclaration(type: TypeNode, methods: [MethodDeclaration])
+  // given [T] Type { ...methods... }
+  case givenDeclaration(typeParams: [String] = [], type: TypeNode, methods: [MethodDeclaration])
 }
 public struct MethodDeclaration {
   public let name: String
