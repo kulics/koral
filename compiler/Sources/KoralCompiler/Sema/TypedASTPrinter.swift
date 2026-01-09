@@ -333,6 +333,8 @@ public func printTypedAST(_ node: TypedProgram) {
           }
         }
       }
+    case .intrinsicCall(let node):
+      print("\(indent)IntrinsicCall: \(node)")
     }
   }
 

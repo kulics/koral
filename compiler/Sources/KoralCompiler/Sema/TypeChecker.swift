@@ -141,7 +141,7 @@ public class TypeChecker {
           for (typeParam, _) in typeParameters {
             try currentScope.defineType(typeParam, type: .genericParameter(name: typeParam))
           }
-          let returnType = try resolveTypeNode(returnTypeNode)
+          _ = try resolveTypeNode(returnTypeNode)
           _ = try parameters.map { param -> Symbol in
             let paramType = try resolveTypeNode(param.type)
             return Symbol(
@@ -162,7 +162,7 @@ public class TypeChecker {
         return .genericFunctionTemplate(name: name)
       }
 
-      let (functionType, typedBody, params) = try withNewScope {
+      let (functionType, _, _) = try withNewScope {
         let returnType = try resolveTypeNode(returnTypeNode)
         let params = try parameters.map { param -> Symbol in
           let paramType = try resolveTypeNode(param.type)
@@ -396,8 +396,8 @@ public class TypeChecker {
       case "Void": type = .void
       case "String": type = .string
       case "Pointer":
-        // Intrinsic generic types are special. For now treat as template.
-        type = .structure(name: name, members: [], isGenericInstantiation: false)
+         // Pointer is generic, handled below
+         type = .void // Placeholder
       default:
         // Default to empty structure for other intrinsics
         type = .structure(name: name, members: [], isGenericInstantiation: false)
@@ -410,7 +410,6 @@ public class TypeChecker {
       } else {
         // For generic intrinsics (like Pointer<T>), we still need a template definition
         // so the type checker knows it accepts distinct type parameters.
-        // We can use an empty parameter list for the "struct body" since it's intrinsic.
         let template = GenericTemplate(name: name, typeParameters: typeParameters, parameters: [])
         currentScope.defineGenericTemplate(name, template: template)
         return .genericTypeTemplate(name: name)
@@ -587,6 +586,27 @@ public class TypeChecker {
             type: instantiatedType
           )
         } else if let template = currentScope.lookupGenericFunctionTemplate(base) {
+          // Special handling for explicit intrinsic template calls (e.g. [Int]alloc_memory)
+          if base == "alloc_memory" {
+            let resolvedArgs = try args.map { try resolveTypeNode($0) }
+            guard resolvedArgs.count == 1 else {
+              throw SemanticError.typeMismatch(expected: "1 generic arg", got: "\(resolvedArgs.count)")
+            }
+            let T = resolvedArgs[0]
+
+            guard arguments.count == 1 else {
+              throw SemanticError.invalidArgumentCount(
+                function: base, expected: 1, got: arguments.count)
+            }
+            let countExpr = try inferTypedExpression(arguments[0])
+            if countExpr.type != .int {
+              throw SemanticError.typeMismatch(expected: "Int", got: countExpr.type.description)
+            }
+
+            return .intrinsicCall(
+              .allocMemory(count: countExpr, resultType: .pointer(element: T)))
+          }
+
           let resolvedArgs = try args.map { try resolveTypeNode($0) }
           let (instantiatedName, instantiatedType) = try instantiateFunction(
             template: template, args: resolvedArgs)
@@ -657,6 +677,18 @@ public class TypeChecker {
             return type
           }
 
+          if template.name == "dealloc_memory" {
+            return .intrinsicCall(.deallocMemory(ptr: typedArguments[0]))
+          }
+          if template.name == "copy_memory" {
+            return .intrinsicCall(
+              .copyMemory(
+                dest: typedArguments[0], source: typedArguments[1], count: typedArguments[2]))
+          }
+          if template.name == "ref_count" {
+            return .intrinsicCall(.refCount(val: typedArguments[0]))
+          }
+
           let (instantiatedName, instantiatedType) = try instantiateFunction(
             template: template, args: resolvedArgs)
 
@@ -704,10 +736,22 @@ public class TypeChecker {
         }
       }
 
+      // Special handling for intrinsic function calls (alloc_memory, etc.)
+      if case .identifier(let name) = callee {
+        if let intrinsicNode = try checkIntrinsicCall(name: name, arguments: arguments) {
+            return intrinsicNode
+        }
+      }
+
       let typedCallee = try inferTypedExpression(callee)
 
       // Method call
       if case .methodReference(let base, let method, let methodType) = typedCallee {
+        // Intercept Pointer methods
+        if case .pointer(_) = base.type, let node = try checkIntrinsicPointerMethod(base: base, method: method, args: arguments) {
+             return node
+        }
+
         if case .function(let params, let returns) = method.type {
           if arguments.count != params.count - 1 {
             throw SemanticError.invalidArgumentCount(
@@ -891,6 +935,28 @@ public class TypeChecker {
               return .methodReference(base: base, method: methodSym, type: methodSym.type)
             }
 
+            if case .pointer(let element) = typeToLookup {
+              if let extensions = genericIntrinsicExtensionMethods["Pointer"] {
+                for ext in extensions {
+                  if ext.method.name == memberName {
+                    let methodSym = try instantiateIntrinsicExtensionMethod(
+                      baseType: typeToLookup,
+                      structureName: "Pointer",
+                      genericArgs: [element],
+                      methodInfo: ext
+                    )
+                    let base: TypedExpressionNode
+                    if typedPath.isEmpty {
+                      base = typedBase
+                    } else {
+                      base = .memberPath(source: typedBase, path: typedPath)
+                    }
+                    return .methodReference(base: base, method: methodSym, type: methodSym.type)
+                  }
+                }
+              }
+            }
+
             if case .structure(_, _, let isGen) = typeToLookup, isGen,
               let info = layoutToTemplateInfo[typeName]
             {
@@ -950,6 +1016,82 @@ public class TypeChecker {
     case .genericInstantiation(let base, _):
       throw SemanticError.invalidOperation(op: "use type as value", type1: base, type2: "")
     }
+  }
+
+
+  private func checkIntrinsicCall(name: String, arguments: [ExpressionNode]) throws -> TypedExpressionNode? {
+      switch name {
+      case "alloc_memory":
+         guard arguments.count == 1 else { throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count) }
+         // Handle generics? [T]alloc_memory
+         // The parser doesn't pass generic args here directly in Call expression? 
+         // Wait, explicit generic call .generic(fn, args) is distinct from call?
+         // In AST, Call is (callee, arguments). If callee is .generic(base, args), we catch it in generic instantiation.
+         // But for intrinsic alloc_memory, we might need to know T.
+         // Let's assume Koral's `[Int]alloc_memory(2)` resolves to `alloc_memory` with a generic instance.
+         // If `alloc_memory` is defined as `intrinsic let [T]alloc_memory...`, standard resolution might find it.
+         // But we want to bypass that. 
+         // Strategy: If `callee` is `identifier`, and `currentScope` has `alloc_memory`, it's the generic template.
+         // We need to support `[Int]alloc_memory(...)`. 
+         // If so, `callee` is NOT `identifier`, it is `generic(base, args)`.
+         // `inferTypedExpression` handles `.generic` by instantiating.
+         // We should intercept `generic` too or let it instantiate and then check the name?
+         // If we let it instantiate, we get a function. Then we call it.
+         // So `callee` will be a `TypedExpressionNode`? No, `callee` in `checkIntrinsicCall` is `ExpressionNode` (identifier).
+         return nil // handled in generic inst for now or handled after resolution?
+         
+      // Non-generic intrinsics
+      case "print_string":
+          guard arguments.count == 1 else { throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count) }
+          let msg = try inferTypedExpression(arguments[0])
+          return .intrinsicCall(.printString(message: msg))
+      case "print_int":
+           guard arguments.count == 1 else { throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count) }
+           let val = try inferTypedExpression(arguments[0])
+           return .intrinsicCall(.printInt(value: val))
+      case "print_bool":
+           guard arguments.count == 1 else { throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count) }
+           let val = try inferTypedExpression(arguments[0])
+           return .intrinsicCall(.printBool(value: val))
+           
+      default: return nil
+      }
+  }
+
+  private func checkIntrinsicPointerMethod(base: TypedExpressionNode, method: Symbol, args: [ExpressionNode]) throws -> TypedExpressionNode? {
+      // method.name is mangled (e.g. Pointer_I_init). Extract the method name.
+      var name = method.name
+      if name.hasPrefix("Pointer_") {
+         if let idx = name.lastIndex(of: "_") {
+             name = String(name[name.index(after: idx)...])
+         }
+      }
+      
+      switch name {
+      case "init":
+           guard args.count == 1 else { throw SemanticError.invalidArgumentCount(function: "init", expected: 1, got: args.count) }
+           let val = try inferTypedExpression(args[0])
+           return .intrinsicCall(.ptrInit(ptr: base, val: val))
+      case "deinit":
+           guard args.count == 0 else { throw SemanticError.invalidArgumentCount(function: "deinit", expected: 0, got: args.count) }
+           return .intrinsicCall(.ptrDeinit(ptr: base))
+      case "peek":
+           guard args.count == 0 else { throw SemanticError.invalidArgumentCount(function: "peek", expected: 0, got: args.count) }
+           return .intrinsicCall(.ptrPeek(ptr: base))
+      case "offset":
+           guard args.count == 1 else { throw SemanticError.invalidArgumentCount(function: "offset", expected: 1, got: args.count) }
+           let offset = try inferTypedExpression(args[0])
+           return .intrinsicCall(.ptrOffset(ptr: base, offset: offset))
+      case "take":
+           guard args.count == 0 else { throw SemanticError.invalidArgumentCount(function: "take", expected: 0, got: args.count) }
+           return .intrinsicCall(.ptrTake(ptr: base))
+      case "replace":
+           guard args.count == 1 else { throw SemanticError.invalidArgumentCount(function: "replace", expected: 1, got: args.count) }
+           let val = try inferTypedExpression(args[0])
+           return .intrinsicCall(.ptrReplace(ptr: base, val: val))
+      default:
+           return nil
+      }
   }
 
   // 新增用于返回带类型的语句的检查函数
@@ -1175,6 +1317,11 @@ public class TypeChecker {
         got: "\(args.count)"
       )
     }
+    
+    // Direct Pointer resolution
+    if template.name == "Pointer" {
+         return .pointer(element: args[0])
+    }
 
     let key = "\(template.name)<\(args.map { $0.description }.joined(separator: ","))>"
     if let cached = instantiatedTypes[key] {
@@ -1276,6 +1423,8 @@ public class TypeChecker {
           kind: .variable(param.mutable ? .MutableValue : .Value))
       }
 
+      // If intrinsic, we return early in checkIntrinsicCall/checkIntrinsicPointerMethod
+      
       let (typedBody, functionType) = try checkFunctionBody(params, returnType, template.body)
       return (functionType, typedBody, params)
     }
@@ -1289,7 +1438,9 @@ public class TypeChecker {
     let mangledName = "\(template.name)_\(argLayoutKeys)"
 
     // 3. Register Global Function if not already generated
-    if !generatedLayouts.contains(mangledName) {
+    // Skip if intrinsic
+    let intrinsicNames = ["alloc_memory", "dealloc_memory", "copy_memory", "move_memory", "ref_count"]
+    if !generatedLayouts.contains(mangledName) && !intrinsicNames.contains(template.name) {
       generatedLayouts.insert(mangledName)
 
       let functionNode = TypedGlobalNode.globalFunction(
@@ -1380,7 +1531,7 @@ public class TypeChecker {
       return Symbol(name: cachedName, type: cachedType, kind: .function)
     }
 
-    let (functionType, typedBody, params) = try withNewScope {
+    let (functionType, _, _) = try withNewScope {
       for (i, paramInfo) in typeParams.enumerated() {
         try currentScope.defineType(paramInfo.name, type: genericArgs[i])
       }
@@ -1408,17 +1559,6 @@ public class TypeChecker {
       return (funcType, typedBody, params)
     }
 
-    if !generatedLayouts.contains(mangledName) {
-      generatedLayouts.insert(mangledName)
-      let functionSymbol = Symbol(name: mangledName, type: functionType, kind: .function)
-      let functionNode = TypedGlobalNode.globalFunction(
-        identifier: functionSymbol,
-        parameters: params,
-        body: typedBody
-      )
-      extraGlobalNodes.append(functionNode)
-    }
-
     instantiatedFunctions[key] = (mangledName, functionType)
     return Symbol(name: mangledName, type: functionType, kind: .function)
   }
@@ -1426,6 +1566,7 @@ public class TypeChecker {
   private func unify(
     node: TypeNode, type: Type, inferred: inout [String: Type], typeParams: [String]
   ) throws {
+    // print("Unify node: \(node) with type: \(type) (canonical: \(type.canonical))")
     switch node {
     case .identifier(let name):
       if typeParams.contains(name) {
@@ -1441,8 +1582,18 @@ public class TypeChecker {
       if case .reference(let innerType) = type {
         try unify(node: inner, type: innerType, inferred: &inferred, typeParams: typeParams)
       }
-    default:
-      break
+    case .generic(let base, let args):
+      if case .pointer(let element) = type, base == "Pointer", args.count == 1 {
+          try unify(node: args[0], type: element, inferred: &inferred, typeParams: typeParams)
+      } else if case .structure(let name, _, _) = type {
+        if let info = layoutToTemplateInfo[name] {
+            if info.base == base && info.args.count == args.count {
+                for (argNode, argType) in zip(args, info.args) {
+                    try unify(node: argNode, type: argType, inferred: &inferred, typeParams: typeParams)
+                }
+            }
+        }
+      }
     }
   }
 
