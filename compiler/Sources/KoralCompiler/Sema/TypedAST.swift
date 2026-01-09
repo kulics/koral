@@ -114,7 +114,59 @@ public indirect enum TypedExpressionNode {
   case whileExpression(condition: TypedExpressionNode, body: TypedExpressionNode, type: Type)
   case typeConstruction(identifier: Symbol, arguments: [TypedExpressionNode], type: Type)
   case memberPath(source: TypedExpressionNode, path: [Symbol])
+  case intrinsicCall(TypedIntrinsic)
 }
+
+public indirect enum TypedIntrinsic {
+    // Memory Management
+    case allocMemory(count: TypedExpressionNode, resultType: Type)
+    case deallocMemory(ptr: TypedExpressionNode)
+    case copyMemory(dest: TypedExpressionNode, source: TypedExpressionNode, count: TypedExpressionNode)
+    case moveMemory(dest: TypedExpressionNode, source: TypedExpressionNode, count: TypedExpressionNode)
+    case refCount(val: TypedExpressionNode)
+    
+    // Pointer Operations
+    case ptrInit(ptr: TypedExpressionNode, val: TypedExpressionNode)
+    case ptrDeinit(ptr: TypedExpressionNode)
+    case ptrPeek(ptr: TypedExpressionNode)
+    case ptrOffset(ptr: TypedExpressionNode, offset: TypedExpressionNode)
+    case ptrTake(ptr: TypedExpressionNode)
+    case ptrReplace(ptr: TypedExpressionNode, val: TypedExpressionNode)
+    
+    // Primitive IO
+    case printString(message: TypedExpressionNode)
+    case printInt(value: TypedExpressionNode)
+    case printBool(value: TypedExpressionNode)
+
+    public var type: Type {
+        switch self {
+        case .allocMemory(_, let resultType): return resultType
+        case .deallocMemory: return .void
+        case .copyMemory: return .void
+        case .moveMemory: return .void
+        case .refCount: return .int
+        case .ptrInit: return .void
+        case .ptrDeinit: return .void
+        case .ptrPeek(let ptr):
+             // return T ref
+             if case .pointer(let element) = ptr.type {
+                  return .reference(inner: element)
+             }
+             fatalError("ptrPeek on non-pointer")
+        case .ptrOffset(let ptr, _): return ptr.type
+        case .ptrTake(let ptr):
+             if case .pointer(let element) = ptr.type { return element }
+             fatalError("ptrTake on non-pointer")
+        case .ptrReplace(let ptr, _):
+             if case .pointer(let element) = ptr.type { return element }
+             fatalError("ptrReplace on non-pointer")
+        case .printString: return .void
+        case .printInt: return .void
+        case .printBool: return .void
+        }
+    }
+}
+
 extension TypedExpressionNode {
   var type: Type {
     switch self {
@@ -143,6 +195,8 @@ extension TypedExpressionNode {
       return identifier.type
     case .memberPath(_, let path):
       return path.last?.type ?? .void
+    case .intrinsicCall(let node):
+      return node.type
     }
   }
 

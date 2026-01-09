@@ -37,6 +37,8 @@ public class CodeGen {
       #include <stdio.h>
       #include <stdlib.h>
       #include <stdatomic.h>
+      #include <string.h>
+      #include <stdint.h>
 
       // Generic Ref type
       struct Ref { void* ptr; void* control; };
@@ -68,17 +70,7 @@ public class CodeGen {
           }
       }
 
-      void print_string(const char* message) {
-          printf("%s\\n", message);
-      }
 
-      void print_int(int value) {
-          printf("%d\\n", value);
-      }
-
-      void print_bool(_Bool value) {
-          printf("%s\\n", value ? "true" : "false");
-      }
 
       """
 
@@ -617,6 +609,156 @@ public class CodeGen {
       return result
     case .memberPath(let source, let path):
       return generateMemberPath(source, path)
+    case .intrinsicCall(let node):
+      return generateIntrinsicSSA(node)
+    }
+  }
+
+
+  private func generateIntrinsicSSA(_ node: TypedIntrinsic) -> String {
+    switch node {
+    case .allocMemory(let count, let type):
+      // malloc
+      guard case .pointer(let element) = type else { fatalError("alloc_memory expects Pointer result") }
+      let countVal = generateExpressionSSA(count)
+      let elemSize = "sizeof(\(getCType(element)))"
+      let result = nextTemp()
+      addIndent()
+      buffer += "\(getCType(type)) \(result);\n"
+      addIndent()
+      buffer += "\(result) = malloc(\(countVal) * \(elemSize));\n"
+      return result
+
+    case .deallocMemory(let ptr):
+      let ptrVal = generateExpressionSSA(ptr)
+      addIndent()
+      buffer += "free(\(ptrVal));\n"
+      return ""
+
+    case .copyMemory(let dest, let src, let count):
+      // memcpy
+      guard case .pointer(let element) = dest.type else { fatalError() }
+      let d = generateExpressionSSA(dest)
+      let s = generateExpressionSSA(src)
+      let c = generateExpressionSSA(count)
+      let elemSize = "sizeof(\(getCType(element)))"
+      addIndent()
+      buffer += "memcpy(\(d), \(s), \(c) * \(elemSize));\n"
+      return ""
+
+    case .moveMemory(let dest, let src, let count):
+      // memmove
+      guard case .pointer(let element) = dest.type else { fatalError() }
+      let d = generateExpressionSSA(dest)
+      let s = generateExpressionSSA(src)
+      let c = generateExpressionSSA(count)
+      let elemSize = "sizeof(\(getCType(element)))"
+      addIndent()
+      buffer += "memmove(\(d), \(s), \(c) * \(elemSize));\n"
+      return ""
+
+    case .refCount(let val):
+      let valRes = generateExpressionSSA(val)
+      let result = nextTemp()
+      addIndent()
+      buffer += "int \(result) = 0;\n"
+      addIndent()
+      buffer += "if (\(valRes).control) {\n"
+      withIndent {
+        addIndent()
+        buffer += "\(result) = atomic_load(&((struct Koral_Control*)\(valRes).control)->count);\n"
+      }
+      addIndent()
+      buffer += "}\n"
+      return result
+
+    case .ptrInit(let ptr, let val):
+      guard case .pointer(let element) = ptr.type else { fatalError() }
+      let p = generateExpressionSSA(ptr)
+      let v = generateExpressionSSA(val)
+      let cType = getCType(element)
+      addIndent()
+      buffer += "*(\(cType)*)\(p) = \(v);\n"
+      return ""
+
+    case .ptrDeinit(let ptr):
+      guard case .pointer(let element) = ptr.type else { fatalError() }
+      let p = generateExpressionSSA(ptr)
+      if case .reference(_) = element {
+        addIndent()
+        buffer += "__koral_release(((struct Ref*)\(p))->control);\n"
+      } else if case .structure(let name, _, _) = element {
+        if name == "String" {  // String is primitive struct
+          addIndent()
+          buffer += "__koral_String_drop(\(p));\n"
+        } else {
+          addIndent()
+          buffer += "__koral_\(name)_drop(\(p));\n"
+        }
+      }
+      // int/float/bool/void -> noop
+      return ""
+
+    case .ptrPeek(let ptr):
+      guard case .pointer(_) = ptr.type else { fatalError() }
+      let p = generateExpressionSSA(ptr)
+      let result = nextTemp()
+      addIndent()
+      buffer += "struct Ref \(result);\n"
+      addIndent()
+      buffer += "\(result).ptr = \(p);\n"
+      addIndent()
+      buffer += "\(result).control = NULL;\n"  // Unowned
+      return result
+
+    case .ptrTake(let ptr):
+      guard case .pointer(let element) = ptr.type else { fatalError() }
+      let p = generateExpressionSSA(ptr)
+      let cType = getCType(element)
+      let result = nextTemp()
+      addIndent()
+      buffer += "\(cType) \(result) = *(\(cType)*)\(p);\n"
+      return result
+
+    case .ptrReplace(let ptr, let val):
+      guard case .pointer(let element) = ptr.type else { fatalError() }
+      let p = generateExpressionSSA(ptr)
+      let v = generateExpressionSSA(val)
+      let cType = getCType(element)
+      let result = nextTemp()
+      addIndent()
+      buffer += "\(cType) \(result) = *(\(cType)*)\(p);\n"
+      addIndent()
+      buffer += "*(\(cType)*)\(p) = \(v);\n"
+      return result
+
+    case .ptrOffset(let ptr, let offset):
+      guard case .pointer(let element) = ptr.type else { fatalError() }
+      let p = generateExpressionSSA(ptr)
+      let o = generateExpressionSSA(offset)
+      let cType = getCType(element)
+      let result = nextTemp()
+      addIndent()
+      buffer += "\(getCType(ptr.type)) \(result);\n"
+      addIndent()
+      buffer += "\(result) = ((\(cType)*)\(p)) + \(o);\n"
+      return result
+
+    case .printString(let msg):
+      let m = generateExpressionSSA(msg)
+      addIndent()
+      buffer += "printf(\"%s\\n\", \(m));\n"
+      return ""
+    case .printInt(let val):
+      let v = generateExpressionSSA(val)
+      addIndent()
+      buffer += "printf(\"%lld\\n\", \(v));\n"
+      return ""
+    case .printBool(let val):
+      let v = generateExpressionSSA(val)
+      addIndent()
+      buffer += "printf(\"%s\\n\", \(v) ? \"true\" : \"false\");\n"
+      return ""
     }
   }
 
@@ -764,7 +906,7 @@ public class CodeGen {
 
   private func getCType(_ type: Type) -> String {
     switch type {
-    case .int: return "int"
+    case .int: return "intptr_t"
     case .float: return "double"
     case .string: return "const char*"
     case .bool: return "_Bool"
@@ -777,6 +919,8 @@ public class CodeGen {
       fatalError("Generic parameter \(name) should be resolved before CodeGen")
     case .reference(_):
       return "struct Ref"
+    case .pointer(_):
+        return "void*"
     }
   }
 
@@ -1012,6 +1156,14 @@ public class CodeGen {
         paramResults.append(result)
       }
     }
+    
+    // Intrinsic Implementation is now handled in .intrinsic AST node.
+    // However, keeping this for backward compatibility if any old logic slipped through
+    // or if we switch back.
+    // But since we are cleaning up, we can remove the pointer checks from here as they should be intercepted
+    // by AST generation.
+    // If we missed something in AST transform, this might be dead code.
+    
     addIndent()
     if type == .void {
       buffer += "\(identifier.name)("

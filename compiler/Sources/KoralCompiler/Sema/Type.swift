@@ -7,6 +7,7 @@ public indirect enum Type: CustomStringConvertible {
   case function(parameters: [Parameter], returns: Type)
   case structure(name: String, members: [(name: String, type: Type, mutable: Bool)], isGenericInstantiation: Bool)
   case reference(inner: Type)
+  case pointer(element: Type)
   case genericParameter(name: String)
 
   public var description: String {
@@ -23,6 +24,8 @@ public indirect enum Type: CustomStringConvertible {
       return name
     case .reference(let inner):
       return "\(inner.description) ref"
+    case .pointer(let element):
+      return "\(element.description) ptr"
     case .genericParameter(let name):
       return name
     }
@@ -37,6 +40,7 @@ public indirect enum Type: CustomStringConvertible {
     case .void: return "V"
     case .function: return "Fn"
     case .reference: return "R"
+    case .pointer(_): return "P"
     case .structure(_, let members, _):
       let memberKeys = members.map { $0.type.layoutKey }.joined(separator: "_")
       return "Struct_\(memberKeys)"
@@ -55,6 +59,8 @@ public indirect enum Type: CustomStringConvertible {
       return members.contains { $0.type.containsGenericParameter }
     case .reference(let inner):
       return inner.containsGenericParameter
+    case .pointer(let element):
+       return element.containsGenericParameter
     case .genericParameter:
       return true
     }
@@ -64,6 +70,7 @@ public indirect enum Type: CustomStringConvertible {
     switch self {
     case .int, .float, .bool, .void, .string: return self
     case .reference(_): return .reference(inner: .void)
+    case .pointer(let element): return .pointer(element: element.canonical) 
     case .structure(let name, let members, let isGenericInstantiation):
       if isGenericInstantiation {
         let newMembers = members.map { ($0.name, $0.type.canonical, $0.mutable) }
@@ -123,6 +130,8 @@ extension Type: Equatable {
       return lName == rName
     case (.reference(let l), .reference(let r)):
       return l == r
+    case (.pointer(let l), .pointer(let r)):
+       return l == r
     case (.genericParameter(let l), .genericParameter(let r)):
       return l == r
 
