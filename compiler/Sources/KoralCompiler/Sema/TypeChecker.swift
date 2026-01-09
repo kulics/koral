@@ -1135,6 +1135,10 @@ public class TypeChecker {
            guard arguments.count == 1 else { throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count) }
            let val = try inferTypedExpression(arguments[0])
            return .intrinsicCall(.printBool(value: val))
+      case "panic":
+           guard arguments.count == 1 else { throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count) }
+           let msg = try inferTypedExpression(arguments[0])
+           return .intrinsicCall(.panic(message: msg))
            
       default: return nil
       }

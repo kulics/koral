@@ -784,6 +784,13 @@ public class CodeGen {
       addIndent()
       buffer += "printf(\"%s\\n\", \(v) ? \"true\" : \"false\");\n"
       return ""
+    case .panic(let msg):
+      let m = generateExpressionSSA(msg)
+      addIndent()
+      buffer += "fprintf(stderr, \"Panic: %s\\n\", \(m));\n"
+      addIndent()
+      buffer += "exit(1);\n"
+      return ""
     }
   }
 
