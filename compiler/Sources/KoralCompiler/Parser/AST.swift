@@ -39,7 +39,8 @@ public indirect enum GlobalNode {
     name: String,
     typeParameters: [(name: String, type: TypeNode?)],
     parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier)],
-    access: AccessModifier
+    access: AccessModifier,
+    isCopy: Bool
   )
   case intrinsicTypeDeclaration(
     name: String,
@@ -99,9 +100,9 @@ public struct MethodDeclaration {
 }
 public indirect enum StatementNode {
   case variableDeclaration(name: String, type: TypeNode?, value: ExpressionNode, mutable: Bool, line: Int)
-  case assignment(target: AssignmentTarget, value: ExpressionNode, line: Int)
+  case assignment(target: ExpressionNode, value: ExpressionNode, line: Int)
   case compoundAssignment(
-    target: AssignmentTarget, operator: CompoundAssignmentOperator, value: ExpressionNode, line: Int)
+    target: ExpressionNode, operator: CompoundAssignmentOperator, value: ExpressionNode, line: Int)
   case expression(ExpressionNode, line: Int)
 }
 public enum CompoundAssignmentOperator {
@@ -165,4 +166,5 @@ public indirect enum ExpressionNode {
   // 连续成员访问聚合为路径
   case memberPath(base: ExpressionNode, path: [String])
   case genericInstantiation(base: String, args: [TypeNode])
+  case subscriptExpression(base: ExpressionNode, arguments: [ExpressionNode])
 }

@@ -37,8 +37,8 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .globalTypeDeclaration(let name, let typeParameters, let parameters, let access):
-      print("\(indent)TypeDeclaration \(name)")
+    case .globalTypeDeclaration(let name, let typeParameters, let parameters, let access, let isCopy):
+      print("\(indent)TypeDeclaration \(name) Copy=\(isCopy)")
       print("\(indent)  Access: \(access)")
       if !typeParameters.isEmpty {
         print("\(indent)  TypeParameters: \(typeParameters)")
@@ -119,11 +119,11 @@ public func printAST(_ node: ASTNode) {
     case .assignment(let target, let value, _):
       print("\(indent)Assignment:")
 
-      switch target {
-      case .variable(let name):
-        print("\(indent)  Target: \(name)")
-      case .memberAccess(let base, let memberPath):
-        print("\(indent)  Target: \(base).\(memberPath.joined(separator: "."))")
+      print("\(indent)  Target:")
+      withIndent {
+          withIndent {
+             printExpression(target)
+          }
       }
 
       print("\(indent)  Value:")
@@ -135,11 +135,11 @@ public func printAST(_ node: ASTNode) {
 
     case .compoundAssignment(let target, let op, let value, _):
       print("\(indent)CompoundAssignment: \(op)")
-      switch target {
-      case .variable(let name):
-        print("\(indent)  Target: \(name)")
-      case .memberAccess(let base, let memberPath):
-        print("\(indent)  Target: \(base).\(memberPath.joined(separator: "."))")
+      print("\(indent)  Target:")
+      withIndent {
+          withIndent {
+             printExpression(target)
+          }
       }
       print("\(indent)  Value:")
       withIndent {
@@ -244,6 +244,22 @@ public func printAST(_ node: ASTNode) {
         withIndent {
           printExpression(body)
         }
+      }
+    case .subscriptExpression(let base, let arguments):
+      print("\(indent)Subscript:")
+      print("\(indent)  Base:")
+      withIndent {
+          withIndent {
+              printExpression(base)
+          }
+      }
+      print("\(indent)  Arguments:")
+      withIndent {
+          withIndent {
+              for arg in arguments {
+                  printExpression(arg)
+              }
+          }
       }
     case .call(let callee, let arguments):
       print("\(indent)Call:")

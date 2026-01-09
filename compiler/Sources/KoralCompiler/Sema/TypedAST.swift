@@ -84,14 +84,10 @@ public struct TypedMethodDeclaration {
 }
 public indirect enum TypedStatementNode {
   case variableDeclaration(identifier: Symbol, value: TypedExpressionNode, mutable: Bool)
-  case assignment(target: TypedAssignmentTarget, value: TypedExpressionNode)
+  case assignment(target: TypedExpressionNode, value: TypedExpressionNode)
   case compoundAssignment(
-    target: TypedAssignmentTarget, operator: CompoundAssignmentOperator, value: TypedExpressionNode)
+    target: TypedExpressionNode, operator: CompoundAssignmentOperator, value: TypedExpressionNode)
   case expression(TypedExpressionNode)
-}
-public enum TypedAssignmentTarget {
-  case variable(identifier: Symbol)
-  case memberAccess(base: Symbol, memberPath: [Symbol])
 }
 public indirect enum TypedExpressionNode {
   case integerLiteral(value: Int, type: Type)
@@ -123,6 +119,7 @@ public indirect enum TypedExpressionNode {
   case whileExpression(condition: TypedExpressionNode, body: TypedExpressionNode, type: Type)
   case typeConstruction(identifier: Symbol, arguments: [TypedExpressionNode], type: Type)
   case memberPath(source: TypedExpressionNode, path: [Symbol])
+  case subscriptExpression(base: TypedExpressionNode, arguments: [TypedExpressionNode], method: Symbol, type: Type)
   case intrinsicCall(TypedIntrinsic)
 }
 
@@ -206,6 +203,8 @@ extension TypedExpressionNode {
       return identifier.type
     case .memberPath(_, let path):
       return path.last?.type ?? .void
+    case .subscriptExpression(_, _, _, let type):
+      return type
     case .intrinsicCall(let node):
       return node.type
     }
@@ -218,7 +217,11 @@ extension TypedExpressionNode {
     case .memberPath(let source, _):
       // member access is lvalue if the source is lvalue
       return source.valueCategory
+    case .subscriptExpression(let base, _, _, _):
+      // Subscript result acts as LValue (can be assigned to if mutable)
+      return base.valueCategory
     case .referenceExpression:
+
       // &expr 是一个临时值（指针）
       return .rvalue
     default:

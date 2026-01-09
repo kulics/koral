@@ -16,6 +16,7 @@ public struct SemanticError: Error, CustomStringConvertible {
         case invalidFieldTypeInValueType(type: String, field: String, fieldType: String)
         case invalidMutableFieldInValueType(type: String, field: String)
         case immutableFieldAssignment(type: String, field: String)
+        case variableMoved(String)
         case generic(String)
     }
     
@@ -64,6 +65,9 @@ public struct SemanticError: Error, CustomStringConvertible {
     public static func immutableFieldAssignment(type: String, field: String) -> SemanticError {
         return SemanticError(.immutableFieldAssignment(type: type, field: field))
     }
+    public static func variableMoved(_ name: String) -> SemanticError {
+        return SemanticError(.variableMoved(name))
+    }
     // Accessor for the old enum-like matching if necessary, though direct matching on `kind` is preferred
     
     public var description: String {
@@ -99,6 +103,8 @@ public struct SemanticError: Error, CustomStringConvertible {
             return "\(location)Value type '\(type)' cannot have mutable field '\(field)'"
         case .immutableFieldAssignment(let type, let field):
             return "\(location)Cannot assign to immutable field '\(field)' of type '\(type)'"
+        case .variableMoved(let name):
+            return "\(location)Use of moved variable: '\(name)'"
         case .generic(let msg):
             return "\(location)\(msg)"
         }
