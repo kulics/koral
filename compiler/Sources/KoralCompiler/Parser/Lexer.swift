@@ -44,6 +44,7 @@ public enum Token: CustomStringConvertible {
   case givenKeyword  // 'given' keyword
   case traitKeyword  // 'trait' keyword
   case matchKeyword  // 'match' keyword
+  case intrinsicKeyword  // 'intrinsic' keyword
   case bitandKeyword  // 'bitand' keyword
   case bitorKeyword  // 'bitor' keyword
   case bitxorKeyword  // 'bitxor' keyword
@@ -117,6 +118,7 @@ public enum Token: CustomStringConvertible {
       (.givenKeyword, .givenKeyword),
       (.traitKeyword, .traitKeyword),
       (.matchKeyword, .matchKeyword),
+      (.intrinsicKeyword, .intrinsicKeyword),
       (.bitandKeyword, .bitandKeyword),
       (.bitorKeyword, .bitorKeyword),
       (.bitxorKeyword, .bitxorKeyword),
@@ -243,6 +245,8 @@ public enum Token: CustomStringConvertible {
       return "trait"
     case .matchKeyword:
       return "match"
+    case .intrinsicKeyword:
+      return "intrinsic"
     case .bitandKeyword:
       return "bitand"
     case .bitorKeyword:
@@ -359,6 +363,22 @@ public class Lexer {
     }
   }
 
+  // Skip block comments /* ... */
+  private func skipBlockComment() throws {
+    while let char = getNextChar() {
+        if char == "*" {
+            if let nextChar = getNextChar() {
+                if nextChar == "/" {
+                    return
+                }
+                unreadChar(nextChar)
+            }
+        }
+    }
+    // If we reach here, it means we hit EOF before closing */
+    throw LexerError.unexpectedEndOfFile
+  }
+
   // Read a number, handling both integers and floats
   private func readNumber() throws -> NumberLiteral {
     var numStr = ""
@@ -445,6 +465,9 @@ public class Lexer {
       if let nextChar = getNextChar() {
         if nextChar == "/" {
           skipLineComment()
+          return try getNextToken()
+        } else if nextChar == "*" {
+          try skipBlockComment()
           return try getNextToken()
         } else if nextChar == "=" {
           return .divideEqual
@@ -564,7 +587,7 @@ public class Lexer {
       case .float(let num):
         .float(num)
       }
-    case let c where c.isLetter:
+    case let c where c.isLetter || c == "_":
       unreadChar(c)
       let id = readIdentifier()
       return switch id {
@@ -585,6 +608,7 @@ public class Lexer {
       case "given": .givenKeyword
       case "trait": .traitKeyword
       case "match": .matchKeyword
+      case "intrinsic": .intrinsicKeyword
       case "bitand": .bitandKeyword
       case "bitor": .bitorKeyword
       case "bitxor": .bitxorKeyword

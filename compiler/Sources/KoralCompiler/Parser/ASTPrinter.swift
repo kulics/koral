@@ -49,6 +49,25 @@ public func printAST(_ node: ASTNode) {
         print("\(indent)  Access: \(param.access)")
       }
 
+    case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, let access):
+      print("\(indent)IntrinsicFunctionDeclaration:")
+      print("\(indent)  Access: \(access)")
+      print("\(indent)  Name: \(name)")
+      print("\(indent)  TypeParameters: \(typeParameters)")
+      print("\(indent)  Parameters:")
+      for param in parameters {
+        let modStr = param.mutable ? "mut " : ""
+        print("\(indent)    \(modStr)\(param.name): \(param.type)")
+      }
+      print("\(indent)  ReturnType: \(returnType)")
+
+    case .intrinsicTypeDeclaration(let name, let typeParameters, let access):
+        print("\(indent)IntrinsicTypeDeclaration \(name)")
+        print("\(indent)  Access: \(access)")
+        if !typeParameters.isEmpty {
+          print("\(indent)  TypeParameters: \(typeParameters)")
+        }
+
     case .givenDeclaration(let typeParams, let type, let methods):
       print("\(indent)GivenDeclaration:")
       if !typeParams.isEmpty {
@@ -59,24 +78,24 @@ public func printAST(_ node: ASTNode) {
       withIndent {
         for method in methods {
           print("\(indent)MethodDeclaration:")
-          print("\(indent)  Access: \(method.access)")
           print("\(indent)  Name: \(method.name)")
-          print("\(indent)  TypeParameters:")
-          for param in method.typeParameters {
-            print("\(indent)    \(param)")
-          }
-          print("\(indent)  Parameters:")
-          for param in method.parameters {
-            let modStr = param.mutable ? "mut " : ""
-            print("\(indent)    \(modStr)\(param.name): \(param.type)")
-          }
-          print("\(indent)  ReturnType: \(method.returnType)")
-          print("\(indent)  Body:")
           withIndent {
-            withIndent {
-              printExpression(method.body)
-            }
+            printExpression(method.body)
           }
+        }
+      }
+
+    case .intrinsicGivenDeclaration(let typeParams, let type, let methods):
+      print("\(indent)IntrinsicGivenDeclaration:")
+      if !typeParams.isEmpty {
+        print("\(indent)  TypeParameters: \(typeParams)")
+      }
+      print("\(indent)  Type: \(type)")
+      print("\(indent)  Methods:")
+      withIndent {
+        for method in methods {
+            print("\(indent)IntrinsicMethodDeclaration:")
+            print("\(indent)  Name: \(method.name)")
         }
       }
     }

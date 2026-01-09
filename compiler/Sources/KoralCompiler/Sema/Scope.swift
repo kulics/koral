@@ -1,12 +1,12 @@
 public struct GenericTemplate {
   public let name: String
-  public let typeParameters: [String]
+  public let typeParameters: [(name: String, type: TypeNode?)]
   public let parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier)]
 }
 
 public struct GenericFunctionTemplate {
   public let name: String
-  public let typeParameters: [String]
+  public let typeParameters: [(name: String, type: TypeNode?)]
   public let parameters: [(name: String, mutable: Bool, type: TypeNode)]
   public let returnType: TypeNode
   public let body: ExpressionNode
