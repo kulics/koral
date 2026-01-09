@@ -1,0 +1,69 @@
+// EXPECT: 42
+// EXPECT: 100
+// EXPECT: 999
+// EXPECT: 50
+// EXPECT: 60
+// EXPECT: 60
+// EXPECT: 80
+// EXPECT: 81
+
+let mutate_indirect(r Int ref) Void = {
+    deref r = 999;
+};
+
+public let main() Void = {
+    let mut x = 42;
+    // Test read
+    print_int(x); 
+    
+    // Capture reference
+    let r = ref x;
+    
+    // Test write via dereference
+    // The syntax 'deref r' creates a DerefExpr 
+    // resolving LValue allows assignment
+    deref r = 100;
+    
+    print_int(x); // Should be mutated
+
+    // Test with pointer from List (via __at) if possible? 
+    // List[0] returns T ref implicitly handled by subscript.
+    // Let's stick to simple ref first.
+
+    // Test deref on mutable parameter
+    mutate_indirect(ref x);
+    print_int(x); // 999
+
+    // Test heap reference via Pointer.peek()
+    let ptr = [Int]alloc_memory(1);
+    ptr.init(50);
+    
+    // ptr.peek() returns Int ref
+    let heap_ref = ptr.peek();
+    print_int(deref heap_ref); // 50
+    
+    deref heap_ref = 60;
+    print_int(deref heap_ref); // 60
+    
+    // Verify via pointer again (peek again)
+    print_int(deref ptr.peek()); // 60
+
+    ptr.deinit();
+    [Int]dealloc_memory(ptr);
+
+    // Test deref on temp reference (rvalue inner)
+    // let x = ref 123; create a generic RValue (non-addressable in C easily unless spilled)
+    // Koral "move semantics" -> RValue might be temp variable.
+    // ref(123) should create a temp on stack or heap?
+    
+    // let temp_ref = ref 80;
+    // deref temp_ref = 81;
+    // The value 80 is temp, 81 is written to it. 
+    // And then discarded. Valid, but useless.
+    // But testing it ensures compiler doesn't crash.
+    
+    let temp_ref = ref 80;
+    print_int(deref temp_ref); // 80
+    deref temp_ref = 81;
+    print_int(deref temp_ref); // 81
+}

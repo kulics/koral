@@ -473,7 +473,7 @@ public class Parser {
     switch currentToken {
     case .letKeyword:
       return try variableDeclaration()
-    case .identifier, .selfKeyword:
+    default:
       let expr = try expression()
 
       if currentToken === .equal {
@@ -486,8 +486,6 @@ public class Parser {
         return .compoundAssignment(target: expr, operator: op, value: value, line: lexer.currentLine)
       }
       return .expression(expr, line: lexer.currentLine)
-    default:
-      return .expression(try expression(), line: lexer.currentLine)
     }
   }
 
