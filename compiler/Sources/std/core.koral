@@ -94,94 +94,96 @@ public intrinsic let print_int(value Int) Void;
 public intrinsic let print_bool(value Bool) Void;
 public intrinsic let panic(message String) Void;
 
-private type [T Copy]ListStorage(mut source [T]Pointer, mut len Int, mut cap Int);
-
-public type [T Copy]List(private mut storage [T]ListStorage ref);
+public type [T Copy]List(private mut source [T]Pointer, private mut len Int, private mut cap Int);
 
 given[T Copy] [T]List {
-    public new() Self = [T]List(ref [T]ListStorage( [T]alloc_memory(10), 0, 10));
+    public new() Self = [T]List([T]alloc_memory(10), 0, 10);
 
     // [Compiler Protocol]
     // Automatically called when the object goes out of scope.
     // User code cannot call this directly.
     __drop(self ref) = {
-        if ref_count(self.storage) == 1 then {
-            let mut i = 0;
-            while i < self.storage.len then {
-                self.storage.source.offset(i).deinit();
-                i += 1;
-            };
-            dealloc_memory(self.storage.source);
-        }
+        let mut i = 0;
+        while i < self.len then {
+            self.source.offset(i).deinit();
+            i += 1;
+        };
+        dealloc_memory(self.source);
     }
 
-    public count(self ref) Int = self.storage.len;
+    public copy(self ref) Self = {
+        let new_ptr = [T]alloc_memory(self.cap);
+        copy_memory(new_ptr, self.source, self.len);
+        [T]List(new_ptr, self.len, self.cap)
+    }
+
+    public count(self ref) Int = self.len;
 
     // [Compiler Protocol]
     // Lowering target for `list[index]` in read context.
     // Returns a temporary reference to the element.
     public __at(self ref, index Int) T ref = {
         // Bounds check can be added here
-        self.storage.source.offset(index).peek()
+        self.source.offset(index).peek()
     }
     
     public set(self ref, index Int, value T) Void = {
-        self.storage.source.offset(index).replace(value);
+        self.source.offset(index).replace(value);
     }
 
     public push_back(self ref, value T) Void = {
-         self.ensure_capacity(self.storage.len + 1);
-        self.storage.source.offset(self.storage.len).init(value);
-        self.storage.len = self.storage.len + 1;
+         self.ensure_capacity(self.len + 1);
+        self.source.offset(self.len).init(value);
+        self.len = self.len + 1;
     }
 
     public insert(self ref, index Int, value T) Void = {
-        self.ensure_capacity(self.storage.len + 1);
+        self.ensure_capacity(self.len + 1);
         
-        if index < self.storage.len then {
-            let src = self.storage.source.offset(index);
-            let dest = self.storage.source.offset(index + 1);
-            let count = self.storage.len - index;
+        if index < self.len then {
+            let src = self.source.offset(index);
+            let dest = self.source.offset(index + 1);
+            let count = self.len - index;
             move_memory(dest, src, count);
-            self.storage.source.offset(index).init(value);
+            self.source.offset(index).init(value);
         } else {
-             self.storage.source.offset(self.storage.len).init(value);
+             self.source.offset(self.len).init(value);
         };
-        self.storage.len = self.storage.len + 1;
+        self.len = self.len + 1;
     }
 
     public remove(self ref, index Int) Void = {
         // 1. Drop the element at index
-        self.storage.source.offset(index).deinit();
+        self.source.offset(index).deinit();
         
         // 2. Shift remaining elements down
-        if index < self.storage.len - 1 then {
-            let src = self.storage.source.offset(index + 1);
-            let dest = self.storage.source.offset(index);
-            let count = self.storage.len - 1 - index;
+        if index < self.len - 1 then {
+            let src = self.source.offset(index + 1);
+            let dest = self.source.offset(index);
+            let count = self.len - 1 - index;
             
             // Move [index+1...len-1] to [index...len-2]
             move_memory(dest, src, count);
         };
         
-        self.storage.len = self.storage.len - 1;
+        self.len = self.len - 1;
     }
 
     // Ensures the list is unique and has enough capacity
     private ensure_capacity(self ref, min_capacity Int) Void = {
          // Unique case - Grow if needed
-         if min_capacity > self.storage.cap then {
-             let mut new_cap = self.storage.cap * 2;
+         if min_capacity > self.cap then {
+             let mut new_cap = self.cap * 2;
              if new_cap < min_capacity then {
                  new_cap = min_capacity;
              };
              
              let new_source = [T]alloc_memory(new_cap);
-             move_memory(new_source, self.storage.source, self.storage.len);
-             dealloc_memory(self.storage.source);
+             move_memory(new_source, self.source, self.len);
+             dealloc_memory(self.source);
              
-             self.storage.source = new_source;
-             self.storage.cap = new_cap;
+             self.source = new_source;
+             self.cap = new_cap;
          };
     }
 }
