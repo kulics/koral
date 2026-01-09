@@ -28,7 +28,6 @@ public enum CompilerMethodKind {
   case normal
   case drop
   case at
-  case atMut
 }
 
 public struct Symbol {

@@ -33,7 +33,6 @@ public class TypeChecker {
     switch name {
     case "__drop": return .drop
     case "__at": return .at
-    case "__at_mut": return .atMut
     default: return .normal
     }
   }
@@ -1314,12 +1313,7 @@ public class TypeChecker {
        var isRef = false
        if case .reference(_) = tentativeBase.type { isRef = true }
        
-       if isRef {
-           typedBase = tentativeBase
-       } else {
-           // Must be LValue
-           typedBase = try resolveLValue(base)
-       }
+       typedBase = tentativeBase
        
        // Now resolve path members on typedBase.
        var current = typedBase
@@ -1366,7 +1360,7 @@ public class TypeChecker {
   }
 
   private func resolveSubscript(base: TypedExpressionNode, args: [TypedExpressionNode], isMut: Bool) throws -> TypedExpressionNode {
-      let methodName = isMut ? "__at_mut" : "__at"
+      let methodName = "__at"
       let type = base.type
       
       // Unwrap reference
