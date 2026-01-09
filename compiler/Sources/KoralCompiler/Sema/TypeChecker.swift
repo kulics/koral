@@ -672,6 +672,41 @@ public class TypeChecker {
               .allocMemory(count: countExpr, resultType: .pointer(element: T)))
           }
 
+          if base == "dealloc_memory" {
+             let resolvedArgs = try args.map { try resolveTypeNode($0) }
+             guard resolvedArgs.count == 1 else { throw SemanticError.typeMismatch(expected: "1 generic arg", got: "\(resolvedArgs.count)") }
+             // We don't need T, but we checked args count.
+             
+             guard arguments.count == 1 else { throw SemanticError.invalidArgumentCount(function: base, expected: 1, got: arguments.count) }
+             let ptrExpr = try inferTypedExpression(arguments[0])
+             // Check pointer type? Sema checks this later for normal calls, but here we do it maybe?
+             // Actually, `ptrExpr.type` should match `[T]Pointer`.
+             return .intrinsicCall(.deallocMemory(ptr: ptrExpr))
+          }
+
+          if base == "ref_count" {
+             _ = try args.map { try resolveTypeNode($0) }
+             guard arguments.count == 1 else { throw SemanticError.invalidArgumentCount(function: base, expected: 1, got: arguments.count) }
+             let val = try inferTypedExpression(arguments[0])
+             return .intrinsicCall(.refCount(val: val))
+          }
+          if base == "copy_memory" {
+             _ = try args.map { try resolveTypeNode($0) }
+             guard arguments.count == 3 else { throw SemanticError.invalidArgumentCount(function: base, expected: 3, got: arguments.count) }
+             let d = try inferTypedExpression(arguments[0])
+             let s = try inferTypedExpression(arguments[1])
+             let c = try inferTypedExpression(arguments[2])
+             return .intrinsicCall(.copyMemory(dest: d, source: s, count: c))
+          }
+           if base == "move_memory" {
+             _ = try args.map { try resolveTypeNode($0) }
+             guard arguments.count == 3 else { throw SemanticError.invalidArgumentCount(function: base, expected: 3, got: arguments.count) }
+             let d = try inferTypedExpression(arguments[0])
+             let s = try inferTypedExpression(arguments[1])
+             let c = try inferTypedExpression(arguments[2])
+             return .intrinsicCall(.moveMemory(dest: d, source: s, count: c))
+          }
+
           let resolvedArgs = try args.map { try resolveTypeNode($0) }
           let (instantiatedName, instantiatedType) = try instantiateFunction(
             template: template, args: resolvedArgs)
@@ -1312,18 +1347,9 @@ public class TypeChecker {
        // Check if base evaluates to a Reference type (RValue allowed)
        // OR if base resolves to an LValue (Mut Value required)
        
-       let typedBase: TypedExpressionNode
-       // We can't easily peek type without inferring.
-       // Infer as generic expression (RValue check)
-       let tentativeBase = try inferTypedExpression(base)
-       
-       var isRef = false
-       if case .reference(_) = tentativeBase.type { isRef = true }
-       
-       typedBase = tentativeBase
+       let typedBase = try inferTypedExpression(base)
        
        // Now resolve path members on typedBase.
-       var current = typedBase
        var currentType = typedBase.type
        var resolvedPath: [Symbol] = []
        
@@ -1360,6 +1386,13 @@ public class TypeChecker {
        
        let typedArgs = try args.map { try inferTypedExpression($0) }
        return try resolveSubscript(base: typedBase, args: typedArgs, isMut: true)
+
+    case .derefExpression(let inner):
+        let typedInner = try inferTypedExpression(inner)
+        if case .reference(let innerType) = typedInner.type {
+             return .derefExpression(expression: typedInner, type: innerType)
+        }
+        throw SemanticError.typeMismatch(expected: "Reference", got: typedInner.type.description)
 
     default:
        throw SemanticError.invalidOperation(op: "assignment target", type1: String(describing: expr), type2: "")

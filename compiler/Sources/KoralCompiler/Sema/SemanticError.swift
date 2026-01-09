@@ -1,6 +1,6 @@
 // Semantic error types
-public struct SemanticError: Error, CustomStringConvertible {
-    public enum Kind {
+public struct SemanticError: Error, CustomStringConvertible, Sendable {
+    public enum Kind: Sendable {
         case typeMismatch(expected: String, got: String)
         case undefinedVariable(String)
         case invalidOperation(op: String, type1: String, type2: String)

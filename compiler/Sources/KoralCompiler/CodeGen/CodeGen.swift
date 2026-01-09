@@ -863,6 +863,14 @@ public class CodeGen {
          let path = "(*(\(innerCType)*)\(refResult).ptr)" 
          let control = "\(refResult).control"
          return (path, control)
+
+    case .derefExpression(let inner, let type):
+         // Dereferencing a reference type gives us an LValue
+         let refResult = generateExpressionSSA(inner)
+         let cType = getCType(type)
+         let path = "(*(\(cType)*)\(refResult).ptr)"
+         let control = "\(refResult).control"
+         return (path, control)
          
     default:
       fatalError("ref requires lvalue (variable or memberAccess)")
