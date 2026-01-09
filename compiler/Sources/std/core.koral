@@ -31,6 +31,8 @@
 // trait Any {}
 
 /* builtin
+type [T Any]Pointer;
+
 // Most pointer operations are available for Any type [T].
 given[T Any] [T]Pointer {
     // --- Access & Mutation ---
@@ -48,12 +50,20 @@ given[T Any] [T]Pointer {
     // Accesses the value pointed to by `self` without removing or invalidating it.
     // Returns a reference of the value.
     // PRECONDITION: Memory at `self` must be initialized.
+    // NOTE: This is the primitive operation used to implement `__at` for higher constructs.
     peek(self) T ref;
 
-    // Puts a new value `v` into *initialized* memory.
-    // This drops the existing value at `self` and replaces it with `v`.
-    // PRECONDITION: Memory at `self` must be initialized.
-    put(self, v T) Void;
+    // [Compiler Protocol]
+    // Enables `ptr[index]` syntax.
+    // Equivalent to `self.offset(index).peek()`.
+    // PRECONDITION: Memory at `self + index` must be initialized.
+    __at(self, index Int) T ref;
+
+    // [Compiler Protocol]
+    // Enables `ptr[index] = val` mutation syntax.
+    // Equivalent to `self.offset(index).peek()`.
+    // PRECONDITION: Memory at `self + index` must be initialized.
+    __at_mut(self, index Int) T ref;
 
     // Retrieves the value from `self`, leaving the memory uninitialized.
     // Ideally used for moving values out of the pointer.
@@ -109,7 +119,10 @@ public type [T Copy]List(storage [T]ListStorage ref);
 given[T Copy] [T]List {
     public new() Self = List(ref ListStorage(alloc_memory(10), 0, 10));
 
-    drop(self ref) = {
+    // [Compiler Protocol]
+    // Automatically called when the object goes out of scope.
+    // User code cannot call this directly.
+    __drop(self ref) = {
         if ref_count(self.storage) == 1 then {
             for i = 0..<self.storage.len then {
                 self.storage.source.offset(i).deinit();
@@ -120,11 +133,21 @@ given[T Copy] [T]List {
 
     public count(self ref) Int = self.storage.len;
 
-    public get(self ref, index Int) T = deref self.storage.source.offset(index).peek();
-    
-    public set(self ref, index Int, value T) Void = {
+    // [Compiler Protocol]
+    // Lowering target for `list[index]` in read context.
+    // Returns a temporary reference to the element.
+    public __at(self ref, index Int) T ref = {
+        // Bounds check can be added here
+        self.storage.source.offset(index).peek()
+    }
+
+    // [Compiler Protocol]
+    // Lowering target for `list[index]` in write/mutating context.
+    // e.g., `list[0] = val` or `list[0].field = val`.
+    // Handles Copy-On-Write logic internally.
+    public __at_mut(self ref, index Int) T ref = {
         make_sure_unique(self);
-        self.storage.source.offset(index).put(value);
+        self.storage.source.offset(index).peek()
     }
 
     public push(self ref, value T) Void = {

@@ -367,10 +367,10 @@ let main() = {
     // operator override
     given[T Any] [T]MyList {
         // self[i]
-        get(self ref, index Int) T = self.arr[index];
+        __at(self ref, index Int) T ref = self.arr.__at(index);
 
         // self[i] = e
-        set(self ref, index Int, element T) Void = self.arr[index] = element;
+        __at_mut(self ref, index Int) T ref = self.arr.__at_mut(index);
     }
 }
 
@@ -465,7 +465,7 @@ trait Copy {
 
 trait Drop {
     // drop 只由编译器自动插入调用，用户代码禁止显式调用
-    drop(self ref) Void;
+    __drop(self ref) Void;
 }
 
 type [T Copy]Node(mut value T, mut next [[T]Node ref]Option, mut prev [[T]Node weakref]Option);
@@ -480,7 +480,7 @@ given File {
     read(self ref, buf [Byte]List ref) Int = fread(self.fd, buf, 0, buf.size());
     write(self ref, buf [Byte]List ref) Int = fwrite(self.fd, buf, 0, buf.size());
 
-    drop(self ref) Void = fclose(self.fd);
+    __drop(self ref) Void = fclose(self.fd);
 }
 
 /*
@@ -489,11 +489,11 @@ given File {
 2-2. 任意类型可以给自己声明 `not Copy` 来标记不实现 Copy，编译器不会自动生成 `Copy` 实现。
 2-3. 任意类型内包含的成员变量如果全部都是 `Copy` 类型，且没有标记为 `not Copy`，那么编译器会给这个类型自动实现 `Copy`（递归成员实现）。
 2-4. 类型可以同时实现 `Copy` 与 `Drop`，编译器会在 `Copy` 时保持原值有效，在 `Drop` 时按实例逐个释放。
-3-1. 任意类型只要显式实现了 drop 函数，其实例生命周期结束时就由编译器插入调用 drop 来销毁。
-3-2. 任意类型如果没有显式实现 drop 函数，那么编译器会给这个类型自动实现 drop（递归成员实现）。
-3-3. drop 函数不能手动调用。编译器会对手动调用 drop 的代码进行报错。
-3-4. 在 drop 实现中移动出成员后，编译器会对被移动的值自动插入 drop，用户代码不需要也不应显式调用成员的 drop。
-3-5. drop 函数虽然签名为 drop(self ref)，但调用点视为终结消费，调用后该值不可再读写或移动。
+3-1. 任意类型只要显式实现了 __drop 函数，其实例生命周期结束时就由编译器插入调用 __drop 来销毁。
+3-2. 任意类型如果没有显式实现 __drop 函数，那么编译器会给这个类型自动实现 __drop（递归成员实现）。
+3-3. __drop 函数不能手动调用。编译器会对手动调用 __drop 的代码进行报错。
+3-4. 在 __drop 实现中移动出成员后，编译器会对被移动的值自动插入 __drop，用户代码不需要也不应显式调用成员的 __drop。
+3-5. __drop 函数虽然签名为 __drop(self ref)，但调用点视为终结消费，调用后该值不可再读写或移动。
 4-1. ref 是内置的智能指针类型，ref 可以从变量获取或者通过 new 函数主动分配，ref 实现了 Copy 和 Drop。
 4-2. 只读和读写变量都能获取引用（ref）。当获取的 ref 会发生逃逸时，编译器会自动将变量分配在堆上。
 4-3. ref 内部使用了自动引用计数，当 ref 发生 copy 时，引用计数会加1；当 ref 发生 drop 时，引用计数会减1，当计数为 0 时，会调用 ref 源的 drop 释放。
