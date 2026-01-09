@@ -97,11 +97,11 @@ public struct MethodDeclaration {
   }
 }
 public indirect enum StatementNode {
-  case variableDeclaration(name: String, type: TypeNode?, value: ExpressionNode, mutable: Bool)
-  case assignment(target: AssignmentTarget, value: ExpressionNode)
+  case variableDeclaration(name: String, type: TypeNode?, value: ExpressionNode, mutable: Bool, line: Int)
+  case assignment(target: AssignmentTarget, value: ExpressionNode, line: Int)
   case compoundAssignment(
-    target: AssignmentTarget, operator: CompoundAssignmentOperator, value: ExpressionNode)
-  case expression(ExpressionNode)
+    target: AssignmentTarget, operator: CompoundAssignmentOperator, value: ExpressionNode, line: Int)
+  case expression(ExpressionNode, line: Int)
 }
 public enum CompoundAssignmentOperator {
   case plus

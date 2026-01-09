@@ -460,7 +460,7 @@ public class Parser {
         }
 
         let value = try expression()
-        return .assignment(target: target, value: value)
+        return .assignment(target: target, value: value, line: lexer.currentLine)
       } else if let op = getCompoundAssignmentOperator(currentToken) {
         try match(currentToken)
         let target: AssignmentTarget
@@ -479,11 +479,11 @@ public class Parser {
             line: lexer.currentLine, got: "invalid assignment target")
         }
         let value = try expression()
-        return .compoundAssignment(target: target, operator: op, value: value)
+        return .compoundAssignment(target: target, operator: op, value: value, line: lexer.currentLine)
       }
-      return .expression(expr)
+      return .expression(expr, line: lexer.currentLine)
     default:
-      return .expression(try expression())
+      return .expression(try expression(), line: lexer.currentLine)
     }
   }
 
@@ -535,10 +535,10 @@ public class Parser {
       try match(.thenKeyword)
       let body = try expression()
       return .expression(
-        .letExpression(name: name, type: type, value: value, mutable: mutable, body: body))
+        .letExpression(name: name, type: type, value: value, mutable: mutable, body: body), line: lexer.currentLine)
     }
 
-    return .variableDeclaration(name: name, type: type, value: value, mutable: mutable)
+    return .variableDeclaration(name: name, type: type, value: value, mutable: mutable, line: lexer.currentLine)
   }
 
   private func letExpression() throws -> ExpressionNode {
@@ -871,7 +871,7 @@ public class Parser {
 
       // If current statement is an expression and next token is right brace,
       // this is the final expression
-      if case .expression(let expr) = stmt {
+      if case .expression(let expr, _) = stmt {
         if currentToken === .rightBrace {
           try match(.rightBrace)
           return .blockExpression(

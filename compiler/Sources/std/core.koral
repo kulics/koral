@@ -105,32 +105,33 @@ public intrinsic let print_string(message String) Void;
 public intrinsic let print_int(value Int) Void;
 public intrinsic let print_bool(value Bool) Void;
 
-/*
-type [T Copy]ListStorage(mut source [T]Pointer, mut len Int, mut cap Int);
+private type [T Copy]ListStorage(mut source [T]Pointer, mut len Int, mut cap Int);
 
-public type [T Copy]List(storage [T]ListStorage ref);
+public type [T Copy]List(private mut storage [T]ListStorage ref);
 
 given[T Copy] [T]List {
-    public new() Self = List(ref ListStorage(alloc_memory(10), 0, 10));
+    public new() Self = [T]List(ref [T]ListStorage( [T]alloc_memory(10), 0, 10));
 
     // [Compiler Protocol]
     // Automatically called when the object goes out of scope.
     // User code cannot call this directly.
-    __drop(self ref) = {
+    __drop(self [T]List ref) = {
         if ref_count(self.storage) == 1 then {
-            for i = 0..<self.storage.len then {
+            let mut i = 0;
+            while i < self.storage.len then {
                 self.storage.source.offset(i).deinit();
-            }
+                i += 1;
+            };
             dealloc_memory(self.storage.source);
-        }
+        } else {}
     }
 
-    public count(self ref) Int = self.storage.len;
+    public count(self [T]List ref) Int = self.storage.len;
 
     // [Compiler Protocol]
     // Lowering target for `list[index]` in read context.
     // Returns a temporary reference to the element.
-    public __at(self ref, index Int) T ref = {
+    public __at(self [T]List ref, index Int) T ref = {
         // Bounds check can be added here
         self.storage.source.offset(index).peek()
     }
@@ -139,43 +140,39 @@ given[T Copy] [T]List {
     // Lowering target for `list[index]` in write/mutating context.
     // e.g., `list[0] = val` or `list[0].field = val`.
     // Handles Copy-On-Write logic internally.
-    public __at_mut(self ref, index Int) T ref = {
-        make_sure_unique(self);
+    public __at_mut(self [T]List ref, index Int) T ref = {
+        self.ensure_capacity(self.storage.len);
         self.storage.source.offset(index).peek()
     }
-
-    public push(self ref, value T) Void = {
-        make_sure_unique(self);
-        // todo, make sure the cap is enough
-        self.storage.source.offset(self.storage.len).init(value);
-        self.storage.len += 1;
+    
+    public set(self [T]List ref, index Int, value T) Void = {
+        self.ensure_capacity(self.storage.len);
+        self.storage.source.offset(index).replace(value);
     }
 
-    public insert(self ref, index Int, value T) Void = {
-        make_sure_unique(self);
-        // todo, make sure the cap is enough
+    public push_back(self [T]List ref, value T) Void = {
+        self.ensure_capacity(self.storage.len + 1);
+        self.storage.source.offset(self.storage.len).init(value);
+        self.storage.len = self.storage.len + 1;
+    }
+
+    public insert(self [T]List ref, index Int, value T) Void = {
+        self.ensure_capacity(self.storage.len + 1);
+        
         if index < self.storage.len then {
-            // Move elements to create space
             let src = self.storage.source.offset(index);
             let dest = self.storage.source.offset(index + 1);
             let count = self.storage.len - index;
-            
-            // Move [index...len-1] to [index+1...len]
-            // dest overlaps src, so we must use move_memory (memmove)
-            // Note: In our definition, move_memory leaves src uninitialized. 
-            // This perfectly matches the logic:
-            // The slot at `index` becomes logically uninitialized (a "hole"), ready for `init(value)`.
             move_memory(dest, src, count);
-            
             self.storage.source.offset(index).init(value);
         } else {
              self.storage.source.offset(self.storage.len).init(value);
-        }
-        self.storage.len += 1;
+        };
+        self.storage.len = self.storage.len + 1;
     }
 
-    public remove(self ref, index Int) Void = {
-        make_sure_unique(self);
+    public remove(self [T]List ref, index Int) Void = {
+        self.ensure_capacity(self.storage.len);
         
         // 1. Drop the element at index
         self.storage.source.offset(index).deinit();
@@ -188,22 +185,54 @@ given[T Copy] [T]List {
             
             // Move [index+1...len-1] to [index...len-2]
             move_memory(dest, src, count);
-        }
+        } else {};
         
-        self.storage.len -= 1;
+        self.storage.len = self.storage.len - 1;
     }
 
-    // public iterator(self) [T]ListIterator = [T]ListIterator(self, -1);
-
-    make_sure_unique(self ref) = { 
-        // todo
+    // Ensures the list is unique and has enough capacity
+    private ensure_capacity(self [T]List ref, min_capacity Int) Void = {
+        if ref_count(self.storage) > 1 then {
+             // Shared case - Clone and Grow if needed
+             let mut new_cap = self.storage.cap;
+             if min_capacity > new_cap then {
+                 new_cap = new_cap * 2;
+                 if new_cap < min_capacity then {
+                     new_cap = min_capacity;
+                 } else {};
+             } else {};
+             
+             let new_source = [T]alloc_memory(new_cap);
+             let mut i = 0;
+             while i < self.storage.len then {
+                new_source.offset(i).init(deref self.storage.source.offset(i).peek());
+                i += 1;
+             };
+             self.storage = ref [T]ListStorage(new_source, self.storage.len, new_cap);
+             
+        } else {
+             // Unique case - Grow if needed
+             if min_capacity > self.storage.cap then {
+                 let mut new_cap = self.storage.cap * 2;
+                 if new_cap < min_capacity then {
+                     new_cap = min_capacity;
+                 } else {};
+                 
+                 let new_source = [T]alloc_memory(new_cap);
+                 copy_memory(new_source, self.storage.source, self.storage.len);
+                 dealloc_memory(self.storage.source);
+                 
+                 self.storage.source = new_source;
+                 self.storage.cap = new_cap;
+             } else {};
+        }
     }
 }
-
+/*
 public type [T Copy]ListIterator(source [T]List ref, mut index Int);
 
 given[T Copy] [T]ListIterator {
-    public next(self ref) [T]Option = 
+    public next(self [T]List ref) [T]Option = 
         if self.index < self.source.count() then {
             self.index += 1;
             .Some(self.source[self.index])
@@ -218,7 +247,7 @@ public type String(source [Byte]List);
 given String {
     public of_utf8_bytes(data [Byte]List) Self = String(data);
 
-    public count(self ref) Int = self.source.count();
+    public count(self [T]List ref) Int = self.source.count();
 
     public iterator(self) StringIterator = StringIterator(self, -1);
 }
@@ -226,7 +255,7 @@ given String {
 public type StringIterator(source String, mut index Int);
 
 given StringIterator {
-    public next(self ref) [Rune]Option = 
+    public next(self Self ref) [Rune]Option = 
         if self.index < self._source.data.size() then {
             self.index += 1;
             .Some((Rune){deref self.source.source.get(self.index)})
@@ -245,7 +274,7 @@ given[T Any] [T]Option {
 }
 
 public trait [T Any]Iterator {
-    next(self ref) [T]Option;
+    next(self Self ref) [T]Option;
 }
 
 public trait [T Any, I [T]Iterator]IntoIterator {
@@ -268,7 +297,7 @@ given[T Any, I [T]Iterator] [T, I]Sequence {
 public type [T Any, I [T]Iterator]FilterSequence(iter I, filter [T, Bool]Func);
 
 given[T Any, I [T]Iterator] [T, I]FilterSequence {
-    public next(self ref) [T]Option = 
+    public next(self Self ref) [T]Option = 
         while self.iter.next() is .Some(v) then {
             if self.filter(v) then return .Some(v);
         } else .None();
@@ -277,16 +306,16 @@ given[T Any, I [T]Iterator] [T, I]FilterSequence {
 public type [T Any, R Any, I [T]Iterator]MapSequence(iter I, mapper [T, R]Func);
 
 given[T Any, R Any, I [T]Iterator] [T, R, I]MapSequence  {
-    next(self ref) [R]Option = 
+    next(self Self ref) [R]Option = 
         if self.iter.next() is .Some(v) then .Some(mapper(v)) else .None();
 }
 
 public trait Equatable {
-    equals(self ref, r Self ref) Bool;
+    equals(self Self ref, r Self ref) Bool;
 }
 
 public trait Comparable Equatable {
-    compare(self ref, r Self ref) Int;
+    compare(self Self ref, r Self ref) Int;
 }
 
 public let [T Comparable]max(a T, b T) T = if compare(a, b) > 0 then a else b;

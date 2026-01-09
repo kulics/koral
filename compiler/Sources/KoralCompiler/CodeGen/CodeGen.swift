@@ -175,7 +175,7 @@ public class CodeGen {
   }
 
   private func generateFunctionDeclaration(_ identifier: Symbol, _ params: [Symbol]) {
-    let returnType = getFunctionReturnType(identifier.type)
+    let returnType = identifier.name == "main" ? "int" : getFunctionReturnType(identifier.type)
     let paramList = params.map { getParamCDecl($0) }.joined(separator: ", ")
     buffer += "\(returnType) \(identifier.name)(\(paramList));\n"
   }
@@ -185,7 +185,7 @@ public class CodeGen {
     _ params: [Symbol],
     _ body: TypedExpressionNode
   ) {
-    let returnType = getFunctionReturnType(identifier.type)
+    let returnType = identifier.name == "main" ? "int" : getFunctionReturnType(identifier.type)
     let paramList = params.map { getParamCDecl($0) }.joined(separator: ", ")
     buffer += "\(returnType) \(identifier.name)(\(paramList)) {\n"
 

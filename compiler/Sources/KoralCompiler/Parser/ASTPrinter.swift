@@ -103,7 +103,7 @@ public func printAST(_ node: ASTNode) {
 
   func printStatement(_ node: StatementNode) {
     switch node {
-    case .variableDeclaration(let name, let type, let value, let mutable):
+    case .variableDeclaration(let name, let type, let value, let mutable, _):
       print("\(indent)VariableDeclaration:")
       print("\(indent)  Name: \(name)")
       if let type = type {
@@ -116,7 +116,7 @@ public func printAST(_ node: ASTNode) {
         printExpression(value)
       }
 
-    case .assignment(let target, let value):
+    case .assignment(let target, let value, _):
       print("\(indent)Assignment:")
 
       switch target {
@@ -133,7 +133,7 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .compoundAssignment(let target, let op, let value):
+    case .compoundAssignment(let target, let op, let value, _):
       print("\(indent)CompoundAssignment: \(op)")
       switch target {
       case .variable(let name):
@@ -148,7 +148,7 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .expression(let expr):
+    case .expression(let expr, _):
       printExpression(expr)
     }
   }
