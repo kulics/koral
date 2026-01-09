@@ -71,8 +71,6 @@ public class CodeGen {
           }
       }
 
-
-
       """
 
     // 生成程序体
@@ -88,11 +86,19 @@ public class CodeGen {
         if case .givenDeclaration(let type, let methods) = node {
              if case .structure(let typeName, _, _) = type {
                  for method in methods {
-                     if method.identifier.name.hasSuffix("___drop") { // Mangled name check
+                     if method.identifier.methodKind == .drop {
                          userDefinedDrops[typeName] = method.identifier.name
                      }
                  }
              }
+        }
+        if case .globalFunction(let identifier, _, _) = node {
+          if identifier.methodKind == .drop {
+            // Mangled name is TypeName___drop, so we can extract TypeName
+            // Note: This relies on the mangling scheme in TypeChecker
+            let typeName = String(identifier.name.dropLast(7))
+            userDefinedDrops[typeName] = identifier.name
+          }
         }
       }
 

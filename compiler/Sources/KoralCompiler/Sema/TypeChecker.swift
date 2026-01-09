@@ -29,6 +29,15 @@ public class TypeChecker {
     self.ast = ast
   }
 
+  private func getCompilerMethodKind(_ name: String) -> CompilerMethodKind {
+    switch name {
+    case "__drop": return .drop
+    case "__at": return .at
+    case "__at_mut": return .atMut
+    default: return .normal
+    }
+  }
+
   // Changed to return TypedProgram
   public func check() throws -> TypedProgram {
     switch self.ast {
@@ -275,7 +284,13 @@ public class TypeChecker {
         }
 
         let mangledName = "\(typeName)_\(method.name)"
-        let methodSymbol = Symbol(name: mangledName, type: methodType, kind: .function)
+        let methodKind = getCompilerMethodKind(method.name)
+        let methodSymbol = Symbol(
+            name: mangledName,
+            type: methodType,
+            kind: .function,
+            methodKind: methodKind
+        )
 
         typedMethods.append(
           TypedMethodDeclaration(
@@ -351,7 +366,13 @@ public class TypeChecker {
         }
 
         let mangledName = "\(typeName)_\(method.name)"
-        let methodSymbol = Symbol(name: mangledName, type: methodType, kind: .function)
+        let methodKind = getCompilerMethodKind(method.name)
+        let methodSymbol = Symbol(
+            name: mangledName,
+            type: methodType,
+            kind: .function,
+            methodKind: methodKind
+        )
 
         typedMethods.append(
           TypedMethodDeclaration(
@@ -1421,6 +1442,20 @@ public class TypeChecker {
     instantiatedTypes[key] = specificType
     layoutToTemplateInfo[layoutName] = (base: template.name, args: args)
 
+    // Force instantiate __drop if it exists for this type
+    if let methods = genericExtensionMethods[template.name] {
+        for entry in methods {
+             if entry.method.name == "__drop" {
+                 _ = try instantiateExtensionMethod(
+                     baseType: specificType,
+                     structureName: template.name,
+                     genericArgs: args,
+                     methodInfo: entry
+                 )
+             }
+        }
+    }
+
     if specificType.containsGenericParameter {
       return specificType
     }
@@ -1568,8 +1603,9 @@ public class TypeChecker {
 
     if !generatedLayouts.contains(mangledName) {
       generatedLayouts.insert(mangledName)
+      let kind = getCompilerMethodKind(method.name)
       let functionNode = TypedGlobalNode.globalFunction(
-        identifier: Symbol(name: mangledName, type: functionType, kind: .function),
+        identifier: Symbol(name: mangledName, type: functionType, kind: .function, methodKind: kind),
         parameters: params,
         body: typedBody
       )
@@ -1577,7 +1613,8 @@ public class TypeChecker {
     }
 
     instantiatedFunctions[key] = (mangledName, functionType)
-    return Symbol(name: mangledName, type: functionType, kind: .function)
+    let kind = getCompilerMethodKind(method.name)
+    return Symbol(name: mangledName, type: functionType, kind: .function, methodKind: kind)
   }
 
   private func instantiateIntrinsicExtensionMethod(
@@ -1633,7 +1670,8 @@ public class TypeChecker {
     }
 
     instantiatedFunctions[key] = (mangledName, functionType)
-    return Symbol(name: mangledName, type: functionType, kind: .function)
+    let kind = getCompilerMethodKind(method.name)
+    return Symbol(name: mangledName, type: functionType, kind: .function, methodKind: kind)
   }
 
   private func unify(

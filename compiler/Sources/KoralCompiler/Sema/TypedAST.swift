@@ -24,15 +24,24 @@ public enum VariableKind {
     }
   }
 }
+public enum CompilerMethodKind {
+  case normal
+  case drop
+  case at
+  case atMut
+}
+
 public struct Symbol {
   public let name: String
   public let type: Type
   public let kind: SymbolKind
+  public let methodKind: CompilerMethodKind
 
-  public init(name: String, type: Type, kind: SymbolKind) {
+  public init(name: String, type: Type, kind: SymbolKind, methodKind: CompilerMethodKind = .normal) {
     self.name = name
     self.type = type
     self.kind = kind
+    self.methodKind = methodKind
   }
 
   public func isMutable() -> Bool {
