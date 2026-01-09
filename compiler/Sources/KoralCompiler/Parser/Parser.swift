@@ -136,6 +136,20 @@ public class Parser {
 
       try match(.leftParen)
       var parameters: [(name: String, mutable: Bool, type: TypeNode)] = []
+      
+      if currentToken === .selfKeyword {
+        try match(.selfKeyword)
+        var selfType: TypeNode = .inferredSelf
+        if currentToken === .refKeyword {
+          try match(.refKeyword)
+           selfType = .reference(selfType)
+        }
+        parameters.append((name: "self", mutable: false, type: selfType))
+        if currentToken === .comma {
+           try match(.comma)
+        }
+      }
+
       while currentToken !== .rightParen {
         var isMut = false
         if currentToken === .mutKeyword {
@@ -196,6 +210,20 @@ public class Parser {
 
       try match(.leftParen)
       var parameters: [(name: String, mutable: Bool, type: TypeNode)] = []
+
+      if currentToken === .selfKeyword {
+        try match(.selfKeyword)
+        var selfType: TypeNode = .inferredSelf
+        if currentToken === .refKeyword {
+           try match(.refKeyword)
+           selfType = .reference(selfType)
+        }
+        parameters.append((name: "self", mutable: false, type: selfType))
+        if currentToken === .comma {
+           try match(.comma)
+        }
+      }
+
       while currentToken !== .rightParen {
         var isMut = false
         if currentToken === .mutKeyword {
@@ -438,7 +466,7 @@ public class Parser {
     switch currentToken {
     case .letKeyword:
       return try variableDeclaration()
-    case .identifier(_):
+    case .identifier, .selfKeyword:
       let expr = try expression()
 
       if currentToken === .equal {
@@ -797,6 +825,9 @@ public class Parser {
     case .identifier(let name):
       try match(.identifier(name))
       return .identifier(name)
+    case .selfKeyword:
+      try match(.selfKeyword)
+      return .identifier("self")
     case .integer(let num):
       try match(.integer(num))
       return .integerLiteral(num)

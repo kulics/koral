@@ -34,47 +34,47 @@ intrinsic given[T Any] [T]Pointer {
     // Initializes this pointer’s memory with the given value.
     // This writes to *uninitialized* memory and does NOT drop any existing value.
     // POSTCONDITION: Memory at `self` is initialized.
-    init(self [T]Pointer, v T) Void;
+    init(self, v T) Void;
 
     // Deinitializes the memory at `self`.
     // This drops the value and returns the memory to an uninitialized state.
     // PRECONDITION: Memory at `self` must be initialized.
-    deinit(self [T]Pointer) Void;
+    deinit(self) Void;
 
     // Accesses the value pointed to by `self` without removing or invalidating it.
     // Returns a reference of the value.
     // PRECONDITION: Memory at `self` must be initialized.
     // NOTE: This is the primitive operation used to implement `__at` for higher constructs.
-    peek(self [T]Pointer) T ref;
+    peek(self) T ref;
 
     // [Compiler Protocol]
     // Enables `ptr[index]` syntax.
     // Equivalent to `self.offset(index).peek()`.
     // PRECONDITION: Memory at `self + index` must be initialized.
-    // __at(self [T]Pointer, index Int) T ref;
+    // __at(self, index Int) T ref;
 
     // [Compiler Protocol]
     // Enables `ptr[index] = val` mutation syntax.
     // Equivalent to `self.offset(index).peek()`.
     // PRECONDITION: Memory at `self + index` must be initialized.
-    // __at_mut(self [T]Pointer, index Int) T ref;
+    // __at_mut(self, index Int) T ref;
 
     // Retrieves the value from `self`, leaving the memory uninitialized.
     // Ideally used for moving values out of the pointer.
     // PRECONDITION: Memory at `self` must be initialized.
     // POSTCONDITION: Memory at `self` is uninitialized.
-    take(self [T]Pointer) T;
+    take(self) T;
 
     // Replaces the value at `self` with `v`, returning the old value.
     // Neither the old value nor the new value is dropped.
     // PRECONDITION: Memory at `self` must be initialized.
-    replace(self [T]Pointer, v T) T;
+    replace(self, v T) T;
 
     // --- Arithmetic ---
 
     // Returns a new pointer moved forward by `n` elements from `self`.
     // The offset is in units of T (stride), not bytes.
-    offset(self [T]Pointer, n Int) [T]Pointer;
+    offset(self, n Int) [T]Pointer;
 };
 
 public intrinsic let [T Any]ref_count(r T ref) Int;
@@ -115,7 +115,7 @@ given[T Copy] [T]List {
     // [Compiler Protocol]
     // Automatically called when the object goes out of scope.
     // User code cannot call this directly.
-    __drop(self [T]List ref) = {
+    __drop(self ref) = {
         if ref_count(self.storage) == 1 then {
             let mut i = 0;
             while i < self.storage.len then {
@@ -126,12 +126,12 @@ given[T Copy] [T]List {
         } else {}
     }
 
-    public count(self [T]List ref) Int = self.storage.len;
+    public count(self ref) Int = self.storage.len;
 
     // [Compiler Protocol]
     // Lowering target for `list[index]` in read context.
     // Returns a temporary reference to the element.
-    public __at(self [T]List ref, index Int) T ref = {
+    public __at(self ref, index Int) T ref = {
         // Bounds check can be added here
         self.storage.source.offset(index).peek()
     }
@@ -140,23 +140,23 @@ given[T Copy] [T]List {
     // Lowering target for `list[index]` in write/mutating context.
     // e.g., `list[0] = val` or `list[0].field = val`.
     // Handles Copy-On-Write logic internally.
-    public __at_mut(self [T]List ref, index Int) T ref = {
+    public __at_mut(self ref, index Int) T ref = {
         self.ensure_capacity(self.storage.len);
         self.storage.source.offset(index).peek()
     }
     
-    public set(self [T]List ref, index Int, value T) Void = {
+    public set(self ref, index Int, value T) Void = {
         self.ensure_capacity(self.storage.len);
         self.storage.source.offset(index).replace(value);
     }
 
-    public push_back(self [T]List ref, value T) Void = {
+    public push_back(self ref, value T) Void = {
         self.ensure_capacity(self.storage.len + 1);
         self.storage.source.offset(self.storage.len).init(value);
         self.storage.len = self.storage.len + 1;
     }
 
-    public insert(self [T]List ref, index Int, value T) Void = {
+    public insert(self ref, index Int, value T) Void = {
         self.ensure_capacity(self.storage.len + 1);
         
         if index < self.storage.len then {
@@ -171,7 +171,7 @@ given[T Copy] [T]List {
         self.storage.len = self.storage.len + 1;
     }
 
-    public remove(self [T]List ref, index Int) Void = {
+    public remove(self ref, index Int) Void = {
         self.ensure_capacity(self.storage.len);
         
         // 1. Drop the element at index
@@ -191,7 +191,7 @@ given[T Copy] [T]List {
     }
 
     // Ensures the list is unique and has enough capacity
-    private ensure_capacity(self [T]List ref, min_capacity Int) Void = {
+    private ensure_capacity(self ref, min_capacity Int) Void = {
         if ref_count(self.storage) > 1 then {
              // Shared case - Clone and Grow if needed
              let mut new_cap = self.storage.cap;

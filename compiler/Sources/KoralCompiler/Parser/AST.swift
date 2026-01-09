@@ -16,6 +16,7 @@ public indirect enum TypeNode {
   case identifier(String)
   case reference(TypeNode)
   case generic(base: String, args: [TypeNode])
+  case inferredSelf
 }
 public indirect enum GlobalNode {
   case globalVariableDeclaration(name: String, type: TypeNode, value: ExpressionNode, mutable: Bool, access: AccessModifier)
