@@ -21,24 +21,60 @@ public indirect enum GlobalNode {
   case globalVariableDeclaration(name: String, type: TypeNode, value: ExpressionNode, mutable: Bool, access: AccessModifier)
   case globalFunctionDeclaration(
     name: String,
-    typeParameters: [String],
+    typeParameters: [(name: String, type: TypeNode?)],
     parameters: [(name: String, mutable: Bool, type: TypeNode)],
     returnType: TypeNode,
     body: ExpressionNode,
     access: AccessModifier
   )
+  case intrinsicFunctionDeclaration(
+    name: String,
+    typeParameters: [(name: String, type: TypeNode?)],
+    parameters: [(name: String, mutable: Bool, type: TypeNode)],
+    returnType: TypeNode,
+    access: AccessModifier
+  )
   case globalTypeDeclaration(
     name: String,
-    typeParameters: [String],
+    typeParameters: [(name: String, type: TypeNode?)],
     parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier)],
     access: AccessModifier
   )
+  case intrinsicTypeDeclaration(
+    name: String,
+    typeParameters: [(name: String, type: TypeNode?)],
+    access: AccessModifier
+  )
   // given [T] Type { ...methods... }
-  case givenDeclaration(typeParams: [String] = [], type: TypeNode, methods: [MethodDeclaration])
+  case givenDeclaration(typeParams: [(name: String, type: TypeNode?)] = [], type: TypeNode, methods: [MethodDeclaration])
+  case intrinsicGivenDeclaration(typeParams: [(name: String, type: TypeNode?)] = [], type: TypeNode, methods: [IntrinsicMethodDeclaration])
 }
+
+public struct IntrinsicMethodDeclaration {
+  public let name: String
+  public let typeParameters: [(name: String, type: TypeNode?)]
+  public let parameters: [(name: String, mutable: Bool, type: TypeNode)]
+  public let returnType: TypeNode
+  public let access: AccessModifier
+
+  public init(
+    name: String,
+    typeParameters: [(name: String, type: TypeNode?)],
+    parameters: [(name: String, mutable: Bool, type: TypeNode)],
+    returnType: TypeNode,
+    access: AccessModifier
+  ) {
+    self.name = name
+    self.typeParameters = typeParameters
+    self.parameters = parameters
+    self.returnType = returnType
+    self.access = access
+  }
+}
+
 public struct MethodDeclaration {
   public let name: String
-  public let typeParameters: [String]
+  public let typeParameters: [(name: String, type: TypeNode?)]
   public let parameters: [(name: String, mutable: Bool, type: TypeNode)]
   public let returnType: TypeNode
   public let body: ExpressionNode
@@ -46,7 +82,7 @@ public struct MethodDeclaration {
 
   public init(
     name: String,
-    typeParameters: [String],
+    typeParameters: [(name: String, type: TypeNode?)],
     parameters: [(name: String, mutable: Bool, type: TypeNode)],
     returnType: TypeNode,
     body: ExpressionNode,

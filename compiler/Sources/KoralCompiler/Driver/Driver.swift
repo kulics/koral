@@ -101,14 +101,34 @@ public class Driver {
         outputDirectory = inputURL.deletingLastPathComponent()
     }
 
+
+    // 0. Load and Parse Core Library
+    let coreLibPath = getCoreLibPath()
+    let coreSource = try String(contentsOfFile: coreLibPath, encoding: .utf8)
+    let coreLexer = Lexer(input: coreSource)
+    let coreParser = Parser(lexer: coreLexer)
+    let coreAST = try coreParser.parse()
+
+    // Extract core global nodes
+    guard case .program(let coreGlobalNodes) = coreAST else {
+        throw NSError(domain: "Driver", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid core library structure"])
+    }
+
     // 1. Compile Koral to C
     let koralSource = try String(contentsOfFile: file, encoding: .utf8)
 
     let lexer = Lexer(input: koralSource)
     let parser = Parser(lexer: lexer)
-    let ast = try parser.parse()
+    let userAST = try parser.parse()
 
-    let typeChecker = TypeChecker(ast: ast)
+    // Combine Core and User AST
+    guard case .program(let userGlobalNodes) = userAST else {
+        throw NSError(domain: "Driver", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid user program structure"])
+    }
+    
+    let combinedAST: ASTNode = .program(globalNodes: coreGlobalNodes + userGlobalNodes)
+
+    let typeChecker = TypeChecker(ast: combinedAST)
     let typedAST = try typeChecker.check()
 
     let codeGen = CodeGen(ast: typedAST)
@@ -116,6 +136,7 @@ public class Driver {
 
     let cFileURL = outputDirectory.appendingPathComponent("\(baseName).c")
     try cSource.write(to: cFileURL, atomically: true, encoding: .utf8)
+
 
     if mode == .emitC {
       return
@@ -153,6 +174,33 @@ public class Driver {
           exit(runResult)
       }
     }
+  }
+
+  func getCoreLibPath() -> String {
+    // Check KORAL_HOME environment variable first
+    if let koralHome = ProcessInfo.processInfo.environment["KORAL_HOME"] {
+        let path = URL(fileURLWithPath: koralHome).appendingPathComponent("compiler/Sources/std/core.koral").path
+        if FileManager.default.fileExists(atPath: path) {
+            return path
+        }
+    }
+
+    // Fallback: Assume we are running from .build/debug/ or similar, try to find source root
+    // This is a heuristic for development environment
+    let currentPath = FileManager.default.currentDirectoryPath
+    let devPath = URL(fileURLWithPath: currentPath).appendingPathComponent("Sources/std/core.koral").path
+    if FileManager.default.fileExists(atPath: devPath) {
+        return devPath
+    }
+    
+    // Fallback for tests running in package root
+    let testPath = URL(fileURLWithPath: currentPath).appendingPathComponent("compiler/Sources/std/core.koral").path
+    if FileManager.default.fileExists(atPath: testPath) {
+         return testPath
+    }
+
+    print("Error: Could not locate std/core.koral. Please set KORAL_HOME environment variable.")
+    exit(1)
   }
 
   func getSDKPath() -> String? {

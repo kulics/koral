@@ -38,6 +38,12 @@ public class Parser {
   private func parseGlobalDeclaration() throws -> GlobalNode {
     let access = try parseAccessModifier()
 
+    var isIntrinsic = false
+    if currentToken === .intrinsicKeyword {
+        try match(.intrinsicKeyword)
+        isIntrinsic = true
+    }
+
     if currentToken === .letKeyword {
       try match(.letKeyword)
 
@@ -70,8 +76,11 @@ public class Parser {
 
       // Otherwise check for left paren to determine if it's a function or variable
       if currentToken === .leftParen {
-        return try globalFunctionDeclaration(name: name, typeParams: typePrams, access: access)
+        return try globalFunctionDeclaration(name: name, typeParams: typePrams, access: access, isIntrinsic: isIntrinsic)
       } else {
+        if isIntrinsic {
+             throw ParserError.unexpectedToken(line: lexer.currentLine, got: "intrinsic variable not supported")
+        }
         return try globalVariableDeclaration(name: name, mutable: false, access: access)
       }
     } else if currentToken === .typeKeyword {
@@ -88,23 +97,85 @@ public class Parser {
       }
 
       try match(.identifier(name))
-      return try parseTypeDeclaration(name, typeParams: typeParams, access: access)
+      return try parseTypeDeclaration(name, typeParams: typeParams, access: access, isIntrinsic: isIntrinsic)
     } else if currentToken === .givenKeyword {
       if access != .default {
-         // Optionally throw error, or allow. 
-         // Since AST doesn't support access for givenDeclaration, we can't persist it.
-         // Effectively ignoring it but allowing syntax "private given ..." -> parses as "given ..."
-         // The user instruction implies "global variables, global functions, global type declarations, methods in given, fields in type"
-         // It *skips* "given declaration itself".
-         // So `private given` is arguably invalid or at least not requested.
-         // But if I parse it, I am consuming the token.
-         // If I error:
          throw ParserError.unexpectedToken(line: lexer.currentLine, got: "Access modifier on given declaration")
+      }
+      if isIntrinsic {
+          return try parseIntrinsicGivenDeclaration()
       }
       return try parseGivenDeclaration()
     } else {
       throw ParserError.unexpectedToken(line: lexer.currentLine, got: currentToken.description)
     }
+  }
+
+  private func parseIntrinsicGivenDeclaration() throws -> GlobalNode {
+    try match(.givenKeyword)
+    let typeParams = try parseTypeParameters()
+    let type = try parseType()
+    try match(.leftBrace)
+    
+    var methods: [IntrinsicMethodDeclaration] = []
+    
+    while currentToken !== .rightBrace {
+      let methodAccess = try parseAccessModifier()
+      
+      // Intrinsic methods inside intrinsic given are implicitly intrinsic, so no need for keyword check?
+      // Or do we disallow nested modifiers?
+      // For simplicity, skip specific 'intrinsic' keyword check on methods since the whole block is intrinsic.
+      // But verify no body.
+
+      let methodTypeParams = try parseTypeParameters()
+
+      guard case .identifier(let name) = currentToken else {
+        throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+      }
+      try match(.identifier(name))
+
+      try match(.leftParen)
+      var parameters: [(name: String, mutable: Bool, type: TypeNode)] = []
+      while currentToken !== .rightParen {
+        var isMut = false
+        if currentToken === .mutKeyword {
+          isMut = true
+          try match(.mutKeyword)
+        }
+        guard case .identifier(let pname) = currentToken else {
+          throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+        }
+        try match(.identifier(pname))
+        let paramType = try parseType()
+        parameters.append((name: pname, mutable: isMut, type: paramType))
+        if currentToken === .comma {
+          try match(.comma)
+        }
+      }
+      try match(.rightParen)
+
+      var returnType: TypeNode = .identifier("Void")
+      if currentToken !== .semicolon {
+        returnType = try parseType()
+      }
+
+      // Must end with semicolon, no body
+      if currentToken === .equal {
+          throw ParserError.unexpectedToken(line: lexer.currentLine, got: "Intrinsic given method should not have body")
+      }
+      try match(.semicolon)
+
+      methods.append(IntrinsicMethodDeclaration(
+         name: name,
+         typeParameters: methodTypeParams,
+         parameters: parameters,
+         returnType: returnType,
+         access: methodAccess
+      ))
+    }
+    
+    try match(.rightBrace)
+    return .intrinsicGivenDeclaration(typeParams: typeParams, type: type, methods: methods)
   }
 
   private func parseGivenDeclaration() throws -> GlobalNode {
@@ -115,6 +186,7 @@ public class Parser {
     var methods: [MethodDeclaration] = []
     while currentToken !== .rightBrace {
       let methodAccess = try parseAccessModifier()
+
       let typeParams = try parseTypeParameters()
 
       guard case .identifier(let name) = currentToken else {
@@ -237,8 +309,8 @@ public class Parser {
     return .globalVariableDeclaration(name: name, type: type, value: value, mutable: mutable, access: access)
   }
 
-  private func parseTypeParameters() throws -> [String] {
-    var parameters: [String] = []
+  private func parseTypeParameters() throws -> [(name: String, type: TypeNode?)] {
+    var parameters: [(name: String, type: TypeNode?)] = []
     if currentToken === .leftBracket {
       try match(.leftBracket)
       while currentToken !== .rightBracket {
@@ -248,12 +320,12 @@ public class Parser {
         }
         try match(.identifier(paramName))
 
-        parameters.append(paramName)
-
-        // Consume optional type bound/constraint (ignored for now)
+        var constraint: TypeNode? = nil
+        // Consume optional type bound/constraint 
         if currentToken !== .comma && currentToken !== .rightBracket {
-             _ = try parseType()
+             constraint = try parseType()
         }
+        parameters.append((name: paramName, type: constraint))
 
         if currentToken === .comma {
           try match(.comma)
@@ -265,7 +337,7 @@ public class Parser {
   }
 
   // Parse global function declaration with optional 'own'/'ref' modifiers for params and return type
-  private func globalFunctionDeclaration(name: String, typeParams: [String], access: AccessModifier) throws -> GlobalNode {
+  private func globalFunctionDeclaration(name: String, typeParams: [(name: String, type: TypeNode?)], access: AccessModifier, isIntrinsic: Bool) throws -> GlobalNode {
     try match(.leftParen)
     var parameters: [(name: String, mutable: Bool, type: TypeNode)] = []
     while currentToken !== .rightParen {
@@ -291,43 +363,65 @@ public class Parser {
     if currentToken !== .equal {
       returnType = try parseType()
     }
-    try match(.equal)
-    let body = try expression()
-    return .globalFunctionDeclaration(
-      name: name,
-      typeParameters: typeParams,
-      parameters: parameters,
-      returnType: returnType,
-      body: body,
-      access: access
-    )
+
+    if isIntrinsic {
+        if currentToken === .equal {
+            throw ParserError.unexpectedToken(line: lexer.currentLine, got: "Intrinsic function should not have body")
+        }
+        return .intrinsicFunctionDeclaration(
+            name: name,
+            typeParameters: typeParams,
+            parameters: parameters,
+            returnType: returnType,
+            access: access
+        )
+    } else {
+        try match(.equal)
+        let body = try expression()
+        return .globalFunctionDeclaration(
+            name: name,
+            typeParameters: typeParams,
+            parameters: parameters,
+            returnType: returnType,
+            body: body,
+            access: access
+        )
+    }
   }
     
   // Parse type declaration
-  private func parseTypeDeclaration(_ name: String, typeParams: [String], access: AccessModifier) throws -> GlobalNode {
+  private func parseTypeDeclaration(_ name: String, typeParams: [(name: String, type: TypeNode?)], access: AccessModifier, isIntrinsic: Bool) throws -> GlobalNode {
+    if isIntrinsic {
+        if currentToken === .leftParen {
+             throw ParserError.unexpectedToken(line: lexer.currentLine, got: "Intrinsic type should not have body")
+        }
+        return .intrinsicTypeDeclaration(name: name, typeParameters: typeParams, access: access)
+    }
+
     try match(.leftParen)
     var parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier)] = []
+
     while currentToken !== .rightParen {
-      let fieldAccess = try parseAccessModifier()
+          let fieldAccess = try parseAccessModifier()
       
-      // Check for mut keyword for the field
-      var fieldMutable = false
-      if currentToken === .mutKeyword {
-        try match(.mutKeyword)
-        fieldMutable = true
-      }
+          // Check for mut keyword for the field
+          var fieldMutable = false
+          if currentToken === .mutKeyword {
+            try match(.mutKeyword)
+            fieldMutable = true
+          }
 
-      guard case .identifier(let paramName) = currentToken else {
-        throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
-      }
-      try match(.identifier(paramName))
-      let paramType = try parseType()
+          guard case .identifier(let paramName) = currentToken else {
+            throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+          }
+          try match(.identifier(paramName))
+          let paramType = try parseType()
 
-      parameters.append((name: paramName, type: paramType, mutable: fieldMutable, access: fieldAccess))
+          parameters.append((name: paramName, type: paramType, mutable: fieldMutable, access: fieldAccess))
 
-      if currentToken === .comma {
-        try match(.comma)
-      }
+          if currentToken === .comma {
+            try match(.comma)
+          }
     }
     try match(.rightParen)
 
