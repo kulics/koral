@@ -229,6 +229,7 @@ public class TypeChecker {
             try currentScope.defineType(typeParam, type: typeType)
           }
 
+          try currentScope.defineType("Self", type: type)
           currentScope.define("self", type, mutable: false)
 
           let returnType = try resolveTypeNode(method.returnType)
@@ -329,6 +330,7 @@ public class TypeChecker {
 
       for method in methods {
         let (methodType, typedBody, params, returnType) = try withNewScope {
+          try currentScope.defineType("Self", type: type)
           let returnType = try resolveTypeNode(method.returnType)
           let params = try method.parameters.map { param -> Symbol in
             let paramType = try resolveTypeNode(param.type)
@@ -1354,6 +1356,11 @@ public class TypeChecker {
         throw SemanticError.undefinedType(name)
       }
       return t
+    case .inferredSelf:
+      guard let t = currentScope.resolveType("Self") else {
+        throw SemanticError.undefinedType("Self")
+      }
+      return t
     case .reference(let inner):
       // 仅支持一层，在 parser 已限制；此处直接映射到 Type.reference
       let base = try resolveTypeNode(inner)
@@ -1641,6 +1648,8 @@ public class TypeChecker {
           inferred[name] = type
         }
       }
+    case .inferredSelf:
+      break
     case .reference(let inner):
       if case .reference(let innerType) = type {
         try unify(node: inner, type: innerType, inferred: &inferred, typeParams: typeParams)

@@ -71,6 +71,7 @@ public enum Token: CustomStringConvertible {
   case lessUnboundedRange  // '<...'
   case unboundedRangeLess  // '...<'
   case fullRange  // '....'
+  case selfKeyword // 'self' keyword
 
   // Add static operator function to compare if the same item
   public static func === (lhs: Token, rhs: Token) -> Bool {
@@ -144,7 +145,10 @@ public enum Token: CustomStringConvertible {
       (.unboundedRange, .unboundedRange),
       (.lessUnboundedRange, .lessUnboundedRange),
       (.unboundedRangeLess, .unboundedRangeLess),
-      (.fullRange, .fullRange):
+       (.fullRange, .fullRange),
+       (.selfKeyword, .selfKeyword),
+       (.bof, .bof),
+       (.eof, .eof):
       return true
     default:
       return false
@@ -235,7 +239,8 @@ public enum Token: CustomStringConvertible {
       return "type"
     case .dot:
       return "."
-    case .isKeyword:
+    case .selfKeyword: return "self"
+      case .isKeyword:
       return "is"
     case .refKeyword:
       return "ref"
@@ -619,6 +624,7 @@ public class Lexer {
       case "public": .publicKeyword
       case "bitshl": .bitshlKeyword
       case "bitshr": .bitshrKeyword
+      case "self": .selfKeyword
       default: .identifier(id)
       }
     default:
