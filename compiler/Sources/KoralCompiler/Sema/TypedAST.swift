@@ -108,7 +108,7 @@ public indirect enum TypedExpressionNode {
     statements: [TypedStatementNode], finalExpression: TypedExpressionNode?, type: Type)
   case ifExpression(
     condition: TypedExpressionNode, thenBranch: TypedExpressionNode,
-    elseBranch: TypedExpressionNode, type: Type)
+    elseBranch: TypedExpressionNode?, type: Type)
   case call(callee: TypedExpressionNode, arguments: [TypedExpressionNode], type: Type)
   case methodReference(base: TypedExpressionNode, method: Symbol, type: Type)
   case whileExpression(condition: TypedExpressionNode, body: TypedExpressionNode, type: Type)

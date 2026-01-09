@@ -541,19 +541,22 @@ public class TypeChecker {
           expected: "Bool", got: typedCondition.type.description)
       }
       let typedThen = try inferTypedExpression(thenBranch)
-      let typedElse = try inferTypedExpression(elseBranch)
-      if typedThen.type != typedElse.type {
-        throw SemanticError.typeMismatch(
-          expected: typedThen.type.description,
-          got: typedElse.type.description
-        )
+
+      if let elseExpr = elseBranch {
+        let typedElse = try inferTypedExpression(elseExpr)
+        if typedThen.type != typedElse.type {
+          throw SemanticError.typeMismatch(
+            expected: typedThen.type.description,
+            got: typedElse.type.description
+          )
+        }
+        return .ifExpression(
+          condition: typedCondition, thenBranch: typedThen, elseBranch: typedElse,
+          type: typedThen.type)
+      } else {
+        return .ifExpression(
+          condition: typedCondition, thenBranch: typedThen, elseBranch: nil, type: .void)
       }
-      return .ifExpression(
-        condition: typedCondition,
-        thenBranch: typedThen,
-        elseBranch: typedElse,
-        type: typedThen.type
-      )
 
     case .whileExpression(let condition, let body):
       let typedCondition = try inferTypedExpression(condition)

@@ -157,7 +157,7 @@ public indirect enum ExpressionNode {
   case identifier(String)
   case blockExpression(statements: [StatementNode], finalExpression: ExpressionNode?)
   case ifExpression(
-    condition: ExpressionNode, thenBranch: ExpressionNode, elseBranch: ExpressionNode)
+    condition: ExpressionNode, thenBranch: ExpressionNode, elseBranch: ExpressionNode?)
   case call(callee: ExpressionNode, arguments: [ExpressionNode])
   case whileExpression(condition: ExpressionNode, body: ExpressionNode)
   case letExpression(

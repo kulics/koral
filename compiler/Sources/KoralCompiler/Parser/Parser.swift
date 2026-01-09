@@ -783,8 +783,12 @@ public class Parser {
     let condition = try expression()
     try match(.thenKeyword)
     let thenBranch = try expression()
-    try match(.elseKeyword)
-    let elseBranch = try expression()
+
+    var elseBranch: ExpressionNode? = nil
+    if currentToken === .elseKeyword {
+      try match(.elseKeyword)
+      elseBranch = try expression()
+    }
     return .ifExpression(condition: condition, thenBranch: thenBranch, elseBranch: elseBranch)
   }
 
