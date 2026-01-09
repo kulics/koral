@@ -2,6 +2,7 @@ public struct GenericTemplate {
   public let name: String
   public let typeParameters: [(name: String, type: TypeNode?)]
   public let parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier)]
+  public let isCopy: Bool
 }
 
 public struct GenericFunctionTemplate {
@@ -19,10 +20,26 @@ public class Scope {
   private var types: [String: Type] = [:]
   private var genericTemplates: [String: GenericTemplate] = [:]
   private var genericFunctionTemplates: [String: GenericFunctionTemplate] = [:]
+  private var movedVariables: Set<String> = []
 
   public init(parent: Scope? = nil) {
     self.symbols = [:]
     self.parent = parent
+  }
+
+  public func markMoved(_ name: String) {
+    if symbols[name] != nil {
+      movedVariables.insert(name)
+    } else {
+      parent?.markMoved(name)
+    }
+  }
+
+  public func isMoved(_ name: String) -> Bool {
+    if symbols[name] != nil {
+      return movedVariables.contains(name)
+    }
+    return parent?.isMoved(name) ?? false
   }
 
   public func define(_ name: String, _ type: Type, mutable: Bool) {

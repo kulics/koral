@@ -128,19 +128,16 @@ given[T Copy] [T]List {
     // [Compiler Protocol]
     // Lowering target for `list[index]` in write/mutating context.
     // e.g., `list[0] = val` or `list[0].field = val`.
-    // Handles Copy-On-Write logic internally.
     public __at_mut(self ref, index Int) T ref = {
-        self.ensure_capacity(self.storage.len);
         self.storage.source.offset(index).peek()
     }
     
     public set(self ref, index Int, value T) Void = {
-        self.ensure_capacity(self.storage.len);
         self.storage.source.offset(index).replace(value);
     }
 
     public push_back(self ref, value T) Void = {
-        self.ensure_capacity(self.storage.len + 1);
+         self.ensure_capacity(self.storage.len + 1);
         self.storage.source.offset(self.storage.len).init(value);
         self.storage.len = self.storage.len + 1;
     }
@@ -161,8 +158,6 @@ given[T Copy] [T]List {
     }
 
     public remove(self ref, index Int) Void = {
-        self.ensure_capacity(self.storage.len);
-        
         // 1. Drop the element at index
         self.storage.source.offset(index).deinit();
         
@@ -181,40 +176,20 @@ given[T Copy] [T]List {
 
     // Ensures the list is unique and has enough capacity
     private ensure_capacity(self ref, min_capacity Int) Void = {
-        if ref_count(self.storage) > 1 then {
-             // Shared case - Clone and Grow if needed
-             let mut new_cap = self.storage.cap;
-             if min_capacity > new_cap then {
-                 new_cap = new_cap * 2;
-                 if new_cap < min_capacity then {
-                     new_cap = min_capacity;
-                 }
+         // Unique case - Grow if needed
+         if min_capacity > self.storage.cap then {
+             let mut new_cap = self.storage.cap * 2;
+             if new_cap < min_capacity then {
+                 new_cap = min_capacity;
              };
              
              let new_source = [T]alloc_memory(new_cap);
-             let mut i = 0;
-             while i < self.storage.len then {
-                new_source.offset(i).init(deref self.storage.source.offset(i).peek());
-                i += 1;
-             };
-             self.storage = ref [T]ListStorage(new_source, self.storage.len, new_cap);
+             move_memory(new_source, self.storage.source, self.storage.len);
+             dealloc_memory(self.storage.source);
              
-        } else {
-             // Unique case - Grow if needed
-             if min_capacity > self.storage.cap then {
-                 let mut new_cap = self.storage.cap * 2;
-                 if new_cap < min_capacity then {
-                     new_cap = min_capacity;
-                 };
-                 
-                 let new_source = [T]alloc_memory(new_cap);
-                 copy_memory(new_source, self.storage.source, self.storage.len);
-                 dealloc_memory(self.storage.source);
-                 
-                 self.storage.source = new_source;
-                 self.storage.cap = new_cap;
-             };
-        }
+             self.storage.source = new_source;
+             self.storage.cap = new_cap;
+         };
     }
 }
 /*

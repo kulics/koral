@@ -452,12 +452,19 @@ public class Parser {
           }
     }
     try match(.rightParen)
+    
+    var isCopy = false
+    if case .identifier("Copy") = currentToken {
+      try match(.identifier("Copy"))
+      isCopy = true
+    }
 
     return .globalTypeDeclaration(
       name: name,
       typeParameters: typeParams,
       parameters: parameters,
-      access: access
+      access: access,
+      isCopy: isCopy
     )
   }
 
@@ -471,43 +478,12 @@ public class Parser {
 
       if currentToken === .equal {
         try match(.equal)
-        let target: AssignmentTarget
-        switch expr {
-        case .identifier(let name):
-          target = .variable(name: name)
-        case .memberPath(let base, let path):
-          if case .identifier(let baseName) = base {
-            target = .memberAccess(base: baseName, memberPath: path)
-          } else {
-            throw ParserError.unexpectedToken(
-              line: lexer.currentLine, got: "invalid assignment target")
-          }
-        default:
-          throw ParserError.unexpectedToken(
-            line: lexer.currentLine, got: "invalid assignment target")
-        }
-
         let value = try expression()
-        return .assignment(target: target, value: value, line: lexer.currentLine)
+        return .assignment(target: expr, value: value, line: lexer.currentLine)
       } else if let op = getCompoundAssignmentOperator(currentToken) {
         try match(currentToken)
-        let target: AssignmentTarget
-        switch expr {
-        case .identifier(let name):
-          target = .variable(name: name)
-        case .memberPath(let base, let path):
-          if case .identifier(let baseName) = base {
-            target = .memberAccess(base: baseName, memberPath: path)
-          } else {
-            throw ParserError.unexpectedToken(
-              line: lexer.currentLine, got: "invalid assignment target")
-          }
-        default:
-          throw ParserError.unexpectedToken(
-            line: lexer.currentLine, got: "invalid assignment target")
-        }
         let value = try expression()
-        return .compoundAssignment(target: target, operator: op, value: value, line: lexer.currentLine)
+        return .compoundAssignment(target: expr, operator: op, value: value, line: lexer.currentLine)
       }
       return .expression(expr, line: lexer.currentLine)
     default:
@@ -593,6 +569,21 @@ public class Parser {
         }
       } else if currentToken === .leftParen {
         expr = try parseCall(expr)
+      } else if currentToken === .leftBracket {
+        try match(.leftBracket)
+        var args: [ExpressionNode] = []
+        if currentToken !== .rightBracket {
+          repeat {
+             args.append(try expression())
+             if currentToken === .comma {
+                 try match(.comma)
+             } else {
+                 break
+             }
+          } while true
+        }
+        try match(.rightBracket)
+        expr = .subscriptExpression(base: expr, arguments: args)
       } else {
         break
       }

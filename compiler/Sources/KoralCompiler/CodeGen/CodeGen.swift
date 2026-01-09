@@ -19,7 +19,7 @@ public class CodeGen {
     let vars = lifetimeScopeStack.removeLast()
     // 反向遍历变量列表,对可变类型变量调用 destroy
     for (name, type) in vars.reversed() {
-      if case .structure(let typeName, _, _) = type {
+      if case .structure(let typeName, _, _, _) = type {
         addIndent()
         buffer += "__koral_\(typeName)_drop(&\(name));\n"
       } else if case .reference(_) = type {
@@ -84,7 +84,7 @@ public class CodeGen {
       // Pass 0: Scan for user-defined drops
       for node in nodes {
         if case .givenDeclaration(let type, let methods) = node {
-             if case .structure(let typeName, _, _) = type {
+             if case .structure(let typeName, _, _, _) = type {
                  for method in methods {
                      if method.identifier.methodKind == .drop {
                          userDefinedDrops[typeName] = method.identifier.name
@@ -213,7 +213,7 @@ public class CodeGen {
     }
     let resultVar = generateExpressionSSA(body)
     let result = nextTemp()
-    if case .structure(let typeName, _, _) = body.type {
+    if case .structure(let typeName, _, _, _) = body.type {
       addIndent()
       if body.valueCategory == .lvalue {
         buffer += "\(getCType(body.type)) \(result) = __koral_\(typeName)_copy(&\(resultVar));\n"
@@ -299,7 +299,7 @@ public class CodeGen {
         let bodyResultVar = generateExpressionSSA(body)
 
         if type != .void {
-          if case .structure(let typeName, _, _) = type {
+          if case .structure(let typeName, _, _, _) = type {
             addIndent()
             if body.valueCategory == .lvalue {
               buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(bodyResultVar));\n"
@@ -398,7 +398,7 @@ public class CodeGen {
       addIndent()
       buffer += "\(getCType(type)) \(result);\n"
       
-      if case .structure(let typeName, _, _) = type {
+      if case .structure(let typeName, _, _, _) = type {
         // Struct: call copy constructor
         addIndent()
         buffer += "\(result) = __koral_\(typeName)_copy((struct \(typeName)*)\(innerResult).ptr);\n"
@@ -445,7 +445,7 @@ public class CodeGen {
         buffer += "\(result).ptr = malloc(sizeof(\(innerCType)));\n"
 
         // 2. 初始化数据
-        if case .structure(let typeName, _, _) = innerType {
+        if case .structure(let typeName, _, _, _) = innerType {
           addIndent()
           buffer += "*(\(innerCType)*)\(result).ptr = __koral_\(typeName)_copy(&\(innerResult));\n"
         } else {
@@ -462,7 +462,7 @@ public class CodeGen {
         buffer += "((struct Koral_Control*)\(result).control)->ptr = \(result).ptr;\n"
 
         // 4. 设置析构函数
-        if case .structure(let typeName, _, _) = innerType {
+        if case .structure(let typeName, _, _, _) = innerType {
           addIndent()
           buffer += "((struct Koral_Control*)\(result).control)->dtor = __koral_\(typeName)_drop;\n"
         } else {
@@ -581,7 +581,7 @@ public class CodeGen {
       
       // Get canonical members to check for casts
       let canonicalMembers: [(name: String, type: Type, mutable: Bool)]
-      if case .structure(_, let members, _) = identifier.type.canonical {
+      if case .structure(_, let members, _, _) = identifier.type.canonical {
           canonicalMembers = members
       } else {
           canonicalMembers = []
@@ -591,7 +591,7 @@ public class CodeGen {
         let argResult = generateExpressionSSA(arg)
         var finalArg = argResult
 
-        if case .structure(let typeName, _, _) = arg.type {
+        if case .structure(let typeName, _, _, _) = arg.type {
           addIndent()
           let argCopy = nextTemp()
           if arg.valueCategory == .lvalue {
@@ -634,6 +634,33 @@ public class CodeGen {
       return result
     case .memberPath(let source, let path):
       return generateMemberPath(source, path)
+    case .subscriptExpression(let base, let args, let method, let type):
+      guard case .function(_, let returns) = method.type else { fatalError() }
+      let callNode = TypedExpressionNode.call(
+          callee: .methodReference(base: base, method: method, type: method.type),
+          arguments: args,
+          type: returns)
+      let refResult = generateExpressionSSA(callNode)
+      
+      let result = nextTemp()
+      addIndent()
+      buffer += "\(getCType(type)) \(result);\n"
+      
+      if case .structure(let typeName, _, _, _) = type {
+        addIndent()
+        buffer += "\(result) = __koral_\(typeName)_copy((struct \(typeName)*)\(refResult).ptr);\n"
+      } else if case .reference(_) = type {
+        addIndent()
+        buffer += "\(result) = *(struct Ref*)\(refResult).ptr;\n"
+        addIndent()
+        buffer += "__koral_retain(\(result).control);\n"
+      } else {
+        let cType = getCType(type)
+        addIndent()
+        buffer += "\(result) = *(\(cType)*)\(refResult).ptr;\n"
+      }
+      return result
+
     case .intrinsicCall(let node):
       return generateIntrinsicSSA(node)
     }
@@ -712,7 +739,7 @@ public class CodeGen {
       if case .reference(_) = element {
         addIndent()
         buffer += "__koral_release(((struct Ref*)\(p))->control);\n"
-      } else if case .structure(let name, _, _) = element {
+      } else if case .structure(let name, _, _, _) = element {
         if name == "String" {  // String is primitive struct
           addIndent()
           buffer += "__koral_String_drop(\(p));\n"
@@ -821,6 +848,22 @@ public class CodeGen {
         curType = member.type
       }
       return (basePath, baseControl)
+    case .subscriptExpression(let base, let args, let method, _):
+         guard case .function(_, let returns) = method.type else { fatalError() }
+         let callNode = TypedExpressionNode.call(
+             callee: .methodReference(base: base, method: method, type: method.type),
+             arguments: args,
+             type: returns)
+         let refResult = generateExpressionSSA(callNode)
+         
+         guard case .reference(let inner) = returns else { fatalError() }
+         let innerCType = getCType(inner)
+         
+         // Wrap in parentheses to ensure . member access applies to the struct, not the pointer field
+         let path = "(*(\(innerCType)*)\(refResult).ptr)" 
+         let control = "\(refResult).control"
+         return (path, control)
+         
     default:
       fatalError("ref requires lvalue (variable or memberAccess)")
     }
@@ -838,7 +881,7 @@ public class CodeGen {
       // void 类型的值不能赋给变量
       if value.type != .void {
         // 如果是可变类型，增加引用计数
-        if case .structure(let typeName, _, _) = identifier.type {
+        if case .structure(let typeName, _, _, _) = identifier.type {
           addIndent()
           buffer += "\(getCType(identifier.type)) \(identifier.name) = "
           if value.valueCategory == .lvalue {
@@ -861,35 +904,39 @@ public class CodeGen {
         }
       }
     case .assignment(let target, let value):
-      switch target {
-      case .variable(let identifier):
-        generateAssignment(identifier, value)
-      case .memberAccess(let base, let memberPath):
-        generateMemberAccessAssignment(base, memberPath, value)
+      // Use buildRefComponents to get the C LValue path
+      let (lhsPath, _) = buildRefComponents(target)
+      let valueResult = generateExpressionSSA(value)
+      
+      if value.type == .void { return }
+
+      if case .structure(let typeName, _, _, _) = target.type {
+        addIndent()
+        if value.valueCategory == .lvalue {
+           buffer += "\(lhsPath) = __koral_\(typeName)_copy(&\(valueResult));\n"
+        } else {
+           buffer += "\(lhsPath) = \(valueResult);\n"
+        }
+      } else if case .reference(_) = target.type {
+         addIndent()
+         buffer += "\(lhsPath) = \(valueResult);\n"
+         if value.valueCategory == .lvalue {
+             addIndent()
+             buffer += "__koral_retain(\(lhsPath).control);\n"
+         }
+      } else {
+         addIndent()
+         buffer += "\(lhsPath) = \(valueResult);\n"
       }
+
     case .compoundAssignment(let target, let op, let value):
+      let (lhsPath, _) = buildRefComponents(target)
       let valueResult = generateExpressionSSA(value)
       let opStr = compoundOpToC(op)
-
-      switch target {
-      case .variable(let identifier):
-        addIndent()
-        buffer += "\(identifier.name) \(opStr) \(valueResult);\n"
-      case .memberAccess(let base, let memberPath):
-        var path = base.name
-        var currentType = base.type
-
-        for member in memberPath {
-          if case .reference(_) = currentType {
-            path += ".ptr->\(member.name)"
-          } else {
-            path += ".\(member.name)"
-          }
-          currentType = member.type
-        }
-        addIndent()
-        buffer += "\(path) \(opStr) \(valueResult);\n"
-      }
+      
+      addIndent()
+      buffer += "\(lhsPath) \(opStr) \(valueResult);\n"
+      
     case .expression(let expr):
       _ = generateExpressionSSA(expr)
     }
@@ -945,7 +992,7 @@ public class CodeGen {
     case .void: return "void"
     case .function(_, _):
       fatalError("Function type not supported in getCType")
-    case .structure(let name, _, _):
+    case .structure(let name, _, _, _):
       return "struct \(name)"
     case .genericParameter(let name):
       fatalError("Generic parameter \(name) should be resolved before CodeGen")
@@ -996,7 +1043,7 @@ public class CodeGen {
     withIndent {
       buffer += "    struct \(name) result;\n"
       for param in parameters {
-        if case .structure(let fieldTypeName, _, _) = param.type {
+        if case .structure(let fieldTypeName, _, _, _) = param.type {
           buffer += "    result.\(param.name) = __koral_\(fieldTypeName)_copy(&self->\(param.name));\n"
         } else if case .reference(_) = param.type {
           buffer += "    result.\(param.name) = self->\(param.name);\n"
@@ -1025,7 +1072,7 @@ public class CodeGen {
       }
 
       for param in parameters {
-        if case .structure(let fieldTypeName, _, _) = param.type {
+        if case .structure(let fieldTypeName, _, _, _) = param.type {
           buffer += "    __koral_\(fieldTypeName)_drop(&self->\(param.name));\n"
         } else if case .reference(_) = param.type {
           buffer += "    __koral_release(self->\(param.name).control);\n"
@@ -1069,7 +1116,7 @@ public class CodeGen {
       return
     }
     let valueResult = generateExpressionSSA(value)
-    if case .structure(let typeName, _, _) = identifier.type {
+    if case .structure(let typeName, _, _, _) = identifier.type {
       if value.valueCategory == .lvalue {
         let copyResult = nextTemp()
         addIndent()
@@ -1124,7 +1171,7 @@ public class CodeGen {
           memberAccess = "\(accessPath).\(memberName)"
       }
       
-      if case .structure(_, let members, _) = curType.canonical {
+      if case .structure(_, let members, _, _) = curType.canonical {
         if let canonicalMember = members.first(where: { $0.name == memberName }) {
           if canonicalMember.type != memberType {
             let targetCType = getCType(memberType)
@@ -1136,7 +1183,7 @@ public class CodeGen {
       accessPath = memberAccess
       curType = memberType
       
-      if isLast, case .structure(let typeName, _, _) = memberType {
+      if isLast, case .structure(let typeName, _, _, _) = memberType {
         if value.valueCategory == .lvalue {
           let copyResult = nextTemp()
           addIndent()
@@ -1181,7 +1228,7 @@ public class CodeGen {
     // struct类型参数传递用值，isValue==false 的 struct 参数自动递归 copy
     for arg in arguments {
       let result = generateExpressionSSA(arg)
-      if case .structure(let typeName, _, _) = arg.type {
+      if case .structure(let typeName, _, _, _) = arg.type {
         if arg.valueCategory == .lvalue {
           let copyResult = nextTemp()
           addIndent()
@@ -1236,7 +1283,7 @@ public class CodeGen {
           memberAccess = "\(access).\(member.name)"
       }
       
-      if case .structure(_, let members, _) = curType.canonical {
+      if case .structure(_, let members, _, _) = curType.canonical {
         if let canonicalMember = members.first(where: { $0.name == member.name }) {
           if canonicalMember.type != member.type {
             let targetCType = getCType(member.type)

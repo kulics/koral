@@ -78,19 +78,10 @@ public func printTypedAST(_ node: TypedProgram) {
 
     case .assignment(let target, let value):
       print("\(indent)Assignment:")
-
-      switch target {
-      case .variable(let identifier):
-        print("\(indent)  Target: \(identifier.name): \(identifier.type)")
-      case .memberAccess(let base, let memberPath):
-        print("\(indent)  Target: MemberAccess Chain")
-        print("\(indent)    Base: \(base.name): \(base.type)")
-        print("\(indent)    Path: \(memberPath.map { $0.name }.joined(separator: "."))")
-        for (index, item) in memberPath.enumerated() {
-          print("\(indent)      Member[\(index)]: \(item.name): \(item.type)")
-        }
+      print("\(indent)  Target:")
+      withIndent {
+          printTypedExpression(target)
       }
-
       print("\(indent)  Value:")
       withIndent {
         printTypedExpression(value)
@@ -98,19 +89,10 @@ public func printTypedAST(_ node: TypedProgram) {
 
     case .compoundAssignment(let target, let op, let value):
       print("\(indent)CompoundAssignment: \(op)")
-
-      switch target {
-      case .variable(let identifier):
-        print("\(indent)  Target: \(identifier.name): \(identifier.type)")
-      case .memberAccess(let base, let memberPath):
-        print("\(indent)  Target: MemberAccess Chain")
-        print("\(indent)    Base: \(base.name): \(base.type)")
-        print("\(indent)    Path: \(memberPath.map { $0.name }.joined(separator: "."))")
-        for (index, item) in memberPath.enumerated() {
-          print("\(indent)      Member[\(index)]: \(item.name): \(item.type)")
-        }
+      print("\(indent)  Target:")
+      withIndent {
+          printTypedExpression(target)
       }
-
       print("\(indent)  Value:")
       withIndent {
         printTypedExpression(value)
@@ -254,6 +236,19 @@ public func printTypedAST(_ node: TypedProgram) {
         }
       }
 
+    case .subscriptExpression(let base, let arguments, let method, let type):
+      print("\(indent)Subscript: \(type)")
+      print("\(indent)  Base:")
+      withIndent {
+          printTypedExpression(base)
+      }
+      print("\(indent)  Method: \(method.name)")
+      print("\(indent)  Arguments:")
+      withIndent {
+          for arg in arguments {
+              printTypedExpression(arg)
+          }
+      }
     case .call(let callee, let arguments, let type):
       print("\(indent)Call: \(type)")
       withIndent {
