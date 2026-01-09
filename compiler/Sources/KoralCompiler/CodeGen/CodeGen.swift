@@ -331,17 +331,22 @@ public class CodeGen {
           _ = generateExpressionSSA(thenBranch)
           popScope()
         }
-        addIndent()
-        buffer += "} else {\n"
-        withIndent {
-          pushScope()
-          _ = generateExpressionSSA(elseBranch)
-          popScope()
+        if let elseBranch = elseBranch {
+          addIndent()
+          buffer += "} else {\n"
+          withIndent {
+            pushScope()
+            _ = generateExpressionSSA(elseBranch)
+            popScope()
+          }
         }
         addIndent()
         buffer += "}\n"
         return ""
       } else {
+        guard let elseBranch = elseBranch else {
+          fatalError("Non-void if expression must have else branch (Sema should catch this)")
+        }
         let resultVar = nextTemp()
         addIndent()
         buffer += "\(getCType(type)) \(resultVar);\n"

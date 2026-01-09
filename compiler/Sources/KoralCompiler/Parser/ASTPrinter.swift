@@ -206,10 +206,12 @@ public func printAST(_ node: ASTNode) {
           printExpression(thenBranch)
         }
       }
-      print("\(indent)  ElseBranch:")
-      withIndent {
+      if let elseBranch = elseBranch {
+        print("\(indent)  ElseBranch:")
         withIndent {
-          printExpression(elseBranch)
+          withIndent {
+            printExpression(elseBranch)
+          }
         }
       }
     case .whileExpression(let condition, let body):

@@ -233,9 +233,11 @@ public func printTypedAST(_ node: TypedProgram) {
         withIndent {
           printTypedExpression(thenBranch)
         }
-        print("\(indent)Else:")
-        withIndent {
-          printTypedExpression(elseBranch)
+        if let elseBranch = elseBranch {
+          print("\(indent)Else:")
+          withIndent {
+            printTypedExpression(elseBranch)
+          }
         }
       }
 
