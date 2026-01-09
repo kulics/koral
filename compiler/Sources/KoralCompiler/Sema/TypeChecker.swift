@@ -247,6 +247,21 @@ public class TypeChecker {
               expected: returnType.description, got: typedBody.type.description)
           }
 
+          // Validate __drop signature
+          if method.name == "__drop" {
+             if params.count != 1 || params[0].name != "self" {
+                 throw SemanticError.invalidOperation(op: "__drop must have exactly one parameter 'self'", type1: "", type2: "")
+             }
+             if case .reference(_) = params[0].type {
+                 // OK
+             } else {
+                 throw SemanticError.invalidOperation(op: "__drop 'self' parameter must be a reference", type1: params[0].type.description, type2: "")
+             }
+             if returnType != .void {
+                 throw SemanticError.invalidOperation(op: "__drop must return Void", type1: returnType.description, type2: "")
+             }
+          }
+
           let functionType = Type.function(
             parameters: params.map {
               Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind))
@@ -550,6 +565,14 @@ public class TypeChecker {
       )
 
     case .call(let callee, let arguments):
+      // Check for explicit call to __drop
+      if case .identifier(let name) = callee, name == "__drop" {
+          throw SemanticError.invalidOperation(op: "Explicit call to __drop is not allowed", type1: "", type2: "")
+      }
+      if case .memberPath(_, let path) = callee, path.last == "__drop" {
+           throw SemanticError.invalidOperation(op: "Explicit call to __drop is not allowed", type1: "", type2: "")
+      }
+
       // Check if callee is a generic instantiation (Constructor call or Function call)
       if case .genericInstantiation(let base, let args) = callee {
         if let template = currentScope.lookupGenericTemplate(base) {

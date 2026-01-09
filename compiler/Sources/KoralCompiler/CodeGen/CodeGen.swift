@@ -5,6 +5,7 @@ public class CodeGen {
   private var tempVarCounter = 0
   private var globalInitializations: [(String, TypedExpressionNode)] = []
   private var lifetimeScopeStack: [[(String, Type)]] = []
+  private var userDefinedDrops: [String: String] = [:] // TypeName -> Mangled Drop Function Name
 
   public init(ast: TypedProgram) {
     self.ast = ast
@@ -82,6 +83,19 @@ public class CodeGen {
   private func generateProgram(_ program: TypedProgram) {
     switch program {
     case .program(let nodes):
+      // Pass 0: Scan for user-defined drops
+      for node in nodes {
+        if case .givenDeclaration(let type, let methods) = node {
+             if case .structure(let typeName, _, _) = type {
+                 for method in methods {
+                     if method.identifier.name.hasSuffix("___drop") { // Mangled name check
+                         userDefinedDrops[typeName] = method.identifier.name
+                     }
+                 }
+             }
+        }
+      }
+
       // 先生成所有类型声明
       for node in nodes {
         if case .globalTypeDeclaration(let identifier, let parameters) = node {
@@ -535,19 +549,19 @@ public class CodeGen {
       buffer += "_Bool \(result) = !\(exprResult);\n"
       return result
 
-    case .bitwiseExpression(let left, let op, let right, _):
+    case .bitwiseExpression(let left, let op, let right, let type):
       let leftResult = generateExpressionSSA(left)
       let rightResult = generateExpressionSSA(right)
       let result = nextTemp()
       addIndent()
-      buffer += "int \(result) = \(leftResult) \(bitwiseOpToC(op)) \(rightResult);\n"
+      buffer += "\(getCType(type)) \(result) = \(leftResult) \(bitwiseOpToC(op)) \(rightResult);\n"
       return result
 
-    case .bitwiseNotExpression(let expr, _):
+    case .bitwiseNotExpression(let expr, let type):
       let exprResult = generateExpressionSSA(expr)
       let result = nextTemp()
       addIndent()
-      buffer += "int \(result) = ~\(exprResult);\n"
+      buffer += "\(getCType(type)) \(result) = ~\(exprResult);\n"
       return result
 
     case .typeConstruction(let identifier, let arguments, _):
@@ -980,6 +994,18 @@ public class CodeGen {
     buffer += "void __koral_\(name)_drop(void* raw_self) {\n"
     withIndent {
       buffer += "    struct \(name)* self = (struct \(name)*)raw_self;\n"
+
+      // Call user defined drop if exists
+      if let userDrop = userDefinedDrops[name] {
+          buffer += "    {\n"
+          buffer += "        void \(userDrop)(struct Ref);\n"
+          buffer += "        struct Ref r;\n"
+          buffer += "        r.ptr = self;\n"
+          buffer += "        r.control = NULL;\n" // Control is NULL as we are inside the destructor managed by control/scope
+          buffer += "        \(userDrop)(r);\n" 
+          buffer += "    }\n"
+      }
+
       for param in parameters {
         if case .structure(let fieldTypeName, _, _) = param.type {
           buffer += "    __koral_\(fieldTypeName)_drop(&self->\(param.name));\n"
