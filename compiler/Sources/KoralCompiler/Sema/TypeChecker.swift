@@ -599,12 +599,19 @@ public class TypeChecker {
       )
 
     case .call(let callee, let arguments):
-      // Check for explicit call to __drop
-      if case .identifier(let name) = callee, name == "__drop" {
-          throw SemanticError.invalidOperation(op: "Explicit call to __drop is not allowed", type1: "", type2: "")
+      // Check for explicit call to methods marked as internal/special by compiler
+      let explicitMethodName: String?
+      switch callee {
+      case .identifier(let name):
+          explicitMethodName = name
+      case .memberPath(_, let path):
+          explicitMethodName = path.last
+      default:
+          explicitMethodName = nil
       }
-      if case .memberPath(_, let path) = callee, path.last == "__drop" {
-           throw SemanticError.invalidOperation(op: "Explicit call to __drop is not allowed", type1: "", type2: "")
+      
+      if let name = explicitMethodName, getCompilerMethodKind(name) != .normal {
+          throw SemanticError.invalidOperation(op: "Explicit call to \(name) is not allowed", type1: "", type2: "")
       }
 
       // Check if callee is a generic instantiation (Constructor call or Function call)
