@@ -426,6 +426,10 @@ public class Parser {
         return .intrinsicTypeDeclaration(name: name, typeParameters: typeParams, access: access)
     }
 
+    if currentToken === .leftBrace {
+        return try parseUnionDeclaration(name, typeParams: typeParams, access: access)
+    }
+
     try match(.leftParen)
     var parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier)] = []
 
@@ -465,6 +469,47 @@ public class Parser {
       parameters: parameters,
       access: access,
       isCopy: isCopy
+    )
+  }
+
+  // Parse union declaration (sum type)
+  private func parseUnionDeclaration(_ name: String, typeParams: [(name: String, type: TypeNode?)], access: AccessModifier) throws -> GlobalNode {
+    try match(.leftBrace)
+    var cases: [UnionCaseDeclaration] = []
+
+    while currentToken !== .rightBrace {
+        guard case .identifier(let caseName) = currentToken else {
+            throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+        }
+        try match(.identifier(caseName))
+        
+        var parameters: [(name: String, type: TypeNode)] = []
+        try match(.leftParen)
+        
+        while currentToken !== .rightParen {
+            guard case .identifier(let paramName) = currentToken else {
+                throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+            }
+            try match(.identifier(paramName))
+            let paramType = try parseType()
+            parameters.append((name: paramName, type: paramType))
+            
+            if currentToken === .comma {
+                try match(.comma)
+            }
+        }
+        try match(.rightParen)
+        try match(.semicolon)
+        cases.append(UnionCaseDeclaration(name: caseName, parameters: parameters))
+    }
+    
+    try match(.rightBrace)
+    
+    return .unionDeclaration(
+        name: name,
+        typeParameters: typeParams,
+        cases: cases,
+        access: access
     )
   }
 

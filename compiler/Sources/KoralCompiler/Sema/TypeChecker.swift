@@ -55,6 +55,33 @@ public class TypeChecker {
 
   private func checkGlobalDeclaration(_ decl: GlobalNode) throws -> TypedGlobalNode? {
     switch decl {
+    case .unionDeclaration(let name, let typeParameters, let cases, let access):
+      if !typeParameters.isEmpty {
+          let template = GenericUnionTemplate(name: name, typeParameters: typeParameters, cases: cases, access: access)
+          currentScope.defineGenericUnionTemplate(name, template: template)
+          return .genericTypeTemplate(name: name)
+      }
+
+      // Placeholder for recursion
+      let placeholder = Type.union(name: name, cases: [], isGenericInstantiation: false, isCopy: true)
+      try currentScope.defineType(name, type: placeholder)
+
+      var unionCases: [UnionCase] = []
+      for c in cases {
+          var params: [(name: String, type: Type)] = []
+          for p in c.parameters {
+              let resolved = try resolveTypeNode(p.type)
+              if resolved == placeholder {
+                   throw SemanticError.invalidOperation(op: "Direct recursion in union \(name) not allowed (use ref)", type1: p.name, type2: "")
+              }
+              params.append((name: p.name, type: resolved))
+          }
+          unionCases.append(UnionCase(name: c.name, parameters: params))
+      }
+      let type = Type.union(name: name, cases: unionCases, isGenericInstantiation: false, isCopy: true)
+      try currentScope.defineType(name, type: type)
+      return .unionDeclaration(identifier: Symbol(name: name, type: type, kind: .type), cases: unionCases)
+
     case .globalVariableDeclaration(let name, let typeNode, let value, let isMut, _):
       guard case nil = currentScope.lookup(name) else {
         throw SemanticError.duplicateDefinition(name)
@@ -194,22 +221,26 @@ public class TypeChecker {
     case .givenDeclaration(let typeParams, let typeNode, let methods):
       if !typeParams.isEmpty {
         // Generic Given
-        guard case .generic(let baseName, let args) = typeNode else {
-          throw SemanticError.invalidOperation(
-            op: "generic given on non-generic type", type1: "", type2: "")
-        }
-
-        // Validate that args are exactly the type params
-        if args.count != typeParams.count {
-          throw SemanticError.typeMismatch(
-            expected: "\(typeParams.count) generic params", got: "\(args.count)")
-        }
-        for (i, arg) in args.enumerated() {
-          guard case .identifier(let argName) = arg, argName == typeParams[i].name else {
+        var baseName = ""
+        if case .generic(let name, let args) = typeNode {
+            baseName = name
+            // Validate that args are exactly the type params
+            if args.count != typeParams.count {
+                throw SemanticError.typeMismatch(
+                    expected: "\(typeParams.count) generic params", got: "\(args.count)")
+            }
+            for (i, arg) in args.enumerated() {
+               guard case .identifier(let argName) = arg, argName == typeParams[i].name else {
+                   throw SemanticError.invalidOperation(
+                       op: "generic given specialization not supported", type1: String(describing: arg),
+                       type2: "")
+               }
+            }
+        } else if case .identifier(let name) = typeNode {
+            baseName = name
+        } else {
             throw SemanticError.invalidOperation(
-              op: "generic given specialization not supported", type1: String(describing: arg),
-              type2: "")
-          }
+                op: "generic given on invalid type node", type1: String(describing: typeNode), type2: "")
         }
 
         // Register methods for the template
@@ -225,8 +256,13 @@ public class TypeChecker {
       }
 
       let type = try resolveTypeNode(typeNode)
-      guard case .structure(let typeName, _, _, _) = type else {
-        throw SemanticError.invalidOperation(op: "given", type1: type.description, type2: "")
+      let typeName: String
+      if case .structure(let name, _, _, _) = type {
+          typeName = name
+      } else if case .union(let name, _, _, _) = type {
+          typeName = name
+      } else {
+        throw SemanticError.invalidOperation(op: "given extends only struct or union", type1: type.description, type2: "")
       }
 
       var typedMethods: [TypedMethodDeclaration] = []
@@ -338,8 +374,13 @@ public class TypeChecker {
       }
 
       let type = try resolveTypeNode(typeNode)
-      guard case .structure(let typeName, _, _, _) = type else {
-        throw SemanticError.invalidOperation(op: "given", type1: type.description, type2: "")
+      let typeName: String
+      if case .structure(let name, _, _, _) = type {
+          typeName = name
+      } else if case .union(let name, _, _, _) = type {
+          typeName = name
+      } else {
+        throw SemanticError.invalidOperation(op: "given extends only struct or union", type1: type.description, type2: "")
       }
 
       var typedMethods: [TypedMethodDeclaration] = []
@@ -397,9 +438,9 @@ public class TypeChecker {
       }
 
       if !typeParameters.isEmpty {
-        let template = GenericTemplate(
+        let template = GenericStructTemplate(
           name: name, typeParameters: typeParameters, parameters: parameters, isCopy: isCopy)
-        currentScope.defineGenericTemplate(name, template: template)
+        currentScope.defineGenericStructTemplate(name, template: template)
         return .genericTypeTemplate(name: name)
       }
 
@@ -452,8 +493,8 @@ public class TypeChecker {
       } else {
         // For generic intrinsics (like Pointer<T>), we still need a template definition
         // so the type checker knows it accepts distinct type parameters.
-        let template = GenericTemplate(name: name, typeParameters: typeParameters, parameters: [], isCopy: true)
-        currentScope.defineGenericTemplate(name, template: template)
+        let template = GenericStructTemplate(name: name, typeParameters: typeParameters, parameters: [], isCopy: true)
+        currentScope.defineGenericStructTemplate(name, template: template)
         return .genericTypeTemplate(name: name)
       }
     }
@@ -481,6 +522,21 @@ public class TypeChecker {
         }, returns: returnType)
       return (typedBody, functionType)
     }
+  }
+
+  private func convertExprToTypeNode(_ expr: ExpressionNode) throws -> TypeNode {
+     switch expr {
+     case .identifier(let name):
+         return .identifier(name)
+     case .subscriptExpression(let base, let args):
+         if case .identifier(let baseName) = base {
+             let typeArgs = try args.map { try convertExprToTypeNode($0) }
+             return .generic(base: baseName, args: typeArgs)
+         }
+         throw SemanticError.invalidOperation(op: "Complex type expression not supported", type1: "", type2: "")
+     default:
+         throw SemanticError.typeMismatch(expected: "Type Identifier", got: String(describing: expr))
+     }
   }
 
   // 新增用于返回带类型的表达式的类型推导函数
@@ -616,7 +672,7 @@ public class TypeChecker {
 
       // Check if callee is a generic instantiation (Constructor call or Function call)
       if case .genericInstantiation(let base, let args) = callee {
-        if let template = currentScope.lookupGenericTemplate(base) {
+        if let template = currentScope.lookupGenericStructTemplate(base) {
           let resolvedArgs = try args.map { try resolveTypeNode($0) }
           let instantiatedType = try instantiate(template: template, args: resolvedArgs)
 
@@ -745,6 +801,53 @@ public class TypeChecker {
         } else {
           throw SemanticError.undefinedType(base)
         }
+      }
+
+      // Check if it is a constructor call OR implicit generic function call
+      if case .identifier(let name) = callee {
+        // Special case: Union Construction via static member access
+        // If Parser produces Call(MemberPath(Id("Option"), "Some"), ...), standard loop below handles it if callee resolves to a ".variable".
+        // BUT calling a .variable requires checkCall logic below.
+        // We need to differentiate if the .variable IS a union constructor symbol.
+        // See Step 3.1 logic which emits .variable(symbol) where symbol.name = "Option.Some".
+        // We can inspect the callee symbol to detect if it's a Union Constructor.
+        // However, `callee` here is `ExpressionNode` (AST), not `TypedExpressionNode`.
+        // So we first infer callee.
+      }
+      
+      // Resolve Callee (Check Union Constructor)
+      var preResolvedCallee: TypedExpressionNode? = nil
+      do {
+          preResolvedCallee = try inferTypedExpression(callee)
+      } catch is SemanticError {
+          // Fallthrough
+          preResolvedCallee = nil
+      }
+
+      if let resolved = preResolvedCallee, case .variable(let symbol) = resolved {
+         if case .function(_, let returnType) = symbol.type, case .union(let uName, _, _, _) = returnType {
+             // Check if symbol name is uName.CaseName
+             if symbol.name.starts(with: uName + ".") {
+                  let caseName = String(symbol.name.dropFirst(uName.count + 1))
+                  let params = symbol.type.functionParameters! 
+                  
+                  if arguments.count != params.count {
+                      throw SemanticError.invalidArgumentCount(function: symbol.name, expected: params.count, got: arguments.count)
+                  }
+                  
+                  var typedArgs: [TypedExpressionNode] = []
+                  for (arg, param) in zip(arguments, params) {
+                      let typedArg = try inferTypedExpression(arg)
+                      if typedArg.type != param.type {
+                          throw SemanticError.typeMismatch(expected: param.type.description, got: typedArg.type.description)
+                      }
+                      checkMove(typedArg)
+                      typedArgs.append(typedArg)
+                  }
+                  
+                  return .unionConstruction(type: returnType, caseName: caseName, arguments: typedArgs)
+             }
+         }
       }
 
       // Check if it is a constructor call OR implicit generic function call
@@ -1012,26 +1115,43 @@ public class TypeChecker {
       return try resolveSubscript(base: typedBase, args: typedArguments, isMut: false)
 
     case .memberPath(let baseExpr, let path):
-      // 1. Check if baseExpr is a Type (Generic Instantiation) for static method access
-      if case .genericInstantiation(let baseName, let args) = baseExpr,
-         let template = currentScope.lookupGenericTemplate(baseName) {
-        let resolvedArgs = try args.map { try resolveTypeNode($0) }
-        let type = try instantiate(template: template, args: resolvedArgs)
-        
-        if path.count == 1 {
-           let memberName = path[0]
-           if case .structure(let name, _, let isGen, _) = type, isGen, let info = layoutToTemplateInfo[name] {
-               if let extensions = genericExtensionMethods[info.base] {
-                   if let ext = extensions.first(where: { $0.method.name == memberName }) {
-                       let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
-                       if isStatic {
-                           let methodSym = try instantiateExtensionMethod(baseType: type, structureName: info.base, genericArgs: info.args, methodInfo: ext)
-                           return .variable(identifier: methodSym)
+      // 1. Check if baseExpr is a Type (Generic Instantiation) for static method access or Union Constructor
+      if case .genericInstantiation(let baseName, let args) = baseExpr {
+         if let template = currentScope.lookupGenericStructTemplate(baseName) {
+            let resolvedArgs = try args.map { try resolveTypeNode($0) }
+            let type = try instantiate(template: template, args: resolvedArgs)
+            
+            if path.count == 1 {
+               let memberName = path[0]
+               if case .structure(let name, _, let isGen, _) = type, isGen, let info = layoutToTemplateInfo[name] {
+                   if let extensions = genericExtensionMethods[info.base] {
+                       if let ext = extensions.first(where: { $0.method.name == memberName }) {
+                           let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
+                           if isStatic {
+                               let methodSym = try instantiateExtensionMethod(baseType: type, structureName: info.base, genericArgs: info.args, methodInfo: ext)
+                               return .variable(identifier: methodSym)
+                           }
                        }
                    }
                }
-           }
-        }
+            }
+         } else if let template = currentScope.lookupGenericUnionTemplate(baseName) {
+             let resolvedArgs = try args.map { try resolveTypeNode($0) }
+             let type = try instantiateUnion(template: template, args: resolvedArgs)
+             
+             if path.count == 1 {
+                 let memberName = path[0]
+                 if case .union(let uName, let cases, _, _) = type {
+                     if let c = cases.first(where: { $0.name == memberName }) {
+                         let symbolName = "\(uName).\(memberName)"
+                         let paramTypes = c.parameters.map { Parameter(type: $0.type, kind: .byVal) }
+                         let constructorType = Type.function(parameters: paramTypes, returns: type)
+                         let symbol = Symbol(name: symbolName, type: constructorType, kind: .variable(.Value))
+                         return .variable(identifier: symbol)
+                     }
+                 }
+             }
+         }
       }
       
       // 2. Check if baseExpr is a Type (Identifier) for static method access
@@ -1044,9 +1164,6 @@ public class TypeChecker {
                    if let methods = extensionMethods[typeName], let sym = methods[memberName] {
                         methodSymbol = sym
                    }
-                   // Also check generic extension methods for non-generic base? (e.g. specialized?)
-                   // If 'type' is structure, it is concrete.
-                   // If 'extensionMethods' populated, use it.
                }
                
                if let method = methodSymbol {
@@ -1054,6 +1171,35 @@ public class TypeChecker {
                    return .variable(identifier: method)
                }
            }
+      }
+
+      // 3. Union Constructor Access via member path (e.g., UnionType.CaseName)
+      // This is not a "Function variable" but a direct Constructor node which expects a Call parent.
+      // However, we are inside `memberPath`. The parser sees `Option.Some(1)` as Call(MemberPath(Option, Some), [1]).
+      // So here we should return a "Function" type that is the constructor.
+      if case .identifier(let name) = baseExpr, let type = currentScope.lookupType(name) {
+          if path.count == 1 {
+              let memberName = path[0]
+              if case .union(_, let cases, _, _) = type {
+                  if let c = cases.first(where: { $0.name == memberName }) {
+                      // Found Union Case. Return a synthetic Function Symbol representing the constructor.
+                      let paramTypes = c.parameters.map { Parameter(type: $0.type, kind: .byVal) }
+                      let funcType = Type.function(parameters: paramTypes, returns: type)
+                      let symbol = Symbol(name: "\(name).\(memberName)", type: funcType, kind: .function)
+                      // We abuse .variable node to transport this symbol up to the Call handler?
+                      // Or creating a specialized Node?
+                      // If we return .variable(symbol), the Call handler will see a function variable and try to "call" it.
+                      // That works for normal functions. For Union constructor, we need to distinguish it in `checkCall` to emit `unionConstruction`.
+                      
+                      // We can mark the symbol name specially or check effectively later.
+                      // Better: Create a distinct SymbolKind for Constructor? Or check if Symbol name matches Union.Case.
+                      
+                      // Actually, let's keep it simple. If we return a Variable(Function), checkCall will try to invoke it.
+                      // But `checkCall` logic usually handles `variable` node.
+                      return .variable(identifier: symbol)
+                  }
+              }
+          }
       }
 
       let typedBase = try inferTypedExpression(baseExpr)
@@ -1118,9 +1264,11 @@ public class TypeChecker {
               }
             }
 
-            if case .structure(_, _, let isGen, _) = typeToLookup, isGen,
-              let info = layoutToTemplateInfo[typeName]
-            {
+            var isGenericInstance = false
+            if case .structure(_, _, let isGen, _) = typeToLookup { isGenericInstance = isGen }
+            else if case .union(_, _, let isGen, _) = typeToLookup { isGenericInstance = isGen }
+            
+            if isGenericInstance, let info = layoutToTemplateInfo[typeName] {
 
               if let extensions = genericExtensionMethods[info.base] {
                 for ext in extensions {
@@ -1523,7 +1671,7 @@ public class TypeChecker {
       let base = try resolveTypeNode(inner)
       return .reference(inner: base)
     case .generic(let base, let args):
-      guard let template = currentScope.lookupGenericTemplate(base) else {
+      guard let template = currentScope.lookupGenericStructTemplate(base) else {
         throw SemanticError.undefinedType(base)
       }
       let resolvedArgs = try args.map { try resolveTypeNode($0) }
@@ -1531,7 +1679,7 @@ public class TypeChecker {
     }
   }
 
-  private func instantiate(template: GenericTemplate, args: [Type]) throws -> Type {
+  private func instantiate(template: GenericStructTemplate, args: [Type]) throws -> Type {
     guard template.typeParameters.count == args.count else {
       throw SemanticError.typeMismatch(
         expected: "\(template.typeParameters.count) generic arguments",
@@ -1626,6 +1774,82 @@ public class TypeChecker {
       extraGlobalNodes.append(.globalTypeDeclaration(identifier: typeSymbol, parameters: params))
     }
 
+    return specificType
+  }
+
+  private func instantiateUnion(template: GenericUnionTemplate, args: [Type]) throws -> Type {
+    guard template.typeParameters.count == args.count else {
+       throw SemanticError.typeMismatch(expected: "\(template.typeParameters.count) generic types", got: "\(args.count)")
+    }
+    
+    let key = "\(template.name)<\(args.map { $0.description }.joined(separator: ","))>"
+    if let existing = instantiatedTypes[key] {
+        return existing
+    }
+    
+    var resolvedCases: [UnionCase] = []
+    try withNewScope {
+        for (i, paramInfo) in template.typeParameters.enumerated() {
+             try currentScope.defineType(paramInfo.name, type: args[i])
+        }
+        for c in template.cases {
+             var params: [(name: String, type: Type)] = []
+             for p in c.parameters {
+                 params.append((name: p.name, type: try resolveTypeNode(p.type)))
+             }
+             resolvedCases.append(UnionCase(name: c.name, parameters: params))
+        }
+    }
+    
+    let argLayoutKeys = args.map { $0.layoutKey }.joined(separator: "_")
+    let layoutName = "\(template.name)_\(argLayoutKeys)"
+    
+    let specificType = Type.union(
+        name: layoutName, 
+        cases: resolvedCases, 
+        isGenericInstantiation: true, 
+        isCopy: true
+    )
+    instantiatedTypes[key] = specificType
+    layoutToTemplateInfo[layoutName] = (base: template.name, args: args)
+
+    // Force instantiate __drop if it exists for this type
+    if let methods = genericExtensionMethods[template.name] {
+        for entry in methods {
+             if entry.method.name == "__drop" {
+                 _ = try instantiateExtensionMethod(
+                     baseType: specificType,
+                     structureName: template.name,
+                     genericArgs: args,
+                     methodInfo: entry
+                 )
+             }
+        }
+    }
+    
+    // Register global declaration for CodeGen
+    if !generatedLayouts.contains(layoutName) {
+        generatedLayouts.insert(layoutName)
+        // Canonical cases (using canonical types for fields)
+        var canonicalCases: [UnionCase] = []
+        try withNewScope {
+             for (i, paramInfo) in template.typeParameters.enumerated() {
+                  try currentScope.defineType(paramInfo.name, type: args[i].canonical)
+             }
+             for c in template.cases {
+                  var params: [(name: String, type: Type)] = []
+                  for p in c.parameters {
+                      params.append((name: p.name, type: try resolveTypeNode(p.type)))
+                  }
+                  canonicalCases.append(UnionCase(name: c.name, parameters: params))
+             }
+        }
+        
+        let canonicalType = Type.union(name: layoutName, cases: canonicalCases, isGenericInstantiation: true, isCopy: true)
+        let typeSymbol = Symbol(name: layoutName, type: canonicalType, kind: .type)
+        extraGlobalNodes.append(.unionDeclaration(identifier: typeSymbol, cases: canonicalCases))
+    }
+    
     return specificType
   }
 

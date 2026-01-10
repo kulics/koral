@@ -1,3 +1,8 @@
+public struct UnionCase {
+  public let name: String
+  public let parameters: [(name: String, type: Type)]
+}
+
 public indirect enum Type: CustomStringConvertible {
   case int
   case float
@@ -9,6 +14,7 @@ public indirect enum Type: CustomStringConvertible {
   case reference(inner: Type)
   case pointer(element: Type)
   case genericParameter(name: String)
+  case union(name: String, cases: [UnionCase], isGenericInstantiation: Bool, isCopy: Bool)
 
   public var isCopy: Bool {
     switch self {
@@ -25,6 +31,8 @@ public indirect enum Type: CustomStringConvertible {
       // Function pointers/closures are usually copyable references.
       return true
     case .structure(_, _, _, let isCopy):
+      return isCopy
+    case .union(_, _, _, let isCopy):
       return isCopy
     case .genericParameter:
       // For now assume generics are NOT Copy by default? Or Copy?
@@ -56,6 +64,8 @@ public indirect enum Type: CustomStringConvertible {
       return "(\(paramTypes)) -> \(returns)"
     case .structure(let name, _, _, _):
       return name
+    case .union(let name, _, _, _):
+      return name
     case .reference(let inner):
       return "\(inner.description) ref"
     case .pointer(let element):
@@ -78,6 +88,11 @@ public indirect enum Type: CustomStringConvertible {
     case .structure(_, let members, _, _):
       let memberKeys = members.map { $0.type.layoutKey }.joined(separator: "_")
       return "Struct_\(memberKeys)"
+    case .union(_, let cases, _, _):
+      let caseKeys = cases.map { c in 
+          c.name + "_" + c.parameters.map { $0.type.layoutKey }.joined(separator: "_")
+      }.joined(separator: "_OR_")
+      return "Union_\(caseKeys)"
     case .genericParameter(let name):
       return "Param_\(name)"
     }
@@ -91,6 +106,8 @@ public indirect enum Type: CustomStringConvertible {
       return returns.containsGenericParameter || params.contains { $0.type.containsGenericParameter }
     case .structure(_, let members, _, _):
       return members.contains { $0.type.containsGenericParameter }
+    case .union(_, let cases, _, _):
+      return cases.contains { c in c.parameters.contains { $0.type.containsGenericParameter } }
     case .reference(let inner):
       return inner.containsGenericParameter
     case .pointer(let element):
@@ -98,6 +115,11 @@ public indirect enum Type: CustomStringConvertible {
     case .genericParameter:
       return true
     }
+  }
+  
+  public var functionParameters: [Parameter]? {
+      if case .function(let params, _) = self { return params }
+      return nil
   }
 
   public var canonical: Type {
@@ -109,6 +131,13 @@ public indirect enum Type: CustomStringConvertible {
       if isGenericInstantiation {
         let newMembers = members.map { ($0.name, $0.type.canonical, $0.mutable) }
         return .structure(name: name, members: newMembers, isGenericInstantiation: true, isCopy: isCopy)
+      } else {
+        return self
+      }
+    case .union(let name, let cases, let isGenericInstantiation, let isCopy):
+      if isGenericInstantiation {
+        let newCases = cases.map { UnionCase(name: $0.name, parameters: $0.parameters.map { p in (name: p.name, type: p.type.canonical) }) }
+        return .union(name: name, cases: newCases, isGenericInstantiation: true, isCopy: isCopy)
       } else {
         return self
       }
@@ -161,6 +190,8 @@ extension Type: Equatable {
       return lParams == rParams && lReturns == rReturns
 
     case (.structure(let lName, _, _, _), .structure(let rName, _, _, _)):
+      return lName == rName
+    case (.union(let lName, _, _, _), .union(let rName, _, _, _)):
       return lName == rName
     case (.reference(let l), .reference(let r)):
       return l == r

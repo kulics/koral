@@ -1,8 +1,15 @@
-public struct GenericTemplate {
+public struct GenericStructTemplate {
   public let name: String
   public let typeParameters: [(name: String, type: TypeNode?)]
   public let parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier)]
   public let isCopy: Bool
+}
+
+public struct GenericUnionTemplate {
+  public let name: String
+  public let typeParameters: [(name: String, type: TypeNode?)]
+  public let cases: [UnionCaseDeclaration]
+  public let access: AccessModifier
 }
 
 public struct GenericFunctionTemplate {
@@ -18,7 +25,8 @@ public class Scope {
   private var symbols: [String: (Type, Bool)]  // (type, mutability)
   private let parent: Scope?
   private var types: [String: Type] = [:]
-  private var genericTemplates: [String: GenericTemplate] = [:]
+  private var genericStructTemplates: [String: GenericStructTemplate] = [:]
+  private var genericUnionTemplates: [String: GenericUnionTemplate] = [:]
   private var genericFunctionTemplates: [String: GenericFunctionTemplate] = [:]
   private var movedVariables: Set<String> = []
 
@@ -46,15 +54,26 @@ public class Scope {
     symbols[name] = (type, mutable)
   }
 
-  public func defineGenericTemplate(_ name: String, template: GenericTemplate) {
-    genericTemplates[name] = template
+  public func defineGenericStructTemplate(_ name: String, template: GenericStructTemplate) {
+    genericStructTemplates[name] = template
   }
 
-  public func lookupGenericTemplate(_ name: String) -> GenericTemplate? {
-    if let template = genericTemplates[name] {
+  public func defineGenericUnionTemplate(_ name: String, template: GenericUnionTemplate) {
+    genericUnionTemplates[name] = template
+  }
+
+  public func lookupGenericStructTemplate(_ name: String) -> GenericStructTemplate? {
+    if let template = genericStructTemplates[name] {
       return template
     }
-    return parent?.lookupGenericTemplate(name)
+    return parent?.lookupGenericStructTemplate(name)
+  }
+
+  public func lookupGenericUnionTemplate(_ name: String) -> GenericUnionTemplate? {
+    if let template = genericUnionTemplates[name] {
+      return template
+    }
+    return parent?.lookupGenericUnionTemplate(name)
   }
 
   public func defineGenericFunctionTemplate(_ name: String, template: GenericFunctionTemplate) {

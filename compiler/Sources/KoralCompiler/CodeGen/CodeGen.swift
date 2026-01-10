@@ -22,6 +22,9 @@ public class CodeGen {
       if case .structure(let typeName, _, _, _) = type {
         addIndent()
         buffer += "__koral_\(typeName)_drop(&\(name));\n"
+      } else if case .union(let typeName, _, _, _) = type {
+        addIndent()
+        buffer += "__koral_\(typeName)_drop(&\(name));\n"
       } else if case .reference(_) = type {
         addIndent()
         buffer += "__koral_release(\(name).control);\n"
@@ -84,10 +87,14 @@ public class CodeGen {
       // Pass 0: Scan for user-defined drops
       for node in nodes {
         if case .givenDeclaration(let type, let methods) = node {
-             if case .structure(let typeName, _, _, _) = type {
+             var typeName: String?
+             if case .structure(let name, _, _, _) = type { typeName = name }
+             if case .union(let name, _, _, _) = type { typeName = name }
+
+             if let name = typeName {
                  for method in methods {
                      if method.identifier.methodKind == .drop {
-                         userDefinedDrops[typeName] = method.identifier.name
+                         userDefinedDrops[name] = method.identifier.name
                      }
                  }
              }
@@ -106,6 +113,9 @@ public class CodeGen {
       for node in nodes {
         if case .globalTypeDeclaration(let identifier, let parameters) = node {
           generateTypeDeclaration(identifier, parameters)
+        }
+        if case .unionDeclaration(let identifier, let cases) = node {
+          generateUnionDeclaration(identifier, cases)
         }
       }
       buffer += "\n"
@@ -391,6 +401,10 @@ public class CodeGen {
       return generateCall(callee, arguments, type)
     case .methodReference:
       fatalError("Method reference not in call position is not supported yet")
+      
+    case .unionConstruction(let type, let caseName, let args):
+      return generateUnionConstructor(type: type, caseName: caseName, args: args)
+
     case .derefExpression(let inner, let type):
       let innerResult = generateExpressionSSA(inner)
       let result = nextTemp()
@@ -898,6 +912,15 @@ public class CodeGen {
             buffer += "\(valueResult);\n"
           }
           registerVariable(identifier.name, identifier.type)
+        } else if case .union(let typeName, _, _, _) = identifier.type {
+          addIndent()
+          buffer += "\(getCType(identifier.type)) \(identifier.name) = "
+          if value.valueCategory == .lvalue {
+            buffer += "__koral_\(typeName)_copy(&\(valueResult));\n"
+          } else {
+            buffer += "\(valueResult);\n"
+          }
+          registerVariable(identifier.name, identifier.type)
         } else if case .reference(_) = identifier.type {
           addIndent()
           buffer += "\(getCType(identifier.type)) \(identifier.name) = \(valueResult);\n"
@@ -1002,6 +1025,8 @@ public class CodeGen {
       fatalError("Function type not supported in getCType")
     case .structure(let name, _, _, _):
       return "struct \(name)"
+    case .union(let name, _, _, _):
+      return "struct \(name)"
     case .genericParameter(let name):
       fatalError("Generic parameter \(name) should be resolved before CodeGen")
     case .reference(_):
@@ -1090,6 +1115,148 @@ public class CodeGen {
     buffer += "}\n\n"
   }
 
+  private func generateUnionDeclaration(_ identifier: Symbol, _ cases: [UnionCase]) {
+    let name = identifier.name
+    buffer += "struct \(name) {\n"
+    withIndent {
+      addIndent()
+      buffer += "intptr_t tag;\n"
+      addIndent()
+      buffer += "union {\n"
+      withIndent {
+        for c in cases {
+            if !c.parameters.isEmpty {
+                addIndent()
+                buffer += "struct {\n"
+                withIndent {
+                    for param in c.parameters {
+                        addIndent()
+                        buffer += "\(getCType(param.type)) \(param.name);\n"
+                    }
+                }
+                addIndent()
+                buffer += "} \(c.name);\n"
+            } else {
+                 addIndent()
+                 buffer += "struct {} \(c.name);\n"
+            }
+        }
+      }
+      addIndent()
+      buffer += "} data;\n"
+    }
+    buffer += "};\n\n"
+
+    // Generate Copy
+    buffer += "struct \(name) __koral_\(name)_copy(const struct \(name) *self) {\n"
+    withIndent {
+        buffer += "    struct \(name) result;\n"
+        buffer += "    result.tag = self->tag;\n"
+        buffer += "    switch (self->tag) {\n"
+        for (index, c) in cases.enumerated() {
+             buffer += "    case \(index): // \(c.name)\n"
+             if !c.parameters.isEmpty {
+                 for param in c.parameters {
+                     let fieldPath = "self->data.\(c.name).\(param.name)"
+                     let resultPath = "result.data.\(c.name).\(param.name)"
+                     if case .structure(let fieldTypeName, _, _, _) = param.type {
+                         buffer += "        \(resultPath) = __koral_\(fieldTypeName)_copy(&\(fieldPath));\n"
+                     } else if case .union(let fieldTypeName, _, _, _) = param.type {
+                        buffer += "        \(resultPath) = __koral_\(fieldTypeName)_copy(&\(fieldPath));\n"
+                     } else if case .reference(_) = param.type {
+                         buffer += "        \(resultPath) = \(fieldPath);\n"
+                         buffer += "        __koral_retain(\(resultPath).control);\n"
+                     } else {
+                         buffer += "        \(resultPath) = \(fieldPath);\n"
+                     }
+                 }
+             }
+             buffer += "        break;\n"
+        }
+        buffer += "    }\n"
+        buffer += "    return result;\n"
+    }
+    buffer += "}\n\n"
+
+    // Generate Drop
+    buffer += "void __koral_\(name)_drop(void* raw_self) {\n"
+    withIndent {
+        buffer += "    struct \(name)* self = (struct \(name)*)raw_self;\n"
+
+        // Call user defined drop if exists
+        if let userDrop = userDefinedDrops[name] {
+            buffer += "    {\n"
+            buffer += "        void \(userDrop)(struct Ref);\n"
+            buffer += "        struct Ref r;\n"
+            buffer += "        r.ptr = self;\n"
+            buffer += "        r.control = NULL;\n" // Control is NULL as we are inside the destructor managed by control/scope
+            buffer += "        \(userDrop)(r);\n" 
+            buffer += "    }\n"
+        }
+
+        buffer += "    switch (self->tag) {\n"
+        for (index, c) in cases.enumerated() {
+             buffer += "    case \(index): // \(c.name)\n"
+             for param in c.parameters {
+                 let fieldPath = "self->data.\(c.name).\(param.name)"
+                 if case .structure(let fieldTypeName, _, _, _) = param.type {
+                     buffer += "        __koral_\(fieldTypeName)_drop(&\(fieldPath));\n"
+                 } else if case .union(let fieldTypeName, _, _, _) = param.type {
+                     buffer += "        __koral_\(fieldTypeName)_drop(&\(fieldPath));\n"
+                 } else if case .reference(_) = param.type {
+                     buffer += "        __koral_release(\(fieldPath).control);\n"
+                 }
+             }
+             buffer += "        break;\n"
+        }
+        buffer += "    }\n"
+    }
+    buffer += "}\n\n"
+  }
+
+  private func generateUnionConstructor(type: Type, caseName: String, args: [TypedExpressionNode]) -> String {
+      guard case .union(let typeName, let cases, _, _) = type else { fatalError() }
+      
+      // Calculate tag index
+      let tagIndex = cases.firstIndex(where: { $0.name == caseName })!
+      
+      let result = nextTemp()
+      addIndent()
+      buffer += "struct \(typeName) \(result);\n"
+      addIndent()
+      buffer += "\(result).tag = \(tagIndex);\n"
+      
+      // Assign members
+      // The union member name is same as case name
+      let caseInfo = cases[tagIndex]
+      
+      if !args.isEmpty {
+          let unionMemberPath = "\(result).data.\(caseName)"
+          for (argExpr, param) in zip(args, caseInfo.parameters) {
+              let argResult = generateExpressionSSA(argExpr)
+              
+              addIndent()
+              if case .structure(let structName, _, _, _) = param.type {
+                   if argExpr.valueCategory == .lvalue {
+                       buffer += "\(unionMemberPath).\(param.name) = __koral_\(structName)_copy(&\(argResult));\n"
+                   } else {
+                       buffer += "\(unionMemberPath).\(param.name) = \(argResult);\n"
+                   }
+              } else if case .reference(_) = param.type {
+                   buffer += "\(unionMemberPath).\(param.name) = \(argResult);\n"
+                   if argExpr.valueCategory == .lvalue {
+                       addIndent()
+                       buffer += "__koral_retain(\(unionMemberPath).\(param.name).control);\n"
+                   }
+              } else {
+                   buffer += "\(unionMemberPath).\(param.name) = \(argResult);\n"
+              }
+          }
+      }
+      
+      return result
+  }
+
   private func generateBlockScope(
     _ statements: [TypedStatementNode], finalExpr: TypedExpressionNode?
   ) -> String {
@@ -1125,6 +1292,21 @@ public class CodeGen {
     }
     let valueResult = generateExpressionSSA(value)
     if case .structure(let typeName, _, _, _) = identifier.type {
+      if value.valueCategory == .lvalue {
+        let copyResult = nextTemp()
+        addIndent()
+        buffer += "\(getCType(value.type)) \(copyResult) = __koral_\(typeName)_copy(&\(valueResult));\n"
+        addIndent()
+        buffer += "__koral_\(typeName)_drop(&\(identifier.name));\n"
+        addIndent()
+        buffer += "\(identifier.name) = \(copyResult);\n"
+      } else {
+        addIndent()
+        buffer += "__koral_\(typeName)_drop(&\(identifier.name));\n"
+        addIndent()
+        buffer += "\(identifier.name) = \(valueResult);\n"
+      }
+    } else if case .union(let typeName, _, _, _) = identifier.type {
       if value.valueCategory == .lvalue {
         let copyResult = nextTemp()
         addIndent()
