@@ -122,6 +122,7 @@ public indirect enum TypedExpressionNode {
   case subscriptExpression(base: TypedExpressionNode, arguments: [TypedExpressionNode], method: Symbol, type: Type)
   case unionConstruction(type: Type, caseName: String, arguments: [TypedExpressionNode])
   case intrinsicCall(TypedIntrinsic)
+  case matchExpression(subject: TypedExpressionNode, cases: [TypedMatchCase], type: Type)
 }
 
 public indirect enum TypedIntrinsic {
@@ -176,6 +177,31 @@ public indirect enum TypedIntrinsic {
     }
 }
 
+public indirect enum TypedPattern: CustomStringConvertible {
+    case booleanLiteral(value: Bool)
+    case integerLiteral(value: Int)
+    case wildcard
+    case variable(symbol: Symbol)
+    case unionCase(caseName: String, tagIndex: Int, elements: [TypedPattern])
+    
+    public var description: String {
+        switch self {
+        case .booleanLiteral(let v): return "\(v)"
+        case .integerLiteral(let v): return "\(v)"
+        case .wildcard: return "_"
+        case .variable(let s): return s.name
+        case .unionCase(let name, _, let elements): 
+            let args = elements.map { $0.description }.joined(separator: ", ")
+            return ".\(name)(\(args))"
+        }
+    }
+}
+
+public struct TypedMatchCase {
+    public let pattern: TypedPattern
+    public let body: TypedExpressionNode
+}
+
 extension TypedExpressionNode {
   var type: Type {
     switch self {
@@ -209,6 +235,8 @@ extension TypedExpressionNode {
       return type
     case .intrinsicCall(let node):
       return node.type
+    case .matchExpression(_, _, let type):
+      return type
     }
   }
 

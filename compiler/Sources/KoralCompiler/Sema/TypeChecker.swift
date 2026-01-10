@@ -55,7 +55,12 @@ public class TypeChecker {
 
   private func checkGlobalDeclaration(_ decl: GlobalNode) throws -> TypedGlobalNode? {
     switch decl {
-    case .unionDeclaration(let name, let typeParameters, let cases, let access):
+    case .unionDeclaration(let name, let typeParameters, let cases, let access, let line):
+      self.currentLine = line
+      if currentScope.lookupType(name) != nil {
+          throw SemanticError.duplicateDefinition(name, line: line)
+      }
+
       if !typeParameters.isEmpty {
           let template = GenericUnionTemplate(name: name, typeParameters: typeParameters, cases: cases, access: access)
           currentScope.defineGenericUnionTemplate(name, template: template)
@@ -64,7 +69,7 @@ public class TypeChecker {
 
       // Placeholder for recursion
       let placeholder = Type.union(name: name, cases: [], isGenericInstantiation: false, isCopy: true)
-      try currentScope.defineType(name, type: placeholder)
+      try currentScope.defineType(name, type: placeholder, line: line, allowOverwrite: true)
 
       var unionCases: [UnionCase] = []
       for c in cases {
@@ -79,12 +84,13 @@ public class TypeChecker {
           unionCases.append(UnionCase(name: c.name, parameters: params))
       }
       let type = Type.union(name: name, cases: unionCases, isGenericInstantiation: false, isCopy: true)
-      try currentScope.defineType(name, type: type)
+      try currentScope.defineType(name, type: type, line: line, allowOverwrite: true)
       return .unionDeclaration(identifier: Symbol(name: name, type: type, kind: .type), cases: unionCases)
 
-    case .globalVariableDeclaration(let name, let typeNode, let value, let isMut, _):
+    case .globalVariableDeclaration(let name, let typeNode, let value, let isMut, _, let line):
+      self.currentLine = line
       guard case nil = currentScope.lookup(name) else {
-        throw SemanticError.duplicateDefinition(name)
+        throw SemanticError.duplicateDefinition(name, line: line)
       }
       let type = try resolveTypeNode(typeNode)
       let typedValue = try inferTypedExpression(value)
@@ -101,9 +107,10 @@ public class TypeChecker {
       )
 
     case .globalFunctionDeclaration(
-      let name, let typeParameters, let parameters, let returnTypeNode, let body, let access):
+      let name, let typeParameters, let parameters, let returnTypeNode, let body, let access, let line):
+      self.currentLine = line
       guard case nil = currentScope.lookup(name) else {
-        throw SemanticError.duplicateDefinition(name)
+        throw SemanticError.duplicateDefinition(name, line: line)
       }
 
       if !typeParameters.isEmpty {
@@ -167,9 +174,10 @@ public class TypeChecker {
       )
 
     case .intrinsicFunctionDeclaration(
-      let name, let typeParameters, let parameters, let returnTypeNode, let access):
+      let name, let typeParameters, let parameters, let returnTypeNode, let access, let line):
+      self.currentLine = line
       guard case nil = currentScope.lookup(name) else {
-        throw SemanticError.duplicateDefinition(name)
+        throw SemanticError.duplicateDefinition(name, line: line)
       }
 
       // Create a dummy body for intrinsic representation
@@ -218,7 +226,8 @@ public class TypeChecker {
       currentScope.define(name, functionType, mutable: false)
       return nil
 
-    case .givenDeclaration(let typeParams, let typeNode, let methods):
+    case .givenDeclaration(let typeParams, let typeNode, let methods, let line):
+      self.currentLine = line
       if !typeParams.isEmpty {
         // Generic Given
         guard case .generic(let baseName, let args) = typeNode else {
@@ -340,7 +349,8 @@ public class TypeChecker {
 
       return .givenDeclaration(type: type, methods: typedMethods)
 
-    case .intrinsicGivenDeclaration(let typeParams, let typeNode, let methods):
+    case .intrinsicGivenDeclaration(let typeParams, let typeNode, let methods, let line):
+      self.currentLine = line
       if !typeParams.isEmpty {
         // Generic Given (Intrinsic)
         guard case .generic(let baseName, let args) = typeNode else {
@@ -427,7 +437,8 @@ public class TypeChecker {
 
       return .givenDeclaration(type: type, methods: typedMethods)
 
-    case .globalTypeDeclaration(let name, let typeParameters, let parameters, _, let isCopy):
+    case .globalTypeDeclaration(let name, let typeParameters, let parameters, _, let isCopy, let line):
+      self.currentLine = line
       // Check if type already exists
       if currentScope.lookupType(name) != nil {
         throw SemanticError.duplicateTypeDefinition(name)
@@ -461,7 +472,8 @@ public class TypeChecker {
         parameters: params
       )
 
-    case .intrinsicTypeDeclaration(let name, let typeParameters, _):
+    case .intrinsicTypeDeclaration(let name, let typeParameters, _, let line):
+      self.currentLine = line
       if currentScope.lookupType(name) != nil {
         // Allow re-declaration if it matches known intrinsic? No, error duplicate.
         throw SemanticError.duplicateTypeDefinition(name)
@@ -549,6 +561,37 @@ public class TypeChecker {
 
     case .booleanLiteral(let value):
       return .booleanLiteral(value: value, type: .bool)
+
+    case .matchExpression(let subject, let cases, _):
+        let typedSubject = try inferTypedExpression(subject)
+        // Auto-deref subject type for pattern matching
+        var subjectType = typedSubject.type
+        if case .reference(let inner) = subjectType {
+            subjectType = inner
+        }
+        
+        var typedCases: [TypedMatchCase] = []
+        var resultType: Type?
+        
+        for c in cases {
+            try withNewScope {
+                let (pattern, vars) = try checkPattern(c.pattern, subjectType: subjectType)
+                for (name, mut, type) in vars {
+                    try currentScope.define(name, type, mutable: mut)
+                }
+                
+                let typedBody = try inferTypedExpression(c.body)
+                if let rt = resultType {
+                    if typedBody.type != rt {
+                         throw SemanticError.typeMismatch(expected: rt.description, got: typedBody.type.description)
+                    }
+                } else {
+                    resultType = typedBody.type
+                }
+                typedCases.append(TypedMatchCase(pattern: pattern, body: typedBody))
+            }
+        }
+        return .matchExpression(subject: typedSubject, cases: typedCases, type: resultType ?? .void)
 
     case .identifier(let name):
       if currentScope.isMoved(name) {
@@ -2025,6 +2068,56 @@ public class TypeChecker {
     instantiatedFunctions[key] = (mangledName, functionType)
     let kind = getCompilerMethodKind(method.name)
     return Symbol(name: mangledName, type: functionType, kind: .function, methodKind: kind)
+  }
+
+  private func checkPattern(_ pattern: PatternNode, subjectType: Type) throws -> (TypedPattern, [(String, Bool, Type)]) {
+      var bindings: [(String, Bool, Type)] = []
+      
+      switch pattern {
+      case .integerLiteral(let val, _):
+          if subjectType != .int {
+             throw SemanticError.typeMismatch(expected: "Int", got: subjectType.description)
+          }
+          return (.integerLiteral(value: val), [])
+          
+      case .booleanLiteral(let val, _):
+          if subjectType != .bool {
+             throw SemanticError.typeMismatch(expected: "Bool", got: subjectType.description)
+          }
+          return (.booleanLiteral(value: val), [])
+          
+      case .wildcard(_):
+          return (.wildcard, [])
+          
+      case .variable(let name, let mutable, _):
+          // Bind variable to the subject
+          let symbol = Symbol(name: name, type: subjectType, kind: .variable(mutable ? .MutableValue : .Value))
+          return (.variable(symbol: symbol), [(name, mutable, subjectType)])
+          
+      case .unionCase(let caseName, let subPatterns, _):
+          guard case .union(let typeName, let cases, _, _) = subjectType else {
+               throw SemanticError.typeMismatch(expected: "Union Type", got: subjectType.description)
+          }
+          
+          guard let caseIndex = cases.firstIndex(where: { $0.name == caseName }) else {
+               throw SemanticError(.generic("Union case '\(caseName)' not found in type '\(typeName)'"))
+          }
+          let caseDef = cases[caseIndex]
+           
+          if caseDef.parameters.count != subPatterns.count {
+               throw SemanticError.invalidArgumentCount(function: caseName, expected: caseDef.parameters.count, got: subPatterns.count)
+          }
+           
+          var typedSubPatterns: [TypedPattern] = []
+          for (idx, subPat) in subPatterns.enumerated() {
+               let paramType = caseDef.parameters[idx].type
+               let (typedSub, subBindings) = try checkPattern(subPat, subjectType: paramType)
+               typedSubPatterns.append(typedSub)
+               bindings.append(contentsOf: subBindings)
+          }
+           
+          return (.unionCase(caseName: caseName, tagIndex: caseIndex, elements: typedSubPatterns), bindings)
+      }
   }
 
   private func unify(

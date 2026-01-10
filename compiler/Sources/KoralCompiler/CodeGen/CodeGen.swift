@@ -487,6 +487,9 @@ public class CodeGen {
         return result
       }
 
+    case .matchExpression(let subject, let cases, let type):
+      return generateMatchExpression(subject, cases, type)
+
     case .whileExpression(let condition, let body, _):
       let labelPrefix = nextTemp()
       addIndent()
@@ -1256,6 +1259,138 @@ public class CodeGen {
       
       return result
   }
+
+  private func generateMatchExpression(_ subject: TypedExpressionNode, _ cases: [TypedMatchCase], _ type: Type) -> String {
+    let subjectVarSSA = generateExpressionSSA(subject)
+    let resultVar = nextTemp()
+    
+    if type != .void {
+        addIndent()
+        buffer += "\(getCType(type)) \(resultVar);\n"
+    }
+    
+    // Dereference subject if it acts as a reference but pattern matches against value
+    var subjectVar = subjectVarSSA
+    var subjectType = subject.type
+    if case .reference(let inner) = subject.type {
+        let innerCType = getCType(inner)
+        let derefVar = nextTemp()
+        addIndent()
+        buffer += "\(innerCType) \(derefVar) = *(\(innerCType)*)\(subjectVarSSA).ptr;\n"
+        subjectVar = derefVar
+        subjectType = inner
+    }
+    
+    let endLabel = "match_end_\(nextTemp())"
+    
+    for c in cases {
+         addIndent()
+         buffer += "{\n"
+         withIndent {
+             let (condition, bindings, vars) = generatePatternConditionAndBindings(c.pattern, subjectVar, subjectType)
+             addIndent()
+             buffer += "if (\(condition)) {\n"
+             withIndent {
+                 pushScope()
+                 
+                 // Apply Bindings
+                 for b in bindings {
+                     addIndent()
+                     buffer += b
+                 }
+                 // Register variables for cleanup
+                 for (name, varType) in vars {
+                     registerVariable(name, varType)
+                 }
+                 
+                 let bodyResult = generateExpressionSSA(c.body)
+                 if type != .void {
+                     addIndent()
+                     if case .structure(let typeName, _, _, _) = type {
+                        if c.body.valueCategory == .lvalue {
+                             buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(bodyResult));\n"
+                        } else {
+                             buffer += "\(resultVar) = \(bodyResult);\n"
+                        }
+                     } else if case .reference(_) = type {
+                        buffer += "\(resultVar) = \(bodyResult);\n"
+                        if c.body.valueCategory == .lvalue {
+                             addIndent()
+                             buffer += "__koral_retain(\(resultVar).control);\n"
+                        }
+                     } else {
+                        buffer += "\(resultVar) = \(bodyResult);\n"
+                     }
+                 }
+                 
+                 popScope()
+                 addIndent()
+                 buffer += "goto \(endLabel);\n"
+             }
+             addIndent()
+             buffer += "}\n"
+         }
+         addIndent()
+         buffer += "}\n"
+    }
+    
+    addIndent()
+    buffer += "\(endLabel):;\n"
+    return type != .void ? resultVar : ""
+  }
+
+  private func generatePatternConditionAndBindings(_ pattern: TypedPattern, _ path: String, _ type: Type) -> (String, [String], [(String, Type)]) {
+      switch pattern {
+      case .integerLiteral(let val):
+          return ("\(path) == \(val)", [], [])
+      case .booleanLiteral(let val):
+          return ("\(path) == \(val ? 1 : 0)", [], [])
+      case .wildcard:
+          return ("1", [], [])
+      case .variable(let symbol):
+          let name = symbol.name
+          let varType = symbol.type
+          var bindCode = ""
+          let cType = getCType(varType)
+          bindCode += "\(cType) \(name);\n"
+          
+          if case .structure(let typeName, _, _, _) = varType {
+               bindCode += "\(name) = __koral_\(typeName)_copy(&\(path));\n"
+          } else if case .reference(_) = varType {
+               bindCode += "\(name) = \(path);\n"
+               bindCode += "__koral_retain(\(name).control);\n"
+          } else {
+               bindCode += "\(name) = \(path);\n"
+          }
+          return ("1", [bindCode], [(name, varType)])
+          
+      case .unionCase(let caseName, let expectedTagIndex, let args):
+          guard case .union(_, let cases, _, _) = type else { fatalError("Union pattern on non-union type") }
+          // Use expectedTagIndex directly
+          
+          var condition = "(\(path).tag == \(expectedTagIndex))"
+          var bindings: [String] = []
+          var vars: [(String, Type)] = []
+          
+          let caseDef = cases[expectedTagIndex]
+          
+          for (i, subInd) in args.enumerated() {
+               let paramName = caseDef.parameters[i].name
+               let paramType = caseDef.parameters[i].type
+               let subPath = "\(path).data.\(caseName).\(paramName)"
+               
+               let (subCond, subBind, subVars) = generatePatternConditionAndBindings(subInd, subPath, paramType)
+               
+               if subCond != "1" {
+                   condition += " && (\(subCond))"
+               }
+               bindings.append(contentsOf: subBind)
+               vars.append(contentsOf: subVars)
+          }
+          return (condition, bindings, vars)
+      }
+  }
+
 
   private func generateBlockScope(
     _ statements: [TypedStatementNode], finalExpr: TypedExpressionNode?

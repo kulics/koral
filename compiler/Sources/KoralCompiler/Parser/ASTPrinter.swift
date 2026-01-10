@@ -4,7 +4,7 @@ public func printAST(_ node: ASTNode) {
 
   func printGlobalNode(_ node: GlobalNode) {
     switch node {
-    case .globalVariableDeclaration(let name, let type, let value, let mutable, let access):
+    case .globalVariableDeclaration(let name, let type, let value, let mutable, let access, _):
       print("\(indent)GlobalVariableDeclaration:")
       print("\(indent)  Access: \(access)")
       print("\(indent)  Name: \(name)")
@@ -16,7 +16,7 @@ public func printAST(_ node: ASTNode) {
       }
 
     case .globalFunctionDeclaration(
-      let name, let typeParameters, let parameters, let returnType, let body, let access):
+      let name, let typeParameters, let parameters, let returnType, let body, let access, _):
       print("\(indent)GlobalFunctionDeclaration:")
       print("\(indent)  Access: \(access)")
       print("\(indent)  Name: \(name)")
@@ -37,7 +37,7 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .globalTypeDeclaration(let name, let typeParameters, let parameters, let access, let isCopy):
+    case .globalTypeDeclaration(let name, let typeParameters, let parameters, let access, let isCopy, _):
       print("\(indent)TypeDeclaration \(name) Copy=\(isCopy)")
       print("\(indent)  Access: \(access)")
       if !typeParameters.isEmpty {
@@ -49,7 +49,7 @@ public func printAST(_ node: ASTNode) {
         print("\(indent)  Access: \(param.access)")
       }
 
-    case .unionDeclaration(let name, let typeParameters, let cases, let access):
+    case .unionDeclaration(let name, let typeParameters, let cases, let access, _):
       print("\(indent)UnionDeclaration \(name)")
       print("\(indent)  Access: \(access)")
       if !typeParameters.isEmpty {
@@ -62,7 +62,7 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, let access):
+    case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, let access, _):
       print("\(indent)IntrinsicFunctionDeclaration:")
       print("\(indent)  Access: \(access)")
       print("\(indent)  Name: \(name)")
@@ -74,14 +74,14 @@ public func printAST(_ node: ASTNode) {
       }
       print("\(indent)  ReturnType: \(returnType)")
 
-    case .intrinsicTypeDeclaration(let name, let typeParameters, let access):
+    case .intrinsicTypeDeclaration(let name, let typeParameters, let access, _):
         print("\(indent)IntrinsicTypeDeclaration \(name)")
         print("\(indent)  Access: \(access)")
         if !typeParameters.isEmpty {
           print("\(indent)  TypeParameters: \(typeParameters)")
         }
 
-    case .givenDeclaration(let typeParams, let type, let methods):
+    case .givenDeclaration(let typeParams, let type, let methods, _):
       print("\(indent)GivenDeclaration:")
       if !typeParams.isEmpty {
         print("\(indent)  TypeParameters: \(typeParams)")
@@ -98,7 +98,7 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .intrinsicGivenDeclaration(let typeParams, let type, let methods):
+    case .intrinsicGivenDeclaration(let typeParams, let type, let methods, _):
       print("\(indent)IntrinsicGivenDeclaration:")
       if !typeParams.isEmpty {
         print("\(indent)  TypeParameters: \(typeParams)")
@@ -274,6 +274,19 @@ public func printAST(_ node: ASTNode) {
               }
           }
       }
+    case .matchExpression(let subject, let cases, _):
+      print("\(indent)Match:")
+      print("\(indent)  Subject:")
+      withIndent { withIndent { printExpression(subject) } }
+      print("\(indent)  Cases:")
+      withIndent {
+          for c in cases {
+              print("\(indent)  Case Pattern: \(c.pattern)")
+              print("\(indent)  Body:")
+              withIndent { withIndent { printExpression(c.body) } }
+          }
+      }
+
     case .call(let callee, let arguments):
       print("\(indent)Call:")
       print("\(indent)  Callee:")
