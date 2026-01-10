@@ -116,22 +116,39 @@ class IntegrationTests: XCTestCase {
         process.waitUntilExit()
         
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: data, encoding: .utf8) ?? ""
+        var output = String(data: data, encoding: .utf8) ?? ""
         
-        // 4. Verify output
-        // We check if the expected lines appear in the output in order
-        var searchStartIndex = output.startIndex
+        // Normalize line endings to \n
+        output = output.replacingOccurrences(of: "\r\n", with: "\n")
+        output = output.replacingOccurrences(of: "\r", with: "\n")
+        
+        // 4. Verify output (Robust Line Matching)
+        let outputLines = output.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }
+        var currentLineIndex = 0
         
         for expected in expectedOutput {
-            if let range = output.range(of: expected, range: searchStartIndex..<output.endIndex) {
-                searchStartIndex = range.upperBound
-            } else {
+             let cleanExpected = expected.trimmingCharacters(in: .whitespacesAndNewlines)
+             if cleanExpected.isEmpty { continue }
+
+            var found = false
+            // Scan forward from current position
+            for i in currentLineIndex..<outputLines.count {
+                if outputLines[i].contains(cleanExpected) {
+                    found = true
+                    currentLineIndex = i + 1 // Advance to next line for next expectation
+                    break
+                }
+            }
+            
+            if !found {
                 XCTFail("""
                 Test failed: \(file.lastPathComponent)
-                Missing expected output: "\(expected)"
+                Missing expected output: "\(cleanExpected)"
                 
-                Actual Output:
-                \(output)
+                Scanned from line \(currentLineIndex)
+                
+                Actual Output Lines:
+                \(outputLines.joined(separator: "\n"))
                 """)
                 return
             }

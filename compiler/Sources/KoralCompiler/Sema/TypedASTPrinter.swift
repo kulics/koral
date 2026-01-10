@@ -263,6 +263,18 @@ public func printTypedAST(_ node: TypedProgram) {
               printTypedExpression(arg)
           }
       }
+    case .matchExpression(let subject, let cases, let type):
+      print("\(indent)Match: \(type)")
+      print("\(indent)  Subject:")
+      withIndent { printTypedExpression(subject) }
+      print("\(indent)  Cases:")
+      withIndent {
+          for c in cases {
+              print("\(indent)  Case Pattern: \(c.pattern)")
+              print("\(indent)  Body:")
+              withIndent { printTypedExpression(c.body) }
+          }
+      }
     case .call(let callee, let arguments, let type):
       print("\(indent)Call: \(type)")
       withIndent {

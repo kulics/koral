@@ -38,8 +38,8 @@ public struct SemanticError: Error, CustomStringConvertible, Sendable {
     public static func invalidOperation(op: String, type1: String, type2: String) -> SemanticError {
         return SemanticError(.invalidOperation(op: op, type1: type1, type2: type2))
     }
-    public static func duplicateDefinition(_ name: String) -> SemanticError {
-        return SemanticError(.duplicateDefinition(name))
+    public static func duplicateDefinition(_ name: String, line: Int? = nil) -> SemanticError {
+        return SemanticError(.duplicateDefinition(name), line: line)
     }
     public static func undefinedType(_ name: String) -> SemanticError {
         return SemanticError(.undefinedType(name))

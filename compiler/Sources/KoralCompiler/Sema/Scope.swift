@@ -105,7 +105,10 @@ public class Scope {
     return Scope(parent: self)
   }
 
-  public func defineType(_ name: String, type: Type) throws {
+  public func defineType(_ name: String, type: Type, line: Int? = nil, allowOverwrite: Bool = false) throws {
+    if !allowOverwrite && types[name] != nil {
+      throw SemanticError.duplicateDefinition(name, line: line)
+    }
     types[name] = type
   }
 
