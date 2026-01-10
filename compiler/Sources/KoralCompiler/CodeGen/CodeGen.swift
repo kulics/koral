@@ -377,19 +377,24 @@ public class CodeGen {
         guard let elseBranch = elseBranch else {
           fatalError("Non-void if expression must have else branch (Sema should catch this)")
         }
-        let resultVar = nextTemp()
-        addIndent()
-        buffer += "\(getCType(type)) \(resultVar);\n"
+        let resultVar = nextTemp() // Declare resultVar before using it
+        if type != .never {
+            addIndent()
+            buffer += "\(getCType(type)) \(resultVar);\n"
+        }
+        
         addIndent()
         buffer += "if (\(conditionVar)) {\n"
         withIndent {
           pushScope()
           let thenResult = generateExpressionSSA(thenBranch)
-          addIndent()
-          buffer += "\(resultVar) = \(thenResult);\n"
-          if case .reference(_) = type, thenBranch.valueCategory == .lvalue {
-            addIndent()
-            buffer += "__koral_retain(\(resultVar).control);\n"
+          if type != .never && thenBranch.type != .never {
+              addIndent()
+              buffer += "\(resultVar) = \(thenResult);\n"
+              if case .reference(_) = type, thenBranch.valueCategory == .lvalue {
+                addIndent()
+                buffer += "__koral_retain(\(resultVar).control);\n"
+              }
           }
           popScope()
         }
@@ -398,11 +403,13 @@ public class CodeGen {
         withIndent {
           pushScope()
           let elseResult = generateExpressionSSA(elseBranch)
-          addIndent()
-          buffer += "\(resultVar) = \(elseResult);\n"
-          if case .reference(_) = type, elseBranch.valueCategory == .lvalue {
-            addIndent()
-            buffer += "__koral_retain(\(resultVar).control);\n"
+          if type != .never && elseBranch.type != .never {
+              addIndent()
+              buffer += "\(resultVar) = \(elseResult);\n"
+              if case .reference(_) = type, elseBranch.valueCategory == .lvalue {
+                addIndent()
+                buffer += "__koral_retain(\(resultVar).control);\n"
+              }
           }
           popScope()
         }
@@ -849,6 +856,17 @@ public class CodeGen {
       addIndent()
       buffer += "exit(1);\n"
       return ""
+
+    case .exit(let code):
+      let c = generateExpressionSSA(code)
+      addIndent()
+      buffer += "exit(\(c));\n"
+      return ""
+
+    case .abort:
+      addIndent()
+      buffer += "abort();\n"
+      return ""
     }
   }
 
@@ -1038,6 +1056,7 @@ public class CodeGen {
     case .string: return "const char*"
     case .bool: return "_Bool"
     case .void: return "void"
+    case .never: return "void"
     case .function(_, _):
       fatalError("Function type not supported in getCType")
     case .structure(let name, _, _, _):
@@ -1278,7 +1297,7 @@ public class CodeGen {
     let subjectVarSSA = generateExpressionSSA(subject)
     let resultVar = nextTemp()
     
-    if type != .void {
+    if type != .void && type != .never {
         addIndent()
         buffer += "\(getCType(type)) \(resultVar);\n"
     }
@@ -1326,7 +1345,7 @@ public class CodeGen {
                  }
                  
                  let bodyResult = generateExpressionSSA(c.body)
-                 if type != .void {
+                 if type != .void && type != .never && c.body.type != .never {
                      addIndent()
                      if case .structure(let typeName, _, _, _) = type {
                         if c.body.valueCategory == .lvalue {
@@ -1442,7 +1461,7 @@ public class CodeGen {
     var result = ""
     if let finalExpr = finalExpr {
       let temp = generateExpressionSSA(finalExpr)
-      if finalExpr.type != .void {
+      if finalExpr.type != .void && finalExpr.type != .never {
         let resultVar = nextTemp()
         addIndent()
         buffer += "\(getCType(finalExpr.type)) \(resultVar) = \(temp);\n"

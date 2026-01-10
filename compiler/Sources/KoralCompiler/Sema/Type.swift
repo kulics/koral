@@ -9,6 +9,7 @@ public indirect enum Type: CustomStringConvertible {
   case string
   case bool
   case void
+  case never
   case function(parameters: [Parameter], returns: Type)
   case structure(name: String, members: [(name: String, type: Type, mutable: Bool)], isGenericInstantiation: Bool, isCopy: Bool)
   case reference(inner: Type)
@@ -18,7 +19,7 @@ public indirect enum Type: CustomStringConvertible {
 
   public var isCopy: Bool {
     switch self {
-    case .int, .float, .bool, .void, .pointer, .reference:
+    case .int, .float, .bool, .void, .never, .pointer, .reference:
       return true
     case .string:
       // Assuming string is reference counted or managed, but for now let's treat it as Copy to avoid breaking existing string heavy code
@@ -59,6 +60,7 @@ public indirect enum Type: CustomStringConvertible {
     case .string: return "String"
     case .bool: return "Bool"
     case .void: return "Void"
+    case .never: return "Never"
     case .function(let params, let returns):
       let paramTypes = params.map { $0.type.description }.joined(separator: ", ")
       return "(\(paramTypes)) -> \(returns)"
@@ -82,6 +84,7 @@ public indirect enum Type: CustomStringConvertible {
     case .string: return "S"
     case .bool: return "B"
     case .void: return "V"
+    case .never: return "N"
     case .function: return "Fn"
     case .reference: return "R"
     case .pointer(_): return "P"
@@ -100,7 +103,7 @@ public indirect enum Type: CustomStringConvertible {
 
   public var containsGenericParameter: Bool {
     switch self {
-    case .int, .float, .string, .bool, .void:
+    case .int, .float, .string, .bool, .void, .never:
       return false
     case .function(let params, let returns):
       return returns.containsGenericParameter || params.contains { $0.type.containsGenericParameter }
@@ -124,7 +127,7 @@ public indirect enum Type: CustomStringConvertible {
 
   public var canonical: Type {
     switch self {
-    case .int, .float, .bool, .void, .string: return self
+    case .int, .float, .bool, .void, .never, .string: return self
     case .reference(_): return .reference(inner: .void)
     case .pointer(let element): return .pointer(element: element.canonical) 
     case .structure(let name, let members, let isGenericInstantiation, let isCopy):
@@ -183,7 +186,8 @@ extension Type: Equatable {
       (.float, .float),
       (.string, .string),
       (.bool, .bool),
-      (.void, .void):
+      (.void, .void),
+      (.never, .never):
       return true
 
     case (.function(let lParams, let lReturns), .function(let rParams, let rReturns)):
