@@ -146,6 +146,8 @@ public indirect enum TypedIntrinsic {
     case printInt(value: TypedExpressionNode)
     case printBool(value: TypedExpressionNode)
     case panic(message: TypedExpressionNode)
+    case exit(code: TypedExpressionNode)
+    case abort
 
     public var type: Type {
         switch self {
@@ -172,7 +174,9 @@ public indirect enum TypedIntrinsic {
         case .printString: return .void
         case .printInt: return .void
         case .printBool: return .void
-        case .panic: return .void
+        case .panic: return .never
+        case .exit: return .never
+        case .abort: return .never
         }
     }
 }

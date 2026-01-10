@@ -105,7 +105,7 @@ public class TypeChecker {
       }
       let type = try resolveTypeNode(typeNode)
       let typedValue = try inferTypedExpression(value)
-      if typedValue.type != type {
+      if typedValue.type != .never && typedValue.type != type {
         throw SemanticError.typeMismatch(
           expected: type.description, got: typedValue.type.description)
       }
@@ -504,6 +504,7 @@ public class TypeChecker {
       case "Int": type = .int
       case "Bool": type = .bool
       case "Void": type = .void
+      case "Never": type = .never
       case "String": type = .string
       case "Pointer":
          // Pointer is generic, handled below
@@ -539,7 +540,7 @@ public class TypeChecker {
       }
 
       let typedBody = try inferTypedExpression(body)
-      if typedBody.type != returnType {
+      if typedBody.type != .never && typedBody.type != returnType {
         throw SemanticError.typeMismatch(
           expected: returnType.description, got: typedBody.type.description)
       }
@@ -606,9 +607,14 @@ public class TypeChecker {
                 
                 let typedBody = try inferTypedExpression(c.body)
                 if let rt = resultType {
-                    if typedBody.type != rt {
-                         throw SemanticError.typeMismatch(expected: rt.description, got: typedBody.type.description)
-                    }
+                     if typedBody.type != .never {
+                        if rt == .never {
+                             // Previous cases were all Never, this is the first concrete type
+                             resultType = typedBody.type
+                        } else if typedBody.type != rt {
+                             throw SemanticError.typeMismatch(expected: rt.description, got: typedBody.type.description)
+                        }
+                     }
                 } else {
                     resultType = typedBody.type
                 }
@@ -629,18 +635,42 @@ public class TypeChecker {
     case .blockExpression(let statements, let finalExpression):
       return try withNewScope {
         var typedStatements: [TypedStatementNode] = []
+        var blockType: Type = .void // Default if no final expression
+        var foundNever = false
+        
         for stmt in statements {
           let typedStmt = try checkStatement(stmt)
           typedStatements.append(typedStmt)
+          
+          if case .expression(let expr) = typedStmt {
+             if expr.type == .never {
+                 blockType = .never
+                 foundNever = true
+                 // Technically could stop processing here or warn about unreachable code
+             }
+          }
         }
+        
         if let finalExpr = finalExpression {
           let typedFinalExpr = try inferTypedExpression(finalExpr)
-          return .blockExpression(
+          // If we already found a Never statement, the block is Never regardless of final expr?
+          // Actually, if a statement is Never, the final expression is unreachable.
+          // For now, let's respect final expression type if reachable, or override if Never.
+          if foundNever {
+             // Block is forced to Never
+             blockType = .never
+          } else {
+             blockType = typedFinalExpr.type
+          }
+           return .blockExpression(
             statements: typedStatements, finalExpression: typedFinalExpr,
-            type: typedFinalExpr.type)
+            type: blockType)
         }
+        
+        if foundNever { blockType = .never }
+        
         return .blockExpression(
-          statements: typedStatements, finalExpression: nil, type: .void)
+          statements: typedStatements, finalExpression: nil, type: blockType)
       }
 
     case .arithmeticExpression(let left, let op, let right):
@@ -690,15 +720,24 @@ public class TypeChecker {
 
       if let elseExpr = elseBranch {
         let typedElse = try inferTypedExpression(elseExpr)
-        if typedThen.type != typedElse.type {
-          throw SemanticError.typeMismatch(
-            expected: typedThen.type.description,
-            got: typedElse.type.description
-          )
+        
+        let resultType: Type
+        if typedThen.type == typedElse.type {
+            resultType = typedThen.type
+        } else if typedThen.type == .never {
+             resultType = typedElse.type
+        } else if typedElse.type == .never {
+             resultType = typedThen.type
+        } else {
+             throw SemanticError.typeMismatch(
+                expected: typedThen.type.description,
+                got: typedElse.type.description
+             )
         }
+        
         return .ifExpression(
           condition: typedCondition, thenBranch: typedThen, elseBranch: typedElse,
-          type: typedThen.type)
+          type: resultType)
       } else {
         return .ifExpression(
           condition: typedCondition, thenBranch: typedThen, elseBranch: nil, type: .void)
@@ -1429,7 +1468,17 @@ public class TypeChecker {
            guard arguments.count == 1 else { throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count) }
            let msg = try inferTypedExpression(arguments[0])
            return .intrinsicCall(.panic(message: msg))
-           
+      case "exit":
+           guard arguments.count == 1 else { throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count) }
+           let code = try inferTypedExpression(arguments[0])
+           if code.type != .int {
+               throw SemanticError.typeMismatch(expected: "Int", got: code.type.description)
+           }
+           return .intrinsicCall(.exit(code: code))
+      case "abort":
+            guard arguments.count == 0 else { throw SemanticError.invalidArgumentCount(function: name, expected: 0, got: arguments.count) }
+            return .intrinsicCall(.abort)
+
       default: return nil
       }
   }
@@ -1502,7 +1551,7 @@ public class TypeChecker {
       
       if let typeNode = typeNode {
         type = try resolveTypeNode(typeNode)
-        if typedValue.type != type {
+        if typedValue.type != .never && typedValue.type != type {
           throw SemanticError.typeMismatch(
             expected: type.description, got: typedValue.type.description)
         }
@@ -1524,7 +1573,7 @@ public class TypeChecker {
       let typedTarget = try resolveLValue(target)
       let typedValue = try inferTypedExpression(value)
       
-      if typedTarget.type != typedValue.type {
+      if typedValue.type != .never && typedTarget.type != typedValue.type {
           throw SemanticError.typeMismatch(expected: typedTarget.type.description, got: typedValue.type.description)
       }
       
