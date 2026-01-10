@@ -49,6 +49,19 @@ public func printAST(_ node: ASTNode) {
         print("\(indent)  Access: \(param.access)")
       }
 
+    case .unionDeclaration(let name, let typeParameters, let cases, let access):
+      print("\(indent)UnionDeclaration \(name)")
+      print("\(indent)  Access: \(access)")
+      if !typeParameters.isEmpty {
+        print("\(indent)  TypeParameters: \(typeParameters)")
+      }
+      for unionCase in cases {
+        print("\(indent)  Case \(unionCase.name)")
+        for param in unionCase.parameters {
+            print("\(indent)    \(param.name): \(param.type)")
+        }
+      }
+
     case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, let access):
       print("\(indent)IntrinsicFunctionDeclaration:")
       print("\(indent)  Access: \(access)")

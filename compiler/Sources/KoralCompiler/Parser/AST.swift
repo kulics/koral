@@ -18,6 +18,11 @@ public indirect enum TypeNode {
   case generic(base: String, args: [TypeNode])
   case inferredSelf
 }
+public struct UnionCaseDeclaration {
+  public let name: String
+  public let parameters: [(name: String, type: TypeNode)]
+}
+
 public indirect enum GlobalNode {
   case globalVariableDeclaration(name: String, type: TypeNode, value: ExpressionNode, mutable: Bool, access: AccessModifier)
   case globalFunctionDeclaration(
@@ -41,6 +46,12 @@ public indirect enum GlobalNode {
     parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier)],
     access: AccessModifier,
     isCopy: Bool
+  )
+  case unionDeclaration(
+    name: String,
+    typeParameters: [(name: String, type: TypeNode?)],
+    cases: [UnionCaseDeclaration],
+    access: AccessModifier
   )
   case intrinsicTypeDeclaration(
     name: String,

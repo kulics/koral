@@ -1,0 +1,80 @@
+// EXPECT: Status.describe called
+// EXPECT: Status dropped
+// EXPECT: --- Scope 1 ---
+// EXPECT: Status dropped
+// EXPECT: --- Scope 1 End ---
+// EXPECT: Box.is_empty called
+// EXPECT: Box dropped
+// EXPECT: --- Scope 2 ---
+// EXPECT: Box dropped
+// EXPECT: --- Scope 2 End ---
+// EXPECT: Box dropped
+// EXPECT: Status dropped
+
+type Status {
+    Active();
+    Inactive(val Int);
+};
+
+given Status {
+    describe(self) Int = {
+        print_string("Status.describe called");
+        0
+    }
+    
+    __drop(self ref) Void = {
+        print_string("Status dropped");
+    }
+};
+
+type [T Any]Box {
+    Full(val T);
+    Empty();
+};
+
+given [T]Box {
+    is_empty(self) Bool = {
+        print_string("Box.is_empty called");
+        true
+    }
+    // Drop for generic union is handled by template instantiation?
+    // Let's add one to check.
+    __drop(self ref) Void = {
+        print_string("Box dropped");
+    }
+};
+
+let main() Int = {
+    let s = Status.Active();
+    s.describe();
+    
+    print_string("--- Scope 1 ---");
+    {
+        let s2 = Status.Inactive(10);
+        // s2 drops here -> "Status dropped"
+    };
+    print_string("--- Scope 1 End ---");
+    
+    let b = [Int]Box.Full(42);
+    b.is_empty();
+    
+    print_string("--- Scope 2 ---");
+    {
+        let b2 = [Int]Box.Empty();
+        // b2 drops here -> "Box dropped"
+    };
+    print_string("--- Scope 2 End ---");
+    
+    // s and b drop here at end of main
+    0
+}
+// EXPECT: Status.describe called
+// EXPECT: --- Scope 1 ---
+// EXPECT: Status dropped
+// EXPECT: --- Scope 1 End ---
+// EXPECT: Box.is_empty called
+// EXPECT: --- Scope 2 ---
+// EXPECT: Box dropped
+// EXPECT: --- Scope 2 End ---
+// EXPECT: Box dropped
+// EXPECT: Status dropped

@@ -39,6 +39,20 @@ public func printTypedAST(_ node: TypedProgram) {
         }
       }
 
+    case .unionDeclaration(let identifier, let cases):
+      print("\(indent)UnionDeclaration:")
+      print("\(indent)  Name: \(identifier.name): \(identifier.type)")
+      withIndent {
+        for c in cases {
+          print("\(indent)Case: \(c.name)")
+          withIndent {
+            for param in c.parameters {
+              print("\(indent)\(param.name): \(param.type)")
+            }
+          }
+        }
+      }
+
     case .genericTypeTemplate(let name):
       print("\(indent)GenericTypeTemplate: \(name)")
 
@@ -330,6 +344,18 @@ public func printTypedAST(_ node: TypedProgram) {
           }
         }
       }
+
+    case .unionConstruction(let type, let caseName, let arguments):
+      print("\(indent)UnionConstruction: \(type) . \(caseName)")
+      withIndent {
+        print("\(indent)Arguments:")
+        withIndent {
+          for arg in arguments {
+            printTypedExpression(arg)
+          }
+        }
+      }
+
     case .intrinsicCall(let node):
       print("\(indent)IntrinsicCall: \(node)")
     }

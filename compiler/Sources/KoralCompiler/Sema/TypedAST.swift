@@ -71,6 +71,7 @@ public indirect enum TypedGlobalNode {
     identifier: Symbol,
     parameters: [Symbol]
   )
+  case unionDeclaration(identifier: Symbol, cases: [UnionCase])
   case genericTypeTemplate(name: String)
   case givenDeclaration(type: Type, methods: [TypedMethodDeclaration])
   case genericFunctionTemplate(name: String)
@@ -119,6 +120,7 @@ public indirect enum TypedExpressionNode {
   case typeConstruction(identifier: Symbol, arguments: [TypedExpressionNode], type: Type)
   case memberPath(source: TypedExpressionNode, path: [Symbol])
   case subscriptExpression(base: TypedExpressionNode, arguments: [TypedExpressionNode], method: Symbol, type: Type)
+  case unionConstruction(type: Type, caseName: String, arguments: [TypedExpressionNode])
   case intrinsicCall(TypedIntrinsic)
 }
 
@@ -196,6 +198,7 @@ extension TypedExpressionNode {
       .methodReference(_, _, let type),
       .whileExpression(_, _, let type),
       .typeConstruction(_, _, let type),
+      .unionConstruction(let type, _, _),
       .letExpression(_, _, _, let type):
       return type
     case .variable(let identifier):
