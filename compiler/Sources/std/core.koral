@@ -199,10 +199,6 @@ given[T Copy] [T]List {
     public __at_mut(self ref, index Int) T ref = {
         self.source.offset(index).peek()
     }
-    
-    public set(self ref, index Int, value T) Void = {
-        self.source.offset(index).replace(value);
-    }
 
     public push_back(self ref, value T) Void = {
          self.ensure_capacity(self.len + 1);
@@ -261,16 +257,18 @@ given[T Copy] [T]List {
     }
 
     public iterator(self ref) [T]ListIterator = {
-        [T]ListIterator(self.source, 0, self.len)
+        // Capture a ref to the list instead of exposing raw Pointer
+        [T]ListIterator(self, 0)
     };
 };
 
-public type [T Copy]ListIterator(source [T]Pointer, mut index Int, len Int);
+// Iterator now holds a ref to the list to avoid exposing raw pointers
+public type [T Copy]ListIterator(source [T]List ref, mut index Int);
 
 given[T Copy] [T]ListIterator {
     public next(self ref) [T]Option = 
-        if self.index < self.len then {
-            let val = deref (self.source.offset(self.index).peek());
+        if self.index < self.source.count() then {
+            let val = self.source[self.index];
             self.index += 1;
             [T]Option.Some(val)
         } else {
