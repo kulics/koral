@@ -33,6 +33,7 @@ public class TypeChecker {
     switch name {
     case "__drop": return .drop
     case "__at": return .at
+    case "__at_mut": return .atMut
     default: return .normal
     }
   }
@@ -600,13 +601,12 @@ public class TypeChecker {
         
         for c in cases {
             try withNewScope {
-                let (pattern, vars) = try checkPattern(c.pattern, subjectType: subjectType)
-                for (name, mut, type) in vars {
-                    try currentScope.define(name, type, mutable: mut)
-                }
-                
-                let typedBody = try inferTypedExpression(c.body)
-                if let rt = resultType {
+              let (pattern, vars) = try checkPattern(c.pattern, subjectType: subjectType)
+              for (name, mut, type) in vars {
+                currentScope.define(name, type, mutable: mut)
+              }
+              let typedBody = try inferTypedExpression(c.body)
+              if let rt = resultType {
                      if typedBody.type != .never {
                         if rt == .never {
                              // Previous cases were all Never, this is the first concrete type
@@ -905,17 +905,6 @@ public class TypeChecker {
         }
       }
 
-      // Check if it is a constructor call OR implicit generic function call
-      if case .identifier(let name) = callee {
-        // Special case: Union Construction via static member access
-        // If Parser produces Call(MemberPath(Id("Option"), "Some"), ...), standard loop below handles it if callee resolves to a ".variable".
-        // BUT calling a .variable requires checkCall logic below.
-        // We need to differentiate if the .variable IS a union constructor symbol.
-        // See Step 3.1 logic which emits .variable(symbol) where symbol.name = "Option.Some".
-        // We can inspect the callee symbol to detect if it's a Union Constructor.
-        // However, `callee` here is `ExpressionNode` (AST), not `TypedExpressionNode`.
-        // So we first infer callee.
-      }
       
       // Resolve Callee (Check Union Constructor)
       var preResolvedCallee: TypedExpressionNode? = nil
@@ -1214,7 +1203,13 @@ public class TypeChecker {
     case .subscriptExpression(let base, let arguments):
       let typedBase = try inferTypedExpression(base)
       let typedArguments = try arguments.map { try inferTypedExpression($0) }
-      return try resolveSubscript(base: typedBase, args: typedArguments, isMut: false)
+      let resolvedSubscript = try resolveSubscript(base: typedBase, args: typedArguments, isMut: false)
+      
+      // Auto-deref: If subscript returns Ref<T>, convert to T via Deref node
+      if case .reference(let inner) = resolvedSubscript.type {
+          return .derefExpression(expression: resolvedSubscript, type: inner)
+      }
+      return resolvedSubscript
 
     case .memberPath(let baseExpr, let path):
       // 1. Check if baseExpr is a Type (Generic Instantiation) for static method access or Union Constructor
@@ -1304,7 +1299,18 @@ public class TypeChecker {
           }
       }
 
-      let typedBase = try inferTypedExpression(baseExpr)
+      
+      // infer base
+      let inferredBase = try inferTypedExpression(baseExpr)
+
+      // access member optimization: peel auto-deref to access ref directly
+      let typedBase: TypedExpressionNode
+      if case .derefExpression(let inner, _) = inferredBase {
+          typedBase = inner
+      } else {
+          typedBase = inferredBase
+      }
+
       var currentType: Type = {
         if case .reference(let inner) = typedBase.type { return inner }
         return typedBase.type
@@ -1607,7 +1613,14 @@ public class TypeChecker {
        // Check if base evaluates to a Reference type (RValue allowed)
        // OR if base resolves to an LValue (Mut Value required)
        
-       let typedBase = try inferTypedExpression(base)
+       let inferredBase = try inferTypedExpression(base)
+       // Optimization: Peel auto-deref for lvalue resolution
+       let typedBase: TypedExpressionNode
+       if case .derefExpression(let inner, _) = inferredBase {
+           typedBase = inner
+       } else {
+           typedBase = inferredBase
+       }
        
        // Now resolve path members on typedBase.
        var currentType = typedBase.type
@@ -1641,11 +1654,19 @@ public class TypeChecker {
        return .memberPath(source: typedBase, path: resolvedPath)
     
     case .subscriptExpression(let base, let args):
-       let typedBase = try resolveLValue(base) // Base must be LValue for `__at_mut` typically?
-       // `__at_mut(ref self)` requires `self` to be addressable.
+       // Relaxed restriction: Base doesn't need to be LValue strictly. 
+       // Similar to member access, we infer the base expression.
+       // If __at(self ref) requires address, inferTypedExpression usually results in a value that has storage (variable) anyway.
+       let typedBase = try inferTypedExpression(base)
        
        let typedArgs = try args.map { try inferTypedExpression($0) }
-       return try resolveSubscript(base: typedBase, args: typedArgs, isMut: true)
+       let resolved = try resolveSubscript(base: typedBase, args: typedArgs, isMut: true)
+       
+       // LValue resolution: Subscript returns Ref<T>, so we wrap in Deref to represent the LValue T
+       if case .reference(let inner) = resolved.type {
+           return .derefExpression(expression: resolved, type: inner)
+       }
+       return resolved
 
     case .derefExpression(let inner):
         let typedInner = try inferTypedExpression(inner)
@@ -1660,7 +1681,7 @@ public class TypeChecker {
   }
 
   private func resolveSubscript(base: TypedExpressionNode, args: [TypedExpressionNode], isMut: Bool) throws -> TypedExpressionNode {
-      let methodName = "__at"
+      let methodName = isMut ? "__at_mut" : "__at"
       let type = base.type
       
       // Unwrap reference
@@ -1708,15 +1729,21 @@ public class TypeChecker {
           }
       }
       
-      // Determine return type (auto deref)
-      let resultType: Type
-      if case .reference(let inner) = returns {
-          resultType = inner
-      } else {
-          resultType = returns
-      }
+      // Determine return type (auto deref logic REMOVED for clarity, we return what method returns)
+      // Actually, standard subscript behavior:
+      // If method returns Ref, subscript expression is LValue of inner type.
+      // But `type` property of TypedExpressionNode usually reflects the Value type for LValues?
+      // Checkout `resolveLValue`...
       
-      return .subscriptExpression(base: finalBase, arguments: args, method: method, type: resultType)
+      // If `__at` returns `Int ref`, then the expression has type `Int ref`. 
+      // If we strip ref here, we say expression is `Int`.
+      // But `CodeGen` needs to know if it's a pointer or value.
+      
+      // Let's modify behavior strictly:
+      // Subscript expression type matches method return type exactly.
+      // Then if it is Ref, usage sites decide to deref.
+      
+      return .subscriptExpression(base: finalBase, arguments: args, method: method, type: returns)
   }
 
         
@@ -1783,11 +1810,15 @@ public class TypeChecker {
       let base = try resolveTypeNode(inner)
       return .reference(inner: base)
     case .generic(let base, let args):
-      guard let template = currentScope.lookupGenericStructTemplate(base) else {
+      if let template = currentScope.lookupGenericStructTemplate(base) {
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        return try instantiate(template: template, args: resolvedArgs)
+      } else if let template = currentScope.lookupGenericUnionTemplate(base) {
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        return try instantiateUnion(template: template, args: resolvedArgs)
+      } else {
         throw SemanticError.undefinedType(base)
       }
-      let resolvedArgs = try args.map { try resolveTypeNode($0) }
-      return try instantiate(template: template, args: resolvedArgs)
     }
   }
 
