@@ -106,10 +106,15 @@ public class Scope {
     return Scope(parent: self)
   }
 
-  public func defineType(_ name: String, type: Type, line: Int? = nil, allowOverwrite: Bool = false) throws {
-    if !allowOverwrite && types[name] != nil {
+  public func defineType(_ name: String, type: Type, line: Int? = nil) throws {
+    if types[name] != nil {
       throw SemanticError.duplicateDefinition(name, line: line)
     }
+    types[name] = type
+  }
+
+  // Overwrite existing type entry (used for resolving recursive types placeholders)
+  public func overwriteType(_ name: String, type: Type) {
     types[name] = type
   }
 

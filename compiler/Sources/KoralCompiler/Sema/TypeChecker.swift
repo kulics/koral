@@ -70,7 +70,7 @@ public class TypeChecker {
 
       // Placeholder for recursion
       let placeholder = Type.union(name: name, cases: [], isGenericInstantiation: false, isCopy: isCopy)
-      try currentScope.defineType(name, type: placeholder, line: line, allowOverwrite: true)
+      try currentScope.defineType(name, type: placeholder, line: line)
 
       var unionCases: [UnionCase] = []
       for c in cases {
@@ -96,7 +96,8 @@ public class TypeChecker {
       }
 
       let type = Type.union(name: name, cases: unionCases, isGenericInstantiation: false, isCopy: isCopy)
-      try currentScope.defineType(name, type: type, line: line, allowOverwrite: true)
+      // Replace placeholder with final type
+      currentScope.overwriteType(name, type: type)
       return .globalUnionDeclaration(identifier: Symbol(name: name, type: type, kind: .type), cases: unionCases)
 
     case .globalVariableDeclaration(let name, let typeNode, let value, let isMut, _, let line):
