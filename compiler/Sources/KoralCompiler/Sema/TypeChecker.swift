@@ -55,20 +55,20 @@ public class TypeChecker {
 
   private func checkGlobalDeclaration(_ decl: GlobalNode) throws -> TypedGlobalNode? {
     switch decl {
-    case .unionDeclaration(let name, let typeParameters, let cases, let access, let line):
+    case .globalUnionDeclaration(let name, let typeParameters, let cases, let access, let isCopy, let line):
       self.currentLine = line
       if currentScope.lookupType(name) != nil {
           throw SemanticError.duplicateDefinition(name, line: line)
       }
 
       if !typeParameters.isEmpty {
-          let template = GenericUnionTemplate(name: name, typeParameters: typeParameters, cases: cases, access: access)
+          let template = GenericUnionTemplate(name: name, typeParameters: typeParameters, cases: cases, access: access, isCopy: isCopy)
           currentScope.defineGenericUnionTemplate(name, template: template)
           return .genericTypeTemplate(name: name)
       }
 
       // Placeholder for recursion
-      let placeholder = Type.union(name: name, cases: [], isGenericInstantiation: false, isCopy: true)
+      let placeholder = Type.union(name: name, cases: [], isGenericInstantiation: false, isCopy: isCopy)
       try currentScope.defineType(name, type: placeholder, line: line, allowOverwrite: true)
 
       var unionCases: [UnionCase] = []
@@ -83,9 +83,20 @@ public class TypeChecker {
           }
           unionCases.append(UnionCase(name: c.name, parameters: params))
       }
-      let type = Type.union(name: name, cases: unionCases, isGenericInstantiation: false, isCopy: true)
+
+      if isCopy {
+          for c in unionCases {
+              for param in c.parameters {
+                  if !param.type.isCopy {
+                      throw SemanticError.invalidOperation(op: "Copy union \(name) cannot contain non-Copy field \(param.name) of type \(param.type)", type1: "", type2: "")
+                  }
+              }
+          }
+      }
+
+      let type = Type.union(name: name, cases: unionCases, isGenericInstantiation: false, isCopy: isCopy)
       try currentScope.defineType(name, type: type, line: line, allowOverwrite: true)
-      return .unionDeclaration(identifier: Symbol(name: name, type: type, kind: .type), cases: unionCases)
+      return .globalUnionDeclaration(identifier: Symbol(name: name, type: type, kind: .type), cases: unionCases)
 
     case .globalVariableDeclaration(let name, let typeNode, let value, let isMut, _, let line):
       self.currentLine = line
@@ -437,7 +448,7 @@ public class TypeChecker {
 
       return .givenDeclaration(type: type, methods: typedMethods)
 
-    case .globalTypeDeclaration(let name, let typeParameters, let parameters, _, let isCopy, let line):
+    case .globalStructDeclaration(let name, let typeParameters, let parameters, _, let isCopy, let line):
       self.currentLine = line
       // Check if type already exists
       if currentScope.lookupType(name) != nil {
@@ -458,6 +469,14 @@ public class TypeChecker {
           kind: param.mutable ? .variable(.MutableValue) : .variable(.Value))
       }
 
+      if isCopy {
+        for param in params {
+            if !param.type.isCopy {
+                throw SemanticError.invalidOperation(op: "Copy type \(name) cannot contain non-Copy field \(param.name) of type \(param.type)", type1: "", type2: "")
+            }
+        }
+      }
+
       // Define the new type
       let typeType = Type.structure(
         name: name,
@@ -467,7 +486,7 @@ public class TypeChecker {
       )
       try currentScope.defineType(name, type: typeType)
 
-      return .globalTypeDeclaration(
+      return .globalStructDeclaration(
         identifier: Symbol(name: name, type: typeType, kind: .type),
         parameters: params
       )
@@ -497,7 +516,7 @@ public class TypeChecker {
       if typeParameters.isEmpty {
         try currentScope.defineType(name, type: type)
         let dummySymbol = Symbol(name: name, type: type, kind: .variable(.Value))
-        return .globalTypeDeclaration(identifier: dummySymbol, parameters: [])
+        return .globalStructDeclaration(identifier: dummySymbol, parameters: [])
       } else {
         // For generic intrinsics (like Pointer<T>), we still need a template definition
         // so the type checker knows it accepts distinct type parameters.
@@ -568,6 +587,11 @@ public class TypeChecker {
         var subjectType = typedSubject.type
         if case .reference(let inner) = subjectType {
             subjectType = inner
+        }
+        
+        // Check Move Semantics
+        if !typedSubject.type.isCopy {
+            checkMove(typedSubject)
         }
         
         var typedCases: [TypedMatchCase] = []
@@ -1810,7 +1834,7 @@ public class TypeChecker {
 
       // We use a dummy symbol for the type identifier, only name matters for CodeGen
       let typeSymbol = Symbol(name: layoutName, type: canonicalType, kind: .type)
-      extraGlobalNodes.append(.globalTypeDeclaration(identifier: typeSymbol, parameters: params))
+      extraGlobalNodes.append(.globalStructDeclaration(identifier: typeSymbol, parameters: params))
     }
 
     return specificType
@@ -1843,11 +1867,21 @@ public class TypeChecker {
     let argLayoutKeys = args.map { $0.layoutKey }.joined(separator: "_")
     let layoutName = "\(template.name)_\(argLayoutKeys)"
     
+    if template.isCopy {
+        for c in resolvedCases {
+            for param in c.parameters {
+                if !param.type.isCopy {
+                     throw SemanticError.invalidOperation(op: "Copy union instantiation \(layoutName) cannot contain non-Copy field \(param.name) of type \(param.type)", type1: "", type2: "")
+                }
+            }
+        }
+    }
+
     let specificType = Type.union(
         name: layoutName, 
         cases: resolvedCases, 
         isGenericInstantiation: true, 
-        isCopy: true
+        isCopy: template.isCopy
     )
     instantiatedTypes[key] = specificType
     layoutToTemplateInfo[layoutName] = (base: template.name, args: args)
@@ -1886,7 +1920,7 @@ public class TypeChecker {
         
         let canonicalType = Type.union(name: layoutName, cases: canonicalCases, isGenericInstantiation: true, isCopy: true)
         let typeSymbol = Symbol(name: layoutName, type: canonicalType, kind: .type)
-        extraGlobalNodes.append(.unionDeclaration(identifier: typeSymbol, cases: canonicalCases))
+        extraGlobalNodes.append(.globalUnionDeclaration(identifier: typeSymbol, cases: canonicalCases))
     }
     
     return specificType

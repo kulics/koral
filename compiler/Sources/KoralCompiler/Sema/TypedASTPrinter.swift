@@ -28,8 +28,8 @@ public func printTypedAST(_ node: TypedProgram) {
         printTypedExpression(body)
       }
 
-    case .globalTypeDeclaration(let identifier, let parameters):
-      print("\(indent)TypeDeclaration:")
+    case .globalStructDeclaration(let identifier, let parameters):
+      print("\(indent)StructDeclaration:")
       print("\(indent)  Name: \(identifier.name): \(identifier.type)")
       print("\(indent)  Parameters:")
       withIndent {
@@ -39,7 +39,7 @@ public func printTypedAST(_ node: TypedProgram) {
         }
       }
 
-    case .unionDeclaration(let identifier, let cases):
+    case .globalUnionDeclaration(let identifier, let cases):
       print("\(indent)UnionDeclaration:")
       print("\(indent)  Name: \(identifier.name): \(identifier.type)")
       withIndent {

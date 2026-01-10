@@ -10,6 +10,7 @@ public struct GenericUnionTemplate {
   public let typeParameters: [(name: String, type: TypeNode?)]
   public let cases: [UnionCaseDeclaration]
   public let access: AccessModifier
+  public let isCopy: Bool
 }
 
 public struct GenericFunctionTemplate {
