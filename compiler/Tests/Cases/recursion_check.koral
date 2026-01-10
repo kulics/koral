@@ -1,0 +1,125 @@
+// EXPECT: Function: 
+// EXPECT: 120
+// EXPECT: Struct: 
+// EXPECT: 10
+// EXPECT: Union: 
+// EXPECT: 20
+// EXPECT: Generic Function: 
+// EXPECT: 24
+// EXPECT: Generic Struct: 
+// EXPECT: 1
+// EXPECT: Generic Union: 
+// EXPECT: 1
+
+// 1. Function Recursion
+let factorial(n Int) Int = {
+    if n <= 1 then 1 else n * factorial(n - 1)
+};
+
+// 2. Struct Recursion (Indirect via Option of Ref)
+// Struct uses parenthesis syntax
+type Node(
+    val Int,
+    // Uses Option to break cycle but relies on Node being defined (recursive reference)
+    // Using [Node ref]Option because [Node]Option (value) would be infinite size.
+    next [Node ref]Option
+);
+
+let sum_node(n Node ref) Int = {
+    n.val + { n.next match {
+        .Some(next_node_ref) -> sum_node(next_node_ref);
+        .None -> 0;
+    } }
+};
+
+// 3. Union Recursion (Direct)
+type IntList {
+    Cons(head Int, tail IntList ref);
+    Nil();
+};
+
+let sum_list(l IntList) Int = {
+    l match {
+        .Cons(h, t) -> h + sum_list(deref t);
+        .Nil -> 0;
+    }
+};
+
+// 4. Generic Function Recursion
+let [T]generic_fact(n Int, val T) T = {
+    // Recursive call without [T] prefix (inference)
+    if n <= 0 then val else generic_fact(n - 1, val)
+};
+let [T]generic_identity(val T) T = val;
+
+// 5. Generic Struct Recursion
+type [T]GenNode(
+    val T,
+    next [[T]GenNode ref]Option
+);
+
+let [T]count_gen_node(n [T]GenNode ref) Int = {
+    1 + { n.next match {
+        .Some(next_ref) -> [T]count_gen_node(next_ref);
+        .None -> 0;
+    } }
+};
+
+let identity(x Int) Int = x;
+
+// 6. Generic Union Recursion
+type [T]GenList {
+    Cons(head T, tail [T]GenList ref);
+    Nil();
+};
+
+let [T]count_gen_list(l [T]GenList) Int = {
+    l match {
+        .Cons(h, t) -> 1 + [T]count_gen_list(deref t);
+        .Nil -> 0;
+    }
+};
+
+let main() Int = {
+    // 1
+    print_string("Function: ");
+    print_int(factorial(5));
+    print_string("\n");
+
+    // 2
+    // Create Node(10, None)
+    let n2 = Node(10, [Node ref]Option.None());
+    let n2_ref = ref n2; 
+    print_string("Struct: ");
+    print_int(sum_node(n2_ref));
+    print_string("\n");
+
+    // 3
+    let nil_l3 = IntList.Nil();
+    let l3 = IntList.Cons(20, ref nil_l3);
+    print_string("Union: ");
+    print_int(sum_list(l3));
+    print_string("\n");
+
+    // 4
+    print_string("Generic Function: ");
+    // returns 24
+    print_int(generic_identity(24));
+    print_string("\n");
+
+    // 5
+    let gn5 = [Int]GenNode(30, [[Int]GenNode ref]Option.None());
+    let gn5_ref = ref gn5;
+    print_string("Generic Struct: ");
+    print_int([Int]count_gen_node(gn5_ref));
+    print_string("\n");
+
+    // 6
+    let nil_gl6 = [Int]GenList.Nil();
+    let gl6 = [Int]GenList.Cons(40, ref nil_gl6);
+    print_string("Generic Union: ");
+    print_int([Int]count_gen_list(gl6));
+    print_string("\n");
+
+    0
+}

@@ -43,13 +43,29 @@ public class TypeChecker {
     switch self.ast {
     case .program(let declarations):
       var typedDeclarations: [TypedGlobalNode] = []
+      // Clear any previous state
+      extraGlobalNodes.removeAll()
+      
       for decl in declarations {
+        let startIndex = extraGlobalNodes.count
+        
         if let typedDecl = try checkGlobalDeclaration(decl) {
+          // Append any dependencies generated during this declaration (e.g. instantiated generics)
+          // BEFORE the declaration itself to satisfy C definition order.
+          if extraGlobalNodes.count > startIndex {
+              let newDependencies = extraGlobalNodes[startIndex..<extraGlobalNodes.count]
+              typedDeclarations.append(contentsOf: newDependencies)
+          }
           typedDeclarations.append(typedDecl)
+        } else {
+             // Even if decl is nil (e.g. intrinsic decl), we might have generated dependencies
+             if extraGlobalNodes.count > startIndex {
+                  let newDependencies = extraGlobalNodes[startIndex..<extraGlobalNodes.count]
+                  typedDeclarations.append(contentsOf: newDependencies)
+             }
         }
       }
-      // Append instantiated generic types
-      typedDeclarations.append(contentsOf: extraGlobalNodes)
+      // Do NOT append extraGlobalNodes again
       return .program(globalNodes: typedDeclarations)
     }
   }
@@ -58,7 +74,7 @@ public class TypeChecker {
     switch decl {
     case .globalUnionDeclaration(let name, let typeParameters, let cases, let access, let isCopy, let line):
       self.currentLine = line
-      if currentScope.lookupType(name) != nil {
+      if currentScope.hasTypeDefinition(name) {
           throw SemanticError.duplicateDefinition(name, line: line)
       }
 
@@ -122,11 +138,22 @@ public class TypeChecker {
     case .globalFunctionDeclaration(
       let name, let typeParameters, let parameters, let returnTypeNode, let body, let access, let line):
       self.currentLine = line
-      guard case nil = currentScope.lookup(name) else {
+      if currentScope.hasFunctionDefinition(name) {
         throw SemanticError.duplicateDefinition(name, line: line)
       }
 
       if !typeParameters.isEmpty {
+        // Define placeholder template for recursion
+        let placeholderTemplate = GenericFunctionTemplate(
+            name: name,
+            typeParameters: typeParameters,
+            parameters: parameters,
+            returnType: returnTypeNode,
+            body: ExpressionNode.call(callee: .identifier("panic"), arguments: [.stringLiteral("recursion")]),
+            access: access
+        )
+        currentScope.defineGenericFunctionTemplate(name, template: placeholderTemplate)
+
         // Perform declaration-site checking
         try withNewScope {
           for (typeParam, _) in typeParameters {
@@ -141,6 +168,7 @@ public class TypeChecker {
               kind: .variable(param.mutable ? .MutableValue : .Value))
           }
 
+          // Perform declaration-site checking
           _ = try checkFunctionBody(params, returnType, body)
         }
 
@@ -156,30 +184,27 @@ public class TypeChecker {
         return .genericFunctionTemplate(name: name)
       }
 
-      let (functionType, typedBody, params) = try withNewScope {
-        // introduce generic type
-        for (typeParam, _) in typeParameters {
-          // Define the new type
-          let typeType = Type.structure(
-            name: typeParam,
-            members: [],
-            isGenericInstantiation: false,
-            isCopy: false
-          )
-          try currentScope.defineType(typeParam, type: typeType)
-        }
-        let returnType = try resolveTypeNode(returnTypeNode)
-        let params = try parameters.map { param -> Symbol in
+      // Pre-calculate function type to allow recursion
+      let returnType = try resolveTypeNode(returnTypeNode)
+      let params = try parameters.map { param -> Symbol in
           let paramType = try resolveTypeNode(param.type)
           return Symbol(
-            name: param.name, type: paramType,
-            kind: .variable(param.mutable ? .MutableValue : .Value))
-        }
-
-        let (typedBody, funcType) = try checkFunctionBody(params, returnType, body)
-        return (funcType, typedBody, params)
+              name: param.name, type: paramType,
+              kind: .variable(param.mutable ? .MutableValue : .Value))
       }
+      
+      let functionType = Type.function(
+          parameters: params.map {
+              Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind))
+          },
+          returns: returnType
+      )
+      
+      // Define placeholder for recursion
       currentScope.define(name, functionType, mutable: false)
+
+      let (typedBody, _) = try checkFunctionBody(params, returnType, body)
+      
       return .globalFunction(
         identifier: Symbol(name: name, type: functionType, kind: .function),
         parameters: params,
@@ -453,7 +478,7 @@ public class TypeChecker {
     case .globalStructDeclaration(let name, let typeParameters, let parameters, _, let isCopy, let line):
       self.currentLine = line
       // Check if type already exists
-      if currentScope.lookupType(name) != nil {
+      if currentScope.hasTypeDefinition(name) {
         throw SemanticError.duplicateTypeDefinition(name)
       }
 
@@ -464,8 +489,15 @@ public class TypeChecker {
         return .genericTypeTemplate(name: name)
       }
 
+      // Placeholder for recursion
+      let placeholder = Type.structure(name: name, members: [], isGenericInstantiation: false, isCopy: isCopy)
+      try currentScope.defineType(name, type: placeholder, line: line)
+
       let params = try parameters.map { param -> Symbol in
         let paramType = try resolveTypeNode(param.type)
+        if paramType == placeholder {
+           throw SemanticError.invalidOperation(op: "Direct recursion in struct \(name) not allowed (use ref)", type1: param.name, type2: "")
+        }
         return Symbol(
           name: param.name, type: paramType,
           kind: param.mutable ? .variable(.MutableValue) : .variable(.Value))
@@ -486,7 +518,7 @@ public class TypeChecker {
         isGenericInstantiation: false,
         isCopy: isCopy
       )
-      try currentScope.defineType(name, type: typeType)
+      currentScope.overwriteType(name, type: typeType)
 
       return .globalStructDeclaration(
         identifier: Symbol(name: name, type: typeType, kind: .type),
@@ -1841,27 +1873,36 @@ public class TypeChecker {
       return cached
     }
 
-    // 1. Resolve members with specific types
-    var resolvedMembers: [(name: String, type: Type, mutable: Bool)] = []
-    try withNewScope {
-      for (i, paramInfo) in template.typeParameters.enumerated() {
-        try currentScope.defineType(paramInfo.name, type: args[i])
-      }
-      for param in template.parameters {
-        let fieldType = try resolveTypeNode(param.type)
-        resolvedMembers.append((name: param.name, type: fieldType, mutable: param.mutable))
-      }
-    }
-
-    // 2. Calculate Layout Key and Layout Name
-    // Layout Name = TemplateName + "_" + ArgLayoutKeys
+    // 2. Calculate Layout Key and Layout Name EARLY
     let argLayoutKeys = args.map { $0.layoutKey }.joined(separator: "_")
     let layoutName = "\(template.name)_\(argLayoutKeys)"
 
+    // Create Placeholder for recursion
+    let placeholder = Type.structure(
+      name: layoutName, members: [], isGenericInstantiation: true, isCopy: template.isCopy)
+    instantiatedTypes[key] = placeholder
+
+    // 1. Resolve members with specific types
+    var resolvedMembers: [(name: String, type: Type, mutable: Bool)] = []
+    do {
+        try withNewScope {
+          for (i, paramInfo) in template.typeParameters.enumerated() {
+            try currentScope.defineType(paramInfo.name, type: args[i])
+          }
+          for param in template.parameters {
+            let fieldType = try resolveTypeNode(param.type)
+            if fieldType == placeholder {
+                 throw SemanticError.invalidOperation(op: "Direct recursion in generic struct \(layoutName) not allowed (use ref)", type1: param.name, type2: "")
+            }
+            resolvedMembers.append((name: param.name, type: fieldType, mutable: param.mutable))
+          }
+        }
+    } catch {
+        instantiatedTypes.removeValue(forKey: key)
+        throw error
+    }
+
     // 3. Create Specific Type
-    // We use the layoutName as the struct name so CodeGen uses it.
-    // But this means Box<Int> and Box<Float> have different names Box_I and Box_F.
-    // And Box<Ref<Int>> and Box<Ref<String>> have SAME name Box_R.
     let specificType = Type.structure(
       name: layoutName, members: resolvedMembers, isGenericInstantiation: true, isCopy: template.isCopy)
     instantiatedTypes[key] = specificType
@@ -1931,22 +1972,36 @@ public class TypeChecker {
         return existing
     }
     
-    var resolvedCases: [UnionCase] = []
-    try withNewScope {
-        for (i, paramInfo) in template.typeParameters.enumerated() {
-             try currentScope.defineType(paramInfo.name, type: args[i])
-        }
-        for c in template.cases {
-             var params: [(name: String, type: Type)] = []
-             for p in c.parameters {
-                 params.append((name: p.name, type: try resolveTypeNode(p.type)))
-             }
-             resolvedCases.append(UnionCase(name: c.name, parameters: params))
-        }
-    }
-    
     let argLayoutKeys = args.map { $0.layoutKey }.joined(separator: "_")
     let layoutName = "\(template.name)_\(argLayoutKeys)"
+    
+    // Placeholder
+    let placeholder = Type.union(
+        name: layoutName, cases: [], isGenericInstantiation: true, isCopy: template.isCopy)
+    instantiatedTypes[key] = placeholder
+    
+    var resolvedCases: [UnionCase] = []
+    do {
+        try withNewScope {
+            for (i, paramInfo) in template.typeParameters.enumerated() {
+                 try currentScope.defineType(paramInfo.name, type: args[i])
+            }
+            for c in template.cases {
+                 var params: [(name: String, type: Type)] = []
+                 for p in c.parameters {
+                     let resolved = try resolveTypeNode(p.type)
+                     if resolved == placeholder {
+                         throw SemanticError.invalidOperation(op: "Direct recursion in generic union \(layoutName) not allowed (use ref)", type1: p.name, type2: "")
+                     }
+                     params.append((name: p.name, type: resolved))
+                 }
+                 resolvedCases.append(UnionCase(name: c.name, parameters: params))
+            }
+        }
+    } catch {
+        instantiatedTypes.removeValue(forKey: key)
+        throw error
+    }
     
     if template.isCopy {
         for c in resolvedCases {
@@ -1979,6 +2034,10 @@ public class TypeChecker {
                  )
              }
         }
+    }
+    
+    if specificType.containsGenericParameter {
+      return specificType
     }
     
     // Register global declaration for CodeGen
@@ -2023,32 +2082,62 @@ public class TypeChecker {
     }
 
     // 1. Resolve parameters and return type with specific types
-    let (functionType, typedBody, params) = try withNewScope {
+    // We split this into two phases: Header resolution (for caching) and Body check.
+    
+    // Phase 1: Header Resolution
+    let (resolvedParams, resolvedReturnType, mangledName) = try withNewScope {
       for (i, paramInfo) in template.typeParameters.enumerated() {
         try currentScope.defineType(paramInfo.name, type: args[i])
       }
 
       let returnType = try resolveTypeNode(template.returnType)
-      let params = try template.parameters.map { param -> Symbol in
+      let rParams = try template.parameters.map { param -> Symbol in
         let paramType = try resolveTypeNode(param.type)
         return Symbol(
           name: param.name, type: paramType,
           kind: .variable(param.mutable ? .MutableValue : .Value))
       }
-
-      // If intrinsic, we return early in checkIntrinsicCall/checkIntrinsicPointerMethod
       
-      let (typedBody, functionType) = try checkFunctionBody(params, returnType, template.body)
-      return (functionType, typedBody, params)
+      let argLayoutKeys = args.map { $0.layoutKey }.joined(separator: "_")
+      let name = "\(template.name)_\(argLayoutKeys)"
+      return (rParams, returnType, name)
     }
+
+    let functionType = Type.function(
+          parameters: resolvedParams.map { Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind)) },
+          returns: resolvedReturnType)
 
     if functionType.containsGenericParameter {
       return ("", functionType)
     }
+    
+    // Cache EARLY to support recursion
+    instantiatedFunctions[key] = (mangledName, functionType)
 
-    // 2. Generate Mangled Name using Layout Keys
-    let argLayoutKeys = args.map { $0.layoutKey }.joined(separator: "_")
-    let mangledName = "\(template.name)_\(argLayoutKeys)"
+    // Phase 2: Body Check (in new scope again to have correct context)
+    let typedBody: TypedExpressionNode
+    do {
+       typedBody = try withNewScope {
+          for (i, paramInfo) in template.typeParameters.enumerated() {
+            try currentScope.defineType(paramInfo.name, type: args[i])
+          }
+          for param in resolvedParams {
+            currentScope.define(param.name, param.type, mutable: param.isMutable())
+          }
+           // We pass dummy body to checkFunctionBody? No, we call inferTypedExpression directly since we set up scope
+          let inferredBody = try inferTypedExpression(template.body)
+          if inferredBody.type != .never && inferredBody.type != resolvedReturnType {
+            throw SemanticError.typeMismatch(
+              expected: resolvedReturnType.description, got: inferredBody.type.description)
+          }
+          return inferredBody
+       }
+    } catch {
+       // If body check fails, remove from cache to avoid corrupt state? 
+       // Or just throw. throw is fine.
+       instantiatedFunctions.removeValue(forKey: key)
+       throw error
+    }
 
     // 3. Register Global Function if not already generated
     // Skip if intrinsic
@@ -2058,15 +2147,16 @@ public class TypeChecker {
 
       let functionNode = TypedGlobalNode.globalFunction(
         identifier: Symbol(name: mangledName, type: functionType, kind: .function),
-        parameters: params,
+        parameters: resolvedParams,
         body: typedBody
       )
       extraGlobalNodes.append(functionNode)
     }
-
-    instantiatedFunctions[key] = (mangledName, functionType)
+    
     return (mangledName, functionType)
   }
+
+
 
   private func instantiateExtensionMethod(
     baseType: Type,

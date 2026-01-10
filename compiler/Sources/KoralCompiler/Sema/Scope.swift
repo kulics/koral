@@ -55,6 +55,18 @@ public class Scope {
     symbols[name] = (type, mutable)
   }
 
+  /// Checks if a type or generic template with the given name is already defined in this scope.
+  public func hasTypeDefinition(_ name: String) -> Bool {
+    return types[name] != nil || 
+           genericStructTemplates[name] != nil || 
+           genericUnionTemplates[name] != nil
+  }
+
+  /// Checks if a function symbol or generic function template is already defined in this scope.
+  public func hasFunctionDefinition(_ name: String) -> Bool {
+     return symbols[name] != nil || genericFunctionTemplates[name] != nil
+  }
+
   public func defineGenericStructTemplate(_ name: String, template: GenericStructTemplate) {
     genericStructTemplates[name] = template
   }
