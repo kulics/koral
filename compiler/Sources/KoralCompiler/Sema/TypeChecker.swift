@@ -790,21 +790,6 @@ public class TypeChecker {
       )
 
     case .call(let callee, let arguments):
-      // Check for explicit call to methods marked as internal/special by compiler
-      let explicitMethodName: String?
-      switch callee {
-      case .identifier(let name):
-          explicitMethodName = name
-      case .memberPath(_, let path):
-          explicitMethodName = path.last
-      default:
-          explicitMethodName = nil
-      }
-      
-      if let name = explicitMethodName, getCompilerMethodKind(name) != .normal {
-          throw SemanticError.invalidOperation(op: "Explicit call to \(name) is not allowed", type1: "", type2: "")
-      }
-
       // Check if callee is a generic instantiation (Constructor call or Function call)
       if case .genericInstantiation(let base, let args) = callee {
         if let template = currentScope.lookupGenericStructTemplate(base) {
@@ -1078,7 +1063,12 @@ public class TypeChecker {
         }
       }
 
-      let typedCallee = try inferTypedExpression(callee)
+        let typedCallee = try inferTypedExpression(callee)
+
+        // Secondary guard: if the resolved callee is a special compiler method, block explicit calls
+        if case .variable(let sym) = typedCallee, sym.methodKind != .normal {
+          throw SemanticError.invalidOperation(op: "Explicit call to \(sym.name) is not allowed", type1: "", type2: "")
+        }
 
       // Method call
       if case .methodReference(let base, let method, let methodType) = typedCallee {
