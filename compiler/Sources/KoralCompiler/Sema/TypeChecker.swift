@@ -221,26 +221,22 @@ public class TypeChecker {
     case .givenDeclaration(let typeParams, let typeNode, let methods):
       if !typeParams.isEmpty {
         // Generic Given
-        var baseName = ""
-        if case .generic(let name, let args) = typeNode {
-            baseName = name
-            // Validate that args are exactly the type params
-            if args.count != typeParams.count {
-                throw SemanticError.typeMismatch(
-                    expected: "\(typeParams.count) generic params", got: "\(args.count)")
-            }
-            for (i, arg) in args.enumerated() {
-               guard case .identifier(let argName) = arg, argName == typeParams[i].name else {
-                   throw SemanticError.invalidOperation(
-                       op: "generic given specialization not supported", type1: String(describing: arg),
-                       type2: "")
-               }
-            }
-        } else if case .identifier(let name) = typeNode {
-            baseName = name
-        } else {
+        guard case .generic(let baseName, let args) = typeNode else {
+          throw SemanticError.invalidOperation(
+            op: "generic given on non-generic type", type1: "", type2: "")
+        }
+
+        // Validate that args are exactly the type params
+        if args.count != typeParams.count {
+          throw SemanticError.typeMismatch(
+            expected: "\(typeParams.count) generic params", got: "\(args.count)")
+        }
+        for (i, arg) in args.enumerated() {
+          guard case .identifier(let argName) = arg, argName == typeParams[i].name else {
             throw SemanticError.invalidOperation(
-                op: "generic given on invalid type node", type1: String(describing: typeNode), type2: "")
+              op: "generic given specialization not supported", type1: String(describing: arg),
+              type2: "")
+          }
         }
 
         // Register methods for the template
