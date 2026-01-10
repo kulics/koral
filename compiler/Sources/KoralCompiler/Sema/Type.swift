@@ -5,7 +5,17 @@ public struct UnionCase {
 
 public indirect enum Type: CustomStringConvertible {
   case int
-  case float
+  case int8
+  case int16
+  case int32
+  case int64
+  case uint
+  case uint8
+  case uint16
+  case uint32
+  case uint64
+  case float32
+  case float64
   case string
   case bool
   case void
@@ -19,7 +29,9 @@ public indirect enum Type: CustomStringConvertible {
 
   public var isCopy: Bool {
     switch self {
-    case .int, .float, .bool, .void, .never, .pointer, .reference:
+    case .int, .int8, .int16, .int32, .int64,
+      .uint, .uint8, .uint16, .uint32, .uint64,
+      .float32, .float64, .bool, .void, .never, .pointer, .reference:
       return true
     case .string:
       // Assuming string is reference counted or managed, but for now let's treat it as Copy to avoid breaking existing string heavy code
@@ -56,7 +68,17 @@ public indirect enum Type: CustomStringConvertible {
   public var description: String {
     switch self {
     case .int: return "Int"
-    case .float: return "Float"
+    case .int8: return "Int8"
+    case .int16: return "Int16"
+    case .int32: return "Int32"
+    case .int64: return "Int64"
+    case .uint: return "UInt"
+    case .uint8: return "UInt8"
+    case .uint16: return "UInt16"
+    case .uint32: return "UInt32"
+    case .uint64: return "UInt64"
+    case .float32: return "Float32"
+    case .float64: return "Float64"
     case .string: return "String"
     case .bool: return "Bool"
     case .void: return "Void"
@@ -80,7 +102,17 @@ public indirect enum Type: CustomStringConvertible {
   public var layoutKey: String {
     switch self {
     case .int: return "I"
-    case .float: return "F"
+    case .int8: return "I8"
+    case .int16: return "I16"
+    case .int32: return "I32"
+    case .int64: return "I64"
+    case .uint: return "U"
+    case .uint8: return "U8"
+    case .uint16: return "U16"
+    case .uint32: return "U32"
+    case .uint64: return "U64"
+    case .float32: return "F32"
+    case .float64: return "F64"
     case .string: return "S"
     case .bool: return "B"
     case .void: return "V"
@@ -103,7 +135,9 @@ public indirect enum Type: CustomStringConvertible {
 
   public var containsGenericParameter: Bool {
     switch self {
-    case .int, .float, .string, .bool, .void, .never:
+    case .int, .int8, .int16, .int32, .int64,
+      .uint, .uint8, .uint16, .uint32, .uint64,
+      .float32, .float64, .string, .bool, .void, .never:
       return false
     case .function(let params, let returns):
       return returns.containsGenericParameter || params.contains { $0.type.containsGenericParameter }
@@ -127,7 +161,9 @@ public indirect enum Type: CustomStringConvertible {
 
   public var canonical: Type {
     switch self {
-    case .int, .float, .bool, .void, .never, .string: return self
+    case .int, .int8, .int16, .int32, .int64,
+      .uint, .uint8, .uint16, .uint32, .uint64,
+      .float32, .float64, .bool, .void, .never, .string: return self
     case .reference(_): return .reference(inner: .void)
     case .pointer(let element): return .pointer(element: element.canonical) 
     case .structure(let name, let members, let isGenericInstantiation, let isCopy):
@@ -183,7 +219,9 @@ extension Type: Equatable {
   public static func == (lhs: Type, rhs: Type) -> Bool {
     switch (lhs, rhs) {
     case (.int, .int),
-      (.float, .float),
+      (.int8, .int8), (.int16, .int16), (.int32, .int32), (.int64, .int64),
+      (.uint, .uint), (.uint8, .uint8), (.uint16, .uint16), (.uint32, .uint32), (.uint64, .uint64),
+      (.float32, .float32), (.float64, .float64),
       (.string, .string),
       (.bool, .bool),
       (.void, .void),

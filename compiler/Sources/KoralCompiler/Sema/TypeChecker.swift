@@ -608,7 +608,7 @@ public class TypeChecker {
       return .integerLiteral(value: value, type: .int)
 
     case .floatLiteral(let value):
-      return .floatLiteral(value: value, type: .float)
+      return .floatLiteral(value: value, type: .float64)
 
     case .stringLiteral(let value):
       return .stringLiteral(value: value, type: .string)
@@ -721,11 +721,12 @@ public class TypeChecker {
         left: typedLeft, op: op, right: typedRight, type: resultType)
 
     case .letExpression(let name, let typeNode, let value, let mutable, let body):
-      let typedValue = try inferTypedExpression(value)
+      var typedValue = try inferTypedExpression(value)
       checkMove(typedValue)
 
       if let typeNode = typeNode {
         let type = try resolveTypeNode(typeNode)
+        typedValue = coerceLiteral(typedValue, to: type)
         if typedValue.type != type {
           throw SemanticError.typeMismatch(
             expected: type.description, got: typedValue.type.description)
@@ -810,7 +811,8 @@ public class TypeChecker {
 
           var typedArguments: [TypedExpressionNode] = []
           for (arg, expectedMember) in zip(arguments, members) {
-            let typedArg = try inferTypedExpression(arg)
+            var typedArg = try inferTypedExpression(arg)
+            typedArg = coerceLiteral(typedArg, to: expectedMember.type)
             if typedArg.type != expectedMember.type {
               throw SemanticError.typeMismatch(
                 expected: expectedMember.type.description,
@@ -901,7 +903,8 @@ public class TypeChecker {
 
           var typedArguments: [TypedExpressionNode] = []
           for (arg, expectedParam) in zip(arguments, params) {
-            let typedArg = try inferTypedExpression(arg)
+            var typedArg = try inferTypedExpression(arg)
+            typedArg = coerceLiteral(typedArg, to: expectedParam.type)
             if typedArg.type != expectedParam.type {
               throw SemanticError.typeMismatch(
                 expected: expectedParam.type.description,
@@ -975,7 +978,7 @@ public class TypeChecker {
 
           var typedArguments: [TypedExpressionNode] = []
           for (argExpr, param) in zip(arguments, template.parameters) {
-            let typedArg = try inferTypedExpression(argExpr)
+            let typedArg = coerceLiteral(try inferTypedExpression(argExpr), to: try resolveTypeNode(param.type))
             checkMove(typedArg)
             typedArguments.append(typedArg)
             try unify(
@@ -1037,7 +1040,8 @@ public class TypeChecker {
 
           var typedArguments: [TypedExpressionNode] = []
           for (arg, expectedMember) in zip(arguments, parameters) {
-            let typedArg = try inferTypedExpression(arg)
+            var typedArg = try inferTypedExpression(arg)
+            typedArg = coerceLiteral(typedArg, to: expectedMember.type)
             if typedArg.type != expectedMember.type {
               throw SemanticError.typeMismatch(
                 expected: expectedMember.type.description,
@@ -1575,11 +1579,12 @@ public class TypeChecker {
     switch stmt {
     case .variableDeclaration(let name, let typeNode, let value, let mutable, let line):
       self.currentLine = line
-      let typedValue = try inferTypedExpression(value)
+      var typedValue = try inferTypedExpression(value)
       let type: Type
       
       if let typeNode = typeNode {
         type = try resolveTypeNode(typeNode)
+        typedValue = coerceLiteral(typedValue, to: type)
         if typedValue.type != .never && typedValue.type != type {
           throw SemanticError.typeMismatch(
             expected: type.description, got: typedValue.type.description)
@@ -1599,10 +1604,11 @@ public class TypeChecker {
 
     case .assignment(let target, let value, let line):
       self.currentLine = line
-      let typedTarget = try resolveLValue(target)
-      let typedValue = try inferTypedExpression(value)
+        let typedTarget = try resolveLValue(target)
+        var typedValue = try inferTypedExpression(value)
+        typedValue = coerceLiteral(typedValue, to: typedTarget.type)
       
-      if typedValue.type != .never && typedTarget.type != typedValue.type {
+        if typedValue.type != .never && typedTarget.type != typedValue.type {
           throw SemanticError.typeMismatch(expected: typedTarget.type.description, got: typedValue.type.description)
       }
       
@@ -1613,7 +1619,7 @@ public class TypeChecker {
     case .compoundAssignment(let target, let op, let value, let line):
       self.currentLine = line
       let typedTarget = try resolveLValue(target)
-      let typedValue = try inferTypedExpression(value)
+      let typedValue = coerceLiteral(try inferTypedExpression(value), to: typedTarget.type)
       // Check arithmetic op validity?
       let _ = try checkArithmeticOp(compoundOpToArithmeticOp(op), typedTarget.type, typedValue.type)
       checkMove(typedValue)
@@ -2358,14 +2364,46 @@ public class TypeChecker {
     return try body()
   }
 
+  private func isIntegerType(_ type: Type) -> Bool {
+    switch type {
+    case .int, .int8, .int16, .int32, .int64,
+         .uint, .uint8, .uint16, .uint32, .uint64:
+      return true
+    default:
+      return false
+    }
+  }
+
+  private func isFloatType(_ type: Type) -> Bool {
+    switch type {
+    case .float32, .float64:
+      return true
+    default:
+      return false
+    }
+  }
+
+  // Coerce numeric literals to the expected numeric type for annotations/parameters.
+  private func coerceLiteral(_ expr: TypedExpressionNode, to expected: Type) -> TypedExpressionNode {
+    if isIntegerType(expected) {
+      if case .integerLiteral(let value, _) = expr {
+        return .integerLiteral(value: value, type: expected)
+      }
+    }
+    if isFloatType(expected) {
+      if case .floatLiteral(let value, _) = expr {
+        return .floatLiteral(value: value, type: expected)
+      }
+    }
+    return expr
+  }
+
   private func checkArithmeticOp(_ op: ArithmeticOperator, _ lhs: Type, _ rhs: Type) throws
     -> Type
   {
-    if lhs == .int && rhs == .int {
-      return .int
-    }
-    if lhs == .float && rhs == .float {
-      return .float
+    if lhs == rhs {
+      if isIntegerType(lhs) { return lhs }
+      if isFloatType(lhs) { return lhs }
     }
     throw SemanticError.invalidOperation(
       op: String(describing: op), type1: lhs.description, type2: rhs.description)

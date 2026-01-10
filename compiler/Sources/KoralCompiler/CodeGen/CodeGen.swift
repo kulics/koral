@@ -1031,7 +1031,17 @@ public class CodeGen {
   private func getCType(_ type: Type) -> String {
     switch type {
     case .int: return "intptr_t"
-    case .float: return "double"
+    case .int8: return "int8_t"
+    case .int16: return "int16_t"
+    case .int32: return "int32_t"
+    case .int64: return "int64_t"
+    case .uint: return "uintptr_t"
+    case .uint8: return "uint8_t"
+    case .uint16: return "uint16_t"
+    case .uint32: return "uint32_t"
+    case .uint64: return "uint64_t"
+    case .float32: return "float"
+    case .float64: return "double"
     case .string: return "const char*"
     case .bool: return "_Bool"
     case .void: return "void"

@@ -3,7 +3,7 @@ public enum Token: CustomStringConvertible {
   case bof  // Beginning of file marker
   case eof  // End of file marker
   case integer(Int)  // Integer literal, e.g.: 42
-  case float(Double)  // Float literal, e.g.: 3.14
+  case float(Double)  // Float64 literal, e.g.: 3.14
   case string(String)  // String literal, e.g.: "hello"
   case plus  // Plus operator '+'
   case minus  // Minus operator '-'
@@ -17,7 +17,7 @@ public enum Token: CustomStringConvertible {
   case less  // Less than operator '<'
   case greaterEqual  // Greater than or equal operator '>='
   case lessEqual  // Less than or equal operator '<='
-  case identifier(String)  // Identifier, e.g.: variableName, Int, Float, String
+  case identifier(String)  // Identifier, e.g.: variableName, Int, Float64, String
   case letKeyword  // 'let' keyword
   case mutKeyword  // 'mut' keyword
   case semicolon  // Semicolon ';'
@@ -164,7 +164,7 @@ public enum Token: CustomStringConvertible {
     case .integer(let value):
       return "Integer(\(value))"
     case .float(let value):
-      return "Float(\(value))"
+      return "Float64(\(value))"
     case .string(let value):
       return "String(\(value))"
     case .plus:

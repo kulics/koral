@@ -141,8 +141,28 @@ public class Scope {
     return switch name {
     case "Int":
       .int
-    case "Float":
-      .float
+    case "Int8":
+      .int8
+    case "Int16":
+      .int16
+    case "Int32":
+      .int32
+    case "Int64":
+      .int64
+    case "UInt":
+      .uint
+    case "UInt8":
+      .uint8
+    case "UInt16":
+      .uint16
+    case "UInt32":
+      .uint32
+    case "UInt64":
+      .uint64
+    case "Float32":
+      .float32
+    case "Float64":
+      .float64
     case "String":
       .string
     case "Bool":
