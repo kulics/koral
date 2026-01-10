@@ -139,7 +139,8 @@ public class CodeGen {
         if case .globalFunction(let identifier, let params, _) = node {
           generateFunctionDeclaration(identifier, params)
         }
-        if case .givenDeclaration(_, let methods) = node {
+        if case .givenDeclaration(let type, let methods) = node {
+          if type.containsGenericParameter { continue }
           for method in methods {
             generateFunctionDeclaration(method.identifier, method.parameters)
           }
@@ -172,7 +173,8 @@ public class CodeGen {
         if case .globalFunction(let identifier, let params, let body) = node {
           generateGlobalFunction(identifier, params, body)
         }
-        if case .givenDeclaration(_, let methods) = node {
+        if case .givenDeclaration(let type, let methods) = node {
+          if type.containsGenericParameter { continue }
           for method in methods {
             generateGlobalFunction(method.identifier, method.parameters, method.body)
           }
