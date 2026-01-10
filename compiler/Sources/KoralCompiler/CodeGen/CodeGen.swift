@@ -672,32 +672,13 @@ public class CodeGen {
       return result
     case .memberPath(let source, let path):
       return generateMemberPath(source, path)
-    case .subscriptExpression(let base, let args, let method, let type):
-      guard case .function(_, let returns) = method.type else { fatalError() }
-      let callNode = TypedExpressionNode.call(
+    case .subscriptExpression(let base, let args, let method, _):
+        guard case .function(_, let returns) = method.type else { fatalError() }
+        let callNode = TypedExpressionNode.call(
           callee: .methodReference(base: base, method: method, type: method.type),
           arguments: args,
           type: returns)
-      let refResult = generateExpressionSSA(callNode)
-      
-      let result = nextTemp()
-      addIndent()
-      buffer += "\(getCType(type)) \(result);\n"
-      
-      if case .structure(let typeName, _, _, _) = type {
-        addIndent()
-        buffer += "\(result) = __koral_\(typeName)_copy((struct \(typeName)*)\(refResult).ptr);\n"
-      } else if case .reference(_) = type {
-        addIndent()
-        buffer += "\(result) = *(struct Ref*)\(refResult).ptr;\n"
-        addIndent()
-        buffer += "__koral_retain(\(result).control);\n"
-      } else {
-        let cType = getCType(type)
-        addIndent()
-        buffer += "\(result) = *(\(cType)*)\(refResult).ptr;\n"
-      }
-      return result
+        return generateExpressionSSA(callNode)
 
     case .intrinsicCall(let node):
       return generateIntrinsicSSA(node)
@@ -905,13 +886,9 @@ public class CodeGen {
              type: returns)
          let refResult = generateExpressionSSA(callNode)
          
-         guard case .reference(let inner) = returns else { fatalError() }
-         let innerCType = getCType(inner)
-         
-         // Wrap in parentheses to ensure . member access applies to the struct, not the pointer field
-         let path = "(*(\(innerCType)*)\(refResult).ptr)" 
-         let control = "\(refResult).control"
-         return (path, control)
+         // Return the Ref structure itself. 
+         // Caller (e.g. memberPath) will handle unwrapping .ptr if the type is Reference.
+         return (refResult, "\(refResult).control")
 
     case .derefExpression(let inner, let type):
          // Dereferencing a reference type gives us an LValue
