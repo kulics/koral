@@ -37,8 +37,8 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .globalTypeDeclaration(let name, let typeParameters, let parameters, let access, let isCopy, _):
-      print("\(indent)TypeDeclaration \(name) Copy=\(isCopy)")
+    case .globalStructDeclaration(let name, let typeParameters, let parameters, let access, let isCopy, _):
+      print("\(indent)StructDeclaration \(name) Copy=\(isCopy)")
       print("\(indent)  Access: \(access)")
       if !typeParameters.isEmpty {
         print("\(indent)  TypeParameters: \(typeParameters)")
@@ -49,8 +49,8 @@ public func printAST(_ node: ASTNode) {
         print("\(indent)  Access: \(param.access)")
       }
 
-    case .unionDeclaration(let name, let typeParameters, let cases, let access, _):
-      print("\(indent)UnionDeclaration \(name)")
+    case .globalUnionDeclaration(let name, let typeParameters, let cases, let access, let isCopy, _):
+      print("\(indent)UnionDeclaration \(name) Copy=\(isCopy)")
       print("\(indent)  Access: \(access)")
       if !typeParameters.isEmpty {
         print("\(indent)  TypeParameters: \(typeParameters)")

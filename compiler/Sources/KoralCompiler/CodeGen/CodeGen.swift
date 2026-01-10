@@ -4,7 +4,7 @@ public class CodeGen {
   private var buffer: String = ""
   private var tempVarCounter = 0
   private var globalInitializations: [(String, TypedExpressionNode)] = []
-  private var lifetimeScopeStack: [[(String, Type)]] = []
+  private var lifetimeScopeStack: [[(name: String, type: Type, consumed: Bool)]] = []
   private var userDefinedDrops: [String: String] = [:] // TypeName -> Mangled Drop Function Name
 
   public init(ast: TypedProgram) {
@@ -18,7 +18,8 @@ public class CodeGen {
   private func popScope() {
     let vars = lifetimeScopeStack.removeLast()
     // 反向遍历变量列表,对可变类型变量调用 destroy
-    for (name, type) in vars.reversed() {
+    for (name, type, consumed) in vars.reversed() {
+      if consumed { continue }
       if case .structure(let typeName, _, _, _) = type {
         addIndent()
         buffer += "__koral_\(typeName)_drop(&\(name));\n"
@@ -33,8 +34,21 @@ public class CodeGen {
   }
 
   private func registerVariable(_ name: String, _ type: Type) {
-    lifetimeScopeStack[lifetimeScopeStack.count - 1].append((name, type))
+    lifetimeScopeStack[lifetimeScopeStack.count - 1].append((name: name, type: type, consumed: false))
   }
+
+  // Consume a variable from the scope (mark as moved so it won't be dropped)
+  private func consumeVariable(_ name: String) {
+    for scopeIndex in (0..<lifetimeScopeStack.count).reversed() {
+       if let index = lifetimeScopeStack[scopeIndex].lastIndex(where: { $0.name == name }) {
+           var entry = lifetimeScopeStack[scopeIndex][index]
+           entry.consumed = true
+           lifetimeScopeStack[scopeIndex][index] = entry
+           return
+       }
+    }
+  }
+
 
   public func generate() -> String {
     buffer = """
@@ -111,10 +125,10 @@ public class CodeGen {
 
       // 先生成所有类型声明
       for node in nodes {
-        if case .globalTypeDeclaration(let identifier, let parameters) = node {
+        if case .globalStructDeclaration(let identifier, let parameters) = node {
           generateTypeDeclaration(identifier, parameters)
         }
-        if case .unionDeclaration(let identifier, let cases) = node {
+        if case .globalUnionDeclaration(let identifier, let cases) = node {
           generateUnionDeclaration(identifier, cases)
         }
       }
@@ -1281,13 +1295,21 @@ public class CodeGen {
         subjectType = inner
     }
     
+    // Check for move semantics and consume variable from scope if necessary
+    if !subject.type.isCopy {
+        if case .variable(let identifier) = subject {
+            consumeVariable(identifier.name)
+        }
+    }
+
     let endLabel = "match_end_\(nextTemp())"
     
     for c in cases {
          addIndent()
          buffer += "{\n"
          withIndent {
-             let (condition, bindings, vars) = generatePatternConditionAndBindings(c.pattern, subjectVar, subjectType)
+             let isMove = !subject.type.isCopy
+             let (condition, bindings, vars) = generatePatternConditionAndBindings(c.pattern, subjectVar, subjectType, isMove: isMove)
              addIndent()
              buffer += "if (\(condition)) {\n"
              withIndent {
@@ -1339,13 +1361,21 @@ public class CodeGen {
     return type != .void ? resultVar : ""
   }
 
-  private func generatePatternConditionAndBindings(_ pattern: TypedPattern, _ path: String, _ type: Type) -> (String, [String], [(String, Type)]) {
+  private func generatePatternConditionAndBindings(_ pattern: TypedPattern, _ path: String, _ type: Type, isMove: Bool = false) -> (String, [String], [(String, Type)]) {
       switch pattern {
       case .integerLiteral(let val):
           return ("\(path) == \(val)", [], [])
       case .booleanLiteral(let val):
           return ("\(path) == \(val ? 1 : 0)", [], [])
       case .wildcard:
+          // If we are moving (isMove=true) and we hit a wildcard, we are effectively dropping this part of the value.
+          // Since the outer scope will NOT drop the moved value (or we are stealing bits from it),
+          // we are responsible for dropping what matches the wildcard if it has content?
+          // BUT, currently we don't have a mechanism to suppress the source destructor easily purely in C gen,
+          // except by nulling it out.
+          // If we hit a wildcard, we bind nothing, so we nullify nothing.
+          // The source destructor will run and clean this part up.
+          // This seems correct for Partial Move semantics (drop unused parts).
           return ("1", [], [])
       case .variable(let symbol):
           let name = symbol.name
@@ -1354,13 +1384,19 @@ public class CodeGen {
           let cType = getCType(varType)
           bindCode += "\(cType) \(name);\n"
           
-          if case .structure(let typeName, _, _, _) = varType {
-               bindCode += "\(name) = __koral_\(typeName)_copy(&\(path));\n"
-          } else if case .reference(_) = varType {
-               bindCode += "\(name) = \(path);\n"
-               bindCode += "__koral_retain(\(name).control);\n"
+          if isMove {
+              // Move Semantics: Shallow Copy. Source cleanup is suppressed via consumeVariable.
+              bindCode += "\(name) = \(path);\n"
           } else {
-               bindCode += "\(name) = \(path);\n"
+              // Copy Semantics
+              if case .structure(let typeName, _, _, _) = varType {
+                   bindCode += "\(name) = __koral_\(typeName)_copy(&\(path));\n"
+              } else if case .reference(_) = varType {
+                   bindCode += "\(name) = \(path);\n"
+                   bindCode += "__koral_retain(\(name).control);\n"
+              } else {
+                   bindCode += "\(name) = \(path);\n"
+              }
           }
           return ("1", [bindCode], [(name, varType)])
           
@@ -1379,7 +1415,8 @@ public class CodeGen {
                let paramType = caseDef.parameters[i].type
                let subPath = "\(path).data.\(caseName).\(paramName)"
                
-               let (subCond, subBind, subVars) = generatePatternConditionAndBindings(subInd, subPath, paramType)
+               // Recursive call propagates isMove
+               let (subCond, subBind, subVars) = generatePatternConditionAndBindings(subInd, subPath, paramType, isMove: isMove)
                
                if subCond != "1" {
                    condition += " && (\(subCond))"

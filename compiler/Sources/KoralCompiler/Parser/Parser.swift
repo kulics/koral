@@ -98,7 +98,7 @@ public class Parser {
       }
 
       try match(.identifier(name))
-      return try parseTypeDeclaration(name, typeParams: typeParams, access: access, isIntrinsic: isIntrinsic, line: startLine)
+      return try parseStructDeclaration(name, typeParams: typeParams, access: access, isIntrinsic: isIntrinsic, line: startLine)
     } else if currentToken === .givenKeyword {
       if access != .default {
          throw ParserError.unexpectedToken(line: lexer.currentLine, got: "Access modifier on given declaration")
@@ -425,7 +425,7 @@ public class Parser {
   }
     
   // Parse type declaration
-  private func parseTypeDeclaration(_ name: String, typeParams: [(name: String, type: TypeNode?)], access: AccessModifier, isIntrinsic: Bool, line: Int) throws -> GlobalNode {
+  private func parseStructDeclaration(_ name: String, typeParams: [(name: String, type: TypeNode?)], access: AccessModifier, isIntrinsic: Bool, line: Int) throws -> GlobalNode {
     if isIntrinsic {
         if currentToken === .leftParen {
              throw ParserError.unexpectedToken(line: lexer.currentLine, got: "Intrinsic type should not have body")
@@ -470,7 +470,7 @@ public class Parser {
       isCopy = true
     }
 
-    return .globalTypeDeclaration(
+    return .globalStructDeclaration(
       name: name,
       typeParameters: typeParams,
       parameters: parameters,
@@ -512,12 +512,19 @@ public class Parser {
     }
     
     try match(.rightBrace)
+
+    var isCopy = false
+    if case .identifier("Copy") = currentToken {
+      try match(.identifier("Copy"))
+      isCopy = true
+    }
     
-    return .unionDeclaration(
+    return .globalUnionDeclaration(
         name: name,
         typeParameters: typeParams,
         cases: cases,
         access: access,
+        isCopy: isCopy,
         line: line
     )
   }

@@ -1,0 +1,84 @@
+// EXPECT: Start Struct Move
+// EXPECT: Inside Match
+// EXPECT: Drop Resource
+// EXPECT: 1
+// EXPECT: End Struct Move
+// EXPECT: Start Enum Move
+// EXPECT: Inside Match
+// EXPECT: Drop Resource
+// EXPECT: 2
+// EXPECT: End Enum Move
+// EXPECT: Start Ref Copy
+// EXPECT: Inside Match
+// EXPECT: Drop Resource
+// EXPECT: 3
+// EXPECT: After Match
+// EXPECT: Drop Resource
+// EXPECT: 3
+
+type Resource(id Int);
+
+given Resource {
+  __drop(self ref) Void = {
+      print_string("Drop Resource");
+      print_int(self.id);
+  }
+};
+
+// 1. Struct Move Test
+type Wrapper(r Resource);
+
+let test_struct_move() Void = {
+    print_string("Start Struct Move");
+    let w = Wrapper(Resource(1));
+    w match {
+        // Move w to w_moved. w is consumed. w_moved takes ownership.
+        w_moved -> {
+            print_string("Inside Match");
+            // w_moved owns it.
+        } 
+        // w_moved drops here
+    };
+    print_string("End Struct Move");
+};
+
+// 2. Enum Move Test
+type Container {
+    Item(r Resource);
+    Empty();
+};
+
+let test_enum_move() Void = {
+    print_string("Start Enum Move");
+    let c = Container.Item(Resource(2));
+    c match {
+        .Item(r_inner) -> {
+            print_string("Inside Match");
+        }
+        // r_inner drops here
+        .Empty -> {}
+    };
+    print_string("End Enum Move");
+};
+
+// 3. Ref Copy Test
+let test_ref_copy() Void = {
+    print_string("Start Ref Copy");
+    let r = ref Resource(3);
+    
+    r match {
+        x -> {
+             print_string("Inside Match");
+        }
+        // x (Copy) drops here (refs count dec)
+    };
+    
+    print_string("After Match");
+    // r drops here (refs count dec -> 0)
+};
+
+let main() Void = {
+    test_struct_move();
+    test_enum_move();
+    test_ref_copy();
+}

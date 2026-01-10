@@ -67,11 +67,11 @@ public indirect enum TypedGlobalNode {
     parameters: [Symbol],
     body: TypedExpressionNode
   )
-  case globalTypeDeclaration(
+  case globalStructDeclaration(
     identifier: Symbol,
     parameters: [Symbol]
   )
-  case unionDeclaration(identifier: Symbol, cases: [UnionCase])
+  case globalUnionDeclaration(identifier: Symbol, cases: [UnionCase])
   case genericTypeTemplate(name: String)
   case givenDeclaration(type: Type, methods: [TypedMethodDeclaration])
   case genericFunctionTemplate(name: String)

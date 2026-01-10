@@ -42,7 +42,7 @@ public indirect enum GlobalNode {
     access: AccessModifier,
     line: Int
   )
-  case globalTypeDeclaration(
+  case globalStructDeclaration(
     name: String,
     typeParameters: [(name: String, type: TypeNode?)],
     parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier)],
@@ -50,11 +50,12 @@ public indirect enum GlobalNode {
     isCopy: Bool,
     line: Int
   )
-  case unionDeclaration(
+  case globalUnionDeclaration(
     name: String,
     typeParameters: [(name: String, type: TypeNode?)],
     cases: [UnionCaseDeclaration],
     access: AccessModifier,
+    isCopy: Bool,
     line: Int
   )
   case intrinsicTypeDeclaration(
