@@ -29,6 +29,7 @@ public enum CompilerMethodKind {
   case drop
   case at
   case updateAt
+  case equals
 }
 public struct Symbol {
   public let name: String
