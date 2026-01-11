@@ -114,9 +114,120 @@ public class Parser {
         return try parseIntrinsicGivenDeclaration(line: startLine)
       }
       return try parseGivenDeclaration(line: startLine)
+    } else if currentToken === .traitKeyword {
+      if isIntrinsic {
+        throw ParserError.unexpectedToken(line: lexer.currentLine, got: "intrinsic trait not supported")
+      }
+      return try parseTraitDeclaration(access: access, line: startLine)
     } else {
       throw ParserError.unexpectedToken(line: lexer.currentLine, got: currentToken.description)
     }
+  }
+
+  private func parseTraitDeclaration(access: AccessModifier, line: Int) throws -> GlobalNode {
+    try match(.traitKeyword)
+
+    guard case .identifier(let name) = currentToken else {
+      throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+    }
+
+    if !isValidTypeName(name) {
+      throw ParserError.invalidTypeName(line: lexer.currentLine, name: name)
+    }
+    try match(.identifier(name))
+
+    // Optional inheritance list: trait Child ParentA ParentB { ... }
+    var superTraits: [String] = []
+    while currentToken !== .leftBrace {
+      guard case .identifier(let parentName) = currentToken else {
+        throw ParserError.unexpectedToken(line: lexer.currentLine, got: currentToken.description)
+      }
+      if !isValidTypeName(parentName) {
+        throw ParserError.invalidTypeName(line: lexer.currentLine, name: parentName)
+      }
+      try match(.identifier(parentName))
+      superTraits.append(parentName)
+    }
+
+    try match(.leftBrace)
+
+    var methods: [TraitMethodSignature] = []
+    while currentToken !== .rightBrace {
+      let methodAccess = try parseAccessModifier()
+      let methodTypeParams = try parseTypeParameters()
+
+      guard case .identifier(let methodName) = currentToken else {
+        throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+      }
+      try match(.identifier(methodName))
+
+      try match(.leftParen)
+      var parameters: [(name: String, mutable: Bool, type: TypeNode)] = []
+
+      if currentToken === .selfKeyword {
+        try match(.selfKeyword)
+        var selfType: TypeNode = .inferredSelf
+        if currentToken === .refKeyword {
+          try match(.refKeyword)
+          selfType = .reference(selfType)
+        }
+        parameters.append((name: "self", mutable: false, type: selfType))
+        if currentToken === .comma {
+          try match(.comma)
+        }
+      }
+
+      while currentToken !== .rightParen {
+        var isMut = false
+        if currentToken === .mutKeyword {
+          isMut = true
+          try match(.mutKeyword)
+        }
+        guard case .identifier(let pname) = currentToken else {
+          throw ParserError.expectedIdentifier(
+            line: lexer.currentLine, got: currentToken.description)
+        }
+        try match(.identifier(pname))
+        let paramType = try parseType()
+        parameters.append((name: pname, mutable: isMut, type: paramType))
+        if currentToken === .comma {
+          try match(.comma)
+        }
+      }
+      try match(.rightParen)
+
+      var returnType: TypeNode = .identifier("Void")
+      if currentToken !== .semicolon {
+        returnType = try parseType()
+      }
+
+      if currentToken === .equal {
+        throw ParserError.unexpectedToken(line: lexer.currentLine, got: "Trait method should not have body")
+      }
+      try match(.semicolon)
+
+      if !methodTypeParams.isEmpty {
+        throw ParserError.unexpectedToken(line: lexer.currentLine, got: "Trait method generics not supported yet")
+      }
+
+      methods.append(
+        TraitMethodSignature(
+          name: methodName,
+          parameters: parameters,
+          returnType: returnType,
+          access: methodAccess
+        )
+      )
+    }
+
+    try match(.rightBrace)
+    return .traitDeclaration(
+      name: name,
+      superTraits: superTraits,
+      methods: methods,
+      access: access,
+      line: line
+    )
   }
 
   private func parseIntrinsicGivenDeclaration(line: Int) throws -> GlobalNode {
@@ -356,8 +467,8 @@ public class Parser {
       name: name, type: type, value: value, mutable: mutable, access: access, line: line)
   }
 
-  private func parseTypeParameters() throws -> [(name: String, type: TypeNode?)] {
-    var parameters: [(name: String, type: TypeNode?)] = []
+  private func parseTypeParameters() throws -> [TypeParameterDecl] {
+    var parameters: [TypeParameterDecl] = []
     if currentToken === .leftBracket {
       try match(.leftBracket)
       while currentToken !== .rightBracket {
@@ -367,12 +478,16 @@ public class Parser {
         }
         try match(.identifier(paramName))
 
-        var constraint: TypeNode? = nil
-        // Consume optional type bound/constraint
+        var constraints: [TypeNode] = []
         if currentToken !== .comma && currentToken !== .rightBracket {
-          constraint = try parseType()
+          constraints.append(try parseTraitConstraint())
+          while currentToken === .andKeyword {
+            try match(.andKeyword)
+            constraints.append(try parseTraitConstraint())
+          }
         }
-        parameters.append((name: paramName, type: constraint))
+
+        parameters.append((name: paramName, constraints: constraints))
 
         if currentToken === .comma {
           try match(.comma)
@@ -383,9 +498,20 @@ public class Parser {
     return parameters
   }
 
+  private func parseTraitConstraint() throws -> TypeNode {
+    guard case .identifier(let name) = currentToken else {
+      throw ParserError.expectedTypeIdentifier(line: lexer.currentLine, got: currentToken.description)
+    }
+    if !isValidTypeName(name) {
+      throw ParserError.invalidTypeName(line: lexer.currentLine, name: name)
+    }
+    try match(.identifier(name))
+    return .identifier(name)
+  }
+
   // Parse global function declaration with optional 'own'/'ref' modifiers for params and return type
   private func globalFunctionDeclaration(
-    name: String, typeParams: [(name: String, type: TypeNode?)], access: AccessModifier,
+    name: String, typeParams: [TypeParameterDecl], access: AccessModifier,
     isIntrinsic: Bool, line: Int
   ) throws -> GlobalNode {
     try match(.leftParen)
@@ -444,7 +570,7 @@ public class Parser {
 
   // Parse type declaration
   private func parseStructDeclaration(
-    _ name: String, typeParams: [(name: String, type: TypeNode?)], access: AccessModifier,
+    _ name: String, typeParams: [TypeParameterDecl], access: AccessModifier,
     isIntrinsic: Bool, line: Int
   ) throws -> GlobalNode {
     if isIntrinsic {
@@ -506,7 +632,7 @@ public class Parser {
 
   // Parse union declaration (sum type)
   private func parseUnionDeclaration(
-    _ name: String, typeParams: [(name: String, type: TypeNode?)], access: AccessModifier, line: Int
+    _ name: String, typeParams: [TypeParameterDecl], access: AccessModifier, line: Int
   ) throws -> GlobalNode {
     try match(.leftBrace)
     var cases: [UnionCaseDeclaration] = []

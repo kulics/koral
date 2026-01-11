@@ -1526,7 +1526,9 @@ public class CodeGen {
         var prelude = ""
         prelude += "static const uint8_t \(bytesVar)[] = { \(byteLiterals) };\n"
         prelude += "\(getCType(type)) \(literalVar) = String_from_utf8_bytes_unchecked((uint8_t*)\(bytesVar), \(utf8Bytes.count));\n"
-        return ([prelude], [(literalVar, type)], "String_equals(\(path), \(literalVar))", [], [])
+        // `String_equals` consumes (drops) both arguments. In match conditions we must pass
+        // copies so we don't consume the subject value or double-drop the prelude literal.
+        return ([prelude], [(literalVar, type)], "String_equals(__koral_String_copy(&\(path)), __koral_String_copy(&\(literalVar)))", [], [])
       case .wildcard:
         return ([], [], "1", [], [])
       case .variable(let symbol):

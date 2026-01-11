@@ -1,9 +1,22 @@
 public class TypeChecker {
+  private struct TraitDeclInfo {
+    let name: String
+    let superTraits: [String]
+    let methods: [TraitMethodSignature]
+    let access: AccessModifier
+    let line: Int
+  }
+
   // Store type information for variables and functions
   private var currentScope: Scope = Scope()
   private let ast: ASTNode
   // TypeName -> MethodName -> MethodSymbol
   private var extensionMethods: [String: [String: Symbol]] = [:]
+
+  private var traits: [String: TraitDeclInfo] = [:]
+
+  // Generic parameter name -> list of trait bounds currently in scope
+  private var genericTraitBounds: [String: [String]] = [:]
 
   // Cache for instantiated types: "TemplateName<Arg1,Arg2>" -> Type
   private var instantiatedTypes: [String: Type] = [:]
@@ -15,9 +28,9 @@ public class TypeChecker {
   private var generatedLayouts: Set<String> = []
   // Generic Template Extensions: TemplateName -> [(TypeParams, Method)]
   private var genericExtensionMethods:
-    [String: [(typeParams: [(name: String, type: TypeNode?)], method: MethodDeclaration)]] = [:]
+    [String: [(typeParams: [TypeParameterDecl], method: MethodDeclaration)]] = [:]
   private var genericIntrinsicExtensionMethods:
-    [String: [(typeParams: [(name: String, type: TypeNode?)], method: IntrinsicMethodDeclaration)]] =
+    [String: [(typeParams: [TypeParameterDecl], method: IntrinsicMethodDeclaration)]] =
       [:]
 
   // Mapping from Layout Name to Template Info (Base Name + Args)
@@ -57,6 +70,224 @@ public class TypeChecker {
       type: type,
       kind: .variable(.Value)
     )
+  }
+
+  private func resolveTraitName(from node: TypeNode) throws -> String {
+    guard case .identifier(let name) = node else {
+      throw SemanticError.invalidOperation(op: "invalid trait bound", type1: String(describing: node), type2: "")
+    }
+    return name
+  }
+
+  private func validateTraitName(_ name: String) throws {
+    if name == "Any" || name == "Copy" {
+      return
+    }
+    if traits[name] == nil {
+      throw SemanticError(.generic("Undefined trait: \(name)"), line: currentLine)
+    }
+  }
+
+  private func flattenedTraitMethods(_ traitName: String) throws -> [String: TraitMethodSignature] {
+    var visited: Set<String> = []
+    return try flattenedTraitMethods(traitName, visited: &visited)
+  }
+
+  private func flattenedTraitMethods(
+    _ traitName: String,
+    visited: inout Set<String>
+  ) throws -> [String: TraitMethodSignature] {
+    if visited.contains(traitName) {
+      return [:]
+    }
+    visited.insert(traitName)
+
+    if traitName == "Any" || traitName == "Copy" {
+      return [:]
+    }
+    guard let decl = traits[traitName] else {
+      throw SemanticError(.generic("Undefined trait: \(traitName)"), line: currentLine)
+    }
+
+    var methods: [String: TraitMethodSignature] = [:]
+    for parent in decl.superTraits {
+      let parentMethods = try flattenedTraitMethods(parent, visited: &visited)
+      for (name, sig) in parentMethods {
+        methods[name] = sig
+      }
+    }
+    for m in decl.methods {
+      methods[m.name] = m
+    }
+    return methods
+  }
+
+  private func recordGenericTraitBounds(_ typeParameters: [TypeParameterDecl]) throws {
+    for param in typeParameters {
+      let bounds = try param.constraints.map { try resolveTraitName(from: $0) }
+      for b in bounds {
+        try validateTraitName(b)
+      }
+      genericTraitBounds[param.name] = bounds
+    }
+  }
+
+  private func expectedFunctionTypeForTraitMethod(
+    _ method: TraitMethodSignature,
+    selfType: Type
+  ) throws -> Type {
+    return try withNewScope {
+      // Bind both `Self` and inferred self placeholder.
+      try currentScope.defineType("Self", type: selfType)
+
+      let params: [Parameter] = try method.parameters.map { param in
+        let t = try resolveTypeNode(param.type)
+        return Parameter(type: t, kind: .byVal)
+      }
+      let ret = try resolveTypeNode(method.returnType)
+      return Type.function(parameters: params, returns: ret)
+    }
+  }
+
+  private func formatTraitMethodSignature(
+    _ method: TraitMethodSignature,
+    selfType: Type
+  ) throws -> String {
+    return try withNewScope {
+      try currentScope.defineType("Self", type: selfType)
+
+      let paramsDesc = try method.parameters.map { param -> String in
+        let resolvedType = try resolveTypeNode(param.type)
+        let mutPrefix = param.mutable ? "mut " : ""
+        return "\(mutPrefix)\(param.name) \(resolvedType)"
+      }.joined(separator: ", ")
+
+      let ret = try resolveTypeNode(method.returnType)
+      return "\(method.name)(\(paramsDesc)) \(ret)"
+    }
+  }
+
+  private func lookupConcreteMethodSymbol(on selfType: Type, name: String) throws -> Symbol? {
+    switch selfType {
+    case .structure(let typeName, _, let isGen, _):
+      if let methods = extensionMethods[typeName], let sym = methods[name] {
+        return sym
+      }
+      if isGen, let info = layoutToTemplateInfo[typeName] {
+        if let extensions = genericExtensionMethods[info.base],
+          let ext = extensions.first(where: { $0.method.name == name })
+        {
+          return try instantiateExtensionMethod(
+            baseType: selfType,
+            structureName: info.base,
+            genericArgs: info.args,
+            methodInfo: ext
+          )
+        }
+      }
+      return nil
+
+    case .union(let typeName, _, let isGen, _):
+      if let methods = extensionMethods[typeName], let sym = methods[name] {
+        return sym
+      }
+      if isGen, let info = layoutToTemplateInfo[typeName] {
+        if let extensions = genericExtensionMethods[info.base],
+          let ext = extensions.first(where: { $0.method.name == name })
+        {
+          return try instantiateExtensionMethod(
+            baseType: selfType,
+            structureName: info.base,
+            genericArgs: info.args,
+            methodInfo: ext
+          )
+        }
+      }
+      return nil
+
+    case .pointer(let element):
+      if let extensions = genericIntrinsicExtensionMethods["Pointer"],
+        let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try instantiateIntrinsicExtensionMethod(
+          baseType: selfType,
+          structureName: "Pointer",
+          genericArgs: [element],
+          methodInfo: ext
+        )
+      }
+      return nil
+
+    default:
+      return nil
+    }
+  }
+
+  private func enforceTraitConformance(
+    _ selfType: Type,
+    traitName: String,
+    context: String? = nil
+  ) throws {
+    if traitName == "Any" {
+      return
+    }
+    if traitName == "Copy" {
+      if !selfType.isCopy {
+        var msg = "Type \(selfType) does not satisfy trait Copy"
+        if let context {
+          msg += " (\(context))"
+        }
+        throw SemanticError(.generic(msg), line: currentLine)
+      }
+      return
+    }
+
+    try validateTraitName(traitName)
+    let required = try flattenedTraitMethods(traitName)
+
+    var missing: [String] = []
+    var mismatched: [String] = []
+
+    for name in required.keys.sorted() {
+      guard let sig = required[name] else { continue }
+      let expectedType = try expectedFunctionTypeForTraitMethod(sig, selfType: selfType)
+      let expectedSig = try formatTraitMethodSignature(sig, selfType: selfType)
+
+      guard let actualSym = try lookupConcreteMethodSymbol(on: selfType, name: sig.name) else {
+        missing.append("missing method \(sig.name): expected \(expectedSig)")
+        continue
+      }
+      if actualSym.type != expectedType {
+        mismatched.append(
+          "method \(sig.name) has type \(actualSym.type), expected \(expectedType) (expected \(expectedSig))"
+        )
+      }
+    }
+
+    if !missing.isEmpty || !mismatched.isEmpty {
+      var msg = "Type \(selfType) does not conform to trait \(traitName)"
+      if let context {
+        msg += " (\(context))"
+      }
+      if !missing.isEmpty {
+        msg += "\n" + missing.joined(separator: "\n")
+      }
+      if !mismatched.isEmpty {
+        msg += "\n" + mismatched.joined(separator: "\n")
+      }
+      throw SemanticError(.generic(msg), line: currentLine)
+    }
+  }
+
+  private func enforceGenericConstraints(typeParameters: [TypeParameterDecl], args: [Type]) throws {
+    guard typeParameters.count == args.count else { return }
+    for (i, param) in typeParameters.enumerated() {
+      for c in param.constraints {
+        let traitName = try resolveTraitName(from: c)
+        let ctx = "checking constraint \(param.name): \(traitName)"
+        try enforceTraitConformance(args[i], traitName: traitName, context: ctx)
+      }
+    }
   }
 
   private func resolveSubscriptUpdateMethod(
@@ -186,6 +417,23 @@ public class TypeChecker {
 
   private func checkGlobalDeclaration(_ decl: GlobalNode) throws -> TypedGlobalNode? {
     switch decl {
+    case .traitDeclaration(let name, let superTraits, let methods, let access, let line):
+      self.currentLine = line
+      if traits[name] != nil {
+        throw SemanticError.duplicateDefinition(name, line: line)
+      }
+      for parent in superTraits {
+        try validateTraitName(parent)
+      }
+      traits[name] = TraitDeclInfo(
+        name: name,
+        superTraits: superTraits,
+        methods: methods,
+        access: access,
+        line: line
+      )
+      return nil
+
     case .globalUnionDeclaration(
       let name, let typeParameters, let cases, let access, let isCopy, let line):
       self.currentLine = line
@@ -282,9 +530,10 @@ public class TypeChecker {
 
         // Perform declaration-site checking
         try withNewScope {
-          for (typeParam, _) in typeParameters {
-            try currentScope.defineType(typeParam, type: .genericParameter(name: typeParam))
+          for param in typeParameters {
+            try currentScope.defineType(param.name, type: .genericParameter(name: param.name))
           }
+          try recordGenericTraitBounds(typeParameters)
 
           let returnType = try resolveTypeNode(returnTypeNode)
           let params = try parameters.map { param -> Symbol in
@@ -349,9 +598,10 @@ public class TypeChecker {
 
       if !typeParameters.isEmpty {
         try withNewScope {
-          for (typeParam, _) in typeParameters {
-            try currentScope.defineType(typeParam, type: .genericParameter(name: typeParam))
+          for param in typeParameters {
+            try currentScope.defineType(param.name, type: .genericParameter(name: param.name))
           }
+          try recordGenericTraitBounds(typeParameters)
           _ = try resolveTypeNode(returnTypeNode)
           _ = try parameters.map { param -> Symbol in
             let paramType = try resolveTypeNode(param.type)
@@ -455,10 +705,9 @@ public class TypeChecker {
 
       for method in methods {
         let (methodType, params, returnType) = try withNewScope {
-          for (typeParam, _) in method.typeParameters {
-            let typeType = Type.structure(
-              name: typeParam, members: [], isGenericInstantiation: false, isCopy: false)
-            try currentScope.defineType(typeParam, type: typeType)
+          for typeParam in method.typeParameters {
+            try currentScope.defineType(
+              typeParam.name, type: .genericParameter(name: typeParam.name))
           }
 
           try currentScope.defineType("Self", type: type)
@@ -519,10 +768,9 @@ public class TypeChecker {
       // Pass 2: typecheck bodies with full method set available.
       for info in methodInfos {
         let typedBody = try withNewScope {
-          for (typeParam, _) in info.method.typeParameters {
-            let typeType = Type.structure(
-              name: typeParam, members: [], isGenericInstantiation: false, isCopy: false)
-            try currentScope.defineType(typeParam, type: typeType)
+          for typeParam in info.method.typeParameters {
+            try currentScope.defineType(
+              typeParam.name, type: .genericParameter(name: typeParam.name))
           }
 
           try currentScope.defineType("Self", type: type)
@@ -1553,6 +1801,27 @@ public class TypeChecker {
           let memberName = path[0]
           var methodSymbol: Symbol?
 
+          // Static trait methods on generic parameters (no `self` parameter)
+          if case .genericParameter(let paramName) = type,
+            let bounds = genericTraitBounds[paramName]
+          {
+            for traitName in bounds {
+              let methods = try flattenedTraitMethods(traitName)
+              if let sig = methods[memberName] {
+                if sig.parameters.first?.name == "self" {
+                  continue
+                }
+                let expectedType = try expectedFunctionTypeForTraitMethod(sig, selfType: type)
+                methodSymbol = Symbol(
+                  name: "__trait_\(traitName)_\(memberName)",
+                  type: expectedType,
+                  kind: .function
+                )
+                break
+              }
+            }
+          }
+
           if case .structure(let typeName, _, _, _) = type {
             if let methods = extensionMethods[typeName], let sym = methods[memberName] {
               methodSymbol = sym
@@ -1713,6 +1982,34 @@ public class TypeChecker {
                     }
                     return .methodReference(base: base, method: methodSym, type: methodSym.type)
                   }
+                }
+              }
+            }
+
+            // Trait-bounded instance methods on generic parameters
+            if case .genericParameter(let paramName) = typeToLookup,
+              let bounds = genericTraitBounds[paramName]
+            {
+              for traitName in bounds {
+                let methods = try flattenedTraitMethods(traitName)
+                if let sig = methods[memberName] {
+                  if sig.parameters.first?.name != "self" {
+                    continue
+                  }
+                  let expectedType = try expectedFunctionTypeForTraitMethod(sig, selfType: typeToLookup)
+                  let placeholder = Symbol(
+                    name: "__trait_\(traitName)_\(memberName)",
+                    type: expectedType,
+                    kind: .function
+                  )
+
+                  let base: TypedExpressionNode
+                  if typedPath.isEmpty {
+                    base = typedBase
+                  } else {
+                    base = .memberPath(source: typedBase, path: typedPath)
+                  }
+                  return .methodReference(base: base, method: placeholder, type: expectedType)
                 }
               }
             }
@@ -2301,6 +2598,9 @@ public class TypeChecker {
   private func resolveTypeNode(_ node: TypeNode) throws -> Type {
     switch node {
     case .identifier(let name):
+      if traits[name] != nil {
+        throw SemanticError.invalidOperation(op: "use trait as type", type1: name, type2: "")
+      }
       guard let t = currentScope.resolveType(name) else {
         throw SemanticError.undefinedType(name)
       }
@@ -2334,6 +2634,8 @@ public class TypeChecker {
         got: "\(args.count)"
       )
     }
+
+    try enforceGenericConstraints(typeParameters: template.typeParameters, args: args)
 
     // Direct Pointer resolution
     if template.name == "Pointer" {
@@ -2443,6 +2745,8 @@ public class TypeChecker {
       throw SemanticError.typeMismatch(
         expected: "\(template.typeParameters.count) generic types", got: "\(args.count)")
     }
+
+    try enforceGenericConstraints(typeParameters: template.typeParameters, args: args)
 
     let key = "\(template.name)<\(args.map { $0.description }.joined(separator: ","))>"
     if let existing = instantiatedTypes[key] {
@@ -2560,6 +2864,8 @@ public class TypeChecker {
       )
     }
 
+    try enforceGenericConstraints(typeParameters: template.typeParameters, args: args)
+
     let key = "\(template.name)<\(args.map { $0.description }.joined(separator: ","))>"
     if let cached = instantiatedFunctions[key] {
       return cached
@@ -2648,7 +2954,7 @@ public class TypeChecker {
     baseType: Type,
     structureName: String,
     genericArgs: [Type],
-    methodInfo: (typeParams: [(name: String, type: TypeNode?)], method: MethodDeclaration)
+    methodInfo: (typeParams: [TypeParameterDecl], method: MethodDeclaration)
   ) throws -> Symbol {
     let (typeParams, method) = methodInfo
 
@@ -2709,7 +3015,7 @@ public class TypeChecker {
     baseType: Type,
     structureName: String,
     genericArgs: [Type],
-    methodInfo: (typeParams: [(name: String, type: TypeNode?)], method: IntrinsicMethodDeclaration)
+    methodInfo: (typeParams: [TypeParameterDecl], method: IntrinsicMethodDeclaration)
   ) throws -> Symbol {
     let (typeParams, method) = methodInfo
 
@@ -2877,8 +3183,12 @@ public class TypeChecker {
 
   private func withNewScope<R>(_ body: () throws -> R) rethrows -> R {
     let previousScope = currentScope
+    let previousTraitBounds = genericTraitBounds
     currentScope = currentScope.createChild()
-    defer { currentScope = previousScope }
+    defer {
+      currentScope = previousScope
+      genericTraitBounds = previousTraitBounds
+    }
     return try body()
   }
 

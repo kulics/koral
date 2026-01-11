@@ -11,12 +11,23 @@ public enum AccessModifier: String {
 public indirect enum ASTNode {
   case program(globalNodes: [GlobalNode])
 }
+
+public typealias TypeParameterDecl = (name: String, constraints: [TypeNode])
+
 public indirect enum TypeNode {
   case identifier(String)
   case reference(TypeNode)
   case generic(base: String, args: [TypeNode])
   case inferredSelf
 }
+
+public struct TraitMethodSignature {
+  public let name: String
+  public let parameters: [(name: String, mutable: Bool, type: TypeNode)]
+  public let returnType: TypeNode
+  public let access: AccessModifier
+}
+
 public struct UnionCaseDeclaration {
   public let name: String
   public let parameters: [(name: String, type: TypeNode)]
@@ -27,7 +38,7 @@ public indirect enum GlobalNode {
     line: Int)
   case globalFunctionDeclaration(
     name: String,
-    typeParameters: [(name: String, type: TypeNode?)],
+    typeParameters: [TypeParameterDecl],
     parameters: [(name: String, mutable: Bool, type: TypeNode)],
     returnType: TypeNode,
     body: ExpressionNode,
@@ -36,7 +47,7 @@ public indirect enum GlobalNode {
   )
   case intrinsicFunctionDeclaration(
     name: String,
-    typeParameters: [(name: String, type: TypeNode?)],
+    typeParameters: [TypeParameterDecl],
     parameters: [(name: String, mutable: Bool, type: TypeNode)],
     returnType: TypeNode,
     access: AccessModifier,
@@ -44,7 +55,7 @@ public indirect enum GlobalNode {
   )
   case globalStructDeclaration(
     name: String,
-    typeParameters: [(name: String, type: TypeNode?)],
+    typeParameters: [TypeParameterDecl],
     parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier)],
     access: AccessModifier,
     isCopy: Bool,
@@ -52,7 +63,7 @@ public indirect enum GlobalNode {
   )
   case globalUnionDeclaration(
     name: String,
-    typeParameters: [(name: String, type: TypeNode?)],
+    typeParameters: [TypeParameterDecl],
     cases: [UnionCaseDeclaration],
     access: AccessModifier,
     isCopy: Bool,
@@ -60,28 +71,38 @@ public indirect enum GlobalNode {
   )
   case intrinsicTypeDeclaration(
     name: String,
-    typeParameters: [(name: String, type: TypeNode?)],
+    typeParameters: [TypeParameterDecl],
     access: AccessModifier,
     line: Int
   )
+
+  // trait Name [SuperTrait ...] { methodSignatures... }
+  case traitDeclaration(
+    name: String,
+    superTraits: [String],
+    methods: [TraitMethodSignature],
+    access: AccessModifier,
+    line: Int
+  )
+
   // given [T] Type { ...methods... }
   case givenDeclaration(
-    typeParams: [(name: String, type: TypeNode?)] = [], type: TypeNode,
+    typeParams: [TypeParameterDecl] = [], type: TypeNode,
     methods: [MethodDeclaration], line: Int)
   case intrinsicGivenDeclaration(
-    typeParams: [(name: String, type: TypeNode?)] = [], type: TypeNode,
+    typeParams: [TypeParameterDecl] = [], type: TypeNode,
     methods: [IntrinsicMethodDeclaration], line: Int)
 }
 public struct IntrinsicMethodDeclaration {
   public let name: String
-  public let typeParameters: [(name: String, type: TypeNode?)]
+  public let typeParameters: [TypeParameterDecl]
   public let parameters: [(name: String, mutable: Bool, type: TypeNode)]
   public let returnType: TypeNode
   public let access: AccessModifier
 
   public init(
     name: String,
-    typeParameters: [(name: String, type: TypeNode?)],
+    typeParameters: [TypeParameterDecl],
     parameters: [(name: String, mutable: Bool, type: TypeNode)],
     returnType: TypeNode,
     access: AccessModifier
@@ -95,7 +116,7 @@ public struct IntrinsicMethodDeclaration {
 }
 public struct MethodDeclaration {
   public let name: String
-  public let typeParameters: [(name: String, type: TypeNode?)]
+  public let typeParameters: [TypeParameterDecl]
   public let parameters: [(name: String, mutable: Bool, type: TypeNode)]
   public let returnType: TypeNode
   public let body: ExpressionNode
@@ -103,7 +124,7 @@ public struct MethodDeclaration {
 
   public init(
     name: String,
-    typeParameters: [(name: String, type: TypeNode?)],
+    typeParameters: [TypeParameterDecl],
     parameters: [(name: String, mutable: Bool, type: TypeNode)],
     returnType: TypeNode,
     body: ExpressionNode,

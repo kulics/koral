@@ -111,6 +111,23 @@ public func printAST(_ node: ASTNode) {
             print("\(indent)  Name: \(method.name)")
         }
       }
+
+    case .traitDeclaration(let name, let superTraits, let methods, let access, _):
+      print("\(indent)TraitDeclaration: \(name)")
+      print("\(indent)  Access: \(access)")
+      if !superTraits.isEmpty {
+        print("\(indent)  SuperTraits: \(superTraits)")
+      }
+      if methods.isEmpty {
+        print("\(indent)  Methods: (none)")
+      } else {
+        print("\(indent)  Methods:")
+        withIndent {
+          for m in methods {
+            print("\(indent)    \(m.name)")
+          }
+        }
+      }
     }
   }
 
