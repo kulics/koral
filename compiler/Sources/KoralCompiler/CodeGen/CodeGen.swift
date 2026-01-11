@@ -336,6 +336,106 @@ public class CodeGen {
     case .variable(let identifier):
       return identifier.name
 
+    case .castExpression(let inner, let type):
+      // Cast is only used for scalar and pointer conversions (Sema enforces legality).
+      let innerResult = generateExpressionSSA(inner)
+      let targetCType = getCType(type)
+
+      if inner.type == type {
+        return innerResult
+      }
+
+      func isFloat(_ t: Type) -> Bool {
+        switch t {
+        case .float32, .float64: return true
+        default: return false
+        }
+      }
+
+      func isSignedInt(_ t: Type) -> Bool {
+        switch t {
+        case .int, .int8, .int16, .int32, .int64: return true
+        default: return false
+        }
+      }
+
+      func isUnsignedInt(_ t: Type) -> Bool {
+        switch t {
+        case .uint, .uint8, .uint16, .uint32, .uint64: return true
+        default: return false
+        }
+      }
+
+      func minMaxMacros(for t: Type) -> (min: String, max: String)? {
+        switch t {
+        case .int8: return ("INT8_MIN", "INT8_MAX")
+        case .int16: return ("INT16_MIN", "INT16_MAX")
+        case .int32: return ("INT32_MIN", "INT32_MAX")
+        case .int64: return ("INT64_MIN", "INT64_MAX")
+        case .int: return ("INTPTR_MIN", "INTPTR_MAX")
+        case .uint8: return ("0", "UINT8_MAX")
+        case .uint16: return ("0", "UINT16_MAX")
+        case .uint32: return ("0", "UINT32_MAX")
+        case .uint64: return ("0", "UINT64_MAX")
+        case .uint: return ("0", "UINTPTR_MAX")
+        default: return nil
+        }
+      }
+
+      // float -> int/uint: runtime range check, overflow panics.
+      if isFloat(inner.type) && (isSignedInt(type) || isUnsignedInt(type)) {
+        guard let (minMacro, maxMacro) = minMaxMacros(for: type) else {
+          fatalError("Unsupported float->int cast target: \(type)")
+        }
+
+        let fVar = nextTemp()
+        addIndent()
+        buffer += "double \(fVar) = (double)\(innerResult);\n"
+
+        addIndent()
+        buffer += "if (!(\(fVar) >= (double)\(minMacro) && \(fVar) <= (double)\(maxMacro))) {\n"
+        withIndent {
+          addIndent()
+          buffer += "fprintf(stderr, \"Panic: float-to-int cast overflow\\n\");\n"
+          addIndent()
+          buffer += "exit(1);\n"
+        }
+        addIndent()
+        buffer += "}\n"
+
+        let result = nextTemp()
+        addIndent()
+        buffer += "\(targetCType) \(result) = (\(targetCType))\(fVar);\n"
+        return result
+      }
+
+      // Pointer <-> Int/UInt casts: prefer uintptr_t/intptr_t intermediates.
+      if case .pointer = type {
+        let result = nextTemp()
+        addIndent()
+        if inner.type == .uint {
+          buffer += "\(targetCType) \(result) = (\(targetCType))(uintptr_t)\(innerResult);\n"
+        } else if inner.type == .int {
+          buffer += "\(targetCType) \(result) = (\(targetCType))(intptr_t)\(innerResult);\n"
+        } else {
+          buffer += "\(targetCType) \(result) = (\(targetCType))\(innerResult);\n"
+        }
+        return result
+      }
+
+      if case .pointer = inner.type {
+        let result = nextTemp()
+        addIndent()
+        buffer += "\(targetCType) \(result) = (\(targetCType))\(innerResult);\n"
+        return result
+      }
+
+      // Default scalar cast.
+      let result = nextTemp()
+      addIndent()
+      buffer += "\(targetCType) \(result) = (\(targetCType))\(innerResult);\n"
+      return result
+
     case .blockExpression(let statements, let finalExpr, _):
       return generateBlockScope(statements, finalExpr: finalExpr)
 

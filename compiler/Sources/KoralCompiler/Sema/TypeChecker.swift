@@ -91,6 +91,63 @@ public class TypeChecker {
     }
   }
 
+  private func isIntegerScalarType(_ type: Type) -> Bool {
+    switch type {
+    case .int, .int8, .int16, .int32, .int64,
+      .uint, .uint8, .uint16, .uint32, .uint64:
+      return true
+    default:
+      return false
+    }
+  }
+
+  private func isSignedIntegerScalarType(_ type: Type) -> Bool {
+    switch type {
+    case .int, .int8, .int16, .int32, .int64:
+      return true
+    default:
+      return false
+    }
+  }
+
+  private func isUnsignedIntegerScalarType(_ type: Type) -> Bool {
+    switch type {
+    case .uint, .uint8, .uint16, .uint32, .uint64:
+      return true
+    default:
+      return false
+    }
+  }
+
+  private func isFloatScalarType(_ type: Type) -> Bool {
+    switch type {
+    case .float32, .float64:
+      return true
+    default:
+      return false
+    }
+  }
+
+  private func isValidExplicitCast(from: Type, to: Type) -> Bool {
+    if from == to { return true }
+
+    // Numeric casts (ints <-> ints/uints/floats and floats <-> ints/uints/floats).
+    if (isIntegerScalarType(from) || isFloatScalarType(from)) && (isIntegerScalarType(to) || isFloatScalarType(to)) {
+      return true
+    }
+
+    // Pointer casts.
+    if case .pointer = from {
+      if case .pointer = to { return true }
+      if to == .int || to == .uint { return true }
+    }
+    if case .pointer = to {
+      if from == .int || from == .uint { return true }
+    }
+
+    return false
+  }
+
   private func withTempIfRValue(
     _ expr: TypedExpressionNode,
     prefix: String,
@@ -1239,6 +1296,22 @@ public class TypeChecker {
   // 新增用于返回带类型的表达式的类型推导函数
   private func inferTypedExpression(_ expr: ExpressionNode) throws -> TypedExpressionNode {
     switch expr {
+    case .castExpression(let typeNode, let innerExpr):
+      let targetType = try resolveTypeNode(typeNode)
+      let typedInner = try inferTypedExpression(innerExpr)
+      checkMove(typedInner)
+
+      if !isValidExplicitCast(from: typedInner.type, to: targetType) {
+        throw SemanticError.invalidOperation(
+          op: "cast",
+          type1: typedInner.type.description,
+          type2: targetType.description
+        )
+      }
+
+      // Cast always produces an rvalue.
+      return .castExpression(expression: typedInner, type: targetType)
+
     case .integerLiteral(let value):
       return .integerLiteral(value: value, type: .int)
 
@@ -1362,6 +1435,7 @@ public class TypeChecker {
           typedLeft = coerceLiteral(typedLeft, to: typedRight.type)
         }
       }
+
       let resultType = try checkArithmeticOp(op, typedLeft.type, typedRight.type)
       return .arithmeticExpression(
         left: typedLeft, op: op, right: typedRight, type: resultType)

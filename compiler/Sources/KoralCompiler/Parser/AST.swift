@@ -187,6 +187,7 @@ public indirect enum ExpressionNode {
   case floatLiteral(Double)
   case stringLiteral(String)
   case booleanLiteral(Bool)
+  case castExpression(type: TypeNode, expression: ExpressionNode)
   case arithmeticExpression(
     left: ExpressionNode, operator: ArithmeticOperator, right: ExpressionNode)
   case comparisonExpression(

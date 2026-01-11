@@ -306,6 +306,11 @@ public class Lexer {
   private var position: String.Index
   private var _line: Int = 1
 
+  public struct State {
+    fileprivate let position: String.Index
+    fileprivate let line: Int
+  }
+
   // Current line number property
   public var currentLine: Int {
     self._line
@@ -314,6 +319,15 @@ public class Lexer {
   public init(input: String) {
     self.input = input
     self.position = input.startIndex
+  }
+
+  public func saveState() -> State {
+    State(position: position, line: _line)
+  }
+
+  public func restoreState(_ state: State) {
+    position = state.position
+    _line = state.line
   }
 
   // Step back one character, fixing line counter if we rewound over a newline
