@@ -22,10 +22,12 @@ public class TypeChecker {
 
   // Mapping from Layout Name to Template Info (Base Name + Args)
   private var layoutToTemplateInfo: [String: (base: String, args: [Type])] = [:]
-  
+
   private var currentLine: Int?
   private var currentFunctionReturnType: Type?
   private var loopDepth: Int = 0
+
+  private var synthesizedTempIndex: Int = 0
 
   public init(ast: ASTNode) {
     self.ast = ast
@@ -43,9 +45,111 @@ public class TypeChecker {
     switch name {
     case "__drop": return .drop
     case "__at": return .at
-    case "__at_mut": return .atMut
+    case "__update_at": return .updateAt
     default: return .normal
     }
+  }
+
+  private func nextSynthSymbol(prefix: String, type: Type) -> Symbol {
+    synthesizedTempIndex += 1
+    return Symbol(
+      name: "__koral_\(prefix)_\(synthesizedTempIndex)",
+      type: type,
+      kind: .variable(.Value)
+    )
+  }
+
+  private func resolveSubscriptUpdateMethod(
+    base: TypedExpressionNode,
+    args: [TypedExpressionNode]
+  ) throws -> (method: Symbol, finalBase: TypedExpressionNode, valueType: Type) {
+    let methodName = "__update_at"
+    let type = base.type
+
+    // Unwrap reference for method lookup
+    let structType: Type
+    if case .reference(let inner) = type { structType = inner } else { structType = type }
+
+    guard case .structure(let typeName, _, _, _) = structType else {
+      throw SemanticError.invalidOperation(op: "subscript", type1: type.description, type2: "")
+    }
+
+    var methodSymbol: Symbol? = nil
+    if let extensions = extensionMethods[typeName], let sym = extensions[methodName] {
+      methodSymbol = sym
+    } else if case .structure(_, _, let isGen, _) = structType, isGen,
+      let info = layoutToTemplateInfo[typeName]
+    {
+      if let extensions = genericExtensionMethods[info.base] {
+        if let ext = extensions.first(where: { $0.method.name == methodName }) {
+          methodSymbol = try instantiateExtensionMethod(
+            baseType: structType,
+            structureName: info.base,
+            genericArgs: info.args,
+            methodInfo: ext
+          )
+        }
+      }
+    }
+
+    guard let method = methodSymbol else {
+      throw SemanticError.undefinedMember(methodName, typeName)
+    }
+    guard case .function(let params, let returns) = method.type else { fatalError() }
+
+    if returns != .void {
+      throw SemanticError.typeMismatch(expected: "Void", got: returns.description)
+    }
+
+    let expectedIndexArgCount = params.count - 2  // excluding self + value
+    if args.count != expectedIndexArgCount {
+      throw SemanticError.invalidArgumentCount(
+        function: methodName, expected: expectedIndexArgCount, got: args.count)
+    }
+
+    // Adjust base for self param (implicit ref/deref rules)
+    var finalBase = base
+    if let firstParam = params.first {
+      if firstParam.type != base.type {
+        if case .reference(let inner) = firstParam.type, inner == base.type {
+          // Implicit Ref for self requires an addressable base
+          if base.valueCategory == .lvalue {
+            finalBase = .referenceExpression(expression: base, type: firstParam.type)
+          } else {
+            throw SemanticError.invalidOperation(
+              op: "implicit ref", type1: base.type.description, type2: "rvalue")
+          }
+        } else if case .reference(let inner) = base.type, inner == firstParam.type {
+          // Implicit deref: only safe for Copy
+          if inner.isCopy {
+            finalBase = .derefExpression(expression: base, type: inner)
+          } else {
+            throw SemanticError.invalidOperation(
+              op: "implicit deref",
+              type1: base.type.description,
+              type2: firstParam.type.description
+            )
+          }
+        } else {
+          throw SemanticError.typeMismatch(
+            expected: firstParam.type.description, got: base.type.description)
+        }
+      }
+    }
+
+    // Check index argument types (exclude last param, which is value)
+    if params.count >= 2 {
+      let indexParams = params.dropFirst().dropLast()
+      for (arg, param) in zip(args, indexParams) {
+        if arg.type != param.type {
+          throw SemanticError.typeMismatch(
+            expected: param.type.description, got: arg.type.description)
+        }
+      }
+    }
+
+    let valueType = params.last!.type
+    return (method: method, finalBase: finalBase, valueType: valueType)
   }
 
   // Changed to return TypedProgram
@@ -55,24 +159,24 @@ public class TypeChecker {
       var typedDeclarations: [TypedGlobalNode] = []
       // Clear any previous state
       extraGlobalNodes.removeAll()
-      
+
       for decl in declarations {
         let startIndex = extraGlobalNodes.count
-        
+
         if let typedDecl = try checkGlobalDeclaration(decl) {
           // Append any dependencies generated during this declaration (e.g. instantiated generics)
           // BEFORE the declaration itself to satisfy C definition order.
           if extraGlobalNodes.count > startIndex {
-              let newDependencies = extraGlobalNodes[startIndex..<extraGlobalNodes.count]
-              typedDeclarations.append(contentsOf: newDependencies)
+            let newDependencies = extraGlobalNodes[startIndex..<extraGlobalNodes.count]
+            typedDeclarations.append(contentsOf: newDependencies)
           }
           typedDeclarations.append(typedDecl)
         } else {
-             // Even if decl is nil (e.g. intrinsic decl), we might have generated dependencies
-             if extraGlobalNodes.count > startIndex {
-                  let newDependencies = extraGlobalNodes[startIndex..<extraGlobalNodes.count]
-                  typedDeclarations.append(contentsOf: newDependencies)
-             }
+          // Even if decl is nil (e.g. intrinsic decl), we might have generated dependencies
+          if extraGlobalNodes.count > startIndex {
+            let newDependencies = extraGlobalNodes[startIndex..<extraGlobalNodes.count]
+            typedDeclarations.append(contentsOf: newDependencies)
+          }
         }
       }
       // Do NOT append extraGlobalNodes again
@@ -82,49 +186,59 @@ public class TypeChecker {
 
   private func checkGlobalDeclaration(_ decl: GlobalNode) throws -> TypedGlobalNode? {
     switch decl {
-    case .globalUnionDeclaration(let name, let typeParameters, let cases, let access, let isCopy, let line):
+    case .globalUnionDeclaration(
+      let name, let typeParameters, let cases, let access, let isCopy, let line):
       self.currentLine = line
       if currentScope.hasTypeDefinition(name) {
-          throw SemanticError.duplicateDefinition(name, line: line)
+        throw SemanticError.duplicateDefinition(name, line: line)
       }
 
       if !typeParameters.isEmpty {
-          let template = GenericUnionTemplate(name: name, typeParameters: typeParameters, cases: cases, access: access, isCopy: isCopy)
-          currentScope.defineGenericUnionTemplate(name, template: template)
-          return .genericTypeTemplate(name: name)
+        let template = GenericUnionTemplate(
+          name: name, typeParameters: typeParameters, cases: cases, access: access, isCopy: isCopy)
+        currentScope.defineGenericUnionTemplate(name, template: template)
+        return .genericTypeTemplate(name: name)
       }
 
       // Placeholder for recursion
-      let placeholder = Type.union(name: name, cases: [], isGenericInstantiation: false, isCopy: isCopy)
+      let placeholder = Type.union(
+        name: name, cases: [], isGenericInstantiation: false, isCopy: isCopy)
       try currentScope.defineType(name, type: placeholder, line: line)
 
       var unionCases: [UnionCase] = []
       for c in cases {
-          var params: [(name: String, type: Type)] = []
-          for p in c.parameters {
-              let resolved = try resolveTypeNode(p.type)
-              if resolved == placeholder {
-                   throw SemanticError.invalidOperation(op: "Direct recursion in union \(name) not allowed (use ref)", type1: p.name, type2: "")
-              }
-              params.append((name: p.name, type: resolved))
+        var params: [(name: String, type: Type)] = []
+        for p in c.parameters {
+          let resolved = try resolveTypeNode(p.type)
+          if resolved == placeholder {
+            throw SemanticError.invalidOperation(
+              op: "Direct recursion in union \(name) not allowed (use ref)", type1: p.name,
+              type2: "")
           }
-          unionCases.append(UnionCase(name: c.name, parameters: params))
+          params.append((name: p.name, type: resolved))
+        }
+        unionCases.append(UnionCase(name: c.name, parameters: params))
       }
 
       if isCopy {
-          for c in unionCases {
-              for param in c.parameters {
-                  if !param.type.isCopy {
-                      throw SemanticError.invalidOperation(op: "Copy union \(name) cannot contain non-Copy field \(param.name) of type \(param.type)", type1: "", type2: "")
-                  }
-              }
+        for c in unionCases {
+          for param in c.parameters {
+            if !param.type.isCopy {
+              throw SemanticError.invalidOperation(
+                op:
+                  "Copy union \(name) cannot contain non-Copy field \(param.name) of type \(param.type)",
+                type1: "", type2: "")
+            }
           }
+        }
       }
 
-      let type = Type.union(name: name, cases: unionCases, isGenericInstantiation: false, isCopy: isCopy)
+      let type = Type.union(
+        name: name, cases: unionCases, isGenericInstantiation: false, isCopy: isCopy)
       // Replace placeholder with final type
       currentScope.overwriteType(name, type: type)
-      return .globalUnionDeclaration(identifier: Symbol(name: name, type: type, kind: .type), cases: unionCases)
+      return .globalUnionDeclaration(
+        identifier: Symbol(name: name, type: type, kind: .type), cases: unionCases)
 
     case .globalVariableDeclaration(let name, let typeNode, let value, let isMut, _, let line):
       self.currentLine = line
@@ -146,7 +260,8 @@ public class TypeChecker {
       )
 
     case .globalFunctionDeclaration(
-      let name, let typeParameters, let parameters, let returnTypeNode, let body, let access, let line):
+      let name, let typeParameters, let parameters, let returnTypeNode, let body, let access,
+      let line):
       self.currentLine = line
       if currentScope.hasFunctionDefinition(name) {
         throw SemanticError.duplicateDefinition(name, line: line)
@@ -155,12 +270,13 @@ public class TypeChecker {
       if !typeParameters.isEmpty {
         // Define placeholder template for recursion
         let placeholderTemplate = GenericFunctionTemplate(
-            name: name,
-            typeParameters: typeParameters,
-            parameters: parameters,
-            returnType: returnTypeNode,
-            body: ExpressionNode.call(callee: .identifier("panic"), arguments: [.stringLiteral("recursion")]),
-            access: access
+          name: name,
+          typeParameters: typeParameters,
+          parameters: parameters,
+          returnType: returnTypeNode,
+          body: ExpressionNode.call(
+            callee: .identifier("panic"), arguments: [.stringLiteral("recursion")]),
+          access: access
         )
         currentScope.defineGenericFunctionTemplate(name, template: placeholderTemplate)
 
@@ -197,24 +313,24 @@ public class TypeChecker {
       // Pre-calculate function type to allow recursion
       let returnType = try resolveTypeNode(returnTypeNode)
       let params = try parameters.map { param -> Symbol in
-          let paramType = try resolveTypeNode(param.type)
-          return Symbol(
-              name: param.name, type: paramType,
-              kind: .variable(param.mutable ? .MutableValue : .Value))
+        let paramType = try resolveTypeNode(param.type)
+        return Symbol(
+          name: param.name, type: paramType,
+          kind: .variable(param.mutable ? .MutableValue : .Value))
       }
-      
+
       let functionType = Type.function(
-          parameters: params.map {
-              Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind))
-          },
-          returns: returnType
+        parameters: params.map {
+          Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind))
+        },
+        returns: returnType
       )
-      
+
       // Define placeholder for recursion
       currentScope.define(name, functionType, mutable: false)
 
       let (typedBody, _) = try checkFunctionBody(params, returnType, body)
-      
+
       return .globalFunction(
         identifier: Symbol(name: name, type: functionType, kind: .function),
         parameters: params,
@@ -311,11 +427,12 @@ public class TypeChecker {
       let type = try resolveTypeNode(typeNode)
       let typeName: String
       if case .structure(let name, _, _, _) = type {
-          typeName = name
+        typeName = name
       } else if case .union(let name, _, _, _) = type {
-          typeName = name
+        typeName = name
       } else {
-        throw SemanticError.invalidOperation(op: "given extends only struct or union", type1: type.description, type2: "")
+        throw SemanticError.invalidOperation(
+          op: "given extends only struct or union", type1: type.description, type2: "")
       }
 
       var typedMethods: [TypedMethodDeclaration] = []
@@ -358,15 +475,19 @@ public class TypeChecker {
           // Validate __drop signature
           if method.name == "__drop" {
             if params.count != 1 || params[0].name != "self" {
-              throw SemanticError.invalidOperation(op: "__drop must have exactly one parameter 'self'", type1: "", type2: "")
+              throw SemanticError.invalidOperation(
+                op: "__drop must have exactly one parameter 'self'", type1: "", type2: "")
             }
             if case .reference(_) = params[0].type {
               // OK
             } else {
-              throw SemanticError.invalidOperation(op: "__drop 'self' parameter must be a reference", type1: params[0].type.description, type2: "")
+              throw SemanticError.invalidOperation(
+                op: "__drop 'self' parameter must be a reference",
+                type1: params[0].type.description, type2: "")
             }
             if returnType != .void {
-              throw SemanticError.invalidOperation(op: "__drop must return Void", type1: returnType.description, type2: "")
+              throw SemanticError.invalidOperation(
+                op: "__drop must return Void", type1: returnType.description, type2: "")
             }
           }
 
@@ -390,7 +511,8 @@ public class TypeChecker {
 
         extensionMethods[typeName]![method.name] = methodSymbol
         methodInfos.append(
-          GivenMethodInfo(method: method, symbol: methodSymbol, params: params, returnType: returnType)
+          GivenMethodInfo(
+            method: method, symbol: methodSymbol, params: params, returnType: returnType)
         )
       }
 
@@ -455,11 +577,12 @@ public class TypeChecker {
       let type = try resolveTypeNode(typeNode)
       let typeName: String
       if case .structure(let name, _, _, _) = type {
-          typeName = name
+        typeName = name
       } else if case .union(let name, _, _, _) = type {
-          typeName = name
+        typeName = name
       } else {
-        throw SemanticError.invalidOperation(op: "given extends only struct or union", type1: type.description, type2: "")
+        throw SemanticError.invalidOperation(
+          op: "given extends only struct or union", type1: type.description, type2: "")
       }
 
       var typedMethods: [TypedMethodDeclaration] = []
@@ -489,10 +612,10 @@ public class TypeChecker {
         let mangledName = "\(typeName)_\(method.name)"
         let methodKind = getCompilerMethodKind(method.name)
         let methodSymbol = Symbol(
-            name: mangledName,
-            type: methodType,
-            kind: .function,
-            methodKind: methodKind
+          name: mangledName,
+          type: methodType,
+          kind: .function,
+          methodKind: methodKind
         )
 
         typedMethods.append(
@@ -510,7 +633,8 @@ public class TypeChecker {
 
       return .givenDeclaration(type: type, methods: typedMethods)
 
-    case .globalStructDeclaration(let name, let typeParameters, let parameters, _, let isCopy, let line):
+    case .globalStructDeclaration(
+      let name, let typeParameters, let parameters, _, let isCopy, let line):
       self.currentLine = line
       // Check if type already exists
       if currentScope.hasTypeDefinition(name) {
@@ -525,13 +649,16 @@ public class TypeChecker {
       }
 
       // Placeholder for recursion
-      let placeholder = Type.structure(name: name, members: [], isGenericInstantiation: false, isCopy: isCopy)
+      let placeholder = Type.structure(
+        name: name, members: [], isGenericInstantiation: false, isCopy: isCopy)
       try currentScope.defineType(name, type: placeholder, line: line)
 
       let params = try parameters.map { param -> Symbol in
         let paramType = try resolveTypeNode(param.type)
         if paramType == placeholder {
-           throw SemanticError.invalidOperation(op: "Direct recursion in struct \(name) not allowed (use ref)", type1: param.name, type2: "")
+          throw SemanticError.invalidOperation(
+            op: "Direct recursion in struct \(name) not allowed (use ref)", type1: param.name,
+            type2: "")
         }
         return Symbol(
           name: param.name, type: paramType,
@@ -540,9 +667,12 @@ public class TypeChecker {
 
       if isCopy {
         for param in params {
-            if !param.type.isCopy {
-                throw SemanticError.invalidOperation(op: "Copy type \(name) cannot contain non-Copy field \(param.name) of type \(param.type)", type1: "", type2: "")
-            }
+          if !param.type.isCopy {
+            throw SemanticError.invalidOperation(
+              op:
+                "Copy type \(name) cannot contain non-Copy field \(param.name) of type \(param.type)",
+              type1: "", type2: "")
+          }
         }
       }
 
@@ -575,8 +705,8 @@ public class TypeChecker {
       case "Void": type = .void
       case "Never": type = .never
       case "Pointer":
-         // Pointer is generic, handled below
-         type = .void // Placeholder
+        // Pointer is generic, handled below
+        type = .void  // Placeholder
       default:
         // Default to empty structure for other intrinsics
         type = .structure(name: name, members: [], isGenericInstantiation: false, isCopy: true)
@@ -589,7 +719,8 @@ public class TypeChecker {
       } else {
         // For generic intrinsics (like Pointer<T>), we still need a template definition
         // so the type checker knows it accepts distinct type parameters.
-        let template = GenericStructTemplate(name: name, typeParameters: typeParameters, parameters: [], isCopy: true)
+        let template = GenericStructTemplate(
+          name: name, typeParameters: typeParameters, parameters: [], isCopy: true)
         currentScope.defineGenericStructTemplate(name, template: template)
         return .genericTypeTemplate(name: name)
       }
@@ -625,18 +756,19 @@ public class TypeChecker {
   }
 
   private func convertExprToTypeNode(_ expr: ExpressionNode) throws -> TypeNode {
-     switch expr {
-     case .identifier(let name):
-         return .identifier(name)
-     case .subscriptExpression(let base, let args):
-         if case .identifier(let baseName) = base {
-             let typeArgs = try args.map { try convertExprToTypeNode($0) }
-             return .generic(base: baseName, args: typeArgs)
-         }
-         throw SemanticError.invalidOperation(op: "Complex type expression not supported", type1: "", type2: "")
-     default:
-         throw SemanticError.typeMismatch(expected: "Type Identifier", got: String(describing: expr))
-     }
+    switch expr {
+    case .identifier(let name):
+      return .identifier(name)
+    case .subscriptExpression(let base, let args):
+      if case .identifier(let baseName) = base {
+        let typeArgs = try args.map { try convertExprToTypeNode($0) }
+        return .generic(base: baseName, args: typeArgs)
+      }
+      throw SemanticError.invalidOperation(
+        op: "Complex type expression not supported", type1: "", type2: "")
+    default:
+      throw SemanticError.typeMismatch(expected: "Type Identifier", got: String(describing: expr))
+    }
   }
 
   // 新增用于返回带类型的表达式的类型推导函数
@@ -655,44 +787,45 @@ public class TypeChecker {
       return .booleanLiteral(value: value, type: .bool)
 
     case .matchExpression(let subject, let cases, _):
-        let typedSubject = try inferTypedExpression(subject)
-        // Auto-deref subject type for pattern matching
-        var subjectType = typedSubject.type
-        if case .reference(let inner) = subjectType {
-            subjectType = inner
-        }
-        
-        // Check Move Semantics
-        if !typedSubject.type.isCopy {
-            checkMove(typedSubject)
-        }
-        
-        var typedCases: [TypedMatchCase] = []
-        var resultType: Type?
-        
-        for c in cases {
-            try withNewScope {
-              let (pattern, vars) = try checkPattern(c.pattern, subjectType: subjectType)
-              for (name, mut, type) in vars {
-                currentScope.define(name, type, mutable: mut)
+      let typedSubject = try inferTypedExpression(subject)
+      // Auto-deref subject type for pattern matching
+      var subjectType = typedSubject.type
+      if case .reference(let inner) = subjectType {
+        subjectType = inner
+      }
+
+      // Check Move Semantics
+      if !typedSubject.type.isCopy {
+        checkMove(typedSubject)
+      }
+
+      var typedCases: [TypedMatchCase] = []
+      var resultType: Type?
+
+      for c in cases {
+        try withNewScope {
+          let (pattern, vars) = try checkPattern(c.pattern, subjectType: subjectType)
+          for (name, mut, type) in vars {
+            currentScope.define(name, type, mutable: mut)
+          }
+          let typedBody = try inferTypedExpression(c.body)
+          if let rt = resultType {
+            if typedBody.type != .never {
+              if rt == .never {
+                // Previous cases were all Never, this is the first concrete type
+                resultType = typedBody.type
+              } else if typedBody.type != rt {
+                throw SemanticError.typeMismatch(
+                  expected: rt.description, got: typedBody.type.description)
               }
-              let typedBody = try inferTypedExpression(c.body)
-              if let rt = resultType {
-                     if typedBody.type != .never {
-                        if rt == .never {
-                             // Previous cases were all Never, this is the first concrete type
-                             resultType = typedBody.type
-                        } else if typedBody.type != rt {
-                             throw SemanticError.typeMismatch(expected: rt.description, got: typedBody.type.description)
-                        }
-                     }
-                } else {
-                    resultType = typedBody.type
-                }
-                typedCases.append(TypedMatchCase(pattern: pattern, body: typedBody))
             }
+          } else {
+            resultType = typedBody.type
+          }
+          typedCases.append(TypedMatchCase(pattern: pattern, body: typedBody))
         }
-        return .matchExpression(subject: typedSubject, cases: typedCases, type: resultType ?? .void)
+      }
+      return .matchExpression(subject: typedSubject, cases: typedCases, type: resultType ?? .void)
 
     case .identifier(let name):
       if currentScope.isMoved(name) {
@@ -706,13 +839,13 @@ public class TypeChecker {
     case .blockExpression(let statements, let finalExpression):
       return try withNewScope {
         var typedStatements: [TypedStatementNode] = []
-        var blockType: Type = .void // Default if no final expression
+        var blockType: Type = .void  // Default if no final expression
         var foundNever = false
-        
+
         for stmt in statements {
           let typedStmt = try checkStatement(stmt)
           typedStatements.append(typedStmt)
-          
+
           switch typedStmt {
           case .expression(let expr):
             if expr.type == .never {
@@ -726,25 +859,25 @@ public class TypeChecker {
             break
           }
         }
-        
+
         if let finalExpr = finalExpression {
           let typedFinalExpr = try inferTypedExpression(finalExpr)
           // If we already found a Never statement, the block is Never regardless of final expr?
           // Actually, if a statement is Never, the final expression is unreachable.
           // For now, let's respect final expression type if reachable, or override if Never.
           if foundNever {
-             // Block is forced to Never
-             blockType = .never
+            // Block is forced to Never
+            blockType = .never
           } else {
-             blockType = typedFinalExpr.type
+            blockType = typedFinalExpr.type
           }
-           return .blockExpression(
+          return .blockExpression(
             statements: typedStatements, finalExpression: typedFinalExpr,
             type: blockType)
         }
-        
+
         if foundNever { blockType = .never }
-        
+
         return .blockExpression(
           statements: typedStatements, finalExpression: nil, type: blockType)
       }
@@ -759,7 +892,8 @@ public class TypeChecker {
           typedRight = coerceLiteral(typedRight, to: typedLeft.type)
         }
         if typedLeft.type != typedRight.type,
-           isIntegerType(typedRight.type) || isFloatType(typedRight.type) {
+          isIntegerType(typedRight.type) || isFloatType(typedRight.type)
+        {
           typedLeft = coerceLiteral(typedLeft, to: typedRight.type)
         }
       }
@@ -777,7 +911,8 @@ public class TypeChecker {
           typedRight = coerceLiteral(typedRight, to: typedLeft.type)
         }
         if typedLeft.type != typedRight.type,
-           isIntegerType(typedRight.type) || isFloatType(typedRight.type) {
+          isIntegerType(typedRight.type) || isFloatType(typedRight.type)
+        {
           typedLeft = coerceLiteral(typedLeft, to: typedRight.type)
         }
       }
@@ -830,21 +965,21 @@ public class TypeChecker {
 
       if let elseExpr = elseBranch {
         let typedElse = try inferTypedExpression(elseExpr)
-        
+
         let resultType: Type
         if typedThen.type == typedElse.type {
-            resultType = typedThen.type
+          resultType = typedThen.type
         } else if typedThen.type == .never {
-             resultType = typedElse.type
+          resultType = typedElse.type
         } else if typedElse.type == .never {
-             resultType = typedThen.type
+          resultType = typedThen.type
         } else {
-             throw SemanticError.typeMismatch(
-                expected: typedThen.type.description,
-                got: typedElse.type.description
-             )
+          throw SemanticError.typeMismatch(
+            expected: typedThen.type.description,
+            got: typedElse.type.description
+          )
         }
-        
+
         return .ifExpression(
           condition: typedCondition, thenBranch: typedThen, elseBranch: typedElse,
           type: resultType)
@@ -911,7 +1046,8 @@ public class TypeChecker {
           if base == "alloc_memory" {
             let resolvedArgs = try args.map { try resolveTypeNode($0) }
             guard resolvedArgs.count == 1 else {
-              throw SemanticError.typeMismatch(expected: "1 generic arg", got: "\(resolvedArgs.count)")
+              throw SemanticError.typeMismatch(
+                expected: "1 generic arg", got: "\(resolvedArgs.count)")
             }
             let T = resolvedArgs[0]
 
@@ -929,38 +1065,53 @@ public class TypeChecker {
           }
 
           if base == "dealloc_memory" {
-             let resolvedArgs = try args.map { try resolveTypeNode($0) }
-             guard resolvedArgs.count == 1 else { throw SemanticError.typeMismatch(expected: "1 generic arg", got: "\(resolvedArgs.count)") }
-             // We don't need T, but we checked args count.
-             
-             guard arguments.count == 1 else { throw SemanticError.invalidArgumentCount(function: base, expected: 1, got: arguments.count) }
-             let ptrExpr = try inferTypedExpression(arguments[0])
-             // Check pointer type? Sema checks this later for normal calls, but here we do it maybe?
-             // Actually, `ptrExpr.type` should match `[T]Pointer`.
-             return .intrinsicCall(.deallocMemory(ptr: ptrExpr))
+            let resolvedArgs = try args.map { try resolveTypeNode($0) }
+            guard resolvedArgs.count == 1 else {
+              throw SemanticError.typeMismatch(
+                expected: "1 generic arg", got: "\(resolvedArgs.count)")
+            }
+            // We don't need T, but we checked args count.
+
+            guard arguments.count == 1 else {
+              throw SemanticError.invalidArgumentCount(
+                function: base, expected: 1, got: arguments.count)
+            }
+            let ptrExpr = try inferTypedExpression(arguments[0])
+            // Check pointer type? Sema checks this later for normal calls, but here we do it maybe?
+            // Actually, `ptrExpr.type` should match `[T]Pointer`.
+            return .intrinsicCall(.deallocMemory(ptr: ptrExpr))
           }
 
           if base == "ref_count" {
-             _ = try args.map { try resolveTypeNode($0) }
-             guard arguments.count == 1 else { throw SemanticError.invalidArgumentCount(function: base, expected: 1, got: arguments.count) }
-             let val = try inferTypedExpression(arguments[0])
-             return .intrinsicCall(.refCount(val: val))
+            _ = try args.map { try resolveTypeNode($0) }
+            guard arguments.count == 1 else {
+              throw SemanticError.invalidArgumentCount(
+                function: base, expected: 1, got: arguments.count)
+            }
+            let val = try inferTypedExpression(arguments[0])
+            return .intrinsicCall(.refCount(val: val))
           }
           if base == "copy_memory" {
-             _ = try args.map { try resolveTypeNode($0) }
-             guard arguments.count == 3 else { throw SemanticError.invalidArgumentCount(function: base, expected: 3, got: arguments.count) }
-             let d = try inferTypedExpression(arguments[0])
-             let s = try inferTypedExpression(arguments[1])
-             let c = try inferTypedExpression(arguments[2])
-             return .intrinsicCall(.copyMemory(dest: d, source: s, count: c))
+            _ = try args.map { try resolveTypeNode($0) }
+            guard arguments.count == 3 else {
+              throw SemanticError.invalidArgumentCount(
+                function: base, expected: 3, got: arguments.count)
+            }
+            let d = try inferTypedExpression(arguments[0])
+            let s = try inferTypedExpression(arguments[1])
+            let c = try inferTypedExpression(arguments[2])
+            return .intrinsicCall(.copyMemory(dest: d, source: s, count: c))
           }
-           if base == "move_memory" {
-             _ = try args.map { try resolveTypeNode($0) }
-             guard arguments.count == 3 else { throw SemanticError.invalidArgumentCount(function: base, expected: 3, got: arguments.count) }
-             let d = try inferTypedExpression(arguments[0])
-             let s = try inferTypedExpression(arguments[1])
-             let c = try inferTypedExpression(arguments[2])
-             return .intrinsicCall(.moveMemory(dest: d, source: s, count: c))
+          if base == "move_memory" {
+            _ = try args.map { try resolveTypeNode($0) }
+            guard arguments.count == 3 else {
+              throw SemanticError.invalidArgumentCount(
+                function: base, expected: 3, got: arguments.count)
+            }
+            let d = try inferTypedExpression(arguments[0])
+            let s = try inferTypedExpression(arguments[1])
+            let c = try inferTypedExpression(arguments[2])
+            return .intrinsicCall(.moveMemory(dest: d, source: s, count: c))
           }
 
           let resolvedArgs = try args.map { try resolveTypeNode($0) }
@@ -1004,40 +1155,43 @@ public class TypeChecker {
         }
       }
 
-      
       // Resolve Callee (Check Union Constructor)
       var preResolvedCallee: TypedExpressionNode? = nil
       do {
-          preResolvedCallee = try inferTypedExpression(callee)
+        preResolvedCallee = try inferTypedExpression(callee)
       } catch is SemanticError {
-          // Fallthrough
-          preResolvedCallee = nil
+        // Fallthrough
+        preResolvedCallee = nil
       }
 
       if let resolved = preResolvedCallee, case .variable(let symbol) = resolved {
-         if case .function(_, let returnType) = symbol.type, case .union(let uName, _, _, _) = returnType {
-             // Check if symbol name is uName.CaseName
-             if symbol.name.starts(with: uName + ".") {
-                  let caseName = String(symbol.name.dropFirst(uName.count + 1))
-                  let params = symbol.type.functionParameters! 
-                  
-                  if arguments.count != params.count {
-                      throw SemanticError.invalidArgumentCount(function: symbol.name, expected: params.count, got: arguments.count)
-                  }
-                  
-                  var typedArgs: [TypedExpressionNode] = []
-                  for (arg, param) in zip(arguments, params) {
-                      let typedArg = try inferTypedExpression(arg)
-                      if typedArg.type != param.type {
-                          throw SemanticError.typeMismatch(expected: param.type.description, got: typedArg.type.description)
-                      }
-                      checkMove(typedArg)
-                      typedArgs.append(typedArg)
-                  }
-                  
-                  return .unionConstruction(type: returnType, caseName: caseName, arguments: typedArgs)
-             }
-         }
+        if case .function(_, let returnType) = symbol.type,
+          case .union(let uName, _, _, _) = returnType
+        {
+          // Check if symbol name is uName.CaseName
+          if symbol.name.starts(with: uName + ".") {
+            let caseName = String(symbol.name.dropFirst(uName.count + 1))
+            let params = symbol.type.functionParameters!
+
+            if arguments.count != params.count {
+              throw SemanticError.invalidArgumentCount(
+                function: symbol.name, expected: params.count, got: arguments.count)
+            }
+
+            var typedArgs: [TypedExpressionNode] = []
+            for (arg, param) in zip(arguments, params) {
+              let typedArg = try inferTypedExpression(arg)
+              if typedArg.type != param.type {
+                throw SemanticError.typeMismatch(
+                  expected: param.type.description, got: typedArg.type.description)
+              }
+              checkMove(typedArg)
+              typedArgs.append(typedArg)
+            }
+
+            return .unionConstruction(type: returnType, caseName: caseName, arguments: typedArgs)
+          }
+        }
       }
 
       // Check if it is a constructor call OR implicit generic function call
@@ -1065,7 +1219,8 @@ public class TypeChecker {
               // type parameters (e.g. `T`, `[T]Pointer`) which are not in the caller scope.
               // Skip literal coercion in that case; we'll infer `T` via unify().
               if case .undefinedType(let name) = error.kind,
-                 template.typeParameters.contains(where: { $0.name == name }) {
+                template.typeParameters.contains(where: { $0.name == name })
+              {
                 // no-op
               } else {
                 throw error
@@ -1155,22 +1310,25 @@ public class TypeChecker {
       // Special handling for intrinsic function calls (alloc_memory, etc.)
       if case .identifier(let name) = callee {
         if let intrinsicNode = try checkIntrinsicCall(name: name, arguments: arguments) {
-            return intrinsicNode
+          return intrinsicNode
         }
       }
 
-        let typedCallee = try inferTypedExpression(callee)
+      let typedCallee = try inferTypedExpression(callee)
 
-        // Secondary guard: if the resolved callee is a special compiler method, block explicit calls
-        if case .variable(let sym) = typedCallee, sym.methodKind != .normal {
-          throw SemanticError.invalidOperation(op: "Explicit call to \(sym.name) is not allowed", type1: "", type2: "")
-        }
+      // Secondary guard: if the resolved callee is a special compiler method, block explicit calls
+      if case .variable(let sym) = typedCallee, sym.methodKind != .normal {
+        throw SemanticError.invalidOperation(
+          op: "Explicit call to \(sym.name) is not allowed", type1: "", type2: "")
+      }
 
       // Method call
       if case .methodReference(let base, let method, let methodType) = typedCallee {
         // Intercept Pointer methods
-        if case .pointer(_) = base.type, let node = try checkIntrinsicPointerMethod(base: base, method: method, args: arguments) {
-             return node
+        if case .pointer(_) = base.type,
+          let node = try checkIntrinsicPointerMethod(base: base, method: method, args: arguments)
+        {
+          return node
         }
 
         if case .function(let params, let returns) = method.type {
@@ -1215,7 +1373,7 @@ public class TypeChecker {
 
           let finalCallee: TypedExpressionNode = .methodReference(
             base: finalBase, method: method, type: methodType)
-          
+
           checkMove(finalBase)
 
           var typedArguments: [TypedExpressionNode] = []
@@ -1334,71 +1492,78 @@ public class TypeChecker {
     case .subscriptExpression(let base, let arguments):
       let typedBase = try inferTypedExpression(base)
       let typedArguments = try arguments.map { try inferTypedExpression($0) }
-      let resolvedSubscript = try resolveSubscript(base: typedBase, args: typedArguments, isMut: false)
-      
-      // Auto-deref: If subscript returns Ref<T>, convert to T via Deref node
+      let resolvedSubscript = try resolveSubscript(base: typedBase, args: typedArguments)
+
+      // Auto-deref: `__at` returns `T ref`, but `x[i]` is a value (`T`) by default.
+      // Member access has a special fast-path that can peel this deref to avoid copying.
       if case .reference(let inner) = resolvedSubscript.type {
-          return .derefExpression(expression: resolvedSubscript, type: inner)
+        return .derefExpression(expression: resolvedSubscript, type: inner)
       }
       return resolvedSubscript
 
     case .memberPath(let baseExpr, let path):
       // 1. Check if baseExpr is a Type (Generic Instantiation) for static method access or Union Constructor
       if case .genericInstantiation(let baseName, let args) = baseExpr {
-         if let template = currentScope.lookupGenericStructTemplate(baseName) {
-            let resolvedArgs = try args.map { try resolveTypeNode($0) }
-            let type = try instantiate(template: template, args: resolvedArgs)
-            
-            if path.count == 1 {
-               let memberName = path[0]
-               if case .structure(let name, _, let isGen, _) = type, isGen, let info = layoutToTemplateInfo[name] {
-                   if let extensions = genericExtensionMethods[info.base] {
-                       if let ext = extensions.first(where: { $0.method.name == memberName }) {
-                           let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
-                           if isStatic {
-                               let methodSym = try instantiateExtensionMethod(baseType: type, structureName: info.base, genericArgs: info.args, methodInfo: ext)
-                               return .variable(identifier: methodSym)
-                           }
-                       }
-                   }
-               }
+        if let template = currentScope.lookupGenericStructTemplate(baseName) {
+          let resolvedArgs = try args.map { try resolveTypeNode($0) }
+          let type = try instantiate(template: template, args: resolvedArgs)
+
+          if path.count == 1 {
+            let memberName = path[0]
+            if case .structure(let name, _, let isGen, _) = type, isGen,
+              let info = layoutToTemplateInfo[name]
+            {
+              if let extensions = genericExtensionMethods[info.base] {
+                if let ext = extensions.first(where: { $0.method.name == memberName }) {
+                  let isStatic =
+                    ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
+                  if isStatic {
+                    let methodSym = try instantiateExtensionMethod(
+                      baseType: type, structureName: info.base, genericArgs: info.args,
+                      methodInfo: ext)
+                    return .variable(identifier: methodSym)
+                  }
+                }
+              }
             }
-         } else if let template = currentScope.lookupGenericUnionTemplate(baseName) {
-             let resolvedArgs = try args.map { try resolveTypeNode($0) }
-             let type = try instantiateUnion(template: template, args: resolvedArgs)
-             
-             if path.count == 1 {
-                 let memberName = path[0]
-                 if case .union(let uName, let cases, _, _) = type {
-                     if let c = cases.first(where: { $0.name == memberName }) {
-                         let symbolName = "\(uName).\(memberName)"
-                         let paramTypes = c.parameters.map { Parameter(type: $0.type, kind: .byVal) }
-                         let constructorType = Type.function(parameters: paramTypes, returns: type)
-                         let symbol = Symbol(name: symbolName, type: constructorType, kind: .variable(.Value))
-                         return .variable(identifier: symbol)
-                     }
-                 }
-             }
-         }
+          }
+        } else if let template = currentScope.lookupGenericUnionTemplate(baseName) {
+          let resolvedArgs = try args.map { try resolveTypeNode($0) }
+          let type = try instantiateUnion(template: template, args: resolvedArgs)
+
+          if path.count == 1 {
+            let memberName = path[0]
+            if case .union(let uName, let cases, _, _) = type {
+              if let c = cases.first(where: { $0.name == memberName }) {
+                let symbolName = "\(uName).\(memberName)"
+                let paramTypes = c.parameters.map { Parameter(type: $0.type, kind: .byVal) }
+                let constructorType = Type.function(parameters: paramTypes, returns: type)
+                let symbol = Symbol(
+                  name: symbolName, type: constructorType, kind: .variable(.Value))
+                return .variable(identifier: symbol)
+              }
+            }
+          }
+        }
       }
-      
+
       // 2. Check if baseExpr is a Type (Identifier) for static method access
       if case .identifier(let name) = baseExpr, let type = currentScope.lookupType(name) {
-           if path.count == 1 {
-               let memberName = path[0]
-               var methodSymbol: Symbol?
-               
-               if case .structure(let typeName, _, _, _) = type {
-                   if let methods = extensionMethods[typeName], let sym = methods[memberName] {
-                        methodSymbol = sym
-                   }
-               }
-               
-               if let method = methodSymbol {
-                   // Return the function symbol directly (static function reference)
-                   return .variable(identifier: method)
-               }
-           }
+        if path.count == 1 {
+          let memberName = path[0]
+          var methodSymbol: Symbol?
+
+          if case .structure(let typeName, _, _, _) = type {
+            if let methods = extensionMethods[typeName], let sym = methods[memberName] {
+              methodSymbol = sym
+            }
+          }
+
+          if let method = methodSymbol {
+            // Return the function symbol directly (static function reference)
+            return .variable(identifier: method)
+          }
+        }
       }
 
       // 3. Union Constructor Access via member path (e.g., UnionType.CaseName)
@@ -1406,40 +1571,39 @@ public class TypeChecker {
       // However, we are inside `memberPath`. The parser sees `Option.Some(1)` as Call(MemberPath(Option, Some), [1]).
       // So here we should return a "Function" type that is the constructor.
       if case .identifier(let name) = baseExpr, let type = currentScope.lookupType(name) {
-          if path.count == 1 {
-              let memberName = path[0]
-              if case .union(_, let cases, _, _) = type {
-                  if let c = cases.first(where: { $0.name == memberName }) {
-                      // Found Union Case. Return a synthetic Function Symbol representing the constructor.
-                      let paramTypes = c.parameters.map { Parameter(type: $0.type, kind: .byVal) }
-                      let funcType = Type.function(parameters: paramTypes, returns: type)
-                      let symbol = Symbol(name: "\(name).\(memberName)", type: funcType, kind: .function)
-                      // We abuse .variable node to transport this symbol up to the Call handler?
-                      // Or creating a specialized Node?
-                      // If we return .variable(symbol), the Call handler will see a function variable and try to "call" it.
-                      // That works for normal functions. For Union constructor, we need to distinguish it in `checkCall` to emit `unionConstruction`.
-                      
-                      // We can mark the symbol name specially or check effectively later.
-                      // Better: Create a distinct SymbolKind for Constructor? Or check if Symbol name matches Union.Case.
-                      
-                      // Actually, let's keep it simple. If we return a Variable(Function), checkCall will try to invoke it.
-                      // But `checkCall` logic usually handles `variable` node.
-                      return .variable(identifier: symbol)
-                  }
-              }
+        if path.count == 1 {
+          let memberName = path[0]
+          if case .union(_, let cases, _, _) = type {
+            if let c = cases.first(where: { $0.name == memberName }) {
+              // Found Union Case. Return a synthetic Function Symbol representing the constructor.
+              let paramTypes = c.parameters.map { Parameter(type: $0.type, kind: .byVal) }
+              let funcType = Type.function(parameters: paramTypes, returns: type)
+              let symbol = Symbol(name: "\(name).\(memberName)", type: funcType, kind: .function)
+              // We abuse .variable node to transport this symbol up to the Call handler?
+              // Or creating a specialized Node?
+              // If we return .variable(symbol), the Call handler will see a function variable and try to "call" it.
+              // That works for normal functions. For Union constructor, we need to distinguish it in `checkCall` to emit `unionConstruction`.
+
+              // We can mark the symbol name specially or check effectively later.
+              // Better: Create a distinct SymbolKind for Constructor? Or check if Symbol name matches Union.Case.
+
+              // Actually, let's keep it simple. If we return a Variable(Function), checkCall will try to invoke it.
+              // But `checkCall` logic usually handles `variable` node.
+              return .variable(identifier: symbol)
+            }
           }
+        }
       }
 
-      
       // infer base
       let inferredBase = try inferTypedExpression(baseExpr)
 
       // access member optimization: peel auto-deref to access ref directly
       let typedBase: TypedExpressionNode
       if case .derefExpression(let inner, _) = inferredBase {
-          typedBase = inner
+        typedBase = inner
       } else {
-          typedBase = inferredBase
+        typedBase = inferredBase
       }
 
       var currentType: Type = {
@@ -1504,9 +1668,12 @@ public class TypeChecker {
             }
 
             var isGenericInstance = false
-            if case .structure(_, _, let isGen, _) = typeToLookup { isGenericInstance = isGen }
-            else if case .union(_, _, let isGen, _) = typeToLookup { isGenericInstance = isGen }
-            
+            if case .structure(_, _, let isGen, _) = typeToLookup {
+              isGenericInstance = isGen
+            } else if case .union(_, _, let isGen, _) = typeToLookup {
+              isGenericInstance = isGen
+            }
+
             if isGenericInstance, let info = layoutToTemplateInfo[typeName] {
 
               if let extensions = genericExtensionMethods[info.base] {
@@ -1566,107 +1733,138 @@ public class TypeChecker {
     }
   }
 
-
-  private func checkIntrinsicCall(name: String, arguments: [ExpressionNode]) throws -> TypedExpressionNode? {
-      switch name {
-      case "alloc_memory":
-         guard arguments.count == 1 else { throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count) }
-         // Handle generics? [T]alloc_memory
-         // The parser doesn't pass generic args here directly in Call expression? 
-         // Wait, explicit generic call .generic(fn, args) is distinct from call?
-         // In AST, Call is (callee, arguments). If callee is .generic(base, args), we catch it in generic instantiation.
-         // But for intrinsic alloc_memory, we might need to know T.
-         // Let's assume Koral's `[Int]alloc_memory(2)` resolves to `alloc_memory` with a generic instance.
-         // If `alloc_memory` is defined as `intrinsic let [T]alloc_memory...`, standard resolution might find it.
-         // But we want to bypass that. 
-         // Strategy: If `callee` is `identifier`, and `currentScope` has `alloc_memory`, it's the generic template.
-         // We need to support `[Int]alloc_memory(...)`. 
-         // If so, `callee` is NOT `identifier`, it is `generic(base, args)`.
-         // `inferTypedExpression` handles `.generic` by instantiating.
-         // We should intercept `generic` too or let it instantiate and then check the name?
-         // If we let it instantiate, we get a function. Then we call it.
-         // So `callee` will be a `TypedExpressionNode`? No, `callee` in `checkIntrinsicCall` is `ExpressionNode` (identifier).
-         return nil // handled in generic inst for now or handled after resolution?
-         
-      // Non-generic intrinsics
-      case "print_string":
-          guard arguments.count == 1 else { throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count) }
-          let msg = try inferTypedExpression(arguments[0])
-          return .intrinsicCall(.printString(message: msg))
-      case "print_int":
-           guard arguments.count == 1 else { throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count) }
-           let val = try inferTypedExpression(arguments[0])
-           return .intrinsicCall(.printInt(value: val))
-      case "print_bool":
-           guard arguments.count == 1 else { throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count) }
-           let val = try inferTypedExpression(arguments[0])
-           return .intrinsicCall(.printBool(value: val))
-      case "panic":
-           guard arguments.count == 1 else { throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count) }
-           let msg = try inferTypedExpression(arguments[0])
-           return .intrinsicCall(.panic(message: msg))
-      case "exit":
-           guard arguments.count == 1 else { throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count) }
-           let code = try inferTypedExpression(arguments[0])
-           if code.type != .int {
-               throw SemanticError.typeMismatch(expected: "Int", got: code.type.description)
-           }
-           return .intrinsicCall(.exit(code: code))
-      case "abort":
-            guard arguments.count == 0 else { throw SemanticError.invalidArgumentCount(function: name, expected: 0, got: arguments.count) }
-            return .intrinsicCall(.abort)
-
-      default: return nil
+  private func checkIntrinsicCall(name: String, arguments: [ExpressionNode]) throws
+    -> TypedExpressionNode?
+  {
+    switch name {
+    case "alloc_memory":
+      guard arguments.count == 1 else {
+        throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
       }
+      // Handle generics? [T]alloc_memory
+      // The parser doesn't pass generic args here directly in Call expression?
+      // Wait, explicit generic call .generic(fn, args) is distinct from call?
+      // In AST, Call is (callee, arguments). If callee is .generic(base, args), we catch it in generic instantiation.
+      // But for intrinsic alloc_memory, we might need to know T.
+      // Let's assume Koral's `[Int]alloc_memory(2)` resolves to `alloc_memory` with a generic instance.
+      // If `alloc_memory` is defined as `intrinsic let [T]alloc_memory...`, standard resolution might find it.
+      // But we want to bypass that.
+      // Strategy: If `callee` is `identifier`, and `currentScope` has `alloc_memory`, it's the generic template.
+      // We need to support `[Int]alloc_memory(...)`.
+      // If so, `callee` is NOT `identifier`, it is `generic(base, args)`.
+      // `inferTypedExpression` handles `.generic` by instantiating.
+      // We should intercept `generic` too or let it instantiate and then check the name?
+      // If we let it instantiate, we get a function. Then we call it.
+      // So `callee` will be a `TypedExpressionNode`? No, `callee` in `checkIntrinsicCall` is `ExpressionNode` (identifier).
+      return nil  // handled in generic inst for now or handled after resolution?
+
+    // Non-generic intrinsics
+    case "print_string":
+      guard arguments.count == 1 else {
+        throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
+      }
+      let msg = try inferTypedExpression(arguments[0])
+      return .intrinsicCall(.printString(message: msg))
+    case "print_int":
+      guard arguments.count == 1 else {
+        throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
+      }
+      let val = try inferTypedExpression(arguments[0])
+      return .intrinsicCall(.printInt(value: val))
+    case "print_bool":
+      guard arguments.count == 1 else {
+        throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
+      }
+      let val = try inferTypedExpression(arguments[0])
+      return .intrinsicCall(.printBool(value: val))
+    case "panic":
+      guard arguments.count == 1 else {
+        throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
+      }
+      let msg = try inferTypedExpression(arguments[0])
+      return .intrinsicCall(.panic(message: msg))
+    case "exit":
+      guard arguments.count == 1 else {
+        throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
+      }
+      let code = try inferTypedExpression(arguments[0])
+      if code.type != .int {
+        throw SemanticError.typeMismatch(expected: "Int", got: code.type.description)
+      }
+      return .intrinsicCall(.exit(code: code))
+    case "abort":
+      guard arguments.count == 0 else {
+        throw SemanticError.invalidArgumentCount(function: name, expected: 0, got: arguments.count)
+      }
+      return .intrinsicCall(.abort)
+
+    default: return nil
+    }
   }
 
-  private func checkIntrinsicPointerMethod(base: TypedExpressionNode, method: Symbol, args: [ExpressionNode]) throws -> TypedExpressionNode? {
-      // method.name is mangled (e.g. Pointer_I_init). Extract the method name.
-      var name = method.name
-      if name.hasPrefix("Pointer_") {
-         if let idx = name.lastIndex(of: "_") {
-             name = String(name[name.index(after: idx)...])
-         }
+  private func checkIntrinsicPointerMethod(
+    base: TypedExpressionNode, method: Symbol, args: [ExpressionNode]
+  ) throws -> TypedExpressionNode? {
+    // method.name is mangled (e.g. Pointer_I_init). Extract the method name.
+    var name = method.name
+    if name.hasPrefix("Pointer_") {
+      if let idx = name.lastIndex(of: "_") {
+        name = String(name[name.index(after: idx)...])
       }
-      
-      guard case .pointer(let elementType) = base.type else { return nil }
+    }
 
-      switch name {
-      case "init":
-           guard args.count == 1 else { throw SemanticError.invalidArgumentCount(function: "init", expected: 1, got: args.count) }
-           var val = try inferTypedExpression(args[0])
-           val = coerceLiteral(val, to: elementType)
-           if val.type != elementType {
-               throw SemanticError.typeMismatch(expected: elementType.description, got: val.type.description)
-           }
-           return .intrinsicCall(.ptrInit(ptr: base, val: val))
-      case "deinit":
-           guard args.count == 0 else { throw SemanticError.invalidArgumentCount(function: "deinit", expected: 0, got: args.count) }
-           return .intrinsicCall(.ptrDeinit(ptr: base))
-      case "peek":
-           guard args.count == 0 else { throw SemanticError.invalidArgumentCount(function: "peek", expected: 0, got: args.count) }
-           return .intrinsicCall(.ptrPeek(ptr: base))
-      case "offset":
-           guard args.count == 1 else { throw SemanticError.invalidArgumentCount(function: "offset", expected: 1, got: args.count) }
-           let offset = try inferTypedExpression(args[0])
-           if offset.type != .int {
-               throw SemanticError.typeMismatch(expected: "Int", got: offset.type.description)
-           }
-           return .intrinsicCall(.ptrOffset(ptr: base, offset: offset))
-      case "take":
-           guard args.count == 0 else { throw SemanticError.invalidArgumentCount(function: "take", expected: 0, got: args.count) }
-           return .intrinsicCall(.ptrTake(ptr: base))
-      case "replace":
-           guard args.count == 1 else { throw SemanticError.invalidArgumentCount(function: "replace", expected: 1, got: args.count) }
-         var val = try inferTypedExpression(args[0])
-         val = coerceLiteral(val, to: elementType)
-         if val.type != elementType {
-               throw SemanticError.typeMismatch(expected: elementType.description, got: val.type.description)
-           }
-           return .intrinsicCall(.ptrReplace(ptr: base, val: val))
-      default:
-           return nil
+    guard case .pointer(let elementType) = base.type else { return nil }
+
+    switch name {
+    case "init":
+      guard args.count == 1 else {
+        throw SemanticError.invalidArgumentCount(function: "init", expected: 1, got: args.count)
       }
+      var val = try inferTypedExpression(args[0])
+      val = coerceLiteral(val, to: elementType)
+      if val.type != elementType {
+        throw SemanticError.typeMismatch(
+          expected: elementType.description, got: val.type.description)
+      }
+      return .intrinsicCall(.ptrInit(ptr: base, val: val))
+    case "deinit":
+      guard args.count == 0 else {
+        throw SemanticError.invalidArgumentCount(function: "deinit", expected: 0, got: args.count)
+      }
+      return .intrinsicCall(.ptrDeinit(ptr: base))
+    case "peek":
+      guard args.count == 0 else {
+        throw SemanticError.invalidArgumentCount(function: "peek", expected: 0, got: args.count)
+      }
+      return .intrinsicCall(.ptrPeek(ptr: base))
+    case "offset":
+      guard args.count == 1 else {
+        throw SemanticError.invalidArgumentCount(function: "offset", expected: 1, got: args.count)
+      }
+      let offset = try inferTypedExpression(args[0])
+      if offset.type != .int {
+        throw SemanticError.typeMismatch(expected: "Int", got: offset.type.description)
+      }
+      return .intrinsicCall(.ptrOffset(ptr: base, offset: offset))
+    case "take":
+      guard args.count == 0 else {
+        throw SemanticError.invalidArgumentCount(function: "take", expected: 0, got: args.count)
+      }
+      return .intrinsicCall(.ptrTake(ptr: base))
+    case "replace":
+      guard args.count == 1 else {
+        throw SemanticError.invalidArgumentCount(function: "replace", expected: 1, got: args.count)
+      }
+      var val = try inferTypedExpression(args[0])
+      val = coerceLiteral(val, to: elementType)
+      if val.type != elementType {
+        throw SemanticError.typeMismatch(
+          expected: elementType.description, got: val.type.description)
+      }
+      return .intrinsicCall(.ptrReplace(ptr: base, val: val))
+    default:
+      return nil
+    }
   }
 
   // 新增用于返回带类型的语句的检查函数
@@ -1674,10 +1872,10 @@ public class TypeChecker {
     do {
       return try checkStatementInternal(stmt)
     } catch let e as SemanticError {
-       if e.line == nil && self.currentLine != nil {
-           throw SemanticError(e.kind, line: self.currentLine)
-       }
-       throw e
+      if e.line == nil && self.currentLine != nil {
+        throw SemanticError(e.kind, line: self.currentLine)
+      }
+      throw e
     }
   }
 
@@ -1687,7 +1885,7 @@ public class TypeChecker {
       self.currentLine = line
       var typedValue = try inferTypedExpression(value)
       let type: Type
-      
+
       if let typeNode = typeNode {
         type = try resolveTypeNode(typeNode)
         typedValue = coerceLiteral(typedValue, to: type)
@@ -1710,23 +1908,159 @@ public class TypeChecker {
 
     case .assignment(let target, let value, let line):
       self.currentLine = line
-        let typedTarget = try resolveLValue(target)
+      // Lower `x[i] = v` into a call to `x.__update_at(i, v)`.
+      if case .subscriptExpression(let baseExpr, let argExprs) = target {
+        let typedBase = try inferTypedExpression(baseExpr)
+        let typedArgs = try argExprs.map { try inferTypedExpression($0) }
+
+        // Resolve expected value type from `__update_at`.
+        let (_, _, expectedValueType) = try resolveSubscriptUpdateMethod(
+          base: typedBase, args: typedArgs)
+
+        // Evaluate base (by reference), args, rhs once.
+        if typedBase.valueCategory != .lvalue {
+          throw SemanticError.invalidOperation(
+            op: "implicit ref", type1: typedBase.type.description, type2: "rvalue")
+        }
+        let baseRefType: Type = .reference(inner: typedBase.type)
+        let baseRefExpr: TypedExpressionNode = .referenceExpression(
+          expression: typedBase, type: baseRefType)
+        let baseSym = nextSynthSymbol(prefix: "sub_base", type: baseRefType)
+        var stmts: [TypedStatementNode] = [
+          .variableDeclaration(identifier: baseSym, value: baseRefExpr, mutable: false)
+        ]
+
+        var argSyms: [Symbol] = []
+        for a in typedArgs {
+          let s = nextSynthSymbol(prefix: "sub_idx", type: a.type)
+          argSyms.append(s)
+          stmts.append(.variableDeclaration(identifier: s, value: a, mutable: false))
+        }
+
         var typedValue = try inferTypedExpression(value)
-        typedValue = coerceLiteral(typedValue, to: typedTarget.type)
-      
-        if typedValue.type != .never && typedTarget.type != typedValue.type {
-          throw SemanticError.typeMismatch(expected: typedTarget.type.description, got: typedValue.type.description)
+        typedValue = coerceLiteral(typedValue, to: expectedValueType)
+        if typedValue.type != .never && typedValue.type != expectedValueType {
+          throw SemanticError.typeMismatch(
+            expected: expectedValueType.description, got: typedValue.type.description)
+        }
+        checkMove(typedValue)
+        let valSym = nextSynthSymbol(prefix: "sub_val", type: typedValue.type)
+        stmts.append(.variableDeclaration(identifier: valSym, value: typedValue, mutable: false))
+
+        let baseVar: TypedExpressionNode = .variable(identifier: baseSym)
+        let argVars: [TypedExpressionNode] = argSyms.map { .variable(identifier: $0) }
+        let (updateMethod, finalBase, _) = try resolveSubscriptUpdateMethod(
+          base: baseVar, args: argVars)
+
+        let callee: TypedExpressionNode = .methodReference(
+          base: finalBase,
+          method: updateMethod,
+          type: updateMethod.type
+        )
+        let callExpr: TypedExpressionNode = .call(
+          callee: callee,
+          arguments: argVars + [.variable(identifier: valSym)],
+          type: .void
+        )
+        stmts.append(.expression(callExpr))
+
+        return .expression(.blockExpression(statements: stmts, finalExpression: nil, type: .void))
       }
-      
+
+      let typedTarget = try resolveLValue(target)
+      var typedValue = try inferTypedExpression(value)
+      typedValue = coerceLiteral(typedValue, to: typedTarget.type)
+
+      if typedValue.type != .never && typedTarget.type != typedValue.type {
+        throw SemanticError.typeMismatch(
+          expected: typedTarget.type.description, got: typedValue.type.description)
+      }
+
       checkMove(typedValue)
-      
       return .assignment(target: typedTarget, value: typedValue)
-      
+
     case .compoundAssignment(let target, let op, let value, let line):
       self.currentLine = line
+      // Lower `x[i] op= v` into a call to `x.__update_at(i, deref x[i] op v)`.
+      if case .subscriptExpression(let baseExpr, let argExprs) = target {
+        let typedBase = try inferTypedExpression(baseExpr)
+        let typedArgs = try argExprs.map { try inferTypedExpression($0) }
+
+        // Evaluate base (by reference), args once.
+        if typedBase.valueCategory != .lvalue {
+          throw SemanticError.invalidOperation(
+            op: "implicit ref", type1: typedBase.type.description, type2: "rvalue")
+        }
+        let baseRefType: Type = .reference(inner: typedBase.type)
+        let baseRefExpr: TypedExpressionNode = .referenceExpression(
+          expression: typedBase, type: baseRefType)
+        let baseSym = nextSynthSymbol(prefix: "sub_base", type: baseRefType)
+        var stmts: [TypedStatementNode] = [
+          .variableDeclaration(identifier: baseSym, value: baseRefExpr, mutable: false)
+        ]
+
+        var argSyms: [Symbol] = []
+        for a in typedArgs {
+          let s = nextSynthSymbol(prefix: "sub_idx", type: a.type)
+          argSyms.append(s)
+          stmts.append(.variableDeclaration(identifier: s, value: a, mutable: false))
+        }
+
+        let baseVar: TypedExpressionNode = .variable(identifier: baseSym)
+        let argVars: [TypedExpressionNode] = argSyms.map { .variable(identifier: $0) }
+        let readRef = try resolveSubscript(base: baseVar, args: argVars)
+
+        let elementType: Type
+        let oldValueExpr: TypedExpressionNode
+        if case .reference(let inner) = readRef.type {
+          elementType = inner
+          oldValueExpr = .derefExpression(expression: readRef, type: inner)
+        } else {
+          elementType = readRef.type
+          oldValueExpr = readRef
+        }
+        let oldSym = nextSynthSymbol(prefix: "sub_old", type: elementType)
+        stmts.append(.variableDeclaration(identifier: oldSym, value: oldValueExpr, mutable: false))
+
+        var typedRhs = try inferTypedExpression(value)
+        typedRhs = coerceLiteral(typedRhs, to: elementType)
+        if typedRhs.type != .never && typedRhs.type != elementType {
+          throw SemanticError.typeMismatch(
+            expected: elementType.description, got: typedRhs.type.description)
+        }
+
+        let _ = try checkArithmeticOp(compoundOpToArithmeticOp(op), elementType, typedRhs.type)
+        checkMove(typedRhs)
+        let rhsSym = nextSynthSymbol(prefix: "sub_rhs", type: typedRhs.type)
+        stmts.append(.variableDeclaration(identifier: rhsSym, value: typedRhs, mutable: false))
+
+        let newValueExpr: TypedExpressionNode = .arithmeticExpression(
+          left: .variable(identifier: oldSym),
+          op: compoundOpToArithmeticOp(op),
+          right: .variable(identifier: rhsSym),
+          type: elementType
+        )
+
+        let (updateMethod, finalBase, expectedValueType) = try resolveSubscriptUpdateMethod(
+          base: baseVar, args: argVars)
+        if expectedValueType != elementType {
+          throw SemanticError.typeMismatch(
+            expected: expectedValueType.description, got: elementType.description)
+        }
+        let callee: TypedExpressionNode = .methodReference(
+          base: finalBase, method: updateMethod, type: updateMethod.type)
+        let callExpr: TypedExpressionNode = .call(
+          callee: callee,
+          arguments: argVars + [newValueExpr],
+          type: .void
+        )
+        stmts.append(.expression(callExpr))
+
+        return .expression(.blockExpression(statements: stmts, finalExpression: nil, type: .void))
+      }
+
       let typedTarget = try resolveLValue(target)
       let typedValue = coerceLiteral(try inferTypedExpression(value), to: typedTarget.type)
-      // Check arithmetic op validity?
       let _ = try checkArithmeticOp(compoundOpToArithmeticOp(op), typedTarget.type, typedValue.type)
       checkMove(typedValue)
       return .compoundAssignment(target: typedTarget, operator: op, value: typedValue)
@@ -1749,7 +2083,8 @@ public class TypeChecker {
         var typedValue = try inferTypedExpression(value)
         typedValue = coerceLiteral(typedValue, to: returnType)
         if typedValue.type != .never && typedValue.type != returnType {
-          throw SemanticError.typeMismatch(expected: returnType.description, got: typedValue.type.description)
+          throw SemanticError.typeMismatch(
+            expected: returnType.description, got: typedValue.type.description)
         }
         checkMove(typedValue)
         return .return(value: typedValue)
@@ -1779,150 +2114,146 @@ public class TypeChecker {
   private func resolveLValue(_ expr: ExpressionNode) throws -> TypedExpressionNode {
     switch expr {
     case .identifier(let name):
-       guard let type = currentScope.lookup(name) else { throw SemanticError.undefinedVariable(name) }
-       guard currentScope.isMutable(name) else { throw SemanticError.assignToImmutable(name) }
-       return .variable(identifier: Symbol(name: name, type: type, kind: .variable(.MutableValue)))
-       
-    case .memberPath(let base, let path):
-       // Check if base evaluates to a Reference type (RValue allowed)
-       // OR if base resolves to an LValue (Mut Value required)
-       
-       let inferredBase = try inferTypedExpression(base)
-       // Optimization: Peel auto-deref for lvalue resolution
-       let typedBase: TypedExpressionNode
-       if case .derefExpression(let inner, _) = inferredBase {
-           typedBase = inner
-       } else {
-           typedBase = inferredBase
-       }
-       
-       // Now resolve path members on typedBase.
-       var currentType = typedBase.type
-       var resolvedPath: [Symbol] = []
-       
-       // Wait, memberPath AST implementation is flat? 
-       // `case memberPath(base: ExpressionNode, path: [String])`
-       // Yes.
-       
-       for memberName in path {
-           // Unwrap reference if needed
-           if case .reference(let inner) = currentType { currentType = inner }
-           
-           guard case .structure(_, let members, _, _) = currentType else {
-               throw SemanticError.invalidOperation(op: "member access on non-struct", type1: currentType.description, type2: "")
-           }
-           
-           guard let member = members.first(where: { $0.name == memberName }) else {
-               throw SemanticError.undefinedMember(memberName, currentType.description)
-           }
-           
-           if !member.mutable {
-              // Can we mutate immutable member? 
-              // If struct is mutable (LValue), then immutable fields are still immutable.
-              throw SemanticError.assignToImmutable(memberName)
-           }
-           
-           resolvedPath.append(Symbol(name: member.name, type: member.type, kind: .variable(.MutableValue)))
-           currentType = member.type
-       }
-       return .memberPath(source: typedBase, path: resolvedPath)
-    
-    case .subscriptExpression(let base, let args):
-       // Relaxed restriction: Base doesn't need to be LValue strictly. 
-       // Similar to member access, we infer the base expression.
-       // If __at(self ref) requires address, inferTypedExpression usually results in a value that has storage (variable) anyway.
-       let typedBase = try inferTypedExpression(base)
-       
-       let typedArgs = try args.map { try inferTypedExpression($0) }
-       let resolved = try resolveSubscript(base: typedBase, args: typedArgs, isMut: true)
-       
-       // LValue resolution: Subscript returns Ref<T>, so we wrap in Deref to represent the LValue T
-       if case .reference(let inner) = resolved.type {
-           return .derefExpression(expression: resolved, type: inner)
-       }
-       return resolved
+      guard let type = currentScope.lookup(name) else {
+        throw SemanticError.undefinedVariable(name)
+      }
+      guard currentScope.isMutable(name) else { throw SemanticError.assignToImmutable(name) }
+      return .variable(identifier: Symbol(name: name, type: type, kind: .variable(.MutableValue)))
 
-    case .derefExpression(let inner):
-        let typedInner = try inferTypedExpression(inner)
-        if case .reference(let innerType) = typedInner.type {
-             return .derefExpression(expression: typedInner, type: innerType)
+    case .memberPath(let base, let path):
+      // Check if base evaluates to a Reference type (RValue allowed)
+      // OR if base resolves to an LValue (Mut Value required)
+
+      let inferredBase = try inferTypedExpression(base)
+      // Optimization: Peel auto-deref for lvalue resolution
+      let typedBase: TypedExpressionNode
+      if case .derefExpression(let inner, _) = inferredBase {
+        typedBase = inner
+      } else {
+        typedBase = inferredBase
+      }
+
+      // Now resolve path members on typedBase.
+      var currentType = typedBase.type
+      var resolvedPath: [Symbol] = []
+
+      // Wait, memberPath AST implementation is flat?
+      // `case memberPath(base: ExpressionNode, path: [String])`
+      // Yes.
+
+      for memberName in path {
+        // Unwrap reference if needed
+        if case .reference(let inner) = currentType { currentType = inner }
+
+        guard case .structure(_, let members, _, _) = currentType else {
+          throw SemanticError.invalidOperation(
+            op: "member access on non-struct", type1: currentType.description, type2: "")
         }
-        throw SemanticError.typeMismatch(expected: "Reference", got: typedInner.type.description)
+
+        guard let member = members.first(where: { $0.name == memberName }) else {
+          throw SemanticError.undefinedMember(memberName, currentType.description)
+        }
+
+        if !member.mutable {
+          // Can we mutate immutable member?
+          // If struct is mutable (LValue), then immutable fields are still immutable.
+          throw SemanticError.assignToImmutable(memberName)
+        }
+
+        resolvedPath.append(
+          Symbol(name: member.name, type: member.type, kind: .variable(.MutableValue)))
+        currentType = member.type
+      }
+      return .memberPath(source: typedBase, path: resolvedPath)
+
+    case .subscriptExpression(_, _):
+      // Direct assignment to `x[i]` is lowered to `__update_at` in statement checking.
+      // Treat subscript as an invalid assignment target here.
+      throw SemanticError.invalidOperation(op: "assignment target", type1: "subscript", type2: "")
+
+    case .derefExpression(_):
+      // `deref r = ...` is intentionally disallowed.
+      // Writes must go through explicit setters like `__update_at` (for subscripts).
+      throw SemanticError.invalidOperation(op: "assignment target", type1: "deref", type2: "")
 
     default:
-       throw SemanticError.invalidOperation(op: "assignment target", type1: String(describing: expr), type2: "")
+      throw SemanticError.invalidOperation(
+        op: "assignment target", type1: String(describing: expr), type2: "")
     }
   }
 
-  private func resolveSubscript(base: TypedExpressionNode, args: [TypedExpressionNode], isMut: Bool) throws -> TypedExpressionNode {
-      let methodName = isMut ? "__at_mut" : "__at"
-      let type = base.type
-      
-      // Unwrap reference
-      let structType: Type
-      if case .reference(let inner) = type { structType = inner } else { structType = type }
-      
-      guard case .structure(let typeName, _, _, _) = structType else {
-          throw SemanticError.invalidOperation(op: "subscript", type1: type.description, type2: "")
+  private func resolveSubscript(base: TypedExpressionNode, args: [TypedExpressionNode]) throws
+    -> TypedExpressionNode
+  {
+    let methodName = "__at"
+    let type = base.type
+
+    // Unwrap reference
+    let structType: Type
+    if case .reference(let inner) = type { structType = inner } else { structType = type }
+
+    guard case .structure(let typeName, _, _, _) = structType else {
+      throw SemanticError.invalidOperation(op: "subscript", type1: type.description, type2: "")
+    }
+
+    var methodSymbol: Symbol? = nil
+    if let extensions = extensionMethods[typeName], let sym = extensions[methodName] {
+      methodSymbol = sym
+    } else if case .structure(_, _, let isGen, _) = structType, isGen,
+      let info = layoutToTemplateInfo[typeName]
+    {
+      if let extensions = genericExtensionMethods[info.base] {
+        if let ext = extensions.first(where: { $0.method.name == methodName }) {
+          methodSymbol = try instantiateExtensionMethod(
+            baseType: structType, structureName: info.base, genericArgs: info.args, methodInfo: ext)
+        }
       }
-      
-      var methodSymbol: Symbol? = nil
-      if let extensions = extensionMethods[typeName], let sym = extensions[methodName] {
-          methodSymbol = sym
-      } else if case .structure(_, _, let isGen, _) = structType, isGen, let info = layoutToTemplateInfo[typeName] {
-           if let extensions = genericExtensionMethods[info.base] {
-               if let ext = extensions.first(where: { $0.method.name == methodName }) {
-                    methodSymbol = try instantiateExtensionMethod(baseType: structType, structureName: info.base, genericArgs: info.args, methodInfo: ext)
-               }
-           }
+    }
+
+    guard let method = methodSymbol else {
+      throw SemanticError.undefinedMember(methodName, typeName)
+    }
+
+    guard case .function(let params, let returns) = method.type else { fatalError() }
+
+    var finalBase = base
+    if let firstParam = params.first {
+      if firstParam.type != base.type {
+        if case .reference(let inner) = firstParam.type, inner == base.type {
+          // Implicit Ref for self
+          finalBase = .referenceExpression(expression: base, type: firstParam.type)
+        }
       }
-      
-      guard let method = methodSymbol else {
-          throw SemanticError.undefinedMember(methodName, typeName)
+    }
+
+    if args.count != params.count - 1 {
+      throw SemanticError.invalidArgumentCount(
+        function: methodName, expected: params.count - 1, got: args.count)
+    }
+
+    for (arg, param) in zip(args, params.dropFirst()) {
+      if arg.type != param.type {
+        throw SemanticError.typeMismatch(
+          expected: param.type.description, got: arg.type.description)
       }
-      
-      guard case .function(let params, let returns) = method.type else { fatalError() }
-      
-      var finalBase = base
-      if let firstParam = params.first {
-           if firstParam.type != base.type {
-               if case .reference(let inner) = firstParam.type, inner == base.type {
-                   // Implicit Ref for self
-                   finalBase = .referenceExpression(expression: base, type: firstParam.type)
-               }
-           }
-      }
-      
-      if args.count != params.count - 1 {
-           throw SemanticError.invalidArgumentCount(function: methodName, expected: params.count - 1, got: args.count)
-      }
-      
-      for (arg, param) in zip(args, params.dropFirst()) {
-          if arg.type != param.type {
-              throw SemanticError.typeMismatch(expected: param.type.description, got: arg.type.description)
-          }
-      }
-      
-      // Determine return type (auto deref logic REMOVED for clarity, we return what method returns)
-      // Actually, standard subscript behavior:
-      // If method returns Ref, subscript expression is LValue of inner type.
-      // But `type` property of TypedExpressionNode usually reflects the Value type for LValues?
-      // Checkout `resolveLValue`...
-      
-      // If `__at` returns `Int ref`, then the expression has type `Int ref`. 
-      // If we strip ref here, we say expression is `Int`.
-      // But `CodeGen` needs to know if it's a pointer or value.
-      
-      // Let's modify behavior strictly:
-      // Subscript expression type matches method return type exactly.
-      // Then if it is Ref, usage sites decide to deref.
-      
-      return .subscriptExpression(base: finalBase, arguments: args, method: method, type: returns)
+    }
+
+    // Determine return type (auto deref logic REMOVED for clarity, we return what method returns)
+    // Actually, standard subscript behavior:
+    // If method returns Ref, subscript expression is LValue of inner type.
+    // But `type` property of TypedExpressionNode usually reflects the Value type for LValues?
+    // Checkout `resolveLValue`...
+
+    // If `__at` returns `Int ref`, then the expression has type `Int ref`.
+    // If we strip ref here, we say expression is `Int`.
+    // But `CodeGen` needs to know if it's a pointer or value.
+
+    // Let's modify behavior strictly:
+    // Subscript expression type matches method return type exactly.
+    // Then if it is Ref, usage sites decide to deref.
+
+    return .subscriptExpression(base: finalBase, arguments: args, method: method, type: returns)
   }
-
-        
-
-
 
   private func compoundOpToArithmeticOp(_ op: CompoundAssignmentOperator) -> ArithmeticOperator {
     switch op {
@@ -1938,15 +2269,15 @@ public class TypeChecker {
   private func checkMove(_ node: TypedExpressionNode) {
     // Only check if we are NOT inside a closure/function that hasn't run yet?
     // But TypeChecker visits linearly.
-    
+
     switch node {
     case .variable(let symbol):
       if !symbol.type.isCopy {
         if currentScope.isMoved(symbol.name) {
-           // Double check failsafe, though lookup should have caught it if Scope checks moved.
-           // Actually scope.lookup SHOULD check moved. But earlier I found it didn't?
-           // Wait, inferTypedExpression checked it.
-           // So this check is just for marking.
+          // Double check failsafe, though lookup should have caught it if Scope checks moved.
+          // Actually scope.lookup SHOULD check moved. But earlier I found it didn't?
+          // Wait, inferTypedExpression checked it.
+          // So this check is just for marking.
         }
         currentScope.markMoved(symbol.name)
       }
@@ -2003,10 +2334,10 @@ public class TypeChecker {
         got: "\(args.count)"
       )
     }
-    
+
     // Direct Pointer resolution
     if template.name == "Pointer" {
-         return .pointer(element: args[0])
+      return .pointer(element: args[0])
     }
 
     let key = "\(template.name)<\(args.map { $0.description }.joined(separator: ","))>"
@@ -2026,41 +2357,44 @@ public class TypeChecker {
     // 1. Resolve members with specific types
     var resolvedMembers: [(name: String, type: Type, mutable: Bool)] = []
     do {
-        try withNewScope {
-          for (i, paramInfo) in template.typeParameters.enumerated() {
-            try currentScope.defineType(paramInfo.name, type: args[i])
-          }
-          for param in template.parameters {
-            let fieldType = try resolveTypeNode(param.type)
-            if fieldType == placeholder {
-                 throw SemanticError.invalidOperation(op: "Direct recursion in generic struct \(layoutName) not allowed (use ref)", type1: param.name, type2: "")
-            }
-            resolvedMembers.append((name: param.name, type: fieldType, mutable: param.mutable))
-          }
+      try withNewScope {
+        for (i, paramInfo) in template.typeParameters.enumerated() {
+          try currentScope.defineType(paramInfo.name, type: args[i])
         }
+        for param in template.parameters {
+          let fieldType = try resolveTypeNode(param.type)
+          if fieldType == placeholder {
+            throw SemanticError.invalidOperation(
+              op: "Direct recursion in generic struct \(layoutName) not allowed (use ref)",
+              type1: param.name, type2: "")
+          }
+          resolvedMembers.append((name: param.name, type: fieldType, mutable: param.mutable))
+        }
+      }
     } catch {
-        instantiatedTypes.removeValue(forKey: key)
-        throw error
+      instantiatedTypes.removeValue(forKey: key)
+      throw error
     }
 
     // 3. Create Specific Type
     let specificType = Type.structure(
-      name: layoutName, members: resolvedMembers, isGenericInstantiation: true, isCopy: template.isCopy)
+      name: layoutName, members: resolvedMembers, isGenericInstantiation: true,
+      isCopy: template.isCopy)
     instantiatedTypes[key] = specificType
     layoutToTemplateInfo[layoutName] = (base: template.name, args: args)
 
     // Force instantiate __drop if it exists for this type
     if let methods = genericExtensionMethods[template.name] {
-        for entry in methods {
-             if entry.method.name == "__drop" {
-                 _ = try instantiateExtensionMethod(
-                     baseType: specificType,
-                     structureName: template.name,
-                     genericArgs: args,
-                     methodInfo: entry
-                 )
-             }
+      for entry in methods {
+        if entry.method.name == "__drop" {
+          _ = try instantiateExtensionMethod(
+            baseType: specificType,
+            structureName: template.name,
+            genericArgs: args,
+            methodInfo: entry
+          )
         }
+      }
     }
 
     if specificType.containsGenericParameter {
@@ -2086,7 +2420,8 @@ public class TypeChecker {
 
       // Create Canonical Type
       let canonicalType = Type.structure(
-        name: layoutName, members: canonicalMembers, isGenericInstantiation: true, isCopy: template.isCopy)
+        name: layoutName, members: canonicalMembers, isGenericInstantiation: true,
+        isCopy: template.isCopy)
 
       // Convert to TypedGlobalNode
       let params = canonicalMembers.map { param in
@@ -2105,105 +2440,113 @@ public class TypeChecker {
 
   private func instantiateUnion(template: GenericUnionTemplate, args: [Type]) throws -> Type {
     guard template.typeParameters.count == args.count else {
-       throw SemanticError.typeMismatch(expected: "\(template.typeParameters.count) generic types", got: "\(args.count)")
+      throw SemanticError.typeMismatch(
+        expected: "\(template.typeParameters.count) generic types", got: "\(args.count)")
     }
-    
+
     let key = "\(template.name)<\(args.map { $0.description }.joined(separator: ","))>"
     if let existing = instantiatedTypes[key] {
-        return existing
+      return existing
     }
-    
+
     let argLayoutKeys = args.map { $0.layoutKey }.joined(separator: "_")
     let layoutName = "\(template.name)_\(argLayoutKeys)"
-    
+
     // Placeholder
     let placeholder = Type.union(
-        name: layoutName, cases: [], isGenericInstantiation: true, isCopy: template.isCopy)
+      name: layoutName, cases: [], isGenericInstantiation: true, isCopy: template.isCopy)
     instantiatedTypes[key] = placeholder
-    
+
     var resolvedCases: [UnionCase] = []
     do {
-        try withNewScope {
-            for (i, paramInfo) in template.typeParameters.enumerated() {
-                 try currentScope.defineType(paramInfo.name, type: args[i])
-            }
-            for c in template.cases {
-                 var params: [(name: String, type: Type)] = []
-                 for p in c.parameters {
-                     let resolved = try resolveTypeNode(p.type)
-                     if resolved == placeholder {
-                         throw SemanticError.invalidOperation(op: "Direct recursion in generic union \(layoutName) not allowed (use ref)", type1: p.name, type2: "")
-                     }
-                     params.append((name: p.name, type: resolved))
-                 }
-                 resolvedCases.append(UnionCase(name: c.name, parameters: params))
-            }
+      try withNewScope {
+        for (i, paramInfo) in template.typeParameters.enumerated() {
+          try currentScope.defineType(paramInfo.name, type: args[i])
         }
+        for c in template.cases {
+          var params: [(name: String, type: Type)] = []
+          for p in c.parameters {
+            let resolved = try resolveTypeNode(p.type)
+            if resolved == placeholder {
+              throw SemanticError.invalidOperation(
+                op: "Direct recursion in generic union \(layoutName) not allowed (use ref)",
+                type1: p.name, type2: "")
+            }
+            params.append((name: p.name, type: resolved))
+          }
+          resolvedCases.append(UnionCase(name: c.name, parameters: params))
+        }
+      }
     } catch {
-        instantiatedTypes.removeValue(forKey: key)
-        throw error
+      instantiatedTypes.removeValue(forKey: key)
+      throw error
     }
-    
+
     if template.isCopy {
-        for c in resolvedCases {
-            for param in c.parameters {
-                if !param.type.isCopy {
-                     throw SemanticError.invalidOperation(op: "Copy union instantiation \(layoutName) cannot contain non-Copy field \(param.name) of type \(param.type)", type1: "", type2: "")
-                }
-            }
+      for c in resolvedCases {
+        for param in c.parameters {
+          if !param.type.isCopy {
+            throw SemanticError.invalidOperation(
+              op:
+                "Copy union instantiation \(layoutName) cannot contain non-Copy field \(param.name) of type \(param.type)",
+              type1: "", type2: "")
+          }
         }
+      }
     }
 
     let specificType = Type.union(
-        name: layoutName, 
-        cases: resolvedCases, 
-        isGenericInstantiation: true, 
-        isCopy: template.isCopy
+      name: layoutName,
+      cases: resolvedCases,
+      isGenericInstantiation: true,
+      isCopy: template.isCopy
     )
     instantiatedTypes[key] = specificType
     layoutToTemplateInfo[layoutName] = (base: template.name, args: args)
 
     // Force instantiate __drop if it exists for this type
     if let methods = genericExtensionMethods[template.name] {
-        for entry in methods {
-             if entry.method.name == "__drop" {
-                 _ = try instantiateExtensionMethod(
-                     baseType: specificType,
-                     structureName: template.name,
-                     genericArgs: args,
-                     methodInfo: entry
-                 )
-             }
+      for entry in methods {
+        if entry.method.name == "__drop" {
+          _ = try instantiateExtensionMethod(
+            baseType: specificType,
+            structureName: template.name,
+            genericArgs: args,
+            methodInfo: entry
+          )
         }
+      }
     }
-    
+
     if specificType.containsGenericParameter {
       return specificType
     }
-    
+
     // Register global declaration for CodeGen
     if !generatedLayouts.contains(layoutName) {
-        generatedLayouts.insert(layoutName)
-        // Canonical cases (using canonical types for fields)
-        var canonicalCases: [UnionCase] = []
-        try withNewScope {
-             for (i, paramInfo) in template.typeParameters.enumerated() {
-                  try currentScope.defineType(paramInfo.name, type: args[i].canonical)
-             }
-             for c in template.cases {
-                  var params: [(name: String, type: Type)] = []
-                  for p in c.parameters {
-                      params.append((name: p.name, type: try resolveTypeNode(p.type)))
-                  }
-                  canonicalCases.append(UnionCase(name: c.name, parameters: params))
-             }
+      generatedLayouts.insert(layoutName)
+      // Canonical cases (using canonical types for fields)
+      var canonicalCases: [UnionCase] = []
+      try withNewScope {
+        for (i, paramInfo) in template.typeParameters.enumerated() {
+          try currentScope.defineType(paramInfo.name, type: args[i].canonical)
         }
-        
-        let canonicalType = Type.union(name: layoutName, cases: canonicalCases, isGenericInstantiation: true, isCopy: true)
-        let typeSymbol = Symbol(name: layoutName, type: canonicalType, kind: .type)
-        extraGlobalNodes.append(.globalUnionDeclaration(identifier: typeSymbol, cases: canonicalCases))
+        for c in template.cases {
+          var params: [(name: String, type: Type)] = []
+          for p in c.parameters {
+            params.append((name: p.name, type: try resolveTypeNode(p.type)))
+          }
+          canonicalCases.append(UnionCase(name: c.name, parameters: params))
+        }
+      }
+
+      let canonicalType = Type.union(
+        name: layoutName, cases: canonicalCases, isGenericInstantiation: true, isCopy: true)
+      let typeSymbol = Symbol(name: layoutName, type: canonicalType, kind: .type)
+      extraGlobalNodes.append(
+        .globalUnionDeclaration(identifier: typeSymbol, cases: canonicalCases))
     }
-    
+
     return specificType
   }
 
@@ -2224,7 +2567,7 @@ public class TypeChecker {
 
     // 1. Resolve parameters and return type with specific types
     // We split this into two phases: Header resolution (for caching) and Body check.
-    
+
     // Phase 1: Header Resolution
     let (resolvedParams, resolvedReturnType, mangledName) = try withNewScope {
       for (i, paramInfo) in template.typeParameters.enumerated() {
@@ -2238,51 +2581,55 @@ public class TypeChecker {
           name: param.name, type: paramType,
           kind: .variable(param.mutable ? .MutableValue : .Value))
       }
-      
+
       let argLayoutKeys = args.map { $0.layoutKey }.joined(separator: "_")
       let name = "\(template.name)_\(argLayoutKeys)"
       return (rParams, returnType, name)
     }
 
     let functionType = Type.function(
-          parameters: resolvedParams.map { Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind)) },
-          returns: resolvedReturnType)
+      parameters: resolvedParams.map {
+        Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind))
+      },
+      returns: resolvedReturnType)
 
     if functionType.containsGenericParameter {
       return ("", functionType)
     }
-    
+
     // Cache EARLY to support recursion
     instantiatedFunctions[key] = (mangledName, functionType)
 
     // Phase 2: Body Check (in new scope again to have correct context)
     let typedBody: TypedExpressionNode
     do {
-       typedBody = try withNewScope {
-          for (i, paramInfo) in template.typeParameters.enumerated() {
-            try currentScope.defineType(paramInfo.name, type: args[i])
-          }
-          for param in resolvedParams {
-            currentScope.define(param.name, param.type, mutable: param.isMutable())
-          }
-           // We pass dummy body to checkFunctionBody? No, we call inferTypedExpression directly since we set up scope
-          let inferredBody = try inferTypedExpression(template.body)
-          if inferredBody.type != .never && inferredBody.type != resolvedReturnType {
-            throw SemanticError.typeMismatch(
-              expected: resolvedReturnType.description, got: inferredBody.type.description)
-          }
-          return inferredBody
-       }
+      typedBody = try withNewScope {
+        for (i, paramInfo) in template.typeParameters.enumerated() {
+          try currentScope.defineType(paramInfo.name, type: args[i])
+        }
+        for param in resolvedParams {
+          currentScope.define(param.name, param.type, mutable: param.isMutable())
+        }
+        // We pass dummy body to checkFunctionBody? No, we call inferTypedExpression directly since we set up scope
+        let inferredBody = try inferTypedExpression(template.body)
+        if inferredBody.type != .never && inferredBody.type != resolvedReturnType {
+          throw SemanticError.typeMismatch(
+            expected: resolvedReturnType.description, got: inferredBody.type.description)
+        }
+        return inferredBody
+      }
     } catch {
-       // If body check fails, remove from cache to avoid corrupt state? 
-       // Or just throw. throw is fine.
-       instantiatedFunctions.removeValue(forKey: key)
-       throw error
+      // If body check fails, remove from cache to avoid corrupt state?
+      // Or just throw. throw is fine.
+      instantiatedFunctions.removeValue(forKey: key)
+      throw error
     }
 
     // 3. Register Global Function if not already generated
     // Skip if intrinsic
-    let intrinsicNames = ["alloc_memory", "dealloc_memory", "copy_memory", "move_memory", "ref_count"]
+    let intrinsicNames = [
+      "alloc_memory", "dealloc_memory", "copy_memory", "move_memory", "ref_count",
+    ]
     if !generatedLayouts.contains(mangledName) && !intrinsicNames.contains(template.name) {
       generatedLayouts.insert(mangledName)
 
@@ -2293,11 +2640,9 @@ public class TypeChecker {
       )
       extraGlobalNodes.append(functionNode)
     }
-    
+
     return (mangledName, functionType)
   }
-
-
 
   private func instantiateExtensionMethod(
     baseType: Type,
@@ -2347,7 +2692,8 @@ public class TypeChecker {
       generatedLayouts.insert(mangledName)
       let kind = getCompilerMethodKind(method.name)
       let functionNode = TypedGlobalNode.globalFunction(
-        identifier: Symbol(name: mangledName, type: functionType, kind: .function, methodKind: kind),
+        identifier: Symbol(
+          name: mangledName, type: functionType, kind: .function, methodKind: kind),
         parameters: params,
         body: typedBody
       )
@@ -2416,66 +2762,74 @@ public class TypeChecker {
     return Symbol(name: mangledName, type: functionType, kind: .function, methodKind: kind)
   }
 
-  private func checkPattern(_ pattern: PatternNode, subjectType: Type) throws -> (TypedPattern, [(String, Bool, Type)]) {
-      var bindings: [(String, Bool, Type)] = []
-      
-      switch pattern {
-      case .integerLiteral(let val, _):
-          if subjectType != .int {
-             throw SemanticError.typeMismatch(expected: "Int", got: subjectType.description)
-          }
-          return (.integerLiteral(value: val), [])
-          
-      case .booleanLiteral(let val, _):
-          if subjectType != .bool {
-             throw SemanticError.typeMismatch(expected: "Bool", got: subjectType.description)
-          }
-          return (.booleanLiteral(value: val), [])
+  private func checkPattern(_ pattern: PatternNode, subjectType: Type) throws -> (
+    TypedPattern, [(String, Bool, Type)]
+  ) {
+    var bindings: [(String, Bool, Type)] = []
 
-      case .stringLiteral(let value, let line):
-        if isStringType(subjectType) {
-          return (.stringLiteral(value: value), [])
-        }
-        if subjectType == .uint8 {
-          guard let byte = singleByteASCII(from: value) else {
-            throw SemanticError(.generic("String literal pattern must be exactly one ASCII byte when matching UInt8"), line: line)
-          }
-          return (.integerLiteral(value: Int(byte)), [])
-        }
-        throw SemanticError.typeMismatch(expected: "String or UInt8", got: subjectType.description)
-          
-      case .wildcard(_):
-          return (.wildcard, [])
-          
-      case .variable(let name, let mutable, _):
-          // Bind variable to the subject
-          let symbol = Symbol(name: name, type: subjectType, kind: .variable(mutable ? .MutableValue : .Value))
-          return (.variable(symbol: symbol), [(name, mutable, subjectType)])
-          
-      case .unionCase(let caseName, let subPatterns, _):
-          guard case .union(let typeName, let cases, _, _) = subjectType else {
-               throw SemanticError.typeMismatch(expected: "Union Type", got: subjectType.description)
-          }
-          
-          guard let caseIndex = cases.firstIndex(where: { $0.name == caseName }) else {
-               throw SemanticError(.generic("Union case '\(caseName)' not found in type '\(typeName)'"))
-          }
-          let caseDef = cases[caseIndex]
-           
-          if caseDef.parameters.count != subPatterns.count {
-               throw SemanticError.invalidArgumentCount(function: caseName, expected: caseDef.parameters.count, got: subPatterns.count)
-          }
-           
-          var typedSubPatterns: [TypedPattern] = []
-          for (idx, subPat) in subPatterns.enumerated() {
-               let paramType = caseDef.parameters[idx].type
-               let (typedSub, subBindings) = try checkPattern(subPat, subjectType: paramType)
-               typedSubPatterns.append(typedSub)
-               bindings.append(contentsOf: subBindings)
-          }
-           
-          return (.unionCase(caseName: caseName, tagIndex: caseIndex, elements: typedSubPatterns), bindings)
+    switch pattern {
+    case .integerLiteral(let val, _):
+      if subjectType != .int {
+        throw SemanticError.typeMismatch(expected: "Int", got: subjectType.description)
       }
+      return (.integerLiteral(value: val), [])
+
+    case .booleanLiteral(let val, _):
+      if subjectType != .bool {
+        throw SemanticError.typeMismatch(expected: "Bool", got: subjectType.description)
+      }
+      return (.booleanLiteral(value: val), [])
+
+    case .stringLiteral(let value, let line):
+      if isStringType(subjectType) {
+        return (.stringLiteral(value: value), [])
+      }
+      if subjectType == .uint8 {
+        guard let byte = singleByteASCII(from: value) else {
+          throw SemanticError(
+            .generic("String literal pattern must be exactly one ASCII byte when matching UInt8"),
+            line: line)
+        }
+        return (.integerLiteral(value: Int(byte)), [])
+      }
+      throw SemanticError.typeMismatch(expected: "String or UInt8", got: subjectType.description)
+
+    case .wildcard(_):
+      return (.wildcard, [])
+
+    case .variable(let name, let mutable, _):
+      // Bind variable to the subject
+      let symbol = Symbol(
+        name: name, type: subjectType, kind: .variable(mutable ? .MutableValue : .Value))
+      return (.variable(symbol: symbol), [(name, mutable, subjectType)])
+
+    case .unionCase(let caseName, let subPatterns, _):
+      guard case .union(let typeName, let cases, _, _) = subjectType else {
+        throw SemanticError.typeMismatch(expected: "Union Type", got: subjectType.description)
+      }
+
+      guard let caseIndex = cases.firstIndex(where: { $0.name == caseName }) else {
+        throw SemanticError(.generic("Union case '\(caseName)' not found in type '\(typeName)'"))
+      }
+      let caseDef = cases[caseIndex]
+
+      if caseDef.parameters.count != subPatterns.count {
+        throw SemanticError.invalidArgumentCount(
+          function: caseName, expected: caseDef.parameters.count, got: subPatterns.count)
+      }
+
+      var typedSubPatterns: [TypedPattern] = []
+      for (idx, subPat) in subPatterns.enumerated() {
+        let paramType = caseDef.parameters[idx].type
+        let (typedSub, subBindings) = try checkPattern(subPat, subjectType: paramType)
+        typedSubPatterns.append(typedSub)
+        bindings.append(contentsOf: subBindings)
+      }
+
+      return (
+        .unionCase(caseName: caseName, tagIndex: caseIndex, elements: typedSubPatterns), bindings
+      )
+    }
   }
 
   private func singleByteASCII(from value: String) -> UInt8? {
@@ -2508,14 +2862,14 @@ public class TypeChecker {
       }
     case .generic(let base, let args):
       if case .pointer(let element) = type, base == "Pointer", args.count == 1 {
-          try unify(node: args[0], type: element, inferred: &inferred, typeParams: typeParams)
+        try unify(node: args[0], type: element, inferred: &inferred, typeParams: typeParams)
       } else if case .structure(let name, _, _, _) = type {
         if let info = layoutToTemplateInfo[name] {
-            if info.base == base && info.args.count == args.count {
-                for (argNode, argType) in zip(args, info.args) {
-                    try unify(node: argNode, type: argType, inferred: &inferred, typeParams: typeParams)
-                }
+          if info.base == base && info.args.count == args.count {
+            for (argNode, argType) in zip(args, info.args) {
+              try unify(node: argNode, type: argType, inferred: &inferred, typeParams: typeParams)
             }
+          }
         }
       }
     }
@@ -2531,7 +2885,7 @@ public class TypeChecker {
   private func isIntegerType(_ type: Type) -> Bool {
     switch type {
     case .int, .int8, .int16, .int32, .int64,
-         .uint, .uint8, .uint16, .uint32, .uint64:
+      .uint, .uint8, .uint16, .uint32, .uint64:
       return true
     default:
       return false
@@ -2557,7 +2911,8 @@ public class TypeChecker {
   }
 
   // Coerce numeric literals to the expected numeric type for annotations/parameters.
-  private func coerceLiteral(_ expr: TypedExpressionNode, to expected: Type) -> TypedExpressionNode {
+  private func coerceLiteral(_ expr: TypedExpressionNode, to expected: Type) -> TypedExpressionNode
+  {
     if isIntegerType(expected) {
       if case .integerLiteral(let value, _) = expr {
         return .integerLiteral(value: value, type: expected)
