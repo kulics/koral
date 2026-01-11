@@ -30,6 +30,7 @@ public enum CompilerMethodKind {
   case at
   case updateAt
   case equals
+  case compare
 }
 public struct Symbol {
   public let name: String

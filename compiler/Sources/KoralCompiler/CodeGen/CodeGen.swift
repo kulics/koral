@@ -446,10 +446,38 @@ public class CodeGen {
           let thenResult = generateExpressionSSA(thenBranch)
           if type != .never && thenBranch.type != .never {
               addIndent()
-              buffer += "\(resultVar) = \(thenResult);\n"
-              if case .reference(_) = type, thenBranch.valueCategory == .lvalue {
-                addIndent()
-                buffer += "__koral_retain(\(resultVar).control);\n"
+              if case .structure(let typeName, _, _, _) = type {
+                if thenBranch.valueCategory == .lvalue {
+                  switch thenBranch {
+                  case .variable(let symbol) where !symbol.type.isCopy:
+                    buffer += "\(resultVar) = \(thenResult);\n"
+                    consumeVariable(symbol.name)
+                  default:
+                    buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(thenResult));\n"
+                  }
+                } else {
+                  buffer += "\(resultVar) = \(thenResult);\n"
+                }
+              } else if case .union(let typeName, _, _, _) = type {
+                if thenBranch.valueCategory == .lvalue {
+                  switch thenBranch {
+                  case .variable(let symbol) where !symbol.type.isCopy:
+                    buffer += "\(resultVar) = \(thenResult);\n"
+                    consumeVariable(symbol.name)
+                  default:
+                    buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(thenResult));\n"
+                  }
+                } else {
+                  buffer += "\(resultVar) = \(thenResult);\n"
+                }
+              } else if case .reference(_) = type {
+                buffer += "\(resultVar) = \(thenResult);\n"
+                if thenBranch.valueCategory == .lvalue {
+                  addIndent()
+                  buffer += "__koral_retain(\(resultVar).control);\n"
+                }
+              } else {
+                buffer += "\(resultVar) = \(thenResult);\n"
               }
           }
           popScope()
@@ -461,10 +489,38 @@ public class CodeGen {
           let elseResult = generateExpressionSSA(elseBranch)
           if type != .never && elseBranch.type != .never {
               addIndent()
-              buffer += "\(resultVar) = \(elseResult);\n"
-              if case .reference(_) = type, elseBranch.valueCategory == .lvalue {
-                addIndent()
-                buffer += "__koral_retain(\(resultVar).control);\n"
+              if case .structure(let typeName, _, _, _) = type {
+                if elseBranch.valueCategory == .lvalue {
+                  switch elseBranch {
+                  case .variable(let symbol) where !symbol.type.isCopy:
+                    buffer += "\(resultVar) = \(elseResult);\n"
+                    consumeVariable(symbol.name)
+                  default:
+                    buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(elseResult));\n"
+                  }
+                } else {
+                  buffer += "\(resultVar) = \(elseResult);\n"
+                }
+              } else if case .union(let typeName, _, _, _) = type {
+                if elseBranch.valueCategory == .lvalue {
+                  switch elseBranch {
+                  case .variable(let symbol) where !symbol.type.isCopy:
+                    buffer += "\(resultVar) = \(elseResult);\n"
+                    consumeVariable(symbol.name)
+                  default:
+                    buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(elseResult));\n"
+                  }
+                } else {
+                  buffer += "\(resultVar) = \(elseResult);\n"
+                }
+              } else if case .reference(_) = type {
+                buffer += "\(resultVar) = \(elseResult);\n"
+                if elseBranch.valueCategory == .lvalue {
+                  addIndent()
+                  buffer += "__koral_retain(\(resultVar).control);\n"
+                }
+              } else {
+                buffer += "\(resultVar) = \(elseResult);\n"
               }
           }
           popScope()

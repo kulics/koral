@@ -60,11 +60,25 @@ public class TypeChecker {
     case "__at": return .at
     case "__update_at": return .updateAt
     case "__equals": return .equals
+    case "__compare": return .compare
     default: return .normal
     }
   }
 
   private func isBuiltinEqualityComparable(_ type: Type) -> Bool {
+    switch type {
+    case .int, .int8, .int16, .int32, .int64,
+      .uint, .uint8, .uint16, .uint32, .uint64,
+      .float32, .float64,
+      .bool,
+      .pointer:
+      return true
+    default:
+      return false
+    }
+  }
+
+  private func isBuiltinOrderingComparable(_ type: Type) -> Bool {
     switch type {
     case .int, .int8, .int16, .int32, .int64,
       .uint, .uint8, .uint16, .uint32, .uint64,
@@ -151,6 +165,57 @@ public class TypeChecker {
         let otherArg = try ensureBorrowed(rhsVar, expected: params[1].type)
         let callee: TypedExpressionNode = .methodReference(base: baseArg, method: methodSym, type: methodSym.type)
         return .call(callee: callee, arguments: [otherArg], type: .bool)
+      }
+    }
+  }
+
+  private func buildCompareCall(lhs: TypedExpressionNode, rhs: TypedExpressionNode) throws -> TypedExpressionNode {
+    guard lhs.type == rhs.type else {
+      throw SemanticError.typeMismatch(expected: lhs.type.description, got: rhs.type.description)
+    }
+
+    let methodName = "__compare"
+    let receiverType = lhs.type
+
+    let methodSym: Symbol
+    if case .genericParameter(let paramName) = receiverType {
+      guard let bounds = genericTraitBounds[paramName], bounds.contains("Comparable") else {
+        throw SemanticError(.generic("Type \(receiverType) is not constrained by trait Comparable"), line: currentLine)
+      }
+      let methods = try flattenedTraitMethods("Comparable")
+      guard let sig = methods[methodName] else {
+        throw SemanticError(.generic("Trait Comparable is missing required method \(methodName)"), line: currentLine)
+      }
+      let expectedType = try expectedFunctionTypeForTraitMethod(sig, selfType: receiverType)
+      methodSym = Symbol(
+        name: "__trait_Comparable_\(methodName)",
+        type: expectedType,
+        kind: .function,
+        methodKind: .compare
+      )
+    } else {
+      guard let concrete = try lookupConcreteMethodSymbol(on: receiverType, name: methodName) else {
+        throw SemanticError.undefinedMember(methodName, receiverType.description)
+      }
+      methodSym = concrete
+    }
+
+    guard case .function(let params, let returns) = methodSym.type else {
+      throw SemanticError.invalidOperation(op: "call", type1: methodSym.type.description, type2: "")
+    }
+    if params.count != 2 {
+      throw SemanticError.invalidArgumentCount(function: methodName, expected: max(0, params.count - 1), got: 1)
+    }
+    if returns != .int {
+      throw SemanticError.typeMismatch(expected: "Int", got: returns.description)
+    }
+
+    return try withTempIfRValue(lhs, prefix: "cmp_lhs") { lhsVar in
+      return try withTempIfRValue(rhs, prefix: "cmp_rhs") { rhsVar in
+        let baseArg = try ensureBorrowed(lhsVar, expected: params[0].type)
+        let otherArg = try ensureBorrowed(rhsVar, expected: params[1].type)
+        let callee: TypedExpressionNode = .methodReference(base: baseArg, method: methodSym, type: methodSym.type)
+        return .call(callee: callee, arguments: [otherArg], type: .int)
       }
     }
   }
@@ -1302,6 +1367,18 @@ public class TypeChecker {
         return eq
       }
 
+      // Operator sugar for Comparable: lower `<`/`<=`/`>`/`>=` to
+      // `__compare(self ref, other ref) Int` for non-builtin scalar types
+      // (struct/union/String/generic parameters).
+      if (op == .greater || op == .less || op == .greaterEqual || op == .lessEqual),
+        typedLeft.type == typedRight.type,
+        !isBuiltinOrderingComparable(typedLeft.type)
+      {
+        let cmp = try buildCompareCall(lhs: typedLeft, rhs: typedRight)
+        let zero: TypedExpressionNode = .integerLiteral(value: 0, type: .int)
+        return .comparisonExpression(left: cmp, op: op, right: zero, type: .bool)
+      }
+
       let resultType = try checkComparisonOp(op, typedLeft.type, typedRight.type)
       return .comparisonExpression(
         left: typedLeft, op: op, right: typedRight, type: resultType)
@@ -1797,6 +1874,28 @@ public class TypeChecker {
             let lhsVal: TypedExpressionNode = .derefExpression(expression: finalBase, type: lhsInner)
             let rhsVal: TypedExpressionNode = .derefExpression(expression: typedArguments[0], type: rhsInner)
             return .comparisonExpression(left: lhsVal, op: .equal, right: rhsVal, type: .bool)
+          }
+
+          // Lower primitive `__compare(self ref, other ref) Int` to scalar comparisons.
+          if method.methodKind == .compare,
+            returns == .int,
+            params.count == 2,
+            case .reference(let lhsInner) = params[0].type,
+            case .reference(let rhsInner) = params[1].type,
+            lhsInner == rhsInner,
+            isBuiltinOrderingComparable(lhsInner)
+          {
+            let lhsVal: TypedExpressionNode = .derefExpression(expression: finalBase, type: lhsInner)
+            let rhsVal: TypedExpressionNode = .derefExpression(expression: typedArguments[0], type: rhsInner)
+
+            let less: TypedExpressionNode = .comparisonExpression(left: lhsVal, op: .less, right: rhsVal, type: .bool)
+            let greater: TypedExpressionNode = .comparisonExpression(left: lhsVal, op: .greater, right: rhsVal, type: .bool)
+            let minusOne: TypedExpressionNode = .integerLiteral(value: -1, type: .int)
+            let plusOne: TypedExpressionNode = .integerLiteral(value: 1, type: .int)
+            let zero: TypedExpressionNode = .integerLiteral(value: 0, type: .int)
+
+            let gtBranch: TypedExpressionNode = .ifExpression(condition: greater, thenBranch: plusOne, elseBranch: zero, type: .int)
+            return .ifExpression(condition: less, thenBranch: minusOne, elseBranch: gtBranch, type: .int)
           }
 
           return .call(callee: finalCallee, arguments: typedArguments, type: returns)
