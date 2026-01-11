@@ -55,35 +55,35 @@ class IntegrationTests: XCTestCase {
         }
         
         // 2. Prepare output and cleanup
-        // Check environment variable to decide whether to keep generated C files
-        // Set KORAL_TEST_KEEP_C=1 to keep .c files in the source directory
+        // Check environment variable to decide whether to keep generated C files.
+        // Set KORAL_TEST_KEEP_C=1 to keep generated artifacts under Tests/CasesOutput.
         let keepCFiles = ProcessInfo.processInfo.environment["KORAL_TEST_KEEP_C"] != nil
-        
+
+        let baseName = file.deletingPathExtension().lastPathComponent
+        let casesOutputRoot = projectRoot.appendingPathComponent("Tests/CasesOutput")
         let outputDir: URL
         let cleanup: () -> Void
 
         if keepCFiles {
-            // Output to same directory as source file
-            outputDir = file.deletingLastPathComponent()
-            
-            // Only remove the executable, keep the .c file
-            let baseName = file.deletingPathExtension().lastPathComponent
+            // Stable per-test directory for easier inspection.
+            outputDir = casesOutputRoot.appendingPathComponent(baseName)
+            try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true, attributes: nil)
+
+            // Only remove the executable, keep the .c file and other artifacts.
             let exePath = outputDir.appendingPathComponent(baseName)
             let exePathWindows = outputDir.appendingPathComponent(baseName + ".exe")
-            
             cleanup = {
                 try? FileManager.default.removeItem(at: exePath)
                 try? FileManager.default.removeItem(at: exePathWindows)
             }
         } else {
-            // Output to a temporary directory
-            let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-            try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true, attributes: nil)
-            outputDir = tempDir
-            
-            // Remove the entire temporary directory
+            // Use an isolated directory under CasesOutput, but clean it up after.
+            let runDir = casesOutputRoot.appendingPathComponent(baseName).appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at: runDir, withIntermediateDirectories: true, attributes: nil)
+            outputDir = runDir
+
             cleanup = {
-                try? FileManager.default.removeItem(at: tempDir)
+                try? FileManager.default.removeItem(at: runDir)
             }
         }
         

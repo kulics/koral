@@ -22,6 +22,10 @@ public class CodeGen {
     lifetimeScopeStack.append([])
   }
 
+  private func popScopeWithoutCleanup() {
+    _ = lifetimeScopeStack.popLast()
+  }
+
   private func popScope() {
     let vars = lifetimeScopeStack.removeLast()
     // 反向遍历变量列表,对可变类型变量调用 destroy
@@ -58,6 +62,24 @@ public class CodeGen {
           addIndent()
           buffer += "__koral_release(\(name).control);\n"
         }
+      }
+    }
+  }
+
+  private func emitCleanupForScope(at scopeIndex: Int) {
+    guard scopeIndex >= 0 && scopeIndex < lifetimeScopeStack.count else { return }
+    let vars = lifetimeScopeStack[scopeIndex]
+    for (name, type, consumed) in vars.reversed() {
+      if consumed { continue }
+      if case .structure(let typeName, _, _, _) = type {
+        addIndent()
+        buffer += "__koral_\(typeName)_drop(&\(name));\n"
+      } else if case .union(let typeName, _, _, _) = type {
+        addIndent()
+        buffer += "__koral_\(typeName)_drop(&\(name));\n"
+      } else if case .reference(_) = type {
+        addIndent()
+        buffer += "__koral_release(\(name).control);\n"
       }
     }
   }
@@ -1141,7 +1163,6 @@ public class CodeGen {
     case .uint64: return "uint64_t"
     case .float32: return "float"
     case .float64: return "double"
-    case .string: return "struct String"
     case .bool: return "_Bool"
     case .void: return "void"
     case .never: return "void"
@@ -1415,49 +1436,67 @@ public class CodeGen {
          addIndent()
          buffer += "{\n"
          withIndent {
-             let isMove = !subject.type.isCopy
-             let (condition, bindings, vars) = generatePatternConditionAndBindings(c.pattern, subjectVar, subjectType, isMove: isMove)
+         let caseScopeIndex = lifetimeScopeStack.count
+         pushScope()
+
+         let isMove = !subject.type.isCopy
+         let (prelude, preludeVars, condition, bindings, vars) = generatePatternConditionAndBindings(c.pattern, subjectVar, subjectType, isMove: isMove)
+
+         // Prelude runs regardless of match success (temps used in the condition)
+         for p in prelude {
+           addIndent()
+           buffer += p
+         }
+         for (name, varType) in preludeVars {
+           registerVariable(name, varType)
+         }
+
+         addIndent()
+         buffer += "if (\(condition)) {\n"
+         withIndent {
+           // Bindings should only exist on the matched path
+           pushScope()
+
+           for b in bindings {
              addIndent()
-             buffer += "if (\(condition)) {\n"
-             withIndent {
-                 pushScope()
+             buffer += b
+           }
+           for (name, varType) in vars {
+             registerVariable(name, varType)
+           }
                  
-                 // Apply Bindings
-                 for b in bindings {
-                     addIndent()
-                     buffer += b
-                 }
-                 // Register variables for cleanup
-                 for (name, varType) in vars {
-                     registerVariable(name, varType)
-                 }
-                 
-                 let bodyResult = generateExpressionSSA(c.body)
-                 if type != .void && type != .never && c.body.type != .never {
-                     addIndent()
-                     if case .structure(let typeName, _, _, _) = type {
-                        if c.body.valueCategory == .lvalue {
-                             buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(bodyResult));\n"
-                        } else {
-                             buffer += "\(resultVar) = \(bodyResult);\n"
-                        }
-                     } else if case .reference(_) = type {
-                        buffer += "\(resultVar) = \(bodyResult);\n"
-                        if c.body.valueCategory == .lvalue {
-                             addIndent()
-                             buffer += "__koral_retain(\(resultVar).control);\n"
-                        }
-                     } else {
-                        buffer += "\(resultVar) = \(bodyResult);\n"
-                     }
-                 }
-                 
-                 popScope()
+           let bodyResult = generateExpressionSSA(c.body)
+           if type != .void && type != .never && c.body.type != .never {
+             addIndent()
+             if case .structure(let typeName, _, _, _) = type {
+              if c.body.valueCategory == .lvalue {
+                 buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(bodyResult));\n"
+              } else {
+                 buffer += "\(resultVar) = \(bodyResult);\n"
+              }
+             } else if case .reference(_) = type {
+              buffer += "\(resultVar) = \(bodyResult);\n"
+              if c.body.valueCategory == .lvalue {
                  addIndent()
-                 buffer += "goto \(endLabel);\n"
+                 buffer += "__koral_retain(\(resultVar).control);\n"
+              }
+             } else {
+              buffer += "\(resultVar) = \(bodyResult);\n"
              }
-             addIndent()
-             buffer += "}\n"
+           }
+
+           // Cleanup bindings, then cleanup prelude temps (outer case scope), then jump out.
+           popScope()
+           emitCleanupForScope(at: caseScopeIndex)
+           addIndent()
+           buffer += "goto \(endLabel);\n"
+         }
+         addIndent()
+         buffer += "}\n"
+
+         // Mismatch path: cleanup prelude temps, then discard the prelude scope.
+         emitCleanupForScope(at: caseScopeIndex)
+         popScopeWithoutCleanup()
          }
          addIndent()
          buffer += "}\n"
@@ -1468,72 +1507,80 @@ public class CodeGen {
     return type != .void ? resultVar : ""
   }
 
-  private func generatePatternConditionAndBindings(_ pattern: TypedPattern, _ path: String, _ type: Type, isMove: Bool = false) -> (String, [String], [(String, Type)]) {
+    private func generatePatternConditionAndBindings(
+    _ pattern: TypedPattern,
+    _ path: String,
+    _ type: Type,
+    isMove: Bool = false
+    ) -> (prelude: [String], preludeVars: [(String, Type)], condition: String, bindings: [String], vars: [(String, Type)]) {
       switch pattern {
       case .integerLiteral(let val):
-          return ("\(path) == \(val)", [], [])
+        return ([], [], "\(path) == \(val)", [], [])
       case .booleanLiteral(let val):
-          return ("\(path) == \(val ? 1 : 0)", [], [])
+        return ([], [], "\(path) == \(val ? 1 : 0)", [], [])
+      case .stringLiteral(let value):
+        let bytesVar = nextTemp() + "_pat_bytes"
+        let utf8Bytes = Array(value.utf8)
+        let byteLiterals = utf8Bytes.map { String(format: "0x%02X", $0) }.joined(separator: ", ")
+        let literalVar = nextTemp() + "_pat_str"
+        var prelude = ""
+        prelude += "static const uint8_t \(bytesVar)[] = { \(byteLiterals) };\n"
+        prelude += "\(getCType(type)) \(literalVar) = String_from_utf8_bytes_unchecked((uint8_t*)\(bytesVar), \(utf8Bytes.count));\n"
+        return ([prelude], [(literalVar, type)], "String_equals(\(path), \(literalVar))", [], [])
       case .wildcard:
-          // If we are moving (isMove=true) and we hit a wildcard, we are effectively dropping this part of the value.
-          // Since the outer scope will NOT drop the moved value (or we are stealing bits from it),
-          // we are responsible for dropping what matches the wildcard if it has content?
-          // BUT, currently we don't have a mechanism to suppress the source destructor easily purely in C gen,
-          // except by nulling it out.
-          // If we hit a wildcard, we bind nothing, so we nullify nothing.
-          // The source destructor will run and clean this part up.
-          // This seems correct for Partial Move semantics (drop unused parts).
-          return ("1", [], [])
+        return ([], [], "1", [], [])
       case .variable(let symbol):
-          let name = symbol.name
-          let varType = symbol.type
-          var bindCode = ""
-          let cType = getCType(varType)
-          bindCode += "\(cType) \(name);\n"
+        let name = symbol.name
+        let varType = symbol.type
+        var bindCode = ""
+        let cType = getCType(varType)
+        bindCode += "\(cType) \(name);\n"
           
-          if isMove {
-              // Move Semantics: Shallow Copy. Source cleanup is suppressed via consumeVariable.
-              bindCode += "\(name) = \(path);\n"
+        if isMove {
+          // Move Semantics: Shallow Copy. Source cleanup is suppressed via consumeVariable.
+          bindCode += "\(name) = \(path);\n"
+        } else {
+          // Copy Semantics
+          if case .structure(let typeName, _, _, _) = varType {
+             bindCode += "\(name) = __koral_\(typeName)_copy(&\(path));\n"
+          } else if case .reference(_) = varType {
+             bindCode += "\(name) = \(path);\n"
+             bindCode += "__koral_retain(\(name).control);\n"
           } else {
-              // Copy Semantics
-              if case .structure(let typeName, _, _, _) = varType {
-                   bindCode += "\(name) = __koral_\(typeName)_copy(&\(path));\n"
-              } else if case .reference(_) = varType {
-                   bindCode += "\(name) = \(path);\n"
-                   bindCode += "__koral_retain(\(name).control);\n"
-              } else {
-                   bindCode += "\(name) = \(path);\n"
-              }
+             bindCode += "\(name) = \(path);\n"
           }
-          return ("1", [bindCode], [(name, varType)])
+        }
+        return ([], [], "1", [bindCode], [(name, varType)])
           
       case .unionCase(let caseName, let expectedTagIndex, let args):
-          guard case .union(_, let cases, _, _) = type else { fatalError("Union pattern on non-union type") }
-          // Use expectedTagIndex directly
+        guard case .union(_, let cases, _, _) = type else { fatalError("Union pattern on non-union type") }
           
-          var condition = "(\(path).tag == \(expectedTagIndex))"
-          var bindings: [String] = []
-          var vars: [(String, Type)] = []
+        var prelude: [String] = []
+        var preludeVars: [(String, Type)] = []
+        var condition = "(\(path).tag == \(expectedTagIndex))"
+        var bindings: [String] = []
+        var vars: [(String, Type)] = []
           
-          let caseDef = cases[expectedTagIndex]
+        let caseDef = cases[expectedTagIndex]
           
-          for (i, subInd) in args.enumerated() {
-               let paramName = caseDef.parameters[i].name
-               let paramType = caseDef.parameters[i].type
-               let subPath = "\(path).data.\(caseName).\(paramName)"
+        for (i, subInd) in args.enumerated() {
+           let paramName = caseDef.parameters[i].name
+           let paramType = caseDef.parameters[i].type
+           let subPath = "\(path).data.\(caseName).\(paramName)"
                
-               // Recursive call propagates isMove
-               let (subCond, subBind, subVars) = generatePatternConditionAndBindings(subInd, subPath, paramType, isMove: isMove)
+           let (subPre, subPreVars, subCond, subBind, subVars) = generatePatternConditionAndBindings(subInd, subPath, paramType, isMove: isMove)
                
-               if subCond != "1" {
-                   condition += " && (\(subCond))"
-               }
-               bindings.append(contentsOf: subBind)
-               vars.append(contentsOf: subVars)
-          }
-          return (condition, bindings, vars)
+           if subCond != "1" {
+             condition += " && (\(subCond))"
+           }
+           prelude.append(contentsOf: subPre)
+           preludeVars.append(contentsOf: subPreVars)
+           bindings.append(contentsOf: subBind)
+           vars.append(contentsOf: subVars)
+        }
+        return (prelude, preludeVars, condition, bindings, vars)
       }
-  }
+    }
 
 
   private func generateBlockScope(

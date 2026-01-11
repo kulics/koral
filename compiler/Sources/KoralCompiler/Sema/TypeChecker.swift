@@ -31,6 +31,14 @@ public class TypeChecker {
     self.ast = ast
   }
 
+  private func builtinStringType() -> Type {
+    if let stringType = currentScope.lookupType("String") {
+      return stringType
+    }
+    // Fallback: std should normally define `type String(...)`.
+    return .structure(name: "String", members: [], isGenericInstantiation: false, isCopy: true)
+  }
+
   private func getCompilerMethodKind(_ name: String) -> CompilerMethodKind {
     switch name {
     case "__drop": return .drop
@@ -566,7 +574,6 @@ public class TypeChecker {
       case "Bool": type = .bool
       case "Void": type = .void
       case "Never": type = .never
-      case "String": type = .string
       case "Pointer":
          // Pointer is generic, handled below
          type = .void // Placeholder
@@ -642,10 +649,7 @@ public class TypeChecker {
       return .floatLiteral(value: value, type: .float64)
 
     case .stringLiteral(let value):
-      if let stringType = currentScope.lookupType("String") {
-        return .stringLiteral(value: value, type: stringType)
-      }
-      return .stringLiteral(value: value, type: .string)
+      return .stringLiteral(value: value, type: builtinStringType())
 
     case .booleanLiteral(let value):
       return .booleanLiteral(value: value, type: .bool)
@@ -775,6 +779,16 @@ public class TypeChecker {
         if typedLeft.type != typedRight.type,
            isIntegerType(typedRight.type) || isFloatType(typedRight.type) {
           typedLeft = coerceLiteral(typedLeft, to: typedRight.type)
+        }
+      }
+
+      // Allow single-byte ASCII string literals to coerce to UInt8 in comparisons.
+      if typedLeft.type != typedRight.type {
+        if typedLeft.type == .uint8 {
+          typedRight = coerceLiteral(typedRight, to: .uint8)
+        }
+        if typedRight.type == .uint8 {
+          typedLeft = coerceLiteral(typedLeft, to: .uint8)
         }
       }
 
@@ -2417,6 +2431,18 @@ public class TypeChecker {
              throw SemanticError.typeMismatch(expected: "Bool", got: subjectType.description)
           }
           return (.booleanLiteral(value: val), [])
+
+      case .stringLiteral(let value, let line):
+        if isStringType(subjectType) {
+          return (.stringLiteral(value: value), [])
+        }
+        if subjectType == .uint8 {
+          guard let byte = singleByteASCII(from: value) else {
+            throw SemanticError(.generic("String literal pattern must be exactly one ASCII byte when matching UInt8"), line: line)
+          }
+          return (.integerLiteral(value: Int(byte)), [])
+        }
+        throw SemanticError.typeMismatch(expected: "String or UInt8", got: subjectType.description)
           
       case .wildcard(_):
           return (.wildcard, [])
@@ -2450,6 +2476,13 @@ public class TypeChecker {
            
           return (.unionCase(caseName: caseName, tagIndex: caseIndex, elements: typedSubPatterns), bindings)
       }
+  }
+
+  private func singleByteASCII(from value: String) -> UInt8? {
+    let bytes = Array(value.utf8)
+    guard bytes.count == 1 else { return nil }
+    guard bytes[0] <= 0x7F else { return nil }
+    return bytes[0]
   }
 
   private func unify(
@@ -2514,11 +2547,27 @@ public class TypeChecker {
     }
   }
 
+  private func isStringType(_ type: Type) -> Bool {
+    switch type {
+    case .structure(let name, _, _, _):
+      return name == "String"
+    default:
+      return false
+    }
+  }
+
   // Coerce numeric literals to the expected numeric type for annotations/parameters.
   private func coerceLiteral(_ expr: TypedExpressionNode, to expected: Type) -> TypedExpressionNode {
     if isIntegerType(expected) {
       if case .integerLiteral(let value, _) = expr {
         return .integerLiteral(value: value, type: expected)
+      }
+
+      // Allow "a" / 'a' (post-escape, single-byte ASCII) to coerce to UInt8.
+      if expected == .uint8, case .stringLiteral(let value, _) = expr {
+        if let b = singleByteASCII(from: value) {
+          return .integerLiteral(value: Int(b), type: .uint8)
+        }
       }
     }
     if isFloatType(expected) {

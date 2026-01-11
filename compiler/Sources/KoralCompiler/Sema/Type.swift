@@ -16,7 +16,6 @@ public indirect enum Type: CustomStringConvertible {
   case uint64
   case float32
   case float64
-  case string
   case bool
   case void
   case never
@@ -32,13 +31,6 @@ public indirect enum Type: CustomStringConvertible {
     case .int, .int8, .int16, .int32, .int64,
       .uint, .uint8, .uint16, .uint32, .uint64,
       .float32, .float64, .bool, .void, .never, .pointer, .reference:
-      return true
-    case .string:
-      // Assuming string is reference counted or managed, but for now let's treat it as Copy to avoid breaking existing string heavy code
-      // OR user might want it to be move?
-      // "Int cannot increment... because no internal state... Container types can".
-      // std/core.koral says "public intrinsic type String".
-      // String is fundamental. Let's start with TRUE (Copy) for safety.
       return true
     case .function:
       // Function pointers/closures are usually copyable references.
@@ -79,7 +71,6 @@ public indirect enum Type: CustomStringConvertible {
     case .uint64: return "UInt64"
     case .float32: return "Float32"
     case .float64: return "Float64"
-    case .string: return "String"
     case .bool: return "Bool"
     case .void: return "Void"
     case .never: return "Never"
@@ -113,7 +104,6 @@ public indirect enum Type: CustomStringConvertible {
     case .uint64: return "U64"
     case .float32: return "F32"
     case .float64: return "F64"
-    case .string: return "S"
     case .bool: return "B"
     case .void: return "V"
     case .never: return "N"
@@ -137,7 +127,7 @@ public indirect enum Type: CustomStringConvertible {
     switch self {
     case .int, .int8, .int16, .int32, .int64,
       .uint, .uint8, .uint16, .uint32, .uint64,
-      .float32, .float64, .string, .bool, .void, .never:
+      .float32, .float64, .bool, .void, .never:
       return false
     case .function(let params, let returns):
       return returns.containsGenericParameter || params.contains { $0.type.containsGenericParameter }
@@ -163,7 +153,7 @@ public indirect enum Type: CustomStringConvertible {
     switch self {
     case .int, .int8, .int16, .int32, .int64,
       .uint, .uint8, .uint16, .uint32, .uint64,
-      .float32, .float64, .bool, .void, .never, .string: return self
+      .float32, .float64, .bool, .void, .never: return self
     case .reference(_): return .reference(inner: .void)
     case .pointer(let element): return .pointer(element: element.canonical) 
     case .structure(let name, let members, let isGenericInstantiation, let isCopy):
@@ -222,7 +212,6 @@ extension Type: Equatable {
       (.int8, .int8), (.int16, .int16), (.int32, .int32), (.int64, .int64),
       (.uint, .uint), (.uint8, .uint8), (.uint16, .uint16), (.uint32, .uint32), (.uint64, .uint64),
       (.float32, .float32), (.float64, .float64),
-      (.string, .string),
       (.bool, .bool),
       (.void, .void),
       (.never, .never):
