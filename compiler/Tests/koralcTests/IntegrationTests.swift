@@ -45,12 +45,16 @@ class IntegrationTests: XCTestCase {
         let content = try String(contentsOf: file, encoding: .utf8)
         let lines = content.components(separatedBy: .newlines)
         var expectedOutput: [String] = []
+        var expectedErrors: [String] = []
         
         for line in lines {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.starts(with: "// EXPECT: ") {
                 let expectation = String(trimmed.dropFirst("// EXPECT: ".count))
                 expectedOutput.append(expectation)
+            } else if trimmed.starts(with: "// EXPECT-ERROR: ") {
+                let expectation = String(trimmed.dropFirst("// EXPECT-ERROR: ".count))
+                expectedErrors.append(expectation)
             }
         }
         
@@ -116,7 +120,8 @@ class IntegrationTests: XCTestCase {
         process.waitUntilExit()
         
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        var output = String(data: data, encoding: .utf8) ?? ""
+        // Use a lossy UTF-8 decode so one bad byte doesn't drop all output.
+        var output = String(decoding: data, as: UTF8.self)
         
         // Normalize line endings to \n
         output = output.replacingOccurrences(of: "\r\n", with: "\n")
@@ -125,6 +130,48 @@ class IntegrationTests: XCTestCase {
         // 4. Verify output (Robust Line Matching)
         let outputLines = output.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }
         var currentLineIndex = 0
+
+        // Negative tests: expect compilation/runtime failure and specific error text.
+        if !expectedErrors.isEmpty {
+            if process.terminationStatus == 0 {
+                XCTFail("""
+                Test failed: \(file.lastPathComponent)
+                Expected non-zero exit code, got 0.
+
+                Actual Output Lines:
+                \(outputLines.joined(separator: "\n"))
+                """)
+                return
+            }
+
+            for expected in expectedErrors {
+                let cleanExpected = expected.trimmingCharacters(in: .whitespacesAndNewlines)
+                if cleanExpected.isEmpty { continue }
+
+                var found = false
+                for i in currentLineIndex..<outputLines.count {
+                    if outputLines[i].contains(cleanExpected) {
+                        found = true
+                        currentLineIndex = i + 1
+                        break
+                    }
+                }
+
+                if !found {
+                    XCTFail("""
+                    Test failed: \(file.lastPathComponent)
+                    Missing expected error: "\(cleanExpected)"
+
+                    Scanned from line \(currentLineIndex)
+
+                    Actual Output Lines:
+                    \(outputLines.joined(separator: "\n"))
+                    """)
+                    return
+                }
+            }
+            return
+        }
         
         for expected in expectedOutput {
              let cleanExpected = expected.trimmingCharacters(in: .whitespacesAndNewlines)
