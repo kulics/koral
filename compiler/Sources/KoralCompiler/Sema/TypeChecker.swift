@@ -373,6 +373,17 @@ public class TypeChecker {
           methodInfo: ext
         )
       }
+
+      if let extensions = genericExtensionMethods["Pointer"],
+        let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try instantiateExtensionMethod(
+          baseType: selfType,
+          structureName: "Pointer",
+          genericArgs: [element],
+          methodInfo: ext
+        )
+      }
       return nil
 
     case .int, .int8, .int16, .int32, .int64,
@@ -847,6 +858,32 @@ public class TypeChecker {
         typeName = name
       } else if case .union(let name, _, _, _) = type {
         typeName = name
+      } else if case .int = type {
+        typeName = type.description
+      } else if case .int8 = type {
+        typeName = type.description
+      } else if case .int16 = type {
+        typeName = type.description
+      } else if case .int32 = type {
+        typeName = type.description
+      } else if case .int64 = type {
+        typeName = type.description
+      } else if case .uint = type {
+        typeName = type.description
+      } else if case .uint8 = type {
+        typeName = type.description
+      } else if case .uint16 = type {
+        typeName = type.description
+      } else if case .uint32 = type {
+        typeName = type.description
+      } else if case .uint64 = type {
+        typeName = type.description
+      } else if case .float32 = type {
+        typeName = type.description
+      } else if case .float64 = type {
+        typeName = type.description
+      } else if case .bool = type {
+        typeName = type.description
       } else {
         throw SemanticError.invalidOperation(
           op: "given extends only struct or union", type1: type.description, type2: "")
