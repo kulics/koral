@@ -8,7 +8,6 @@ public enum AccessModifier: String {
   case `protected`
   case `default`
 }
-
 public indirect enum ASTNode {
   case program(globalNodes: [GlobalNode])
 }
@@ -22,9 +21,10 @@ public struct UnionCaseDeclaration {
   public let name: String
   public let parameters: [(name: String, type: TypeNode)]
 }
-
 public indirect enum GlobalNode {
-  case globalVariableDeclaration(name: String, type: TypeNode, value: ExpressionNode, mutable: Bool, access: AccessModifier, line: Int)
+  case globalVariableDeclaration(
+    name: String, type: TypeNode, value: ExpressionNode, mutable: Bool, access: AccessModifier,
+    line: Int)
   case globalFunctionDeclaration(
     name: String,
     typeParameters: [(name: String, type: TypeNode?)],
@@ -65,10 +65,13 @@ public indirect enum GlobalNode {
     line: Int
   )
   // given [T] Type { ...methods... }
-  case givenDeclaration(typeParams: [(name: String, type: TypeNode?)] = [], type: TypeNode, methods: [MethodDeclaration], line: Int)
-  case intrinsicGivenDeclaration(typeParams: [(name: String, type: TypeNode?)] = [], type: TypeNode, methods: [IntrinsicMethodDeclaration], line: Int)
+  case givenDeclaration(
+    typeParams: [(name: String, type: TypeNode?)] = [], type: TypeNode,
+    methods: [MethodDeclaration], line: Int)
+  case intrinsicGivenDeclaration(
+    typeParams: [(name: String, type: TypeNode?)] = [], type: TypeNode,
+    methods: [IntrinsicMethodDeclaration], line: Int)
 }
-
 public struct IntrinsicMethodDeclaration {
   public let name: String
   public let typeParameters: [(name: String, type: TypeNode?)]
@@ -90,7 +93,6 @@ public struct IntrinsicMethodDeclaration {
     self.access = access
   }
 }
-
 public struct MethodDeclaration {
   public let name: String
   public let typeParameters: [(name: String, type: TypeNode?)]
@@ -116,7 +118,8 @@ public struct MethodDeclaration {
   }
 }
 public indirect enum StatementNode {
-  case variableDeclaration(name: String, type: TypeNode?, value: ExpressionNode, mutable: Bool, line: Int)
+  case variableDeclaration(
+    name: String, type: TypeNode?, value: ExpressionNode, mutable: Bool, line: Int)
   case assignment(target: ExpressionNode, value: ExpressionNode, line: Int)
   case compoundAssignment(
     target: ExpressionNode, operator: CompoundAssignmentOperator, value: ExpressionNode, line: Int)
@@ -189,28 +192,28 @@ public indirect enum ExpressionNode {
   case subscriptExpression(base: ExpressionNode, arguments: [ExpressionNode])
   case matchExpression(subject: ExpressionNode, cases: [MatchCaseNode], line: Int)
 }
-
 public indirect enum PatternNode: CustomStringConvertible {
-    case booleanLiteral(value: Bool, line: Int)
-    case integerLiteral(value: Int, line: Int)
-    case wildcard(line: Int)
-    case variable(name: String, mutable: Bool, line: Int)
-    case unionCase(caseName: String, elements: [PatternNode], line: Int)
-    
-    public var description: String {
-        switch self {
-        case .booleanLiteral(let value, _): return "\(value)"
-        case .integerLiteral(let value, _): return "\(value)"
-        case .wildcard: return "_"
-        case .variable(let name, let mutable, _): return mutable ? "mut \(name)" : name
-        case .unionCase(let name, let elements, _):
-            let args = elements.map { $0.description }.joined(separator: ", ")
-            return ".\(name)(\(args))"
-        }
-    }
-}
+  case booleanLiteral(value: Bool, line: Int)
+  case integerLiteral(value: Int, line: Int)
+  case stringLiteral(value: String, line: Int)
+  case wildcard(line: Int)
+  case variable(name: String, mutable: Bool, line: Int)
+  case unionCase(caseName: String, elements: [PatternNode], line: Int)
 
+  public var description: String {
+    switch self {
+    case .booleanLiteral(let value, _): return "\(value)"
+    case .integerLiteral(let value, _): return "\(value)"
+    case .stringLiteral(let value, _): return "\"\(value)\""
+    case .wildcard: return "_"
+    case .variable(let name, let mutable, _): return mutable ? "mut \(name)" : name
+    case .unionCase(let name, let elements, _):
+      let args = elements.map { $0.description }.joined(separator: ", ")
+      return ".\(name)(\(args))"
+    }
+  }
+}
 public struct MatchCaseNode {
-    public let pattern: PatternNode
-    public let body: ExpressionNode
+  public let pattern: PatternNode
+  public let body: ExpressionNode
 }

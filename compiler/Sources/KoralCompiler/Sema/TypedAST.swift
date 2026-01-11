@@ -30,14 +30,14 @@ public enum CompilerMethodKind {
   case at
   case atMut
 }
-
 public struct Symbol {
   public let name: String
   public let type: Type
   public let kind: SymbolKind
   public let methodKind: CompilerMethodKind
 
-  public init(name: String, type: Type, kind: SymbolKind, methodKind: CompilerMethodKind = .normal) {
+  public init(name: String, type: Type, kind: SymbolKind, methodKind: CompilerMethodKind = .normal)
+  {
     self.name = name
     self.type = type
     self.kind = kind
@@ -123,93 +123,94 @@ public indirect enum TypedExpressionNode {
   case whileExpression(condition: TypedExpressionNode, body: TypedExpressionNode, type: Type)
   case typeConstruction(identifier: Symbol, arguments: [TypedExpressionNode], type: Type)
   case memberPath(source: TypedExpressionNode, path: [Symbol])
-  case subscriptExpression(base: TypedExpressionNode, arguments: [TypedExpressionNode], method: Symbol, type: Type)
+  case subscriptExpression(
+    base: TypedExpressionNode, arguments: [TypedExpressionNode], method: Symbol, type: Type)
   case unionConstruction(type: Type, caseName: String, arguments: [TypedExpressionNode])
   case intrinsicCall(TypedIntrinsic)
   case matchExpression(subject: TypedExpressionNode, cases: [TypedMatchCase], type: Type)
 }
-
 public indirect enum TypedIntrinsic {
-    // Memory Management
-    case allocMemory(count: TypedExpressionNode, resultType: Type)
-    case deallocMemory(ptr: TypedExpressionNode)
-    case copyMemory(dest: TypedExpressionNode, source: TypedExpressionNode, count: TypedExpressionNode)
-    case moveMemory(dest: TypedExpressionNode, source: TypedExpressionNode, count: TypedExpressionNode)
-    case refCount(val: TypedExpressionNode)
-    
-    // Pointer Operations
-    case ptrInit(ptr: TypedExpressionNode, val: TypedExpressionNode)
-    case ptrDeinit(ptr: TypedExpressionNode)
-    case ptrPeek(ptr: TypedExpressionNode)
-    case ptrOffset(ptr: TypedExpressionNode, offset: TypedExpressionNode)
-    case ptrTake(ptr: TypedExpressionNode)
-    case ptrReplace(ptr: TypedExpressionNode, val: TypedExpressionNode)
-    
-    // Primitive IO
-    case printString(message: TypedExpressionNode)
-    case printInt(value: TypedExpressionNode)
-    case printBool(value: TypedExpressionNode)
-    case panic(message: TypedExpressionNode)
-    case exit(code: TypedExpressionNode)
-    case abort
+  // Memory Management
+  case allocMemory(count: TypedExpressionNode, resultType: Type)
+  case deallocMemory(ptr: TypedExpressionNode)
+  case copyMemory(
+    dest: TypedExpressionNode, source: TypedExpressionNode, count: TypedExpressionNode)
+  case moveMemory(
+    dest: TypedExpressionNode, source: TypedExpressionNode, count: TypedExpressionNode)
+  case refCount(val: TypedExpressionNode)
 
-    public var type: Type {
-        switch self {
-        case .allocMemory(_, let resultType): return resultType
-        case .deallocMemory: return .void
-        case .copyMemory: return .void
-        case .moveMemory: return .void
-        case .refCount: return .int
-        case .ptrInit: return .void
-        case .ptrDeinit: return .void
-        case .ptrPeek(let ptr):
-             // return T ref
-             if case .pointer(let element) = ptr.type {
-                  return .reference(inner: element)
-             }
-             fatalError("ptrPeek on non-pointer")
-        case .ptrOffset(let ptr, _): return ptr.type
-        case .ptrTake(let ptr):
-             if case .pointer(let element) = ptr.type { return element }
-             fatalError("ptrTake on non-pointer")
-        case .ptrReplace(let ptr, _):
-             if case .pointer(let element) = ptr.type { return element }
-             fatalError("ptrReplace on non-pointer")
-        case .printString: return .void
-        case .printInt: return .void
-        case .printBool: return .void
-        case .panic: return .never
-        case .exit: return .never
-        case .abort: return .never
-        }
+  // Pointer Operations
+  case ptrInit(ptr: TypedExpressionNode, val: TypedExpressionNode)
+  case ptrDeinit(ptr: TypedExpressionNode)
+  case ptrPeek(ptr: TypedExpressionNode)
+  case ptrOffset(ptr: TypedExpressionNode, offset: TypedExpressionNode)
+  case ptrTake(ptr: TypedExpressionNode)
+  case ptrReplace(ptr: TypedExpressionNode, val: TypedExpressionNode)
+
+  // Primitive IO
+  case printString(message: TypedExpressionNode)
+  case printInt(value: TypedExpressionNode)
+  case printBool(value: TypedExpressionNode)
+  case panic(message: TypedExpressionNode)
+  case exit(code: TypedExpressionNode)
+  case abort
+
+  public var type: Type {
+    switch self {
+    case .allocMemory(_, let resultType): return resultType
+    case .deallocMemory: return .void
+    case .copyMemory: return .void
+    case .moveMemory: return .void
+    case .refCount: return .int
+    case .ptrInit: return .void
+    case .ptrDeinit: return .void
+    case .ptrPeek(let ptr):
+      // return T ref
+      if case .pointer(let element) = ptr.type {
+        return .reference(inner: element)
+      }
+      fatalError("ptrPeek on non-pointer")
+    case .ptrOffset(let ptr, _): return ptr.type
+    case .ptrTake(let ptr):
+      if case .pointer(let element) = ptr.type { return element }
+      fatalError("ptrTake on non-pointer")
+    case .ptrReplace(let ptr, _):
+      if case .pointer(let element) = ptr.type { return element }
+      fatalError("ptrReplace on non-pointer")
+    case .printString: return .void
+    case .printInt: return .void
+    case .printBool: return .void
+    case .panic: return .never
+    case .exit: return .never
+    case .abort: return .never
     }
+  }
 }
-
 public indirect enum TypedPattern: CustomStringConvertible {
-    case booleanLiteral(value: Bool)
-    case integerLiteral(value: Int)
-    case wildcard
-    case variable(symbol: Symbol)
-    case unionCase(caseName: String, tagIndex: Int, elements: [TypedPattern])
-    
-    public var description: String {
-        switch self {
-        case .booleanLiteral(let v): return "\(v)"
-        case .integerLiteral(let v): return "\(v)"
-        case .wildcard: return "_"
-        case .variable(let s): return s.name
-        case .unionCase(let name, _, let elements): 
-            let args = elements.map { $0.description }.joined(separator: ", ")
-            return ".\(name)(\(args))"
-        }
+  case booleanLiteral(value: Bool)
+  case integerLiteral(value: Int)
+  case stringLiteral(value: String)
+  case wildcard
+  case variable(symbol: Symbol)
+  case unionCase(caseName: String, tagIndex: Int, elements: [TypedPattern])
+
+  public var description: String {
+    switch self {
+    case .booleanLiteral(let v): return "\(v)"
+    case .integerLiteral(let v): return "\(v)"
+    case .stringLiteral(let v): return "\"\(v)\""
+    case .wildcard: return "_"
+    case .variable(let s): return s.name
+    case .unionCase(let name, _, let elements):
+      let args = elements.map { $0.description }.joined(separator: ", ")
+      return ".\(name)(\(args))"
     }
+  }
 }
-
 public struct TypedMatchCase {
-    public let pattern: TypedPattern
-    public let body: TypedExpressionNode
+  public let pattern: TypedPattern
+  public let body: TypedExpressionNode
 }
-
 extension TypedExpressionNode {
   var type: Type {
     switch self {

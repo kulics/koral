@@ -420,6 +420,8 @@ public class Lexer {
         case "n": str.append("\n")
         case "t": str.append("\t")
         case "r": str.append("\r")
+        case "v": str.append("\u{000B}")
+        case "f": str.append("\u{000C}")
         case "0": str.append("\0")
         case "\\": str.append("\\")
         case "\"": str.append("\"")

@@ -738,6 +738,10 @@ public class Parser {
       try match(.identifier(name))
       return .variable(name: name, mutable: false, line: lexer.currentLine)
     }
+    if case .string(let str) = currentToken {
+      try match(.string(str))
+      return .stringLiteral(value: str, line: lexer.currentLine)
+    }
     if currentToken === .mutKeyword {
       try match(.mutKeyword)
       guard case .identifier(let name) = currentToken else {
