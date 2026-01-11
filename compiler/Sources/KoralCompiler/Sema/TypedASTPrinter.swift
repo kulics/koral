@@ -143,6 +143,15 @@ public func printTypedAST(_ node: TypedProgram) {
     case .booleanLiteral(let value, let type):
       print("\(indent)BoolLiteral: \(value) : \(type)")
 
+    case .castExpression(let inner, let type):
+      print("\(indent)CastExpression: : \(type)")
+      withIndent {
+        print("\(indent)Operand:")
+        withIndent {
+          printTypedExpression(inner)
+        }
+      }
+
     case .variable(let identifier):
       print("\(indent)Variable: \(identifier.name) : \(identifier.type)")
 

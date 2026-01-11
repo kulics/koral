@@ -100,6 +100,7 @@ public indirect enum TypedExpressionNode {
   case floatLiteral(value: Double, type: Type)
   case stringLiteral(value: String, type: Type)
   case booleanLiteral(value: Bool, type: Type)
+  case castExpression(expression: TypedExpressionNode, type: Type)
   case arithmeticExpression(
     left: TypedExpressionNode, op: ArithmeticOperator, right: TypedExpressionNode, type: Type)
   case comparisonExpression(
@@ -220,6 +221,7 @@ extension TypedExpressionNode {
       .floatLiteral(_, let type),
       .stringLiteral(_, let type),
       .booleanLiteral(_, let type),
+      .castExpression(_, let type),
       .arithmeticExpression(_, _, _, let type),
       .comparisonExpression(_, _, _, let type),
       .andExpression(_, _, let type),
@@ -264,6 +266,8 @@ extension TypedExpressionNode {
     case .referenceExpression:
 
       // &expr 是一个临时值（指针）
+      return .rvalue
+    case .castExpression:
       return .rvalue
     default:
       return .rvalue

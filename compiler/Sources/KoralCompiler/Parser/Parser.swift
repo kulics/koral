@@ -1058,6 +1058,9 @@ public class Parser {
   }
 
   private func parsePrefixExpression() throws -> ExpressionNode {
+    if let cast = try tryParseCastExpression() {
+      return cast
+    }
     if currentToken === .refKeyword {
       try match(.refKeyword)
       let expr = try parsePrefixExpression()
@@ -1072,6 +1075,30 @@ public class Parser {
       return .bitwiseNotExpression(expr)
     }
     return try parsePostfixExpression()
+  }
+
+  // Attempt to parse a C-style cast expression: `(Type)expr`.
+  // Uses lexer state save/restore to disambiguate from parenthesized expressions.
+  private func tryParseCastExpression() throws -> ExpressionNode? {
+    guard currentToken === .leftParen else { return nil }
+
+    let savedLexer = lexer.saveState()
+    let savedToken = currentToken
+
+    do {
+      try match(.leftParen)
+      let targetType = try parseType()
+      guard currentToken === .rightParen else {
+        throw ParserError.unexpectedToken(line: lexer.currentLine, got: currentToken.description)
+      }
+      try match(.rightParen)
+      let expr = try parsePrefixExpression()
+      return .castExpression(type: targetType, expression: expr)
+    } catch {
+      lexer.restoreState(savedLexer)
+      currentToken = savedToken
+      return nil
+    }
   }
 
   private func ifExpression() throws -> ExpressionNode {
@@ -1140,11 +1167,6 @@ public class Parser {
     case .bool(let value):
       try match(.bool(value))
       return .booleanLiteral(value)
-    case .leftParen:
-      try match(.leftParen)
-      let expr = try expression()
-      try match(.rightParen)
-      return expr
     case .leftBrace:
       return try blockExpression()
     case .leftBracket:
@@ -1175,7 +1197,7 @@ public class Parser {
       throw ParserError.unexpectedToken(
         line: lexer.currentLine,
         got: currentToken.description,
-        expected: "number, identifier, or boolean literal"
+        expected: "number, identifier, boolean literal, block expression, or generic instantiation"
       )
     }
   }
