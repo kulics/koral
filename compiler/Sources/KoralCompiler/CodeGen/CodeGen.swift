@@ -1523,12 +1523,20 @@ public class CodeGen {
         let utf8Bytes = Array(value.utf8)
         let byteLiterals = utf8Bytes.map { String(format: "0x%02X", $0) }.joined(separator: ", ")
         let literalVar = nextTemp() + "_pat_str"
+        let selfRefVar = nextTemp() + "_pat_self_ref"
+        let otherRefVar = nextTemp() + "_pat_other_ref"
         var prelude = ""
         prelude += "static const uint8_t \(bytesVar)[] = { \(byteLiterals) };\n"
         prelude += "\(getCType(type)) \(literalVar) = String_from_utf8_bytes_unchecked((uint8_t*)\(bytesVar), \(utf8Bytes.count));\n"
-        // `String_equals` consumes (drops) both arguments. In match conditions we must pass
-        // copies so we don't consume the subject value or double-drop the prelude literal.
-        return ([prelude], [(literalVar, type)], "String_equals(__koral_String_copy(&\(path)), __koral_String_copy(&\(literalVar)))", [], [])
+        // Compare via compiler-protocol `String.__equals(self ref, other String ref) Bool`.
+        // The C ABI for `T ref` is `struct Ref`, so we build borrowed refs to both values.
+        prelude += "struct Ref \(selfRefVar);\n"
+        prelude += "\(selfRefVar).ptr = &\(path);\n"
+        prelude += "\(selfRefVar).control = NULL;\n"
+        prelude += "struct Ref \(otherRefVar);\n"
+        prelude += "\(otherRefVar).ptr = &\(literalVar);\n"
+        prelude += "\(otherRefVar).control = NULL;\n"
+        return ([prelude], [(literalVar, type)], "String___equals(\(selfRefVar), \(otherRefVar))", [], [])
       case .wildcard:
         return ([], [], "1", [], [])
       case .variable(let symbol):

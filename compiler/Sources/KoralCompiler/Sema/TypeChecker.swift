@@ -59,7 +59,99 @@ public class TypeChecker {
     case "__drop": return .drop
     case "__at": return .at
     case "__update_at": return .updateAt
+    case "__equals": return .equals
     default: return .normal
+    }
+  }
+
+  private func isBuiltinEqualityComparable(_ type: Type) -> Bool {
+    switch type {
+    case .int, .int8, .int16, .int32, .int64,
+      .uint, .uint8, .uint16, .uint32, .uint64,
+      .float32, .float64,
+      .bool,
+      .pointer:
+      return true
+    default:
+      return false
+    }
+  }
+
+  private func withTempIfRValue(
+    _ expr: TypedExpressionNode,
+    prefix: String,
+    _ body: (TypedExpressionNode) throws -> TypedExpressionNode
+  ) rethrows -> TypedExpressionNode {
+    if expr.valueCategory == .lvalue {
+      return try body(expr)
+    }
+    let sym = nextSynthSymbol(prefix: prefix, type: expr.type)
+    let varExpr: TypedExpressionNode = .variable(identifier: sym)
+    let inner = try body(varExpr)
+    return .letExpression(identifier: sym, value: expr, body: inner, type: inner.type)
+  }
+
+  private func ensureBorrowed(_ expr: TypedExpressionNode, expected: Type) throws -> TypedExpressionNode {
+    if expr.type == expected {
+      return expr
+    }
+    if case .reference(let inner) = expected, expr.type == inner {
+      if expr.valueCategory == .lvalue {
+        return .referenceExpression(expression: expr, type: expected)
+      }
+      throw SemanticError.invalidOperation(op: "implicit ref", type1: expr.type.description, type2: "rvalue")
+    }
+    throw SemanticError.typeMismatch(expected: expected.description, got: expr.type.description)
+  }
+
+  private func buildEqualsCall(lhs: TypedExpressionNode, rhs: TypedExpressionNode) throws -> TypedExpressionNode {
+    guard lhs.type == rhs.type else {
+      throw SemanticError.typeMismatch(expected: lhs.type.description, got: rhs.type.description)
+    }
+
+    let methodName = "__equals"
+    let receiverType = lhs.type
+
+    let methodSym: Symbol
+    if case .genericParameter(let paramName) = receiverType {
+      guard let bounds = genericTraitBounds[paramName], bounds.contains("Equatable") else {
+        throw SemanticError(.generic("Type \(receiverType) is not constrained by trait Equatable"), line: currentLine)
+      }
+      let methods = try flattenedTraitMethods("Equatable")
+      guard let sig = methods[methodName] else {
+        throw SemanticError(.generic("Trait Equatable is missing required method \(methodName)"), line: currentLine)
+      }
+      let expectedType = try expectedFunctionTypeForTraitMethod(sig, selfType: receiverType)
+      methodSym = Symbol(
+        name: "__trait_Equatable_\(methodName)",
+        type: expectedType,
+        kind: .function,
+        methodKind: .equals
+      )
+    } else {
+      guard let concrete = try lookupConcreteMethodSymbol(on: receiverType, name: methodName) else {
+        throw SemanticError.undefinedMember(methodName, receiverType.description)
+      }
+      methodSym = concrete
+    }
+
+    guard case .function(let params, let returns) = methodSym.type else {
+      throw SemanticError.invalidOperation(op: "call", type1: methodSym.type.description, type2: "")
+    }
+    if params.count != 2 {
+      throw SemanticError.invalidArgumentCount(function: methodName, expected: max(0, params.count - 1), got: 1)
+    }
+    if returns != .bool {
+      throw SemanticError.typeMismatch(expected: "Bool", got: returns.description)
+    }
+
+    return try withTempIfRValue(lhs, prefix: "eq_lhs") { lhsVar in
+      return try withTempIfRValue(rhs, prefix: "eq_rhs") { rhsVar in
+        let baseArg = try ensureBorrowed(lhsVar, expected: params[0].type)
+        let otherArg = try ensureBorrowed(rhsVar, expected: params[1].type)
+        let callee: TypedExpressionNode = .methodReference(base: baseArg, method: methodSym, type: methodSym.type)
+        return .call(callee: callee, arguments: [otherArg], type: .bool)
+      }
     }
   }
 
@@ -215,6 +307,16 @@ public class TypeChecker {
           genericArgs: [element],
           methodInfo: ext
         )
+      }
+      return nil
+
+    case .int, .int8, .int16, .int32, .int64,
+      .uint, .uint8, .uint16, .uint32, .uint64,
+      .float32, .float64,
+      .bool:
+      let typeName = selfType.description
+      if let methods = extensionMethods[typeName], let sym = methods[name] {
+        return sym
       }
       return nil
 
@@ -823,14 +925,25 @@ public class TypeChecker {
       }
 
       let type = try resolveTypeNode(typeNode)
+
       let typeName: String
-      if case .structure(let name, _, _, _) = type {
+      let shouldEmitGiven: Bool
+      switch type {
+      case .structure(let name, _, _, _):
         typeName = name
-      } else if case .union(let name, _, _, _) = type {
+        shouldEmitGiven = true
+      case .union(let name, _, _, _):
         typeName = name
-      } else {
+        shouldEmitGiven = true
+      case .int, .int8, .int16, .int32, .int64,
+        .uint, .uint8, .uint16, .uint32, .uint64,
+        .float32, .float64,
+        .bool:
+        typeName = type.description
+        shouldEmitGiven = false
+      default:
         throw SemanticError.invalidOperation(
-          op: "given extends only struct or union", type1: type.description, type2: "")
+          op: "intrinsic given target not supported", type1: type.description, type2: "")
       }
 
       var typedMethods: [TypedMethodDeclaration] = []
@@ -866,20 +979,22 @@ public class TypeChecker {
           methodKind: methodKind
         )
 
-        typedMethods.append(
-          TypedMethodDeclaration(
-            identifier: methodSymbol,
-            parameters: params,
-            body: typedBody,
-            returnType: returnType
-          ))
+        if shouldEmitGiven {
+          typedMethods.append(
+            TypedMethodDeclaration(
+              identifier: methodSymbol,
+              parameters: params,
+              body: typedBody,
+              returnType: returnType
+            ))
+        }
         if extensionMethods[typeName] == nil {
           extensionMethods[typeName] = [:]
         }
         extensionMethods[typeName]![method.name] = methodSymbol
       }
 
-      return .givenDeclaration(type: type, methods: typedMethods)
+      return shouldEmitGiven ? .givenDeclaration(type: type, methods: typedMethods) : nil
 
     case .globalStructDeclaration(
       let name, let typeParameters, let parameters, _, let isCopy, let line):
@@ -1173,6 +1288,18 @@ public class TypeChecker {
         if typedRight.type == .uint8 {
           typedLeft = coerceLiteral(typedLeft, to: .uint8)
         }
+      }
+
+      // Operator sugar for Equatable: lower `==`/`<>` to `__equals(self ref, other ref)`
+      // for non-builtin scalar types (struct/union/String/generic parameters).
+      if (op == .equal || op == .notEqual), typedLeft.type == typedRight.type,
+        !isBuiltinEqualityComparable(typedLeft.type)
+      {
+        let eq = try buildEqualsCall(lhs: typedLeft, rhs: typedRight)
+        if op == .notEqual {
+          return .notExpression(expression: eq, type: .bool)
+        }
+        return eq
       }
 
       let resultType = try checkComparisonOp(op, typedLeft.type, typedRight.type)
@@ -1629,13 +1756,47 @@ public class TypeChecker {
             var typedArg = try inferTypedExpression(arg)
             typedArg = coerceLiteral(typedArg, to: param.type)
             if typedArg.type != param.type {
-              throw SemanticError.typeMismatch(
-                expected: param.type.description,
-                got: typedArg.type.description
-              )
+              // Try implicit ref/deref for arguments as well (mirrors self handling).
+              if case .reference(let inner) = param.type, inner == typedArg.type {
+                if typedArg.valueCategory == .lvalue {
+                  typedArg = .referenceExpression(expression: typedArg, type: param.type)
+                } else {
+                  throw SemanticError.invalidOperation(
+                    op: "implicit ref", type1: typedArg.type.description, type2: "rvalue")
+                }
+              } else if case .reference(let inner) = typedArg.type, inner == param.type {
+                if inner.isCopy {
+                  typedArg = .derefExpression(expression: typedArg, type: inner)
+                } else {
+                  throw SemanticError.invalidOperation(
+                    op: "implicit deref",
+                    type1: typedArg.type.description,
+                    type2: param.type.description
+                  )
+                }
+              } else {
+                throw SemanticError.typeMismatch(
+                  expected: param.type.description,
+                  got: typedArg.type.description
+                )
+              }
             }
             checkMove(typedArg)
             typedArguments.append(typedArg)
+          }
+
+          // Lower primitive `__equals(self ref, other ref)` to direct scalar comparison.
+          if method.methodKind == .equals,
+            returns == .bool,
+            params.count == 2,
+            case .reference(let lhsInner) = params[0].type,
+            case .reference(let rhsInner) = params[1].type,
+            lhsInner == rhsInner,
+            isBuiltinEqualityComparable(lhsInner)
+          {
+            let lhsVal: TypedExpressionNode = .derefExpression(expression: finalBase, type: lhsInner)
+            let rhsVal: TypedExpressionNode = .derefExpression(expression: typedArguments[0], type: rhsInner)
+            return .comparisonExpression(left: lhsVal, op: .equal, right: rhsVal, type: .bool)
           }
 
           return .call(callee: finalCallee, arguments: typedArguments, type: returns)
@@ -1769,6 +1930,12 @@ public class TypeChecker {
                     let methodSym = try instantiateExtensionMethod(
                       baseType: type, structureName: info.base, genericArgs: info.args,
                       methodInfo: ext)
+                    if methodSym.methodKind != .normal {
+                      throw SemanticError(
+                        .generic(
+                          "compiler protocol method \(memberName) cannot be called explicitly"),
+                        line: currentLine)
+                    }
                     return .variable(identifier: methodSym)
                   }
                 }
@@ -1829,6 +1996,12 @@ public class TypeChecker {
           }
 
           if let method = methodSymbol {
+            if method.methodKind != .normal {
+              throw SemanticError(
+                .generic(
+                  "compiler protocol method \(memberName) cannot be called explicitly"),
+                line: currentLine)
+            }
             // Return the function symbol directly (static function reference)
             return .variable(identifier: method)
           }
@@ -1905,6 +2078,12 @@ public class TypeChecker {
           if isLast {
             let typeName = typeToLookup.description
             if let methods = extensionMethods[typeName], let methodSym = methods[memberName] {
+              if methodSym.methodKind != .normal {
+                throw SemanticError(
+                  .generic(
+                    "compiler protocol method \(memberName) cannot be called explicitly"),
+                  line: currentLine)
+              }
               let base: TypedExpressionNode
               if typedPath.isEmpty {
                 base = typedBase
@@ -1924,6 +2103,12 @@ public class TypeChecker {
                       genericArgs: [element],
                       methodInfo: ext
                     )
+                    if methodSym.methodKind != .normal {
+                      throw SemanticError(
+                        .generic(
+                          "compiler protocol method \(memberName) cannot be called explicitly"),
+                        line: currentLine)
+                    }
                     let base: TypedExpressionNode
                     if typedPath.isEmpty {
                       base = typedBase
@@ -1954,6 +2139,12 @@ public class TypeChecker {
                       genericArgs: info.args,
                       methodInfo: ext
                     )
+                    if methodSym.methodKind != .normal {
+                      throw SemanticError(
+                        .generic(
+                          "compiler protocol method \(memberName) cannot be called explicitly"),
+                        line: currentLine)
+                    }
                     let base: TypedExpressionNode
                     if typedPath.isEmpty {
                       base = typedBase
@@ -1974,6 +2165,12 @@ public class TypeChecker {
                       genericArgs: info.args,
                       methodInfo: ext
                     )
+                    if methodSym.methodKind != .normal {
+                      throw SemanticError(
+                        .generic(
+                          "compiler protocol method \(memberName) cannot be called explicitly"),
+                        line: currentLine)
+                    }
                     let base: TypedExpressionNode
                     if typedPath.isEmpty {
                       base = typedBase
@@ -2000,8 +2197,16 @@ public class TypeChecker {
                   let placeholder = Symbol(
                     name: "__trait_\(traitName)_\(memberName)",
                     type: expectedType,
-                    kind: .function
+                    kind: .function,
+                    methodKind: getCompilerMethodKind(memberName)
                   )
+
+                  if placeholder.methodKind != .normal {
+                    throw SemanticError(
+                      .generic(
+                        "compiler protocol method \(memberName) cannot be called explicitly"),
+                      line: currentLine)
+                  }
 
                   let base: TypedExpressionNode
                   if typedPath.isEmpty {
@@ -2968,7 +3173,8 @@ public class TypeChecker {
     let key = "ext:\(mangledName)"
 
     if let (cachedName, cachedType) = instantiatedFunctions[key] {
-      return Symbol(name: cachedName, type: cachedType, kind: .function)
+      let kind = getCompilerMethodKind(method.name)
+      return Symbol(name: cachedName, type: cachedType, kind: .function, methodKind: kind)
     }
 
     let (functionType, typedBody, params) = try withNewScope {
@@ -3029,7 +3235,8 @@ public class TypeChecker {
     let key = "ext:\(mangledName)"
 
     if let (cachedName, cachedType) = instantiatedFunctions[key] {
-      return Symbol(name: cachedName, type: cachedType, kind: .function)
+      let kind = getCompilerMethodKind(method.name)
+      return Symbol(name: cachedName, type: cachedType, kind: .function, methodKind: kind)
     }
 
     let (functionType, _, _) = try withNewScope {
