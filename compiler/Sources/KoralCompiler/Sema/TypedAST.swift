@@ -89,6 +89,9 @@ public indirect enum TypedStatementNode {
   case compoundAssignment(
     target: TypedExpressionNode, operator: CompoundAssignmentOperator, value: TypedExpressionNode)
   case expression(TypedExpressionNode)
+  case `return`(value: TypedExpressionNode?)
+  case `break`
+  case `continue`
 }
 public indirect enum TypedExpressionNode {
   case integerLiteral(value: Int, type: Type)

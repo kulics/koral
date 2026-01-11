@@ -24,6 +24,8 @@ public class TypeChecker {
   private var layoutToTemplateInfo: [String: (base: String, args: [Type])] = [:]
   
   private var currentLine: Int?
+  private var currentFunctionReturnType: Type?
+  private var loopDepth: Int = 0
 
   public init(ast: ASTNode) {
     self.ast = ast
@@ -310,8 +312,24 @@ public class TypeChecker {
 
       var typedMethods: [TypedMethodDeclaration] = []
 
+      if extensionMethods[typeName] == nil {
+        extensionMethods[typeName] = [:]
+      }
+
+      // Pass 1: pre-register all method symbols so methods can call each other regardless
+      // of declaration order within the `given` block.
+      struct GivenMethodInfo {
+        let method: MethodDeclaration
+        let symbol: Symbol
+        let params: [Symbol]
+        let returnType: Type
+      }
+
+      var methodInfos: [GivenMethodInfo] = []
+      methodInfos.reserveCapacity(methods.count)
+
       for method in methods {
-        let (methodType, typedBody, params, returnType) = try withNewScope {
+        let (methodType, params, returnType) = try withNewScope {
           for (typeParam, _) in method.typeParameters {
             let typeType = Type.structure(
               name: typeParam, members: [], isGenericInstantiation: false, isCopy: false)
@@ -329,29 +347,19 @@ public class TypeChecker {
               kind: .variable(param.mutable ? .MutableValue : .Value))
           }
 
-          for param in params {
-            currentScope.define(param.name, param.type, mutable: param.isMutable())
-          }
-
-          let typedBody = try inferTypedExpression(method.body)
-          if typedBody.type != returnType {
-            throw SemanticError.typeMismatch(
-              expected: returnType.description, got: typedBody.type.description)
-          }
-
           // Validate __drop signature
           if method.name == "__drop" {
-             if params.count != 1 || params[0].name != "self" {
-                 throw SemanticError.invalidOperation(op: "__drop must have exactly one parameter 'self'", type1: "", type2: "")
-             }
-             if case .reference(_) = params[0].type {
-                 // OK
-             } else {
-                 throw SemanticError.invalidOperation(op: "__drop 'self' parameter must be a reference", type1: params[0].type.description, type2: "")
-             }
-             if returnType != .void {
-                 throw SemanticError.invalidOperation(op: "__drop must return Void", type1: returnType.description, type2: "")
-             }
+            if params.count != 1 || params[0].name != "self" {
+              throw SemanticError.invalidOperation(op: "__drop must have exactly one parameter 'self'", type1: "", type2: "")
+            }
+            if case .reference(_) = params[0].type {
+              // OK
+            } else {
+              throw SemanticError.invalidOperation(op: "__drop 'self' parameter must be a reference", type1: params[0].type.description, type2: "")
+            }
+            if returnType != .void {
+              throw SemanticError.invalidOperation(op: "__drop must return Void", type1: returnType.description, type2: "")
+            }
           }
 
           let functionType = Type.function(
@@ -360,29 +368,48 @@ public class TypeChecker {
             },
             returns: returnType
           )
-          return (functionType, typedBody, params, returnType)
+          return (functionType, params, returnType)
         }
 
         let mangledName = "\(typeName)_\(method.name)"
         let methodKind = getCompilerMethodKind(method.name)
         let methodSymbol = Symbol(
-            name: mangledName,
-            type: methodType,
-            kind: .function,
-            methodKind: methodKind
+          name: mangledName,
+          type: methodType,
+          kind: .function,
+          methodKind: methodKind
         )
+
+        extensionMethods[typeName]![method.name] = methodSymbol
+        methodInfos.append(
+          GivenMethodInfo(method: method, symbol: methodSymbol, params: params, returnType: returnType)
+        )
+      }
+
+      // Pass 2: typecheck bodies with full method set available.
+      for info in methodInfos {
+        let typedBody = try withNewScope {
+          for (typeParam, _) in info.method.typeParameters {
+            let typeType = Type.structure(
+              name: typeParam, members: [], isGenericInstantiation: false, isCopy: false)
+            try currentScope.defineType(typeParam, type: typeType)
+          }
+
+          try currentScope.defineType("Self", type: type)
+          currentScope.define("self", type, mutable: false)
+
+          let (typedBody, _) = try checkFunctionBody(info.params, info.returnType, info.method.body)
+          return typedBody
+        }
 
         typedMethods.append(
           TypedMethodDeclaration(
-            identifier: methodSymbol,
-            parameters: params,
+            identifier: info.symbol,
+            parameters: info.params,
             body: typedBody,
-            returnType: returnType
-          ))
-        if extensionMethods[typeName] == nil {
-          extensionMethods[typeName] = [:]
-        }
-        extensionMethods[typeName]![method.name] = methodSymbol
+            returnType: info.returnType
+          )
+        )
       }
 
       return .givenDeclaration(type: type, methods: typedMethods)
@@ -567,6 +594,10 @@ public class TypeChecker {
     _ returnType: Type,
     _ body: ExpressionNode
   ) throws -> (TypedExpressionNode, Type) {
+    let previousReturnType = currentFunctionReturnType
+    currentFunctionReturnType = returnType
+    defer { currentFunctionReturnType = previousReturnType }
+
     return try withNewScope {
       // Add parameters to new scope
       for param in params {
@@ -611,6 +642,9 @@ public class TypeChecker {
       return .floatLiteral(value: value, type: .float64)
 
     case .stringLiteral(let value):
+      if let stringType = currentScope.lookupType("String") {
+        return .stringLiteral(value: value, type: stringType)
+      }
       return .stringLiteral(value: value, type: .string)
 
     case .booleanLiteral(let value):
@@ -675,12 +709,17 @@ public class TypeChecker {
           let typedStmt = try checkStatement(stmt)
           typedStatements.append(typedStmt)
           
-          if case .expression(let expr) = typedStmt {
-             if expr.type == .never {
-                 blockType = .never
-                 foundNever = true
-                 // Technically could stop processing here or warn about unreachable code
-             }
+          switch typedStmt {
+          case .expression(let expr):
+            if expr.type == .never {
+              blockType = .never
+              foundNever = true
+            }
+          case .return, .break, .continue:
+            blockType = .never
+            foundNever = true
+          default:
+            break
           }
         }
         
@@ -707,15 +746,38 @@ public class TypeChecker {
       }
 
     case .arithmeticExpression(let left, let op, let right):
-      let typedLeft = try inferTypedExpression(left)
-      let typedRight = try inferTypedExpression(right)
+      var typedLeft = try inferTypedExpression(left)
+      var typedRight = try inferTypedExpression(right)
+
+      // Allow numeric literals to coerce to the other operand type.
+      if typedLeft.type != typedRight.type {
+        if isIntegerType(typedLeft.type) || isFloatType(typedLeft.type) {
+          typedRight = coerceLiteral(typedRight, to: typedLeft.type)
+        }
+        if typedLeft.type != typedRight.type,
+           isIntegerType(typedRight.type) || isFloatType(typedRight.type) {
+          typedLeft = coerceLiteral(typedLeft, to: typedRight.type)
+        }
+      }
       let resultType = try checkArithmeticOp(op, typedLeft.type, typedRight.type)
       return .arithmeticExpression(
         left: typedLeft, op: op, right: typedRight, type: resultType)
 
     case .comparisonExpression(let left, let op, let right):
-      let typedLeft = try inferTypedExpression(left)
-      let typedRight = try inferTypedExpression(right)
+      var typedLeft = try inferTypedExpression(left)
+      var typedRight = try inferTypedExpression(right)
+
+      // Allow numeric literals to coerce to the other operand type.
+      if typedLeft.type != typedRight.type {
+        if isIntegerType(typedLeft.type) || isFloatType(typedLeft.type) {
+          typedRight = coerceLiteral(typedRight, to: typedLeft.type)
+        }
+        if typedLeft.type != typedRight.type,
+           isIntegerType(typedRight.type) || isFloatType(typedRight.type) {
+          typedLeft = coerceLiteral(typedLeft, to: typedRight.type)
+        }
+      }
+
       let resultType = try checkComparisonOp(op, typedLeft.type, typedRight.type)
       return .comparisonExpression(
         left: typedLeft, op: op, right: typedRight, type: resultType)
@@ -783,6 +845,8 @@ public class TypeChecker {
         throw SemanticError.typeMismatch(
           expected: "Bool", got: typedCondition.type.description)
       }
+      loopDepth += 1
+      defer { loopDepth -= 1 }
       let typedBody = try inferTypedExpression(body)
       return .whileExpression(
         condition: typedCondition,
@@ -978,7 +1042,21 @@ public class TypeChecker {
 
           var typedArguments: [TypedExpressionNode] = []
           for (argExpr, param) in zip(arguments, template.parameters) {
-            let typedArg = coerceLiteral(try inferTypedExpression(argExpr), to: try resolveTypeNode(param.type))
+            var typedArg = try inferTypedExpression(argExpr)
+            do {
+              let expectedType = try resolveTypeNode(param.type)
+              typedArg = coerceLiteral(typedArg, to: expectedType)
+            } catch let error as SemanticError {
+              // During implicit generic inference, parameter types may reference template
+              // type parameters (e.g. `T`, `[T]Pointer`) which are not in the caller scope.
+              // Skip literal coercion in that case; we'll infer `T` via unify().
+              if case .undefinedType(let name) = error.kind,
+                 template.typeParameters.contains(where: { $0.name == name }) {
+                // no-op
+              } else {
+                throw error
+              }
+            }
             checkMove(typedArg)
             typedArguments.append(typedArg)
             try unify(
@@ -1102,6 +1180,16 @@ public class TypeChecker {
                   throw SemanticError.invalidOperation(
                     op: "implicit ref", type1: base.type.description, type2: "rvalue")
                 }
+              } else if case .reference(let inner) = base.type, inner == firstParam.type {
+                // 尝试自动解引用：期望 T，实际是 T ref
+                // Only safe for Copy types (otherwise this would implicitly move).
+                if inner.isCopy {
+                  finalBase = .derefExpression(expression: base, type: inner)
+                } else {
+                  throw SemanticError.invalidOperation(
+                    op: "implicit deref", type1: base.type.description,
+                    type2: firstParam.type.description)
+                }
               } else {
                 throw SemanticError.typeMismatch(
                   expected: firstParam.type.description,
@@ -1118,7 +1206,8 @@ public class TypeChecker {
 
           var typedArguments: [TypedExpressionNode] = []
           for (arg, param) in zip(arguments, params.dropFirst()) {
-            let typedArg = try inferTypedExpression(arg)
+            var typedArg = try inferTypedExpression(arg)
+            typedArg = coerceLiteral(typedArg, to: param.type)
             if typedArg.type != param.type {
               throw SemanticError.typeMismatch(
                 expected: param.type.description,
@@ -1145,7 +1234,8 @@ public class TypeChecker {
 
         var typedArguments: [TypedExpressionNode] = []
         for (arg, param) in zip(arguments, params) {
-          let typedArg = try inferTypedExpression(arg)
+          var typedArg = try inferTypedExpression(arg)
+          typedArg = coerceLiteral(typedArg, to: param.type)
           if typedArg.type != param.type {
             throw SemanticError.typeMismatch(
               expected: param.type.description,
@@ -1530,7 +1620,8 @@ public class TypeChecker {
       switch name {
       case "init":
            guard args.count == 1 else { throw SemanticError.invalidArgumentCount(function: "init", expected: 1, got: args.count) }
-           let val = try inferTypedExpression(args[0])
+           var val = try inferTypedExpression(args[0])
+           val = coerceLiteral(val, to: elementType)
            if val.type != elementType {
                throw SemanticError.typeMismatch(expected: elementType.description, got: val.type.description)
            }
@@ -1553,8 +1644,9 @@ public class TypeChecker {
            return .intrinsicCall(.ptrTake(ptr: base))
       case "replace":
            guard args.count == 1 else { throw SemanticError.invalidArgumentCount(function: "replace", expected: 1, got: args.count) }
-           let val = try inferTypedExpression(args[0])
-           if val.type != elementType {
+         var val = try inferTypedExpression(args[0])
+         val = coerceLiteral(val, to: elementType)
+         if val.type != elementType {
                throw SemanticError.typeMismatch(expected: elementType.description, got: val.type.description)
            }
            return .intrinsicCall(.ptrReplace(ptr: base, val: val))
@@ -1628,6 +1720,45 @@ public class TypeChecker {
     case .expression(let expr, let line):
       self.currentLine = line
       return .expression(try inferTypedExpression(expr))
+
+    case .return(let value, let line):
+      self.currentLine = line
+      guard let returnType = currentFunctionReturnType else {
+        throw SemanticError.invalidOperation(op: "return outside of function", type1: "", type2: "")
+      }
+
+      if let value = value {
+        if returnType == .void {
+          throw SemanticError.typeMismatch(expected: "Void", got: "non-Void")
+        }
+
+        var typedValue = try inferTypedExpression(value)
+        typedValue = coerceLiteral(typedValue, to: returnType)
+        if typedValue.type != .never && typedValue.type != returnType {
+          throw SemanticError.typeMismatch(expected: returnType.description, got: typedValue.type.description)
+        }
+        checkMove(typedValue)
+        return .return(value: typedValue)
+      }
+
+      if returnType != .void {
+        throw SemanticError.typeMismatch(expected: returnType.description, got: "Void")
+      }
+      return .return(value: nil)
+
+    case .break(let line):
+      self.currentLine = line
+      if loopDepth <= 0 {
+        throw SemanticError.invalidOperation(op: "break outside of while", type1: "", type2: "")
+      }
+      return .break
+
+    case .continue(let line):
+      self.currentLine = line
+      if loopDepth <= 0 {
+        throw SemanticError.invalidOperation(op: "continue outside of while", type1: "", type2: "")
+      }
+      return .continue
     }
   }
 

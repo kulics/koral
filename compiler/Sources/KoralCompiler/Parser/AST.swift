@@ -121,6 +121,9 @@ public indirect enum StatementNode {
   case compoundAssignment(
     target: ExpressionNode, operator: CompoundAssignmentOperator, value: ExpressionNode, line: Int)
   case expression(ExpressionNode, line: Int)
+  case `return`(value: ExpressionNode?, line: Int)
+  case `break`(line: Int)
+  case `continue`(line: Int)
 }
 public enum CompoundAssignmentOperator {
   case plus

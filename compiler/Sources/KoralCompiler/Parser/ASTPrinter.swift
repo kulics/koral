@@ -163,6 +163,20 @@ public func printAST(_ node: ASTNode) {
 
     case .expression(let expr, _):
       printExpression(expr)
+
+    case .return(let value, _):
+      print("\(indent)Return:")
+      if let value {
+        withIndent {
+          printExpression(value)
+        }
+      }
+
+    case .break:
+      print("\(indent)Break")
+
+    case .continue:
+      print("\(indent)Continue")
     }
   }
 
