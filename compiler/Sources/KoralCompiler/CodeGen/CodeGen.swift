@@ -1071,6 +1071,24 @@ public class CodeGen {
       addIndent()
       buffer += "abort();\n"
       return ""
+
+    case .float32Bits(let value):
+      let v = generateExpressionSSA(value)
+      let result = nextTemp()
+      addIndent()
+      buffer += "uint32_t \(result) = 0;\n"
+      addIndent()
+      buffer += "memcpy(&\(result), &\(v), sizeof(uint32_t));\n"
+      return result
+
+    case .float64Bits(let value):
+      let v = generateExpressionSSA(value)
+      let result = nextTemp()
+      addIndent()
+      buffer += "uint64_t \(result) = 0;\n"
+      addIndent()
+      buffer += "memcpy(&\(result), &\(v), sizeof(uint64_t));\n"
+      return result
     }
   }
 

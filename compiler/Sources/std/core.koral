@@ -208,6 +208,11 @@ public intrinsic let panic(message String) Never;
 public intrinsic let exit(code Int) Never;
 public intrinsic let abort() Never;
 
+// Bit-level utilities (intrinsic)
+// Used for stable hashing of floating point values.
+public intrinsic let float32_bits(value Float32) UInt32;
+public intrinsic let float64_bits(value Float64) UInt64;
+
 // ---------------- Option ----------------
 public type [T Any] Option {
     None();
@@ -952,41 +957,75 @@ given UInt {
     public hash(self ref) UInt = deref self;
 };
 
+// Hashes for smaller unsigned ints.
+given UInt8 { public hash(self ref) UInt = (UInt)deref self; };
+given UInt16 { public hash(self ref) UInt = (UInt)deref self; };
+given UInt32 { public hash(self ref) UInt = (UInt)deref self; };
+
+// Hash UInt64 by mixing low/high parts (portable even if UInt is 32-bit).
+given UInt64 {
+    public hash(self ref) UInt = {
+        let v UInt64 = deref self;
+        let lo UInt = (UInt)v;
+        let hi UInt = (UInt){ v / (UInt64)4294967296 };
+        hash_combine(hash_combine(0, lo), hi)
+    };
+};
+
 // Minimal, deterministic String hash (currently length-based).
 // This satisfies the Hashable contract (equal => same hash) and is a placeholder
 // until numeric casts/bitwise ops across integer widths are available.
 given String {
+    // Deterministic byte-based hash.
+    // Uses `hash_combine` so it doesn't require bitwise ops.
     public hash(self ref) UInt = {
         let s = deref self;
-        let mut h UInt = 0;
+        let mut h UInt = 2166136261;
         let mut i Int = 0;
         while i < s.count_byte() then {
-            h = hash_combine(h, 1);
+            let b UInt8 = s.get_byte(i);
+            h = hash_combine(h, (UInt)b);
             i += 1;
         };
         h
     };
 };
 
-// Fallback hashes for other scalar types (deterministic but low-entropy).
-// Map/Set v1 can start with UInt/Bool/String keys; these are here mainly to
-// keep trait usage ergonomic.
-given Int { public hash(self ref) UInt = { let z UInt = 0; z }; };
-given Int8 { public hash(self ref) UInt = { let z UInt = 0; z }; };
-given Int16 { public hash(self ref) UInt = { let z UInt = 0; z }; };
-given Int32 { public hash(self ref) UInt = { let z UInt = 0; z }; };
-given Int64 { public hash(self ref) UInt = { let z UInt = 0; z }; };
+// Hashes for signed ints (cast to UInt keeps equality=>same-hash for the same type).
+given Int { public hash(self ref) UInt = (UInt)deref self; };
+given Int8 { public hash(self ref) UInt = (UInt)deref self; };
+given Int16 { public hash(self ref) UInt = (UInt)deref self; };
+given Int32 { public hash(self ref) UInt = (UInt)deref self; };
 
-given UInt8 { public hash(self ref) UInt = { let z UInt = 0; z }; };
-given UInt16 { public hash(self ref) UInt = { let z UInt = 0; z }; };
-given UInt32 { public hash(self ref) UInt = { let z UInt = 0; z }; };
-given UInt64 { public hash(self ref) UInt = { let z UInt = 0; z }; };
+// Hash Int64 by mixing low/high parts.
+given Int64 {
+    public hash(self ref) UInt = {
+        let v UInt64 = (UInt64)deref self;
+        let lo UInt = (UInt)v;
+        let hi UInt = (UInt){ v / (UInt64)4294967296 };
+        hash_combine(hash_combine(0, lo), hi)
+    };
+};
 
-given Float32 { public hash(self ref) UInt = { let z UInt = 0; z }; };
-given Float64 { public hash(self ref) UInt = { let z UInt = 0; z }; };
+// Hash floats via bit-pattern.
+given Float32 {
+    public hash(self ref) UInt = {
+        let bits UInt32 = float32_bits(deref self);
+        hash_combine(0, (UInt)bits)
+    };
+};
+
+given Float64 {
+    public hash(self ref) UInt = {
+        let bits UInt64 = float64_bits(deref self);
+        let lo UInt = (UInt)bits;
+        let hi UInt = (UInt){ bits / (UInt64)4294967296 };
+        hash_combine(hash_combine(0, lo), hi)
+    };
+};
 
 given[T Any] [T]Pointer {
-    public hash(self ref) UInt = { let z UInt = 0; z };
+    public hash(self ref) UInt = (UInt)deref self;
 };
 
 public let [T Comparable]max(a T, b T) T = if a > b then a else b;

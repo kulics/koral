@@ -150,6 +150,10 @@ public indirect enum TypedIntrinsic {
   case ptrTake(ptr: TypedExpressionNode)
   case ptrReplace(ptr: TypedExpressionNode, val: TypedExpressionNode)
 
+  // Bit utilities
+  case float32Bits(value: TypedExpressionNode)
+  case float64Bits(value: TypedExpressionNode)
+
   // Primitive IO
   case printString(message: TypedExpressionNode)
   case printInt(value: TypedExpressionNode)
@@ -180,6 +184,10 @@ public indirect enum TypedIntrinsic {
     case .ptrReplace(let ptr, _):
       if case .pointer(let element) = ptr.type { return element }
       fatalError("ptrReplace on non-pointer")
+
+    case .float32Bits: return .uint32
+    case .float64Bits: return .uint64
+
     case .printString: return .void
     case .printInt: return .void
     case .printBool: return .void
