@@ -17,8 +17,48 @@ public intrinsic type UInt64;
 public intrinsic type Float32;
 public intrinsic type Float64;
 
-public intrinsic type String;
 public intrinsic type [T Any]Pointer;
+
+// Memory management primitives
+public intrinsic let [T Any]ref_count(r T ref) Int;
+
+// Allocates uninitialized memory for `capacity` number of elements.
+// The caller is responsible for deallocating this memory later.
+public intrinsic let [T Any]alloc_memory(capacity Int) [T]Pointer;
+
+// Deallocates the memory pointed to by `ptr`.
+// PRECONDITION: The memory must be deinitialized (i.e. uninitialized).
+// If the memory contains values that need to be dropped, call `ptr.deinit()` first.
+public intrinsic let [T Any]dealloc_memory(ptr [T]Pointer) Void;
+
+// Copies `count` elements from `source` to `dest`.
+// The memory regions must NOT overlap.
+// PRECONDITION: Memory at `dest` must be uninitialized. `source` must be initialized.
+// POSTCONDITION: Memory at `dest` is initialized. `source` remains initialized.
+public intrinsic let [T Any]copy_memory(dest [T]Pointer, source [T]Pointer, count Int) Void;
+
+// Moves `count` elements from `source` to `dest`.
+// The memory regions may overlap.
+// PRECONDITION: Memory at `dest` must be uninitialized. `source` must be initialized.
+// POSTCONDITION: Memory at `dest` is initialized. Memory at `source` becomes uninitialized.
+public intrinsic let [T Any]move_memory(dest [T]Pointer, source [T]Pointer, count Int) Void;
+
+// String storage and COW String
+public type StringStorage(mut data [UInt8]Pointer, mut len Int, mut cap Int);
+
+given StringStorage {
+    // [Compiler Protocol] drop releases underlying buffer
+    __drop(self ref) = {
+        dealloc_memory(self.data);
+    };
+};
+
+public type String(mut storage StringStorage ref) Copy;
+
+// Forward declarations for iterator helpers used in `given String`
+public type StringSplitAsciiWhitespace(source String, mut index Int);
+public type StringSplit(source String, sep String, mut index Int);
+public type StringLines(source String, mut index Int);
 
 // type Byte = UInt8;
 // type Rune = UInt32;
@@ -63,29 +103,6 @@ intrinsic given[T Any] [T]Pointer {
     // The offset is in units of T (stride), not bytes.
     offset(self, n Int) [T]Pointer;
 };
-
-public intrinsic let [T Any]ref_count(r T ref) Int;
-
-// Allocates uninitialized memory for `capacity` number of elements.
-// The caller is responsible for deallocating this memory later.
-public intrinsic let [T Any]alloc_memory(capacity Int) [T]Pointer;
-
-// Deallocates the memory pointed to by `ptr`.
-// PRECONDITION: The memory must be deinitialized (i.e. uninitialized).
-// If the memory contains values that need to be dropped, call `ptr.deinit()` first.
-public intrinsic let [T Any]dealloc_memory(ptr [T]Pointer) Void;
-
-// Copies `count` elements from `source` to `dest`.
-// The memory regions must NOT overlap.
-// PRECONDITION: Memory at `dest` must be uninitialized. `source` must be initialized.
-// POSTCONDITION: Memory at `dest` is initialized. `source` remains initialized.
-public intrinsic let [T Any]copy_memory(dest [T]Pointer, source [T]Pointer, count Int) Void;
-
-// Moves `count` elements from `source` to `dest`.
-// The memory regions may overlap.
-// PRECONDITION: Memory at `dest` must be uninitialized. `source` must be initialized.
-// POSTCONDITION: Memory at `dest` is initialized. Memory at `source` becomes uninitialized.
-public intrinsic let [T Any]move_memory(dest [T]Pointer, source [T]Pointer, count Int) Void;
 
 // Temporary IO
 public intrinsic let print_string(message String) Void;
@@ -159,6 +176,492 @@ given [T Any, E Any] [T, E]Result {
             .Err(e) -> e;
         }
     }
+};
+
+// ---------------- String ----------------
+
+given String {
+    // Unsafe constructor: does not validate UTF-8
+    public from_utf8_bytes_unchecked(bytes [UInt8]Pointer, len Int) String = {
+        let cap = len + 1; // keep room for trailing 0
+        let data = [UInt8]alloc_memory(cap);
+        copy_memory(data, bytes, len);
+        data.offset(len).init(0);
+        let storage = ref StringStorage(data, len, cap);
+        String(storage)
+    };
+
+    public empty() String = {
+        let data = [UInt8]alloc_memory(1);
+        data.init(0);
+        let storage = ref StringStorage(data, 0, 1);
+        String(storage)
+    };
+
+    private is_ascii_space(b UInt8) Bool =
+        b == 32 or b == 9 or b == 10 or b == 11 or b == 12 or b == 13;
+
+    private bounds_check_read(self, index Int) Void = {
+        if index < 0 or index > self.storage.len then { panic("String index out of bounds"); };
+    };
+
+    private bounds_check_write(self, index Int) Void = {
+        if index < 0 or index >= self.storage.len then { panic("String index out of bounds"); };
+    };
+
+    private ensure_unique(self ref) Void = {
+        if ref_count(self.storage) > 1 then {
+            let old = self.storage;
+            let new_data = [UInt8]alloc_memory(old.cap);
+            copy_memory(new_data, old.data, old.len + 1); // copy including trailing 0
+            let new_storage = ref StringStorage(new_data, old.len, old.cap);
+            self.storage = new_storage;
+        }
+    };
+
+    private ensure_capacity(self ref, min_cap Int) Void = {
+        if self.storage.cap >= min_cap then { return; };
+        let mut new_cap = self.storage.cap * 2;
+        if new_cap < min_cap then { new_cap = min_cap; };
+
+        let new_data = [UInt8]alloc_memory(new_cap);
+        copy_memory(new_data, self.storage.data, self.storage.len + 1);
+        let new_storage = ref StringStorage(new_data, self.storage.len, new_cap);
+        self.storage = new_storage;
+    };
+
+    public count_byte(self) Int = self.storage.len;
+
+    public is_empty(self) Bool = self.storage.len == 0;
+
+    public get_byte(self, index Int) UInt8 = {
+        self.bounds_check_read(index);
+        deref self.storage.data.offset(index).peek()
+    };
+
+    public set_byte(self ref, index Int, value UInt8) Void = {
+        self.bounds_check_write(index);
+        self.ensure_unique();
+        self.storage.data.offset(index).replace(value);
+    };
+
+    public push_byte(self ref, value UInt8) Void = {
+        self.ensure_unique();
+        let needed = self.storage.len + 2; // new byte + trailing 0
+        self.ensure_capacity(needed);
+        self.storage.data.offset(self.storage.len).init(value);
+        self.storage.len = self.storage.len + 1;
+        self.storage.data.offset(self.storage.len).replace(0);
+    };
+
+    public push(self ref, other String) Void = {
+        let other_len = other.storage.len;
+        self.ensure_unique();
+        let needed = self.storage.len + other_len + 1;
+        self.ensure_capacity(needed);
+        let dest = self.storage.data.offset(self.storage.len);
+        copy_memory(dest, other.storage.data, other_len);
+        self.storage.len = self.storage.len + other_len;
+        self.storage.data.offset(self.storage.len).replace(0);
+    };
+
+    public reserve_byte(self ref, capacity Int) Void = {
+        self.ensure_unique();
+        let need = capacity + 1;
+        self.ensure_capacity(need);
+    };
+
+    public capacity_byte(self) Int = self.storage.cap - 1;
+
+    public starts_with(self, prefix String) Bool = {
+        if prefix.storage.len > self.storage.len then { return false; };
+        let mut i = 0;
+        while i < prefix.storage.len then {
+            if self.get_byte(i) <> prefix.get_byte(i) then { return false; };
+            i += 1;
+        };
+        true
+    };
+
+    public ends_with(self, suffix String) Bool = {
+        let slen = suffix.storage.len;
+        if slen > self.storage.len then { return false; };
+        let offset = self.storage.len - slen;
+        let mut i = 0;
+        while i < slen then {
+            if self.get_byte(offset + i) <> suffix.get_byte(i) then { return false; };
+            i += 1;
+        };
+        true
+    };
+
+    public contains_byte(self, b UInt8) Bool = {
+        self.first_index_of_byte(b) match {
+            .Some(_) -> true;
+            .None -> false
+        }
+    };
+
+    public first_index_of_byte(self, b UInt8) [Int]Option = {
+        let mut i = 0;
+        while i < self.storage.len then {
+            if self.get_byte(i) == b then { return [Int]Option.Some(i); };
+            i += 1;
+        };
+        [Int]Option.None()
+    };
+
+    public last_index_of_byte(self, b UInt8) [Int]Option = {
+        let mut i = self.storage.len;
+        while i > 0 then {
+            i -= 1;
+            if self.get_byte(i) == b then { return [Int]Option.Some(i); };
+        };
+        [Int]Option.None()
+    };
+
+    private make_substring(self, start Int, len Int) String = {
+        if start < 0 or len < 0 or start + len > self.storage.len then {
+            panic("substring out of bounds");
+        };
+        let cap = len + 1;
+        let data = [UInt8]alloc_memory(cap);
+        copy_memory(data, self.storage.data.offset(start), len);
+        data.offset(len).init(0);
+        let storage = ref StringStorage(data, len, cap);
+        String(storage)
+    };
+
+    public substring(self, start Int, len Int) String = self.make_substring(start, len);
+
+    public trim_ascii_start(self) String = {
+        let mut i = 0;
+        while i < self.storage.len and String.is_ascii_space(self.get_byte(i)) then { i += 1; };
+        self.make_substring(i, self.storage.len - i)
+    };
+
+    public trim_ascii_end(self) String = {
+        let mut end = self.storage.len;
+        while end > 0 and String.is_ascii_space(self.get_byte(end - 1)) then { end -= 1; };
+        self.make_substring(0, end)
+    };
+
+    public trim_ascii_whitespace(self) String = {
+        let head = self.trim_ascii_start();
+        head.trim_ascii_end()
+    };
+
+    private to_lower_byte(b UInt8) UInt8 =
+        if b >= 65 and b <= 90 then b + 32 else b;
+
+    private to_upper_byte(b UInt8) UInt8 =
+        if b >= 97 and b <= 122 then b - 32 else b;
+
+    public to_ascii_lowercase(self) String = {
+        let cap = self.storage.len + 1;
+        let data = [UInt8]alloc_memory(cap);
+        let mut i = 0;
+        while i < self.storage.len then {
+            data.offset(i).init(String.to_lower_byte(self.get_byte(i)));
+            i += 1;
+        };
+        data.offset(self.storage.len).init(0);
+        let storage = ref StringStorage(data, self.storage.len, cap);
+        String(storage)
+    };
+
+    public to_ascii_uppercase(self) String = {
+        let cap = self.storage.len + 1;
+        let data = [UInt8]alloc_memory(cap);
+        let mut i = 0;
+        while i < self.storage.len then {
+            data.offset(i).init(String.to_upper_byte(self.get_byte(i)));
+            i += 1;
+        };
+        data.offset(self.storage.len).init(0);
+        let storage = ref StringStorage(data, self.storage.len, cap);
+        String(storage)
+    };
+
+    public to_ascii_title(self) String = {
+        let cap = self.storage.len + 1;
+        let data = [UInt8]alloc_memory(cap);
+        let mut in_word = false;
+        let mut i = 0;
+        while i < self.storage.len then {
+            let b = self.get_byte(i);
+            if String.is_ascii_space(b) then {
+                in_word = false;
+                data.offset(i).init(b);
+            } else {
+                if not in_word then {
+                    in_word = true;
+                    data.offset(i).init(String.to_upper_byte(b));
+                } else {
+                    data.offset(i).init(String.to_lower_byte(b));
+                }
+            };
+            i += 1;
+        };
+        data.offset(self.storage.len).init(0);
+        let storage = ref StringStorage(data, self.storage.len, cap);
+        String(storage)
+    };
+
+    public insert_byte(self ref, index Int, value UInt8) Void = {
+        if index < 0 or index > self.storage.len then { panic("insert out of bounds"); };
+        self.ensure_unique();
+        let needed = self.storage.len + 2;
+        self.ensure_capacity(needed);
+        let src = self.storage.data.offset(index);
+        let dest = self.storage.data.offset(index + 1);
+        let count = self.storage.len - index + 1; // include trailing 0
+        move_memory(dest, src, count);
+        self.storage.data.offset(index).replace(value);
+        self.storage.len = self.storage.len + 1;
+    };
+
+    public insert(self ref, index Int, value String) Void = {
+        if index < 0 or index > self.storage.len then { panic("insert out of bounds"); };
+        let vlen = value.storage.len;
+        if vlen == 0 then { return; };
+        self.ensure_unique();
+        let needed = self.storage.len + vlen + 1;
+        self.ensure_capacity(needed);
+        let src = self.storage.data.offset(index);
+        let dest = self.storage.data.offset(index + vlen);
+        let count = self.storage.len - index + 1; // include trailing 0
+        move_memory(dest, src, count);
+        copy_memory(self.storage.data.offset(index), value.storage.data, vlen);
+        self.storage.len = self.storage.len + vlen;
+    };
+
+    public remove_byte(self ref, index Int) UInt8 = {
+        if index < 0 or index >= self.storage.len then { panic("remove out of bounds"); };
+        self.ensure_unique();
+        let old = deref self.storage.data.offset(index).peek();
+        let dest = self.storage.data.offset(index);
+        let src = self.storage.data.offset(index + 1);
+        let count = self.storage.len - index; // include trailing 0
+        move_memory(dest, src, count);
+        self.storage.len = self.storage.len - 1;
+        old
+    };
+
+    public pop_byte(self ref) [UInt8]Option =
+        if self.storage.len == 0 then { [UInt8]Option.None() }
+        else { [UInt8]Option.Some(self.remove_byte(self.storage.len - 1)) };
+
+    public is_ascii(self) Bool = {
+        let mut i = 0;
+        while i < self.storage.len then {
+            if self.get_byte(i) >= 128 then { return false; };
+            i += 1;
+        };
+        true
+    };
+
+    public is_ascii_blank(self) Bool = {
+        let mut i = 0;
+        while i < self.storage.len then {
+            let b = self.get_byte(i);
+            if not String.is_ascii_space(b) then { return false; };
+            i += 1;
+        };
+        true
+    };
+
+    public equals(self, other String) Bool = {
+        if self.storage.len <> other.storage.len then { return false; };
+        let mut i = 0;
+        while i < self.storage.len then {
+            if self.get_byte(i) <> other.get_byte(i) then { return false; };
+            i += 1;
+        };
+        true
+    };
+
+    public compare(self, other String) Int = {
+        let min = if self.storage.len < other.storage.len then self.storage.len else other.storage.len;
+        let mut i = 0;
+        while i < min then {
+            let a = self.get_byte(i);
+            let b = other.get_byte(i);
+            if a < b then { return 0 - 1; };
+            if a > b then { return 1; };
+            i += 1;
+        };
+        if self.storage.len < other.storage.len then 0 - 1
+        else if self.storage.len > other.storage.len then 1
+        else 0
+    };
+
+    public find_from(self, pat String, start Int) [Int]Option = {
+        if pat.storage.len == 0 then { panic("find empty pattern"); };
+        if start < 0 or start > self.storage.len then { panic("find start out of bounds"); };
+        let mut i = start;
+        let max = self.storage.len - pat.storage.len;
+        while i <= max then {
+            let mut j = 0;
+            let mut ok = true;
+            while j < pat.storage.len then {
+                if self.get_byte(i + j) <> pat.get_byte(j) then { ok = false; break; };
+                j += 1;
+            };
+            if ok then { return [Int]Option.Some(i); };
+            i += 1;
+        };
+        [Int]Option.None()
+    };
+
+    public find(self, pat String) [Int]Option = self.find_from(pat, 0);
+
+    public contains(self, pat String) Bool = {
+        self.find_from(pat, 0) match {
+            .Some(_) -> true;
+            .None -> false
+        }
+    };
+
+    public count_string(self, pat String) Int = {
+        let mut count = 0;
+        let mut idxOpt = self.find_from(pat, 0);
+        while true then {
+            idxOpt match {
+                .Some(i) -> {
+                    count += 1;
+                    idxOpt = self.find_from(pat, i + pat.storage.len);
+                };
+                .None -> { break; }
+            };
+        };
+        count
+    };
+
+    public repeat(self, times Int) String = {
+        if times < 0 then { panic("repeat negative"); };
+        if times == 0 then { return String.empty(); };
+        let total = self.storage.len * times;
+        let cap = total + 1;
+        let data = [UInt8]alloc_memory(cap);
+        let mut offset = 0;
+        let mut t = 0;
+        while t < times then {
+            copy_memory(data.offset(offset), self.storage.data, self.storage.len);
+            offset += self.storage.len;
+            t += 1;
+        };
+        data.offset(total).init(0);
+        let storage = ref StringStorage(data, total, cap);
+        String(storage)
+    };
+
+    public replace(self, pat String, with String) String = {
+        if pat.storage.len == 0 then { panic("replace empty pattern"); };
+        let mut result = String.empty();
+        let mut start = 0;
+        let mut idxOpt = self.find_from(pat, start);
+        while true then {
+            idxOpt match {
+                .Some(idx) -> {
+                    let prefix_len = idx - start;
+                    if prefix_len > 0 then {
+                        let slice = self.make_substring(start, prefix_len);
+                        result.push(slice);
+                    };
+                    result.push(with);
+                    start = idx + pat.storage.len;
+                    idxOpt = self.find_from(pat, start);
+                };
+                .None -> { break; }
+            };
+        };
+        if start < self.storage.len then {
+            let tail = self.make_substring(start, self.storage.len - start);
+            result.push(tail);
+        };
+        result
+    };
+
+    public split_ascii_whitespace(self) StringSplitAsciiWhitespace =
+        StringSplitAsciiWhitespace(self, 0);
+
+    public split(self, sep String) StringSplit = {
+        if sep.storage.len == 0 then { panic("split empty separator"); };
+        StringSplit(self, sep, 0)
+    };
+
+    public lines(self) StringLines = StringLines(self, 0);
+
+    public remove_prefix(self, prefix String) String =
+        if self.starts_with(prefix) then { self.make_substring(prefix.storage.len, self.storage.len - prefix.storage.len) } else { self }
+    ;
+
+    public remove_suffix(self, suffix String) String = {
+        if self.ends_with(suffix) then {
+            let remain = self.storage.len - suffix.storage.len;
+            self.make_substring(0, remain)
+        } else { self }
+    };
+};
+
+given StringSplitAsciiWhitespace {
+    public next(self ref) [String]Option = {
+        let len = self.source.count_byte();
+        let mut i = self.index;
+        while i < len and String.is_ascii_space(self.source.get_byte(i)) then { i += 1; };
+        if i >= len then { return [String]Option.None(); };
+        let start = i;
+        while i < len and not String.is_ascii_space(self.source.get_byte(i)) then { i += 1; };
+        let part = self.source.substring(start, i - start);
+        self.index = i;
+        [String]Option.Some(part)
+    };
+};
+
+given StringSplit {
+    public next(self ref) [String]Option = {
+        let len = self.source.count_byte();
+        if self.index > len then { return [String]Option.None(); };
+        let mut idxOpt = self.source.find_from(self.sep, self.index);
+        idxOpt match {
+            .Some(i) -> {
+                let part = self.source.substring(self.index, i - self.index);
+                self.index = i + self.sep.count_byte();
+                [String]Option.Some(part)
+            };
+            .None -> {
+                let part = self.source.substring(self.index, len - self.index);
+                self.index = len + 1;
+                [String]Option.Some(part)
+            }
+        }
+    };
+};
+
+given StringLines {
+    public next(self ref) [String]Option = {
+        let len = self.source.count_byte();
+        if self.index > len then { return [String]Option.None(); };
+        // Do not yield a trailing empty line when the string ends with '\n'.
+        if self.index == len then {
+            self.index = len + 1;
+            return [String]Option.None();
+        };
+        let mut iOpt = self.source.find_from("\n", self.index);
+        iOpt match {
+            .Some(i) -> {
+                let part = self.source.substring(self.index, i - self.index);
+                self.index = i + 1;
+                [String]Option.Some(part)
+            };
+            .None -> {
+                let part = self.source.substring(self.index, len - self.index);
+                self.index = len + 1;
+                [String]Option.Some(part)
+            }
+        }
+    };
 };
 
 public type [T Copy]List(private mut source [T]Pointer, private mut len Int, private mut cap Int);
@@ -275,28 +778,6 @@ given[T Copy] [T]ListIterator {
 };
 
 /*
-public type String(source [Byte]List);
-
-given String {
-    public of_utf8_bytes(data [Byte]List) Self = String(data);
-
-    public count(self [T]List ref) Int = self.source.count();
-
-    public iterator(self) StringIterator = StringIterator(self, -1);
-}
-
-public type StringIterator(source String, mut index Int);
-
-given StringIterator {
-    public next(self Self ref) [Rune]Option = 
-        if self.index < self._source.data.size() then {
-            self.index += 1;
-            .Some((Rune){deref self.source.source.get(self.index)})
-        } else {
-            .None()
-        }
-}
-
 public trait [T Any]Iterator {
     next(self Self ref) [T]Option;
 }

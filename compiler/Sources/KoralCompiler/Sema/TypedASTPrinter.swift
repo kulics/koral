@@ -114,6 +114,18 @@ public func printTypedAST(_ node: TypedProgram) {
 
     case .expression(let expr):
       printTypedExpression(expr)
+
+    case .return(let value):
+      print("\(indent)Return")
+      if let value {
+        withIndent { printTypedExpression(value) }
+      }
+
+    case .break:
+      print("\(indent)Break")
+
+    case .continue:
+      print("\(indent)Continue")
     }
   }
 

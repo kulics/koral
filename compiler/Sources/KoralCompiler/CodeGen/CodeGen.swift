@@ -7,6 +7,13 @@ public class CodeGen {
   private var lifetimeScopeStack: [[(name: String, type: Type, consumed: Bool)]] = []
   private var userDefinedDrops: [String: String] = [:] // TypeName -> Mangled Drop Function Name
 
+  private struct LoopContext {
+    let startLabel: String
+    let endLabel: String
+    let scopeIndex: Int
+  }
+  private var loopStack: [LoopContext] = []
+
   public init(ast: TypedProgram) {
     self.ast = ast
   }
@@ -29,6 +36,28 @@ public class CodeGen {
       } else if case .reference(_) = type {
         addIndent()
         buffer += "__koral_release(\(name).control);\n"
+      }
+    }
+  }
+
+  private func emitCleanup(fromScopeIndex startIndex: Int) {
+    guard !lifetimeScopeStack.isEmpty else { return }
+    let clampedStart = max(0, min(startIndex, lifetimeScopeStack.count - 1))
+
+    for scopeIndex in stride(from: lifetimeScopeStack.count - 1, through: clampedStart, by: -1) {
+      let vars = lifetimeScopeStack[scopeIndex]
+      for (name, type, consumed) in vars.reversed() {
+        if consumed { continue }
+        if case .structure(let typeName, _, _, _) = type {
+          addIndent()
+          buffer += "__koral_\(typeName)_drop(&\(name));\n"
+        } else if case .union(let typeName, _, _, _) = type {
+          addIndent()
+          buffer += "__koral_\(typeName)_drop(&\(name));\n"
+        } else if case .reference(_) = type {
+          addIndent()
+          buffer += "__koral_release(\(name).control);\n"
+        }
       }
     }
   }
@@ -131,11 +160,6 @@ public class CodeGen {
         if case .globalUnionDeclaration(let identifier, let cases) = node {
           generateUnionDeclaration(identifier, cases)
         }
-      }
-      buffer += "\n"
-
-      // 先生成所有函数声明
-      for node in nodes {
         if case .globalFunction(let identifier, let params, _) = node {
           generateFunctionDeclaration(identifier, params)
         }
@@ -152,7 +176,6 @@ public class CodeGen {
       for node in nodes {
         if case .globalVariable(let identifier, let value, _) = node {
           let cType = getCType(identifier.type)
-          // 简单表达式直接初始化
           switch value {
           case .integerLiteral(_, _), .floatLiteral(_, _),
             .stringLiteral(_, _), .booleanLiteral(_, _):
@@ -273,8 +296,17 @@ public class CodeGen {
     case .floatLiteral(let value, _):
       return String(value)
 
-    case .stringLiteral(let value, _):
-      return "\"\(value)\""
+    case .stringLiteral(let value, let type):
+      let bytesVar = nextTemp() + "_bytes"
+      let utf8Bytes = Array(value.utf8)
+      let byteLiterals = utf8Bytes.map { String(format: "0x%02X", $0) }.joined(separator: ", ")
+      addIndent()
+      buffer += "static const uint8_t \(bytesVar)[] = { \(byteLiterals) };\n"
+
+      let result = nextTemp()
+      addIndent()
+      buffer += "\(getCType(type)) \(result) = String_from_utf8_bytes_unchecked((uint8_t*)\(bytesVar), \(utf8Bytes.count));\n"
+      return result
 
     case .booleanLiteral(let value, _):
       return value ? "1" : "0"
@@ -515,22 +547,26 @@ public class CodeGen {
 
     case .whileExpression(let condition, let body, _):
       let labelPrefix = nextTemp()
+      let startLabel = "\(labelPrefix)_start"
+      let endLabel = "\(labelPrefix)_end"
       addIndent()
-      buffer += "\(labelPrefix)_start: {\n"
+      buffer += "\(startLabel): {\n"
       withIndent {
         let conditionVar = generateExpressionSSA(condition)
         addIndent()
-        buffer += "if (!\(conditionVar)) { goto \(labelPrefix)_end; }\n"
+        buffer += "if (!\(conditionVar)) { goto \(endLabel); }\n"
         pushScope()
+        loopStack.append(LoopContext(startLabel: startLabel, endLabel: endLabel, scopeIndex: lifetimeScopeStack.count - 1))
         _ = generateExpressionSSA(body)
+        loopStack.removeLast()
         popScope()
         addIndent()
-        buffer += "goto \(labelPrefix)_start;\n"
+        buffer += "goto \(startLabel);\n"
       }
       addIndent()
       buffer += "}\n"
       addIndent()
-      buffer += "\(labelPrefix)_end: {\n"
+      buffer += "\(endLabel): {\n"
       addIndent()
       buffer += "}\n"
       return ""
@@ -819,8 +855,12 @@ public class CodeGen {
 
     case .printString(let msg):
       let m = generateExpressionSSA(msg)
+      // Access StringStorage through the ref inside String
+      let storageVar = nextTemp()
       addIndent()
-      buffer += "printf(\"%s\\n\", \(m));\n"
+      buffer += "struct StringStorage* \(storageVar) = (struct StringStorage*)\(m).storage.ptr;\n"
+      addIndent()
+      buffer += "printf(\"%.*s\\n\", (int)\(storageVar)->len, (const char*)\(storageVar)->data);\n"
       return ""
     case .printInt(let val):
       let v = generateExpressionSSA(val)
@@ -834,8 +874,11 @@ public class CodeGen {
       return ""
     case .panic(let msg):
       let m = generateExpressionSSA(msg)
+      let storageVar = nextTemp()
       addIndent()
-      buffer += "fprintf(stderr, \"Panic: %s\\n\", \(m));\n"
+      buffer += "struct StringStorage* \(storageVar) = (struct StringStorage*)\(m).storage.ptr;\n"
+      addIndent()
+      buffer += "fprintf(stderr, \"Panic: %.*s\\n\", (int)\(storageVar)->len, (const char*)\(storageVar)->data);\n"
       addIndent()
       buffer += "exit(1);\n"
       return ""
@@ -984,6 +1027,62 @@ public class CodeGen {
       
     case .expression(let expr):
       _ = generateExpressionSSA(expr)
+
+    case .return(let value):
+      if let value = value {
+        let valueResult = generateExpressionSSA(value)
+        let retVar = nextTemp()
+
+        if case .structure(let typeName, _, _, _) = value.type {
+          addIndent()
+          if value.valueCategory == .lvalue {
+            buffer += "\(getCType(value.type)) \(retVar) = __koral_\(typeName)_copy(&\(valueResult));\n"
+          } else {
+            buffer += "\(getCType(value.type)) \(retVar) = \(valueResult);\n"
+          }
+        } else if case .union(let typeName, _, _, _) = value.type {
+          addIndent()
+          if value.valueCategory == .lvalue {
+            buffer += "\(getCType(value.type)) \(retVar) = __koral_\(typeName)_copy(&\(valueResult));\n"
+          } else {
+            buffer += "\(getCType(value.type)) \(retVar) = \(valueResult);\n"
+          }
+        } else if case .reference(_) = value.type {
+          addIndent()
+          buffer += "\(getCType(value.type)) \(retVar) = \(valueResult);\n"
+          if value.valueCategory == .lvalue {
+            addIndent()
+            buffer += "__koral_retain(\(retVar).control);\n"
+          }
+        } else {
+          addIndent()
+          buffer += "\(getCType(value.type)) \(retVar) = \(valueResult);\n"
+        }
+
+        emitCleanup(fromScopeIndex: 0)
+        addIndent()
+        buffer += "return \(retVar);\n"
+      } else {
+        emitCleanup(fromScopeIndex: 0)
+        addIndent()
+        buffer += "return;\n"
+      }
+
+    case .break:
+      guard let ctx = loopStack.last else {
+        fatalError("break used outside of loop codegen")
+      }
+      emitCleanup(fromScopeIndex: ctx.scopeIndex)
+      addIndent()
+      buffer += "goto \(ctx.endLabel);\n"
+
+    case .continue:
+      guard let ctx = loopStack.last else {
+        fatalError("continue used outside of loop codegen")
+      }
+      emitCleanup(fromScopeIndex: ctx.scopeIndex)
+      addIndent()
+      buffer += "goto \(ctx.startLabel);\n"
     }
   }
 
@@ -1042,7 +1141,7 @@ public class CodeGen {
     case .uint64: return "uint64_t"
     case .float32: return "float"
     case .float64: return "double"
-    case .string: return "const char*"
+    case .string: return "struct String"
     case .bool: return "_Bool"
     case .void: return "void"
     case .never: return "void"
@@ -1452,11 +1551,46 @@ public class CodeGen {
       let temp = generateExpressionSSA(finalExpr)
       if finalExpr.type != .void && finalExpr.type != .never {
         let resultVar = nextTemp()
-        addIndent()
-        buffer += "\(getCType(finalExpr.type)) \(resultVar) = \(temp);\n"
-        if case .reference(_) = finalExpr.type, finalExpr.valueCategory == .lvalue {
+        if case .structure(let typeName, _, _, _) = finalExpr.type {
+          if finalExpr.valueCategory == .lvalue {
+            // Returning an lvalue struct from a block:
+            // - Copy types must be copied, because scope cleanup will drop the original.
+            // - Move types can be moved, but we must mark the source variable as consumed.
+            switch finalExpr {
+            case .variable(let symbol) where !symbol.type.isCopy:
+              addIndent()
+              buffer += "\(getCType(finalExpr.type)) \(resultVar) = \(temp);\n"
+              consumeVariable(symbol.name)
+            default:
+              addIndent()
+              buffer += "\(getCType(finalExpr.type)) \(resultVar) = __koral_\(typeName)_copy(&\(temp));\n"
+            }
+          } else {
+            addIndent()
+            buffer += "\(getCType(finalExpr.type)) \(resultVar) = \(temp);\n"
+          }
+        } else if case .union(let typeName, _, _, _) = finalExpr.type {
+          if finalExpr.valueCategory == .lvalue {
+            switch finalExpr {
+            case .variable(let symbol) where !symbol.type.isCopy:
+              addIndent()
+              buffer += "\(getCType(finalExpr.type)) \(resultVar) = \(temp);\n"
+              consumeVariable(symbol.name)
+            default:
+              addIndent()
+              buffer += "\(getCType(finalExpr.type)) \(resultVar) = __koral_\(typeName)_copy(&\(temp));\n"
+            }
+          } else {
+            addIndent()
+            buffer += "\(getCType(finalExpr.type)) \(resultVar) = \(temp);\n"
+          }
+        } else {
           addIndent()
-          buffer += "__koral_retain(\(resultVar).control);\n"
+          buffer += "\(getCType(finalExpr.type)) \(resultVar) = \(temp);\n"
+          if case .reference(_) = finalExpr.type, finalExpr.valueCategory == .lvalue {
+            addIndent()
+            buffer += "__koral_retain(\(resultVar).control);\n"
+          }
         }
         result = resultVar
       }

@@ -163,8 +163,6 @@ public class Scope {
       .float32
     case "Float64":
       .float64
-    case "String":
-      .string
     case "Bool":
       .bool
     case "Void":

@@ -1,0 +1,150 @@
+// EXPECT: String advanced tests passed
+
+let assert(cond Bool, msg String) Void = { if not cond then { panic(msg); }; };
+
+let expect_some_int(opt [Int]Option, v Int, msg String) Void = {
+    opt match {
+        .Some(x) -> assert(x == v, msg);
+        .None -> panic(msg);
+    }
+};
+
+let test_capacity_and_empty() Void = {
+    let s = "abc";
+    assert(s.capacity_byte() >= s.count_byte(), "capacity");
+    let e = String.empty();
+    assert(e.count_byte() == 0, "empty count");
+    assert(e.is_empty(), "empty flag");
+};
+
+let test_prefix_suffix_and_bytes() Void = {
+    let s = "abcab";
+    assert(s.starts_with("ab"), "starts_with");
+    assert(s.ends_with("ab"), "ends_with");
+    assert(s.contains_byte(99), "contains_byte");
+    expect_some_int(s.first_index_of_byte(98), 1, "first index b");
+    expect_some_int(s.last_index_of_byte(98), 4, "last index b");
+};
+
+let test_trim_and_case() Void = {
+    let s = "  HeLLo  ";
+    let trimmed = s.trim_ascii_whitespace();
+    assert(trimmed.equals("HeLLo"), "trim both");
+    assert(trimmed.trim_ascii_start().equals("HeLLo"), "trim start");
+    assert(trimmed.trim_ascii_end().equals("HeLLo"), "trim end");
+    assert(trimmed.to_ascii_lowercase().equals("hello"), "lowercase");
+    assert(trimmed.to_ascii_uppercase().equals("HELLO"), "uppercase");
+    assert("hELlo  woRLD".to_ascii_title().equals("Hello  World"), "title");
+};
+
+let test_insert_remove_pop() Void = {
+    let mut s = "ac";
+    s.insert_byte(1, 98); // insert 'b'
+    assert(s.equals("abc"), "insert");
+    let removed = s.remove_byte(1);
+    assert(removed == 98, "remove return");
+    assert(s.equals("ac"), "remove result");
+    let popd = s.pop_byte();
+    popd match { .Some(v) -> assert(v == 99, "pop value"); .None -> panic("pop none"); };
+    assert(s.equals("a"), "pop shrinks");
+};
+
+let test_find_contains_replace_repeat() Void = {
+    let s = "ababa";
+    expect_some_int(s.find("aba"), 0, "find aba");
+    expect_some_int(s.find_from("aba", 1), 2, "find_from aba");
+    assert(s.contains("ba"), "contains ba");
+    assert(s.count_string("aba") == 1, "count string");
+    let r = "abcabc".replace("ab", "X");
+    assert(r.equals("XcXc"), "replace");
+    let rep = "ab".repeat(3);
+    assert(rep.equals("ababab"), "repeat");
+};
+
+let test_ascii_checks() Void = {
+    let s = "azAZ09";
+    assert(s.is_ascii(), "ascii");
+    let mut ws = " \t"; // space and tab
+    assert(ws.is_ascii_blank(), "blank yes");
+    let a UInt8 = 97; // 'a'
+    ws.push_byte(a);
+    assert(not ws.is_ascii_blank(), "blank no");
+};
+
+let test_substring_and_remove_prefix_suffix() Void = {
+    let s = "abcdef";
+    assert(s.substring(2, 3).equals("cde"), "substring");
+    assert(s.remove_prefix("ab").equals("cdef"), "remove prefix");
+    assert(s.remove_suffix("ef").equals("abcd"), "remove suffix");
+};
+
+let test_split_whitespace() Void = {
+    let s = "  a  bc d  ";
+    let mut it = s.split_ascii_whitespace();
+    let mut acc = String.empty();
+    let mut first = true;
+    let mut done = false;
+    while not done then {
+        let n = it.next();
+        n match {
+            .Some(part) -> {
+                if not first then { acc.push_byte(44); }; // comma
+                first = false;
+                acc.push(part);
+            };
+            .None -> { done = true; };
+        }
+    };
+    assert(acc.equals("a,bc,d"), "split ascii whitespace");
+};
+
+let test_split_sep_and_lines() Void = {
+    let s = "a--b--";
+    let mut it = s.split("--");
+    let mut parts = String.empty();
+    let mut first = true;
+    let mut done = false;
+    while not done then {
+        let n = it.next();
+        n match {
+            .Some(p) -> {
+                if not first then { parts.push_byte(58); }; // ':'
+                first = false;
+                parts.push(p);
+            };
+            .None -> { done = true; };
+        }
+    };
+    assert(parts.equals("a:b:"), "split sep includes trailing empty");
+
+    let l = "x\ny\n";
+    let mut lit = l.lines();
+    let mut out = String.empty();
+    let mut firstLine = true;
+    let mut done2 = false;
+    while not done2 then {
+        let n = lit.next();
+        n match {
+            .Some(line) -> {
+                if not firstLine then { out.push_byte(59); }; // ';'
+                firstLine = false;
+                out.push(line);
+            };
+            .None -> { done2 = true; };
+        }
+    };
+    assert(out.equals("x;y"), "lines split");
+};
+
+let main() Void = {
+    test_capacity_and_empty();
+    test_prefix_suffix_and_bytes();
+    test_trim_and_case();
+    test_insert_remove_pop();
+    test_find_contains_replace_repeat();
+    test_ascii_checks();
+    test_substring_and_remove_prefix_suffix();
+    test_split_whitespace();
+    test_split_sep_and_lines();
+    print_string("String advanced tests passed");
+};

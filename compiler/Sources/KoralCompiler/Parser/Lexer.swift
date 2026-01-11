@@ -72,83 +72,66 @@ public enum Token: CustomStringConvertible {
   case unboundedRangeLess  // '...<'
   case fullRange  // '....'
   case selfKeyword // 'self' keyword
+  case returnKeyword // 'return' keyword
+  case breakKeyword // 'break' keyword
+  case continueKeyword // 'continue' keyword
 
   // Add static operator function to compare if the same item
   public static func === (lhs: Token, rhs: Token) -> Bool {
     switch (lhs, rhs) {
-    case (.integer, .integer),
-      (.float, .float),
-      (.string, .string),
-      (.plus, .plus),
-      (.minus, .minus),
-      (.multiply, .multiply),
-      (.divide, .divide),
-      (.modulo, .modulo),
-      (.equal, .equal),
-      (.equalEqual, .equalEqual),
-      (.notEqual, .notEqual),
-      (.greater, .greater),
-      (.less, .less),
-      (.greaterEqual, .greaterEqual),
-      (.lessEqual, .lessEqual),
-      (.identifier, .identifier),
-      (.letKeyword, .letKeyword),
-      (.mutKeyword, .mutKeyword),
-      (.semicolon, .semicolon),
-      (.leftParen, .leftParen),
-      (.rightParen, .rightParen),
-      (.comma, .comma),
-      (.leftBrace, .leftBrace),
-      (.rightBrace, .rightBrace),
-      (.leftBracket, .leftBracket),
-      (.rightBracket, .rightBracket),
-      (.eof, .eof),
-      (.bool, .bool),
-      (.ifKeyword, .ifKeyword),
-      (.thenKeyword, .thenKeyword),
-      (.elseKeyword, .elseKeyword),
-      (.whileKeyword, .whileKeyword),
-      (.andKeyword, .andKeyword),
-      (.orKeyword, .orKeyword),
-      (.notKeyword, .notKeyword),
-      (.colon, .colon),
-      (.typeKeyword, .typeKeyword),
-      (.dot, .dot),
-      (.isKeyword, .isKeyword),
-      (.refKeyword, .refKeyword),
-      (.givenKeyword, .givenKeyword),
-      (.traitKeyword, .traitKeyword),
-      (.matchKeyword, .matchKeyword),
-      (.intrinsicKeyword, .intrinsicKeyword),
-      (.bitandKeyword, .bitandKeyword),
-      (.bitorKeyword, .bitorKeyword),
-      (.bitxorKeyword, .bitxorKeyword),
-      (.bitnotKeyword, .bitnotKeyword),
-      (.derefKeyword, .derefKeyword),
-      (.privateKeyword, .privateKeyword),
-      (.protectedKeyword, .protectedKeyword),
-      (.publicKeyword, .publicKeyword),
-      (.bitshlKeyword, .bitshlKeyword),
-      (.bitshrKeyword, .bitshrKeyword),
-      (.arrow, .arrow),
-      (.power, .power),
-      (.plusEqual, .plusEqual),
-      (.minusEqual, .minusEqual),
-      (.multiplyEqual, .multiplyEqual),
-      (.divideEqual, .divideEqual),
-      (.moduloEqual, .moduloEqual),
-      (.powerEqual, .powerEqual),
-      (.range, .range),
-      (.rangeLess, .rangeLess),
-      (.lessRange, .lessRange),
-      (.lessRangeLess, .lessRangeLess),
-      (.unboundedRange, .unboundedRange),
-      (.lessUnboundedRange, .lessUnboundedRange),
-      (.unboundedRangeLess, .unboundedRangeLess),
-       (.fullRange, .fullRange),
-       (.selfKeyword, .selfKeyword),
-       (.bof, .bof),
-       (.eof, .eof):
+    case (.integer(_), .integer(_)):
+      return true
+    case (.float(_), .float(_)):
+      return true
+    case (.string(_), .string(_)):
+      return true
+    case (.bool(_), .bool(_)):
+      return true
+    case (.identifier(_), .identifier(_)):
+      return true
+    case (.plus, .plus), (.minus, .minus), (.multiply, .multiply), (.divide, .divide), (.modulo, .modulo):
+      return true
+    case (.equal, .equal), (.equalEqual, .equalEqual), (.notEqual, .notEqual):
+      return true
+    case (.greater, .greater), (.less, .less), (.greaterEqual, .greaterEqual), (.lessEqual, .lessEqual):
+      return true
+    case (.letKeyword, .letKeyword), (.mutKeyword, .mutKeyword):
+      return true
+    case (.semicolon, .semicolon), (.comma, .comma), (.colon, .colon), (.dot, .dot), (.arrow, .arrow):
+      return true
+    case (.leftParen, .leftParen), (.rightParen, .rightParen):
+      return true
+    case (.leftBrace, .leftBrace), (.rightBrace, .rightBrace):
+      return true
+    case (.leftBracket, .leftBracket), (.rightBracket, .rightBracket):
+      return true
+    case (.ifKeyword, .ifKeyword), (.thenKeyword, .thenKeyword), (.elseKeyword, .elseKeyword), (.whileKeyword, .whileKeyword):
+      return true
+    case (.andKeyword, .andKeyword), (.orKeyword, .orKeyword), (.notKeyword, .notKeyword):
+      return true
+    case (.typeKeyword, .typeKeyword), (.isKeyword, .isKeyword), (.refKeyword, .refKeyword):
+      return true
+    case (.givenKeyword, .givenKeyword), (.traitKeyword, .traitKeyword), (.matchKeyword, .matchKeyword), (.intrinsicKeyword, .intrinsicKeyword):
+      return true
+    case (.bitandKeyword, .bitandKeyword), (.bitorKeyword, .bitorKeyword), (.bitxorKeyword, .bitxorKeyword), (.bitnotKeyword, .bitnotKeyword):
+      return true
+    case (.bitshlKeyword, .bitshlKeyword), (.bitshrKeyword, .bitshrKeyword):
+      return true
+    case (.derefKeyword, .derefKeyword):
+      return true
+    case (.privateKeyword, .privateKeyword), (.protectedKeyword, .protectedKeyword), (.publicKeyword, .publicKeyword):
+      return true
+    case (.power, .power):
+      return true
+    case (.plusEqual, .plusEqual), (.minusEqual, .minusEqual), (.multiplyEqual, .multiplyEqual), (.divideEqual, .divideEqual), (.moduloEqual, .moduloEqual), (.powerEqual, .powerEqual):
+      return true
+    case (.range, .range), (.rangeLess, .rangeLess), (.lessRange, .lessRange), (.lessRangeLess, .lessRangeLess), (.unboundedRange, .unboundedRange), (.lessUnboundedRange, .lessUnboundedRange), (.unboundedRangeLess, .unboundedRangeLess), (.fullRange, .fullRange):
+      return true
+    case (.selfKeyword, .selfKeyword):
+      return true
+    case (.returnKeyword, .returnKeyword), (.breakKeyword, .breakKeyword), (.continueKeyword, .continueKeyword):
+      return true
+    case (.bof, .bof), (.eof, .eof):
       return true
     default:
       return false
@@ -182,7 +165,7 @@ public enum Token: CustomStringConvertible {
     case .equalEqual:
       return "=="
     case .notEqual:
-      return "!="
+      return "<>"
     case .greater:
       return ">"
     case .less:
@@ -240,6 +223,9 @@ public enum Token: CustomStringConvertible {
     case .dot:
       return "."
     case .selfKeyword: return "self"
+    case .returnKeyword: return "return"
+    case .breakKeyword: return "break"
+    case .continueKeyword: return "continue"
       case .isKeyword:
       return "is"
     case .refKeyword:
@@ -391,6 +377,9 @@ public class Lexer {
     while let char = getNextChar() {
       if char.isNumber {
         numStr.append(char)
+      } else if char == "_" {
+        // Digit separator (e.g. 1_000_000)
+        continue
       } else if char == "." {
         if hasDot {
           throw LexerError.invalidFloat(line: _line, "consecutive dots are not allowed")
@@ -417,13 +406,34 @@ public class Lexer {
       throw LexerError.invalidString(line: _line, "expected string start with \" or '")
     }
     let quote = startChar
+
     while let char = getNextChar() {
       if char == quote {
-        break
+        return str
       }
+
+      if char == "\\" {
+        guard let escaped = getNextChar() else {
+          throw LexerError.invalidString(line: _line, "unterminated escape sequence")
+        }
+        switch escaped {
+        case "n": str.append("\n")
+        case "t": str.append("\t")
+        case "r": str.append("\r")
+        case "0": str.append("\0")
+        case "\\": str.append("\\")
+        case "\"": str.append("\"")
+        case "'": str.append("'")
+        default:
+          throw LexerError.invalidString(line: _line, "unknown escape: \\\(escaped)")
+        }
+        continue
+      }
+
       str.append(char)
     }
-    return str
+
+    throw LexerError.invalidString(line: _line, "unterminated string literal")
   }
 
   // Read an identifier
@@ -501,6 +511,9 @@ public class Lexer {
         unreadChar(nextChar)
       }
       return .equal
+    case "!":
+      // Koral does not use '!' (use `not expr`) and does not use '!=' (use '<>').
+      throw LexerError.unexpectedCharacter(line: currentLine, "!")
     case ">":
       if let nextChar = getNextChar() {
         if nextChar == "=" {
@@ -625,6 +638,9 @@ public class Lexer {
       case "bitshl": .bitshlKeyword
       case "bitshr": .bitshrKeyword
       case "self": .selfKeyword
+      case "return": .returnKeyword
+      case "break": .breakKeyword
+      case "continue": .continueKeyword
       default: .identifier(id)
       }
     default:
