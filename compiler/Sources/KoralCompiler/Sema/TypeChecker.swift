@@ -2329,6 +2329,32 @@ public class TypeChecker {
                   }
                 }
               }
+
+              if let extensions = genericExtensionMethods["Pointer"] {
+                for ext in extensions {
+                  if ext.method.name == memberName {
+                    let methodSym = try instantiateExtensionMethod(
+                      baseType: typeToLookup,
+                      structureName: "Pointer",
+                      genericArgs: [element],
+                      methodInfo: ext
+                    )
+                    if methodSym.methodKind != .normal {
+                      throw SemanticError(
+                        .generic(
+                          "compiler protocol method \(memberName) cannot be called explicitly"),
+                        line: currentLine)
+                    }
+                    let base: TypedExpressionNode
+                    if typedPath.isEmpty {
+                      base = typedBase
+                    } else {
+                      base = .memberPath(source: typedBase, path: typedPath)
+                    }
+                    return .methodReference(base: base, method: methodSym, type: methodSym.type)
+                  }
+                }
+              }
             }
 
             var isGenericInstance = false
@@ -2509,6 +2535,26 @@ public class TypeChecker {
         throw SemanticError.invalidArgumentCount(function: name, expected: 0, got: arguments.count)
       }
       return .intrinsicCall(.abort)
+
+    case "float32_bits":
+      guard arguments.count == 1 else {
+        throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
+      }
+      let val = try inferTypedExpression(arguments[0])
+      if val.type != .float32 {
+        throw SemanticError.typeMismatch(expected: "Float32", got: val.type.description)
+      }
+      return .intrinsicCall(.float32Bits(value: val))
+
+    case "float64_bits":
+      guard arguments.count == 1 else {
+        throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
+      }
+      let val = try inferTypedExpression(arguments[0])
+      if val.type != .float64 {
+        throw SemanticError.typeMismatch(expected: "Float64", got: val.type.description)
+      }
+      return .intrinsicCall(.float64Bits(value: val))
 
     default: return nil
     }
