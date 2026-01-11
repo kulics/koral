@@ -1,13 +1,13 @@
 public struct GenericStructTemplate {
   public let name: String
-  public let typeParameters: [(name: String, type: TypeNode?)]
+  public let typeParameters: [TypeParameterDecl]
   public let parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier)]
   public let isCopy: Bool
 }
 
 public struct GenericUnionTemplate {
   public let name: String
-  public let typeParameters: [(name: String, type: TypeNode?)]
+  public let typeParameters: [TypeParameterDecl]
   public let cases: [UnionCaseDeclaration]
   public let access: AccessModifier
   public let isCopy: Bool
@@ -15,7 +15,7 @@ public struct GenericUnionTemplate {
 
 public struct GenericFunctionTemplate {
   public let name: String
-  public let typeParameters: [(name: String, type: TypeNode?)]
+  public let typeParameters: [TypeParameterDecl]
   public let parameters: [(name: String, mutable: Bool, type: TypeNode)]
   public let returnType: TypeNode
   public let body: ExpressionNode
