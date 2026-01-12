@@ -880,16 +880,16 @@ for item in library {
 
 ```
 let nb = 42;
-nb match {
-    0..9 ->
+when nb is {
+    0..9 then
         printLine("single digit");
-    10 ->
+    10 then
         printLine("double digits");
-    11..99 ->
+    11..99 then
         printLine("double digits");
-    100..999 ->
+    100..999 then
         printLine("triple digits");
-    _ ->
+    _ then
         printLine("four or more digits");
 }
 ```

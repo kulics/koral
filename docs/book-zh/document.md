@@ -615,10 +615,10 @@ Koral 拥有强大的模式匹配功能，主要通过 `match` 表达式和 `is`
 `match` 表达式允许你将一个值与一系列模式进行比较，并根据匹配的模式执行相应的代码。它类似于其他语言中的 `switch` 语句，但功能更为强大。`match` 也是一个表达式，会返回匹配分支的值。
 
 ```koral
-x match {
-    1 -> "one";
-    2 -> "two";
-    _ -> "other";
+when x is {
+    1 then "one";
+    2 then "two";
+    _ then "other";
 }
 ```
 
@@ -915,13 +915,13 @@ let s = Shape.Circle(1.0);
 我们可以通过模式匹配（Pattern Matching）来提取枚举变体中携带的数据。这是处理枚举最常见也是最安全的方式。
 
 ```koral
-let area = s match {
-    .Circle(r) -> 3.14 * r * r;
-    .Rectangle(w, h) -> w * h;
+let area = when s is {
+    .Circle(r) then 3.14 * r * r;
+    .Rectangle(w, h) then w * h;
 }
 ```
 
-在 `match` 表达式中，我们使用 `.VariantName` 的形式来匹配具体的变体，并解构其中的数据。
+在 `when` 表达式中，我们使用 `.VariantName` 的形式来匹配具体的变体，并解构其中的数据。
 
 ## Trait 与 Given
 

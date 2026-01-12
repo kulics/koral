@@ -43,7 +43,7 @@ public enum Token: CustomStringConvertible {
   case refKeyword  // 'ref' keyword
   case givenKeyword  // 'given' keyword
   case traitKeyword  // 'trait' keyword
-  case matchKeyword  // 'match' keyword
+  case whenKeyword  // 'when' keyword
   case intrinsicKeyword  // 'intrinsic' keyword
   case bitandKeyword  // 'bitand' keyword
   case bitorKeyword  // 'bitor' keyword
@@ -111,7 +111,7 @@ public enum Token: CustomStringConvertible {
       return true
     case (.typeKeyword, .typeKeyword), (.isKeyword, .isKeyword), (.refKeyword, .refKeyword):
       return true
-    case (.givenKeyword, .givenKeyword), (.traitKeyword, .traitKeyword), (.matchKeyword, .matchKeyword), (.intrinsicKeyword, .intrinsicKeyword):
+    case (.givenKeyword, .givenKeyword), (.traitKeyword, .traitKeyword), (.whenKeyword, .whenKeyword), (.intrinsicKeyword, .intrinsicKeyword):
       return true
     case (.bitandKeyword, .bitandKeyword), (.bitorKeyword, .bitorKeyword), (.bitxorKeyword, .bitxorKeyword), (.bitnotKeyword, .bitnotKeyword):
       return true
@@ -234,8 +234,8 @@ public enum Token: CustomStringConvertible {
       return "given"
     case .traitKeyword:
       return "trait"
-    case .matchKeyword:
-      return "match"
+    case .whenKeyword:
+      return "when"
     case .intrinsicKeyword:
       return "intrinsic"
     case .bitandKeyword:
@@ -641,7 +641,7 @@ public class Lexer {
       case "ref": .refKeyword
       case "given": .givenKeyword
       case "trait": .traitKeyword
-      case "match": .matchKeyword
+      case "when": .whenKeyword
       case "intrinsic": .intrinsicKeyword
       case "bitand": .bitandKeyword
       case "bitor": .bitorKeyword

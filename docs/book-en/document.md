@@ -617,17 +617,17 @@ Executing the above program will first output 1 to 5, and then output 1 to 5 wit
 
 ## Pattern Matching
 
-Koral has powerful pattern matching capabilities, mainly used through `match` expressions and `is` operators.
+Koral has powerful pattern matching capabilities, mainly used through `when` expressions and `is` operators.
 
-### match Expression
+### when expression
 
-The `match` expression allows you to compare a value against a series of patterns and execute corresponding code based on the matching pattern. It is similar to `switch` statements in other languages, but more powerful. `match` is also an expression and returns the value of the matching branch.
+The `when` expression allows you to compare a value against a series of patterns and execute corresponding code based on the matching pattern. It is similar to `switch` statements in other languages, but more powerful. `when` is also an expression and returns the value of the matching branch.
 
 ```koral
-x match {
-    1 -> "one";
-    2 -> "two";
-    _ -> "other";
+when x is {
+    1 then "one";
+    2 then "two";
+    _ then "other";
 }
 ```
 
@@ -924,13 +924,13 @@ let s = Shape.Circle(1.0);
 We can extract data carried in enum variants through Pattern Matching. This is the most common and safest way to handle enums.
 
 ```koral
-let area = s match {
-    .Circle(r) -> 3.14 * r * r;
-    .Rectangle(w, h) -> w * h;
+let area = when s is {
+    .Circle(r) then 3.14 * r * r;
+    .Rectangle(w, h) then w * h;
 }
 ```
 
-In the `match` expression, we use the form `.VariantName` to match specific variants and destructure the data within them.
+In the `when` expression, we use the form `.VariantName` to match specific variants and destructure the data within them.
 
 ## Trait and Given
 

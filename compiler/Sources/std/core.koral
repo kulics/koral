@@ -214,16 +214,16 @@ public intrinsic let float32_bits(value Float32) UInt32;
 public intrinsic let float64_bits(value Float64) UInt64;
 
 // ---------------- Option ----------------
-public type [T Any] Option {
+public type [T Copy] Option {
     None();
     Some(value T);
 };
 
-given [T Any] [T]Option {
+given [T Copy] [T]Option {
     public is_some(self ref) Bool = {
-        deref self match {
-            .Some(_) -> true;
-            .None -> false;
+        when deref self is {
+            .Some(_) then true;
+            .None then false;
         }
     }
 
@@ -232,31 +232,31 @@ given [T Any] [T]Option {
     }
 
     public unwrap(self) T = {
-        self match {
-            .Some(v) -> v;
-            .None -> panic("Option.unwrap failed: value is None");
+        when self is {
+            .Some(v) then v;
+            .None then panic("Option.unwrap failed: value is None");
         }
     }
 
     public unwrap_or(self, default T) T = {
-        self match {
-            .Some(v) -> v;
-            .None -> default;
+        when self is {
+            .Some(v) then v;
+            .None then default;
         }
     }
 };
 
 // ---------------- Result ----------------
-public type [T Any, E Any] Result {
+public type [T Copy, E Copy] Result {
     Ok(value T);
     Err(error E);
 };
 
-given [T Any, E Any] [T, E]Result {
+given [T Copy, E Copy] [T, E]Result {
     public is_ok(self ref) Bool = {
-        deref self match {
-            .Ok(_) -> true;
-            .Err(_) -> false;
+        when deref self is {
+            .Ok(_) then true;
+            .Err(_) then false;
         }
     }
 
@@ -265,16 +265,16 @@ given [T Any, E Any] [T, E]Result {
     }
 
     public unwrap(self) T = {
-        self match {
-            .Ok(v) -> v;
-            .Err(_) -> panic("Result.unwrap failed: value is Err");
+        when self is {
+            .Ok(v) then v;
+            .Err(_) then panic("Result.unwrap failed: value is Err");
         }
     }
 
     public unwrap_err(self) E = {
-        self match {
-            .Ok(_) -> panic("Result.unwrap_err failed: value is Ok");
-            .Err(e) -> e;
+        when self is {
+            .Ok(_) then panic("Result.unwrap_err failed: value is Ok");
+            .Err(e) then e;
         }
     }
 };
@@ -397,9 +397,9 @@ given String {
     };
 
     public contains_byte(self, b UInt8) Bool = {
-        self.first_index_of_byte(b) match {
-            .Some(_) -> true;
-            .None -> false
+        when self.first_index_of_byte(b) is {
+            .Some(_) then true;
+            .None then false
         }
     };
 
@@ -618,9 +618,9 @@ given String {
     public find(self, pat String) [Int]Option = self.find_from(pat, 0);
 
     public contains(self, pat String) Bool = {
-        self.find_from(pat, 0) match {
-            .Some(_) -> true;
-            .None -> false
+        when self.find_from(pat, 0) is {
+            .Some(_) then true;
+            .None then false
         }
     };
 
@@ -628,12 +628,12 @@ given String {
         let mut count = 0;
         let mut idxOpt = self.find_from(pat, 0);
         while true then {
-            idxOpt match {
-                .Some(i) -> {
+            when idxOpt is {
+                .Some(i) then {
                     count += 1;
                     idxOpt = self.find_from(pat, i + pat.storage.len);
                 };
-                .None -> { break; }
+                .None then { break; }
             };
         };
         count
@@ -663,8 +663,8 @@ given String {
         let mut start = 0;
         let mut idxOpt = self.find_from(pat, start);
         while true then {
-            idxOpt match {
-                .Some(idx) -> {
+            when idxOpt is {
+                .Some(idx) then {
                     let prefix_len = idx - start;
                     if prefix_len > 0 then {
                         let slice = self.make_substring(start, prefix_len);
@@ -674,7 +674,7 @@ given String {
                     start = idx + pat.storage.len;
                     idxOpt = self.find_from(pat, start);
                 };
-                .None -> { break; }
+                .None then { break; }
             };
         };
         if start < self.storage.len then {
@@ -725,13 +725,13 @@ given StringSplit {
         let len = self.source.count_byte();
         if self.index > len then { return [String]Option.None(); };
         let mut idxOpt = self.source.find_from(self.sep, self.index);
-        idxOpt match {
-            .Some(i) -> {
+        when idxOpt is {
+            .Some(i) then {
                 let part = self.source.substring(self.index, i - self.index);
                 self.index = i + self.sep.count_byte();
                 [String]Option.Some(part)
             };
-            .None -> {
+            .None then {
                 let part = self.source.substring(self.index, len - self.index);
                 self.index = len + 1;
                 [String]Option.Some(part)
@@ -750,13 +750,13 @@ given StringLines {
             return [String]Option.None();
         };
         let mut iOpt = self.source.find_from("\n", self.index);
-        iOpt match {
-            .Some(i) -> {
+        when iOpt is {
+            .Some(i) then {
                 let part = self.source.substring(self.index, i - self.index);
                 self.index = i + 1;
                 [String]Option.Some(part)
             };
-            .None -> {
+            .None then {
                 let part = self.source.substring(self.index, len - self.index);
                 self.index = len + 1;
                 [String]Option.Some(part)
@@ -783,8 +783,16 @@ given[T Copy] [T]List {
     }
 
     public copy(self ref) Self = {
+        // IMPORTANT: Do NOT use `copy_memory` here.
+        // `copy_memory` is a raw memcpy and would skip retain/copy semantics for Copy types
+        // like `ref T` and `String`.
         let new_ptr = [T]alloc_memory(self.cap);
-        copy_memory(new_ptr, self.source, self.len);
+        let mut i = 0;
+        while i < self.len then {
+            let v = deref self.source.offset(i).peek();
+            new_ptr.offset(i).init(v);
+            i += 1;
+        };
         [T]List(new_ptr, self.len, self.cap)
     }
 
@@ -792,15 +800,16 @@ given[T Copy] [T]List {
 
     // [Compiler Protocol]
     // Lowering target for `list[index]` in read context.
-    // Returns a temporary reference to the element.
-    public __at(self ref, index Int) T ref = {
-        // Bounds check can be added here
-        self.source.offset(index).peek()
+    // Returns a copy of the element (List requires T: Copy).
+    public __at(self ref, index Int) T = {
+        if index < 0 or index >= self.len then { panic("List index out of bounds"); };
+        deref self.source.offset(index).peek()
     }
 
     // [Compiler Protocol]
     // Lowering target for `list[index] = value`.
     public __update_at(self ref, index Int, value T) Void = {
+        if index < 0 or index >= self.len then { panic("List index out of bounds"); };
         // Replace element (handles ref-counted Copy types via init/deinit)
         self.source.offset(index).deinit();
         self.source.offset(index).init(value);
@@ -813,6 +822,7 @@ given[T Copy] [T]List {
     }
 
     public insert(self ref, index Int, value T) Void = {
+        if index < 0 or index > self.len then { panic("List insert index out of bounds"); };
         self.ensure_capacity(self.len + 1);
         
         if index < self.len then {
@@ -827,7 +837,8 @@ given[T Copy] [T]List {
         self.len = self.len + 1;
     }
 
-    public remove(self ref, index Int) Void = {
+    public remove(self ref, index Int) Bool = {
+        if index < 0 or index >= self.len then { return false; };
         // 1. Drop the element at index
         self.source.offset(index).deinit();
         
@@ -842,7 +853,17 @@ given[T Copy] [T]List {
         };
         
         self.len = self.len - 1;
-    }
+        true
+    };
+
+    public pop_back(self ref) [T]Option = {
+        if self.len == 0 then { return [T]Option.None(); };
+        let idx = self.len - 1;
+        let p = self.source.offset(idx);
+        let v = p.take();
+        self.len = idx;
+        [T]Option.Some(v)
+    };
 
     // Ensures the list is unique and has enough capacity
     private ensure_capacity(self ref, min_capacity Int) Void = {
@@ -938,6 +959,10 @@ public trait Hashable Equatable {
     hash(self ref) UInt;
 };
 
+// Keys usable in hash tables.
+// v1: require `Copy` so Map/Set can store values safely in raw slots.
+public trait HashKey Hashable Copy {};
+
 public trait Comparable Equatable {
     __compare(self ref, other Self ref) Int;
 };
@@ -1026,6 +1051,532 @@ given Float64 {
 
 given[T Any] [T]Pointer {
     public hash(self ref) UInt = (UInt)deref self;
+};
+
+// ---------------- Map / Set ----------------
+
+// Separate chaining using bucket array backed by raw Pointer.
+// Each bucket stores an optional ref to a singly-linked Node.
+
+public type [K HashKey, V Copy]MapNode(hash UInt, key K, mut value V, mut next_node [[K, V]MapNode ref]Option);
+public type [K HashKey, V Copy]MapItem(key K, value V) Copy;
+
+given[K HashKey, V Copy] [K, V]MapNode {
+    public next(self ref) [[K, V]MapNode ref]Option = self.next_node;
+    public set_next(self ref, next [[K, V]MapNode ref]Option) Void = { self.next_node = next; };
+};
+
+public type [K HashKey, V Copy]Map(
+    private mut buckets [[[K, V]MapNode ref]Option]Pointer,
+    private mut cap Int,
+    private mut len Int
+);
+
+public type [K HashKey, V Copy]MapIterator(source [K, V]Map ref, mut bucket Int, mut current [[K, V]MapNode ref]Option);
+
+given[K HashKey, V Copy] [K, V]Map {
+    public new() Self = [K, V]Map.with_capacity(16);
+
+    public with_capacity(capacity Int) Self = {
+        let mut cap = capacity;
+        if cap < 16 then { cap = 16; };
+
+        let buckets = [[[K, V]MapNode ref]Option]alloc_memory(cap);
+        let mut i = 0;
+        while i < cap then {
+            buckets.offset(i).init([[K, V]MapNode ref]Option.None());
+            i += 1;
+        };
+        [K, V]Map(buckets, cap, 0)
+    };
+
+    // Drop buckets and all nodes.
+    __drop(self ref) = {
+        let mut i = 0;
+        while i < self.cap then {
+            self.buckets.offset(i).deinit();
+            i += 1;
+        };
+        dealloc_memory(self.buckets);
+    };
+
+    public copy(self ref) Self = {
+        let mut out = [K, V]Map.with_capacity(self.cap);
+        let mut it = self.iterator();
+        while true then {
+            when it.next() is {
+                .Some(item) then { out.insert(item.key, item.value); };
+                .None then { break; }
+            }
+        };
+        out
+    };
+
+    public count(self ref) Int = self.len;
+    public capacity(self ref) Int = self.cap;
+    public is_empty(self ref) Bool = self.len == 0;
+
+    public clear(self ref) Void = {
+        let mut i = 0;
+        while i < self.cap then {
+            let ptr = self.buckets.offset(i);
+            let old = ptr.take();
+            // dropping `old` releases the chain
+            ptr.init([[K, V]MapNode ref]Option.None());
+            i += 1;
+        };
+        self.len = 0;
+    };
+
+    public reserve(self ref, additional Int) Void = {
+        if additional <= 0 then { return; };
+        self.ensure_capacity(self.len + additional);
+    };
+
+    public contains_key(self ref, key K) Bool = {
+        let h = key.hash();
+        let idx = self.bucket_index(h);
+        let mut cur = deref self.buckets.offset(idx).peek();
+        while true then {
+            when cur is {
+                .Some(nref) then {
+                    let node = deref nref;
+                    if node.key == key then { return true; };
+                    cur = node.next_node;
+                };
+                .None then { return false; }
+            }
+        }
+    };
+
+    public get(self ref, key K) [V]Option = {
+        let h = key.hash();
+        let idx = self.bucket_index(h);
+        let mut cur = deref self.buckets.offset(idx).peek();
+        while true then {
+            when cur is {
+                .Some(nref) then {
+                    let node = deref nref;
+                    if node.key == key then { return [V]Option.Some(node.value); };
+                    cur = node.next_node;
+                };
+                .None then { return [V]Option.None(); }
+            }
+        }
+    };
+
+    // Overwrite semantics:
+    // - returns true if a new key was inserted
+    // - returns false if an existing key was overwritten
+    public insert(self ref, key K, value V) Bool = {
+        self.ensure_capacity(self.len + 1);
+
+        let h = key.hash();
+        let idx = self.bucket_index(h);
+        let bucket_ptr = self.buckets.offset(idx);
+
+        let mut cur = deref bucket_ptr.peek();
+        while true then {
+            when cur is {
+                .Some(nref) then {
+                    let node = deref nref;
+                    if node.key == key then {
+                        node.value = value;
+                        return false;
+                    };
+                    cur = node.next_node;
+                };
+                .None then { break; }
+            }
+        };
+
+        // Insert new node at head
+        let head = bucket_ptr.take();
+        let new_node = ref [K, V]MapNode(h, key, value, head);
+        bucket_ptr.init([[K, V]MapNode ref]Option.Some(new_node));
+        self.len = self.len + 1;
+        true
+    };
+
+    public remove(self ref, key K) [V]Option = {
+        let h = key.hash();
+        let idx = self.bucket_index(h);
+        let bucket_ptr = self.buckets.offset(idx);
+        let mut head = deref bucket_ptr.peek();
+
+        when head is {
+            .None then { return [V]Option.None(); };
+            .Some(nref) then {
+                let node = deref nref;
+                if node.key == key then {
+                    let next = node.next_node;
+                    bucket_ptr.replace(next);
+                    self.len = self.len - 1;
+                    return [V]Option.Some(node.value);
+                };
+                let mut prev = nref;
+                let mut cur = node.next_node;
+                while true then {
+                    when cur is {
+                        .Some(cref) then {
+                            let cnode = deref cref;
+                            if cnode.key == key then {
+                                let next = cnode.next_node;
+                                deref prev . next_node = next;
+                                self.len = self.len - 1;
+                                return [V]Option.Some(cnode.value);
+                            };
+                            prev = cref;
+                            cur = cnode.next_node;
+                        };
+                        .None then { return [V]Option.None(); }
+                    }
+                }
+            }
+        }
+    };
+
+    public iterator(self ref) [K, V]MapIterator = [K, V]MapIterator(self, 0, [[K, V]MapNode ref]Option.None());
+
+    private bucket_index(self ref, hash UInt) Int = {
+        let capU UInt = (UInt)self.cap;
+        let div = hash / capU;
+        let m UInt = hash - div * capU;
+        (Int)m
+    };
+
+    private ensure_capacity(self ref, min_entries Int) Void = {
+        let mut limit = self.cap * 3 / 4; // load factor 0.75
+        if limit == 0 then { limit = 1; };
+        if min_entries <= limit then { return; };
+
+        let mut new_cap = self.cap * 2;
+        if new_cap < 16 then { new_cap = 16; };
+        while min_entries > new_cap * 3 / 4 then {
+            new_cap = new_cap * 2;
+        };
+        self.rehash_into(new_cap);
+    };
+
+    private rehash_into(self ref, new_cap Int) Void = {
+        let mut new_map = [K, V]Map.with_capacity(new_cap);
+        let mut it = self.iterator();
+        while true then {
+            when it.next() is {
+                .Some(item) then { new_map.insert(item.key, item.value); };
+                .None then { break; }
+            }
+        };
+
+        let old_buckets = self.buckets;
+        let old_cap = self.cap;
+        let old_len = self.len;
+
+        self.buckets = new_map.buckets;
+        self.cap = new_map.cap;
+        self.len = new_map.len;
+
+        new_map.buckets = old_buckets;
+        new_map.cap = old_cap;
+        new_map.len = old_len;
+    };
+
+    private bucket_index_for_hash(self ref, hash UInt, cap Int) Int = {
+        let capU UInt = (UInt)cap;
+        let div = hash / capU;
+        let m UInt = hash - div * capU;
+        (Int)m
+    };
+};
+
+given[K HashKey, V Copy] [K, V]MapIterator {
+    public next(self ref) [[K, V]MapItem]Option = {
+        while true then {
+            when self.current is {
+                .Some(nref) then {
+                    let node = deref nref;
+                    self.current = node.next_node;
+                    return [[K, V]MapItem]Option.Some([K, V]MapItem(node.key, node.value));
+                };
+                .None then {
+                    if self.bucket >= self.source.cap then { return [[K, V]MapItem]Option.None(); };
+                    let head = deref self.source.buckets.offset(self.bucket).peek();
+                    self.bucket = self.bucket + 1;
+                    self.current = head;
+                }
+            }
+        }
+    };
+};
+
+public type [T HashKey]SetNode(hash UInt, value T, mut next_node [[T]SetNode ref]Option);
+
+given[T HashKey] [T]SetNode {
+    public next(self ref) [[T]SetNode ref]Option = self.next_node;
+    public set_next(self ref, next [[T]SetNode ref]Option) Void = { self.next_node = next; };
+};
+
+public type [T HashKey]Set(
+    private mut buckets [[[T]SetNode ref]Option]Pointer,
+    private mut cap Int,
+    private mut len Int
+);
+
+public type [T HashKey]SetIterator(source [T]Set ref, mut bucket Int, mut current [[T]SetNode ref]Option);
+
+given[T HashKey] [T]Set {
+    public new() Self = [T]Set.with_capacity(16);
+
+    public with_capacity(capacity Int) Self = {
+        let mut cap = capacity;
+        if cap < 16 then { cap = 16; };
+
+        let buckets = [[[T]SetNode ref]Option]alloc_memory(cap);
+        let mut i = 0;
+        while i < cap then {
+            buckets.offset(i).init([[T]SetNode ref]Option.None());
+            i += 1;
+        };
+        [T]Set(buckets, cap, 0)
+    };
+
+    __drop(self ref) = {
+        let mut i = 0;
+        while i < self.cap then {
+            self.buckets.offset(i).deinit();
+            i += 1;
+        };
+        dealloc_memory(self.buckets);
+    };
+
+    public copy(self ref) Self = {
+        let mut out = [T]Set.with_capacity(self.cap);
+        let mut it = self.iterator();
+        while true then {
+            when it.next() is {
+                .Some(v) then { out.insert(v); };
+                .None then { break; }
+            }
+        };
+        out
+    };
+
+    public count(self ref) Int = self.len;
+    public capacity(self ref) Int = self.cap;
+    public is_empty(self ref) Bool = self.len == 0;
+
+    public clear(self ref) Void = {
+        let mut i = 0;
+        while i < self.cap then {
+            let ptr = self.buckets.offset(i);
+            let old = ptr.take();
+            ptr.init([[T]SetNode ref]Option.None());
+            i += 1;
+        };
+        self.len = 0;
+    };
+
+    public reserve(self ref, additional Int) Void = {
+        if additional <= 0 then { return; };
+        self.ensure_capacity(self.len + additional);
+    };
+
+    public contains(self ref, value T) Bool = {
+        let h = value.hash();
+        let idx = self.bucket_index(h);
+        let mut cur = deref self.buckets.offset(idx).peek();
+        while true then {
+            when cur is {
+                .Some(nref) then {
+                    let node = deref nref;
+                    if node.value == value then { return true; };
+                    cur = node.next_node;
+                };
+                .None then { return false; }
+            }
+        }
+    };
+
+    // Returns true if newly inserted, false if already present.
+    public insert(self ref, value T) Bool = {
+        self.ensure_capacity(self.len + 1);
+
+        let h = value.hash();
+        let idx = self.bucket_index(h);
+        let bucket_ptr = self.buckets.offset(idx);
+
+        let mut cur = deref bucket_ptr.peek();
+        while true then {
+            when cur is {
+                .Some(nref) then {
+                    let node = deref nref;
+                    if node.value == value then { return false; };
+                    cur = node.next_node;
+                };
+                .None then { break; }
+            }
+        };
+
+        let head = bucket_ptr.take();
+        let new_node = ref [T]SetNode(h, value, head);
+        bucket_ptr.init([[T]SetNode ref]Option.Some(new_node));
+        self.len = self.len + 1;
+        true
+    };
+
+    public remove(self ref, value T) Bool = {
+        let h = value.hash();
+        let idx = self.bucket_index(h);
+        let bucket_ptr = self.buckets.offset(idx);
+        let mut head = deref bucket_ptr.peek();
+
+        when head is {
+            .None then { return false; };
+            .Some(nref) then {
+                let node = deref nref;
+                if node.value == value then {
+                    let next = node.next_node;
+                    bucket_ptr.replace(next);
+                    self.len = self.len - 1;
+                    return true;
+                };
+                let mut prev = nref;
+                let mut cur = node.next_node;
+                while true then {
+                    when cur is {
+                        .Some(cref) then {
+                            let cnode = deref cref;
+                            if cnode.value == value then {
+                                let next = cnode.next_node;
+                                deref prev . next_node = next;
+                                self.len = self.len - 1;
+                                return true;
+                            };
+                            prev = cref;
+                            cur = cnode.next_node;
+                        };
+                        .None then { return false; }
+                    }
+                }
+            }
+        }
+    };
+
+    public union(self ref, other [T]Set ref) [T]Set = {
+        let mut out = [T]Set.with_capacity(self.len + other.len);
+        let mut it = self.iterator();
+        while true then {
+            when it.next() is {
+                .Some(v) then { out.insert(v); };
+                .None then { break; }
+            }
+        };
+        let mut it2 = other.iterator();
+        while true then {
+            when it2.next() is {
+                .Some(v) then { out.insert(v); };
+                .None then { break; }
+            }
+        };
+        out
+    };
+
+    public intersection(self ref, other [T]Set ref) [T]Set = {
+        let min_cnt = if self.len < other.len then self.len else other.len;
+        let mut out = [T]Set.with_capacity(min_cnt);
+        let mut it = self.iterator();
+        while true then {
+            when it.next() is {
+                .Some(v) then { if other.contains(v) then { out.insert(v); }; };
+                .None then { break; }
+            }
+        };
+        out
+    };
+
+    public difference(self ref, other [T]Set ref) [T]Set = {
+        let mut out = [T]Set.with_capacity(self.len);
+        let mut it = self.iterator();
+        while true then {
+            when it.next() is {
+                .Some(v) then { if not other.contains(v) then { out.insert(v); }; };
+                .None then { break; }
+            }
+        };
+        out
+    };
+
+    public iterator(self ref) [T]SetIterator = [T]SetIterator(self, 0, [[T]SetNode ref]Option.None());
+
+    private bucket_index(self ref, hash UInt) Int = {
+        let capU UInt = (UInt)self.cap;
+        let div = hash / capU;
+        let m UInt = hash - div * capU;
+        (Int)m
+    };
+
+    private ensure_capacity(self ref, min_entries Int) Void = {
+        let mut limit = self.cap * 3 / 4;
+        if limit == 0 then { limit = 1; };
+        if min_entries <= limit then { return; };
+
+        let mut new_cap = self.cap * 2;
+        if new_cap < 16 then { new_cap = 16; };
+        while min_entries > new_cap * 3 / 4 then {
+            new_cap = new_cap * 2;
+        };
+        self.rehash_into(new_cap);
+    };
+
+    private rehash_into(self ref, new_cap Int) Void = {
+        let mut new_set = [T]Set.with_capacity(new_cap);
+        let mut it = self.iterator();
+        while true then {
+            when it.next() is {
+                .Some(v) then { new_set.insert(v); };
+                .None then { break; }
+            }
+        };
+
+        let old_buckets = self.buckets;
+        let old_cap = self.cap;
+        let old_len = self.len;
+
+        self.buckets = new_set.buckets;
+        self.cap = new_set.cap;
+        self.len = new_set.len;
+
+        new_set.buckets = old_buckets;
+        new_set.cap = old_cap;
+        new_set.len = old_len;
+    };
+
+    private bucket_index_for_hash(self ref, hash UInt, cap Int) Int = {
+        let capU UInt = (UInt)cap;
+        let div = hash / capU;
+        let m UInt = hash - div * capU;
+        (Int)m
+    };
+};
+
+given[T HashKey] [T]SetIterator {
+    public next(self ref) [T]Option = {
+        while true then {
+            when self.current is {
+                .Some(nref) then {
+                    let node = deref nref;
+                    self.current = node.next_node;
+                    return [T]Option.Some(node.value);
+                };
+                .None then {
+                    if self.bucket >= self.source.cap then { return [T]Option.None(); };
+                    let head = deref self.source.buckets.offset(self.bucket).peek();
+                    self.bucket = self.bucket + 1;
+                    self.current = head;
+                }
+            }
+        }
+    };
 };
 
 public let [T Comparable]max(a T, b T) T = if a > b then a else b;
