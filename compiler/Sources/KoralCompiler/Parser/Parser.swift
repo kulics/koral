@@ -136,9 +136,11 @@ public class Parser {
     }
     try match(.identifier(name))
 
-    // Optional inheritance list: trait Child ParentA ParentB { ... }
+    // Optional inheritance list: trait Child ParentA and ParentB { ... }
     var superTraits: [String] = []
-    while currentToken !== .leftBrace {
+    
+    // Parse first parent constraint if present
+    if currentToken !== .leftBrace {
       guard case .identifier(let parentName) = currentToken else {
         throw ParserError.unexpectedToken(line: lexer.currentLine, got: currentToken.description)
       }
@@ -147,6 +149,20 @@ public class Parser {
       }
       try match(.identifier(parentName))
       superTraits.append(parentName)
+      
+      // Parse subsequent constraints separated by 'and'
+      while currentToken === .andKeyword {
+        try match(.andKeyword)
+        
+        guard case .identifier(let nextParent) = currentToken else {
+           throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+        }
+        if !isValidTypeName(nextParent) {
+            throw ParserError.invalidTypeName(line: lexer.currentLine, name: nextParent)
+        }
+        try match(.identifier(nextParent))
+        superTraits.append(nextParent)
+      }
     }
 
     try match(.leftBrace)

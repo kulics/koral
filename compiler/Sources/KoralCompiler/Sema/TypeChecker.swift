@@ -2073,20 +2073,31 @@ public class TypeChecker {
       return .notExpression(expression: typedExpr, type: .bool)
 
     case .bitwiseExpression(let left, let op, let right):
-      let typedLeft = try inferTypedExpression(left)
-      let typedRight = try inferTypedExpression(right)
-      if typedLeft.type != .int || typedRight.type != .int {
-        throw SemanticError.typeMismatch(
-          expected: "Int", got: "\(typedLeft.type) \(op) \(typedRight.type)")
+      var typedLeft = try inferTypedExpression(left)
+      var typedRight = try inferTypedExpression(right)
+
+      // Allow numeric literals to coerce to the other operand type.
+      if typedLeft.type != typedRight.type {
+        if isIntegerType(typedLeft.type) {
+          typedRight = coerceLiteral(typedRight, to: typedLeft.type)
+        }
+        if typedLeft.type != typedRight.type, isIntegerType(typedRight.type) {
+          typedLeft = coerceLiteral(typedLeft, to: typedRight.type)
+        }
       }
-      return .bitwiseExpression(left: typedLeft, op: op, right: typedRight, type: .int)
+
+      if !isIntegerScalarType(typedLeft.type) || typedLeft.type != typedRight.type {
+        throw SemanticError.typeMismatch(
+          expected: "Matching Integer Types", got: "\(typedLeft.type) \(op) \(typedRight.type)")
+      }
+      return .bitwiseExpression(left: typedLeft, op: op, right: typedRight, type: typedLeft.type)
 
     case .bitwiseNotExpression(let expr):
       let typedExpr = try inferTypedExpression(expr)
-      if typedExpr.type != .int {
-        throw SemanticError.typeMismatch(expected: "Int", got: typedExpr.type.description)
+      if !isIntegerScalarType(typedExpr.type) {
+        throw SemanticError.typeMismatch(expected: "Integer Type", got: typedExpr.type.description)
       }
-      return .bitwiseNotExpression(expression: typedExpr, type: .int)
+      return .bitwiseNotExpression(expression: typedExpr, type: typedExpr.type)
 
     case .derefExpression(let inner):
       let typedInner = try inferTypedExpression(inner)
