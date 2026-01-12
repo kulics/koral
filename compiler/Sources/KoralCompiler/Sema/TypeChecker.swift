@@ -2113,11 +2113,6 @@ public class TypeChecker {
       let typedArguments = try arguments.map { try inferTypedExpression($0) }
       let resolvedSubscript = try resolveSubscript(base: typedBase, args: typedArguments)
 
-      // Auto-deref: `__at` returns `T ref`, but `x[i]` is a value (`T`) by default.
-      // Member access has a special fast-path that can peel this deref to avoid copying.
-      if case .reference(let inner) = resolvedSubscript.type {
-        return .derefExpression(expression: resolvedSubscript, type: inner)
-      }
       return resolvedSubscript
 
     case .memberPath(let baseExpr, let path):

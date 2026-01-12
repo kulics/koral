@@ -849,7 +849,13 @@ public class CodeGen {
           addIndent()
           let argCopy = nextTemp()
           if arg.valueCategory == .lvalue {
-            buffer += "\(getCType(arg.type)) \(argCopy) = __koral_\(typeName)_copy(&\(argResult));\n"
+            switch arg {
+            case .variable(let symbol) where !symbol.type.isCopy:
+              buffer += "\(getCType(arg.type)) \(argCopy) = \(argResult);\n"
+              consumeVariable(symbol.name)
+            default:
+              buffer += "\(getCType(arg.type)) \(argCopy) = __koral_\(typeName)_copy(&\(argResult));\n"
+            }
           } else {
             buffer += "\(getCType(arg.type)) \(argCopy) = \(argResult);\n"
           }
@@ -965,7 +971,19 @@ public class CodeGen {
       let v = generateExpressionSSA(val)
       let cType = getCType(element)
       addIndent()
-      buffer += "*(\(cType)*)\(p) = \(v);\n"
+      if case .reference(_) = element {
+        buffer += "*(struct Ref*)\(p) = \(v);\n"
+        addIndent()
+        buffer += "__koral_retain(((struct Ref*)\(p))->control);\n"
+      } else if case .structure(let name, _, _, _) = element {
+        if name == "String" {
+          buffer += "*(\(cType)*)\(p) = __koral_String_copy(&\(v));\n"
+        } else {
+          buffer += "*(\(cType)*)\(p) = __koral_\(name)_copy(&\(v));\n"
+        }
+      } else {
+        buffer += "*(\(cType)*)\(p) = \(v);\n"
+      }
       return ""
 
     case .ptrDeinit(let ptr):
@@ -1016,7 +1034,19 @@ public class CodeGen {
       addIndent()
       buffer += "\(cType) \(result) = *(\(cType)*)\(p);\n"
       addIndent()
-      buffer += "*(\(cType)*)\(p) = \(v);\n"
+      if case .reference(_) = element {
+        buffer += "*(struct Ref*)\(p) = \(v);\n"
+        addIndent()
+        buffer += "__koral_retain(((struct Ref*)\(p))->control);\n"
+      } else if case .structure(let name, _, _, _) = element {
+        if name == "String" {
+          buffer += "*(\(cType)*)\(p) = __koral_String_copy(&\(v));\n"
+        } else {
+          buffer += "*(\(cType)*)\(p) = __koral_\(name)_copy(&\(v));\n"
+        }
+      } else {
+        buffer += "*(\(cType)*)\(p) = \(v);\n"
+      }
       return result
 
     case .ptrOffset(let ptr, let offset):
@@ -1119,7 +1149,7 @@ public class CodeGen {
         curType = member.type
       }
       return (basePath, baseControl)
-    case .subscriptExpression(let base, let args, let method, _):
+    case .subscriptExpression(let base, let args, let method, let type):
          guard case .function(_, let returns) = method.type else { fatalError() }
          let callNode = TypedExpressionNode.call(
              callee: .methodReference(base: base, method: method, type: method.type),
@@ -1127,9 +1157,11 @@ public class CodeGen {
              type: returns)
          let refResult = generateExpressionSSA(callNode)
          
-         // Return the Ref structure itself. 
-         // Caller (e.g. memberPath) will handle unwrapping .ptr if the type is Reference.
-         return (refResult, "\(refResult).control")
+         if case .reference(_) = type {
+             return (refResult, "\(refResult).control")
+         } else {
+             return (refResult, "NULL")
+         }
 
     case .derefExpression(let inner, let type):
          // Dereferencing a reference type gives us an LValue

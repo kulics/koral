@@ -813,31 +813,6 @@ public class Parser {
         }
         try match(.rightBracket)
         expr = .subscriptExpression(base: expr, arguments: args)
-      } else if currentToken === .matchKeyword {
-        try match(.matchKeyword)
-        try match(.leftBrace)
-        var cases: [MatchCaseNode] = []
-        while currentToken !== .rightBrace {
-          let pattern = try parsePattern()
-          if currentToken === .arrow {
-            try match(.arrow)
-          } else {
-            return expr  // fail gracefully or throw? For now expect arrow
-            // actually the lexer has arrow.
-          }
-          let body: ExpressionNode
-          if currentToken === .leftBrace {
-            body = try blockExpression()
-          } else {
-            body = try expression()
-          }
-
-          // Optional semicolon between cases (required unless next token is `}`)
-          if currentToken === .semicolon { try match(.semicolon) }
-          cases.append(MatchCaseNode(pattern: pattern, body: body))
-        }
-        try match(.rightBrace)
-        expr = .matchExpression(subject: expr, cases: cases, line: lexer.currentLine)
       } else {
         break
       }
@@ -926,6 +901,8 @@ public class Parser {
       return try ifExpression()
     } else if currentToken === .whileKeyword {
       return try whileExpression()
+    } else if currentToken === .whenKeyword {
+      return try parseWhenExpression()
     } else {
       return try parseOrExpression()
     }
@@ -1121,6 +1098,32 @@ public class Parser {
     try match(.thenKeyword)
     let body = try expression()
     return .whileExpression(condition: condition, body: body)
+  }
+
+  private func parseWhenExpression() throws -> ExpressionNode {
+    try match(.whenKeyword)
+    let subject = try expression()
+    try match(.isKeyword)
+    try match(.leftBrace)
+    var cases: [MatchCaseNode] = []
+    while currentToken !== .rightBrace {
+      let pattern = try parsePattern()
+      
+      try match(.thenKeyword)
+
+      let body: ExpressionNode
+      if currentToken === .leftBrace {
+        body = try blockExpression()
+      } else {
+        body = try expression()
+      }
+
+      // Optional semicolon between cases (required unless next token is `}`)
+      if currentToken === .semicolon { try match(.semicolon) }
+      cases.append(MatchCaseNode(pattern: pattern, body: body))
+    }
+    try match(.rightBrace)
+    return .matchExpression(subject: subject, cases: cases, line: lexer.currentLine)
   }
 
   private func tokenToArithmeticOperator(_ token: Token) -> ArithmeticOperator {
