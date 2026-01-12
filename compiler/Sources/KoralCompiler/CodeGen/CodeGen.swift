@@ -4,7 +4,7 @@ public class CodeGen {
   private var buffer: String = ""
   private var tempVarCounter = 0
   private var globalInitializations: [(String, TypedExpressionNode)] = []
-  private var lifetimeScopeStack: [[(name: String, type: Type, consumed: Bool)]] = []
+  private var lifetimeScopeStack: [[(name: String, type: Type)]] = []
   private var userDefinedDrops: [String: String] = [:] // TypeName -> Mangled Drop Function Name
 
   private struct LoopContext {
@@ -28,13 +28,11 @@ public class CodeGen {
 
   private func popScope() {
     let vars = lifetimeScopeStack.removeLast()
-    // 反向遍历变量列表,对可变类型变量调用 destroy
-    for (name, type, consumed) in vars.reversed() {
-      if consumed { continue }
-      if case .structure(let typeName, _, _, _) = type {
+    for (name, type) in vars.reversed() {
+      if case .structure(let typeName, _, _) = type {
         addIndent()
         buffer += "__koral_\(typeName)_drop(&\(name));\n"
-      } else if case .union(let typeName, _, _, _) = type {
+      } else if case .union(let typeName, _, _) = type {
         addIndent()
         buffer += "__koral_\(typeName)_drop(&\(name));\n"
       } else if case .reference(_) = type {
@@ -50,12 +48,11 @@ public class CodeGen {
 
     for scopeIndex in stride(from: lifetimeScopeStack.count - 1, through: clampedStart, by: -1) {
       let vars = lifetimeScopeStack[scopeIndex]
-      for (name, type, consumed) in vars.reversed() {
-        if consumed { continue }
-        if case .structure(let typeName, _, _, _) = type {
+      for (name, type) in vars.reversed() {
+        if case .structure(let typeName, _, _) = type {
           addIndent()
           buffer += "__koral_\(typeName)_drop(&\(name));\n"
-        } else if case .union(let typeName, _, _, _) = type {
+        } else if case .union(let typeName, _, _) = type {
           addIndent()
           buffer += "__koral_\(typeName)_drop(&\(name));\n"
         } else if case .reference(_) = type {
@@ -69,12 +66,11 @@ public class CodeGen {
   private func emitCleanupForScope(at scopeIndex: Int) {
     guard scopeIndex >= 0 && scopeIndex < lifetimeScopeStack.count else { return }
     let vars = lifetimeScopeStack[scopeIndex]
-    for (name, type, consumed) in vars.reversed() {
-      if consumed { continue }
-      if case .structure(let typeName, _, _, _) = type {
+    for (name, type) in vars.reversed() {
+      if case .structure(let typeName, _, _) = type {
         addIndent()
         buffer += "__koral_\(typeName)_drop(&\(name));\n"
-      } else if case .union(let typeName, _, _, _) = type {
+      } else if case .union(let typeName, _, _) = type {
         addIndent()
         buffer += "__koral_\(typeName)_drop(&\(name));\n"
       } else if case .reference(_) = type {
@@ -85,19 +81,7 @@ public class CodeGen {
   }
 
   private func registerVariable(_ name: String, _ type: Type) {
-    lifetimeScopeStack[lifetimeScopeStack.count - 1].append((name: name, type: type, consumed: false))
-  }
-
-  // Consume a variable from the scope (mark as moved so it won't be dropped)
-  private func consumeVariable(_ name: String) {
-    for scopeIndex in (0..<lifetimeScopeStack.count).reversed() {
-       if let index = lifetimeScopeStack[scopeIndex].lastIndex(where: { $0.name == name }) {
-           var entry = lifetimeScopeStack[scopeIndex][index]
-           entry.consumed = true
-           lifetimeScopeStack[scopeIndex][index] = entry
-           return
-       }
-    }
+    lifetimeScopeStack[lifetimeScopeStack.count - 1].append((name: name, type: type))
   }
 
 
@@ -153,8 +137,8 @@ public class CodeGen {
       for node in nodes {
         if case .givenDeclaration(let type, let methods) = node {
              var typeName: String?
-             if case .structure(let name, _, _, _) = type { typeName = name }
-             if case .union(let name, _, _, _) = type { typeName = name }
+             if case .structure(let name, _, _) = type { typeName = name }
+             if case .union(let name, _, _) = type { typeName = name }
 
              if let name = typeName {
                  for method in methods {
@@ -284,7 +268,7 @@ public class CodeGen {
     }
     let resultVar = generateExpressionSSA(body)
     let result = nextTemp()
-    if case .structure(let typeName, _, _, _) = body.type {
+    if case .structure(let typeName, _, _) = body.type {
       addIndent()
       if body.valueCategory == .lvalue {
         buffer += "\(getCType(body.type)) \(result) = __koral_\(typeName)_copy(&\(resultVar));\n"
@@ -479,7 +463,7 @@ public class CodeGen {
         let bodyResultVar = generateExpressionSSA(body)
 
         if type != .void {
-          if case .structure(let typeName, _, _, _) = type {
+          if case .structure(let typeName, _, _) = type {
             addIndent()
             if body.valueCategory == .lvalue {
               buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(bodyResultVar));\n"
@@ -546,24 +530,18 @@ public class CodeGen {
           let thenResult = generateExpressionSSA(thenBranch)
           if type != .never && thenBranch.type != .never {
               addIndent()
-              if case .structure(let typeName, _, _, _) = type {
+              if case .structure(let typeName, _, _) = type {
                 if thenBranch.valueCategory == .lvalue {
                   switch thenBranch {
-                  case .variable(let symbol) where !symbol.type.isCopy:
-                    buffer += "\(resultVar) = \(thenResult);\n"
-                    consumeVariable(symbol.name)
                   default:
                     buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(thenResult));\n"
                   }
                 } else {
                   buffer += "\(resultVar) = \(thenResult);\n"
                 }
-              } else if case .union(let typeName, _, _, _) = type {
+              } else if case .union(let typeName, _, _) = type {
                 if thenBranch.valueCategory == .lvalue {
                   switch thenBranch {
-                  case .variable(let symbol) where !symbol.type.isCopy:
-                    buffer += "\(resultVar) = \(thenResult);\n"
-                    consumeVariable(symbol.name)
                   default:
                     buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(thenResult));\n"
                   }
@@ -589,24 +567,18 @@ public class CodeGen {
           let elseResult = generateExpressionSSA(elseBranch)
           if type != .never && elseBranch.type != .never {
               addIndent()
-              if case .structure(let typeName, _, _, _) = type {
+              if case .structure(let typeName, _, _) = type {
                 if elseBranch.valueCategory == .lvalue {
                   switch elseBranch {
-                  case .variable(let symbol) where !symbol.type.isCopy:
-                    buffer += "\(resultVar) = \(elseResult);\n"
-                    consumeVariable(symbol.name)
                   default:
                     buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(elseResult));\n"
                   }
                 } else {
                   buffer += "\(resultVar) = \(elseResult);\n"
                 }
-              } else if case .union(let typeName, _, _, _) = type {
+              } else if case .union(let typeName, _, _) = type {
                 if elseBranch.valueCategory == .lvalue {
                   switch elseBranch {
-                  case .variable(let symbol) where !symbol.type.isCopy:
-                    buffer += "\(resultVar) = \(elseResult);\n"
-                    consumeVariable(symbol.name)
                   default:
                     buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(elseResult));\n"
                   }
@@ -645,7 +617,7 @@ public class CodeGen {
       addIndent()
       buffer += "\(getCType(type)) \(result);\n"
       
-      if case .structure(let typeName, _, _, _) = type {
+      if case .structure(let typeName, _, _) = type {
         // Struct: call copy constructor
         addIndent()
         buffer += "\(result) = __koral_\(typeName)_copy((struct \(typeName)*)\(innerResult).ptr);\n"
@@ -692,7 +664,7 @@ public class CodeGen {
         buffer += "\(result).ptr = malloc(sizeof(\(innerCType)));\n"
 
         // 2. 初始化数据
-        if case .structure(let typeName, _, _, _) = innerType {
+        if case .structure(let typeName, _, _) = innerType {
           addIndent()
           buffer += "*(\(innerCType)*)\(result).ptr = __koral_\(typeName)_copy(&\(innerResult));\n"
         } else {
@@ -709,7 +681,7 @@ public class CodeGen {
         buffer += "((struct Koral_Control*)\(result).control)->ptr = \(result).ptr;\n"
 
         // 4. 设置析构函数
-        if case .structure(let typeName, _, _, _) = innerType {
+        if case .structure(let typeName, _, _) = innerType {
           addIndent()
           buffer += "((struct Koral_Control*)\(result).control)->dtor = __koral_\(typeName)_drop;\n"
         } else {
@@ -835,7 +807,7 @@ public class CodeGen {
       
       // Get canonical members to check for casts
       let canonicalMembers: [(name: String, type: Type, mutable: Bool)]
-      if case .structure(_, let members, _, _) = identifier.type.canonical {
+      if case .structure(_, let members, _) = identifier.type.canonical {
           canonicalMembers = members
       } else {
           canonicalMembers = []
@@ -845,14 +817,11 @@ public class CodeGen {
         let argResult = generateExpressionSSA(arg)
         var finalArg = argResult
 
-        if case .structure(let typeName, _, _, _) = arg.type {
+        if case .structure(let typeName, _, _) = arg.type {
           addIndent()
           let argCopy = nextTemp()
           if arg.valueCategory == .lvalue {
             switch arg {
-            case .variable(let symbol) where !symbol.type.isCopy:
-              buffer += "\(getCType(arg.type)) \(argCopy) = \(argResult);\n"
-              consumeVariable(symbol.name)
             default:
               buffer += "\(getCType(arg.type)) \(argCopy) = __koral_\(typeName)_copy(&\(argResult));\n"
             }
@@ -975,7 +944,7 @@ public class CodeGen {
         buffer += "*(struct Ref*)\(p) = \(v);\n"
         addIndent()
         buffer += "__koral_retain(((struct Ref*)\(p))->control);\n"
-      } else if case .structure(let name, _, _, _) = element {
+      } else if case .structure(let name, _, _) = element {
         if name == "String" {
           buffer += "*(\(cType)*)\(p) = __koral_String_copy(&\(v));\n"
         } else {
@@ -992,7 +961,7 @@ public class CodeGen {
       if case .reference(_) = element {
         addIndent()
         buffer += "__koral_release(((struct Ref*)\(p))->control);\n"
-      } else if case .structure(let name, _, _, _) = element {
+      } else if case .structure(let name, _, _) = element {
         if name == "String" {  // String is primitive struct
           addIndent()
           buffer += "__koral_String_drop(\(p));\n"
@@ -1038,7 +1007,7 @@ public class CodeGen {
         buffer += "*(struct Ref*)\(p) = \(v);\n"
         addIndent()
         buffer += "__koral_retain(((struct Ref*)\(p))->control);\n"
-      } else if case .structure(let name, _, _, _) = element {
+      } else if case .structure(let name, _, _) = element {
         if name == "String" {
           buffer += "*(\(cType)*)\(p) = __koral_String_copy(&\(v));\n"
         } else {
@@ -1188,7 +1157,7 @@ public class CodeGen {
       // void 类型的值不能赋给变量
       if value.type != .void {
         // 如果是可变类型，增加引用计数
-        if case .structure(let typeName, _, _, _) = identifier.type {
+        if case .structure(let typeName, _, _) = identifier.type {
           addIndent()
           buffer += "\(getCType(identifier.type)) \(identifier.name) = "
           if value.valueCategory == .lvalue {
@@ -1197,7 +1166,7 @@ public class CodeGen {
             buffer += "\(valueResult);\n"
           }
           registerVariable(identifier.name, identifier.type)
-        } else if case .union(let typeName, _, _, _) = identifier.type {
+        } else if case .union(let typeName, _, _) = identifier.type {
           addIndent()
           buffer += "\(getCType(identifier.type)) \(identifier.name) = "
           if value.valueCategory == .lvalue {
@@ -1226,7 +1195,7 @@ public class CodeGen {
       
       if value.type == .void { return }
 
-      if case .structure(let typeName, _, _, _) = target.type {
+      if case .structure(let typeName, _, _) = target.type {
         addIndent()
         if value.valueCategory == .lvalue {
            buffer += "\(lhsPath) = __koral_\(typeName)_copy(&\(valueResult));\n"
@@ -1261,14 +1230,14 @@ public class CodeGen {
         let valueResult = generateExpressionSSA(value)
         let retVar = nextTemp()
 
-        if case .structure(let typeName, _, _, _) = value.type {
+        if case .structure(let typeName, _, _) = value.type {
           addIndent()
           if value.valueCategory == .lvalue {
             buffer += "\(getCType(value.type)) \(retVar) = __koral_\(typeName)_copy(&\(valueResult));\n"
           } else {
             buffer += "\(getCType(value.type)) \(retVar) = \(valueResult);\n"
           }
-        } else if case .union(let typeName, _, _, _) = value.type {
+        } else if case .union(let typeName, _, _) = value.type {
           addIndent()
           if value.valueCategory == .lvalue {
             buffer += "\(getCType(value.type)) \(retVar) = __koral_\(typeName)_copy(&\(valueResult));\n"
@@ -1374,9 +1343,9 @@ public class CodeGen {
     case .never: return "void"
     case .function(_, _):
       fatalError("Function type not supported in getCType")
-    case .structure(let name, _, _, _):
+    case .structure(let name, _, _):
       return "struct \(name)"
-    case .union(let name, _, _, _):
+    case .union(let name, _, _):
       return "struct \(name)"
     case .genericParameter(let name):
       fatalError("Generic parameter \(name) should be resolved before CodeGen")
@@ -1427,7 +1396,7 @@ public class CodeGen {
     withIndent {
       buffer += "    struct \(name) result;\n"
       for param in parameters {
-        if case .structure(let fieldTypeName, _, _, _) = param.type {
+        if case .structure(let fieldTypeName, _, _) = param.type {
           buffer += "    result.\(param.name) = __koral_\(fieldTypeName)_copy(&self->\(param.name));\n"
         } else if case .reference(_) = param.type {
           buffer += "    result.\(param.name) = self->\(param.name);\n"
@@ -1456,7 +1425,7 @@ public class CodeGen {
       }
 
       for param in parameters {
-        if case .structure(let fieldTypeName, _, _, _) = param.type {
+        if case .structure(let fieldTypeName, _, _) = param.type {
           buffer += "    __koral_\(fieldTypeName)_drop(&self->\(param.name));\n"
         } else if case .reference(_) = param.type {
           buffer += "    __koral_release(self->\(param.name).control);\n"
@@ -1510,9 +1479,9 @@ public class CodeGen {
                  for param in c.parameters {
                      let fieldPath = "self->data.\(c.name).\(param.name)"
                      let resultPath = "result.data.\(c.name).\(param.name)"
-                     if case .structure(let fieldTypeName, _, _, _) = param.type {
+                     if case .structure(let fieldTypeName, _, _) = param.type {
                          buffer += "        \(resultPath) = __koral_\(fieldTypeName)_copy(&\(fieldPath));\n"
-                     } else if case .union(let fieldTypeName, _, _, _) = param.type {
+                     } else if case .union(let fieldTypeName, _, _) = param.type {
                         buffer += "        \(resultPath) = __koral_\(fieldTypeName)_copy(&\(fieldPath));\n"
                      } else if case .reference(_) = param.type {
                          buffer += "        \(resultPath) = \(fieldPath);\n"
@@ -1550,9 +1519,9 @@ public class CodeGen {
              buffer += "    case \(index): // \(c.name)\n"
              for param in c.parameters {
                  let fieldPath = "self->data.\(c.name).\(param.name)"
-                 if case .structure(let fieldTypeName, _, _, _) = param.type {
+                 if case .structure(let fieldTypeName, _, _) = param.type {
                      buffer += "        __koral_\(fieldTypeName)_drop(&\(fieldPath));\n"
-                 } else if case .union(let fieldTypeName, _, _, _) = param.type {
+                 } else if case .union(let fieldTypeName, _, _) = param.type {
                      buffer += "        __koral_\(fieldTypeName)_drop(&\(fieldPath));\n"
                  } else if case .reference(_) = param.type {
                      buffer += "        __koral_release(\(fieldPath).control);\n"
@@ -1566,7 +1535,7 @@ public class CodeGen {
   }
 
   private func generateUnionConstructor(type: Type, caseName: String, args: [TypedExpressionNode]) -> String {
-      guard case .union(let typeName, let cases, _, _) = type else { fatalError() }
+      guard case .union(let typeName, let cases, _) = type else { fatalError() }
       
       // Calculate tag index
       let tagIndex = cases.firstIndex(where: { $0.name == caseName })!
@@ -1587,7 +1556,7 @@ public class CodeGen {
               let argResult = generateExpressionSSA(argExpr)
               
               addIndent()
-              if case .structure(let structName, _, _, _) = param.type {
+              if case .structure(let structName, _, _) = param.type {
                    if argExpr.valueCategory == .lvalue {
                        buffer += "\(unionMemberPath).\(param.name) = __koral_\(structName)_copy(&\(argResult));\n"
                    } else {
@@ -1629,12 +1598,6 @@ public class CodeGen {
         subjectType = inner
     }
     
-    // Check for move semantics and consume variable from scope if necessary
-    if !subject.type.isCopy {
-        if case .variable(let identifier) = subject {
-            consumeVariable(identifier.name)
-        }
-    }
 
     let endLabel = "match_end_\(nextTemp())"
     
@@ -1645,7 +1608,7 @@ public class CodeGen {
          let caseScopeIndex = lifetimeScopeStack.count
          pushScope()
 
-         let isMove = !subject.type.isCopy
+         let isMove = false
          let (prelude, preludeVars, condition, bindings, vars) = generatePatternConditionAndBindings(c.pattern, subjectVar, subjectType, isMove: isMove)
 
          // Prelude runs regardless of match success (temps used in the condition)
@@ -1674,7 +1637,7 @@ public class CodeGen {
            let bodyResult = generateExpressionSSA(c.body)
            if type != .void && type != .never && c.body.type != .never {
              addIndent()
-             if case .structure(let typeName, _, _, _) = type {
+             if case .structure(let typeName, _, _) = type {
               if c.body.valueCategory == .lvalue {
                  buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(bodyResult));\n"
               } else {
@@ -1757,7 +1720,7 @@ public class CodeGen {
           bindCode += "\(name) = \(path);\n"
         } else {
           // Copy Semantics
-          if case .structure(let typeName, _, _, _) = varType {
+          if case .structure(let typeName, _, _) = varType {
              bindCode += "\(name) = __koral_\(typeName)_copy(&\(path));\n"
           } else if case .reference(_) = varType {
              bindCode += "\(name) = \(path);\n"
@@ -1769,7 +1732,7 @@ public class CodeGen {
         return ([], [], "1", [bindCode], [(name, varType)])
           
       case .unionCase(let caseName, let expectedTagIndex, let args):
-        guard case .union(_, let cases, _, _) = type else { fatalError("Union pattern on non-union type") }
+        guard case .union(_, let cases, _) = type else { fatalError("Union pattern on non-union type") }
           
         var prelude: [String] = []
         var preludeVars: [(String, Type)] = []
@@ -1814,16 +1777,11 @@ public class CodeGen {
       let temp = generateExpressionSSA(finalExpr)
       if finalExpr.type != .void && finalExpr.type != .never {
         let resultVar = nextTemp()
-        if case .structure(let typeName, _, _, _) = finalExpr.type {
+        if case .structure(let typeName, _, _) = finalExpr.type {
           if finalExpr.valueCategory == .lvalue {
             // Returning an lvalue struct from a block:
             // - Copy types must be copied, because scope cleanup will drop the original.
-            // - Move types can be moved, but we must mark the source variable as consumed.
             switch finalExpr {
-            case .variable(let symbol) where !symbol.type.isCopy:
-              addIndent()
-              buffer += "\(getCType(finalExpr.type)) \(resultVar) = \(temp);\n"
-              consumeVariable(symbol.name)
             default:
               addIndent()
               buffer += "\(getCType(finalExpr.type)) \(resultVar) = __koral_\(typeName)_copy(&\(temp));\n"
@@ -1832,13 +1790,9 @@ public class CodeGen {
             addIndent()
             buffer += "\(getCType(finalExpr.type)) \(resultVar) = \(temp);\n"
           }
-        } else if case .union(let typeName, _, _, _) = finalExpr.type {
+        } else if case .union(let typeName, _, _) = finalExpr.type {
           if finalExpr.valueCategory == .lvalue {
             switch finalExpr {
-            case .variable(let symbol) where !symbol.type.isCopy:
-              addIndent()
-              buffer += "\(getCType(finalExpr.type)) \(resultVar) = \(temp);\n"
-              consumeVariable(symbol.name)
             default:
               addIndent()
               buffer += "\(getCType(finalExpr.type)) \(resultVar) = __koral_\(typeName)_copy(&\(temp));\n"
@@ -1868,7 +1822,7 @@ public class CodeGen {
       return
     }
     let valueResult = generateExpressionSSA(value)
-    if case .structure(let typeName, _, _, _) = identifier.type {
+    if case .structure(let typeName, _, _) = identifier.type {
       if value.valueCategory == .lvalue {
         let copyResult = nextTemp()
         addIndent()
@@ -1883,7 +1837,7 @@ public class CodeGen {
         addIndent()
         buffer += "\(identifier.name) = \(valueResult);\n"
       }
-    } else if case .union(let typeName, _, _, _) = identifier.type {
+    } else if case .union(let typeName, _, _) = identifier.type {
       if value.valueCategory == .lvalue {
         let copyResult = nextTemp()
         addIndent()
@@ -1938,7 +1892,7 @@ public class CodeGen {
           memberAccess = "\(accessPath).\(memberName)"
       }
       
-      if case .structure(_, let members, _, _) = curType.canonical {
+      if case .structure(_, let members, _) = curType.canonical {
         if let canonicalMember = members.first(where: { $0.name == memberName }) {
           if canonicalMember.type != memberType {
             let targetCType = getCType(memberType)
@@ -1950,7 +1904,7 @@ public class CodeGen {
       accessPath = memberAccess
       curType = memberType
       
-      if isLast, case .structure(let typeName, _, _, _) = memberType {
+      if isLast, case .structure(let typeName, _, _) = memberType {
         if value.valueCategory == .lvalue {
           let copyResult = nextTemp()
           addIndent()
@@ -1995,7 +1949,7 @@ public class CodeGen {
     // struct类型参数传递用值，isValue==false 的 struct 参数自动递归 copy
     for arg in arguments {
       let result = generateExpressionSSA(arg)
-      if case .structure(let typeName, _, _, _) = arg.type {
+      if case .structure(let typeName, _, _) = arg.type {
         if arg.valueCategory == .lvalue {
           let copyResult = nextTemp()
           addIndent()
@@ -2050,7 +2004,7 @@ public class CodeGen {
           memberAccess = "\(access).\(member.name)"
       }
       
-      if case .structure(_, let members, _, _) = curType.canonical {
+      if case .structure(_, let members, _) = curType.canonical {
         if let canonicalMember = members.first(where: { $0.name == member.name }) {
           if canonicalMember.type != member.type {
             let targetCType = getCType(member.type)

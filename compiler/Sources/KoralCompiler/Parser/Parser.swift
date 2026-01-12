@@ -495,12 +495,10 @@ public class Parser {
         try match(.identifier(paramName))
 
         var constraints: [TypeNode] = []
-        if currentToken !== .comma && currentToken !== .rightBracket {
+        constraints.append(try parseTraitConstraint())
+        while currentToken === .andKeyword {
+          try match(.andKeyword)
           constraints.append(try parseTraitConstraint())
-          while currentToken === .andKeyword {
-            try match(.andKeyword)
-            constraints.append(try parseTraitConstraint())
-          }
         }
 
         parameters.append((name: paramName, constraints: constraints))
@@ -630,18 +628,12 @@ public class Parser {
     }
     try match(.rightParen)
 
-    var isCopy = false
-    if case .identifier("Copy") = currentToken {
-      try match(.identifier("Copy"))
-      isCopy = true
-    }
 
     return .globalStructDeclaration(
       name: name,
       typeParameters: typeParams,
       parameters: parameters,
       access: access,
-      isCopy: isCopy,
       line: line
     )
   }
@@ -682,18 +674,12 @@ public class Parser {
 
     try match(.rightBrace)
 
-    var isCopy = false
-    if case .identifier("Copy") = currentToken {
-      try match(.identifier("Copy"))
-      isCopy = true
-    }
 
     return .globalUnionDeclaration(
       name: name,
       typeParameters: typeParams,
       cases: cases,
       access: access,
-      isCopy: isCopy,
       line: line
     )
   }

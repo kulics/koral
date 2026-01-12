@@ -58,7 +58,6 @@ public indirect enum GlobalNode {
     typeParameters: [TypeParameterDecl],
     parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier)],
     access: AccessModifier,
-    isCopy: Bool,
     line: Int
   )
   case globalUnionDeclaration(
@@ -66,7 +65,6 @@ public indirect enum GlobalNode {
     typeParameters: [TypeParameterDecl],
     cases: [UnionCaseDeclaration],
     access: AccessModifier,
-    isCopy: Bool,
     line: Int
   )
   case intrinsicTypeDeclaration(
