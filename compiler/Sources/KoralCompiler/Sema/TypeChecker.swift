@@ -51,7 +51,7 @@ public class TypeChecker {
       return stringType
     }
     // Fallback: std should normally define `type String(...)`.
-    return .structure(name: "String", members: [], isGenericInstantiation: false, isCopy: true)
+    return .structure(name: "String", members: [], isGenericInstantiation: false)
   }
 
   private func getCompilerMethodKind(_ name: String) -> CompilerMethodKind {
@@ -383,7 +383,7 @@ public class TypeChecker {
 
   private func lookupConcreteMethodSymbol(on selfType: Type, name: String) throws -> Symbol? {
     switch selfType {
-    case .structure(let typeName, _, let isGen, _):
+    case .structure(let typeName, _, let isGen):
       if let methods = extensionMethods[typeName], let sym = methods[name] {
         return sym
       }
@@ -401,7 +401,7 @@ public class TypeChecker {
       }
       return nil
 
-    case .union(let typeName, _, let isGen, _):
+    case .union(let typeName, _, let isGen):
       if let methods = extensionMethods[typeName], let sym = methods[name] {
         return sym
       }
@@ -466,16 +466,6 @@ public class TypeChecker {
     if traitName == "Any" {
       return
     }
-    if traitName == "Copy" {
-      if !selfType.isCopy {
-        var msg = "Type \(selfType) does not satisfy trait Copy"
-        if let context {
-          msg += " (\(context))"
-        }
-        throw SemanticError(.generic(msg), line: currentLine)
-      }
-      return
-    }
 
     try validateTraitName(traitName)
     let required = try flattenedTraitMethods(traitName)
@@ -536,14 +526,14 @@ public class TypeChecker {
     let structType: Type
     if case .reference(let inner) = type { structType = inner } else { structType = type }
 
-    guard case .structure(let typeName, _, _, _) = structType else {
+    guard case .structure(let typeName, _, _) = structType else {
       throw SemanticError.invalidOperation(op: "subscript", type1: type.description, type2: "")
     }
 
     var methodSymbol: Symbol? = nil
     if let extensions = extensionMethods[typeName], let sym = extensions[methodName] {
       methodSymbol = sym
-    } else if case .structure(_, _, let isGen, _) = structType, isGen,
+    } else if case .structure(_, _, let isGen) = structType, isGen,
       let info = layoutToTemplateInfo[typeName]
     {
       if let extensions = genericExtensionMethods[info.base] {
@@ -587,15 +577,7 @@ public class TypeChecker {
           }
         } else if case .reference(let inner) = base.type, inner == firstParam.type {
           // Implicit deref: only safe for Copy
-          if inner.isCopy {
-            finalBase = .derefExpression(expression: base, type: inner)
-          } else {
-            throw SemanticError.invalidOperation(
-              op: "implicit deref",
-              type1: base.type.description,
-              type2: firstParam.type.description
-            )
-          }
+          finalBase = .derefExpression(expression: base, type: inner)
         } else {
           throw SemanticError.typeMismatch(
             expected: firstParam.type.description, got: base.type.description)
@@ -670,7 +652,7 @@ public class TypeChecker {
       return nil
 
     case .globalUnionDeclaration(
-      let name, let typeParameters, let cases, let access, let isCopy, let line):
+      let name, let typeParameters, let cases, let access, let line):
       self.currentLine = line
       if currentScope.hasTypeDefinition(name) {
         throw SemanticError.duplicateDefinition(name, line: line)
@@ -678,14 +660,14 @@ public class TypeChecker {
 
       if !typeParameters.isEmpty {
         let template = GenericUnionTemplate(
-          name: name, typeParameters: typeParameters, cases: cases, access: access, isCopy: isCopy)
+          name: name, typeParameters: typeParameters, cases: cases, access: access)
         currentScope.defineGenericUnionTemplate(name, template: template)
         return .genericTypeTemplate(name: name)
       }
 
       // Placeholder for recursion
       let placeholder = Type.union(
-        name: name, cases: [], isGenericInstantiation: false, isCopy: isCopy)
+        name: name, cases: [], isGenericInstantiation: false)
       try currentScope.defineType(name, type: placeholder, line: line)
 
       var unionCases: [UnionCase] = []
@@ -703,21 +685,8 @@ public class TypeChecker {
         unionCases.append(UnionCase(name: c.name, parameters: params))
       }
 
-      if isCopy {
-        for c in unionCases {
-          for param in c.parameters {
-            if !param.type.isCopy {
-              throw SemanticError.invalidOperation(
-                op:
-                  "Copy union \(name) cannot contain non-Copy field \(param.name) of type \(param.type)",
-                type1: "", type2: "")
-            }
-          }
-        }
-      }
-
       let type = Type.union(
-        name: name, cases: unionCases, isGenericInstantiation: false, isCopy: isCopy)
+        name: name, cases: unionCases, isGenericInstantiation: false)
       // Replace placeholder with final type
       currentScope.overwriteType(name, type: type)
       return .globalUnionDeclaration(
@@ -734,7 +703,6 @@ public class TypeChecker {
         throw SemanticError.typeMismatch(
           expected: type.description, got: typedValue.type.description)
       }
-      checkMove(typedValue)
       currentScope.define(name, type, mutable: isMut)
       return .globalVariable(
         identifier: Symbol(name: name, type: type, kind: .variable(isMut ? .MutableValue : .Value)),
@@ -911,9 +879,9 @@ public class TypeChecker {
 
       let type = try resolveTypeNode(typeNode)
       let typeName: String
-      if case .structure(let name, _, _, _) = type {
+      if case .structure(let name, _, _) = type {
         typeName = name
-      } else if case .union(let name, _, _, _) = type {
+      } else if case .union(let name, _, _) = type {
         typeName = name
       } else if case .int = type {
         typeName = type.description
@@ -1088,10 +1056,10 @@ public class TypeChecker {
       let typeName: String
       let shouldEmitGiven: Bool
       switch type {
-      case .structure(let name, _, _, _):
+      case .structure(let name, _, _):
         typeName = name
         shouldEmitGiven = true
-      case .union(let name, _, _, _):
+      case .union(let name, _, _):
         typeName = name
         shouldEmitGiven = true
       case .int, .int8, .int16, .int32, .int64,
@@ -1156,7 +1124,7 @@ public class TypeChecker {
       return shouldEmitGiven ? .givenDeclaration(type: type, methods: typedMethods) : nil
 
     case .globalStructDeclaration(
-      let name, let typeParameters, let parameters, _, let isCopy, let line):
+      let name, let typeParameters, let parameters, _, let line):
       self.currentLine = line
       // Check if type already exists
       if currentScope.hasTypeDefinition(name) {
@@ -1165,14 +1133,14 @@ public class TypeChecker {
 
       if !typeParameters.isEmpty {
         let template = GenericStructTemplate(
-          name: name, typeParameters: typeParameters, parameters: parameters, isCopy: isCopy)
+          name: name, typeParameters: typeParameters, parameters: parameters)
         currentScope.defineGenericStructTemplate(name, template: template)
         return .genericTypeTemplate(name: name)
       }
 
       // Placeholder for recursion
       let placeholder = Type.structure(
-        name: name, members: [], isGenericInstantiation: false, isCopy: isCopy)
+        name: name, members: [], isGenericInstantiation: false)
       try currentScope.defineType(name, type: placeholder, line: line)
 
       let params = try parameters.map { param -> Symbol in
@@ -1187,23 +1155,11 @@ public class TypeChecker {
           kind: param.mutable ? .variable(.MutableValue) : .variable(.Value))
       }
 
-      if isCopy {
-        for param in params {
-          if !param.type.isCopy {
-            throw SemanticError.invalidOperation(
-              op:
-                "Copy type \(name) cannot contain non-Copy field \(param.name) of type \(param.type)",
-              type1: "", type2: "")
-          }
-        }
-      }
-
       // Define the new type
       let typeType = Type.structure(
         name: name,
         members: params.map { (name: $0.name, type: $0.type, mutable: $0.isMutable()) },
-        isGenericInstantiation: false,
-        isCopy: isCopy
+        isGenericInstantiation: false
       )
       currentScope.overwriteType(name, type: typeType)
 
@@ -1231,7 +1187,7 @@ public class TypeChecker {
         type = .void  // Placeholder
       default:
         // Default to empty structure for other intrinsics
-        type = .structure(name: name, members: [], isGenericInstantiation: false, isCopy: true)
+        type = .structure(name: name, members: [], isGenericInstantiation: false)
       }
 
       if typeParameters.isEmpty {
@@ -1242,7 +1198,7 @@ public class TypeChecker {
         // For generic intrinsics (like Pointer<T>), we still need a template definition
         // so the type checker knows it accepts distinct type parameters.
         let template = GenericStructTemplate(
-          name: name, typeParameters: typeParameters, parameters: [], isCopy: true)
+          name: name, typeParameters: typeParameters, parameters: [])
         currentScope.defineGenericStructTemplate(name, template: template)
         return .genericTypeTemplate(name: name)
       }
@@ -1299,7 +1255,6 @@ public class TypeChecker {
     case .castExpression(let typeNode, let innerExpr):
       let targetType = try resolveTypeNode(typeNode)
       let typedInner = try inferTypedExpression(innerExpr)
-      checkMove(typedInner)
 
       if !isValidExplicitCast(from: typedInner.type, to: targetType) {
         throw SemanticError.invalidOperation(
@@ -1330,11 +1285,6 @@ public class TypeChecker {
       var subjectType = typedSubject.type
       if case .reference(let inner) = subjectType {
         subjectType = inner
-      }
-
-      // Check Move Semantics
-      if !typedSubject.type.isCopy {
-        checkMove(typedSubject)
       }
 
       var typedCases: [TypedMatchCase] = []
@@ -1496,7 +1446,6 @@ public class TypeChecker {
 
     case .letExpression(let name, let typeNode, let value, let mutable, let body):
       var typedValue = try inferTypedExpression(value)
-      checkMove(typedValue)
 
       if let typeNode = typeNode {
         let type = try resolveTypeNode(typeNode)
@@ -1573,7 +1522,7 @@ public class TypeChecker {
           let resolvedArgs = try args.map { try resolveTypeNode($0) }
           let instantiatedType = try instantiate(template: template, args: resolvedArgs)
 
-          guard case .structure(let typeName, let members, _, _) = instantiatedType else {
+          guard case .structure(let typeName, let members, _) = instantiatedType else {
             fatalError("Instantiated type must be a structure")
           }
 
@@ -1595,7 +1544,6 @@ public class TypeChecker {
                 got: typedArg.type.description
               )
             }
-            checkMove(typedArg)
             typedArguments.append(typedArg)
           }
 
@@ -1703,7 +1651,6 @@ public class TypeChecker {
                 got: typedArg.type.description
               )
             }
-            checkMove(typedArg)
             typedArguments.append(typedArg)
           }
 
@@ -1729,7 +1676,7 @@ public class TypeChecker {
 
       if let resolved = preResolvedCallee, case .variable(let symbol) = resolved {
         if case .function(_, let returnType) = symbol.type,
-          case .union(let uName, _, _, _) = returnType
+          case .union(let uName, _, _) = returnType
         {
           // Check if symbol name is uName.CaseName
           if symbol.name.starts(with: uName + ".") {
@@ -1748,7 +1695,6 @@ public class TypeChecker {
                 throw SemanticError.typeMismatch(
                   expected: param.type.description, got: typedArg.type.description)
               }
-              checkMove(typedArg)
               typedArgs.append(typedArg)
             }
 
@@ -1789,7 +1735,6 @@ public class TypeChecker {
                 throw error
               }
             }
-            checkMove(typedArg)
             typedArguments.append(typedArg)
             try unify(
               node: param.type, type: typedArg.type, inferred: &inferred,
@@ -1835,7 +1780,7 @@ public class TypeChecker {
         }
 
         if let type = currentScope.lookupType(name) {
-          guard case .structure(_, let parameters, _, _) = type else {
+          guard case .structure(_, let parameters, _) = type else {
             throw SemanticError.invalidOperation(
               op: "construct", type1: type.description, type2: "")
           }
@@ -1858,7 +1803,6 @@ public class TypeChecker {
                 got: typedArg.type.description
               )
             }
-            checkMove(typedArg)
             typedArguments.append(typedArg)
           }
 
@@ -1918,13 +1862,7 @@ public class TypeChecker {
               } else if case .reference(let inner) = base.type, inner == firstParam.type {
                 // 尝试自动解引用：期望 T，实际是 T ref
                 // Only safe for Copy types (otherwise this would implicitly move).
-                if inner.isCopy {
-                  finalBase = .derefExpression(expression: base, type: inner)
-                } else {
-                  throw SemanticError.invalidOperation(
-                    op: "implicit deref", type1: base.type.description,
-                    type2: firstParam.type.description)
-                }
+                finalBase = .derefExpression(expression: base, type: inner)
               } else {
                 throw SemanticError.typeMismatch(
                   expected: firstParam.type.description,
@@ -1937,7 +1875,6 @@ public class TypeChecker {
           let finalCallee: TypedExpressionNode = .methodReference(
             base: finalBase, method: method, type: methodType)
 
-          checkMove(finalBase)
 
           var typedArguments: [TypedExpressionNode] = []
           for (arg, param) in zip(arguments, params.dropFirst()) {
@@ -1953,15 +1890,7 @@ public class TypeChecker {
                     op: "implicit ref", type1: typedArg.type.description, type2: "rvalue")
                 }
               } else if case .reference(let inner) = typedArg.type, inner == param.type {
-                if inner.isCopy {
-                  typedArg = .derefExpression(expression: typedArg, type: inner)
-                } else {
-                  throw SemanticError.invalidOperation(
-                    op: "implicit deref",
-                    type1: typedArg.type.description,
-                    type2: param.type.description
-                  )
-                }
+                typedArg = .derefExpression(expression: typedArg, type: inner)
               } else {
                 throw SemanticError.typeMismatch(
                   expected: param.type.description,
@@ -1969,7 +1898,6 @@ public class TypeChecker {
                 )
               }
             }
-            checkMove(typedArg)
             typedArguments.append(typedArg)
           }
 
@@ -2033,7 +1961,6 @@ public class TypeChecker {
               got: typedArg.type.description
             )
           }
-          checkMove(typedArg)
           typedArguments.append(typedArg)
         }
 
@@ -2135,7 +2062,7 @@ public class TypeChecker {
 
           if path.count == 1 {
             let memberName = path[0]
-            if case .structure(let name, _, let isGen, _) = type, isGen,
+            if case .structure(let name, _, let isGen) = type, isGen,
               let info = layoutToTemplateInfo[name]
             {
               if let extensions = genericExtensionMethods[info.base] {
@@ -2164,7 +2091,7 @@ public class TypeChecker {
 
           if path.count == 1 {
             let memberName = path[0]
-            if case .union(let uName, let cases, _, _) = type {
+            if case .union(let uName, let cases, _) = type {
               if let c = cases.first(where: { $0.name == memberName }) {
                 let symbolName = "\(uName).\(memberName)"
                 let paramTypes = c.parameters.map { Parameter(type: $0.type, kind: .byVal) }
@@ -2205,7 +2132,7 @@ public class TypeChecker {
             }
           }
 
-          if case .structure(let typeName, _, _, _) = type {
+          if case .structure(let typeName, _, _) = type {
             if let methods = extensionMethods[typeName], let sym = methods[memberName] {
               methodSymbol = sym
             }
@@ -2231,7 +2158,7 @@ public class TypeChecker {
       if case .identifier(let name) = baseExpr, let type = currentScope.lookupType(name) {
         if path.count == 1 {
           let memberName = path[0]
-          if case .union(_, let cases, _, _) = type {
+          if case .union(_, let cases, _) = type {
             if let c = cases.first(where: { $0.name == memberName }) {
               // Found Union Case. Return a synthetic Function Symbol representing the constructor.
               let paramTypes = c.parameters.map { Parameter(type: $0.type, kind: .byVal) }
@@ -2280,7 +2207,7 @@ public class TypeChecker {
 
         // Check if it is a structure to access members
         var foundMember = false
-        if case .structure(_, let members, _, _) = typeToLookup {
+        if case .structure(_, let members, _) = typeToLookup {
           if let mem = members.first(where: { $0.name == memberName }) {
             let sym = Symbol(
               name: mem.name, type: mem.type, kind: .variable(mem.mutable ? .MutableValue : .Value))
@@ -2364,9 +2291,9 @@ public class TypeChecker {
             }
 
             var isGenericInstance = false
-            if case .structure(_, _, let isGen, _) = typeToLookup {
+            if case .structure(_, _, let isGen) = typeToLookup {
               isGenericInstance = isGen
-            } else if case .union(_, _, let isGen, _) = typeToLookup {
+            } else if case .union(_, _, let isGen) = typeToLookup {
               isGenericInstance = isGen
             }
 
@@ -2462,7 +2389,7 @@ public class TypeChecker {
             }
           }
 
-          if case .structure(let typeName, _, _, _) = typeToLookup {
+          if case .structure(let typeName, _, _) = typeToLookup {
             throw SemanticError.undefinedMember(memberName, typeName)
           } else {
             throw SemanticError.invalidOperation(
@@ -2661,7 +2588,6 @@ public class TypeChecker {
         type = typedValue.type
       }
 
-      checkMove(typedValue)
       currentScope.define(name, type, mutable: mutable)
       return .variableDeclaration(
         identifier: Symbol(
@@ -2707,7 +2633,6 @@ public class TypeChecker {
           throw SemanticError.typeMismatch(
             expected: expectedValueType.description, got: typedValue.type.description)
         }
-        checkMove(typedValue)
         let valSym = nextSynthSymbol(prefix: "sub_val", type: typedValue.type)
         stmts.append(.variableDeclaration(identifier: valSym, value: typedValue, mutable: false))
 
@@ -2740,7 +2665,6 @@ public class TypeChecker {
           expected: typedTarget.type.description, got: typedValue.type.description)
       }
 
-      checkMove(typedValue)
       return .assignment(target: typedTarget, value: typedValue)
 
     case .compoundAssignment(let target, let op, let value, let line):
@@ -2794,7 +2718,6 @@ public class TypeChecker {
         }
 
         let _ = try checkArithmeticOp(compoundOpToArithmeticOp(op), elementType, typedRhs.type)
-        checkMove(typedRhs)
         let rhsSym = nextSynthSymbol(prefix: "sub_rhs", type: typedRhs.type)
         stmts.append(.variableDeclaration(identifier: rhsSym, value: typedRhs, mutable: false))
 
@@ -2826,7 +2749,6 @@ public class TypeChecker {
       let typedTarget = try resolveLValue(target)
       let typedValue = coerceLiteral(try inferTypedExpression(value), to: typedTarget.type)
       let _ = try checkArithmeticOp(compoundOpToArithmeticOp(op), typedTarget.type, typedValue.type)
-      checkMove(typedValue)
       return .compoundAssignment(target: typedTarget, operator: op, value: typedValue)
 
     case .expression(let expr, let line):
@@ -2850,7 +2772,6 @@ public class TypeChecker {
           throw SemanticError.typeMismatch(
             expected: returnType.description, got: typedValue.type.description)
         }
-        checkMove(typedValue)
         return .return(value: typedValue)
       }
 
@@ -2909,7 +2830,7 @@ public class TypeChecker {
         // Unwrap reference if needed
         if case .reference(let inner) = currentType { currentType = inner }
 
-        guard case .structure(_, let members, _, _) = currentType else {
+        guard case .structure(_, let members, _) = currentType else {
           throw SemanticError.invalidOperation(
             op: "member access on non-struct", type1: currentType.description, type2: "")
         }
@@ -2956,14 +2877,14 @@ public class TypeChecker {
     let structType: Type
     if case .reference(let inner) = type { structType = inner } else { structType = type }
 
-    guard case .structure(let typeName, _, _, _) = structType else {
+    guard case .structure(let typeName, _, _) = structType else {
       throw SemanticError.invalidOperation(op: "subscript", type1: type.description, type2: "")
     }
 
     var methodSymbol: Symbol? = nil
     if let extensions = extensionMethods[typeName], let sym = extensions[methodName] {
       methodSymbol = sym
-    } else if case .structure(_, _, let isGen, _) = structType, isGen,
+    } else if case .structure(_, _, let isGen) = structType, isGen,
       let info = layoutToTemplateInfo[typeName]
     {
       if let extensions = genericExtensionMethods[info.base] {
@@ -3030,37 +2951,6 @@ public class TypeChecker {
   }
 
   // 将 TypeNode 解析为语义层 Type，支持函数参数/返回位置的一层 reference(T)
-  private func checkMove(_ node: TypedExpressionNode) {
-    // Only check if we are NOT inside a closure/function that hasn't run yet?
-    // But TypeChecker visits linearly.
-
-    switch node {
-    case .variable(let symbol):
-      if !symbol.type.isCopy {
-        if currentScope.isMoved(symbol.name) {
-          // Double check failsafe, though lookup should have caught it if Scope checks moved.
-          // Actually scope.lookup SHOULD check moved. But earlier I found it didn't?
-          // Wait, inferTypedExpression checked it.
-          // So this check is just for marking.
-        }
-        currentScope.markMoved(symbol.name)
-      }
-    case .ifExpression(_, let thenExpr, let elseExpr, _):
-      checkMove(thenExpr)
-      if let elseExpr = elseExpr {
-        checkMove(elseExpr)
-      }
-    case .blockExpression(_, let finalExpr, _):
-      if let finalExpr = finalExpr {
-        checkMove(finalExpr)
-      }
-    case .letExpression(_, _, let body, _):
-      checkMove(body)
-    // Add other structural nodes if necessary
-    default:
-      break
-    }
-  }
 
   private func resolveTypeNode(_ node: TypeNode) throws -> Type {
     switch node {
@@ -3120,7 +3010,7 @@ public class TypeChecker {
 
     // Create Placeholder for recursion
     let placeholder = Type.structure(
-      name: layoutName, members: [], isGenericInstantiation: true, isCopy: template.isCopy)
+      name: layoutName, members: [], isGenericInstantiation: true)
     instantiatedTypes[key] = placeholder
 
     // 1. Resolve members with specific types
@@ -3147,8 +3037,7 @@ public class TypeChecker {
 
     // 3. Create Specific Type
     let specificType = Type.structure(
-      name: layoutName, members: resolvedMembers, isGenericInstantiation: true,
-      isCopy: template.isCopy)
+      name: layoutName, members: resolvedMembers, isGenericInstantiation: true)
     instantiatedTypes[key] = specificType
     layoutToTemplateInfo[layoutName] = (base: template.name, args: args)
 
@@ -3189,8 +3078,7 @@ public class TypeChecker {
 
       // Create Canonical Type
       let canonicalType = Type.structure(
-        name: layoutName, members: canonicalMembers, isGenericInstantiation: true,
-        isCopy: template.isCopy)
+        name: layoutName, members: canonicalMembers, isGenericInstantiation: true)
 
       // Convert to TypedGlobalNode
       let params = canonicalMembers.map { param in
@@ -3225,7 +3113,7 @@ public class TypeChecker {
 
     // Placeholder
     let placeholder = Type.union(
-      name: layoutName, cases: [], isGenericInstantiation: true, isCopy: template.isCopy)
+      name: layoutName, cases: [], isGenericInstantiation: true)
     instantiatedTypes[key] = placeholder
 
     var resolvedCases: [UnionCase] = []
@@ -3253,24 +3141,12 @@ public class TypeChecker {
       throw error
     }
 
-    if template.isCopy {
-      for c in resolvedCases {
-        for param in c.parameters {
-          if !param.type.isCopy {
-            throw SemanticError.invalidOperation(
-              op:
-                "Copy union instantiation \(layoutName) cannot contain non-Copy field \(param.name) of type \(param.type)",
-              type1: "", type2: "")
-          }
-        }
-      }
-    }
+
 
     let specificType = Type.union(
       name: layoutName,
       cases: resolvedCases,
-      isGenericInstantiation: true,
-      isCopy: template.isCopy
+      isGenericInstantiation: true
     )
     instantiatedTypes[key] = specificType
     layoutToTemplateInfo[layoutName] = (base: template.name, args: args)
@@ -3312,7 +3188,7 @@ public class TypeChecker {
       }
 
       let canonicalType = Type.union(
-        name: layoutName, cases: canonicalCases, isGenericInstantiation: true, isCopy: true)
+        name: layoutName, cases: canonicalCases, isGenericInstantiation: true)
       let typeSymbol = Symbol(name: layoutName, type: canonicalType, kind: .type)
       extraGlobalNodes.append(
         .globalUnionDeclaration(identifier: typeSymbol, cases: canonicalCases))
@@ -3579,7 +3455,7 @@ public class TypeChecker {
       return (.variable(symbol: symbol), [(name, mutable, subjectType)])
 
     case .unionCase(let caseName, let subPatterns, _):
-      guard case .union(let typeName, let cases, _, _) = subjectType else {
+      guard case .union(let typeName, let cases, _) = subjectType else {
         throw SemanticError.typeMismatch(expected: "Union Type", got: subjectType.description)
       }
 
@@ -3638,7 +3514,7 @@ public class TypeChecker {
     case .generic(let base, let args):
       if case .pointer(let element) = type, base == "Pointer", args.count == 1 {
         try unify(node: args[0], type: element, inferred: &inferred, typeParams: typeParams)
-      } else if case .structure(let name, _, _, _) = type {
+      } else if case .structure(let name, _, _) = type {
         if let info = layoutToTemplateInfo[name] {
           if info.base == base && info.args.count == args.count {
             for (argNode, argType) in zip(args, info.args) {
@@ -3682,7 +3558,7 @@ public class TypeChecker {
 
   private func isStringType(_ type: Type) -> Bool {
     switch type {
-    case .structure(let name, _, _, _):
+    case .structure(let name, _, _):
       return name == "String"
     default:
       return false
