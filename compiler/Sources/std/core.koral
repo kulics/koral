@@ -765,14 +765,9 @@ given StringLines {
     };
 };
 
-public type [T Any]List(private mut source [T]Pointer, private mut len Int, private mut cap Int);
+public type [T Any]ListStorage(mut source [T]Pointer, mut len Int, mut cap Int);
 
-given[T Copy] [T]List {
-    public new() Self = [T]List([T]alloc_memory(10), 0, 10);
-
-    // [Compiler Protocol]
-    // Automatically called when the object goes out of scope.
-    // User code cannot call this directly.
+given[T Any] [T]ListStorage {
     __drop(self ref) = {
         let mut i = 0;
         while i < self.len then {
@@ -781,121 +776,145 @@ given[T Copy] [T]List {
         };
         dealloc_memory(self.source);
     }
+};
 
-    public copy(self ref) Self = {
-        // IMPORTANT: Do NOT use `copy_memory` here.
-        // `copy_memory` is a raw memcpy and would skip retain/copy semantics for Copy types
-        // like `ref T` and `String`.
-        let new_ptr = [T]alloc_memory(self.cap);
-        let mut i = 0;
-        while i < self.len then {
-            let v = deref self.source.offset(i).peek();
-            new_ptr.offset(i).init(v);
-            i += 1;
-        };
-        [T]List(new_ptr, self.len, self.cap)
+public type [T Any]List(mut storage [T]ListStorage ref);
+
+given[T Any] [T]List {
+    public new() Self = {
+        let cap = 10;
+        let source = [T]alloc_memory(cap);
+        let storage = ref [T]ListStorage(source, 0, cap);
+        [T]List(storage)
+    };
+
+    public count(self ref) Int = self.storage.len;
+
+    private ensure_unique(self ref) Void = {
+        if ref_count(self.storage) > 1 then {
+            let old = self.storage;
+            let new_cap = old.cap;
+            let new_source = [T]alloc_memory(new_cap);
+            let mut i = 0;
+            while i < old.len then {
+                let v = deref old.source.offset(i).peek();
+                new_source.offset(i).init(v);
+                i += 1;
+            };
+            let new_storage = ref [T]ListStorage(new_source, old.len, new_cap);
+            self.storage = new_storage;
+        }
+    };
+
+    private ensure_capacity(self ref, min_capacity Int) Void = {
+         if min_capacity > self.storage.cap then {
+             let mut new_cap = self.storage.cap * 2;
+             if new_cap < min_capacity then { new_cap = min_capacity; };
+             
+             // Always alloc new buffer on resize
+             let new_source = [T]alloc_memory(new_cap);
+             let old_len = self.storage.len;
+
+             // Optimization: If unique, move elements (uninit old location, init new)
+             // If shared, copy elements (keep old location initialized, init new)
+             
+             if ref_count(self.storage) == 1 then {
+                 let old_source = self.storage.source;
+                 move_memory(new_source, old_source, old_len);
+                 dealloc_memory(old_source);
+                 self.storage.source = new_source;
+                 self.storage.cap = new_cap;
+             } else {
+                 let mut i = 0;
+                 while i < old_len then {
+                    let v = deref self.storage.source.offset(i).peek();
+                    new_source.offset(i).init(v);
+                    i += 1;
+                 };
+                 let new_storage = ref [T]ListStorage(new_source, old_len, new_cap);
+                 self.storage = new_storage;
+             }
+         } else {
+             // Capacity is fine, just ensure unique
+             self.ensure_unique();
+         }
     }
 
-    public count(self ref) Int = self.len;
-
-    // [Compiler Protocol]
-    // Lowering target for `list[index]` in read context.
-    // Returns a copy of the element (List requires T: Copy).
     public __at(self ref, index Int) T = {
-        if index < 0 or index >= self.len then { panic("List index out of bounds"); };
-        deref self.source.offset(index).peek()
+        if index < 0 or index >= self.storage.len then { panic("List index out of bounds"); };
+        deref self.storage.source.offset(index).peek()
     }
 
-    // [Compiler Protocol]
-    // Lowering target for `list[index] = value`.
     public __update_at(self ref, index Int, value T) Void = {
-        if index < 0 or index >= self.len then { panic("List index out of bounds"); };
-        // Replace element (handles ref-counted Copy types via init/deinit)
-        self.source.offset(index).deinit();
-        self.source.offset(index).init(value);
+        if index < 0 or index >= self.storage.len then { panic("List index out of bounds"); };
+        self.ensure_unique();
+        self.storage.source.offset(index).replace(value);
     }
 
     public push_back(self ref, value T) Void = {
-         self.ensure_capacity(self.len + 1);
-        self.source.offset(self.len).init(value);
-        self.len = self.len + 1;
+        self.ensure_capacity(self.storage.len + 1);
+        self.storage.source.offset(self.storage.len).init(value);
+        self.storage.len = self.storage.len + 1;
     }
 
     public insert(self ref, index Int, value T) Void = {
-        if index < 0 or index > self.len then { panic("List insert index out of bounds"); };
-        self.ensure_capacity(self.len + 1);
+        let len = self.storage.len;
+        if index < 0 or index > len then { panic("List insert index out of bounds"); };
         
-        if index < self.len then {
-            let src = self.source.offset(index);
-            let dest = self.source.offset(index + 1);
-            let count = self.len - index;
+        self.ensure_capacity(len + 1);
+        
+        if index < len then {
+            let src = self.storage.source.offset(index);
+            let dest = self.storage.source.offset(index + 1);
+            let count = len - index;
             move_memory(dest, src, count);
-            self.source.offset(index).init(value);
-        } else {
-             self.source.offset(self.len).init(value);
         };
-        self.len = self.len + 1;
+        self.storage.source.offset(index).init(value);
+        self.storage.len = len + 1;
     }
 
     public remove(self ref, index Int) Bool = {
-        if index < 0 or index >= self.len then { return false; };
+        let len = self.storage.len;
+        if index < 0 or index >= len then { return false; };
+
+        self.ensure_unique();
+        
         // 1. Drop the element at index
-        self.source.offset(index).deinit();
+        self.storage.source.offset(index).deinit();
         
         // 2. Shift remaining elements down
-        if index < self.len - 1 then {
-            let src = self.source.offset(index + 1);
-            let dest = self.source.offset(index);
-            let count = self.len - 1 - index;
-            
-            // Move [index+1...len-1] to [index...len-2]
+        if index < len - 1 then {
+            let src = self.storage.source.offset(index + 1);
+            let dest = self.storage.source.offset(index);
+            let count = len - 1 - index;
             move_memory(dest, src, count);
         };
         
-        self.len = self.len - 1;
+        self.storage.len = len - 1;
         true
     };
 
     public pop_back(self ref) [T]Option = {
-        if self.len == 0 then { return [T]Option.None(); };
-        let idx = self.len - 1;
-        let p = self.source.offset(idx);
+        if self.storage.len == 0 then { return [T]Option.None(); };
+        self.ensure_unique();
+        let idx = self.storage.len - 1;
+        let p = self.storage.source.offset(idx);
         let v = p.take();
-        self.len = idx;
+        self.storage.len = idx;
         [T]Option.Some(v)
     };
 
-    // Ensures the list is unique and has enough capacity
-    private ensure_capacity(self ref, min_capacity Int) Void = {
-         // Unique case - Grow if needed
-         if min_capacity > self.cap then {
-             let mut new_cap = self.cap * 2;
-             if new_cap < min_capacity then {
-                 new_cap = min_capacity;
-             };
-             
-             let new_source = [T]alloc_memory(new_cap);
-             move_memory(new_source, self.source, self.len);
-             dealloc_memory(self.source);
-             
-             self.source = new_source;
-             self.cap = new_cap;
-         };
-    }
-
     public iterator(self ref) [T]ListIterator = {
-        // Capture a ref to the list instead of exposing raw Pointer
-        [T]ListIterator(self, 0)
+        [T]ListIterator(self.storage, 0)
     };
 };
 
-// Iterator now holds a ref to the list to avoid exposing raw pointers
-public type [T Any]ListIterator(source [T]List ref, mut index Int);
+public type [T Any]ListIterator(storage [T]ListStorage ref, mut index Int);
 
-given[T Copy] [T]ListIterator {
+given[T Any] [T]ListIterator {
     public next(self ref) [T]Option = 
-        if self.index < self.source.count() then {
-            let val = self.source[self.index];
+        if self.index < self.storage.len then {
+            let val = deref self.storage.source.offset(self.index).peek();
             self.index += 1;
             [T]Option.Some(val)
         } else {
@@ -965,7 +984,6 @@ public trait Hashable Equatable {
 };
 
 // Keys usable in hash tables.
-// v1: require `Copy` so Map/Set can store values safely in raw slots.
 public trait HashKey Hashable {};
 
 public trait Comparable Equatable {
@@ -1066,7 +1084,7 @@ given[T Any] [T]Pointer {
 public type [K HashKey, V Any]MapNode(hash UInt, key K, mut value V, mut next_node [[K, V]MapNode ref]Option);
 public type [K HashKey, V Any]MapItem(key K, value V);
 
-given[K HashKey, V Copy] [K, V]MapNode {
+given[K HashKey, V Any] [K, V]MapNode {
     public next(self ref) [[K, V]MapNode ref]Option = self.next_node;
     public set_next(self ref, next [[K, V]MapNode ref]Option) Void = { self.next_node = next; };
 };
@@ -1079,7 +1097,7 @@ public type [K HashKey, V Any]Map(
 
 public type [K HashKey, V Any]MapIterator(source [K, V]Map ref, mut bucket Int, mut current [[K, V]MapNode ref]Option);
 
-given[K HashKey, V Copy] [K, V]Map {
+given[K HashKey, V Any] [K, V]Map {
     public new() Self = [K, V]Map.with_capacity(16);
 
     public with_capacity(capacity Int) Self = {
@@ -1294,7 +1312,7 @@ given[K HashKey, V Copy] [K, V]Map {
     };
 };
 
-given[K HashKey, V Copy] [K, V]MapIterator {
+given[K HashKey, V Any] [K, V]MapIterator {
     public next(self ref) [[K, V]MapItem]Option = {
         while true then {
             when self.current is {
