@@ -974,15 +974,12 @@ public class CodeGen {
       return ""
 
     case .ptrPeek(let ptr):
-      guard case .pointer(_) = ptr.type else { fatalError() }
+      guard case .pointer(let element) = ptr.type else { fatalError() }
       let p = generateExpressionSSA(ptr)
+      let cType = getCType(element)
       let result = nextTemp()
       addIndent()
-      buffer += "struct Ref \(result);\n"
-      addIndent()
-      buffer += "\(result).ptr = \(p);\n"
-      addIndent()
-      buffer += "\(result).control = NULL;\n"  // Unowned
+      buffer += "\(cType) \(result) = *(\(cType)*)\(p);\n"
       return result
 
     case .ptrTake(let ptr):
