@@ -81,10 +81,10 @@ intrinsic given[T Any] [T]Pointer {
     deinit(self) Void;
 
     // Accesses the value pointed to by `self` without removing or invalidating it.
-    // Returns a reference of the value.
+    // Returns a copy of the value.
     // PRECONDITION: Memory at `self` must be initialized.
     // NOTE: This is the primitive operation used to implement `__at` for higher constructs.
-    peek(self) T ref;
+    peek(self) T;
 
     // Retrieves the value from `self`, leaving the memory uninitialized.
     // Ideally used for moving values out of the pointer.
@@ -337,7 +337,7 @@ given String {
 
     public get_byte(self, index Int) UInt8 = {
         self.bounds_check_read(index);
-        deref self.storage.data.offset(index).peek()
+        self.storage.data.offset(index).peek()
     };
 
     public set_byte(self ref, index Int, value UInt8) Void = {
@@ -540,7 +540,7 @@ given String {
     public remove_byte(self ref, index Int) UInt8 = {
         if index < 0 or index >= self.storage.len then { panic("remove out of bounds"); };
         self.ensure_unique();
-        let old = deref self.storage.data.offset(index).peek();
+        let old = self.storage.data.offset(index).peek();
         let dest = self.storage.data.offset(index);
         let src = self.storage.data.offset(index + 1);
         let count = self.storage.len - index; // include trailing 0
@@ -797,7 +797,7 @@ given[T Any] [T]List {
             let new_source = [T]alloc_memory(new_cap);
             let mut i = 0;
             while i < old.len then {
-                let v = deref old.source.offset(i).peek();
+                let v = old.source.offset(i).peek();
                 new_source.offset(i).init(v);
                 i += 1;
             };
@@ -827,7 +827,7 @@ given[T Any] [T]List {
              } else {
                  let mut i = 0;
                  while i < old_len then {
-                    let v = deref self.storage.source.offset(i).peek();
+                    let v = self.storage.source.offset(i).peek();
                     new_source.offset(i).init(v);
                     i += 1;
                  };
@@ -842,7 +842,7 @@ given[T Any] [T]List {
 
     public __at(self ref, index Int) T = {
         if index < 0 or index >= self.storage.len then { panic("List index out of bounds"); };
-        deref self.storage.source.offset(index).peek()
+        self.storage.source.offset(index).peek()
     }
 
     public __update_at(self ref, index Int, value T) Void = {
@@ -914,7 +914,7 @@ public type [T Any]ListIterator(storage [T]ListStorage ref, mut index Int);
 given[T Any] [T]ListIterator {
     public next(self ref) [T]Option = 
         if self.index < self.storage.len then {
-            let val = deref self.storage.source.offset(self.index).peek();
+            let val = self.storage.source.offset(self.index).peek();
             self.index += 1;
             [T]Option.Some(val)
         } else {
@@ -1159,7 +1159,7 @@ given[K HashKey, V Any] [K, V]Map {
     public contains_key(self ref, key K) Bool = {
         let h = key.hash();
         let idx = self.bucket_index(h);
-        let mut cur = deref self.buckets.offset(idx).peek();
+        let mut cur = self.buckets.offset(idx).peek();
         while true then {
             when cur is {
                 .Some(nref) then {
@@ -1175,7 +1175,7 @@ given[K HashKey, V Any] [K, V]Map {
     public get(self ref, key K) [V]Option = {
         let h = key.hash();
         let idx = self.bucket_index(h);
-        let mut cur = deref self.buckets.offset(idx).peek();
+        let mut cur = self.buckets.offset(idx).peek();
         while true then {
             when cur is {
                 .Some(nref) then {
@@ -1198,7 +1198,7 @@ given[K HashKey, V Any] [K, V]Map {
         let idx = self.bucket_index(h);
         let bucket_ptr = self.buckets.offset(idx);
 
-        let mut cur = deref bucket_ptr.peek();
+        let mut cur = bucket_ptr.peek();
         while true then {
             when cur is {
                 .Some(nref) then {
@@ -1225,7 +1225,7 @@ given[K HashKey, V Any] [K, V]Map {
         let h = key.hash();
         let idx = self.bucket_index(h);
         let bucket_ptr = self.buckets.offset(idx);
-        let mut head = deref bucket_ptr.peek();
+        let mut head = bucket_ptr.peek();
 
         when head is {
             .None then { return [V]Option.None(); };
@@ -1323,7 +1323,7 @@ given[K HashKey, V Any] [K, V]MapIterator {
                 };
                 .None then {
                     if self.bucket >= self.source.cap then { return [[K, V]MapItem]Option.None(); };
-                    let head = deref self.source.buckets.offset(self.bucket).peek();
+                    let head = self.source.buckets.offset(self.bucket).peek();
                     self.bucket = self.bucket + 1;
                     self.current = head;
                 }
@@ -1407,7 +1407,7 @@ given[T HashKey] [T]Set {
     public contains(self ref, value T) Bool = {
         let h = value.hash();
         let idx = self.bucket_index(h);
-        let mut cur = deref self.buckets.offset(idx).peek();
+        let mut cur = self.buckets.offset(idx).peek();
         while true then {
             when cur is {
                 .Some(nref) then {
@@ -1428,7 +1428,7 @@ given[T HashKey] [T]Set {
         let idx = self.bucket_index(h);
         let bucket_ptr = self.buckets.offset(idx);
 
-        let mut cur = deref bucket_ptr.peek();
+        let mut cur = bucket_ptr.peek();
         while true then {
             when cur is {
                 .Some(nref) then {
@@ -1451,7 +1451,7 @@ given[T HashKey] [T]Set {
         let h = value.hash();
         let idx = self.bucket_index(h);
         let bucket_ptr = self.buckets.offset(idx);
-        let mut head = deref bucket_ptr.peek();
+        let mut head = bucket_ptr.peek();
 
         when head is {
             .None then { return false; };
@@ -1593,7 +1593,7 @@ given[T HashKey] [T]SetIterator {
                 };
                 .None then {
                     if self.bucket >= self.source.cap then { return [T]Option.None(); };
-                    let head = deref self.source.buckets.offset(self.bucket).peek();
+                    let head = self.source.buckets.offset(self.bucket).peek();
                     self.bucket = self.bucket + 1;
                     self.current = head;
                 }

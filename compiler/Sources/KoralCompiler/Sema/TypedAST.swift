@@ -172,9 +172,8 @@ public indirect enum TypedIntrinsic {
     case .ptrInit: return .void
     case .ptrDeinit: return .void
     case .ptrPeek(let ptr):
-      // return T ref
       if case .pointer(let element) = ptr.type {
-        return .reference(inner: element)
+        return element
       }
       fatalError("ptrPeek on non-pointer")
     case .ptrOffset(let ptr, _): return ptr.type
