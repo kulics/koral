@@ -1,0 +1,364 @@
+// SemaUtils.swift
+// Shared utility functions used by both TypeChecker and Monomorphizer.
+// This file contains common logic that was previously duplicated between the two components.
+
+/// Namespace for shared semantic analysis utility functions.
+public enum SemaUtils {
+    
+    // MARK: - Compiler Method Kind Resolution
+    
+    /// Returns the compiler method kind for a method name.
+    /// Used to identify special compiler-recognized methods like __drop, __at, etc.
+    /// - Parameter name: The method name to check
+    /// - Returns: The corresponding CompilerMethodKind
+    public static func getCompilerMethodKind(_ name: String) -> CompilerMethodKind {
+        switch name {
+        case "__drop": return .drop
+        case "__at": return .at
+        case "__update_at": return .updateAt
+        case "__equals": return .equals
+        case "__compare": return .compare
+        default: return .normal
+        }
+    }
+    
+    // MARK: - Trait Name Resolution
+    
+    /// Resolves a trait name from a TypeNode.
+    /// - Parameter node: The type node to resolve
+    /// - Returns: The trait name as a string
+    /// - Throws: SemanticError if the node is not a valid trait identifier
+    public static func resolveTraitName(from node: TypeNode) throws -> String {
+        guard case .identifier(let name) = node else {
+            throw SemanticError.invalidOperation(
+                op: "invalid trait bound",
+                type1: String(describing: node),
+                type2: ""
+            )
+        }
+        return name
+    }
+    
+    // MARK: - Built-in Type Checking
+    
+    /// Checks if a type supports builtin equality comparison.
+    /// - Parameter type: The type to check
+    /// - Returns: true if the type supports builtin equality comparison
+    public static func isBuiltinEqualityComparable(_ type: Type) -> Bool {
+        switch type {
+        case .int, .int8, .int16, .int32, .int64,
+             .uint, .uint8, .uint16, .uint32, .uint64,
+             .float32, .float64,
+             .bool,
+             .pointer:
+            return true
+        default:
+            return false
+        }
+    }
+    
+    /// Checks if a type supports builtin ordering comparison.
+    /// - Parameter type: The type to check
+    /// - Returns: true if the type supports builtin ordering comparison
+    public static func isBuiltinOrderingComparable(_ type: Type) -> Bool {
+        switch type {
+        case .int, .int8, .int16, .int32, .int64,
+             .uint, .uint8, .uint16, .uint32, .uint64,
+             .float32, .float64,
+             .bool,
+             .pointer:
+            return true
+        default:
+            return false
+        }
+    }
+    
+    // MARK: - Built-in Type Resolution
+    
+    /// Resolves a built-in type name to its Type.
+    /// - Parameter name: The type name to resolve
+    /// - Returns: The corresponding Type, or nil if not a built-in type
+    public static func resolveBuiltinType(_ name: String) -> Type? {
+        switch name {
+        case "Int": return .int
+        case "Int8": return .int8
+        case "Int16": return .int16
+        case "Int32": return .int32
+        case "Int64": return .int64
+        case "UInt": return .uint
+        case "UInt8": return .uint8
+        case "UInt16": return .uint16
+        case "UInt32": return .uint32
+        case "UInt64": return .uint64
+        case "Float32": return .float32
+        case "Float64": return .float64
+        case "Bool": return .bool
+        case "Void": return .void
+        default: return nil
+        }
+    }
+    
+    // MARK: - Built-in Trait Checking
+    
+    /// Checks if a trait name is a built-in trait that doesn't require explicit method implementations.
+    /// - Parameter name: The trait name to check
+    /// - Returns: true if the trait is a built-in trait (Any or Copy)
+    public static func isBuiltinTrait(_ name: String) -> Bool {
+        return name == "Any" || name == "Copy"
+    }
+    
+    // MARK: - Trait Method Flattening
+    
+    /// Returns all methods required by a trait, including inherited methods.
+    /// This is a pure function that takes the traits dictionary as a parameter.
+    /// - Parameters:
+    ///   - traitName: The name of the trait
+    ///   - traits: Dictionary of trait declarations
+    ///   - currentLine: Current source line for error reporting
+    /// - Returns: Dictionary mapping method names to their signatures
+    /// - Throws: SemanticError if the trait is undefined
+    public static func flattenedTraitMethods(
+        _ traitName: String,
+        traits: [String: TraitDeclInfo],
+        currentLine: Int?
+    ) throws -> [String: TraitMethodSignature] {
+        var visited: Set<String> = []
+        return try flattenedTraitMethodsHelper(traitName, traits: traits, visited: &visited, currentLine: currentLine)
+    }
+    
+    /// Helper function for flattenedTraitMethods that tracks visited traits.
+    private static func flattenedTraitMethodsHelper(
+        _ traitName: String,
+        traits: [String: TraitDeclInfo],
+        visited: inout Set<String>,
+        currentLine: Int?
+    ) throws -> [String: TraitMethodSignature] {
+        if visited.contains(traitName) {
+            return [:]
+        }
+        visited.insert(traitName)
+        
+        if isBuiltinTrait(traitName) {
+            return [:]
+        }
+        
+        guard let decl = traits[traitName] else {
+            throw SemanticError(.generic("Undefined trait: \(traitName)"), line: currentLine)
+        }
+        
+        var methods: [String: TraitMethodSignature] = [:]
+        for parent in decl.superTraits {
+            let parentMethods = try flattenedTraitMethodsHelper(parent, traits: traits, visited: &visited, currentLine: currentLine)
+            for (name, sig) in parentMethods {
+                methods[name] = sig
+            }
+        }
+        for m in decl.methods {
+            methods[m.name] = m
+        }
+        return methods
+    }
+    
+    // MARK: - Trait Validation
+    
+    /// Validates that a trait name is defined.
+    /// - Parameters:
+    ///   - name: The trait name to validate
+    ///   - traits: Dictionary of trait declarations
+    ///   - currentLine: Current source line for error reporting
+    /// - Throws: SemanticError if the trait is undefined
+    public static func validateTraitName(
+        _ name: String,
+        traits: [String: TraitDeclInfo],
+        currentLine: Int?
+    ) throws {
+        if isBuiltinTrait(name) {
+            return
+        }
+        if traits[name] == nil {
+            throw SemanticError(.generic("Undefined trait: \(name)"), line: currentLine)
+        }
+    }
+    
+    // MARK: - Type Substitution
+    
+    /// Substitutes a type by replacing generic parameters with concrete types.
+    /// - Parameters:
+    ///   - type: The type to substitute
+    ///   - substitution: Map from type parameter names to concrete types
+    /// - Returns: The substituted type
+    public static func substituteType(_ type: Type, substitution: [String: Type]) -> Type {
+        switch type {
+        case .int, .int8, .int16, .int32, .int64,
+             .uint, .uint8, .uint16, .uint32, .uint64,
+             .float32, .float64, .bool, .void, .never:
+            return type
+            
+        case .genericParameter(let name):
+            return substitution[name] ?? type
+            
+        case .reference(let inner):
+            return .reference(inner: substituteType(inner, substitution: substitution))
+            
+        case .pointer(let element):
+            return .pointer(element: substituteType(element, substitution: substitution))
+            
+        case .function(let params, let returns):
+            let newParams = params.map { param in
+                Parameter(
+                    type: substituteType(param.type, substitution: substitution),
+                    kind: param.kind
+                )
+            }
+            return .function(
+                parameters: newParams,
+                returns: substituteType(returns, substitution: substitution)
+            )
+            
+        case .structure(let name, let members, let isGenericInstantiation):
+            let newMembers = members.map { member in
+                (
+                    name: member.name,
+                    type: substituteType(member.type, substitution: substitution),
+                    mutable: member.mutable
+                )
+            }
+            
+            // Recalculate the layout name if this is a generic instantiation
+            // and the name contains generic parameter placeholders
+            var newName = name
+            if isGenericInstantiation && name.contains("Param_") {
+                // Extract the base name (everything before the first "_Param_" or the first type arg)
+                // The layout name format is "BaseName_Arg1_Arg2_..."
+                // where Arg can be "Param_T" for generic parameters or "I" for Int, etc.
+                let parts = name.split(separator: "_")
+                if let firstPart = parts.first {
+                    let baseName = String(firstPart)
+                    // Recalculate the layout name based on the substituted member types
+                    // We need to extract the type args from the original name and substitute them
+                    var typeArgs: [Type] = []
+                    var i = 1
+                    while i < parts.count {
+                        if parts[i] == "Param" && i + 1 < parts.count {
+                            // This is a generic parameter like "Param_T"
+                            let paramName = String(parts[i + 1])
+                            if let substitutedType = substitution[paramName] {
+                                typeArgs.append(substitutedType)
+                            } else {
+                                typeArgs.append(.genericParameter(name: paramName))
+                            }
+                            i += 2
+                        } else {
+                            // This is a concrete type like "I" for Int
+                            let layoutKey = String(parts[i])
+                            if let builtinType = resolveBuiltinTypeFromLayoutKey(layoutKey) {
+                                typeArgs.append(builtinType)
+                            } else {
+                                // Unknown type - keep as is
+                                typeArgs.append(.genericParameter(name: layoutKey))
+                            }
+                            i += 1
+                        }
+                    }
+                    
+                    // Generate the new layout name
+                    if !typeArgs.isEmpty && !typeArgs.contains(where: { $0.containsGenericParameter }) {
+                        newName = generateLayoutName(baseName: baseName, args: typeArgs)
+                    }
+                }
+            }
+            
+            return .structure(name: newName, members: newMembers, isGenericInstantiation: isGenericInstantiation)
+            
+        case .union(let name, let cases, let isGenericInstantiation):
+            let newCases = cases.map { unionCase in
+                UnionCase(
+                    name: unionCase.name,
+                    parameters: unionCase.parameters.map { param in
+                        (name: param.name, type: substituteType(param.type, substitution: substitution))
+                    }
+                )
+            }
+            
+            // Recalculate the layout name if this is a generic instantiation
+            // and the name contains generic parameter placeholders
+            var newName = name
+            if isGenericInstantiation && name.contains("Param_") {
+                let parts = name.split(separator: "_")
+                if let firstPart = parts.first {
+                    let baseName = String(firstPart)
+                    var typeArgs: [Type] = []
+                    var i = 1
+                    while i < parts.count {
+                        if parts[i] == "Param" && i + 1 < parts.count {
+                            let paramName = String(parts[i + 1])
+                            if let substitutedType = substitution[paramName] {
+                                typeArgs.append(substitutedType)
+                            } else {
+                                typeArgs.append(.genericParameter(name: paramName))
+                            }
+                            i += 2
+                        } else {
+                            let layoutKey = String(parts[i])
+                            if let builtinType = resolveBuiltinTypeFromLayoutKey(layoutKey) {
+                                typeArgs.append(builtinType)
+                            } else {
+                                typeArgs.append(.genericParameter(name: layoutKey))
+                            }
+                            i += 1
+                        }
+                    }
+                    
+                    if !typeArgs.isEmpty && !typeArgs.contains(where: { $0.containsGenericParameter }) {
+                        newName = generateLayoutName(baseName: baseName, args: typeArgs)
+                    }
+                }
+            }
+            
+            return .union(name: newName, cases: newCases, isGenericInstantiation: isGenericInstantiation)
+        }
+    }
+    
+    /// Resolves a layout key to a built-in type.
+    private static func resolveBuiltinTypeFromLayoutKey(_ key: String) -> Type? {
+        switch key {
+        case "I": return .int
+        case "I8": return .int8
+        case "I16": return .int16
+        case "I32": return .int32
+        case "I64": return .int64
+        case "U": return .uint
+        case "U8": return .uint8
+        case "U16": return .uint16
+        case "U32": return .uint32
+        case "U64": return .uint64
+        case "F32": return .float32
+        case "F64": return .float64
+        case "B": return .bool
+        case "V": return .void
+        case "N": return .never
+        default: return nil
+        }
+    }
+    
+    // MARK: - Layout Key Generation
+    
+    /// Generates a mangled layout name for a generic instantiation.
+    /// - Parameters:
+    ///   - baseName: The base template name
+    ///   - args: The type arguments
+    /// - Returns: The mangled layout name
+    public static func generateLayoutName(baseName: String, args: [Type]) -> String {
+        let argLayoutKeys = args.map { $0.layoutKey }.joined(separator: "_")
+        return "\(baseName)_\(argLayoutKeys)"
+    }
+    
+    /// Generates a cache key for a generic instantiation.
+    /// - Parameters:
+    ///   - baseName: The base template name
+    ///   - args: The type arguments
+    /// - Returns: The cache key string
+    public static func generateCacheKey(baseName: String, args: [Type]) -> String {
+        return "\(baseName)<\(args.map { $0.description }.joined(separator: ","))>"
+    }
+}

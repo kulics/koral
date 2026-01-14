@@ -1,11 +1,26 @@
 public class CodeGen {
-  private let ast: TypedProgram
+  private let ast: MonomorphizedProgram
   private var indent: String = ""
   private var buffer: String = ""
   private var tempVarCounter = 0
   private var globalInitializations: [(String, TypedExpressionNode)] = []
   private var lifetimeScopeStack: [[(name: String, type: Type)]] = []
   private var userDefinedDrops: [String: String] = [:] // TypeName -> Mangled Drop Function Name
+
+  // Lightweight type declaration wrapper used for dependency ordering before emission
+  private enum TypeDeclaration {
+    case structure(Symbol, [Symbol])
+    case union(Symbol, [UnionCase])
+
+    var name: String {
+      switch self {
+      case .structure(let identifier, _):
+        return identifier.name
+      case .union(let identifier, _):
+        return identifier.name
+      }
+    }
+  }
 
   private struct LoopContext {
     let startLabel: String
@@ -14,7 +29,7 @@ public class CodeGen {
   }
   private var loopStack: [LoopContext] = []
 
-  public init(ast: TypedProgram) {
+  public init(ast: MonomorphizedProgram) {
     self.ast = ast
   }
 
@@ -130,9 +145,107 @@ public class CodeGen {
     return buffer
   }
 
-  private func generateProgram(_ program: TypedProgram) {
-    switch program {
-    case .program(let nodes):
+  private func collectTypeDeclarations(_ nodes: [TypedGlobalNode]) -> [TypeDeclaration] {
+    var result: [TypeDeclaration] = []
+    for node in nodes {
+      switch node {
+      case .globalStructDeclaration(let identifier, let parameters):
+        result.append(.structure(identifier, parameters))
+      case .globalUnionDeclaration(let identifier, let cases):
+        result.append(.union(identifier, cases))
+      default:
+        continue
+      }
+    }
+    return result
+  }
+
+  private func dependencies(for declaration: TypeDeclaration, available: Set<String>) -> Set<String> {
+    var deps: Set<String> = []
+
+    func recordDependency(from type: Type, selfName: String) {
+      switch type {
+      case .structure(let name, _, _), .union(let name, _, _):
+        if name != selfName && available.contains(name) {
+          deps.insert(name)
+        }
+      default:
+        break
+      }
+    }
+
+    switch declaration {
+    case .structure(let identifier, let parameters):
+      for param in parameters {
+        recordDependency(from: param.type, selfName: identifier.name)
+      }
+    case .union(let identifier, let cases):
+      for c in cases {
+        for param in c.parameters {
+          recordDependency(from: param.type, selfName: identifier.name)
+        }
+      }
+    }
+
+    return deps
+  }
+
+  private func sortTypeDeclarations(_ declarations: [TypeDeclaration]) -> [TypeDeclaration] {
+    let available = Set(declarations.map { $0.name })
+    var dependencyMap: [String: Set<String>] = [:]
+    var dependents: [String: Set<String>] = [:]
+    var indegree: [String: Int] = [:]
+    var originalIndex: [String: Int] = [:]
+
+    for (index, decl) in declarations.enumerated() {
+      originalIndex[decl.name] = index
+      let deps = dependencies(for: decl, available: available)
+      dependencyMap[decl.name] = deps
+      indegree[decl.name] = deps.count
+      for dep in deps {
+        dependents[dep, default: []].insert(decl.name)
+      }
+    }
+
+    func enqueueZeroIndegree(_ queue: inout [String], _ name: String) {
+      queue.append(name)
+      queue.sort { (originalIndex[$0] ?? 0) < (originalIndex[$1] ?? 0) }
+    }
+
+    var queue: [String] = []
+    for decl in declarations where (indegree[decl.name] ?? 0) == 0 {
+      enqueueZeroIndegree(&queue, decl.name)
+    }
+
+    var ordered: [TypeDeclaration] = []
+    var emitted: Set<String> = []
+
+    while !queue.isEmpty {
+      let name = queue.removeFirst()
+      guard let decl = declarations.first(where: { $0.name == name }) else { continue }
+      ordered.append(decl)
+      emitted.insert(name)
+
+      for follower in dependents[name] ?? [] {
+        let newDegree = (indegree[follower] ?? 0) - 1
+        indegree[follower] = newDegree
+        if newDegree == 0 {
+          enqueueZeroIndegree(&queue, follower)
+        }
+      }
+    }
+
+    if ordered.count < declarations.count {
+      for decl in declarations where !emitted.contains(decl.name) {
+        ordered.append(decl)
+      }
+    }
+
+    return ordered
+  }
+
+  private func generateProgram(_ program: MonomorphizedProgram) {
+    let nodes = program.globalNodes
       // Pass 0: Scan for user-defined drops
       for node in nodes {
         if case .givenDeclaration(let type, let methods) = node {
@@ -158,14 +271,19 @@ public class CodeGen {
         }
       }
 
-      // 先生成所有类型声明
-      for node in nodes {
-        if case .globalStructDeclaration(let identifier, let parameters) = node {
+      // 先生成所有类型声明，按依赖顺序排序以确保字段类型已定义
+      let typeDeclarations = collectTypeDeclarations(nodes)
+      for decl in sortTypeDeclarations(typeDeclarations) {
+        switch decl {
+        case .structure(let identifier, let parameters):
           generateTypeDeclaration(identifier, parameters)
-        }
-        if case .globalUnionDeclaration(let identifier, let cases) = node {
+        case .union(let identifier, let cases):
           generateUnionDeclaration(identifier, cases)
         }
+      }
+
+      // 然后生成所有函数声明
+      for node in nodes {
         if case .globalFunction(let identifier, let params, _) = node {
           generateFunctionDeclaration(identifier, params)
         }
@@ -214,7 +332,6 @@ public class CodeGen {
       if !globalInitializations.isEmpty {
         generateMainFunction()
       }
-    }
   }
 
   private func generateMainFunction() {
@@ -267,6 +384,13 @@ public class CodeGen {
       registerVariable(param.name, param.type)
     }
     let resultVar = generateExpressionSSA(body)
+
+    // `Never` 表达式不返回；不要生成返回临时变量或 return 语句。
+    if body.type == .never {
+      popScope()
+      return
+    }
+
     let result = nextTemp()
     if case .structure(let typeName, _, _) = body.type {
       addIndent()
@@ -493,7 +617,7 @@ public class CodeGen {
     case .ifExpression(let condition, let thenBranch, let elseBranch, let type):
       let conditionVar = generateExpressionSSA(condition)
 
-      if type == .void {
+      if type == .void || type == .never {
         addIndent()
         buffer += "if (\(conditionVar)) {\n"
         withIndent {
@@ -1151,8 +1275,8 @@ public class CodeGen {
     switch stmt {
     case .variableDeclaration(let identifier, let value, _):
       let valueResult = generateExpressionSSA(value)
-      // void 类型的值不能赋给变量
-      if value.type != .void {
+      // void/never 类型的值不能赋给变量
+      if value.type != .void && value.type != .never {
         // 如果是可变类型，增加引用计数
         if case .structure(let typeName, _, _) = identifier.type {
           addIndent()
@@ -1190,7 +1314,7 @@ public class CodeGen {
       let (lhsPath, _) = buildRefComponents(target)
       let valueResult = generateExpressionSSA(value)
       
-      if value.type == .void { return }
+      if value.type == .void || value.type == .never { return }
 
       if case .structure(let typeName, _, _) = target.type {
         addIndent()
@@ -1224,6 +1348,10 @@ public class CodeGen {
 
     case .return(let value):
       if let value = value {
+        if value.type == .never {
+          _ = generateExpressionSSA(value)
+          return
+        }
         let valueResult = generateExpressionSSA(value)
         let retVar = nextTemp()
 
@@ -1670,7 +1798,7 @@ public class CodeGen {
     
     addIndent()
     buffer += "\(endLabel):;\n"
-    return type != .void ? resultVar : ""
+    return (type == .void || type == .never) ? "" : resultVar
   }
 
     private func generatePatternConditionAndBindings(
@@ -1814,7 +1942,7 @@ public class CodeGen {
   }
 
   private func generateAssignment(_ identifier: Symbol, _ value: TypedExpressionNode) {
-    if value.type == .void {
+    if value.type == .void || value.type == .never {
       _ = generateExpressionSSA(value)
       return
     }
@@ -1868,7 +1996,7 @@ public class CodeGen {
     _ base: Symbol,
     _ memberPath: [Symbol], _ value: TypedExpressionNode
   ) {
-    if value.type == .void {
+    if value.type == .void || value.type == .never {
       _ = generateExpressionSSA(value)
       return
     }

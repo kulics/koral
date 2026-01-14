@@ -18,6 +18,33 @@ public struct GenericFunctionTemplate {
   public let returnType: TypeNode
   public let body: ExpressionNode
   public let access: AccessModifier
+  
+  // Declaration-time type checking results (using genericParameter types)
+  public var checkedBody: TypedExpressionNode?
+  public var checkedParameters: [Symbol]?
+  public var checkedReturnType: Type?
+  
+  public init(
+    name: String,
+    typeParameters: [TypeParameterDecl],
+    parameters: [(name: String, mutable: Bool, type: TypeNode)],
+    returnType: TypeNode,
+    body: ExpressionNode,
+    access: AccessModifier,
+    checkedBody: TypedExpressionNode? = nil,
+    checkedParameters: [Symbol]? = nil,
+    checkedReturnType: Type? = nil
+  ) {
+    self.name = name
+    self.typeParameters = typeParameters
+    self.parameters = parameters
+    self.returnType = returnType
+    self.body = body
+    self.access = access
+    self.checkedBody = checkedBody
+    self.checkedParameters = checkedParameters
+    self.checkedReturnType = checkedReturnType
+  }
 }
 
 public class Scope {
@@ -168,5 +195,32 @@ public class Scope {
     default:
       lookupType(name)
     }
+  }
+
+  /// Returns all generic struct templates defined in this scope and parent scopes.
+  public func getAllGenericStructTemplates() -> [String: GenericStructTemplate] {
+    var result = parent?.getAllGenericStructTemplates() ?? [:]
+    for (name, template) in genericStructTemplates {
+      result[name] = template
+    }
+    return result
+  }
+
+  /// Returns all generic union templates defined in this scope and parent scopes.
+  public func getAllGenericUnionTemplates() -> [String: GenericUnionTemplate] {
+    var result = parent?.getAllGenericUnionTemplates() ?? [:]
+    for (name, template) in genericUnionTemplates {
+      result[name] = template
+    }
+    return result
+  }
+
+  /// Returns all generic function templates defined in this scope and parent scopes.
+  public func getAllGenericFunctionTemplates() -> [String: GenericFunctionTemplate] {
+    var result = parent?.getAllGenericFunctionTemplates() ?? [:]
+    for (name, template) in genericFunctionTemplates {
+      result[name] = template
+    }
+    return result
   }
 }

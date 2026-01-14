@@ -20,8 +20,3 @@ This is the main source code repository for Koral. It contains the compiler, and
 
 - [English](./docs/book-en/document.md)
 - [中文](./docs/book-zh/document.md)
-
-## Compare
-
-Compare with C#, Go, Kotlin, Swift.
-Read detail from [Here](./docs/Compare.md).  

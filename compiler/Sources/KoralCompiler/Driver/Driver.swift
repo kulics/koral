@@ -128,10 +128,16 @@ public class Driver {
     
     let combinedAST: ASTNode = .program(globalNodes: coreGlobalNodes + userGlobalNodes)
 
+    // 1. Type checking
     let typeChecker = TypeChecker(ast: combinedAST)
-    let typedAST = try typeChecker.check()
+    let typeCheckerOutput = try typeChecker.check()
 
-    let codeGen = CodeGen(ast: typedAST)
+    // 2. Monomorphization (new phase)
+    let monomorphizer = Monomorphizer(input: typeCheckerOutput)
+    let monomorphizedProgram = try monomorphizer.monomorphize()
+
+    // 3. Code generation
+    let codeGen = CodeGen(ast: monomorphizedProgram)
     let cSource = codeGen.generate()
 
     let cFileURL = outputDirectory.appendingPathComponent("\(baseName).c")
@@ -143,7 +149,11 @@ public class Driver {
     }
 
     // 2. Compile C to Executable using Clang
+    #if os(Windows)
+    let exeURL = outputDirectory.appendingPathComponent(baseName + ".exe")
+    #else
     let exeURL = outputDirectory.appendingPathComponent(baseName)
+    #endif
     
     // Suppress warnings to keep output clean
     var clangArgs = [cFileURL.path, "-o", exeURL.path, "-Wno-everything"]
@@ -239,12 +249,17 @@ public class Driver {
     #if os(Windows)
     let pathSeparator: Character = ";"
     let extensions = [".exe", ".cmd", ".bat", ""]
+    // On Windows, environment variable names are case-insensitive but Swift may be case-sensitive
+    let pathEnv = ProcessInfo.processInfo.environment["PATH"] 
+                  ?? ProcessInfo.processInfo.environment["Path"]
+                  ?? ProcessInfo.processInfo.environment["path"]
+                  ?? ""
     #else
     let pathSeparator: Character = ":"
     let extensions = [""]
+    let pathEnv = ProcessInfo.processInfo.environment["PATH"] ?? ""
     #endif
     
-    let pathEnv = ProcessInfo.processInfo.environment["PATH"] ?? ""
     let paths = pathEnv.split(separator: pathSeparator).map(String.init)
     
     for path in paths {

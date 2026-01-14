@@ -367,10 +367,10 @@ let main() = {
     // operator override
     given[T Any] [T]MyList {
         // self[i]
-        __at(self ref, index Int) T ref = self.arr.__at(index);
+        __at(self ref, index Int) T = self.arr[index];
 
         // self[i] = e
-        __at_mut(self ref, index Int) T ref = self.arr.__at_mut(index);
+        __update_at(self ref, index Int, value T) = self.arr[index] = value;
     }
 }
 
@@ -460,53 +460,45 @@ trait OutputStream {
     flush(self ref) Void;
 }
 
-trait Copy {
+type [T Any]Node(mut value T, mut next [[T]Node ref]Option, mut prev [[T]Node weakref]Option);
+
+type [T Any]LinkedList(mut head [[T]Node]Option, mut tail [[T]Node]Option, mut size Int);
+
+type FileStorage(fd UInt);
+
+given FileStorage {
+    __drop(self ref) Void = {
+        fclose(self.fd);
+    }
 }
 
-trait Drop {
-    // drop 只由编译器自动插入调用，用户代码禁止显式调用
-    __drop(self ref) Void;
-}
-
-type [T Copy]Node(mut value T, mut next [[T]Node ref]Option, mut prev [[T]Node weakref]Option);
-
-type [T Copy]LinkedList(mut head [[T]Node]Option, mut tail [[T]Node]Option, mut size Int);
-
-type File(fd UInt) not Copy;
+type File(data FileStorage ref);
 
 given File {
-    open(path String) File = File(fopen(path, todo()));
+    open(path String) File = File(ref FileStorage(fopen(path, todo())));
 
-    read(self ref, buf [Byte]List ref) Int = fread(self.fd, buf, 0, buf.size());
-    write(self ref, buf [Byte]List ref) Int = fwrite(self.fd, buf, 0, buf.size());
-
-    __drop(self ref) Void = fclose(self.fd);
+    read(self ref, buf [Byte]List ref) Int = fread(self.data.fd, buf, 0, buf.size());
+    write(self ref, buf [Byte]List ref) Int = fwrite(self.data.fd, buf, 0, buf.size());
 }
 
 /*
-1. 默认声明的类型都是值类型，等价于 c struct，但不是所有类型都能直接 copy。
-2-1. 任意类型默认都实现了 `Copy`，编译器就会自动根据需要使用 `Copy` 实现来产生新实例。
-2-2. 任意类型可以给自己声明 `not Copy` 来标记不实现 Copy，编译器不会自动生成 `Copy` 实现。
-2-3. 任意类型内包含的成员变量如果全部都是 `Copy` 类型，且没有标记为 `not Copy`，那么编译器会给这个类型自动实现 `Copy`（递归成员实现）。
-2-4. 类型可以同时实现 `Copy` 与 `Drop`，编译器会在 `Copy` 时保持原值有效，在 `Drop` 时按实例逐个释放。
-3-1. 任意类型只要显式实现了 __drop 函数，其实例生命周期结束时就由编译器插入调用 __drop 来销毁。
-3-2. 任意类型如果没有显式实现 __drop 函数，那么编译器会给这个类型自动实现 __drop（递归成员实现）。
-3-3. __drop 函数不能手动调用。编译器会对手动调用 __drop 的代码进行报错。
-3-4. 在 __drop 实现中移动出成员后，编译器会对被移动的值自动插入 __drop，用户代码不需要也不应显式调用成员的 __drop。
-3-5. __drop 函数虽然签名为 __drop(self ref)，但调用点视为终结消费，调用后该值不可再读写或移动。
-4-1. ref 是内置的智能指针类型，ref 可以从变量获取或者通过 new 函数主动分配，ref 实现了 Copy 和 Drop。
-4-2. 只读和读写变量都能获取引用（ref）。当获取的 ref 会发生逃逸时，编译器会自动将变量分配在堆上。
-4-3. ref 内部使用了自动引用计数，当 ref 发生 copy 时，引用计数会加1；当 ref 发生 drop 时，引用计数会减1，当计数为 0 时，会调用 ref 源的 drop 释放。
-4-4. ref 是共享所有权，所有 ref 都会指向原来产生的变量或者分配的对象。
-4-5. T ref 的成员/方法访问自动解引用；若需要获得值的副本，需使用 `deref` 语法调用 T 的 `Copy` 实现。
-4-6. 当 ref 存在环引用时，需要通过 weakref 解开环引用。weakref 只操作弱计数，不影响对象存活，弱计数归零释放控制块。
-5. 如果编译器判断某个非引用变量的所有权被转移，则不会调用 copy 和 drop，只会 move 值。
+1. 默认声明的类型都是值类型，等价于 c struct，所有类型都实现了 copy，但不是所有类型都会深度拷贝 copy。例如 ref 类型和 Pointer 类型就不会深度拷贝。
+2-1. 任意类型只要显式实现了 __drop 函数，其实例生命周期结束时就由编译器插入调用 __drop 来销毁。
+2-2. 任意类型如果没有显式实现 __drop 函数，那么编译器会给这个类型自动实现 __drop（递归成员实现）。
+2-3. __drop 函数不能手动调用。编译器会对手动调用 __drop 的代码进行报错。
+3-1. ref 是内置的智能指针类型，ref 可以从变量获取或者通过 new 函数主动分配。
+3-2. 只读和读写变量都能获取引用（ref）。当获取的 ref 会发生逃逸时，编译器会自动将变量分配在堆上。
+3-3. ref 内部使用了自动引用计数，当 ref 发生 copy 时，引用计数会加1；当 ref 发生 drop 时，引用计数会减1，当计数为 0 时，会调用 ref 源的 drop 释放。
+3-4. ref 是共享所有权，所有 ref 都会指向原来产生的变量或者分配的对象。
+3-5. T ref 的成员/方法访问自动解引用；若需要获得值的副本，需使用 `deref` 语法来 copy T 的一个新副本。
+3-6. 当 ref 存在环引用时，需要通过 weakref 解开环引用。weakref 只操作弱计数，不影响对象存活，弱计数归零释放控制块。
+4. 如果编译器判断某个变量的所有权被转移而不需要 copy 或 drop，则不会调用 copy 和 drop，只会 move 值。
 
 lifetime 规则：
 作用域包含函数体，if 的 then、else 分支，while 的 then 分支。
 1. 变量（本地变量/函数参数/由函数调用和类型构造产生的隐藏变量）在作用域结束前必须被消费。
 2. 消费包含 own 语义的绑定、解构、赋值、传参、返回、捕获。
-3. 对于实现了 Copy 的变量，如果作用域内存在多于 1 次的消费，那么最后一次之前的消费会由编译器插入 copy 调用来产生新实例。
+3. 对于实现了任意变量，如果作用域内存在多于 1 次的消费，那么最后一次之前的消费会由编译器插入 copy 调用来产生新实例。
 4. 从变量中获取 ref 并且没有逃逸的话，该变量不会被消耗。如果发生了逃逸，那变量的所有权会转移到 ref 上。 
 5. and 和 or 短路后只处理左侧表达式的临时对象生命周期，右侧未求值则无临时对象，已求值则按正常规则处理。
 */
