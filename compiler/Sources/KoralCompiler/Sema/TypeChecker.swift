@@ -1,12 +1,4 @@
 public class TypeChecker {
-  private struct TraitDeclInfo {
-    let name: String
-    let superTraits: [String]
-    let methods: [TraitMethodSignature]
-    let access: AccessModifier
-    let line: Int
-  }
-
   // Store type information for variables and functions
   private var currentScope: Scope = Scope()
   private let ast: ASTNode
@@ -22,19 +14,20 @@ public class TypeChecker {
   private var instantiatedTypes: [String: Type] = [:]
   // Cache for instantiated functions: "TemplateName<Arg1,Arg2>" -> (MangledName, Type)
   private var instantiatedFunctions: [String: (String, Type)] = [:]
-  // Generated global nodes for instantiated types (canonical versions)
-  private var extraGlobalNodes: [TypedGlobalNode] = []
-  // Track which layout names have been generated to avoid duplicates
-  private var generatedLayouts: Set<String> = []
-  // Generic Template Extensions: TemplateName -> [(TypeParams, Method)]
-  private var genericExtensionMethods:
-    [String: [(typeParams: [TypeParameterDecl], method: MethodDeclaration)]] = [:]
+  // Generic Template Extensions: TemplateName -> [GenericExtensionMethodTemplate]
+  private var genericExtensionMethods: [String: [GenericExtensionMethodTemplate]] = [:]
   private var genericIntrinsicExtensionMethods:
     [String: [(typeParams: [TypeParameterDecl], method: IntrinsicMethodDeclaration)]] =
       [:]
 
   // Mapping from Layout Name to Template Info (Base Name + Args)
   private var layoutToTemplateInfo: [String: (base: String, args: [Type])] = [:]
+
+  // Instantiation requests collected during type checking (for deferred monomorphization)
+  private var instantiationRequests: [InstantiationRequest] = []
+  
+  // Cache for typed extension method bodies (for Monomorphizer to use)
+  private var typedExtensionMethods: [String: TypedExtensionMethodInfo] = [:]
 
   private var currentLine: Int?
   private var currentFunctionReturnType: Type?
@@ -54,41 +47,17 @@ public class TypeChecker {
     return .structure(name: "String", members: [], isGenericInstantiation: false)
   }
 
+  // Wrapper for shared utility function from SemaUtils.swift
   private func getCompilerMethodKind(_ name: String) -> CompilerMethodKind {
-    switch name {
-    case "__drop": return .drop
-    case "__at": return .at
-    case "__update_at": return .updateAt
-    case "__equals": return .equals
-    case "__compare": return .compare
-    default: return .normal
-    }
+    return SemaUtils.getCompilerMethodKind(name)
   }
 
   private func isBuiltinEqualityComparable(_ type: Type) -> Bool {
-    switch type {
-    case .int, .int8, .int16, .int32, .int64,
-      .uint, .uint8, .uint16, .uint32, .uint64,
-      .float32, .float64,
-      .bool,
-      .pointer:
-      return true
-    default:
-      return false
-    }
+    return SemaUtils.isBuiltinEqualityComparable(type)
   }
 
   private func isBuiltinOrderingComparable(_ type: Type) -> Bool {
-    switch type {
-    case .int, .int8, .int16, .int32, .int64,
-      .uint, .uint8, .uint16, .uint32, .uint64,
-      .float32, .float64,
-      .bool,
-      .pointer:
-      return true
-    default:
-      return false
-    }
+    return SemaUtils.isBuiltinOrderingComparable(type)
   }
 
   private func isIntegerScalarType(_ type: Type) -> Bool {
@@ -286,54 +255,24 @@ public class TypeChecker {
     )
   }
 
+  /// Records an instantiation request for deferred monomorphization.
+  /// This method collects all generic instantiation points during type checking
+  /// so they can be processed later by the Monomorphizer.
+  private func recordInstantiation(_ request: InstantiationRequest) {
+    instantiationRequests.append(request)
+  }
+
+  // Wrapper for shared utility function from SemaUtils.swift
   private func resolveTraitName(from node: TypeNode) throws -> String {
-    guard case .identifier(let name) = node else {
-      throw SemanticError.invalidOperation(op: "invalid trait bound", type1: String(describing: node), type2: "")
-    }
-    return name
+    return try SemaUtils.resolveTraitName(from: node)
   }
 
   private func validateTraitName(_ name: String) throws {
-    if name == "Any" || name == "Copy" {
-      return
-    }
-    if traits[name] == nil {
-      throw SemanticError(.generic("Undefined trait: \(name)"), line: currentLine)
-    }
+    try SemaUtils.validateTraitName(name, traits: traits, currentLine: currentLine)
   }
 
   private func flattenedTraitMethods(_ traitName: String) throws -> [String: TraitMethodSignature] {
-    var visited: Set<String> = []
-    return try flattenedTraitMethods(traitName, visited: &visited)
-  }
-
-  private func flattenedTraitMethods(
-    _ traitName: String,
-    visited: inout Set<String>
-  ) throws -> [String: TraitMethodSignature] {
-    if visited.contains(traitName) {
-      return [:]
-    }
-    visited.insert(traitName)
-
-    if traitName == "Any" || traitName == "Copy" {
-      return [:]
-    }
-    guard let decl = traits[traitName] else {
-      throw SemanticError(.generic("Undefined trait: \(traitName)"), line: currentLine)
-    }
-
-    var methods: [String: TraitMethodSignature] = [:]
-    for parent in decl.superTraits {
-      let parentMethods = try flattenedTraitMethods(parent, visited: &visited)
-      for (name, sig) in parentMethods {
-        methods[name] = sig
-      }
-    }
-    for m in decl.methods {
-      methods[m.name] = m
-    }
-    return methods
+    return try SemaUtils.flattenedTraitMethods(traitName, traits: traits, currentLine: currentLine)
   }
 
   private func recordGenericTraitBounds(_ typeParameters: [TypeParameterDecl]) throws {
@@ -509,6 +448,22 @@ public class TypeChecker {
     for (i, param) in typeParameters.enumerated() {
       for c in param.constraints {
         let traitName = try resolveTraitName(from: c)
+        
+        // If the argument is a generic parameter, check if it has the required constraint
+        // in its bounds rather than checking for concrete method implementations
+        if case .genericParameter(let argName) = args[i] {
+          // Check if the generic parameter has the required trait bound
+          if let bounds = genericTraitBounds[argName] {
+            if traitName != "Any" && !bounds.contains(traitName) {
+              throw SemanticError(.generic(
+                "Generic parameter \(argName) does not have required constraint \(traitName)"
+              ), line: currentLine)
+            }
+          }
+          // If bounds exist and contain the trait (or trait is Any), constraint is satisfied
+          continue
+        }
+        
         let ctx = "checking constraint \(param.name): \(traitName)"
         try enforceTraitConformance(args[i], traitName: traitName, context: ctx)
       }
@@ -600,35 +555,44 @@ public class TypeChecker {
     return (method: method, finalBase: finalBase, valueType: valueType)
   }
 
-  // Changed to return TypedProgram
-  public func check() throws -> TypedProgram {
+  /// Performs type checking on the AST and returns the TypeCheckerOutput.
+  /// The output contains:
+  /// - The typed program with all declarations type-checked
+  /// - The collected instantiation requests for deferred monomorphization
+  /// - The registry of generic templates for the Monomorphizer
+  public func check() throws -> TypeCheckerOutput {
     switch self.ast {
     case .program(let declarations):
       var typedDeclarations: [TypedGlobalNode] = []
       // Clear any previous state
-      extraGlobalNodes.removeAll()
+      instantiationRequests.removeAll()
 
       for decl in declarations {
-        let startIndex = extraGlobalNodes.count
-
         if let typedDecl = try checkGlobalDeclaration(decl) {
-          // Append any dependencies generated during this declaration (e.g. instantiated generics)
-          // BEFORE the declaration itself to satisfy C definition order.
-          if extraGlobalNodes.count > startIndex {
-            let newDependencies = extraGlobalNodes[startIndex..<extraGlobalNodes.count]
-            typedDeclarations.append(contentsOf: newDependencies)
-          }
           typedDeclarations.append(typedDecl)
-        } else {
-          // Even if decl is nil (e.g. intrinsic decl), we might have generated dependencies
-          if extraGlobalNodes.count > startIndex {
-            let newDependencies = extraGlobalNodes[startIndex..<extraGlobalNodes.count]
-            typedDeclarations.append(contentsOf: newDependencies)
-          }
         }
       }
-      // Do NOT append extraGlobalNodes again
-      return .program(globalNodes: typedDeclarations)
+      
+      // Build the typed program
+      let program = TypedProgram.program(globalNodes: typedDeclarations)
+      
+      // Build the generic template registry
+      let registry = GenericTemplateRegistry(
+        structTemplates: currentScope.getAllGenericStructTemplates(),
+        unionTemplates: currentScope.getAllGenericUnionTemplates(),
+        functionTemplates: currentScope.getAllGenericFunctionTemplates(),
+        extensionMethods: genericExtensionMethods,
+        intrinsicExtensionMethods: genericIntrinsicExtensionMethods,
+        traits: traits,
+        concreteExtensionMethods: extensionMethods
+      )
+      
+      return TypeCheckerOutput(
+        program: program,
+        instantiationRequests: instantiationRequests,
+        genericTemplates: registry,
+        typedExtensionMethods: typedExtensionMethods
+      )
     }
   }
 
@@ -659,9 +623,32 @@ public class TypeChecker {
       }
 
       if !typeParameters.isEmpty {
+        // Register template first to allow recursive type references
         let template = GenericUnionTemplate(
           name: name, typeParameters: typeParameters, cases: cases, access: access)
         currentScope.defineGenericUnionTemplate(name, template: template)
+        
+        // Perform declaration-time validation of case parameter types in validation-only mode
+        // This validates type references without actually instantiating types
+        let savedValidationMode = isValidationOnlyMode
+        isValidationOnlyMode = true
+        defer { isValidationOnlyMode = savedValidationMode }
+        
+        try withNewScope {
+          // Define type parameters as generic parameter types
+          for param in typeParameters {
+            try currentScope.defineType(param.name, type: .genericParameter(name: param.name))
+          }
+          try recordGenericTraitBounds(typeParameters)
+          
+          // Validate all case parameter types are valid under the type parameters
+          for c in cases {
+            for p in c.parameters {
+              _ = try resolveTypeNode(p.type)
+            }
+          }
+        }
+        
         return .genericTypeTemplate(name: name)
       }
 
@@ -731,8 +718,8 @@ public class TypeChecker {
         )
         currentScope.defineGenericFunctionTemplate(name, template: placeholderTemplate)
 
-        // Perform declaration-site checking
-        try withNewScope {
+        // Perform declaration-site checking and store results
+        let (checkedBody, checkedParams, checkedReturnType) = try withNewScope {
           for param in typeParameters {
             try currentScope.defineType(param.name, type: .genericParameter(name: param.name))
           }
@@ -747,16 +734,21 @@ public class TypeChecker {
           }
 
           // Perform declaration-site checking
-          _ = try checkFunctionBody(params, returnType, body)
+          let (typedBody, _) = try checkFunctionBody(params, returnType, body)
+          return (typedBody, params, returnType)
         }
 
+        // Create template with checked results
         let template = GenericFunctionTemplate(
           name: name,
           typeParameters: typeParameters,
           parameters: parameters,
           returnType: returnTypeNode,
           body: body,
-          access: access
+          access: access,
+          checkedBody: checkedBody,
+          checkedParameters: checkedParams,
+          checkedReturnType: checkedReturnType
         )
         currentScope.defineGenericFunctionTemplate(name, template: template)
         return .genericFunctionTemplate(name: name)
@@ -866,11 +858,17 @@ public class TypeChecker {
         }
 
         // Register methods for the template
+        // Note: Method bodies are type-checked during instantiation when Self is concrete
+        // We cannot validate method signatures here because they may reference types
+        // that are defined later in the file (forward references)
         if genericExtensionMethods[baseName] == nil {
           genericExtensionMethods[baseName] = []
         }
         for method in methods {
-          genericExtensionMethods[baseName]!.append((typeParams: typeParams, method: method))
+          genericExtensionMethods[baseName]!.append(GenericExtensionMethodTemplate(
+            typeParams: typeParams,
+            method: method
+          ))
         }
 
         // Return nil as we process these lazily upon instantiation
@@ -1132,9 +1130,30 @@ public class TypeChecker {
       }
 
       if !typeParameters.isEmpty {
+        // Register template first to allow recursive type references
         let template = GenericStructTemplate(
           name: name, typeParameters: typeParameters, parameters: parameters)
         currentScope.defineGenericStructTemplate(name, template: template)
+        
+        // Perform declaration-time validation of field types in validation-only mode
+        // This validates type references without actually instantiating types
+        let savedValidationMode = isValidationOnlyMode
+        isValidationOnlyMode = true
+        defer { isValidationOnlyMode = savedValidationMode }
+        
+        try withNewScope {
+          // Define type parameters as generic parameter types
+          for param in typeParameters {
+            try currentScope.defineType(param.name, type: .genericParameter(name: param.name))
+          }
+          try recordGenericTraitBounds(typeParameters)
+          
+          // Validate all field types are valid under the type parameters
+          for param in parameters {
+            _ = try resolveTypeNode(param.type)
+          }
+        }
+        
         return .genericTypeTemplate(name: name)
       }
 
@@ -1520,6 +1539,16 @@ public class TypeChecker {
       if case .genericInstantiation(let base, let args) = callee {
         if let template = currentScope.lookupGenericStructTemplate(base) {
           let resolvedArgs = try args.map { try resolveTypeNode($0) }
+          
+          // Record instantiation request for deferred monomorphization
+          // Skip if any argument contains generic parameters (will be recorded when fully resolved)
+          if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+            recordInstantiation(InstantiationRequest(
+              kind: .structType(template: template, args: resolvedArgs),
+              sourceLine: currentLine
+            ))
+          }
+          
           let instantiatedType = try instantiate(template: template, args: resolvedArgs)
 
           guard case .structure(let typeName, let members, _) = instantiatedType else {
@@ -1626,6 +1655,16 @@ public class TypeChecker {
           }
 
           let resolvedArgs = try args.map { try resolveTypeNode($0) }
+          
+          // Record instantiation request for deferred monomorphization
+          // Skip if any argument contains generic parameters (will be recorded when fully resolved)
+          if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+            recordInstantiation(InstantiationRequest(
+              kind: .function(template: template, args: resolvedArgs),
+              sourceLine: currentLine
+            ))
+          }
+          
           let (instantiatedName, instantiatedType) = try instantiateFunction(
             template: template, args: resolvedArgs)
 
@@ -1764,6 +1803,15 @@ public class TypeChecker {
           }
           if template.name == "ref_count" {
             return .intrinsicCall(.refCount(val: typedArguments[0]))
+          }
+
+          // Record instantiation request for deferred monomorphization
+          // Skip if any argument contains generic parameters (will be recorded when fully resolved)
+          if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+            recordInstantiation(InstantiationRequest(
+              kind: .function(template: template, args: resolvedArgs),
+              sourceLine: currentLine
+            ))
           }
 
           let (instantiatedName, instantiatedType) = try instantiateFunction(
@@ -2058,6 +2106,16 @@ public class TypeChecker {
       if case .genericInstantiation(let baseName, let args) = baseExpr {
         if let template = currentScope.lookupGenericStructTemplate(baseName) {
           let resolvedArgs = try args.map { try resolveTypeNode($0) }
+          
+          // Record instantiation request for deferred monomorphization
+          // Skip if any argument contains generic parameters (will be recorded when fully resolved)
+          if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+            recordInstantiation(InstantiationRequest(
+              kind: .structType(template: template, args: resolvedArgs),
+              sourceLine: currentLine
+            ))
+          }
+          
           let type = try instantiate(template: template, args: resolvedArgs)
 
           if path.count == 1 {
@@ -2087,6 +2145,16 @@ public class TypeChecker {
           }
         } else if let template = currentScope.lookupGenericUnionTemplate(baseName) {
           let resolvedArgs = try args.map { try resolveTypeNode($0) }
+          
+          // Record instantiation request for deferred monomorphization
+          // Skip if any argument contains generic parameters (will be recorded when fully resolved)
+          if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+            recordInstantiation(InstantiationRequest(
+              kind: .unionType(template: template, args: resolvedArgs),
+              sourceLine: currentLine
+            ))
+          }
+          
           let type = try instantiateUnion(template: template, args: resolvedArgs)
 
           if path.count == 1 {
@@ -2951,6 +3019,8 @@ public class TypeChecker {
   }
 
   // 将 TypeNode 解析为语义层 Type，支持函数参数/返回位置的一层 reference(T)
+  // When validationOnly is true, we skip full instantiation and just validate type references
+  private var isValidationOnlyMode = false
 
   private func resolveTypeNode(_ node: TypeNode) throws -> Type {
     switch node {
@@ -2974,15 +3044,75 @@ public class TypeChecker {
     case .generic(let base, let args):
       if let template = currentScope.lookupGenericStructTemplate(base) {
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        
+        // In validation-only mode, just check constraints and return a placeholder
+        if isValidationOnlyMode {
+          guard template.typeParameters.count == resolvedArgs.count else {
+            throw SemanticError.typeMismatch(
+              expected: "\(template.typeParameters.count) generic arguments",
+              got: "\(resolvedArgs.count)"
+            )
+          }
+          try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
+          // Return a placeholder that won't be used for actual code generation
+          return .genericParameter(name: "\(base)<\(resolvedArgs.map { $0.description }.joined(separator: ","))>")
+        }
+        
+        // Record instantiation request for deferred monomorphization
+        // Skip if any argument contains generic parameters (will be recorded when fully resolved)
+        if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+          recordInstantiation(InstantiationRequest(
+            kind: .structType(template: template, args: resolvedArgs),
+            sourceLine: currentLine
+          ))
+        }
+        
         return try instantiate(template: template, args: resolvedArgs)
       } else if let template = currentScope.lookupGenericUnionTemplate(base) {
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        
+        // In validation-only mode, just check constraints and return a placeholder
+        if isValidationOnlyMode {
+          guard template.typeParameters.count == resolvedArgs.count else {
+            throw SemanticError.typeMismatch(
+              expected: "\(template.typeParameters.count) generic types",
+              got: "\(resolvedArgs.count)"
+            )
+          }
+          try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
+          // Return a placeholder that won't be used for actual code generation
+          return .genericParameter(name: "\(base)<\(resolvedArgs.map { $0.description }.joined(separator: ","))>")
+        }
+        
+        // Record instantiation request for deferred monomorphization
+        // Skip if any argument contains generic parameters (will be recorded when fully resolved)
+        if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+          recordInstantiation(InstantiationRequest(
+            kind: .unionType(template: template, args: resolvedArgs),
+            sourceLine: currentLine
+          ))
+        }
+        
         return try instantiateUnion(template: template, args: resolvedArgs)
       } else {
         throw SemanticError.undefinedType(base)
       }
     }
   }
+
+  // MARK: - Type Instantiation for Type Checking
+  //
+  // These methods compute instantiated types for type checking purposes.
+  // They do NOT generate code - code generation is handled by the Monomorphizer.
+  //
+  // These methods are necessary because the TypeChecker needs to know the concrete
+  // types (e.g., List_Int with its members) to perform type checking on expressions
+  // that use generic types with concrete arguments.
+  //
+  // The Monomorphizer has its own instantiation methods that both compute types
+  // AND generate code. The duplication in type computation is intentional:
+  // - TypeChecker computes types for type checking
+  // - Monomorphizer computes types for code generation (with caching to avoid redundant work)
 
   private func instantiate(template: GenericStructTemplate, args: [Type]) throws -> Type {
     guard template.typeParameters.count == args.count else {
@@ -3004,7 +3134,7 @@ public class TypeChecker {
       return cached
     }
 
-    // 2. Calculate Layout Key and Layout Name EARLY
+    // Calculate Layout Key and Layout Name
     let argLayoutKeys = args.map { $0.layoutKey }.joined(separator: "_")
     let layoutName = "\(template.name)_\(argLayoutKeys)"
 
@@ -3013,7 +3143,7 @@ public class TypeChecker {
       name: layoutName, members: [], isGenericInstantiation: true)
     instantiatedTypes[key] = placeholder
 
-    // 1. Resolve members with specific types
+    // Resolve members with specific types
     var resolvedMembers: [(name: String, type: Type, mutable: Bool)] = []
     do {
       try withNewScope {
@@ -3035,13 +3165,14 @@ public class TypeChecker {
       throw error
     }
 
-    // 3. Create Specific Type
+    // Create Specific Type
     let specificType = Type.structure(
       name: layoutName, members: resolvedMembers, isGenericInstantiation: true)
     instantiatedTypes[key] = specificType
     layoutToTemplateInfo[layoutName] = (base: template.name, args: args)
 
     // Force instantiate __drop if it exists for this type
+    // This ensures the typed body is available in the cache for the Monomorphizer
     if let methods = genericExtensionMethods[template.name] {
       for entry in methods {
         if entry.method.name == "__drop" {
@@ -3053,43 +3184,6 @@ public class TypeChecker {
           )
         }
       }
-    }
-
-    if specificType.containsGenericParameter {
-      return specificType
-    }
-
-    // 4. Register Global Type Declaration if not already generated
-    if !generatedLayouts.contains(layoutName) {
-      generatedLayouts.insert(layoutName)
-
-      // Create Canonical Members for the C struct definition
-      // Map T -> Canonical(T)
-      var canonicalMembers: [(name: String, type: Type, mutable: Bool)] = []
-      try withNewScope {
-        for (i, paramInfo) in template.typeParameters.enumerated() {
-          try currentScope.defineType(paramInfo.name, type: args[i].canonical)
-        }
-        for param in template.parameters {
-          let fieldType = try resolveTypeNode(param.type)
-          canonicalMembers.append((name: param.name, type: fieldType, mutable: param.mutable))
-        }
-      }
-
-      // Create Canonical Type
-      let canonicalType = Type.structure(
-        name: layoutName, members: canonicalMembers, isGenericInstantiation: true)
-
-      // Convert to TypedGlobalNode
-      let params = canonicalMembers.map { param in
-        Symbol(
-          name: param.name, type: param.type,
-          kind: param.mutable ? .variable(.MutableValue) : .variable(.Value))
-      }
-
-      // We use a dummy symbol for the type identifier, only name matters for CodeGen
-      let typeSymbol = Symbol(name: layoutName, type: canonicalType, kind: .type)
-      extraGlobalNodes.append(.globalStructDeclaration(identifier: typeSymbol, parameters: params))
     }
 
     return specificType
@@ -3141,8 +3235,6 @@ public class TypeChecker {
       throw error
     }
 
-
-
     let specificType = Type.union(
       name: layoutName,
       cases: resolvedCases,
@@ -3152,6 +3244,7 @@ public class TypeChecker {
     layoutToTemplateInfo[layoutName] = (base: template.name, args: args)
 
     // Force instantiate __drop if it exists for this type
+    // This ensures the typed body is available in the cache for the Monomorphizer
     if let methods = genericExtensionMethods[template.name] {
       for entry in methods {
         if entry.method.name == "__drop" {
@@ -3163,35 +3256,6 @@ public class TypeChecker {
           )
         }
       }
-    }
-
-    if specificType.containsGenericParameter {
-      return specificType
-    }
-
-    // Register global declaration for CodeGen
-    if !generatedLayouts.contains(layoutName) {
-      generatedLayouts.insert(layoutName)
-      // Canonical cases (using canonical types for fields)
-      var canonicalCases: [UnionCase] = []
-      try withNewScope {
-        for (i, paramInfo) in template.typeParameters.enumerated() {
-          try currentScope.defineType(paramInfo.name, type: args[i].canonical)
-        }
-        for c in template.cases {
-          var params: [(name: String, type: Type)] = []
-          for p in c.parameters {
-            params.append((name: p.name, type: try resolveTypeNode(p.type)))
-          }
-          canonicalCases.append(UnionCase(name: c.name, parameters: params))
-        }
-      }
-
-      let canonicalType = Type.union(
-        name: layoutName, cases: canonicalCases, isGenericInstantiation: true)
-      let typeSymbol = Symbol(name: layoutName, type: canonicalType, kind: .type)
-      extraGlobalNodes.append(
-        .globalUnionDeclaration(identifier: typeSymbol, cases: canonicalCases))
     }
 
     return specificType
@@ -3214,10 +3278,7 @@ public class TypeChecker {
       return cached
     }
 
-    // 1. Resolve parameters and return type with specific types
-    // We split this into two phases: Header resolution (for caching) and Body check.
-
-    // Phase 1: Header Resolution
+    // Resolve parameters and return type with specific types
     let (resolvedParams, resolvedReturnType, mangledName) = try withNewScope {
       for (i, paramInfo) in template.typeParameters.enumerated() {
         try currentScope.defineType(paramInfo.name, type: args[i])
@@ -3243,53 +3304,14 @@ public class TypeChecker {
       returns: resolvedReturnType)
 
     if functionType.containsGenericParameter {
-      return ("", functionType)
+      // Return the template name (not empty) so Monomorphizer can identify and mangle it
+      return (template.name, functionType)
     }
 
-    // Cache EARLY to support recursion
+    // Cache the result
     instantiatedFunctions[key] = (mangledName, functionType)
 
-    // Phase 2: Body Check (in new scope again to have correct context)
-    let typedBody: TypedExpressionNode
-    do {
-      typedBody = try withNewScope {
-        for (i, paramInfo) in template.typeParameters.enumerated() {
-          try currentScope.defineType(paramInfo.name, type: args[i])
-        }
-        for param in resolvedParams {
-          currentScope.define(param.name, param.type, mutable: param.isMutable())
-        }
-        // We pass dummy body to checkFunctionBody? No, we call inferTypedExpression directly since we set up scope
-        let inferredBody = try inferTypedExpression(template.body)
-        if inferredBody.type != .never && inferredBody.type != resolvedReturnType {
-          throw SemanticError.typeMismatch(
-            expected: resolvedReturnType.description, got: inferredBody.type.description)
-        }
-        return inferredBody
-      }
-    } catch {
-      // If body check fails, remove from cache to avoid corrupt state?
-      // Or just throw. throw is fine.
-      instantiatedFunctions.removeValue(forKey: key)
-      throw error
-    }
-
-    // 3. Register Global Function if not already generated
-    // Skip if intrinsic
-    let intrinsicNames = [
-      "alloc_memory", "dealloc_memory", "copy_memory", "move_memory", "ref_count",
-    ]
-    if !generatedLayouts.contains(mangledName) && !intrinsicNames.contains(template.name) {
-      generatedLayouts.insert(mangledName)
-
-      let functionNode = TypedGlobalNode.globalFunction(
-        identifier: Symbol(name: mangledName, type: functionType, kind: .function),
-        parameters: resolvedParams,
-        body: typedBody
-      )
-      extraGlobalNodes.append(functionNode)
-    }
-
+    // Code generation is handled by the Monomorphizer
     return (mangledName, functionType)
   }
 
@@ -3297,9 +3319,10 @@ public class TypeChecker {
     baseType: Type,
     structureName: String,
     genericArgs: [Type],
-    methodInfo: (typeParams: [TypeParameterDecl], method: MethodDeclaration)
+    methodInfo: GenericExtensionMethodTemplate
   ) throws -> Symbol {
-    let (typeParams, method) = methodInfo
+    let typeParams = methodInfo.typeParams
+    let method = methodInfo.method
 
     if typeParams.count != genericArgs.count {
       throw SemanticError.typeMismatch(
@@ -3315,6 +3338,21 @@ public class TypeChecker {
       return Symbol(name: cachedName, type: cachedType, kind: .function, methodKind: kind)
     }
 
+    // Record instantiation request for deferred monomorphization
+    // Skip if any argument contains generic parameters (will be recorded when fully resolved)
+    if !genericArgs.contains(where: { $0.containsGenericParameter }) {
+      recordInstantiation(InstantiationRequest(
+        kind: .extensionMethod(
+          baseType: baseType,
+          templateName: structureName,
+          typeArgs: genericArgs,
+          methodName: method.name
+        ),
+        sourceLine: currentLine
+      ))
+    }
+
+    // Resolve function type and type-check the body
     let (functionType, typedBody, params) = try withNewScope {
       for (i, paramInfo) in typeParams.enumerated() {
         try currentScope.defineType(paramInfo.name, type: genericArgs[i])
@@ -3333,25 +3371,34 @@ public class TypeChecker {
           kind: .variable(param.mutable ? .MutableValue : .Value))
       }
 
-      // Use checkFunctionBody to handle body scope
-      let (typedBody, funcType) = try checkFunctionBody(params, returnType, method.body)
-      return (funcType, typedBody, params)
-    }
-
-    if !generatedLayouts.contains(mangledName) {
-      generatedLayouts.insert(mangledName)
-      let kind = getCompilerMethodKind(method.name)
-      let functionNode = TypedGlobalNode.globalFunction(
-        identifier: Symbol(
-          name: mangledName, type: functionType, kind: .function, methodKind: kind),
-        parameters: params,
-        body: typedBody
+      let funcType = Type.function(
+        parameters: params.map {
+          Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind))
+        },
+        returns: returnType
       )
-      extraGlobalNodes.append(functionNode)
+      
+      // Type-check the method body with concrete types
+      let (typedBody, _) = try checkFunctionBody(params, returnType, method.body)
+      
+      return (funcType, typedBody, params)
     }
 
     instantiatedFunctions[key] = (mangledName, functionType)
     let kind = getCompilerMethodKind(method.name)
+    
+    // Store the typed body in the cache for the Monomorphizer to use
+    // Skip if any argument contains generic parameters (will be stored when fully resolved)
+    if !genericArgs.contains(where: { $0.containsGenericParameter }) {
+      typedExtensionMethods[mangledName] = TypedExtensionMethodInfo(
+        mangledName: mangledName,
+        functionType: functionType,
+        parameters: params,
+        body: typedBody,
+        methodKind: kind
+      )
+    }
+    
     return Symbol(name: mangledName, type: functionType, kind: .function, methodKind: kind)
   }
 
@@ -3377,7 +3424,7 @@ public class TypeChecker {
       return Symbol(name: cachedName, type: cachedType, kind: .function, methodKind: kind)
     }
 
-    let (functionType, _, _) = try withNewScope {
+    let functionType = try withNewScope {
       for (i, paramInfo) in typeParams.enumerated() {
         try currentScope.defineType(paramInfo.name, type: genericArgs[i])
       }
@@ -3395,17 +3442,12 @@ public class TypeChecker {
           kind: .variable(param.mutable ? .MutableValue : .Value))
       }
 
-      // Intrinsic logic: generate dummy body
-      let funcType = Type.function(
+      return Type.function(
         parameters: params.map {
           Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind))
         },
         returns: returnType
       )
-      // Dummy body
-      let typedBody = TypedExpressionNode.integerLiteral(value: 0, type: .int)
-
-      return (funcType, typedBody, params)
     }
 
     instantiatedFunctions[key] = (mangledName, functionType)
