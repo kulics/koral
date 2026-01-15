@@ -76,6 +76,36 @@ public enum Token: CustomStringConvertible {
   case breakKeyword // 'break' keyword
   case continueKeyword // 'continue' keyword
 
+  /// Whether this token is a continuation token (triggers line continuation when at start of line)
+  /// Continuation tokens include: infix operators, dot, and arrow
+  public var isContinuationToken: Bool {
+    switch self {
+    // Arithmetic infix operators
+    case .plus, .minus, .multiply, .divide, .modulo, .power:
+      return true
+    // Logical infix operators
+    case .andKeyword, .orKeyword:
+      return true
+    // Bitwise infix operators
+    case .bitandKeyword, .bitorKeyword, .bitxorKeyword, .bitshlKeyword, .bitshrKeyword:
+      return true
+    // Comparison operators
+    case .equalEqual, .notEqual, .greater, .less, .greaterEqual, .lessEqual:
+      return true
+    // Dot for member access and chaining
+    case .dot:
+      return true
+    // Arrow for lambda expressions
+    case .arrow:
+      return true
+    // Range operators
+    case .range, .rangeLess, .lessRange, .lessRangeLess:
+      return true
+    default:
+      return false
+    }
+  }
+
   // Add static operator function to compare if the same item
   public static func === (lhs: Token, rhs: Token) -> Bool {
     switch (lhs, rhs) {
@@ -305,15 +335,31 @@ public class Lexer {
   private let input: String
   private var position: String.Index
   private var _line: Int = 1
+  
+  // Newline tracking for automatic statement termination
+  private var _hasNewlineBeforeCurrentToken: Bool = false
+  private var _hasBlankLineOrCommentBeforeCurrentToken: Bool = false
 
   public struct State {
     fileprivate let position: String.Index
     fileprivate let line: Int
+    fileprivate let hasNewlineBeforeCurrentToken: Bool
+    fileprivate let hasBlankLineOrCommentBeforeCurrentToken: Bool
   }
 
   // Current line number property
   public var currentLine: Int {
     self._line
+  }
+  
+  // Whether there was a newline before the current token
+  public var newlineBeforeCurrent: Bool {
+    self._hasNewlineBeforeCurrentToken
+  }
+  
+  // Whether there was a blank line or comment before the current token
+  public var blankLineOrCommentBeforeCurrent: Bool {
+    self._hasBlankLineOrCommentBeforeCurrentToken
   }
 
   public init(input: String) {
@@ -322,12 +368,19 @@ public class Lexer {
   }
 
   public func saveState() -> State {
-    State(position: position, line: _line)
+    State(
+      position: position,
+      line: _line,
+      hasNewlineBeforeCurrentToken: _hasNewlineBeforeCurrentToken,
+      hasBlankLineOrCommentBeforeCurrentToken: _hasBlankLineOrCommentBeforeCurrentToken
+    )
   }
 
   public func restoreState(_ state: State) {
     position = state.position
     _line = state.line
+    _hasNewlineBeforeCurrentToken = state.hasNewlineBeforeCurrentToken
+    _hasBlankLineOrCommentBeforeCurrentToken = state.hasBlankLineOrCommentBeforeCurrentToken
   }
 
   // Step back one character, fixing line counter if we rewound over a newline
@@ -349,7 +402,86 @@ public class Lexer {
     return char
   }
 
-  // Skip whitespace characters
+  // Skip whitespace characters and track newlines
+  // Returns (sawNewline, sawBlankLineOrComment)
+  private func skipWhitespaceOnly() -> (sawNewline: Bool, sawBlankLineOrComment: Bool) {
+    var sawNewline = false
+    var sawBlankLineOrComment = false
+    var consecutiveNewlines = 0
+    
+    while let char = getNextChar() {
+      if char.isNewline {
+        sawNewline = true
+        consecutiveNewlines += 1
+        if consecutiveNewlines > 1 {
+          sawBlankLineOrComment = true  // Empty line detected
+        }
+      } else if char.isWhitespace {
+        // Regular whitespace, don't reset newline count
+        continue
+      } else {
+        unreadChar(char)
+        break
+      }
+    }
+    return (sawNewline, sawBlankLineOrComment)
+  }
+  
+  // Skip whitespace and comments, tracking newlines and blank lines/comments
+  private func skipWhitespaceAndComments() throws -> (sawNewline: Bool, sawBlankLineOrComment: Bool) {
+    var sawNewline = false
+    var sawBlankLineOrComment = false
+    var consecutiveNewlines = 0
+    
+    while true {
+      // First skip any whitespace
+      while let char = getNextChar() {
+        if char.isNewline {
+          sawNewline = true
+          consecutiveNewlines += 1
+          if consecutiveNewlines > 1 {
+            sawBlankLineOrComment = true
+          }
+        } else if char.isWhitespace {
+          continue
+        } else {
+          unreadChar(char)
+          break
+        }
+      }
+      
+      // Check for comments
+      guard let char = getNextChar() else { break }
+      
+      if char == "/" {
+        if let nextChar = getNextChar() {
+          if nextChar == "/" {
+            // Line comment
+            skipLineComment()
+            sawBlankLineOrComment = true
+            consecutiveNewlines = 0
+            continue
+          } else if nextChar == "*" {
+            // Block comment
+            try skipBlockComment()
+            sawBlankLineOrComment = true
+            consecutiveNewlines = 0
+            continue
+          }
+          unreadChar(nextChar)
+        }
+        unreadChar(char)
+        break
+      } else {
+        unreadChar(char)
+        break
+      }
+    }
+    
+    return (sawNewline, sawBlankLineOrComment)
+  }
+
+  // Skip whitespace characters (legacy method for compatibility)
   private func skipWhitespace() {
     while let char = getNextChar() {
       if !char.isWhitespace {
@@ -468,7 +600,11 @@ public class Lexer {
 
   // Get next token
   public func getNextToken() throws -> Token {
-    skipWhitespace()
+    // Track newlines and blank lines/comments before this token
+    let (sawNewline, sawBlankLineOrComment) = try skipWhitespaceAndComments()
+    _hasNewlineBeforeCurrentToken = sawNewline
+    _hasBlankLineOrCommentBeforeCurrentToken = sawBlankLineOrComment
+    
     guard let char = getNextChar() else {
       return .eof
     }
@@ -496,9 +632,17 @@ public class Lexer {
       if let nextChar = getNextChar() {
         if nextChar == "/" {
           skipLineComment()
+          // Re-track newlines after comment
+          let (sawNewline, _) = try skipWhitespaceAndComments()
+          _hasNewlineBeforeCurrentToken = _hasNewlineBeforeCurrentToken || sawNewline
+          _hasBlankLineOrCommentBeforeCurrentToken = true
           return try getNextToken()
         } else if nextChar == "*" {
           try skipBlockComment()
+          // Re-track newlines after comment
+          let (sawNewline, _) = try skipWhitespaceAndComments()
+          _hasNewlineBeforeCurrentToken = _hasNewlineBeforeCurrentToken || sawNewline
+          _hasBlankLineOrCommentBeforeCurrentToken = true
           return try getNextToken()
         } else if nextChar == "=" {
           return .divideEqual
