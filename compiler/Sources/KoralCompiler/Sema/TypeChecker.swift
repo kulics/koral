@@ -29,14 +29,39 @@ public class TypeChecker {
   // Cache for typed extension method bodies (for Monomorphizer to use)
   private var typedExtensionMethods: [String: TypedExtensionMethodInfo] = [:]
 
-  private var currentLine: Int?
+  private var currentLine: Int = 1 {
+    didSet {
+      SemanticErrorContext.currentLine = currentLine
+    }
+  }
+  private var currentFileName: String {
+    didSet {
+      SemanticErrorContext.currentFileName = currentFileName
+    }
+  }
+
+  // File mapping for diagnostics (since stdlib globals are prepended)
+  private let coreGlobalCount: Int
+  private let coreFileName: String
+  private let userFileName: String
   private var currentFunctionReturnType: Type?
   private var loopDepth: Int = 0
 
   private var synthesizedTempIndex: Int = 0
 
-  public init(ast: ASTNode) {
+  public init(
+    ast: ASTNode,
+    coreGlobalCount: Int = 0,
+    coreFileName: String = "std/core.koral",
+    userFileName: String = "<input>"
+  ) {
     self.ast = ast
+    self.coreGlobalCount = max(0, coreGlobalCount)
+    self.coreFileName = coreFileName
+    self.userFileName = userFileName
+    self.currentFileName = userFileName
+    SemanticErrorContext.currentFileName = userFileName
+    SemanticErrorContext.currentLine = 1
   }
 
   private func builtinStringType() -> Type {
@@ -567,9 +592,16 @@ public class TypeChecker {
       // Clear any previous state
       instantiationRequests.removeAll()
 
-      for decl in declarations {
-        if let typedDecl = try checkGlobalDeclaration(decl) {
-          typedDeclarations.append(typedDecl)
+      for (index, decl) in declarations.enumerated() {
+        self.currentFileName = (index < coreGlobalCount) ? coreFileName : userFileName
+        self.currentLine = decl.line
+        do {
+          if let typedDecl = try checkGlobalDeclaration(decl) {
+            typedDeclarations.append(typedDecl)
+          }
+        } catch let e as SemanticError {
+          // SemanticError is expected to always carry a valid location.
+          throw e
         }
       }
       
@@ -1545,7 +1577,8 @@ public class TypeChecker {
           if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
             recordInstantiation(InstantiationRequest(
               kind: .structType(template: template, args: resolvedArgs),
-              sourceLine: currentLine
+              sourceLine: currentLine,
+              sourceFileName: currentFileName
             ))
           }
           
@@ -1661,7 +1694,8 @@ public class TypeChecker {
           if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
             recordInstantiation(InstantiationRequest(
               kind: .function(template: template, args: resolvedArgs),
-              sourceLine: currentLine
+              sourceLine: currentLine,
+              sourceFileName: currentFileName
             ))
           }
           
@@ -1810,7 +1844,8 @@ public class TypeChecker {
           if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
             recordInstantiation(InstantiationRequest(
               kind: .function(template: template, args: resolvedArgs),
-              sourceLine: currentLine
+              sourceLine: currentLine,
+              sourceFileName: currentFileName
             ))
           }
 
@@ -2112,7 +2147,8 @@ public class TypeChecker {
           if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
             recordInstantiation(InstantiationRequest(
               kind: .structType(template: template, args: resolvedArgs),
-              sourceLine: currentLine
+              sourceLine: currentLine,
+              sourceFileName: currentFileName
             ))
           }
           
@@ -2151,7 +2187,8 @@ public class TypeChecker {
           if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
             recordInstantiation(InstantiationRequest(
               kind: .unionType(template: template, args: resolvedArgs),
-              sourceLine: currentLine
+              sourceLine: currentLine,
+              sourceFileName: currentFileName
             ))
           }
           
@@ -2631,9 +2668,6 @@ public class TypeChecker {
     do {
       return try checkStatementInternal(stmt)
     } catch let e as SemanticError {
-      if e.line == nil && self.currentLine != nil {
-        throw SemanticError(e.kind, line: self.currentLine)
-      }
       throw e
     }
   }
@@ -3063,7 +3097,8 @@ public class TypeChecker {
         if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
           recordInstantiation(InstantiationRequest(
             kind: .structType(template: template, args: resolvedArgs),
-            sourceLine: currentLine
+            sourceLine: currentLine,
+            sourceFileName: currentFileName
           ))
         }
         
@@ -3089,7 +3124,8 @@ public class TypeChecker {
         if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
           recordInstantiation(InstantiationRequest(
             kind: .unionType(template: template, args: resolvedArgs),
-            sourceLine: currentLine
+            sourceLine: currentLine,
+            sourceFileName: currentFileName
           ))
         }
         
@@ -3348,7 +3384,8 @@ public class TypeChecker {
           typeArgs: genericArgs,
           methodName: method.name
         ),
-        sourceLine: currentLine
+        sourceLine: currentLine,
+        sourceFileName: currentFileName
       ))
     }
 

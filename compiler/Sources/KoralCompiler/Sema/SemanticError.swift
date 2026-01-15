@@ -21,11 +21,23 @@ public struct SemanticError: Error, CustomStringConvertible, Sendable {
     }
     
     public let kind: Kind
-    public let line: Int?
+    public let fileName: String
+    public let line: Int
     
-    public init(_ kind: Kind, line: Int? = nil) {
+    public init(_ kind: Kind, fileName: String, line: Int) {
         self.kind = kind
+        self.fileName = fileName
         self.line = line
+    }
+
+    /// Convenience initializer that uses the current semantic context.
+    /// This keeps call sites lightweight while still guaranteeing non-optional file/line.
+    public init(_ kind: Kind, line: Int? = nil) {
+        self.init(
+            kind,
+            fileName: SemanticErrorContext.currentFileName,
+            line: line ?? SemanticErrorContext.currentLine
+        )
     }
     
     // Compatibility initializers
@@ -71,7 +83,7 @@ public struct SemanticError: Error, CustomStringConvertible, Sendable {
     // Accessor for the old enum-like matching if necessary, though direct matching on `kind` is preferred
     
     public var description: String {
-        let location = line.map { "Line \($0): " } ?? ""
+        let location = "Line \(line): "
         switch kind {
         case .typeMismatch(let expected, let got):
             return "\(location)Type mismatch: expected \(expected), got \(got)"

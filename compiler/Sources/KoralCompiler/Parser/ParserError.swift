@@ -3,7 +3,7 @@ public enum LexerError: Error {
   case invalidFloat(line: Int, String)
   case invalidString(line: Int, String)
   case unexpectedCharacter(line: Int, String)
-  case unexpectedEndOfFile
+  case unexpectedEndOfFile(line: Int)
 }
 
 extension LexerError: CustomStringConvertible {
@@ -15,8 +15,8 @@ extension LexerError: CustomStringConvertible {
       "Line \(line): Invalid string: \(msg)"
     case .unexpectedCharacter(let line, let msg):
         "Line \(line): Unexpected character: \(msg)"
-    case .unexpectedEndOfFile:
-        "Unexpected end of file"
+    case .unexpectedEndOfFile(let line):
+        "Line \(line): Unexpected end of file"
     }
   }
 }

@@ -47,7 +47,18 @@ public class Monomorphizer {
     private var extensionMethods: [String: [String: Symbol]] = [:]
     
     /// Current source line for error reporting
-    private var currentLine: Int?
+    private var currentLine: Int = 1 {
+        didSet {
+            SemanticErrorContext.currentLine = currentLine
+        }
+    }
+
+    /// Current source file for error reporting
+    private var currentFileName: String = "<input>" {
+        didSet {
+            SemanticErrorContext.currentFileName = currentFileName
+        }
+    }
     
     /// Pending instantiation requests (work queue for transitive instantiation)
     private var pendingRequests: [InstantiationRequest] = []
@@ -142,6 +153,11 @@ public class Monomorphizer {
     /// - Parameter request: The instantiation request to process
     private func processRequest(_ request: InstantiationRequest) throws {
         currentLine = request.sourceLine
+        currentFileName = request.sourceFileName
+
+        // Ensure any SemanticError factories in monomorphization have correct context.
+        SemanticErrorContext.currentLine = currentLine
+        SemanticErrorContext.currentFileName = currentFileName
         
         // Generate a key for this request to avoid duplicate processing
         let key = requestKey(for: request)
@@ -150,23 +166,27 @@ public class Monomorphizer {
         }
         processedRequestKeys.insert(key)
         
-        switch request.kind {
-        case .structType(let template, let args):
-            _ = try instantiateStruct(template: template, args: args)
-            
-        case .unionType(let template, let args):
-            _ = try instantiateUnion(template: template, args: args)
-            
-        case .function(let template, let args):
-            _ = try instantiateFunction(template: template, args: args)
-            
-        case .extensionMethod(let baseType, let templateName, let typeArgs, let methodName):
-            _ = try instantiateExtensionMethod(
-                baseType: baseType,
-                templateName: templateName,
-                typeArgs: typeArgs,
-                methodName: methodName
-            )
+        do {
+            switch request.kind {
+            case .structType(let template, let args):
+                _ = try instantiateStruct(template: template, args: args)
+                
+            case .unionType(let template, let args):
+                _ = try instantiateUnion(template: template, args: args)
+                
+            case .function(let template, let args):
+                _ = try instantiateFunction(template: template, args: args)
+                
+            case .extensionMethod(let baseType, let templateName, let typeArgs, let methodName):
+                _ = try instantiateExtensionMethod(
+                    baseType: baseType,
+                    templateName: templateName,
+                    typeArgs: typeArgs,
+                    methodName: methodName
+                )
+            }
+        } catch let e as SemanticError {
+            throw e
         }
     }
     
@@ -1135,7 +1155,8 @@ public class Monomorphizer {
                         if !generatedLayouts.contains(newName) && !typeArgs.contains(where: { $0.containsGenericParameter }) {
                             pendingRequests.append(InstantiationRequest(
                                 kind: .function(template: template, args: typeArgs),
-                                sourceLine: currentLine
+                                sourceLine: currentLine,
+                                sourceFileName: currentFileName
                             ))
                         }
                     }
@@ -1315,7 +1336,8 @@ public class Monomorphizer {
                         if typeArgs.count == template.typeParameters.count {
                             pendingRequests.append(InstantiationRequest(
                                 kind: .structType(template: template, args: typeArgs),
-                                sourceLine: currentLine
+                                sourceLine: currentLine,
+                                sourceFileName: currentFileName
                             ))
                         }
                     }
@@ -1333,7 +1355,8 @@ public class Monomorphizer {
                         if typeArgs.count == template.typeParameters.count {
                             pendingRequests.append(InstantiationRequest(
                                 kind: .unionType(template: template, args: typeArgs),
-                                sourceLine: currentLine
+                                sourceLine: currentLine,
+                                sourceFileName: currentFileName
                             ))
                         }
                     }

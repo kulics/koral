@@ -513,7 +513,7 @@ public class Lexer {
         }
     }
     // If we reach here, it means we hit EOF before closing */
-    throw LexerError.unexpectedEndOfFile
+    throw LexerError.unexpectedEndOfFile(line: currentLine)
   }
 
   // Read a number, handling both integers and floats

@@ -73,6 +73,9 @@ public class Driver {
 
     do {
       try process(file: filePath, mode: mode, outputDir: outputDir, noStd: noStd)
+    } catch let error as DiagnosticError {
+      print(error.renderForCLI())
+      exit(1)
     } catch let error as ParserError {
       print("Parser Error: \(error)")
       exit(1)
@@ -80,11 +83,35 @@ public class Driver {
       print("Lexer Error: \(error)")
       exit(1)
     } catch let error as SemanticError {
-      print("Semantic Error: \(error)")
+      // Fallback if semantic errors escape without being wrapped.
+      print("\(error.fileName): Semantic Error: \(error)")
       exit(1)
     } catch {
       print("Error: \(error)")
       exit(1)
+    }
+  }
+
+  private func parseProgram(source: String, fileName: String) throws -> [GlobalNode] {
+    let lexer = Lexer(input: source)
+    let parser = Parser(lexer: lexer)
+    do {
+      let ast = try parser.parse()
+      guard case .program(let nodes) = ast else {
+        throw DiagnosticError(
+          stage: .other,
+          fileName: fileName,
+          underlying: NSError(
+            domain: "Driver", code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Invalid program structure"]
+          )
+        )
+      }
+      return nodes
+    } catch let error as LexerError {
+      throw DiagnosticError(stage: .lexer, fileName: fileName, underlying: error)
+    } catch let error as ParserError {
+      throw DiagnosticError(stage: .parser, fileName: fileName, underlying: error)
     }
   }
 
@@ -105,44 +132,55 @@ public class Driver {
         outputDirectory = inputURL.deletingLastPathComponent()
     }
 
+    let userDisplayName = inputURL.lastPathComponent
+    let coreDisplayName = "std/core.koral"
+
     var coreGlobalNodes: [GlobalNode] = []
     
     if !noStd {
         // 0. Load and Parse Core Library
         let coreLibPath = getCoreLibPath()
         let coreSource = try String(contentsOfFile: coreLibPath, encoding: .utf8)
-        let coreLexer = Lexer(input: coreSource)
-        let coreParser = Parser(lexer: coreLexer)
-        let coreAST = try coreParser.parse()
-
-        // Extract core global nodes
-        guard case .program(let nodes) = coreAST else {
-            throw NSError(domain: "Driver", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid core library structure"])
-        }
-        coreGlobalNodes = nodes
+      coreGlobalNodes = try parseProgram(source: coreSource, fileName: coreDisplayName)
     }
 
     // 1. Compile Koral to C
     let koralSource = try String(contentsOfFile: file, encoding: .utf8)
 
-    let lexer = Lexer(input: koralSource)
-    let parser = Parser(lexer: lexer)
-    let userAST = try parser.parse()
-
-    // Combine Core and User AST
-    guard case .program(let userGlobalNodes) = userAST else {
-        throw NSError(domain: "Driver", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid user program structure"])
-    }
+    let userGlobalNodes = try parseProgram(source: koralSource, fileName: userDisplayName)
     
     let combinedAST: ASTNode = .program(globalNodes: coreGlobalNodes + userGlobalNodes)
 
     // 1. Type checking
-    let typeChecker = TypeChecker(ast: combinedAST)
-    let typeCheckerOutput = try typeChecker.check()
+    let typeChecker = TypeChecker(
+      ast: combinedAST,
+      coreGlobalCount: coreGlobalNodes.count,
+      coreFileName: coreDisplayName,
+      userFileName: userDisplayName
+    )
+    let typeCheckerOutput: TypeCheckerOutput
+    do {
+      typeCheckerOutput = try typeChecker.check()
+    } catch let error as SemanticError {
+      throw DiagnosticError(
+        stage: .semantic,
+        fileName: error.fileName,
+        underlying: error
+      )
+    }
 
     // 2. Monomorphization (new phase)
     let monomorphizer = Monomorphizer(input: typeCheckerOutput)
-    let monomorphizedProgram = try monomorphizer.monomorphize()
+    let monomorphizedProgram: MonomorphizedProgram
+    do {
+      monomorphizedProgram = try monomorphizer.monomorphize()
+    } catch let error as SemanticError {
+      throw DiagnosticError(
+        stage: .semantic,
+        fileName: error.fileName,
+        underlying: error
+      )
+    }
 
     // 3. Code generation
     let codeGen = CodeGen(ast: monomorphizedProgram)
