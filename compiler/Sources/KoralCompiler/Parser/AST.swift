@@ -91,6 +91,31 @@ public indirect enum GlobalNode {
     typeParams: [TypeParameterDecl] = [], type: TypeNode,
     methods: [IntrinsicMethodDeclaration], line: Int)
 }
+
+extension GlobalNode {
+  public var line: Int {
+    switch self {
+    case .globalVariableDeclaration(_, _, _, _, _, let line):
+      return line
+    case .globalFunctionDeclaration(_, _, _, _, _, _, let line):
+      return line
+    case .intrinsicFunctionDeclaration(_, _, _, _, _, let line):
+      return line
+    case .globalStructDeclaration(_, _, _, _, let line):
+      return line
+    case .globalUnionDeclaration(_, _, _, _, let line):
+      return line
+    case .intrinsicTypeDeclaration(_, _, _, let line):
+      return line
+    case .traitDeclaration(_, _, _, _, let line):
+      return line
+    case .givenDeclaration(_, _, _, let line):
+      return line
+    case .intrinsicGivenDeclaration(_, _, _, let line):
+      return line
+    }
+  }
+}
 public struct IntrinsicMethodDeclaration {
   public let name: String
   public let typeParameters: [TypeParameterDecl]

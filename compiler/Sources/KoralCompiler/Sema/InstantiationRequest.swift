@@ -43,14 +43,19 @@ public struct InstantiationRequest {
     public let kind: InstantiationKind
     
     /// The source line where the instantiation was requested, used for error reporting
-    public let sourceLine: Int?
+    public let sourceLine: Int
+
+    /// The source file where the instantiation was requested, used for error reporting
+    public let sourceFileName: String
     
     /// Creates a new instantiation request.
     /// - Parameters:
     ///   - kind: The kind of instantiation
-    ///   - sourceLine: The source line number (optional, for error reporting)
-    public init(kind: InstantiationKind, sourceLine: Int? = nil) {
+    ///   - sourceLine: The source line number (for error reporting)
+    ///   - sourceFileName: The source file display name (for error reporting)
+    public init(kind: InstantiationKind, sourceLine: Int, sourceFileName: String) {
         self.kind = kind
         self.sourceLine = sourceLine
+        self.sourceFileName = sourceFileName
     }
 }
