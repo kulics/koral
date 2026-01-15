@@ -19,6 +19,42 @@ public class Parser {
       )
     }
   }
+  
+  /// Check if the current position should terminate a statement/declaration.
+  /// Returns true if:
+  /// 1. Current token is a semicolon
+  /// 2. There was a newline before current token AND current token is not a continuation token
+  ///    (unless there was a blank line or comment, which blocks continuation)
+  /// 3. Current token is EOF or right brace (end of block)
+  private func shouldTerminateStatement() -> Bool {
+    // Explicit termination
+    if currentToken === .semicolon {
+      return true
+    }
+    // End of file or block
+    if currentToken === .eof || currentToken === .rightBrace {
+      return true
+    }
+    // Newline-based termination
+    if lexer.newlineBeforeCurrent {
+      // If there was a blank line or comment, always terminate (no continuation allowed)
+      if lexer.blankLineOrCommentBeforeCurrent {
+        return true
+      }
+      // Otherwise, check if current token is a continuation token
+      if !currentToken.isContinuationToken {
+        return true
+      }
+    }
+    return false
+  }
+  
+  /// Consume optional semicolon if present
+  private func consumeOptionalSemicolon() throws {
+    if currentToken === .semicolon {
+      try match(.semicolon)
+    }
+  }
 
   // Parse program
   public func parse() throws -> ASTNode {
@@ -27,9 +63,8 @@ public class Parser {
     while currentToken !== .eof {
       let statement = try parseGlobalDeclaration()
       statements.append(statement)
-      if currentToken !== .eof {
-        try match(.semicolon)
-      }
+      // Consume optional semicolon after global declaration
+      try consumeOptionalSemicolon()
     }
     return .program(globalNodes: statements)
   }
@@ -668,8 +703,13 @@ public class Parser {
         }
       }
       try match(.rightParen)
-      try match(.semicolon)
+      
       cases.append(UnionCaseDeclaration(name: caseName, parameters: parameters))
+      
+      // Use comma as separator between variants (optional trailing comma)
+      if currentToken === .comma {
+        try match(.comma)
+      }
     }
 
     try match(.rightBrace)
@@ -692,7 +732,8 @@ public class Parser {
     case .returnKeyword:
       try match(.returnKeyword)
       // return; or return <expr>;
-      if currentToken === .semicolon || currentToken === .rightBrace {
+      // Also check for automatic statement termination (newline before non-continuation token)
+      if currentToken === .semicolon || currentToken === .rightBrace || shouldTerminateStatement() {
         return .return(value: nil, line: lexer.currentLine)
       }
       let value = try expression()
@@ -786,6 +827,17 @@ public class Parser {
   private func parsePostfixExpression() throws -> ExpressionNode {
     var expr = try term()
     while true {
+      // Check for automatic statement termination before parsing postfix operators
+      // If there's a newline before the current token and it's not a continuation token,
+      // we should stop parsing postfix expressions
+      if lexer.newlineBeforeCurrent && !currentToken.isContinuationToken {
+        // Special case: dot is a continuation token, so we continue
+        // But [ and ( are not continuation tokens, so we stop
+        if currentToken === .leftBracket || currentToken === .leftParen || currentToken === .leftBrace {
+          break
+        }
+      }
+      
       if currentToken === .dot {
         try match(.dot)
         guard case .identifier(let member) = currentToken else {
@@ -1120,9 +1172,12 @@ public class Parser {
         body = try expression()
       }
 
-      // Optional semicolon between cases (required unless next token is `}`)
-      if currentToken === .semicolon { try match(.semicolon) }
       cases.append(MatchCaseNode(pattern: pattern, body: body))
+      
+      // Use comma as separator between match arms (optional trailing comma)
+      if currentToken === .comma {
+        try match(.comma)
+      }
     }
     try match(.rightBrace)
     return .matchExpression(subject: subject, cases: cases, line: lexer.currentLine)
@@ -1227,10 +1282,10 @@ public class Parser {
       let stmt = try statement()
       statements.append(stmt)
 
-      // If current statement is an expression and next token is right brace,
-      // this is the final expression
+      // Check if this is the final expression (no explicit semicolon and next is right brace)
       if case .expression(let expr, _) = stmt {
         if currentToken === .rightBrace {
+          // This expression is the final expression (return value of block)
           try match(.rightBrace)
           return .blockExpression(
             statements: Array(statements.dropLast()),
@@ -1239,15 +1294,33 @@ public class Parser {
         }
       }
 
-      try match(.semicolon)
-
-      // if next token is right brace, return block expression
-      if currentToken === .rightBrace {
-        try match(.rightBrace)
-        return .blockExpression(statements: statements, finalExpression: nil)
+      // Check for explicit semicolon - if present, this statement is terminated
+      if currentToken === .semicolon {
+        try match(.semicolon)
+        // After semicolon, if next is right brace, block has no final expression
+        if currentToken === .rightBrace {
+          try match(.rightBrace)
+          return .blockExpression(statements: statements, finalExpression: nil)
+        }
+        continue
       }
+
+      // Check for automatic statement termination (newline before non-continuation token)
+      if shouldTerminateStatement() {
+        // If next is right brace, block has no final expression
+        if currentToken === .rightBrace {
+          try match(.rightBrace)
+          return .blockExpression(statements: statements, finalExpression: nil)
+        }
+        continue
+      }
+
+      // If we reach here, the statement continues (e.g., continuation token on next line)
+      // This shouldn't normally happen as statement() should consume the full statement
     }
-    throw ParserError.unexpectedToken(line: lexer.currentLine, got: currentToken.description)
+    
+    try match(.rightBrace)
+    return .blockExpression(statements: statements, finalExpression: nil)
   }
 
   private func isValidVariableName(_ name: String) -> Bool {

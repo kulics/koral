@@ -51,6 +51,7 @@ public class Driver {
 
     // Parse options
     var outputDir: String?
+    var noStd = false
     var i = 0
     while i < remainingArgs.count {
       let arg = remainingArgs[i]
@@ -62,13 +63,16 @@ public class Driver {
           print("Error: Missing path for -o option")
           exit(1)
         }
+      } else if arg == "--no-std" {
+        noStd = true
+        i += 1
       } else {
         i += 1
       }
     }
 
     do {
-      try process(file: filePath, mode: mode, outputDir: outputDir)
+      try process(file: filePath, mode: mode, outputDir: outputDir, noStd: noStd)
     } catch let error as ParserError {
       print("Parser Error: \(error)")
       exit(1)
@@ -84,7 +88,7 @@ public class Driver {
     }
   }
 
-  func process(file: String, mode: DriverCommand, outputDir: String? = nil) throws {
+  func process(file: String, mode: DriverCommand, outputDir: String? = nil, noStd: Bool = false) throws {
     let fileManager = FileManager.default
     let inputURL = URL(fileURLWithPath: file)
     
@@ -101,17 +105,21 @@ public class Driver {
         outputDirectory = inputURL.deletingLastPathComponent()
     }
 
+    var coreGlobalNodes: [GlobalNode] = []
+    
+    if !noStd {
+        // 0. Load and Parse Core Library
+        let coreLibPath = getCoreLibPath()
+        let coreSource = try String(contentsOfFile: coreLibPath, encoding: .utf8)
+        let coreLexer = Lexer(input: coreSource)
+        let coreParser = Parser(lexer: coreLexer)
+        let coreAST = try coreParser.parse()
 
-    // 0. Load and Parse Core Library
-    let coreLibPath = getCoreLibPath()
-    let coreSource = try String(contentsOfFile: coreLibPath, encoding: .utf8)
-    let coreLexer = Lexer(input: coreSource)
-    let coreParser = Parser(lexer: coreLexer)
-    let coreAST = try coreParser.parse()
-
-    // Extract core global nodes
-    guard case .program(let coreGlobalNodes) = coreAST else {
-        throw NSError(domain: "Driver", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid core library structure"])
+        // Extract core global nodes
+        guard case .program(let nodes) = coreAST else {
+            throw NSError(domain: "Driver", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid core library structure"])
+        }
+        coreGlobalNodes = nodes
     }
 
     // 1. Compile Koral to C

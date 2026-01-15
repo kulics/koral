@@ -42,16 +42,17 @@ let a = 0;
 let b = 1;
 ```
 
-A statement usually ends with an explicit semicolon, but if a statement ends with a block expression (such as `{ ... }`) and is followed by a newline, the semicolon can be omitted. This makes structures like `if`, `while`, `function` look cleaner.
+A statement usually ends with an explicit semicolon, but if the last expression of the statement is immediately followed by a newline, the semicolon can be omitted. This makes structures like `if`, `while`, etc. look cleaner.
 
 ```koral
-// Ends with a block expression and newline, semicolon omitted
+// Ends with a newline, semicolon omitted
 let a = { 
     1 + 1 
 } 
 
-// Normal expression, must add semicolon
-let b = 1; 
+// Ends with a newline, semicolon omitted
+let b = 1
+let c = 2
 ```
 
 ### Entry Function
