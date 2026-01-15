@@ -255,7 +255,9 @@ public class Parser {
       if currentToken === .equal {
         throw ParserError.unexpectedToken(line: lexer.currentLine, got: "Trait method should not have body")
       }
-      try match(.semicolon)
+      
+      // Use newline-based termination for trait method declarations
+      try consumeOptionalSemicolon()
 
       if !methodTypeParams.isEmpty {
         throw ParserError.unexpectedToken(line: lexer.currentLine, got: "Trait method generics not supported yet")
@@ -344,12 +346,14 @@ public class Parser {
         returnType = try parseType()
       }
 
-      // Must end with semicolon, no body
+      // Must not have body
       if currentToken === .equal {
         throw ParserError.unexpectedToken(
           line: lexer.currentLine, got: "Intrinsic given method should not have body")
       }
-      try match(.semicolon)
+      
+      // Use newline-based termination for intrinsic method declarations
+      try consumeOptionalSemicolon()
 
       methods.append(
         IntrinsicMethodDeclaration(
@@ -424,9 +428,7 @@ public class Parser {
 
       try match(.equal)
       let body = try expression()
-      if currentToken === .semicolon {
-        try match(.semicolon)
-      }
+      try consumeOptionalSemicolon()
 
       methods.append(
         MethodDeclaration(
