@@ -1,122 +1,132 @@
-// Note: CodeGen fails on generic push_back due to Int/Ref mismatch in compiler backend.
-// Tests are structurally correct and pass TypeChecking.
-
-let assert(cond Bool, msg String) Void = {
-    if not cond then {
-        panic(msg)
-    }
-}
-
-let test_basic_push() Void = {
-    let mut list = [Int]List.new()
-    assert(list.count() == 0, "count 0")
-    
-    list.push_back(10)
-    assert(list.count() == 1, "count 1")
-    // Verify values using subscript
-    assert(list[0] == 10, "value 10")
-    
-    list.push_back(20)
-    assert(list.count() == 2, "count 2")
-    assert(list[1] == 20, "value 20")
-}
-
-let test_set_and_subscript() Void = {
-    let mut list = [Int]List.new()
-    list.push_back(100)
-    list.push_back(200)
-    
-    // Test subscript assignment
-    list[0] = 300
-    assert(list[0] == 300, "subscript set index 0")
-    
-    list[1] = 400
-    assert(list[1] == 400, "subscript set index 1")
-}
-
-let test_insert_remove() Void = {
-    let mut list = [Int]List.new()
-    list.push_back(10)
-    list.push_back(20)
-    list.push_back(30)
-    // [10, 20, 30]
-
-    // Insert at start
-    list.insert(0, 5)
-    // [5, 10, 20, 30]
-    assert(list.count() == 4, "insert count")
-    assert(list[0] == 5, "insert value index 0")
-    assert(list[1] == 10, "insert value index 1")
-
-    // Insert at middle
-    list.insert(2, 15)
-    // [5, 10, 15, 20, 30]
-    assert(list.count() == 5, "insert mid count")
-    assert(list[2] == 15, "insert mid value")
-
-    // Remove middle
-    list.remove(2)
-    // [5, 10, 20, 30]
-    assert(list.count() == 4, "remove mid count")
-    assert(list[2] == 20, "remove mid check")
-
-    // Remove start
-    list.remove(0)
-    // [10, 20, 30]
-    assert(list.count() == 3, "remove start count")
-    assert(list[0] == 10, "remove start check")
-
-    // Remove end
-    list.remove(2)
-    // [10, 20]
-    assert(list.count() == 2, "remove end count")
-    assert(list[1] == 20, "remove end check")
-}
-
-let test_iteration() Void = {
-    let mut list = [Int]List.new()
-    list.push_back(1)
-    list.push_back(2)
-    list.push_back(3)
-    list.push_back(4)
-    list.push_back(5)
-
-    let mut sum = 0
-    let mut i = 0
-    while i < list.count() then {
-        sum = sum + list[i]
-        i = i + 1
-    }
-    assert(sum == 15, "iteration sum")
-}
-
-let test_pop_back_remove() Void = {
-    let mut l = [Int]List.new()
-    l.push_back(1)
-    l.push_back(2)
-    l.push_back(3)
-
-    // pop_back returns Some
-    let o1 = l.pop_back()
-    assert(o1.is_some(), "pop is some")
-    assert(l.count() == 2, "count after pop 1")
-    let o2 = l.pop_back()
-    assert(o2.unwrap() == 2, "pop value 2")
-
-    // remove returns Bool
-    // List has [1] now
-    assert(l.remove(0), "remove valid element")
-    // List is empty
-    assert(not l.remove(0), "remove from empty")
-    assert(not l.remove(0), "remove from empty 2")
-}
+// EXPECT: All List tests passed
 
 let main() Void = {
-    test_basic_push()
-    test_set_and_subscript()
-    test_insert_remove()
-    test_iteration()
-    test_pop_back_remove()
-    print_string("All tests passed")
+    // === Basic Operations ===
+    let mut list = [Int]List.new()
+    assert(list.count() == 0, "new list count 0")
+    assert(list.is_empty(), "new list is_empty")
+
+    // === push_back / pop_back ===
+    list.push_back(10)
+    assert(list.count() == 1, "count after push_back")
+    assert(not list.is_empty(), "not empty after push_back")
+    
+    list.push_back(20)
+    list.push_back(30)
+    assert(list.count() == 3, "count 3")
+
+    let p1 = list.pop_back()
+    assert(p1.unwrap() == 30, "pop_back value")
+    assert(list.count() == 2, "count after pop_back")
+
+    // === push_front / pop_front ===
+    list.push_front(5)
+    assert(list.count() == 3, "count after push_front")
+    assert(list[0] == 5, "push_front at index 0")
+
+    let p2 = list.pop_front()
+    assert(p2.unwrap() == 5, "pop_front value")
+    assert(list[0] == 10, "after pop_front")
+
+    // === front / back ===
+    assert(list.front().unwrap() == 10, "front")
+    assert(list.back().unwrap() == 20, "back")
+
+    let mut empty_list = [Int]List.new()
+    let front_empty = empty_list.front()
+    assert(front_empty.is_none(), "front on empty")
+    let back_empty = empty_list.back()
+    assert(back_empty.is_none(), "back on empty")
+
+    // === at (safe access) ===
+    assert(list.at(0).unwrap() == 10, "at(0)")
+    assert(list.at(1).unwrap() == 20, "at(1)")
+    let at_oob = list.at(999)
+    assert(at_oob.is_none(), "at out of bounds")
+    let at_neg = list.at(0 - 1)
+    assert(at_neg.is_none(), "at negative")
+
+    // === replace (returns old value) ===
+    let old1 = list.replace(0, 100)
+    assert(old1.unwrap() == 10, "replace returns old value")
+    assert(list[0] == 100, "replace new value")
+
+    let old2 = list.replace(999, 0)
+    assert(old2.is_none(), "replace out of bounds")
+
+    // === subscript (__at / __update_at) ===
+    list[0] = 1
+    list[1] = 2
+    assert(list[0] == 1, "subscript read 0")
+    assert(list[1] == 2, "subscript read 1")
+
+    // === insert ===
+    list.insert(1, 99)  // Insert 99 at index 1
+    assert(list.count() == 3, "count after insert")
+    assert(list[0] == 1, "insert: index 0")
+    assert(list[1] == 99, "insert: index 1")
+    assert(list[2] == 2, "insert: index 2")
+
+    // === remove (returns removed value) ===
+    let removed = list.remove(1)
+    assert(removed == 99, "remove returns value")
+    assert(list.count() == 2, "count after remove")
+
+    // === clear ===
+    list.clear()
+    assert(list.count() == 0, "count after clear")
+    assert(list.is_empty(), "is_empty after clear")
+
+    // === pop on empty ===
+    let pop_empty1 = list.pop_back()
+    assert(pop_empty1.is_none(), "pop_back on empty")
+    let pop_empty2 = list.pop_front()
+    assert(pop_empty2.is_none(), "pop_front on empty")
+
+    // === iterator ===
+    let mut list2 = [Int]List.new()
+    list2.push_back(1)
+    list2.push_back(2)
+    list2.push_back(3)
+
+    let mut sum = 0
+    let mut it = list2.iterator()
+    while true then {
+        when it.next() is {
+            .Some(v) then { sum = sum + v; },
+            .None then { break; },
+        }
+    }
+    assert(sum == 6, "iterator sum")
+
+    // === COW (Copy-On-Write) semantics ===
+    let mut original = [Int]List.new()
+    original.push_back(10)
+    original.push_back(20)
+
+    let mut copy = original  // Shallow copy, shares storage
+
+    // Modify copy triggers COW
+    copy.push_back(30)
+    copy[0] = 99
+
+    // Original unchanged
+    assert(original.count() == 2, "original count unchanged")
+    assert(original[0] == 10, "original[0] unchanged")
+    assert(original[1] == 20, "original[1] unchanged")
+
+    // Copy modified
+    assert(copy.count() == 3, "copy count")
+    assert(copy[0] == 99, "copy[0] modified")
+    assert(copy[1] == 20, "copy[1]")
+    assert(copy[2] == 30, "copy[2] added")
+
+    // === String list (reference types) ===
+    let mut strings = [String]List.new()
+    strings.push_back("hello")
+    strings.push_back("world")
+    assert(strings[0] == "hello", "string list 0")
+    assert(strings[1] == "world", "string list 1")
+
+    print_string("All List tests passed")
 }
-// EXPECT: All tests passed

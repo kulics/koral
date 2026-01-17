@@ -42,33 +42,27 @@ public struct TypeCheckerOutput {
     /// This includes both concrete declarations and generic template placeholders.
     public let program: TypedProgram
     
-    /// The list of instantiation requests collected during type checking.
+    /// The set of instantiation requests collected during type checking.
     /// Each request represents a point where a generic was used with concrete type arguments.
-    public let instantiationRequests: [InstantiationRequest]
+    /// Using a Set ensures automatic deduplication of identical requests.
+    public let instantiationRequests: Set<InstantiationRequest>
     
     /// The registry of generic templates collected during type checking.
     /// Contains all generic structs, unions, functions, and extension methods.
     public let genericTemplates: GenericTemplateRegistry
-    
-    /// Cache of typed extension method bodies, keyed by mangled name.
-    /// This allows the Monomorphizer to use pre-checked bodies instead of placeholders.
-    public var typedExtensionMethods: [String: TypedExtensionMethodInfo]
     
     /// Creates a new TypeCheckerOutput.
     /// - Parameters:
     ///   - program: The type-checked program
     ///   - instantiationRequests: The collected instantiation requests
     ///   - genericTemplates: The registry of generic templates
-    ///   - typedExtensionMethods: Cache of typed extension method bodies
     public init(
         program: TypedProgram,
-        instantiationRequests: [InstantiationRequest],
-        genericTemplates: GenericTemplateRegistry,
-        typedExtensionMethods: [String: TypedExtensionMethodInfo] = [:]
+        instantiationRequests: Set<InstantiationRequest>,
+        genericTemplates: GenericTemplateRegistry
     ) {
         self.program = program
         self.instantiationRequests = instantiationRequests
         self.genericTemplates = genericTemplates
-        self.typedExtensionMethods = typedExtensionMethods
     }
 }

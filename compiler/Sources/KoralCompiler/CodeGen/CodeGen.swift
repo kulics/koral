@@ -32,6 +32,335 @@ public class CodeGen {
   public init(ast: MonomorphizedProgram) {
     self.ast = ast
   }
+  
+  // MARK: - Type Validation
+  
+  /// Validates that a type has been fully resolved (no generic parameters or parameterized types).
+  /// This is called during code generation to catch any types that weren't properly resolved
+  /// by the Monomorphizer.
+  private func assertTypeResolved(_ type: Type, context: String) {
+    switch type {
+    case .genericParameter(let name):
+      fatalError("CodeGen error: Generic parameter '\(name)' should be resolved before code generation. Context: \(context)")
+    case .genericStruct(let template, let args):
+      fatalError("CodeGen error: Generic struct '\(template)<\(args.map { $0.description }.joined(separator: ", "))>' should be resolved before code generation. Context: \(context)")
+    case .genericUnion(let template, let args):
+      fatalError("CodeGen error: Generic union '\(template)<\(args.map { $0.description }.joined(separator: ", "))>' should be resolved before code generation. Context: \(context)")
+    case .function(let params, let returns):
+      for param in params {
+        assertTypeResolved(param.type, context: "\(context) -> function parameter")
+      }
+      assertTypeResolved(returns, context: "\(context) -> function return type")
+    case .reference(let inner):
+      assertTypeResolved(inner, context: "\(context) -> reference inner type")
+    case .pointer(let element):
+      assertTypeResolved(element, context: "\(context) -> pointer element type")
+    case .structure(_, let members, _):
+      for member in members {
+        assertTypeResolved(member.type, context: "\(context) -> struct member '\(member.name)'")
+      }
+    case .union(_, let cases, _):
+      for unionCase in cases {
+        for param in unionCase.parameters {
+          assertTypeResolved(param.type, context: "\(context) -> union case '\(unionCase.name)' parameter '\(param.name)'")
+        }
+      }
+    default:
+      // Primitive types are always resolved
+      break
+    }
+  }
+  
+  /// Validates that all types in a global node are fully resolved.
+  /// This catches any types that weren't properly resolved by the Monomorphizer.
+  private func validateGlobalNode(_ node: TypedGlobalNode) {
+    switch node {
+    case .globalVariable(let identifier, let value, _):
+      assertTypeResolved(identifier.type, context: "global variable '\(identifier.name)'")
+      validateExpression(value, context: "global variable '\(identifier.name)' initializer")
+      
+    case .globalFunction(let identifier, let params, let body):
+      assertTypeResolved(identifier.type, context: "function '\(identifier.name)'")
+      for param in params {
+        assertTypeResolved(param.type, context: "function '\(identifier.name)' parameter '\(param.name)'")
+      }
+      validateExpression(body, context: "function '\(identifier.name)' body")
+      
+    case .globalStructDeclaration(let identifier, let params):
+      assertTypeResolved(identifier.type, context: "struct '\(identifier.name)'")
+      for param in params {
+        assertTypeResolved(param.type, context: "struct '\(identifier.name)' field '\(param.name)'")
+      }
+      
+    case .globalUnionDeclaration(let identifier, let cases):
+      assertTypeResolved(identifier.type, context: "union '\(identifier.name)'")
+      for unionCase in cases {
+        for param in unionCase.parameters {
+          assertTypeResolved(param.type, context: "union '\(identifier.name)' case '\(unionCase.name)' parameter '\(param.name)'")
+        }
+      }
+      
+    case .givenDeclaration(let type, let methods):
+      assertTypeResolved(type, context: "given declaration")
+      for method in methods {
+        assertTypeResolved(method.identifier.type, context: "given method '\(method.identifier.name)'")
+        for param in method.parameters {
+          assertTypeResolved(param.type, context: "given method '\(method.identifier.name)' parameter '\(param.name)'")
+        }
+        validateExpression(method.body, context: "given method '\(method.identifier.name)' body")
+      }
+      
+    case .genericTypeTemplate, .genericFunctionTemplate:
+      // Templates are not emitted, skip validation
+      break
+    }
+  }
+  
+  /// Validates that all types in an expression are fully resolved.
+  private func validateExpression(_ expr: TypedExpressionNode, context: String) {
+    assertTypeResolved(expr.type, context: context)
+    
+    switch expr {
+    case .integerLiteral, .floatLiteral, .stringLiteral, .booleanLiteral:
+      break
+      
+    case .variable(let identifier):
+      assertTypeResolved(identifier.type, context: "\(context) -> variable '\(identifier.name)'")
+      
+    case .castExpression(let inner, let type):
+      assertTypeResolved(type, context: "\(context) -> cast target type")
+      validateExpression(inner, context: "\(context) -> cast inner")
+      
+    case .arithmeticExpression(let left, _, let right, _):
+      validateExpression(left, context: "\(context) -> arithmetic left")
+      validateExpression(right, context: "\(context) -> arithmetic right")
+      
+    case .comparisonExpression(let left, _, let right, _):
+      validateExpression(left, context: "\(context) -> comparison left")
+      validateExpression(right, context: "\(context) -> comparison right")
+      
+    case .letExpression(let identifier, let value, let body, _):
+      assertTypeResolved(identifier.type, context: "\(context) -> let '\(identifier.name)'")
+      validateExpression(value, context: "\(context) -> let value")
+      validateExpression(body, context: "\(context) -> let body")
+      
+    case .andExpression(let left, let right, _):
+      validateExpression(left, context: "\(context) -> and left")
+      validateExpression(right, context: "\(context) -> and right")
+      
+    case .orExpression(let left, let right, _):
+      validateExpression(left, context: "\(context) -> or left")
+      validateExpression(right, context: "\(context) -> or right")
+      
+    case .notExpression(let inner, _):
+      validateExpression(inner, context: "\(context) -> not inner")
+      
+    case .bitwiseExpression(let left, _, let right, _):
+      validateExpression(left, context: "\(context) -> bitwise left")
+      validateExpression(right, context: "\(context) -> bitwise right")
+      
+    case .bitwiseNotExpression(let inner, _):
+      validateExpression(inner, context: "\(context) -> bitwise not inner")
+      
+    case .derefExpression(let inner, _):
+      validateExpression(inner, context: "\(context) -> deref inner")
+      
+    case .referenceExpression(let inner, _):
+      validateExpression(inner, context: "\(context) -> reference inner")
+      
+    case .blockExpression(let statements, let finalExpr, _):
+      for stmt in statements {
+        validateStatement(stmt, context: "\(context) -> block statement")
+      }
+      if let finalExpr = finalExpr {
+        validateExpression(finalExpr, context: "\(context) -> block final expression")
+      }
+      
+    case .ifExpression(let condition, let thenBranch, let elseBranch, _):
+      validateExpression(condition, context: "\(context) -> if condition")
+      validateExpression(thenBranch, context: "\(context) -> if then")
+      if let elseBranch = elseBranch {
+        validateExpression(elseBranch, context: "\(context) -> if else")
+      }
+      
+    case .call(let callee, let arguments, _):
+      validateExpression(callee, context: "\(context) -> call callee")
+      for arg in arguments {
+        validateExpression(arg, context: "\(context) -> call argument")
+      }
+      
+    case .genericCall(let functionName, let typeArgs, _, _):
+      fatalError("CodeGen error: genericCall '\(functionName)' with type args \(typeArgs.map { $0.description }.joined(separator: ", ")) should be resolved before code generation. Context: \(context)")
+      
+    case .methodReference(let base, let method, let typeArgs, _):
+      validateExpression(base, context: "\(context) -> method reference base")
+      assertTypeResolved(method.type, context: "\(context) -> method reference '\(method.name)'")
+      if let typeArgs = typeArgs {
+        for typeArg in typeArgs {
+          assertTypeResolved(typeArg, context: "\(context) -> method reference type arg")
+        }
+      }
+      
+    case .whileExpression(let condition, let body, _):
+      validateExpression(condition, context: "\(context) -> while condition")
+      validateExpression(body, context: "\(context) -> while body")
+      
+    case .typeConstruction(let identifier, let typeArgs, let arguments, _):
+      assertTypeResolved(identifier.type, context: "\(context) -> type construction '\(identifier.name)'")
+      if let typeArgs = typeArgs {
+        for typeArg in typeArgs {
+          assertTypeResolved(typeArg, context: "\(context) -> type construction type arg")
+        }
+      }
+      for arg in arguments {
+        validateExpression(arg, context: "\(context) -> type construction argument")
+      }
+      
+    case .memberPath(let source, let path):
+      validateExpression(source, context: "\(context) -> member path source")
+      for member in path {
+        assertTypeResolved(member.type, context: "\(context) -> member path '\(member.name)'")
+      }
+      
+    case .subscriptExpression(let base, let arguments, let method, _):
+      validateExpression(base, context: "\(context) -> subscript base")
+      for arg in arguments {
+        validateExpression(arg, context: "\(context) -> subscript argument")
+      }
+      assertTypeResolved(method.type, context: "\(context) -> subscript method")
+      
+    case .unionConstruction(let type, let caseName, let arguments):
+      assertTypeResolved(type, context: "\(context) -> union construction '\(caseName)'")
+      for arg in arguments {
+        validateExpression(arg, context: "\(context) -> union construction argument")
+      }
+      
+    case .intrinsicCall(let intrinsic):
+      validateIntrinsic(intrinsic, context: "\(context) -> intrinsic call")
+      
+    case .matchExpression(let subject, let cases, _):
+      validateExpression(subject, context: "\(context) -> match subject")
+      for matchCase in cases {
+        validatePattern(matchCase.pattern, context: "\(context) -> match case pattern")
+        validateExpression(matchCase.body, context: "\(context) -> match case body")
+      }
+      
+    case .staticMethodCall(let baseType, let methodName, let typeArgs, _, _):
+      fatalError("CodeGen error: staticMethodCall '\(methodName)' on type '\(baseType)' with type args \(typeArgs.map { $0.description }.joined(separator: ", ")) should be resolved before code generation. Context: \(context)")
+    }
+  }
+  
+  /// Validates that all types in a pattern are fully resolved.
+  private func validatePattern(_ pattern: TypedPattern, context: String) {
+    switch pattern {
+    case .booleanLiteral, .integerLiteral, .stringLiteral, .wildcard:
+      break
+    case .variable(let symbol):
+      assertTypeResolved(symbol.type, context: "\(context) -> pattern variable '\(symbol.name)'")
+    case .unionCase(_, _, let elements):
+      for element in elements {
+        validatePattern(element, context: "\(context) -> union case element")
+      }
+    }
+  }
+  
+  /// Validates that all types in a statement are fully resolved.
+  private func validateStatement(_ stmt: TypedStatementNode, context: String) {
+    switch stmt {
+    case .variableDeclaration(let identifier, let value, _):
+      assertTypeResolved(identifier.type, context: "\(context) -> variable declaration '\(identifier.name)'")
+      validateExpression(value, context: "\(context) -> variable declaration value")
+      
+    case .assignment(let target, let value):
+      validateExpression(target, context: "\(context) -> assignment target")
+      validateExpression(value, context: "\(context) -> assignment value")
+      
+    case .compoundAssignment(let target, _, let value):
+      validateExpression(target, context: "\(context) -> compound assignment target")
+      validateExpression(value, context: "\(context) -> compound assignment value")
+      
+    case .expression(let expr):
+      validateExpression(expr, context: "\(context) -> expression statement")
+      
+    case .return(let value):
+      if let value = value {
+        validateExpression(value, context: "\(context) -> return value")
+      }
+      
+    case .break, .continue:
+      break
+    }
+  }
+  
+  /// Validates that all types in an intrinsic call are fully resolved.
+  private func validateIntrinsic(_ intrinsic: TypedIntrinsic, context: String) {
+    switch intrinsic {
+    case .allocMemory(let count, let resultType):
+      validateExpression(count, context: "\(context) -> allocMemory count")
+      assertTypeResolved(resultType, context: "\(context) -> allocMemory result type")
+      
+    case .deallocMemory(let ptr):
+      validateExpression(ptr, context: "\(context) -> deallocMemory ptr")
+      
+    case .copyMemory(let dest, let src, let count):
+      validateExpression(dest, context: "\(context) -> copyMemory dest")
+      validateExpression(src, context: "\(context) -> copyMemory src")
+      validateExpression(count, context: "\(context) -> copyMemory count")
+      
+    case .moveMemory(let dest, let src, let count):
+      validateExpression(dest, context: "\(context) -> moveMemory dest")
+      validateExpression(src, context: "\(context) -> moveMemory src")
+      validateExpression(count, context: "\(context) -> moveMemory count")
+      
+    case .refCount(let val):
+      validateExpression(val, context: "\(context) -> refCount val")
+      
+    case .ptrInit(let ptr, let val):
+      validateExpression(ptr, context: "\(context) -> ptrInit ptr")
+      validateExpression(val, context: "\(context) -> ptrInit val")
+      
+    case .ptrDeinit(let ptr):
+      validateExpression(ptr, context: "\(context) -> ptrDeinit ptr")
+      
+    case .ptrPeek(let ptr):
+      validateExpression(ptr, context: "\(context) -> ptrPeek ptr")
+      
+    case .ptrTake(let ptr):
+      validateExpression(ptr, context: "\(context) -> ptrTake ptr")
+      
+    case .ptrReplace(let ptr, let val):
+      validateExpression(ptr, context: "\(context) -> ptrReplace ptr")
+      validateExpression(val, context: "\(context) -> ptrReplace val")
+      
+    case .ptrOffset(let ptr, let offset):
+      validateExpression(ptr, context: "\(context) -> ptrOffset ptr")
+      validateExpression(offset, context: "\(context) -> ptrOffset offset")
+      
+    case .printString(let msg):
+      validateExpression(msg, context: "\(context) -> printString msg")
+      
+    case .printInt(let val):
+      validateExpression(val, context: "\(context) -> printInt val")
+      
+    case .printBool(let val):
+      validateExpression(val, context: "\(context) -> printBool val")
+      
+    case .panic(let msg):
+      validateExpression(msg, context: "\(context) -> panic msg")
+      
+    case .exit(let code):
+      validateExpression(code, context: "\(context) -> exit code")
+      
+    case .abort:
+      break
+      
+    case .float32Bits(let value):
+      validateExpression(value, context: "\(context) -> float32Bits value")
+      
+    case .float64Bits(let value):
+      validateExpression(value, context: "\(context) -> float64Bits value")
+    }
+  }
 
   private func pushScope() {
     lifetimeScopeStack.append([])
@@ -246,6 +575,14 @@ public class CodeGen {
 
   private func generateProgram(_ program: MonomorphizedProgram) {
     let nodes = program.globalNodes
+    
+      // Pass -1: Validate all types are resolved (no generic parameters or parameterized types)
+      #if DEBUG
+      for node in nodes {
+        validateGlobalNode(node)
+      }
+      #endif
+    
       // Pass 0: Scan for user-defined drops
       for node in nodes {
         if case .givenDeclaration(let type, let methods) = node {
@@ -728,8 +1065,12 @@ public class CodeGen {
 
     case .call(let callee, let arguments, let type):
       return generateCall(callee, arguments, type)
+    case .genericCall:
+      fatalError("Generic call should have been resolved by monomorphizer before code generation")
     case .methodReference:
       fatalError("Method reference not in call position is not supported yet")
+    case .staticMethodCall:
+      fatalError("Static method call should have been resolved by monomorphizer before code generation")
       
     case .unionConstruction(let type, let caseName, let args):
       return generateUnionConstructor(type: type, caseName: caseName, args: args)
@@ -925,7 +1266,7 @@ public class CodeGen {
       buffer += "\(getCType(type)) \(result) = ~\(exprResult);\n"
       return result
 
-    case .typeConstruction(let identifier, let arguments, _):
+    case .typeConstruction(let identifier, _, let arguments, _):
       let result = nextTemp()
       var argResults: [String] = []
       
@@ -990,7 +1331,7 @@ public class CodeGen {
     case .subscriptExpression(let base, let args, let method, _):
         guard case .function(_, let returns) = method.type else { fatalError() }
         let callNode = TypedExpressionNode.call(
-          callee: .methodReference(base: base, method: method, type: method.type),
+          callee: .methodReference(base: base, method: method, typeArgs: nil, type: method.type),
           arguments: args,
           type: returns)
         return generateExpressionSSA(callNode)
@@ -1074,6 +1415,8 @@ public class CodeGen {
         } else {
           buffer += "*(\(cType)*)\(p) = __koral_\(name)_copy(&\(v));\n"
         }
+      } else if case .union(let name, _, _) = element {
+        buffer += "*(\(cType)*)\(p) = __koral_\(name)_copy(&\(v));\n"
       } else {
         buffer += "*(\(cType)*)\(p) = \(v);\n"
       }
@@ -1103,7 +1446,20 @@ public class CodeGen {
       let cType = getCType(element)
       let result = nextTemp()
       addIndent()
-      buffer += "\(cType) \(result) = *(\(cType)*)\(p);\n"
+      // For types that need deep copy (structs, unions), use copy function
+      if case .structure(let name, _, _) = element {
+        buffer += "\(cType) \(result) = __koral_\(name)_copy((\(cType)*)\(p));\n"
+      } else if case .union(let name, _, _) = element {
+        buffer += "\(cType) \(result) = __koral_\(name)_copy((\(cType)*)\(p));\n"
+      } else if case .reference(_) = element {
+        // Reference: copy struct Ref and retain
+        buffer += "\(cType) \(result) = *(\(cType)*)\(p);\n"
+        addIndent()
+        buffer += "__koral_retain(\(result).control);\n"
+      } else {
+        // Primitive types: simple copy
+        buffer += "\(cType) \(result) = *(\(cType)*)\(p);\n"
+      }
       return result
 
     case .ptrTake(let ptr):
@@ -1242,7 +1598,7 @@ public class CodeGen {
     case .subscriptExpression(let base, let args, let method, let type):
          guard case .function(_, let returns) = method.type else { fatalError() }
          let callNode = TypedExpressionNode.call(
-             callee: .methodReference(base: base, method: method, type: method.type),
+             callee: .methodReference(base: base, method: method, typeArgs: nil, type: method.type),
              arguments: args,
              type: returns)
          let refResult = generateExpressionSSA(callNode)
@@ -1478,6 +1834,10 @@ public class CodeGen {
       return "struct Ref"
     case .pointer(_):
         return "void*"
+    case .genericStruct(let template, _):
+      fatalError("Generic struct \(template) should be resolved before CodeGen")
+    case .genericUnion(let template, _):
+      fatalError("Generic union \(template) should be resolved before CodeGen")
     }
   }
 
@@ -2054,7 +2414,7 @@ public class CodeGen {
   private func generateCall(
     _ callee: TypedExpressionNode, _ arguments: [TypedExpressionNode], _ type: Type
   ) -> String {
-    if case .methodReference(let base, let method, _) = callee {
+    if case .methodReference(let base, let method, _, _) = callee {
       var allArgs = [base]
       allArgs.append(contentsOf: arguments)
       return generateFunctionCall(method, allArgs, type)

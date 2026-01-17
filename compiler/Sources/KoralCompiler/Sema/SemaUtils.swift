@@ -316,6 +316,14 @@ public enum SemaUtils {
             }
             
             return .union(name: newName, cases: newCases, isGenericInstantiation: isGenericInstantiation)
+            
+        case .genericStruct(let template, let args):
+            let newArgs = args.map { substituteType($0, substitution: substitution) }
+            return .genericStruct(template: template, args: newArgs)
+            
+        case .genericUnion(let template, let args):
+            let newArgs = args.map { substituteType($0, substitution: substitution) }
+            return .genericUnion(template: template, args: newArgs)
         }
     }
     

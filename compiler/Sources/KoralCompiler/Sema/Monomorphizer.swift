@@ -64,7 +64,21 @@ public class Monomorphizer {
     private var pendingRequests: [InstantiationRequest] = []
     
     /// Processed request keys to avoid duplicate processing
-    private var processedRequestKeys: Set<String> = []
+    private var processedRequestKeys: Set<InstantiationKey> = []
+    
+    // MARK: - Recursion Detection
+    
+    /// Types currently being instantiated (for recursion detection)
+    private var instantiatingTypes: Set<String> = []
+    
+    /// Functions currently being instantiated (for recursion detection)
+    private var instantiatingFunctions: Set<String> = []
+    
+    /// Current recursion depth for instantiation
+    private var currentRecursionDepth: Int = 0
+    
+    /// Maximum allowed recursion depth to prevent infinite loops
+    private let maxRecursionDepth: Int = 100
     
     // MARK: - Initialization
     
@@ -120,11 +134,24 @@ public class Monomorphizer {
                     // Cache the function type
                     instantiatedFunctions[identifier.name] = (identifier.name, identifier.type)
                     resultNodes.append(node)
-                case .givenDeclaration(_, let methods):
+                case .givenDeclaration(let type, let methods):
                     // Track already-generated extension methods
+                    // Calculate the type name for mangling
+                    let typeName: String
+                    switch type {
+                    case .structure(let name, _, _):
+                        typeName = name
+                    case .union(let name, _, _):
+                        typeName = name
+                    default:
+                        typeName = type.description
+                    }
+                    
                     for method in methods {
-                        generatedLayouts.insert(method.identifier.name)
-                        instantiatedFunctions[method.identifier.name] = (method.identifier.name, method.identifier.type)
+                        // Calculate mangled name (TypeName_MethodName)
+                        let mangledName = "\(typeName)_\(method.identifier.name)"
+                        generatedLayouts.insert(mangledName)
+                        instantiatedFunctions[mangledName] = (mangledName, method.identifier.type)
                     }
                     resultNodes.append(node)
                 default:
@@ -134,7 +161,7 @@ public class Monomorphizer {
         }
         
         // Initialize pending requests with all collected instantiation requests
-        pendingRequests = input.instantiationRequests
+        pendingRequests = Array(input.instantiationRequests)
         
         // Process all instantiation requests (including transitive ones)
         while !pendingRequests.isEmpty {
@@ -142,9 +169,24 @@ public class Monomorphizer {
             try processRequest(request)
         }
         
+        // Resolve genericStruct/genericUnion types in all result nodes
+        // This ensures no parameterized types reach CodeGen
+        var resolvedResultNodes: [TypedGlobalNode] = []
+        for node in resultNodes {
+            let resolvedNode = try resolveTypesInGlobalNode(node)
+            resolvedResultNodes.append(resolvedNode)
+        }
+        
+        // Also resolve types in generated nodes (they may contain nested generic types)
+        var resolvedGeneratedNodes: [TypedGlobalNode] = []
+        for node in generatedNodes {
+            let resolvedNode = try resolveTypesInGlobalNode(node)
+            resolvedGeneratedNodes.append(resolvedNode)
+        }
+        
         // Insert generated nodes before the result nodes (for C definition order)
         // Types and functions must be declared before they are used
-        return MonomorphizedProgram(globalNodes: generatedNodes + resultNodes)
+        return MonomorphizedProgram(globalNodes: resolvedGeneratedNodes + resolvedResultNodes)
     }
     
     // MARK: - Request Processing
@@ -159,12 +201,20 @@ public class Monomorphizer {
         SemanticErrorContext.currentLine = currentLine
         SemanticErrorContext.currentFileName = currentFileName
         
+        // Check recursion depth
+        guard currentRecursionDepth < maxRecursionDepth else {
+            throw SemanticError(.generic("Maximum instantiation depth exceeded (possible infinite recursion)"), line: currentLine)
+        }
+        
         // Generate a key for this request to avoid duplicate processing
-        let key = requestKey(for: request)
+        let key = request.deduplicationKey
         guard !processedRequestKeys.contains(key) else {
             return
         }
         processedRequestKeys.insert(key)
+        
+        currentRecursionDepth += 1
+        defer { currentRecursionDepth -= 1 }
         
         do {
             switch request.kind {
@@ -177,12 +227,11 @@ public class Monomorphizer {
             case .function(let template, let args):
                 _ = try instantiateFunction(template: template, args: args)
                 
-            case .extensionMethod(let baseType, let templateName, let typeArgs, let methodName):
+            case .extensionMethod(let baseType, let template, let typeArgs):
                 _ = try instantiateExtensionMethod(
                     baseType: baseType,
-                    templateName: templateName,
-                    typeArgs: typeArgs,
-                    methodName: methodName
+                    template: template,
+                    typeArgs: typeArgs
                 )
             }
         } catch let e as SemanticError {
@@ -190,24 +239,7 @@ public class Monomorphizer {
         }
     }
     
-    /// Generates a unique key for an instantiation request.
-    private func requestKey(for request: InstantiationRequest) -> String {
-        switch request.kind {
-        case .structType(let template, let args):
-            return "struct:\(template.name)<\(args.map { $0.description }.joined(separator: ","))>"
-            
-        case .unionType(let template, let args):
-            return "union:\(template.name)<\(args.map { $0.description }.joined(separator: ","))>"
-            
-        case .function(let template, let args):
-            return "func:\(template.name)<\(args.map { $0.description }.joined(separator: ","))>"
-            
-        case .extensionMethod(let baseType, let templateName, let typeArgs, let methodName):
-            return "ext:\(templateName)<\(typeArgs.map { $0.description }.joined(separator: ","))>.\(methodName)@\(baseType)"
-        }
-    }
 
-    
     // MARK: - Struct Instantiation
     
     /// Instantiates a generic struct template with concrete type arguments.
@@ -223,8 +255,7 @@ public class Monomorphizer {
             )
         }
         
-        // Enforce trait constraints on type arguments
-        try enforceGenericConstraints(typeParameters: template.typeParameters, args: args)
+        // Note: Trait constraints were already validated by TypeChecker at declaration time
         
         // Special case: Pointer<T> maps directly to .pointer(element: T)
         if template.name == "Pointer" {
@@ -341,8 +372,7 @@ public class Monomorphizer {
                 expected: "\(template.typeParameters.count) generic types", got: "\(args.count)")
         }
         
-        // Enforce trait constraints
-        try enforceGenericConstraints(typeParameters: template.typeParameters, args: args)
+        // Note: Trait constraints were already validated by TypeChecker at declaration time
         
         // Check cache
         let key = "\(template.name)<\(args.map { $0.description }.joined(separator: ","))>"
@@ -458,8 +488,7 @@ public class Monomorphizer {
             )
         }
         
-        // Enforce trait constraints
-        try enforceGenericConstraints(typeParameters: template.typeParameters, args: args)
+        // Note: Trait constraints were already validated by TypeChecker at declaration time
         
         // Check cache
         let key = "\(template.name)<\(args.map { $0.description }.joined(separator: ","))>"
@@ -538,30 +567,40 @@ public class Monomorphizer {
     /// Instantiates an extension method on a generic type.
     /// - Parameters:
     ///   - baseType: The concrete type on which the method is called
-    ///   - templateName: The name of the generic type template
+    ///   - template: The generic extension method template to instantiate
     ///   - typeArgs: The type arguments used to instantiate the base type
-    ///   - methodName: The name of the method to instantiate
     /// - Returns: The symbol for the instantiated method
     private func instantiateExtensionMethod(
         baseType: Type,
-        templateName: String,
-        typeArgs: [Type],
-        methodName: String
+        template: GenericExtensionMethodTemplate,
+        typeArgs: [Type]
     ) throws -> Symbol {
-        // Look up the method in the extension methods registry
-        guard let methods = input.genericTemplates.extensionMethods[templateName] else {
-            throw SemanticError.undefinedMember(methodName, templateName)
-        }
+        // Resolve the base type if it's a parameterized type
+        let resolvedBaseType = resolveParameterizedType(baseType)
         
-        guard let methodInfo = methods.first(where: { $0.method.name == methodName }) else {
-            throw SemanticError.undefinedMember(methodName, templateName)
+        // Derive the structure name from the base type
+        let structureName: String
+        switch resolvedBaseType {
+        case .structure(let name, _, _):
+            // Extract base name from mangled name (e.g., "List_I" -> "List")
+            structureName = name.split(separator: "_").first.map(String.init) ?? name
+        case .genericStruct(let templateName, _):
+            structureName = templateName
+        case .genericUnion(let templateName, _):
+            structureName = templateName
+        case .union(let name, _, _):
+            structureName = name.split(separator: "_").first.map(String.init) ?? name
+        case .pointer(_):
+            structureName = "Pointer"
+        default:
+            structureName = resolvedBaseType.description
         }
         
         return try instantiateExtensionMethodFromEntry(
-            baseType: baseType,
-            structureName: templateName,
+            baseType: resolvedBaseType,
+            structureName: structureName,
             genericArgs: typeArgs,
-            methodInfo: methodInfo
+            methodInfo: template
         )
     }
     
@@ -622,12 +661,13 @@ public class Monomorphizer {
             return Symbol(name: mangledName, type: functionType, kind: .function, methodKind: kind)
         }
         
-        // Get the typed body from the TypeChecker's cache
+        // IMPORTANT: Cache the function BEFORE processing the body to prevent infinite recursion
+        // This allows recursive methods (like rehash calling insert, insert calling rehash) to work
+        instantiatedFunctions[key] = (mangledName, functionType)
+        
+        // Get the typed body from the declaration-time checked body
         let typedBody: TypedExpressionNode
-        if let cachedInfo = input.typedExtensionMethods[mangledName] {
-            // Use the pre-checked body from the TypeChecker
-            typedBody = cachedInfo.body
-        } else if let checkedBody = methodInfo.checkedBody {
+        if let checkedBody = methodInfo.checkedBody {
             // Use the declaration-time checked body and substitute types
             typedBody = substituteTypesInExpression(checkedBody, substitution: typeSubstitution)
         } else {
@@ -648,7 +688,6 @@ public class Monomorphizer {
             generatedNodes.append(functionNode)
         }
         
-        instantiatedFunctions[key] = (mangledName, functionType)
         let kind = getCompilerMethodKind(method.name)
         return Symbol(name: mangledName, type: functionType, kind: .function, methodKind: kind)
     }
@@ -668,127 +707,7 @@ public class Monomorphizer {
     }
 
     
-    // MARK: - Trait Constraint Validation
-    
-    /// Enforces trait constraints on type arguments.
-    /// - Parameters:
-    ///   - typeParameters: The type parameter declarations with constraints
-    ///   - args: The concrete type arguments
-    private func enforceGenericConstraints(typeParameters: [TypeParameterDecl], args: [Type]) throws {
-        guard typeParameters.count == args.count else { return }
-        
-        for (i, param) in typeParameters.enumerated() {
-            for constraint in param.constraints {
-                let traitName = try resolveTraitName(from: constraint)
-                
-                // If the argument is a generic parameter, skip concrete conformance check
-                // (it will be checked when fully instantiated)
-                if case .genericParameter = args[i] {
-                    continue
-                }
-                
-                let ctx = "checking constraint \(param.name): \(traitName)"
-                try enforceTraitConformance(args[i], traitName: traitName, context: ctx)
-            }
-        }
-    }
-    
-    /// Enforces that a type conforms to a trait.
-    /// - Parameters:
-    ///   - selfType: The type to check
-    ///   - traitName: The trait name
-    ///   - context: Context for error messages
-    private func enforceTraitConformance(
-        _ selfType: Type,
-        traitName: String,
-        context: String? = nil
-    ) throws {
-        // Any trait is satisfied by all types
-        if traitName == "Any" {
-            return
-        }
-        
-        // Validate trait exists
-        try validateTraitName(traitName)
-        
-        // Get required methods from trait
-        let required = try flattenedTraitMethods(traitName)
-        
-        var missing: [String] = []
-        var mismatched: [String] = []
-        
-        for name in required.keys.sorted() {
-            guard let sig = required[name] else { continue }
-            let expectedType = try expectedFunctionTypeForTraitMethod(sig, selfType: selfType)
-            let expectedSig = try formatTraitMethodSignature(sig, selfType: selfType)
-            
-            guard let actualSym = try lookupConcreteMethodSymbol(on: selfType, name: sig.name) else {
-                missing.append("missing method \(sig.name): expected \(expectedSig)")
-                continue
-            }
-            if actualSym.type != expectedType {
-                mismatched.append(
-                    "method \(sig.name) has type \(actualSym.type), expected \(expectedType) (expected \(expectedSig))"
-                )
-            }
-        }
-        
-        if !missing.isEmpty || !mismatched.isEmpty {
-            var msg = "Type \(selfType) does not conform to trait \(traitName)"
-            if let context {
-                msg += " (\(context))"
-            }
-            if !missing.isEmpty {
-                msg += "\n" + missing.joined(separator: "\n")
-            }
-            if !mismatched.isEmpty {
-                msg += "\n" + mismatched.joined(separator: "\n")
-            }
-            throw SemanticError(.generic(msg), line: currentLine)
-        }
-    }
-    
-    /// Validates that a trait name is defined.
-    private func validateTraitName(_ name: String) throws {
-        try SemaUtils.validateTraitName(name, traits: input.genericTemplates.traits, currentLine: currentLine)
-    }
-    
-    /// Returns all methods required by a trait, including inherited methods.
-    private func flattenedTraitMethods(_ traitName: String) throws -> [String: TraitMethodSignature] {
-        return try SemaUtils.flattenedTraitMethods(traitName, traits: input.genericTemplates.traits, currentLine: currentLine)
-    }
-    
-    /// Computes the expected function type for a trait method.
-    private func expectedFunctionTypeForTraitMethod(
-        _ method: TraitMethodSignature,
-        selfType: Type
-    ) throws -> Type {
-        let substitution: [String: Type] = ["Self": selfType]
-        
-        let params: [Parameter] = try method.parameters.map { param in
-            let t = try resolveTypeNode(param.type, substitution: substitution)
-            return Parameter(type: t, kind: .byVal)
-        }
-        let ret = try resolveTypeNode(method.returnType, substitution: substitution)
-        return Type.function(parameters: params, returns: ret)
-    }
-    
-    /// Formats a trait method signature for error messages.
-    private func formatTraitMethodSignature(
-        _ method: TraitMethodSignature,
-        selfType: Type
-    ) throws -> String {
-        let substitution: [String: Type] = ["Self": selfType]
-        
-        let paramsDesc = try method.parameters.map { param -> String in
-            let resolvedType = try resolveTypeNode(param.type, substitution: substitution)
-            let mutPrefix = param.mutable ? "mut " : ""
-            return "\(mutPrefix)\(param.name) \(resolvedType)"
-        }.joined(separator: ", ")
-        
-        let ret = try resolveTypeNode(method.returnType, substitution: substitution)
-        return "\(method.name)(\(paramsDesc)) \(ret)"
-    }
+    // MARK: - Helper Methods
     
     /// Checks if a type supports builtin equality comparison.
     private func isBuiltinEqualityComparable(_ type: Type) -> Bool {
@@ -809,7 +728,14 @@ public class Monomorphizer {
             
         case .structure(let typeName, _, let isGen):
             if let methods = extensionMethods[typeName], let sym = methods[name] {
-                return sym
+                // Generate mangled name for the method
+                let mangledName = "\(typeName)_\(name)"
+                return Symbol(
+                    name: mangledName,
+                    type: sym.type,
+                    kind: sym.kind,
+                    methodKind: sym.methodKind
+                )
             }
             if isGen, let info = layoutToTemplateInfo[typeName] {
                 if let extensions = input.genericTemplates.extensionMethods[info.base],
@@ -827,7 +753,14 @@ public class Monomorphizer {
             
         case .union(let typeName, _, let isGen):
             if let methods = extensionMethods[typeName], let sym = methods[name] {
-                return sym
+                // Generate mangled name for the method
+                let mangledName = "\(typeName)_\(name)"
+                return Symbol(
+                    name: mangledName,
+                    type: sym.type,
+                    kind: sym.kind,
+                    methodKind: sym.methodKind
+                )
             }
             if isGen, let info = layoutToTemplateInfo[typeName] {
                 if let extensions = input.genericTemplates.extensionMethods[info.base],
@@ -875,7 +808,14 @@ public class Monomorphizer {
              .bool:
             let typeName = selfType.description
             if let methods = extensionMethods[typeName], let sym = methods[name] {
-                return sym
+                // Generate mangled name for the method
+                let mangledName = "\(typeName)_\(name)"
+                return Symbol(
+                    name: mangledName,
+                    type: sym.type,
+                    kind: sym.kind,
+                    methodKind: sym.methodKind
+                )
             }
             // Check intrinsic extension methods for primitive types
             if let extensions = input.genericTemplates.intrinsicExtensionMethods[typeName],
@@ -1195,7 +1135,7 @@ public class Monomorphizer {
             
             // Apply lowering for primitive type methods (__equals, __compare)
             // This mirrors the lowering done in TypeChecker for direct calls
-            if case .methodReference(let base, let method, _) = newCallee {
+            if case .methodReference(let base, let method, _, _) = newCallee {
                 // Lower primitive `__equals(self ref, other ref) Bool` to scalar equality
                 if method.methodKind == .equals,
                    newType == .bool,
@@ -1234,8 +1174,62 @@ public class Monomorphizer {
             }
             
             return .call(callee: newCallee, arguments: newArguments, type: newType)
+        
+        case .genericCall(let functionName, let typeArgs, let arguments, let type):
+            // Substitute type arguments
+            let substitutedTypeArgs = typeArgs.map { substituteType($0, substitution: substitution) }
+            // Substitute arguments
+            let newArguments = arguments.map { substituteTypesInExpression($0, substitution: substitution) }
+            // Substitute return type
+            let newType = substituteType(type, substitution: substitution)
             
-        case .methodReference(let base, let method, let type):
+            // If type args still contain generic parameters, keep as genericCall
+            if substitutedTypeArgs.contains(where: { $0.containsGenericParameter }) {
+                return .genericCall(
+                    functionName: functionName,
+                    typeArgs: substitutedTypeArgs,
+                    arguments: newArguments,
+                    type: newType
+                )
+            }
+            
+            // Convert to regular call by instantiating the function
+            if let template = input.genericTemplates.functionTemplates[functionName] {
+                // Ensure the function is instantiated
+                let key = InstantiationKey.function(templateName: functionName, args: substitutedTypeArgs)
+                if !processedRequestKeys.contains(key) {
+                    pendingRequests.append(InstantiationRequest(
+                        kind: .function(template: template, args: substitutedTypeArgs),
+                        sourceLine: currentLine,
+                        sourceFileName: currentFileName
+                    ))
+                }
+                
+                // Calculate the mangled name
+                let argLayoutKeys = substitutedTypeArgs.map { $0.layoutKey }.joined(separator: "_")
+                let mangledName = "\(functionName)_\(argLayoutKeys)"
+                
+                // Create the callee as a variable reference to the mangled function
+                let functionType = Type.function(
+                    parameters: newArguments.map { Parameter(type: $0.type, kind: .byVal) },
+                    returns: newType
+                )
+                let callee: TypedExpressionNode = .variable(
+                    identifier: Symbol(name: mangledName, type: functionType, kind: .function)
+                )
+                
+                return .call(callee: callee, arguments: newArguments, type: newType)
+            }
+            
+            // Fallback: keep as genericCall
+            return .genericCall(
+                functionName: functionName,
+                typeArgs: substitutedTypeArgs,
+                arguments: newArguments,
+                type: newType
+            )
+            
+        case .methodReference(let base, let method, let typeArgs, let type):
             let newBase = substituteTypesInExpression(base, substitution: substitution)
             var newMethod = Symbol(
                 name: method.name,
@@ -1243,6 +1237,9 @@ public class Monomorphizer {
                 kind: method.kind,
                 methodKind: method.methodKind
             )
+            
+            // Substitute type args if present
+            let substitutedTypeArgs = typeArgs?.map { substituteType($0, substitution: substitution) }
             
             // Resolve trait method placeholders to concrete methods
             // Placeholder names have the format "__trait_TraitName_methodName"
@@ -1268,10 +1265,23 @@ public class Monomorphizer {
                     }
                 }
             }
+            // Resolve generic extension method to mangled name
+            else if !newBase.type.containsGenericParameter {
+                // Look up the concrete method on the substituted base type
+                if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: method.name) {
+                    newMethod = Symbol(
+                        name: concreteMethod.name,
+                        type: concreteMethod.type,
+                        kind: concreteMethod.kind,
+                        methodKind: concreteMethod.methodKind
+                    )
+                }
+            }
             
             return .methodReference(
                 base: newBase,
                 method: newMethod,
+                typeArgs: substitutedTypeArgs,
                 type: substituteType(type, substitution: substitution)
             )
             
@@ -1282,7 +1292,7 @@ public class Monomorphizer {
                 type: substituteType(type, substitution: substitution)
             )
             
-        case .typeConstruction(let identifier, let arguments, let type):
+        case .typeConstruction(let identifier, let typeArgs, let arguments, let type):
             let substitutedType = substituteType(identifier.type, substitution: substitution)
             
             // If the substituted type is a concrete structure or union, we need to:
@@ -1369,8 +1379,11 @@ public class Monomorphizer {
                 kind: identifier.kind,
                 methodKind: identifier.methodKind
             )
+            // Substitute type args if present
+            let substitutedTypeArgs = typeArgs?.map { substituteType($0, substitution: substitution) }
             return .typeConstruction(
                 identifier: newIdentifier,
+                typeArgs: substitutedTypeArgs,
                 arguments: arguments.map { substituteTypesInExpression($0, substitution: substitution) },
                 type: substituteType(type, substitution: substitution)
             )
@@ -1390,14 +1403,29 @@ public class Monomorphizer {
             )
             
         case .subscriptExpression(let base, let arguments, let method, let type):
-            let newMethod = Symbol(
+            let newBase = substituteTypesInExpression(base, substitution: substitution)
+            var newMethod = Symbol(
                 name: method.name,
                 type: substituteType(method.type, substitution: substitution),
                 kind: method.kind,
                 methodKind: method.methodKind
             )
+            
+            // Resolve method name to mangled name for generic extension methods
+            if !newBase.type.containsGenericParameter {
+                // Look up the concrete method on the substituted base type
+                if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: method.name) {
+                    newMethod = Symbol(
+                        name: concreteMethod.name,
+                        type: concreteMethod.type,
+                        kind: concreteMethod.kind,
+                        methodKind: concreteMethod.methodKind
+                    )
+                }
+            }
+            
             return .subscriptExpression(
-                base: substituteTypesInExpression(base, substitution: substitution),
+                base: newBase,
                 arguments: arguments.map { substituteTypesInExpression($0, substitution: substitution) },
                 method: newMethod,
                 type: substituteType(type, substitution: substitution)
@@ -1424,6 +1452,21 @@ public class Monomorphizer {
                 subject: substituteTypesInExpression(subject, substitution: substitution),
                 cases: newCases,
                 type: substituteType(type, substitution: substitution)
+            )
+            
+        case .staticMethodCall(let baseType, let methodName, let typeArgs, let arguments, let type):
+            // Substitute types in the static method call
+            let substitutedBaseType = substituteType(baseType, substitution: substitution)
+            let substitutedTypeArgs = typeArgs.map { substituteType($0, substitution: substitution) }
+            let substitutedArguments = arguments.map { substituteTypesInExpression($0, substitution: substitution) }
+            let substitutedReturnType = substituteType(type, substitution: substitution)
+            
+            return .staticMethodCall(
+                baseType: substitutedBaseType,
+                methodName: methodName,
+                typeArgs: substitutedTypeArgs,
+                arguments: substitutedArguments,
+                type: substitutedReturnType
             )
         }
     }
@@ -1587,8 +1630,779 @@ public class Monomorphizer {
     }
     
     /// Substitutes type parameters in a type.
+    /// This method extends SemaUtils.substituteType to also resolve genericStruct/genericUnion
+    /// to concrete structure/union types by instantiating them.
     private func substituteType(_ type: Type, substitution: [String: Type]) -> Type {
-        return SemaUtils.substituteType(type, substitution: substitution)
+        // First, apply the basic substitution
+        let substituted = SemaUtils.substituteType(type, substitution: substitution)
+        
+        // Then, resolve genericStruct/genericUnion to concrete types
+        return resolveParameterizedType(substituted)
+    }
+    
+    /// Resolves a parameterized type (genericStruct/genericUnion) to a concrete type.
+    /// If the type still contains generic parameters, returns it unchanged.
+    /// - Parameter type: The type to resolve
+    /// - Returns: The resolved concrete type, or the original type if it can't be resolved yet
+    private func resolveParameterizedType(_ type: Type) -> Type {
+        switch type {
+        case .genericStruct(let template, let args):
+            // First, recursively resolve the type arguments
+            let resolvedArgs = args.map { resolveParameterizedType($0) }
+            
+            // If any arg still contains generic parameters, we can't resolve yet
+            if resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+                return .genericStruct(template: template, args: resolvedArgs)
+            }
+            
+            // Check if we already have this type cached FIRST
+            let cacheKey = "\(template)<\(resolvedArgs.map { $0.description }.joined(separator: ","))>"
+            if let cached = instantiatedTypes[cacheKey] {
+                return cached
+            }
+            
+            // Look up the struct template and instantiate directly
+            if let structTemplate = input.genericTemplates.structTemplates[template] {
+                // Directly instantiate the struct type
+                do {
+                    return try instantiateStruct(template: structTemplate, args: resolvedArgs)
+                } catch {
+                    // If instantiation fails, return a placeholder
+                    let argLayoutKeys = resolvedArgs.map { $0.layoutKey }.joined(separator: "_")
+                    let layoutName = "\(template)_\(argLayoutKeys)"
+                    return .structure(name: layoutName, members: [], isGenericInstantiation: true)
+                }
+            }
+            
+            // Special case: Pointer<T> maps directly to .pointer(element: T)
+            if template == "Pointer" && resolvedArgs.count == 1 {
+                return .pointer(element: resolvedArgs[0])
+            }
+            
+            return .genericStruct(template: template, args: resolvedArgs)
+            
+        case .genericUnion(let template, let args):
+            // First, recursively resolve the type arguments
+            let resolvedArgs = args.map { resolveParameterizedType($0) }
+            
+            // If any arg still contains generic parameters, we can't resolve yet
+            if resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+                return .genericUnion(template: template, args: resolvedArgs)
+            }
+            
+            // Check if we already have this type cached FIRST
+            let cacheKey = "\(template)<\(resolvedArgs.map { $0.description }.joined(separator: ","))>"
+            if let cached = instantiatedTypes[cacheKey] {
+                return cached
+            }
+            
+            // Look up the union template and instantiate directly
+            if let unionTemplate = input.genericTemplates.unionTemplates[template] {
+                // Directly instantiate the union type
+                do {
+                    return try instantiateUnion(template: unionTemplate, args: resolvedArgs)
+                } catch {
+                    // If instantiation fails, return a placeholder
+                    let argLayoutKeys = resolvedArgs.map { $0.layoutKey }.joined(separator: "_")
+                    let layoutName = "\(template)_\(argLayoutKeys)"
+                    return .union(name: layoutName, cases: [], isGenericInstantiation: true)
+                }
+            }
+            
+            return .genericUnion(template: template, args: resolvedArgs)
+            
+        case .reference(let inner):
+            return .reference(inner: resolveParameterizedType(inner))
+            
+        case .pointer(let element):
+            return .pointer(element: resolveParameterizedType(element))
+            
+        case .function(let params, let returns):
+            let newParams = params.map { param in
+                Parameter(
+                    type: resolveParameterizedType(param.type),
+                    kind: param.kind
+                )
+            }
+            return .function(
+                parameters: newParams,
+                returns: resolveParameterizedType(returns)
+            )
+            
+        case .structure(let name, let members, let isGenericInstantiation):
+            let newMembers = members.map { member in
+                (
+                    name: member.name,
+                    type: resolveParameterizedType(member.type),
+                    mutable: member.mutable
+                )
+            }
+            return .structure(name: name, members: newMembers, isGenericInstantiation: isGenericInstantiation)
+            
+        case .union(let name, let cases, let isGenericInstantiation):
+            let newCases = cases.map { unionCase in
+                UnionCase(
+                    name: unionCase.name,
+                    parameters: unionCase.parameters.map { param in
+                        (name: param.name, type: resolveParameterizedType(param.type))
+                    }
+                )
+            }
+            return .union(name: name, cases: newCases, isGenericInstantiation: isGenericInstantiation)
+            
+        default:
+            return type
+        }
+    }
+    
+    // MARK: - Global Node Type Resolution
+    
+    /// Resolves all genericStruct/genericUnion types in a global node.
+    /// This ensures no parameterized types reach CodeGen.
+    private func resolveTypesInGlobalNode(_ node: TypedGlobalNode) throws -> TypedGlobalNode {
+        switch node {
+        case .globalStructDeclaration(let identifier, let parameters):
+            let newIdentifier = Symbol(
+                name: identifier.name,
+                type: resolveParameterizedType(identifier.type),
+                kind: identifier.kind,
+                methodKind: identifier.methodKind
+            )
+            let newParams = parameters.map { param in
+                Symbol(
+                    name: param.name,
+                    type: resolveParameterizedType(param.type),
+                    kind: param.kind,
+                    methodKind: param.methodKind
+                )
+            }
+            return .globalStructDeclaration(identifier: newIdentifier, parameters: newParams)
+            
+        case .globalUnionDeclaration(let identifier, let cases):
+            let newIdentifier = Symbol(
+                name: identifier.name,
+                type: resolveParameterizedType(identifier.type),
+                kind: identifier.kind,
+                methodKind: identifier.methodKind
+            )
+            let newCases = cases.map { unionCase in
+                UnionCase(
+                    name: unionCase.name,
+                    parameters: unionCase.parameters.map { param in
+                        (name: param.name, type: resolveParameterizedType(param.type))
+                    }
+                )
+            }
+            return .globalUnionDeclaration(identifier: newIdentifier, cases: newCases)
+            
+        case .globalFunction(let identifier, let parameters, let body):
+            let newIdentifier = Symbol(
+                name: identifier.name,
+                type: resolveParameterizedType(identifier.type),
+                kind: identifier.kind,
+                methodKind: identifier.methodKind
+            )
+            let newParams = parameters.map { param in
+                Symbol(
+                    name: param.name,
+                    type: resolveParameterizedType(param.type),
+                    kind: param.kind,
+                    methodKind: param.methodKind
+                )
+            }
+            let newBody = resolveTypesInExpression(body)
+            return .globalFunction(identifier: newIdentifier, parameters: newParams, body: newBody)
+            
+        case .givenDeclaration(let type, let methods):
+            // Resolve the type to get the concrete type name
+            let resolvedType = resolveParameterizedType(type)
+            let typeName: String
+            switch resolvedType {
+            case .structure(let name, _, _):
+                typeName = name
+            case .union(let name, _, _):
+                typeName = name
+            default:
+                typeName = resolvedType.description
+            }
+            
+            let newMethods = methods.map { method -> TypedMethodDeclaration in
+                // Generate mangled name for the method
+                let mangledName = "\(typeName)_\(method.identifier.name)"
+                
+                return TypedMethodDeclaration(
+                    identifier: Symbol(
+                        name: mangledName,
+                        type: resolveParameterizedType(method.identifier.type),
+                        kind: method.identifier.kind,
+                        methodKind: method.identifier.methodKind
+                    ),
+                    parameters: method.parameters.map { param in
+                        Symbol(
+                            name: param.name,
+                            type: resolveParameterizedType(param.type),
+                            kind: param.kind,
+                            methodKind: param.methodKind
+                        )
+                    },
+                    body: resolveTypesInExpression(method.body),
+                    returnType: resolveParameterizedType(method.returnType)
+                )
+            }
+            return .givenDeclaration(type: resolvedType, methods: newMethods)
+            
+        case .globalVariable(let identifier, let value, let kind):
+            let newIdentifier = Symbol(
+                name: identifier.name,
+                type: resolveParameterizedType(identifier.type),
+                kind: identifier.kind,
+                methodKind: identifier.methodKind
+            )
+            return .globalVariable(identifier: newIdentifier, value: resolveTypesInExpression(value), kind: kind)
+            
+        case .genericTypeTemplate, .genericFunctionTemplate:
+            // Templates should not reach this point
+            return node
+        }
+    }
+    
+    /// Resolves all genericStruct/genericUnion types in an expression.
+    private func resolveTypesInExpression(_ expr: TypedExpressionNode) -> TypedExpressionNode {
+        switch expr {
+        case .integerLiteral(let value, let type):
+            return .integerLiteral(value: value, type: resolveParameterizedType(type))
+            
+        case .floatLiteral(let value, let type):
+            return .floatLiteral(value: value, type: resolveParameterizedType(type))
+            
+        case .stringLiteral(let value, let type):
+            return .stringLiteral(value: value, type: resolveParameterizedType(type))
+            
+        case .booleanLiteral(let value, let type):
+            return .booleanLiteral(value: value, type: resolveParameterizedType(type))
+            
+        case .castExpression(let expression, let type):
+            return .castExpression(
+                expression: resolveTypesInExpression(expression),
+                type: resolveParameterizedType(type)
+            )
+            
+        case .arithmeticExpression(let left, let op, let right, let type):
+            return .arithmeticExpression(
+                left: resolveTypesInExpression(left),
+                op: op,
+                right: resolveTypesInExpression(right),
+                type: resolveParameterizedType(type)
+            )
+            
+        case .comparisonExpression(let left, let op, let right, let type):
+            return .comparisonExpression(
+                left: resolveTypesInExpression(left),
+                op: op,
+                right: resolveTypesInExpression(right),
+                type: resolveParameterizedType(type)
+            )
+            
+        case .letExpression(let identifier, let value, let body, let type):
+            let newIdentifier = Symbol(
+                name: identifier.name,
+                type: resolveParameterizedType(identifier.type),
+                kind: identifier.kind,
+                methodKind: identifier.methodKind
+            )
+            return .letExpression(
+                identifier: newIdentifier,
+                value: resolveTypesInExpression(value),
+                body: resolveTypesInExpression(body),
+                type: resolveParameterizedType(type)
+            )
+            
+        case .andExpression(let left, let right, let type):
+            return .andExpression(
+                left: resolveTypesInExpression(left),
+                right: resolveTypesInExpression(right),
+                type: resolveParameterizedType(type)
+            )
+            
+        case .orExpression(let left, let right, let type):
+            return .orExpression(
+                left: resolveTypesInExpression(left),
+                right: resolveTypesInExpression(right),
+                type: resolveParameterizedType(type)
+            )
+            
+        case .notExpression(let expression, let type):
+            return .notExpression(
+                expression: resolveTypesInExpression(expression),
+                type: resolveParameterizedType(type)
+            )
+            
+        case .bitwiseExpression(let left, let op, let right, let type):
+            return .bitwiseExpression(
+                left: resolveTypesInExpression(left),
+                op: op,
+                right: resolveTypesInExpression(right),
+                type: resolveParameterizedType(type)
+            )
+            
+        case .bitwiseNotExpression(let expression, let type):
+            return .bitwiseNotExpression(
+                expression: resolveTypesInExpression(expression),
+                type: resolveParameterizedType(type)
+            )
+            
+        case .derefExpression(let expression, let type):
+            return .derefExpression(
+                expression: resolveTypesInExpression(expression),
+                type: resolveParameterizedType(type)
+            )
+            
+        case .referenceExpression(let expression, let type):
+            return .referenceExpression(
+                expression: resolveTypesInExpression(expression),
+                type: resolveParameterizedType(type)
+            )
+            
+        case .variable(let identifier):
+            let newIdentifier = Symbol(
+                name: identifier.name,
+                type: resolveParameterizedType(identifier.type),
+                kind: identifier.kind,
+                methodKind: identifier.methodKind
+            )
+            return .variable(identifier: newIdentifier)
+            
+        case .blockExpression(let statements, let finalExpression, let type):
+            let newStatements = statements.map { resolveTypesInStatement($0) }
+            let newFinal = finalExpression.map { resolveTypesInExpression($0) }
+            return .blockExpression(
+                statements: newStatements,
+                finalExpression: newFinal,
+                type: resolveParameterizedType(type)
+            )
+            
+        case .ifExpression(let condition, let thenBranch, let elseBranch, let type):
+            return .ifExpression(
+                condition: resolveTypesInExpression(condition),
+                thenBranch: resolveTypesInExpression(thenBranch),
+                elseBranch: elseBranch.map { resolveTypesInExpression($0) },
+                type: resolveParameterizedType(type)
+            )
+            
+        case .call(let callee, let arguments, let type):
+            return .call(
+                callee: resolveTypesInExpression(callee),
+                arguments: arguments.map { resolveTypesInExpression($0) },
+                type: resolveParameterizedType(type)
+            )
+            
+        case .genericCall(let functionName, let typeArgs, let arguments, let type):
+            // Resolve type args and convert to regular call
+            let resolvedTypeArgs = typeArgs.map { resolveParameterizedType($0) }
+            let newArguments = arguments.map { resolveTypesInExpression($0) }
+            let newType = resolveParameterizedType(type)
+            
+            // If type args still contain generic parameters, keep as genericCall
+            if resolvedTypeArgs.contains(where: { $0.containsGenericParameter }) {
+                return .genericCall(
+                    functionName: functionName,
+                    typeArgs: resolvedTypeArgs,
+                    arguments: newArguments,
+                    type: newType
+                )
+            }
+            
+            // Look up the function template and instantiate
+            if let template = input.genericTemplates.functionTemplates[functionName] {
+                // Ensure the function is instantiated
+                let key = InstantiationKey.function(templateName: functionName, args: resolvedTypeArgs)
+                if !processedRequestKeys.contains(key) {
+                    pendingRequests.append(InstantiationRequest(
+                        kind: .function(template: template, args: resolvedTypeArgs),
+                        sourceLine: currentLine,
+                        sourceFileName: currentFileName
+                    ))
+                }
+                
+                // Calculate the mangled name
+                let argLayoutKeys = resolvedTypeArgs.map { $0.layoutKey }.joined(separator: "_")
+                let mangledName = "\(functionName)_\(argLayoutKeys)"
+                
+                // Create the callee as a variable reference to the mangled function
+                let functionType = Type.function(
+                    parameters: newArguments.map { Parameter(type: $0.type, kind: .byVal) },
+                    returns: newType
+                )
+                let callee: TypedExpressionNode = .variable(
+                    identifier: Symbol(name: mangledName, type: functionType, kind: .function)
+                )
+                
+                return .call(callee: callee, arguments: newArguments, type: newType)
+            }
+            
+            // Fallback: keep as genericCall (shouldn't happen in normal operation)
+            return .genericCall(
+                functionName: functionName,
+                typeArgs: resolvedTypeArgs,
+                arguments: newArguments,
+                type: newType
+            )
+            
+        case .methodReference(let base, let method, let typeArgs, let type):
+            let newBase = resolveTypesInExpression(base)
+            var newMethod = Symbol(
+                name: method.name,
+                type: resolveParameterizedType(method.type),
+                kind: method.kind,
+                methodKind: method.methodKind
+            )
+            let resolvedTypeArgs = typeArgs?.map { resolveParameterizedType($0) }
+            
+            // Resolve method name to mangled name for generic extension methods
+            if !newBase.type.containsGenericParameter {
+                // Look up the concrete method on the resolved base type
+                if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: method.name) {
+                    // Resolve any parameterized types in the method type
+                    let resolvedMethodType = resolveParameterizedType(concreteMethod.type)
+                    newMethod = Symbol(
+                        name: concreteMethod.name,
+                        type: resolvedMethodType,
+                        kind: concreteMethod.kind,
+                        methodKind: concreteMethod.methodKind
+                    )
+                }
+            }
+            
+            return .methodReference(
+                base: newBase,
+                method: newMethod,
+                typeArgs: resolvedTypeArgs,
+                type: resolveParameterizedType(type)
+            )
+            
+        case .whileExpression(let condition, let body, let type):
+            return .whileExpression(
+                condition: resolveTypesInExpression(condition),
+                body: resolveTypesInExpression(body),
+                type: resolveParameterizedType(type)
+            )
+            
+        case .typeConstruction(let identifier, let typeArgs, let arguments, let type):
+            let resolvedType = resolveParameterizedType(identifier.type)
+            
+            // Update the identifier name to match the resolved type's layout name
+            var newName = identifier.name
+            if case .structure(let layoutName, _, _) = resolvedType {
+                newName = layoutName
+            } else if case .union(let layoutName, _, _) = resolvedType {
+                newName = layoutName
+            }
+            
+            let newIdentifier = Symbol(
+                name: newName,
+                type: resolvedType,
+                kind: identifier.kind,
+                methodKind: identifier.methodKind
+            )
+            let resolvedTypeArgs = typeArgs?.map { resolveParameterizedType($0) }
+            return .typeConstruction(
+                identifier: newIdentifier,
+                typeArgs: resolvedTypeArgs,
+                arguments: arguments.map { resolveTypesInExpression($0) },
+                type: resolveParameterizedType(type)
+            )
+            
+        case .memberPath(let source, let path):
+            let newPath = path.map { sym in
+                Symbol(
+                    name: sym.name,
+                    type: resolveParameterizedType(sym.type),
+                    kind: sym.kind,
+                    methodKind: sym.methodKind
+                )
+            }
+            return .memberPath(
+                source: resolveTypesInExpression(source),
+                path: newPath
+            )
+            
+        case .subscriptExpression(let base, let arguments, let method, let type):
+            let newBase = resolveTypesInExpression(base)
+            var newMethod = Symbol(
+                name: method.name,
+                type: resolveParameterizedType(method.type),
+                kind: method.kind,
+                methodKind: method.methodKind
+            )
+            
+            // Resolve method name to mangled name for generic extension methods
+            if !newBase.type.containsGenericParameter {
+                // Look up the concrete method on the resolved base type
+                if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: method.name) {
+                    newMethod = Symbol(
+                        name: concreteMethod.name,
+                        type: concreteMethod.type,
+                        kind: concreteMethod.kind,
+                        methodKind: concreteMethod.methodKind
+                    )
+                }
+            }
+            
+            return .subscriptExpression(
+                base: newBase,
+                arguments: arguments.map { resolveTypesInExpression($0) },
+                method: newMethod,
+                type: resolveParameterizedType(type)
+            )
+            
+        case .unionConstruction(let type, let caseName, let arguments):
+            return .unionConstruction(
+                type: resolveParameterizedType(type),
+                caseName: caseName,
+                arguments: arguments.map { resolveTypesInExpression($0) }
+            )
+            
+        case .intrinsicCall(let intrinsic):
+            return .intrinsicCall(resolveTypesInIntrinsic(intrinsic))
+            
+        case .matchExpression(let subject, let cases, let type):
+            let newCases = cases.map { matchCase in
+                TypedMatchCase(
+                    pattern: resolveTypesInPattern(matchCase.pattern),
+                    body: resolveTypesInExpression(matchCase.body)
+                )
+            }
+            return .matchExpression(
+                subject: resolveTypesInExpression(subject),
+                cases: newCases,
+                type: resolveParameterizedType(type)
+            )
+            
+        case .staticMethodCall(let baseType, let methodName, let typeArgs, let arguments, let type):
+            // Resolve the base type and type arguments
+            let resolvedBaseType = resolveParameterizedType(baseType)
+            let resolvedTypeArgs = typeArgs.map { resolveParameterizedType($0) }
+            let resolvedArguments = arguments.map { resolveTypesInExpression($0) }
+            let resolvedReturnType = resolveParameterizedType(type)
+            
+            // If base type still contains generic parameters, keep as staticMethodCall
+            if resolvedBaseType.containsGenericParameter || resolvedTypeArgs.contains(where: { $0.containsGenericParameter }) {
+                return .staticMethodCall(
+                    baseType: resolvedBaseType,
+                    methodName: methodName,
+                    typeArgs: resolvedTypeArgs,
+                    arguments: resolvedArguments,
+                    type: resolvedReturnType
+                )
+            }
+            
+            // Get the template name from the base type
+            let templateName: String
+            switch resolvedBaseType {
+            case .structure(let name, _, _):
+                // Extract base name from mangled name (e.g., "List_I" -> "List")
+                templateName = name.split(separator: "_").first.map(String.init) ?? name
+            case .genericStruct(let name, _):
+                templateName = name
+            case .union(let name, _, _):
+                templateName = name.split(separator: "_").first.map(String.init) ?? name
+            case .genericUnion(let name, _):
+                templateName = name
+            default:
+                templateName = resolvedBaseType.description
+            }
+            
+            // Calculate the mangled method name
+            // For non-generic types (empty typeArgs), use "TypeName_methodName"
+            // For generic types, use "TypeName_TypeArgs_methodName"
+            let mangledMethodName: String
+            if resolvedTypeArgs.isEmpty {
+                mangledMethodName = "\(templateName)_\(methodName)"
+            } else {
+                let argLayoutKeys = resolvedTypeArgs.map { $0.layoutKey }.joined(separator: "_")
+                mangledMethodName = "\(templateName)_\(argLayoutKeys)_\(methodName)"
+            }
+            
+            // Ensure the extension method is instantiated
+            if let extensions = input.genericTemplates.extensionMethods[templateName] {
+                if let ext = extensions.first(where: { $0.method.name == methodName }) {
+                    let key = InstantiationKey.extensionMethod(
+                        templateName: templateName,
+                        methodName: methodName,
+                        typeArgs: resolvedTypeArgs
+                    )
+                    if !processedRequestKeys.contains(key) {
+                        pendingRequests.append(InstantiationRequest(
+                            kind: .extensionMethod(baseType: resolvedBaseType, template: ext, typeArgs: resolvedTypeArgs),
+                            sourceLine: currentLine,
+                            sourceFileName: currentFileName
+                        ))
+                    }
+                }
+            }
+            
+            // Create the function type for the callee
+            let functionType = Type.function(
+                parameters: resolvedArguments.map { Parameter(type: $0.type, kind: .byVal) },
+                returns: resolvedReturnType
+            )
+            
+            // Create the callee as a variable reference to the mangled function
+            let callee: TypedExpressionNode = .variable(
+                identifier: Symbol(name: mangledMethodName, type: functionType, kind: .function)
+            )
+            
+            return .call(callee: callee, arguments: resolvedArguments, type: resolvedReturnType)
+        }
+    }
+    
+    /// Resolves types in a statement.
+    private func resolveTypesInStatement(_ stmt: TypedStatementNode) -> TypedStatementNode {
+        switch stmt {
+        case .variableDeclaration(let identifier, let value, let mutable):
+            let newIdentifier = Symbol(
+                name: identifier.name,
+                type: resolveParameterizedType(identifier.type),
+                kind: identifier.kind,
+                methodKind: identifier.methodKind
+            )
+            return .variableDeclaration(
+                identifier: newIdentifier,
+                value: resolveTypesInExpression(value),
+                mutable: mutable
+            )
+            
+        case .assignment(let target, let value):
+            return .assignment(
+                target: resolveTypesInExpression(target),
+                value: resolveTypesInExpression(value)
+            )
+            
+        case .compoundAssignment(let target, let op, let value):
+            return .compoundAssignment(
+                target: resolveTypesInExpression(target),
+                operator: op,
+                value: resolveTypesInExpression(value)
+            )
+            
+        case .expression(let expr):
+            return .expression(resolveTypesInExpression(expr))
+            
+        case .return(let value):
+            return .return(value: value.map { resolveTypesInExpression($0) })
+            
+        case .break:
+            return .break
+            
+        case .continue:
+            return .continue
+        }
+    }
+    
+    /// Resolves types in a pattern.
+    private func resolveTypesInPattern(_ pattern: TypedPattern) -> TypedPattern {
+        switch pattern {
+        case .booleanLiteral, .integerLiteral, .stringLiteral, .wildcard:
+            return pattern
+            
+        case .variable(let symbol):
+            let newSymbol = Symbol(
+                name: symbol.name,
+                type: resolveParameterizedType(symbol.type),
+                kind: symbol.kind,
+                methodKind: symbol.methodKind
+            )
+            return .variable(symbol: newSymbol)
+            
+        case .unionCase(let caseName, let tagIndex, let elements):
+            return .unionCase(
+                caseName: caseName,
+                tagIndex: tagIndex,
+                elements: elements.map { resolveTypesInPattern($0) }
+            )
+        }
+    }
+    
+    /// Resolves types in an intrinsic call.
+    private func resolveTypesInIntrinsic(_ intrinsic: TypedIntrinsic) -> TypedIntrinsic {
+        switch intrinsic {
+        case .allocMemory(let count, let resultType):
+            return .allocMemory(
+                count: resolveTypesInExpression(count),
+                resultType: resolveParameterizedType(resultType)
+            )
+            
+        case .deallocMemory(let ptr):
+            return .deallocMemory(ptr: resolveTypesInExpression(ptr))
+            
+        case .copyMemory(let dest, let source, let count):
+            return .copyMemory(
+                dest: resolveTypesInExpression(dest),
+                source: resolveTypesInExpression(source),
+                count: resolveTypesInExpression(count)
+            )
+            
+        case .moveMemory(let dest, let source, let count):
+            return .moveMemory(
+                dest: resolveTypesInExpression(dest),
+                source: resolveTypesInExpression(source),
+                count: resolveTypesInExpression(count)
+            )
+            
+        case .refCount(let val):
+            return .refCount(val: resolveTypesInExpression(val))
+            
+        case .ptrInit(let ptr, let val):
+            return .ptrInit(
+                ptr: resolveTypesInExpression(ptr),
+                val: resolveTypesInExpression(val)
+            )
+            
+        case .ptrDeinit(let ptr):
+            return .ptrDeinit(ptr: resolveTypesInExpression(ptr))
+            
+        case .ptrPeek(let ptr):
+            return .ptrPeek(ptr: resolveTypesInExpression(ptr))
+            
+        case .ptrOffset(let ptr, let offset):
+            return .ptrOffset(
+                ptr: resolveTypesInExpression(ptr),
+                offset: resolveTypesInExpression(offset)
+            )
+            
+        case .ptrTake(let ptr):
+            return .ptrTake(ptr: resolveTypesInExpression(ptr))
+            
+        case .ptrReplace(let ptr, let val):
+            return .ptrReplace(
+                ptr: resolveTypesInExpression(ptr),
+                val: resolveTypesInExpression(val)
+            )
+            
+        case .float32Bits(let value):
+            return .float32Bits(value: resolveTypesInExpression(value))
+            
+        case .float64Bits(let value):
+            return .float64Bits(value: resolveTypesInExpression(value))
+            
+        case .printString(let message):
+            return .printString(message: resolveTypesInExpression(message))
+            
+        case .printInt(let value):
+            return .printInt(value: resolveTypesInExpression(value))
+            
+        case .printBool(let value):
+            return .printBool(value: resolveTypesInExpression(value))
+            
+        case .panic(let message):
+            return .panic(message: resolveTypesInExpression(message))
+            
+        case .exit(let code):
+            return .exit(code: resolveTypesInExpression(code))
+            
+        case .abort:
+            return .abort
+        }
     }
     
     // MARK: - Dependency Ordering

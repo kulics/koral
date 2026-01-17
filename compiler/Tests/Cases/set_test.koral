@@ -1,56 +1,131 @@
 // EXPECT: All Set tests passed
 
-let assert(cond Bool, msg String) Void = {
-    if not cond then { panic(msg); }
-}
-
 let main() Int = {
-    /*
-    let mut a = [Int]Set.new()
-    assert(a.insert(1), "insert 1")
-    assert(not a.insert(1), "dup insert false")
-    assert(a.contains(1), "contains 1")
-    assert(a.count() == 1, "count 1")
+    // === Basic Operations ===
+    let mut s = [Int]Set.new()
+    assert(s.count() == 0, "new set count 0")
+    assert(s.is_empty(), "new set is_empty")
 
-    let mut b = [Int]Set.new()
-    b.insert(1)
-    b.insert(2)
-    b.insert(3)
+    // === insert ===
+    assert(s.insert(1), "insert new")
+    assert(s.count() == 1, "count after insert")
+    assert(not s.is_empty(), "not empty")
 
-    a.insert(2)
-    a.insert(4)
+    s.insert(2);
+    s.insert(3);
+    assert(s.count() == 3, "count 3")
 
-    let u = a.union(b)
-    assert(u.contains(1), "u 1")
-    assert(u.contains(2), "u 2")
-    assert(u.contains(3), "u 3")
-    assert(u.contains(4), "u 4")
+    // Insert duplicate
+    assert(not s.insert(1), "insert duplicate returns false")
+    assert(s.count() == 3, "count unchanged")
 
-    let i = a.intersection(b)
-    assert(i.contains(1), "i 1")
-    assert(i.contains(2), "i 2")
-    assert(not i.contains(3), "i no 3")
-    assert(not i.contains(4), "i no 4")
+    // === contains ===
+    assert(s.contains(1), "contains 1")
+    assert(s.contains(2), "contains 2")
+    assert(not s.contains(999), "not contains 999")
 
-    let d = a.difference(b)
-    assert(d.contains(4), "d 4")
-    assert(not d.contains(1), "d no 1")
-    assert(not d.contains(2), "d no 2")
+    // === remove ===
+    assert(s.remove(2), "remove existing")
+    assert(s.count() == 2, "count after remove")
+    assert(not s.contains(2), "not contains after remove")
+    assert(not s.remove(999), "remove missing")
 
-    assert(a.remove(4), "remove 4")
-    assert(not a.contains(4), "no 4")
+    // === clear ===
+    s.clear()
+    assert(s.count() == 0, "count after clear")
+    assert(s.is_empty(), "is_empty after clear")
 
-    // Iterator smoke
-    let mut it = b.iterator()
-    let mut seen = 0
+    // === Rehash test ===
+    let mut s2 = [Int]Set.new()
+    let mut i = 0
+    while i < 50 then {
+        s2.insert(i);
+        i = i + 1
+    }
+    assert(s2.count() == 50, "count after 50 inserts")
+
+    i = 0
+    while i < 50 then {
+        assert(s2.contains(i), "contains after rehash")
+        i = i + 1
+    }
+
+    // === iterator ===
+    let mut s3 = [Int]Set.new()
+    s3.insert(10);
+    s3.insert(20);
+    s3.insert(30);
+
+    let mut count = 0
+    let mut sum = 0
+    let mut it = s3.iterator()
     while true then {
-        it.next(when ) is {
-            .Some(_) then { seen += 1; }
-            .None then { break; }
+        when it.next() is {
+            .Some(v) then {
+                count = count + 1
+                sum = sum + v
+            },
+            .None then { break; },
         }
     }
-    assert(seen == 3, "iter 3")
-    */
+    assert(count == 3, "iterator count")
+    assert(sum == 60, "iterator sum")
+
+    // === Set operations ===
+    let mut a = [Int]Set.new()
+    a.insert(1);
+    a.insert(2);
+    a.insert(3);
+
+    let mut b = [Int]Set.new()
+    b.insert(2);
+    b.insert(3);
+    b.insert(4);
+
+    // union
+    let mut u = a.union(ref b)
+    assert(u.count() == 4, "union count")
+    assert(u.contains(1) and u.contains(2) and u.contains(3) and u.contains(4), "union values")
+
+    // intersection
+    let mut inter = a.intersection(ref b)
+    assert(inter.count() == 2, "intersection count")
+    assert(inter.contains(2) and inter.contains(3), "intersection values")
+    assert(not inter.contains(1) and not inter.contains(4), "intersection excludes")
+
+    // difference
+    let mut diff = a.difference(ref b)
+    assert(diff.count() == 1, "difference count")
+    assert(diff.contains(1), "difference value")
+
+    // === COW (Copy-On-Write) semantics ===
+    let mut original = [Int]Set.new()
+    original.insert(1);
+    original.insert(2);
+
+    let mut copy = original  // Shallow copy
+
+    // Modify copy triggers COW
+    copy.insert(3);
+    copy.remove(1);
+
+    // Original unchanged
+    assert(original.count() == 2, "original count unchanged")
+    assert(original.contains(1), "original contains 1")
+    assert(not original.contains(3), "original not contains 3")
+
+    // Copy modified
+    assert(copy.count() == 2, "copy count")
+    assert(not copy.contains(1), "copy not contains 1")
+    assert(copy.contains(3), "copy contains 3")
+
+    // === String set ===
+    let mut ss = [String]Set.new()
+    ss.insert("apple");
+    ss.insert("banana");
+    assert(ss.contains("apple"), "string set contains")
+    assert(not ss.insert("apple"), "string set duplicate")
+
     print_string("All Set tests passed")
     0
 }

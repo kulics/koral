@@ -1,50 +1,117 @@
 // EXPECT: All Map tests passed
 
-let assert(cond Bool, msg String) Void = {
-    if not cond then { panic(msg); }
-}
-
 let main() Int = {
-    /*
+    // === Basic Operations ===
     let mut m = [Int, String]Map.new()
+    assert(m.count() == 0, "new map count 0")
+    assert(m.is_empty(), "new map is_empty")
 
-    // Insert new
-    assert(m.insert(1, "a"), "insert new")
-    assert(m.count() == 1, "count 1")
-    assert(m.get(1).unwrap() == "a", "get a")
+    // === insert ===
+    let r1 = m.insert(1, "one")
+    assert(r1.is_none(), "insert new returns None")
+    assert(m.count() == 1, "count after insert")
 
-    // Overwrite
-    assert(not m.insert(1, "b"), "insert overwrite returns false")
-    assert(m.count() == 1, "count still 1")
-    assert(m.get(1).unwrap() == "b", "get b")
+    let r2 = m.insert(2, "two")
+    assert(r2.is_none(), "insert 2")
+    let r3 = m.insert(3, "three")
+    assert(r3.is_none(), "insert 3")
+    assert(m.count() == 3, "count 3")
 
-    // Missing
-    let miss = m.get(2)
-    assert(miss.is_none(), "missing is none")
+    // Overwrite existing key
+    let r4 = m.insert(1, "ONE")
+    assert(r4.is_some(), "insert existing returns Some")
+    assert(r4.unwrap() == "one", "insert returns old value")
+    assert(m.count() == 3, "count unchanged after overwrite")
 
-    // Remove
-    assert(m.remove(1).unwrap() == "b", "remove returns old")
-    assert(m.count() == 0, "count 0")
-    let removed = m.get(1)
-    assert(removed.is_none(), "removed none")
+    // === at ===
+    assert(m.at(1).unwrap() == "ONE", "at(1)")
+    assert(m.at(2).unwrap() == "two", "at(2)")
+    let at_missing = m.at(999)
+    assert(at_missing.is_none(), "at missing key")
 
-    // Iterator
-    m.insert(10, "x")
-    m.insert(20, "y")
-    let mut it = m.iterator()
-    let mut seen = 0
+    // === subscript ===
+    assert(m[1] == "ONE", "subscript read")
+    m[2] = "TWO"
+    assert(m[2] == "TWO", "subscript write")
+
+    // === contains ===
+    assert(m.contains(1), "contains existing")
+    assert(not m.contains(999), "not contains missing")
+
+    // === remove ===
+    let removed = m.remove(1)
+    assert(removed.unwrap() == "ONE", "remove returns value")
+    assert(m.count() == 2, "count after remove")
+    assert(not m.contains(1), "not contains after remove")
+    let remove_missing = m.remove(999)
+    assert(remove_missing.is_none(), "remove missing")
+
+    // === clear ===
+    m.clear()
+    assert(m.count() == 0, "count after clear")
+    assert(m.is_empty(), "is_empty after clear")
+
+    // === Rehash test ===
+    let mut m2 = [Int, Int]Map.new()
+    let mut i = 0
+    while i < 50 then {
+        let ri = m2.insert(i, i * 10)
+        i = i + 1
+    }
+    assert(m2.count() == 50, "count after 50 inserts")
+
+    i = 0
+    while i < 50 then {
+        assert(m2.at(i).unwrap() == i * 10, "value after rehash")
+        i = i + 1
+    }
+
+    // === iterator ===
+    let mut m3 = [Int, String]Map.new()
+    let ri10 = m3.insert(10, "ten")
+    let ri20 = m3.insert(20, "twenty")
+    let ri30 = m3.insert(30, "thirty")
+
+    let mut count = 0
+    let mut key_sum = 0
+    let mut it = m3.iterator()
     while true then {
-        it.next(when ) is {
-            .Some(item) then {
-                if item.key == 10 then { assert(item.value == "x", "iter x"); }
-                if item.key == 20 then { assert(item.value == "y", "iter y"); }
-                seen += 1
-            }
-            .None then { break; }
+        when it.next() is {
+            .Some(entry) then {
+                count = count + 1
+                key_sum = key_sum + entry.key
+            },
+            .None then { break; },
         }
     }
-    assert(seen == 2, "iter count")
-    */
+    assert(count == 3, "iterator count")
+    assert(key_sum == 60, "iterator key sum")
+
+    // === COW ===
+    let mut original = [Int, String]Map.new()
+    let ro1 = original.insert(1, "a")
+    let ro2 = original.insert(2, "b")
+
+    let mut copy = original
+
+    let rc3 = copy.insert(3, "c")
+    copy[1] = "A"
+
+    assert(original.count() == 2, "original count unchanged")
+    assert(original[1] == "a", "original[1] unchanged")
+    assert(not original.contains(3), "original not contains 3")
+
+    assert(copy.count() == 3, "copy count")
+    assert(copy[1] == "A", "copy[1] modified")
+    assert(copy.contains(3), "copy contains 3")
+
+    // === String keys ===
+    let mut sm = [String, Int]Map.new()
+    let rsa = sm.insert("apple", 1)
+    let rsb = sm.insert("banana", 2)
+    assert(sm["apple"] == 1, "string key")
+    assert(sm.contains("banana"), "contains string key")
+
     print_string("All Map tests passed")
     0
 }

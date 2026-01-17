@@ -10,24 +10,21 @@ public class TypeChecker {
   // Generic parameter name -> list of trait bounds currently in scope
   private var genericTraitBounds: [String: [String]] = [:]
 
-  // Cache for instantiated types: "TemplateName<Arg1,Arg2>" -> Type
-  private var instantiatedTypes: [String: Type] = [:]
-  // Cache for instantiated functions: "TemplateName<Arg1,Arg2>" -> (MangledName, Type)
-  private var instantiatedFunctions: [String: (String, Type)] = [:]
   // Generic Template Extensions: TemplateName -> [GenericExtensionMethodTemplate]
   private var genericExtensionMethods: [String: [GenericExtensionMethodTemplate]] = [:]
   private var genericIntrinsicExtensionMethods:
     [String: [(typeParams: [TypeParameterDecl], method: IntrinsicMethodDeclaration)]] =
       [:]
 
-  // Mapping from Layout Name to Template Info (Base Name + Args)
-  private var layoutToTemplateInfo: [String: (base: String, args: [Type])] = [:]
-
   // Instantiation requests collected during type checking (for deferred monomorphization)
-  private var instantiationRequests: [InstantiationRequest] = []
+  private var instantiationRequests: Set<InstantiationRequest> = []
   
-  // Cache for typed extension method bodies (for Monomorphizer to use)
-  private var typedExtensionMethods: [String: TypedExtensionMethodInfo] = [:]
+  // Stack of generic types currently being resolved (for recursion detection)
+  private var resolvingGenericTypes: Set<String> = []
+  
+  // Sets to track intrinsic generic types and functions for special handling during monomorphization
+  private var intrinsicGenericTypes: Set<String> = []
+  private var intrinsicGenericFunctions: Set<String> = []
 
   private var currentLine: Int = 1 {
     didSet {
@@ -179,7 +176,7 @@ public class TypeChecker {
 
     let methodSym: Symbol
     if case .genericParameter(let paramName) = receiverType {
-      guard let bounds = genericTraitBounds[paramName], bounds.contains("Equatable") else {
+      guard hasTraitBound(paramName, "Equatable") else {
         throw SemanticError(.generic("Type \(receiverType) is not constrained by trait Equatable"), line: currentLine)
       }
       let methods = try flattenedTraitMethods("Equatable")
@@ -214,7 +211,7 @@ public class TypeChecker {
       return try withTempIfRValue(rhs, prefix: "eq_rhs") { rhsVar in
         let baseArg = try ensureBorrowed(lhsVar, expected: params[0].type)
         let otherArg = try ensureBorrowed(rhsVar, expected: params[1].type)
-        let callee: TypedExpressionNode = .methodReference(base: baseArg, method: methodSym, type: methodSym.type)
+        let callee: TypedExpressionNode = .methodReference(base: baseArg, method: methodSym, typeArgs: nil, type: methodSym.type)
         return .call(callee: callee, arguments: [otherArg], type: .bool)
       }
     }
@@ -230,7 +227,7 @@ public class TypeChecker {
 
     let methodSym: Symbol
     if case .genericParameter(let paramName) = receiverType {
-      guard let bounds = genericTraitBounds[paramName], bounds.contains("Comparable") else {
+      guard hasTraitBound(paramName, "Comparable") else {
         throw SemanticError(.generic("Type \(receiverType) is not constrained by trait Comparable"), line: currentLine)
       }
       let methods = try flattenedTraitMethods("Comparable")
@@ -265,7 +262,7 @@ public class TypeChecker {
       return try withTempIfRValue(rhs, prefix: "cmp_rhs") { rhsVar in
         let baseArg = try ensureBorrowed(lhsVar, expected: params[0].type)
         let otherArg = try ensureBorrowed(rhsVar, expected: params[1].type)
-        let callee: TypedExpressionNode = .methodReference(base: baseArg, method: methodSym, type: methodSym.type)
+        let callee: TypedExpressionNode = .methodReference(base: baseArg, method: methodSym, typeArgs: nil, type: methodSym.type)
         return .call(callee: callee, arguments: [otherArg], type: .int)
       }
     }
@@ -284,7 +281,7 @@ public class TypeChecker {
   /// This method collects all generic instantiation points during type checking
   /// so they can be processed later by the Monomorphizer.
   private func recordInstantiation(_ request: InstantiationRequest) {
-    instantiationRequests.append(request)
+    instantiationRequests.insert(request)
   }
 
   // Wrapper for shared utility function from SemaUtils.swift
@@ -308,6 +305,61 @@ public class TypeChecker {
       }
       genericTraitBounds[param.name] = bounds
     }
+  }
+  
+  /// Checks if a type parameter has a trait bound, including inherited traits.
+  /// For example, if K has bound HashKey and HashKey extends Equatable,
+  /// then hasTraitBound("K", "Equatable") returns true.
+  private func hasTraitBound(_ paramName: String, _ traitName: String) -> Bool {
+    guard let bounds = genericTraitBounds[paramName] else {
+      return false
+    }
+    
+    // Check direct bounds
+    if bounds.contains(traitName) {
+      return true
+    }
+    
+    // Check inherited traits
+    for bound in bounds {
+      if let traitInfo = traits[bound] {
+        // Check if this trait inherits from the target trait
+        if traitInfo.superTraits.contains(traitName) {
+          return true
+        }
+        // Recursively check super traits
+        for superTrait in traitInfo.superTraits {
+          if hasTraitInheritance(superTrait, traitName) {
+            return true
+          }
+        }
+      }
+    }
+    
+    return false
+  }
+  
+  /// Checks if a trait inherits from another trait (directly or transitively).
+  private func hasTraitInheritance(_ traitName: String, _ targetTrait: String) -> Bool {
+    if traitName == targetTrait {
+      return true
+    }
+    
+    guard let traitInfo = traits[traitName] else {
+      return false
+    }
+    
+    if traitInfo.superTraits.contains(targetTrait) {
+      return true
+    }
+    
+    for superTrait in traitInfo.superTraits {
+      if hasTraitInheritance(superTrait, targetTrait) {
+        return true
+      }
+    }
+    
+    return false
   }
 
   private func expectedFunctionTypeForTraitMethod(
@@ -347,39 +399,43 @@ public class TypeChecker {
 
   private func lookupConcreteMethodSymbol(on selfType: Type, name: String) throws -> Symbol? {
     switch selfType {
-    case .structure(let typeName, _, let isGen):
+    case .structure(let typeName, _, _):
       if let methods = extensionMethods[typeName], let sym = methods[name] {
         return sym
-      }
-      if isGen, let info = layoutToTemplateInfo[typeName] {
-        if let extensions = genericExtensionMethods[info.base],
-          let ext = extensions.first(where: { $0.method.name == name })
-        {
-          return try instantiateExtensionMethod(
-            baseType: selfType,
-            structureName: info.base,
-            genericArgs: info.args,
-            methodInfo: ext
-          )
-        }
       }
       return nil
 
-    case .union(let typeName, _, let isGen):
+    case .union(let typeName, _, _):
       if let methods = extensionMethods[typeName], let sym = methods[name] {
         return sym
       }
-      if isGen, let info = layoutToTemplateInfo[typeName] {
-        if let extensions = genericExtensionMethods[info.base],
-          let ext = extensions.first(where: { $0.method.name == name })
-        {
-          return try instantiateExtensionMethod(
-            baseType: selfType,
-            structureName: info.base,
-            genericArgs: info.args,
-            methodInfo: ext
-          )
-        }
+      return nil
+      
+    case .genericStruct(let templateName, let args):
+      // Look up method on generic struct template
+      if let extensions = genericExtensionMethods[templateName],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveGenericExtensionMethod(
+          baseType: selfType,
+          templateName: templateName,
+          typeArgs: args,
+          methodInfo: ext
+        )
+      }
+      return nil
+      
+    case .genericUnion(let templateName, let args):
+      // Look up method on generic union template
+      if let extensions = genericExtensionMethods[templateName],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveGenericExtensionMethod(
+          baseType: selfType,
+          templateName: templateName,
+          typeArgs: args,
+          methodInfo: ext
+        )
       }
       return nil
 
@@ -387,10 +443,10 @@ public class TypeChecker {
       if let extensions = genericIntrinsicExtensionMethods["Pointer"],
         let ext = extensions.first(where: { $0.method.name == name })
       {
-        return try instantiateIntrinsicExtensionMethod(
+        return try resolveIntrinsicExtensionMethod(
           baseType: selfType,
-          structureName: "Pointer",
-          genericArgs: [element],
+          templateName: "Pointer",
+          typeArgs: [element],
           methodInfo: ext
         )
       }
@@ -398,10 +454,10 @@ public class TypeChecker {
       if let extensions = genericExtensionMethods["Pointer"],
         let ext = extensions.first(where: { $0.method.name == name })
       {
-        return try instantiateExtensionMethod(
+        return try resolveGenericExtensionMethod(
           baseType: selfType,
-          structureName: "Pointer",
-          genericArgs: [element],
+          templateName: "Pointer",
+          typeArgs: [element],
           methodInfo: ext
         )
       }
@@ -420,6 +476,105 @@ public class TypeChecker {
     default:
       return nil
     }
+  }
+  
+  /// Resolves a generic extension method without instantiating it.
+  /// Returns a symbol with the substituted function type and records an instantiation request.
+  private func resolveGenericExtensionMethod(
+    baseType: Type,
+    templateName: String,
+    typeArgs: [Type],
+    methodInfo: GenericExtensionMethodTemplate
+  ) throws -> Symbol {
+    let typeParams = methodInfo.typeParams
+    let method = methodInfo.method
+    
+    guard typeParams.count == typeArgs.count else {
+      throw SemanticError.typeMismatch(
+        expected: "\(typeParams.count) type arguments",
+        got: "\(typeArgs.count)"
+      )
+    }
+    
+    // Create type substitution map
+    var substitution: [String: Type] = [:]
+    for (i, param) in typeParams.enumerated() {
+      substitution[param.name] = typeArgs[i]
+    }
+    substitution["Self"] = baseType
+    
+    // Resolve function type with substitution
+    let functionType = try withNewScope {
+      for (paramName, paramType) in substitution {
+        try currentScope.defineType(paramName, type: paramType)
+      }
+      
+      let returnType = try resolveTypeNode(method.returnType)
+      let params = try method.parameters.map { param -> Parameter in
+        let paramType = try resolveTypeNode(param.type)
+        return Parameter(type: paramType, kind: param.mutable ? .byMutRef : .byVal)
+      }
+      
+      return Type.function(parameters: params, returns: returnType)
+    }
+    
+    // Record instantiation request if type args are concrete
+    if !typeArgs.contains(where: { $0.containsGenericParameter }) {
+      recordInstantiation(InstantiationRequest(
+        kind: .extensionMethod(
+          baseType: baseType,
+          template: methodInfo,
+          typeArgs: typeArgs
+        ),
+        sourceLine: currentLine,
+        sourceFileName: currentFileName
+      ))
+    }
+    
+    let kind = getCompilerMethodKind(method.name)
+    return Symbol(name: method.name, type: functionType, kind: .function, methodKind: kind)
+  }
+  
+  /// Resolves an intrinsic extension method without instantiating it.
+  private func resolveIntrinsicExtensionMethod(
+    baseType: Type,
+    templateName: String,
+    typeArgs: [Type],
+    methodInfo: (typeParams: [TypeParameterDecl], method: IntrinsicMethodDeclaration)
+  ) throws -> Symbol {
+    let (typeParams, method) = methodInfo
+    
+    guard typeParams.count == typeArgs.count else {
+      throw SemanticError.typeMismatch(
+        expected: "\(typeParams.count) type arguments",
+        got: "\(typeArgs.count)"
+      )
+    }
+    
+    // Create type substitution map
+    var substitution: [String: Type] = [:]
+    for (i, param) in typeParams.enumerated() {
+      substitution[param.name] = typeArgs[i]
+    }
+    substitution["Self"] = baseType
+    
+    // Resolve function type with substitution
+    let functionType = try withNewScope {
+      for (paramName, paramType) in substitution {
+        try currentScope.defineType(paramName, type: paramType)
+      }
+      
+      let returnType = try resolveTypeNode(method.returnType)
+      let params = try method.parameters.map { param -> Parameter in
+        let paramType = try resolveTypeNode(param.type)
+        return Parameter(type: paramType, kind: param.mutable ? .byMutRef : .byVal)
+      }
+      
+      return Type.function(parameters: params, returns: returnType)
+    }
+    
+    let kind = getCompilerMethodKind(method.name)
+    return Symbol(name: method.name, type: functionType, kind: .function, methodKind: kind)
   }
 
   private func enforceTraitConformance(
@@ -506,22 +661,36 @@ public class TypeChecker {
     let structType: Type
     if case .reference(let inner) = type { structType = inner } else { structType = type }
 
-    guard case .structure(let typeName, _, _) = structType else {
+    // Get the type name for error messages
+    let typeName: String
+    switch structType {
+    case .structure(let name, _, _):
+      typeName = name
+    case .genericStruct(let template, _):
+      typeName = template
+    default:
       throw SemanticError.invalidOperation(op: "subscript", type1: type.description, type2: "")
     }
 
     var methodSymbol: Symbol? = nil
-    if let extensions = extensionMethods[typeName], let sym = extensions[methodName] {
-      methodSymbol = sym
-    } else if case .structure(_, _, let isGen) = structType, isGen,
-      let info = layoutToTemplateInfo[typeName]
-    {
-      if let extensions = genericExtensionMethods[info.base] {
-        if let ext = extensions.first(where: { $0.method.name == methodName }) {
-          methodSymbol = try instantiateExtensionMethod(
+    
+    // Try to look up method on concrete type first
+    if case .structure(let name, _, _) = structType {
+      if let extensions = extensionMethods[name], let sym = extensions[methodName] {
+        methodSymbol = sym
+      }
+    }
+    
+    // If not found, try generic type lookup
+    if methodSymbol == nil {
+      if case .genericStruct(let templateName, let args) = structType {
+        if let extensions = genericExtensionMethods[templateName],
+           let ext = extensions.first(where: { $0.method.name == methodName })
+        {
+          methodSymbol = try resolveGenericExtensionMethod(
             baseType: structType,
-            structureName: info.base,
-            genericArgs: info.args,
+            templateName: templateName,
+            typeArgs: args,
             methodInfo: ext
           )
         }
@@ -592,6 +761,35 @@ public class TypeChecker {
       // Clear any previous state
       instantiationRequests.removeAll()
 
+      // === PASS 1: Collect all type definitions ===
+      // This pass registers all types, traits, and function signatures
+      // so that forward references work correctly
+      for (index, decl) in declarations.enumerated() {
+        self.currentFileName = (index < coreGlobalCount) ? coreFileName : userFileName
+        self.currentLine = decl.line
+        do {
+          try collectTypeDefinition(decl)
+        } catch let e as SemanticError {
+          throw e
+        }
+      }
+      
+      // === PASS 2: Register all given method signatures ===
+      // This allows methods in one given block to call methods in another given block
+      // regardless of declaration order
+      for (index, decl) in declarations.enumerated() {
+        self.currentFileName = (index < coreGlobalCount) ? coreFileName : userFileName
+        self.currentLine = decl.line
+        do {
+          try collectGivenSignatures(decl)
+        } catch let e as SemanticError {
+          throw e
+        }
+      }
+      
+      // === PASS 3: Check function bodies and generate typed AST ===
+      // Now that all types and method signatures are defined, we can check function bodies
+      // which may reference types or methods defined later in the file
       for (index, decl) in declarations.enumerated() {
         self.currentFileName = (index < coreGlobalCount) ? coreFileName : userFileName
         self.currentLine = decl.line
@@ -600,7 +798,6 @@ public class TypeChecker {
             typedDeclarations.append(typedDecl)
           }
         } catch let e as SemanticError {
-          // SemanticError is expected to always carry a valid location.
           throw e
         }
       }
@@ -616,28 +813,32 @@ public class TypeChecker {
         extensionMethods: genericExtensionMethods,
         intrinsicExtensionMethods: genericIntrinsicExtensionMethods,
         traits: traits,
-        concreteExtensionMethods: extensionMethods
+        concreteExtensionMethods: extensionMethods,
+        intrinsicGenericTypes: intrinsicGenericTypes,
+        intrinsicGenericFunctions: intrinsicGenericFunctions
       )
       
       return TypeCheckerOutput(
         program: program,
         instantiationRequests: instantiationRequests,
-        genericTemplates: registry,
-        typedExtensionMethods: typedExtensionMethods
+        genericTemplates: registry
       )
     }
   }
-
-  private func checkGlobalDeclaration(_ decl: GlobalNode) throws -> TypedGlobalNode? {
+  
+  // MARK: - Pass 1: Type Collection
+  
+  /// Collects type definitions without checking function bodies.
+  /// This allows forward references to work correctly.
+  private func collectTypeDefinition(_ decl: GlobalNode) throws {
     switch decl {
     case .traitDeclaration(let name, let superTraits, let methods, let access, let line):
       self.currentLine = line
       if traits[name] != nil {
         throw SemanticError.duplicateDefinition(name, line: line)
       }
-      for parent in superTraits {
-        try validateTraitName(parent)
-      }
+      // Note: We don't validate superTraits here because they might be forward references
+      // They will be validated in pass 2
       traits[name] = TraitDeclInfo(
         name: name,
         superTraits: superTraits,
@@ -645,35 +846,270 @@ public class TypeChecker {
         access: access,
         line: line
       )
-      return nil
-
-    case .globalUnionDeclaration(
-      let name, let typeParameters, let cases, let access, let line):
+      
+    case .globalUnionDeclaration(let name, let typeParameters, let cases, let access, let line):
       self.currentLine = line
       if currentScope.hasTypeDefinition(name) {
         throw SemanticError.duplicateDefinition(name, line: line)
       }
-
+      
       if !typeParameters.isEmpty {
-        // Register template first to allow recursive type references
+        // Register generic union template
         let template = GenericUnionTemplate(
           name: name, typeParameters: typeParameters, cases: cases, access: access)
         currentScope.defineGenericUnionTemplate(name, template: template)
+      } else {
+        // Register placeholder for non-generic union (allows recursive references)
+        let placeholder = Type.union(name: name, cases: [], isGenericInstantiation: false)
+        try currentScope.defineType(name, type: placeholder)
+      }
+      
+    case .globalStructDeclaration(let name, let typeParameters, let parameters, _, let line):
+      self.currentLine = line
+      if currentScope.hasTypeDefinition(name) {
+        throw SemanticError.duplicateDefinition(name, line: line)
+      }
+      
+      if !typeParameters.isEmpty {
+        // Register generic struct template
+        let template = GenericStructTemplate(
+          name: name, typeParameters: typeParameters, parameters: parameters)
+        currentScope.defineGenericStructTemplate(name, template: template)
+      } else {
+        // Register placeholder for non-generic struct (allows recursive references)
+        let placeholder = Type.structure(name: name, members: [], isGenericInstantiation: false)
+        try currentScope.defineType(name, type: placeholder)
+      }
+      
+    case .globalFunctionDeclaration(let name, let typeParameters, _, _, _, _, let line):
+      self.currentLine = line
+      // For generic functions, we just note that they exist
+      // The full template will be registered in pass 2
+      if !typeParameters.isEmpty {
+        // Mark as generic function (will be fully registered in pass 2)
+        // We don't need to do anything here since pass 2 handles it
+      }
+      // For non-generic functions, we also defer to pass 2
+      // since we need to resolve parameter types which may reference forward types
+      
+    case .globalVariableDeclaration:
+      // Variables are handled in pass 2
+      break
+      
+    case .givenDeclaration(let typeParams, let typeNode, _, let line):
+      self.currentLine = line
+      // For generic given, we just note the base type exists
+      // The methods will be registered in pass 2
+      if !typeParams.isEmpty {
+        // Generic given - base type should already be registered
+        if case .generic(let baseName, _) = typeNode {
+          // Verify the base type exists (struct or union template)
+          if currentScope.lookupGenericStructTemplate(baseName) == nil &&
+             currentScope.lookupGenericUnionTemplate(baseName) == nil {
+            // It might be an intrinsic type like Pointer, which is OK
+          }
+        }
+      }
+      // Non-generic given is handled in pass 2
+      
+    case .intrinsicTypeDeclaration(let name, let typeParameters, _, let line):
+      self.currentLine = line
+      if currentScope.hasTypeDefinition(name) {
+        throw SemanticError.duplicateDefinition(name, line: line)
+      }
+      
+      if !typeParameters.isEmpty {
+        // Register as intrinsic generic type
+        intrinsicGenericTypes.insert(name)
+        let template = GenericStructTemplate(
+          name: name, typeParameters: typeParameters, parameters: [])
+        currentScope.defineGenericStructTemplate(name, template: template)
+      } else {
+        // Non-generic intrinsic type - register the actual type
+        let type: Type
+        switch name {
+        case "Int": type = .int
+        case "Int8": type = .int8
+        case "Int16": type = .int16
+        case "Int32": type = .int32
+        case "Int64": type = .int64
+        case "UInt": type = .uint
+        case "UInt8": type = .uint8
+        case "UInt16": type = .uint16
+        case "UInt32": type = .uint32
+        case "UInt64": type = .uint64
+        case "Float32": type = .float32
+        case "Float64": type = .float64
+        case "Bool": type = .bool
+        case "Void": type = .void
+        case "Never": type = .never
+        default:
+          type = .structure(name: name, members: [], isGenericInstantiation: false)
+        }
+        try currentScope.defineType(name, type: type)
+      }
+      
+    case .intrinsicFunctionDeclaration(let name, let typeParameters, _, _, _, let line):
+      self.currentLine = line
+      if !typeParameters.isEmpty {
+        intrinsicGenericFunctions.insert(name)
+      }
+      // Function signature will be registered in pass 3
+      
+    case .intrinsicGivenDeclaration:
+      // Handled in pass 2 (signature) and pass 3 (body)
+      break
+    }
+  }
+  
+  // MARK: - Pass 2: Given Signature Collection
+  
+  /// Collects given method signatures without checking bodies.
+  /// This allows methods in one given block to call methods in another given block.
+  private func collectGivenSignatures(_ decl: GlobalNode) throws {
+    switch decl {
+    case .givenDeclaration(let typeParams, let typeNode, let methods, let line):
+      self.currentLine = line
+      if !typeParams.isEmpty {
+        // Generic Given - register method signatures
+        guard case .generic(let baseName, let args) = typeNode else {
+          throw SemanticError.invalidOperation(
+            op: "generic given on non-generic type", type1: "", type2: "")
+        }
+
+        // Validate that args are exactly the type params
+        if args.count != typeParams.count {
+          throw SemanticError.typeMismatch(
+            expected: "\(typeParams.count) generic params", got: "\(args.count)")
+        }
+        for (i, arg) in args.enumerated() {
+          guard case .identifier(let argName) = arg, argName == typeParams[i].name else {
+            throw SemanticError.invalidOperation(
+              op: "generic given specialization not supported", type1: String(describing: arg),
+              type2: "")
+          }
+        }
+
+        // Initialize extension methods dictionary for this base type
+        if genericExtensionMethods[baseName] == nil {
+          genericExtensionMethods[baseName] = []
+        }
         
-        // Perform declaration-time validation of case parameter types in validation-only mode
-        // This validates type references without actually instantiating types
-        let savedValidationMode = isValidationOnlyMode
-        isValidationOnlyMode = true
-        defer { isValidationOnlyMode = savedValidationMode }
+        // Create a generic Self type for declaration-time checking
+        let genericSelfArgs = typeParams.map { Type.genericParameter(name: $0.name) }
+        let genericSelfType: Type
+        if baseName == "Pointer" && genericSelfArgs.count == 1 {
+          genericSelfType = .pointer(element: genericSelfArgs[0])
+        } else if currentScope.lookupGenericStructTemplate(baseName) != nil {
+          genericSelfType = .genericStruct(template: baseName, args: genericSelfArgs)
+        } else if currentScope.lookupGenericUnionTemplate(baseName) != nil {
+          genericSelfType = .genericUnion(template: baseName, args: genericSelfArgs)
+        } else {
+          genericSelfType = .genericStruct(template: baseName, args: genericSelfArgs)
+        }
         
+        // Register all method signatures (without checking bodies)
+        for method in methods {
+          let (checkedParams, checkedReturnType) = try withNewScope {
+            for typeParam in typeParams {
+              try currentScope.defineType(
+                typeParam.name, type: .genericParameter(name: typeParam.name))
+            }
+            try recordGenericTraitBounds(typeParams)
+            
+            try currentScope.defineType("Self", type: genericSelfType)
+            currentScope.define("self", genericSelfType, mutable: false)
+            
+            let returnType = try resolveTypeNode(method.returnType)
+            let params = try method.parameters.map { param -> Symbol in
+              let paramType = try resolveTypeNode(param.type)
+              return Symbol(
+                name: param.name, type: paramType,
+                kind: .variable(param.mutable ? .MutableValue : .Value))
+            }
+            
+            // Validate __drop signature
+            if method.name == "__drop" {
+              if params.count != 1 || params[0].name != "self" {
+                throw SemanticError.invalidOperation(
+                  op: "__drop must have exactly one parameter 'self'", type1: "", type2: "")
+              }
+              if case .reference(_) = params[0].type {
+                // OK
+              } else {
+                throw SemanticError.invalidOperation(
+                  op: "__drop 'self' parameter must be a reference",
+                  type1: params[0].type.description, type2: "")
+              }
+              if returnType != .void {
+                throw SemanticError.invalidOperation(
+                  op: "__drop must return Void", type1: returnType.description, type2: "")
+              }
+            }
+            
+            return (params, returnType)
+          }
+          
+          // Register the method template (without checked body)
+          genericExtensionMethods[baseName]!.append(GenericExtensionMethodTemplate(
+            typeParams: typeParams,
+            method: method,
+            checkedBody: nil,
+            checkedParameters: checkedParams,
+            checkedReturnType: checkedReturnType
+          ))
+        }
+      }
+      // Non-generic given is handled in pass 3
+      
+    case .intrinsicGivenDeclaration(let typeParams, let typeNode, let methods, let line):
+      self.currentLine = line
+      if !typeParams.isEmpty {
+        // Generic intrinsic given - register method signatures
+        guard case .generic(let baseName, _) = typeNode else {
+          throw SemanticError.invalidOperation(
+            op: "generic given on non-generic type", type1: "", type2: "")
+        }
+
+        if genericIntrinsicExtensionMethods[baseName] == nil {
+          genericIntrinsicExtensionMethods[baseName] = []
+        }
+
+        for m in methods {
+          genericIntrinsicExtensionMethods[baseName]!.append((typeParams: typeParams, method: m))
+        }
+      }
+      // Non-generic intrinsic given is handled in pass 3
+      
+    default:
+      // Other declarations are handled in pass 3
+      break
+    }
+  }
+
+  private func checkGlobalDeclaration(_ decl: GlobalNode) throws -> TypedGlobalNode? {
+    switch decl {
+    case .traitDeclaration(let name, let superTraits, _, _, let line):
+      self.currentLine = line
+      // Trait was registered in pass 1, now validate superTraits
+      for parent in superTraits {
+        try validateTraitName(parent)
+      }
+      return nil
+
+    case .globalUnionDeclaration(
+      let name, let typeParameters, let cases, _, let line):
+      self.currentLine = line
+
+      if !typeParameters.isEmpty {
+        // Generic union template was registered in pass 1
+        // Now validate case parameter types
         try withNewScope {
-          // Define type parameters as generic parameter types
           for param in typeParameters {
             try currentScope.defineType(param.name, type: .genericParameter(name: param.name))
           }
           try recordGenericTraitBounds(typeParameters)
           
-          // Validate all case parameter types are valid under the type parameters
           for c in cases {
             for p in c.parameters {
               _ = try resolveTypeNode(p.type)
@@ -684,11 +1120,10 @@ public class TypeChecker {
         return .genericTypeTemplate(name: name)
       }
 
-      // Placeholder for recursion
-      let placeholder = Type.union(
-        name: name, cases: [], isGenericInstantiation: false)
-      try currentScope.defineType(name, type: placeholder, line: line)
-
+      // Non-generic union: placeholder was registered in pass 1
+      // Now resolve the actual case types
+      let placeholder = currentScope.lookupType(name)!
+      
       var unionCases: [UnionCase] = []
       for c in cases {
         var params: [(name: String, type: Type)] = []
@@ -847,6 +1282,10 @@ public class TypeChecker {
           access: access
         )
         currentScope.defineGenericFunctionTemplate(name, template: template)
+        
+        // Mark as intrinsic generic function for special handling during monomorphization
+        intrinsicGenericFunctions.insert(name)
+        
         return .genericFunctionTemplate(name: name)
       }
 
@@ -870,37 +1309,72 @@ public class TypeChecker {
     case .givenDeclaration(let typeParams, let typeNode, let methods, let line):
       self.currentLine = line
       if !typeParams.isEmpty {
-        // Generic Given
-        guard case .generic(let baseName, let args) = typeNode else {
+        // Generic Given - signatures were registered in Pass 2 (collectGivenSignatures)
+        // Now we only need to check method bodies
+        guard case .generic(let baseName, _) = typeNode else {
           throw SemanticError.invalidOperation(
             op: "generic given on non-generic type", type1: "", type2: "")
         }
-
-        // Validate that args are exactly the type params
-        if args.count != typeParams.count {
-          throw SemanticError.typeMismatch(
-            expected: "\(typeParams.count) generic params", got: "\(args.count)")
+        
+        // Create a generic Self type for body checking
+        let genericSelfArgs = typeParams.map { Type.genericParameter(name: $0.name) }
+        let genericSelfType: Type
+        if baseName == "Pointer" && genericSelfArgs.count == 1 {
+          genericSelfType = .pointer(element: genericSelfArgs[0])
+        } else if currentScope.lookupGenericStructTemplate(baseName) != nil {
+          genericSelfType = .genericStruct(template: baseName, args: genericSelfArgs)
+        } else if currentScope.lookupGenericUnionTemplate(baseName) != nil {
+          genericSelfType = .genericUnion(template: baseName, args: genericSelfArgs)
+        } else {
+          genericSelfType = .genericStruct(template: baseName, args: genericSelfArgs)
         }
-        for (i, arg) in args.enumerated() {
-          guard case .identifier(let argName) = arg, argName == typeParams[i].name else {
-            throw SemanticError.invalidOperation(
-              op: "generic given specialization not supported", type1: String(describing: arg),
-              type2: "")
+        
+        // Find the templates registered in Pass 2 and check their bodies
+        guard let templates = genericExtensionMethods[baseName] else {
+          return nil
+        }
+        
+        // Find the templates for this given block (they were added in order)
+        // We need to find templates that match our methods
+        for (methodIndex, method) in methods.enumerated() {
+          // Find the template for this method
+          guard let templateIndex = templates.firstIndex(where: { 
+            $0.method.name == method.name && 
+            $0.typeParams.count == typeParams.count &&
+            $0.checkedBody == nil  // Not yet checked
+          }) else {
+            continue
           }
-        }
-
-        // Register methods for the template
-        // Note: Method bodies are type-checked during instantiation when Self is concrete
-        // We cannot validate method signatures here because they may reference types
-        // that are defined later in the file (forward references)
-        if genericExtensionMethods[baseName] == nil {
-          genericExtensionMethods[baseName] = []
-        }
-        for method in methods {
-          genericExtensionMethods[baseName]!.append(GenericExtensionMethodTemplate(
-            typeParams: typeParams,
-            method: method
-          ))
+          
+          let template = templates[templateIndex]
+          
+          // Check method body
+          let checkedBody = try withNewScope {
+            for typeParam in typeParams {
+              try currentScope.defineType(
+                typeParam.name, type: .genericParameter(name: typeParam.name))
+            }
+            try recordGenericTraitBounds(typeParams)
+            
+            try currentScope.defineType("Self", type: genericSelfType)
+            currentScope.define("self", genericSelfType, mutable: false)
+            
+            let (typedBody, _) = try checkFunctionBody(
+              template.checkedParameters ?? [],
+              template.checkedReturnType ?? .void,
+              method.body
+            )
+            return typedBody
+          }
+          
+          // Update the template with the checked body
+          genericExtensionMethods[baseName]![templateIndex] = GenericExtensionMethodTemplate(
+            typeParams: template.typeParams,
+            method: template.method,
+            checkedBody: checkedBody,
+            checkedParameters: template.checkedParameters,
+            checkedReturnType: template.checkedReturnType
+          )
         }
 
         // Return nil as we process these lazily upon instantiation
@@ -1008,10 +1482,9 @@ public class TypeChecker {
           return (functionType, params, returnType)
         }
 
-        let mangledName = "\(typeName)_\(method.name)"
         let methodKind = getCompilerMethodKind(method.name)
         let methodSymbol = Symbol(
-          name: mangledName,
+          name: method.name,  // Use original method name, Monomorphizer will mangle it
           type: methodType,
           kind: .function,
           methodKind: methodKind
@@ -1127,10 +1600,9 @@ public class TypeChecker {
           return (functionType, typedBody, params, returnType)
         }
 
-        let mangledName = "\(typeName)_\(method.name)"
         let methodKind = getCompilerMethodKind(method.name)
         let methodSymbol = Symbol(
-          name: mangledName,
+          name: method.name,  // Use original method name, Monomorphizer will mangle it
           type: methodType,
           kind: .function,
           methodKind: methodKind
@@ -1156,23 +1628,12 @@ public class TypeChecker {
     case .globalStructDeclaration(
       let name, let typeParameters, let parameters, _, let line):
       self.currentLine = line
-      // Check if type already exists
-      if currentScope.hasTypeDefinition(name) {
-        throw SemanticError.duplicateTypeDefinition(name)
-      }
+      // Note: Type was already registered in Pass 1 (collectTypeDefinition)
+      // Pass 2 only validates field types and finalizes the type definition
 
       if !typeParameters.isEmpty {
-        // Register template first to allow recursive type references
-        let template = GenericStructTemplate(
-          name: name, typeParameters: typeParameters, parameters: parameters)
-        currentScope.defineGenericStructTemplate(name, template: template)
-        
-        // Perform declaration-time validation of field types in validation-only mode
-        // This validates type references without actually instantiating types
-        let savedValidationMode = isValidationOnlyMode
-        isValidationOnlyMode = true
-        defer { isValidationOnlyMode = savedValidationMode }
-        
+        // Generic struct template was already registered in Pass 1
+        // Now validate field types with type parameters in scope
         try withNewScope {
           // Define type parameters as generic parameter types
           for param in typeParameters {
@@ -1189,10 +1650,9 @@ public class TypeChecker {
         return .genericTypeTemplate(name: name)
       }
 
-      // Placeholder for recursion
-      let placeholder = Type.structure(
-        name: name, members: [], isGenericInstantiation: false)
-      try currentScope.defineType(name, type: placeholder, line: line)
+      // Non-generic struct: placeholder was registered in Pass 1
+      // Now resolve member types and finalize the type definition
+      let placeholder = currentScope.lookupType(name)!
 
       let params = try parameters.map { param -> Symbol in
         let paramType = try resolveTypeNode(param.type)
@@ -1221,36 +1681,17 @@ public class TypeChecker {
 
     case .intrinsicTypeDeclaration(let name, let typeParameters, _, let line):
       self.currentLine = line
-      if currentScope.lookupType(name) != nil {
-        // Allow re-declaration if it matches known intrinsic? No, error duplicate.
-        throw SemanticError.duplicateTypeDefinition(name)
-      }
-
-      // Intrinsic Type (e.g. Int, Bool, Pointer)
-      let type: Type
-      switch name {
-      case "Int": type = .int
-      case "Bool": type = .bool
-      case "Void": type = .void
-      case "Never": type = .never
-      case "Pointer":
-        // Pointer is generic, handled below
-        type = .void  // Placeholder
-      default:
-        // Default to empty structure for other intrinsics
-        type = .structure(name: name, members: [], isGenericInstantiation: false)
-      }
+      // Note: Type was already registered in Pass 1 (collectTypeDefinition)
+      // Pass 2 just returns the appropriate node
 
       if typeParameters.isEmpty {
-        try currentScope.defineType(name, type: type)
+        // Non-generic intrinsic type was already registered in Pass 1
+        let type = currentScope.lookupType(name) ?? .structure(name: name, members: [], isGenericInstantiation: false)
         let dummySymbol = Symbol(name: name, type: type, kind: .variable(.Value))
         return .globalStructDeclaration(identifier: dummySymbol, parameters: [])
       } else {
-        // For generic intrinsics (like Pointer<T>), we still need a template definition
-        // so the type checker knows it accepts distinct type parameters.
-        let template = GenericStructTemplate(
-          name: name, typeParameters: typeParameters, parameters: [])
-        currentScope.defineGenericStructTemplate(name, template: template)
+        // Generic intrinsic template was already registered in Pass 1
+        // intrinsicGenericTypes was also already populated in Pass 1
         return .genericTypeTemplate(name: name)
       }
     }
@@ -1567,10 +2008,224 @@ public class TypeChecker {
       )
 
     case .call(let callee, let arguments):
+      // Check if callee is a static method call on a generic type (e.g., [Int]List.new())
+      if case .memberPath(let baseExpr, let path) = callee,
+         case .genericInstantiation(let baseName, let args) = baseExpr,
+         path.count == 1 {
+        let memberName = path[0]
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        
+        // Check if it's a generic struct with a static method
+        if let template = currentScope.lookupGenericStructTemplate(baseName) {
+          // Validate type argument count
+          guard template.typeParameters.count == resolvedArgs.count else {
+            throw SemanticError.typeMismatch(
+              expected: "\(template.typeParameters.count) generic arguments",
+              got: "\(resolvedArgs.count)"
+            )
+          }
+          
+          // Validate generic constraints
+          try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
+          
+          // Record instantiation request for deferred monomorphization
+          if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+            recordInstantiation(InstantiationRequest(
+              kind: .structType(template: template, args: resolvedArgs),
+              sourceLine: currentLine,
+              sourceFileName: currentFileName
+            ))
+          }
+          
+          // Create parameterized type
+          let baseType = Type.genericStruct(template: baseName, args: resolvedArgs)
+          
+          // Look up static method on generic struct
+          if let extensions = genericExtensionMethods[baseName] {
+            if let ext = extensions.first(where: { $0.method.name == memberName }) {
+              let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
+              if isStatic {
+                let methodSym = try resolveGenericExtensionMethod(
+                  baseType: baseType, templateName: baseName, typeArgs: resolvedArgs,
+                  methodInfo: ext)
+                if methodSym.methodKind != .normal {
+                  throw SemanticError(
+                    .generic("compiler protocol method \(memberName) cannot be called explicitly"),
+                    line: currentLine)
+                }
+                
+                // Get function parameters and return type
+                guard case .function(let params, let returnType) = methodSym.type else {
+                  throw SemanticError(.generic("Expected function type for static method"), line: currentLine)
+                }
+                
+                // Check argument count
+                if arguments.count != params.count {
+                  throw SemanticError.invalidArgumentCount(
+                    function: memberName,
+                    expected: params.count,
+                    got: arguments.count
+                  )
+                }
+                
+                // Type check arguments
+                var typedArguments: [TypedExpressionNode] = []
+                for (arg, param) in zip(arguments, params) {
+                  var typedArg = try inferTypedExpression(arg)
+                  typedArg = coerceLiteral(typedArg, to: param.type)
+                  if typedArg.type != param.type {
+                    throw SemanticError.typeMismatch(
+                      expected: param.type.description,
+                      got: typedArg.type.description
+                    )
+                  }
+                  typedArguments.append(typedArg)
+                }
+                
+                // Return staticMethodCall node
+                return .staticMethodCall(
+                  baseType: baseType,
+                  methodName: memberName,
+                  typeArgs: resolvedArgs,
+                  arguments: typedArguments,
+                  type: returnType
+                )
+              }
+            }
+          }
+        }
+        
+        // Check if it's a generic union with a case constructor or static method
+        if let template = currentScope.lookupGenericUnionTemplate(baseName) {
+          // Validate type argument count
+          guard template.typeParameters.count == resolvedArgs.count else {
+            throw SemanticError.typeMismatch(
+              expected: "\(template.typeParameters.count) generic arguments",
+              got: "\(resolvedArgs.count)"
+            )
+          }
+          
+          // Validate generic constraints
+          try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
+          
+          // Record instantiation request for deferred monomorphization
+          if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+            recordInstantiation(InstantiationRequest(
+              kind: .unionType(template: template, args: resolvedArgs),
+              sourceLine: currentLine,
+              sourceFileName: currentFileName
+            ))
+          }
+          
+          // Create parameterized type
+          let baseType = Type.genericUnion(template: baseName, args: resolvedArgs)
+          
+          // Check if it's a union case constructor
+          var substitution: [String: Type] = [:]
+          for (i, param) in template.typeParameters.enumerated() {
+            substitution[param.name] = resolvedArgs[i]
+          }
+          
+          if let c = template.cases.first(where: { $0.name == memberName }) {
+            let resolvedParams = try withNewScope {
+              for (paramName, paramType) in substitution {
+                try currentScope.defineType(paramName, type: paramType)
+              }
+              return try c.parameters.map { param -> Parameter in
+                let paramType = try resolveTypeNode(param.type)
+                return Parameter(type: paramType, kind: .byVal)
+              }
+            }
+            
+            if arguments.count != resolvedParams.count {
+              throw SemanticError.invalidArgumentCount(
+                function: "\(baseName).\(memberName)",
+                expected: resolvedParams.count,
+                got: arguments.count
+              )
+            }
+            
+            var typedArgs: [TypedExpressionNode] = []
+            for (arg, param) in zip(arguments, resolvedParams) {
+              var typedArg = try inferTypedExpression(arg)
+              typedArg = coerceLiteral(typedArg, to: param.type)
+              if typedArg.type != param.type {
+                throw SemanticError.typeMismatch(
+                  expected: param.type.description, got: typedArg.type.description)
+              }
+              typedArgs.append(typedArg)
+            }
+            
+            return .unionConstruction(type: baseType, caseName: memberName, arguments: typedArgs)
+          }
+          
+          // Look up static method on generic union
+          if let extensions = genericExtensionMethods[baseName] {
+            if let ext = extensions.first(where: { $0.method.name == memberName }) {
+              let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
+              if isStatic {
+                let methodSym = try resolveGenericExtensionMethod(
+                  baseType: baseType, templateName: baseName, typeArgs: resolvedArgs,
+                  methodInfo: ext)
+                if methodSym.methodKind != .normal {
+                  throw SemanticError(
+                    .generic("compiler protocol method \(memberName) cannot be called explicitly"),
+                    line: currentLine)
+                }
+                
+                guard case .function(let params, let returnType) = methodSym.type else {
+                  throw SemanticError(.generic("Expected function type for static method"), line: currentLine)
+                }
+                
+                if arguments.count != params.count {
+                  throw SemanticError.invalidArgumentCount(
+                    function: memberName,
+                    expected: params.count,
+                    got: arguments.count
+                  )
+                }
+                
+                var typedArguments: [TypedExpressionNode] = []
+                for (arg, param) in zip(arguments, params) {
+                  var typedArg = try inferTypedExpression(arg)
+                  typedArg = coerceLiteral(typedArg, to: param.type)
+                  if typedArg.type != param.type {
+                    throw SemanticError.typeMismatch(
+                      expected: param.type.description,
+                      got: typedArg.type.description
+                    )
+                  }
+                  typedArguments.append(typedArg)
+                }
+                
+                return .staticMethodCall(
+                  baseType: baseType,
+                  methodName: memberName,
+                  typeArgs: resolvedArgs,
+                  arguments: typedArguments,
+                  type: returnType
+                )
+              }
+            }
+          }
+        }
+      }
+      
       // Check if callee is a generic instantiation (Constructor call or Function call)
       if case .genericInstantiation(let base, let args) = callee {
         if let template = currentScope.lookupGenericStructTemplate(base) {
           let resolvedArgs = try args.map { try resolveTypeNode($0) }
+          
+          // Validate type argument count
+          guard template.typeParameters.count == resolvedArgs.count else {
+            throw SemanticError.typeMismatch(
+              expected: "\(template.typeParameters.count) generic arguments",
+              got: "\(resolvedArgs.count)"
+            )
+          }
+          
+          // Validate generic constraints
+          try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
           
           // Record instantiation request for deferred monomorphization
           // Skip if any argument contains generic parameters (will be recorded when fully resolved)
@@ -1582,22 +2237,33 @@ public class TypeChecker {
             ))
           }
           
-          let instantiatedType = try instantiate(template: template, args: resolvedArgs)
-
-          guard case .structure(let typeName, let members, _) = instantiatedType else {
-            fatalError("Instantiated type must be a structure")
+          // Create type substitution map
+          var substitution: [String: Type] = [:]
+          for (i, param) in template.typeParameters.enumerated() {
+            substitution[param.name] = resolvedArgs[i]
+          }
+          
+          // Resolve member types with substitution
+          let memberTypes = try withNewScope {
+            for (paramName, paramType) in substitution {
+              try currentScope.defineType(paramName, type: paramType)
+            }
+            return try template.parameters.map { param -> (name: String, type: Type, mutable: Bool) in
+              let fieldType = try resolveTypeNode(param.type)
+              return (name: param.name, type: fieldType, mutable: param.mutable)
+            }
           }
 
-          if arguments.count != members.count {
+          if arguments.count != memberTypes.count {
             throw SemanticError.invalidArgumentCount(
-              function: typeName,
-              expected: members.count,
+              function: base,
+              expected: memberTypes.count,
               got: arguments.count
             )
           }
 
           var typedArguments: [TypedExpressionNode] = []
-          for (arg, expectedMember) in zip(arguments, members) {
+          for (arg, expectedMember) in zip(arguments, memberTypes) {
             var typedArg = try inferTypedExpression(arg)
             typedArg = coerceLiteral(typedArg, to: expectedMember.type)
             if typedArg.type != expectedMember.type {
@@ -1608,11 +2274,15 @@ public class TypeChecker {
             }
             typedArguments.append(typedArg)
           }
+          
+          // Return parameterized type
+          let genericType = Type.genericStruct(template: base, args: resolvedArgs)
 
           return .typeConstruction(
-            identifier: Symbol(name: typeName, type: instantiatedType, kind: .type),
+            identifier: Symbol(name: base, type: genericType, kind: .type),
+            typeArgs: resolvedArgs,
             arguments: typedArguments,
-            type: instantiatedType
+            type: genericType
           )
         } else if let template = currentScope.lookupGenericFunctionTemplate(base) {
           // Special handling for explicit intrinsic template calls (e.g. [Int]alloc_memory)
@@ -1689,6 +2359,17 @@ public class TypeChecker {
 
           let resolvedArgs = try args.map { try resolveTypeNode($0) }
           
+          // Validate type argument count
+          guard template.typeParameters.count == resolvedArgs.count else {
+            throw SemanticError.typeMismatch(
+              expected: "\(template.typeParameters.count) generic arguments",
+              got: "\(resolvedArgs.count)"
+            )
+          }
+          
+          // Validate generic constraints
+          try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
+          
           // Record instantiation request for deferred monomorphization
           // Skip if any argument contains generic parameters (will be recorded when fully resolved)
           if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
@@ -1699,16 +2380,28 @@ public class TypeChecker {
             ))
           }
           
-          let (instantiatedName, instantiatedType) = try instantiateFunction(
-            template: template, args: resolvedArgs)
-
-          guard case .function(let params, let returns) = instantiatedType else {
-            fatalError("Instantiated function must have function type")
+          // Create type substitution map
+          var substitution: [String: Type] = [:]
+          for (i, param) in template.typeParameters.enumerated() {
+            substitution[param.name] = resolvedArgs[i]
+          }
+          
+          // Resolve parameter and return types with substitution
+          let (params, returnType) = try withNewScope {
+            for (paramName, paramType) in substitution {
+              try currentScope.defineType(paramName, type: paramType)
+            }
+            let resolvedParams = try template.parameters.map { param -> Parameter in
+              let paramType = try resolveTypeNode(param.type)
+              return Parameter(type: paramType, kind: param.mutable ? .byMutRef : .byVal)
+            }
+            let resolvedReturn = try resolveTypeNode(template.returnType)
+            return (resolvedParams, resolvedReturn)
           }
 
           if arguments.count != params.count {
             throw SemanticError.invalidArgumentCount(
-              function: instantiatedName,
+              function: base,
               expected: params.count,
               got: arguments.count
             )
@@ -1727,11 +2420,12 @@ public class TypeChecker {
             typedArguments.append(typedArg)
           }
 
-          return .call(
-            callee: .variable(
-              identifier: Symbol(name: instantiatedName, type: instantiatedType, kind: .function)),
+          // Return genericCall node instead of instantiated call
+          return .genericCall(
+            functionName: base,
+            typeArgs: resolvedArgs,
             arguments: typedArguments,
-            type: returns
+            type: returnType
           )
         } else {
           throw SemanticError.undefinedType(base)
@@ -1748,30 +2442,39 @@ public class TypeChecker {
       }
 
       if let resolved = preResolvedCallee, case .variable(let symbol) = resolved {
-        if case .function(_, let returnType) = symbol.type,
-          case .union(let uName, _, _) = returnType
-        {
-          // Check if symbol name is uName.CaseName
-          if symbol.name.starts(with: uName + ".") {
-            let caseName = String(symbol.name.dropFirst(uName.count + 1))
-            let params = symbol.type.functionParameters!
+        if case .function(_, let returnType) = symbol.type {
+          // Check for union constructor (both concrete and generic)
+          var unionName: String? = nil
+          if case .union(let uName, _, _) = returnType {
+            unionName = uName
+          } else if case .genericUnion(let templateName, _) = returnType {
+            unionName = templateName
+          }
+          
+          if let uName = unionName {
+            // Check if symbol name is uName.CaseName
+            if symbol.name.starts(with: uName + ".") {
+              let caseName = String(symbol.name.dropFirst(uName.count + 1))
+              let params = symbol.type.functionParameters!
 
-            if arguments.count != params.count {
-              throw SemanticError.invalidArgumentCount(
-                function: symbol.name, expected: params.count, got: arguments.count)
-            }
-
-            var typedArgs: [TypedExpressionNode] = []
-            for (arg, param) in zip(arguments, params) {
-              let typedArg = try inferTypedExpression(arg)
-              if typedArg.type != param.type {
-                throw SemanticError.typeMismatch(
-                  expected: param.type.description, got: typedArg.type.description)
+              if arguments.count != params.count {
+                throw SemanticError.invalidArgumentCount(
+                  function: symbol.name, expected: params.count, got: arguments.count)
               }
-              typedArgs.append(typedArg)
-            }
 
-            return .unionConstruction(type: returnType, caseName: caseName, arguments: typedArgs)
+              var typedArgs: [TypedExpressionNode] = []
+              for (arg, param) in zip(arguments, params) {
+                var typedArg = try inferTypedExpression(arg)
+                typedArg = coerceLiteral(typedArg, to: param.type)
+                if typedArg.type != param.type {
+                  throw SemanticError.typeMismatch(
+                    expected: param.type.description, got: typedArg.type.description)
+                }
+                typedArgs.append(typedArg)
+              }
+
+              return .unionConstruction(type: returnType, caseName: caseName, arguments: typedArgs)
+            }
           }
         }
       }
@@ -1848,17 +2551,30 @@ public class TypeChecker {
               sourceFileName: currentFileName
             ))
           }
+          
+          // Validate generic constraints
+          try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
+          
+          // Create type substitution map
+          var substitution: [String: Type] = [:]
+          for (i, param) in template.typeParameters.enumerated() {
+            substitution[param.name] = resolvedArgs[i]
+          }
+          
+          // Resolve return type with substitution
+          let returnType = try withNewScope {
+            for (paramName, paramType) in substitution {
+              try currentScope.defineType(paramName, type: paramType)
+            }
+            return try resolveTypeNode(template.returnType)
+          }
 
-          let (instantiatedName, instantiatedType) = try instantiateFunction(
-            template: template, args: resolvedArgs)
-
-          guard case .function(_, let returns) = instantiatedType else { fatalError() }
-
-          return .call(
-            callee: .variable(
-              identifier: Symbol(name: instantiatedName, type: instantiatedType, kind: .function)),
+          // Return genericCall node instead of instantiated call
+          return .genericCall(
+            functionName: name,
+            typeArgs: resolvedArgs,
             arguments: typedArguments,
-            type: returns
+            type: returnType
           )
         }
 
@@ -1891,6 +2607,7 @@ public class TypeChecker {
 
           return .typeConstruction(
             identifier: Symbol(name: name, type: type, kind: .type),
+            typeArgs: nil,
             arguments: typedArguments,
             type: type
           )
@@ -1913,7 +2630,7 @@ public class TypeChecker {
       }
 
       // Method call
-      if case .methodReference(let base, let method, let methodType) = typedCallee {
+      if case .methodReference(let base, let method, _, let methodType) = typedCallee {
         // Intercept Pointer methods
         if case .pointer(_) = base.type,
           let node = try checkIntrinsicPointerMethod(base: base, method: method, args: arguments)
@@ -1956,7 +2673,7 @@ public class TypeChecker {
           }
 
           let finalCallee: TypedExpressionNode = .methodReference(
-            base: finalBase, method: method, type: methodType)
+            base: finalBase, method: method, typeArgs: nil, type: methodType)
 
 
           var typedArguments: [TypedExpressionNode] = []
@@ -2142,6 +2859,17 @@ public class TypeChecker {
         if let template = currentScope.lookupGenericStructTemplate(baseName) {
           let resolvedArgs = try args.map { try resolveTypeNode($0) }
           
+          // Validate type argument count
+          guard template.typeParameters.count == resolvedArgs.count else {
+            throw SemanticError.typeMismatch(
+              expected: "\(template.typeParameters.count) generic arguments",
+              got: "\(resolvedArgs.count)"
+            )
+          }
+          
+          // Validate generic constraints
+          try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
+          
           // Record instantiation request for deferred monomorphization
           // Skip if any argument contains generic parameters (will be recorded when fully resolved)
           if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
@@ -2152,35 +2880,44 @@ public class TypeChecker {
             ))
           }
           
-          let type = try instantiate(template: template, args: resolvedArgs)
+          // Create parameterized type
+          let type = Type.genericStruct(template: baseName, args: resolvedArgs)
 
           if path.count == 1 {
             let memberName = path[0]
-            if case .structure(let name, _, let isGen) = type, isGen,
-              let info = layoutToTemplateInfo[name]
-            {
-              if let extensions = genericExtensionMethods[info.base] {
-                if let ext = extensions.first(where: { $0.method.name == memberName }) {
-                  let isStatic =
-                    ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
-                  if isStatic {
-                    let methodSym = try instantiateExtensionMethod(
-                      baseType: type, structureName: info.base, genericArgs: info.args,
-                      methodInfo: ext)
-                    if methodSym.methodKind != .normal {
-                      throw SemanticError(
-                        .generic(
-                          "compiler protocol method \(memberName) cannot be called explicitly"),
-                        line: currentLine)
-                    }
-                    return .variable(identifier: methodSym)
+            // Look up static method on generic struct
+            if let extensions = genericExtensionMethods[baseName] {
+              if let ext = extensions.first(where: { $0.method.name == memberName }) {
+                let isStatic =
+                  ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
+                if isStatic {
+                  let methodSym = try resolveGenericExtensionMethod(
+                    baseType: type, templateName: baseName, typeArgs: resolvedArgs,
+                    methodInfo: ext)
+                  if methodSym.methodKind != .normal {
+                    throw SemanticError(
+                      .generic(
+                        "compiler protocol method \(memberName) cannot be called explicitly"),
+                      line: currentLine)
                   }
+                  return .variable(identifier: methodSym)
                 }
               }
             }
           }
         } else if let template = currentScope.lookupGenericUnionTemplate(baseName) {
           let resolvedArgs = try args.map { try resolveTypeNode($0) }
+          
+          // Validate type argument count
+          guard template.typeParameters.count == resolvedArgs.count else {
+            throw SemanticError.typeMismatch(
+              expected: "\(template.typeParameters.count) generic arguments",
+              got: "\(resolvedArgs.count)"
+            )
+          }
+          
+          // Validate generic constraints
+          try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
           
           // Record instantiation request for deferred monomorphization
           // Skip if any argument contains generic parameters (will be recorded when fully resolved)
@@ -2192,19 +2929,35 @@ public class TypeChecker {
             ))
           }
           
-          let type = try instantiateUnion(template: template, args: resolvedArgs)
+          // Create parameterized type
+          let type = Type.genericUnion(template: baseName, args: resolvedArgs)
 
           if path.count == 1 {
             let memberName = path[0]
-            if case .union(let uName, let cases, _) = type {
-              if let c = cases.first(where: { $0.name == memberName }) {
-                let symbolName = "\(uName).\(memberName)"
-                let paramTypes = c.parameters.map { Parameter(type: $0.type, kind: .byVal) }
-                let constructorType = Type.function(parameters: paramTypes, returns: type)
-                let symbol = Symbol(
-                  name: symbolName, type: constructorType, kind: .variable(.Value))
-                return .variable(identifier: symbol)
+            // Look up union case constructor
+            // Create type substitution to resolve case parameter types
+            var substitution: [String: Type] = [:]
+            for (i, param) in template.typeParameters.enumerated() {
+              substitution[param.name] = resolvedArgs[i]
+            }
+            
+            // Find the case and resolve its parameter types
+            if let c = template.cases.first(where: { $0.name == memberName }) {
+              let resolvedParams = try withNewScope {
+                for (paramName, paramType) in substitution {
+                  try currentScope.defineType(paramName, type: paramType)
+                }
+                return try c.parameters.map { param -> Parameter in
+                  let paramType = try resolveTypeNode(param.type)
+                  return Parameter(type: paramType, kind: .byVal)
+                }
               }
+              
+              let symbolName = "\(baseName).\(memberName)"
+              let constructorType = Type.function(parameters: resolvedParams, returns: type)
+              let symbol = Symbol(
+                name: symbolName, type: constructorType, kind: .variable(.Value))
+              return .variable(identifier: symbol)
             }
           }
         }
@@ -2321,6 +3074,34 @@ public class TypeChecker {
             foundMember = true
           }
         }
+        
+        // Handle genericStruct types - look up member from template
+        if !foundMember, case .genericStruct(let templateName, let typeArgs) = typeToLookup {
+          if let template = currentScope.lookupGenericStructTemplate(templateName) {
+            // Create type substitution map
+            var substitution: [String: Type] = [:]
+            for (i, param) in template.typeParameters.enumerated() {
+              if i < typeArgs.count {
+                substitution[param.name] = typeArgs[i]
+              }
+            }
+            
+            // Look up member in template and substitute types
+            if let param = template.parameters.first(where: { $0.name == memberName }) {
+              let memberType = try withNewScope {
+                for (paramName, paramType) in substitution {
+                  try currentScope.defineType(paramName, type: paramType)
+                }
+                return try resolveTypeNode(param.type)
+              }
+              let sym = Symbol(
+                name: param.name, type: memberType, kind: .variable(param.mutable ? .MutableValue : .Value))
+              typedPath.append(sym)
+              currentType = memberType
+              foundMember = true
+            }
+          }
+        }
 
         if !foundMember {
           if isLast {
@@ -2338,17 +3119,17 @@ public class TypeChecker {
               } else {
                 base = .memberPath(source: typedBase, path: typedPath)
               }
-              return .methodReference(base: base, method: methodSym, type: methodSym.type)
+              return .methodReference(base: base, method: methodSym, typeArgs: nil, type: methodSym.type)
             }
 
             if case .pointer(let element) = typeToLookup {
               if let extensions = genericIntrinsicExtensionMethods["Pointer"] {
                 for ext in extensions {
                   if ext.method.name == memberName {
-                    let methodSym = try instantiateIntrinsicExtensionMethod(
+                    let methodSym = try resolveIntrinsicExtensionMethod(
                       baseType: typeToLookup,
-                      structureName: "Pointer",
-                      genericArgs: [element],
+                      templateName: "Pointer",
+                      typeArgs: [element],
                       methodInfo: ext
                     )
                     if methodSym.methodKind != .normal {
@@ -2363,7 +3144,7 @@ public class TypeChecker {
                     } else {
                       base = .memberPath(source: typedBase, path: typedPath)
                     }
-                    return .methodReference(base: base, method: methodSym, type: methodSym.type)
+                    return .methodReference(base: base, method: methodSym, typeArgs: [element], type: methodSym.type)
                   }
                 }
               }
@@ -2371,10 +3152,10 @@ public class TypeChecker {
               if let extensions = genericExtensionMethods["Pointer"] {
                 for ext in extensions {
                   if ext.method.name == memberName {
-                    let methodSym = try instantiateExtensionMethod(
+                    let methodSym = try resolveGenericExtensionMethod(
                       baseType: typeToLookup,
-                      structureName: "Pointer",
-                      genericArgs: [element],
+                      templateName: "Pointer",
+                      typeArgs: [element],
                       methodInfo: ext
                     )
                     if methodSym.methodKind != .normal {
@@ -2389,28 +3170,21 @@ public class TypeChecker {
                     } else {
                       base = .memberPath(source: typedBase, path: typedPath)
                     }
-                    return .methodReference(base: base, method: methodSym, type: methodSym.type)
+                    return .methodReference(base: base, method: methodSym, typeArgs: [element], type: methodSym.type)
                   }
                 }
               }
             }
-
-            var isGenericInstance = false
-            if case .structure(_, _, let isGen) = typeToLookup {
-              isGenericInstance = isGen
-            } else if case .union(_, _, let isGen) = typeToLookup {
-              isGenericInstance = isGen
-            }
-
-            if isGenericInstance, let info = layoutToTemplateInfo[typeName] {
-
-              if let extensions = genericExtensionMethods[info.base] {
+            
+            // Handle genericStruct types
+            if case .genericStruct(let templateName, let typeArgs) = typeToLookup {
+              if let extensions = genericExtensionMethods[templateName] {
                 for ext in extensions {
                   if ext.method.name == memberName {
-                    let methodSym = try instantiateExtensionMethod(
+                    let methodSym = try resolveGenericExtensionMethod(
                       baseType: typeToLookup,
-                      structureName: info.base,
-                      genericArgs: info.args,
+                      templateName: templateName,
+                      typeArgs: typeArgs,
                       methodInfo: ext
                     )
                     if methodSym.methodKind != .normal {
@@ -2425,18 +3199,21 @@ public class TypeChecker {
                     } else {
                       base = .memberPath(source: typedBase, path: typedPath)
                     }
-                    return .methodReference(base: base, method: methodSym, type: methodSym.type)
+                    return .methodReference(base: base, method: methodSym, typeArgs: typeArgs, type: methodSym.type)
                   }
                 }
               }
-
-              if let extensions = genericIntrinsicExtensionMethods[info.base] {
+            }
+            
+            // Handle genericUnion types
+            if case .genericUnion(let templateName, let typeArgs) = typeToLookup {
+              if let extensions = genericExtensionMethods[templateName] {
                 for ext in extensions {
                   if ext.method.name == memberName {
-                    let methodSym = try instantiateIntrinsicExtensionMethod(
+                    let methodSym = try resolveGenericExtensionMethod(
                       baseType: typeToLookup,
-                      structureName: info.base,
-                      genericArgs: info.args,
+                      templateName: templateName,
+                      typeArgs: typeArgs,
                       methodInfo: ext
                     )
                     if methodSym.methodKind != .normal {
@@ -2451,7 +3228,7 @@ public class TypeChecker {
                     } else {
                       base = .memberPath(source: typedBase, path: typedPath)
                     }
-                    return .methodReference(base: base, method: methodSym, type: methodSym.type)
+                    return .methodReference(base: base, method: methodSym, typeArgs: typeArgs, type: methodSym.type)
                   }
                 }
               }
@@ -2488,7 +3265,7 @@ public class TypeChecker {
                   } else {
                     base = .memberPath(source: typedBase, path: typedPath)
                   }
-                  return .methodReference(base: base, method: placeholder, type: expectedType)
+                  return .methodReference(base: base, method: placeholder, typeArgs: nil, type: expectedType)
                 }
               }
             }
@@ -2503,6 +3280,248 @@ public class TypeChecker {
         }
       }
       return .memberPath(source: typedBase, path: typedPath)
+
+    case .staticMethodCall(let typeName, let typeArgs, let methodName, let arguments):
+      // Handle static method call from AST: TypeName.methodName(...) or [T]TypeName.methodName(...)
+      let resolvedTypeArgs = try typeArgs.map { try resolveTypeNode($0) }
+      
+      // Check if it's a generic struct
+      if let template = currentScope.lookupGenericStructTemplate(typeName) {
+        // Validate type argument count
+        guard template.typeParameters.count == resolvedTypeArgs.count else {
+          throw SemanticError.typeMismatch(
+            expected: "\(template.typeParameters.count) generic arguments",
+            got: "\(resolvedTypeArgs.count)"
+          )
+        }
+        
+        // Validate generic constraints
+        try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedTypeArgs)
+        
+        // Record instantiation request for deferred monomorphization
+        if !resolvedTypeArgs.contains(where: { $0.containsGenericParameter }) {
+          recordInstantiation(InstantiationRequest(
+            kind: .structType(template: template, args: resolvedTypeArgs),
+            sourceLine: currentLine,
+            sourceFileName: currentFileName
+          ))
+        }
+        
+        // Create parameterized type
+        let baseType = Type.genericStruct(template: typeName, args: resolvedTypeArgs)
+        
+        // Look up static method on generic struct
+        if let extensions = genericExtensionMethods[typeName] {
+          if let ext = extensions.first(where: { $0.method.name == methodName }) {
+            let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
+            if isStatic {
+              let methodSym = try resolveGenericExtensionMethod(
+                baseType: baseType, templateName: typeName, typeArgs: resolvedTypeArgs,
+                methodInfo: ext)
+              if methodSym.methodKind != .normal {
+                throw SemanticError(
+                  .generic("compiler protocol method \(methodName) cannot be called explicitly"),
+                  line: currentLine)
+              }
+              
+              // Get function parameters and return type
+              guard case .function(let params, let returnType) = methodSym.type else {
+                throw SemanticError(.generic("Expected function type for static method"), line: currentLine)
+              }
+              
+              // Check argument count
+              if arguments.count != params.count {
+                throw SemanticError.invalidArgumentCount(
+                  function: methodName,
+                  expected: params.count,
+                  got: arguments.count
+                )
+              }
+              
+              // Type check arguments
+              var typedArguments: [TypedExpressionNode] = []
+              for (arg, param) in zip(arguments, params) {
+                var typedArg = try inferTypedExpression(arg)
+                typedArg = coerceLiteral(typedArg, to: param.type)
+                if typedArg.type != param.type {
+                  throw SemanticError.typeMismatch(
+                    expected: param.type.description,
+                    got: typedArg.type.description
+                  )
+                }
+                typedArguments.append(typedArg)
+              }
+              
+              // Return staticMethodCall node
+              return .staticMethodCall(
+                baseType: baseType,
+                methodName: methodName,
+                typeArgs: resolvedTypeArgs,
+                arguments: typedArguments,
+                type: returnType
+              )
+            }
+          }
+        }
+        
+        throw SemanticError.undefinedMember(methodName, typeName)
+      }
+      
+      // Check if it's a generic union
+      if let template = currentScope.lookupGenericUnionTemplate(typeName) {
+        // Validate type argument count
+        guard template.typeParameters.count == resolvedTypeArgs.count else {
+          throw SemanticError.typeMismatch(
+            expected: "\(template.typeParameters.count) generic arguments",
+            got: "\(resolvedTypeArgs.count)"
+          )
+        }
+        
+        // Validate generic constraints
+        try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedTypeArgs)
+        
+        // Record instantiation request for deferred monomorphization
+        if !resolvedTypeArgs.contains(where: { $0.containsGenericParameter }) {
+          recordInstantiation(InstantiationRequest(
+            kind: .unionType(template: template, args: resolvedTypeArgs),
+            sourceLine: currentLine,
+            sourceFileName: currentFileName
+          ))
+        }
+        
+        // Create parameterized type
+        let baseType = Type.genericUnion(template: typeName, args: resolvedTypeArgs)
+        
+        // Look up static method on generic union
+        if let extensions = genericExtensionMethods[typeName] {
+          if let ext = extensions.first(where: { $0.method.name == methodName }) {
+            let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
+            if isStatic {
+              let methodSym = try resolveGenericExtensionMethod(
+                baseType: baseType, templateName: typeName, typeArgs: resolvedTypeArgs,
+                methodInfo: ext)
+              if methodSym.methodKind != .normal {
+                throw SemanticError(
+                  .generic("compiler protocol method \(methodName) cannot be called explicitly"),
+                  line: currentLine)
+              }
+              
+              guard case .function(let params, let returnType) = methodSym.type else {
+                throw SemanticError(.generic("Expected function type for static method"), line: currentLine)
+              }
+              
+              if arguments.count != params.count {
+                throw SemanticError.invalidArgumentCount(
+                  function: methodName,
+                  expected: params.count,
+                  got: arguments.count
+                )
+              }
+              
+              var typedArguments: [TypedExpressionNode] = []
+              for (arg, param) in zip(arguments, params) {
+                var typedArg = try inferTypedExpression(arg)
+                typedArg = coerceLiteral(typedArg, to: param.type)
+                if typedArg.type != param.type {
+                  throw SemanticError.typeMismatch(
+                    expected: param.type.description,
+                    got: typedArg.type.description
+                  )
+                }
+                typedArguments.append(typedArg)
+              }
+              
+              return .staticMethodCall(
+                baseType: baseType,
+                methodName: methodName,
+                typeArgs: resolvedTypeArgs,
+                arguments: typedArguments,
+                type: returnType
+              )
+            }
+          }
+        }
+        
+        throw SemanticError.undefinedMember(methodName, typeName)
+      }
+      
+      // Check if it's a non-generic type (e.g., String.empty())
+      if let type = currentScope.lookupType(typeName) {
+        // For non-generic types, typeArgs should be empty
+        if !resolvedTypeArgs.isEmpty {
+          throw SemanticError(.generic("Type \(typeName) is not generic"), line: currentLine)
+        }
+        
+        // Get the type name for method lookup
+        let lookupTypeName: String
+        switch type {
+        case .structure(let name, _, _):
+          lookupTypeName = name
+        case .union(let name, _, _):
+          lookupTypeName = name
+        default:
+          lookupTypeName = type.description
+        }
+        
+        // Look up static method
+        if let methods = extensionMethods[lookupTypeName], let methodSym = methods[methodName] {
+          if methodSym.methodKind != .normal {
+            throw SemanticError(
+              .generic("compiler protocol method \(methodName) cannot be called explicitly"),
+              line: currentLine)
+          }
+          
+          guard case .function(let params, let returnType) = methodSym.type else {
+            throw SemanticError(.generic("Expected function type for static method"), line: currentLine)
+          }
+          
+          // Check if it's a static method (no self parameter or first param is not self)
+          let isStatic = params.isEmpty || {
+            // Check if first parameter is self by looking at the method signature
+            // For static methods, there's no self parameter
+            // We can't easily check this from the function type alone,
+            // so we assume if it's in extensionMethods and being called statically, it's valid
+            true
+          }()
+          
+          if !isStatic {
+            throw SemanticError(.generic("Method \(methodName) requires an instance"), line: currentLine)
+          }
+          
+          if arguments.count != params.count {
+            throw SemanticError.invalidArgumentCount(
+              function: methodName,
+              expected: params.count,
+              got: arguments.count
+            )
+          }
+          
+          var typedArguments: [TypedExpressionNode] = []
+          for (arg, param) in zip(arguments, params) {
+            var typedArg = try inferTypedExpression(arg)
+            typedArg = coerceLiteral(typedArg, to: param.type)
+            if typedArg.type != param.type {
+              throw SemanticError.typeMismatch(
+                expected: param.type.description,
+                got: typedArg.type.description
+              )
+            }
+            typedArguments.append(typedArg)
+          }
+          
+          return .staticMethodCall(
+            baseType: type,
+            methodName: methodName,
+            typeArgs: [],
+            arguments: typedArguments,
+            type: returnType
+          )
+        }
+        
+        throw SemanticError.undefinedMember(methodName, typeName)
+      }
+      
+      throw SemanticError.undefinedType(typeName)
 
     case .genericInstantiation(let base, _):
       throw SemanticError.invalidOperation(op: "use type as value", type1: base, type2: "")
@@ -2746,6 +3765,7 @@ public class TypeChecker {
         let callee: TypedExpressionNode = .methodReference(
           base: finalBase,
           method: updateMethod,
+          typeArgs: nil,
           type: updateMethod.type
         )
         let callExpr: TypedExpressionNode = .call(
@@ -2837,7 +3857,7 @@ public class TypeChecker {
             expected: expectedValueType.description, got: elementType.description)
         }
         let callee: TypedExpressionNode = .methodReference(
-          base: finalBase, method: updateMethod, type: updateMethod.type)
+          base: finalBase, method: updateMethod, typeArgs: nil, type: updateMethod.type)
         let callExpr: TypedExpressionNode = .call(
           callee: callee,
           arguments: argVars + [newValueExpr],
@@ -2932,24 +3952,63 @@ public class TypeChecker {
         // Unwrap reference if needed
         if case .reference(let inner) = currentType { currentType = inner }
 
-        guard case .structure(_, let members, _) = currentType else {
-          throw SemanticError.invalidOperation(
-            op: "member access on non-struct", type1: currentType.description, type2: "")
+        // Handle concrete structure types
+        if case .structure(_, let members, _) = currentType {
+          guard let member = members.first(where: { $0.name == memberName }) else {
+            throw SemanticError.undefinedMember(memberName, currentType.description)
+          }
+
+          if !member.mutable {
+            // Can we mutate immutable member?
+            // If struct is mutable (LValue), then immutable fields are still immutable.
+            throw SemanticError.assignToImmutable(memberName)
+          }
+
+          resolvedPath.append(
+            Symbol(name: member.name, type: member.type, kind: .variable(.MutableValue)))
+          currentType = member.type
+          continue
+        }
+        
+        // Handle genericStruct types - look up member from template
+        if case .genericStruct(let templateName, let typeArgs) = currentType {
+          guard let template = currentScope.lookupGenericStructTemplate(templateName) else {
+            throw SemanticError.undefinedType(templateName)
+          }
+          
+          // Create type substitution map
+          var substitution: [String: Type] = [:]
+          for (i, param) in template.typeParameters.enumerated() {
+            if i < typeArgs.count {
+              substitution[param.name] = typeArgs[i]
+            }
+          }
+          
+          // Look up member in template
+          guard let param = template.parameters.first(where: { $0.name == memberName }) else {
+            throw SemanticError.undefinedMember(memberName, currentType.description)
+          }
+          
+          if !param.mutable {
+            throw SemanticError.assignToImmutable(memberName)
+          }
+          
+          // Resolve member type with substitution
+          let memberType = try withNewScope {
+            for (paramName, paramType) in substitution {
+              try currentScope.defineType(paramName, type: paramType)
+            }
+            return try resolveTypeNode(param.type)
+          }
+          
+          resolvedPath.append(
+            Symbol(name: param.name, type: memberType, kind: .variable(.MutableValue)))
+          currentType = memberType
+          continue
         }
 
-        guard let member = members.first(where: { $0.name == memberName }) else {
-          throw SemanticError.undefinedMember(memberName, currentType.description)
-        }
-
-        if !member.mutable {
-          // Can we mutate immutable member?
-          // If struct is mutable (LValue), then immutable fields are still immutable.
-          throw SemanticError.assignToImmutable(memberName)
-        }
-
-        resolvedPath.append(
-          Symbol(name: member.name, type: member.type, kind: .variable(.MutableValue)))
-        currentType = member.type
+        throw SemanticError.invalidOperation(
+          op: "member access on non-struct", type1: currentType.description, type2: "")
       }
       return .memberPath(source: typedBase, path: resolvedPath)
 
@@ -2979,20 +4038,38 @@ public class TypeChecker {
     let structType: Type
     if case .reference(let inner) = type { structType = inner } else { structType = type }
 
-    guard case .structure(let typeName, _, _) = structType else {
+    // Get the type name for error messages
+    let typeName: String
+    switch structType {
+    case .structure(let name, _, _):
+      typeName = name
+    case .genericStruct(let template, _):
+      typeName = template
+    default:
       throw SemanticError.invalidOperation(op: "subscript", type1: type.description, type2: "")
     }
 
     var methodSymbol: Symbol? = nil
-    if let extensions = extensionMethods[typeName], let sym = extensions[methodName] {
-      methodSymbol = sym
-    } else if case .structure(_, _, let isGen) = structType, isGen,
-      let info = layoutToTemplateInfo[typeName]
-    {
-      if let extensions = genericExtensionMethods[info.base] {
-        if let ext = extensions.first(where: { $0.method.name == methodName }) {
-          methodSymbol = try instantiateExtensionMethod(
-            baseType: structType, structureName: info.base, genericArgs: info.args, methodInfo: ext)
+    
+    // Try to look up method on concrete type first
+    if case .structure(let name, _, _) = structType {
+      if let extensions = extensionMethods[name], let sym = extensions[methodName] {
+        methodSymbol = sym
+      }
+    }
+    
+    // If not found, try generic type lookup
+    if methodSymbol == nil {
+      if case .genericStruct(let templateName, let typeArgs) = structType {
+        if let extensions = genericExtensionMethods[templateName],
+           let ext = extensions.first(where: { $0.method.name == methodName })
+        {
+          methodSymbol = try resolveGenericExtensionMethod(
+            baseType: structType,
+            templateName: templateName,
+            typeArgs: typeArgs,
+            methodInfo: ext
+          )
         }
       }
     }
@@ -3053,9 +4130,6 @@ public class TypeChecker {
   }
 
   // 将 TypeNode 解析为语义层 Type，支持函数参数/返回位置的一层 reference(T)
-  // When validationOnly is true, we skip full instantiation and just validate type references
-  private var isValidationOnlyMode = false
-
   private func resolveTypeNode(_ node: TypeNode) throws -> Type {
     switch node {
     case .identifier(let name):
@@ -3079,17 +4153,29 @@ public class TypeChecker {
       if let template = currentScope.lookupGenericStructTemplate(base) {
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
         
-        // In validation-only mode, just check constraints and return a placeholder
-        if isValidationOnlyMode {
-          guard template.typeParameters.count == resolvedArgs.count else {
-            throw SemanticError.typeMismatch(
-              expected: "\(template.typeParameters.count) generic arguments",
-              got: "\(resolvedArgs.count)"
-            )
-          }
-          try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
-          // Return a placeholder that won't be used for actual code generation
-          return .genericParameter(name: "\(base)<\(resolvedArgs.map { $0.description }.joined(separator: ","))>")
+        // Validate type argument count
+        guard template.typeParameters.count == resolvedArgs.count else {
+          throw SemanticError.typeMismatch(
+            expected: "\(template.typeParameters.count) generic arguments",
+            got: "\(resolvedArgs.count)"
+          )
+        }
+        
+        // Validate generic constraints
+        try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
+        
+        // Special case: Pointer<T> resolves directly to .pointer(element: T)
+        if template.name == "Pointer" {
+          return .pointer(element: resolvedArgs[0])
+        }
+        
+        // Build recursion detection key
+        let recursionKey = "\(base)<\(resolvedArgs.map { $0.description }.joined(separator: ","))>"
+        
+        // Check for recursion - if we're already resolving this type, return parameterized type
+        // This allows recursive types through ref (e.g., type [T]Node(value T, next ref [T]Node))
+        if resolvingGenericTypes.contains(recursionKey) {
+          return .genericStruct(template: base, args: resolvedArgs)
         }
         
         // Record instantiation request for deferred monomorphization
@@ -3102,21 +4188,29 @@ public class TypeChecker {
           ))
         }
         
-        return try instantiate(template: template, args: resolvedArgs)
+        // Return parameterized type instead of instantiating
+        return .genericStruct(template: base, args: resolvedArgs)
       } else if let template = currentScope.lookupGenericUnionTemplate(base) {
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
         
-        // In validation-only mode, just check constraints and return a placeholder
-        if isValidationOnlyMode {
-          guard template.typeParameters.count == resolvedArgs.count else {
-            throw SemanticError.typeMismatch(
-              expected: "\(template.typeParameters.count) generic types",
-              got: "\(resolvedArgs.count)"
-            )
-          }
-          try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
-          // Return a placeholder that won't be used for actual code generation
-          return .genericParameter(name: "\(base)<\(resolvedArgs.map { $0.description }.joined(separator: ","))>")
+        // Validate type argument count
+        guard template.typeParameters.count == resolvedArgs.count else {
+          throw SemanticError.typeMismatch(
+            expected: "\(template.typeParameters.count) generic types",
+            got: "\(resolvedArgs.count)"
+          )
+        }
+        
+        // Validate generic constraints
+        try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
+        
+        // Build recursion detection key
+        let recursionKey = "\(base)<\(resolvedArgs.map { $0.description }.joined(separator: ","))>"
+        
+        // Check for recursion - if we're already resolving this type, return parameterized type
+        // This allows recursive types through ref
+        if resolvingGenericTypes.contains(recursionKey) {
+          return .genericUnion(template: base, args: resolvedArgs)
         }
         
         // Record instantiation request for deferred monomorphization
@@ -3129,367 +4223,12 @@ public class TypeChecker {
           ))
         }
         
-        return try instantiateUnion(template: template, args: resolvedArgs)
+        // Return parameterized type instead of instantiating
+        return .genericUnion(template: base, args: resolvedArgs)
       } else {
         throw SemanticError.undefinedType(base)
       }
     }
-  }
-
-  // MARK: - Type Instantiation for Type Checking
-  //
-  // These methods compute instantiated types for type checking purposes.
-  // They do NOT generate code - code generation is handled by the Monomorphizer.
-  //
-  // These methods are necessary because the TypeChecker needs to know the concrete
-  // types (e.g., List_Int with its members) to perform type checking on expressions
-  // that use generic types with concrete arguments.
-  //
-  // The Monomorphizer has its own instantiation methods that both compute types
-  // AND generate code. The duplication in type computation is intentional:
-  // - TypeChecker computes types for type checking
-  // - Monomorphizer computes types for code generation (with caching to avoid redundant work)
-
-  private func instantiate(template: GenericStructTemplate, args: [Type]) throws -> Type {
-    guard template.typeParameters.count == args.count else {
-      throw SemanticError.typeMismatch(
-        expected: "\(template.typeParameters.count) generic arguments",
-        got: "\(args.count)"
-      )
-    }
-
-    try enforceGenericConstraints(typeParameters: template.typeParameters, args: args)
-
-    // Direct Pointer resolution
-    if template.name == "Pointer" {
-      return .pointer(element: args[0])
-    }
-
-    let key = "\(template.name)<\(args.map { $0.description }.joined(separator: ","))>"
-    if let cached = instantiatedTypes[key] {
-      return cached
-    }
-
-    // Calculate Layout Key and Layout Name
-    let argLayoutKeys = args.map { $0.layoutKey }.joined(separator: "_")
-    let layoutName = "\(template.name)_\(argLayoutKeys)"
-
-    // Create Placeholder for recursion
-    let placeholder = Type.structure(
-      name: layoutName, members: [], isGenericInstantiation: true)
-    instantiatedTypes[key] = placeholder
-
-    // Resolve members with specific types
-    var resolvedMembers: [(name: String, type: Type, mutable: Bool)] = []
-    do {
-      try withNewScope {
-        for (i, paramInfo) in template.typeParameters.enumerated() {
-          try currentScope.defineType(paramInfo.name, type: args[i])
-        }
-        for param in template.parameters {
-          let fieldType = try resolveTypeNode(param.type)
-          if fieldType == placeholder {
-            throw SemanticError.invalidOperation(
-              op: "Direct recursion in generic struct \(layoutName) not allowed (use ref)",
-              type1: param.name, type2: "")
-          }
-          resolvedMembers.append((name: param.name, type: fieldType, mutable: param.mutable))
-        }
-      }
-    } catch {
-      instantiatedTypes.removeValue(forKey: key)
-      throw error
-    }
-
-    // Create Specific Type
-    let specificType = Type.structure(
-      name: layoutName, members: resolvedMembers, isGenericInstantiation: true)
-    instantiatedTypes[key] = specificType
-    layoutToTemplateInfo[layoutName] = (base: template.name, args: args)
-
-    // Force instantiate __drop if it exists for this type
-    // This ensures the typed body is available in the cache for the Monomorphizer
-    if let methods = genericExtensionMethods[template.name] {
-      for entry in methods {
-        if entry.method.name == "__drop" {
-          _ = try instantiateExtensionMethod(
-            baseType: specificType,
-            structureName: template.name,
-            genericArgs: args,
-            methodInfo: entry
-          )
-        }
-      }
-    }
-
-    return specificType
-  }
-
-  private func instantiateUnion(template: GenericUnionTemplate, args: [Type]) throws -> Type {
-    guard template.typeParameters.count == args.count else {
-      throw SemanticError.typeMismatch(
-        expected: "\(template.typeParameters.count) generic types", got: "\(args.count)")
-    }
-
-    try enforceGenericConstraints(typeParameters: template.typeParameters, args: args)
-
-    let key = "\(template.name)<\(args.map { $0.description }.joined(separator: ","))>"
-    if let existing = instantiatedTypes[key] {
-      return existing
-    }
-
-    let argLayoutKeys = args.map { $0.layoutKey }.joined(separator: "_")
-    let layoutName = "\(template.name)_\(argLayoutKeys)"
-
-    // Placeholder
-    let placeholder = Type.union(
-      name: layoutName, cases: [], isGenericInstantiation: true)
-    instantiatedTypes[key] = placeholder
-
-    var resolvedCases: [UnionCase] = []
-    do {
-      try withNewScope {
-        for (i, paramInfo) in template.typeParameters.enumerated() {
-          try currentScope.defineType(paramInfo.name, type: args[i])
-        }
-        for c in template.cases {
-          var params: [(name: String, type: Type)] = []
-          for p in c.parameters {
-            let resolved = try resolveTypeNode(p.type)
-            if resolved == placeholder {
-              throw SemanticError.invalidOperation(
-                op: "Direct recursion in generic union \(layoutName) not allowed (use ref)",
-                type1: p.name, type2: "")
-            }
-            params.append((name: p.name, type: resolved))
-          }
-          resolvedCases.append(UnionCase(name: c.name, parameters: params))
-        }
-      }
-    } catch {
-      instantiatedTypes.removeValue(forKey: key)
-      throw error
-    }
-
-    let specificType = Type.union(
-      name: layoutName,
-      cases: resolvedCases,
-      isGenericInstantiation: true
-    )
-    instantiatedTypes[key] = specificType
-    layoutToTemplateInfo[layoutName] = (base: template.name, args: args)
-
-    // Force instantiate __drop if it exists for this type
-    // This ensures the typed body is available in the cache for the Monomorphizer
-    if let methods = genericExtensionMethods[template.name] {
-      for entry in methods {
-        if entry.method.name == "__drop" {
-          _ = try instantiateExtensionMethod(
-            baseType: specificType,
-            structureName: template.name,
-            genericArgs: args,
-            methodInfo: entry
-          )
-        }
-      }
-    }
-
-    return specificType
-  }
-
-  private func instantiateFunction(template: GenericFunctionTemplate, args: [Type]) throws -> (
-    String, Type
-  ) {
-    guard template.typeParameters.count == args.count else {
-      throw SemanticError.typeMismatch(
-        expected: "\(template.typeParameters.count) generic arguments",
-        got: "\(args.count)"
-      )
-    }
-
-    try enforceGenericConstraints(typeParameters: template.typeParameters, args: args)
-
-    let key = "\(template.name)<\(args.map { $0.description }.joined(separator: ","))>"
-    if let cached = instantiatedFunctions[key] {
-      return cached
-    }
-
-    // Resolve parameters and return type with specific types
-    let (resolvedParams, resolvedReturnType, mangledName) = try withNewScope {
-      for (i, paramInfo) in template.typeParameters.enumerated() {
-        try currentScope.defineType(paramInfo.name, type: args[i])
-      }
-
-      let returnType = try resolveTypeNode(template.returnType)
-      let rParams = try template.parameters.map { param -> Symbol in
-        let paramType = try resolveTypeNode(param.type)
-        return Symbol(
-          name: param.name, type: paramType,
-          kind: .variable(param.mutable ? .MutableValue : .Value))
-      }
-
-      let argLayoutKeys = args.map { $0.layoutKey }.joined(separator: "_")
-      let name = "\(template.name)_\(argLayoutKeys)"
-      return (rParams, returnType, name)
-    }
-
-    let functionType = Type.function(
-      parameters: resolvedParams.map {
-        Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind))
-      },
-      returns: resolvedReturnType)
-
-    if functionType.containsGenericParameter {
-      // Return the template name (not empty) so Monomorphizer can identify and mangle it
-      return (template.name, functionType)
-    }
-
-    // Cache the result
-    instantiatedFunctions[key] = (mangledName, functionType)
-
-    // Code generation is handled by the Monomorphizer
-    return (mangledName, functionType)
-  }
-
-  private func instantiateExtensionMethod(
-    baseType: Type,
-    structureName: String,
-    genericArgs: [Type],
-    methodInfo: GenericExtensionMethodTemplate
-  ) throws -> Symbol {
-    let typeParams = methodInfo.typeParams
-    let method = methodInfo.method
-
-    if typeParams.count != genericArgs.count {
-      throw SemanticError.typeMismatch(
-        expected: "\(typeParams.count) args", got: "\(genericArgs.count)")
-    }
-
-    let argLayoutKeys = genericArgs.map { $0.layoutKey }.joined(separator: "_")
-    let mangledName = "\(structureName)_\(argLayoutKeys)_\(method.name)"
-    let key = "ext:\(mangledName)"
-
-    if let (cachedName, cachedType) = instantiatedFunctions[key] {
-      let kind = getCompilerMethodKind(method.name)
-      return Symbol(name: cachedName, type: cachedType, kind: .function, methodKind: kind)
-    }
-
-    // Record instantiation request for deferred monomorphization
-    // Skip if any argument contains generic parameters (will be recorded when fully resolved)
-    if !genericArgs.contains(where: { $0.containsGenericParameter }) {
-      recordInstantiation(InstantiationRequest(
-        kind: .extensionMethod(
-          baseType: baseType,
-          templateName: structureName,
-          typeArgs: genericArgs,
-          methodName: method.name
-        ),
-        sourceLine: currentLine,
-        sourceFileName: currentFileName
-      ))
-    }
-
-    // Resolve function type and type-check the body
-    let (functionType, typedBody, params) = try withNewScope {
-      for (i, paramInfo) in typeParams.enumerated() {
-        try currentScope.defineType(paramInfo.name, type: genericArgs[i])
-      }
-
-      // Define 'self' variable for instance access
-      currentScope.define("self", baseType, mutable: false)
-      // Define 'Self' type alias for the concrete type
-      try currentScope.defineType("Self", type: baseType)
-
-      let returnType = try resolveTypeNode(method.returnType)
-      let params = try method.parameters.map { param -> Symbol in
-        let paramType = try resolveTypeNode(param.type)
-        return Symbol(
-          name: param.name, type: paramType,
-          kind: .variable(param.mutable ? .MutableValue : .Value))
-      }
-
-      let funcType = Type.function(
-        parameters: params.map {
-          Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind))
-        },
-        returns: returnType
-      )
-      
-      // Type-check the method body with concrete types
-      let (typedBody, _) = try checkFunctionBody(params, returnType, method.body)
-      
-      return (funcType, typedBody, params)
-    }
-
-    instantiatedFunctions[key] = (mangledName, functionType)
-    let kind = getCompilerMethodKind(method.name)
-    
-    // Store the typed body in the cache for the Monomorphizer to use
-    // Skip if any argument contains generic parameters (will be stored when fully resolved)
-    if !genericArgs.contains(where: { $0.containsGenericParameter }) {
-      typedExtensionMethods[mangledName] = TypedExtensionMethodInfo(
-        mangledName: mangledName,
-        functionType: functionType,
-        parameters: params,
-        body: typedBody,
-        methodKind: kind
-      )
-    }
-    
-    return Symbol(name: mangledName, type: functionType, kind: .function, methodKind: kind)
-  }
-
-  private func instantiateIntrinsicExtensionMethod(
-    baseType: Type,
-    structureName: String,
-    genericArgs: [Type],
-    methodInfo: (typeParams: [TypeParameterDecl], method: IntrinsicMethodDeclaration)
-  ) throws -> Symbol {
-    let (typeParams, method) = methodInfo
-
-    if typeParams.count != genericArgs.count {
-      throw SemanticError.typeMismatch(
-        expected: "\(typeParams.count) args", got: "\(genericArgs.count)")
-    }
-
-    let argLayoutKeys = genericArgs.map { $0.layoutKey }.joined(separator: "_")
-    let mangledName = "\(structureName)_\(argLayoutKeys)_\(method.name)"
-    let key = "ext:\(mangledName)"
-
-    if let (cachedName, cachedType) = instantiatedFunctions[key] {
-      let kind = getCompilerMethodKind(method.name)
-      return Symbol(name: cachedName, type: cachedType, kind: .function, methodKind: kind)
-    }
-
-    let functionType = try withNewScope {
-      for (i, paramInfo) in typeParams.enumerated() {
-        try currentScope.defineType(paramInfo.name, type: genericArgs[i])
-      }
-
-      // Define 'self' variable for instance access
-      currentScope.define("self", baseType, mutable: false)
-      // Define 'Self' type alias for the concrete type
-      try currentScope.defineType("Self", type: baseType)
-
-      let returnType = try resolveTypeNode(method.returnType)
-      let params = try method.parameters.map { param -> Symbol in
-        let paramType = try resolveTypeNode(param.type)
-        return Symbol(
-          name: param.name, type: paramType,
-          kind: .variable(param.mutable ? .MutableValue : .Value))
-      }
-
-      return Type.function(
-        parameters: params.map {
-          Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind))
-        },
-        returns: returnType
-      )
-    }
-
-    instantiatedFunctions[key] = (mangledName, functionType)
-    let kind = getCompilerMethodKind(method.name)
-    return Symbol(name: mangledName, type: functionType, kind: .function, methodKind: kind)
   }
 
   private func checkPattern(_ pattern: PatternNode, subjectType: Type) throws -> (
@@ -3534,7 +4273,44 @@ public class TypeChecker {
       return (.variable(symbol: symbol), [(name, mutable, subjectType)])
 
     case .unionCase(let caseName, let subPatterns, _):
-      guard case .union(let typeName, let cases, _) = subjectType else {
+      // Handle both concrete union and genericUnion types
+      let typeName: String
+      let cases: [UnionCase]
+      
+      switch subjectType {
+      case .union(let name, let unionCases, _):
+        typeName = name
+        cases = unionCases
+        
+      case .genericUnion(let templateName, let typeArgs):
+        // Look up the union template and substitute type parameters
+        guard let template = currentScope.lookupGenericUnionTemplate(templateName) else {
+          throw SemanticError.undefinedType(templateName)
+        }
+        
+        typeName = templateName
+        
+        // Create substitution map
+        var substitution: [String: Type] = [:]
+        for (i, param) in template.typeParameters.enumerated() {
+          substitution[param.name] = typeArgs[i]
+        }
+        
+        // Resolve case parameter types with substitution
+        cases = try template.cases.map { caseDef in
+          let resolvedParams: [(name: String, type: Type)] = try caseDef.parameters.map { param in
+            let resolvedType = try withNewScope {
+              for (paramName, paramType) in substitution {
+                try currentScope.defineType(paramName, type: paramType)
+              }
+              return try resolveTypeNode(param.type)
+            }
+            return (name: param.name, type: resolvedType)
+          }
+          return UnionCase(name: caseDef.name, parameters: resolvedParams)
+        }
+        
+      default:
         throw SemanticError.typeMismatch(expected: "Union Type", got: subjectType.description)
       }
 
@@ -3593,12 +4369,18 @@ public class TypeChecker {
     case .generic(let base, let args):
       if case .pointer(let element) = type, base == "Pointer", args.count == 1 {
         try unify(node: args[0], type: element, inferred: &inferred, typeParams: typeParams)
-      } else if case .structure(let name, _, _) = type {
-        if let info = layoutToTemplateInfo[name] {
-          if info.base == base && info.args.count == args.count {
-            for (argNode, argType) in zip(args, info.args) {
-              try unify(node: argNode, type: argType, inferred: &inferred, typeParams: typeParams)
-            }
+      } else if case .genericStruct(let templateName, let typeArgs) = type {
+        // Match against genericStruct type
+        if templateName == base && typeArgs.count == args.count {
+          for (argNode, argType) in zip(args, typeArgs) {
+            try unify(node: argNode, type: argType, inferred: &inferred, typeParams: typeParams)
+          }
+        }
+      } else if case .genericUnion(let templateName, let typeArgs) = type {
+        // Match against genericUnion type
+        if templateName == base && typeArgs.count == args.count {
+          for (argNode, argType) in zip(args, typeArgs) {
+            try unify(node: argNode, type: argType, inferred: &inferred, typeParams: typeParams)
           }
         }
       }

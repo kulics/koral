@@ -857,6 +857,55 @@ public class Parser {
             line: lexer.currentLine, got: currentToken.description)
         }
         try match(.identifier(member))
+        
+        // Check if this is a static method call: TypeName.methodName(...)
+        // TypeName starts with uppercase, methodName starts with lowercase
+        if isValidTypeName(member) == false {
+          // member is lowercase - could be a method or field
+          // Check if base is a type identifier (uppercase) - this would be a static method call
+          if case .identifier(let baseName) = expr, isValidTypeName(baseName) {
+            // This is TypeName.methodName - check for call
+            if currentToken === .leftParen {
+              try match(.leftParen)
+              var arguments: [ExpressionNode] = []
+              if currentToken !== .rightParen {
+                repeat {
+                  arguments.append(try expression())
+                  if currentToken === .comma {
+                    try match(.comma)
+                  } else {
+                    break
+                  }
+                } while true
+              }
+              try match(.rightParen)
+              expr = .staticMethodCall(typeName: baseName, typeArgs: [], methodName: member, arguments: arguments)
+              continue
+            }
+          }
+          // Check if base is a generic instantiation: [T]TypeName.methodName(...)
+          if case .genericInstantiation(let baseName, let typeArgs) = expr {
+            if currentToken === .leftParen {
+              try match(.leftParen)
+              var arguments: [ExpressionNode] = []
+              if currentToken !== .rightParen {
+                repeat {
+                  arguments.append(try expression())
+                  if currentToken === .comma {
+                    try match(.comma)
+                  } else {
+                    break
+                  }
+                } while true
+              }
+              try match(.rightParen)
+              expr = .staticMethodCall(typeName: baseName, typeArgs: typeArgs, methodName: member, arguments: arguments)
+              continue
+            }
+          }
+        }
+        
+        // Regular member path
         if case .memberPath(let base, let path) = expr {
           expr = .memberPath(base: base, path: path + [member])
         } else {
