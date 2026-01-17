@@ -466,6 +466,15 @@ public class Parser {
 
   // Parse type identifier
   private func parseType() throws -> TypeNode {
+    if currentToken === .selfTypeKeyword {
+      try match(.selfTypeKeyword)
+      var type: TypeNode = .inferredSelf
+      if currentToken === .refKeyword {
+        try match(.refKeyword)
+        type = .reference(type)
+      }
+      return type
+    }
     if currentToken === .leftBracket {
       try match(.leftBracket)
       var args: [TypeNode] = []
