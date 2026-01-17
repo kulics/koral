@@ -1,0 +1,159 @@
+// EXPECT: Escape analysis tests passed
+
+// Test 1: Direct reference to local variable in struct constructor
+// The reference expression is directly in the constructor call
+type IntBox(val Int ref)
+
+let return_direct_ref() IntBox = {
+    let x Int = 42
+    IntBox(ref x)  // ref x is directly passed, x should be heap allocated
+}
+
+let test_return_direct_ref() Void = {
+    let box = return_direct_ref()
+    let val = deref box.val
+    assert(val == 42, "return direct ref value")
+}
+
+// Test 2: Return parameter reference (should NOT escape - parameter outlives function)
+let identity_ref(x Int ref) Int ref = {
+    x  // Just return the parameter reference
+}
+
+let test_return_param_ref() Void = {
+    let x Int = 100
+    let r = identity_ref(ref x)
+    let val = deref r
+    assert(val == 100, "return param ref value")
+}
+
+// Test 3: Direct reference in struct field (should use heap allocation)
+type RefHolder(data Int ref)
+
+let create_ref_holder_direct() RefHolder = {
+    let local Int = 999
+    RefHolder(ref local)  // ref local is directly passed
+}
+
+let test_store_ref_to_field() Void = {
+    let holder = create_ref_holder_direct()
+    let val = deref holder.data
+    assert(val == 999, "store ref to field value")
+}
+
+// Test 4: Non-escaping reference (should use stack allocation)
+let use_local_ref() Int = {
+    let x Int = 50
+    let r Int ref = ref x  // x does NOT escape - r is only used locally
+    let val = deref r
+    val + 10
+}
+
+let test_non_escaping_ref() Void = {
+    let result = use_local_ref()
+    assert(result == 60, "non-escaping ref result")
+}
+
+// Test 5: Multiple non-escaping references
+let mixed_non_escape() Int = {
+    let a Int = 10
+    let b Int = 20
+    
+    // r1 doesn't escape - only used locally
+    let r1 Int ref = ref a
+    let val1 = deref r1
+    
+    // r2 doesn't escape either - only used locally
+    let r2 Int ref = ref b
+    let val2 = deref r2
+    
+    val1 + val2
+}
+
+let test_mixed_non_escape() Void = {
+    let result = mixed_non_escape()
+    assert(result == 30, "mixed non-escape result")
+}
+
+// Test 6: Reference in conditional branch - non-escaping
+let conditional_ref_simple(flag Bool) Int = {
+    let x Int = 1
+    let y Int = 2
+    if flag then {
+        let r Int ref = ref x  // x doesn't escape - r is only used locally
+        deref r
+    } else {
+        let r Int ref = ref y  // y doesn't escape - r is only used locally
+        deref r
+    }
+}
+
+let test_conditional_ref() Void = {
+    let val1 = conditional_ref_simple(true)
+    let val2 = conditional_ref_simple(false)
+    assert(val1 == 1, "conditional ref true")
+    assert(val2 == 2, "conditional ref false")
+}
+
+// Test 7: Reference passed to function but not stored
+let read_ref(r Int ref) Int = {
+    deref r
+}
+
+let test_ref_passed_not_stored() Void = {
+    let x Int = 77
+    let r Int ref = ref x  // x doesn't escape - r is only read
+    let val = read_ref(r)
+    assert(val == 77, "ref passed not stored")
+}
+
+// Test 8: Reference to rvalue (always heap allocated)
+let test_rvalue_ref() Void = {
+    // ref 100 creates a reference to an rvalue, which must be heap allocated
+    let r Int ref = ref 100
+    let val = deref r
+    assert(val == 100, "rvalue ref value")
+}
+
+// Test 9: Direct reference in chained call
+let create_box_direct(val Int) IntBox = {
+    let x Int = val
+    IntBox(ref x)  // ref x is directly passed
+}
+
+let get_box_value(box IntBox) Int = {
+    deref box.val
+}
+
+let test_chained_direct() Void = {
+    let val = get_box_value(create_box_direct(42))
+    assert(val == 42, "chained direct value")
+}
+
+// Test 10: Existing struct_with_ref pattern (from existing test)
+type Box(val Int ref)
+
+let getBox() Box = {
+    let r Int ref = ref 100  // 100 is rvalue, so heap allocated
+    Box(r)
+}
+
+let test_existing_pattern() Void = {
+    let b = getBox()
+    let val = deref b.val
+    assert(val == 100, "existing pattern value")
+}
+
+let main() Void = {
+    test_return_direct_ref()
+    test_return_param_ref()
+    test_store_ref_to_field()
+    test_non_escaping_ref()
+    test_mixed_non_escape()
+    test_conditional_ref()
+    test_ref_passed_not_stored()
+    test_rvalue_ref()
+    test_chained_direct()
+    test_existing_pattern()
+    print_string("Escape analysis tests passed")
+}

@@ -52,6 +52,7 @@ public class Driver {
     // Parse options
     var outputDir: String?
     var noStd = false
+    var escapeAnalysisReport = false
     var i = 0
     while i < remainingArgs.count {
       let arg = remainingArgs[i]
@@ -66,13 +67,16 @@ public class Driver {
       } else if arg == "--no-std" {
         noStd = true
         i += 1
+      } else if arg == "--escape-analysis-report" {
+        escapeAnalysisReport = true
+        i += 1
       } else {
         i += 1
       }
     }
 
     do {
-      try process(file: filePath, mode: mode, outputDir: outputDir, noStd: noStd)
+      try process(file: filePath, mode: mode, outputDir: outputDir, noStd: noStd, escapeAnalysisReport: escapeAnalysisReport)
     } catch let error as DiagnosticError {
       print(error.renderForCLI())
       exit(1)
@@ -115,7 +119,7 @@ public class Driver {
     }
   }
 
-  func process(file: String, mode: DriverCommand, outputDir: String? = nil, noStd: Bool = false) throws {
+  func process(file: String, mode: DriverCommand, outputDir: String? = nil, noStd: Bool = false, escapeAnalysisReport: Bool = false) throws {
     let fileManager = FileManager.default
     let inputURL = URL(fileURLWithPath: file)
     
@@ -183,8 +187,16 @@ public class Driver {
     }
 
     // 3. Code generation
-    let codeGen = CodeGen(ast: monomorphizedProgram)
+    let codeGen = CodeGen(ast: monomorphizedProgram, escapeAnalysisReportEnabled: escapeAnalysisReport)
     let cSource = codeGen.generate()
+    
+    // Output escape analysis report if enabled
+    if escapeAnalysisReport {
+      let diagnostics = codeGen.getEscapeAnalysisDiagnostics()
+      if !diagnostics.isEmpty {
+        print(diagnostics)
+      }
+    }
 
     let cFileURL = outputDirectory.appendingPathComponent("\(baseName).c")
     try cSource.write(to: cFileURL, atomically: true, encoding: .utf8)
@@ -323,12 +335,17 @@ public class Driver {
   func printUsage() {
     print(
       """
-      Usage: koralc [command] <file.koral>
+      Usage: koralc [command] <file.koral> [options]
 
       Commands:
         build   Compile to executable (default)
         run     Compile and run
         emit-c  Generate C code only
+
+      Options:
+        -o, --output <path>       Output directory for generated files
+        --no-std                  Compile without standard library
+        --escape-analysis-report  Print escape analysis diagnostics
       """)
   }
 }

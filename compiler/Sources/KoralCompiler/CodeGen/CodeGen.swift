@@ -6,6 +6,13 @@ public class CodeGen {
   private var globalInitializations: [(String, TypedExpressionNode)] = []
   private var lifetimeScopeStack: [[(name: String, type: Type)]] = []
   private var userDefinedDrops: [String: String] = [:] // TypeName -> Mangled Drop Function Name
+  
+  // MARK: - Escape Analysis
+  /// 逃逸分析上下文，用于追踪变量作用域和逃逸状态
+  private var escapeContext: EscapeContext
+  
+  /// 是否启用逃逸分析报告
+  private let escapeAnalysisReportEnabled: Bool
 
   // Lightweight type declaration wrapper used for dependency ordering before emission
   private enum TypeDeclaration {
@@ -29,8 +36,10 @@ public class CodeGen {
   }
   private var loopStack: [LoopContext] = []
 
-  public init(ast: MonomorphizedProgram) {
+  public init(ast: MonomorphizedProgram, escapeAnalysisReportEnabled: Bool = false) {
     self.ast = ast
+    self.escapeAnalysisReportEnabled = escapeAnalysisReportEnabled
+    self.escapeContext = EscapeContext(reportingEnabled: escapeAnalysisReportEnabled)
   }
   
   // MARK: - Type Validation
@@ -364,10 +373,12 @@ public class CodeGen {
 
   private func pushScope() {
     lifetimeScopeStack.append([])
+    escapeContext.enterScope()
   }
 
   private func popScopeWithoutCleanup() {
     _ = lifetimeScopeStack.popLast()
+    escapeContext.leaveScope()
   }
 
   private func popScope() {
@@ -384,6 +395,7 @@ public class CodeGen {
         buffer += "__koral_release(\(name).control);\n"
       }
     }
+    escapeContext.leaveScope()
   }
 
   private func emitCleanup(fromScopeIndex startIndex: Int) {
@@ -426,6 +438,7 @@ public class CodeGen {
 
   private func registerVariable(_ name: String, _ type: Type) {
     lifetimeScopeStack[lifetimeScopeStack.count - 1].append((name: name, type: type))
+    escapeContext.registerVariable(name)
   }
 
 
@@ -472,6 +485,19 @@ public class CodeGen {
     // 生成程序体
     generateProgram(ast)
     return buffer
+  }
+  
+  /// 获取逃逸分析诊断报告
+  /// 
+  /// 返回所有在代码生成过程中收集的逃逸分析诊断信息。
+  /// 只有在启用逃逸分析报告时才会有内容。
+  public func getEscapeAnalysisDiagnostics() -> String {
+    return escapeContext.getFormattedDiagnostics()
+  }
+  
+  /// 获取逃逸分析诊断列表
+  public func getEscapeDiagnostics() -> [EscapeDiagnostic] {
+    return escapeContext.diagnostics
   }
 
   private func collectTypeDeclarations(_ nodes: [TypedGlobalNode]) -> [TypeDeclaration] {
@@ -700,6 +726,18 @@ public class CodeGen {
     _ params: [Symbol],
     _ body: TypedExpressionNode
   ) {
+    // 重置逃逸分析上下文，设置当前函数的返回类型和函数名
+    let funcReturnType = getFunctionReturnTypeAsType(identifier.type)
+    escapeContext.reset(returnType: funcReturnType, functionName: identifier.name)
+    
+    // 预分析函数体，识别所有可能逃逸的变量
+    escapeContext.preAnalyze(body: body, params: params)
+    
+    // 重置作用域状态（预分析会修改作用域状态）
+    escapeContext.variableScopes = [:]
+    escapeContext.currentScopeLevel = 0
+    // 注意：escapedVariables 保留，因为这是预分析的结果
+    
     let returnType = identifier.name == "main" ? "int" : getFunctionReturnType(identifier.type)
     let paramList = params.map { getParamCDecl($0) }.joined(separator: ", ")
     buffer += "\(returnType) \(identifier.name)(\(paramList)) {\n"
@@ -1101,8 +1139,11 @@ public class CodeGen {
       return result
 
     case .referenceExpression(let inner, let type):
-      if inner.valueCategory == .lvalue {
-        // 取引用：构造 Ref 结构体
+      // 使用逃逸分析决定分配策略
+      let shouldHeapAllocate = escapeContext.shouldUseHeapAllocation(inner)
+      
+      if inner.valueCategory == .lvalue && !shouldHeapAllocate {
+        // 不逃逸的 lvalue：栈分配（取地址）
         let (lvaluePath, controlPath) = buildRefComponents(inner)
         let result = nextTemp()
         addIndent()
@@ -1115,7 +1156,7 @@ public class CodeGen {
         buffer += "__koral_retain(\(result).control);\n"
         return result
       } else {
-        // 堆分配：构造 Ref 结构体
+        // 逃逸的 lvalue 或 rvalue：堆分配
         let innerResult = generateExpressionSSA(inner)
         let result = nextTemp()
         let innerType = inner.type
@@ -1131,7 +1172,19 @@ public class CodeGen {
         // 2. 初始化数据
         if case .structure(let typeName, _, _) = innerType {
           addIndent()
-          buffer += "*(\(innerCType)*)\(result).ptr = __koral_\(typeName)_copy(&\(innerResult));\n"
+          if inner.valueCategory == .lvalue {
+            // 对于逃逸的 lvalue，需要复制数据
+            buffer += "*(\(innerCType)*)\(result).ptr = __koral_\(typeName)_copy(&\(innerResult));\n"
+          } else {
+            buffer += "*(\(innerCType)*)\(result).ptr = __koral_\(typeName)_copy(&\(innerResult));\n"
+          }
+        } else if case .union(let typeName, _, _) = innerType {
+          addIndent()
+          if inner.valueCategory == .lvalue {
+            buffer += "*(\(innerCType)*)\(result).ptr = __koral_\(typeName)_copy(&\(innerResult));\n"
+          } else {
+            buffer += "*(\(innerCType)*)\(result).ptr = __koral_\(typeName)_copy(&\(innerResult));\n"
+          }
         } else {
           addIndent()
           buffer += "*(\(innerCType)*)\(result).ptr = \(innerResult);\n"
@@ -1148,7 +1201,10 @@ public class CodeGen {
         // 4. 设置析构函数
         if case .structure(let typeName, _, _) = innerType {
           addIndent()
-          buffer += "((struct Koral_Control*)\(result).control)->dtor = __koral_\(typeName)_drop;\n"
+          buffer += "((struct Koral_Control*)\(result).control)->dtor = (Koral_Dtor)__koral_\(typeName)_drop;\n"
+        } else if case .union(let typeName, _, _) = innerType {
+          addIndent()
+          buffer += "((struct Koral_Control*)\(result).control)->dtor = (Koral_Dtor)__koral_\(typeName)_drop;\n"
         } else {
           addIndent()
           buffer += "((struct Koral_Control*)\(result).control)->dtor = NULL;\n"
@@ -1666,9 +1722,17 @@ public class CodeGen {
         }
       }
     case .assignment(let target, let value):
+      // 检测是否是结构体字段赋值（用于逃逸分析）
+      let isFieldAssignment = isStructFieldAssignment(target)
+      if isFieldAssignment && isReferenceType(value.type) {
+        escapeContext.inFieldAssignmentContext = true
+      }
+      
       // Use buildRefComponents to get the C LValue path
       let (lhsPath, _) = buildRefComponents(target)
       let valueResult = generateExpressionSSA(value)
+      
+      escapeContext.inFieldAssignmentContext = false
       
       if value.type == .void || value.type == .never { return }
 
@@ -1708,7 +1772,12 @@ public class CodeGen {
           _ = generateExpressionSSA(value)
           return
         }
+        
+        // 设置返回上下文标志，用于逃逸分析
+        escapeContext.inReturnContext = true
         let valueResult = generateExpressionSSA(value)
+        escapeContext.inReturnContext = false
+        
         let retVar = nextTemp()
 
         if case .structure(let typeName, _, _) = value.type {
@@ -1848,6 +1917,46 @@ public class CodeGen {
     default:
       fatalError("Expected function type")
     }
+  }
+  
+  /// 获取函数类型的返回类型（作为 Type）
+  private func getFunctionReturnTypeAsType(_ type: Type) -> Type? {
+    switch type {
+    case .function(_, let returns):
+      return returns
+    default:
+      return nil
+    }
+  }
+  
+  // MARK: - 逃逸分析辅助函数
+  
+  /// 检查表达式是否是结构体字段赋值
+  private func isStructFieldAssignment(_ target: TypedExpressionNode) -> Bool {
+    switch target {
+    case .memberPath(let source, let path):
+      // 如果路径长度 > 0，说明是字段访问
+      if !path.isEmpty {
+        // 检查源是否是结构体类型
+        if case .structure(_, _, _) = source.type {
+          return true
+        }
+        if case .union(_, _, _) = source.type {
+          return true
+        }
+      }
+      return false
+    default:
+      return false
+    }
+  }
+  
+  /// 检查类型是否是引用类型
+  private func isReferenceType(_ type: Type) -> Bool {
+    if case .reference(_) = type {
+      return true
+    }
+    return false
   }
 
   private func addIndent() {
