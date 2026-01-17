@@ -2286,20 +2286,13 @@ public class CodeGen {
         let utf8Bytes = Array(value.utf8)
         let byteLiterals = utf8Bytes.map { String(format: "0x%02X", $0) }.joined(separator: ", ")
         let literalVar = nextTemp() + "_pat_str"
-        let selfRefVar = nextTemp() + "_pat_self_ref"
-        let otherRefVar = nextTemp() + "_pat_other_ref"
         var prelude = ""
         prelude += "static const uint8_t \(bytesVar)[] = { \(byteLiterals) };\n"
         prelude += "\(getCType(type)) \(literalVar) = String_from_utf8_bytes_unchecked((uint8_t*)\(bytesVar), \(utf8Bytes.count));\n"
-        // Compare via compiler-protocol `String.__equals(self ref, other String ref) Bool`.
-        // The C ABI for `T ref` is `struct Ref`, so we build borrowed refs to both values.
-        prelude += "struct Ref \(selfRefVar);\n"
-        prelude += "\(selfRefVar).ptr = &\(path);\n"
-        prelude += "\(selfRefVar).control = NULL;\n"
-        prelude += "struct Ref \(otherRefVar);\n"
-        prelude += "\(otherRefVar).ptr = &\(literalVar);\n"
-        prelude += "\(otherRefVar).control = NULL;\n"
-        return ([prelude], [(literalVar, type)], "String___equals(\(selfRefVar), \(otherRefVar))", [], [])
+        // Compare via compiler-protocol `String.__equals(self, other String) Bool`.
+        // Value-passing semantics: String___equals consumes its arguments, so we must copy
+        // the subject before comparison to allow multiple pattern matches on the same variable.
+        return ([prelude], [(literalVar, type)], "String___equals(__koral_String_copy(&\(path)), \(literalVar))", [], [])
       case .wildcard:
         return ([], [], "1", [], [])
       case .variable(let symbol):
@@ -2486,11 +2479,18 @@ public class CodeGen {
           memberAccess = "\(accessPath).\(memberName)"
       }
       
+      // Only apply type cast for non-reference struct members
+      // Reference types use generic struct Ref and don't need casting
       if case .structure(_, let members, _) = curType.canonical {
         if let canonicalMember = members.first(where: { $0.name == memberName }) {
           if canonicalMember.type != memberType {
-            let targetCType = getCType(memberType)
-            memberAccess = "*(\(targetCType)*)&(\(memberAccess))"
+            // Skip cast for reference types - they all use struct Ref
+            if case .reference(_) = memberType {
+              // No cast needed for reference types
+            } else {
+              let targetCType = getCType(memberType)
+              memberAccess = "*(\(targetCType)*)&(\(memberAccess))"
+            }
           }
         }
       }
@@ -2598,11 +2598,18 @@ public class CodeGen {
           memberAccess = "\(access).\(member.name)"
       }
       
+      // Only apply type cast for non-reference struct members
+      // Reference types use generic struct Ref and don't need casting
       if case .structure(_, let members, _) = curType.canonical {
         if let canonicalMember = members.first(where: { $0.name == member.name }) {
           if canonicalMember.type != member.type {
-            let targetCType = getCType(member.type)
-            memberAccess = "*(\(targetCType)*)&(\(memberAccess))"
+            // Skip cast for reference types - they all use struct Ref
+            if case .reference(_) = member.type {
+              // No cast needed for reference types
+            } else {
+              let targetCType = getCType(member.type)
+              memberAccess = "*(\(targetCType)*)&(\(memberAccess))"
+            }
           }
         }
       }
