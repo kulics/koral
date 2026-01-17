@@ -277,6 +277,78 @@ public class TypeChecker {
     )
   }
 
+  /// 为方法调用创建临时物化
+  /// 当 base 是右值且方法期望 `self ref` 时，生成 letExpression 包装临时变量和方法调用
+  /// 
+  /// 例如：`"hello".count_byte()` 转换为：
+  /// ```
+  /// letExpression(
+  ///   identifier: __koral_temp_recv_1,
+  ///   value: "hello",
+  ///   body: call(
+  ///     callee: methodReference(
+  ///       base: referenceExpression(variable(__koral_temp_recv_1)),
+  ///       method: count_byte
+  ///     ),
+  ///     arguments: []
+  ///   )
+  /// )
+  /// ```
+  private func materializeTemporaryForMethodCall(
+    base: TypedExpressionNode,
+    method: Symbol,
+    methodType: Type,
+    params: [Parameter],
+    returns: Type,
+    arguments: [ExpressionNode]
+  ) throws -> TypedExpressionNode {
+    // 1. 创建临时变量符号
+    let tempSymbol = nextSynthSymbol(prefix: "temp_recv", type: base.type)
+    
+    // 2. 创建临时变量表达式（这是一个 lvalue）
+    let tempVar: TypedExpressionNode = .variable(identifier: tempSymbol)
+    
+    // 3. 创建引用表达式（对临时变量取引用）
+    let refType: Type = .reference(inner: base.type)
+    let refExpr: TypedExpressionNode = .referenceExpression(expression: tempVar, type: refType)
+    
+    // 4. 创建方法引用
+    let finalCallee: TypedExpressionNode = .methodReference(
+      base: refExpr, method: method, typeArgs: nil, type: methodType)
+    
+    // 5. 处理方法参数
+    var typedArguments: [TypedExpressionNode] = []
+    for (arg, param) in zip(arguments, params.dropFirst()) {
+      var typedArg = try inferTypedExpression(arg)
+      typedArg = coerceLiteral(typedArg, to: param.type)
+      if typedArg.type != param.type {
+        // Try implicit ref/deref for arguments as well (mirrors self handling).
+        if case .reference(let inner) = param.type, inner == typedArg.type {
+          if typedArg.valueCategory == .lvalue {
+            typedArg = .referenceExpression(expression: typedArg, type: param.type)
+          } else {
+            throw SemanticError.invalidOperation(
+              op: "implicit ref", type1: typedArg.type.description, type2: "rvalue")
+          }
+        } else if case .reference(let inner) = typedArg.type, inner == param.type {
+          typedArg = .derefExpression(expression: typedArg, type: inner)
+        } else {
+          throw SemanticError.typeMismatch(
+            expected: param.type.description,
+            got: typedArg.type.description
+          )
+        }
+      }
+      typedArguments.append(typedArg)
+    }
+    
+    // 6. 创建方法调用
+    let call: TypedExpressionNode = .call(callee: finalCallee, arguments: typedArguments, type: returns)
+    
+    // 7. 包装在 letExpression 中
+    return .letExpression(identifier: tempSymbol, value: base, body: call, type: returns)
+  }
+
   /// Records an instantiation request for deferred monomorphization.
   /// This method collects all generic instantiation points during type checking
   /// so they can be processed later by the Monomorphizer.
@@ -2648,6 +2720,22 @@ public class TypeChecker {
           }
 
           // Check base type against first param
+          // 如果 base 是 rvalue 且方法期望 self ref，使用临时物化
+          if let firstParam = params.first,
+             case .reference(let inner) = firstParam.type,
+             inner == base.type,
+             base.valueCategory == .rvalue {
+            // 右值临时物化：将方法调用包装在 letExpression 中
+            return try materializeTemporaryForMethodCall(
+              base: base,
+              method: method,
+              methodType: methodType,
+              params: params,
+              returns: returns,
+              arguments: arguments
+            )
+          }
+          
           var finalBase = base
           if let firstParam = params.first {
             if base.type != firstParam.type {
@@ -2656,6 +2744,7 @@ public class TypeChecker {
                 if base.valueCategory == .lvalue {
                   finalBase = .referenceExpression(expression: base, type: firstParam.type)
                 } else {
+                  // 这个分支不应该被执行，因为上面已经处理了 rvalue 的情况
                   throw SemanticError.invalidOperation(
                     op: "implicit ref", type1: base.type.description, type2: "rvalue")
                 }
