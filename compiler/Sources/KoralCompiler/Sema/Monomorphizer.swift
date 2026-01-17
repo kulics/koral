@@ -1136,31 +1136,25 @@ public class Monomorphizer {
             // Apply lowering for primitive type methods (__equals, __compare)
             // This mirrors the lowering done in TypeChecker for direct calls
             if case .methodReference(let base, let method, _, _) = newCallee {
-                // Lower primitive `__equals(self ref, other ref) Bool` to scalar equality
+                // Lower primitive `__equals(self, other) Bool` to scalar equality
                 if method.methodKind == .equals,
                    newType == .bool,
                    newArguments.count == 1,
-                   case .reference(let lhsInner) = base.type,
-                   case .reference(let rhsInner) = newArguments[0].type,
-                   lhsInner == rhsInner,
-                   isBuiltinEqualityComparable(lhsInner)
+                   base.type == newArguments[0].type,
+                   isBuiltinEqualityComparable(base.type)
                 {
-                    let lhsVal: TypedExpressionNode = .derefExpression(expression: base, type: lhsInner)
-                    let rhsVal: TypedExpressionNode = .derefExpression(expression: newArguments[0], type: rhsInner)
-                    return .comparisonExpression(left: lhsVal, op: .equal, right: rhsVal, type: .bool)
+                    return .comparisonExpression(left: base, op: .equal, right: newArguments[0], type: .bool)
                 }
                 
-                // Lower primitive `__compare(self ref, other ref) Int` to scalar comparisons
+                // Lower primitive `__compare(self, other) Int` to scalar comparisons
                 if method.methodKind == .compare,
                    newType == .int,
                    newArguments.count == 1,
-                   case .reference(let lhsInner) = base.type,
-                   case .reference(let rhsInner) = newArguments[0].type,
-                   lhsInner == rhsInner,
-                   isBuiltinOrderingComparable(lhsInner)
+                   base.type == newArguments[0].type,
+                   isBuiltinOrderingComparable(base.type)
                 {
-                    let lhsVal: TypedExpressionNode = .derefExpression(expression: base, type: lhsInner)
-                    let rhsVal: TypedExpressionNode = .derefExpression(expression: newArguments[0], type: rhsInner)
+                    let lhsVal = base
+                    let rhsVal = newArguments[0]
                     
                     let less: TypedExpressionNode = .comparisonExpression(left: lhsVal, op: .less, right: rhsVal, type: .bool)
                     let greater: TypedExpressionNode = .comparisonExpression(left: lhsVal, op: .greater, right: rhsVal, type: .bool)

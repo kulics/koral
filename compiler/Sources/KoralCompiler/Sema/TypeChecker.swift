@@ -207,14 +207,9 @@ public class TypeChecker {
       throw SemanticError.typeMismatch(expected: "Bool", got: returns.description)
     }
 
-    return try withTempIfRValue(lhs, prefix: "eq_lhs") { lhsVar in
-      return try withTempIfRValue(rhs, prefix: "eq_rhs") { rhsVar in
-        let baseArg = try ensureBorrowed(lhsVar, expected: params[0].type)
-        let otherArg = try ensureBorrowed(rhsVar, expected: params[1].type)
-        let callee: TypedExpressionNode = .methodReference(base: baseArg, method: methodSym, typeArgs: nil, type: methodSym.type)
-        return .call(callee: callee, arguments: [otherArg], type: .bool)
-      }
-    }
+    // Value-passing semantics: pass lhs and rhs directly
+    let callee: TypedExpressionNode = .methodReference(base: lhs, method: methodSym, typeArgs: nil, type: methodSym.type)
+    return .call(callee: callee, arguments: [rhs], type: .bool)
   }
 
   private func buildCompareCall(lhs: TypedExpressionNode, rhs: TypedExpressionNode) throws -> TypedExpressionNode {
@@ -258,14 +253,9 @@ public class TypeChecker {
       throw SemanticError.typeMismatch(expected: "Int", got: returns.description)
     }
 
-    return try withTempIfRValue(lhs, prefix: "cmp_lhs") { lhsVar in
-      return try withTempIfRValue(rhs, prefix: "cmp_rhs") { rhsVar in
-        let baseArg = try ensureBorrowed(lhsVar, expected: params[0].type)
-        let otherArg = try ensureBorrowed(rhsVar, expected: params[1].type)
-        let callee: TypedExpressionNode = .methodReference(base: baseArg, method: methodSym, typeArgs: nil, type: methodSym.type)
-        return .call(callee: callee, arguments: [otherArg], type: .int)
-      }
-    }
+    // Value-passing semantics: pass lhs and rhs directly
+    let callee: TypedExpressionNode = .methodReference(base: lhs, method: methodSym, typeArgs: nil, type: methodSym.type)
+    return .call(callee: callee, arguments: [rhs], type: .int)
   }
 
   private func nextSynthSymbol(prefix: String, type: Type) -> Symbol {
@@ -953,7 +943,7 @@ public class TypeChecker {
         try currentScope.defineType(name, type: placeholder)
       }
       
-    case .globalFunctionDeclaration(let name, let typeParameters, _, _, _, _, let line):
+    case .globalFunctionDeclaration(_, let typeParameters, _, _, _, _, let line):
       self.currentLine = line
       // For generic functions, we just note that they exist
       // The full template will be registered in pass 2
@@ -1161,7 +1151,7 @@ public class TypeChecker {
 
   private func checkGlobalDeclaration(_ decl: GlobalNode) throws -> TypedGlobalNode? {
     switch decl {
-    case .traitDeclaration(let name, let superTraits, _, _, let line):
+    case .traitDeclaration(_, let superTraits, _, _, let line):
       self.currentLine = line
       // Trait was registered in pass 1, now validate superTraits
       for parent in superTraits {
@@ -1408,7 +1398,7 @@ public class TypeChecker {
         
         // Find the templates for this given block (they were added in order)
         // We need to find templates that match our methods
-        for (methodIndex, method) in methods.enumerated() {
+        for (_, method) in methods.enumerated() {
           // Find the template for this method
           guard let templateIndex = templates.firstIndex(where: { 
             $0.method.name == method.name && 
@@ -2790,31 +2780,25 @@ public class TypeChecker {
             typedArguments.append(typedArg)
           }
 
-          // Lower primitive `__equals(self ref, other ref)` to direct scalar comparison.
+          // Lower primitive `__equals(self, other)` to direct scalar comparison.
           if method.methodKind == .equals,
             returns == .bool,
             params.count == 2,
-            case .reference(let lhsInner) = params[0].type,
-            case .reference(let rhsInner) = params[1].type,
-            lhsInner == rhsInner,
-            isBuiltinEqualityComparable(lhsInner)
+            params[0].type == params[1].type,
+            isBuiltinEqualityComparable(params[0].type)
           {
-            let lhsVal: TypedExpressionNode = .derefExpression(expression: finalBase, type: lhsInner)
-            let rhsVal: TypedExpressionNode = .derefExpression(expression: typedArguments[0], type: rhsInner)
-            return .comparisonExpression(left: lhsVal, op: .equal, right: rhsVal, type: .bool)
+            return .comparisonExpression(left: finalBase, op: .equal, right: typedArguments[0], type: .bool)
           }
 
-          // Lower primitive `__compare(self ref, other ref) Int` to scalar comparisons.
+          // Lower primitive `__compare(self, other) Int` to scalar comparisons.
           if method.methodKind == .compare,
             returns == .int,
             params.count == 2,
-            case .reference(let lhsInner) = params[0].type,
-            case .reference(let rhsInner) = params[1].type,
-            lhsInner == rhsInner,
-            isBuiltinOrderingComparable(lhsInner)
+            params[0].type == params[1].type,
+            isBuiltinOrderingComparable(params[0].type)
           {
-            let lhsVal: TypedExpressionNode = .derefExpression(expression: finalBase, type: lhsInner)
-            let rhsVal: TypedExpressionNode = .derefExpression(expression: typedArguments[0], type: rhsInner)
+            let lhsVal = finalBase
+            let rhsVal = typedArguments[0]
 
             let less: TypedExpressionNode = .comparisonExpression(left: lhsVal, op: .less, right: rhsVal, type: .bool)
             let greater: TypedExpressionNode = .comparisonExpression(left: lhsVal, op: .greater, right: rhsVal, type: .bool)

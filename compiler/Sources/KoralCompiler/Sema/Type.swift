@@ -88,14 +88,13 @@ public indirect enum Type: CustomStringConvertible {
     case .function: return "Fn"
     case .reference: return "R"
     case .pointer(_): return "P"
-    case .structure(_, let members, _):
-      let memberKeys = members.map { $0.type.layoutKey }.joined(separator: "_")
-      return "Struct_\(memberKeys)"
-    case .union(_, let cases, _):
-      let caseKeys = cases.map { c in 
-          c.name + "_" + c.parameters.map { $0.type.layoutKey }.joined(separator: "_")
-      }.joined(separator: "_OR_")
-      return "Union_\(caseKeys)"
+    case .structure(let name, _, _):
+      // Use the type name directly for structures to ensure unique identification
+      // This prevents collisions between different struct types with similar layouts
+      return name
+    case .union(let name, _, _):
+      // Use the type name directly for unions to ensure unique identification
+      return name
     case .genericParameter(let name):
       return "Param_\(name)"
     case .genericStruct(let template, let args):
