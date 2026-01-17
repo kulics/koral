@@ -403,6 +403,18 @@ public func printAST(_ node: ASTNode) {
     case .genericInstantiation(let base, let args):
       print("\(indent)GenericInstantiation: \(base)")
       print("\(indent)  Args: \(args)")
+      
+    case .staticMethodCall(let typeName, let typeArgs, let methodName, let arguments):
+      let typeArgsStr = typeArgs.isEmpty ? "" : "[\(typeArgs.map { "\($0)" }.joined(separator: ", "))]"
+      print("\(indent)StaticMethodCall: \(typeArgsStr)\(typeName).\(methodName)")
+      print("\(indent)  Arguments:")
+      withIndent {
+        withIndent {
+          for arg in arguments {
+            printExpression(arg)
+          }
+        }
+      }
     }
   }
 

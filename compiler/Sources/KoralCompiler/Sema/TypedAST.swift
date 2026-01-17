@@ -122,9 +122,17 @@ public indirect enum TypedExpressionNode {
     condition: TypedExpressionNode, thenBranch: TypedExpressionNode,
     elseBranch: TypedExpressionNode?, type: Type)
   case call(callee: TypedExpressionNode, arguments: [TypedExpressionNode], type: Type)
-  case methodReference(base: TypedExpressionNode, method: Symbol, type: Type)
+  case genericCall(functionName: String, typeArgs: [Type], arguments: [TypedExpressionNode], type: Type)
+  case methodReference(base: TypedExpressionNode, method: Symbol, typeArgs: [Type]?, type: Type)
+  /// Static method call on a type (e.g., `[Int]List.new()`, `Pair.new(1, 2)`)
+  /// - baseType: The type on which the static method is called
+  /// - methodName: The original method name (not mangled)
+  /// - typeArgs: Type arguments for generic types (e.g., [Int] for [Int]List)
+  /// - arguments: Method arguments
+  /// - type: Return type
+  case staticMethodCall(baseType: Type, methodName: String, typeArgs: [Type], arguments: [TypedExpressionNode], type: Type)
   case whileExpression(condition: TypedExpressionNode, body: TypedExpressionNode, type: Type)
-  case typeConstruction(identifier: Symbol, arguments: [TypedExpressionNode], type: Type)
+  case typeConstruction(identifier: Symbol, typeArgs: [Type]?, arguments: [TypedExpressionNode], type: Type)
   case memberPath(source: TypedExpressionNode, path: [Symbol])
   case subscriptExpression(
     base: TypedExpressionNode, arguments: [TypedExpressionNode], method: Symbol, type: Type)
@@ -241,9 +249,11 @@ extension TypedExpressionNode {
       .blockExpression(_, _, let type),
       .ifExpression(_, _, _, let type),
       .call(_, _, let type),
-      .methodReference(_, _, let type),
+      .genericCall(_, _, _, let type),
+      .methodReference(_, _, _, let type),
+      .staticMethodCall(_, _, _, _, let type),
       .whileExpression(_, _, let type),
-      .typeConstruction(_, _, let type),
+      .typeConstruction(_, _, _, let type),
       .unionConstruction(let type, _, _),
       .letExpression(_, _, _, let type):
       return type

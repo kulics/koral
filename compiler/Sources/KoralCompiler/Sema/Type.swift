@@ -25,6 +25,8 @@ public indirect enum Type: CustomStringConvertible {
   case pointer(element: Type)
   case genericParameter(name: String)
   case union(name: String, cases: [UnionCase], isGenericInstantiation: Bool)
+  case genericStruct(template: String, args: [Type])
+  case genericUnion(template: String, args: [Type])
 
 
   public var description: String {
@@ -57,6 +59,12 @@ public indirect enum Type: CustomStringConvertible {
       return "\(element.description) ptr"
     case .genericParameter(let name):
       return name
+    case .genericStruct(let template, let args):
+      let argsStr = args.map { $0.description }.joined(separator: ", ")
+      return "[\(argsStr)]\(template)"
+    case .genericUnion(let template, let args):
+      let argsStr = args.map { $0.description }.joined(separator: ", ")
+      return "[\(argsStr)]\(template)"
     }
   }
 
@@ -90,6 +98,12 @@ public indirect enum Type: CustomStringConvertible {
       return "Union_\(caseKeys)"
     case .genericParameter(let name):
       return "Param_\(name)"
+    case .genericStruct(let template, let args):
+      let argsKeys = args.map { $0.layoutKey }.joined(separator: "_")
+      return "\(template)_\(argsKeys)"
+    case .genericUnion(let template, let args):
+      let argsKeys = args.map { $0.layoutKey }.joined(separator: "_")
+      return "\(template)_\(argsKeys)"
     }
   }
 
@@ -111,6 +125,10 @@ public indirect enum Type: CustomStringConvertible {
        return element.containsGenericParameter
     case .genericParameter:
       return true
+    case .genericStruct(_, let args):
+      return args.contains { $0.containsGenericParameter }
+    case .genericUnion(_, let args):
+      return args.contains { $0.containsGenericParameter }
     }
   }
   
@@ -142,6 +160,10 @@ public indirect enum Type: CustomStringConvertible {
       }
     case .function: return self
     case .genericParameter: return self
+    case .genericStruct(let template, let args):
+      return .genericStruct(template: template, args: args.map { $0.canonical })
+    case .genericUnion(let template, let args):
+      return .genericUnion(template: template, args: args.map { $0.canonical })
     }
   }
 }
@@ -200,6 +222,10 @@ extension Type: Equatable {
        return l == r
     case (.genericParameter(let l), .genericParameter(let r)):
       return l == r
+    case (.genericStruct(let lTemplate, let lArgs), .genericStruct(let rTemplate, let rArgs)):
+      return lTemplate == rTemplate && lArgs == rArgs
+    case (.genericUnion(let lTemplate, let lArgs), .genericUnion(let rTemplate, let rArgs)):
+      return lTemplate == rTemplate && lArgs == rArgs
 
     default:
       return false

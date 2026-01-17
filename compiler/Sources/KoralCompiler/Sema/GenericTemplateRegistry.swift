@@ -87,6 +87,14 @@ public struct GenericTemplateRegistry {
     /// These are methods defined on non-generic types.
     public var concreteExtensionMethods: [String: [String: Symbol]]
     
+    /// Set of intrinsic generic type names (e.g., "Pointer")
+    /// These types don't have Koral source implementations and need special handling during monomorphization.
+    public var intrinsicGenericTypes: Set<String>
+    
+    /// Set of intrinsic generic function names (e.g., "alloc_memory", "dealloc_memory")
+    /// These functions don't have Koral source implementations and need special handling during monomorphization.
+    public var intrinsicGenericFunctions: Set<String>
+    
     /// Creates an empty generic template registry.
     public init() {
         self.structTemplates = [:]
@@ -96,6 +104,8 @@ public struct GenericTemplateRegistry {
         self.intrinsicExtensionMethods = [:]
         self.traits = [:]
         self.concreteExtensionMethods = [:]
+        self.intrinsicGenericTypes = []
+        self.intrinsicGenericFunctions = []
     }
     
     /// Creates a generic template registry with the given templates.
@@ -106,7 +116,9 @@ public struct GenericTemplateRegistry {
         extensionMethods: [String: [GenericExtensionMethodTemplate]],
         intrinsicExtensionMethods: [String: [(typeParams: [TypeParameterDecl], method: IntrinsicMethodDeclaration)]],
         traits: [String: TraitDeclInfo],
-        concreteExtensionMethods: [String: [String: Symbol]] = [:]
+        concreteExtensionMethods: [String: [String: Symbol]] = [:],
+        intrinsicGenericTypes: Set<String> = [],
+        intrinsicGenericFunctions: Set<String> = []
     ) {
         self.structTemplates = structTemplates
         self.unionTemplates = unionTemplates
@@ -115,5 +127,7 @@ public struct GenericTemplateRegistry {
         self.intrinsicExtensionMethods = intrinsicExtensionMethods
         self.traits = traits
         self.concreteExtensionMethods = concreteExtensionMethods
+        self.intrinsicGenericTypes = intrinsicGenericTypes
+        self.intrinsicGenericFunctions = intrinsicGenericFunctions
     }
 }

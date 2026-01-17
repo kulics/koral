@@ -311,8 +311,25 @@ public func printTypedAST(_ node: TypedProgram) {
         }
       }
 
-    case .methodReference(let base, let method, let type):
+    case .genericCall(let functionName, let typeArgs, let arguments, let type):
+      print("\(indent)GenericCall: \(functionName) : \(type)")
+      withIndent {
+        print("\(indent)TypeArgs: \(typeArgs.map { $0.description }.joined(separator: ", "))")
+        print("\(indent)Arguments:")
+        withIndent {
+          for arg in arguments {
+            printTypedExpression(arg)
+          }
+        }
+      }
+
+    case .methodReference(let base, let method, let typeArgs, let type):
       print("\(indent)MethodReference: \(method.name) : \(type)")
+      if let typeArgs = typeArgs, !typeArgs.isEmpty {
+        withIndent {
+          print("\(indent)TypeArgs: \(typeArgs.map { $0.description }.joined(separator: ", "))")
+        }
+      }
       withIndent {
         print("\(indent)Base:")
         withIndent {
@@ -367,8 +384,13 @@ public func printTypedAST(_ node: TypedProgram) {
         printTypedExpression(expression)
       }
 
-    case .typeConstruction(let identifier, let arguments, let type):
+    case .typeConstruction(let identifier, let typeArgs, let arguments, let type):
       print("\(indent)TypeConstruction: \(identifier.name) : \(type)")
+      if let typeArgs = typeArgs, !typeArgs.isEmpty {
+        withIndent {
+          print("\(indent)TypeArgs: \(typeArgs.map { $0.description }.joined(separator: ", "))")
+        }
+      }
       withIndent {
         print("\(indent)Arguments:")
         withIndent {
@@ -391,6 +413,22 @@ public func printTypedAST(_ node: TypedProgram) {
 
     case .intrinsicCall(let node):
       print("\(indent)IntrinsicCall: \(node)")
+      
+    case .staticMethodCall(let baseType, let methodName, let typeArgs, let arguments, let type):
+      print("\(indent)StaticMethodCall: \(baseType).\(methodName) : \(type)")
+      if !typeArgs.isEmpty {
+        withIndent {
+          print("\(indent)TypeArgs: \(typeArgs.map { $0.description }.joined(separator: ", "))")
+        }
+      }
+      withIndent {
+        print("\(indent)Arguments:")
+        withIndent {
+          for arg in arguments {
+            printTypedExpression(arg)
+          }
+        }
+      }
     }
   }
 

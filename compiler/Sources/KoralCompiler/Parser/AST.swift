@@ -236,6 +236,12 @@ public indirect enum ExpressionNode {
   case genericInstantiation(base: String, args: [TypeNode])
   case subscriptExpression(base: ExpressionNode, arguments: [ExpressionNode])
   case matchExpression(subject: ExpressionNode, cases: [MatchCaseNode], line: Int)
+  /// Static method call on a type: TypeName.methodName(args) or [T]TypeName.methodName(args)
+  /// - typeName: The type name (e.g., "String", "List")
+  /// - typeArgs: Optional type arguments for generic types (e.g., [Int] for List)
+  /// - methodName: The method name (e.g., "empty", "new")
+  /// - arguments: The method arguments
+  case staticMethodCall(typeName: String, typeArgs: [TypeNode], methodName: String, arguments: [ExpressionNode])
 }
 public indirect enum PatternNode: CustomStringConvertible {
   case booleanLiteral(value: Bool, line: Int)
