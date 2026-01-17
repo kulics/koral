@@ -18,6 +18,11 @@ public struct SemanticError: Error, CustomStringConvertible, Sendable {
         case immutableFieldAssignment(type: String, field: String)
         case variableMoved(String)
         case generic(String)
+        
+        // Exhaustiveness checking errors
+        case nonExhaustiveMatch(type: String, missing: [String])
+        case unreachablePattern(pattern: String, reason: String)
+        case missingCatchallPattern(type: String)
     }
     
     public let kind: Kind
@@ -119,6 +124,14 @@ public struct SemanticError: Error, CustomStringConvertible, Sendable {
             return "\(location)Use of moved variable: '\(name)'"
         case .generic(let msg):
             return "\(location)\(msg)"
+        case .nonExhaustiveMatch(let type, let missing):
+            let casesStr = missing.joined(separator: ", ")
+            return "\(location)Non-exhaustive match on type '\(type)': missing cases \(casesStr)"
+        case .unreachablePattern(let pattern, let reason):
+            return "\(location)Unreachable pattern '\(pattern)': \(reason)"
+        case .missingCatchallPattern(let type):
+            return "\(location)Match on type '\(type)' requires a wildcard or variable binding pattern"
         }
+
     }
 }
