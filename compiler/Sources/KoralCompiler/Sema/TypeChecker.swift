@@ -1867,6 +1867,18 @@ public class TypeChecker {
           typedCases.append(TypedMatchCase(pattern: pattern, body: typedBody))
         }
       }
+      
+      // Exhaustiveness checking
+      let patterns = typedCases.map { $0.pattern }
+      let resolvedCases = resolveUnionCasesForExhaustiveness(subjectType)
+      let checker = ExhaustivenessChecker(
+        subjectType: subjectType,
+        patterns: patterns,
+        currentLine: currentLine,
+        resolvedUnionCases: resolvedCases
+      )
+      try checker.check()
+      
       return .matchExpression(subject: typedSubject, cases: typedCases, type: resultType ?? .void)
 
     case .identifier(let name):
@@ -4541,5 +4553,50 @@ public class TypeChecker {
     }
     throw SemanticError.invalidOperation(
       op: String(describing: op), type1: lhs.description, type2: rhs.description)
+  }
+
+  /// Resolve union cases for exhaustiveness checking.
+  /// For generic unions, this looks up the template and substitutes type parameters.
+  private func resolveUnionCasesForExhaustiveness(_ type: Type) -> [UnionCase]? {
+    switch type {
+    case .union(_, let cases, _):
+      return cases
+      
+    case .genericUnion(let templateName, let typeArgs):
+      // Look up the union template and substitute type parameters
+      guard let template = currentScope.lookupGenericUnionTemplate(templateName) else {
+        return nil
+      }
+      
+      // Create substitution map
+      var substitution: [String: Type] = [:]
+      for (i, param) in template.typeParameters.enumerated() {
+        if i < typeArgs.count {
+          substitution[param.name] = typeArgs[i]
+        }
+      }
+      
+      // Resolve case parameter types with substitution
+      do {
+        let resolvedCases: [UnionCase] = try template.cases.map { caseDef in
+          let resolvedParams: [(name: String, type: Type)] = try caseDef.parameters.map { param in
+            let resolvedType = try withNewScope {
+              for (paramName, paramType) in substitution {
+                try currentScope.defineType(paramName, type: paramType)
+              }
+              return try resolveTypeNode(param.type)
+            }
+            return (name: param.name, type: resolvedType)
+          }
+          return UnionCase(name: caseDef.name, parameters: resolvedParams)
+        }
+        return resolvedCases
+      } catch {
+        return nil
+      }
+      
+    default:
+      return nil
+    }
   }
 }
