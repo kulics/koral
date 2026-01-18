@@ -914,7 +914,33 @@ public class Monomorphizer {
                 return substituted
             }
             // Then check built-in types
-            return resolveBuiltinType(name) ?? .genericParameter(name: name)
+            if let builtinType = resolveBuiltinType(name) {
+                return builtinType
+            }
+            // Check if it's a known concrete struct type
+            if let concreteType = input.genericTemplates.concreteStructTypes[name] {
+                return concreteType
+            }
+            // Check if it's a known concrete union type
+            if let concreteType = input.genericTemplates.concreteUnionTypes[name] {
+                return concreteType
+            }
+            // Check if it's a known struct template (non-generic reference)
+            if let template = input.genericTemplates.structTemplates[name] {
+                // Non-generic struct reference
+                if template.typeParameters.isEmpty {
+                    return .structure(name: name, members: [], isGenericInstantiation: false)
+                }
+            }
+            // Check if it's a known union template (non-generic reference)
+            if let template = input.genericTemplates.unionTemplates[name] {
+                // Non-generic union reference
+                if template.typeParameters.isEmpty {
+                    return .union(name: name, cases: [], isGenericInstantiation: false)
+                }
+            }
+            // Otherwise treat as generic parameter
+            return .genericParameter(name: name)
             
         case .reference(let inner):
             let innerType = try resolveTypeNode(inner, substitution: substitution)

@@ -95,6 +95,12 @@ public struct GenericTemplateRegistry {
     /// These functions don't have Koral source implementations and need special handling during monomorphization.
     public var intrinsicGenericFunctions: Set<String>
     
+    /// Concrete (non-generic) struct types indexed by name
+    public var concreteStructTypes: [String: Type]
+    
+    /// Concrete (non-generic) union types indexed by name
+    public var concreteUnionTypes: [String: Type]
+    
     /// Creates an empty generic template registry.
     public init() {
         self.structTemplates = [:]
@@ -106,6 +112,8 @@ public struct GenericTemplateRegistry {
         self.concreteExtensionMethods = [:]
         self.intrinsicGenericTypes = []
         self.intrinsicGenericFunctions = []
+        self.concreteStructTypes = [:]
+        self.concreteUnionTypes = [:]
     }
     
     /// Creates a generic template registry with the given templates.
@@ -118,7 +126,9 @@ public struct GenericTemplateRegistry {
         traits: [String: TraitDeclInfo],
         concreteExtensionMethods: [String: [String: Symbol]] = [:],
         intrinsicGenericTypes: Set<String> = [],
-        intrinsicGenericFunctions: Set<String> = []
+        intrinsicGenericFunctions: Set<String> = [],
+        concreteStructTypes: [String: Type] = [:],
+        concreteUnionTypes: [String: Type] = [:]
     ) {
         self.structTemplates = structTemplates
         self.unionTemplates = unionTemplates
@@ -129,5 +139,7 @@ public struct GenericTemplateRegistry {
         self.concreteExtensionMethods = concreteExtensionMethods
         self.intrinsicGenericTypes = intrinsicGenericTypes
         self.intrinsicGenericFunctions = intrinsicGenericFunctions
+        self.concreteStructTypes = concreteStructTypes
+        self.concreteUnionTypes = concreteUnionTypes
     }
 }

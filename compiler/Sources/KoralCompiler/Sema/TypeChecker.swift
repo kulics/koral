@@ -868,6 +868,21 @@ public class TypeChecker {
       let program = TypedProgram.program(globalNodes: typedDeclarations)
       
       // Build the generic template registry
+      // Separate concrete types into structs and unions
+      let allConcreteTypes = currentScope.getAllConcreteTypes()
+      var concreteStructs: [String: Type] = [:]
+      var concreteUnions: [String: Type] = [:]
+      for (name, type) in allConcreteTypes {
+        switch type {
+        case .structure:
+          concreteStructs[name] = type
+        case .union:
+          concreteUnions[name] = type
+        default:
+          break
+        }
+      }
+      
       let registry = GenericTemplateRegistry(
         structTemplates: currentScope.getAllGenericStructTemplates(),
         unionTemplates: currentScope.getAllGenericUnionTemplates(),
@@ -877,7 +892,9 @@ public class TypeChecker {
         traits: traits,
         concreteExtensionMethods: extensionMethods,
         intrinsicGenericTypes: intrinsicGenericTypes,
-        intrinsicGenericFunctions: intrinsicGenericFunctions
+        intrinsicGenericFunctions: intrinsicGenericFunctions,
+        concreteStructTypes: concreteStructs,
+        concreteUnionTypes: concreteUnions
       )
       
       return TypeCheckerOutput(
