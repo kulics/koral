@@ -379,6 +379,14 @@ given String {
         String(storage)
     }
 
+    public new() String = {
+        let cap = 16  // 默认容量，与 List 一致
+        let data = [UInt8]alloc_memory(cap)
+        data.init(0)
+        let storage = ref StringStorage(data, 0, cap)
+        String(storage)
+    }
+
     private is_ascii_space(b UInt8) Bool =
         b == " " or b == "\t" or b == "\n" or b == "\v" or b == "\f" or b == "\r"
 
@@ -414,22 +422,25 @@ given String {
         self.storage = new_storage
     }
 
-    public count_byte(self) Int = self.storage.len
+    public count(self) Int = self.storage.len
     public is_empty(self) Bool = self.storage.len == 0
-    public capacity_byte(self) Int = self.storage.cap - 1
+    public capacity(self) Int = self.storage.cap - 1
 
-    public get_byte(self, index Int) UInt8 = {
-        self.bounds_check_read(index)
+    public get(self, index Int) [UInt8]Option = {
+        if index < 0 or index >= self.storage.len then {
+            return [UInt8]Option.None()
+        }
+        [UInt8]Option.Some(self.storage.data.offset(index).peek())
+    }
+
+    public __at(self, index Int) UInt8 = {
+        if index < 0 or index >= self.storage.len then {
+            panic("String index out of bounds")
+        }
         self.storage.data.offset(index).peek()
     }
 
-    public set_byte(self ref, index Int, value UInt8) Void = {
-        self.bounds_check_write(index)
-        self.ensure_unique()
-        self.storage.data.offset(index).replace(value);
-    }
-
-    public push_byte(self ref, value UInt8) Void = {
+    public push(self ref, value UInt8) Void = {
         self.ensure_unique()
         let needed = self.storage.len + 2
         self.ensure_capacity(needed)
@@ -438,7 +449,7 @@ given String {
         self.storage.data.offset(self.storage.len).replace(0);
     }
 
-    public push(self ref, other String) Void = {
+    public push_string(self ref, other String) Void = {
         let other_len = other.storage.len
         self.ensure_unique()
         let needed = self.storage.len + other_len + 1
@@ -449,7 +460,133 @@ given String {
         self.storage.data.offset(self.storage.len).replace(0);
     }
 
-    public reserve_byte(self ref, capacity Int) Void = {
+    // Push an Int value directly to the string (no temporary String allocation)
+    public push_int(self ref, value Int) Void = {
+        if value == 0 then {
+            self.push('0')
+            return
+        }
+        
+        let mut n = value
+        let is_negative = n < 0
+        if is_negative then { n = 0 - n; }
+        
+        // Extract digits in reverse order into a small stack buffer
+        // Max 19 digits + sign for 64-bit int
+        let buf = [UInt8]alloc_memory(21)
+        let mut pos = 20
+        while n > 0 then {
+            pos -= 1
+            buf.offset(pos).init((UInt8){ n % 10 } + '0')
+            n = n / 10
+        }
+        
+        if is_negative then {
+            pos -= 1
+            buf.offset(pos).init('-')
+        }
+        
+        // Now push each byte from buf[pos..20) to self
+        let mut i = pos
+        while i < 20 then {
+            self.push(buf.offset(i).peek())
+            i += 1
+        }
+        
+        // Clean up temp buffer
+        let mut j = pos
+        while j < 20 then {
+            buf.offset(j).deinit()
+            j += 1
+        }
+        dealloc_memory(buf)
+    }
+
+    // Push a UInt value directly to the string
+    public push_uint(self ref, value UInt) Void = {
+        if value == 0u then {
+            self.push('0')
+            return
+        }
+        
+        let mut n = value
+        
+        // Extract digits in reverse order
+        // Max 20 digits for 64-bit uint
+        let buf = [UInt8]alloc_memory(21)
+        let mut pos = 20
+        while n > 0u then {
+            pos -= 1
+            buf.offset(pos).init((UInt8){ n % 10u } + '0')
+            n = n / 10u
+        }
+        
+        // Push each byte from buf[pos..20) to self
+        let mut i = pos
+        while i < 20 then {
+            self.push(buf.offset(i).peek())
+            i += 1
+        }
+        
+        // Clean up temp buffer
+        let mut j = pos
+        while j < 20 then {
+            buf.offset(j).deinit()
+            j += 1
+        }
+        dealloc_memory(buf)
+    }
+
+    // Push a Float64 value directly to the string
+    public push_float64(self ref, value Float64) Void = {
+        // Handle special cases
+        let bits = value.to_bits()
+        let exp = { bits bitshr 52 } bitand 2047u64
+        let mantissa = bits bitand 4503599627370495u64
+        if exp == 2047u64 then {
+            if mantissa <> 0u64 then {
+                self.push_string("NaN")
+                return
+            }
+            if { bits bitshr 63 } == 1u64 then {
+                self.push_string("-Inf")
+                return
+            }
+            self.push_string("Inf")
+            return
+        }
+        
+        let is_negative = { bits bitshr 63 } == 1u64
+        let mut f = if is_negative then 0.0 - value else value
+        
+        let int_part = (Int)f
+        let frac_part = f - (Float64)int_part
+        
+        if is_negative then { self.push('-'); }
+        self.push_int(int_part)
+        self.push('.')
+        
+        let mut frac = frac_part
+        let mut digits = 0
+        while digits < 6 then {
+            frac = frac * 10.0
+            let d = (Int)frac
+            self.push((UInt8)d + '0')
+            frac = frac - (Float64)d
+            digits += 1
+        }
+    }
+
+    // Push a Bool value directly to the string
+    public push_bool(self ref, value Bool) Void = {
+        if value then {
+            self.push_string("true")
+        } else {
+            self.push_string("false")
+        }
+    }
+
+    public reserve(self ref, capacity Int) Void = {
         self.ensure_unique()
         self.ensure_capacity(capacity + 1)
     }
@@ -458,7 +595,7 @@ given String {
         if prefix.storage.len > self.storage.len then { return false; }
         let mut i = 0
         while i < prefix.storage.len then {
-            if self.get_byte(i) <> prefix.get_byte(i) then { return false; }
+            if self.storage.data.offset(i).peek() <> prefix.storage.data.offset(i).peek() then { return false; }
             i += 1
         }
         true
@@ -470,35 +607,30 @@ given String {
         let offset = self.storage.len - slen
         let mut i = 0
         while i < slen then {
-            if self.get_byte(offset + i) <> suffix.get_byte(i) then { return false; }
+            if self.storage.data.offset(offset + i).peek() <> suffix.storage.data.offset(i).peek() then { return false; }
             i += 1
         }
         true
     }
 
-    public contains_byte(self, b UInt8) Bool = {
-        when self.first_index_of_byte(b) is {
-            .Some(_) then true,
-            .None then false,
-        }
-    }
+    public first_index_of(self, pat String) [Int]Option = self.find(pat)
 
-    public first_index_of_byte(self, b UInt8) [Int]Option = {
-        let mut i = 0
-        while i < self.storage.len then {
-            if self.get_byte(i) == b then { return [Int]Option.Some(i); }
-            i += 1
+    public last_index_of(self, pat String) [Int]Option = {
+        if pat.storage.len == 0 then {
+            panic("last_index_of empty pattern")
         }
-        [Int]Option.None()
-    }
-
-    public last_index_of_byte(self, b UInt8) [Int]Option = {
-        let mut i = self.storage.len
-        while i > 0 then {
-            i -= 1
-            if self.get_byte(i) == b then { return [Int]Option.Some(i); }
+        let mut result = [Int]Option.None()
+        let mut start = 0
+        while true then {
+            when self.find_from(pat, start) is {
+                .Some(idx) then {
+                    result = [Int]Option.Some(idx)
+                    start = idx + 1
+                },
+                .None then { break },
+            }
         }
-        [Int]Option.None()
+        result
     }
 
     private make_substring(self, start Int, len Int) String = {
@@ -517,13 +649,13 @@ given String {
 
     public trim_ascii_start(self) String = {
         let mut i = 0
-        while i < self.storage.len and String.is_ascii_space(self.get_byte(i)) then { i += 1; }
+        while i < self.storage.len and String.is_ascii_space(self.storage.data.offset(i).peek()) then { i += 1; }
         self.make_substring(i, self.storage.len - i)
     }
 
     public trim_ascii_end(self) String = {
         let mut end = self.storage.len
-        while end > 0 and String.is_ascii_space(self.get_byte(end - 1)) then { end -= 1; }
+        while end > 0 and String.is_ascii_space(self.storage.data.offset(end - 1).peek()) then { end -= 1; }
         self.make_substring(0, end)
     }
 
@@ -543,7 +675,7 @@ given String {
         let data = [UInt8]alloc_memory(cap)
         let mut i = 0
         while i < self.storage.len then {
-            data.offset(i).init(String.to_lower_byte(self.get_byte(i)))
+            data.offset(i).init(String.to_lower_byte(self.storage.data.offset(i).peek()))
             i += 1
         }
         data.offset(self.storage.len).init(0)
@@ -556,7 +688,7 @@ given String {
         let data = [UInt8]alloc_memory(cap)
         let mut i = 0
         while i < self.storage.len then {
-            data.offset(i).init(String.to_upper_byte(self.get_byte(i)))
+            data.offset(i).init(String.to_upper_byte(self.storage.data.offset(i).peek()))
             i += 1
         }
         data.offset(self.storage.len).init(0)
@@ -570,7 +702,7 @@ given String {
         let mut in_word = false
         let mut i = 0
         while i < self.storage.len then {
-            let b = self.get_byte(i)
+            let b = self.storage.data.offset(i).peek()
             if String.is_ascii_space(b) then {
                 in_word = false
                 data.offset(i).init(b)
@@ -589,60 +721,10 @@ given String {
         String(storage)
     }
 
-    public insert_byte(self ref, index Int, value UInt8) Void = {
-        if index < 0 or index > self.storage.len then {
-            panic("insert out of bounds")
-        }
-        self.ensure_unique()
-        let needed = self.storage.len + 2
-        self.ensure_capacity(needed)
-        let src = self.storage.data.offset(index)
-        let dest = self.storage.data.offset(index + 1)
-        let count = self.storage.len - index + 1
-        move_memory(dest, src, count)
-        self.storage.data.offset(index).replace(value)
-        self.storage.len = self.storage.len + 1
-    }
-
-    public insert(self ref, index Int, value String) Void = {
-        if index < 0 or index > self.storage.len then {
-            panic("insert out of bounds")
-        }
-        let vlen = value.storage.len
-        if vlen == 0 then { return; }
-        self.ensure_unique()
-        let needed = self.storage.len + vlen + 1
-        self.ensure_capacity(needed)
-        let src = self.storage.data.offset(index)
-        let dest = self.storage.data.offset(index + vlen)
-        let count = self.storage.len - index + 1
-        move_memory(dest, src, count)
-        copy_memory(self.storage.data.offset(index), value.storage.data, vlen)
-        self.storage.len = self.storage.len + vlen
-    }
-
-    public remove_byte(self ref, index Int) UInt8 = {
-        if index < 0 or index >= self.storage.len then {
-            panic("remove out of bounds")
-        }
-        self.ensure_unique()
-        let old = self.storage.data.offset(index).peek()
-        let dest = self.storage.data.offset(index)
-        let src = self.storage.data.offset(index + 1)
-        let count = self.storage.len - index
-        move_memory(dest, src, count)
-        self.storage.len = self.storage.len - 1
-        old
-    }
-
-    public pop_byte(self ref) [UInt8]Option =
-        if self.storage.len == 0 then { [UInt8]Option.None() }
-        else { [UInt8]Option.Some(self.remove_byte(self.storage.len - 1)) }
-
     public is_ascii(self) Bool = {
         let mut i = 0
         while i < self.storage.len then {
-            if self.get_byte(i) >= 128 then { return false; }
+            if self.storage.data.offset(i).peek() >= 128 then { return false; }
             i += 1
         }
         true
@@ -651,7 +733,7 @@ given String {
     public is_ascii_blank(self) Bool = {
         let mut i = 0
         while i < self.storage.len then {
-            if not String.is_ascii_space(self.get_byte(i)) then { return false; }
+            if not String.is_ascii_space(self.storage.data.offset(i).peek()) then { return false; }
             i += 1
         }
         true
@@ -661,7 +743,7 @@ given String {
         if self.storage.len <> other.storage.len then { return false; }
         let mut i = 0
         while i < self.storage.len then {
-            if self.get_byte(i) <> other.get_byte(i) then { return false; }
+            if self.storage.data.offset(i).peek() <> other.storage.data.offset(i).peek() then { return false; }
             i += 1
         }
         true
@@ -671,8 +753,8 @@ given String {
         let min = if self.storage.len < other.storage.len then self.storage.len else other.storage.len
         let mut i = 0
         while i < min then {
-            let a = self.get_byte(i)
-            let b = other.get_byte(i)
+            let a = self.storage.data.offset(i).peek()
+            let b = other.storage.data.offset(i).peek()
             if a < b then { return 0 - 1; }
             if a > b then { return 1; }
             i += 1
@@ -685,8 +767,8 @@ given String {
     public hash(self) UInt = {
         let mut h UInt = 2166136261
         let mut i Int = 0
-        while i < self.count_byte() then {
-            let b UInt8 = self.get_byte(i)
+        while i < self.storage.len then {
+            let b UInt8 = self.storage.data.offset(i).peek()
             h = hash_combine(h, (UInt)b)
             i += 1
         }
@@ -708,7 +790,7 @@ given String {
             let mut j = 0
             let mut ok = true
             while j < pat.storage.len then {
-                if self.get_byte(i + j) <> pat.get_byte(j) then { ok = false; break; }
+                if self.storage.data.offset(i + j).peek() <> pat.storage.data.offset(j).peek() then { ok = false; break; }
                 j += 1
             }
             if ok then { return [Int]Option.Some(i); }
@@ -774,9 +856,9 @@ given String {
                     let prefix_len = idx - start
                     if prefix_len > 0 then {
                         let slice = self.make_substring(start, prefix_len)
-                        result.push(slice)
+                        result.push_string(slice)
                     }
-                    result.push(with)
+                    result.push_string(with)
                     start = idx + pat.storage.len
                     idxOpt = self.find_from(pat, start)
                 },
@@ -785,7 +867,7 @@ given String {
         }
         if start < self.storage.len then {
             let tail = self.make_substring(start, self.storage.len - start)
-            result.push(tail)
+            result.push_string(tail)
         }
         result
     }
@@ -816,12 +898,12 @@ given String {
 // String iterator implementations
 given StringSplitAsciiWhitespace {
     public next(self ref) [String]Option = {
-        let len = self.source.count_byte()
+        let len = self.source.count()
         let mut i = self.index
-        while i < len and String.is_ascii_space(self.source.get_byte(i)) then { i += 1; }
+        while i < len and String.is_ascii_space(self.source[i]) then { i += 1; }
         if i >= len then { return [String]Option.None(); }
         let start = i
-        while i < len and not String.is_ascii_space(self.source.get_byte(i)) then { i += 1; }
+        while i < len and not String.is_ascii_space(self.source[i]) then { i += 1; }
         let part = self.source.substring(start, i - start)
         self.index = i
         [String]Option.Some(part)
@@ -830,13 +912,13 @@ given StringSplitAsciiWhitespace {
 
 given StringSplit {
     public next(self ref) [String]Option = {
-        let len = self.source.count_byte()
+        let len = self.source.count()
         if self.index > len then { return [String]Option.None() }
         let mut idxOpt = self.source.find_from(self.sep, self.index)
         when idxOpt is {
             .Some(i) then {
                 let part = self.source.substring(self.index, i - self.index)
-                self.index = i + self.sep.count_byte()
+                self.index = i + self.sep.count()
                 [String]Option.Some(part)
             },
             .None then {
@@ -850,7 +932,7 @@ given StringSplit {
 
 given StringLines {
     public next(self ref) [String]Option = {
-        let len = self.source.count_byte()
+        let len = self.source.count()
         if self.index > len then { return [String]Option.None() }
         if self.index == len then {
             self.index = len + 1
@@ -1076,17 +1158,17 @@ given Float32 {
         let frac_part = f - (Float64)int_part
         
         let mut result = String.empty()
-        if is_negative then { result.push_byte('-'); }
+        if is_negative then { result.push('-'); }
         
-        result.push(int_part.to_string())
-        result.push_byte('.')
+        result.push_string(int_part.to_string())
+        result.push('.')
         
         let mut frac = frac_part
         let mut digits = 0
         while digits < 6 then {
             frac = frac * 10.0
             let d = (Int)frac
-            result.push_byte((UInt8)d + '0')
+            result.push((UInt8)d + '0')
             frac = frac - (Float64)d
             digits += 1
         }
@@ -1154,17 +1236,17 @@ given Float64 {
         let frac_part = f - (Float64)int_part
         
         let mut result = String.empty()
-        if is_negative then { result.push_byte('-'); }
+        if is_negative then { result.push('-'); }
 
-        result.push(int_part.to_string())
-        result.push_byte('.')
+        result.push_string(int_part.to_string())
+        result.push('.')
         
         let mut frac = frac_part
         let mut digits = 0
         while digits < 6 then {
             frac = frac * 10.0
             let d = (Int)frac
-            result.push_byte((UInt8)d + '0')
+            result.push((UInt8)d + '0')
             frac = frac - (Float64)d
             digits += 1
         }
@@ -1378,7 +1460,7 @@ given[T Any] [T]List {
         value
     }
 
-    public at(self, index Int) [T]Option = {
+    public get(self, index Int) [T]Option = {
         if index < 0 or index >= self.storage.len then { return [T]Option.None(); }
         [T]Option.Some(self.storage.source.offset(index).peek())
     }
@@ -1390,11 +1472,11 @@ given[T Any] [T]List {
         [T]Option.Some(old)
     }
 
-    public front(self) [T]Option = self.at(0)
+    public front(self) [T]Option = self.get(0)
 
     public back(self) [T]Option = {
         if self.storage.len == 0 then { return [T]Option.None(); }
-        self.at(self.storage.len - 1)
+        self.get(self.storage.len - 1)
     }
 
     public is_empty(self) Bool = self.storage.len == 0
@@ -1420,6 +1502,19 @@ given[T Any] [T]List {
         if index < 0 or index >= self.storage.len then { panic("List index out of bounds"); }
         self.ensure_unique()
         self.storage.source.offset(index).replace(value);
+    }
+}
+
+given[T Equatable] [T]List {
+    public contains(self, value T) Bool = {
+        let mut i = 0
+        while i < self.storage.len then {
+            if self.storage.source.offset(i).peek() == value then {
+                return true
+            }
+            i += 1
+        }
+        false
     }
 }
 
@@ -1604,7 +1699,7 @@ given[K Hashable, V Any] [K, V]Map {
         }
     }
 
-    public at(self, key K) [V]Option = {
+    public get(self, key K) [V]Option = {
         let idx = self.find_slot(ref key)
         if idx < 0 then { return [V]Option.None(); }
         let bucket = self.storage.buckets.offset(idx).peek()
@@ -1642,7 +1737,7 @@ given[K Hashable, V Any] [K, V]Map {
     }
 
     public contains(self, key K) Bool = {
-        when self.at(key) is {
+        when self.get(key) is {
             .Some(_) then true,
             .None then false,
         }
@@ -2015,7 +2110,7 @@ public let read_line() [String]Option = {
         }
         
         // Add character to result
-        result.push_byte((UInt8)ch)
+        result.push((UInt8)ch)
     }
     
     [String]Option.Some(result)
@@ -2030,9 +2125,9 @@ given [T ToString] [T]Option {
         when self is {
             .Some(v) then {
                 let mut result = String.empty()
-                result.push("Some(")
-                result.push(v.to_string())
-                result.push(")")
+                result.push_string("Some(")
+                result.push_string(v.to_string())
+                result.push_string(")")
                 result
             },
             .None then "None",
@@ -2043,14 +2138,14 @@ given [T ToString] [T]Option {
 given [T ToString] [T]List {
     public to_string(self) String = {
         let mut result = String.empty()
-        result.push("[")
+        result.push_string("[")
         let mut i = 0
         while i < self.count() then {
-            if i > 0 then { result.push(", "); }
-            result.push(self[i].to_string())
+            if i > 0 then { result.push_string(", "); }
+            result.push_string(self[i].to_string())
             i += 1
         }
-        result.push("]")
+        result.push_string("]")
         result
     }
 }
@@ -2058,24 +2153,24 @@ given [T ToString] [T]List {
 given [K ToString and Hashable, V ToString] [K, V]Map {
     public to_string(self) String = {
         let mut result = String.empty()
-        result.push("[")
+        result.push_string("[")
         let mut first = true
         let mut i = 0
         while i < self.storage.capacity then {
             let bucket = self.storage.buckets.offset(i).peek()
             when bucket is {
                 .Occupied(entry) then {
-                    if not first then { result.push(", "); }
+                    if not first then { result.push_string(", "); }
                     first = false
-                    result.push(entry.key.to_string())
-                    result.push(": ")
-                    result.push(entry.value.to_string())
+                    result.push_string(entry.key.to_string())
+                    result.push_string(": ")
+                    result.push_string(entry.value.to_string())
                 },
                 _ then {},
             }
             i += 1
         }
-        result.push("]")
+        result.push_string("]")
         result
     }
 }
@@ -2083,22 +2178,22 @@ given [K ToString and Hashable, V ToString] [K, V]Map {
 given [T ToString and Hashable] [T]Set {
     public to_string(self) String = {
         let mut result = String.empty()
-        result.push("[")
+        result.push_string("[")
         let mut first = true
         let mut i = 0
         while i < self.storage.capacity then {
             let bucket = self.storage.buckets.offset(i).peek()
             when bucket is {
                 .Occupied(v) then {
-                    if not first then { result.push(", "); }
+                    if not first then { result.push_string(", "); }
                     first = false
-                    result.push(v.to_string())
+                    result.push_string(v.to_string())
                 },
                 _ then {},
             }
             i += 1
         }
-        result.push("]")
+        result.push_string("]")
         result
     }
 }
