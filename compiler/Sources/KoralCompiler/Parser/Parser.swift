@@ -7,6 +7,16 @@ public class Parser {
     self.lexer = lexer
     self.currentToken = .bof
   }
+  
+  /// Get the current token's source span
+  private var currentSpan: SourceSpan {
+    lexer.tokenSpan
+  }
+  
+  /// Get a source span at the current location
+  private var currentLocation: SourceSpan {
+    SourceSpan(location: lexer.currentLocation)
+  }
 
   // Match current token type
   private func match(_ expected: Token) throws {
@@ -14,7 +24,7 @@ public class Parser {
       currentToken = try lexer.getNextToken()
     } else {
       throw ParserError.unexpectedToken(
-        line: lexer.currentLine,
+        span: currentSpan,
         got: currentToken.description
       )
     }
@@ -77,7 +87,7 @@ public class Parser {
 
   // Parse global declaration
   private func parseGlobalDeclaration() throws -> GlobalNode {
-    let startLine = lexer.currentLine
+    let startSpan = currentSpan
     let access = try parseAccessModifier()
 
     var isIntrinsic = false
@@ -99,11 +109,11 @@ public class Parser {
       let typePrams = try parseTypeParameters()
 
       guard case .identifier(let name) = currentToken else {
-        throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
 
       if !isValidVariableName(name) {
-        throw ParserError.invalidVariableName(line: lexer.currentLine, name: name)
+        throw ParserError.invalidVariableName(span: currentSpan, name: name)
       }
 
       try match(.identifier(name))
@@ -111,24 +121,24 @@ public class Parser {
       // If mut keyword was detected, it must be a variable declaration
       if mutable {
         if currentToken === .leftParen {
-          throw ParserError.unexpectedToken(line: lexer.currentLine, got: currentToken.description)
+          throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
         }
         return try globalVariableDeclaration(
-          name: name, mutable: true, access: access, line: startLine)
+          name: name, mutable: true, access: access, span: startSpan)
       }
 
       // Otherwise check for left paren to determine if it's a function or variable
       if currentToken === .leftParen {
         return try globalFunctionDeclaration(
           name: name, typeParams: typePrams, access: access, isIntrinsic: isIntrinsic,
-          line: startLine)
+          span: startSpan)
       } else {
         if isIntrinsic {
           throw ParserError.unexpectedToken(
-            line: lexer.currentLine, got: "intrinsic variable not supported")
+            span: currentSpan, got: "intrinsic variable not supported")
         }
         return try globalVariableDeclaration(
-          name: name, mutable: false, access: access, line: startLine)
+          name: name, mutable: false, access: access, span: startSpan)
       }
     } else if currentToken === .typeKeyword {
       try match(.typeKeyword)
@@ -136,47 +146,47 @@ public class Parser {
       let typeParams = try parseTypeParameters()
 
       guard case .identifier(let name) = currentToken else {
-        throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
 
       if !isValidTypeName(name) {
-        throw ParserError.invalidTypeName(line: lexer.currentLine, name: name)
+        throw ParserError.invalidTypeName(span: currentSpan, name: name)
       }
 
       try match(.identifier(name))
       return try parseStructDeclaration(
-        name, typeParams: typeParams, access: access, isIntrinsic: isIntrinsic, line: startLine)
+        name, typeParams: typeParams, access: access, isIntrinsic: isIntrinsic, span: startSpan)
     } else if currentToken === .givenKeyword {
       if access != .default {
         throw ParserError.unexpectedToken(
-          line: lexer.currentLine, got: "Access modifier on given declaration")
+          span: currentSpan, got: "Access modifier on given declaration")
       }
       if isIntrinsic {
-        return try parseIntrinsicGivenDeclaration(line: startLine)
+        return try parseIntrinsicGivenDeclaration(span: startSpan)
       }
-      return try parseGivenDeclaration(line: startLine)
+      return try parseGivenDeclaration(span: startSpan)
     } else if currentToken === .traitKeyword {
       if isIntrinsic {
-        throw ParserError.unexpectedToken(line: lexer.currentLine, got: "intrinsic trait not supported")
+        throw ParserError.unexpectedToken(span: currentSpan, got: "intrinsic trait not supported")
       }
-      return try parseTraitDeclaration(access: access, line: startLine)
+      return try parseTraitDeclaration(access: access, span: startSpan)
     } else {
-      throw ParserError.unexpectedToken(line: lexer.currentLine, got: currentToken.description)
+      throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
     }
   }
 
-  private func parseTraitDeclaration(access: AccessModifier, line: Int) throws -> GlobalNode {
+  private func parseTraitDeclaration(access: AccessModifier, span: SourceSpan) throws -> GlobalNode {
     try match(.traitKeyword)
 
     // Parse optional type parameters for generic traits: [T Any]Iterator
     let typeParams = try parseTypeParameters()
 
     guard case .identifier(let name) = currentToken else {
-      throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
     }
 
     if !isValidTypeName(name) {
-      throw ParserError.invalidTypeName(line: lexer.currentLine, name: name)
+      throw ParserError.invalidTypeName(span: currentSpan, name: name)
     }
     try match(.identifier(name))
 
@@ -186,10 +196,10 @@ public class Parser {
     // Parse first parent constraint if present
     if currentToken !== .leftBrace {
       guard case .identifier(let parentName) = currentToken else {
-        throw ParserError.unexpectedToken(line: lexer.currentLine, got: currentToken.description)
+        throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
       }
       if !isValidTypeName(parentName) {
-        throw ParserError.invalidTypeName(line: lexer.currentLine, name: parentName)
+        throw ParserError.invalidTypeName(span: currentSpan, name: parentName)
       }
       try match(.identifier(parentName))
       superTraits.append(parentName)
@@ -199,10 +209,10 @@ public class Parser {
         try match(.andKeyword)
         
         guard case .identifier(let nextParent) = currentToken else {
-           throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+           throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
         }
         if !isValidTypeName(nextParent) {
-            throw ParserError.invalidTypeName(line: lexer.currentLine, name: nextParent)
+            throw ParserError.invalidTypeName(span: currentSpan, name: nextParent)
         }
         try match(.identifier(nextParent))
         superTraits.append(nextParent)
@@ -217,7 +227,7 @@ public class Parser {
       let methodTypeParams = try parseTypeParameters()
 
       guard case .identifier(let methodName) = currentToken else {
-        throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
       try match(.identifier(methodName))
 
@@ -245,7 +255,7 @@ public class Parser {
         }
         guard case .identifier(let pname) = currentToken else {
           throw ParserError.expectedIdentifier(
-            line: lexer.currentLine, got: currentToken.description)
+            span: currentSpan, got: currentToken.description)
         }
         try match(.identifier(pname))
         let paramType = try parseType()
@@ -262,14 +272,14 @@ public class Parser {
       }
 
       if currentToken === .equal {
-        throw ParserError.unexpectedToken(line: lexer.currentLine, got: "Trait method should not have body")
+        throw ParserError.unexpectedToken(span: currentSpan, got: "Trait method should not have body")
       }
       
       // Use newline-based termination for trait method declarations
       try consumeOptionalSemicolon()
 
       if !methodTypeParams.isEmpty {
-        throw ParserError.unexpectedToken(line: lexer.currentLine, got: "Trait method generics not supported yet")
+        throw ParserError.unexpectedToken(span: currentSpan, got: "Trait method generics not supported yet")
       }
 
       methods.append(
@@ -289,11 +299,11 @@ public class Parser {
       superTraits: superTraits,
       methods: methods,
       access: access,
-      line: line
+      span: span
     )
   }
 
-  private func parseIntrinsicGivenDeclaration(line: Int) throws -> GlobalNode {
+  private func parseIntrinsicGivenDeclaration(span: SourceSpan) throws -> GlobalNode {
     try match(.givenKeyword)
     let typeParams = try parseTypeParameters()
     let type = try parseType()
@@ -312,7 +322,7 @@ public class Parser {
       let methodTypeParams = try parseTypeParameters()
 
       guard case .identifier(let name) = currentToken else {
-        throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
       try match(.identifier(name))
 
@@ -340,7 +350,7 @@ public class Parser {
         }
         guard case .identifier(let pname) = currentToken else {
           throw ParserError.expectedIdentifier(
-            line: lexer.currentLine, got: currentToken.description)
+            span: currentSpan, got: currentToken.description)
         }
         try match(.identifier(pname))
         let paramType = try parseType()
@@ -359,7 +369,7 @@ public class Parser {
       // Must not have body
       if currentToken === .equal {
         throw ParserError.unexpectedToken(
-          line: lexer.currentLine, got: "Intrinsic given method should not have body")
+          span: currentSpan, got: "Intrinsic given method should not have body")
       }
       
       // Use newline-based termination for intrinsic method declarations
@@ -377,10 +387,10 @@ public class Parser {
 
     try match(.rightBrace)
     return .intrinsicGivenDeclaration(
-      typeParams: typeParams, type: type, methods: methods, line: line)
+      typeParams: typeParams, type: type, methods: methods, span: span)
   }
 
-  private func parseGivenDeclaration(line: Int) throws -> GlobalNode {
+  private func parseGivenDeclaration(span: SourceSpan) throws -> GlobalNode {
     try match(.givenKeyword)
     let typeParams = try parseTypeParameters()
     let type = try parseType()
@@ -392,7 +402,7 @@ public class Parser {
       let typeParams = try parseTypeParameters()
 
       guard case .identifier(let name) = currentToken else {
-        throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
       try match(.identifier(name))
 
@@ -420,7 +430,7 @@ public class Parser {
         }
         guard case .identifier(let pname) = currentToken else {
           throw ParserError.expectedIdentifier(
-            line: lexer.currentLine, got: currentToken.description)
+            span: currentSpan, got: currentToken.description)
         }
         try match(.identifier(pname))
         let paramType = try parseType()
@@ -451,7 +461,7 @@ public class Parser {
         ))
     }
     try match(.rightBrace)
-    return .givenDeclaration(typeParams: typeParams, type: type, methods: methods, line: line)
+    return .givenDeclaration(typeParams: typeParams, type: type, methods: methods, span: span)
   }
 
   private func parseAccessModifier() throws -> AccessModifier {
@@ -492,7 +502,7 @@ public class Parser {
 
       guard case .identifier(let name) = currentToken else {
         throw ParserError.expectedTypeIdentifier(
-          line: lexer.currentLine, got: currentToken.description)
+          span: currentSpan, got: currentToken.description)
       }
       try match(.identifier(name))
 
@@ -506,11 +516,11 @@ public class Parser {
 
     guard case .identifier(let name) = currentToken else {
       throw ParserError.expectedTypeIdentifier(
-        line: lexer.currentLine, got: currentToken.description)
+        span: currentSpan, got: currentToken.description)
     }
 
     if !isValidTypeName(name) {
-      throw ParserError.invalidTypeName(line: lexer.currentLine, name: name)
+      throw ParserError.invalidTypeName(span: currentSpan, name: name)
     }
 
     try match(.identifier(name))
@@ -526,7 +536,7 @@ public class Parser {
 
   // Parse global variable declaration
   private func globalVariableDeclaration(
-    name: String, mutable: Bool, access: AccessModifier, line: Int
+    name: String, mutable: Bool, access: AccessModifier, span: SourceSpan
   ) throws -> GlobalNode {
     var type: TypeNode = .identifier("Int")
     if currentToken !== .equal {
@@ -536,7 +546,7 @@ public class Parser {
     try match(.equal)
     let value = try expression()
     return .globalVariableDeclaration(
-      name: name, type: type, value: value, mutable: mutable, access: access, line: line)
+      name: name, type: type, value: value, mutable: mutable, access: access, span: span)
   }
 
   private func parseTypeParameters() throws -> [TypeParameterDecl] {
@@ -546,7 +556,7 @@ public class Parser {
       while currentToken !== .rightBracket {
         guard case .identifier(let paramName) = currentToken else {
           throw ParserError.expectedIdentifier(
-            line: lexer.currentLine, got: currentToken.description)
+            span: currentSpan, got: currentToken.description)
         }
         try match(.identifier(paramName))
 
@@ -570,10 +580,10 @@ public class Parser {
 
   private func parseTraitConstraint() throws -> TypeNode {
     guard case .identifier(let name) = currentToken else {
-      throw ParserError.expectedTypeIdentifier(line: lexer.currentLine, got: currentToken.description)
+      throw ParserError.expectedTypeIdentifier(span: currentSpan, got: currentToken.description)
     }
     if !isValidTypeName(name) {
-      throw ParserError.invalidTypeName(line: lexer.currentLine, name: name)
+      throw ParserError.invalidTypeName(span: currentSpan, name: name)
     }
     try match(.identifier(name))
     return .identifier(name)
@@ -582,7 +592,7 @@ public class Parser {
   // Parse global function declaration with optional 'own'/'ref' modifiers for params and return type
   private func globalFunctionDeclaration(
     name: String, typeParams: [TypeParameterDecl], access: AccessModifier,
-    isIntrinsic: Bool, line: Int
+    isIntrinsic: Bool, span: SourceSpan
   ) throws -> GlobalNode {
     try match(.leftParen)
     var parameters: [(name: String, mutable: Bool, type: TypeNode)] = []
@@ -594,7 +604,7 @@ public class Parser {
         try match(.mutKeyword)
       }
       guard case .identifier(let pname) = currentToken else {
-        throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
       try match(.identifier(pname))
       let paramType = try parseType()
@@ -613,7 +623,7 @@ public class Parser {
     if isIntrinsic {
       if currentToken === .equal {
         throw ParserError.unexpectedToken(
-          line: lexer.currentLine, got: "Intrinsic function should not have body")
+          span: currentSpan, got: "Intrinsic function should not have body")
       }
       return .intrinsicFunctionDeclaration(
         name: name,
@@ -621,7 +631,7 @@ public class Parser {
         parameters: parameters,
         returnType: returnType,
         access: access,
-        line: line
+        span: span
       )
     } else {
       try match(.equal)
@@ -633,7 +643,7 @@ public class Parser {
         returnType: returnType,
         body: body,
         access: access,
-        line: line
+        span: span
       )
     }
   }
@@ -641,19 +651,19 @@ public class Parser {
   // Parse type declaration
   private func parseStructDeclaration(
     _ name: String, typeParams: [TypeParameterDecl], access: AccessModifier,
-    isIntrinsic: Bool, line: Int
+    isIntrinsic: Bool, span: SourceSpan
   ) throws -> GlobalNode {
     if isIntrinsic {
       if currentToken === .leftParen {
         throw ParserError.unexpectedToken(
-          line: lexer.currentLine, got: "Intrinsic type should not have body")
+          span: currentSpan, got: "Intrinsic type should not have body")
       }
       return .intrinsicTypeDeclaration(
-        name: name, typeParameters: typeParams, access: access, line: line)
+        name: name, typeParameters: typeParams, access: access, span: span)
     }
 
     if currentToken === .leftBrace {
-      return try parseUnionDeclaration(name, typeParams: typeParams, access: access, line: line)
+      return try parseUnionDeclaration(name, typeParams: typeParams, access: access, span: span)
     }
 
     try match(.leftParen)
@@ -670,7 +680,7 @@ public class Parser {
       }
 
       guard case .identifier(let paramName) = currentToken else {
-        throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
       try match(.identifier(paramName))
       let paramType = try parseType()
@@ -690,20 +700,20 @@ public class Parser {
       typeParameters: typeParams,
       parameters: parameters,
       access: access,
-      line: line
+      span: span
     )
   }
 
   // Parse union declaration (sum type)
   private func parseUnionDeclaration(
-    _ name: String, typeParams: [TypeParameterDecl], access: AccessModifier, line: Int
+    _ name: String, typeParams: [TypeParameterDecl], access: AccessModifier, span: SourceSpan
   ) throws -> GlobalNode {
     try match(.leftBrace)
     var cases: [UnionCaseDeclaration] = []
 
     while currentToken !== .rightBrace {
       guard case .identifier(let caseName) = currentToken else {
-        throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
       try match(.identifier(caseName))
 
@@ -713,7 +723,7 @@ public class Parser {
       while currentToken !== .rightParen {
         guard case .identifier(let paramName) = currentToken else {
           throw ParserError.expectedIdentifier(
-            line: lexer.currentLine, got: currentToken.description)
+            span: currentSpan, got: currentToken.description)
         }
         try match(.identifier(paramName))
         let paramType = try parseType()
@@ -741,7 +751,7 @@ public class Parser {
       typeParameters: typeParams,
       cases: cases,
       access: access,
-      line: line
+      span: span
     )
   }
 
@@ -755,30 +765,30 @@ public class Parser {
       // return; or return <expr>;
       // Also check for automatic statement termination (newline before non-continuation token)
       if currentToken === .semicolon || currentToken === .rightBrace || shouldTerminateStatement() {
-        return .return(value: nil, line: lexer.currentLine)
+        return .return(value: nil, span: currentSpan)
       }
       let value = try expression()
-      return .return(value: value, line: lexer.currentLine)
+      return .return(value: value, span: currentSpan)
     case .breakKeyword:
       try match(.breakKeyword)
-      return .break(line: lexer.currentLine)
+      return .break(span: currentSpan)
     case .continueKeyword:
       try match(.continueKeyword)
-      return .continue(line: lexer.currentLine)
+      return .continue(span: currentSpan)
     default:
       let expr = try expression()
 
       if currentToken === .equal {
         try match(.equal)
         let value = try expression()
-        return .assignment(target: expr, value: value, line: lexer.currentLine)
+        return .assignment(target: expr, value: value, span: currentSpan)
       } else if let op = getCompoundAssignmentOperator(currentToken) {
         try match(currentToken)
         let value = try expression()
         return .compoundAssignment(
-          target: expr, operator: op, value: value, line: lexer.currentLine)
+          target: expr, operator: op, value: value, span: currentSpan)
       }
-      return .expression(expr, line: lexer.currentLine)
+      return .expression(expr, span: currentSpan)
     }
   }
 
@@ -803,11 +813,11 @@ public class Parser {
       mutable = true
     }
     guard case .identifier(let name) = currentToken else {
-      throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
     }
 
     if !isValidVariableName(name) {
-      throw ParserError.invalidVariableName(line: lexer.currentLine, name: name)
+      throw ParserError.invalidVariableName(span: currentSpan, name: name)
     }
 
     try match(.identifier(name))
@@ -831,11 +841,11 @@ public class Parser {
       let body = try expression()
       return .expression(
         .letExpression(name: name, type: type, value: value, mutable: mutable, body: body),
-        line: lexer.currentLine)
+        span: currentSpan)
     }
 
     return .variableDeclaration(
-      name: name, type: type, value: value, mutable: mutable, line: lexer.currentLine)
+      name: name, type: type, value: value, mutable: mutable, span: currentSpan)
   }
 
   private func letExpression() throws -> ExpressionNode {
@@ -867,7 +877,7 @@ public class Parser {
         try match(.dot)
         guard case .identifier(let member) = currentToken else {
           throw ParserError.expectedIdentifier(
-            line: lexer.currentLine, got: currentToken.description)
+            span: currentSpan, got: currentToken.description)
         }
         try match(.identifier(member))
         
@@ -952,37 +962,37 @@ public class Parser {
     // Literal Patterns
     if case .integer(let v, let suffix) = currentToken {
       try match(.integer(v, suffix))
-      return .integerLiteral(value: v, suffix: suffix, line: lexer.currentLine)
+      return .integerLiteral(value: v, suffix: suffix, span: currentSpan)
     }
     if case .bool(let v) = currentToken {
       try match(.bool(v))
-      return .booleanLiteral(value: v, line: lexer.currentLine)
+      return .booleanLiteral(value: v, span: currentSpan)
     }
     if case .identifier(let name) = currentToken {
       if name == "_" {
         try match(.identifier(name))
-        return .wildcard(line: lexer.currentLine)
+        return .wildcard(span: currentSpan)
       }
       // Variable binding or Enum Case? Koral uses .Case for Enum
       try match(.identifier(name))
-      return .variable(name: name, mutable: false, line: lexer.currentLine)
+      return .variable(name: name, mutable: false, span: currentSpan)
     }
     if case .string(let str) = currentToken {
       try match(.string(str))
-      return .stringLiteral(value: str, line: lexer.currentLine)
+      return .stringLiteral(value: str, span: currentSpan)
     }
     if currentToken === .mutKeyword {
       try match(.mutKeyword)
       guard case .identifier(let name) = currentToken else {
-        throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
       try match(.identifier(name))
-      return .variable(name: name, mutable: true, line: lexer.currentLine)
+      return .variable(name: name, mutable: true, span: currentSpan)
     }
     if currentToken === .dot {
       try match(.dot)
       guard case .identifier(let name) = currentToken else {
-        throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
       try match(.identifier(name))
       var args: [PatternNode] = []
@@ -994,9 +1004,9 @@ public class Parser {
         }
         try match(.rightParen)
       }
-      return .unionCase(caseName: name, elements: args, line: lexer.currentLine)
+      return .unionCase(caseName: name, elements: args, span: currentSpan)
     }
-    throw ParserError.unexpectedToken(line: lexer.currentLine, got: currentToken.description)
+    throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
   }
 
   private func parseCall(_ callee: ExpressionNode) throws -> ExpressionNode {
@@ -1205,7 +1215,7 @@ public class Parser {
       try match(.leftParen)
       let targetType = try parseType()
       guard currentToken === .rightParen else {
-        throw ParserError.unexpectedToken(line: lexer.currentLine, got: currentToken.description)
+        throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
       }
       try match(.rightParen)
       let expr = try parsePrefixExpression()
@@ -1276,7 +1286,7 @@ public class Parser {
       }
     }
     try match(.rightBrace)
-    return .matchExpression(subject: subject, cases: cases, line: lexer.currentLine)
+    return .matchExpression(subject: subject, cases: cases, span: currentSpan)
   }
 
   private func tokenToArithmeticOperator(_ token: Token) -> ArithmeticOperator {
@@ -1344,7 +1354,7 @@ public class Parser {
 
       guard case .identifier(let name) = currentToken else {
         throw ParserError.expectedIdentifier(
-          line: lexer.currentLine, got: currentToken.description)
+          span: currentSpan, got: currentToken.description)
       }
       try match(.identifier(name))
 
@@ -1357,7 +1367,7 @@ public class Parser {
       return .genericInstantiation(base: name, args: args)
     default:
       throw ParserError.unexpectedToken(
-        line: lexer.currentLine,
+        span: currentSpan,
         got: currentToken.description,
         expected: "number, identifier, boolean literal, block expression, or generic instantiation"
       )
@@ -1378,7 +1388,7 @@ public class Parser {
     // Parse statements
     while currentToken !== .rightBrace {
       if currentToken === .eof {
-        throw ParserError.unexpectedEndOfFile(line: lexer.currentLine)
+        throw ParserError.unexpectedEndOfFile(span: currentSpan)
       }
 
       let stmt = try statement()

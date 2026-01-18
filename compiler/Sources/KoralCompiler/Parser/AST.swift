@@ -8,6 +8,9 @@ public enum AccessModifier: String {
   case `protected`
   case `default`
 }
+
+// Re-export SourceSpan for AST nodes
+public typealias ASTSpan = SourceSpan
 public indirect enum ASTNode {
   case program(globalNodes: [GlobalNode])
 }
@@ -35,7 +38,7 @@ public struct UnionCaseDeclaration {
 public indirect enum GlobalNode {
   case globalVariableDeclaration(
     name: String, type: TypeNode, value: ExpressionNode, mutable: Bool, access: AccessModifier,
-    line: Int)
+    span: SourceSpan)
   case globalFunctionDeclaration(
     name: String,
     typeParameters: [TypeParameterDecl],
@@ -43,7 +46,7 @@ public indirect enum GlobalNode {
     returnType: TypeNode,
     body: ExpressionNode,
     access: AccessModifier,
-    line: Int
+    span: SourceSpan
   )
   case intrinsicFunctionDeclaration(
     name: String,
@@ -51,27 +54,27 @@ public indirect enum GlobalNode {
     parameters: [(name: String, mutable: Bool, type: TypeNode)],
     returnType: TypeNode,
     access: AccessModifier,
-    line: Int
+    span: SourceSpan
   )
   case globalStructDeclaration(
     name: String,
     typeParameters: [TypeParameterDecl],
     parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier)],
     access: AccessModifier,
-    line: Int
+    span: SourceSpan
   )
   case globalUnionDeclaration(
     name: String,
     typeParameters: [TypeParameterDecl],
     cases: [UnionCaseDeclaration],
     access: AccessModifier,
-    line: Int
+    span: SourceSpan
   )
   case intrinsicTypeDeclaration(
     name: String,
     typeParameters: [TypeParameterDecl],
     access: AccessModifier,
-    line: Int
+    span: SourceSpan
   )
 
   // trait Name [SuperTrait ...] { methodSignatures... }
@@ -81,40 +84,45 @@ public indirect enum GlobalNode {
     superTraits: [String],
     methods: [TraitMethodSignature],
     access: AccessModifier,
-    line: Int
+    span: SourceSpan
   )
 
   // given [T] Type { ...methods... }
   case givenDeclaration(
     typeParams: [TypeParameterDecl] = [], type: TypeNode,
-    methods: [MethodDeclaration], line: Int)
+    methods: [MethodDeclaration], span: SourceSpan)
   case intrinsicGivenDeclaration(
     typeParams: [TypeParameterDecl] = [], type: TypeNode,
-    methods: [IntrinsicMethodDeclaration], line: Int)
+    methods: [IntrinsicMethodDeclaration], span: SourceSpan)
 }
 
 extension GlobalNode {
-  public var line: Int {
+  public var span: SourceSpan {
     switch self {
-    case .globalVariableDeclaration(_, _, _, _, _, let line):
-      return line
-    case .globalFunctionDeclaration(_, _, _, _, _, _, let line):
-      return line
-    case .intrinsicFunctionDeclaration(_, _, _, _, _, let line):
-      return line
-    case .globalStructDeclaration(_, _, _, _, let line):
-      return line
-    case .globalUnionDeclaration(_, _, _, _, let line):
-      return line
-    case .intrinsicTypeDeclaration(_, _, _, let line):
-      return line
-    case .traitDeclaration(_, _, _, _, _, let line):
-      return line
-    case .givenDeclaration(_, _, _, let line):
-      return line
-    case .intrinsicGivenDeclaration(_, _, _, let line):
-      return line
+    case .globalVariableDeclaration(_, _, _, _, _, let span):
+      return span
+    case .globalFunctionDeclaration(_, _, _, _, _, _, let span):
+      return span
+    case .intrinsicFunctionDeclaration(_, _, _, _, _, let span):
+      return span
+    case .globalStructDeclaration(_, _, _, _, let span):
+      return span
+    case .globalUnionDeclaration(_, _, _, _, let span):
+      return span
+    case .intrinsicTypeDeclaration(_, _, _, let span):
+      return span
+    case .traitDeclaration(_, _, _, _, _, let span):
+      return span
+    case .givenDeclaration(_, _, _, let span):
+      return span
+    case .intrinsicGivenDeclaration(_, _, _, let span):
+      return span
     }
+  }
+  
+  /// Line number for backward compatibility
+  public var line: Int {
+    span.start.line
   }
 }
 public struct IntrinsicMethodDeclaration {
@@ -164,14 +172,34 @@ public struct MethodDeclaration {
 }
 public indirect enum StatementNode {
   case variableDeclaration(
-    name: String, type: TypeNode?, value: ExpressionNode, mutable: Bool, line: Int)
-  case assignment(target: ExpressionNode, value: ExpressionNode, line: Int)
+    name: String, type: TypeNode?, value: ExpressionNode, mutable: Bool, span: SourceSpan)
+  case assignment(target: ExpressionNode, value: ExpressionNode, span: SourceSpan)
   case compoundAssignment(
-    target: ExpressionNode, operator: CompoundAssignmentOperator, value: ExpressionNode, line: Int)
-  case expression(ExpressionNode, line: Int)
-  case `return`(value: ExpressionNode?, line: Int)
-  case `break`(line: Int)
-  case `continue`(line: Int)
+    target: ExpressionNode, operator: CompoundAssignmentOperator, value: ExpressionNode, span: SourceSpan)
+  case expression(ExpressionNode, span: SourceSpan)
+  case `return`(value: ExpressionNode?, span: SourceSpan)
+  case `break`(span: SourceSpan)
+  case `continue`(span: SourceSpan)
+}
+
+extension StatementNode {
+  /// The source span of this statement
+  public var span: SourceSpan {
+    switch self {
+    case .variableDeclaration(_, _, _, _, let span): return span
+    case .assignment(_, _, let span): return span
+    case .compoundAssignment(_, _, _, let span): return span
+    case .expression(_, let span): return span
+    case .return(_, let span): return span
+    case .break(let span): return span
+    case .continue(let span): return span
+    }
+  }
+  
+  /// Line number for backward compatibility
+  public var line: Int {
+    span.start.line
+  }
 }
 public enum CompoundAssignmentOperator {
   case plus
@@ -236,7 +264,7 @@ public indirect enum ExpressionNode {
   case memberPath(base: ExpressionNode, path: [String])
   case genericInstantiation(base: String, args: [TypeNode])
   case subscriptExpression(base: ExpressionNode, arguments: [ExpressionNode])
-  case matchExpression(subject: ExpressionNode, cases: [MatchCaseNode], line: Int)
+  case matchExpression(subject: ExpressionNode, cases: [MatchCaseNode], span: SourceSpan)
   /// Static method call on a type: TypeName.methodName(args) or [T]TypeName.methodName(args)
   /// - typeName: The type name (e.g., "String", "List")
   /// - typeArgs: Optional type arguments for generic types (e.g., [Int] for List)
@@ -247,12 +275,12 @@ public indirect enum ExpressionNode {
   case forExpression(pattern: PatternNode, iterable: ExpressionNode, body: ExpressionNode)
 }
 public indirect enum PatternNode: CustomStringConvertible {
-  case booleanLiteral(value: Bool, line: Int)
-  case integerLiteral(value: String, suffix: NumericSuffix?, line: Int)  // Store as string with optional suffix
-  case stringLiteral(value: String, line: Int)
-  case wildcard(line: Int)
-  case variable(name: String, mutable: Bool, line: Int)
-  case unionCase(caseName: String, elements: [PatternNode], line: Int)
+  case booleanLiteral(value: Bool, span: SourceSpan)
+  case integerLiteral(value: String, suffix: NumericSuffix?, span: SourceSpan)  // Store as string with optional suffix
+  case stringLiteral(value: String, span: SourceSpan)
+  case wildcard(span: SourceSpan)
+  case variable(name: String, mutable: Bool, span: SourceSpan)
+  case unionCase(caseName: String, elements: [PatternNode], span: SourceSpan)
 
   public var description: String {
     switch self {
@@ -269,6 +297,23 @@ public indirect enum PatternNode: CustomStringConvertible {
       let args = elements.map { $0.description }.joined(separator: ", ")
       return ".\(name)(\(args))"
     }
+  }
+  
+  /// The source span of this pattern
+  public var span: SourceSpan {
+    switch self {
+    case .booleanLiteral(_, let span): return span
+    case .integerLiteral(_, _, let span): return span
+    case .stringLiteral(_, let span): return span
+    case .wildcard(let span): return span
+    case .variable(_, _, let span): return span
+    case .unionCase(_, _, let span): return span
+    }
+  }
+  
+  /// Line number for backward compatibility
+  public var line: Int {
+    span.start.line
   }
 }
 public struct MatchCaseNode {

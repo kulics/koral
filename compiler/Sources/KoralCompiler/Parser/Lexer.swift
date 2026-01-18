@@ -367,21 +367,53 @@ public class Lexer {
   private let input: String
   private var position: String.Index
   private var _line: Int = 1
+  private var _column: Int = 1
+  
+  // Token start position tracking
+  private var _tokenStartLine: Int = 1
+  private var _tokenStartColumn: Int = 1
   
   // Newline tracking for automatic statement termination
   private var _hasNewlineBeforeCurrentToken: Bool = false
   private var _hasBlankLineOrCommentBeforeCurrentToken: Bool = false
+  
+  // Column tracking for unreadChar - stores the column before newline
+  private var _previousLineColumn: Int = 1
 
   public struct State {
     fileprivate let position: String.Index
     fileprivate let line: Int
+    fileprivate let column: Int
+    fileprivate let tokenStartLine: Int
+    fileprivate let tokenStartColumn: Int
     fileprivate let hasNewlineBeforeCurrentToken: Bool
     fileprivate let hasBlankLineOrCommentBeforeCurrentToken: Bool
+    fileprivate let previousLineColumn: Int
   }
 
   // Current line number property
   public var currentLine: Int {
     self._line
+  }
+  
+  // Current column number property
+  public var currentColumn: Int {
+    self._column
+  }
+  
+  // Current location as SourceLocation
+  public var currentLocation: SourceLocation {
+    SourceLocation(line: _line, column: _column)
+  }
+  
+  // Token start location
+  public var tokenStartLocation: SourceLocation {
+    SourceLocation(line: _tokenStartLine, column: _tokenStartColumn)
+  }
+  
+  // Token span from start to current position
+  public var tokenSpan: SourceSpan {
+    SourceSpan(start: tokenStartLocation, end: currentLocation)
   }
   
   // Whether there was a newline before the current token
@@ -403,23 +435,40 @@ public class Lexer {
     State(
       position: position,
       line: _line,
+      column: _column,
+      tokenStartLine: _tokenStartLine,
+      tokenStartColumn: _tokenStartColumn,
       hasNewlineBeforeCurrentToken: _hasNewlineBeforeCurrentToken,
-      hasBlankLineOrCommentBeforeCurrentToken: _hasBlankLineOrCommentBeforeCurrentToken
+      hasBlankLineOrCommentBeforeCurrentToken: _hasBlankLineOrCommentBeforeCurrentToken,
+      previousLineColumn: _previousLineColumn
     )
   }
 
   public func restoreState(_ state: State) {
     position = state.position
     _line = state.line
+    _column = state.column
+    _tokenStartLine = state.tokenStartLine
+    _tokenStartColumn = state.tokenStartColumn
     _hasNewlineBeforeCurrentToken = state.hasNewlineBeforeCurrentToken
     _hasBlankLineOrCommentBeforeCurrentToken = state.hasBlankLineOrCommentBeforeCurrentToken
+    _previousLineColumn = state.previousLineColumn
+  }
+  
+  // Record the start position of a token
+  private func markTokenStart() {
+    _tokenStartLine = _line
+    _tokenStartColumn = _column
   }
 
-  // Step back one character, fixing line counter if we rewound over a newline
+  // Step back one character, fixing line and column counters
   private func unreadChar(_ char: Character) {
     position = input.index(before: position)
     if char.isNewline {
       _line -= 1
+      _column = _previousLineColumn
+    } else {
+      _column -= 1
     }
   }
 
@@ -429,7 +478,11 @@ public class Lexer {
     let char = input[position]
     position = input.index(after: position)
     if char.isNewline {
+      _previousLineColumn = _column
       _line += 1
+      _column = 1
+    } else {
+      _column += 1
     }
     return char
   }
@@ -545,7 +598,7 @@ public class Lexer {
         }
     }
     // If we reach here, it means we hit EOF before closing */
-    throw LexerError.unexpectedEndOfFile(line: currentLine)
+    throw LexerError.unexpectedEndOfFile(span: SourceSpan(location: currentLocation))
   }
 
   // Read a number, handling both integers and floats with optional type suffix
@@ -562,7 +615,7 @@ public class Lexer {
         continue
       } else if char == "." {
         if hasDot {
-          throw LexerError.invalidFloat(line: _line, "consecutive dots are not allowed")
+          throw LexerError.invalidFloat(span: tokenSpan, "consecutive dots are not allowed")
         }
         hasDot = true
         numStr.append(char)
@@ -607,7 +660,7 @@ public class Lexer {
         case .f32, .f64:
           break  // Valid for floats
         default:
-          throw LexerError.invalidFloat(line: _line, "integer suffix '\(s)' cannot be used with float literal")
+          throw LexerError.invalidFloat(span: tokenSpan, "integer suffix '\(s)' cannot be used with float literal")
         }
       }
       return .float(numStr, suffix)
@@ -615,7 +668,7 @@ public class Lexer {
       if let s = suffix {
         switch s {
         case .f32, .f64:
-          throw LexerError.invalidInteger(line: _line, "float suffix '\(s)' cannot be used with integer literal without decimal point")
+          throw LexerError.invalidInteger(span: tokenSpan, "float suffix '\(s)' cannot be used with integer literal without decimal point")
         default:
           break  // Valid for integers
         }
@@ -628,7 +681,7 @@ public class Lexer {
   private func readString() throws -> String {
     var str = ""
     guard let startChar = getNextChar(), (startChar == "\"" || startChar == "'") else {
-      throw LexerError.invalidString(line: _line, "expected string start with \" or '")
+      throw LexerError.invalidString(span: tokenSpan, "expected string start with \" or '")
     }
     let quote = startChar
 
@@ -639,7 +692,7 @@ public class Lexer {
 
       if char == "\\" {
         guard let escaped = getNextChar() else {
-          throw LexerError.invalidString(line: _line, "unterminated escape sequence")
+          throw LexerError.invalidString(span: tokenSpan, "unterminated escape sequence")
         }
         switch escaped {
         case "n": str.append("\n")
@@ -652,7 +705,7 @@ public class Lexer {
         case "\"": str.append("\"")
         case "'": str.append("'")
         default:
-          throw LexerError.invalidString(line: _line, "unknown escape: \\\(escaped)")
+          throw LexerError.invalidString(span: tokenSpan, "unknown escape: \\\(escaped)")
         }
         continue
       }
@@ -660,7 +713,7 @@ public class Lexer {
       str.append(char)
     }
 
-    throw LexerError.invalidString(line: _line, "unterminated string literal")
+    throw LexerError.invalidString(span: tokenSpan, "unterminated string literal")
   }
 
   // Read an identifier
@@ -683,6 +736,9 @@ public class Lexer {
     let (sawNewline, sawBlankLineOrComment) = try skipWhitespaceAndComments()
     _hasNewlineBeforeCurrentToken = sawNewline
     _hasBlankLineOrCommentBeforeCurrentToken = sawBlankLineOrComment
+    
+    // Record token start position before reading the first character
+    markTokenStart()
     
     guard let char = getNextChar() else {
       return .eof
@@ -752,7 +808,7 @@ public class Lexer {
       return .equal
     case "!":
       // Koral does not use '!' (use `not expr`) and does not use '!=' (use '<>').
-      throw LexerError.unexpectedCharacter(line: currentLine, "!")
+      throw LexerError.unexpectedCharacter(span: tokenSpan, "!")
     case ">":
       if let nextChar = getNextChar() {
         if nextChar == "=" {
@@ -885,7 +941,7 @@ public class Lexer {
       default: .identifier(id)
       }
     default:
-      throw LexerError.unexpectedCharacter(line: _line, String(char))
+      throw LexerError.unexpectedCharacter(span: tokenSpan, String(char))
     }
   }
 }
