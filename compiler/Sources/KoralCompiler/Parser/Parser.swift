@@ -946,9 +946,9 @@ public class Parser {
 
   private func parsePattern() throws -> PatternNode {
     // Literal Patterns
-    if case .integer(let v) = currentToken {
-      try match(.integer(v))
-      return .integerLiteral(value: v, line: lexer.currentLine)
+    if case .integer(let v, let suffix) = currentToken {
+      try match(.integer(v, suffix))
+      return .integerLiteral(value: v, suffix: suffix, line: lexer.currentLine)
     }
     if case .bool(let v) = currentToken {
       try match(.bool(v))
@@ -1294,12 +1294,12 @@ public class Parser {
     case .selfKeyword:
       try match(.selfKeyword)
       return .identifier("self")
-    case .integer(let num):
-      try match(.integer(num))
-      return .integerLiteral(num)
-    case .float(let num):
-      try match(.float(num))
-      return .floatLiteral(num)
+    case .integer(let num, let suffix):
+      try match(.integer(num, suffix))
+      return .integerLiteral(num, suffix)
+    case .float(let num, let suffix):
+      try match(.float(num, suffix))
+      return .floatLiteral(num, suffix)
     case .string(let str):
       try match(.string(str))
       return .stringLiteral(str)
@@ -1308,6 +1308,12 @@ public class Parser {
       return .booleanLiteral(value)
     case .leftBrace:
       return try blockExpression()
+    case .leftParen:
+      // Parenthesized expression for grouping: (expr)
+      try match(.leftParen)
+      let inner = try expression()
+      try match(.rightParen)
+      return inner
     case .leftBracket:
       try match(.leftBracket)
       var args: [TypeNode] = []
@@ -1404,7 +1410,8 @@ public class Parser {
 
   private func isValidVariableName(_ name: String) -> Bool {
     guard let first = name.first else { return false }
-    return first.isLowercase
+    // Allow names starting with lowercase letter or underscore
+    return first.isLowercase || first == "_"
   }
 
   private func isValidTypeName(_ name: String) -> Bool {

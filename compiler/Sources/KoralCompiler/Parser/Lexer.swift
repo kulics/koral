@@ -1,9 +1,27 @@
+// Numeric literal type suffix
+public enum NumericSuffix: String, CustomStringConvertible {
+  case i = "i"      // Int
+  case i8 = "i8"
+  case i16 = "i16"
+  case i32 = "i32"
+  case i64 = "i64"
+  case u = "u"      // UInt
+  case u8 = "u8"
+  case u16 = "u16"
+  case u32 = "u32"
+  case u64 = "u64"
+  case f32 = "f32"
+  case f64 = "f64"
+  
+  public var description: String { rawValue }
+}
+
 // Define token types for lexical analysis
 public enum Token: CustomStringConvertible {
   case bof  // Beginning of file marker
   case eof  // End of file marker
-  case integer(Int)  // Integer literal, e.g.: 42
-  case float(Double)  // Float64 literal, e.g.: 3.14
+  case integer(String, NumericSuffix?)  // Integer literal as string with optional suffix, e.g.: "42", "255u8"
+  case float(String, NumericSuffix?)  // Float literal as string with optional suffix, e.g.: "3.14", "1.0f32"
   case string(String)  // String literal, e.g.: "hello"
   case plus  // Plus operator '+'
   case minus  // Minus operator '-'
@@ -110,9 +128,9 @@ public enum Token: CustomStringConvertible {
   // Add static operator function to compare if the same item
   public static func === (lhs: Token, rhs: Token) -> Bool {
     switch (lhs, rhs) {
-    case (.integer(_), .integer(_)):
+    case (.integer(_, _), .integer(_, _)):
       return true
-    case (.float(_), .float(_)):
+    case (.float(_, _), .float(_, _)):
       return true
     case (.string(_), .string(_)):
       return true
@@ -177,10 +195,16 @@ public enum Token: CustomStringConvertible {
 
   public var description: String {
     switch self {
-    case .integer(let value):
+    case .integer(let value, let suffix):
+      if let suffix = suffix {
+        return "Integer(\(value)\(suffix))"
+      }
       return "Integer(\(value))"
-    case .float(let value):
-      return "Float64(\(value))"
+    case .float(let value, let suffix):
+      if let suffix = suffix {
+        return "Float(\(value)\(suffix))"
+      }
+      return "Float(\(value))"
     case .string(let value):
       return "String(\(value))"
     case .plus:
@@ -330,8 +354,8 @@ public enum Token: CustomStringConvertible {
 
 // Enumeration for number literal return values
 private enum NumberLiteral {
-  case integer(Int)
-  case float(Double)
+  case integer(String, NumericSuffix?)
+  case float(String, NumericSuffix?)
 }
 
 // Lexical analyzer class
@@ -520,7 +544,9 @@ public class Lexer {
     throw LexerError.unexpectedEndOfFile(line: currentLine)
   }
 
-  // Read a number, handling both integers and floats
+  // Read a number, handling both integers and floats with optional type suffix
+  // Returns the number as a string to support arbitrary precision
+  // Suffixes: i8, i16, i32, i64, u8, u16, u32, u64, f32, f64
   private func readNumber() throws -> NumberLiteral {
     var numStr = ""
     var hasDot = false
@@ -542,10 +568,55 @@ public class Lexer {
       }
     }
 
-    return if hasDot {
-      .float(Double(numStr)!)
+    // Try to read type suffix (i8, i16, i32, i64, u8, u16, u32, u64, f32, f64)
+    var suffix: NumericSuffix? = nil
+    if let firstChar = getNextChar() {
+      if firstChar == "i" || firstChar == "u" || firstChar == "f" {
+        var suffixStr = String(firstChar)
+        // Read digits for suffix
+        while let char = getNextChar() {
+          if char.isNumber {
+            suffixStr.append(char)
+          } else {
+            unreadChar(char)
+            break
+          }
+        }
+        // Validate suffix
+        if let parsedSuffix = NumericSuffix(rawValue: suffixStr) {
+          suffix = parsedSuffix
+        } else {
+          // Not a valid suffix, put back all characters
+          for char in suffixStr.reversed() {
+            unreadChar(char)
+          }
+        }
+      } else {
+        unreadChar(firstChar)
+      }
+    }
+
+    // Validate suffix compatibility
+    if hasDot {
+      if let s = suffix {
+        switch s {
+        case .f32, .f64:
+          break  // Valid for floats
+        default:
+          throw LexerError.invalidFloat(line: _line, "integer suffix '\(s)' cannot be used with float literal")
+        }
+      }
+      return .float(numStr, suffix)
     } else {
-      .integer(Int(numStr)!)
+      if let s = suffix {
+        switch s {
+        case .f32, .f64:
+          throw LexerError.invalidInteger(line: _line, "float suffix '\(s)' cannot be used with integer literal without decimal point")
+        default:
+          break  // Valid for integers
+        }
+      }
+      return .integer(numStr, suffix)
     }
   }
 
@@ -764,10 +835,10 @@ public class Lexer {
       unreadChar(c)
       let numberLiteral = try readNumber()
       return switch numberLiteral {
-      case .integer(let num):
-        .integer(num)
-      case .float(let num):
-        .float(num)
+      case .integer(let num, let suffix):
+        .integer(num, suffix)
+      case .float(let num, let suffix):
+        .float(num, suffix)
       }
     case let c where c.isLetter || c == "_":
       unreadChar(c)

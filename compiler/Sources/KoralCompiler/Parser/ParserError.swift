@@ -1,6 +1,7 @@
 // Define lexer error types
 public enum LexerError: Error {
   case invalidFloat(line: Int, String)
+  case invalidInteger(line: Int, String)
   case invalidString(line: Int, String)
   case unexpectedCharacter(line: Int, String)
   case unexpectedEndOfFile(line: Int)
@@ -11,6 +12,8 @@ extension LexerError: CustomStringConvertible {
     switch self {
     case .invalidFloat(let line, let msg):
       "Line \(line): Invalid float number: \(msg)"
+    case .invalidInteger(let line, let msg):
+      "Line \(line): Invalid integer number: \(msg)"
     case .invalidString(let line, let msg):
       "Line \(line): Invalid string: \(msg)"
     case .unexpectedCharacter(let line, let msg):

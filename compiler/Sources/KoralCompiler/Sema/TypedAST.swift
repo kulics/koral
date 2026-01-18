@@ -96,8 +96,8 @@ public indirect enum TypedStatementNode {
   case `continue`
 }
 public indirect enum TypedExpressionNode {
-  case integerLiteral(value: Int, type: Type)
-  case floatLiteral(value: Double, type: Type)
+  case integerLiteral(value: String, type: Type)  // Store as string to support arbitrary precision
+  case floatLiteral(value: String, type: Type)    // Store as string to support arbitrary precision
   case stringLiteral(value: String, type: Type)
   case booleanLiteral(value: Bool, type: Type)
   case castExpression(expression: TypedExpressionNode, type: Type)
@@ -157,18 +157,22 @@ public indirect enum TypedIntrinsic {
   case ptrOffset(ptr: TypedExpressionNode, offset: TypedExpressionNode)
   case ptrTake(ptr: TypedExpressionNode)
   case ptrReplace(ptr: TypedExpressionNode, val: TypedExpressionNode)
+  case ptrBits  // Returns pointer bit width (32 or 64)
 
   // Bit utilities
   case float32Bits(value: TypedExpressionNode)
   case float64Bits(value: TypedExpressionNode)
+  case float32FromBits(bits: TypedExpressionNode)
+  case float64FromBits(bits: TypedExpressionNode)
 
-  // Primitive IO
-  case printString(message: TypedExpressionNode)
-  case printInt(value: TypedExpressionNode)
-  case printBool(value: TypedExpressionNode)
-  case panic(message: TypedExpressionNode)
+  // Control flow
   case exit(code: TypedExpressionNode)
   case abort
+
+  // Low-level IO intrinsics (minimal set using file descriptors)
+  case fwrite(ptr: TypedExpressionNode, len: TypedExpressionNode, fd: TypedExpressionNode)  // returns bytes written
+  case fgetc(fd: TypedExpressionNode)  // returns char (0-255) or -1 for EOF
+  case fflush(fd: TypedExpressionNode)
 
   public var type: Type {
     switch self {
@@ -191,22 +195,26 @@ public indirect enum TypedIntrinsic {
     case .ptrReplace(let ptr, _):
       if case .pointer(let element) = ptr.type { return element }
       fatalError("ptrReplace on non-pointer")
+    case .ptrBits: return .int
 
     case .float32Bits: return .uint32
     case .float64Bits: return .uint64
+    case .float32FromBits: return .float32
+    case .float64FromBits: return .float64
 
-    case .printString: return .void
-    case .printInt: return .void
-    case .printBool: return .void
-    case .panic: return .never
     case .exit: return .never
     case .abort: return .never
+
+    // Low-level IO intrinsics
+    case .fwrite: return .int  // returns bytes written
+    case .fgetc: return .int   // returns char or -1 for EOF
+    case .fflush: return .void
     }
   }
 }
 public indirect enum TypedPattern: CustomStringConvertible {
   case booleanLiteral(value: Bool)
-  case integerLiteral(value: Int)
+  case integerLiteral(value: String)  // Store as string to support arbitrary precision
   case stringLiteral(value: String)
   case wildcard
   case variable(symbol: Symbol)
