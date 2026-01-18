@@ -131,6 +131,17 @@ public indirect enum Type: CustomStringConvertible {
     }
   }
   
+  /// Returns true if this type is an integer type (signed or unsigned)
+  public var isIntegerType: Bool {
+    switch self {
+    case .int, .int8, .int16, .int32, .int64,
+         .uint, .uint8, .uint16, .uint32, .uint64:
+      return true
+    default:
+      return false
+    }
+  }
+  
   public var functionParameters: [Parameter]? {
       if case .function(let params, _) = self { return params }
       return nil

@@ -493,6 +493,8 @@ public class EscapeContext {
             for element in elements {
                 preAnalyzePattern(element)
             }
+        case .rangePattern(let rangeExpr):
+            preAnalyzeExpression(rangeExpr)
         }
     }
     

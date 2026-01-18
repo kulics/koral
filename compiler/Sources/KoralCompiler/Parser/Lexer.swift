@@ -614,6 +614,28 @@ public class Lexer {
         // Digit separator (e.g. 1_000_000)
         continue
       } else if char == "." {
+        // Check if this is a range operator (.., ..., etc.) rather than a decimal point
+        if let nextChar = getNextChar() {
+          if nextChar == "." || nextChar == "<" {
+            // This is a range operator, not a decimal point
+            unreadChar(nextChar)
+            unreadChar(char)
+            break
+          }
+          // Check if next char is a digit (valid decimal)
+          if !nextChar.isNumber {
+            // Not a decimal number, put back both chars
+            unreadChar(nextChar)
+            unreadChar(char)
+            break
+          }
+          unreadChar(nextChar)
+        } else {
+          // EOF after dot, put back the dot
+          unreadChar(char)
+          break
+        }
+        
         if hasDot {
           throw LexerError.invalidFloat(span: tokenSpan, "consecutive dots are not allowed")
         }

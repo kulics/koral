@@ -234,6 +234,19 @@ public enum BitwiseOperator {
   case shiftLeft
   case shiftRight
 }
+
+/// Range operator types for range expressions
+public enum RangeOperator {
+  case closed        // ..    a..b   : start <= x <= end
+  case closedOpen    // ..<   a..<b  : start <= x < end
+  case openClosed    // <..   a<..b  : start < x <= end
+  case open          // <..<  a<..<b : start < x < end
+  case from          // ...   a...   : start <= x <= max
+  case fromOpen      // <...  a<...  : start < x <= max
+  case to            // ...   ...b   : min <= x <= end
+  case toOpen        // ...<  ...<b  : min <= x < end
+  case full          // ....  ....   : min <= x <= max
+}
 public indirect enum ExpressionNode {
   case integerLiteral(String, NumericSuffix?)  // Store as string with optional suffix
   case floatLiteral(String, NumericSuffix?)    // Store as string with optional suffix
@@ -273,6 +286,11 @@ public indirect enum ExpressionNode {
   case staticMethodCall(typeName: String, typeArgs: [TypeNode], methodName: String, arguments: [ExpressionNode])
   /// For loop expression: for <pattern> = <iterable> then <body>
   case forExpression(pattern: PatternNode, iterable: ExpressionNode, body: ExpressionNode)
+  /// Range expression with operator and operands
+  /// - operator: The range operator type
+  /// - left: Left operand (nil for ToRange, ToOpenRange, FullRange)
+  /// - right: Right operand (nil for FromRange, FromOpenRange, FullRange)
+  case rangeExpression(operator: RangeOperator, left: ExpressionNode?, right: ExpressionNode?)
 }
 public indirect enum PatternNode: CustomStringConvertible {
   case booleanLiteral(value: Bool, span: SourceSpan)
@@ -281,6 +299,11 @@ public indirect enum PatternNode: CustomStringConvertible {
   case wildcard(span: SourceSpan)
   case variable(name: String, mutable: Bool, span: SourceSpan)
   case unionCase(caseName: String, elements: [PatternNode], span: SourceSpan)
+  /// Range pattern for matching values within a range
+  /// - operator: The range operator type (closed, closedOpen, etc.)
+  /// - left: Left bound (nil for ToRange, ToOpenRange)
+  /// - right: Right bound (nil for FromRange, FromOpenRange)
+  case rangePattern(operator: RangeOperator, left: ExpressionNode?, right: ExpressionNode?, span: SourceSpan)
 
   public var description: String {
     switch self {
@@ -296,6 +319,20 @@ public indirect enum PatternNode: CustomStringConvertible {
     case .unionCase(let name, let elements, _):
       let args = elements.map { $0.description }.joined(separator: ", ")
       return ".\(name)(\(args))"
+    case .rangePattern(let op, let left, let right, _):
+      let leftStr = left.map { "\($0)" } ?? ""
+      let rightStr = right.map { "\($0)" } ?? ""
+      switch op {
+      case .closed: return "\(leftStr)..\(rightStr)"
+      case .closedOpen: return "\(leftStr)..<\(rightStr)"
+      case .openClosed: return "\(leftStr)<..\(rightStr)"
+      case .open: return "\(leftStr)<..<\(rightStr)"
+      case .from: return "\(leftStr)..."
+      case .fromOpen: return "\(leftStr)<..."
+      case .to: return "...\(rightStr)"
+      case .toOpen: return "...<\(rightStr)"
+      case .full: return "...."
+      }
     }
   }
   
@@ -308,6 +345,7 @@ public indirect enum PatternNode: CustomStringConvertible {
     case .wildcard(let span): return span
     case .variable(_, _, let span): return span
     case .unionCase(_, _, let span): return span
+    case .rangePattern(_, _, _, let span): return span
     }
   }
   

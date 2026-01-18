@@ -219,6 +219,9 @@ public indirect enum TypedPattern: CustomStringConvertible {
   case wildcard
   case variable(symbol: Symbol)
   case unionCase(caseName: String, tagIndex: Int, elements: [TypedPattern])
+  /// Range pattern - desugared to a contains check at code generation
+  /// - rangeExpr: The typed range expression to check against
+  case rangePattern(rangeExpr: TypedExpressionNode)
 
   public var description: String {
     switch self {
@@ -230,6 +233,8 @@ public indirect enum TypedPattern: CustomStringConvertible {
     case .unionCase(let name, _, let elements):
       let args = elements.map { $0.description }.joined(separator: ", ")
       return ".\(name)(\(args))"
+    case .rangePattern(let rangeExpr):
+      return "range(\(rangeExpr.type))"
     }
   }
 }

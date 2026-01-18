@@ -1584,6 +1584,9 @@ public class Monomorphizer {
                 tagIndex: tagIndex,
                 elements: elements.map { substituteTypesInPattern($0, substitution: substitution) }
             )
+            
+        case .rangePattern(let rangeExpr):
+            return .rangePattern(rangeExpr: substituteTypesInExpression(rangeExpr, substitution: substitution))
         }
     }
     
@@ -2293,7 +2296,20 @@ public class Monomorphizer {
                 mangledMethodName = "\(templateName)_\(argLayoutKeys)_\(methodName)"
             }
             
-            // Ensure the extension method is instantiated
+            // Check for concrete extension methods first (for primitive types like Int, UInt, etc.)
+            if let methods = extensionMethods[templateName], let _ = methods[methodName] {
+                // Method exists in concrete extension methods, just generate the call
+                let functionType = Type.function(
+                    parameters: resolvedArguments.map { Parameter(type: $0.type, kind: .byVal) },
+                    returns: resolvedReturnType
+                )
+                let callee: TypedExpressionNode = .variable(
+                    identifier: Symbol(name: mangledMethodName, type: functionType, kind: .function)
+                )
+                return .call(callee: callee, arguments: resolvedArguments, type: resolvedReturnType)
+            }
+            
+            // Ensure the extension method is instantiated (for generic types)
             if let extensions = input.genericTemplates.extensionMethods[templateName] {
                 if let ext = extensions.first(where: { $0.method.name == methodName }) {
                     let key = InstantiationKey.extensionMethod(
@@ -2390,6 +2406,9 @@ public class Monomorphizer {
                 tagIndex: tagIndex,
                 elements: elements.map { resolveTypesInPattern($0) }
             )
+            
+        case .rangePattern(let rangeExpr):
+            return .rangePattern(rangeExpr: resolveTypesInExpression(rangeExpr))
         }
     }
     

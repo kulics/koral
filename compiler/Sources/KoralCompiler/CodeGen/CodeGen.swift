@@ -270,6 +270,8 @@ public class CodeGen {
       for element in elements {
         validatePattern(element, context: "\(context) -> union case element")
       }
+    case .rangePattern(let rangeExpr):
+      validateExpression(rangeExpr, context: "\(context) -> range pattern")
     }
   }
   
@@ -2384,6 +2386,120 @@ public class CodeGen {
            vars.append(contentsOf: subVars)
         }
         return (prelude, preludeVars, condition, bindings, vars)
+        
+      case .rangePattern(let rangeExpr):
+        // Range pattern is desugared to direct comparison checks
+        // Since T implements Comparable, we can use comparison operators directly
+        
+        // The rangeExpr is a unionConstruction for Range type
+        // We need to extract the bounds and generate appropriate comparisons
+        guard case .unionConstruction(_, let caseName, let arguments) = rangeExpr else {
+          fatalError("Range pattern must be a union construction")
+        }
+        
+        var prelude: [String] = []
+        var preludeVars: [(String, Type)] = []
+        
+        // Generate comparison based on the Range case
+        let condition: String
+        switch caseName {
+        case "ClosedRange":
+          // start <= x <= end
+          guard arguments.count == 2 else { fatalError("ClosedRange requires 2 arguments") }
+          let startVar = nextTemp() + "_start"
+          let endVar = nextTemp() + "_end"
+          let startCode = generateExpressionSSA(arguments[0])
+          let endCode = generateExpressionSSA(arguments[1])
+          prelude.append("\(getCType(arguments[0].type)) \(startVar) = \(startCode);\n")
+          prelude.append("\(getCType(arguments[1].type)) \(endVar) = \(endCode);\n")
+          preludeVars.append((startVar, arguments[0].type))
+          preludeVars.append((endVar, arguments[1].type))
+          condition = "(\(startVar) <= \(path) && \(path) <= \(endVar))"
+          
+        case "ClosedOpenRange":
+          // start <= x < end
+          guard arguments.count == 2 else { fatalError("ClosedOpenRange requires 2 arguments") }
+          let startVar = nextTemp() + "_start"
+          let endVar = nextTemp() + "_end"
+          let startCode = generateExpressionSSA(arguments[0])
+          let endCode = generateExpressionSSA(arguments[1])
+          prelude.append("\(getCType(arguments[0].type)) \(startVar) = \(startCode);\n")
+          prelude.append("\(getCType(arguments[1].type)) \(endVar) = \(endCode);\n")
+          preludeVars.append((startVar, arguments[0].type))
+          preludeVars.append((endVar, arguments[1].type))
+          condition = "(\(startVar) <= \(path) && \(path) < \(endVar))"
+          
+        case "OpenClosedRange":
+          // start < x <= end
+          guard arguments.count == 2 else { fatalError("OpenClosedRange requires 2 arguments") }
+          let startVar = nextTemp() + "_start"
+          let endVar = nextTemp() + "_end"
+          let startCode = generateExpressionSSA(arguments[0])
+          let endCode = generateExpressionSSA(arguments[1])
+          prelude.append("\(getCType(arguments[0].type)) \(startVar) = \(startCode);\n")
+          prelude.append("\(getCType(arguments[1].type)) \(endVar) = \(endCode);\n")
+          preludeVars.append((startVar, arguments[0].type))
+          preludeVars.append((endVar, arguments[1].type))
+          condition = "(\(startVar) < \(path) && \(path) <= \(endVar))"
+          
+        case "OpenRange":
+          // start < x < end
+          guard arguments.count == 2 else { fatalError("OpenRange requires 2 arguments") }
+          let startVar = nextTemp() + "_start"
+          let endVar = nextTemp() + "_end"
+          let startCode = generateExpressionSSA(arguments[0])
+          let endCode = generateExpressionSSA(arguments[1])
+          prelude.append("\(getCType(arguments[0].type)) \(startVar) = \(startCode);\n")
+          prelude.append("\(getCType(arguments[1].type)) \(endVar) = \(endCode);\n")
+          preludeVars.append((startVar, arguments[0].type))
+          preludeVars.append((endVar, arguments[1].type))
+          condition = "(\(startVar) < \(path) && \(path) < \(endVar))"
+          
+        case "FromRange":
+          // start <= x
+          guard arguments.count == 1 else { fatalError("FromRange requires 1 argument") }
+          let startVar = nextTemp() + "_start"
+          let startCode = generateExpressionSSA(arguments[0])
+          prelude.append("\(getCType(arguments[0].type)) \(startVar) = \(startCode);\n")
+          preludeVars.append((startVar, arguments[0].type))
+          condition = "(\(startVar) <= \(path))"
+          
+        case "FromOpenRange":
+          // start < x
+          guard arguments.count == 1 else { fatalError("FromOpenRange requires 1 argument") }
+          let startVar = nextTemp() + "_start"
+          let startCode = generateExpressionSSA(arguments[0])
+          prelude.append("\(getCType(arguments[0].type)) \(startVar) = \(startCode);\n")
+          preludeVars.append((startVar, arguments[0].type))
+          condition = "(\(startVar) < \(path))"
+          
+        case "ToRange":
+          // x <= end
+          guard arguments.count == 1 else { fatalError("ToRange requires 1 argument") }
+          let endVar = nextTemp() + "_end"
+          let endCode = generateExpressionSSA(arguments[0])
+          prelude.append("\(getCType(arguments[0].type)) \(endVar) = \(endCode);\n")
+          preludeVars.append((endVar, arguments[0].type))
+          condition = "(\(path) <= \(endVar))"
+          
+        case "ToOpenRange":
+          // x < end
+          guard arguments.count == 1 else { fatalError("ToOpenRange requires 1 argument") }
+          let endVar = nextTemp() + "_end"
+          let endCode = generateExpressionSSA(arguments[0])
+          prelude.append("\(getCType(arguments[0].type)) \(endVar) = \(endCode);\n")
+          preludeVars.append((endVar, arguments[0].type))
+          condition = "(\(path) < \(endVar))"
+          
+        case "FullRange":
+          // Always matches (min <= x <= max)
+          condition = "1"
+          
+        default:
+          fatalError("Unknown Range case: \(caseName)")
+        }
+        
+        return (prelude, preludeVars, condition, [], [])
       }
     }
 
