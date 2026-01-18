@@ -959,10 +959,102 @@ public class Parser {
   }
 
   private func parsePattern() throws -> PatternNode {
+    let startSpan = currentSpan
+    
+    // Handle prefix range operators: ...b, ...<b, ....
+    if currentToken === .fullRange {
+      try match(.fullRange)
+      return .rangePattern(operator: .full, left: nil, right: nil, span: startSpan)
+    }
+    if currentToken === .unboundedRange {
+      try match(.unboundedRange)
+      let right = try parsePatternRangeOperand()
+      return .rangePattern(operator: .to, left: nil, right: right, span: startSpan)
+    }
+    if currentToken === .unboundedRangeLess {
+      try match(.unboundedRangeLess)
+      let right = try parsePatternRangeOperand()
+      return .rangePattern(operator: .toOpen, left: nil, right: right, span: startSpan)
+    }
+    
+    // Handle negative number patterns: -5, -10..0, etc.
+    if currentToken === .minus {
+      try match(.minus)
+      if case .integer(let v, let suffix) = currentToken {
+        try match(.integer(v, suffix))
+        // Create negation expression: 0 - v
+        let leftExpr: ExpressionNode = .arithmeticExpression(
+          left: .integerLiteral("0", suffix),
+          operator: .minus,
+          right: .integerLiteral(v, suffix)
+        )
+        
+        // Check for range operator after negative integer literal
+        switch currentToken {
+        case .range:  // ..
+          try match(.range)
+          let right = try parsePatternRangeOperand()
+          return .rangePattern(operator: .closed, left: leftExpr, right: right, span: startSpan)
+        case .rangeLess:  // ..<
+          try match(.rangeLess)
+          let right = try parsePatternRangeOperand()
+          return .rangePattern(operator: .closedOpen, left: leftExpr, right: right, span: startSpan)
+        case .lessRange:  // <..
+          try match(.lessRange)
+          let right = try parsePatternRangeOperand()
+          return .rangePattern(operator: .openClosed, left: leftExpr, right: right, span: startSpan)
+        case .lessRangeLess:  // <..<
+          try match(.lessRangeLess)
+          let right = try parsePatternRangeOperand()
+          return .rangePattern(operator: .open, left: leftExpr, right: right, span: startSpan)
+        case .unboundedRange:  // ...
+          try match(.unboundedRange)
+          return .rangePattern(operator: .from, left: leftExpr, right: nil, span: startSpan)
+        case .lessUnboundedRange:  // <...
+          try match(.lessUnboundedRange)
+          return .rangePattern(operator: .fromOpen, left: leftExpr, right: nil, span: startSpan)
+        default:
+          // Just a negative integer literal pattern - need to handle this case
+          // For now, we don't support standalone negative integer patterns
+          throw ParserError.unexpectedToken(span: currentSpan, got: "negative integer literal pattern not supported as standalone")
+        }
+      }
+      throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
+    }
+    
     // Literal Patterns
     if case .integer(let v, let suffix) = currentToken {
       try match(.integer(v, suffix))
-      return .integerLiteral(value: v, suffix: suffix, span: currentSpan)
+      let leftExpr: ExpressionNode = .integerLiteral(v, suffix)
+      
+      // Check for range operator after integer literal
+      switch currentToken {
+      case .range:  // ..
+        try match(.range)
+        let right = try parsePatternRangeOperand()
+        return .rangePattern(operator: .closed, left: leftExpr, right: right, span: startSpan)
+      case .rangeLess:  // ..<
+        try match(.rangeLess)
+        let right = try parsePatternRangeOperand()
+        return .rangePattern(operator: .closedOpen, left: leftExpr, right: right, span: startSpan)
+      case .lessRange:  // <..
+        try match(.lessRange)
+        let right = try parsePatternRangeOperand()
+        return .rangePattern(operator: .openClosed, left: leftExpr, right: right, span: startSpan)
+      case .lessRangeLess:  // <..<
+        try match(.lessRangeLess)
+        let right = try parsePatternRangeOperand()
+        return .rangePattern(operator: .open, left: leftExpr, right: right, span: startSpan)
+      case .unboundedRange:  // ...
+        try match(.unboundedRange)
+        return .rangePattern(operator: .from, left: leftExpr, right: nil, span: startSpan)
+      case .lessUnboundedRange:  // <...
+        try match(.lessUnboundedRange)
+        return .rangePattern(operator: .fromOpen, left: leftExpr, right: nil, span: startSpan)
+      default:
+        // Just an integer literal pattern
+        return .integerLiteral(value: v, suffix: suffix, span: startSpan)
+      }
     }
     if case .bool(let v) = currentToken {
       try match(.bool(v))
@@ -1005,6 +1097,29 @@ public class Parser {
         try match(.rightParen)
       }
       return .unionCase(caseName: name, elements: args, span: currentSpan)
+    }
+    throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
+  }
+  
+  /// Parse a simple operand for range patterns (integer literals, including negative)
+  private func parsePatternRangeOperand() throws -> ExpressionNode {
+    // Handle negative numbers: -5, -10, etc.
+    if currentToken === .minus {
+      try match(.minus)
+      if case .integer(let v, let suffix) = currentToken {
+        try match(.integer(v, suffix))
+        // Create negation expression: 0 - v
+        return .arithmeticExpression(
+          left: .integerLiteral("0", suffix),
+          operator: .minus,
+          right: .integerLiteral(v, suffix)
+        )
+      }
+      throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
+    }
+    if case .integer(let v, let suffix) = currentToken {
+      try match(.integer(v, suffix))
+      return .integerLiteral(v, suffix)
     }
     throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
   }
@@ -1104,14 +1219,65 @@ public class Parser {
   }
 
   private func parseBitwiseAndExpression() throws -> ExpressionNode {
-    var left = try parseComparisonExpression()
+    var left = try parseRangeExpression()
     while currentToken === .bitandKeyword {
       if isLineContinuationBlocked() { break }
       try match(.bitandKeyword)
-      let right = try parseComparisonExpression()
+      let right = try parseRangeExpression()
       left = .bitwiseExpression(left: left, operator: .and, right: right)
     }
     return left
+  }
+
+  // Range expressions: a..b, a..<b, a<..b, a<..<b, a..., a<..., ...b, ...<b, ....
+  private func parseRangeExpression() throws -> ExpressionNode {
+    // Handle prefix range operators: ...b, ...<b, ....
+    if currentToken === .fullRange {
+      try match(.fullRange)
+      return .rangeExpression(operator: .full, left: nil, right: nil)
+    }
+    if currentToken === .unboundedRange {
+      try match(.unboundedRange)
+      let right = try parseComparisonExpression()
+      return .rangeExpression(operator: .to, left: nil, right: right)
+    }
+    if currentToken === .unboundedRangeLess {
+      try match(.unboundedRangeLess)
+      let right = try parseComparisonExpression()
+      return .rangeExpression(operator: .toOpen, left: nil, right: right)
+    }
+    
+    let left = try parseComparisonExpression()
+    
+    // Handle infix and postfix range operators
+    if isLineContinuationBlocked() { return left }
+    
+    switch currentToken {
+    case .range:  // ..
+      try match(.range)
+      let right = try parseComparisonExpression()
+      return .rangeExpression(operator: .closed, left: left, right: right)
+    case .rangeLess:  // ..<
+      try match(.rangeLess)
+      let right = try parseComparisonExpression()
+      return .rangeExpression(operator: .closedOpen, left: left, right: right)
+    case .lessRange:  // <..
+      try match(.lessRange)
+      let right = try parseComparisonExpression()
+      return .rangeExpression(operator: .openClosed, left: left, right: right)
+    case .lessRangeLess:  // <..<
+      try match(.lessRangeLess)
+      let right = try parseComparisonExpression()
+      return .rangeExpression(operator: .open, left: left, right: right)
+    case .unboundedRange:  // ...
+      try match(.unboundedRange)
+      return .rangeExpression(operator: .from, left: left, right: nil)
+    case .lessUnboundedRange:  // <...
+      try match(.lessUnboundedRange)
+      return .rangeExpression(operator: .fromOpen, left: left, right: nil)
+    default:
+      return left
+    }
   }
 
   // Fourth level: Comparisons

@@ -97,6 +97,9 @@ extension ExhaustivenessChecker {
         switch pattern {
         case .wildcard, .variable:
             return true
+        case .rangePattern:
+            // Range patterns are not catchall - they only match values within the range
+            return false
         default:
             return false
         }

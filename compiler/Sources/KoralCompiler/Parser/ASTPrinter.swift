@@ -442,6 +442,25 @@ public func printAST(_ node: ASTNode) {
           printExpression(body)
         }
       }
+    
+    case .rangeExpression(let op, let left, let right):
+      print("\(indent)RangeExpression: \(op)")
+      if let l = left {
+        print("\(indent)  Left:")
+        withIndent {
+          withIndent {
+            printExpression(l)
+          }
+        }
+      }
+      if let r = right {
+        print("\(indent)  Right:")
+        withIndent {
+          withIndent {
+            printExpression(r)
+          }
+        }
+      }
     }
   }
 

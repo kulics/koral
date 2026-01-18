@@ -74,6 +74,11 @@ extension PatternSpace {
             
         case .unionCase(let caseName, _, let elements):
             return subtractUnionCase(caseName: caseName, elements: elements, type: type)
+            
+        case .rangePattern:
+            // Range patterns don't reduce the space meaningfully for exhaustiveness
+            // (we still need a catchall for exhaustiveness on numeric types)
+            return self
         }
     }
     

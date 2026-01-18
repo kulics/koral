@@ -3897,6 +3897,55 @@ public class TypeChecker {
           )
         }
         
+        // Check if it's a generic parameter with trait bounds
+        if case .genericParameter(let paramName) = type {
+          if let bounds = genericTraitBounds[paramName] {
+            for traitName in bounds {
+              let methods = try flattenedTraitMethods(traitName)
+              if let sig = methods[methodName] {
+                // Check if it's a static method (no self parameter)
+                if sig.parameters.first?.name == "self" {
+                  continue
+                }
+                let expectedType = try expectedFunctionTypeForTraitMethod(sig, selfType: type)
+                
+                guard case .function(let params, let returnType) = expectedType else {
+                  throw SemanticError(.generic("Expected function type for static method"), line: currentLine)
+                }
+                
+                if arguments.count != params.count {
+                  throw SemanticError.invalidArgumentCount(
+                    function: methodName,
+                    expected: params.count,
+                    got: arguments.count
+                  )
+                }
+                
+                var typedArguments: [TypedExpressionNode] = []
+                for (arg, param) in zip(arguments, params) {
+                  var typedArg = try inferTypedExpression(arg)
+                  typedArg = coerceLiteral(typedArg, to: param.type)
+                  if typedArg.type != param.type {
+                    throw SemanticError.typeMismatch(
+                      expected: param.type.description,
+                      got: typedArg.type.description
+                    )
+                  }
+                  typedArguments.append(typedArg)
+                }
+                
+                return .staticMethodCall(
+                  baseType: type,
+                  methodName: methodName,
+                  typeArgs: [],
+                  arguments: typedArguments,
+                  type: returnType
+                )
+              }
+            }
+          }
+        }
+        
         throw SemanticError.undefinedMember(methodName, typeName)
       }
       
@@ -3905,9 +3954,86 @@ public class TypeChecker {
     case .forExpression(let pattern, let iterable, let body):
       return try inferForExpression(pattern: pattern, iterable: iterable, body: body)
 
+    case .rangeExpression(let op, let left, let right):
+      return try inferRangeExpression(operator: op, left: left, right: right)
+
     case .genericInstantiation(let base, _):
       throw SemanticError.invalidOperation(op: "use type as value", type1: base, type2: "")
     }
+  }
+
+  // MARK: - Range Expression Type Checking and Desugaring
+
+  /// Type checks a range expression and desugars it to Range union construction.
+  /// Range expressions like `a..b` are desugared to `[T]Range.ClosedRange(a, b)`
+  private func inferRangeExpression(
+    operator op: RangeOperator,
+    left: ExpressionNode?,
+    right: ExpressionNode?
+  ) throws -> TypedExpressionNode {
+    // 1. Type check operands
+    let typedLeft = left != nil ? try inferTypedExpression(left!) : nil
+    let typedRight = right != nil ? try inferTypedExpression(right!) : nil
+    
+    // 2. Determine element type T
+    let elementType: Type
+    if let l = typedLeft {
+      elementType = l.type
+      // If both operands exist, verify they have the same type
+      if let r = typedRight {
+        if l.type != r.type {
+          throw SemanticError(.typeMismatch(expected: l.type.description, got: r.type.description), line: currentLine)
+        }
+      }
+    } else if let r = typedRight {
+      elementType = r.type
+    } else {
+      // FullRange with no operands - need context type or explicit annotation
+      throw SemanticError(.generic("FullRange requires type annotation or context type"), line: currentLine)
+    }
+    
+    // 3. Verify T implements Comparable
+    try enforceTraitConformance(elementType, traitName: "Comparable")
+    
+    // 4. Construct Range type
+    let rangeType = Type.genericUnion(template: "Range", args: [elementType])
+    
+    // 5. Determine case name and arguments
+    let caseName: String
+    let args: [TypedExpressionNode]
+    
+    switch op {
+    case .closed:
+      caseName = "ClosedRange"
+      args = [typedLeft!, typedRight!]
+    case .closedOpen:
+      caseName = "ClosedOpenRange"
+      args = [typedLeft!, typedRight!]
+    case .openClosed:
+      caseName = "OpenClosedRange"
+      args = [typedLeft!, typedRight!]
+    case .open:
+      caseName = "OpenRange"
+      args = [typedLeft!, typedRight!]
+    case .from:
+      caseName = "FromRange"
+      args = [typedLeft!]
+    case .fromOpen:
+      caseName = "FromOpenRange"
+      args = [typedLeft!]
+    case .to:
+      caseName = "ToRange"
+      args = [typedRight!]
+    case .toOpen:
+      caseName = "ToOpenRange"
+      args = [typedRight!]
+    case .full:
+      caseName = "FullRange"
+      args = []
+    }
+    
+    // 6. Return union construction expression
+    return .unionConstruction(type: rangeType, caseName: caseName, arguments: args)
   }
 
   // MARK: - For Loop Type Checking and Desugaring
@@ -4015,6 +4141,10 @@ public class TypeChecker {
     case .booleanLiteral, .integerLiteral, .stringLiteral:
       throw SemanticError(.generic(
         "For loop pattern must be exhaustive. Literal patterns are not exhaustive."
+      ), line: currentLine)
+    case .rangePattern:
+      throw SemanticError(.generic(
+        "For loop pattern must be exhaustive. Range patterns are not exhaustive."
       ), line: currentLine)
     }
   }
@@ -4210,6 +4340,9 @@ public class TypeChecker {
         try convertPatternToTypedPattern(elem, expectedType: .void)
       }
       return .unionCase(caseName: caseName, tagIndex: 0, elements: typedElements)
+    case .rangePattern(let op, let left, let right, _):
+      let typedRangeExpr = try inferRangeExpression(operator: op, left: left, right: right)
+      return .rangePattern(rangeExpr: typedRangeExpr)
     }
   }
 
@@ -4227,6 +4360,9 @@ public class TypeChecker {
       for elem in elements {
         try bindPatternVariables(pattern: elem, type: .void)
       }
+    case .rangePattern:
+      // Range patterns don't bind any variables
+      break
     }
   }
 
@@ -5104,6 +5240,25 @@ public class TypeChecker {
       return (
         .unionCase(caseName: caseName, tagIndex: caseIndex, elements: typedSubPatterns), bindings
       )
+      
+    case .rangePattern(let op, let left, let right, let span):
+      // Range patterns are desugared to a contains check
+      // First, infer the range expression to get a typed Range value
+      let typedRangeExpr = try inferRangeExpression(operator: op, left: left, right: right)
+      
+      // Verify the range element type matches the subject type
+      if case .genericUnion(let template, let args) = typedRangeExpr.type, template == "Range" {
+        if args.count == 1 && args[0] != subjectType {
+          throw SemanticError(.typeMismatch(expected: subjectType.description, got: args[0].description), span: span)
+        }
+      }
+      
+      // Range patterns only support integer types
+      if !subjectType.isIntegerType {
+        throw SemanticError(.generic("Range patterns only support integer types, got '\(subjectType)'"), span: span)
+      }
+      
+      return (.rangePattern(rangeExpr: typedRangeExpr), bindings)
     }
   }
 
