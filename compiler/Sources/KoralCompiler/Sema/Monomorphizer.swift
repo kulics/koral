@@ -538,8 +538,8 @@ public class Monomorphizer {
             // Use the declaration-time checked body and substitute types
             typedBody = substituteTypesInExpression(checkedBody, substitution: typeSubstitution)
         } else {
-            // Fallback: create a panic call (this shouldn't happen in normal operation)
-            typedBody = .intrinsicCall(.panic(message: .stringLiteral(value: "unimplemented", type: builtinStringType())))
+            // Fallback: use abort (this shouldn't happen in normal operation)
+            typedBody = .intrinsicCall(.abort)
         }
         
         // Skip intrinsic functions
@@ -698,16 +698,29 @@ public class Monomorphizer {
         case .void:
             return .blockExpression(statements: [], finalExpression: nil, type: .void)
         case .int:
-            return .integerLiteral(value: 0, type: .int)
+            return .integerLiteral(value: "0", type: .int)
         case .bool:
             return .booleanLiteral(value: false, type: .bool)
         default:
-            return .intrinsicCall(.panic(message: .stringLiteral(value: "unimplemented", type: builtinStringType())))
+            // Use abort as fallback (this shouldn't happen in normal operation)
+            return .intrinsicCall(.abort)
         }
     }
 
     
     // MARK: - Helper Methods
+    
+    /// Extracts the method name from a mangled name (e.g., "Float32_to_bits" -> "to_bits")
+    private func extractMethodName(_ mangledName: String) -> String {
+        if mangledName.hasPrefix("Float32_") {
+            return String(mangledName.dropFirst("Float32_".count))
+        } else if mangledName.hasPrefix("Float64_") {
+            return String(mangledName.dropFirst("Float64_".count))
+        } else if let idx = mangledName.lastIndex(of: "_") {
+            return String(mangledName[mangledName.index(after: idx)...])
+        }
+        return mangledName
+    }
     
     /// Checks if a type supports builtin equality comparison.
     private func isBuiltinEqualityComparable(_ type: Type) -> Bool {
@@ -1136,6 +1149,16 @@ public class Monomorphizer {
             // Apply lowering for primitive type methods (__equals, __compare)
             // This mirrors the lowering done in TypeChecker for direct calls
             if case .methodReference(let base, let method, _, _) = newCallee {
+                // Intercept Float32/Float64 to_bits intrinsic method
+                let methodName = extractMethodName(method.name)
+                if methodName == "to_bits" {
+                    if base.type == .float32 && newArguments.isEmpty {
+                        return .intrinsicCall(.float32Bits(value: base))
+                    } else if base.type == .float64 && newArguments.isEmpty {
+                        return .intrinsicCall(.float64Bits(value: base))
+                    }
+                }
+                
                 // Lower primitive `__equals(self, other) Bool` to scalar equality
                 if method.methodKind == .equals,
                    newType == .bool,
@@ -1158,9 +1181,9 @@ public class Monomorphizer {
                     
                     let less: TypedExpressionNode = .comparisonExpression(left: lhsVal, op: .less, right: rhsVal, type: .bool)
                     let greater: TypedExpressionNode = .comparisonExpression(left: lhsVal, op: .greater, right: rhsVal, type: .bool)
-                    let minusOne: TypedExpressionNode = .integerLiteral(value: -1, type: .int)
-                    let plusOne: TypedExpressionNode = .integerLiteral(value: 1, type: .int)
-                    let zero: TypedExpressionNode = .integerLiteral(value: 0, type: .int)
+                    let minusOne: TypedExpressionNode = .integerLiteral(value: "-1", type: .int)
+                    let plusOne: TypedExpressionNode = .integerLiteral(value: "1", type: .int)
+                    let zero: TypedExpressionNode = .integerLiteral(value: "0", type: .int)
                     
                     let gtBranch: TypedExpressionNode = .ifExpression(condition: greater, thenBranch: plusOne, elseBranch: zero, type: .int)
                     return .ifExpression(condition: less, thenBranch: minusOne, elseBranch: gtBranch, type: .int)
@@ -1602,24 +1625,35 @@ public class Monomorphizer {
             
         case .float64Bits(let value):
             return .float64Bits(value: substituteTypesInExpression(value, substitution: substitution))
+
+        case .float32FromBits(let bits):
+            return .float32FromBits(bits: substituteTypesInExpression(bits, substitution: substitution))
             
-        case .printString(let message):
-            return .printString(message: substituteTypesInExpression(message, substitution: substitution))
-            
-        case .printInt(let value):
-            return .printInt(value: substituteTypesInExpression(value, substitution: substitution))
-            
-        case .printBool(let value):
-            return .printBool(value: substituteTypesInExpression(value, substitution: substitution))
-            
-        case .panic(let message):
-            return .panic(message: substituteTypesInExpression(message, substitution: substitution))
+        case .float64FromBits(let bits):
+            return .float64FromBits(bits: substituteTypesInExpression(bits, substitution: substitution))
             
         case .exit(let code):
             return .exit(code: substituteTypesInExpression(code, substitution: substitution))
             
         case .abort:
             return .abort
+
+        // Low-level IO intrinsics (minimal set using file descriptors)
+        case .fwrite(let ptr, let len, let fd):
+            return .fwrite(
+                ptr: substituteTypesInExpression(ptr, substitution: substitution),
+                len: substituteTypesInExpression(len, substitution: substitution),
+                fd: substituteTypesInExpression(fd, substitution: substitution)
+            )
+            
+        case .fgetc(let fd):
+            return .fgetc(fd: substituteTypesInExpression(fd, substitution: substitution))
+            
+        case .fflush(let fd):
+            return .fflush(fd: substituteTypesInExpression(fd, substitution: substitution))
+            
+        case .ptrBits:
+            return .ptrBits
         }
     }
     
@@ -1984,10 +2018,26 @@ public class Monomorphizer {
             )
             
         case .call(let callee, let arguments, let type):
+            let newCallee = resolveTypesInExpression(callee)
+            let newArguments = arguments.map { resolveTypesInExpression($0) }
+            let newType = resolveParameterizedType(type)
+            
+            // Intercept Float32/Float64 to_bits intrinsic method
+            if case .methodReference(let base, let method, _, _) = newCallee {
+                let methodName = extractMethodName(method.name)
+                if methodName == "to_bits" {
+                    if base.type == .float32 && newArguments.isEmpty {
+                        return .intrinsicCall(.float32Bits(value: base))
+                    } else if base.type == .float64 && newArguments.isEmpty {
+                        return .intrinsicCall(.float64Bits(value: base))
+                    }
+                }
+            }
+            
             return .call(
-                callee: resolveTypesInExpression(callee),
-                arguments: arguments.map { resolveTypesInExpression($0) },
-                type: resolveParameterizedType(type)
+                callee: newCallee,
+                arguments: newArguments,
+                type: newType
             )
             
         case .genericCall(let functionName, let typeArgs, let arguments, let type):
@@ -2378,24 +2428,35 @@ public class Monomorphizer {
             
         case .float64Bits(let value):
             return .float64Bits(value: resolveTypesInExpression(value))
+
+        case .float32FromBits(let bits):
+            return .float32FromBits(bits: resolveTypesInExpression(bits))
             
-        case .printString(let message):
-            return .printString(message: resolveTypesInExpression(message))
-            
-        case .printInt(let value):
-            return .printInt(value: resolveTypesInExpression(value))
-            
-        case .printBool(let value):
-            return .printBool(value: resolveTypesInExpression(value))
-            
-        case .panic(let message):
-            return .panic(message: resolveTypesInExpression(message))
+        case .float64FromBits(let bits):
+            return .float64FromBits(bits: resolveTypesInExpression(bits))
             
         case .exit(let code):
             return .exit(code: resolveTypesInExpression(code))
             
         case .abort:
             return .abort
+
+        // Low-level IO intrinsics (minimal set using file descriptors)
+        case .fwrite(let ptr, let len, let fd):
+            return .fwrite(
+                ptr: resolveTypesInExpression(ptr),
+                len: resolveTypesInExpression(len),
+                fd: resolveTypesInExpression(fd)
+            )
+            
+        case .fgetc(let fd):
+            return .fgetc(fd: resolveTypesInExpression(fd))
+            
+        case .fflush(let fd):
+            return .fflush(fd: resolveTypesInExpression(fd))
+            
+        case .ptrBits:
+            return .ptrBits
         }
     }
     

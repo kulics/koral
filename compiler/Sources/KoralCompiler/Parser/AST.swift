@@ -206,8 +206,8 @@ public enum BitwiseOperator {
   case shiftRight
 }
 public indirect enum ExpressionNode {
-  case integerLiteral(Int)
-  case floatLiteral(Double)
+  case integerLiteral(String, NumericSuffix?)  // Store as string with optional suffix
+  case floatLiteral(String, NumericSuffix?)    // Store as string with optional suffix
   case stringLiteral(String)
   case booleanLiteral(Bool)
   case castExpression(type: TypeNode, expression: ExpressionNode)
@@ -245,7 +245,7 @@ public indirect enum ExpressionNode {
 }
 public indirect enum PatternNode: CustomStringConvertible {
   case booleanLiteral(value: Bool, line: Int)
-  case integerLiteral(value: Int, line: Int)
+  case integerLiteral(value: String, suffix: NumericSuffix?, line: Int)  // Store as string with optional suffix
   case stringLiteral(value: String, line: Int)
   case wildcard(line: Int)
   case variable(name: String, mutable: Bool, line: Int)
@@ -254,7 +254,11 @@ public indirect enum PatternNode: CustomStringConvertible {
   public var description: String {
     switch self {
     case .booleanLiteral(let value, _): return "\(value)"
-    case .integerLiteral(let value, _): return "\(value)"
+    case .integerLiteral(let value, let suffix, _): 
+      if let suffix = suffix {
+        return "\(value)\(suffix)"
+      }
+      return "\(value)"
     case .stringLiteral(let value, _): return "\"\(value)\""
     case .wildcard: return "_"
     case .variable(let name, let mutable, _): return mutable ? "mut \(name)" : name

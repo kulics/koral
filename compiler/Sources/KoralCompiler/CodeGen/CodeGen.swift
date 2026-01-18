@@ -341,21 +341,12 @@ public class CodeGen {
       validateExpression(ptr, context: "\(context) -> ptrReplace ptr")
       validateExpression(val, context: "\(context) -> ptrReplace val")
       
+    case .ptrBits:
+      break  // No expressions to validate
+      
     case .ptrOffset(let ptr, let offset):
       validateExpression(ptr, context: "\(context) -> ptrOffset ptr")
       validateExpression(offset, context: "\(context) -> ptrOffset offset")
-      
-    case .printString(let msg):
-      validateExpression(msg, context: "\(context) -> printString msg")
-      
-    case .printInt(let val):
-      validateExpression(val, context: "\(context) -> printInt val")
-      
-    case .printBool(let val):
-      validateExpression(val, context: "\(context) -> printBool val")
-      
-    case .panic(let msg):
-      validateExpression(msg, context: "\(context) -> panic msg")
       
     case .exit(let code):
       validateExpression(code, context: "\(context) -> exit code")
@@ -368,6 +359,24 @@ public class CodeGen {
       
     case .float64Bits(let value):
       validateExpression(value, context: "\(context) -> float64Bits value")
+
+    case .float32FromBits(let bits):
+      validateExpression(bits, context: "\(context) -> float32FromBits bits")
+      
+    case .float64FromBits(let bits):
+      validateExpression(bits, context: "\(context) -> float64FromBits bits")
+
+    // Low-level IO intrinsics (minimal set using file descriptors)
+    case .fwrite(let ptr, let len, let fd):
+      validateExpression(ptr, context: "\(context) -> fwrite ptr")
+      validateExpression(len, context: "\(context) -> fwrite len")
+      validateExpression(fd, context: "\(context) -> fwrite fd")
+      
+    case .fgetc(let fd):
+      validateExpression(fd, context: "\(context) -> fgetc fd")
+      
+    case .fflush(let fd):
+      validateExpression(fd, context: "\(context) -> fflush fd")
     }
   }
 
@@ -1551,6 +1560,13 @@ public class CodeGen {
       }
       return result
 
+    case .ptrBits:
+      // Return pointer bit width (32 or 64)
+      let result = nextTemp()
+      addIndent()
+      buffer += "int64_t \(result) = sizeof(void*) * 8;\n"
+      return result
+
     case .ptrOffset(let ptr, let offset):
       guard case .pointer(let element) = ptr.type else { fatalError() }
       let p = generateExpressionSSA(ptr)
@@ -1562,36 +1578,6 @@ public class CodeGen {
       addIndent()
       buffer += "\(result) = ((\(cType)*)\(p)) + \(o);\n"
       return result
-
-    case .printString(let msg):
-      let m = generateExpressionSSA(msg)
-      // Access StringStorage through the ref inside String
-      let storageVar = nextTemp()
-      addIndent()
-      buffer += "struct StringStorage* \(storageVar) = (struct StringStorage*)\(m).storage.ptr;\n"
-      addIndent()
-      buffer += "printf(\"%.*s\\n\", (int)\(storageVar)->len, (const char*)\(storageVar)->data);\n"
-      return ""
-    case .printInt(let val):
-      let v = generateExpressionSSA(val)
-      addIndent()
-      buffer += "printf(\"%lld\\n\", \(v));\n"
-      return ""
-    case .printBool(let val):
-      let v = generateExpressionSSA(val)
-      addIndent()
-      buffer += "printf(\"%s\\n\", \(v) ? \"true\" : \"false\");\n"
-      return ""
-    case .panic(let msg):
-      let m = generateExpressionSSA(msg)
-      let storageVar = nextTemp()
-      addIndent()
-      buffer += "struct StringStorage* \(storageVar) = (struct StringStorage*)\(m).storage.ptr;\n"
-      addIndent()
-      buffer += "fprintf(stderr, \"Panic: %.*s\\n\", (int)\(storageVar)->len, (const char*)\(storageVar)->data);\n"
-      addIndent()
-      buffer += "exit(1);\n"
-      return ""
 
     case .exit(let code):
       let c = generateExpressionSSA(code)
@@ -1621,6 +1607,59 @@ public class CodeGen {
       addIndent()
       buffer += "memcpy(&\(result), &\(v), sizeof(uint64_t));\n"
       return result
+
+    case .float32FromBits(let bits):
+      let b = generateExpressionSSA(bits)
+      let bitsTemp = nextTemp()
+      let result = nextTemp()
+      addIndent()
+      buffer += "uint32_t \(bitsTemp) = \(b);\n"
+      addIndent()
+      buffer += "float \(result) = 0;\n"
+      addIndent()
+      buffer += "memcpy(&\(result), &\(bitsTemp), sizeof(float));\n"
+      return result
+
+    case .float64FromBits(let bits):
+      let b = generateExpressionSSA(bits)
+      let bitsTemp = nextTemp()
+      let result = nextTemp()
+      addIndent()
+      buffer += "uint64_t \(bitsTemp) = \(b);\n"
+      addIndent()
+      buffer += "double \(result) = 0;\n"
+      addIndent()
+      buffer += "memcpy(&\(result), &\(bitsTemp), sizeof(double));\n"
+      return result
+
+    // Low-level IO intrinsics (minimal set using file descriptors)
+    case .fwrite(let ptr, let len, let fd):
+      let p = generateExpressionSSA(ptr)
+      let l = generateExpressionSSA(len)
+      let f = generateExpressionSSA(fd)
+      let result = nextTemp()
+      addIndent()
+      buffer += "FILE* _fwrite_stream_\(result) = (\(f) == 1) ? stdout : ((\(f) == 2) ? stderr : stdin);\n"
+      addIndent()
+      buffer += "int64_t \(result) = fwrite((const char*)\(p), 1, \(l), _fwrite_stream_\(result));\n"
+      return result
+
+    case .fgetc(let fd):
+      let f = generateExpressionSSA(fd)
+      let result = nextTemp()
+      addIndent()
+      buffer += "FILE* _fgetc_stream_\(result) = (\(f) == 0) ? stdin : ((\(f) == 1) ? stdout : stderr);\n"
+      addIndent()
+      buffer += "int64_t \(result) = fgetc(_fgetc_stream_\(result));\n"
+      return result
+
+    case .fflush(let fd):
+      let f = generateExpressionSSA(fd)
+      addIndent()
+      buffer += "FILE* _fflush_stream = (\(f) == 1) ? stdout : ((\(f) == 2) ? stderr : stdin);\n"
+      addIndent()
+      buffer += "fflush(_fflush_stream);\n"
+      return ""
     }
   }
 
@@ -2571,7 +2610,7 @@ public class CodeGen {
     // If we missed something in AST transform, this might be dead code.
     
     addIndent()
-    if type == .void {
+    if type == .void || type == .never {
       buffer += "\(identifier.name)("
       buffer += paramResults.joined(separator: ", ")
       buffer += ");\n"

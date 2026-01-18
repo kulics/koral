@@ -1028,6 +1028,7 @@ public class TypeChecker {
   
   /// Collects given method signatures without checking bodies.
   /// This allows methods in one given block to call methods in another given block.
+  /// Also resolves struct and union types so function signatures can reference them.
   private func collectGivenSignatures(_ decl: GlobalNode) throws {
     switch decl {
     case .givenDeclaration(let typeParams, let typeNode, let methods, let line):
@@ -1143,6 +1144,94 @@ public class TypeChecker {
       }
       // Non-generic intrinsic given is handled in pass 3
       
+    case .globalStructDeclaration(let name, let typeParameters, let parameters, _, let line):
+      self.currentLine = line
+      // Resolve non-generic struct types so function signatures can reference them
+      if typeParameters.isEmpty {
+        // Non-generic struct: resolve member types and finalize the type definition
+        let placeholder = currentScope.lookupType(name)!
+        
+        let params = try parameters.map { param -> Symbol in
+          let paramType = try resolveTypeNode(param.type)
+          if paramType == placeholder {
+            throw SemanticError.invalidOperation(
+              op: "Direct recursion in struct \(name) not allowed (use ref)", type1: param.name,
+              type2: "")
+          }
+          return Symbol(
+            name: param.name, type: paramType,
+            kind: param.mutable ? .variable(.MutableValue) : .variable(.Value))
+        }
+        
+        // Define the new type
+        let typeType = Type.structure(
+          name: name,
+          members: params.map { (name: $0.name, type: $0.type, mutable: $0.isMutable()) },
+          isGenericInstantiation: false
+        )
+        currentScope.overwriteType(name, type: typeType)
+      }
+      // Generic structs are handled in pass 3
+      
+    case .globalUnionDeclaration(let name, let typeParameters, let cases, _, let line):
+      self.currentLine = line
+      // Resolve non-generic union types so function signatures can reference them
+      if typeParameters.isEmpty {
+        // Non-generic union: resolve case types and finalize the type definition
+        let placeholder = currentScope.lookupType(name)!
+        
+        var unionCases: [UnionCase] = []
+        for c in cases {
+          var params: [(name: String, type: Type)] = []
+          for p in c.parameters {
+            let resolved = try resolveTypeNode(p.type)
+            if resolved == placeholder {
+              throw SemanticError.invalidOperation(
+                op: "Direct recursion in union \(name) not allowed (use ref)", type1: p.name,
+                type2: "")
+            }
+            params.append((name: p.name, type: resolved))
+          }
+          unionCases.append(UnionCase(name: c.name, parameters: params))
+        }
+        
+        let unionType = Type.union(name: name, cases: unionCases, isGenericInstantiation: false)
+        currentScope.overwriteType(name, type: unionType)
+      }
+      // Generic unions are handled in pass 3
+      
+    case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, _, _, let line):
+      self.currentLine = line
+      // Register function signature so it can be called from methods defined earlier
+      if typeParameters.isEmpty {
+        // Non-generic function: register signature now
+        let returnType = try resolveTypeNode(returnTypeNode)
+        let params = try parameters.map { param -> Parameter in
+          let paramType = try resolveTypeNode(param.type)
+          // In Koral, 'mutable' in parameter means it's a mutable reference (ref)
+          let passKind: PassKind = param.mutable ? .byMutRef : .byVal
+          return Parameter(type: paramType, kind: passKind)
+        }
+        let functionType = Type.function(parameters: params, returns: returnType)
+        currentScope.define(name, functionType, mutable: false)
+      }
+      // Generic functions are handled in pass 3
+      
+    case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, _, let line):
+      self.currentLine = line
+      // Register intrinsic function signature so it can be called from methods defined earlier
+      if typeParameters.isEmpty {
+        let returnType = try resolveTypeNode(returnTypeNode)
+        let params = try parameters.map { param -> Parameter in
+          let paramType = try resolveTypeNode(param.type)
+          let passKind: PassKind = param.mutable ? .byMutRef : .byVal
+          return Parameter(type: paramType, kind: passKind)
+        }
+        let functionType = Type.function(parameters: params, returns: returnType)
+        currentScope.define(name, functionType, mutable: false)
+      }
+      // Generic intrinsic functions are handled in pass 3
+      
     default:
       // Other declarations are handled in pass 3
       break
@@ -1182,29 +1271,15 @@ public class TypeChecker {
         return .genericTypeTemplate(name: name)
       }
 
-      // Non-generic union: placeholder was registered in pass 1
-      // Now resolve the actual case types
-      let placeholder = currentScope.lookupType(name)!
+      // Non-generic union: already resolved in Pass 2
+      // Just return the typed declaration
+      let type = currentScope.lookupType(name)!
       
       var unionCases: [UnionCase] = []
-      for c in cases {
-        var params: [(name: String, type: Type)] = []
-        for p in c.parameters {
-          let resolved = try resolveTypeNode(p.type)
-          if resolved == placeholder {
-            throw SemanticError.invalidOperation(
-              op: "Direct recursion in union \(name) not allowed (use ref)", type1: p.name,
-              type2: "")
-          }
-          params.append((name: p.name, type: resolved))
-        }
-        unionCases.append(UnionCase(name: c.name, parameters: params))
+      if case .union(_, let cases, _) = type {
+        unionCases = cases
       }
-
-      let type = Type.union(
-        name: name, cases: unionCases, isGenericInstantiation: false)
-      // Replace placeholder with final type
-      currentScope.overwriteType(name, type: type)
+      
       return .globalUnionDeclaration(
         identifier: Symbol(name: name, type: type, kind: .type), cases: unionCases)
 
@@ -1230,7 +1305,11 @@ public class TypeChecker {
       let name, let typeParameters, let parameters, let returnTypeNode, let body, let access,
       let line):
       self.currentLine = line
-      if currentScope.hasFunctionDefinition(name) {
+      
+      // For non-generic functions, skip duplicate check if already defined in Pass 2
+      if typeParameters.isEmpty && currentScope.lookup(name) != nil {
+        // Already defined in Pass 2, continue with body checking
+      } else if currentScope.hasFunctionDefinition(name) {
         throw SemanticError.duplicateDefinition(name, line: line)
       }
 
@@ -1299,8 +1378,10 @@ public class TypeChecker {
         returns: returnType
       )
 
-      // Define placeholder for recursion
-      currentScope.define(name, functionType, mutable: false)
+      // Define placeholder for recursion (skip if already defined in Pass 2)
+      if currentScope.lookup(name) == nil {
+        currentScope.define(name, functionType, mutable: false)
+      }
 
       let (typedBody, _) = try checkFunctionBody(params, returnType, body)
 
@@ -1313,6 +1394,13 @@ public class TypeChecker {
     case .intrinsicFunctionDeclaration(
       let name, let typeParameters, let parameters, let returnTypeNode, let access, let line):
       self.currentLine = line
+      
+      // Skip duplicate check for non-generic functions (already defined in Pass 2)
+      if typeParameters.isEmpty && currentScope.lookup(name) != nil {
+        // Already defined in Pass 2, just return nil
+        return nil
+      }
+      
       guard case nil = currentScope.lookup(name) else {
         throw SemanticError.duplicateDefinition(name, line: line)
       }
@@ -1362,7 +1450,7 @@ public class TypeChecker {
         let funcType = Type.function(
           parameters: params.map { Parameter(type: $0.type, kind: .byVal) }, returns: returnType)
         // Dummy typed body
-        let typedBody = TypedExpressionNode.integerLiteral(value: 0, type: .int)
+        let typedBody = TypedExpressionNode.integerLiteral(value: "0", type: .int)
         return (funcType, typedBody, params)
       }
       currentScope.define(name, functionType, mutable: false)
@@ -1658,7 +1746,7 @@ public class TypeChecker {
             returns: returnType
           )
           // Dummy body for intrinsic
-          let typedBody = TypedExpressionNode.integerLiteral(value: 0, type: .int)
+          let typedBody = TypedExpressionNode.integerLiteral(value: "0", type: .int)
           return (functionType, typedBody, params, returnType)
         }
 
@@ -1691,7 +1779,7 @@ public class TypeChecker {
       let name, let typeParameters, let parameters, _, let line):
       self.currentLine = line
       // Note: Type was already registered in Pass 1 (collectTypeDefinition)
-      // Pass 2 only validates field types and finalizes the type definition
+      // Non-generic types are resolved in Pass 2 (collectGivenSignatures)
 
       if !typeParameters.isEmpty {
         // Generic struct template was already registered in Pass 1
@@ -1712,29 +1800,16 @@ public class TypeChecker {
         return .genericTypeTemplate(name: name)
       }
 
-      // Non-generic struct: placeholder was registered in Pass 1
-      // Now resolve member types and finalize the type definition
-      let placeholder = currentScope.lookupType(name)!
+      // Non-generic struct: already resolved in Pass 2
+      // Just return the typed declaration
+      let typeType = currentScope.lookupType(name)!
 
       let params = try parameters.map { param -> Symbol in
         let paramType = try resolveTypeNode(param.type)
-        if paramType == placeholder {
-          throw SemanticError.invalidOperation(
-            op: "Direct recursion in struct \(name) not allowed (use ref)", type1: param.name,
-            type2: "")
-        }
         return Symbol(
           name: param.name, type: paramType,
           kind: param.mutable ? .variable(.MutableValue) : .variable(.Value))
       }
-
-      // Define the new type
-      let typeType = Type.structure(
-        name: name,
-        members: params.map { (name: $0.name, type: $0.type, mutable: $0.isMutable()) },
-        isGenericInstantiation: false
-      )
-      currentScope.overwriteType(name, type: typeType)
 
       return .globalStructDeclaration(
         identifier: Symbol(name: name, type: typeType, kind: .type),
@@ -1821,11 +1896,41 @@ public class TypeChecker {
       // Cast always produces an rvalue.
       return .castExpression(expression: typedInner, type: targetType)
 
-    case .integerLiteral(let value):
-      return .integerLiteral(value: value, type: .int)
+    case .integerLiteral(let value, let suffix):
+      let type: Type
+      if let suffix = suffix {
+        switch suffix {
+        case .i: type = .int
+        case .i8: type = .int8
+        case .i16: type = .int16
+        case .i32: type = .int32
+        case .i64: type = .int64
+        case .u: type = .uint
+        case .u8: type = .uint8
+        case .u16: type = .uint16
+        case .u32: type = .uint32
+        case .u64: type = .uint64
+        case .f32, .f64:
+          throw SemanticError.typeMismatch(expected: "integer suffix", got: suffix.rawValue)
+        }
+      } else {
+        type = .int
+      }
+      return .integerLiteral(value: value, type: type)
 
-    case .floatLiteral(let value):
-      return .floatLiteral(value: value, type: .float64)
+    case .floatLiteral(let value, let suffix):
+      let type: Type
+      if let suffix = suffix {
+        switch suffix {
+        case .f32: type = .float32
+        case .f64: type = .float64
+        case .i, .i8, .i16, .i32, .i64, .u, .u8, .u16, .u32, .u64:
+          throw SemanticError.typeMismatch(expected: "float suffix", got: suffix.rawValue)
+        }
+      } else {
+        type = .float64
+      }
+      return .floatLiteral(value: value, type: type)
 
     case .stringLiteral(let value):
       return .stringLiteral(value: value, type: builtinStringType())
@@ -2002,7 +2107,7 @@ public class TypeChecker {
         !isBuiltinOrderingComparable(typedLeft.type)
       {
         let cmp = try buildCompareCall(lhs: typedLeft, rhs: typedRight)
-        let zero: TypedExpressionNode = .integerLiteral(value: 0, type: .int)
+        let zero: TypedExpressionNode = .integerLiteral(value: "0", type: .int)
         return .comparisonExpression(left: cmp, op: op, right: zero, type: .bool)
       }
 
@@ -2712,6 +2817,13 @@ public class TypeChecker {
           return node
         }
 
+        // Intercept Float32/Float64 intrinsic methods
+        if base.type == .float32 || base.type == .float64,
+          let node = try checkIntrinsicFloatMethod(base: base, method: method, args: arguments)
+        {
+          return node
+        }
+
         if case .function(let params, let returns) = method.type {
           if arguments.count != params.count - 1 {
             throw SemanticError.invalidArgumentCount(
@@ -2814,9 +2926,9 @@ public class TypeChecker {
 
             let less: TypedExpressionNode = .comparisonExpression(left: lhsVal, op: .less, right: rhsVal, type: .bool)
             let greater: TypedExpressionNode = .comparisonExpression(left: lhsVal, op: .greater, right: rhsVal, type: .bool)
-            let minusOne: TypedExpressionNode = .integerLiteral(value: -1, type: .int)
-            let plusOne: TypedExpressionNode = .integerLiteral(value: 1, type: .int)
-            let zero: TypedExpressionNode = .integerLiteral(value: 0, type: .int)
+            let minusOne: TypedExpressionNode = .integerLiteral(value: "-1", type: .int)
+            let plusOne: TypedExpressionNode = .integerLiteral(value: "1", type: .int)
+            let zero: TypedExpressionNode = .integerLiteral(value: "0", type: .int)
 
             let gtBranch: TypedExpressionNode = .ifExpression(condition: greater, thenBranch: plusOne, elseBranch: zero, type: .int)
             return .ifExpression(condition: less, thenBranch: minusOne, elseBranch: gtBranch, type: .int)
@@ -3368,6 +3480,39 @@ public class TypeChecker {
 
     case .staticMethodCall(let typeName, let typeArgs, let methodName, let arguments):
       // Handle static method call from AST: TypeName.methodName(...) or [T]TypeName.methodName(...)
+      
+      // Intercept Float32.from_bits and Float64.from_bits intrinsic static methods
+      if typeArgs.isEmpty && methodName == "from_bits" {
+        if typeName == "Float32" {
+          guard arguments.count == 1 else {
+            throw SemanticError.invalidArgumentCount(function: "from_bits", expected: 1, got: arguments.count)
+          }
+          var bits = try inferTypedExpression(arguments[0])
+          bits = coerceLiteral(bits, to: .uint32)
+          if bits.type != .uint32 {
+            throw SemanticError.typeMismatch(expected: "UInt32", got: bits.type.description)
+          }
+          return .intrinsicCall(.float32FromBits(bits: bits))
+        } else if typeName == "Float64" {
+          guard arguments.count == 1 else {
+            throw SemanticError.invalidArgumentCount(function: "from_bits", expected: 1, got: arguments.count)
+          }
+          var bits = try inferTypedExpression(arguments[0])
+          bits = coerceLiteral(bits, to: .uint64)
+          if bits.type != .uint64 {
+            throw SemanticError.typeMismatch(expected: "UInt64", got: bits.type.description)
+          }
+          return .intrinsicCall(.float64FromBits(bits: bits))
+        }
+      }
+      
+      // Intercept Pointer.bits() intrinsic static method
+      if typeName == "Pointer" && methodName == "bits" {
+        if let node = try checkIntrinsicPointerStaticMethod(typeName: typeName, methodName: methodName, args: arguments) {
+          return node
+        }
+      }
+      
       let resolvedTypeArgs = try typeArgs.map { try resolveTypeNode($0) }
       
       // Check if it's a generic struct
@@ -3639,30 +3784,6 @@ public class TypeChecker {
       return nil  // handled in generic inst for now or handled after resolution?
 
     // Non-generic intrinsics
-    case "print_string":
-      guard arguments.count == 1 else {
-        throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
-      }
-      let msg = try inferTypedExpression(arguments[0])
-      return .intrinsicCall(.printString(message: msg))
-    case "print_int":
-      guard arguments.count == 1 else {
-        throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
-      }
-      let val = try inferTypedExpression(arguments[0])
-      return .intrinsicCall(.printInt(value: val))
-    case "print_bool":
-      guard arguments.count == 1 else {
-        throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
-      }
-      let val = try inferTypedExpression(arguments[0])
-      return .intrinsicCall(.printBool(value: val))
-    case "panic":
-      guard arguments.count == 1 else {
-        throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
-      }
-      let msg = try inferTypedExpression(arguments[0])
-      return .intrinsicCall(.panic(message: msg))
     case "exit":
       guard arguments.count == 1 else {
         throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
@@ -3678,25 +3799,44 @@ public class TypeChecker {
       }
       return .intrinsicCall(.abort)
 
-    case "float32_bits":
-      guard arguments.count == 1 else {
-        throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
+    // Low-level IO intrinsics (minimal set using file descriptors)
+    case "fwrite":
+      guard arguments.count == 3 else {
+        throw SemanticError.invalidArgumentCount(function: name, expected: 3, got: arguments.count)
       }
-      let val = try inferTypedExpression(arguments[0])
-      if val.type != .float32 {
-        throw SemanticError.typeMismatch(expected: "Float32", got: val.type.description)
+      let ptr = try inferTypedExpression(arguments[0])
+      let len = try inferTypedExpression(arguments[1])
+      let fd = try inferTypedExpression(arguments[2])
+      guard case .pointer(let elem) = ptr.type, elem == .uint8 else {
+        throw SemanticError.typeMismatch(expected: "[UInt8]Pointer", got: ptr.type.description)
       }
-      return .intrinsicCall(.float32Bits(value: val))
+      if len.type != .int {
+        throw SemanticError.typeMismatch(expected: "Int", got: len.type.description)
+      }
+      if fd.type != .int {
+        throw SemanticError.typeMismatch(expected: "Int", got: fd.type.description)
+      }
+      return .intrinsicCall(.fwrite(ptr: ptr, len: len, fd: fd))
 
-    case "float64_bits":
+    case "fgetc":
       guard arguments.count == 1 else {
         throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
       }
-      let val = try inferTypedExpression(arguments[0])
-      if val.type != .float64 {
-        throw SemanticError.typeMismatch(expected: "Float64", got: val.type.description)
+      let fd = try inferTypedExpression(arguments[0])
+      if fd.type != .int {
+        throw SemanticError.typeMismatch(expected: "Int", got: fd.type.description)
       }
-      return .intrinsicCall(.float64Bits(value: val))
+      return .intrinsicCall(.fgetc(fd: fd))
+
+    case "fflush":
+      guard arguments.count == 1 else {
+        throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
+      }
+      let fd = try inferTypedExpression(arguments[0])
+      if fd.type != .int {
+        throw SemanticError.typeMismatch(expected: "Int", got: fd.type.description)
+      }
+      return .intrinsicCall(.fflush(fd: fd))
 
     default: return nil
     }
@@ -3762,6 +3902,58 @@ public class TypeChecker {
           expected: elementType.description, got: val.type.description)
       }
       return .intrinsicCall(.ptrReplace(ptr: base, val: val))
+    default:
+      return nil
+    }
+  }
+
+  private func checkIntrinsicPointerStaticMethod(
+    typeName: String, methodName: String, args: [ExpressionNode]
+  ) throws -> TypedExpressionNode? {
+    // Handle Pointer.bits() static method
+    if methodName == "bits" {
+      guard args.count == 0 else {
+        throw SemanticError.invalidArgumentCount(function: "bits", expected: 0, got: args.count)
+      }
+      return .intrinsicCall(.ptrBits)
+    }
+    return nil
+  }
+
+  private func checkIntrinsicFloatMethod(
+    base: TypedExpressionNode, method: Symbol, args: [ExpressionNode]
+  ) throws -> TypedExpressionNode? {
+    // Extract the method name from mangled name (e.g., "Float32_to_bits" -> "to_bits")
+    var name = method.name
+    if name.hasPrefix("Float32_") {
+      name = String(name.dropFirst("Float32_".count))
+    } else if name.hasPrefix("Float64_") {
+      name = String(name.dropFirst("Float64_".count))
+    } else if let idx = name.lastIndex(of: "_") {
+      name = String(name[name.index(after: idx)...])
+    }
+
+    switch base.type {
+    case .float32:
+      switch name {
+      case "to_bits":
+        guard args.count == 0 else {
+          throw SemanticError.invalidArgumentCount(function: "to_bits", expected: 0, got: args.count)
+        }
+        return .intrinsicCall(.float32Bits(value: base))
+      default:
+        return nil
+      }
+    case .float64:
+      switch name {
+      case "to_bits":
+        guard args.count == 0 else {
+          throw SemanticError.invalidArgumentCount(function: "to_bits", expected: 0, got: args.count)
+        }
+        return .intrinsicCall(.float64Bits(value: base))
+      default:
+        return nil
+      }
     default:
       return nil
     }
@@ -4322,9 +4514,29 @@ public class TypeChecker {
     var bindings: [(String, Bool, Type)] = []
 
     switch pattern {
-    case .integerLiteral(let val, _):
-      if subjectType != .int {
-        throw SemanticError.typeMismatch(expected: "Int", got: subjectType.description)
+    case .integerLiteral(let val, let suffix, _):
+      // Determine expected type from suffix or default to Int
+      let expectedType: Type
+      if let suffix = suffix {
+        switch suffix {
+        case .i: expectedType = .int
+        case .i8: expectedType = .int8
+        case .i16: expectedType = .int16
+        case .i32: expectedType = .int32
+        case .i64: expectedType = .int64
+        case .u: expectedType = .uint
+        case .u8: expectedType = .uint8
+        case .u16: expectedType = .uint16
+        case .u32: expectedType = .uint32
+        case .u64: expectedType = .uint64
+        case .f32, .f64:
+          throw SemanticError.typeMismatch(expected: "integer type", got: suffix.rawValue)
+        }
+      } else {
+        expectedType = .int
+      }
+      if subjectType != expectedType {
+        throw SemanticError.typeMismatch(expected: expectedType.description, got: subjectType.description)
       }
       return (.integerLiteral(value: val), [])
 
@@ -4344,7 +4556,7 @@ public class TypeChecker {
             .generic("String literal pattern must be exactly one ASCII byte when matching UInt8"),
             line: line)
         }
-        return (.integerLiteral(value: Int(byte)), [])
+        return (.integerLiteral(value: String(byte)), [])
       }
       throw SemanticError.typeMismatch(expected: "String or UInt8", got: subjectType.description)
 
@@ -4522,7 +4734,7 @@ public class TypeChecker {
       // Allow "a" / 'a' (post-escape, single-byte ASCII) to coerce to UInt8.
       if expected == .uint8, case .stringLiteral(let value, _) = expr {
         if let b = singleByteASCII(from: value) {
-          return .integerLiteral(value: Int(b), type: .uint8)
+          return .integerLiteral(value: String(b), type: .uint8)
         }
       }
     }

@@ -199,10 +199,18 @@ public func printAST(_ node: ASTNode) {
 
   func printExpression(_ node: ExpressionNode) {
     switch node {
-    case .integerLiteral(let value):
-      print("\(indent)IntegerLiteral: \(value)")
-    case .floatLiteral(let value):
-      print("\(indent)FloatLiteral: \(value)")
+    case .integerLiteral(let value, let suffix):
+      if let suffix = suffix {
+        print("\(indent)IntegerLiteral: \(value)\(suffix)")
+      } else {
+        print("\(indent)IntegerLiteral: \(value)")
+      }
+    case .floatLiteral(let value, let suffix):
+      if let suffix = suffix {
+        print("\(indent)FloatLiteral: \(value)\(suffix)")
+      } else {
+        print("\(indent)FloatLiteral: \(value)")
+      }
     case .stringLiteral(let str):
       print("\(indent)StringLiteral: \(str)")
     case .booleanLiteral(let value):
