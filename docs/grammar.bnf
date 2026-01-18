@@ -1,201 +1,299 @@
+// Koral Language Grammar (BNF)
+// Updated to match current implementation
+
 <program> ::= <item>*
 
-<item> ::= <export-decl>
-         | <import-decl>
-         | <let-decl>
-         | <type-decl>
-         | <trait-decl>
-         | <given-decl>
-         | <annotation> <item>
+<item> ::= <global-decl>
 
-<export-decl> ::= "export" <identifier> ";"?
+// ============================================================================
+// Global Declarations
+// ============================================================================
 
-<import-decl> ::= "import" "{" <import-path> (";" <import-path>)* "}" ";"?
-<import-path> ::= <identifier> ("." <identifier>)*
+<global-decl> ::= <access-modifier>? "intrinsic"? <let-decl>
+               | <access-modifier>? "intrinsic"? <type-decl>
+               | <access-modifier>? <trait-decl>
+               | "intrinsic"? <given-decl>
 
-<let-decl> ::= "let" <binding-simple> ";"?
+<access-modifier> ::= "public" | "private" | "protected"
 
-<binding-simple> ::= <generic-params>? <identifier> <function-signature> "=" <simple-expression>
-                   | <mut>? <identifier> <type-annotation>? "=" <simple-expression>
+// ============================================================================
+// Let Declarations (Variables and Functions)
+// ============================================================================
 
-<binding> ::= <binding-simple>
+<let-decl> ::= "let" <generic-params>? <identifier> <function-signature> "=" <expression> ";"?
+             | "let" "mut"? <identifier> <type-annotation>? "=" <expression> ";"?
+             | "let" <generic-params>? <identifier> <function-signature> ";"?  // intrinsic function
 
-<function-signature> ::=  "(" <param-list>? ")" <return-type>?
+<function-signature> ::= "(" <param-list>? ")" <type-annotation>?
 <param-list> ::= <param> ("," <param>)* ","?
-<param> ::= <annotation>* <identifier> <type-annotation>?
-<return-type> ::= <type-annotation>
+<param> ::= "mut"? <identifier> <type-annotation>
+          | "self" ("ref")?                           // self parameter in methods
 
 <type-annotation> ::= <type>
 
-<type-decl> ::= "type" <generic-params>? <identifier> <type-body> ","?
-<type-body> ::= "(" <field-list>? ")"
-              | "{" <variant-list> "}"
-              | "=" <type>
-<field-list> ::= <field> ("," <field>)*
-<field> ::= <annotation>* <visibility>? <mut>? <identifier> <type-annotation>
+// ============================================================================
+// Type Declarations
+// ============================================================================
+
+<type-decl> ::= "type" <generic-params>? <identifier> <type-body>?
+<type-body> ::= "(" <field-list>? ")"                 // struct
+              | "{" <variant-list> "}"                // union (sum type)
+
+<field-list> ::= <field> ("," <field>)* ","?
+<field> ::= <access-modifier>? "mut"? <identifier> <type-annotation>
+
 <variant-list> ::= <variant> ("," <variant>)* ","?
-<variant> ::= <annotation>* <identifier> "(" <field-list>? ")"
-<visibility> ::= "private"
-                | "protected"
-                | "public"
+<variant> ::= <identifier> "(" <variant-field-list>? ")"
+<variant-field-list> ::= <variant-field> ("," <variant-field>)* ","?
+<variant-field> ::= <identifier> <type-annotation>
 
-<trait-decl> ::= "trait" <generic-params>? <identifier> <trait-parents>? "{" <trait-member>* "}" ","?
-<trait-parents> ::= <type-annotation> ("and" <type-annotation>)*
-<trait-member> ::= <function-decl-signature> ";"？
+// ============================================================================
+// Trait Declarations
+// ============================================================================
 
-<given-decl> ::= "given" <given-head> <trait-impls>? "{" <given-member>* "}" ","?
-<given-head> ::= <generic-params>? <type-name>
-<trait-impls> ::= <type-annotation> ("and" <type-annotation>)*
-<given-member> ::= <function-decl>
+<trait-decl> ::= "trait" <generic-params>? <identifier> <trait-parents>? "{" <trait-member>* "}"
+<trait-parents> ::= <identifier> ("and" <identifier>)*
+<trait-member> ::= <access-modifier>? <generic-params>? <identifier> <function-signature> ";"?
 
-<function-decl> ::= <function-decl-signature> "=" <expression> ";"?
-<function-decl-signature> ::= <generic-params>? <identifier> <function-signature>
+// ============================================================================
+// Given Declarations (Type Implementations)
+// ============================================================================
+
+<given-decl> ::= "given" <generic-params>? <type> "{" <given-member>* "}"
+<given-member> ::= <access-modifier>? <generic-params>? <identifier> <function-signature> "=" <expression> ";"?
+                 | <access-modifier>? <generic-params>? <identifier> <function-signature> ";"?  // intrinsic method
+
+// ============================================================================
+// Generic Parameters
+// ============================================================================
 
 <generic-params> ::= "[" <generic-param-list> "]"
 <generic-param-list> ::= <generic-param> ("," <generic-param>)*
-<generic-param> ::= <identifier> (<type-bound>)?
-<type-bound> ::= <type-annotation>
+<generic-param> ::= <identifier> <trait-constraints>?
+<trait-constraints> ::= <identifier> ("and" <identifier>)*
 
-<annotation> ::= "@" <identifier> ("(" <annotation-args>? ")")?
-<annotation-args> ::= <annotation-arg> ("," <annotation-arg>)*
-<annotation-arg> ::= <expression> | <identifier> "=" <expression>
+// ============================================================================
+// Types
+// ============================================================================
 
-<statement> ::= <let-decl>
+<type> ::= <simple-type> ("ref")*
+
+<simple-type> ::= <identifier>                                    // simple type: Int, String
+                | <generic-type>                                  // generic type: [T]List, [K, V]Map
+                | "Self"                                          // Self type in traits/given
+
+<generic-type> ::= "[" <type-list> "]" <identifier>
+<type-list> ::= <type> ("," <type>)*
+
+// ============================================================================
+// Statements
+// ============================================================================
+
+<statement> ::= <let-statement>
               | <assignment-statement>
+              | <return-statement>
+              | <break-statement>
+              | <continue-statement>
               | <expression-statement>
 
-<assignment-statement> ::= <lhs> <assign-op> <simple-expression> ";"?
+<let-statement> ::= "let" "mut"? <identifier> <type-annotation>? "=" <expression> ";"?
 
-<assign-op> ::= "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "^=" | "bitand=" | "bitor=" | "bitxor=" | "bitshl=" | "bitshr="
-<lhs> ::= <identifier> | <postfix-expression>
+<assignment-statement> ::= <expression> <assign-op> <expression> ";"?
+<assign-op> ::= "=" | "+=" | "-=" | "*=" | "/=" | "%="
 
-<expression-statement> ::= <simple-expression> ";"?
+<return-statement> ::= "return" <expression>? ";"?
+<break-statement> ::= "break" ";"?
+<continue-statement> ::= "continue" ";"?
 
-<expression> ::= <block-expression>
-               | <simple-expression>
+<expression-statement> ::= <expression> ";"?
 
-<block-expression> ::= <block>
-                     | <let-expression-block>
-                     | <if-expression-block>
-                     | <while-expression-block>
-                     | <for-expression-block>
-                     | <match-expression>
-                     | <lambda-expression-block>
+// ============================================================================
+// Expressions
+// ============================================================================
 
-<simple-expression> ::= <let-expression-simple>
-                      | <if-expression-simple>
-                      | <while-expression-simple>
-                      | <for-expression-simple>
-                      | <lambda-expression-simple>
-                      | <binary-expression>
+<expression> ::= <let-expression>
+               | <if-expression>
+               | <while-expression>
+               | <for-expression>
+               | <when-expression>
+               | <or-expression>
 
-<block> ::= "{" <statement>* (<expression>)? "}"
+<let-expression> ::= "let" "mut"? <identifier> <type-annotation>? "=" <expression> "then" <expression>
 
-<let-expression-block> ::= "let" <binding> "then" <block-expression>
-<let-expression-simple> ::= "let" <binding> "then" <simple-expression>
+<if-expression> ::= "if" <expression> "then" <expression> ("else" <expression>)?
 
-<if-expression-block> ::= "if" <expression> "then" <block-expression>
-                        | "if" <expression> "then" <expression> "else" <block-expression>
-<if-expression-simple> ::= "if" <expression> "then" <simple-expression>
-                         | "if" <expression> "then" <expression> "else" <simple-expression>
+<while-expression> ::= "while" <expression> "then" <expression>
 
-<while-expression-block> ::= "while" <expression> "then" <block-expression>
-                           | "while" <expression> "then" <expression> "else" <block-expression>
-<while-expression-simple> ::= "while" <expression> "then" <simple-expression>
-                            | "while" <expression> "then" <expression> "else" <simple-expression>
+<for-expression> ::= "for" <pattern> "=" <expression> "then" <expression>
 
-<for-expression-block> ::= "for" <pattern> "=" <expression> "then" <block-expression>
-<for-expression-simple> ::= "for" <pattern> "=" <expression> "then" <simple-expression>
-
-<match-expression> ::= "when" <expression> "is" "{" <match-arm-list> "}"
+<when-expression> ::= "when" <expression> "is" "{" <match-arm-list> "}"
 <match-arm-list> ::= <match-arm> ("," <match-arm>)* ","?
 <match-arm> ::= <pattern> "then" <expression>
 
-<lambda-expression-block> ::= <lambda-params> "->" <block-expression>
-<lambda-expression-simple> ::= <lambda-params> "->" <simple-expression>
-<lambda-params> ::= "(" <param-list>? ")"
+// ============================================================================
+// Binary Expressions (by precedence, lowest to highest)
+// ============================================================================
 
-<binary-expression> ::= <logical-or-expression>
-<logical-or-expression> ::= <logical-and-expression> ("or" <logical-and-expression>)*
-<logical-and-expression> ::= <is-expression> ("and" <is-expression>)*
-<is-expression> ::= <bitwise-or-expression> ("is" <pattern>)*
+<or-expression> ::= <and-expression> ("or" <and-expression>)*
+<and-expression> ::= <not-expression> ("and" <not-expression>)*
+<not-expression> ::= "not" <bitwise-or-expression> | <bitwise-or-expression>
+
 <bitwise-or-expression> ::= <bitwise-xor-expression> ("bitor" <bitwise-xor-expression>)*
 <bitwise-xor-expression> ::= <bitwise-and-expression> ("bitxor" <bitwise-and-expression>)*
-<bitwise-and-expression> ::= <equality-expression> ("bitand" <equality-expression>)*
-<equality-expression> ::= <relational-expression> (("==" | "<>") <relational-expression>)*
-<relational-expression> ::= <shift-expression> ((">" | "<" | ">=" | "<=") <shift-expression>)*
-<shift-expression> ::= <additive-expression> (("bitshl" | "bitshr") <additive-expression>)*
-<additive-expression> ::= <multiplicative-expression> (("+" | "-") <multiplicative-expression>)*
-<multiplicative-expression> ::= <power-expression> (("*" | "/" | "%") <power-expression>)*
-<power-expression> ::= <prefix-expression> ("^" <power-expression>)?
-<prefix-expression> ::= ("not" | "bitnot" | "+" | "-") <prefix-expression> | <postfix-expression>
+<bitwise-and-expression> ::= <range-expression> ("bitand" <range-expression>)*
+
+<range-expression> ::= <comparison-expression> <range-op> <comparison-expression>
+                     | <comparison-expression> <postfix-range-op>
+                     | <prefix-range-op> <comparison-expression>
+                     | "...."
+                     | <comparison-expression>
+
+<range-op> ::= ".." | "..<" | "<.." | "<..<"
+<postfix-range-op> ::= "..." | "<..."
+<prefix-range-op> ::= "..." | "...<"
+
+<comparison-expression> ::= <shift-expression> (<comparison-op> <shift-expression>)*
+<comparison-op> ::= "==" | "<>" | ">" | "<" | ">=" | "<="
+
+<shift-expression> ::= <additive-expression> (<shift-op> <additive-expression>)*
+<shift-op> ::= "bitshl" | "bitshr"
+
+<additive-expression> ::= <multiplicative-expression> (<additive-op> <multiplicative-expression>)*
+<additive-op> ::= "+" | "-"
+
+<multiplicative-expression> ::= <prefix-expression> (<multiplicative-op> <prefix-expression>)*
+<multiplicative-op> ::= "*" | "/" | "%"
+
+// ============================================================================
+// Prefix Expressions
+// ============================================================================
+
+<prefix-expression> ::= <cast-expression>
+                      | "ref" <prefix-expression>
+                      | "deref" <prefix-expression>
+                      | "bitnot" <prefix-expression>
+                      | <postfix-expression>
+
+<cast-expression> ::= "(" <type> ")" <prefix-expression>
+
+// ============================================================================
+// Postfix Expressions
+// ============================================================================
+
 <postfix-expression> ::= <primary-expression> <postfix-suffix>*
-<postfix-suffix> ::= <call-suffix> | <index-suffix> | <member-suffix>
+<postfix-suffix> ::= <call-suffix>
+                   | <subscript-suffix>
+                   | <member-suffix>
+
 <call-suffix> ::= "(" <argument-list>? ")"
-<index-suffix> ::= "[" <expression> "]"
-<member-suffix> ::= "." <generic-args>? <identifier>
+<subscript-suffix> ::= "[" <expression-list> "]"
+<member-suffix> ::= "." <identifier>
+
+<argument-list> ::= <expression> ("," <expression>)* ","?
+<expression-list> ::= <expression> ("," <expression>)* ","?
+
+// ============================================================================
+// Primary Expressions
+// ============================================================================
 
 <primary-expression> ::= <literal>
                        | <identifier>
-                       | <type-constructor>
-                       | <enum-constructor>
-                       | <tuple-expression>
-                       | <array-expression>
-                       | <range-expression>
-                       | <block>
-                       | "(" <type> ")" <expression>
+                       | "self"
+                       | <generic-instantiation>
+                       | <block-expression>
                        | "(" <expression> ")"
 
-<type-constructor> ::= <type-name> "(" <argument-list>? ")"
-<enum-constructor> ::= <type-name>? "." <identifier> "(" <argument-list>? ")"
-<generic-args> ::= "[" <type-list> "]"
-<tuple-expression> ::= "(" <expression-list>? ")"
-<array-expression> ::= "[" <expression-list>? "]"
-<expression-list> ::= <expression> ("," <expression>)*
+<generic-instantiation> ::= "[" <type-list> "]" <identifier>
 
-<range-expression> ::= <expression> (".." | "..<" | "<.." | "<..<") <expression>
-                    | <expression> ("..." | "<...")
-                    | ("..." | "...<") <expression>
-                    | "...."
+<block-expression> ::= "{" <statement>* <expression>? "}"
 
-<pattern> ::= "_"
-            | <range-pattern>
-            | <literal>
-            | "mut"? <identifier>
-            | <identifier> <type-annotation>
-            | <type>
-            | <tuple-pattern>
-            | <constructor-pattern>
-            | <enum-pattern>
+// ============================================================================
+// Patterns
+// ============================================================================
 
-<range-pattern> ::= <literal> (".." | "..<" | "<.." | "<..<") <literal>
-                  | <literal> ("..." | "<...")
-                  | ("..." | "...<") <literal>
+<pattern> ::= "_"                                     // wildcard
+            | <literal>                               // literal pattern
+            | "mut"? <identifier>                     // variable binding
+            | <range-pattern>                         // range pattern
+            | <union-case-pattern>                    // union case pattern
+
+<range-pattern> ::= <pattern-operand> <range-op> <pattern-operand>
+                  | <pattern-operand> <postfix-range-op>
+                  | <prefix-range-op> <pattern-operand>
                   | "...."
 
-<tuple-pattern> ::= "(" <pattern-list>? ")"
-<constructor-pattern> ::= <identifier> "(" <pattern-list>? ")"
-<pattern-list> ::= <pattern> ("," <pattern>)*
-<enum-pattern> ::= "." <identifier> ("(" <pattern-list>? ")")?
+<pattern-operand> ::= "-"? <integer-literal>
 
-<type> ::= <type-name> ("ref")*
+<union-case-pattern> ::= "." <identifier> ("(" <pattern-list>? ")")?
+<pattern-list> ::= <pattern> ("," <pattern>)* ","?
 
-<type-name> ::= <identifier> ("." <identifier>)*
-              | (<identifier> ".")* "[" <type-list> "]" <identifier>
-              | (<identifier> ".")* "[" <integer-literal> "," <type-list> "]" <identifier>
-
-<type-list> ::= <type> ("," <type>)*
-
-<argument-list> ::= <expression> ("," <expression>)*
+// ============================================================================
+// Literals
+// ============================================================================
 
 <literal> ::= <integer-literal>
             | <float-literal>
             | <string-literal>
             | <bool-literal>
 
-<integer-literal> ::= [0-9]+
-<float-literal> ::= [0-9]+ "." [0-9]+
-<string-literal> ::= "\"" (~"\"")* "\"" | "'" (~"'")* "'"
+<integer-literal> ::= [0-9]+ ("_" [0-9]+)* <integer-suffix>?
+<integer-suffix> ::= "i" | "i8" | "i16" | "i32" | "i64"
+                   | "u" | "u8" | "u16" | "u32" | "u64"
+
+<float-literal> ::= [0-9]+ ("_" [0-9]+)* "." [0-9]+ ("_" [0-9]+)* <float-suffix>?
+<float-suffix> ::= "f32" | "f64"
+
+<string-literal> ::= '"' <string-char>* '"'
+                   | "'" <string-char>* "'"
+
+<string-char> ::= <escape-sequence> | ~["\\\n]
+<escape-sequence> ::= "\\" ("n" | "t" | "r" | "v" | "f" | "0" | "\\" | '"' | "'")
+
 <bool-literal> ::= "true" | "false"
+
 <identifier> ::= [a-zA-Z_][a-zA-Z0-9_]*
-<mut> ::= "mut"
+
+// ============================================================================
+// Keywords
+// ============================================================================
+
+// Reserved keywords:
+//   let, mut, type, trait, given, intrinsic
+//   if, then, else, while, for, when, is
+//   and, or, not
+//   bitand, bitor, bitxor, bitnot, bitshl, bitshr
+//   ref, deref
+//   self, Self
+//   return, break, continue
+//   true, false
+//   public, private, protected
+
+// ============================================================================
+// Operators
+// ============================================================================
+
+// Arithmetic: + - * / % ^
+// Comparison: == <> > < >= <=
+// Logical: and or not
+// Bitwise: bitand bitor bitxor bitnot bitshl bitshr
+// Assignment: = += -= *= /= %=
+// Range: .. ..< <.. <..< ... <... ...< ....
+// Other: -> . , ; : ( ) [ ] { }
+
+// ============================================================================
+// Comments
+// ============================================================================
+
+// Line comment: // ...
+// Block comment: /* ... */
+
+// ============================================================================
+// Automatic Semicolon Insertion
+// ============================================================================
+
+// Koral uses newline-based statement termination with continuation rules:
+// - Semicolons are optional at end of statements/declarations
+// - A newline terminates a statement unless:
+//   1. The next token is a continuation token (infix operators, dot, arrow)
+//   2. The statement is inside parentheses, brackets, or braces
+// - Blank lines and comments block line continuation
