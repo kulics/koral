@@ -27,12 +27,17 @@ public struct SemanticError: Error, CustomStringConvertible, Sendable {
     
     public let kind: Kind
     public let fileName: String
-    public let line: Int
+    public let span: SourceSpan
     
-    public init(_ kind: Kind, fileName: String, line: Int) {
+    public init(_ kind: Kind, fileName: String, span: SourceSpan) {
         self.kind = kind
         self.fileName = fileName
-        self.line = line
+        self.span = span
+    }
+    
+    /// Convenience initializer that uses line number (for backward compatibility)
+    public init(_ kind: Kind, fileName: String, line: Int) {
+        self.init(kind, fileName: fileName, span: SourceSpan(location: SourceLocation(line: line, column: 1)))
     }
 
     /// Convenience initializer that uses the current semantic context.
@@ -41,9 +46,20 @@ public struct SemanticError: Error, CustomStringConvertible, Sendable {
         self.init(
             kind,
             fileName: SemanticErrorContext.currentFileName,
-            line: line ?? SemanticErrorContext.currentLine
+            span: SourceSpan(location: SourceLocation(line: line ?? SemanticErrorContext.currentLine, column: 1))
         )
     }
+    
+    /// Convenience initializer with span from context
+    public init(_ kind: Kind, span: SourceSpan) {
+        self.init(kind, fileName: SemanticErrorContext.currentFileName, span: span)
+    }
+    
+    // Line number (for backward compatibility)
+    public var line: Int { span.start.line }
+    
+    // Column number
+    public var column: Int { span.start.column }
     
     // Compatibility initializers
     public static func typeMismatch(expected: String, got: String) -> SemanticError {
@@ -85,53 +101,56 @@ public struct SemanticError: Error, CustomStringConvertible, Sendable {
     public static func variableMoved(_ name: String) -> SemanticError {
         return SemanticError(.variableMoved(name))
     }
-    // Accessor for the old enum-like matching if necessary, though direct matching on `kind` is preferred
     
-    public var description: String {
-        let location = "Line \(line): "
+    /// The error message without location information
+    public var messageWithoutLocation: String {
         switch kind {
         case .typeMismatch(let expected, let got):
-            return "\(location)Type mismatch: expected \(expected), got \(got)"
+            return "Type mismatch: expected \(expected), got \(got)"
         case .undefinedVariable(let name):
-            return "\(location)Undefined variable: \(name)"
+            return "Undefined variable: \(name)"
         case .invalidOperation(let op, let type1, let type2):
-            return "\(location)Invalid operation \(op) between types \(type1) and \(type2)"
+            return "Invalid operation \(op) between types \(type1) and \(type2)"
         case .invalidNode:
-            return "\(location)Invalid AST node"
+            return "Invalid AST node"
         case .duplicateDefinition(let name):
-            return "\(location)Duplicate definition: \(name)"
+            return "Duplicate definition: \(name)"
         case .invalidType(let type):
-            return "\(location)Invalid type: \(type)"
+            return "Invalid type: \(type)"
         case .assignToImmutable(let name):
-            return "\(location)Cannot assign to immutable variable: \(name)"
+            return "Cannot assign to immutable variable: \(name)"
         case .functionNotFound(let name):
-            return "\(location)Function not found: \(name)"
+            return "Function not found: \(name)"
         case .invalidArgumentCount(let function, let expected, let got):
-            return "\(location)Invalid argument count for function \(function): expected \(expected), got \(got)"
+            return "Invalid argument count for function \(function): expected \(expected), got \(got)"
         case .duplicateTypeDefinition(let name):
-            return "\(location)Duplicate type definition: \(name)"
+            return "Duplicate type definition: \(name)"
         case .undefinedType(let name):
-            return "\(location)Undefined type: \(name)"
+            return "Undefined type: \(name)"
         case .undefinedMember(let member, let type):
-            return "\(location)Member '\(member)' not found in type '\(type)'"
+            return "Member '\(member)' not found in type '\(type)'"
         case .invalidFieldTypeInValueType(let type, let field, let fieldType):
-            return "\(location)Value type '\(type)' cannot have field '\(field)' of reference type '\(fieldType)'"
+            return "Value type '\(type)' cannot have field '\(field)' of reference type '\(fieldType)'"
         case .invalidMutableFieldInValueType(let type, let field):
-            return "\(location)Value type '\(type)' cannot have mutable field '\(field)'"
+            return "Value type '\(type)' cannot have mutable field '\(field)'"
         case .immutableFieldAssignment(let type, let field):
-            return "\(location)Cannot assign to immutable field '\(field)' of type '\(type)'"
+            return "Cannot assign to immutable field '\(field)' of type '\(type)'"
         case .variableMoved(let name):
-            return "\(location)Use of moved variable: '\(name)'"
+            return "Use of moved variable: '\(name)'"
         case .generic(let msg):
-            return "\(location)\(msg)"
+            return msg
         case .nonExhaustiveMatch(let type, let missing):
             let casesStr = missing.joined(separator: ", ")
-            return "\(location)Non-exhaustive match on type '\(type)': missing cases \(casesStr)"
+            return "Non-exhaustive match on type '\(type)': missing cases \(casesStr)"
         case .unreachablePattern(let pattern, let reason):
-            return "\(location)Unreachable pattern '\(pattern)': \(reason)"
+            return "Unreachable pattern '\(pattern)': \(reason)"
         case .missingCatchallPattern(let type):
-            return "\(location)Match on type '\(type)' requires a wildcard or variable binding pattern"
+            return "Match on type '\(type)' requires a wildcard or variable binding pattern"
         }
-
+    }
+    
+    public var description: String {
+        let location = span.isKnown ? "\(span.start.line):\(span.start.column): " : ""
+        return "\(location)\(messageWithoutLocation)"
     }
 }

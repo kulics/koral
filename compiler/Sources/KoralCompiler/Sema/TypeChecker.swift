@@ -26,11 +26,18 @@ public class TypeChecker {
   private var intrinsicGenericTypes: Set<String> = []
   private var intrinsicGenericFunctions: Set<String> = []
 
-  private var currentLine: Int = 1 {
+  private var currentSpan: SourceSpan = .unknown {
     didSet {
-      SemanticErrorContext.currentLine = currentLine
+      SemanticErrorContext.updateSpan(currentSpan)
     }
   }
+  
+  // Backward compatibility: currentLine as computed property
+  private var currentLine: Int {
+    get { currentSpan.start.line }
+    set { currentSpan = SourceSpan(location: SourceLocation(line: newValue, column: 1)) }
+  }
+  
   private var currentFileName: String {
     didSet {
       SemanticErrorContext.currentFileName = currentFileName
@@ -952,7 +959,7 @@ public class TypeChecker {
       // so that forward references work correctly
       for (index, decl) in declarations.enumerated() {
         self.currentFileName = (index < coreGlobalCount) ? coreFileName : userFileName
-        self.currentLine = decl.line
+        self.currentSpan = decl.span
         do {
           try collectTypeDefinition(decl)
         } catch let e as SemanticError {
@@ -965,7 +972,7 @@ public class TypeChecker {
       // regardless of declaration order
       for (index, decl) in declarations.enumerated() {
         self.currentFileName = (index < coreGlobalCount) ? coreFileName : userFileName
-        self.currentLine = decl.line
+        self.currentSpan = decl.span
         do {
           try collectGivenSignatures(decl)
         } catch let e as SemanticError {
@@ -978,7 +985,7 @@ public class TypeChecker {
       // which may reference types or methods defined later in the file
       for (index, decl) in declarations.enumerated() {
         self.currentFileName = (index < coreGlobalCount) ? coreFileName : userFileName
-        self.currentLine = decl.line
+        self.currentSpan = decl.span
         do {
           if let typedDecl = try checkGlobalDeclaration(decl) {
             typedDeclarations.append(typedDecl)
@@ -1035,10 +1042,10 @@ public class TypeChecker {
   /// This allows forward references to work correctly.
   private func collectTypeDefinition(_ decl: GlobalNode) throws {
     switch decl {
-    case .traitDeclaration(let name, let typeParameters, let superTraits, let methods, let access, let line):
-      self.currentLine = line
+    case .traitDeclaration(let name, let typeParameters, let superTraits, let methods, let access, let span):
+      self.currentSpan = span
       if traits[name] != nil {
-        throw SemanticError.duplicateDefinition(name, line: line)
+        throw SemanticError.duplicateDefinition(name, line: span.line)
       }
       // Note: We don't validate superTraits here because they might be forward references
       // They will be validated in pass 2
@@ -1048,13 +1055,13 @@ public class TypeChecker {
         superTraits: superTraits,
         methods: methods,
         access: access,
-        line: line
+        line: span.line
       )
       
-    case .globalUnionDeclaration(let name, let typeParameters, let cases, let access, let line):
-      self.currentLine = line
+    case .globalUnionDeclaration(let name, let typeParameters, let cases, let access, let span):
+      self.currentSpan = span
       if currentScope.hasTypeDefinition(name) {
-        throw SemanticError.duplicateDefinition(name, line: line)
+        throw SemanticError.duplicateDefinition(name, line: span.line)
       }
       
       if !typeParameters.isEmpty {
@@ -1068,10 +1075,10 @@ public class TypeChecker {
         try currentScope.defineType(name, type: placeholder)
       }
       
-    case .globalStructDeclaration(let name, let typeParameters, let parameters, _, let line):
-      self.currentLine = line
+    case .globalStructDeclaration(let name, let typeParameters, let parameters, _, let span):
+      self.currentSpan = span
       if currentScope.hasTypeDefinition(name) {
-        throw SemanticError.duplicateDefinition(name, line: line)
+        throw SemanticError.duplicateDefinition(name, line: span.line)
       }
       
       if !typeParameters.isEmpty {
@@ -1085,8 +1092,8 @@ public class TypeChecker {
         try currentScope.defineType(name, type: placeholder)
       }
       
-    case .globalFunctionDeclaration(_, let typeParameters, _, _, _, _, let line):
-      self.currentLine = line
+    case .globalFunctionDeclaration(_, let typeParameters, _, _, _, _, let span):
+      self.currentSpan = span
       // For generic functions, we just note that they exist
       // The full template will be registered in pass 2
       if !typeParameters.isEmpty {
@@ -1100,8 +1107,8 @@ public class TypeChecker {
       // Variables are handled in pass 2
       break
       
-    case .givenDeclaration(let typeParams, let typeNode, _, let line):
-      self.currentLine = line
+    case .givenDeclaration(let typeParams, let typeNode, _, let span):
+      self.currentSpan = span
       // For generic given, we just note the base type exists
       // The methods will be registered in pass 2
       if !typeParams.isEmpty {
@@ -1116,10 +1123,10 @@ public class TypeChecker {
       }
       // Non-generic given is handled in pass 2
       
-    case .intrinsicTypeDeclaration(let name, let typeParameters, _, let line):
-      self.currentLine = line
+    case .intrinsicTypeDeclaration(let name, let typeParameters, _, let span):
+      self.currentSpan = span
       if currentScope.hasTypeDefinition(name) {
-        throw SemanticError.duplicateDefinition(name, line: line)
+        throw SemanticError.duplicateDefinition(name, line: span.line)
       }
       
       if !typeParameters.isEmpty {
@@ -1153,8 +1160,8 @@ public class TypeChecker {
         try currentScope.defineType(name, type: type)
       }
       
-    case .intrinsicFunctionDeclaration(let name, let typeParameters, _, _, _, let line):
-      self.currentLine = line
+    case .intrinsicFunctionDeclaration(let name, let typeParameters, _, _, _, let span):
+      self.currentSpan = span
       if !typeParameters.isEmpty {
         intrinsicGenericFunctions.insert(name)
       }
@@ -1173,8 +1180,8 @@ public class TypeChecker {
   /// Also resolves struct and union types so function signatures can reference them.
   private func collectGivenSignatures(_ decl: GlobalNode) throws {
     switch decl {
-    case .givenDeclaration(let typeParams, let typeNode, let methods, let line):
-      self.currentLine = line
+    case .givenDeclaration(let typeParams, let typeNode, let methods, let span):
+      self.currentSpan = span
       if !typeParams.isEmpty {
         // Generic Given - register method signatures
         guard case .generic(let baseName, let args) = typeNode else {
@@ -1267,8 +1274,8 @@ public class TypeChecker {
       }
       // Non-generic given is handled in pass 3
       
-    case .intrinsicGivenDeclaration(let typeParams, let typeNode, let methods, let line):
-      self.currentLine = line
+    case .intrinsicGivenDeclaration(let typeParams, let typeNode, let methods, let span):
+      self.currentSpan = span
       if !typeParams.isEmpty {
         // Generic intrinsic given - register method signatures
         guard case .generic(let baseName, _) = typeNode else {
@@ -1286,8 +1293,8 @@ public class TypeChecker {
       }
       // Non-generic intrinsic given is handled in pass 3
       
-    case .globalStructDeclaration(let name, let typeParameters, let parameters, _, let line):
-      self.currentLine = line
+    case .globalStructDeclaration(let name, let typeParameters, let parameters, _, let span):
+      self.currentSpan = span
       // Resolve non-generic struct types so function signatures can reference them
       if typeParameters.isEmpty {
         // Non-generic struct: resolve member types and finalize the type definition
@@ -1315,8 +1322,8 @@ public class TypeChecker {
       }
       // Generic structs are handled in pass 3
       
-    case .globalUnionDeclaration(let name, let typeParameters, let cases, _, let line):
-      self.currentLine = line
+    case .globalUnionDeclaration(let name, let typeParameters, let cases, _, let span):
+      self.currentSpan = span
       // Resolve non-generic union types so function signatures can reference them
       if typeParameters.isEmpty {
         // Non-generic union: resolve case types and finalize the type definition
@@ -1342,8 +1349,8 @@ public class TypeChecker {
       }
       // Generic unions are handled in pass 3
       
-    case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, _, _, let line):
-      self.currentLine = line
+    case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, _, _, let span):
+      self.currentSpan = span
       // Register function signature so it can be called from methods defined earlier
       if typeParameters.isEmpty {
         // Non-generic function: register signature now
@@ -1359,8 +1366,8 @@ public class TypeChecker {
       }
       // Generic functions are handled in pass 3
       
-    case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, _, let line):
-      self.currentLine = line
+    case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, _, let span):
+      self.currentSpan = span
       // Register intrinsic function signature so it can be called from methods defined earlier
       if typeParameters.isEmpty {
         let returnType = try resolveTypeNode(returnTypeNode)
@@ -1382,8 +1389,8 @@ public class TypeChecker {
 
   private func checkGlobalDeclaration(_ decl: GlobalNode) throws -> TypedGlobalNode? {
     switch decl {
-    case .traitDeclaration(_, _, let superTraits, _, _, let line):
-      self.currentLine = line
+    case .traitDeclaration(_, _, let superTraits, _, _, let span):
+      self.currentSpan = span
       // Trait was registered in pass 1, now validate superTraits
       for parent in superTraits {
         try validateTraitName(parent)
@@ -1391,8 +1398,8 @@ public class TypeChecker {
       return nil
 
     case .globalUnionDeclaration(
-      let name, let typeParameters, let cases, _, let line):
-      self.currentLine = line
+      let name, let typeParameters, let cases, _, let span):
+      self.currentSpan = span
 
       if !typeParameters.isEmpty {
         // Generic union template was registered in pass 1
@@ -1425,10 +1432,10 @@ public class TypeChecker {
       return .globalUnionDeclaration(
         identifier: Symbol(name: name, type: type, kind: .type), cases: unionCases)
 
-    case .globalVariableDeclaration(let name, let typeNode, let value, let isMut, _, let line):
-      self.currentLine = line
+    case .globalVariableDeclaration(let name, let typeNode, let value, let isMut, _, let span):
+      self.currentSpan = span
       guard case nil = currentScope.lookup(name) else {
-        throw SemanticError.duplicateDefinition(name, line: line)
+        throw SemanticError.duplicateDefinition(name, line: span.line)
       }
       let type = try resolveTypeNode(typeNode)
       let typedValue = try inferTypedExpression(value)
@@ -1445,14 +1452,14 @@ public class TypeChecker {
 
     case .globalFunctionDeclaration(
       let name, let typeParameters, let parameters, let returnTypeNode, let body, let access,
-      let line):
-      self.currentLine = line
+      let span):
+      self.currentSpan = span
       
       // For non-generic functions, skip duplicate check if already defined in Pass 2
       if typeParameters.isEmpty && currentScope.lookup(name) != nil {
         // Already defined in Pass 2, continue with body checking
       } else if currentScope.hasFunctionDefinition(name) {
-        throw SemanticError.duplicateDefinition(name, line: line)
+        throw SemanticError.duplicateDefinition(name, line: span.line)
       }
 
       if !typeParameters.isEmpty {
@@ -1534,8 +1541,8 @@ public class TypeChecker {
       )
 
     case .intrinsicFunctionDeclaration(
-      let name, let typeParameters, let parameters, let returnTypeNode, let access, let line):
-      self.currentLine = line
+      let name, let typeParameters, let parameters, let returnTypeNode, let access, let span):
+      self.currentSpan = span
       
       // Skip duplicate check for non-generic functions (already defined in Pass 2)
       if typeParameters.isEmpty && currentScope.lookup(name) != nil {
@@ -1544,7 +1551,7 @@ public class TypeChecker {
       }
       
       guard case nil = currentScope.lookup(name) else {
-        throw SemanticError.duplicateDefinition(name, line: line)
+        throw SemanticError.duplicateDefinition(name, line: span.line)
       }
 
       // Create a dummy body for intrinsic representation
@@ -1598,8 +1605,8 @@ public class TypeChecker {
       currentScope.define(name, functionType, mutable: false)
       return nil
 
-    case .givenDeclaration(let typeParams, let typeNode, let methods, let line):
-      self.currentLine = line
+    case .givenDeclaration(let typeParams, let typeNode, let methods, let span):
+      self.currentSpan = span
       if !typeParams.isEmpty {
         // Generic Given - signatures were registered in Pass 2 (collectGivenSignatures)
         // Now we only need to check method bodies
@@ -1816,8 +1823,8 @@ public class TypeChecker {
 
       return .givenDeclaration(type: type, methods: typedMethods)
 
-    case .intrinsicGivenDeclaration(let typeParams, let typeNode, let methods, let line):
-      self.currentLine = line
+    case .intrinsicGivenDeclaration(let typeParams, let typeNode, let methods, let span):
+      self.currentSpan = span
       if !typeParams.isEmpty {
         // Generic Given (Intrinsic)
         guard case .generic(let baseName, let args) = typeNode else {
@@ -1918,8 +1925,8 @@ public class TypeChecker {
       return shouldEmitGiven ? .givenDeclaration(type: type, methods: typedMethods) : nil
 
     case .globalStructDeclaration(
-      let name, let typeParameters, let parameters, _, let line):
-      self.currentLine = line
+      let name, let typeParameters, let parameters, _, let span):
+      self.currentSpan = span
       // Note: Type was already registered in Pass 1 (collectTypeDefinition)
       // Non-generic types are resolved in Pass 2 (collectGivenSignatures)
 
@@ -1958,8 +1965,8 @@ public class TypeChecker {
         parameters: params
       )
 
-    case .intrinsicTypeDeclaration(let name, let typeParameters, _, let line):
-      self.currentLine = line
+    case .intrinsicTypeDeclaration(let name, let typeParameters, _, let span):
+      self.currentSpan = span
       // Note: Type was already registered in Pass 1 (collectTypeDefinition)
       // Pass 2 just returns the appropriate node
 
@@ -4435,8 +4442,8 @@ public class TypeChecker {
 
   private func checkStatementInternal(_ stmt: StatementNode) throws -> TypedStatementNode {
     switch stmt {
-    case .variableDeclaration(let name, let typeNode, let value, let mutable, let line):
-      self.currentLine = line
+    case .variableDeclaration(let name, let typeNode, let value, let mutable, let span):
+      self.currentSpan = span
       var typedValue = try inferTypedExpression(value)
       let type: Type
 
@@ -4459,8 +4466,8 @@ public class TypeChecker {
         mutable: mutable
       )
 
-    case .assignment(let target, let value, let line):
-      self.currentLine = line
+    case .assignment(let target, let value, let span):
+      self.currentSpan = span
       // Lower `x[i] = v` into a call to `x.__update_at(i, v)`.
       if case .subscriptExpression(let baseExpr, let argExprs) = target {
         let typedBase = try inferTypedExpression(baseExpr)
@@ -4531,8 +4538,8 @@ public class TypeChecker {
 
       return .assignment(target: typedTarget, value: typedValue)
 
-    case .compoundAssignment(let target, let op, let value, let line):
-      self.currentLine = line
+    case .compoundAssignment(let target, let op, let value, let span):
+      self.currentSpan = span
       // Lower `x[i] op= v` into a call to `x.__update_at(i, deref x[i] op v)`.
       if case .subscriptExpression(let baseExpr, let argExprs) = target {
         let typedBase = try inferTypedExpression(baseExpr)
@@ -4615,12 +4622,12 @@ public class TypeChecker {
       let _ = try checkArithmeticOp(compoundOpToArithmeticOp(op), typedTarget.type, typedValue.type)
       return .compoundAssignment(target: typedTarget, operator: op, value: typedValue)
 
-    case .expression(let expr, let line):
-      self.currentLine = line
+    case .expression(let expr, let span):
+      self.currentSpan = span
       return .expression(try inferTypedExpression(expr))
 
-    case .return(let value, let line):
-      self.currentLine = line
+    case .return(let value, let span):
+      self.currentSpan = span
       guard let returnType = currentFunctionReturnType else {
         throw SemanticError.invalidOperation(op: "return outside of function", type1: "", type2: "")
       }
@@ -4644,15 +4651,15 @@ public class TypeChecker {
       }
       return .return(value: nil)
 
-    case .break(let line):
-      self.currentLine = line
+    case .break(let span):
+      self.currentSpan = span
       if loopDepth <= 0 {
         throw SemanticError.invalidOperation(op: "break outside of while", type1: "", type2: "")
       }
       return .break
 
-    case .continue(let line):
-      self.currentLine = line
+    case .continue(let span):
+      self.currentSpan = span
       if loopDepth <= 0 {
         throw SemanticError.invalidOperation(op: "continue outside of while", type1: "", type2: "")
       }
@@ -5011,7 +5018,7 @@ public class TypeChecker {
       }
       return (.booleanLiteral(value: val), [])
 
-    case .stringLiteral(let value, let line):
+    case .stringLiteral(let value, let span):
       if isStringType(subjectType) {
         return (.stringLiteral(value: value), [])
       }
@@ -5019,7 +5026,7 @@ public class TypeChecker {
         guard let byte = singleByteASCII(from: value) else {
           throw SemanticError(
             .generic("String literal pattern must be exactly one ASCII byte when matching UInt8"),
-            line: line)
+            span: span)
         }
         return (.integerLiteral(value: String(byte)), [])
       }

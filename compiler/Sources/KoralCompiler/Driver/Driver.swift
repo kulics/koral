@@ -7,6 +7,9 @@ enum DriverCommand: String {
 }
 
 public class Driver {
+  /// Source manager for error rendering with code snippets
+  private var sourceManager = SourceManager()
+  
   public init() {}
 
   public func run(args: [String]) {
@@ -77,7 +80,9 @@ public class Driver {
 
     do {
       try process(file: filePath, mode: mode, outputDir: outputDir, noStd: noStd, escapeAnalysisReport: escapeAnalysisReport)
-    } catch let error as DiagnosticError {
+    } catch var error as DiagnosticError {
+      // Attach source manager for rendering with code snippets
+      error.sourceManager = sourceManager
       print(error.renderForCLI())
       exit(1)
     } catch let error as ParserError {
@@ -97,6 +102,9 @@ public class Driver {
   }
 
   private func parseProgram(source: String, fileName: String) throws -> [GlobalNode] {
+    // Register source with source manager for error rendering
+    sourceManager.loadFile(name: fileName, content: source)
+    
     let lexer = Lexer(input: source)
     let parser = Parser(lexer: lexer)
     do {
@@ -108,14 +116,15 @@ public class Driver {
           underlying: NSError(
             domain: "Driver", code: 1,
             userInfo: [NSLocalizedDescriptionKey: "Invalid program structure"]
-          )
+          ),
+          sourceManager: sourceManager
         )
       }
       return nodes
     } catch let error as LexerError {
-      throw DiagnosticError(stage: .lexer, fileName: fileName, underlying: error)
+      throw DiagnosticError(stage: .lexer, fileName: fileName, underlying: error, sourceManager: sourceManager)
     } catch let error as ParserError {
-      throw DiagnosticError(stage: .parser, fileName: fileName, underlying: error)
+      throw DiagnosticError(stage: .parser, fileName: fileName, underlying: error, sourceManager: sourceManager)
     }
   }
 
@@ -169,7 +178,8 @@ public class Driver {
       throw DiagnosticError(
         stage: .semantic,
         fileName: error.fileName,
-        underlying: error
+        underlying: error,
+        sourceManager: sourceManager
       )
     }
 
@@ -182,7 +192,8 @@ public class Driver {
       throw DiagnosticError(
         stage: .semantic,
         fileName: error.fileName,
-        underlying: error
+        underlying: error,
+        sourceManager: sourceManager
       )
     }
 
