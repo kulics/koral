@@ -94,6 +94,7 @@ public enum Token: CustomStringConvertible {
   case returnKeyword // 'return' keyword
   case breakKeyword // 'break' keyword
   case continueKeyword // 'continue' keyword
+  case forKeyword // 'for' keyword
 
   /// Whether this token is a continuation token (triggers line continuation when at start of line)
   /// Continuation tokens include: infix operators, dot, and arrow
@@ -181,6 +182,8 @@ public enum Token: CustomStringConvertible {
     case (.selfTypeKeyword, .selfTypeKeyword):
       return true
     case (.returnKeyword, .returnKeyword), (.breakKeyword, .breakKeyword), (.continueKeyword, .continueKeyword):
+      return true
+    case (.forKeyword, .forKeyword):
       return true
     case (.bof, .bof), (.eof, .eof):
       return true
@@ -284,6 +287,7 @@ public enum Token: CustomStringConvertible {
     case .returnKeyword: return "return"
     case .breakKeyword: return "break"
     case .continueKeyword: return "continue"
+    case .forKeyword: return "for"
       case .isKeyword:
       return "is"
     case .refKeyword:
@@ -877,6 +881,7 @@ public class Lexer {
       case "return": .returnKeyword
       case "break": .breakKeyword
       case "continue": .continueKeyword
+      case "for": .forKeyword
       default: .identifier(id)
       }
     default:

@@ -168,6 +168,9 @@ public class Parser {
   private func parseTraitDeclaration(access: AccessModifier, line: Int) throws -> GlobalNode {
     try match(.traitKeyword)
 
+    // Parse optional type parameters for generic traits: [T Any]Iterator
+    let typeParams = try parseTypeParameters()
+
     guard case .identifier(let name) = currentToken else {
       throw ParserError.expectedIdentifier(line: lexer.currentLine, got: currentToken.description)
     }
@@ -282,6 +285,7 @@ public class Parser {
     try match(.rightBrace)
     return .traitDeclaration(
       name: name,
+      typeParameters: typeParams,
       superTraits: superTraits,
       methods: methods,
       access: access,
@@ -1027,6 +1031,8 @@ public class Parser {
       return try whileExpression()
     } else if currentToken === .whenKeyword {
       return try parseWhenExpression()
+    } else if currentToken === .forKeyword {
+      return try forExpression()
     } else {
       return try parseOrExpression()
     }
@@ -1231,6 +1237,17 @@ public class Parser {
     try match(.thenKeyword)
     let body = try expression()
     return .whileExpression(condition: condition, body: body)
+  }
+
+  /// Parse for expression: for <pattern> = <iterable> then <body>
+  private func forExpression() throws -> ExpressionNode {
+    try match(.forKeyword)
+    let pattern = try parsePattern()
+    try match(.equal)
+    let iterable = try expression()
+    try match(.thenKeyword)
+    let body = try expression()
+    return .forExpression(pattern: pattern, iterable: iterable, body: body)
   }
 
   private func parseWhenExpression() throws -> ExpressionNode {

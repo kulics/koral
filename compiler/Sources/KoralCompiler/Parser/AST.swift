@@ -77,6 +77,7 @@ public indirect enum GlobalNode {
   // trait Name [SuperTrait ...] { methodSignatures... }
   case traitDeclaration(
     name: String,
+    typeParameters: [TypeParameterDecl],
     superTraits: [String],
     methods: [TraitMethodSignature],
     access: AccessModifier,
@@ -107,7 +108,7 @@ extension GlobalNode {
       return line
     case .intrinsicTypeDeclaration(_, _, _, let line):
       return line
-    case .traitDeclaration(_, _, _, _, let line):
+    case .traitDeclaration(_, _, _, _, _, let line):
       return line
     case .givenDeclaration(_, _, _, let line):
       return line
@@ -242,6 +243,8 @@ public indirect enum ExpressionNode {
   /// - methodName: The method name (e.g., "empty", "new")
   /// - arguments: The method arguments
   case staticMethodCall(typeName: String, typeArgs: [TypeNode], methodName: String, arguments: [ExpressionNode])
+  /// For loop expression: for <pattern> = <iterable> then <body>
+  case forExpression(pattern: PatternNode, iterable: ExpressionNode, body: ExpressionNode)
 }
 public indirect enum PatternNode: CustomStringConvertible {
   case booleanLiteral(value: Bool, line: Int)
