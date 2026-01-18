@@ -223,4 +223,16 @@ public class Scope {
     }
     return result
   }
+  
+  /// Returns all concrete (non-generic) types defined in this scope and parent scopes.
+  public func getAllConcreteTypes() -> [String: Type] {
+    var result = parent?.getAllConcreteTypes() ?? [:]
+    for (name, type) in types {
+      // Skip generic parameters and Self
+      if case .genericParameter = type { continue }
+      if name == "Self" { continue }
+      result[name] = type
+    }
+    return result
+  }
 }
