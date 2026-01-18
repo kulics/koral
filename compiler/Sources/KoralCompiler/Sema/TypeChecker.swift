@@ -1271,8 +1271,81 @@ public class TypeChecker {
             checkedReturnType: checkedReturnType
           ))
         }
+      } else {
+        // Non-generic given - collect method signatures for forward reference support
+        let type = try resolveTypeNode(typeNode)
+        let typeName: String
+        if case .structure(let name, _, _) = type {
+          typeName = name
+        } else if case .union(let name, _, _) = type {
+          typeName = name
+        } else if case .int = type {
+          typeName = type.description
+        } else if case .int8 = type {
+          typeName = type.description
+        } else if case .int16 = type {
+          typeName = type.description
+        } else if case .int32 = type {
+          typeName = type.description
+        } else if case .int64 = type {
+          typeName = type.description
+        } else if case .uint = type {
+          typeName = type.description
+        } else if case .uint8 = type {
+          typeName = type.description
+        } else if case .uint16 = type {
+          typeName = type.description
+        } else if case .uint32 = type {
+          typeName = type.description
+        } else if case .uint64 = type {
+          typeName = type.description
+        } else if case .float32 = type {
+          typeName = type.description
+        } else if case .float64 = type {
+          typeName = type.description
+        } else if case .bool = type {
+          typeName = type.description
+        } else {
+          // Skip unsupported types, will be caught in pass 3
+          return
+        }
+        
+        if extensionMethods[typeName] == nil {
+          extensionMethods[typeName] = [:]
+        }
+        
+        // Pre-register method signatures (without checking bodies)
+        for method in methods {
+          let methodType = try withNewScope {
+            for typeParam in method.typeParameters {
+              try currentScope.defineType(
+                typeParam.name, type: .genericParameter(name: typeParam.name))
+            }
+            
+            try currentScope.defineType("Self", type: type)
+            currentScope.define("self", type, mutable: false)
+            
+            let returnType = try resolveTypeNode(method.returnType)
+            let params = try method.parameters.map { param -> Parameter in
+              let paramType = try resolveTypeNode(param.type)
+              let passKind: PassKind = param.mutable ? .byMutRef : .byVal
+              return Parameter(type: paramType, kind: passKind)
+            }
+            
+            return Type.function(parameters: params, returns: returnType)
+          }
+          
+          let methodKind = getCompilerMethodKind(method.name)
+          let methodSymbol = Symbol(
+            name: method.name,
+            type: methodType,
+            kind: .function,
+            methodKind: methodKind
+          )
+          
+          extensionMethods[typeName]![method.name] = methodSymbol
+        }
       }
-      // Non-generic given is handled in pass 3
       
     case .intrinsicGivenDeclaration(let typeParams, let typeNode, let methods, let span):
       self.currentSpan = span
@@ -1290,8 +1363,56 @@ public class TypeChecker {
         for m in methods {
           genericIntrinsicExtensionMethods[baseName]!.append((typeParams: typeParams, method: m))
         }
+      } else {
+        // Non-generic intrinsic given - collect method signatures for forward reference support
+        let type = try resolveTypeNode(typeNode)
+        
+        let typeName: String
+        switch type {
+        case .structure(let name, _, _):
+          typeName = name
+        case .union(let name, _, _):
+          typeName = name
+        case .int, .int8, .int16, .int32, .int64,
+             .uint, .uint8, .uint16, .uint32, .uint64,
+             .float32, .float64,
+             .bool:
+          typeName = type.description
+        default:
+          // Skip unsupported types, will be caught in pass 3
+          return
+        }
+        
+        if extensionMethods[typeName] == nil {
+          extensionMethods[typeName] = [:]
+        }
+        
+        // Pre-register method signatures (without checking bodies)
+        for method in methods {
+          let methodType = try withNewScope {
+            try currentScope.defineType("Self", type: type)
+            
+            let returnType = try resolveTypeNode(method.returnType)
+            let params = try method.parameters.map { param -> Parameter in
+              let paramType = try resolveTypeNode(param.type)
+              let passKind: PassKind = param.mutable ? .byMutRef : .byVal
+              return Parameter(type: paramType, kind: passKind)
+            }
+            
+            return Type.function(parameters: params, returns: returnType)
+          }
+          
+          let methodKind = getCompilerMethodKind(method.name)
+          let methodSymbol = Symbol(
+            name: method.name,
+            type: methodType,
+            kind: .function,
+            methodKind: methodKind
+          )
+          
+          extensionMethods[typeName]![method.name] = methodSymbol
+        }
       }
-      // Non-generic intrinsic given is handled in pass 3
       
     case .globalStructDeclaration(let name, let typeParameters, let parameters, _, let span):
       self.currentSpan = span
