@@ -112,9 +112,12 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .traitDeclaration(let name, let superTraits, let methods, let access, _):
+    case .traitDeclaration(let name, let typeParameters, let superTraits, let methods, let access, _):
       print("\(indent)TraitDeclaration: \(name)")
       print("\(indent)  Access: \(access)")
+      if !typeParameters.isEmpty {
+        print("\(indent)  TypeParameters: \(typeParameters)")
+      }
       if !superTraits.isEmpty {
         print("\(indent)  SuperTraits: \(superTraits)")
       }
@@ -421,6 +424,22 @@ public func printAST(_ node: ASTNode) {
           for arg in arguments {
             printExpression(arg)
           }
+        }
+      }
+    
+    case .forExpression(let pattern, let iterable, let body):
+      print("\(indent)ForExpression:")
+      print("\(indent)  Pattern: \(pattern)")
+      print("\(indent)  Iterable:")
+      withIndent {
+        withIndent {
+          printExpression(iterable)
+        }
+      }
+      print("\(indent)  Body:")
+      withIndent {
+        withIndent {
+          printExpression(body)
         }
       }
     }

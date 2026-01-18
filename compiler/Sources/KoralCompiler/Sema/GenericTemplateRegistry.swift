@@ -7,6 +7,9 @@ public struct TraitDeclInfo {
     /// The name of the trait
     public let name: String
     
+    /// Type parameters for generic traits (e.g., [T Any] for Iterator)
+    public let typeParameters: [TypeParameterDecl]
+    
     /// Names of traits that this trait inherits from
     public let superTraits: [String]
     
@@ -22,12 +25,14 @@ public struct TraitDeclInfo {
     /// Creates a new trait declaration info.
     public init(
         name: String,
+        typeParameters: [TypeParameterDecl] = [],
         superTraits: [String],
         methods: [TraitMethodSignature],
         access: AccessModifier,
         line: Int
     ) {
         self.name = name
+        self.typeParameters = typeParameters
         self.superTraits = superTraits
         self.methods = methods
         self.access = access

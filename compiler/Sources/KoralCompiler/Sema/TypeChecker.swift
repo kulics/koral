@@ -685,6 +685,130 @@ public class TypeChecker {
     }
   }
 
+  /// Checks if a type conforms to a generic trait with specific type arguments.
+  /// For example, checking if ListIterator conforms to [Int]Iterator.
+  /// - Parameters:
+  ///   - selfType: The type to check
+  ///   - traitName: The trait name (e.g., "Iterator")
+  ///   - traitTypeArgs: The type arguments for the trait (e.g., [Int] for [Int]Iterator)
+  ///   - context: Optional context string for error messages
+  private func enforceGenericTraitConformance(
+    _ selfType: Type,
+    traitName: String,
+    traitTypeArgs: [Type],
+    context: String? = nil
+  ) throws {
+    if traitName == "Any" {
+      return
+    }
+
+    try validateTraitName(traitName)
+    
+    guard let traitInfo = traits[traitName] else {
+      throw SemanticError(.generic("Undefined trait: \(traitName)"), line: currentLine)
+    }
+    
+    // Validate type argument count
+    guard traitInfo.typeParameters.count == traitTypeArgs.count else {
+      throw SemanticError(.generic(
+        "Trait \(traitName) expects \(traitInfo.typeParameters.count) type arguments, got \(traitTypeArgs.count)"
+      ), line: currentLine)
+    }
+    
+    // Create type substitution map from trait type parameters to concrete types
+    var substitution: [String: Type] = [:]
+    for (i, param) in traitInfo.typeParameters.enumerated() {
+      substitution[param.name] = traitTypeArgs[i]
+    }
+    
+    let required = try flattenedTraitMethods(traitName)
+
+    var missing: [String] = []
+    var mismatched: [String] = []
+
+    for name in required.keys.sorted() {
+      guard let sig = required[name] else { continue }
+      let expectedType = try expectedFunctionTypeForGenericTraitMethod(sig, selfType: selfType, substitution: substitution)
+      let expectedSig = try formatGenericTraitMethodSignature(sig, selfType: selfType, substitution: substitution)
+
+      guard let actualSym = try lookupConcreteMethodSymbol(on: selfType, name: sig.name) else {
+        missing.append("missing method \(sig.name): expected \(expectedSig)")
+        continue
+      }
+      if actualSym.type != expectedType {
+        mismatched.append(
+          "method \(sig.name) has type \(actualSym.type), expected \(expectedType) (expected \(expectedSig))"
+        )
+      }
+    }
+
+    if !missing.isEmpty || !mismatched.isEmpty {
+      var msg = "Type \(selfType) does not conform to trait \(traitName)"
+      if !traitTypeArgs.isEmpty {
+        let argsStr = traitTypeArgs.map { $0.description }.joined(separator: ", ")
+        msg = "Type \(selfType) does not conform to trait [\(argsStr)]\(traitName)"
+      }
+      if let context {
+        msg += " (\(context))"
+      }
+      if !missing.isEmpty {
+        msg += "\n" + missing.joined(separator: "\n")
+      }
+      if !mismatched.isEmpty {
+        msg += "\n" + mismatched.joined(separator: "\n")
+      }
+      throw SemanticError(.generic(msg), line: currentLine)
+    }
+  }
+
+  /// Computes the expected function type for a generic trait method with type substitution.
+  private func expectedFunctionTypeForGenericTraitMethod(
+    _ method: TraitMethodSignature,
+    selfType: Type,
+    substitution: [String: Type]
+  ) throws -> Type {
+    return try withNewScope {
+      // Bind Self type
+      try currentScope.defineType("Self", type: selfType)
+      
+      // Bind trait type parameters
+      for (name, type) in substitution {
+        try currentScope.defineType(name, type: type)
+      }
+
+      let params: [Parameter] = try method.parameters.map { param in
+        let t = try resolveTypeNode(param.type)
+        return Parameter(type: t, kind: .byVal)
+      }
+      let ret = try resolveTypeNode(method.returnType)
+      return Type.function(parameters: params, returns: ret)
+    }
+  }
+
+  /// Formats a generic trait method signature with type substitution for error messages.
+  private func formatGenericTraitMethodSignature(
+    _ method: TraitMethodSignature,
+    selfType: Type,
+    substitution: [String: Type]
+  ) throws -> String {
+    return try withNewScope {
+      try currentScope.defineType("Self", type: selfType)
+      
+      for (name, type) in substitution {
+        try currentScope.defineType(name, type: type)
+      }
+
+      let paramsDesc = try method.parameters.map { param -> String in
+        let resolvedType = try resolveTypeNode(param.type)
+        let mutPrefix = param.mutable ? "mut " : ""
+        return "\(mutPrefix)\(param.name) \(resolvedType)"
+      }.joined(separator: ", ")
+
+      let ret = try resolveTypeNode(method.returnType)
+      return "\(method.name)(\(paramsDesc)) \(ret)"
+    }
+  }
+
   private func enforceGenericConstraints(typeParameters: [TypeParameterDecl], args: [Type]) throws {
     guard typeParameters.count == args.count else { return }
     for (i, param) in typeParameters.enumerated() {
@@ -911,7 +1035,7 @@ public class TypeChecker {
   /// This allows forward references to work correctly.
   private func collectTypeDefinition(_ decl: GlobalNode) throws {
     switch decl {
-    case .traitDeclaration(let name, let superTraits, let methods, let access, let line):
+    case .traitDeclaration(let name, let typeParameters, let superTraits, let methods, let access, let line):
       self.currentLine = line
       if traits[name] != nil {
         throw SemanticError.duplicateDefinition(name, line: line)
@@ -920,6 +1044,7 @@ public class TypeChecker {
       // They will be validated in pass 2
       traits[name] = TraitDeclInfo(
         name: name,
+        typeParameters: typeParameters,
         superTraits: superTraits,
         methods: methods,
         access: access,
@@ -1257,7 +1382,7 @@ public class TypeChecker {
 
   private func checkGlobalDeclaration(_ decl: GlobalNode) throws -> TypedGlobalNode? {
     switch decl {
-    case .traitDeclaration(_, let superTraits, _, _, let line):
+    case .traitDeclaration(_, _, let superTraits, _, _, let line):
       self.currentLine = line
       // Trait was registered in pass 1, now validate superTraits
       for parent in superTraits {
@@ -3770,8 +3895,331 @@ public class TypeChecker {
       
       throw SemanticError.undefinedType(typeName)
 
+    case .forExpression(let pattern, let iterable, let body):
+      return try inferForExpression(pattern: pattern, iterable: iterable, body: body)
+
     case .genericInstantiation(let base, _):
       throw SemanticError.invalidOperation(op: "use type as value", type1: base, type2: "")
+    }
+  }
+
+  // MARK: - For Loop Type Checking and Desugaring
+
+  /// Type checks a for expression and desugars it to let + while + match.
+  /// for <pattern> = <iterable> then <body>
+  /// becomes:
+  /// let mut __koral_iter_N = <iterable>.iterator() then  // or just <iterable> if it's already an iterator
+  ///   while true then
+  ///     when __koral_iter_N.next() is {
+  ///       .Some(<pattern>) then <body>,
+  ///       .None then break
+  ///     }
+  private func inferForExpression(
+    pattern: PatternNode,
+    iterable: ExpressionNode,
+    body: ExpressionNode
+  ) throws -> TypedExpressionNode {
+    // 1. Type check the iterable expression
+    let typedIterable = try inferTypedExpression(iterable)
+    let iterableType = typedIterable.type
+    
+    // 2. First check if the expression type itself is an iterator
+    //    (has a next(self ref) [T]Option method)
+    if let elementType = try? extractIteratorElementType(iterableType) {
+      // The expression itself is an iterator, use it directly
+      try checkForLoopPatternExhaustiveness(pattern: pattern, elementType: elementType)
+      return try desugarForLoop(
+        pattern: pattern,
+        typedIterable: typedIterable,
+        iteratorType: iterableType,
+        elementType: elementType,
+        body: body,
+        needsIteratorCall: false  // Don't call iterator(), use expression directly
+      )
+    }
+    
+    // 3. Look up the iterator() method on the iterable type
+    guard let iteratorMethod = try lookupConcreteMethodSymbol(on: iterableType, name: "iterator") else {
+      throw SemanticError(.generic(
+        "Type \(iterableType) is not iterable: missing iterator() method and does not implement Iterator"
+      ), line: currentLine)
+    }
+    
+    // 4. Get the iterator type from the method's return type
+    guard case .function(_, let iteratorType) = iteratorMethod.type else {
+      throw SemanticError(.generic("iterator() must be a function"), line: currentLine)
+    }
+    
+    // 5. Extract the element type from the iterator
+    let elementType = try extractIteratorElementType(iteratorType)
+    
+    // 6. Check pattern exhaustiveness against element type
+    try checkForLoopPatternExhaustiveness(pattern: pattern, elementType: elementType)
+    
+    // 7. Desugar the for loop
+    return try desugarForLoop(
+      pattern: pattern,
+      typedIterable: typedIterable,
+      iteratorType: iteratorType,
+      elementType: elementType,
+      body: body,
+      needsIteratorCall: true  // Need to call iterator()
+    )
+  }
+
+  /// Extracts the element type T from an iterator type.
+  /// The iterator must have a next(self ref) [T]Option method.
+  private func extractIteratorElementType(_ iteratorType: Type) throws -> Type {
+    // Look up the next method on the iterator type
+    guard let nextMethod = try lookupConcreteMethodSymbol(on: iteratorType, name: "next") else {
+      throw SemanticError(.generic(
+        "Iterator type \(iteratorType) missing next() method"
+      ), line: currentLine)
+    }
+    
+    // Verify the return type is [T]Option
+    guard case .function(_, let returnType) = nextMethod.type else {
+      throw SemanticError(.generic("Iterator.next() must be a function"), line: currentLine)
+    }
+    
+    // Check if return type is Option<T>
+    switch returnType {
+    case .genericUnion(let template, let args) where template == "Option" && args.count == 1:
+      return args[0]
+    default:
+      throw SemanticError(.generic(
+        "Iterator.next() must return [T]Option, got \(returnType)"
+      ), line: currentLine)
+    }
+  }
+
+  /// Checks that the for loop pattern is exhaustive for the element type.
+  private func checkForLoopPatternExhaustiveness(pattern: PatternNode, elementType: Type) throws {
+    // For simple variable bindings and wildcards, they are always exhaustive
+    switch pattern {
+    case .variable, .wildcard:
+      return
+    case .unionCase:
+      // For union case patterns, we need to check exhaustiveness
+      // This is a simplified check - a full implementation would use the exhaustiveness checker
+      throw SemanticError(.generic(
+        "For loop pattern must be exhaustive for element type \(elementType). Use a simple variable binding."
+      ), line: currentLine)
+    case .booleanLiteral, .integerLiteral, .stringLiteral:
+      throw SemanticError(.generic(
+        "For loop pattern must be exhaustive. Literal patterns are not exhaustive."
+      ), line: currentLine)
+    }
+  }
+
+  /// Desugars a for loop into let + while + match.
+  /// - Parameters:
+  ///   - needsIteratorCall: If true, calls iterator() on the iterable. If false, uses the expression directly as the iterator.
+  private func desugarForLoop(
+    pattern: PatternNode,
+    typedIterable: TypedExpressionNode,
+    iteratorType: Type,
+    elementType: Type,
+    body: ExpressionNode,
+    needsIteratorCall: Bool
+  ) throws -> TypedExpressionNode {
+    // Generate unique iterator variable name
+    let iterVarName = "__koral_iter_\(synthesizedTempIndex)"
+    synthesizedTempIndex += 1
+    
+    // Create iterator symbol (mutable)
+    let iterSymbol = Symbol(name: iterVarName, type: iteratorType, kind: .variable(.MutableValue))
+    
+    // Build the iterator initialization expression
+    let iteratorInit: TypedExpressionNode
+    if needsIteratorCall {
+      // Build: iterable.iterator()
+      iteratorInit = try buildIteratorCall(typedIterable: typedIterable, iteratorType: iteratorType)
+    } else {
+      // Use the expression directly as the iterator
+      iteratorInit = typedIterable
+    }
+    
+    // Enter a new scope for the let expression
+    return try withNewScope {
+      // Define the iterator variable in scope
+      currentScope.define(iterVarName, iteratorType, mutable: true)
+      
+      // Build: __koral_iter_N.next()
+      let iterVarExpr = TypedExpressionNode.variable(identifier: iterSymbol)
+      let iterRefExpr = TypedExpressionNode.referenceExpression(
+        expression: iterVarExpr,
+        type: .reference(inner: iteratorType)
+      )
+      let nextCall = try buildNextCall(iterRef: iterRefExpr, elementType: elementType)
+      
+      // Build the match expression body
+      // We need to enter a new scope for the pattern bindings
+      let matchExpr = try buildForLoopMatchExpression(
+        nextCall: nextCall,
+        pattern: pattern,
+        elementType: elementType,
+        body: body
+      )
+      
+      // Build: while true then match
+      loopDepth += 1
+      let whileExpr = TypedExpressionNode.whileExpression(
+        condition: .booleanLiteral(value: true, type: .bool),
+        body: matchExpr,
+        type: .void
+      )
+      loopDepth -= 1
+      
+      // Build: let mut __iter = iterator() then while ...
+      return .letExpression(
+        identifier: iterSymbol,
+        value: iteratorInit,
+        body: whileExpr,
+        type: .void
+      )
+    }
+  }
+
+  /// Builds the iterator() method call on the iterable.
+  private func buildIteratorCall(
+    typedIterable: TypedExpressionNode,
+    iteratorType: Type
+  ) throws -> TypedExpressionNode {
+    // Look up the iterator method
+    guard let iteratorMethod = try lookupConcreteMethodSymbol(on: typedIterable.type, name: "iterator") else {
+      throw SemanticError(.generic("iterator() method not found"), line: currentLine)
+    }
+    
+    // Build method reference
+    let methodRef = TypedExpressionNode.methodReference(
+      base: typedIterable,
+      method: iteratorMethod,
+      typeArgs: nil,
+      type: iteratorMethod.type
+    )
+    
+    // Build call
+    return .call(callee: methodRef, arguments: [], type: iteratorType)
+  }
+
+  /// Builds the next() method call on the iterator reference.
+  private func buildNextCall(
+    iterRef: TypedExpressionNode,
+    elementType: Type
+  ) throws -> TypedExpressionNode {
+    // Get the iterator type from the reference
+    guard case .reference(let iteratorType) = iterRef.type else {
+      throw SemanticError(.generic("Expected reference to iterator"), line: currentLine)
+    }
+    
+    // Look up the next method
+    guard let nextMethod = try lookupConcreteMethodSymbol(on: iteratorType, name: "next") else {
+      throw SemanticError(.generic("next() method not found"), line: currentLine)
+    }
+    
+    // Build method reference
+    let methodRef = TypedExpressionNode.methodReference(
+      base: iterRef,
+      method: nextMethod,
+      typeArgs: nil,
+      type: nextMethod.type
+    )
+    
+    // The return type is [T]Option
+    let optionType = Type.genericUnion(template: "Option", args: [elementType])
+    
+    // Build call
+    return .call(callee: methodRef, arguments: [], type: optionType)
+  }
+
+  /// Builds the match expression for the for loop body.
+  private func buildForLoopMatchExpression(
+    nextCall: TypedExpressionNode,
+    pattern: PatternNode,
+    elementType: Type,
+    body: ExpressionNode
+  ) throws -> TypedExpressionNode {
+    // Build Some case pattern with the user's pattern
+    let somePattern = try buildSomePattern(userPattern: pattern, elementType: elementType)
+    
+    // Type check the body in a new scope with pattern bindings
+    let typedBody = try withNewScope {
+      // Bind pattern variables
+      try bindPatternVariables(pattern: pattern, type: elementType)
+      
+      // Type check body
+      loopDepth += 1
+      let result = try inferTypedExpression(body)
+      loopDepth -= 1
+      return result
+    }
+    
+    // Build None case with break
+    let nonePattern = TypedPattern.unionCase(caseName: "None", tagIndex: 0, elements: [])
+    let breakExpr = TypedExpressionNode.blockExpression(
+      statements: [.break],
+      finalExpression: nil,
+      type: .void
+    )
+    
+    // Build match cases
+    let someCase = TypedMatchCase(pattern: somePattern, body: typedBody)
+    let noneCase = TypedMatchCase(pattern: nonePattern, body: breakExpr)
+    
+    return .matchExpression(
+      subject: nextCall,
+      cases: [someCase, noneCase],
+      type: .void
+    )
+  }
+
+  /// Builds the Some pattern wrapping the user's pattern.
+  private func buildSomePattern(userPattern: PatternNode, elementType: Type) throws -> TypedPattern {
+    let innerPattern = try convertPatternToTypedPattern(userPattern, expectedType: elementType)
+    // Some has tag index 1 (None is 0, Some is 1 in Option)
+    return .unionCase(caseName: "Some", tagIndex: 1, elements: [innerPattern])
+  }
+
+  /// Converts an AST pattern to a typed pattern.
+  private func convertPatternToTypedPattern(_ pattern: PatternNode, expectedType: Type) throws -> TypedPattern {
+    switch pattern {
+    case .variable(let name, let mutable, _):
+      let varKind: VariableKind = mutable ? .MutableValue : .Value
+      let symbol = Symbol(name: name, type: expectedType, kind: .variable(varKind))
+      return .variable(symbol: symbol)
+    case .wildcard:
+      return .wildcard
+    case .booleanLiteral(let value, _):
+      return .booleanLiteral(value: value)
+    case .integerLiteral(let value, _, _):
+      return .integerLiteral(value: value)
+    case .stringLiteral(let value, _):
+      return .stringLiteral(value: value)
+    case .unionCase(let caseName, let elements, _):
+      let typedElements = try elements.map { elem -> TypedPattern in
+        // For union case elements, we need to determine the expected type
+        // This is a simplified implementation
+        try convertPatternToTypedPattern(elem, expectedType: .void)
+      }
+      return .unionCase(caseName: caseName, tagIndex: 0, elements: typedElements)
+    }
+  }
+
+  /// Binds pattern variables in the current scope.
+  private func bindPatternVariables(pattern: PatternNode, type: Type) throws {
+    switch pattern {
+    case .variable(let name, let mutable, _):
+      currentScope.define(name, type, mutable: mutable)
+    case .wildcard, .booleanLiteral, .integerLiteral, .stringLiteral:
+      // No variables to bind
+      break
+    case .unionCase(_, let elements, _):
+      // For union cases, we would need to bind nested variables
+      // This is a simplified implementation
+      for elem in elements {
+        try bindPatternVariables(pattern: elem, type: .void)
+      }
     }
   }
 
