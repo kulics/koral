@@ -1,5 +1,7 @@
 // Typed AST node definitions for semantic analysis phase
 
+import Foundation
+
 public enum ValueCategory {
   case lvalue
   case rvalue
@@ -8,6 +10,23 @@ public enum SymbolKind {
   case variable(VariableKind)
   case function
   case type
+  case module(ModuleSymbolInfo)
+}
+
+/// 模块符号信息
+public struct ModuleSymbolInfo {
+  /// 模块路径
+  public let modulePath: [String]
+  /// 模块中的公开符号（函数、类型等）
+  public var publicSymbols: [String: Symbol]
+  /// 模块中的公开类型
+  public var publicTypes: [String: Type]
+  
+  public init(modulePath: [String], publicSymbols: [String: Symbol] = [:], publicTypes: [String: Type] = [:]) {
+    self.modulePath = modulePath
+    self.publicSymbols = publicSymbols
+    self.publicTypes = publicTypes
+  }
 }
 public enum VariableKind {
   case Value
@@ -37,13 +56,32 @@ public struct Symbol {
   public let type: Type
   public let kind: SymbolKind
   public let methodKind: CompilerMethodKind
+  
+  /// 模块路径（用于代码生成时生成限定名）
+  public let modulePath: [String]
+  
+  /// 来源文件路径（用于 private 符号的文件隔离）
+  public let sourceFile: String
+  
+  /// 访问修饰符（用于代码生成时决定是否添加文件标识符）
+  public let access: AccessModifier
 
-  public init(name: String, type: Type, kind: SymbolKind, methodKind: CompilerMethodKind = .normal)
-  {
+  public init(
+    name: String,
+    type: Type,
+    kind: SymbolKind,
+    methodKind: CompilerMethodKind = .normal,
+    modulePath: [String] = [],
+    sourceFile: String = "",
+    access: AccessModifier = .default
+  ) {
     self.name = name
     self.type = type
     self.kind = kind
     self.methodKind = methodKind
+    self.modulePath = modulePath
+    self.sourceFile = sourceFile
+    self.access = access
   }
 
   public func isMutable() -> Bool {
@@ -55,7 +93,7 @@ public struct Symbol {
       case .Value, .Reference:
         return false
       }
-    case .function, .type:
+    case .function, .type, .module:
       return false
     }
   }

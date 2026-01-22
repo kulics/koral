@@ -51,10 +51,16 @@ public class Scope {
   private var symbols: [String: (Type, Bool)]  // (type, mutability)
   private let parent: Scope?
   private var types: [String: Type] = [:]
+  /// Private types indexed by "name@sourceFile"
+  private var privateTypes: [String: Type] = [:]
+  /// Private symbols indexed by "name@sourceFile" with full info
+  private var privateSymbols: [String: (type: Type, mutable: Bool, sourceFile: String)] = [:]
   private var genericStructTemplates: [String: GenericStructTemplate] = [:]
   private var genericUnionTemplates: [String: GenericUnionTemplate] = [:]
   private var genericFunctionTemplates: [String: GenericFunctionTemplate] = [:]
   private var movedVariables: Set<String> = []
+  /// Module path for symbols (symbol name -> module path)
+  private var symbolModulePaths: [String: [String]] = [:]
 
   public init(parent: Scope? = nil) {
     self.symbols = [:]
@@ -78,6 +84,67 @@ public class Scope {
 
   public func define(_ name: String, _ type: Type, mutable: Bool) {
     symbols[name] = (type, mutable)
+  }
+  
+  /// Define a symbol with module path information
+  public func defineWithModulePath(_ name: String, _ type: Type, mutable: Bool, modulePath: [String]) {
+    symbols[name] = (type, mutable)
+    symbolModulePaths[name] = modulePath
+  }
+  
+  /// Define a private symbol with file isolation
+  public func definePrivateSymbol(_ name: String, sourceFile: String, type: Type, mutable: Bool) {
+    let key = "\(name)@\(sourceFile)"
+    privateSymbols[key] = (type: type, mutable: mutable, sourceFile: sourceFile)
+  }
+  
+  /// Lookup a symbol, checking private symbols for the given source file first
+  public func lookup(_ name: String, sourceFile: String? = nil) -> Type? {
+    // First check private symbols for the current file
+    if let sourceFile = sourceFile {
+      let key = "\(name)@\(sourceFile)"
+      if let info = privateSymbols[key] {
+        return info.type
+      }
+    }
+    // Then check public/protected symbols
+    if let (type, _) = symbols[name] {
+      return type
+    }
+    return parent?.lookup(name, sourceFile: sourceFile)
+  }
+  
+  /// Lookup a symbol and return full info including whether it's private
+  /// Returns: (type, mutable, isPrivate, sourceFile, modulePath)
+  public func lookupWithInfo(_ name: String, sourceFile: String? = nil) -> (type: Type, mutable: Bool, isPrivate: Bool, sourceFile: String?, modulePath: [String])? {
+    // First check private symbols for the current file
+    if let sourceFile = sourceFile {
+      let key = "\(name)@\(sourceFile)"
+      if let info = privateSymbols[key] {
+        return (type: info.type, mutable: info.mutable, isPrivate: true, sourceFile: info.sourceFile, modulePath: symbolModulePaths[name] ?? [])
+      }
+    }
+    // Then check public/protected symbols
+    if let (type, mutable) = symbols[name] {
+      return (type: type, mutable: mutable, isPrivate: false, sourceFile: nil, modulePath: symbolModulePaths[name] ?? [])
+    }
+    return parent?.lookupWithInfo(name, sourceFile: sourceFile)
+  }
+  
+  /// Check if a symbol is mutable, checking private symbols for the given source file first
+  public func isMutable(_ name: String, sourceFile: String? = nil) -> Bool {
+    // First check private symbols for the current file
+    if let sourceFile = sourceFile {
+      let key = "\(name)@\(sourceFile)"
+      if let info = privateSymbols[key] {
+        return info.mutable
+      }
+    }
+    // Then check public/protected symbols
+    if let (_, mutable) = symbols[name] {
+      return mutable
+    }
+    return parent?.isMutable(name, sourceFile: sourceFile) ?? false
   }
 
   /// Checks if a type or generic template with the given name is already defined in this scope.
@@ -125,20 +192,6 @@ public class Scope {
     return parent?.lookupGenericFunctionTemplate(name)
   }
 
-  public func lookup(_ name: String) -> Type? {
-    if let (type, _) = symbols[name] {
-      return type
-    }
-    return parent?.lookup(name)
-  }
-
-  public func isMutable(_ name: String) -> Bool {
-    if let (_, mutable) = symbols[name] {
-      return mutable
-    }
-    return parent?.isMutable(name) ?? false
-  }
-
   public func createChild() -> Scope {
     return Scope(parent: self)
   }
@@ -154,6 +207,37 @@ public class Scope {
   public func overwriteType(_ name: String, type: Type) {
     types[name] = type
   }
+  
+  /// Define a private type with file isolation
+  public func definePrivateType(_ name: String, sourceFile: String, type: Type) throws {
+    let key = "\(name)@\(sourceFile)"
+    if privateTypes[key] != nil {
+      throw SemanticError.duplicateDefinition(name)
+    }
+    privateTypes[key] = type
+  }
+  
+  /// Overwrite a private type (used for resolving recursive types)
+  public func overwritePrivateType(_ name: String, sourceFile: String, type: Type) {
+    let key = "\(name)@\(sourceFile)"
+    privateTypes[key] = type
+  }
+  
+  /// Lookup a type, checking private types for the given source file first
+  public func lookupType(_ name: String, sourceFile: String? = nil) -> Type? {
+    // First check private types for the current file
+    if let sourceFile = sourceFile {
+      let key = "\(name)@\(sourceFile)"
+      if let type = privateTypes[key] {
+        return type
+      }
+    }
+    // Then check public/protected types
+    if let type = types[name] {
+      return type
+    }
+    return parent?.lookupType(name, sourceFile: sourceFile)
+  }
 
   public func lookupType(_ name: String) -> Type? {
     if let type = types[name] {
@@ -163,6 +247,11 @@ public class Scope {
   }
 
   public func resolveType(_ name: String) -> Type? {
+    return resolveType(name, sourceFile: nil)
+  }
+  
+  /// Resolve a type name, checking private types for the given source file first
+  public func resolveType(_ name: String, sourceFile: String?) -> Type? {
     return switch name {
     case "Int":
       .int
@@ -193,7 +282,7 @@ public class Scope {
     case "Void":
       .void
     default:
-      lookupType(name)
+      lookupType(name, sourceFile: sourceFile)
     }
   }
 

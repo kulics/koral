@@ -1,3 +1,21 @@
+import Foundation
+
+/// 全局节点的源信息
+public struct GlobalNodeSourceInfo {
+  /// 源文件路径（绝对路径）
+  public let sourceFile: String
+  /// 模块路径
+  public let modulePath: [String]
+  /// 全局节点
+  public let node: GlobalNode
+  
+  public init(sourceFile: String, modulePath: [String], node: GlobalNode) {
+    self.sourceFile = sourceFile
+    self.modulePath = modulePath
+    self.node = node
+  }
+}
+
 public class TypeChecker {
   // Store type information for variables and functions
   private var currentScope: Scope = Scope()
@@ -25,6 +43,9 @@ public class TypeChecker {
   // Sets to track intrinsic generic types and functions for special handling during monomorphization
   private var intrinsicGenericTypes: Set<String> = []
   private var intrinsicGenericFunctions: Set<String> = []
+  
+  // Set to track types defined in the standard library (for given declaration module rules)
+  private var stdLibTypes: Set<String> = []
 
   private var currentSpan: SourceSpan = .unknown {
     didSet {
@@ -52,6 +73,28 @@ public class TypeChecker {
   private var loopDepth: Int = 0
 
   private var synthesizedTempIndex: Int = 0
+  
+  // MARK: - Module System Support
+  
+  /// 全局节点的源信息映射（用于多文件项目）
+  /// 键是节点在 declarations 数组中的索引
+  private var nodeSourceInfoMap: [Int: GlobalNodeSourceInfo] = [:]
+  
+  /// 当前正在处理的节点的源文件路径（绝对路径）
+  private var currentSourceFile: String = ""
+  
+  /// 当前正在处理的节点的模块路径
+  private var currentModulePath: [String] = []
+  
+  /// 模块符号映射：模块路径 -> 模块符号信息
+  /// 用于支持 `using self.child` 后通过 `child.xxx` 访问子模块符号
+  private var moduleSymbols: [String: ModuleSymbolInfo] = [:]
+  
+  /// 检查当前文件是否是标准库文件
+  private var isCurrentFileStdLib: Bool {
+    // Check if currentFileName matches coreFileName or ends with core.koral
+    return currentFileName == coreFileName || currentFileName.hasSuffix("core.koral")
+  }
 
   public init(
     ast: ASTNode,
@@ -67,13 +110,49 @@ public class TypeChecker {
     SemanticErrorContext.currentFileName = userFileName
     SemanticErrorContext.currentLine = 1
   }
+  
+  /// 使用源信息初始化 TypeChecker（用于多文件项目）
+  /// - Parameters:
+  ///   - ast: AST 节点
+  ///   - nodeSourceInfoList: 全局节点的源信息列表
+  ///   - coreGlobalCount: 标准库全局节点数量
+  ///   - coreFileName: 标准库文件名
+  ///   - userFileName: 用户文件名（用于单文件模式的回退）
+  public init(
+    ast: ASTNode,
+    nodeSourceInfoList: [GlobalNodeSourceInfo],
+    coreGlobalCount: Int = 0,
+    coreFileName: String = "std/core.koral",
+    userFileName: String = "<input>"
+  ) {
+    self.ast = ast
+    self.coreGlobalCount = max(0, coreGlobalCount)
+    self.coreFileName = coreFileName
+    self.userFileName = userFileName
+    self.currentFileName = userFileName
+    SemanticErrorContext.currentFileName = userFileName
+    SemanticErrorContext.currentLine = 1
+    
+    // 构建源信息映射
+    for (index, info) in nodeSourceInfoList.enumerated() {
+      self.nodeSourceInfoMap[index] = info
+    }
+  }
 
   private func builtinStringType() -> Type {
     if let stringType = currentScope.lookupType("String") {
       return stringType
     }
     // Fallback: std should normally define `type String(...)`.
-    return .structure(name: "String", members: [], isGenericInstantiation: false)
+    let decl = StructDecl(
+      name: "String",
+      modulePath: [],
+      sourceFile: "",
+      access: .default,
+      members: [],
+      isGenericInstantiation: false
+    )
+    return .structure(decl: decl)
   }
 
   // Wrapper for shared utility function from SemaUtils.swift
@@ -195,7 +274,10 @@ public class TypeChecker {
         name: "__trait_Equatable_\(methodName)",
         type: expectedType,
         kind: .function,
-        methodKind: .equals
+        methodKind: .equals,
+        modulePath: currentModulePath,
+        sourceFile: currentSourceFile,
+        access: .default
       )
     } else {
       guard let concrete = try lookupConcreteMethodSymbol(on: receiverType, name: methodName) else {
@@ -241,7 +323,10 @@ public class TypeChecker {
         name: "__trait_Comparable_\(methodName)",
         type: expectedType,
         kind: .function,
-        methodKind: .compare
+        methodKind: .compare,
+        modulePath: currentModulePath,
+        sourceFile: currentSourceFile,
+        access: .default
       )
     } else {
       guard let concrete = try lookupConcreteMethodSymbol(on: receiverType, name: methodName) else {
@@ -270,7 +355,59 @@ public class TypeChecker {
     return Symbol(
       name: "__koral_\(prefix)_\(synthesizedTempIndex)",
       type: type,
-      kind: .variable(.Value)
+      kind: .variable(.Value),
+      modulePath: currentModulePath,
+      sourceFile: currentSourceFile,
+      access: .default
+    )
+  }
+  
+  /// 创建局部符号（用于参数、局部变量等）
+  /// - Parameters:
+  ///   - name: 符号名称
+  ///   - type: 符号类型
+  ///   - kind: 符号种类
+  /// - Returns: 带有当前模块信息的 Symbol
+  private func makeLocalSymbol(
+    name: String,
+    type: Type,
+    kind: SymbolKind
+  ) -> Symbol {
+    return Symbol(
+      name: name,
+      type: type,
+      kind: kind,
+      modulePath: currentModulePath,
+      sourceFile: currentSourceFile,
+      access: .default
+    )
+  }
+  
+  // MARK: - Global Symbol Creation
+  
+  /// 创建带有模块信息的全局符号
+  /// - Parameters:
+  ///   - name: 符号名称
+  ///   - type: 符号类型
+  ///   - kind: 符号种类
+  ///   - methodKind: 编译器方法种类（默认为 .normal）
+  ///   - access: 访问修饰符
+  /// - Returns: 带有模块信息的 Symbol
+  private func makeGlobalSymbol(
+    name: String,
+    type: Type,
+    kind: SymbolKind,
+    methodKind: CompilerMethodKind = .normal,
+    access: AccessModifier
+  ) -> Symbol {
+    return Symbol(
+      name: name,
+      type: type,
+      kind: kind,
+      methodKind: methodKind,
+      modulePath: currentModulePath,
+      sourceFile: currentSourceFile,
+      access: access
     )
   }
 
@@ -468,13 +605,15 @@ public class TypeChecker {
 
   private func lookupConcreteMethodSymbol(on selfType: Type, name: String) throws -> Symbol? {
     switch selfType {
-    case .structure(let typeName, _, _):
+    case .structure(let decl):
+      let typeName = decl.name
       if let methods = extensionMethods[typeName], let sym = methods[name] {
         return sym
       }
       return nil
 
-    case .union(let typeName, _, _):
+    case .union(let decl):
+      let typeName = decl.name
       if let methods = extensionMethods[typeName], let sym = methods[name] {
         return sym
       }
@@ -601,7 +740,15 @@ public class TypeChecker {
     }
     
     let kind = getCompilerMethodKind(method.name)
-    return Symbol(name: method.name, type: functionType, kind: .function, methodKind: kind)
+    return Symbol(
+      name: method.name,
+      type: functionType,
+      kind: .function,
+      methodKind: kind,
+      modulePath: currentModulePath,
+      sourceFile: currentSourceFile,
+      access: .default
+    )
   }
   
   /// Resolves an intrinsic extension method without instantiating it.
@@ -643,7 +790,15 @@ public class TypeChecker {
     }
     
     let kind = getCompilerMethodKind(method.name)
-    return Symbol(name: method.name, type: functionType, kind: .function, methodKind: kind)
+    return Symbol(
+      name: method.name,
+      type: functionType,
+      kind: .function,
+      methodKind: kind,
+      modulePath: currentModulePath,
+      sourceFile: currentSourceFile,
+      access: .default
+    )
   }
 
   private func enforceTraitConformance(
@@ -857,8 +1012,8 @@ public class TypeChecker {
     // Get the type name for error messages
     let typeName: String
     switch structType {
-    case .structure(let name, _, _):
-      typeName = name
+    case .structure(let decl):
+      typeName = decl.name
     case .genericStruct(let template, _):
       typeName = template
     default:
@@ -868,8 +1023,8 @@ public class TypeChecker {
     var methodSymbol: Symbol? = nil
     
     // Try to look up method on concrete type first
-    if case .structure(let name, _, _) = structType {
-      if let extensions = extensionMethods[name], let sym = extensions[methodName] {
+    if case .structure(let decl) = structType {
+      if let extensions = extensionMethods[decl.name], let sym = extensions[methodName] {
         methodSymbol = sym
       }
     }
@@ -949,7 +1104,13 @@ public class TypeChecker {
   /// - The registry of generic templates for the Monomorphizer
   public func check() throws -> TypeCheckerOutput {
     switch self.ast {
-    case .program(let declarations):
+    case .program(let allNodes):
+      // 从 GlobalNode 中过滤出非 using 声明的节点
+      let declarations = allNodes.filter { node in
+        if case .usingDeclaration = node { return false }
+        return true
+      }
+      
       var typedDeclarations: [TypedGlobalNode] = []
       // Clear any previous state
       instantiationRequests.removeAll()
@@ -958,10 +1119,16 @@ public class TypeChecker {
       // This pass registers all types, traits, and function signatures
       // so that forward references work correctly
       for (index, decl) in declarations.enumerated() {
-        self.currentFileName = (index < coreGlobalCount) ? coreFileName : userFileName
+        let isStdLib = index < coreGlobalCount
+        // 更新当前源文件和模块路径
+        // nodeSourceInfoMap is always populated by Driver using ModuleResolver
+        let sourceInfo = nodeSourceInfoMap[index]
+        self.currentFileName = sourceInfo?.sourceFile ?? (isStdLib ? coreFileName : userFileName)
+        self.currentSourceFile = sourceInfo?.sourceFile ?? self.currentFileName
+        self.currentModulePath = sourceInfo?.modulePath ?? []
         self.currentSpan = decl.span
         do {
-          try collectTypeDefinition(decl)
+          try collectTypeDefinition(decl, isStdLib: isStdLib)
         } catch let e as SemanticError {
           throw e
         }
@@ -971,7 +1138,12 @@ public class TypeChecker {
       // This allows methods in one given block to call methods in another given block
       // regardless of declaration order
       for (index, decl) in declarations.enumerated() {
-        self.currentFileName = (index < coreGlobalCount) ? coreFileName : userFileName
+        let isStdLib = index < coreGlobalCount
+        // 更新当前源文件和模块路径
+        let sourceInfo = nodeSourceInfoMap[index]
+        self.currentFileName = sourceInfo?.sourceFile ?? (isStdLib ? coreFileName : userFileName)
+        self.currentSourceFile = sourceInfo?.sourceFile ?? self.currentFileName
+        self.currentModulePath = sourceInfo?.modulePath ?? []
         self.currentSpan = decl.span
         do {
           try collectGivenSignatures(decl)
@@ -980,11 +1152,22 @@ public class TypeChecker {
         }
       }
       
+      // === PASS 2.5: Build module symbols from collected definitions ===
+      // This allows `using self.child` to work by creating module symbols
+      // that can be accessed via `child.xxx`
+      // Must be after Pass 2 because function symbols are registered in Pass 2
+      try buildModuleSymbols(from: declarations)
+      
       // === PASS 3: Check function bodies and generate typed AST ===
       // Now that all types and method signatures are defined, we can check function bodies
       // which may reference types or methods defined later in the file
       for (index, decl) in declarations.enumerated() {
-        self.currentFileName = (index < coreGlobalCount) ? coreFileName : userFileName
+        let isStdLib = index < coreGlobalCount
+        // 更新当前源文件和模块路径
+        let sourceInfo = nodeSourceInfoMap[index]
+        self.currentFileName = sourceInfo?.sourceFile ?? (isStdLib ? coreFileName : userFileName)
+        self.currentSourceFile = sourceInfo?.sourceFile ?? self.currentFileName
+        self.currentModulePath = sourceInfo?.modulePath ?? []
         self.currentSpan = decl.span
         do {
           if let typedDecl = try checkGlobalDeclaration(decl) {
@@ -1036,12 +1219,167 @@ public class TypeChecker {
     }
   }
   
+  // MARK: - Pass 1.5: Module Symbol Building
+  
+  /// Builds module symbols from collected definitions.
+  /// This allows `using self.child` to work by creating module symbols
+  /// that can be accessed via `child.xxx`.
+  private func buildModuleSymbols(from declarations: [GlobalNode]) throws {
+    // Step 1: Collect all symbols by module path
+    var symbolsByModule: [String: [(name: String, symbol: Symbol, type: Type?)]] = [:]
+    
+    for (index, decl) in declarations.enumerated() {
+      guard let sourceInfo = nodeSourceInfoMap[index] else { continue }
+      let modulePath = sourceInfo.modulePath
+      
+      // Skip root module (empty path) - we only care about submodules
+      if modulePath.isEmpty { continue }
+      
+      let moduleKey = modulePath.joined(separator: ".")
+      
+      // Extract symbol info from declaration
+      if let symbolInfo = extractSymbolInfo(from: decl, sourceInfo: sourceInfo) {
+        if symbolsByModule[moduleKey] == nil {
+          symbolsByModule[moduleKey] = []
+        }
+        symbolsByModule[moduleKey]?.append(symbolInfo)
+      }
+    }
+    
+    // Step 2: Build ModuleSymbolInfo for each module
+    for (moduleKey, symbols) in symbolsByModule {
+      var publicSymbols: [String: Symbol] = [:]
+      var publicTypes: [String: Type] = [:]
+      
+      for (name, symbol, type) in symbols {
+        // Only include public symbols (for now, include all non-private)
+        if symbol.access != .private {
+          publicSymbols[name] = symbol
+          if let t = type {
+            publicTypes[name] = t
+          }
+        }
+      }
+      
+      let modulePath = moduleKey.split(separator: ".").map(String.init)
+      moduleSymbols[moduleKey] = ModuleSymbolInfo(
+        modulePath: modulePath,
+        publicSymbols: publicSymbols,
+        publicTypes: publicTypes
+      )
+    }
+    
+    // Step 3: Register module symbols in scope for direct child modules
+    // For each unique first-level submodule, create a module symbol
+    var registeredModules: Set<String> = []
+    for moduleKey in moduleSymbols.keys {
+      let parts = moduleKey.split(separator: ".").map(String.init)
+      if let firstPart = parts.first, !registeredModules.contains(firstPart) {
+        registeredModules.insert(firstPart)
+        
+        // Get or create module info for this submodule
+        if let moduleInfo = moduleSymbols[firstPart] {
+          let moduleType = Type.module(info: moduleInfo)
+          // Register the module symbol in scope (as private by default)
+          currentScope.define(firstPart, moduleType, mutable: false)
+        }
+      }
+    }
+  }
+  
+  /// Extracts symbol information from a global declaration.
+  private func extractSymbolInfo(from decl: GlobalNode, sourceInfo: GlobalNodeSourceInfo) -> (name: String, symbol: Symbol, type: Type?)? {
+    switch decl {
+    case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, _, let access, _):
+      // Skip generic functions for now
+      if !typeParameters.isEmpty { return nil }
+      
+      // Build function type
+      let paramTypes = parameters.map { param -> Parameter in
+        // We can't fully resolve types here, but we can create a placeholder
+        return Parameter(type: .void, kind: .byVal)
+      }
+      _ = paramTypes
+      _ = returnType
+      
+      // Look up the actual symbol from scope
+      if let funcType = currentScope.lookup(name, sourceFile: sourceInfo.sourceFile) {
+        let symbol = Symbol(
+          name: name,
+          type: funcType,
+          kind: .function,
+          modulePath: sourceInfo.modulePath,
+          sourceFile: sourceInfo.sourceFile,
+          access: access
+        )
+        return (name, symbol, nil)
+      }
+      return nil
+      
+    case .globalStructDeclaration(let name, let typeParameters, _, let access, _):
+      // Skip generic structs for now
+      if !typeParameters.isEmpty { return nil }
+      
+      if let structType = currentScope.lookupType(name, sourceFile: sourceInfo.sourceFile) {
+        let symbol = Symbol(
+          name: name,
+          type: structType,
+          kind: .type,
+          modulePath: sourceInfo.modulePath,
+          sourceFile: sourceInfo.sourceFile,
+          access: access
+        )
+        return (name, symbol, structType)
+      }
+      return nil
+      
+    case .globalUnionDeclaration(let name, let typeParameters, _, let access, _):
+      // Skip generic unions for now
+      if !typeParameters.isEmpty { return nil }
+      
+      if let unionType = currentScope.lookupType(name, sourceFile: sourceInfo.sourceFile) {
+        let symbol = Symbol(
+          name: name,
+          type: unionType,
+          kind: .type,
+          modulePath: sourceInfo.modulePath,
+          sourceFile: sourceInfo.sourceFile,
+          access: access
+        )
+        return (name, symbol, unionType)
+      }
+      return nil
+      
+    case .globalVariableDeclaration(let name, _, _, _, let access, _):
+      if let varType = currentScope.lookup(name, sourceFile: sourceInfo.sourceFile) {
+        let symbol = Symbol(
+          name: name,
+          type: varType,
+          kind: .variable(.Value),
+          modulePath: sourceInfo.modulePath,
+          sourceFile: sourceInfo.sourceFile,
+          access: access
+        )
+        return (name, symbol, nil)
+      }
+      return nil
+      
+    default:
+      return nil
+    }
+  }
+  
   // MARK: - Pass 1: Type Collection
   
   /// Collects type definitions without checking function bodies.
   /// This allows forward references to work correctly.
-  private func collectTypeDefinition(_ decl: GlobalNode) throws {
+  /// - Parameter isStdLib: Whether this declaration is from the standard library
+  private func collectTypeDefinition(_ decl: GlobalNode, isStdLib: Bool = false) throws {
     switch decl {
+    case .usingDeclaration:
+      // Using declarations are handled separately, skip here
+      return
+      
     case .traitDeclaration(let name, let typeParameters, let superTraits, let methods, let access, let span):
       self.currentSpan = span
       if traits[name] != nil {
@@ -1057,10 +1395,16 @@ public class TypeChecker {
         access: access,
         line: span.line
       )
+      // Track std library traits
+      if isStdLib {
+        stdLibTypes.insert(name)
+      }
       
     case .globalUnionDeclaration(let name, let typeParameters, let cases, let access, let span):
       self.currentSpan = span
-      if currentScope.hasTypeDefinition(name) {
+      // For private types, allow same name in different files
+      let isPrivate = (access == .private)
+      if !isPrivate && currentScope.hasTypeDefinition(name) {
         throw SemanticError.duplicateDefinition(name, line: span.line)
       }
       
@@ -1071,13 +1415,32 @@ public class TypeChecker {
         currentScope.defineGenericUnionTemplate(name, template: template)
       } else {
         // Register placeholder for non-generic union (allows recursive references)
-        let placeholder = Type.union(name: name, cases: [], isGenericInstantiation: false)
-        try currentScope.defineType(name, type: placeholder)
+        let decl = UnionDecl(
+          name: name,
+          modulePath: currentModulePath,
+          sourceFile: currentSourceFile,
+          access: access,
+          cases: [],
+          isGenericInstantiation: false
+        )
+        let placeholder = Type.union(decl: decl)
+        if isPrivate {
+          // For private types, use file-qualified storage
+          try currentScope.definePrivateType(name, sourceFile: currentSourceFile, type: placeholder)
+        } else {
+          try currentScope.defineType(name, type: placeholder)
+        }
+      }
+      // Track std library types
+      if isStdLib {
+        stdLibTypes.insert(name)
       }
       
-    case .globalStructDeclaration(let name, let typeParameters, let parameters, _, let span):
+    case .globalStructDeclaration(let name, let typeParameters, let parameters, let access, let span):
       self.currentSpan = span
-      if currentScope.hasTypeDefinition(name) {
+      // For private types, allow same name in different files
+      let isPrivate = (access == .private)
+      if !isPrivate && currentScope.hasTypeDefinition(name) {
         throw SemanticError.duplicateDefinition(name, line: span.line)
       }
       
@@ -1088,8 +1451,25 @@ public class TypeChecker {
         currentScope.defineGenericStructTemplate(name, template: template)
       } else {
         // Register placeholder for non-generic struct (allows recursive references)
-        let placeholder = Type.structure(name: name, members: [], isGenericInstantiation: false)
-        try currentScope.defineType(name, type: placeholder)
+        let decl = StructDecl(
+          name: name,
+          modulePath: currentModulePath,
+          sourceFile: currentSourceFile,
+          access: access,
+          members: [],
+          isGenericInstantiation: false
+        )
+        let placeholder = Type.structure(decl: decl)
+        if isPrivate {
+          // For private types, use file-qualified storage
+          try currentScope.definePrivateType(name, sourceFile: currentSourceFile, type: placeholder)
+        } else {
+          try currentScope.defineType(name, type: placeholder)
+        }
+      }
+      // Track std library types
+      if isStdLib {
+        stdLibTypes.insert(name)
       }
       
     case .globalFunctionDeclaration(_, let typeParameters, _, _, _, _, let span):
@@ -1125,6 +1505,12 @@ public class TypeChecker {
       
     case .intrinsicTypeDeclaration(let name, let typeParameters, _, let span):
       self.currentSpan = span
+      
+      // Module rule check: intrinsic declarations are only allowed in standard library
+      if !isStdLib {
+        throw SemanticError(.generic("'intrinsic' declarations are only allowed in the standard library"), line: span.line)
+      }
+      
       if currentScope.hasTypeDefinition(name) {
         throw SemanticError.duplicateDefinition(name, line: span.line)
       }
@@ -1155,19 +1541,42 @@ public class TypeChecker {
         case "Void": type = .void
         case "Never": type = .never
         default:
-          type = .structure(name: name, members: [], isGenericInstantiation: false)
+          let decl = StructDecl(
+            name: name,
+            modulePath: currentModulePath,
+            sourceFile: currentSourceFile,
+            access: .default,
+            members: [],
+            isGenericInstantiation: false
+          )
+          type = .structure(decl: decl)
         }
         try currentScope.defineType(name, type: type)
+      }
+      // Intrinsic types are always from std library
+      if isStdLib {
+        stdLibTypes.insert(name)
       }
       
     case .intrinsicFunctionDeclaration(let name, let typeParameters, _, _, _, let span):
       self.currentSpan = span
+      
+      // Module rule check: intrinsic declarations are only allowed in standard library
+      if !isStdLib {
+        throw SemanticError(.generic("'intrinsic' declarations are only allowed in the standard library"), line: span.line)
+      }
+      
       if !typeParameters.isEmpty {
         intrinsicGenericFunctions.insert(name)
       }
       // Function signature will be registered in pass 3
       
-    case .intrinsicGivenDeclaration:
+    case .intrinsicGivenDeclaration(_, _, _, let span):
+      // Module rule check: intrinsic declarations are only allowed in standard library
+      if !isStdLib {
+        self.currentSpan = span
+        throw SemanticError(.generic("'intrinsic' declarations are only allowed in the standard library"), line: span.line)
+      }
       // Handled in pass 2 (signature) and pass 3 (body)
       break
     }
@@ -1275,10 +1684,10 @@ public class TypeChecker {
         // Non-generic given - collect method signatures for forward reference support
         let type = try resolveTypeNode(typeNode)
         let typeName: String
-        if case .structure(let name, _, _) = type {
-          typeName = name
-        } else if case .union(let name, _, _) = type {
-          typeName = name
+        if case .structure(let decl) = type {
+          typeName = decl.name
+        } else if case .union(let decl) = type {
+          typeName = decl.name
         } else if case .int = type {
           typeName = type.description
         } else if case .int8 = type {
@@ -1369,10 +1778,10 @@ public class TypeChecker {
         
         let typeName: String
         switch type {
-        case .structure(let name, _, _):
-          typeName = name
-        case .union(let name, _, _):
-          typeName = name
+        case .structure(let decl):
+          typeName = decl.name
+        case .union(let decl):
+          typeName = decl.name
         case .int, .int8, .int16, .int32, .int64,
              .uint, .uint8, .uint16, .uint32, .uint64,
              .float32, .float64,
@@ -1414,12 +1823,15 @@ public class TypeChecker {
         }
       }
       
-    case .globalStructDeclaration(let name, let typeParameters, let parameters, _, let span):
+    case .globalStructDeclaration(let name, let typeParameters, let parameters, let access, let span):
       self.currentSpan = span
       // Resolve non-generic struct types so function signatures can reference them
       if typeParameters.isEmpty {
         // Non-generic struct: resolve member types and finalize the type definition
-        let placeholder = currentScope.lookupType(name)!
+        let isPrivate = (access == .private)
+        let placeholder = isPrivate 
+          ? currentScope.lookupType(name, sourceFile: currentSourceFile)!
+          : currentScope.lookupType(name)!
         
         let params = try parameters.map { param -> Symbol in
           let paramType = try resolveTypeNode(param.type)
@@ -1433,22 +1845,38 @@ public class TypeChecker {
             kind: param.mutable ? .variable(.MutableValue) : .variable(.Value))
         }
         
-        // Define the new type
-        let typeType = Type.structure(
-          name: name,
-          members: params.map { (name: $0.name, type: $0.type, mutable: $0.isMutable()) },
-          isGenericInstantiation: false
-        )
-        currentScope.overwriteType(name, type: typeType)
+        // Create a new Type with resolved members and overwrite the placeholder
+        // (StructDecl is now a struct, so we can't mutate it in place)
+        if case .structure(let decl) = placeholder {
+          let newDecl = StructDecl(
+            id: decl.id,  // Keep the same UUID for identity
+            name: decl.name,
+            modulePath: decl.modulePath,
+            sourceFile: decl.sourceFile,
+            access: decl.access,
+            members: params.map { (name: $0.name, type: $0.type, mutable: $0.isMutable()) },
+            isGenericInstantiation: decl.isGenericInstantiation,
+            typeArguments: decl.typeArguments
+          )
+          let resolvedType = Type.structure(decl: newDecl)
+          if isPrivate {
+            currentScope.overwritePrivateType(name, sourceFile: currentSourceFile, type: resolvedType)
+          } else {
+            currentScope.overwriteType(name, type: resolvedType)
+          }
+        }
       }
       // Generic structs are handled in pass 3
       
-    case .globalUnionDeclaration(let name, let typeParameters, let cases, _, let span):
+    case .globalUnionDeclaration(let name, let typeParameters, let cases, let access, let span):
       self.currentSpan = span
       // Resolve non-generic union types so function signatures can reference them
       if typeParameters.isEmpty {
         // Non-generic union: resolve case types and finalize the type definition
-        let placeholder = currentScope.lookupType(name)!
+        let isPrivate = (access == .private)
+        let placeholder = isPrivate
+          ? currentScope.lookupType(name, sourceFile: currentSourceFile)!
+          : currentScope.lookupType(name)!
         
         var unionCases: [UnionCase] = []
         for c in cases {
@@ -1465,12 +1893,30 @@ public class TypeChecker {
           unionCases.append(UnionCase(name: c.name, parameters: params))
         }
         
-        let unionType = Type.union(name: name, cases: unionCases, isGenericInstantiation: false)
-        currentScope.overwriteType(name, type: unionType)
+        // Create a new Type with resolved cases and overwrite the placeholder
+        // (UnionDecl is now a struct, so we can't mutate it in place)
+        if case .union(let decl) = placeholder {
+          let newDecl = UnionDecl(
+            id: decl.id,  // Keep the same UUID for identity
+            name: decl.name,
+            modulePath: decl.modulePath,
+            sourceFile: decl.sourceFile,
+            access: decl.access,
+            cases: unionCases,
+            isGenericInstantiation: decl.isGenericInstantiation,
+            typeArguments: decl.typeArguments
+          )
+          let resolvedType = Type.union(decl: newDecl)
+          if isPrivate {
+            currentScope.overwritePrivateType(name, sourceFile: currentSourceFile, type: resolvedType)
+          } else {
+            currentScope.overwriteType(name, type: resolvedType)
+          }
+        }
       }
       // Generic unions are handled in pass 3
       
-    case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, _, _, let span):
+    case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, _, let access, let span):
       self.currentSpan = span
       // Register function signature so it can be called from methods defined earlier
       if typeParameters.isEmpty {
@@ -1483,7 +1929,14 @@ public class TypeChecker {
           return Parameter(type: paramType, kind: passKind)
         }
         let functionType = Type.function(parameters: params, returns: returnType)
-        currentScope.define(name, functionType, mutable: false)
+        
+        // For private functions, use file-isolated registration
+        let isPrivate = (access == .private)
+        if isPrivate {
+          currentScope.definePrivateSymbol(name, sourceFile: currentSourceFile, type: functionType, mutable: false)
+        } else {
+          currentScope.define(name, functionType, mutable: false)
+        }
       }
       // Generic functions are handled in pass 3
       
@@ -1510,6 +1963,10 @@ public class TypeChecker {
 
   private func checkGlobalDeclaration(_ decl: GlobalNode) throws -> TypedGlobalNode? {
     switch decl {
+    case .usingDeclaration:
+      // Using declarations are handled separately, skip here
+      return nil
+      
     case .traitDeclaration(_, _, let superTraits, _, _, let span):
       self.currentSpan = span
       // Trait was registered in pass 1, now validate superTraits
@@ -1519,7 +1976,7 @@ public class TypeChecker {
       return nil
 
     case .globalUnionDeclaration(
-      let name, let typeParameters, let cases, _, let span):
+      let name, let typeParameters, let cases, let access, let span):
       self.currentSpan = span
 
       if !typeParameters.isEmpty {
@@ -1543,20 +2000,33 @@ public class TypeChecker {
 
       // Non-generic union: already resolved in Pass 2
       // Just return the typed declaration
-      let type = currentScope.lookupType(name)!
+      let isPrivate = (access == .private)
+      let type = isPrivate
+        ? currentScope.lookupType(name, sourceFile: currentSourceFile)!
+        : currentScope.lookupType(name)!
       
       var unionCases: [UnionCase] = []
-      if case .union(_, let cases, _) = type {
-        unionCases = cases
+      if case .union(let decl) = type {
+        unionCases = decl.cases
       }
       
       return .globalUnionDeclaration(
-        identifier: Symbol(name: name, type: type, kind: .type), cases: unionCases)
+        identifier: makeGlobalSymbol(name: name, type: type, kind: .type, access: access), cases: unionCases)
 
-    case .globalVariableDeclaration(let name, let typeNode, let value, let isMut, _, let span):
+    case .globalVariableDeclaration(let name, let typeNode, let value, let isMut, let access, let span):
       self.currentSpan = span
-      guard case nil = currentScope.lookup(name) else {
-        throw SemanticError.duplicateDefinition(name, line: span.line)
+      // For private variables, allow same name in different files
+      let isPrivate = (access == .private)
+      
+      if isPrivate {
+        // Check only in private symbols for this file
+        if currentScope.lookup(name, sourceFile: currentSourceFile) != nil {
+          throw SemanticError.duplicateDefinition(name, line: span.line)
+        }
+      } else {
+        guard case nil = currentScope.lookup(name) else {
+          throw SemanticError.duplicateDefinition(name, line: span.line)
+        }
       }
       let type = try resolveTypeNode(typeNode)
       let typedValue = try inferTypedExpression(value)
@@ -1564,9 +2034,16 @@ public class TypeChecker {
         throw SemanticError.typeMismatch(
           expected: type.description, got: typedValue.type.description)
       }
-      currentScope.define(name, type, mutable: isMut)
+      if isPrivate {
+        currentScope.definePrivateSymbol(name, sourceFile: currentSourceFile, type: type, mutable: isMut)
+      } else {
+        currentScope.define(name, type, mutable: isMut)
+      }
+      
+      let symbol = makeGlobalSymbol(name: name, type: type, kind: .variable(isMut ? .MutableValue : .Value), access: access)
+      
       return .globalVariable(
-        identifier: Symbol(name: name, type: type, kind: .variable(isMut ? .MutableValue : .Value)),
+        identifier: symbol,
         value: typedValue,
         kind: isMut ? .MutableValue : .Value
       )
@@ -1577,7 +2054,12 @@ public class TypeChecker {
       self.currentSpan = span
       
       // For non-generic functions, skip duplicate check if already defined in Pass 2
-      if typeParameters.isEmpty && currentScope.lookup(name) != nil {
+      let isPrivate = (access == .private)
+      let existingLookup = isPrivate 
+        ? currentScope.lookup(name, sourceFile: currentSourceFile) 
+        : currentScope.lookup(name)
+      
+      if typeParameters.isEmpty && existingLookup != nil {
         // Already defined in Pass 2, continue with body checking
       } else if currentScope.hasFunctionDefinition(name) {
         throw SemanticError.duplicateDefinition(name, line: span.line)
@@ -1649,14 +2131,21 @@ public class TypeChecker {
       )
 
       // Define placeholder for recursion (skip if already defined in Pass 2)
-      if currentScope.lookup(name) == nil {
-        currentScope.define(name, functionType, mutable: false)
+      let existingForRecursion = isPrivate 
+        ? currentScope.lookup(name, sourceFile: currentSourceFile) 
+        : currentScope.lookup(name)
+      if existingForRecursion == nil {
+        if isPrivate {
+          currentScope.definePrivateSymbol(name, sourceFile: currentSourceFile, type: functionType, mutable: false)
+        } else {
+          currentScope.define(name, functionType, mutable: false)
+        }
       }
 
       let (typedBody, _) = try checkFunctionBody(params, returnType, body)
 
       return .globalFunction(
-        identifier: Symbol(name: name, type: functionType, kind: .function),
+        identifier: makeGlobalSymbol(name: name, type: functionType, kind: .function, access: access),
         parameters: params,
         body: typedBody
       )
@@ -1736,6 +2225,11 @@ public class TypeChecker {
             op: "generic given on non-generic type", type1: "", type2: "")
         }
         
+        // Module rule check: Cannot add given declaration for types defined in external modules (std library)
+        if stdLibTypes.contains(baseName) && !isCurrentFileStdLib {
+          throw SemanticError(.generic("Cannot add 'given' declaration for type '\(baseName)' defined in standard library"), line: span.line)
+        }
+        
         // Create a generic Self type for body checking
         let genericSelfArgs = typeParams.map { Type.genericParameter(name: $0.name) }
         let genericSelfType: Type
@@ -1803,10 +2297,10 @@ public class TypeChecker {
 
       let type = try resolveTypeNode(typeNode)
       let typeName: String
-      if case .structure(let name, _, _) = type {
-        typeName = name
-      } else if case .union(let name, _, _) = type {
-        typeName = name
+      if case .structure(let decl) = type {
+        typeName = decl.name
+      } else if case .union(let decl) = type {
+        typeName = decl.name
       } else if case .int = type {
         typeName = type.description
       } else if case .int8 = type {
@@ -1836,6 +2330,12 @@ public class TypeChecker {
       } else {
         throw SemanticError.invalidOperation(
           op: "given extends only struct or union", type1: type.description, type2: "")
+      }
+
+      // Module rule check: Cannot add given declaration for types defined in external modules (std library)
+      // This check ensures that users cannot extend types from the standard library
+      if stdLibTypes.contains(typeName) && !isCurrentFileStdLib {
+        throw SemanticError(.generic("Cannot add 'given' declaration for type '\(typeName)' defined in standard library"), line: span.line)
       }
 
       var typedMethods: [TypedMethodDeclaration] = []
@@ -1979,11 +2479,11 @@ public class TypeChecker {
       let typeName: String
       let shouldEmitGiven: Bool
       switch type {
-      case .structure(let name, _, _):
-        typeName = name
+      case .structure(let decl):
+        typeName = decl.name
         shouldEmitGiven = true
-      case .union(let name, _, _):
-        typeName = name
+      case .union(let decl):
+        typeName = decl.name
         shouldEmitGiven = true
       case .int, .int8, .int16, .int32, .int64,
         .uint, .uint8, .uint16, .uint32, .uint64,
@@ -2046,7 +2546,7 @@ public class TypeChecker {
       return shouldEmitGiven ? .givenDeclaration(type: type, methods: typedMethods) : nil
 
     case .globalStructDeclaration(
-      let name, let typeParameters, let parameters, _, let span):
+      let name, let typeParameters, let parameters, let access, let span):
       self.currentSpan = span
       // Note: Type was already registered in Pass 1 (collectTypeDefinition)
       // Non-generic types are resolved in Pass 2 (collectGivenSignatures)
@@ -2072,7 +2572,10 @@ public class TypeChecker {
 
       // Non-generic struct: already resolved in Pass 2
       // Just return the typed declaration
-      let typeType = currentScope.lookupType(name)!
+      let isPrivate = (access == .private)
+      let typeType = isPrivate 
+        ? currentScope.lookupType(name, sourceFile: currentSourceFile)!
+        : currentScope.lookupType(name)!
 
       let params = try parameters.map { param -> Symbol in
         let paramType = try resolveTypeNode(param.type)
@@ -2081,20 +2584,35 @@ public class TypeChecker {
           kind: param.mutable ? .variable(.MutableValue) : .variable(.Value))
       }
 
+      let symbol = makeGlobalSymbol(name: name, type: typeType, kind: .type, access: access)
+
       return .globalStructDeclaration(
-        identifier: Symbol(name: name, type: typeType, kind: .type),
+        identifier: symbol,
         parameters: params
       )
 
-    case .intrinsicTypeDeclaration(let name, let typeParameters, _, let span):
+    case .intrinsicTypeDeclaration(let name, let typeParameters, let access, let span):
       self.currentSpan = span
       // Note: Type was already registered in Pass 1 (collectTypeDefinition)
       // Pass 2 just returns the appropriate node
 
       if typeParameters.isEmpty {
         // Non-generic intrinsic type was already registered in Pass 1
-        let type = currentScope.lookupType(name) ?? .structure(name: name, members: [], isGenericInstantiation: false)
-        let dummySymbol = Symbol(name: name, type: type, kind: .variable(.Value))
+        let type: Type
+        if let existingType = currentScope.lookupType(name) {
+          type = existingType
+        } else {
+          let decl = StructDecl(
+            name: name,
+            modulePath: currentModulePath,
+            sourceFile: currentSourceFile,
+            access: access,
+            members: [],
+            isGenericInstantiation: false
+          )
+          type = .structure(decl: decl)
+        }
+        let dummySymbol = makeGlobalSymbol(name: name, type: type, kind: .variable(.Value), access: access)
         return .globalStructDeclaration(identifier: dummySymbol, parameters: [])
       } else {
         // Generic intrinsic template was already registered in Pass 1
@@ -2260,10 +2778,27 @@ public class TypeChecker {
       if currentScope.isMoved(name) {
         throw SemanticError.variableMoved(name)
       }
-      guard let type = currentScope.lookup(name) else {
+      guard let info = currentScope.lookupWithInfo(name, sourceFile: currentSourceFile) else {
         throw SemanticError.undefinedVariable(name)
       }
-      return .variable(identifier: Symbol(name: name, type: type, kind: .variable(.Value)))
+      
+      // 判断是否是全局符号（需要模块路径前缀）
+      // 局部变量和参数：modulePath 为空且 sourceFile 为空
+      // 全局符号：有 modulePath 或有 sourceFile（private 符号）
+      let isGlobalSymbol = !info.modulePath.isEmpty || info.isPrivate
+      let symbolModulePath = isGlobalSymbol ? (info.modulePath.isEmpty ? currentModulePath : info.modulePath) : []
+      let symbolSourceFile = info.isPrivate ? (info.sourceFile ?? currentSourceFile) : ""
+      
+      let symbol = Symbol(
+        name: name,
+        type: info.type,
+        kind: .variable(info.mutable ? .MutableValue : .Value),
+        modulePath: symbolModulePath,
+        sourceFile: symbolSourceFile,
+        access: info.isPrivate ? .private : .default
+      )
+      
+      return .variable(identifier: symbol)
 
     case .blockExpression(let statements, let finalExpression):
       return try withNewScope {
@@ -2894,8 +3429,8 @@ public class TypeChecker {
         if case .function(_, let returnType) = symbol.type {
           // Check for union constructor (both concrete and generic)
           var unionName: String? = nil
-          if case .union(let uName, _, _) = returnType {
-            unionName = uName
+          if case .union(let decl) = returnType {
+            unionName = decl.name
           } else if case .genericUnion(let templateName, _) = returnType {
             unionName = templateName
           }
@@ -3027,11 +3562,12 @@ public class TypeChecker {
           )
         }
 
-        if let type = currentScope.lookupType(name) {
-          guard case .structure(_, let parameters, _) = type else {
+        if let type = currentScope.lookupType(name, sourceFile: currentSourceFile) {
+          guard case .structure(let decl) = type else {
             throw SemanticError.invalidOperation(
               op: "construct", type1: type.description, type2: "")
           }
+          let parameters = decl.members
 
           if arguments.count != parameters.count {
             throw SemanticError.invalidArgumentCount(
@@ -3430,7 +3966,36 @@ public class TypeChecker {
         }
       }
 
-      // 2. Check if baseExpr is a Type (Identifier) for static method access
+      // 2. Check if baseExpr is a module symbol for member access (e.g., child.child_value())
+      if case .identifier(let name) = baseExpr {
+        // Check if it's a module symbol
+        if let moduleType = currentScope.lookup(name, sourceFile: currentSourceFile),
+           case .module(let moduleInfo) = moduleType {
+          if path.count == 1 {
+            let memberName = path[0]
+            // Look up the member in the module's public symbols
+            if let memberSymbol = moduleInfo.publicSymbols[memberName] {
+              return .variable(identifier: memberSymbol)
+            }
+            // Look up the member in the module's public types
+            if let memberType = moduleInfo.publicTypes[memberName] {
+              // Return a type symbol
+              let typeSymbol = Symbol(
+                name: memberName,
+                type: memberType,
+                kind: .type,
+                modulePath: moduleInfo.modulePath,
+                sourceFile: "",
+                access: .public
+              )
+              return .variable(identifier: typeSymbol)
+            }
+            throw SemanticError.undefinedMember(memberName, name)
+          }
+        }
+      }
+      
+      // 3. Check if baseExpr is a Type (Identifier) for static method access
       if case .identifier(let name) = baseExpr, let type = currentScope.lookupType(name) {
         if path.count == 1 {
           let memberName = path[0]
@@ -3457,8 +4022,8 @@ public class TypeChecker {
             }
           }
 
-          if case .structure(let typeName, _, _) = type {
-            if let methods = extensionMethods[typeName], let sym = methods[memberName] {
+          if case .structure(let decl) = type {
+            if let methods = extensionMethods[decl.name], let sym = methods[memberName] {
               methodSymbol = sym
             }
           }
@@ -3476,15 +4041,15 @@ public class TypeChecker {
         }
       }
 
-      // 3. Union Constructor Access via member path (e.g., UnionType.CaseName)
+      // 4. Union Constructor Access via member path (e.g., UnionType.CaseName)
       // This is not a "Function variable" but a direct Constructor node which expects a Call parent.
       // However, we are inside `memberPath`. The parser sees `Option.Some(1)` as Call(MemberPath(Option, Some), [1]).
       // So here we should return a "Function" type that is the constructor.
       if case .identifier(let name) = baseExpr, let type = currentScope.lookupType(name) {
         if path.count == 1 {
           let memberName = path[0]
-          if case .union(_, let cases, _) = type {
-            if let c = cases.first(where: { $0.name == memberName }) {
+          if case .union(let decl) = type {
+            if let c = decl.cases.first(where: { $0.name == memberName }) {
               // Found Union Case. Return a synthetic Function Symbol representing the constructor.
               let paramTypes = c.parameters.map { Parameter(type: $0.type, kind: .byVal) }
               let funcType = Type.function(parameters: paramTypes, returns: type)
@@ -3532,8 +4097,8 @@ public class TypeChecker {
 
         // Check if it is a structure to access members
         var foundMember = false
-        if case .structure(_, let members, _) = typeToLookup {
-          if let mem = members.first(where: { $0.name == memberName }) {
+        if case .structure(let decl) = typeToLookup {
+          if let mem = decl.members.first(where: { $0.name == memberName }) {
             let sym = Symbol(
               name: mem.name, type: mem.type, kind: .variable(mem.mutable ? .MutableValue : .Value))
             typedPath.append(sym)
@@ -3738,8 +4303,8 @@ public class TypeChecker {
             }
           }
 
-          if case .structure(let typeName, _, _) = typeToLookup {
-            throw SemanticError.undefinedMember(memberName, typeName)
+          if case .structure(let decl) = typeToLookup {
+            throw SemanticError.undefinedMember(memberName, decl.name)
           } else {
             throw SemanticError.invalidOperation(
               op: "member access", type1: typeToLookup.description, type2: "")
@@ -3955,10 +4520,10 @@ public class TypeChecker {
         // Get the type name for method lookup
         let lookupTypeName: String
         switch type {
-        case .structure(let name, _, _):
-          lookupTypeName = name
-        case .union(let name, _, _):
-          lookupTypeName = name
+        case .structure(let decl):
+          lookupTypeName = decl.name
+        case .union(let decl):
+          lookupTypeName = decl.name
         default:
           lookupTypeName = type.description
         }
@@ -4927,10 +5492,10 @@ public class TypeChecker {
   private func resolveLValue(_ expr: ExpressionNode) throws -> TypedExpressionNode {
     switch expr {
     case .identifier(let name):
-      guard let type = currentScope.lookup(name) else {
+      guard let type = currentScope.lookup(name, sourceFile: currentSourceFile) else {
         throw SemanticError.undefinedVariable(name)
       }
-      guard currentScope.isMutable(name) else { throw SemanticError.assignToImmutable(name) }
+      guard currentScope.isMutable(name, sourceFile: currentSourceFile) else { throw SemanticError.assignToImmutable(name) }
       return .variable(identifier: Symbol(name: name, type: type, kind: .variable(.MutableValue)))
 
     case .memberPath(let base, let path):
@@ -4959,8 +5524,8 @@ public class TypeChecker {
         if case .reference(let inner) = currentType { currentType = inner }
 
         // Handle concrete structure types
-        if case .structure(_, let members, _) = currentType {
-          guard let member = members.first(where: { $0.name == memberName }) else {
+        if case .structure(let decl) = currentType {
+          guard let member = decl.members.first(where: { $0.name == memberName }) else {
             throw SemanticError.undefinedMember(memberName, currentType.description)
           }
 
@@ -5047,8 +5612,8 @@ public class TypeChecker {
     // Get the type name for error messages
     let typeName: String
     switch structType {
-    case .structure(let name, _, _):
-      typeName = name
+    case .structure(let decl):
+      typeName = decl.name
     case .genericStruct(let template, _):
       typeName = template
     default:
@@ -5058,8 +5623,8 @@ public class TypeChecker {
     var methodSymbol: Symbol? = nil
     
     // Try to look up method on concrete type first
-    if case .structure(let name, _, _) = structType {
-      if let extensions = extensionMethods[name], let sym = extensions[methodName] {
+    if case .structure(let decl) = structType {
+      if let extensions = extensionMethods[decl.name], let sym = extensions[methodName] {
         methodSymbol = sym
       }
     }
@@ -5142,7 +5707,7 @@ public class TypeChecker {
       if traits[name] != nil {
         throw SemanticError.invalidOperation(op: "use trait as type", type1: name, type2: "")
       }
-      guard let t = currentScope.resolveType(name) else {
+      guard let t = currentScope.resolveType(name, sourceFile: currentSourceFile) else {
         throw SemanticError.undefinedType(name)
       }
       return t
@@ -5304,9 +5869,9 @@ public class TypeChecker {
       let cases: [UnionCase]
       
       switch subjectType {
-      case .union(let name, let unionCases, _):
-        typeName = name
-        cases = unionCases
+      case .union(let decl):
+        typeName = decl.name
+        cases = decl.cases
         
       case .genericUnion(let templateName, let typeArgs):
         // Look up the union template and substitute type parameters
@@ -5464,8 +6029,8 @@ public class TypeChecker {
 
   private func isStringType(_ type: Type) -> Bool {
     switch type {
-    case .structure(let name, _, _):
-      return name == "String"
+    case .structure(let decl):
+      return decl.name == "String"
     default:
       return false
     }
@@ -5519,8 +6084,8 @@ public class TypeChecker {
   /// For generic unions, this looks up the template and substitutes type parameters.
   private func resolveUnionCasesForExhaustiveness(_ type: Type) -> [UnionCase]? {
     switch type {
-    case .union(_, let cases, _):
-      return cases
+    case .union(let decl):
+      return decl.cases
       
     case .genericUnion(let templateName, let typeArgs):
       // Look up the union template and substitute type parameters

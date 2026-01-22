@@ -60,6 +60,10 @@ public enum ParserError: Error {
   case invalidVariableName(span: SourceSpan, name: String)
   case invalidFunctionName(span: SourceSpan, name: String)
   case invalidTypeName(span: SourceSpan, name: String)
+  // Module system errors
+  case usingAfterDeclaration(span: SourceSpan)
+  case fileMergeNoAccessModifier(span: SourceSpan)
+  case expectedDot(span: SourceSpan)
   
   /// The source span where the error occurred
   public var span: SourceSpan {
@@ -72,6 +76,9 @@ public enum ParserError: Error {
     case .invalidVariableName(let span, _): return span
     case .invalidFunctionName(let span, _): return span
     case .invalidTypeName(let span, _): return span
+    case .usingAfterDeclaration(let span): return span
+    case .fileMergeNoAccessModifier(let span): return span
+    case .expectedDot(let span): return span
     }
   }
   
@@ -107,6 +114,12 @@ public enum ParserError: Error {
       return "Function name '\(name)' must start with a lowercase letter"
     case .invalidTypeName(_, let name):
       return "Type name '\(name)' must start with an uppercase letter"
+    case .usingAfterDeclaration:
+      return "Using declarations must appear before other declarations"
+    case .fileMergeNoAccessModifier:
+      return "File merge (using \"...\") does not support access modifiers"
+    case .expectedDot:
+      return "Expected '.' after 'self' in using declaration"
     }
   }
 }

@@ -341,7 +341,7 @@ We can simply understand them as calculation symbols in mathematics, but program
 
 Arithmetic operators are mainly used on numeric type data operations, and most declarations conform to mathematical expectations.
 
-Koral supports standard arithmetic operations, including addition, subtraction, multiplication, division, and modulus. In addition, the exponentiation operator `^` is provided.
+Koral supports standard arithmetic operations, including addition, subtraction, multiplication, division, and modulus. In addition, the exponentiation operator `**` is provided.
 
 ```koral
 let a = 4;
@@ -351,7 +351,7 @@ printLine( a - b );    // - Subtract
 printLine( a * b );    // * Multiply
 printLine( a / b );    // / Divide
 printLine( a % b );    // % Modulus, meaning the remainder after division
-printLine( a ^ b );    // ^ Power
+printLine( a ** b );   // ** Power
 ```
 
 ### Comparison Operators
@@ -437,7 +437,7 @@ x -= 2;       // x = x - 2
 x *= 3;       // x = x * 3
 x /= 2;       // x = x / 2
 x %= 4;       // x = x % 4
-x ^= 2;       // x = x ^ 2 (Power)
+x **= 2;      // x = x ** 2 (Power)
 
 let mut y = 0b1100;
 y bitand= 0b1010; // y = y bitand 0b1010
@@ -452,7 +452,7 @@ y bitshr= 2;      // y = y bitshr 2
 Operator precedence from high to low is as follows:
 
 1. Prefix: `not`, `bitnot`, `+`(unary), `-`(unary)
-2. Power: `^` (Right associative)
+2. Power: `**` (Right associative)
 3. Multiplication/Division: `*`, `/`, `%`
 4. Addition/Subtraction: `+`, `-`
 5. Shift: `bitshl`, `bitshr`
@@ -1077,3 +1077,214 @@ let main() = {
     let z = mergeList(x, y);
 }
 ```
+
+
+## Module System
+
+Koral provides a powerful module system for organizing code across multiple files and directories. The module system enables code reuse, encapsulation, and clear separation of concerns.
+
+### Module Concepts
+
+A **module** in Koral consists of an entry file and all files it depends on through `using` declarations. The module boundary is determined by the entry file and its dependency chain.
+
+- **Root Module**: The module formed by the compilation entry file and its dependencies
+- **Submodule**: A module in a subdirectory, with `index.koral` as its entry file
+- **External Module**: Modules from outside the current compilation unit (e.g., standard library)
+
+### Using Declarations
+
+The `using` keyword is used to import modules and symbols. All `using` declarations must appear at the beginning of a file, before any other declarations.
+
+#### File Merging
+
+Use string literal syntax to merge files from the same directory into the current module:
+
+```koral
+using "utils"      // Merges utils.koral into current module
+using "helpers"    // Merges helpers.koral into current module
+```
+
+Merged files share the same scope - their `public` and `protected` symbols are mutually visible without additional imports.
+
+#### Submodule Import
+
+Use `self.` prefix to import submodules from subdirectories:
+
+```koral
+using self.models              // Import models/ subdirectory as submodule (private)
+protected using self.models    // Import and share within current module
+public using self.models       // Import and expose to external modules
+```
+
+Access submodule members using dot notation:
+
+```koral
+using self.models
+let user = models.User("Alice")
+```
+
+You can also import specific symbols or batch import:
+
+```koral
+using self.models.User         // Import specific symbol
+using self.models.*            // Batch import all public symbols (become private)
+```
+
+#### Parent Module Access
+
+Use `super.` prefix to access parent modules within the same compilation unit:
+
+```koral
+using super.sibling            // Import from parent module
+using super.super.uncle        // Import from grandparent module (chained super)
+```
+
+#### External Module Import
+
+Import external modules (like standard library) without any prefix:
+
+```koral
+using std                      // Import std module
+using std.collections          // Import collections from std
+using std.collections.List     // Import specific symbol
+using std.collections.*        // Batch import all public symbols
+```
+
+Use aliases to rename imports:
+
+```koral
+using txt = std.text           // Import with alias
+let builder = txt.StringBuilder.new()
+```
+
+### Access Modifiers
+
+Koral provides three access levels to control symbol visibility:
+
+| Modifier | Visibility |
+|----------|------------|
+| `public` | Accessible from anywhere |
+| `protected` | Accessible within current module and all submodules |
+| `private` | Accessible only within the same file |
+
+#### Default Access Levels
+
+Different declarations have different default access levels:
+
+| Declaration | Default |
+|-------------|---------|
+| Global functions, variables, types | `protected` |
+| Struct fields | `protected` |
+| Union constructor fields | `public` |
+| Member functions (in `given` blocks) | `protected` |
+| Trait methods | `public` |
+| Using declarations | `private` |
+
+#### Using Access Modifiers
+
+Apply access modifiers before declarations:
+
+```koral
+public type User(
+    public name String,           // Accessible from anywhere
+    protected email String,       // Accessible within module and submodules
+    private passwordHash String,  // Accessible only in this file
+)
+
+public let greet(user User) String = "Hello, " + user.name
+
+protected let validateEmail(email String) Bool = email.contains("@")
+
+private let hashPassword(password String) String = { /* ... */ }
+```
+
+#### Re-export Rules
+
+You can re-export symbols from the same compilation unit:
+
+```koral
+public using self.helpers      // Re-export submodule
+public using super.sibling     // Re-export from parent module
+```
+
+However, re-exporting external module symbols is not allowed:
+
+```koral
+public using std.Option        // Error: cannot re-export external symbols
+```
+
+### Project Structure Example
+
+A typical multi-file project structure:
+
+```
+my_project/
+├── main.koral           # Root module entry
+├── utils.koral          # Merged into root module
+├── models/
+│   ├── index.koral      # models submodule entry
+│   ├── user.koral       # Merged into models module
+│   └── post.koral       # Merged into models module
+└── services/
+    ├── index.koral      # services submodule entry
+    └── auth.koral       # Merged into services module
+```
+
+```koral
+// main.koral
+using std
+using "utils"                  // Merge utils.koral
+using self.models              // Import models submodule
+using self.services            // Import services submodule
+
+public let main() = {
+    let user = models.User.new("Alice")
+    if services.authenticate(user) then {
+        printLine("Welcome!")
+    }
+}
+```
+
+```koral
+// models/index.koral
+using "user"                   // Merge user.koral
+using "post"                   // Merge post.koral
+// User and Post types are now part of models module
+```
+
+```koral
+// models/user.koral
+public type User(
+    public name String,
+    public email String,
+)
+
+given User {
+    public new(name String) User = User(name, "")
+}
+```
+
+### Multiple Programs in Same Directory
+
+Multiple independent programs can share common code:
+
+```
+scripts/
+├── tool1.koral          # Independent program 1
+├── tool2.koral          # Independent program 2
+└── common.koral         # Shared utilities
+```
+
+```koral
+// tool1.koral
+using "common"
+public let main() = helper()
+
+// tool2.koral  
+using "common"
+public let main() = helper()
+```
+
+Each program is compiled independently:
+- `koralc tool1.koral` → tool1 module = tool1.koral + common.koral
+- `koralc tool2.koral` → tool2 module = tool2.koral + common.koral

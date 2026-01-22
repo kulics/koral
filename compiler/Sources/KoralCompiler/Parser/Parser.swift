@@ -74,15 +74,266 @@ public class Parser {
 
   // Parse program
   public func parse() throws -> ASTNode {
-    var statements: [GlobalNode] = []
+    var globalNodes: [GlobalNode] = []
+    var seenNonUsing = false
+    
     self.currentToken = try self.lexer.getNextToken()
     while currentToken !== .eof {
-      let statement = try parseGlobalDeclaration()
-      statements.append(statement)
-      // Consume optional semicolon after global declaration
-      try consumeOptionalSemicolon()
+      // Check for using declaration
+      if isUsingDeclaration() {
+        if seenNonUsing {
+          throw ParserError.usingAfterDeclaration(span: currentSpan)
+        }
+        let usingDecl = try parseUsingDeclaration()
+        globalNodes.append(.usingDeclaration(usingDecl))
+        try consumeOptionalSemicolon()
+      } else {
+        seenNonUsing = true
+        let statement = try parseGlobalDeclaration()
+        globalNodes.append(statement)
+        // Consume optional semicolon after global declaration
+        try consumeOptionalSemicolon()
+      }
     }
-    return .program(globalNodes: statements)
+    return .program(globalNodes: globalNodes)
+  }
+  
+  /// Check if current position is a using declaration
+  private func isUsingDeclaration() -> Bool {
+    // using ...
+    if currentToken === .usingKeyword {
+      return true
+    }
+    // public/protected/private using ...
+    if currentToken === .publicKeyword || currentToken === .protectedKeyword || currentToken === .privateKeyword {
+      let state = lexer.saveState()
+      let savedToken = currentToken
+      do {
+        // Get the token after the access modifier
+        let nextToken = try lexer.getNextToken()
+        lexer.restoreState(state)
+        currentToken = savedToken
+        return nextToken === .usingKeyword
+      } catch {
+        lexer.restoreState(state)
+        currentToken = savedToken
+        return false
+      }
+    }
+    return false
+  }
+  
+  /// Parse using declaration
+  private func parseUsingDeclaration() throws -> UsingDeclaration {
+    let startSpan = currentSpan
+    
+    // Parse optional access modifier
+    var access: AccessModifier = .default
+    if currentToken === .publicKeyword {
+      try match(.publicKeyword)
+      access = .public
+    } else if currentToken === .protectedKeyword {
+      try match(.protectedKeyword)
+      access = .protected
+    } else if currentToken === .privateKeyword {
+      try match(.privateKeyword)
+      access = .private
+    }
+    
+    try match(.usingKeyword)
+    
+    // Determine path type based on first token
+    if case .string(let filename) = currentToken {
+      // using "filename" - 文件合并
+      try match(currentToken)
+      
+      // 文件合并不允许访问修饰符
+      if access != .default {
+        throw ParserError.fileMergeNoAccessModifier(span: startSpan)
+      }
+      
+      let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
+      return UsingDeclaration(
+        pathKind: .fileMerge,
+        pathSegments: [filename],
+        alias: nil,
+        isBatchImport: false,
+        access: .default,
+        span: span
+      )
+    } else if currentToken === .selfKeyword {
+      try match(.selfKeyword)
+      
+      if currentToken === .dot {
+        // using self.submod - 子模块
+        return try parseSubmodulePath(access: access, startSpan: startSpan)
+      } else {
+        throw ParserError.expectedDot(span: currentSpan)
+      }
+    } else if currentToken === .superKeyword {
+      // using super.sibling - 父模块
+      return try parseParentPath(access: access, startSpan: startSpan)
+    } else {
+      // using std - 外部模块
+      return try parseExternalPath(access: access, startSpan: startSpan)
+    }
+  }
+  
+  /// Parse submodule path: self.utils or self.utils.SomeType or self.utils.*
+  private func parseSubmodulePath(access: AccessModifier, startSpan: SourceSpan) throws -> UsingDeclaration {
+    var segments: [String] = []
+    var isBatchImport = false
+    let alias: String? = nil
+    
+    while currentToken === .dot {
+      try match(.dot)
+      
+      if currentToken === .multiply {
+        try match(.multiply)
+        isBatchImport = true
+        break
+      }
+      
+      guard case .identifier(let name) = currentToken else {
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+      }
+      segments.append(name)
+      try match(currentToken)
+    }
+    
+    // Parse optional alias: using alias = self.submod
+    if currentToken === .equal {
+      // Actually alias comes before the path, so we need to handle this differently
+      // For now, skip alias support in this direction
+    }
+    
+    let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
+    return UsingDeclaration(
+      pathKind: .submodule,
+      pathSegments: segments,
+      alias: alias,
+      isBatchImport: isBatchImport,
+      access: access,
+      span: span
+    )
+  }
+  
+  /// Parse parent path: super.sibling or super.super.uncle
+  private func parseParentPath(access: AccessModifier, startSpan: SourceSpan) throws -> UsingDeclaration {
+    var segments: [String] = ["super"]
+    try match(.superKeyword)
+    
+    while currentToken === .dot {
+      try match(.dot)
+      
+      if currentToken === .superKeyword {
+        segments.append("super")
+        try match(.superKeyword)
+      } else if currentToken === .multiply {
+        try match(.multiply)
+        let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
+        return UsingDeclaration(
+          pathKind: .parent,
+          pathSegments: segments,
+          alias: nil,
+          isBatchImport: true,
+          access: access,
+          span: span
+        )
+      } else {
+        guard case .identifier(let name) = currentToken else {
+          throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+        }
+        segments.append(name)
+        try match(currentToken)
+        
+        // Continue parsing remaining path
+        while currentToken === .dot {
+          try match(.dot)
+          if currentToken === .multiply {
+            try match(.multiply)
+            let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
+            return UsingDeclaration(
+              pathKind: .parent,
+              pathSegments: segments,
+              alias: nil,
+              isBatchImport: true,
+              access: access,
+              span: span
+            )
+          }
+          guard case .identifier(let nextName) = currentToken else {
+            throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+          }
+          segments.append(nextName)
+          try match(currentToken)
+        }
+        break
+      }
+    }
+    
+    let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
+    return UsingDeclaration(
+      pathKind: .parent,
+      pathSegments: segments,
+      alias: nil,
+      isBatchImport: false,
+      access: access,
+      span: span
+    )
+  }
+  
+  /// Parse external path: std or std.text or std.text.*
+  private func parseExternalPath(access: AccessModifier, startSpan: SourceSpan) throws -> UsingDeclaration {
+    var segments: [String] = []
+    var isBatchImport = false
+    var alias: String? = nil
+    
+    // Check for alias syntax: using alias = path
+    guard case .identifier(let firstName) = currentToken else {
+      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+    }
+    try match(currentToken)
+    
+    if currentToken === .equal {
+      // This is an alias: using txt = std.text
+      alias = firstName
+      try match(.equal)
+      
+      guard case .identifier(let moduleName) = currentToken else {
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+      }
+      segments.append(moduleName)
+      try match(currentToken)
+    } else {
+      segments.append(firstName)
+    }
+    
+    while currentToken === .dot {
+      try match(.dot)
+      
+      if currentToken === .multiply {
+        try match(.multiply)
+        isBatchImport = true
+        break
+      }
+      
+      guard case .identifier(let name) = currentToken else {
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+      }
+      segments.append(name)
+      try match(currentToken)
+    }
+    
+    let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
+    return UsingDeclaration(
+      pathKind: .external,
+      pathSegments: segments,
+      alias: alias,
+      isBatchImport: isBatchImport,
+      access: access,
+      span: span
+    )
   }
 
   // Parse global declaration
