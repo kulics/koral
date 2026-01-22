@@ -75,9 +75,24 @@ extension PatternSpace {
         case .unionCase(let caseName, _, let elements):
             return subtractUnionCase(caseName: caseName, elements: elements, type: type)
             
-        case .rangePattern:
-            // Range patterns don't reduce the space meaningfully for exhaustiveness
+        case .comparisonPattern:
+            // Comparison patterns don't reduce the space meaningfully for exhaustiveness
             // (we still need a catchall for exhaustiveness on numeric types)
+            return self
+            
+        case .andPattern(let left, let right):
+            // And pattern: subtract both sub-patterns
+            let afterLeft = self.subtract(left, type: type)
+            return afterLeft.subtract(right, type: type)
+            
+        case .orPattern(let left, let right):
+            // Or pattern: subtract both sub-patterns (union of covered spaces)
+            let afterLeft = self.subtract(left, type: type)
+            return afterLeft.subtract(right, type: type)
+            
+        case .notPattern:
+            // Not patterns don't reduce the space meaningfully for exhaustiveness
+            // (they exclude values rather than covering them)
             return self
         }
     }
@@ -244,6 +259,9 @@ extension PatternSpace {
                 return remaining == [value]
             }
             return false
+        case .integerLiteral, .stringLiteral:
+            // Literals don't cover the entire space
+            return false
         case .unionCase(let caseName, _, let elements):
             if case .unionCases(_, let cases) = self {
                 if cases.count == 1, let fields = cases[caseName] {
@@ -251,7 +269,17 @@ extension PatternSpace {
                 }
             }
             return false
-        default:
+        case .comparisonPattern:
+            // Comparison patterns don't cover the entire space
+            return false
+        case .andPattern(let left, let right):
+            // And pattern covers if both sub-patterns cover
+            return self.isCoveredBy(left) && self.isCoveredBy(right)
+        case .orPattern(let left, let right):
+            // Or pattern covers if either sub-pattern covers
+            return self.isCoveredBy(left) || self.isCoveredBy(right)
+        case .notPattern:
+            // Not patterns don't cover the entire space
             return false
         }
     }

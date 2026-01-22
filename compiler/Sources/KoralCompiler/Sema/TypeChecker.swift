@@ -2975,6 +2975,58 @@ public class TypeChecker {
         return .ifExpression(
           condition: typedCondition, thenBranch: typedThen, elseBranch: nil, type: .void)
       }
+      
+    case .ifPatternExpression(let subject, let pattern, let thenBranch, let elseBranch, _):
+      // Type check the subject expression
+      let typedSubject = try inferTypedExpression(subject)
+      
+      // Check the pattern and collect variable bindings
+      let (typedPattern, bindings) = try checkPattern(pattern, subjectType: typedSubject.type)
+      
+      // Type check the then branch with bindings in scope
+      let typedThen = try withNewScope {
+        for (name, mutable, type) in bindings {
+          currentScope.define(name, type, mutable: mutable)
+        }
+        return try inferTypedExpression(thenBranch)
+      }
+      
+      // Type check the else branch (without bindings)
+      if let elseExpr = elseBranch {
+        let typedElse = try inferTypedExpression(elseExpr)
+        
+        let resultType: Type
+        if typedThen.type == typedElse.type {
+          resultType = typedThen.type
+        } else if typedThen.type == .never {
+          resultType = typedElse.type
+        } else if typedElse.type == .never {
+          resultType = typedThen.type
+        } else {
+          throw SemanticError.typeMismatch(
+            expected: typedThen.type.description,
+            got: typedElse.type.description
+          )
+        }
+        
+        return .ifPatternExpression(
+          subject: typedSubject,
+          pattern: typedPattern,
+          bindings: bindings,
+          thenBranch: typedThen,
+          elseBranch: typedElse,
+          type: resultType
+        )
+      } else {
+        return .ifPatternExpression(
+          subject: typedSubject,
+          pattern: typedPattern,
+          bindings: bindings,
+          thenBranch: typedThen,
+          elseBranch: nil,
+          type: .void
+        )
+      }
 
     case .whileExpression(let condition, let body):
       let typedCondition = try inferTypedExpression(condition)
@@ -2987,6 +3039,32 @@ public class TypeChecker {
       let typedBody = try inferTypedExpression(body)
       return .whileExpression(
         condition: typedCondition,
+        body: typedBody,
+        type: .void
+      )
+      
+    case .whilePatternExpression(let subject, let pattern, let body, _):
+      // Type check the subject expression
+      let typedSubject = try inferTypedExpression(subject)
+      
+      // Check the pattern and collect variable bindings
+      let (typedPattern, bindings) = try checkPattern(pattern, subjectType: typedSubject.type)
+      
+      // Type check the body with bindings in scope
+      loopDepth += 1
+      defer { loopDepth -= 1 }
+      
+      let typedBody = try withNewScope {
+        for (name, mutable, type) in bindings {
+          currentScope.define(name, type, mutable: mutable)
+        }
+        return try inferTypedExpression(body)
+      }
+      
+      return .whilePatternExpression(
+        subject: typedSubject,
+        pattern: typedPattern,
+        bindings: bindings,
         body: typedBody,
         type: .void
       )
@@ -4824,13 +4902,17 @@ public class TypeChecker {
       throw SemanticError(.generic(
         "For loop pattern must be exhaustive for element type \(elementType). Use a simple variable binding."
       ), line: currentLine)
-    case .booleanLiteral, .integerLiteral, .stringLiteral:
+    case .booleanLiteral, .integerLiteral, .stringLiteral, .negativeIntegerLiteral:
       throw SemanticError(.generic(
         "For loop pattern must be exhaustive. Literal patterns are not exhaustive."
       ), line: currentLine)
-    case .rangePattern:
+    case .comparisonPattern:
       throw SemanticError(.generic(
-        "For loop pattern must be exhaustive. Range patterns are not exhaustive."
+        "For loop pattern must be exhaustive. Comparison patterns are not exhaustive."
+      ), line: currentLine)
+    case .andPattern, .orPattern, .notPattern:
+      throw SemanticError(.generic(
+        "For loop pattern must be exhaustive. Pattern combinators are not exhaustive."
       ), line: currentLine)
     }
   }
@@ -5017,6 +5099,8 @@ public class TypeChecker {
       return .booleanLiteral(value: value)
     case .integerLiteral(let value, _, _):
       return .integerLiteral(value: value)
+    case .negativeIntegerLiteral(let value, _, _):
+      return .integerLiteral(value: "-\(value)")
     case .stringLiteral(let value, _):
       return .stringLiteral(value: value)
     case .unionCase(let caseName, let elements, _):
@@ -5026,9 +5110,28 @@ public class TypeChecker {
         try convertPatternToTypedPattern(elem, expectedType: .void)
       }
       return .unionCase(caseName: caseName, tagIndex: 0, elements: typedElements)
-    case .rangePattern(let op, let left, let right, _):
-      let typedRangeExpr = try inferRangeExpression(operator: op, left: left, right: right)
-      return .rangePattern(rangeExpr: typedRangeExpr)
+    case .comparisonPattern(let op, let value, _, _):
+      // Parse the integer value
+      let intValue: Int64
+      if value.hasPrefix("-") {
+        let positiveValue = String(value.dropFirst())
+        intValue = -(Int64(positiveValue) ?? 0)
+      } else {
+        intValue = Int64(value) ?? 0
+      }
+      return .comparisonPattern(operator: op, value: intValue)
+    case .andPattern(let left, let right, _):
+      return .andPattern(
+        left: try convertPatternToTypedPattern(left, expectedType: expectedType),
+        right: try convertPatternToTypedPattern(right, expectedType: expectedType)
+      )
+    case .orPattern(let left, let right, _):
+      return .orPattern(
+        left: try convertPatternToTypedPattern(left, expectedType: expectedType),
+        right: try convertPatternToTypedPattern(right, expectedType: expectedType)
+      )
+    case .notPattern(let inner, _):
+      return .notPattern(pattern: try convertPatternToTypedPattern(inner, expectedType: expectedType))
     }
   }
 
@@ -5037,7 +5140,7 @@ public class TypeChecker {
     switch pattern {
     case .variable(let name, let mutable, _):
       currentScope.define(name, type, mutable: mutable)
-    case .wildcard, .booleanLiteral, .integerLiteral, .stringLiteral:
+    case .wildcard, .booleanLiteral, .integerLiteral, .stringLiteral, .negativeIntegerLiteral:
       // No variables to bind
       break
     case .unionCase(_, let elements, _):
@@ -5046,8 +5149,18 @@ public class TypeChecker {
       for elem in elements {
         try bindPatternVariables(pattern: elem, type: .void)
       }
-    case .rangePattern:
-      // Range patterns don't bind any variables
+    case .comparisonPattern:
+      // Comparison patterns don't bind any variables
+      break
+    case .andPattern(let left, let right, _):
+      try bindPatternVariables(pattern: left, type: type)
+      try bindPatternVariables(pattern: right, type: type)
+    case .orPattern(let left, _, _):
+      // For or patterns, both branches must bind the same variables
+      // We only need to bind from one branch (they should be identical)
+      try bindPatternVariables(pattern: left, type: type)
+    case .notPattern:
+      // Not patterns cannot bind variables
       break
     }
   }
@@ -5873,6 +5986,30 @@ public class TypeChecker {
         throw SemanticError.typeMismatch(expected: expectedType.description, got: subjectType.description)
       }
       return (.integerLiteral(value: val), [])
+      
+    case .negativeIntegerLiteral(let val, let suffix, let span):
+      // Negative integer literal pattern - verify subject is integer type
+      let expectedType: Type
+      if let suffix = suffix {
+        switch suffix {
+        case .i: expectedType = .int
+        case .i8: expectedType = .int8
+        case .i16: expectedType = .int16
+        case .i32: expectedType = .int32
+        case .i64: expectedType = .int64
+        case .u, .u8, .u16, .u32, .u64:
+          throw SemanticError(.generic("Negative integer literal cannot have unsigned suffix"), span: span)
+        case .f32, .f64:
+          throw SemanticError.typeMismatch(expected: "integer type", got: suffix.rawValue)
+        }
+      } else {
+        expectedType = .int
+      }
+      if subjectType != expectedType {
+        throw SemanticError.typeMismatch(expected: expectedType.description, got: subjectType.description)
+      }
+      // Store as negative value string
+      return (.integerLiteral(value: "-\(val)"), [])
 
     case .booleanLiteral(let val, _):
       if subjectType != .bool {
@@ -5967,24 +6104,109 @@ public class TypeChecker {
         .unionCase(caseName: caseName, tagIndex: caseIndex, elements: typedSubPatterns), bindings
       )
       
-    case .rangePattern(let op, let left, let right, let span):
-      // Range patterns are desugared to a contains check
-      // First, infer the range expression to get a typed Range value
-      let typedRangeExpr = try inferRangeExpression(operator: op, left: left, right: right)
+    case .comparisonPattern(let op, let value, let suffix, let span):
+      // Comparison patterns only support integer types
+      if !subjectType.isIntegerType {
+        throw SemanticError(.generic(
+          "Comparison patterns only support integer types, got '\(subjectType)'"
+        ), span: span)
+      }
       
-      // Verify the range element type matches the subject type
-      if case .genericUnion(let template, let args) = typedRangeExpr.type, template == "Range" {
-        if args.count == 1 && args[0] != subjectType {
-          throw SemanticError(.typeMismatch(expected: subjectType.description, got: args[0].description), span: span)
+      // Parse the integer value
+      let intValue: Int64
+      if value.hasPrefix("-") {
+        let positiveValue = String(value.dropFirst())
+        guard let parsed = Int64(positiveValue) else {
+          throw SemanticError(.generic("Invalid integer literal in comparison pattern: \(value)"), span: span)
+        }
+        intValue = -parsed
+      } else {
+        guard let parsed = Int64(value) else {
+          throw SemanticError(.generic("Invalid integer literal in comparison pattern: \(value)"), span: span)
+        }
+        intValue = parsed
+      }
+      
+      // Verify suffix matches subject type if provided
+      if let suffix = suffix {
+        let expectedType: Type
+        switch suffix {
+        case .i: expectedType = .int
+        case .i8: expectedType = .int8
+        case .i16: expectedType = .int16
+        case .i32: expectedType = .int32
+        case .i64: expectedType = .int64
+        case .u: expectedType = .uint
+        case .u8: expectedType = .uint8
+        case .u16: expectedType = .uint16
+        case .u32: expectedType = .uint32
+        case .u64: expectedType = .uint64
+        case .f32, .f64:
+          throw SemanticError(.generic("Comparison patterns do not support float types"), span: span)
+        }
+        if subjectType != expectedType {
+          throw SemanticError.typeMismatch(expected: expectedType.description, got: subjectType.description)
         }
       }
       
-      // Range patterns only support integer types
-      if !subjectType.isIntegerType {
-        throw SemanticError(.generic("Range patterns only support integer types, got '\(subjectType)'"), span: span)
+      return (.comparisonPattern(operator: op, value: intValue), [])
+      
+    case .andPattern(let left, let right, let span):
+      let (typedLeft, leftBindings) = try checkPattern(left, subjectType: subjectType)
+      let (typedRight, rightBindings) = try checkPattern(right, subjectType: subjectType)
+      
+      // and pattern cannot bind the same variable name in both branches
+      let leftNames = Set(leftBindings.map { $0.0 })
+      let rightNames = Set(rightBindings.map { $0.0 })
+      let overlap = leftNames.intersection(rightNames)
+      
+      if !overlap.isEmpty {
+        throw SemanticError(.generic(
+          "And pattern cannot bind the same variable in both branches: \(overlap.sorted().joined(separator: ", "))"
+        ), span: span)
       }
       
-      return (.rangePattern(rangeExpr: typedRangeExpr), bindings)
+      return (.andPattern(left: typedLeft, right: typedRight), leftBindings + rightBindings)
+      
+    case .orPattern(let left, let right, let span):
+      let (typedLeft, leftBindings) = try checkPattern(left, subjectType: subjectType)
+      let (typedRight, rightBindings) = try checkPattern(right, subjectType: subjectType)
+      
+      // or pattern branches must bind the same variables
+      let leftNames = Set(leftBindings.map { $0.0 })
+      let rightNames = Set(rightBindings.map { $0.0 })
+      
+      if leftNames != rightNames {
+        throw SemanticError(.generic(
+          "Or pattern branches must bind the same variables. Left binds: {\(leftNames.sorted().joined(separator: ", "))}, Right binds: {\(rightNames.sorted().joined(separator: ", "))}"
+        ), span: span)
+      }
+      
+      // Check type consistency for bindings
+      for (name, mutable, leftType) in leftBindings {
+        if let (_, _, rightType) = rightBindings.first(where: { $0.0 == name }) {
+          if leftType != rightType {
+            throw SemanticError(.typeMismatch(
+              expected: leftType.description,
+              got: rightType.description
+            ), span: span)
+          }
+        }
+      }
+      
+      return (.orPattern(left: typedLeft, right: typedRight), leftBindings)
+      
+    case .notPattern(let innerPattern, let span):
+      let (typedPattern, innerBindings) = try checkPattern(innerPattern, subjectType: subjectType)
+      
+      // not pattern cannot contain variable bindings
+      if !innerBindings.isEmpty {
+        throw SemanticError(.generic(
+          "Not pattern cannot contain variable bindings"
+        ), span: span)
+      }
+      
+      return (.notPattern(pattern: typedPattern), [])
     }
   }
 

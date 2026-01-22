@@ -97,8 +97,17 @@ extension ExhaustivenessChecker {
         switch pattern {
         case .wildcard, .variable:
             return true
-        case .rangePattern:
-            // Range patterns are not catchall - they only match values within the range
+        case .comparisonPattern:
+            // Comparison patterns are not catchall - they only match values within the comparison
+            return false
+        case .andPattern(let left, let right):
+            // And pattern is catchall only if both sub-patterns are catchall
+            return isCatchallPattern(left) && isCatchallPattern(right)
+        case .orPattern(let left, let right):
+            // Or pattern is catchall if either sub-pattern is catchall
+            return isCatchallPattern(left) || isCatchallPattern(right)
+        case .notPattern:
+            // Not patterns are never catchall (they exclude values)
             return false
         default:
             return false

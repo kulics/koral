@@ -468,6 +468,46 @@ public func printAST(_ node: ASTNode) {
           }
         }
       }
+      
+    case .ifPatternExpression(let subject, let pattern, let thenBranch, let elseBranch, _):
+      print("\(indent)IfPatternExpression:")
+      print("\(indent)  Subject:")
+      withIndent {
+        withIndent {
+          printExpression(subject)
+        }
+      }
+      print("\(indent)  Pattern: \(pattern)")
+      print("\(indent)  ThenBranch:")
+      withIndent {
+        withIndent {
+          printExpression(thenBranch)
+        }
+      }
+      if let elseBranch = elseBranch {
+        print("\(indent)  ElseBranch:")
+        withIndent {
+          withIndent {
+            printExpression(elseBranch)
+          }
+        }
+      }
+      
+    case .whilePatternExpression(let subject, let pattern, let body, _):
+      print("\(indent)WhilePatternExpression:")
+      print("\(indent)  Subject:")
+      withIndent {
+        withIndent {
+          printExpression(subject)
+        }
+      }
+      print("\(indent)  Pattern: \(pattern)")
+      print("\(indent)  Body:")
+      withIndent {
+        withIndent {
+          printExpression(body)
+        }
+      }
     }
   }
 

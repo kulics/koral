@@ -429,6 +429,42 @@ public func printTypedAST(_ node: TypedProgram) {
           }
         }
       }
+      
+    case .ifPatternExpression(let subject, let pattern, let bindings, let thenBranch, let elseBranch, let type):
+      print("\(indent)IfPatternExpression: \(type)")
+      withIndent {
+        print("\(indent)Subject:")
+        withIndent {
+          printTypedExpression(subject)
+        }
+        print("\(indent)Pattern: \(pattern)")
+        print("\(indent)Bindings: \(bindings.map { "\($0.0): \($0.2)" }.joined(separator: ", "))")
+        print("\(indent)Then:")
+        withIndent {
+          printTypedExpression(thenBranch)
+        }
+        if let elseBranch = elseBranch {
+          print("\(indent)Else:")
+          withIndent {
+            printTypedExpression(elseBranch)
+          }
+        }
+      }
+      
+    case .whilePatternExpression(let subject, let pattern, let bindings, let body, let type):
+      print("\(indent)WhilePatternExpression: \(type)")
+      withIndent {
+        print("\(indent)Subject:")
+        withIndent {
+          printTypedExpression(subject)
+        }
+        print("\(indent)Pattern: \(pattern)")
+        print("\(indent)Bindings: \(bindings.map { "\($0.0): \($0.2)" }.joined(separator: ", "))")
+        print("\(indent)Body:")
+        withIndent {
+          printTypedExpression(body)
+        }
+      }
     }
   }
 

@@ -384,6 +384,25 @@ public class CodeGen {
       
     case .staticMethodCall(let baseType, let methodName, let typeArgs, _, _):
       fatalError("CodeGen error: staticMethodCall '\(methodName)' on type '\(baseType)' with type args \(typeArgs.map { $0.description }.joined(separator: ", ")) should be resolved before code generation. Context: \(context)")
+      
+    case .ifPatternExpression(let subject, let pattern, let bindings, let thenBranch, let elseBranch, _):
+      validateExpression(subject, context: "\(context) -> if pattern subject")
+      validatePattern(pattern, context: "\(context) -> if pattern")
+      for (name, _, type) in bindings {
+        assertTypeResolved(type, context: "\(context) -> if pattern binding '\(name)'")
+      }
+      validateExpression(thenBranch, context: "\(context) -> if pattern then")
+      if let elseBranch = elseBranch {
+        validateExpression(elseBranch, context: "\(context) -> if pattern else")
+      }
+      
+    case .whilePatternExpression(let subject, let pattern, let bindings, let body, _):
+      validateExpression(subject, context: "\(context) -> while pattern subject")
+      validatePattern(pattern, context: "\(context) -> while pattern")
+      for (name, _, type) in bindings {
+        assertTypeResolved(type, context: "\(context) -> while pattern binding '\(name)'")
+      }
+      validateExpression(body, context: "\(context) -> while pattern body")
     }
   }
   
@@ -398,8 +417,17 @@ public class CodeGen {
       for element in elements {
         validatePattern(element, context: "\(context) -> union case element")
       }
-    case .rangePattern(let rangeExpr):
-      validateExpression(rangeExpr, context: "\(context) -> range pattern")
+    case .comparisonPattern:
+      // Comparison patterns don't have types to validate
+      break
+    case .andPattern(let left, let right):
+      validatePattern(left, context: "\(context) -> and pattern left")
+      validatePattern(right, context: "\(context) -> and pattern right")
+    case .orPattern(let left, let right):
+      validatePattern(left, context: "\(context) -> or pattern left")
+      validatePattern(right, context: "\(context) -> or pattern right")
+    case .notPattern(let inner):
+      validatePattern(inner, context: "\(context) -> not pattern inner")
     }
   }
   
@@ -1404,6 +1432,191 @@ public class CodeGen {
         addIndent()
         buffer += "if (!\(conditionVar)) { goto \(endLabel); }\n"
         pushScope()
+        loopStack.append(LoopContext(startLabel: startLabel, endLabel: endLabel, scopeIndex: lifetimeScopeStack.count - 1))
+        _ = generateExpressionSSA(body)
+        loopStack.removeLast()
+        popScope()
+        addIndent()
+        buffer += "goto \(startLabel);\n"
+      }
+      addIndent()
+      buffer += "}\n"
+      addIndent()
+      buffer += "\(endLabel): {\n"
+      addIndent()
+      buffer += "}\n"
+      return ""
+      
+    case .ifPatternExpression(let subject, let pattern, let bindings, let thenBranch, let elseBranch, let type):
+      // Generate subject expression
+      let subjectVar = generateExpressionSSA(subject)
+      let subjectTemp = nextTemp() + "_subject"
+      addIndent()
+      buffer += "\(getCType(subject.type)) \(subjectTemp) = \(subjectVar);\n"
+      
+      // Generate pattern matching condition and bindings
+      let (prelude, _, condition, bindingCode, _) = 
+          generatePatternConditionAndBindings(pattern, subjectTemp, subject.type, isMove: false)
+      
+      // Output prelude
+      for p in prelude {
+        addIndent()
+        buffer += p
+      }
+      
+      if type == .void || type == .never {
+        addIndent()
+        buffer += "if (\(condition)) {\n"
+        withIndent {
+          pushScope()
+          // Generate bindings
+          for b in bindingCode {
+            addIndent()
+            buffer += b
+          }
+          // Register bound variables in scope
+          for (name, _, varType) in bindings {
+            registerVariable(name, varType)
+          }
+          _ = generateExpressionSSA(thenBranch)
+          popScope()
+        }
+        if let elseBranch = elseBranch {
+          addIndent()
+          buffer += "} else {\n"
+          withIndent {
+            pushScope()
+            _ = generateExpressionSSA(elseBranch)
+            popScope()
+          }
+        }
+        addIndent()
+        buffer += "}\n"
+        return ""
+      } else {
+        guard let elseBranch = elseBranch else {
+          fatalError("Non-void if pattern expression must have else branch")
+        }
+        let resultVar = nextTemp()
+        if type != .never {
+          addIndent()
+          buffer += "\(getCType(type)) \(resultVar);\n"
+        }
+        
+        addIndent()
+        buffer += "if (\(condition)) {\n"
+        withIndent {
+          pushScope()
+          // Generate bindings
+          for b in bindingCode {
+            addIndent()
+            buffer += b
+          }
+          // Register bound variables in scope
+          for (name, _, varType) in bindings {
+            registerVariable(name, varType)
+          }
+          let thenResult = generateExpressionSSA(thenBranch)
+          if type != .never && thenBranch.type != .never {
+            addIndent()
+            if case .structure(let decl) = type {
+              if thenBranch.valueCategory == .lvalue {
+                buffer += "\(resultVar) = __koral_\(decl.qualifiedName)_copy(&\(thenResult));\n"
+              } else {
+                buffer += "\(resultVar) = \(thenResult);\n"
+              }
+            } else if case .union(let decl) = type {
+              if thenBranch.valueCategory == .lvalue {
+                buffer += "\(resultVar) = __koral_\(decl.qualifiedName)_copy(&\(thenResult));\n"
+              } else {
+                buffer += "\(resultVar) = \(thenResult);\n"
+              }
+            } else if case .reference(_) = type {
+              buffer += "\(resultVar) = \(thenResult);\n"
+              if thenBranch.valueCategory == .lvalue {
+                addIndent()
+                buffer += "__koral_retain(\(resultVar).control);\n"
+              }
+            } else {
+              buffer += "\(resultVar) = \(thenResult);\n"
+            }
+          }
+          popScope()
+        }
+        addIndent()
+        buffer += "} else {\n"
+        withIndent {
+          pushScope()
+          let elseResult = generateExpressionSSA(elseBranch)
+          if type != .never && elseBranch.type != .never {
+            addIndent()
+            if case .structure(let decl) = type {
+              if elseBranch.valueCategory == .lvalue {
+                buffer += "\(resultVar) = __koral_\(decl.qualifiedName)_copy(&\(elseResult));\n"
+              } else {
+                buffer += "\(resultVar) = \(elseResult);\n"
+              }
+            } else if case .union(let decl) = type {
+              if elseBranch.valueCategory == .lvalue {
+                buffer += "\(resultVar) = __koral_\(decl.qualifiedName)_copy(&\(elseResult));\n"
+              } else {
+                buffer += "\(resultVar) = \(elseResult);\n"
+              }
+            } else if case .reference(_) = type {
+              buffer += "\(resultVar) = \(elseResult);\n"
+              if elseBranch.valueCategory == .lvalue {
+                addIndent()
+                buffer += "__koral_retain(\(resultVar).control);\n"
+              }
+            } else {
+              buffer += "\(resultVar) = \(elseResult);\n"
+            }
+          }
+          popScope()
+        }
+        addIndent()
+        buffer += "}\n"
+        return resultVar
+      }
+      
+    case .whilePatternExpression(let subject, let pattern, let bindings, let body, _):
+      let labelPrefix = nextTemp()
+      let startLabel = "\(labelPrefix)_start"
+      let endLabel = "\(labelPrefix)_end"
+      
+      addIndent()
+      buffer += "\(startLabel): {\n"
+      withIndent {
+        // Generate subject expression (evaluated each iteration)
+        let subjectVar = generateExpressionSSA(subject)
+        let subjectTemp = nextTemp() + "_subject"
+        addIndent()
+        buffer += "\(getCType(subject.type)) \(subjectTemp) = \(subjectVar);\n"
+        
+        // Generate pattern matching condition and bindings
+        let (prelude, _, condition, bindingCode, _) = 
+            generatePatternConditionAndBindings(pattern, subjectTemp, subject.type, isMove: false)
+        
+        // Output prelude
+        for p in prelude {
+          addIndent()
+          buffer += p
+        }
+        
+        addIndent()
+        buffer += "if (!(\(condition))) { goto \(endLabel); }\n"
+        
+        pushScope()
+        // Generate bindings
+        for b in bindingCode {
+          addIndent()
+          buffer += b
+        }
+        // Register bound variables in scope
+        for (name, _, varType) in bindings {
+          registerVariable(name, varType)
+        }
+        
         loopStack.append(LoopContext(startLabel: startLabel, endLabel: endLabel, scopeIndex: lifetimeScopeStack.count - 1))
         _ = generateExpressionSSA(body)
         loopStack.removeLast()
@@ -2579,119 +2792,97 @@ public class CodeGen {
         }
         return (prelude, preludeVars, condition, bindings, vars)
         
-      case .rangePattern(let rangeExpr):
-        // Range pattern is desugared to direct comparison checks
-        // Since T implements Comparable, we can use comparison operators directly
-        
-        // The rangeExpr is a unionConstruction for Range type
-        // We need to extract the bounds and generate appropriate comparisons
-        guard case .unionConstruction(_, let caseName, let arguments) = rangeExpr else {
-          fatalError("Range pattern must be a union construction")
+      case .comparisonPattern(let op, let value):
+        // Comparison pattern generates a simple comparison
+        let opStr: String
+        switch op {
+        case .greater: opStr = ">"
+        case .less: opStr = "<"
+        case .greaterEqual: opStr = ">="
+        case .lessEqual: opStr = "<="
         }
         
-        var prelude: [String] = []
-        var preludeVars: [(String, Type)] = []
+        let condition = "(\(path) \(opStr) \(value))"
+        return ([], [], condition, [], [])
         
-        // Generate comparison based on the Range case
-        let condition: String
-        switch caseName {
-        case "ClosedRange":
-          // start <= x <= end
-          guard arguments.count == 2 else { fatalError("ClosedRange requires 2 arguments") }
-          let startVar = nextTemp() + "_start"
-          let endVar = nextTemp() + "_end"
-          let startCode = generateExpressionSSA(arguments[0])
-          let endCode = generateExpressionSSA(arguments[1])
-          prelude.append("\(getCType(arguments[0].type)) \(startVar) = \(startCode);\n")
-          prelude.append("\(getCType(arguments[1].type)) \(endVar) = \(endCode);\n")
-          preludeVars.append((startVar, arguments[0].type))
-          preludeVars.append((endVar, arguments[1].type))
-          condition = "(\(startVar) <= \(path) && \(path) <= \(endVar))"
-          
-        case "ClosedOpenRange":
-          // start <= x < end
-          guard arguments.count == 2 else { fatalError("ClosedOpenRange requires 2 arguments") }
-          let startVar = nextTemp() + "_start"
-          let endVar = nextTemp() + "_end"
-          let startCode = generateExpressionSSA(arguments[0])
-          let endCode = generateExpressionSSA(arguments[1])
-          prelude.append("\(getCType(arguments[0].type)) \(startVar) = \(startCode);\n")
-          prelude.append("\(getCType(arguments[1].type)) \(endVar) = \(endCode);\n")
-          preludeVars.append((startVar, arguments[0].type))
-          preludeVars.append((endVar, arguments[1].type))
-          condition = "(\(startVar) <= \(path) && \(path) < \(endVar))"
-          
-        case "OpenClosedRange":
-          // start < x <= end
-          guard arguments.count == 2 else { fatalError("OpenClosedRange requires 2 arguments") }
-          let startVar = nextTemp() + "_start"
-          let endVar = nextTemp() + "_end"
-          let startCode = generateExpressionSSA(arguments[0])
-          let endCode = generateExpressionSSA(arguments[1])
-          prelude.append("\(getCType(arguments[0].type)) \(startVar) = \(startCode);\n")
-          prelude.append("\(getCType(arguments[1].type)) \(endVar) = \(endCode);\n")
-          preludeVars.append((startVar, arguments[0].type))
-          preludeVars.append((endVar, arguments[1].type))
-          condition = "(\(startVar) < \(path) && \(path) <= \(endVar))"
-          
-        case "OpenRange":
-          // start < x < end
-          guard arguments.count == 2 else { fatalError("OpenRange requires 2 arguments") }
-          let startVar = nextTemp() + "_start"
-          let endVar = nextTemp() + "_end"
-          let startCode = generateExpressionSSA(arguments[0])
-          let endCode = generateExpressionSSA(arguments[1])
-          prelude.append("\(getCType(arguments[0].type)) \(startVar) = \(startCode);\n")
-          prelude.append("\(getCType(arguments[1].type)) \(endVar) = \(endCode);\n")
-          preludeVars.append((startVar, arguments[0].type))
-          preludeVars.append((endVar, arguments[1].type))
-          condition = "(\(startVar) < \(path) && \(path) < \(endVar))"
-          
-        case "FromRange":
-          // start <= x
-          guard arguments.count == 1 else { fatalError("FromRange requires 1 argument") }
-          let startVar = nextTemp() + "_start"
-          let startCode = generateExpressionSSA(arguments[0])
-          prelude.append("\(getCType(arguments[0].type)) \(startVar) = \(startCode);\n")
-          preludeVars.append((startVar, arguments[0].type))
-          condition = "(\(startVar) <= \(path))"
-          
-        case "FromOpenRange":
-          // start < x
-          guard arguments.count == 1 else { fatalError("FromOpenRange requires 1 argument") }
-          let startVar = nextTemp() + "_start"
-          let startCode = generateExpressionSSA(arguments[0])
-          prelude.append("\(getCType(arguments[0].type)) \(startVar) = \(startCode);\n")
-          preludeVars.append((startVar, arguments[0].type))
-          condition = "(\(startVar) < \(path))"
-          
-        case "ToRange":
-          // x <= end
-          guard arguments.count == 1 else { fatalError("ToRange requires 1 argument") }
-          let endVar = nextTemp() + "_end"
-          let endCode = generateExpressionSSA(arguments[0])
-          prelude.append("\(getCType(arguments[0].type)) \(endVar) = \(endCode);\n")
-          preludeVars.append((endVar, arguments[0].type))
-          condition = "(\(path) <= \(endVar))"
-          
-        case "ToOpenRange":
-          // x < end
-          guard arguments.count == 1 else { fatalError("ToOpenRange requires 1 argument") }
-          let endVar = nextTemp() + "_end"
-          let endCode = generateExpressionSSA(arguments[0])
-          prelude.append("\(getCType(arguments[0].type)) \(endVar) = \(endCode);\n")
-          preludeVars.append((endVar, arguments[0].type))
-          condition = "(\(path) < \(endVar))"
-          
-        case "FullRange":
-          // Always matches (min <= x <= max)
-          condition = "1"
-          
-        default:
-          fatalError("Unknown Range case: \(caseName)")
+      case .andPattern(let left, let right):
+        // And pattern: both sub-patterns must match
+        let (leftPre, leftPreVars, leftCond, leftBind, leftVars) = 
+            generatePatternConditionAndBindings(left, path, type, isMove: isMove)
+        let (rightPre, rightPreVars, rightCond, rightBind, rightVars) = 
+            generatePatternConditionAndBindings(right, path, type, isMove: isMove)
+        
+        let condition = "(\(leftCond)) && (\(rightCond))"
+        return (
+            leftPre + rightPre,
+            leftPreVars + rightPreVars,
+            condition,
+            leftBind + rightBind,
+            leftVars + rightVars
+        )
+        
+      case .orPattern(let left, let right):
+        // Or pattern: either sub-pattern must match
+        // For bindings, we need to handle them specially since both branches bind the same variables
+        let (leftPre, leftPreVars, leftCond, leftBind, leftVars) = 
+            generatePatternConditionAndBindings(left, path, type, isMove: isMove)
+        let (rightPre, rightPreVars, rightCond, rightBind, rightVars) = 
+            generatePatternConditionAndBindings(right, path, type, isMove: isMove)
+        
+        let condition = "(\(leftCond)) || (\(rightCond))"
+        
+        // For or patterns with bindings, we need to generate conditional bindings
+        // The bindings should be the same in both branches (enforced by type checker)
+        // We use the left branch bindings but they will be set by whichever branch matches
+        // Since both branches bind the same variables, we can use either set
+        // The actual binding code will be generated based on which branch matched
+        
+        // If there are bindings, we need to generate conditional binding code
+        var combinedBind: [String] = []
+        if !leftVars.isEmpty {
+            // Generate conditional bindings using ternary operator
+            // First, we need to evaluate which branch matched
+            let matchLeftVar = nextTemp() + "_match_left"
+            combinedBind.append("int \(matchLeftVar) = \(leftCond);\n")
+            
+            // For each variable, generate conditional assignment
+            for (i, (name, varType)) in leftVars.enumerated() {
+                let cType = getCType(varType)
+                combinedBind.append("\(cType) \(name);\n")
+                
+                // Get the binding expressions from left and right
+                // This is simplified - in practice we'd need to extract the actual binding expressions
+                // For now, we assume the binding is just the path (for simple variable patterns)
+                if i < rightVars.count {
+                    // Both branches have this variable - use conditional
+                    combinedBind.append("if (\(matchLeftVar)) {\n")
+                    combinedBind.append(contentsOf: leftBind.filter { $0.contains(name) })
+                    combinedBind.append("} else {\n")
+                    combinedBind.append(contentsOf: rightBind.filter { $0.contains(name) })
+                    combinedBind.append("}\n")
+                }
+            }
         }
         
-        return (prelude, preludeVars, condition, [], [])
+        // If no bindings, just use empty bindings
+        let finalBind = leftVars.isEmpty ? [] : combinedBind
+        
+        return (
+            leftPre + rightPre,
+            leftPreVars + rightPreVars,
+            condition,
+            finalBind,
+            leftVars
+        )
+        
+      case .notPattern(let pattern):
+        // Not pattern: negate the sub-pattern condition
+        let (pre, preVars, cond, _, _) = 
+            generatePatternConditionAndBindings(pattern, path, type, isMove: isMove)
+        
+        let condition = "!(\(cond))"
+        // Not patterns cannot have bindings (enforced by type checker)
+        return (pre, preVars, condition, [], [])
       }
     }
 

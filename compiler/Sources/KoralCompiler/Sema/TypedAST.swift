@@ -159,6 +159,20 @@ public indirect enum TypedExpressionNode {
   case ifExpression(
     condition: TypedExpressionNode, thenBranch: TypedExpressionNode,
     elseBranch: TypedExpressionNode?, type: Type)
+  /// Conditional pattern matching expression (if expr is pattern then body else ...)
+  /// - subject: The expression being matched against
+  /// - pattern: The pattern to match
+  /// - bindings: Variable bindings introduced by the pattern (name, isMutable, type)
+  /// - thenBranch: Expression to evaluate when pattern matches
+  /// - elseBranch: Optional expression to evaluate when pattern doesn't match
+  /// - type: The result type of the expression
+  case ifPatternExpression(
+    subject: TypedExpressionNode,
+    pattern: TypedPattern,
+    bindings: [(String, Bool, Type)],
+    thenBranch: TypedExpressionNode,
+    elseBranch: TypedExpressionNode?,
+    type: Type)
   case call(callee: TypedExpressionNode, arguments: [TypedExpressionNode], type: Type)
   case genericCall(functionName: String, typeArgs: [Type], arguments: [TypedExpressionNode], type: Type)
   case methodReference(base: TypedExpressionNode, method: Symbol, typeArgs: [Type]?, type: Type)
@@ -170,6 +184,18 @@ public indirect enum TypedExpressionNode {
   /// - type: Return type
   case staticMethodCall(baseType: Type, methodName: String, typeArgs: [Type], arguments: [TypedExpressionNode], type: Type)
   case whileExpression(condition: TypedExpressionNode, body: TypedExpressionNode, type: Type)
+  /// Loop pattern matching expression (while expr is pattern then body)
+  /// - subject: The expression being matched against in each iteration
+  /// - pattern: The pattern to match
+  /// - bindings: Variable bindings introduced by the pattern (name, isMutable, type)
+  /// - body: Expression to evaluate when pattern matches
+  /// - type: The result type of the expression (always Void)
+  case whilePatternExpression(
+    subject: TypedExpressionNode,
+    pattern: TypedPattern,
+    bindings: [(String, Bool, Type)],
+    body: TypedExpressionNode,
+    type: Type)
   case typeConstruction(identifier: Symbol, typeArgs: [Type]?, arguments: [TypedExpressionNode], type: Type)
   case memberPath(source: TypedExpressionNode, path: [Symbol])
   case subscriptExpression(
@@ -257,9 +283,16 @@ public indirect enum TypedPattern: CustomStringConvertible {
   case wildcard
   case variable(symbol: Symbol)
   case unionCase(caseName: String, tagIndex: Int, elements: [TypedPattern])
-  /// Range pattern - desugared to a contains check at code generation
-  /// - rangeExpr: The typed range expression to check against
-  case rangePattern(rangeExpr: TypedExpressionNode)
+  
+  // Comparison pattern - matches values based on comparison operators
+  // - operator: The comparison operator (>, <, >=, <=)
+  // - value: The integer value to compare against
+  case comparisonPattern(operator: ComparisonPatternOperator, value: Int64)
+  
+  // Combination patterns for logical composition of patterns
+  case andPattern(left: TypedPattern, right: TypedPattern)
+  case orPattern(left: TypedPattern, right: TypedPattern)
+  case notPattern(pattern: TypedPattern)
 
   public var description: String {
     switch self {
@@ -271,8 +304,21 @@ public indirect enum TypedPattern: CustomStringConvertible {
     case .unionCase(let name, _, let elements):
       let args = elements.map { $0.description }.joined(separator: ", ")
       return ".\(name)(\(args))"
-    case .rangePattern(let rangeExpr):
-      return "range(\(rangeExpr.type))"
+    case .comparisonPattern(let op, let value):
+      let opStr: String
+      switch op {
+      case .greater: opStr = ">"
+      case .less: opStr = "<"
+      case .greaterEqual: opStr = ">="
+      case .lessEqual: opStr = "<="
+      }
+      return "\(opStr) \(value)"
+    case .andPattern(let left, let right):
+      return "(\(left) and \(right))"
+    case .orPattern(let left, let right):
+      return "(\(left) or \(right))"
+    case .notPattern(let pattern):
+      return "not \(pattern)"
     }
   }
 }
@@ -299,11 +345,13 @@ extension TypedExpressionNode {
       .referenceExpression(_, let type),
       .blockExpression(_, _, let type),
       .ifExpression(_, _, _, let type),
+      .ifPatternExpression(_, _, _, _, _, let type),
       .call(_, _, let type),
       .genericCall(_, _, _, let type),
       .methodReference(_, _, _, let type),
       .staticMethodCall(_, _, _, _, let type),
       .whileExpression(_, _, let type),
+      .whilePatternExpression(_, _, _, _, let type),
       .typeConstruction(_, _, _, let type),
       .unionConstruction(let type, _, _),
       .letExpression(_, _, _, let type):

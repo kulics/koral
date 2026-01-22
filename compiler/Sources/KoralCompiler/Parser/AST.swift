@@ -310,6 +310,14 @@ public enum RangeOperator {
   case toOpen        // ...<  ...<b  : min <= x < end
   case full          // ....  ....   : min <= x <= max
 }
+
+/// Comparison pattern operator types for comparison patterns
+public enum ComparisonPatternOperator {
+  case greater       // >
+  case less          // <
+  case greaterEqual  // >=
+  case lessEqual     // <=
+}
 public indirect enum ExpressionNode {
   case integerLiteral(String, NumericSuffix?)  // Store as string with optional suffix
   case floatLiteral(String, NumericSuffix?)    // Store as string with optional suffix
@@ -332,8 +340,23 @@ public indirect enum ExpressionNode {
   case blockExpression(statements: [StatementNode], finalExpression: ExpressionNode?)
   case ifExpression(
     condition: ExpressionNode, thenBranch: ExpressionNode, elseBranch: ExpressionNode?)
+  /// Conditional pattern matching expression: if expr is pattern then body [else elseBranch]
+  case ifPatternExpression(
+    subject: ExpressionNode,
+    pattern: PatternNode,
+    thenBranch: ExpressionNode,
+    elseBranch: ExpressionNode?,
+    span: SourceSpan
+  )
   case call(callee: ExpressionNode, arguments: [ExpressionNode])
   case whileExpression(condition: ExpressionNode, body: ExpressionNode)
+  /// While pattern matching expression: while expr is pattern then body
+  case whilePatternExpression(
+    subject: ExpressionNode,
+    pattern: PatternNode,
+    body: ExpressionNode,
+    span: SourceSpan
+  )
   case letExpression(
     name: String, type: TypeNode?, value: ExpressionNode, mutable: Bool, body: ExpressionNode)
   // 连续成员访问聚合为路径
@@ -358,15 +381,23 @@ public indirect enum ExpressionNode {
 public indirect enum PatternNode: CustomStringConvertible {
   case booleanLiteral(value: Bool, span: SourceSpan)
   case integerLiteral(value: String, suffix: NumericSuffix?, span: SourceSpan)  // Store as string with optional suffix
+  /// Negative integer literal pattern for matching negative integers (e.g., -5)
+  case negativeIntegerLiteral(value: String, suffix: NumericSuffix?, span: SourceSpan)
   case stringLiteral(value: String, span: SourceSpan)
   case wildcard(span: SourceSpan)
   case variable(name: String, mutable: Bool, span: SourceSpan)
   case unionCase(caseName: String, elements: [PatternNode], span: SourceSpan)
-  /// Range pattern for matching values within a range
-  /// - operator: The range operator type (closed, closedOpen, etc.)
-  /// - left: Left bound (nil for ToRange, ToOpenRange)
-  /// - right: Right bound (nil for FromRange, FromOpenRange)
-  case rangePattern(operator: RangeOperator, left: ExpressionNode?, right: ExpressionNode?, span: SourceSpan)
+  /// Comparison pattern for matching values using comparison operators (e.g., > 5, <= 10)
+  /// - operator: The comparison operator (>, <, >=, <=)
+  /// - value: The integer literal value to compare against (stored as string)
+  /// - suffix: Optional numeric suffix for the integer literal
+  case comparisonPattern(operator: ComparisonPatternOperator, value: String, suffix: NumericSuffix?, span: SourceSpan)
+  /// And pattern for combining two patterns with logical AND
+  case andPattern(left: PatternNode, right: PatternNode, span: SourceSpan)
+  /// Or pattern for combining two patterns with logical OR
+  case orPattern(left: PatternNode, right: PatternNode, span: SourceSpan)
+  /// Not pattern for negating a pattern
+  case notPattern(pattern: PatternNode, span: SourceSpan)
 
   public var description: String {
     switch self {
@@ -376,26 +407,35 @@ public indirect enum PatternNode: CustomStringConvertible {
         return "\(value)\(suffix)"
       }
       return "\(value)"
+    case .negativeIntegerLiteral(let value, let suffix, _):
+      if let suffix = suffix {
+        return "-\(value)\(suffix)"
+      }
+      return "-\(value)"
     case .stringLiteral(let value, _): return "\"\(value)\""
     case .wildcard: return "_"
     case .variable(let name, let mutable, _): return mutable ? "mut \(name)" : name
     case .unionCase(let name, let elements, _):
       let args = elements.map { $0.description }.joined(separator: ", ")
       return ".\(name)(\(args))"
-    case .rangePattern(let op, let left, let right, _):
-      let leftStr = left.map { "\($0)" } ?? ""
-      let rightStr = right.map { "\($0)" } ?? ""
+    case .comparisonPattern(let op, let value, let suffix, _):
+      let opStr: String
       switch op {
-      case .closed: return "\(leftStr)..\(rightStr)"
-      case .closedOpen: return "\(leftStr)..<\(rightStr)"
-      case .openClosed: return "\(leftStr)<..\(rightStr)"
-      case .open: return "\(leftStr)<..<\(rightStr)"
-      case .from: return "\(leftStr)..."
-      case .fromOpen: return "\(leftStr)<..."
-      case .to: return "...\(rightStr)"
-      case .toOpen: return "...<\(rightStr)"
-      case .full: return "...."
+      case .greater: opStr = ">"
+      case .less: opStr = "<"
+      case .greaterEqual: opStr = ">="
+      case .lessEqual: opStr = "<="
       }
+      if let suffix = suffix {
+        return "\(opStr) \(value)\(suffix)"
+      }
+      return "\(opStr) \(value)"
+    case .andPattern(let left, let right, _):
+      return "(\(left.description) and \(right.description))"
+    case .orPattern(let left, let right, _):
+      return "(\(left.description) or \(right.description))"
+    case .notPattern(let pattern, _):
+      return "not \(pattern.description)"
     }
   }
   
@@ -404,11 +444,15 @@ public indirect enum PatternNode: CustomStringConvertible {
     switch self {
     case .booleanLiteral(_, let span): return span
     case .integerLiteral(_, _, let span): return span
+    case .negativeIntegerLiteral(_, _, let span): return span
     case .stringLiteral(_, let span): return span
     case .wildcard(let span): return span
     case .variable(_, _, let span): return span
     case .unionCase(_, _, let span): return span
-    case .rangePattern(_, _, _, let span): return span
+    case .comparisonPattern(_, _, _, let span): return span
+    case .andPattern(_, _, let span): return span
+    case .orPattern(_, _, let span): return span
+    case .notPattern(_, let span): return span
     }
   }
   
