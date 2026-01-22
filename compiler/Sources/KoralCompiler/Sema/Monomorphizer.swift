@@ -1242,6 +1242,19 @@ public class Monomorphizer {
                 type: substituteType(type, substitution: substitution)
             )
             
+        case .ifPatternExpression(let subject, let pattern, let bindings, let thenBranch, let elseBranch, let type):
+            let newBindings = bindings.map { (name, mutable, bindType) in
+                (name, mutable, substituteType(bindType, substitution: substitution))
+            }
+            return .ifPatternExpression(
+                subject: substituteTypesInExpression(subject, substitution: substitution),
+                pattern: substituteTypesInPattern(pattern, substitution: substitution),
+                bindings: newBindings,
+                thenBranch: substituteTypesInExpression(thenBranch, substitution: substitution),
+                elseBranch: elseBranch.map { substituteTypesInExpression($0, substitution: substitution) },
+                type: substituteType(type, substitution: substitution)
+            )
+            
         case .call(let callee, let arguments, let type):
             let newCallee = substituteTypesInExpression(callee, substitution: substitution)
             let newArguments = arguments.map { substituteTypesInExpression($0, substitution: substitution) }
@@ -1415,6 +1428,18 @@ public class Monomorphizer {
         case .whileExpression(let condition, let body, let type):
             return .whileExpression(
                 condition: substituteTypesInExpression(condition, substitution: substitution),
+                body: substituteTypesInExpression(body, substitution: substitution),
+                type: substituteType(type, substitution: substitution)
+            )
+            
+        case .whilePatternExpression(let subject, let pattern, let bindings, let body, let type):
+            let newBindings = bindings.map { (name, mutable, bindType) in
+                (name, mutable, substituteType(bindType, substitution: substitution))
+            }
+            return .whilePatternExpression(
+                subject: substituteTypesInExpression(subject, substitution: substitution),
+                pattern: substituteTypesInPattern(pattern, substitution: substitution),
+                bindings: newBindings,
                 body: substituteTypesInExpression(body, substitution: substitution),
                 type: substituteType(type, substitution: substitution)
             )
@@ -1699,8 +1724,24 @@ public class Monomorphizer {
                 elements: elements.map { substituteTypesInPattern($0, substitution: substitution) }
             )
             
-        case .rangePattern(let rangeExpr):
-            return .rangePattern(rangeExpr: substituteTypesInExpression(rangeExpr, substitution: substitution))
+        case .comparisonPattern:
+            // Comparison patterns don't contain types to substitute
+            return pattern
+            
+        case .andPattern(let left, let right):
+            return .andPattern(
+                left: substituteTypesInPattern(left, substitution: substitution),
+                right: substituteTypesInPattern(right, substitution: substitution)
+            )
+            
+        case .orPattern(let left, let right):
+            return .orPattern(
+                left: substituteTypesInPattern(left, substitution: substitution),
+                right: substituteTypesInPattern(right, substitution: substitution)
+            )
+            
+        case .notPattern(let inner):
+            return .notPattern(pattern: substituteTypesInPattern(inner, substitution: substitution))
         }
     }
     
@@ -2260,6 +2301,19 @@ public class Monomorphizer {
                 type: resolveParameterizedType(type)
             )
             
+        case .ifPatternExpression(let subject, let pattern, let bindings, let thenBranch, let elseBranch, let type):
+            let newBindings = bindings.map { (name, mutable, bindType) in
+                (name, mutable, resolveParameterizedType(bindType))
+            }
+            return .ifPatternExpression(
+                subject: resolveTypesInExpression(subject),
+                pattern: resolveTypesInPattern(pattern),
+                bindings: newBindings,
+                thenBranch: resolveTypesInExpression(thenBranch),
+                elseBranch: elseBranch.map { resolveTypesInExpression($0) },
+                type: resolveParameterizedType(type)
+            )
+            
         case .call(let callee, let arguments, let type):
             let newCallee = resolveTypesInExpression(callee)
             let newArguments = arguments.map { resolveTypesInExpression($0) }
@@ -2376,6 +2430,18 @@ public class Monomorphizer {
         case .whileExpression(let condition, let body, let type):
             return .whileExpression(
                 condition: resolveTypesInExpression(condition),
+                body: resolveTypesInExpression(body),
+                type: resolveParameterizedType(type)
+            )
+            
+        case .whilePatternExpression(let subject, let pattern, let bindings, let body, let type):
+            let newBindings = bindings.map { (name, mutable, bindType) in
+                (name, mutable, resolveParameterizedType(bindType))
+            }
+            return .whilePatternExpression(
+                subject: resolveTypesInExpression(subject),
+                pattern: resolveTypesInPattern(pattern),
+                bindings: newBindings,
                 body: resolveTypesInExpression(body),
                 type: resolveParameterizedType(type)
             )
@@ -2645,8 +2711,24 @@ public class Monomorphizer {
                 elements: elements.map { resolveTypesInPattern($0) }
             )
             
-        case .rangePattern(let rangeExpr):
-            return .rangePattern(rangeExpr: resolveTypesInExpression(rangeExpr))
+        case .comparisonPattern:
+            // Comparison patterns don't contain types to resolve
+            return pattern
+            
+        case .andPattern(let left, let right):
+            return .andPattern(
+                left: resolveTypesInPattern(left),
+                right: resolveTypesInPattern(right)
+            )
+            
+        case .orPattern(let left, let right):
+            return .orPattern(
+                left: resolveTypesInPattern(left),
+                right: resolveTypesInPattern(right)
+            )
+            
+        case .notPattern(let inner):
+            return .notPattern(pattern: resolveTypesInPattern(inner))
         }
     }
     

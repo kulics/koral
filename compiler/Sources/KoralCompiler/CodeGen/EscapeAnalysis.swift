@@ -380,6 +380,16 @@ public class EscapeContext {
                 preAnalyzeExpression(elseBranch)
             }
             
+        case .ifPatternExpression(let subject, let pattern, _, let thenBranch, let elseBranch, _):
+            preAnalyzeExpression(subject)
+            preAnalyzePattern(pattern)
+            enterScope()
+            preAnalyzeExpression(thenBranch)
+            leaveScope()
+            if let elseBranch = elseBranch {
+                preAnalyzeExpression(elseBranch)
+            }
+            
         case .call(let callee, let arguments, _):
             preAnalyzeExpression(callee)
             for arg in arguments {
@@ -401,6 +411,13 @@ public class EscapeContext {
             
         case .whileExpression(let condition, let body, _):
             preAnalyzeExpression(condition)
+            enterScope()
+            preAnalyzeExpression(body)
+            leaveScope()
+            
+        case .whilePatternExpression(let subject, let pattern, _, let body, _):
+            preAnalyzeExpression(subject)
+            preAnalyzePattern(pattern)
             enterScope()
             preAnalyzeExpression(body)
             leaveScope()
@@ -493,8 +510,17 @@ public class EscapeContext {
             for element in elements {
                 preAnalyzePattern(element)
             }
-        case .rangePattern(let rangeExpr):
-            preAnalyzeExpression(rangeExpr)
+        case .comparisonPattern:
+            // Comparison patterns don't have expressions to analyze
+            break
+        case .andPattern(let left, let right):
+            preAnalyzePattern(left)
+            preAnalyzePattern(right)
+        case .orPattern(let left, let right):
+            preAnalyzePattern(left)
+            preAnalyzePattern(right)
+        case .notPattern(let inner):
+            preAnalyzePattern(inner)
         }
     }
     
@@ -589,6 +615,12 @@ public class EscapeContext {
             }
             
         case .ifExpression(_, let thenBranch, let elseBranch, _):
+            checkReturnEscape(thenBranch)
+            if let elseBranch = elseBranch {
+                checkReturnEscape(elseBranch)
+            }
+            
+        case .ifPatternExpression(_, _, _, let thenBranch, let elseBranch, _):
             checkReturnEscape(thenBranch)
             if let elseBranch = elseBranch {
                 checkReturnEscape(elseBranch)
