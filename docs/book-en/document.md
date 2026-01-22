@@ -402,12 +402,12 @@ Bitwise operators are mainly used to perform bitwise operations (AND, OR, XOR, N
 ```koral
 let a = 4;
 let b = 2;
-printLine( a bitand b );    // Bitwise AND
-printLine( a bitor b );     // Bitwise OR
-printLine( a bitxor b );    // Bitwise XOR
-printLine( bitnot a );      // Bitwise NOT
-printLine( a bitshl b );    // Left shift
-printLine( a bitshr b );    // Right shift
+printLine( a & b );    // Bitwise AND
+printLine( a | b );    // Bitwise OR
+printLine( a ^ b );    // Bitwise XOR
+printLine( ~a );       // Bitwise NOT
+printLine( a << b );   // Left shift
+printLine( a >> b );   // Right shift
 ```
 
 ### Range Operators
@@ -440,27 +440,27 @@ x %= 4;       // x = x % 4
 x **= 2;      // x = x ** 2 (Power)
 
 let mut y = 0b1100;
-y bitand= 0b1010; // y = y bitand 0b1010
-y bitor=  0b0001; // y = y bitor 0b0001
-y bitxor= 0b1111; // y = y bitxor 0b1111
-y bitshl= 1;      // y = y bitshl 1
-y bitshr= 2;      // y = y bitshr 2
+y &= 0b1010;  // y = y & 0b1010
+y |= 0b0001;  // y = y | 0b0001
+y ^= 0b1111;  // y = y ^ 0b1111
+y <<= 1;      // y = y << 1
+y >>= 2;      // y = y >> 2
 ```
 
 ### Operator Precedence
 
 Operator precedence from high to low is as follows:
 
-1. Prefix: `not`, `bitnot`, `+`(unary), `-`(unary)
+1. Prefix: `not`, `~`, `+`(unary), `-`(unary)
 2. Power: `**` (Right associative)
 3. Multiplication/Division: `*`, `/`, `%`
 4. Addition/Subtraction: `+`, `-`
-5. Shift: `bitshl`, `bitshr`
+5. Shift: `<<`, `>>`
 6. Relation: `<`, `>`, `<=`, `>=`
 7. Equality: `==`, `<>`
-8. Bitwise AND: `bitand`
-9. Bitwise XOR: `bitxor`
-10. Bitwise OR: `bitor`
+8. Bitwise AND: `&`
+9. Bitwise XOR: `^`
+10. Bitwise OR: `|`
 11. Pattern Check: `is`
 12. Logical AND: `and`
 13. Logical OR: `or`

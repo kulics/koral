@@ -63,24 +63,29 @@ public enum Token: CustomStringConvertible {
   case traitKeyword  // 'trait' keyword
   case whenKeyword  // 'when' keyword
   case intrinsicKeyword  // 'intrinsic' keyword
-  case bitandKeyword  // 'bitand' keyword
-  case bitorKeyword  // 'bitor' keyword
-  case bitxorKeyword  // 'bitxor' keyword
-  case bitnotKeyword  // 'bitnot' keyword
+  case ampersand  // '&' - bitwise AND
+  case pipe  // '|' - bitwise OR
+  case caret  // '^' - bitwise XOR
+  case tilde  // '~' - bitwise NOT
   case derefKeyword   // 'deref' keyword
   case privateKeyword // 'private' keyword
   case protectedKeyword // 'protected' keyword
   case publicKeyword  // 'public' keyword
-  case bitshlKeyword  // 'bitshl' keyword
-  case bitshrKeyword  // 'bitshr' keyword
+  case leftShift  // '<<' - left shift
+  case rightShift  // '>>' - right shift
   case arrow  // '->'
-  case power  // '^'
+  case doubleStar  // '**' - power
   case plusEqual  // '+='
   case minusEqual  // '-='
   case multiplyEqual  // '*='
   case divideEqual  // '/='
   case moduloEqual  // '%='
-  case powerEqual  // '^='
+  case doubleStarEqual  // '**=' - power assignment
+  case ampersandEqual  // '&=' - bitwise AND assignment
+  case pipeEqual  // '|=' - bitwise OR assignment
+  case caretEqual  // '^=' - bitwise XOR assignment
+  case leftShiftEqual  // '<<=' - left shift assignment
+  case rightShiftEqual  // '>>=' - right shift assignment
   case range  // '..'
   case rangeLess  // '..<'
   case lessRange  // '<..'
@@ -103,13 +108,13 @@ public enum Token: CustomStringConvertible {
   public var isContinuationToken: Bool {
     switch self {
     // Arithmetic infix operators
-    case .plus, .minus, .multiply, .divide, .modulo, .power:
+    case .plus, .minus, .multiply, .divide, .modulo, .doubleStar:
       return true
     // Logical infix operators
     case .andKeyword, .orKeyword:
       return true
-    // Bitwise infix operators
-    case .bitandKeyword, .bitorKeyword, .bitxorKeyword, .bitshlKeyword, .bitshrKeyword:
+    // Bitwise infix operators (not tilde - it's a prefix operator)
+    case .ampersand, .pipe, .caret, .leftShift, .rightShift:
       return true
     // Comparison operators
     case .equalEqual, .notEqual, .greater, .less, .greaterEqual, .lessEqual:
@@ -165,17 +170,19 @@ public enum Token: CustomStringConvertible {
       return true
     case (.givenKeyword, .givenKeyword), (.traitKeyword, .traitKeyword), (.whenKeyword, .whenKeyword), (.intrinsicKeyword, .intrinsicKeyword):
       return true
-    case (.bitandKeyword, .bitandKeyword), (.bitorKeyword, .bitorKeyword), (.bitxorKeyword, .bitxorKeyword), (.bitnotKeyword, .bitnotKeyword):
+    case (.ampersand, .ampersand), (.pipe, .pipe), (.caret, .caret), (.tilde, .tilde):
       return true
-    case (.bitshlKeyword, .bitshlKeyword), (.bitshrKeyword, .bitshrKeyword):
+    case (.leftShift, .leftShift), (.rightShift, .rightShift):
       return true
     case (.derefKeyword, .derefKeyword):
       return true
     case (.privateKeyword, .privateKeyword), (.protectedKeyword, .protectedKeyword), (.publicKeyword, .publicKeyword):
       return true
-    case (.power, .power):
+    case (.doubleStar, .doubleStar):
       return true
-    case (.plusEqual, .plusEqual), (.minusEqual, .minusEqual), (.multiplyEqual, .multiplyEqual), (.divideEqual, .divideEqual), (.moduloEqual, .moduloEqual), (.powerEqual, .powerEqual):
+    case (.plusEqual, .plusEqual), (.minusEqual, .minusEqual), (.multiplyEqual, .multiplyEqual), (.divideEqual, .divideEqual), (.moduloEqual, .moduloEqual), (.doubleStarEqual, .doubleStarEqual):
+      return true
+    case (.ampersandEqual, .ampersandEqual), (.pipeEqual, .pipeEqual), (.caretEqual, .caretEqual), (.leftShiftEqual, .leftShiftEqual), (.rightShiftEqual, .rightShiftEqual):
       return true
     case (.range, .range), (.rangeLess, .rangeLess), (.lessRange, .lessRange), (.lessRangeLess, .lessRangeLess), (.unboundedRange, .unboundedRange), (.lessUnboundedRange, .lessUnboundedRange), (.unboundedRangeLess, .unboundedRangeLess), (.fullRange, .fullRange):
       return true
@@ -308,14 +315,14 @@ public enum Token: CustomStringConvertible {
       return "when"
     case .intrinsicKeyword:
       return "intrinsic"
-    case .bitandKeyword:
-      return "bitand"
-    case .bitorKeyword:
-      return "bitor"
-    case .bitxorKeyword:
-      return "bitxor"
-    case .bitnotKeyword:
-      return "bitnot"
+    case .ampersand:
+      return "&"
+    case .pipe:
+      return "|"
+    case .caret:
+      return "^"
+    case .tilde:
+      return "~"
     case .derefKeyword:
       return "deref"
     case .privateKeyword:
@@ -324,14 +331,14 @@ public enum Token: CustomStringConvertible {
       return "protected"
     case .publicKeyword:
       return "public"
-    case .bitshlKeyword:
-      return "bitshl"
-    case .bitshrKeyword:
-      return "bitshr"
+    case .leftShift:
+      return "<<"
+    case .rightShift:
+      return ">>"
     case .arrow:
       return "->"
-    case .power:
-      return "^"
+    case .doubleStar:
+      return "**"
     case .plusEqual:
       return "+="
     case .minusEqual:
@@ -342,8 +349,18 @@ public enum Token: CustomStringConvertible {
       return "/="
     case .moduloEqual:
       return "%="
-    case .powerEqual:
+    case .doubleStarEqual:
+      return "**="
+    case .ampersandEqual:
+      return "&="
+    case .pipeEqual:
+      return "|="
+    case .caretEqual:
       return "^="
+    case .leftShiftEqual:
+      return "<<="
+    case .rightShiftEqual:
+      return ">>="
     case .range:
       return ".."
     case .rangeLess:
@@ -789,6 +806,13 @@ public class Lexer {
       return .minus
     case "*":
       if let nextChar = getNextChar() {
+        if nextChar == "*" {
+          if let nextNextChar = getNextChar() {
+            if nextNextChar == "=" { return .doubleStarEqual }
+            unreadChar(nextNextChar)
+          }
+          return .doubleStar
+        }
         if nextChar == "=" { return .multiplyEqual }
         unreadChar(nextChar)
       }
@@ -824,10 +848,10 @@ public class Lexer {
       return .modulo
     case "^":
       if let nextChar = getNextChar() {
-        if nextChar == "=" { return .powerEqual }
+        if nextChar == "=" { return .caretEqual }
         unreadChar(nextChar)
       }
-      return .power
+      return .caret
     case "=":
       if let nextChar = getNextChar() {
         if nextChar == "=" {
@@ -839,8 +863,29 @@ public class Lexer {
     case "!":
       // Koral does not use '!' (use `not expr`) and does not use '!=' (use '<>').
       throw LexerError.unexpectedCharacter(span: tokenSpan, "!")
+    case "&":
+      if let nextChar = getNextChar() {
+        if nextChar == "=" { return .ampersandEqual }
+        unreadChar(nextChar)
+      }
+      return .ampersand
+    case "|":
+      if let nextChar = getNextChar() {
+        if nextChar == "=" { return .pipeEqual }
+        unreadChar(nextChar)
+      }
+      return .pipe
+    case "~":
+      return .tilde
     case ">":
       if let nextChar = getNextChar() {
+        if nextChar == ">" {
+          if let nextNextChar = getNextChar() {
+            if nextNextChar == "=" { return .rightShiftEqual }
+            unreadChar(nextNextChar)
+          }
+          return .rightShift
+        }
         if nextChar == "=" {
           return .greaterEqual
         }
@@ -849,6 +894,13 @@ public class Lexer {
       return .greater
     case "<":
       if let nextChar = getNextChar() {
+        if nextChar == "<" {
+          if let nextNextChar = getNextChar() {
+            if nextNextChar == "=" { return .leftShiftEqual }
+            unreadChar(nextNextChar)
+          }
+          return .leftShift
+        }
         if nextChar == ">" {
           return .notEqual
         }
@@ -952,16 +1004,10 @@ public class Lexer {
       case "trait": .traitKeyword
       case "when": .whenKeyword
       case "intrinsic": .intrinsicKeyword
-      case "bitand": .bitandKeyword
-      case "bitor": .bitorKeyword
-      case "bitxor": .bitxorKeyword
-      case "bitnot": .bitnotKeyword
       case "deref": .derefKeyword
       case "private": .privateKeyword
       case "protected": .protectedKeyword
       case "public": .publicKeyword
-      case "bitshl": .bitshlKeyword
-      case "bitshr": .bitshrKeyword
       case "self": .selfKeyword
       case "Self": .selfTypeKeyword
       case "super": .superKeyword

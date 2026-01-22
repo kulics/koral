@@ -5410,16 +5410,33 @@ public class TypeChecker {
             expected: elementType.description, got: typedRhs.type.description)
         }
 
-        let _ = try checkArithmeticOp(compoundOpToArithmeticOp(op), elementType, typedRhs.type)
         let rhsSym = nextSynthSymbol(prefix: "sub_rhs", type: typedRhs.type)
         stmts.append(.variableDeclaration(identifier: rhsSym, value: typedRhs, mutable: false))
 
-        let newValueExpr: TypedExpressionNode = .arithmeticExpression(
-          left: .variable(identifier: oldSym),
-          op: compoundOpToArithmeticOp(op),
-          right: .variable(identifier: rhsSym),
-          type: elementType
-        )
+        let newValueExpr: TypedExpressionNode
+        if let arithmeticOp = compoundOpToArithmeticOp(op) {
+          let _ = try checkArithmeticOp(arithmeticOp, elementType, typedRhs.type)
+          newValueExpr = .arithmeticExpression(
+            left: .variable(identifier: oldSym),
+            op: arithmeticOp,
+            right: .variable(identifier: rhsSym),
+            type: elementType
+          )
+        } else if let bitwiseOp = compoundOpToBitwiseOp(op) {
+          // Check that both operands are integer types
+          if !isIntegerScalarType(elementType) || elementType != typedRhs.type {
+            throw SemanticError.typeMismatch(
+              expected: "Matching Integer Types", got: "\(elementType) \(op) \(typedRhs.type)")
+          }
+          newValueExpr = .bitwiseExpression(
+            left: .variable(identifier: oldSym),
+            op: bitwiseOp,
+            right: .variable(identifier: rhsSym),
+            type: elementType
+          )
+        } else {
+          fatalError("Unknown compound assignment operator")
+        }
 
         let (updateMethod, finalBase, expectedValueType) = try resolveSubscriptUpdateMethod(
           base: baseVar, args: argVars)
@@ -5441,7 +5458,15 @@ public class TypeChecker {
 
       let typedTarget = try resolveLValue(target)
       let typedValue = coerceLiteral(try inferTypedExpression(value), to: typedTarget.type)
-      let _ = try checkArithmeticOp(compoundOpToArithmeticOp(op), typedTarget.type, typedValue.type)
+      if let arithmeticOp = compoundOpToArithmeticOp(op) {
+        let _ = try checkArithmeticOp(arithmeticOp, typedTarget.type, typedValue.type)
+      } else if let _ = compoundOpToBitwiseOp(op) {
+        // Check that both operands are integer types
+        if !isIntegerScalarType(typedTarget.type) || typedTarget.type != typedValue.type {
+          throw SemanticError.typeMismatch(
+            expected: "Matching Integer Types", got: "\(typedTarget.type) \(op) \(typedValue.type)")
+        }
+      }
       return .compoundAssignment(target: typedTarget, operator: op, value: typedValue)
 
     case .expression(let expr, let span):
@@ -5690,13 +5715,28 @@ public class TypeChecker {
     return .subscriptExpression(base: finalBase, arguments: args, method: method, type: returns)
   }
 
-  private func compoundOpToArithmeticOp(_ op: CompoundAssignmentOperator) -> ArithmeticOperator {
+  private func compoundOpToArithmeticOp(_ op: CompoundAssignmentOperator) -> ArithmeticOperator? {
     switch op {
     case .plus: return .plus
     case .minus: return .minus
     case .multiply: return .multiply
     case .divide: return .divide
     case .modulo: return .modulo
+    case .power: return .power
+    case .bitwiseAnd, .bitwiseOr, .bitwiseXor, .shiftLeft, .shiftRight:
+      return nil  // Bitwise operators are not arithmetic operators
+    }
+  }
+
+  private func compoundOpToBitwiseOp(_ op: CompoundAssignmentOperator) -> BitwiseOperator? {
+    switch op {
+    case .bitwiseAnd: return .and
+    case .bitwiseOr: return .or
+    case .bitwiseXor: return .xor
+    case .shiftLeft: return .shiftLeft
+    case .shiftRight: return .shiftRight
+    case .plus, .minus, .multiply, .divide, .modulo, .power:
+      return nil  // Arithmetic operators are not bitwise operators
     }
   }
 

@@ -594,6 +594,18 @@ public class CodeGen {
       #include <stdatomic.h>
       #include <string.h>
       #include <stdint.h>
+      #include <math.h>
+
+      // Integer power function using fast exponentiation
+      static inline intptr_t __koral_ipow(intptr_t base, intptr_t exp) {
+          intptr_t result = 1;
+          while (exp > 0) {
+              if (exp & 1) result *= base;
+              base *= base;
+              exp >>= 1;
+          }
+          return result;
+      }
 
       // Generic Ref type
       struct Ref { void* ptr; void* control; };
@@ -1083,8 +1095,17 @@ public class CodeGen {
       let rightResult = generateExpressionSSA(right)
       let result = nextTemp()
       addIndent()
-      buffer +=
-        "\(getCType(type)) \(result) = \(leftResult) \(arithmeticOpToC(op)) \(rightResult);\n"
+      if op == .power {
+        // Special handling for power operator
+        if isFloatType(type) {
+          buffer += "\(getCType(type)) \(result) = pow(\(leftResult), \(rightResult));\n"
+        } else {
+          buffer += "\(getCType(type)) \(result) = __koral_ipow(\(leftResult), \(rightResult));\n"
+        }
+      } else {
+        buffer +=
+          "\(getCType(type)) \(result) = \(leftResult) \(arithmeticOpToC(op)) \(rightResult);\n"
+      }
       return result
 
     case .comparisonExpression(let left, let op, let right, let type):
@@ -2026,6 +2047,12 @@ public class CodeGen {
     case .multiply: return "*="
     case .divide: return "/="
     case .modulo: return "%="
+    case .power: return "**="  // Special handling needed
+    case .bitwiseAnd: return "&="
+    case .bitwiseOr: return "|="
+    case .bitwiseXor: return "^="
+    case .shiftLeft: return "<<="
+    case .shiftRight: return ">>="
     }
   }
 
@@ -2036,6 +2063,7 @@ public class CodeGen {
     case .multiply: return "*"
     case .divide: return "/"
     case .modulo: return "%"
+    case .power: return "**"  // Special handling needed
     }
   }
 
@@ -2095,6 +2123,13 @@ public class CodeGen {
       fatalError("Generic union \(template) should be resolved before CodeGen")
     case .module:
       fatalError("Module type should not appear in CodeGen")
+    }
+  }
+
+  private func isFloatType(_ type: Type) -> Bool {
+    switch type {
+    case .float32, .float64: return true
+    default: return false
     }
   }
 

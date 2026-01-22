@@ -263,6 +263,12 @@ public enum CompoundAssignmentOperator {
   case multiply
   case divide
   case modulo
+  case power
+  case bitwiseAnd
+  case bitwiseOr
+  case bitwiseXor
+  case shiftLeft
+  case shiftRight
 }
 public enum AssignmentTarget {
   case variable(name: String)
@@ -274,6 +280,7 @@ public enum ArithmeticOperator {
   case multiply
   case divide
   case modulo
+  case power
 }
 public enum ComparisonOperator {
   case equal
