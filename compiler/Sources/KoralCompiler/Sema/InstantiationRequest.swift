@@ -60,14 +60,14 @@ public enum InstantiationKind: Hashable {
             // Include the base type's template name in the hash
             let templateName: String
             switch baseType {
-            case .structure(let name, _, _):
-                templateName = name.split(separator: "_").first.map(String.init) ?? name
+            case .structure(let decl):
+                templateName = decl.name.split(separator: "_").first.map(String.init) ?? decl.name
             case .genericStruct(let name, _):
                 templateName = name
             case .genericUnion(let name, _):
                 templateName = name
-            case .union(let name, _, _):
-                templateName = name.split(separator: "_").first.map(String.init) ?? name
+            case .union(let decl):
+                templateName = decl.name.split(separator: "_").first.map(String.init) ?? decl.name
             case .pointer(_):
                 templateName = "Pointer"
             default:
@@ -93,14 +93,14 @@ public enum InstantiationKind: Hashable {
             // Compare base type template names
             let lTemplateName: String
             switch lBaseType {
-            case .structure(let name, _, _):
-                lTemplateName = name.split(separator: "_").first.map(String.init) ?? name
+            case .structure(let decl):
+                lTemplateName = decl.name.split(separator: "_").first.map(String.init) ?? decl.name
             case .genericStruct(let name, _):
                 lTemplateName = name
             case .genericUnion(let name, _):
                 lTemplateName = name
-            case .union(let name, _, _):
-                lTemplateName = name.split(separator: "_").first.map(String.init) ?? name
+            case .union(let decl):
+                lTemplateName = decl.name.split(separator: "_").first.map(String.init) ?? decl.name
             case .pointer(_):
                 lTemplateName = "Pointer"
             default:
@@ -108,14 +108,14 @@ public enum InstantiationKind: Hashable {
             }
             let rTemplateName: String
             switch rBaseType {
-            case .structure(let name, _, _):
-                rTemplateName = name.split(separator: "_").first.map(String.init) ?? name
+            case .structure(let decl):
+                rTemplateName = decl.name.split(separator: "_").first.map(String.init) ?? decl.name
             case .genericStruct(let name, _):
                 rTemplateName = name
             case .genericUnion(let name, _):
                 rTemplateName = name
-            case .union(let name, _, _):
-                rTemplateName = name.split(separator: "_").first.map(String.init) ?? name
+            case .union(let decl):
+                rTemplateName = decl.name.split(separator: "_").first.map(String.init) ?? decl.name
             case .pointer(_):
                 rTemplateName = "Pointer"
             default:
@@ -228,15 +228,15 @@ public struct InstantiationRequest: Hashable {
             // Derive the base type template name from the baseType
             let templateName: String
             switch baseType {
-            case .structure(let name, _, _):
+            case .structure(let decl):
                 // Extract base name from mangled name (e.g., "List_I" -> "List")
-                templateName = name.split(separator: "_").first.map(String.init) ?? name
+                templateName = decl.name.split(separator: "_").first.map(String.init) ?? decl.name
             case .genericStruct(let name, _):
                 templateName = name
             case .genericUnion(let name, _):
                 templateName = name
-            case .union(let name, _, _):
-                templateName = name.split(separator: "_").first.map(String.init) ?? name
+            case .union(let decl):
+                templateName = decl.name.split(separator: "_").first.map(String.init) ?? decl.name
             case .pointer(_):
                 templateName = "Pointer"
             default:

@@ -649,10 +649,10 @@ public class EscapeContext {
         switch target {
         case .memberPath(let source, let path):
             if !path.isEmpty {
-                if case .structure(_, _, _) = source.type {
+                if case .structure(_) = source.type {
                     return true
                 }
-                if case .union(_, _, _) = source.type {
+                if case .union(_) = source.type {
                     return true
                 }
             }

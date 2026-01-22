@@ -2,11 +2,62 @@
 
 // Method declaration used inside given blocks; same shape as a global function
 
-public enum AccessModifier: String {
+public enum AccessModifier: String, Sendable {
   case `public`
   case `private`
   case `protected`
   case `default`
+}
+
+// MARK: - Module System Types
+
+/// Using 声明的路径类型
+public enum UsingPathKind {
+  case external    // 外部模块: using std
+  case fileMerge   // 文件合并: using "user"
+  case submodule   // 子模块: using self.utils
+  case parent      // 父模块: using super.sibling
+}
+
+/// Using 声明 AST 节点
+public struct UsingDeclaration {
+  /// 路径类型
+  public let pathKind: UsingPathKind
+  
+  /// 模块路径段
+  /// - external: ["std", "text"]
+  /// - fileMerge: ["user"] (文件名)
+  /// - submodule: ["utils", "SomeType"]
+  /// - parent: ["super", "sibling"] 或 ["super", "super", "uncle"]
+  public let pathSegments: [String]
+  
+  /// 可选别名: using txt = std.text
+  public let alias: String?
+  
+  /// 是否批量导入: using std.text.*
+  public let isBatchImport: Bool
+  
+  /// 访问修饰符
+  public let access: AccessModifier
+  
+  /// 源码位置
+  public let span: SourceSpan
+  
+  public init(
+    pathKind: UsingPathKind,
+    pathSegments: [String],
+    alias: String? = nil,
+    isBatchImport: Bool = false,
+    access: AccessModifier = .default,
+    span: SourceSpan
+  ) {
+    self.pathKind = pathKind
+    self.pathSegments = pathSegments
+    self.alias = alias
+    self.isBatchImport = isBatchImport
+    self.access = access
+    self.span = span
+  }
 }
 
 // Re-export SourceSpan for AST nodes
@@ -36,6 +87,9 @@ public struct UnionCaseDeclaration {
   public let parameters: [(name: String, type: TypeNode)]
 }
 public indirect enum GlobalNode {
+  // Using declaration (must appear at the beginning of a file)
+  case usingDeclaration(UsingDeclaration)
+  
   case globalVariableDeclaration(
     name: String, type: TypeNode, value: ExpressionNode, mutable: Bool, access: AccessModifier,
     span: SourceSpan)
@@ -99,6 +153,8 @@ public indirect enum GlobalNode {
 extension GlobalNode {
   public var span: SourceSpan {
     switch self {
+    case .usingDeclaration(let decl):
+      return decl.span
     case .globalVariableDeclaration(_, _, _, _, _, let span):
       return span
     case .globalFunctionDeclaration(_, _, _, _, _, _, let span):

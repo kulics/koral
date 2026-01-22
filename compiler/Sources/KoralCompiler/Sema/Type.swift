@@ -1,7 +1,134 @@
+import Foundation
+
+// MARK: - Type Declaration Entities
+
+/// Struct 类型的声明实体
+/// 使用 struct + UUID 实现类型身份语义，避免循环引用问题
+public struct StructDecl: Equatable, Hashable {
+    /// 唯一标识符，用于类型身份比较
+    public let id: UUID
+    
+    /// 类型名称（简单名）
+    public let name: String
+    
+    /// 模块路径
+    public var modulePath: [String]
+    
+    /// 源文件路径（用于 private 符号隔离）
+    public var sourceFile: String
+    
+    /// 访问修饰符
+    public var access: AccessModifier
+    
+    /// 字段列表（可变，用于解析递归类型）
+    public var members: [(name: String, type: Type, mutable: Bool)]
+    
+    /// 是否为泛型实例化
+    public var isGenericInstantiation: Bool
+    
+    /// 泛型类型参数（用于实例化类型的 qualifiedName）
+    public var typeArguments: [Type]?
+    
+    public init(
+        id: UUID = UUID(),
+        name: String,
+        modulePath: [String],
+        sourceFile: String,
+        access: AccessModifier,
+        members: [(name: String, type: Type, mutable: Bool)] = [],
+        isGenericInstantiation: Bool = false,
+        typeArguments: [Type]? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.modulePath = modulePath
+        self.sourceFile = sourceFile
+        self.access = access
+        self.members = members
+        self.isGenericInstantiation = isGenericInstantiation
+        self.typeArguments = typeArguments
+    }
+    
+    // 类型相等性基于 UUID
+    public static func == (lhs: StructDecl, rhs: StructDecl) -> Bool {
+        return lhs.id == rhs.id
+    }
+    
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+
+/// Union 类型的声明实体
+/// 使用 struct + UUID 实现类型身份语义，避免循环引用问题
+public struct UnionDecl: Equatable, Hashable {
+    /// 唯一标识符，用于类型身份比较
+    public let id: UUID
+    
+    /// 类型名称（简单名）
+    public let name: String
+    
+    /// 模块路径
+    public var modulePath: [String]
+    
+    /// 源文件路径（用于 private 符号隔离）
+    public var sourceFile: String
+    
+    /// 访问修饰符
+    public var access: AccessModifier
+    
+    /// Union cases（可变，用于解析递归类型）
+    public var cases: [UnionCase]
+    
+    /// 是否为泛型实例化
+    public var isGenericInstantiation: Bool
+    
+    /// 泛型类型参数
+    public var typeArguments: [Type]?
+    
+    public init(
+        id: UUID = UUID(),
+        name: String,
+        modulePath: [String],
+        sourceFile: String,
+        access: AccessModifier,
+        cases: [UnionCase] = [],
+        isGenericInstantiation: Bool = false,
+        typeArguments: [Type]? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.modulePath = modulePath
+        self.sourceFile = sourceFile
+        self.access = access
+        self.cases = cases
+        self.isGenericInstantiation = isGenericInstantiation
+        self.typeArguments = typeArguments
+    }
+    
+    // 类型相等性基于 UUID
+    public static func == (lhs: UnionDecl, rhs: UnionDecl) -> Bool {
+        return lhs.id == rhs.id
+    }
+    
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+
+// MARK: - Union Case
+
 public struct UnionCase {
   public let name: String
   public let parameters: [(name: String, type: Type)]
+  
+  public init(name: String, parameters: [(name: String, type: Type)]) {
+    self.name = name
+    self.parameters = parameters
+  }
 }
+
+// MARK: - Type Enum
 
 public indirect enum Type: CustomStringConvertible {
   case int
@@ -20,14 +147,86 @@ public indirect enum Type: CustomStringConvertible {
   case void
   case never
   case function(parameters: [Parameter], returns: Type)
-  case structure(name: String, members: [(name: String, type: Type, mutable: Bool)], isGenericInstantiation: Bool)
+  case structure(decl: StructDecl)
   case reference(inner: Type)
   case pointer(element: Type)
   case genericParameter(name: String)
-  case union(name: String, cases: [UnionCase], isGenericInstantiation: Bool)
+  case union(decl: UnionDecl)
   case genericStruct(template: String, args: [Type])
   case genericUnion(template: String, args: [Type])
-
+  case module(info: ModuleSymbolInfo)
+  
+  // MARK: - Convenience Accessors
+  
+  /// 获取类型名称（用于显示）
+  public var typeName: String? {
+    switch self {
+    case .structure(let decl): return decl.name
+    case .union(let decl): return decl.name
+    default: return nil
+    }
+  }
+  
+  /// 获取字段列表（struct）
+  public var structMembers: [(name: String, type: Type, mutable: Bool)]? {
+    if case .structure(let decl) = self {
+      return decl.members
+    }
+    return nil
+  }
+  
+  /// 获取 cases（union）
+  public var unionCases: [UnionCase]? {
+    if case .union(let decl) = self {
+      return decl.cases
+    }
+    return nil
+  }
+  
+  /// 是否为泛型实例化
+  public var isGenericInstantiation: Bool {
+    switch self {
+    case .structure(let decl): return decl.isGenericInstantiation
+    case .union(let decl): return decl.isGenericInstantiation
+    default: return false
+    }
+  }
+  
+  // MARK: - Legacy Pattern Matching Support
+  
+  /// 解构 struct 类型（用于迁移期间的模式匹配）
+  /// 返回 (name, members, isGenericInstantiation) 或 nil
+  public var structureComponents: (name: String, members: [(name: String, type: Type, mutable: Bool)], isGenericInstantiation: Bool)? {
+    if case .structure(let decl) = self {
+      return (decl.name, decl.members, decl.isGenericInstantiation)
+    }
+    return nil
+  }
+  
+  /// 解构 union 类型（用于迁移期间的模式匹配）
+  /// 返回 (name, cases, isGenericInstantiation) 或 nil
+  public var unionComponents: (name: String, cases: [UnionCase], isGenericInstantiation: Bool)? {
+    if case .union(let decl) = self {
+      return (decl.name, decl.cases, decl.isGenericInstantiation)
+    }
+    return nil
+  }
+  
+  /// 获取 struct 的声明实体
+  public var structDecl: StructDecl? {
+    if case .structure(let decl) = self {
+      return decl
+    }
+    return nil
+  }
+  
+  /// 获取 union 的声明实体
+  public var unionDecl: UnionDecl? {
+    if case .union(let decl) = self {
+      return decl
+    }
+    return nil
+  }
 
   public var description: String {
     switch self {
@@ -49,10 +248,10 @@ public indirect enum Type: CustomStringConvertible {
     case .function(let params, let returns):
       let paramTypes = params.map { $0.type.description }.joined(separator: ", ")
       return "(\(paramTypes)) -> \(returns)"
-    case .structure(let name, _, _):
-      return name
-    case .union(let name, _, _):
-      return name
+    case .structure(let decl):
+      return decl.name
+    case .union(let decl):
+      return decl.name
     case .reference(let inner):
       return "\(inner.description) ref"
     case .pointer(let element):
@@ -65,6 +264,8 @@ public indirect enum Type: CustomStringConvertible {
     case .genericUnion(let template, let args):
       let argsStr = args.map { $0.description }.joined(separator: ", ")
       return "[\(argsStr)]\(template)"
+    case .module(let info):
+      return "module(\(info.modulePath.joined(separator: ".")))"
     }
   }
 
@@ -88,13 +289,46 @@ public indirect enum Type: CustomStringConvertible {
     case .function: return "Fn"
     case .reference: return "R"
     case .pointer(_): return "P"
-    case .structure(let name, _, _):
-      // Use the type name directly for structures to ensure unique identification
-      // This prevents collisions between different struct types with similar layouts
-      return name
-    case .union(let name, _, _):
-      // Use the type name directly for unions to ensure unique identification
-      return name
+    case .structure(let decl):
+      // 使用模块路径、文件标识（如果是 private）和名称来确保唯一性
+      var parts: [String] = []
+      if !decl.modulePath.isEmpty {
+        parts.append(decl.modulePath.joined(separator: "_"))
+      }
+      if decl.access == .private {
+        // 使用文件路径的哈希值生成短标识符
+        var hash: UInt32 = 0
+        for char in decl.sourceFile.utf8 {
+          hash = hash &* 31 &+ UInt32(char)
+        }
+        parts.append("f\(hash % 10000)")
+      }
+      parts.append(decl.name)
+      if let typeArgs = decl.typeArguments, !typeArgs.isEmpty {
+        let argsStr = typeArgs.map { $0.layoutKey }.joined(separator: "_")
+        parts.append(argsStr)
+      }
+      return parts.joined(separator: "_")
+    case .union(let decl):
+      // 使用模块路径、文件标识（如果是 private）和名称来确保唯一性
+      var parts: [String] = []
+      if !decl.modulePath.isEmpty {
+        parts.append(decl.modulePath.joined(separator: "_"))
+      }
+      if decl.access == .private {
+        // 使用文件路径的哈希值生成短标识符
+        var hash: UInt32 = 0
+        for char in decl.sourceFile.utf8 {
+          hash = hash &* 31 &+ UInt32(char)
+        }
+        parts.append("f\(hash % 10000)")
+      }
+      parts.append(decl.name)
+      if let typeArgs = decl.typeArguments, !typeArgs.isEmpty {
+        let argsStr = typeArgs.map { $0.layoutKey }.joined(separator: "_")
+        parts.append(argsStr)
+      }
+      return parts.joined(separator: "_")
     case .genericParameter(let name):
       return "Param_\(name)"
     case .genericStruct(let template, let args):
@@ -103,6 +337,8 @@ public indirect enum Type: CustomStringConvertible {
     case .genericUnion(let template, let args):
       let argsKeys = args.map { $0.layoutKey }.joined(separator: "_")
       return "\(template)_\(argsKeys)"
+    case .module(let info):
+      return "M_\(info.modulePath.joined(separator: "_"))"
     }
   }
 
@@ -114,10 +350,10 @@ public indirect enum Type: CustomStringConvertible {
       return false
     case .function(let params, let returns):
       return returns.containsGenericParameter || params.contains { $0.type.containsGenericParameter }
-    case .structure(_, let members, _):
-      return members.contains { $0.type.containsGenericParameter }
-    case .union(_, let cases, _):
-      return cases.contains { c in c.parameters.contains { $0.type.containsGenericParameter } }
+    case .structure(let decl):
+      return decl.members.contains { $0.type.containsGenericParameter }
+    case .union(let decl):
+      return decl.cases.contains { c in c.parameters.contains { $0.type.containsGenericParameter } }
     case .reference(let inner):
       return inner.containsGenericParameter
     case .pointer(let element):
@@ -128,6 +364,8 @@ public indirect enum Type: CustomStringConvertible {
       return args.contains { $0.containsGenericParameter }
     case .genericUnion(_, let args):
       return args.contains { $0.containsGenericParameter }
+    case .module:
+      return false
     }
   }
   
@@ -154,17 +392,35 @@ public indirect enum Type: CustomStringConvertible {
       .float32, .float64, .bool, .void, .never: return self
     case .reference(_): return .reference(inner: .void)
     case .pointer(let element): return .pointer(element: element.canonical) 
-    case .structure(let name, let members, let isGenericInstantiation):
-      if isGenericInstantiation {
-        let newMembers = members.map { ($0.name, $0.type.canonical, $0.mutable) }
-        return .structure(name: name, members: newMembers, isGenericInstantiation: true)
+    case .structure(let decl):
+      if decl.isGenericInstantiation {
+        let newMembers = decl.members.map { ($0.name, $0.type.canonical, $0.mutable) }
+        let newDecl = StructDecl(
+          name: decl.name,
+          modulePath: decl.modulePath,
+          sourceFile: decl.sourceFile,
+          access: decl.access,
+          members: newMembers,
+          isGenericInstantiation: true,
+          typeArguments: decl.typeArguments
+        )
+        return .structure(decl: newDecl)
       } else {
         return self
       }
-    case .union(let name, let cases, let isGenericInstantiation):
-      if isGenericInstantiation {
-        let newCases = cases.map { UnionCase(name: $0.name, parameters: $0.parameters.map { p in (name: p.name, type: p.type.canonical) }) }
-        return .union(name: name, cases: newCases, isGenericInstantiation: true)
+    case .union(let decl):
+      if decl.isGenericInstantiation {
+        let newCases = decl.cases.map { UnionCase(name: $0.name, parameters: $0.parameters.map { p in (name: p.name, type: p.type.canonical) }) }
+        let newDecl = UnionDecl(
+          name: decl.name,
+          modulePath: decl.modulePath,
+          sourceFile: decl.sourceFile,
+          access: decl.access,
+          cases: newCases,
+          isGenericInstantiation: true,
+          typeArguments: decl.typeArguments
+        )
+        return .union(decl: newDecl)
       } else {
         return self
       }
@@ -174,13 +430,20 @@ public indirect enum Type: CustomStringConvertible {
       return .genericStruct(template: template, args: args.map { $0.canonical })
     case .genericUnion(let template, let args):
       return .genericUnion(template: template, args: args.map { $0.canonical })
+    case .module:
+      return self
     }
   }
 }
 
 public struct Parameter: Equatable {
-  let type: Type
-  let kind: PassKind
+  public let type: Type
+  public let kind: PassKind
+  
+  public init(type: Type, kind: PassKind) {
+    self.type = type
+    self.kind = kind
+  }
 }
 
 public enum PassKind: Equatable {
@@ -202,8 +465,8 @@ public func fromSymbolKindToPassKind(_ kind: SymbolKind) -> PassKind {
     case .MutableReference:
       return .byMutRef
     }
-  case .function, .type:
-    fatalError("Cannot convert function or type symbol kind to pass kind")
+  case .function, .type, .module:
+    fatalError("Cannot convert function, type, or module symbol kind to pass kind")
   }
 }
 
@@ -222,10 +485,13 @@ extension Type: Equatable {
     case (.function(let lParams, let lReturns), .function(let rParams, let rReturns)):
       return lParams == rParams && lReturns == rReturns
 
-    case (.structure(let lName, _, _), .structure(let rName, _, _)):
-      return lName == rName
-    case (.union(let lName, _, _), .union(let rName, _, _)):
-      return lName == rName
+    // struct/union 相等性基于声明实体的 UUID
+    case (.structure(let lDecl), .structure(let rDecl)):
+      return lDecl == rDecl  // 基于 UUID 比较
+      
+    case (.union(let lDecl), .union(let rDecl)):
+      return lDecl == rDecl  // 基于 UUID 比较
+      
     case (.reference(let l), .reference(let r)):
       return l == r
     case (.pointer(let l), .pointer(let r)):
@@ -236,6 +502,8 @@ extension Type: Equatable {
       return lTemplate == rTemplate && lArgs == rArgs
     case (.genericUnion(let lTemplate, let lArgs), .genericUnion(let rTemplate, let rArgs)):
       return lTemplate == rTemplate && lArgs == rArgs
+    case (.module(let lInfo), .module(let rInfo)):
+      return lInfo.modulePath == rInfo.modulePath
 
     default:
       return false

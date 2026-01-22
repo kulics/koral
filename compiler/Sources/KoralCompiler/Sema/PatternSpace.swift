@@ -201,9 +201,9 @@ extension PatternSpace {
     
     private func getUnionCases(from type: Type) -> [String: [PatternSpace]]? {
         switch type {
-        case .union(_, let cases, _):
+        case .union(let decl):
             var result: [String: [PatternSpace]] = [:]
-            for c in cases {
+            for c in decl.cases {
                 result[c.name] = c.parameters.map { PatternSpace.full($0.type) }
             }
             return result
@@ -223,9 +223,9 @@ extension PatternSpace {
         switch type {
         case .bool:
             return .boolValues(remaining: [true, false])
-        case .union(_, let cases, _):
+        case .union(let decl):
             var caseSpaces: [String: [PatternSpace]] = [:]
-            for c in cases {
+            for c in decl.cases {
                 caseSpaces[c.name] = c.parameters.map { PatternSpace.full($0.type) }
             }
             return .unionCases(typeName: type.description, cases: caseSpaces)

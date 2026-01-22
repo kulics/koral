@@ -4,6 +4,13 @@ public func printAST(_ node: ASTNode) {
 
   func printGlobalNode(_ node: GlobalNode) {
     switch node {
+    case .usingDeclaration(let decl):
+      let pathStr = decl.pathSegments.joined(separator: ".")
+      let aliasStr = decl.alias.map { " = \($0)" } ?? ""
+      let batchStr = decl.isBatchImport ? ".*" : ""
+      print("\(indent)UsingDeclaration: \(decl.pathKind) \(pathStr)\(batchStr)\(aliasStr)")
+      print("\(indent)  Access: \(decl.access)")
+      
     case .globalVariableDeclaration(let name, let type, let value, let mutable, let access, _):
       print("\(indent)GlobalVariableDeclaration:")
       print("\(indent)  Access: \(access)")
@@ -472,11 +479,11 @@ public func printAST(_ node: ASTNode) {
   }
 
   switch node {
-  case .program(let statements):
+  case .program(let globalNodes):
     print("\(indent)Program:")
     withIndent {
-      for statement in statements {
-        printGlobalNode(statement)
+      for node in globalNodes {
+        printGlobalNode(node)
       }
     }
   }

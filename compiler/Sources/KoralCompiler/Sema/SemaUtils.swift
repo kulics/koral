@@ -215,7 +215,10 @@ public enum SemaUtils {
                 returns: substituteType(returns, substitution: substitution)
             )
             
-        case .structure(let name, let members, let isGenericInstantiation):
+        case .structure(let decl):
+            let name = decl.name
+            let members = decl.members
+            let isGenericInstantiation = decl.isGenericInstantiation
             let newMembers = members.map { member in
                 (
                     name: member.name,
@@ -268,9 +271,20 @@ public enum SemaUtils {
                 }
             }
             
-            return .structure(name: newName, members: newMembers, isGenericInstantiation: isGenericInstantiation)
+            return .structure(decl: StructDecl(
+                name: newName,
+                modulePath: decl.modulePath,
+                sourceFile: decl.sourceFile,
+                access: decl.access,
+                members: newMembers,
+                isGenericInstantiation: isGenericInstantiation,
+                typeArguments: decl.typeArguments
+            ))
             
-        case .union(let name, let cases, let isGenericInstantiation):
+        case .union(let decl):
+            let name = decl.name
+            let cases = decl.cases
+            let isGenericInstantiation = decl.isGenericInstantiation
             let newCases = cases.map { unionCase in
                 UnionCase(
                     name: unionCase.name,
@@ -315,7 +329,15 @@ public enum SemaUtils {
                 }
             }
             
-            return .union(name: newName, cases: newCases, isGenericInstantiation: isGenericInstantiation)
+            return .union(decl: UnionDecl(
+                name: newName,
+                modulePath: decl.modulePath,
+                sourceFile: decl.sourceFile,
+                access: decl.access,
+                cases: newCases,
+                isGenericInstantiation: isGenericInstantiation,
+                typeArguments: decl.typeArguments
+            ))
             
         case .genericStruct(let template, let args):
             let newArgs = args.map { substituteType($0, substitution: substitution) }
@@ -324,6 +346,10 @@ public enum SemaUtils {
         case .genericUnion(let template, let args):
             let newArgs = args.map { substituteType($0, substitution: substitution) }
             return .genericUnion(template: template, args: newArgs)
+            
+        case .module:
+            // Module types should not be substituted
+            return type
         }
     }
     

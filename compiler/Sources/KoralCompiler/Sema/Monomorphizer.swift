@@ -2,6 +2,8 @@
 // Implements the monomorphization phase that processes instantiation requests
 // and generates concrete types and functions from generic templates.
 
+import Foundation
+
 /// The output from the Monomorphizer phase.
 /// Contains only concrete (non-generic) declarations ready for code generation.
 public struct MonomorphizedProgram {
@@ -111,8 +113,8 @@ public class Monomorphizer {
                     // Track already-generated struct layouts
                     generatedLayouts.insert(identifier.name)
                     // Also cache the type if it's a generic instantiation
-                    if case .structure(_, _, let isGenericInstantiation) = identifier.type,
-                       isGenericInstantiation {
+                    if case .structure(let decl) = identifier.type,
+                       decl.isGenericInstantiation {
                         // Extract the cache key from the type
                         // The TypeChecker uses "TemplateName<Arg1,Arg2>" as the key
                         // We need to reconstruct this from the layout name
@@ -123,8 +125,8 @@ public class Monomorphizer {
                 case .globalUnionDeclaration(let identifier, _):
                     // Track already-generated union layouts
                     generatedLayouts.insert(identifier.name)
-                    if case .union(_, _, let isGenericInstantiation) = identifier.type,
-                       isGenericInstantiation {
+                    if case .union(let decl) = identifier.type,
+                       decl.isGenericInstantiation {
                         instantiatedTypes[identifier.name] = identifier.type
                     }
                     resultNodes.append(node)
@@ -139,10 +141,10 @@ public class Monomorphizer {
                     // Calculate the type name for mangling
                     let typeName: String
                     switch type {
-                    case .structure(let name, _, _):
-                        typeName = name
-                    case .union(let name, _, _):
-                        typeName = name
+                    case .structure(let decl):
+                        typeName = decl.name
+                    case .union(let decl):
+                        typeName = decl.name
                     default:
                         typeName = type.description
                     }
@@ -273,8 +275,15 @@ public class Monomorphizer {
         let layoutName = "\(template.name)_\(argLayoutKeys)"
         
         // Create placeholder for recursion detection
-        let placeholder = Type.structure(
-            name: layoutName, members: [], isGenericInstantiation: true)
+        let placeholderDecl = StructDecl(
+            name: layoutName,
+            modulePath: [],
+            sourceFile: "",
+            access: .default,
+            members: [],
+            isGenericInstantiation: true
+        )
+        let placeholder = Type.structure(decl: placeholderDecl)
         instantiatedTypes[key] = placeholder
         
         // Resolve members with concrete types
@@ -301,8 +310,15 @@ public class Monomorphizer {
         }
         
         // Create the concrete type
-        let specificType = Type.structure(
-            name: layoutName, members: resolvedMembers, isGenericInstantiation: true)
+        let specificDecl = StructDecl(
+            name: layoutName,
+            modulePath: [],
+            sourceFile: "",
+            access: .default,
+            members: resolvedMembers,
+            isGenericInstantiation: true
+        )
+        let specificType = Type.structure(decl: specificDecl)
         instantiatedTypes[key] = specificType
         layoutToTemplateInfo[layoutName] = (base: template.name, args: args)
         
@@ -342,8 +358,15 @@ public class Monomorphizer {
             }
             
             // Create canonical type
-            let canonicalType = Type.structure(
-                name: layoutName, members: canonicalMembers, isGenericInstantiation: true)
+            let canonicalDecl = StructDecl(
+                name: layoutName,
+                modulePath: [],
+                sourceFile: "",
+                access: .default,
+                members: canonicalMembers,
+                isGenericInstantiation: true
+            )
+            let canonicalType = Type.structure(decl: canonicalDecl)
             
             // Convert to TypedGlobalNode
             let params = canonicalMembers.map { param in
@@ -385,8 +408,15 @@ public class Monomorphizer {
         let layoutName = "\(template.name)_\(argLayoutKeys)"
         
         // Create placeholder for recursion
-        let placeholder = Type.union(
-            name: layoutName, cases: [], isGenericInstantiation: true)
+        let placeholderDecl = UnionDecl(
+            name: layoutName,
+            modulePath: [],
+            sourceFile: "",
+            access: .default,
+            cases: [],
+            isGenericInstantiation: true
+        )
+        let placeholder = Type.union(decl: placeholderDecl)
         instantiatedTypes[key] = placeholder
         
         // Resolve cases with concrete types
@@ -416,11 +446,15 @@ public class Monomorphizer {
         }
         
         // Create the concrete type
-        let specificType = Type.union(
+        let specificDecl = UnionDecl(
             name: layoutName,
+            modulePath: [],
+            sourceFile: "",
+            access: .default,
             cases: resolvedCases,
             isGenericInstantiation: true
         )
+        let specificType = Type.union(decl: specificDecl)
         instantiatedTypes[key] = specificType
         layoutToTemplateInfo[layoutName] = (base: template.name, args: args)
         
@@ -462,8 +496,15 @@ public class Monomorphizer {
                 canonicalCases.append(UnionCase(name: c.name, parameters: params))
             }
             
-            let canonicalType = Type.union(
-                name: layoutName, cases: canonicalCases, isGenericInstantiation: true)
+            let canonicalDecl = UnionDecl(
+                name: layoutName,
+                modulePath: [],
+                sourceFile: "",
+                access: .default,
+                cases: canonicalCases,
+                isGenericInstantiation: true
+            )
+            let canonicalType = Type.union(decl: canonicalDecl)
             let typeSymbol = Symbol(name: layoutName, type: canonicalType, kind: .type)
             generatedNodes.append(
                 .globalUnionDeclaration(identifier: typeSymbol, cases: canonicalCases))
@@ -581,15 +622,15 @@ public class Monomorphizer {
         // Derive the structure name from the base type
         let structureName: String
         switch resolvedBaseType {
-        case .structure(let name, _, _):
+        case .structure(let decl):
             // Extract base name from mangled name (e.g., "List_I" -> "List")
-            structureName = name.split(separator: "_").first.map(String.init) ?? name
+            structureName = decl.name.split(separator: "_").first.map(String.init) ?? decl.name
         case .genericStruct(let templateName, _):
             structureName = templateName
         case .genericUnion(let templateName, _):
             structureName = templateName
-        case .union(let name, _, _):
-            structureName = name.split(separator: "_").first.map(String.init) ?? name
+        case .union(let decl):
+            structureName = decl.name.split(separator: "_").first.map(String.init) ?? decl.name
         case .pointer(_):
             structureName = "Pointer"
         default:
@@ -739,7 +780,9 @@ public class Monomorphizer {
             // For reference types, look up the method on the inner type
             return try lookupConcreteMethodSymbol(on: inner, name: name)
             
-        case .structure(let typeName, _, let isGen):
+        case .structure(let decl):
+            let typeName = decl.name
+            let isGen = decl.isGenericInstantiation
             if let methods = extensionMethods[typeName], let sym = methods[name] {
                 // Generate mangled name for the method
                 let mangledName = "\(typeName)_\(name)"
@@ -764,7 +807,9 @@ public class Monomorphizer {
             }
             return nil
             
-        case .union(let typeName, _, let isGen):
+        case .union(let decl):
+            let typeName = decl.name
+            let isGen = decl.isGenericInstantiation
             if let methods = extensionMethods[typeName], let sym = methods[name] {
                 // Generate mangled name for the method
                 let mangledName = "\(typeName)_\(name)"
@@ -929,14 +974,30 @@ public class Monomorphizer {
             if let template = input.genericTemplates.structTemplates[name] {
                 // Non-generic struct reference
                 if template.typeParameters.isEmpty {
-                    return .structure(name: name, members: [], isGenericInstantiation: false)
+                    let decl = StructDecl(
+                        name: name,
+                        modulePath: [],
+                        sourceFile: "",
+                        access: .default,
+                        members: [],
+                        isGenericInstantiation: false
+                    )
+                    return .structure(decl: decl)
                 }
             }
             // Check if it's a known union template (non-generic reference)
             if let template = input.genericTemplates.unionTemplates[name] {
                 // Non-generic union reference
                 if template.typeParameters.isEmpty {
-                    return .union(name: name, cases: [], isGenericInstantiation: false)
+                    let decl = UnionDecl(
+                        name: name,
+                        modulePath: [],
+                        sourceFile: "",
+                        access: .default,
+                        cases: [],
+                        isGenericInstantiation: false
+                    )
+                    return .union(decl: decl)
                 }
             }
             // Otherwise treat as generic parameter
@@ -996,7 +1057,15 @@ public class Monomorphizer {
     
     /// Returns the built-in String type.
     private func builtinStringType() -> Type {
-        return .structure(name: "String", members: [], isGenericInstantiation: false)
+        let decl = StructDecl(
+            name: "String",
+            modulePath: [],
+            sourceFile: "",
+            access: .default,
+            members: [],
+            isGenericInstantiation: false
+        )
+        return .structure(decl: decl)
     }
     
     // MARK: - Type Substitution in Expressions
@@ -1050,7 +1119,10 @@ public class Monomorphizer {
                 name: identifier.name,
                 type: substituteType(identifier.type, substitution: substitution),
                 kind: identifier.kind,
-                methodKind: identifier.methodKind
+                methodKind: identifier.methodKind,
+                modulePath: identifier.modulePath,
+                sourceFile: identifier.sourceFile,
+                access: identifier.access
             )
             return .letExpression(
                 identifier: newIdentifier,
@@ -1146,7 +1218,10 @@ public class Monomorphizer {
                 name: newName,
                 type: newType,
                 kind: identifier.kind,
-                methodKind: identifier.methodKind
+                methodKind: identifier.methodKind,
+                modulePath: identifier.modulePath,
+                sourceFile: identifier.sourceFile,
+                access: identifier.access
             )
             return .variable(identifier: newIdentifier)
             
@@ -1278,7 +1353,10 @@ public class Monomorphizer {
                 name: method.name,
                 type: substituteType(method.type, substitution: substitution),
                 kind: method.kind,
-                methodKind: method.methodKind
+                methodKind: method.methodKind,
+                modulePath: method.modulePath,
+                sourceFile: method.sourceFile,
+                access: method.access
             )
             
             // Substitute type args if present
@@ -1303,7 +1381,10 @@ public class Monomorphizer {
                             name: concreteMethod.name,
                             type: concreteMethod.type,
                             kind: concreteMethod.kind,
-                            methodKind: concreteMethod.methodKind
+                            methodKind: concreteMethod.methodKind,
+                            modulePath: concreteMethod.modulePath,
+                            sourceFile: concreteMethod.sourceFile,
+                            access: concreteMethod.access
                         )
                     }
                 }
@@ -1316,7 +1397,10 @@ public class Monomorphizer {
                         name: concreteMethod.name,
                         type: concreteMethod.type,
                         kind: concreteMethod.kind,
-                        methodKind: concreteMethod.methodKind
+                        methodKind: concreteMethod.methodKind,
+                        modulePath: concreteMethod.modulePath,
+                        sourceFile: concreteMethod.sourceFile,
+                        access: concreteMethod.access
                     )
                 }
             }
@@ -1342,7 +1426,9 @@ public class Monomorphizer {
             // 1. Update the identifier name to match the concrete type's layout name
             // 2. Ensure the concrete type is instantiated
             var newName = identifier.name
-            if case .structure(let layoutName, _, let isGenericInstantiation) = substitutedType {
+            if case .structure(let decl) = substitutedType {
+                let layoutName = decl.name
+                let isGenericInstantiation = decl.isGenericInstantiation
                 newName = layoutName
                 // Trigger instantiation of the concrete type if needed
                 if isGenericInstantiation && !generatedLayouts.contains(layoutName) && !substitutedType.containsGenericParameter {
@@ -1362,17 +1448,25 @@ public class Monomorphizer {
                         
                         // Try to reconstruct the type args from the layout keys
                         // This is a heuristic - we look for types that match the layout keys
-                        var typeArgs: [Type] = []
+                        var typeArgsReconstructed: [Type] = []
                         for key in argLayoutKeys {
                             if let builtinType = resolveBuiltinType(key) {
-                                typeArgs.append(builtinType)
+                                typeArgsReconstructed.append(builtinType)
                             } else if key == "I" {
-                                typeArgs.append(.int)
+                                typeArgsReconstructed.append(.int)
                             } else if key == "R" {
-                                typeArgs.append(.reference(inner: .int)) // Heuristic
+                                typeArgsReconstructed.append(.reference(inner: .int)) // Heuristic
                             } else if key.hasPrefix("Struct_") {
                                 // Nested struct - need to look up
-                                typeArgs.append(.structure(name: key, members: [], isGenericInstantiation: true))
+                                let nestedDecl = StructDecl(
+                                    name: key,
+                                    modulePath: [],
+                                    sourceFile: "",
+                                    access: .default,
+                                    members: [],
+                                    isGenericInstantiation: true
+                                )
+                                typeArgsReconstructed.append(.structure(decl: nestedDecl))
                             } else {
                                 // Unknown type - use the substituted type's info
                                 break
@@ -1380,34 +1474,36 @@ public class Monomorphizer {
                         }
                         
                         // If we couldn't reconstruct the type args, try to use the substitution map
-                        if typeArgs.count != template.typeParameters.count {
-                            typeArgs = template.typeParameters.compactMap { param in
+                        if typeArgsReconstructed.count != template.typeParameters.count {
+                            typeArgsReconstructed = template.typeParameters.compactMap { param in
                                 substitution[param.name]
                             }
                         }
                         
-                        if typeArgs.count == template.typeParameters.count {
+                        if typeArgsReconstructed.count == template.typeParameters.count {
                             pendingRequests.append(InstantiationRequest(
-                                kind: .structType(template: template, args: typeArgs),
+                                kind: .structType(template: template, args: typeArgsReconstructed),
                                 sourceLine: currentLine,
                                 sourceFileName: currentFileName
                             ))
                         }
                     }
                 }
-            } else if case .union(let layoutName, _, let isGenericInstantiation) = substitutedType {
+            } else if case .union(let decl) = substitutedType {
+                let layoutName = decl.name
+                let isGenericInstantiation = decl.isGenericInstantiation
                 newName = layoutName
                 // Similar logic for unions
                 if isGenericInstantiation && !generatedLayouts.contains(layoutName) && !substitutedType.containsGenericParameter {
                     let baseName = layoutName.split(separator: "_").first.map(String.init) ?? layoutName
                     if let template = input.genericTemplates.unionTemplates[baseName] {
-                        let typeArgs: [Type] = template.typeParameters.compactMap { param in
+                        let typeArgsReconstructed: [Type] = template.typeParameters.compactMap { param in
                             substitution[param.name]
                         }
                         
-                        if typeArgs.count == template.typeParameters.count {
+                        if typeArgsReconstructed.count == template.typeParameters.count {
                             pendingRequests.append(InstantiationRequest(
-                                kind: .unionType(template: template, args: typeArgs),
+                                kind: .unionType(template: template, args: typeArgsReconstructed),
                                 sourceLine: currentLine,
                                 sourceFileName: currentFileName
                             ))
@@ -1420,7 +1516,10 @@ public class Monomorphizer {
                 name: newName,
                 type: substitutedType,
                 kind: identifier.kind,
-                methodKind: identifier.methodKind
+                methodKind: identifier.methodKind,
+                modulePath: identifier.modulePath,
+                sourceFile: identifier.sourceFile,
+                access: identifier.access
             )
             // Substitute type args if present
             let substitutedTypeArgs = typeArgs?.map { substituteType($0, substitution: substitution) }
@@ -1437,7 +1536,10 @@ public class Monomorphizer {
                     name: sym.name,
                     type: substituteType(sym.type, substitution: substitution),
                     kind: sym.kind,
-                    methodKind: sym.methodKind
+                    methodKind: sym.methodKind,
+                    modulePath: sym.modulePath,
+                    sourceFile: sym.sourceFile,
+                    access: sym.access
                 )
             }
             return .memberPath(
@@ -1451,7 +1553,10 @@ public class Monomorphizer {
                 name: method.name,
                 type: substituteType(method.type, substitution: substitution),
                 kind: method.kind,
-                methodKind: method.methodKind
+                methodKind: method.methodKind,
+                modulePath: method.modulePath,
+                sourceFile: method.sourceFile,
+                access: method.access
             )
             
             // Resolve method name to mangled name for generic extension methods
@@ -1462,7 +1567,10 @@ public class Monomorphizer {
                         name: concreteMethod.name,
                         type: concreteMethod.type,
                         kind: concreteMethod.kind,
-                        methodKind: concreteMethod.methodKind
+                        methodKind: concreteMethod.methodKind,
+                        modulePath: concreteMethod.modulePath,
+                        sourceFile: concreteMethod.sourceFile,
+                        access: concreteMethod.access
                     )
                 }
             }
@@ -1525,7 +1633,10 @@ public class Monomorphizer {
                 name: identifier.name,
                 type: substituteType(identifier.type, substitution: substitution),
                 kind: identifier.kind,
-                methodKind: identifier.methodKind
+                methodKind: identifier.methodKind,
+                modulePath: identifier.modulePath,
+                sourceFile: identifier.sourceFile,
+                access: identifier.access
             )
             return .variableDeclaration(
                 identifier: newIdentifier,
@@ -1574,7 +1685,10 @@ public class Monomorphizer {
                 name: symbol.name,
                 type: substituteType(symbol.type, substitution: substitution),
                 kind: symbol.kind,
-                methodKind: symbol.methodKind
+                methodKind: symbol.methodKind,
+                modulePath: symbol.modulePath,
+                sourceFile: symbol.sourceFile,
+                access: symbol.access
             )
             return .variable(symbol: newSymbol)
             
@@ -1694,14 +1808,15 @@ public class Monomorphizer {
         let substituted = SemaUtils.substituteType(type, substitution: substitution)
         
         // Then, resolve genericStruct/genericUnion to concrete types
-        return resolveParameterizedType(substituted)
+        return resolveParameterizedType(substituted, visited: [])
     }
     
     /// Resolves a parameterized type (genericStruct/genericUnion) to a concrete type.
     /// If the type still contains generic parameters, returns it unchanged.
     /// - Parameter type: The type to resolve
+    /// - Parameter visited: Set of visited type declaration UUIDs to prevent infinite recursion
     /// - Returns: The resolved concrete type, or the original type if it can't be resolved yet
-    private func resolveParameterizedType(_ type: Type) -> Type {
+    private func resolveParameterizedType(_ type: Type, visited: Set<UUID> = []) -> Type {
         switch type {
         case .genericStruct(let template, let args):
             // First, recursively resolve the type arguments
@@ -1727,7 +1842,15 @@ public class Monomorphizer {
                     // If instantiation fails, return a placeholder
                     let argLayoutKeys = resolvedArgs.map { $0.layoutKey }.joined(separator: "_")
                     let layoutName = "\(template)_\(argLayoutKeys)"
-                    return .structure(name: layoutName, members: [], isGenericInstantiation: true)
+                    let decl = StructDecl(
+                        name: layoutName,
+                        modulePath: [],
+                        sourceFile: "",
+                        access: .default,
+                        members: [],
+                        isGenericInstantiation: true
+                    )
+                    return .structure(decl: decl)
                 }
             }
             
@@ -1762,7 +1885,15 @@ public class Monomorphizer {
                     // If instantiation fails, return a placeholder
                     let argLayoutKeys = resolvedArgs.map { $0.layoutKey }.joined(separator: "_")
                     let layoutName = "\(template)_\(argLayoutKeys)"
-                    return .union(name: layoutName, cases: [], isGenericInstantiation: true)
+                    let decl = UnionDecl(
+                        name: layoutName,
+                        modulePath: [],
+                        sourceFile: "",
+                        access: .default,
+                        cases: [],
+                        isGenericInstantiation: true
+                    )
+                    return .union(decl: decl)
                 }
             }
             
@@ -1786,26 +1917,78 @@ public class Monomorphizer {
                 returns: resolveParameterizedType(returns)
             )
             
-        case .structure(let name, let members, let isGenericInstantiation):
-            let newMembers = members.map { member in
+        case .structure(let decl):
+            // Check for infinite recursion using UUID
+            if visited.contains(decl.id) {
+                return type
+            }
+            var newVisited = visited
+            newVisited.insert(decl.id)
+            
+            let newMembers = decl.members.map { member in
                 (
                     name: member.name,
-                    type: resolveParameterizedType(member.type),
+                    type: resolveParameterizedType(member.type, visited: newVisited),
                     mutable: member.mutable
                 )
             }
-            return .structure(name: name, members: newMembers, isGenericInstantiation: isGenericInstantiation)
             
-        case .union(let name, let cases, let isGenericInstantiation):
-            let newCases = cases.map { unionCase in
+            // Only create a new type if members actually changed
+            let membersChanged = zip(decl.members, newMembers).contains { old, new in
+                old.type != new.type
+            }
+            if !membersChanged {
+                return type
+            }
+            
+            let newDecl = StructDecl(
+                name: decl.name,
+                modulePath: decl.modulePath,
+                sourceFile: decl.sourceFile,
+                access: decl.access,
+                members: newMembers,
+                isGenericInstantiation: decl.isGenericInstantiation,
+                typeArguments: decl.typeArguments
+            )
+            return .structure(decl: newDecl)
+            
+        case .union(let decl):
+            // Check for infinite recursion using UUID
+            if visited.contains(decl.id) {
+                return type
+            }
+            var newVisited = visited
+            newVisited.insert(decl.id)
+            
+            let newCases = decl.cases.map { unionCase in
                 UnionCase(
                     name: unionCase.name,
                     parameters: unionCase.parameters.map { param in
-                        (name: param.name, type: resolveParameterizedType(param.type))
+                        (name: param.name, type: resolveParameterizedType(param.type, visited: newVisited))
                     }
                 )
             }
-            return .union(name: name, cases: newCases, isGenericInstantiation: isGenericInstantiation)
+            
+            // Only create a new type if cases actually changed
+            let casesChanged = zip(decl.cases, newCases).contains { old, new in
+                zip(old.parameters, new.parameters).contains { oldParam, newParam in
+                    oldParam.type != newParam.type
+                }
+            }
+            if !casesChanged {
+                return type
+            }
+            
+            let newDecl = UnionDecl(
+                name: decl.name,
+                modulePath: decl.modulePath,
+                sourceFile: decl.sourceFile,
+                access: decl.access,
+                cases: newCases,
+                isGenericInstantiation: decl.isGenericInstantiation,
+                typeArguments: decl.typeArguments
+            )
+            return .union(decl: newDecl)
             
         default:
             return type
@@ -1823,14 +2006,20 @@ public class Monomorphizer {
                 name: identifier.name,
                 type: resolveParameterizedType(identifier.type),
                 kind: identifier.kind,
-                methodKind: identifier.methodKind
+                methodKind: identifier.methodKind,
+                modulePath: identifier.modulePath,
+                sourceFile: identifier.sourceFile,
+                access: identifier.access
             )
             let newParams = parameters.map { param in
                 Symbol(
                     name: param.name,
                     type: resolveParameterizedType(param.type),
                     kind: param.kind,
-                    methodKind: param.methodKind
+                    methodKind: param.methodKind,
+                    modulePath: param.modulePath,
+                    sourceFile: param.sourceFile,
+                    access: param.access
                 )
             }
             return .globalStructDeclaration(identifier: newIdentifier, parameters: newParams)
@@ -1840,7 +2029,10 @@ public class Monomorphizer {
                 name: identifier.name,
                 type: resolveParameterizedType(identifier.type),
                 kind: identifier.kind,
-                methodKind: identifier.methodKind
+                methodKind: identifier.methodKind,
+                modulePath: identifier.modulePath,
+                sourceFile: identifier.sourceFile,
+                access: identifier.access
             )
             let newCases = cases.map { unionCase in
                 UnionCase(
@@ -1857,14 +2049,20 @@ public class Monomorphizer {
                 name: identifier.name,
                 type: resolveParameterizedType(identifier.type),
                 kind: identifier.kind,
-                methodKind: identifier.methodKind
+                methodKind: identifier.methodKind,
+                modulePath: identifier.modulePath,
+                sourceFile: identifier.sourceFile,
+                access: identifier.access
             )
             let newParams = parameters.map { param in
                 Symbol(
                     name: param.name,
                     type: resolveParameterizedType(param.type),
                     kind: param.kind,
-                    methodKind: param.methodKind
+                    methodKind: param.methodKind,
+                    modulePath: param.modulePath,
+                    sourceFile: param.sourceFile,
+                    access: param.access
                 )
             }
             let newBody = resolveTypesInExpression(body)
@@ -1875,10 +2073,10 @@ public class Monomorphizer {
             let resolvedType = resolveParameterizedType(type)
             let typeName: String
             switch resolvedType {
-            case .structure(let name, _, _):
-                typeName = name
-            case .union(let name, _, _):
-                typeName = name
+            case .structure(let decl):
+                typeName = decl.name
+            case .union(let decl):
+                typeName = decl.name
             default:
                 typeName = resolvedType.description
             }
@@ -1892,14 +2090,20 @@ public class Monomorphizer {
                         name: mangledName,
                         type: resolveParameterizedType(method.identifier.type),
                         kind: method.identifier.kind,
-                        methodKind: method.identifier.methodKind
+                        methodKind: method.identifier.methodKind,
+                        modulePath: method.identifier.modulePath,
+                        sourceFile: method.identifier.sourceFile,
+                        access: method.identifier.access
                     ),
                     parameters: method.parameters.map { param in
                         Symbol(
                             name: param.name,
                             type: resolveParameterizedType(param.type),
                             kind: param.kind,
-                            methodKind: param.methodKind
+                            methodKind: param.methodKind,
+                            modulePath: param.modulePath,
+                            sourceFile: param.sourceFile,
+                            access: param.access
                         )
                     },
                     body: resolveTypesInExpression(method.body),
@@ -1913,8 +2117,12 @@ public class Monomorphizer {
                 name: identifier.name,
                 type: resolveParameterizedType(identifier.type),
                 kind: identifier.kind,
-                methodKind: identifier.methodKind
+                methodKind: identifier.methodKind,
+                modulePath: identifier.modulePath,
+                sourceFile: identifier.sourceFile,
+                access: identifier.access
             )
+            
             return .globalVariable(identifier: newIdentifier, value: resolveTypesInExpression(value), kind: kind)
             
         case .genericTypeTemplate, .genericFunctionTemplate:
@@ -1965,7 +2173,10 @@ public class Monomorphizer {
                 name: identifier.name,
                 type: resolveParameterizedType(identifier.type),
                 kind: identifier.kind,
-                methodKind: identifier.methodKind
+                methodKind: identifier.methodKind,
+                modulePath: identifier.modulePath,
+                sourceFile: identifier.sourceFile,
+                access: identifier.access
             )
             return .letExpression(
                 identifier: newIdentifier,
@@ -2025,7 +2236,10 @@ public class Monomorphizer {
                 name: identifier.name,
                 type: resolveParameterizedType(identifier.type),
                 kind: identifier.kind,
-                methodKind: identifier.methodKind
+                methodKind: identifier.methodKind,
+                modulePath: identifier.modulePath,
+                sourceFile: identifier.sourceFile,
+                access: identifier.access
             )
             return .variable(identifier: newIdentifier)
             
@@ -2127,7 +2341,10 @@ public class Monomorphizer {
                 name: method.name,
                 type: resolveParameterizedType(method.type),
                 kind: method.kind,
-                methodKind: method.methodKind
+                methodKind: method.methodKind,
+                modulePath: method.modulePath,
+                sourceFile: method.sourceFile,
+                access: method.access
             )
             let resolvedTypeArgs = typeArgs?.map { resolveParameterizedType($0) }
             
@@ -2141,7 +2358,10 @@ public class Monomorphizer {
                         name: concreteMethod.name,
                         type: resolvedMethodType,
                         kind: concreteMethod.kind,
-                        methodKind: concreteMethod.methodKind
+                        methodKind: concreteMethod.methodKind,
+                        modulePath: concreteMethod.modulePath,
+                        sourceFile: concreteMethod.sourceFile,
+                        access: concreteMethod.access
                     )
                 }
             }
@@ -2165,17 +2385,20 @@ public class Monomorphizer {
             
             // Update the identifier name to match the resolved type's layout name
             var newName = identifier.name
-            if case .structure(let layoutName, _, _) = resolvedType {
-                newName = layoutName
-            } else if case .union(let layoutName, _, _) = resolvedType {
-                newName = layoutName
+            if case .structure(let decl) = resolvedType {
+                newName = decl.name
+            } else if case .union(let decl) = resolvedType {
+                newName = decl.name
             }
             
             let newIdentifier = Symbol(
                 name: newName,
                 type: resolvedType,
                 kind: identifier.kind,
-                methodKind: identifier.methodKind
+                methodKind: identifier.methodKind,
+                modulePath: identifier.modulePath,
+                sourceFile: identifier.sourceFile,
+                access: identifier.access
             )
             let resolvedTypeArgs = typeArgs?.map { resolveParameterizedType($0) }
             return .typeConstruction(
@@ -2191,7 +2414,10 @@ public class Monomorphizer {
                     name: sym.name,
                     type: resolveParameterizedType(sym.type),
                     kind: sym.kind,
-                    methodKind: sym.methodKind
+                    methodKind: sym.methodKind,
+                    modulePath: sym.modulePath,
+                    sourceFile: sym.sourceFile,
+                    access: sym.access
                 )
             }
             return .memberPath(
@@ -2205,7 +2431,10 @@ public class Monomorphizer {
                 name: method.name,
                 type: resolveParameterizedType(method.type),
                 kind: method.kind,
-                methodKind: method.methodKind
+                methodKind: method.methodKind,
+                modulePath: method.modulePath,
+                sourceFile: method.sourceFile,
+                access: method.access
             )
             
             // Resolve method name to mangled name for generic extension methods
@@ -2216,7 +2445,10 @@ public class Monomorphizer {
                         name: concreteMethod.name,
                         type: concreteMethod.type,
                         kind: concreteMethod.kind,
-                        methodKind: concreteMethod.methodKind
+                        methodKind: concreteMethod.methodKind,
+                        modulePath: concreteMethod.modulePath,
+                        sourceFile: concreteMethod.sourceFile,
+                        access: concreteMethod.access
                     )
                 }
             }
@@ -2272,13 +2504,13 @@ public class Monomorphizer {
             // Get the template name from the base type
             let templateName: String
             switch resolvedBaseType {
-            case .structure(let name, _, _):
+            case .structure(let decl):
                 // Extract base name from mangled name (e.g., "List_I" -> "List")
-                templateName = name.split(separator: "_").first.map(String.init) ?? name
+                templateName = decl.name.split(separator: "_").first.map(String.init) ?? decl.name
             case .genericStruct(let name, _):
                 templateName = name
-            case .union(let name, _, _):
-                templateName = name.split(separator: "_").first.map(String.init) ?? name
+            case .union(let decl):
+                templateName = decl.name.split(separator: "_").first.map(String.init) ?? decl.name
             case .genericUnion(let name, _):
                 templateName = name
             default:
@@ -2350,7 +2582,10 @@ public class Monomorphizer {
                 name: identifier.name,
                 type: resolveParameterizedType(identifier.type),
                 kind: identifier.kind,
-                methodKind: identifier.methodKind
+                methodKind: identifier.methodKind,
+                modulePath: identifier.modulePath,
+                sourceFile: identifier.sourceFile,
+                access: identifier.access
             )
             return .variableDeclaration(
                 identifier: newIdentifier,
@@ -2396,7 +2631,10 @@ public class Monomorphizer {
                 name: symbol.name,
                 type: resolveParameterizedType(symbol.type),
                 kind: symbol.kind,
-                methodKind: symbol.methodKind
+                methodKind: symbol.methodKind,
+                modulePath: symbol.modulePath,
+                sourceFile: symbol.sourceFile,
+                access: symbol.access
             )
             return .variable(symbol: newSymbol)
             

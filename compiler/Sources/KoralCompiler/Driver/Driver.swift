@@ -95,6 +95,15 @@ public class Driver {
       // Fallback if semantic errors escape without being wrapped.
       print("\(error.fileName): Semantic Error: \(error)")
       exit(1)
+    } catch let error as ModuleError {
+      print("Module Error: \(error)")
+      exit(1)
+    } catch let error as SymbolError {
+      print("Symbol Error: \(error)")
+      exit(1)
+    } catch let error as AccessError {
+      print("Access Error: \(error)")
+      exit(1)
     } catch {
       print("Error: \(error)")
       exit(1)
@@ -154,19 +163,78 @@ public class Driver {
         // 0. Load and Parse Core Library
         let coreLibPath = getCoreLibPath()
         let coreSource = try String(contentsOfFile: coreLibPath, encoding: .utf8)
-      coreGlobalNodes = try parseProgram(source: coreSource, fileName: coreDisplayName)
+        coreGlobalNodes = try parseProgram(source: coreSource, fileName: coreDisplayName)
     }
 
     // 1. Compile Koral to C
-    let koralSource = try String(contentsOfFile: file, encoding: .utf8)
-
-    let userGlobalNodes = try parseProgram(source: koralSource, fileName: userDisplayName)
+    // Always use ModuleResolver for unified handling of single-file and multi-file projects
+    // This ensures nodeSourceInfoList is always populated with correct file paths
+    let resolver = initializeModuleResolver()
     
-    let combinedAST: ASTNode = .program(globalNodes: coreGlobalNodes + userGlobalNodes)
+    var allGlobalNodes: [GlobalNode] = coreGlobalNodes
+    var nodeSourceInfoList: [GlobalNodeSourceInfo] = []
+    
+    do {
+      let compilationUnit = try resolver.resolveModule(entryFile: file)
+      
+      // Collect all global nodes from the compilation unit
+      allGlobalNodes = coreGlobalNodes + compilationUnit.getAllGlobalNodes()
+      
+      // 构建源信息列表
+      // 先添加标准库节点的源信息（空模块路径）
+      for node in coreGlobalNodes {
+        nodeSourceInfoList.append(GlobalNodeSourceInfo(
+          sourceFile: getCoreLibPath(),
+          modulePath: [],
+          node: node
+        ))
+      }
+      // 添加用户代码节点的源信息
+      let userNodesWithInfo = compilationUnit.getAllGlobalNodesWithSourceInfo()
+      for (node, sourceFile, modulePath) in userNodesWithInfo {
+        nodeSourceInfoList.append(GlobalNodeSourceInfo(
+          sourceFile: sourceFile,
+          modulePath: modulePath,
+          node: node
+        ))
+      }
+      
+      // Register all source files with source manager for error rendering
+      func registerSources(from module: ModuleInfo) {
+        // Register entry file
+        if let source = try? String(contentsOfFile: module.entryFile, encoding: .utf8) {
+          let displayName = URL(fileURLWithPath: module.entryFile).lastPathComponent
+          sourceManager.loadFile(name: displayName, content: source)
+        }
+        // Register merged files
+        for mergedFile in module.mergedFiles {
+          if let source = try? String(contentsOfFile: mergedFile, encoding: .utf8) {
+            let displayName = URL(fileURLWithPath: mergedFile).lastPathComponent
+            sourceManager.loadFile(name: displayName, content: source)
+          }
+        }
+        // Register submodule files
+        for (_, submodule) in module.submodules {
+          registerSources(from: submodule)
+        }
+      }
+      registerSources(from: compilationUnit.rootModule)
+      
+    } catch let error as ModuleError {
+      throw DiagnosticError(
+        stage: .other,
+        fileName: userDisplayName,
+        underlying: error,
+        sourceManager: sourceManager
+      )
+    }
+    
+    let combinedAST: ASTNode = .program(globalNodes: allGlobalNodes)
 
-    // 1. Type checking
+    // Type checking - always use source info initializer for unified handling
     let typeChecker = TypeChecker(
       ast: combinedAST,
+      nodeSourceInfoList: nodeSourceInfoList,
       coreGlobalCount: coreGlobalNodes.count,
       coreFileName: coreDisplayName,
       userFileName: userDisplayName
@@ -280,6 +348,38 @@ public class Driver {
 
     print("Error: Could not locate std/core.koral. Please set KORAL_HOME environment variable.")
     exit(1)
+  }
+  
+  /// Gets the standard library directory path
+  func getStdLibPath() -> String? {
+    // Check KORAL_HOME environment variable first
+    if let koralHome = ProcessInfo.processInfo.environment["KORAL_HOME"] {
+        let path = URL(fileURLWithPath: koralHome).appendingPathComponent("compiler/Sources/std").path
+        if FileManager.default.fileExists(atPath: path) {
+            return path
+        }
+    }
+
+    // Fallback: Assume we are running from .build/debug/ or similar
+    let currentPath = FileManager.default.currentDirectoryPath
+    let devPath = URL(fileURLWithPath: currentPath).appendingPathComponent("Sources/std").path
+    if FileManager.default.fileExists(atPath: devPath) {
+        return devPath
+    }
+    
+    // Fallback for tests running in package root
+    let testPath = URL(fileURLWithPath: currentPath).appendingPathComponent("compiler/Sources/std").path
+    if FileManager.default.fileExists(atPath: testPath) {
+         return testPath
+    }
+
+    return nil
+  }
+  
+  /// Initializes the module resolver with appropriate paths
+  private func initializeModuleResolver() -> ModuleResolver {
+    let stdLibPath = getStdLibPath()
+    return ModuleResolver(stdLibPath: stdLibPath, externalPaths: [])
   }
 
   func getSDKPath() -> String? {

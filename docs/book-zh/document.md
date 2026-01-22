@@ -332,7 +332,7 @@ Koral 旨在提供高效且安全的内存管理。它结合了自动内存管�
 
 算数操作符主要被使用在数字类型的数据运算上，大部分声明符合数学中的预期。
 
-Koral 支持标准的算术运算，包括加减乘除和取余。此外，还提供了幂运算操作符 `^`。
+Koral 支持标准的算术运算，包括加减乘除和取余。此外，还提供了幂运算操作符 `**`。
 
 ```koral
 let a = 4;
@@ -342,7 +342,7 @@ printLine( a - b );    // - 减
 printLine( a * b );    // * 乘
 printLine( a / b );    // / 除
 printLine( a % b );    // % 取余，意思是整除后剩下的余数
-printLine( a ^ b );    // ^ 幂
+printLine( a ** b );   // ** 幂
 ```
 
 ### 比较操作符
@@ -428,7 +428,7 @@ x -= 2;       // x = x - 2
 x *= 3;       // x = x * 3
 x /= 2;       // x = x / 2
 x %= 4;       // x = x % 4
-x ^= 2;       // x = x ^ 2 (幂运算)
+x **= 2;      // x = x ** 2 (幂运算)
 
 let mut y = 0b1100;
 y bitand= 0b1010; // y = y bitand 0b1010
@@ -443,7 +443,7 @@ y bitshr= 2;      // y = y bitshr 2
 操作符优先级从高到低如下：
 
 1. 前缀: `not`, `bitnot`, `+`(一元), `-`(一元)
-2. 幂: `^` (右结合)
+2. 幂: `**` (右结合)
 3. 乘除: `*`, `/`, `%`
 4. 加减: `+`, `-`
 5. 移位: `bitshl`, `bitshr`
@@ -1068,3 +1068,214 @@ let main() = {
     let z = mergeList(x, y);
 }
 ```
+
+
+## 模块系统
+
+Koral 提供了强大的模块系统，用于在多个文件和目录中组织代码。模块系统支持代码复用、封装和清晰的关注点分离。
+
+### 模块概念
+
+Koral 中的**模块**由入口文件及其通过 `using` 声明依赖的所有文件组成。模块边界由入口文件和依赖链决定。
+
+- **根模块**：由编译入口文件及其依赖组成的模块
+- **子模块**：子目录中的模块，以 `index.koral` 作为入口文件
+- **外部模块**：当前编译单元之外的模块（如标准库）
+
+### Using 声明
+
+`using` 关键字用于导入模块和符号。所有 `using` 声明必须出现在文件开头，在任何其他声明之前。
+
+#### 文件合并
+
+使用字符串字面量语法将同目录的文件合并到当前模块：
+
+```koral
+using "utils"      // 将 utils.koral 合并到当前模块
+using "helpers"    // 将 helpers.koral 合并到当前模块
+```
+
+合并的文件共享同一作用域 - 它们的 `public` 和 `protected` 符号互相可见，无需额外导入。
+
+#### 子模块导入
+
+使用 `self.` 前缀从子目录导入子模块：
+
+```koral
+using self.models              // 导入 models/ 子目录作为子模块（私有）
+protected using self.models    // 导入并在当前模块内共享
+public using self.models       // 导入并对外部模块公开
+```
+
+使用点号访问子模块成员：
+
+```koral
+using self.models
+let user = models.User("Alice")
+```
+
+也可以导入特定符号或批量导入：
+
+```koral
+using self.models.User         // 导入特定符号
+using self.models.*            // 批量导入所有 public 符号（变为 private）
+```
+
+#### 父模块访问
+
+使用 `super.` 前缀访问同一编译单元内的父模块：
+
+```koral
+using super.sibling            // 从父模块导入
+using super.super.uncle        // 从祖父模块导入（链式 super）
+```
+
+#### 外部模块导入
+
+导入外部模块（如标准库）不需要任何前缀：
+
+```koral
+using std                      // 导入 std 模块
+using std.collections          // 从 std 导入 collections
+using std.collections.List     // 导入特定符号
+using std.collections.*        // 批量导入所有 public 符号
+```
+
+使用别名重命名导入：
+
+```koral
+using txt = std.text           // 使用别名导入
+let builder = txt.StringBuilder.new()
+```
+
+### 访问修饰符
+
+Koral 提供三种访问级别来控制符号可见性：
+
+| 修饰符 | 可见性 |
+|--------|--------|
+| `public` | 任何地方都可访问 |
+| `protected` | 当前模块及所有子模块内可访问 |
+| `private` | 仅在同一文件内可访问 |
+
+#### 默认访问级别
+
+不同声明有不同的默认访问级别：
+
+| 声明类型 | 默认值 |
+|----------|--------|
+| 全局函数、变量、类型 | `protected` |
+| 结构体字段 | `protected` |
+| 枚举构造器字段 | `public` |
+| 成员函数（`given` 块内） | `protected` |
+| Trait 方法 | `public` |
+| Using 声明 | `private` |
+
+#### 使用访问修饰符
+
+在声明前添加访问修饰符：
+
+```koral
+public type User(
+    public name String,           // 任何地方都可访问
+    protected email String,       // 模块及子模块内可访问
+    private passwordHash String,  // 仅本文件可访问
+)
+
+public let greet(user User) String = "Hello, " + user.name
+
+protected let validateEmail(email String) Bool = email.contains("@")
+
+private let hashPassword(password String) String = { /* ... */ }
+```
+
+#### 重导出规则
+
+可以重导出同一编译单元内的符号：
+
+```koral
+public using self.helpers      // 重导出子模块
+public using super.sibling     // 重导出父模块的符号
+```
+
+但是，不允许重导出外部模块的符号：
+
+```koral
+public using std.Option        // 错误：不能重导出外部符号
+```
+
+### 项目结构示例
+
+典型的多文件项目结构：
+
+```
+my_project/
+├── main.koral           # 根模块入口
+├── utils.koral          # 合并到根模块
+├── models/
+│   ├── index.koral      # models 子模块入口
+│   ├── user.koral       # 合并到 models 模块
+│   └── post.koral       # 合并到 models 模块
+└── services/
+    ├── index.koral      # services 子模块入口
+    └── auth.koral       # 合并到 services 模块
+```
+
+```koral
+// main.koral
+using std
+using "utils"                  // 合并 utils.koral
+using self.models              // 导入 models 子模块
+using self.services            // 导入 services 子模块
+
+public let main() = {
+    let user = models.User.new("Alice")
+    if services.authenticate(user) then {
+        printLine("Welcome!")
+    }
+}
+```
+
+```koral
+// models/index.koral
+using "user"                   // 合并 user.koral
+using "post"                   // 合并 post.koral
+// User 和 Post 类型现在是 models 模块的一部分
+```
+
+```koral
+// models/user.koral
+public type User(
+    public name String,
+    public email String,
+)
+
+given User {
+    public new(name String) User = User(name, "")
+}
+```
+
+### 同目录多程序
+
+多个独立程序可以共享公共代码：
+
+```
+scripts/
+├── tool1.koral          # 独立程序 1
+├── tool2.koral          # 独立程序 2
+└── common.koral         # 共享工具
+```
+
+```koral
+// tool1.koral
+using "common"
+public let main() = helper()
+
+// tool2.koral  
+using "common"
+public let main() = helper()
+```
+
+每个程序独立编译：
+- `koralc tool1.koral` → tool1 模块 = tool1.koral + common.koral
+- `koralc tool2.koral` → tool2 模块 = tool2.koral + common.koral
