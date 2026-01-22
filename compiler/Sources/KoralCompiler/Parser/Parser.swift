@@ -1050,6 +1050,12 @@ public class Parser {
     case .multiplyEqual: return .multiply
     case .divideEqual: return .divide
     case .moduloEqual: return .modulo
+    case .doubleStarEqual: return .power
+    case .ampersandEqual: return .bitwiseAnd
+    case .pipeEqual: return .bitwiseOr
+    case .caretEqual: return .bitwiseXor
+    case .leftShiftEqual: return .shiftLeft
+    case .rightShiftEqual: return .shiftRight
     default: return nil
     }
   }
@@ -1449,9 +1455,9 @@ public class Parser {
 
   private func parseBitwiseOrExpression() throws -> ExpressionNode {
     var left = try parseBitwiseXorExpression()
-    while currentToken === .bitorKeyword {
+    while currentToken === .pipe {
       if isLineContinuationBlocked() { break }
-      try match(.bitorKeyword)
+      try match(.pipe)
       let right = try parseBitwiseXorExpression()
       left = .bitwiseExpression(left: left, operator: .or, right: right)
     }
@@ -1460,9 +1466,9 @@ public class Parser {
 
   private func parseBitwiseXorExpression() throws -> ExpressionNode {
     var left = try parseBitwiseAndExpression()
-    while currentToken === .bitxorKeyword {
+    while currentToken === .caret {
       if isLineContinuationBlocked() { break }
-      try match(.bitxorKeyword)
+      try match(.caret)
       let right = try parseBitwiseAndExpression()
       left = .bitwiseExpression(left: left, operator: .xor, right: right)
     }
@@ -1471,9 +1477,9 @@ public class Parser {
 
   private func parseBitwiseAndExpression() throws -> ExpressionNode {
     var left = try parseRangeExpression()
-    while currentToken === .bitandKeyword {
+    while currentToken === .ampersand {
       if isLineContinuationBlocked() { break }
-      try match(.bitandKeyword)
+      try match(.ampersand)
       let right = try parseRangeExpression()
       left = .bitwiseExpression(left: left, operator: .and, right: right)
     }
@@ -1553,12 +1559,12 @@ public class Parser {
 
   private func parseShiftExpression() throws -> ExpressionNode {
     var left = try parseAdditiveExpression()
-    while currentToken === .bitshlKeyword || currentToken === .bitshrKeyword {
+    while currentToken === .leftShift || currentToken === .rightShift {
       if isLineContinuationBlocked() { break }
       let op = currentToken
       try match(op)
       let right = try parseAdditiveExpression()
-      let bitOp: BitwiseOperator = (op === .bitshlKeyword) ? .shiftLeft : .shiftRight
+      let bitOp: BitwiseOperator = (op === .leftShift) ? .shiftLeft : .shiftRight
       left = .bitwiseExpression(left: left, operator: bitOp, right: right)
     }
     return left
@@ -1584,18 +1590,31 @@ public class Parser {
 
   // Sixth level: Multiplication, division, and modulo
   private func parseMultiplicativeExpression() throws -> ExpressionNode {
-    var left = try parsePrefixExpression()
+    var left = try parsePowerExpression()
 
     while currentToken === .multiply || currentToken === .divide || currentToken === .modulo {
       if isLineContinuationBlocked() { break }
       let op = currentToken
       try match(op)
-      let right = try parsePrefixExpression()
+      let right = try parsePowerExpression()
       left = .arithmeticExpression(
         left: left,
         operator: tokenToArithmeticOperator(op),
         right: right
       )
+    }
+    return left
+  }
+
+  // Seventh level: Power (right-associative)
+  private func parsePowerExpression() throws -> ExpressionNode {
+    let left = try parsePrefixExpression()
+    // Power is right-associative, so we use recursion instead of a loop
+    if currentToken === .doubleStar {
+      if isLineContinuationBlocked() { return left }
+      try match(.doubleStar)
+      let right = try parsePowerExpression()  // Recursive for right-associativity
+      return .arithmeticExpression(left: left, operator: .power, right: right)
     }
     return left
   }
@@ -1612,8 +1631,8 @@ public class Parser {
       try match(.derefKeyword)
       let expr = try parsePrefixExpression()
       return .derefExpression(expr)
-    } else if currentToken === .bitnotKeyword {
-      try match(.bitnotKeyword)
+    } else if currentToken === .tilde {
+      try match(.tilde)
       let expr = try parsePrefixExpression()
       return .bitwiseNotExpression(expr)
     }
@@ -1713,6 +1732,7 @@ public class Parser {
     case .multiply: return .multiply
     case .divide: return .divide
     case .modulo: return .modulo
+    case .doubleStar: return .power
     default: fatalError("Invalid arithmetic operator token")
     }
   }

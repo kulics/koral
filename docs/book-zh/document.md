@@ -393,12 +393,12 @@ let a = true or f(); // 不会执行 f()
 ```koral
 let a = 4;
 let b = 2;
-printLine( a bitand b );    // 按位与
-printLine( a bitor b );     // 按位或
-printLine( a bitxor b );    // 按位异或
-printLine( bitnot a );      // 按位取反
-printLine( a bitshl b );    // 左移
-printLine( a bitshr b );    // 右移
+printLine( a & b );    // 按位与
+printLine( a | b );    // 按位或
+printLine( a ^ b );    // 按位异或
+printLine( ~a );       // 按位取反
+printLine( a << b );   // 左移
+printLine( a >> b );   // 右移
 ```
 
 ### 范围操作符
@@ -431,27 +431,27 @@ x %= 4;       // x = x % 4
 x **= 2;      // x = x ** 2 (幂运算)
 
 let mut y = 0b1100;
-y bitand= 0b1010; // y = y bitand 0b1010
-y bitor=  0b0001; // y = y bitor 0b0001
-y bitxor= 0b1111; // y = y bitxor 0b1111
-y bitshl= 1;      // y = y bitshl 1
-y bitshr= 2;      // y = y bitshr 2
+y &= 0b1010;  // y = y & 0b1010
+y |= 0b0001;  // y = y | 0b0001
+y ^= 0b1111;  // y = y ^ 0b1111
+y <<= 1;      // y = y << 1
+y >>= 2;      // y = y >> 2
 ```
 
 ### 运算符优先级
 
 操作符优先级从高到低如下：
 
-1. 前缀: `not`, `bitnot`, `+`(一元), `-`(一元)
+1. 前缀: `not`, `~`, `+`(一元), `-`(一元)
 2. 幂: `**` (右结合)
 3. 乘除: `*`, `/`, `%`
 4. 加减: `+`, `-`
-5. 移位: `bitshl`, `bitshr`
+5. 移位: `<<`, `>>`
 6. 关系: `<`, `>`, `<=`, `>=`
 7. 相等: `==`, `<>`
-8. 按位与: `bitand`
-9. 按位异或: `bitxor`
-10. 按位或: `bitor`
+8. 按位与: `&`
+9. 按位异或: `^`
+10. 按位或: `|`
 11. 模式检查: `is`
 12. 逻辑与: `and`
 13. 逻辑或: `or`
