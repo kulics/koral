@@ -1,0 +1,288 @@
+// ============================================================================
+// Koral Standard Library - Map Type
+// ============================================================================
+// NOTE: This file is merged into core.koral, so all previous types are already available.
+// ============================================================================
+
+// ============================================================================
+// Map Storage and Type Definition
+// ============================================================================
+
+public type [K Hashable, V Any]MapEntry(key K, value V)
+
+public type [K Hashable, V Any]MapBucket {
+    Empty(),
+    Occupied(entry [K, V]MapEntry),
+    Deleted(),
+}
+
+public type [K Hashable, V Any]MapStorage(
+    mut buckets [[K, V]MapBucket]Pointer,
+    mut count Int,
+    mut capacity Int
+)
+
+given[K Hashable, V Any] [K, V]MapStorage {
+    __drop(self ref) = {
+        let mut i = 0
+        while i < self.capacity then {
+            self.buckets.offset(i).deinit()
+            i += 1
+        }
+        dealloc_memory(self.buckets)
+    }
+}
+
+public type [K Hashable, V Any]Map(mut storage [K, V]MapStorage ref)
+
+public type [K Hashable, V Any]MapIterator(storage [K, V]MapStorage ref, mut index Int)
+
+// ============================================================================
+// Map Methods
+// ============================================================================
+
+given[K Hashable, V Any] [K, V]Map {
+    public new() Self = {
+        let capacity = 16
+        let buckets = [[K, V]MapBucket]alloc_memory(capacity)
+        let mut i = 0
+        while i < capacity then {
+            buckets.offset(i).init([K, V]MapBucket.Empty())
+            i += 1
+        }
+        let storage = ref [K, V]MapStorage(buckets, 0, capacity)
+        [K, V]Map(storage)
+    }
+
+    public with_capacity(capacity Int) Self = {
+        // Hash tables need extra space for efficiency (load factor ~0.5)
+        let cap = if capacity < 4 then 4 else capacity * 2
+        let buckets = [[K, V]MapBucket]alloc_memory(cap)
+        let mut i = 0
+        while i < cap then {
+            buckets.offset(i).init([K, V]MapBucket.Empty())
+            i += 1
+        }
+        let storage = ref [K, V]MapStorage(buckets, 0, cap)
+        [K, V]Map(storage)
+    }
+
+    public count(self) Int = self.storage.count
+
+    private ensure_unique(self ref) Void = {
+        if ref_count(self.storage) > 1 then {
+            let old = self.storage
+            let new_buckets = [[K, V]MapBucket]alloc_memory(old.capacity)
+            let mut i = 0
+            while i < old.capacity then {
+                let bucket = old.buckets.offset(i).peek()
+                new_buckets.offset(i).init(bucket)
+                i += 1
+            }
+            let new_storage = ref [K, V]MapStorage(new_buckets, old.count, old.capacity)
+            self.storage = new_storage
+        }
+    }
+
+    // Using when for bucket handling
+    private find_slot(self ref, key K ref) Int = {
+        let h = key.hash()
+        let mut idx = (Int){ h % (UInt)self.storage.capacity }
+        let mut first_deleted = 0 - 1
+        let mut probes = 0
+        while probes < self.storage.capacity then {
+            let bucket = self.storage.buckets.offset(idx).peek()
+            when bucket is {
+                .Empty then {
+                    if first_deleted >= 0 then { return first_deleted; }
+                    return idx
+                },
+                .Deleted then {
+                    if first_deleted < 0 then { first_deleted = idx; }
+                },
+                .Occupied(e) then {
+                    if e.key == deref key then { return idx; }
+                },
+            }
+            idx = { idx + 1 } % self.storage.capacity
+            probes += 1
+        }
+        if first_deleted >= 0 then first_deleted else 0 - 1
+    }
+
+    private rehash(self ref) Void = {
+        let old_cap = self.storage.capacity
+        let old_buckets = self.storage.buckets
+        let new_cap = old_cap * 2
+        let new_buckets = [[K, V]MapBucket]alloc_memory(new_cap)
+        let mut i = 0
+        while i < new_cap then {
+            new_buckets.offset(i).init([K, V]MapBucket.Empty())
+            i += 1
+        }
+        self.storage.buckets = new_buckets
+        self.storage.capacity = new_cap
+        self.storage.count = 0
+        i = 0
+        while i < old_cap then {
+            let bucket = old_buckets.offset(i).take()
+            when bucket is {
+                .Occupied(e) then { self.insert_internal(e.key, e.value); },
+                _ then {},
+            }
+            i += 1
+        }
+        dealloc_memory(old_buckets)
+    }
+
+    // Internal insert used by rehash - doesn't return old value
+    private insert_internal(self ref, key K, value V) Void = {
+        let idx = self.find_slot(ref key)
+        if idx < 0 then { panic("Map insert failed"); }
+        let bucket = self.storage.buckets.offset(idx).peek()
+        when bucket is {
+            .Occupied(_) then {
+                self.storage.buckets.offset(idx).replace([K, V]MapBucket.Occupied([K, V]MapEntry(key, value)));
+            },
+            .Empty or .Deleted then {
+                self.storage.buckets.offset(idx).replace([K, V]MapBucket.Occupied([K, V]MapEntry(key, value)));
+                self.storage.count = self.storage.count + 1
+            },
+        }
+    }
+
+    // Returns None if key was new, Some(old_value) if overwritten
+    public insert(self ref, key K, value V) [V]Option = {
+        self.ensure_unique()
+        if self.storage.count * 2 >= self.storage.capacity then { self.rehash(); }
+        let idx = self.find_slot(ref key)
+        if idx < 0 then { panic("Map insert failed"); }
+        let bucket = self.storage.buckets.offset(idx).peek()
+        when bucket is {
+            .Occupied(e) then {
+                self.storage.buckets.offset(idx).replace([K, V]MapBucket.Occupied([K, V]MapEntry(key, value)));
+                [V]Option.Some(e.value)
+            },
+            .Empty or .Deleted then {
+                self.storage.buckets.offset(idx).replace([K, V]MapBucket.Occupied([K, V]MapEntry(key, value)));
+                self.storage.count = self.storage.count + 1
+                [V]Option.None()
+            },
+        }
+    }
+
+    public get(self, key K) [V]Option = {
+        let idx = self.find_slot(ref key)
+        if idx < 0 then { return [V]Option.None(); }
+        let bucket = self.storage.buckets.offset(idx).peek()
+        when bucket is {
+            .Occupied(e) then [V]Option.Some(e.value),
+            _ then [V]Option.None(),
+        }
+    }
+
+    public __at(self, key K) V = {
+        let idx = self.find_slot(ref key)
+        if idx < 0 then { panic("Map key not found"); }
+        let bucket = self.storage.buckets.offset(idx).peek()
+        when bucket is {
+            .Occupied(e) then e.value,
+            _ then panic("Map key not found"),
+        }
+    }
+
+    public __update_at(self ref, key K, value V) Void = {
+        self.ensure_unique()
+        let idx = self.find_slot(ref key)
+        if idx < 0 then { panic("Map key not found"); }
+        let bucket = self.storage.buckets.offset(idx).peek()
+        when bucket is {
+            .Occupied(e) then {
+                let old = self.storage.buckets.offset(idx).replace([K, V]MapBucket.Occupied([K, V]MapEntry(e.key, value)))
+                // old is dropped here
+            },
+            _ then panic("Map key not found"),
+        }
+    }
+
+    public contains(self, key K) Bool = when self.get(key) is {
+        .Some(_) then true,
+        .None then false,
+    }
+
+    public remove(self ref, key K) [V]Option = {
+        self.ensure_unique()
+        let idx = self.find_slot(ref key)
+        if idx < 0 then { return [V]Option.None(); }
+        let bucket = self.storage.buckets.offset(idx).peek()
+        when bucket is {
+            .Occupied(e) then {
+                self.storage.buckets.offset(idx).replace([K, V]MapBucket.Deleted());
+                self.storage.count = self.storage.count - 1
+                [V]Option.Some(e.value)
+            },
+            _ then [V]Option.None(),
+        }
+    }
+
+    public is_empty(self) Bool = self.storage.count == 0
+
+    public clear(self ref) Void = {
+        self.ensure_unique()
+        let mut i = 0
+        while i < self.storage.capacity then {
+            self.storage.buckets.offset(i).replace([K, V]MapBucket.Empty());
+            i += 1
+        }
+        self.storage.count = 0
+    }
+
+    public iterator(self) [K, V]MapIterator = [K, V]MapIterator(self.storage, 0)
+}
+
+// ============================================================================
+// Map Iterator
+// ============================================================================
+
+given[K Hashable, V Any] [K, V]MapIterator {
+    public next(self ref) [[K, V]MapEntry]Option = {
+        while self.index < self.storage.capacity then {
+            let bucket = self.storage.buckets.offset(self.index).peek()
+            self.index = self.index + 1
+            when bucket is {
+                .Occupied(e) then { return [[K, V]MapEntry]Option.Some(e); },
+                _ then {},
+            }
+        }
+        [[K, V]MapEntry]Option.None()
+    }
+}
+
+// ============================================================================
+// Map ToString Implementation
+// ============================================================================
+
+given [K ToString and Hashable, V ToString] [K, V]Map {
+    public to_string(self) String = {
+        let mut result = String.empty()
+        result.push_string("[")
+        let mut first = true
+        let mut i = 0
+        while i < self.storage.capacity then {
+            let bucket = self.storage.buckets.offset(i).peek()
+            when bucket is {
+                .Occupied(entry) then {
+                    if not first then { result.push_string(", "); }
+                    first = false
+                    result.push_string(entry.key.to_string())
+                    result.push_string(": ")
+                    result.push_string(entry.value.to_string())
+                },
+                _ then {},
+            }
+            i += 1
+        }
+        result.push_string("]")
+        result
+    }
+}
