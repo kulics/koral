@@ -1,9 +1,31 @@
 // Koral Language Grammar (BNF)
-// Updated to match current implementation
+// Updated to match current implementation (Lexer/Parser)
 
-<program> ::= <item>*
+<program> ::= <using-decl>* <global-decl>*
 
-<item> ::= <global-decl>
+// using 必须出现在其他全局声明之前
+
+<using-decl> ::= <access-modifier>? "using" <using-path> ";"?
+<using-path> ::= <file-merge-path>
+               | <external-path>
+               | <submodule-path>
+               | <parent-path>
+
+<file-merge-path> ::= <string-literal>
+
+<external-path> ::= <external-alias>? <path-segments> <batch-import>?
+<external-alias> ::= <identifier> "="
+
+<submodule-path> ::= "self" "." <path-segments> <batch-import>?
+
+<parent-path> ::= "super" ("." "super")* ("." <identifier>)* <batch-import>?
+
+<path-segments> ::= <identifier> ("." <identifier>)*
+<batch-import> ::= "." "*"
+
+// 说明：
+// 1) file merge (using "file") 不允许访问修饰符
+// 2) alias 只支持 external path（using alias = std.text）
 
 // ============================================================================
 // Global Declarations
@@ -23,11 +45,15 @@
 <let-decl> ::= "let" <generic-params>? <identifier> <function-signature> "=" <expression> ";"?
              | "let" "mut"? <identifier> <type-annotation>? "=" <expression> ";"?
              | "let" <generic-params>? <identifier> <function-signature> ";"?  // intrinsic function
+// 说明：出现 mut 时必须是变量声明（不可接函数参数列表）
 
-<function-signature> ::= "(" <param-list>? ")" <type-annotation>?
-<param-list> ::= <param> ("," <param>)* ","?
-<param> ::= "mut"? <identifier> <type-annotation>
-          | "self" ("ref")?                           // self parameter in methods
+<function-signature> ::= "(" <func-param-list>? ")" <type-annotation>?
+<func-param-list> ::= <func-param> ("," <func-param>)* ","?
+<func-param> ::= "mut"? <identifier> <type-annotation>
+
+<method-param-list> ::= <method-first-param> ("," <func-param>)* ","?
+<method-first-param> ::= "self" ("ref")?
+                       | <func-param>
 
 <type-annotation> ::= <type>
 
@@ -35,9 +61,10 @@
 // Type Declarations
 // ============================================================================
 
-<type-decl> ::= "type" <generic-params>? <identifier> <type-body>?
+<type-decl> ::= "type" <generic-params>? <type-identifier> <type-body>
+              | "type" <generic-params>? <type-identifier>            // intrinsic type (no body)
 <type-body> ::= "(" <field-list>? ")"                 // struct
-              | "{" <variant-list> "}"                // union (sum type)
+              | "{" <variant-list>? "}"                // union (sum type)
 
 <field-list> ::= <field> ("," <field>)* ","?
 <field> ::= <access-modifier>? "mut"? <identifier> <type-annotation>
@@ -51,17 +78,18 @@
 // Trait Declarations
 // ============================================================================
 
-<trait-decl> ::= "trait" <generic-params>? <identifier> <trait-parents>? "{" <trait-member>* "}"
-<trait-parents> ::= <identifier> ("and" <identifier>)*
-<trait-member> ::= <access-modifier>? <generic-params>? <identifier> <function-signature> ";"?
+<trait-decl> ::= "trait" <generic-params>? <type-identifier> <trait-parents>? "{" <trait-member>* "}"
+<trait-parents> ::= <type-identifier> ("and" <type-identifier>)*
+<trait-member> ::= <access-modifier>? <identifier> "(" <method-param-list>? ")" <type-annotation>? ";"?
+// 说明：trait method 不支持泛型参数和方法体
 
 // ============================================================================
 // Given Declarations (Type Implementations)
 // ============================================================================
 
 <given-decl> ::= "given" <generic-params>? <type> "{" <given-member>* "}"
-<given-member> ::= <access-modifier>? <generic-params>? <identifier> <function-signature> "=" <expression> ";"?
-                 | <access-modifier>? <generic-params>? <identifier> <function-signature> ";"?  // intrinsic method
+<given-member> ::= <access-modifier>? <generic-params>? <identifier> "(" <method-param-list>? ")" <type-annotation>? "=" <expression> ";"?
+                 | <access-modifier>? <generic-params>? <identifier> "(" <method-param-list>? ")" <type-annotation>? ";"?  // intrinsic given method
 
 // ============================================================================
 // Generic Parameters
@@ -69,20 +97,18 @@
 
 <generic-params> ::= "[" <generic-param-list> "]"
 <generic-param-list> ::= <generic-param> ("," <generic-param>)*
-<generic-param> ::= <identifier> <trait-constraints>?
-<trait-constraints> ::= <identifier> ("and" <identifier>)*
+<generic-param> ::= <identifier> <trait-constraints>
+<trait-constraints> ::= <type-identifier> ("and" <type-identifier>)*
 
 // ============================================================================
 // Types
 // ============================================================================
 
-<type> ::= <simple-type> ("ref")*
+<type> ::= <type-identifier> ("ref")?
+         | <generic-type> ("ref")?
+         | "Self" ("ref")?
 
-<simple-type> ::= <identifier>                                    // simple type: Int, String
-                | <generic-type>                                  // generic type: [T]List, [K, V]Map
-                | "Self"                                          // Self type in traits/given
-
-<generic-type> ::= "[" <type-list> "]" <identifier>
+<generic-type> ::= "[" <type-list> "]" <type-identifier>
 <type-list> ::= <type> ("," <type>)*
 
 // ============================================================================
@@ -142,15 +168,16 @@
 <bitwise-xor-expression> ::= <bitwise-and-expression> ("^" <bitwise-and-expression>)*
 <bitwise-and-expression> ::= <range-expression> ("&" <range-expression>)*
 
-<range-expression> ::= <comparison-expression> <range-op> <comparison-expression>
-                     | <comparison-expression> <postfix-range-op>
-                     | <prefix-range-op> <comparison-expression>
+<range-expression> ::= <comparison-expression> <range-suffix>?
+                     | <range-prefix> <comparison-expression>
                      | "...."
-                     | <comparison-expression>
+
+<range-suffix> ::= <range-op> <comparison-expression>
+                 | <postfix-range-op>
 
 <range-op> ::= ".." | "..<" | "<.." | "<..<"
 <postfix-range-op> ::= "..." | "<..."
-<prefix-range-op> ::= "..." | "...<"
+<range-prefix> ::= "..." | "...<"
 
 <comparison-expression> ::= <shift-expression> (<comparison-op> <shift-expression>)*
 <comparison-op> ::= "==" | "<>" | ">" | "<" | ">=" | "<="
@@ -214,17 +241,20 @@
 // ============================================================================
 
 <pattern> ::= "_"                                     // wildcard
-            | <literal>                               // literal pattern
-            | "mut"? <identifier>                     // variable binding
-            | <range-pattern>                         // range pattern
-            | <union-case-pattern>                    // union case pattern
+        | <integer-literal>                       // integer literal pattern
+        | <bool-literal>                          // bool literal pattern
+        | <string-literal>                        // string literal pattern
+        | "mut"? <identifier>                     // variable binding
+        | <range-pattern>                         // range pattern
+        | <union-case-pattern>                    // union case pattern
 
 <range-pattern> ::= <pattern-operand> <range-op> <pattern-operand>
                   | <pattern-operand> <postfix-range-op>
-                  | <prefix-range-op> <pattern-operand>
+            | <range-prefix> <pattern-operand>
                   | "...."
 
 <pattern-operand> ::= "-"? <integer-literal>
+// 说明：负数作为单独 pattern 不支持，仅允许出现在范围 pattern 中
 
 <union-case-pattern> ::= "." <identifier> ("(" <pattern-list>? ")")?
 <pattern-list> ::= <pattern> ("," <pattern>)* ","?
@@ -254,6 +284,7 @@
 <bool-literal> ::= "true" | "false"
 
 <identifier> ::= [a-zA-Z_][a-zA-Z0-9_]*
+<type-identifier> ::= [A-Z][a-zA-Z0-9_]*
 
 // ============================================================================
 // Keywords
@@ -261,10 +292,10 @@
 
 // Reserved keywords:
 //   let, mut, type, trait, given, intrinsic
+//   using, self, Self, super
 //   if, then, else, while, for, when, is
 //   and, or, not
 //   ref, deref
-//   self, Self
 //   return, break, continue
 //   true, false
 //   public, private, protected
@@ -279,7 +310,7 @@
 // Bitwise: & | ^ ~ << >>
 // Assignment: = += -= *= /= %= **= &= |= ^= <<= >>=
 // Range: .. ..< <.. <..< ... <... ...< ....
-// Other: -> . , ; : ( ) [ ] { }
+// Other: . , ; : ( ) [ ] { }
 
 // ============================================================================
 // Comments
