@@ -155,41 +155,71 @@ public class Driver {
     }
 
     let userDisplayName = inputURL.lastPathComponent
-    let coreDisplayName = "std/core.koral"
+    let stdDisplayName = "std/core.koral"
 
-    var coreGlobalNodes: [GlobalNode] = []
-    
-    if !noStd {
-        // 0. Load and Parse Core Library
-        let coreLibPath = getCoreLibPath()
-        let coreSource = try String(contentsOfFile: coreLibPath, encoding: .utf8)
-        coreGlobalNodes = try parseProgram(source: coreSource, fileName: coreDisplayName)
-    }
-
-    // 1. Compile Koral to C
-    // Always use ModuleResolver for unified handling of single-file and multi-file projects
-    // This ensures nodeSourceInfoList is always populated with correct file paths
+    // Initialize module resolver
     let resolver = initializeModuleResolver()
     
-    var allGlobalNodes: [GlobalNode] = coreGlobalNodes
-    var nodeSourceInfoList: [GlobalNodeSourceInfo] = []
+    var stdGlobalNodes: [GlobalNode] = []
+    var stdNodeSourceInfoList: [GlobalNodeSourceInfo] = []
+    var stdCompilationUnit: CompilationUnit? = nil
+    
+    if !noStd {
+        // Load standard library using ModuleResolver (same as user code)
+        let stdLibPath = getCoreLibPath()
+        do {
+            stdCompilationUnit = try resolver.resolveModule(entryFile: stdLibPath)
+            
+            // Collect std library nodes with source info
+            let stdNodesWithInfo = stdCompilationUnit!.getAllGlobalNodesWithSourceInfo()
+            for (node, sourceFile, modulePath) in stdNodesWithInfo {
+                stdGlobalNodes.append(node)
+                stdNodeSourceInfoList.append(GlobalNodeSourceInfo(
+                    sourceFile: sourceFile,
+                    modulePath: modulePath,
+                    node: node
+                ))
+            }
+            
+            // Register std library source files with source manager
+            func registerStdSources(from module: ModuleInfo) {
+                if let source = try? String(contentsOfFile: module.entryFile, encoding: .utf8) {
+                    let displayName = "std/" + URL(fileURLWithPath: module.entryFile).lastPathComponent
+                    sourceManager.loadFile(name: displayName, content: source)
+                }
+                for mergedFile in module.mergedFiles {
+                    if let source = try? String(contentsOfFile: mergedFile, encoding: .utf8) {
+                        let displayName = "std/" + URL(fileURLWithPath: mergedFile).lastPathComponent
+                        sourceManager.loadFile(name: displayName, content: source)
+                    }
+                }
+                for (_, submodule) in module.submodules {
+                    registerStdSources(from: submodule)
+                }
+            }
+            registerStdSources(from: stdCompilationUnit!.rootModule)
+            
+        } catch let error as ModuleError {
+            throw DiagnosticError(
+                stage: .other,
+                fileName: stdDisplayName,
+                underlying: error,
+                sourceManager: sourceManager
+            )
+        }
+    }
+
+    // Compile user code
+    var allGlobalNodes: [GlobalNode] = stdGlobalNodes
+    var nodeSourceInfoList: [GlobalNodeSourceInfo] = stdNodeSourceInfoList
     
     do {
       let compilationUnit = try resolver.resolveModule(entryFile: file)
       
       // Collect all global nodes from the compilation unit
-      allGlobalNodes = coreGlobalNodes + compilationUnit.getAllGlobalNodes()
+      allGlobalNodes = stdGlobalNodes + compilationUnit.getAllGlobalNodes()
       
-      // 构建源信息列表
-      // 先添加标准库节点的源信息（空模块路径）
-      for node in coreGlobalNodes {
-        nodeSourceInfoList.append(GlobalNodeSourceInfo(
-          sourceFile: getCoreLibPath(),
-          modulePath: [],
-          node: node
-        ))
-      }
-      // 添加用户代码节点的源信息
+      // Add user code nodes with source info
       let userNodesWithInfo = compilationUnit.getAllGlobalNodesWithSourceInfo()
       for (node, sourceFile, modulePath) in userNodesWithInfo {
         nodeSourceInfoList.append(GlobalNodeSourceInfo(
@@ -235,8 +265,8 @@ public class Driver {
     let typeChecker = TypeChecker(
       ast: combinedAST,
       nodeSourceInfoList: nodeSourceInfoList,
-      coreGlobalCount: coreGlobalNodes.count,
-      coreFileName: coreDisplayName,
+      coreGlobalCount: stdGlobalNodes.count,
+      coreFileName: stdDisplayName,
       userFileName: userDisplayName
     )
     let typeCheckerOutput: TypeCheckerOutput

@@ -90,11 +90,9 @@ public class TypeChecker {
   /// 用于支持 `using self.child` 后通过 `child.xxx` 访问子模块符号
   private var moduleSymbols: [String: ModuleSymbolInfo] = [:]
   
-  /// 检查当前文件是否是标准库文件
-  private var isCurrentFileStdLib: Bool {
-    // Check if currentFileName matches coreFileName or ends with core.koral
-    return currentFileName == coreFileName || currentFileName.hasSuffix("core.koral")
-  }
+  /// 当前正在处理的声明是否来自标准库
+  /// 基于声明索引判断：索引小于 coreGlobalCount 的声明来自标准库
+  private var isCurrentDeclStdLib: Bool = false
 
   public init(
     ast: ASTNode,
@@ -1120,6 +1118,7 @@ public class TypeChecker {
       // so that forward references work correctly
       for (index, decl) in declarations.enumerated() {
         let isStdLib = index < coreGlobalCount
+        self.isCurrentDeclStdLib = isStdLib
         // 更新当前源文件和模块路径
         // nodeSourceInfoMap is always populated by Driver using ModuleResolver
         let sourceInfo = nodeSourceInfoMap[index]
@@ -1139,6 +1138,7 @@ public class TypeChecker {
       // regardless of declaration order
       for (index, decl) in declarations.enumerated() {
         let isStdLib = index < coreGlobalCount
+        self.isCurrentDeclStdLib = isStdLib
         // 更新当前源文件和模块路径
         let sourceInfo = nodeSourceInfoMap[index]
         self.currentFileName = sourceInfo?.sourceFile ?? (isStdLib ? coreFileName : userFileName)
@@ -1163,6 +1163,7 @@ public class TypeChecker {
       // which may reference types or methods defined later in the file
       for (index, decl) in declarations.enumerated() {
         let isStdLib = index < coreGlobalCount
+        self.isCurrentDeclStdLib = isStdLib
         // 更新当前源文件和模块路径
         let sourceInfo = nodeSourceInfoMap[index]
         self.currentFileName = sourceInfo?.sourceFile ?? (isStdLib ? coreFileName : userFileName)
@@ -2226,7 +2227,7 @@ public class TypeChecker {
         }
         
         // Module rule check: Cannot add given declaration for types defined in external modules (std library)
-        if stdLibTypes.contains(baseName) && !isCurrentFileStdLib {
+        if stdLibTypes.contains(baseName) && !isCurrentDeclStdLib {
           throw SemanticError(.generic("Cannot add 'given' declaration for type '\(baseName)' defined in standard library"), line: span.line)
         }
         
@@ -2334,7 +2335,7 @@ public class TypeChecker {
 
       // Module rule check: Cannot add given declaration for types defined in external modules (std library)
       // This check ensures that users cannot extend types from the standard library
-      if stdLibTypes.contains(typeName) && !isCurrentFileStdLib {
+      if stdLibTypes.contains(typeName) && !isCurrentDeclStdLib {
         throw SemanticError(.generic("Cannot add 'given' declaration for type '\(typeName)' defined in standard library"), line: span.line)
       }
 

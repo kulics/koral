@@ -1,0 +1,889 @@
+// ============================================================================
+// Koral Standard Library - String Type
+// ============================================================================
+// NOTE: This file is merged into core.koral, so primitives, traits, and option are already available.
+// ============================================================================
+
+// ============================================================================
+// String Storage and Type Definition
+// ============================================================================
+
+// Internal storage for String (COW semantics)
+public type StringStorage(mut data [UInt8]Pointer, mut len Int, mut cap Int)
+
+given StringStorage {
+    __drop(self ref) = { dealloc_memory(self.data) }
+}
+
+// String type with COW semantics
+public type String(mut storage StringStorage ref)
+
+// Forward declarations for String iterators
+public type StringSplitAsciiWhitespace(source String, mut index Int)
+public type StringSplit(source String, sep String, mut index Int)
+public type StringLines(source String, mut index Int)
+
+// ============================================================================
+// String Methods
+// ============================================================================
+
+given String {
+    // Unsafe constructor: does not validate UTF-8
+    public from_utf8_bytes_unchecked(bytes [UInt8]Pointer, len Int) String = {
+        let cap = len + 1
+        let data = [UInt8]alloc_memory(cap)
+        copy_memory(data, bytes, len)
+        data.offset(len).init(0)
+        let storage = ref StringStorage(data, len, cap)
+        String(storage)
+    }
+
+    public empty() String = {
+        let data = [UInt8]alloc_memory(1)
+        data.init(0)
+        let storage = ref StringStorage(data, 0, 1)
+        String(storage)
+    }
+
+    public with_capacity(capacity Int) String = {
+        let cap = if capacity < 1 then 1 else capacity + 1
+        let data = [UInt8]alloc_memory(cap)
+        data.init(0)
+        let storage = ref StringStorage(data, 0, cap)
+        String(storage)
+    }
+
+    public new() String = {
+        let cap = 16  // 默认容量
+        let data = [UInt8]alloc_memory(cap)
+        data.init(0)
+        let storage = ref StringStorage(data, 0, cap)
+        String(storage)
+    }
+
+    // Using comparison patterns for ASCII space check
+    private is_ascii_space(b UInt8) Bool =
+        b == " " or b == "\t" or b == "\n" or b == "\v" or b == "\f" or b == "\r"
+
+    private bounds_check_read(self, index Int) Void = {
+        if index < 0 or index > self.storage.len then {
+            panic("String index out of bounds")
+        }
+    }
+
+    private bounds_check_write(self, index Int) Void = {
+        if index < 0 or index >= self.storage.len then {
+            panic("String index out of bounds")
+        }
+    }
+
+    private ensure_unique(self ref) Void = {
+        if ref_count(self.storage) > 1 then {
+            let old = self.storage
+            let new_data = [UInt8]alloc_memory(old.cap)
+            copy_memory(new_data, old.data, old.len + 1)
+            let new_storage = ref StringStorage(new_data, old.len, old.cap)
+            self.storage = new_storage
+        }
+    }
+
+    private ensure_capacity(self ref, min_cap Int) Void = {
+        if self.storage.cap >= min_cap then { return; }
+        let mut new_cap = self.storage.cap * 2
+        if new_cap < min_cap then { new_cap = min_cap; }
+        let new_data = [UInt8]alloc_memory(new_cap)
+        copy_memory(new_data, self.storage.data, self.storage.len + 1)
+        let new_storage = ref StringStorage(new_data, self.storage.len, new_cap)
+        self.storage = new_storage
+    }
+
+    public count(self) Int = self.storage.len
+    public is_empty(self) Bool = self.storage.len == 0
+    public capacity(self) Int = self.storage.cap - 1
+
+    public get(self, index Int) [UInt8]Option = {
+        if index < 0 or index >= self.storage.len then {
+            return [UInt8]Option.None()
+        }
+        [UInt8]Option.Some(self.storage.data.offset(index).peek())
+    }
+
+    public __at(self, index Int) UInt8 = {
+        if index < 0 or index >= self.storage.len then {
+            panic("String index out of bounds")
+        }
+        self.storage.data.offset(index).peek()
+    }
+
+    public push(self ref, value UInt8) Void = {
+        self.ensure_unique()
+        let needed = self.storage.len + 2
+        self.ensure_capacity(needed)
+        self.storage.data.offset(self.storage.len).init(value)
+        self.storage.len = self.storage.len + 1
+        self.storage.data.offset(self.storage.len).replace(0);
+    }
+
+    public push_string(self ref, other String) Void = {
+        let other_len = other.storage.len
+        self.ensure_unique()
+        let needed = self.storage.len + other_len + 1
+        self.ensure_capacity(needed)
+        let dest = self.storage.data.offset(self.storage.len)
+        copy_memory(dest, other.storage.data, other_len)
+        self.storage.len = self.storage.len + other_len
+        self.storage.data.offset(self.storage.len).replace(0);
+    }
+
+    // Push an Int value directly to the string
+    public push_int(self ref, value Int) Void = {
+        if value == 0 then {
+            self.push('0')
+            return
+        }
+        
+        let mut n = value
+        let is_negative = n < 0
+        if is_negative then { n = 0 - n; }
+        
+        let buf = [UInt8]alloc_memory(21)
+        let mut pos = 20
+        while n > 0 then {
+            pos -= 1
+            buf.offset(pos).init((UInt8){ n % 10 } + '0')
+            n = n / 10
+        }
+        
+        if is_negative then {
+            pos -= 1
+            buf.offset(pos).init('-')
+        }
+        
+        let mut i = pos
+        while i < 20 then {
+            self.push(buf.offset(i).peek())
+            i += 1
+        }
+        
+        let mut j = pos
+        while j < 20 then {
+            buf.offset(j).deinit()
+            j += 1
+        }
+        dealloc_memory(buf)
+    }
+
+    // Push a UInt value directly to the string
+    public push_uint(self ref, value UInt) Void = {
+        if value == 0u then {
+            self.push('0')
+            return
+        }
+        
+        let mut n = value
+        let buf = [UInt8]alloc_memory(21)
+        let mut pos = 20
+        while n > 0u then {
+            pos -= 1
+            buf.offset(pos).init((UInt8){ n % 10u } + '0')
+            n = n / 10u
+        }
+        
+        let mut i = pos
+        while i < 20 then {
+            self.push(buf.offset(i).peek())
+            i += 1
+        }
+        
+        let mut j = pos
+        while j < 20 then {
+            buf.offset(j).deinit()
+            j += 1
+        }
+        dealloc_memory(buf)
+    }
+
+    public reserve(self ref, capacity Int) Void = {
+        self.ensure_unique()
+        self.ensure_capacity(capacity + 1)
+    }
+
+    public starts_with(self, prefix String) Bool = {
+        if prefix.storage.len > self.storage.len then { return false; }
+        let mut i = 0
+        while i < prefix.storage.len then {
+            if self.storage.data.offset(i).peek() <> prefix.storage.data.offset(i).peek() then { return false; }
+            i += 1
+        }
+        true
+    }
+
+    public ends_with(self, suffix String) Bool = {
+        let slen = suffix.storage.len
+        if slen > self.storage.len then { return false; }
+        let offset = self.storage.len - slen
+        let mut i = 0
+        while i < slen then {
+            if self.storage.data.offset(offset + i).peek() <> suffix.storage.data.offset(i).peek() then { return false; }
+            i += 1
+        }
+        true
+    }
+
+    public first_index_of(self, pat String) [Int]Option = self.find(pat)
+
+    public last_index_of(self, pat String) [Int]Option = {
+        if pat.storage.len == 0 then {
+            panic("last_index_of empty pattern")
+        }
+        let mut result = [Int]Option.None()
+        let mut start = 0
+        // Using while is pattern matching for iterator-like loop
+        while self.find_from(pat, start) is .Some(idx) then {
+            result = [Int]Option.Some(idx)
+            start = idx + 1
+        }
+        result
+    }
+
+    private make_substring(self, start Int, len Int) String = {
+        if start < 0 or len < 0 or start + len > self.storage.len then {
+            panic("substring out of bounds")
+        }
+        let cap = len + 1
+        let data = [UInt8]alloc_memory(cap)
+        copy_memory(data, self.storage.data.offset(start), len)
+        data.offset(len).init(0)
+        let storage = ref StringStorage(data, len, cap)
+        String(storage)
+    }
+
+    public substring(self, start Int, len Int) String = self.make_substring(start, len)
+
+    public trim_ascii_start(self) String = {
+        let mut i = 0
+        while i < self.storage.len and String.is_ascii_space(self.storage.data.offset(i).peek()) then { i += 1; }
+        self.make_substring(i, self.storage.len - i)
+    }
+
+    public trim_ascii_end(self) String = {
+        let mut end = self.storage.len
+        while end > 0 and String.is_ascii_space(self.storage.data.offset(end - 1).peek()) then { end -= 1; }
+        self.make_substring(0, end)
+    }
+
+    public trim_ascii_whitespace(self) String = {
+        let head = self.trim_ascii_start()
+        head.trim_ascii_end()
+    }
+
+    // Using comparison patterns for case conversion
+    private to_lower_byte(b UInt8) UInt8 =
+        if b is >= 65 and <= 90 then b + 32 else b
+
+    private to_upper_byte(b UInt8) UInt8 =
+        if b is >= 97 and <= 122 then b - 32 else b
+
+    public to_ascii_lowercase(self) String = {
+        let cap = self.storage.len + 1
+        let data = [UInt8]alloc_memory(cap)
+        let mut i = 0
+        while i < self.storage.len then {
+            data.offset(i).init(String.to_lower_byte(self.storage.data.offset(i).peek()))
+            i += 1
+        }
+        data.offset(self.storage.len).init(0)
+        let storage = ref StringStorage(data, self.storage.len, cap)
+        String(storage)
+    }
+
+    public to_ascii_uppercase(self) String = {
+        let cap = self.storage.len + 1
+        let data = [UInt8]alloc_memory(cap)
+        let mut i = 0
+        while i < self.storage.len then {
+            data.offset(i).init(String.to_upper_byte(self.storage.data.offset(i).peek()))
+            i += 1
+        }
+        data.offset(self.storage.len).init(0)
+        let storage = ref StringStorage(data, self.storage.len, cap)
+        String(storage)
+    }
+
+    public is_ascii(self) Bool = {
+        let mut i = 0
+        while i < self.storage.len then {
+            if self.storage.data.offset(i).peek() >= 128 then { return false; }
+            i += 1
+        }
+        true
+    }
+
+    public is_ascii_blank(self) Bool = {
+        let mut i = 0
+        while i < self.storage.len then {
+            if not String.is_ascii_space(self.storage.data.offset(i).peek()) then { return false; }
+            i += 1
+        }
+        true
+    }
+
+    public __equals(self, other String) Bool = {
+        if self.storage.len <> other.storage.len then { return false; }
+        let mut i = 0
+        while i < self.storage.len then {
+            if self.storage.data.offset(i).peek() <> other.storage.data.offset(i).peek() then { return false; }
+            i += 1
+        }
+        true
+    }
+
+    public __compare(self, other String) Int = {
+        let min = if self.storage.len < other.storage.len then self.storage.len else other.storage.len
+        let mut i = 0
+        while i < min then {
+            let a = self.storage.data.offset(i).peek()
+            let b = other.storage.data.offset(i).peek()
+            if a < b then { return 0 - 1; }
+            if a > b then { return 1; }
+            i += 1
+        }
+        if self.storage.len < other.storage.len then 0 - 1
+        else if self.storage.len > other.storage.len then 1
+        else 0
+    }
+
+    public hash(self) UInt = {
+        let mut h UInt = 2166136261u
+        let mut i Int = 0
+        while i < self.storage.len then {
+            let b UInt8 = self.storage.data.offset(i).peek()
+            h = hash_combine(h, (UInt)b)
+            i += 1
+        }
+        h
+    }
+
+    public to_string(self) String = self
+
+    public find_from(self, pat String, start Int) [Int]Option = {
+        if pat.storage.len == 0 then {
+            panic("find empty pattern")
+        }
+        if start < 0 or start > self.storage.len then {
+            panic("find start out of bounds")
+        }
+        let mut i = start
+        let max = self.storage.len - pat.storage.len
+        while i <= max then {
+            let mut j = 0
+            let mut ok = true
+            while j < pat.storage.len then {
+                if self.storage.data.offset(i + j).peek() <> pat.storage.data.offset(j).peek() then { ok = false; break; }
+                j += 1
+            }
+            if ok then { return [Int]Option.Some(i); }
+            i += 1
+        }
+        [Int]Option.None()
+    }
+
+    public find(self, pat String) [Int]Option = self.find_from(pat, 0)
+
+    public contains(self, pat String) Bool = when self.find_from(pat, 0) is {
+        .Some(_) then true,
+        .None then false,
+    }
+
+    public count_string(self, pat String) Int = {
+        let mut count = 0
+        let mut idxOpt = self.find_from(pat, 0)
+        // Using while is pattern matching
+        while idxOpt is .Some(i) then {
+            count += 1
+            idxOpt = self.find_from(pat, i + pat.storage.len)
+        }
+        count
+    }
+
+    public repeat(self, times Int) String = {
+        if times < 0 then {
+            panic("repeat negative")
+        }
+        if times == 0 then { return String.empty(); }
+        let total = self.storage.len * times
+        let cap = total + 1
+        let data = [UInt8]alloc_memory(cap)
+        let mut offset = 0
+        let mut t = 0
+        while t < times then {
+            copy_memory(data.offset(offset), self.storage.data, self.storage.len)
+            offset += self.storage.len
+            t += 1
+        }
+        data.offset(total).init(0)
+        let storage = ref StringStorage(data, total, cap)
+        String(storage)
+    }
+
+    public replace(self, pat String, with String) String = {
+        if pat.storage.len == 0 then {
+            panic("replace empty pattern")
+        }
+        let mut result = String.empty()
+        let mut start = 0
+        // Using while is pattern matching
+        while self.find_from(pat, start) is .Some(idx) then {
+            let prefix_len = idx - start
+            if prefix_len > 0 then {
+                let slice = self.make_substring(start, prefix_len)
+                result.push_string(slice)
+            }
+            result.push_string(with)
+            start = idx + pat.storage.len
+        }
+        if start < self.storage.len then {
+            let tail = self.make_substring(start, self.storage.len - start)
+            result.push_string(tail)
+        }
+        result
+    }
+
+    public split_ascii_whitespace(self) StringSplitAsciiWhitespace =
+        StringSplitAsciiWhitespace(self, 0)
+
+    public split(self, sep String) StringSplit = {
+        if sep.storage.len == 0 then {
+            panic("split empty separator")
+        }
+        StringSplit(self, sep, 0)
+    }
+
+    public lines(self) StringLines = StringLines(self, 0)
+
+    public remove_prefix(self, prefix String) String =
+        if self.starts_with(prefix) then { self.make_substring(prefix.storage.len, self.storage.len - prefix.storage.len) } else { self }
+
+    public remove_suffix(self, suffix String) String = {
+        if self.ends_with(suffix) then {
+            let remain = self.storage.len - suffix.storage.len
+            self.make_substring(0, remain)
+        } else { self }
+    }
+}
+
+// ============================================================================
+// String Iterator Implementations - Using new pattern matching
+// ============================================================================
+
+given StringSplitAsciiWhitespace {
+    public next(self ref) [String]Option = {
+        let len = self.source.count()
+        let mut i = self.index
+        while i < len and String.is_ascii_space(self.source[i]) then { i += 1; }
+        if i >= len then { return [String]Option.None(); }
+        let start = i
+        while i < len and not String.is_ascii_space(self.source[i]) then { i += 1; }
+        let part = self.source.substring(start, i - start)
+        self.index = i
+        [String]Option.Some(part)
+    }
+}
+
+given StringSplit {
+    public next(self ref) [String]Option = {
+        let len = self.source.count()
+        if self.index > len then { return [String]Option.None() }
+        when self.source.find_from(self.sep, self.index) is {
+            .Some(i) then {
+                let part = self.source.substring(self.index, i - self.index)
+                self.index = i + self.sep.count()
+                [String]Option.Some(part)
+            },
+            .None then {
+                let part = self.source.substring(self.index, len - self.index)
+                self.index = len + 1
+                [String]Option.Some(part)
+            },
+        }
+    }
+}
+
+given StringLines {
+    public next(self ref) [String]Option = {
+        let len = self.source.count()
+        if self.index > len then { return [String]Option.None() }
+        if self.index == len then {
+            self.index = len + 1
+            return [String]Option.None()
+        }
+        when self.source.find_from("\n", self.index) is {
+            .Some(i) then {
+                let part = self.source.substring(self.index, i - self.index)
+                self.index = i + 1
+                [String]Option.Some(part)
+            },
+            .None then {
+                let part = self.source.substring(self.index, len - self.index)
+                self.index = len + 1
+                [String]Option.Some(part)
+            },
+        }
+    }
+}
+
+// ============================================================================
+// Additional String Methods
+// ============================================================================
+
+given String {
+    // Push a Float64 value directly to the string
+    public push_float64(self ref, value Float64) Void = {
+        // Handle special cases
+        let bits = value.to_bits()
+        let exp = { bits >> 52 } & 2047u64
+        let mantissa = bits & 4503599627370495u64
+        if exp == 2047u64 then {
+            if mantissa <> 0u64 then {
+                self.push_string("NaN")
+                return
+            }
+            if { bits >> 63 } == 1u64 then {
+                self.push_string("-Inf")
+                return
+            }
+            self.push_string("Inf")
+            return
+        }
+        
+        let is_negative = { bits >> 63 } == 1u64
+        let mut f = if is_negative then 0.0 - value else value
+        
+        let int_part = (Int)f
+        let frac_part = f - (Float64)int_part
+        
+        if is_negative then { self.push('-'); }
+        self.push_int(int_part)
+        self.push('.')
+        
+        let mut frac = frac_part
+        let mut digits = 0
+        while digits < 6 then {
+            frac = frac * 10.0
+            let d = (Int)frac
+            self.push((UInt8)d + '0')
+            frac = frac - (Float64)d
+            digits += 1
+        }
+    }
+
+    // Push a Bool value directly to the string
+    public push_bool(self ref, value Bool) Void = {
+        if value then {
+            self.push_string("true")
+        } else {
+            self.push_string("false")
+        }
+    }
+
+    public to_ascii_title(self) String = {
+        let cap = self.storage.len + 1
+        let data = [UInt8]alloc_memory(cap)
+        let mut in_word = false
+        let mut i = 0
+        while i < self.storage.len then {
+            let b = self.storage.data.offset(i).peek()
+            if String.is_ascii_space(b) then {
+                in_word = false
+                data.offset(i).init(b)
+            } else {
+                if not in_word then {
+                    in_word = true
+                    data.offset(i).init(String.to_upper_byte(b))
+                } else {
+                    data.offset(i).init(String.to_lower_byte(b))
+                }
+            }
+            i += 1
+        }
+        data.offset(self.storage.len).init(0)
+        let storage = ref StringStorage(data, self.storage.len, cap)
+        String(storage)
+    }
+}
+
+
+// ============================================================================
+// Primitive ToString Implementations
+// ============================================================================
+
+given Bool {
+    public to_string(self) String = if self then "true" else "false"
+}
+
+given Int {
+    public to_string(self) String = {
+        if self == 0 then { return "0"; }
+    
+        let mut n = self
+        let is_negative = n < 0
+        if is_negative then { n = 0 - n; }
+    
+        // Extract digits in reverse order into buffer
+        let buf = [UInt8]alloc_memory(21)
+        let mut pos = 20
+        buf.offset(pos).init(0)
+        while n > 0 then {
+            pos -= 1
+            buf.offset(pos).init((UInt8){ n % 10 } + '0')
+            n = n / 10
+        }
+    
+        if is_negative then {
+            pos -= 1
+            buf.offset(pos).init('-')
+        }
+        
+        let len = 20 - pos
+        if pos > 0 then {
+            move_memory(buf, buf.offset(pos), len + 1)
+        }
+        let storage = ref StringStorage(buf, len, 21)
+        String(storage)
+    }
+    
+    public max() Int = (Int){ (~0u) >> 1 }
+    public min() Int = ~Int.max()
+}
+
+given Int8 {
+    public to_string(self) String = ((Int)self).to_string()
+    public max() Int8 = (Int8){ (~0u8) >> 1 }
+    public min() Int8 = ~Int8.max()
+}
+
+given Int16 {
+    public to_string(self) String = ((Int)self).to_string()
+    public max() Int16 = (Int16){ (~0u16) >> 1 }
+    public min() Int16 = ~Int16.max()
+}
+
+given Int32 {
+    public to_string(self) String = ((Int)self).to_string()
+    public max() Int32 = (Int32){ (~0u32) >> 1 }
+    public min() Int32 = ~Int32.max()
+}
+
+given Int64 {
+    public to_string(self) String = ((Int)self).to_string()
+    public max() Int64 = (Int64){ (~0u64) >> 1 }
+    public min() Int64 = ~Int64.max()
+}
+
+
+given UInt {
+    public to_string(self) String = {
+        if self == 0u then { return "0"; }
+        
+        let mut n = self
+        let buf = [UInt8]alloc_memory(21)
+        let mut pos = 20
+        buf.offset(pos).init(0)
+        while n > 0u then {
+            pos -= 1
+            buf.offset(pos).init((UInt8){ n % 10u } + '0')
+            n = n / 10u
+        }
+    
+        let len = 20 - pos
+        if pos > 0 then {
+            move_memory(buf, buf.offset(pos), len + 1)
+        }
+        let storage = ref StringStorage(buf, len, 21)
+        String(storage)
+    }
+    
+    public max() UInt = ~0u
+    public min() UInt = 0u
+}
+
+given UInt8 {
+    public to_string(self) String = ((UInt)self).to_string()
+    public max() UInt8 = ~0u8
+    public min() UInt8 = 0u8
+}
+
+given UInt16 {
+    public to_string(self) String = ((UInt)self).to_string()
+    public max() UInt16 = ~0u16
+    public min() UInt16 = 0u16
+}
+
+given UInt32 {
+    public to_string(self) String = ((UInt)self).to_string()
+    public max() UInt32 = ~0u32
+    public min() UInt32 = 0u32
+}
+
+given UInt64 {
+    public to_string(self) String = ((UInt)self).to_string()
+    public max() UInt64 = ~0u64
+    public min() UInt64 = 0u64
+}
+
+
+given Float32 {
+    public to_string(self) String = {
+        let bits = self.to_bits()
+        let exp = { bits >> 23 } & 255u32
+        let mantissa = bits & 8388607u32
+        if exp == 255u32 then {
+            if mantissa <> 0u32 then { return "NaN"; }
+            if { bits >> 31 } == 1u32 then { return "-Inf"; }
+            return "Inf"
+        }
+        
+        let is_negative = { bits >> 31 } == 1u32
+        let mut f = if is_negative then 0.0 - (Float64)self else (Float64)self
+        
+        let int_part = (Int)f
+        let frac_part = f - (Float64)int_part
+        
+        let mut result = String.empty()
+        if is_negative then { result.push('-'); }
+        
+        result.push_string(int_part.to_string())
+        result.push('.')
+        
+        let mut frac = frac_part
+        let mut digits = 0
+        while digits < 6 then {
+            frac = frac * 10.0
+            let d = (Int)frac
+            result.push((UInt8)d + '0')
+            frac = frac - (Float64)d
+            digits += 1
+        }
+        
+        result
+    }
+    
+    public inf() Float32 = Float32.from_bits(2139095040u32)
+    public nan() Float32 = Float32.from_bits(2143289344u32)
+    public min_normal() Float32 = Float32.from_bits(8388608u32)
+    public min_denormal() Float32 = Float32.from_bits(1u32)
+    public max() Float32 = Float32.from_bits(2139095039u32)
+    public min() Float32 = Float32.from_bits(4286578687u32)
+    
+    public is_nan(self) Bool = {
+        let bits = self.to_bits()
+        let exp = { bits >> 23 } & 255u32
+        let mantissa = bits & 8388607u32
+        exp == 255u32 and mantissa <> 0u32
+    }
+    
+    public is_inf(self) Bool = {
+        let bits = self.to_bits()
+        let exp = { bits >> 23 } & 255u32
+        let mantissa = bits & 8388607u32
+        exp == 255u32 and mantissa == 0u32
+    }
+    
+    public is_normal(self) Bool = {
+        let bits = self.to_bits()
+        let exp = { bits >> 23 } & 255u32
+        exp > 0u32 and exp < 255u32
+    }
+}
+
+
+given Float64 {
+    public to_string(self) String = {
+        let bits = self.to_bits()
+        let exp = { bits >> 52 } & 2047u64
+        let mantissa = bits & 4503599627370495u64
+        if exp == 2047u64 then {
+            if mantissa <> 0u64 then { return "NaN"; }
+            if { bits >> 63 } == 1u64 then { return "-Inf"; }
+            return "Inf"
+        }
+        
+        let is_negative = { bits >> 63 } == 1u64
+        let mut f = if is_negative then 0.0 - self else self
+        
+        let int_part = (Int)f
+        let frac_part = f - (Float64)int_part
+        
+        let mut result = String.empty()
+        if is_negative then { result.push('-'); }
+
+        result.push_string(int_part.to_string())
+        result.push('.')
+        
+        let mut frac = frac_part
+        let mut digits = 0
+        while digits < 6 then {
+            frac = frac * 10.0
+            let d = (Int)frac
+            result.push((UInt8)d + '0')
+            frac = frac - (Float64)d
+            digits += 1
+        }
+        
+        result
+    }
+    
+    public inf() Float64 = Float64.from_bits(2047u64 << 52)
+    public nan() Float64 = Float64.from_bits({ 2047u64 << 52 } | { 1u64 << 51 })
+    public min_normal() Float64 = Float64.from_bits(1u64 << 52)
+    public min_denormal() Float64 = Float64.from_bits(1u64)
+    public max() Float64 = {
+        let exp_bits UInt64 = 2046u64 << 52
+        let mantissa_bits UInt64 = { 1u64 << 52 } - 1u64
+        Float64.from_bits(exp_bits | mantissa_bits)
+    }
+    public min() Float64 = {
+        let sign_bit UInt64 = 1u64 << 63
+        let exp_bits UInt64 = 2046u64 << 52
+        let mantissa_bits UInt64 = { 1u64 << 52 } - 1u64
+        Float64.from_bits(sign_bit | exp_bits | mantissa_bits)
+    }
+    
+    public is_nan(self) Bool = {
+        let bits = self.to_bits()
+        let exp = { bits >> 52 } & 2047u64
+        let mantissa = bits & 4503599627370495u64
+        exp == 2047u64 and mantissa <> 0u64
+    }
+    
+    public is_inf(self) Bool = {
+        let bits = self.to_bits()
+        let exp = { bits >> 52 } & 2047u64
+        let mantissa = bits & 4503599627370495u64
+        exp == 2047u64 and mantissa == 0u64
+    }
+    
+    public is_normal(self) Bool = {
+        let bits = self.to_bits()
+        let exp = { bits >> 52 } & 2047u64
+        exp > 0u64 and exp < 2047u64
+    }
+}
+
+
+// ============================================================================
+// Option ToString Implementation
+// ============================================================================
+
+given [T ToString] [T]Option {
+    public to_string(self) String = when self is {
+        .Some(v) then {
+            let mut result = String.empty()
+            result.push_string("Some(")
+            result.push_string(v.to_string())
+            result.push_string(")")
+            result
+        },
+        .None then "None",
+    }
+}

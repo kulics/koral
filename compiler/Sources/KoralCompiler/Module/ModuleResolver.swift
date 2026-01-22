@@ -11,6 +11,8 @@ public enum ModuleError: Error, CustomStringConvertible {
     case externalModuleNotFound(String, searchPaths: [String])
     case circularDependency(path: [String])
     case invalidModulePath(String)
+    case duplicateUsing(String, span: SourceSpan)
+    case parseError(file: String, underlying: Error)
     
     public var description: String {
         switch self {
@@ -28,6 +30,10 @@ public enum ModuleError: Error, CustomStringConvertible {
             return "Circular dependency detected: \(path.joined(separator: " -> "))"
         case .invalidModulePath(let path):
             return "Invalid module path: '\(path)'"
+        case .duplicateUsing(let name, let span):
+            return "\(span): Duplicate using declaration for '\(name)'"
+        case .parseError(let file, let underlying):
+            return "\(file): \(underlying)"
         }
     }
 }
@@ -206,7 +212,14 @@ public class ModuleResolver {
         let source = try String(contentsOfFile: file, encoding: .utf8)
         let lexer = Lexer(input: source)
         let parser = Parser(lexer: lexer)
-        let ast = try parser.parse()
+        
+        let ast: ASTNode
+        do {
+            ast = try parser.parse()
+        } catch {
+            // 包装解析错误，添加文件名信息
+            throw ModuleError.parseError(file: file, underlying: error)
+        }
         
         guard case .program(let globalNodes) = ast else {
             throw ModuleError.invalidModulePath(file)
@@ -267,9 +280,9 @@ public class ModuleResolver {
             throw ModuleError.fileNotFound(filename, searchPath: module.directory)
         }
         
-        // 检查是否已合并
+        // 检查是否已合并 - 如果已合并则报错（不允许重复 using）
         if module.mergedFiles.contains(filePath) {
-            return // 已合并，跳过
+            throw ModuleError.duplicateUsing(filename, span: using.span)
         }
         
         module.mergedFiles.append(filePath)

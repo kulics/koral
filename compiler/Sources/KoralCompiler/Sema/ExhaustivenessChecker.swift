@@ -62,13 +62,17 @@ extension ExhaustivenessChecker {
             }
             
             // For union types, check if all cases are already covered
-            if case .unionCase(let caseName, _, _) = pattern {
-                // Check if this specific case was already covered
-                if coveredUnionCases.contains(caseName) {
+            // Handle both direct union cases and or patterns containing union cases
+            let casesInPattern = collectUnionCasesFromPatternSet(pattern)
+            
+            if !casesInPattern.isEmpty {
+                // Check if any case in this pattern was already covered
+                let alreadyCovered = casesInPattern.intersection(coveredUnionCases)
+                if !alreadyCovered.isEmpty {
                     throw SemanticError(
                         .unreachablePattern(
                             pattern: pattern.description,
-                            reason: "case '\(caseName)' is already covered"
+                            reason: "case '\(alreadyCovered.first!)' is already covered"
                         ),
                         line: currentLine
                     )
@@ -85,12 +89,19 @@ extension ExhaustivenessChecker {
                     )
                 }
                 
-                coveredUnionCases.insert(caseName)
+                coveredUnionCases.formUnion(casesInPattern)
             }
             
             // Update covered space
             coveredSpace = updateCoveredSpace(coveredSpace, with: pattern)
         }
+    }
+    
+    /// Collect union case names from a pattern into a Set (for unreachable pattern detection)
+    private func collectUnionCasesFromPatternSet(_ pattern: TypedPattern) -> Set<String> {
+        var cases: Set<String> = []
+        collectUnionCasesFromPattern(pattern, into: &cases)
+        return cases
     }
     
     private func isCatchallPattern(_ pattern: TypedPattern) -> Bool {
@@ -214,12 +225,10 @@ extension ExhaustivenessChecker {
             return // Catchall covers everything
         }
         
-        // Collect all covered case names
+        // Collect all covered case names (including from or patterns)
         var coveredCases: Set<String> = []
         for pattern in patterns {
-            if case .unionCase(let caseName, _, _) = pattern {
-                coveredCases.insert(caseName)
-            }
+            collectUnionCasesFromPattern(pattern, into: &coveredCases)
         }
         
         // Find missing cases
@@ -232,6 +241,20 @@ extension ExhaustivenessChecker {
                 .nonExhaustiveMatch(type: typeName, missing: sortedMissing),
                 line: currentLine
             )
+        }
+    }
+    
+    /// Recursively collect union case names from a pattern, handling or patterns
+    private func collectUnionCasesFromPattern(_ pattern: TypedPattern, into coveredCases: inout Set<String>) {
+        switch pattern {
+        case .unionCase(let caseName, _, _):
+            coveredCases.insert(caseName)
+        case .orPattern(let left, let right):
+            // Recursively collect from both sides of or pattern
+            collectUnionCasesFromPattern(left, into: &coveredCases)
+            collectUnionCasesFromPattern(right, into: &coveredCases)
+        default:
+            break
         }
     }
     
