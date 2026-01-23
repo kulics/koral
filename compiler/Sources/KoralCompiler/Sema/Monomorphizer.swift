@@ -1037,6 +1037,13 @@ public class Monomorphizer {
                 return selfType
             }
             throw SemanticError(.generic("Self type not available in this context"), line: currentLine)
+            
+        case .functionType(let paramTypes, let returnType):
+            // Resolve function type: [ParamType1, ParamType2, ..., ReturnType]Func
+            let resolvedParamTypes = try paramTypes.map { try resolveTypeNode($0, substitution: substitution) }
+            let resolvedReturnType = try resolveTypeNode(returnType, substitution: substitution)
+            let parameters = resolvedParamTypes.map { Parameter(type: $0, kind: .byVal) }
+            return .function(parameters: parameters, returns: resolvedReturnType)
         }
     }
     
@@ -1643,6 +1650,41 @@ public class Monomorphizer {
                 typeArgs: substitutedTypeArgs,
                 arguments: substitutedArguments,
                 type: substitutedReturnType
+            )
+            
+        case .lambdaExpression(let parameters, let captures, let body, let type):
+            // Substitute types in lambda parameters
+            let newParameters = parameters.map { param in
+                Symbol(
+                    name: param.name,
+                    type: substituteType(param.type, substitution: substitution),
+                    kind: param.kind,
+                    methodKind: param.methodKind,
+                    modulePath: param.modulePath,
+                    sourceFile: param.sourceFile,
+                    access: param.access
+                )
+            }
+            // Substitute types in captures
+            let newCaptures = captures.map { capture in
+                CapturedVariable(
+                    symbol: Symbol(
+                        name: capture.symbol.name,
+                        type: substituteType(capture.symbol.type, substitution: substitution),
+                        kind: capture.symbol.kind,
+                        methodKind: capture.symbol.methodKind,
+                        modulePath: capture.symbol.modulePath,
+                        sourceFile: capture.symbol.sourceFile,
+                        access: capture.symbol.access
+                    ),
+                    captureKind: capture.captureKind
+                )
+            }
+            return .lambdaExpression(
+                parameters: newParameters,
+                captures: newCaptures,
+                body: substituteTypesInExpression(body, substitution: substitution),
+                type: substituteType(type, substitution: substitution)
             )
         }
     }
@@ -2637,6 +2679,41 @@ public class Monomorphizer {
             )
             
             return .call(callee: callee, arguments: resolvedArguments, type: resolvedReturnType)
+            
+        case .lambdaExpression(let parameters, let captures, let body, let type):
+            // Resolve types in lambda parameters
+            let newParameters = parameters.map { param in
+                Symbol(
+                    name: param.name,
+                    type: resolveParameterizedType(param.type),
+                    kind: param.kind,
+                    methodKind: param.methodKind,
+                    modulePath: param.modulePath,
+                    sourceFile: param.sourceFile,
+                    access: param.access
+                )
+            }
+            // Resolve types in captures
+            let newCaptures = captures.map { capture in
+                CapturedVariable(
+                    symbol: Symbol(
+                        name: capture.symbol.name,
+                        type: resolveParameterizedType(capture.symbol.type),
+                        kind: capture.symbol.kind,
+                        methodKind: capture.symbol.methodKind,
+                        modulePath: capture.symbol.modulePath,
+                        sourceFile: capture.symbol.sourceFile,
+                        access: capture.symbol.access
+                    ),
+                    captureKind: capture.captureKind
+                )
+            }
+            return .lambdaExpression(
+                parameters: newParameters,
+                captures: newCaptures,
+                body: resolveTypesInExpression(body),
+                type: resolveParameterizedType(type)
+            )
         }
     }
     

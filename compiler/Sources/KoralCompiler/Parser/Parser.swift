@@ -757,6 +757,24 @@ public class Parser {
       }
       try match(.identifier(name))
 
+      // Check if this is a function type: [...]Func
+      if name == "Func" {
+        // Function type: [ParamType1, ParamType2, ..., ReturnType]Func
+        // The last type is the return type, all others are parameter types
+        guard !args.isEmpty else {
+          throw ParserError.invalidFunctionType(
+            span: currentSpan, message: "Function type must have at least a return type")
+        }
+        let returnType = args.last!
+        let paramTypes = Array(args.dropLast())
+        var type: TypeNode = .functionType(paramTypes: paramTypes, returnType: returnType)
+        if currentToken === .refKeyword {
+          try match(.refKeyword)
+          type = .reference(type)
+        }
+        return type
+      }
+
       var type = TypeNode.generic(base: name, args: args)
       if currentToken === .refKeyword {
         try match(.refKeyword)
@@ -1835,11 +1853,8 @@ public class Parser {
     case .leftBrace:
       return try blockExpression()
     case .leftParen:
-      // Parenthesized expression for grouping: (expr)
-      try match(.leftParen)
-      let inner = try expression()
-      try match(.rightParen)
-      return inner
+      // Could be: parenthesized expression (expr) or lambda expression (params) -> body
+      return try parseParenOrLambda()
     case .leftBracket:
       try match(.leftBracket)
       var args: [TypeNode] = []
@@ -1871,6 +1886,124 @@ public class Parser {
         expected: "number, identifier, boolean literal, block expression, or generic instantiation"
       )
     }
+  }
+  
+  /// Parse either a parenthesized expression or a lambda expression.
+  /// Lambda syntax:
+  ///   () -> expr                    // no params
+  ///   (x) -> expr                   // single param, type inferred
+  ///   (x, y) -> expr                // multiple params, types inferred
+  ///   (x Int) -> expr               // single param with type
+  ///   (x Int, y Int) -> expr        // multiple params with types
+  ///   (x Int, y Int) Int -> expr    // with return type
+  private func parseParenOrLambda() throws -> ExpressionNode {
+    let startSpan = currentSpan
+    try match(.leftParen)
+    
+    // Empty parens: () -> must be lambda
+    if currentToken === .rightParen {
+      try match(.rightParen)
+      // Check for optional return type before arrow
+      var returnType: TypeNode? = nil
+      if currentToken !== .arrow {
+        // Could be a return type
+        if case .identifier(_) = currentToken {
+          returnType = try parseType()
+        } else if currentToken === .leftBracket {
+          returnType = try parseType()
+        }
+      }
+      if currentToken === .arrow {
+        try match(.arrow)
+        let body = try expression()
+        return .lambdaExpression(parameters: [], returnType: returnType, body: body, span: startSpan)
+      } else {
+        // Not a lambda, but () is not a valid expression by itself
+        throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description, expected: "'->'")
+      }
+    }
+    
+    // Save state to backtrack if this is not a lambda
+    let savedState = lexer.saveState()
+    let savedToken = currentToken
+    
+    // Try to parse as lambda parameters
+    var parameters: [(name: String, type: TypeNode?)] = []
+    var isLambda = false
+    
+    do {
+      while currentToken !== .rightParen {
+        guard case .identifier(let paramName) = currentToken else {
+          // Not a valid lambda parameter, restore and parse as expression
+          throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
+        }
+        try match(.identifier(paramName))
+        
+        // Check for optional type annotation
+        var paramType: TypeNode? = nil
+        if currentToken !== .comma && currentToken !== .rightParen {
+          // Could be a type annotation or an operator (if this is an expression)
+          // Types start with uppercase identifier or [
+          if case .identifier(let typeName) = currentToken, typeName.first?.isUppercase == true {
+            paramType = try parseType()
+          } else if currentToken === .leftBracket {
+            paramType = try parseType()
+          } else {
+            // Not a type, this might be an expression like (a + b)
+            throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
+          }
+        }
+        
+        parameters.append((name: paramName, type: paramType))
+        
+        if currentToken === .comma {
+          try match(.comma)
+        }
+      }
+      
+      try match(.rightParen)
+      
+      // Check for optional return type before arrow
+      var returnType: TypeNode? = nil
+      if currentToken !== .arrow {
+        // Could be a return type
+        if case .identifier(let typeName) = currentToken, typeName.first?.isUppercase == true {
+          returnType = try parseType()
+        } else if currentToken === .leftBracket {
+          returnType = try parseType()
+        }
+      }
+      
+      // Must have arrow for lambda
+      if currentToken === .arrow {
+        isLambda = true
+        try match(.arrow)
+        let body = try expression()
+        return .lambdaExpression(parameters: parameters, returnType: returnType, body: body, span: startSpan)
+      }
+      
+      // No arrow - if we have multiple params or typed params, it's an error
+      if parameters.count > 1 || parameters.contains(where: { $0.type != nil }) {
+        throw ParserError.expectedArrow(span: currentSpan)
+      }
+      
+      // Single untyped param without arrow - restore and parse as expression
+      // This handles cases like (a) which could be just a parenthesized identifier
+    } catch {
+      // Parsing as lambda failed, restore state
+    }
+    
+    if !isLambda {
+      // Restore state and parse as parenthesized expression
+      lexer.restoreState(savedState)
+      currentToken = savedToken
+      let inner = try expression()
+      try match(.rightParen)
+      return inner
+    }
+    
+    // Should not reach here
+    fatalError("Unreachable")
   }
 
   // Parse block expression

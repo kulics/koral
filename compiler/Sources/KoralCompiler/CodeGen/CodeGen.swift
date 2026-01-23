@@ -127,6 +127,14 @@ public class CodeGen {
   private var lifetimeScopeStack: [[(name: String, type: Type)]] = []
   private var userDefinedDrops: [String: String] = [:] // TypeName -> Mangled Drop Function Name
   
+  // MARK: - Lambda Code Generation
+  /// Counter for generating unique Lambda function names
+  private var lambdaCounter = 0
+  /// Buffer for Lambda function definitions (generated at the end)
+  private var lambdaFunctions: String = ""
+  /// Buffer for Lambda environment struct definitions
+  private var lambdaEnvStructs: String = ""
+  
   // MARK: - Escape Analysis
   /// 逃逸分析上下文，用于追踪变量作用域和逃逸状态
   private var escapeContext: EscapeContext
@@ -403,6 +411,16 @@ public class CodeGen {
         assertTypeResolved(type, context: "\(context) -> while pattern binding '\(name)'")
       }
       validateExpression(body, context: "\(context) -> while pattern body")
+      
+    case .lambdaExpression(let parameters, let captures, let body, let type):
+      assertTypeResolved(type, context: "\(context) -> lambda type")
+      for param in parameters {
+        assertTypeResolved(param.type, context: "\(context) -> lambda parameter '\(param.name)'")
+      }
+      for capture in captures {
+        assertTypeResolved(capture.symbol.type, context: "\(context) -> lambda capture '\(capture.symbol.name)'")
+      }
+      validateExpression(body, context: "\(context) -> lambda body")
     }
   }
   
@@ -638,6 +656,11 @@ public class CodeGen {
       // Generic Ref type
       struct Ref { void* ptr; void* control; };
 
+      // Unified Closure type for all function types (16 bytes)
+      // fn: function pointer (with env as first param if env != NULL)
+      // env: environment pointer (NULL for no-capture lambdas)
+      struct __koral_Closure { void* fn; void* env; };
+
       typedef void (*Koral_Dtor)(void*);
 
       struct Koral_Control {
@@ -669,6 +692,19 @@ public class CodeGen {
 
     // 生成程序体
     generateProgram(ast)
+    
+    // Insert Lambda env structs after the runtime definitions
+    if !lambdaEnvStructs.isEmpty {
+      // Find the position after the runtime definitions (after __koral_release)
+      if let insertPos = buffer.range(of: "void __koral_release(void* raw_control)") {
+        // Find the end of __koral_release function
+        if let funcEnd = buffer.range(of: "}\n\n", range: insertPos.upperBound..<buffer.endIndex) {
+          let insertIndex = funcEnd.upperBound
+          buffer.insert(contentsOf: lambdaEnvStructs, at: insertIndex)
+        }
+      }
+    }
+    
     return buffer
   }
   
@@ -934,14 +970,34 @@ public class CodeGen {
     escapeContext.currentScopeLevel = 0
     // 注意：escapedVariables 保留，因为这是预分析的结果
     
+    // Save Lambda state before generating function body
+    let savedLambdaFunctions = lambdaFunctions
+    lambdaFunctions = ""
+    
     let returnType = cName == "main" ? "int" : getFunctionReturnType(identifier.type)
     let paramList = params.map { getParamCDecl($0) }.joined(separator: ", ")
+    
+    // Generate function body to a temporary buffer to collect Lambda functions
+    let savedBuffer = buffer
+    buffer = ""
     buffer += "\(returnType) \(cName)(\(paramList)) {\n"
 
     withIndent {
       generateFunctionBody(body, params)
     }
     buffer += "}\n"
+    
+    let functionCode = buffer
+    buffer = savedBuffer
+    
+    // Insert Lambda functions before this function, then the function itself
+    if !lambdaFunctions.isEmpty {
+      buffer += lambdaFunctions
+    }
+    buffer += functionCode
+    
+    // Restore Lambda state
+    lambdaFunctions = savedLambdaFunctions
   }
 
   // 生成参数的 C 声明：类型若为 reference(T) 则 getCType 返回 T*
@@ -1784,7 +1840,240 @@ public class CodeGen {
 
     case .intrinsicCall(let node):
       return generateIntrinsicSSA(node)
+      
+    case .lambdaExpression(let parameters, let captures, let body, let type):
+      return generateLambdaExpression(parameters: parameters, captures: captures, body: body, type: type)
     }
+  }
+  
+  // MARK: - Lambda Expression Code Generation
+  
+  /// Generates a unique Lambda function name
+  private func nextLambdaName() -> String {
+    let name = "__koral_lambda_\(lambdaCounter)"
+    lambdaCounter += 1
+    return name
+  }
+  
+  /// Generates code for a Lambda expression
+  /// Returns the name of a temporary variable holding the Closure struct
+  private func generateLambdaExpression(
+    parameters: [Symbol],
+    captures: [CapturedVariable],
+    body: TypedExpressionNode,
+    type: Type
+  ) -> String {
+    guard case .function(let funcParams, let returnType) = type else {
+      fatalError("Lambda expression must have function type")
+    }
+    
+    let lambdaName = nextLambdaName()
+    
+    if captures.isEmpty {
+      // No-capture Lambda: generate a simple function, env = NULL
+      generateNoCaptureLabmdaFunction(
+        name: lambdaName,
+        parameters: parameters,
+        funcParams: funcParams,
+        returnType: returnType,
+        body: body
+      )
+      
+      // Create closure struct with env = NULL
+      let result = nextTemp()
+      addIndent()
+      buffer += "struct __koral_Closure \(result) = { .fn = (void*)\(lambdaName), .env = NULL };\n"
+      return result
+    } else {
+      // With-capture Lambda: generate env struct and wrapper function
+      let envStructName = "\(lambdaName)_env"
+      
+      // Generate environment struct definition
+      generateLambdaEnvStruct(name: envStructName, captures: captures)
+      
+      // Generate Lambda function with env parameter
+      generateCaptureLabmdaFunction(
+        name: lambdaName,
+        envStructName: envStructName,
+        parameters: parameters,
+        funcParams: funcParams,
+        returnType: returnType,
+        captures: captures,
+        body: body
+      )
+      
+      // Allocate and initialize environment
+      let envVar = nextTemp()
+      addIndent()
+      buffer += "struct \(envStructName)* \(envVar) = (struct \(envStructName)*)malloc(sizeof(struct \(envStructName)));\n"
+      addIndent()
+      buffer += "\(envVar)->__refcount = 1;\n"
+      
+      // Initialize captured variables
+      for capture in captures {
+        addIndent()
+        let capturedName = capture.symbol.qualifiedName
+        if case .reference(_) = capture.symbol.type {
+          // Reference type: copy the Ref struct and retain
+          buffer += "\(envVar)->\(capturedName) = \(capturedName);\n"
+          addIndent()
+          buffer += "__koral_retain(\(envVar)->\(capturedName).control);\n"
+        } else {
+          // Value type: copy the value
+          buffer += "\(envVar)->\(capturedName) = \(capturedName);\n"
+        }
+      }
+      
+      // Create closure struct
+      let result = nextTemp()
+      addIndent()
+      buffer += "struct __koral_Closure \(result) = { .fn = (void*)\(lambdaName), .env = \(envVar) };\n"
+      return result
+    }
+  }
+  
+  /// Generates a no-capture Lambda function
+  private func generateNoCaptureLabmdaFunction(
+    name: String,
+    parameters: [Symbol],
+    funcParams: [Parameter],
+    returnType: Type,
+    body: TypedExpressionNode
+  ) {
+    let returnCType = getCType(returnType)
+    
+    // Build parameter list
+    var paramList: [String] = []
+    for (i, param) in parameters.enumerated() {
+      let paramType = funcParams[i].type
+      paramList.append("\(getCType(paramType)) \(param.qualifiedName)")
+    }
+    
+    let paramsStr = paramList.isEmpty ? "void" : paramList.joined(separator: ", ")
+    
+    // Generate forward declaration
+    var funcBuffer = "\n// Lambda function (no capture)\n"
+    funcBuffer += "static \(returnCType) \(name)(\(paramsStr));\n"
+    funcBuffer += "static \(returnCType) \(name)(\(paramsStr)) {\n"
+    
+    // Save current state
+    let savedBuffer = buffer
+    let savedIndent = indent
+    let savedLambdaCounter = lambdaCounter
+    let savedLambdaFunctions = lambdaFunctions
+    buffer = ""
+    indent = "  "
+    lambdaFunctions = ""
+    
+    // Generate body
+    let bodyResult = generateExpressionSSA(body)
+    
+    if returnType != .void && returnType != .never {
+      addIndent()
+      buffer += "return \(bodyResult);\n"
+    }
+    
+    funcBuffer += buffer
+    funcBuffer += "}\n"
+    
+    // Handle nested lambdas
+    if !lambdaFunctions.isEmpty {
+      funcBuffer = lambdaFunctions + funcBuffer
+    }
+    
+    // Restore state
+    buffer = savedBuffer
+    indent = savedIndent
+    lambdaCounter = savedLambdaCounter + (lambdaCounter - savedLambdaCounter)
+    
+    // Add to Lambda functions buffer
+    lambdaFunctions = savedLambdaFunctions + funcBuffer
+  }
+  
+  /// Generates a Lambda function with captures
+  private func generateCaptureLabmdaFunction(
+    name: String,
+    envStructName: String,
+    parameters: [Symbol],
+    funcParams: [Parameter],
+    returnType: Type,
+    captures: [CapturedVariable],
+    body: TypedExpressionNode
+  ) {
+    let returnCType = getCType(returnType)
+    
+    // Build parameter list (env as first parameter)
+    var paramList: [String] = ["void* __env"]
+    for (i, param) in parameters.enumerated() {
+      let paramType = funcParams[i].type
+      paramList.append("\(getCType(paramType)) \(param.qualifiedName)")
+    }
+    
+    let paramsStr = paramList.joined(separator: ", ")
+    
+    // Generate forward declaration and function
+    var funcBuffer = "\n// Lambda function (with capture)\n"
+    funcBuffer += "static \(returnCType) \(name)(\(paramsStr));\n"
+    funcBuffer += "static \(returnCType) \(name)(\(paramsStr)) {\n"
+    funcBuffer += "  struct \(envStructName)* __captured = (struct \(envStructName)*)__env;\n"
+    
+    // Generate local aliases for captured variables
+    for capture in captures {
+      let capturedName = capture.symbol.qualifiedName
+      let capturedType = getCType(capture.symbol.type)
+      funcBuffer += "  \(capturedType) \(capturedName) = __captured->\(capturedName);\n"
+    }
+    
+    // Save current state
+    let savedBuffer = buffer
+    let savedIndent = indent
+    let savedLambdaCounter = lambdaCounter
+    let savedLambdaFunctions = lambdaFunctions
+    buffer = ""
+    indent = "  "
+    lambdaFunctions = ""
+    
+    // Generate body
+    let bodyResult = generateExpressionSSA(body)
+    
+    if returnType != .void && returnType != .never {
+      addIndent()
+      buffer += "return \(bodyResult);\n"
+    }
+    
+    funcBuffer += buffer
+    funcBuffer += "}\n"
+    
+    // Handle nested lambdas
+    if !lambdaFunctions.isEmpty {
+      funcBuffer = lambdaFunctions + funcBuffer
+    }
+    
+    // Restore state
+    buffer = savedBuffer
+    indent = savedIndent
+    lambdaCounter = savedLambdaCounter + (lambdaCounter - savedLambdaCounter)
+    
+    // Add to Lambda functions buffer
+    lambdaFunctions = savedLambdaFunctions + funcBuffer
+  }
+  
+  /// Generates the environment struct for a Lambda with captures
+  private func generateLambdaEnvStruct(name: String, captures: [CapturedVariable]) {
+    var structBuffer = "\n// Lambda environment struct\n"
+    structBuffer += "struct \(name) {\n"
+    structBuffer += "  intptr_t __refcount;\n"
+    
+    for capture in captures {
+      let capturedName = capture.symbol.qualifiedName
+      let capturedType = getCType(capture.symbol.type)
+      structBuffer += "  \(capturedType) \(capturedName);\n"
+    }
+    
+    structBuffer += "};\n"
+    
+    // Add to Lambda env structs buffer
+    lambdaEnvStructs += structBuffer
   }
 
 
@@ -2319,7 +2608,8 @@ public class CodeGen {
     case .void: return "void"
     case .never: return "void"
     case .function(_, _):
-      fatalError("Function type not supported in getCType")
+      // All function types use the unified Closure struct (16 bytes: fn + env)
+      return "struct __koral_Closure"
     case .structure(let decl):
       return "struct \(decl.qualifiedName)"
     case .union(let decl):
@@ -3073,10 +3363,125 @@ public class CodeGen {
     }
 
     if case .variable(let identifier) = callee {
+      // Check if this is a function type variable (closure call)
+      // Regular functions have kind = .function, while closure variables have kind = .variable
+      if case .variable(_) = identifier.kind,
+         case .function(let funcParams, let returnType) = identifier.type {
+        return generateClosureCall(
+          closureVar: identifier.qualifiedName,
+          funcParams: funcParams,
+          returnType: returnType,
+          arguments: arguments
+        )
+      }
       return generateFunctionCall(identifier, arguments, type)
     }
 
-    fatalError("Indirect call not supported yet")
+    // Handle indirect call through expression (e.g., lambda expression result)
+    if case .function(let funcParams, let returnType) = callee.type {
+      let closureResult = generateExpressionSSA(callee)
+      return generateClosureCall(
+        closureVar: closureResult,
+        funcParams: funcParams,
+        returnType: returnType,
+        arguments: arguments
+      )
+    }
+
+    fatalError("Indirect call not supported: callee type = \(callee.type)")
+  }
+  
+  /// Generates code for calling a closure (function type variable)
+  /// Handles both no-capture (env == NULL) and with-capture (env != NULL) cases
+  private func generateClosureCall(
+    closureVar: String,
+    funcParams: [Parameter],
+    returnType: Type,
+    arguments: [TypedExpressionNode]
+  ) -> String {
+    // Generate argument values
+    var argResults: [String] = []
+    for arg in arguments {
+      let result = generateExpressionSSA(arg)
+      if case .structure(let decl) = arg.type {
+        if arg.valueCategory == .lvalue {
+          let copyResult = nextTemp()
+          addIndent()
+          buffer += "\(getCType(arg.type)) \(copyResult) = __koral_\(decl.qualifiedName)_copy(&\(result));\n"
+          argResults.append(copyResult)
+        } else {
+          argResults.append(result)
+        }
+      } else if case .reference(_) = arg.type {
+        if arg.valueCategory == .lvalue {
+          addIndent()
+          buffer += "__koral_retain(\(result).control);\n"
+        }
+        argResults.append(result)
+      } else {
+        argResults.append(result)
+      }
+    }
+    
+    let returnCType = getCType(returnType)
+    
+    // Build function pointer type for no-capture case: ReturnType (*)(Args...)
+    var noCaptureParamTypes: [String] = []
+    for param in funcParams {
+      noCaptureParamTypes.append(getCType(param.type))
+    }
+    let noCaptureParamsStr = noCaptureParamTypes.isEmpty ? "void" : noCaptureParamTypes.joined(separator: ", ")
+    let noCaptureFnPtrType = "\(returnCType) (*)(\(noCaptureParamsStr))"
+    
+    // Build function pointer type for with-capture case: ReturnType (*)(void*, Args...)
+    var withCaptureParamTypes: [String] = ["void*"]
+    for param in funcParams {
+      withCaptureParamTypes.append(getCType(param.type))
+    }
+    let withCaptureParamsStr = withCaptureParamTypes.joined(separator: ", ")
+    let withCaptureFnPtrType = "\(returnCType) (*)(\(withCaptureParamsStr))"
+    
+    // Build argument list strings
+    let argsStr = argResults.joined(separator: ", ")
+    let argsWithEnvStr = argResults.isEmpty ? "\(closureVar).env" : "\(closureVar).env, \(argsStr)"
+    
+    // Generate conditional call based on env == NULL
+    if returnType == .void || returnType == .never {
+      addIndent()
+      buffer += "if (\(closureVar).env == NULL) {\n"
+      indent += "  "
+      addIndent()
+      buffer += "((\(noCaptureFnPtrType))(\(closureVar).fn))(\(argsStr));\n"
+      indent = String(indent.dropLast(2))
+      addIndent()
+      buffer += "} else {\n"
+      indent += "  "
+      addIndent()
+      buffer += "((\(withCaptureFnPtrType))(\(closureVar).fn))(\(argsWithEnvStr));\n"
+      indent = String(indent.dropLast(2))
+      addIndent()
+      buffer += "}\n"
+      return ""
+    } else {
+      let result = nextTemp()
+      addIndent()
+      buffer += "\(returnCType) \(result);\n"
+      addIndent()
+      buffer += "if (\(closureVar).env == NULL) {\n"
+      indent += "  "
+      addIndent()
+      buffer += "\(result) = ((\(noCaptureFnPtrType))(\(closureVar).fn))(\(argsStr));\n"
+      indent = String(indent.dropLast(2))
+      addIndent()
+      buffer += "} else {\n"
+      indent += "  "
+      addIndent()
+      buffer += "\(result) = ((\(withCaptureFnPtrType))(\(closureVar).fn))(\(argsWithEnvStr));\n"
+      indent = String(indent.dropLast(2))
+      addIndent()
+      buffer += "}\n"
+      return result
+    }
   }
 
   private func generateFunctionCall(

@@ -61,6 +61,8 @@ public class Scope {
   private var movedVariables: Set<String> = []
   /// Module path for symbols (symbol name -> module path)
   private var symbolModulePaths: [String: [String]] = [:]
+  /// Set of function symbols (not closure variables)
+  private var functionSymbols: Set<String> = []
 
   public init(parent: Scope? = nil) {
     self.symbols = [:]
@@ -86,6 +88,28 @@ public class Scope {
     symbols[name] = (type, mutable)
   }
   
+  /// Define a function symbol (not a closure variable)
+  public func defineFunction(_ name: String, _ type: Type) {
+    symbols[name] = (type, false)  // Functions are always immutable
+    functionSymbols.insert(name)
+  }
+  
+  /// Check if a symbol is a function (not a closure variable)
+  public func isFunction(_ name: String, sourceFile: String? = nil) -> Bool {
+    // Check private function symbols first
+    if let sourceFile = sourceFile {
+      let key = "\(name)@\(sourceFile)"
+      if privateFunctionSymbols.contains(key) {
+        return true
+      }
+    }
+    // Then check public function symbols
+    if functionSymbols.contains(name) {
+      return true
+    }
+    return parent?.isFunction(name, sourceFile: sourceFile) ?? false
+  }
+  
   /// Define a symbol with module path information
   public func defineWithModulePath(_ name: String, _ type: Type, mutable: Bool, modulePath: [String]) {
     symbols[name] = (type, mutable)
@@ -96,6 +120,25 @@ public class Scope {
   public func definePrivateSymbol(_ name: String, sourceFile: String, type: Type, mutable: Bool) {
     let key = "\(name)@\(sourceFile)"
     privateSymbols[key] = (type: type, mutable: mutable, sourceFile: sourceFile)
+  }
+  
+  /// Private function symbols indexed by "name@sourceFile"
+  private var privateFunctionSymbols: Set<String> = []
+  
+  /// Define a private function symbol with file isolation
+  public func definePrivateFunction(_ name: String, sourceFile: String, type: Type) {
+    let key = "\(name)@\(sourceFile)"
+    privateSymbols[key] = (type: type, mutable: false, sourceFile: sourceFile)
+    privateFunctionSymbols.insert(key)
+  }
+  
+  /// Check if a symbol is a private function
+  public func isPrivateFunction(_ name: String, sourceFile: String) -> Bool {
+    let key = "\(name)@\(sourceFile)"
+    if privateFunctionSymbols.contains(key) {
+      return true
+    }
+    return parent?.isPrivateFunction(name, sourceFile: sourceFile) ?? false
   }
   
   /// Lookup a symbol, checking private symbols for the given source file first

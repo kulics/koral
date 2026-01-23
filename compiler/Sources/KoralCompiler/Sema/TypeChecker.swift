@@ -1934,9 +1934,9 @@ public class TypeChecker {
         // For private functions, use file-isolated registration
         let isPrivate = (access == .private)
         if isPrivate {
-          currentScope.definePrivateSymbol(name, sourceFile: currentSourceFile, type: functionType, mutable: false)
+          currentScope.definePrivateFunction(name, sourceFile: currentSourceFile, type: functionType)
         } else {
-          currentScope.define(name, functionType, mutable: false)
+          currentScope.defineFunction(name, functionType)
         }
       }
       // Generic functions are handled in pass 3
@@ -1952,7 +1952,7 @@ public class TypeChecker {
           return Parameter(type: paramType, kind: passKind)
         }
         let functionType = Type.function(parameters: params, returns: returnType)
-        currentScope.define(name, functionType, mutable: false)
+        currentScope.defineFunction(name, functionType)
       }
       // Generic intrinsic functions are handled in pass 3
       
@@ -2030,7 +2030,20 @@ public class TypeChecker {
         }
       }
       let type = try resolveTypeNode(typeNode)
-      let typedValue = try inferTypedExpression(value)
+      
+      // For Lambda expressions, pass the expected type for type inference
+      var typedValue: TypedExpressionNode
+      if case .lambdaExpression(let parameters, let returnType, let body, _) = value {
+        typedValue = try inferLambdaExpression(
+          parameters: parameters,
+          returnType: returnType,
+          body: body,
+          expectedType: type
+        )
+      } else {
+        typedValue = try inferTypedExpression(value)
+      }
+      
       if typedValue.type != .never && typedValue.type != type {
         throw SemanticError.typeMismatch(
           expected: type.description, got: typedValue.type.description)
@@ -2137,9 +2150,9 @@ public class TypeChecker {
         : currentScope.lookup(name)
       if existingForRecursion == nil {
         if isPrivate {
-          currentScope.definePrivateSymbol(name, sourceFile: currentSourceFile, type: functionType, mutable: false)
+          currentScope.definePrivateFunction(name, sourceFile: currentSourceFile, type: functionType)
         } else {
-          currentScope.define(name, functionType, mutable: false)
+          currentScope.defineFunction(name, functionType)
         }
       }
 
@@ -2213,7 +2226,7 @@ public class TypeChecker {
         let typedBody = TypedExpressionNode.integerLiteral(value: "0", type: .int)
         return (funcType, typedBody, params)
       }
-      currentScope.define(name, functionType, mutable: false)
+      currentScope.defineFunction(name, functionType)
       return nil
 
     case .givenDeclaration(let typeParams, let typeNode, let methods, let span):
@@ -2790,10 +2803,22 @@ public class TypeChecker {
       let symbolModulePath = isGlobalSymbol ? (info.modulePath.isEmpty ? currentModulePath : info.modulePath) : []
       let symbolSourceFile = info.isPrivate ? (info.sourceFile ?? currentSourceFile) : ""
       
+      // Determine symbol kind:
+      // - Functions are tracked in the scope's functionSymbols set
+      // - Variables with function types (closures) are not in that set
+      let symbolKind: SymbolKind
+      if currentScope.isFunction(name, sourceFile: currentSourceFile) {
+        // This is a function symbol (not a closure variable)
+        symbolKind = .function
+      } else {
+        // This is a variable (possibly with function type for closures)
+        symbolKind = .variable(info.mutable ? .MutableValue : .Value)
+      }
+      
       let symbol = Symbol(
         name: name,
         type: info.type,
-        kind: .variable(info.mutable ? .MutableValue : .Value),
+        kind: symbolKind,
         modulePath: symbolModulePath,
         sourceFile: symbolSourceFile,
         access: info.isPrivate ? .private : .default
@@ -3766,7 +3791,18 @@ public class TypeChecker {
 
           var typedArguments: [TypedExpressionNode] = []
           for (arg, param) in zip(arguments, params.dropFirst()) {
-            var typedArg = try inferTypedExpression(arg)
+            var typedArg: TypedExpressionNode
+            // For Lambda expressions, pass the expected type for type inference
+            if case .lambdaExpression(let lambdaParams, let returnType, let body, _) = arg {
+              typedArg = try inferLambdaExpression(
+                parameters: lambdaParams,
+                returnType: returnType,
+                body: body,
+                expectedType: param.type
+              )
+            } else {
+              typedArg = try inferTypedExpression(arg)
+            }
             typedArg = coerceLiteral(typedArg, to: param.type)
             if typedArg.type != param.type {
               // Try implicit ref/deref for arguments as well (mirrors self handling).
@@ -3835,7 +3871,18 @@ public class TypeChecker {
 
         var typedArguments: [TypedExpressionNode] = []
         for (arg, param) in zip(arguments, params) {
-          var typedArg = try inferTypedExpression(arg)
+          var typedArg: TypedExpressionNode
+          // For Lambda expressions, pass the expected type for type inference
+          if case .lambdaExpression(let lambdaParams, let returnType, let body, _) = arg {
+            typedArg = try inferLambdaExpression(
+              parameters: lambdaParams,
+              returnType: returnType,
+              body: body,
+              expectedType: param.type
+            )
+          } else {
+            typedArg = try inferTypedExpression(arg)
+          }
           typedArg = coerceLiteral(typedArg, to: param.type)
           if typedArg.type != param.type {
             throw SemanticError.typeMismatch(
@@ -4724,6 +4771,286 @@ public class TypeChecker {
 
     case .genericInstantiation(let base, _):
       throw SemanticError.invalidOperation(op: "use type as value", type1: base, type2: "")
+      
+    case .lambdaExpression(let parameters, let returnType, let body, _):
+      return try inferLambdaExpression(parameters: parameters, returnType: returnType, body: body, expectedType: nil)
+    }
+  }
+
+  // MARK: - Lambda Expression Type Checking
+  
+  /// Type checks a lambda expression and returns a typed lambda expression.
+  /// - Parameters:
+  ///   - parameters: Lambda parameters with optional type annotations
+  ///   - returnType: Optional return type annotation
+  ///   - body: Lambda body expression
+  ///   - expectedType: Expected function type for type inference (optional)
+  /// - Returns: Typed lambda expression
+  private func inferLambdaExpression(
+    parameters: [(name: String, type: TypeNode?)],
+    returnType: TypeNode?,
+    body: ExpressionNode,
+    expectedType: Type?
+  ) throws -> TypedExpressionNode {
+    // Extract expected parameter types and return type from expectedType
+    var expectedParamTypes: [Type]? = nil
+    var expectedReturnType: Type? = nil
+    
+    if case .function(let funcParams, let funcReturn) = expectedType {
+      expectedParamTypes = funcParams.map { $0.type }
+      expectedReturnType = funcReturn
+    }
+    
+    // Resolve parameter types
+    var typedParams: [(name: String, type: Type)] = []
+    for (i, param) in parameters.enumerated() {
+      let paramType: Type
+      
+      if let explicitType = param.type {
+        // Use explicit type annotation
+        paramType = try resolveTypeNode(explicitType)
+      } else if let expected = expectedParamTypes, i < expected.count {
+        // Infer from expected type
+        paramType = expected[i]
+      } else {
+        throw SemanticError(.generic("Cannot infer type for parameter '\(param.name)'"), line: currentLine)
+      }
+      
+      typedParams.append((name: param.name, type: paramType))
+    }
+    
+    // Enter new scope and add parameters
+    return try withNewScope {
+      for param in typedParams {
+        currentScope.define(param.name, param.type, mutable: false)
+      }
+      
+      // Analyze captured variables
+      let captures = try analyzeCapturedVariables(body: body, params: typedParams)
+      
+      // Type check lambda body
+      let typedBody = try inferTypedExpression(body)
+      
+      // Determine return type
+      let actualReturnType: Type
+      if let explicit = returnType {
+        actualReturnType = try resolveTypeNode(explicit)
+        // Verify body type matches declared return type
+        if typedBody.type != actualReturnType && typedBody.type != .never {
+          throw SemanticError(.typeMismatch(expected: actualReturnType.description, got: typedBody.type.description), line: currentLine)
+        }
+      } else if let expected = expectedReturnType {
+        actualReturnType = expected
+        // Verify body type matches expected return type
+        if typedBody.type != actualReturnType && typedBody.type != .never {
+          throw SemanticError(.typeMismatch(expected: actualReturnType.description, got: typedBody.type.description), line: currentLine)
+        }
+      } else {
+        // Infer return type from body
+        actualReturnType = typedBody.type
+      }
+      
+      // Build function type
+      let funcParams = typedParams.map { Parameter(type: $0.type, kind: .byVal) }
+      let funcType = Type.function(parameters: funcParams, returns: actualReturnType)
+      
+      // Build typed parameter symbols
+      let paramSymbols = typedParams.map { param in
+        Symbol(
+          name: param.name,
+          type: param.type,
+          kind: .variable(.Value),
+          modulePath: [],
+          sourceFile: currentSourceFile,
+          access: .default
+        )
+      }
+      
+      return .lambdaExpression(
+        parameters: paramSymbols,
+        captures: captures,
+        body: typedBody,
+        type: funcType
+      )
+    }
+  }
+  
+  /// Analyzes captured variables in a lambda body.
+  /// Only immutable variables can be captured.
+  private func analyzeCapturedVariables(
+    body: ExpressionNode,
+    params: [(name: String, type: Type)]
+  ) throws -> [CapturedVariable] {
+    var captures: [CapturedVariable] = []
+    let paramNames = Set(params.map { $0.name })
+    
+    // Collect all variable references in the body
+    try collectCapturedVariables(expr: body, paramNames: paramNames, captures: &captures)
+    
+    return captures
+  }
+  
+  /// Recursively collects captured variables from an expression.
+  private func collectCapturedVariables(
+    expr: ExpressionNode,
+    paramNames: Set<String>,
+    captures: inout [CapturedVariable]
+  ) throws {
+    switch expr {
+    case .identifier(let name):
+      // Skip if it's a parameter
+      if paramNames.contains(name) { return }
+      
+      // Look up the variable in scope with full info
+      if let info = currentScope.lookupWithInfo(name, sourceFile: currentSourceFile) {
+        // Check if it's mutable - only immutable variables can be captured
+        if info.mutable {
+          throw SemanticError(.generic("Cannot capture mutable variable '\(name)'"), line: currentLine)
+        }
+        
+        // Avoid duplicates
+        if !captures.contains(where: { $0.symbol.name == name }) {
+          let captureKind: CaptureKind
+          if case .reference(_) = info.type {
+            captureKind = .byReference
+          } else {
+            captureKind = .byValue
+          }
+          
+          let symbol = Symbol(
+            name: name,
+            type: info.type,
+            kind: .variable(.Value),
+            modulePath: [],
+            sourceFile: currentSourceFile,
+            access: .default
+          )
+          captures.append(CapturedVariable(symbol: symbol, captureKind: captureKind))
+        }
+      }
+      
+    case .blockExpression(let statements, let finalExpr):
+      for stmt in statements {
+        try collectCapturedVariablesFromStatement(stmt: stmt, paramNames: paramNames, captures: &captures)
+      }
+      if let final = finalExpr {
+        try collectCapturedVariables(expr: final, paramNames: paramNames, captures: &captures)
+      }
+      
+    case .call(let callee, let arguments):
+      try collectCapturedVariables(expr: callee, paramNames: paramNames, captures: &captures)
+      for arg in arguments {
+        try collectCapturedVariables(expr: arg, paramNames: paramNames, captures: &captures)
+      }
+      
+    case .arithmeticExpression(let left, _, let right),
+         .comparisonExpression(let left, _, let right),
+         .bitwiseExpression(let left, _, let right),
+         .andExpression(let left, let right),
+         .orExpression(let left, let right):
+      try collectCapturedVariables(expr: left, paramNames: paramNames, captures: &captures)
+      try collectCapturedVariables(expr: right, paramNames: paramNames, captures: &captures)
+      
+    case .notExpression(let inner),
+         .bitwiseNotExpression(let inner),
+         .derefExpression(let inner),
+         .refExpression(let inner):
+      try collectCapturedVariables(expr: inner, paramNames: paramNames, captures: &captures)
+      
+    case .ifExpression(let condition, let thenBranch, let elseBranch):
+      try collectCapturedVariables(expr: condition, paramNames: paramNames, captures: &captures)
+      try collectCapturedVariables(expr: thenBranch, paramNames: paramNames, captures: &captures)
+      if let elseBranch = elseBranch {
+        try collectCapturedVariables(expr: elseBranch, paramNames: paramNames, captures: &captures)
+      }
+      
+    case .whileExpression(let condition, let body):
+      try collectCapturedVariables(expr: condition, paramNames: paramNames, captures: &captures)
+      try collectCapturedVariables(expr: body, paramNames: paramNames, captures: &captures)
+      
+    case .letExpression(_, _, let value, _, let body):
+      try collectCapturedVariables(expr: value, paramNames: paramNames, captures: &captures)
+      try collectCapturedVariables(expr: body, paramNames: paramNames, captures: &captures)
+      
+    case .memberPath(let base, _):
+      try collectCapturedVariables(expr: base, paramNames: paramNames, captures: &captures)
+      
+    case .subscriptExpression(let base, let arguments):
+      try collectCapturedVariables(expr: base, paramNames: paramNames, captures: &captures)
+      for arg in arguments {
+        try collectCapturedVariables(expr: arg, paramNames: paramNames, captures: &captures)
+      }
+      
+    case .matchExpression(let subject, let cases, _):
+      try collectCapturedVariables(expr: subject, paramNames: paramNames, captures: &captures)
+      for c in cases {
+        try collectCapturedVariables(expr: c.body, paramNames: paramNames, captures: &captures)
+      }
+      
+    case .castExpression(_, let inner):
+      try collectCapturedVariables(expr: inner, paramNames: paramNames, captures: &captures)
+      
+    case .staticMethodCall(_, _, _, let arguments):
+      for arg in arguments {
+        try collectCapturedVariables(expr: arg, paramNames: paramNames, captures: &captures)
+      }
+      
+    case .forExpression(_, let iterable, let body):
+      try collectCapturedVariables(expr: iterable, paramNames: paramNames, captures: &captures)
+      try collectCapturedVariables(expr: body, paramNames: paramNames, captures: &captures)
+      
+    case .rangeExpression(_, let left, let right):
+      if let left = left {
+        try collectCapturedVariables(expr: left, paramNames: paramNames, captures: &captures)
+      }
+      if let right = right {
+        try collectCapturedVariables(expr: right, paramNames: paramNames, captures: &captures)
+      }
+      
+    case .ifPatternExpression(let subject, _, let thenBranch, let elseBranch, _):
+      try collectCapturedVariables(expr: subject, paramNames: paramNames, captures: &captures)
+      try collectCapturedVariables(expr: thenBranch, paramNames: paramNames, captures: &captures)
+      if let elseBranch = elseBranch {
+        try collectCapturedVariables(expr: elseBranch, paramNames: paramNames, captures: &captures)
+      }
+      
+    case .whilePatternExpression(let subject, _, let body, _):
+      try collectCapturedVariables(expr: subject, paramNames: paramNames, captures: &captures)
+      try collectCapturedVariables(expr: body, paramNames: paramNames, captures: &captures)
+      
+    case .lambdaExpression(_, _, let body, _):
+      // Nested lambda - recursively collect captures
+      try collectCapturedVariables(expr: body, paramNames: paramNames, captures: &captures)
+      
+    case .integerLiteral, .floatLiteral, .stringLiteral, .booleanLiteral, .genericInstantiation:
+      // Literals and type instantiations don't capture variables
+      break
+    }
+  }
+  
+  /// Helper to collect captured variables from a statement.
+  private func collectCapturedVariablesFromStatement(
+    stmt: StatementNode,
+    paramNames: Set<String>,
+    captures: inout [CapturedVariable]
+  ) throws {
+    switch stmt {
+    case .variableDeclaration(_, _, let value, _, _):
+      try collectCapturedVariables(expr: value, paramNames: paramNames, captures: &captures)
+    case .assignment(let target, let value, _):
+      try collectCapturedVariables(expr: target, paramNames: paramNames, captures: &captures)
+      try collectCapturedVariables(expr: value, paramNames: paramNames, captures: &captures)
+    case .compoundAssignment(let target, _, let value, _):
+      try collectCapturedVariables(expr: target, paramNames: paramNames, captures: &captures)
+      try collectCapturedVariables(expr: value, paramNames: paramNames, captures: &captures)
+    case .expression(let expr, _):
+      try collectCapturedVariables(expr: expr, paramNames: paramNames, captures: &captures)
+    case .return(let value, _):
+      if let value = value {
+        try collectCapturedVariables(expr: value, paramNames: paramNames, captures: &captures)
+      }
+    case .break, .continue:
+      break
     }
   }
 
@@ -5380,11 +5707,30 @@ public class TypeChecker {
     switch stmt {
     case .variableDeclaration(let name, let typeNode, let value, let mutable, let span):
       self.currentSpan = span
-      var typedValue = try inferTypedExpression(value)
-      let type: Type
-
+      
+      // For Lambda expressions, pass the expected type for type inference
+      var typedValue: TypedExpressionNode
+      var expectedType: Type? = nil
+      
       if let typeNode = typeNode {
-        type = try resolveTypeNode(typeNode)
+        expectedType = try resolveTypeNode(typeNode)
+      }
+      
+      // Check if value is a Lambda expression and pass expected type
+      if case .lambdaExpression(let parameters, let returnType, let body, _) = value {
+        typedValue = try inferLambdaExpression(
+          parameters: parameters,
+          returnType: returnType,
+          body: body,
+          expectedType: expectedType
+        )
+      } else {
+        typedValue = try inferTypedExpression(value)
+      }
+      
+      let type: Type
+      if let expectedType = expectedType {
+        type = expectedType
         typedValue = coerceLiteral(typedValue, to: type)
         if typedValue.type != .never && typedValue.type != type {
           throw SemanticError.typeMismatch(
@@ -5953,6 +6299,12 @@ public class TypeChecker {
       } else {
         throw SemanticError.undefinedType(base)
       }
+    case .functionType(let paramTypes, let returnType):
+      // Resolve function type: [ParamType1, ParamType2, ..., ReturnType]Func
+      let resolvedParamTypes = try paramTypes.map { try resolveTypeNode($0) }
+      let resolvedReturnType = try resolveTypeNode(returnType)
+      let parameters = resolvedParamTypes.map { Parameter(type: $0, kind: .byVal) }
+      return .function(parameters: parameters, returns: resolvedReturnType)
     }
   }
 
@@ -6255,6 +6607,16 @@ public class TypeChecker {
           for (argNode, argType) in zip(args, typeArgs) {
             try unify(node: argNode, type: argType, inferred: &inferred, typeParams: typeParams)
           }
+        }
+      }
+    case .functionType(let paramTypes, let returnType):
+      // Match against function type
+      if case .function(let params, let returns) = type {
+        if params.count == paramTypes.count {
+          for (paramNode, param) in zip(paramTypes, params) {
+            try unify(node: paramNode, type: param.type, inferred: &inferred, typeParams: typeParams)
+          }
+          try unify(node: returnType, type: returns, inferred: &inferred, typeParams: typeParams)
         }
       }
     }

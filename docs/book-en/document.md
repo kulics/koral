@@ -758,6 +758,50 @@ When the type of lambda can be known in our context, we can omit its parameter t
 let f [Int, Int]Func = (x) -> x + 1;
 ```
 
+### Closures
+
+Lambda expressions can capture variables from their surrounding scope. This is called a closure. When a lambda references a variable from an outer scope, that variable is captured and stored within the closure.
+
+```koral
+let make_adder(base Int) [Int, Int]Func = {
+    // The lambda captures 'base' from the outer scope
+    (x) -> base + x
+}
+
+let add10 = make_adder(10);
+let result = add10(32);  // result == 42
+```
+
+In the example above, the lambda `(x) -> base + x` captures the `base` parameter from the `make_adder` function. Even after `make_adder` returns, the closure retains access to the captured value.
+
+#### Capture Rules
+
+Koral only allows capturing **immutable** variables. Attempting to capture a mutable variable will result in a compile error.
+
+```koral
+let x = 10;
+let f = () -> x + 1;  // OK: x is immutable
+
+let mut y = 20;
+let g = () -> y + 1;  // Error: cannot capture mutable variable 'y'
+```
+
+This restriction ensures that closures have predictable behavior and avoids issues with shared mutable state.
+
+#### Currying
+
+Closures enable currying - a technique where a function with multiple parameters is transformed into a sequence of functions, each taking a single parameter.
+
+```koral
+let add [Int, [Int, Int]Func]Func = (x) -> (y) -> x + y;
+
+let add10 = add(10);     // Returns a function that adds 10
+let result = add10(32);  // result == 42
+
+// Or call directly
+let sum = add(20)(22);   // sum == 42
+```
+
 ## Data Types
 
 Data types are data collections composed of a series of data with the same type or different types. It is a composite data type.

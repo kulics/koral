@@ -465,6 +465,29 @@ public func printTypedAST(_ node: TypedProgram) {
           printTypedExpression(body)
         }
       }
+      
+    case .lambdaExpression(let parameters, let captures, let body, let type):
+      print("\(indent)LambdaExpression: \(type)")
+      withIndent {
+        print("\(indent)Parameters:")
+        withIndent {
+          for param in parameters {
+            print("\(indent)\(param.name): \(param.type)")
+          }
+        }
+        if !captures.isEmpty {
+          print("\(indent)Captures:")
+          withIndent {
+            for capture in captures {
+              print("\(indent)\(capture.symbol.name): \(capture.symbol.type) (\(capture.captureKind))")
+            }
+          }
+        }
+        print("\(indent)Body:")
+        withIndent {
+          printTypedExpression(body)
+        }
+      }
     }
   }
 

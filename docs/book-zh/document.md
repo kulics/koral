@@ -749,6 +749,50 @@ let a = f1(1) + f2(1); // a == 4
 let f [Int, Int]Func = (x) -> x + 1;
 ```
 
+### 闭包
+
+Lambda 表达式可以捕获其周围作用域中的变量，这被称为闭包。当 lambda 引用外部作用域的变量时，该变量会被捕获并存储在闭包中。
+
+```koral
+let make_adder(base Int) [Int, Int]Func = {
+    // lambda 捕获了外部作用域的 'base'
+    (x) -> base + x
+}
+
+let add10 = make_adder(10);
+let result = add10(32);  // result == 42
+```
+
+在上面的例子中，lambda `(x) -> base + x` 捕获了 `make_adder` 函数的参数 `base`。即使 `make_adder` 返回后，闭包仍然保留对捕获值的访问。
+
+#### 捕获规则
+
+Koral 只允许捕获**不可变**变量。尝试捕获可变变量会导致编译错误。
+
+```koral
+let x = 10;
+let f = () -> x + 1;  // OK: x 是不可变的
+
+let mut y = 20;
+let g = () -> y + 1;  // 错误: 不能捕获可变变量 'y'
+```
+
+这个限制确保闭包具有可预测的行为，避免共享可变状态带来的问题。
+
+#### 柯里化
+
+闭包使柯里化成为可能——这是一种将具有多个参数的函数转换为一系列单参数函数的技术。
+
+```koral
+let add [Int, [Int, Int]Func]Func = (x) -> (y) -> x + y;
+
+let add10 = add(10);     // 返回一个加 10 的函数
+let result = add10(32);  // result == 42
+
+// 或者直接调用
+let sum = add(20)(22);   // sum == 42
+```
+
 ## 数据类型
 
 数据类型是由一系列具有相同类型或不同类型的数据构成的数据集合，它是一种复合数据类型。

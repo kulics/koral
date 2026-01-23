@@ -64,6 +64,10 @@ public enum ParserError: Error {
   case usingAfterDeclaration(span: SourceSpan)
   case fileMergeNoAccessModifier(span: SourceSpan)
   case expectedDot(span: SourceSpan)
+  // Function type errors
+  case invalidFunctionType(span: SourceSpan, message: String)
+  // Lambda expression errors
+  case expectedArrow(span: SourceSpan)
   
   /// The source span where the error occurred
   public var span: SourceSpan {
@@ -79,6 +83,8 @@ public enum ParserError: Error {
     case .usingAfterDeclaration(let span): return span
     case .fileMergeNoAccessModifier(let span): return span
     case .expectedDot(let span): return span
+    case .invalidFunctionType(let span, _): return span
+    case .expectedArrow(let span): return span
     }
   }
   
@@ -120,6 +126,10 @@ public enum ParserError: Error {
       return "File merge (using \"...\") does not support access modifiers"
     case .expectedDot:
       return "Expected '.' after 'self' in using declaration"
+    case .invalidFunctionType(_, let message):
+      return "Invalid function type: \(message)"
+    case .expectedArrow:
+      return "Expected '->' in lambda expression"
     }
   }
 }
