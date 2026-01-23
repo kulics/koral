@@ -418,6 +418,22 @@ public func printAST(_ node: ASTNode) {
         printExpression(base)
       }
 
+    case .genericMethodCall(let base, let methodTypeArgs, let methodName, let arguments):
+      let typeArgsStr = methodTypeArgs.map { "\($0)" }.joined(separator: ", ")
+      print("\(indent)GenericMethodCall: .[\(typeArgsStr)]\(methodName)")
+      print("\(indent)  Base:")
+      withIndent {
+        printExpression(base)
+      }
+      print("\(indent)  Arguments:")
+      withIndent {
+        withIndent {
+          for arg in arguments {
+            printExpression(arg)
+          }
+        }
+      }
+
     case .genericInstantiation(let base, let args):
       print("\(indent)GenericInstantiation: \(base)")
       print("\(indent)  Args: \(args)")
