@@ -43,6 +43,27 @@ public enum VariableKind {
     }
   }
 }
+
+/// Capture kind for lambda closures
+public enum CaptureKind {
+  /// Value capture: copy the variable's value
+  case byValue
+  /// Reference capture: capture reference type, increment reference count
+  case byReference
+}
+
+/// Captured variable information for lambda closures
+public struct CapturedVariable {
+  /// The captured variable symbol
+  public let symbol: Symbol
+  /// How the variable is captured
+  public let captureKind: CaptureKind
+  
+  public init(symbol: Symbol, captureKind: CaptureKind) {
+    self.symbol = symbol
+    self.captureKind = captureKind
+  }
+}
 public enum CompilerMethodKind {
   case normal
   case drop
@@ -203,6 +224,17 @@ public indirect enum TypedExpressionNode {
   case unionConstruction(type: Type, caseName: String, arguments: [TypedExpressionNode])
   case intrinsicCall(TypedIntrinsic)
   case matchExpression(subject: TypedExpressionNode, cases: [TypedMatchCase], type: Type)
+  /// Lambda expression (closure)
+  /// - parameters: Typed parameter symbols
+  /// - captures: Captured variables from outer scope
+  /// - body: Lambda body expression
+  /// - type: Function type of the lambda
+  case lambdaExpression(
+    parameters: [Symbol],
+    captures: [CapturedVariable],
+    body: TypedExpressionNode,
+    type: Type
+  )
 }
 public indirect enum TypedIntrinsic {
   // Memory Management
@@ -365,6 +397,8 @@ extension TypedExpressionNode {
     case .intrinsicCall(let node):
       return node.type
     case .matchExpression(_, _, let type):
+      return type
+    case .lambdaExpression(_, _, _, let type):
       return type
     }
   }

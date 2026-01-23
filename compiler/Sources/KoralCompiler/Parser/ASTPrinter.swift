@@ -508,6 +508,23 @@ public func printAST(_ node: ASTNode) {
           printExpression(body)
         }
       }
+      
+    case .lambdaExpression(let parameters, let returnType, let body, _):
+      let paramsStr = parameters.map { param in
+        if let type = param.type {
+          return "\(param.name) \(type)"
+        } else {
+          return param.name
+        }
+      }.joined(separator: ", ")
+      let returnStr = returnType.map { " \($0)" } ?? ""
+      print("\(indent)LambdaExpression: (\(paramsStr))\(returnStr) ->")
+      print("\(indent)  Body:")
+      withIndent {
+        withIndent {
+          printExpression(body)
+        }
+      }
     }
   }
 

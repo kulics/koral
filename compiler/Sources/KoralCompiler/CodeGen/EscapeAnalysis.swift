@@ -455,6 +455,16 @@ public class EscapeContext {
                 preAnalyzeExpression(matchCase.body)
                 leaveScope()
             }
+            
+        case .lambdaExpression(_, let captures, let body, _):
+            // Lambda 表达式：被捕获的变量应该标记为逃逸
+            for capture in captures {
+                markEscaped(capture.symbol.name, reason: .escapeToField)
+            }
+            // 分析 Lambda 体
+            enterScope()
+            preAnalyzeExpression(body)
+            leaveScope()
         }
     }
     

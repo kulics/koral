@@ -68,11 +68,32 @@ public indirect enum ASTNode {
 
 public typealias TypeParameterDecl = (name: String, constraints: [TypeNode])
 
-public indirect enum TypeNode {
+public indirect enum TypeNode: CustomStringConvertible {
   case identifier(String)
   case reference(TypeNode)
   case generic(base: String, args: [TypeNode])
   case inferredSelf
+  /// Function type: [ParamType1, ParamType2, ..., ReturnType]Func
+  /// The last type in args is the return type, all others are parameter types
+  case functionType(paramTypes: [TypeNode], returnType: TypeNode)
+  
+  public var description: String {
+    switch self {
+    case .identifier(let name):
+      return name
+    case .reference(let inner):
+      return "\(inner) ref"
+    case .generic(let base, let args):
+      let argsStr = args.map { $0.description }.joined(separator: ", ")
+      return "[\(argsStr)]\(base)"
+    case .inferredSelf:
+      return "Self"
+    case .functionType(let paramTypes, let returnType):
+      let allTypes = paramTypes + [returnType]
+      let typesStr = allTypes.map { $0.description }.joined(separator: ", ")
+      return "[\(typesStr)]Func"
+    }
+  }
 }
 
 public struct TraitMethodSignature {
@@ -377,6 +398,17 @@ public indirect enum ExpressionNode {
   /// - left: Left operand (nil for ToRange, ToOpenRange, FullRange)
   /// - right: Right operand (nil for FromRange, FromOpenRange, FullRange)
   case rangeExpression(operator: RangeOperator, left: ExpressionNode?, right: ExpressionNode?)
+  /// Lambda expression: (params) [ReturnType] -> body
+  /// - parameters: Parameter list with optional type annotations
+  /// - returnType: Optional return type annotation
+  /// - body: Lambda body expression
+  /// - span: Source location
+  case lambdaExpression(
+    parameters: [(name: String, type: TypeNode?)],
+    returnType: TypeNode?,
+    body: ExpressionNode,
+    span: SourceSpan
+  )
 }
 public indirect enum PatternNode: CustomStringConvertible {
   case booleanLiteral(value: Bool, span: SourceSpan)
