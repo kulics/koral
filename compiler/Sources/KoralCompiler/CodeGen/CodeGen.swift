@@ -2,6 +2,72 @@ import Foundation
 
 // MARK: - C Code Generation Extensions for Qualified Names
 
+// MARK: - C Keyword Escaping
+
+/// C 语言关键字集合，包含 C89/C99/C11/C23 标准关键字和常见扩展
+private let cKeywords: Set<String> = [
+    // C89 关键字
+    "auto", "break", "case", "char", "const", "continue", "default", "do",
+    "double", "else", "enum", "extern", "float", "for", "goto", "if",
+    "int", "long", "register", "return", "short", "signed", "sizeof", "static",
+    "struct", "switch", "typedef", "union", "unsigned", "void", "volatile", "while",
+    
+    // C99 新增关键字
+    "inline", "restrict", "_Bool", "_Complex", "_Imaginary",
+    
+    // C11 新增关键字
+    "_Alignas", "_Alignof", "_Atomic", "_Generic", "_Noreturn", "_Static_assert", "_Thread_local",
+    
+    // C23 新增关键字
+    "true", "false", "nullptr", "constexpr", "typeof", "typeof_unqual",
+    "_BitInt", "_Decimal32", "_Decimal64", "_Decimal128",
+    
+    // 常见编译器扩展和保留标识符
+    "asm", "__asm", "__asm__", "__attribute__", "__typeof__",
+    "__inline", "__inline__", "__restrict", "__restrict__",
+    "__volatile__", "__const__", "__signed__", "__unsigned__",
+    
+    // 标准库常用宏和类型（避免冲突）
+    "NULL", "EOF", "FILE", "size_t", "ptrdiff_t", "intptr_t", "uintptr_t",
+    "int8_t", "int16_t", "int32_t", "int64_t",
+    "uint8_t", "uint16_t", "uint32_t", "uint64_t",
+    "bool"
+]
+
+/// 转义前缀，用于避免与 C 关键字冲突
+private let escapePrefix = "_k_"
+
+/// 检查标识符是否需要转义，如果需要则返回转义后的标识符
+/// - Parameter name: 原始标识符
+/// - Returns: 转义后的标识符（如果需要转义）或原始标识符
+private func escapeIfCKeyword(_ name: String) -> String {
+    // 空字符串直接返回
+    guard !name.isEmpty else { return name }
+    
+    // 检查是否是 C 关键字
+    if cKeywords.contains(name) {
+        return escapePrefix + name
+    }
+    
+    // 检查是否以 _k_ 开头（避免与转义后的标识符冲突）
+    if name.hasPrefix(escapePrefix) {
+        return escapePrefix + name
+    }
+    
+    // 检查是否是保留标识符模式（以下划线开头后跟大写字母或双下划线）
+    if name.hasPrefix("_") {
+        let secondIndex = name.index(after: name.startIndex)
+        if secondIndex < name.endIndex {
+            let secondChar = name[secondIndex]
+            if secondChar.isUppercase || secondChar == "_" {
+                return escapePrefix + name
+            }
+        }
+    }
+    
+    return name
+}
+
 /// 生成文件标识符（用于 private 符号的文件隔离）
 /// 使用文件路径的哈希值生成短标识符
 private func generateFileId(_ sourceFile: String) -> String {
@@ -12,7 +78,7 @@ private func generateFileId(_ sourceFile: String) -> String {
     return String(hash % 10000)
 }
 
-/// 清理标识符，将非法字符替换为下划线
+/// 清理标识符，将非法字符替换为下划线，并转义 C 关键字
 private func sanitizeIdentifier(_ name: String) -> String {
     var result = ""
     for char in name {
@@ -22,7 +88,8 @@ private func sanitizeIdentifier(_ name: String) -> String {
             result.append("_")
         }
     }
-    return result
+    // 应用关键字转义
+    return escapeIfCKeyword(result)
 }
 
 extension Symbol {
@@ -1002,13 +1069,13 @@ public class CodeGen {
 
   // 生成参数的 C 声明：类型若为 reference(T) 则 getCType 返回 T*
   private func getParamCDecl(_ param: Symbol) -> String {
-    return "\(getCType(param.type)) \(param.name)"
+    return "\(getCType(param.type)) \(param.qualifiedName)"
   }
 
   private func generateFunctionBody(_ body: TypedExpressionNode, _ params: [Symbol]) {
     pushScope()
     for param in params {
-      registerVariable(param.name, param.type)
+      registerVariable(param.qualifiedName, param.type)
     }
     let resultVar = generateExpressionSSA(body)
 
@@ -1215,10 +1282,10 @@ public class CodeGen {
       withIndent {
         addIndent()
         let cType = getCType(identifier.type)
-        buffer += "\(cType) \(identifier.name) = \(valueVar);\n"
+        buffer += "\(cType) \(identifier.qualifiedName) = \(valueVar);\n"
 
         pushScope()
-        registerVariable(identifier.name, identifier.type)
+        registerVariable(identifier.qualifiedName, identifier.type)
 
         let bodyResultVar = generateExpressionSSA(body)
 
@@ -2352,10 +2419,10 @@ public class CodeGen {
           // Dereferencing a ref type updates the control block
           baseControl = "\(basePath).control"
           let innerCType = getCType(inner)
-          basePath = "((\(innerCType)*)\(basePath).ptr)->\(member.name)"
+          basePath = "((\(innerCType)*)\(basePath).ptr)->\(member.qualifiedName)"
         } else {
           // Accessing member of value type keeps the same control block
-          basePath += ".\(member.name)"
+          basePath += ".\(member.qualifiedName)"
         }
         curType = member.type
       }
@@ -2401,33 +2468,33 @@ public class CodeGen {
         // 如果是可变类型，增加引用计数
         if case .structure(let decl) = identifier.type {
           addIndent()
-          buffer += "\(getCType(identifier.type)) \(identifier.name) = "
+          buffer += "\(getCType(identifier.type)) \(identifier.qualifiedName) = "
           if value.valueCategory == .lvalue {
             buffer += "__koral_\(decl.qualifiedName)_copy(&\(valueResult));\n"
           } else {
             buffer += "\(valueResult);\n"
           }
-          registerVariable(identifier.name, identifier.type)
+          registerVariable(identifier.qualifiedName, identifier.type)
         } else if case .union(let decl) = identifier.type {
           addIndent()
-          buffer += "\(getCType(identifier.type)) \(identifier.name) = "
+          buffer += "\(getCType(identifier.type)) \(identifier.qualifiedName) = "
           if value.valueCategory == .lvalue {
             buffer += "__koral_\(decl.qualifiedName)_copy(&\(valueResult));\n"
           } else {
             buffer += "\(valueResult);\n"
           }
-          registerVariable(identifier.name, identifier.type)
+          registerVariable(identifier.qualifiedName, identifier.type)
         } else if case .reference(_) = identifier.type {
           addIndent()
-          buffer += "\(getCType(identifier.type)) \(identifier.name) = \(valueResult);\n"
+          buffer += "\(getCType(identifier.type)) \(identifier.qualifiedName) = \(valueResult);\n"
           if value.valueCategory == .lvalue {
             addIndent()
-            buffer += "__koral_retain(\(identifier.name).control);\n"
+            buffer += "__koral_retain(\(identifier.qualifiedName).control);\n"
           }
-          registerVariable(identifier.name, identifier.type)
+          registerVariable(identifier.qualifiedName, identifier.type)
         } else {
           addIndent()
-          buffer += "\(getCType(identifier.type)) \(identifier.name) = \(valueResult);\n"
+          buffer += "\(getCType(identifier.type)) \(identifier.qualifiedName) = \(valueResult);\n"
         }
       }
     case .assignment(let target, let value):
@@ -2707,7 +2774,7 @@ public class CodeGen {
     withIndent {
       for param in parameters {
         addIndent()
-        buffer += "\(getCType(param.type)) \(param.name);\n"
+        buffer += "\(getCType(param.type)) \(sanitizeIdentifier(param.name));\n"
       }
     }
     buffer += "};\n\n"
@@ -2717,14 +2784,15 @@ public class CodeGen {
     withIndent {
       buffer += "    struct \(name) result;\n"
       for param in parameters {
+        let fieldName = sanitizeIdentifier(param.name)
         if case .structure(let decl) = param.type {
           let qualifiedFieldTypeName = decl.qualifiedName
-          buffer += "    result.\(param.name) = __koral_\(qualifiedFieldTypeName)_copy(&self->\(param.name));\n"
+          buffer += "    result.\(fieldName) = __koral_\(qualifiedFieldTypeName)_copy(&self->\(fieldName));\n"
         } else if case .reference(_) = param.type {
-          buffer += "    result.\(param.name) = self->\(param.name);\n"
-          buffer += "    __koral_retain(result.\(param.name).control);\n"
+          buffer += "    result.\(fieldName) = self->\(fieldName);\n"
+          buffer += "    __koral_retain(result.\(fieldName).control);\n"
         } else {
-          buffer += "    result.\(param.name) = self->\(param.name);\n"
+          buffer += "    result.\(fieldName) = self->\(fieldName);\n"
         }
       }
       buffer += "    return result;\n"
@@ -2747,11 +2815,12 @@ public class CodeGen {
       }
 
       for param in parameters {
+        let fieldName = sanitizeIdentifier(param.name)
         if case .structure(let decl) = param.type {
           let qualifiedFieldTypeName = decl.qualifiedName
-          buffer += "    __koral_\(qualifiedFieldTypeName)_drop(&self->\(param.name));\n"
+          buffer += "    __koral_\(qualifiedFieldTypeName)_drop(&self->\(fieldName));\n"
         } else if case .reference(_) = param.type {
-          buffer += "    __koral_release(self->\(param.name).control);\n"
+          buffer += "    __koral_release(self->\(fieldName).control);\n"
         }
       }
     }
@@ -2768,20 +2837,21 @@ public class CodeGen {
       buffer += "union {\n"
       withIndent {
         for c in cases {
+            let caseName = sanitizeIdentifier(c.name)
             if !c.parameters.isEmpty {
                 addIndent()
                 buffer += "struct {\n"
                 withIndent {
                     for param in c.parameters {
                         addIndent()
-                        buffer += "\(getCType(param.type)) \(param.name);\n"
+                        buffer += "\(getCType(param.type)) \(sanitizeIdentifier(param.name));\n"
                     }
                 }
                 addIndent()
-                buffer += "} \(c.name);\n"
+                buffer += "} \(caseName);\n"
             } else {
                  addIndent()
-                 buffer += "struct {} \(c.name);\n"
+                 buffer += "struct {} \(caseName);\n"
             }
         }
       }
@@ -2797,11 +2867,13 @@ public class CodeGen {
         buffer += "    result.tag = self->tag;\n"
         buffer += "    switch (self->tag) {\n"
         for (index, c) in cases.enumerated() {
+             let caseName = sanitizeIdentifier(c.name)
              buffer += "    case \(index): // \(c.name)\n"
              if !c.parameters.isEmpty {
                  for param in c.parameters {
-                     let fieldPath = "self->data.\(c.name).\(param.name)"
-                     let resultPath = "result.data.\(c.name).\(param.name)"
+                     let fieldName = sanitizeIdentifier(param.name)
+                     let fieldPath = "self->data.\(caseName).\(fieldName)"
+                     let resultPath = "result.data.\(caseName).\(fieldName)"
                      if case .structure(let decl) = param.type {
                          let qualifiedFieldTypeName = decl.qualifiedName
                          buffer += "        \(resultPath) = __koral_\(qualifiedFieldTypeName)_copy(&\(fieldPath));\n"
@@ -2841,9 +2913,11 @@ public class CodeGen {
 
         buffer += "    switch (self->tag) {\n"
         for (index, c) in cases.enumerated() {
+             let caseName = sanitizeIdentifier(c.name)
              buffer += "    case \(index): // \(c.name)\n"
              for param in c.parameters {
-                 let fieldPath = "self->data.\(c.name).\(param.name)"
+                 let fieldName = sanitizeIdentifier(param.name)
+                 let fieldPath = "self->data.\(caseName).\(fieldName)"
                  if case .structure(let decl) = param.type {
                      let qualifiedFieldTypeName = decl.qualifiedName
                      buffer += "        __koral_\(qualifiedFieldTypeName)_drop(&\(fieldPath));\n"
@@ -2878,27 +2952,29 @@ public class CodeGen {
       // Assign members
       // The union member name is same as case name
       let caseInfo = cases[tagIndex]
+      let escapedCaseName = sanitizeIdentifier(caseName)
       
       if !args.isEmpty {
-          let unionMemberPath = "\(result).data.\(caseName)"
+          let unionMemberPath = "\(result).data.\(escapedCaseName)"
           for (argExpr, param) in zip(args, caseInfo.parameters) {
               let argResult = generateExpressionSSA(argExpr)
+              let fieldName = sanitizeIdentifier(param.name)
               
               addIndent()
               if case .structure(let structDecl) = param.type {
                    if argExpr.valueCategory == .lvalue {
-                       buffer += "\(unionMemberPath).\(param.name) = __koral_\(structDecl.qualifiedName)_copy(&\(argResult));\n"
+                       buffer += "\(unionMemberPath).\(fieldName) = __koral_\(structDecl.qualifiedName)_copy(&\(argResult));\n"
                    } else {
-                       buffer += "\(unionMemberPath).\(param.name) = \(argResult);\n"
+                       buffer += "\(unionMemberPath).\(fieldName) = \(argResult);\n"
                    }
               } else if case .reference(_) = param.type {
-                   buffer += "\(unionMemberPath).\(param.name) = \(argResult);\n"
+                   buffer += "\(unionMemberPath).\(fieldName) = \(argResult);\n"
                    if argExpr.valueCategory == .lvalue {
                        addIndent()
-                       buffer += "__koral_retain(\(unionMemberPath).\(param.name).control);\n"
+                       buffer += "__koral_retain(\(unionMemberPath).\(fieldName).control);\n"
                    }
               } else {
-                   buffer += "\(unionMemberPath).\(param.name) = \(argResult);\n"
+                   buffer += "\(unionMemberPath).\(fieldName) = \(argResult);\n"
               }
           }
       }
@@ -3031,7 +3107,7 @@ public class CodeGen {
       case .wildcard:
         return ([], [], "1", [], [])
       case .variable(let symbol):
-        let name = symbol.name
+        let name = symbol.qualifiedName
         let varType = symbol.type
         var bindCode = ""
         let cType = getCType(varType)
@@ -3064,11 +3140,12 @@ public class CodeGen {
         var vars: [(String, Type)] = []
           
         let caseDef = cases[expectedTagIndex]
+        let escapedCaseName = sanitizeIdentifier(caseName)
           
         for (i, subInd) in args.enumerated() {
-           let paramName = caseDef.parameters[i].name
+           let paramName = sanitizeIdentifier(caseDef.parameters[i].name)
            let paramType = caseDef.parameters[i].type
-           let subPath = "\(path).data.\(caseName).\(paramName)"
+           let subPath = "\(path).data.\(escapedCaseName).\(paramName)"
                
            let (subPre, subPreVars, subCond, subBind, subVars) = generatePatternConditionAndBindings(subInd, subPath, paramType, isMove: isMove)
                
@@ -3243,14 +3320,14 @@ public class CodeGen {
         addIndent()
         buffer += "\(getCType(value.type)) \(copyResult) = __koral_\(decl.qualifiedName)_copy(&\(valueResult));\n"
         addIndent()
-        buffer += "__koral_\(decl.qualifiedName)_drop(&\(identifier.name));\n"
+        buffer += "__koral_\(decl.qualifiedName)_drop(&\(identifier.qualifiedName));\n"
         addIndent()
-        buffer += "\(identifier.name) = \(copyResult);\n"
+        buffer += "\(identifier.qualifiedName) = \(copyResult);\n"
       } else {
         addIndent()
-        buffer += "__koral_\(decl.qualifiedName)_drop(&\(identifier.name));\n"
+        buffer += "__koral_\(decl.qualifiedName)_drop(&\(identifier.qualifiedName));\n"
         addIndent()
-        buffer += "\(identifier.name) = \(valueResult);\n"
+        buffer += "\(identifier.qualifiedName) = \(valueResult);\n"
       }
     } else if case .union(let decl) = identifier.type {
       if value.valueCategory == .lvalue {
@@ -3258,27 +3335,27 @@ public class CodeGen {
         addIndent()
         buffer += "\(getCType(value.type)) \(copyResult) = __koral_\(decl.qualifiedName)_copy(&\(valueResult));\n"
         addIndent()
-        buffer += "__koral_\(decl.qualifiedName)_drop(&\(identifier.name));\n"
+        buffer += "__koral_\(decl.qualifiedName)_drop(&\(identifier.qualifiedName));\n"
         addIndent()
-        buffer += "\(identifier.name) = \(copyResult);\n"
+        buffer += "\(identifier.qualifiedName) = \(copyResult);\n"
       } else {
         addIndent()
-        buffer += "__koral_\(decl.qualifiedName)_drop(&\(identifier.name));\n"
+        buffer += "__koral_\(decl.qualifiedName)_drop(&\(identifier.qualifiedName));\n"
         addIndent()
-        buffer += "\(identifier.name) = \(valueResult);\n"
+        buffer += "\(identifier.qualifiedName) = \(valueResult);\n"
       }
     } else if case .reference(_) = identifier.type {
       addIndent()
-      buffer += "__koral_release(\(identifier.name).control);\n"
+      buffer += "__koral_release(\(identifier.qualifiedName).control);\n"
       addIndent()
-      buffer += "\(identifier.name) = \(valueResult);\n"
+      buffer += "\(identifier.qualifiedName) = \(valueResult);\n"
       if value.valueCategory == .lvalue {
         addIndent()
-        buffer += "__koral_retain(\(identifier.name).control);\n"
+        buffer += "__koral_retain(\(identifier.qualifiedName).control);\n"
       }
     } else {
       addIndent()
-      buffer += "\(identifier.name) = \(valueResult);\n"
+      buffer += "\(identifier.qualifiedName) = \(valueResult);\n"
     }
   }
 
@@ -3290,7 +3367,7 @@ public class CodeGen {
       _ = generateExpressionSSA(value)
       return
     }
-    let baseResult = base.name
+    let baseResult = base.qualifiedName
     let valueResult = generateExpressionSSA(value)
     var accessPath = baseResult
     var curType = base.type
@@ -3541,9 +3618,9 @@ public class CodeGen {
       var memberAccess: String
       if case .reference(let inner) = curType {
           let innerCType = getCType(inner)
-          memberAccess = "((\(innerCType)*)\(access).ptr)->\(member.name)"
+          memberAccess = "((\(innerCType)*)\(access).ptr)->\(member.qualifiedName)"
       } else {
-          memberAccess = "\(access).\(member.name)"
+          memberAccess = "\(access).\(member.qualifiedName)"
       }
       
       // Only apply type cast for non-reference struct members when the C types differ
