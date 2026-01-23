@@ -529,13 +529,10 @@ public class Parser {
       // Use newline-based termination for trait method declarations
       try consumeOptionalSemicolon()
 
-      if !methodTypeParams.isEmpty {
-        throw ParserError.unexpectedToken(span: currentSpan, got: "Trait method generics not supported yet")
-      }
-
       methods.append(
         TraitMethodSignature(
           name: methodName,
+          typeParameters: methodTypeParams,
           parameters: parameters,
           returnType: returnType,
           access: methodAccess
@@ -1150,6 +1147,50 @@ public class Parser {
       
       if currentToken === .dot {
         try match(.dot)
+        
+        // Check for generic method call: obj.[Type]method(args)
+        if currentToken === .leftBracket {
+          try match(.leftBracket)
+          var methodTypeArgs: [TypeNode] = []
+          while currentToken !== .rightBracket {
+            methodTypeArgs.append(try parseType())
+            if currentToken === .comma {
+              try match(.comma)
+            }
+          }
+          try match(.rightBracket)
+          
+          guard case .identifier(let methodName) = currentToken else {
+            throw ParserError.expectedIdentifier(
+              span: currentSpan, got: currentToken.description)
+          }
+          try match(.identifier(methodName))
+          
+          // Must be followed by a call
+          guard currentToken === .leftParen else {
+            throw ParserError.unexpectedToken(
+              span: currentSpan,
+              got: currentToken.description,
+              expected: "("
+            )
+          }
+          try match(.leftParen)
+          var arguments: [ExpressionNode] = []
+          if currentToken !== .rightParen {
+            repeat {
+              arguments.append(try expression())
+              if currentToken === .comma {
+                try match(.comma)
+              } else {
+                break
+              }
+            } while true
+          }
+          try match(.rightParen)
+          expr = .genericMethodCall(base: expr, methodTypeArgs: methodTypeArgs, methodName: methodName, arguments: arguments)
+          continue
+        }
+        
         guard case .identifier(let member) = currentToken else {
           throw ParserError.expectedIdentifier(
             span: currentSpan, got: currentToken.description)

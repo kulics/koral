@@ -27,10 +27,12 @@ public enum InstantiationKind: Hashable {
     ///   - baseType: The concrete type on which the method is called (genericStruct/genericUnion or concrete)
     ///   - template: The generic extension method template to instantiate
     ///   - typeArgs: The type arguments used to instantiate the base type
+    ///   - methodTypeArgs: The type arguments for method-level generic parameters
     case extensionMethod(
         baseType: Type,
         template: GenericExtensionMethodTemplate,
-        typeArgs: [Type]
+        typeArgs: [Type],
+        methodTypeArgs: [Type]
     )
     
     // MARK: - Hashable conformance
@@ -55,7 +57,7 @@ public enum InstantiationKind: Hashable {
             for arg in args {
                 hasher.combine(arg.layoutKey)
             }
-        case .extensionMethod(let baseType, let template, let typeArgs):
+        case .extensionMethod(let baseType, let template, let typeArgs, let methodTypeArgs):
             hasher.combine(3)
             // Include the base type's template name in the hash
             let templateName: String
@@ -78,6 +80,9 @@ public enum InstantiationKind: Hashable {
             for arg in typeArgs {
                 hasher.combine(arg.layoutKey)
             }
+            for arg in methodTypeArgs {
+                hasher.combine(arg.layoutKey)
+            }
         }
     }
     
@@ -89,7 +94,7 @@ public enum InstantiationKind: Hashable {
             return lTemplate.name == rTemplate.name && lArgs == rArgs
         case (.function(let lTemplate, let lArgs), .function(let rTemplate, let rArgs)):
             return lTemplate.name == rTemplate.name && lArgs == rArgs
-        case (.extensionMethod(let lBaseType, let lTemplate, let lTypeArgs), .extensionMethod(let rBaseType, let rTemplate, let rTypeArgs)):
+        case (.extensionMethod(let lBaseType, let lTemplate, let lTypeArgs, let lMethodTypeArgs), .extensionMethod(let rBaseType, let rTemplate, let rTypeArgs, let rMethodTypeArgs)):
             // Compare base type template names
             let lTemplateName: String
             switch lBaseType {
@@ -121,7 +126,7 @@ public enum InstantiationKind: Hashable {
             default:
                 rTemplateName = rBaseType.description
             }
-            return lTemplateName == rTemplateName && lTemplate.method.name == rTemplate.method.name && lTypeArgs == rTypeArgs
+            return lTemplateName == rTemplateName && lTemplate.method.name == rTemplate.method.name && lTypeArgs == rTypeArgs && lMethodTypeArgs == rMethodTypeArgs
         default:
             return false
         }
@@ -141,7 +146,7 @@ public enum InstantiationKey: Hashable {
     case function(templateName: String, args: [Type])
     
     /// Key for extension method instantiation
-    case extensionMethod(templateName: String, methodName: String, typeArgs: [Type])
+    case extensionMethod(templateName: String, methodName: String, typeArgs: [Type], methodTypeArgs: [Type])
     
     // MARK: - Hashable conformance
     
@@ -165,11 +170,14 @@ public enum InstantiationKey: Hashable {
             for arg in args {
                 hasher.combine(arg.layoutKey)
             }
-        case .extensionMethod(let templateName, let methodName, let typeArgs):
+        case .extensionMethod(let templateName, let methodName, let typeArgs, let methodTypeArgs):
             hasher.combine(3)
             hasher.combine(templateName)
             hasher.combine(methodName)
             for arg in typeArgs {
+                hasher.combine(arg.layoutKey)
+            }
+            for arg in methodTypeArgs {
                 hasher.combine(arg.layoutKey)
             }
         }
@@ -183,8 +191,8 @@ public enum InstantiationKey: Hashable {
             return lName == rName && lArgs == rArgs
         case (.function(let lName, let lArgs), .function(let rName, let rArgs)):
             return lName == rName && lArgs == rArgs
-        case (.extensionMethod(let lTName, let lMName, let lArgs), .extensionMethod(let rTName, let rMName, let rArgs)):
-            return lTName == rTName && lMName == rMName && lArgs == rArgs
+        case (.extensionMethod(let lTName, let lMName, let lArgs, let lMethodArgs), .extensionMethod(let rTName, let rMName, let rArgs, let rMethodArgs)):
+            return lTName == rTName && lMName == rMName && lArgs == rArgs && lMethodArgs == rMethodArgs
         default:
             return false
         }
@@ -224,7 +232,7 @@ public struct InstantiationRequest: Hashable {
             return .unionType(templateName: template.name, args: args)
         case .function(let template, let args):
             return .function(templateName: template.name, args: args)
-        case .extensionMethod(let baseType, let template, let typeArgs):
+        case .extensionMethod(let baseType, let template, let typeArgs, let methodTypeArgs):
             // Derive the base type template name from the baseType
             let templateName: String
             switch baseType {
@@ -245,7 +253,8 @@ public struct InstantiationRequest: Hashable {
             return .extensionMethod(
                 templateName: templateName,
                 methodName: template.method.name,
-                typeArgs: typeArgs
+                typeArgs: typeArgs,
+                methodTypeArgs: methodTypeArgs
             )
         }
     }

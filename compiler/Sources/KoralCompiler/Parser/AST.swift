@@ -98,9 +98,24 @@ public indirect enum TypeNode: CustomStringConvertible {
 
 public struct TraitMethodSignature {
   public let name: String
+  public let typeParameters: [TypeParameterDecl]  // 方法级泛型参数
   public let parameters: [(name: String, mutable: Bool, type: TypeNode)]
   public let returnType: TypeNode
   public let access: AccessModifier
+  
+  public init(
+    name: String,
+    typeParameters: [TypeParameterDecl] = [],
+    parameters: [(name: String, mutable: Bool, type: TypeNode)],
+    returnType: TypeNode,
+    access: AccessModifier
+  ) {
+    self.name = name
+    self.typeParameters = typeParameters
+    self.parameters = parameters
+    self.returnType = returnType
+    self.access = access
+  }
 }
 
 public struct UnionCaseDeclaration {
@@ -382,6 +397,12 @@ public indirect enum ExpressionNode {
     name: String, type: TypeNode?, value: ExpressionNode, mutable: Bool, body: ExpressionNode)
   // 连续成员访问聚合为路径
   case memberPath(base: ExpressionNode, path: [String])
+  /// Generic method call with explicit type arguments: obj.[Type]method(args)
+  /// - base: The object expression
+  /// - methodTypeArgs: The explicit type arguments for the method
+  /// - methodName: The method name
+  /// - arguments: The method arguments
+  case genericMethodCall(base: ExpressionNode, methodTypeArgs: [TypeNode], methodName: String, arguments: [ExpressionNode])
   case genericInstantiation(base: String, args: [TypeNode])
   case subscriptExpression(base: ExpressionNode, arguments: [ExpressionNode])
   case matchExpression(subject: ExpressionNode, cases: [MatchCaseNode], span: SourceSpan)

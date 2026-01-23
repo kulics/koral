@@ -404,12 +404,17 @@ public class CodeGen {
     case .genericCall(let functionName, let typeArgs, _, _):
       fatalError("CodeGen error: genericCall '\(functionName)' with type args \(typeArgs.map { $0.description }.joined(separator: ", ")) should be resolved before code generation. Context: \(context)")
       
-    case .methodReference(let base, let method, let typeArgs, _):
+    case .methodReference(let base, let method, let typeArgs, let methodTypeArgs, _):
       validateExpression(base, context: "\(context) -> method reference base")
       assertTypeResolved(method.type, context: "\(context) -> method reference '\(method.name)'")
       if let typeArgs = typeArgs {
         for typeArg in typeArgs {
           assertTypeResolved(typeArg, context: "\(context) -> method reference type arg")
+        }
+      }
+      if let methodTypeArgs = methodTypeArgs {
+        for typeArg in methodTypeArgs {
+          assertTypeResolved(typeArg, context: "\(context) -> method reference method type arg")
         }
       }
       
@@ -1900,7 +1905,7 @@ public class CodeGen {
     case .subscriptExpression(let base, let args, let method, _):
         guard case .function(_, let returns) = method.type else { fatalError() }
         let callNode = TypedExpressionNode.call(
-          callee: .methodReference(base: base, method: method, typeArgs: nil, type: method.type),
+          callee: .methodReference(base: base, method: method, typeArgs: nil, methodTypeArgs: nil, type: method.type),
           arguments: args,
           type: returns)
         return generateExpressionSSA(callNode)
@@ -2430,7 +2435,7 @@ public class CodeGen {
     case .subscriptExpression(let base, let args, let method, let type):
          guard case .function(_, let returns) = method.type else { fatalError() }
          let callNode = TypedExpressionNode.call(
-             callee: .methodReference(base: base, method: method, typeArgs: nil, type: method.type),
+             callee: .methodReference(base: base, method: method, typeArgs: nil, methodTypeArgs: nil, type: method.type),
              arguments: args,
              type: returns)
          let refResult = generateExpressionSSA(callNode)
@@ -3433,7 +3438,7 @@ public class CodeGen {
   private func generateCall(
     _ callee: TypedExpressionNode, _ arguments: [TypedExpressionNode], _ type: Type
   ) -> String {
-    if case .methodReference(let base, let method, _, _) = callee {
+    if case .methodReference(let base, let method, _, _, _) = callee {
       var allArgs = [base]
       allArgs.append(contentsOf: arguments)
       return generateFunctionCall(method, allArgs, type)

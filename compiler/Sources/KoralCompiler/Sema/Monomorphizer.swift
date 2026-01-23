@@ -229,11 +229,12 @@ public class Monomorphizer {
             case .function(let template, let args):
                 _ = try instantiateFunction(template: template, args: args)
                 
-            case .extensionMethod(let baseType, let template, let typeArgs):
+            case .extensionMethod(let baseType, let template, let typeArgs, let methodTypeArgs):
                 _ = try instantiateExtensionMethod(
                     baseType: baseType,
                     template: template,
-                    typeArgs: typeArgs
+                    typeArgs: typeArgs,
+                    methodTypeArgs: methodTypeArgs
                 )
             }
         } catch let e as SemanticError {
@@ -330,6 +331,7 @@ public class Monomorphizer {
                         baseType: specificType,
                         structureName: template.name,
                         genericArgs: args,
+                        methodTypeArgs: [],
                         methodInfo: entry
                     )
                 }
@@ -466,6 +468,7 @@ public class Monomorphizer {
                         baseType: specificType,
                         structureName: template.name,
                         genericArgs: args,
+                        methodTypeArgs: [],
                         methodInfo: entry
                     )
                 }
@@ -610,11 +613,13 @@ public class Monomorphizer {
     ///   - baseType: The concrete type on which the method is called
     ///   - template: The generic extension method template to instantiate
     ///   - typeArgs: The type arguments used to instantiate the base type
+    ///   - methodTypeArgs: The type arguments for method-level generic parameters
     /// - Returns: The symbol for the instantiated method
     private func instantiateExtensionMethod(
         baseType: Type,
         template: GenericExtensionMethodTemplate,
-        typeArgs: [Type]
+        typeArgs: [Type],
+        methodTypeArgs: [Type]
     ) throws -> Symbol {
         // Resolve the base type if it's a parameterized type
         let resolvedBaseType = resolveParameterizedType(baseType)
@@ -641,6 +646,7 @@ public class Monomorphizer {
             baseType: resolvedBaseType,
             structureName: structureName,
             genericArgs: typeArgs,
+            methodTypeArgs: methodTypeArgs,
             methodInfo: template
         )
     }
@@ -650,9 +656,11 @@ public class Monomorphizer {
         baseType: Type,
         structureName: String,
         genericArgs: [Type],
+        methodTypeArgs: [Type],
         methodInfo: GenericExtensionMethodTemplate
     ) throws -> Symbol {
         let typeParams = methodInfo.typeParams
+        let methodTypeParams = methodInfo.method.typeParameters
         let method = methodInfo.method
         
         if typeParams.count != genericArgs.count {
@@ -660,9 +668,20 @@ public class Monomorphizer {
                 expected: "\(typeParams.count) args", got: "\(genericArgs.count)")
         }
         
-        // Calculate mangled name
+        if methodTypeParams.count != methodTypeArgs.count {
+            throw SemanticError.typeMismatch(
+                expected: "\(methodTypeParams.count) method type args", got: "\(methodTypeArgs.count)")
+        }
+        
+        // Calculate mangled name (include method type args if present)
         let argLayoutKeys = genericArgs.map { $0.layoutKey }.joined(separator: "_")
-        let mangledName = "\(structureName)_\(argLayoutKeys)_\(method.name)"
+        let methodArgLayoutKeys = methodTypeArgs.map { $0.layoutKey }.joined(separator: "_")
+        let mangledName: String
+        if methodTypeArgs.isEmpty {
+            mangledName = "\(structureName)_\(argLayoutKeys)_\(method.name)"
+        } else {
+            mangledName = "\(structureName)_\(argLayoutKeys)_\(method.name)_\(methodArgLayoutKeys)"
+        }
         let key = "ext:\(mangledName)"
         
         // Check cache
@@ -675,6 +694,10 @@ public class Monomorphizer {
         var typeSubstitution: [String: Type] = [:]
         for (i, paramInfo) in typeParams.enumerated() {
             typeSubstitution[paramInfo.name] = genericArgs[i]
+        }
+        // Add method-level type parameter substitutions
+        for (i, paramInfo) in methodTypeParams.enumerated() {
+            typeSubstitution[paramInfo.name] = methodTypeArgs[i]
         }
         // Also substitute Self with the base type
         typeSubstitution["Self"] = baseType
@@ -774,18 +797,19 @@ public class Monomorphizer {
     }
     
     /// Looks up a concrete method symbol on a type.
-    private func lookupConcreteMethodSymbol(on selfType: Type, name: String) throws -> Symbol? {
+    private func lookupConcreteMethodSymbol(on selfType: Type, name: String, methodTypeArgs: [Type] = []) throws -> Symbol? {
         switch selfType {
         case .reference(let inner):
             // For reference types, look up the method on the inner type
-            return try lookupConcreteMethodSymbol(on: inner, name: name)
+            return try lookupConcreteMethodSymbol(on: inner, name: name, methodTypeArgs: methodTypeArgs)
             
         case .structure(let decl):
             let typeName = decl.name
             let isGen = decl.isGenericInstantiation
             if let methods = extensionMethods[typeName], let sym = methods[name] {
-                // Generate mangled name for the method
-                let mangledName = "\(typeName)_\(name)"
+                // Generate mangled name for the method (include method type args if present)
+                let methodArgLayoutKeys = methodTypeArgs.map { $0.layoutKey }.joined(separator: "_")
+                let mangledName = methodTypeArgs.isEmpty ? "\(typeName)_\(name)" : "\(typeName)_\(name)_\(methodArgLayoutKeys)"
                 return Symbol(
                     name: mangledName,
                     type: sym.type,
@@ -801,6 +825,7 @@ public class Monomorphizer {
                         baseType: selfType,
                         structureName: info.base,
                         genericArgs: info.args,
+                        methodTypeArgs: methodTypeArgs,
                         methodInfo: ext
                     )
                 }
@@ -811,8 +836,9 @@ public class Monomorphizer {
             let typeName = decl.name
             let isGen = decl.isGenericInstantiation
             if let methods = extensionMethods[typeName], let sym = methods[name] {
-                // Generate mangled name for the method
-                let mangledName = "\(typeName)_\(name)"
+                // Generate mangled name for the method (include method type args if present)
+                let methodArgLayoutKeys = methodTypeArgs.map { $0.layoutKey }.joined(separator: "_")
+                let mangledName = methodTypeArgs.isEmpty ? "\(typeName)_\(name)" : "\(typeName)_\(name)_\(methodArgLayoutKeys)"
                 return Symbol(
                     name: mangledName,
                     type: sym.type,
@@ -828,6 +854,7 @@ public class Monomorphizer {
                         baseType: selfType,
                         structureName: info.base,
                         genericArgs: info.args,
+                        methodTypeArgs: methodTypeArgs,
                         methodInfo: ext
                     )
                 }
@@ -855,6 +882,7 @@ public class Monomorphizer {
                     baseType: selfType,
                     structureName: "Pointer",
                     genericArgs: [element],
+                    methodTypeArgs: methodTypeArgs,
                     methodInfo: ext
                 )
             }
@@ -1269,7 +1297,7 @@ public class Monomorphizer {
             
             // Apply lowering for primitive type methods (__equals, __compare)
             // This mirrors the lowering done in TypeChecker for direct calls
-            if case .methodReference(let base, let method, _, _) = newCallee {
+            if case .methodReference(let base, let method, _, _, _) = newCallee {
                 // Intercept Float32/Float64 to_bits intrinsic method
                 let methodName = extractMethodName(method.name)
                 if methodName == "to_bits" {
@@ -1367,7 +1395,7 @@ public class Monomorphizer {
                 type: newType
             )
             
-        case .methodReference(let base, let method, let typeArgs, let type):
+        case .methodReference(let base, let method, let typeArgs, let methodTypeArgs, let type):
             let newBase = substituteTypesInExpression(base, substitution: substitution)
             var newMethod = Symbol(
                 name: method.name,
@@ -1381,6 +1409,9 @@ public class Monomorphizer {
             
             // Substitute type args if present
             let substitutedTypeArgs = typeArgs?.map { substituteType($0, substitution: substitution) }
+            
+            // Substitute method type args if present
+            let substitutedMethodTypeArgs = methodTypeArgs?.map { substituteType($0, substitution: substitution) }
             
             // Resolve trait method placeholders to concrete methods
             // Placeholder names have the format "__trait_TraitName_methodName"
@@ -1396,7 +1427,8 @@ public class Monomorphizer {
                     let methodName = String(remainder[remainder.index(after: underscoreIndex)...])
                     
                     // Look up the concrete method on the substituted base type
-                    if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: methodName) {
+                    // Pass methodTypeArgs for generic methods
+                    if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: methodName, methodTypeArgs: substitutedMethodTypeArgs ?? []) {
                         newMethod = Symbol(
                             name: concreteMethod.name,
                             type: concreteMethod.type,
@@ -1429,6 +1461,7 @@ public class Monomorphizer {
                 base: newBase,
                 method: newMethod,
                 typeArgs: substitutedTypeArgs,
+                methodTypeArgs: substitutedMethodTypeArgs,
                 type: substituteType(type, substitution: substitution)
             )
             
@@ -2362,7 +2395,7 @@ public class Monomorphizer {
             let newType = resolveParameterizedType(type)
             
             // Intercept Float32/Float64 to_bits intrinsic method
-            if case .methodReference(let base, let method, _, _) = newCallee {
+            if case .methodReference(let base, let method, _, _, _) = newCallee {
                 let methodName = extractMethodName(method.name)
                 if methodName == "to_bits" {
                     if base.type == .float32 && newArguments.isEmpty {
@@ -2431,7 +2464,7 @@ public class Monomorphizer {
                 type: newType
             )
             
-        case .methodReference(let base, let method, let typeArgs, let type):
+        case .methodReference(let base, let method, let typeArgs, let methodTypeArgs, let type):
             let newBase = resolveTypesInExpression(base)
             var newMethod = Symbol(
                 name: method.name,
@@ -2443,11 +2476,14 @@ public class Monomorphizer {
                 access: method.access
             )
             let resolvedTypeArgs = typeArgs?.map { resolveParameterizedType($0) }
+            let resolvedMethodTypeArgs = methodTypeArgs?.map { resolveParameterizedType($0) }
             
             // Resolve method name to mangled name for generic extension methods
             if !newBase.type.containsGenericParameter {
                 // Look up the concrete method on the resolved base type
-                if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: method.name) {
+                // Pass method type args for generic methods
+                let methodTypeArgsToPass = resolvedMethodTypeArgs ?? []
+                if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: method.name, methodTypeArgs: methodTypeArgsToPass) {
                     // Resolve any parameterized types in the method type
                     let resolvedMethodType = resolveParameterizedType(concreteMethod.type)
                     newMethod = Symbol(
@@ -2466,6 +2502,7 @@ public class Monomorphizer {
                 base: newBase,
                 method: newMethod,
                 typeArgs: resolvedTypeArgs,
+                methodTypeArgs: resolvedMethodTypeArgs,
                 type: resolveParameterizedType(type)
             )
             
@@ -2655,11 +2692,12 @@ public class Monomorphizer {
                     let key = InstantiationKey.extensionMethod(
                         templateName: templateName,
                         methodName: methodName,
-                        typeArgs: resolvedTypeArgs
+                        typeArgs: resolvedTypeArgs,
+                        methodTypeArgs: []  // TODO: Support method-level type args in method calls
                     )
                     if !processedRequestKeys.contains(key) {
                         pendingRequests.append(InstantiationRequest(
-                            kind: .extensionMethod(baseType: resolvedBaseType, template: ext, typeArgs: resolvedTypeArgs),
+                            kind: .extensionMethod(baseType: resolvedBaseType, template: ext, typeArgs: resolvedTypeArgs, methodTypeArgs: []),
                             sourceLine: currentLine,
                             sourceFileName: currentFileName
                         ))

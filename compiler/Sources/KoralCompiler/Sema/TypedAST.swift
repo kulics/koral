@@ -196,7 +196,7 @@ public indirect enum TypedExpressionNode {
     type: Type)
   case call(callee: TypedExpressionNode, arguments: [TypedExpressionNode], type: Type)
   case genericCall(functionName: String, typeArgs: [Type], arguments: [TypedExpressionNode], type: Type)
-  case methodReference(base: TypedExpressionNode, method: Symbol, typeArgs: [Type]?, type: Type)
+  case methodReference(base: TypedExpressionNode, method: Symbol, typeArgs: [Type]?, methodTypeArgs: [Type]?, type: Type)
   /// Static method call on a type (e.g., `[Int]List.new()`, `Pair.new(1, 2)`)
   /// - baseType: The type on which the static method is called
   /// - methodName: The original method name (not mangled)
@@ -380,7 +380,7 @@ extension TypedExpressionNode {
       .ifPatternExpression(_, _, _, _, _, let type),
       .call(_, _, let type),
       .genericCall(_, _, _, let type),
-      .methodReference(_, _, _, let type),
+      .methodReference(_, _, _, _, let type),
       .staticMethodCall(_, _, _, _, let type),
       .whileExpression(_, _, let type),
       .whilePatternExpression(_, _, _, _, let type),

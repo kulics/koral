@@ -401,7 +401,7 @@ public class EscapeContext {
                 preAnalyzeExpression(arg)
             }
             
-        case .methodReference(let base, _, _, _):
+        case .methodReference(let base, _, _, _, _):
             preAnalyzeExpression(base)
             
         case .staticMethodCall(_, _, _, let arguments, _):

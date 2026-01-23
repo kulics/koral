@@ -323,11 +323,16 @@ public func printTypedAST(_ node: TypedProgram) {
         }
       }
 
-    case .methodReference(let base, let method, let typeArgs, let type):
+    case .methodReference(let base, let method, let typeArgs, let methodTypeArgs, let type):
       print("\(indent)MethodReference: \(method.name) : \(type)")
       if let typeArgs = typeArgs, !typeArgs.isEmpty {
         withIndent {
           print("\(indent)TypeArgs: \(typeArgs.map { $0.description }.joined(separator: ", "))")
+        }
+      }
+      if let methodTypeArgs = methodTypeArgs, !methodTypeArgs.isEmpty {
+        withIndent {
+          print("\(indent)MethodTypeArgs: \(methodTypeArgs.map { $0.description }.joined(separator: ", "))")
         }
       }
       withIndent {
