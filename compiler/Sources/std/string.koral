@@ -19,9 +19,15 @@ given StringStorage {
 public type String(mut storage StringStorage ref)
 
 // Forward declarations for String iterators
-public type StringSplitAsciiWhitespace(source String, mut index Int)
-public type StringSplit(source String, sep String, mut index Int)
-public type StringLines(source String, mut index Int)
+// Wrapper types (provide iterator() method)
+public type StringSplitAsciiWhitespace(source String)
+public type StringSplit(source String, sep String)
+public type StringLines(source String)
+
+// Iterator types (provide next() method)
+public type StringSplitAsciiWhitespaceIterator(source String, mut index Int)
+public type StringSplitIterator(source String, sep String, mut index Int)
+public type StringLinesIterator(source String, mut index Int)
 
 // ============================================================================
 // String Methods
@@ -450,16 +456,16 @@ given String {
     }
 
     public split_ascii_whitespace(self) StringSplitAsciiWhitespace =
-        StringSplitAsciiWhitespace(self, 0)
+        StringSplitAsciiWhitespace(self)
 
     public split(self, sep String) StringSplit = {
         if sep.storage.len == 0 then {
             panic("split empty separator")
         }
-        StringSplit(self, sep, 0)
+        StringSplit(self, sep)
     }
 
-    public lines(self) StringLines = StringLines(self, 0)
+    public lines(self) StringLines = StringLines(self)
 
     public remove_prefix(self, prefix String) String =
         if self.starts_with(prefix) then { self.make_substring(prefix.storage.len, self.storage.len - prefix.storage.len) } else { self }
@@ -476,7 +482,24 @@ given String {
 // String Iterator Implementations - Using new pattern matching
 // ============================================================================
 
+// Wrapper types provide iterator() method
 given StringSplitAsciiWhitespace {
+    public iterator(self) StringSplitAsciiWhitespaceIterator =
+        StringSplitAsciiWhitespaceIterator(self.source, 0)
+}
+
+given StringSplit {
+    public iterator(self) StringSplitIterator =
+        StringSplitIterator(self.source, self.sep, 0)
+}
+
+given StringLines {
+    public iterator(self) StringLinesIterator =
+        StringLinesIterator(self.source, 0)
+}
+
+// Iterator types provide next() method
+given StringSplitAsciiWhitespaceIterator {
     public next(self ref) [String]Option = {
         let len = self.source.count()
         let mut i = self.index
@@ -490,7 +513,7 @@ given StringSplitAsciiWhitespace {
     }
 }
 
-given StringSplit {
+given StringSplitIterator {
     public next(self ref) [String]Option = {
         let len = self.source.count()
         if self.index > len then { return [String]Option.None() }
@@ -509,7 +532,7 @@ given StringSplit {
     }
 }
 
-given StringLines {
+given StringLinesIterator {
     public next(self ref) [String]Option = {
         let len = self.source.count()
         if self.index > len then { return [String]Option.None() }

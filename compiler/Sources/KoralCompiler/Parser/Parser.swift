@@ -845,6 +845,11 @@ public class Parser {
   }
 
   private func parseTraitConstraint() throws -> TypeNode {
+    // Support both simple identifiers (e.g., Any, Equatable) and generic types (e.g., [T]Iterator)
+    if currentToken === .leftBracket {
+      // Generic type constraint like [T]Iterator
+      return try parseType()
+    }
     guard case .identifier(let name) = currentToken else {
       throw ParserError.expectedTypeIdentifier(span: currentSpan, got: currentToken.description)
     }
