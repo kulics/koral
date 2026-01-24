@@ -2698,6 +2698,8 @@ public class CodeGen {
       fatalError("Generic union \(template) should be resolved before CodeGen")
     case .module:
       fatalError("Module type should not appear in CodeGen")
+    case .typeVariable(let tv):
+      fatalError("Type variable \(tv) should be resolved before CodeGen")
     }
   }
 
