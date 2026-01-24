@@ -179,11 +179,30 @@ public class Monomorphizer {
             resolvedResultNodes.append(resolvedNode)
         }
         
+        // Process any new instantiation requests that were added during type resolution
+        while !pendingRequests.isEmpty {
+            let request = pendingRequests.removeFirst()
+            try processRequest(request)
+        }
+        
         // Also resolve types in generated nodes (they may contain nested generic types)
+        // We need to keep resolving until no new nodes are generated
         var resolvedGeneratedNodes: [TypedGlobalNode] = []
-        for node in generatedNodes {
-            let resolvedNode = try resolveTypesInGlobalNode(node)
-            resolvedGeneratedNodes.append(resolvedNode)
+        var processedGeneratedCount = 0
+        
+        while processedGeneratedCount < generatedNodes.count {
+            // Resolve types in newly generated nodes
+            for i in processedGeneratedCount..<generatedNodes.count {
+                let resolvedNode = try resolveTypesInGlobalNode(generatedNodes[i])
+                resolvedGeneratedNodes.append(resolvedNode)
+            }
+            processedGeneratedCount = generatedNodes.count
+            
+            // Process any new instantiation requests that were added during resolution
+            while !pendingRequests.isEmpty {
+                let request = pendingRequests.removeFirst()
+                try processRequest(request)
+            }
         }
         
         // Insert generated nodes before the result nodes (for C definition order)
@@ -984,6 +1003,19 @@ public class Monomorphizer {
         case .identifier(let name):
             // Check substitution map first
             if let substituted = substitution[name] {
+                // If the substituted type is a genericStruct, we need to instantiate it
+                if case .genericStruct(let template, let args) = substituted {
+                    // Check if it's a struct template
+                    if let structTemplate = input.genericTemplates.structTemplates[template] {
+                        return try instantiateStruct(template: structTemplate, args: args)
+                    }
+                }
+                // If the substituted type is a genericUnion, we need to instantiate it
+                if case .genericUnion(let template, let args) = substituted {
+                    if let unionTemplate = input.genericTemplates.unionTemplates[template] {
+                        return try instantiateUnion(template: unionTemplate, args: args)
+                    }
+                }
                 return substituted
             }
             // Then check built-in types

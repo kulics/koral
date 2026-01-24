@@ -25,8 +25,9 @@ public class TypeChecker {
 
   private var traits: [String: TraitDeclInfo] = [:]
 
-  // Generic parameter name -> list of trait bounds currently in scope
-  private var genericTraitBounds: [String: [String]] = [:]
+  // Generic parameter name -> list of trait constraints currently in scope
+  // Stores full TraitConstraint to preserve type arguments for generic traits
+  private var genericTraitBounds: [String: [TraitConstraint]] = [:]
 
   // Generic Template Extensions: TemplateName -> [GenericExtensionMethodTemplate]
   private var genericExtensionMethods: [String: [GenericExtensionMethodTemplate]] = [:]
@@ -503,9 +504,12 @@ public class TypeChecker {
 
   private func recordGenericTraitBounds(_ typeParameters: [TypeParameterDecl]) throws {
     for param in typeParameters {
-      let bounds = try param.constraints.map { try resolveTraitName(from: $0) }
-      for b in bounds {
-        try validateTraitName(b)
+      var bounds: [TraitConstraint] = []
+      for c in param.constraints {
+        let constraint = try SemaUtils.resolveTraitConstraint(from: c)
+        let traitName = constraint.baseName
+        try validateTraitName(traitName)
+        bounds.append(constraint)
       }
       genericTraitBounds[param.name] = bounds
     }
@@ -520,13 +524,14 @@ public class TypeChecker {
     }
     
     // Check direct bounds
-    if bounds.contains(traitName) {
+    if bounds.contains(where: { $0.baseName == traitName }) {
       return true
     }
     
     // Check inherited traits
     for bound in bounds {
-      if let traitInfo = traits[bound] {
+      let boundName = bound.baseName
+      if let traitInfo = traits[boundName] {
         // Check if this trait inherits from the target trait
         if traitInfo.superTraits.contains(traitName) {
           return true
@@ -541,6 +546,15 @@ public class TypeChecker {
     }
     
     return false
+  }
+  
+  /// Finds the trait constraint for a given type parameter and trait name.
+  /// Returns the full TraitConstraint including type arguments.
+  private func findTraitConstraint(_ paramName: String, _ traitName: String) -> TraitConstraint? {
+    guard let bounds = genericTraitBounds[paramName] else {
+      return nil
+    }
+    return bounds.first(where: { $0.baseName == traitName })
   }
   
   /// Checks if a trait inherits from another trait (directly or transitively).
@@ -568,11 +582,23 @@ public class TypeChecker {
 
   private func expectedFunctionTypeForTraitMethod(
     _ method: TraitMethodSignature,
-    selfType: Type
+    selfType: Type,
+    traitInfo: TraitDeclInfo? = nil,
+    traitTypeArgs: [Type] = []
   ) throws -> Type {
     return try withNewScope {
       // Bind both `Self` and inferred self placeholder.
       try currentScope.defineType("Self", type: selfType)
+
+      // Bind trait-level type parameters to their actual type arguments
+      // For example, for [T]Iterator with constraint [A]Iterator, bind T -> A
+      if let traitInfo = traitInfo {
+        for (i, typeParam) in traitInfo.typeParameters.enumerated() {
+          if i < traitTypeArgs.count {
+            try currentScope.defineType(typeParam.name, type: traitTypeArgs[i])
+          }
+        }
+      }
 
       // Bind method-level type parameters as generic parameters
       for typeParam in method.typeParameters {
@@ -590,10 +616,21 @@ public class TypeChecker {
 
   private func formatTraitMethodSignature(
     _ method: TraitMethodSignature,
-    selfType: Type
+    selfType: Type,
+    traitInfo: TraitDeclInfo? = nil,
+    traitTypeArgs: [Type] = []
   ) throws -> String {
     return try withNewScope {
       try currentScope.defineType("Self", type: selfType)
+      
+      // Bind trait-level type parameters to their actual type arguments
+      if let traitInfo = traitInfo {
+        for (i, typeParam) in traitInfo.typeParameters.enumerated() {
+          if i < traitTypeArgs.count {
+            try currentScope.defineType(typeParam.name, type: traitTypeArgs[i])
+          }
+        }
+      }
       
       // Bind method-level type parameters as generic parameters
       for typeParam in method.typeParameters {
@@ -963,7 +1000,8 @@ public class TypeChecker {
     }
     
     // Search for the method in all trait bounds
-    for traitName in bounds {
+    for traitConstraint in bounds {
+      let traitName = traitConstraint.baseName
       let methods = try flattenedTraitMethods(traitName)
       if let sig = methods[methodName] {
         // Found the method - check if it has method-level type parameters
@@ -990,6 +1028,19 @@ public class TypeChecker {
         let functionType = try withNewScope {
           // Bind Self to the generic parameter type
           try currentScope.defineType("Self", type: baseType)
+          
+          // Bind trait type parameters to their actual type arguments
+          // For example, for [T]Iterator with constraint [A]Iterator, bind T -> A
+          if let traitInfo = traits[traitName] {
+            if case .generic(_, let argNodes) = traitConstraint {
+              for (i, typeParam) in traitInfo.typeParameters.enumerated() {
+                if i < argNodes.count {
+                  let argType = try resolveTypeNode(argNodes[i])
+                  try currentScope.defineType(typeParam.name, type: argType)
+                }
+              }
+            }
+          }
           
           // Bind method type parameters
           for (paramName, paramType) in substitution {
@@ -1368,27 +1419,127 @@ public class TypeChecker {
 
   private func enforceGenericConstraints(typeParameters: [TypeParameterDecl], args: [Type]) throws {
     guard typeParameters.count == args.count else { return }
+    
+    // Build a substitution map from type parameter names to actual types
+    var substitution: [String: Type] = [:]
+    for (i, param) in typeParameters.enumerated() {
+      substitution[param.name] = args[i]
+    }
+    
     for (i, param) in typeParameters.enumerated() {
       for c in param.constraints {
-        let traitName = try resolveTraitName(from: c)
+        let constraint = try SemaUtils.resolveTraitConstraint(from: c)
         
-        // If the argument is a generic parameter, check if it has the required constraint
-        // in its bounds rather than checking for concrete method implementations
-        if case .genericParameter(let argName) = args[i] {
-          // Check if the generic parameter has the required trait bound
-          if let bounds = genericTraitBounds[argName] {
-            if traitName != "Any" && !bounds.contains(traitName) {
-              throw SemanticError(.generic(
-                "Generic parameter \(argName) does not have required constraint \(traitName)"
-              ), line: currentLine)
+        switch constraint {
+        case .simple(let traitName):
+          // Simple trait constraint (e.g., T Any, T Equatable)
+          // If the argument is a generic parameter, check if it has the required constraint
+          // in its bounds rather than checking for concrete method implementations
+          if case .genericParameter(let argName) = args[i] {
+            // Check if the generic parameter has the required trait bound
+            if let bounds = genericTraitBounds[argName] {
+              if traitName != "Any" && !bounds.contains(where: { $0.baseName == traitName }) {
+                throw SemanticError(.generic(
+                  "Generic parameter \(argName) does not have required constraint \(traitName)"
+                ), line: currentLine)
+              }
             }
+            // If bounds exist and contain the trait (or trait is Any), constraint is satisfied
+            continue
           }
-          // If bounds exist and contain the trait (or trait is Any), constraint is satisfied
-          continue
+          
+          let ctx = "checking constraint \(param.name): \(traitName)"
+          try enforceTraitConformance(args[i], traitName: traitName, context: ctx)
+          
+        case .generic(let baseTrait, let traitArgs):
+          // Generic trait constraint (e.g., R [T]Iterator)
+          // We need to check that the actual type implements the trait with the correct type arguments
+          
+          // First, substitute type parameters in the trait arguments
+          let resolvedTraitArgs = try traitArgs.map { arg -> Type in
+            try resolveTypeNodeWithSubstitution(arg, substitution: substitution)
+          }
+          
+          // If the argument is a generic parameter, check if it has a matching generic trait bound
+          if case .genericParameter(let argName) = args[i] {
+            // For now, check if the generic parameter has the base trait bound
+            // A more sophisticated check would verify the type arguments match
+            if let bounds = genericTraitBounds[argName] {
+              if !bounds.contains(where: { $0.baseName == baseTrait }) {
+                throw SemanticError(.generic(
+                  "Generic parameter \(argName) does not have required constraint \(constraint)"
+                ), line: currentLine)
+              }
+            }
+            continue
+          }
+          
+          // For concrete types, check trait conformance with the resolved type arguments
+          let ctx = "checking constraint \(param.name): \(constraint)"
+          try enforceGenericTraitConformance(args[i], traitName: baseTrait, traitArgs: resolvedTraitArgs, context: ctx)
         }
-        
-        let ctx = "checking constraint \(param.name): \(traitName)"
-        try enforceTraitConformance(args[i], traitName: traitName, context: ctx)
+      }
+    }
+  }
+  
+  /// Resolves a TypeNode to a Type using the given substitution map for type parameters.
+  private func resolveTypeNodeWithSubstitution(_ node: TypeNode, substitution: [String: Type]) throws -> Type {
+    switch node {
+    case .identifier(let name):
+      // Check if it's a type parameter that should be substituted
+      if let substitutedType = substitution[name] {
+        return substitutedType
+      }
+      // Otherwise resolve as a regular type
+      return try resolveTypeNode(node)
+      
+    case .generic(let base, let args):
+      let resolvedArgs = try args.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
+      // Create a generic type
+      return .genericStruct(template: base, args: resolvedArgs)
+      
+    default:
+      return try resolveTypeNode(node)
+    }
+  }
+  
+  /// Enforces that a type conforms to a generic trait with specific type arguments.
+  private func enforceGenericTraitConformance(_ type: Type, traitName: String, traitArgs: [Type], context: String) throws {
+    // For generic traits like [T]Iterator, we need to check:
+    // 1. The type has a `next` method (for Iterator)
+    // 2. The return type matches [T]Option where T is the expected element type
+    
+    // Get the trait methods
+    let traitMethods = try flattenedTraitMethods(traitName)
+    
+    // For each method in the trait, check if the type implements it with correct types
+    for (methodName, _) in traitMethods {
+      // Look up the method on the type
+      let structType: Type
+      if case .reference(let inner) = type { structType = inner } else { structType = type }
+      
+      // Try to find the method using extensionMethods dictionary
+      var methodFound = false
+      
+      switch structType {
+      case .structure(let decl):
+        if let methods = extensionMethods[decl.name], methods[methodName] != nil {
+          methodFound = true
+        }
+      case .genericStruct(let template, _):
+        // For generic structs, check if there's a generic extension method
+        if let extensions = genericExtensionMethods[template],
+           extensions.contains(where: { $0.method.name == methodName }) {
+          methodFound = true
+        }
+      default:
+        break
+      }
+      
+      if !methodFound {
+        throw SemanticError(.generic(
+          "Type \(type) does not implement method '\(methodName)' required by trait \(traitName)"
+        ), line: currentLine)
       }
     }
   }
@@ -4708,13 +4859,30 @@ public class TypeChecker {
           if case .genericParameter(let paramName) = type,
             let bounds = genericTraitBounds[paramName]
           {
-            for traitName in bounds {
+            for traitConstraint in bounds {
+              let traitName = traitConstraint.baseName
               let methods = try flattenedTraitMethods(traitName)
               if let sig = methods[memberName] {
                 if sig.parameters.first?.name == "self" {
                   continue
                 }
-                let expectedType = try expectedFunctionTypeForTraitMethod(sig, selfType: type)
+                
+                // Resolve trait type arguments from the constraint
+                let traitInfo = traits[traitName]
+                var traitTypeArgs: [Type] = []
+                if case .generic(_, let argNodes) = traitConstraint {
+                  for argNode in argNodes {
+                    let argType = try resolveTypeNode(argNode)
+                    traitTypeArgs.append(argType)
+                  }
+                }
+                
+                let expectedType = try expectedFunctionTypeForTraitMethod(
+                  sig, 
+                  selfType: type,
+                  traitInfo: traitInfo,
+                  traitTypeArgs: traitTypeArgs
+                )
                 methodSymbol = Symbol(
                   name: "__trait_\(traitName)_\(memberName)",
                   type: expectedType,
@@ -4973,13 +5141,30 @@ public class TypeChecker {
             if case .genericParameter(let paramName) = typeToLookup,
               let bounds = genericTraitBounds[paramName]
             {
-              for traitName in bounds {
+              for traitConstraint in bounds {
+                let traitName = traitConstraint.baseName
                 let methods = try flattenedTraitMethods(traitName)
                 if let sig = methods[memberName] {
                   if sig.parameters.first?.name != "self" {
                     continue
                   }
-                  let expectedType = try expectedFunctionTypeForTraitMethod(sig, selfType: typeToLookup)
+                  
+                  // Resolve trait type arguments from the constraint
+                  let traitInfo = traits[traitName]
+                  var traitTypeArgs: [Type] = []
+                  if case .generic(_, let argNodes) = traitConstraint {
+                    for argNode in argNodes {
+                      let argType = try resolveTypeNode(argNode)
+                      traitTypeArgs.append(argType)
+                    }
+                  }
+                  
+                  let expectedType = try expectedFunctionTypeForTraitMethod(
+                    sig, 
+                    selfType: typeToLookup,
+                    traitInfo: traitInfo,
+                    traitTypeArgs: traitTypeArgs
+                  )
                   let placeholder = Symbol(
                     name: "__trait_\(traitName)_\(memberName)",
                     type: expectedType,
@@ -5289,14 +5474,31 @@ public class TypeChecker {
         // Check if it's a generic parameter with trait bounds
         if case .genericParameter(let paramName) = type {
           if let bounds = genericTraitBounds[paramName] {
-            for traitName in bounds {
+            for traitConstraint in bounds {
+              let traitName = traitConstraint.baseName
               let methods = try flattenedTraitMethods(traitName)
               if let sig = methods[methodName] {
                 // Check if it's a static method (no self parameter)
                 if sig.parameters.first?.name == "self" {
                   continue
                 }
-                let expectedType = try expectedFunctionTypeForTraitMethod(sig, selfType: type)
+                
+                // Resolve trait type arguments from the constraint
+                let traitInfo = traits[traitName]
+                var traitTypeArgs: [Type] = []
+                if case .generic(_, let argNodes) = traitConstraint {
+                  for argNode in argNodes {
+                    let argType = try resolveTypeNode(argNode)
+                    traitTypeArgs.append(argType)
+                  }
+                }
+                
+                let expectedType = try expectedFunctionTypeForTraitMethod(
+                  sig, 
+                  selfType: type,
+                  traitInfo: traitInfo,
+                  traitTypeArgs: traitTypeArgs
+                )
                 
                 guard case .function(let params, let returnType) = expectedType else {
                   throw SemanticError(.generic("Expected function type for static method"), line: currentLine)

@@ -2,6 +2,30 @@
 // Shared utility functions used by both TypeChecker and Monomorphizer.
 // This file contains common logic that was previously duplicated between the two components.
 
+/// Represents a trait constraint, which can be either a simple trait name or a generic trait.
+public enum TraitConstraint: CustomStringConvertible {
+    case simple(name: String)
+    case generic(base: String, args: [TypeNode])
+    
+    public var description: String {
+        switch self {
+        case .simple(let name):
+            return name
+        case .generic(let base, let args):
+            let argsStr = args.map { $0.description }.joined(separator: ", ")
+            return "[\(argsStr)]\(base)"
+        }
+    }
+    
+    /// Returns the base trait name (e.g., "Iterator" for [T]Iterator)
+    public var baseName: String {
+        switch self {
+        case .simple(let name): return name
+        case .generic(let base, _): return base
+        }
+    }
+}
+
 /// Namespace for shared semantic analysis utility functions.
 public enum SemaUtils {
     
@@ -29,14 +53,38 @@ public enum SemaUtils {
     /// - Returns: The trait name as a string
     /// - Throws: SemanticError if the node is not a valid trait identifier
     public static func resolveTraitName(from node: TypeNode) throws -> String {
-        guard case .identifier(let name) = node else {
+        switch node {
+        case .identifier(let name):
+            return name
+        case .generic(let base, _):
+            // For generic traits like [T]Iterator, return the base name
+            return base
+        default:
             throw SemanticError.invalidOperation(
                 op: "invalid trait bound",
                 type1: String(describing: node),
                 type2: ""
             )
         }
-        return name
+    }
+    
+    /// Resolves a trait constraint from a TypeNode, preserving generic type arguments.
+    /// - Parameter node: The type node to resolve
+    /// - Returns: The trait constraint
+    /// - Throws: SemanticError if the node is not a valid trait constraint
+    public static func resolveTraitConstraint(from node: TypeNode) throws -> TraitConstraint {
+        switch node {
+        case .identifier(let name):
+            return .simple(name: name)
+        case .generic(let base, let args):
+            return .generic(base: base, args: args)
+        default:
+            throw SemanticError.invalidOperation(
+                op: "invalid trait bound",
+                type1: String(describing: node),
+                type2: ""
+            )
+        }
     }
     
     // MARK: - Built-in Type Checking
