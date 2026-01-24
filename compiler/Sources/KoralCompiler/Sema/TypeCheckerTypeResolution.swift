@@ -540,9 +540,26 @@ extension TypeChecker {
     guard bytes[0] <= 0x7F else { return nil }
     return bytes[0]
   }
+  
+  /// Extract a single Unicode code point from a string literal.
+  /// Returns nil if the string contains zero or more than one code point.
+  func singleRuneCodePoint(from value: String) -> UInt32? {
+    var iterator = value.unicodeScalars.makeIterator()
+    guard let scalar = iterator.next() else { return nil }
+    guard iterator.next() == nil else { return nil }  // Ensure only one code point
+    return scalar.value
+  }
+  
+  /// Check if a type is the Rune struct type.
+  func isRuneType(_ type: Type) -> Bool {
+    if case .structure(let decl) = type {
+      return decl.name == "Rune"
+    }
+    return false
+  }
 
   // Coerce numeric literals to the expected numeric type for annotations/parameters.
-  func coerceLiteral(_ expr: TypedExpressionNode, to expected: Type) -> TypedExpressionNode
+  func coerceLiteral(_ expr: TypedExpressionNode, to expected: Type) throws -> TypedExpressionNode
   {
     if isIntegerType(expected) {
       if case .integerLiteral(let value, _) = expr {
@@ -561,6 +578,34 @@ extension TypeChecker {
         return .floatLiteral(value: value, type: expected)
       }
     }
+    
+    // Allow single-character string literal to coerce to Rune type.
+    // e.g., 'A' -> Rune(65), '中' -> Rune(20013)
+    if isRuneType(expected), case .stringLiteral(let value, _) = expr {
+      if let cp = singleRuneCodePoint(from: value) {
+        // Construct Rune(value) using typeConstruction
+        // We need to get the Rune type's symbol
+        if case .structure(let decl) = expected {
+          let runeSymbol = Symbol(name: decl.name, type: expected, kind: .type)
+          return .typeConstruction(
+            identifier: runeSymbol,
+            typeArgs: nil,
+            arguments: [.integerLiteral(value: String(cp), type: .uint32)],
+            type: expected
+          )
+        }
+      }
+      // Check if it's a multi-code-point string and provide better error message
+      let codePointCount = value.unicodeScalars.count
+      if codePointCount > 1 {
+        throw SemanticError(.generic("Rune literal must contain exactly one Unicode code point, but '\(value)' contains \(codePointCount)"))
+      }
+      // Empty string case
+      if codePointCount == 0 {
+        throw SemanticError(.generic("Rune literal cannot be empty"))
+      }
+    }
+    
     return expr
   }
 }

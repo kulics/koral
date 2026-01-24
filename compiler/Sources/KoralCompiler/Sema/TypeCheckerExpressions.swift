@@ -207,12 +207,12 @@ extension TypeChecker {
       // Allow numeric literals to coerce to the other operand type.
       if typedLeft.type != typedRight.type {
         if isIntegerType(typedLeft.type) || isFloatType(typedLeft.type) {
-          typedRight = coerceLiteral(typedRight, to: typedLeft.type)
+          typedRight = try coerceLiteral(typedRight, to: typedLeft.type)
         }
         if typedLeft.type != typedRight.type,
           isIntegerType(typedRight.type) || isFloatType(typedRight.type)
         {
-          typedLeft = coerceLiteral(typedLeft, to: typedRight.type)
+          typedLeft = try coerceLiteral(typedLeft, to: typedRight.type)
         }
       }
 
@@ -227,22 +227,32 @@ extension TypeChecker {
       // Allow numeric literals to coerce to the other operand type.
       if typedLeft.type != typedRight.type {
         if isIntegerType(typedLeft.type) || isFloatType(typedLeft.type) {
-          typedRight = coerceLiteral(typedRight, to: typedLeft.type)
+          typedRight = try coerceLiteral(typedRight, to: typedLeft.type)
         }
         if typedLeft.type != typedRight.type,
           isIntegerType(typedRight.type) || isFloatType(typedRight.type)
         {
-          typedLeft = coerceLiteral(typedLeft, to: typedRight.type)
+          typedLeft = try coerceLiteral(typedLeft, to: typedRight.type)
         }
       }
 
       // Allow single-byte ASCII string literals to coerce to UInt8 in comparisons.
       if typedLeft.type != typedRight.type {
         if typedLeft.type == .uint8 {
-          typedRight = coerceLiteral(typedRight, to: .uint8)
+          typedRight = try coerceLiteral(typedRight, to: .uint8)
         }
         if typedRight.type == .uint8 {
-          typedLeft = coerceLiteral(typedLeft, to: .uint8)
+          typedLeft = try coerceLiteral(typedLeft, to: .uint8)
+        }
+      }
+      
+      // Allow single-character string literals to coerce to Rune in comparisons.
+      if typedLeft.type != typedRight.type {
+        if isRuneType(typedLeft.type) {
+          typedRight = try coerceLiteral(typedRight, to: typedLeft.type)
+        }
+        if typedLeft.type != typedRight.type, isRuneType(typedRight.type) {
+          typedLeft = try coerceLiteral(typedLeft, to: typedRight.type)
         }
       }
 
@@ -279,7 +289,7 @@ extension TypeChecker {
 
       if let typeNode = typeNode {
         let type = try resolveTypeNode(typeNode)
-        typedValue = coerceLiteral(typedValue, to: type)
+        typedValue = try coerceLiteral(typedValue, to: type)
         if typedValue.type != type {
           throw SemanticError.typeMismatch(
             expected: type.description, got: typedValue.type.description)
@@ -458,10 +468,10 @@ extension TypeChecker {
       // Allow numeric literals to coerce to the other operand type.
       if typedLeft.type != typedRight.type {
         if isIntegerType(typedLeft.type) {
-          typedRight = coerceLiteral(typedRight, to: typedLeft.type)
+          typedRight = try coerceLiteral(typedRight, to: typedLeft.type)
         }
         if typedLeft.type != typedRight.type, isIntegerType(typedRight.type) {
-          typedLeft = coerceLiteral(typedLeft, to: typedRight.type)
+          typedLeft = try coerceLiteral(typedLeft, to: typedRight.type)
         }
       }
 
@@ -610,7 +620,7 @@ extension TypeChecker {
               var typedArguments: [TypedExpressionNode] = []
               for (arg, param) in zip(arguments, params) {
                 var typedArg = try inferTypedExpression(arg)
-                typedArg = coerceLiteral(typedArg, to: param.type)
+                typedArg = try coerceLiteral(typedArg, to: param.type)
                 if typedArg.type != param.type {
                   throw SemanticError.typeMismatch(
                     expected: param.type.description,
@@ -686,7 +696,7 @@ extension TypeChecker {
           var typedArgs: [TypedExpressionNode] = []
           for (arg, param) in zip(arguments, resolvedParams) {
             var typedArg = try inferTypedExpression(arg)
-            typedArg = coerceLiteral(typedArg, to: param.type)
+            typedArg = try coerceLiteral(typedArg, to: param.type)
             if typedArg.type != param.type {
               throw SemanticError.typeMismatch(
                 expected: param.type.description, got: typedArg.type.description)
@@ -726,7 +736,7 @@ extension TypeChecker {
               var typedArguments: [TypedExpressionNode] = []
               for (arg, param) in zip(arguments, params) {
                 var typedArg = try inferTypedExpression(arg)
-                typedArg = coerceLiteral(typedArg, to: param.type)
+                typedArg = try coerceLiteral(typedArg, to: param.type)
                 if typedArg.type != param.type {
                   throw SemanticError.typeMismatch(
                     expected: param.type.description,
@@ -787,7 +797,7 @@ extension TypeChecker {
             var typedArgs: [TypedExpressionNode] = []
             for (arg, param) in zip(arguments, params) {
               var typedArg = try inferTypedExpression(arg)
-              typedArg = coerceLiteral(typedArg, to: param.type)
+              typedArg = try coerceLiteral(typedArg, to: param.type)
               if typedArg.type != param.type {
                 throw SemanticError.typeMismatch(
                   expected: param.type.description, got: typedArg.type.description)
@@ -826,7 +836,7 @@ extension TypeChecker {
         var typedArguments: [TypedExpressionNode] = []
         for (arg, expectedMember) in zip(arguments, parameters) {
           var typedArg = try inferTypedExpression(arg)
-          typedArg = coerceLiteral(typedArg, to: expectedMember.type)
+          typedArg = try coerceLiteral(typedArg, to: expectedMember.type)
           if typedArg.type != expectedMember.type {
             throw SemanticError.typeMismatch(
               expected: expectedMember.type.description,
@@ -902,7 +912,7 @@ extension TypeChecker {
         } else {
           typedArg = try inferTypedExpression(arg)
         }
-        typedArg = coerceLiteral(typedArg, to: param.type)
+        typedArg = try coerceLiteral(typedArg, to: param.type)
         if typedArg.type != param.type {
           throw SemanticError.typeMismatch(
             expected: param.type.description,
@@ -983,7 +993,7 @@ extension TypeChecker {
       var typedArguments: [TypedExpressionNode] = []
       for (arg, expectedMember) in zip(arguments, memberTypes) {
         var typedArg = try inferTypedExpression(arg)
-        typedArg = coerceLiteral(typedArg, to: expectedMember.type)
+        typedArg = try coerceLiteral(typedArg, to: expectedMember.type)
         if typedArg.type != expectedMember.type {
           throw SemanticError.typeMismatch(
             expected: expectedMember.type.description,
@@ -1128,7 +1138,7 @@ extension TypeChecker {
       var typedArguments: [TypedExpressionNode] = []
       for (arg, expectedParam) in zip(arguments, params) {
         var typedArg = try inferTypedExpression(arg)
-        typedArg = coerceLiteral(typedArg, to: expectedParam.type)
+        typedArg = try coerceLiteral(typedArg, to: expectedParam.type)
         if typedArg.type != expectedParam.type {
           throw SemanticError.typeMismatch(
             expected: expectedParam.type.description,
@@ -1167,7 +1177,7 @@ extension TypeChecker {
       var typedArg = try inferTypedExpression(argExpr)
       do {
         let expectedType = try resolveTypeNode(param.type)
-        typedArg = coerceLiteral(typedArg, to: expectedType)
+        typedArg = try coerceLiteral(typedArg, to: expectedType)
       } catch let error as SemanticError {
         // During implicit generic inference, parameter types may reference template
         // type parameters (e.g. `T`, `[T]Pointer`) which are not in the caller scope.
@@ -1336,7 +1346,7 @@ extension TypeChecker {
             continue
           }
           let typedArg = try inferTypedExpression(arg)
-          let coercedArg = coerceLiteral(typedArg, to: param.type)
+          let coercedArg = try coerceLiteral(typedArg, to: param.type)
           if param.type.containsGenericParameter {
             _ = unifyTypes(param.type, coercedArg.type, bindings: &methodTypeParamBindings)
           }
@@ -1381,7 +1391,7 @@ extension TypeChecker {
           }
         } else {
           typedArg = try inferTypedExpression(arg)
-          typedArg = coerceLiteral(typedArg, to: param.type)
+          typedArg = try coerceLiteral(typedArg, to: param.type)
           
           // If param type contains generic parameters, unify to infer them
           if param.type.containsGenericParameter {
@@ -1564,7 +1574,7 @@ extension TypeChecker {
       } else {
         typedArg = try inferTypedExpression(arg)
       }
-      typedArg = coerceLiteral(typedArg, to: param.type)
+      typedArg = try coerceLiteral(typedArg, to: param.type)
       if typedArg.type != param.type {
         if case .reference(let inner) = param.type, inner == typedArg.type {
           if typedArg.valueCategory == .lvalue {
@@ -2100,7 +2110,7 @@ extension TypeChecker {
           throw SemanticError.invalidArgumentCount(function: "from_bits", expected: 1, got: arguments.count)
         }
         var bits = try inferTypedExpression(arguments[0])
-        bits = coerceLiteral(bits, to: .uint32)
+        bits = try coerceLiteral(bits, to: .uint32)
         if bits.type != .uint32 {
           throw SemanticError.typeMismatch(expected: "UInt32", got: bits.type.description)
         }
@@ -2110,7 +2120,7 @@ extension TypeChecker {
           throw SemanticError.invalidArgumentCount(function: "from_bits", expected: 1, got: arguments.count)
         }
         var bits = try inferTypedExpression(arguments[0])
-        bits = coerceLiteral(bits, to: .uint64)
+        bits = try coerceLiteral(bits, to: .uint64)
         if bits.type != .uint64 {
           throw SemanticError.typeMismatch(expected: "UInt64", got: bits.type.description)
         }
@@ -2217,7 +2227,7 @@ extension TypeChecker {
           var typedArguments: [TypedExpressionNode] = []
           for (arg, param) in zip(arguments, params) {
             var typedArg = try inferTypedExpression(arg)
-            typedArg = coerceLiteral(typedArg, to: param.type)
+            typedArg = try coerceLiteral(typedArg, to: param.type)
             if typedArg.type != param.type {
               throw SemanticError.typeMismatch(
                 expected: param.type.description,
@@ -2295,7 +2305,7 @@ extension TypeChecker {
           var typedArguments: [TypedExpressionNode] = []
           for (arg, param) in zip(arguments, params) {
             var typedArg = try inferTypedExpression(arg)
-            typedArg = coerceLiteral(typedArg, to: param.type)
+            typedArg = try coerceLiteral(typedArg, to: param.type)
             if typedArg.type != param.type {
               throw SemanticError.typeMismatch(
                 expected: param.type.description,
@@ -2362,7 +2372,7 @@ extension TypeChecker {
       var typedArguments: [TypedExpressionNode] = []
       for (arg, param) in zip(arguments, params) {
         var typedArg = try inferTypedExpression(arg)
-        typedArg = coerceLiteral(typedArg, to: param.type)
+        typedArg = try coerceLiteral(typedArg, to: param.type)
         if typedArg.type != param.type {
           throw SemanticError.typeMismatch(
             expected: param.type.description,
@@ -2423,7 +2433,7 @@ extension TypeChecker {
             var typedArguments: [TypedExpressionNode] = []
             for (arg, param) in zip(arguments, params) {
               var typedArg = try inferTypedExpression(arg)
-              typedArg = coerceLiteral(typedArg, to: param.type)
+              typedArg = try coerceLiteral(typedArg, to: param.type)
               if typedArg.type != param.type {
                 throw SemanticError.typeMismatch(
                   expected: param.type.description,

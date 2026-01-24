@@ -466,7 +466,7 @@ extension TypeChecker {
     // Re-check arguments with resolved types and apply coercion
     var finalTypedArguments: [TypedExpressionNode] = []
     for (typedArg, expectedMember) in zip(typedArguments, memberTypes) {
-      let finalArg = coerceLiteral(typedArg, to: expectedMember.type)
+      let finalArg = try coerceLiteral(typedArg, to: expectedMember.type)
       if finalArg.type != expectedMember.type {
         throw SemanticError.typeMismatch(
           expected: expectedMember.type.description,

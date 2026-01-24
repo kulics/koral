@@ -108,6 +108,9 @@ class IntegrationTests: XCTestCase {
     func test_recursion_check() throws { try runCase(named: "recursion_check.koral") }
     func test_result_map_test() throws { try runCase(named: "result_map_test.koral") }
     func test_return_break_continue() throws { try runCase(named: "return_break_continue.koral") }
+    func test_rune_basic() throws { try runCase(named: "rune_basic.koral") }
+    func test_rune_literal() throws { try runCase(named: "rune_literal.koral") }
+    func test_rune_string() throws { try runCase(named: "rune_string.koral") }
     func test_rvalue_ref_param_error() throws { try runCase(named: "rvalue_ref_param_error.koral") }
     func test_rvalue_temp_materialization() throws { try runCase(named: "rvalue_temp_materialization.koral") }
     func test_set_test() throws { try runCase(named: "set_test.koral") }
