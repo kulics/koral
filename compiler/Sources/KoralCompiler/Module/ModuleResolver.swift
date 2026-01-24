@@ -13,6 +13,7 @@ public enum ModuleError: Error, CustomStringConvertible {
     case invalidModulePath(String)
     case duplicateUsing(String, span: SourceSpan)
     case parseError(file: String, underlying: Error)
+    case invalidEntryFileName(filename: String, reason: String)
     
     public var description: String {
         switch self {
@@ -34,8 +35,52 @@ public enum ModuleError: Error, CustomStringConvertible {
             return "\(span): Duplicate using declaration for '\(name)'"
         case .parseError(let file, let underlying):
             return "\(file): \(underlying)"
+        case .invalidEntryFileName(let filename, let reason):
+            return """
+                Invalid entry file name '\(filename)': \(reason)
+                Module names must be valid identifiers: start with a lowercase letter, \
+                contain only lowercase letters, digits, and underscores.
+                Examples: main, my_app, tool1
+                """
         }
     }
+}
+
+// MARK: - Module Name Validation
+
+/// 验证文件名是否为有效的模块名标识符
+/// - Parameter filename: 不含扩展名的文件名
+/// - Returns: 验证结果，成功返回 nil，失败返回错误原因
+public func validateModuleName(_ filename: String) -> String? {
+    // 空文件名
+    guard !filename.isEmpty else {
+        return "Module name cannot be empty"
+    }
+    
+    let chars = Array(filename)
+    
+    // 必须以小写字母开头
+    guard let first = chars.first else {
+        return "Module name cannot be empty"
+    }
+    
+    // 检查第一个字符是否为小写 ASCII 字母
+    guard first >= "a" && first <= "z" else {
+        return "Module name must start with a lowercase letter (a-z)"
+    }
+    
+    // 只能包含小写字母、数字和下划线
+    for char in chars {
+        let isLowercaseLetter = char >= "a" && char <= "z"
+        let isDigit = char >= "0" && char <= "9"
+        let isUnderscore = char == "_"
+        
+        if !isLowercaseLetter && !isDigit && !isUnderscore {
+            return "Module name can only contain lowercase letters (a-z), digits (0-9), and underscores (_)"
+        }
+    }
+    
+    return nil
 }
 
 // MARK: - Module Info
@@ -87,7 +132,7 @@ public class ModuleInfo {
     
     /// 模块的完整路径字符串
     public var pathString: String {
-        return path.isEmpty ? "<root>" : path.joined(separator: ".")
+        return path.joined(separator: ".")
     }
 }
 
@@ -179,8 +224,19 @@ public class ModuleResolver {
     public func resolveModule(entryFile: String) throws -> CompilationUnit {
         let absolutePath = URL(fileURLWithPath: entryFile).standardized.path
         
+        // 提取文件名（不含扩展名）
+        let filename = URL(fileURLWithPath: absolutePath)
+            .deletingPathExtension()
+            .lastPathComponent
+        
+        // 验证文件名
+        if let error = validateModuleName(filename) {
+            throw ModuleError.invalidEntryFileName(filename: filename, reason: error)
+        }
+        
+        // 创建根模块，path 包含文件名
         let rootModule = ModuleInfo(
-            path: [],
+            path: [filename],
             entryFile: absolutePath,
             isExternal: false
         )

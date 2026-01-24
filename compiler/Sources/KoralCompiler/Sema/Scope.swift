@@ -94,6 +94,13 @@ public class Scope {
     functionSymbols.insert(name)
   }
   
+  /// Define a function symbol with module path information
+  public func defineFunctionWithModulePath(_ name: String, _ type: Type, modulePath: [String]) {
+    symbols[name] = (type, false)  // Functions are always immutable
+    functionSymbols.insert(name)
+    symbolModulePaths[name] = modulePath
+  }
+  
   /// Check if a symbol is a function (not a closure variable)
   public func isFunction(_ name: String, sourceFile: String? = nil) -> Bool {
     // Check private function symbols first
@@ -117,19 +124,21 @@ public class Scope {
   }
   
   /// Define a private symbol with file isolation
-  public func definePrivateSymbol(_ name: String, sourceFile: String, type: Type, mutable: Bool) {
+  public func definePrivateSymbol(_ name: String, sourceFile: String, type: Type, mutable: Bool, modulePath: [String] = []) {
     let key = "\(name)@\(sourceFile)"
     privateSymbols[key] = (type: type, mutable: mutable, sourceFile: sourceFile)
+    symbolModulePaths[name] = modulePath
   }
   
   /// Private function symbols indexed by "name@sourceFile"
   private var privateFunctionSymbols: Set<String> = []
   
   /// Define a private function symbol with file isolation
-  public func definePrivateFunction(_ name: String, sourceFile: String, type: Type) {
+  public func definePrivateFunction(_ name: String, sourceFile: String, type: Type, modulePath: [String] = []) {
     let key = "\(name)@\(sourceFile)"
     privateSymbols[key] = (type: type, mutable: false, sourceFile: sourceFile)
     privateFunctionSymbols.insert(key)
+    symbolModulePaths[name] = modulePath
   }
   
   /// Check if a symbol is a private function
