@@ -310,3 +310,135 @@ given[T Any] [T]List {
         result
     }
 }
+
+// ============================================================================
+// List Sorting - sort_by with custom comparator
+// ============================================================================
+
+given[T Any] [T]List {
+    // Sort in-place using a custom comparison function
+    // compare returns: negative if first < second, zero if equal, positive if first > second
+    public sort_by(self ref, compare [T, T, Int]Func) Void = {
+        if self.storage.len <= 1 then { return; }
+        self.ensure_unique()
+        self.merge_sort_by(compare, 0, self.storage.len)
+    }
+    
+    // Merge sort implementation with custom comparator
+    private merge_sort_by(self ref, compare [T, T, Int]Func, start Int, end Int) Void = {
+        let len = end - start
+        if len <= 1 then { return; }
+        
+        let mid = start + len / 2
+        self.merge_sort_by(compare, start, mid)
+        self.merge_sort_by(compare, mid, end)
+        self.merge_by(compare, start, mid, end)
+    }
+    
+    // Merge two sorted subarrays using custom comparator
+    private merge_by(self ref, compare [T, T, Int]Func, start Int, mid Int, end Int) Void = {
+        let left_len = mid - start
+        let mut temp = [T]List.with_capacity(left_len)
+        
+        // Copy left half to temp
+        let mut i = 0
+        while i < left_len then {
+            temp.push_back(self.storage.source.offset(start + i).peek())
+            i += 1
+        }
+        
+        let mut left_idx = 0
+        let mut right_idx = mid
+        let mut dest_idx = start
+        
+        // Merge back
+        while left_idx < left_len and right_idx < end then {
+            let left_val = temp.storage.source.offset(left_idx).peek()
+            let right_val = self.storage.source.offset(right_idx).peek()
+            
+            // Use <= 0 to ensure stability (prefer left on equal)
+            if compare(left_val, right_val) <= 0 then {
+                self.storage.source.offset(dest_idx).replace(left_val);
+                left_idx += 1
+            } else {
+                self.storage.source.offset(dest_idx).replace(right_val);
+                right_idx += 1
+            }
+            dest_idx += 1
+        }
+        
+        // Copy remaining left elements
+        while left_idx < left_len then {
+            let val = temp.storage.source.offset(left_idx).peek()
+            self.storage.source.offset(dest_idx).replace(val);
+            left_idx += 1
+            dest_idx += 1
+        }
+    }
+}
+
+
+// ============================================================================
+// List Sorting - sort based on Comparable trait
+// ============================================================================
+
+given[T Comparable] [T]List {
+    // Sort in-place in ascending order using Comparable trait
+    public sort(self ref) Void = {
+        if self.storage.len <= 1 then { return; }
+        self.ensure_unique()
+        self.merge_sort_comparable(0, self.storage.len)
+    }
+    
+    // Merge sort implementation using Comparable
+    private merge_sort_comparable(self ref, start Int, end Int) Void = {
+        let len = end - start
+        if len <= 1 then { return; }
+        
+        let mid = start + len / 2
+        self.merge_sort_comparable(start, mid)
+        self.merge_sort_comparable(mid, end)
+        self.merge_comparable(start, mid, end)
+    }
+    
+    // Merge two sorted subarrays using Comparable
+    private merge_comparable(self ref, start Int, mid Int, end Int) Void = {
+        let left_len = mid - start
+        let mut temp = [T]List.with_capacity(left_len)
+        
+        // Copy left half to temp
+        let mut i = 0
+        while i < left_len then {
+            temp.push_back(self.storage.source.offset(start + i).peek())
+            i += 1
+        }
+        
+        let mut left_idx = 0
+        let mut right_idx = mid
+        let mut dest_idx = start
+        
+        // Merge back
+        while left_idx < left_len and right_idx < end then {
+            let left_val = temp.storage.source.offset(left_idx).peek()
+            let right_val = self.storage.source.offset(right_idx).peek()
+            
+            // Use <= to ensure stability (prefer left on equal)
+            if left_val <= right_val then {
+                self.storage.source.offset(dest_idx).replace(left_val);
+                left_idx += 1
+            } else {
+                self.storage.source.offset(dest_idx).replace(right_val);
+                right_idx += 1
+            }
+            dest_idx += 1
+        }
+        
+        // Copy remaining left elements
+        while left_idx < left_len then {
+            let val = temp.storage.source.offset(left_idx).peek()
+            self.storage.source.offset(dest_idx).replace(val);
+            left_idx += 1
+            dest_idx += 1
+        }
+    }
+}
