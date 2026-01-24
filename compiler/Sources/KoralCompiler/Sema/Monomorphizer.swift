@@ -837,16 +837,77 @@ public class Monomorphizer {
                 )
             }
             if isGen, let info = layoutToTemplateInfo[typeName] {
-                if let extensions = input.genericTemplates.extensionMethods[info.base],
+                if let extensions = input.genericTemplates.extensionMethods[info.base] {
+                    if let ext = extensions.first(where: { $0.method.name == name }) {
+                        do {
+                            let result = try instantiateExtensionMethodFromEntry(
+                                baseType: selfType,
+                                structureName: info.base,
+                                genericArgs: info.args,
+                                methodTypeArgs: methodTypeArgs,
+                                methodInfo: ext
+                            )
+                            return result
+                        } catch {
+                            return nil
+                        }
+                    }
+                }
+            }
+            // If not found in layoutToTemplateInfo, try to extract base name from the type name
+            // This handles cases where the type was instantiated but not yet registered in layoutToTemplateInfo
+            if isGen {
+                // Extract base name from mangled name (e.g., "List_I" -> "List")
+                let baseName = typeName.split(separator: "_").first.map(String.init) ?? typeName
+                if let extensions = input.genericTemplates.extensionMethods[baseName],
                    let ext = extensions.first(where: { $0.method.name == name })
                 {
-                    return try instantiateExtensionMethodFromEntry(
-                        baseType: selfType,
-                        structureName: info.base,
-                        genericArgs: info.args,
-                        methodTypeArgs: methodTypeArgs,
-                        methodInfo: ext
-                    )
+                    // Try to extract type args from the type's members
+                    // For now, use the decl's members to reconstruct type args
+                    var typeArgs: [Type] = []
+                    if let _ = input.genericTemplates.structTemplates[baseName] {
+                        // Extract type args from the layout name suffix
+                        let suffix = String(typeName.dropFirst(baseName.count + 1)) // Remove "BaseName_"
+                        let argLayoutKeys = suffix.split(separator: "_").map(String.init)
+                        // Try to reconstruct types from layout keys
+                        for key in argLayoutKeys {
+                            if let builtinType = SemaUtils.resolveBuiltinType(key) {
+                                typeArgs.append(builtinType)
+                            } else if key == "I" {
+                                typeArgs.append(.int)
+                            } else if key == "U" {
+                                typeArgs.append(.uint)
+                            } else if key == "B" {
+                                typeArgs.append(.bool)
+                            } else if key == "F32" {
+                                typeArgs.append(.float32)
+                            } else if key == "F64" {
+                                typeArgs.append(.float64)
+                            } else {
+                                // Assume it's a struct type
+                                let structDecl = StructDecl(
+                                    name: key,
+                                    modulePath: [],
+                                    sourceFile: "",
+                                    access: .default,
+                                    members: [],
+                                    isGenericInstantiation: key.contains("_")
+                                )
+                                typeArgs.append(.structure(decl: structDecl))
+                            }
+                        }
+                    }
+                    if typeArgs.count == ext.typeParams.count {
+                        // Register in layoutToTemplateInfo for future lookups
+                        layoutToTemplateInfo[typeName] = (base: baseName, args: typeArgs)
+                        return try instantiateExtensionMethodFromEntry(
+                            baseType: selfType,
+                            structureName: baseName,
+                            genericArgs: typeArgs,
+                            methodTypeArgs: methodTypeArgs,
+                            methodInfo: ext
+                        )
+                    }
                 }
             }
             return nil
@@ -1445,6 +1506,9 @@ public class Monomorphizer {
             // Substitute method type args if present
             let substitutedMethodTypeArgs = methodTypeArgs?.map { substituteType($0, substitution: substitution) }
             
+            // Track the resolved return type (will be updated if we find a concrete method)
+            var resolvedReturnType = substituteType(type, substitution: substitution)
+            
             // Resolve trait method placeholders to concrete methods
             // Placeholder names have the format "__trait_TraitName_methodName"
             // where methodName may start with underscores (e.g., "__equals")
@@ -1470,13 +1534,18 @@ public class Monomorphizer {
                             sourceFile: concreteMethod.sourceFile,
                             access: concreteMethod.access
                         )
+                        // Extract the return type from the concrete method's function type
+                        if case .function(_, let returns) = concreteMethod.type {
+                            resolvedReturnType = returns
+                        }
                     }
                 }
             }
             // Resolve generic extension method to mangled name
             else if !newBase.type.containsGenericParameter {
                 // Look up the concrete method on the substituted base type
-                if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: method.name) {
+                // Pass method type args for generic methods
+                if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: method.name, methodTypeArgs: substitutedMethodTypeArgs ?? []) {
                     newMethod = Symbol(
                         name: concreteMethod.name,
                         type: concreteMethod.type,
@@ -1486,6 +1555,10 @@ public class Monomorphizer {
                         sourceFile: concreteMethod.sourceFile,
                         access: concreteMethod.access
                     )
+                    // Extract the return type from the concrete method's function type
+                    if case .function(_, let returns) = concreteMethod.type {
+                        resolvedReturnType = returns
+                    }
                 }
             }
             
@@ -1494,7 +1567,7 @@ public class Monomorphizer {
                 method: newMethod,
                 typeArgs: substitutedTypeArgs,
                 methodTypeArgs: substitutedMethodTypeArgs,
-                type: substituteType(type, substitution: substitution)
+                type: resolvedReturnType
             )
             
         case .whileExpression(let condition, let body, let type):
@@ -2510,6 +2583,9 @@ public class Monomorphizer {
             let resolvedTypeArgs = typeArgs?.map { resolveParameterizedType($0) }
             let resolvedMethodTypeArgs = methodTypeArgs?.map { resolveParameterizedType($0) }
             
+            // Track the resolved return type (will be updated if we find a concrete method)
+            var resolvedReturnType = resolveParameterizedType(type)
+            
             // Resolve method name to mangled name for generic extension methods
             if !newBase.type.containsGenericParameter {
                 // Look up the concrete method on the resolved base type
@@ -2527,6 +2603,10 @@ public class Monomorphizer {
                         sourceFile: concreteMethod.sourceFile,
                         access: concreteMethod.access
                     )
+                    // Extract the return type from the concrete method's function type
+                    if case .function(_, let returns) = resolvedMethodType {
+                        resolvedReturnType = returns
+                    }
                 }
             }
             
@@ -2535,7 +2615,7 @@ public class Monomorphizer {
                 method: newMethod,
                 typeArgs: resolvedTypeArgs,
                 methodTypeArgs: resolvedMethodTypeArgs,
-                type: resolveParameterizedType(type)
+                type: resolvedReturnType
             )
             
         case .whileExpression(let condition, let body, let type):
