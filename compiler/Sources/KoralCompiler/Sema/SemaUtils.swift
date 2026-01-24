@@ -398,6 +398,11 @@ public enum SemaUtils {
         case .module:
             // Module types should not be substituted
             return type
+            
+        case .typeVariable:
+            // Type variables should not be substituted by generic parameter substitution
+            // They are handled by the constraint solver
+            return type
         }
     }
     

@@ -155,6 +155,7 @@ public indirect enum Type: CustomStringConvertible {
   case genericStruct(template: String, args: [Type])
   case genericUnion(template: String, args: [Type])
   case module(info: ModuleSymbolInfo)
+  case typeVariable(TypeVariable)
   
   // MARK: - Convenience Accessors
   
@@ -266,6 +267,8 @@ public indirect enum Type: CustomStringConvertible {
       return "[\(argsStr)]\(template)"
     case .module(let info):
       return "module(\(info.modulePath.joined(separator: ".")))"
+    case .typeVariable(let tv):
+      return tv.description
     }
   }
 
@@ -339,6 +342,8 @@ public indirect enum Type: CustomStringConvertible {
       return "\(template)_\(argsKeys)"
     case .module(let info):
       return "M_\(info.modulePath.joined(separator: "_"))"
+    case .typeVariable(let tv):
+      return "TV_\(tv.id)"
     }
   }
 
@@ -366,6 +371,8 @@ public indirect enum Type: CustomStringConvertible {
       return args.contains { $0.containsGenericParameter }
     case .module:
       return false
+    case .typeVariable:
+      return true  // 类型变量类似于泛型参数，需要被解析
     }
   }
   
@@ -432,6 +439,8 @@ public indirect enum Type: CustomStringConvertible {
       return .genericUnion(template: template, args: args.map { $0.canonical })
     case .module:
       return self
+    case .typeVariable:
+      return self  // 类型变量保持不变
     }
   }
 }
@@ -504,6 +513,9 @@ extension Type: Equatable {
       return lTemplate == rTemplate && lArgs == rArgs
     case (.module(let lInfo), .module(let rInfo)):
       return lInfo.modulePath == rInfo.modulePath
+    
+    case (.typeVariable(let lTV), .typeVariable(let rTV)):
+      return lTV == rTV
 
     default:
       return false
