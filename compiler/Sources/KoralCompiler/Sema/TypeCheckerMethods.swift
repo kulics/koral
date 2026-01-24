@@ -32,7 +32,7 @@ extension TypeChecker {
     var typedArguments: [TypedExpressionNode] = []
     for (arg, param) in zip(arguments, params.dropFirst()) {
       var typedArg = try inferTypedExpression(arg)
-      typedArg = coerceLiteral(typedArg, to: param.type)
+      typedArg = try coerceLiteral(typedArg, to: param.type)
       if typedArg.type != param.type {
         // Try implicit ref/deref for arguments as well (mirrors self handling).
         if case .reference(let inner) = param.type, inner == typedArg.type {
@@ -537,7 +537,7 @@ extension TypeChecker {
       } else {
         typedArg = try inferTypedExpression(arg)
       }
-      typedArg = coerceLiteral(typedArg, to: param.type)
+      typedArg = try coerceLiteral(typedArg, to: param.type)
       if typedArg.type != param.type {
         if case .reference(let inner) = param.type, inner == typedArg.type {
           if typedArg.valueCategory == .lvalue {
@@ -853,7 +853,7 @@ extension TypeChecker {
         throw SemanticError.invalidArgumentCount(function: "init", expected: 1, got: args.count)
       }
       var val = try inferTypedExpression(args[0])
-      val = coerceLiteral(val, to: elementType)
+      val = try coerceLiteral(val, to: elementType)
       if val.type != elementType {
         throw SemanticError.typeMismatch(
           expected: elementType.description, got: val.type.description)
@@ -888,7 +888,7 @@ extension TypeChecker {
         throw SemanticError.invalidArgumentCount(function: "replace", expected: 1, got: args.count)
       }
       var val = try inferTypedExpression(args[0])
-      val = coerceLiteral(val, to: elementType)
+      val = try coerceLiteral(val, to: elementType)
       if val.type != elementType {
         throw SemanticError.typeMismatch(
           expected: elementType.description, got: val.type.description)

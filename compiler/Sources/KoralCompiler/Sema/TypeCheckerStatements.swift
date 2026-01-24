@@ -42,7 +42,7 @@ extension TypeChecker {
       let type: Type
       if let expectedType = expectedType {
         type = expectedType
-        typedValue = coerceLiteral(typedValue, to: type)
+        typedValue = try coerceLiteral(typedValue, to: type)
         if typedValue.type != .never && typedValue.type != type {
           throw SemanticError.typeMismatch(
             expected: type.description, got: typedValue.type.description)
@@ -91,7 +91,7 @@ extension TypeChecker {
         }
 
         var typedValue = try inferTypedExpression(value)
-        typedValue = coerceLiteral(typedValue, to: expectedValueType)
+        typedValue = try coerceLiteral(typedValue, to: expectedValueType)
         if typedValue.type != .never && typedValue.type != expectedValueType {
           throw SemanticError.typeMismatch(
             expected: expectedValueType.description, got: typedValue.type.description)
@@ -123,7 +123,7 @@ extension TypeChecker {
 
       let typedTarget = try resolveLValue(target)
       var typedValue = try inferTypedExpression(value)
-      typedValue = coerceLiteral(typedValue, to: typedTarget.type)
+      typedValue = try coerceLiteral(typedValue, to: typedTarget.type)
 
       if typedValue.type != .never && typedTarget.type != typedValue.type {
         throw SemanticError.typeMismatch(
@@ -176,7 +176,7 @@ extension TypeChecker {
         stmts.append(.variableDeclaration(identifier: oldSym, value: oldValueExpr, mutable: false))
 
         var typedRhs = try inferTypedExpression(value)
-        typedRhs = coerceLiteral(typedRhs, to: elementType)
+        typedRhs = try coerceLiteral(typedRhs, to: elementType)
         if typedRhs.type != .never && typedRhs.type != elementType {
           throw SemanticError.typeMismatch(
             expected: elementType.description, got: typedRhs.type.description)
@@ -229,7 +229,7 @@ extension TypeChecker {
       }
 
       let typedTarget = try resolveLValue(target)
-      let typedValue = coerceLiteral(try inferTypedExpression(value), to: typedTarget.type)
+      let typedValue = try coerceLiteral(try inferTypedExpression(value), to: typedTarget.type)
       if let arithmeticOp = compoundOpToArithmeticOp(op) {
         let _ = try checkArithmeticOp(arithmeticOp, typedTarget.type, typedValue.type)
       } else if let _ = compoundOpToBitwiseOp(op) {
@@ -257,7 +257,7 @@ extension TypeChecker {
         }
 
         var typedValue = try inferTypedExpression(value)
-        typedValue = coerceLiteral(typedValue, to: returnType)
+        typedValue = try coerceLiteral(typedValue, to: returnType)
         if typedValue.type != .never && typedValue.type != returnType {
           throw SemanticError.typeMismatch(
             expected: returnType.description, got: typedValue.type.description)
