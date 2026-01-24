@@ -155,7 +155,7 @@ public class Driver {
     }
 
     let userDisplayName = inputURL.lastPathComponent
-    let stdDisplayName = "std/core.koral"
+    let stdDisplayName = "std/std.koral"
 
     // Initialize module resolver
     let resolver = initializeModuleResolver()
@@ -356,7 +356,7 @@ public class Driver {
   func getCoreLibPath() -> String {
     // Check KORAL_HOME environment variable first
     if let koralHome = ProcessInfo.processInfo.environment["KORAL_HOME"] {
-        let path = URL(fileURLWithPath: koralHome).appendingPathComponent("compiler/Sources/std/core.koral").path
+        let path = URL(fileURLWithPath: koralHome).appendingPathComponent("compiler/Sources/std/std.koral").path
         if FileManager.default.fileExists(atPath: path) {
             return path
         }
@@ -365,18 +365,18 @@ public class Driver {
     // Fallback: Assume we are running from .build/debug/ or similar, try to find source root
     // This is a heuristic for development environment
     let currentPath = FileManager.default.currentDirectoryPath
-    let devPath = URL(fileURLWithPath: currentPath).appendingPathComponent("Sources/std/core.koral").path
+    let devPath = URL(fileURLWithPath: currentPath).appendingPathComponent("Sources/std/std.koral").path
     if FileManager.default.fileExists(atPath: devPath) {
         return devPath
     }
     
     // Fallback for tests running in package root
-    let testPath = URL(fileURLWithPath: currentPath).appendingPathComponent("compiler/Sources/std/core.koral").path
+    let testPath = URL(fileURLWithPath: currentPath).appendingPathComponent("compiler/Sources/std/std.koral").path
     if FileManager.default.fileExists(atPath: testPath) {
          return testPath
     }
 
-    print("Error: Could not locate std/core.koral. Please set KORAL_HOME environment variable.")
+    print("Error: Could not locate std/std.koral. Please set KORAL_HOME environment variable.")
     exit(1)
   }
   

@@ -194,6 +194,10 @@ public class CodeGen {
   private var lifetimeScopeStack: [[(name: String, type: Type)]] = []
   private var userDefinedDrops: [String: String] = [:] // TypeName -> Mangled Drop Function Name
   
+  /// 用户定义的 main 函数的限定名（如 "hello_main"）
+  /// 如果用户没有定义 main 函数，则为 nil
+  private var userMainFunctionName: String? = nil
+  
   // MARK: - Lambda Code Generation
   /// Counter for generating unique Lambda function names
   private var lambdaCounter = 0
@@ -908,7 +912,7 @@ public class CodeGen {
       }
       #endif
     
-      // Pass 0: Scan for user-defined drops
+      // Pass 0: Scan for user-defined drops and main function
       for node in nodes {
         if case .givenDeclaration(let type, let methods) = node {
              var typeName: String?
@@ -929,6 +933,10 @@ public class CodeGen {
             // Note: This relies on the mangling scheme in TypeChecker
             let typeName = String(identifier.name.dropLast(7))
             userDefinedDrops[typeName] = identifier.name
+          }
+          // 检测用户定义的 main 函数
+          if identifier.name == "main" {
+            userMainFunctionName = identifier.qualifiedName
           }
         }
       }
@@ -992,24 +1000,35 @@ public class CodeGen {
         }
       }
 
-      // 生成 main 函数用于初始化全局变量
-      if !globalInitializations.isEmpty {
-        generateMainFunction()
+      // 生成 C 的 main 函数
+      // 如果有全局变量初始化或用户定义了 main 函数，都需要生成
+      if !globalInitializations.isEmpty || userMainFunctionName != nil {
+        generateCMainFunction()
       }
   }
 
-  private func generateMainFunction() {
+  /// 生成 C 的 main 函数入口
+  /// 负责初始化全局变量并调用用户定义的 main 函数
+  private func generateCMainFunction() {
     buffer += "\nint main() {\n"
     withIndent {
       // 生成全局变量初始化
-      pushScope()
-      for (name, value) in globalInitializations {
-        let resultVar = generateExpressionSSA(value)
-        addIndent()
-        buffer += "\(name) = \(resultVar);\n"
+      if !globalInitializations.isEmpty {
+        pushScope()
+        for (name, value) in globalInitializations {
+          let resultVar = generateExpressionSSA(value)
+          addIndent()
+          buffer += "\(name) = \(resultVar);\n"
+        }
+        popScope()
       }
-      popScope()
-      // 如果需要的话，这里可以调用用户定义的 main 函数
+      
+      // 调用用户定义的 main 函数
+      if let userMain = userMainFunctionName {
+        addIndent()
+        buffer += "\(userMain)();\n"
+      }
+      
       addIndent()
       buffer += "return 0;\n"
     }
@@ -1018,7 +1037,7 @@ public class CodeGen {
 
   private func generateFunctionDeclaration(_ identifier: Symbol, _ params: [Symbol]) {
     let cName = identifier.qualifiedName
-    let returnType = cName == "main" ? "int" : getFunctionReturnType(identifier.type)
+    let returnType = getFunctionReturnType(identifier.type)
     let paramList = params.map { getParamCDecl($0) }.joined(separator: ", ")
     buffer += "\(returnType) \(cName)(\(paramList));\n"
   }
@@ -1046,7 +1065,7 @@ public class CodeGen {
     let savedLambdaFunctions = lambdaFunctions
     lambdaFunctions = ""
     
-    let returnType = cName == "main" ? "int" : getFunctionReturnType(identifier.type)
+    let returnType = getFunctionReturnType(identifier.type)
     let paramList = params.map { getParamCDecl($0) }.joined(separator: ", ")
     
     // Generate function body to a temporary buffer to collect Lambda functions
@@ -2217,11 +2236,7 @@ public class CodeGen {
         addIndent()
         buffer += "__koral_retain(((struct Ref*)\(p))->control);\n"
       } else if case .structure(let decl) = element {
-        if decl.name == "String" {
-          buffer += "*(\(cType)*)\(p) = __koral_String_copy(&\(v));\n"
-        } else {
-          buffer += "*(\(cType)*)\(p) = __koral_\(decl.qualifiedName)_copy(&\(v));\n"
-        }
+        buffer += "*(\(cType)*)\(p) = __koral_\(decl.qualifiedName)_copy(&\(v));\n"
       } else if case .union(let decl) = element {
         buffer += "*(\(cType)*)\(p) = __koral_\(decl.qualifiedName)_copy(&\(v));\n"
       } else {
@@ -2236,13 +2251,8 @@ public class CodeGen {
         addIndent()
         buffer += "__koral_release(((struct Ref*)\(p))->control);\n"
       } else if case .structure(let decl) = element {
-        if decl.name == "String" {  // String is primitive struct
-          addIndent()
-          buffer += "__koral_String_drop(\(p));\n"
-        } else {
-          addIndent()
-          buffer += "__koral_\(decl.qualifiedName)_drop(\(p));\n"
-        }
+        addIndent()
+        buffer += "__koral_\(decl.qualifiedName)_drop(\(p));\n"
       }
       // int/float/bool/void -> noop
       return ""
@@ -2292,11 +2302,7 @@ public class CodeGen {
         addIndent()
         buffer += "__koral_retain(((struct Ref*)\(p))->control);\n"
       } else if case .structure(let decl) = element {
-        if decl.name == "String" {
-          buffer += "*(\(cType)*)\(p) = __koral_String_copy(&\(v));\n"
-        } else {
-          buffer += "*(\(cType)*)\(p) = __koral_\(decl.qualifiedName)_copy(&\(v));\n"
-        }
+        buffer += "*(\(cType)*)\(p) = __koral_\(decl.qualifiedName)_copy(&\(v));\n"
       } else {
         buffer += "*(\(cType)*)\(p) = \(v);\n"
       }
@@ -3110,7 +3116,8 @@ public class CodeGen {
         // Compare via compiler-protocol `String.__equals(self, other String) Bool`.
         // Value-passing semantics: String___equals consumes its arguments, so we must copy
         // the subject before comparison to allow multiple pattern matches on the same variable.
-        return ([prelude], [(literalVar, type)], "String___equals(__koral_String_copy(&\(path)), \(literalVar))", [], [])
+        guard case .structure(let decl) = type else { fatalError("String literal pattern requires String type") }
+        return ([prelude], [(literalVar, type)], "String___equals(__koral_\(decl.qualifiedName)_copy(&\(path)), \(literalVar))", [], [])
       case .wildcard:
         return ([], [], "1", [], [])
       case .variable(let symbol):

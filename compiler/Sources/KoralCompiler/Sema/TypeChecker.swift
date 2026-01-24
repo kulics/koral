@@ -98,7 +98,7 @@ public class TypeChecker {
   public init(
     ast: ASTNode,
     coreGlobalCount: Int = 0,
-    coreFileName: String = "std/core.koral",
+    coreFileName: String = "std/std.koral",
     userFileName: String = "<input>"
   ) {
     self.ast = ast
@@ -121,7 +121,7 @@ public class TypeChecker {
     ast: ASTNode,
     nodeSourceInfoList: [GlobalNodeSourceInfo],
     coreGlobalCount: Int = 0,
-    coreFileName: String = "std/core.koral",
+    coreFileName: String = "std/std.koral",
     userFileName: String = "<input>"
   ) {
     self.ast = ast
@@ -2550,9 +2550,9 @@ public class TypeChecker {
         // For private functions, use file-isolated registration
         let isPrivate = (access == .private)
         if isPrivate {
-          currentScope.definePrivateFunction(name, sourceFile: currentSourceFile, type: functionType)
+          currentScope.definePrivateFunction(name, sourceFile: currentSourceFile, type: functionType, modulePath: currentModulePath)
         } else {
-          currentScope.defineFunction(name, functionType)
+          currentScope.defineFunctionWithModulePath(name, functionType, modulePath: currentModulePath)
         }
       }
       // Generic functions are handled in pass 3
@@ -2568,7 +2568,7 @@ public class TypeChecker {
           return Parameter(type: paramType, kind: passKind)
         }
         let functionType = Type.function(parameters: params, returns: returnType)
-        currentScope.defineFunction(name, functionType)
+        currentScope.defineFunctionWithModulePath(name, functionType, modulePath: currentModulePath)
       }
       // Generic intrinsic functions are handled in pass 3
       
@@ -2665,9 +2665,9 @@ public class TypeChecker {
           expected: type.description, got: typedValue.type.description)
       }
       if isPrivate {
-        currentScope.definePrivateSymbol(name, sourceFile: currentSourceFile, type: type, mutable: isMut)
+        currentScope.definePrivateSymbol(name, sourceFile: currentSourceFile, type: type, mutable: isMut, modulePath: currentModulePath)
       } else {
-        currentScope.define(name, type, mutable: isMut)
+        currentScope.defineWithModulePath(name, type, mutable: isMut, modulePath: currentModulePath)
       }
       
       let symbol = makeGlobalSymbol(name: name, type: type, kind: .variable(isMut ? .MutableValue : .Value), access: access)
@@ -2766,9 +2766,9 @@ public class TypeChecker {
         : currentScope.lookup(name)
       if existingForRecursion == nil {
         if isPrivate {
-          currentScope.definePrivateFunction(name, sourceFile: currentSourceFile, type: functionType)
+          currentScope.definePrivateFunction(name, sourceFile: currentSourceFile, type: functionType, modulePath: currentModulePath)
         } else {
-          currentScope.defineFunction(name, functionType)
+          currentScope.defineFunctionWithModulePath(name, functionType, modulePath: currentModulePath)
         }
       }
 
@@ -2842,7 +2842,7 @@ public class TypeChecker {
         let typedBody = TypedExpressionNode.integerLiteral(value: "0", type: .int)
         return (funcType, typedBody, params)
       }
-      currentScope.defineFunction(name, functionType)
+      currentScope.defineFunctionWithModulePath(name, functionType, modulePath: currentModulePath)
       return nil
 
     case .givenDeclaration(let typeParams, let typeNode, let methods, let span):
