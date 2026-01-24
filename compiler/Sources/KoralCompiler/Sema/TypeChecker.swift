@@ -777,13 +777,14 @@ public class TypeChecker {
     }
     
     // Record instantiation request if type args are concrete
-    if !typeArgs.contains(where: { $0.containsGenericParameter }) {
+    // Skip if method has method-level type parameters (will be recorded when method call is processed)
+    if !typeArgs.contains(where: { $0.containsGenericParameter }) && method.typeParameters.isEmpty {
       recordInstantiation(InstantiationRequest(
         kind: .extensionMethod(
           baseType: baseType,
           template: methodInfo,
           typeArgs: typeArgs,
-          methodTypeArgs: []  // TODO: Support method-level type args in method calls
+          methodTypeArgs: []
         ),
         sourceLine: currentLine,
         sourceFileName: currentFileName
@@ -4324,6 +4325,19 @@ public class TypeChecker {
             type: type
           )
         }
+        
+        // 2. Try Generic Struct/Union Template (Implicit Type Inference)
+        // Only for identifiers starting with uppercase (type naming convention)
+        // This allows writing Stream(iter) instead of [T, R]Stream(iter)
+        if let firstChar = name.first, firstChar.isUppercase {
+          // Try generic struct template
+          if let template = currentScope.lookupGenericStructTemplate(name) {
+            return try inferGenericStructConstruction(template: template, name: name, arguments: arguments)
+          }
+          
+          // Try generic union template (for union case constructors without dot notation)
+          // Note: This is less common since union cases are usually accessed via .CaseName
+        }
       }
 
       // Special handling for intrinsic function calls (alloc_memory, etc.)
@@ -4408,45 +4422,110 @@ public class TypeChecker {
             }
           }
 
-          let finalCallee: TypedExpressionNode = .methodReference(
-            base: finalBase, method: method, typeArgs: nil, methodTypeArgs: nil, type: methodType)
-
+          // Check if method has unresolved type parameters (method-level generics)
+          let hasMethodLevelGenerics = returns.containsGenericParameter || 
+            params.dropFirst().contains { $0.type.containsGenericParameter }
 
           var typedArguments: [TypedExpressionNode] = []
+          var methodTypeParamBindings: [String: Type] = [:]
+          
+          // Two-pass inference for method-level generics:
+          // Pass 1: Infer non-lambda arguments first to get initial type parameter bindings
+          if hasMethodLevelGenerics {
+            for (arg, param) in zip(arguments, params.dropFirst()) {
+              if case .lambdaExpression(_, _, _, _) = arg {
+                // Skip lambdas in first pass
+                continue
+              }
+              let typedArg = try inferTypedExpression(arg)
+              let coercedArg = coerceLiteral(typedArg, to: param.type)
+              if param.type.containsGenericParameter {
+                _ = unifyTypes(param.type, coercedArg.type, bindings: &methodTypeParamBindings)
+              }
+            }
+          }
+          
+          // Pass 2: Infer all arguments, using substituted expected types for lambdas
           for (arg, param) in zip(arguments, params.dropFirst()) {
             var typedArg: TypedExpressionNode
             // For Lambda expressions, pass the expected type for type inference
             if case .lambdaExpression(let lambdaParams, let returnType, let body, _) = arg {
+              // Substitute known type parameters into expected type for lambda inference
+              var expectedType = param.type
+              if hasMethodLevelGenerics && !methodTypeParamBindings.isEmpty {
+                expectedType = SemaUtils.substituteType(param.type, substitution: methodTypeParamBindings)
+              }
               typedArg = try inferLambdaExpression(
                 parameters: lambdaParams,
                 returnType: returnType,
                 body: body,
-                expectedType: param.type
+                expectedType: expectedType
               )
+              // After inferring lambda, unify to get any remaining type parameters
+              if param.type.containsGenericParameter {
+                _ = unifyTypes(param.type, typedArg.type, bindings: &methodTypeParamBindings)
+              }
             } else {
               typedArg = try inferTypedExpression(arg)
-            }
-            typedArg = coerceLiteral(typedArg, to: param.type)
-            if typedArg.type != param.type {
-              // Try implicit ref/deref for arguments as well (mirrors self handling).
-              if case .reference(let inner) = param.type, inner == typedArg.type {
-                if typedArg.valueCategory == .lvalue {
-                  typedArg = .referenceExpression(expression: typedArg, type: param.type)
+              typedArg = coerceLiteral(typedArg, to: param.type)
+              
+              // If param type contains generic parameters, unify to infer them
+              if param.type.containsGenericParameter {
+                _ = unifyTypes(param.type, typedArg.type, bindings: &methodTypeParamBindings)
+              } else if typedArg.type != param.type {
+                // Try implicit ref/deref for arguments as well (mirrors self handling).
+                if case .reference(let inner) = param.type, inner == typedArg.type {
+                  if typedArg.valueCategory == .lvalue {
+                    typedArg = .referenceExpression(expression: typedArg, type: param.type)
+                  } else {
+                    throw SemanticError.invalidOperation(
+                      op: "implicit ref", type1: typedArg.type.description, type2: "rvalue")
+                  }
+                } else if case .reference(let inner) = typedArg.type, inner == param.type {
+                  typedArg = .derefExpression(expression: typedArg, type: inner)
                 } else {
-                  throw SemanticError.invalidOperation(
-                    op: "implicit ref", type1: typedArg.type.description, type2: "rvalue")
+                  throw SemanticError.typeMismatch(
+                    expected: param.type.description,
+                    got: typedArg.type.description
+                  )
                 }
-              } else if case .reference(let inner) = typedArg.type, inner == param.type {
-                typedArg = .derefExpression(expression: typedArg, type: inner)
-              } else {
-                throw SemanticError.typeMismatch(
-                  expected: param.type.description,
-                  got: typedArg.type.description
-                )
               }
             }
             typedArguments.append(typedArg)
           }
+
+          // Substitute inferred method-level type parameters into return type
+          var finalReturns = returns
+          // Convert bindings to array of types in order (for methodTypeArgs)
+          var inferredMethodTypeArgs: [Type]? = nil
+          if hasMethodLevelGenerics && !methodTypeParamBindings.isEmpty {
+            finalReturns = SemaUtils.substituteType(returns, substitution: methodTypeParamBindings)
+            // Extract method type args in order from the function type
+            // The order is determined by the order of first appearance in the function type
+            let paramNames = extractGenericParameterNames(from: method.type)
+            // Filter out type parameters that are already in scope (type-level parameters)
+            // Only include method-level type parameters that were inferred
+            let methodLevelParamNames = paramNames.filter { name in
+              // If the type parameter is already defined in scope, it's a type-level parameter
+              // and should not be included in methodTypeArgs
+              if let existingType = currentScope.lookupType(name) {
+                // If it's a generic parameter with the same name, it's a type-level parameter
+                if case .genericParameter(let existingName) = existingType, existingName == name {
+                  return false
+                }
+              }
+              return true
+            }
+            inferredMethodTypeArgs = methodLevelParamNames.compactMap { methodTypeParamBindings[$0] }
+            // If no method-level type parameters were inferred, set to nil
+            if inferredMethodTypeArgs?.isEmpty == true {
+              inferredMethodTypeArgs = nil
+            }
+          }
+          
+          // Create final callee with inferred method type args
+          let finalCallee: TypedExpressionNode = .methodReference(
+            base: finalBase, method: method, typeArgs: nil, methodTypeArgs: inferredMethodTypeArgs, type: methodType)
 
           // Lower primitive `__equals(self, other)` to direct scalar comparison.
           if method.methodKind == .equals,
@@ -4478,7 +4557,7 @@ public class TypeChecker {
             return .ifExpression(condition: less, thenBranch: minusOne, elseBranch: gtBranch, type: .int)
           }
 
-          return .call(callee: finalCallee, arguments: typedArguments, type: returns)
+          return .call(callee: finalCallee, arguments: typedArguments, type: finalReturns)
         }
       }
 
@@ -5619,10 +5698,16 @@ public class TypeChecker {
           throw SemanticError(.typeMismatch(expected: actualReturnType.description, got: typedBody.type.description), line: currentLine)
         }
       } else if let expected = expectedReturnType {
-        actualReturnType = expected
-        // Verify body type matches expected return type
-        if typedBody.type != actualReturnType && typedBody.type != .never {
-          throw SemanticError(.typeMismatch(expected: actualReturnType.description, got: typedBody.type.description), line: currentLine)
+        // If expected return type is a generic parameter, infer from body instead
+        // This allows method-level type parameters to be inferred from lambda return types
+        if case .genericParameter(_) = expected {
+          actualReturnType = typedBody.type
+        } else {
+          actualReturnType = expected
+          // Verify body type matches expected return type
+          if typedBody.type != actualReturnType && typedBody.type != .never {
+            throw SemanticError(.typeMismatch(expected: actualReturnType.description, got: typedBody.type.description), line: currentLine)
+          }
         }
       } else {
         // Infer return type from body
@@ -7673,6 +7758,160 @@ public class TypeChecker {
     }
   }
 
+  /// Infer type arguments for a generic struct constructor call
+  /// e.g., Stream(iter) -> [T, R]Stream(iter) where T and R are inferred from iter's type
+  private func inferGenericStructConstruction(
+    template: GenericStructTemplate,
+    name: String,
+    arguments: [ExpressionNode]
+  ) throws -> TypedExpressionNode {
+    // Type check arguments first
+    if arguments.count != template.parameters.count {
+      throw SemanticError.invalidArgumentCount(
+        function: name,
+        expected: template.parameters.count,
+        got: arguments.count
+      )
+    }
+    
+    var typedArguments: [TypedExpressionNode] = []
+    for argExpr in arguments {
+      let typedArg = try inferTypedExpression(argExpr)
+      typedArguments.append(typedArg)
+    }
+    
+    // Infer type arguments from constructor arguments
+    var inferred: [String: Type] = [:]
+    let typeParamNames = template.typeParameters.map { $0.name }
+    for (typedArg, param) in zip(typedArguments, template.parameters) {
+      try unify(node: param.type, type: typedArg.type, inferred: &inferred, typeParams: typeParamNames)
+    }
+    
+    // Try to infer remaining type parameters from trait bounds (similar to unifyWithTraitInference)
+    var madeProgress = true
+    var iterations = 0
+    let maxIterations = template.typeParameters.count * 2
+    
+    while madeProgress && iterations < maxIterations {
+      madeProgress = false
+      iterations += 1
+      
+      for typeParam in template.typeParameters {
+        for constraint in typeParam.constraints {
+          let traitConstraint = try SemaUtils.resolveTraitConstraint(from: constraint)
+          
+          switch traitConstraint {
+          case .generic(let traitName, let traitArgs):
+            // Handle Iterator trait: [T]Iterator
+            // If R has constraint [T]Iterator and R is inferred, we can infer T
+            if traitName == "Iterator" && traitArgs.count == 1 {
+              guard case .identifier(let tParamName) = traitArgs[0] else {
+                continue
+              }
+              
+              // If we know the iterator type, extract the element type
+              if let concreteIteratorType = inferred[typeParam.name] {
+                if inferred[tParamName] == nil {
+                  if let nextMethod = try? lookupConcreteMethodSymbol(on: concreteIteratorType, name: "next"),
+                     case .function(_, let optionType) = nextMethod.type,
+                     case .genericUnion(let templateName, let typeArgs) = optionType,
+                     templateName == "Option",
+                     typeArgs.count == 1 {
+                    inferred[tParamName] = typeArgs[0]
+                    madeProgress = true
+                  }
+                }
+              }
+            }
+            
+            // Handle Iterable trait: [T, R]Iterable
+            if traitName == "Iterable" && traitArgs.count == 2 {
+              guard case .identifier(let tParamName) = traitArgs[0],
+                    case .identifier(let rParamName) = traitArgs[1] else {
+                continue
+              }
+              
+              if let concreteCollectionType = inferred[typeParam.name] {
+                if let (elementType, iteratorType) = inferIterableTypeParams(from: concreteCollectionType) {
+                  if inferred[tParamName] == nil {
+                    inferred[tParamName] = elementType
+                    madeProgress = true
+                  }
+                  if inferred[rParamName] == nil {
+                    inferred[rParamName] = iteratorType
+                    madeProgress = true
+                  }
+                }
+              }
+            }
+            
+          case .simple:
+            continue
+          }
+        }
+      }
+    }
+    
+    // Build resolved type arguments
+    let resolvedArgs = try template.typeParameters.map { param -> Type in
+      guard let type = inferred[param.name] else {
+        throw SemanticError.typeMismatch(
+          expected: "inferred type for \(param.name)", got: "unknown")
+      }
+      return type
+    }
+    
+    // Validate generic constraints
+    try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
+    
+    // Record instantiation request for deferred monomorphization
+    if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+      recordInstantiation(InstantiationRequest(
+        kind: .structType(template: template, args: resolvedArgs),
+        sourceLine: currentLine,
+        sourceFileName: currentFileName
+      ))
+    }
+    
+    // Create type substitution map and resolve member types
+    var substitution: [String: Type] = [:]
+    for (i, param) in template.typeParameters.enumerated() {
+      substitution[param.name] = resolvedArgs[i]
+    }
+    
+    let memberTypes = try withNewScope {
+      for (paramName, paramType) in substitution {
+        try currentScope.defineType(paramName, type: paramType)
+      }
+      return try template.parameters.map { param -> (name: String, type: Type, mutable: Bool) in
+        let fieldType = try resolveTypeNode(param.type)
+        return (name: param.name, type: fieldType, mutable: param.mutable)
+      }
+    }
+    
+    // Re-check arguments with resolved types and apply coercion
+    var finalTypedArguments: [TypedExpressionNode] = []
+    for (typedArg, expectedMember) in zip(typedArguments, memberTypes) {
+      let finalArg = coerceLiteral(typedArg, to: expectedMember.type)
+      if finalArg.type != expectedMember.type {
+        throw SemanticError.typeMismatch(
+          expected: expectedMember.type.description,
+          got: finalArg.type.description
+        )
+      }
+      finalTypedArguments.append(finalArg)
+    }
+    
+    let genericType = Type.genericStruct(template: name, args: resolvedArgs)
+    
+    return .typeConstruction(
+      identifier: Symbol(name: name, type: genericType, kind: .type),
+      typeArgs: resolvedArgs,
+      arguments: finalTypedArguments,
+      type: genericType
+    )
+  }
+
   private func withNewScope<R>(_ body: () throws -> R) rethrows -> R {
     let previousScope = currentScope
     let previousTraitBounds = genericTraitBounds
@@ -7798,6 +8037,95 @@ public class TypeChecker {
       
     default:
       return nil
+    }
+  }
+
+  /// Unifies two types and extracts generic parameter bindings.
+  /// This is used to infer method-level type parameters from argument types.
+  /// - Parameters:
+  ///   - expected: The expected type (may contain generic parameters)
+  ///   - actual: The actual type (should be concrete)
+  ///   - bindings: Dictionary to store inferred bindings
+  /// - Returns: true if unification succeeded, false otherwise
+  private func unifyTypes(_ expected: Type, _ actual: Type, bindings: inout [String: Type]) -> Bool {
+    switch (expected, actual) {
+    case (.genericParameter(let name), _):
+      if let existing = bindings[name] {
+        return existing == actual
+      }
+      bindings[name] = actual
+      return true
+      
+    case (.function(let expectedParams, let expectedReturn), .function(let actualParams, let actualReturn)):
+      guard expectedParams.count == actualParams.count else { return false }
+      for (ep, ap) in zip(expectedParams, actualParams) {
+        if !unifyTypes(ep.type, ap.type, bindings: &bindings) {
+          return false
+        }
+      }
+      return unifyTypes(expectedReturn, actualReturn, bindings: &bindings)
+      
+    case (.reference(let expectedInner), .reference(let actualInner)):
+      return unifyTypes(expectedInner, actualInner, bindings: &bindings)
+      
+    case (.pointer(let expectedElem), .pointer(let actualElem)):
+      return unifyTypes(expectedElem, actualElem, bindings: &bindings)
+      
+    case (.genericStruct(let expectedName, let expectedArgs), .genericStruct(let actualName, let actualArgs)):
+      guard expectedName == actualName && expectedArgs.count == actualArgs.count else { return false }
+      for (ea, aa) in zip(expectedArgs, actualArgs) {
+        if !unifyTypes(ea, aa, bindings: &bindings) {
+          return false
+        }
+      }
+      return true
+      
+    case (.genericUnion(let expectedName, let expectedArgs), .genericUnion(let actualName, let actualArgs)):
+      guard expectedName == actualName && expectedArgs.count == actualArgs.count else { return false }
+      for (ea, aa) in zip(expectedArgs, actualArgs) {
+        if !unifyTypes(ea, aa, bindings: &bindings) {
+          return false
+        }
+      }
+      return true
+      
+    default:
+      // For non-generic types, they must be equal
+      return expected == actual || !expected.containsGenericParameter
+    }
+  }
+
+  /// Extracts generic parameter names from a type in order of first appearance.
+  /// This is used to determine the order of method-level type parameters.
+  private func extractGenericParameterNames(from type: Type) -> [String] {
+    var names: [String] = []
+    var seen: Set<String> = []
+    extractGenericParameterNamesHelper(from: type, names: &names, seen: &seen)
+    return names
+  }
+  
+  private func extractGenericParameterNamesHelper(from type: Type, names: inout [String], seen: inout Set<String>) {
+    switch type {
+    case .genericParameter(let name):
+      if !seen.contains(name) {
+        seen.insert(name)
+        names.append(name)
+      }
+    case .function(let params, let returns):
+      for param in params {
+        extractGenericParameterNamesHelper(from: param.type, names: &names, seen: &seen)
+      }
+      extractGenericParameterNamesHelper(from: returns, names: &names, seen: &seen)
+    case .reference(let inner):
+      extractGenericParameterNamesHelper(from: inner, names: &names, seen: &seen)
+    case .pointer(let element):
+      extractGenericParameterNamesHelper(from: element, names: &names, seen: &seen)
+    case .genericStruct(_, let args), .genericUnion(_, let args):
+      for arg in args {
+        extractGenericParameterNamesHelper(from: arg, names: &names, seen: &seen)
+      }
+    default:
+      break
     }
   }
 }
