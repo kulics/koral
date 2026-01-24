@@ -6993,13 +6993,13 @@ public class TypeChecker {
   private func resolveTypeNode(_ node: TypeNode) throws -> Type {
     switch node {
     case .identifier(let name):
+      if let t = currentScope.resolveType(name, sourceFile: currentSourceFile) {
+        return t
+      }
       if traits[name] != nil {
         throw SemanticError.invalidOperation(op: "use trait as type", type1: name, type2: "")
       }
-      guard let t = currentScope.resolveType(name, sourceFile: currentSourceFile) else {
-        throw SemanticError.undefinedType(name)
-      }
-      return t
+      throw SemanticError.undefinedType(name)
     case .inferredSelf:
       guard let t = currentScope.resolveType("Self") else {
         throw SemanticError.undefinedType("Self")
@@ -7325,7 +7325,7 @@ public class TypeChecker {
       }
       
       // Check type consistency for bindings
-      for (name, mutable, leftType) in leftBindings {
+      for (name, _, leftType) in leftBindings {
         if let (_, _, rightType) = rightBindings.first(where: { $0.0 == name }) {
           if leftType != rightType {
             throw SemanticError(.typeMismatch(
@@ -7368,7 +7368,7 @@ public class TypeChecker {
     inferred: inout [String: Type]
   ) throws {
     // Build a substitution map from already-inferred type parameters
-    var substitution: [String: Type] = inferred
+    let substitution: [String: Type] = inferred
     
     // Iterate until no more progress is made
     var madeProgress = true
@@ -7415,7 +7415,7 @@ public class TypeChecker {
             // Now we have all trait args resolved, try to find a type that satisfies the constraint
             // For Iterator trait, look for a type with a `next` method returning `[T]Option`
             if traitName == "Iterator" && resolvedTraitArgs.count == 1 {
-              let elementType = resolvedTraitArgs[0]
+              _ = resolvedTraitArgs[0]
               // The type parameter should be an iterator type
               // We can't directly infer it without more context
               // This case is handled by looking at method return types
@@ -7427,7 +7427,7 @@ public class TypeChecker {
               // This is typically inferred from the argument type
             }
             
-          case .simple(let traitName):
+          case .simple(_):
             // Simple trait constraint like `T Any` or `T Equatable`
             // These don't help with inference
             continue
