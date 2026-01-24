@@ -85,6 +85,7 @@ class IntegrationTests: XCTestCase {
     func test_lambda_with_generics() throws { try runCase(named: "lambda_with_generics.koral") }
     func test_let_expression() throws { try runCase(named: "let_expression.koral") }
     func test_list_test() throws { try runCase(named: "list_test.koral") }
+    func test_list_sort_test() throws { try runCase(named: "list_sort_test.koral") }
     func test_map_test() throws { try runCase(named: "map_test.koral") }
     func test_match() throws { try runCase(named: "match.koral") }
     func test_match_drop() throws { try runCase(named: "match_drop.koral") }
