@@ -79,7 +79,7 @@ private func generateFileId(_ sourceFile: String) -> String {
 }
 
 /// 清理标识符，将非法字符替换为下划线，并转义 C 关键字
-private func sanitizeIdentifier(_ name: String) -> String {
+func sanitizeIdentifier(_ name: String) -> String {
     var result = ""
     for char in name {
         if char.isLetter || char.isNumber || char == "_" {
@@ -187,12 +187,12 @@ extension UnionDecl {
 
 public class CodeGen {
   private let ast: MonomorphizedProgram
-  private var indent: String = ""
-  private var buffer: String = ""
-  private var tempVarCounter = 0
+  var indent: String = ""
+  var buffer: String = ""
+  var tempVarCounter = 0
   private var globalInitializations: [(String, TypedExpressionNode)] = []
-  private var lifetimeScopeStack: [[(name: String, type: Type)]] = []
-  private var userDefinedDrops: [String: String] = [:] // TypeName -> Mangled Drop Function Name
+  var lifetimeScopeStack: [[(name: String, type: Type)]] = []
+  var userDefinedDrops: [String: String] = [:] // TypeName -> Mangled Drop Function Name
   
   /// 用户定义的 main 函数的限定名（如 "hello_main"）
   /// 如果用户没有定义 main 函数，则为 nil
@@ -200,15 +200,15 @@ public class CodeGen {
   
   // MARK: - Lambda Code Generation
   /// Counter for generating unique Lambda function names
-  private var lambdaCounter = 0
+  var lambdaCounter = 0
   /// Buffer for Lambda function definitions (generated at the end)
-  private var lambdaFunctions: String = ""
+  var lambdaFunctions: String = ""
   /// Buffer for Lambda environment struct definitions
-  private var lambdaEnvStructs: String = ""
+  var lambdaEnvStructs: String = ""
   
   // MARK: - Escape Analysis
   /// 逃逸分析上下文，用于追踪变量作用域和逃逸状态
-  private var escapeContext: EscapeContext
+  var escapeContext: EscapeContext
   
   /// 是否启用逃逸分析报告
   private let escapeAnalysisReportEnabled: Bool
@@ -228,12 +228,12 @@ public class CodeGen {
     }
   }
 
-  private struct LoopContext {
+  struct LoopContext {
     let startLabel: String
     let endLabel: String
     let scopeIndex: Int
   }
-  private var loopStack: [LoopContext] = []
+  var loopStack: [LoopContext] = []
 
   public init(ast: MonomorphizedProgram, escapeAnalysisReportEnabled: Bool = false) {
     self.ast = ast
@@ -241,408 +241,17 @@ public class CodeGen {
     self.escapeContext = EscapeContext(reportingEnabled: escapeAnalysisReportEnabled)
   }
   
-  // MARK: - Type Validation
-  
-  /// Validates that a type has been fully resolved (no generic parameters or parameterized types).
-  /// This is called during code generation to catch any types that weren't properly resolved
-  /// by the Monomorphizer.
-  private func assertTypeResolved(_ type: Type, context: String, visited: Set<UUID> = []) {
-    switch type {
-    case .genericParameter(let name):
-      fatalError("CodeGen error: Generic parameter '\(name)' should be resolved before code generation. Context: \(context)")
-    case .genericStruct(let template, let args):
-      fatalError("CodeGen error: Generic struct '\(template)<\(args.map { $0.description }.joined(separator: ", "))>' should be resolved before code generation. Context: \(context)")
-    case .genericUnion(let template, let args):
-      fatalError("CodeGen error: Generic union '\(template)<\(args.map { $0.description }.joined(separator: ", "))>' should be resolved before code generation. Context: \(context)")
-    case .function(let params, let returns):
-      for param in params {
-        assertTypeResolved(param.type, context: "\(context) -> function parameter", visited: visited)
-      }
-      assertTypeResolved(returns, context: "\(context) -> function return type", visited: visited)
-    case .reference(let inner):
-      assertTypeResolved(inner, context: "\(context) -> reference inner type", visited: visited)
-    case .pointer(let element):
-      assertTypeResolved(element, context: "\(context) -> pointer element type", visited: visited)
-    case .structure(let decl):
-      // Prevent infinite recursion for recursive types (using UUID)
-      if visited.contains(decl.id) { return }
-      var newVisited = visited
-      newVisited.insert(decl.id)
-      for member in decl.members {
-        assertTypeResolved(member.type, context: "\(context) -> struct member '\(member.name)'", visited: newVisited)
-      }
-    case .union(let decl):
-      // Prevent infinite recursion for recursive types (using UUID)
-      if visited.contains(decl.id) { return }
-      var newVisited = visited
-      newVisited.insert(decl.id)
-      for unionCase in decl.cases {
-        for param in unionCase.parameters {
-          assertTypeResolved(param.type, context: "\(context) -> union case '\(unionCase.name)' parameter '\(param.name)'", visited: newVisited)
-        }
-      }
-    default:
-      // Primitive types are always resolved
-      break
-    }
-  }
-  
-  /// Validates that all types in a global node are fully resolved.
-  /// This catches any types that weren't properly resolved by the Monomorphizer.
-  private func validateGlobalNode(_ node: TypedGlobalNode) {
-    switch node {
-    case .globalVariable(let identifier, let value, _):
-      assertTypeResolved(identifier.type, context: "global variable '\(identifier.name)'")
-      validateExpression(value, context: "global variable '\(identifier.name)' initializer")
-      
-    case .globalFunction(let identifier, let params, let body):
-      assertTypeResolved(identifier.type, context: "function '\(identifier.name)'")
-      for param in params {
-        assertTypeResolved(param.type, context: "function '\(identifier.name)' parameter '\(param.name)'")
-      }
-      validateExpression(body, context: "function '\(identifier.name)' body")
-      
-    case .globalStructDeclaration(let identifier, let params):
-      assertTypeResolved(identifier.type, context: "struct '\(identifier.name)'")
-      for param in params {
-        assertTypeResolved(param.type, context: "struct '\(identifier.name)' field '\(param.name)'")
-      }
-      
-    case .globalUnionDeclaration(let identifier, let cases):
-      assertTypeResolved(identifier.type, context: "union '\(identifier.name)'")
-      for unionCase in cases {
-        for param in unionCase.parameters {
-          assertTypeResolved(param.type, context: "union '\(identifier.name)' case '\(unionCase.name)' parameter '\(param.name)'")
-        }
-      }
-      
-    case .givenDeclaration(let type, let methods):
-      assertTypeResolved(type, context: "given declaration")
-      for method in methods {
-        assertTypeResolved(method.identifier.type, context: "given method '\(method.identifier.name)'")
-        for param in method.parameters {
-          assertTypeResolved(param.type, context: "given method '\(method.identifier.name)' parameter '\(param.name)'")
-        }
-        validateExpression(method.body, context: "given method '\(method.identifier.name)' body")
-      }
-      
-    case .genericTypeTemplate, .genericFunctionTemplate:
-      // Templates are not emitted, skip validation
-      break
-    }
-  }
-  
-  /// Validates that all types in an expression are fully resolved.
-  private func validateExpression(_ expr: TypedExpressionNode, context: String) {
-    assertTypeResolved(expr.type, context: context)
-    
-    switch expr {
-    case .integerLiteral, .floatLiteral, .stringLiteral, .booleanLiteral:
-      break
-      
-    case .variable(let identifier):
-      assertTypeResolved(identifier.type, context: "\(context) -> variable '\(identifier.name)'")
-      
-    case .castExpression(let inner, let type):
-      assertTypeResolved(type, context: "\(context) -> cast target type")
-      validateExpression(inner, context: "\(context) -> cast inner")
-      
-    case .arithmeticExpression(let left, _, let right, _):
-      validateExpression(left, context: "\(context) -> arithmetic left")
-      validateExpression(right, context: "\(context) -> arithmetic right")
-      
-    case .comparisonExpression(let left, _, let right, _):
-      validateExpression(left, context: "\(context) -> comparison left")
-      validateExpression(right, context: "\(context) -> comparison right")
-      
-    case .letExpression(let identifier, let value, let body, _):
-      assertTypeResolved(identifier.type, context: "\(context) -> let '\(identifier.name)'")
-      validateExpression(value, context: "\(context) -> let value")
-      validateExpression(body, context: "\(context) -> let body")
-      
-    case .andExpression(let left, let right, _):
-      validateExpression(left, context: "\(context) -> and left")
-      validateExpression(right, context: "\(context) -> and right")
-      
-    case .orExpression(let left, let right, _):
-      validateExpression(left, context: "\(context) -> or left")
-      validateExpression(right, context: "\(context) -> or right")
-      
-    case .notExpression(let inner, _):
-      validateExpression(inner, context: "\(context) -> not inner")
-      
-    case .bitwiseExpression(let left, _, let right, _):
-      validateExpression(left, context: "\(context) -> bitwise left")
-      validateExpression(right, context: "\(context) -> bitwise right")
-      
-    case .bitwiseNotExpression(let inner, _):
-      validateExpression(inner, context: "\(context) -> bitwise not inner")
-      
-    case .derefExpression(let inner, _):
-      validateExpression(inner, context: "\(context) -> deref inner")
-      
-    case .referenceExpression(let inner, _):
-      validateExpression(inner, context: "\(context) -> reference inner")
-      
-    case .blockExpression(let statements, let finalExpr, _):
-      for stmt in statements {
-        validateStatement(stmt, context: "\(context) -> block statement")
-      }
-      if let finalExpr = finalExpr {
-        validateExpression(finalExpr, context: "\(context) -> block final expression")
-      }
-      
-    case .ifExpression(let condition, let thenBranch, let elseBranch, _):
-      validateExpression(condition, context: "\(context) -> if condition")
-      validateExpression(thenBranch, context: "\(context) -> if then")
-      if let elseBranch = elseBranch {
-        validateExpression(elseBranch, context: "\(context) -> if else")
-      }
-      
-    case .call(let callee, let arguments, _):
-      validateExpression(callee, context: "\(context) -> call callee")
-      for arg in arguments {
-        validateExpression(arg, context: "\(context) -> call argument")
-      }
-      
-    case .genericCall(let functionName, let typeArgs, _, _):
-      fatalError("CodeGen error: genericCall '\(functionName)' with type args \(typeArgs.map { $0.description }.joined(separator: ", ")) should be resolved before code generation. Context: \(context)")
-      
-    case .methodReference(let base, let method, let typeArgs, let methodTypeArgs, _):
-      validateExpression(base, context: "\(context) -> method reference base")
-      assertTypeResolved(method.type, context: "\(context) -> method reference '\(method.name)'")
-      if let typeArgs = typeArgs {
-        for typeArg in typeArgs {
-          assertTypeResolved(typeArg, context: "\(context) -> method reference type arg")
-        }
-      }
-      if let methodTypeArgs = methodTypeArgs {
-        for typeArg in methodTypeArgs {
-          assertTypeResolved(typeArg, context: "\(context) -> method reference method type arg")
-        }
-      }
-      
-    case .whileExpression(let condition, let body, _):
-      validateExpression(condition, context: "\(context) -> while condition")
-      validateExpression(body, context: "\(context) -> while body")
-      
-    case .typeConstruction(let identifier, let typeArgs, let arguments, _):
-      assertTypeResolved(identifier.type, context: "\(context) -> type construction '\(identifier.name)'")
-      if let typeArgs = typeArgs {
-        for typeArg in typeArgs {
-          assertTypeResolved(typeArg, context: "\(context) -> type construction type arg")
-        }
-      }
-      for arg in arguments {
-        validateExpression(arg, context: "\(context) -> type construction argument")
-      }
-      
-    case .memberPath(let source, let path):
-      validateExpression(source, context: "\(context) -> member path source")
-      for member in path {
-        assertTypeResolved(member.type, context: "\(context) -> member path '\(member.name)'")
-      }
-      
-    case .subscriptExpression(let base, let arguments, let method, _):
-      validateExpression(base, context: "\(context) -> subscript base")
-      for arg in arguments {
-        validateExpression(arg, context: "\(context) -> subscript argument")
-      }
-      assertTypeResolved(method.type, context: "\(context) -> subscript method")
-      
-    case .unionConstruction(let type, let caseName, let arguments):
-      assertTypeResolved(type, context: "\(context) -> union construction '\(caseName)'")
-      for arg in arguments {
-        validateExpression(arg, context: "\(context) -> union construction argument")
-      }
-      
-    case .intrinsicCall(let intrinsic):
-      validateIntrinsic(intrinsic, context: "\(context) -> intrinsic call")
-      
-    case .matchExpression(let subject, let cases, _):
-      validateExpression(subject, context: "\(context) -> match subject")
-      for matchCase in cases {
-        validatePattern(matchCase.pattern, context: "\(context) -> match case pattern")
-        validateExpression(matchCase.body, context: "\(context) -> match case body")
-      }
-      
-    case .staticMethodCall(let baseType, let methodName, let typeArgs, _, _):
-      fatalError("CodeGen error: staticMethodCall '\(methodName)' on type '\(baseType)' with type args \(typeArgs.map { $0.description }.joined(separator: ", ")) should be resolved before code generation. Context: \(context)")
-      
-    case .ifPatternExpression(let subject, let pattern, let bindings, let thenBranch, let elseBranch, _):
-      validateExpression(subject, context: "\(context) -> if pattern subject")
-      validatePattern(pattern, context: "\(context) -> if pattern")
-      for (name, _, type) in bindings {
-        assertTypeResolved(type, context: "\(context) -> if pattern binding '\(name)'")
-      }
-      validateExpression(thenBranch, context: "\(context) -> if pattern then")
-      if let elseBranch = elseBranch {
-        validateExpression(elseBranch, context: "\(context) -> if pattern else")
-      }
-      
-    case .whilePatternExpression(let subject, let pattern, let bindings, let body, _):
-      validateExpression(subject, context: "\(context) -> while pattern subject")
-      validatePattern(pattern, context: "\(context) -> while pattern")
-      for (name, _, type) in bindings {
-        assertTypeResolved(type, context: "\(context) -> while pattern binding '\(name)'")
-      }
-      validateExpression(body, context: "\(context) -> while pattern body")
-      
-    case .lambdaExpression(let parameters, let captures, let body, let type):
-      assertTypeResolved(type, context: "\(context) -> lambda type")
-      for param in parameters {
-        assertTypeResolved(param.type, context: "\(context) -> lambda parameter '\(param.name)'")
-      }
-      for capture in captures {
-        assertTypeResolved(capture.symbol.type, context: "\(context) -> lambda capture '\(capture.symbol.name)'")
-      }
-      validateExpression(body, context: "\(context) -> lambda body")
-    }
-  }
-  
-  /// Validates that all types in a pattern are fully resolved.
-  private func validatePattern(_ pattern: TypedPattern, context: String) {
-    switch pattern {
-    case .booleanLiteral, .integerLiteral, .stringLiteral, .wildcard:
-      break
-    case .variable(let symbol):
-      assertTypeResolved(symbol.type, context: "\(context) -> pattern variable '\(symbol.name)'")
-    case .unionCase(_, _, let elements):
-      for element in elements {
-        validatePattern(element, context: "\(context) -> union case element")
-      }
-    case .comparisonPattern:
-      // Comparison patterns don't have types to validate
-      break
-    case .andPattern(let left, let right):
-      validatePattern(left, context: "\(context) -> and pattern left")
-      validatePattern(right, context: "\(context) -> and pattern right")
-    case .orPattern(let left, let right):
-      validatePattern(left, context: "\(context) -> or pattern left")
-      validatePattern(right, context: "\(context) -> or pattern right")
-    case .notPattern(let inner):
-      validatePattern(inner, context: "\(context) -> not pattern inner")
-    }
-  }
-  
-  /// Validates that all types in a statement are fully resolved.
-  private func validateStatement(_ stmt: TypedStatementNode, context: String) {
-    switch stmt {
-    case .variableDeclaration(let identifier, let value, _):
-      assertTypeResolved(identifier.type, context: "\(context) -> variable declaration '\(identifier.name)'")
-      validateExpression(value, context: "\(context) -> variable declaration value")
-      
-    case .assignment(let target, let value):
-      validateExpression(target, context: "\(context) -> assignment target")
-      validateExpression(value, context: "\(context) -> assignment value")
-      
-    case .compoundAssignment(let target, _, let value):
-      validateExpression(target, context: "\(context) -> compound assignment target")
-      validateExpression(value, context: "\(context) -> compound assignment value")
-      
-    case .expression(let expr):
-      validateExpression(expr, context: "\(context) -> expression statement")
-      
-    case .return(let value):
-      if let value = value {
-        validateExpression(value, context: "\(context) -> return value")
-      }
-      
-    case .break, .continue:
-      break
-    }
-  }
-  
-  /// Validates that all types in an intrinsic call are fully resolved.
-  private func validateIntrinsic(_ intrinsic: TypedIntrinsic, context: String) {
-    switch intrinsic {
-    case .allocMemory(let count, let resultType):
-      validateExpression(count, context: "\(context) -> allocMemory count")
-      assertTypeResolved(resultType, context: "\(context) -> allocMemory result type")
-      
-    case .deallocMemory(let ptr):
-      validateExpression(ptr, context: "\(context) -> deallocMemory ptr")
-      
-    case .copyMemory(let dest, let src, let count):
-      validateExpression(dest, context: "\(context) -> copyMemory dest")
-      validateExpression(src, context: "\(context) -> copyMemory src")
-      validateExpression(count, context: "\(context) -> copyMemory count")
-      
-    case .moveMemory(let dest, let src, let count):
-      validateExpression(dest, context: "\(context) -> moveMemory dest")
-      validateExpression(src, context: "\(context) -> moveMemory src")
-      validateExpression(count, context: "\(context) -> moveMemory count")
-      
-    case .refCount(let val):
-      validateExpression(val, context: "\(context) -> refCount val")
-      
-    case .ptrInit(let ptr, let val):
-      validateExpression(ptr, context: "\(context) -> ptrInit ptr")
-      validateExpression(val, context: "\(context) -> ptrInit val")
-      
-    case .ptrDeinit(let ptr):
-      validateExpression(ptr, context: "\(context) -> ptrDeinit ptr")
-      
-    case .ptrPeek(let ptr):
-      validateExpression(ptr, context: "\(context) -> ptrPeek ptr")
-      
-    case .ptrTake(let ptr):
-      validateExpression(ptr, context: "\(context) -> ptrTake ptr")
-      
-    case .ptrReplace(let ptr, let val):
-      validateExpression(ptr, context: "\(context) -> ptrReplace ptr")
-      validateExpression(val, context: "\(context) -> ptrReplace val")
-      
-    case .ptrBits:
-      break  // No expressions to validate
-      
-    case .ptrOffset(let ptr, let offset):
-      validateExpression(ptr, context: "\(context) -> ptrOffset ptr")
-      validateExpression(offset, context: "\(context) -> ptrOffset offset")
-      
-    case .exit(let code):
-      validateExpression(code, context: "\(context) -> exit code")
-      
-    case .abort:
-      break
-      
-    case .float32Bits(let value):
-      validateExpression(value, context: "\(context) -> float32Bits value")
-      
-    case .float64Bits(let value):
-      validateExpression(value, context: "\(context) -> float64Bits value")
-
-    case .float32FromBits(let bits):
-      validateExpression(bits, context: "\(context) -> float32FromBits bits")
-      
-    case .float64FromBits(let bits):
-      validateExpression(bits, context: "\(context) -> float64FromBits bits")
-
-    // Low-level IO intrinsics (minimal set using file descriptors)
-    case .fwrite(let ptr, let len, let fd):
-      validateExpression(ptr, context: "\(context) -> fwrite ptr")
-      validateExpression(len, context: "\(context) -> fwrite len")
-      validateExpression(fd, context: "\(context) -> fwrite fd")
-      
-    case .fgetc(let fd):
-      validateExpression(fd, context: "\(context) -> fgetc fd")
-      
-    case .fflush(let fd):
-      validateExpression(fd, context: "\(context) -> fflush fd")
-    }
-  }
-
-  private func pushScope() {
+  func pushScope() {
     lifetimeScopeStack.append([])
     escapeContext.enterScope()
   }
 
-  private func popScopeWithoutCleanup() {
+  func popScopeWithoutCleanup() {
     _ = lifetimeScopeStack.popLast()
     escapeContext.leaveScope()
   }
 
-  private func popScope() {
+  func popScope() {
     let vars = lifetimeScopeStack.removeLast()
     for (name, type) in vars.reversed() {
       if case .structure(let decl) = type {
@@ -661,7 +270,7 @@ public class CodeGen {
     escapeContext.leaveScope()
   }
 
-  private func emitCleanup(fromScopeIndex startIndex: Int) {
+  func emitCleanup(fromScopeIndex startIndex: Int) {
     guard !lifetimeScopeStack.isEmpty else { return }
     let clampedStart = max(0, min(startIndex, lifetimeScopeStack.count - 1))
 
@@ -684,7 +293,7 @@ public class CodeGen {
     }
   }
 
-  private func emitCleanupForScope(at scopeIndex: Int) {
+  func emitCleanupForScope(at scopeIndex: Int) {
     guard scopeIndex >= 0 && scopeIndex < lifetimeScopeStack.count else { return }
     let vars = lifetimeScopeStack[scopeIndex]
     for (name, type) in vars.reversed() {
@@ -703,7 +312,7 @@ public class CodeGen {
     }
   }
 
-  private func registerVariable(_ name: String, _ type: Type) {
+  func registerVariable(_ name: String, _ type: Type) {
     lifetimeScopeStack[lifetimeScopeStack.count - 1].append((name: name, type: type))
     escapeContext.registerVariable(name)
   }
@@ -1136,7 +745,7 @@ public class CodeGen {
     }
   }
 
-  private func generateExpressionSSA(_ expr: TypedExpressionNode) -> String {
+  func generateExpressionSSA(_ expr: TypedExpressionNode) -> String {
     switch expr {
     case .integerLiteral(let value, _):
       return String(value)
@@ -1224,7 +833,7 @@ public class CodeGen {
           addIndent()
           buffer += "fprintf(stderr, \"Panic: float-to-int cast overflow\\n\");\n"
           addIndent()
-          buffer += "exit(1);\n"
+          buffer += "abort();\n"
         }
         addIndent()
         buffer += "}\n"
@@ -1937,238 +1546,9 @@ public class CodeGen {
     }
   }
   
-  // MARK: - Lambda Expression Code Generation
-  
-  /// Generates a unique Lambda function name
-  private func nextLambdaName() -> String {
-    let name = "__koral_lambda_\(lambdaCounter)"
-    lambdaCounter += 1
-    return name
-  }
-  
-  /// Generates code for a Lambda expression
-  /// Returns the name of a temporary variable holding the Closure struct
-  private func generateLambdaExpression(
-    parameters: [Symbol],
-    captures: [CapturedVariable],
-    body: TypedExpressionNode,
-    type: Type
-  ) -> String {
-    guard case .function(let funcParams, let returnType) = type else {
-      fatalError("Lambda expression must have function type")
-    }
-    
-    let lambdaName = nextLambdaName()
-    
-    if captures.isEmpty {
-      // No-capture Lambda: generate a simple function, env = NULL
-      generateNoCaptureLabmdaFunction(
-        name: lambdaName,
-        parameters: parameters,
-        funcParams: funcParams,
-        returnType: returnType,
-        body: body
-      )
-      
-      // Create closure struct with env = NULL
-      let result = nextTemp()
-      addIndent()
-      buffer += "struct __koral_Closure \(result) = { .fn = (void*)\(lambdaName), .env = NULL };\n"
-      return result
-    } else {
-      // With-capture Lambda: generate env struct and wrapper function
-      let envStructName = "\(lambdaName)_env"
-      
-      // Generate environment struct definition
-      generateLambdaEnvStruct(name: envStructName, captures: captures)
-      
-      // Generate Lambda function with env parameter
-      generateCaptureLabmdaFunction(
-        name: lambdaName,
-        envStructName: envStructName,
-        parameters: parameters,
-        funcParams: funcParams,
-        returnType: returnType,
-        captures: captures,
-        body: body
-      )
-      
-      // Allocate and initialize environment
-      let envVar = nextTemp()
-      addIndent()
-      buffer += "struct \(envStructName)* \(envVar) = (struct \(envStructName)*)malloc(sizeof(struct \(envStructName)));\n"
-      addIndent()
-      buffer += "\(envVar)->__refcount = 1;\n"
-      
-      // Initialize captured variables
-      for capture in captures {
-        addIndent()
-        let capturedName = capture.symbol.qualifiedName
-        if case .reference(_) = capture.symbol.type {
-          // Reference type: copy the Ref struct and retain
-          buffer += "\(envVar)->\(capturedName) = \(capturedName);\n"
-          addIndent()
-          buffer += "__koral_retain(\(envVar)->\(capturedName).control);\n"
-        } else {
-          // Value type: copy the value
-          buffer += "\(envVar)->\(capturedName) = \(capturedName);\n"
-        }
-      }
-      
-      // Create closure struct
-      let result = nextTemp()
-      addIndent()
-      buffer += "struct __koral_Closure \(result) = { .fn = (void*)\(lambdaName), .env = \(envVar) };\n"
-      return result
-    }
-  }
-  
-  /// Generates a no-capture Lambda function
-  private func generateNoCaptureLabmdaFunction(
-    name: String,
-    parameters: [Symbol],
-    funcParams: [Parameter],
-    returnType: Type,
-    body: TypedExpressionNode
-  ) {
-    let returnCType = getCType(returnType)
-    
-    // Build parameter list
-    var paramList: [String] = []
-    for (i, param) in parameters.enumerated() {
-      let paramType = funcParams[i].type
-      paramList.append("\(getCType(paramType)) \(param.qualifiedName)")
-    }
-    
-    let paramsStr = paramList.isEmpty ? "void" : paramList.joined(separator: ", ")
-    
-    // Generate forward declaration
-    var funcBuffer = "\n// Lambda function (no capture)\n"
-    funcBuffer += "static \(returnCType) \(name)(\(paramsStr));\n"
-    funcBuffer += "static \(returnCType) \(name)(\(paramsStr)) {\n"
-    
-    // Save current state
-    let savedBuffer = buffer
-    let savedIndent = indent
-    let savedLambdaCounter = lambdaCounter
-    let savedLambdaFunctions = lambdaFunctions
-    buffer = ""
-    indent = "  "
-    lambdaFunctions = ""
-    
-    // Generate body
-    let bodyResult = generateExpressionSSA(body)
-    
-    if returnType != .void && returnType != .never {
-      addIndent()
-      buffer += "return \(bodyResult);\n"
-    }
-    
-    funcBuffer += buffer
-    funcBuffer += "}\n"
-    
-    // Handle nested lambdas
-    if !lambdaFunctions.isEmpty {
-      funcBuffer = lambdaFunctions + funcBuffer
-    }
-    
-    // Restore state
-    buffer = savedBuffer
-    indent = savedIndent
-    lambdaCounter = savedLambdaCounter + (lambdaCounter - savedLambdaCounter)
-    
-    // Add to Lambda functions buffer
-    lambdaFunctions = savedLambdaFunctions + funcBuffer
-  }
-  
-  /// Generates a Lambda function with captures
-  private func generateCaptureLabmdaFunction(
-    name: String,
-    envStructName: String,
-    parameters: [Symbol],
-    funcParams: [Parameter],
-    returnType: Type,
-    captures: [CapturedVariable],
-    body: TypedExpressionNode
-  ) {
-    let returnCType = getCType(returnType)
-    
-    // Build parameter list (env as first parameter)
-    var paramList: [String] = ["void* __env"]
-    for (i, param) in parameters.enumerated() {
-      let paramType = funcParams[i].type
-      paramList.append("\(getCType(paramType)) \(param.qualifiedName)")
-    }
-    
-    let paramsStr = paramList.joined(separator: ", ")
-    
-    // Generate forward declaration and function
-    var funcBuffer = "\n// Lambda function (with capture)\n"
-    funcBuffer += "static \(returnCType) \(name)(\(paramsStr));\n"
-    funcBuffer += "static \(returnCType) \(name)(\(paramsStr)) {\n"
-    funcBuffer += "  struct \(envStructName)* __captured = (struct \(envStructName)*)__env;\n"
-    
-    // Generate local aliases for captured variables
-    for capture in captures {
-      let capturedName = capture.symbol.qualifiedName
-      let capturedType = getCType(capture.symbol.type)
-      funcBuffer += "  \(capturedType) \(capturedName) = __captured->\(capturedName);\n"
-    }
-    
-    // Save current state
-    let savedBuffer = buffer
-    let savedIndent = indent
-    let savedLambdaCounter = lambdaCounter
-    let savedLambdaFunctions = lambdaFunctions
-    buffer = ""
-    indent = "  "
-    lambdaFunctions = ""
-    
-    // Generate body
-    let bodyResult = generateExpressionSSA(body)
-    
-    if returnType != .void && returnType != .never {
-      addIndent()
-      buffer += "return \(bodyResult);\n"
-    }
-    
-    funcBuffer += buffer
-    funcBuffer += "}\n"
-    
-    // Handle nested lambdas
-    if !lambdaFunctions.isEmpty {
-      funcBuffer = lambdaFunctions + funcBuffer
-    }
-    
-    // Restore state
-    buffer = savedBuffer
-    indent = savedIndent
-    lambdaCounter = savedLambdaCounter + (lambdaCounter - savedLambdaCounter)
-    
-    // Add to Lambda functions buffer
-    lambdaFunctions = savedLambdaFunctions + funcBuffer
-  }
-  
-  /// Generates the environment struct for a Lambda with captures
-  private func generateLambdaEnvStruct(name: String, captures: [CapturedVariable]) {
-    var structBuffer = "\n// Lambda environment struct\n"
-    structBuffer += "struct \(name) {\n"
-    structBuffer += "  intptr_t __refcount;\n"
-    
-    for capture in captures {
-      let capturedName = capture.symbol.qualifiedName
-      let capturedType = getCType(capture.symbol.type)
-      structBuffer += "  \(capturedType) \(capturedName);\n"
-    }
-    
-    structBuffer += "};\n"
-    
-    // Add to Lambda env structs buffer
-    lambdaEnvStructs += structBuffer
-  }
 
 
-  private func generateIntrinsicSSA(_ node: TypedIntrinsic) -> String {
+  func generateIntrinsicSSA(_ node: TypedIntrinsic) -> String {
     switch node {
     case .allocMemory(let count, let type):
       // malloc
@@ -2411,66 +1791,13 @@ public class CodeGen {
     }
   }
 
-  // 构建引用组件：返回 (访问路径, 控制块指针)
-  private func buildRefComponents(_ expr: TypedExpressionNode) -> (path: String, control: String) {
-    switch expr {
-    case .variable(let identifier):
-      let path = identifier.qualifiedName
-      if case .reference(_) = identifier.type {
-        return (path, "\(path).control")
-      } else {
-        return (path, "NULL")
-      }
-    case .memberPath(let source, let path):
-      var (basePath, baseControl) = buildRefComponents(source)
-      var curType = source.type
 
-      for member in path {
-        if case .reference(let inner) = curType {
-          // Dereferencing a ref type updates the control block
-          baseControl = "\(basePath).control"
-          let innerCType = getCType(inner)
-          basePath = "((\(innerCType)*)\(basePath).ptr)->\(member.qualifiedName)"
-        } else {
-          // Accessing member of value type keeps the same control block
-          basePath += ".\(member.qualifiedName)"
-        }
-        curType = member.type
-      }
-      return (basePath, baseControl)
-    case .subscriptExpression(let base, let args, let method, let type):
-         guard case .function(_, let returns) = method.type else { fatalError() }
-         let callNode = TypedExpressionNode.call(
-             callee: .methodReference(base: base, method: method, typeArgs: nil, methodTypeArgs: nil, type: method.type),
-             arguments: args,
-             type: returns)
-         let refResult = generateExpressionSSA(callNode)
-         
-         if case .reference(_) = type {
-             return (refResult, "\(refResult).control")
-         } else {
-             return (refResult, "NULL")
-         }
-
-    case .derefExpression(let inner, let type):
-         // Dereferencing a reference type gives us an LValue
-         let refResult = generateExpressionSSA(inner)
-         let cType = getCType(type)
-         let path = "(*(\(cType)*)\(refResult).ptr)"
-         let control = "\(refResult).control"
-         return (path, control)
-         
-    default:
-      fatalError("ref requires lvalue (variable or memberAccess)")
-    }
-  }
-
-  private func nextTemp() -> String {
+  func nextTemp() -> String {
     tempVarCounter += 1
     return "_t\(tempVarCounter)"
   }
 
-  private func generateStatement(_ stmt: TypedStatementNode) {
+  func generateStatement(_ stmt: TypedStatementNode) {
     switch stmt {
     case .variableDeclaration(let identifier, let value, _):
       let valueResult = generateExpressionSSA(value)
@@ -2620,55 +1947,7 @@ public class CodeGen {
     }
   }
 
-  private func compoundOpToC(_ op: CompoundAssignmentOperator) -> String {
-    switch op {
-    case .plus: return "+="
-    case .minus: return "-="
-    case .multiply: return "*="
-    case .divide: return "/="
-    case .modulo: return "%="
-    case .power: return "**="  // Special handling needed
-    case .bitwiseAnd: return "&="
-    case .bitwiseOr: return "|="
-    case .bitwiseXor: return "^="
-    case .shiftLeft: return "<<="
-    case .shiftRight: return ">>="
-    }
-  }
-
-  private func arithmeticOpToC(_ op: ArithmeticOperator) -> String {
-    switch op {
-    case .plus: return "+"
-    case .minus: return "-"
-    case .multiply: return "*"
-    case .divide: return "/"
-    case .modulo: return "%"
-    case .power: return "**"  // Special handling needed
-    }
-  }
-
-  private func comparisonOpToC(_ op: ComparisonOperator) -> String {
-    switch op {
-    case .equal: return "=="
-    case .notEqual: return "!="
-    case .greater: return ">"
-    case .less: return "<"
-    case .greaterEqual: return ">="
-    case .lessEqual: return "<="
-    }
-  }
-
-  private func bitwiseOpToC(_ op: BitwiseOperator) -> String {
-    switch op {
-    case .and: return "&"
-    case .or: return "|"
-    case .xor: return "^"
-    case .shiftLeft: return "<<"
-    case .shiftRight: return ">>"
-    }
-  }
-
-  private func getCType(_ type: Type) -> String {
+  func getCType(_ type: Type) -> String {
     switch type {
     case .int: return "intptr_t"
     case .int8: return "int8_t"
@@ -2709,14 +1988,14 @@ public class CodeGen {
     }
   }
 
-  private func isFloatType(_ type: Type) -> Bool {
+  func isFloatType(_ type: Type) -> Bool {
     switch type {
     case .float32, .float64: return true
     default: return false
     }
   }
 
-  private func getFunctionReturnType(_ type: Type) -> String {
+  func getFunctionReturnType(_ type: Type) -> String {
     switch type {
     case .function(_, let returns):
       return getCType(returns)
@@ -2726,7 +2005,7 @@ public class CodeGen {
   }
   
   /// 获取函数类型的返回类型（作为 Type）
-  private func getFunctionReturnTypeAsType(_ type: Type) -> Type? {
+  func getFunctionReturnTypeAsType(_ type: Type) -> Type? {
     switch type {
     case .function(_, let returns):
       return returns
@@ -2738,7 +2017,7 @@ public class CodeGen {
   // MARK: - 逃逸分析辅助函数
   
   /// 检查表达式是否是结构体字段赋值
-  private func isStructFieldAssignment(_ target: TypedExpressionNode) -> Bool {
+  func isStructFieldAssignment(_ target: TypedExpressionNode) -> Bool {
     switch target {
     case .memberPath(let source, let path):
       // 如果路径长度 > 0，说明是字段访问
@@ -2758,244 +2037,35 @@ public class CodeGen {
   }
   
   /// 检查类型是否是引用类型
-  private func isReferenceType(_ type: Type) -> Bool {
+  func isReferenceType(_ type: Type) -> Bool {
     if case .reference(_) = type {
       return true
     }
     return false
   }
 
-  private func addIndent() {
+  func addIndent() {
     buffer += indent
   }
 
-  private func withIndent(_ body: () -> Void) {
+  func withIndent(_ body: () -> Void) {
     let oldIndent = indent
     indent += "    "
     body()
     indent = oldIndent
   }
-
-  private func generateTypeDeclaration(
-    _ identifier: Symbol,
-    _ parameters: [Symbol]
-  ) {
-    let name = identifier.qualifiedName
-    
-    // 所有类型都生成 struct，字段为值类型
-    buffer += "struct \(name) {\n"
-    withIndent {
-      for param in parameters {
-        addIndent()
-        buffer += "\(getCType(param.type)) \(sanitizeIdentifier(param.name));\n"
-      }
-    }
-    buffer += "};\n\n"
-
-    // 自动生成 copy/drop，需要递归处理
-    buffer += "struct \(name) __koral_\(name)_copy(const struct \(name) *self) {\n"
-    withIndent {
-      buffer += "    struct \(name) result;\n"
-      for param in parameters {
-        let fieldName = sanitizeIdentifier(param.name)
-        if case .structure(let decl) = param.type {
-          let qualifiedFieldTypeName = decl.qualifiedName
-          buffer += "    result.\(fieldName) = __koral_\(qualifiedFieldTypeName)_copy(&self->\(fieldName));\n"
-        } else if case .reference(_) = param.type {
-          buffer += "    result.\(fieldName) = self->\(fieldName);\n"
-          buffer += "    __koral_retain(result.\(fieldName).control);\n"
-        } else {
-          buffer += "    result.\(fieldName) = self->\(fieldName);\n"
-        }
-      }
-      buffer += "    return result;\n"
-    }
-    buffer += "}\n\n"
-
-    buffer += "void __koral_\(name)_drop(void* raw_self) {\n"
-    withIndent {
-      buffer += "    struct \(name)* self = (struct \(name)*)raw_self;\n"
-
-      // Call user defined drop if exists
-      if let userDrop = userDefinedDrops[name] {
-          buffer += "    {\n"
-          buffer += "        void \(userDrop)(struct Ref);\n"
-          buffer += "        struct Ref r;\n"
-          buffer += "        r.ptr = self;\n"
-          buffer += "        r.control = NULL;\n" // Control is NULL as we are inside the destructor managed by control/scope
-          buffer += "        \(userDrop)(r);\n" 
-          buffer += "    }\n"
-      }
-
-      for param in parameters {
-        let fieldName = sanitizeIdentifier(param.name)
-        if case .structure(let decl) = param.type {
-          let qualifiedFieldTypeName = decl.qualifiedName
-          buffer += "    __koral_\(qualifiedFieldTypeName)_drop(&self->\(fieldName));\n"
-        } else if case .reference(_) = param.type {
-          buffer += "    __koral_release(self->\(fieldName).control);\n"
-        }
-      }
-    }
-    buffer += "}\n\n"
+  
+  /// Append text to the buffer (used by extensions)
+  func appendToBuffer(_ text: String) {
+    buffer += text
+  }
+  
+  /// Get user defined drop function for a type
+  func getUserDefinedDrop(for typeName: String) -> String? {
+    return userDefinedDrops[typeName]
   }
 
-  private func generateUnionDeclaration(_ identifier: Symbol, _ cases: [UnionCase]) {
-    let name = identifier.qualifiedName
-    buffer += "struct \(name) {\n"
-    withIndent {
-      addIndent()
-      buffer += "intptr_t tag;\n"
-      addIndent()
-      buffer += "union {\n"
-      withIndent {
-        for c in cases {
-            let caseName = sanitizeIdentifier(c.name)
-            if !c.parameters.isEmpty {
-                addIndent()
-                buffer += "struct {\n"
-                withIndent {
-                    for param in c.parameters {
-                        addIndent()
-                        buffer += "\(getCType(param.type)) \(sanitizeIdentifier(param.name));\n"
-                    }
-                }
-                addIndent()
-                buffer += "} \(caseName);\n"
-            } else {
-                 addIndent()
-                 buffer += "struct {} \(caseName);\n"
-            }
-        }
-      }
-      addIndent()
-      buffer += "} data;\n"
-    }
-    buffer += "};\n\n"
-
-    // Generate Copy
-    buffer += "struct \(name) __koral_\(name)_copy(const struct \(name) *self) {\n"
-    withIndent {
-        buffer += "    struct \(name) result;\n"
-        buffer += "    result.tag = self->tag;\n"
-        buffer += "    switch (self->tag) {\n"
-        for (index, c) in cases.enumerated() {
-             let caseName = sanitizeIdentifier(c.name)
-             buffer += "    case \(index): // \(c.name)\n"
-             if !c.parameters.isEmpty {
-                 for param in c.parameters {
-                     let fieldName = sanitizeIdentifier(param.name)
-                     let fieldPath = "self->data.\(caseName).\(fieldName)"
-                     let resultPath = "result.data.\(caseName).\(fieldName)"
-                     if case .structure(let decl) = param.type {
-                         let qualifiedFieldTypeName = decl.qualifiedName
-                         buffer += "        \(resultPath) = __koral_\(qualifiedFieldTypeName)_copy(&\(fieldPath));\n"
-                     } else if case .union(let decl) = param.type {
-                        let qualifiedFieldTypeName = decl.qualifiedName
-                        buffer += "        \(resultPath) = __koral_\(qualifiedFieldTypeName)_copy(&\(fieldPath));\n"
-                     } else if case .reference(_) = param.type {
-                         buffer += "        \(resultPath) = \(fieldPath);\n"
-                         buffer += "        __koral_retain(\(resultPath).control);\n"
-                     } else {
-                         buffer += "        \(resultPath) = \(fieldPath);\n"
-                     }
-                 }
-             }
-             buffer += "        break;\n"
-        }
-        buffer += "    }\n"
-        buffer += "    return result;\n"
-    }
-    buffer += "}\n\n"
-
-    // Generate Drop
-    buffer += "void __koral_\(name)_drop(void* raw_self) {\n"
-    withIndent {
-        buffer += "    struct \(name)* self = (struct \(name)*)raw_self;\n"
-
-        // Call user defined drop if exists
-        if let userDrop = userDefinedDrops[name] {
-            buffer += "    {\n"
-            buffer += "        void \(userDrop)(struct Ref);\n"
-            buffer += "        struct Ref r;\n"
-            buffer += "        r.ptr = self;\n"
-            buffer += "        r.control = NULL;\n" // Control is NULL as we are inside the destructor managed by control/scope
-            buffer += "        \(userDrop)(r);\n" 
-            buffer += "    }\n"
-        }
-
-        buffer += "    switch (self->tag) {\n"
-        for (index, c) in cases.enumerated() {
-             let caseName = sanitizeIdentifier(c.name)
-             buffer += "    case \(index): // \(c.name)\n"
-             for param in c.parameters {
-                 let fieldName = sanitizeIdentifier(param.name)
-                 let fieldPath = "self->data.\(caseName).\(fieldName)"
-                 if case .structure(let decl) = param.type {
-                     let qualifiedFieldTypeName = decl.qualifiedName
-                     buffer += "        __koral_\(qualifiedFieldTypeName)_drop(&\(fieldPath));\n"
-                 } else if case .union(let decl) = param.type {
-                     let qualifiedFieldTypeName = decl.qualifiedName
-                     buffer += "        __koral_\(qualifiedFieldTypeName)_drop(&\(fieldPath));\n"
-                 } else if case .reference(_) = param.type {
-                     buffer += "        __koral_release(\(fieldPath).control);\n"
-                 }
-             }
-             buffer += "        break;\n"
-        }
-        buffer += "    }\n"
-    }
-    buffer += "}\n\n"
-  }
-
-  private func generateUnionConstructor(type: Type, caseName: String, args: [TypedExpressionNode]) -> String {
-      guard case .union(let decl) = type else { fatalError() }
-      let typeName = decl.qualifiedName
-      let cases = decl.cases
-      
-      // Calculate tag index
-      let tagIndex = cases.firstIndex(where: { $0.name == caseName })!
-      
-      let result = nextTemp()
-      addIndent()
-      buffer += "struct \(typeName) \(result);\n"
-      addIndent()
-      buffer += "\(result).tag = \(tagIndex);\n"
-      
-      // Assign members
-      // The union member name is same as case name
-      let caseInfo = cases[tagIndex]
-      let escapedCaseName = sanitizeIdentifier(caseName)
-      
-      if !args.isEmpty {
-          let unionMemberPath = "\(result).data.\(escapedCaseName)"
-          for (argExpr, param) in zip(args, caseInfo.parameters) {
-              let argResult = generateExpressionSSA(argExpr)
-              let fieldName = sanitizeIdentifier(param.name)
-              
-              addIndent()
-              if case .structure(let structDecl) = param.type {
-                   if argExpr.valueCategory == .lvalue {
-                       buffer += "\(unionMemberPath).\(fieldName) = __koral_\(structDecl.qualifiedName)_copy(&\(argResult));\n"
-                   } else {
-                       buffer += "\(unionMemberPath).\(fieldName) = \(argResult);\n"
-                   }
-              } else if case .reference(_) = param.type {
-                   buffer += "\(unionMemberPath).\(fieldName) = \(argResult);\n"
-                   if argExpr.valueCategory == .lvalue {
-                       addIndent()
-                       buffer += "__koral_retain(\(unionMemberPath).\(fieldName).control);\n"
-                   }
-              } else {
-                   buffer += "\(unionMemberPath).\(fieldName) = \(argResult);\n"
-              }
-          }
-      }
-      
-      return result
-  }
-
-  private func generateMatchExpression(_ subject: TypedExpressionNode, _ cases: [TypedMatchCase], _ type: Type) -> String {
+  func generateMatchExpression(_ subject: TypedExpressionNode, _ cases: [TypedMatchCase], _ type: Type) -> String {
     let subjectVarSSA = generateExpressionSSA(subject)
     let resultVar = nextTemp()
     
@@ -3094,7 +2164,7 @@ public class CodeGen {
     return (type == .void || type == .never) ? "" : resultVar
   }
 
-    private func generatePatternConditionAndBindings(
+    func generatePatternConditionAndBindings(
     _ pattern: TypedPattern,
     _ path: String,
     _ type: Type,
@@ -3268,402 +2338,4 @@ public class CodeGen {
     }
 
 
-  private func generateBlockScope(
-    _ statements: [TypedStatementNode], finalExpr: TypedExpressionNode?
-  ) -> String {
-    pushScope()
-    // 先处理所有语句
-    for stmt in statements {
-      generateStatement(stmt)
-    }
-
-    // 生成最终表达式
-    var result = ""
-    if let finalExpr = finalExpr {
-      let temp = generateExpressionSSA(finalExpr)
-      if finalExpr.type != .void && finalExpr.type != .never {
-        let resultVar = nextTemp()
-        if case .structure(let decl) = finalExpr.type {
-          if finalExpr.valueCategory == .lvalue {
-            // Returning an lvalue struct from a block:
-            // - Copy types must be copied, because scope cleanup will drop the original.
-            switch finalExpr {
-            default:
-              addIndent()
-              buffer += "\(getCType(finalExpr.type)) \(resultVar) = __koral_\(decl.qualifiedName)_copy(&\(temp));\n"
-            }
-          } else {
-            addIndent()
-            buffer += "\(getCType(finalExpr.type)) \(resultVar) = \(temp);\n"
-          }
-        } else if case .union(let decl) = finalExpr.type {
-          if finalExpr.valueCategory == .lvalue {
-            switch finalExpr {
-            default:
-              addIndent()
-              buffer += "\(getCType(finalExpr.type)) \(resultVar) = __koral_\(decl.qualifiedName)_copy(&\(temp));\n"
-            }
-          } else {
-            addIndent()
-            buffer += "\(getCType(finalExpr.type)) \(resultVar) = \(temp);\n"
-          }
-        } else {
-          addIndent()
-          buffer += "\(getCType(finalExpr.type)) \(resultVar) = \(temp);\n"
-          if case .reference(_) = finalExpr.type, finalExpr.valueCategory == .lvalue {
-            addIndent()
-            buffer += "__koral_retain(\(resultVar).control);\n"
-          }
-        }
-        result = resultVar
-      }
-    }
-    popScope()
-    return result
-  }
-
-  private func generateAssignment(_ identifier: Symbol, _ value: TypedExpressionNode) {
-    if value.type == .void || value.type == .never {
-      _ = generateExpressionSSA(value)
-      return
-    }
-    let valueResult = generateExpressionSSA(value)
-    if case .structure(let decl) = identifier.type {
-      if value.valueCategory == .lvalue {
-        let copyResult = nextTemp()
-        addIndent()
-        buffer += "\(getCType(value.type)) \(copyResult) = __koral_\(decl.qualifiedName)_copy(&\(valueResult));\n"
-        addIndent()
-        buffer += "__koral_\(decl.qualifiedName)_drop(&\(identifier.qualifiedName));\n"
-        addIndent()
-        buffer += "\(identifier.qualifiedName) = \(copyResult);\n"
-      } else {
-        addIndent()
-        buffer += "__koral_\(decl.qualifiedName)_drop(&\(identifier.qualifiedName));\n"
-        addIndent()
-        buffer += "\(identifier.qualifiedName) = \(valueResult);\n"
-      }
-    } else if case .union(let decl) = identifier.type {
-      if value.valueCategory == .lvalue {
-        let copyResult = nextTemp()
-        addIndent()
-        buffer += "\(getCType(value.type)) \(copyResult) = __koral_\(decl.qualifiedName)_copy(&\(valueResult));\n"
-        addIndent()
-        buffer += "__koral_\(decl.qualifiedName)_drop(&\(identifier.qualifiedName));\n"
-        addIndent()
-        buffer += "\(identifier.qualifiedName) = \(copyResult);\n"
-      } else {
-        addIndent()
-        buffer += "__koral_\(decl.qualifiedName)_drop(&\(identifier.qualifiedName));\n"
-        addIndent()
-        buffer += "\(identifier.qualifiedName) = \(valueResult);\n"
-      }
-    } else if case .reference(_) = identifier.type {
-      addIndent()
-      buffer += "__koral_release(\(identifier.qualifiedName).control);\n"
-      addIndent()
-      buffer += "\(identifier.qualifiedName) = \(valueResult);\n"
-      if value.valueCategory == .lvalue {
-        addIndent()
-        buffer += "__koral_retain(\(identifier.qualifiedName).control);\n"
-      }
-    } else {
-      addIndent()
-      buffer += "\(identifier.qualifiedName) = \(valueResult);\n"
-    }
-  }
-
-  private func generateMemberAccessAssignment(
-    _ base: Symbol,
-    _ memberPath: [Symbol], _ value: TypedExpressionNode
-  ) {
-    if value.type == .void || value.type == .never {
-      _ = generateExpressionSSA(value)
-      return
-    }
-    let baseResult = base.qualifiedName
-    let valueResult = generateExpressionSSA(value)
-    var accessPath = baseResult
-    var curType = base.type
-    for (index, item) in memberPath.enumerated() {
-      let isLast = index == memberPath.count - 1
-      let memberName = item.name
-      let memberType = item.type
-      
-      var memberAccess: String
-      if case .reference(let inner) = curType {
-          let innerCType = getCType(inner)
-          memberAccess = "((\(innerCType)*)\(accessPath).ptr)->\(memberName)"
-      } else {
-          memberAccess = "\(accessPath).\(memberName)"
-      }
-      
-      // Only apply type cast for non-reference struct members when the C types differ
-      // This handles cases where generic type parameters are replaced with concrete types
-      // but the C representation needs explicit casting
-      if case .structure(let decl) = curType.canonical {
-        if let canonicalMember = decl.members.first(where: { $0.name == memberName }) {
-          // Compare C type representations instead of Type equality
-          // This avoids issues with UUID-based type identity for generic instantiations
-          let canonicalCType = getCType(canonicalMember.type)
-          let memberCTypeStr = getCType(memberType)
-          if canonicalCType != memberCTypeStr {
-            // Skip cast for reference types - they all use struct Ref
-            if case .reference(_) = memberType {
-              // No cast needed for reference types
-            } else {
-              let targetCType = getCType(memberType)
-              memberAccess = "*(\(targetCType)*)&(\(memberAccess))"
-            }
-          }
-        }
-      }
-      
-      accessPath = memberAccess
-      curType = memberType
-      
-      if isLast, case .structure(let decl) = memberType {
-        if value.valueCategory == .lvalue {
-          let copyResult = nextTemp()
-          addIndent()
-          buffer += "\(getCType(value.type)) \(copyResult) = __koral_\(decl.qualifiedName)_copy(&\(valueResult));\n"
-          addIndent()
-          buffer += "__koral_\(decl.qualifiedName)_drop(&\(accessPath));\n"
-          addIndent()
-          buffer += "\(accessPath) = \(copyResult);\n"
-        } else {
-          addIndent()
-          buffer += "__koral_\(decl.qualifiedName)_drop(&\(accessPath));\n"
-          addIndent()
-          buffer += "\(accessPath) = \(valueResult);\n"
-        }
-        return
-      }
-    }
-    addIndent()
-    buffer += "\(accessPath) = \(valueResult);\n"
-  }
-
-  private func generateCall(
-    _ callee: TypedExpressionNode, _ arguments: [TypedExpressionNode], _ type: Type
-  ) -> String {
-    if case .methodReference(let base, let method, _, _, _) = callee {
-      var allArgs = [base]
-      allArgs.append(contentsOf: arguments)
-      return generateFunctionCall(method, allArgs, type)
-    }
-
-    if case .variable(let identifier) = callee {
-      // Check if this is a function type variable (closure call)
-      // Regular functions have kind = .function, while closure variables have kind = .variable
-      if case .variable(_) = identifier.kind,
-         case .function(let funcParams, let returnType) = identifier.type {
-        return generateClosureCall(
-          closureVar: identifier.qualifiedName,
-          funcParams: funcParams,
-          returnType: returnType,
-          arguments: arguments
-        )
-      }
-      return generateFunctionCall(identifier, arguments, type)
-    }
-
-    // Handle indirect call through expression (e.g., lambda expression result)
-    if case .function(let funcParams, let returnType) = callee.type {
-      let closureResult = generateExpressionSSA(callee)
-      return generateClosureCall(
-        closureVar: closureResult,
-        funcParams: funcParams,
-        returnType: returnType,
-        arguments: arguments
-      )
-    }
-
-    fatalError("Indirect call not supported: callee type = \(callee.type)")
-  }
-  
-  /// Generates code for calling a closure (function type variable)
-  /// Handles both no-capture (env == NULL) and with-capture (env != NULL) cases
-  private func generateClosureCall(
-    closureVar: String,
-    funcParams: [Parameter],
-    returnType: Type,
-    arguments: [TypedExpressionNode]
-  ) -> String {
-    // Generate argument values
-    var argResults: [String] = []
-    for arg in arguments {
-      let result = generateExpressionSSA(arg)
-      if case .structure(let decl) = arg.type {
-        if arg.valueCategory == .lvalue {
-          let copyResult = nextTemp()
-          addIndent()
-          buffer += "\(getCType(arg.type)) \(copyResult) = __koral_\(decl.qualifiedName)_copy(&\(result));\n"
-          argResults.append(copyResult)
-        } else {
-          argResults.append(result)
-        }
-      } else if case .reference(_) = arg.type {
-        if arg.valueCategory == .lvalue {
-          addIndent()
-          buffer += "__koral_retain(\(result).control);\n"
-        }
-        argResults.append(result)
-      } else {
-        argResults.append(result)
-      }
-    }
-    
-    let returnCType = getCType(returnType)
-    
-    // Build function pointer type for no-capture case: ReturnType (*)(Args...)
-    var noCaptureParamTypes: [String] = []
-    for param in funcParams {
-      noCaptureParamTypes.append(getCType(param.type))
-    }
-    let noCaptureParamsStr = noCaptureParamTypes.isEmpty ? "void" : noCaptureParamTypes.joined(separator: ", ")
-    let noCaptureFnPtrType = "\(returnCType) (*)(\(noCaptureParamsStr))"
-    
-    // Build function pointer type for with-capture case: ReturnType (*)(void*, Args...)
-    var withCaptureParamTypes: [String] = ["void*"]
-    for param in funcParams {
-      withCaptureParamTypes.append(getCType(param.type))
-    }
-    let withCaptureParamsStr = withCaptureParamTypes.joined(separator: ", ")
-    let withCaptureFnPtrType = "\(returnCType) (*)(\(withCaptureParamsStr))"
-    
-    // Build argument list strings
-    let argsStr = argResults.joined(separator: ", ")
-    let argsWithEnvStr = argResults.isEmpty ? "\(closureVar).env" : "\(closureVar).env, \(argsStr)"
-    
-    // Generate conditional call based on env == NULL
-    if returnType == .void || returnType == .never {
-      addIndent()
-      buffer += "if (\(closureVar).env == NULL) {\n"
-      indent += "  "
-      addIndent()
-      buffer += "((\(noCaptureFnPtrType))(\(closureVar).fn))(\(argsStr));\n"
-      indent = String(indent.dropLast(2))
-      addIndent()
-      buffer += "} else {\n"
-      indent += "  "
-      addIndent()
-      buffer += "((\(withCaptureFnPtrType))(\(closureVar).fn))(\(argsWithEnvStr));\n"
-      indent = String(indent.dropLast(2))
-      addIndent()
-      buffer += "}\n"
-      return ""
-    } else {
-      let result = nextTemp()
-      addIndent()
-      buffer += "\(returnCType) \(result);\n"
-      addIndent()
-      buffer += "if (\(closureVar).env == NULL) {\n"
-      indent += "  "
-      addIndent()
-      buffer += "\(result) = ((\(noCaptureFnPtrType))(\(closureVar).fn))(\(argsStr));\n"
-      indent = String(indent.dropLast(2))
-      addIndent()
-      buffer += "} else {\n"
-      indent += "  "
-      addIndent()
-      buffer += "\(result) = ((\(withCaptureFnPtrType))(\(closureVar).fn))(\(argsWithEnvStr));\n"
-      indent = String(indent.dropLast(2))
-      addIndent()
-      buffer += "}\n"
-      return result
-    }
-  }
-
-  private func generateFunctionCall(
-    _ identifier: Symbol, _ arguments: [TypedExpressionNode], _ type: Type
-  ) -> String {
-    var paramResults: [String] = []
-    // struct类型参数传递用值，isValue==false 的 struct 参数自动递归 copy
-    for arg in arguments {
-      let result = generateExpressionSSA(arg)
-      if case .structure(let decl) = arg.type {
-        if arg.valueCategory == .lvalue {
-          let copyResult = nextTemp()
-          addIndent()
-          buffer += "\(getCType(arg.type)) \(copyResult) = __koral_\(decl.qualifiedName)_copy(&\(result));\n"
-          paramResults.append(copyResult)
-        } else {
-          paramResults.append(result)
-        }
-      } else if case .reference(_) = arg.type {
-        if arg.valueCategory == .lvalue {
-          addIndent()
-          buffer += "__koral_retain(\(result).control);\n"
-        }
-        paramResults.append(result)
-      } else {
-        paramResults.append(result)
-      }
-    }
-    
-    // Intrinsic Implementation is now handled in .intrinsic AST node.
-    // However, keeping this for backward compatibility if any old logic slipped through
-    // or if we switch back.
-    // But since we are cleaning up, we can remove the pointer checks from here as they should be intercepted
-    // by AST generation.
-    // If we missed something in AST transform, this might be dead code.
-    
-    addIndent()
-    if type == .void || type == .never {
-      buffer += "\(identifier.qualifiedName)("
-      buffer += paramResults.joined(separator: ", ")
-      buffer += ");\n"
-      return ""
-    } else {
-      let result = nextTemp()
-      buffer += "\(getCType(type)) \(result) = \(identifier.qualifiedName)("
-      buffer += paramResults.joined(separator: ", ")
-      buffer += ");\n"
-      return result
-    }
-  }
-
-  private func generateMemberPath(_ source: TypedExpressionNode, _ path: [Symbol]) -> String {
-    let sourceResult = generateExpressionSSA(source)
-    var access = sourceResult
-    var curType = source.type
-    for member in path {
-      var memberAccess: String
-      if case .reference(let inner) = curType {
-          let innerCType = getCType(inner)
-          memberAccess = "((\(innerCType)*)\(access).ptr)->\(member.qualifiedName)"
-      } else {
-          memberAccess = "\(access).\(member.qualifiedName)"
-      }
-      
-      // Only apply type cast for non-reference struct members when the C types differ
-      // This handles cases where generic type parameters are replaced with concrete types
-      // but the C representation needs explicit casting
-      if case .structure(let decl) = curType.canonical {
-        if let canonicalMember = decl.members.first(where: { $0.name == member.name }) {
-          // Compare C type representations instead of Type equality
-          // This avoids issues with UUID-based type identity for generic instantiations
-          let canonicalCType = getCType(canonicalMember.type)
-          let memberCType = getCType(member.type)
-          if canonicalCType != memberCType {
-            // Skip cast for reference types - they all use struct Ref
-            if case .reference(_) = member.type {
-              // No cast needed for reference types
-            } else {
-              let targetCType = getCType(member.type)
-              memberAccess = "*(\(targetCType)*)&(\(memberAccess))"
-            }
-          }
-        }
-      }
-      
-      access = memberAccess
-      curType = member.type
-    }
-    let result = nextTemp()
-    addIndent()
-    buffer += "\(getCType(path.last?.type ?? .void)) \(result) = \(access);\n"
-    return result
-  }
 }

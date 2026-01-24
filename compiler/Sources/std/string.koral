@@ -264,7 +264,17 @@ given String {
         String(storage)
     }
 
-    public substring(self, start Int, len Int) String = self.make_substring(start, len)
+    public slice(self, range [Int]Range) String = when range is {
+        .ClosedRange(start, end) then self.make_substring(start, end - start + 1),
+        .ClosedOpenRange(start, end) then self.make_substring(start, end - start),
+        .OpenClosedRange(start, end) then self.make_substring(start + 1, end - start),
+        .OpenRange(start, end) then self.make_substring(start + 1, end - start - 1),
+        .FromRange(start) then self.make_substring(start, self.storage.len - start),
+        .FromOpenRange(start) then self.make_substring(start + 1, self.storage.len - start - 1),
+        .ToRange(end) then self.make_substring(0, end + 1),
+        .ToOpenRange(end) then self.make_substring(0, end),
+        .FullRange then self.make_substring(0, self.storage.len),
+    }
 
     public trim_ascii_start(self) String = {
         let mut i = 0
@@ -507,7 +517,7 @@ given StringSplitAsciiWhitespaceIterator {
         if i >= len then { return [String]Option.None(); }
         let start = i
         while i < len and not String.is_ascii_space(self.source[i]) then { i += 1; }
-        let part = self.source.substring(start, i - start)
+        let part = self.source.slice(start..<i)
         self.index = i
         [String]Option.Some(part)
     }
@@ -519,12 +529,12 @@ given StringSplitIterator {
         if self.index > len then { return [String]Option.None() }
         when self.source.find_from(self.sep, self.index) is {
             .Some(i) then {
-                let part = self.source.substring(self.index, i - self.index)
+                let part = self.source.slice(self.index..<i)
                 self.index = i + self.sep.count()
                 [String]Option.Some(part)
             },
             .None then {
-                let part = self.source.substring(self.index, len - self.index)
+                let part = self.source.slice(self.index...)
                 self.index = len + 1
                 [String]Option.Some(part)
             },
@@ -542,12 +552,12 @@ given StringLinesIterator {
         }
         when self.source.find_from("\n", self.index) is {
             .Some(i) then {
-                let part = self.source.substring(self.index, i - self.index)
+                let part = self.source.slice(self.index..<i)
                 self.index = i + 1
                 [String]Option.Some(part)
             },
             .None then {
-                let part = self.source.substring(self.index, len - self.index)
+                let part = self.source.slice(self.index...)
                 self.index = len + 1
                 [String]Option.Some(part)
             },

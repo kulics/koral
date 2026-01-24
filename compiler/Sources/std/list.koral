@@ -208,6 +208,31 @@ given[T Any] [T]List {
         self.ensure_unique()
         self.storage.source.offset(index).replace(value);
     }
+
+    private make_slice(self, start Int, len Int) [T]List = {
+        if start < 0 or len < 0 or start + len > self.storage.len then {
+            panic("List slice out of bounds")
+        }
+        let mut result = [T]List.with_capacity(len)
+        let mut i = 0
+        while i < len then {
+            result.push_back(self.storage.source.offset(start + i).peek())
+            i += 1
+        }
+        result
+    }
+
+    public slice(self, range [Int]Range) [T]List = when range is {
+        .ClosedRange(start, end) then self.make_slice(start, end - start + 1),
+        .ClosedOpenRange(start, end) then self.make_slice(start, end - start),
+        .OpenClosedRange(start, end) then self.make_slice(start + 1, end - start),
+        .OpenRange(start, end) then self.make_slice(start + 1, end - start - 1),
+        .FromRange(start) then self.make_slice(start, self.storage.len - start),
+        .FromOpenRange(start) then self.make_slice(start + 1, self.storage.len - start - 1),
+        .ToRange(end) then self.make_slice(0, end + 1),
+        .ToOpenRange(end) then self.make_slice(0, end),
+        .FullRange then self.make_slice(0, self.storage.len),
+    }
 }
 
 given[T Equatable] [T]List {

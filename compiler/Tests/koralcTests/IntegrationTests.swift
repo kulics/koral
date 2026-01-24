@@ -2,43 +2,138 @@ import XCTest
 import Foundation
 
 class IntegrationTests: XCTestCase {
-    
-    func testAllCases() throws {
-        // 1. Locate the Tests/Cases directory by finding Package.swift
+    private func projectRootURL() -> URL? {
         let currentFileURL = URL(fileURLWithPath: #file)
         var projectRoot = currentFileURL.deletingLastPathComponent()
-        
+
         while !FileManager.default.fileExists(atPath: projectRoot.appendingPathComponent("Package.swift").path) {
             if projectRoot.path == "/" {
-                XCTFail("Could not find Package.swift starting from \(currentFileURL.path)")
-                return
+                return nil
             }
             projectRoot = projectRoot.deletingLastPathComponent()
         }
-        
-        let casesDir = projectRoot.appendingPathComponent("Tests/Cases")
-        
-        print("Debug: #file = \(currentFileURL.path)")
-        print("Debug: casesDir = \(casesDir.path)")
-        print("Debug: projectRoot = \(projectRoot.path)")
-        
-        let fileManager = FileManager.default
-        guard fileManager.fileExists(atPath: casesDir.path) else {
-            XCTFail("Tests/Cases directory not found at \(casesDir.path)")
+
+        return projectRoot
+    }
+
+    private func runCase(named fileName: String) throws {
+        guard let projectRoot = projectRootURL() else {
+            XCTFail("Could not find Package.swift starting from \(#file)")
             return
         }
-        
-        let files = try fileManager.contentsOfDirectory(at: casesDir, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "koral" }
-            .sorted { $0.lastPathComponent < $1.lastPathComponent }
-        
-        print("Found \(files.count) test cases.")
-        
-        for file in files {
-            print("Running test: \(file.lastPathComponent)")
-            try runTestCase(file: file, projectRoot: projectRoot)
+
+        let casesDir = projectRoot.appendingPathComponent("Tests/Cases")
+        let file = casesDir.appendingPathComponent(fileName)
+
+        guard FileManager.default.fileExists(atPath: file.path) else {
+            XCTFail("Test case not found at \(file.path)")
+            return
         }
+
+        try runTestCase(file: file, projectRoot: projectRoot)
     }
+
+    func test_access_modifiers() throws { try runCase(named: "access_modifiers.koral") }
+    func test_bitwise() throws { try runCase(named: "bitwise.koral") }
+    func test_byte_literal_coercion() throws { try runCase(named: "byte_literal_coercion.koral") }
+    func test_c_keyword_escaping() throws { try runCase(named: "c_keyword_escaping.koral") }
+    func test_cast_float_overflow_panic() throws { try runCase(named: "cast_float_overflow_panic.koral") }
+    func test_cast_numeric() throws { try runCase(named: "cast_numeric.koral") }
+    func test_cast_pointer_int_uint() throws { try runCase(named: "cast_pointer_int_uint.koral") }
+    func test_cast_widening() throws { try runCase(named: "cast_widening.koral") }
+    func test_comparable() throws { try runCase(named: "comparable.koral") }
+    func test_comparison_pattern() throws { try runCase(named: "comparison_pattern.koral") }
+    func test_compiler_method_call_compare_error() throws { try runCase(named: "compiler_method_call_compare_error.koral") }
+    func test_compiler_method_call_error() throws { try runCase(named: "compiler_method_call_error.koral") }
+    func test_compound_assignment() throws { try runCase(named: "compound_assignment.koral") }
+    func test_conditional_pattern_matching() throws { try runCase(named: "conditional_pattern_matching.koral") }
+    func test_control_flow() throws { try runCase(named: "control_flow.koral") }
+    func test_deref_assignment() throws { try runCase(named: "deref_assignment.koral") }
+    func test_drop_test() throws { try runCase(named: "drop_test.koral") }
+    func test_escape_analysis() throws { try runCase(named: "escape_analysis.koral") }
+    func test_exhaustiveness_check() throws { try runCase(named: "exhaustiveness_check.koral") }
+    func test_float_types() throws { try runCase(named: "float_types.koral") }
+    func test_for_loop_basic() throws { try runCase(named: "for_loop_basic.koral") }
+    func test_for_loop_control_flow() throws { try runCase(named: "for_loop_control_flow.koral") }
+    func test_for_loop_direct_iterator() throws { try runCase(named: "for_loop_direct_iterator.koral") }
+    func test_for_loop_error_non_exhaustive() throws { try runCase(named: "for_loop_error_non_exhaustive.koral") }
+    func test_for_loop_error_not_iterable() throws { try runCase(named: "for_loop_error_not_iterable.koral") }
+    func test_for_loop_nested() throws { try runCase(named: "for_loop_nested.koral") }
+    func test_functions() throws { try runCase(named: "functions.koral") }
+    func test_generic_declaration_errors() throws { try runCase(named: "generic_declaration_errors.koral") }
+    func test_generic_given() throws { try runCase(named: "generic_given.koral") }
+    func test_generic_method_parse_test() throws { try runCase(named: "generic_method_parse_test.koral") }
+    func test_generic_method_test() throws { try runCase(named: "generic_method_test.koral") }
+    func test_generic_struct_validation() throws { try runCase(named: "generic_struct_validation.koral") }
+    func test_generic_tostring_test() throws { try runCase(named: "generic_tostring_test.koral") }
+    func test_generic_union_validation() throws { try runCase(named: "generic_union_validation.koral") }
+    func test_generics() throws { try runCase(named: "generics.koral") }
+    func test_hashable_basic() throws { try runCase(named: "hashable_basic.koral") }
+    func test_hashable_primitives() throws { try runCase(named: "hashable_primitives.koral") }
+    func test_heap_allocation() throws { try runCase(named: "heap_allocation.koral") }
+    func test_hello() throws { try runCase(named: "hello.koral") }
+    func test_integer_types() throws { try runCase(named: "integer_types.koral") }
+    func test_lambda_basic() throws { try runCase(named: "lambda_basic.koral") }
+    func test_lambda_closure() throws { try runCase(named: "lambda_closure.koral") }
+    func test_lambda_currying() throws { try runCase(named: "lambda_currying.koral") }
+    func test_lambda_error_capture_mutable() throws { try runCase(named: "lambda_error_capture_mutable.koral") }
+    func test_lambda_error_inference_fail() throws { try runCase(named: "lambda_error_inference_fail.koral") }
+    func test_lambda_error_type_mismatch() throws { try runCase(named: "lambda_error_type_mismatch.koral") }
+    func test_lambda_higher_order() throws { try runCase(named: "lambda_higher_order.koral") }
+    func test_lambda_parsing_test() throws { try runCase(named: "lambda_parsing_test.koral") }
+    func test_lambda_type_inference() throws { try runCase(named: "lambda_type_inference.koral") }
+    func test_lambda_with_generics() throws { try runCase(named: "lambda_with_generics.koral") }
+    func test_let_expression() throws { try runCase(named: "let_expression.koral") }
+    func test_list_test() throws { try runCase(named: "list_test.koral") }
+    func test_map_test() throws { try runCase(named: "map_test.koral") }
+    func test_match() throws { try runCase(named: "match.koral") }
+    func test_match_drop() throws { try runCase(named: "match_drop.koral") }
+    func test_math() throws { try runCase(named: "math.koral") }
+    func test_missing_catchall_int() throws { try runCase(named: "missing_catchall_int.koral") }
+    func test_missing_catchall_string() throws { try runCase(named: "missing_catchall_string.koral") }
+    func test_monomorphization() throws { try runCase(named: "monomorphization.koral") }
+    func test_never_test() throws { try runCase(named: "never_test.koral") }
+    func test_newline_semicolon_blankline_blocks_dot() throws { try runCase(named: "newline_semicolon_blankline_blocks_dot.koral") }
+    func test_newline_semicolon_comment_blocks_infix() throws { try runCase(named: "newline_semicolon_comment_blocks_infix.koral") }
+    func test_newline_semicolon_continuation_ok() throws { try runCase(named: "newline_semicolon_continuation_ok.koral") }
+    func test_non_exhaustive_bool() throws { try runCase(named: "non_exhaustive_bool.koral") }
+    func test_non_exhaustive_union() throws { try runCase(named: "non_exhaustive_union.koral") }
+    func test_option_map_test() throws { try runCase(named: "option_map_test.koral") }
+    func test_pattern_combinators() throws { try runCase(named: "pattern_combinators.koral") }
+    func test_pointer_test() throws { try runCase(named: "pointer_test.koral") }
+    func test_power() throws { try runCase(named: "power.koral") }
+    func test_range_basic() throws { try runCase(named: "range_basic.koral") }
+    func test_range_iterator() throws { try runCase(named: "range_iterator.koral") }
+    func test_range_unbounded() throws { try runCase(named: "range_unbounded.koral") }
+    func test_recursion_check() throws { try runCase(named: "recursion_check.koral") }
+    func test_result_map_test() throws { try runCase(named: "result_map_test.koral") }
+    func test_return_break_continue() throws { try runCase(named: "return_break_continue.koral") }
+    func test_rvalue_ref_param_error() throws { try runCase(named: "rvalue_ref_param_error.koral") }
+    func test_rvalue_temp_materialization() throws { try runCase(named: "rvalue_temp_materialization.koral") }
+    func test_set_test() throws { try runCase(named: "set_test.koral") }
+    func test_single_quote_string() throws { try runCase(named: "single_quote_string.koral") }
+    func test_stream_api_test() throws { try runCase(named: "stream_api_test.koral") }
+    func test_stream_basic() throws { try runCase(named: "stream_basic.koral") }
+    func test_stream_inference_test() throws { try runCase(named: "stream_inference_test.koral") }
+    func test_stream_simple() throws { try runCase(named: "stream_simple.koral") }
+    func test_string() throws { try runCase(named: "string.koral") }
+    func test_string_methods() throws { try runCase(named: "string_methods.koral") }
+    func test_struct_with_ref() throws { try runCase(named: "struct_with_ref.koral") }
+    func test_structs() throws { try runCase(named: "structs.koral") }
+    func test_subscript_test() throws { try runCase(named: "subscript_test.koral") }
+    func test_trait_cannot_as_type() throws { try runCase(named: "trait_cannot_as_type.koral") }
+    func test_trait_constraint_validation() throws { try runCase(named: "trait_constraint_validation.koral") }
+    func test_trait_equatable() throws { try runCase(named: "trait_equatable.koral") }
+    func test_trait_generic_method_test() throws { try runCase(named: "trait_generic_method_test.koral") }
+    func test_trait_inheritance() throws { try runCase(named: "trait_inheritance.koral") }
+    func test_trait_inheritance_multiple() throws { try runCase(named: "trait_inheritance_multiple.koral") }
+    func test_trait_inheritance_validation() throws { try runCase(named: "trait_inheritance_validation.koral") }
+    func test_trait_missing_method_error() throws { try runCase(named: "trait_missing_method_error.koral") }
+    func test_union_construction() throws { try runCase(named: "union_construction.koral") }
+    func test_union_methods() throws { try runCase(named: "union_methods.koral") }
+    func test_union_parsing() throws { try runCase(named: "union_parsing.koral") }
+    func test_unreachable_pattern() throws { try runCase(named: "unreachable_pattern.koral") }
+    func test_zip_test() throws { try runCase(named: "zip_test.koral") }
     
     func runTestCase(file: URL, projectRoot: URL) throws {
         // 1. Parse expectations
