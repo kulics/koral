@@ -10,9 +10,24 @@ public struct MonomorphizedProgram {
     /// The global nodes containing all concrete declarations.
     public let globalNodes: [TypedGlobalNode]
     
+    /// 静态方法查找表：(类型名, 方法名) -> DefId
+    /// 用于 CodeGen 查找标准库函数的正确 C 标识符
+    public let staticMethodLookup: [String: DefId]
+    
     /// Creates a new MonomorphizedProgram.
-    public init(globalNodes: [TypedGlobalNode]) {
+    public init(globalNodes: [TypedGlobalNode], staticMethodLookup: [String: DefId] = [:]) {
         self.globalNodes = globalNodes
+        self.staticMethodLookup = staticMethodLookup
+    }
+    
+    /// 查找静态方法的完整限定名
+    /// - Parameters:
+    ///   - typeName: 类型名（如 "String", "Rune"）
+    ///   - methodName: 方法名（如 "empty", "from_utf8_bytes_unchecked"）
+    /// - Returns: 对应的 DefId，如果未找到则返回 nil
+    public func lookupStaticMethod(typeName: String, methodName: String) -> DefId? {
+        let key = "\(typeName).\(methodName)"
+        return staticMethodLookup[key]
     }
 }
 
@@ -82,6 +97,81 @@ public class Monomorphizer {
     
     /// Maximum allowed recursion depth to prevent infinite loops
     private let maxRecursionDepth: Int = 100
+    
+    // MARK: - DefId Support
+    
+    /// DefIdMap for allocating unique DefIds during monomorphization
+    internal var defIdMap = DefIdMap()
+    
+    /// Creates a Symbol with a new DefId for monomorphized entities
+    /// - Parameters:
+    ///   - name: Symbol name
+    ///   - type: Symbol type
+    ///   - kind: Symbol kind
+    ///   - methodKind: Compiler method kind (default: .normal)
+    ///   - modulePath: Module path (default: empty for generated symbols)
+    ///   - sourceFile: Source file (default: empty)
+    ///   - access: Access modifier (default: .default)
+    /// - Returns: A new Symbol with allocated DefId
+    internal func makeSymbol(
+        name: String,
+        type: Type,
+        kind: SymbolKind,
+        methodKind: CompilerMethodKind = .normal,
+        modulePath: [String] = [],
+        sourceFile: String = "",
+        access: AccessModifier = .default
+    ) -> Symbol {
+        let defKind: DefKind
+        switch kind {
+        case .function:
+            defKind = .function
+        case .type:
+            defKind = .type(.structure)
+        case .variable:
+            defKind = .variable
+        case .module:
+            defKind = .module
+        }
+        
+        let defId = defIdMap.allocate(
+            modulePath: modulePath,
+            name: name,
+            kind: defKind,
+            sourceFile: sourceFile
+        )
+        
+        return Symbol(
+            name: name,
+            type: type,
+            kind: kind,
+            methodKind: methodKind,
+            modulePath: modulePath,
+            sourceFile: sourceFile,
+            access: access,
+            defId: defId
+        )
+    }
+    
+    /// Creates a Symbol by copying from an existing symbol but with a new DefId
+    /// Used when transforming symbols during monomorphization
+    internal func copySymbolWithNewDefId(
+        _ symbol: Symbol,
+        newName: String? = nil,
+        newType: Type? = nil,
+        newModulePath: [String]? = nil,
+        newSourceFile: String? = nil
+    ) -> Symbol {
+        return makeSymbol(
+            name: newName ?? symbol.name,
+            type: newType ?? symbol.type,
+            kind: symbol.kind,
+            methodKind: symbol.methodKind,
+            modulePath: newModulePath ?? symbol.modulePath,
+            sourceFile: newSourceFile ?? symbol.sourceFile,
+            access: symbol.access
+        )
+    }
     
     // MARK: - Initialization
     
@@ -197,7 +287,77 @@ public class Monomorphizer {
             }
         }
         
-        return MonomorphizedProgram(globalNodes: resolvedGeneratedNodes + resolvedResultNodes)
+        // 构建静态方法查找表
+        let allNodes = resolvedGeneratedNodes + resolvedResultNodes
+        let staticMethodLookup = buildStaticMethodLookup(from: allNodes)
+        
+        return MonomorphizedProgram(globalNodes: allNodes, staticMethodLookup: staticMethodLookup)
+    }
+    
+    /// 构建静态方法查找表
+    /// - Parameter nodes: 所有全局节点
+    /// - Returns: (类型名.方法名) -> 完整限定名 的映射
+    private func buildStaticMethodLookup(from nodes: [TypedGlobalNode]) -> [String: DefId] {
+        var lookup: [String: DefId] = [:]
+        
+        for node in nodes {
+            switch node {
+            case .givenDeclaration(let type, let methods):
+                // 获取类型的简单名称（不含模块路径）
+                let typeName: String
+                let qualifiedTypeName: String
+                switch type {
+                case .structure(let decl):
+                    typeName = decl.name
+                    qualifiedTypeName = decl.qualifiedName
+                case .union(let decl):
+                    typeName = decl.name
+                    qualifiedTypeName = decl.qualifiedName
+                default:
+                    continue
+                }
+                
+                // 注册每个方法
+                for method in methods {
+                    // method.identifier.name 是 mangled name，格式为 qualifiedTypeName_methodName
+                    // 例如：std_std_String_from_utf8_bytes_unchecked
+                    // 我们需要提取原始方法名
+                    let mangledName = method.identifier.name
+                    
+                    // 从 mangled name 中提取原始方法名
+                    // mangled name 格式：qualifiedTypeName_methodName
+                    let prefix = "\(qualifiedTypeName)_"
+                    let originalMethodName: String
+                    if mangledName.hasPrefix(prefix) {
+                        originalMethodName = String(mangledName.dropFirst(prefix.count))
+                    } else {
+                        // 回退：使用整个名称
+                        originalMethodName = mangledName
+                    }
+                    
+                    // 键格式：TypeName.methodName（使用简单类型名和原始方法名）
+                    let key = "\(typeName).\(originalMethodName)"
+                    lookup[key] = method.identifier.defId
+                }
+                
+            case .globalFunction(let identifier, _, _):
+                // 对于全局函数，也可以通过简单名称查找
+                let name = identifier.name
+                
+                // 检查是否是类型的静态方法（名称格式：TypeName_methodName）
+                if let underscoreIndex = name.firstIndex(of: "_") {
+                    let typeName = String(name[..<underscoreIndex])
+                    let methodName = String(name[name.index(after: underscoreIndex)...])
+                    let key = "\(typeName).\(methodName)"
+                    lookup[key] = identifier.defId
+                }
+                
+            default:
+                break
+            }
+        }
+        
+        return lookup
     }
 
     
@@ -249,6 +409,24 @@ public class Monomorphizer {
     internal func getCompilerMethodKind(_ name: String) -> CompilerMethodKind {
         return SemaUtils.getCompilerMethodKind(name)
     }
+
+    /// 获取或分配类型定义的 DefId（用于单态化生成的类型）
+    internal func getOrAllocateTypeDefId(
+        name: String,
+        kind: TypeDefKind,
+        modulePath: [String] = [],
+        sourceFile: String = ""
+    ) -> DefId {
+        if let existing = defIdMap.lookup(modulePath: modulePath, name: name, sourceFile: sourceFile.isEmpty ? nil : sourceFile) {
+            return existing
+        }
+        return defIdMap.allocate(
+            modulePath: modulePath,
+            name: name,
+            kind: .type(kind),
+            sourceFile: sourceFile
+        )
+    }
     
     private func resolveTraitName(from node: TypeNode) throws -> String {
         return try SemaUtils.resolveTraitName(from: node)
@@ -257,6 +435,7 @@ public class Monomorphizer {
     private func builtinStringType() -> Type {
         let decl = StructDecl(
             name: "String",
+            defId: getOrAllocateTypeDefId(name: "String", kind: .structure),
             modulePath: [],
             sourceFile: "",
             access: .default,

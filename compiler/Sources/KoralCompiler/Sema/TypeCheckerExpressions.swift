@@ -155,13 +155,23 @@ extension TypeChecker {
         symbolKind = .variable(info.mutable ? .MutableValue : .Value)
       }
       
+      // 为符号分配 DefId
+      let defKind: DefKind = currentScope.isFunction(name, sourceFile: currentSourceFile) ? .function : .variable
+      let defId = defIdMap.allocate(
+        modulePath: symbolModulePath,
+        name: name,
+        kind: defKind,
+        sourceFile: symbolSourceFile
+      )
+      
       let symbol = Symbol(
         name: name,
         type: info.type,
         kind: symbolKind,
         modulePath: symbolModulePath,
         sourceFile: symbolSourceFile,
-        access: info.isPrivate ? .private : .default
+        access: info.isPrivate ? .private : .default,
+        defId: defId
       )
       
       return .variable(identifier: symbol)
@@ -310,7 +320,7 @@ extension TypeChecker {
 
       return try withNewScope {
         currentScope.define(name, typedValue.type, mutable: mutable)
-        let symbol = Symbol(
+        let symbol = makeLocalSymbol(
           name: name, type: typedValue.type, kind: .variable(mutable ? .MutableValue : .Value))
 
         let typedBody = try inferTypedExpression(body)
@@ -1064,7 +1074,7 @@ extension TypeChecker {
         }
 
         return .typeConstruction(
-          identifier: Symbol(name: name, type: type, kind: .type),
+          identifier: makeLocalSymbol(name: name, type: type, kind: .type),
           typeArgs: nil,
           arguments: typedArguments,
           type: type
@@ -1224,7 +1234,7 @@ extension TypeChecker {
       let genericType = Type.genericStruct(template: base, args: resolvedArgs)
 
       return .typeConstruction(
-        identifier: Symbol(name: base, type: genericType, kind: .type),
+        identifier: makeLocalSymbol(name: base, type: genericType, kind: .type),
         typeArgs: resolvedArgs,
         arguments: typedArguments,
         type: genericType
@@ -1852,13 +1862,20 @@ extension TypeChecker {
           // Look up the member in the module's public types
           if let memberType = moduleInfo.publicTypes[memberName] {
             // Return a type symbol
+            let defId = defIdMap.allocate(
+              modulePath: moduleInfo.modulePath,
+              name: memberName,
+              kind: .type(.structure),
+              sourceFile: ""
+            )
             let typeSymbol = Symbol(
               name: memberName,
               type: memberType,
               kind: .type,
               modulePath: moduleInfo.modulePath,
               sourceFile: "",
-              access: .public
+              access: .public,
+              defId: defId
             )
             return .variable(identifier: typeSymbol)
           }
@@ -1885,7 +1902,7 @@ extension TypeChecker {
           }
           
           // Try generic struct template
-          if let template = currentScope.lookupGenericStructTemplate(typeName) {
+          if currentScope.lookupGenericStructTemplate(typeName) != nil {
             // For generic types, we need type arguments
             // This case handles module.GenericType.method() without explicit type args
             // which is typically an error, but we'll let inferTypeMemberPath handle it
@@ -1912,7 +1929,7 @@ extension TypeChecker {
           if let c = decl.cases.first(where: { $0.name == memberName }) {
             let paramTypes = c.parameters.map { Parameter(type: $0.type, kind: .byVal) }
             let funcType = Type.function(parameters: paramTypes, returns: type)
-            let symbol = Symbol(name: "\(name).\(memberName)", type: funcType, kind: .function)
+            let symbol = makeLocalSymbol(name: "\(name).\(memberName)", type: funcType, kind: .function)
             return .variable(identifier: symbol)
           }
         }
@@ -1966,7 +1983,7 @@ extension TypeChecker {
           
           let symbolName = "\(name).\(memberName)"
           let constructorType = Type.function(parameters: resolvedParams, returns: type)
-          let symbol = Symbol(name: symbolName, type: constructorType, kind: .variable(.Value))
+          let symbol = makeLocalSymbol(name: symbolName, type: constructorType, kind: .variable(.Value))
           return .variable(identifier: symbol)
         }
       }
@@ -2001,7 +2018,7 @@ extension TypeChecker {
       var foundMember = false
       if case .structure(let decl) = typeToLookup {
         if let mem = decl.members.first(where: { $0.name == memberName }) {
-          let sym = Symbol(
+          let sym = makeLocalSymbol(
             name: mem.name, type: mem.type, kind: .variable(mem.mutable ? .MutableValue : .Value))
           typedPath.append(sym)
           currentType = mem.type
@@ -2028,7 +2045,7 @@ extension TypeChecker {
               }
               return try resolveTypeNode(param.type)
             }
-            let sym = Symbol(
+            let sym = makeLocalSymbol(
               name: param.name, type: memberType, kind: .variable(param.mutable ? .MutableValue : .Value))
             typedPath.append(sym)
             currentType = memberType
@@ -2141,7 +2158,7 @@ extension TypeChecker {
           
           let symbolName = "\(baseName).\(memberName)"
           let constructorType = Type.function(parameters: resolvedParams, returns: type)
-          let symbol = Symbol(name: symbolName, type: constructorType, kind: .variable(.Value))
+          let symbol = makeLocalSymbol(name: symbolName, type: constructorType, kind: .variable(.Value))
           return .variable(identifier: symbol)
         }
       }
@@ -2182,10 +2199,11 @@ extension TypeChecker {
               traitInfo: traitInfo,
               traitTypeArgs: traitTypeArgs
             )
-            methodSymbol = Symbol(
+            methodSymbol = makeGlobalSymbol(
               name: "__trait_\(traitName)_\(memberName)",
               type: expectedType,
-              kind: .function
+              kind: .function,
+              access: .default
             )
             break
           }
@@ -2363,11 +2381,12 @@ extension TypeChecker {
             traitInfo: traitInfo,
             traitTypeArgs: traitTypeArgs
           )
-          let placeholder = Symbol(
+          let placeholder = makeGlobalSymbol(
             name: "__trait_\(traitName)_\(memberName)",
             type: expectedType,
             kind: .function,
-            methodKind: getCompilerMethodKind(memberName)
+            methodKind: getCompilerMethodKind(memberName),
+            access: .default
           )
 
           if placeholder.methodKind != .normal {
@@ -2788,13 +2807,11 @@ extension TypeChecker {
         throw SemanticError(.generic("Trait Equatable is missing required method \(methodName)"), line: currentLine)
       }
       let expectedType = try expectedFunctionTypeForTraitMethod(sig, selfType: receiverType)
-      methodSym = Symbol(
+      methodSym = makeGlobalSymbol(
         name: "__trait_Equatable_\(methodName)",
         type: expectedType,
         kind: .function,
         methodKind: .equals,
-        modulePath: currentModulePath,
-        sourceFile: currentSourceFile,
         access: .default
       )
     } else {
@@ -2838,13 +2855,11 @@ extension TypeChecker {
         throw SemanticError(.generic("Trait Comparable is missing required method \(methodName)"), line: currentLine)
       }
       let expectedType = try expectedFunctionTypeForTraitMethod(sig, selfType: receiverType)
-      methodSym = Symbol(
+      methodSym = makeGlobalSymbol(
         name: "__trait_Comparable_\(methodName)",
         type: expectedType,
         kind: .function,
         methodKind: .compare,
-        modulePath: currentModulePath,
-        sourceFile: currentSourceFile,
         access: .default
       )
     } else {
@@ -2877,7 +2892,7 @@ extension TypeChecker {
         throw SemanticError.undefinedVariable(name)
       }
       guard currentScope.isMutable(name, sourceFile: currentSourceFile) else { throw SemanticError.assignToImmutable(name) }
-      return .variable(identifier: Symbol(name: name, type: type, kind: .variable(.MutableValue)))
+      return .variable(identifier: makeLocalSymbol(name: name, type: type, kind: .variable(.MutableValue)))
 
     case .memberPath(let base, let path):
       // Check if base evaluates to a Reference type (RValue allowed)
@@ -2911,7 +2926,7 @@ extension TypeChecker {
           }
 
           resolvedPath.append(
-            Symbol(name: member.name, type: member.type, kind: .variable(.MutableValue)))
+            makeLocalSymbol(name: member.name, type: member.type, kind: .variable(.MutableValue)))
           currentType = member.type
           continue
         }
@@ -2948,7 +2963,7 @@ extension TypeChecker {
           }
           
           resolvedPath.append(
-            Symbol(name: param.name, type: memberType, kind: .variable(.MutableValue)))
+            makeLocalSymbol(name: param.name, type: memberType, kind: .variable(.MutableValue)))
           currentType = memberType
           continue
         }
@@ -3198,7 +3213,7 @@ extension TypeChecker {
     synthesizedTempIndex += 1
     
     // Create iterator symbol (mutable)
-    let iterSymbol = Symbol(name: iterVarName, type: iteratorType, kind: .variable(.MutableValue))
+    let iterSymbol = makeLocalSymbol(name: iterVarName, type: iteratorType, kind: .variable(.MutableValue))
     
     // Build the iterator initialization expression
     let iteratorInit: TypedExpressionNode
@@ -3365,7 +3380,7 @@ extension TypeChecker {
     switch pattern {
     case .variable(let name, let mutable, _):
       let varKind: VariableKind = mutable ? .MutableValue : .Value
-      let symbol = Symbol(name: name, type: expectedType, kind: .variable(varKind))
+      let symbol = makeLocalSymbol(name: name, type: expectedType, kind: .variable(varKind))
       return .variable(symbol: symbol)
     case .wildcard:
       return .wildcard

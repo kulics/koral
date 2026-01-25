@@ -52,9 +52,13 @@ extension TypeChecker {
       }
 
       currentScope.define(name, type, mutable: mutable)
+      let symbol = makeLocalSymbol(
+        name: name,
+        type: type,
+        kind: mutable ? .variable(.MutableValue) : .variable(.Value)
+      )
       return .variableDeclaration(
-        identifier: Symbol(
-          name: name, type: type, kind: mutable ? .variable(.MutableValue) : .variable(.Value)),
+        identifier: symbol,
         value: typedValue,
         mutable: mutable
       )

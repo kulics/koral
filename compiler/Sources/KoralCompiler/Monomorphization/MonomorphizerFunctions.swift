@@ -42,9 +42,11 @@ extension Monomorphizer {
         let resolvedReturnType = try resolveTypeNode(template.returnType, substitution: typeSubstitution)
         let resolvedParams = try template.parameters.map { param -> Symbol in
             let paramType = try resolveTypeNode(param.type, substitution: typeSubstitution)
-            return Symbol(
-                name: param.name, type: paramType,
-                kind: .variable(param.mutable ? .MutableValue : .Value))
+            return makeSymbol(
+                name: param.name,
+                type: paramType,
+                kind: .variable(param.mutable ? .MutableValue : .Value)
+            )
         }
         
         // Calculate mangled name
@@ -88,7 +90,7 @@ extension Monomorphizer {
             generatedLayouts.insert(mangledName)
             
             let functionNode = TypedGlobalNode.globalFunction(
-                identifier: Symbol(name: mangledName, type: functionType, kind: .function),
+                identifier: makeSymbol(name: mangledName, type: functionType, kind: .function),
                 parameters: resolvedParams,
                 body: typedBody
             )
@@ -179,7 +181,7 @@ extension Monomorphizer {
         // Check cache
         if let (cachedName, cachedType) = instantiatedFunctions[key] {
             let kind = getCompilerMethodKind(method.name)
-            return Symbol(name: cachedName, type: cachedType, kind: .function, methodKind: kind)
+            return makeSymbol(name: cachedName, type: cachedType, kind: .function, methodKind: kind)
         }
         
         // Create type substitution map
@@ -198,9 +200,11 @@ extension Monomorphizer {
         let returnType = try resolveTypeNode(method.returnType, substitution: typeSubstitution)
         let params = try method.parameters.map { param -> Symbol in
             let paramType = try resolveTypeNode(param.type, substitution: typeSubstitution)
-            return Symbol(
-                name: param.name, type: paramType,
-                kind: .variable(param.mutable ? .MutableValue : .Value))
+            return makeSymbol(
+                name: param.name,
+                type: paramType,
+                kind: .variable(param.mutable ? .MutableValue : .Value)
+            )
         }
         
         // Create function type
@@ -214,7 +218,7 @@ extension Monomorphizer {
         // Skip code generation if function type still contains generic parameters
         if functionType.containsGenericParameter {
             let kind = getCompilerMethodKind(method.name)
-            return Symbol(name: mangledName, type: functionType, kind: .function, methodKind: kind)
+            return makeSymbol(name: mangledName, type: functionType, kind: .function, methodKind: kind)
         }
         
         // IMPORTANT: Cache the function BEFORE processing the body to prevent infinite recursion
@@ -236,7 +240,7 @@ extension Monomorphizer {
             generatedLayouts.insert(mangledName)
             let kind = getCompilerMethodKind(method.name)
             let functionNode = TypedGlobalNode.globalFunction(
-                identifier: Symbol(
+                identifier: makeSymbol(
                     name: mangledName, type: functionType, kind: .function, methodKind: kind),
                 parameters: params,
                 body: typedBody
@@ -245,7 +249,7 @@ extension Monomorphizer {
         }
         
         let kind = getCompilerMethodKind(method.name)
-        return Symbol(name: mangledName, type: functionType, kind: .function, methodKind: kind)
+        return makeSymbol(name: mangledName, type: functionType, kind: .function, methodKind: kind)
     }
     
     /// Creates a placeholder body for methods that need re-checking.
@@ -285,7 +289,7 @@ extension Monomorphizer {
         
         if let (cachedName, cachedType) = instantiatedFunctions[key] {
             let kind = getCompilerMethodKind(method.name)
-            return Symbol(name: cachedName, type: cachedType, kind: .function, methodKind: kind)
+            return makeSymbol(name: cachedName, type: cachedType, kind: .function, methodKind: kind)
         }
         
         // Create type substitution
@@ -298,9 +302,11 @@ extension Monomorphizer {
         let returnType = try resolveTypeNode(method.returnType, substitution: typeSubstitution)
         let params = try method.parameters.map { param -> Symbol in
             let paramType = try resolveTypeNode(param.type, substitution: typeSubstitution)
-            return Symbol(
-                name: param.name, type: paramType,
-                kind: .variable(param.mutable ? .MutableValue : .Value))
+            return makeSymbol(
+                name: param.name,
+                type: paramType,
+                kind: .variable(param.mutable ? .MutableValue : .Value)
+            )
         }
         
         let funcType = Type.function(
@@ -312,7 +318,7 @@ extension Monomorphizer {
         
         instantiatedFunctions[key] = (mangledName, funcType)
         let kind = getCompilerMethodKind(method.name)
-        return Symbol(name: mangledName, type: funcType, kind: .function, methodKind: kind)
+        return makeSymbol(name: mangledName, type: funcType, kind: .function, methodKind: kind)
     }
     
     // MARK: - Method Lookup
@@ -333,12 +339,7 @@ extension Monomorphizer {
                 // Use qualifiedTypeName to include module path
                 let methodArgLayoutKeys = methodTypeArgs.map { $0.layoutKey }.joined(separator: "_")
                 let mangledName = methodTypeArgs.isEmpty ? "\(qualifiedTypeName)_\(name)" : "\(qualifiedTypeName)_\(name)_\(methodArgLayoutKeys)"
-                return Symbol(
-                    name: mangledName,
-                    type: sym.type,
-                    kind: sym.kind,
-                    methodKind: sym.methodKind
-                )
+                return copySymbolWithNewDefId(sym, newName: mangledName, newModulePath: [])
             }
             if isGen, let info = layoutToTemplateInfo[typeName] {
                 if let extensions = input.genericTemplates.extensionMethods[info.base] {
@@ -391,6 +392,7 @@ extension Monomorphizer {
                                 // Assume it's a struct type
                                 let structDecl = StructDecl(
                                     name: key,
+                                    defId: getOrAllocateTypeDefId(name: key, kind: .structure),
                                     modulePath: [],
                                     sourceFile: "",
                                     access: .default,
@@ -425,12 +427,7 @@ extension Monomorphizer {
                 // Use qualifiedTypeName to include module path
                 let methodArgLayoutKeys = methodTypeArgs.map { $0.layoutKey }.joined(separator: "_")
                 let mangledName = methodTypeArgs.isEmpty ? "\(qualifiedTypeName)_\(name)" : "\(qualifiedTypeName)_\(name)_\(methodArgLayoutKeys)"
-                return Symbol(
-                    name: mangledName,
-                    type: sym.type,
-                    kind: sym.kind,
-                    methodKind: sym.methodKind
-                )
+                return copySymbolWithNewDefId(sym, newName: mangledName, newModulePath: [])
             }
             if isGen, let info = layoutToTemplateInfo[typeName] {
                 if let extensions = input.genericTemplates.extensionMethods[info.base],
@@ -482,12 +479,7 @@ extension Monomorphizer {
             if let methods = extensionMethods[typeName], let sym = methods[name] {
                 // Generate mangled name for the method
                 let mangledName = "\(typeName)_\(name)"
-                return Symbol(
-                    name: mangledName,
-                    type: sym.type,
-                    kind: sym.kind,
-                    methodKind: sym.methodKind
-                )
+                return copySymbolWithNewDefId(sym, newName: mangledName, newModulePath: [])
             }
             // Check intrinsic extension methods for primitive types
             if let extensions = input.genericTemplates.intrinsicExtensionMethods[typeName],

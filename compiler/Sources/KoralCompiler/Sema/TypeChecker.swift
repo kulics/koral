@@ -1,21 +1,5 @@
 import Foundation
 
-/// 导入的模块信息
-public struct ImportedModuleInfo {
-  /// 模块路径
-  public let modulePath: [String]
-  /// 是否是批量导入（using module.*）
-  public let isBatchImport: Bool
-  /// 导入的特定符号（using module.Symbol）
-  public let importedSymbol: String?
-  
-  public init(modulePath: [String], isBatchImport: Bool = false, importedSymbol: String? = nil) {
-    self.modulePath = modulePath
-    self.isBatchImport = isBatchImport
-    self.importedSymbol = importedSymbol
-  }
-}
-
 /// 全局节点的源信息
 public struct GlobalNodeSourceInfo {
   /// 源文件路径（绝对路径）
@@ -24,14 +8,11 @@ public struct GlobalNodeSourceInfo {
   public let modulePath: [String]
   /// 全局节点
   public let node: GlobalNode
-  /// 当前模块导入的模块信息列表（通过 using 声明）
-  public let importedModules: [ImportedModuleInfo]
   
-  public init(sourceFile: String, modulePath: [String], node: GlobalNode, importedModules: [ImportedModuleInfo] = []) {
+  public init(sourceFile: String, modulePath: [String], node: GlobalNode) {
     self.sourceFile = sourceFile
     self.modulePath = modulePath
     self.node = node
-    self.importedModules = importedModules
   }
 }
 
@@ -96,6 +77,138 @@ public class TypeChecker {
 
   var synthesizedTempIndex: Int = 0
   
+  // MARK: - Diagnostic Collection
+  
+  /// 诊断收集器 - 收集所有诊断信息而不是在第一个错误时停止
+  /// **Validates: Requirements 9.1, 9.2, 9.4**
+  var diagnosticCollector = DiagnosticCollector()
+  
+  /// 是否启用错误收集模式（而不是立即抛出）
+  /// 当为 true 时，错误会被收集到 diagnosticCollector 中
+  /// 当为 false 时，保持原有的抛出行为
+  var collectErrors: Bool = false
+  
+  /// 记录错误到诊断收集器
+  /// - Parameters:
+  ///   - message: 错误消息
+  ///   - span: 源代码位置
+  ///   - isPrimary: 是否是主要错误
+  func recordError(_ message: String, at span: SourceSpan, isPrimary: Bool = true) {
+    diagnosticCollector.error(
+      message,
+      at: span,
+      fileName: currentFileName,
+      isPrimary: isPrimary
+    )
+  }
+  
+  /// 记录错误到诊断收集器（使用当前位置）
+  func recordError(_ message: String, isPrimary: Bool = true) {
+    recordError(message, at: currentSpan, isPrimary: isPrimary)
+  }
+  
+  /// 记录 SemanticError 到诊断收集器
+  func recordSemanticError(_ error: SemanticError, isPrimary: Bool = true) {
+    diagnosticCollector.addSemanticError(error, isPrimary: isPrimary)
+  }
+  
+  /// 记录警告到诊断收集器
+  func recordWarning(_ message: String, at span: SourceSpan) {
+    diagnosticCollector.warning(
+      message,
+      at: span,
+      fileName: currentFileName
+    )
+  }
+  
+  /// 记录警告到诊断收集器（使用当前位置）
+  func recordWarning(_ message: String) {
+    recordWarning(message, at: currentSpan)
+  }
+  
+  /// 记录次要错误（由其他错误引起的）
+  /// - Parameters:
+  ///   - message: 错误消息
+  ///   - span: 源代码位置
+  ///   - causedBy: 引起此错误的主要错误描述
+  func recordSecondaryError(_ message: String, at span: SourceSpan, causedBy: String? = nil) {
+    diagnosticCollector.secondaryError(
+      message,
+      at: span,
+      fileName: currentFileName,
+      causedBy: causedBy
+    )
+  }
+  
+  /// 记录次要错误（使用当前位置）
+  func recordSecondaryError(_ message: String, causedBy: String? = nil) {
+    recordSecondaryError(message, at: currentSpan, causedBy: causedBy)
+  }
+  
+  /// 处理错误：根据 collectErrors 设置决定是收集还是抛出
+  /// - Parameters:
+  ///   - error: 要处理的错误
+  ///   - isPrimary: 是否是主要错误
+  /// - Throws: 如果 collectErrors 为 false，则抛出错误
+  func handleError(_ error: SemanticError, isPrimary: Bool = true) throws {
+    if collectErrors {
+      recordSemanticError(error, isPrimary: isPrimary)
+    } else {
+      throw error
+    }
+  }
+  
+  /// 处理错误：根据 collectErrors 设置决定是收集还是抛出
+  /// - Parameters:
+  ///   - message: 错误消息
+  ///   - span: 源代码位置
+  ///   - isPrimary: 是否是主要错误
+  /// - Throws: 如果 collectErrors 为 false，则抛出错误
+  func handleError(_ message: String, at span: SourceSpan, isPrimary: Bool = true) throws {
+    if collectErrors {
+      recordError(message, at: span, isPrimary: isPrimary)
+    } else {
+      throw SemanticError(.generic(message), span: span)
+    }
+  }
+  
+  /// 检查是否有收集到的错误
+  var hasCollectedErrors: Bool {
+    return diagnosticCollector.hasErrors()
+  }
+  
+  /// 获取所有收集到的诊断信息
+  func getCollectedDiagnostics() -> [Diagnostic] {
+    return diagnosticCollector.getDiagnostics()
+  }
+  
+  /// 清空收集到的诊断信息
+  func clearDiagnostics() {
+    diagnosticCollector.clear()
+  }
+  
+  // MARK: - Pass Architecture Support
+  
+  /// DefIdMap - 管理所有定义的标识符
+  /// 用于为所有符号分配唯一的 DefId
+  /// **Validates: Requirements 1.1, 8.1**
+  var defIdMap = DefIdMap()
+  
+  /// NameCollector 的输出（Pass 1 结果）
+  /// 包含 DefIdMap 和 NameTable，用于后续 Pass 使用
+  /// **Validates: Requirements 2.1, 2.2**
+  var nameCollectorOutput: NameCollectorOutput?
+  
+  /// TypeResolver 的输出（Pass 2 结果）
+  /// 包含 TypedDefMap 和 SymbolTable，用于后续 Pass 使用
+  /// **Validates: Requirements 2.1, 2.2**
+  var typeResolverOutput: TypeResolverOutput?
+  
+  /// BodyChecker 的输出（Pass 3 结果）
+  /// 包含 TypedAST 和 InstantiationRequests，用于后续阶段使用
+  /// **Validates: Requirements 2.1, 2.2**
+  var bodyCheckerOutput: BodyCheckerOutput?
+  
   // MARK: - Module System Support
   
   /// 全局节点的源信息映射（用于多文件项目）
@@ -108,8 +221,8 @@ public class TypeChecker {
   /// 当前正在处理的节点的模块路径
   var currentModulePath: [String] = []
   
-  /// 当前模块导入的模块信息列表（通过 using 声明）
-  var currentImportedModules: [ImportedModuleInfo] = []
+  /// 模块导入图（用于可见性检查）
+  var importGraph: ImportGraph? = nil
   
   /// 模块符号映射：模块路径 -> 模块符号信息
   /// 用于支持 `using self.child` 后通过 `child.xxx` 访问子模块符号
@@ -175,6 +288,15 @@ public class TypeChecker {
   
   /// 检查符号是否可以从当前位置直接访问（不需要模块前缀）
   /// 
+  // MARK: - Visibility Checker
+  
+  /// 可见性检查器实例
+  /// 用于检查符号和类型的模块可见性
+  /// **Validates: Requirements 6.1, 6.2, 6.3, 6.5**
+  let visibilityChecker = VisibilityChecker()
+  
+  /// 检查符号是否可以从当前位置直接访问（不需要模块前缀）
+  /// 
   /// 允许直接访问的情况：
   /// 1. 符号与当前代码在同一模块（modulePath 相同）
   /// 2. 符号来自父模块（符号的 modulePath 是当前 modulePath 的前缀）
@@ -186,53 +308,13 @@ public class TypeChecker {
   /// 2. 符号来自兄弟模块（需要通过 module.symbol 访问）
   /// 3. 符号来自外部模块（需要通过 module.symbol 访问）
   func canAccessSymbolDirectly(symbolModulePath: [String], currentModulePath: [String], symbolName: String? = nil) -> Bool {
-    // 空路径总是可直接访问（局部变量/参数）
-    if symbolModulePath.isEmpty {
-      return true
-    }
-    
-    // 同一模块可以直接访问
-    if symbolModulePath == currentModulePath {
-      return true
-    }
-    
-    // 标准库符号总是可以直接访问
-    if !symbolModulePath.isEmpty && symbolModulePath[0] == "std" {
-      return true
-    }
-    
-    // 检查符号是否来自父模块（符号的 modulePath 是当前 modulePath 的前缀）
-    // 例如：当前在 ["expr_eval", "frontend"]，符号在 ["expr_eval"]
-    // 父模块的符号可以直接访问
-    if symbolModulePath.count < currentModulePath.count {
-      let prefix = Array(currentModulePath.prefix(symbolModulePath.count))
-      if prefix == symbolModulePath {
-        return true
-      }
-    }
-    
-    // 检查符号是否来自导入的模块
-    for importInfo in currentImportedModules {
-      // 批量导入：using module.* -> 模块的所有符号可以直接访问
-      if importInfo.isBatchImport && symbolModulePath == importInfo.modulePath {
-        return true
-      }
-      
-      // 成员导入：using module.Symbol -> 只有指定的符号可以直接访问
-      if let importedSymbol = importInfo.importedSymbol,
-         symbolModulePath == importInfo.modulePath,
-         let name = symbolName,
-         name == importedSymbol {
-        return true
-      }
-      
-      // 注意：普通模块导入（using module）不允许直接访问模块内的符号
-      // 需要通过 module.Symbol 访问
-    }
-    
-    // 其他情况（子模块、兄弟模块、外部模块）不允许直接访问
-    // 需要通过模块前缀访问
-    return false
+    return visibilityChecker.canAccessDirectly(
+      symbolModulePath: symbolModulePath,
+      currentModulePath: currentModulePath,
+      symbolName: symbolName,
+      importGraph: importGraph,
+      isGenericParameter: false
+    )
   }
   
   /// 获取访问符号所需的模块前缀
@@ -245,98 +327,33 @@ public class TypeChecker {
   /// - 当前在 ["expr_eval"]，符号在 ["other_module"]
   ///   返回 "other_module"
   func getRequiredModulePrefix(symbolModulePath: [String], currentModulePath: [String]) -> String {
-    // 空路径不需要前缀
-    if symbolModulePath.isEmpty {
-      return ""
-    }
-    
-    // 同一模块不需要前缀
-    if symbolModulePath == currentModulePath {
-      return ""
-    }
-    
-    // 检查是否是子模块
-    // 例如：当前在 ["expr_eval"]，符号在 ["expr_eval", "frontend"]
-    if symbolModulePath.count > currentModulePath.count {
-      let prefix = Array(symbolModulePath.prefix(currentModulePath.count))
-      if prefix == currentModulePath {
-        // 返回直接子模块名
-        return symbolModulePath[currentModulePath.count]
-      }
-    }
-    
-    // 检查是否是兄弟模块
-    // 例如：当前在 ["expr_eval", "backend"]，符号在 ["expr_eval", "frontend"]
-    if symbolModulePath.count >= 2 && currentModulePath.count >= 2 {
-      // 找到共同祖先
-      var commonPrefixLength = 0
-      for i in 0..<min(symbolModulePath.count, currentModulePath.count) {
-        if symbolModulePath[i] == currentModulePath[i] {
-          commonPrefixLength = i + 1
-        } else {
-          break
-        }
-      }
-      
-      if commonPrefixLength > 0 && commonPrefixLength < symbolModulePath.count {
-        // 返回从共同祖先开始的第一个不同部分
-        return symbolModulePath[commonPrefixLength]
-      }
-    }
-    
-    // 外部模块：返回模块名
-    if !symbolModulePath.isEmpty {
-      return symbolModulePath.last ?? ""
-    }
-    
-    return ""
+    return visibilityChecker.getRequiredPrefix(
+      symbolModulePath: symbolModulePath,
+      currentModulePath: currentModulePath
+    )
   }
   
   /// 检查类型的模块可见性
   /// 如果类型来自子模块或兄弟模块，需要使用模块前缀访问
   func checkTypeVisibility(type: Type, typeName: String) throws {
-    // 获取类型的模块路径
-    let typeModulePath: [String]
-    switch type {
-    case .structure(let decl):
-      typeModulePath = decl.modulePath
-    case .union(let decl):
-      typeModulePath = decl.modulePath
-    case .genericStruct(let templateName, _):
-      // 泛型结构体：查找模板获取模块路径
-      if currentScope.lookupGenericStructTemplate(templateName) != nil {
-        // 泛型模板目前没有存储模块路径，暂时跳过检查
-        // TODO: 为泛型模板添加模块路径支持
-        return
-      }
-      return
-    case .genericUnion(let templateName, _):
-      // 泛型联合体：查找模板获取模块路径
-      if currentScope.lookupGenericUnionTemplate(templateName) != nil {
-        // 泛型模板目前没有存储模块路径，暂时跳过检查
-        // TODO: 为泛型模板添加模块路径支持
-        return
-      }
-      return
-    default:
-      // 基本类型、泛型参数等不需要检查
-      return
-    }
+    // 局部类型绑定（如泛型替换、Self 绑定）不需要检查模块可见性
+    let isLocalBinding = currentScope.isLocalTypeBinding(typeName)
     
-    // 空模块路径表示标准库类型或局部类型，总是可访问
-    if typeModulePath.isEmpty {
-      return
-    }
+    // 泛型参数不需要检查模块可见性
+    let isGenericParameter = currentScope.isGenericParameter(typeName)
     
-    // 标准库类型总是可访问
-    if !typeModulePath.isEmpty && typeModulePath[0] == "std" {
-      return
-    }
-    
-    // 检查是否可以直接访问（传递类型名用于成员导入检查）
-    if !canAccessSymbolDirectly(symbolModulePath: typeModulePath, currentModulePath: currentModulePath, symbolName: typeName) {
-      let modulePrefix = getRequiredModulePrefix(symbolModulePath: typeModulePath, currentModulePath: currentModulePath)
-      throw SemanticError(.generic("'\(typeName)' is defined in module '\(modulePrefix)'. Use '\(modulePrefix).\(typeName)' to access it."), line: currentLine)
+    do {
+      try visibilityChecker.checkTypeVisibility(
+        type: type,
+        typeName: typeName,
+        currentModulePath: currentModulePath,
+        importGraph: importGraph,
+        isLocalBinding: isLocalBinding,
+        isGenericParameter: isGenericParameter
+      )
+    } catch let error as VisibilityError {
+      // 转换 VisibilityError 为 SemanticError
+      throw SemanticError(.generic(error.description), line: currentLine)
     }
   }
 
@@ -344,13 +361,15 @@ public class TypeChecker {
     ast: ASTNode,
     coreGlobalCount: Int = 0,
     coreFileName: String = "std/std.koral",
-    userFileName: String = "<input>"
+    userFileName: String = "<input>",
+    importGraph: ImportGraph? = nil
   ) {
     self.ast = ast
     self.coreGlobalCount = max(0, coreGlobalCount)
     self.coreFileName = coreFileName
     self.userFileName = userFileName
     self.currentFileName = userFileName
+    self.importGraph = importGraph
     SemanticErrorContext.currentFileName = userFileName
     SemanticErrorContext.currentLine = 1
   }
@@ -367,13 +386,15 @@ public class TypeChecker {
     nodeSourceInfoList: [GlobalNodeSourceInfo],
     coreGlobalCount: Int = 0,
     coreFileName: String = "std/std.koral",
-    userFileName: String = "<input>"
+    userFileName: String = "<input>",
+    importGraph: ImportGraph? = nil
   ) {
     self.ast = ast
     self.coreGlobalCount = max(0, coreGlobalCount)
     self.coreFileName = coreFileName
     self.userFileName = userFileName
     self.currentFileName = userFileName
+    self.importGraph = importGraph
     SemanticErrorContext.currentFileName = userFileName
     SemanticErrorContext.currentLine = 1
     
@@ -390,6 +411,13 @@ public class TypeChecker {
     // Fallback: std should normally define `type String(...)`.
     let decl = StructDecl(
       name: "String",
+      defId: getOrAllocateTypeDefId(
+        name: "String",
+        kind: .structure,
+        access: .default,
+        modulePath: [],
+        sourceFile: ""
+      ),
       modulePath: [],
       sourceFile: "",
       access: .default,
@@ -500,35 +528,8 @@ public class TypeChecker {
 
   func nextSynthSymbol(prefix: String, type: Type) -> Symbol {
     synthesizedTempIndex += 1
-    return Symbol(
-      name: "__koral_\(prefix)_\(synthesizedTempIndex)",
-      type: type,
-      kind: .variable(.Value),
-      modulePath: currentModulePath,
-      sourceFile: currentSourceFile,
-      access: .default
-    )
-  }
-  
-  /// 创建局部符号（用于参数、局部变量等）
-  /// - Parameters:
-  ///   - name: 符号名称
-  ///   - type: 符号类型
-  ///   - kind: 符号种类
-  /// - Returns: 带有当前模块信息的 Symbol
-  func makeLocalSymbol(
-    name: String,
-    type: Type,
-    kind: SymbolKind
-  ) -> Symbol {
-    return Symbol(
-      name: name,
-      type: type,
-      kind: kind,
-      modulePath: currentModulePath,
-      sourceFile: currentSourceFile,
-      access: .default
-    )
+    let name = "__koral_\(prefix)_\(synthesizedTempIndex)"
+    return makeLocalSymbol(name: name, type: type, kind: .variable(.Value))
   }
   
   // MARK: - Global Symbol Creation
@@ -540,7 +541,7 @@ public class TypeChecker {
   ///   - kind: 符号种类
   ///   - methodKind: 编译器方法种类（默认为 .normal）
   ///   - access: 访问修饰符
-  /// - Returns: 带有模块信息的 Symbol
+  /// - Returns: 带有模块信息和 DefId 的 Symbol
   func makeGlobalSymbol(
     name: String,
     type: Type,
@@ -548,6 +549,32 @@ public class TypeChecker {
     methodKind: CompilerMethodKind = .normal,
     access: AccessModifier
   ) -> Symbol {
+    // 将 SymbolKind 转换为 DefKind
+    let defKind: DefKind
+    switch kind {
+    case .function:
+      defKind = .function
+    case .type:
+      defKind = .type(.structure)  // 默认为 structure，实际类型由调用者决定
+    case .variable:
+      defKind = .variable
+    case .module:
+      defKind = .module
+    }
+    
+    // 分配 DefId（尽量复用已存在的 DefId，避免重复分配）
+    let lookupSourceFile = access == .private ? currentSourceFile : nil
+    let defId = defIdMap.lookup(
+      modulePath: currentModulePath,
+      name: name,
+      sourceFile: lookupSourceFile
+    ) ?? defIdMap.allocate(
+      modulePath: currentModulePath,
+      name: name,
+      kind: defKind,
+      sourceFile: currentSourceFile
+    )
+    
     return Symbol(
       name: name,
       type: type,
@@ -555,7 +582,71 @@ public class TypeChecker {
       methodKind: methodKind,
       modulePath: currentModulePath,
       sourceFile: currentSourceFile,
-      access: access
+      access: access,
+      defId: defId
+    )
+  }
+
+  /// 获取或分配类型定义的 DefId
+  /// - Parameters:
+  ///   - name: 类型名称
+  ///   - kind: 类型种类（struct/union/trait）
+  ///   - access: 访问修饰符
+  ///   - modulePath: 模块路径
+  ///   - sourceFile: 源文件路径
+  func getOrAllocateTypeDefId(
+    name: String,
+    kind: TypeDefKind,
+    access: AccessModifier,
+    modulePath: [String],
+    sourceFile: String
+  ) -> DefId {
+    let lookupSourceFile = access == .private ? sourceFile : nil
+    if let existing = defIdMap.lookup(
+      modulePath: modulePath,
+      name: name,
+      sourceFile: lookupSourceFile
+    ) {
+      return existing
+    }
+    return defIdMap.allocate(
+      modulePath: modulePath,
+      name: name,
+      kind: .type(kind),
+      sourceFile: sourceFile
+    )
+  }
+  
+  /// 创建局部符号（局部变量、参数等）
+  /// - Parameters:
+  ///   - name: 符号名称
+  ///   - type: 符号类型
+  ///   - kind: 符号种类
+  /// - Returns: 带有 DefId 的 Symbol（局部符号的 modulePath 为空）
+  func makeLocalSymbol(
+    name: String,
+    type: Type,
+    kind: SymbolKind
+  ) -> Symbol {
+    // 局部符号的 DefKind 总是 variable
+    let defKind: DefKind = .variable
+    
+    // 分配 DefId（局部符号的 modulePath 为空）
+    let defId = defIdMap.allocate(
+      modulePath: [],
+      name: name,
+      kind: defKind,
+      sourceFile: ""  // 局部符号不需要文件隔离
+    )
+    
+    return Symbol(
+      name: name,
+      type: type,
+      kind: kind,
+      modulePath: [],
+      sourceFile: "",
+      access: .default,
+      defId: defId
     )
   }
 

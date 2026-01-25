@@ -149,9 +149,13 @@ public class CompilationUnit {
     /// 外部模块缓存（模块名 -> 编译单元）
     public var externalModules: [String: CompilationUnit] = [:]
     
+    /// 导入图 - 记录模块间的导入关系
+    public var importGraph: ImportGraph
+    
     public init(rootModule: ModuleInfo) {
         self.rootModule = rootModule
         self.loadedModules[rootModule.pathString] = rootModule
+        self.importGraph = ImportGraph()
     }
     
     /// 获取所有全局节点（按依赖顺序）
@@ -164,8 +168,8 @@ public class CompilationUnit {
     
     /// 获取所有全局节点及其来源文件信息
     /// 用于 CodeGen 阶段生成正确的 C 名称
-    public func getAllGlobalNodesWithSourceInfo() -> [(node: GlobalNode, sourceFile: String, modulePath: [String], importedModules: [ImportedModuleInfo])] {
-        var result: [(node: GlobalNode, sourceFile: String, modulePath: [String], importedModules: [ImportedModuleInfo])] = []
+    public func getAllGlobalNodesWithSourceInfo() -> [(node: GlobalNode, sourceFile: String, modulePath: [String])] {
+        var result: [(node: GlobalNode, sourceFile: String, modulePath: [String])] = []
         collectGlobalNodesWithSourceInfo(from: rootModule, into: &result)
         return result
     }
@@ -183,162 +187,17 @@ public class CompilationUnit {
     
     private func collectGlobalNodesWithSourceInfo(
         from module: ModuleInfo,
-        into result: inout [(node: GlobalNode, sourceFile: String, modulePath: [String], importedModules: [ImportedModuleInfo])]
+        into result: inout [(node: GlobalNode, sourceFile: String, modulePath: [String])]
     ) {
         // 先收集子模块的节点
         for (_, submodule) in module.submodules.sorted(by: { $0.key < $1.key }) {
             collectGlobalNodesWithSourceInfo(from: submodule, into: &result)
         }
         
-        // 计算当前模块导入的模块信息
-        let importedModules = computeImportedModules(for: module)
-        
         // 收集当前模块的节点（包含来源信息）
         for (node, sourceFile) in module.globalNodes {
-            result.append((node: node, sourceFile: sourceFile, modulePath: module.path, importedModules: importedModules))
+            result.append((node: node, sourceFile: sourceFile, modulePath: module.path))
         }
-    }
-    
-    /// 计算模块导入的模块信息
-    private func computeImportedModules(for module: ModuleInfo) -> [ImportedModuleInfo] {
-        var importedModules: [ImportedModuleInfo] = []
-        
-        for using in module.usingDeclarations {
-            switch using.pathKind {
-            case .submodule:
-                // using self.child -> 模块导入
-                // using self.child.* -> 批量导入
-                // using self.child.Symbol -> 成员导入
-                var targetPath = module.path
-                // 跳过 "self"
-                let segments = using.pathSegments.filter { $0 != "self" }
-                
-                if using.isBatchImport {
-                    // 批量导入：using self.child.*
-                    targetPath.append(contentsOf: segments)
-                    importedModules.append(ImportedModuleInfo(
-                        modulePath: targetPath,
-                        isBatchImport: true,
-                        importedSymbol: nil
-                    ))
-                } else if segments.count >= 2 {
-                    // 可能是成员导入：using self.child.Symbol
-                    // 最后一个段是符号名，前面的是模块路径
-                    let modulePart = Array(segments.dropLast())
-                    let symbolName = segments.last!
-                    targetPath.append(contentsOf: modulePart)
-                    
-                    // 检查最后一个段是否是类型名（首字母大写）
-                    if let firstChar = symbolName.first, firstChar.isUppercase {
-                        importedModules.append(ImportedModuleInfo(
-                            modulePath: targetPath,
-                            isBatchImport: false,
-                            importedSymbol: symbolName
-                        ))
-                    } else {
-                        // 普通模块导入
-                        targetPath = module.path
-                        targetPath.append(contentsOf: segments)
-                        importedModules.append(ImportedModuleInfo(
-                            modulePath: targetPath,
-                            isBatchImport: false,
-                            importedSymbol: nil
-                        ))
-                    }
-                } else {
-                    // 普通模块导入：using self.child
-                    targetPath.append(contentsOf: segments)
-                    importedModules.append(ImportedModuleInfo(
-                        modulePath: targetPath,
-                        isBatchImport: false,
-                        importedSymbol: nil
-                    ))
-                }
-                
-            case .parent:
-                // using super.sibling -> 模块导入
-                // using super.sibling.* -> 批量导入
-                // using super.sibling.Symbol -> 成员导入
-                var current = module
-                var segmentIndex = 0
-                
-                // 处理 super 链
-                while segmentIndex < using.pathSegments.count
-                      && using.pathSegments[segmentIndex] == "super" {
-                    if let parent = current.parent {
-                        current = parent
-                    }
-                    segmentIndex += 1
-                }
-                
-                // 处理剩余路径
-                var targetPath = current.path
-                let remainingSegments = segmentIndex < using.pathSegments.count
-                    ? Array(using.pathSegments[segmentIndex...])
-                    : []
-                
-                if using.isBatchImport {
-                    // 批量导入
-                    targetPath.append(contentsOf: remainingSegments)
-                    importedModules.append(ImportedModuleInfo(
-                        modulePath: targetPath,
-                        isBatchImport: true,
-                        importedSymbol: nil
-                    ))
-                } else if remainingSegments.count >= 2 {
-                    // 可能是成员导入
-                    let modulePart = Array(remainingSegments.dropLast())
-                    let symbolName = remainingSegments.last!
-                    targetPath.append(contentsOf: modulePart)
-                    
-                    if let firstChar = symbolName.first, firstChar.isUppercase {
-                        importedModules.append(ImportedModuleInfo(
-                            modulePath: targetPath,
-                            isBatchImport: false,
-                            importedSymbol: symbolName
-                        ))
-                    } else {
-                        targetPath = current.path
-                        targetPath.append(contentsOf: remainingSegments)
-                        importedModules.append(ImportedModuleInfo(
-                            modulePath: targetPath,
-                            isBatchImport: false,
-                            importedSymbol: nil
-                        ))
-                    }
-                } else {
-                    // 普通模块导入
-                    targetPath.append(contentsOf: remainingSegments)
-                    importedModules.append(ImportedModuleInfo(
-                        modulePath: targetPath,
-                        isBatchImport: false,
-                        importedSymbol: nil
-                    ))
-                }
-                
-            case .external:
-                // using std.xxx -> 外部模块导入
-                if using.isBatchImport {
-                    importedModules.append(ImportedModuleInfo(
-                        modulePath: using.pathSegments,
-                        isBatchImport: true,
-                        importedSymbol: nil
-                    ))
-                } else {
-                    importedModules.append(ImportedModuleInfo(
-                        modulePath: using.pathSegments,
-                        isBatchImport: false,
-                        importedSymbol: nil
-                    ))
-                }
-                
-            case .fileMerge:
-                // using "file" -> 文件合并，不影响模块导入
-                break
-            }
-        }
-        
-        return importedModules
     }
 }
 
@@ -453,15 +312,153 @@ public class ModuleResolver {
         unit: CompilationUnit,
         currentFile: String
     ) throws {
+        // 记录导入到 ImportGraph
+        recordImportToGraph(using: using, module: module, unit: unit, currentFile: currentFile)
+        
         switch using.pathKind {
         case .fileMerge:
-            try resolveFileMerge(using: using, module: module, unit: unit)
+            try resolveFileMerge(using: using, module: module, unit: unit, currentFile: currentFile)
         case .submodule:
-            try resolveSubmodule(using: using, module: module, unit: unit)
+            try resolveSubmodule(using: using, module: module, unit: unit, currentFile: currentFile)
         case .parent:
-            try resolveParent(using: using, module: module, unit: unit)
+            try resolveParent(using: using, module: module, unit: unit, currentFile: currentFile)
         case .external:
-            try resolveExternal(using: using, module: module, unit: unit)
+            try resolveExternal(using: using, module: module, unit: unit, currentFile: currentFile)
+        }
+    }
+    
+    /// 记录导入关系到 ImportGraph
+    private func recordImportToGraph(
+        using: UsingDeclaration,
+        module: ModuleInfo,
+        unit: CompilationUnit,
+        currentFile: String
+    ) {
+        switch using.pathKind {
+        case .fileMerge:
+            // 文件合并：using "file"
+            // 文件合并被视为 local，因为合并的文件成为当前模块的一部分
+            // 不需要记录到 ImportGraph，因为符号直接可用
+            break
+            
+        case .submodule:
+            // 子模块导入：using self.child 或 using self.child.* 或 using self.child.Symbol
+            let segments = using.pathSegments.filter { $0 != "self" }
+            guard !segments.isEmpty else { return }
+            
+            var targetPath = module.path
+            
+            if using.isBatchImport {
+                // 批量导入：using self.child.*
+                targetPath.append(contentsOf: segments)
+                unit.importGraph.addModuleImport(
+                    from: module.path,
+                    to: targetPath,
+                    kind: .batchImport
+                )
+            } else if segments.count >= 2,
+                      let lastSegment = segments.last,
+                      let firstChar = lastSegment.first,
+                      firstChar.isUppercase {
+                // 成员导入：using self.child.Symbol
+                let modulePart = Array(segments.dropLast())
+                targetPath.append(contentsOf: modulePart)
+                unit.importGraph.addSymbolImport(
+                    module: module.path,
+                    target: targetPath,
+                    symbol: lastSegment,
+                    kind: .memberImport
+                )
+            } else {
+                // 普通模块导入：using self.child
+                targetPath.append(contentsOf: segments)
+                unit.importGraph.addModuleImport(
+                    from: module.path,
+                    to: targetPath,
+                    kind: .moduleImport
+                )
+            }
+            
+        case .parent:
+            // 父模块导入：using super.sibling 或 using super.sibling.* 或 using super.sibling.Symbol
+            var current = module
+            var segmentIndex = 0
+            
+            // 处理 super 链
+            while segmentIndex < using.pathSegments.count
+                  && using.pathSegments[segmentIndex] == "super" {
+                if let parent = current.parent {
+                    current = parent
+                }
+                segmentIndex += 1
+            }
+            
+            // 处理剩余路径
+            var targetPath = current.path
+            let remainingSegments = segmentIndex < using.pathSegments.count
+                ? Array(using.pathSegments[segmentIndex...])
+                : []
+            
+            if using.isBatchImport {
+                // 批量导入
+                targetPath.append(contentsOf: remainingSegments)
+                unit.importGraph.addModuleImport(
+                    from: module.path,
+                    to: targetPath,
+                    kind: .batchImport
+                )
+            } else if remainingSegments.count >= 2,
+                      let lastSegment = remainingSegments.last,
+                      let firstChar = lastSegment.first,
+                      firstChar.isUppercase {
+                // 成员导入
+                let modulePart = Array(remainingSegments.dropLast())
+                targetPath.append(contentsOf: modulePart)
+                unit.importGraph.addSymbolImport(
+                    module: module.path,
+                    target: targetPath,
+                    symbol: lastSegment,
+                    kind: .memberImport
+                )
+            } else {
+                // 普通模块导入
+                targetPath.append(contentsOf: remainingSegments)
+                unit.importGraph.addModuleImport(
+                    from: module.path,
+                    to: targetPath,
+                    kind: .moduleImport
+                )
+            }
+            
+        case .external:
+            // 外部模块导入：using std 或 using std.* 或 using std.Symbol
+            guard !using.pathSegments.isEmpty else { return }
+            
+            if using.isBatchImport {
+                unit.importGraph.addModuleImport(
+                    from: module.path,
+                    to: using.pathSegments,
+                    kind: .batchImport
+                )
+            } else if using.pathSegments.count >= 2,
+                      let lastSegment = using.pathSegments.last,
+                      let firstChar = lastSegment.first,
+                      firstChar.isUppercase {
+                // 成员导入
+                let modulePart = Array(using.pathSegments.dropLast())
+                unit.importGraph.addSymbolImport(
+                    module: module.path,
+                    target: modulePart,
+                    symbol: lastSegment,
+                    kind: .memberImport
+                )
+            } else {
+                unit.importGraph.addModuleImport(
+                    from: module.path,
+                    to: using.pathSegments,
+                    kind: .moduleImport
+                )
+            }
         }
     }
     
@@ -469,7 +466,8 @@ public class ModuleResolver {
     private func resolveFileMerge(
         using: UsingDeclaration,
         module: ModuleInfo,
-        unit: CompilationUnit
+        unit: CompilationUnit,
+        currentFile: String
     ) throws {
         guard !using.pathSegments.isEmpty else {
             throw ModuleError.invalidModulePath("empty file merge path")
@@ -497,7 +495,8 @@ public class ModuleResolver {
     private func resolveSubmodule(
         using: UsingDeclaration,
         module: ModuleInfo,
-        unit: CompilationUnit
+        unit: CompilationUnit,
+        currentFile: String
     ) throws {
         guard !using.pathSegments.isEmpty else {
             throw ModuleError.invalidModulePath("empty submodule path")
@@ -571,7 +570,8 @@ public class ModuleResolver {
     private func resolveParent(
         using: UsingDeclaration,
         module: ModuleInfo,
-        unit: CompilationUnit
+        unit: CompilationUnit,
+        currentFile: String
     ) throws {
         var current = module
         var segmentIndex = 0
@@ -640,7 +640,8 @@ public class ModuleResolver {
     private func resolveExternal(
         using: UsingDeclaration,
         module: ModuleInfo,
-        unit: CompilationUnit
+        unit: CompilationUnit,
+        currentFile: String
     ) throws {
         guard !using.pathSegments.isEmpty else {
             throw ModuleError.invalidModulePath("empty external path")

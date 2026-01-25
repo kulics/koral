@@ -321,6 +321,7 @@ public enum SemaUtils {
             
             return .structure(decl: StructDecl(
                 name: newName,
+                defId: decl.defId,
                 modulePath: decl.modulePath,
                 sourceFile: decl.sourceFile,
                 access: decl.access,
@@ -379,6 +380,7 @@ public enum SemaUtils {
             
             return .union(decl: UnionDecl(
                 name: newName,
+                defId: decl.defId,
                 modulePath: decl.modulePath,
                 sourceFile: decl.sourceFile,
                 access: decl.access,

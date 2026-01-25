@@ -10,6 +10,9 @@ public struct StructDecl: Equatable, Hashable {
     
     /// 类型名称（简单名）
     public let name: String
+
+    /// 定义标识符（用于生成唯一的 C 标识符）
+    public let defId: DefId
     
     /// 模块路径
     public var modulePath: [String]
@@ -30,17 +33,19 @@ public struct StructDecl: Equatable, Hashable {
     public var typeArguments: [Type]?
     
     public init(
-        id: UUID = UUID(),
-        name: String,
-        modulePath: [String],
-        sourceFile: String,
-        access: AccessModifier,
-        members: [(name: String, type: Type, mutable: Bool)] = [],
-        isGenericInstantiation: Bool = false,
-        typeArguments: [Type]? = nil
+      id: UUID = UUID(),
+      name: String,
+      defId: DefId,
+      modulePath: [String],
+      sourceFile: String,
+      access: AccessModifier,
+      members: [(name: String, type: Type, mutable: Bool)] = [],
+      isGenericInstantiation: Bool = false,
+      typeArguments: [Type]? = nil
     ) {
         self.id = id
         self.name = name
+        self.defId = defId
         self.modulePath = modulePath
         self.sourceFile = sourceFile
         self.access = access
@@ -67,6 +72,9 @@ public struct UnionDecl: Equatable, Hashable {
     
     /// 类型名称（简单名）
     public let name: String
+
+    /// 定义标识符（用于生成唯一的 C 标识符）
+    public let defId: DefId
     
     /// 模块路径
     public var modulePath: [String]
@@ -87,17 +95,19 @@ public struct UnionDecl: Equatable, Hashable {
     public var typeArguments: [Type]?
     
     public init(
-        id: UUID = UUID(),
-        name: String,
-        modulePath: [String],
-        sourceFile: String,
-        access: AccessModifier,
-        cases: [UnionCase] = [],
-        isGenericInstantiation: Bool = false,
-        typeArguments: [Type]? = nil
+      id: UUID = UUID(),
+      name: String,
+      defId: DefId,
+      modulePath: [String],
+      sourceFile: String,
+      access: AccessModifier,
+      cases: [UnionCase] = [],
+      isGenericInstantiation: Bool = false,
+      typeArguments: [Type]? = nil
     ) {
         self.id = id
         self.name = name
+        self.defId = defId
         self.modulePath = modulePath
         self.sourceFile = sourceFile
         self.access = access
@@ -346,6 +356,65 @@ public indirect enum Type: CustomStringConvertible {
       return "TV_\(tv.id)"
     }
   }
+  
+  /// 生成可读的调试名称（用于生成的代码中的注释）
+  ///
+  /// 与 layoutKey 不同，debugName 使用完整的类型名称而不是缩写，
+  /// 便于在生成的 C 代码中进行调试。
+  ///
+  /// ## 示例
+  /// - `List[Int]` 而不是 `List_I`
+  /// - `Map[String, Int]` 而不是 `Map_std_String_I`
+  public var debugName: String {
+    switch self {
+    case .int: return "Int"
+    case .int8: return "Int8"
+    case .int16: return "Int16"
+    case .int32: return "Int32"
+    case .int64: return "Int64"
+    case .uint: return "UInt"
+    case .uint8: return "UInt8"
+    case .uint16: return "UInt16"
+    case .uint32: return "UInt32"
+    case .uint64: return "UInt64"
+    case .float32: return "Float32"
+    case .float64: return "Float64"
+    case .bool: return "Bool"
+    case .void: return "Void"
+    case .never: return "Never"
+    case .function(let params, let returns):
+      let paramStr = params.map { $0.type.debugName }.joined(separator: ", ")
+      return "(\(paramStr)) -> \(returns.debugName)"
+    case .reference(let inner): return "ref \(inner.debugName)"
+    case .pointer(let element): return "Pointer[\(element.debugName)]"
+    case .structure(let decl):
+      var name = decl.name
+      if let typeArgs = decl.typeArguments, !typeArgs.isEmpty {
+        let argsStr = typeArgs.map { $0.debugName }.joined(separator: ", ")
+        name += "[\(argsStr)]"
+      }
+      return name
+    case .union(let decl):
+      var name = decl.name
+      if let typeArgs = decl.typeArguments, !typeArgs.isEmpty {
+        let argsStr = typeArgs.map { $0.debugName }.joined(separator: ", ")
+        name += "[\(argsStr)]"
+      }
+      return name
+    case .genericParameter(let name):
+      return name
+    case .genericStruct(let template, let args):
+      let argsStr = args.map { $0.debugName }.joined(separator: ", ")
+      return "\(template)[\(argsStr)]"
+    case .genericUnion(let template, let args):
+      let argsStr = args.map { $0.debugName }.joined(separator: ", ")
+      return "\(template)[\(argsStr)]"
+    case .module(let info):
+      return "module \(info.modulePath.joined(separator: "."))"
+    case .typeVariable(let tv):
+      return "?\(tv.id)"
+    }
+  }
 
   public var containsGenericParameter: Bool {
     switch self {
@@ -404,6 +473,7 @@ public indirect enum Type: CustomStringConvertible {
         let newMembers = decl.members.map { ($0.name, $0.type.canonical, $0.mutable) }
         let newDecl = StructDecl(
           name: decl.name,
+          defId: decl.defId,
           modulePath: decl.modulePath,
           sourceFile: decl.sourceFile,
           access: decl.access,
@@ -420,6 +490,7 @@ public indirect enum Type: CustomStringConvertible {
         let newCases = decl.cases.map { UnionCase(name: $0.name, parameters: $0.parameters.map { p in (name: p.name, type: p.type.canonical) }) }
         let newDecl = UnionDecl(
           name: decl.name,
+          defId: decl.defId,
           modulePath: decl.modulePath,
           sourceFile: decl.sourceFile,
           access: decl.access,

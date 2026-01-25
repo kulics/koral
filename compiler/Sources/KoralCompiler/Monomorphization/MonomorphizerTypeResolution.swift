@@ -55,6 +55,7 @@ extension Monomorphizer {
                 if template.typeParameters.isEmpty {
                     let decl = StructDecl(
                         name: name,
+                        defId: getOrAllocateTypeDefId(name: name, kind: .structure),
                         modulePath: [],
                         sourceFile: "",
                         access: .default,
@@ -70,6 +71,7 @@ extension Monomorphizer {
                 if template.typeParameters.isEmpty {
                     let decl = UnionDecl(
                         name: name,
+                        defId: getOrAllocateTypeDefId(name: name, kind: .union),
                         modulePath: [],
                         sourceFile: "",
                         access: .default,
@@ -221,6 +223,7 @@ extension Monomorphizer {
                     let layoutName = "\(template)_\(argLayoutKeys)"
                     let decl = StructDecl(
                         name: layoutName,
+                        defId: getOrAllocateTypeDefId(name: layoutName, kind: .structure),
                         modulePath: [],
                         sourceFile: "",
                         access: .default,
@@ -270,6 +273,7 @@ extension Monomorphizer {
                     let layoutName = "\(template)_\(argLayoutKeys)"
                     let decl = UnionDecl(
                         name: layoutName,
+                        defId: getOrAllocateTypeDefId(name: layoutName, kind: .union),
                         modulePath: [],
                         sourceFile: "",
                         access: .default,
@@ -326,6 +330,7 @@ extension Monomorphizer {
             
             let newDecl = StructDecl(
                 name: decl.name,
+                defId: decl.defId,
                 modulePath: decl.modulePath,
                 sourceFile: decl.sourceFile,
                 access: decl.access,
@@ -364,6 +369,7 @@ extension Monomorphizer {
             
             let newDecl = UnionDecl(
                 name: decl.name,
+                defId: decl.defId,
                 modulePath: decl.modulePath,
                 sourceFile: decl.sourceFile,
                 access: decl.access,
@@ -385,37 +391,22 @@ extension Monomorphizer {
     internal func resolveTypesInGlobalNode(_ node: TypedGlobalNode) throws -> TypedGlobalNode {
         switch node {
         case .globalStructDeclaration(let identifier, let parameters):
-            let newIdentifier = Symbol(
-                name: identifier.name,
-                type: resolveParameterizedType(identifier.type),
-                kind: identifier.kind,
-                methodKind: identifier.methodKind,
-                modulePath: identifier.modulePath,
-                sourceFile: identifier.sourceFile,
-                access: identifier.access
+            let newIdentifier = copySymbolWithNewDefId(
+                identifier,
+                newType: resolveParameterizedType(identifier.type)
             )
             let newParams = parameters.map { param in
-                Symbol(
-                    name: param.name,
-                    type: resolveParameterizedType(param.type),
-                    kind: param.kind,
-                    methodKind: param.methodKind,
-                    modulePath: param.modulePath,
-                    sourceFile: param.sourceFile,
-                    access: param.access
+                copySymbolWithNewDefId(
+                    param,
+                    newType: resolveParameterizedType(param.type)
                 )
             }
             return .globalStructDeclaration(identifier: newIdentifier, parameters: newParams)
             
         case .globalUnionDeclaration(let identifier, let cases):
-            let newIdentifier = Symbol(
-                name: identifier.name,
-                type: resolveParameterizedType(identifier.type),
-                kind: identifier.kind,
-                methodKind: identifier.methodKind,
-                modulePath: identifier.modulePath,
-                sourceFile: identifier.sourceFile,
-                access: identifier.access
+            let newIdentifier = copySymbolWithNewDefId(
+                identifier,
+                newType: resolveParameterizedType(identifier.type)
             )
             let newCases = cases.map { unionCase in
                 UnionCase(
@@ -428,24 +419,14 @@ extension Monomorphizer {
             return .globalUnionDeclaration(identifier: newIdentifier, cases: newCases)
             
         case .globalFunction(let identifier, let parameters, let body):
-            let newIdentifier = Symbol(
-                name: identifier.name,
-                type: resolveParameterizedType(identifier.type),
-                kind: identifier.kind,
-                methodKind: identifier.methodKind,
-                modulePath: identifier.modulePath,
-                sourceFile: identifier.sourceFile,
-                access: identifier.access
+            let newIdentifier = copySymbolWithNewDefId(
+                identifier,
+                newType: resolveParameterizedType(identifier.type)
             )
             let newParams = parameters.map { param in
-                Symbol(
-                    name: param.name,
-                    type: resolveParameterizedType(param.type),
-                    kind: param.kind,
-                    methodKind: param.methodKind,
-                    modulePath: param.modulePath,
-                    sourceFile: param.sourceFile,
-                    access: param.access
+                copySymbolWithNewDefId(
+                    param,
+                    newType: resolveParameterizedType(param.type)
                 )
             }
             let newBody = resolveTypesInExpression(body)
@@ -473,25 +454,23 @@ extension Monomorphizer {
                 // Use qualifiedTypeName to include module path
                 let mangledName = "\(qualifiedTypeName)_\(method.identifier.name)"
                 
+                // 创建新的 Symbol，使用空的 modulePath
+                // 因为 mangledName 已经包含了完整的模块路径信息
+                // 这样 Symbol.qualifiedName 就不会再添加模块路径前缀
                 return TypedMethodDeclaration(
-                    identifier: Symbol(
+                    identifier: makeSymbol(
                         name: mangledName,
                         type: resolveParameterizedType(method.identifier.type),
                         kind: method.identifier.kind,
                         methodKind: method.identifier.methodKind,
-                        modulePath: method.identifier.modulePath,
+                        modulePath: [],  // 空的 modulePath，因为 mangledName 已经包含了模块路径
                         sourceFile: method.identifier.sourceFile,
                         access: method.identifier.access
                     ),
                     parameters: method.parameters.map { param in
-                        Symbol(
-                            name: param.name,
-                            type: resolveParameterizedType(param.type),
-                            kind: param.kind,
-                            methodKind: param.methodKind,
-                            modulePath: param.modulePath,
-                            sourceFile: param.sourceFile,
-                            access: param.access
+                        copySymbolWithNewDefId(
+                            param,
+                            newType: resolveParameterizedType(param.type)
                         )
                     },
                     body: resolveTypesInExpression(method.body),
@@ -501,14 +480,9 @@ extension Monomorphizer {
             return .givenDeclaration(type: resolvedType, methods: newMethods)
             
         case .globalVariable(let identifier, let value, let kind):
-            let newIdentifier = Symbol(
-                name: identifier.name,
-                type: resolveParameterizedType(identifier.type),
-                kind: identifier.kind,
-                methodKind: identifier.methodKind,
-                modulePath: identifier.modulePath,
-                sourceFile: identifier.sourceFile,
-                access: identifier.access
+            let newIdentifier = copySymbolWithNewDefId(
+                identifier,
+                newType: resolveParameterizedType(identifier.type)
             )
             
             return .globalVariable(identifier: newIdentifier, value: resolveTypesInExpression(value), kind: kind)
@@ -563,14 +537,9 @@ extension Monomorphizer {
             )
             
         case .letExpression(let identifier, let value, let body, let type):
-            let newIdentifier = Symbol(
-                name: identifier.name,
-                type: resolveParameterizedType(identifier.type),
-                kind: identifier.kind,
-                methodKind: identifier.methodKind,
-                modulePath: identifier.modulePath,
-                sourceFile: identifier.sourceFile,
-                access: identifier.access
+            let newIdentifier = copySymbolWithNewDefId(
+                identifier,
+                newType: resolveParameterizedType(identifier.type)
             )
             return .letExpression(
                 identifier: newIdentifier,
@@ -626,14 +595,9 @@ extension Monomorphizer {
             )
             
         case .variable(let identifier):
-            let newIdentifier = Symbol(
-                name: identifier.name,
-                type: resolveParameterizedType(identifier.type),
-                kind: identifier.kind,
-                methodKind: identifier.methodKind,
-                modulePath: identifier.modulePath,
-                sourceFile: identifier.sourceFile,
-                access: identifier.access
+            let newIdentifier = copySymbolWithNewDefId(
+                identifier,
+                newType: resolveParameterizedType(identifier.type)
             )
             return .variable(identifier: newIdentifier)
             
@@ -728,7 +692,7 @@ extension Monomorphizer {
                     returns: newType
                 )
                 let callee: TypedExpressionNode = .variable(
-                    identifier: Symbol(name: mangledName, type: functionType, kind: .function)
+                    identifier: makeSymbol(name: mangledName, type: functionType, kind: .function)
                 )
                 
                 return .call(callee: callee, arguments: newArguments, type: newType)
@@ -744,14 +708,9 @@ extension Monomorphizer {
             
         case .methodReference(let base, let method, let typeArgs, let methodTypeArgs, let type):
             let newBase = resolveTypesInExpression(base)
-            var newMethod = Symbol(
-                name: method.name,
-                type: resolveParameterizedType(method.type),
-                kind: method.kind,
-                methodKind: method.methodKind,
-                modulePath: method.modulePath,
-                sourceFile: method.sourceFile,
-                access: method.access
+            var newMethod = copySymbolWithNewDefId(
+                method,
+                newType: resolveParameterizedType(method.type)
             )
             let resolvedTypeArgs = typeArgs?.map { resolveParameterizedType($0) }
             let resolvedMethodTypeArgs = methodTypeArgs?.map { resolveParameterizedType($0) }
@@ -767,14 +726,9 @@ extension Monomorphizer {
                 if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: method.name, methodTypeArgs: methodTypeArgsToPass) {
                     // Resolve any parameterized types in the method type
                     let resolvedMethodType = resolveParameterizedType(concreteMethod.type)
-                    newMethod = Symbol(
-                        name: concreteMethod.name,
-                        type: resolvedMethodType,
-                        kind: concreteMethod.kind,
-                        methodKind: concreteMethod.methodKind,
-                        modulePath: concreteMethod.modulePath,
-                        sourceFile: concreteMethod.sourceFile,
-                        access: concreteMethod.access
+                    newMethod = copySymbolWithNewDefId(
+                        concreteMethod,
+                        newType: resolvedMethodType
                     )
                     // Extract the return type from the concrete method's function type
                     if case .function(_, let returns) = resolvedMethodType {
@@ -821,14 +775,10 @@ extension Monomorphizer {
                 newName = decl.name
             }
             
-            let newIdentifier = Symbol(
-                name: newName,
-                type: resolvedType,
-                kind: identifier.kind,
-                methodKind: identifier.methodKind,
-                modulePath: identifier.modulePath,
-                sourceFile: identifier.sourceFile,
-                access: identifier.access
+            let newIdentifier = copySymbolWithNewDefId(
+                identifier,
+                newName: newName,
+                newType: resolvedType
             )
             let resolvedTypeArgs = typeArgs?.map { resolveParameterizedType($0) }
             return .typeConstruction(
@@ -840,14 +790,9 @@ extension Monomorphizer {
             
         case .memberPath(let source, let path):
             let newPath = path.map { sym in
-                Symbol(
-                    name: sym.name,
-                    type: resolveParameterizedType(sym.type),
-                    kind: sym.kind,
-                    methodKind: sym.methodKind,
-                    modulePath: sym.modulePath,
-                    sourceFile: sym.sourceFile,
-                    access: sym.access
+                copySymbolWithNewDefId(
+                    sym,
+                    newType: resolveParameterizedType(sym.type)
                 )
             }
             return .memberPath(
@@ -857,29 +802,16 @@ extension Monomorphizer {
             
         case .subscriptExpression(let base, let arguments, let method, let type):
             let newBase = resolveTypesInExpression(base)
-            var newMethod = Symbol(
-                name: method.name,
-                type: resolveParameterizedType(method.type),
-                kind: method.kind,
-                methodKind: method.methodKind,
-                modulePath: method.modulePath,
-                sourceFile: method.sourceFile,
-                access: method.access
+            var newMethod = copySymbolWithNewDefId(
+                method,
+                newType: resolveParameterizedType(method.type)
             )
             
             // Resolve method name to mangled name for generic extension methods
             if !newBase.type.containsGenericParameter {
                 // Look up the concrete method on the resolved base type
                 if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: method.name) {
-                    newMethod = Symbol(
-                        name: concreteMethod.name,
-                        type: concreteMethod.type,
-                        kind: concreteMethod.kind,
-                        methodKind: concreteMethod.methodKind,
-                        modulePath: concreteMethod.modulePath,
-                        sourceFile: concreteMethod.sourceFile,
-                        access: concreteMethod.access
-                    )
+                    newMethod = copySymbolWithNewDefId(concreteMethod)
                 }
             }
             
@@ -980,7 +912,7 @@ extension Monomorphizer {
                     returns: resolvedReturnType
                 )
                 let callee: TypedExpressionNode = .variable(
-                    identifier: Symbol(name: mangledMethodName, type: functionType, kind: .function)
+                    identifier: makeSymbol(name: mangledMethodName, type: functionType, kind: .function)
                 )
                 return .call(callee: callee, arguments: resolvedArguments, type: resolvedReturnType)
             }
@@ -1012,7 +944,7 @@ extension Monomorphizer {
             
             // Create the callee as a variable reference to the mangled function
             let callee: TypedExpressionNode = .variable(
-                identifier: Symbol(name: mangledMethodName, type: functionType, kind: .function)
+                identifier: makeSymbol(name: mangledMethodName, type: functionType, kind: .function)
             )
             
             return .call(callee: callee, arguments: resolvedArguments, type: resolvedReturnType)
@@ -1020,27 +952,17 @@ extension Monomorphizer {
         case .lambdaExpression(let parameters, let captures, let body, let type):
             // Resolve types in lambda parameters
             let newParameters = parameters.map { param in
-                Symbol(
-                    name: param.name,
-                    type: resolveParameterizedType(param.type),
-                    kind: param.kind,
-                    methodKind: param.methodKind,
-                    modulePath: param.modulePath,
-                    sourceFile: param.sourceFile,
-                    access: param.access
+                copySymbolWithNewDefId(
+                    param,
+                    newType: resolveParameterizedType(param.type)
                 )
             }
             // Resolve types in captures
             let newCaptures = captures.map { capture in
                 CapturedVariable(
-                    symbol: Symbol(
-                        name: capture.symbol.name,
-                        type: resolveParameterizedType(capture.symbol.type),
-                        kind: capture.symbol.kind,
-                        methodKind: capture.symbol.methodKind,
-                        modulePath: capture.symbol.modulePath,
-                        sourceFile: capture.symbol.sourceFile,
-                        access: capture.symbol.access
+                    symbol: copySymbolWithNewDefId(
+                        capture.symbol,
+                        newType: resolveParameterizedType(capture.symbol.type)
                     ),
                     captureKind: capture.captureKind
                 )
@@ -1064,14 +986,9 @@ extension Monomorphizer {
     internal func resolveTypesInStatement(_ stmt: TypedStatementNode) -> TypedStatementNode {
         switch stmt {
         case .variableDeclaration(let identifier, let value, let mutable):
-            let newIdentifier = Symbol(
-                name: identifier.name,
-                type: resolveParameterizedType(identifier.type),
-                kind: identifier.kind,
-                methodKind: identifier.methodKind,
-                modulePath: identifier.modulePath,
-                sourceFile: identifier.sourceFile,
-                access: identifier.access
+            let newIdentifier = copySymbolWithNewDefId(
+                identifier,
+                newType: resolveParameterizedType(identifier.type)
             )
             return .variableDeclaration(
                 identifier: newIdentifier,
@@ -1118,14 +1035,9 @@ extension Monomorphizer {
             return pattern
             
         case .variable(let symbol):
-            let newSymbol = Symbol(
-                name: symbol.name,
-                type: resolveParameterizedType(symbol.type),
-                kind: symbol.kind,
-                methodKind: symbol.methodKind,
-                modulePath: symbol.modulePath,
-                sourceFile: symbol.sourceFile,
-                access: symbol.access
+            let newSymbol = copySymbolWithNewDefId(
+                symbol,
+                newType: resolveParameterizedType(symbol.type)
             )
             return .variable(symbol: newSymbol)
             
