@@ -1,5 +1,9 @@
 import Foundation
 
+private func cTypeIdentifierOrFallback(_ type: Type, fallback: String) -> String {
+    return TypeHandlerRegistry.shared.cTypeIdentifier(for: type) ?? fallback
+}
+
 // MARK: - TypeHandler Protocol
 
 /// 类型处理器协议 - 确保所有类型都有完整的处理逻辑
@@ -213,14 +217,15 @@ public class StructHandler: TypeHandler {
         guard case .structure(let decl) = type else {
             return "void"
         }
-        return "struct \(decl.qualifiedName)"
+        let qualifiedName = cTypeIdentifierOrFallback(type, fallback: decl.qualifiedName)
+        return "struct \(qualifiedName)"
     }
     
     public func generateCopyCode(_ type: Type, source: String, dest: String) -> String {
         guard case .structure(let decl) = type else {
             return ""
         }
-        let qualifiedName = decl.qualifiedName
+        let qualifiedName = cTypeIdentifierOrFallback(type, fallback: decl.qualifiedName)
         return "\(dest) = __koral_\(qualifiedName)_copy(&\(source));"
     }
     
@@ -228,7 +233,7 @@ public class StructHandler: TypeHandler {
         guard case .structure(let decl) = type else {
             return ""
         }
-        let qualifiedName = decl.qualifiedName
+        let qualifiedName = cTypeIdentifierOrFallback(type, fallback: decl.qualifiedName)
         return "__koral_\(qualifiedName)_drop(&\(value));"
     }
     
@@ -236,7 +241,7 @@ public class StructHandler: TypeHandler {
         guard case .structure(let decl) = type else {
             return ""
         }
-        return decl.qualifiedName
+        return cTypeIdentifierOrFallback(type, fallback: decl.qualifiedName)
     }
     
     public func containsGenericParameter(_ type: Type) -> Bool {
@@ -345,14 +350,15 @@ public class UnionHandler: TypeHandler {
         guard case .union(let decl) = type else {
             return "void"
         }
-        return "struct \(decl.qualifiedName)"
+        let qualifiedName = cTypeIdentifierOrFallback(type, fallback: decl.qualifiedName)
+        return "struct \(qualifiedName)"
     }
     
     public func generateCopyCode(_ type: Type, source: String, dest: String) -> String {
         guard case .union(let decl) = type else {
             return ""
         }
-        let qualifiedName = decl.qualifiedName
+        let qualifiedName = cTypeIdentifierOrFallback(type, fallback: decl.qualifiedName)
         return "\(dest) = __koral_\(qualifiedName)_copy(&\(source));"
     }
     
@@ -360,7 +366,7 @@ public class UnionHandler: TypeHandler {
         guard case .union(let decl) = type else {
             return ""
         }
-        let qualifiedName = decl.qualifiedName
+        let qualifiedName = cTypeIdentifierOrFallback(type, fallback: decl.qualifiedName)
         return "__koral_\(qualifiedName)_drop(&\(value));"
     }
     
@@ -368,7 +374,7 @@ public class UnionHandler: TypeHandler {
         guard case .union(let decl) = type else {
             return ""
         }
-        return decl.qualifiedName
+        return cTypeIdentifierOrFallback(type, fallback: decl.qualifiedName)
     }
     
     public func containsGenericParameter(_ type: Type) -> Bool {
@@ -459,7 +465,7 @@ public class UnionHandler: TypeHandler {
             return ""
         }
         
-        let typeName = decl.qualifiedName
+        let typeName = cTypeIdentifierOrFallback(type, fallback: decl.qualifiedName)
         guard let tagIndex = getCaseIndex(type, name: caseName) else {
             return ""
         }
@@ -969,6 +975,9 @@ public final class TypeHandlerRegistry: @unchecked Sendable {
     
     /// 已注册的处理器列表
     private var handlers: [TypeHandler] = []
+
+    /// 可选的 C 类型名解析器（用于 CodeGen 注入冲突安全命名）
+    private var cTypeNameResolver: ((Type) -> String?)?
     
     /// 默认处理器（用于未知类型）
     private let defaultHandler: TypeHandler
@@ -996,6 +1005,22 @@ public final class TypeHandlerRegistry: @unchecked Sendable {
     public func register(_ handler: TypeHandler) {
         handlers.insert(handler, at: 0)  // 自定义处理器优先
     }
+
+    /// 设置 C 类型名解析器
+    ///
+    /// 用于 CodeGen 注入冲突安全的 struct/union 命名规则。
+    public func setCTypeNameResolver(_ resolver: ((Type) -> String?)?) {
+        cTypeNameResolver = resolver
+    }
+
+    /// 获取用于函数命名的 C 类型标识符（不包含 `struct ` 前缀）
+    public func cTypeIdentifier(for type: Type) -> String? {
+        guard let override = cTypeNameResolver?(type) else { return nil }
+        if override.hasPrefix("struct ") {
+            return String(override.dropFirst("struct ".count))
+        }
+        return override
+    }
     
     /// 获取类型对应的处理器
     public func handler(for type: Type) -> TypeHandler {
@@ -1021,7 +1046,28 @@ public final class TypeHandlerRegistry: @unchecked Sendable {
     
     /// 生成类型的 C 类型名
     public func generateCTypeName(_ type: Type) -> String {
+        if let override = cTypeNameResolver?(type) {
+            return override
+        }
         return handler(for: type).generateCTypeName(type)
+    }
+
+    /// 生成已解析类型的 C 类型名（用于 CodeGen）
+    public func generateConcreteCTypeName(_ type: Type) -> String {
+        switch type {
+        case .genericParameter(let name):
+            fatalError("Generic parameter \(name) should be resolved before CodeGen")
+        case .genericStruct(let template, _):
+            fatalError("Generic struct \(template) should be resolved before CodeGen")
+        case .genericUnion(let template, _):
+            fatalError("Generic union \(template) should be resolved before CodeGen")
+        case .module:
+            fatalError("Module type should not appear in CodeGen")
+        case .typeVariable(let tv):
+            fatalError("Type variable \(tv) should be resolved before CodeGen")
+        default:
+            return generateCTypeName(type)
+        }
     }
     
     /// 生成拷贝代码

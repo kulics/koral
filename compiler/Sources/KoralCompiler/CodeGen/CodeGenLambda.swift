@@ -90,13 +90,13 @@ extension CodeGen {
     returnType: Type,
     body: TypedExpressionNode
   ) {
-    let returnCType = getCType(returnType)
+    let returnCType = cTypeName(returnType)
     
     // Build parameter list
     var paramList: [String] = []
     for (i, param) in parameters.enumerated() {
       let paramType = funcParams[i].type
-      paramList.append("\(getCType(paramType)) \(param.qualifiedName)")
+      paramList.append("\(cTypeName(paramType)) \(param.qualifiedName)")
     }
     
     let paramsStr = paramList.isEmpty ? "void" : paramList.joined(separator: ", ")
@@ -150,13 +150,13 @@ extension CodeGen {
     captures: [CapturedVariable],
     body: TypedExpressionNode
   ) {
-    let returnCType = getCType(returnType)
+    let returnCType = cTypeName(returnType)
     
     // Build parameter list (env as first parameter)
     var paramList: [String] = ["void* __env"]
     for (i, param) in parameters.enumerated() {
       let paramType = funcParams[i].type
-      paramList.append("\(getCType(paramType)) \(param.qualifiedName)")
+      paramList.append("\(cTypeName(paramType)) \(param.qualifiedName)")
     }
     
     let paramsStr = paramList.joined(separator: ", ")
@@ -170,7 +170,7 @@ extension CodeGen {
     // Generate local aliases for captured variables
     for capture in captures {
       let capturedName = capture.symbol.qualifiedName
-      let capturedType = getCType(capture.symbol.type)
+      let capturedType = cTypeName(capture.symbol.type)
       funcBuffer += "  \(capturedType) \(capturedName) = __captured->\(capturedName);\n"
     }
     
@@ -216,7 +216,7 @@ extension CodeGen {
     
     for capture in captures {
       let capturedName = capture.symbol.qualifiedName
-      let capturedType = getCType(capture.symbol.type)
+      let capturedType = cTypeName(capture.symbol.type)
       structBuffer += "  \(capturedType) \(capturedName);\n"
     }
     
