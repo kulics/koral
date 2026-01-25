@@ -107,7 +107,9 @@ class IntegrationTests: XCTestCase {
     func test_range_iterator() throws { try runCase(named: "range_iterator.koral") }
     func test_range_unbounded() throws { try runCase(named: "range_unbounded.koral") }
     func test_recursion_check() throws { try runCase(named: "recursion_check.koral") }
+    func test_recursive_union_test() throws { try runCase(named: "recursive_union_test.koral") }
     func test_result_map_test() throws { try runCase(named: "result_map_test.koral") }
+    func test_result_void_test() throws { try runCase(named: "result_void_test.koral") }
     func test_return_break_continue() throws { try runCase(named: "return_break_continue.koral") }
     func test_rune_basic() throws { try runCase(named: "rune_basic.koral") }
     func test_rune_literal() throws { try runCase(named: "rune_literal.koral") }
@@ -137,6 +139,7 @@ class IntegrationTests: XCTestCase {
     func test_union_methods() throws { try runCase(named: "union_methods.koral") }
     func test_union_parsing() throws { try runCase(named: "union_parsing.koral") }
     func test_unreachable_pattern() throws { try runCase(named: "unreachable_pattern.koral") }
+    func test_value_param_copy() throws { try runCase(named: "value_param_copy.koral") }
     func test_zip_test() throws { try runCase(named: "zip_test.koral") }
     
     func runTestCase(file: URL, projectRoot: URL) throws {

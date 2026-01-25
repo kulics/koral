@@ -1,0 +1,237 @@
+// Test: Value type parameter copy for struct, union, and closure
+// EXPECT: === Test Struct Copy ===
+// EXPECT: Person(Alice, 30)
+// EXPECT: === Test Union Copy ===
+// EXPECT: Identifier(hello)
+// EXPECT: === Test Closure Copy ===
+// EXPECT: 10
+// EXPECT: 15
+// EXPECT: === Test Nested Type Copy ===
+// EXPECT: Container(Identifier(nested), 42)
+// EXPECT: === Test String Copy ===
+// EXPECT: hello world
+// EXPECT: All tests passed!
+// This test verifies that managed types are properly copied when passed
+// as lvalue arguments to functions.
+// Bug: Union types were not being copied when passed as lvalue parameters,
+// causing use-after-free when the same value was used multiple times.
+
+// ============================================================================
+// Part 1: Struct with managed fields
+// ============================================================================
+
+public type Person(name String, age Int)
+
+given Person {
+    public to_string(self) String = {
+        let mut s = String.empty()
+        s.push_string("Person(")
+        s.push_string(self.name)
+        s.push_string(", ")
+        s.push_int(self.age)
+        s.push(')')
+        s
+    }
+}
+
+let consume_person(p Person) String = p.to_string()
+
+let test_struct_copy() Void = {
+    print_line("=== Test Struct Copy ===")
+    
+    let person = Person("Alice", 30)
+    
+    // Use the same struct multiple times
+    print_line(consume_person(person))
+    print_line(consume_person(person))
+    print_line(person.to_string())
+    
+    // Push to list after using
+    let mut people = [Person]List.new()
+    people.push_back(person)
+    
+    for p = people then {
+        print_line(p.to_string())
+    }
+}
+
+// ============================================================================
+// Part 2: Union with managed fields
+// ============================================================================
+
+public type Token {
+    Number(value Int),
+    Identifier(name String),
+    Plus(),
+}
+
+given Token {
+    public to_string(self) String = when self is {
+        .Number(v) then {
+            let mut s = String.empty()
+            s.push_string("Number(")
+            s.push_int(v)
+            s.push(')')
+            s
+        },
+        .Identifier(name) then {
+            let mut s = String.empty()
+            s.push_string("Identifier(")
+            s.push_string(name)
+            s.push(')')
+            s
+        },
+        .Plus then "Plus",
+    }
+}
+
+let consume_token(t Token) String = t.to_string()
+
+let test_union_copy() Void = {
+    print_line("=== Test Union Copy ===")
+    
+    let token = Token.Identifier("hello")
+    
+    // Use the same union multiple times
+    print_line(consume_token(token))
+    print_line(consume_token(token))
+    print_line(token.to_string())
+    
+    // Push to list after using
+    let mut tokens = [Token]List.new()
+    tokens.push_back(token)
+    
+    for t = tokens then {
+        print_line(t.to_string())
+    }
+}
+
+// ============================================================================
+// Part 3: Closure (function type)
+// ============================================================================
+
+let call_fn(f [Int, Int]Func, x Int) Int = f(x)
+
+let test_closure_copy() Void = {
+    print_line("=== Test Closure Copy ===")
+    
+    // Closure without capture
+    let double [Int, Int]Func = (x) -> x * 2
+    
+    // Use the same closure multiple times
+    print_line(call_fn(double, 5).to_string())
+    print_line(call_fn(double, 10).to_string())
+    print_line(call_fn(double, 15).to_string())
+    
+    // Closure with capture
+    let multiplier = 3
+    let triple [Int, Int]Func = (x) -> x * multiplier
+    
+    print_line(call_fn(triple, 5).to_string())
+    print_line(call_fn(triple, 10).to_string())
+    print_line(call_fn(triple, 15).to_string())
+}
+
+// ============================================================================
+// Part 4: Nested types (struct containing union, union containing struct)
+// ============================================================================
+
+public type Container(token Token, count Int)
+
+given Container {
+    public to_string(self) String = {
+        let mut s = String.empty()
+        s.push_string("Container(")
+        s.push_string(self.token.to_string())
+        s.push_string(", ")
+        s.push_int(self.count)
+        s.push(')')
+        s
+    }
+}
+
+let consume_container(c Container) String = c.to_string()
+
+let test_nested_copy() Void = {
+    print_line("=== Test Nested Type Copy ===")
+    
+    let container = Container(Token.Identifier("nested"), 42)
+    
+    // Use the same nested struct multiple times
+    print_line(consume_container(container))
+    print_line(consume_container(container))
+    print_line(container.to_string())
+}
+
+// ============================================================================
+// Part 5: String (basic managed type)
+// ============================================================================
+
+let consume_string(s String) String = s
+
+let test_string_copy() Void = {
+    print_line("=== Test String Copy ===")
+    
+    let text = "hello world"
+    
+    // Use the same string multiple times
+    print_line(consume_string(text))
+    print_line(consume_string(text))
+    print_line(text)
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+public let main() Void = {
+    test_struct_copy()
+    print_line("")
+    
+    test_union_copy()
+    print_line("")
+    
+    test_closure_copy()
+    print_line("")
+    
+    test_nested_copy()
+    print_line("")
+    
+    test_string_copy()
+    print_line("")
+    
+    print_line("All tests passed!")
+}
+
+// Expected output:
+// === Test Struct Copy ===
+// Person(Alice, 30)
+// Person(Alice, 30)
+// Person(Alice, 30)
+// Person(Alice, 30)
+// 
+// === Test Union Copy ===
+// Identifier(hello)
+// Identifier(hello)
+// Identifier(hello)
+// Identifier(hello)
+// 
+// === Test Closure Copy ===
+// 10
+// 20
+// 30
+// 15
+// 30
+// 45
+// 
+// === Test Nested Type Copy ===
+// Container(Identifier(nested), 42)
+// Container(Identifier(nested), 42)
+// Container(Identifier(nested), 42)
+// 
+// === Test String Copy ===
+// hello world
+// hello world
+// hello world
+// 
+// All tests passed!
