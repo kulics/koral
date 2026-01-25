@@ -116,37 +116,15 @@ extension Monomorphizer {
         if !generatedLayouts.contains(layoutName) {
             generatedLayouts.insert(layoutName)
             
-            // Create canonical members for the C struct definition
-            var canonicalMembers: [(name: String, type: Type, mutable: Bool)] = []
-            var typeSubstitution: [String: Type] = [:]
-            for (i, paramInfo) in template.typeParameters.enumerated() {
-                typeSubstitution[paramInfo.name] = args[i].canonical
-            }
-            
-            for param in template.parameters {
-                let fieldType = try resolveTypeNode(param.type, substitution: typeSubstitution)
-                canonicalMembers.append((name: param.name, type: fieldType, mutable: param.mutable))
-            }
-            
-            // Create canonical type
-            let canonicalDecl = StructDecl(
-                name: layoutName,
-                modulePath: [],
-                sourceFile: "",
-                access: .default,
-                members: canonicalMembers,
-                isGenericInstantiation: true
-            )
-            let canonicalType = Type.structure(decl: canonicalDecl)
-            
-            // Convert to TypedGlobalNode
-            let params = canonicalMembers.map { param in
+            // Convert to TypedGlobalNode using resolved members (not canonical)
+            // The canonical transformation is only for C type mapping, not for type identity
+            let params = resolvedMembers.map { param in
                 Symbol(
                     name: param.name, type: param.type,
                     kind: param.mutable ? .variable(.MutableValue) : .variable(.Value))
             }
             
-            let typeSymbol = Symbol(name: layoutName, type: canonicalType, kind: .type)
+            let typeSymbol = Symbol(name: layoutName, type: specificType, kind: .type)
             generatedNodes.append(.globalStructDeclaration(identifier: typeSymbol, parameters: params))
         }
         
@@ -256,33 +234,11 @@ extension Monomorphizer {
         if !generatedLayouts.contains(layoutName) {
             generatedLayouts.insert(layoutName)
             
-            // Canonical cases (using canonical types for fields)
-            var canonicalCases: [UnionCase] = []
-            var typeSubstitution: [String: Type] = [:]
-            for (i, paramInfo) in template.typeParameters.enumerated() {
-                typeSubstitution[paramInfo.name] = args[i].canonical
-            }
-            
-            for c in template.cases {
-                var params: [(name: String, type: Type)] = []
-                for p in c.parameters {
-                    params.append((name: p.name, type: try resolveTypeNode(p.type, substitution: typeSubstitution)))
-                }
-                canonicalCases.append(UnionCase(name: c.name, parameters: params))
-            }
-            
-            let canonicalDecl = UnionDecl(
-                name: layoutName,
-                modulePath: [],
-                sourceFile: "",
-                access: .default,
-                cases: canonicalCases,
-                isGenericInstantiation: true
-            )
-            let canonicalType = Type.union(decl: canonicalDecl)
-            let typeSymbol = Symbol(name: layoutName, type: canonicalType, kind: .type)
+            // Use resolved cases directly (not canonical) for the declaration
+            // The canonical transformation is only for C type mapping, not for type identity
+            let typeSymbol = Symbol(name: layoutName, type: specificType, kind: .type)
             generatedNodes.append(
-                .globalUnionDeclaration(identifier: typeSymbol, cases: canonicalCases))
+                .globalUnionDeclaration(identifier: typeSymbol, cases: resolvedCases))
         }
         
         return specificType

@@ -270,6 +270,15 @@ extension CodeGen {
         } else {
           argResults.append(result)
         }
+      } else if case .union(let decl) = arg.type {
+        if arg.valueCategory == .lvalue {
+          let copyResult = nextTemp()
+          addIndent()
+          appendToBuffer("\(getCType(arg.type)) \(copyResult) = __koral_\(decl.qualifiedName)_copy(&\(result));\n")
+          argResults.append(copyResult)
+        } else {
+          argResults.append(result)
+        }
       } else if case .reference(_) = arg.type {
         if arg.valueCategory == .lvalue {
           addIndent()
@@ -346,10 +355,19 @@ extension CodeGen {
     _ identifier: Symbol, _ arguments: [TypedExpressionNode], _ type: Type
   ) -> String {
     var paramResults: [String] = []
-    // struct类型参数传递用值，isValue==false 的 struct 参数自动递归 copy
+    // struct/union类型参数传递用值，isValue==false 的参数自动递归 copy
     for arg in arguments {
       let result = generateExpressionSSA(arg)
       if case .structure(let decl) = arg.type {
+        if arg.valueCategory == .lvalue {
+          let copyResult = nextTemp()
+          addIndent()
+          appendToBuffer("\(getCType(arg.type)) \(copyResult) = __koral_\(decl.qualifiedName)_copy(&\(result));\n")
+          paramResults.append(copyResult)
+        } else {
+          paramResults.append(result)
+        }
+      } else if case .union(let decl) = arg.type {
         if arg.valueCategory == .lvalue {
           let copyResult = nextTemp()
           addIndent()
