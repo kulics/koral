@@ -499,6 +499,13 @@ public class BidirectionalInference {
         case .inferredSelf:
             // Self 类型需要从上下文获取
             return .genericParameter(name: "Self")
+        case .moduleQualified(_, let name):
+            // 模块限定类型：简化处理，直接解析类型名
+            return resolveSimpleType(name)
+        case .moduleQualifiedGeneric(_, let base, let args):
+            // 模块限定泛型类型
+            let argTypes = args.map { resolveTypeNode($0) }
+            return .genericStruct(template: base, args: argTypes)
         }
     }
     

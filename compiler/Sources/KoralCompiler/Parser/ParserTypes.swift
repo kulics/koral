@@ -13,6 +13,7 @@ extension Parser {
   /// - Function types: [ParamType1, ParamType2, ReturnType]Func
   /// - Reference types: Int ref, [T]List ref
   /// - Self type: Self, Self ref
+  /// - Module-qualified types: module.TypeName, module.[T]List
   func parseType() throws -> TypeNode {
     // Handle Self type
     if currentToken === .selfTypeKeyword {
@@ -70,17 +71,72 @@ extension Parser {
       return type
     }
 
-    // Handle simple type identifier
+    // Handle simple type identifier or module-qualified type
     guard case .identifier(let name) = currentToken else {
       throw ParserError.expectedTypeIdentifier(
         span: currentSpan, got: currentToken.description)
     }
+    try match(.identifier(name))
+    
+    // Check for module-qualified type: module.TypeName or module.[T]List
+    if currentToken === .dot {
+      // This is a module-qualified type
+      try match(.dot)
+      
+      // Check for generic type after module prefix: module.[T]List
+      if currentToken === .leftBracket {
+        try match(.leftBracket)
+        var args: [TypeNode] = []
+        while currentToken !== .rightBracket {
+          args.append(try parseType())
+          if currentToken === .comma {
+            try match(.comma)
+          }
+        }
+        try match(.rightBracket)
+        
+        guard case .identifier(let typeName) = currentToken else {
+          throw ParserError.expectedTypeIdentifier(
+            span: currentSpan, got: currentToken.description)
+        }
+        
+        if !isValidTypeName(typeName) {
+          throw ParserError.invalidTypeName(span: currentSpan, name: typeName)
+        }
+        try match(.identifier(typeName))
+        
+        var type = TypeNode.moduleQualifiedGeneric(module: name, base: typeName, args: args)
+        if currentToken === .refKeyword {
+          try match(.refKeyword)
+          type = .reference(type)
+        }
+        return type
+      }
+      
+      // Simple module-qualified type: module.TypeName
+      guard case .identifier(let typeName) = currentToken else {
+        throw ParserError.expectedTypeIdentifier(
+          span: currentSpan, got: currentToken.description)
+      }
+      
+      if !isValidTypeName(typeName) {
+        throw ParserError.invalidTypeName(span: currentSpan, name: typeName)
+      }
+      try match(.identifier(typeName))
+      
+      var type: TypeNode = .moduleQualified(module: name, name: typeName)
+      if currentToken === .refKeyword {
+        try match(.refKeyword)
+        type = .reference(type)
+      }
+      return type
+    }
 
+    // Simple type - must start with uppercase
     if !isValidTypeName(name) {
       throw ParserError.invalidTypeName(span: currentSpan, name: name)
     }
 
-    try match(.identifier(name))
     var type: TypeNode = .identifier(name)
 
     // Handle reference type suffix

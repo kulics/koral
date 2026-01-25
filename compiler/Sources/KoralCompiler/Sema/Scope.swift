@@ -63,6 +63,11 @@ public class Scope {
   private var symbolModulePaths: [String: [String]] = [:]
   /// Set of function symbols (not closure variables)
   private var functionSymbols: Set<String> = []
+  /// 直接可用符号集合（local、memberImport、batchImport）
+  /// 这些符号可以不带模块前缀直接访问
+  private var directlyAccessibleSymbols: Set<String> = []
+  /// 直接可用类型集合
+  private var directlyAccessibleTypes: Set<String> = []
 
   public init(parent: Scope? = nil) {
     self.symbols = [:]
@@ -86,6 +91,46 @@ public class Scope {
 
   public func define(_ name: String, _ type: Type, mutable: Bool) {
     symbols[name] = (type, mutable)
+  }
+  
+  /// 定义一个直接可用的符号（local、memberImport、batchImport）
+  /// 这些符号可以不带模块前缀直接访问
+  public func defineAsDirectlyAccessible(_ name: String, _ type: Type, mutable: Bool) {
+    symbols[name] = (type, mutable)
+    directlyAccessibleSymbols.insert(name)
+  }
+  
+  /// 定义一个直接可用的函数符号
+  public func defineFunctionAsDirectlyAccessible(_ name: String, _ type: Type, modulePath: [String]) {
+    symbols[name] = (type, false)
+    functionSymbols.insert(name)
+    symbolModulePaths[name] = modulePath
+    directlyAccessibleSymbols.insert(name)
+  }
+  
+  /// 检查符号是否可以直接访问（不需要模块前缀）
+  public func isDirectlyAccessible(_ name: String) -> Bool {
+    if directlyAccessibleSymbols.contains(name) {
+      return true
+    }
+    return parent?.isDirectlyAccessible(name) ?? false
+  }
+  
+  /// 定义一个直接可用的类型
+  public func defineTypeAsDirectlyAccessible(_ name: String, type: Type, line: Int? = nil) throws {
+    if types[name] != nil {
+      throw SemanticError.duplicateDefinition(name, line: line)
+    }
+    types[name] = type
+    directlyAccessibleTypes.insert(name)
+  }
+  
+  /// 检查类型是否可以直接访问（不需要模块前缀）
+  public func isTypeDirectlyAccessible(_ name: String) -> Bool {
+    if directlyAccessibleTypes.contains(name) {
+      return true
+    }
+    return parent?.isTypeDirectlyAccessible(name) ?? false
   }
   
   /// Define a function symbol (not a closure variable)

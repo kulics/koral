@@ -123,6 +123,43 @@ extension Monomorphizer {
             let resolvedReturnType = try resolveTypeNode(returnType, substitution: substitution)
             let parameters = resolvedParamTypes.map { Parameter(type: $0, kind: .byVal) }
             return .function(parameters: parameters, returns: resolvedReturnType)
+            
+        case .moduleQualified(_, let name):
+            // 模块限定类型：直接解析类型名
+            // 在 Monomorphizer 阶段，模块信息已经不重要，直接使用类型名
+            if let substituted = substitution[name] {
+                return substituted
+            }
+            if let builtinType = resolveBuiltinType(name) {
+                return builtinType
+            }
+            if let concreteType = input.genericTemplates.concreteStructTypes[name] {
+                return concreteType
+            }
+            if let concreteType = input.genericTemplates.concreteUnionTypes[name] {
+                return concreteType
+            }
+            return .genericParameter(name: name)
+            
+        case .moduleQualifiedGeneric(_, let base, let args):
+            // 模块限定泛型类型
+            // Special case: Pointer<T>
+            if base == "Pointer" && args.count == 1 {
+                let elementType = try resolveTypeNode(args[0], substitution: substitution)
+                return .pointer(element: elementType)
+            }
+            
+            let resolvedArgs = try args.map { try resolveTypeNode($0, substitution: substitution) }
+            
+            if let template = input.genericTemplates.structTemplates[base] {
+                return try instantiateStruct(template: template, args: resolvedArgs)
+            }
+            
+            if let template = input.genericTemplates.unionTemplates[base] {
+                return try instantiateUnion(template: template, args: resolvedArgs)
+            }
+            
+            throw SemanticError(.generic("Unknown generic type: \(base)"), line: currentLine)
         }
     }
     
@@ -418,18 +455,23 @@ extension Monomorphizer {
             // Resolve the type to get the concrete type name
             let resolvedType = resolveParameterizedType(type)
             let typeName: String
+            let qualifiedTypeName: String
             switch resolvedType {
             case .structure(let decl):
                 typeName = decl.name
+                qualifiedTypeName = decl.qualifiedName
             case .union(let decl):
                 typeName = decl.name
+                qualifiedTypeName = decl.qualifiedName
             default:
                 typeName = resolvedType.description
+                qualifiedTypeName = typeName
             }
             
             let newMethods = methods.map { method -> TypedMethodDeclaration in
                 // Generate mangled name for the method
-                let mangledName = "\(typeName)_\(method.identifier.name)"
+                // Use qualifiedTypeName to include module path
+                let mangledName = "\(qualifiedTypeName)_\(method.identifier.name)"
                 
                 return TypedMethodDeclaration(
                     identifier: Symbol(
@@ -889,31 +931,45 @@ extension Monomorphizer {
                 )
             }
             
-            // Get the template name from the base type
+            // Get the template name and qualified name from the base type
             let templateName: String
+            let qualifiedTypeName: String
+            let isGenericInstantiation: Bool
             switch resolvedBaseType {
             case .structure(let decl):
                 // Extract base name from mangled name (e.g., "List_I" -> "List")
                 templateName = decl.name.split(separator: "_").first.map(String.init) ?? decl.name
+                qualifiedTypeName = decl.qualifiedName
+                isGenericInstantiation = decl.isGenericInstantiation
             case .genericStruct(let name, _):
                 templateName = name
+                qualifiedTypeName = name  // Generic types don't have module path yet
+                isGenericInstantiation = false
             case .union(let decl):
                 templateName = decl.name.split(separator: "_").first.map(String.init) ?? decl.name
+                qualifiedTypeName = decl.qualifiedName
+                isGenericInstantiation = decl.isGenericInstantiation
             case .genericUnion(let name, _):
                 templateName = name
+                qualifiedTypeName = name  // Generic types don't have module path yet
+                isGenericInstantiation = false
             default:
                 templateName = resolvedBaseType.description
+                qualifiedTypeName = templateName
+                isGenericInstantiation = false
             }
             
-            // Calculate the mangled method name
-            // For non-generic types (empty typeArgs), use "TypeName_methodName"
-            // For generic types, use "TypeName_TypeArgs_methodName"
+            // Calculate the mangled method name using qualified type name
+            // For instantiated generic types, qualifiedTypeName already includes type args
+            // For non-generic types, just use "QualifiedTypeName_methodName"
             let mangledMethodName: String
-            if resolvedTypeArgs.isEmpty {
-                mangledMethodName = "\(templateName)_\(methodName)"
+            if isGenericInstantiation || resolvedTypeArgs.isEmpty {
+                // qualifiedTypeName already includes type args for generic instantiations
+                mangledMethodName = "\(qualifiedTypeName)_\(methodName)"
             } else {
+                // For uninstantiated generic types, add type args
                 let argLayoutKeys = resolvedTypeArgs.map { $0.layoutKey }.joined(separator: "_")
-                mangledMethodName = "\(templateName)_\(argLayoutKeys)_\(methodName)"
+                mangledMethodName = "\(qualifiedTypeName)_\(argLayoutKeys)_\(methodName)"
             }
             
             // Check for concrete extension methods first (for primitive types like Int, UInt, etc.)

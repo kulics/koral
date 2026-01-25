@@ -762,7 +762,8 @@ public class CodeGen {
 
       let result = nextTemp()
       addIndent()
-      buffer += "\(getCType(type)) \(result) = String_from_utf8_bytes_unchecked((uint8_t*)\(bytesVar), \(utf8Bytes.count));\n"
+      // Use qualified name for String.from_utf8_bytes_unchecked
+      buffer += "\(getCType(type)) \(result) = std_String_from_utf8_bytes_unchecked((uint8_t*)\(bytesVar), \(utf8Bytes.count));\n"
       return result
 
     case .booleanLiteral(let value, _):
@@ -2182,12 +2183,14 @@ public class CodeGen {
         let literalVar = nextTemp() + "_pat_str"
         var prelude = ""
         prelude += "static const uint8_t \(bytesVar)[] = { \(byteLiterals) };\n"
-        prelude += "\(getCType(type)) \(literalVar) = String_from_utf8_bytes_unchecked((uint8_t*)\(bytesVar), \(utf8Bytes.count));\n"
+        // Use qualified name for String.from_utf8_bytes_unchecked
+        prelude += "\(getCType(type)) \(literalVar) = std_String_from_utf8_bytes_unchecked((uint8_t*)\(bytesVar), \(utf8Bytes.count));\n"
         // Compare via compiler-protocol `String.__equals(self, other String) Bool`.
         // Value-passing semantics: String___equals consumes its arguments, so we must copy
         // the subject before comparison to allow multiple pattern matches on the same variable.
         guard case .structure(let decl) = type else { fatalError("String literal pattern requires String type") }
-        return ([prelude], [(literalVar, type)], "String___equals(__koral_\(decl.qualifiedName)_copy(&\(path)), \(literalVar))", [], [])
+        // Use qualified name for String.__equals
+        return ([prelude], [(literalVar, type)], "std_String___equals(__koral_\(decl.qualifiedName)_copy(&\(path)), \(literalVar))", [], [])
       case .wildcard:
         return ([], [], "1", [], [])
       case .variable(let symbol):

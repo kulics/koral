@@ -172,12 +172,13 @@ public class Driver {
             
             // Collect std library nodes with source info
             let stdNodesWithInfo = stdCompilationUnit!.getAllGlobalNodesWithSourceInfo()
-            for (node, sourceFile, modulePath) in stdNodesWithInfo {
+            for (node, sourceFile, modulePath, importedModules) in stdNodesWithInfo {
                 stdGlobalNodes.append(node)
                 stdNodeSourceInfoList.append(GlobalNodeSourceInfo(
                     sourceFile: sourceFile,
                     modulePath: modulePath,
-                    node: node
+                    node: node,
+                    importedModules: importedModules
                 ))
             }
             
@@ -221,11 +222,12 @@ public class Driver {
       
       // Add user code nodes with source info
       let userNodesWithInfo = compilationUnit.getAllGlobalNodesWithSourceInfo()
-      for (node, sourceFile, modulePath) in userNodesWithInfo {
+      for (node, sourceFile, modulePath, importedModules) in userNodesWithInfo {
         nodeSourceInfoList.append(GlobalNodeSourceInfo(
           sourceFile: sourceFile,
           modulePath: modulePath,
-          node: node
+          node: node,
+          importedModules: importedModules
         ))
       }
       

@@ -131,6 +131,18 @@ extension TypeChecker {
       let symbolModulePath = isGlobalSymbol ? (info.modulePath.isEmpty ? currentModulePath : info.modulePath) : []
       let symbolSourceFile = info.isPrivate ? (info.sourceFile ?? currentSourceFile) : ""
       
+      // 模块可见性检查：
+      // 只有同一模块或父模块的符号可以直接访问
+      // 子模块或兄弟模块的符号需要通过模块前缀访问
+      if !symbolModulePath.isEmpty && !currentModulePath.isEmpty {
+        // 检查符号是否可以从当前模块直接访问（传递符号名用于成员导入检查）
+        if !canAccessSymbolDirectly(symbolModulePath: symbolModulePath, currentModulePath: currentModulePath, symbolName: name) {
+          // 找到需要使用的模块前缀
+          let modulePrefix = getRequiredModulePrefix(symbolModulePath: symbolModulePath, currentModulePath: currentModulePath)
+          throw SemanticError(.generic("'\(name)' is defined in module '\(modulePrefix)'. Use '\(modulePrefix).\(name)' to access it."), line: currentLine)
+        }
+      }
+      
       // Determine symbol kind:
       // - Functions are tracked in the scope's functionSymbols set
       // - Variables with function types (closures) are not in that set
@@ -556,6 +568,211 @@ extension TypeChecker {
   
   /// Infers the type of a call expression
   func inferCallExpression(callee: ExpressionNode, arguments: [ExpressionNode]) throws -> TypedExpressionNode {
+    // Check if callee is a module-qualified static method call (e.g., module.Type.method())
+    if case .memberPath(let baseExpr, let path) = callee,
+       case .identifier(let moduleName) = baseExpr,
+       path.count >= 2 {
+      // Check if the base identifier is a module symbol
+      if let moduleType = currentScope.lookup(moduleName, sourceFile: currentSourceFile),
+         case .module(let moduleInfo) = moduleType {
+        let typeName = path[0]
+        let methodName = path[1]
+        
+        // Look up the type in the module's public types
+        if let type = moduleInfo.publicTypes[typeName] {
+          // Handle concrete struct types
+          if case .structure(let decl) = type {
+            // Look up static method on the struct using simple name (how extensionMethods is keyed)
+            if let methods = extensionMethods[decl.name], let methodSym = methods[methodName] {
+              // Check if it's a static method (no self parameter or first param is not self)
+              let isStatic: Bool
+              if case .function(let params, _) = methodSym.type {
+                isStatic = params.isEmpty || params[0].kind != .byRef
+              } else {
+                isStatic = true
+              }
+              
+              if isStatic {
+                if methodSym.methodKind != .normal {
+                  throw SemanticError(
+                    .generic("compiler protocol method \(methodName) cannot be called explicitly"),
+                    line: currentLine)
+                }
+                
+                guard case .function(let params, let returnType) = methodSym.type else {
+                  throw SemanticError(.generic("Expected function type for static method"), line: currentLine)
+                }
+                
+                if arguments.count != params.count {
+                  throw SemanticError.invalidArgumentCount(
+                    function: methodName,
+                    expected: params.count,
+                    got: arguments.count
+                  )
+                }
+                
+                var typedArguments: [TypedExpressionNode] = []
+                for (arg, param) in zip(arguments, params) {
+                  var typedArg = try inferTypedExpression(arg)
+                  typedArg = try coerceLiteral(typedArg, to: param.type)
+                  if typedArg.type != param.type {
+                    throw SemanticError.typeMismatch(
+                      expected: param.type.description,
+                      got: typedArg.type.description
+                    )
+                  }
+                  typedArguments.append(typedArg)
+                }
+                
+                return .staticMethodCall(
+                  baseType: type,
+                  methodName: methodName,
+                  typeArgs: [],
+                  arguments: typedArguments,
+                  type: returnType
+                )
+              }
+            }
+          }
+          
+          // Handle concrete union types
+          if case .union(let decl) = type {
+            // Check if it's a union case constructor
+            if let c = decl.cases.first(where: { $0.name == methodName }) {
+              let params = c.parameters.map { Parameter(type: $0.type, kind: .byVal) }
+              
+              if arguments.count != params.count {
+                throw SemanticError.invalidArgumentCount(
+                  function: "\(typeName).\(methodName)",
+                  expected: params.count,
+                  got: arguments.count
+                )
+              }
+              
+              var typedArgs: [TypedExpressionNode] = []
+              for (arg, param) in zip(arguments, params) {
+                var typedArg = try inferTypedExpression(arg)
+                typedArg = try coerceLiteral(typedArg, to: param.type)
+                if typedArg.type != param.type {
+                  throw SemanticError.typeMismatch(
+                    expected: param.type.description, got: typedArg.type.description)
+                }
+                typedArgs.append(typedArg)
+              }
+              
+              return .unionConstruction(type: type, caseName: methodName, arguments: typedArgs)
+            }
+            
+            // Look up static method on the union using simple name
+            if let methods = extensionMethods[decl.name], let methodSym = methods[methodName] {
+              let isStatic: Bool
+              if case .function(let params, _) = methodSym.type {
+                isStatic = params.isEmpty || params[0].kind != .byRef
+              } else {
+                isStatic = true
+              }
+              
+              if isStatic {
+                if methodSym.methodKind != .normal {
+                  throw SemanticError(
+                    .generic("compiler protocol method \(methodName) cannot be called explicitly"),
+                    line: currentLine)
+                }
+                
+                guard case .function(let params, let returnType) = methodSym.type else {
+                  throw SemanticError(.generic("Expected function type for static method"), line: currentLine)
+                }
+                
+                if arguments.count != params.count {
+                  throw SemanticError.invalidArgumentCount(
+                    function: methodName,
+                    expected: params.count,
+                    got: arguments.count
+                  )
+                }
+                
+                var typedArguments: [TypedExpressionNode] = []
+                for (arg, param) in zip(arguments, params) {
+                  var typedArg = try inferTypedExpression(arg)
+                  typedArg = try coerceLiteral(typedArg, to: param.type)
+                  if typedArg.type != param.type {
+                    throw SemanticError.typeMismatch(
+                      expected: param.type.description,
+                      got: typedArg.type.description
+                    )
+                  }
+                  typedArguments.append(typedArg)
+                }
+                
+                return .staticMethodCall(
+                  baseType: type,
+                  methodName: methodName,
+                  typeArgs: [],
+                  arguments: typedArguments,
+                  type: returnType
+                )
+              }
+            }
+          }
+        }
+        
+        // Also try looking up the type from global scope (for types not yet in module's publicTypes)
+        if let type = currentScope.lookupType(typeName) {
+          if case .structure(let decl) = type {
+            if let methods = extensionMethods[decl.name], let methodSym = methods[methodName] {
+              let isStatic: Bool
+              if case .function(let params, _) = methodSym.type {
+                isStatic = params.isEmpty || params[0].kind != .byRef
+              } else {
+                isStatic = true
+              }
+              
+              if isStatic {
+                if methodSym.methodKind != .normal {
+                  throw SemanticError(
+                    .generic("compiler protocol method \(methodName) cannot be called explicitly"),
+                    line: currentLine)
+                }
+                
+                guard case .function(let params, let returnType) = methodSym.type else {
+                  throw SemanticError(.generic("Expected function type for static method"), line: currentLine)
+                }
+                
+                if arguments.count != params.count {
+                  throw SemanticError.invalidArgumentCount(
+                    function: methodName,
+                    expected: params.count,
+                    got: arguments.count
+                  )
+                }
+                
+                var typedArguments: [TypedExpressionNode] = []
+                for (arg, param) in zip(arguments, params) {
+                  var typedArg = try inferTypedExpression(arg)
+                  typedArg = try coerceLiteral(typedArg, to: param.type)
+                  if typedArg.type != param.type {
+                    throw SemanticError.typeMismatch(
+                      expected: param.type.description,
+                      got: typedArg.type.description
+                    )
+                  }
+                  typedArguments.append(typedArg)
+                }
+                
+                return .staticMethodCall(
+                  baseType: type,
+                  methodName: methodName,
+                  typeArgs: [],
+                  arguments: typedArguments,
+                  type: returnType
+                )
+              }
+            }
+          }
+        }
+      }
+    }
+    
     // Check if callee is a static method call on a generic type (e.g., [Int]List.new())
     if case .memberPath(let baseExpr, let path) = callee,
        case .genericInstantiation(let baseName, let args) = baseExpr,
@@ -1621,7 +1838,7 @@ extension TypeChecker {
       }
     }
 
-    // 2. Check if baseExpr is a module symbol for member access (e.g., child.child_value())
+    // 2. Check if baseExpr is a module symbol for member access (e.g., child.child_value() or module.Type.method())
     if case .identifier(let name) = baseExpr {
       // Check if it's a module symbol
       if let moduleType = currentScope.lookup(name, sourceFile: currentSourceFile),
@@ -1646,6 +1863,36 @@ extension TypeChecker {
             return .variable(identifier: typeSymbol)
           }
           throw SemanticError.undefinedMember(memberName, name)
+        } else if path.count >= 2 {
+          // Handle module.Type.method() or module.Type.field
+          let typeName = path[0]
+          let remainingPath = Array(path.dropFirst())
+          
+          // First, try to find the type in the module's public types
+          if let memberType = moduleInfo.publicTypes[typeName] {
+            // Now handle the remaining path as a type member access
+            if let result = try inferTypeMemberPath(type: memberType, typeName: typeName, path: remainingPath) {
+              return result
+            }
+          }
+          
+          // If not found in module's public types, try global scope
+          // (for types that haven't been fully registered in the module yet)
+          if let type = currentScope.lookupType(typeName) {
+            if let result = try inferTypeMemberPath(type: type, typeName: typeName, path: remainingPath) {
+              return result
+            }
+          }
+          
+          // Try generic struct template
+          if let template = currentScope.lookupGenericStructTemplate(typeName) {
+            // For generic types, we need type arguments
+            // This case handles module.GenericType.method() without explicit type args
+            // which is typically an error, but we'll let inferTypeMemberPath handle it
+            throw SemanticError.undefinedType("\(name).\(typeName)")
+          }
+          
+          throw SemanticError.undefinedMember(typeName, name)
         }
       }
     }
@@ -2192,6 +2439,8 @@ extension TypeChecker {
     
     // Check if it's a generic struct
     if let template = currentScope.lookupGenericStructTemplate(typeName) {
+      // 检查泛型模板的可见性（通过已实例化的类型检查）
+      // 泛型模板本身没有模块路径，需要在实例化时检查
       return try inferGenericStructStaticMethodCall(
         template: template,
         typeName: typeName,
@@ -2214,6 +2463,9 @@ extension TypeChecker {
     
     // Check if it's a non-generic type (e.g., String.empty())
     if let type = currentScope.lookupType(typeName) {
+      // 检查类型的模块可见性
+      try checkTypeVisibility(type: type, typeName: typeName)
+      
       return try inferConcreteTypeStaticMethodCall(
         type: type,
         typeName: typeName,

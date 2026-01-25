@@ -13,6 +13,8 @@ extension TypeChecker {
     switch node {
     case .identifier(let name):
       if let t = currentScope.resolveType(name, sourceFile: currentSourceFile) {
+        // 检查类型的模块可见性
+        try checkTypeVisibility(type: t, typeName: name)
         return t
       }
       if traits[name] != nil {
@@ -113,6 +115,90 @@ extension TypeChecker {
       let resolvedReturnType = try resolveTypeNode(returnType)
       let parameters = resolvedParamTypes.map { Parameter(type: $0, kind: .byVal) }
       return .function(parameters: parameters, returns: resolvedReturnType)
+      
+    case .moduleQualified(let moduleName, let typeName):
+      // 模块限定类型：module.TypeName
+      // 首先验证模块符号存在
+      guard let moduleType = currentScope.lookup(moduleName, sourceFile: currentSourceFile),
+            case .module(let moduleInfo) = moduleType else {
+        throw SemanticError.undefinedVariable(moduleName)
+      }
+      
+      // 首先尝试从模块的公开类型中查找（Pass 2.5 之后可用）
+      if let type = moduleInfo.publicTypes[typeName] {
+        return type
+      }
+      
+      // 如果模块的公开类型中没有，尝试从全局 scope 中查找
+      // 这是为了支持 Pass 2 中的类型解析（此时模块符号还没有完全构建）
+      if let type = currentScope.lookupType(typeName) {
+        // 验证类型确实属于该模块
+        // TODO: 添加模块路径验证
+        return type
+      }
+      
+      throw SemanticError.undefinedType("\(moduleName).\(typeName)")
+      
+    case .moduleQualifiedGeneric(let moduleName, let baseName, let args):
+      // 模块限定泛型类型：module.[T]List
+      // 首先查找模块符号
+      guard let moduleType = currentScope.lookup(moduleName, sourceFile: currentSourceFile),
+            case .module = moduleType else {
+        throw SemanticError.undefinedVariable(moduleName)
+      }
+      
+      // 查找泛型模板（泛型模板是全局注册的）
+      if let template = currentScope.lookupGenericStructTemplate(baseName) {
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        
+        // Validate type argument count
+        guard template.typeParameters.count == resolvedArgs.count else {
+          throw SemanticError.typeMismatch(
+            expected: "\(template.typeParameters.count) generic arguments",
+            got: "\(resolvedArgs.count)"
+          )
+        }
+        
+        // Validate generic constraints
+        try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
+        
+        // Record instantiation request for deferred monomorphization
+        if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+          recordInstantiation(InstantiationRequest(
+            kind: .structType(template: template, args: resolvedArgs),
+            sourceLine: currentLine,
+            sourceFileName: currentFileName
+          ))
+        }
+        
+        return .genericStruct(template: baseName, args: resolvedArgs)
+      } else if let template = currentScope.lookupGenericUnionTemplate(baseName) {
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        
+        // Validate type argument count
+        guard template.typeParameters.count == resolvedArgs.count else {
+          throw SemanticError.typeMismatch(
+            expected: "\(template.typeParameters.count) generic types",
+            got: "\(resolvedArgs.count)"
+          )
+        }
+        
+        // Validate generic constraints
+        try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
+        
+        // Record instantiation request for deferred monomorphization
+        if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+          recordInstantiation(InstantiationRequest(
+            kind: .unionType(template: template, args: resolvedArgs),
+            sourceLine: currentLine,
+            sourceFileName: currentFileName
+          ))
+        }
+        
+        return .genericUnion(template: baseName, args: resolvedArgs)
+      } else {
+        throw SemanticError.undefinedType("\(moduleName).\(baseName)")
+      }
     }
   }
   

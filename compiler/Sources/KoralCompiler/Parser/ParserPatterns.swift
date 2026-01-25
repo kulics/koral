@@ -132,23 +132,23 @@ extension Parser {
     // Boolean literal pattern
     if case .bool(let v) = currentToken {
       try match(.bool(v))
-      return .booleanLiteral(value: v, span: currentSpan)
+      return .booleanLiteral(value: v, span: startSpan)
     }
     
     // Identifier pattern (wildcard or variable binding)
     if case .identifier(let name) = currentToken {
       if name == "_" {
         try match(.identifier(name))
-        return .wildcard(span: currentSpan)
+        return .wildcard(span: startSpan)
       }
       try match(.identifier(name))
-      return .variable(name: name, mutable: false, span: currentSpan)
+      return .variable(name: name, mutable: false, span: startSpan)
     }
     
     // String literal pattern
     if case .string(let str) = currentToken {
       try match(.string(str))
-      return .stringLiteral(value: str, span: currentSpan)
+      return .stringLiteral(value: str, span: startSpan)
     }
     
     // Mutable variable binding pattern
@@ -158,7 +158,7 @@ extension Parser {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
       try match(.identifier(name))
-      return .variable(name: name, mutable: true, span: currentSpan)
+      return .variable(name: name, mutable: true, span: startSpan)
     }
     
     // Union case pattern
@@ -177,7 +177,7 @@ extension Parser {
         }
         try match(.rightParen)
       }
-      return .unionCase(caseName: name, elements: args, span: currentSpan)
+      return .unionCase(caseName: name, elements: args, span: startSpan)
     }
     
     // Parenthesized pattern for grouping

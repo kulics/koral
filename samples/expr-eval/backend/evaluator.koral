@@ -1,0 +1,196 @@
+// 表达式求值器 - Evaluator 核心功能
+
+public type Evaluator(mut env Environment)
+
+given Evaluator {
+    public new() Self = Evaluator(Environment.new())
+
+    public eval(self ref, expr frontend.Expr ref) [types.Value, String]Result = {
+        when deref expr is {
+            .Number(v) then Result.Ok(v),
+            .Variable(name) then self.eval_variable(name),
+            .BinaryOp(op, left, right) then self.eval_binary(op, left, right),
+            .UnaryOp(op, operand) then self.eval_unary(op, operand),
+            .FunctionCall(name, args) then self.eval_call(name, args),
+            .Assignment(name, value) then self.eval_assignment(name, value),
+        }
+    }
+
+    private eval_variable(self ref, name String) [types.Value, String]Result = {
+        when self.env.get(name) is {
+            .Some(v) then Result.Ok(v),
+            .None then {
+                let msg = String.empty()
+                msg.push_string("Undefined variable: ")
+                msg.push_string(name)
+                Result.Error(msg)
+            },
+        }
+    }
+
+    private eval_binary(self ref, op frontend.BinaryOperator, left frontend.Expr ref, right frontend.Expr ref) [types.Value, String]Result = {
+        when self.eval(left) is {
+            .Error(e) then Result.Error(e),
+            .Ok(lv) then when self.eval(right) is {
+                .Error(e) then Result.Error(e),
+                .Ok(rv) then self.apply_binary_op(op, lv, rv),
+            },
+        }
+    }
+
+    private apply_binary_op(self ref, op frontend.BinaryOperator, left types.Value, right types.Value) [types.Value, String]Result = {
+        when op is {
+            .Add then self.value_add(left, right),
+            .Sub then self.value_sub(left, right),
+            .Mul then self.value_mul(left, right),
+            .Div then self.value_div(left, right),
+            .Mod then self.value_mod(left, right),
+            .Pow then self.value_pow(left, right),
+        }
+    }
+
+    // 加法
+    private value_add(self ref, left types.Value, right types.Value) [types.Value, String]Result = {
+        if left.is_int() and right.is_int() then {
+            when left is {
+                .IntVal(lv) then when right is {
+                    .IntVal(rv) then Result.Ok(types.Value.IntVal(lv + rv)),
+                    _ then Result.Error("unreachable"),
+                },
+                _ then Result.Error("unreachable"),
+            }
+        } else {
+            Result.Ok(types.Value.FloatVal(left.to_float() + right.to_float()))
+        }
+    }
+
+    // 减法
+    private value_sub(self ref, left types.Value, right types.Value) [types.Value, String]Result = {
+        if left.is_int() and right.is_int() then {
+            when left is {
+                .IntVal(lv) then when right is {
+                    .IntVal(rv) then Result.Ok(types.Value.IntVal(lv - rv)),
+                    _ then Result.Error("unreachable"),
+                },
+                _ then Result.Error("unreachable"),
+            }
+        } else {
+            Result.Ok(types.Value.FloatVal(left.to_float() - right.to_float()))
+        }
+    }
+
+    // 乘法
+    private value_mul(self ref, left types.Value, right types.Value) [types.Value, String]Result = {
+        if left.is_int() and right.is_int() then {
+            when left is {
+                .IntVal(lv) then when right is {
+                    .IntVal(rv) then Result.Ok(types.Value.IntVal(lv * rv)),
+                    _ then Result.Error("unreachable"),
+                },
+                _ then Result.Error("unreachable"),
+            }
+        } else {
+            Result.Ok(types.Value.FloatVal(left.to_float() * right.to_float()))
+        }
+    }
+
+    // 除法
+    private value_div(self ref, left types.Value, right types.Value) [types.Value, String]Result = {
+        if right.to_float() == 0.0 then {
+            return Result.Error("Division by zero");
+        }
+        if left.is_int() and right.is_int() then {
+            when left is {
+                .IntVal(lv) then when right is {
+                    .IntVal(rv) then {
+                        if lv % rv == 0 then Result.Ok(types.Value.IntVal(lv / rv))
+                        else Result.Ok(types.Value.FloatVal((Float64)lv / (Float64)rv))
+                    },
+                    _ then Result.Error("unreachable"),
+                },
+                _ then Result.Error("unreachable"),
+            }
+        } else {
+            Result.Ok(types.Value.FloatVal(left.to_float() / right.to_float()))
+        }
+    }
+
+    // 取模
+    private value_mod(self ref, left types.Value, right types.Value) [types.Value, String]Result = {
+        if right.to_float() == 0.0 then {
+            return Result.Error("Modulo by zero");
+        }
+        if left.is_int() and right.is_int() then {
+            when left is {
+                .IntVal(lv) then when right is {
+                    .IntVal(rv) then Result.Ok(types.Value.IntVal(lv % rv)),
+                    _ then Result.Error("unreachable"),
+                },
+                _ then Result.Error("unreachable"),
+            }
+        } else {
+            let lf = left.to_float()
+            let rf = right.to_float()
+            Result.Ok(types.Value.FloatVal(lf - rf * (Float64)math_floor(lf / rf)))
+        }
+    }
+
+    // 幂运算
+    private value_pow(self ref, left types.Value, right types.Value) [types.Value, String]Result = {
+        let result = math_pow(left.to_float(), right.to_float())
+        if left.is_int() and right.is_int() then {
+            when right is {
+                .IntVal(rv) then {
+                    if rv >= 0 then {
+                        let int_result = (Int)result
+                        if (Float64)int_result == result then {
+                            return Result.Ok(types.Value.IntVal(int_result));
+                        }
+                    }
+                },
+                _ then {},
+            }
+        }
+        Result.Ok(types.Value.FloatVal(result))
+    }
+
+    // 一元运算
+    private eval_unary(self ref, op frontend.UnaryOperator, operand frontend.Expr ref) [types.Value, String]Result = {
+        when self.eval(operand) is {
+            .Error(e) then Result.Error(e),
+            .Ok(v) then when op is {
+                .Neg then when v is {
+                    .IntVal(x) then Result.Ok(types.Value.IntVal(0 - x)),
+                    .FloatVal(x) then Result.Ok(types.Value.FloatVal(0.0 - x)),
+                },
+            },
+        }
+    }
+
+    // 函数调用
+    private eval_call(self ref, name String, args [frontend.Expr ref]List) [types.Value, String]Result = {
+        let evaluated_args = [types.Value]List.new()
+        for arg = args then {
+            when self.eval(arg) is {
+                .Error(e) then { return Result.Error(e); },
+                .Ok(v) then { evaluated_args.push_back(v); },
+            }
+        }
+        call_builtin(name, evaluated_args)
+    }
+
+    // 赋值
+    private eval_assignment(self ref, name String, value frontend.Expr ref) [types.Value, String]Result = {
+        when self.eval(value) is {
+            .Error(e) then Result.Error(e),
+            .Ok(v) then {
+                self.env.set(name, v)
+                Result.Ok(v)
+            },
+        }
+    }
+
+    public get_env(self ref) Environment ref = ref self.env
+    public clear_env(self ref) Void = self.env.clear()
+    public list_vars(self) Void = self.env.list_vars()
+}

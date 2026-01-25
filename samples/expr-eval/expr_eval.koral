@@ -1,0 +1,124 @@
+// 表达式求值器 - 入口文件
+
+public using self.types
+public using self.frontend
+public using self.backend
+
+// REPL 类型
+public type REPL(mut evaluator backend.Evaluator)
+
+given REPL {
+    public new() Self = REPL(backend.Evaluator.new())
+
+    // 显示欢迎信息
+    private show_welcome(self) Void = {
+        print_line("Expression Evaluator v1.0")
+        print_line("Type 'help' for available commands, 'quit' to exit.")
+        print_line("")
+    }
+
+    // 显示帮助信息
+    private show_help(self) Void = {
+        print_line("Commands:")
+        print_line("  help   - Show this help message")
+        print_line("  vars   - List all defined variables")
+        print_line("  clear  - Clear all variables")
+        print_line("  quit   - Exit the program")
+        print_line("  exit   - Exit the program")
+        print_line("")
+        print_line("Operators: + - * / % ^ (power)")
+        print_line("Functions: abs, sqrt, min, max, floor, ceil, round")
+        print_line("Variables: x = 10 (assignment), x (reference)")
+    }
+
+    // 处理单行输入
+    private process_line(self ref, line String) Bool = {
+        // 检查命令
+        if line == "quit" or line == "exit" then {
+            print_line("Goodbye!")
+            return false
+        }
+        
+        if line == "help" then {
+            self.show_help()
+            return true
+        }
+        
+        if line == "vars" then {
+            self.evaluator.list_vars()
+            return true
+        }
+        
+        if line == "clear" then {
+            self.evaluator.clear_env()
+            print_line("Variables cleared.")
+            return true
+        }
+        
+        // 空行跳过
+        if line.is_empty() then {
+            return true
+        }
+        
+        // 解析并求值表达式
+        let lexer = frontend.Lexer.new(line)
+        when lexer.tokenize() is {
+            .Ok(tokens) then {
+                let parser = frontend.Parser.new(tokens)
+                when parser.parse() is {
+                    .Ok(expr) then {
+                        when self.evaluator.eval(expr) is {
+                            .Ok(v) then print_line(v.to_string()),
+                            .Error(msg) then {
+                                let s = String.empty()
+                                s.push_string("Error: ")
+                                s.push_string(msg)
+                                print_line(s)
+                            },
+                        }
+                    },
+                    .Error(msg) then {
+                        let s = String.empty()
+                        s.push_string("Parse error: ")
+                        s.push_string(msg)
+                        print_line(s)
+                    },
+                }
+            },
+            .Error(msg) then {
+                let s = String.empty()
+                s.push_string("Lexer error: ")
+                s.push_string(msg)
+                print_line(s)
+            },
+        }
+        
+        true
+    }
+
+    // 运行 REPL 主循环
+    public run(self ref) Void = {
+        self.show_welcome()
+        
+        let mut running = true
+        while running then {
+            print("> ")
+            when read_line() is {
+                .Some(line) then {
+                    running = self.process_line(line)
+                },
+                .None then {
+                    // EOF
+                    print_line("")
+                    print_line("Goodbye!")
+                    running = false
+                },
+            }
+        }
+    }
+}
+
+public let main() Void = {
+    let repl = REPL.new()
+    repl.run()
+}
