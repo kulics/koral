@@ -77,7 +77,6 @@ public class BodyChecker: CompilerPass {
         let nameCollectorOutput = typeResolverOutput.nameCollectorOutput
         let moduleResolverOutput = nameCollectorOutput.moduleResolverOutput
         let astNodes = moduleResolverOutput.astNodes
-        _ = moduleResolverOutput.nodeSourceInfoList
         
         // 重置状态
         typedDeclarations = []
@@ -131,13 +130,3 @@ public class BodyChecker: CompilerPass {
     }
 }
 
-// MARK: - 辅助结构体
-
-/// 检查的声明信息
-struct CheckedDeclarationInfo {
-    let node: GlobalNode
-    let index: Int
-    let isStdLib: Bool
-    let sourceFile: String
-    let modulePath: [String]
-}
