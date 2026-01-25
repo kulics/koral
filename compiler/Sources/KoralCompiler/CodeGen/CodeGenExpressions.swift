@@ -72,7 +72,7 @@ extension CodeGen {
         if case .reference(let inner) = curType {
           // Dereferencing a ref type updates the control block
           baseControl = "\(basePath).control"
-          let innerCType = getCType(inner)
+          let innerCType = cTypeName(inner)
           basePath = "((\(innerCType)*)\(basePath).ptr)->\(member.qualifiedName)"
         } else {
           // Accessing member of value type keeps the same control block
@@ -98,7 +98,7 @@ extension CodeGen {
     case .derefExpression(let inner, let type):
          // Dereferencing a reference type gives us an LValue
          let refResult = generateExpressionSSA(inner)
-         let cType = getCType(type)
+         let cType = cTypeName(type)
          let path = "(*(\(cType)*)\(refResult).ptr)"
          let control = "\(refResult).control"
          return (path, control)
@@ -117,7 +117,7 @@ extension CodeGen {
     for member in path {
       var memberAccess: String
       if case .reference(let inner) = curType {
-          let innerCType = getCType(inner)
+          let innerCType = cTypeName(inner)
           memberAccess = "((\(innerCType)*)\(access).ptr)->\(member.qualifiedName)"
       } else {
           memberAccess = "\(access).\(member.qualifiedName)"
@@ -130,14 +130,14 @@ extension CodeGen {
         if let canonicalMember = decl.members.first(where: { $0.name == member.name }) {
           // Compare C type representations instead of Type equality
           // This avoids issues with UUID-based type identity for generic instantiations
-          let canonicalCType = getCType(canonicalMember.type)
-          let memberCType = getCType(member.type)
+          let canonicalCType = cTypeName(canonicalMember.type)
+          let memberCType = cTypeName(member.type)
           if canonicalCType != memberCType {
             // Skip cast for reference types - they all use struct Ref
             if case .reference(_) = member.type {
               // No cast needed for reference types
             } else {
-              let targetCType = getCType(member.type)
+              let targetCType = cTypeName(member.type)
               memberAccess = "*(\(targetCType)*)&(\(memberAccess))"
             }
           }
@@ -149,7 +149,7 @@ extension CodeGen {
     }
     let result = nextTemp()
     addIndent()
-    appendToBuffer("\(getCType(path.last?.type ?? .void)) \(result) = \(access);\n")
+    appendToBuffer("\(cTypeName(path.last?.type ?? .void)) \(result) = \(access);\n")
     return result
   }
   
@@ -174,11 +174,11 @@ extension CodeGen {
           // Returning an lvalue from a block:
           // - Copy types must be copied, because scope cleanup will drop the original.
           addIndent()
-          appendToBuffer("\(getCType(finalExpr.type)) \(resultVar);\n")
+          appendToBuffer("\(cTypeName(finalExpr.type)) \(resultVar);\n")
           appendCopyAssignment(for: finalExpr.type, source: temp, dest: resultVar, indent: indent)
         } else {
           addIndent()
-          appendToBuffer("\(getCType(finalExpr.type)) \(resultVar) = \(temp);\n")
+          appendToBuffer("\(cTypeName(finalExpr.type)) \(resultVar) = \(temp);\n")
         }
         result = resultVar
       }
@@ -242,7 +242,7 @@ extension CodeGen {
       if arg.valueCategory == .lvalue {
         let copyResult = nextTemp()
         addIndent()
-        appendToBuffer("\(getCType(arg.type)) \(copyResult);\n")
+        appendToBuffer("\(cTypeName(arg.type)) \(copyResult);\n")
         appendCopyAssignment(for: arg.type, source: result, dest: copyResult, indent: indent)
         argResults.append(copyResult)
       } else {
@@ -250,12 +250,12 @@ extension CodeGen {
       }
     }
     
-    let returnCType = getCType(returnType)
+    let returnCType = cTypeName(returnType)
     
     // Build function pointer type for no-capture case: ReturnType (*)(Args...)
     var noCaptureParamTypes: [String] = []
     for param in funcParams {
-      noCaptureParamTypes.append(getCType(param.type))
+      noCaptureParamTypes.append(cTypeName(param.type))
     }
     let noCaptureParamsStr = noCaptureParamTypes.isEmpty ? "void" : noCaptureParamTypes.joined(separator: ", ")
     let noCaptureFnPtrType = "\(returnCType) (*)(\(noCaptureParamsStr))"
@@ -263,7 +263,7 @@ extension CodeGen {
     // Build function pointer type for with-capture case: ReturnType (*)(void*, Args...)
     var withCaptureParamTypes: [String] = ["void*"]
     for param in funcParams {
-      withCaptureParamTypes.append(getCType(param.type))
+      withCaptureParamTypes.append(cTypeName(param.type))
     }
     let withCaptureParamsStr = withCaptureParamTypes.joined(separator: ", ")
     let withCaptureFnPtrType = "\(returnCType) (*)(\(withCaptureParamsStr))"
@@ -321,7 +321,7 @@ extension CodeGen {
       if arg.valueCategory == .lvalue {
         let copyResult = nextTemp()
         addIndent()
-        appendToBuffer("\(getCType(arg.type)) \(copyResult);\n")
+        appendToBuffer("\(cTypeName(arg.type)) \(copyResult);\n")
         appendCopyAssignment(for: arg.type, source: result, dest: copyResult, indent: indent)
         paramResults.append(copyResult)
       } else {
@@ -337,7 +337,7 @@ extension CodeGen {
       return ""
     } else {
       let result = nextTemp()
-      appendToBuffer("\(getCType(type)) \(result) = \(identifier.qualifiedName)(")
+      appendToBuffer("\(cTypeName(type)) \(result) = \(identifier.qualifiedName)(")
       appendToBuffer(paramResults.joined(separator: ", "))
       appendToBuffer(");\n")
       return result
@@ -355,7 +355,7 @@ extension CodeGen {
     if value.valueCategory == .lvalue {
       let copyResult = nextTemp()
       addIndent()
-      appendToBuffer("\(getCType(value.type)) \(copyResult);\n")
+      appendToBuffer("\(cTypeName(value.type)) \(copyResult);\n")
       appendCopyAssignment(for: value.type, source: valueResult, dest: copyResult, indent: indent)
       addIndent()
       appendDropStatement(for: identifier.type, value: identifier.qualifiedName, indent: "")
@@ -388,7 +388,7 @@ extension CodeGen {
       
       var memberAccess: String
       if case .reference(let inner) = curType {
-          let innerCType = getCType(inner)
+          let innerCType = cTypeName(inner)
           memberAccess = "((\(innerCType)*)\(accessPath).ptr)->\(memberName)"
       } else {
           memberAccess = "\(accessPath).\(memberName)"
@@ -397,13 +397,13 @@ extension CodeGen {
       // Only apply type cast for non-reference struct members when the C types differ
       if case .structure(let decl) = curType.canonical {
         if let canonicalMember = decl.members.first(where: { $0.name == memberName }) {
-          let canonicalCType = getCType(canonicalMember.type)
-          let memberCTypeStr = getCType(memberType)
+          let canonicalCType = cTypeName(canonicalMember.type)
+          let memberCTypeStr = cTypeName(memberType)
           if canonicalCType != memberCTypeStr {
             if case .reference(_) = memberType {
               // No cast needed for reference types
             } else {
-              let targetCType = getCType(memberType)
+              let targetCType = cTypeName(memberType)
               memberAccess = "*(\(targetCType)*)&(\(memberAccess))"
             }
           }
@@ -417,7 +417,7 @@ extension CodeGen {
         if value.valueCategory == .lvalue {
           let copyResult = nextTemp()
           addIndent()
-          appendToBuffer("\(getCType(value.type)) \(copyResult);\n")
+          appendToBuffer("\(cTypeName(value.type)) \(copyResult);\n")
           appendCopyAssignment(for: value.type, source: valueResult, dest: copyResult, indent: indent)
           addIndent()
           appendDropStatement(for: memberType, value: accessPath, indent: "")

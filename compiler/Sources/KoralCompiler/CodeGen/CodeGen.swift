@@ -119,6 +119,21 @@ public class CodeGen {
     self.escapeAnalysisReportEnabled = escapeAnalysisReportEnabled
     self.escapeContext = EscapeContext(reportingEnabled: escapeAnalysisReportEnabled)
     buildCIdentifierMap()
+    TypeHandlerRegistry.shared.setCTypeNameResolver { [weak self] type in
+      guard let self else { return nil }
+      switch type {
+      case .structure(let decl):
+        return "struct \(self.cIdentifier(for: decl))"
+      case .union(let decl):
+        return "struct \(self.cIdentifier(for: decl))"
+      default:
+        return nil
+      }
+    }
+  }
+
+  deinit {
+    TypeHandlerRegistry.shared.setCTypeNameResolver(nil)
   }
 
   private func defIdKey(_ defId: DefId) -> String {
@@ -581,7 +596,7 @@ public class CodeGen {
       // 生成全局变量声明
       for node in nodes {
         if case .globalVariable(let identifier, let value, _) = node {
-          let cType = getCType(identifier.type)
+          let cType = cTypeName(identifier.type)
           let cName = cIdentifier(for: identifier)
           switch value {
           case .integerLiteral(_, _), .floatLiteral(_, _),
@@ -704,7 +719,7 @@ public class CodeGen {
 
   // 生成参数的 C 声明：类型若为 reference(T) 则 getCType 返回 T*
   private func getParamCDecl(_ param: Symbol) -> String {
-    return "\(getCType(param.type)) \(cIdentifier(for: param))"
+    return "\(cTypeName(param.type)) \(cIdentifier(for: param))"
   }
 
   private func generateFunctionBody(_ body: TypedExpressionNode, _ params: [Symbol]) {
@@ -725,20 +740,20 @@ public class CodeGen {
       let typeName = cIdentifier(for: decl)
       addIndent()
       if body.valueCategory == .lvalue {
-        buffer += "\(getCType(body.type)) \(result) = __koral_\(typeName)_copy(&\(resultVar));\n"
+        buffer += "\(cTypeName(body.type)) \(result) = __koral_\(typeName)_copy(&\(resultVar));\n"
       } else {
-        buffer += "\(getCType(body.type)) \(result) = \(resultVar);\n"
+        buffer += "\(cTypeName(body.type)) \(result) = \(resultVar);\n"
       }
     } else if case .reference(_) = body.type {
       addIndent()
-      buffer += "\(getCType(body.type)) \(result) = \(resultVar);\n"
+      buffer += "\(cTypeName(body.type)) \(result) = \(resultVar);\n"
       if body.valueCategory == .lvalue {
         addIndent()
         buffer += "__koral_retain(\(result).control);\n"
       }
     } else if body.type != .void {
       addIndent()
-      buffer += "\(getCType(body.type)) \(result) = \(resultVar);\n"
+      buffer += "\(cTypeName(body.type)) \(result) = \(resultVar);\n"
     }
     popScope()
 
@@ -767,7 +782,7 @@ public class CodeGen {
       addIndent()
       // Use qualified name for String.from_utf8_bytes_unchecked via lookup
       let fromUtf8Method = lookupStaticMethod(typeName: "String", methodName: "from_utf8_bytes_unchecked")
-      buffer += "\(getCType(type)) \(result) = \(fromUtf8Method)((uint8_t*)\(bytesVar), \(utf8Bytes.count));\n"
+      buffer += "\(cTypeName(type)) \(result) = \(fromUtf8Method)((uint8_t*)\(bytesVar), \(utf8Bytes.count));\n"
       return result
 
     case .booleanLiteral(let value, _):
@@ -779,7 +794,7 @@ public class CodeGen {
     case .castExpression(let inner, let type):
       // Cast is only used for scalar and pointer conversions (Sema enforces legality).
       let innerResult = generateExpressionSSA(inner)
-      let targetCType = getCType(type)
+      let targetCType = cTypeName(type)
 
       if inner.type == type {
         return innerResult
@@ -887,13 +902,13 @@ public class CodeGen {
       if op == .power {
         // Special handling for power operator
         if isFloatType(type) {
-          buffer += "\(getCType(type)) \(result) = pow(\(leftResult), \(rightResult));\n"
+          buffer += "\(cTypeName(type)) \(result) = pow(\(leftResult), \(rightResult));\n"
         } else {
-          buffer += "\(getCType(type)) \(result) = __koral_ipow(\(leftResult), \(rightResult));\n"
+          buffer += "\(cTypeName(type)) \(result) = __koral_ipow(\(leftResult), \(rightResult));\n"
         }
       } else {
         buffer +=
-          "\(getCType(type)) \(result) = \(leftResult) \(arithmeticOpToC(op)) \(rightResult);\n"
+          "\(cTypeName(type)) \(result) = \(leftResult) \(arithmeticOpToC(op)) \(rightResult);\n"
       }
       return result
 
@@ -903,7 +918,7 @@ public class CodeGen {
       let result = nextTemp()
       addIndent()
       buffer +=
-        "\(getCType(type)) \(result) = \(leftResult) \(comparisonOpToC(op)) \(rightResult);\n"
+        "\(cTypeName(type)) \(result) = \(leftResult) \(comparisonOpToC(op)) \(rightResult);\n"
       return result
 
     case .letExpression(let identifier, let value, let body, let type):
@@ -912,14 +927,14 @@ public class CodeGen {
       let resultVar = nextTemp()
       if type != .void {
         addIndent()
-        buffer += "\(getCType(type)) \(resultVar);\n"
+        buffer += "\(cTypeName(type)) \(resultVar);\n"
       }
 
       addIndent()
       buffer += "{\n"
       withIndent {
         addIndent()
-        let cType = getCType(identifier.type)
+        let cType = cTypeName(identifier.type)
         buffer += "\(cType) \(cIdentifier(for: identifier)) = \(valueVar);\n"
 
         pushScope()
@@ -986,7 +1001,7 @@ public class CodeGen {
         let resultVar = nextTemp() // Declare resultVar before using it
         if type != .never {
             addIndent()
-            buffer += "\(getCType(type)) \(resultVar);\n"
+            buffer += "\(cTypeName(type)) \(resultVar);\n"
         }
         
         addIndent()
@@ -1089,7 +1104,7 @@ public class CodeGen {
       let result = nextTemp()
       
       addIndent()
-      buffer += "\(getCType(type)) \(result);\n"
+      buffer += "\(cTypeName(type)) \(result);\n"
       
       if case .structure(let decl) = type {
         let typeName = cIdentifier(for: decl)
@@ -1104,7 +1119,7 @@ public class CodeGen {
         buffer += "__koral_retain(\(result).control);\n"
       } else {
         // Primitive: direct dereference
-        let cType = getCType(type)
+        let cType = cTypeName(type)
         addIndent()
         buffer += "\(result) = *(\(cType)*)\(innerResult).ptr;\n"
       }
@@ -1119,7 +1134,7 @@ public class CodeGen {
         let (lvaluePath, controlPath) = buildRefComponents(inner)
         let result = nextTemp()
         addIndent()
-        buffer += "\(getCType(type)) \(result);\n"
+        buffer += "\(cTypeName(type)) \(result);\n"
         addIndent()
         buffer += "\(result).ptr = &\(lvaluePath);\n"
         addIndent()
@@ -1132,10 +1147,10 @@ public class CodeGen {
         let innerResult = generateExpressionSSA(inner)
         let result = nextTemp()
         let innerType = inner.type
-        let innerCType = getCType(innerType)
+        let innerCType = cTypeName(innerType)
 
         addIndent()
-        buffer += "\(getCType(type)) \(result);\n"
+        buffer += "\(cTypeName(type)) \(result);\n"
 
         // 1. 分配数据内存
         addIndent()
@@ -1223,7 +1238,7 @@ public class CodeGen {
       let subjectVar = generateExpressionSSA(subject)
       let subjectTemp = nextTemp() + "_subject"
       addIndent()
-      buffer += "\(getCType(subject.type)) \(subjectTemp) = \(subjectVar);\n"
+      buffer += "\(cTypeName(subject.type)) \(subjectTemp) = \(subjectVar);\n"
       
       // Generate pattern matching condition and bindings
       let (prelude, _, condition, bindingCode, _) = 
@@ -1271,7 +1286,7 @@ public class CodeGen {
         let resultVar = nextTemp()
         if type != .never {
           addIndent()
-          buffer += "\(getCType(type)) \(resultVar);\n"
+          buffer += "\(cTypeName(type)) \(resultVar);\n"
         }
         
         addIndent()
@@ -1366,7 +1381,7 @@ public class CodeGen {
         let subjectVar = generateExpressionSSA(subject)
         let subjectTemp = nextTemp() + "_subject"
         addIndent()
-        buffer += "\(getCType(subject.type)) \(subjectTemp) = \(subjectVar);\n"
+        buffer += "\(cTypeName(subject.type)) \(subjectTemp) = \(subjectVar);\n"
         
         // Generate pattern matching condition and bindings
         let (prelude, _, condition, bindingCode, _) = 
@@ -1477,14 +1492,14 @@ public class CodeGen {
       let rightResult = generateExpressionSSA(right)
       let result = nextTemp()
       addIndent()
-      buffer += "\(getCType(type)) \(result) = \(leftResult) \(bitwiseOpToC(op)) \(rightResult);\n"
+      buffer += "\(cTypeName(type)) \(result) = \(leftResult) \(bitwiseOpToC(op)) \(rightResult);\n"
       return result
 
     case .bitwiseNotExpression(let expr, let type):
       let exprResult = generateExpressionSSA(expr)
       let result = nextTemp()
       addIndent()
-      buffer += "\(getCType(type)) \(result) = ~\(exprResult);\n"
+      buffer += "\(cTypeName(type)) \(result) = ~\(exprResult);\n"
       return result
 
     case .typeConstruction(let identifier, _, let arguments, _):
@@ -1510,10 +1525,10 @@ public class CodeGen {
           if arg.valueCategory == .lvalue {
             switch arg {
             default:
-              buffer += "\(getCType(arg.type)) \(argCopy) = __koral_\(typeName)_copy(&\(argResult));\n"
+              buffer += "\(cTypeName(arg.type)) \(argCopy) = __koral_\(typeName)_copy(&\(argResult));\n"
             }
           } else {
-            buffer += "\(getCType(arg.type)) \(argCopy) = \(argResult);\n"
+            buffer += "\(cTypeName(arg.type)) \(argCopy) = \(argResult);\n"
           }
           finalArg = argCopy
         } else if case .reference(_) = arg.type {
@@ -1526,7 +1541,7 @@ public class CodeGen {
         if index < canonicalMembers.count {
             let canonicalType = canonicalMembers[index].type
             if canonicalType != arg.type {
-                let targetCType = getCType(canonicalType)
+                let targetCType = cTypeName(canonicalType)
                 // Cast the value to the canonical type
                 // For structs (like Ref_Int -> Ref_Void), we need to cast the value.
                 // Since we are initializing a struct member, we can cast the expression.
@@ -1544,7 +1559,7 @@ public class CodeGen {
       }
 
       addIndent()
-      buffer += "\(getCType(identifier.type)) \(result) = {"
+      buffer += "\(cTypeName(identifier.type)) \(result) = {"
       buffer += argResults.joined(separator: ", ")
       buffer += "};\n"
       return result
@@ -1574,10 +1589,10 @@ public class CodeGen {
       // malloc
       guard case .pointer(let element) = type else { fatalError("alloc_memory expects Pointer result") }
       let countVal = generateExpressionSSA(count)
-      let elemSize = "sizeof(\(getCType(element)))"
+      let elemSize = "sizeof(\(cTypeName(element)))"
       let result = nextTemp()
       addIndent()
-      buffer += "\(getCType(type)) \(result);\n"
+      buffer += "\(cTypeName(type)) \(result);\n"
       addIndent()
       buffer += "\(result) = malloc(\(countVal) * \(elemSize));\n"
       return result
@@ -1594,7 +1609,7 @@ public class CodeGen {
       let d = generateExpressionSSA(dest)
       let s = generateExpressionSSA(src)
       let c = generateExpressionSSA(count)
-      let elemSize = "sizeof(\(getCType(element)))"
+      let elemSize = "sizeof(\(cTypeName(element)))"
       addIndent()
       buffer += "memcpy(\(d), \(s), \(c) * \(elemSize));\n"
       return ""
@@ -1605,7 +1620,7 @@ public class CodeGen {
       let d = generateExpressionSSA(dest)
       let s = generateExpressionSSA(src)
       let c = generateExpressionSSA(count)
-      let elemSize = "sizeof(\(getCType(element)))"
+      let elemSize = "sizeof(\(cTypeName(element)))"
       addIndent()
       buffer += "memmove(\(d), \(s), \(c) * \(elemSize));\n"
       return ""
@@ -1629,7 +1644,7 @@ public class CodeGen {
       guard case .pointer(let element) = ptr.type else { fatalError() }
       let p = generateExpressionSSA(ptr)
       let v = generateExpressionSSA(val)
-      let cType = getCType(element)
+      let cType = cTypeName(element)
       addIndent()
       if case .reference(_) = element {
         buffer += "*(struct Ref*)\(p) = \(v);\n"
@@ -1663,7 +1678,7 @@ public class CodeGen {
     case .ptrPeek(let ptr):
       guard case .pointer(let element) = ptr.type else { fatalError() }
       let p = generateExpressionSSA(ptr)
-      let cType = getCType(element)
+      let cType = cTypeName(element)
       let result = nextTemp()
       addIndent()
       // For types that need deep copy (structs, unions), use copy function
@@ -1687,7 +1702,7 @@ public class CodeGen {
     case .ptrTake(let ptr):
       guard case .pointer(let element) = ptr.type else { fatalError() }
       let p = generateExpressionSSA(ptr)
-      let cType = getCType(element)
+      let cType = cTypeName(element)
       let result = nextTemp()
       addIndent()
       buffer += "\(cType) \(result) = *(\(cType)*)\(p);\n"
@@ -1697,7 +1712,7 @@ public class CodeGen {
       guard case .pointer(let element) = ptr.type else { fatalError() }
       let p = generateExpressionSSA(ptr)
       let v = generateExpressionSSA(val)
-      let cType = getCType(element)
+      let cType = cTypeName(element)
       let result = nextTemp()
       addIndent()
       buffer += "\(cType) \(result) = *(\(cType)*)\(p);\n"
@@ -1725,10 +1740,10 @@ public class CodeGen {
       guard case .pointer(let element) = ptr.type else { fatalError() }
       let p = generateExpressionSSA(ptr)
       let o = generateExpressionSSA(offset)
-      let cType = getCType(element)
+      let cType = cTypeName(element)
       let result = nextTemp()
       addIndent()
-      buffer += "\(getCType(ptr.type)) \(result);\n"
+      buffer += "\(cTypeName(ptr.type)) \(result);\n"
       addIndent()
       buffer += "\(result) = ((\(cType)*)\(p)) + \(o);\n"
       return result
@@ -1833,7 +1848,7 @@ public class CodeGen {
         if case .structure(let decl) = identifier.type {
           let typeName = cIdentifier(for: decl)
           addIndent()
-          buffer += "\(getCType(identifier.type)) \(cIdentifier(for: identifier)) = "
+          buffer += "\(cTypeName(identifier.type)) \(cIdentifier(for: identifier)) = "
           if value.valueCategory == .lvalue {
             buffer += "__koral_\(typeName)_copy(&\(valueResult));\n"
           } else {
@@ -1843,7 +1858,7 @@ public class CodeGen {
         } else if case .union(let decl) = identifier.type {
           let typeName = cIdentifier(for: decl)
           addIndent()
-          buffer += "\(getCType(identifier.type)) \(cIdentifier(for: identifier)) = "
+          buffer += "\(cTypeName(identifier.type)) \(cIdentifier(for: identifier)) = "
           if value.valueCategory == .lvalue {
             buffer += "__koral_\(typeName)_copy(&\(valueResult));\n"
           } else {
@@ -1852,7 +1867,7 @@ public class CodeGen {
           registerVariable(cIdentifier(for: identifier), identifier.type)
         } else if case .reference(_) = identifier.type {
           addIndent()
-          buffer += "\(getCType(identifier.type)) \(cIdentifier(for: identifier)) = \(valueResult);\n"
+          buffer += "\(cTypeName(identifier.type)) \(cIdentifier(for: identifier)) = \(valueResult);\n"
           if value.valueCategory == .lvalue {
             addIndent()
             buffer += "__koral_retain(\(cIdentifier(for: identifier)).control);\n"
@@ -1860,7 +1875,7 @@ public class CodeGen {
           registerVariable(cIdentifier(for: identifier), identifier.type)
         } else {
           addIndent()
-          buffer += "\(getCType(identifier.type)) \(cIdentifier(for: identifier)) = \(valueResult);\n"
+          buffer += "\(cTypeName(identifier.type)) \(cIdentifier(for: identifier)) = \(valueResult);\n"
         }
       }
     case .assignment(let target, let value):
@@ -1927,28 +1942,28 @@ public class CodeGen {
           let typeName = cIdentifier(for: decl)
           addIndent()
           if value.valueCategory == .lvalue {
-            buffer += "\(getCType(value.type)) \(retVar) = __koral_\(typeName)_copy(&\(valueResult));\n"
+            buffer += "\(cTypeName(value.type)) \(retVar) = __koral_\(typeName)_copy(&\(valueResult));\n"
           } else {
-            buffer += "\(getCType(value.type)) \(retVar) = \(valueResult);\n"
+            buffer += "\(cTypeName(value.type)) \(retVar) = \(valueResult);\n"
           }
         } else if case .union(let decl) = value.type {
           let typeName = cIdentifier(for: decl)
           addIndent()
           if value.valueCategory == .lvalue {
-            buffer += "\(getCType(value.type)) \(retVar) = __koral_\(typeName)_copy(&\(valueResult));\n"
+            buffer += "\(cTypeName(value.type)) \(retVar) = __koral_\(typeName)_copy(&\(valueResult));\n"
           } else {
-            buffer += "\(getCType(value.type)) \(retVar) = \(valueResult);\n"
+            buffer += "\(cTypeName(value.type)) \(retVar) = \(valueResult);\n"
           }
         } else if case .reference(_) = value.type {
           addIndent()
-          buffer += "\(getCType(value.type)) \(retVar) = \(valueResult);\n"
+          buffer += "\(cTypeName(value.type)) \(retVar) = \(valueResult);\n"
           if value.valueCategory == .lvalue {
             addIndent()
             buffer += "__koral_retain(\(retVar).control);\n"
           }
         } else {
           addIndent()
-          buffer += "\(getCType(value.type)) \(retVar) = \(valueResult);\n"
+          buffer += "\(cTypeName(value.type)) \(retVar) = \(valueResult);\n"
         }
 
         emitCleanup(fromScopeIndex: 0)
@@ -1978,27 +1993,8 @@ public class CodeGen {
     }
   }
 
-  func getCType(_ type: Type) -> String {
-    switch type {
-    case .structure(let decl):
-      return "struct \(cIdentifier(for: decl))"
-    case .union(let decl):
-      return "struct \(cIdentifier(for: decl))"
-    case .pointer(let element):
-      return "\(getCType(element))*"
-    case .genericParameter(let name):
-      fatalError("Generic parameter \(name) should be resolved before CodeGen")
-    case .genericStruct(let template, _):
-      fatalError("Generic struct \(template) should be resolved before CodeGen")
-    case .genericUnion(let template, _):
-      fatalError("Generic union \(template) should be resolved before CodeGen")
-    case .module:
-      fatalError("Module type should not appear in CodeGen")
-    case .typeVariable(let tv):
-      fatalError("Type variable \(tv) should be resolved before CodeGen")
-    default:
-      return TypeHandlerRegistry.shared.generateCTypeName(type)
-    }
+  func cTypeName(_ type: Type) -> String {
+    return TypeHandlerRegistry.shared.generateConcreteCTypeName(type)
   }
 
   func appendIndentedCode(_ code: String, indent: String) {
@@ -2052,7 +2048,7 @@ public class CodeGen {
   func getFunctionReturnType(_ type: Type) -> String {
     switch type {
     case .function(_, let returns):
-      return getCType(returns)
+      return cTypeName(returns)
     default:
       fatalError("Expected function type")
     }
@@ -2125,14 +2121,14 @@ public class CodeGen {
     
     if type != .void && type != .never {
         addIndent()
-        buffer += "\(getCType(type)) \(resultVar);\n"
+        buffer += "\(cTypeName(type)) \(resultVar);\n"
     }
     
     // Dereference subject if it acts as a reference but pattern matches against value
     var subjectVar = subjectVarSSA
     var subjectType = subject.type
     if case .reference(let inner) = subject.type {
-        let innerCType = getCType(inner)
+        let innerCType = cTypeName(inner)
         let derefVar = nextTemp()
         addIndent()
         buffer += "\(innerCType) \(derefVar) = *(\(innerCType)*)\(subjectVarSSA).ptr;\n"
@@ -2239,7 +2235,7 @@ public class CodeGen {
         prelude += "static const uint8_t \(bytesVar)[] = { \(byteLiterals) };\n"
         // Use qualified name for String.from_utf8_bytes_unchecked via lookup
         let fromUtf8Method = lookupStaticMethod(typeName: "String", methodName: "from_utf8_bytes_unchecked")
-        prelude += "\(getCType(type)) \(literalVar) = \(fromUtf8Method)((uint8_t*)\(bytesVar), \(utf8Bytes.count));\n"
+        prelude += "\(cTypeName(type)) \(literalVar) = \(fromUtf8Method)((uint8_t*)\(bytesVar), \(utf8Bytes.count));\n"
         // Compare via compiler-protocol `String.__equals(self, other String) Bool`.
         // Value-passing semantics: String___equals consumes its arguments, so we must copy
         // the subject before comparison to allow multiple pattern matches on the same variable.
@@ -2254,7 +2250,7 @@ public class CodeGen {
         let name = cIdentifier(for: symbol)
         let varType = symbol.type
         var bindCode = ""
-        let cType = getCType(varType)
+        let cType = cTypeName(varType)
         bindCode += "\(cType) \(name);\n"
           
         if isMove {
@@ -2359,7 +2355,7 @@ public class CodeGen {
             
             // For each variable, generate conditional assignment
             for (i, (name, varType)) in leftVars.enumerated() {
-                let cType = getCType(varType)
+                let cType = cTypeName(varType)
                 combinedBind.append("\(cType) \(name);\n")
                 
                 // Get the binding expressions from left and right

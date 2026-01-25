@@ -23,7 +23,7 @@ extension CodeGen {
     withIndent {
       for param in parameters {
         addIndent()
-        appendToBuffer("\(getCType(param.type)) \(sanitizeIdentifier(param.name));\n")
+        appendToBuffer("\(cTypeName(param.type)) \(sanitizeIdentifier(param.name));\n")
       }
     }
     appendToBuffer("};\n\n")
@@ -100,7 +100,7 @@ extension CodeGen {
                 withIndent {
                     for param in nonVoidParams {
                         addIndent()
-                        appendToBuffer("\(getCType(param.type)) \(sanitizeIdentifier(param.name));\n")
+                        appendToBuffer("\(cTypeName(param.type)) \(sanitizeIdentifier(param.name));\n")
                     }
                 }
                 addIndent()
