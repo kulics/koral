@@ -246,18 +246,8 @@ public class CodeGen {
   func popScope() {
     let vars = lifetimeScopeStack.removeLast()
     for (name, type) in vars.reversed() {
-      if case .structure(let decl) = type {
-        let qualifiedTypeName = cIdentifier(for: decl)
-        addIndent()
-        buffer += "__koral_\(qualifiedTypeName)_drop(&\(name));\n"
-      } else if case .union(let decl) = type {
-        let qualifiedTypeName = cIdentifier(for: decl)
-        addIndent()
-        buffer += "__koral_\(qualifiedTypeName)_drop(&\(name));\n"
-      } else if case .reference(_) = type {
-        addIndent()
-        buffer += "__koral_release(\(name).control);\n"
-      }
+      addIndent()
+      appendDropStatement(for: type, value: name, indent: "")
     }
     escapeContext.leaveScope()
   }
@@ -269,18 +259,8 @@ public class CodeGen {
     for scopeIndex in stride(from: lifetimeScopeStack.count - 1, through: clampedStart, by: -1) {
       let vars = lifetimeScopeStack[scopeIndex]
       for (name, type) in vars.reversed() {
-        if case .structure(let decl) = type {
-          let qualifiedTypeName = cIdentifier(for: decl)
-          addIndent()
-          buffer += "__koral_\(qualifiedTypeName)_drop(&\(name));\n"
-        } else if case .union(let decl) = type {
-          let qualifiedTypeName = cIdentifier(for: decl)
-          addIndent()
-          buffer += "__koral_\(qualifiedTypeName)_drop(&\(name));\n"
-        } else if case .reference(_) = type {
-          addIndent()
-          buffer += "__koral_release(\(name).control);\n"
-        }
+        addIndent()
+        appendDropStatement(for: type, value: name, indent: "")
       }
     }
   }
@@ -289,18 +269,8 @@ public class CodeGen {
     guard scopeIndex >= 0 && scopeIndex < lifetimeScopeStack.count else { return }
     let vars = lifetimeScopeStack[scopeIndex]
     for (name, type) in vars.reversed() {
-      if case .structure(let decl) = type {
-        let qualifiedTypeName = cIdentifier(for: decl)
-        addIndent()
-        buffer += "__koral_\(qualifiedTypeName)_drop(&\(name));\n"
-      } else if case .union(let decl) = type {
-        let qualifiedTypeName = cIdentifier(for: decl)
-        addIndent()
-        buffer += "__koral_\(qualifiedTypeName)_drop(&\(name));\n"
-      } else if case .reference(_) = type {
-        addIndent()
-        buffer += "__koral_release(\(name).control);\n"
-      }
+      addIndent()
+      appendDropStatement(for: type, value: name, indent: "")
     }
   }
 
@@ -2028,6 +1998,47 @@ public class CodeGen {
       fatalError("Type variable \(tv) should be resolved before CodeGen")
     default:
       return TypeHandlerRegistry.shared.generateCTypeName(type)
+    }
+  }
+
+  func appendIndentedCode(_ code: String, indent: String) {
+    let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return }
+    let lines = trimmed.split(separator: "\n", omittingEmptySubsequences: true)
+    for line in lines {
+      appendToBuffer("\(indent)\(line)\n")
+    }
+  }
+
+  func appendCopyAssignment(for type: Type, source: String, dest: String, indent: String = "    ") {
+    switch type {
+    case .structure(let decl):
+      let fieldTypeName = cIdentifier(for: decl)
+      appendToBuffer("\(indent)\(dest) = __koral_\(fieldTypeName)_copy(&\(source));\n")
+    case .union(let decl):
+      let fieldTypeName = cIdentifier(for: decl)
+      appendToBuffer("\(indent)\(dest) = __koral_\(fieldTypeName)_copy(&\(source));\n")
+    default:
+      let copyCode = TypeHandlerRegistry.shared.generateCopyCode(type, source: source, dest: dest)
+      if copyCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        appendToBuffer("\(indent)\(dest) = \(source);\n")
+      } else {
+        appendIndentedCode(copyCode, indent: indent)
+      }
+    }
+  }
+
+  func appendDropStatement(for type: Type, value: String, indent: String = "    ") {
+    switch type {
+    case .structure(let decl):
+      let fieldTypeName = cIdentifier(for: decl)
+      appendToBuffer("\(indent)__koral_\(fieldTypeName)_drop(&\(value));\n")
+    case .union(let decl):
+      let fieldTypeName = cIdentifier(for: decl)
+      appendToBuffer("\(indent)__koral_\(fieldTypeName)_drop(&\(value));\n")
+    default:
+      let dropCode = TypeHandlerRegistry.shared.generateDropCode(type, value: value)
+      appendIndentedCode(dropCode, indent: indent)
     }
   }
 

@@ -170,37 +170,15 @@ extension CodeGen {
       let temp = generateExpressionSSA(finalExpr)
       if finalExpr.type != .void && finalExpr.type != .never {
         let resultVar = nextTemp()
-        if case .structure(let decl) = finalExpr.type {
-          if finalExpr.valueCategory == .lvalue {
-            // Returning an lvalue struct from a block:
-            // - Copy types must be copied, because scope cleanup will drop the original.
-            switch finalExpr {
-            default:
-              addIndent()
-              appendToBuffer("\(getCType(finalExpr.type)) \(resultVar) = __koral_\(decl.qualifiedName)_copy(&\(temp));\n")
-            }
-          } else {
-            addIndent()
-            appendToBuffer("\(getCType(finalExpr.type)) \(resultVar) = \(temp);\n")
-          }
-        } else if case .union(let decl) = finalExpr.type {
-          if finalExpr.valueCategory == .lvalue {
-            switch finalExpr {
-            default:
-              addIndent()
-              appendToBuffer("\(getCType(finalExpr.type)) \(resultVar) = __koral_\(decl.qualifiedName)_copy(&\(temp));\n")
-            }
-          } else {
-            addIndent()
-            appendToBuffer("\(getCType(finalExpr.type)) \(resultVar) = \(temp);\n")
-          }
+        if finalExpr.valueCategory == .lvalue {
+          // Returning an lvalue from a block:
+          // - Copy types must be copied, because scope cleanup will drop the original.
+          addIndent()
+          appendToBuffer("\(getCType(finalExpr.type)) \(resultVar);\n")
+          appendCopyAssignment(for: finalExpr.type, source: temp, dest: resultVar, indent: indent)
         } else {
           addIndent()
           appendToBuffer("\(getCType(finalExpr.type)) \(resultVar) = \(temp);\n")
-          if case .reference(_) = finalExpr.type, finalExpr.valueCategory == .lvalue {
-            addIndent()
-            appendToBuffer("__koral_retain(\(resultVar).control);\n")
-          }
         }
         result = resultVar
       }
@@ -261,30 +239,12 @@ extension CodeGen {
     var argResults: [String] = []
     for arg in arguments {
       let result = generateExpressionSSA(arg)
-      if case .structure(let decl) = arg.type {
-        if arg.valueCategory == .lvalue {
-          let copyResult = nextTemp()
-          addIndent()
-          appendToBuffer("\(getCType(arg.type)) \(copyResult) = __koral_\(decl.qualifiedName)_copy(&\(result));\n")
-          argResults.append(copyResult)
-        } else {
-          argResults.append(result)
-        }
-      } else if case .union(let decl) = arg.type {
-        if arg.valueCategory == .lvalue {
-          let copyResult = nextTemp()
-          addIndent()
-          appendToBuffer("\(getCType(arg.type)) \(copyResult) = __koral_\(decl.qualifiedName)_copy(&\(result));\n")
-          argResults.append(copyResult)
-        } else {
-          argResults.append(result)
-        }
-      } else if case .reference(_) = arg.type {
-        if arg.valueCategory == .lvalue {
-          addIndent()
-          appendToBuffer("__koral_retain(\(result).control);\n")
-        }
-        argResults.append(result)
+      if arg.valueCategory == .lvalue {
+        let copyResult = nextTemp()
+        addIndent()
+        appendToBuffer("\(getCType(arg.type)) \(copyResult);\n")
+        appendCopyAssignment(for: arg.type, source: result, dest: copyResult, indent: indent)
+        argResults.append(copyResult)
       } else {
         argResults.append(result)
       }
@@ -358,30 +318,12 @@ extension CodeGen {
     // struct/union类型参数传递用值，isValue==false 的参数自动递归 copy
     for arg in arguments {
       let result = generateExpressionSSA(arg)
-      if case .structure(let decl) = arg.type {
-        if arg.valueCategory == .lvalue {
-          let copyResult = nextTemp()
-          addIndent()
-          appendToBuffer("\(getCType(arg.type)) \(copyResult) = __koral_\(decl.qualifiedName)_copy(&\(result));\n")
-          paramResults.append(copyResult)
-        } else {
-          paramResults.append(result)
-        }
-      } else if case .union(let decl) = arg.type {
-        if arg.valueCategory == .lvalue {
-          let copyResult = nextTemp()
-          addIndent()
-          appendToBuffer("\(getCType(arg.type)) \(copyResult) = __koral_\(decl.qualifiedName)_copy(&\(result));\n")
-          paramResults.append(copyResult)
-        } else {
-          paramResults.append(result)
-        }
-      } else if case .reference(_) = arg.type {
-        if arg.valueCategory == .lvalue {
-          addIndent()
-          appendToBuffer("__koral_retain(\(result).control);\n")
-        }
-        paramResults.append(result)
+      if arg.valueCategory == .lvalue {
+        let copyResult = nextTemp()
+        addIndent()
+        appendToBuffer("\(getCType(arg.type)) \(copyResult);\n")
+        appendCopyAssignment(for: arg.type, source: result, dest: copyResult, indent: indent)
+        paramResults.append(copyResult)
       } else {
         paramResults.append(result)
       }
@@ -410,46 +352,18 @@ extension CodeGen {
       return
     }
     let valueResult = generateExpressionSSA(value)
-    if case .structure(let decl) = identifier.type {
-      if value.valueCategory == .lvalue {
-        let copyResult = nextTemp()
-        addIndent()
-        appendToBuffer("\(getCType(value.type)) \(copyResult) = __koral_\(decl.qualifiedName)_copy(&\(valueResult));\n")
-        addIndent()
-        appendToBuffer("__koral_\(decl.qualifiedName)_drop(&\(identifier.qualifiedName));\n")
-        addIndent()
-        appendToBuffer("\(identifier.qualifiedName) = \(copyResult);\n")
-      } else {
-        addIndent()
-        appendToBuffer("__koral_\(decl.qualifiedName)_drop(&\(identifier.qualifiedName));\n")
-        addIndent()
-        appendToBuffer("\(identifier.qualifiedName) = \(valueResult);\n")
-      }
-    } else if case .union(let decl) = identifier.type {
-      if value.valueCategory == .lvalue {
-        let copyResult = nextTemp()
-        addIndent()
-        appendToBuffer("\(getCType(value.type)) \(copyResult) = __koral_\(decl.qualifiedName)_copy(&\(valueResult));\n")
-        addIndent()
-        appendToBuffer("__koral_\(decl.qualifiedName)_drop(&\(identifier.qualifiedName));\n")
-        addIndent()
-        appendToBuffer("\(identifier.qualifiedName) = \(copyResult);\n")
-      } else {
-        addIndent()
-        appendToBuffer("__koral_\(decl.qualifiedName)_drop(&\(identifier.qualifiedName));\n")
-        addIndent()
-        appendToBuffer("\(identifier.qualifiedName) = \(valueResult);\n")
-      }
-    } else if case .reference(_) = identifier.type {
+    if value.valueCategory == .lvalue {
+      let copyResult = nextTemp()
       addIndent()
-      appendToBuffer("__koral_release(\(identifier.qualifiedName).control);\n")
+      appendToBuffer("\(getCType(value.type)) \(copyResult);\n")
+      appendCopyAssignment(for: value.type, source: valueResult, dest: copyResult, indent: indent)
       addIndent()
-      appendToBuffer("\(identifier.qualifiedName) = \(valueResult);\n")
-      if value.valueCategory == .lvalue {
-        addIndent()
-        appendToBuffer("__koral_retain(\(identifier.qualifiedName).control);\n")
-      }
+      appendDropStatement(for: identifier.type, value: identifier.qualifiedName, indent: "")
+      addIndent()
+      appendToBuffer("\(identifier.qualifiedName) = \(copyResult);\n")
     } else {
+      addIndent()
+      appendDropStatement(for: identifier.type, value: identifier.qualifiedName, indent: "")
       addIndent()
       appendToBuffer("\(identifier.qualifiedName) = \(valueResult);\n")
     }
@@ -499,18 +413,19 @@ extension CodeGen {
       accessPath = memberAccess
       curType = memberType
       
-      if isLast, case .structure(let decl) = memberType {
+      if isLast {
         if value.valueCategory == .lvalue {
           let copyResult = nextTemp()
           addIndent()
-          appendToBuffer("\(getCType(value.type)) \(copyResult) = __koral_\(decl.qualifiedName)_copy(&\(valueResult));\n")
+          appendToBuffer("\(getCType(value.type)) \(copyResult);\n")
+          appendCopyAssignment(for: value.type, source: valueResult, dest: copyResult, indent: indent)
           addIndent()
-          appendToBuffer("__koral_\(decl.qualifiedName)_drop(&\(accessPath));\n")
+          appendDropStatement(for: memberType, value: accessPath, indent: "")
           addIndent()
           appendToBuffer("\(accessPath) = \(copyResult);\n")
         } else {
           addIndent()
-          appendToBuffer("__koral_\(decl.qualifiedName)_drop(&\(accessPath));\n")
+          appendDropStatement(for: memberType, value: accessPath, indent: "")
           addIndent()
           appendToBuffer("\(accessPath) = \(valueResult);\n")
         }
