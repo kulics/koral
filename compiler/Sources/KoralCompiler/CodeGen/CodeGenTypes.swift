@@ -34,15 +34,11 @@ extension CodeGen {
       appendToBuffer("    struct \(name) result;\n")
       for param in parameters {
         let fieldName = sanitizeIdentifier(param.name)
-        if case .structure(let decl) = param.type {
-          let fieldTypeName = cIdentifier(for: decl)
-          appendToBuffer("    result.\(fieldName) = __koral_\(fieldTypeName)_copy(&self->\(fieldName));\n")
-        } else if case .reference(_) = param.type {
-          appendToBuffer("    result.\(fieldName) = self->\(fieldName);\n")
-          appendToBuffer("    __koral_retain(result.\(fieldName).control);\n")
-        } else {
-          appendToBuffer("    result.\(fieldName) = self->\(fieldName);\n")
-        }
+        appendCopyAssignment(
+          for: param.type,
+          source: "self->\(fieldName)",
+          dest: "result.\(fieldName)"
+        )
       }
       appendToBuffer("    return result;\n")
     }
@@ -66,12 +62,7 @@ extension CodeGen {
 
       for param in parameters {
         let fieldName = sanitizeIdentifier(param.name)
-        if case .structure(let decl) = param.type {
-          let fieldTypeName = cIdentifier(for: decl)
-          appendToBuffer("    __koral_\(fieldTypeName)_drop(&self->\(fieldName));\n")
-        } else if case .reference(_) = param.type {
-          appendToBuffer("    __koral_release(self->\(fieldName).control);\n")
-        }
+        appendDropStatement(for: param.type, value: "self->\(fieldName)")
       }
     }
     appendToBuffer("}\n\n")
@@ -144,18 +135,11 @@ extension CodeGen {
                      let fieldName = sanitizeIdentifier(param.name)
                      let fieldPath = "self->data.\(caseName).\(fieldName)"
                      let resultPath = "result.data.\(caseName).\(fieldName)"
-                     if case .structure(let decl) = param.type {
-                      let fieldTypeName = cIdentifier(for: decl)
-                      appendToBuffer("        \(resultPath) = __koral_\(fieldTypeName)_copy(&\(fieldPath));\n")
-                     } else if case .union(let decl) = param.type {
-                       let fieldTypeName = cIdentifier(for: decl)
-                       appendToBuffer("        \(resultPath) = __koral_\(fieldTypeName)_copy(&\(fieldPath));\n")
-                     } else if case .reference(_) = param.type {
-                         appendToBuffer("        \(resultPath) = \(fieldPath);\n")
-                         appendToBuffer("        __koral_retain(\(resultPath).control);\n")
-                     } else {
-                         appendToBuffer("        \(resultPath) = \(fieldPath);\n")
-                     }
+                     appendCopyAssignment(
+                       for: param.type,
+                       source: fieldPath,
+                       dest: resultPath
+                     )
                  }
              }
              appendToBuffer("        break;\n")
@@ -191,17 +175,9 @@ extension CodeGen {
                  return true
              }
              for param in nonVoidParams {
-                 let fieldName = sanitizeIdentifier(param.name)
-                 let fieldPath = "self->data.\(caseName).\(fieldName)"
-                 if case .structure(let decl) = param.type {
-                  let fieldTypeName = cIdentifier(for: decl)
-                  appendToBuffer("        __koral_\(fieldTypeName)_drop(&\(fieldPath));\n")
-                 } else if case .union(let decl) = param.type {
-                  let fieldTypeName = cIdentifier(for: decl)
-                  appendToBuffer("        __koral_\(fieldTypeName)_drop(&\(fieldPath));\n")
-                 } else if case .reference(_) = param.type {
-                     appendToBuffer("        __koral_release(\(fieldPath).control);\n")
-                 }
+               let fieldName = sanitizeIdentifier(param.name)
+               let fieldPath = "self->data.\(caseName).\(fieldName)"
+               appendDropStatement(for: param.type, value: fieldPath)
              }
              appendToBuffer("        break;\n")
         }

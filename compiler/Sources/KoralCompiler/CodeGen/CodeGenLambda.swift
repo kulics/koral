@@ -65,17 +65,13 @@ extension CodeGen {
       
       // Initialize captured variables
       for capture in captures {
-        addIndent()
         let capturedName = capture.symbol.qualifiedName
-        if case .reference(_) = capture.symbol.type {
-          // Reference type: copy the Ref struct and retain
-          appendToBuffer("\(envVar)->\(capturedName) = \(capturedName);\n")
-          addIndent()
-          appendToBuffer("__koral_retain(\(envVar)->\(capturedName).control);\n")
-        } else {
-          // Value type: copy the value
-          appendToBuffer("\(envVar)->\(capturedName) = \(capturedName);\n")
-        }
+        appendCopyAssignment(
+          for: capture.symbol.type,
+          source: capturedName,
+          dest: "\(envVar)->\(capturedName)",
+          indent: indent
+        )
       }
       
       // Create closure struct
