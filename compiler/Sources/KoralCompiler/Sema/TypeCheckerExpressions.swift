@@ -1671,6 +1671,59 @@ extension TypeChecker {
         }
       }
     }
+    
+    // 5. Generic Union Constructor Access with type inference from return type context
+    // e.g., Result.Ok(x) when return type is [T, E]Result
+    if case .identifier(let name) = baseExpr,
+       let template = currentScope.lookupGenericUnionTemplate(name),
+       path.count == 1 {
+      let memberName = path[0]
+      
+      // Try to infer type arguments from currentFunctionReturnType
+      if let returnType = currentFunctionReturnType,
+         case .genericUnion(let templateName, let typeArgs) = returnType,
+         templateName == name {
+        // We have a matching return type context, use its type arguments
+        
+        // Validate generic constraints
+        try enforceGenericConstraints(typeParameters: template.typeParameters, args: typeArgs)
+        
+        // Record instantiation request for deferred monomorphization
+        if !typeArgs.contains(where: { $0.containsGenericParameter }) {
+          recordInstantiation(InstantiationRequest(
+            kind: .unionType(template: template, args: typeArgs),
+            sourceLine: currentLine,
+            sourceFileName: currentFileName
+          ))
+        }
+        
+        let type = Type.genericUnion(template: name, args: typeArgs)
+        
+        // Create type substitution map
+        var substitution: [String: Type] = [:]
+        for (i, param) in template.typeParameters.enumerated() {
+          substitution[param.name] = typeArgs[i]
+        }
+        
+        // Check if it's a union case constructor
+        if let c = template.cases.first(where: { $0.name == memberName }) {
+          let resolvedParams = try withNewScope {
+            for (paramName, paramType) in substitution {
+              try currentScope.defineType(paramName, type: paramType)
+            }
+            return try c.parameters.map { param -> Parameter in
+              let paramType = try resolveTypeNode(param.type)
+              return Parameter(type: paramType, kind: .byVal)
+            }
+          }
+          
+          let symbolName = "\(name).\(memberName)"
+          let constructorType = Type.function(parameters: resolvedParams, returns: type)
+          let symbol = Symbol(name: symbolName, type: constructorType, kind: .variable(.Value))
+          return .variable(identifier: symbol)
+        }
+      }
+    }
 
     // infer base
     let inferredBase = try inferTypedExpression(baseExpr)
@@ -2777,7 +2830,12 @@ extension TypeChecker {
   ) throws -> TypedExpressionNode {
     // 1. Type check the iterable expression
     let typedIterable = try inferTypedExpression(iterable)
-    let iterableType = typedIterable.type
+    var iterableType = typedIterable.type
+    
+    // Auto-deref: if the iterable is a reference type, unwrap it
+    if case .reference(let inner) = iterableType {
+      iterableType = inner
+    }
     
     // 2. First check if the expression type itself is an iterator
     //    (has a next(self ref) [T]Option method)
@@ -2945,14 +3003,22 @@ extension TypeChecker {
     typedIterable: TypedExpressionNode,
     iteratorType: Type
   ) throws -> TypedExpressionNode {
+    // Auto-deref: if the iterable is a reference, we need to deref it first
+    var actualIterable = typedIterable
+    var actualIterableType = typedIterable.type
+    if case .reference(let inner) = typedIterable.type {
+      actualIterable = .derefExpression(expression: typedIterable, type: inner)
+      actualIterableType = inner
+    }
+    
     // Look up the iterator method
-    guard let iteratorMethod = try lookupConcreteMethodSymbol(on: typedIterable.type, name: "iterator") else {
+    guard let iteratorMethod = try lookupConcreteMethodSymbol(on: actualIterableType, name: "iterator") else {
       throw SemanticError(.generic("iterator() method not found"), line: currentLine)
     }
     
     // Build method reference
     let methodRef = TypedExpressionNode.methodReference(
-      base: typedIterable,
+      base: actualIterable,
       method: iteratorMethod,
       typeArgs: nil,
       methodTypeArgs: nil,

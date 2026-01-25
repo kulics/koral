@@ -66,6 +66,7 @@ class IntegrationTests: XCTestCase {
     func test_generic_method_test() throws { try runCase(named: "generic_method_test.koral") }
     func test_generic_struct_validation() throws { try runCase(named: "generic_struct_validation.koral") }
     func test_generic_tostring_test() throws { try runCase(named: "generic_tostring_test.koral") }
+    func test_generic_union_inference() throws { try runCase(named: "generic_union_inference.koral") }
     func test_generic_union_validation() throws { try runCase(named: "generic_union_validation.koral") }
     func test_generics() throws { try runCase(named: "generics.koral") }
     func test_hashable_basic() throws { try runCase(named: "hashable_basic.koral") }
@@ -108,6 +109,7 @@ class IntegrationTests: XCTestCase {
     func test_range_unbounded() throws { try runCase(named: "range_unbounded.koral") }
     func test_recursion_check() throws { try runCase(named: "recursion_check.koral") }
     func test_recursive_union_test() throws { try runCase(named: "recursive_union_test.koral") }
+    func test_ref_method_call() throws { try runCase(named: "ref_method_call.koral") }
     func test_result_map_test() throws { try runCase(named: "result_map_test.koral") }
     func test_result_void_test() throws { try runCase(named: "result_void_test.koral") }
     func test_return_break_continue() throws { try runCase(named: "return_break_continue.koral") }
