@@ -85,6 +85,9 @@ public class Driver {
       error.sourceManager = sourceManager
       print(error.renderForCLI())
       exit(1)
+    } catch let error as DiagnosticCollector {
+      print(error.formatWithSource(sourceManager: sourceManager))
+      exit(1)
     } catch let error as ParserError {
       print("Parser Error: \(error)")
       exit(1)
@@ -172,13 +175,12 @@ public class Driver {
             
             // Collect std library nodes with source info
             let stdNodesWithInfo = stdCompilationUnit!.getAllGlobalNodesWithSourceInfo()
-            for (node, sourceFile, modulePath, importedModules) in stdNodesWithInfo {
+            for (node, sourceFile, modulePath) in stdNodesWithInfo {
                 stdGlobalNodes.append(node)
                 stdNodeSourceInfoList.append(GlobalNodeSourceInfo(
                     sourceFile: sourceFile,
                     modulePath: modulePath,
-                    node: node,
-                    importedModules: importedModules
+                node: node
                 ))
             }
             
@@ -213,21 +215,22 @@ public class Driver {
     // Compile user code
     var allGlobalNodes: [GlobalNode] = stdGlobalNodes
     var nodeSourceInfoList: [GlobalNodeSourceInfo] = stdNodeSourceInfoList
+    var userCompilationUnit: CompilationUnit? = nil
     
     do {
       let compilationUnit = try resolver.resolveModule(entryFile: file)
+      userCompilationUnit = compilationUnit
       
       // Collect all global nodes from the compilation unit
       allGlobalNodes = stdGlobalNodes + compilationUnit.getAllGlobalNodes()
       
       // Add user code nodes with source info
       let userNodesWithInfo = compilationUnit.getAllGlobalNodesWithSourceInfo()
-      for (node, sourceFile, modulePath, importedModules) in userNodesWithInfo {
+      for (node, sourceFile, modulePath) in userNodesWithInfo {
         nodeSourceInfoList.append(GlobalNodeSourceInfo(
           sourceFile: sourceFile,
           modulePath: modulePath,
-          node: node,
-          importedModules: importedModules
+          node: node
         ))
       }
       
@@ -263,13 +266,22 @@ public class Driver {
     
     let combinedAST: ASTNode = .program(globalNodes: allGlobalNodes)
 
+    var mergedImportGraph = ImportGraph()
+    if let stdCompilationUnit {
+      mergedImportGraph.merge(stdCompilationUnit.importGraph)
+    }
+    if let userCompilationUnit {
+      mergedImportGraph.merge(userCompilationUnit.importGraph)
+    }
+
     // Type checking - always use source info initializer for unified handling
     let typeChecker = TypeChecker(
       ast: combinedAST,
       nodeSourceInfoList: nodeSourceInfoList,
       coreGlobalCount: stdGlobalNodes.count,
       coreFileName: stdDisplayName,
-      userFileName: userDisplayName
+      userFileName: userDisplayName,
+      importGraph: mergedImportGraph
     )
     let typeCheckerOutput: TypeCheckerOutput
     do {

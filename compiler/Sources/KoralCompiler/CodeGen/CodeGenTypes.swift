@@ -7,7 +7,16 @@ extension CodeGen {
     _ identifier: Symbol,
     _ parameters: [Symbol]
   ) {
-    let name = identifier.qualifiedName
+    let name: String
+    if case .structure(let decl) = identifier.type {
+      name = cIdentifier(for: decl)
+    } else {
+      name = cIdentifier(for: identifier)
+    }
+    if case .structure(let decl) = identifier.type,
+       decl.isGenericInstantiation || (decl.typeArguments?.isEmpty == false) {
+      appendToBuffer("// Generic instantiation: \(identifier.type.debugName)\n")
+    }
     
     // Generate struct definition
     appendToBuffer("struct \(name) {\n")
@@ -26,8 +35,8 @@ extension CodeGen {
       for param in parameters {
         let fieldName = sanitizeIdentifier(param.name)
         if case .structure(let decl) = param.type {
-          let qualifiedFieldTypeName = decl.qualifiedName
-          appendToBuffer("    result.\(fieldName) = __koral_\(qualifiedFieldTypeName)_copy(&self->\(fieldName));\n")
+          let fieldTypeName = cIdentifier(for: decl)
+          appendToBuffer("    result.\(fieldName) = __koral_\(fieldTypeName)_copy(&self->\(fieldName));\n")
         } else if case .reference(_) = param.type {
           appendToBuffer("    result.\(fieldName) = self->\(fieldName);\n")
           appendToBuffer("    __koral_retain(result.\(fieldName).control);\n")
@@ -58,8 +67,8 @@ extension CodeGen {
       for param in parameters {
         let fieldName = sanitizeIdentifier(param.name)
         if case .structure(let decl) = param.type {
-          let qualifiedFieldTypeName = decl.qualifiedName
-          appendToBuffer("    __koral_\(qualifiedFieldTypeName)_drop(&self->\(fieldName));\n")
+          let fieldTypeName = cIdentifier(for: decl)
+          appendToBuffer("    __koral_\(fieldTypeName)_drop(&self->\(fieldName));\n")
         } else if case .reference(_) = param.type {
           appendToBuffer("    __koral_release(self->\(fieldName).control);\n")
         }
@@ -70,7 +79,16 @@ extension CodeGen {
 
   /// Generate union type declaration with copy and drop functions
   func generateUnionDeclaration(_ identifier: Symbol, _ cases: [UnionCase]) {
-    let name = identifier.qualifiedName
+    let name: String
+    if case .union(let decl) = identifier.type {
+      name = cIdentifier(for: decl)
+    } else {
+      name = cIdentifier(for: identifier)
+    }
+    if case .union(let decl) = identifier.type,
+       decl.isGenericInstantiation || (decl.typeArguments?.isEmpty == false) {
+      appendToBuffer("// Generic instantiation: \(identifier.type.debugName)\n")
+    }
     appendToBuffer("struct \(name) {\n")
     withIndent {
       addIndent()
@@ -127,11 +145,11 @@ extension CodeGen {
                      let fieldPath = "self->data.\(caseName).\(fieldName)"
                      let resultPath = "result.data.\(caseName).\(fieldName)"
                      if case .structure(let decl) = param.type {
-                         let qualifiedFieldTypeName = decl.qualifiedName
-                         appendToBuffer("        \(resultPath) = __koral_\(qualifiedFieldTypeName)_copy(&\(fieldPath));\n")
+                      let fieldTypeName = cIdentifier(for: decl)
+                      appendToBuffer("        \(resultPath) = __koral_\(fieldTypeName)_copy(&\(fieldPath));\n")
                      } else if case .union(let decl) = param.type {
-                        let qualifiedFieldTypeName = decl.qualifiedName
-                        appendToBuffer("        \(resultPath) = __koral_\(qualifiedFieldTypeName)_copy(&\(fieldPath));\n")
+                       let fieldTypeName = cIdentifier(for: decl)
+                       appendToBuffer("        \(resultPath) = __koral_\(fieldTypeName)_copy(&\(fieldPath));\n")
                      } else if case .reference(_) = param.type {
                          appendToBuffer("        \(resultPath) = \(fieldPath);\n")
                          appendToBuffer("        __koral_retain(\(resultPath).control);\n")
@@ -176,11 +194,11 @@ extension CodeGen {
                  let fieldName = sanitizeIdentifier(param.name)
                  let fieldPath = "self->data.\(caseName).\(fieldName)"
                  if case .structure(let decl) = param.type {
-                     let qualifiedFieldTypeName = decl.qualifiedName
-                     appendToBuffer("        __koral_\(qualifiedFieldTypeName)_drop(&\(fieldPath));\n")
+                  let fieldTypeName = cIdentifier(for: decl)
+                  appendToBuffer("        __koral_\(fieldTypeName)_drop(&\(fieldPath));\n")
                  } else if case .union(let decl) = param.type {
-                     let qualifiedFieldTypeName = decl.qualifiedName
-                     appendToBuffer("        __koral_\(qualifiedFieldTypeName)_drop(&\(fieldPath));\n")
+                  let fieldTypeName = cIdentifier(for: decl)
+                  appendToBuffer("        __koral_\(fieldTypeName)_drop(&\(fieldPath));\n")
                  } else if case .reference(_) = param.type {
                      appendToBuffer("        __koral_release(\(fieldPath).control);\n")
                  }
@@ -195,7 +213,7 @@ extension CodeGen {
   /// Generate union constructor code
   func generateUnionConstructor(type: Type, caseName: String, args: [TypedExpressionNode]) -> String {
       guard case .union(let decl) = type else { fatalError() }
-      let typeName = decl.qualifiedName
+      let typeName = cIdentifier(for: decl)
       let cases = decl.cases
       
       // Calculate tag index
@@ -227,7 +245,8 @@ extension CodeGen {
               addIndent()
               if case .structure(let structDecl) = param.type {
                    if argExpr.valueCategory == .lvalue {
-                       appendToBuffer("\(unionMemberPath).\(fieldName) = __koral_\(structDecl.qualifiedName)_copy(&\(argResult));\n")
+                     let structTypeName = cIdentifier(for: structDecl)
+                     appendToBuffer("\(unionMemberPath).\(fieldName) = __koral_\(structTypeName)_copy(&\(argResult));\n")
                    } else {
                        appendToBuffer("\(unionMemberPath).\(fieldName) = \(argResult);\n")
                    }

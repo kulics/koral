@@ -105,7 +105,7 @@ extension TypeChecker {
 
       // Bind method-level type parameters as generic parameters
       for typeParam in method.typeParameters {
-        try currentScope.defineType(typeParam.name, type: .genericParameter(name: typeParam.name))
+        currentScope.defineGenericParameter(typeParam.name, type: .genericParameter(name: typeParam.name))
       }
 
       let params: [Parameter] = try method.parameters.map { param in
@@ -137,7 +137,7 @@ extension TypeChecker {
       
       // Bind method-level type parameters as generic parameters
       for typeParam in method.typeParameters {
-        try currentScope.defineType(typeParam.name, type: .genericParameter(name: typeParam.name))
+        currentScope.defineGenericParameter(typeParam.name, type: .genericParameter(name: typeParam.name))
       }
 
       let paramsDesc = try method.parameters.map { param -> String in

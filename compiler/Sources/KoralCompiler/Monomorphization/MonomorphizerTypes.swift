@@ -44,6 +44,7 @@ extension Monomorphizer {
         // Create placeholder for recursion detection
         let placeholderDecl = StructDecl(
             name: layoutName,
+            defId: getOrAllocateTypeDefId(name: layoutName, kind: .structure),
             modulePath: [],
             sourceFile: "",
             access: .default,
@@ -82,6 +83,7 @@ extension Monomorphizer {
         // Create the concrete type
         let specificDecl = StructDecl(
             name: layoutName,
+            defId: getOrAllocateTypeDefId(name: layoutName, kind: .structure),
             modulePath: [],
             sourceFile: "",
             access: .default,
@@ -119,12 +121,14 @@ extension Monomorphizer {
             // Convert to TypedGlobalNode using resolved members (not canonical)
             // The canonical transformation is only for C type mapping, not for type identity
             let params = resolvedMembers.map { param in
-                Symbol(
-                    name: param.name, type: param.type,
-                    kind: param.mutable ? .variable(.MutableValue) : .variable(.Value))
+                makeSymbol(
+                    name: param.name,
+                    type: param.type,
+                    kind: param.mutable ? .variable(.MutableValue) : .variable(.Value)
+                )
             }
             
-            let typeSymbol = Symbol(name: layoutName, type: specificType, kind: .type)
+            let typeSymbol = makeSymbol(name: layoutName, type: specificType, kind: .type)
             generatedNodes.append(.globalStructDeclaration(identifier: typeSymbol, parameters: params))
         }
         
@@ -159,6 +163,7 @@ extension Monomorphizer {
         // Create placeholder for recursion
         let placeholderDecl = UnionDecl(
             name: layoutName,
+            defId: getOrAllocateTypeDefId(name: layoutName, kind: .union),
             modulePath: [],
             sourceFile: "",
             access: .default,
@@ -200,6 +205,7 @@ extension Monomorphizer {
         // Create the concrete type
         let specificDecl = UnionDecl(
             name: layoutName,
+            defId: getOrAllocateTypeDefId(name: layoutName, kind: .union),
             modulePath: [],
             sourceFile: "",
             access: .default,
@@ -236,7 +242,7 @@ extension Monomorphizer {
             
             // Use resolved cases directly (not canonical) for the declaration
             // The canonical transformation is only for C type mapping, not for type identity
-            let typeSymbol = Symbol(name: layoutName, type: specificType, kind: .type)
+            let typeSymbol = makeSymbol(name: layoutName, type: specificType, kind: .type)
             generatedNodes.append(
                 .globalUnionDeclaration(identifier: typeSymbol, cases: resolvedCases))
         }

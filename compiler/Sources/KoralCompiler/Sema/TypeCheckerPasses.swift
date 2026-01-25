@@ -19,86 +19,87 @@ extension TypeChecker {
         return true
       }
       
-      var typedDeclarations: [TypedGlobalNode] = []
       // Clear any previous state
       instantiationRequests.removeAll()
 
-      // === PASS 1: Collect all type definitions ===
-      // This pass registers all types, traits, and function signatures
-      // so that forward references work correctly
-      for (index, decl) in declarations.enumerated() {
-        let isStdLib = index < coreGlobalCount
-        self.isCurrentDeclStdLib = isStdLib
-        // 更新当前源文件和模块路径
-        // nodeSourceInfoMap is always populated by Driver using ModuleResolver
-        let sourceInfo = nodeSourceInfoMap[index]
-        self.currentFileName = sourceInfo?.sourceFile ?? (isStdLib ? coreFileName : userFileName)
-        self.currentSourceFile = sourceInfo?.sourceFile ?? self.currentFileName
-        self.currentModulePath = sourceInfo?.modulePath ?? []
-        self.currentImportedModules = sourceInfo?.importedModules ?? []
-        self.currentSpan = decl.span
+      // Enable diagnostic collection for multi-error reporting
+      collectErrors = true
+      clearDiagnostics()
+
+      // === PASS 1: Collect all type definitions using NameCollector ===
+      // NameCollector is the new Pass 1 implementation that:
+      // - Collects all types, traits, and function names
+      // - Allocates DefIds for each definition
+      // - Registers module names (merged Pass 1.5 functionality)
+      //
+      // The NameCollector runs in parallel with the existing collectTypeDefinition logic
+      // to ensure backward compatibility during the migration period.
+      // **Validates: Requirements 2.1, 2.2**
+      
+      // Run NameCollector (new Pass architecture)
+      var nameCollectorOutput: NameCollectorOutput?
+      do {
+        let output = try runNameCollector(allNodes: allNodes, declarations: declarations)
+        nameCollectorOutput = output
+        // Store the NameCollector output for potential use by later passes
+        self.nameCollectorOutput = output
+        self.defIdMap = output.defIdMap
+      } catch let error as SemanticError {
+        try? handleError(error)
+      }
+      
+      // === PASS 2: Resolve type signatures using TypeResolver ===
+      // TypeResolver is the new Pass 2 implementation that:
+      // - Resolves type members and function signatures
+      // - Builds complete type information
+      // - Registers given method signatures
+      // - Builds module symbols (merged Pass 2.5 functionality)
+      //
+      // The TypeResolver runs in parallel with the existing collectGivenSignatures logic
+      // to ensure backward compatibility during the migration period.
+      // **Validates: Requirements 2.1, 2.2**
+      
+      // Run TypeResolver (new Pass architecture)
+      var typeResolverOutput: TypeResolverOutput?
+      if let nameCollectorOutput {
         do {
-          try collectTypeDefinition(decl, isStdLib: isStdLib)
-        } catch let e as SemanticError {
-          throw e
+          let output = try runTypeResolver(nameCollectorOutput: nameCollectorOutput)
+          typeResolverOutput = output
+          // Store the TypeResolver output for potential use by later passes
+          self.typeResolverOutput = output
+        } catch let error as SemanticError {
+          try? handleError(error)
         }
       }
       
-      // === PASS 1.5: Register module symbols (names only) ===
-      // This allows module-qualified types like `backend.Evaluator` to be resolved in Pass 2
-      // We only register the module names here, the public symbols will be populated in Pass 2.5
-      try registerModuleNames(from: declarations)
+      // === PASS 3: Check function bodies using BodyChecker ===
+      // BodyChecker is the new Pass 3 implementation that:
+      // - Checks function bodies and expressions
+      // - Performs type inference
+      // - Generates typed AST
+      // - Collects generic instantiation requests
+      //
+      // The BodyChecker runs in parallel with the existing checkGlobalDeclaration logic
+      // to ensure backward compatibility during the migration period.
+      // **Validates: Requirements 2.1, 2.2**
       
-      // === PASS 2: Register all given method signatures ===
-      // This allows methods in one given block to call methods in another given block
-      // regardless of declaration order
-      for (index, decl) in declarations.enumerated() {
-        let isStdLib = index < coreGlobalCount
-        self.isCurrentDeclStdLib = isStdLib
-        // 更新当前源文件和模块路径
-        let sourceInfo = nodeSourceInfoMap[index]
-        self.currentFileName = sourceInfo?.sourceFile ?? (isStdLib ? coreFileName : userFileName)
-        self.currentSourceFile = sourceInfo?.sourceFile ?? self.currentFileName
-        self.currentModulePath = sourceInfo?.modulePath ?? []
-        self.currentImportedModules = sourceInfo?.importedModules ?? []
-        self.currentSpan = decl.span
+      // Run BodyChecker (new Pass architecture)
+      if let typeResolverOutput {
         do {
-          try collectGivenSignatures(decl)
-        } catch let e as SemanticError {
-          throw e
+          let output = try runBodyChecker(typeResolverOutput: typeResolverOutput)
+          // Store the BodyChecker output for potential use by later stages
+          self.bodyCheckerOutput = output
+        } catch let error as SemanticError {
+          try? handleError(error)
         }
       }
       
-      // === PASS 2.5: Build module symbols from collected definitions ===
-      // This allows `using self.child` to work by creating module symbols
-      // that can be accessed via `child.xxx`
-      // Must be after Pass 2 because function symbols are registered in Pass 2
-      try buildModuleSymbols(from: declarations)
-      
-      // === PASS 3: Check function bodies and generate typed AST ===
-      // Now that all types and method signatures are defined, we can check function bodies
-      // which may reference types or methods defined later in the file
-      for (index, decl) in declarations.enumerated() {
-        let isStdLib = index < coreGlobalCount
-        self.isCurrentDeclStdLib = isStdLib
-        // 更新当前源文件和模块路径
-        let sourceInfo = nodeSourceInfoMap[index]
-        self.currentFileName = sourceInfo?.sourceFile ?? (isStdLib ? coreFileName : userFileName)
-        self.currentSourceFile = sourceInfo?.sourceFile ?? self.currentFileName
-        self.currentModulePath = sourceInfo?.modulePath ?? []
-        self.currentImportedModules = sourceInfo?.importedModules ?? []
-        self.currentSpan = decl.span
-        do {
-          if let typedDecl = try checkGlobalDeclaration(decl) {
-            typedDeclarations.append(typedDecl)
-          }
-        } catch let e as SemanticError {
-          throw e
-        }
+      guard let bodyCheckerOutput = self.bodyCheckerOutput else {
+        throw SemanticError(.generic("BodyChecker output missing"), line: 1)
       }
       
       // Build the typed program
-      let program = TypedProgram.program(globalNodes: typedDeclarations)
+      let program = bodyCheckerOutput.typedAST
       
       // Build the generic template registry
       // Separate concrete types into structs and unions
@@ -129,10 +130,14 @@ extension TypeChecker {
         concreteStructTypes: concreteStructs,
         concreteUnionTypes: concreteUnions
       )
+
+      if hasCollectedErrors {
+        throw diagnosticCollector
+      }
       
       return TypeCheckerOutput(
         program: program,
-        instantiationRequests: instantiationRequests,
+        instantiationRequests: bodyCheckerOutput.instantiationRequests,
         genericTemplates: registry
       )
     }
@@ -143,7 +148,7 @@ extension TypeChecker {
   /// Registers module names in scope so that module-qualified types can be resolved.
   /// This is called after Pass 1 and before Pass 2.
   /// Only registers the module names, the public symbols will be populated in Pass 2.5.
-  private func registerModuleNames(from declarations: [GlobalNode]) throws {
+  func registerModuleNames(from declarations: [GlobalNode]) throws {
     // Collect all unique module paths
     var allModulePaths: Set<String> = []
     
@@ -187,7 +192,7 @@ extension TypeChecker {
   /// Builds module symbols from collected definitions.
   /// This allows `using self.child` to work by creating module symbols
   /// that can be accessed via `child.xxx`.
-  private func buildModuleSymbols(from declarations: [GlobalNode]) throws {
+  func buildModuleSymbols(from declarations: [GlobalNode]) throws {
     // Step 1: Collect all unique module paths
     var allModulePaths: Set<String> = []
     
@@ -282,12 +287,10 @@ extension TypeChecker {
       
       // Look up the actual symbol from scope
       if let funcType = currentScope.lookup(name, sourceFile: sourceInfo.sourceFile) {
-        let symbol = Symbol(
+        let symbol = makeGlobalSymbol(
           name: name,
           type: funcType,
           kind: .function,
-          modulePath: sourceInfo.modulePath,
-          sourceFile: sourceInfo.sourceFile,
           access: access
         )
         return (name, symbol, nil)
@@ -299,12 +302,10 @@ extension TypeChecker {
       if !typeParameters.isEmpty { return nil }
       
       if let structType = currentScope.lookupType(name, sourceFile: sourceInfo.sourceFile) {
-        let symbol = Symbol(
+        let symbol = makeGlobalSymbol(
           name: name,
           type: structType,
           kind: .type,
-          modulePath: sourceInfo.modulePath,
-          sourceFile: sourceInfo.sourceFile,
           access: access
         )
         return (name, symbol, structType)
@@ -316,12 +317,10 @@ extension TypeChecker {
       if !typeParameters.isEmpty { return nil }
       
       if let unionType = currentScope.lookupType(name, sourceFile: sourceInfo.sourceFile) {
-        let symbol = Symbol(
+        let symbol = makeGlobalSymbol(
           name: name,
           type: unionType,
           kind: .type,
-          modulePath: sourceInfo.modulePath,
-          sourceFile: sourceInfo.sourceFile,
           access: access
         )
         return (name, symbol, unionType)
@@ -330,12 +329,10 @@ extension TypeChecker {
       
     case .globalVariableDeclaration(let name, _, _, _, let access, _):
       if let varType = currentScope.lookup(name, sourceFile: sourceInfo.sourceFile) {
-        let symbol = Symbol(
+        let symbol = makeGlobalSymbol(
           name: name,
           type: varType,
           kind: .variable(.Value),
-          modulePath: sourceInfo.modulePath,
-          sourceFile: sourceInfo.sourceFile,
           access: access
         )
         return (name, symbol, nil)
@@ -398,7 +395,7 @@ extension TypeChecker {
   /// Collects type definitions without checking function bodies.
   /// This allows forward references to work correctly.
   /// - Parameter isStdLib: Whether this declaration is from the standard library
-  private func collectTypeDefinition(_ decl: GlobalNode, isStdLib: Bool = false) throws {
+  func collectTypeDefinition(_ decl: GlobalNode, isStdLib: Bool = false) throws {
     switch decl {
     case .usingDeclaration:
       // Using declarations are handled separately, skip here
@@ -449,6 +446,13 @@ extension TypeChecker {
         // Register placeholder for non-generic union (allows recursive references)
         let decl = UnionDecl(
           name: name,
+          defId: getOrAllocateTypeDefId(
+            name: name,
+            kind: .union,
+            access: access,
+            modulePath: currentModulePath,
+            sourceFile: currentSourceFile
+          ),
           modulePath: currentModulePath,
           sourceFile: currentSourceFile,
           access: access,
@@ -485,6 +489,13 @@ extension TypeChecker {
         // Register placeholder for non-generic struct (allows recursive references)
         let decl = StructDecl(
           name: name,
+          defId: getOrAllocateTypeDefId(
+            name: name,
+            kind: .structure,
+            access: access,
+            modulePath: currentModulePath,
+            sourceFile: currentSourceFile
+          ),
           modulePath: currentModulePath,
           sourceFile: currentSourceFile,
           access: access,
@@ -575,6 +586,13 @@ extension TypeChecker {
         default:
           let decl = StructDecl(
             name: name,
+            defId: getOrAllocateTypeDefId(
+              name: name,
+              kind: .structure,
+              access: .default,
+              modulePath: currentModulePath,
+              sourceFile: currentSourceFile
+            ),
             modulePath: currentModulePath,
             sourceFile: currentSourceFile,
             access: .default,
@@ -619,7 +637,7 @@ extension TypeChecker {
   /// Collects given method signatures without checking bodies.
   /// This allows methods in one given block to call methods in another given block.
   /// Also resolves struct and union types so function signatures can reference them.
-  private func collectGivenSignatures(_ decl: GlobalNode) throws {
+  func collectGivenSignatures(_ decl: GlobalNode) throws {
     switch decl {
     case .givenDeclaration(let typeParams, let typeNode, let methods, let span):
       self.currentSpan = span
@@ -672,14 +690,14 @@ extension TypeChecker {
         for method in methods {
           let (checkedParams, checkedReturnType) = try withNewScope {
             for typeParam in typeParams {
-              try currentScope.defineType(
+              currentScope.defineGenericParameter(
                 typeParam.name, type: .genericParameter(name: typeParam.name))
             }
             try recordGenericTraitBounds(typeParams)
             
             // Register method-level type parameters
             for typeParam in method.typeParameters {
-              try currentScope.defineType(
+              currentScope.defineGenericParameter(
                 typeParam.name, type: .genericParameter(name: typeParam.name))
             }
             try recordGenericTraitBounds(method.typeParameters)
@@ -690,7 +708,7 @@ extension TypeChecker {
             let returnType = try resolveTypeNode(method.returnType)
             let params = try method.parameters.map { param -> Symbol in
               let paramType = try resolveTypeNode(param.type)
-              return Symbol(
+              return makeLocalSymbol(
                 name: param.name, type: paramType,
                 kind: .variable(param.mutable ? .MutableValue : .Value))
             }
@@ -773,7 +791,7 @@ extension TypeChecker {
         for method in methods {
           let methodType = try withNewScope {
             for typeParam in method.typeParameters {
-              try currentScope.defineType(
+              currentScope.defineGenericParameter(
                 typeParam.name, type: .genericParameter(name: typeParam.name))
             }
             
@@ -791,11 +809,12 @@ extension TypeChecker {
           }
           
           let methodKind = getCompilerMethodKind(method.name)
-          let methodSymbol = Symbol(
+          let methodSymbol = makeGlobalSymbol(
             name: method.name,
             type: methodType,
             kind: .function,
-            methodKind: methodKind
+            methodKind: methodKind,
+            access: .default
           )
           
           extensionMethods[typeName]![method.name] = methodSymbol
@@ -858,11 +877,12 @@ extension TypeChecker {
           }
           
           let methodKind = getCompilerMethodKind(method.name)
-          let methodSymbol = Symbol(
+          let methodSymbol = makeGlobalSymbol(
             name: method.name,
             type: methodType,
             kind: .function,
-            methodKind: methodKind
+            methodKind: methodKind,
+            access: .default
           )
           
           extensionMethods[typeName]![method.name] = methodSymbol
@@ -886,7 +906,7 @@ extension TypeChecker {
               op: "Direct recursion in struct \(name) not allowed (use ref)", type1: param.name,
               type2: "")
           }
-          return Symbol(
+          return makeLocalSymbol(
             name: param.name, type: paramType,
             kind: param.mutable ? .variable(.MutableValue) : .variable(.Value))
         }
@@ -897,6 +917,7 @@ extension TypeChecker {
           let newDecl = StructDecl(
             id: decl.id,  // Keep the same UUID for identity
             name: decl.name,
+            defId: decl.defId,
             modulePath: decl.modulePath,
             sourceFile: decl.sourceFile,
             access: decl.access,
@@ -945,6 +966,7 @@ extension TypeChecker {
           let newDecl = UnionDecl(
             id: decl.id,  // Keep the same UUID for identity
             name: decl.name,
+            defId: decl.defId,
             modulePath: decl.modulePath,
             sourceFile: decl.sourceFile,
             access: decl.access,
@@ -1007,7 +1029,7 @@ extension TypeChecker {
     }
   }
 
-  private func checkGlobalDeclaration(_ decl: GlobalNode) throws -> TypedGlobalNode? {
+  func checkGlobalDeclaration(_ decl: GlobalNode) throws -> TypedGlobalNode? {
     switch decl {
     case .usingDeclaration:
       // Using declarations are handled separately, skip here
@@ -1030,7 +1052,7 @@ extension TypeChecker {
         // Now validate case parameter types
         try withNewScope {
           for param in typeParameters {
-            try currentScope.defineType(param.name, type: .genericParameter(name: param.name))
+            currentScope.defineGenericParameter(param.name, type: .genericParameter(name: param.name))
           }
           try recordGenericTraitBounds(typeParameters)
           
@@ -1140,14 +1162,14 @@ extension TypeChecker {
         // Perform declaration-site checking and store results
         let (checkedBody, checkedParams, checkedReturnType) = try withNewScope {
           for param in typeParameters {
-            try currentScope.defineType(param.name, type: .genericParameter(name: param.name))
+            currentScope.defineGenericParameter(param.name, type: .genericParameter(name: param.name))
           }
           try recordGenericTraitBounds(typeParameters)
 
           let returnType = try resolveTypeNode(returnTypeNode)
           let params = try parameters.map { param -> Symbol in
             let paramType = try resolveTypeNode(param.type)
-            return Symbol(
+            return makeLocalSymbol(
               name: param.name, type: paramType,
               kind: .variable(param.mutable ? .MutableValue : .Value))
           }
@@ -1177,7 +1199,7 @@ extension TypeChecker {
       let returnType = try resolveTypeNode(returnTypeNode)
       let params = try parameters.map { param -> Symbol in
         let paramType = try resolveTypeNode(param.type)
-        return Symbol(
+        return makeLocalSymbol(
           name: param.name, type: paramType,
           kind: .variable(param.mutable ? .MutableValue : .Value))
       }
@@ -1229,13 +1251,13 @@ extension TypeChecker {
       if !typeParameters.isEmpty {
         try withNewScope {
           for param in typeParameters {
-            try currentScope.defineType(param.name, type: .genericParameter(name: param.name))
+            currentScope.defineGenericParameter(param.name, type: .genericParameter(name: param.name))
           }
           try recordGenericTraitBounds(typeParameters)
           _ = try resolveTypeNode(returnTypeNode)
           _ = try parameters.map { param -> Symbol in
             let paramType = try resolveTypeNode(param.type)
-            return Symbol(
+            return makeLocalSymbol(
               name: param.name, type: paramType,
               kind: .variable(param.mutable ? .MutableValue : .Value))
           }
@@ -1261,7 +1283,7 @@ extension TypeChecker {
         let returnType = try resolveTypeNode(returnTypeNode)
         let params = try parameters.map { param -> Symbol in
           let paramType = try resolveTypeNode(param.type)
-          return Symbol(
+          return makeLocalSymbol(
             name: param.name, type: paramType,
             kind: .variable(param.mutable ? .MutableValue : .Value))
         }
@@ -1324,14 +1346,14 @@ extension TypeChecker {
           // Check method body
           let checkedBody = try withNewScope {
             for typeParam in typeParams {
-              try currentScope.defineType(
+              currentScope.defineGenericParameter(
                 typeParam.name, type: .genericParameter(name: typeParam.name))
             }
             try recordGenericTraitBounds(typeParams)
             
             // Register method-level type parameters
             for typeParam in method.typeParameters {
-              try currentScope.defineType(
+              currentScope.defineGenericParameter(
                 typeParam.name, type: .genericParameter(name: typeParam.name))
             }
             try recordGenericTraitBounds(method.typeParameters)
@@ -1425,7 +1447,7 @@ extension TypeChecker {
       for method in methods {
         let (methodType, params, returnType) = try withNewScope {
           for typeParam in method.typeParameters {
-            try currentScope.defineType(
+            currentScope.defineGenericParameter(
               typeParam.name, type: .genericParameter(name: typeParam.name))
           }
 
@@ -1435,7 +1457,7 @@ extension TypeChecker {
           let returnType = try resolveTypeNode(method.returnType)
           let params = try method.parameters.map { param -> Symbol in
             let paramType = try resolveTypeNode(param.type)
-            return Symbol(
+            return makeLocalSymbol(
               name: param.name, type: paramType,
               kind: .variable(param.mutable ? .MutableValue : .Value))
           }
@@ -1469,11 +1491,12 @@ extension TypeChecker {
         }
 
         let methodKind = getCompilerMethodKind(method.name)
-        let methodSymbol = Symbol(
+        let methodSymbol = makeGlobalSymbol(
           name: method.name,  // Use original method name, Monomorphizer will mangle it
           type: methodType,
           kind: .function,
-          methodKind: methodKind
+          methodKind: methodKind,
+          access: .default
         )
 
         extensionMethods[typeName]![method.name] = methodSymbol
@@ -1487,7 +1510,7 @@ extension TypeChecker {
       for info in methodInfos {
         let typedBody = try withNewScope {
           for typeParam in info.method.typeParameters {
-            try currentScope.defineType(
+            currentScope.defineGenericParameter(
               typeParam.name, type: .genericParameter(name: typeParam.name))
           }
 
@@ -1570,7 +1593,7 @@ extension TypeChecker {
           let returnType = try resolveTypeNode(method.returnType)
           let params = try method.parameters.map { param -> Symbol in
             let paramType = try resolveTypeNode(param.type)
-            return Symbol(
+            return makeLocalSymbol(
               name: param.name, type: paramType,
               kind: .variable(param.mutable ? .MutableValue : .Value))
           }
@@ -1587,11 +1610,12 @@ extension TypeChecker {
         }
 
         let methodKind = getCompilerMethodKind(method.name)
-        let methodSymbol = Symbol(
+        let methodSymbol = makeGlobalSymbol(
           name: method.name,  // Use original method name, Monomorphizer will mangle it
           type: methodType,
           kind: .function,
-          methodKind: methodKind
+          methodKind: methodKind,
+          access: .default
         )
 
         if shouldEmitGiven {
@@ -1623,7 +1647,7 @@ extension TypeChecker {
         try withNewScope {
           // Define type parameters as generic parameter types
           for param in typeParameters {
-            try currentScope.defineType(param.name, type: .genericParameter(name: param.name))
+            currentScope.defineGenericParameter(param.name, type: .genericParameter(name: param.name))
           }
           try recordGenericTraitBounds(typeParameters)
           
@@ -1645,7 +1669,7 @@ extension TypeChecker {
 
       let params = try parameters.map { param -> Symbol in
         let paramType = try resolveTypeNode(param.type)
-        return Symbol(
+        return makeLocalSymbol(
           name: param.name, type: paramType,
           kind: param.mutable ? .variable(.MutableValue) : .variable(.Value))
       }
@@ -1670,6 +1694,13 @@ extension TypeChecker {
         } else {
           let decl = StructDecl(
             name: name,
+            defId: getOrAllocateTypeDefId(
+              name: name,
+              kind: .structure,
+              access: access,
+              modulePath: currentModulePath,
+              sourceFile: currentSourceFile
+            ),
             modulePath: currentModulePath,
             sourceFile: currentSourceFile,
             access: access,
@@ -1686,5 +1717,165 @@ extension TypeChecker {
         return .genericTypeTemplate(name: name)
       }
     }
+  }
+  
+  // MARK: - NameCollector Integration
+  
+  /// Runs the NameCollector (Pass 1) to collect all type and function definitions.
+  ///
+  /// This method creates the necessary input for NameCollector from the TypeChecker's
+  /// current state and runs the pass. The output contains:
+  /// - DefIdMap: Unique identifiers for all definitions
+  /// - NameTable: Name to DefId mappings
+  /// - ModuleResolverOutput: Preserved from input
+  ///
+  /// **Validates: Requirements 2.1, 2.2**
+  ///
+  /// - Parameters:
+  ///   - allNodes: All global nodes including using declarations
+  ///   - declarations: Filtered global nodes (excluding using declarations)
+  /// - Returns: The NameCollector output
+  /// - Throws: SemanticError if duplicate definitions are found
+  private func runNameCollector(allNodes: [GlobalNode], declarations: [GlobalNode]) throws -> NameCollectorOutput {
+    // Create ModuleResolverOutput from current state
+    let moduleResolverOutput = createModuleResolverOutput(allNodes: allNodes)
+    
+    // Create NameCollector input
+    let input = NameCollectorInput(moduleResolverOutput: moduleResolverOutput)
+    
+    // Create and run NameCollector
+    let nameCollector = NameCollector(coreGlobalCount: coreGlobalCount, checker: self)
+    let output = try nameCollector.run(input: input)
+    
+    return output
+  }
+  
+  /// Creates a ModuleResolverOutput from the TypeChecker's current state.
+  ///
+  /// This method bridges the gap between the existing TypeChecker state and
+  /// the new Pass architecture by creating the expected input format for NameCollector.
+  ///
+  /// - Parameter allNodes: All global nodes
+  /// - Returns: A ModuleResolverOutput suitable for NameCollector
+  private func createModuleResolverOutput(allNodes: [GlobalNode]) -> ModuleResolverOutput {
+    // Create a basic ModuleTree from the nodeSourceInfoMap
+    let rootModulePath: [String]
+    if let firstUserSourceInfo = nodeSourceInfoMap.values.first(where: { info in
+      // Find the first non-stdlib source info
+      let index = nodeSourceInfoMap.first(where: { $0.value.sourceFile == info.sourceFile })?.key ?? 0
+      return index >= coreGlobalCount
+    }) {
+      rootModulePath = firstUserSourceInfo.modulePath.isEmpty ? [] : [firstUserSourceInfo.modulePath[0]]
+    } else {
+      rootModulePath = []
+    }
+    
+    // Create root module info
+    let rootModule = ModuleInfo(
+      path: rootModulePath,
+      entryFile: userFileName
+    )
+    
+    // Collect all loaded modules
+    var loadedModules: [String: ModuleInfo] = [:]
+    for (_, sourceInfo) in nodeSourceInfoMap {
+      let moduleKey = sourceInfo.modulePath.joined(separator: ".")
+      if !moduleKey.isEmpty && loadedModules[moduleKey] == nil {
+        loadedModules[moduleKey] = ModuleInfo(
+          path: sourceInfo.modulePath,
+          entryFile: sourceInfo.sourceFile
+        )
+      }
+    }
+    
+    let moduleTree = ModuleTree(
+      rootModule: rootModule,
+      loadedModules: loadedModules
+    )
+    
+    // Create node source info list from the map
+    var nodeSourceInfoList: [GlobalNodeSourceInfo] = []
+    for (index, node) in allNodes.enumerated() {
+      if let sourceInfo = nodeSourceInfoMap[index] {
+        nodeSourceInfoList.append(sourceInfo)
+      } else {
+        // Create a default source info for nodes without explicit mapping
+        let isStdLib = index < coreGlobalCount
+        nodeSourceInfoList.append(GlobalNodeSourceInfo(
+          sourceFile: isStdLib ? coreFileName : userFileName,
+          modulePath: [],
+          node: node
+        ))
+      }
+    }
+    
+    return ModuleResolverOutput(
+      moduleTree: moduleTree,
+      importGraph: ImportGraph(),
+      astNodes: allNodes,
+      nodeSourceInfoList: nodeSourceInfoList
+    )
+  }
+  
+  // MARK: - Pass 2: TypeResolver Integration
+  
+  /// Runs the TypeResolver pass to resolve type signatures.
+  ///
+  /// TypeResolver is the new Pass 2 implementation that:
+  /// - Resolves type members and function signatures
+  /// - Builds complete type information
+  /// - Registers given method signatures
+  /// - Builds module symbols (merged Pass 2.5 functionality)
+  ///
+  /// The output contains:
+  /// - TypedDefMap: DefId to type information mappings
+  /// - SymbolTable: Symbol registration and lookup table
+  /// - NameCollectorOutput: Preserved from input
+  ///
+  /// **Validates: Requirements 2.1, 2.2**
+  ///
+  /// - Parameter nameCollectorOutput: The output from NameCollector (Pass 1)
+  /// - Returns: The TypeResolver output
+  /// - Throws: SemanticError if type resolution fails
+  private func runTypeResolver(nameCollectorOutput: NameCollectorOutput) throws -> TypeResolverOutput {
+    // Create TypeResolver input
+    let input = TypeResolverInput(nameCollectorOutput: nameCollectorOutput)
+    
+    // Create and run TypeResolver
+    let typeResolver = TypeResolver(coreGlobalCount: coreGlobalCount, checker: self)
+    let output = try typeResolver.run(input: input)
+    
+    return output
+  }
+  
+  // MARK: - Pass 3: BodyChecker Integration
+  
+  /// Runs the BodyChecker pass to check function bodies and expressions.
+  ///
+  /// BodyChecker is the new Pass 3 implementation that:
+  /// - Checks function bodies and expressions
+  /// - Performs type inference
+  /// - Generates typed AST
+  /// - Collects generic instantiation requests
+  ///
+  /// The output contains:
+  /// - TypedAST: The type-checked AST
+  /// - InstantiationRequests: Generic instantiation requests
+  /// - TypeResolverOutput: Preserved from input
+  ///
+  /// **Validates: Requirements 2.1, 2.2**
+  ///
+  /// - Parameter typeResolverOutput: The output from TypeResolver (Pass 2)
+  /// - Returns: The BodyChecker output
+  /// - Throws: SemanticError if type checking fails
+  private func runBodyChecker(typeResolverOutput: TypeResolverOutput) throws -> BodyCheckerOutput {
+    // Create BodyChecker input
+    let input = BodyCheckerInput(typeResolverOutput: typeResolverOutput)
+    
+    // Create and run BodyChecker
+    let bodyChecker = BodyChecker(checker: self, coreGlobalCount: coreGlobalCount)
+    let output = try bodyChecker.run(input: input)
+    
+    return output
   }
 }

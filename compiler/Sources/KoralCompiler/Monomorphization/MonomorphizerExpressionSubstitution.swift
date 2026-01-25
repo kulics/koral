@@ -56,14 +56,9 @@ extension Monomorphizer {
             )
             
         case .letExpression(let identifier, let value, let body, let type):
-            let newIdentifier = Symbol(
-                name: identifier.name,
-                type: substituteType(identifier.type, substitution: substitution),
-                kind: identifier.kind,
-                methodKind: identifier.methodKind,
-                modulePath: identifier.modulePath,
-                sourceFile: identifier.sourceFile,
-                access: identifier.access
+            let newIdentifier = copySymbolWithNewDefId(
+                identifier,
+                newType: substituteType(identifier.type, substitution: substitution)
             )
             return .letExpression(
                 identifier: newIdentifier,
@@ -157,14 +152,10 @@ extension Monomorphizer {
             }
 
             
-            let newIdentifier = Symbol(
-                name: newName,
-                type: newType,
-                kind: identifier.kind,
-                methodKind: identifier.methodKind,
-                modulePath: identifier.modulePath,
-                sourceFile: identifier.sourceFile,
-                access: identifier.access
+            let newIdentifier = copySymbolWithNewDefId(
+                identifier,
+                newName: newName,
+                newType: newType
             )
             return .variable(identifier: newIdentifier)
             
@@ -291,7 +282,7 @@ extension Monomorphizer {
                     returns: newType
                 )
                 let callee: TypedExpressionNode = .variable(
-                    identifier: Symbol(name: mangledName, type: functionType, kind: .function)
+                    identifier: makeSymbol(name: mangledName, type: functionType, kind: .function)
                 )
                 
                 return .call(callee: callee, arguments: newArguments, type: newType)
@@ -308,14 +299,9 @@ extension Monomorphizer {
             
         case .methodReference(let base, let method, let typeArgs, let methodTypeArgs, let type):
             let newBase = substituteTypesInExpression(base, substitution: substitution)
-            var newMethod = Symbol(
-                name: method.name,
-                type: substituteType(method.type, substitution: substitution),
-                kind: method.kind,
-                methodKind: method.methodKind,
-                modulePath: method.modulePath,
-                sourceFile: method.sourceFile,
-                access: method.access
+            var newMethod = copySymbolWithNewDefId(
+                method,
+                newType: substituteType(method.type, substitution: substitution)
             )
             
             // Substitute type args if present
@@ -343,15 +329,7 @@ extension Monomorphizer {
                     // Look up the concrete method on the substituted base type
                     // Pass methodTypeArgs for generic methods
                     if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: methodName, methodTypeArgs: substitutedMethodTypeArgs ?? []) {
-                        newMethod = Symbol(
-                            name: concreteMethod.name,
-                            type: concreteMethod.type,
-                            kind: concreteMethod.kind,
-                            methodKind: concreteMethod.methodKind,
-                            modulePath: concreteMethod.modulePath,
-                            sourceFile: concreteMethod.sourceFile,
-                            access: concreteMethod.access
-                        )
+                        newMethod = copySymbolWithNewDefId(concreteMethod)
                         // Extract the return type from the concrete method's function type
                         if case .function(_, let returns) = concreteMethod.type {
                             resolvedReturnType = returns
@@ -365,15 +343,7 @@ extension Monomorphizer {
                 // Look up the concrete method on the substituted base type
                 // Pass method type args for generic methods
                 if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: method.name, methodTypeArgs: substitutedMethodTypeArgs ?? []) {
-                    newMethod = Symbol(
-                        name: concreteMethod.name,
-                        type: concreteMethod.type,
-                        kind: concreteMethod.kind,
-                        methodKind: concreteMethod.methodKind,
-                        modulePath: concreteMethod.modulePath,
-                        sourceFile: concreteMethod.sourceFile,
-                        access: concreteMethod.access
-                    )
+                    newMethod = copySymbolWithNewDefId(concreteMethod)
                     // Extract the return type from the concrete method's function type
                     if case .function(_, let returns) = concreteMethod.type {
                         resolvedReturnType = returns
@@ -450,6 +420,7 @@ extension Monomorphizer {
                                 // Nested struct - need to look up
                                 let nestedDecl = StructDecl(
                                     name: key,
+                                    defId: getOrAllocateTypeDefId(name: key, kind: .structure),
                                     modulePath: [],
                                     sourceFile: "",
                                     access: .default,
@@ -503,14 +474,10 @@ extension Monomorphizer {
                 }
             }
             
-            let newIdentifier = Symbol(
-                name: newName,
-                type: substitutedType,
-                kind: identifier.kind,
-                methodKind: identifier.methodKind,
-                modulePath: identifier.modulePath,
-                sourceFile: identifier.sourceFile,
-                access: identifier.access
+            let newIdentifier = copySymbolWithNewDefId(
+                identifier,
+                newName: newName,
+                newType: substitutedType
             )
             // Substitute type args if present
             let substitutedTypeArgs = typeArgs?.map { substituteType($0, substitution: substitution) }
@@ -524,14 +491,9 @@ extension Monomorphizer {
             
         case .memberPath(let source, let path):
             let newPath = path.map { sym in
-                Symbol(
-                    name: sym.name,
-                    type: substituteType(sym.type, substitution: substitution),
-                    kind: sym.kind,
-                    methodKind: sym.methodKind,
-                    modulePath: sym.modulePath,
-                    sourceFile: sym.sourceFile,
-                    access: sym.access
+                copySymbolWithNewDefId(
+                    sym,
+                    newType: substituteType(sym.type, substitution: substitution)
                 )
             }
             return .memberPath(
@@ -541,29 +503,16 @@ extension Monomorphizer {
             
         case .subscriptExpression(let base, let arguments, let method, let type):
             let newBase = substituteTypesInExpression(base, substitution: substitution)
-            var newMethod = Symbol(
-                name: method.name,
-                type: substituteType(method.type, substitution: substitution),
-                kind: method.kind,
-                methodKind: method.methodKind,
-                modulePath: method.modulePath,
-                sourceFile: method.sourceFile,
-                access: method.access
+            var newMethod = copySymbolWithNewDefId(
+                method,
+                newType: substituteType(method.type, substitution: substitution)
             )
             
             // Resolve method name to mangled name for generic extension methods
             if !newBase.type.containsGenericParameter {
                 // Look up the concrete method on the substituted base type
                 if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: method.name) {
-                    newMethod = Symbol(
-                        name: concreteMethod.name,
-                        type: concreteMethod.type,
-                        kind: concreteMethod.kind,
-                        methodKind: concreteMethod.methodKind,
-                        modulePath: concreteMethod.modulePath,
-                        sourceFile: concreteMethod.sourceFile,
-                        access: concreteMethod.access
-                    )
+                    newMethod = copySymbolWithNewDefId(concreteMethod)
                 }
             }
             
@@ -617,27 +566,17 @@ extension Monomorphizer {
         case .lambdaExpression(let parameters, let captures, let body, let type):
             // Substitute types in lambda parameters
             let newParameters = parameters.map { param in
-                Symbol(
-                    name: param.name,
-                    type: substituteType(param.type, substitution: substitution),
-                    kind: param.kind,
-                    methodKind: param.methodKind,
-                    modulePath: param.modulePath,
-                    sourceFile: param.sourceFile,
-                    access: param.access
+                copySymbolWithNewDefId(
+                    param,
+                    newType: substituteType(param.type, substitution: substitution)
                 )
             }
             // Substitute types in captures
             let newCaptures = captures.map { capture in
                 CapturedVariable(
-                    symbol: Symbol(
-                        name: capture.symbol.name,
-                        type: substituteType(capture.symbol.type, substitution: substitution),
-                        kind: capture.symbol.kind,
-                        methodKind: capture.symbol.methodKind,
-                        modulePath: capture.symbol.modulePath,
-                        sourceFile: capture.symbol.sourceFile,
-                        access: capture.symbol.access
+                    symbol: copySymbolWithNewDefId(
+                        capture.symbol,
+                        newType: substituteType(capture.symbol.type, substitution: substitution)
                     ),
                     captureKind: capture.captureKind
                 )
@@ -660,14 +599,9 @@ extension Monomorphizer {
     ) -> TypedStatementNode {
         switch stmt {
         case .variableDeclaration(let identifier, let value, let mutable):
-            let newIdentifier = Symbol(
-                name: identifier.name,
-                type: substituteType(identifier.type, substitution: substitution),
-                kind: identifier.kind,
-                methodKind: identifier.methodKind,
-                modulePath: identifier.modulePath,
-                sourceFile: identifier.sourceFile,
-                access: identifier.access
+            let newIdentifier = copySymbolWithNewDefId(
+                identifier,
+                newType: substituteType(identifier.type, substitution: substitution)
             )
             return .variableDeclaration(
                 identifier: newIdentifier,
@@ -715,14 +649,9 @@ extension Monomorphizer {
             return pattern
             
         case .variable(let symbol):
-            let newSymbol = Symbol(
-                name: symbol.name,
-                type: substituteType(symbol.type, substitution: substitution),
-                kind: symbol.kind,
-                methodKind: symbol.methodKind,
-                modulePath: symbol.modulePath,
-                sourceFile: symbol.sourceFile,
-                access: symbol.access
+            let newSymbol = copySymbolWithNewDefId(
+                symbol,
+                newType: substituteType(symbol.type, substitution: substitution)
             )
             return .variable(symbol: newSymbol)
             

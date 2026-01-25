@@ -505,7 +505,7 @@ extension TypeChecker {
     let genericType = Type.genericStruct(template: name, args: resolvedArgs)
     
     return .typeConstruction(
-      identifier: Symbol(name: name, type: genericType, kind: .type),
+      identifier: makeLocalSymbol(name: name, type: genericType, kind: .type),
       typeArgs: resolvedArgs,
       arguments: finalTypedArguments,
       type: genericType

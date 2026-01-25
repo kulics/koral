@@ -183,7 +183,7 @@ extension TypeChecker {
       
       // Bind method-level type parameters as generic parameters
       for typeParam in method.typeParameters {
-        try currentScope.defineType(typeParam.name, type: .genericParameter(name: typeParam.name))
+        currentScope.defineGenericParameter(typeParam.name, type: .genericParameter(name: typeParam.name))
       }
       
       let returnType = try resolveTypeNode(method.returnType)
@@ -211,13 +211,11 @@ extension TypeChecker {
     }
     
     let kind = getCompilerMethodKind(method.name)
-    return Symbol(
+    return makeGlobalSymbol(
       name: method.name,
       type: functionType,
       kind: .function,
       methodKind: kind,
-      modulePath: currentModulePath,
-      sourceFile: currentSourceFile,
       access: .default
     )
   }
@@ -261,13 +259,11 @@ extension TypeChecker {
     }
     
     let kind = getCompilerMethodKind(method.name)
-    return Symbol(
+    return makeGlobalSymbol(
       name: method.name,
       type: functionType,
       kind: .function,
       methodKind: kind,
-      modulePath: currentModulePath,
-      sourceFile: currentSourceFile,
       access: .default
     )
   }
@@ -387,13 +383,11 @@ extension TypeChecker {
     }
     
     let kind = getCompilerMethodKind(method.name)
-    let methodSymbol = Symbol(
+    let methodSymbol = makeGlobalSymbol(
       name: method.name,
       type: functionType,
       kind: .function,
       methodKind: kind,
-      modulePath: currentModulePath,
-      sourceFile: currentSourceFile,
       access: .default
     )
     
@@ -477,13 +471,11 @@ extension TypeChecker {
         }
         
         let kind = getCompilerMethodKind(methodName)
-        let methodSymbol = Symbol(
+        let methodSymbol = makeGlobalSymbol(
           name: "__trait_\(traitName)_\(methodName)",
           type: functionType,
           kind: .function,
           methodKind: kind,
-          modulePath: currentModulePath,
-          sourceFile: currentSourceFile,
           access: .default
         )
         

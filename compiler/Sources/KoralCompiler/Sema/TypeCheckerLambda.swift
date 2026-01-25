@@ -88,13 +88,10 @@ extension TypeChecker {
       
       // Build typed parameter symbols
       let paramSymbols = typedParams.map { param in
-        Symbol(
+        makeLocalSymbol(
           name: param.name,
           type: param.type,
-          kind: .variable(.Value),
-          modulePath: [],
-          sourceFile: currentSourceFile,
-          access: .default
+          kind: .variable(.Value)
         )
       }
       
@@ -149,13 +146,10 @@ extension TypeChecker {
             captureKind = .byValue
           }
           
-          let symbol = Symbol(
+          let symbol = makeLocalSymbol(
             name: name,
             type: info.type,
-            kind: .variable(.Value),
-            modulePath: [],
-            sourceFile: currentSourceFile,
-            access: .default
+            kind: .variable(.Value)
           )
           captures.append(CapturedVariable(symbol: symbol, captureKind: captureKind))
         }

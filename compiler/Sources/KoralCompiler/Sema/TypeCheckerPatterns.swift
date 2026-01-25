@@ -86,8 +86,11 @@ extension TypeChecker {
 
     case .variable(let name, let mutable, _):
       // Bind variable to the subject
-      let symbol = Symbol(
-        name: name, type: subjectType, kind: .variable(mutable ? .MutableValue : .Value))
+      let symbol = makeLocalSymbol(
+        name: name,
+        type: subjectType,
+        kind: .variable(mutable ? .MutableValue : .Value)
+      )
       return (.variable(symbol: symbol), [(name, mutable, subjectType)])
 
     case .unionCase(let caseName, let subPatterns, _):

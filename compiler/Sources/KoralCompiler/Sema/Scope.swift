@@ -68,6 +68,9 @@ public class Scope {
   private var directlyAccessibleSymbols: Set<String> = []
   /// 直接可用类型集合
   private var directlyAccessibleTypes: Set<String> = []
+  /// 泛型参数（名称 -> Type）- 与普通类型分开存储
+  /// 泛型参数在查找时具有最高优先级，避免被误判为其他模块的符号
+  private var genericParameters: [String: Type] = [:]
 
   public init(parent: Scope? = nil) {
     self.symbols = [:]
@@ -98,6 +101,22 @@ public class Scope {
   public func defineAsDirectlyAccessible(_ name: String, _ type: Type, mutable: Bool) {
     symbols[name] = (type, mutable)
     directlyAccessibleSymbols.insert(name)
+  }
+  
+  /// 定义泛型参数
+  /// 泛型参数与普通类型分开存储，在查找时具有最高优先级
+  /// 这确保泛型参数（如 Map<K, V> 的 V）不会被误判为其他模块的符号（如 types.V）
+  public func defineGenericParameter(_ name: String, type: Type) {
+    genericParameters[name] = type
+  }
+  
+  /// 检查是否是泛型参数
+  /// 递归检查当前作用域和父作用域
+  public func isGenericParameter(_ name: String) -> Bool {
+    if genericParameters[name] != nil {
+      return true
+    }
+    return parent?.isGenericParameter(name) ?? false
   }
   
   /// 定义一个直接可用的函数符号
@@ -131,6 +150,13 @@ public class Scope {
       return true
     }
     return parent?.isTypeDirectlyAccessible(name) ?? false
+  }
+
+  /// 检查类型名是否是当前作用域内的局部绑定（如泛型替换、Self 绑定）
+  /// 仅在子作用域中生效，避免影响全局可见性检查
+  public func isLocalTypeBinding(_ name: String) -> Bool {
+    guard parent != nil else { return false }
+    return types[name] != nil
   }
   
   /// Define a function symbol (not a closure variable)
@@ -195,36 +221,48 @@ public class Scope {
     return parent?.isPrivateFunction(name, sourceFile: sourceFile) ?? false
   }
   
-  /// Lookup a symbol, checking private symbols for the given source file first
+  /// Lookup a symbol, checking generic parameters first, then private symbols for the given source file
   public func lookup(_ name: String, sourceFile: String? = nil) -> Type? {
-    // First check private symbols for the current file
+    // 1. 首先检查泛型参数（最高优先级）
+    // 这确保泛型参数（如 Map 的 V）不会被误判为其他模块的符号（如 types.V）
+    if let genericType = genericParameters[name] {
+      return genericType
+    }
+    // 2. Check private symbols for the current file
     if let sourceFile = sourceFile {
       let key = "\(name)@\(sourceFile)"
       if let info = privateSymbols[key] {
         return info.type
       }
     }
-    // Then check public/protected symbols
+    // 3. Then check public/protected symbols
     if let (type, _) = symbols[name] {
       return type
     }
+    // 4. 递归查找父作用域
     return parent?.lookup(name, sourceFile: sourceFile)
   }
   
   /// Lookup a symbol and return full info including whether it's private
   /// Returns: (type, mutable, isPrivate, sourceFile, modulePath)
   public func lookupWithInfo(_ name: String, sourceFile: String? = nil) -> (type: Type, mutable: Bool, isPrivate: Bool, sourceFile: String?, modulePath: [String])? {
-    // First check private symbols for the current file
+    // 1. 首先检查泛型参数（最高优先级）
+    // 泛型参数不可变，不是 private，没有 sourceFile 和 modulePath
+    if let genericType = genericParameters[name] {
+      return (type: genericType, mutable: false, isPrivate: false, sourceFile: nil, modulePath: [])
+    }
+    // 2. Check private symbols for the current file
     if let sourceFile = sourceFile {
       let key = "\(name)@\(sourceFile)"
       if let info = privateSymbols[key] {
         return (type: info.type, mutable: info.mutable, isPrivate: true, sourceFile: info.sourceFile, modulePath: symbolModulePaths[name] ?? [])
       }
     }
-    // Then check public/protected symbols
+    // 3. Then check public/protected symbols
     if let (type, mutable) = symbols[name] {
       return (type: type, mutable: mutable, isPrivate: false, sourceFile: nil, modulePath: symbolModulePaths[name] ?? [])
     }
+    // 4. 递归查找父作用域
     return parent?.lookupWithInfo(name, sourceFile: sourceFile)
   }
   
@@ -320,26 +358,37 @@ public class Scope {
     privateTypes[key] = type
   }
   
-  /// Lookup a type, checking private types for the given source file first
+  /// Lookup a type, checking generic parameters first, then private types for the given source file
   public func lookupType(_ name: String, sourceFile: String? = nil) -> Type? {
-    // First check private types for the current file
+    // 1. 首先检查泛型参数（最高优先级）
+    if let genericType = genericParameters[name] {
+      return genericType
+    }
+    // 2. Check private types for the current file
     if let sourceFile = sourceFile {
       let key = "\(name)@\(sourceFile)"
       if let type = privateTypes[key] {
         return type
       }
     }
-    // Then check public/protected types
+    // 3. Then check public/protected types
     if let type = types[name] {
       return type
     }
+    // 4. 递归查找父作用域
     return parent?.lookupType(name, sourceFile: sourceFile)
   }
 
   public func lookupType(_ name: String) -> Type? {
+    // 1. 首先检查泛型参数（最高优先级）
+    if let genericType = genericParameters[name] {
+      return genericType
+    }
+    // 2. Then check public/protected types
     if let type = types[name] {
       return type
     }
+    // 3. 递归查找父作用域
     return parent?.lookupType(name)
   }
 
