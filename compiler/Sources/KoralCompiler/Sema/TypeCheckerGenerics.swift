@@ -329,6 +329,32 @@ extension TypeChecker {
           try unify(node: returnType, type: returns, inferred: &inferred, typeParams: typeParams)
         }
       }
+    case .moduleQualified(_, let name):
+      // 模块限定类型：检查类型名是否是类型参数
+      if typeParams.contains(name) {
+        if let existing = inferred[name] {
+          if existing != type {
+            throw SemanticError.typeMismatch(expected: existing.description, got: type.description)
+          }
+        } else {
+          inferred[name] = type
+        }
+      }
+    case .moduleQualifiedGeneric(_, let base, let args):
+      // 模块限定泛型类型
+      if case .genericStruct(let templateName, let typeArgs) = type {
+        if templateName == base && typeArgs.count == args.count {
+          for (argNode, argType) in zip(args, typeArgs) {
+            try unify(node: argNode, type: argType, inferred: &inferred, typeParams: typeParams)
+          }
+        }
+      } else if case .genericUnion(let templateName, let typeArgs) = type {
+        if templateName == base && typeArgs.count == args.count {
+          for (argNode, argType) in zip(args, typeArgs) {
+            try unify(node: argNode, type: argType, inferred: &inferred, typeParams: typeParams)
+          }
+        }
+      }
     }
   }
 

@@ -326,11 +326,13 @@ extension Monomorphizer {
             
         case .structure(let decl):
             let typeName = decl.name
+            let qualifiedTypeName = decl.qualifiedName
             let isGen = decl.isGenericInstantiation
             if let methods = extensionMethods[typeName], let sym = methods[name] {
                 // Generate mangled name for the method (include method type args if present)
+                // Use qualifiedTypeName to include module path
                 let methodArgLayoutKeys = methodTypeArgs.map { $0.layoutKey }.joined(separator: "_")
-                let mangledName = methodTypeArgs.isEmpty ? "\(typeName)_\(name)" : "\(typeName)_\(name)_\(methodArgLayoutKeys)"
+                let mangledName = methodTypeArgs.isEmpty ? "\(qualifiedTypeName)_\(name)" : "\(qualifiedTypeName)_\(name)_\(methodArgLayoutKeys)"
                 return Symbol(
                     name: mangledName,
                     type: sym.type,
@@ -416,11 +418,13 @@ extension Monomorphizer {
             
         case .union(let decl):
             let typeName = decl.name
+            let qualifiedTypeName = decl.qualifiedName
             let isGen = decl.isGenericInstantiation
             if let methods = extensionMethods[typeName], let sym = methods[name] {
                 // Generate mangled name for the method (include method type args if present)
+                // Use qualifiedTypeName to include module path
                 let methodArgLayoutKeys = methodTypeArgs.map { $0.layoutKey }.joined(separator: "_")
-                let mangledName = methodTypeArgs.isEmpty ? "\(typeName)_\(name)" : "\(typeName)_\(name)_\(methodArgLayoutKeys)"
+                let mangledName = methodTypeArgs.isEmpty ? "\(qualifiedTypeName)_\(name)" : "\(qualifiedTypeName)_\(name)_\(methodArgLayoutKeys)"
                 return Symbol(
                     name: mangledName,
                     type: sym.type,

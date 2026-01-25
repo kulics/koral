@@ -5,8 +5,8 @@ import Foundation
 /// 模块系统错误类型
 public enum ModuleError: Error, CustomStringConvertible {
     case fileNotFound(String, searchPath: String)
-    case submoduleNotFound(String, parentPath: String)
-    case missingIndexFile(String)
+    case submoduleNotFound(String, parentPath: String, span: SourceSpan)
+    case missingIndexFile(String, span: SourceSpan)
     case superOutOfBounds(span: SourceSpan)
     case externalModuleNotFound(String, searchPaths: [String])
     case circularDependency(path: [String])
@@ -19,12 +19,12 @@ public enum ModuleError: Error, CustomStringConvertible {
         switch self {
         case .fileNotFound(let file, let searchPath):
             return "File '\(file).koral' not found in '\(searchPath)'"
-        case .submoduleNotFound(let name, let parentPath):
-            return "Submodule '\(name)' not found (expected directory '\(parentPath)/\(name)/')"
-        case .missingIndexFile(let path):
-            return "Submodule at '\(path)' is missing 'index.koral' entry file"
+        case .submoduleNotFound(let name, let parentPath, let span):
+            return "\(span): error: Submodule '\(name)' not found (expected directory '\(parentPath)/\(name)/')"
+        case .missingIndexFile(let path, let span):
+            return "\(span): error: Submodule at '\(path)' is missing 'index.koral' entry file"
         case .superOutOfBounds(let span):
-            return "\(span): 'super' goes beyond the root module of the compilation unit"
+            return "\(span): error: 'super' goes beyond the root module of the compilation unit"
         case .externalModuleNotFound(let name, let paths):
             return "External module '\(name)' not found. Searched in: \(paths.joined(separator: ", "))"
         case .circularDependency(let path):
@@ -32,7 +32,7 @@ public enum ModuleError: Error, CustomStringConvertible {
         case .invalidModulePath(let path):
             return "Invalid module path: '\(path)'"
         case .duplicateUsing(let name, let span):
-            return "\(span): Duplicate using declaration for '\(name)'"
+            return "\(span): error: Duplicate using declaration for '\(name)'"
         case .parseError(let file, let underlying):
             return "\(file): \(underlying)"
         case .invalidEntryFileName(let filename, let reason):
@@ -164,8 +164,8 @@ public class CompilationUnit {
     
     /// 获取所有全局节点及其来源文件信息
     /// 用于 CodeGen 阶段生成正确的 C 名称
-    public func getAllGlobalNodesWithSourceInfo() -> [(node: GlobalNode, sourceFile: String, modulePath: [String])] {
-        var result: [(node: GlobalNode, sourceFile: String, modulePath: [String])] = []
+    public func getAllGlobalNodesWithSourceInfo() -> [(node: GlobalNode, sourceFile: String, modulePath: [String], importedModules: [ImportedModuleInfo])] {
+        var result: [(node: GlobalNode, sourceFile: String, modulePath: [String], importedModules: [ImportedModuleInfo])] = []
         collectGlobalNodesWithSourceInfo(from: rootModule, into: &result)
         return result
     }
@@ -183,16 +183,162 @@ public class CompilationUnit {
     
     private func collectGlobalNodesWithSourceInfo(
         from module: ModuleInfo,
-        into result: inout [(node: GlobalNode, sourceFile: String, modulePath: [String])]
+        into result: inout [(node: GlobalNode, sourceFile: String, modulePath: [String], importedModules: [ImportedModuleInfo])]
     ) {
         // 先收集子模块的节点
         for (_, submodule) in module.submodules.sorted(by: { $0.key < $1.key }) {
             collectGlobalNodesWithSourceInfo(from: submodule, into: &result)
         }
+        
+        // 计算当前模块导入的模块信息
+        let importedModules = computeImportedModules(for: module)
+        
         // 收集当前模块的节点（包含来源信息）
         for (node, sourceFile) in module.globalNodes {
-            result.append((node: node, sourceFile: sourceFile, modulePath: module.path))
+            result.append((node: node, sourceFile: sourceFile, modulePath: module.path, importedModules: importedModules))
         }
+    }
+    
+    /// 计算模块导入的模块信息
+    private func computeImportedModules(for module: ModuleInfo) -> [ImportedModuleInfo] {
+        var importedModules: [ImportedModuleInfo] = []
+        
+        for using in module.usingDeclarations {
+            switch using.pathKind {
+            case .submodule:
+                // using self.child -> 模块导入
+                // using self.child.* -> 批量导入
+                // using self.child.Symbol -> 成员导入
+                var targetPath = module.path
+                // 跳过 "self"
+                let segments = using.pathSegments.filter { $0 != "self" }
+                
+                if using.isBatchImport {
+                    // 批量导入：using self.child.*
+                    targetPath.append(contentsOf: segments)
+                    importedModules.append(ImportedModuleInfo(
+                        modulePath: targetPath,
+                        isBatchImport: true,
+                        importedSymbol: nil
+                    ))
+                } else if segments.count >= 2 {
+                    // 可能是成员导入：using self.child.Symbol
+                    // 最后一个段是符号名，前面的是模块路径
+                    let modulePart = Array(segments.dropLast())
+                    let symbolName = segments.last!
+                    targetPath.append(contentsOf: modulePart)
+                    
+                    // 检查最后一个段是否是类型名（首字母大写）
+                    if let firstChar = symbolName.first, firstChar.isUppercase {
+                        importedModules.append(ImportedModuleInfo(
+                            modulePath: targetPath,
+                            isBatchImport: false,
+                            importedSymbol: symbolName
+                        ))
+                    } else {
+                        // 普通模块导入
+                        targetPath = module.path
+                        targetPath.append(contentsOf: segments)
+                        importedModules.append(ImportedModuleInfo(
+                            modulePath: targetPath,
+                            isBatchImport: false,
+                            importedSymbol: nil
+                        ))
+                    }
+                } else {
+                    // 普通模块导入：using self.child
+                    targetPath.append(contentsOf: segments)
+                    importedModules.append(ImportedModuleInfo(
+                        modulePath: targetPath,
+                        isBatchImport: false,
+                        importedSymbol: nil
+                    ))
+                }
+                
+            case .parent:
+                // using super.sibling -> 模块导入
+                // using super.sibling.* -> 批量导入
+                // using super.sibling.Symbol -> 成员导入
+                var current = module
+                var segmentIndex = 0
+                
+                // 处理 super 链
+                while segmentIndex < using.pathSegments.count
+                      && using.pathSegments[segmentIndex] == "super" {
+                    if let parent = current.parent {
+                        current = parent
+                    }
+                    segmentIndex += 1
+                }
+                
+                // 处理剩余路径
+                var targetPath = current.path
+                let remainingSegments = segmentIndex < using.pathSegments.count
+                    ? Array(using.pathSegments[segmentIndex...])
+                    : []
+                
+                if using.isBatchImport {
+                    // 批量导入
+                    targetPath.append(contentsOf: remainingSegments)
+                    importedModules.append(ImportedModuleInfo(
+                        modulePath: targetPath,
+                        isBatchImport: true,
+                        importedSymbol: nil
+                    ))
+                } else if remainingSegments.count >= 2 {
+                    // 可能是成员导入
+                    let modulePart = Array(remainingSegments.dropLast())
+                    let symbolName = remainingSegments.last!
+                    targetPath.append(contentsOf: modulePart)
+                    
+                    if let firstChar = symbolName.first, firstChar.isUppercase {
+                        importedModules.append(ImportedModuleInfo(
+                            modulePath: targetPath,
+                            isBatchImport: false,
+                            importedSymbol: symbolName
+                        ))
+                    } else {
+                        targetPath = current.path
+                        targetPath.append(contentsOf: remainingSegments)
+                        importedModules.append(ImportedModuleInfo(
+                            modulePath: targetPath,
+                            isBatchImport: false,
+                            importedSymbol: nil
+                        ))
+                    }
+                } else {
+                    // 普通模块导入
+                    targetPath.append(contentsOf: remainingSegments)
+                    importedModules.append(ImportedModuleInfo(
+                        modulePath: targetPath,
+                        isBatchImport: false,
+                        importedSymbol: nil
+                    ))
+                }
+                
+            case .external:
+                // using std.xxx -> 外部模块导入
+                if using.isBatchImport {
+                    importedModules.append(ImportedModuleInfo(
+                        modulePath: using.pathSegments,
+                        isBatchImport: true,
+                        importedSymbol: nil
+                    ))
+                } else {
+                    importedModules.append(ImportedModuleInfo(
+                        modulePath: using.pathSegments,
+                        isBatchImport: false,
+                        importedSymbol: nil
+                    ))
+                }
+                
+            case .fileMerge:
+                // using "file" -> 文件合并，不影响模块导入
+                break
+            }
+        }
+        
+        return importedModules
     }
 }
 
@@ -347,7 +493,7 @@ public class ModuleResolver {
         try resolveFile(file: filePath, module: module, unit: unit)
     }
     
-    /// 解析子模块: using self.utils
+    /// 解析子模块: using self.utils 或符号导入: using self.Symbol
     private func resolveSubmodule(
         using: UsingDeclaration,
         module: ModuleInfo,
@@ -357,36 +503,42 @@ public class ModuleResolver {
             throw ModuleError.invalidModulePath("empty submodule path")
         }
         
-        let submodName = using.pathSegments[0]
-        let submodPath = module.directory + "/" + submodName
+        // pathSegments 不包含 "self"，直接是子模块/符号路径
+        // 例如: using self.utils -> pathSegments = ["utils"]
+        //       using self.Expr -> pathSegments = ["Expr"]
+        let firstSegment = using.pathSegments[0]
+        let submodPath = module.directory + "/" + firstSegment
         let indexFile = submodPath + "/index.koral"
         
-        guard fileManager.fileExists(atPath: submodPath) else {
-            throw ModuleError.submoduleNotFound(submodName, parentPath: module.directory)
-        }
-        
+        // 检查是否是子模块目录
         var isDirectory: ObjCBool = false
-        guard fileManager.fileExists(atPath: submodPath, isDirectory: &isDirectory),
-              isDirectory.boolValue else {
-            throw ModuleError.submoduleNotFound(submodName, parentPath: module.directory)
+        let pathExists = fileManager.fileExists(atPath: submodPath, isDirectory: &isDirectory)
+        
+        // 如果不是目录，说明这是符号导入而不是子模块导入
+        // 符号导入的验证在 TypeChecker 阶段完成
+        if !pathExists || !isDirectory.boolValue {
+            // 这是符号导入 (using self.Symbol)，不需要在模块解析阶段处理
+            // 符号导入在 TypeChecker 阶段通过 importedModules 处理
+            return
         }
         
+        // 检查 index.koral 是否存在
         guard fileManager.fileExists(atPath: indexFile) else {
-            throw ModuleError.missingIndexFile(submodPath)
+            throw ModuleError.missingIndexFile(submodPath, span: using.span)
         }
         
         // 创建或获取子模块
         let submodule: ModuleInfo
-        if let existing = module.submodules[submodName] {
+        if let existing = module.submodules[firstSegment] {
             submodule = existing
         } else {
             submodule = ModuleInfo(
-                path: module.path + [submodName],
+                path: module.path + [firstSegment],
                 entryFile: indexFile,
                 isExternal: false
             )
             submodule.parent = module
-            module.submodules[submodName] = submodule
+            module.submodules[firstSegment] = submodule
             unit.loadedModules[submodule.pathString] = submodule
             
             // 解析子模块
@@ -404,7 +556,7 @@ public class ModuleResolver {
         
         // 将子模块注册为模块符号
         try module.symbolTable?.addModuleSymbol(
-            name: submodName,
+            name: firstSegment,
             module: submodule,
             access: access,
             span: using.span,
@@ -441,27 +593,29 @@ public class ModuleResolver {
             let accessChecker = AccessChecker()
             
             for segment in remainingPath {
-                // 通过符号表查找子模块符号
-                // 子模块作为符号存储在父模块的符号表中
-                if let symbolTable = current.symbolTable,
-                   let symbol = symbolTable.lookupModuleSymbol(segment) {
-                    // 使用通用的访问检查
-                    try accessChecker.checkAccess(
-                        symbol: symbol,
-                        from: module,
-                        fromFile: module.entryFile
-                    )
-                }
-                
+                // 首先检查是否是子模块
                 if let submod = current.submodules[segment] {
+                    // 通过符号表检查访问权限
+                    if let symbolTable = current.symbolTable,
+                       let symbol = symbolTable.lookupModuleSymbol(segment) {
+                        try accessChecker.checkAccess(
+                            symbol: symbol,
+                            from: module,
+                            fromFile: module.entryFile
+                        )
+                    }
                     current = submod
                 } else {
                     // 尝试加载子模块
                     let submodPath = current.directory + "/" + segment
                     let indexFile = submodPath + "/index.koral"
                     
+                    // 如果子模块目录不存在，说明这个段是符号名而不是模块名
+                    // 停止子模块查找，符号导入在 TypeChecker 阶段处理
                     guard fileManager.fileExists(atPath: indexFile) else {
-                        throw ModuleError.submoduleNotFound(segment, parentPath: current.directory)
+                        // 不是子模块，可能是符号导入，直接返回
+                        // 符号导入的验证在 TypeChecker 阶段完成
+                        return
                     }
                     
                     let submodule = ModuleInfo(

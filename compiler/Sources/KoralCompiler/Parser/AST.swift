@@ -76,6 +76,10 @@ public indirect enum TypeNode: CustomStringConvertible {
   /// Function type: [ParamType1, ParamType2, ..., ReturnType]Func
   /// The last type in args is the return type, all others are parameter types
   case functionType(paramTypes: [TypeNode], returnType: TypeNode)
+  /// Module-qualified type: module.TypeName
+  case moduleQualified(module: String, name: String)
+  /// Module-qualified generic type: module.[T]List
+  case moduleQualifiedGeneric(module: String, base: String, args: [TypeNode])
   
   public var description: String {
     switch self {
@@ -92,6 +96,11 @@ public indirect enum TypeNode: CustomStringConvertible {
       let allTypes = paramTypes + [returnType]
       let typesStr = allTypes.map { $0.description }.joined(separator: ", ")
       return "[\(typesStr)]Func"
+    case .moduleQualified(let module, let name):
+      return "\(module).\(name)"
+    case .moduleQualifiedGeneric(let module, let base, let args):
+      let argsStr = args.map { $0.description }.joined(separator: ", ")
+      return "\(module).[\(argsStr)]\(base)"
     }
   }
 }

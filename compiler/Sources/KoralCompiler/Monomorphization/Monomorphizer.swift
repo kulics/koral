@@ -135,18 +135,18 @@ public class Monomorphizer {
                     resultNodes.append(node)
                 case .givenDeclaration(let type, let methods):
                     // Track already-generated extension methods
-                    let typeName: String
+                    let qualifiedTypeName: String
                     switch type {
                     case .structure(let decl):
-                        typeName = decl.name
+                        qualifiedTypeName = decl.qualifiedName
                     case .union(let decl):
-                        typeName = decl.name
+                        qualifiedTypeName = decl.qualifiedName
                     default:
-                        typeName = type.description
+                        qualifiedTypeName = type.description
                     }
                     
                     for method in methods {
-                        let mangledName = "\(typeName)_\(method.identifier.name)"
+                        let mangledName = "\(qualifiedTypeName)_\(method.identifier.name)"
                         generatedLayouts.insert(mangledName)
                         instantiatedFunctions[mangledName] = (mangledName, method.identifier.type)
                     }

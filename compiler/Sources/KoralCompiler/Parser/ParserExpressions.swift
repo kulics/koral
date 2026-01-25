@@ -792,6 +792,7 @@ extension Parser {
   // MARK: - When/Match Expression
   
   private func parseWhenExpression() throws -> ExpressionNode {
+    let startSpan = currentSpan
     try match(.whenKeyword)
     let subject = try expression()
     try match(.isKeyword)
@@ -817,7 +818,7 @@ extension Parser {
       }
     }
     try match(.rightBrace)
-    return .matchExpression(subject: subject, cases: cases, span: currentSpan)
+    return .matchExpression(subject: subject, cases: cases, span: startSpan)
   }
   
   // MARK: - Operator Conversion Helpers

@@ -13,6 +13,29 @@ public enum SymbolKind {
   case module(ModuleSymbolInfo)
 }
 
+/// 符号的导入方式
+/// 用于决定符号是否可以直接访问（不需要模块前缀）
+public enum ImportKind {
+  /// 当前模块定义的符号（包括文件合并）
+  case local
+  /// 成员导入：using self.module.symbol
+  case memberImport
+  /// 批量导入：using self.module.*
+  case batchImport
+  /// 模块导入：using self.module（符号不直接可用，需要通过模块前缀访问）
+  case moduleImport
+  
+  /// 是否可以直接访问（不需要模块前缀）
+  public var isDirectlyAccessible: Bool {
+    switch self {
+    case .local, .memberImport, .batchImport:
+      return true
+    case .moduleImport:
+      return false
+    }
+  }
+}
+
 /// 模块符号信息
 public struct ModuleSymbolInfo {
   /// 模块路径

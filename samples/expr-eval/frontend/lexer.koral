@@ -1,0 +1,172 @@
+// 表达式求值器 - 词法分析器
+
+public type Lexer(
+    source String,
+    mut pos Int,
+)
+
+given Lexer {
+    public new(source String) Lexer = Lexer(source, 0)
+
+    private is_at_end(self) Bool = self.pos >= self.source.count()
+
+    private peek_char(self) [UInt8]Option = {
+        if self.is_at_end() then [UInt8]Option.None()
+        else [UInt8]Option.Some(self.source[self.pos])
+    }
+
+    private peek_next(self) [UInt8]Option = {
+        if self.pos + 1 >= self.source.count() then [UInt8]Option.None()
+        else [UInt8]Option.Some(self.source[self.pos + 1])
+    }
+
+    private advance(self ref) UInt8 = {
+        let c = self.source[self.pos]
+        self.pos += 1
+        c
+    }
+
+    private skip_whitespace(self ref) Void = {
+        while not self.is_at_end() then {
+            let c = self.source[self.pos]
+            if c == ' ' or c == '\t' or c == '\n' or c == '\r' then { self.pos += 1 }
+            else { break }
+        }
+    }
+
+    private is_digit(c UInt8) Bool = c >= '0' and c <= '9'
+    private is_alpha(c UInt8) Bool = { c >= 'a' and c <= 'z' } or { c >= 'A' and c <= 'Z' } or c == '_'
+    private is_alphanumeric(c UInt8) Bool = Lexer.is_digit(c) or Lexer.is_alpha(c)
+
+    private scan_number(self ref) types.Token = {
+        let start = self.pos
+        let mut has_dot = false
+
+        while not self.is_at_end() and Lexer.is_digit(self.source[self.pos]) then {
+            self.pos += 1
+        }
+
+        if { not self.is_at_end() } and self.source[self.pos] == '.' then {
+            when self.peek_next() is {
+                .Some(next) then {
+                    if Lexer.is_digit(next) then {
+                        has_dot = true
+                        self.pos += 1
+                        while not self.is_at_end() and Lexer.is_digit(self.source[self.pos]) then {
+                            self.pos += 1
+                        }
+                    }
+                },
+                .None then {},
+            }
+        }
+
+        let num_str = self.source.slice(start..<self.pos)
+        if has_dot then types.Token.FloatLiteral(parse_float64_str(num_str))
+        else types.Token.IntLiteral(parse_int_str(num_str))
+    }
+
+    private scan_identifier(self ref) types.Token = {
+        let start = self.pos
+        while not self.is_at_end() and Lexer.is_alphanumeric(self.source[self.pos]) then {
+            self.pos += 1
+        }
+        types.Token.Identifier(self.source.slice(start..<self.pos))
+    }
+
+    public next_token(self ref) [types.Token, String]Result = {
+        self.skip_whitespace()
+
+        if self.is_at_end() then {
+            return Result.Ok(types.Token.EOF())
+        }
+
+        let c = self.advance()
+
+        if Lexer.is_digit(c) then {
+            self.pos -= 1
+            return Result.Ok(self.scan_number())
+        }
+
+        if Lexer.is_alpha(c) then {
+            self.pos -= 1
+            return Result.Ok(self.scan_identifier())
+        }
+
+        when c is {
+            '+' then Result.Ok(types.Token.Plus()),
+            '-' then Result.Ok(types.Token.Minus()),
+            '*' then Result.Ok(types.Token.Star()),
+            '^' then Result.Ok(types.Token.Power()),
+            '/' then Result.Ok(types.Token.Slash()),
+            '%' then Result.Ok(types.Token.Percent()),
+            '=' then Result.Ok(types.Token.Equals()),
+            '(' then Result.Ok(types.Token.LeftParen()),
+            ')' then Result.Ok(types.Token.RightParen()),
+            ',' then Result.Ok(types.Token.Comma()),
+            _ then {
+                let msg = String.empty()
+                msg.push_string("Lexer error at position ")
+                msg.push_int(self.pos - 1)
+                msg.push_string(": unexpected character '")
+                msg.push(c)
+                msg.push('\'')
+                Result.Error(msg)
+            },
+        }
+    }
+
+    public tokenize(self ref) [[types.Token]List, String]Result = {
+        let tokens = [types.Token]List.new()
+        let mut done = false
+        while not done then {
+            when self.next_token() is {
+                .Ok(token) then {
+                    when token is {
+                        .EOF then {
+                            tokens.push_back(token)
+                            done = true
+                        },
+                        _ then tokens.push_back(token),
+                    }
+                },
+                .Error(msg) then { return Result.Error(msg) },
+            }
+        }
+        Result.Ok(tokens)
+    }
+}
+
+let parse_int_str(s String) Int = {
+    let mut result = 0
+    let mut i = 0
+    while i < s.count() then {
+        result = result * 10 + (Int){ s[i] - '0' }
+        i += 1
+    }
+    result
+}
+
+let parse_float64_str(s String) Float64 = {
+    let mut result = 0.0
+    let mut i = 0
+    let mut after_dot = false
+    let mut decimal_place = 0.1
+
+    while i < s.count() then {
+        let c = s[i]
+        if c == '.' then {
+            after_dot = true
+        } else {
+            let digit = (Float64){ (Int){ c - '0' } }
+            if after_dot then {
+                result = result + digit * decimal_place
+                decimal_place = decimal_place * 0.1
+            } else {
+                result = result * 10.0 + digit
+            }
+        }
+        i += 1
+    }
+    result
+}

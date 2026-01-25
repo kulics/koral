@@ -35,6 +35,7 @@ extension TypeChecker {
         self.currentFileName = sourceInfo?.sourceFile ?? (isStdLib ? coreFileName : userFileName)
         self.currentSourceFile = sourceInfo?.sourceFile ?? self.currentFileName
         self.currentModulePath = sourceInfo?.modulePath ?? []
+        self.currentImportedModules = sourceInfo?.importedModules ?? []
         self.currentSpan = decl.span
         do {
           try collectTypeDefinition(decl, isStdLib: isStdLib)
@@ -42,6 +43,11 @@ extension TypeChecker {
           throw e
         }
       }
+      
+      // === PASS 1.5: Register module symbols (names only) ===
+      // This allows module-qualified types like `backend.Evaluator` to be resolved in Pass 2
+      // We only register the module names here, the public symbols will be populated in Pass 2.5
+      try registerModuleNames(from: declarations)
       
       // === PASS 2: Register all given method signatures ===
       // This allows methods in one given block to call methods in another given block
@@ -54,6 +60,7 @@ extension TypeChecker {
         self.currentFileName = sourceInfo?.sourceFile ?? (isStdLib ? coreFileName : userFileName)
         self.currentSourceFile = sourceInfo?.sourceFile ?? self.currentFileName
         self.currentModulePath = sourceInfo?.modulePath ?? []
+        self.currentImportedModules = sourceInfo?.importedModules ?? []
         self.currentSpan = decl.span
         do {
           try collectGivenSignatures(decl)
@@ -79,6 +86,7 @@ extension TypeChecker {
         self.currentFileName = sourceInfo?.sourceFile ?? (isStdLib ? coreFileName : userFileName)
         self.currentSourceFile = sourceInfo?.sourceFile ?? self.currentFileName
         self.currentModulePath = sourceInfo?.modulePath ?? []
+        self.currentImportedModules = sourceInfo?.importedModules ?? []
         self.currentSpan = decl.span
         do {
           if let typedDecl = try checkGlobalDeclaration(decl) {
@@ -130,13 +138,71 @@ extension TypeChecker {
     }
   }
   
-  // MARK: - Pass 1.5: Module Symbol Building
+  // MARK: - Pass 1.5: Register Module Names
+  
+  /// Registers module names in scope so that module-qualified types can be resolved.
+  /// This is called after Pass 1 and before Pass 2.
+  /// Only registers the module names, the public symbols will be populated in Pass 2.5.
+  private func registerModuleNames(from declarations: [GlobalNode]) throws {
+    // Collect all unique module paths
+    var allModulePaths: Set<String> = []
+    
+    for (index, _) in declarations.enumerated() {
+      guard let sourceInfo = nodeSourceInfoMap[index] else { continue }
+      let modulePath = sourceInfo.modulePath
+      
+      // Skip root module (empty path) - we only care about submodules
+      if modulePath.isEmpty { continue }
+      
+      let moduleKey = modulePath.joined(separator: ".")
+      allModulePaths.insert(moduleKey)
+    }
+    
+    // Register module names in scope for direct child modules
+    for moduleKey in allModulePaths {
+      let parts = moduleKey.split(separator: ".").map(String.init)
+      
+      // Only register direct child modules (depth 2 from root)
+      // Example: ["expr_eval", "frontend"] has 2 parts, so "frontend" is a direct child
+      if parts.count == 2 {
+        let submoduleName = parts[1]
+        
+        // Create an empty ModuleSymbolInfo (will be populated in Pass 2.5)
+        let moduleInfo = ModuleSymbolInfo(
+          modulePath: parts,
+          publicSymbols: [:],
+          publicTypes: [:]
+        )
+        moduleSymbols[moduleKey] = moduleInfo
+        
+        let moduleType = Type.module(info: moduleInfo)
+        // Register the submodule name in scope
+        currentScope.define(submoduleName, moduleType, mutable: false)
+      }
+    }
+  }
+  
+  // MARK: - Pass 2.5: Build Module Symbols
   
   /// Builds module symbols from collected definitions.
   /// This allows `using self.child` to work by creating module symbols
   /// that can be accessed via `child.xxx`.
   private func buildModuleSymbols(from declarations: [GlobalNode]) throws {
-    // Step 1: Collect all symbols by module path
+    // Step 1: Collect all unique module paths
+    var allModulePaths: Set<String> = []
+    
+    for (index, _) in declarations.enumerated() {
+      guard let sourceInfo = nodeSourceInfoMap[index] else { continue }
+      let modulePath = sourceInfo.modulePath
+      
+      // Skip root module (empty path) - we only care about submodules
+      if modulePath.isEmpty { continue }
+      
+      let moduleKey = modulePath.joined(separator: ".")
+      allModulePaths.insert(moduleKey)
+    }
+    
+    // Step 2: Collect all symbols by module path
     var symbolsByModule: [String: [(name: String, symbol: Symbol, type: Type?)]] = [:]
     
     for (index, decl) in declarations.enumerated() {
@@ -157,17 +223,19 @@ extension TypeChecker {
       }
     }
     
-    // Step 2: Build ModuleSymbolInfo for each module
-    for (moduleKey, symbols) in symbolsByModule {
+    // Step 3: Build ModuleSymbolInfo for each module (including empty ones)
+    for moduleKey in allModulePaths {
       var publicSymbols: [String: Symbol] = [:]
       var publicTypes: [String: Type] = [:]
       
-      for (name, symbol, type) in symbols {
-        // Only include public symbols (for now, include all non-private)
-        if symbol.access != .private {
-          publicSymbols[name] = symbol
-          if let t = type {
-            publicTypes[name] = t
+      if let symbols = symbolsByModule[moduleKey] {
+        for (name, symbol, type) in symbols {
+          // Only include public symbols (for now, include all non-private)
+          if symbol.access != .private {
+            publicSymbols[name] = symbol
+            if let t = type {
+              publicTypes[name] = t
+            }
           }
         }
       }
@@ -180,20 +248,19 @@ extension TypeChecker {
       )
     }
     
-    // Step 3: Register module symbols in scope for direct child modules
-    // For each unique first-level submodule, create a module symbol
-    var registeredModules: Set<String> = []
-    for moduleKey in moduleSymbols.keys {
+    // Step 4: Register module symbols in scope for direct child modules
+    // For each submodule, register its name as a module symbol in the parent scope
+    // Example: for module path ["expr_eval", "frontend"], register "frontend" as a module symbol
+    for (moduleKey, moduleInfo) in moduleSymbols {
       let parts = moduleKey.split(separator: ".").map(String.init)
-      if let firstPart = parts.first, !registeredModules.contains(firstPart) {
-        registeredModules.insert(firstPart)
-        
-        // Get or create module info for this submodule
-        if let moduleInfo = moduleSymbols[firstPart] {
-          let moduleType = Type.module(info: moduleInfo)
-          // Register the module symbol in scope (as private by default)
-          currentScope.define(firstPart, moduleType, mutable: false)
-        }
+      
+      // Only register direct child modules (depth 2 from root)
+      // Example: ["expr_eval", "frontend"] has 2 parts, so "frontend" is a direct child
+      if parts.count == 2 {
+        let submoduleName = parts[1]
+        let moduleType = Type.module(info: moduleInfo)
+        // Register the submodule name in scope
+        currentScope.define(submoduleName, moduleType, mutable: false)
       }
     }
   }

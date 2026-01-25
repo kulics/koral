@@ -1,5 +1,21 @@
 import Foundation
 
+/// 导入的模块信息
+public struct ImportedModuleInfo {
+  /// 模块路径
+  public let modulePath: [String]
+  /// 是否是批量导入（using module.*）
+  public let isBatchImport: Bool
+  /// 导入的特定符号（using module.Symbol）
+  public let importedSymbol: String?
+  
+  public init(modulePath: [String], isBatchImport: Bool = false, importedSymbol: String? = nil) {
+    self.modulePath = modulePath
+    self.isBatchImport = isBatchImport
+    self.importedSymbol = importedSymbol
+  }
+}
+
 /// 全局节点的源信息
 public struct GlobalNodeSourceInfo {
   /// 源文件路径（绝对路径）
@@ -8,11 +24,14 @@ public struct GlobalNodeSourceInfo {
   public let modulePath: [String]
   /// 全局节点
   public let node: GlobalNode
+  /// 当前模块导入的模块信息列表（通过 using 声明）
+  public let importedModules: [ImportedModuleInfo]
   
-  public init(sourceFile: String, modulePath: [String], node: GlobalNode) {
+  public init(sourceFile: String, modulePath: [String], node: GlobalNode, importedModules: [ImportedModuleInfo] = []) {
     self.sourceFile = sourceFile
     self.modulePath = modulePath
     self.node = node
+    self.importedModules = importedModules
   }
 }
 
@@ -89,6 +108,9 @@ public class TypeChecker {
   /// 当前正在处理的节点的模块路径
   var currentModulePath: [String] = []
   
+  /// 当前模块导入的模块信息列表（通过 using 声明）
+  var currentImportedModules: [ImportedModuleInfo] = []
+  
   /// 模块符号映射：模块路径 -> 模块符号信息
   /// 用于支持 `using self.child` 后通过 `child.xxx` 访问子模块符号
   var moduleSymbols: [String: ModuleSymbolInfo] = [:]
@@ -96,6 +118,227 @@ public class TypeChecker {
   /// 当前正在处理的声明是否来自标准库
   /// 基于声明索引判断：索引小于 coreGlobalCount 的声明来自标准库
   var isCurrentDeclStdLib: Bool = false
+  
+  /// 检查当前声明是否来自子模块
+  /// 子模块的 modulePath 长度大于 1（根模块路径长度为 1，如 ["expr_eval"]）
+  /// 子模块路径长度为 2+，如 ["expr_eval", "frontend"]
+  var isCurrentDeclFromSubmodule: Bool {
+    return currentModulePath.count > 1
+  }
+  
+  /// 检查符号的模块是否可以从当前模块直接访问
+  /// 允许访问的情况：
+  /// 1. 符号与当前代码在同一模块（modulePath 相同）
+  /// 2. 符号来自父模块（符号的 modulePath 是当前 modulePath 的前缀）
+  /// 3. 符号来自标准库根模块（modulePath 为 ["std"]）
+  /// 4. 符号来自同一编译单元的根模块
+  func isModuleAccessible(symbolModulePath: [String], currentModulePath: [String]) -> Bool {
+    // 空路径总是可访问（局部变量/参数）
+    if symbolModulePath.isEmpty {
+      return true
+    }
+    
+    // 同一模块
+    if symbolModulePath == currentModulePath {
+      return true
+    }
+    
+    // 标准库根模块的符号总是可访问
+    if symbolModulePath.count == 1 && symbolModulePath[0] == "std" {
+      return true
+    }
+    
+    // 检查符号是否来自父模块（符号的 modulePath 是当前 modulePath 的前缀）
+    // 例如：当前在 ["expr_eval", "frontend"]，符号在 ["expr_eval"]
+    if symbolModulePath.count < currentModulePath.count {
+      let prefix = Array(currentModulePath.prefix(symbolModulePath.count))
+      if prefix == symbolModulePath {
+        return true
+      }
+    }
+    
+    // 检查符号是否来自同一编译单元的根模块
+    // 例如：当前在 ["expr_eval"]，符号也在 ["expr_eval"] 的某个文件
+    if !currentModulePath.isEmpty && !symbolModulePath.isEmpty {
+      // 同一编译单元：根模块名相同
+      if currentModulePath[0] == symbolModulePath[0] {
+        // 如果符号来自子模块，不允许直接访问
+        // 例如：当前在 ["expr_eval"]，符号在 ["expr_eval", "frontend"]
+        if symbolModulePath.count > currentModulePath.count {
+          return false
+        }
+      }
+    }
+    
+    return false
+  }
+  
+  /// 检查符号是否可以从当前位置直接访问（不需要模块前缀）
+  /// 
+  /// 允许直接访问的情况：
+  /// 1. 符号与当前代码在同一模块（modulePath 相同）
+  /// 2. 符号来自父模块（符号的 modulePath 是当前 modulePath 的前缀）
+  /// 3. 符号来自标准库（modulePath 为 ["std"] 或以 "std" 开头）
+  /// 4. 符号是局部变量/参数（modulePath 为空）
+  /// 
+  /// 不允许直接访问的情况：
+  /// 1. 符号来自子模块（需要通过 module.symbol 访问）
+  /// 2. 符号来自兄弟模块（需要通过 module.symbol 访问）
+  /// 3. 符号来自外部模块（需要通过 module.symbol 访问）
+  func canAccessSymbolDirectly(symbolModulePath: [String], currentModulePath: [String], symbolName: String? = nil) -> Bool {
+    // 空路径总是可直接访问（局部变量/参数）
+    if symbolModulePath.isEmpty {
+      return true
+    }
+    
+    // 同一模块可以直接访问
+    if symbolModulePath == currentModulePath {
+      return true
+    }
+    
+    // 标准库符号总是可以直接访问
+    if !symbolModulePath.isEmpty && symbolModulePath[0] == "std" {
+      return true
+    }
+    
+    // 检查符号是否来自父模块（符号的 modulePath 是当前 modulePath 的前缀）
+    // 例如：当前在 ["expr_eval", "frontend"]，符号在 ["expr_eval"]
+    // 父模块的符号可以直接访问
+    if symbolModulePath.count < currentModulePath.count {
+      let prefix = Array(currentModulePath.prefix(symbolModulePath.count))
+      if prefix == symbolModulePath {
+        return true
+      }
+    }
+    
+    // 检查符号是否来自导入的模块
+    for importInfo in currentImportedModules {
+      // 批量导入：using module.* -> 模块的所有符号可以直接访问
+      if importInfo.isBatchImport && symbolModulePath == importInfo.modulePath {
+        return true
+      }
+      
+      // 成员导入：using module.Symbol -> 只有指定的符号可以直接访问
+      if let importedSymbol = importInfo.importedSymbol,
+         symbolModulePath == importInfo.modulePath,
+         let name = symbolName,
+         name == importedSymbol {
+        return true
+      }
+      
+      // 注意：普通模块导入（using module）不允许直接访问模块内的符号
+      // 需要通过 module.Symbol 访问
+    }
+    
+    // 其他情况（子模块、兄弟模块、外部模块）不允许直接访问
+    // 需要通过模块前缀访问
+    return false
+  }
+  
+  /// 获取访问符号所需的模块前缀
+  /// 
+  /// 例如：
+  /// - 当前在 ["expr_eval"]，符号在 ["expr_eval", "frontend"]
+  ///   返回 "frontend"
+  /// - 当前在 ["expr_eval", "backend"]，符号在 ["expr_eval", "frontend"]
+  ///   返回 "frontend"（通过 super.frontend 访问）
+  /// - 当前在 ["expr_eval"]，符号在 ["other_module"]
+  ///   返回 "other_module"
+  func getRequiredModulePrefix(symbolModulePath: [String], currentModulePath: [String]) -> String {
+    // 空路径不需要前缀
+    if symbolModulePath.isEmpty {
+      return ""
+    }
+    
+    // 同一模块不需要前缀
+    if symbolModulePath == currentModulePath {
+      return ""
+    }
+    
+    // 检查是否是子模块
+    // 例如：当前在 ["expr_eval"]，符号在 ["expr_eval", "frontend"]
+    if symbolModulePath.count > currentModulePath.count {
+      let prefix = Array(symbolModulePath.prefix(currentModulePath.count))
+      if prefix == currentModulePath {
+        // 返回直接子模块名
+        return symbolModulePath[currentModulePath.count]
+      }
+    }
+    
+    // 检查是否是兄弟模块
+    // 例如：当前在 ["expr_eval", "backend"]，符号在 ["expr_eval", "frontend"]
+    if symbolModulePath.count >= 2 && currentModulePath.count >= 2 {
+      // 找到共同祖先
+      var commonPrefixLength = 0
+      for i in 0..<min(symbolModulePath.count, currentModulePath.count) {
+        if symbolModulePath[i] == currentModulePath[i] {
+          commonPrefixLength = i + 1
+        } else {
+          break
+        }
+      }
+      
+      if commonPrefixLength > 0 && commonPrefixLength < symbolModulePath.count {
+        // 返回从共同祖先开始的第一个不同部分
+        return symbolModulePath[commonPrefixLength]
+      }
+    }
+    
+    // 外部模块：返回模块名
+    if !symbolModulePath.isEmpty {
+      return symbolModulePath.last ?? ""
+    }
+    
+    return ""
+  }
+  
+  /// 检查类型的模块可见性
+  /// 如果类型来自子模块或兄弟模块，需要使用模块前缀访问
+  func checkTypeVisibility(type: Type, typeName: String) throws {
+    // 获取类型的模块路径
+    let typeModulePath: [String]
+    switch type {
+    case .structure(let decl):
+      typeModulePath = decl.modulePath
+    case .union(let decl):
+      typeModulePath = decl.modulePath
+    case .genericStruct(let templateName, _):
+      // 泛型结构体：查找模板获取模块路径
+      if currentScope.lookupGenericStructTemplate(templateName) != nil {
+        // 泛型模板目前没有存储模块路径，暂时跳过检查
+        // TODO: 为泛型模板添加模块路径支持
+        return
+      }
+      return
+    case .genericUnion(let templateName, _):
+      // 泛型联合体：查找模板获取模块路径
+      if currentScope.lookupGenericUnionTemplate(templateName) != nil {
+        // 泛型模板目前没有存储模块路径，暂时跳过检查
+        // TODO: 为泛型模板添加模块路径支持
+        return
+      }
+      return
+    default:
+      // 基本类型、泛型参数等不需要检查
+      return
+    }
+    
+    // 空模块路径表示标准库类型或局部类型，总是可访问
+    if typeModulePath.isEmpty {
+      return
+    }
+    
+    // 标准库类型总是可访问
+    if !typeModulePath.isEmpty && typeModulePath[0] == "std" {
+      return
+    }
+    
+    // 检查是否可以直接访问（传递类型名用于成员导入检查）
+    if !canAccessSymbolDirectly(symbolModulePath: typeModulePath, currentModulePath: currentModulePath, symbolName: typeName) {
+      let modulePrefix = getRequiredModulePrefix(symbolModulePath: typeModulePath, currentModulePath: currentModulePath)
+      throw SemanticError(.generic("'\(typeName)' is defined in module '\(modulePrefix)'. Use '\(modulePrefix).\(typeName)' to access it."), line: currentLine)
+    }
+  }
 
   public init(
     ast: ASTNode,

@@ -103,6 +103,9 @@ public class Parser {
 
   // Parse statement
   func statement() throws -> StatementNode {
+    // Record the span at the start of the statement
+    let startSpan = currentSpan
+    
     switch currentToken {
     case .letKeyword:
       return try variableDeclaration()
@@ -111,30 +114,30 @@ public class Parser {
       // return; or return <expr>;
       // Also check for automatic statement termination (newline before non-continuation token)
       if currentToken === .semicolon || currentToken === .rightBrace || shouldTerminateStatement() {
-        return .return(value: nil, span: currentSpan)
+        return .return(value: nil, span: startSpan)
       }
       let value = try expression()
-      return .return(value: value, span: currentSpan)
+      return .return(value: value, span: startSpan)
     case .breakKeyword:
       try match(.breakKeyword)
-      return .break(span: currentSpan)
+      return .break(span: startSpan)
     case .continueKeyword:
       try match(.continueKeyword)
-      return .continue(span: currentSpan)
+      return .continue(span: startSpan)
     default:
       let expr = try expression()
 
       if currentToken === .equal {
         try match(.equal)
         let value = try expression()
-        return .assignment(target: expr, value: value, span: currentSpan)
+        return .assignment(target: expr, value: value, span: startSpan)
       } else if let op = getCompoundAssignmentOperator(currentToken) {
         try match(currentToken)
         let value = try expression()
         return .compoundAssignment(
-          target: expr, operator: op, value: value, span: currentSpan)
+          target: expr, operator: op, value: value, span: startSpan)
       }
-      return .expression(expr, span: currentSpan)
+      return .expression(expr, span: startSpan)
     }
   }
 
@@ -186,6 +189,8 @@ public class Parser {
 
   // Parse variable declaration
   private func variableDeclaration() throws -> StatementNode {
+    // Record the span at the start of the declaration (at 'let' keyword)
+    let startSpan = currentSpan
     let (name, type, value, mutable) = try parseLetContent()
 
     if currentToken === .thenKeyword {
@@ -193,11 +198,11 @@ public class Parser {
       let body = try expression()
       return .expression(
         .letExpression(name: name, type: type, value: value, mutable: mutable, body: body),
-        span: currentSpan)
+        span: startSpan)
     }
 
     return .variableDeclaration(
-      name: name, type: type, value: value, mutable: mutable, span: currentSpan)
+      name: name, type: type, value: value, mutable: mutable, span: startSpan)
   }
 
 
