@@ -152,15 +152,22 @@ extension Monomorphizer {
     internal func resolveParameterizedType(_ type: Type, visited: Set<UUID> = []) -> Type {
         switch type {
         case .genericStruct(let template, let args):
+            // Check if we already have this type cached FIRST (before resolving args)
+            // This handles recursive types like List<Expr ref> where Expr contains List<Expr ref>
+            let initialCacheKey = "\(template)<\(args.map { $0.description }.joined(separator: ","))>"
+            if let cached = instantiatedTypes[initialCacheKey] {
+                return cached
+            }
+            
             // First, recursively resolve the type arguments
-            let resolvedArgs = args.map { resolveParameterizedType($0) }
+            let resolvedArgs = args.map { resolveParameterizedType($0, visited: visited) }
             
             // If any arg still contains generic parameters, we can't resolve yet
             if resolvedArgs.contains(where: { $0.containsGenericParameter }) {
                 return .genericStruct(template: template, args: resolvedArgs)
             }
             
-            // Check if we already have this type cached FIRST
+            // Check cache again with resolved args (in case description changed)
             let cacheKey = "\(template)<\(resolvedArgs.map { $0.description }.joined(separator: ","))>"
             if let cached = instantiatedTypes[cacheKey] {
                 return cached
@@ -195,15 +202,21 @@ extension Monomorphizer {
             return .genericStruct(template: template, args: resolvedArgs)
             
         case .genericUnion(let template, let args):
+            // Check if we already have this type cached FIRST (before resolving args)
+            let initialCacheKey = "\(template)<\(args.map { $0.description }.joined(separator: ","))>"
+            if let cached = instantiatedTypes[initialCacheKey] {
+                return cached
+            }
+            
             // First, recursively resolve the type arguments
-            let resolvedArgs = args.map { resolveParameterizedType($0) }
+            let resolvedArgs = args.map { resolveParameterizedType($0, visited: visited) }
             
             // If any arg still contains generic parameters, we can't resolve yet
             if resolvedArgs.contains(where: { $0.containsGenericParameter }) {
                 return .genericUnion(template: template, args: resolvedArgs)
             }
             
-            // Check if we already have this type cached FIRST
+            // Check cache again with resolved args (in case description changed)
             let cacheKey = "\(template)<\(resolvedArgs.map { $0.description }.joined(separator: ","))>"
             if let cached = instantiatedTypes[cacheKey] {
                 return cached
@@ -233,21 +246,21 @@ extension Monomorphizer {
             return .genericUnion(template: template, args: resolvedArgs)
             
         case .reference(let inner):
-            return .reference(inner: resolveParameterizedType(inner))
+            return .reference(inner: resolveParameterizedType(inner, visited: visited))
             
         case .pointer(let element):
-            return .pointer(element: resolveParameterizedType(element))
+            return .pointer(element: resolveParameterizedType(element, visited: visited))
             
         case .function(let params, let returns):
             let newParams = params.map { param in
                 Parameter(
-                    type: resolveParameterizedType(param.type),
+                    type: resolveParameterizedType(param.type, visited: visited),
                     kind: param.kind
                 )
             }
             return .function(
                 parameters: newParams,
-                returns: resolveParameterizedType(returns)
+                returns: resolveParameterizedType(returns, visited: visited)
             )
             
         case .structure(let decl):

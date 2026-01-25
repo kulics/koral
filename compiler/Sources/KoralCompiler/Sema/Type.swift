@@ -290,8 +290,8 @@ public indirect enum Type: CustomStringConvertible {
     case .void: return "V"
     case .never: return "N"
     case .function: return "Fn"
-    case .reference: return "R"
-    case .pointer(_): return "P"
+    case .reference(let inner): return "R_\(inner.layoutKey)"
+    case .pointer(let element): return "P_\(element.layoutKey)"
     case .structure(let decl):
       // 使用模块路径、文件标识（如果是 private）和名称来确保唯一性
       var parts: [String] = []
