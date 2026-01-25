@@ -63,12 +63,15 @@ extension Monomorphizer {
             }
             
             for param in template.parameters {
-                let fieldType = try resolveTypeNode(param.type, substitution: typeSubstitution)
+                var fieldType = try resolveTypeNode(param.type, substitution: typeSubstitution)
                 if fieldType == placeholder {
                     throw SemanticError.invalidOperation(
                         op: "Direct recursion in generic struct \(layoutName) not allowed (use ref)",
                         type1: param.name, type2: "")
                 }
+                // Resolve any nested genericStruct/genericUnion types
+                // This ensures types like List<T ref> get instantiated
+                fieldType = resolveParameterizedType(fieldType, visited: [])
                 resolvedMembers.append((name: param.name, type: fieldType, mutable: param.mutable))
             }
         } catch {
@@ -198,12 +201,15 @@ extension Monomorphizer {
             for c in template.cases {
                 var params: [(name: String, type: Type)] = []
                 for p in c.parameters {
-                    let resolved = try resolveTypeNode(p.type, substitution: typeSubstitution)
+                    var resolved = try resolveTypeNode(p.type, substitution: typeSubstitution)
                     if resolved == placeholder {
                         throw SemanticError.invalidOperation(
                             op: "Direct recursion in generic union \(layoutName) not allowed (use ref)",
                             type1: p.name, type2: "")
                     }
+                    // Resolve any nested genericStruct/genericUnion types
+                    // This ensures types like List<Expr ref> get instantiated
+                    resolved = resolveParameterizedType(resolved, visited: [])
                     params.append((name: p.name, type: resolved))
                 }
                 resolvedCases.append(UnionCase(name: c.name, parameters: params))
