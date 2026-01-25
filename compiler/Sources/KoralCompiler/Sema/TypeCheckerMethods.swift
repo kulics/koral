@@ -62,7 +62,13 @@ extension TypeChecker {
   }
 
   func lookupConcreteMethodSymbol(on selfType: Type, name: String) throws -> Symbol? {
-    switch selfType {
+    // Auto-deref: if the type is a reference, unwrap it first
+    var actualType = selfType
+    if case .reference(let inner) = selfType {
+      actualType = inner
+    }
+    
+    switch actualType {
     case .structure(let decl):
       let typeName = decl.name
       if let methods = extensionMethods[typeName], let sym = methods[name] {
@@ -729,8 +735,11 @@ extension TypeChecker {
     if let firstParam = params.first {
       if firstParam.type != base.type {
         if case .reference(let inner) = firstParam.type, inner == base.type {
-          // Implicit Ref for self
+          // Implicit Ref for self: method expects `self ref` but base is value type
           finalBase = .referenceExpression(expression: base, type: firstParam.type)
+        } else if case .reference(let inner) = base.type, inner == firstParam.type {
+          // Implicit Deref for self: method expects `self` but base is ref type
+          finalBase = .derefExpression(expression: base, type: firstParam.type)
         }
       }
     }
