@@ -89,48 +89,18 @@ given[T Any] [T]List {
          }
     }
 
-    public push_back(self ref, value T) Void = {
+    public push(self ref, value T) Void = {
         self.ensure_capacity(self.storage.len + 1)
         self.storage.source.offset(self.storage.len).init(value)
         self.storage.len = self.storage.len + 1
     }
 
     // Using if is pattern matching
-    public pop_back(self ref) [T]Option = {
+    public pop(self ref) [T]Option = {
         if self.storage.len == 0 then { return [T]Option.None(); }
         self.ensure_unique()
         self.storage.len = self.storage.len - 1
         let value = self.storage.source.offset(self.storage.len).take()
-        [T]Option.Some(value)
-    }
-
-    public push_front(self ref, value T) Void = {
-        self.ensure_capacity(self.storage.len + 1)
-        // Shift all elements to the right
-        let mut i = self.storage.len
-        while i > 0 then {
-            let src = self.storage.source.offset(i - 1)
-            let dst = self.storage.source.offset(i)
-            dst.init(src.take())
-            i = i - 1
-        }
-        self.storage.source.offset(0).init(value)
-        self.storage.len = self.storage.len + 1
-    }
-
-    public pop_front(self ref) [T]Option = {
-        if self.storage.len == 0 then { return [T]Option.None(); }
-        self.ensure_unique()
-        let value = self.storage.source.offset(0).take()
-        // Shift all elements to the left
-        let mut i = 0
-        while i < self.storage.len - 1 then {
-            let src = self.storage.source.offset(i + 1)
-            let dst = self.storage.source.offset(i)
-            dst.init(src.take())
-            i = i + 1
-        }
-        self.storage.len = self.storage.len - 1
         [T]Option.Some(value)
     }
 
@@ -170,7 +140,7 @@ given[T Any] [T]List {
         [T]Option.Some(self.storage.source.offset(index).peek())
     }
 
-    public replace(self ref, index Int, value T) [T]Option = {
+    public set(self ref, index Int, value T) [T]Option = {
         if index < 0 or index >= self.storage.len then { return [T]Option.None(); }
         self.ensure_unique()
         let old = self.storage.source.offset(index).replace(value)
@@ -216,7 +186,7 @@ given[T Any] [T]List {
         let mut result = [T]List.with_capacity(len)
         let mut i = 0
         while i < len then {
-            result.push_back(self.storage.source.offset(start + i).peek())
+            result.push(self.storage.source.offset(start + i).peek())
             i += 1
         }
         result
@@ -292,7 +262,7 @@ given[T Any] [T]List {
         let mut i = 0
         while i < self.storage.len then {
             let v = self.storage.source.offset(i).peek()
-            if fn(v) then { result.push_back(v); }
+            if fn(v) then { result.push(v); }
             i += 1
         }
         result
@@ -304,7 +274,7 @@ given[T Any] [T]List {
         let mut i = 0
         while i < self.storage.len then {
             let v = self.storage.source.offset(i).peek()
-            result.push_back(fn(v))
+            result.push(fn(v))
             i += 1
         }
         result
@@ -312,38 +282,38 @@ given[T Any] [T]List {
 }
 
 // ============================================================================
-// List Sorting - sort_by with custom comparator
+// List Sorting - sort_by with key function
 // ============================================================================
 
 given[T Any] [T]List {
-    // Sort in-place using a custom comparison function
-    // compare returns: negative if first < second, zero if equal, positive if first > second
-    public sort_by(self ref, compare [T, T, Int]Func) Void = {
+    // Sort in-place using a key extraction function
+    // key extracts a comparable value from each element
+    public [K Comparable]sort_by(self ref, key [T, K]Func) Void = {
         if self.storage.len <= 1 then { return; }
         self.ensure_unique()
-        self.merge_sort_by(compare, 0, self.storage.len)
+        self.merge_sort_by_key(key, 0, self.storage.len)
     }
-    
-    // Merge sort implementation with custom comparator
-    private merge_sort_by(self ref, compare [T, T, Int]Func, start Int, end Int) Void = {
+
+    // Merge sort implementation with key function
+    private [K Comparable]merge_sort_by_key(self ref, key [T, K]Func, start Int, end Int) Void = {
         let len = end - start
         if len <= 1 then { return; }
         
         let mid = start + len / 2
-        self.merge_sort_by(compare, start, mid)
-        self.merge_sort_by(compare, mid, end)
-        self.merge_by(compare, start, mid, end)
+        self.merge_sort_by_key(key, start, mid)
+        self.merge_sort_by_key(key, mid, end)
+        self.merge_by_key(key, start, mid, end)
     }
-    
-    // Merge two sorted subarrays using custom comparator
-    private merge_by(self ref, compare [T, T, Int]Func, start Int, mid Int, end Int) Void = {
+
+    // Merge two sorted subarrays using key function
+    private [K Comparable]merge_by_key(self ref, key [T, K]Func, start Int, mid Int, end Int) Void = {
         let left_len = mid - start
         let mut temp = [T]List.with_capacity(left_len)
         
         // Copy left half to temp
         let mut i = 0
         while i < left_len then {
-            temp.push_back(self.storage.source.offset(start + i).peek())
+            temp.push(self.storage.source.offset(start + i).peek())
             i += 1
         }
         
@@ -356,8 +326,8 @@ given[T Any] [T]List {
             let left_val = temp.storage.source.offset(left_idx).peek()
             let right_val = self.storage.source.offset(right_idx).peek()
             
-            // Use <= 0 to ensure stability (prefer left on equal)
-            if compare(left_val, right_val) <= 0 then {
+            // Use <= to ensure stability (prefer left on equal)
+            if key(left_val) <= key(right_val) then {
                 self.storage.source.offset(dest_idx).replace(left_val);
                 left_idx += 1
             } else {
@@ -409,7 +379,7 @@ given[T Comparable] [T]List {
         // Copy left half to temp
         let mut i = 0
         while i < left_len then {
-            temp.push_back(self.storage.source.offset(start + i).peek())
+            temp.push(self.storage.source.offset(start + i).peek())
             i += 1
         }
         

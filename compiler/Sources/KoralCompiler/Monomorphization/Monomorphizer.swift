@@ -23,7 +23,7 @@ public struct MonomorphizedProgram {
     /// 查找静态方法的完整限定名
     /// - Parameters:
     ///   - typeName: 类型名（如 "String", "Rune"）
-    ///   - methodName: 方法名（如 "empty", "from_utf8_bytes_unchecked"）
+    ///   - methodName: 方法名（如 "empty", "from_bytes_unchecked"）
     /// - Returns: 对应的 DefId，如果未找到则返回 nil
     public func lookupStaticMethod(typeName: String, methodName: String) -> DefId? {
         let key = "\(typeName).\(methodName)"
@@ -102,6 +102,9 @@ public class Monomorphizer {
     
     /// DefIdMap for allocating unique DefIds during monomorphization
     internal var defIdMap = DefIdMap()
+
+    /// TypedDefMap for accessing struct/union members during monomorphization
+    internal var typedDefMap = TypedDefMap()
     
     /// Creates a Symbol with a new DefId for monomorphized entities
     /// - Parameters:
@@ -138,7 +141,9 @@ public class Monomorphizer {
             modulePath: modulePath,
             name: name,
             kind: defKind,
-            sourceFile: sourceFile
+            sourceFile: sourceFile,
+            access: access,
+            span: .unknown
         )
         
         return Symbol(
@@ -179,6 +184,10 @@ public class Monomorphizer {
     /// - Parameter input: The output from the TypeChecker phase
     public init(input: TypeCheckerOutput) {
         self.input = input
+        self.defIdMap = input.defIdMap
+        self.typedDefMap = input.typedDefMap
+        DefIdContext.current = self.defIdMap
+        TypedDefContext.current = self.typedDefMap
         // Initialize concrete extension methods from the registry
         self.extensionMethods = input.genericTemplates.concreteExtensionMethods
     }
@@ -205,16 +214,16 @@ public class Monomorphizer {
                     // Track already-generated struct layouts
                     generatedLayouts.insert(identifier.name)
                     // Also cache the type if it's a generic instantiation
-                    if case .structure(let decl) = identifier.type,
-                       decl.isGenericInstantiation {
+                    if case .structure(let defId) = identifier.type,
+                       typedDefMap.isGenericInstantiation(defId) == true {
                         instantiatedTypes[identifier.name] = identifier.type
                     }
                     resultNodes.append(node)
                 case .globalUnionDeclaration(let identifier, _):
                     // Track already-generated union layouts
                     generatedLayouts.insert(identifier.name)
-                    if case .union(let decl) = identifier.type,
-                       decl.isGenericInstantiation {
+                    if case .union(let defId) = identifier.type,
+                       typedDefMap.isGenericInstantiation(defId) == true {
                         instantiatedTypes[identifier.name] = identifier.type
                     }
                     resultNodes.append(node)
@@ -227,10 +236,10 @@ public class Monomorphizer {
                     // Track already-generated extension methods
                     let qualifiedTypeName: String
                     switch type {
-                    case .structure(let decl):
-                        qualifiedTypeName = decl.qualifiedName
-                    case .union(let decl):
-                        qualifiedTypeName = decl.qualifiedName
+                    case .structure(let defId):
+                        qualifiedTypeName = defIdMap.getQualifiedName(defId) ?? type.description
+                    case .union(let defId):
+                        qualifiedTypeName = defIdMap.getQualifiedName(defId) ?? type.description
                     default:
                         qualifiedTypeName = type.description
                     }
@@ -307,12 +316,14 @@ public class Monomorphizer {
                 let typeName: String
                 let qualifiedTypeName: String
                 switch type {
-                case .structure(let decl):
-                    typeName = decl.name
-                    qualifiedTypeName = decl.qualifiedName
-                case .union(let decl):
-                    typeName = decl.name
-                    qualifiedTypeName = decl.qualifiedName
+                case .structure(let defId):
+                    let name = defIdMap.getName(defId) ?? type.description
+                    typeName = name
+                    qualifiedTypeName = defIdMap.getQualifiedName(defId) ?? name
+                case .union(let defId):
+                    let name = defIdMap.getName(defId) ?? type.description
+                    typeName = name
+                    qualifiedTypeName = defIdMap.getQualifiedName(defId) ?? name
                 default:
                     continue
                 }
@@ -320,7 +331,7 @@ public class Monomorphizer {
                 // 注册每个方法
                 for method in methods {
                     // method.identifier.name 是 mangled name，格式为 qualifiedTypeName_methodName
-                    // 例如：std_std_String_from_utf8_bytes_unchecked
+                    // 例如：std_std_String_from_bytes_unchecked
                     // 我们需要提取原始方法名
                     let mangledName = method.identifier.name
                     
@@ -369,7 +380,7 @@ public class Monomorphizer {
         currentFileName = request.sourceFileName
         SemanticErrorContext.currentLine = currentLine
         SemanticErrorContext.currentFileName = currentFileName
-        
+
         guard currentRecursionDepth < maxRecursionDepth else {
             throw SemanticError(.generic("Maximum instantiation depth exceeded (possible infinite recursion)"), line: currentLine)
         }
@@ -415,7 +426,8 @@ public class Monomorphizer {
         name: String,
         kind: TypeDefKind,
         modulePath: [String] = [],
-        sourceFile: String = ""
+        sourceFile: String = "",
+        access: AccessModifier = .default
     ) -> DefId {
         if let existing = defIdMap.lookup(modulePath: modulePath, name: name, sourceFile: sourceFile.isEmpty ? nil : sourceFile) {
             return existing
@@ -424,7 +436,9 @@ public class Monomorphizer {
             modulePath: modulePath,
             name: name,
             kind: .type(kind),
-            sourceFile: sourceFile
+            sourceFile: sourceFile,
+            access: access,
+            span: .unknown
         )
     }
     
@@ -433,15 +447,7 @@ public class Monomorphizer {
     }
     
     private func builtinStringType() -> Type {
-        let decl = StructDecl(
-            name: "String",
-            defId: getOrAllocateTypeDefId(name: "String", kind: .structure),
-            modulePath: [],
-            sourceFile: "",
-            access: .default,
-            members: [],
-            isGenericInstantiation: false
-        )
-        return .structure(decl: decl)
+        let defId = getOrAllocateTypeDefId(name: "String", kind: .structure)
+        return .structure(defId: defId)
     }
 }

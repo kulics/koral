@@ -50,6 +50,12 @@ public struct TypeCheckerOutput {
     /// The registry of generic templates collected during type checking.
     /// Contains all generic structs, unions, functions, and extension methods.
     public let genericTemplates: GenericTemplateRegistry
+
+    /// DefIdMap containing metadata for all definitions.
+    public let defIdMap: DefIdMap
+
+    /// TypedDefMap containing resolved type information.
+    public let typedDefMap: TypedDefMap
     
     /// Creates a new TypeCheckerOutput.
     /// - Parameters:
@@ -59,10 +65,14 @@ public struct TypeCheckerOutput {
     public init(
         program: TypedProgram,
         instantiationRequests: Set<InstantiationRequest>,
-        genericTemplates: GenericTemplateRegistry
+        genericTemplates: GenericTemplateRegistry,
+        defIdMap: DefIdMap,
+        typedDefMap: TypedDefMap
     ) {
         self.program = program
         self.instantiationRequests = instantiationRequests
         self.genericTemplates = genericTemplates
+        self.defIdMap = defIdMap
+        self.typedDefMap = typedDefMap
     }
 }

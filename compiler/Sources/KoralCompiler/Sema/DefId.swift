@@ -1,3 +1,5 @@
+import Foundation
+
 /// DefId.swift - 定义标识符系统
 ///
 /// DefId（Definition Identifier）是唯一标识每个全局定义的核心数据结构，
@@ -44,44 +46,8 @@ public enum DefKind: Hashable, Equatable {
 /// 定义标识符 - 唯一标识每个全局定义
 ///
 /// DefId 是编译器中用于唯一标识类型、函数、变量等定义的核心数据结构。
-/// 它包含了定义的完整路径信息，用于：
-/// - 符号查找和匹配
-/// - 生成唯一的 C 标识符
-/// - 支持模块系统和可见性检查
-///
-/// ## 示例
-/// ```
-/// // 对于 expr_eval/frontend 模块中的 Parser 类型
-/// let defId = DefId(
-///     modulePath: ["expr_eval", "frontend"],
-///     name: "Parser",
-///     kind: .type(.structure),
-///     sourceFile: "parser.koral",
-///     id: 42
-/// )
-/// // defId.cIdentifier == "expr_eval_frontend_Parser"
-/// ```
+/// 它是一个纯索引（UInt64），所有元数据由 DefIdMap 统一管理。
 public struct DefId: Hashable, Equatable {
-    /// 模块路径（如 ["expr_eval", "frontend"]）
-    ///
-    /// 表示定义所在的模块层次结构。根模块的路径为空数组。
-    public let modulePath: [String]
-    
-    /// 定义名称
-    ///
-    /// 定义的简单名称，不包含模块路径。
-    public let name: String
-    
-    /// 定义类型
-    ///
-    /// 描述这个定义是类型、函数、变量还是模块。
-    public let kind: DefKind
-    
-    /// 源文件路径（用于 private 符号隔离）
-    ///
-    /// 对于 private 符号，需要源文件路径来确保只有同一文件中的代码可以访问。
-    public let sourceFile: String
-    
     /// 唯一数字 ID（用于快速比较）
     ///
     /// 由 DefIdMap 分配的全局唯一数字标识符，用于高效的相等性比较和哈希。
@@ -89,77 +55,9 @@ public struct DefId: Hashable, Equatable {
     
     /// 创建一个新的 DefId
     ///
-    /// - Parameters:
-    ///   - modulePath: 模块路径
-    ///   - name: 定义名称
-    ///   - kind: 定义类型
-    ///   - sourceFile: 源文件路径
-    ///   - id: 唯一数字 ID
-    public init(
-        modulePath: [String],
-        name: String,
-        kind: DefKind,
-        sourceFile: String,
-        id: UInt64
-    ) {
-        self.modulePath = modulePath
-        self.name = name
-        self.kind = kind
-        self.sourceFile = sourceFile
+    /// - Parameter id: 唯一数字 ID
+    public init(id: UInt64) {
         self.id = id
-    }
-    
-    // MARK: - 计算属性
-    
-    /// 生成唯一的 C 标识符
-    ///
-    /// 将模块路径和名称组合成一个有效的 C 标识符。
-    /// 模块路径中的各部分用下划线连接。
-    /// 对于 private 符号，会包含文件标识符以确保唯一性。
-    ///
-    /// 使用 CIdentifierUtils 中的统一逻辑，确保与 CodeGen 保持一致。
-    ///
-    /// ## 示例
-    /// - `["expr_eval", "frontend"]` + `"Parser"` → `"expr_eval_frontend_Parser"`
-    /// - `[]` + `"main"` → `"main"`
-    /// - private 符号会包含文件哈希：`"module_f1234_PrivateType"`
-    public var cIdentifier: String {
-        return generateCIdentifier(
-            modulePath: modulePath,
-            name: name,
-            isPrivate: false,  // 由调用者根据 access modifier 决定
-            sourceFile: ""
-        )
-    }
-    
-    /// 生成带有文件隔离的 C 标识符（用于 private 符号）
-    ///
-    /// - Returns: 包含文件哈希的唯一 C 标识符
-    public var cIdentifierWithFileIsolation: String {
-        return generateCIdentifier(
-            modulePath: modulePath,
-            name: name,
-            isPrivate: true,
-            sourceFile: sourceFile
-        )
-    }
-    
-    /// 完整的限定名称（用于显示和调试）
-    ///
-    /// 使用点号分隔的完整路径名称。
-    ///
-    /// ## 示例
-    /// - `["expr_eval", "frontend"]` + `"Parser"` → `"expr_eval.frontend.Parser"`
-    /// - `[]` + `"main"` → `"main"`
-    public var qualifiedName: String {
-        var parts = modulePath
-        parts.append(name)
-        return parts.joined(separator: ".")
-    }
-    
-    /// 是否是根模块中的定义
-    public var isRootLevel: Bool {
-        return modulePath.isEmpty
     }
     
     // MARK: - Hashable & Equatable
@@ -175,13 +73,45 @@ public struct DefId: Hashable, Equatable {
     public static func == (lhs: DefId, rhs: DefId) -> Bool {
         return lhs.id == rhs.id
     }
+    
+    // MARK: - Metadata Queries
+    
+    /// 通过 DefIdMap 查询模块路径
+    public func modulePath(in map: DefIdMap) -> [String]? {
+        return map.getModulePath(self)
+    }
+    
+    /// 通过 DefIdMap 查询名称
+    public func name(in map: DefIdMap) -> String? {
+        return map.getName(self)
+    }
+    
+    /// 通过 DefIdMap 查询源文件
+    public func sourceFile(in map: DefIdMap) -> String? {
+        return map.getSourceFile(self)
+    }
+    
+    /// 通过 DefIdMap 查询定义类型
+    public func kind(in map: DefIdMap) -> DefKind? {
+        return map.getKind(self)
+    }
+    
+    /// 通过 DefIdMap 查询访问修饰符
+    public func access(in map: DefIdMap) -> AccessModifier? {
+        return map.getAccess(self)
+    }
+    
+    /// 通过 DefIdMap 查询诊断信息
+    public func span(in map: DefIdMap) -> SourceSpan? {
+        return map.getSpan(self)
+    }
 }
 
 // MARK: - CustomStringConvertible
 
 extension DefId: CustomStringConvertible {
     public var description: String {
-        return "DefId(\(qualifiedName), kind: \(kind), id: \(id))"
+        return "DefId(id: \(id))"
     }
 }
 
@@ -263,6 +193,30 @@ extension GenericTemplateKind: CustomStringConvertible {
 /// }
 /// ```
 public class DefIdMap {
+    public struct Metadata: Equatable, Hashable {
+        public let modulePath: [String]
+        public let name: String
+        public let kind: DefKind
+        public let sourceFile: String
+        public let access: AccessModifier
+        public let span: SourceSpan
+        
+        public init(
+            modulePath: [String],
+            name: String,
+            kind: DefKind,
+            sourceFile: String,
+            access: AccessModifier,
+            span: SourceSpan
+        ) {
+            self.modulePath = modulePath
+            self.name = name
+            self.kind = kind
+            self.sourceFile = sourceFile
+            self.access = access
+            self.span = span
+        }
+    }
     
     // MARK: - 私有属性
     
@@ -274,8 +228,8 @@ public class DefIdMap {
     /// 键的格式为 "modulePath.name" 或 "modulePath.name@sourceFile"
     private var nameToDefId: [String: DefId] = [:]
     
-    /// ID 到 DefId 的映射（用于反向查找）
-    private var idToDefId: [UInt64: DefId] = [:]
+    /// ID 到元数据的映射（用于反向查找）
+    private var idToMetadata: [UInt64: Metadata] = [:]
     
     // MARK: - 初始化
     
@@ -309,28 +263,45 @@ public class DefIdMap {
         modulePath: [String],
         name: String,
         kind: DefKind,
-        sourceFile: String
+        sourceFile: String,
+        access: AccessModifier = .default,
+        span: SourceSpan = .unknown
     ) -> DefId {
+        let isLocalSymbol = modulePath.isEmpty && sourceFile.isEmpty && kind == .variable
+
+        // Reuse existing DefId for non-local symbols when possible
+        if access == .private {
+            let keyWithFile = makeKey(modulePath: modulePath, name: name, sourceFile: sourceFile)
+            if let existing = nameToDefId[keyWithFile],
+               let metadata = idToMetadata[existing.id],
+               metadata.kind == kind {
+                return existing
+            }
+        }
+
         let id = nextId
         nextId += 1
-        
-        let defId = DefId(
+        let defId = DefId(id: id)
+        let metadata = Metadata(
             modulePath: modulePath,
             name: name,
             kind: kind,
             sourceFile: sourceFile,
-            id: id
+            access: access,
+            span: span
         )
         
-        // Store with sourceFile key for precise lookup (private symbols)
-        let keyWithFile = makeKey(modulePath: modulePath, name: name, sourceFile: sourceFile)
-        nameToDefId[keyWithFile] = defId
+        if !isLocalSymbol {
+            // Store with sourceFile key for precise lookup (private symbols)
+            let keyWithFile = makeKey(modulePath: modulePath, name: name, sourceFile: sourceFile)
+            nameToDefId[keyWithFile] = defId
+            
+            // Also store without sourceFile key for general lookup (public symbols)
+            let keyWithoutFile = makeKey(modulePath: modulePath, name: name, sourceFile: nil)
+            nameToDefId[keyWithoutFile] = defId
+        }
         
-        // Also store without sourceFile key for general lookup (public symbols)
-        let keyWithoutFile = makeKey(modulePath: modulePath, name: name, sourceFile: nil)
-        nameToDefId[keyWithoutFile] = defId
-        
-        idToDefId[id] = defId
+        idToMetadata[id] = metadata
         
         return defId
     }
@@ -339,16 +310,16 @@ public class DefIdMap {
     ///
     /// 用于在不重新分配 ID 的情况下将已有 DefId 纳入冲突检测与查找。
     /// - Parameter defId: 已有的 DefId
-    public func register(_ defId: DefId) {
+    public func register(_ defId: DefId, metadata: Metadata) {
         // Store with sourceFile key for precise lookup (private symbols)
-        let keyWithFile = makeKey(modulePath: defId.modulePath, name: defId.name, sourceFile: defId.sourceFile)
+        let keyWithFile = makeKey(modulePath: metadata.modulePath, name: metadata.name, sourceFile: metadata.sourceFile)
         nameToDefId[keyWithFile] = defId
 
         // Also store without sourceFile key for general lookup (public symbols)
-        let keyWithoutFile = makeKey(modulePath: defId.modulePath, name: defId.name, sourceFile: nil)
+        let keyWithoutFile = makeKey(modulePath: metadata.modulePath, name: metadata.name, sourceFile: nil)
         nameToDefId[keyWithoutFile] = defId
 
-        idToDefId[defId.id] = defId
+        idToMetadata[defId.id] = metadata
 
         if defId.id >= nextId {
             nextId = defId.id + 1
@@ -417,19 +388,22 @@ public class DefIdMap {
     /// }
     /// ```
     public func lookupById(_ id: UInt64) -> DefId? {
-        return idToDefId[id]
+        guard idToMetadata[id] != nil else {
+            return nil
+        }
+        return DefId(id: id)
     }
     
     /// 获取所有已分配的 DefId 数量
     public var count: Int {
-        return idToDefId.count
+        return idToMetadata.count
     }
     
     /// 获取所有已分配的 DefId
     ///
     /// 返回所有已分配的 DefId 的数组，按 ID 排序。
     public var allDefIds: [DefId] {
-        return idToDefId.values.sorted { $0.id < $1.id }
+        return idToMetadata.keys.sorted().map { DefId(id: $0) }
     }
     
     /// 检测 C 标识符冲突
@@ -442,7 +416,9 @@ public class DefIdMap {
         var cIdentifierToDefIds: [String: [DefId]] = [:]
         
         for defId in allDefIds {
-            let cId = defId.cIdentifier
+            guard let cId = getCIdentifier(defId) else {
+                continue
+            }
             cIdentifierToDefIds[cId, default: []].append(defId)
         }
         
@@ -469,14 +445,14 @@ public class DefIdMap {
     /// - Parameter defId: 要生成 C 标识符的 DefId
     /// - Returns: 唯一的 C 标识符
     public func uniqueCIdentifier(for defId: DefId) -> String {
-        let baseCId = defId.cIdentifier
+        let baseCId = getCIdentifier(defId) ?? ""
         
         // Check if there are other DefIds with the same C identifier
         var conflictCount = 0
         var myIndex = 0
         
         for other in allDefIds {
-            if other.cIdentifier == baseCId {
+            if getCIdentifier(other) == baseCId {
                 if other.id < defId.id {
                     conflictCount += 1
                 }
@@ -509,6 +485,58 @@ public class DefIdMap {
     ) -> Bool {
         return lookup(modulePath: modulePath, name: name, sourceFile: sourceFile) != nil
     }
+
+    // MARK: - Metadata Queries
+    
+    public func metadata(for defId: DefId) -> Metadata? {
+        return idToMetadata[defId.id]
+    }
+    
+    public func getModulePath(_ defId: DefId) -> [String]? {
+        return idToMetadata[defId.id]?.modulePath
+    }
+    
+    public func getName(_ defId: DefId) -> String? {
+        return idToMetadata[defId.id]?.name
+    }
+    
+    public func getSourceFile(_ defId: DefId) -> String? {
+        return idToMetadata[defId.id]?.sourceFile
+    }
+    
+    public func getKind(_ defId: DefId) -> DefKind? {
+        return idToMetadata[defId.id]?.kind
+    }
+    
+    public func getAccess(_ defId: DefId) -> AccessModifier? {
+        return idToMetadata[defId.id]?.access
+    }
+    
+    public func getSpan(_ defId: DefId) -> SourceSpan? {
+        return idToMetadata[defId.id]?.span
+    }
+    
+    public func getQualifiedName(_ defId: DefId) -> String? {
+        guard let metadata = idToMetadata[defId.id] else {
+            return nil
+        }
+        var parts = metadata.modulePath
+        parts.append(metadata.name)
+        return parts.joined(separator: ".")
+    }
+    
+    public func getCIdentifier(_ defId: DefId) -> String? {
+        guard let metadata = idToMetadata[defId.id] else {
+            return nil
+        }
+        let isPrivate = metadata.access == .private
+        return generateCIdentifier(
+            modulePath: metadata.modulePath,
+            name: metadata.name,
+            isPrivate: isPrivate,
+            sourceFile: metadata.sourceFile
+        )
+    }
     
     // MARK: - 私有方法
     
@@ -539,7 +567,17 @@ public class DefIdMap {
 
 extension DefIdMap: CustomStringConvertible {
     public var description: String {
-        let defIds = allDefIds.map { "  \($0)" }.joined(separator: "\n")
+        let defIds = allDefIds.map {
+            let name = getQualifiedName($0) ?? "<unknown>"
+            let kind = getKind($0)?.description ?? "unknown"
+            return "  DefId(\(name), kind: \(kind), id: \($0.id))"
+        }.joined(separator: "\n")
         return "DefIdMap(\(count) definitions):\n\(defIds)"
     }
+}
+
+// MARK: - Migration Context (Deprecated Accessors)
+
+public enum DefIdContext {
+    public nonisolated(unsafe) static var current: DefIdMap?
 }

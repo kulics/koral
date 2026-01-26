@@ -126,8 +126,9 @@ extension CodeGen {
       // Only apply type cast for non-reference struct members when the C types differ
       // This handles cases where generic type parameters are replaced with concrete types
       // but the C representation needs explicit casting
-      if case .structure(let decl) = curType.canonical {
-        if let canonicalMember = decl.members.first(where: { $0.name == member.name }) {
+      if case .structure(let defId) = curType.canonical,
+         let canonicalMembers = typedDefMap.getStructMembers(defId),
+         let canonicalMember = canonicalMembers.first(where: { $0.name == member.name }) {
           // Compare C type representations instead of Type equality
           // This avoids issues with UUID-based type identity for generic instantiations
           let canonicalCType = cTypeName(canonicalMember.type)
@@ -141,7 +142,6 @@ extension CodeGen {
               memberAccess = "*(\(targetCType)*)&(\(memberAccess))"
             }
           }
-        }
       }
       
       access = memberAccess
@@ -395,8 +395,9 @@ extension CodeGen {
       }
       
       // Only apply type cast for non-reference struct members when the C types differ
-      if case .structure(let decl) = curType.canonical {
-        if let canonicalMember = decl.members.first(where: { $0.name == memberName }) {
+      if case .structure(let defId) = curType.canonical,
+         let canonicalMembers = typedDefMap.getStructMembers(defId),
+         let canonicalMember = canonicalMembers.first(where: { $0.name == memberName }) {
           let canonicalCType = cTypeName(canonicalMember.type)
           let memberCTypeStr = cTypeName(memberType)
           if canonicalCType != memberCTypeStr {
@@ -407,7 +408,6 @@ extension CodeGen {
               memberAccess = "*(\(targetCType)*)&(\(memberAccess))"
             }
           }
-        }
       }
       
       accessPath = memberAccess

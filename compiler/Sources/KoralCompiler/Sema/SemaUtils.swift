@@ -263,10 +263,9 @@ public enum SemaUtils {
                 returns: substituteType(returns, substitution: substitution)
             )
             
-        case .structure(let decl):
-            let name = decl.name
-            let members = decl.members
-            let isGenericInstantiation = decl.isGenericInstantiation
+        case .structure(let defId):
+            let members = TypedDefContext.current?.getStructMembers(defId) ?? []
+            let isGenericInstantiation = TypedDefContext.current?.isGenericInstantiation(defId) ?? false
             let newMembers = members.map { member in
                 (
                     name: member.name,
@@ -274,66 +273,21 @@ public enum SemaUtils {
                     mutable: member.mutable
                 )
             }
-            
-            // Recalculate the layout name if this is a generic instantiation
-            // and the name contains generic parameter placeholders
-            var newName = name
-            if isGenericInstantiation && name.contains("Param_") {
-                // Extract the base name (everything before the first "_Param_" or the first type arg)
-                // The layout name format is "BaseName_Arg1_Arg2_..."
-                // where Arg can be "Param_T" for generic parameters or "I" for Int, etc.
-                let parts = name.split(separator: "_")
-                if let firstPart = parts.first {
-                    let baseName = String(firstPart)
-                    // Recalculate the layout name based on the substituted member types
-                    // We need to extract the type args from the original name and substitute them
-                    var typeArgs: [Type] = []
-                    var i = 1
-                    while i < parts.count {
-                        if parts[i] == "Param" && i + 1 < parts.count {
-                            // This is a generic parameter like "Param_T"
-                            let paramName = String(parts[i + 1])
-                            if let substitutedType = substitution[paramName] {
-                                typeArgs.append(substitutedType)
-                            } else {
-                                typeArgs.append(.genericParameter(name: paramName))
-                            }
-                            i += 2
-                        } else {
-                            // This is a concrete type like "I" for Int
-                            let layoutKey = String(parts[i])
-                            if let builtinType = resolveBuiltinTypeFromLayoutKey(layoutKey) {
-                                typeArgs.append(builtinType)
-                            } else {
-                                // Unknown type - keep as is
-                                typeArgs.append(.genericParameter(name: layoutKey))
-                            }
-                            i += 1
-                        }
-                    }
-                    
-                    // Generate the new layout name
-                    if !typeArgs.isEmpty && !typeArgs.contains(where: { $0.containsGenericParameter }) {
-                        newName = generateLayoutName(baseName: baseName, args: typeArgs)
-                    }
-                }
+            let newTypeArguments = TypedDefContext.current?.getTypeArguments(defId)?.map { substituteType($0, substitution: substitution) }
+            if var map = TypedDefContext.current {
+                map.addStructInfo(
+                    defId: defId,
+                    members: newMembers,
+                    isGenericInstantiation: isGenericInstantiation,
+                    typeArguments: newTypeArguments
+                )
+                TypedDefContext.current = map
             }
+            return .structure(defId: defId)
             
-            return .structure(decl: StructDecl(
-                name: newName,
-                defId: decl.defId,
-                modulePath: decl.modulePath,
-                sourceFile: decl.sourceFile,
-                access: decl.access,
-                members: newMembers,
-                isGenericInstantiation: isGenericInstantiation,
-                typeArguments: decl.typeArguments
-            ))
-            
-        case .union(let decl):
-            let name = decl.name
-            let cases = decl.cases
-            let isGenericInstantiation = decl.isGenericInstantiation
+        case .union(let defId):
+            let cases = TypedDefContext.current?.getUnionCases(defId) ?? []
+            let isGenericInstantiation = TypedDefContext.current?.isGenericInstantiation(defId) ?? false
             let newCases = cases.map { unionCase in
                 UnionCase(
                     name: unionCase.name,
@@ -342,52 +296,17 @@ public enum SemaUtils {
                     }
                 )
             }
-            
-            // Recalculate the layout name if this is a generic instantiation
-            // and the name contains generic parameter placeholders
-            var newName = name
-            if isGenericInstantiation && name.contains("Param_") {
-                let parts = name.split(separator: "_")
-                if let firstPart = parts.first {
-                    let baseName = String(firstPart)
-                    var typeArgs: [Type] = []
-                    var i = 1
-                    while i < parts.count {
-                        if parts[i] == "Param" && i + 1 < parts.count {
-                            let paramName = String(parts[i + 1])
-                            if let substitutedType = substitution[paramName] {
-                                typeArgs.append(substitutedType)
-                            } else {
-                                typeArgs.append(.genericParameter(name: paramName))
-                            }
-                            i += 2
-                        } else {
-                            let layoutKey = String(parts[i])
-                            if let builtinType = resolveBuiltinTypeFromLayoutKey(layoutKey) {
-                                typeArgs.append(builtinType)
-                            } else {
-                                typeArgs.append(.genericParameter(name: layoutKey))
-                            }
-                            i += 1
-                        }
-                    }
-                    
-                    if !typeArgs.isEmpty && !typeArgs.contains(where: { $0.containsGenericParameter }) {
-                        newName = generateLayoutName(baseName: baseName, args: typeArgs)
-                    }
-                }
+            let newTypeArguments = TypedDefContext.current?.getTypeArguments(defId)?.map { substituteType($0, substitution: substitution) }
+            if var map = TypedDefContext.current {
+                map.addUnionInfo(
+                    defId: defId,
+                    cases: newCases,
+                    isGenericInstantiation: isGenericInstantiation,
+                    typeArguments: newTypeArguments
+                )
+                TypedDefContext.current = map
             }
-            
-            return .union(decl: UnionDecl(
-                name: newName,
-                defId: decl.defId,
-                modulePath: decl.modulePath,
-                sourceFile: decl.sourceFile,
-                access: decl.access,
-                cases: newCases,
-                isGenericInstantiation: isGenericInstantiation,
-                typeArguments: decl.typeArguments
-            ))
+            return .union(defId: defId)
             
         case .genericStruct(let template, let args):
             let newArgs = args.map { substituteType($0, substitution: substitution) }

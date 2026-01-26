@@ -170,15 +170,15 @@ given [T Any, R [T]Iterator] [T, R]PeekStreamIterator {
     }
 }
 
-// SeparateStreamIterator - inserts separator between elements
-public type [T Any, R [T]Iterator]SeparateStreamIterator(
+// IntersperseStreamIterator - inserts separator between elements
+public type [T Any, R [T]Iterator]IntersperseStreamIterator(
     mut iter R,
     separator T,
     mut next_is_separator Bool,
     mut pending [T]Option
 )
 
-given [T Any, R [T]Iterator] [T, R]SeparateStreamIterator {
+given [T Any, R [T]Iterator] [T, R]IntersperseStreamIterator {
     public next(self ref) [T]Option = {
         // If we need to return separator
         if self.next_is_separator then {
@@ -377,8 +377,8 @@ given [T Any, R [T]Iterator] [T, R]Stream {
     public skip(self, n Int) [T, [T, R]SkipStreamIterator]Stream =
         [T, [T, R]SkipStreamIterator]Stream([T, R]SkipStreamIterator(self.iter, n))
     
-    // Step - take every nth element
-    public step(self, n Int) [T, [T, R]StepStreamIterator]Stream = {
+    // StepBy - take every nth element
+    public step_by(self, n Int) [T, [T, R]StepStreamIterator]Stream = {
         if n < 1 then { panic("step size must be at least 1"); }
         [T, [T, R]StepStreamIterator]Stream([T, R]StepStreamIterator(self.iter, n, true))
     }
@@ -391,9 +391,9 @@ given [T Any, R [T]Iterator] [T, R]Stream {
     public peek(self, fn [T, Void]Func) [T, [T, R]PeekStreamIterator]Stream =
         [T, [T, R]PeekStreamIterator]Stream([T, R]PeekStreamIterator(self.iter, fn))
     
-    // Separate - insert separator between elements
-    public separate(self, v T) [T, [T, R]SeparateStreamIterator]Stream =
-        [T, [T, R]SeparateStreamIterator]Stream([T, R]SeparateStreamIterator(self.iter, v, false, [T]Option.None()))
+    // Intersperse - insert separator between elements
+    public intersperse(self, v T) [T, [T, R]IntersperseStreamIterator]Stream =
+        [T, [T, R]IntersperseStreamIterator]Stream([T, R]IntersperseStreamIterator(self.iter, v, false, [T]Option.None()))
     
     // TakeWhile - take elements while predicate is true
     public take_while(self, fn [T, Bool]Func) [T, [T, R]TakeWhileStreamIterator]Stream =
@@ -451,7 +451,7 @@ given [T Any, R [T]Iterator] [T, R]Stream {
         let mut result = [T]List.new()
         let mut it = self.iter
         while it.next() is .Some(v) then {
-            result.push_back(v)
+            result.push(v)
         }
         result
     }
@@ -487,8 +487,8 @@ given [T Any, R [T]Iterator] [T, R]Stream {
         result
     }
     
-    // At - get element at index
-    public at(self, n Int) [T]Option = {
+    // Get - get element at index
+    public get(self, n Int) [T]Option = {
         if n < 0 then { return [T]Option.None(); }
         let mut it = self.iter
         let mut i = 0
@@ -499,8 +499,8 @@ given [T Any, R [T]Iterator] [T, R]Stream {
         [T]Option.None()
     }
     
-    // Position - find index of first element matching predicate
-    public position(self, fn [T, Bool]Func) [Int]Option = {
+    // IndexOf - find index of first element matching predicate
+    public index_of(self, fn [T, Bool]Func) [Int]Option = {
         let mut it = self.iter
         let mut i = 0
         while it.next() is .Some(v) then {
@@ -522,8 +522,8 @@ given [T Any, R [T]Iterator] [T, R]Stream {
         [U]Option.None()
     }
     
-    // Any - check if any element matches predicate
-    public any(self, fn [T, Bool]Func) Bool = {
+    // AnyMatch - check if any element matches predicate
+    public any_match(self, fn [T, Bool]Func) Bool = {
         let mut it = self.iter
         while it.next() is .Some(v) then {
             if fn(v) then { return true; }
@@ -531,8 +531,8 @@ given [T Any, R [T]Iterator] [T, R]Stream {
         false
     }
     
-    // All - check if all elements match predicate
-    public all(self, fn [T, Bool]Func) Bool = {
+    // AllMatch - check if all elements match predicate
+    public all_match(self, fn [T, Bool]Func) Bool = {
         let mut it = self.iter
         while it.next() is .Some(v) then {
             if not fn(v) then { return false; }
@@ -540,8 +540,8 @@ given [T Any, R [T]Iterator] [T, R]Stream {
         true
     }
     
-    // None - check if no element matches predicate
-    public none(self, fn [T, Bool]Func) Bool = {
+    // NoneMatch - check if no element matches predicate
+    public none_match(self, fn [T, Bool]Func) Bool = {
         let mut it = self.iter
         while it.next() is .Some(v) then {
             if fn(v) then { return false; }
@@ -605,15 +605,6 @@ given [T Equatable, R [T]Iterator] [T, R]Stream {
             if v == value then { return true; }
         }
         false
-    }
-    
-    // Find - find first element equal to value
-    public find(self, value T) [T]Option = {
-        let mut it = self.iter
-        while it.next() is .Some(v) then {
-            if v == value then { return [T]Option.Some(v); }
-        }
-        [T]Option.None()
     }
 }
 

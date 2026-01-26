@@ -63,28 +63,38 @@ public struct TypeSubstitution {
         case .pointer(let elem):
             return .pointer(element: apply(elem))
             
-        case .structure(let decl):
-            // 对于结构体，需要替换成员类型中的类型变量
-            if decl.members.contains(where: { $0.type.containsTypeVariable }) {
-                let newMembers = decl.members.map { (name: $0.name, type: apply($0.type), mutable: $0.mutable) }
-                var newDecl = decl
-                newDecl.members = newMembers
-                return .structure(decl: newDecl)
+        case .structure(let defId):
+            guard let members = TypedDefContext.current?.getStructMembers(defId) else {
+                return type
+            }
+            if members.contains(where: { $0.type.containsTypeVariable }) {
+                let newMembers = members.map { (name: $0.name, type: apply($0.type), mutable: $0.mutable) }
+                if var map = TypedDefContext.current {
+                    let isGeneric = map.isGenericInstantiation(defId) ?? false
+                    let typeArgs = map.getTypeArguments(defId)
+                    map.addStructInfo(defId: defId, members: newMembers, isGenericInstantiation: isGeneric, typeArguments: typeArgs)
+                    TypedDefContext.current = map
+                }
             }
             return type
             
-        case .union(let decl):
-            // 对于联合类型，需要替换 case 参数类型中的类型变量
-            if decl.cases.contains(where: { c in c.parameters.contains { $0.type.containsTypeVariable } }) {
-                let newCases = decl.cases.map { c in
+        case .union(let defId):
+            guard let cases = TypedDefContext.current?.getUnionCases(defId) else {
+                return type
+            }
+            if cases.contains(where: { c in c.parameters.contains { $0.type.containsTypeVariable } }) {
+                let newCases = cases.map { c in
                     UnionCase(
                         name: c.name,
                         parameters: c.parameters.map { (name: $0.name, type: apply($0.type)) }
                     )
                 }
-                var newDecl = decl
-                newDecl.cases = newCases
-                return .union(decl: newDecl)
+                if var map = TypedDefContext.current {
+                    let isGeneric = map.isGenericInstantiation(defId) ?? false
+                    let typeArgs = map.getTypeArguments(defId)
+                    map.addUnionInfo(defId: defId, cases: newCases, isGenericInstantiation: isGeneric, typeArguments: typeArgs)
+                    TypedDefContext.current = map
+                }
             }
             return type
             

@@ -90,6 +90,8 @@ public class TypeResolver: CompilerPass {
         let astNodes = moduleResolverOutput.astNodes
         let nodeSourceInfoList = moduleResolverOutput.nodeSourceInfoList
         let defIdMap = nameCollectorOutput.defIdMap
+
+        DefIdContext.current = defIdMap
         
         // 重置状态
         typedDefMap = TypedDefMap()
@@ -112,6 +114,8 @@ public class TypeResolver: CompilerPass {
 
         // Pass 2: 注册 given 方法签名到 TypeChecker（用于后续体检查）
         if let checker {
+            // Ensure TypedDefContext points to this pass's map for updates
+            TypedDefContext.current = typedDefMap
             let declarations = astNodes.filter { node in
                 if case .usingDeclaration = node { return false }
                 return true
@@ -126,17 +130,18 @@ public class TypeResolver: CompilerPass {
                 checker.currentSpan = node.span
                 try checker.collectGivenSignatures(node)
             }
+            // Sync any updates from the checker back into this pass's map
+            if let updatedMap = TypedDefContext.current {
+                typedDefMap = updatedMap
+            }
         }
         
         // 第二步：构建模块符号表（合并原 Pass 2.5 的功能）
         try buildModuleSymbols(from: astNodes, nodeSourceInfoList: nodeSourceInfoList, defIdMap: defIdMap)
 
         if let checker {
-            let declarations = astNodes.filter { node in
-                if case .usingDeclaration = node { return false }
-                return true
-            }
-            try checker.buildModuleSymbols(from: declarations)
+            // Use full node list to keep nodeSourceInfoMap indices aligned
+            try checker.buildModuleSymbols(from: astNodes)
         }
         
         // 第三步：将收集的信息添加到 TypedDefMap 和 SymbolTable
@@ -615,27 +620,15 @@ public class TypeResolver: CompilerPass {
                 let placeholderType: Type
                 switch signature.kind {
                 case .structure:
-                    let decl = StructDecl(
-                        name: signature.name,
-                        defId: defId,
-                        modulePath: signature.modulePath,
-                        sourceFile: signature.sourceFile,
-                        access: signature.access,
-                        members: [],
-                        isGenericInstantiation: false
-                    )
-                    placeholderType = .structure(decl: decl)
+                    placeholderType = .structure(defId: defId)
+                    if typedDefMap.getStructMembers(defId) == nil {
+                        typedDefMap.addStructInfo(defId: defId, members: [], isGenericInstantiation: false, typeArguments: nil)
+                    }
                 case .union:
-                    let decl = UnionDecl(
-                        name: signature.name,
-                        defId: defId,
-                        modulePath: signature.modulePath,
-                        sourceFile: signature.sourceFile,
-                        access: signature.access,
-                        cases: [],
-                        isGenericInstantiation: false
-                    )
-                    placeholderType = .union(decl: decl)
+                    placeholderType = .union(defId: defId)
+                    if typedDefMap.getUnionCases(defId) == nil {
+                        typedDefMap.addUnionInfo(defId: defId, cases: [], isGenericInstantiation: false, typeArguments: nil)
+                    }
                 }
                 
                 typedDefMap.addType(defId: defId, type: placeholderType)

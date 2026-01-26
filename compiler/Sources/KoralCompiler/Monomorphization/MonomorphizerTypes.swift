@@ -42,16 +42,9 @@ extension Monomorphizer {
         let layoutName = "\(template.name)_\(argLayoutKeys)"
         
         // Create placeholder for recursion detection
-        let placeholderDecl = StructDecl(
-            name: layoutName,
-            defId: getOrAllocateTypeDefId(name: layoutName, kind: .structure),
-            modulePath: [],
-            sourceFile: "",
-            access: .default,
-            members: [],
-            isGenericInstantiation: true
-        )
-        let placeholder = Type.structure(decl: placeholderDecl)
+        let defId = getOrAllocateTypeDefId(name: layoutName, kind: .structure)
+        typedDefMap.addStructInfo(defId: defId, members: [], isGenericInstantiation: true, typeArguments: args)
+        let placeholder = Type.structure(defId: defId)
         instantiatedTypes[key] = placeholder
 
         // Resolve members with concrete types
@@ -81,16 +74,8 @@ extension Monomorphizer {
         }
         
         // Create the concrete type
-        let specificDecl = StructDecl(
-            name: layoutName,
-            defId: getOrAllocateTypeDefId(name: layoutName, kind: .structure),
-            modulePath: [],
-            sourceFile: "",
-            access: .default,
-            members: resolvedMembers,
-            isGenericInstantiation: true
-        )
-        let specificType = Type.structure(decl: specificDecl)
+        typedDefMap.addStructInfo(defId: defId, members: resolvedMembers, isGenericInstantiation: true, typeArguments: args)
+        let specificType = Type.structure(defId: defId)
         instantiatedTypes[key] = specificType
         layoutToTemplateInfo[layoutName] = (base: template.name, args: args)
         
@@ -161,16 +146,9 @@ extension Monomorphizer {
         let layoutName = "\(template.name)_\(argLayoutKeys)"
         
         // Create placeholder for recursion
-        let placeholderDecl = UnionDecl(
-            name: layoutName,
-            defId: getOrAllocateTypeDefId(name: layoutName, kind: .union),
-            modulePath: [],
-            sourceFile: "",
-            access: .default,
-            cases: [],
-            isGenericInstantiation: true
-        )
-        let placeholder = Type.union(decl: placeholderDecl)
+        let defId = getOrAllocateTypeDefId(name: layoutName, kind: .union)
+        typedDefMap.addUnionInfo(defId: defId, cases: [], isGenericInstantiation: true, typeArguments: args)
+        let placeholder = Type.union(defId: defId)
         instantiatedTypes[key] = placeholder
         
         // Resolve cases with concrete types
@@ -203,16 +181,8 @@ extension Monomorphizer {
         }
         
         // Create the concrete type
-        let specificDecl = UnionDecl(
-            name: layoutName,
-            defId: getOrAllocateTypeDefId(name: layoutName, kind: .union),
-            modulePath: [],
-            sourceFile: "",
-            access: .default,
-            cases: resolvedCases,
-            isGenericInstantiation: true
-        )
-        let specificType = Type.union(decl: specificDecl)
+        typedDefMap.addUnionInfo(defId: defId, cases: resolvedCases, isGenericInstantiation: true, typeArguments: args)
+        let specificType = Type.union(defId: defId)
         instantiatedTypes[key] = specificType
         layoutToTemplateInfo[layoutName] = (base: template.name, args: args)
 

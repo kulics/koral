@@ -121,15 +121,17 @@ extension Monomorphizer {
         // Derive the structure name from the base type
         let structureName: String
         switch resolvedBaseType {
-        case .structure(let decl):
+        case .structure(let defId):
+            let name = DefIdContext.current?.getName(defId) ?? ""
             // Extract base name from mangled name (e.g., "List_I" -> "List")
-            structureName = decl.name.split(separator: "_").first.map(String.init) ?? decl.name
+            structureName = name.split(separator: "_").first.map(String.init) ?? name
         case .genericStruct(let templateName, _):
             structureName = templateName
         case .genericUnion(let templateName, _):
             structureName = templateName
-        case .union(let decl):
-            structureName = decl.name.split(separator: "_").first.map(String.init) ?? decl.name
+        case .union(let defId):
+            let name = DefIdContext.current?.getName(defId) ?? ""
+            structureName = name.split(separator: "_").first.map(String.init) ?? name
         case .pointer(_):
             structureName = "Pointer"
         default:
@@ -329,11 +331,57 @@ extension Monomorphizer {
         case .reference(let inner):
             // For reference types, look up the method on the inner type
             return try lookupConcreteMethodSymbol(on: inner, name: name, methodTypeArgs: methodTypeArgs)
+
+        case .genericStruct(let template, let args):
+            let resolvedArgs = args.map { resolveParameterizedType($0) }
+            if resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+                return nil
+            }
+            if let extensions = input.genericTemplates.extensionMethods[template],
+               let ext = extensions.first(where: { $0.method.name == name })
+            {
+                let resolvedBase = resolveParameterizedType(selfType)
+                return try instantiateExtensionMethodFromEntry(
+                    baseType: resolvedBase,
+                    structureName: template,
+                    genericArgs: resolvedArgs,
+                    methodTypeArgs: methodTypeArgs,
+                    methodInfo: ext
+                )
+            }
+            let resolved = resolveParameterizedType(selfType)
+            if resolved != selfType {
+                return try lookupConcreteMethodSymbol(on: resolved, name: name, methodTypeArgs: methodTypeArgs)
+            }
+            return nil
+
+        case .genericUnion(let template, let args):
+            let resolvedArgs = args.map { resolveParameterizedType($0) }
+            if resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+                return nil
+            }
+            if let extensions = input.genericTemplates.extensionMethods[template],
+               let ext = extensions.first(where: { $0.method.name == name })
+            {
+                let resolvedBase = resolveParameterizedType(selfType)
+                return try instantiateExtensionMethodFromEntry(
+                    baseType: resolvedBase,
+                    structureName: template,
+                    genericArgs: resolvedArgs,
+                    methodTypeArgs: methodTypeArgs,
+                    methodInfo: ext
+                )
+            }
+            let resolved = resolveParameterizedType(selfType)
+            if resolved != selfType {
+                return try lookupConcreteMethodSymbol(on: resolved, name: name, methodTypeArgs: methodTypeArgs)
+            }
+            return nil
             
-        case .structure(let decl):
-            let typeName = decl.name
-            let qualifiedTypeName = decl.qualifiedName
-            let isGen = decl.isGenericInstantiation
+        case .structure(let defId):
+            let typeName = DefIdContext.current?.getName(defId) ?? ""
+            let qualifiedTypeName = DefIdContext.current?.getQualifiedName(defId) ?? typeName
+            let isGen = typedDefMap.isGenericInstantiation(defId) ?? false
             if let methods = extensionMethods[typeName], let sym = methods[name] {
                 // Generate mangled name for the method (include method type args if present)
                 // Use qualifiedTypeName to include module path
@@ -341,40 +389,35 @@ extension Monomorphizer {
                 let mangledName = methodTypeArgs.isEmpty ? "\(qualifiedTypeName)_\(name)" : "\(qualifiedTypeName)_\(name)_\(methodArgLayoutKeys)"
                 return copySymbolWithNewDefId(sym, newName: mangledName, newModulePath: [])
             }
-            if isGen, let info = layoutToTemplateInfo[typeName] {
-                if let extensions = input.genericTemplates.extensionMethods[info.base] {
-                    if let ext = extensions.first(where: { $0.method.name == name }) {
-                        do {
-                            let result = try instantiateExtensionMethodFromEntry(
-                                baseType: selfType,
-                                structureName: info.base,
-                                genericArgs: info.args,
-                                methodTypeArgs: methodTypeArgs,
-                                methodInfo: ext
-                            )
-                            return result
-                        } catch {
-                            return nil
-                        }
-                    }
+            // Try generic extension methods even if isGenericInstantiation is missing
+            if let baseName = typeName.split(separator: "_").first.map(String.init),
+               let extensions = input.genericTemplates.extensionMethods[baseName],
+               let ext = extensions.first(where: { $0.method.name == name })
+            {
+                if let info = layoutToTemplateInfo[typeName] {
+                    return try instantiateExtensionMethodFromEntry(
+                        baseType: selfType,
+                        structureName: info.base,
+                        genericArgs: info.args,
+                        methodTypeArgs: methodTypeArgs,
+                        methodInfo: ext
+                    )
                 }
-            }
-            // If not found in layoutToTemplateInfo, try to extract base name from the type name
-            // This handles cases where the type was instantiated but not yet registered in layoutToTemplateInfo
-            if isGen {
-                // Extract base name from mangled name (e.g., "List_I" -> "List")
-                let baseName = typeName.split(separator: "_").first.map(String.init) ?? typeName
-                if let extensions = input.genericTemplates.extensionMethods[baseName],
-                   let ext = extensions.first(where: { $0.method.name == name })
-                {
-                    // Try to extract type args from the type's members
-                    // For now, use the decl's members to reconstruct type args
+                if let typeArgs = typedDefMap.getTypeArguments(defId), typeArgs.count == ext.typeParams.count {
+                    layoutToTemplateInfo[typeName] = (base: baseName, args: typeArgs)
+                    return try instantiateExtensionMethodFromEntry(
+                        baseType: selfType,
+                        structureName: baseName,
+                        genericArgs: typeArgs,
+                        methodTypeArgs: methodTypeArgs,
+                        methodInfo: ext
+                    )
+                }
+                if isGen || typeName.contains("_") {
                     var typeArgs: [Type] = []
-                    if let _ = input.genericTemplates.structTemplates[baseName] {
-                        // Extract type args from the layout name suffix
-                        let suffix = String(typeName.dropFirst(baseName.count + 1)) // Remove "BaseName_"
+                    if input.genericTemplates.structTemplates[baseName] != nil {
+                        let suffix = String(typeName.dropFirst(baseName.count + 1))
                         let argLayoutKeys = suffix.split(separator: "_").map(String.init)
-                        // Try to reconstruct types from layout keys
                         for key in argLayoutKeys {
                             if let builtinType = SemaUtils.resolveBuiltinType(key) {
                                 typeArgs.append(builtinType)
@@ -388,23 +431,19 @@ extension Monomorphizer {
                                 typeArgs.append(.float32)
                             } else if key == "F64" {
                                 typeArgs.append(.float64)
-                            } else {
-                                // Assume it's a struct type
-                                let structDecl = StructDecl(
-                                    name: key,
-                                    defId: getOrAllocateTypeDefId(name: key, kind: .structure),
-                                    modulePath: [],
-                                    sourceFile: "",
-                                    access: .default,
+                            } else if !key.isEmpty {
+                                let defId = getOrAllocateTypeDefId(name: key, kind: .structure)
+                                typedDefMap.addStructInfo(
+                                    defId: defId,
                                     members: [],
-                                    isGenericInstantiation: key.contains("_")
+                                    isGenericInstantiation: key.contains("_"),
+                                    typeArguments: nil
                                 )
-                                typeArgs.append(.structure(decl: structDecl))
+                                typeArgs.append(.structure(defId: defId))
                             }
                         }
                     }
                     if typeArgs.count == ext.typeParams.count {
-                        // Register in layoutToTemplateInfo for future lookups
                         layoutToTemplateInfo[typeName] = (base: baseName, args: typeArgs)
                         return try instantiateExtensionMethodFromEntry(
                             baseType: selfType,
@@ -418,10 +457,10 @@ extension Monomorphizer {
             }
             return nil
             
-        case .union(let decl):
-            let typeName = decl.name
-            let qualifiedTypeName = decl.qualifiedName
-            let isGen = decl.isGenericInstantiation
+        case .union(let defId):
+            let typeName = DefIdContext.current?.getName(defId) ?? ""
+            let qualifiedTypeName = DefIdContext.current?.getQualifiedName(defId) ?? typeName
+            let isGen = typedDefMap.isGenericInstantiation(defId) ?? false
             if let methods = extensionMethods[typeName], let sym = methods[name] {
                 // Generate mangled name for the method (include method type args if present)
                 // Use qualifiedTypeName to include module path
@@ -429,10 +468,11 @@ extension Monomorphizer {
                 let mangledName = methodTypeArgs.isEmpty ? "\(qualifiedTypeName)_\(name)" : "\(qualifiedTypeName)_\(name)_\(methodArgLayoutKeys)"
                 return copySymbolWithNewDefId(sym, newName: mangledName, newModulePath: [])
             }
-            if isGen, let info = layoutToTemplateInfo[typeName] {
-                if let extensions = input.genericTemplates.extensionMethods[info.base],
-                   let ext = extensions.first(where: { $0.method.name == name })
-                {
+            if let baseName = typeName.split(separator: "_").first.map(String.init),
+               let extensions = input.genericTemplates.extensionMethods[baseName],
+               let ext = extensions.first(where: { $0.method.name == name })
+            {
+                if let info = layoutToTemplateInfo[typeName] {
                     return try instantiateExtensionMethodFromEntry(
                         baseType: selfType,
                         structureName: info.base,
@@ -440,6 +480,57 @@ extension Monomorphizer {
                         methodTypeArgs: methodTypeArgs,
                         methodInfo: ext
                     )
+                }
+                if let typeArgs = typedDefMap.getTypeArguments(defId), typeArgs.count == ext.typeParams.count {
+                    layoutToTemplateInfo[typeName] = (base: baseName, args: typeArgs)
+                    return try instantiateExtensionMethodFromEntry(
+                        baseType: selfType,
+                        structureName: baseName,
+                        genericArgs: typeArgs,
+                        methodTypeArgs: methodTypeArgs,
+                        methodInfo: ext
+                    )
+                }
+                if isGen || typeName.contains("_") {
+                    var typeArgs: [Type] = []
+                    if input.genericTemplates.unionTemplates[baseName] != nil {
+                        let suffix = String(typeName.dropFirst(baseName.count + 1))
+                        let argLayoutKeys = suffix.split(separator: "_").map(String.init)
+                        for key in argLayoutKeys {
+                            if let builtinType = SemaUtils.resolveBuiltinType(key) {
+                                typeArgs.append(builtinType)
+                            } else if key == "I" {
+                                typeArgs.append(.int)
+                            } else if key == "U" {
+                                typeArgs.append(.uint)
+                            } else if key == "B" {
+                                typeArgs.append(.bool)
+                            } else if key == "F32" {
+                                typeArgs.append(.float32)
+                            } else if key == "F64" {
+                                typeArgs.append(.float64)
+                            } else if !key.isEmpty {
+                                let defId = getOrAllocateTypeDefId(name: key, kind: .structure)
+                                typedDefMap.addStructInfo(
+                                    defId: defId,
+                                    members: [],
+                                    isGenericInstantiation: key.contains("_"),
+                                    typeArguments: nil
+                                )
+                                typeArgs.append(.structure(defId: defId))
+                            }
+                        }
+                    }
+                    if typeArgs.count == ext.typeParams.count {
+                        layoutToTemplateInfo[typeName] = (base: baseName, args: typeArgs)
+                        return try instantiateExtensionMethodFromEntry(
+                            baseType: selfType,
+                            structureName: baseName,
+                            genericArgs: typeArgs,
+                            methodTypeArgs: methodTypeArgs,
+                            methodInfo: ext
+                        )
+                    }
                 }
             }
             return nil

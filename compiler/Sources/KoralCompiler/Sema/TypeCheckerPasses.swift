@@ -138,7 +138,9 @@ extension TypeChecker {
       return TypeCheckerOutput(
         program: program,
         instantiationRequests: bodyCheckerOutput.instantiationRequests,
-        genericTemplates: registry
+        genericTemplates: registry,
+        defIdMap: defIdMap,
+        typedDefMap: typeResolverOutput?.typedDefMap ?? TypedDefMap()
       )
     }
   }
@@ -213,6 +215,9 @@ extension TypeChecker {
     for (index, decl) in declarations.enumerated() {
       guard let sourceInfo = nodeSourceInfoMap[index] else { continue }
       let modulePath = sourceInfo.modulePath
+      currentSourceFile = sourceInfo.sourceFile
+      currentModulePath = sourceInfo.modulePath
+      currentSpan = decl.span
       
       // Skip root module (empty path) - we only care about submodules
       if modulePath.isEmpty { continue }
@@ -444,22 +449,14 @@ extension TypeChecker {
         currentScope.defineGenericUnionTemplate(name, template: template)
       } else {
         // Register placeholder for non-generic union (allows recursive references)
-        let decl = UnionDecl(
+        let defId = getOrAllocateTypeDefId(
           name: name,
-          defId: getOrAllocateTypeDefId(
-            name: name,
-            kind: .union,
-            access: access,
-            modulePath: currentModulePath,
-            sourceFile: currentSourceFile
-          ),
-          modulePath: currentModulePath,
-          sourceFile: currentSourceFile,
+          kind: .union,
           access: access,
-          cases: [],
-          isGenericInstantiation: false
+          modulePath: currentModulePath,
+          sourceFile: currentSourceFile
         )
-        let placeholder = Type.union(decl: decl)
+        let placeholder = Type.union(defId: defId)
         if isPrivate {
           // For private types, use file-qualified storage
           try currentScope.definePrivateType(name, sourceFile: currentSourceFile, type: placeholder)
@@ -487,22 +484,14 @@ extension TypeChecker {
         currentScope.defineGenericStructTemplate(name, template: template)
       } else {
         // Register placeholder for non-generic struct (allows recursive references)
-        let decl = StructDecl(
+        let defId = getOrAllocateTypeDefId(
           name: name,
-          defId: getOrAllocateTypeDefId(
-            name: name,
-            kind: .structure,
-            access: access,
-            modulePath: currentModulePath,
-            sourceFile: currentSourceFile
-          ),
-          modulePath: currentModulePath,
-          sourceFile: currentSourceFile,
+          kind: .structure,
           access: access,
-          members: [],
-          isGenericInstantiation: false
+          modulePath: currentModulePath,
+          sourceFile: currentSourceFile
         )
-        let placeholder = Type.structure(decl: decl)
+        let placeholder = Type.structure(defId: defId)
         if isPrivate {
           // For private types, use file-qualified storage
           try currentScope.definePrivateType(name, sourceFile: currentSourceFile, type: placeholder)
@@ -584,22 +573,14 @@ extension TypeChecker {
         case "Void": type = .void
         case "Never": type = .never
         default:
-          let decl = StructDecl(
+          let defId = getOrAllocateTypeDefId(
             name: name,
-            defId: getOrAllocateTypeDefId(
-              name: name,
-              kind: .structure,
-              access: .default,
-              modulePath: currentModulePath,
-              sourceFile: currentSourceFile
-            ),
-            modulePath: currentModulePath,
-            sourceFile: currentSourceFile,
+            kind: .structure,
             access: .default,
-            members: [],
-            isGenericInstantiation: false
+            modulePath: currentModulePath,
+            sourceFile: currentSourceFile
           )
-          type = .structure(decl: decl)
+          type = .structure(defId: defId)
         }
         try currentScope.defineType(name, type: type)
       }
@@ -748,10 +729,10 @@ extension TypeChecker {
         // Non-generic given - collect method signatures for forward reference support
         let type = try resolveTypeNode(typeNode)
         let typeName: String
-        if case .structure(let decl) = type {
-          typeName = decl.name
-        } else if case .union(let decl) = type {
-          typeName = decl.name
+        if case .structure(let defId) = type {
+          typeName = DefIdContext.current?.getName(defId) ?? ""
+        } else if case .union(let defId) = type {
+          typeName = DefIdContext.current?.getName(defId) ?? ""
         } else if case .int = type {
           typeName = type.description
         } else if case .int8 = type {
@@ -843,10 +824,10 @@ extension TypeChecker {
         
         let typeName: String
         switch type {
-        case .structure(let decl):
-          typeName = decl.name
-        case .union(let decl):
-          typeName = decl.name
+        case .structure(let defId):
+          typeName = DefIdContext.current?.getName(defId) ?? ""
+        case .union(let defId):
+          typeName = DefIdContext.current?.getName(defId) ?? ""
         case .int, .int8, .int16, .int32, .int64,
              .uint, .uint8, .uint16, .uint32, .uint64,
              .float32, .float64,
@@ -911,21 +892,14 @@ extension TypeChecker {
             kind: param.mutable ? .variable(.MutableValue) : .variable(.Value))
         }
         
-        // Create a new Type with resolved members and overwrite the placeholder
-        // (StructDecl is now a struct, so we can't mutate it in place)
-        if case .structure(let decl) = placeholder {
-          let newDecl = StructDecl(
-            id: decl.id,  // Keep the same UUID for identity
-            name: decl.name,
-            defId: decl.defId,
-            modulePath: decl.modulePath,
-            sourceFile: decl.sourceFile,
-            access: decl.access,
-            members: params.map { (name: $0.name, type: $0.type, mutable: $0.isMutable()) },
-            isGenericInstantiation: decl.isGenericInstantiation,
-            typeArguments: decl.typeArguments
-          )
-          let resolvedType = Type.structure(decl: newDecl)
+        // Update typed def info and overwrite the placeholder
+        if case .structure(let defId) = placeholder {
+          let members = params.map { (name: $0.name, type: $0.type, mutable: $0.isMutable()) }
+          if var map = TypedDefContext.current {
+            map.addStructInfo(defId: defId, members: members, isGenericInstantiation: false, typeArguments: nil)
+            TypedDefContext.current = map
+          }
+          let resolvedType = Type.structure(defId: defId)
           if isPrivate {
             currentScope.overwritePrivateType(name, sourceFile: currentSourceFile, type: resolvedType)
           } else {
@@ -960,21 +934,13 @@ extension TypeChecker {
           unionCases.append(UnionCase(name: c.name, parameters: params))
         }
         
-        // Create a new Type with resolved cases and overwrite the placeholder
-        // (UnionDecl is now a struct, so we can't mutate it in place)
-        if case .union(let decl) = placeholder {
-          let newDecl = UnionDecl(
-            id: decl.id,  // Keep the same UUID for identity
-            name: decl.name,
-            defId: decl.defId,
-            modulePath: decl.modulePath,
-            sourceFile: decl.sourceFile,
-            access: decl.access,
-            cases: unionCases,
-            isGenericInstantiation: decl.isGenericInstantiation,
-            typeArguments: decl.typeArguments
-          )
-          let resolvedType = Type.union(decl: newDecl)
+        // Update typed def info and overwrite the placeholder
+        if case .union(let defId) = placeholder {
+          if var map = TypedDefContext.current {
+            map.addUnionInfo(defId: defId, cases: unionCases, isGenericInstantiation: false, typeArguments: nil)
+            TypedDefContext.current = map
+          }
+          let resolvedType = Type.union(defId: defId)
           if isPrivate {
             currentScope.overwritePrivateType(name, sourceFile: currentSourceFile, type: resolvedType)
           } else {
@@ -1074,8 +1040,8 @@ extension TypeChecker {
         : currentScope.lookupType(name)!
       
       var unionCases: [UnionCase] = []
-      if case .union(let decl) = type {
-        unionCases = decl.cases
+      if case .union(let defId) = type {
+        unionCases = TypedDefContext.current?.getUnionCases(defId) ?? []
       }
       
       return .globalUnionDeclaration(
@@ -1385,10 +1351,10 @@ extension TypeChecker {
 
       let type = try resolveTypeNode(typeNode)
       let typeName: String
-      if case .structure(let decl) = type {
-        typeName = decl.name
-      } else if case .union(let decl) = type {
-        typeName = decl.name
+      if case .structure(let defId) = type {
+        typeName = DefIdContext.current?.getName(defId) ?? ""
+      } else if case .union(let defId) = type {
+        typeName = DefIdContext.current?.getName(defId) ?? ""
       } else if case .int = type {
         typeName = type.description
       } else if case .int8 = type {
@@ -1568,11 +1534,11 @@ extension TypeChecker {
       let typeName: String
       let shouldEmitGiven: Bool
       switch type {
-      case .structure(let decl):
-        typeName = decl.name
+      case .structure(let defId):
+        typeName = DefIdContext.current?.getName(defId) ?? ""
         shouldEmitGiven = true
-      case .union(let decl):
-        typeName = decl.name
+      case .union(let defId):
+        typeName = DefIdContext.current?.getName(defId) ?? ""
         shouldEmitGiven = true
       case .int, .int8, .int16, .int32, .int64,
         .uint, .uint8, .uint16, .uint32, .uint64,
@@ -1692,22 +1658,14 @@ extension TypeChecker {
         if let existingType = currentScope.lookupType(name) {
           type = existingType
         } else {
-          let decl = StructDecl(
+          let defId = getOrAllocateTypeDefId(
             name: name,
-            defId: getOrAllocateTypeDefId(
-              name: name,
-              kind: .structure,
-              access: access,
-              modulePath: currentModulePath,
-              sourceFile: currentSourceFile
-            ),
-            modulePath: currentModulePath,
-            sourceFile: currentSourceFile,
+            kind: .structure,
             access: access,
-            members: [],
-            isGenericInstantiation: false
+            modulePath: currentModulePath,
+            sourceFile: currentSourceFile
           )
-          type = .structure(decl: decl)
+          type = .structure(defId: defId)
         }
         let dummySymbol = makeGlobalSymbol(name: name, type: type, kind: .variable(.Value), access: access)
         return .globalStructDeclaration(identifier: dummySymbol, parameters: [])

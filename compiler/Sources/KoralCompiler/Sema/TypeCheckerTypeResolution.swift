@@ -213,13 +213,63 @@ extension TypeChecker {
       // Otherwise resolve as a regular type
       return try resolveTypeNode(node)
       
+    case .reference(let inner):
+      let base = try resolveTypeNodeWithSubstitution(inner, substitution: substitution)
+      return .reference(inner: base)
+      
     case .generic(let base, let args):
       let resolvedArgs = try args.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
-      // Create a generic type
+      
+      // Special case: Pointer<T>
+      if base == "Pointer", resolvedArgs.count == 1 {
+        return .pointer(element: resolvedArgs[0])
+      }
+      
+      if currentScope.lookupGenericStructTemplate(base) != nil {
+        return .genericStruct(template: base, args: resolvedArgs)
+      }
+      if currentScope.lookupGenericUnionTemplate(base) != nil {
+        return .genericUnion(template: base, args: resolvedArgs)
+      }
+      
+      // Fallback to generic struct if template is unresolved (will be caught later)
       return .genericStruct(template: base, args: resolvedArgs)
       
-    default:
+    case .functionType(let paramTypes, let returnType):
+      let resolvedParamTypes = try paramTypes.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
+      let resolvedReturnType = try resolveTypeNodeWithSubstitution(returnType, substitution: substitution)
+      let parameters = resolvedParamTypes.map { Parameter(type: $0, kind: .byVal) }
+      return .function(parameters: parameters, returns: resolvedReturnType)
+      
+    case .moduleQualified(let moduleName, let typeName):
+      _ = moduleName
+      // If substitution has an override for the simple name, use it
+      if let substitutedType = substitution[typeName] {
+        return substitutedType
+      }
       return try resolveTypeNode(node)
+      
+    case .moduleQualifiedGeneric(let moduleName, let baseName, let args):
+      _ = moduleName
+      let resolvedArgs = try args.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
+      
+      // Try to resolve against templates (module visibility is checked in resolveTypeNode)
+      if currentScope.lookupGenericStructTemplate(baseName) != nil {
+        return .genericStruct(template: baseName, args: resolvedArgs)
+      }
+      if currentScope.lookupGenericUnionTemplate(baseName) != nil {
+        return .genericUnion(template: baseName, args: resolvedArgs)
+      }
+      
+      // Fallback to regular resolution to surface proper diagnostics
+      return try resolveTypeNode(node)
+      
+    case .inferredSelf:
+      if let substitutedType = substitution["Self"] {
+        return substitutedType
+      }
+      return try resolveTypeNode(node)
+      
     }
   }
   
@@ -357,15 +407,15 @@ extension TypeChecker {
   /// without knowing the method type arguments.
   func checkMethodExists(on selfType: Type, name: String) throws -> Bool {
     switch selfType {
-    case .structure(let decl):
-      let typeName = decl.name
+    case .structure(let defId):
+      let typeName = DefIdContext.current?.getName(defId) ?? ""
       if let methods = extensionMethods[typeName], methods[name] != nil {
         return true
       }
       return false
 
-    case .union(let decl):
-      let typeName = decl.name
+    case .union(let defId):
+      let typeName = DefIdContext.current?.getName(defId) ?? ""
       if let methods = extensionMethods[typeName], methods[name] != nil {
         return true
       }
@@ -568,8 +618,9 @@ extension TypeChecker {
       var methodFound = false
       
       switch structType {
-      case .structure(let decl):
-        if let methods = extensionMethods[decl.name], methods[methodName] != nil {
+      case .structure(let defId):
+        let typeName = DefIdContext.current?.getName(defId) ?? ""
+        if let methods = extensionMethods[typeName], methods[methodName] != nil {
           methodFound = true
         }
       case .genericStruct(let template, _):
@@ -613,8 +664,8 @@ extension TypeChecker {
 
   func isStringType(_ type: Type) -> Bool {
     switch type {
-    case .structure(let decl):
-      return decl.name == "String"
+    case .structure(let defId):
+      return DefIdContext.current?.getName(defId) == "String"
     default:
       return false
     }
@@ -638,8 +689,8 @@ extension TypeChecker {
   
   /// Check if a type is the Rune struct type.
   func isRuneType(_ type: Type) -> Bool {
-    if case .structure(let decl) = type {
-      return decl.name == "Rune"
+    if case .structure(let defId) = type {
+      return DefIdContext.current?.getName(defId) == "Rune"
     }
     return false
   }
@@ -671,8 +722,9 @@ extension TypeChecker {
       if let cp = singleRuneCodePoint(from: value) {
         // Construct Rune(value) using typeConstruction
         // We need to get the Rune type's symbol
-        if case .structure(let decl) = expected {
-          let runeSymbol = makeLocalSymbol(name: decl.name, type: expected, kind: .type)
+        if case .structure(let defId) = expected {
+          let name = DefIdContext.current?.getName(defId) ?? "Rune"
+          let runeSymbol = makeLocalSymbol(name: name, type: expected, kind: .type)
           return .typeConstruction(
             identifier: runeSymbol,
             typeArgs: nil,

@@ -77,6 +77,9 @@ public class BodyChecker: CompilerPass {
         let nameCollectorOutput = typeResolverOutput.nameCollectorOutput
         let moduleResolverOutput = nameCollectorOutput.moduleResolverOutput
         let astNodes = moduleResolverOutput.astNodes
+
+        DefIdContext.current = nameCollectorOutput.defIdMap
+        TypedDefContext.current = typeResolverOutput.typedDefMap
         
         // 重置状态
         typedDeclarations = []
@@ -97,13 +100,18 @@ public class BodyChecker: CompilerPass {
             checker.currentSourceFile = sourceInfo?.sourceFile ?? checker.currentFileName
             checker.currentModulePath = sourceInfo?.modulePath ?? []
             checker.currentSpan = decl.span
+            
             do {
-                if let typedDecl = try checker.checkGlobalDeclaration(decl) {
+                let result = try checker.checkGlobalDeclaration(decl)
+                
+                if let typedDecl = result {
                     typedDeclarations.append(typedDecl)
                 }
             } catch let error as SemanticError {
                 try? checker.handleError(error)
                 continue
+            } catch {
+                throw error
             }
         }
         

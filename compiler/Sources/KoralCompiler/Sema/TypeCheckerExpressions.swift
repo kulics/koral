@@ -123,11 +123,13 @@ extension TypeChecker {
       guard let info = currentScope.lookupWithInfo(name, sourceFile: currentSourceFile) else {
         throw SemanticError.undefinedVariable(name)
       }
+
+      let isLocalSymbol = currentScope.lookupWithInfoLocal(name, sourceFile: currentSourceFile) != nil
       
       // 判断是否是全局符号（需要模块路径前缀）
       // 局部变量和参数：modulePath 为空且 sourceFile 为空
       // 全局符号：有 modulePath 或有 sourceFile（private 符号）
-      let isGlobalSymbol = !info.modulePath.isEmpty || info.isPrivate
+      let isGlobalSymbol = !info.modulePath.isEmpty || info.isPrivate || info.sourceFile != nil
       let symbolModulePath = isGlobalSymbol ? (info.modulePath.isEmpty ? currentModulePath : info.modulePath) : []
       let symbolSourceFile = info.isPrivate ? (info.sourceFile ?? currentSourceFile) : ""
       
@@ -157,12 +159,28 @@ extension TypeChecker {
       
       // 为符号分配 DefId
       let defKind: DefKind = currentScope.isFunction(name, sourceFile: currentSourceFile) ? .function : .variable
-      let defId = defIdMap.allocate(
-        modulePath: symbolModulePath,
-        name: name,
-        kind: defKind,
-        sourceFile: symbolSourceFile
-      )
+      let defId: DefId
+      let shouldAllocateLocal = isLocalSymbol && info.modulePath.isEmpty && !info.isPrivate
+      if shouldAllocateLocal {
+        defId = defIdMap.allocate(
+          modulePath: [],
+          name: name,
+          kind: defKind,
+          sourceFile: ""
+        )
+      } else {
+        let lookupSourceFile = info.isPrivate ? (info.sourceFile ?? currentSourceFile) : nil
+        defId = defIdMap.lookup(
+          modulePath: symbolModulePath,
+          name: name,
+          sourceFile: lookupSourceFile
+        ) ?? defIdMap.allocate(
+          modulePath: symbolModulePath,
+          name: name,
+          kind: defKind,
+          sourceFile: symbolSourceFile
+        )
+      }
       
       let symbol = Symbol(
         name: name,
@@ -591,9 +609,10 @@ extension TypeChecker {
         // Look up the type in the module's public types
         if let type = moduleInfo.publicTypes[typeName] {
           // Handle concrete struct types
-          if case .structure(let decl) = type {
+          if case .structure(let defId) = type {
+            let typeName = DefIdContext.current?.getName(defId) ?? ""
             // Look up static method on the struct using simple name (how extensionMethods is keyed)
-            if let methods = extensionMethods[decl.name], let methodSym = methods[methodName] {
+            if let methods = extensionMethods[typeName], let methodSym = methods[methodName] {
               // Check if it's a static method (no self parameter or first param is not self)
               let isStatic: Bool
               if case .function(let params, _) = methodSym.type {
@@ -646,9 +665,10 @@ extension TypeChecker {
           }
           
           // Handle concrete union types
-          if case .union(let decl) = type {
+          if case .union(let defId) = type {
+            let unionCases = TypedDefContext.current?.getUnionCases(defId) ?? []
             // Check if it's a union case constructor
-            if let c = decl.cases.first(where: { $0.name == methodName }) {
+            if let c = unionCases.first(where: { $0.name == methodName }) {
               let params = c.parameters.map { Parameter(type: $0.type, kind: .byVal) }
               
               if arguments.count != params.count {
@@ -674,7 +694,8 @@ extension TypeChecker {
             }
             
             // Look up static method on the union using simple name
-            if let methods = extensionMethods[decl.name], let methodSym = methods[methodName] {
+            let unionName = DefIdContext.current?.getName(defId) ?? ""
+            if let methods = extensionMethods[unionName], let methodSym = methods[methodName] {
               let isStatic: Bool
               if case .function(let params, _) = methodSym.type {
                 isStatic = params.isEmpty || params[0].kind != .byRef
@@ -728,8 +749,9 @@ extension TypeChecker {
         
         // Also try looking up the type from global scope (for types not yet in module's publicTypes)
         if let type = currentScope.lookupType(typeName) {
-          if case .structure(let decl) = type {
-            if let methods = extensionMethods[decl.name], let methodSym = methods[methodName] {
+          if case .structure(let defId) = type {
+            let name = DefIdContext.current?.getName(defId) ?? ""
+            if let methods = extensionMethods[name], let methodSym = methods[methodName] {
               let isStatic: Bool
               if case .function(let params, _) = methodSym.type {
                 isStatic = params.isEmpty || params[0].kind != .byRef
@@ -1004,8 +1026,8 @@ extension TypeChecker {
       if case .function(_, let returnType) = symbol.type {
         // Check for union constructor (both concrete and generic)
         var unionName: String? = nil
-        if case .union(let decl) = returnType {
-          unionName = decl.name
+        if case .union(let defId) = returnType {
+          unionName = DefIdContext.current?.getName(defId)
         } else if case .genericUnion(let templateName, _) = returnType {
           unionName = templateName
         }
@@ -1046,11 +1068,11 @@ extension TypeChecker {
       }
 
       if let type = currentScope.lookupType(name, sourceFile: currentSourceFile) {
-        guard case .structure(let decl) = type else {
+        guard case .structure(let defId) = type else {
           throw SemanticError.invalidOperation(
             op: "construct", type1: type.description, type2: "")
         }
-        let parameters = decl.members
+        let parameters = TypedDefContext.current?.getStructMembers(defId) ?? []
 
         if arguments.count != parameters.count {
           throw SemanticError.invalidArgumentCount(
@@ -1649,27 +1671,30 @@ extension TypeChecker {
       var finalReturns = returns
       // Convert bindings to array of types in order (for methodTypeArgs)
       var inferredMethodTypeArgs: [Type]? = nil
-      if hasMethodLevelGenerics && !methodTypeParamBindings.isEmpty {
-        finalReturns = SemaUtils.substituteType(returns, substitution: methodTypeParamBindings)
+      if hasMethodLevelGenerics {
+        if !methodTypeParamBindings.isEmpty {
+          finalReturns = SemaUtils.substituteType(returns, substitution: methodTypeParamBindings)
+        }
         // Extract method type args in order from the function type
         // The order is determined by the order of first appearance in the function type
         let paramNames = extractGenericParameterNames(from: method.type)
-        // Filter out type parameters that are already in scope (type-level parameters)
-        // Only include method-level type parameters that were inferred
-        let methodLevelParamNames = paramNames.filter { name in
-          // If the type parameter is already defined in scope, it's a type-level parameter
-          // and should not be included in methodTypeArgs
-          if let existingType = currentScope.lookupType(name) {
-            // If it's a generic parameter with the same name, it's a type-level parameter
-            if case .genericParameter(let existingName) = existingType, existingName == name {
-              return false
-            }
+        let baseTypeParamNames = extractGenericParameterNames(from: finalBase.type)
+        // Filter out type parameters that belong to the base type (type-level parameters)
+        let methodLevelParamNames = paramNames.filter { !baseTypeParamNames.contains($0) }
+        let collectedMethodTypeArgs = methodLevelParamNames.compactMap { name -> Type? in
+          if let bound = methodTypeParamBindings[name] {
+            return bound
           }
-          return true
+          if let existingType = currentScope.lookupType(name),
+             case .genericParameter(let existingName) = existingType,
+             existingName == name {
+            return existingType
+          }
+          return nil
         }
-        inferredMethodTypeArgs = methodLevelParamNames.compactMap { methodTypeParamBindings[$0] }
-        // If no method-level type parameters were inferred, set to nil
-        if inferredMethodTypeArgs?.isEmpty == true {
+        if !methodLevelParamNames.isEmpty && collectedMethodTypeArgs.count == methodLevelParamNames.count {
+          inferredMethodTypeArgs = collectedMethodTypeArgs
+        } else {
           inferredMethodTypeArgs = nil
         }
       }
@@ -1862,7 +1887,11 @@ extension TypeChecker {
           // Look up the member in the module's public types
           if let memberType = moduleInfo.publicTypes[memberName] {
             // Return a type symbol
-            let defId = defIdMap.allocate(
+            let defId = defIdMap.lookup(
+              modulePath: moduleInfo.modulePath,
+              name: memberName,
+              sourceFile: nil
+            ) ?? defIdMap.allocate(
               modulePath: moduleInfo.modulePath,
               name: memberName,
               kind: .type(.structure),
@@ -1925,8 +1954,8 @@ extension TypeChecker {
     if case .identifier(let name) = baseExpr, let type = currentScope.lookupType(name) {
       if path.count == 1 {
         let memberName = path[0]
-        if case .union(let decl) = type {
-          if let c = decl.cases.first(where: { $0.name == memberName }) {
+        if case .union(let defId) = type {
+          if let c = TypedDefContext.current?.getUnionCases(defId)?.first(where: { $0.name == memberName }) {
             let paramTypes = c.parameters.map { Parameter(type: $0.type, kind: .byVal) }
             let funcType = Type.function(parameters: paramTypes, returns: type)
             let symbol = makeLocalSymbol(name: "\(name).\(memberName)", type: funcType, kind: .function)
@@ -2016,8 +2045,8 @@ extension TypeChecker {
 
       // Check if it is a structure to access members
       var foundMember = false
-      if case .structure(let decl) = typeToLookup {
-        if let mem = decl.members.first(where: { $0.name == memberName }) {
+      if case .structure(let defId) = typeToLookup {
+        if let mem = TypedDefContext.current?.getStructMembers(defId)?.first(where: { $0.name == memberName }) {
           let sym = makeLocalSymbol(
             name: mem.name, type: mem.type, kind: .variable(mem.mutable ? .MutableValue : .Value))
           typedPath.append(sym)
@@ -2062,8 +2091,9 @@ extension TypeChecker {
           }
         }
 
-        if case .structure(let decl) = typeToLookup {
-          throw SemanticError.undefinedMember(memberName, decl.name)
+        if case .structure(let defId) = typeToLookup {
+          let name = DefIdContext.current?.getName(defId) ?? ""
+          throw SemanticError.undefinedMember(memberName, name)
         } else {
           throw SemanticError.invalidOperation(
             op: "member access", type1: typeToLookup.description, type2: "")
@@ -2210,8 +2240,9 @@ extension TypeChecker {
         }
       }
 
-      if case .structure(let decl) = type {
-        if let methods = extensionMethods[decl.name], let sym = methods[memberName] {
+      if case .structure(let defId) = type {
+        let name = DefIdContext.current?.getName(defId) ?? ""
+        if let methods = extensionMethods[name], let sym = methods[memberName] {
           methodSymbol = sym
         }
       }
@@ -2447,8 +2478,8 @@ extension TypeChecker {
       }
     }
     
-    // Intercept Pointer.bits() intrinsic static method
-    if typeName == "Pointer" && methodName == "bits" {
+    // Intercept Pointer.bit_width() intrinsic static method
+    if typeName == "Pointer" && methodName == "bit_width" {
       if let node = try checkIntrinsicPointerStaticMethod(typeName: typeName, methodName: methodName, args: arguments) {
         return node
       }
@@ -2666,10 +2697,10 @@ extension TypeChecker {
     
     let lookupTypeName: String
     switch type {
-    case .structure(let decl):
-      lookupTypeName = decl.name
-    case .union(let decl):
-      lookupTypeName = decl.name
+    case .structure(let defId):
+      lookupTypeName = DefIdContext.current?.getName(defId) ?? ""
+    case .union(let defId):
+      lookupTypeName = DefIdContext.current?.getName(defId) ?? ""
     default:
       lookupTypeName = type.description
     }
@@ -2916,8 +2947,8 @@ extension TypeChecker {
         if case .reference(let inner) = currentType { currentType = inner }
 
         // Handle concrete structure types
-        if case .structure(let decl) = currentType {
-          guard let member = decl.members.first(where: { $0.name == memberName }) else {
+        if case .structure(let defId) = currentType {
+          guard let member = TypedDefContext.current?.getStructMembers(defId)?.first(where: { $0.name == memberName }) else {
             throw SemanticError.undefinedMember(memberName, currentType.description)
           }
 

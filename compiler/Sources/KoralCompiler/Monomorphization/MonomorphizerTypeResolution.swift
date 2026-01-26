@@ -53,32 +53,18 @@ extension Monomorphizer {
             if let template = input.genericTemplates.structTemplates[name] {
                 // Non-generic struct reference
                 if template.typeParameters.isEmpty {
-                    let decl = StructDecl(
-                        name: name,
-                        defId: getOrAllocateTypeDefId(name: name, kind: .structure),
-                        modulePath: [],
-                        sourceFile: "",
-                        access: .default,
-                        members: [],
-                        isGenericInstantiation: false
-                    )
-                    return .structure(decl: decl)
+                    let defId = getOrAllocateTypeDefId(name: name, kind: .structure)
+                    typedDefMap.addStructInfo(defId: defId, members: [], isGenericInstantiation: false, typeArguments: nil)
+                    return .structure(defId: defId)
                 }
             }
             // Check if it's a known union template (non-generic reference)
             if let template = input.genericTemplates.unionTemplates[name] {
                 // Non-generic union reference
                 if template.typeParameters.isEmpty {
-                    let decl = UnionDecl(
-                        name: name,
-                        defId: getOrAllocateTypeDefId(name: name, kind: .union),
-                        modulePath: [],
-                        sourceFile: "",
-                        access: .default,
-                        cases: [],
-                        isGenericInstantiation: false
-                    )
-                    return .union(decl: decl)
+                    let defId = getOrAllocateTypeDefId(name: name, kind: .union)
+                    typedDefMap.addUnionInfo(defId: defId, cases: [], isGenericInstantiation: false, typeArguments: nil)
+                    return .union(defId: defId)
                 }
             }
             // Otherwise treat as generic parameter
@@ -186,9 +172,9 @@ extension Monomorphizer {
     /// Resolves a parameterized type (genericStruct/genericUnion) to a concrete type.
     /// If the type still contains generic parameters, returns it unchanged.
     /// - Parameter type: The type to resolve
-    /// - Parameter visited: Set of visited type declaration UUIDs to prevent infinite recursion
+    /// - Parameter visited: Set of visited DefId ids to prevent infinite recursion
     /// - Returns: The resolved concrete type, or the original type if it can't be resolved yet
-    internal func resolveParameterizedType(_ type: Type, visited: Set<UUID> = []) -> Type {
+    internal func resolveParameterizedType(_ type: Type, visited: Set<UInt64> = []) -> Type {
         switch type {
         case .genericStruct(let template, let args):
             // Check if we already have this type cached FIRST (before resolving args)
@@ -221,16 +207,9 @@ extension Monomorphizer {
                     // If instantiation fails, return a placeholder
                     let argLayoutKeys = resolvedArgs.map { $0.layoutKey }.joined(separator: "_")
                     let layoutName = "\(template)_\(argLayoutKeys)"
-                    let decl = StructDecl(
-                        name: layoutName,
-                        defId: getOrAllocateTypeDefId(name: layoutName, kind: .structure),
-                        modulePath: [],
-                        sourceFile: "",
-                        access: .default,
-                        members: [],
-                        isGenericInstantiation: true
-                    )
-                    return .structure(decl: decl)
+                    let defId = getOrAllocateTypeDefId(name: layoutName, kind: .structure)
+                    typedDefMap.addStructInfo(defId: defId, members: [], isGenericInstantiation: true, typeArguments: resolvedArgs)
+                    return .structure(defId: defId)
                 }
             }
             
@@ -271,16 +250,9 @@ extension Monomorphizer {
                     // If instantiation fails, return a placeholder
                     let argLayoutKeys = resolvedArgs.map { $0.layoutKey }.joined(separator: "_")
                     let layoutName = "\(template)_\(argLayoutKeys)"
-                    let decl = UnionDecl(
-                        name: layoutName,
-                        defId: getOrAllocateTypeDefId(name: layoutName, kind: .union),
-                        modulePath: [],
-                        sourceFile: "",
-                        access: .default,
-                        cases: [],
-                        isGenericInstantiation: true
-                    )
-                    return .union(decl: decl)
+                    let defId = getOrAllocateTypeDefId(name: layoutName, kind: .union)
+                    typedDefMap.addUnionInfo(defId: defId, cases: [], isGenericInstantiation: true, typeArguments: resolvedArgs)
+                    return .union(defId: defId)
                 }
             }
             
@@ -304,51 +276,39 @@ extension Monomorphizer {
                 returns: resolveParameterizedType(returns, visited: visited)
             )
             
-        case .structure(let decl):
-            // Check for infinite recursion using UUID
-            if visited.contains(decl.id) {
+        case .structure(let defId):
+            if visited.contains(defId.id) {
                 return type
             }
             var newVisited = visited
-            newVisited.insert(decl.id)
-            
-            let newMembers = decl.members.map { member in
+            newVisited.insert(defId.id)
+            let members = typedDefMap.getStructMembers(defId) ?? []
+            let newMembers = members.map { member in
                 (
                     name: member.name,
                     type: resolveParameterizedType(member.type, visited: newVisited),
                     mutable: member.mutable
                 )
             }
-            
-            // Only create a new type if members actually changed
-            let membersChanged = zip(decl.members, newMembers).contains { old, new in
+            let membersChanged = zip(members, newMembers).contains { old, new in
                 old.type != new.type
             }
             if !membersChanged {
                 return type
             }
+            let isGeneric = typedDefMap.isGenericInstantiation(defId) ?? false
+            let typeArgs = typedDefMap.getTypeArguments(defId)
+            typedDefMap.addStructInfo(defId: defId, members: newMembers, isGenericInstantiation: isGeneric, typeArguments: typeArgs)
+            return .structure(defId: defId)
             
-            let newDecl = StructDecl(
-                name: decl.name,
-                defId: decl.defId,
-                modulePath: decl.modulePath,
-                sourceFile: decl.sourceFile,
-                access: decl.access,
-                members: newMembers,
-                isGenericInstantiation: decl.isGenericInstantiation,
-                typeArguments: decl.typeArguments
-            )
-            return .structure(decl: newDecl)
-            
-        case .union(let decl):
-            // Check for infinite recursion using UUID
-            if visited.contains(decl.id) {
+        case .union(let defId):
+            if visited.contains(defId.id) {
                 return type
             }
             var newVisited = visited
-            newVisited.insert(decl.id)
-            
-            let newCases = decl.cases.map { unionCase in
+            newVisited.insert(defId.id)
+            let cases = typedDefMap.getUnionCases(defId) ?? []
+            let newCases = cases.map { unionCase in
                 UnionCase(
                     name: unionCase.name,
                     parameters: unionCase.parameters.map { param in
@@ -356,9 +316,7 @@ extension Monomorphizer {
                     }
                 )
             }
-            
-            // Only create a new type if cases actually changed
-            let casesChanged = zip(decl.cases, newCases).contains { old, new in
+            let casesChanged = zip(cases, newCases).contains { old, new in
                 zip(old.parameters, new.parameters).contains { oldParam, newParam in
                     oldParam.type != newParam.type
                 }
@@ -366,18 +324,10 @@ extension Monomorphizer {
             if !casesChanged {
                 return type
             }
-            
-            let newDecl = UnionDecl(
-                name: decl.name,
-                defId: decl.defId,
-                modulePath: decl.modulePath,
-                sourceFile: decl.sourceFile,
-                access: decl.access,
-                cases: newCases,
-                isGenericInstantiation: decl.isGenericInstantiation,
-                typeArguments: decl.typeArguments
-            )
-            return .union(decl: newDecl)
+            let isGeneric = typedDefMap.isGenericInstantiation(defId) ?? false
+            let typeArgs = typedDefMap.getTypeArguments(defId)
+            typedDefMap.addUnionInfo(defId: defId, cases: newCases, isGenericInstantiation: isGeneric, typeArguments: typeArgs)
+            return .union(defId: defId)
             
         default:
             return type
@@ -438,12 +388,14 @@ extension Monomorphizer {
             let typeName: String
             let qualifiedTypeName: String
             switch resolvedType {
-            case .structure(let decl):
-                typeName = decl.name
-                qualifiedTypeName = decl.qualifiedName
-            case .union(let decl):
-                typeName = decl.name
-                qualifiedTypeName = decl.qualifiedName
+            case .structure(let defId):
+                let name = defIdMap.getName(defId) ?? resolvedType.description
+                typeName = name
+                qualifiedTypeName = defIdMap.getQualifiedName(defId) ?? name
+            case .union(let defId):
+                let name = defIdMap.getName(defId) ?? resolvedType.description
+                typeName = name
+                qualifiedTypeName = defIdMap.getQualifiedName(defId) ?? name
             default:
                 typeName = resolvedType.description
                 qualifiedTypeName = typeName
@@ -717,7 +669,7 @@ extension Monomorphizer {
             
             // Track the resolved return type (will be updated if we find a concrete method)
             var resolvedReturnType = resolveParameterizedType(type)
-            
+
             // Resolve method name to mangled name for generic extension methods
             if !newBase.type.containsGenericParameter {
                 // Look up the concrete method on the resolved base type
@@ -769,10 +721,10 @@ extension Monomorphizer {
             
             // Update the identifier name to match the resolved type's layout name
             var newName = identifier.name
-            if case .structure(let decl) = resolvedType {
-                newName = decl.name
-            } else if case .union(let decl) = resolvedType {
-                newName = decl.name
+            if case .structure(let defId) = resolvedType {
+                newName = defIdMap.getName(defId) ?? newName
+            } else if case .union(let defId) = resolvedType {
+                newName = defIdMap.getName(defId) ?? newName
             }
             
             let newIdentifier = copySymbolWithNewDefId(
@@ -868,19 +820,21 @@ extension Monomorphizer {
             let qualifiedTypeName: String
             let isGenericInstantiation: Bool
             switch resolvedBaseType {
-            case .structure(let decl):
+            case .structure(let defId):
+                let name = defIdMap.getName(defId) ?? resolvedBaseType.description
                 // Extract base name from mangled name (e.g., "List_I" -> "List")
-                templateName = decl.name.split(separator: "_").first.map(String.init) ?? decl.name
-                qualifiedTypeName = decl.qualifiedName
-                isGenericInstantiation = decl.isGenericInstantiation
+                templateName = name.split(separator: "_").first.map(String.init) ?? name
+                qualifiedTypeName = defIdMap.getQualifiedName(defId) ?? name
+                isGenericInstantiation = typedDefMap.isGenericInstantiation(defId) ?? false
             case .genericStruct(let name, _):
                 templateName = name
                 qualifiedTypeName = name  // Generic types don't have module path yet
                 isGenericInstantiation = false
-            case .union(let decl):
-                templateName = decl.name.split(separator: "_").first.map(String.init) ?? decl.name
-                qualifiedTypeName = decl.qualifiedName
-                isGenericInstantiation = decl.isGenericInstantiation
+            case .union(let defId):
+                let name = defIdMap.getName(defId) ?? resolvedBaseType.description
+                templateName = name.split(separator: "_").first.map(String.init) ?? name
+                qualifiedTypeName = defIdMap.getQualifiedName(defId) ?? name
+                isGenericInstantiation = typedDefMap.isGenericInstantiation(defId) ?? false
             case .genericUnion(let name, _):
                 templateName = name
                 qualifiedTypeName = name  // Generic types don't have module path yet

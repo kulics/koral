@@ -35,7 +35,7 @@ public type StringLinesIterator(source String, mut index Int)
 
 given String {
     // Unsafe constructor: does not validate UTF-8
-    public from_utf8_bytes_unchecked(bytes [UInt8]Pointer, len Int) String = {
+    public from_bytes_unchecked(bytes [UInt8]Pointer, len Int) String = {
         let cap = len + 1
         let data = [UInt8]alloc_memory(cap)
         copy_memory(data, bytes, len)
@@ -107,7 +107,7 @@ given String {
     public is_empty(self) Bool = self.storage.len == 0
     public capacity(self) Int = self.storage.cap - 1
 
-    public get(self, index Int) [UInt8]Option = {
+    public get_byte(self, index Int) [UInt8]Option = {
         if index < 0 or index >= self.storage.len then {
             return [UInt8]Option.None()
         }
@@ -121,7 +121,7 @@ given String {
         self.storage.data.offset(index).peek()
     }
 
-    public push(self ref, value UInt8) Void = {
+    public push_byte(self ref, value UInt8) Void = {
         self.ensure_unique()
         let needed = self.storage.len + 2
         self.ensure_capacity(needed)
@@ -144,7 +144,7 @@ given String {
     // Push an Int value directly to the string
     public push_int(self ref, value Int) Void = {
         if value == 0 then {
-            self.push('0')
+            self.push_byte('0')
             return
         }
         
@@ -167,7 +167,7 @@ given String {
         
         let mut i = pos
         while i < 20 then {
-            self.push(buf.offset(i).peek())
+            self.push_byte(buf.offset(i).peek())
             i += 1
         }
         
@@ -182,7 +182,7 @@ given String {
     // Push a UInt value directly to the string
     public push_uint(self ref, value UInt) Void = {
         if value == 0u then {
-            self.push('0')
+            self.push_byte('0')
             return
         }
         
@@ -197,7 +197,7 @@ given String {
         
         let mut i = pos
         while i < 20 then {
-            self.push(buf.offset(i).peek())
+            self.push_byte(buf.offset(i).peek())
             i += 1
         }
         
@@ -236,7 +236,7 @@ given String {
         true
     }
 
-    public first_index_of(self, pat String) [Int]Option = self.find(pat)
+    public index_of(self, pat String) [Int]Option = self.index_of_after(pat, 0)
 
     public last_index_of(self, pat String) [Int]Option = {
         if pat.storage.len == 0 then {
@@ -245,7 +245,7 @@ given String {
         let mut result = [Int]Option.None()
         let mut start = 0
         // Using while is pattern matching for iterator-like loop
-        while self.find_from(pat, start) is .Some(idx) then {
+        while self.index_of_after(pat, start) is .Some(idx) then {
             result = [Int]Option.Some(idx)
             start = idx + 1
         }
@@ -288,7 +288,7 @@ given String {
         self.make_substring(0, end)
     }
 
-    public trim_ascii_whitespace(self) String = {
+    public trim_ascii(self) String = {
         let head = self.trim_ascii_start()
         head.trim_ascii_end()
     }
@@ -335,7 +335,7 @@ given String {
         true
     }
 
-    public is_ascii_blank(self) Bool = {
+    public is_ascii_whitespace(self) Bool = {
         let mut i = 0
         while i < self.storage.len then {
             if not String.is_ascii_space(self.storage.data.offset(i).peek()) then { return false; }
@@ -374,7 +374,7 @@ given String {
         let mut i Int = 0
         while i < self.storage.len then {
             let b UInt8 = self.storage.data.offset(i).peek()
-            h = hash_combine(h, (UInt)b)
+            h = combine_hash(h, (UInt)b)
             i += 1
         }
         h
@@ -382,7 +382,7 @@ given String {
 
     public to_string(self) String = self
 
-    public find_from(self, pat String, start Int) [Int]Option = {
+    public index_of_after(self, pat String, start Int) [Int]Option = {
         if pat.storage.len == 0 then {
             panic("find empty pattern")
         }
@@ -404,22 +404,9 @@ given String {
         [Int]Option.None()
     }
 
-    public find(self, pat String) [Int]Option = self.find_from(pat, 0)
-
-    public contains(self, pat String) Bool = when self.find_from(pat, 0) is {
+    public contains(self, pat String) Bool = when self.index_of_after(pat, 0) is {
         .Some(_) then true,
         .None then false,
-    }
-
-    public count_string(self, pat String) Int = {
-        let mut count = 0
-        let mut idxOpt = self.find_from(pat, 0)
-        // Using while is pattern matching
-        while idxOpt is .Some(i) then {
-            count += 1
-            idxOpt = self.find_from(pat, i + pat.storage.len)
-        }
-        count
     }
 
     public repeat(self, times Int) String = {
@@ -442,14 +429,14 @@ given String {
         String(storage)
     }
 
-    public replace(self, pat String, with String) String = {
+    public replace_all(self, pat String, with String) String = {
         if pat.storage.len == 0 then {
             panic("replace empty pattern")
         }
         let mut result = String.empty()
         let mut start = 0
         // Using while is pattern matching
-        while self.find_from(pat, start) is .Some(idx) then {
+        while self.index_of_after(pat, start) is .Some(idx) then {
             let prefix_len = idx - start
             if prefix_len > 0 then {
                 let slice = self.make_substring(start, prefix_len)
@@ -527,7 +514,7 @@ given StringSplitIterator {
     public next(self ref) [String]Option = {
         let len = self.source.count()
         if self.index > len then { return [String]Option.None() }
-        when self.source.find_from(self.sep, self.index) is {
+        when self.source.index_of_after(self.sep, self.index) is {
             .Some(i) then {
                 let part = self.source.slice(self.index..<i)
                 self.index = i + self.sep.count()
@@ -550,7 +537,7 @@ given StringLinesIterator {
             self.index = len + 1
             return [String]Option.None()
         }
-        when self.source.find_from("\n", self.index) is {
+        when self.source.index_of_after("\n", self.index) is {
             .Some(i) then {
                 let part = self.source.slice(self.index..<i)
                 self.index = i + 1
@@ -595,16 +582,16 @@ given String {
         let int_part = (Int)f
         let frac_part = f - (Float64)int_part
         
-        if is_negative then { self.push('-'); }
+        if is_negative then { self.push_byte('-'); }
         self.push_int(int_part)
-        self.push('.')
+        self.push_byte('.')
         
         let mut frac = frac_part
         let mut digits = 0
         while digits < 6 then {
             frac = frac * 10.0
             let d = (Int)frac
-            self.push((UInt8)d + '0')
+            self.push_byte((UInt8)d + '0')
             frac = frac - (Float64)d
             digits += 1
         }
@@ -619,7 +606,7 @@ given String {
         }
     }
 
-    public to_ascii_title(self) String = {
+    public to_ascii_titlecase(self) String = {
         let cap = self.storage.len + 1
         let data = [UInt8]alloc_memory(cap)
         let mut in_word = false
@@ -783,17 +770,17 @@ given Float32 {
         let frac_part = f - (Float64)int_part
         
         let mut result = String.empty()
-        if is_negative then { result.push('-'); }
+        if is_negative then { result.push_byte('-'); }
         
         result.push_string(int_part.to_string())
-        result.push('.')
+        result.push_byte('.')
         
         let mut frac = frac_part
         let mut digits = 0
         while digits < 6 then {
             frac = frac * 10.0
             let d = (Int)frac
-            result.push((UInt8)d + '0')
+            result.push_byte((UInt8)d + '0')
             frac = frac - (Float64)d
             digits += 1
         }
@@ -848,17 +835,17 @@ given Float64 {
         let frac_part = f - (Float64)int_part
         
         let mut result = String.empty()
-        if is_negative then { result.push('-'); }
+        if is_negative then { result.push_byte('-'); }
 
         result.push_string(int_part.to_string())
-        result.push('.')
+        result.push_byte('.')
         
         let mut frac = frac_part
         let mut digits = 0
         while digits < 6 then {
             frac = frac * 10.0
             let d = (Int)frac
-            result.push((UInt8)d + '0')
+            result.push_byte((UInt8)d + '0')
             frac = frac - (Float64)d
             digits += 1
         }
@@ -963,7 +950,7 @@ given Rune {
     }
     
     // Return number of bytes needed to encode this rune in UTF-8
-    public utf8_len(self) Int = {
+    public byte_count(self) Int = {
         let cp = self.value
         if not self.is_valid() then { return 3; }  // Replacement char length
         if cp < 128u32 then 1
@@ -1277,7 +1264,7 @@ given String {
 
 given String {
     // Count number of Unicode code points (runes) in the string
-    public count_rune(self) Int = {
+    public rune_count(self) Int = {
         let mut count = 0
         let mut iter = self.runes().iterator()
         while iter.next() is .Some(_) then {
@@ -1314,37 +1301,37 @@ given String {
         
         // Handle invalid code points - append replacement character
         if not rune.is_valid() then {
-            self.push(239u8)   // 0xEF
-            self.push(191u8)   // 0xBF
-            self.push(189u8)   // 0xBD
+            self.push_byte(239u8)   // 0xEF
+            self.push_byte(191u8)   // 0xBF
+            self.push_byte(189u8)   // 0xBD
             return
         }
         
         // 1-byte sequence (ASCII)
         if cp < 128u32 then {
-            self.push((UInt8)cp)
+            self.push_byte((UInt8)cp)
             return
         }
         
         // 2-byte sequence
         if cp < 2048u32 then {
-            self.push((UInt8){ cp >> 6 } | 192u8)
-            self.push((UInt8){ cp & 63u32 } | 128u8)
+            self.push_byte((UInt8){ cp >> 6 } | 192u8)
+            self.push_byte((UInt8){ cp & 63u32 } | 128u8)
             return
         }
         
         // 3-byte sequence
         if cp < 65536u32 then {
-            self.push((UInt8){ cp >> 12 } | 224u8)
-            self.push((UInt8){ { cp >> 6 } & 63u32 } | 128u8)
-            self.push((UInt8){ cp & 63u32 } | 128u8)
+            self.push_byte((UInt8){ cp >> 12 } | 224u8)
+            self.push_byte((UInt8){ { cp >> 6 } & 63u32 } | 128u8)
+            self.push_byte((UInt8){ cp & 63u32 } | 128u8)
             return
         }
         
         // 4-byte sequence
-        self.push((UInt8){ cp >> 18 } | 240u8)
-        self.push((UInt8){ { cp >> 12 } & 63u32 } | 128u8)
-        self.push((UInt8){ { cp >> 6 } & 63u32 } | 128u8)
-        self.push((UInt8){ cp & 63u32 } | 128u8)
+        self.push_byte((UInt8){ cp >> 18 } | 240u8)
+        self.push_byte((UInt8){ { cp >> 12 } & 63u32 } | 128u8)
+        self.push_byte((UInt8){ { cp >> 6 } & 63u32 } | 128u8)
+        self.push_byte((UInt8){ cp & 63u32 } | 128u8)
     }
 }

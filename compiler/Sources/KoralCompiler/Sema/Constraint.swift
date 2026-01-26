@@ -136,15 +136,15 @@ extension Type {
             }
             result.append(contentsOf: returns.freeTypeVariables)
             return result
-        case .structure(let decl):
+        case .structure(let defId):
             var result: [TypeVariable] = []
-            for member in decl.members {
+            for member in TypedDefContext.current?.getStructMembers(defId) ?? [] {
                 result.append(contentsOf: member.type.freeTypeVariables)
             }
             return result
-        case .union(let decl):
+        case .union(let defId):
             var result: [TypeVariable] = []
-            for c in decl.cases {
+            for c in TypedDefContext.current?.getUnionCases(defId) ?? [] {
                 for param in c.parameters {
                     result.append(contentsOf: param.type.freeTypeVariables)
                 }

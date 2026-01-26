@@ -192,7 +192,11 @@ public class TypeChecker {
   /// DefIdMap - 管理所有定义的标识符
   /// 用于为所有符号分配唯一的 DefId
   /// **Validates: Requirements 1.1, 8.1**
-  var defIdMap = DefIdMap()
+  var defIdMap = DefIdMap() {
+    didSet {
+      DefIdContext.current = defIdMap
+    }
+  }
   
   /// NameCollector 的输出（Pass 1 结果）
   /// 包含 DefIdMap 和 NameTable，用于后续 Pass 使用
@@ -202,7 +206,13 @@ public class TypeChecker {
   /// TypeResolver 的输出（Pass 2 结果）
   /// 包含 TypedDefMap 和 SymbolTable，用于后续 Pass 使用
   /// **Validates: Requirements 2.1, 2.2**
-  var typeResolverOutput: TypeResolverOutput?
+  var typeResolverOutput: TypeResolverOutput? {
+    didSet {
+      if let typedDefMap = typeResolverOutput?.typedDefMap {
+        TypedDefContext.current = typedDefMap
+      }
+    }
+  }
   
   /// BodyChecker 的输出（Pass 3 结果）
   /// 包含 TypedAST 和 InstantiationRequests，用于后续阶段使用
@@ -409,22 +419,14 @@ public class TypeChecker {
       return stringType
     }
     // Fallback: std should normally define `type String(...)`.
-    let decl = StructDecl(
+    let defId = getOrAllocateTypeDefId(
       name: "String",
-      defId: getOrAllocateTypeDefId(
-        name: "String",
-        kind: .structure,
-        access: .default,
-        modulePath: [],
-        sourceFile: ""
-      ),
-      modulePath: [],
-      sourceFile: "",
+      kind: .structure,
       access: .default,
-      members: [],
-      isGenericInstantiation: false
+      modulePath: [],
+      sourceFile: ""
     )
-    return .structure(decl: decl)
+    return .structure(defId: defId)
   }
 
   // Wrapper for shared utility function from SemaUtils.swift
@@ -572,7 +574,9 @@ public class TypeChecker {
       modulePath: currentModulePath,
       name: name,
       kind: defKind,
-      sourceFile: currentSourceFile
+      sourceFile: currentSourceFile,
+      access: access,
+      span: currentSpan
     )
     
     return Symbol(
@@ -613,7 +617,9 @@ public class TypeChecker {
       modulePath: modulePath,
       name: name,
       kind: .type(kind),
-      sourceFile: sourceFile
+      sourceFile: sourceFile,
+      access: access,
+      span: .unknown
     )
   }
   
@@ -636,7 +642,9 @@ public class TypeChecker {
       modulePath: [],
       name: name,
       kind: defKind,
-      sourceFile: ""  // 局部符号不需要文件隔离
+      sourceFile: "",  // 局部符号不需要文件隔离
+      access: .default,
+      span: .unknown
     )
     
     return Symbol(
@@ -778,8 +786,8 @@ public class TypeChecker {
   /// For generic unions, this looks up the template and substitutes type parameters.
   func resolveUnionCasesForExhaustiveness(_ type: Type) -> [UnionCase]? {
     switch type {
-    case .union(let decl):
-      return decl.cases
+    case .union(let defId):
+      return TypedDefContext.current?.getUnionCases(defId)
       
     case .genericUnion(let templateName, let typeArgs):
       // Look up the union template and substitute type parameters
