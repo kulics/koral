@@ -4,6 +4,10 @@ private func cTypeIdentifierOrFallback(_ type: Type, fallback: String) -> String
     return TypeHandlerRegistry.shared.cTypeIdentifier(for: type) ?? fallback
 }
 
+private func cIdentifierOrFallback(defId: DefId, fallback: String) -> String {
+    return DefIdContext.current?.getCIdentifier(defId) ?? fallback
+}
+
 // MARK: - TypeHandler Protocol
 
 /// 类型处理器协议 - 确保所有类型都有完整的处理逻辑
@@ -184,10 +188,10 @@ public class StructHandler: TypeHandler {
     }
     
     public func getMembers(_ type: Type) -> [(name: String, type: Type, mutable: Bool)] {
-        guard case .structure(let decl) = type else {
+        guard case .structure(let defId) = type else {
             return []
         }
-        return decl.members
+        return TypedDefContext.current?.getStructMembers(defId) ?? []
     }
     
     public func getMethods(_ type: Type) -> [String] {
@@ -214,83 +218,83 @@ public class StructHandler: TypeHandler {
     }
     
     public func generateCTypeName(_ type: Type) -> String {
-        guard case .structure(let decl) = type else {
+        guard case .structure(let defId) = type else {
             return "void"
         }
-        let qualifiedName = cTypeIdentifierOrFallback(type, fallback: decl.qualifiedName)
+        let qualifiedName = cIdentifierOrFallback(defId: defId, fallback: "T_\(defId.id)")
         return "struct \(qualifiedName)"
     }
     
     public func generateCopyCode(_ type: Type, source: String, dest: String) -> String {
-        guard case .structure(let decl) = type else {
+        guard case .structure(let defId) = type else {
             return ""
         }
-        let qualifiedName = cTypeIdentifierOrFallback(type, fallback: decl.qualifiedName)
+        let qualifiedName = cIdentifierOrFallback(defId: defId, fallback: "T_\(defId.id)")
         return "\(dest) = __koral_\(qualifiedName)_copy(&\(source));"
     }
     
     public func generateDropCode(_ type: Type, value: String) -> String {
-        guard case .structure(let decl) = type else {
+        guard case .structure(let defId) = type else {
             return ""
         }
-        let qualifiedName = cTypeIdentifierOrFallback(type, fallback: decl.qualifiedName)
+        let qualifiedName = cIdentifierOrFallback(defId: defId, fallback: "T_\(defId.id)")
         return "__koral_\(qualifiedName)_drop(&\(value));"
     }
     
     public func getQualifiedName(_ type: Type) -> String {
-        guard case .structure(let decl) = type else {
+        guard case .structure(let defId) = type else {
             return ""
         }
-        return cTypeIdentifierOrFallback(type, fallback: decl.qualifiedName)
+        return cIdentifierOrFallback(defId: defId, fallback: "T_\(defId.id)")
     }
     
     public func containsGenericParameter(_ type: Type) -> Bool {
-        guard case .structure(let decl) = type else {
+        guard case .structure(let defId) = type else {
             return false
         }
-        return decl.members.contains { $0.type.containsGenericParameter }
+        return (TypedDefContext.current?.getStructMembers(defId) ?? []).contains { $0.type.containsGenericParameter }
     }
     
     // MARK: - Struct-Specific Methods
     
     /// 获取结构体的访问修饰符
     public func getAccessModifier(_ type: Type) -> AccessModifier? {
-        guard case .structure(let decl) = type else {
+        guard case .structure(let defId) = type else {
             return nil
         }
-        return decl.access
+        return DefIdContext.current?.getAccess(defId)
     }
     
     /// 获取结构体的模块路径
     public func getModulePath(_ type: Type) -> [String]? {
-        guard case .structure(let decl) = type else {
+        guard case .structure(let defId) = type else {
             return nil
         }
-        return decl.modulePath
+        return DefIdContext.current?.getModulePath(defId)
     }
     
     /// 获取结构体的源文件
     public func getSourceFile(_ type: Type) -> String? {
-        guard case .structure(let decl) = type else {
+        guard case .structure(let defId) = type else {
             return nil
         }
-        return decl.sourceFile
+        return DefIdContext.current?.getSourceFile(defId)
     }
     
     /// 检查结构体是否是泛型实例化
     public func isGenericInstantiation(_ type: Type) -> Bool {
-        guard case .structure(let decl) = type else {
+        guard case .structure(let defId) = type else {
             return false
         }
-        return decl.isGenericInstantiation
+        return TypedDefContext.current?.isGenericInstantiation(defId) ?? false
     }
     
     /// 获取泛型类型参数
     public func getTypeArguments(_ type: Type) -> [Type]? {
-        guard case .structure(let decl) = type else {
+        guard case .structure(let defId) = type else {
             return nil
         }
-        return decl.typeArguments
+        return TypedDefContext.current?.getTypeArguments(defId)
     }
 }
 
@@ -347,41 +351,41 @@ public class UnionHandler: TypeHandler {
     }
     
     public func generateCTypeName(_ type: Type) -> String {
-        guard case .union(let decl) = type else {
+        guard case .union(let defId) = type else {
             return "void"
         }
-        let qualifiedName = cTypeIdentifierOrFallback(type, fallback: decl.qualifiedName)
+        let qualifiedName = cIdentifierOrFallback(defId: defId, fallback: "U_\(defId.id)")
         return "struct \(qualifiedName)"
     }
     
     public func generateCopyCode(_ type: Type, source: String, dest: String) -> String {
-        guard case .union(let decl) = type else {
+        guard case .union(let defId) = type else {
             return ""
         }
-        let qualifiedName = cTypeIdentifierOrFallback(type, fallback: decl.qualifiedName)
+        let qualifiedName = cIdentifierOrFallback(defId: defId, fallback: "U_\(defId.id)")
         return "\(dest) = __koral_\(qualifiedName)_copy(&\(source));"
     }
     
     public func generateDropCode(_ type: Type, value: String) -> String {
-        guard case .union(let decl) = type else {
+        guard case .union(let defId) = type else {
             return ""
         }
-        let qualifiedName = cTypeIdentifierOrFallback(type, fallback: decl.qualifiedName)
+        let qualifiedName = cIdentifierOrFallback(defId: defId, fallback: "U_\(defId.id)")
         return "__koral_\(qualifiedName)_drop(&\(value));"
     }
     
     public func getQualifiedName(_ type: Type) -> String {
-        guard case .union(let decl) = type else {
+        guard case .union(let defId) = type else {
             return ""
         }
-        return cTypeIdentifierOrFallback(type, fallback: decl.qualifiedName)
+        return cIdentifierOrFallback(defId: defId, fallback: "U_\(defId.id)")
     }
     
     public func containsGenericParameter(_ type: Type) -> Bool {
-        guard case .union(let decl) = type else {
+        guard case .union(let defId) = type else {
             return false
         }
-        return decl.cases.contains { c in
+        return (TypedDefContext.current?.getUnionCases(defId) ?? []).contains { c in
             c.parameters.contains { $0.type.containsGenericParameter }
         }
     }
@@ -390,66 +394,66 @@ public class UnionHandler: TypeHandler {
     
     /// 获取 Union 的所有 cases
     public func getCases(_ type: Type) -> [UnionCase]? {
-        guard case .union(let decl) = type else {
+        guard case .union(let defId) = type else {
             return nil
         }
-        return decl.cases
+        return TypedDefContext.current?.getUnionCases(defId)
     }
     
     /// 获取指定 case 的信息
     public func getCase(_ type: Type, name: String) -> UnionCase? {
-        guard case .union(let decl) = type else {
+        guard case .union(let defId) = type else {
             return nil
         }
-        return decl.cases.first { $0.name == name }
+        return TypedDefContext.current?.getUnionCases(defId)?.first { $0.name == name }
     }
     
     /// 获取 case 的索引（用于 tag）
     public func getCaseIndex(_ type: Type, name: String) -> Int? {
-        guard case .union(let decl) = type else {
+        guard case .union(let defId) = type else {
             return nil
         }
-        return decl.cases.firstIndex { $0.name == name }
+        return TypedDefContext.current?.getUnionCases(defId)?.firstIndex { $0.name == name }
     }
     
     /// 获取 Union 的访问修饰符
     public func getAccessModifier(_ type: Type) -> AccessModifier? {
-        guard case .union(let decl) = type else {
+        guard case .union(let defId) = type else {
             return nil
         }
-        return decl.access
+        return DefIdContext.current?.getAccess(defId)
     }
     
     /// 获取 Union 的模块路径
     public func getModulePath(_ type: Type) -> [String]? {
-        guard case .union(let decl) = type else {
+        guard case .union(let defId) = type else {
             return nil
         }
-        return decl.modulePath
+        return DefIdContext.current?.getModulePath(defId)
     }
     
     /// 获取 Union 的源文件
     public func getSourceFile(_ type: Type) -> String? {
-        guard case .union(let decl) = type else {
+        guard case .union(let defId) = type else {
             return nil
         }
-        return decl.sourceFile
+        return DefIdContext.current?.getSourceFile(defId)
     }
     
     /// 检查 Union 是否是泛型实例化
     public func isGenericInstantiation(_ type: Type) -> Bool {
-        guard case .union(let decl) = type else {
+        guard case .union(let defId) = type else {
             return false
         }
-        return decl.isGenericInstantiation
+        return TypedDefContext.current?.isGenericInstantiation(defId) ?? false
     }
     
     /// 获取泛型类型参数
     public func getTypeArguments(_ type: Type) -> [Type]? {
-        guard case .union(let decl) = type else {
+        guard case .union(let defId) = type else {
             return nil
         }
-        return decl.typeArguments
+        return TypedDefContext.current?.getTypeArguments(defId)
     }
     
     /// 生成 Union 构造器代码
@@ -461,11 +465,10 @@ public class UnionHandler: TypeHandler {
         resultVar: String,
         argAssignments: [(fieldName: String, argCode: String)]
     ) -> String {
-        guard case .union(let decl) = type else {
+        guard case .union(let defId) = type else {
             return ""
         }
-        
-        let typeName = cTypeIdentifierOrFallback(type, fallback: decl.qualifiedName)
+        let typeName = cIdentifierOrFallback(defId: defId, fallback: "U_\(defId.id)")
         guard let tagIndex = getCaseIndex(type, name: caseName) else {
             return ""
         }

@@ -69,15 +69,15 @@ extension TypeChecker {
     }
     
     switch actualType {
-    case .structure(let decl):
-      let typeName = decl.name
+    case .structure(let defId):
+      let typeName = DefIdContext.current?.getName(defId) ?? ""
       if let methods = extensionMethods[typeName], let sym = methods[name] {
         return sym
       }
       return nil
 
-    case .union(let decl):
-      let typeName = decl.name
+    case .union(let defId):
+      let typeName = DefIdContext.current?.getName(defId) ?? ""
       if let methods = extensionMethods[typeName], let sym = methods[name] {
         return sym
       }
@@ -304,13 +304,15 @@ extension TypeChecker {
     case .genericUnion(let name, let args):
       templateName = name
       typeArgs = args
-    case .structure(let decl):
+    case .structure(let defId):
       // Non-generic struct - extract base name
-      templateName = decl.name.split(separator: "_").first.map(String.init) ?? decl.name
+      let name = DefIdContext.current?.getName(defId) ?? ""
+      templateName = name.split(separator: "_").first.map(String.init) ?? name
       typeArgs = []
-    case .union(let decl):
+    case .union(let defId):
       // Non-generic union - extract base name
-      templateName = decl.name.split(separator: "_").first.map(String.init) ?? decl.name
+      let name = DefIdContext.current?.getName(defId) ?? ""
+      templateName = name.split(separator: "_").first.map(String.init) ?? name
       typeArgs = []
     case .pointer(let element):
       templateName = "Pointer"
@@ -586,8 +588,8 @@ extension TypeChecker {
     // Get the type name for error messages
     let typeName: String
     switch structType {
-    case .structure(let decl):
-      typeName = decl.name
+    case .structure(let defId):
+      typeName = DefIdContext.current?.getName(defId) ?? ""
     case .genericStruct(let template, _):
       typeName = template
     default:
@@ -597,8 +599,9 @@ extension TypeChecker {
     var methodSymbol: Symbol? = nil
     
     // Try to look up method on concrete type first
-    if case .structure(let decl) = structType {
-      if let extensions = extensionMethods[decl.name], let sym = extensions[methodName] {
+    if case .structure(let defId) = structType {
+      let name = DefIdContext.current?.getName(defId) ?? ""
+      if let extensions = extensionMethods[name], let sym = extensions[methodName] {
         methodSymbol = sym
       }
     }
@@ -684,8 +687,8 @@ extension TypeChecker {
     // Get the type name for error messages
     let typeName: String
     switch structType {
-    case .structure(let decl):
-      typeName = decl.name
+    case .structure(let defId):
+      typeName = DefIdContext.current?.getName(defId) ?? ""
     case .genericStruct(let template, _):
       typeName = template
     default:
@@ -695,8 +698,9 @@ extension TypeChecker {
     var methodSymbol: Symbol? = nil
     
     // Try to look up method on concrete type first
-    if case .structure(let decl) = structType {
-      if let extensions = extensionMethods[decl.name], let sym = extensions[methodName] {
+    if case .structure(let defId) = structType {
+      let name = DefIdContext.current?.getName(defId) ?? ""
+      if let extensions = extensionMethods[name], let sym = extensions[methodName] {
         methodSymbol = sym
       }
     }
@@ -903,10 +907,10 @@ extension TypeChecker {
   func checkIntrinsicPointerStaticMethod(
     typeName: String, methodName: String, args: [ExpressionNode]
   ) throws -> TypedExpressionNode? {
-    // Handle Pointer.bits() static method
-    if methodName == "bits" {
+    // Handle Pointer.bit_width() static method
+    if methodName == "bit_width" {
       guard args.count == 0 else {
-        throw SemanticError.invalidArgumentCount(function: "bits", expected: 0, got: args.count)
+        throw SemanticError.invalidArgumentCount(function: "bit_width", expected: 0, got: args.count)
       }
       return .intrinsicCall(.ptrBits)
     }

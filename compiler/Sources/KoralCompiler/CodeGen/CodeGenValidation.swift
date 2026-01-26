@@ -7,7 +7,7 @@ extension CodeGen {
   /// Validates that a type has been fully resolved (no generic parameters or parameterized types).
   /// This is called during code generation to catch any types that weren't properly resolved
   /// by the Monomorphizer.
-  func assertTypeResolved(_ type: Type, context: String, visited: Set<UUID> = []) {
+  func assertTypeResolved(_ type: Type, context: String, visited: Set<UInt64> = []) {
     switch type {
     case .genericParameter(let name):
       fatalError("CodeGen error: Generic parameter '\(name)' should be resolved before code generation. Context: \(context)")
@@ -24,20 +24,20 @@ extension CodeGen {
       assertTypeResolved(inner, context: "\(context) -> reference inner type", visited: visited)
     case .pointer(let element):
       assertTypeResolved(element, context: "\(context) -> pointer element type", visited: visited)
-    case .structure(let decl):
-      // Prevent infinite recursion for recursive types (using UUID)
-      if visited.contains(decl.id) { return }
+    case .structure(let defId):
+      // Prevent infinite recursion for recursive types (using DefId)
+      if visited.contains(defId.id) { return }
       var newVisited = visited
-      newVisited.insert(decl.id)
-      for member in decl.members {
+      newVisited.insert(defId.id)
+      for member in typedDefMap.getStructMembers(defId) ?? [] {
         assertTypeResolved(member.type, context: "\(context) -> struct member '\(member.name)'", visited: newVisited)
       }
-    case .union(let decl):
-      // Prevent infinite recursion for recursive types (using UUID)
-      if visited.contains(decl.id) { return }
+    case .union(let defId):
+      // Prevent infinite recursion for recursive types (using DefId)
+      if visited.contains(defId.id) { return }
       var newVisited = visited
-      newVisited.insert(decl.id)
-      for unionCase in decl.cases {
+      newVisited.insert(defId.id)
+      for unionCase in typedDefMap.getUnionCases(defId) ?? [] {
         for param in unionCase.parameters {
           assertTypeResolved(param.type, context: "\(context) -> union case '\(unionCase.name)' parameter '\(param.name)'", visited: newVisited)
         }

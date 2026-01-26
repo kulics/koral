@@ -265,6 +265,27 @@ public class Scope {
     // 4. 递归查找父作用域
     return parent?.lookupWithInfo(name, sourceFile: sourceFile)
   }
+
+  /// Lookup a symbol only in the current scope (no parent traversal)
+  /// Returns: (type, mutable, isPrivate, sourceFile, modulePath)
+  public func lookupWithInfoLocal(_ name: String, sourceFile: String? = nil) -> (type: Type, mutable: Bool, isPrivate: Bool, sourceFile: String?, modulePath: [String])? {
+    // Generic parameters in the current scope
+    if let genericType = genericParameters[name] {
+      return (type: genericType, mutable: false, isPrivate: false, sourceFile: nil, modulePath: [])
+    }
+    // Private symbols in the current scope for the current file
+    if let sourceFile = sourceFile {
+      let key = "\(name)@\(sourceFile)"
+      if let info = privateSymbols[key] {
+        return (type: info.type, mutable: info.mutable, isPrivate: true, sourceFile: info.sourceFile, modulePath: symbolModulePaths[name] ?? [])
+      }
+    }
+    // Public/protected symbols in the current scope
+    if let (type, mutable) = symbols[name] {
+      return (type: type, mutable: mutable, isPrivate: false, sourceFile: nil, modulePath: symbolModulePaths[name] ?? [])
+    }
+    return nil
+  }
   
   /// Check if a symbol is mutable, checking private symbols for the given source file first
   public func isMutable(_ name: String, sourceFile: String? = nil) -> Bool {
@@ -360,6 +381,26 @@ public class Scope {
   
   /// Lookup a type, checking generic parameters first, then private types for the given source file
   public func lookupType(_ name: String, sourceFile: String? = nil) -> Type? {
+    var visited: Set<ObjectIdentifier> = []
+    return lookupTypeInternal(name, sourceFile: sourceFile, visited: &visited)
+  }
+
+  public func lookupType(_ name: String) -> Type? {
+    var visited: Set<ObjectIdentifier> = []
+    return lookupTypeInternal(name, sourceFile: nil, visited: &visited)
+  }
+
+  private func lookupTypeInternal(
+    _ name: String,
+    sourceFile: String?,
+    visited: inout Set<ObjectIdentifier>
+  ) -> Type? {
+    let id = ObjectIdentifier(self)
+    if visited.contains(id) {
+      return nil
+    }
+    visited.insert(id)
+
     // 1. 首先检查泛型参数（最高优先级）
     if let genericType = genericParameters[name] {
       return genericType
@@ -376,20 +417,7 @@ public class Scope {
       return type
     }
     // 4. 递归查找父作用域
-    return parent?.lookupType(name, sourceFile: sourceFile)
-  }
-
-  public func lookupType(_ name: String) -> Type? {
-    // 1. 首先检查泛型参数（最高优先级）
-    if let genericType = genericParameters[name] {
-      return genericType
-    }
-    // 2. Then check public/protected types
-    if let type = types[name] {
-      return type
-    }
-    // 3. 递归查找父作用域
-    return parent?.lookupType(name)
+    return parent?.lookupTypeInternal(name, sourceFile: sourceFile, visited: &visited)
   }
 
   public func resolveType(_ name: String) -> Type? {

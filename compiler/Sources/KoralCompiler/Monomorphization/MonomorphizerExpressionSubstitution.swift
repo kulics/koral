@@ -386,9 +386,9 @@ extension Monomorphizer {
             // 1. Update the identifier name to match the concrete type's layout name
             // 2. Ensure the concrete type is instantiated
             var newName = identifier.name
-            if case .structure(let decl) = substitutedType {
-                let layoutName = decl.name
-                let isGenericInstantiation = decl.isGenericInstantiation
+            if case .structure(let defId) = substitutedType {
+                let layoutName = defIdMap.getName(defId) ?? substitutedType.description
+                let isGenericInstantiation = typedDefMap.isGenericInstantiation(defId) ?? false
                 newName = layoutName
                 // Trigger instantiation of the concrete type if needed
                 if isGenericInstantiation && !generatedLayouts.contains(layoutName) && !substitutedType.containsGenericParameter {
@@ -418,16 +418,9 @@ extension Monomorphizer {
                                 typeArgsReconstructed.append(.reference(inner: .int)) // Heuristic
                             } else if key.hasPrefix("Struct_") {
                                 // Nested struct - need to look up
-                                let nestedDecl = StructDecl(
-                                    name: key,
-                                    defId: getOrAllocateTypeDefId(name: key, kind: .structure),
-                                    modulePath: [],
-                                    sourceFile: "",
-                                    access: .default,
-                                    members: [],
-                                    isGenericInstantiation: true
-                                )
-                                typeArgsReconstructed.append(.structure(decl: nestedDecl))
+                                let defId = getOrAllocateTypeDefId(name: key, kind: .structure)
+                                typedDefMap.addStructInfo(defId: defId, members: [], isGenericInstantiation: true, typeArguments: nil)
+                                typeArgsReconstructed.append(.structure(defId: defId))
                             } else {
                                 // Unknown type - use the substituted type's info
                                 break
@@ -451,9 +444,9 @@ extension Monomorphizer {
                         }
                     }
                 }
-            } else if case .union(let decl) = substitutedType {
-                let layoutName = decl.name
-                let isGenericInstantiation = decl.isGenericInstantiation
+            } else if case .union(let defId) = substitutedType {
+                let layoutName = defIdMap.getName(defId) ?? substitutedType.description
+                let isGenericInstantiation = typedDefMap.isGenericInstantiation(defId) ?? false
                 newName = layoutName
                 // Similar logic for unions
                 if isGenericInstantiation && !generatedLayouts.contains(layoutName) && !substitutedType.containsGenericParameter {

@@ -138,8 +138,8 @@ extension ExhaustivenessChecker {
         }
         
         switch subjectType {
-        case .union(let decl):
-            return Set(decl.cases.map { $0.name })
+        case .union(let defId):
+            return Set((TypedDefContext.current?.getUnionCases(defId) ?? []).map { $0.name })
         default:
             return []
         }
@@ -163,8 +163,10 @@ extension ExhaustivenessChecker {
         
         // Handle different types
         switch subjectType {
-        case .union(let decl):
-            try checkUnionExhaustiveness(typeName: decl.name, cases: decl.cases, hasCatchall: hasCatchall)
+        case .union(let defId):
+            let typeName = DefIdContext.current?.getName(defId) ?? subjectType.description
+            let cases = TypedDefContext.current?.getUnionCases(defId) ?? []
+            try checkUnionExhaustiveness(typeName: typeName, cases: cases, hasCatchall: hasCatchall)
             
         case .genericUnion(let templateName, _):
             // Use resolved cases if available
@@ -195,11 +197,12 @@ extension ExhaustivenessChecker {
                 )
             }
             
-        case .structure(let decl):
+        case .structure(let defId):
             // Struct types require catchall (can't enumerate all values)
             if !hasCatchall {
+                let name = DefIdContext.current?.getName(defId) ?? subjectType.description
                 throw SemanticError(
-                    .missingCatchallPattern(type: decl.name),
+                    .missingCatchallPattern(type: name),
                     line: currentLine
                 )
             }
@@ -284,8 +287,8 @@ extension ExhaustivenessChecker {
     }
     
     private func isStringType(_ type: Type) -> Bool {
-        if case .structure(let decl) = type {
-            return decl.name == "String"
+        if case .structure(let defId) = type {
+            return DefIdContext.current?.getName(defId) == "String"
         }
         return false
     }

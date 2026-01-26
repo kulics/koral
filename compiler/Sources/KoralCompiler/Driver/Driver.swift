@@ -310,7 +310,12 @@ public class Driver {
     }
 
     // 3. Code generation
-    let codeGen = CodeGen(ast: monomorphizedProgram, escapeAnalysisReportEnabled: escapeAnalysisReport)
+    let codeGen = CodeGen(
+      ast: monomorphizedProgram,
+      defIdMap: monomorphizer.defIdMap,
+      typedDefMap: monomorphizer.typedDefMap,
+      escapeAnalysisReportEnabled: escapeAnalysisReport
+    )
     let cSource = codeGen.generate()
     
     // Output escape analysis report if enabled

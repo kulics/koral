@@ -259,11 +259,11 @@ public class Unifier {
         case .pointer(let elem):
             return occurs(tv, in: elem)
             
-        case .structure(let decl):
-            return decl.members.contains { occurs(tv, in: $0.type) }
+        case .structure(let defId):
+            return (TypedDefContext.current?.getStructMembers(defId) ?? []).contains { occurs(tv, in: $0.type) }
             
-        case .union(let decl):
-            return decl.cases.contains { c in
+        case .union(let defId):
+            return (TypedDefContext.current?.getUnionCases(defId) ?? []).contains { c in
                 c.parameters.contains { occurs(tv, in: $0.type) }
             }
             

@@ -167,16 +167,56 @@ public struct NameTable {
 /// - 支持函数签名查询
 /// - 支持泛型实例化
 public struct TypedDefMap {
-    /// DefId 到类型的映射
+    public struct StructTypeInfo {
+        public let members: [(name: String, type: Type, mutable: Bool)]
+        public let isGenericInstantiation: Bool
+        public let typeArguments: [Type]?
+        
+        public init(
+            members: [(name: String, type: Type, mutable: Bool)],
+            isGenericInstantiation: Bool,
+            typeArguments: [Type]?
+        ) {
+            self.members = members
+            self.isGenericInstantiation = isGenericInstantiation
+            self.typeArguments = typeArguments
+        }
+    }
+    
+    public struct UnionTypeInfo {
+        public let cases: [UnionCase]
+        public let isGenericInstantiation: Bool
+        public let typeArguments: [Type]?
+        
+        public init(
+            cases: [UnionCase],
+            isGenericInstantiation: Bool,
+            typeArguments: [Type]?
+        ) {
+            self.cases = cases
+            self.isGenericInstantiation = isGenericInstantiation
+            self.typeArguments = typeArguments
+        }
+    }
+    
+    /// DefId 到类型的映射（用于占位类型或快速查找）
     private var typeMap: [UInt64: Type]
     
     /// DefId 到函数签名的映射
     private var signatureMap: [UInt64: FunctionSignature]
     
+    /// DefId 到结构体信息的映射
+    private var structInfoMap: [UInt64: StructTypeInfo]
+    
+    /// DefId 到联合类型信息的映射
+    private var unionInfoMap: [UInt64: UnionTypeInfo]
+    
     /// 创建空的类型化定义映射
     public init() {
         self.typeMap = [:]
         self.signatureMap = [:]
+        self.structInfoMap = [:]
+        self.unionInfoMap = [:]
     }
     
     /// 添加类型定义
@@ -186,6 +226,34 @@ public struct TypedDefMap {
     ///   - type: 解析后的类型
     public mutating func addType(defId: DefId, type: Type) {
         typeMap[defId.id] = type
+    }
+    
+    /// 添加结构体信息
+    public mutating func addStructInfo(
+        defId: DefId,
+        members: [(name: String, type: Type, mutable: Bool)],
+        isGenericInstantiation: Bool = false,
+        typeArguments: [Type]? = nil
+    ) {
+        structInfoMap[defId.id] = StructTypeInfo(
+            members: members,
+            isGenericInstantiation: isGenericInstantiation,
+            typeArguments: typeArguments
+        )
+    }
+    
+    /// 添加联合类型信息
+    public mutating func addUnionInfo(
+        defId: DefId,
+        cases: [UnionCase],
+        isGenericInstantiation: Bool = false,
+        typeArguments: [Type]? = nil
+    ) {
+        unionInfoMap[defId.id] = UnionTypeInfo(
+            cases: cases,
+            isGenericInstantiation: isGenericInstantiation,
+            typeArguments: typeArguments
+        )
     }
     
     /// 添加函数签名
@@ -205,6 +273,38 @@ public struct TypedDefMap {
         return typeMap[defId.id]
     }
     
+    /// 查找结构体成员
+    public func getStructMembers(_ defId: DefId) -> [(name: String, type: Type, mutable: Bool)]? {
+        return structInfoMap[defId.id]?.members
+    }
+    
+    /// 查找联合类型 cases
+    public func getUnionCases(_ defId: DefId) -> [UnionCase]? {
+        return unionInfoMap[defId.id]?.cases
+    }
+    
+    /// 是否为泛型实例化
+    public func isGenericInstantiation(_ defId: DefId) -> Bool? {
+        if let info = structInfoMap[defId.id] {
+            return info.isGenericInstantiation
+        }
+        if let info = unionInfoMap[defId.id] {
+            return info.isGenericInstantiation
+        }
+        return nil
+    }
+    
+    /// 获取泛型类型参数
+    public func getTypeArguments(_ defId: DefId) -> [Type]? {
+        if let info = structInfoMap[defId.id] {
+            return info.typeArguments
+        }
+        if let info = unionInfoMap[defId.id] {
+            return info.typeArguments
+        }
+        return nil
+    }
+    
     /// 查找函数签名
     ///
     /// - Parameter defId: 函数的 DefId
@@ -212,6 +312,12 @@ public struct TypedDefMap {
     public func lookupSignature(defId: DefId) -> FunctionSignature? {
         return signatureMap[defId.id]
     }
+}
+
+// MARK: - Migration Context (Deprecated Accessors)
+
+public enum TypedDefContext {
+    public nonisolated(unsafe) static var current: TypedDefMap?
 }
 
 /// 函数签名 - 描述函数的参数和返回类型

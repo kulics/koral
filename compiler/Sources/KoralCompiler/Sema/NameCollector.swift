@@ -275,11 +275,14 @@ public class NameCollector: CompilerPass {
             modulePath: currentModulePath,
             name: name,
             kind: .type(.trait),
-            sourceFile: currentSourceFile
+            sourceFile: currentSourceFile,
+            access: access,
+            span: span
         )
         
         // 添加到名称表
-        nameTable.add(name: defId.qualifiedName, defId: defId)
+        let fullName = defIdMap.getQualifiedName(defId) ?? qualifiedName
+        nameTable.add(name: fullName, defId: defId)
         
         // 收集 trait 信息
         collectedTraits[qualifiedName] = CollectedTraitInfo(
@@ -336,11 +339,14 @@ public class NameCollector: CompilerPass {
             modulePath: currentModulePath,
             name: name,
             kind: defKind,
-            sourceFile: currentSourceFile
+            sourceFile: currentSourceFile,
+            access: access,
+            span: span
         )
         
         // 添加到名称表
-        nameTable.add(name: defId.qualifiedName, defId: defId)
+        let fullName = defIdMap.getQualifiedName(defId) ?? qualifiedName
+        nameTable.add(name: fullName, defId: defId)
         
         // 收集类型信息
         if !typeParameters.isEmpty {
@@ -410,11 +416,14 @@ public class NameCollector: CompilerPass {
             modulePath: currentModulePath,
             name: name,
             kind: defKind,
-            sourceFile: currentSourceFile
+            sourceFile: currentSourceFile,
+            access: access,
+            span: span
         )
         
         // 添加到名称表
-        nameTable.add(name: defId.qualifiedName, defId: defId)
+        let fullName = defIdMap.getQualifiedName(defId) ?? qualifiedName
+        nameTable.add(name: fullName, defId: defId)
         
         // 收集类型信息
         if !typeParameters.isEmpty {
@@ -470,11 +479,14 @@ public class NameCollector: CompilerPass {
             modulePath: currentModulePath,
             name: name,
             kind: defKind,
-            sourceFile: currentSourceFile
+            sourceFile: currentSourceFile,
+            access: access,
+            span: span
         )
         
         // 添加到名称表
-        nameTable.add(name: defId.qualifiedName, defId: defId)
+        let fullName = defIdMap.getQualifiedName(defId) ?? name
+        nameTable.add(name: fullName, defId: defId)
         
         // 收集函数信息
         let isPrivate = (access == .private)
@@ -503,11 +515,14 @@ public class NameCollector: CompilerPass {
             modulePath: currentModulePath,
             name: name,
             kind: .variable,
-            sourceFile: currentSourceFile
+            sourceFile: currentSourceFile,
+            access: access,
+            span: span
         )
         
         // 添加到名称表
-        nameTable.add(name: defId.qualifiedName, defId: defId)
+        let fullName = defIdMap.getQualifiedName(defId) ?? name
+        nameTable.add(name: fullName, defId: defId)
     }
     
     // MARK: - Given 声明收集
@@ -562,11 +577,14 @@ public class NameCollector: CompilerPass {
             modulePath: currentModulePath,
             name: name,
             kind: defKind,
-            sourceFile: currentSourceFile
+            sourceFile: currentSourceFile,
+            access: .default,
+            span: span
         )
         
         // 添加到名称表
-        nameTable.add(name: defId.qualifiedName, defId: defId)
+        let fullName = defIdMap.getQualifiedName(defId) ?? name
+        nameTable.add(name: fullName, defId: defId)
         
         // 收集类型信息
         if !typeParameters.isEmpty {
@@ -619,11 +637,14 @@ public class NameCollector: CompilerPass {
             modulePath: currentModulePath,
             name: name,
             kind: defKind,
-            sourceFile: currentSourceFile
+            sourceFile: currentSourceFile,
+            access: .default,
+            span: span
         )
         
         // 添加到名称表
-        nameTable.add(name: defId.qualifiedName, defId: defId)
+        let fullName = defIdMap.getQualifiedName(defId) ?? name
+        nameTable.add(name: fullName, defId: defId)
         
         // 收集函数信息
         collectedFunctions[name] = CollectedFunctionInfo(
@@ -666,7 +687,9 @@ public class NameCollector: CompilerPass {
                 modulePath: Array(parts.dropLast()),
                 name: parts.last ?? "",
                 kind: .module,
-                sourceFile: ""
+                sourceFile: "",
+                access: .default,
+                span: .unknown
             )
             
             // 添加到名称表
