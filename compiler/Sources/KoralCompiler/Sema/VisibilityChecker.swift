@@ -39,8 +39,11 @@ public enum VisibilityError: Error, CustomStringConvertible {
 /// 可见性检查器
 /// 负责检查符号是否可以从当前位置直接访问，以及生成正确的访问建议
 public class VisibilityChecker {
+    private let context: CompilerContext
     
-    public init() {}
+    public init(context: CompilerContext) {
+        self.context = context
+    }
     
     // MARK: - Direct Access Check
     
@@ -284,9 +287,9 @@ public class VisibilityChecker {
         let typeModulePath: [String]
         switch type {
         case .structure(let defId):
-            typeModulePath = DefIdContext.current?.getModulePath(defId) ?? []
+            typeModulePath = context.getModulePath(defId) ?? []
         case .union(let defId):
-            typeModulePath = DefIdContext.current?.getModulePath(defId) ?? []
+            typeModulePath = context.getModulePath(defId) ?? []
         case .genericStruct, .genericUnion:
             // 泛型模板目前没有存储模块路径，暂时跳过检查
             // TODO: 为泛型模板添加模块路径支持

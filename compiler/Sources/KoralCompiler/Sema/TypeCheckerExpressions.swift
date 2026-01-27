@@ -110,7 +110,8 @@ extension TypeChecker {
         subjectType: subjectType,
         patterns: patterns,
         currentLine: currentLine,
-        resolvedUnionCases: resolvedCases
+        resolvedUnionCases: resolvedCases,
+        context: context
       )
       try checker.check()
       
@@ -610,7 +611,7 @@ extension TypeChecker {
         if let type = moduleInfo.publicTypes[typeName] {
           // Handle concrete struct types
           if case .structure(let defId) = type {
-            let typeName = DefIdContext.current?.getName(defId) ?? ""
+            let typeName = context.getName(defId) ?? ""
             // Look up static method on the struct using simple name (how extensionMethods is keyed)
             if let methods = extensionMethods[typeName], let methodSym = methods[methodName] {
               // Check if it's a static method (no self parameter or first param is not self)
@@ -666,7 +667,7 @@ extension TypeChecker {
           
           // Handle concrete union types
           if case .union(let defId) = type {
-            let unionCases = TypedDefContext.current?.getUnionCases(defId) ?? []
+            let unionCases = context.getUnionCases(defId) ?? []
             // Check if it's a union case constructor
             if let c = unionCases.first(where: { $0.name == methodName }) {
               let params = c.parameters.map { Parameter(type: $0.type, kind: .byVal) }
@@ -694,7 +695,7 @@ extension TypeChecker {
             }
             
             // Look up static method on the union using simple name
-            let unionName = DefIdContext.current?.getName(defId) ?? ""
+            let unionName = context.getName(defId) ?? ""
             if let methods = extensionMethods[unionName], let methodSym = methods[methodName] {
               let isStatic: Bool
               if case .function(let params, _) = methodSym.type {
@@ -750,7 +751,7 @@ extension TypeChecker {
         // Also try looking up the type from global scope (for types not yet in module's publicTypes)
         if let type = currentScope.lookupType(typeName) {
           if case .structure(let defId) = type {
-            let name = DefIdContext.current?.getName(defId) ?? ""
+            let name = context.getName(defId) ?? ""
             if let methods = extensionMethods[name], let methodSym = methods[methodName] {
               let isStatic: Bool
               if case .function(let params, _) = methodSym.type {
@@ -805,6 +806,72 @@ extension TypeChecker {
       }
     }
     
+    // Static trait method calls on generic parameter types (e.g., T.method())
+    if case .memberPath(let baseExpr, let path) = callee,
+       case .identifier(let baseName) = baseExpr,
+       path.count == 1,
+       let baseType = currentScope.lookupType(baseName),
+       case .genericParameter(let paramName) = baseType
+    {
+      let methodName = path[0]
+      if let bounds = genericTraitBounds[paramName] {
+        for traitConstraint in bounds {
+          let traitName = traitConstraint.baseName
+          let methods = try flattenedTraitMethods(traitName)
+          if let sig = methods[methodName], sig.parameters.first?.name != "self" {
+            let traitInfo = traits[traitName]
+            var traitTypeArgs: [Type] = []
+            if case .generic(_, let argNodes) = traitConstraint {
+              for argNode in argNodes {
+                let argType = try resolveTypeNode(argNode)
+                traitTypeArgs.append(argType)
+              }
+            }
+
+            let expectedType = try expectedFunctionTypeForTraitMethod(
+              sig,
+              selfType: baseType,
+              traitInfo: traitInfo,
+              traitTypeArgs: traitTypeArgs
+            )
+
+            guard case .function(let params, let returnType) = expectedType else {
+              throw SemanticError(.generic("Expected function type for static trait method"), line: currentLine)
+            }
+
+            if arguments.count != params.count {
+              throw SemanticError.invalidArgumentCount(
+                function: methodName,
+                expected: params.count,
+                got: arguments.count
+              )
+            }
+
+            var typedArguments: [TypedExpressionNode] = []
+            for (arg, param) in zip(arguments, params) {
+              var typedArg = try inferTypedExpression(arg)
+              typedArg = try coerceLiteral(typedArg, to: param.type)
+              if typedArg.type != param.type {
+                throw SemanticError.typeMismatch(
+                  expected: param.type.description,
+                  got: typedArg.type.description
+                )
+              }
+              typedArguments.append(typedArg)
+            }
+
+            return .staticMethodCall(
+              baseType: baseType,
+              methodName: methodName,
+              typeArgs: [],
+              arguments: typedArguments,
+              type: returnType
+            )
+          }
+        }
+      }
+    }
+
     // Check if callee is a static method call on a generic type (e.g., [Int]List.new())
     if case .memberPath(let baseExpr, let path) = callee,
        case .genericInstantiation(let baseName, let args) = baseExpr,
@@ -826,7 +893,7 @@ extension TypeChecker {
         try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
         
         // Record instantiation request for deferred monomorphization
-        if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+        if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
           recordInstantiation(InstantiationRequest(
             kind: .structType(template: template, args: resolvedArgs),
             sourceLine: currentLine,
@@ -906,7 +973,7 @@ extension TypeChecker {
         try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
         
         // Record instantiation request for deferred monomorphization
-        if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+        if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
           recordInstantiation(InstantiationRequest(
             kind: .unionType(template: template, args: resolvedArgs),
             sourceLine: currentLine,
@@ -1027,7 +1094,7 @@ extension TypeChecker {
         // Check for union constructor (both concrete and generic)
         var unionName: String? = nil
         if case .union(let defId) = returnType {
-          unionName = DefIdContext.current?.getName(defId)
+          unionName = context.getName(defId)
         } else if case .genericUnion(let templateName, _) = returnType {
           unionName = templateName
         }
@@ -1072,7 +1139,7 @@ extension TypeChecker {
           throw SemanticError.invalidOperation(
             op: "construct", type1: type.description, type2: "")
         }
-        let parameters = TypedDefContext.current?.getStructMembers(defId) ?? []
+        let parameters = context.getStructMembers(defId) ?? []
 
         if arguments.count != parameters.count {
           throw SemanticError.invalidArgumentCount(
@@ -1135,6 +1202,76 @@ extension TypeChecker {
     // Method call
     if case .methodReference(let base, let method, _, _, let methodType) = typedCallee {
       return try inferMethodCall(base: base, method: method, methodType: methodType, arguments: arguments)
+    }
+
+    // Trait method placeholder call (for trait methods on generic parameters)
+    if case .traitMethodPlaceholder(let traitName, let methodName, let base, let methodTypeArgs, let methodType) = typedCallee {
+      // For trait method placeholders, we need to handle the call similarly to method calls
+      // The base is already included in the placeholder, so we just need to type-check the arguments
+      guard case .function(let params, let returns) = methodType else {
+        throw SemanticError.invalidOperation(op: "call", type1: methodType.description, type2: "")
+      }
+      
+      // The first parameter is 'self' (the base), so we check remaining arguments
+      let expectedArgCount = params.count - 1
+      if arguments.count != expectedArgCount {
+        throw SemanticError.invalidArgumentCount(
+          function: "trait method",
+          expected: expectedArgCount,
+          got: arguments.count
+        )
+      }
+      
+      // Adjust base to match expected self parameter type
+      var adjustedBase = base
+      if let firstParam = params.first, adjustedBase.type != firstParam.type {
+        if case .reference(let inner) = firstParam.type, inner == adjustedBase.type {
+          adjustedBase = .referenceExpression(expression: adjustedBase, type: firstParam.type)
+        } else if case .reference(let inner) = adjustedBase.type, inner == firstParam.type {
+          adjustedBase = .derefExpression(expression: adjustedBase, type: inner)
+        } else {
+          throw SemanticError.typeMismatch(
+            expected: firstParam.type.description,
+            got: adjustedBase.type.description
+          )
+        }
+      }
+
+      var typedArguments: [TypedExpressionNode] = []
+      for (arg, param) in zip(arguments, params.dropFirst()) {
+        var typedArg: TypedExpressionNode
+        if case .lambdaExpression(let lambdaParams, let returnType, let body, _) = arg {
+          typedArg = try inferLambdaExpression(
+            parameters: lambdaParams,
+            returnType: returnType,
+            body: body,
+            expectedType: param.type
+          )
+        } else {
+          typedArg = try inferTypedExpression(arg)
+        }
+        typedArg = try coerceLiteral(typedArg, to: param.type)
+        if typedArg.type != param.type {
+          throw SemanticError.typeMismatch(
+            expected: param.type.description,
+            got: typedArg.type.description
+          )
+        }
+        typedArguments.append(typedArg)
+      }
+      
+      let adjustedCallee: TypedExpressionNode = .traitMethodPlaceholder(
+        traitName: traitName,
+        methodName: methodName,
+        base: adjustedBase,
+        methodTypeArgs: methodTypeArgs,
+        type: methodType
+      )
+      return .call(
+        callee: adjustedCallee,
+        arguments: typedArguments,
+        type: returns
+      )
     }
 
     // Function call
@@ -1206,7 +1343,7 @@ extension TypeChecker {
       
       // Record instantiation request for deferred monomorphization
       // Skip if any argument contains generic parameters (will be recorded when fully resolved)
-      if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+      if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
         recordInstantiation(InstantiationRequest(
           kind: .structType(template: template, args: resolvedArgs),
           sourceLine: currentLine,
@@ -1349,7 +1486,7 @@ extension TypeChecker {
       
       // Record instantiation request for deferred monomorphization
       // Skip if any argument contains generic parameters (will be recorded when fully resolved)
-      if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+      if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
         recordInstantiation(InstantiationRequest(
           kind: .function(template: template, args: resolvedArgs),
           sourceLine: currentLine,
@@ -1472,7 +1609,7 @@ extension TypeChecker {
 
     // Record instantiation request for deferred monomorphization
     // Skip if any argument contains generic parameters (will be recorded when fully resolved)
-    if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+    if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
       recordInstantiation(InstantiationRequest(
         kind: .function(template: template, args: resolvedArgs),
         sourceLine: currentLine,
@@ -1580,8 +1717,8 @@ extension TypeChecker {
       }
 
       // Check if method has unresolved type parameters (method-level generics)
-      let hasMethodLevelGenerics = returns.containsGenericParameter || 
-        params.dropFirst().contains { $0.type.containsGenericParameter }
+      let hasMethodLevelGenerics = context.containsGenericParameter(returns) || 
+        params.dropFirst().contains { context.containsGenericParameter($0.type) }
 
       var typedArguments: [TypedExpressionNode] = []
       var methodTypeParamBindings: [String: Type] = [:]
@@ -1596,7 +1733,7 @@ extension TypeChecker {
           }
           let typedArg = try inferTypedExpression(arg)
           let coercedArg = try coerceLiteral(typedArg, to: param.type)
-          if param.type.containsGenericParameter {
+          if context.containsGenericParameter(param.type) {
             _ = unifyTypes(param.type, coercedArg.type, bindings: &methodTypeParamBindings)
           }
         }
@@ -1610,7 +1747,7 @@ extension TypeChecker {
           // Substitute known type parameters into expected type for lambda inference
           var expectedType = param.type
           if hasMethodLevelGenerics && !methodTypeParamBindings.isEmpty {
-            expectedType = SemaUtils.substituteType(param.type, substitution: methodTypeParamBindings)
+            expectedType = SemaUtils.substituteType(param.type, substitution: methodTypeParamBindings, context: context)
           }
           typedArg = try inferLambdaExpression(
             parameters: lambdaParams,
@@ -1619,14 +1756,14 @@ extension TypeChecker {
             expectedType: expectedType
           )
           // After inferring lambda, unify to get any remaining type parameters
-          if param.type.containsGenericParameter {
+          if context.containsGenericParameter(param.type) {
             _ = unifyTypes(param.type, typedArg.type, bindings: &methodTypeParamBindings)
           }
         } else if case .rangeExpression(let op, let left, let right) = arg {
           // For Range expressions (especially FullRange), pass the expected type for type inference
           var expectedType = param.type
           if hasMethodLevelGenerics && !methodTypeParamBindings.isEmpty {
-            expectedType = SemaUtils.substituteType(param.type, substitution: methodTypeParamBindings)
+            expectedType = SemaUtils.substituteType(param.type, substitution: methodTypeParamBindings, context: context)
           }
           typedArg = try inferRangeExpression(
             operator: op,
@@ -1635,7 +1772,7 @@ extension TypeChecker {
             expectedType: expectedType
           )
           // After inferring range, unify to get any remaining type parameters
-          if param.type.containsGenericParameter {
+          if context.containsGenericParameter(param.type) {
             _ = unifyTypes(param.type, typedArg.type, bindings: &methodTypeParamBindings)
           }
         } else {
@@ -1643,7 +1780,7 @@ extension TypeChecker {
           typedArg = try coerceLiteral(typedArg, to: param.type)
           
           // If param type contains generic parameters, unify to infer them
-          if param.type.containsGenericParameter {
+          if context.containsGenericParameter(param.type) {
             _ = unifyTypes(param.type, typedArg.type, bindings: &methodTypeParamBindings)
           } else if typedArg.type != param.type {
             // Try implicit ref/deref for arguments as well (mirrors self handling).
@@ -1673,7 +1810,7 @@ extension TypeChecker {
       var inferredMethodTypeArgs: [Type]? = nil
       if hasMethodLevelGenerics {
         if !methodTypeParamBindings.isEmpty {
-          finalReturns = SemaUtils.substituteType(returns, substitution: methodTypeParamBindings)
+          finalReturns = SemaUtils.substituteType(returns, substitution: methodTypeParamBindings, context: context)
         }
         // Extract method type args in order from the function type
         // The order is determined by the order of first appearance in the function type
@@ -1798,7 +1935,8 @@ extension TypeChecker {
               typeArgs: methodResult.typeArgs,
               params: params,
               returns: returns,
-              arguments: arguments
+              arguments: arguments,
+              traitName: methodResult.traitName
             )
           }
         } else if case .reference(let inner) = typedBase.type, inner == firstParam.type {
@@ -1847,13 +1985,26 @@ extension TypeChecker {
       typedArguments.append(typedArg)
     }
     
-    let finalCallee: TypedExpressionNode = .methodReference(
-      base: finalBase,
-      method: methodResult.methodSymbol,
-      typeArgs: methodResult.typeArgs,
-      methodTypeArgs: resolvedMethodTypeArgs,
-      type: methodResult.methodType
-    )
+    // Check if this is a trait method placeholder (for generic parameter types)
+    let finalCallee: TypedExpressionNode
+    if let traitName = methodResult.traitName {
+      // Create a traitMethodPlaceholder instead of methodReference
+      finalCallee = .traitMethodPlaceholder(
+        traitName: traitName,
+        methodName: methodResult.methodSymbol.name,
+        base: finalBase,
+        methodTypeArgs: resolvedMethodTypeArgs,
+        type: methodResult.methodType
+      )
+    } else {
+      finalCallee = .methodReference(
+        base: finalBase,
+        method: methodResult.methodSymbol,
+        typeArgs: methodResult.typeArgs,
+        methodTypeArgs: resolvedMethodTypeArgs,
+        type: methodResult.methodType
+      )
+    }
     
     return .call(callee: finalCallee, arguments: typedArguments, type: returns)
   }
@@ -1955,7 +2106,7 @@ extension TypeChecker {
       if path.count == 1 {
         let memberName = path[0]
         if case .union(let defId) = type {
-          if let c = TypedDefContext.current?.getUnionCases(defId)?.first(where: { $0.name == memberName }) {
+          if let c = context.getUnionCases(defId)?.first(where: { $0.name == memberName }) {
             let paramTypes = c.parameters.map { Parameter(type: $0.type, kind: .byVal) }
             let funcType = Type.function(parameters: paramTypes, returns: type)
             let symbol = makeLocalSymbol(name: "\(name).\(memberName)", type: funcType, kind: .function)
@@ -1982,7 +2133,7 @@ extension TypeChecker {
         try enforceGenericConstraints(typeParameters: template.typeParameters, args: typeArgs)
         
         // Record instantiation request for deferred monomorphization
-        if !typeArgs.contains(where: { $0.containsGenericParameter }) {
+        if !typeArgs.contains(where: { context.containsGenericParameter($0) }) {
           recordInstantiation(InstantiationRequest(
             kind: .unionType(template: template, args: typeArgs),
             sourceLine: currentLine,
@@ -2046,7 +2197,7 @@ extension TypeChecker {
       // Check if it is a structure to access members
       var foundMember = false
       if case .structure(let defId) = typeToLookup {
-        if let mem = TypedDefContext.current?.getStructMembers(defId)?.first(where: { $0.name == memberName }) {
+        if let mem = context.getStructMembers(defId)?.first(where: { $0.name == memberName }) {
           let sym = makeLocalSymbol(
             name: mem.name, type: mem.type, kind: .variable(mem.mutable ? .MutableValue : .Value))
           typedPath.append(sym)
@@ -2092,7 +2243,7 @@ extension TypeChecker {
         }
 
         if case .structure(let defId) = typeToLookup {
-          let name = DefIdContext.current?.getName(defId) ?? ""
+          let name = context.getName(defId) ?? ""
           throw SemanticError.undefinedMember(memberName, name)
         } else {
           throw SemanticError.invalidOperation(
@@ -2117,7 +2268,7 @@ extension TypeChecker {
       
       try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
       
-      if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+      if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
         recordInstantiation(InstantiationRequest(
           kind: .structType(template: template, args: resolvedArgs),
           sourceLine: currentLine,
@@ -2158,7 +2309,7 @@ extension TypeChecker {
       
       try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
       
-      if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+      if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
         recordInstantiation(InstantiationRequest(
           kind: .unionType(template: template, args: resolvedArgs),
           sourceLine: currentLine,
@@ -2203,45 +2354,10 @@ extension TypeChecker {
       var methodSymbol: Symbol?
 
       // Static trait methods on generic parameters (no `self` parameter)
-      if case .genericParameter(let paramName) = type,
-        let bounds = genericTraitBounds[paramName]
-      {
-        for traitConstraint in bounds {
-          let traitName = traitConstraint.baseName
-          let methods = try flattenedTraitMethods(traitName)
-          if let sig = methods[memberName] {
-            if sig.parameters.first?.name == "self" {
-              continue
-            }
-            
-            let traitInfo = traits[traitName]
-            var traitTypeArgs: [Type] = []
-            if case .generic(_, let argNodes) = traitConstraint {
-              for argNode in argNodes {
-                let argType = try resolveTypeNode(argNode)
-                traitTypeArgs.append(argType)
-              }
-            }
-            
-            let expectedType = try expectedFunctionTypeForTraitMethod(
-              sig, 
-              selfType: type,
-              traitInfo: traitInfo,
-              traitTypeArgs: traitTypeArgs
-            )
-            methodSymbol = makeGlobalSymbol(
-              name: "__trait_\(traitName)_\(memberName)",
-              type: expectedType,
-              kind: .function,
-              access: .default
-            )
-            break
-          }
-        }
-      }
+      // are resolved during call expression inference.
 
       if case .structure(let defId) = type {
-        let name = DefIdContext.current?.getName(defId) ?? ""
+        let name = context.getName(defId) ?? ""
         if let methods = extensionMethods[name], let sym = methods[memberName] {
           methodSymbol = sym
         }
@@ -2261,7 +2377,15 @@ extension TypeChecker {
   
   /// Helper to infer method on a type during member path resolution
   private func inferMethodOnType(typeToLookup: Type, memberName: String, typedBase: TypedExpressionNode, typedPath: [Symbol]) throws -> TypedExpressionNode? {
-    let typeName = typeToLookup.description
+    let typeName: String
+    switch typeToLookup {
+    case .structure(let defId):
+      typeName = context.getName(defId) ?? typeToLookup.description
+    case .union(let defId):
+      typeName = context.getName(defId) ?? typeToLookup.description
+    default:
+      typeName = typeToLookup.description
+    }
     if let methods = extensionMethods[typeName], let methodSym = methods[memberName] {
       if methodSym.methodKind != .normal {
         throw SemanticError(
@@ -2412,15 +2536,10 @@ extension TypeChecker {
             traitInfo: traitInfo,
             traitTypeArgs: traitTypeArgs
           )
-          let placeholder = makeGlobalSymbol(
-            name: "__trait_\(traitName)_\(memberName)",
-            type: expectedType,
-            kind: .function,
-            methodKind: getCompilerMethodKind(memberName),
-            access: .default
-          )
-
-          if placeholder.methodKind != .normal {
+          
+          // Check if this is a compiler protocol method that cannot be called explicitly
+          let methodKind = getCompilerMethodKind(memberName)
+          if methodKind != .normal {
             throw SemanticError(
               .generic("compiler protocol method \(memberName) cannot be called explicitly"),
               line: currentLine)
@@ -2432,7 +2551,18 @@ extension TypeChecker {
           } else {
             base = .memberPath(source: typedBase, path: typedPath)
           }
-          return .methodReference(base: base, method: placeholder, typeArgs: nil, methodTypeArgs: nil, type: expectedType)
+          recordTraitPlaceholderInstantiation(
+            baseType: base.type,
+            methodName: memberName,
+            methodTypeArgs: []
+          )
+          return .traitMethodPlaceholder(
+            traitName: traitName,
+            methodName: memberName,
+            base: base,
+            methodTypeArgs: [],
+            type: expectedType
+          )
         }
       }
     }
@@ -2544,7 +2674,7 @@ extension TypeChecker {
     
     try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedTypeArgs)
     
-    if !resolvedTypeArgs.contains(where: { $0.containsGenericParameter }) {
+    if !resolvedTypeArgs.contains(where: { context.containsGenericParameter($0) }) {
       recordInstantiation(InstantiationRequest(
         kind: .structType(template: template, args: resolvedTypeArgs),
         sourceLine: currentLine,
@@ -2622,7 +2752,7 @@ extension TypeChecker {
     
     try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedTypeArgs)
     
-    if !resolvedTypeArgs.contains(where: { $0.containsGenericParameter }) {
+    if !resolvedTypeArgs.contains(where: { context.containsGenericParameter($0) }) {
       recordInstantiation(InstantiationRequest(
         kind: .unionType(template: template, args: resolvedTypeArgs),
         sourceLine: currentLine,
@@ -2698,9 +2828,9 @@ extension TypeChecker {
     let lookupTypeName: String
     switch type {
     case .structure(let defId):
-      lookupTypeName = DefIdContext.current?.getName(defId) ?? ""
+      lookupTypeName = context.getName(defId) ?? ""
     case .union(let defId):
-      lookupTypeName = DefIdContext.current?.getName(defId) ?? ""
+      lookupTypeName = context.getName(defId) ?? ""
     default:
       lookupTypeName = type.description
     }
@@ -2828,7 +2958,7 @@ extension TypeChecker {
     let methodName = "__equals"
     let receiverType = lhs.type
 
-    let methodSym: Symbol
+    // Handle generic parameter case - create trait method placeholder
     if case .genericParameter(let paramName) = receiverType {
       guard hasTraitBound(paramName, "Equatable") else {
         throw SemanticError(.generic("Type \(receiverType) is not constrained by trait Equatable"), line: currentLine)
@@ -2838,18 +2968,27 @@ extension TypeChecker {
         throw SemanticError(.generic("Trait Equatable is missing required method \(methodName)"), line: currentLine)
       }
       let expectedType = try expectedFunctionTypeForTraitMethod(sig, selfType: receiverType)
-      methodSym = makeGlobalSymbol(
-        name: "__trait_Equatable_\(methodName)",
-        type: expectedType,
-        kind: .function,
-        methodKind: .equals,
-        access: .default
+      
+      recordTraitPlaceholderInstantiation(
+        baseType: receiverType,
+        methodName: methodName,
+        methodTypeArgs: []
       )
-    } else {
-      guard let concrete = try lookupConcreteMethodSymbol(on: receiverType, name: methodName) else {
-        throw SemanticError.undefinedMember(methodName, receiverType.description)
-      }
-      methodSym = concrete
+      
+      // Create trait method placeholder instead of methodReference with __trait_ prefix
+      let callee: TypedExpressionNode = .traitMethodPlaceholder(
+        traitName: "Equatable",
+        methodName: methodName,
+        base: lhs,
+        methodTypeArgs: [],
+        type: expectedType
+      )
+      return .call(callee: callee, arguments: [rhs], type: .bool)
+    }
+    
+    // Concrete type case - look up the actual method
+    guard let methodSym = try lookupConcreteMethodSymbol(on: receiverType, name: methodName) else {
+      throw SemanticError.undefinedMember(methodName, receiverType.description)
     }
 
     guard case .function(let params, let returns) = methodSym.type else {
@@ -2876,7 +3015,7 @@ extension TypeChecker {
     let methodName = "__compare"
     let receiverType = lhs.type
 
-    let methodSym: Symbol
+    // Handle generic parameter case - create trait method placeholder
     if case .genericParameter(let paramName) = receiverType {
       guard hasTraitBound(paramName, "Comparable") else {
         throw SemanticError(.generic("Type \(receiverType) is not constrained by trait Comparable"), line: currentLine)
@@ -2886,18 +3025,27 @@ extension TypeChecker {
         throw SemanticError(.generic("Trait Comparable is missing required method \(methodName)"), line: currentLine)
       }
       let expectedType = try expectedFunctionTypeForTraitMethod(sig, selfType: receiverType)
-      methodSym = makeGlobalSymbol(
-        name: "__trait_Comparable_\(methodName)",
-        type: expectedType,
-        kind: .function,
-        methodKind: .compare,
-        access: .default
+      
+      recordTraitPlaceholderInstantiation(
+        baseType: receiverType,
+        methodName: methodName,
+        methodTypeArgs: []
       )
-    } else {
-      guard let concrete = try lookupConcreteMethodSymbol(on: receiverType, name: methodName) else {
-        throw SemanticError.undefinedMember(methodName, receiverType.description)
-      }
-      methodSym = concrete
+      
+      // Create trait method placeholder instead of methodReference with __trait_ prefix
+      let callee: TypedExpressionNode = .traitMethodPlaceholder(
+        traitName: "Comparable",
+        methodName: methodName,
+        base: lhs,
+        methodTypeArgs: [],
+        type: expectedType
+      )
+      return .call(callee: callee, arguments: [rhs], type: .int)
+    }
+    
+    // Concrete type case - look up the actual method
+    guard let methodSym = try lookupConcreteMethodSymbol(on: receiverType, name: methodName) else {
+      throw SemanticError.undefinedMember(methodName, receiverType.description)
     }
 
     guard case .function(let params, let returns) = methodSym.type else {
@@ -2948,7 +3096,7 @@ extension TypeChecker {
 
         // Handle concrete structure types
         if case .structure(let defId) = currentType {
-          guard let member = TypedDefContext.current?.getStructMembers(defId)?.first(where: { $0.name == memberName }) else {
+          guard let member = context.getStructMembers(defId)?.first(where: { $0.name == memberName }) else {
             throw SemanticError.undefinedMember(memberName, currentType.description)
           }
 

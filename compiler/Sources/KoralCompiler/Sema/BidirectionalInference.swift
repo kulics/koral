@@ -31,7 +31,12 @@ public class BidirectionalInference {
     
     /// 初始化双向推断器
     public init() {
-        self.solver = ConstraintSolver()
+        self.solver = ConstraintSolver(context: CompilerContext())
+    }
+
+    /// 使用指定上下文初始化
+    public init(context: CompilerContext) {
+        self.solver = ConstraintSolver(context: context)
     }
     
     /// 使用现有求解器初始化

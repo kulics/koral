@@ -71,10 +71,10 @@ public enum Constraint: CustomStringConvertible {
     }
     
     /// 获取约束中涉及的所有类型变量
-    public var involvedTypeVariables: [TypeVariable] {
+    public func involvedTypeVariables(in context: CompilerContext) -> [TypeVariable] {
         var result: [TypeVariable] = []
         for type in involvedTypes {
-            result.append(contentsOf: type.freeTypeVariables)
+            result.append(contentsOf: context.freeTypeVariables(in: type))
         }
         return result
     }
@@ -117,56 +117,3 @@ extension Constraint {
     }
 }
 
-// MARK: - Type Extension for TypeVariable
-
-extension Type {
-    /// 获取类型中的所有自由类型变量
-    public var freeTypeVariables: [TypeVariable] {
-        switch self {
-        case .int, .int8, .int16, .int32, .int64,
-             .uint, .uint8, .uint16, .uint32, .uint64,
-             .float32, .float64, .bool, .void, .never:
-            return []
-        case .typeVariable(let tv):
-            return [tv]
-        case .function(let params, let returns):
-            var result: [TypeVariable] = []
-            for param in params {
-                result.append(contentsOf: param.type.freeTypeVariables)
-            }
-            result.append(contentsOf: returns.freeTypeVariables)
-            return result
-        case .structure(let defId):
-            var result: [TypeVariable] = []
-            for member in TypedDefContext.current?.getStructMembers(defId) ?? [] {
-                result.append(contentsOf: member.type.freeTypeVariables)
-            }
-            return result
-        case .union(let defId):
-            var result: [TypeVariable] = []
-            for c in TypedDefContext.current?.getUnionCases(defId) ?? [] {
-                for param in c.parameters {
-                    result.append(contentsOf: param.type.freeTypeVariables)
-                }
-            }
-            return result
-        case .reference(let inner):
-            return inner.freeTypeVariables
-        case .pointer(let element):
-            return element.freeTypeVariables
-        case .genericParameter:
-            return []
-        case .genericStruct(_, let args):
-            return args.flatMap { $0.freeTypeVariables }
-        case .genericUnion(_, let args):
-            return args.flatMap { $0.freeTypeVariables }
-        case .module:
-            return []
-        }
-    }
-    
-    /// 检查类型是否包含类型变量
-    public var containsTypeVariable: Bool {
-        return !freeTypeVariables.isEmpty
-    }
-}

@@ -465,7 +465,7 @@ extension TypeChecker {
     try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
     
     // Record instantiation request for deferred monomorphization
-    if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+    if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
       recordInstantiation(InstantiationRequest(
         kind: .structType(template: template, args: resolvedArgs),
         sourceLine: currentLine,

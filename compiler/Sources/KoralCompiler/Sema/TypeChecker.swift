@@ -189,14 +189,18 @@ public class TypeChecker {
   
   // MARK: - Pass Architecture Support
   
+  /// CompilerContext - 统一查询与更新上下文
+  /// 包含 DefIdMap 与类型信息，避免依赖全局可变状态
+  var context = CompilerContext()
+
   /// DefIdMap - 管理所有定义的标识符
   /// 用于为所有符号分配唯一的 DefId
   /// **Validates: Requirements 1.1, 8.1**
-  var defIdMap = DefIdMap() {
-    didSet {
-      DefIdContext.current = defIdMap
-    }
+  var defIdMap: DefIdMap {
+    get { context.defIdMap }
+    set { context.setDefIdMap(newValue) }
   }
+
   
   /// NameCollector 的输出（Pass 1 结果）
   /// 包含 DefIdMap 和 NameTable，用于后续 Pass 使用
@@ -204,15 +208,9 @@ public class TypeChecker {
   var nameCollectorOutput: NameCollectorOutput?
   
   /// TypeResolver 的输出（Pass 2 结果）
-  /// 包含 TypedDefMap 和 SymbolTable，用于后续 Pass 使用
+  /// 包含 SymbolTable，用于后续 Pass 使用
   /// **Validates: Requirements 2.1, 2.2**
-  var typeResolverOutput: TypeResolverOutput? {
-    didSet {
-      if let typedDefMap = typeResolverOutput?.typedDefMap {
-        TypedDefContext.current = typedDefMap
-      }
-    }
-  }
+  var typeResolverOutput: TypeResolverOutput?
   
   /// BodyChecker 的输出（Pass 3 结果）
   /// 包含 TypedAST 和 InstantiationRequests，用于后续阶段使用
@@ -303,7 +301,7 @@ public class TypeChecker {
   /// 可见性检查器实例
   /// 用于检查符号和类型的模块可见性
   /// **Validates: Requirements 6.1, 6.2, 6.3, 6.5**
-  let visibilityChecker = VisibilityChecker()
+  lazy var visibilityChecker = VisibilityChecker(context: context)
   
   /// 检查符号是否可以从当前位置直接访问（不需要模块前缀）
   /// 
@@ -382,6 +380,7 @@ public class TypeChecker {
     self.importGraph = importGraph
     SemanticErrorContext.currentFileName = userFileName
     SemanticErrorContext.currentLine = 1
+    SemanticErrorContext.currentCompilerContext = context
   }
   
   /// 使用源信息初始化 TypeChecker（用于多文件项目）
@@ -407,6 +406,7 @@ public class TypeChecker {
     self.importGraph = importGraph
     SemanticErrorContext.currentFileName = userFileName
     SemanticErrorContext.currentLine = 1
+    SemanticErrorContext.currentCompilerContext = context
     
     // 构建源信息映射
     for (index, info) in nodeSourceInfoList.enumerated() {
@@ -680,6 +680,29 @@ public class TypeChecker {
     instantiationRequests.insert(request)
   }
 
+  /// Records a trait placeholder method instantiation request when the base type is concrete.
+  func recordTraitPlaceholderInstantiation(
+    baseType: Type,
+    methodName: String,
+    methodTypeArgs: [Type]
+  ) {
+    if context.containsGenericParameter(baseType) {
+      return
+    }
+    if methodTypeArgs.contains(where: { context.containsGenericParameter($0) }) {
+      return
+    }
+    recordInstantiation(InstantiationRequest(
+      kind: .traitMethod(
+        baseType: baseType,
+        methodName: methodName,
+        methodTypeArgs: methodTypeArgs
+      ),
+      sourceLine: currentLine,
+      sourceFileName: currentFileName
+    ))
+  }
+
   func checkFunctionBody(
     _ params: [Symbol],
     _ returnType: Type,
@@ -787,7 +810,7 @@ public class TypeChecker {
   func resolveUnionCasesForExhaustiveness(_ type: Type) -> [UnionCase]? {
     switch type {
     case .union(let defId):
-      return TypedDefContext.current?.getUnionCases(defId)
+      return context.getUnionCases(defId)
       
     case .genericUnion(let templateName, let typeArgs):
       // Look up the union template and substitute type parameters
@@ -878,7 +901,7 @@ public class TypeChecker {
       
     default:
       // For non-generic types, they must be equal
-      return expected == actual || !expected.containsGenericParameter
+      return expected == actual || !context.containsGenericParameter(expected)
     }
   }
 

@@ -4,6 +4,7 @@ public struct ExhaustivenessChecker {
     private let subjectType: Type
     private let patterns: [TypedPattern]
     private let currentLine: Int
+    private let context: CompilerContext
     
     /// Resolved union cases for generic union types
     private let resolvedUnionCases: [UnionCase]?
@@ -12,12 +13,14 @@ public struct ExhaustivenessChecker {
         subjectType: Type,
         patterns: [TypedPattern],
         currentLine: Int,
-        resolvedUnionCases: [UnionCase]? = nil
+        resolvedUnionCases: [UnionCase]? = nil,
+        context: CompilerContext
     ) {
         self.subjectType = subjectType
         self.patterns = patterns
         self.currentLine = currentLine
         self.resolvedUnionCases = resolvedUnionCases
+        self.context = context
     }
     
     /// Perform exhaustiveness checking
@@ -139,7 +142,7 @@ extension ExhaustivenessChecker {
         
         switch subjectType {
         case .union(let defId):
-            return Set((TypedDefContext.current?.getUnionCases(defId) ?? []).map { $0.name })
+            return Set((context.getUnionCases(defId) ?? []).map { $0.name })
         default:
             return []
         }
@@ -164,8 +167,8 @@ extension ExhaustivenessChecker {
         // Handle different types
         switch subjectType {
         case .union(let defId):
-            let typeName = DefIdContext.current?.getName(defId) ?? subjectType.description
-            let cases = TypedDefContext.current?.getUnionCases(defId) ?? []
+            let typeName = context.getName(defId) ?? subjectType.description
+            let cases = context.getUnionCases(defId) ?? []
             try checkUnionExhaustiveness(typeName: typeName, cases: cases, hasCatchall: hasCatchall)
             
         case .genericUnion(let templateName, _):
@@ -200,7 +203,7 @@ extension ExhaustivenessChecker {
         case .structure(let defId):
             // Struct types require catchall (can't enumerate all values)
             if !hasCatchall {
-                let name = DefIdContext.current?.getName(defId) ?? subjectType.description
+                let name = context.getName(defId) ?? subjectType.description
                 throw SemanticError(
                     .missingCatchallPattern(type: name),
                     line: currentLine
@@ -288,7 +291,7 @@ extension ExhaustivenessChecker {
     
     private func isStringType(_ type: Type) -> Bool {
         if case .structure(let defId) = type {
-            return DefIdContext.current?.getName(defId) == "String"
+            return context.getName(defId) == "String"
         }
         return false
     }

@@ -39,6 +39,9 @@ public class ConstraintSolver {
     
     /// 合一器
     private let unifier: Unifier
+
+    /// 统一查询上下文
+    private let context: CompilerContext
     
     /// 待处理的约束队列
     private var constraints: [Constraint]
@@ -53,9 +56,10 @@ public class ConstraintSolver {
     public var traitChecker: ((Type, String) -> Bool)?
     
     /// 初始化约束求解器
-    public init() {
+    public init(context: CompilerContext) {
+        self.context = context
         self.unionFind = UnionFind<TypeVariable>()
-        self.unifier = Unifier(unionFind: unionFind)
+        self.unifier = Unifier(unionFind: unionFind, context: context)
         self.constraints = []
         self.defaultConstraints = []
         self.errors = []
@@ -138,7 +142,7 @@ public class ConstraintSolver {
             let resolvedType = unifier.resolve(type)
             
             // 如果类型仍包含类型变量，延迟检查
-            if resolvedType.containsTypeVariable {
+            if context.containsTypeVariable(resolvedType) {
                 // 重新添加约束，稍后处理
                 constraints.append(constraint)
             } else {
@@ -220,6 +224,6 @@ public class ConstraintSolver {
     /// - Returns: 未解决的类型变量列表
     public func unsolvedVariables(in type: Type) -> [TypeVariable] {
         let resolved = unifier.resolve(type)
-        return resolved.freeTypeVariables
+        return context.freeTypeVariables(in: resolved)
     }
 }

@@ -100,11 +100,8 @@ public class Monomorphizer {
     
     // MARK: - DefId Support
     
-    /// DefIdMap for allocating unique DefIds during monomorphization
-    internal var defIdMap = DefIdMap()
-
-    /// TypedDefMap for accessing struct/union members during monomorphization
-    internal var typedDefMap = TypedDefMap()
+    /// Unified compiler context
+    internal let context: CompilerContext
     
     /// Creates a Symbol with a new DefId for monomorphized entities
     /// - Parameters:
@@ -137,7 +134,7 @@ public class Monomorphizer {
             defKind = .module
         }
         
-        let defId = defIdMap.allocate(
+        let defId = context.allocateDefId(
             modulePath: modulePath,
             name: name,
             kind: defKind,
@@ -184,10 +181,7 @@ public class Monomorphizer {
     /// - Parameter input: The output from the TypeChecker phase
     public init(input: TypeCheckerOutput) {
         self.input = input
-        self.defIdMap = input.defIdMap
-        self.typedDefMap = input.typedDefMap
-        DefIdContext.current = self.defIdMap
-        TypedDefContext.current = self.typedDefMap
+        self.context = input.context
         // Initialize concrete extension methods from the registry
         self.extensionMethods = input.genericTemplates.concreteExtensionMethods
     }
@@ -214,16 +208,16 @@ public class Monomorphizer {
                     // Track already-generated struct layouts
                     generatedLayouts.insert(identifier.name)
                     // Also cache the type if it's a generic instantiation
-                    if case .structure(let defId) = identifier.type,
-                       typedDefMap.isGenericInstantiation(defId) == true {
+                          if case .structure(let defId) = identifier.type,
+                              context.isGenericInstantiation(defId) == true {
                         instantiatedTypes[identifier.name] = identifier.type
                     }
                     resultNodes.append(node)
                 case .globalUnionDeclaration(let identifier, _):
                     // Track already-generated union layouts
                     generatedLayouts.insert(identifier.name)
-                    if case .union(let defId) = identifier.type,
-                       typedDefMap.isGenericInstantiation(defId) == true {
+                          if case .union(let defId) = identifier.type,
+                              context.isGenericInstantiation(defId) == true {
                         instantiatedTypes[identifier.name] = identifier.type
                     }
                     resultNodes.append(node)
@@ -237,9 +231,9 @@ public class Monomorphizer {
                     let qualifiedTypeName: String
                     switch type {
                     case .structure(let defId):
-                        qualifiedTypeName = defIdMap.getQualifiedName(defId) ?? type.description
+                        qualifiedTypeName = context.getQualifiedName(defId) ?? type.description
                     case .union(let defId):
-                        qualifiedTypeName = defIdMap.getQualifiedName(defId) ?? type.description
+                        qualifiedTypeName = context.getQualifiedName(defId) ?? type.description
                     default:
                         qualifiedTypeName = type.description
                     }
@@ -296,8 +290,29 @@ public class Monomorphizer {
             }
         }
         
+        var allNodes = resolvedGeneratedNodes + resolvedResultNodes
+
+        // Finalize trait placeholder resolution after all instantiations.
+        var processedCount = processedRequestKeys.count
+        var didProcess = true
+        while didProcess {
+            while !pendingRequests.isEmpty {
+                let request = pendingRequests.removeFirst()
+                try processRequest(request)
+            }
+
+            var reResolved: [TypedGlobalNode] = []
+            for node in allNodes {
+                let resolvedNode = try resolveTypesInGlobalNode(node)
+                reResolved.append(resolvedNode)
+            }
+            allNodes = reResolved
+
+            didProcess = processedRequestKeys.count != processedCount
+            processedCount = processedRequestKeys.count
+        }
+
         // 构建静态方法查找表
-        let allNodes = resolvedGeneratedNodes + resolvedResultNodes
         let staticMethodLookup = buildStaticMethodLookup(from: allNodes)
         
         return MonomorphizedProgram(globalNodes: allNodes, staticMethodLookup: staticMethodLookup)
@@ -317,13 +332,13 @@ public class Monomorphizer {
                 let qualifiedTypeName: String
                 switch type {
                 case .structure(let defId):
-                    let name = defIdMap.getName(defId) ?? type.description
+                    let name = context.getName(defId) ?? type.description
                     typeName = name
-                    qualifiedTypeName = defIdMap.getQualifiedName(defId) ?? name
+                    qualifiedTypeName = context.getQualifiedName(defId) ?? name
                 case .union(let defId):
-                    let name = defIdMap.getName(defId) ?? type.description
+                    let name = context.getName(defId) ?? type.description
                     typeName = name
-                    qualifiedTypeName = defIdMap.getQualifiedName(defId) ?? name
+                    qualifiedTypeName = context.getQualifiedName(defId) ?? name
                 default:
                     continue
                 }
@@ -342,7 +357,6 @@ public class Monomorphizer {
                     if mangledName.hasPrefix(prefix) {
                         originalMethodName = String(mangledName.dropFirst(prefix.count))
                     } else {
-                        // 回退：使用整个名称
                         originalMethodName = mangledName
                     }
                     
@@ -369,6 +383,110 @@ public class Monomorphizer {
         }
         
         return lookup
+    }
+
+    // MARK: - Trait Placeholder Instantiation
+
+    internal func instantiateTraitPlaceholderMethod(baseType: Type, name: String, methodTypeArgs: [Type]) throws {
+        let base: Type
+        switch baseType {
+        case .reference(let inner):
+            base = inner
+        default:
+            base = baseType
+        }
+
+        switch base {
+        case .genericStruct(let template, let args):
+            let resolvedArgs = args.map { resolveParameterizedType($0) }
+                if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }),
+                    let extensions = input.genericTemplates.extensionMethods[template],
+                    let ext = extensions.first(where: { $0.method.name == name }),
+                    ext.method.typeParameters.count == methodTypeArgs.count {
+                let resolvedBase = resolveParameterizedType(.genericStruct(template: template, args: resolvedArgs))
+                _ = try instantiateExtensionMethodFromEntry(
+                    baseType: resolvedBase,
+                    structureName: template,
+                    genericArgs: resolvedArgs,
+                    methodTypeArgs: methodTypeArgs,
+                    methodInfo: ext
+                )
+            }
+        case .genericUnion(let template, let args):
+            let resolvedArgs = args.map { resolveParameterizedType($0) }
+                if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }),
+                    let extensions = input.genericTemplates.extensionMethods[template],
+                    let ext = extensions.first(where: { $0.method.name == name }),
+                    ext.method.typeParameters.count == methodTypeArgs.count {
+                let resolvedBase = resolveParameterizedType(.genericUnion(template: template, args: resolvedArgs))
+                _ = try instantiateExtensionMethodFromEntry(
+                    baseType: resolvedBase,
+                    structureName: template,
+                    genericArgs: resolvedArgs,
+                    methodTypeArgs: methodTypeArgs,
+                    methodInfo: ext
+                )
+            }
+        case .structure(let defId), .union(let defId):
+            let typeName = context.getName(defId) ?? ""
+            let simpleName = typeName.split(separator: ".").last.map(String.init) ?? typeName
+            // Use stored templateName if available, otherwise fall back to full name
+            let baseName = context.getTemplateName(defId) ?? simpleName
+            var extensions = input.genericTemplates.extensionMethods[baseName]
+            if extensions == nil {
+                if let matchKey = input.genericTemplates.extensionMethods.keys.first(where: { key in
+                    simpleName.hasPrefix(key) || simpleName.contains(key)
+                }) {
+                    extensions = input.genericTemplates.extensionMethods[matchKey]
+                }
+            }
+            if let extensions,
+               let ext = extensions.first(where: { $0.method.name == name }),
+               ext.method.typeParameters.count == methodTypeArgs.count {
+                                let resolvedTypeArgs = context.getTypeArguments(defId)
+                                    ?? layoutToTemplateInfo[typeName]?.args
+                if resolvedTypeArgs == nil || resolvedTypeArgs?.count != ext.typeParams.count {
+                    throw SemanticError(
+                        .generic("Missing type arguments for generic instantiation '\(typeName)' while resolving method '\(name)'."),
+                        line: currentLine
+                    )
+                }
+                if let typeArgs = resolvedTypeArgs,
+                   typeArgs.count == ext.typeParams.count {
+                    _ = try instantiateExtensionMethodFromEntry(
+                        baseType: base,
+                        structureName: baseName,
+                        genericArgs: typeArgs,
+                        methodTypeArgs: methodTypeArgs,
+                        methodInfo: ext
+                    )
+                }
+            }
+        default:
+            break
+        }
+    }
+
+    internal func enqueueTraitPlaceholderRequest(
+        baseType: Type,
+        methodName: String,
+        methodTypeArgs: [Type]
+    ) {
+        if context.containsGenericParameter(baseType) {
+            return
+        }
+        if methodTypeArgs.contains(where: { context.containsGenericParameter($0) }) {
+            return
+        }
+        pendingRequests.append(InstantiationRequest(
+            kind: .traitMethod(
+                baseType: baseType,
+                methodName: methodName,
+                methodTypeArgs: methodTypeArgs
+            ),
+            sourceLine: currentLine,
+            sourceFileName: currentFileName
+        ))
     }
 
     
@@ -402,11 +520,17 @@ public class Monomorphizer {
                 _ = try instantiateUnion(template: template, args: args)
             case .function(let template, let args):
                 _ = try instantiateFunction(template: template, args: args)
-            case .extensionMethod(let baseType, let template, let typeArgs, let methodTypeArgs):
+            case .extensionMethod(_, let baseType, let template, let typeArgs, let methodTypeArgs):
                 _ = try instantiateExtensionMethod(
                     baseType: baseType,
                     template: template,
                     typeArgs: typeArgs,
+                    methodTypeArgs: methodTypeArgs
+                )
+            case .traitMethod(let baseType, let methodName, let methodTypeArgs):
+                _ = try instantiateTraitPlaceholderMethod(
+                    baseType: baseType,
+                    name: methodName,
                     methodTypeArgs: methodTypeArgs
                 )
             }
@@ -429,10 +553,10 @@ public class Monomorphizer {
         sourceFile: String = "",
         access: AccessModifier = .default
     ) -> DefId {
-        if let existing = defIdMap.lookup(modulePath: modulePath, name: name, sourceFile: sourceFile.isEmpty ? nil : sourceFile) {
+        if let existing = context.lookupDefId(modulePath: modulePath, name: name, sourceFile: sourceFile.isEmpty ? nil : sourceFile) {
             return existing
         }
-        return defIdMap.allocate(
+        return context.allocateDefId(
             modulePath: modulePath,
             name: name,
             kind: .type(kind),

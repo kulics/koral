@@ -216,16 +216,38 @@ class IntegrationTests: XCTestCase {
         process.arguments = ["run", file.path, "-o", outputDir.path]
         process.currentDirectoryURL = projectRoot
         
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe // Capture stderr too just in case
+        // Use temporary files instead of pipes to avoid buffer deadlock
+        let tempDir = FileManager.default.temporaryDirectory
+        let stdoutFile = tempDir.appendingPathComponent(UUID().uuidString + "_stdout.txt")
+        let stderrFile = tempDir.appendingPathComponent(UUID().uuidString + "_stderr.txt")
+        
+        _ = FileManager.default.createFile(atPath: stdoutFile.path, contents: nil)
+        _ = FileManager.default.createFile(atPath: stderrFile.path, contents: nil)
+        
+        defer {
+            try? FileManager.default.removeItem(at: stdoutFile)
+            try? FileManager.default.removeItem(at: stderrFile)
+        }
+        
+        let stdoutHandle = try FileHandle(forWritingTo: stdoutFile)
+        let stderrHandle = try FileHandle(forWritingTo: stderrFile)
+        
+        process.standardOutput = stdoutHandle
+        process.standardError = stderrHandle
         
         try process.run()
         process.waitUntilExit()
         
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        try? stdoutHandle.close()
+        try? stderrHandle.close()
+        
+        // Read captured output from temp files
+        let stdoutData = (try? Data(contentsOf: stdoutFile)) ?? Data()
+        let stderrData = (try? Data(contentsOf: stderrFile)) ?? Data()
+        let combinedData = stdoutData + stderrData
+        
         // Use a lossy UTF-8 decode so one bad byte doesn't drop all output.
-        var output = String(decoding: data, as: UTF8.self)
+        var output = String(decoding: combinedData, as: UTF8.self)
         
         // Normalize line endings to \n
         output = output.replacingOccurrences(of: "\r\n", with: "\n")

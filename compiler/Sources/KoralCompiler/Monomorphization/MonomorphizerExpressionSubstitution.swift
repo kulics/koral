@@ -136,11 +136,11 @@ extension Monomorphizer {
                         substitution[param.name]
                     }
                     if typeArgs.count == template.typeParameters.count {
-                        let argLayoutKeys = typeArgs.map { $0.layoutKey }.joined(separator: "_")
+                        let argLayoutKeys = typeArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
                         newName = "\(identifier.name)_\(argLayoutKeys)"
                         
                         // Ensure the function is instantiated
-                        if !generatedLayouts.contains(newName) && !typeArgs.contains(where: { $0.containsGenericParameter }) {
+                        if !generatedLayouts.contains(newName) && !typeArgs.contains(where: { context.containsGenericParameter($0) }) {
                             pendingRequests.append(InstantiationRequest(
                                 kind: .function(template: template, args: typeArgs),
                                 sourceLine: currentLine,
@@ -251,7 +251,7 @@ extension Monomorphizer {
             let newType = substituteType(type, substitution: substitution)
             
             // If type args still contain generic parameters, keep as genericCall
-            if substitutedTypeArgs.contains(where: { $0.containsGenericParameter }) {
+            if substitutedTypeArgs.contains(where: { context.containsGenericParameter($0) }) {
                 return .genericCall(
                     functionName: functionName,
                     typeArgs: substitutedTypeArgs,
@@ -273,7 +273,7 @@ extension Monomorphizer {
                 }
                 
                 // Calculate the mangled name
-                let argLayoutKeys = substitutedTypeArgs.map { $0.layoutKey }.joined(separator: "_")
+                let argLayoutKeys = substitutedTypeArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
                 let mangledName = "\(functionName)_\(argLayoutKeys)"
                 
                 // Create the callee as a variable reference to the mangled function
@@ -309,40 +309,16 @@ extension Monomorphizer {
             
             // Substitute method type args if present
             let substitutedMethodTypeArgs = methodTypeArgs?.map { substituteType($0, substitution: substitution) }
+            let effectiveMethodTypeArgs = substitutedMethodTypeArgs ?? []
             
             // Track the resolved return type (will be updated if we find a concrete method)
             var resolvedReturnType = substituteType(type, substitution: substitution)
             
-            // Resolve trait method placeholders to concrete methods
-            // Placeholder names have the format "__trait_TraitName_methodName"
-            // where methodName may start with underscores (e.g., "__equals")
-            if method.name.hasPrefix("__trait_") && !newBase.type.containsGenericParameter {
-                // Extract the method name from the placeholder
-                // Format: "__trait_TraitName_methodName"
-                let prefix = "__trait_"
-                let remainder = String(method.name.dropFirst(prefix.count))
-                // Find the first underscore that separates trait name from method name
-                // The trait name doesn't contain underscores, so we find the first underscore
-                if let underscoreIndex = remainder.firstIndex(of: "_") {
-                    let methodName = String(remainder[remainder.index(after: underscoreIndex)...])
-                    
-                    // Look up the concrete method on the substituted base type
-                    // Pass methodTypeArgs for generic methods
-                    if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: methodName, methodTypeArgs: substitutedMethodTypeArgs ?? []) {
-                        newMethod = copySymbolWithNewDefId(concreteMethod)
-                        // Extract the return type from the concrete method's function type
-                        if case .function(_, let returns) = concreteMethod.type {
-                            resolvedReturnType = returns
-                        }
-                    }
-                }
-            }
-
             // Resolve generic extension method to mangled name
-            else if !newBase.type.containsGenericParameter {
+            if !context.containsGenericParameter(newBase.type) {
                 // Look up the concrete method on the substituted base type
                 // Pass method type args for generic methods
-                if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: method.name, methodTypeArgs: substitutedMethodTypeArgs ?? []) {
+                if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: method.name, methodTypeArgs: effectiveMethodTypeArgs) {
                     newMethod = copySymbolWithNewDefId(concreteMethod)
                     // Extract the return type from the concrete method's function type
                     if case .function(_, let returns) = concreteMethod.type {
@@ -355,8 +331,85 @@ extension Monomorphizer {
                 base: newBase,
                 method: newMethod,
                 typeArgs: substitutedTypeArgs,
-                methodTypeArgs: substitutedMethodTypeArgs,
+                methodTypeArgs: effectiveMethodTypeArgs,
                 type: resolvedReturnType
+            )
+            
+        case .traitMethodPlaceholder(let traitName, let methodName, let base, let methodTypeArgs, let type):
+            // Substitute types in the placeholder
+            let newBase = substituteTypesInExpression(base, substitution: substitution)
+            let substitutedMethodTypeArgs = methodTypeArgs.map { substituteType($0, substitution: substitution) }
+            let substitutedType = substituteType(type, substitution: substitution)
+            
+            // Enqueue trait placeholder request for later resolution
+            enqueueTraitPlaceholderRequest(
+                baseType: newBase.type,
+                methodName: methodName,
+                methodTypeArgs: substitutedMethodTypeArgs
+            )
+            
+            // Try to resolve to concrete method if base type is now concrete
+            if !context.containsGenericParameter(newBase.type) {
+                // Look up the concrete method on the substituted base type
+                if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: methodName, methodTypeArgs: substitutedMethodTypeArgs) {
+                    // Extract the return type from the concrete method's function type
+                    var resolvedReturnType = substitutedType
+                    if case .function(_, let returns) = concreteMethod.type {
+                        resolvedReturnType = returns
+                    }
+                    var adjustedBase = newBase
+                    if case .function(let params, _) = concreteMethod.type, let firstParam = params.first {
+                        if case .reference(let inner) = firstParam.type, inner == adjustedBase.type {
+                            adjustedBase = .referenceExpression(expression: adjustedBase, type: firstParam.type)
+                        } else if case .reference(let inner) = adjustedBase.type, inner == firstParam.type {
+                            adjustedBase = .derefExpression(expression: adjustedBase, type: inner)
+                        }
+                    }
+                    return .methodReference(
+                        base: adjustedBase,
+                        method: copySymbolWithNewDefId(concreteMethod),
+                        typeArgs: nil,
+                        methodTypeArgs: substitutedMethodTypeArgs,
+                        type: resolvedReturnType
+                    )
+                } else {
+                    // Try to instantiate the method first
+                    _ = try? instantiateTraitPlaceholderMethod(
+                        baseType: newBase.type,
+                        name: methodName,
+                        methodTypeArgs: substitutedMethodTypeArgs
+                    )
+                    if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: methodName, methodTypeArgs: substitutedMethodTypeArgs) {
+                        var resolvedReturnType = substitutedType
+                        if case .function(_, let returns) = concreteMethod.type {
+                            resolvedReturnType = returns
+                        }
+                        var adjustedBase = newBase
+                        if case .function(let params, _) = concreteMethod.type, let firstParam = params.first {
+                            if case .reference(let inner) = firstParam.type, inner == adjustedBase.type {
+                                adjustedBase = .referenceExpression(expression: adjustedBase, type: firstParam.type)
+                            } else if case .reference(let inner) = adjustedBase.type, inner == firstParam.type {
+                                adjustedBase = .derefExpression(expression: adjustedBase, type: inner)
+                            }
+                        }
+                        return .methodReference(
+                            base: adjustedBase,
+                            method: copySymbolWithNewDefId(concreteMethod),
+                            typeArgs: nil,
+                            methodTypeArgs: substitutedMethodTypeArgs,
+                            type: resolvedReturnType
+                        )
+                    }
+                }
+            }
+            
+            // Keep as placeholder if base type is still generic
+            return .traitMethodPlaceholder(
+                traitName: traitName,
+                methodName: methodName,
+                base: newBase,
+                methodTypeArgs: substitutedMethodTypeArgs,
+                type: substitutedType
             )
             
         case .whileExpression(let condition, let body, let type):
@@ -387,82 +440,48 @@ extension Monomorphizer {
             // 2. Ensure the concrete type is instantiated
             var newName = identifier.name
             if case .structure(let defId) = substitutedType {
-                let layoutName = defIdMap.getName(defId) ?? substitutedType.description
-                let isGenericInstantiation = typedDefMap.isGenericInstantiation(defId) ?? false
+                let layoutName = context.getName(defId) ?? substitutedType.description
+                let isGenericInstantiation = context.isGenericInstantiation(defId) ?? false
                 newName = layoutName
                 // Trigger instantiation of the concrete type if needed
-                if isGenericInstantiation && !generatedLayouts.contains(layoutName) && !substitutedType.containsGenericParameter {
+                if isGenericInstantiation && !generatedLayouts.contains(layoutName) && !context.containsGenericParameter(substitutedType) {
                     // Find the template and instantiate
-                    // Extract base name from the layout name (e.g., "Pair_I_I" -> "Pair")
-                    let baseName = layoutName.split(separator: "_").first.map(String.init) ?? layoutName
+                    let baseName = context.getTemplateName(defId) ?? layoutName
                     if let template = input.genericTemplates.structTemplates[baseName] {
-                        // Extract type args from the substituted type's members
-                        // We need to reconstruct the type args from the layout name
-                        // For now, we'll add a pending request with the substituted type
-                        // The instantiateStruct method will handle the actual instantiation
-                        
-                        // Parse the layout name to extract type args
-                        // Layout name format: "BaseName_Arg1_Arg2_..."
-                        let suffix = String(layoutName.dropFirst(baseName.count + 1)) // Remove "BaseName_"
-                        let argLayoutKeys = suffix.split(separator: "_").map(String.init)
-                        
-                        // Try to reconstruct the type args from the layout keys
-                        // This is a heuristic - we look for types that match the layout keys
-                        var typeArgsReconstructed: [Type] = []
-                        for key in argLayoutKeys {
-                            if let builtinType = resolveBuiltinType(key) {
-                                typeArgsReconstructed.append(builtinType)
-                            } else if key == "I" {
-                                typeArgsReconstructed.append(.int)
-                            } else if key == "R" {
-                                typeArgsReconstructed.append(.reference(inner: .int)) // Heuristic
-                            } else if key.hasPrefix("Struct_") {
-                                // Nested struct - need to look up
-                                let defId = getOrAllocateTypeDefId(name: key, kind: .structure)
-                                typedDefMap.addStructInfo(defId: defId, members: [], isGenericInstantiation: true, typeArguments: nil)
-                                typeArgsReconstructed.append(.structure(defId: defId))
-                            } else {
-                                // Unknown type - use the substituted type's info
-                                break
-                            }
-                        }
-
-                        
-                        // If we couldn't reconstruct the type args, try to use the substitution map
-                        if typeArgsReconstructed.count != template.typeParameters.count {
-                            typeArgsReconstructed = template.typeParameters.compactMap { param in
+                        let typeArgsReconstructed: [Type] = context.getTypeArguments(defId)
+                            ?? template.typeParameters.compactMap { param in
                                 substitution[param.name]
                             }
+                        if typeArgsReconstructed.count != template.typeParameters.count {
+                            fatalError("Missing type arguments for generic instantiation '\(layoutName)' during substitution.")
                         }
-                        
-                        if typeArgsReconstructed.count == template.typeParameters.count {
-                            pendingRequests.append(InstantiationRequest(
-                                kind: .structType(template: template, args: typeArgsReconstructed),
-                                sourceLine: currentLine,
-                                sourceFileName: currentFileName
-                            ))
-                        }
+                        pendingRequests.append(InstantiationRequest(
+                            kind: .structType(template: template, args: typeArgsReconstructed),
+                            sourceLine: currentLine,
+                            sourceFileName: currentFileName
+                        ))
                     }
                 }
             } else if case .union(let defId) = substitutedType {
-                let layoutName = defIdMap.getName(defId) ?? substitutedType.description
-                let isGenericInstantiation = typedDefMap.isGenericInstantiation(defId) ?? false
+                let layoutName = context.getName(defId) ?? substitutedType.description
+                let isGenericInstantiation = context.isGenericInstantiation(defId) ?? false
                 newName = layoutName
                 // Similar logic for unions
-                if isGenericInstantiation && !generatedLayouts.contains(layoutName) && !substitutedType.containsGenericParameter {
-                    let baseName = layoutName.split(separator: "_").first.map(String.init) ?? layoutName
+                if isGenericInstantiation && !generatedLayouts.contains(layoutName) && !context.containsGenericParameter(substitutedType) {
+                    let baseName = context.getTemplateName(defId) ?? layoutName
                     if let template = input.genericTemplates.unionTemplates[baseName] {
-                        let typeArgsReconstructed: [Type] = template.typeParameters.compactMap { param in
-                            substitution[param.name]
+                        let typeArgsReconstructed: [Type] = context.getTypeArguments(defId)
+                            ?? template.typeParameters.compactMap { param in
+                                substitution[param.name]
+                            }
+                        if typeArgsReconstructed.count != template.typeParameters.count {
+                            fatalError("Missing type arguments for generic instantiation '\(layoutName)' during substitution.")
                         }
-                        
-                        if typeArgsReconstructed.count == template.typeParameters.count {
-                            pendingRequests.append(InstantiationRequest(
-                                kind: .unionType(template: template, args: typeArgsReconstructed),
-                                sourceLine: currentLine,
-                                sourceFileName: currentFileName
-                            ))
-                        }
+                        pendingRequests.append(InstantiationRequest(
+                            kind: .unionType(template: template, args: typeArgsReconstructed),
+                            sourceLine: currentLine,
+                            sourceFileName: currentFileName
+                        ))
                     }
                 }
             }
@@ -502,7 +521,7 @@ extension Monomorphizer {
             )
             
             // Resolve method name to mangled name for generic extension methods
-            if !newBase.type.containsGenericParameter {
+            if !context.containsGenericParameter(newBase.type) {
                 // Look up the concrete method on the substituted base type
                 if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: method.name) {
                     newMethod = copySymbolWithNewDefId(concreteMethod)

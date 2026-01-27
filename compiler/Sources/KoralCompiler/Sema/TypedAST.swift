@@ -266,6 +266,19 @@ public indirect enum TypedExpressionNode {
     body: TypedExpressionNode,
     type: Type
   )
+  /// Trait method placeholder for generic parameter method calls
+  /// - traitName: The name of the trait (e.g., "Iterator", "Equatable")
+  /// - methodName: The name of the method (e.g., "next", "__equals")
+  /// - base: The base expression (generic parameter reference)
+  /// - methodTypeArgs: Method-level type arguments (for generic methods)
+  /// - type: The expected function type of the method
+  case traitMethodPlaceholder(
+    traitName: String,
+    methodName: String,
+    base: TypedExpressionNode,
+    methodTypeArgs: [Type],
+    type: Type
+  )
 }
 public indirect enum TypedIntrinsic {
   // Memory Management
@@ -430,6 +443,8 @@ extension TypedExpressionNode {
     case .matchExpression(_, _, let type):
       return type
     case .lambdaExpression(_, _, _, let type):
+      return type
+    case .traitMethodPlaceholder(_, _, _, _, let type):
       return type
     }
   }

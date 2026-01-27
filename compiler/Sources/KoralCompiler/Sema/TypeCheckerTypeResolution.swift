@@ -61,7 +61,7 @@ extension TypeChecker {
         
         // Record instantiation request for deferred monomorphization
         // Skip if any argument contains generic parameters (will be recorded when fully resolved)
-        if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+        if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
           recordInstantiation(InstantiationRequest(
             kind: .structType(template: template, args: resolvedArgs),
             sourceLine: currentLine,
@@ -96,7 +96,7 @@ extension TypeChecker {
         
         // Record instantiation request for deferred monomorphization
         // Skip if any argument contains generic parameters (will be recorded when fully resolved)
-        if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+        if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
           recordInstantiation(InstantiationRequest(
             kind: .unionType(template: template, args: resolvedArgs),
             sourceLine: currentLine,
@@ -163,7 +163,7 @@ extension TypeChecker {
         try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
         
         // Record instantiation request for deferred monomorphization
-        if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+        if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
           recordInstantiation(InstantiationRequest(
             kind: .structType(template: template, args: resolvedArgs),
             sourceLine: currentLine,
@@ -187,7 +187,7 @@ extension TypeChecker {
         try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
         
         // Record instantiation request for deferred monomorphization
-        if !resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+        if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
           recordInstantiation(InstantiationRequest(
             kind: .unionType(template: template, args: resolvedArgs),
             sourceLine: currentLine,
@@ -408,14 +408,14 @@ extension TypeChecker {
   func checkMethodExists(on selfType: Type, name: String) throws -> Bool {
     switch selfType {
     case .structure(let defId):
-      let typeName = DefIdContext.current?.getName(defId) ?? ""
+      let typeName = context.getName(defId) ?? ""
       if let methods = extensionMethods[typeName], methods[name] != nil {
         return true
       }
       return false
 
     case .union(let defId):
-      let typeName = DefIdContext.current?.getName(defId) ?? ""
+      let typeName = context.getName(defId) ?? ""
       if let methods = extensionMethods[typeName], methods[name] != nil {
         return true
       }
@@ -600,7 +600,7 @@ extension TypeChecker {
   }
   
   /// Enforces that a type conforms to a generic trait with specific type arguments.
-  func enforceGenericTraitConformanceForIterable(_ type: Type, traitName: String, traitArgs: [Type], context: String) throws {
+  func enforceGenericTraitConformanceForIterable(_ type: Type, traitName: String, traitArgs: [Type], contextInfo: String) throws {
     // For generic traits like [T]Iterator, we need to check:
     // 1. The type has a `next` method (for Iterator)
     // 2. The return type matches [T]Option where T is the expected element type
@@ -619,7 +619,7 @@ extension TypeChecker {
       
       switch structType {
       case .structure(let defId):
-        let typeName = DefIdContext.current?.getName(defId) ?? ""
+        let typeName = context.getName(defId) ?? ""
         if let methods = extensionMethods[typeName], methods[methodName] != nil {
           methodFound = true
         }
@@ -665,7 +665,7 @@ extension TypeChecker {
   func isStringType(_ type: Type) -> Bool {
     switch type {
     case .structure(let defId):
-      return DefIdContext.current?.getName(defId) == "String"
+      return context.getName(defId) == "String"
     default:
       return false
     }
@@ -690,7 +690,7 @@ extension TypeChecker {
   /// Check if a type is the Rune struct type.
   func isRuneType(_ type: Type) -> Bool {
     if case .structure(let defId) = type {
-      return DefIdContext.current?.getName(defId) == "Rune"
+      return context.getName(defId) == "Rune"
     }
     return false
   }
@@ -723,7 +723,7 @@ extension TypeChecker {
         // Construct Rune(value) using typeConstruction
         // We need to get the Rune type's symbol
         if case .structure(let defId) = expected {
-          let name = DefIdContext.current?.getName(defId) ?? "Rune"
+          let name = context.getName(defId) ?? "Rune"
           let runeSymbol = makeLocalSymbol(name: name, type: expected, kind: .type)
           return .typeConstruction(
             identifier: runeSymbol,

@@ -235,7 +235,7 @@ public enum SemaUtils {
     ///   - type: The type to substitute
     ///   - substitution: Map from type parameter names to concrete types
     /// - Returns: The substituted type
-    public static func substituteType(_ type: Type, substitution: [String: Type]) -> Type {
+    public static func substituteType(_ type: Type, substitution: [String: Type], context: CompilerContext) -> Type {
         switch type {
         case .int, .int8, .int16, .int32, .int64,
              .uint, .uint8, .uint16, .uint32, .uint64,
@@ -246,74 +246,68 @@ public enum SemaUtils {
             return substitution[name] ?? type
             
         case .reference(let inner):
-            return .reference(inner: substituteType(inner, substitution: substitution))
+            return .reference(inner: substituteType(inner, substitution: substitution, context: context))
             
         case .pointer(let element):
-            return .pointer(element: substituteType(element, substitution: substitution))
+            return .pointer(element: substituteType(element, substitution: substitution, context: context))
             
         case .function(let params, let returns):
             let newParams = params.map { param in
                 Parameter(
-                    type: substituteType(param.type, substitution: substitution),
+                    type: substituteType(param.type, substitution: substitution, context: context),
                     kind: param.kind
                 )
             }
             return .function(
                 parameters: newParams,
-                returns: substituteType(returns, substitution: substitution)
+                returns: substituteType(returns, substitution: substitution, context: context)
             )
             
         case .structure(let defId):
-            let members = TypedDefContext.current?.getStructMembers(defId) ?? []
-            let isGenericInstantiation = TypedDefContext.current?.isGenericInstantiation(defId) ?? false
+            let members = context.getStructMembers(defId) ?? []
+            let isGenericInstantiation = context.isGenericInstantiation(defId) ?? false
             let newMembers = members.map { member in
                 (
                     name: member.name,
-                    type: substituteType(member.type, substitution: substitution),
+                    type: substituteType(member.type, substitution: substitution, context: context),
                     mutable: member.mutable
                 )
             }
-            let newTypeArguments = TypedDefContext.current?.getTypeArguments(defId)?.map { substituteType($0, substitution: substitution) }
-            if var map = TypedDefContext.current {
-                map.addStructInfo(
-                    defId: defId,
-                    members: newMembers,
-                    isGenericInstantiation: isGenericInstantiation,
-                    typeArguments: newTypeArguments
-                )
-                TypedDefContext.current = map
-            }
+            let newTypeArguments = context.getTypeArguments(defId)?.map { substituteType($0, substitution: substitution, context: context) }
+            context.updateStructInfo(
+                defId: defId,
+                members: newMembers,
+                isGenericInstantiation: isGenericInstantiation,
+                typeArguments: newTypeArguments
+            )
             return .structure(defId: defId)
             
         case .union(let defId):
-            let cases = TypedDefContext.current?.getUnionCases(defId) ?? []
-            let isGenericInstantiation = TypedDefContext.current?.isGenericInstantiation(defId) ?? false
+            let cases = context.getUnionCases(defId) ?? []
+            let isGenericInstantiation = context.isGenericInstantiation(defId) ?? false
             let newCases = cases.map { unionCase in
                 UnionCase(
                     name: unionCase.name,
                     parameters: unionCase.parameters.map { param in
-                        (name: param.name, type: substituteType(param.type, substitution: substitution))
+                        (name: param.name, type: substituteType(param.type, substitution: substitution, context: context))
                     }
                 )
             }
-            let newTypeArguments = TypedDefContext.current?.getTypeArguments(defId)?.map { substituteType($0, substitution: substitution) }
-            if var map = TypedDefContext.current {
-                map.addUnionInfo(
-                    defId: defId,
-                    cases: newCases,
-                    isGenericInstantiation: isGenericInstantiation,
-                    typeArguments: newTypeArguments
-                )
-                TypedDefContext.current = map
-            }
+            let newTypeArguments = context.getTypeArguments(defId)?.map { substituteType($0, substitution: substitution, context: context) }
+            context.updateUnionInfo(
+                defId: defId,
+                cases: newCases,
+                isGenericInstantiation: isGenericInstantiation,
+                typeArguments: newTypeArguments
+            )
             return .union(defId: defId)
             
         case .genericStruct(let template, let args):
-            let newArgs = args.map { substituteType($0, substitution: substitution) }
+            let newArgs = args.map { substituteType($0, substitution: substitution, context: context) }
             return .genericStruct(template: template, args: newArgs)
             
         case .genericUnion(let template, let args):
-            let newArgs = args.map { substituteType($0, substitution: substitution) }
+            let newArgs = args.map { substituteType($0, substitution: substitution, context: context) }
             return .genericUnion(template: template, args: newArgs)
             
         case .module:
@@ -357,7 +351,11 @@ public enum SemaUtils {
     ///   - args: The type arguments
     /// - Returns: The mangled layout name
     public static func generateLayoutName(baseName: String, args: [Type]) -> String {
-        let argLayoutKeys = args.map { $0.layoutKey }.joined(separator: "_")
+        let argLayoutKeys = args.map { $0.stableKey }.joined(separator: "_")
+        return "\(baseName)_\(argLayoutKeys)"
+    }
+    public static func makeLayoutName(baseName: String, args: [Type], context: CompilerContext) -> String {
+        let argLayoutKeys = args.map { context.getLayoutKey($0) }.joined(separator: "_")
         return "\(baseName)_\(argLayoutKeys)"
     }
     
