@@ -217,6 +217,44 @@ public class DefIdMap {
             self.span = span
         }
     }
+
+    public struct StructTypeInfo {
+        public let members: [(name: String, type: Type, mutable: Bool)]
+        public let isGenericInstantiation: Bool
+        public let typeArguments: [Type]?
+        public let templateName: String?  // 泛型模板名称
+
+        public init(
+            members: [(name: String, type: Type, mutable: Bool)],
+            isGenericInstantiation: Bool,
+            typeArguments: [Type]?,
+            templateName: String? = nil
+        ) {
+            self.members = members
+            self.isGenericInstantiation = isGenericInstantiation
+            self.typeArguments = typeArguments
+            self.templateName = templateName
+        }
+    }
+
+    public struct UnionTypeInfo {
+        public let cases: [UnionCase]
+        public let isGenericInstantiation: Bool
+        public let typeArguments: [Type]?
+        public let templateName: String?  // 泛型模板名称
+
+        public init(
+            cases: [UnionCase],
+            isGenericInstantiation: Bool,
+            typeArguments: [Type]?,
+            templateName: String? = nil
+        ) {
+            self.cases = cases
+            self.isGenericInstantiation = isGenericInstantiation
+            self.typeArguments = typeArguments
+            self.templateName = templateName
+        }
+    }
     
     // MARK: - 私有属性
     
@@ -230,11 +268,31 @@ public class DefIdMap {
     
     /// ID 到元数据的映射（用于反向查找）
     private var idToMetadata: [UInt64: Metadata] = [:]
+
+    /// DefId 到类型的映射（用于占位类型或快速查找）
+    private var typeMap: [UInt64: Type] = [:]
+
+    /// DefId 到函数签名的映射
+    private var signatureMap: [UInt64: FunctionSignature] = [:]
+
+    /// DefId 到结构体信息的映射
+    private var structInfoMap: [UInt64: StructTypeInfo] = [:]
+
+    /// DefId 到联合类型信息的映射
+    private var unionInfoMap: [UInt64: UnionTypeInfo] = [:]
     
     // MARK: - 初始化
     
     /// 创建一个新的空 DefIdMap
     public init() {}
+
+    /// 清理类型相关信息（保留 DefId 元数据）
+    public func clearTypeInfo() {
+        typeMap.removeAll()
+        signatureMap.removeAll()
+        structInfoMap.removeAll()
+        unionInfoMap.removeAll()
+    }
     
     // MARK: - 公共方法
     
@@ -536,6 +594,98 @@ public class DefIdMap {
             isPrivate: isPrivate,
             sourceFile: metadata.sourceFile
         )
+    }
+
+    // MARK: - Typed Definition Queries/Updates
+
+    public func addType(defId: DefId, type: Type) {
+        typeMap[defId.id] = type
+    }
+
+    public func addStructInfo(
+        defId: DefId,
+        members: [(name: String, type: Type, mutable: Bool)],
+        isGenericInstantiation: Bool = false,
+        typeArguments: [Type]? = nil,
+        templateName: String? = nil
+    ) {
+        structInfoMap[defId.id] = StructTypeInfo(
+            members: members,
+            isGenericInstantiation: isGenericInstantiation,
+            typeArguments: typeArguments,
+            templateName: templateName
+        )
+    }
+
+    public func addUnionInfo(
+        defId: DefId,
+        cases: [UnionCase],
+        isGenericInstantiation: Bool = false,
+        typeArguments: [Type]? = nil,
+        templateName: String? = nil
+    ) {
+        unionInfoMap[defId.id] = UnionTypeInfo(
+            cases: cases,
+            isGenericInstantiation: isGenericInstantiation,
+            typeArguments: typeArguments,
+            templateName: templateName
+        )
+    }
+
+    public func addSignature(defId: DefId, signature: FunctionSignature) {
+        signatureMap[defId.id] = signature
+    }
+
+    public func lookupType(defId: DefId) -> Type? {
+        return typeMap[defId.id]
+    }
+
+    public func getStructMembers(_ defId: DefId) -> [(name: String, type: Type, mutable: Bool)]? {
+        return structInfoMap[defId.id]?.members
+    }
+
+    public func getUnionCases(_ defId: DefId) -> [UnionCase]? {
+        return unionInfoMap[defId.id]?.cases
+    }
+
+    public func isGenericInstantiation(_ defId: DefId) -> Bool? {
+        if let info = structInfoMap[defId.id] {
+            return info.isGenericInstantiation
+        }
+        if let info = unionInfoMap[defId.id] {
+            return info.isGenericInstantiation
+        }
+        return nil
+    }
+
+    public func getTypeArguments(_ defId: DefId) -> [Type]? {
+        if let info = structInfoMap[defId.id] {
+            return info.typeArguments
+        }
+        if let info = unionInfoMap[defId.id] {
+            return info.typeArguments
+        }
+        return nil
+    }
+
+    /// 获取泛型实例化的模板名称
+    ///
+    /// 对于泛型类型实例化（如 `List_I`），返回原始模板名称（如 `List`）。
+    ///
+    /// - Parameter defId: 要查询的 DefId
+    /// - Returns: 模板名称，如果不是泛型实例化或未找到则返回 nil
+    public func getTemplateName(_ defId: DefId) -> String? {
+        if let info = structInfoMap[defId.id] {
+            return info.templateName
+        }
+        if let info = unionInfoMap[defId.id] {
+            return info.templateName
+        }
+        return nil
+    }
+
+    public func lookupSignature(defId: DefId) -> FunctionSignature? {
+        return signatureMap[defId.id]
     }
     
     // MARK: - 私有方法

@@ -5,7 +5,7 @@ private func cTypeIdentifierOrFallback(_ type: Type, fallback: String) -> String
 }
 
 private func cIdentifierOrFallback(defId: DefId, fallback: String) -> String {
-    return DefIdContext.current?.getCIdentifier(defId) ?? fallback
+    return TypeHandlerRegistry.shared.currentContext?.getCIdentifier(defId) ?? fallback
 }
 
 // MARK: - TypeHandler Protocol
@@ -126,7 +126,10 @@ extension TypeHandler {
     
     /// 默认实现：检查是否包含泛型参数
     public func containsGenericParameter(_ type: Type) -> Bool {
-        return type.containsGenericParameter
+        guard let context = TypeHandlerRegistry.shared.currentContext else {
+            return false
+        }
+        return context.containsGenericParameter(type)
     }
 }
 
@@ -191,7 +194,7 @@ public class StructHandler: TypeHandler {
         guard case .structure(let defId) = type else {
             return []
         }
-        return TypedDefContext.current?.getStructMembers(defId) ?? []
+        return TypeHandlerRegistry.shared.currentContext?.getStructMembers(defId) ?? []
     }
     
     public func getMethods(_ type: Type) -> [String] {
@@ -252,7 +255,10 @@ public class StructHandler: TypeHandler {
         guard case .structure(let defId) = type else {
             return false
         }
-        return (TypedDefContext.current?.getStructMembers(defId) ?? []).contains { $0.type.containsGenericParameter }
+        guard let context = TypeHandlerRegistry.shared.currentContext else {
+            return false
+        }
+        return (context.getStructMembers(defId) ?? []).contains { context.containsGenericParameter($0.type) }
     }
     
     // MARK: - Struct-Specific Methods
@@ -262,7 +268,7 @@ public class StructHandler: TypeHandler {
         guard case .structure(let defId) = type else {
             return nil
         }
-        return DefIdContext.current?.getAccess(defId)
+        return TypeHandlerRegistry.shared.currentContext?.getAccess(defId)
     }
     
     /// 获取结构体的模块路径
@@ -270,7 +276,7 @@ public class StructHandler: TypeHandler {
         guard case .structure(let defId) = type else {
             return nil
         }
-        return DefIdContext.current?.getModulePath(defId)
+        return TypeHandlerRegistry.shared.currentContext?.getModulePath(defId)
     }
     
     /// 获取结构体的源文件
@@ -278,7 +284,7 @@ public class StructHandler: TypeHandler {
         guard case .structure(let defId) = type else {
             return nil
         }
-        return DefIdContext.current?.getSourceFile(defId)
+        return TypeHandlerRegistry.shared.currentContext?.getSourceFile(defId)
     }
     
     /// 检查结构体是否是泛型实例化
@@ -286,7 +292,7 @@ public class StructHandler: TypeHandler {
         guard case .structure(let defId) = type else {
             return false
         }
-        return TypedDefContext.current?.isGenericInstantiation(defId) ?? false
+        return TypeHandlerRegistry.shared.currentContext?.isGenericInstantiation(defId) ?? false
     }
     
     /// 获取泛型类型参数
@@ -294,7 +300,7 @@ public class StructHandler: TypeHandler {
         guard case .structure(let defId) = type else {
             return nil
         }
-        return TypedDefContext.current?.getTypeArguments(defId)
+        return TypeHandlerRegistry.shared.currentContext?.getTypeArguments(defId)
     }
 }
 
@@ -385,8 +391,11 @@ public class UnionHandler: TypeHandler {
         guard case .union(let defId) = type else {
             return false
         }
-        return (TypedDefContext.current?.getUnionCases(defId) ?? []).contains { c in
-            c.parameters.contains { $0.type.containsGenericParameter }
+        guard let context = TypeHandlerRegistry.shared.currentContext else {
+            return false
+        }
+        return (context.getUnionCases(defId) ?? []).contains { c in
+            c.parameters.contains { context.containsGenericParameter($0.type) }
         }
     }
     
@@ -397,7 +406,7 @@ public class UnionHandler: TypeHandler {
         guard case .union(let defId) = type else {
             return nil
         }
-        return TypedDefContext.current?.getUnionCases(defId)
+        return TypeHandlerRegistry.shared.currentContext?.getUnionCases(defId)
     }
     
     /// 获取指定 case 的信息
@@ -405,7 +414,7 @@ public class UnionHandler: TypeHandler {
         guard case .union(let defId) = type else {
             return nil
         }
-        return TypedDefContext.current?.getUnionCases(defId)?.first { $0.name == name }
+        return TypeHandlerRegistry.shared.currentContext?.getUnionCases(defId)?.first { $0.name == name }
     }
     
     /// 获取 case 的索引（用于 tag）
@@ -413,7 +422,7 @@ public class UnionHandler: TypeHandler {
         guard case .union(let defId) = type else {
             return nil
         }
-        return TypedDefContext.current?.getUnionCases(defId)?.firstIndex { $0.name == name }
+        return TypeHandlerRegistry.shared.currentContext?.getUnionCases(defId)?.firstIndex { $0.name == name }
     }
     
     /// 获取 Union 的访问修饰符
@@ -421,7 +430,7 @@ public class UnionHandler: TypeHandler {
         guard case .union(let defId) = type else {
             return nil
         }
-        return DefIdContext.current?.getAccess(defId)
+        return TypeHandlerRegistry.shared.currentContext?.getAccess(defId)
     }
     
     /// 获取 Union 的模块路径
@@ -429,7 +438,7 @@ public class UnionHandler: TypeHandler {
         guard case .union(let defId) = type else {
             return nil
         }
-        return DefIdContext.current?.getModulePath(defId)
+        return TypeHandlerRegistry.shared.currentContext?.getModulePath(defId)
     }
     
     /// 获取 Union 的源文件
@@ -437,7 +446,7 @@ public class UnionHandler: TypeHandler {
         guard case .union(let defId) = type else {
             return nil
         }
-        return DefIdContext.current?.getSourceFile(defId)
+        return TypeHandlerRegistry.shared.currentContext?.getSourceFile(defId)
     }
     
     /// 检查 Union 是否是泛型实例化
@@ -445,7 +454,7 @@ public class UnionHandler: TypeHandler {
         guard case .union(let defId) = type else {
             return false
         }
-        return TypedDefContext.current?.isGenericInstantiation(defId) ?? false
+        return TypeHandlerRegistry.shared.currentContext?.isGenericInstantiation(defId) ?? false
     }
     
     /// 获取泛型类型参数
@@ -453,7 +462,7 @@ public class UnionHandler: TypeHandler {
         guard case .union(let defId) = type else {
             return nil
         }
-        return TypedDefContext.current?.getTypeArguments(defId)
+        return TypeHandlerRegistry.shared.currentContext?.getTypeArguments(defId)
     }
     
     /// 生成 Union 构造器代码
@@ -549,10 +558,20 @@ public class GenericHandler: TypeHandler {
     public func generateCTypeName(_ type: Type) -> String {
         switch type {
         case .genericStruct(let template, let args):
-            let argsStr = args.map { $0.layoutKey }.joined(separator: "_")
+            let argsStr: String
+            if let context = TypeHandlerRegistry.shared.currentContext {
+                argsStr = args.map { context.getLayoutKey($0) }.joined(separator: "_")
+            } else {
+                argsStr = args.map { $0.stableKey }.joined(separator: "_")
+            }
             return "struct \(template)_\(argsStr)"
         case .genericUnion(let template, let args):
-            let argsStr = args.map { $0.layoutKey }.joined(separator: "_")
+            let argsStr: String
+            if let context = TypeHandlerRegistry.shared.currentContext {
+                argsStr = args.map { context.getLayoutKey($0) }.joined(separator: "_")
+            } else {
+                argsStr = args.map { $0.stableKey }.joined(separator: "_")
+            }
             return "struct \(template)_\(argsStr)"
         case .genericParameter(let name):
             // 泛型参数不应该出现在代码生成阶段
@@ -565,11 +584,21 @@ public class GenericHandler: TypeHandler {
     public func generateCopyCode(_ type: Type, source: String, dest: String) -> String {
         switch type {
         case .genericStruct(let template, let args):
-            let argsStr = args.map { $0.layoutKey }.joined(separator: "_")
+            let argsStr: String
+            if let context = TypeHandlerRegistry.shared.currentContext {
+                argsStr = args.map { context.getLayoutKey($0) }.joined(separator: "_")
+            } else {
+                argsStr = args.map { $0.stableKey }.joined(separator: "_")
+            }
             let qualifiedName = "\(template)_\(argsStr)"
             return "\(dest) = __koral_\(qualifiedName)_copy(&\(source));"
         case .genericUnion(let template, let args):
-            let argsStr = args.map { $0.layoutKey }.joined(separator: "_")
+            let argsStr: String
+            if let context = TypeHandlerRegistry.shared.currentContext {
+                argsStr = args.map { context.getLayoutKey($0) }.joined(separator: "_")
+            } else {
+                argsStr = args.map { $0.stableKey }.joined(separator: "_")
+            }
             let qualifiedName = "\(template)_\(argsStr)"
             return "\(dest) = __koral_\(qualifiedName)_copy(&\(source));"
         case .genericParameter:
@@ -583,11 +612,21 @@ public class GenericHandler: TypeHandler {
     public func generateDropCode(_ type: Type, value: String) -> String {
         switch type {
         case .genericStruct(let template, let args):
-            let argsStr = args.map { $0.layoutKey }.joined(separator: "_")
+            let argsStr: String
+            if let context = TypeHandlerRegistry.shared.currentContext {
+                argsStr = args.map { context.getLayoutKey($0) }.joined(separator: "_")
+            } else {
+                argsStr = args.map { $0.stableKey }.joined(separator: "_")
+            }
             let qualifiedName = "\(template)_\(argsStr)"
             return "__koral_\(qualifiedName)_drop(&\(value));"
         case .genericUnion(let template, let args):
-            let argsStr = args.map { $0.layoutKey }.joined(separator: "_")
+            let argsStr: String
+            if let context = TypeHandlerRegistry.shared.currentContext {
+                argsStr = args.map { context.getLayoutKey($0) }.joined(separator: "_")
+            } else {
+                argsStr = args.map { $0.stableKey }.joined(separator: "_")
+            }
             let qualifiedName = "\(template)_\(argsStr)"
             return "__koral_\(qualifiedName)_drop(&\(value));"
         case .genericParameter:
@@ -600,10 +639,20 @@ public class GenericHandler: TypeHandler {
     public func getQualifiedName(_ type: Type) -> String {
         switch type {
         case .genericStruct(let template, let args):
-            let argsStr = args.map { $0.layoutKey }.joined(separator: "_")
+            let argsStr: String
+            if let context = TypeHandlerRegistry.shared.currentContext {
+                argsStr = args.map { context.getLayoutKey($0) }.joined(separator: "_")
+            } else {
+                argsStr = args.map { $0.stableKey }.joined(separator: "_")
+            }
             return "\(template)_\(argsStr)"
         case .genericUnion(let template, let args):
-            let argsStr = args.map { $0.layoutKey }.joined(separator: "_")
+            let argsStr: String
+            if let context = TypeHandlerRegistry.shared.currentContext {
+                argsStr = args.map { context.getLayoutKey($0) }.joined(separator: "_")
+            } else {
+                argsStr = args.map { $0.stableKey }.joined(separator: "_")
+            }
             return "\(template)_\(argsStr)"
         case .genericParameter(let name):
             return name
@@ -617,7 +666,10 @@ public class GenericHandler: TypeHandler {
         case .genericParameter:
             return true
         case .genericStruct(_, let args), .genericUnion(_, let args):
-            return args.contains { $0.containsGenericParameter }
+            guard let context = TypeHandlerRegistry.shared.currentContext else {
+                return false
+            }
+            return args.contains { context.containsGenericParameter($0) }
         default:
             return false
         }
@@ -807,7 +859,10 @@ public class ReferenceHandler: TypeHandler {
         guard case .reference(let inner) = type else {
             return false
         }
-        return inner.containsGenericParameter
+        guard let context = TypeHandlerRegistry.shared.currentContext else {
+            return false
+        }
+        return context.containsGenericParameter(inner)
     }
     
     // MARK: - Reference-Specific Methods
@@ -876,7 +931,10 @@ public class FunctionHandler: TypeHandler {
         guard case .function(let params, let returns) = type else {
             return false
         }
-        return returns.containsGenericParameter || params.contains { $0.type.containsGenericParameter }
+        guard let context = TypeHandlerRegistry.shared.currentContext else {
+            return false
+        }
+        return context.containsGenericParameter(returns) || params.contains { context.containsGenericParameter($0.type) }
     }
     
     // MARK: - Function-Specific Methods
@@ -952,7 +1010,10 @@ public class PointerHandler: TypeHandler {
         guard case .pointer(let element) = type else {
             return false
         }
-        return element.containsGenericParameter
+        guard let context = TypeHandlerRegistry.shared.currentContext else {
+            return false
+        }
+        return context.containsGenericParameter(element)
     }
     
     // MARK: - Pointer-Specific Methods
@@ -978,6 +1039,9 @@ public final class TypeHandlerRegistry: @unchecked Sendable {
     
     /// 已注册的处理器列表
     private var handlers: [TypeHandler] = []
+
+    /// 当前编译上下文（用于类型元数据查询）
+    private var context: CompilerContext?
 
     /// 可选的 C 类型名解析器（用于 CodeGen 注入冲突安全命名）
     private var cTypeNameResolver: ((Type) -> String?)?
@@ -1014,6 +1078,16 @@ public final class TypeHandlerRegistry: @unchecked Sendable {
     /// 用于 CodeGen 注入冲突安全的 struct/union 命名规则。
     public func setCTypeNameResolver(_ resolver: ((Type) -> String?)?) {
         cTypeNameResolver = resolver
+    }
+
+    /// 设置当前编译上下文
+    public func setContext(_ context: CompilerContext?) {
+        self.context = context
+    }
+
+    /// 获取当前编译上下文
+    public var currentContext: CompilerContext? {
+        return context
     }
 
     /// 获取用于函数命名的 C 类型标识符（不包含 `struct ` 前缀）

@@ -58,7 +58,7 @@ extension CodeGen {
   func buildRefComponents(_ expr: TypedExpressionNode) -> (path: String, control: String) {
     switch expr {
     case .variable(let identifier):
-      let path = identifier.qualifiedName
+      let path = qualifiedName(for: identifier)
       if case .reference(_) = identifier.type {
         return (path, "\(path).control")
       } else {
@@ -73,10 +73,10 @@ extension CodeGen {
           // Dereferencing a ref type updates the control block
           baseControl = "\(basePath).control"
           let innerCType = cTypeName(inner)
-          basePath = "((\(innerCType)*)\(basePath).ptr)->\(member.qualifiedName)"
+          basePath = "((\(innerCType)*)\(basePath).ptr)->\(qualifiedName(for: member))"
         } else {
           // Accessing member of value type keeps the same control block
-          basePath += ".\(member.qualifiedName)"
+          basePath += ".\(qualifiedName(for: member))"
         }
         curType = member.type
       }
@@ -118,16 +118,16 @@ extension CodeGen {
       var memberAccess: String
       if case .reference(let inner) = curType {
           let innerCType = cTypeName(inner)
-          memberAccess = "((\(innerCType)*)\(access).ptr)->\(member.qualifiedName)"
+          memberAccess = "((\(innerCType)*)\(access).ptr)->\(qualifiedName(for: member))"
       } else {
-          memberAccess = "\(access).\(member.qualifiedName)"
+          memberAccess = "\(access).\(qualifiedName(for: member))"
       }
       
       // Only apply type cast for non-reference struct members when the C types differ
       // This handles cases where generic type parameters are replaced with concrete types
       // but the C representation needs explicit casting
       if case .structure(let defId) = curType.canonical,
-         let canonicalMembers = typedDefMap.getStructMembers(defId),
+        let canonicalMembers = context.getStructMembers(defId),
          let canonicalMember = canonicalMembers.first(where: { $0.name == member.name }) {
           // Compare C type representations instead of Type equality
           // This avoids issues with UUID-based type identity for generic instantiations
@@ -198,13 +198,18 @@ extension CodeGen {
       return generateFunctionCall(method, allArgs, type)
     }
 
+    // Handle trait method placeholder calls
+    if case .traitMethodPlaceholder(let traitName, let methodName, let base, _, _) = callee {
+      fatalError("Unresolved trait method placeholder: \(traitName).\(methodName) on \(base.type)")
+    }
+
     if case .variable(let identifier) = callee {
       // Check if this is a function type variable (closure call)
       // Regular functions have kind = .function, while closure variables have kind = .variable
       if case .variable(_) = identifier.kind,
          case .function(let funcParams, let returnType) = identifier.type {
         return generateClosureCall(
-          closureVar: identifier.qualifiedName,
+          closureVar: qualifiedName(for: identifier),
           funcParams: funcParams,
           returnType: returnType,
           arguments: arguments
@@ -226,6 +231,7 @@ extension CodeGen {
 
     fatalError("Indirect call not supported: callee type = \(callee.type)")
   }
+
   
   /// Generates code for calling a closure (function type variable)
   /// Handles both no-capture (env == NULL) and with-capture (env != NULL) cases
@@ -331,13 +337,13 @@ extension CodeGen {
     
     addIndent()
     if type == .void || type == .never {
-      appendToBuffer("\(identifier.qualifiedName)(")
+      appendToBuffer("\(qualifiedName(for: identifier))(")
       appendToBuffer(paramResults.joined(separator: ", "))
       appendToBuffer(");\n")
       return ""
     } else {
       let result = nextTemp()
-      appendToBuffer("\(cTypeName(type)) \(result) = \(identifier.qualifiedName)(")
+      appendToBuffer("\(cTypeName(type)) \(result) = \(qualifiedName(for: identifier))(")
       appendToBuffer(paramResults.joined(separator: ", "))
       appendToBuffer(");\n")
       return result
@@ -358,14 +364,14 @@ extension CodeGen {
       appendToBuffer("\(cTypeName(value.type)) \(copyResult);\n")
       appendCopyAssignment(for: value.type, source: valueResult, dest: copyResult, indent: indent)
       addIndent()
-      appendDropStatement(for: identifier.type, value: identifier.qualifiedName, indent: "")
+      appendDropStatement(for: identifier.type, value: qualifiedName(for: identifier), indent: "")
       addIndent()
-      appendToBuffer("\(identifier.qualifiedName) = \(copyResult);\n")
+      appendToBuffer("\(qualifiedName(for: identifier)) = \(copyResult);\n")
     } else {
       addIndent()
-      appendDropStatement(for: identifier.type, value: identifier.qualifiedName, indent: "")
+      appendDropStatement(for: identifier.type, value: qualifiedName(for: identifier), indent: "")
       addIndent()
-      appendToBuffer("\(identifier.qualifiedName) = \(valueResult);\n")
+      appendToBuffer("\(qualifiedName(for: identifier)) = \(valueResult);\n")
     }
   }
 
@@ -377,7 +383,7 @@ extension CodeGen {
       _ = generateExpressionSSA(value)
       return
     }
-    let baseResult = base.qualifiedName
+    let baseResult = qualifiedName(for: base)
     let valueResult = generateExpressionSSA(value)
     var accessPath = baseResult
     var curType = base.type
@@ -396,7 +402,7 @@ extension CodeGen {
       
       // Only apply type cast for non-reference struct members when the C types differ
       if case .structure(let defId) = curType.canonical,
-         let canonicalMembers = typedDefMap.getStructMembers(defId),
+        let canonicalMembers = context.getStructMembers(defId),
          let canonicalMember = canonicalMembers.first(where: { $0.name == memberName }) {
           let canonicalCType = cTypeName(canonicalMember.type)
           let memberCTypeStr = cTypeName(memberType)

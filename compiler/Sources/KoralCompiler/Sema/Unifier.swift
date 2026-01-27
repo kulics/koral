@@ -7,7 +7,6 @@ import Foundation
 public enum UnificationError: Error, CustomStringConvertible, @unchecked Sendable {
     /// 类型不匹配
     case typeMismatch(expected: Type, got: Type, span: SourceSpan)
-    
     /// 参数数量不匹配
     case arityMismatch(expected: Int, got: Int, span: SourceSpan)
     
@@ -39,13 +38,21 @@ public class Unifier {
     /// 类型变量到具体类型的绑定
     private var bindings: [TypeVariable: Type]
     
+    /// 统一查询上下文
+    private let context: CompilerContext
+    
     /// 初始化合一器
     /// - Parameters:
     ///   - unionFind: 并查集实例
     ///   - bindings: 初始绑定
-    public init(unionFind: UnionFind<TypeVariable>, bindings: [TypeVariable: Type] = [:]) {
+    public init(
+        unionFind: UnionFind<TypeVariable>,
+        bindings: [TypeVariable: Type] = [:],
+        context: CompilerContext
+    ) {
         self.unionFind = unionFind
         self.bindings = bindings
+        self.context = context
     }
     
     /// 获取当前绑定
@@ -176,7 +183,6 @@ public class Unifier {
                     span: span
                 )
             }
-            
         // 其他情况：类型不匹配
         default:
             throw UnificationError.typeMismatch(
@@ -260,10 +266,10 @@ public class Unifier {
             return occurs(tv, in: elem)
             
         case .structure(let defId):
-            return (TypedDefContext.current?.getStructMembers(defId) ?? []).contains { occurs(tv, in: $0.type) }
+            return (context.getStructMembers(defId) ?? []).contains { occurs(tv, in: $0.type) }
             
         case .union(let defId):
-            return (TypedDefContext.current?.getUnionCases(defId) ?? []).contains { c in
+            return (context.getUnionCases(defId) ?? []).contains { c in
                 c.parameters.contains { occurs(tv, in: $0.type) }
             }
             

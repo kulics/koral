@@ -9,13 +9,13 @@ extension CodeGen {
   ) {
     let name: String
     if case .structure(let defId) = identifier.type {
-      name = cIdentifierByDefId[defIdKey(defId)] ?? defIdMap.getCIdentifier(defId) ?? "T_\(defId.id)"
+      name = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
     } else {
       name = cIdentifier(for: identifier)
     }
     if case .structure(let defId) = identifier.type,
-       typedDefMap.isGenericInstantiation(defId) == true || (typedDefMap.getTypeArguments(defId)?.isEmpty == false) {
-      appendToBuffer("// Generic instantiation: \(identifier.type.debugName)\n")
+       context.isGenericInstantiation(defId) == true || (context.getTypeArguments(defId)?.isEmpty == false) {
+      appendToBuffer("// Generic instantiation: \(context.getDebugName(identifier.type))\n")
     }
     
     // Generate struct definition
@@ -72,13 +72,13 @@ extension CodeGen {
   func generateUnionDeclaration(_ identifier: Symbol, _ cases: [UnionCase]) {
     let name: String
     if case .union(let defId) = identifier.type {
-      name = cIdentifierByDefId[defIdKey(defId)] ?? defIdMap.getCIdentifier(defId) ?? "U_\(defId.id)"
+      name = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
     } else {
       name = cIdentifier(for: identifier)
     }
     if case .union(let defId) = identifier.type,
-       typedDefMap.isGenericInstantiation(defId) == true || (typedDefMap.getTypeArguments(defId)?.isEmpty == false) {
-      appendToBuffer("// Generic instantiation: \(identifier.type.debugName)\n")
+       context.isGenericInstantiation(defId) == true || (context.getTypeArguments(defId)?.isEmpty == false) {
+      appendToBuffer("// Generic instantiation: \(context.getDebugName(identifier.type))\n")
     }
     appendToBuffer("struct \(name) {\n")
     withIndent {
@@ -189,8 +189,8 @@ extension CodeGen {
   /// Generate union constructor code
   func generateUnionConstructor(type: Type, caseName: String, args: [TypedExpressionNode]) -> String {
       guard case .union(let defId) = type else { fatalError() }
-      let typeName = cIdentifierByDefId[defIdKey(defId)] ?? defIdMap.getCIdentifier(defId) ?? "U_\(defId.id)"
-      let cases = typedDefMap.getUnionCases(defId) ?? []
+      let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
+      let cases = context.getUnionCases(defId) ?? []
       
       // Calculate tag index
       let tagIndex = cases.firstIndex(where: { $0.name == caseName })!
@@ -221,7 +221,7 @@ extension CodeGen {
               addIndent()
               if case .structure(let structDefId) = param.type {
                    if argExpr.valueCategory == .lvalue {
-                     let structTypeName = cIdentifierByDefId[defIdKey(structDefId)] ?? defIdMap.getCIdentifier(structDefId) ?? "T_\(structDefId.id)"
+                     let structTypeName = cIdentifierByDefId[defIdKey(structDefId)] ?? context.getCIdentifier(structDefId) ?? "T_\(structDefId.id)"
                      appendToBuffer("\(unionMemberPath).\(fieldName) = __koral_\(structTypeName)_copy(&\(argResult));\n")
                    } else {
                        appendToBuffer("\(unionMemberPath).\(fieldName) = \(argResult);\n")

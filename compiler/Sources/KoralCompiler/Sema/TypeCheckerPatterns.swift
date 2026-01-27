@@ -100,8 +100,8 @@ extension TypeChecker {
       
       switch subjectType {
       case .union(let defId):
-        typeName = DefIdContext.current?.getName(defId) ?? ""
-        cases = TypedDefContext.current?.getUnionCases(defId) ?? []
+        typeName = context.getName(defId) ?? ""
+        cases = context.getUnionCases(defId) ?? []
         
       case .genericUnion(let templateName, let typeArgs):
         // Look up the union template and substitute type parameters

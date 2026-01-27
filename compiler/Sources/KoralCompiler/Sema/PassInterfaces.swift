@@ -157,169 +157,6 @@ public struct NameTable {
     }
 }
 
-/// 类型化定义映射 - 存储 DefId 到类型信息的映射
-///
-/// 这是一个占位类型，将在后续任务中完善实现。
-/// 用于在 Pass 2 中存储解析后的类型信息。
-///
-/// ## 未来扩展
-/// - 支持类型成员查询
-/// - 支持函数签名查询
-/// - 支持泛型实例化
-public struct TypedDefMap {
-    public struct StructTypeInfo {
-        public let members: [(name: String, type: Type, mutable: Bool)]
-        public let isGenericInstantiation: Bool
-        public let typeArguments: [Type]?
-        
-        public init(
-            members: [(name: String, type: Type, mutable: Bool)],
-            isGenericInstantiation: Bool,
-            typeArguments: [Type]?
-        ) {
-            self.members = members
-            self.isGenericInstantiation = isGenericInstantiation
-            self.typeArguments = typeArguments
-        }
-    }
-    
-    public struct UnionTypeInfo {
-        public let cases: [UnionCase]
-        public let isGenericInstantiation: Bool
-        public let typeArguments: [Type]?
-        
-        public init(
-            cases: [UnionCase],
-            isGenericInstantiation: Bool,
-            typeArguments: [Type]?
-        ) {
-            self.cases = cases
-            self.isGenericInstantiation = isGenericInstantiation
-            self.typeArguments = typeArguments
-        }
-    }
-    
-    /// DefId 到类型的映射（用于占位类型或快速查找）
-    private var typeMap: [UInt64: Type]
-    
-    /// DefId 到函数签名的映射
-    private var signatureMap: [UInt64: FunctionSignature]
-    
-    /// DefId 到结构体信息的映射
-    private var structInfoMap: [UInt64: StructTypeInfo]
-    
-    /// DefId 到联合类型信息的映射
-    private var unionInfoMap: [UInt64: UnionTypeInfo]
-    
-    /// 创建空的类型化定义映射
-    public init() {
-        self.typeMap = [:]
-        self.signatureMap = [:]
-        self.structInfoMap = [:]
-        self.unionInfoMap = [:]
-    }
-    
-    /// 添加类型定义
-    ///
-    /// - Parameters:
-    ///   - defId: 定义的 DefId
-    ///   - type: 解析后的类型
-    public mutating func addType(defId: DefId, type: Type) {
-        typeMap[defId.id] = type
-    }
-    
-    /// 添加结构体信息
-    public mutating func addStructInfo(
-        defId: DefId,
-        members: [(name: String, type: Type, mutable: Bool)],
-        isGenericInstantiation: Bool = false,
-        typeArguments: [Type]? = nil
-    ) {
-        structInfoMap[defId.id] = StructTypeInfo(
-            members: members,
-            isGenericInstantiation: isGenericInstantiation,
-            typeArguments: typeArguments
-        )
-    }
-    
-    /// 添加联合类型信息
-    public mutating func addUnionInfo(
-        defId: DefId,
-        cases: [UnionCase],
-        isGenericInstantiation: Bool = false,
-        typeArguments: [Type]? = nil
-    ) {
-        unionInfoMap[defId.id] = UnionTypeInfo(
-            cases: cases,
-            isGenericInstantiation: isGenericInstantiation,
-            typeArguments: typeArguments
-        )
-    }
-    
-    /// 添加函数签名
-    ///
-    /// - Parameters:
-    ///   - defId: 函数的 DefId
-    ///   - signature: 函数签名
-    public mutating func addSignature(defId: DefId, signature: FunctionSignature) {
-        signatureMap[defId.id] = signature
-    }
-    
-    /// 查找类型
-    ///
-    /// - Parameter defId: 定义的 DefId
-    /// - Returns: 解析后的类型，如果不存在则返回 nil
-    public func lookupType(defId: DefId) -> Type? {
-        return typeMap[defId.id]
-    }
-    
-    /// 查找结构体成员
-    public func getStructMembers(_ defId: DefId) -> [(name: String, type: Type, mutable: Bool)]? {
-        return structInfoMap[defId.id]?.members
-    }
-    
-    /// 查找联合类型 cases
-    public func getUnionCases(_ defId: DefId) -> [UnionCase]? {
-        return unionInfoMap[defId.id]?.cases
-    }
-    
-    /// 是否为泛型实例化
-    public func isGenericInstantiation(_ defId: DefId) -> Bool? {
-        if let info = structInfoMap[defId.id] {
-            return info.isGenericInstantiation
-        }
-        if let info = unionInfoMap[defId.id] {
-            return info.isGenericInstantiation
-        }
-        return nil
-    }
-    
-    /// 获取泛型类型参数
-    public func getTypeArguments(_ defId: DefId) -> [Type]? {
-        if let info = structInfoMap[defId.id] {
-            return info.typeArguments
-        }
-        if let info = unionInfoMap[defId.id] {
-            return info.typeArguments
-        }
-        return nil
-    }
-    
-    /// 查找函数签名
-    ///
-    /// - Parameter defId: 函数的 DefId
-    /// - Returns: 函数签名，如果不存在则返回 nil
-    public func lookupSignature(defId: DefId) -> FunctionSignature? {
-        return signatureMap[defId.id]
-    }
-}
-
-// MARK: - Migration Context (Deprecated Accessors)
-
-public enum TypedDefContext {
-    public nonisolated(unsafe) static var current: TypedDefMap?
-}
-
 /// 函数签名 - 描述函数的参数和返回类型
 ///
 /// 用于在 Pass 2 中存储解析后的函数签名信息。
@@ -574,7 +411,6 @@ public struct NameCollectorOutput: PassOutput {
 /// TypeResolver 的输出
 ///
 /// Pass 2 负责解析类型成员和函数签名，输出包括：
-/// - TypedDefMap：DefId 到类型信息的映射
 /// - SymbolTable：符号的注册和查找表
 /// - NameCollectorOutput：来自 Pass 1 的输出（用于后续 Pass）
 ///
@@ -584,9 +420,6 @@ public struct NameCollectorOutput: PassOutput {
 ///
 /// **Validates: Requirements 2.1, 2.3**
 public struct TypeResolverOutput: PassOutput {
-    /// 类型化定义映射 - 存储 DefId 到类型信息的映射
-    public let typedDefMap: TypedDefMap
-    
     /// 符号表 - 管理符号的注册和查找
     public let symbolTable: SymbolTable
     
@@ -596,18 +429,18 @@ public struct TypeResolverOutput: PassOutput {
     /// 创建 TypeResolver 输出
     ///
     /// - Parameters:
-    ///   - typedDefMap: 类型化定义映射
     ///   - symbolTable: 符号表
     ///   - nameCollectorOutput: NameCollector 的输出
     public init(
-        typedDefMap: TypedDefMap,
         symbolTable: SymbolTable,
         nameCollectorOutput: NameCollectorOutput
     ) {
-        self.typedDefMap = typedDefMap
         self.symbolTable = symbolTable
         self.nameCollectorOutput = nameCollectorOutput
     }
+
+    /// DefIdMap with merged type information.
+    public var defIdMap: DefIdMap { nameCollectorOutput.defIdMap }
 }
 
 // MARK: - Pass 3: BodyChecker 输出
@@ -631,7 +464,7 @@ public struct BodyCheckerOutput: PassOutput {
     /// 泛型实例化请求集合
     public let instantiationRequests: Set<InstantiationRequest>
     
-    /// TypeResolver 的输出 - 包含 TypedDefMap、SymbolTable 和 NameCollectorOutput
+    /// TypeResolver 的输出 - 包含 SymbolTable 和 NameCollectorOutput
     public let typeResolverOutput: TypeResolverOutput
     
     /// 创建 BodyChecker 输出

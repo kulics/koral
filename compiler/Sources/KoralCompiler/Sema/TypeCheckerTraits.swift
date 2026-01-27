@@ -91,7 +91,13 @@ extension TypeChecker {
   ) throws -> Type {
     return try withNewScope {
       // Bind both `Self` and inferred self placeholder.
-      try currentScope.defineType("Self", type: selfType)
+      let normalizedSelfType: Type
+      if case .reference(let inner) = selfType {
+        normalizedSelfType = inner
+      } else {
+        normalizedSelfType = selfType
+      }
+      try currentScope.defineType("Self", type: normalizedSelfType)
 
       // Bind trait-level type parameters to their actual type arguments
       // For example, for [T]Iterator with constraint [A]Iterator, bind T -> A

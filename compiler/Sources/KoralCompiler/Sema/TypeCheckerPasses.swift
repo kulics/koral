@@ -134,13 +134,12 @@ extension TypeChecker {
       if hasCollectedErrors {
         throw diagnosticCollector
       }
-      
+
       return TypeCheckerOutput(
         program: program,
         instantiationRequests: bodyCheckerOutput.instantiationRequests,
         genericTemplates: registry,
-        defIdMap: defIdMap,
-        typedDefMap: typeResolverOutput?.typedDefMap ?? TypedDefMap()
+        context: context
       )
     }
   }
@@ -730,9 +729,9 @@ extension TypeChecker {
         let type = try resolveTypeNode(typeNode)
         let typeName: String
         if case .structure(let defId) = type {
-          typeName = DefIdContext.current?.getName(defId) ?? ""
+          typeName = context.getName(defId) ?? ""
         } else if case .union(let defId) = type {
-          typeName = DefIdContext.current?.getName(defId) ?? ""
+          typeName = context.getName(defId) ?? ""
         } else if case .int = type {
           typeName = type.description
         } else if case .int8 = type {
@@ -825,9 +824,9 @@ extension TypeChecker {
         let typeName: String
         switch type {
         case .structure(let defId):
-          typeName = DefIdContext.current?.getName(defId) ?? ""
+          typeName = context.getName(defId) ?? ""
         case .union(let defId):
-          typeName = DefIdContext.current?.getName(defId) ?? ""
+          typeName = context.getName(defId) ?? ""
         case .int, .int8, .int16, .int32, .int64,
              .uint, .uint8, .uint16, .uint32, .uint64,
              .float32, .float64,
@@ -895,10 +894,12 @@ extension TypeChecker {
         // Update typed def info and overwrite the placeholder
         if case .structure(let defId) = placeholder {
           let members = params.map { (name: $0.name, type: $0.type, mutable: $0.isMutable()) }
-          if var map = TypedDefContext.current {
-            map.addStructInfo(defId: defId, members: members, isGenericInstantiation: false, typeArguments: nil)
-            TypedDefContext.current = map
-          }
+          context.updateStructInfo(
+            defId: defId,
+            members: members,
+            isGenericInstantiation: false,
+            typeArguments: nil
+          )
           let resolvedType = Type.structure(defId: defId)
           if isPrivate {
             currentScope.overwritePrivateType(name, sourceFile: currentSourceFile, type: resolvedType)
@@ -936,10 +937,12 @@ extension TypeChecker {
         
         // Update typed def info and overwrite the placeholder
         if case .union(let defId) = placeholder {
-          if var map = TypedDefContext.current {
-            map.addUnionInfo(defId: defId, cases: unionCases, isGenericInstantiation: false, typeArguments: nil)
-            TypedDefContext.current = map
-          }
+          context.updateUnionInfo(
+            defId: defId,
+            cases: unionCases,
+            isGenericInstantiation: false,
+            typeArguments: nil
+          )
           let resolvedType = Type.union(defId: defId)
           if isPrivate {
             currentScope.overwritePrivateType(name, sourceFile: currentSourceFile, type: resolvedType)
@@ -1041,7 +1044,7 @@ extension TypeChecker {
       
       var unionCases: [UnionCase] = []
       if case .union(let defId) = type {
-        unionCases = TypedDefContext.current?.getUnionCases(defId) ?? []
+        unionCases = context.getUnionCases(defId) ?? []
       }
       
       return .globalUnionDeclaration(
@@ -1352,9 +1355,9 @@ extension TypeChecker {
       let type = try resolveTypeNode(typeNode)
       let typeName: String
       if case .structure(let defId) = type {
-        typeName = DefIdContext.current?.getName(defId) ?? ""
+        typeName = context.getName(defId) ?? ""
       } else if case .union(let defId) = type {
-        typeName = DefIdContext.current?.getName(defId) ?? ""
+        typeName = context.getName(defId) ?? ""
       } else if case .int = type {
         typeName = type.description
       } else if case .int8 = type {
@@ -1535,10 +1538,10 @@ extension TypeChecker {
       let shouldEmitGiven: Bool
       switch type {
       case .structure(let defId):
-        typeName = DefIdContext.current?.getName(defId) ?? ""
+        typeName = context.getName(defId) ?? ""
         shouldEmitGiven = true
       case .union(let defId):
-        typeName = DefIdContext.current?.getName(defId) ?? ""
+        typeName = context.getName(defId) ?? ""
         shouldEmitGiven = true
       case .int, .int8, .int16, .int32, .int64,
         .uint, .uint8, .uint16, .uint32, .uint64,
@@ -1786,7 +1789,7 @@ extension TypeChecker {
   /// - Builds module symbols (merged Pass 2.5 functionality)
   ///
   /// The output contains:
-  /// - TypedDefMap: DefId to type information mappings
+  /// - DefIdMap: DefId to type information mappings
   /// - SymbolTable: Symbol registration and lookup table
   /// - NameCollectorOutput: Preserved from input
   ///
@@ -1800,7 +1803,7 @@ extension TypeChecker {
     let input = TypeResolverInput(nameCollectorOutput: nameCollectorOutput)
     
     // Create and run TypeResolver
-    let typeResolver = TypeResolver(coreGlobalCount: coreGlobalCount, checker: self)
+    let typeResolver = TypeResolver(coreGlobalCount: coreGlobalCount, checker: self, context: context)
     let output = try typeResolver.run(input: input)
     
     return output

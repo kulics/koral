@@ -142,7 +142,7 @@ public class Driver {
 
   func process(file: String, mode: DriverCommand, outputDir: String? = nil, noStd: Bool = false, escapeAnalysisReport: Bool = false) throws {
     let fileManager = FileManager.default
-    let inputURL = URL(fileURLWithPath: file)
+    let inputURL = URL(fileURLWithPath: file).standardized
     
     let baseName = inputURL.deletingPathExtension().lastPathComponent
     
@@ -312,8 +312,7 @@ public class Driver {
     // 3. Code generation
     let codeGen = CodeGen(
       ast: monomorphizedProgram,
-      defIdMap: monomorphizer.defIdMap,
-      typedDefMap: monomorphizer.typedDefMap,
+      context: monomorphizer.context,
       escapeAnalysisReportEnabled: escapeAnalysisReport
     )
     let cSource = codeGen.generate()
@@ -326,6 +325,10 @@ public class Driver {
       }
     }
 
+    // Ensure output directory exists
+    if !fileManager.fileExists(atPath: outputDirectory.path) {
+      try fileManager.createDirectory(at: outputDirectory, withIntermediateDirectories: true, attributes: nil)
+    }
     let cFileURL = outputDirectory.appendingPathComponent("\(baseName).c")
     try cSource.write(to: cFileURL, atomically: true, encoding: .utf8)
 
@@ -457,9 +460,41 @@ public class Driver {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: executable)
     process.arguments = args
+    
+    // Use temporary files instead of pipes to avoid buffer deadlock
+    let tempDir = FileManager.default.temporaryDirectory
+    let stdoutFile = tempDir.appendingPathComponent(UUID().uuidString + "_stdout.txt")
+    let stderrFile = tempDir.appendingPathComponent(UUID().uuidString + "_stderr.txt")
+    
+    FileManager.default.createFile(atPath: stdoutFile.path, contents: nil)
+    FileManager.default.createFile(atPath: stderrFile.path, contents: nil)
+    
+    defer {
+      try? FileManager.default.removeItem(at: stdoutFile)
+      try? FileManager.default.removeItem(at: stderrFile)
+    }
+    
+    let stdoutHandle = try FileHandle(forWritingTo: stdoutFile)
+    let stderrHandle = try FileHandle(forWritingTo: stderrFile)
+    
+    process.standardOutput = stdoutHandle
+    process.standardError = stderrHandle
 
     try process.run()
     process.waitUntilExit()
+    
+    try? stdoutHandle.close()
+    try? stderrHandle.close()
+    
+    // Read and print captured output
+    if let stdoutData = try? Data(contentsOf: stdoutFile),
+       let stdout = String(data: stdoutData, encoding: .utf8), !stdout.isEmpty {
+      print(stdout, terminator: "")
+    }
+    if let stderrData = try? Data(contentsOf: stderrFile), !stderrData.isEmpty {
+      FileHandle.standardError.write(stderrData)
+    }
+    
     return process.terminationStatus
   }
 

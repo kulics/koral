@@ -58,7 +58,7 @@ public indirect enum PatternSpace {
 extension PatternSpace {
     /// Subtract the space covered by a pattern from this space.
     /// Returns the remaining uncovered space.
-    public func subtract(_ pattern: TypedPattern, type: Type) -> PatternSpace {
+    public func subtract(_ pattern: TypedPattern, type: Type, context: CompilerContext) -> PatternSpace {
         switch pattern {
         case .wildcard, .variable:
             // Wildcard and variable patterns cover everything
@@ -73,7 +73,7 @@ extension PatternSpace {
             return self
             
         case .unionCase(let caseName, _, let elements):
-            return subtractUnionCase(caseName: caseName, elements: elements, type: type)
+            return subtractUnionCase(caseName: caseName, elements: elements, type: type, context: context)
             
         case .comparisonPattern:
             // Comparison patterns don't reduce the space meaningfully for exhaustiveness
@@ -82,13 +82,13 @@ extension PatternSpace {
             
         case .andPattern(let left, let right):
             // And pattern: subtract both sub-patterns
-            let afterLeft = self.subtract(left, type: type)
-            return afterLeft.subtract(right, type: type)
+            let afterLeft = self.subtract(left, type: type, context: context)
+            return afterLeft.subtract(right, type: type, context: context)
             
         case .orPattern(let left, let right):
             // Or pattern: subtract both sub-patterns (union of covered spaces)
-            let afterLeft = self.subtract(left, type: type)
-            return afterLeft.subtract(right, type: type)
+            let afterLeft = self.subtract(left, type: type, context: context)
+            return afterLeft.subtract(right, type: type, context: context)
             
         case .notPattern:
             // Not patterns don't reduce the space meaningfully for exhaustiveness
@@ -120,11 +120,16 @@ extension PatternSpace {
         }
     }
     
-    private func subtractUnionCase(caseName: String, elements: [TypedPattern], type: Type) -> PatternSpace {
+    private func subtractUnionCase(
+        caseName: String,
+        elements: [TypedPattern],
+        type: Type,
+        context: CompilerContext
+    ) -> PatternSpace {
         switch self {
         case .full(let t):
             // Get all cases from the union type
-            guard let allCases = getUnionCases(from: t) else {
+            guard let allCases = getUnionCases(from: t, context: context) else {
                 return self
             }
             
@@ -143,7 +148,7 @@ extension PatternSpace {
                 // Partial coverage - need to track field spaces
                 var remainingCases = allCases
                 if let caseFields = remainingCases[caseName] {
-                    let newFields = subtractFromFields(caseFields, patterns: elements)
+                    let newFields = subtractFromFields(caseFields, patterns: elements, context: context)
                     if newFields.allSatisfy({ $0.isEmpty }) {
                         remainingCases.removeValue(forKey: caseName)
                     } else {
@@ -166,7 +171,7 @@ extension PatternSpace {
             if coversEntireCase {
                 cases.removeValue(forKey: caseName)
             } else if let caseFields = cases[caseName] {
-                let newFields = subtractFromFields(caseFields, patterns: elements)
+                let newFields = subtractFromFields(caseFields, patterns: elements, context: context)
                 if newFields.allSatisfy({ $0.isEmpty }) {
                     cases.removeValue(forKey: caseName)
                 } else {
@@ -184,7 +189,11 @@ extension PatternSpace {
         }
     }
     
-    private func subtractFromFields(_ fields: [PatternSpace], patterns: [TypedPattern]) -> [PatternSpace] {
+    private func subtractFromFields(
+        _ fields: [PatternSpace],
+        patterns: [TypedPattern],
+        context: CompilerContext
+    ) -> [PatternSpace] {
         guard fields.count == patterns.count else {
             return fields
         }
@@ -192,7 +201,7 @@ extension PatternSpace {
         var result: [PatternSpace] = []
         for (field, pattern) in zip(fields, patterns) {
             let fieldType: Type = extractTypeFromSpace(field)
-            result.append(field.subtract(pattern, type: fieldType))
+            result.append(field.subtract(pattern, type: fieldType, context: context))
         }
         return result
     }
@@ -214,11 +223,11 @@ extension PatternSpace {
         }
     }
     
-    private func getUnionCases(from type: Type) -> [String: [PatternSpace]]? {
+    private func getUnionCases(from type: Type, context: CompilerContext) -> [String: [PatternSpace]]? {
         switch type {
         case .union(let defId):
             var result: [String: [PatternSpace]] = [:]
-            for c in TypedDefContext.current?.getUnionCases(defId) ?? [] {
+            for c in context.getUnionCases(defId) ?? [] {
                 result[c.name] = c.parameters.map { PatternSpace.full($0.type) }
             }
             return result
@@ -234,13 +243,13 @@ extension PatternSpace {
     }
     
     /// Create a full pattern space for a given type
-    public static func fullSpace(for type: Type) -> PatternSpace {
+    public static func fullSpace(for type: Type, context: CompilerContext) -> PatternSpace {
         switch type {
         case .bool:
             return .boolValues(remaining: [true, false])
         case .union(let defId):
             var caseSpaces: [String: [PatternSpace]] = [:]
-            for c in TypedDefContext.current?.getUnionCases(defId) ?? [] {
+            for c in context.getUnionCases(defId) ?? [] {
                 caseSpaces[c.name] = c.parameters.map { PatternSpace.full($0.type) }
             }
             return .unionCases(typeName: type.description, cases: caseSpaces)

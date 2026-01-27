@@ -65,7 +65,7 @@ extension CodeGen {
       
       // Initialize captured variables
       for capture in captures {
-        let capturedName = capture.symbol.qualifiedName
+        let capturedName = qualifiedName(for: capture.symbol)
         appendCopyAssignment(
           for: capture.symbol.type,
           source: capturedName,
@@ -96,7 +96,7 @@ extension CodeGen {
     var paramList: [String] = []
     for (i, param) in parameters.enumerated() {
       let paramType = funcParams[i].type
-      paramList.append("\(cTypeName(paramType)) \(param.qualifiedName)")
+      paramList.append("\(cTypeName(paramType)) \(qualifiedName(for: param))")
     }
     
     let paramsStr = paramList.isEmpty ? "void" : paramList.joined(separator: ", ")
@@ -156,7 +156,7 @@ extension CodeGen {
     var paramList: [String] = ["void* __env"]
     for (i, param) in parameters.enumerated() {
       let paramType = funcParams[i].type
-      paramList.append("\(cTypeName(paramType)) \(param.qualifiedName)")
+      paramList.append("\(cTypeName(paramType)) \(qualifiedName(for: param))")
     }
     
     let paramsStr = paramList.joined(separator: ", ")
@@ -169,7 +169,7 @@ extension CodeGen {
     
     // Generate local aliases for captured variables
     for capture in captures {
-      let capturedName = capture.symbol.qualifiedName
+      let capturedName = qualifiedName(for: capture.symbol)
       let capturedType = cTypeName(capture.symbol.type)
       funcBuffer += "  \(capturedType) \(capturedName) = __captured->\(capturedName);\n"
     }
@@ -215,7 +215,7 @@ extension CodeGen {
     structBuffer += "  intptr_t __refcount;\n"
     
     for capture in captures {
-      let capturedName = capture.symbol.qualifiedName
+      let capturedName = qualifiedName(for: capture.symbol)
       let capturedType = cTypeName(capture.symbol.type)
       structBuffer += "  \(capturedType) \(capturedName);\n"
     }

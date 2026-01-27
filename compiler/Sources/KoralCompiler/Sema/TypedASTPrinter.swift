@@ -342,6 +342,20 @@ public func printTypedAST(_ node: TypedProgram) {
         }
       }
 
+    case .traitMethodPlaceholder(let traitName, let methodName, let base, let methodTypeArgs, let type):
+      print("\(indent)TraitMethodPlaceholder: \(traitName).\(methodName) : \(type)")
+      if !methodTypeArgs.isEmpty {
+        withIndent {
+          print("\(indent)MethodTypeArgs: \(methodTypeArgs.map { $0.description }.joined(separator: ", "))")
+        }
+      }
+      withIndent {
+        print("\(indent)Base:")
+        withIndent {
+          printTypedExpression(base)
+        }
+      }
+
     case .memberPath(let source, let path):
       print("\(indent)MemberPath: \(path.map { $0.name }.joined(separator: "."))")
       withIndent {

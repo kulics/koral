@@ -26,6 +26,7 @@ public enum SemanticErrorContext {
     // Legacy global state for backward compatibility
     public nonisolated(unsafe) static var currentFileName: String = "<input>"
     public nonisolated(unsafe) static var currentLine: Int = 1
+    public nonisolated(unsafe) static var currentCompilerContext: CompilerContext? = nil
     
     /// The current context, or a default context if the stack is empty.
     public static var current: Context {

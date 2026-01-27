@@ -70,14 +70,14 @@ extension TypeChecker {
     
     switch actualType {
     case .structure(let defId):
-      let typeName = DefIdContext.current?.getName(defId) ?? ""
+      let typeName = context.getName(defId) ?? ""
       if let methods = extensionMethods[typeName], let sym = methods[name] {
         return sym
       }
       return nil
 
     case .union(let defId):
-      let typeName = DefIdContext.current?.getName(defId) ?? ""
+      let typeName = context.getName(defId) ?? ""
       if let methods = extensionMethods[typeName], let sym = methods[name] {
         return sym
       }
@@ -197,9 +197,10 @@ extension TypeChecker {
     
     // Record instantiation request if type args are concrete
     // Skip if method has method-level type parameters (will be recorded when method call is processed)
-    if !typeArgs.contains(where: { $0.containsGenericParameter }) && method.typeParameters.isEmpty {
+    if !typeArgs.contains(where: { context.containsGenericParameter($0) }) && method.typeParameters.isEmpty {
       recordInstantiation(InstantiationRequest(
         kind: .extensionMethod(
+          templateName: templateName,
           baseType: baseType,
           template: methodInfo,
           typeArgs: typeArgs,
@@ -274,6 +275,16 @@ extension TypeChecker {
     let methodType: Type
     let typeArgs: [Type]?
     let methodTypeArgs: [Type]
+    /// If non-nil, this is a trait method placeholder that should be resolved at monomorphization time
+    let traitName: String?
+    
+    init(methodSymbol: Symbol, methodType: Type, typeArgs: [Type]?, methodTypeArgs: [Type], traitName: String? = nil) {
+      self.methodSymbol = methodSymbol
+      self.methodType = methodType
+      self.typeArgs = typeArgs
+      self.methodTypeArgs = methodTypeArgs
+      self.traitName = traitName
+    }
   }
 
   /// Resolves a generic method with explicit method-level type arguments.
@@ -306,13 +317,13 @@ extension TypeChecker {
       typeArgs = args
     case .structure(let defId):
       // Non-generic struct - extract base name
-      let name = DefIdContext.current?.getName(defId) ?? ""
-      templateName = name.split(separator: "_").first.map(String.init) ?? name
+      let name = context.getName(defId) ?? ""
+      templateName = context.getTemplateName(defId) ?? name
       typeArgs = []
     case .union(let defId):
       // Non-generic union - extract base name
-      let name = DefIdContext.current?.getName(defId) ?? ""
-      templateName = name.split(separator: "_").first.map(String.init) ?? name
+      let name = context.getName(defId) ?? ""
+      templateName = context.getTemplateName(defId) ?? name
       typeArgs = []
     case .pointer(let element):
       templateName = "Pointer"
@@ -371,9 +382,10 @@ extension TypeChecker {
     
     // Record instantiation request if all type args are concrete
     let allTypeArgs = typeArgs + methodTypeArgs
-    if !allTypeArgs.contains(where: { $0.containsGenericParameter }) {
+    if !allTypeArgs.contains(where: { context.containsGenericParameter($0) }) {
       recordInstantiation(InstantiationRequest(
         kind: .extensionMethod(
+          templateName: templateName,
           baseType: baseType,
           template: methodInfo,
           typeArgs: typeArgs,
@@ -443,7 +455,13 @@ extension TypeChecker {
         // Resolve function type with substitution
         let functionType = try withNewScope {
           // Bind Self to the generic parameter type
-          try currentScope.defineType("Self", type: baseType)
+          let normalizedSelfType: Type
+          if case .reference(let inner) = baseType {
+            normalizedSelfType = inner
+          } else {
+            normalizedSelfType = baseType
+          }
+          try currentScope.defineType("Self", type: normalizedSelfType)
           
           // Bind trait type parameters to their actual type arguments
           // For example, for [T]Iterator with constraint [A]Iterator, bind T -> A
@@ -473,19 +491,27 @@ extension TypeChecker {
         }
         
         let kind = getCompilerMethodKind(methodName)
+        // Create a placeholder symbol without __trait_ prefix
+        // The traitName field in the result indicates this is a trait method placeholder
         let methodSymbol = makeGlobalSymbol(
-          name: "__trait_\(traitName)_\(methodName)",
+          name: methodName,
           type: functionType,
           kind: .function,
           methodKind: kind,
           access: .default
+        )
+        recordTraitPlaceholderInstantiation(
+          baseType: baseType,
+          methodName: methodName,
+          methodTypeArgs: methodTypeArgs
         )
         
         return GenericMethodResolutionResult(
           methodSymbol: methodSymbol,
           methodType: functionType,
           typeArgs: nil,
-          methodTypeArgs: methodTypeArgs
+          methodTypeArgs: methodTypeArgs,
+          traitName: traitName
         )
       }
     }
@@ -502,7 +528,8 @@ extension TypeChecker {
     typeArgs: [Type]?,
     params: [Parameter],
     returns: Type,
-    arguments: [ExpressionNode]
+    arguments: [ExpressionNode],
+    traitName: String? = nil
   ) throws -> TypedExpressionNode {
     // Create a temporary variable for the rvalue
     let tempSym = nextSynthSymbol(prefix: "temp_recv", type: base.type)
@@ -514,14 +541,25 @@ extension TypeChecker {
     let refType: Type = .reference(inner: base.type)
     let tempRef: TypedExpressionNode = .referenceExpression(expression: tempVar, type: refType)
     
-    // Create method reference with the temporary as base
-    let finalCallee: TypedExpressionNode = .methodReference(
-      base: tempRef,
-      method: method,
-      typeArgs: typeArgs,
-      methodTypeArgs: methodTypeArgs,
-      type: methodType
-    )
+    // Create method reference or trait method placeholder with the temporary as base
+    let finalCallee: TypedExpressionNode
+    if let traitName = traitName {
+      finalCallee = .traitMethodPlaceholder(
+        traitName: traitName,
+        methodName: method.name,
+        base: tempRef,
+        methodTypeArgs: methodTypeArgs,
+        type: methodType
+      )
+    } else {
+      finalCallee = .methodReference(
+        base: tempRef,
+        method: method,
+        typeArgs: typeArgs,
+        methodTypeArgs: methodTypeArgs,
+        type: methodType
+      )
+    }
     
     // Type check arguments
     var typedArguments: [TypedExpressionNode] = []
@@ -589,7 +627,7 @@ extension TypeChecker {
     let typeName: String
     switch structType {
     case .structure(let defId):
-      typeName = DefIdContext.current?.getName(defId) ?? ""
+      typeName = context.getName(defId) ?? ""
     case .genericStruct(let template, _):
       typeName = template
     default:
@@ -600,7 +638,7 @@ extension TypeChecker {
     
     // Try to look up method on concrete type first
     if case .structure(let defId) = structType {
-      let name = DefIdContext.current?.getName(defId) ?? ""
+      let name = context.getName(defId) ?? ""
       if let extensions = extensionMethods[name], let sym = extensions[methodName] {
         methodSymbol = sym
       }
@@ -688,7 +726,7 @@ extension TypeChecker {
     let typeName: String
     switch structType {
     case .structure(let defId):
-      typeName = DefIdContext.current?.getName(defId) ?? ""
+      typeName = context.getName(defId) ?? ""
     case .genericStruct(let template, _):
       typeName = template
     default:
@@ -699,7 +737,7 @@ extension TypeChecker {
     
     // Try to look up method on concrete type first
     if case .structure(let defId) = structType {
-      let name = DefIdContext.current?.getName(defId) ?? ""
+      let name = context.getName(defId) ?? ""
       if let extensions = extensionMethods[name], let sym = extensions[methodName] {
         methodSymbol = sym
       }

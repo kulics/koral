@@ -54,7 +54,7 @@ extension Monomorphizer {
                 // Non-generic struct reference
                 if template.typeParameters.isEmpty {
                     let defId = getOrAllocateTypeDefId(name: name, kind: .structure)
-                    typedDefMap.addStructInfo(defId: defId, members: [], isGenericInstantiation: false, typeArguments: nil)
+                    context.updateStructInfo(defId: defId, members: [], isGenericInstantiation: false, typeArguments: nil)
                     return .structure(defId: defId)
                 }
             }
@@ -63,7 +63,7 @@ extension Monomorphizer {
                 // Non-generic union reference
                 if template.typeParameters.isEmpty {
                     let defId = getOrAllocateTypeDefId(name: name, kind: .union)
-                    typedDefMap.addUnionInfo(defId: defId, cases: [], isGenericInstantiation: false, typeArguments: nil)
+                    context.updateUnionInfo(defId: defId, cases: [], isGenericInstantiation: false, typeArguments: nil)
                     return .union(defId: defId)
                 }
             }
@@ -163,7 +163,7 @@ extension Monomorphizer {
     /// to concrete structure/union types by instantiating them.
     internal func substituteType(_ type: Type, substitution: [String: Type]) -> Type {
         // First, apply the basic substitution
-        let substituted = SemaUtils.substituteType(type, substitution: substitution)
+        let substituted = SemaUtils.substituteType(type, substitution: substitution, context: context)
         
         // Then, resolve genericStruct/genericUnion to concrete types
         return resolveParameterizedType(substituted, visited: [])
@@ -188,7 +188,7 @@ extension Monomorphizer {
             let resolvedArgs = args.map { resolveParameterizedType($0, visited: visited) }
             
             // If any arg still contains generic parameters, we can't resolve yet
-            if resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+            if resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
                 return .genericStruct(template: template, args: resolvedArgs)
             }
             
@@ -205,10 +205,10 @@ extension Monomorphizer {
                     return try instantiateStruct(template: structTemplate, args: resolvedArgs)
                 } catch {
                     // If instantiation fails, return a placeholder
-                    let argLayoutKeys = resolvedArgs.map { $0.layoutKey }.joined(separator: "_")
+                    let argLayoutKeys = resolvedArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
                     let layoutName = "\(template)_\(argLayoutKeys)"
                     let defId = getOrAllocateTypeDefId(name: layoutName, kind: .structure)
-                    typedDefMap.addStructInfo(defId: defId, members: [], isGenericInstantiation: true, typeArguments: resolvedArgs)
+                    context.updateStructInfo(defId: defId, members: [], isGenericInstantiation: true, typeArguments: resolvedArgs)
                     return .structure(defId: defId)
                 }
             }
@@ -231,7 +231,7 @@ extension Monomorphizer {
             let resolvedArgs = args.map { resolveParameterizedType($0, visited: visited) }
             
             // If any arg still contains generic parameters, we can't resolve yet
-            if resolvedArgs.contains(where: { $0.containsGenericParameter }) {
+            if resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
                 return .genericUnion(template: template, args: resolvedArgs)
             }
             
@@ -248,10 +248,10 @@ extension Monomorphizer {
                     return try instantiateUnion(template: unionTemplate, args: resolvedArgs)
                 } catch {
                     // If instantiation fails, return a placeholder
-                    let argLayoutKeys = resolvedArgs.map { $0.layoutKey }.joined(separator: "_")
+                    let argLayoutKeys = resolvedArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
                     let layoutName = "\(template)_\(argLayoutKeys)"
                     let defId = getOrAllocateTypeDefId(name: layoutName, kind: .union)
-                    typedDefMap.addUnionInfo(defId: defId, cases: [], isGenericInstantiation: true, typeArguments: resolvedArgs)
+                    context.updateUnionInfo(defId: defId, cases: [], isGenericInstantiation: true, typeArguments: resolvedArgs)
                     return .union(defId: defId)
                 }
             }
@@ -282,7 +282,7 @@ extension Monomorphizer {
             }
             var newVisited = visited
             newVisited.insert(defId.id)
-            let members = typedDefMap.getStructMembers(defId) ?? []
+            let members = context.getStructMembers(defId) ?? []
             let newMembers = members.map { member in
                 (
                     name: member.name,
@@ -296,9 +296,9 @@ extension Monomorphizer {
             if !membersChanged {
                 return type
             }
-            let isGeneric = typedDefMap.isGenericInstantiation(defId) ?? false
-            let typeArgs = typedDefMap.getTypeArguments(defId)
-            typedDefMap.addStructInfo(defId: defId, members: newMembers, isGenericInstantiation: isGeneric, typeArguments: typeArgs)
+            let isGeneric = context.isGenericInstantiation(defId) ?? false
+            let typeArgs = context.getTypeArguments(defId)
+            context.updateStructInfo(defId: defId, members: newMembers, isGenericInstantiation: isGeneric, typeArguments: typeArgs)
             return .structure(defId: defId)
             
         case .union(let defId):
@@ -307,7 +307,7 @@ extension Monomorphizer {
             }
             var newVisited = visited
             newVisited.insert(defId.id)
-            let cases = typedDefMap.getUnionCases(defId) ?? []
+            let cases = context.getUnionCases(defId) ?? []
             let newCases = cases.map { unionCase in
                 UnionCase(
                     name: unionCase.name,
@@ -324,9 +324,9 @@ extension Monomorphizer {
             if !casesChanged {
                 return type
             }
-            let isGeneric = typedDefMap.isGenericInstantiation(defId) ?? false
-            let typeArgs = typedDefMap.getTypeArguments(defId)
-            typedDefMap.addUnionInfo(defId: defId, cases: newCases, isGenericInstantiation: isGeneric, typeArguments: typeArgs)
+            let isGeneric = context.isGenericInstantiation(defId) ?? false
+            let typeArgs = context.getTypeArguments(defId)
+            context.updateUnionInfo(defId: defId, cases: newCases, isGenericInstantiation: isGeneric, typeArguments: typeArgs)
             return .union(defId: defId)
             
         default:
@@ -389,13 +389,13 @@ extension Monomorphizer {
             let qualifiedTypeName: String
             switch resolvedType {
             case .structure(let defId):
-                let name = defIdMap.getName(defId) ?? resolvedType.description
+                let name = context.getName(defId) ?? resolvedType.description
                 typeName = name
-                qualifiedTypeName = defIdMap.getQualifiedName(defId) ?? name
+                qualifiedTypeName = context.getQualifiedName(defId) ?? name
             case .union(let defId):
-                let name = defIdMap.getName(defId) ?? resolvedType.description
+                let name = context.getName(defId) ?? resolvedType.description
                 typeName = name
-                qualifiedTypeName = defIdMap.getQualifiedName(defId) ?? name
+                qualifiedTypeName = context.getQualifiedName(defId) ?? name
             default:
                 typeName = resolvedType.description
                 qualifiedTypeName = typeName
@@ -404,7 +404,16 @@ extension Monomorphizer {
             let newMethods = methods.map { method -> TypedMethodDeclaration in
                 // Generate mangled name for the method
                 // Use qualifiedTypeName to include module path
-                let mangledName = "\(qualifiedTypeName)_\(method.identifier.name)"
+                let qualifiedPrefix = "\(qualifiedTypeName)_"
+                let qualifiedCName = sanitizeCIdentifier(qualifiedTypeName)
+                let qualifiedCPrefix = "\(qualifiedCName)_"
+                let mangledName: String
+                if method.identifier.name.hasPrefix(qualifiedPrefix)
+                    || method.identifier.name.hasPrefix(qualifiedCPrefix) {
+                    mangledName = method.identifier.name
+                } else {
+                    mangledName = "\(qualifiedTypeName)_\(method.identifier.name)"
+                }
                 
                 // 创建新的 Symbol，使用空的 modulePath
                 // 因为 mangledName 已经包含了完整的模块路径信息
@@ -599,7 +608,7 @@ extension Monomorphizer {
                     }
                 }
             }
-            
+
             return .call(
                 callee: newCallee,
                 arguments: newArguments,
@@ -613,7 +622,7 @@ extension Monomorphizer {
             let newType = resolveParameterizedType(type)
             
             // If type args still contain generic parameters, keep as genericCall
-            if resolvedTypeArgs.contains(where: { $0.containsGenericParameter }) {
+            if resolvedTypeArgs.contains(where: { context.containsGenericParameter($0) }) {
                 return .genericCall(
                     functionName: functionName,
                     typeArgs: resolvedTypeArgs,
@@ -635,7 +644,7 @@ extension Monomorphizer {
                 }
                 
                 // Calculate the mangled name
-                let argLayoutKeys = resolvedTypeArgs.map { $0.layoutKey }.joined(separator: "_")
+                let argLayoutKeys = resolvedTypeArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
                 let mangledName = "\(functionName)_\(argLayoutKeys)"
                 
                 // Create the callee as a variable reference to the mangled function
@@ -669,12 +678,12 @@ extension Monomorphizer {
             
             // Track the resolved return type (will be updated if we find a concrete method)
             var resolvedReturnType = resolveParameterizedType(type)
+            let methodTypeArgsToPass = resolvedMethodTypeArgs ?? []
 
             // Resolve method name to mangled name for generic extension methods
-            if !newBase.type.containsGenericParameter {
+            if !context.containsGenericParameter(newBase.type) {
                 // Look up the concrete method on the resolved base type
                 // Pass method type args for generic methods
-                let methodTypeArgsToPass = resolvedMethodTypeArgs ?? []
                 if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: method.name, methodTypeArgs: methodTypeArgsToPass) {
                     // Resolve any parameterized types in the method type
                     let resolvedMethodType = resolveParameterizedType(concreteMethod.type)
@@ -695,6 +704,84 @@ extension Monomorphizer {
                 typeArgs: resolvedTypeArgs,
                 methodTypeArgs: resolvedMethodTypeArgs,
                 type: resolvedReturnType
+            )
+            
+        case .traitMethodPlaceholder(let traitName, let methodName, let base, let methodTypeArgs, let type):
+            // Resolve types in the placeholder
+            let newBase = resolveTypesInExpression(base)
+            let resolvedMethodTypeArgs = methodTypeArgs.map { resolveParameterizedType($0) }
+            let resolvedType = resolveParameterizedType(type)
+            
+            // Enqueue trait placeholder request for later resolution
+            enqueueTraitPlaceholderRequest(
+                baseType: newBase.type,
+                methodName: methodName,
+                methodTypeArgs: resolvedMethodTypeArgs
+            )
+            
+            // Try to resolve to concrete method if base type is now concrete
+            if !context.containsGenericParameter(newBase.type) {
+                // Look up the concrete method on the resolved base type
+                if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: methodName, methodTypeArgs: resolvedMethodTypeArgs) {
+                    let resolvedMethodType = resolveParameterizedType(concreteMethod.type)
+                    var resolvedReturnType = resolvedType
+                    if case .function(_, let returns) = resolvedMethodType {
+                        resolvedReturnType = returns
+                    }
+                    var adjustedBase = newBase
+                    if case .function(let params, _) = resolvedMethodType, let firstParam = params.first {
+                        if case .reference(let inner) = firstParam.type, inner == adjustedBase.type {
+                            adjustedBase = .referenceExpression(expression: adjustedBase, type: firstParam.type)
+                        } else if case .reference(let inner) = adjustedBase.type, inner == firstParam.type {
+                            adjustedBase = .derefExpression(expression: adjustedBase, type: inner)
+                        }
+                    }
+                    return .methodReference(
+                        base: adjustedBase,
+                        method: copySymbolWithNewDefId(concreteMethod, newType: resolvedMethodType),
+                        typeArgs: nil,
+                        methodTypeArgs: resolvedMethodTypeArgs,
+                        type: resolvedReturnType
+                    )
+                } else {
+                    // Try to instantiate the method first
+                    _ = try? instantiateTraitPlaceholderMethod(
+                        baseType: newBase.type,
+                        name: methodName,
+                        methodTypeArgs: resolvedMethodTypeArgs
+                    )
+                    if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: methodName, methodTypeArgs: resolvedMethodTypeArgs) {
+                        let resolvedMethodType = resolveParameterizedType(concreteMethod.type)
+                        var resolvedReturnType = resolvedType
+                        if case .function(_, let returns) = resolvedMethodType {
+                            resolvedReturnType = returns
+                        }
+                        var adjustedBase = newBase
+                        if case .function(let params, _) = resolvedMethodType, let firstParam = params.first {
+                            if case .reference(let inner) = firstParam.type, inner == adjustedBase.type {
+                                adjustedBase = .referenceExpression(expression: adjustedBase, type: firstParam.type)
+                            } else if case .reference(let inner) = adjustedBase.type, inner == firstParam.type {
+                                adjustedBase = .derefExpression(expression: adjustedBase, type: inner)
+                            }
+                        }
+                        return .methodReference(
+                            base: adjustedBase,
+                            method: copySymbolWithNewDefId(concreteMethod, newType: resolvedMethodType),
+                            typeArgs: nil,
+                            methodTypeArgs: resolvedMethodTypeArgs,
+                            type: resolvedReturnType
+                        )
+                    }
+                }
+            }
+            
+            // Keep as placeholder if base type is still generic
+            return .traitMethodPlaceholder(
+                traitName: traitName,
+                methodName: methodName,
+                base: newBase,
+                methodTypeArgs: resolvedMethodTypeArgs,
+                type: resolvedType
             )
             
         case .whileExpression(let condition, let body, let type):
@@ -722,9 +809,9 @@ extension Monomorphizer {
             // Update the identifier name to match the resolved type's layout name
             var newName = identifier.name
             if case .structure(let defId) = resolvedType {
-                newName = defIdMap.getName(defId) ?? newName
+                newName = context.getName(defId) ?? newName
             } else if case .union(let defId) = resolvedType {
-                newName = defIdMap.getName(defId) ?? newName
+                newName = context.getName(defId) ?? newName
             }
             
             let newIdentifier = copySymbolWithNewDefId(
@@ -760,7 +847,7 @@ extension Monomorphizer {
             )
             
             // Resolve method name to mangled name for generic extension methods
-            if !newBase.type.containsGenericParameter {
+            if !context.containsGenericParameter(newBase.type) {
                 // Look up the concrete method on the resolved base type
                 if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: method.name) {
                     newMethod = copySymbolWithNewDefId(concreteMethod)
@@ -805,7 +892,7 @@ extension Monomorphizer {
             let resolvedReturnType = resolveParameterizedType(type)
             
             // If base type still contains generic parameters, keep as staticMethodCall
-            if resolvedBaseType.containsGenericParameter || resolvedTypeArgs.contains(where: { $0.containsGenericParameter }) {
+            if context.containsGenericParameter(resolvedBaseType) || resolvedTypeArgs.contains(where: { context.containsGenericParameter($0) }) {
                 return .staticMethodCall(
                     baseType: resolvedBaseType,
                     methodName: methodName,
@@ -821,20 +908,21 @@ extension Monomorphizer {
             let isGenericInstantiation: Bool
             switch resolvedBaseType {
             case .structure(let defId):
-                let name = defIdMap.getName(defId) ?? resolvedBaseType.description
-                // Extract base name from mangled name (e.g., "List_I" -> "List")
-                templateName = name.split(separator: "_").first.map(String.init) ?? name
-                qualifiedTypeName = defIdMap.getQualifiedName(defId) ?? name
-                isGenericInstantiation = typedDefMap.isGenericInstantiation(defId) ?? false
+                let name = context.getName(defId) ?? resolvedBaseType.description
+                // Use stored templateName if available, otherwise fall back to full name
+                templateName = context.getTemplateName(defId) ?? name
+                qualifiedTypeName = context.getQualifiedName(defId) ?? name
+                isGenericInstantiation = context.isGenericInstantiation(defId) ?? false
             case .genericStruct(let name, _):
                 templateName = name
                 qualifiedTypeName = name  // Generic types don't have module path yet
                 isGenericInstantiation = false
             case .union(let defId):
-                let name = defIdMap.getName(defId) ?? resolvedBaseType.description
-                templateName = name.split(separator: "_").first.map(String.init) ?? name
-                qualifiedTypeName = defIdMap.getQualifiedName(defId) ?? name
-                isGenericInstantiation = typedDefMap.isGenericInstantiation(defId) ?? false
+                let name = context.getName(defId) ?? resolvedBaseType.description
+                // Use stored templateName if available, otherwise fall back to full name
+                templateName = context.getTemplateName(defId) ?? name
+                qualifiedTypeName = context.getQualifiedName(defId) ?? name
+                isGenericInstantiation = context.isGenericInstantiation(defId) ?? false
             case .genericUnion(let name, _):
                 templateName = name
                 qualifiedTypeName = name  // Generic types don't have module path yet
@@ -854,7 +942,7 @@ extension Monomorphizer {
                 mangledMethodName = "\(qualifiedTypeName)_\(methodName)"
             } else {
                 // For uninstantiated generic types, add type args
-                let argLayoutKeys = resolvedTypeArgs.map { $0.layoutKey }.joined(separator: "_")
+                let argLayoutKeys = resolvedTypeArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
                 mangledMethodName = "\(qualifiedTypeName)_\(argLayoutKeys)_\(methodName)"
             }
             
@@ -882,7 +970,7 @@ extension Monomorphizer {
                     )
                     if !processedRequestKeys.contains(key) {
                         pendingRequests.append(InstantiationRequest(
-                            kind: .extensionMethod(baseType: resolvedBaseType, template: ext, typeArgs: resolvedTypeArgs, methodTypeArgs: []),
+                            kind: .extensionMethod(templateName: templateName, baseType: resolvedBaseType, template: ext, typeArgs: resolvedTypeArgs, methodTypeArgs: []),
                             sourceLine: currentLine,
                             sourceFileName: currentFileName
                         ))

@@ -7,39 +7,39 @@ extension CodeGen {
   /// Validates that a type has been fully resolved (no generic parameters or parameterized types).
   /// This is called during code generation to catch any types that weren't properly resolved
   /// by the Monomorphizer.
-  func assertTypeResolved(_ type: Type, context: String, visited: Set<UInt64> = []) {
+  func assertTypeResolved(_ type: Type, contextInfo: String, visited: Set<UInt64> = []) {
     switch type {
     case .genericParameter(let name):
-      fatalError("CodeGen error: Generic parameter '\(name)' should be resolved before code generation. Context: \(context)")
+      fatalError("CodeGen error: Generic parameter '\(name)' should be resolved before code generation. Context: \(contextInfo)")
     case .genericStruct(let template, let args):
-      fatalError("CodeGen error: Generic struct '\(template)<\(args.map { $0.description }.joined(separator: ", "))>' should be resolved before code generation. Context: \(context)")
+      fatalError("CodeGen error: Generic struct '\(template)<\(args.map { $0.description }.joined(separator: ", "))>' should be resolved before code generation. Context: \(contextInfo)")
     case .genericUnion(let template, let args):
-      fatalError("CodeGen error: Generic union '\(template)<\(args.map { $0.description }.joined(separator: ", "))>' should be resolved before code generation. Context: \(context)")
+      fatalError("CodeGen error: Generic union '\(template)<\(args.map { $0.description }.joined(separator: ", "))>' should be resolved before code generation. Context: \(contextInfo)")
     case .function(let params, let returns):
       for param in params {
-        assertTypeResolved(param.type, context: "\(context) -> function parameter", visited: visited)
+        assertTypeResolved(param.type, contextInfo: "\(contextInfo) -> function parameter", visited: visited)
       }
-      assertTypeResolved(returns, context: "\(context) -> function return type", visited: visited)
+      assertTypeResolved(returns, contextInfo: "\(contextInfo) -> function return type", visited: visited)
     case .reference(let inner):
-      assertTypeResolved(inner, context: "\(context) -> reference inner type", visited: visited)
+      assertTypeResolved(inner, contextInfo: "\(contextInfo) -> reference inner type", visited: visited)
     case .pointer(let element):
-      assertTypeResolved(element, context: "\(context) -> pointer element type", visited: visited)
+      assertTypeResolved(element, contextInfo: "\(contextInfo) -> pointer element type", visited: visited)
     case .structure(let defId):
       // Prevent infinite recursion for recursive types (using DefId)
       if visited.contains(defId.id) { return }
       var newVisited = visited
       newVisited.insert(defId.id)
-      for member in typedDefMap.getStructMembers(defId) ?? [] {
-        assertTypeResolved(member.type, context: "\(context) -> struct member '\(member.name)'", visited: newVisited)
+      for member in context.getStructMembers(defId) ?? [] {
+        assertTypeResolved(member.type, contextInfo: "\(contextInfo) -> struct member '\(member.name)'", visited: newVisited)
       }
     case .union(let defId):
       // Prevent infinite recursion for recursive types (using DefId)
       if visited.contains(defId.id) { return }
       var newVisited = visited
       newVisited.insert(defId.id)
-      for unionCase in typedDefMap.getUnionCases(defId) ?? [] {
+      for unionCase in context.getUnionCases(defId) ?? [] {
         for param in unionCase.parameters {
-          assertTypeResolved(param.type, context: "\(context) -> union case '\(unionCase.name)' parameter '\(param.name)'", visited: newVisited)
+          assertTypeResolved(param.type, contextInfo: "\(contextInfo) -> union case '\(unionCase.name)' parameter '\(param.name)'", visited: newVisited)
         }
       }
     default:
@@ -53,36 +53,36 @@ extension CodeGen {
   func validateGlobalNode(_ node: TypedGlobalNode) {
     switch node {
     case .globalVariable(let identifier, let value, _):
-      assertTypeResolved(identifier.type, context: "global variable '\(identifier.name)'")
+      assertTypeResolved(identifier.type, contextInfo: "global variable '\(identifier.name)'")
       validateExpression(value, context: "global variable '\(identifier.name)' initializer")
       
     case .globalFunction(let identifier, let params, let body):
-      assertTypeResolved(identifier.type, context: "function '\(identifier.name)'")
+      assertTypeResolved(identifier.type, contextInfo: "function '\(identifier.name)'")
       for param in params {
-        assertTypeResolved(param.type, context: "function '\(identifier.name)' parameter '\(param.name)'")
+        assertTypeResolved(param.type, contextInfo: "function '\(identifier.name)' parameter '\(param.name)'")
       }
       validateExpression(body, context: "function '\(identifier.name)' body")
       
     case .globalStructDeclaration(let identifier, let params):
-      assertTypeResolved(identifier.type, context: "struct '\(identifier.name)'")
+      assertTypeResolved(identifier.type, contextInfo: "struct '\(identifier.name)'")
       for param in params {
-        assertTypeResolved(param.type, context: "struct '\(identifier.name)' field '\(param.name)'")
+        assertTypeResolved(param.type, contextInfo: "struct '\(identifier.name)' field '\(param.name)'")
       }
       
     case .globalUnionDeclaration(let identifier, let cases):
-      assertTypeResolved(identifier.type, context: "union '\(identifier.name)'")
+      assertTypeResolved(identifier.type, contextInfo: "union '\(identifier.name)'")
       for unionCase in cases {
         for param in unionCase.parameters {
-          assertTypeResolved(param.type, context: "union '\(identifier.name)' case '\(unionCase.name)' parameter '\(param.name)'")
+          assertTypeResolved(param.type, contextInfo: "union '\(identifier.name)' case '\(unionCase.name)' parameter '\(param.name)'")
         }
       }
       
     case .givenDeclaration(let type, let methods):
-      assertTypeResolved(type, context: "given declaration")
+      assertTypeResolved(type, contextInfo: "given declaration")
       for method in methods {
-        assertTypeResolved(method.identifier.type, context: "given method '\(method.identifier.name)'")
+        assertTypeResolved(method.identifier.type, contextInfo: "given method '\(method.identifier.name)'")
         for param in method.parameters {
-          assertTypeResolved(param.type, context: "given method '\(method.identifier.name)' parameter '\(param.name)'")
+          assertTypeResolved(param.type, contextInfo: "given method '\(method.identifier.name)' parameter '\(param.name)'")
         }
         validateExpression(method.body, context: "given method '\(method.identifier.name)' body")
       }
@@ -95,17 +95,17 @@ extension CodeGen {
   
   /// Validates that all types in an expression are fully resolved.
   func validateExpression(_ expr: TypedExpressionNode, context: String) {
-    assertTypeResolved(expr.type, context: context)
+    assertTypeResolved(expr.type, contextInfo: context)
     
     switch expr {
     case .integerLiteral, .floatLiteral, .stringLiteral, .booleanLiteral:
       break
       
     case .variable(let identifier):
-      assertTypeResolved(identifier.type, context: "\(context) -> variable '\(identifier.name)'")
+      assertTypeResolved(identifier.type, contextInfo: "\(context) -> variable '\(identifier.name)'")
       
     case .castExpression(let inner, let type):
-      assertTypeResolved(type, context: "\(context) -> cast target type")
+      assertTypeResolved(type, contextInfo: "\(context) -> cast target type")
       validateExpression(inner, context: "\(context) -> cast inner")
       
     case .arithmeticExpression(let left, _, let right, _):
@@ -117,7 +117,7 @@ extension CodeGen {
       validateExpression(right, context: "\(context) -> comparison right")
       
     case .letExpression(let identifier, let value, let body, _):
-      assertTypeResolved(identifier.type, context: "\(context) -> let '\(identifier.name)'")
+      assertTypeResolved(identifier.type, contextInfo: "\(context) -> let '\(identifier.name)'")
       validateExpression(value, context: "\(context) -> let value")
       validateExpression(body, context: "\(context) -> let body")
       
@@ -171,27 +171,31 @@ extension CodeGen {
       
     case .methodReference(let base, let method, let typeArgs, let methodTypeArgs, _):
       validateExpression(base, context: "\(context) -> method reference base")
-      assertTypeResolved(method.type, context: "\(context) -> method reference '\(method.name)'")
+      assertTypeResolved(method.type, contextInfo: "\(context) -> method reference '\(method.name)'")
       if let typeArgs = typeArgs {
         for typeArg in typeArgs {
-          assertTypeResolved(typeArg, context: "\(context) -> method reference type arg")
+          assertTypeResolved(typeArg, contextInfo: "\(context) -> method reference type arg")
         }
       }
       if let methodTypeArgs = methodTypeArgs {
         for typeArg in methodTypeArgs {
-          assertTypeResolved(typeArg, context: "\(context) -> method reference method type arg")
+          assertTypeResolved(typeArg, contextInfo: "\(context) -> method reference method type arg")
         }
       }
+      
+    case .traitMethodPlaceholder(let traitName, let methodName, let base, _, _):
+      // Trait method placeholders should be resolved by Monomorphizer before reaching CodeGen
+      fatalError("CodeGen error: Unresolved trait method placeholder '\(traitName).\(methodName)' on base type \(base.type). Context: \(context)")
       
     case .whileExpression(let condition, let body, _):
       validateExpression(condition, context: "\(context) -> while condition")
       validateExpression(body, context: "\(context) -> while body")
       
     case .typeConstruction(let identifier, let typeArgs, let arguments, _):
-      assertTypeResolved(identifier.type, context: "\(context) -> type construction '\(identifier.name)'")
+      assertTypeResolved(identifier.type, contextInfo: "\(context) -> type construction '\(identifier.name)'")
       if let typeArgs = typeArgs {
         for typeArg in typeArgs {
-          assertTypeResolved(typeArg, context: "\(context) -> type construction type arg")
+          assertTypeResolved(typeArg, contextInfo: "\(context) -> type construction type arg")
         }
       }
       for arg in arguments {
@@ -201,7 +205,7 @@ extension CodeGen {
     case .memberPath(let source, let path):
       validateExpression(source, context: "\(context) -> member path source")
       for member in path {
-        assertTypeResolved(member.type, context: "\(context) -> member path '\(member.name)'")
+        assertTypeResolved(member.type, contextInfo: "\(context) -> member path '\(member.name)'")
       }
       
     case .subscriptExpression(let base, let arguments, let method, _):
@@ -209,10 +213,10 @@ extension CodeGen {
       for arg in arguments {
         validateExpression(arg, context: "\(context) -> subscript argument")
       }
-      assertTypeResolved(method.type, context: "\(context) -> subscript method")
+      assertTypeResolved(method.type, contextInfo: "\(context) -> subscript method")
       
     case .unionConstruction(let type, let caseName, let arguments):
-      assertTypeResolved(type, context: "\(context) -> union construction '\(caseName)'")
+      assertTypeResolved(type, contextInfo: "\(context) -> union construction '\(caseName)'")
       for arg in arguments {
         validateExpression(arg, context: "\(context) -> union construction argument")
       }
@@ -234,7 +238,7 @@ extension CodeGen {
       validateExpression(subject, context: "\(context) -> if pattern subject")
       validatePattern(pattern, context: "\(context) -> if pattern")
       for (name, _, type) in bindings {
-        assertTypeResolved(type, context: "\(context) -> if pattern binding '\(name)'")
+        assertTypeResolved(type, contextInfo: "\(context) -> if pattern binding '\(name)'")
       }
       validateExpression(thenBranch, context: "\(context) -> if pattern then")
       if let elseBranch = elseBranch {
@@ -245,17 +249,17 @@ extension CodeGen {
       validateExpression(subject, context: "\(context) -> while pattern subject")
       validatePattern(pattern, context: "\(context) -> while pattern")
       for (name, _, type) in bindings {
-        assertTypeResolved(type, context: "\(context) -> while pattern binding '\(name)'")
+        assertTypeResolved(type, contextInfo: "\(context) -> while pattern binding '\(name)'")
       }
       validateExpression(body, context: "\(context) -> while pattern body")
       
     case .lambdaExpression(let parameters, let captures, let body, let type):
-      assertTypeResolved(type, context: "\(context) -> lambda type")
+      assertTypeResolved(type, contextInfo: "\(context) -> lambda type")
       for param in parameters {
-        assertTypeResolved(param.type, context: "\(context) -> lambda parameter '\(param.name)'")
+        assertTypeResolved(param.type, contextInfo: "\(context) -> lambda parameter '\(param.name)'")
       }
       for capture in captures {
-        assertTypeResolved(capture.symbol.type, context: "\(context) -> lambda capture '\(capture.symbol.name)'")
+        assertTypeResolved(capture.symbol.type, contextInfo: "\(context) -> lambda capture '\(capture.symbol.name)'")
       }
       validateExpression(body, context: "\(context) -> lambda body")
     }
@@ -267,7 +271,7 @@ extension CodeGen {
     case .booleanLiteral, .integerLiteral, .stringLiteral, .wildcard:
       break
     case .variable(let symbol):
-      assertTypeResolved(symbol.type, context: "\(context) -> pattern variable '\(symbol.name)'")
+      assertTypeResolved(symbol.type, contextInfo: "\(context) -> pattern variable '\(symbol.name)'")
     case .unionCase(_, _, let elements):
       for element in elements {
         validatePattern(element, context: "\(context) -> union case element")
@@ -290,7 +294,7 @@ extension CodeGen {
   func validateStatement(_ stmt: TypedStatementNode, context: String) {
     switch stmt {
     case .variableDeclaration(let identifier, let value, _):
-      assertTypeResolved(identifier.type, context: "\(context) -> variable declaration '\(identifier.name)'")
+      assertTypeResolved(identifier.type, contextInfo: "\(context) -> variable declaration '\(identifier.name)'")
       validateExpression(value, context: "\(context) -> variable declaration value")
       
     case .assignment(let target, let value):
@@ -319,7 +323,7 @@ extension CodeGen {
     switch intrinsic {
     case .allocMemory(let count, let resultType):
       validateExpression(count, context: "\(context) -> allocMemory count")
-      assertTypeResolved(resultType, context: "\(context) -> allocMemory result type")
+      assertTypeResolved(resultType, contextInfo: "\(context) -> allocMemory result type")
       
     case .deallocMemory(let ptr):
       validateExpression(ptr, context: "\(context) -> deallocMemory ptr")

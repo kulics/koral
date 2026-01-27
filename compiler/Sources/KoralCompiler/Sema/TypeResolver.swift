@@ -12,7 +12,7 @@
 ///
 /// ## 依赖关系
 /// - 输入：NameCollectorOutput（包含 DefIdMap、NameTable 和 ModuleResolverOutput）
-/// - 输出：TypeResolverOutput（包含 TypedDefMap、SymbolTable 和 NameCollectorOutput）
+/// - 输出：TypeResolverOutput（包含 SymbolTable 和 NameCollectorOutput）
 ///
 /// **Validates: Requirements 2.1, 2.2**
 
@@ -35,8 +35,8 @@ public class TypeResolver: CompilerPass {
     
     // MARK: - 私有属性
     
-    /// 类型化定义映射
-    private var typedDefMap: TypedDefMap
+    /// 统一查询上下文
+    private var context: CompilerContext
     
     /// 符号表
     private var symbolTable: SymbolTable
@@ -70,11 +70,11 @@ public class TypeResolver: CompilerPass {
     /// 创建一个新的 TypeResolver
     ///
     /// - Parameter coreGlobalCount: 标准库全局节点数量（用于判断是否是标准库定义）
-    public init(coreGlobalCount: Int = 0, checker: TypeChecker? = nil) {
-        self.typedDefMap = TypedDefMap()
+    public init(coreGlobalCount: Int = 0, checker: TypeChecker? = nil, context: CompilerContext? = nil) {
         self.symbolTable = SymbolTable()
         self.coreGlobalCount = coreGlobalCount
         self.checker = checker
+        self.context = context ?? CompilerContext()
     }
     
     // MARK: - CompilerPass 实现
@@ -90,11 +90,10 @@ public class TypeResolver: CompilerPass {
         let astNodes = moduleResolverOutput.astNodes
         let nodeSourceInfoList = moduleResolverOutput.nodeSourceInfoList
         let defIdMap = nameCollectorOutput.defIdMap
-
-        DefIdContext.current = defIdMap
+        context.setDefIdMap(defIdMap)
         
         // 重置状态
-        typedDefMap = TypedDefMap()
+        defIdMap.clearTypeInfo()
         symbolTable = SymbolTable()
         collectedTypeSignatures = [:]
         collectedFunctionSignatures = [:]
@@ -114,8 +113,6 @@ public class TypeResolver: CompilerPass {
 
         // Pass 2: 注册 given 方法签名到 TypeChecker（用于后续体检查）
         if let checker {
-            // Ensure TypedDefContext points to this pass's map for updates
-            TypedDefContext.current = typedDefMap
             let declarations = astNodes.filter { node in
                 if case .usingDeclaration = node { return false }
                 return true
@@ -130,10 +127,6 @@ public class TypeResolver: CompilerPass {
                 checker.currentSpan = node.span
                 try checker.collectGivenSignatures(node)
             }
-            // Sync any updates from the checker back into this pass's map
-            if let updatedMap = TypedDefContext.current {
-                typedDefMap = updatedMap
-            }
         }
         
         // 第二步：构建模块符号表（合并原 Pass 2.5 的功能）
@@ -144,11 +137,10 @@ public class TypeResolver: CompilerPass {
             try checker.buildModuleSymbols(from: astNodes)
         }
         
-        // 第三步：将收集的信息添加到 TypedDefMap 和 SymbolTable
+        // 第三步：将收集的信息添加到 DefIdMap 和 SymbolTable
         try populateOutputMaps(defIdMap: defIdMap)
         
         return TypeResolverOutput(
-            typedDefMap: typedDefMap,
             symbolTable: symbolTable,
             nameCollectorOutput: nameCollectorOutput
         )
@@ -607,9 +599,9 @@ public class TypeResolver: CompilerPass {
     
     // MARK: - 输出映射填充
     
-    /// 将收集的信息填充到 TypedDefMap 和 SymbolTable
+    /// 将收集的信息填充到 DefIdMap 和 SymbolTable
     private func populateOutputMaps(defIdMap: DefIdMap) throws {
-        // 填充类型签名到 TypedDefMap
+        // 填充类型签名到 DefIdMap
         for (_, signature) in collectedTypeSignatures {
             if let defId = defIdMap.lookup(
                 modulePath: signature.modulePath,
@@ -621,17 +613,17 @@ public class TypeResolver: CompilerPass {
                 switch signature.kind {
                 case .structure:
                     placeholderType = .structure(defId: defId)
-                    if typedDefMap.getStructMembers(defId) == nil {
-                        typedDefMap.addStructInfo(defId: defId, members: [], isGenericInstantiation: false, typeArguments: nil)
+                    if defIdMap.getStructMembers(defId) == nil {
+                        defIdMap.addStructInfo(defId: defId, members: [], isGenericInstantiation: false, typeArguments: nil)
                     }
                 case .union:
                     placeholderType = .union(defId: defId)
-                    if typedDefMap.getUnionCases(defId) == nil {
-                        typedDefMap.addUnionInfo(defId: defId, cases: [], isGenericInstantiation: false, typeArguments: nil)
+                    if defIdMap.getUnionCases(defId) == nil {
+                        defIdMap.addUnionInfo(defId: defId, cases: [], isGenericInstantiation: false, typeArguments: nil)
                     }
                 }
                 
-                typedDefMap.addType(defId: defId, type: placeholderType)
+                defIdMap.addType(defId: defId, type: placeholderType)
                 
                 // 添加到符号表
                 let entry = SymbolTableEntry(
@@ -647,7 +639,7 @@ public class TypeResolver: CompilerPass {
             }
         }
         
-        // 填充函数签名到 TypedDefMap
+        // 填充函数签名到 DefIdMap
         for (_, signature) in collectedFunctionSignatures {
             if let defId = defIdMap.lookup(
                 modulePath: signature.modulePath,
@@ -668,7 +660,7 @@ public class TypeResolver: CompilerPass {
                     typeParameters: signature.typeParameters.map { $0.name }
                 )
                 
-                typedDefMap.addSignature(defId: defId, signature: funcSignature)
+                defIdMap.addSignature(defId: defId, signature: funcSignature)
                 
                 // 添加到符号表
                 let entry = SymbolTableEntry(

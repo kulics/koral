@@ -38,12 +38,12 @@ extension Monomorphizer {
         }
         
         // Calculate layout name
-        let argLayoutKeys = args.map { $0.layoutKey }.joined(separator: "_")
+        let argLayoutKeys = args.map { context.getLayoutKey($0) }.joined(separator: "_")
         let layoutName = "\(template.name)_\(argLayoutKeys)"
         
         // Create placeholder for recursion detection
         let defId = getOrAllocateTypeDefId(name: layoutName, kind: .structure)
-        typedDefMap.addStructInfo(defId: defId, members: [], isGenericInstantiation: true, typeArguments: args)
+        context.updateStructInfo(defId: defId, members: [], isGenericInstantiation: true, typeArguments: args, templateName: template.name)
         let placeholder = Type.structure(defId: defId)
         instantiatedTypes[key] = placeholder
 
@@ -74,7 +74,7 @@ extension Monomorphizer {
         }
         
         // Create the concrete type
-        typedDefMap.addStructInfo(defId: defId, members: resolvedMembers, isGenericInstantiation: true, typeArguments: args)
+        context.updateStructInfo(defId: defId, members: resolvedMembers, isGenericInstantiation: true, typeArguments: args, templateName: template.name)
         let specificType = Type.structure(defId: defId)
         instantiatedTypes[key] = specificType
         layoutToTemplateInfo[layoutName] = (base: template.name, args: args)
@@ -95,7 +95,7 @@ extension Monomorphizer {
         }
         
         // Skip code generation if type still contains generic parameters
-        if specificType.containsGenericParameter {
+        if specificType.containsGenericParameter(in: context) {
             return specificType
         }
 
@@ -142,12 +142,12 @@ extension Monomorphizer {
         }
         
         // Calculate layout name
-        let argLayoutKeys = args.map { $0.layoutKey }.joined(separator: "_")
+        let argLayoutKeys = args.map { context.getLayoutKey($0) }.joined(separator: "_")
         let layoutName = "\(template.name)_\(argLayoutKeys)"
         
         // Create placeholder for recursion
         let defId = getOrAllocateTypeDefId(name: layoutName, kind: .union)
-        typedDefMap.addUnionInfo(defId: defId, cases: [], isGenericInstantiation: true, typeArguments: args)
+        context.updateUnionInfo(defId: defId, cases: [], isGenericInstantiation: true, typeArguments: args, templateName: template.name)
         let placeholder = Type.union(defId: defId)
         instantiatedTypes[key] = placeholder
         
@@ -181,7 +181,7 @@ extension Monomorphizer {
         }
         
         // Create the concrete type
-        typedDefMap.addUnionInfo(defId: defId, cases: resolvedCases, isGenericInstantiation: true, typeArguments: args)
+        context.updateUnionInfo(defId: defId, cases: resolvedCases, isGenericInstantiation: true, typeArguments: args, templateName: template.name)
         let specificType = Type.union(defId: defId)
         instantiatedTypes[key] = specificType
         layoutToTemplateInfo[layoutName] = (base: template.name, args: args)
@@ -202,7 +202,7 @@ extension Monomorphizer {
         }
         
         // Skip code generation if type still contains generic parameters
-        if specificType.containsGenericParameter {
+        if specificType.containsGenericParameter(in: context) {
             return specificType
         }
         

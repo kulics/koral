@@ -29,9 +29,21 @@ public enum InstantiationKind: Hashable {
     ///   - typeArgs: The type arguments used to instantiate the base type
     ///   - methodTypeArgs: The type arguments for method-level generic parameters
     case extensionMethod(
+        templateName: String,
         baseType: Type,
         template: GenericExtensionMethodTemplate,
         typeArgs: [Type],
+        methodTypeArgs: [Type]
+    )
+
+    /// Request to instantiate a trait placeholder method on a concrete type.
+    /// - Parameters:
+    ///   - baseType: The concrete base type the trait method is called on
+    ///   - methodName: The trait method name (e.g., "next")
+    ///   - methodTypeArgs: The type arguments for method-level generic parameters
+    case traitMethod(
+        baseType: Type,
+        methodName: String,
         methodTypeArgs: [Type]
     )
     
@@ -43,31 +55,36 @@ public enum InstantiationKind: Hashable {
             hasher.combine(0)
             hasher.combine(template.name)
             for arg in args {
-                hasher.combine(arg.layoutKey)
+                hasher.combine(arg.stableKey)
             }
         case .unionType(let template, let args):
             hasher.combine(1)
             hasher.combine(template.name)
             for arg in args {
-                hasher.combine(arg.layoutKey)
+                hasher.combine(arg.stableKey)
             }
         case .function(let template, let args):
             hasher.combine(2)
             hasher.combine(template.name)
             for arg in args {
-                hasher.combine(arg.layoutKey)
+                hasher.combine(arg.stableKey)
             }
-        case .extensionMethod(let baseType, let template, let typeArgs, let methodTypeArgs):
+        case .extensionMethod(let templateName, _, let template, let typeArgs, let methodTypeArgs):
             hasher.combine(3)
-            // Include the base type's template name in the hash
-            let templateName = Self.baseTemplateName(for: baseType)
             hasher.combine(templateName)
             hasher.combine(template.method.name)
             for arg in typeArgs {
-                hasher.combine(arg.layoutKey)
+                hasher.combine(arg.stableKey)
             }
             for arg in methodTypeArgs {
-                hasher.combine(arg.layoutKey)
+                hasher.combine(arg.stableKey)
+            }
+        case .traitMethod(let baseType, let methodName, let methodTypeArgs):
+            hasher.combine(4)
+            hasher.combine(baseType.stableKey)
+            hasher.combine(methodName)
+            for arg in methodTypeArgs {
+                hasher.combine(arg.stableKey)
             }
         }
     }
@@ -80,32 +97,12 @@ public enum InstantiationKind: Hashable {
             return lTemplate.name == rTemplate.name && lArgs == rArgs
         case (.function(let lTemplate, let lArgs), .function(let rTemplate, let rArgs)):
             return lTemplate.name == rTemplate.name && lArgs == rArgs
-        case (.extensionMethod(let lBaseType, let lTemplate, let lTypeArgs, let lMethodTypeArgs), .extensionMethod(let rBaseType, let rTemplate, let rTypeArgs, let rMethodTypeArgs)):
-            // Compare base type template names
-            let lTemplateName = Self.baseTemplateName(for: lBaseType)
-            let rTemplateName = Self.baseTemplateName(for: rBaseType)
+        case (.extensionMethod(let lTemplateName, _, let lTemplate, let lTypeArgs, let lMethodTypeArgs), .extensionMethod(let rTemplateName, _, let rTemplate, let rTypeArgs, let rMethodTypeArgs)):
             return lTemplateName == rTemplateName && lTemplate.method.name == rTemplate.method.name && lTypeArgs == rTypeArgs && lMethodTypeArgs == rMethodTypeArgs
+        case (.traitMethod(let lBase, let lName, let lMethodTypeArgs), .traitMethod(let rBase, let rName, let rMethodTypeArgs)):
+            return lBase == rBase && lName == rName && lMethodTypeArgs == rMethodTypeArgs
         default:
             return false
-        }
-    }
-
-    static func baseTemplateName(for baseType: Type) -> String {
-        switch baseType {
-        case .structure(let defId):
-            let name = DefIdContext.current?.getName(defId) ?? baseType.description
-            return name.split(separator: "_").first.map(String.init) ?? name
-        case .genericStruct(let name, _):
-            return name
-        case .genericUnion(let name, _):
-            return name
-        case .union(let defId):
-            let name = DefIdContext.current?.getName(defId) ?? baseType.description
-            return name.split(separator: "_").first.map(String.init) ?? name
-        case .pointer(_):
-            return "Pointer"
-        default:
-            return baseType.description
         }
     }
 }
@@ -124,6 +121,9 @@ public enum InstantiationKey: Hashable {
     
     /// Key for extension method instantiation
     case extensionMethod(templateName: String, methodName: String, typeArgs: [Type], methodTypeArgs: [Type])
+
+    /// Key for trait placeholder method instantiation
+    case traitMethod(baseType: Type, methodName: String, methodTypeArgs: [Type])
     
     // MARK: - Hashable conformance
     
@@ -133,29 +133,36 @@ public enum InstantiationKey: Hashable {
             hasher.combine(0)
             hasher.combine(templateName)
             for arg in args {
-                hasher.combine(arg.layoutKey)
+                hasher.combine(arg.stableKey)
             }
         case .unionType(let templateName, let args):
             hasher.combine(1)
             hasher.combine(templateName)
             for arg in args {
-                hasher.combine(arg.layoutKey)
+                hasher.combine(arg.stableKey)
             }
         case .function(let templateName, let args):
             hasher.combine(2)
             hasher.combine(templateName)
             for arg in args {
-                hasher.combine(arg.layoutKey)
+                hasher.combine(arg.stableKey)
             }
         case .extensionMethod(let templateName, let methodName, let typeArgs, let methodTypeArgs):
             hasher.combine(3)
             hasher.combine(templateName)
             hasher.combine(methodName)
             for arg in typeArgs {
-                hasher.combine(arg.layoutKey)
+                hasher.combine(arg.stableKey)
             }
             for arg in methodTypeArgs {
-                hasher.combine(arg.layoutKey)
+                hasher.combine(arg.stableKey)
+            }
+        case .traitMethod(let baseType, let methodName, let methodTypeArgs):
+            hasher.combine(4)
+            hasher.combine(baseType.stableKey)
+            hasher.combine(methodName)
+            for arg in methodTypeArgs {
+                hasher.combine(arg.stableKey)
             }
         }
     }
@@ -170,6 +177,8 @@ public enum InstantiationKey: Hashable {
             return lName == rName && lArgs == rArgs
         case (.extensionMethod(let lTName, let lMName, let lArgs, let lMethodArgs), .extensionMethod(let rTName, let rMName, let rArgs, let rMethodArgs)):
             return lTName == rTName && lMName == rMName && lArgs == rArgs && lMethodArgs == rMethodArgs
+        case (.traitMethod(let lBase, let lName, let lMethodArgs), .traitMethod(let rBase, let rName, let rMethodArgs)):
+            return lBase == rBase && lName == rName && lMethodArgs == rMethodArgs
         default:
             return false
         }
@@ -209,13 +218,17 @@ public struct InstantiationRequest: Hashable {
             return .unionType(templateName: template.name, args: args)
         case .function(let template, let args):
             return .function(templateName: template.name, args: args)
-        case .extensionMethod(let baseType, let template, let typeArgs, let methodTypeArgs):
-            // Derive the base type template name from the baseType
-            let templateName = InstantiationKind.baseTemplateName(for: baseType)
+        case .extensionMethod(let templateName, _, let template, let typeArgs, let methodTypeArgs):
             return .extensionMethod(
                 templateName: templateName,
                 methodName: template.method.name,
                 typeArgs: typeArgs,
+                methodTypeArgs: methodTypeArgs
+            )
+        case .traitMethod(let baseType, let methodName, let methodTypeArgs):
+            return .traitMethod(
+                baseType: baseType,
+                methodName: methodName,
                 methodTypeArgs: methodTypeArgs
             )
         }
