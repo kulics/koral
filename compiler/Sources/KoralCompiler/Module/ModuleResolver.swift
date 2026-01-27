@@ -6,7 +6,7 @@ import Foundation
 public enum ModuleError: Error, CustomStringConvertible {
     case fileNotFound(String, searchPath: String)
     case submoduleNotFound(String, parentPath: String, span: SourceSpan)
-    case missingIndexFile(String, span: SourceSpan)
+    case missingEntryFile(submodName: String, expectedPath: String, span: SourceSpan)
     case superOutOfBounds(span: SourceSpan)
     case externalModuleNotFound(String, searchPaths: [String])
     case circularDependency(path: [String])
@@ -21,8 +21,8 @@ public enum ModuleError: Error, CustomStringConvertible {
             return "File '\(file).koral' not found in '\(searchPath)'"
         case .submoduleNotFound(let name, let parentPath, let span):
             return "\(span): error: Submodule '\(name)' not found (expected directory '\(parentPath)/\(name)/')"
-        case .missingIndexFile(let path, let span):
-            return "\(span): error: Submodule at '\(path)' is missing 'index.koral' entry file"
+        case .missingEntryFile(let submodName, let expectedPath, let span):
+            return "\(span): error: Submodule '\(submodName)' is missing entry file '\(expectedPath)'"
         case .superOutOfBounds(let span):
             return "\(span): error: 'super' goes beyond the root module of the compilation unit"
         case .externalModuleNotFound(let name, let paths):
@@ -221,6 +221,15 @@ public class ModuleResolver {
     public init(stdLibPath: String? = nil, externalPaths: [String] = []) {
         self.stdLibPath = stdLibPath
         self.externalPaths = externalPaths
+    }
+    
+    /// 计算子模块入口文件路径
+    /// - Parameters:
+    ///   - parentDirectory: 父模块目录
+    ///   - submodName: 子模块名称
+    /// - Returns: 入口文件的完整路径
+    private func submoduleEntryPath(parentDirectory: String, submodName: String) -> String {
+        return parentDirectory + "/" + submodName + "/" + submodName + ".koral"
     }
     
     /// 解析模块入口
@@ -507,7 +516,7 @@ public class ModuleResolver {
         //       using self.Expr -> pathSegments = ["Expr"]
         let firstSegment = using.pathSegments[0]
         let submodPath = module.directory + "/" + firstSegment
-        let indexFile = submodPath + "/index.koral"
+        let entryFile = submoduleEntryPath(parentDirectory: module.directory, submodName: firstSegment)
         
         // 检查是否是子模块目录
         var isDirectory: ObjCBool = false
@@ -521,9 +530,9 @@ public class ModuleResolver {
             return
         }
         
-        // 检查 index.koral 是否存在
-        guard fileManager.fileExists(atPath: indexFile) else {
-            throw ModuleError.missingIndexFile(submodPath, span: using.span)
+        // 检查入口文件是否存在
+        guard fileManager.fileExists(atPath: entryFile) else {
+            throw ModuleError.missingEntryFile(submodName: firstSegment, expectedPath: entryFile, span: using.span)
         }
         
         // 创建或获取子模块
@@ -533,7 +542,7 @@ public class ModuleResolver {
         } else {
             submodule = ModuleInfo(
                 path: module.path + [firstSegment],
-                entryFile: indexFile,
+                entryFile: entryFile,
                 isExternal: false
             )
             submodule.parent = module
@@ -541,7 +550,7 @@ public class ModuleResolver {
             unit.loadedModules[submodule.pathString] = submodule
             
             // 解析子模块
-            try resolveFile(file: indexFile, module: submodule, unit: unit)
+            try resolveFile(file: entryFile, module: submodule, unit: unit)
         }
         
         // 将子模块作为符号注册到当前模块的符号表
@@ -607,12 +616,11 @@ public class ModuleResolver {
                     current = submod
                 } else {
                     // 尝试加载子模块
-                    let submodPath = current.directory + "/" + segment
-                    let indexFile = submodPath + "/index.koral"
+                    let entryFile = submoduleEntryPath(parentDirectory: current.directory, submodName: segment)
                     
-                    // 如果子模块目录不存在，说明这个段是符号名而不是模块名
+                    // 如果子模块入口文件不存在，说明这个段是符号名而不是模块名
                     // 停止子模块查找，符号导入在 TypeChecker 阶段处理
-                    guard fileManager.fileExists(atPath: indexFile) else {
+                    guard fileManager.fileExists(atPath: entryFile) else {
                         // 不是子模块，可能是符号导入，直接返回
                         // 符号导入的验证在 TypeChecker 阶段完成
                         return
@@ -620,14 +628,14 @@ public class ModuleResolver {
                     
                     let submodule = ModuleInfo(
                         path: current.path + [segment],
-                        entryFile: indexFile,
+                        entryFile: entryFile,
                         isExternal: false
                     )
                     submodule.parent = current
                     current.submodules[segment] = submodule
                     unit.loadedModules[submodule.pathString] = submodule
                     
-                    try resolveFile(file: indexFile, module: submodule, unit: unit)
+                    try resolveFile(file: entryFile, module: submodule, unit: unit)
                     current = submodule
                 }
             }
@@ -661,7 +669,7 @@ public class ModuleResolver {
         let modulePath = try findExternalModule(moduleName)
         
         // 加载外部模块（作为独立编译单元）
-        let externalUnit = try resolveModule(entryFile: modulePath + "/index.koral")
+        let externalUnit = try resolveModule(entryFile: modulePath + "/" + moduleName + ".koral")
         unit.externalModules[moduleName] = externalUnit
         
         // 符号导入在 TypeChecker 阶段通过 nodeSourceInfoList 完成
@@ -670,12 +678,13 @@ public class ModuleResolver {
     /// 查找外部模块路径
     private func findExternalModule(_ name: String) throws -> String {
         var searchPaths: [String] = []
+        let entryFileName = name + ".koral"
         
         // 检查标准库
         if let stdPath = stdLibPath {
             let path = stdPath + "/" + name
             searchPaths.append(path)
-            if fileManager.fileExists(atPath: path + "/index.koral") {
+            if fileManager.fileExists(atPath: path + "/" + entryFileName) {
                 return path
             }
         }
@@ -684,7 +693,7 @@ public class ModuleResolver {
         for basePath in externalPaths {
             let path = basePath + "/" + name
             searchPaths.append(path)
-            if fileManager.fileExists(atPath: path + "/index.koral") {
+            if fileManager.fileExists(atPath: path + "/" + entryFileName) {
                 return path
             }
         }
