@@ -107,6 +107,7 @@ public class NameCollector: CompilerPass {
         // 过滤非 using 声明
         let declarations = astNodes.filter { node in
             if case .usingDeclaration = node { return false }
+            if case .foreignUsingDeclaration = node { return false }
             return true
         }
         
@@ -156,6 +157,9 @@ public class NameCollector: CompilerPass {
         case .usingDeclaration:
             // Using 声明在 ModuleResolver 中处理，这里跳过
             return
+        case .foreignUsingDeclaration:
+            // Foreign using is handled in CodeGen, skip here
+            return
             
         case .traitDeclaration(let name, let typeParameters, let superTraits, let methods, let access, let span):
             try collectTraitDefinition(
@@ -198,6 +202,16 @@ public class NameCollector: CompilerPass {
                 span: span,
                 isStdLib: isStdLib
             )
+        case .foreignFunctionDeclaration(let name, let parameters, let returnType, let access, let span):
+            try collectFunctionDeclaration(
+                name: name,
+                typeParameters: [],
+                parameters: parameters,
+                returnType: returnType,
+                access: access,
+                span: span,
+                isStdLib: isStdLib
+            )
             
         case .globalVariableDeclaration(let name, _, _, _, let access, let span):
             try collectVariableDeclaration(
@@ -219,6 +233,13 @@ public class NameCollector: CompilerPass {
             try collectIntrinsicTypeDeclaration(
                 name: name,
                 typeParameters: typeParameters,
+                span: span,
+                isStdLib: isStdLib
+            )
+        case .foreignTypeDeclaration(let name, let access, let span):
+            try collectForeignTypeDefinition(
+                name: name,
+                access: access,
                 span: span,
                 isStdLib: isStdLib
             )
@@ -580,6 +601,46 @@ public class NameCollector: CompilerPass {
         // 标记标准库类型
         stdLibTypes.insert(name)
     }
+
+    // MARK: - Foreign 类型声明收集
+
+    private func collectForeignTypeDefinition(
+        name: String,
+        access: AccessModifier,
+        span: SourceSpan,
+        isStdLib: Bool
+    ) throws {
+        let isPrivate = (access == .private)
+        let qualifiedName = currentModulePath.isEmpty ? name : "\(currentModulePath.joined(separator: ".")).\(name)"
+
+        if !isPrivate && collectedTypes[qualifiedName] != nil {
+            throw SemanticError.duplicateDefinition(name, line: span.line)
+        }
+
+        let defId = defIdMap.allocate(
+            modulePath: currentModulePath,
+            name: name,
+            kind: .type(.opaque),
+            sourceFile: currentSourceFile,
+            access: access,
+            span: span
+        )
+
+        let key = isPrivate ? "\(name)@\(currentSourceFile)" : qualifiedName
+        collectedTypes[key] = CollectedTypeInfo(
+            defId: defId,
+            name: name,
+            kind: .opaque,
+            access: access,
+            isPrivate: isPrivate,
+            sourceFile: currentSourceFile,
+            modulePath: currentModulePath
+        )
+
+        if isStdLib {
+            stdLibTypes.insert(name)
+        }
+    }
     
     // MARK: - Intrinsic 函数声明收集
     
@@ -748,6 +809,7 @@ public struct CollectedTypeInfo {
 public enum CollectedTypeKind {
     case structure
     case union
+    case opaque
 }
 
 /// 收集到的泛型模板信息

@@ -235,10 +235,13 @@ public class AccessChecker {
         case .usingDeclaration(let decl):
             // using 声明使用其自身的访问修饰符，默认为 private
             return decl.access == .default ? .private : decl.access
+        case .foreignUsingDeclaration:
+            return .default
             
         case .globalFunctionDeclaration, .globalVariableDeclaration,
              .globalStructDeclaration, .globalUnionDeclaration,
-             .intrinsicFunctionDeclaration, .intrinsicTypeDeclaration:
+             .intrinsicFunctionDeclaration, .intrinsicTypeDeclaration,
+             .foreignFunctionDeclaration, .foreignTypeDeclaration:
             return .protected
             
         case .traitDeclaration:

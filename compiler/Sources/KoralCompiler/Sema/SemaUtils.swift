@@ -310,6 +310,9 @@ public enum SemaUtils {
             let newArgs = args.map { substituteType($0, substitution: substitution, context: context) }
             return .genericUnion(template: template, args: newArgs)
             
+        case .opaque:
+            return type
+            
         case .module:
             // Module types should not be substituted
             return type

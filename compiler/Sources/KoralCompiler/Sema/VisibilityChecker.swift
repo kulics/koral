@@ -290,6 +290,8 @@ public class VisibilityChecker {
             typeModulePath = context.getModulePath(defId) ?? []
         case .union(let defId):
             typeModulePath = context.getModulePath(defId) ?? []
+        case .opaque(let defId):
+            typeModulePath = context.getModulePath(defId) ?? []
         case .genericStruct, .genericUnion:
             // 泛型模板目前没有存储模块路径，暂时跳过检查
             // TODO: 为泛型模板添加模块路径支持

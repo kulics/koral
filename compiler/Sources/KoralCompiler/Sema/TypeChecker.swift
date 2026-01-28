@@ -295,6 +295,42 @@ public class TypeChecker {
     
     return false
   }
+
+  // MARK: - FFI Type Compatibility
+
+  func isFfiCompatibleType(_ type: Type) -> Bool {
+    switch type {
+    case .int, .int8, .int16, .int32, .int64,
+         .uint, .uint8, .uint16, .uint32, .uint64,
+         .float32, .float64, .bool, .void, .never:
+      return true
+    case .pointer:
+      return true
+    case .opaque:
+      return true
+    case .structure, .union, .reference, .function, .genericParameter:
+      return false
+    case .genericStruct, .genericUnion, .module, .typeVariable:
+      return false
+    }
+  }
+
+  func ffiTypeError(_ type: Type) -> String {
+    switch type {
+    case .structure:
+      return "Koral struct types cannot be used in foreign functions"
+    case .union:
+      return "Koral union types cannot be used in foreign functions"
+    case .reference:
+      return "Reference types (ref) cannot be used in foreign functions"
+    case .function:
+      return "Function types cannot be used in foreign functions"
+    case .genericParameter, .genericStruct, .genericUnion:
+      return "Generic parameters cannot be used in foreign functions"
+    default:
+      return "Type '\(type)' is not compatible with FFI"
+    }
+  }
   
   /// 检查符号是否可以从当前位置直接访问（不需要模块前缀）
   /// 

@@ -150,6 +150,7 @@ public indirect enum Type: CustomStringConvertible {
   case union(defId: DefId)
   case genericStruct(template: String, args: [Type])
   case genericUnion(template: String, args: [Type])
+  case opaque(defId: DefId)
   case module(info: ModuleSymbolInfo)
   case typeVariable(TypeVariable)
   
@@ -160,6 +161,7 @@ public indirect enum Type: CustomStringConvertible {
     switch self {
     case .structure(let defId): return context.getName(defId)
     case .union(let defId): return context.getName(defId)
+    case .opaque(let defId): return context.getName(defId)
     default: return nil
     }
   }
@@ -291,6 +293,11 @@ public indirect enum Type: CustomStringConvertible {
     case .genericUnion(let template, let args):
       let argsStr = args.map { $0.description }.joined(separator: ", ")
       return "[\(argsStr)]\(template)"
+    case .opaque(let defId):
+      if let context = SemanticErrorContext.currentCompilerContext {
+        return context.getDebugName(self)
+      }
+      return "opaque(\(defId.id))"
     case .module(let info):
       return "module(\(info.modulePath.joined(separator: ".")))"
     case .typeVariable(let tv):
@@ -355,6 +362,8 @@ public indirect enum Type: CustomStringConvertible {
     case .genericUnion(let template, let args):
       let argsKey = args.map { $0.stableKey }.joined(separator: ",")
       return "GU(\(template))[\(argsKey)]"
+    case .opaque(let defId):
+      return "Opaque#\(defId.id)"
     case .module(let info):
       return "M(\(info.modulePath.joined(separator: ".")))"
     case .typeVariable(let tv):
@@ -395,6 +404,8 @@ public indirect enum Type: CustomStringConvertible {
       return .genericStruct(template: template, args: args.map { $0.canonical })
     case .genericUnion(let template, let args):
       return .genericUnion(template: template, args: args.map { $0.canonical })
+    case .opaque:
+      return self
     case .module:
       return self
     case .typeVariable:
@@ -469,6 +480,8 @@ extension Type: Equatable {
       return lTemplate == rTemplate && lArgs == rArgs
     case (.genericUnion(let lTemplate, let lArgs), .genericUnion(let rTemplate, let rArgs)):
       return lTemplate == rTemplate && lArgs == rArgs
+    case (.opaque(let lDefId), .opaque(let rDefId)):
+      return lDefId == rDefId
     case (.module(let lInfo), .module(let rInfo)):
       return lInfo.modulePath == rInfo.modulePath
     

@@ -15,6 +15,8 @@ public enum TypeDefKind: Hashable, Equatable {
     case union
     /// Trait 类型
     case trait
+    /// 不透明类型（foreign type）
+    case opaque
 }
 
 /// 泛型模板的具体类型
@@ -141,6 +143,8 @@ extension TypeDefKind: CustomStringConvertible {
             return "union"
         case .trait:
             return "trait"
+        case .opaque:
+            return "opaque"
         }
     }
 }

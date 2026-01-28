@@ -1135,6 +1135,9 @@ extension TypeChecker {
       }
 
       if let type = currentScope.lookupType(name, sourceFile: currentSourceFile) {
+        if case .opaque = type {
+          throw SemanticError(.opaqueTypeConstruction(type: type.description), span: currentSpan)
+        }
         guard case .structure(let defId) = type else {
           throw SemanticError.invalidOperation(
             op: "construct", type1: type.description, type2: "")

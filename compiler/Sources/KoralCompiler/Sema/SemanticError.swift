@@ -18,6 +18,8 @@ public struct SemanticError: Error, CustomStringConvertible, Sendable {
         case immutableFieldAssignment(type: String, field: String)
         case variableMoved(String)
         case generic(String)
+        case ffiIncompatibleType(type: String, reason: String)
+        case opaqueTypeConstruction(type: String)
         
         // Exhaustiveness checking errors
         case nonExhaustiveMatch(type: String, missing: [String])
@@ -136,6 +138,10 @@ public struct SemanticError: Error, CustomStringConvertible, Sendable {
             return "Use of moved variable: '\(name)'"
         case .generic(let msg):
             return msg
+        case .ffiIncompatibleType(let type, let reason):
+            return "FFI incompatible type '\(type)': \(reason)"
+        case .opaqueTypeConstruction(let type):
+            return "Opaque type '\(type)' cannot be constructed directly"
         case .nonExhaustiveMatch(let type, let missing):
             let casesStr = missing.joined(separator: ", ")
             return "Non-exhaustive match on type '\(type)': missing cases \(casesStr)"

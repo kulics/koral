@@ -93,6 +93,7 @@ public enum TypeHandlerKind: Hashable {
     case genericUnion   // 泛型联合
     case module         // 模块类型
     case typeVariable   // 类型变量
+    case opaque         // 不透明类型
 }
 
 // MARK: - Default Implementation
@@ -163,7 +164,49 @@ extension TypeHandlerKind {
             return .module
         case .typeVariable:
             return .typeVariable
+        case .opaque:
+            return .opaque
         }
+    }
+}
+
+// MARK: - OpaqueHandler
+
+/// 不透明类型处理器
+///
+/// 处理 foreign type 的类型映射（在 C 中为 typedef void*）。
+public class OpaqueHandler: TypeHandler {
+    public var supportedKinds: Set<TypeHandlerKind> {
+        return [.opaque]
+    }
+    
+    public init() {}
+    
+    public func canHandle(_ type: Type) -> Bool {
+        if case .opaque = type {
+            return true
+        }
+        return false
+    }
+    
+    public func generateCTypeName(_ type: Type) -> String {
+        guard case .opaque(let defId) = type else {
+            return "void*"
+        }
+        return TypeHandlerRegistry.shared.currentContext?.getName(defId) ?? "void*"
+    }
+
+    public func generateCopyCode(_ type: Type, source: String, dest: String) -> String {
+        return "\(dest) = \(source);"
+    }
+
+    public func generateDropCode(_ type: Type, value: String) -> String {
+        return ""
+    }
+    
+    public func getQualifiedName(_ type: Type) -> String {
+        guard case .opaque(let defId) = type else { return "" }
+        return TypeHandlerRegistry.shared.currentContext?.getQualifiedName(defId) ?? ""
     }
 }
 
@@ -1066,6 +1109,7 @@ public final class TypeHandlerRegistry: @unchecked Sendable {
         handlers.append(ReferenceHandler())
         handlers.append(FunctionHandler())
         handlers.append(PointerHandler())
+        handlers.append(OpaqueHandler())
     }
     
     /// 注册自定义处理器

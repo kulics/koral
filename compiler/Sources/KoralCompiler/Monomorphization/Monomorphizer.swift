@@ -192,6 +192,8 @@ public class Monomorphizer {
         if case .program(let nodes) = input.program {
             for node in nodes {
                 switch node {
+                case .foreignUsing, .foreignType, .foreignFunction:
+                    resultNodes.append(node)
                 case .genericTypeTemplate, .genericFunctionTemplate:
                     // Skip template placeholders - they will be instantiated on demand
                     break

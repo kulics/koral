@@ -63,6 +63,11 @@ public enum ParserError: Error {
   case invalidFunctionType(span: SourceSpan, message: String)
   // Lambda expression errors
   case expectedArrow(span: SourceSpan)
+  // Foreign declaration errors
+  case foreignAndIntrinsicConflict(span: SourceSpan)
+  case foreignFunctionNoBody(span: SourceSpan)
+  case foreignTypeNoBody(span: SourceSpan)
+  case foreignFunctionNoGenerics(span: SourceSpan)
   
   /// The source span where the error occurred
   public var span: SourceSpan {
@@ -80,6 +85,10 @@ public enum ParserError: Error {
     case .expectedDot(let span): return span
     case .invalidFunctionType(let span, _): return span
     case .expectedArrow(let span): return span
+    case .foreignAndIntrinsicConflict(let span): return span
+    case .foreignFunctionNoBody(let span): return span
+    case .foreignTypeNoBody(let span): return span
+    case .foreignFunctionNoGenerics(let span): return span
     }
   }
   
@@ -120,6 +129,14 @@ public enum ParserError: Error {
       return "Invalid function type: \(message)"
     case .expectedArrow:
       return "Expected '->' in lambda expression"
+    case .foreignAndIntrinsicConflict:
+      return "foreign and intrinsic cannot be used together"
+    case .foreignFunctionNoBody:
+      return "foreign function cannot have a body"
+    case .foreignTypeNoBody:
+      return "foreign type cannot have a body"
+    case .foreignFunctionNoGenerics:
+      return "foreign function does not support generics"
     }
   }
 }

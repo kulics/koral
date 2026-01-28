@@ -63,6 +63,7 @@ public enum Token: CustomStringConvertible {
   case traitKeyword  // 'trait' keyword
   case whenKeyword  // 'when' keyword
   case intrinsicKeyword  // 'intrinsic' keyword
+  case foreignKeyword  // 'foreign' keyword
   case ampersand  // '&' - bitwise AND
   case pipe  // '|' - bitwise OR
   case caret  // '^' - bitwise XOR
@@ -166,7 +167,7 @@ public enum Token: CustomStringConvertible {
       return true
     case (.typeKeyword, .typeKeyword), (.isKeyword, .isKeyword), (.refKeyword, .refKeyword):
       return true
-    case (.givenKeyword, .givenKeyword), (.traitKeyword, .traitKeyword), (.whenKeyword, .whenKeyword), (.intrinsicKeyword, .intrinsicKeyword):
+    case (.givenKeyword, .givenKeyword), (.traitKeyword, .traitKeyword), (.whenKeyword, .whenKeyword), (.intrinsicKeyword, .intrinsicKeyword), (.foreignKeyword, .foreignKeyword):
       return true
     case (.ampersand, .ampersand), (.pipe, .pipe), (.caret, .caret), (.tilde, .tilde):
       return true
@@ -311,6 +312,8 @@ public enum Token: CustomStringConvertible {
       return "when"
     case .intrinsicKeyword:
       return "intrinsic"
+    case .foreignKeyword:
+      return "foreign"
     case .ampersand:
       return "&"
     case .pipe:
@@ -979,6 +982,7 @@ public class Lexer {
       case "trait": .traitKeyword
       case "when": .whenKeyword
       case "intrinsic": .intrinsicKeyword
+      case "foreign": .foreignKeyword
       case "deref": .derefKeyword
       case "private": .privateKeyword
       case "protected": .protectedKeyword

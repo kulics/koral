@@ -113,7 +113,11 @@ public final class CompilerContext: @unchecked Sendable {
         case .variable:
             defKind = .variable
         case .type:
-            defKind = .type(.structure)
+            if case .opaque = type {
+                defKind = .type(.opaque)
+            } else {
+                defKind = .type(.structure)
+            }
         case .module:
             defKind = .module
         }
@@ -213,6 +217,8 @@ public final class CompilerContext: @unchecked Sendable {
             return defIdMap.getName(defId) ?? "<unknown>"
         case .union(let defId):
             return defIdMap.getName(defId) ?? "<unknown>"
+        case .opaque(let defId):
+            return defIdMap.getName(defId) ?? "<unknown>"
         default:
             return type.description
         }
@@ -254,6 +260,8 @@ public final class CompilerContext: @unchecked Sendable {
                 name += "[\(argsStr)]"
             }
             return name
+        case .opaque(let defId):
+            return defIdMap.getName(defId) ?? "<unknown>"
         case .genericParameter(let name):
             return name
         case .genericStruct(let template, let args):
@@ -312,6 +320,8 @@ public final class CompilerContext: @unchecked Sendable {
             return args.flatMap { freeTypeVariables(in: $0) }
         case .module:
             return []
+        case .opaque:
+            return []
         }
     }
 
@@ -342,6 +352,8 @@ public final class CompilerContext: @unchecked Sendable {
         case .structure(let defId):
             return layoutKey(for: defId)
         case .union(let defId):
+            return layoutKey(for: defId)
+        case .opaque(let defId):
             return layoutKey(for: defId)
         case .genericParameter(let name):
             return "Param_\(name)"
@@ -416,6 +428,8 @@ public final class CompilerContext: @unchecked Sendable {
             return (defIdMap.getUnionCases(defId) ?? []).contains { c in
                 c.parameters.contains { containsGenericParameterInternal($0.type, visited: &visited) }
             }
+        case .opaque:
+            return false
         case .reference(let inner):
             return containsGenericParameterInternal(inner, visited: &visited)
         case .pointer(let element):
