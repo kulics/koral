@@ -278,17 +278,6 @@ public class CodeGen {
       #include <stdint.h>
       #include <math.h>
 
-      // Integer power function using fast exponentiation
-      static inline intptr_t __koral_ipow(intptr_t base, intptr_t exp) {
-          intptr_t result = 1;
-          while (exp > 0) {
-              if (exp & 1) result *= base;
-              base *= base;
-              exp >>= 1;
-          }
-          return result;
-      }
-
       // Generic Ref type
       struct Ref { void* ptr; void* control; };
 
@@ -891,17 +880,8 @@ public class CodeGen {
       let rightResult = generateExpressionSSA(right)
       let result = nextTemp()
       addIndent()
-      if op == .power {
-        // Special handling for power operator
-        if isFloatType(type) {
-          buffer += "\(cTypeName(type)) \(result) = pow(\(leftResult), \(rightResult));\n"
-        } else {
-          buffer += "\(cTypeName(type)) \(result) = __koral_ipow(\(leftResult), \(rightResult));\n"
-        }
-      } else {
-        buffer +=
-          "\(cTypeName(type)) \(result) = \(leftResult) \(arithmeticOpToC(op)) \(rightResult);\n"
-      }
+      buffer +=
+        "\(cTypeName(type)) \(result) = \(leftResult) \(arithmeticOpToC(op)) \(rightResult);\n"
       return result
 
     case .comparisonExpression(let left, let op, let right, let type):

@@ -74,13 +74,11 @@ public enum Token: CustomStringConvertible {
   case leftShift  // '<<' - left shift
   case rightShift  // '>>' - right shift
   case arrow  // '->'
-  case doubleStar  // '**' - power
   case plusEqual  // '+='
   case minusEqual  // '-='
   case multiplyEqual  // '*='
   case divideEqual  // '/='
   case moduloEqual  // '%='
-  case doubleStarEqual  // '**=' - power assignment
   case ampersandEqual  // '&=' - bitwise AND assignment
   case pipeEqual  // '|=' - bitwise OR assignment
   case caretEqual  // '^=' - bitwise XOR assignment
@@ -108,7 +106,7 @@ public enum Token: CustomStringConvertible {
   public var isContinuationToken: Bool {
     switch self {
     // Arithmetic infix operators
-    case .plus, .minus, .multiply, .divide, .modulo, .doubleStar:
+    case .plus, .minus, .multiply, .divide, .modulo:
       return true
     // Logical infix operators
     case .andKeyword, .orKeyword:
@@ -178,9 +176,7 @@ public enum Token: CustomStringConvertible {
       return true
     case (.privateKeyword, .privateKeyword), (.protectedKeyword, .protectedKeyword), (.publicKeyword, .publicKeyword):
       return true
-    case (.doubleStar, .doubleStar):
-      return true
-    case (.plusEqual, .plusEqual), (.minusEqual, .minusEqual), (.multiplyEqual, .multiplyEqual), (.divideEqual, .divideEqual), (.moduloEqual, .moduloEqual), (.doubleStarEqual, .doubleStarEqual):
+    case (.plusEqual, .plusEqual), (.minusEqual, .minusEqual), (.multiplyEqual, .multiplyEqual), (.divideEqual, .divideEqual), (.moduloEqual, .moduloEqual):
       return true
     case (.ampersandEqual, .ampersandEqual), (.pipeEqual, .pipeEqual), (.caretEqual, .caretEqual), (.leftShiftEqual, .leftShiftEqual), (.rightShiftEqual, .rightShiftEqual):
       return true
@@ -337,8 +333,6 @@ public enum Token: CustomStringConvertible {
       return ">>"
     case .arrow:
       return "->"
-    case .doubleStar:
-      return "**"
     case .plusEqual:
       return "+="
     case .minusEqual:
@@ -349,8 +343,6 @@ public enum Token: CustomStringConvertible {
       return "/="
     case .moduloEqual:
       return "%="
-    case .doubleStarEqual:
-      return "**="
     case .ampersandEqual:
       return "&="
     case .pipeEqual:
@@ -796,13 +788,6 @@ public class Lexer {
       return .minus
     case "*":
       if let nextChar = getNextChar() {
-        if nextChar == "*" {
-          if let nextNextChar = getNextChar() {
-            if nextNextChar == "=" { return .doubleStarEqual }
-            unreadChar(nextNextChar)
-          }
-          return .doubleStar
-        }
         if nextChar == "=" { return .multiplyEqual }
         unreadChar(nextChar)
       }

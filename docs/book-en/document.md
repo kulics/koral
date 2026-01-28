@@ -341,7 +341,7 @@ We can simply understand them as calculation symbols in mathematics, but program
 
 Arithmetic operators are mainly used on numeric type data operations, and most declarations conform to mathematical expectations.
 
-Koral supports standard arithmetic operations, including addition, subtraction, multiplication, division, and modulus. In addition, the exponentiation operator `**` is provided.
+Koral supports standard arithmetic operations, including addition, subtraction, multiplication, division, and modulus. 
 
 ```koral
 let a = 4;
@@ -351,7 +351,6 @@ printLine( a - b );    // - Subtract
 printLine( a * b );    // * Multiply
 printLine( a / b );    // / Divide
 printLine( a % b );    // % Modulus, meaning the remainder after division
-printLine( a ** b );   // ** Power
 ```
 
 ### Comparison Operators

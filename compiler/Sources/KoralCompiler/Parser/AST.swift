@@ -300,7 +300,6 @@ public enum CompoundAssignmentOperator {
   case multiply
   case divide
   case modulo
-  case power
   case bitwiseAnd
   case bitwiseOr
   case bitwiseXor
@@ -317,7 +316,6 @@ public enum ArithmeticOperator {
   case multiply
   case divide
   case modulo
-  case power
 }
 public enum ComparisonOperator {
   case equal
