@@ -47,13 +47,24 @@ extension TypeChecker {
     
     // Enter new scope and add parameters
     return try withNewScope {
-      for param in typedParams {
-        currentScope.define(param.name, param.type, mutable: false)
+      // Build typed parameter symbols
+      let paramSymbols = typedParams.map { param in
+        makeLocalSymbol(
+          name: param.name,
+          type: param.type,
+          kind: .variable(.Value)
+        )
       }
-      
+
+      for symbol in paramSymbols {
+        if let name = context.getName(symbol.defId) {
+          currentScope.define(name, defId: symbol.defId)
+        }
+      }
+
       // Analyze captured variables
       let captures = try analyzeCapturedVariables(body: body, params: typedParams)
-      
+
       // Type check lambda body
       let typedBody = try inferTypedExpression(body)
       
@@ -85,15 +96,6 @@ extension TypeChecker {
       // Build function type
       let funcParams = typedParams.map { Parameter(type: $0.type, kind: .byVal) }
       let funcType = Type.function(parameters: funcParams, returns: actualReturnType)
-      
-      // Build typed parameter symbols
-      let paramSymbols = typedParams.map { param in
-        makeLocalSymbol(
-          name: param.name,
-          type: param.type,
-          kind: .variable(.Value)
-        )
-      }
       
       return .lambdaExpression(
         parameters: paramSymbols,
@@ -138,7 +140,7 @@ extension TypeChecker {
         }
         
         // Avoid duplicates
-        if !captures.contains(where: { $0.symbol.name == name }) {
+        if !captures.contains(where: { context.getName($0.symbol.defId) == name }) {
           let captureKind: CaptureKind
           if case .reference(_) = info.type {
             captureKind = .byReference

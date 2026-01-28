@@ -25,25 +25,27 @@ extension Monomorphizer {
         }
         
         // Note: Trait constraints were already validated by TypeChecker at declaration time
+
+        let templateName = context.getName(template.defId) ?? "<unknown>"
         
         // Special case: Pointer<T> maps directly to .pointer(element: T)
-        if template.name == "Pointer" {
+        if templateName == "Pointer" {
             return .pointer(element: args[0])
         }
         
         // Check cache
-        let key = "\(template.name)<\(args.map { $0.description }.joined(separator: ","))>"
+        let key = "\(templateName)<\(args.map { $0.description }.joined(separator: ","))>"
         if let cached = instantiatedTypes[key] {
             return cached
         }
         
         // Calculate layout name
         let argLayoutKeys = args.map { context.getLayoutKey($0) }.joined(separator: "_")
-        let layoutName = "\(template.name)_\(argLayoutKeys)"
+        let layoutName = "\(templateName)_\(argLayoutKeys)"
         
         // Create placeholder for recursion detection
         let defId = getOrAllocateTypeDefId(name: layoutName, kind: .structure)
-        context.updateStructInfo(defId: defId, members: [], isGenericInstantiation: true, typeArguments: args, templateName: template.name)
+        context.updateStructInfo(defId: defId, members: [], isGenericInstantiation: true, typeArguments: args, templateName: templateName)
         let placeholder = Type.structure(defId: defId)
         instantiatedTypes[key] = placeholder
 
@@ -74,18 +76,19 @@ extension Monomorphizer {
         }
         
         // Create the concrete type
-        context.updateStructInfo(defId: defId, members: resolvedMembers, isGenericInstantiation: true, typeArguments: args, templateName: template.name)
+        context.updateStructInfo(defId: defId, members: resolvedMembers, isGenericInstantiation: true, typeArguments: args, templateName: templateName)
         let specificType = Type.structure(defId: defId)
         instantiatedTypes[key] = specificType
-        layoutToTemplateInfo[layoutName] = (base: template.name, args: args)
+        layoutToTemplateInfo[layoutName] = (base: templateName, args: args)
         
         // Force instantiate __drop if it exists for this type
-        if let methods = input.genericTemplates.extensionMethods[template.name] {
+        if let methods = input.genericTemplates.extensionMethods[templateName] {
             for entry in methods {
-                if entry.method.name == "__drop" {
+                let methodName = entry.method.name
+                if methodName == "__drop" {
                     _ = try instantiateExtensionMethodFromEntry(
                         baseType: specificType,
-                        structureName: template.name,
+                        structureName: templateName,
                         genericArgs: args,
                         methodTypeArgs: [],
                         methodInfo: entry
@@ -135,19 +138,21 @@ extension Monomorphizer {
         
         // Note: Trait constraints were already validated by TypeChecker at declaration time
 
+        let templateName = context.getName(template.defId) ?? "<unknown>"
+
         // Check cache
-        let key = "\(template.name)<\(args.map { $0.description }.joined(separator: ","))>"
+        let key = "\(templateName)<\(args.map { $0.description }.joined(separator: ","))>"
         if let existing = instantiatedTypes[key] {
             return existing
         }
         
         // Calculate layout name
         let argLayoutKeys = args.map { context.getLayoutKey($0) }.joined(separator: "_")
-        let layoutName = "\(template.name)_\(argLayoutKeys)"
+        let layoutName = "\(templateName)_\(argLayoutKeys)"
         
         // Create placeholder for recursion
         let defId = getOrAllocateTypeDefId(name: layoutName, kind: .union)
-        context.updateUnionInfo(defId: defId, cases: [], isGenericInstantiation: true, typeArguments: args, templateName: template.name)
+        context.updateUnionInfo(defId: defId, cases: [], isGenericInstantiation: true, typeArguments: args, templateName: templateName)
         let placeholder = Type.union(defId: defId)
         instantiatedTypes[key] = placeholder
         
@@ -181,18 +186,19 @@ extension Monomorphizer {
         }
         
         // Create the concrete type
-        context.updateUnionInfo(defId: defId, cases: resolvedCases, isGenericInstantiation: true, typeArguments: args, templateName: template.name)
+        context.updateUnionInfo(defId: defId, cases: resolvedCases, isGenericInstantiation: true, typeArguments: args, templateName: templateName)
         let specificType = Type.union(defId: defId)
         instantiatedTypes[key] = specificType
-        layoutToTemplateInfo[layoutName] = (base: template.name, args: args)
+        layoutToTemplateInfo[layoutName] = (base: templateName, args: args)
 
         // Force instantiate __drop if it exists
-        if let methods = input.genericTemplates.extensionMethods[template.name] {
+        if let methods = input.genericTemplates.extensionMethods[templateName] {
             for entry in methods {
-                if entry.method.name == "__drop" {
+                let methodName = entry.method.name
+                if methodName == "__drop" {
                     _ = try instantiateExtensionMethodFromEntry(
                         baseType: specificType,
-                        structureName: template.name,
+                        structureName: templateName,
                         genericArgs: args,
                         methodTypeArgs: [],
                         methodInfo: entry

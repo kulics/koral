@@ -544,9 +544,10 @@ extension TypeChecker {
     // Create method reference or trait method placeholder with the temporary as base
     let finalCallee: TypedExpressionNode
     if let traitName = traitName {
+      let methodName = context.getName(method.defId) ?? "<unknown>"
       finalCallee = .traitMethodPlaceholder(
         traitName: traitName,
-        methodName: method.name,
+        methodName: methodName,
         base: tempRef,
         methodTypeArgs: methodTypeArgs,
         type: methodType
@@ -881,7 +882,7 @@ extension TypeChecker {
     base: TypedExpressionNode, method: Symbol, args: [ExpressionNode]
   ) throws -> TypedExpressionNode? {
     // method.name is mangled (e.g. Pointer_I_init). Extract the method name.
-    var name = method.name
+    var name = context.getName(method.defId) ?? ""
     if name.hasPrefix("Pointer_") {
       if let idx = name.lastIndex(of: "_") {
         name = String(name[name.index(after: idx)...])
@@ -959,7 +960,7 @@ extension TypeChecker {
     base: TypedExpressionNode, method: Symbol, args: [ExpressionNode]
   ) throws -> TypedExpressionNode? {
     // Extract the method name from mangled name (e.g., "Float32_to_bits" -> "to_bits")
-    var name = method.name
+    var name = context.getName(method.defId) ?? ""
     if name.hasPrefix("Float32_") {
       name = String(name.dropFirst("Float32_".count))
     } else if name.hasPrefix("Float64_") {

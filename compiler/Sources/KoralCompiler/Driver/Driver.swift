@@ -101,9 +101,6 @@ public class Driver {
     } catch let error as ModuleError {
       print("Module Error: \(error)")
       exit(1)
-    } catch let error as SymbolError {
-      print("Symbol Error: \(error)")
-      exit(1)
     } catch let error as AccessError {
       print("Access Error: \(error)")
       exit(1)
@@ -466,8 +463,8 @@ public class Driver {
     let stdoutFile = tempDir.appendingPathComponent(UUID().uuidString + "_stdout.txt")
     let stderrFile = tempDir.appendingPathComponent(UUID().uuidString + "_stderr.txt")
     
-    FileManager.default.createFile(atPath: stdoutFile.path, contents: nil)
-    FileManager.default.createFile(atPath: stderrFile.path, contents: nil)
+    _ = FileManager.default.createFile(atPath: stdoutFile.path, contents: nil)
+    _ = FileManager.default.createFile(atPath: stderrFile.path, contents: nil)
     
     defer {
       try? FileManager.default.removeItem(at: stdoutFile)

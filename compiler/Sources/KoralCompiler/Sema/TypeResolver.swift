@@ -11,8 +11,8 @@
 /// - 原 TypeCheckerPasses.swift 中的 collectGivenSignatures 和 buildModuleSymbols 方法
 ///
 /// ## 依赖关系
-/// - 输入：NameCollectorOutput（包含 DefIdMap、NameTable 和 ModuleResolverOutput）
-/// - 输出：TypeResolverOutput（包含 SymbolTable 和 NameCollectorOutput）
+/// - 输入：NameCollectorOutput（包含 DefIdMap 和 ModuleResolverOutput）
+/// - 输出：TypeResolverOutput（包含 NameCollectorOutput）
 ///
 /// **Validates: Requirements 2.1, 2.2**
 
@@ -38,8 +38,6 @@ public class TypeResolver: CompilerPass {
     /// 统一查询上下文
     private var context: CompilerContext
     
-    /// 符号表
-    private var symbolTable: SymbolTable
     
     /// 当前处理的源文件
     private var currentSourceFile: String = ""
@@ -71,7 +69,6 @@ public class TypeResolver: CompilerPass {
     ///
     /// - Parameter coreGlobalCount: 标准库全局节点数量（用于判断是否是标准库定义）
     public init(coreGlobalCount: Int = 0, checker: TypeChecker? = nil, context: CompilerContext? = nil) {
-        self.symbolTable = SymbolTable()
         self.coreGlobalCount = coreGlobalCount
         self.checker = checker
         self.context = context ?? CompilerContext()
@@ -94,7 +91,6 @@ public class TypeResolver: CompilerPass {
         
         // 重置状态
         defIdMap.clearTypeInfo()
-        symbolTable = SymbolTable()
         collectedTypeSignatures = [:]
         collectedFunctionSignatures = [:]
         collectedGivenSignatures = [:]
@@ -137,13 +133,10 @@ public class TypeResolver: CompilerPass {
             try checker.buildModuleSymbols(from: astNodes)
         }
         
-        // 第三步：将收集的信息添加到 DefIdMap 和 SymbolTable
+        // 第三步：将收集的信息添加到 DefIdMap
         try populateOutputMaps(defIdMap: defIdMap)
         
-        return TypeResolverOutput(
-            symbolTable: symbolTable,
-            nameCollectorOutput: nameCollectorOutput
-        )
+        return TypeResolverOutput(nameCollectorOutput: nameCollectorOutput)
     }
     
     // MARK: - 签名解析
@@ -599,7 +592,7 @@ public class TypeResolver: CompilerPass {
     
     // MARK: - 输出映射填充
     
-    /// 将收集的信息填充到 DefIdMap 和 SymbolTable
+    /// 将收集的信息填充到 DefIdMap
     private func populateOutputMaps(defIdMap: DefIdMap) throws {
         // 填充类型签名到 DefIdMap
         for (_, signature) in collectedTypeSignatures {
@@ -625,17 +618,6 @@ public class TypeResolver: CompilerPass {
                 
                 defIdMap.addType(defId: defId, type: placeholderType)
                 
-                // 添加到符号表
-                let entry = SymbolTableEntry(
-                    defId: defId,
-                    name: signature.name,
-                    type: placeholderType,
-                    kind: .type,
-                    access: signature.access,
-                    sourceFile: signature.sourceFile,
-                    isDirectlyAccessible: true
-                )
-                symbolTable.add(defId: defId, entry: entry)
             }
         }
         
@@ -662,17 +644,6 @@ public class TypeResolver: CompilerPass {
                 
                 defIdMap.addSignature(defId: defId, signature: funcSignature)
                 
-                // 添加到符号表
-                let entry = SymbolTableEntry(
-                    defId: defId,
-                    name: signature.name,
-                    type: .void, // 占位
-                    kind: .function,
-                    access: signature.access,
-                    sourceFile: signature.sourceFile,
-                    isDirectlyAccessible: true
-                )
-                symbolTable.add(defId: defId, entry: entry)
             }
         }
     }

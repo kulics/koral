@@ -45,12 +45,36 @@ public final class CompilerContext: @unchecked Sendable {
         defIdMap.getCIdentifier(defId)
     }
 
+    public func getSymbolType(_ defId: DefId) -> Type? {
+        defIdMap.getSymbolType(defId)
+    }
+
+    public func getSymbolKind(_ defId: DefId) -> SymbolKind? {
+        defIdMap.getSymbolKind(defId)
+    }
+
+    public func getSymbolMethodKind(_ defId: DefId) -> CompilerMethodKind? {
+        defIdMap.getSymbolMethodKind(defId)
+    }
+
+    public func isSymbolMutable(_ defId: DefId) -> Bool {
+        defIdMap.isSymbolMutable(defId) ?? false
+    }
+
     public func lookupDefId(
         modulePath: [String],
         name: String,
         sourceFile: String?
     ) -> DefId? {
         defIdMap.lookup(modulePath: modulePath, name: name, sourceFile: sourceFile)
+    }
+
+    public func lookupSymbol(
+        name: String,
+        sourceFile: String?,
+        scope: UnifiedScope
+    ) -> DefId? {
+        scope.lookup(name, sourceFile: sourceFile)
     }
 
     public func allocateDefId(
@@ -69,6 +93,54 @@ public final class CompilerContext: @unchecked Sendable {
             access: access,
             span: span
         )
+    }
+
+    public func createSymbol(
+        name: String,
+        modulePath: [String],
+        sourceFile: String,
+        type: Type,
+        kind: SymbolKind,
+        methodKind: CompilerMethodKind = .normal,
+        access: AccessModifier = .default,
+        span: SourceSpan = .unknown,
+        isMutable: Bool = false
+    ) -> Symbol {
+        let defKind: DefKind
+        switch kind {
+        case .function:
+            defKind = .function
+        case .variable:
+            defKind = .variable
+        case .type:
+            defKind = .type(.structure)
+        case .module:
+            defKind = .module
+        }
+
+        let lookupSourceFile = access == .private ? sourceFile : nil
+        let defId = defIdMap.lookup(
+            modulePath: modulePath,
+            name: name,
+            sourceFile: lookupSourceFile
+        ) ?? defIdMap.allocate(
+            modulePath: modulePath,
+            name: name,
+            kind: defKind,
+            sourceFile: sourceFile,
+            access: access,
+            span: span
+        )
+
+        defIdMap.addSymbolInfo(
+            defId: defId,
+            type: type,
+            kind: kind,
+            methodKind: methodKind,
+            isMutable: isMutable
+        )
+
+        return Symbol(defId: defId, type: type, kind: kind, methodKind: methodKind)
     }
 
     // MARK: - Typed Definition Queries

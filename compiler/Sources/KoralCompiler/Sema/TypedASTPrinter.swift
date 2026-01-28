@@ -1,11 +1,15 @@
 public func printTypedAST(_ node: TypedProgram) {
   var indent: String = ""
 
+  func symbolLabel(_ symbol: Symbol) -> String {
+    return "def#\(symbol.defId.id)"
+  }
+
   func printTypedGlobalNode(_ node: TypedGlobalNode) {
     switch node {
     case .globalVariable(let identifier, let value, let mutable):
       print("\(indent)GlobalVariable:")
-      print("\(indent)  Identifier: \(identifier.name): \(identifier.type)")
+      print("\(indent)  Identifier: \(symbolLabel(identifier)): \(identifier.type)")
       print("\(indent)  Mutable: \(mutable)")
       print("\(indent)  Value:")
       withIndent {
@@ -16,11 +20,11 @@ public func printTypedAST(_ node: TypedProgram) {
 
     case .globalFunction(let identifier, let parameters, let body):
       print("\(indent)GlobalFunction:")
-      print("\(indent)  Identifier: \(identifier.name): \(identifier.type)")
+      print("\(indent)  Identifier: \(symbolLabel(identifier)): \(identifier.type)")
       print("\(indent)  Parameters:")
       withIndent {
         for param in parameters {
-          print("\(indent)\(param.name): \(param.type)")
+          print("\(indent)\(symbolLabel(param)): \(param.type)")
         }
       }
       print("\(indent)  Body:")
@@ -30,18 +34,18 @@ public func printTypedAST(_ node: TypedProgram) {
 
     case .globalStructDeclaration(let identifier, let parameters):
       print("\(indent)StructDeclaration:")
-      print("\(indent)  Name: \(identifier.name): \(identifier.type)")
+      print("\(indent)  Name: \(symbolLabel(identifier)): \(identifier.type)")
       print("\(indent)  Parameters:")
       withIndent {
         for param in parameters {
-          print("\(indent)\(param.name): \(param.type)")
+          print("\(indent)\(symbolLabel(param)): \(param.type)")
           print("\(indent)  Mutable: \(param.isMutable())")
         }
       }
 
     case .globalUnionDeclaration(let identifier, let cases):
       print("\(indent)UnionDeclaration:")
-      print("\(indent)  Name: \(identifier.name): \(identifier.type)")
+      print("\(indent)  Name: \(symbolLabel(identifier)): \(identifier.type)")
       withIndent {
         for c in cases {
           print("\(indent)Case: \(c.name)")
@@ -63,11 +67,11 @@ public func printTypedAST(_ node: TypedProgram) {
       print("\(indent)GivenDeclaration: \(type)")
       withIndent {
         for method in methods {
-          print("\(indent)Method: \(method.identifier.name) : \(method.identifier.type)")
+          print("\(indent)Method: \(symbolLabel(method.identifier)) : \(method.identifier.type)")
           print("\(indent)  Parameters:")
           withIndent {
             for param in method.parameters {
-              print("\(indent)\(param.name): \(param.type)")
+              print("\(indent)\(symbolLabel(param)): \(param.type)")
             }
           }
           print("\(indent)  Body:")
@@ -83,7 +87,7 @@ public func printTypedAST(_ node: TypedProgram) {
     switch stmt {
     case .variableDeclaration(let identifier, let value, let mutable):
       print("\(indent)VariableDeclaration:")
-      print("\(indent)  Identifier: \(identifier.name): \(identifier.type)")
+      print("\(indent)  Identifier: \(symbolLabel(identifier)): \(identifier.type)")
       print("\(indent)  Mutable: \(mutable)")
       print("\(indent)  Value:")
       withIndent {
@@ -153,7 +157,7 @@ public func printTypedAST(_ node: TypedProgram) {
       }
 
     case .variable(let identifier):
-      print("\(indent)Variable: \(identifier.name) : \(identifier.type)")
+      print("\(indent)Variable: \(symbolLabel(identifier)) : \(identifier.type)")
 
     case .blockExpression(let statements, let finalExpr, let type):
       print("\(indent)Block: \(type)")
@@ -227,7 +231,7 @@ public func printTypedAST(_ node: TypedProgram) {
       }
 
     case .letExpression(let identifier, let value, let body, let type):
-      print("\(indent)LetExpression: \(identifier.name) : \(type)")
+      print("\(indent)LetExpression: \(symbolLabel(identifier)) : \(type)")
       withIndent {
         print("\(indent)Value:")
         withIndent {
@@ -277,7 +281,7 @@ public func printTypedAST(_ node: TypedProgram) {
       withIndent {
           printTypedExpression(base)
       }
-      print("\(indent)  Method: \(method.name)")
+      print("\(indent)  Method: \(symbolLabel(method))")
       print("\(indent)  Arguments:")
       withIndent {
           for arg in arguments {
@@ -324,7 +328,7 @@ public func printTypedAST(_ node: TypedProgram) {
       }
 
     case .methodReference(let base, let method, let typeArgs, let methodTypeArgs, let type):
-      print("\(indent)MethodReference: \(method.name) : \(type)")
+      print("\(indent)MethodReference: \(symbolLabel(method)) : \(type)")
       if let typeArgs = typeArgs, !typeArgs.isEmpty {
         withIndent {
           print("\(indent)TypeArgs: \(typeArgs.map { $0.description }.joined(separator: ", "))")
@@ -357,7 +361,7 @@ public func printTypedAST(_ node: TypedProgram) {
       }
 
     case .memberPath(let source, let path):
-      print("\(indent)MemberPath: \(path.map { $0.name }.joined(separator: "."))")
+      print("\(indent)MemberPath: \(path.map { symbolLabel($0) }.joined(separator: "."))")
       withIndent {
         print("\(indent)Source:")
         withIndent {
@@ -404,7 +408,7 @@ public func printTypedAST(_ node: TypedProgram) {
       }
 
     case .typeConstruction(let identifier, let typeArgs, let arguments, let type):
-      print("\(indent)TypeConstruction: \(identifier.name) : \(type)")
+      print("\(indent)TypeConstruction: \(symbolLabel(identifier)) : \(type)")
       if let typeArgs = typeArgs, !typeArgs.isEmpty {
         withIndent {
           print("\(indent)TypeArgs: \(typeArgs.map { $0.description }.joined(separator: ", "))")
@@ -491,14 +495,14 @@ public func printTypedAST(_ node: TypedProgram) {
         print("\(indent)Parameters:")
         withIndent {
           for param in parameters {
-            print("\(indent)\(param.name): \(param.type)")
+            print("\(indent)\(symbolLabel(param)): \(param.type)")
           }
         }
         if !captures.isEmpty {
           print("\(indent)Captures:")
           withIndent {
             for capture in captures {
-              print("\(indent)\(capture.symbol.name): \(capture.symbol.type) (\(capture.captureKind))")
+              print("\(indent)\(symbolLabel(capture.symbol)): \(capture.symbol.type) (\(capture.captureKind))")
             }
           }
         }

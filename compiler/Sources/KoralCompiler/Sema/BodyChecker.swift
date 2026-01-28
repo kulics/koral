@@ -11,7 +11,7 @@
 /// - 原 TypeCheckerPasses.swift 中的 checkGlobalDeclaration 方法
 ///
 /// ## 依赖关系
-/// - 输入：TypeResolverOutput（包含 SymbolTable 和 NameCollectorOutput）
+/// - 输入：TypeResolverOutput（包含 NameCollectorOutput）
 /// - 输出：BodyCheckerOutput（包含 TypedAST、InstantiationRequests 和 TypeResolverOutput）
 ///
 /// **Validates: Requirements 2.1, 2.2**

@@ -115,7 +115,8 @@ extension Monomorphizer {
             )
             
         case .variable(let identifier):
-            var newName = identifier.name
+            let identifierName = context.getName(identifier.defId) ?? "<unknown>"
+            var newName = identifierName
             let newType = substituteType(identifier.type, substitution: substitution)
             
             // Check if this is a generic function that needs its name updated to the mangled name
@@ -130,14 +131,14 @@ extension Monomorphizer {
                case .function(_, _) = identifier.type,
                !substitution.isEmpty {
                 // Check if this is a generic function template
-                if let template = input.genericTemplates.functionTemplates[identifier.name] {
+                if let template = input.genericTemplates.functionTemplates[identifierName] {
                     // Calculate the mangled name using the substituted type arguments
                     let typeArgs = template.typeParameters.compactMap { param -> Type? in
                         substitution[param.name]
                     }
                     if typeArgs.count == template.typeParameters.count {
                         let argLayoutKeys = typeArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
-                        newName = "\(identifier.name)_\(argLayoutKeys)"
+                        newName = "\(identifierName)_\(argLayoutKeys)"
                         
                         // Ensure the function is instantiated
                         if !generatedLayouts.contains(newName) && !typeArgs.contains(where: { context.containsGenericParameter($0) }) {
@@ -199,7 +200,8 @@ extension Monomorphizer {
             // This mirrors the lowering done in TypeChecker for direct calls
             if case .methodReference(let base, let method, _, _, _) = newCallee {
                 // Intercept Float32/Float64 to_bits intrinsic method
-                let methodName = extractMethodName(method.name)
+                let rawMethodName = context.getName(method.defId) ?? ""
+                let methodName = extractMethodName(rawMethodName)
                 if methodName == "to_bits" {
                     if base.type == .float32 && newArguments.isEmpty {
                         return .intrinsicCall(.float32Bits(value: base))
@@ -315,10 +317,11 @@ extension Monomorphizer {
             var resolvedReturnType = substituteType(type, substitution: substitution)
             
             // Resolve generic extension method to mangled name
+            let methodName = context.getName(method.defId) ?? ""
             if !context.containsGenericParameter(newBase.type) {
                 // Look up the concrete method on the substituted base type
                 // Pass method type args for generic methods
-                if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: method.name, methodTypeArgs: effectiveMethodTypeArgs) {
+                if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: methodName, methodTypeArgs: effectiveMethodTypeArgs) {
                     newMethod = copySymbolWithNewDefId(concreteMethod)
                     // Extract the return type from the concrete method's function type
                     if case .function(_, let returns) = concreteMethod.type {
@@ -438,7 +441,7 @@ extension Monomorphizer {
             // If the substituted type is a concrete structure or union, we need to:
             // 1. Update the identifier name to match the concrete type's layout name
             // 2. Ensure the concrete type is instantiated
-            var newName = identifier.name
+            var newName = context.getName(identifier.defId) ?? "<unknown>"
             if case .structure(let defId) = substitutedType {
                 let layoutName = context.getName(defId) ?? substitutedType.description
                 let isGenericInstantiation = context.isGenericInstantiation(defId) ?? false
@@ -521,9 +524,10 @@ extension Monomorphizer {
             )
             
             // Resolve method name to mangled name for generic extension methods
+            let methodName = context.getName(method.defId) ?? ""
             if !context.containsGenericParameter(newBase.type) {
                 // Look up the concrete method on the substituted base type
-                if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: method.name) {
+                if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: methodName) {
                     newMethod = copySymbolWithNewDefId(concreteMethod)
                 }
             }

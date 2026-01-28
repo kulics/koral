@@ -65,6 +65,8 @@ public struct EscapeDiagnostic {
 /// 追踪变量作用域层级和已标记为逃逸的变量，
 /// 用于在生成引用相关代码时决定栈/堆分配策略。
 public class EscapeContext {
+    /// Compiler context for symbol metadata lookup
+    public let context: CompilerContext?
     /// 当前函数的返回类型
     public var returnType: Type?
     
@@ -95,8 +97,9 @@ public class EscapeContext {
     /// 收集的诊断信息
     public private(set) var diagnostics: [EscapeDiagnostic] = []
     
-    public init(reportingEnabled: Bool = false) {
+    public init(reportingEnabled: Bool = false, context: CompilerContext? = nil) {
         self.reportingEnabled = reportingEnabled
+        self.context = context
     }
     
     /// 进入新作用域
@@ -233,7 +236,7 @@ public class EscapeContext {
     private func extractVariableName(from expr: TypedExpressionNode) -> String? {
         switch expr {
         case .variable(let identifier):
-            return identifier.name
+            return context?.getName(identifier.defId)
         case .memberPath(let source, _):
             // 对于成员路径，提取源变量名
             return extractVariableName(from: source)
@@ -292,7 +295,8 @@ public class EscapeContext {
     public func preAnalyze(body: TypedExpressionNode, params: [Symbol]) {
         // 首先注册参数（作用域层级 0，不会逃逸）
         for param in params {
-            variableScopes[param.name] = 0
+            let name = context?.getName(param.defId) ?? "<unknown>"
+            variableScopes[name] = 0
         }
         
         // 进入函数体作用域
@@ -328,9 +332,10 @@ public class EscapeContext {
         case .letExpression(let identifier, let value, let body, _):
             preAnalyzeExpression(value)
             // 注册变量到当前作用域
-            variableScopes[identifier.name] = currentScopeLevel
+            let name = context?.getName(identifier.defId) ?? "<unknown>"
+            variableScopes[name] = currentScopeLevel
             if !scopeStack.isEmpty {
-                scopeStack[scopeStack.count - 1].append(identifier.name)
+                scopeStack[scopeStack.count - 1].append(name)
             }
             preAnalyzeExpression(body)
             
@@ -462,7 +467,8 @@ public class EscapeContext {
         case .lambdaExpression(_, let captures, let body, _):
             // Lambda 表达式：被捕获的变量应该标记为逃逸
             for capture in captures {
-                markEscaped(capture.symbol.name, reason: .escapeToField)
+                let name = context?.getName(capture.symbol.defId) ?? "<unknown>"
+                markEscaped(name, reason: .escapeToField)
             }
             // 分析 Lambda 体
             enterScope()
@@ -477,9 +483,10 @@ public class EscapeContext {
         case .variableDeclaration(let identifier, let value, _):
             preAnalyzeExpression(value)
             // 注册变量到当前作用域
-            variableScopes[identifier.name] = currentScopeLevel
+            let name = context?.getName(identifier.defId) ?? "<unknown>"
+            variableScopes[name] = currentScopeLevel
             if !scopeStack.isEmpty {
-                scopeStack[scopeStack.count - 1].append(identifier.name)
+                scopeStack[scopeStack.count - 1].append(name)
             }
             
         case .assignment(let target, let value):
@@ -515,9 +522,10 @@ public class EscapeContext {
         case .booleanLiteral, .integerLiteral, .stringLiteral, .wildcard:
             break
         case .variable(let symbol):
-            variableScopes[symbol.name] = currentScopeLevel
+            let name = context?.getName(symbol.defId) ?? "<unknown>"
+            variableScopes[name] = currentScopeLevel
             if !scopeStack.isEmpty {
-                scopeStack[scopeStack.count - 1].append(symbol.name)
+                scopeStack[scopeStack.count - 1].append(name)
             }
         case .unionCase(_, _, let elements):
             for element in elements {
@@ -615,7 +623,8 @@ public class EscapeContext {
                 // 这个变量本身是引用类型，检查它是否指向局部变量
                 // 这种情况比较复杂，需要追踪引用的来源
                 // 目前采用保守策略：如果变量是局部的且类型是引用，标记为逃逸
-                if let scopeLevel = variableScopes[identifier.name], scopeLevel > 0 {
+                let name = context?.getName(identifier.defId) ?? "<unknown>"
+                if let scopeLevel = variableScopes[name], scopeLevel > 0 {
                     // 检查这个引用变量的值是否来自局部变量
                     // 由于我们在预分析阶段，无法完全追踪，采用保守策略
                     _ = innerType // 使用变量避免警告
@@ -677,7 +686,8 @@ public class EscapeContext {
             // 目前采用保守策略
             if case .reference(_) = identifier.type {
                 // 变量本身是引用类型，检查它是否是局部变量
-                if let scopeLevel = variableScopes[identifier.name], scopeLevel > 0 {
+                let name = context?.getName(identifier.defId) ?? "<unknown>"
+                if let scopeLevel = variableScopes[name], scopeLevel > 0 {
                     // 这个引用变量被存储到字段，可能导致逃逸
                     // 但我们需要追踪这个引用指向的原始变量
                     // 目前采用保守策略，不标记（因为引用本身可能来自参数）

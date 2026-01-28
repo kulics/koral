@@ -122,36 +122,23 @@ public class Monomorphizer {
         sourceFile: String = "",
         access: AccessModifier = .default
     ) -> Symbol {
-        let defKind: DefKind
+        let isMutable: Bool
         switch kind {
-        case .function:
-            defKind = .function
-        case .type:
-            defKind = .type(.structure)
-        case .variable:
-            defKind = .variable
-        case .module:
-            defKind = .module
+        case .variable(let varKind):
+            isMutable = varKind.isMutable
+        case .function, .type, .module:
+            isMutable = false
         }
-        
-        let defId = context.allocateDefId(
+        return context.createSymbol(
+            name: name,
             modulePath: modulePath,
-            name: name,
-            kind: defKind,
             sourceFile: sourceFile,
-            access: access,
-            span: .unknown
-        )
-        
-        return Symbol(
-            name: name,
             type: type,
             kind: kind,
             methodKind: methodKind,
-            modulePath: modulePath,
-            sourceFile: sourceFile,
             access: access,
-            defId: defId
+            span: .unknown,
+            isMutable: isMutable
         )
     }
     
@@ -164,14 +151,18 @@ public class Monomorphizer {
         newModulePath: [String]? = nil,
         newSourceFile: String? = nil
     ) -> Symbol {
+        let name = newName ?? context.getName(symbol.defId) ?? "<unknown>"
+        let modulePath = newModulePath ?? context.getModulePath(symbol.defId) ?? []
+        let sourceFile = newSourceFile ?? context.getSourceFile(symbol.defId) ?? ""
+        let access = context.getAccess(symbol.defId) ?? .default
         return makeSymbol(
-            name: newName ?? symbol.name,
+            name: name,
             type: newType ?? symbol.type,
             kind: symbol.kind,
             methodKind: symbol.methodKind,
-            modulePath: newModulePath ?? symbol.modulePath,
-            sourceFile: newSourceFile ?? symbol.sourceFile,
-            access: symbol.access
+            modulePath: modulePath,
+            sourceFile: sourceFile,
+            access: access
         )
     }
     
@@ -206,25 +197,28 @@ public class Monomorphizer {
                     break
                 case .globalStructDeclaration(let identifier, _):
                     // Track already-generated struct layouts
-                    generatedLayouts.insert(identifier.name)
+                    let identifierName = context.getName(identifier.defId) ?? "<unknown>"
+                    generatedLayouts.insert(identifierName)
                     // Also cache the type if it's a generic instantiation
                           if case .structure(let defId) = identifier.type,
                               context.isGenericInstantiation(defId) == true {
-                        instantiatedTypes[identifier.name] = identifier.type
+                        instantiatedTypes[identifierName] = identifier.type
                     }
                     resultNodes.append(node)
                 case .globalUnionDeclaration(let identifier, _):
                     // Track already-generated union layouts
-                    generatedLayouts.insert(identifier.name)
+                    let identifierName = context.getName(identifier.defId) ?? "<unknown>"
+                    generatedLayouts.insert(identifierName)
                           if case .union(let defId) = identifier.type,
                               context.isGenericInstantiation(defId) == true {
-                        instantiatedTypes[identifier.name] = identifier.type
+                        instantiatedTypes[identifierName] = identifier.type
                     }
                     resultNodes.append(node)
                 case .globalFunction(let identifier, _, _):
                     // Track already-generated functions
-                    generatedLayouts.insert(identifier.name)
-                    instantiatedFunctions[identifier.name] = (identifier.name, identifier.type)
+                    let identifierName = context.getName(identifier.defId) ?? "<unknown>"
+                    generatedLayouts.insert(identifierName)
+                    instantiatedFunctions[identifierName] = (identifierName, identifier.type)
                     resultNodes.append(node)
                 case .givenDeclaration(let type, let methods):
                     // Track already-generated extension methods
@@ -239,7 +233,8 @@ public class Monomorphizer {
                     }
                     
                     for method in methods {
-                        let mangledName = "\(qualifiedTypeName)_\(method.identifier.name)"
+                        let methodName = context.getName(method.identifier.defId) ?? "<unknown>"
+                        let mangledName = "\(qualifiedTypeName)_\(methodName)"
                         generatedLayouts.insert(mangledName)
                         instantiatedFunctions[mangledName] = (mangledName, method.identifier.type)
                     }
@@ -348,7 +343,7 @@ public class Monomorphizer {
                     // method.identifier.name 是 mangled name，格式为 qualifiedTypeName_methodName
                     // 例如：std_std_String_from_bytes_unchecked
                     // 我们需要提取原始方法名
-                    let mangledName = method.identifier.name
+                    let mangledName = context.getName(method.identifier.defId) ?? "<unknown>"
                     
                     // 从 mangled name 中提取原始方法名
                     // mangled name 格式：qualifiedTypeName_methodName
@@ -367,7 +362,7 @@ public class Monomorphizer {
                 
             case .globalFunction(let identifier, _, _):
                 // 对于全局函数，也可以通过简单名称查找
-                let name = identifier.name
+                let name = context.getName(identifier.defId) ?? "<unknown>"
                 
                 // 检查是否是类型的静态方法（名称格式：TypeName_methodName）
                 if let underscoreIndex = name.firstIndex(of: "_") {

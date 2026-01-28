@@ -127,8 +127,9 @@ extension CodeGen {
       // This handles cases where generic type parameters are replaced with concrete types
       // but the C representation needs explicit casting
       if case .structure(let defId) = curType.canonical,
-        let canonicalMembers = context.getStructMembers(defId),
-         let canonicalMember = canonicalMembers.first(where: { $0.name == member.name }) {
+        let canonicalMembers = context.getStructMembers(defId) {
+          let memberName = context.getName(member.defId) ?? "<unknown>"
+          if let canonicalMember = canonicalMembers.first(where: { $0.name == memberName }) {
           // Compare C type representations instead of Type equality
           // This avoids issues with UUID-based type identity for generic instantiations
           let canonicalCType = cTypeName(canonicalMember.type)
@@ -142,6 +143,7 @@ extension CodeGen {
               memberAccess = "*(\(targetCType)*)&(\(memberAccess))"
             }
           }
+        }
       }
       
       access = memberAccess
@@ -389,7 +391,8 @@ extension CodeGen {
     var curType = base.type
     for (index, item) in memberPath.enumerated() {
       let isLast = index == memberPath.count - 1
-      let memberName = item.name
+      let memberLookupName = context.getName(item.defId) ?? "<unknown>"
+      let memberName = sanitizeIdentifier(memberLookupName)
       let memberType = item.type
       
       var memberAccess: String
@@ -403,7 +406,7 @@ extension CodeGen {
       // Only apply type cast for non-reference struct members when the C types differ
       if case .structure(let defId) = curType.canonical,
         let canonicalMembers = context.getStructMembers(defId),
-         let canonicalMember = canonicalMembers.first(where: { $0.name == memberName }) {
+         let canonicalMember = canonicalMembers.first(where: { $0.name == memberLookupName }) {
           let canonicalCType = cTypeName(canonicalMember.type)
           let memberCTypeStr = cTypeName(memberType)
           if canonicalCType != memberCTypeStr {

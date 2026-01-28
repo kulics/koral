@@ -46,7 +46,7 @@ extension TypeChecker {
         try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
         
         // Special case: Pointer<T> resolves directly to .pointer(element: T)
-        if template.name == "Pointer" {
+        if (template.name(in: defIdMap) ?? "") == "Pointer" {
           return .pointer(element: resolvedArgs[0])
         }
         
@@ -119,8 +119,9 @@ extension TypeChecker {
     case .moduleQualified(let moduleName, let typeName):
       // 模块限定类型：module.TypeName
       // 首先验证模块符号存在
-      guard let moduleType = currentScope.lookup(moduleName, sourceFile: currentSourceFile),
-            case .module(let moduleInfo) = moduleType else {
+      guard let moduleDefId = currentScope.lookup(moduleName, sourceFile: currentSourceFile),
+        let moduleType = defIdMap.getSymbolType(moduleDefId),
+        case .module(let moduleInfo) = moduleType else {
         throw SemanticError.undefinedVariable(moduleName)
       }
       
@@ -142,8 +143,9 @@ extension TypeChecker {
     case .moduleQualifiedGeneric(let moduleName, let baseName, let args):
       // 模块限定泛型类型：module.[T]List
       // 首先查找模块符号
-      guard let moduleType = currentScope.lookup(moduleName, sourceFile: currentSourceFile),
-            case .module = moduleType else {
+      guard let moduleDefId = currentScope.lookup(moduleName, sourceFile: currentSourceFile),
+        let moduleType = defIdMap.getSymbolType(moduleDefId),
+        case .module = moduleType else {
         throw SemanticError.undefinedVariable(moduleName)
       }
       
