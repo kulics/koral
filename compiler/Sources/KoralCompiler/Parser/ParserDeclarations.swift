@@ -12,9 +12,18 @@ extension Parser {
     let access = try parseAccessModifier()
 
     var isIntrinsic = false
+    var isForeign = false
     if currentToken === .intrinsicKeyword {
       try match(.intrinsicKeyword)
       isIntrinsic = true
+    }
+
+    if currentToken === .foreignKeyword {
+      try match(.foreignKeyword)
+      if isIntrinsic {
+        throw ParserError.foreignAndIntrinsicConflict(span: currentSpan)
+      }
+      isForeign = true
     }
 
     if currentToken === .letKeyword {
@@ -39,8 +48,15 @@ extension Parser {
 
       try match(.identifier(name))
 
+      if isForeign && !typePrams.isEmpty {
+        throw ParserError.foreignFunctionNoGenerics(span: currentSpan)
+      }
+
       // If mut keyword was detected, it must be a variable declaration
       if mutable {
+        if isForeign {
+          throw ParserError.unexpectedToken(span: currentSpan, got: "foreign variable not supported")
+        }
         if currentToken === .leftParen {
           throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
         }
@@ -50,10 +66,16 @@ extension Parser {
 
       // Otherwise check for left paren to determine if it's a function or variable
       if currentToken === .leftParen {
+        if isForeign {
+          return try foreignFunctionDeclaration(name: name, access: access, span: startSpan)
+        }
         return try globalFunctionDeclaration(
           name: name, typeParams: typePrams, access: access, isIntrinsic: isIntrinsic,
           span: startSpan)
       } else {
+        if isForeign {
+          throw ParserError.unexpectedToken(span: currentSpan, got: "foreign variable not supported")
+        }
         if isIntrinsic {
           throw ParserError.unexpectedToken(
             span: currentSpan, got: "intrinsic variable not supported")
@@ -75,6 +97,9 @@ extension Parser {
       }
 
       try match(.identifier(name))
+      if isForeign {
+        return try foreignTypeDeclaration(name: name, access: access, span: startSpan)
+      }
       return try parseStructDeclaration(
         name, typeParams: typeParams, access: access, isIntrinsic: isIntrinsic, span: startSpan)
     } else if currentToken === .givenKeyword {
@@ -527,6 +552,63 @@ extension Parser {
     }
   }
 
+  // MARK: - Foreign Declarations
+
+  private func foreignFunctionDeclaration(
+    name: String, access: AccessModifier, span: SourceSpan
+  ) throws -> GlobalNode {
+    try match(.leftParen)
+    var parameters: [(name: String, mutable: Bool, type: TypeNode)] = []
+    while currentToken !== .rightParen {
+      var isMut = false
+      if currentToken === .mutKeyword {
+        isMut = true
+        try match(.mutKeyword)
+      }
+      guard case .identifier(let pname) = currentToken else {
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+      }
+      try match(.identifier(pname))
+      let paramType = try parseType()
+      parameters.append((name: pname, mutable: isMut, type: paramType))
+      if currentToken === .comma {
+        try match(.comma)
+      }
+    }
+    try match(.rightParen)
+
+    var returnType: TypeNode = .identifier("Void")
+    if currentToken !== .semicolon && !shouldTerminateStatement() {
+      returnType = try parseType()
+    }
+
+    if currentToken === .equal {
+      throw ParserError.foreignFunctionNoBody(span: currentSpan)
+    }
+
+    return .foreignFunctionDeclaration(
+      name: name,
+      parameters: parameters,
+      returnType: returnType,
+      access: access,
+      span: span
+    )
+  }
+
+  private func foreignTypeDeclaration(
+    name: String, access: AccessModifier, span: SourceSpan
+  ) throws -> GlobalNode {
+    if currentToken === .leftParen || currentToken === .leftBrace {
+      throw ParserError.foreignTypeNoBody(span: currentSpan)
+    }
+
+    return .foreignTypeDeclaration(
+      name: name,
+      access: access,
+      span: span
+    )
+  }
+
   // MARK: - Struct Declaration
   
   /// Parse type declaration
@@ -639,6 +721,40 @@ extension Parser {
   }
 
   // MARK: - Using Declarations
+
+  /// Check if current position is a foreign using declaration
+  func isForeignUsingDeclaration() -> Bool {
+    if currentToken === .foreignKeyword {
+      let state = lexer.saveState()
+      let savedToken = currentToken
+      do {
+        let nextToken = try lexer.getNextToken()
+        lexer.restoreState(state)
+        currentToken = savedToken
+        return nextToken === .usingKeyword
+      } catch {
+        lexer.restoreState(state)
+        currentToken = savedToken
+        return false
+      }
+    }
+    return false
+  }
+
+  /// Parse foreign using declaration
+  func parseForeignUsingDeclaration() throws -> GlobalNode {
+    let startSpan = currentSpan
+    try match(.foreignKeyword)
+    try match(.usingKeyword)
+
+    guard case .string(let headerName) = currentToken else {
+      throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description, expected: "string literal")
+    }
+    try match(currentToken)
+
+    let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
+    return .foreignUsingDeclaration(headerName: headerName, span: span)
+  }
   
   /// Check if current position is a using declaration
   func isUsingDeclaration() -> Bool {

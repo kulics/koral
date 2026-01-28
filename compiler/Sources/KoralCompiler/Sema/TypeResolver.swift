@@ -111,6 +111,7 @@ public class TypeResolver: CompilerPass {
         if let checker {
             let declarations = astNodes.filter { node in
                 if case .usingDeclaration = node { return false }
+                if case .foreignUsingDeclaration = node { return false }
                 return true
             }
             for (index, node) in declarations.enumerated() {
@@ -151,6 +152,9 @@ public class TypeResolver: CompilerPass {
         switch node {
         case .usingDeclaration:
             // Using 声明在 ModuleResolver 中处理，这里跳过
+            return
+        case .foreignUsingDeclaration:
+            // Foreign using doesn't affect type signatures
             return
             
         case .givenDeclaration(let typeParams, let typeNode, let methods, let span):
@@ -208,6 +212,23 @@ public class TypeResolver: CompilerPass {
                 typeParameters: typeParameters,
                 parameters: parameters,
                 returnType: returnType,
+                span: span,
+                defIdMap: defIdMap
+            )
+        case .foreignFunctionDeclaration(let name, let parameters, let returnType, let access, let span):
+            try resolveFunctionSignature(
+                name: name,
+                typeParameters: [],
+                parameters: parameters,
+                returnType: returnType,
+                access: access,
+                span: span,
+                defIdMap: defIdMap
+            )
+        case .foreignTypeDeclaration(let name, let access, let span):
+            try resolveOpaqueTypeSignature(
+                name: name,
+                access: access,
                 span: span,
                 defIdMap: defIdMap
             )
@@ -403,6 +424,26 @@ public class TypeResolver: CompilerPass {
             modulePath: currentModulePath
         )
     }
+
+    /// 解析 opaque（foreign type）签名
+    private func resolveOpaqueTypeSignature(
+        name: String,
+        access: AccessModifier,
+        span: SourceSpan,
+        defIdMap: DefIdMap
+    ) throws {
+        let qualifiedName = currentModulePath.isEmpty ? name : "\(currentModulePath.joined(separator: ".")).\(name)"
+
+        collectedTypeSignatures[qualifiedName] = ResolvedTypeSignature(
+            name: name,
+            kind: .opaque,
+            typeParameters: [],
+            members: [],
+            access: access,
+            sourceFile: currentSourceFile,
+            modulePath: currentModulePath
+        )
+    }
     
     // MARK: - 函数签名解析
     
@@ -551,6 +592,14 @@ public class TypeResolver: CompilerPass {
                 modulePath: sourceInfo.modulePath,
                 sourceFile: sourceInfo.sourceFile
             )
+        case .foreignFunctionDeclaration(let name, _, _, let access, _):
+            return ResolvedModuleSymbol(
+                name: name,
+                kind: .function,
+                access: access,
+                modulePath: sourceInfo.modulePath,
+                sourceFile: sourceInfo.sourceFile
+            )
             
         case .globalStructDeclaration(let name, let typeParameters, _, let access, _):
             // 跳过泛型结构体
@@ -568,6 +617,14 @@ public class TypeResolver: CompilerPass {
             // 跳过泛型联合类型
             if !typeParameters.isEmpty { return nil }
             
+            return ResolvedModuleSymbol(
+                name: name,
+                kind: .type,
+                access: access,
+                modulePath: sourceInfo.modulePath,
+                sourceFile: sourceInfo.sourceFile
+            )
+        case .foreignTypeDeclaration(let name, let access, _):
             return ResolvedModuleSymbol(
                 name: name,
                 kind: .type,
@@ -614,6 +671,8 @@ public class TypeResolver: CompilerPass {
                     if defIdMap.getUnionCases(defId) == nil {
                         defIdMap.addUnionInfo(defId: defId, cases: [], isGenericInstantiation: false, typeArguments: nil)
                     }
+                case .opaque:
+                    placeholderType = .opaque(defId: defId)
                 }
                 
                 defIdMap.addType(defId: defId, type: placeholderType)
@@ -708,6 +767,7 @@ public struct ResolvedTypeSignature {
 public enum ResolvedTypeKind {
     case structure
     case union(cases: [ResolvedUnionCase])
+    case opaque
 }
 
 /// 解析的成员

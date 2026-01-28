@@ -10,6 +10,9 @@ public func printAST(_ node: ASTNode) {
       let batchStr = decl.isBatchImport ? ".*" : ""
       print("\(indent)UsingDeclaration: \(decl.pathKind) \(pathStr)\(batchStr)\(aliasStr)")
       print("\(indent)  Access: \(decl.access)")
+
+    case .foreignUsingDeclaration(let headerName, _):
+      print("\(indent)ForeignUsingDeclaration: \(headerName)")
       
     case .globalVariableDeclaration(let name, let type, let value, let mutable, let access, _):
       print("\(indent)GlobalVariableDeclaration:")
@@ -81,12 +84,27 @@ public func printAST(_ node: ASTNode) {
       }
       print("\(indent)  ReturnType: \(returnType)")
 
+    case .foreignFunctionDeclaration(let name, let parameters, let returnType, let access, _):
+      print("\(indent)ForeignFunctionDeclaration:")
+      print("\(indent)  Access: \(access)")
+      print("\(indent)  Name: \(name)")
+      print("\(indent)  Parameters:")
+      for param in parameters {
+        let modStr = param.mutable ? "mut " : ""
+        print("\(indent)    \(modStr)\(param.name): \(param.type)")
+      }
+      print("\(indent)  ReturnType: \(returnType)")
+
     case .intrinsicTypeDeclaration(let name, let typeParameters, let access, _):
         print("\(indent)IntrinsicTypeDeclaration \(name)")
         print("\(indent)  Access: \(access)")
         if !typeParameters.isEmpty {
           print("\(indent)  TypeParameters: \(typeParameters)")
         }
+
+    case .foreignTypeDeclaration(let name, let access, _):
+        print("\(indent)ForeignTypeDeclaration \(name)")
+        print("\(indent)  Access: \(access)")
 
     case .givenDeclaration(let typeParams, let type, let methods, _):
       print("\(indent)GivenDeclaration:")

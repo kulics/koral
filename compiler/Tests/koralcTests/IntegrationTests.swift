@@ -52,6 +52,12 @@ class IntegrationTests: XCTestCase {
     func test_drop_test() throws { try runCase(named: "drop_test.koral") }
     func test_escape_analysis() throws { try runCase(named: "escape_analysis.koral") }
     func test_exhaustiveness_check() throws { try runCase(named: "exhaustiveness_check.koral") }
+    func test_ffi_basic() throws { try runCase(named: "ffi_basic.koral") }
+    func test_ffi_foreign_body_error() throws { try runCase(named: "ffi_foreign_body_error.koral") }
+    func test_ffi_foreign_generics_error() throws { try runCase(named: "ffi_foreign_generics_error.koral") }
+    func test_ffi_foreign_intrinsic_conflict() throws { try runCase(named: "ffi_foreign_intrinsic_conflict.koral") }
+    func test_ffi_foreign_type_body_error() throws { try runCase(named: "ffi_foreign_type_body_error.koral") }
+    func test_ffi_incompatible_type() throws { try runCase(named: "ffi_incompatible_type.koral") }
     func test_float_types() throws { try runCase(named: "float_types.koral") }
     func test_for_loop_basic() throws { try runCase(named: "for_loop_basic.koral") }
     func test_for_loop_control_flow() throws { try runCase(named: "for_loop_control_flow.koral") }

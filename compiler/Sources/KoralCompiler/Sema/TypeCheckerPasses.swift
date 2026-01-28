@@ -16,6 +16,7 @@ extension TypeChecker {
       // 从 GlobalNode 中过滤出非 using 声明的节点
       let declarations = allNodes.filter { node in
         if case .usingDeclaration = node { return false }
+        if case .foreignUsingDeclaration = node { return false }
         return true
       }
       
@@ -284,6 +285,19 @@ extension TypeChecker {
         return (name, symbol, nil)
       }
       return nil
+
+    case .foreignFunctionDeclaration(let name, _, _, _, _):
+      if let defId = currentScope.lookup(name, sourceFile: sourceInfo.sourceFile),
+         let funcType = defIdMap.getSymbolType(defId) {
+        let symbol = Symbol(
+          defId: defId,
+          type: funcType,
+          kind: .function,
+          methodKind: defIdMap.getSymbolMethodKind(defId) ?? .normal
+        )
+        return (name, symbol, nil)
+      }
+      return nil
       
     case .globalStructDeclaration(let name, let typeParameters, _, _, _):
       // Skip generic structs for now
@@ -326,6 +340,28 @@ extension TypeChecker {
           methodKind: .normal
         )
         return (name, symbol, unionType)
+      }
+      return nil
+
+    case .foreignTypeDeclaration(let name, let access, _):
+      let type = access == .private
+        ? currentScope.lookupType(name, sourceFile: sourceInfo.sourceFile)
+        : currentScope.lookupType(name)
+      if let type {
+        let defId: DefId
+        switch type {
+        case .structure(let typeDefId), .union(let typeDefId), .opaque(let typeDefId):
+          defId = typeDefId
+        default:
+          return nil
+        }
+        let symbol = Symbol(
+          defId: defId,
+          type: type,
+          kind: .type,
+          methodKind: .normal
+        )
+        return (name, symbol, type)
       }
       return nil
       
@@ -402,6 +438,9 @@ extension TypeChecker {
     switch decl {
     case .usingDeclaration:
       // Using declarations are handled separately, skip here
+      return
+    case .foreignUsingDeclaration:
+      // Foreign using is handled in CodeGen, skip here
       return
       
     case .traitDeclaration(let name, let typeParameters, let superTraits, let methods, let access, let span):
@@ -517,6 +556,29 @@ extension TypeChecker {
         stdLibTypes.insert(name)
       }
       
+    case .foreignTypeDeclaration(let name, let access, let span):
+      self.currentSpan = span
+      let isPrivate = (access == .private)
+      if !isPrivate && currentScope.hasTypeDefinition(name) {
+        throw SemanticError.duplicateDefinition(name, line: span.line)
+      }
+      let defId = getOrAllocateTypeDefId(
+        name: name,
+        kind: .opaque,
+        access: access,
+        modulePath: currentModulePath,
+        sourceFile: currentSourceFile
+      )
+      let placeholder = Type.opaque(defId: defId)
+      if isPrivate {
+        try currentScope.definePrivateType(name, sourceFile: currentSourceFile, type: placeholder)
+      } else {
+        try currentScope.defineType(name, type: placeholder)
+      }
+      if isStdLib {
+        stdLibTypes.insert(name)
+      }
+      
     case .globalFunctionDeclaration(_, let typeParameters, _, _, _, _, let span):
       self.currentSpan = span
       // For generic functions, we just note that they exist
@@ -527,6 +589,10 @@ extension TypeChecker {
       }
       // For non-generic functions, we also defer to pass 2
       // since we need to resolve parameter types which may reference forward types
+      
+    case .foreignFunctionDeclaration:
+      // Foreign function signatures are handled in pass 2
+      break
       
     case .globalVariableDeclaration:
       // Variables are handled in pass 2
@@ -1001,6 +1067,22 @@ extension TypeChecker {
         }
       }
       // Generic functions are handled in pass 3
+
+    case .foreignFunctionDeclaration(let name, let parameters, let returnTypeNode, let access, let span):
+      self.currentSpan = span
+      let returnType = try resolveTypeNode(returnTypeNode)
+      let params = try parameters.map { param -> Parameter in
+        let paramType = try resolveTypeNode(param.type)
+        let passKind: PassKind = param.mutable ? .byMutRef : .byVal
+        return Parameter(type: paramType, kind: passKind)
+      }
+      let functionType = Type.function(parameters: params, returns: returnType)
+      let isPrivate = (access == .private)
+      if isPrivate {
+        currentScope.definePrivateFunction(name, sourceFile: currentSourceFile, type: functionType, modulePath: currentModulePath)
+      } else {
+        currentScope.defineFunctionWithModulePath(name, functionType, modulePath: currentModulePath)
+      }
       
     case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, _, let span):
       self.currentSpan = span
@@ -1028,6 +1110,8 @@ extension TypeChecker {
     case .usingDeclaration:
       // Using declarations are handled separately, skip here
       return nil
+    case .foreignUsingDeclaration(let headerName, _):
+      return .foreignUsing(headerName: headerName)
       
     case .traitDeclaration(_, _, let superTraits, _, _, let span):
       self.currentSpan = span
@@ -1122,6 +1206,31 @@ extension TypeChecker {
         value: typedValue,
         kind: isMut ? .MutableValue : .Value
       )
+
+    case .foreignTypeDeclaration(let name, let access, let span):
+      self.currentSpan = span
+      let isPrivate = (access == .private)
+      let type: Type
+      if let existing = isPrivate
+        ? currentScope.lookupType(name, sourceFile: currentSourceFile)
+        : currentScope.lookupType(name) {
+        type = existing
+      } else {
+        let defId = getOrAllocateTypeDefId(
+          name: name,
+          kind: .opaque,
+          access: access,
+          modulePath: currentModulePath,
+          sourceFile: currentSourceFile
+        )
+        type = .opaque(defId: defId)
+        if isPrivate {
+          try currentScope.definePrivateType(name, sourceFile: currentSourceFile, type: type)
+        } else {
+          try currentScope.defineType(name, type: type)
+        }
+      }
+      return .foreignType(identifier: makeGlobalSymbol(name: name, type: type, kind: .type, access: access))
 
     case .globalFunctionDeclaration(
       let name, let typeParameters, let parameters, let returnTypeNode, let body, let access,
@@ -1232,6 +1341,41 @@ extension TypeChecker {
         parameters: params,
         body: typedBody
       )
+
+    case .foreignFunctionDeclaration(
+      let name, let parameters, let returnTypeNode, let access, let span):
+      self.currentSpan = span
+
+      let returnType = try resolveTypeNode(returnTypeNode)
+      if !isFfiCompatibleType(returnType) {
+        throw SemanticError(
+          .ffiIncompatibleType(type: returnType.description, reason: ffiTypeError(returnType)),
+          span: span
+        )
+      }
+
+      let params = try parameters.map { param -> Symbol in
+        let paramType = try resolveTypeNode(param.type)
+        if !isFfiCompatibleType(paramType) {
+          throw SemanticError(
+            .ffiIncompatibleType(type: paramType.description, reason: ffiTypeError(paramType)),
+            span: span
+          )
+        }
+        return makeLocalSymbol(
+          name: param.name, type: paramType,
+          kind: .variable(param.mutable ? .MutableValue : .Value))
+      }
+
+      let functionType = Type.function(
+        parameters: params.map {
+          Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind))
+        },
+        returns: returnType
+      )
+
+      let symbol = makeGlobalSymbol(name: name, type: functionType, kind: .function, access: access)
+      return .foreignFunction(identifier: symbol, parameters: params)
 
     case .intrinsicFunctionDeclaration(
       let name, let typeParameters, let parameters, let returnTypeNode, let access, let span):

@@ -340,6 +340,23 @@ extension Monomorphizer {
     /// This ensures no parameterized types reach CodeGen.
     internal func resolveTypesInGlobalNode(_ node: TypedGlobalNode) throws -> TypedGlobalNode {
         switch node {
+        case .foreignUsing:
+            return node
+        case .foreignType(let identifier):
+            let newIdentifier = copySymbolWithNewDefId(
+                identifier,
+                newType: resolveParameterizedType(identifier.type)
+            )
+            return .foreignType(identifier: newIdentifier)
+        case .foreignFunction(let identifier, let parameters):
+            let newIdentifier = copySymbolWithNewDefId(
+                identifier,
+                newType: resolveParameterizedType(identifier.type)
+            )
+            let newParams = parameters.map { param in
+                copySymbolWithNewDefId(param, newType: resolveParameterizedType(param.type))
+            }
+            return .foreignFunction(identifier: newIdentifier, parameters: newParams)
         case .globalStructDeclaration(let identifier, let parameters):
             let newIdentifier = copySymbolWithNewDefId(
                 identifier,

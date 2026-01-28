@@ -19,6 +19,14 @@ public class CodeGen {
   /// 用户定义的 main 函数的限定名（如 "hello_main"）
   /// 如果用户没有定义 main 函数，则为 nil
   private var userMainFunctionName: String? = nil
+
+  /// 标准库头文件列表（使用尖括号）
+  private let standardHeaders: Set<String> = [
+    "stdio.h", "stdlib.h", "stdint.h", "stddef.h", "stdbool.h",
+    "string.h", "math.h", "time.h", "errno.h", "assert.h",
+    "ctype.h", "limits.h", "float.h", "signal.h", "setjmp.h",
+    "stdarg.h", "locale.h"
+  ]
   
   // MARK: - Lambda Code Generation
   /// Counter for generating unique Lambda function names
@@ -113,6 +121,7 @@ public class CodeGen {
   private func buildCIdentifierMap() {
     var publicDefIds: [DefId] = []
     var privateDefIds: [DefId] = []
+    var foreignDefIds: Set<UInt64> = []
 
     func register(defId: DefId, access: AccessModifier) {
       if access == .private {
@@ -124,6 +133,14 @@ public class CodeGen {
 
     for node in ast.globalNodes {
       switch node {
+      case .foreignType(let identifier):
+        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .default)
+        foreignDefIds.insert(defIdKey(identifier.defId))
+      case .foreignFunction(let identifier, _):
+        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .default)
+        foreignDefIds.insert(defIdKey(identifier.defId))
+      case .foreignUsing:
+        break
       case .globalStructDeclaration(let identifier, _):
         register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .default)
         if case .structure(let defId) = identifier.type {
@@ -160,11 +177,21 @@ public class CodeGen {
     }
 
     for defId in publicDefIds {
-      let cId = context.getCIdentifier(defId) ?? "T_\(defId.id)"
+      let cId: String
+      if foreignDefIds.contains(defIdKey(defId)) {
+        cId = context.getName(defId) ?? "T_\(defId.id)"
+      } else {
+        cId = context.getCIdentifier(defId) ?? "T_\(defId.id)"
+      }
       cIdentifierByDefId[defIdKey(defId)] = cId
     }
     for defId in privateDefIds {
-      let cId = context.getCIdentifier(defId) ?? "T_\(defId.id)"
+      let cId: String
+      if foreignDefIds.contains(defIdKey(defId)) {
+        cId = context.getName(defId) ?? "T_\(defId.id)"
+      } else {
+        cId = context.getCIdentifier(defId) ?? "T_\(defId.id)"
+      }
       cIdentifierByDefId[defIdKey(defId)] = cId
     }
   }
@@ -278,6 +305,11 @@ public class CodeGen {
       #include <stdint.h>
       #include <math.h>
 
+      """
+
+    emitForeignUsingDeclarations(from: ast.globalNodes)
+
+    buffer += """
       // Generic Ref type
       struct Ref { void* ptr; void* control; };
 
@@ -289,28 +321,28 @@ public class CodeGen {
       typedef void (*Koral_Dtor)(void*);
 
       struct Koral_Control {
-          _Atomic int count;
-          Koral_Dtor dtor;
-          void* ptr;
+        _Atomic int count;
+        Koral_Dtor dtor;
+        void* ptr;
       };
 
       void __koral_retain(void* raw_control) {
-          if (!raw_control) return;
-          struct Koral_Control* control = (struct Koral_Control*)raw_control;
-          atomic_fetch_add(&control->count, 1);
+        if (!raw_control) return;
+        struct Koral_Control* control = (struct Koral_Control*)raw_control;
+        atomic_fetch_add(&control->count, 1);
       }
 
       void __koral_release(void* raw_control) {
-          if (!raw_control) return;
-          struct Koral_Control* control = (struct Koral_Control*)raw_control;
-          int prev = atomic_fetch_sub(&control->count, 1);
-          if (prev == 1) {
-              if (control->dtor) {
-                  control->dtor(control->ptr);
-              }
-              free(control->ptr);
-              free(control);
+        if (!raw_control) return;
+        struct Koral_Control* control = (struct Koral_Control*)raw_control;
+        int prev = atomic_fetch_sub(&control->count, 1);
+        if (prev == 1) {
+          if (control->dtor) {
+            control->dtor(control->ptr);
           }
+          free(control->ptr);
+          free(control);
+        }
       }
 
       """
@@ -331,6 +363,27 @@ public class CodeGen {
     }
     
     return buffer
+  }
+
+  private func emitForeignUsingDeclarations(from nodes: [TypedGlobalNode]) {
+    var seen: Set<String> = []
+    var ordered: [String] = []
+
+    for node in nodes {
+      if case .foreignUsing(let headerName) = node {
+        if !seen.contains(headerName) {
+          seen.insert(headerName)
+          ordered.append(headerName)
+        }
+      }
+    }
+
+    guard !ordered.isEmpty else { return }
+
+    for header in ordered {
+      generateForeignUsingDeclaration(header)
+    }
+    buffer += "\n"
   }
   
   /// 获取逃逸分析诊断报告
@@ -548,6 +601,24 @@ public class CodeGen {
         }
       }
 
+      let foreignTypes: [Symbol] = nodes.compactMap {
+        if case .foreignType(let identifier) = $0 { return identifier }
+        return nil
+      }
+      let foreignFunctions: [(Symbol, [Symbol])] = nodes.compactMap {
+        if case .foreignFunction(let identifier, let params) = $0 {
+          return (identifier, params)
+        }
+        return nil
+      }
+
+      if !foreignTypes.isEmpty {
+        for typeSymbol in foreignTypes {
+          generateForeignTypeDeclaration(typeSymbol)
+        }
+        buffer += "\n"
+      }
+
       // 先生成所有类型声明，按依赖顺序排序以确保字段类型已定义
       let typeDeclarations = collectTypeDeclarations(nodes)
       
@@ -558,6 +629,13 @@ public class CodeGen {
         case .union(let identifier, let cases, _):
           generateUnionDeclaration(identifier, cases)
         }
+      }
+
+      if !foreignFunctions.isEmpty {
+        for (identifier, params) in foreignFunctions {
+          generateForeignFunctionDeclaration(identifier, params)
+        }
+        buffer += "\n"
       }
 
       // 然后生成所有函数声明
@@ -640,6 +718,31 @@ public class CodeGen {
       buffer += "return 0;\n"
     }
     buffer += "}\n"
+  }
+
+  private func generateForeignUsingDeclaration(_ headerName: String) {
+    if standardHeaders.contains(headerName) {
+      buffer += "#include <\(headerName)>\n"
+    } else {
+      buffer += "#include \"\(headerName)\"\n"
+    }
+  }
+
+  private func generateForeignTypeDeclaration(_ identifier: Symbol) {
+    let cName = context.getName(identifier.defId) ?? "<unknown>"
+    buffer += "typedef void* \(cName);\n"
+  }
+
+  private func generateForeignFunctionDeclaration(_ identifier: Symbol, _ params: [Symbol]) {
+    let cName = context.getName(identifier.defId) ?? "<unknown>"
+    let returnType = getFunctionReturnType(identifier.type)
+    let paramList = params.map { getParamCDecl($0) }.joined(separator: ", ")
+
+    if case .function(_, let ret) = identifier.type, ret == .never {
+      buffer += "_Noreturn "
+    }
+
+    buffer += "extern \(returnType) \(cName)(\(paramList));\n"
   }
 
   private func generateFunctionDeclaration(_ identifier: Symbol, _ params: [Symbol]) {

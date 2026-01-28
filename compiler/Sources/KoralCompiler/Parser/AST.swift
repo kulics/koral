@@ -134,6 +134,12 @@ public struct UnionCaseDeclaration {
 public indirect enum GlobalNode {
   // Using declaration (must appear at the beginning of a file)
   case usingDeclaration(UsingDeclaration)
+
+  /// Foreign Using 声明（C 头文件导入）
+  case foreignUsingDeclaration(
+    headerName: String,
+    span: SourceSpan
+  )
   
   case globalVariableDeclaration(
     name: String, type: TypeNode, value: ExpressionNode, mutable: Bool, access: AccessModifier,
@@ -150,6 +156,13 @@ public indirect enum GlobalNode {
   case intrinsicFunctionDeclaration(
     name: String,
     typeParameters: [TypeParameterDecl],
+    parameters: [(name: String, mutable: Bool, type: TypeNode)],
+    returnType: TypeNode,
+    access: AccessModifier,
+    span: SourceSpan
+  )
+  case foreignFunctionDeclaration(
+    name: String,
     parameters: [(name: String, mutable: Bool, type: TypeNode)],
     returnType: TypeNode,
     access: AccessModifier,
@@ -172,6 +185,11 @@ public indirect enum GlobalNode {
   case intrinsicTypeDeclaration(
     name: String,
     typeParameters: [TypeParameterDecl],
+    access: AccessModifier,
+    span: SourceSpan
+  )
+  case foreignTypeDeclaration(
+    name: String,
     access: AccessModifier,
     span: SourceSpan
   )
@@ -200,17 +218,23 @@ extension GlobalNode {
     switch self {
     case .usingDeclaration(let decl):
       return decl.span
+    case .foreignUsingDeclaration(_, let span):
+      return span
     case .globalVariableDeclaration(_, _, _, _, _, let span):
       return span
     case .globalFunctionDeclaration(_, _, _, _, _, _, let span):
       return span
     case .intrinsicFunctionDeclaration(_, _, _, _, _, let span):
       return span
+    case .foreignFunctionDeclaration(_, _, _, _, let span):
+      return span
     case .globalStructDeclaration(_, _, _, _, let span):
       return span
     case .globalUnionDeclaration(_, _, _, _, let span):
       return span
     case .intrinsicTypeDeclaration(_, _, _, let span):
+      return span
+    case .foreignTypeDeclaration(_, _, let span):
       return span
     case .traitDeclaration(_, _, _, _, _, let span):
       return span

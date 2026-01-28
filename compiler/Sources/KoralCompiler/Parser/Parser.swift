@@ -80,8 +80,12 @@ public class Parser {
     
     self.currentToken = try self.lexer.getNextToken()
     while currentToken !== .eof {
-      // Check for using declaration
-      if isUsingDeclaration() {
+      // Check for foreign using declaration
+      if isForeignUsingDeclaration() {
+        let foreignUsingDecl = try parseForeignUsingDeclaration()
+        globalNodes.append(foreignUsingDecl)
+        try consumeOptionalSemicolon()
+      } else if isUsingDeclaration() {
         if seenNonUsing {
           throw ParserError.usingAfterDeclaration(span: currentSpan)
         }

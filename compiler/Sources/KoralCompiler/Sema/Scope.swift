@@ -379,7 +379,7 @@ public class UnifiedScope {
     }
     let defId: DefId
     switch type {
-    case .structure(let typeDefId), .union(let typeDefId):
+    case .structure(let typeDefId), .union(let typeDefId), .opaque(let typeDefId):
       defId = typeDefId
     default:
       defId = map.allocate(
@@ -401,7 +401,7 @@ public class UnifiedScope {
     }
     let defId: DefId
     switch type {
-    case .structure(let typeDefId), .union(let typeDefId):
+    case .structure(let typeDefId), .union(let typeDefId), .opaque(let typeDefId):
       defId = typeDefId
     default:
       defId = map.allocate(
@@ -427,7 +427,7 @@ public class UnifiedScope {
     }
     let defId: DefId
     switch type {
-    case .structure(let typeDefId), .union(let typeDefId):
+    case .structure(let typeDefId), .union(let typeDefId), .opaque(let typeDefId):
       defId = typeDefId
     default:
       defId = map.allocate(
@@ -450,7 +450,7 @@ public class UnifiedScope {
     }
     let defId: DefId
     switch type {
-    case .structure(let typeDefId), .union(let typeDefId):
+    case .structure(let typeDefId), .union(let typeDefId), .opaque(let typeDefId):
       defId = typeDefId
     default:
       defId = map.allocate(

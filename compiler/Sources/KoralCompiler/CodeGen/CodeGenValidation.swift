@@ -52,6 +52,18 @@ extension CodeGen {
   /// This catches any types that weren't properly resolved by the Monomorphizer.
   func validateGlobalNode(_ node: TypedGlobalNode) {
     switch node {
+    case .foreignUsing:
+      break
+    case .foreignFunction(let identifier, let params):
+      let name = context.getName(identifier.defId) ?? "<unknown>"
+      assertTypeResolved(identifier.type, contextInfo: "foreign function '\(name)'")
+      for param in params {
+        let paramName = context.getName(param.defId) ?? "<unknown>"
+        assertTypeResolved(param.type, contextInfo: "foreign function '\(name)' parameter '\(paramName)'")
+      }
+    case .foreignType(let identifier):
+      let name = context.getName(identifier.defId) ?? "<unknown>"
+      assertTypeResolved(identifier.type, contextInfo: "foreign type '\(name)'")
     case .globalVariable(let identifier, let value, _):
       let name = context.getName(identifier.defId) ?? "<unknown>"
       assertTypeResolved(identifier.type, contextInfo: "global variable '\(name)'")
