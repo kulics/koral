@@ -11,7 +11,6 @@ extension CodeGen {
     case .multiply: return "*"
     case .divide: return "/"
     case .modulo: return "%"
-    case .power: return "**"  // Special handling needed
     }
   }
 
@@ -43,7 +42,6 @@ extension CodeGen {
     case .multiply: return "*="
     case .divide: return "/="
     case .modulo: return "%="
-    case .power: return "**="  // Special handling needed
     case .bitwiseAnd: return "&="
     case .bitwiseOr: return "|="
     case .bitwiseXor: return "^="

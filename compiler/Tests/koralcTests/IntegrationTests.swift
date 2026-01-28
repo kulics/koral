@@ -103,7 +103,6 @@ class IntegrationTests: XCTestCase {
     func test_option_map_test() throws { try runCase(named: "option_map_test.koral") }
     func test_pattern_combinators() throws { try runCase(named: "pattern_combinators.koral") }
     func test_pointer_test() throws { try runCase(named: "pointer_test.koral") }
-    func test_power() throws { try runCase(named: "power.koral") }
     func test_range_basic() throws { try runCase(named: "range_basic.koral") }
     func test_range_iterator() throws { try runCase(named: "range_iterator.koral") }
     func test_range_unbounded() throws { try runCase(named: "range_unbounded.koral") }

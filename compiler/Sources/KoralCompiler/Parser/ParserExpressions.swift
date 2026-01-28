@@ -214,31 +214,18 @@ extension Parser {
 
   /// Sixth level: Multiplication, division, and modulo
   private func parseMultiplicativeExpression() throws -> ExpressionNode {
-    var left = try parsePowerExpression()
+    var left = try parsePrefixExpression()
 
     while currentToken === .multiply || currentToken === .divide || currentToken === .modulo {
       if isLineContinuationBlocked() { break }
       let op = currentToken
       try match(op)
-      let right = try parsePowerExpression()
+      let right = try parsePrefixExpression()
       left = .arithmeticExpression(
         left: left,
         operator: tokenToArithmeticOperator(op),
         right: right
       )
-    }
-    return left
-  }
-
-  /// Seventh level: Power (right-associative)
-  private func parsePowerExpression() throws -> ExpressionNode {
-    let left = try parsePrefixExpression()
-    // Power is right-associative, so we use recursion instead of a loop
-    if currentToken === .doubleStar {
-      if isLineContinuationBlocked() { return left }
-      try match(.doubleStar)
-      let right = try parsePowerExpression()  // Recursive for right-associativity
-      return .arithmeticExpression(left: left, operator: .power, right: right)
     }
     return left
   }
@@ -830,7 +817,6 @@ extension Parser {
     case .multiply: return .multiply
     case .divide: return .divide
     case .modulo: return .modulo
-    case .doubleStar: return .power
     default: fatalError("Invalid arithmetic operator token")
     }
   }

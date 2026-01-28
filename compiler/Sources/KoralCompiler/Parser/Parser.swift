@@ -148,7 +148,6 @@ public class Parser {
     case .multiplyEqual: return .multiply
     case .divideEqual: return .divide
     case .moduloEqual: return .modulo
-    case .doubleStarEqual: return .power
     case .ampersandEqual: return .bitwiseAnd
     case .pipeEqual: return .bitwiseOr
     case .caretEqual: return .bitwiseXor
