@@ -436,7 +436,6 @@ x -= 2;       // x = x - 2
 x *= 3;       // x = x * 3
 x /= 2;       // x = x / 2
 x %= 4;       // x = x % 4
-x **= 2;      // x = x ** 2 (Power)
 
 let mut y = 0b1100;
 y &= 0b1010;  // y = y & 0b1010
@@ -451,13 +450,12 @@ y >>= 2;      // y = y >> 2
 Operator precedence from high to low is as follows:
 
 1. Prefix: `not`, `~`, `+`(unary), `-`(unary)
-2. Power: `**` (Right associative)
-3. Multiplication/Division: `*`, `/`, `%`
-4. Addition/Subtraction: `+`, `-`
-5. Shift: `<<`, `>>`
-6. Relation: `<`, `>`, `<=`, `>=`
-7. Equality: `==`, `<>`
-8. Bitwise AND: `&`
+2. Multiplication/Division: `*`, `/`, `%`
+3. Addition/Subtraction: `+`, `-`
+4. Shift: `<<`, `>>`
+5. Relation: `<`, `>`, `<=`, `>=`
+6. Equality: `==`, `<>`
+7. Bitwise AND: `&`
 9. Bitwise XOR: `^`
 10. Bitwise OR: `|`
 11. Pattern Check: `is`
