@@ -220,12 +220,8 @@ extension GlobalNode {
       return span
     }
   }
-  
-  /// Line number for backward compatibility
-  public var line: Int {
-    span.start.line
-  }
 }
+
 public struct IntrinsicMethodDeclaration {
   public let name: String
   public let typeParameters: [TypeParameterDecl]
@@ -296,12 +292,8 @@ extension StatementNode {
     case .continue(let span): return span
     }
   }
-  
-  /// Line number for backward compatibility
-  public var line: Int {
-    span.start.line
-  }
 }
+
 public enum CompoundAssignmentOperator {
   case plus
   case minus
@@ -517,12 +509,8 @@ public indirect enum PatternNode: CustomStringConvertible {
     case .notPattern(_, let span): return span
     }
   }
-  
-  /// Line number for backward compatibility
-  public var line: Int {
-    span.start.line
-  }
 }
+
 public struct MatchCaseNode {
   public let pattern: PatternNode
   public let body: ExpressionNode

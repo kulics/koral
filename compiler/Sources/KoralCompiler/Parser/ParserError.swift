@@ -17,11 +17,6 @@ public enum LexerError: Error {
     }
   }
   
-  /// The line number (for backward compatibility)
-  public var line: Int {
-    span.start.line
-  }
-  
   /// The column number
   public var column: Int {
     span.start.column
@@ -86,11 +81,6 @@ public enum ParserError: Error {
     case .invalidFunctionType(let span, _): return span
     case .expectedArrow(let span): return span
     }
-  }
-  
-  /// The line number (for backward compatibility)
-  public var line: Int {
-    span.start.line
   }
   
   /// The column number

@@ -19,24 +19,19 @@ public struct TraitDeclInfo {
     /// Access modifier for the trait
     public let access: AccessModifier
     
-    /// Source line where the trait was declared
-    public let line: Int
-    
     /// Creates a new trait declaration info.
     public init(
         name: String,
         typeParameters: [TypeParameterDecl] = [],
         superTraits: [String],
         methods: [TraitMethodSignature],
-        access: AccessModifier,
-        line: Int
+        access: AccessModifier
     ) {
         self.name = name
         self.typeParameters = typeParameters
         self.superTraits = superTraits
         self.methods = methods
         self.access = access
-        self.line = line
     }
 }
 

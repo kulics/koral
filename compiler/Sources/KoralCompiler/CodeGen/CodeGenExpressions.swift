@@ -392,7 +392,7 @@ extension CodeGen {
     for (index, item) in memberPath.enumerated() {
       let isLast = index == memberPath.count - 1
       let memberLookupName = context.getName(item.defId) ?? "<unknown>"
-      let memberName = sanitizeIdentifier(memberLookupName)
+      let memberName = sanitizeCIdentifier(memberLookupName)
       let memberType = item.type
       
       var memberAccess: String

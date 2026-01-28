@@ -274,10 +274,7 @@ public class NameCollector: CompilerPass {
             access: access,
             span: span
         )
-        
-        // 添加到名称表
-        let fullName = defIdMap.getQualifiedName(defId) ?? qualifiedName
-        
+
         // 收集 trait 信息
         collectedTraits[qualifiedName] = CollectedTraitInfo(
             defId: defId,
@@ -285,8 +282,7 @@ public class NameCollector: CompilerPass {
             typeParameters: typeParameters,
             superTraits: superTraits,
             methods: methods,
-            access: access,
-            line: span.line
+            access: access
         )
         
         // 标记标准库类型
@@ -337,10 +333,7 @@ public class NameCollector: CompilerPass {
             access: access,
             span: span
         )
-        
-        // 添加到名称表
-        let fullName = defIdMap.getQualifiedName(defId) ?? qualifiedName
-        
+
         // 收集类型信息
         if !typeParameters.isEmpty {
             // 泛型结构体模板
@@ -413,10 +406,7 @@ public class NameCollector: CompilerPass {
             access: access,
             span: span
         )
-        
-        // 添加到名称表
-        let fullName = defIdMap.getQualifiedName(defId) ?? qualifiedName
-        
+
         // 收集类型信息
         if !typeParameters.isEmpty {
             // 泛型联合类型模板
@@ -475,10 +465,7 @@ public class NameCollector: CompilerPass {
             access: access,
             span: span
         )
-        
-        // 添加到名称表
-        let fullName = defIdMap.getQualifiedName(defId) ?? name
-        
+
         // 收集函数信息
         let isPrivate = (access == .private)
         let key = isPrivate ? "\(name)@\(currentSourceFile)" : name
@@ -502,7 +489,7 @@ public class NameCollector: CompilerPass {
         isStdLib: Bool
     ) throws {
         // 分配 DefId
-        let defId = defIdMap.allocate(
+        _ = defIdMap.allocate(
             modulePath: currentModulePath,
             name: name,
             kind: .variable,
@@ -510,9 +497,6 @@ public class NameCollector: CompilerPass {
             access: access,
             span: span
         )
-        
-        // 添加到名称表
-        let fullName = defIdMap.getQualifiedName(defId) ?? name
     }
     
     // MARK: - Given 声明收集
@@ -571,10 +555,7 @@ public class NameCollector: CompilerPass {
             access: .default,
             span: span
         )
-        
-        // 添加到名称表
-        let fullName = defIdMap.getQualifiedName(defId) ?? name
-        
+
         // 收集类型信息
         if !typeParameters.isEmpty {
             collectedGenericTemplates[name] = CollectedGenericTemplateInfo(
@@ -630,10 +611,7 @@ public class NameCollector: CompilerPass {
             access: .default,
             span: span
         )
-        
-        // 添加到名称表
-        let fullName = defIdMap.getQualifiedName(defId) ?? name
-        
+
         // 收集函数信息
         collectedFunctions[name] = CollectedFunctionInfo(
             defId: defId,
@@ -753,7 +731,6 @@ public struct CollectedTraitInfo {
     public let superTraits: [String]
     public let methods: [TraitMethodSignature]
     public let access: AccessModifier
-    public let line: Int
 }
 
 /// 收集到的类型信息
