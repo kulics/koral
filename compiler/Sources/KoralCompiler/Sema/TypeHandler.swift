@@ -198,7 +198,7 @@ public class StructHandler: TypeHandler {
     }
     
     public func getMethods(_ type: Type) -> [String] {
-        // 方法信息存储在 SymbolTable 中，这里返回空
+        // 方法信息尚未注册到此处，返回空
         // 实际的方法查找应该通过 TypeChecker 进行
         return []
     }

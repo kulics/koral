@@ -193,6 +193,94 @@ extension GenericTemplateKind: CustomStringConvertible {
 /// }
 /// ```
 public class DefIdMap {
+    public struct SymbolInfo {
+        public let type: Type
+        public let kind: SymbolKind
+        public let methodKind: CompilerMethodKind
+        public let isMutable: Bool
+
+        public init(
+            type: Type,
+            kind: SymbolKind,
+            methodKind: CompilerMethodKind,
+            isMutable: Bool
+        ) {
+            self.type = type
+            self.kind = kind
+            self.methodKind = methodKind
+            self.isMutable = isMutable
+        }
+    }
+
+    public struct ImportRecord {
+        public let originalDefId: DefId
+        public let importKind: ImportKind
+        public let fromModule: [String]
+
+        public init(
+            originalDefId: DefId,
+            importKind: ImportKind,
+            fromModule: [String]
+        ) {
+            self.originalDefId = originalDefId
+            self.importKind = importKind
+            self.fromModule = fromModule
+        }
+    }
+
+    public struct GenericStructTemplateInfo {
+        public let typeParameters: [TypeParameterDecl]
+        public let parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier)]
+
+        public init(
+            typeParameters: [TypeParameterDecl],
+            parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier)]
+        ) {
+            self.typeParameters = typeParameters
+            self.parameters = parameters
+        }
+    }
+
+    public struct GenericUnionTemplateInfo {
+        public let typeParameters: [TypeParameterDecl]
+        public let cases: [UnionCaseDeclaration]
+
+        public init(
+            typeParameters: [TypeParameterDecl],
+            cases: [UnionCaseDeclaration]
+        ) {
+            self.typeParameters = typeParameters
+            self.cases = cases
+        }
+    }
+
+    public struct GenericFunctionTemplateInfo {
+        public let typeParameters: [TypeParameterDecl]
+        public let parameters: [(name: String, mutable: Bool, type: TypeNode)]
+        public let returnType: TypeNode
+        public let body: ExpressionNode
+        public var checkedBody: TypedExpressionNode?
+        public var checkedParameters: [Symbol]?
+        public var checkedReturnType: Type?
+
+        public init(
+            typeParameters: [TypeParameterDecl],
+            parameters: [(name: String, mutable: Bool, type: TypeNode)],
+            returnType: TypeNode,
+            body: ExpressionNode,
+            checkedBody: TypedExpressionNode? = nil,
+            checkedParameters: [Symbol]? = nil,
+            checkedReturnType: Type? = nil
+        ) {
+            self.typeParameters = typeParameters
+            self.parameters = parameters
+            self.returnType = returnType
+            self.body = body
+            self.checkedBody = checkedBody
+            self.checkedParameters = checkedParameters
+            self.checkedReturnType = checkedReturnType
+        }
+    }
     public struct Metadata: Equatable, Hashable {
         public let modulePath: [String]
         public let name: String
@@ -280,6 +368,22 @@ public class DefIdMap {
 
     /// DefId 到联合类型信息的映射
     private var unionInfoMap: [UInt64: UnionTypeInfo] = [:]
+
+    /// DefId 到符号信息的映射
+    private var symbolInfoMap: [UInt64: SymbolInfo] = [:]
+
+    /// 导入记录映射（导入后的 DefId -> ImportRecord）
+    private var importRecords: [UInt64: ImportRecord] = [:]
+
+    /// 泛型模板映射（名称 -> DefId）
+    private var genericStructTemplates: [String: DefId] = [:]
+    private var genericUnionTemplates: [String: DefId] = [:]
+    private var genericFunctionTemplates: [String: DefId] = [:]
+
+    /// 泛型模板详细信息
+    private var genericStructTemplateInfo: [UInt64: GenericStructTemplateInfo] = [:]
+    private var genericUnionTemplateInfo: [UInt64: GenericUnionTemplateInfo] = [:]
+    private var genericFunctionTemplateInfo: [UInt64: GenericFunctionTemplateInfo] = [:]
     
     // MARK: - 初始化
     
@@ -686,6 +790,115 @@ public class DefIdMap {
 
     public func lookupSignature(defId: DefId) -> FunctionSignature? {
         return signatureMap[defId.id]
+    }
+
+    // MARK: - Symbol Info
+
+    public func addSymbolInfo(
+        defId: DefId,
+        type: Type,
+        kind: SymbolKind,
+        methodKind: CompilerMethodKind,
+        isMutable: Bool
+    ) {
+        symbolInfoMap[defId.id] = SymbolInfo(
+            type: type,
+            kind: kind,
+            methodKind: methodKind,
+            isMutable: isMutable
+        )
+    }
+
+    public func getSymbolType(_ defId: DefId) -> Type? {
+        return symbolInfoMap[defId.id]?.type
+    }
+
+    public func getSymbolKind(_ defId: DefId) -> SymbolKind? {
+        return symbolInfoMap[defId.id]?.kind
+    }
+
+    public func getSymbolMethodKind(_ defId: DefId) -> CompilerMethodKind? {
+        return symbolInfoMap[defId.id]?.methodKind
+    }
+
+    public func isSymbolMutable(_ defId: DefId) -> Bool? {
+        return symbolInfoMap[defId.id]?.isMutable
+    }
+
+    // MARK: - Import Records
+
+    public func recordImport(
+        importedDefId: DefId,
+        originalDefId: DefId,
+        importKind: ImportKind,
+        fromModule: [String]
+    ) {
+        importRecords[importedDefId.id] = ImportRecord(
+            originalDefId: originalDefId,
+            importKind: importKind,
+            fromModule: fromModule
+        )
+    }
+
+    public func getOriginalDefId(_ defId: DefId) -> DefId? {
+        return importRecords[defId.id]?.originalDefId
+    }
+
+    public func isImported(_ defId: DefId) -> Bool {
+        return importRecords[defId.id] != nil
+    }
+
+    // MARK: - Generic Template Info
+
+    public func registerGenericStructTemplate(name: String, defId: DefId, info: GenericStructTemplateInfo) {
+        genericStructTemplates[name] = defId
+        genericStructTemplateInfo[defId.id] = info
+    }
+
+    public func registerGenericUnionTemplate(name: String, defId: DefId, info: GenericUnionTemplateInfo) {
+        genericUnionTemplates[name] = defId
+        genericUnionTemplateInfo[defId.id] = info
+    }
+
+    public func registerGenericFunctionTemplate(name: String, defId: DefId, info: GenericFunctionTemplateInfo) {
+        genericFunctionTemplates[name] = defId
+        genericFunctionTemplateInfo[defId.id] = info
+    }
+
+    public func lookupGenericStructTemplateDefId(_ name: String) -> DefId? {
+        return genericStructTemplates[name]
+    }
+
+    public func lookupGenericUnionTemplateDefId(_ name: String) -> DefId? {
+        return genericUnionTemplates[name]
+    }
+
+    public func lookupGenericFunctionTemplateDefId(_ name: String) -> DefId? {
+        return genericFunctionTemplates[name]
+    }
+
+    public func getGenericStructTemplateInfo(_ defId: DefId) -> GenericStructTemplateInfo? {
+        return genericStructTemplateInfo[defId.id]
+    }
+
+    public func getGenericUnionTemplateInfo(_ defId: DefId) -> GenericUnionTemplateInfo? {
+        return genericUnionTemplateInfo[defId.id]
+    }
+
+    public func getGenericFunctionTemplateInfo(_ defId: DefId) -> GenericFunctionTemplateInfo? {
+        return genericFunctionTemplateInfo[defId.id]
+    }
+
+    public func genericStructTemplatesSnapshot() -> [String: DefId] {
+        return genericStructTemplates
+    }
+
+    public func genericUnionTemplatesSnapshot() -> [String: DefId] {
+        return genericUnionTemplates
+    }
+
+    public func genericFunctionTemplatesSnapshot() -> [String: DefId] {
+        return genericFunctionTemplates
     }
     
     // MARK: - 私有方法

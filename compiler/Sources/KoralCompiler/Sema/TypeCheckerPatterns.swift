@@ -262,4 +262,28 @@ extension TypeChecker {
       return (.notPattern(pattern: typedPattern), [])
     }
   }
+
+  func extractPatternSymbols(from pattern: TypedPattern) -> [Symbol] {
+    var symbols: [Symbol] = []
+    collectPatternSymbols(pattern, into: &symbols)
+    return symbols
+  }
+
+  private func collectPatternSymbols(_ pattern: TypedPattern, into symbols: inout [Symbol]) {
+    switch pattern {
+    case .variable(let symbol):
+      symbols.append(symbol)
+    case .unionCase(_, _, let elements):
+      for element in elements {
+        collectPatternSymbols(element, into: &symbols)
+      }
+    case .andPattern(let left, let right), .orPattern(let left, let right):
+      collectPatternSymbols(left, into: &symbols)
+      collectPatternSymbols(right, into: &symbols)
+    case .notPattern(let pattern):
+      collectPatternSymbols(pattern, into: &symbols)
+    case .booleanLiteral, .integerLiteral, .stringLiteral, .wildcard, .comparisonPattern:
+      break
+    }
+  }
 }

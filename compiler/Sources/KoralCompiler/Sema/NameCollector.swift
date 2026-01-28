@@ -12,7 +12,7 @@
 ///
 /// ## 依赖关系
 /// - 输入：ModuleResolverOutput（包含 AST 节点和模块信息）
-/// - 输出：NameCollectorOutput（包含 DefIdMap 和 NameTable）
+/// - 输出：NameCollectorOutput（包含 DefIdMap）
 ///
 /// **Validates: Requirements 2.1, 2.2**
 
@@ -38,8 +38,6 @@ public class NameCollector: CompilerPass {
     /// DefId 映射表
     private var defIdMap: DefIdMap
     
-    /// 名称表
-    private var nameTable: NameTable
     
     /// 当前处理的源文件
     private var currentSourceFile: String = ""
@@ -78,7 +76,6 @@ public class NameCollector: CompilerPass {
     /// - Parameter coreGlobalCount: 标准库全局节点数量（用于判断是否是标准库定义）
     public init(coreGlobalCount: Int = 0, checker: TypeChecker? = nil) {
         self.defIdMap = DefIdMap()
-        self.nameTable = NameTable()
         self.coreGlobalCount = coreGlobalCount
         self.checker = checker
     }
@@ -97,7 +94,6 @@ public class NameCollector: CompilerPass {
         
         // 重置状态
         defIdMap = DefIdMap()
-        nameTable = NameTable()
         collectedTraits = [:]
         collectedTypes = [:]
         collectedGenericTemplates = [:]
@@ -144,7 +140,6 @@ public class NameCollector: CompilerPass {
         
         return NameCollectorOutput(
             defIdMap: defIdMap,
-            nameTable: nameTable,
             moduleResolverOutput: moduleResolverOutput
         )
     }
@@ -282,7 +277,6 @@ public class NameCollector: CompilerPass {
         
         // 添加到名称表
         let fullName = defIdMap.getQualifiedName(defId) ?? qualifiedName
-        nameTable.add(name: fullName, defId: defId)
         
         // 收集 trait 信息
         collectedTraits[qualifiedName] = CollectedTraitInfo(
@@ -346,7 +340,6 @@ public class NameCollector: CompilerPass {
         
         // 添加到名称表
         let fullName = defIdMap.getQualifiedName(defId) ?? qualifiedName
-        nameTable.add(name: fullName, defId: defId)
         
         // 收集类型信息
         if !typeParameters.isEmpty {
@@ -423,7 +416,6 @@ public class NameCollector: CompilerPass {
         
         // 添加到名称表
         let fullName = defIdMap.getQualifiedName(defId) ?? qualifiedName
-        nameTable.add(name: fullName, defId: defId)
         
         // 收集类型信息
         if !typeParameters.isEmpty {
@@ -486,7 +478,6 @@ public class NameCollector: CompilerPass {
         
         // 添加到名称表
         let fullName = defIdMap.getQualifiedName(defId) ?? name
-        nameTable.add(name: fullName, defId: defId)
         
         // 收集函数信息
         let isPrivate = (access == .private)
@@ -522,7 +513,6 @@ public class NameCollector: CompilerPass {
         
         // 添加到名称表
         let fullName = defIdMap.getQualifiedName(defId) ?? name
-        nameTable.add(name: fullName, defId: defId)
     }
     
     // MARK: - Given 声明收集
@@ -584,7 +574,6 @@ public class NameCollector: CompilerPass {
         
         // 添加到名称表
         let fullName = defIdMap.getQualifiedName(defId) ?? name
-        nameTable.add(name: fullName, defId: defId)
         
         // 收集类型信息
         if !typeParameters.isEmpty {
@@ -644,7 +633,6 @@ public class NameCollector: CompilerPass {
         
         // 添加到名称表
         let fullName = defIdMap.getQualifiedName(defId) ?? name
-        nameTable.add(name: fullName, defId: defId)
         
         // 收集函数信息
         collectedFunctions[name] = CollectedFunctionInfo(
@@ -693,7 +681,6 @@ public class NameCollector: CompilerPass {
             )
             
             // 添加到名称表
-            nameTable.add(name: moduleKey, defId: defId)
             
             // 收集模块信息
             collectedModules[moduleKey] = CollectedModuleInfo(

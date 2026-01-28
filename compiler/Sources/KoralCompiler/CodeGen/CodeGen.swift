@@ -71,7 +71,7 @@ public class CodeGen {
     self.ast = ast
     self.context = context
     self.escapeAnalysisReportEnabled = escapeAnalysisReportEnabled
-    self.escapeContext = EscapeContext(reportingEnabled: escapeAnalysisReportEnabled)
+    self.escapeContext = EscapeContext(reportingEnabled: escapeAnalysisReportEnabled, context: context)
     buildCIdentifierMap()
     TypeHandlerRegistry.shared.setContext(context)
     TypeHandlerRegistry.shared.setCTypeNameResolver { [weak self] type in
@@ -102,14 +102,18 @@ public class CodeGen {
     case .function, .type, .module:
       isGlobalSymbol = true
     case .variable:
-      isGlobalSymbol = !symbol.modulePath.isEmpty || !symbol.sourceFile.isEmpty || symbol.access == .private
+      let modulePath = context.getModulePath(symbol.defId) ?? []
+      let sourceFile = context.getSourceFile(symbol.defId) ?? ""
+      let access = context.getAccess(symbol.defId) ?? .default
+      isGlobalSymbol = !modulePath.isEmpty || !sourceFile.isEmpty || access == .private
     }
 
     if isGlobalSymbol {
-      return context.getCIdentifier(symbol.defId) ?? sanitizeCIdentifier(symbol.name)
+      let name = context.getName(symbol.defId) ?? "<unknown>"
+      return context.getCIdentifier(symbol.defId) ?? sanitizeCIdentifier(name)
     }
 
-    return sanitizeCIdentifier(symbol.name)
+    return sanitizeCIdentifier(context.getName(symbol.defId) ?? "<unknown>")
   }
 
   private func buildCIdentifierMap() {
@@ -127,21 +131,21 @@ public class CodeGen {
     for node in ast.globalNodes {
       switch node {
       case .globalStructDeclaration(let identifier, _):
-        register(defId: identifier.defId, access: identifier.access)
+        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .default)
         if case .structure(let defId) = identifier.type {
           let access = context.getAccess(defId) ?? .default
           register(defId: defId, access: access)
         }
       case .globalUnionDeclaration(let identifier, _):
-        register(defId: identifier.defId, access: identifier.access)
+        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .default)
         if case .union(let defId) = identifier.type {
           let access = context.getAccess(defId) ?? .default
           register(defId: defId, access: access)
         }
       case .globalFunction(let identifier, _, _):
-        register(defId: identifier.defId, access: identifier.access)
+        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .default)
       case .globalVariable(let identifier, _, _):
-        register(defId: identifier.defId, access: identifier.access)
+        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .default)
       case .givenDeclaration(let type, let methods):
         switch type {
         case .structure(let defId):
@@ -154,7 +158,7 @@ public class CodeGen {
           break
         }
         for method in methods {
-          register(defId: method.identifier.defId, access: method.identifier.access)
+          register(defId: method.identifier.defId, access: context.getAccess(method.identifier.defId) ?? .default)
         }
       case .genericTypeTemplate, .genericFunctionTemplate:
         break
@@ -177,16 +181,20 @@ public class CodeGen {
     case .function, .type, .module:
       isGlobalSymbol = true
     case .variable:
-      isGlobalSymbol = !symbol.modulePath.isEmpty || !symbol.sourceFile.isEmpty || symbol.access == .private
+      let modulePath = context.getModulePath(symbol.defId) ?? []
+      let sourceFile = context.getSourceFile(symbol.defId) ?? ""
+      let access = context.getAccess(symbol.defId) ?? .default
+      isGlobalSymbol = !modulePath.isEmpty || !sourceFile.isEmpty || access == .private
     }
 
     if isGlobalSymbol {
       if let cName = cIdentifierByDefId[defIdKey(symbol.defId)] {
         return cName
       }
-      return context.getCIdentifier(symbol.defId) ?? sanitizeCIdentifier(symbol.name)
+      let name = context.getName(symbol.defId) ?? "<unknown>"
+      return context.getCIdentifier(symbol.defId) ?? sanitizeCIdentifier(name)
     }
-    return sanitizeCIdentifier(symbol.name)
+    return sanitizeCIdentifier(context.getName(symbol.defId) ?? "<unknown>")
   }
 
   func cIdentifier(for decl: StructDecl) -> String {
@@ -533,14 +541,17 @@ public class CodeGen {
           if identifier.methodKind == .drop {
             // Mangled name is TypeName___drop, so we can extract TypeName
             // Note: This relies on the mangling scheme in TypeChecker
-            let baseName = String(identifier.name.dropLast(7))
+            let identifierName = context.getName(identifier.defId) ?? "<unknown>"
+            let baseName = String(identifierName.dropLast(7))
             let parts = baseName.split(separator: ".").map(String.init)
             let typeName = parts.last ?? baseName
             let modulePath = parts.dropLast().map { $0 }
+            let access = context.getAccess(identifier.defId) ?? .default
+            let sourceFile = context.getSourceFile(identifier.defId)
             let typeDefId = context.lookupDefId(
               modulePath: modulePath,
               name: typeName,
-              sourceFile: identifier.access == .private ? identifier.sourceFile : nil
+              sourceFile: access == .private ? sourceFile : nil
             )
             let cTypeName = typeDefId.flatMap { defId in
               cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId)
@@ -548,7 +559,7 @@ public class CodeGen {
             userDefinedDrops[cTypeName] = cIdentifier(for: identifier)
           }
           // 检测用户定义的 main 函数
-          if identifier.name == "main" {
+          if (context.getName(identifier.defId) ?? "") == "main" {
             userMainFunctionName = cIdentifier(for: identifier)
           }
         }

@@ -81,9 +81,11 @@ extension TypeChecker {
 
       for c in cases {
         try withNewScope {
-          let (pattern, vars) = try checkPattern(c.pattern, subjectType: subjectType)
-          for (name, mut, type) in vars {
-            currentScope.define(name, type, mutable: mut)
+          let (pattern, _) = try checkPattern(c.pattern, subjectType: subjectType)
+          for symbol in extractPatternSymbols(from: pattern) {
+            if let name = context.getName(symbol.defId) {
+              currentScope.define(name, defId: symbol.defId)
+            }
           }
           let typedBody = try inferTypedExpression(c.body)
           if let rt = resultType {
@@ -125,7 +127,7 @@ extension TypeChecker {
         throw SemanticError.undefinedVariable(name)
       }
 
-      let isLocalSymbol = currentScope.lookupWithInfoLocal(name, sourceFile: currentSourceFile) != nil
+      _ = currentScope.lookupWithInfoLocal(name, sourceFile: currentSourceFile) != nil
       
       // 判断是否是全局符号（需要模块路径前缀）
       // 局部变量和参数：modulePath 为空且 sourceFile 为空
@@ -158,39 +160,31 @@ extension TypeChecker {
         symbolKind = .variable(info.mutable ? .MutableValue : .Value)
       }
       
-      // 为符号分配 DefId
       let defKind: DefKind = currentScope.isFunction(name, sourceFile: currentSourceFile) ? .function : .variable
-      let defId: DefId
-      let shouldAllocateLocal = isLocalSymbol && info.modulePath.isEmpty && !info.isPrivate
-      if shouldAllocateLocal {
-        defId = defIdMap.allocate(
-          modulePath: [],
-          name: name,
-          kind: defKind,
-          sourceFile: ""
-        )
-      } else {
-        let lookupSourceFile = info.isPrivate ? (info.sourceFile ?? currentSourceFile) : nil
-        defId = defIdMap.lookup(
-          modulePath: symbolModulePath,
-          name: name,
-          sourceFile: lookupSourceFile
-        ) ?? defIdMap.allocate(
-          modulePath: symbolModulePath,
-          name: name,
-          kind: defKind,
-          sourceFile: symbolSourceFile
-        )
-      }
-      
-      let symbol = Symbol(
-        name: name,
-        type: info.type,
-        kind: symbolKind,
+      let defId = currentScope.lookup(name, sourceFile: currentSourceFile) ?? defIdMap.allocate(
         modulePath: symbolModulePath,
+        name: name,
+        kind: defKind,
         sourceFile: symbolSourceFile,
         access: info.isPrivate ? .private : .default,
-        defId: defId
+        span: currentSpan
+      )
+
+      if defIdMap.getSymbolType(defId) == nil {
+        defIdMap.addSymbolInfo(
+          defId: defId,
+          type: info.type,
+          kind: symbolKind,
+          methodKind: .normal,
+          isMutable: info.mutable
+        )
+      }
+
+      let symbol = Symbol(
+        defId: defId,
+        type: info.type,
+        kind: symbolKind,
+        methodKind: .normal
       )
       
       return .variable(identifier: symbol)
@@ -338,9 +332,9 @@ extension TypeChecker {
       }
 
       return try withNewScope {
-        currentScope.define(name, typedValue.type, mutable: mutable)
         let symbol = makeLocalSymbol(
           name: name, type: typedValue.type, kind: .variable(mutable ? .MutableValue : .Value))
+        currentScope.define(name, defId: symbol.defId)
 
         let typedBody = try inferTypedExpression(body)
 
@@ -390,8 +384,10 @@ extension TypeChecker {
       
       // Type check the then branch with bindings in scope
       let typedThen = try withNewScope {
-        for (name, mutable, type) in bindings {
-          currentScope.define(name, type, mutable: mutable)
+        for symbol in extractPatternSymbols(from: typedPattern) {
+          if let name = context.getName(symbol.defId) {
+            currentScope.define(name, defId: symbol.defId)
+          }
         }
         return try inferTypedExpression(thenBranch)
       }
@@ -460,8 +456,10 @@ extension TypeChecker {
       defer { loopDepth -= 1 }
       
       let typedBody = try withNewScope {
-        for (name, mutable, type) in bindings {
-          currentScope.define(name, type, mutable: mutable)
+        for symbol in extractPatternSymbols(from: typedPattern) {
+          if let name = context.getName(symbol.defId) {
+            currentScope.define(name, defId: symbol.defId)
+          }
         }
         return try inferTypedExpression(body)
       }
@@ -602,8 +600,9 @@ extension TypeChecker {
        case .identifier(let moduleName) = baseExpr,
        path.count >= 2 {
       // Check if the base identifier is a module symbol
-      if let moduleType = currentScope.lookup(moduleName, sourceFile: currentSourceFile),
-         case .module(let moduleInfo) = moduleType {
+      if let moduleDefId = currentScope.lookup(moduleName, sourceFile: currentSourceFile),
+        let moduleType = defIdMap.getSymbolType(moduleDefId),
+        case .module(let moduleInfo) = moduleType {
         let typeName = path[0]
         let methodName = path[1]
         
@@ -617,13 +616,13 @@ extension TypeChecker {
               // Check if it's a static method (no self parameter or first param is not self)
               let isStatic: Bool
               if case .function(let params, _) = methodSym.type {
-                isStatic = params.isEmpty || params[0].kind != .byRef
+                isStatic = params.isEmpty || params[0].kind != PassKind.byRef
               } else {
                 isStatic = true
               }
               
               if isStatic {
-                if methodSym.methodKind != .normal {
+                if methodSym.methodKind != CompilerMethodKind.normal {
                   throw SemanticError(
                     .generic("compiler protocol method \(methodName) cannot be called explicitly"),
                     line: currentLine)
@@ -699,13 +698,13 @@ extension TypeChecker {
             if let methods = extensionMethods[unionName], let methodSym = methods[methodName] {
               let isStatic: Bool
               if case .function(let params, _) = methodSym.type {
-                isStatic = params.isEmpty || params[0].kind != .byRef
+                isStatic = params.isEmpty || params[0].kind != PassKind.byRef
               } else {
                 isStatic = true
               }
               
               if isStatic {
-                if methodSym.methodKind != .normal {
+                if methodSym.methodKind != CompilerMethodKind.normal {
                   throw SemanticError(
                     .generic("compiler protocol method \(methodName) cannot be called explicitly"),
                     line: currentLine)
@@ -755,13 +754,13 @@ extension TypeChecker {
             if let methods = extensionMethods[name], let methodSym = methods[methodName] {
               let isStatic: Bool
               if case .function(let params, _) = methodSym.type {
-                isStatic = params.isEmpty || params[0].kind != .byRef
+                isStatic = params.isEmpty || params[0].kind != PassKind.byRef
               } else {
                 isStatic = true
               }
               
               if isStatic {
-                if methodSym.methodKind != .normal {
+                if methodSym.methodKind != CompilerMethodKind.normal {
                   throw SemanticError(
                     .generic("compiler protocol method \(methodName) cannot be called explicitly"),
                     line: currentLine)
@@ -1101,13 +1100,14 @@ extension TypeChecker {
         
         if let uName = unionName {
           // Check if symbol name is uName.CaseName
-          if symbol.name.starts(with: uName + ".") {
-            let caseName = String(symbol.name.dropFirst(uName.count + 1))
+          let symbolName = context.getName(symbol.defId) ?? ""
+          if symbolName.starts(with: uName + ".") {
+            let caseName = String(symbolName.dropFirst(uName.count + 1))
             let params = symbol.type.functionParameters!
 
             if arguments.count != params.count {
               throw SemanticError.invalidArgumentCount(
-                function: symbol.name, expected: params.count, got: arguments.count)
+                function: symbolName, expected: params.count, got: arguments.count)
             }
 
             var typedArgs: [TypedExpressionNode] = []
@@ -1194,9 +1194,10 @@ extension TypeChecker {
     let typedCallee = try inferTypedExpression(callee)
 
     // Secondary guard: if the resolved callee is a special compiler method, block explicit calls
-    if case .variable(let sym) = typedCallee, sym.methodKind != .normal {
+    if case .variable(let sym) = typedCallee, sym.methodKind != CompilerMethodKind.normal {
+      let symName = context.getName(sym.defId) ?? "<unknown>"
       throw SemanticError.invalidOperation(
-        op: "Explicit call to \(sym.name) is not allowed", type1: "", type2: "")
+        op: "Explicit call to \(symName) is not allowed", type1: "", type2: "")
     }
 
     // Method call
@@ -1590,20 +1591,21 @@ extension TypeChecker {
       return type
     }
 
-    if template.name == "dealloc_memory" {
+    let templateName = template.name(in: defIdMap) ?? ""
+    if templateName == "dealloc_memory" {
       return .intrinsicCall(.deallocMemory(ptr: typedArguments[0]))
     }
-    if template.name == "copy_memory" {
+    if templateName == "copy_memory" {
       return .intrinsicCall(
         .copyMemory(
           dest: typedArguments[0], source: typedArguments[1], count: typedArguments[2]))
     }
-    if template.name == "move_memory" {
+    if templateName == "move_memory" {
       return .intrinsicCall(
         .moveMemory(
           dest: typedArguments[0], source: typedArguments[1], count: typedArguments[2]))
     }
-    if template.name == "ref_count" {
+    if templateName == "ref_count" {
       return .intrinsicCall(.refCount(val: typedArguments[0]))
     }
 
@@ -1651,6 +1653,7 @@ extension TypeChecker {
   
   /// Infers the type of a method call expression
   func inferMethodCall(base: TypedExpressionNode, method: Symbol, methodType: Type, arguments: [ExpressionNode]) throws -> TypedExpressionNode {
+    let methodName = context.getName(method.defId) ?? "<unknown>"
     // Intercept Pointer methods
     if case .pointer(_) = base.type,
       let node = try checkIntrinsicPointerMethod(base: base, method: method, args: arguments)
@@ -1668,7 +1671,7 @@ extension TypeChecker {
     if case .function(let params, let returns) = method.type {
       if arguments.count != params.count - 1 {
         throw SemanticError.invalidArgumentCount(
-          function: method.name,
+          function: methodName,
           expected: params.count - 1,
           got: arguments.count
         )
@@ -1989,9 +1992,10 @@ extension TypeChecker {
     let finalCallee: TypedExpressionNode
     if let traitName = methodResult.traitName {
       // Create a traitMethodPlaceholder instead of methodReference
+      let methodName = context.getName(methodResult.methodSymbol.defId) ?? "<unknown>"
       finalCallee = .traitMethodPlaceholder(
         traitName: traitName,
-        methodName: methodResult.methodSymbol.name,
+        methodName: methodName,
         base: finalBase,
         methodTypeArgs: resolvedMethodTypeArgs,
         type: methodResult.methodType
@@ -2027,8 +2031,9 @@ extension TypeChecker {
     // 2. Check if baseExpr is a module symbol for member access (e.g., child.child_value() or module.Type.method())
     if case .identifier(let name) = baseExpr {
       // Check if it's a module symbol
-      if let moduleType = currentScope.lookup(name, sourceFile: currentSourceFile),
-         case .module(let moduleInfo) = moduleType {
+      if let moduleDefId = currentScope.lookup(name, sourceFile: currentSourceFile),
+        let moduleType = defIdMap.getSymbolType(moduleDefId),
+        case .module(let moduleInfo) = moduleType {
         if path.count == 1 {
           let memberName = path[0]
           // Look up the member in the module's public symbols
@@ -2048,14 +2053,20 @@ extension TypeChecker {
               kind: .type(.structure),
               sourceFile: ""
             )
+            if defIdMap.getSymbolType(defId) == nil {
+              defIdMap.addSymbolInfo(
+                defId: defId,
+                type: memberType,
+                kind: .type,
+                methodKind: .normal,
+                isMutable: false
+              )
+            }
             let typeSymbol = Symbol(
-              name: memberName,
+              defId: defId,
               type: memberType,
               kind: .type,
-              modulePath: moduleInfo.modulePath,
-              sourceFile: "",
-              access: .public,
-              defId: defId
+              methodKind: .normal
             )
             return .variable(identifier: typeSymbol)
           }
@@ -3067,7 +3078,8 @@ extension TypeChecker {
   func resolveLValue(_ expr: ExpressionNode) throws -> TypedExpressionNode {
     switch expr {
     case .identifier(let name):
-      guard let type = currentScope.lookup(name, sourceFile: currentSourceFile) else {
+      guard let defId = currentScope.lookup(name, sourceFile: currentSourceFile),
+            let type = defIdMap.getSymbolType(defId) else {
         throw SemanticError.undefinedVariable(name)
       }
       guard currentScope.isMutable(name, sourceFile: currentSourceFile) else { throw SemanticError.assignToImmutable(name) }
@@ -3407,7 +3419,7 @@ extension TypeChecker {
     // Enter a new scope for the let expression
     return try withNewScope {
       // Define the iterator variable in scope
-      currentScope.define(iterVarName, iteratorType, mutable: true)
+      currentScope.define(iterVarName, defId: iterSymbol.defId)
       
       // Build: __koral_iter_N.next()
       let iterVarExpr = TypedExpressionNode.variable(identifier: iterSymbol)
@@ -3604,7 +3616,12 @@ extension TypeChecker {
   func bindPatternVariables(pattern: PatternNode, type: Type) throws {
     switch pattern {
     case .variable(let name, let mutable, _):
-      currentScope.define(name, type, mutable: mutable)
+      let symbol = makeLocalSymbol(
+        name: name,
+        type: type,
+        kind: mutable ? .variable(.MutableValue) : .variable(.Value)
+      )
+      currentScope.define(name, defId: symbol.defId)
     case .wildcard, .booleanLiteral, .integerLiteral, .stringLiteral, .negativeIntegerLiteral:
       break
     case .unionCase(_, let elements, _):

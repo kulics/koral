@@ -96,44 +96,21 @@ public enum CompilerMethodKind {
   case compare
 }
 public struct Symbol {
-  public let name: String
+  public let defId: DefId
   public let type: Type
   public let kind: SymbolKind
   public let methodKind: CompilerMethodKind
-  
-  /// 模块路径（用于代码生成时生成限定名）
-  /// 注意：此字段将被废弃，请使用 defId.modulePath
-  public let modulePath: [String]
-  
-  /// 来源文件路径（用于 private 符号的文件隔离）
-  /// 注意：此字段将被废弃，请使用 defId.sourceFile
-  public let sourceFile: String
-  
-  /// 访问修饰符（用于代码生成时决定是否添加文件标识符）
-  public let access: AccessModifier
-  
-  /// 定义标识符（用于生成唯一的 C 标识符）
-  /// 所有符号都必须有 DefId，CodeGen 使用 defId.cIdentifier 生成 C 标识符
-  public let defId: DefId
 
   public init(
-    name: String,
+    defId: DefId,
     type: Type,
     kind: SymbolKind,
-    methodKind: CompilerMethodKind = .normal,
-    modulePath: [String] = [],
-    sourceFile: String = "",
-    access: AccessModifier = .default,
-    defId: DefId
+    methodKind: CompilerMethodKind = .normal
   ) {
-    self.name = name
+    self.defId = defId
     self.type = type
     self.kind = kind
     self.methodKind = methodKind
-    self.modulePath = modulePath
-    self.sourceFile = sourceFile
-    self.access = access
-    self.defId = defId
   }
 
   public func isMutable() -> Bool {
@@ -376,7 +353,7 @@ public indirect enum TypedPattern: CustomStringConvertible {
     case .integerLiteral(let v): return "\(v)"
     case .stringLiteral(let v): return "\"\(v)\""
     case .wildcard: return "_"
-    case .variable(let s): return s.name
+    case .variable(let s): return "def#\(s.defId.id)"
     case .unionCase(let name, _, let elements):
       let args = elements.map { $0.description }.joined(separator: ", ")
       return ".\(name)(\(args))"

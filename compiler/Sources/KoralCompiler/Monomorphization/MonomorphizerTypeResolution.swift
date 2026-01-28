@@ -408,11 +408,12 @@ extension Monomorphizer {
                 let qualifiedCName = sanitizeCIdentifier(qualifiedTypeName)
                 let qualifiedCPrefix = "\(qualifiedCName)_"
                 let mangledName: String
-                if method.identifier.name.hasPrefix(qualifiedPrefix)
-                    || method.identifier.name.hasPrefix(qualifiedCPrefix) {
-                    mangledName = method.identifier.name
+                let identifierName = context.getName(method.identifier.defId) ?? "<unknown>"
+                if identifierName.hasPrefix(qualifiedPrefix)
+                    || identifierName.hasPrefix(qualifiedCPrefix) {
+                    mangledName = identifierName
                 } else {
-                    mangledName = "\(qualifiedTypeName)_\(method.identifier.name)"
+                    mangledName = "\(qualifiedTypeName)_\(identifierName)"
                 }
                 
                 // 创建新的 Symbol，使用空的 modulePath
@@ -425,8 +426,8 @@ extension Monomorphizer {
                         kind: method.identifier.kind,
                         methodKind: method.identifier.methodKind,
                         modulePath: [],  // 空的 modulePath，因为 mangledName 已经包含了模块路径
-                        sourceFile: method.identifier.sourceFile,
-                        access: method.identifier.access
+                        sourceFile: context.getSourceFile(method.identifier.defId) ?? "",
+                        access: context.getAccess(method.identifier.defId) ?? .default
                     ),
                     parameters: method.parameters.map { param in
                         copySymbolWithNewDefId(
@@ -599,7 +600,8 @@ extension Monomorphizer {
             
             // Intercept Float32/Float64 to_bits intrinsic method
             if case .methodReference(let base, let method, _, _, _) = newCallee {
-                let methodName = extractMethodName(method.name)
+                let rawMethodName = context.getName(method.defId) ?? ""
+                let methodName = extractMethodName(rawMethodName)
                 if methodName == "to_bits" {
                     if base.type == .float32 && newArguments.isEmpty {
                         return .intrinsicCall(.float32Bits(value: base))
@@ -681,10 +683,11 @@ extension Monomorphizer {
             let methodTypeArgsToPass = resolvedMethodTypeArgs ?? []
 
             // Resolve method name to mangled name for generic extension methods
+            let methodName = context.getName(method.defId) ?? ""
             if !context.containsGenericParameter(newBase.type) {
                 // Look up the concrete method on the resolved base type
                 // Pass method type args for generic methods
-                if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: method.name, methodTypeArgs: methodTypeArgsToPass) {
+                if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: methodName, methodTypeArgs: methodTypeArgsToPass) {
                     // Resolve any parameterized types in the method type
                     let resolvedMethodType = resolveParameterizedType(concreteMethod.type)
                     newMethod = copySymbolWithNewDefId(
@@ -807,7 +810,7 @@ extension Monomorphizer {
             let resolvedType = resolveParameterizedType(identifier.type)
             
             // Update the identifier name to match the resolved type's layout name
-            var newName = identifier.name
+            var newName = context.getName(identifier.defId) ?? "<unknown>"
             if case .structure(let defId) = resolvedType {
                 newName = context.getName(defId) ?? newName
             } else if case .union(let defId) = resolvedType {
@@ -847,9 +850,10 @@ extension Monomorphizer {
             )
             
             // Resolve method name to mangled name for generic extension methods
+            let methodName = context.getName(method.defId) ?? ""
             if !context.containsGenericParameter(newBase.type) {
                 // Look up the concrete method on the resolved base type
-                if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: method.name) {
+                if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: methodName) {
                     newMethod = copySymbolWithNewDefId(concreteMethod)
                 }
             }

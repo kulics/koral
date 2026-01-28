@@ -23,7 +23,8 @@ extension CodeGen {
     withIndent {
       for param in parameters {
         addIndent()
-        appendToBuffer("\(cTypeName(param.type)) \(sanitizeIdentifier(param.name));\n")
+        let paramName = context.getName(param.defId) ?? "<unknown>"
+        appendToBuffer("\(cTypeName(param.type)) \(sanitizeIdentifier(paramName));\n")
       }
     }
     appendToBuffer("};\n\n")
@@ -33,7 +34,7 @@ extension CodeGen {
     withIndent {
       appendToBuffer("    struct \(name) result;\n")
       for param in parameters {
-        let fieldName = sanitizeIdentifier(param.name)
+        let fieldName = sanitizeIdentifier(context.getName(param.defId) ?? "<unknown>")
         appendCopyAssignment(
           for: param.type,
           source: "self->\(fieldName)",
@@ -61,7 +62,7 @@ extension CodeGen {
       }
 
       for param in parameters {
-        let fieldName = sanitizeIdentifier(param.name)
+        let fieldName = sanitizeIdentifier(context.getName(param.defId) ?? "<unknown>")
         appendDropStatement(for: param.type, value: "self->\(fieldName)")
       }
     }

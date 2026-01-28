@@ -53,19 +53,19 @@ public enum InstantiationKind: Hashable {
         switch self {
         case .structType(let template, let args):
             hasher.combine(0)
-            hasher.combine(template.name)
+            hasher.combine(template.defId.id)
             for arg in args {
                 hasher.combine(arg.stableKey)
             }
         case .unionType(let template, let args):
             hasher.combine(1)
-            hasher.combine(template.name)
+            hasher.combine(template.defId.id)
             for arg in args {
                 hasher.combine(arg.stableKey)
             }
         case .function(let template, let args):
             hasher.combine(2)
-            hasher.combine(template.name)
+            hasher.combine(template.defId.id)
             for arg in args {
                 hasher.combine(arg.stableKey)
             }
@@ -92,11 +92,11 @@ public enum InstantiationKind: Hashable {
     public static func == (lhs: InstantiationKind, rhs: InstantiationKind) -> Bool {
         switch (lhs, rhs) {
         case (.structType(let lTemplate, let lArgs), .structType(let rTemplate, let rArgs)):
-            return lTemplate.name == rTemplate.name && lArgs == rArgs
+            return lTemplate.defId == rTemplate.defId && lArgs == rArgs
         case (.unionType(let lTemplate, let lArgs), .unionType(let rTemplate, let rArgs)):
-            return lTemplate.name == rTemplate.name && lArgs == rArgs
+            return lTemplate.defId == rTemplate.defId && lArgs == rArgs
         case (.function(let lTemplate, let lArgs), .function(let rTemplate, let rArgs)):
-            return lTemplate.name == rTemplate.name && lArgs == rArgs
+            return lTemplate.defId == rTemplate.defId && lArgs == rArgs
         case (.extensionMethod(let lTemplateName, _, let lTemplate, let lTypeArgs, let lMethodTypeArgs), .extensionMethod(let rTemplateName, _, let rTemplate, let rTypeArgs, let rMethodTypeArgs)):
             return lTemplateName == rTemplateName && lTemplate.method.name == rTemplate.method.name && lTypeArgs == rTypeArgs && lMethodTypeArgs == rMethodTypeArgs
         case (.traitMethod(let lBase, let lName, let lMethodTypeArgs), .traitMethod(let rBase, let rName, let rMethodTypeArgs)):
@@ -213,11 +213,11 @@ public struct InstantiationRequest: Hashable {
     public var deduplicationKey: InstantiationKey {
         switch kind {
         case .structType(let template, let args):
-            return .structType(templateName: template.name, args: args)
+            return .structType(templateName: "def#\(template.defId.id)", args: args)
         case .unionType(let template, let args):
-            return .unionType(templateName: template.name, args: args)
+            return .unionType(templateName: "def#\(template.defId.id)", args: args)
         case .function(let template, let args):
-            return .function(templateName: template.name, args: args)
+            return .function(templateName: "def#\(template.defId.id)", args: args)
         case .extensionMethod(let templateName, _, let template, let typeArgs, let methodTypeArgs):
             return .extensionMethod(
                 templateName: templateName,

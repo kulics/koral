@@ -47,48 +47,47 @@ public class AccessChecker {
     
     // MARK: - Symbol Access Check
     
-    /// 检查符号访问是否合法
+    /// 检查模块符号访问是否合法
     /// - Parameters:
-    ///   - symbol: 要访问的符号
+    ///   - symbolName: 符号名称
+    ///   - access: 符号访问级别
+    ///   - definedIn: 符号定义模块
+    ///   - definedInFile: 符号定义文件
     ///   - from: 访问者所在的模块
     ///   - fromFile: 访问者所在的文件
+    ///   - span: 源码位置
     /// - Throws: AccessError 如果访问不合法
-    public func checkAccess(
-        symbol: ModuleSymbol,
+    public func checkModuleAccess(
+        symbolName: String,
+        access: AccessModifier,
+        definedIn: ModuleInfo,
+        definedInFile: String,
         from: ModuleInfo,
-        fromFile: String
+        fromFile: String,
+        span: SourceSpan
     ) throws {
-        switch symbol.access {
+        switch access {
         case .public:
             // public 符号总是可访问
             return
             
         case .protected, .default:
             // protected 符号只能从定义模块及其子模块访问
-            guard let definedIn = symbol.definedIn else {
-                throw AccessError.protectedAccess(
-                    symbol: symbol.name,
-                    definedIn: [],
-                    accessedFrom: from.path,
-                    span: symbol.span
-                )
-            }
-            
             if !isSubmoduleOf(from, definedIn) {
                 throw AccessError.protectedAccess(
-                    symbol: symbol.name,
+                    symbol: symbolName,
                     definedIn: definedIn.path,
                     accessedFrom: from.path,
-                    span: symbol.span
+                    span: span
                 )
             }
             
         case .private:
             // private 符号只能从同一文件访问
-            if symbol.definedInFile != fromFile {
+            if definedInFile != fromFile {
                 throw AccessError.privateAccess(
-                    symbol: symbol.name,
-                    span: symbol.span
+                    symbol: symbolName,
+                    span: span
                 )
             }
         }

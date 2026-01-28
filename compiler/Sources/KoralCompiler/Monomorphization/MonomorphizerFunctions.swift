@@ -27,7 +27,8 @@ extension Monomorphizer {
         // Note: Trait constraints were already validated by TypeChecker at declaration time
         
         // Check cache
-        let key = "\(template.name)<\(args.map { $0.description }.joined(separator: ","))>"
+        let templateName = context.getName(template.defId) ?? "<unknown>"
+        let key = "\(templateName)<\(args.map { $0.description }.joined(separator: ", "))>"
         if let cached = instantiatedFunctions[key] {
             return cached
         }
@@ -51,7 +52,7 @@ extension Monomorphizer {
         
         // Calculate mangled name
         let argLayoutKeys = args.map { context.getLayoutKey($0) }.joined(separator: "_")
-        let mangledName = "\(template.name)_\(argLayoutKeys)"
+        let mangledName = "\(templateName)_\(argLayoutKeys)"
         
         // Create function type
         let functionType = Type.function(
@@ -87,7 +88,7 @@ extension Monomorphizer {
         ]
         
         // Generate global function if not already generated
-        if !generatedLayouts.contains(mangledName) && !intrinsicNames.contains(template.name) {
+        if !generatedLayouts.contains(mangledName) && !intrinsicNames.contains(templateName) {
             generatedLayouts.insert(mangledName)
             
             let functionNode = TypedGlobalNode.globalFunction(

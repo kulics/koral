@@ -120,42 +120,6 @@ public struct ModuleTree {
 /// - 支持按模块查询
 /// - 支持按类型查询
 /// - 支持名称冲突检测
-public struct NameTable {
-    /// 名称到 DefId 的映射
-    private var entries: [String: DefId]
-    
-    /// 创建空的名称表
-    public init() {
-        self.entries = [:]
-    }
-    
-    /// 添加名称条目
-    ///
-    /// - Parameters:
-    ///   - name: 完整限定名称
-    ///   - defId: 对应的 DefId
-    public mutating func add(name: String, defId: DefId) {
-        entries[name] = defId
-    }
-    
-    /// 查找名称
-    ///
-    /// - Parameter name: 完整限定名称
-    /// - Returns: 对应的 DefId，如果不存在则返回 nil
-    public func lookup(name: String) -> DefId? {
-        return entries[name]
-    }
-    
-    /// 获取所有条目
-    public var allEntries: [String: DefId] {
-        return entries
-    }
-    
-    /// 条目数量
-    public var count: Int {
-        return entries.count
-    }
-}
 
 /// 函数签名 - 描述函数的参数和返回类型
 ///
@@ -221,98 +185,6 @@ public struct FunctionParameter {
     }
 }
 
-/// 符号表 - 管理符号的注册和查找
-///
-/// 这是一个占位类型，将在后续任务中完善实现。
-/// 与现有的 Scope 类配合使用。
-///
-/// ## 未来扩展
-/// - 支持按模块查询
-/// - 支持按文件查询
-/// - 支持按作用域查询
-public struct SymbolTable {
-    /// 符号映射：DefId -> SymbolInfo
-    private var symbols: [UInt64: SymbolTableEntry]
-    
-    /// 创建空的符号表
-    public init() {
-        self.symbols = [:]
-    }
-    
-    /// 添加符号
-    ///
-    /// - Parameters:
-    ///   - defId: 符号的 DefId
-    ///   - entry: 符号信息
-    public mutating func add(defId: DefId, entry: SymbolTableEntry) {
-        symbols[defId.id] = entry
-    }
-    
-    /// 查找符号
-    ///
-    /// - Parameter defId: 符号的 DefId
-    /// - Returns: 符号信息，如果不存在则返回 nil
-    public func lookup(defId: DefId) -> SymbolTableEntry? {
-        return symbols[defId.id]
-    }
-    
-    /// 获取所有符号
-    public var allSymbols: [UInt64: SymbolTableEntry] {
-        return symbols
-    }
-}
-
-/// 符号表条目 - 存储符号的详细信息
-public struct SymbolTableEntry {
-    /// 符号的 DefId
-    public let defId: DefId
-    
-    /// 符号名称
-    public let name: String
-    
-    /// 符号类型
-    public let type: Type
-    
-    /// 符号种类
-    public let kind: SymbolKind
-    
-    /// 访问修饰符
-    public let access: AccessModifier
-    
-    /// 源文件路径
-    public let sourceFile: String
-    
-    /// 是否可以直接访问（不需要模块前缀）
-    public let isDirectlyAccessible: Bool
-    
-    /// 创建符号表条目
-    ///
-    /// - Parameters:
-    ///   - defId: 符号的 DefId
-    ///   - name: 符号名称
-    ///   - type: 符号类型
-    ///   - kind: 符号种类
-    ///   - access: 访问修饰符
-    ///   - sourceFile: 源文件路径
-    ///   - isDirectlyAccessible: 是否可以直接访问
-    public init(
-        defId: DefId,
-        name: String,
-        type: Type,
-        kind: SymbolKind,
-        access: AccessModifier,
-        sourceFile: String,
-        isDirectlyAccessible: Bool = true
-    ) {
-        self.defId = defId
-        self.name = name
-        self.type = type
-        self.kind = kind
-        self.access = access
-        self.sourceFile = sourceFile
-        self.isDirectlyAccessible = isDirectlyAccessible
-    }
-}
 
 // 注意：InstantiationRequest 和 InstantiationKind 已在
 // Monomorphization/InstantiationRequest.swift 中定义，
@@ -371,7 +243,6 @@ public struct ModuleResolverOutput: PassOutput {
 ///
 /// Pass 1 负责收集所有类型和函数名称，分配 DefId，输出包括：
 /// - DefIdMap：所有定义的标识符映射
-/// - NameTable：名称到 DefId 的映射
 /// - ModuleResolverOutput：来自 Phase 0 的输出（用于后续 Pass）
 ///
 /// ## 依赖关系
@@ -383,9 +254,6 @@ public struct NameCollectorOutput: PassOutput {
     /// DefId 映射表 - 管理所有定义的标识符
     public let defIdMap: DefIdMap
     
-    /// 名称表 - 存储名称到 DefId 的映射
-    public let nameTable: NameTable
-    
     /// ModuleResolver 的输出 - 包含模块树、导入图和 AST 节点
     public let moduleResolverOutput: ModuleResolverOutput
     
@@ -393,15 +261,12 @@ public struct NameCollectorOutput: PassOutput {
     ///
     /// - Parameters:
     ///   - defIdMap: DefId 映射表
-    ///   - nameTable: 名称表
     ///   - moduleResolverOutput: ModuleResolver 的输出
     public init(
         defIdMap: DefIdMap,
-        nameTable: NameTable,
         moduleResolverOutput: ModuleResolverOutput
     ) {
         self.defIdMap = defIdMap
-        self.nameTable = nameTable
         self.moduleResolverOutput = moduleResolverOutput
     }
 }
@@ -411,7 +276,6 @@ public struct NameCollectorOutput: PassOutput {
 /// TypeResolver 的输出
 ///
 /// Pass 2 负责解析类型成员和函数签名，输出包括：
-/// - SymbolTable：符号的注册和查找表
 /// - NameCollectorOutput：来自 Pass 1 的输出（用于后续 Pass）
 ///
 /// ## 依赖关系
@@ -420,22 +284,13 @@ public struct NameCollectorOutput: PassOutput {
 ///
 /// **Validates: Requirements 2.1, 2.3**
 public struct TypeResolverOutput: PassOutput {
-    /// 符号表 - 管理符号的注册和查找
-    public let symbolTable: SymbolTable
-    
-    /// NameCollector 的输出 - 包含 DefIdMap、NameTable 和 ModuleResolverOutput
+    /// NameCollector 的输出 - 包含 DefIdMap 和 ModuleResolverOutput
     public let nameCollectorOutput: NameCollectorOutput
     
     /// 创建 TypeResolver 输出
     ///
-    /// - Parameters:
-    ///   - symbolTable: 符号表
-    ///   - nameCollectorOutput: NameCollector 的输出
-    public init(
-        symbolTable: SymbolTable,
-        nameCollectorOutput: NameCollectorOutput
-    ) {
-        self.symbolTable = symbolTable
+    /// - Parameter nameCollectorOutput: NameCollector 的输出
+    public init(nameCollectorOutput: NameCollectorOutput) {
         self.nameCollectorOutput = nameCollectorOutput
     }
 
@@ -464,7 +319,7 @@ public struct BodyCheckerOutput: PassOutput {
     /// 泛型实例化请求集合
     public let instantiationRequests: Set<InstantiationRequest>
     
-    /// TypeResolver 的输出 - 包含 SymbolTable 和 NameCollectorOutput
+    /// TypeResolver 的输出 - 包含 NameCollectorOutput
     public let typeResolverOutput: TypeResolverOutput
     
     /// 创建 BodyChecker 输出

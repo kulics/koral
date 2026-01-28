@@ -19,7 +19,7 @@ public struct GlobalNodeSourceInfo {
 public class TypeChecker {
   // Store type information for variables and functions
   // Note: internal access for extension methods in TypeCheckerTypeResolution.swift
-  var currentScope: Scope = Scope()
+  var currentScope: UnifiedScope = UnifiedScope()
   let ast: ASTNode
   // TypeName -> MethodName -> MethodSymbol
   var extensionMethods: [String: [String: Symbol]] = [:]
@@ -198,17 +198,19 @@ public class TypeChecker {
   /// **Validates: Requirements 1.1, 8.1**
   var defIdMap: DefIdMap {
     get { context.defIdMap }
-    set { context.setDefIdMap(newValue) }
+    set {
+      context.setDefIdMap(newValue)
+      currentScope.updateDefIdMap(newValue)
+    }
   }
 
   
   /// NameCollector 的输出（Pass 1 结果）
-  /// 包含 DefIdMap 和 NameTable，用于后续 Pass 使用
+  /// 包含 DefIdMap，用于后续 Pass 使用
   /// **Validates: Requirements 2.1, 2.2**
   var nameCollectorOutput: NameCollectorOutput?
   
   /// TypeResolver 的输出（Pass 2 结果）
-  /// 包含 SymbolTable，用于后续 Pass 使用
   /// **Validates: Requirements 2.1, 2.2**
   var typeResolverOutput: TypeResolverOutput?
   
@@ -381,6 +383,7 @@ public class TypeChecker {
     SemanticErrorContext.currentFileName = userFileName
     SemanticErrorContext.currentLine = 1
     SemanticErrorContext.currentCompilerContext = context
+    self.currentScope = UnifiedScope(defIdMap: context.defIdMap)
   }
   
   /// 使用源信息初始化 TypeChecker（用于多文件项目）
@@ -407,6 +410,7 @@ public class TypeChecker {
     SemanticErrorContext.currentFileName = userFileName
     SemanticErrorContext.currentLine = 1
     SemanticErrorContext.currentCompilerContext = context
+    self.currentScope = UnifiedScope(defIdMap: context.defIdMap)
     
     // 构建源信息映射
     for (index, info) in nodeSourceInfoList.enumerated() {
@@ -551,43 +555,24 @@ public class TypeChecker {
     methodKind: CompilerMethodKind = .normal,
     access: AccessModifier
   ) -> Symbol {
-    // 将 SymbolKind 转换为 DefKind
-    let defKind: DefKind
+    let isMutable: Bool
     switch kind {
-    case .function:
-      defKind = .function
-    case .type:
-      defKind = .type(.structure)  // 默认为 structure，实际类型由调用者决定
-    case .variable:
-      defKind = .variable
-    case .module:
-      defKind = .module
+    case .variable(let varKind):
+      isMutable = varKind.isMutable
+    case .function, .type, .module:
+      isMutable = false
     }
-    
-    // 分配 DefId（尽量复用已存在的 DefId，避免重复分配）
-    let lookupSourceFile = access == .private ? currentSourceFile : nil
-    let defId = defIdMap.lookup(
-      modulePath: currentModulePath,
+
+    return context.createSymbol(
       name: name,
-      sourceFile: lookupSourceFile
-    ) ?? defIdMap.allocate(
       modulePath: currentModulePath,
-      name: name,
-      kind: defKind,
       sourceFile: currentSourceFile,
-      access: access,
-      span: currentSpan
-    )
-    
-    return Symbol(
-      name: name,
       type: type,
       kind: kind,
       methodKind: methodKind,
-      modulePath: currentModulePath,
-      sourceFile: currentSourceFile,
       access: access,
-      defId: defId
+      span: currentSpan,
+      isMutable: isMutable
     )
   }
 
@@ -634,27 +619,24 @@ public class TypeChecker {
     type: Type,
     kind: SymbolKind
   ) -> Symbol {
-    // 局部符号的 DefKind 总是 variable
-    let defKind: DefKind = .variable
-    
-    // 分配 DefId（局部符号的 modulePath 为空）
-    let defId = defIdMap.allocate(
-      modulePath: [],
+    let isMutable: Bool
+    switch kind {
+    case .variable(let varKind):
+      isMutable = varKind.isMutable
+    case .function, .type, .module:
+      isMutable = false
+    }
+
+    return context.createSymbol(
       name: name,
-      kind: defKind,
-      sourceFile: "",  // 局部符号不需要文件隔离
-      access: .default,
-      span: .unknown
-    )
-    
-    return Symbol(
-      name: name,
-      type: type,
-      kind: kind,
       modulePath: [],
       sourceFile: "",
+      type: type,
+      kind: kind,
+      methodKind: .normal,
       access: .default,
-      defId: defId
+      span: .unknown,
+      isMutable: isMutable
     )
   }
 
@@ -715,7 +697,9 @@ public class TypeChecker {
     return try withNewScope {
       // Add parameters to new scope
       for param in params {
-        currentScope.define(param.name, param.type, mutable: param.isMutable())
+        if let name = context.getName(param.defId) {
+          currentScope.define(name, defId: param.defId)
+        }
       }
 
       let typedBody = try inferTypedExpression(body)

@@ -240,7 +240,8 @@ extension TypeChecker {
       if let symbols = symbolsByModule[moduleKey] {
         for (name, symbol, type) in symbols {
           // Only include public symbols (for now, include all non-private)
-          if symbol.access != .private {
+          let access = defIdMap.getAccess(symbol.defId) ?? .default
+          if access != .private {
             publicSymbols[name] = symbol
             if let t = type {
               publicTypes[name] = t
@@ -277,7 +278,7 @@ extension TypeChecker {
   /// Extracts symbol information from a global declaration.
   private func extractSymbolInfo(from decl: GlobalNode, sourceInfo: GlobalNodeSourceInfo) -> (name: String, symbol: Symbol, type: Type?)? {
     switch decl {
-    case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, _, let access, _):
+    case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, _, _, _):
       // Skip generic functions for now
       if !typeParameters.isEmpty { return nil }
       
@@ -290,54 +291,70 @@ extension TypeChecker {
       _ = returnType
       
       // Look up the actual symbol from scope
-      if let funcType = currentScope.lookup(name, sourceFile: sourceInfo.sourceFile) {
-        let symbol = makeGlobalSymbol(
-          name: name,
+      if let defId = currentScope.lookup(name, sourceFile: sourceInfo.sourceFile),
+         let funcType = defIdMap.getSymbolType(defId) {
+        let symbol = Symbol(
+          defId: defId,
           type: funcType,
           kind: .function,
-          access: access
+          methodKind: defIdMap.getSymbolMethodKind(defId) ?? .normal
         )
         return (name, symbol, nil)
       }
       return nil
       
-    case .globalStructDeclaration(let name, let typeParameters, _, let access, _):
+    case .globalStructDeclaration(let name, let typeParameters, _, _, _):
       // Skip generic structs for now
       if !typeParameters.isEmpty { return nil }
       
       if let structType = currentScope.lookupType(name, sourceFile: sourceInfo.sourceFile) {
-        let symbol = makeGlobalSymbol(
-          name: name,
+        let defId: DefId
+        switch structType {
+        case .structure(let typeDefId), .union(let typeDefId):
+          defId = typeDefId
+        default:
+          return nil
+        }
+        let symbol = Symbol(
+          defId: defId,
           type: structType,
           kind: .type,
-          access: access
+          methodKind: .normal
         )
         return (name, symbol, structType)
       }
       return nil
       
-    case .globalUnionDeclaration(let name, let typeParameters, _, let access, _):
+    case .globalUnionDeclaration(let name, let typeParameters, _, _, _):
       // Skip generic unions for now
       if !typeParameters.isEmpty { return nil }
       
       if let unionType = currentScope.lookupType(name, sourceFile: sourceInfo.sourceFile) {
-        let symbol = makeGlobalSymbol(
-          name: name,
+        let defId: DefId
+        switch unionType {
+        case .structure(let typeDefId), .union(let typeDefId):
+          defId = typeDefId
+        default:
+          return nil
+        }
+        let symbol = Symbol(
+          defId: defId,
           type: unionType,
           kind: .type,
-          access: access
+          methodKind: .normal
         )
         return (name, symbol, unionType)
       }
       return nil
       
-    case .globalVariableDeclaration(let name, _, _, _, let access, _):
-      if let varType = currentScope.lookup(name, sourceFile: sourceInfo.sourceFile) {
-        let symbol = makeGlobalSymbol(
-          name: name,
+    case .globalVariableDeclaration(let name, _, _, _, _, _):
+      if let defId = currentScope.lookup(name, sourceFile: sourceInfo.sourceFile),
+         let varType = defIdMap.getSymbolType(defId) {
+        let symbol = Symbol(
+          defId: defId,
           type: varType,
           kind: .variable(.Value),
-          access: access
+          methodKind: defIdMap.getSymbolMethodKind(defId) ?? .normal
         )
         return (name, symbol, nil)
       }
@@ -443,8 +460,16 @@ extension TypeChecker {
       
       if !typeParameters.isEmpty {
         // Register generic union template
+        let defId = defIdMap.allocate(
+          modulePath: currentModulePath,
+          name: name,
+          kind: .genericTemplate(.union),
+          sourceFile: currentSourceFile,
+          access: access,
+          span: currentSpan
+        )
         let template = GenericUnionTemplate(
-          name: name, typeParameters: typeParameters, cases: cases, access: access)
+          defId: defId, typeParameters: typeParameters, cases: cases)
         currentScope.defineGenericUnionTemplate(name, template: template)
       } else {
         // Register placeholder for non-generic union (allows recursive references)
@@ -478,8 +503,16 @@ extension TypeChecker {
       
       if !typeParameters.isEmpty {
         // Register generic struct template
+        let defId = defIdMap.allocate(
+          modulePath: currentModulePath,
+          name: name,
+          kind: .genericTemplate(.structure),
+          sourceFile: currentSourceFile,
+          access: access,
+          span: currentSpan
+        )
         let template = GenericStructTemplate(
-          name: name, typeParameters: typeParameters, parameters: parameters)
+          defId: defId, typeParameters: typeParameters, parameters: parameters)
         currentScope.defineGenericStructTemplate(name, template: template)
       } else {
         // Register placeholder for non-generic struct (allows recursive references)
@@ -549,8 +582,16 @@ extension TypeChecker {
       if !typeParameters.isEmpty {
         // Register as intrinsic generic type
         intrinsicGenericTypes.insert(name)
+        let defId = defIdMap.allocate(
+          modulePath: currentModulePath,
+          name: name,
+          kind: .genericTemplate(.structure),
+          sourceFile: currentSourceFile,
+          access: .default,
+          span: currentSpan
+        )
         let template = GenericStructTemplate(
-          name: name, typeParameters: typeParameters, parameters: [])
+          defId: defId, typeParameters: typeParameters, parameters: [])
         currentScope.defineGenericStructTemplate(name, template: template)
       } else {
         // Non-generic intrinsic type - register the actual type
@@ -695,7 +736,8 @@ extension TypeChecker {
             
             // Validate __drop signature
             if method.name == "__drop" {
-              if params.count != 1 || params[0].name != "self" {
+              let firstParamName = params.first.flatMap { context.getName($0.defId) }
+              if params.count != 1 || firstParamName != "self" {
                 throw SemanticError.invalidOperation(
                   op: "__drop must have exactly one parameter 'self'", type1: "", type2: "")
               }
@@ -893,7 +935,9 @@ extension TypeChecker {
         
         // Update typed def info and overwrite the placeholder
         if case .structure(let defId) = placeholder {
-          let members = params.map { (name: $0.name, type: $0.type, mutable: $0.isMutable()) }
+          let members = params.map {
+            (name: context.getName($0.defId) ?? "<unknown>", type: $0.type, mutable: $0.isMutable())
+          }
           context.updateStructInfo(
             defId: defId,
             members: members,
@@ -1116,15 +1160,24 @@ extension TypeChecker {
       }
 
       if !typeParameters.isEmpty {
+        let defId = defIdMap.lookupGenericFunctionTemplateDefId(name)
+          ?? defIdMap.allocate(
+            modulePath: currentModulePath,
+            name: name,
+            kind: .genericTemplate(.function),
+            sourceFile: currentSourceFile,
+            access: access,
+            span: currentSpan
+          )
+
         // Define placeholder template for recursion
         let placeholderTemplate = GenericFunctionTemplate(
-          name: name,
+          defId: defId,
           typeParameters: typeParameters,
           parameters: parameters,
           returnType: returnTypeNode,
           body: ExpressionNode.call(
-            callee: .identifier("panic"), arguments: [.stringLiteral("recursion")]),
-          access: access
+            callee: .identifier("panic"), arguments: [.stringLiteral("recursion")])
         )
         currentScope.defineGenericFunctionTemplate(name, template: placeholderTemplate)
 
@@ -1150,12 +1203,11 @@ extension TypeChecker {
 
         // Create template with checked results
         let template = GenericFunctionTemplate(
-          name: name,
+          defId: defId,
           typeParameters: typeParameters,
           parameters: parameters,
           returnType: returnTypeNode,
           body: body,
-          access: access,
           checkedBody: checkedBody,
           checkedParameters: checkedParams,
           checkedReturnType: checkedReturnType
@@ -1232,13 +1284,21 @@ extension TypeChecker {
           }
         }
 
+        let defId = defIdMap.lookupGenericFunctionTemplateDefId(name)
+          ?? defIdMap.allocate(
+            modulePath: currentModulePath,
+            name: name,
+            kind: .genericTemplate(.function),
+            sourceFile: currentSourceFile,
+            access: access,
+            span: currentSpan
+          )
         let template = GenericFunctionTemplate(
-          name: name,
+          defId: defId,
           typeParameters: typeParameters,
           parameters: parameters,
           returnType: returnTypeNode,
-          body: dummyBody,
-          access: access
+          body: dummyBody
         )
         currentScope.defineGenericFunctionTemplate(name, template: template)
         
@@ -1433,7 +1493,8 @@ extension TypeChecker {
 
           // Validate __drop signature
           if method.name == "__drop" {
-            if params.count != 1 || params[0].name != "self" {
+            let firstParamName = params.first.flatMap { context.getName($0.defId) }
+            if params.count != 1 || firstParamName != "self" {
               throw SemanticError.invalidOperation(
                 op: "__drop must have exactly one parameter 'self'", type1: "", type2: "")
             }
@@ -1687,7 +1748,6 @@ extension TypeChecker {
   /// This method creates the necessary input for NameCollector from the TypeChecker's
   /// current state and runs the pass. The output contains:
   /// - DefIdMap: Unique identifiers for all definitions
-  /// - NameTable: Name to DefId mappings
   /// - ModuleResolverOutput: Preserved from input
   ///
   /// **Validates: Requirements 2.1, 2.2**
@@ -1790,7 +1850,6 @@ extension TypeChecker {
   ///
   /// The output contains:
   /// - DefIdMap: DefId to type information mappings
-  /// - SymbolTable: Symbol registration and lookup table
   /// - NameCollectorOutput: Preserved from input
   ///
   /// **Validates: Requirements 2.1, 2.2**

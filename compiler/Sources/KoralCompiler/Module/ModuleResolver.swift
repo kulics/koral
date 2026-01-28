@@ -46,6 +46,20 @@ public enum ModuleError: Error, CustomStringConvertible {
     }
 }
 
+// MARK: - Module Access Info
+
+public struct ModuleAccessInfo {
+    public let access: AccessModifier
+    public let definedInFile: String
+    public let span: SourceSpan
+
+    public init(access: AccessModifier, definedInFile: String, span: SourceSpan) {
+        self.access = access
+        self.definedInFile = definedInFile
+        self.span = span
+    }
+}
+
 // MARK: - Module Name Validation
 
 /// 验证文件名是否为有效的模块名标识符
@@ -116,9 +130,9 @@ public class ModuleInfo {
     
     /// using 声明
     public var usingDeclarations: [UsingDeclaration] = []
-    
-    /// 符号表
-    public var symbolTable: ModuleSymbolTable?
+
+    /// 子模块访问控制信息
+    public var submoduleAccesses: [String: ModuleAccessInfo] = [:]
     
     public init(
         path: [String],
@@ -553,22 +567,15 @@ public class ModuleResolver {
             try resolveFile(file: entryFile, module: submodule, unit: unit)
         }
         
-        // 将子模块作为符号注册到当前模块的符号表
-        // 访问修饰符：默认为 private，除非显式指定 public 或 protected
+        // 记录子模块访问控制信息
         let access = using.access == .default ? .private : using.access
-        
-        // 确保模块有符号表
-        if module.symbolTable == nil {
-            module.symbolTable = ModuleSymbolTable(module: module)
+        if module.submoduleAccesses[firstSegment] != nil {
+            throw ModuleError.duplicateUsing(firstSegment, span: using.span)
         }
-        
-        // 将子模块注册为模块符号
-        try module.symbolTable?.addModuleSymbol(
-            name: firstSegment,
-            module: submodule,
+        module.submoduleAccesses[firstSegment] = ModuleAccessInfo(
             access: access,
-            span: using.span,
-            fromFile: module.entryFile
+            definedInFile: currentFile,
+            span: using.span
         )
         
         // 符号导入在 TypeChecker 阶段通过 nodeSourceInfoList 完成
@@ -604,13 +611,16 @@ public class ModuleResolver {
             for segment in remainingPath {
                 // 首先检查是否是子模块
                 if let submod = current.submodules[segment] {
-                    // 通过符号表检查访问权限
-                    if let symbolTable = current.symbolTable,
-                       let symbol = symbolTable.lookupModuleSymbol(segment) {
-                        try accessChecker.checkAccess(
-                            symbol: symbol,
+                    // 通过记录的访问控制信息检查权限（如果存在）
+                    if let accessInfo = current.submoduleAccesses[segment] {
+                        try accessChecker.checkModuleAccess(
+                            symbolName: segment,
+                            access: accessInfo.access,
+                            definedIn: current,
+                            definedInFile: accessInfo.definedInFile,
                             from: module,
-                            fromFile: module.entryFile
+                            fromFile: currentFile,
+                            span: accessInfo.span
                         )
                     }
                     current = submod
