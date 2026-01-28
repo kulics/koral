@@ -45,13 +45,6 @@ public struct TypeVariable: Hashable, Equatable, CustomStringConvertible, Sendab
         return TypeVariable(id: id, name: name, sourceSpan: span)
     }
     
-    /// 重置计数器（仅用于测试）
-    public static func resetCounter() {
-        lock.lock()
-        defer { lock.unlock() }
-        counter = 0
-    }
-    
     // MARK: - Hashable & Equatable
     
     public func hash(into hasher: inout Hasher) {
