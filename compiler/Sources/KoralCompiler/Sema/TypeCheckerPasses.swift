@@ -27,16 +27,10 @@ extension TypeChecker {
       clearDiagnostics()
 
       // === PASS 1: Collect all type definitions using NameCollector ===
-      // NameCollector is the new Pass 1 implementation that:
-      // - Collects all types, traits, and function names
-      // - Allocates DefIds for each definition
-      // - Registers module names (merged Pass 1.5 functionality)
-      //
-      // The NameCollector runs in parallel with the existing collectTypeDefinition logic
-      // to ensure backward compatibility during the migration period.
-      // **Validates: Requirements 2.1, 2.2**
+      // NameCollector collects all types, traits, and function names,
+      // allocates DefIds for each definition, and registers module names.
       
-      // Run NameCollector (new Pass architecture)
+      // Run NameCollector
       var nameCollectorOutput: NameCollectorOutput?
       do {
         let output = try runNameCollector(allNodes: allNodes, declarations: declarations)
@@ -49,17 +43,11 @@ extension TypeChecker {
       }
       
       // === PASS 2: Resolve type signatures using TypeResolver ===
-      // TypeResolver is the new Pass 2 implementation that:
-      // - Resolves type members and function signatures
-      // - Builds complete type information
-      // - Registers given method signatures
-      // - Builds module symbols (merged Pass 2.5 functionality)
-      //
-      // The TypeResolver runs in parallel with the existing collectGivenSignatures logic
-      // to ensure backward compatibility during the migration period.
-      // **Validates: Requirements 2.1, 2.2**
+      // TypeResolver resolves type members and function signatures,
+      // builds complete type information, registers given method signatures,
+      // and builds module symbols.
       
-      // Run TypeResolver (new Pass architecture)
+      // Run TypeResolver
       var typeResolverOutput: TypeResolverOutput?
       if let nameCollectorOutput {
         do {
@@ -73,17 +61,11 @@ extension TypeChecker {
       }
       
       // === PASS 3: Check function bodies using BodyChecker ===
-      // BodyChecker is the new Pass 3 implementation that:
-      // - Checks function bodies and expressions
-      // - Performs type inference
-      // - Generates typed AST
-      // - Collects generic instantiation requests
-      //
-      // The BodyChecker runs in parallel with the existing checkGlobalDeclaration logic
-      // to ensure backward compatibility during the migration period.
-      // **Validates: Requirements 2.1, 2.2**
+      // BodyChecker checks function bodies and expressions,
+      // performs type inference, generates typed AST,
+      // and collects generic instantiation requests.
       
-      // Run BodyChecker (new Pass architecture)
+      // Run BodyChecker
       if let typeResolverOutput {
         do {
           let output = try runBodyChecker(typeResolverOutput: typeResolverOutput)
@@ -442,8 +424,7 @@ extension TypeChecker {
         typeParameters: typeParameters,
         superTraits: superTraits,
         methods: methods,
-        access: access,
-        line: span.line
+        access: access
       )
       // Track std library traits
       if isStdLib {

@@ -939,8 +939,3 @@ extension DefIdMap: CustomStringConvertible {
     }
 }
 
-// MARK: - Migration Context (Deprecated Accessors)
-
-public enum DefIdContext {
-    public nonisolated(unsafe) static var current: DefIdMap?
-}

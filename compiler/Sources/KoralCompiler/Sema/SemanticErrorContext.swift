@@ -23,7 +23,7 @@ public enum SemanticErrorContext {
     // Thread-local context stack (compiler is single-threaded)
     private nonisolated(unsafe) static var contextStack: [Context] = []
     
-    // Legacy global state for backward compatibility
+    // Global state for error context
     public nonisolated(unsafe) static var currentFileName: String = "<input>"
     public nonisolated(unsafe) static var currentLine: Int = 1
     public nonisolated(unsafe) static var currentCompilerContext: CompilerContext? = nil

@@ -35,7 +35,7 @@ public struct SemanticError: Error, CustomStringConvertible, Sendable {
         self.span = span
     }
     
-    /// Convenience initializer that uses line number (for backward compatibility)
+    /// Convenience initializer that uses line number
     public init(_ kind: Kind, fileName: String, line: Int) {
         self.init(kind, fileName: fileName, span: SourceSpan(location: SourceLocation(line: line, column: 1)))
     }
@@ -55,13 +55,10 @@ public struct SemanticError: Error, CustomStringConvertible, Sendable {
         self.init(kind, fileName: SemanticErrorContext.currentFileName, span: span)
     }
     
-    // Line number (for backward compatibility)
-    public var line: Int { span.start.line }
-    
     // Column number
     public var column: Int { span.start.column }
     
-    // Compatibility initializers
+    // Static factory methods for common error types
     public static func typeMismatch(expected: String, got: String) -> SemanticError {
         return SemanticError(.typeMismatch(expected: expected, got: got))
     }

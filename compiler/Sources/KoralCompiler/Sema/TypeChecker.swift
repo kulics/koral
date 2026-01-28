@@ -55,7 +55,7 @@ public class TypeChecker {
     }
   }
   
-  // Backward compatibility: currentLine as computed property
+  // Computed property for accessing line number from currentSpan
   // Note: internal access for extension methods
   var currentLine: Int {
     get { currentSpan.start.line }
@@ -456,24 +456,6 @@ public class TypeChecker {
     }
   }
 
-  private func isSignedIntegerScalarType(_ type: Type) -> Bool {
-    switch type {
-    case .int, .int8, .int16, .int32, .int64:
-      return true
-    default:
-      return false
-    }
-  }
-
-  private func isUnsignedIntegerScalarType(_ type: Type) -> Bool {
-    switch type {
-    case .uint, .uint8, .uint16, .uint32, .uint64:
-      return true
-    default:
-      return false
-    }
-  }
-
   private func isFloatScalarType(_ type: Type) -> Bool {
     switch type {
     case .float32, .float64:
@@ -502,35 +484,6 @@ public class TypeChecker {
 
     return false
   }
-
-  private func withTempIfRValue(
-    _ expr: TypedExpressionNode,
-    prefix: String,
-    _ body: (TypedExpressionNode) throws -> TypedExpressionNode
-  ) rethrows -> TypedExpressionNode {
-    if expr.valueCategory == .lvalue {
-      return try body(expr)
-    }
-    let sym = nextSynthSymbol(prefix: prefix, type: expr.type)
-    let varExpr: TypedExpressionNode = .variable(identifier: sym)
-    let inner = try body(varExpr)
-    return .letExpression(identifier: sym, value: expr, body: inner, type: inner.type)
-  }
-
-  private func ensureBorrowed(_ expr: TypedExpressionNode, expected: Type) throws -> TypedExpressionNode {
-    if expr.type == expected {
-      return expr
-    }
-    if case .reference(let inner) = expected, expr.type == inner {
-      if expr.valueCategory == .lvalue {
-        return .referenceExpression(expression: expr, type: expected)
-      }
-      throw SemanticError.invalidOperation(op: "implicit ref", type1: expr.type.description, type2: "rvalue")
-    }
-    throw SemanticError.typeMismatch(expected: expected.description, got: expr.type.description)
-  }
-
-
 
   func nextSynthSymbol(prefix: String, type: Type) -> Symbol {
     synthesizedTempIndex += 1
@@ -714,23 +667,6 @@ public class TypeChecker {
       return (typedBody, functionType)
     }
   }
-
-  private func convertExprToTypeNode(_ expr: ExpressionNode) throws -> TypeNode {
-    switch expr {
-    case .identifier(let name):
-      return .identifier(name)
-    case .subscriptExpression(let base, let args):
-      if case .identifier(let baseName) = base {
-        let typeArgs = try args.map { try convertExprToTypeNode($0) }
-        return .generic(base: baseName, args: typeArgs)
-      }
-      throw SemanticError.invalidOperation(
-        op: "Complex type expression not supported", type1: "", type2: "")
-    default:
-      throw SemanticError.typeMismatch(expected: "Type Identifier", got: String(describing: expr))
-    }
-  }
-
 
   func compoundOpToArithmeticOp(_ op: CompoundAssignmentOperator) -> ArithmeticOperator? {
     switch op {

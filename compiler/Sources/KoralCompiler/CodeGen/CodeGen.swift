@@ -5,12 +5,6 @@ import Foundation
 // 使用 CIdentifierUtils.swift 中的统一工具函数生成 C 标识符。
 // 这确保了 CodeGen 和 DefId 系统使用一致的标识符生成逻辑。
 
-/// 清理标识符，将非法字符替换为下划线，并转义 C 关键字
-/// 这是 sanitizeCIdentifier 的别名，保持向后兼容
-func sanitizeIdentifier(_ name: String) -> String {
-    return sanitizeCIdentifier(name)
-}
-
 public class CodeGen {
   private let ast: MonomorphizedProgram
   internal let context: CompilerContext
@@ -2281,10 +2275,10 @@ public class CodeGen {
         var vars: [(String, Type)] = []
           
         let caseDef = cases[expectedTagIndex]
-        let escapedCaseName = sanitizeIdentifier(caseName)
+        let escapedCaseName = sanitizeCIdentifier(caseName)
           
         for (i, subInd) in args.enumerated() {
-           let paramName = sanitizeIdentifier(caseDef.parameters[i].name)
+           let paramName = sanitizeCIdentifier(caseDef.parameters[i].name)
            let paramType = caseDef.parameters[i].type
            let subPath = "\(path).data.\(escapedCaseName).\(paramName)"
                

@@ -24,7 +24,7 @@ extension CodeGen {
       for param in parameters {
         addIndent()
         let paramName = context.getName(param.defId) ?? "<unknown>"
-        appendToBuffer("\(cTypeName(param.type)) \(sanitizeIdentifier(paramName));\n")
+        appendToBuffer("\(cTypeName(param.type)) \(sanitizeCIdentifier(paramName));\n")
       }
     }
     appendToBuffer("};\n\n")
@@ -34,7 +34,7 @@ extension CodeGen {
     withIndent {
       appendToBuffer("    struct \(name) result;\n")
       for param in parameters {
-        let fieldName = sanitizeIdentifier(context.getName(param.defId) ?? "<unknown>")
+        let fieldName = sanitizeCIdentifier(context.getName(param.defId) ?? "<unknown>")
         appendCopyAssignment(
           for: param.type,
           source: "self->\(fieldName)",
@@ -62,7 +62,7 @@ extension CodeGen {
       }
 
       for param in parameters {
-        let fieldName = sanitizeIdentifier(context.getName(param.defId) ?? "<unknown>")
+        let fieldName = sanitizeCIdentifier(context.getName(param.defId) ?? "<unknown>")
         appendDropStatement(for: param.type, value: "self->\(fieldName)")
       }
     }
@@ -89,7 +89,7 @@ extension CodeGen {
       appendToBuffer("union {\n")
       withIndent {
         for c in cases {
-            let caseName = sanitizeIdentifier(c.name)
+            let caseName = sanitizeCIdentifier(c.name)
             // Filter out Void type parameters - they don't need storage
             let nonVoidParams = c.parameters.filter { param in
                 if case .void = param.type { return false }
@@ -101,7 +101,7 @@ extension CodeGen {
                 withIndent {
                     for param in nonVoidParams {
                         addIndent()
-                        appendToBuffer("\(cTypeName(param.type)) \(sanitizeIdentifier(param.name));\n")
+                        appendToBuffer("\(cTypeName(param.type)) \(sanitizeCIdentifier(param.name));\n")
                     }
                 }
                 addIndent()
@@ -124,7 +124,7 @@ extension CodeGen {
         appendToBuffer("    result.tag = self->tag;\n")
         appendToBuffer("    switch (self->tag) {\n")
         for (index, c) in cases.enumerated() {
-             let caseName = sanitizeIdentifier(c.name)
+             let caseName = sanitizeCIdentifier(c.name)
              appendToBuffer("    case \(index): // \(c.name)\n")
              // Filter out Void type parameters
              let nonVoidParams = c.parameters.filter { param in
@@ -133,7 +133,7 @@ extension CodeGen {
              }
              if !nonVoidParams.isEmpty {
                  for param in nonVoidParams {
-                     let fieldName = sanitizeIdentifier(param.name)
+                     let fieldName = sanitizeCIdentifier(param.name)
                      let fieldPath = "self->data.\(caseName).\(fieldName)"
                      let resultPath = "result.data.\(caseName).\(fieldName)"
                      appendCopyAssignment(
@@ -168,7 +168,7 @@ extension CodeGen {
 
         appendToBuffer("    switch (self->tag) {\n")
         for (index, c) in cases.enumerated() {
-             let caseName = sanitizeIdentifier(c.name)
+             let caseName = sanitizeCIdentifier(c.name)
              appendToBuffer("    case \(index): // \(c.name)\n")
              // Filter out Void type parameters
              let nonVoidParams = c.parameters.filter { param in
@@ -176,7 +176,7 @@ extension CodeGen {
                  return true
              }
              for param in nonVoidParams {
-               let fieldName = sanitizeIdentifier(param.name)
+               let fieldName = sanitizeCIdentifier(param.name)
                let fieldPath = "self->data.\(caseName).\(fieldName)"
                appendDropStatement(for: param.type, value: fieldPath)
              }
@@ -204,7 +204,7 @@ extension CodeGen {
       
       // Assign members
       let caseInfo = cases[tagIndex]
-      let escapedCaseName = sanitizeIdentifier(caseName)
+      let escapedCaseName = sanitizeCIdentifier(caseName)
       
       // Filter out Void type parameters and their corresponding args
       var nonVoidArgsAndParams: [(TypedExpressionNode, (name: String, type: Type))] = []
@@ -217,7 +217,7 @@ extension CodeGen {
           let unionMemberPath = "\(result).data.\(escapedCaseName)"
           for (argExpr, param) in nonVoidArgsAndParams {
               let argResult = generateExpressionSSA(argExpr)
-              let fieldName = sanitizeIdentifier(param.name)
+              let fieldName = sanitizeCIdentifier(param.name)
               
               addIndent()
               if case .structure(let structDefId) = param.type {

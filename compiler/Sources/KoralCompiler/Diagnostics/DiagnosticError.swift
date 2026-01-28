@@ -26,28 +26,6 @@ public struct DiagnosticError: Error, Sendable {
     return renderer.render(self).trimmingCharacters(in: .newlines)
   }
   
-  /// Renders the error without source snippet (legacy format).
-  public func renderSimple() -> String {
-    let span = extractSpan()
-    let location: String
-    if span.isKnown {
-      location = "\(fileName):\(span.start.line):\(span.start.column)"
-    } else {
-      location = fileName
-    }
-    
-    let stageStr: String
-    switch stage {
-    case .lexer: stageStr = "Lexer Error"
-    case .parser: stageStr = "Parser Error"
-    case .semantic: stageStr = "Semantic Error"
-    case .other: stageStr = "Error"
-    }
-    
-    let message = formatMessage()
-    return "\(location): \(stageStr): \(message)"
-  }
-  
   private func extractSpan() -> SourceSpan {
     if let semantic = underlying as? SemanticError {
       return semantic.span

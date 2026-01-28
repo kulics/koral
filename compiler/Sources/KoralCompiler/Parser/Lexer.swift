@@ -591,16 +591,6 @@ public class Lexer {
     return (sawNewline, sawBlankLineOrComment)
   }
 
-  // Skip whitespace characters (legacy method for compatibility)
-  private func skipWhitespace() {
-    while let char = getNextChar() {
-      if !char.isWhitespace {
-        unreadChar(char)
-        break
-      }
-    }
-  }
-
   // Skip line comments
   private func skipLineComment() {
     while let char = getNextChar() {

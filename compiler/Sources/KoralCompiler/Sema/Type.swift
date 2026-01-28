@@ -55,9 +55,6 @@ public struct StructDecl: Equatable, Hashable {
   public func access(in map: DefIdMap) -> AccessModifier? {
     return map.getAccess(defId)
   }
-    
-  // MARK: - Deprecated Accessors (Migration)
-  // Removed global-state-backed accessors. Use CompilerContext queries instead.
 }
 
 /// Union 类型的声明实体
@@ -113,9 +110,6 @@ public struct UnionDecl: Equatable, Hashable {
   public func access(in map: DefIdMap) -> AccessModifier? {
     return map.getAccess(defId)
   }
-    
-  // MARK: - Deprecated Accessors (Migration)
-  // Removed global-state-backed accessors. Use CompilerContext queries instead.
 }
 
 // MARK: - Union Case
