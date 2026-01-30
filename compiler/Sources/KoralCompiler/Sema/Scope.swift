@@ -85,6 +85,13 @@ public class UnifiedScope {
     names[name] = defId
   }
 
+  public func defineLocal(_ name: String, defId: DefId, line: Int? = nil) throws {
+    if names[name] != nil {
+      throw SemanticError.duplicateDefinition(name, line: line)
+    }
+    names[name] = defId
+  }
+
   public func define(
     _ name: String,
     _ type: Type,

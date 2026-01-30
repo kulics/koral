@@ -73,14 +73,12 @@ extension Monomorphizer {
         case .reference(let inner):
             let innerType = try resolveTypeNode(inner, substitution: substitution)
             return .reference(inner: innerType)
+
+        case .pointer(let inner):
+            let innerType = try resolveTypeNode(inner, substitution: substitution)
+            return .pointer(element: innerType)
             
         case .generic(let base, let args):
-            // Special case: Pointer<T>
-            if base == "Pointer" && args.count == 1 {
-                let elementType = try resolveTypeNode(args[0], substitution: substitution)
-                return .pointer(element: elementType)
-            }
-            
             // Look up generic template
             let resolvedArgs = try args.map { try resolveTypeNode($0, substitution: substitution) }
             
@@ -131,12 +129,6 @@ extension Monomorphizer {
             
         case .moduleQualifiedGeneric(_, let base, let args):
             // 模块限定泛型类型
-            // Special case: Pointer<T>
-            if base == "Pointer" && args.count == 1 {
-                let elementType = try resolveTypeNode(args[0], substitution: substitution)
-                return .pointer(element: elementType)
-            }
-            
             let resolvedArgs = try args.map { try resolveTypeNode($0, substitution: substitution) }
             
             if let template = input.genericTemplates.structTemplates[base] {
@@ -211,11 +203,6 @@ extension Monomorphizer {
                     context.updateStructInfo(defId: defId, members: [], isGenericInstantiation: true, typeArguments: resolvedArgs)
                     return .structure(defId: defId)
                 }
-            }
-            
-            // Special case: Pointer<T> maps directly to .pointer(element: T)
-            if template == "Pointer" && resolvedArgs.count == 1 {
-                return .pointer(element: resolvedArgs[0])
             }
             
             return .genericStruct(template: template, args: resolvedArgs)
@@ -391,7 +378,7 @@ extension Monomorphizer {
                 newType: resolveParameterizedType(identifier.type)
             )
             let newParams = parameters.map { param in
-                copySymbolWithNewDefId(
+                copySymbolPreservingDefId(
                     param,
                     newType: resolveParameterizedType(param.type)
                 )
@@ -447,7 +434,7 @@ extension Monomorphizer {
                         access: context.getAccess(method.identifier.defId) ?? .default
                     ),
                     parameters: method.parameters.map { param in
-                        copySymbolWithNewDefId(
+                        copySymbolPreservingDefId(
                             param,
                             newType: resolveParameterizedType(param.type)
                         )
@@ -516,7 +503,7 @@ extension Monomorphizer {
             )
             
         case .letExpression(let identifier, let value, let body, let type):
-            let newIdentifier = copySymbolWithNewDefId(
+            let newIdentifier = copySymbolPreservingDefId(
                 identifier,
                 newType: resolveParameterizedType(identifier.type)
             )
@@ -572,9 +559,21 @@ extension Monomorphizer {
                 expression: resolveTypesInExpression(expression),
                 type: resolveParameterizedType(type)
             )
+
+        case .ptrExpression(let expression, let type):
+            return .ptrExpression(
+                expression: resolveTypesInExpression(expression),
+                type: resolveParameterizedType(type)
+            )
+
+        case .deptrExpression(let expression, let type):
+            return .deptrExpression(
+                expression: resolveTypesInExpression(expression),
+                type: resolveParameterizedType(type)
+            )
             
         case .variable(let identifier):
-            let newIdentifier = copySymbolWithNewDefId(
+            let newIdentifier = copySymbolPreservingDefId(
                 identifier,
                 newType: resolveParameterizedType(identifier.type)
             )
@@ -1015,7 +1014,7 @@ extension Monomorphizer {
         case .lambdaExpression(let parameters, let captures, let body, let type):
             // Resolve types in lambda parameters
             let newParameters = parameters.map { param in
-                copySymbolWithNewDefId(
+                copySymbolPreservingDefId(
                     param,
                     newType: resolveParameterizedType(param.type)
                 )
@@ -1023,7 +1022,7 @@ extension Monomorphizer {
             // Resolve types in captures
             let newCaptures = captures.map { capture in
                 CapturedVariable(
-                    symbol: copySymbolWithNewDefId(
+                    symbol: copySymbolPreservingDefId(
                         capture.symbol,
                         newType: resolveParameterizedType(capture.symbol.type)
                     ),
@@ -1049,7 +1048,7 @@ extension Monomorphizer {
     internal func resolveTypesInStatement(_ stmt: TypedStatementNode) -> TypedStatementNode {
         switch stmt {
         case .variableDeclaration(let identifier, let value, let mutable):
-            let newIdentifier = copySymbolWithNewDefId(
+            let newIdentifier = copySymbolPreservingDefId(
                 identifier,
                 newType: resolveParameterizedType(identifier.type)
             )
@@ -1059,15 +1058,16 @@ extension Monomorphizer {
                 mutable: mutable
             )
             
-        case .assignment(let target, let value):
+        case .assignment(let target, let op, let value):
             return .assignment(
                 target: resolveTypesInExpression(target),
+                operator: op,
                 value: resolveTypesInExpression(value)
             )
-            
-        case .compoundAssignment(let target, let op, let value):
-            return .compoundAssignment(
-                target: resolveTypesInExpression(target),
+
+        case .deptrAssignment(let pointer, let op, let value):
+            return .deptrAssignment(
+                pointer: resolveTypesInExpression(pointer),
                 operator: op,
                 value: resolveTypesInExpression(value)
             )
@@ -1098,7 +1098,7 @@ extension Monomorphizer {
             return pattern
             
         case .variable(let symbol):
-            let newSymbol = copySymbolWithNewDefId(
+            let newSymbol = copySymbolPreservingDefId(
                 symbol,
                 newType: resolveParameterizedType(symbol.type)
             )
@@ -1166,48 +1166,33 @@ extension Monomorphizer {
         case .refCount(let val):
             return .refCount(val: resolveTypesInExpression(val))
             
-        case .ptrInit(let ptr, let val):
-            return .ptrInit(
+        case .initMemory(let ptr, let val):
+            return .initMemory(
                 ptr: resolveTypesInExpression(ptr),
                 val: resolveTypesInExpression(val)
             )
-            
-        case .ptrDeinit(let ptr):
-            return .ptrDeinit(ptr: resolveTypesInExpression(ptr))
-            
-        case .ptrPeek(let ptr):
-            return .ptrPeek(ptr: resolveTypesInExpression(ptr))
-            
-        case .ptrOffset(let ptr, let offset):
-            return .ptrOffset(
+        case .deinitMemory(let ptr):
+            return .deinitMemory(ptr: resolveTypesInExpression(ptr))
+        case .offsetPtr(let ptr, let offset):
+            return .offsetPtr(
                 ptr: resolveTypesInExpression(ptr),
                 offset: resolveTypesInExpression(offset)
             )
-            
-        case .ptrTake(let ptr):
-            return .ptrTake(ptr: resolveTypesInExpression(ptr))
-            
-        case .ptrReplace(let ptr, let val):
-            return .ptrReplace(
-                ptr: resolveTypesInExpression(ptr),
-                val: resolveTypesInExpression(val)
-            )
+        case .takeMemory(let ptr):
+            return .takeMemory(ptr: resolveTypesInExpression(ptr))
+        case .nullPtr(let resultType):
+            return .nullPtr(resultType: resultType)
             
         case .float32Bits(let value):
             return .float32Bits(value: resolveTypesInExpression(value))
-            
         case .float64Bits(let value):
             return .float64Bits(value: resolveTypesInExpression(value))
-
         case .float32FromBits(let bits):
             return .float32FromBits(bits: resolveTypesInExpression(bits))
-            
         case .float64FromBits(let bits):
             return .float64FromBits(bits: resolveTypesInExpression(bits))
-            
         case .exit(let code):
             return .exit(code: resolveTypesInExpression(code))
-            
         case .abort:
             return .abort
 
@@ -1224,9 +1209,6 @@ extension Monomorphizer {
             
         case .fflush(let fd):
             return .fflush(fd: resolveTypesInExpression(fd))
-            
-        case .ptrBits:
-            return .ptrBits
         }
     }
 }

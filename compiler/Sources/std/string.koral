@@ -9,7 +9,7 @@
 // ============================================================================
 
 // Internal storage for String (COW semantics)
-public type StringStorage(mut data [UInt8]Pointer, mut len Int, mut cap Int)
+public type StringStorage(mut data UInt8 ptr, mut len Int, mut cap Int)
 
 given StringStorage {
     __drop(self ref) = { dealloc_memory(self.data) }
@@ -35,18 +35,18 @@ public type StringLinesIterator(source String, mut index Int)
 
 given String {
     // Unsafe constructor: does not validate UTF-8
-    public from_bytes_unchecked(bytes [UInt8]Pointer, len Int) String = {
+    public from_bytes_unchecked(bytes UInt8 ptr, len Int) String = {
         let cap = len + 1
         let data = [UInt8]alloc_memory(cap)
         copy_memory(data, bytes, len)
-        data.offset(len).init(0)
+        init_memory(offset_ptr(data, len), 0)
         let storage = ref StringStorage(data, len, cap)
         String(storage)
     }
 
     public empty() String = {
         let data = [UInt8]alloc_memory(1)
-        data.init(0)
+        init_memory(data, 0)
         let storage = ref StringStorage(data, 0, 1)
         String(storage)
     }
@@ -54,7 +54,7 @@ given String {
     public with_capacity(capacity Int) String = {
         let cap = if capacity < 1 then 1 else capacity + 1
         let data = [UInt8]alloc_memory(cap)
-        data.init(0)
+        init_memory(data, 0)
         let storage = ref StringStorage(data, 0, cap)
         String(storage)
     }
@@ -62,7 +62,7 @@ given String {
     public new() String = {
         let cap = 16  // 默认容量
         let data = [UInt8]alloc_memory(cap)
-        data.init(0)
+        init_memory(data, 0)
         let storage = ref StringStorage(data, 0, cap)
         String(storage)
     }
@@ -111,23 +111,23 @@ given String {
         if index < 0 or index >= self.storage.len then {
             return [UInt8]Option.None()
         }
-        [UInt8]Option.Some(self.storage.data.offset(index).peek())
+        [UInt8]Option.Some(deptr offset_ptr(self.storage.data, index))
     }
 
     public __at(self, index Int) UInt8 = {
         if index < 0 or index >= self.storage.len then {
             panic("String index out of bounds")
         }
-        self.storage.data.offset(index).peek()
+        deptr offset_ptr(self.storage.data, index)
     }
 
     public push(self ref, value UInt8) Void = {
         self.ensure_unique()
         let needed = self.storage.len + 2
         self.ensure_capacity(needed)
-        self.storage.data.offset(self.storage.len).init(value)
+        init_memory(offset_ptr(self.storage.data, self.storage.len), value)
         self.storage.len = self.storage.len + 1
-        self.storage.data.offset(self.storage.len).replace(0);
+        deptr offset_ptr(self.storage.data, self.storage.len) = 0;
     }
 
     public push_string(self ref, other String) Void = {
@@ -135,10 +135,10 @@ given String {
         self.ensure_unique()
         let needed = self.storage.len + other_len + 1
         self.ensure_capacity(needed)
-        let dest = self.storage.data.offset(self.storage.len)
+        let dest = offset_ptr(self.storage.data, self.storage.len)
         copy_memory(dest, other.storage.data, other_len)
         self.storage.len = self.storage.len + other_len
-        self.storage.data.offset(self.storage.len).replace(0);
+        deptr offset_ptr(self.storage.data, self.storage.len) = 0;
     }
 
     // Push an Int value directly to the string
@@ -156,24 +156,24 @@ given String {
         let mut pos = 20
         while n > 0 then {
             pos -= 1
-            buf.offset(pos).init((UInt8){ n % 10 } + '0')
+            init_memory(offset_ptr(buf, pos), (UInt8){ n % 10 } + '0')
             n = n / 10
         }
         
         if is_negative then {
             pos -= 1
-            buf.offset(pos).init('-')
+            init_memory(offset_ptr(buf, pos), '-')
         }
         
         let mut i = pos
         while i < 20 then {
-            self.push(buf.offset(i).peek())
+            self.push(deptr offset_ptr(buf, i))
             i += 1
         }
         
         let mut j = pos
         while j < 20 then {
-            buf.offset(j).deinit()
+            deinit_memory(offset_ptr(buf, j))
             j += 1
         }
         dealloc_memory(buf)
@@ -191,19 +191,19 @@ given String {
         let mut pos = 20
         while n > 0u then {
             pos -= 1
-            buf.offset(pos).init((UInt8){ n % 10u } + '0')
+            init_memory(offset_ptr(buf, pos), (UInt8){ n % 10u } + '0')
             n = n / 10u
         }
         
         let mut i = pos
         while i < 20 then {
-            self.push(buf.offset(i).peek())
+            self.push(deptr offset_ptr(buf, i))
             i += 1
         }
         
         let mut j = pos
         while j < 20 then {
-            buf.offset(j).deinit()
+            deinit_memory(offset_ptr(buf, j))
             j += 1
         }
         dealloc_memory(buf)
@@ -218,7 +218,7 @@ given String {
         if prefix.storage.len > self.storage.len then { return false; }
         let mut i = 0
         while i < prefix.storage.len then {
-            if self.storage.data.offset(i).peek() <> prefix.storage.data.offset(i).peek() then { return false; }
+            if deptr offset_ptr(self.storage.data, i) <> deptr offset_ptr(prefix.storage.data, i) then { return false; }
             i += 1
         }
         true
@@ -230,7 +230,7 @@ given String {
         let offset = self.storage.len - slen
         let mut i = 0
         while i < slen then {
-            if self.storage.data.offset(offset + i).peek() <> suffix.storage.data.offset(i).peek() then { return false; }
+            if deptr offset_ptr(self.storage.data, offset + i) <> deptr offset_ptr(suffix.storage.data, i) then { return false; }
             i += 1
         }
         true
@@ -258,8 +258,8 @@ given String {
         }
         let cap = len + 1
         let data = [UInt8]alloc_memory(cap)
-        copy_memory(data, self.storage.data.offset(start), len)
-        data.offset(len).init(0)
+        copy_memory(data, offset_ptr(self.storage.data, start), len)
+        init_memory(offset_ptr(data, len), 0)
         let storage = ref StringStorage(data, len, cap)
         String(storage)
     }
@@ -278,13 +278,13 @@ given String {
 
     public trim_ascii_start(self) String = {
         let mut i = 0
-        while i < self.storage.len and String.is_ascii_space(self.storage.data.offset(i).peek()) then { i += 1; }
+        while i < self.storage.len and String.is_ascii_space(deptr offset_ptr(self.storage.data, i)) then { i += 1; }
         self.make_substring(i, self.storage.len - i)
     }
 
     public trim_ascii_end(self) String = {
         let mut end = self.storage.len
-        while end > 0 and String.is_ascii_space(self.storage.data.offset(end - 1).peek()) then { end -= 1; }
+        while end > 0 and String.is_ascii_space(deptr offset_ptr(self.storage.data, end - 1)) then { end -= 1; }
         self.make_substring(0, end)
     }
 
@@ -305,10 +305,10 @@ given String {
         let data = [UInt8]alloc_memory(cap)
         let mut i = 0
         while i < self.storage.len then {
-            data.offset(i).init(String.to_lower_byte(self.storage.data.offset(i).peek()))
+            init_memory(offset_ptr(data, i), String.to_lower_byte(deptr offset_ptr(self.storage.data, i)))
             i += 1
         }
-        data.offset(self.storage.len).init(0)
+        init_memory(offset_ptr(data, self.storage.len), 0)
         let storage = ref StringStorage(data, self.storage.len, cap)
         String(storage)
     }
@@ -318,10 +318,10 @@ given String {
         let data = [UInt8]alloc_memory(cap)
         let mut i = 0
         while i < self.storage.len then {
-            data.offset(i).init(String.to_upper_byte(self.storage.data.offset(i).peek()))
+            init_memory(offset_ptr(data, i), String.to_upper_byte(deptr offset_ptr(self.storage.data, i)))
             i += 1
         }
-        data.offset(self.storage.len).init(0)
+        init_memory(offset_ptr(data, self.storage.len), 0)
         let storage = ref StringStorage(data, self.storage.len, cap)
         String(storage)
     }
@@ -329,7 +329,7 @@ given String {
     public is_ascii(self) Bool = {
         let mut i = 0
         while i < self.storage.len then {
-            if self.storage.data.offset(i).peek() >= 128 then { return false; }
+            if deptr offset_ptr(self.storage.data, i) >= 128 then { return false; }
             i += 1
         }
         true
@@ -338,7 +338,7 @@ given String {
     public is_ascii_whitespace(self) Bool = {
         let mut i = 0
         while i < self.storage.len then {
-            if not String.is_ascii_space(self.storage.data.offset(i).peek()) then { return false; }
+            if not String.is_ascii_space(deptr offset_ptr(self.storage.data, i)) then { return false; }
             i += 1
         }
         true
@@ -348,7 +348,7 @@ given String {
         if self.storage.len <> other.storage.len then { return false; }
         let mut i = 0
         while i < self.storage.len then {
-            if self.storage.data.offset(i).peek() <> other.storage.data.offset(i).peek() then { return false; }
+            if deptr offset_ptr(self.storage.data, i) <> deptr offset_ptr(other.storage.data, i) then { return false; }
             i += 1
         }
         true
@@ -358,8 +358,8 @@ given String {
         let min = if self.storage.len < other.storage.len then self.storage.len else other.storage.len
         let mut i = 0
         while i < min then {
-            let a = self.storage.data.offset(i).peek()
-            let b = other.storage.data.offset(i).peek()
+            let a = deptr offset_ptr(self.storage.data, i)
+            let b = deptr offset_ptr(other.storage.data, i)
             if a < b then { return 0 - 1; }
             if a > b then { return 1; }
             i += 1
@@ -373,7 +373,7 @@ given String {
         let mut h UInt = 2166136261u
         let mut i Int = 0
         while i < self.storage.len then {
-            let b UInt8 = self.storage.data.offset(i).peek()
+            let b UInt8 = deptr offset_ptr(self.storage.data, i)
             h = combine_hash(h, (UInt)b)
             i += 1
         }
@@ -395,7 +395,7 @@ given String {
             let mut j = 0
             let mut ok = true
             while j < pat.storage.len then {
-                if self.storage.data.offset(i + j).peek() <> pat.storage.data.offset(j).peek() then { ok = false; break; }
+                if deptr offset_ptr(self.storage.data, i + j) <> deptr offset_ptr(pat.storage.data, j) then { ok = false; break; }
                 j += 1
             }
             if ok then { return [Int]Option.Some(i); }
@@ -420,11 +420,11 @@ given String {
         let mut offset = 0
         let mut t = 0
         while t < times then {
-            copy_memory(data.offset(offset), self.storage.data, self.storage.len)
+            copy_memory(offset_ptr(data, offset), self.storage.data, self.storage.len)
             offset += self.storage.len
             t += 1
         }
-        data.offset(total).init(0)
+        init_memory(offset_ptr(data, total), 0)
         let storage = ref StringStorage(data, total, cap)
         String(storage)
     }
@@ -612,21 +612,21 @@ given String {
         let mut in_word = false
         let mut i = 0
         while i < self.storage.len then {
-            let b = self.storage.data.offset(i).peek()
+            let b = deptr offset_ptr(self.storage.data, i)
             if String.is_ascii_space(b) then {
                 in_word = false
-                data.offset(i).init(b)
+                init_memory(offset_ptr(data, i), b)
             } else {
                 if not in_word then {
                     in_word = true
-                    data.offset(i).init(String.to_upper_byte(b))
+                    init_memory(offset_ptr(data, i), String.to_upper_byte(b))
                 } else {
-                    data.offset(i).init(String.to_lower_byte(b))
+                    init_memory(offset_ptr(data, i), String.to_lower_byte(b))
                 }
             }
             i += 1
         }
-        data.offset(self.storage.len).init(0)
+        init_memory(offset_ptr(data, self.storage.len), 0)
         let storage = ref StringStorage(data, self.storage.len, cap)
         String(storage)
     }
@@ -652,21 +652,21 @@ given Int {
         // Extract digits in reverse order into buffer
         let buf = [UInt8]alloc_memory(21)
         let mut pos = 20
-        buf.offset(pos).init(0)
+        init_memory(offset_ptr(buf, pos), 0)
         while n > 0 then {
             pos -= 1
-            buf.offset(pos).init((UInt8){ n % 10 } + '0')
+            init_memory(offset_ptr(buf, pos), (UInt8){ n % 10 } + '0')
             n = n / 10
         }
     
         if is_negative then {
             pos -= 1
-            buf.offset(pos).init('-')
+            init_memory(offset_ptr(buf, pos), '-')
         }
         
         let len = 20 - pos
         if pos > 0 then {
-            move_memory(buf, buf.offset(pos), len + 1)
+            move_memory(buf, offset_ptr(buf, pos), len + 1)
         }
         let storage = ref StringStorage(buf, len, 21)
         String(storage)
@@ -708,16 +708,16 @@ given UInt {
         let mut n = self
         let buf = [UInt8]alloc_memory(21)
         let mut pos = 20
-        buf.offset(pos).init(0)
+        init_memory(offset_ptr(buf, pos), 0)
         while n > 0u then {
             pos -= 1
-            buf.offset(pos).init((UInt8){ n % 10u } + '0')
+            init_memory(offset_ptr(buf, pos), (UInt8){ n % 10u } + '0')
             n = n / 10u
         }
     
         let len = 20 - pos
         if pos > 0 then {
-            move_memory(buf, buf.offset(pos), len + 1)
+            move_memory(buf, offset_ptr(buf, pos), len + 1)
         }
         let storage = ref StringStorage(buf, len, 21)
         String(storage)
@@ -966,10 +966,10 @@ given Rune {
         // Handle invalid code points - return replacement character
         if not self.is_valid() then {
             let data = [UInt8]alloc_memory(4)
-            data.offset(0).init(239u8)   // 0xEF
-            data.offset(1).init(191u8)   // 0xBF
-            data.offset(2).init(189u8)   // 0xBD
-            data.offset(3).init(0u8)
+            init_memory(offset_ptr(data, 0), 239u8)   // 0xEF
+            init_memory(offset_ptr(data, 1), 191u8)   // 0xBF
+            init_memory(offset_ptr(data, 2), 189u8)   // 0xBD
+            init_memory(offset_ptr(data, 3), 0u8)
             let storage = ref StringStorage(data, 3, 4)
             return String(storage)
         }
@@ -977,8 +977,8 @@ given Rune {
         // 1-byte sequence (ASCII)
         if cp < 128u32 then {
             let data = [UInt8]alloc_memory(2)
-            data.offset(0).init((UInt8)cp)
-            data.offset(1).init(0u8)
+            init_memory(offset_ptr(data, 0), (UInt8)cp)
+            init_memory(offset_ptr(data, 1), 0u8)
             let storage = ref StringStorage(data, 1, 2)
             return String(storage)
         }
@@ -986,9 +986,9 @@ given Rune {
         // 2-byte sequence
         if cp < 2048u32 then {
             let data = [UInt8]alloc_memory(3)
-            data.offset(0).init((UInt8){ cp >> 6 } | 192u8)
-            data.offset(1).init((UInt8){ cp & 63u32 } | 128u8)
-            data.offset(2).init(0u8)
+            init_memory(offset_ptr(data, 0), (UInt8){ cp >> 6 } | 192u8)
+            init_memory(offset_ptr(data, 1), (UInt8){ cp & 63u32 } | 128u8)
+            init_memory(offset_ptr(data, 2), 0u8)
             let storage = ref StringStorage(data, 2, 3)
             return String(storage)
         }
@@ -996,21 +996,21 @@ given Rune {
         // 3-byte sequence
         if cp < 65536u32 then {
             let data = [UInt8]alloc_memory(4)
-            data.offset(0).init((UInt8){ cp >> 12 } | 224u8)
-            data.offset(1).init((UInt8){ { cp >> 6 } & 63u32 } | 128u8)
-            data.offset(2).init((UInt8){ cp & 63u32 } | 128u8)
-            data.offset(3).init(0u8)
+            init_memory(offset_ptr(data, 0), (UInt8){ cp >> 12 } | 224u8)
+            init_memory(offset_ptr(data, 1), (UInt8){ { cp >> 6 } & 63u32 } | 128u8)
+            init_memory(offset_ptr(data, 2), (UInt8){ cp & 63u32 } | 128u8)
+            init_memory(offset_ptr(data, 3), 0u8)
             let storage = ref StringStorage(data, 3, 4)
             return String(storage)
         }
         
         // 4-byte sequence
         let data = [UInt8]alloc_memory(5)
-        data.offset(0).init((UInt8){ cp >> 18 } | 240u8)
-        data.offset(1).init((UInt8){ { cp >> 12 } & 63u32 } | 128u8)
-        data.offset(2).init((UInt8){ { cp >> 6 } & 63u32 } | 128u8)
-        data.offset(3).init((UInt8){ cp & 63u32 } | 128u8)
-        data.offset(4).init(0u8)
+        init_memory(offset_ptr(data, 0), (UInt8){ cp >> 18 } | 240u8)
+        init_memory(offset_ptr(data, 1), (UInt8){ { cp >> 12 } & 63u32 } | 128u8)
+        init_memory(offset_ptr(data, 2), (UInt8){ { cp >> 6 } & 63u32 } | 128u8)
+        init_memory(offset_ptr(data, 3), (UInt8){ cp & 63u32 } | 128u8)
+        init_memory(offset_ptr(data, 4), 0u8)
         let storage = ref StringStorage(data, 4, 5)
         String(storage)
     }

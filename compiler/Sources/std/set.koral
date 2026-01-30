@@ -15,7 +15,7 @@ public type [T Hashable]SetBucket {
 }
 
 public type [T Hashable]SetStorage(
-    mut buckets [[T]SetBucket]Pointer,
+    mut buckets [T]SetBucket ptr,
     mut count Int,
     mut capacity Int
 )
@@ -24,7 +24,7 @@ given[T Hashable] [T]SetStorage {
     __drop(self ref) = {
         let mut i = 0
         while i < self.capacity then {
-            self.buckets.offset(i).deinit()
+            deinit_memory(offset_ptr(self.buckets, i))
             i += 1
         }
         dealloc_memory(self.buckets)
@@ -46,7 +46,7 @@ given[T Hashable] [T]Set {
         let buckets = [[T]SetBucket]alloc_memory(capacity)
         let mut i = 0
         while i < capacity then {
-            buckets.offset(i).init([T]SetBucket.Empty())
+            init_memory(offset_ptr(buckets, i), [T]SetBucket.Empty())
             i += 1
         }
         let storage = ref [T]SetStorage(buckets, 0, capacity)
@@ -59,7 +59,7 @@ given[T Hashable] [T]Set {
         let buckets = [[T]SetBucket]alloc_memory(cap)
         let mut i = 0
         while i < cap then {
-            buckets.offset(i).init([T]SetBucket.Empty())
+            init_memory(offset_ptr(buckets, i), [T]SetBucket.Empty())
             i += 1
         }
         let storage = ref [T]SetStorage(buckets, 0, cap)
@@ -74,8 +74,8 @@ given[T Hashable] [T]Set {
             let new_buckets = [[T]SetBucket]alloc_memory(old.capacity)
             let mut i = 0
             while i < old.capacity then {
-                let bucket = old.buckets.offset(i).peek()
-                new_buckets.offset(i).init(bucket)
+                let bucket = deptr offset_ptr(old.buckets, i)
+                init_memory(offset_ptr(new_buckets, i), bucket)
                 i += 1
             }
             let new_storage = ref [T]SetStorage(new_buckets, old.count, old.capacity)
@@ -90,7 +90,7 @@ given[T Hashable] [T]Set {
         let mut first_deleted = 0 - 1
         let mut probes = 0
         while probes < self.storage.capacity then {
-            let bucket = self.storage.buckets.offset(idx).peek()
+            let bucket = deptr offset_ptr(self.storage.buckets, idx)
             when bucket is {
                 .Empty then {
                     if first_deleted >= 0 then { return first_deleted; }
@@ -116,7 +116,7 @@ given[T Hashable] [T]Set {
         let new_buckets = [[T]SetBucket]alloc_memory(new_cap)
         let mut i = 0
         while i < new_cap then {
-            new_buckets.offset(i).init([T]SetBucket.Empty())
+            init_memory(offset_ptr(new_buckets, i), [T]SetBucket.Empty())
             i += 1
         }
         self.storage.buckets = new_buckets
@@ -124,7 +124,7 @@ given[T Hashable] [T]Set {
         self.storage.count = 0
         i = 0
         while i < old_cap then {
-            let bucket = old_buckets.offset(i).take()
+            let bucket = take_memory(offset_ptr(old_buckets, i))
             when bucket is {
                 .Occupied(v) then { self.insert(v); },
                 _ then {},
@@ -141,11 +141,11 @@ given[T Hashable] [T]Set {
         if self.storage.count * 2 >= self.storage.capacity then { self.rehash(); }
         let idx = self.find_slot(ref value)
         if idx < 0 then { panic("Set insert failed"); }
-        let bucket = self.storage.buckets.offset(idx).peek()
+        let bucket = deptr offset_ptr(self.storage.buckets, idx)
         when bucket is {
             .Occupied(_) then false,
             .Empty or .Deleted then {
-                self.storage.buckets.offset(idx).replace([T]SetBucket.Occupied(value));
+                deptr offset_ptr(self.storage.buckets, idx) = [T]SetBucket.Occupied(value);
                 self.storage.count = self.storage.count + 1
                 true
             },
@@ -155,7 +155,7 @@ given[T Hashable] [T]Set {
     public contains(self, value T) Bool = {
         let idx = self.find_slot(ref value)
         if idx < 0 then { return false; }
-        let bucket = self.storage.buckets.offset(idx).peek()
+        let bucket = deptr offset_ptr(self.storage.buckets, idx)
         when bucket is {
             .Occupied(_) then true,
             _ then false,
@@ -166,10 +166,10 @@ given[T Hashable] [T]Set {
         self.ensure_unique()
         let idx = self.find_slot(ref value)
         if idx < 0 then { return false; }
-        let bucket = self.storage.buckets.offset(idx).peek()
+        let bucket = deptr offset_ptr(self.storage.buckets, idx)
         when bucket is {
             .Occupied(_) then {
-                self.storage.buckets.offset(idx).replace([T]SetBucket.Deleted());
+                deptr offset_ptr(self.storage.buckets, idx) = [T]SetBucket.Deleted();
                 self.storage.count = self.storage.count - 1
                 true
             },
@@ -183,7 +183,7 @@ given[T Hashable] [T]Set {
         self.ensure_unique()
         let mut i = 0
         while i < self.storage.capacity then {
-            self.storage.buckets.offset(i).replace([T]SetBucket.Empty());
+            deptr offset_ptr(self.storage.buckets, i) = [T]SetBucket.Empty();
             i += 1
         }
         self.storage.count = 0
@@ -228,7 +228,7 @@ given[T Hashable] [T]Set {
 given[T Hashable] [T]SetIterator {
     public next(self ref) [T]Option = {
         while self.index < self.storage.capacity then {
-            let bucket = self.storage.buckets.offset(self.index).peek()
+            let bucket = deptr offset_ptr(self.storage.buckets, self.index)
             self.index = self.index + 1
             when bucket is {
                 .Occupied(v) then { return [T]Option.Some(v); },
@@ -250,7 +250,7 @@ given [T ToString and Hashable] [T]Set {
         let mut first = true
         let mut i = 0
         while i < self.storage.capacity then {
-            let bucket = self.storage.buckets.offset(i).peek()
+            let bucket = deptr offset_ptr(self.storage.buckets, i)
             when bucket is {
                 .Occupied(v) then {
                     if not first then { result.push_string(", "); }

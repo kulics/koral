@@ -71,6 +71,7 @@ public typealias TypeParameterDecl = (name: String, constraints: [TypeNode])
 public indirect enum TypeNode: CustomStringConvertible {
   case identifier(String)
   case reference(TypeNode)
+  case pointer(TypeNode)
   case generic(base: String, args: [TypeNode])
   case inferredSelf
   /// Function type: [ParamType1, ParamType2, ..., ReturnType]Func
@@ -87,6 +88,8 @@ public indirect enum TypeNode: CustomStringConvertible {
       return name
     case .reference(let inner):
       return "\(inner) ref"
+    case .pointer(let inner):
+      return "\(inner) ptr"
     case .generic(let base, let args):
       let argsStr = args.map { $0.description }.joined(separator: ", ")
       return "[\(argsStr)]\(base)"
@@ -294,9 +297,10 @@ public struct MethodDeclaration {
 public indirect enum StatementNode {
   case variableDeclaration(
     name: String, type: TypeNode?, value: ExpressionNode, mutable: Bool, span: SourceSpan)
-  case assignment(target: ExpressionNode, value: ExpressionNode, span: SourceSpan)
-  case compoundAssignment(
-    target: ExpressionNode, operator: CompoundAssignmentOperator, value: ExpressionNode, span: SourceSpan)
+  case assignment(
+    target: ExpressionNode, operator: CompoundAssignmentOperator?, value: ExpressionNode, span: SourceSpan)
+  case deptrAssignment(
+    pointer: ExpressionNode, operator: CompoundAssignmentOperator?, value: ExpressionNode, span: SourceSpan)
   case expression(ExpressionNode, span: SourceSpan)
   case `return`(value: ExpressionNode?, span: SourceSpan)
   case `break`(span: SourceSpan)
@@ -308,8 +312,8 @@ extension StatementNode {
   public var span: SourceSpan {
     switch self {
     case .variableDeclaration(_, _, _, _, let span): return span
-    case .assignment(_, _, let span): return span
-    case .compoundAssignment(_, _, _, let span): return span
+    case .assignment(_, _, _, let span): return span
+    case .deptrAssignment(_, _, _, let span): return span
     case .expression(_, let span): return span
     case .return(_, let span): return span
     case .break(let span): return span
@@ -395,6 +399,8 @@ public indirect enum ExpressionNode {
   case bitwiseNotExpression(ExpressionNode)
   case derefExpression(ExpressionNode)
   case refExpression(ExpressionNode)
+  case ptrExpression(ExpressionNode)
+  case deptrExpression(ExpressionNode)
   case identifier(String)
   case blockExpression(statements: [StatementNode], finalExpression: ExpressionNode?)
   case ifExpression(

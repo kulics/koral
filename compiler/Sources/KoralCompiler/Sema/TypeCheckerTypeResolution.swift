@@ -27,9 +27,11 @@ extension TypeChecker {
       }
       return t
     case .reference(let inner):
-      // 仅支持一层，在 parser 已限制；此处直接映射到 Type.reference
       let base = try resolveTypeNode(inner)
       return .reference(inner: base)
+    case .pointer(let inner):
+      let base = try resolveTypeNode(inner)
+      return .pointer(element: base)
     case .generic(let base, let args):
       if let template = currentScope.lookupGenericStructTemplate(base) {
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
@@ -44,11 +46,6 @@ extension TypeChecker {
         
         // Validate generic constraints
         try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
-        
-        // Special case: Pointer<T> resolves directly to .pointer(element: T)
-        if (template.name(in: defIdMap) ?? "") == "Pointer" {
-          return .pointer(element: resolvedArgs[0])
-        }
         
         // Build recursion detection key
         let recursionKey = "\(base)<\(resolvedArgs.map { $0.description }.joined(separator: ","))>"
@@ -218,14 +215,13 @@ extension TypeChecker {
     case .reference(let inner):
       let base = try resolveTypeNodeWithSubstitution(inner, substitution: substitution)
       return .reference(inner: base)
+
+    case .pointer(let inner):
+      let base = try resolveTypeNodeWithSubstitution(inner, substitution: substitution)
+      return .pointer(element: base)
       
     case .generic(let base, let args):
       let resolvedArgs = try args.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
-      
-      // Special case: Pointer<T>
-      if base == "Pointer", resolvedArgs.count == 1 {
-        return .pointer(element: resolvedArgs[0])
-      }
       
       if currentScope.lookupGenericStructTemplate(base) != nil {
         return .genericStruct(template: base, args: resolvedArgs)
@@ -440,12 +436,12 @@ extension TypeChecker {
       return false
 
     case .pointer(_):
-      if let extensions = genericIntrinsicExtensionMethods["Pointer"],
+      if let extensions = genericIntrinsicExtensionMethods["Ptr"],
         extensions.contains(where: { $0.method.name == name })
       {
         return true
       }
-      if let extensions = genericExtensionMethods["Pointer"],
+      if let extensions = genericExtensionMethods["Ptr"],
         extensions.contains(where: { $0.method.name == name })
       {
         return true
@@ -700,6 +696,11 @@ extension TypeChecker {
   // Coerce numeric literals to the expected numeric type for annotations/parameters.
   func coerceLiteral(_ expr: TypedExpressionNode, to expected: Type) throws -> TypedExpressionNode
   {
+    if case .pointer = expected,
+       case .intrinsicCall(.nullPtr) = expr {
+      return .intrinsicCall(.nullPtr(resultType: expected))
+    }
+
     if isIntegerType(expected) {
       if case .integerLiteral(let value, _) = expr {
         return .integerLiteral(value: value, type: expected)

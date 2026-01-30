@@ -71,10 +71,12 @@ extension CodeGen {
           // Dereferencing a ref type updates the control block
           baseControl = "\(basePath).control"
           let innerCType = cTypeName(inner)
-          basePath = "((\(innerCType)*)\(basePath).ptr)->\(qualifiedName(for: member))"
+          let memberName = sanitizeCIdentifier(context.getName(member.defId) ?? "<unknown>")
+          basePath = "((\(innerCType)*)\(basePath).ptr)->\(memberName)"
         } else {
           // Accessing member of value type keeps the same control block
-          basePath += ".\(qualifiedName(for: member))"
+          let memberName = sanitizeCIdentifier(context.getName(member.defId) ?? "<unknown>")
+          basePath += ".\(memberName)"
         }
         curType = member.type
       }
@@ -114,12 +116,13 @@ extension CodeGen {
     var curType = source.type
     for member in path {
       var memberAccess: String
-      if case .reference(let inner) = curType {
+        let memberName = sanitizeCIdentifier(context.getName(member.defId) ?? "<unknown>")
+        if case .reference(let inner) = curType {
           let innerCType = cTypeName(inner)
-          memberAccess = "((\(innerCType)*)\(access).ptr)->\(qualifiedName(for: member))"
-      } else {
-          memberAccess = "\(access).\(qualifiedName(for: member))"
-      }
+          memberAccess = "((\(innerCType)*)\(access).ptr)->\(memberName)"
+        } else {
+          memberAccess = "\(access).\(memberName)"
+        }
       
       // Only apply type cast for non-reference struct members when the C types differ
       // This handles cases where generic type parameters are replaced with concrete types

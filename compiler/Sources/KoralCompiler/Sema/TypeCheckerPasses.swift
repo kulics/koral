@@ -608,7 +608,7 @@ extension TypeChecker {
           // Verify the base type exists (struct or union template)
           if currentScope.lookupGenericStructTemplate(baseName) == nil &&
              currentScope.lookupGenericUnionTemplate(baseName) == nil {
-            // It might be an intrinsic type like Pointer, which is OK
+            // It might be an intrinsic type like Ptr, which is OK
           }
         }
       }
@@ -711,7 +711,16 @@ extension TypeChecker {
       self.currentSpan = span
       if !typeParams.isEmpty {
         // Generic Given - register method signatures
-        guard case .generic(let baseName, let args) = typeNode else {
+        let baseName: String
+        let args: [TypeNode]
+        switch typeNode {
+        case .generic(let base, let typeArgs):
+          baseName = base
+          args = typeArgs
+        case .pointer(let inner):
+          baseName = "Ptr"
+          args = [inner]
+        default:
           throw SemanticError.invalidOperation(
             op: "generic given on non-generic type", type1: "", type2: "")
         }
@@ -744,7 +753,7 @@ extension TypeChecker {
         // Create a generic Self type for declaration-time checking
         let genericSelfArgs = typeParams.map { Type.genericParameter(name: $0.name) }
         let genericSelfType: Type
-        if baseName == "Pointer" && genericSelfArgs.count == 1 {
+        if baseName == "Ptr" && genericSelfArgs.count == 1 {
           genericSelfType = .pointer(element: genericSelfArgs[0])
         } else if currentScope.lookupGenericStructTemplate(baseName) != nil {
           genericSelfType = .genericStruct(template: baseName, args: genericSelfArgs)
@@ -894,7 +903,13 @@ extension TypeChecker {
       self.currentSpan = span
       if !typeParams.isEmpty {
         // Generic intrinsic given - register method signatures
-        guard case .generic(let baseName, _) = typeNode else {
+        let baseName: String
+        switch typeNode {
+        case .generic(let name, _):
+          baseName = name
+        case .pointer:
+          baseName = "Ptr"
+        default:
           throw SemanticError.invalidOperation(
             op: "generic given on non-generic type", type1: "", type2: "")
         }
@@ -1455,7 +1470,13 @@ extension TypeChecker {
       if !typeParams.isEmpty {
         // Generic Given - signatures were registered in Pass 2 (collectGivenSignatures)
         // Now we only need to check method bodies
-        guard case .generic(let baseName, _) = typeNode else {
+        let baseName: String
+        switch typeNode {
+        case .generic(let base, _):
+          baseName = base
+        case .pointer:
+          baseName = "Ptr"
+        default:
           throw SemanticError.invalidOperation(
             op: "generic given on non-generic type", type1: "", type2: "")
         }
@@ -1468,7 +1489,7 @@ extension TypeChecker {
         // Create a generic Self type for body checking
         let genericSelfArgs = typeParams.map { Type.genericParameter(name: $0.name) }
         let genericSelfType: Type
-        if baseName == "Pointer" && genericSelfArgs.count == 1 {
+        if baseName == "Ptr" && genericSelfArgs.count == 1 {
           genericSelfType = .pointer(element: genericSelfArgs[0])
         } else if currentScope.lookupGenericStructTemplate(baseName) != nil {
           genericSelfType = .genericStruct(template: baseName, args: genericSelfArgs)
@@ -1692,7 +1713,16 @@ extension TypeChecker {
       self.currentSpan = span
       if !typeParams.isEmpty {
         // Generic Given (Intrinsic)
-        guard case .generic(let baseName, let args) = typeNode else {
+        let baseName: String
+        let args: [TypeNode]
+        switch typeNode {
+        case .generic(let name, let typeArgs):
+          baseName = name
+          args = typeArgs
+        case .pointer(let inner):
+          baseName = "Ptr"
+          args = [inner]
+        default:
           throw SemanticError.invalidOperation(
             op: "generic given on non-generic type", type1: "", type2: "")
         }

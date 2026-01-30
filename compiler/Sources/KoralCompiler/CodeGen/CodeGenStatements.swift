@@ -10,7 +10,7 @@
 // The generateStatement method handles:
 // - variableDeclaration: Variable declaration with initialization
 // - assignment: Assignment to variables and member paths
-// - compoundAssignment: Compound assignment operators (+=, -=, etc.)
+// - assignment: Assignment statements (including compound operators)
 // - expression: Expression statements
 // - return: Return statements with cleanup
 // - break: Break statements with cleanup

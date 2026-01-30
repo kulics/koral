@@ -687,7 +687,7 @@ public class TypeChecker {
       // Add parameters to new scope
       for param in params {
         if let name = context.getName(param.defId) {
-          currentScope.define(name, defId: param.defId)
+          try currentScope.defineLocal(name, defId: param.defId, line: currentLine)
         }
       }
 

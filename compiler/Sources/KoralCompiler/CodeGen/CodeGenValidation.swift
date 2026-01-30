@@ -166,6 +166,12 @@ extension CodeGen {
       
     case .referenceExpression(let inner, _):
       validateExpression(inner, context: "\(context) -> reference inner")
+
+    case .ptrExpression(let inner, _):
+      validateExpression(inner, context: "\(context) -> ptr inner")
+
+    case .deptrExpression(let inner, _):
+      validateExpression(inner, context: "\(context) -> deptr inner")
       
     case .blockExpression(let statements, let finalExpr, _):
       for stmt in statements {
@@ -326,13 +332,13 @@ extension CodeGen {
       assertTypeResolved(identifier.type, contextInfo: "\(context) -> variable declaration '\(name)'")
       validateExpression(value, context: "\(context) -> variable declaration value")
       
-    case .assignment(let target, let value):
+    case .assignment(let target, _, let value):
       validateExpression(target, context: "\(context) -> assignment target")
       validateExpression(value, context: "\(context) -> assignment value")
-      
-    case .compoundAssignment(let target, _, let value):
-      validateExpression(target, context: "\(context) -> compound assignment target")
-      validateExpression(value, context: "\(context) -> compound assignment value")
+
+    case .deptrAssignment(let pointer, _, let value):
+      validateExpression(pointer, context: "\(context) -> deptr assignment pointer")
+      validateExpression(value, context: "\(context) -> deptr assignment value")
       
     case .expression(let expr):
       validateExpression(expr, context: "\(context) -> expression statement")
@@ -370,29 +376,22 @@ extension CodeGen {
     case .refCount(let val):
       validateExpression(val, context: "\(context) -> refCount val")
       
-    case .ptrInit(let ptr, let val):
-      validateExpression(ptr, context: "\(context) -> ptrInit ptr")
-      validateExpression(val, context: "\(context) -> ptrInit val")
+    case .initMemory(let ptr, let val):
+      validateExpression(ptr, context: "\(context) -> initMemory ptr")
+      validateExpression(val, context: "\(context) -> initMemory val")
       
-    case .ptrDeinit(let ptr):
-      validateExpression(ptr, context: "\(context) -> ptrDeinit ptr")
+    case .deinitMemory(let ptr):
+      validateExpression(ptr, context: "\(context) -> deinitMemory ptr")
       
-    case .ptrPeek(let ptr):
-      validateExpression(ptr, context: "\(context) -> ptrPeek ptr")
+    case .takeMemory(let ptr):
+      validateExpression(ptr, context: "\(context) -> takeMemory ptr")
       
-    case .ptrTake(let ptr):
-      validateExpression(ptr, context: "\(context) -> ptrTake ptr")
+    case .offsetPtr(let ptr, let offset):
+      validateExpression(ptr, context: "\(context) -> offsetPtr ptr")
+      validateExpression(offset, context: "\(context) -> offsetPtr offset")
       
-    case .ptrReplace(let ptr, let val):
-      validateExpression(ptr, context: "\(context) -> ptrReplace ptr")
-      validateExpression(val, context: "\(context) -> ptrReplace val")
-      
-    case .ptrBits:
+    case .nullPtr:
       break  // No expressions to validate
-      
-    case .ptrOffset(let ptr, let offset):
-      validateExpression(ptr, context: "\(context) -> ptrOffset ptr")
-      validateExpression(offset, context: "\(context) -> ptrOffset offset")
       
     case .exit(let code):
       validateExpression(code, context: "\(context) -> exit code")

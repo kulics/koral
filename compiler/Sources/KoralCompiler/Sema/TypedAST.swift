@@ -157,9 +157,10 @@ public struct TypedMethodDeclaration {
 }
 public indirect enum TypedStatementNode {
   case variableDeclaration(identifier: Symbol, value: TypedExpressionNode, mutable: Bool)
-  case assignment(target: TypedExpressionNode, value: TypedExpressionNode)
-  case compoundAssignment(
-    target: TypedExpressionNode, operator: CompoundAssignmentOperator, value: TypedExpressionNode)
+  case assignment(
+    target: TypedExpressionNode, operator: CompoundAssignmentOperator?, value: TypedExpressionNode)
+  case deptrAssignment(
+    pointer: TypedExpressionNode, operator: CompoundAssignmentOperator?, value: TypedExpressionNode)
   case expression(TypedExpressionNode)
   case `return`(value: TypedExpressionNode?)
   case `break`
@@ -185,6 +186,8 @@ public indirect enum TypedExpressionNode {
   case bitwiseNotExpression(expression: TypedExpressionNode, type: Type)
   case derefExpression(expression: TypedExpressionNode, type: Type)
   case referenceExpression(expression: TypedExpressionNode, type: Type)
+  case ptrExpression(expression: TypedExpressionNode, type: Type)
+  case deptrExpression(expression: TypedExpressionNode, type: Type)
   case variable(identifier: Symbol)
   case blockExpression(
     statements: [TypedStatementNode], finalExpression: TypedExpressionNode?, type: Type)
@@ -271,13 +274,11 @@ public indirect enum TypedIntrinsic {
   case refCount(val: TypedExpressionNode)
 
   // Pointer Operations
-  case ptrInit(ptr: TypedExpressionNode, val: TypedExpressionNode)
-  case ptrDeinit(ptr: TypedExpressionNode)
-  case ptrPeek(ptr: TypedExpressionNode)
-  case ptrOffset(ptr: TypedExpressionNode, offset: TypedExpressionNode)
-  case ptrTake(ptr: TypedExpressionNode)
-  case ptrReplace(ptr: TypedExpressionNode, val: TypedExpressionNode)
-  case ptrBits  // Returns pointer bit width (32 or 64)
+  case initMemory(ptr: TypedExpressionNode, val: TypedExpressionNode)
+  case deinitMemory(ptr: TypedExpressionNode)
+  case offsetPtr(ptr: TypedExpressionNode, offset: TypedExpressionNode)
+  case takeMemory(ptr: TypedExpressionNode)
+  case nullPtr(resultType: Type)
 
   // Bit utilities
   case float32Bits(value: TypedExpressionNode)
@@ -301,21 +302,13 @@ public indirect enum TypedIntrinsic {
     case .copyMemory: return .void
     case .moveMemory: return .void
     case .refCount: return .int
-    case .ptrInit: return .void
-    case .ptrDeinit: return .void
-    case .ptrPeek(let ptr):
-      if case .pointer(let element) = ptr.type {
-        return element
-      }
-      fatalError("ptrPeek on non-pointer")
-    case .ptrOffset(let ptr, _): return ptr.type
-    case .ptrTake(let ptr):
+    case .initMemory: return .void
+    case .deinitMemory: return .void
+    case .offsetPtr(let ptr, _): return ptr.type
+    case .takeMemory(let ptr):
       if case .pointer(let element) = ptr.type { return element }
-      fatalError("ptrTake on non-pointer")
-    case .ptrReplace(let ptr, _):
-      if case .pointer(let element) = ptr.type { return element }
-      fatalError("ptrReplace on non-pointer")
-    case .ptrBits: return .int
+      fatalError("takeMemory on non-pointer")
+    case .nullPtr(let resultType): return resultType
 
     case .float32Bits: return .uint32
     case .float64Bits: return .uint64
@@ -399,6 +392,8 @@ extension TypedExpressionNode {
       .bitwiseNotExpression(_, let type),
       .derefExpression(_, let type),
       .referenceExpression(_, let type),
+      .ptrExpression(_, let type),
+      .deptrExpression(_, let type),
       .blockExpression(_, _, let type),
       .ifExpression(_, _, _, let type),
       .ifPatternExpression(_, _, _, _, _, let type),
@@ -442,6 +437,8 @@ extension TypedExpressionNode {
     case .referenceExpression:
 
       // &expr 是一个临时值（指针）
+      return .rvalue
+    case .ptrExpression, .deptrExpression:
       return .rvalue
     case .castExpression:
       return .rvalue

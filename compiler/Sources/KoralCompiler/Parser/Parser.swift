@@ -134,11 +134,17 @@ public class Parser {
       if currentToken === .equal {
         try match(.equal)
         let value = try expression()
-        return .assignment(target: expr, value: value, span: startSpan)
+        if case .deptrExpression(let pointer) = expr {
+          return .deptrAssignment(pointer: pointer, operator: nil, value: value, span: startSpan)
+        }
+        return .assignment(target: expr, operator: nil, value: value, span: startSpan)
       } else if let op = getCompoundAssignmentOperator(currentToken) {
         try match(currentToken)
         let value = try expression()
-        return .compoundAssignment(
+        if case .deptrExpression(let pointer) = expr {
+          return .deptrAssignment(pointer: pointer, operator: op, value: value, span: startSpan)
+        }
+        return .assignment(
           target: expr, operator: op, value: value, span: startSpan)
       }
       return .expression(expr, span: startSpan)

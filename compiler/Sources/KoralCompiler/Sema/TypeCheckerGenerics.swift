@@ -205,6 +205,22 @@ extension TypeChecker {
     
     // First, do basic unification from argument types
     for (typedArg, param) in zip(arguments, template.parameters) {
+      if case .identifier(let name) = param.type,
+         typeParams.contains(name),
+         let existing = inferred[name],
+         typedArg.type != existing {
+        switch typedArg {
+        case .integerLiteral:
+          if isIntegerType(existing) { continue }
+        case .floatLiteral:
+          if isFloatType(existing) { continue }
+        case .stringLiteral(let value, _):
+          if existing == .uint8, singleByteASCII(from: value) != nil { continue }
+          if isRuneType(existing), singleRuneCodePoint(from: value) != nil { continue }
+        default:
+          break
+        }
+      }
       try unify(node: param.type, type: typedArg.type, inferred: &inferred, typeParams: typeParams)
     }
     
@@ -301,10 +317,12 @@ extension TypeChecker {
       if case .reference(let innerType) = type {
         try unify(node: inner, type: innerType, inferred: &inferred, typeParams: typeParams)
       }
+    case .pointer(let inner):
+      if case .pointer(let elementType) = type {
+        try unify(node: inner, type: elementType, inferred: &inferred, typeParams: typeParams)
+      }
     case .generic(let base, let args):
-      if case .pointer(let element) = type, base == "Pointer", args.count == 1 {
-        try unify(node: args[0], type: element, inferred: &inferred, typeParams: typeParams)
-      } else if case .genericStruct(let templateName, let typeArgs) = type {
+      if case .genericStruct(let templateName, let typeArgs) = type {
         // Match against genericStruct type
         if templateName == base && typeArgs.count == args.count {
           for (argNode, argType) in zip(args, typeArgs) {

@@ -19,9 +19,18 @@ extension Parser {
     if currentToken === .selfTypeKeyword {
       try match(.selfTypeKeyword)
       var type: TypeNode = .inferredSelf
-      if currentToken === .refKeyword {
-        try match(.refKeyword)
-        type = .reference(type)
+      while true {
+        if currentToken === .refKeyword {
+          try match(.refKeyword)
+          type = .reference(type)
+          continue
+        }
+        if currentToken === .ptrKeyword {
+          try match(.ptrKeyword)
+          type = .pointer(type)
+          continue
+        }
+        break
       }
       return type
     }
@@ -55,18 +64,37 @@ extension Parser {
         let returnType = args.last!
         let paramTypes = Array(args.dropLast())
         var type: TypeNode = .functionType(paramTypes: paramTypes, returnType: returnType)
-        if currentToken === .refKeyword {
-          try match(.refKeyword)
-          type = .reference(type)
+        while true {
+          if currentToken === .refKeyword {
+            try match(.refKeyword)
+            type = .reference(type)
+            continue
+          }
+          if currentToken === .ptrKeyword {
+            try match(.ptrKeyword)
+            type = .pointer(type)
+            continue
+          }
+          break
         }
         return type
       }
 
+
       // Regular generic type
       var type = TypeNode.generic(base: name, args: args)
-      if currentToken === .refKeyword {
-        try match(.refKeyword)
-        type = .reference(type)
+      while true {
+        if currentToken === .refKeyword {
+          try match(.refKeyword)
+          type = .reference(type)
+          continue
+        }
+        if currentToken === .ptrKeyword {
+          try match(.ptrKeyword)
+          type = .pointer(type)
+          continue
+        }
+        break
       }
       return type
     }
@@ -106,9 +134,18 @@ extension Parser {
         try match(.identifier(typeName))
         
         var type = TypeNode.moduleQualifiedGeneric(module: name, base: typeName, args: args)
-        if currentToken === .refKeyword {
-          try match(.refKeyword)
-          type = .reference(type)
+        while true {
+          if currentToken === .refKeyword {
+            try match(.refKeyword)
+            type = .reference(type)
+            continue
+          }
+          if currentToken === .ptrKeyword {
+            try match(.ptrKeyword)
+            type = .pointer(type)
+            continue
+          }
+          break
         }
         return type
       }
@@ -125,9 +162,18 @@ extension Parser {
       try match(.identifier(typeName))
       
       var type: TypeNode = .moduleQualified(module: name, name: typeName)
-      if currentToken === .refKeyword {
-        try match(.refKeyword)
-        type = .reference(type)
+      while true {
+        if currentToken === .refKeyword {
+          try match(.refKeyword)
+          type = .reference(type)
+          continue
+        }
+        if currentToken === .ptrKeyword {
+          try match(.ptrKeyword)
+          type = .pointer(type)
+          continue
+        }
+        break
       }
       return type
     }
@@ -139,10 +185,19 @@ extension Parser {
 
     var type: TypeNode = .identifier(name)
 
-    // Handle reference type suffix
-    if currentToken === .refKeyword {
-      try match(.refKeyword)
-      type = .reference(type)
+    // Handle reference/pointer type suffix
+    while true {
+      if currentToken === .refKeyword {
+        try match(.refKeyword)
+        type = .reference(type)
+        continue
+      }
+      if currentToken === .ptrKeyword {
+        try match(.ptrKeyword)
+        type = .pointer(type)
+        continue
+      }
+      break
     }
 
     return type

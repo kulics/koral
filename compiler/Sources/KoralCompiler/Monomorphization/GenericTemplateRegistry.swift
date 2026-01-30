@@ -76,7 +76,7 @@ public struct GenericTemplateRegistry {
     public var extensionMethods: [String: [GenericExtensionMethodTemplate]]
     
     /// Intrinsic extension methods indexed by type name.
-    /// These are built-in methods like Pointer.init, Pointer.peek, etc.
+    /// These are built-in methods like Ptr.init, Ptr.peek, etc.
     public var intrinsicExtensionMethods: [String: [(typeParams: [TypeParameterDecl], method: IntrinsicMethodDeclaration)]]
     
     /// Trait declarations indexed by trait name
@@ -87,7 +87,7 @@ public struct GenericTemplateRegistry {
     /// These are methods defined on non-generic types.
     public var concreteExtensionMethods: [String: [String: Symbol]]
     
-    /// Set of intrinsic generic type names (e.g., "Pointer")
+    /// Set of intrinsic generic type names (e.g., "Ptr")
     /// These types don't have Koral source implementations and need special handling during monomorphization.
     public var intrinsicGenericTypes: Set<String>
     

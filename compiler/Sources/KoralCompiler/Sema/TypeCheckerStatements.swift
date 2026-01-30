@@ -56,15 +56,133 @@ extension TypeChecker {
         type: type,
         kind: mutable ? .variable(.MutableValue) : .variable(.Value)
       )
-      currentScope.define(name, defId: symbol.defId)
+      try currentScope.defineLocal(name, defId: symbol.defId, line: currentSpan.line)
       return .variableDeclaration(
         identifier: symbol,
         value: typedValue,
         mutable: mutable
       )
 
-    case .assignment(let target, let value, let span):
+    case .assignment(let target, let op, let value, let span):
       self.currentSpan = span
+      if let op {
+        // Lower `x[i] op= v` into a call to `x.__update_at(i, deref x[i] op v)`.
+        if case .subscriptExpression(let baseExpr, let argExprs) = target {
+          let typedBase = try inferTypedExpression(baseExpr)
+          let typedArgs = try argExprs.map { try inferTypedExpression($0) }
+
+          // Evaluate base (by reference), args once.
+          if typedBase.valueCategory != .lvalue {
+            throw SemanticError.invalidOperation(
+              op: "implicit ref", type1: typedBase.type.description, type2: "rvalue")
+          }
+          let baseRefType: Type = .reference(inner: typedBase.type)
+          let baseRefExpr: TypedExpressionNode = .referenceExpression(
+            expression: typedBase, type: baseRefType)
+          let baseSym = nextSynthSymbol(prefix: "sub_base", type: baseRefType)
+          var stmts: [TypedStatementNode] = [
+            .variableDeclaration(identifier: baseSym, value: baseRefExpr, mutable: false)
+          ]
+
+          var argSyms: [Symbol] = []
+          for a in typedArgs {
+            let s = nextSynthSymbol(prefix: "sub_idx", type: a.type)
+            argSyms.append(s)
+            stmts.append(.variableDeclaration(identifier: s, value: a, mutable: false))
+          }
+
+          let baseVar: TypedExpressionNode = .variable(identifier: baseSym)
+          let argVars: [TypedExpressionNode] = argSyms.map { .variable(identifier: $0) }
+          let readRef = try resolveSubscript(base: baseVar, args: argVars)
+
+          let elementType: Type
+          let oldValueExpr: TypedExpressionNode
+          if case .reference(let inner) = readRef.type {
+            elementType = inner
+            oldValueExpr = .derefExpression(expression: readRef, type: inner)
+          } else {
+            elementType = readRef.type
+            oldValueExpr = readRef
+          }
+          let oldSym = nextSynthSymbol(prefix: "sub_old", type: elementType)
+          stmts.append(.variableDeclaration(identifier: oldSym, value: oldValueExpr, mutable: false))
+
+          var typedRhs = try inferTypedExpression(value)
+          typedRhs = try coerceLiteral(typedRhs, to: elementType)
+          if typedRhs.type != .never && typedRhs.type != elementType {
+            throw SemanticError.typeMismatch(
+              expected: elementType.description, got: typedRhs.type.description)
+          }
+
+          let rhsSym = nextSynthSymbol(prefix: "sub_rhs", type: typedRhs.type)
+          stmts.append(.variableDeclaration(identifier: rhsSym, value: typedRhs, mutable: false))
+
+          let newValueExpr: TypedExpressionNode
+          if let arithmeticOp = compoundOpToArithmeticOp(op) {
+            let _ = try checkArithmeticOp(arithmeticOp, elementType, typedRhs.type)
+            newValueExpr = .arithmeticExpression(
+              left: .variable(identifier: oldSym),
+              op: arithmeticOp,
+              right: .variable(identifier: rhsSym),
+              type: elementType
+            )
+          } else if let bitwiseOp = compoundOpToBitwiseOp(op) {
+            if !isIntegerScalarType(elementType) || elementType != typedRhs.type {
+              throw SemanticError.typeMismatch(
+                expected: "Matching Integer Types", got: "\(elementType) \(op) \(typedRhs.type)")
+            }
+            newValueExpr = .bitwiseExpression(
+              left: .variable(identifier: oldSym),
+              op: bitwiseOp,
+              right: .variable(identifier: rhsSym),
+              type: elementType
+            )
+          } else {
+            fatalError("Unknown compound assignment operator")
+          }
+
+          let (updateMethod, finalBase, expectedValueType) = try resolveSubscriptUpdateMethod(
+            base: baseVar, args: argVars)
+          if expectedValueType != elementType {
+            throw SemanticError.typeMismatch(
+              expected: expectedValueType.description, got: elementType.description)
+          }
+          let callee: TypedExpressionNode = .methodReference(
+            base: finalBase, method: updateMethod, typeArgs: nil, methodTypeArgs: nil, type: updateMethod.type)
+          let callExpr: TypedExpressionNode = .call(
+            callee: callee,
+            arguments: argVars + [newValueExpr],
+            type: .void
+          )
+          stmts.append(.expression(callExpr))
+
+          return .expression(.blockExpression(statements: stmts, finalExpression: nil, type: .void))
+        }
+
+        let typedTarget = try resolveLValue(target)
+        var typedValue = try inferTypedExpression(value)
+        typedValue = try coerceLiteral(typedValue, to: typedTarget.type)
+
+        if typedValue.type != .never && typedTarget.type != typedValue.type {
+          throw SemanticError.typeMismatch(
+            expected: typedTarget.type.description, got: typedValue.type.description)
+        }
+
+        if let arithmeticOp = compoundOpToArithmeticOp(op) {
+          let _ = try checkArithmeticOp(arithmeticOp, typedTarget.type, typedValue.type)
+        } else if let _ = compoundOpToBitwiseOp(op) {
+          if !isIntegerScalarType(typedTarget.type) || typedTarget.type != typedValue.type {
+            throw SemanticError.typeMismatch(
+              expected: "Matching Integer Types", got: "\(typedTarget.type) \(op) \(typedValue.type)")
+          }
+        } else {
+          fatalError("Unknown compound assignment operator")
+        }
+
+        return .assignment(target: typedTarget, operator: op, value: typedValue)
+      }
+
+      // Simple assignment
       // Lower `x[i] = v` into a call to `x.__update_at(i, v)`.
       if case .subscriptExpression(let baseExpr, let argExprs) = target {
         let typedBase = try inferTypedExpression(baseExpr)
@@ -134,116 +252,34 @@ extension TypeChecker {
           expected: typedTarget.type.description, got: typedValue.type.description)
       }
 
-      return .assignment(target: typedTarget, value: typedValue)
+      return .assignment(target: typedTarget, operator: nil, value: typedValue)
 
-    case .compoundAssignment(let target, let op, let value, let span):
+    case .deptrAssignment(let pointer, let op, let value, let span):
       self.currentSpan = span
-      // Lower `x[i] op= v` into a call to `x.__update_at(i, deref x[i] op v)`.
-      if case .subscriptExpression(let baseExpr, let argExprs) = target {
-        let typedBase = try inferTypedExpression(baseExpr)
-        let typedArgs = try argExprs.map { try inferTypedExpression($0) }
+      let typedPointer = try inferTypedExpression(pointer)
+      guard case .pointer(let elementType) = typedPointer.type else {
+        throw SemanticError(.generic("cannot dereference non-pointer type"))
+      }
 
-        // Evaluate base (by reference), args once.
-        if typedBase.valueCategory != .lvalue {
-          throw SemanticError.invalidOperation(
-            op: "implicit ref", type1: typedBase.type.description, type2: "rvalue")
-        }
-        let baseRefType: Type = .reference(inner: typedBase.type)
-        let baseRefExpr: TypedExpressionNode = .referenceExpression(
-          expression: typedBase, type: baseRefType)
-        let baseSym = nextSynthSymbol(prefix: "sub_base", type: baseRefType)
-        var stmts: [TypedStatementNode] = [
-          .variableDeclaration(identifier: baseSym, value: baseRefExpr, mutable: false)
-        ]
+      var typedValue = try inferTypedExpression(value)
+      typedValue = try coerceLiteral(typedValue, to: elementType)
+      if typedValue.type != .never && typedValue.type != elementType {
+        throw SemanticError.typeMismatch(
+          expected: elementType.description, got: typedValue.type.description)
+      }
 
-        var argSyms: [Symbol] = []
-        for a in typedArgs {
-          let s = nextSynthSymbol(prefix: "sub_idx", type: a.type)
-          argSyms.append(s)
-          stmts.append(.variableDeclaration(identifier: s, value: a, mutable: false))
-        }
-
-        let baseVar: TypedExpressionNode = .variable(identifier: baseSym)
-        let argVars: [TypedExpressionNode] = argSyms.map { .variable(identifier: $0) }
-        let readRef = try resolveSubscript(base: baseVar, args: argVars)
-
-        let elementType: Type
-        let oldValueExpr: TypedExpressionNode
-        if case .reference(let inner) = readRef.type {
-          elementType = inner
-          oldValueExpr = .derefExpression(expression: readRef, type: inner)
-        } else {
-          elementType = readRef.type
-          oldValueExpr = readRef
-        }
-        let oldSym = nextSynthSymbol(prefix: "sub_old", type: elementType)
-        stmts.append(.variableDeclaration(identifier: oldSym, value: oldValueExpr, mutable: false))
-
-        var typedRhs = try inferTypedExpression(value)
-        typedRhs = try coerceLiteral(typedRhs, to: elementType)
-        if typedRhs.type != .never && typedRhs.type != elementType {
-          throw SemanticError.typeMismatch(
-            expected: elementType.description, got: typedRhs.type.description)
-        }
-
-        let rhsSym = nextSynthSymbol(prefix: "sub_rhs", type: typedRhs.type)
-        stmts.append(.variableDeclaration(identifier: rhsSym, value: typedRhs, mutable: false))
-
-        let newValueExpr: TypedExpressionNode
+      if let op {
         if let arithmeticOp = compoundOpToArithmeticOp(op) {
-          let _ = try checkArithmeticOp(arithmeticOp, elementType, typedRhs.type)
-          newValueExpr = .arithmeticExpression(
-            left: .variable(identifier: oldSym),
-            op: arithmeticOp,
-            right: .variable(identifier: rhsSym),
-            type: elementType
-          )
-        } else if let bitwiseOp = compoundOpToBitwiseOp(op) {
-          // Check that both operands are integer types
-          if !isIntegerScalarType(elementType) || elementType != typedRhs.type {
+          let _ = try checkArithmeticOp(arithmeticOp, elementType, typedValue.type)
+        } else if let _ = compoundOpToBitwiseOp(op) {
+          if !isIntegerScalarType(elementType) || elementType != typedValue.type {
             throw SemanticError.typeMismatch(
-              expected: "Matching Integer Types", got: "\(elementType) \(op) \(typedRhs.type)")
+              expected: "Matching Integer Types", got: "\(elementType) \(op) \(typedValue.type)")
           }
-          newValueExpr = .bitwiseExpression(
-            left: .variable(identifier: oldSym),
-            op: bitwiseOp,
-            right: .variable(identifier: rhsSym),
-            type: elementType
-          )
-        } else {
-          fatalError("Unknown compound assignment operator")
-        }
-
-        let (updateMethod, finalBase, expectedValueType) = try resolveSubscriptUpdateMethod(
-          base: baseVar, args: argVars)
-        if expectedValueType != elementType {
-          throw SemanticError.typeMismatch(
-            expected: expectedValueType.description, got: elementType.description)
-        }
-        let callee: TypedExpressionNode = .methodReference(
-          base: finalBase, method: updateMethod, typeArgs: nil, methodTypeArgs: nil, type: updateMethod.type)
-        let callExpr: TypedExpressionNode = .call(
-          callee: callee,
-          arguments: argVars + [newValueExpr],
-          type: .void
-        )
-        stmts.append(.expression(callExpr))
-
-        return .expression(.blockExpression(statements: stmts, finalExpression: nil, type: .void))
-      }
-
-      let typedTarget = try resolveLValue(target)
-      let typedValue = try coerceLiteral(try inferTypedExpression(value), to: typedTarget.type)
-      if let arithmeticOp = compoundOpToArithmeticOp(op) {
-        let _ = try checkArithmeticOp(arithmeticOp, typedTarget.type, typedValue.type)
-      } else if let _ = compoundOpToBitwiseOp(op) {
-        // Check that both operands are integer types
-        if !isIntegerScalarType(typedTarget.type) || typedTarget.type != typedValue.type {
-          throw SemanticError.typeMismatch(
-            expected: "Matching Integer Types", got: "\(typedTarget.type) \(op) \(typedValue.type)")
         }
       }
-      return .compoundAssignment(target: typedTarget, operator: op, value: typedValue)
+
+      return .deptrAssignment(pointer: typedPointer, operator: op, value: typedValue)
 
     case .expression(let expr, let span):
       self.currentSpan = span

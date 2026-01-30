@@ -58,7 +58,7 @@ extension TypeChecker {
 
       for symbol in paramSymbols {
         if let name = context.getName(symbol.defId) {
-          currentScope.define(name, defId: symbol.defId)
+          try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
         }
       }
 
@@ -133,26 +133,25 @@ extension TypeChecker {
       if paramNames.contains(name) { return }
       
       // Look up the variable in scope with full info
-      if let info = currentScope.lookupWithInfo(name, sourceFile: currentSourceFile) {
+      if let defId = currentScope.lookup(name, sourceFile: currentSourceFile),
+         let info = currentScope.lookupWithInfo(name, sourceFile: currentSourceFile) {
         // Check if it's mutable - only immutable variables can be captured
         if info.mutable {
           throw SemanticError(.generic("Cannot capture mutable variable '\(name)'"), line: currentLine)
         }
         
         // Avoid duplicates
-        if !captures.contains(where: { context.getName($0.symbol.defId) == name }) {
+        if !captures.contains(where: { $0.symbol.defId == defId }) {
           let captureKind: CaptureKind
           if case .reference(_) = info.type {
             captureKind = .byReference
           } else {
             captureKind = .byValue
           }
-          
-          let symbol = makeLocalSymbol(
-            name: name,
-            type: info.type,
-            kind: .variable(.Value)
-          )
+
+          let kind = defIdMap.getSymbolKind(defId) ?? .variable(.Value)
+          let methodKind = defIdMap.getSymbolMethodKind(defId) ?? .normal
+          let symbol = Symbol(defId: defId, type: info.type, kind: kind, methodKind: methodKind)
           captures.append(CapturedVariable(symbol: symbol, captureKind: captureKind))
         }
       }
@@ -182,7 +181,9 @@ extension TypeChecker {
     case .notExpression(let inner),
          .bitwiseNotExpression(let inner),
          .derefExpression(let inner),
-         .refExpression(let inner):
+          .refExpression(let inner),
+          .ptrExpression(let inner),
+          .deptrExpression(let inner):
       try collectCapturedVariables(expr: inner, paramNames: paramNames, captures: &captures)
       
     case .ifExpression(let condition, let thenBranch, let elseBranch):
@@ -272,11 +273,11 @@ extension TypeChecker {
     switch stmt {
     case .variableDeclaration(_, _, let value, _, _):
       try collectCapturedVariables(expr: value, paramNames: paramNames, captures: &captures)
-    case .assignment(let target, let value, _):
+    case .assignment(let target, _, let value, _):
       try collectCapturedVariables(expr: target, paramNames: paramNames, captures: &captures)
       try collectCapturedVariables(expr: value, paramNames: paramNames, captures: &captures)
-    case .compoundAssignment(let target, _, let value, _):
-      try collectCapturedVariables(expr: target, paramNames: paramNames, captures: &captures)
+    case .deptrAssignment(let pointer, _, let value, _):
+      try collectCapturedVariables(expr: pointer, paramNames: paramNames, captures: &captures)
       try collectCapturedVariables(expr: value, paramNames: paramNames, captures: &captures)
     case .expression(let expr, _):
       try collectCapturedVariables(expr: expr, paramNames: paramNames, captures: &captures)

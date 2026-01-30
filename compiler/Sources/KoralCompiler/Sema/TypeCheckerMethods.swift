@@ -112,23 +112,23 @@ extension TypeChecker {
       return nil
 
     case .pointer(let element):
-      if let extensions = genericIntrinsicExtensionMethods["Pointer"],
+      if let extensions = genericIntrinsicExtensionMethods["Ptr"],
         let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveIntrinsicExtensionMethod(
           baseType: selfType,
-          templateName: "Pointer",
+          templateName: "Ptr",
           typeArgs: [element],
           methodInfo: ext
         )
       }
 
-      if let extensions = genericExtensionMethods["Pointer"],
+      if let extensions = genericExtensionMethods["Ptr"],
         let ext = extensions.first(where: { $0.method.name == name })
       {
         return try resolveGenericExtensionMethod(
           baseType: selfType,
-          templateName: "Pointer",
+          templateName: "Ptr",
           typeArgs: [element],
           methodInfo: ext
         )
@@ -326,7 +326,7 @@ extension TypeChecker {
       templateName = context.getTemplateName(defId) ?? name
       typeArgs = []
     case .pointer(let element):
-      templateName = "Pointer"
+      templateName = "Ptr"
       typeArgs = [element]
     default:
       throw SemanticError(.generic("Cannot call generic method on type \(baseType)"), line: currentLine)
@@ -844,7 +844,7 @@ extension TypeChecker {
       let len = try inferTypedExpression(arguments[1])
       let fd = try inferTypedExpression(arguments[2])
       guard case .pointer(let elem) = ptr.type, elem == .uint8 else {
-        throw SemanticError.typeMismatch(expected: "[UInt8]Pointer", got: ptr.type.description)
+        throw SemanticError.typeMismatch(expected: "UInt8 ptr", got: ptr.type.description)
       }
       if len.type != .int {
         throw SemanticError.typeMismatch(expected: "Int", got: len.type.description)
@@ -853,6 +853,56 @@ extension TypeChecker {
         throw SemanticError.typeMismatch(expected: "Int", got: fd.type.description)
       }
       return .intrinsicCall(.fwrite(ptr: ptr, len: len, fd: fd))
+
+    case "init_memory":
+      guard arguments.count == 2 else {
+        throw SemanticError.invalidArgumentCount(function: name, expected: 2, got: arguments.count)
+      }
+      let ptr = try inferTypedExpression(arguments[0])
+      guard case .pointer(let elementType) = ptr.type else {
+        throw SemanticError(.generic("cannot dereference non-pointer type"))
+      }
+      var val = try inferTypedExpression(arguments[1])
+      val = try coerceLiteral(val, to: elementType)
+      if val.type != elementType {
+        throw SemanticError.typeMismatch(
+          expected: elementType.description, got: val.type.description)
+      }
+      return .intrinsicCall(.initMemory(ptr: ptr, val: val))
+
+    case "deinit_memory":
+      guard arguments.count == 1 else {
+        throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
+      }
+      let ptr = try inferTypedExpression(arguments[0])
+      guard case .pointer = ptr.type else {
+        throw SemanticError(.generic("cannot dereference non-pointer type"))
+      }
+      return .intrinsicCall(.deinitMemory(ptr: ptr))
+
+    case "take_memory":
+      guard arguments.count == 1 else {
+        throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
+      }
+      let ptr = try inferTypedExpression(arguments[0])
+      guard case .pointer = ptr.type else {
+        throw SemanticError(.generic("cannot dereference non-pointer type"))
+      }
+      return .intrinsicCall(.takeMemory(ptr: ptr))
+
+    case "offset_ptr":
+      guard arguments.count == 2 else {
+        throw SemanticError.invalidArgumentCount(function: name, expected: 2, got: arguments.count)
+      }
+      let ptr = try inferTypedExpression(arguments[0])
+      guard case .pointer = ptr.type else {
+        throw SemanticError(.generic("cannot dereference non-pointer type"))
+      }
+      let offset = try inferTypedExpression(arguments[1])
+      if offset.type != .int {
+        throw SemanticError.typeMismatch(expected: "Int", got: offset.type.description)
+      }
+      return .intrinsicCall(.offsetPtr(ptr: ptr, offset: offset))
 
     case "fgetc":
       guard arguments.count == 1 else {
@@ -876,84 +926,6 @@ extension TypeChecker {
 
     default: return nil
     }
-  }
-
-  func checkIntrinsicPointerMethod(
-    base: TypedExpressionNode, method: Symbol, args: [ExpressionNode]
-  ) throws -> TypedExpressionNode? {
-    // method.name is mangled (e.g. Pointer_I_init). Extract the method name.
-    var name = context.getName(method.defId) ?? ""
-    if name.hasPrefix("Pointer_") {
-      if let idx = name.lastIndex(of: "_") {
-        name = String(name[name.index(after: idx)...])
-      }
-    }
-
-    guard case .pointer(let elementType) = base.type else { return nil }
-
-    switch name {
-    case "init":
-      guard args.count == 1 else {
-        throw SemanticError.invalidArgumentCount(function: "init", expected: 1, got: args.count)
-      }
-      var val = try inferTypedExpression(args[0])
-      val = try coerceLiteral(val, to: elementType)
-      if val.type != elementType {
-        throw SemanticError.typeMismatch(
-          expected: elementType.description, got: val.type.description)
-      }
-      return .intrinsicCall(.ptrInit(ptr: base, val: val))
-    case "deinit":
-      guard args.count == 0 else {
-        throw SemanticError.invalidArgumentCount(function: "deinit", expected: 0, got: args.count)
-      }
-      return .intrinsicCall(.ptrDeinit(ptr: base))
-    case "peek":
-      guard args.count == 0 else {
-        throw SemanticError.invalidArgumentCount(function: "peek", expected: 0, got: args.count)
-      }
-      return .intrinsicCall(.ptrPeek(ptr: base))
-    case "offset":
-      guard args.count == 1 else {
-        throw SemanticError.invalidArgumentCount(function: "offset", expected: 1, got: args.count)
-      }
-      let offset = try inferTypedExpression(args[0])
-      if offset.type != .int {
-        throw SemanticError.typeMismatch(expected: "Int", got: offset.type.description)
-      }
-      return .intrinsicCall(.ptrOffset(ptr: base, offset: offset))
-    case "take":
-      guard args.count == 0 else {
-        throw SemanticError.invalidArgumentCount(function: "take", expected: 0, got: args.count)
-      }
-      return .intrinsicCall(.ptrTake(ptr: base))
-    case "replace":
-      guard args.count == 1 else {
-        throw SemanticError.invalidArgumentCount(function: "replace", expected: 1, got: args.count)
-      }
-      var val = try inferTypedExpression(args[0])
-      val = try coerceLiteral(val, to: elementType)
-      if val.type != elementType {
-        throw SemanticError.typeMismatch(
-          expected: elementType.description, got: val.type.description)
-      }
-      return .intrinsicCall(.ptrReplace(ptr: base, val: val))
-    default:
-      return nil
-    }
-  }
-
-  func checkIntrinsicPointerStaticMethod(
-    typeName: String, methodName: String, args: [ExpressionNode]
-  ) throws -> TypedExpressionNode? {
-    // Handle Pointer.bit_width() static method
-    if methodName == "bit_width" {
-      guard args.count == 0 else {
-        throw SemanticError.invalidArgumentCount(function: "bit_width", expected: 0, got: args.count)
-      }
-      return .intrinsicCall(.ptrBits)
-    }
-    return nil
   }
 
   func checkIntrinsicFloatMethod(
