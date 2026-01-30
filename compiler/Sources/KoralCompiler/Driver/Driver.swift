@@ -388,24 +388,23 @@ public class Driver {
   func getCoreLibPath() -> String {
     // Check KORAL_HOME environment variable first
     if let koralHome = ProcessInfo.processInfo.environment["KORAL_HOME"] {
-        let path = URL(fileURLWithPath: koralHome).appendingPathComponent("compiler/Sources/std/std.koral").path
+        let path = URL(fileURLWithPath: koralHome).appendingPathComponent("std/std.koral").path
         if FileManager.default.fileExists(atPath: path) {
             return path
         }
     }
 
-    // Fallback: Assume we are running from .build/debug/ or similar, try to find source root
-    // This is a heuristic for development environment
-    let currentPath = FileManager.default.currentDirectoryPath
-    let devPath = URL(fileURLWithPath: currentPath).appendingPathComponent("Sources/std/std.koral").path
-    if FileManager.default.fileExists(atPath: devPath) {
-        return devPath
-    }
-    
-    // Fallback for tests running in package root
-    let testPath = URL(fileURLWithPath: currentPath).appendingPathComponent("compiler/Sources/std/std.koral").path
-    if FileManager.default.fileExists(atPath: testPath) {
-         return testPath
+    // Fallback: Try common relative locations (package root, repo root, build dirs)
+    let currentURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+    let candidatePaths = [
+      currentURL.appendingPathComponent("std/std.koral").path,
+      currentURL.deletingLastPathComponent().appendingPathComponent("std/std.koral").path,
+      currentURL.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("std/std.koral").path
+    ]
+    for path in candidatePaths {
+      if FileManager.default.fileExists(atPath: path) {
+        return path
+      }
     }
 
     print("Error: Could not locate std/std.koral. Please set KORAL_HOME environment variable.")
@@ -416,23 +415,23 @@ public class Driver {
   func getStdLibPath() -> String? {
     // Check KORAL_HOME environment variable first
     if let koralHome = ProcessInfo.processInfo.environment["KORAL_HOME"] {
-        let path = URL(fileURLWithPath: koralHome).appendingPathComponent("compiler/Sources/std").path
+        let path = URL(fileURLWithPath: koralHome).appendingPathComponent("std").path
         if FileManager.default.fileExists(atPath: path) {
             return path
         }
     }
 
-    // Fallback: Assume we are running from .build/debug/ or similar
-    let currentPath = FileManager.default.currentDirectoryPath
-    let devPath = URL(fileURLWithPath: currentPath).appendingPathComponent("Sources/std").path
-    if FileManager.default.fileExists(atPath: devPath) {
-        return devPath
-    }
-    
-    // Fallback for tests running in package root
-    let testPath = URL(fileURLWithPath: currentPath).appendingPathComponent("compiler/Sources/std").path
-    if FileManager.default.fileExists(atPath: testPath) {
-         return testPath
+    // Fallback: Try common relative locations (package root, repo root, build dirs)
+    let currentURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+    let candidatePaths = [
+      currentURL.appendingPathComponent("std").path,
+      currentURL.deletingLastPathComponent().appendingPathComponent("std").path,
+      currentURL.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("std").path
+    ]
+    for path in candidatePaths {
+      if FileManager.default.fileExists(atPath: path) {
+        return path
+      }
     }
 
     return nil
