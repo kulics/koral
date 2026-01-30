@@ -104,13 +104,6 @@ public class NameCollector: CompilerPass {
             checker.defIdMap = defIdMap
         }
 
-        // 过滤非 using 声明
-        let declarations = astNodes.filter { node in
-            if case .usingDeclaration = node { return false }
-            if case .foreignUsingDeclaration = node { return false }
-            return true
-        }
-        
         // 第一步：收集所有类型定义
         for (index, node) in astNodes.enumerated() {
             let isStdLib = index < coreGlobalCount
@@ -136,7 +129,7 @@ public class NameCollector: CompilerPass {
         try registerModuleNames(from: nodeSourceInfoList)
 
         if let checker {
-            try checker.registerModuleNames(from: declarations)
+            try checker.registerModuleNames(from: astNodes)
         }
         
         return NameCollectorOutput(
@@ -236,7 +229,7 @@ public class NameCollector: CompilerPass {
                 span: span,
                 isStdLib: isStdLib
             )
-        case .foreignTypeDeclaration(let name, let fields, let access, let span):
+        case .foreignTypeDeclaration(let name, _, let fields, let access, let span):
             try collectForeignTypeDefinition(
                 name: name,
                 fields: fields,

@@ -1,0 +1,226 @@
+// ============================================================================
+// Koral Standard Library - Time Module
+// ============================================================================
+
+/// Duration 表示时间间隔
+/// 内部存储与 C timespec 完全对齐
+public type Duration(secs Int64, nanos Int64)
+
+given Duration {
+    // ============ 转换方法 ============
+
+    /// 转换为纳秒总数
+    public as_nanos(self) Int64 = {
+        self.secs * 1_000_000_000i64 + self.nanos
+    }
+
+    /// 转换为微秒总数
+    public as_micros(self) Int64 = {
+        self.secs * 1_000_000i64 + self.nanos / 1_000i64
+    }
+
+    /// 转换为毫秒总数
+    public as_millis(self) Int64 = {
+        self.secs * 1_000i64 + self.nanos / 1_000_000i64
+    }
+
+    /// 转换为秒数（截断）
+    public as_seconds(self) Int64 = {
+        self.secs
+    }
+
+    /// 转换为分钟数（截断）
+    public as_minutes(self) Int64 = {
+        self.secs / 60i64
+    }
+
+    /// 转换为小时数（截断）
+    public as_hours(self) Int64 = {
+        self.secs / 3600i64
+    }
+
+    /// 转换为天数（截断）
+    public as_days(self) Int64 = {
+        self.secs / 86400i64
+    }
+
+    // ============ 算术方法 ============
+
+    /// 加法
+    public add(self, other Duration) Duration = {
+        let total_nanos = self.nanos + other.nanos
+        let extra_secs = total_nanos / 1_000_000_000i64
+        let final_nanos = total_nanos % 1_000_000_000i64
+        Duration(self.secs + other.secs + extra_secs, final_nanos)
+    }
+
+    /// 减法
+    public sub(self, other Duration) Duration = {
+        let mut total_nanos = self.nanos - other.nanos
+        let mut secs_diff = self.secs - other.secs
+        if total_nanos < 0i64 then {
+            secs_diff = secs_diff - 1i64
+            total_nanos = total_nanos + 1_000_000_000i64
+        }
+        Duration(secs_diff, total_nanos)
+    }
+
+    /// 乘法（Duration * Int）
+    public mul(self, n Int) Duration = {
+        let total_nanos = self.as_nanos() * (Int64)n
+        let secs = total_nanos / 1_000_000_000i64
+        let nanos = total_nanos % 1_000_000_000i64
+        Duration(secs, nanos)
+    }
+
+    /// 除法（Duration / Int）
+    public div(self, n Int) Duration = {
+        let total_nanos = self.as_nanos() / (Int64)n
+        let secs = total_nanos / 1_000_000_000i64
+        let nanos = total_nanos % 1_000_000_000i64
+        Duration(secs, nanos)
+    }
+
+    // ============ 比较方法 ============
+
+    /// 相等比较
+    public __equals(self, other Duration) Bool = {
+        self.secs == other.secs and self.nanos == other.nanos
+    }
+
+    /// 三路比较
+    /// 返回: -1 (self < other), 0 (self == other), 1 (self > other)
+    public __compare(self, other Duration) Int = {
+        if self.secs < other.secs then { -1 }
+        else if self.secs > other.secs then { 1 }
+        else if self.nanos < other.nanos then { -1 }
+        else if self.nanos > other.nanos then { 1 }
+        else { 0 }
+    }
+
+    // ============ 显示方法 ============
+
+    /// 转换为可读字符串
+    /// 格式: "1d2h", "1h30min", "500ms", "100ns"
+    public to_string(self) String = {
+        if self.secs >= 86400i64 then {
+            let days = self.secs / 86400i64
+            let remaining_secs = self.secs % 86400i64
+            if remaining_secs >= 3600i64 then {
+                let hours = remaining_secs / 3600i64
+                let mut result = String.empty()
+                result.push_string(days.to_string())
+                result.push_string("d")
+                result.push_string(hours.to_string())
+                result.push_string("h")
+                result
+            } else if remaining_secs >= 60i64 then {
+                let mins = remaining_secs / 60i64
+                let mut result = String.empty()
+                result.push_string(days.to_string())
+                result.push_string("d")
+                result.push_string(mins.to_string())
+                result.push_string("min")
+                result
+            } else if remaining_secs > 0i64 then {
+                let mut result = String.empty()
+                result.push_string(days.to_string())
+                result.push_string("d")
+                result.push_string(remaining_secs.to_string())
+                result.push_string("s")
+                result
+            } else {
+                let mut result = String.empty()
+                result.push_string(days.to_string())
+                result.push_string("d")
+                result
+            }
+        } else if self.secs >= 3600i64 then {
+            let hours = self.secs / 3600i64
+            let remaining_secs = self.secs % 3600i64
+            if remaining_secs >= 60i64 then {
+                let mins = remaining_secs / 60i64
+                let mut result = String.empty()
+                result.push_string(hours.to_string())
+                result.push_string("h")
+                result.push_string(mins.to_string())
+                result.push_string("min")
+                result
+            } else if remaining_secs > 0i64 then {
+                let mut result = String.empty()
+                result.push_string(hours.to_string())
+                result.push_string("h")
+                result.push_string(remaining_secs.to_string())
+                result.push_string("s")
+                result
+            } else {
+                let mut result = String.empty()
+                result.push_string(hours.to_string())
+                result.push_string("h")
+                result
+            }
+        } else if self.secs >= 60i64 then {
+            let mins = self.secs / 60i64
+            let remaining_secs = self.secs % 60i64
+            if remaining_secs > 0i64 then {
+                let mut result = String.empty()
+                result.push_string(mins.to_string())
+                result.push_string("min")
+                result.push_string(remaining_secs.to_string())
+                result.push_string("s")
+                result
+            } else {
+                let mut result = String.empty()
+                result.push_string(mins.to_string())
+                result.push_string("min")
+                result
+            }
+        } else if self.secs > 0i64 then {
+            if self.nanos > 0i64 then {
+                let mut result = String.empty()
+                result.push_string(self.secs.to_string())
+                result.push_string("s")
+                result.push_string(self.nanos.to_string())
+                result.push_string("ns")
+                result
+            } else {
+                let mut result = String.empty()
+                result.push_string(self.secs.to_string())
+                result.push_string("s")
+                result
+            }
+        } else if self.nanos >= 1_000_000i64 then {
+            let mut result = String.empty()
+            result.push_string((self.nanos / 1_000_000i64).to_string())
+            result.push_string("ms")
+            result
+        } else if self.nanos >= 1_000i64 then {
+            let mut result = String.empty()
+            result.push_string((self.nanos / 1_000i64).to_string())
+            result.push_string("us")
+            result
+        } else {
+            let mut result = String.empty()
+            result.push_string(self.nanos.to_string())
+            result.push_string("ns")
+            result
+        }
+    }
+}
+
+// ============================================================================
+// Sleep API (POSIX nanosleep)
+// ============================================================================
+
+// FFI 结构体：与 C timespec 布局对齐
+foreign type Timespec(tv_sec Int64, tv_nsec Int64)
+
+// FFI 函数声明
+// Windows 下由编译器自动生成 nanosleep shim
+foreign let nanosleep(req Timespec ptr, rem Timespec ptr) Int32
+
+/// 休眠指定时间
+public let sleep(d Duration) Void = {
+    let ts = Timespec(d.secs, d.nanos)
+    let _ = nanosleep(ptr ts, [Timespec]null_ptr())
+}

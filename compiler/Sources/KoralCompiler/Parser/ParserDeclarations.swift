@@ -89,6 +89,13 @@ extension Parser {
     } else if currentToken === .typeKeyword {
       try match(.typeKeyword)
 
+      // Check for optional C name: foreign type "cname" Name(...)
+      var cname: String? = nil
+      if isForeign, case .string(let cnameValue) = currentToken {
+        cname = cnameValue
+        try match(.string(cnameValue))
+      }
+
       let typeParams = try parseTypeParameters()
 
       guard case .identifier(let name) = currentToken else {
@@ -101,7 +108,7 @@ extension Parser {
 
       try match(.identifier(name))
       if isForeign {
-        return try foreignTypeDeclaration(name: name, access: access, span: startSpan)
+        return try foreignTypeDeclaration(name: name, cname: cname, access: access, span: startSpan)
       }
       return try parseStructDeclaration(
         name, typeParams: typeParams, access: access, isIntrinsic: isIntrinsic, span: startSpan)
@@ -599,7 +606,7 @@ extension Parser {
   }
 
   private func foreignTypeDeclaration(
-    name: String, access: AccessModifier, span: SourceSpan
+    name: String, cname: String?, access: AccessModifier, span: SourceSpan
   ) throws -> GlobalNode {
     if currentToken === .leftBrace {
       throw ParserError.foreignTypeNoBody(span: currentSpan)
@@ -625,6 +632,7 @@ extension Parser {
 
     return .foreignTypeDeclaration(
       name: name,
+      cname: cname,
       fields: fields,
       access: access,
       span: span

@@ -5,6 +5,72 @@ import Foundation
 // including the main inferTypedExpression method and its helper methods.
 
 extension TypeChecker {
+
+  // MARK: - Duration Literal Helpers
+
+  private func checkedMultiply(_ lhs: Int64, _ rhs: Int64, span: SourceSpan) throws -> Int64 {
+    let (result, overflow) = lhs.multipliedReportingOverflow(by: rhs)
+    if overflow {
+      throw SemanticError(.generic("Duration value too large"), line: span.start.line)
+    }
+    return result
+  }
+
+  private func normalizeDurationNanos(_ totalNanos: Int64) -> (secs: Int64, nanos: Int64) {
+    let secs = totalNanos / 1_000_000_000
+    let nanos = totalNanos % 1_000_000_000
+    return (secs, nanos)
+  }
+
+  private func convertDurationLiteral(
+    value: String,
+    unit: DurationUnit,
+    span: SourceSpan
+  ) throws -> (secs: Int64, nanos: Int64) {
+    guard let numValue = Int64(value) else {
+      throw SemanticError(.generic("Invalid duration value: \(value)"), line: span.start.line)
+    }
+    if numValue < 0 {
+      throw SemanticError(.generic("Duration cannot be negative"), line: span.start.line)
+    }
+
+    switch unit {
+    case .nanoseconds:
+      return normalizeDurationNanos(numValue)
+    case .microseconds:
+      let total = try checkedMultiply(numValue, 1_000, span: span)
+      return normalizeDurationNanos(total)
+    case .milliseconds:
+      let total = try checkedMultiply(numValue, 1_000_000, span: span)
+      return normalizeDurationNanos(total)
+    case .seconds:
+      return (numValue, 0)
+    case .minutes:
+      let secs = try checkedMultiply(numValue, 60, span: span)
+      return (secs, 0)
+    case .hours:
+      let secs = try checkedMultiply(numValue, 3_600, span: span)
+      return (secs, 0)
+    case .days:
+      let secs = try checkedMultiply(numValue, 86_400, span: span)
+      return (secs, 0)
+    }
+  }
+
+  private func checkDurationLiteral(
+    value: String,
+    unit: DurationUnit,
+    span: SourceSpan
+  ) throws -> TypedExpressionNode {
+    let (secs, nanos) = try convertDurationLiteral(value: value, unit: unit, span: span)
+
+    guard let durationType = currentScope.lookupType("Duration")
+      ?? currentScope.lookupType("Duration", sourceFile: currentSourceFile) else {
+      throw SemanticError(.generic("Duration type not found. Import std.time or std.os."), line: span.start.line)
+    }
+
+    return .durationLiteral(secs: secs, nanos: nanos, type: durationType)
+  }
   
   // MARK: - Main Expression Type Inference
   
@@ -29,6 +95,14 @@ extension TypeChecker {
     case .integerLiteral(let value, let suffix):
       let type: Type
       if let suffix = suffix {
+        if value.hasPrefix("-") {
+          switch suffix {
+          case .u, .u8, .u16, .u32, .u64:
+            throw SemanticError(.generic("Negative integer literal cannot have unsigned suffix"), line: currentLine)
+          default:
+            break
+          }
+        }
         switch suffix {
         case .i: type = .int
         case .i8: type = .int8
@@ -61,6 +135,9 @@ extension TypeChecker {
         type = .float64
       }
       return .floatLiteral(value: value, type: type)
+
+    case .durationLiteral(let value, let unit, let span):
+      return try checkDurationLiteral(value: value, unit: unit, span: span)
 
     case .stringLiteral(let value):
       return .stringLiteral(value: value, type: builtinStringType())
@@ -3400,7 +3477,7 @@ extension TypeChecker {
 
   private func isLiteralExpression(_ expr: ExpressionNode) -> Bool {
     switch expr {
-    case .integerLiteral, .floatLiteral, .stringLiteral, .booleanLiteral:
+    case .integerLiteral, .floatLiteral, .durationLiteral, .stringLiteral, .booleanLiteral:
       return true
     default:
       return false

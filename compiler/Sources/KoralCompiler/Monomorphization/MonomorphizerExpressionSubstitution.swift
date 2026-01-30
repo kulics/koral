@@ -26,6 +26,9 @@ extension Monomorphizer {
             
         case .floatLiteral(let value, let type):
             return .floatLiteral(value: value, type: substituteType(type, substitution: substitution))
+
+        case .durationLiteral(let secs, let nanos, let type):
+            return .durationLiteral(secs: secs, nanos: nanos, type: substituteType(type, substitution: substitution))
             
         case .stringLiteral(let value, let type):
             return .stringLiteral(value: value, type: substituteType(type, substitution: substitution))

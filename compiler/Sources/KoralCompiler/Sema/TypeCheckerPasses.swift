@@ -343,7 +343,7 @@ extension TypeChecker {
       }
       return nil
 
-    case .foreignTypeDeclaration(let name, _, let access, _):
+    case .foreignTypeDeclaration(let name, _, _, let access, _):
       let type = access == .private
         ? currentScope.lookupType(name, sourceFile: sourceInfo.sourceFile)
         : currentScope.lookupType(name)
@@ -568,7 +568,7 @@ extension TypeChecker {
         stdLibTypes.insert(name)
       }
       
-    case .foreignTypeDeclaration(let name, let fields, let access, let span):
+    case .foreignTypeDeclaration(let name, _, let fields, let access, let span):
       self.currentSpan = span
       let isPrivate = (access == .private)
       if !isPrivate && currentScope.hasTypeDefinition(name) {
@@ -1034,7 +1034,7 @@ extension TypeChecker {
       }
       // Generic structs are handled in pass 3
 
-    case .foreignTypeDeclaration(let name, let fields, let access, let span):
+    case .foreignTypeDeclaration(let name, let cname, let fields, let access, let span):
       self.currentSpan = span
       guard let fields else {
         break
@@ -1058,6 +1058,10 @@ extension TypeChecker {
       }
 
       if case .structure(let defId) = placeholder {
+        // Store cname if provided
+        if let cname = cname {
+          context.setCname(defId, cname)
+        }
         let members = resolvedFields.map { (name: $0.name, type: $0.type, mutable: true) }
         context.updateStructInfo(
           defId: defId,
@@ -1285,7 +1289,7 @@ extension TypeChecker {
         kind: isMut ? .MutableValue : .Value
       )
 
-    case .foreignTypeDeclaration(let name, let fields, let access, let span):
+    case .foreignTypeDeclaration(let name, _, let fields, let access, let span):
       self.currentSpan = span
       let isPrivate = (access == .private)
       let type: Type

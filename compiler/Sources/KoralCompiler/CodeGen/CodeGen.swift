@@ -15,6 +15,7 @@ public class CodeGen {
   var lifetimeScopeStack: [[(name: String, type: Type)]] = []
   var userDefinedDrops: [String: String] = [:] // TypeName -> Mangled Drop Function Name
   private(set) var cIdentifierByDefId: [UInt64: String] = [:]
+  private var foreignFunctionDefIds: Set<UInt64> = []
   
   /// 用户定义的 main 函数的限定名（如 "hello_main"）
   /// 如果用户没有定义 main 函数，则为 nil
@@ -69,6 +70,12 @@ public class CodeGen {
     self.context = context
     self.escapeAnalysisReportEnabled = escapeAnalysisReportEnabled
     self.escapeContext = EscapeContext(reportingEnabled: escapeAnalysisReportEnabled, context: context)
+    self.foreignFunctionDefIds = Set(ast.globalNodes.compactMap { node in
+      if case .foreignFunction(let identifier, _) = node {
+        return identifier.defId.id
+      }
+      return nil
+    })
     buildCIdentifierMap()
     TypeHandlerRegistry.shared.setContext(context)
     TypeHandlerRegistry.shared.setCTypeNameResolver { [weak self] type in
@@ -96,6 +103,10 @@ public class CodeGen {
   }
 
   func qualifiedName(for symbol: Symbol) -> String {
+    if foreignFunctionDefIds.contains(symbol.defId.id) {
+      let name = context.getName(symbol.defId) ?? "<unknown>"
+      return sanitizeCIdentifier(name)
+    }
     let isGlobalSymbol: Bool
     switch symbol.kind {
     case .function, .type, .module:
@@ -191,7 +202,8 @@ public class CodeGen {
     for defId in publicDefIds {
       let cId: String
       if foreignDefIds.contains(defIdKey(defId)) {
-        cId = context.getName(defId) ?? "T_\(defId.id)"
+        // For foreign types, prefer cname if set, otherwise use the Koral name
+        cId = context.getCname(defId) ?? context.getName(defId) ?? "T_\(defId.id)"
       } else {
         cId = context.getCIdentifier(defId) ?? "T_\(defId.id)"
       }
@@ -200,7 +212,8 @@ public class CodeGen {
     for defId in privateDefIds {
       let cId: String
       if foreignDefIds.contains(defIdKey(defId)) {
-        cId = context.getName(defId) ?? "T_\(defId.id)"
+        // For foreign types, prefer cname if set, otherwise use the Koral name
+        cId = context.getCname(defId) ?? context.getName(defId) ?? "T_\(defId.id)"
       } else {
         cId = context.getCIdentifier(defId) ?? "T_\(defId.id)"
       }
@@ -685,6 +698,9 @@ public class CodeGen {
         buffer += "\n"
       }
 
+      // Emit nanosleep shim for Windows if needed
+      emitNanosleepShimIfNeeded(foreignFunctions)
+
       // 然后生成所有函数声明
       for node in nodes {
         if case .globalFunction(let identifier, let params, _) = node {
@@ -799,6 +815,36 @@ public class CodeGen {
     buffer += "extern \(returnType) \(cName)(\(paramList));\n"
   }
 
+  private func emitNanosleepShimIfNeeded(_ foreignFunctions: [(Symbol, [Symbol])]) {
+    guard let nanosleepFunc = foreignFunctions.first(where: { (identifier, _) in
+      (context.getName(identifier.defId) ?? "") == "nanosleep"
+    }) else { return }
+
+    // Get return type and parameter types from the foreign function declaration
+    let returnType = getFunctionReturnType(nanosleepFunc.0.type)
+    let params = nanosleepFunc.1
+    let paramList = params.map { getParamCDecl($0) }.joined(separator: ", ")
+    
+    // Get first parameter name for the implementation
+    let reqParam = params.count > 0 ? cIdentifier(for: params[0]) : "req"
+    let remParam = params.count > 1 ? cIdentifier(for: params[1]) : "rem"
+
+    buffer += """
+      // nanosleep shim for Windows
+      #ifdef _WIN32
+      #include <windows.h>
+      \(returnType) nanosleep(\(paramList)) {
+        (void)\(remParam);
+        if (!\(reqParam)) return -1;
+        DWORD ms = (DWORD)(\(reqParam)->tv_sec * 1000 + \(reqParam)->tv_nsec / 1000000);
+        Sleep(ms);
+        return 0;
+      }
+      #endif
+
+      """
+  }
+
   private func generateFunctionDeclaration(_ identifier: Symbol, _ params: [Symbol]) {
     let cName = cIdentifier(for: identifier)
     let returnType = getFunctionReturnType(identifier.type)
@@ -908,6 +954,9 @@ public class CodeGen {
 
     case .floatLiteral(let value, _):
       return String(value)
+
+    case .durationLiteral(let secs, let nanos, let type):
+      return generateDurationLiteral(secs: secs, nanos: nanos, type: type)
 
     case .stringLiteral(let value, let type):
       let bytesVar = nextTemp() + "_bytes"

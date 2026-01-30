@@ -165,6 +165,14 @@ public final class CompilerContext: @unchecked Sendable {
         defIdMap.isForeignStruct(defId)
     }
 
+    public func setCname(_ defId: DefId, _ cname: String) {
+        defIdMap.setCname(defId, cname)
+    }
+
+    public func getCname(_ defId: DefId) -> String? {
+        defIdMap.getCname(defId)
+    }
+
     public func isGenericInstantiation(_ defId: DefId) -> Bool? {
         defIdMap.isGenericInstantiation(defId)
     }

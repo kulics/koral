@@ -316,7 +316,7 @@ public class EscapeContext {
     /// 预分析表达式，识别逃逸变量
     private func preAnalyzeExpression(_ expr: TypedExpressionNode) {
         switch expr {
-        case .integerLiteral, .floatLiteral, .stringLiteral, .booleanLiteral:
+        case .integerLiteral, .floatLiteral, .durationLiteral, .stringLiteral, .booleanLiteral:
             break
             
         case .variable:

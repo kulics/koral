@@ -132,6 +132,10 @@ public class BidirectionalInference {
         // 浮点字面量
         case .floatLiteral(_, let suffix):
             return synthesizeFloatLiteral(suffix: suffix, span: span)
+
+        // Duration 字面量
+        case .durationLiteral:
+            return lookupType(name: "Duration") ?? .genericStruct(template: "Duration", args: [])
             
         // 布尔字面量
         case .booleanLiteral:

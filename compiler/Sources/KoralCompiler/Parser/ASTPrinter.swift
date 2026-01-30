@@ -102,8 +102,11 @@ public func printAST(_ node: ASTNode) {
           print("\(indent)  TypeParameters: \(typeParameters)")
         }
 
-    case .foreignTypeDeclaration(let name, let fields, let access, _):
+    case .foreignTypeDeclaration(let name, let cname, let fields, let access, _):
         print("\(indent)ForeignTypeDeclaration \(name)")
+        if let cname {
+          print("\(indent)  CName: \(cname)")
+        }
         print("\(indent)  Access: \(access)")
         if let fields {
           for field in fields {
@@ -257,6 +260,8 @@ public func printAST(_ node: ASTNode) {
       } else {
         print("\(indent)FloatLiteral: \(value)")
       }
+    case .durationLiteral(let value, let unit, _):
+      print("\(indent)DurationLiteral: \(value)\(unit)")
     case .stringLiteral(let str):
       print("\(indent)StringLiteral: \(str)")
     case .booleanLiteral(let value):
