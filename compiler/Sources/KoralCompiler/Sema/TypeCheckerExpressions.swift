@@ -84,7 +84,7 @@ extension TypeChecker {
           let (pattern, _) = try checkPattern(c.pattern, subjectType: subjectType)
           for symbol in extractPatternSymbols(from: pattern) {
             if let name = context.getName(symbol.defId) {
-              currentScope.define(name, defId: symbol.defId)
+              try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
             }
           }
           let typedBody = try inferTypedExpression(c.body)
@@ -291,6 +291,17 @@ extension TypeChecker {
         }
       }
 
+      // Allow null_ptr() to infer pointer element type from the other operand.
+      if typedLeft.type != typedRight.type {
+        if case .pointer = typedLeft.type,
+           case .intrinsicCall(.nullPtr) = typedRight {
+          typedRight = try coerceLiteral(typedRight, to: typedLeft.type)
+        } else if case .pointer = typedRight.type,
+          case .intrinsicCall(.nullPtr) = typedLeft {
+          typedLeft = try coerceLiteral(typedLeft, to: typedRight.type)
+        }
+      }
+
       // Operator sugar for Equatable: lower `==`/`<>` to `__equals(self ref, other ref)`
       // for non-builtin scalar types (struct/union/String/generic parameters).
       if (op == .equal || op == .notEqual), typedLeft.type == typedRight.type,
@@ -334,7 +345,7 @@ extension TypeChecker {
       return try withNewScope {
         let symbol = makeLocalSymbol(
           name: name, type: typedValue.type, kind: .variable(mutable ? .MutableValue : .Value))
-        currentScope.define(name, defId: symbol.defId)
+        try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
 
         let typedBody = try inferTypedExpression(body)
 
@@ -386,7 +397,7 @@ extension TypeChecker {
       let typedThen = try withNewScope {
         for symbol in extractPatternSymbols(from: typedPattern) {
           if let name = context.getName(symbol.defId) {
-            currentScope.define(name, defId: symbol.defId)
+            try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
           }
         }
         return try inferTypedExpression(thenBranch)
@@ -458,7 +469,7 @@ extension TypeChecker {
       let typedBody = try withNewScope {
         for symbol in extractPatternSymbols(from: typedPattern) {
           if let name = context.getName(symbol.defId) {
-            currentScope.define(name, defId: symbol.defId)
+            try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
           }
         }
         return try inferTypedExpression(body)
@@ -546,6 +557,24 @@ extension TypeChecker {
           op: "ref", type1: typedInner.type.description, type2: "")
       }
       return .referenceExpression(expression: typedInner, type: .reference(inner: typedInner.type))
+
+    case .ptrExpression(let inner):
+      let typedInner = try inferTypedExpression(inner)
+      let isAddressable = typedInner.valueCategory == .lvalue || isDerefExpression(inner)
+      if !isAddressable {
+        if isLiteralExpression(inner) {
+          throw SemanticError(.generic("cannot take address of literal"))
+        }
+        throw SemanticError(.generic("cannot take address of temporary value"))
+      }
+      return .ptrExpression(expression: typedInner, type: .pointer(element: typedInner.type))
+
+    case .deptrExpression(let inner):
+      let typedInner = try inferTypedExpression(inner)
+      guard case .pointer(let element) = typedInner.type else {
+        throw SemanticError(.generic("cannot dereference non-pointer type"))
+      }
+      return .deptrExpression(expression: typedInner, type: element)
 
     case .subscriptExpression(let base, let arguments):
       let typedBase = try inferTypedExpression(base)
@@ -1439,8 +1468,98 @@ extension TypeChecker {
         }
         let ptrExpr = try inferTypedExpression(arguments[0])
         // Check pointer type? Sema checks this later for normal calls, but here we do it maybe?
-        // Actually, `ptrExpr.type` should match `[T]Pointer`.
+        // Actually, `ptrExpr.type` should match `[T]Ptr`.
         return .intrinsicCall(.deallocMemory(ptr: ptrExpr))
+      }
+      if base == "init_memory" {
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        guard resolvedArgs.count == 1 else {
+          throw SemanticError.typeMismatch(
+            expected: "1 generic arg", got: "\(resolvedArgs.count)")
+        }
+        guard arguments.count == 2 else {
+          throw SemanticError.invalidArgumentCount(
+            function: base, expected: 2, got: arguments.count)
+        }
+        let ptrExpr = try inferTypedExpression(arguments[0])
+        guard case .pointer(let elementType) = ptrExpr.type else {
+          throw SemanticError(.generic("cannot dereference non-pointer type"))
+        }
+        var valExpr = try inferTypedExpression(arguments[1])
+        valExpr = try coerceLiteral(valExpr, to: elementType)
+        if valExpr.type != elementType {
+          throw SemanticError.typeMismatch(
+            expected: elementType.description, got: valExpr.type.description)
+        }
+        return .intrinsicCall(.initMemory(ptr: ptrExpr, val: valExpr))
+      }
+
+      if base == "deinit_memory" {
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        guard resolvedArgs.count == 1 else {
+          throw SemanticError.typeMismatch(
+            expected: "1 generic arg", got: "\(resolvedArgs.count)")
+        }
+        guard arguments.count == 1 else {
+          throw SemanticError.invalidArgumentCount(
+            function: base, expected: 1, got: arguments.count)
+        }
+        let ptrExpr = try inferTypedExpression(arguments[0])
+        guard case .pointer = ptrExpr.type else {
+          throw SemanticError(.generic("cannot dereference non-pointer type"))
+        }
+        return .intrinsicCall(.deinitMemory(ptr: ptrExpr))
+      }
+
+      if base == "take_memory" {
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        guard resolvedArgs.count == 1 else {
+          throw SemanticError.typeMismatch(
+            expected: "1 generic arg", got: "\(resolvedArgs.count)")
+        }
+        guard arguments.count == 1 else {
+          throw SemanticError.invalidArgumentCount(
+            function: base, expected: 1, got: arguments.count)
+        }
+        let ptrExpr = try inferTypedExpression(arguments[0])
+        guard case .pointer = ptrExpr.type else {
+          throw SemanticError(.generic("cannot dereference non-pointer type"))
+        }
+        return .intrinsicCall(.takeMemory(ptr: ptrExpr))
+      }
+
+      if base == "offset_ptr" {
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        guard resolvedArgs.count == 1 else {
+          throw SemanticError.typeMismatch(
+            expected: "1 generic arg", got: "\(resolvedArgs.count)")
+        }
+        guard arguments.count == 2 else {
+          throw SemanticError.invalidArgumentCount(
+            function: base, expected: 2, got: arguments.count)
+        }
+        let ptrExpr = try inferTypedExpression(arguments[0])
+        guard case .pointer = ptrExpr.type else {
+          throw SemanticError(.generic("cannot dereference non-pointer type"))
+        }
+        let offsetExpr = try inferTypedExpression(arguments[1])
+        if offsetExpr.type != .int {
+          throw SemanticError.typeMismatch(expected: "Int", got: offsetExpr.type.description)
+        }
+        return .intrinsicCall(.offsetPtr(ptr: ptrExpr, offset: offsetExpr))
+      }
+      if base == "null_ptr" {
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        guard resolvedArgs.count == 1 else {
+          throw SemanticError.typeMismatch(
+            expected: "1 generic arg", got: "\(resolvedArgs.count)")
+        }
+        guard arguments.isEmpty else {
+          throw SemanticError.invalidArgumentCount(
+            function: base, expected: 0, got: arguments.count)
+        }
+        let resultType = Type.pointer(element: resolvedArgs[0])
+        return .intrinsicCall(.nullPtr(resultType: resultType))
       }
 
       if base == "ref_count" {
@@ -1552,6 +1671,10 @@ extension TypeChecker {
   
   /// Infers the type of an implicit generic function call (type arguments inferred from arguments)
   func inferImplicitGenericFunctionCall(template: GenericFunctionTemplate, name: String, arguments: [ExpressionNode]) throws -> TypedExpressionNode {
+    if name == "null_ptr" && arguments.isEmpty {
+      return .intrinsicCall(.nullPtr(resultType: .pointer(element: .void)))
+    }
+
     var inferred: [String: Type] = [:]
 
     if arguments.count != template.parameters.count {
@@ -1594,7 +1717,73 @@ extension TypeChecker {
       return type
     }
 
+    // Create type substitution map
+    var substitution: [String: Type] = [:]
+    for (i, param) in template.typeParameters.enumerated() {
+      substitution[param.name] = resolvedArgs[i]
+    }
+
+    // Re-check arguments with resolved types and apply literal coercion.
+    let resolvedParams = try withNewScope {
+      for (paramName, paramType) in substitution {
+        try currentScope.defineType(paramName, type: paramType)
+      }
+      return try template.parameters.map { param -> Type in
+        try resolveTypeNode(param.type)
+      }
+    }
+    var finalTypedArguments: [TypedExpressionNode] = []
+    for (typedArg, expectedType) in zip(typedArguments, resolvedParams) {
+      let coerced = try coerceLiteral(typedArg, to: expectedType)
+      if coerced.type != .never && coerced.type != expectedType {
+        throw SemanticError.typeMismatch(
+          expected: expectedType.description, got: coerced.type.description)
+      }
+      finalTypedArguments.append(coerced)
+    }
+    typedArguments = finalTypedArguments
+
     let templateName = template.name(in: defIdMap) ?? ""
+    if templateName == "init_memory" {
+      guard case .pointer(let elementType) = typedArguments[0].type else {
+        throw SemanticError(.generic("cannot dereference non-pointer type"))
+      }
+      let val = typedArguments[1]
+      if val.type != elementType {
+        throw SemanticError.typeMismatch(
+          expected: elementType.description, got: val.type.description)
+      }
+      return .intrinsicCall(.initMemory(ptr: typedArguments[0], val: val))
+    }
+    if templateName == "deinit_memory" {
+      guard case .pointer = typedArguments[0].type else {
+        throw SemanticError(.generic("cannot dereference non-pointer type"))
+      }
+      return .intrinsicCall(.deinitMemory(ptr: typedArguments[0]))
+    }
+    if templateName == "take_memory" {
+      guard case .pointer = typedArguments[0].type else {
+        throw SemanticError(.generic("cannot dereference non-pointer type"))
+      }
+      return .intrinsicCall(.takeMemory(ptr: typedArguments[0]))
+    }
+    if templateName == "offset_ptr" {
+      guard case .pointer = typedArguments[0].type else {
+        throw SemanticError(.generic("cannot dereference non-pointer type"))
+      }
+      if typedArguments[1].type != .int {
+        throw SemanticError.typeMismatch(expected: "Int", got: typedArguments[1].type.description)
+      }
+      return .intrinsicCall(.offsetPtr(ptr: typedArguments[0], offset: typedArguments[1]))
+    }
+    if templateName == "null_ptr" {
+      guard typedArguments.isEmpty else {
+        throw SemanticError.invalidArgumentCount(
+          function: templateName, expected: 0, got: typedArguments.count)
+      }
+      let resultType = Type.pointer(element: resolvedArgs[0])
+      return .intrinsicCall(.nullPtr(resultType: resultType))
+    }
     if templateName == "dealloc_memory" {
       return .intrinsicCall(.deallocMemory(ptr: typedArguments[0]))
     }
@@ -1625,12 +1814,6 @@ extension TypeChecker {
     // Validate generic constraints
     try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
     
-    // Create type substitution map
-    var substitution: [String: Type] = [:]
-    for (i, param) in template.typeParameters.enumerated() {
-      substitution[param.name] = resolvedArgs[i]
-    }
-    
     // Resolve return type with substitution
     let returnType = try withNewScope {
       for (paramName, paramType) in substitution {
@@ -1657,13 +1840,6 @@ extension TypeChecker {
   /// Infers the type of a method call expression
   func inferMethodCall(base: TypedExpressionNode, method: Symbol, methodType: Type, arguments: [ExpressionNode]) throws -> TypedExpressionNode {
     let methodName = context.getName(method.defId) ?? "<unknown>"
-    // Intercept Pointer methods
-    if case .pointer(_) = base.type,
-      let node = try checkIntrinsicPointerMethod(base: base, method: method, args: arguments)
-    {
-      return node
-    }
-
     // Intercept Float32/Float64 intrinsic methods
     if base.type == .float32 || base.type == .float64,
       let node = try checkIntrinsicFloatMethod(base: base, method: method, args: arguments)
@@ -2416,12 +2592,12 @@ extension TypeChecker {
     }
 
     if case .pointer(let element) = typeToLookup {
-      if let extensions = genericIntrinsicExtensionMethods["Pointer"] {
+      if let extensions = genericIntrinsicExtensionMethods["Ptr"] {
         for ext in extensions {
           if ext.method.name == memberName {
             let methodSym = try resolveIntrinsicExtensionMethod(
               baseType: typeToLookup,
-              templateName: "Pointer",
+              templateName: "Ptr",
               typeArgs: [element],
               methodInfo: ext
             )
@@ -2441,12 +2617,12 @@ extension TypeChecker {
         }
       }
 
-      if let extensions = genericExtensionMethods["Pointer"] {
+      if let extensions = genericExtensionMethods["Ptr"] {
         for ext in extensions {
           if ext.method.name == memberName {
             let methodSym = try resolveGenericExtensionMethod(
               baseType: typeToLookup,
-              templateName: "Pointer",
+              templateName: "Ptr",
               typeArgs: [element],
               methodInfo: ext
             )
@@ -2619,13 +2795,6 @@ extension TypeChecker {
           throw SemanticError.typeMismatch(expected: "UInt64", got: bits.type.description)
         }
         return .intrinsicCall(.float64FromBits(bits: bits))
-      }
-    }
-    
-    // Intercept Pointer.bit_width() intrinsic static method
-    if typeName == "Pointer" && methodName == "bit_width" {
-      if let node = try checkIntrinsicPointerStaticMethod(typeName: typeName, methodName: methodName, args: arguments) {
-        return node
       }
     }
     
@@ -3086,7 +3255,10 @@ extension TypeChecker {
         throw SemanticError.undefinedVariable(name)
       }
       guard currentScope.isMutable(name, sourceFile: currentSourceFile) else { throw SemanticError.assignToImmutable(name) }
-      return .variable(identifier: makeLocalSymbol(name: name, type: type, kind: .variable(.MutableValue)))
+      let kind = defIdMap.getSymbolKind(defId) ?? .variable(.MutableValue)
+      let methodKind = defIdMap.getSymbolMethodKind(defId) ?? .normal
+      let symbol = Symbol(defId: defId, type: type, kind: kind, methodKind: methodKind)
+      return .variable(identifier: symbol)
 
     case .memberPath(let base, let path):
       // Check if base evaluates to a Reference type (RValue allowed)
@@ -3181,6 +3353,22 @@ extension TypeChecker {
       throw SemanticError.invalidOperation(
         op: "assignment target", type1: String(describing: expr), type2: "")
     }
+  }
+
+  private func isLiteralExpression(_ expr: ExpressionNode) -> Bool {
+    switch expr {
+    case .integerLiteral, .floatLiteral, .stringLiteral, .booleanLiteral:
+      return true
+    default:
+      return false
+    }
+  }
+
+  private func isDerefExpression(_ expr: ExpressionNode) -> Bool {
+    if case .derefExpression = expr {
+      return true
+    }
+    return false
   }
 }
 
@@ -3533,9 +3721,13 @@ extension TypeChecker {
     
     // Type check the body in a new scope with pattern bindings
     let typedBody = try withNewScope {
-      // Bind pattern variables
-      try bindPatternVariables(pattern: pattern, type: elementType)
-      
+      // Bind pattern variables using the typed pattern symbols
+      for symbol in extractPatternSymbols(from: somePattern) {
+        if let name = context.getName(symbol.defId) {
+          try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
+        }
+      }
+
       // Type check body
       loopDepth += 1
       let result = try inferTypedExpression(body)
@@ -3624,7 +3816,7 @@ extension TypeChecker {
         type: type,
         kind: mutable ? .variable(.MutableValue) : .variable(.Value)
       )
-      currentScope.define(name, defId: symbol.defId)
+      try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
     case .wildcard, .booleanLiteral, .integerLiteral, .stringLiteral, .negativeIntegerLiteral:
       break
     case .unionCase(_, let elements, _):

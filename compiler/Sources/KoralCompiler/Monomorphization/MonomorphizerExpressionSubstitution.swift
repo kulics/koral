@@ -56,7 +56,7 @@ extension Monomorphizer {
             )
             
         case .letExpression(let identifier, let value, let body, let type):
-            let newIdentifier = copySymbolWithNewDefId(
+            let newIdentifier = copySymbolPreservingDefId(
                 identifier,
                 newType: substituteType(identifier.type, substitution: substitution)
             )
@@ -113,6 +113,18 @@ extension Monomorphizer {
                 expression: substituteTypesInExpression(expression, substitution: substitution),
                 type: substituteType(type, substitution: substitution)
             )
+
+        case .ptrExpression(let expression, let type):
+            return .ptrExpression(
+                expression: substituteTypesInExpression(expression, substitution: substitution),
+                type: substituteType(type, substitution: substitution)
+            )
+
+        case .deptrExpression(let expression, let type):
+            return .deptrExpression(
+                expression: substituteTypesInExpression(expression, substitution: substitution),
+                type: substituteType(type, substitution: substitution)
+            )
             
         case .variable(let identifier):
             let identifierName = context.getName(identifier.defId) ?? "<unknown>"
@@ -153,9 +165,18 @@ extension Monomorphizer {
             }
 
             
-            let newIdentifier = copySymbolWithNewDefId(
+            if case .function = identifier.kind,
+               newName != identifierName {
+                let newIdentifier = copySymbolWithNewDefId(
+                    identifier,
+                    newName: newName,
+                    newType: newType
+                )
+                return .variable(identifier: newIdentifier)
+            }
+
+            let newIdentifier = copySymbolPreservingDefId(
                 identifier,
-                newName: newName,
                 newType: newType
             )
             return .variable(identifier: newIdentifier)
@@ -582,7 +603,7 @@ extension Monomorphizer {
         case .lambdaExpression(let parameters, let captures, let body, let type):
             // Substitute types in lambda parameters
             let newParameters = parameters.map { param in
-                copySymbolWithNewDefId(
+                copySymbolPreservingDefId(
                     param,
                     newType: substituteType(param.type, substitution: substitution)
                 )
@@ -590,7 +611,7 @@ extension Monomorphizer {
             // Substitute types in captures
             let newCaptures = captures.map { capture in
                 CapturedVariable(
-                    symbol: copySymbolWithNewDefId(
+                    symbol: copySymbolPreservingDefId(
                         capture.symbol,
                         newType: substituteType(capture.symbol.type, substitution: substitution)
                     ),
@@ -615,7 +636,7 @@ extension Monomorphizer {
     ) -> TypedStatementNode {
         switch stmt {
         case .variableDeclaration(let identifier, let value, let mutable):
-            let newIdentifier = copySymbolWithNewDefId(
+            let newIdentifier = copySymbolPreservingDefId(
                 identifier,
                 newType: substituteType(identifier.type, substitution: substitution)
             )
@@ -626,15 +647,16 @@ extension Monomorphizer {
             )
 
             
-        case .assignment(let target, let value):
+        case .assignment(let target, let op, let value):
             return .assignment(
                 target: substituteTypesInExpression(target, substitution: substitution),
+                operator: op,
                 value: substituteTypesInExpression(value, substitution: substitution)
             )
-            
-        case .compoundAssignment(let target, let op, let value):
-            return .compoundAssignment(
-                target: substituteTypesInExpression(target, substitution: substitution),
+
+        case .deptrAssignment(let pointer, let op, let value):
+            return .deptrAssignment(
+                pointer: substituteTypesInExpression(pointer, substitution: substitution),
                 operator: op,
                 value: substituteTypesInExpression(value, substitution: substitution)
             )
@@ -665,7 +687,7 @@ extension Monomorphizer {
             return pattern
             
         case .variable(let symbol):
-            let newSymbol = copySymbolWithNewDefId(
+            let newSymbol = copySymbolPreservingDefId(
                 symbol,
                 newType: substituteType(symbol.type, substitution: substitution)
             )
@@ -735,48 +757,33 @@ extension Monomorphizer {
         case .refCount(let val):
             return .refCount(val: substituteTypesInExpression(val, substitution: substitution))
             
-        case .ptrInit(let ptr, let val):
-            return .ptrInit(
+        case .initMemory(let ptr, let val):
+            return .initMemory(
                 ptr: substituteTypesInExpression(ptr, substitution: substitution),
                 val: substituteTypesInExpression(val, substitution: substitution)
             )
-            
-        case .ptrDeinit(let ptr):
-            return .ptrDeinit(ptr: substituteTypesInExpression(ptr, substitution: substitution))
-            
-        case .ptrPeek(let ptr):
-            return .ptrPeek(ptr: substituteTypesInExpression(ptr, substitution: substitution))
-            
-        case .ptrOffset(let ptr, let offset):
-            return .ptrOffset(
+        case .deinitMemory(let ptr):
+            return .deinitMemory(ptr: substituteTypesInExpression(ptr, substitution: substitution))
+        case .offsetPtr(let ptr, let offset):
+            return .offsetPtr(
                 ptr: substituteTypesInExpression(ptr, substitution: substitution),
                 offset: substituteTypesInExpression(offset, substitution: substitution)
             )
-            
-        case .ptrTake(let ptr):
-            return .ptrTake(ptr: substituteTypesInExpression(ptr, substitution: substitution))
-            
-        case .ptrReplace(let ptr, let val):
-            return .ptrReplace(
-                ptr: substituteTypesInExpression(ptr, substitution: substitution),
-                val: substituteTypesInExpression(val, substitution: substitution)
-            )
+        case .takeMemory(let ptr):
+            return .takeMemory(ptr: substituteTypesInExpression(ptr, substitution: substitution))
+        case .nullPtr(let resultType):
+            return .nullPtr(resultType: substituteType(resultType, substitution: substitution))
             
         case .float32Bits(let value):
             return .float32Bits(value: substituteTypesInExpression(value, substitution: substitution))
-            
         case .float64Bits(let value):
             return .float64Bits(value: substituteTypesInExpression(value, substitution: substitution))
-
         case .float32FromBits(let bits):
             return .float32FromBits(bits: substituteTypesInExpression(bits, substitution: substitution))
-            
         case .float64FromBits(let bits):
             return .float64FromBits(bits: substituteTypesInExpression(bits, substitution: substitution))
-            
         case .exit(let code):
             return .exit(code: substituteTypesInExpression(code, substitution: substitution))
-            
         case .abort:
             return .abort
 
@@ -794,9 +801,6 @@ extension Monomorphizer {
             
         case .fflush(let fd):
             return .fflush(fd: substituteTypesInExpression(fd, substitution: substitution))
-            
-        case .ptrBits:
-            return .ptrBits
         }
     }
 }

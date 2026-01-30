@@ -28,11 +28,6 @@ extension Monomorphizer {
 
         let templateName = context.getName(template.defId) ?? "<unknown>"
         
-        // Special case: Pointer<T> maps directly to .pointer(element: T)
-        if templateName == "Pointer" {
-            return .pointer(element: args[0])
-        }
-        
         // Check cache
         let key = "\(templateName)<\(args.map { $0.description }.joined(separator: ","))>"
         if let cached = instantiatedTypes[key] {

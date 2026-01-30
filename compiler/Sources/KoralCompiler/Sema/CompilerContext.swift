@@ -244,8 +244,8 @@ public final class CompilerContext: @unchecked Sendable {
         case .function(let params, let returns):
             let paramStr = params.map { getDebugName($0.type) }.joined(separator: ", ")
             return "(\(paramStr)) -> \(getDebugName(returns))"
-        case .reference(let inner): return "ref \(getDebugName(inner))"
-        case .pointer(let element): return "Pointer[\(getDebugName(element))]"
+        case .reference(let inner): return "\(getDebugName(inner)) ref"
+        case .pointer(let element): return "\(getDebugName(element)) ptr"
         case .structure(let defId):
             var name = defIdMap.getName(defId) ?? "<unknown>"
             if let typeArgs = defIdMap.getTypeArguments(defId), !typeArgs.isEmpty {

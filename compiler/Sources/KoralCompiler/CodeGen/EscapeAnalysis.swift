@@ -243,6 +243,10 @@ public class EscapeContext {
         case .derefExpression(let inner, _):
             // 对于解引用表达式，提取内部变量名
             return extractVariableName(from: inner)
+        case .ptrExpression(let inner, _):
+            return extractVariableName(from: inner)
+        case .deptrExpression(let inner, _):
+            return extractVariableName(from: inner)
         default:
             return nil
         }
@@ -358,6 +362,12 @@ public class EscapeContext {
             preAnalyzeExpression(inner)
             
         case .derefExpression(let inner, _):
+            preAnalyzeExpression(inner)
+
+        case .ptrExpression(let inner, _):
+            preAnalyzeExpression(inner)
+
+        case .deptrExpression(let inner, _):
             preAnalyzeExpression(inner)
             
         case .referenceExpression(let inner, _):
@@ -489,14 +499,14 @@ public class EscapeContext {
                 scopeStack[scopeStack.count - 1].append(name)
             }
             
-        case .assignment(let target, let value):
+        case .assignment(let target, _, let value):
             preAnalyzeExpression(target)
             preAnalyzeExpression(value)
             // 检查是否是结构体字段赋值
             checkFieldAssignmentEscape(target: target, value: value)
-            
-        case .compoundAssignment(let target, _, let value):
-            preAnalyzeExpression(target)
+
+        case .deptrAssignment(let pointer, _, let value):
+            preAnalyzeExpression(pointer)
             preAnalyzeExpression(value)
             
         case .expression(let expr):
@@ -562,23 +572,18 @@ public class EscapeContext {
             preAnalyzeExpression(count)
         case .refCount(let val):
             preAnalyzeExpression(val)
-        case .ptrInit(let ptr, let val):
+        case .initMemory(let ptr, let val):
             preAnalyzeExpression(ptr)
             preAnalyzeExpression(val)
-        case .ptrDeinit(let ptr):
+        case .deinitMemory(let ptr):
             preAnalyzeExpression(ptr)
-        case .ptrPeek(let ptr):
+        case .takeMemory(let ptr):
             preAnalyzeExpression(ptr)
-        case .ptrTake(let ptr):
-            preAnalyzeExpression(ptr)
-        case .ptrReplace(let ptr, let val):
-            preAnalyzeExpression(ptr)
-            preAnalyzeExpression(val)
-        case .ptrBits:
-            break  // No expressions to analyze
-        case .ptrOffset(let ptr, let offset):
+        case .offsetPtr(let ptr, let offset):
             preAnalyzeExpression(ptr)
             preAnalyzeExpression(offset)
+        case .nullPtr:
+            break  // No expressions to analyze
         case .exit(let code):
             preAnalyzeExpression(code)
         case .abort:

@@ -8,13 +8,13 @@
 // List Storage and Type Definition
 // ============================================================================
 
-public type [T Any]ListStorage(mut source [T]Pointer, mut len Int, mut cap Int)
+public type [T Any]ListStorage(mut source T ptr, mut len Int, mut cap Int)
 
 given[T Any] [T]ListStorage {
     __drop(self ref) = {
         let mut i = 0
         while i < self.len then {
-            self.source.offset(i).deinit()
+            deinit_memory(offset_ptr(self.source, i))
             i += 1
         }
         dealloc_memory(self.source)
@@ -53,8 +53,8 @@ given[T Any] [T]List {
             let new_source = [T]alloc_memory(new_cap)
             let mut i = 0
             while i < old.len then {
-                let v = old.source.offset(i).peek()
-                new_source.offset(i).init(v)
+                let v = deptr offset_ptr(old.source, i)
+                init_memory(offset_ptr(new_source, i), v)
                 i += 1
             }
             let new_storage = ref [T]ListStorage(new_source, old.len, new_cap)
@@ -77,8 +77,8 @@ given[T Any] [T]List {
              } else {
                  let mut i = 0
                  while i < old_len then {
-                    let v = self.storage.source.offset(i).peek()
-                    new_source.offset(i).init(v)
+                    let v = deptr offset_ptr(self.storage.source, i)
+                    init_memory(offset_ptr(new_source, i), v)
                     i += 1
                  }
                  let new_storage = ref [T]ListStorage(new_source, old_len, new_cap)
@@ -91,7 +91,7 @@ given[T Any] [T]List {
 
     public push(self ref, value T) Void = {
         self.ensure_capacity(self.storage.len + 1)
-        self.storage.source.offset(self.storage.len).init(value)
+        init_memory(offset_ptr(self.storage.source, self.storage.len), value)
         self.storage.len = self.storage.len + 1
     }
 
@@ -100,7 +100,7 @@ given[T Any] [T]List {
         if self.storage.len == 0 then { return [T]Option.None(); }
         self.ensure_unique()
         self.storage.len = self.storage.len - 1
-        let value = self.storage.source.offset(self.storage.len).take()
+        let value = take_memory(offset_ptr(self.storage.source, self.storage.len))
         [T]Option.Some(value)
     }
 
@@ -110,25 +110,25 @@ given[T Any] [T]List {
         // Shift elements to the right
         let mut i = self.storage.len
         while i > index then {
-            let src = self.storage.source.offset(i - 1)
-            let dst = self.storage.source.offset(i)
-            dst.init(src.take())
+            let src = offset_ptr(self.storage.source, i - 1)
+            let dst = offset_ptr(self.storage.source, i)
+            init_memory(dst, take_memory(src))
             i = i - 1
         }
-        self.storage.source.offset(index).init(value)
+        init_memory(offset_ptr(self.storage.source, index), value)
         self.storage.len = self.storage.len + 1
     }
 
     public remove(self ref, index Int) T = {
         if index < 0 or index >= self.storage.len then { panic("List remove index out of bounds"); }
         self.ensure_unique()
-        let value = self.storage.source.offset(index).take()
+        let value = take_memory(offset_ptr(self.storage.source, index))
         // Shift elements to the left
         let mut i = index
         while i < self.storage.len - 1 then {
-            let src = self.storage.source.offset(i + 1)
-            let dst = self.storage.source.offset(i)
-            dst.init(src.take())
+            let src = offset_ptr(self.storage.source, i + 1)
+            let dst = offset_ptr(self.storage.source, i)
+            init_memory(dst, take_memory(src))
             i = i + 1
         }
         self.storage.len = self.storage.len - 1
@@ -137,13 +137,15 @@ given[T Any] [T]List {
 
     public get(self, index Int) [T]Option = {
         if index < 0 or index >= self.storage.len then { return [T]Option.None(); }
-        [T]Option.Some(self.storage.source.offset(index).peek())
+        [T]Option.Some(deptr offset_ptr(self.storage.source, index))
     }
 
     public set(self ref, index Int, value T) [T]Option = {
         if index < 0 or index >= self.storage.len then { return [T]Option.None(); }
         self.ensure_unique()
-        let old = self.storage.source.offset(index).replace(value)
+        let slot = offset_ptr(self.storage.source, index)
+        let old = deptr slot
+        deptr slot = value
         [T]Option.Some(old)
     }
 
@@ -160,7 +162,7 @@ given[T Any] [T]List {
         self.ensure_unique()
         let mut i = 0
         while i < self.storage.len then {
-            self.storage.source.offset(i).deinit()
+            deinit_memory(offset_ptr(self.storage.source, i))
             i += 1
         }
         self.storage.len = 0
@@ -170,13 +172,13 @@ given[T Any] [T]List {
 
     public __at(self, index Int) T = {
         if index < 0 or index >= self.storage.len then { panic("List index out of bounds"); }
-        self.storage.source.offset(index).peek()
+        deptr offset_ptr(self.storage.source, index)
     }
 
     public __update_at(self ref, index Int, value T) Void = {
         if index < 0 or index >= self.storage.len then { panic("List index out of bounds"); }
         self.ensure_unique()
-        self.storage.source.offset(index).replace(value);
+        deptr offset_ptr(self.storage.source, index) = value;
     }
 
     private make_slice(self, start Int, len Int) [T]List = {
@@ -186,7 +188,7 @@ given[T Any] [T]List {
         let mut result = [T]List.with_capacity(len)
         let mut i = 0
         while i < len then {
-            result.push(self.storage.source.offset(start + i).peek())
+            result.push(deptr offset_ptr(self.storage.source, start + i))
             i += 1
         }
         result
@@ -209,7 +211,7 @@ given[T Equatable] [T]List {
     public contains(self, value T) Bool = {
         let mut i = 0
         while i < self.storage.len then {
-            if self.storage.source.offset(i).peek() == value then {
+            if deptr offset_ptr(self.storage.source, i) == value then {
                 return true
             }
             i += 1
@@ -225,7 +227,7 @@ given[T Equatable] [T]List {
 given[T Any] [T]ListIterator {
     public next(self ref) [T]Option = {
         if self.index >= self.storage.len then { return [T]Option.None(); }
-        let value = self.storage.source.offset(self.index).peek()
+        let value = deptr offset_ptr(self.storage.source, self.index)
         self.index = self.index + 1
         [T]Option.Some(value)
     }
@@ -261,7 +263,7 @@ given[T Any] [T]List {
         let mut result = [T]List.new()
         let mut i = 0
         while i < self.storage.len then {
-            let v = self.storage.source.offset(i).peek()
+            let v = deptr offset_ptr(self.storage.source, i)
             if fn(v) then { result.push(v); }
             i += 1
         }
@@ -273,7 +275,7 @@ given[T Any] [T]List {
         let mut result = [U]List.with_capacity(self.storage.len)
         let mut i = 0
         while i < self.storage.len then {
-            let v = self.storage.source.offset(i).peek()
+            let v = deptr offset_ptr(self.storage.source, i)
             result.push(fn(v))
             i += 1
         }
@@ -313,7 +315,7 @@ given[T Any] [T]List {
         // Copy left half to temp
         let mut i = 0
         while i < left_len then {
-            temp.push(self.storage.source.offset(start + i).peek())
+            temp.push(deptr offset_ptr(self.storage.source, start + i))
             i += 1
         }
         
@@ -323,15 +325,15 @@ given[T Any] [T]List {
         
         // Merge back
         while left_idx < left_len and right_idx < end then {
-            let left_val = temp.storage.source.offset(left_idx).peek()
-            let right_val = self.storage.source.offset(right_idx).peek()
+            let left_val = deptr offset_ptr(temp.storage.source, left_idx)
+            let right_val = deptr offset_ptr(self.storage.source, right_idx)
             
             // Use <= to ensure stability (prefer left on equal)
             if key(left_val) <= key(right_val) then {
-                self.storage.source.offset(dest_idx).replace(left_val);
+                deptr offset_ptr(self.storage.source, dest_idx) = left_val;
                 left_idx += 1
             } else {
-                self.storage.source.offset(dest_idx).replace(right_val);
+                deptr offset_ptr(self.storage.source, dest_idx) = right_val;
                 right_idx += 1
             }
             dest_idx += 1
@@ -339,8 +341,8 @@ given[T Any] [T]List {
         
         // Copy remaining left elements
         while left_idx < left_len then {
-            let val = temp.storage.source.offset(left_idx).peek()
-            self.storage.source.offset(dest_idx).replace(val);
+            let val = deptr offset_ptr(temp.storage.source, left_idx)
+            deptr offset_ptr(self.storage.source, dest_idx) = val;
             left_idx += 1
             dest_idx += 1
         }
@@ -379,7 +381,7 @@ given[T Comparable] [T]List {
         // Copy left half to temp
         let mut i = 0
         while i < left_len then {
-            temp.push(self.storage.source.offset(start + i).peek())
+            temp.push(deptr offset_ptr(self.storage.source, start + i))
             i += 1
         }
         
@@ -389,15 +391,15 @@ given[T Comparable] [T]List {
         
         // Merge back
         while left_idx < left_len and right_idx < end then {
-            let left_val = temp.storage.source.offset(left_idx).peek()
-            let right_val = self.storage.source.offset(right_idx).peek()
+            let left_val = deptr offset_ptr(temp.storage.source, left_idx)
+            let right_val = deptr offset_ptr(self.storage.source, right_idx)
             
             // Use <= to ensure stability (prefer left on equal)
             if left_val <= right_val then {
-                self.storage.source.offset(dest_idx).replace(left_val);
+                deptr offset_ptr(self.storage.source, dest_idx) = left_val;
                 left_idx += 1
             } else {
-                self.storage.source.offset(dest_idx).replace(right_val);
+                deptr offset_ptr(self.storage.source, dest_idx) = right_val;
                 right_idx += 1
             }
             dest_idx += 1
@@ -405,8 +407,8 @@ given[T Comparable] [T]List {
         
         // Copy remaining left elements
         while left_idx < left_len then {
-            let val = temp.storage.source.offset(left_idx).peek()
-            self.storage.source.offset(dest_idx).replace(val);
+            let val = deptr offset_ptr(temp.storage.source, left_idx)
+            deptr offset_ptr(self.storage.source, dest_idx) = val;
             left_idx += 1
             dest_idx += 1
         }

@@ -108,6 +108,7 @@ class IntegrationTests: XCTestCase {
     func test_non_exhaustive_union() throws { try runCase(named: "non_exhaustive_union.koral") }
     func test_option_map_test() throws { try runCase(named: "option_map_test.koral") }
     func test_pattern_combinators() throws { try runCase(named: "pattern_combinators.koral") }
+    func test_duplicate_local_scope() throws { try runCase(named: "duplicate_local_scope.koral") }
     func test_pointer_test() throws { try runCase(named: "pointer_test.koral") }
     func test_range_basic() throws { try runCase(named: "range_basic.koral") }
     func test_range_iterator() throws { try runCase(named: "range_iterator.koral") }

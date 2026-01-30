@@ -111,8 +111,12 @@ public func printTypedAST(_ node: TypedProgram) {
         printTypedExpression(value)
       }
 
-    case .assignment(let target, let value):
-      print("\(indent)Assignment:")
+    case .assignment(let target, let op, let value):
+      if let op {
+        print("\(indent)Assignment: \(op)")
+      } else {
+        print("\(indent)Assignment:")
+      }
       print("\(indent)  Target:")
       withIndent {
           printTypedExpression(target)
@@ -122,11 +126,15 @@ public func printTypedAST(_ node: TypedProgram) {
         printTypedExpression(value)
       }
 
-    case .compoundAssignment(let target, let op, let value):
-      print("\(indent)CompoundAssignment: \(op)")
-      print("\(indent)  Target:")
+    case .deptrAssignment(let pointer, let op, let value):
+      if let op {
+        print("\(indent)DeptrAssignment: \(op)")
+      } else {
+        print("\(indent)DeptrAssignment")
+      }
+      print("\(indent)  Pointer:")
       withIndent {
-          printTypedExpression(target)
+        printTypedExpression(pointer)
       }
       print("\(indent)  Value:")
       withIndent {
@@ -240,6 +248,24 @@ public func printTypedAST(_ node: TypedProgram) {
 
     case .derefExpression(let operand, let type):
       print("\(indent)DerefExpression: : \(type)")
+      withIndent {
+        print("\(indent)Operand:")
+        withIndent {
+          printTypedExpression(operand)
+        }
+      }
+
+    case .ptrExpression(let operand, let type):
+      print("\(indent)PtrExpression: : \(type)")
+      withIndent {
+        print("\(indent)Operand:")
+        withIndent {
+          printTypedExpression(operand)
+        }
+      }
+
+    case .deptrExpression(let operand, let type):
+      print("\(indent)DeptrExpression: : \(type)")
       withIndent {
         print("\(indent)Operand:")
         withIndent {

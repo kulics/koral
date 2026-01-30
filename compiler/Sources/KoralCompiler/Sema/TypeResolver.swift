@@ -260,11 +260,15 @@ public class TypeResolver: CompilerPass {
         let baseName: String
         if !typeParams.isEmpty {
             // 泛型 given
-            guard case .generic(let name, _) = typeNode else {
+            switch typeNode {
+            case .generic(let name, _):
+                baseName = name
+            case .pointer:
+                baseName = "Ptr"
+            default:
                 // 非泛型类型上的泛型 given 将在后续处理
                 return
             }
-            baseName = name
         } else {
             // 非泛型 given
             baseName = extractTypeName(from: typeNode)
@@ -316,10 +320,14 @@ public class TypeResolver: CompilerPass {
         // 获取基类型名称
         let baseName: String
         if !typeParams.isEmpty {
-            guard case .generic(let name, _) = typeNode else {
+            switch typeNode {
+            case .generic(let name, _):
+                baseName = name
+            case .pointer:
+                baseName = "Ptr"
+            default:
                 return
             }
-            baseName = name
         } else {
             baseName = extractTypeName(from: typeNode)
         }
@@ -721,6 +729,8 @@ public class TypeResolver: CompilerPass {
         case .moduleQualifiedGeneric(_, let base, _):
             return base
         case .reference(let inner):
+            return extractTypeName(from: inner)
+        case .pointer(let inner):
             return extractTypeName(from: inner)
         case .functionType, .inferredSelf:
             return ""

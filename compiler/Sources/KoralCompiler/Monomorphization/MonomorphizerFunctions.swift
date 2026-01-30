@@ -41,13 +41,21 @@ extension Monomorphizer {
         
         // Resolve parameters and return type
         let resolvedReturnType = try resolveTypeNode(template.returnType, substitution: typeSubstitution)
-        let resolvedParams = try template.parameters.map { param -> Symbol in
-            let paramType = try resolveTypeNode(param.type, substitution: typeSubstitution)
-            return makeSymbol(
-                name: param.name,
-                type: paramType,
-                kind: .variable(param.mutable ? .MutableValue : .Value)
-            )
+        let resolvedParams: [Symbol]
+        if let checkedParams = template.checkedParameters {
+            resolvedParams = checkedParams.map { param in
+                let paramType = substituteType(param.type, substitution: typeSubstitution)
+                return copySymbolPreservingDefId(param, newType: paramType)
+            }
+        } else {
+            resolvedParams = try template.parameters.map { param -> Symbol in
+                let paramType = try resolveTypeNode(param.type, substitution: typeSubstitution)
+                return makeSymbol(
+                    name: param.name,
+                    type: paramType,
+                    kind: .variable(param.mutable ? .MutableValue : .Value)
+                )
+            }
         }
         
         // Calculate mangled name
@@ -85,6 +93,7 @@ extension Monomorphizer {
         // Skip intrinsic functions
         let intrinsicNames = [
             "alloc_memory", "dealloc_memory", "copy_memory", "move_memory", "ref_count",
+            "init_memory", "deinit_memory", "take_memory", "offset_ptr", "null_ptr",
         ]
         
         // Generate global function if not already generated
@@ -136,7 +145,7 @@ extension Monomorphizer {
             // Use stored templateName if available, otherwise fall back to full name
             structureName = context.getTemplateName(defId) ?? name
         case .pointer(_):
-            structureName = "Pointer"
+            structureName = "Ptr"
         default:
             structureName = resolvedBaseType.description
         }
@@ -203,13 +212,21 @@ extension Monomorphizer {
         
         // Resolve return type and parameters
         let returnType = try resolveTypeNode(method.returnType, substitution: typeSubstitution)
-        let params = try method.parameters.map { param -> Symbol in
-            let paramType = try resolveTypeNode(param.type, substitution: typeSubstitution)
-            return makeSymbol(
-                name: param.name,
-                type: paramType,
-                kind: .variable(param.mutable ? .MutableValue : .Value)
-            )
+        let params: [Symbol]
+        if let checkedParams = methodInfo.checkedParameters {
+            params = checkedParams.map { param in
+                let paramType = substituteType(param.type, substitution: typeSubstitution)
+                return copySymbolPreservingDefId(param, newType: paramType)
+            }
+        } else {
+            params = try method.parameters.map { param -> Symbol in
+                let paramType = try resolveTypeNode(param.type, substitution: typeSubstitution)
+                return makeSymbol(
+                    name: param.name,
+                    type: paramType,
+                    kind: .variable(param.mutable ? .MutableValue : .Value)
+                )
+            }
         }
         
         // Create function type
@@ -480,24 +497,24 @@ extension Monomorphizer {
             
         case .pointer(let element):
             // Check intrinsic extension methods first
-            if let extensions = input.genericTemplates.intrinsicExtensionMethods["Pointer"],
+            if let extensions = input.genericTemplates.intrinsicExtensionMethods["Ptr"],
                let ext = extensions.first(where: { $0.method.name == name })
             {
                 return try instantiateIntrinsicExtensionMethod(
                     baseType: selfType,
-                    structureName: "Pointer",
+                    structureName: "Ptr",
                     genericArgs: [element],
                     methodInfo: ext
                 )
             }
             
             // Then check regular extension methods
-            if let extensions = input.genericTemplates.extensionMethods["Pointer"],
+            if let extensions = input.genericTemplates.extensionMethods["Ptr"],
                let ext = extensions.first(where: { $0.method.name == name })
             {
                 return try instantiateExtensionMethodFromEntry(
                     baseType: selfType,
-                    structureName: "Pointer",
+                    structureName: "Ptr",
                     genericArgs: [element],
                     methodTypeArgs: methodTypeArgs,
                     methodInfo: ext

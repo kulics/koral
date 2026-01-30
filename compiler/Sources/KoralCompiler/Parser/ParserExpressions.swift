@@ -241,6 +241,14 @@ extension Parser {
       try match(.refKeyword)
       let expr = try parsePrefixExpression()
       return .refExpression(expr)
+    } else if currentToken === .ptrKeyword {
+      try match(.ptrKeyword)
+      let expr = try parsePrefixExpression()
+      return .ptrExpression(expr)
+    } else if currentToken === .deptrKeyword {
+      try match(.deptrKeyword)
+      let expr = try parsePrefixExpression()
+      return .deptrExpression(expr)
     } else if currentToken === .derefKeyword {
       try match(.derefKeyword)
       let expr = try parsePrefixExpression()

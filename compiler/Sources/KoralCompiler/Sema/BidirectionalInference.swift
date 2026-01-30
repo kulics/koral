@@ -501,6 +501,8 @@ public class BidirectionalInference {
             return .genericStruct(template: base, args: argTypes)
         case .reference(let inner):
             return .reference(inner: resolveTypeNode(inner))
+        case .pointer(let inner):
+            return .pointer(element: resolveTypeNode(inner))
         case .inferredSelf:
             // Self 类型需要从上下文获取
             return .genericParameter(name: "Self")

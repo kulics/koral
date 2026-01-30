@@ -174,8 +174,12 @@ public func printAST(_ node: ASTNode) {
         printExpression(value)
       }
 
-    case .assignment(let target, let value, _):
-      print("\(indent)Assignment:")
+    case .assignment(let target, let op, let value, _):
+      if let op {
+        print("\(indent)Assignment: \(op)")
+      } else {
+        print("\(indent)Assignment:")
+      }
 
       print("\(indent)  Target:")
       withIndent {
@@ -191,13 +195,17 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .compoundAssignment(let target, let op, let value, _):
-      print("\(indent)CompoundAssignment: \(op)")
-      print("\(indent)  Target:")
+    case .deptrAssignment(let pointer, let op, let value, _):
+      if let op {
+        print("\(indent)DeptrAssignment: \(op)")
+      } else {
+        print("\(indent)DeptrAssignment:")
+      }
+      print("\(indent)  Pointer:")
       withIndent {
-          withIndent {
-             printExpression(target)
-          }
+        withIndent {
+          printExpression(pointer)
+        }
       }
       print("\(indent)  Value:")
       withIndent {
@@ -425,6 +433,18 @@ public func printAST(_ node: ASTNode) {
 
     case .refExpression(let expr):
       print("\(indent)RefExpression:")
+      withIndent {
+        printExpression(expr)
+      }
+
+    case .ptrExpression(let expr):
+      print("\(indent)PtrExpression:")
+      withIndent {
+        printExpression(expr)
+      }
+
+    case .deptrExpression(let expr):
+      print("\(indent)DeptrExpression:")
       withIndent {
         printExpression(expr)
       }

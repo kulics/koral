@@ -165,6 +165,20 @@ public class Monomorphizer {
             access: access
         )
     }
+
+    /// Copies a Symbol while preserving its DefId (for locals/parameters).
+    /// This keeps declaration and use sites aligned when C names include DefId.
+    internal func copySymbolPreservingDefId(
+        _ symbol: Symbol,
+        newType: Type? = nil
+    ) -> Symbol {
+        return Symbol(
+            defId: symbol.defId,
+            type: newType ?? symbol.type,
+            kind: symbol.kind,
+            methodKind: symbol.methodKind
+        )
+    }
     
     // MARK: - Initialization
     

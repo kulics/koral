@@ -115,7 +115,8 @@ public class CodeGen {
       return context.getCIdentifier(symbol.defId) ?? sanitizeCIdentifier(name)
     }
 
-    return sanitizeCIdentifier(context.getName(symbol.defId) ?? "<unknown>")
+    let base = sanitizeCIdentifier(context.getName(symbol.defId) ?? "<unknown>")
+    return "\(base)_\(symbol.defId.id)"
   }
 
   private func buildCIdentifierMap() {
@@ -215,7 +216,8 @@ public class CodeGen {
       let name = context.getName(symbol.defId) ?? "<unknown>"
       return context.getCIdentifier(symbol.defId) ?? sanitizeCIdentifier(name)
     }
-    return sanitizeCIdentifier(context.getName(symbol.defId) ?? "<unknown>")
+    let base = sanitizeCIdentifier(context.getName(symbol.defId) ?? "<unknown>")
+    return "\(base)_\(symbol.defId.id)"
   }
 
   func cIdentifier(for decl: StructDecl) -> String {
@@ -1202,6 +1204,17 @@ public class CodeGen {
       }
       return result
 
+    case .ptrExpression(let inner, let type):
+      let (lvaluePath, _) = buildRefComponents(inner)
+      let result = nextTemp()
+      addIndent()
+      buffer += "\(cTypeName(type)) \(result) = &\(lvaluePath);\n"
+      return result
+
+    case .deptrExpression(let inner, let type):
+      let ptrValue = generateExpressionSSA(inner)
+      return emitPointerReadCopy(pointerExpr: ptrValue, elementType: type)
+
     case .referenceExpression(let inner, let type):
       // 使用逃逸分析决定分配策略
       let shouldHeapAllocate = escapeContext.shouldUseHeapAllocation(inner)
@@ -1318,13 +1331,16 @@ public class CodeGen {
       buffer += "\(cTypeName(subject.type)) \(subjectTemp) = \(subjectVar);\n"
       
       // Generate pattern matching condition and bindings
-      let (prelude, _, condition, bindingCode, _) = 
+      let (prelude, preludeVars, condition, bindingCode, vars) = 
           generatePatternConditionAndBindings(pattern, subjectTemp, subject.type, isMove: false)
       
       // Output prelude
       for p in prelude {
         addIndent()
         buffer += p
+      }
+      for (name, varType) in preludeVars {
+        registerVariable(name, varType)
       }
       
       if type == .void || type == .never {
@@ -1338,7 +1354,7 @@ public class CodeGen {
             buffer += b
           }
           // Register bound variables in scope
-          for (name, _, varType) in bindings {
+          for (name, varType) in vars {
             registerVariable(name, varType)
           }
           _ = generateExpressionSSA(thenBranch)
@@ -1376,7 +1392,7 @@ public class CodeGen {
             buffer += b
           }
           // Register bound variables in scope
-          for (name, _, varType) in bindings {
+          for (name, varType) in vars {
             registerVariable(name, varType)
           }
           let thenResult = generateExpressionSSA(thenBranch)
@@ -1461,13 +1477,16 @@ public class CodeGen {
         buffer += "\(cTypeName(subject.type)) \(subjectTemp) = \(subjectVar);\n"
         
         // Generate pattern matching condition and bindings
-        let (prelude, _, condition, bindingCode, _) = 
+        let (prelude, preludeVars, condition, bindingCode, vars) = 
             generatePatternConditionAndBindings(pattern, subjectTemp, subject.type, isMove: false)
         
         // Output prelude
         for p in prelude {
           addIndent()
           buffer += p
+        }
+        for (name, varType) in preludeVars {
+          registerVariable(name, varType)
         }
         
         addIndent()
@@ -1480,7 +1499,7 @@ public class CodeGen {
           buffer += b
         }
         // Register bound variables in scope
-        for (name, _, varType) in bindings {
+        for (name, varType) in vars {
           registerVariable(name, varType)
         }
         
@@ -1717,7 +1736,7 @@ public class CodeGen {
       buffer += "}\n"
       return result
 
-    case .ptrInit(let ptr, let val):
+    case .initMemory(let ptr, let val):
       guard case .pointer(let element) = ptr.type else { fatalError() }
       let p = generateExpressionSSA(ptr)
       let v = generateExpressionSSA(val)
@@ -1738,7 +1757,7 @@ public class CodeGen {
       }
       return ""
 
-    case .ptrDeinit(let ptr):
+    case .deinitMemory(let ptr):
       guard case .pointer(let element) = ptr.type else { fatalError() }
       let p = generateExpressionSSA(ptr)
       if case .reference(_) = element {
@@ -1752,31 +1771,7 @@ public class CodeGen {
       // int/float/bool/void -> noop
       return ""
 
-    case .ptrPeek(let ptr):
-      guard case .pointer(let element) = ptr.type else { fatalError() }
-      let p = generateExpressionSSA(ptr)
-      let cType = cTypeName(element)
-      let result = nextTemp()
-      addIndent()
-      // For types that need deep copy (structs, unions), use copy function
-      if case .structure(let defId) = element {
-        let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-        buffer += "\(cType) \(result) = __koral_\(typeName)_copy((\(cType)*)\(p));\n"
-      } else if case .union(let defId) = element {
-        let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-        buffer += "\(cType) \(result) = __koral_\(typeName)_copy((\(cType)*)\(p));\n"
-      } else if case .reference(_) = element {
-        // Reference: copy struct Ref and retain
-        buffer += "\(cType) \(result) = *(\(cType)*)\(p);\n"
-        addIndent()
-        buffer += "__koral_retain(\(result).control);\n"
-      } else {
-        // Primitive types: simple copy
-        buffer += "\(cType) \(result) = *(\(cType)*)\(p);\n"
-      }
-      return result
-
-    case .ptrTake(let ptr):
+    case .takeMemory(let ptr):
       guard case .pointer(let element) = ptr.type else { fatalError() }
       let p = generateExpressionSSA(ptr)
       let cType = cTypeName(element)
@@ -1784,36 +1779,7 @@ public class CodeGen {
       addIndent()
       buffer += "\(cType) \(result) = *(\(cType)*)\(p);\n"
       return result
-
-    case .ptrReplace(let ptr, let val):
-      guard case .pointer(let element) = ptr.type else { fatalError() }
-      let p = generateExpressionSSA(ptr)
-      let v = generateExpressionSSA(val)
-      let cType = cTypeName(element)
-      let result = nextTemp()
-      addIndent()
-      buffer += "\(cType) \(result) = *(\(cType)*)\(p);\n"
-      addIndent()
-      if case .reference(_) = element {
-        buffer += "*(struct Ref*)\(p) = \(v);\n"
-        addIndent()
-        buffer += "__koral_retain(((struct Ref*)\(p))->control);\n"
-      } else if case .structure(let defId) = element {
-        let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-        buffer += "*(\(cType)*)\(p) = __koral_\(typeName)_copy(&\(v));\n"
-      } else {
-        buffer += "*(\(cType)*)\(p) = \(v);\n"
-      }
-      return result
-
-    case .ptrBits:
-      // Return pointer bit width (32 or 64)
-      let result = nextTemp()
-      addIndent()
-      buffer += "int64_t \(result) = sizeof(void*) * 8;\n"
-      return result
-
-    case .ptrOffset(let ptr, let offset):
+    case .offsetPtr(let ptr, let offset):
       guard case .pointer(let element) = ptr.type else { fatalError() }
       let p = generateExpressionSSA(ptr)
       let o = generateExpressionSSA(offset)
@@ -1823,6 +1789,12 @@ public class CodeGen {
       buffer += "\(cTypeName(ptr.type)) \(result);\n"
       addIndent()
       buffer += "\(result) = ((\(cType)*)\(p)) + \(o);\n"
+      return result
+
+    case .nullPtr(let resultType):
+      let result = nextTemp()
+      addIndent()
+      buffer += "\(cTypeName(resultType)) \(result) = NULL;\n"
       return result
 
     case .exit(let code):
@@ -1955,48 +1927,68 @@ public class CodeGen {
           buffer += "\(cTypeName(identifier.type)) \(cIdentifier(for: identifier)) = \(valueResult);\n"
         }
       }
-    case .assignment(let target, let value):
-      // 检测是否是结构体字段赋值（用于逃逸分析）
-      let isFieldAssignment = isStructFieldAssignment(target)
-      if isFieldAssignment && isReferenceType(value.type) {
-        escapeContext.inFieldAssignmentContext = true
-      }
-      
-      // Use buildRefComponents to get the C LValue path
-      let (lhsPath, _) = buildRefComponents(target)
-      let valueResult = generateExpressionSSA(value)
-      
-      escapeContext.inFieldAssignmentContext = false
-      
-      if value.type == .void || value.type == .never { return }
-
-      if case .structure(let defId) = target.type {
-        let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
+    case .assignment(let target, let op, let value):
+      if let op {
+        let (lhsPath, _) = buildRefComponents(target)
+        let valueResult = generateExpressionSSA(value)
+        let opStr = compoundOpToC(op)
+        
         addIndent()
-        if value.valueCategory == .lvalue {
-          buffer += "\(lhsPath) = __koral_\(typeName)_copy(&\(valueResult));\n"
+        buffer += "\(lhsPath) \(opStr) \(valueResult);\n"
+      } else {
+        // 检测是否是结构体字段赋值（用于逃逸分析）
+        let isFieldAssignment = isStructFieldAssignment(target)
+        if isFieldAssignment && isReferenceType(value.type) {
+          escapeContext.inFieldAssignmentContext = true
+        }
+        
+        // Use buildRefComponents to get the C LValue path
+        let (lhsPath, _) = buildRefComponents(target)
+        let valueResult = generateExpressionSSA(value)
+        
+        escapeContext.inFieldAssignmentContext = false
+        
+        if value.type == .void || value.type == .never { return }
+
+        if case .structure(let defId) = target.type {
+          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
+          addIndent()
+          if value.valueCategory == .lvalue {
+            buffer += "\(lhsPath) = __koral_\(typeName)_copy(&\(valueResult));\n"
+          } else {
+             buffer += "\(lhsPath) = \(valueResult);\n"
+          }
+        } else if case .reference(_) = target.type {
+           addIndent()
+           buffer += "\(lhsPath) = \(valueResult);\n"
+           if value.valueCategory == .lvalue {
+               addIndent()
+               buffer += "__koral_retain(\(lhsPath).control);\n"
+           }
         } else {
+           addIndent()
            buffer += "\(lhsPath) = \(valueResult);\n"
         }
-      } else if case .reference(_) = target.type {
-         addIndent()
-         buffer += "\(lhsPath) = \(valueResult);\n"
-         if value.valueCategory == .lvalue {
-             addIndent()
-             buffer += "__koral_retain(\(lhsPath).control);\n"
-         }
-      } else {
-         addIndent()
-         buffer += "\(lhsPath) = \(valueResult);\n"
       }
 
-    case .compoundAssignment(let target, let op, let value):
-      let (lhsPath, _) = buildRefComponents(target)
-      let valueResult = generateExpressionSSA(value)
-      let opStr = compoundOpToC(op)
-      
-      addIndent()
-      buffer += "\(lhsPath) \(opStr) \(valueResult);\n"
+    case .deptrAssignment(let pointer, let op, let value):
+      guard case .pointer(let elementType) = pointer.type else { fatalError() }
+      let ptrValue = generateExpressionSSA(pointer)
+
+      if let op {
+        let oldValue = emitPointerReadCopy(pointerExpr: ptrValue, elementType: elementType)
+        let rhsValue = generateExpressionSSA(value)
+        let newValue = nextTemp()
+        addIndent()
+        buffer += "\(cTypeName(elementType)) \(newValue) = \(oldValue) \(compoundOpToC(op).dropLast()) \(rhsValue);\n"
+
+        appendDropStatement(for: elementType, value: "(*\(ptrValue))")
+        appendCopyAssignment(for: elementType, source: newValue, dest: "(*\(ptrValue))")
+      } else {
+        let valueResult = generateExpressionSSA(value)
+        appendDropStatement(for: elementType, value: "(*\(ptrValue))")
+        appendCopyAssignment(for: elementType, source: valueResult, dest: "(*\(ptrValue))")
+      }
       
     case .expression(let expr):
       _ = generateExpressionSSA(expr)
@@ -2113,6 +2105,33 @@ public class CodeGen {
       let dropCode = TypeHandlerRegistry.shared.generateDropCode(type, value: value)
       appendIndentedCode(dropCode, indent: indent)
     }
+  }
+
+  func emitPointerReadCopy(pointerExpr: String, elementType: Type) -> String {
+    let result = nextTemp()
+    let cType = cTypeName(elementType)
+    addIndent()
+    buffer += "\(cType) \(result);\n"
+
+    if case .structure(let defId) = elementType {
+      let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
+      addIndent()
+      buffer += "\(result) = __koral_\(typeName)_copy((\(cType)*)\(pointerExpr));\n"
+    } else if case .union(let defId) = elementType {
+      let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
+      addIndent()
+      buffer += "\(result) = __koral_\(typeName)_copy((\(cType)*)\(pointerExpr));\n"
+    } else if case .reference(_) = elementType {
+      addIndent()
+      buffer += "\(result) = *(\(cType)*)\(pointerExpr);\n"
+      addIndent()
+      buffer += "__koral_retain(\(result).control);\n"
+    } else {
+      addIndent()
+      buffer += "\(result) = *(\(cType)*)\(pointerExpr);\n"
+    }
+
+    return result
   }
 
   func isFloatType(_ type: Type) -> Bool {
