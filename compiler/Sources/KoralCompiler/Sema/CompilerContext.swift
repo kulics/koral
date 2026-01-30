@@ -157,6 +157,14 @@ public final class CompilerContext: @unchecked Sendable {
         defIdMap.getUnionCases(defId)
     }
 
+    public func getForeignStructFields(_ defId: DefId) -> [(name: String, type: Type)]? {
+        defIdMap.getForeignStructFields(defId)
+    }
+
+    public func isForeignStruct(_ defId: DefId) -> Bool {
+        defIdMap.isForeignStruct(defId)
+    }
+
     public func isGenericInstantiation(_ defId: DefId) -> Bool? {
         defIdMap.isGenericInstantiation(defId)
     }
@@ -207,6 +215,10 @@ public final class CompilerContext: @unchecked Sendable {
             typeArguments: typeArguments,
             templateName: resolvedTemplateName
         )
+    }
+
+    public func updateForeignStructFields(defId: DefId, fields: [(name: String, type: Type)]) {
+        defIdMap.setForeignStructFields(defId, fields)
     }
 
     // MARK: - Type Queries

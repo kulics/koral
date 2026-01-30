@@ -64,6 +64,15 @@ extension CodeGen {
     case .foreignType(let identifier):
       let name = context.getName(identifier.defId) ?? "<unknown>"
       assertTypeResolved(identifier.type, contextInfo: "foreign type '\(name)'")
+    case .foreignStruct(let identifier, let fields):
+      let name = context.getName(identifier.defId) ?? "<unknown>"
+      assertTypeResolved(identifier.type, contextInfo: "foreign struct '\(name)'")
+      for field in fields {
+        assertTypeResolved(field.type, contextInfo: "foreign struct '\(name)' field '\(field.name)'")
+      }
+    case .foreignGlobalVariable(let identifier, _):
+      let name = context.getName(identifier.defId) ?? "<unknown>"
+      assertTypeResolved(identifier.type, contextInfo: "foreign global '\(name)'")
     case .globalVariable(let identifier, let value, _):
       let name = context.getName(identifier.defId) ?? "<unknown>"
       assertTypeResolved(identifier.type, contextInfo: "global variable '\(name)'")

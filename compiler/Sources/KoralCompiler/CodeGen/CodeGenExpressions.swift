@@ -73,6 +73,9 @@ extension CodeGen {
           let innerCType = cTypeName(inner)
           let memberName = sanitizeCIdentifier(context.getName(member.defId) ?? "<unknown>")
           basePath = "((\(innerCType)*)\(basePath).ptr)->\(memberName)"
+        } else if case .pointer = curType {
+          let memberName = sanitizeCIdentifier(context.getName(member.defId) ?? "<unknown>")
+          basePath = "\(basePath)->\(memberName)"
         } else {
           // Accessing member of value type keeps the same control block
           let memberName = sanitizeCIdentifier(context.getName(member.defId) ?? "<unknown>")
@@ -116,13 +119,15 @@ extension CodeGen {
     var curType = source.type
     for member in path {
       var memberAccess: String
-        let memberName = sanitizeCIdentifier(context.getName(member.defId) ?? "<unknown>")
-        if case .reference(let inner) = curType {
-          let innerCType = cTypeName(inner)
-          memberAccess = "((\(innerCType)*)\(access).ptr)->\(memberName)"
-        } else {
-          memberAccess = "\(access).\(memberName)"
-        }
+      let memberName = sanitizeCIdentifier(context.getName(member.defId) ?? "<unknown>")
+      if case .reference(let inner) = curType {
+        let innerCType = cTypeName(inner)
+        memberAccess = "((\(innerCType)*)\(access).ptr)->\(memberName)"
+      } else if case .pointer = curType {
+        memberAccess = "\(access)->\(memberName)"
+      } else {
+        memberAccess = "\(access).\(memberName)"
+      }
       
       // Only apply type cast for non-reference struct members when the C types differ
       // This handles cases where generic type parameters are replaced with concrete types

@@ -20,14 +20,6 @@ public class CodeGen {
   /// 如果用户没有定义 main 函数，则为 nil
   private var userMainFunctionName: String? = nil
 
-  /// 标准库头文件列表（使用尖括号）
-  private let standardHeaders: Set<String> = [
-    "stdio.h", "stdlib.h", "stdint.h", "stddef.h", "stdbool.h",
-    "string.h", "math.h", "time.h", "errno.h", "assert.h",
-    "ctype.h", "limits.h", "float.h", "signal.h", "setjmp.h",
-    "stdarg.h", "locale.h"
-  ]
-  
   // MARK: - Lambda Code Generation
   /// Counter for generating unique Lambda function names
   var lambdaCounter = 0
@@ -47,12 +39,15 @@ public class CodeGen {
   private enum TypeDeclaration {
     case structure(Symbol, [Symbol], String)
     case union(Symbol, [UnionCase], String)
+    case foreignStructure(Symbol, [(name: String, type: Type)], String)
 
     var name: String {
       switch self {
       case .structure(_, _, let cName):
         return cName
       case .union(_, _, let cName):
+        return cName
+      case .foreignStructure(_, _, let cName):
         return cName
       }
     }
@@ -80,9 +75,11 @@ public class CodeGen {
       guard let self else { return nil }
       switch type {
       case .structure(let defId):
-        return "struct \(self.context.getCIdentifier(defId) ?? "T_\(defId.id)")"
+        let name = self.cIdentifierByDefId[self.defIdKey(defId)] ?? self.context.getCIdentifier(defId) ?? "T_\(defId.id)"
+        return "struct \(name)"
       case .union(let defId):
-        return "struct \(self.context.getCIdentifier(defId) ?? "U_\(defId.id)")"
+        let name = self.cIdentifierByDefId[self.defIdKey(defId)] ?? self.context.getCIdentifier(defId) ?? "U_\(defId.id)"
+        return "struct \(name)"
       default:
         return nil
       }
@@ -137,7 +134,21 @@ public class CodeGen {
       case .foreignType(let identifier):
         register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .default)
         foreignDefIds.insert(defIdKey(identifier.defId))
+        if case .opaque(let defId) = identifier.type {
+          register(defId: defId, access: context.getAccess(defId) ?? .default)
+          foreignDefIds.insert(defIdKey(defId))
+        }
+      case .foreignStruct(let identifier, _):
+        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .default)
+        foreignDefIds.insert(defIdKey(identifier.defId))
+        if case .structure(let defId) = identifier.type {
+          register(defId: defId, access: context.getAccess(defId) ?? .default)
+          foreignDefIds.insert(defIdKey(defId))
+        }
       case .foreignFunction(let identifier, _):
+        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .default)
+        foreignDefIds.insert(defIdKey(identifier.defId))
+      case .foreignGlobalVariable(let identifier, _):
         register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .default)
         foreignDefIds.insert(defIdKey(identifier.defId))
       case .foreignUsing:
@@ -372,10 +383,10 @@ public class CodeGen {
     var ordered: [String] = []
 
     for node in nodes {
-      if case .foreignUsing(let headerName) = node {
-        if !seen.contains(headerName) {
-          seen.insert(headerName)
-          ordered.append(headerName)
+      if case .foreignUsing(let libraryName) = node {
+        if !seen.contains(libraryName) {
+          seen.insert(libraryName)
+          ordered.append(libraryName)
         }
       }
     }
@@ -449,6 +460,28 @@ public class CodeGen {
           }
           resultByName[name] = candidate
         }
+      case .foreignStruct(let identifier, let fields):
+        if case .structure(let defId) = identifier.type {
+          let name = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
+          let candidate: TypeDeclaration = .foreignStructure(identifier, fields, name)
+          if let existing = resultByName[name] {
+            if case .foreignStructure(_, let existingFields, _) = existing,
+               existingFields.count >= fields.count {
+              continue
+            }
+          }
+          resultByName[name] = candidate
+        } else {
+          let name = cIdentifier(for: identifier)
+          let candidate: TypeDeclaration = .foreignStructure(identifier, fields, name)
+          if let existing = resultByName[name] {
+            if case .foreignStructure(_, let existingFields, _) = existing,
+               existingFields.count >= fields.count {
+              continue
+            }
+          }
+          resultByName[name] = candidate
+        }
       default:
         continue
       }
@@ -486,6 +519,10 @@ public class CodeGen {
         for param in c.parameters {
           recordDependency(from: param.type, selfName: selfName)
         }
+      }
+    case .foreignStructure(_, let fields, let selfName):
+      for field in fields {
+        recordDependency(from: field.type, selfName: selfName)
       }
     }
 
@@ -613,6 +650,12 @@ public class CodeGen {
         }
         return nil
       }
+      let foreignGlobals: [(Symbol, Bool)] = nodes.compactMap {
+        if case .foreignGlobalVariable(let identifier, let mutable) = $0 {
+          return (identifier, mutable)
+        }
+        return nil
+      }
 
       if !foreignTypes.isEmpty {
         for typeSymbol in foreignTypes {
@@ -630,6 +673,8 @@ public class CodeGen {
           generateTypeDeclaration(identifier, parameters)
         case .union(let identifier, let cases, _):
           generateUnionDeclaration(identifier, cases)
+        case .foreignStructure(let identifier, let fields, _):
+          generateForeignStructDeclaration(identifier, fields)
         }
       }
 
@@ -655,6 +700,17 @@ public class CodeGen {
       buffer += "\n"
 
       // 生成全局变量声明
+      if !foreignGlobals.isEmpty {
+        for (identifier, mutable) in foreignGlobals {
+          let cType = cTypeName(identifier.type)
+          let cName = cIdentifier(for: identifier)
+          if mutable {
+            buffer += "extern \(cType) \(cName);\n"
+          } else {
+            buffer += "extern const \(cType) \(cName);\n"
+          }
+        }
+      }
       for node in nodes {
         if case .globalVariable(let identifier, let value, _) = node {
           let cType = cTypeName(identifier.type)
@@ -722,17 +778,13 @@ public class CodeGen {
     buffer += "}\n"
   }
 
-  private func generateForeignUsingDeclaration(_ headerName: String) {
-    if standardHeaders.contains(headerName) {
-      buffer += "#include <\(headerName)>\n"
-    } else {
-      buffer += "#include \"\(headerName)\"\n"
-    }
+  private func generateForeignUsingDeclaration(_ libraryName: String) {
+    buffer += "// Link: -l\(libraryName)\n"
   }
 
   private func generateForeignTypeDeclaration(_ identifier: Symbol) {
     let cName = context.getName(identifier.defId) ?? "<unknown>"
-    buffer += "typedef void* \(cName);\n"
+    buffer += "typedef struct \(cName) \(cName);\n"
   }
 
   private func generateForeignFunctionDeclaration(_ identifier: Symbol, _ params: [Symbol]) {
@@ -1323,7 +1375,7 @@ public class CodeGen {
       buffer += "}\n"
       return ""
       
-    case .ifPatternExpression(let subject, let pattern, let bindings, let thenBranch, let elseBranch, let type):
+    case .ifPatternExpression(let subject, let pattern, _, let thenBranch, let elseBranch, let type):
       // Generate subject expression
       let subjectVar = generateExpressionSSA(subject)
       let subjectTemp = nextTemp() + "_subject"
@@ -1462,7 +1514,7 @@ public class CodeGen {
         return resultVar
       }
       
-    case .whilePatternExpression(let subject, let pattern, let bindings, let body, _):
+    case .whilePatternExpression(let subject, let pattern, _, let body, _):
       let labelPrefix = nextTemp()
       let startLabel = "\(labelPrefix)_start"
       let endLabel = "\(labelPrefix)_end"
@@ -2078,8 +2130,12 @@ public class CodeGen {
   func appendCopyAssignment(for type: Type, source: String, dest: String, indent: String = "    ") {
     switch type {
     case .structure(let defId):
-      let fieldTypeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-      appendToBuffer("\(indent)\(dest) = __koral_\(fieldTypeName)_copy(&\(source));\n")
+      if context.isForeignStruct(defId) {
+        appendToBuffer("\(indent)\(dest) = \(source);\n")
+      } else {
+        let fieldTypeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
+        appendToBuffer("\(indent)\(dest) = __koral_\(fieldTypeName)_copy(&\(source));\n")
+      }
     case .union(let defId):
       let fieldTypeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
       appendToBuffer("\(indent)\(dest) = __koral_\(fieldTypeName)_copy(&\(source));\n")
@@ -2096,6 +2152,9 @@ public class CodeGen {
   func appendDropStatement(for type: Type, value: String, indent: String = "    ") {
     switch type {
     case .structure(let defId):
+      if context.isForeignStruct(defId) {
+        return
+      }
       let fieldTypeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
       appendToBuffer("\(indent)__koral_\(fieldTypeName)_drop(&\(value));\n")
     case .union(let defId):
@@ -2114,9 +2173,14 @@ public class CodeGen {
     buffer += "\(cType) \(result);\n"
 
     if case .structure(let defId) = elementType {
-      let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-      addIndent()
-      buffer += "\(result) = __koral_\(typeName)_copy((\(cType)*)\(pointerExpr));\n"
+      if context.isForeignStruct(defId) {
+        addIndent()
+        buffer += "\(result) = *(\(cType)*)\(pointerExpr);\n"
+      } else {
+        let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
+        addIndent()
+        buffer += "\(result) = __koral_\(typeName)_copy((\(cType)*)\(pointerExpr));\n"
+      }
     } else if case .union(let defId) = elementType {
       let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
       addIndent()

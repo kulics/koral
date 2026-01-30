@@ -335,6 +335,21 @@ extension Monomorphizer {
                 newType: resolveParameterizedType(identifier.type)
             )
             return .foreignType(identifier: newIdentifier)
+        case .foreignStruct(let identifier, let fields):
+            let newIdentifier = copySymbolWithNewDefId(
+                identifier,
+                newType: resolveParameterizedType(identifier.type)
+            )
+            let newFields = fields.map { field in
+                (name: field.name, type: resolveParameterizedType(field.type))
+            }
+            return .foreignStruct(identifier: newIdentifier, fields: newFields)
+        case .foreignGlobalVariable(let identifier, let mutable):
+            let newIdentifier = copySymbolWithNewDefId(
+                identifier,
+                newType: resolveParameterizedType(identifier.type)
+            )
+            return .foreignGlobalVariable(identifier: newIdentifier, mutable: mutable)
         case .foreignFunction(let identifier, let parameters):
             let newIdentifier = copySymbolWithNewDefId(
                 identifier,

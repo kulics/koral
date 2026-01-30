@@ -51,6 +51,8 @@ extension TypeChecker {
         type = typedValue.type
       }
 
+      try assertNotOpaqueType(type, span: span)
+
       let symbol = makeLocalSymbol(
         name: name,
         type: type,

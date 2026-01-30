@@ -236,8 +236,17 @@ public class NameCollector: CompilerPass {
                 span: span,
                 isStdLib: isStdLib
             )
-        case .foreignTypeDeclaration(let name, let access, let span):
+        case .foreignTypeDeclaration(let name, let fields, let access, let span):
             try collectForeignTypeDefinition(
+                name: name,
+                fields: fields,
+                access: access,
+                span: span,
+                isStdLib: isStdLib
+            )
+
+        case .foreignLetDeclaration(let name, _, _, let access, let span):
+            try collectVariableDeclaration(
                 name: name,
                 access: access,
                 span: span,
@@ -606,6 +615,7 @@ public class NameCollector: CompilerPass {
 
     private func collectForeignTypeDefinition(
         name: String,
+        fields: [(name: String, type: TypeNode)]?,
         access: AccessModifier,
         span: SourceSpan,
         isStdLib: Bool
@@ -617,20 +627,22 @@ public class NameCollector: CompilerPass {
             throw SemanticError.duplicateDefinition(name, line: span.line)
         }
 
+        let kind: TypeDefKind = fields == nil ? .opaque : .structure
         let defId = defIdMap.allocate(
             modulePath: currentModulePath,
             name: name,
-            kind: .type(.opaque),
+            kind: .type(kind),
             sourceFile: currentSourceFile,
             access: access,
             span: span
         )
 
         let key = isPrivate ? "\(name)@\(currentSourceFile)" : qualifiedName
+        let collectedKind: CollectedTypeKind = fields == nil ? .opaque : .structure
         collectedTypes[key] = CollectedTypeInfo(
             defId: defId,
             name: name,
-            kind: .opaque,
+            kind: collectedKind,
             access: access,
             isPrivate: isPrivate,
             sourceFile: currentSourceFile,

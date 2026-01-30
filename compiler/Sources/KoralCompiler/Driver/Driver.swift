@@ -344,6 +344,17 @@ public class Driver {
     // Suppress warnings to keep output clean
     var clangArgs = [cFileURL.path, "-o", exeURL.path, "-Wno-everything"]
 
+    // Collect linked libraries from foreign using declarations (in order)
+    let linkedLibraries: [String] = monomorphizedProgram.globalNodes.compactMap { node in
+      if case .foreignUsing(let libraryName) = node {
+        return libraryName
+      }
+      return nil
+    }
+    for lib in linkedLibraries {
+      clangArgs.append("-l\(lib)")
+    }
+
     #if os(macOS)
     if let sdkPath = getSDKPath() {
         clangArgs.append(contentsOf: ["-isysroot", sdkPath])
