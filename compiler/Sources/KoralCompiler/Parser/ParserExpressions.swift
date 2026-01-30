@@ -237,6 +237,28 @@ extension Parser {
     if let cast = try tryParseCastExpression() {
       return cast
     }
+    if currentToken === .minus {
+      let startSpan = currentSpan
+      try match(.minus)
+      switch currentToken {
+      case .integer(let num, let suffix):
+        try match(.integer(num, suffix))
+        return .integerLiteral("-\(num)", suffix)
+      case .float(let num, let suffix):
+        try match(.float(num, suffix))
+        return .floatLiteral("-\(num)", suffix)
+      case .duration(let value, let unit):
+        let span = currentSpan
+        try match(.duration(value: value, unit: unit))
+        return .durationLiteral(value: "-\(value)", unit: unit, span: span)
+      default:
+        throw ParserError.unexpectedToken(
+          span: startSpan,
+          got: currentToken.description,
+          expected: "numeric literal"
+        )
+      }
+    }
     if currentToken === .refKeyword {
       try match(.refKeyword)
       let expr = try parsePrefixExpression()
@@ -476,6 +498,10 @@ extension Parser {
     case .float(let num, let suffix):
       try match(.float(num, suffix))
       return .floatLiteral(num, suffix)
+    case .duration(let value, let unit):
+      let span = currentSpan
+      try match(.duration(value: value, unit: unit))
+      return .durationLiteral(value: value, unit: unit, span: span)
     case .string(let str):
       try match(.string(str))
       return .stringLiteral(str)

@@ -193,6 +193,7 @@ public indirect enum GlobalNode {
   )
   case foreignTypeDeclaration(
     name: String,
+    cname: String?,
     fields: [(name: String, type: TypeNode)]?,
     access: AccessModifier,
     span: SourceSpan
@@ -246,7 +247,7 @@ extension GlobalNode {
       return span
     case .intrinsicTypeDeclaration(_, _, _, let span):
       return span
-    case .foreignTypeDeclaration(_, _, _, let span):
+    case .foreignTypeDeclaration(_, _, _, _, let span):
       return span
     case .foreignLetDeclaration(_, _, _, _, let span):
       return span
@@ -395,6 +396,7 @@ public enum ComparisonPatternOperator {
 public indirect enum ExpressionNode {
   case integerLiteral(String, NumericSuffix?)  // Store as string with optional suffix
   case floatLiteral(String, NumericSuffix?)    // Store as string with optional suffix
+  case durationLiteral(value: String, unit: DurationUnit, span: SourceSpan)
   case stringLiteral(String)
   case booleanLiteral(Bool)
   case castExpression(type: TypeNode, expression: ExpressionNode)

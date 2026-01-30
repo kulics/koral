@@ -84,17 +84,19 @@ public class BodyChecker: CompilerPass {
         typedDeclarations = []
         instantiationRequests = []
         
-        // 过滤出非 using 声明的节点
-        let declarations = astNodes.filter { node in
-            if case .usingDeclaration = node { return false }
-            return true
+        // 过滤出非 using 声明的节点（保留源信息索引对齐）
+        var declarations: [(decl: GlobalNode, sourceInfo: GlobalNodeSourceInfo?, originalIndex: Int)] = []
+        for (index, node) in astNodes.enumerated() {
+            if case .usingDeclaration = node { continue }
+            declarations.append((decl: node, sourceInfo: checker.nodeSourceInfoMap[index], originalIndex: index))
         }
         
         // Pass 3: 检查函数体并生成 Typed AST
-        for (index, decl) in declarations.enumerated() {
-            let isStdLib = index < coreGlobalCount
+        for (_, entry) in declarations.enumerated() {
+            let decl = entry.decl
+            let isStdLib = entry.originalIndex < coreGlobalCount
             checker.isCurrentDeclStdLib = isStdLib
-            let sourceInfo = checker.nodeSourceInfoMap[index]
+            let sourceInfo = entry.sourceInfo
             checker.currentFileName = sourceInfo?.sourceFile ?? (isStdLib ? checker.coreFileName : checker.userFileName)
             checker.currentSourceFile = sourceInfo?.sourceFile ?? checker.currentFileName
             checker.currentModulePath = sourceInfo?.modulePath ?? []

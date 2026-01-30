@@ -109,12 +109,9 @@ public class TypeResolver: CompilerPass {
 
         // Pass 2: 注册 given 方法签名到 TypeChecker（用于后续体检查）
         if let checker {
-            let declarations = astNodes.filter { node in
-                if case .usingDeclaration = node { return false }
-                if case .foreignUsingDeclaration = node { return false }
-                return true
-            }
-            for (index, node) in declarations.enumerated() {
+            for (index, node) in astNodes.enumerated() {
+                if case .usingDeclaration = node { continue }
+                if case .foreignUsingDeclaration = node { continue }
                 let isStdLib = index < coreGlobalCount
                 checker.isCurrentDeclStdLib = isStdLib
                 let sourceInfo = index < nodeSourceInfoList.count ? nodeSourceInfoList[index] : nil
@@ -225,7 +222,7 @@ public class TypeResolver: CompilerPass {
                 span: span,
                 defIdMap: defIdMap
             )
-        case .foreignTypeDeclaration(let name, let fields, let access, let span):
+        case .foreignTypeDeclaration(let name, _, let fields, let access, let span):
             if fields == nil {
                 try resolveOpaqueTypeSignature(
                     name: name,
@@ -643,7 +640,7 @@ public class TypeResolver: CompilerPass {
                 modulePath: sourceInfo.modulePath,
                 sourceFile: sourceInfo.sourceFile
             )
-        case .foreignTypeDeclaration(let name, _, let access, _):
+        case .foreignTypeDeclaration(let name, _, _, let access, _):
             return ResolvedModuleSymbol(
                 name: name,
                 kind: .type,

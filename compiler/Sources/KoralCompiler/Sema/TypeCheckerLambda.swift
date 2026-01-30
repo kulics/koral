@@ -128,6 +128,8 @@ extension TypeChecker {
     captures: inout [CapturedVariable]
   ) throws {
     switch expr {
+    case .integerLiteral, .floatLiteral, .durationLiteral, .stringLiteral, .booleanLiteral:
+      return
     case .identifier(let name):
       // Skip if it's a parameter
       if paramNames.contains(name) { return }

@@ -171,6 +171,7 @@ public indirect enum TypedStatementNode {
 public indirect enum TypedExpressionNode {
   case integerLiteral(value: String, type: Type)  // Store as string to support arbitrary precision
   case floatLiteral(value: String, type: Type)    // Store as string to support arbitrary precision
+  case durationLiteral(secs: Int64, nanos: Int64, type: Type)
   case stringLiteral(value: String, type: Type)
   case booleanLiteral(value: Bool, type: Type)
   case castExpression(expression: TypedExpressionNode, type: Type)
@@ -382,6 +383,7 @@ extension TypedExpressionNode {
     switch self {
     case .integerLiteral(_, let type),
       .floatLiteral(_, let type),
+      .durationLiteral(_, _, let type),
       .stringLiteral(_, let type),
       .booleanLiteral(_, let type),
       .castExpression(_, let type),

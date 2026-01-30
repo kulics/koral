@@ -376,6 +376,9 @@ public class DefIdMap {
     /// DefId 到 FFI 结构体字段的映射
     private var foreignStructFields: [UInt64: [(name: String, type: Type)]] = [:]
 
+    /// DefId 到 C 名称的映射（用于 foreign type 的 cname）
+    private var cnameMap: [UInt64: String] = [:]
+
     /// DefId 到符号信息的映射
     private var symbolInfoMap: [UInt64: SymbolInfo] = [:]
 
@@ -770,6 +773,14 @@ public class DefIdMap {
 
     public func isForeignStruct(_ defId: DefId) -> Bool {
         return foreignStructFields[defId.id] != nil
+    }
+
+    public func setCname(_ defId: DefId, _ cname: String) {
+        cnameMap[defId.id] = cname
+    }
+
+    public func getCname(_ defId: DefId) -> String? {
+        return cnameMap[defId.id]
     }
 
     public func isGenericInstantiation(_ defId: DefId) -> Bool? {

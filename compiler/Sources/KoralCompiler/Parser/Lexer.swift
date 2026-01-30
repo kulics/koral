@@ -16,12 +16,26 @@ public enum NumericSuffix: String, CustomStringConvertible {
   public var description: String { rawValue }
 }
 
+/// Duration literal units
+public enum DurationUnit: String, CustomStringConvertible {
+  case nanoseconds = "ns"
+  case microseconds = "us"
+  case milliseconds = "ms"
+  case seconds = "s"
+  case minutes = "min"
+  case hours = "h"
+  case days = "d"
+
+  public var description: String { rawValue }
+}
+
 // Define token types for lexical analysis
 public enum Token: CustomStringConvertible {
   case bof  // Beginning of file marker
   case eof  // End of file marker
   case integer(String, NumericSuffix?)  // Integer literal as string with optional suffix, e.g.: "42", "255u8"
   case float(String, NumericSuffix?)  // Float literal as string with optional suffix, e.g.: "3.14", "1.0f32"
+  case duration(value: String, unit: DurationUnit)  // Duration literal, e.g.: "100ms"
   case string(String)  // String literal, e.g.: "hello"
   case plus  // Plus operator '+'
   case minus  // Minus operator '-'
@@ -141,6 +155,8 @@ public enum Token: CustomStringConvertible {
       return true
     case (.float(_, _), .float(_, _)):
       return true
+    case (.duration(_, _), .duration(_, _)):
+      return true
     case (.string(_), .string(_)):
       return true
     case (.bool(_), .bool(_)):
@@ -222,6 +238,8 @@ public enum Token: CustomStringConvertible {
         return "Float(\(value)\(suffix))"
       }
       return "Float(\(value))"
+    case .duration(let value, let unit):
+      return "Duration(\(value)\(unit))"
     case .string(let value):
       return "String(\(value))"
     case .plus:
@@ -717,6 +735,64 @@ public class Lexer {
     }
   }
 
+  /// Try to read a duration literal suffix after an integer literal.
+  private func tryReadDurationSuffix(numStr: String) -> Token? {
+    guard let firstChar = getNextChar() else { return nil }
+
+    switch firstChar {
+    case "n":
+      if let nextChar = getNextChar() {
+        if nextChar == "s" {
+          return .duration(value: numStr, unit: .nanoseconds)
+        }
+        unreadChar(nextChar)
+      }
+      unreadChar(firstChar)
+      return nil
+
+    case "u":
+      if let nextChar = getNextChar() {
+        if nextChar == "s" {
+          return .duration(value: numStr, unit: .microseconds)
+        }
+        unreadChar(nextChar)
+      }
+      unreadChar(firstChar)
+      return nil
+
+    case "m":
+      if let nextChar = getNextChar() {
+        if nextChar == "s" {
+          return .duration(value: numStr, unit: .milliseconds)
+        }
+        if nextChar == "i" {
+          if let nextNextChar = getNextChar() {
+            if nextNextChar == "n" {
+              return .duration(value: numStr, unit: .minutes)
+            }
+            unreadChar(nextNextChar)
+          }
+        }
+        unreadChar(nextChar)
+      }
+      unreadChar(firstChar)
+      return nil
+
+    case "s":
+      return .duration(value: numStr, unit: .seconds)
+
+    case "h":
+      return .duration(value: numStr, unit: .hours)
+
+    case "d":
+      return .duration(value: numStr, unit: .days)
+
+    default:
+      unreadChar(firstChar)
+      return nil
+    }
+  }
+
   // Read a string literal
   private func readString() throws -> String {
     var str = ""
@@ -964,7 +1040,11 @@ public class Lexer {
       let numberLiteral = try readNumber()
       return switch numberLiteral {
       case .integer(let num, let suffix):
-        .integer(num, suffix)
+        if suffix == nil, let durationToken = tryReadDurationSuffix(numStr: num) {
+          durationToken
+        } else {
+          .integer(num, suffix)
+        }
       case .float(let num, let suffix):
         .float(num, suffix)
       }

@@ -352,6 +352,8 @@ public class Driver {
       return nil
     }
     for lib in linkedLibraries {
+      // libc is implicitly linked; skip -lc on all platforms
+      if lib == "c" { continue }
       clangArgs.append("-l\(lib)")
     }
 
