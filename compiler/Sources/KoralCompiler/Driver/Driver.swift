@@ -493,8 +493,13 @@ public class Driver {
     try process.run()
     process.waitUntilExit()
     
-    try? stdoutHandle.close()
-    try? stderrHandle.close()
+    if #available(macOS 10.15, *) {
+      try? stdoutHandle.close()
+      try? stderrHandle.close()
+    } else {
+      stdoutHandle.closeFile()
+      stderrHandle.closeFile()
+    }
     
     // Read and print captured output
     if let stdoutData = try? Data(contentsOf: stdoutFile),
