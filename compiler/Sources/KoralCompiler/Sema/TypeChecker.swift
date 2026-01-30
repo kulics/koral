@@ -629,6 +629,13 @@ public class TypeChecker {
     )
   }
 
+  func assertNotOpaqueType(_ type: Type, span: SourceSpan) throws {
+    if case .opaque(let defId) = type {
+      let typeName = context.getName(defId) ?? type.description
+      throw SemanticError(.opaqueTypeCannotBeInstantiated(typeName: typeName), span: span)
+    }
+  }
+
   /// 为方法调用创建临时物化
   /// 当 base 是右值且方法期望 `self ref` 时，生成 letExpression 包装临时变量和方法调用
   /// 

@@ -11,8 +11,8 @@ public func printAST(_ node: ASTNode) {
       print("\(indent)UsingDeclaration: \(decl.pathKind) \(pathStr)\(batchStr)\(aliasStr)")
       print("\(indent)  Access: \(decl.access)")
 
-    case .foreignUsingDeclaration(let headerName, _):
-      print("\(indent)ForeignUsingDeclaration: \(headerName)")
+    case .foreignUsingDeclaration(let libraryName, _):
+      print("\(indent)ForeignUsingDeclaration: \(libraryName)")
       
     case .globalVariableDeclaration(let name, let type, let value, let mutable, let access, _):
       print("\(indent)GlobalVariableDeclaration:")
@@ -102,9 +102,19 @@ public func printAST(_ node: ASTNode) {
           print("\(indent)  TypeParameters: \(typeParameters)")
         }
 
-    case .foreignTypeDeclaration(let name, let access, _):
+    case .foreignTypeDeclaration(let name, let fields, let access, _):
         print("\(indent)ForeignTypeDeclaration \(name)")
         print("\(indent)  Access: \(access)")
+        if let fields {
+          for field in fields {
+            print("\(indent)  Field \(field.name): \(field.type)")
+          }
+        }
+    case .foreignLetDeclaration(let name, let type, let mutable, let access, _):
+        let mutLabel = mutable ? "mut " : ""
+        print("\(indent)ForeignLetDeclaration \(mutLabel)\(name)")
+        print("\(indent)  Access: \(access)")
+        print("\(indent)  Type: \(type)")
 
     case .givenDeclaration(let typeParams, let type, let methods, _):
       print("\(indent)GivenDeclaration:")

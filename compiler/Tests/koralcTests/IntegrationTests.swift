@@ -58,6 +58,10 @@ class IntegrationTests: XCTestCase {
     func test_ffi_foreign_intrinsic_conflict() throws { try runCase(named: "ffi_foreign_intrinsic_conflict.koral") }
     func test_ffi_foreign_type_body_error() throws { try runCase(named: "ffi_foreign_type_body_error.koral") }
     func test_ffi_incompatible_type() throws { try runCase(named: "ffi_incompatible_type.koral") }
+    func test_ffi_foreign_global_decl() throws { try runCase(named: "ffi_foreign_global_decl.koral") }
+    func test_ffi_foreign_struct_access() throws { try runCase(named: "ffi_foreign_struct_access.koral") }
+    func test_ffi_opaque_ptr_required() throws { try runCase(named: "ffi_opaque_ptr_required.koral") }
+    func test_ffi_pointer_member_error() throws { try runCase(named: "ffi_pointer_member_error.koral") }
     func test_float_types() throws { try runCase(named: "float_types.koral") }
     func test_for_loop_basic() throws { try runCase(named: "for_loop_basic.koral") }
     func test_for_loop_control_flow() throws { try runCase(named: "for_loop_control_flow.koral") }

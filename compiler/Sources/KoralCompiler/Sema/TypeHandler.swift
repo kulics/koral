@@ -174,7 +174,7 @@ extension TypeHandlerKind {
 
 /// 不透明类型处理器
 ///
-/// 处理 foreign type 的类型映射（在 C 中为 typedef void*）。
+/// 处理 foreign type 的类型映射（在 C 中为不透明结构体类型）。
 public class OpaqueHandler: TypeHandler {
     public var supportedKinds: Set<TypeHandlerKind> {
         return [.opaque]
@@ -267,7 +267,7 @@ public class StructHandler: TypeHandler {
         guard case .structure(let defId) = type else {
             return "void"
         }
-        let qualifiedName = cIdentifierOrFallback(defId: defId, fallback: "T_\(defId.id)")
+        let qualifiedName = cTypeIdentifierOrFallback(type, fallback: "T_\(defId.id)")
         return "struct \(qualifiedName)"
     }
     
@@ -275,7 +275,7 @@ public class StructHandler: TypeHandler {
         guard case .structure(let defId) = type else {
             return ""
         }
-        let qualifiedName = cIdentifierOrFallback(defId: defId, fallback: "T_\(defId.id)")
+        let qualifiedName = cTypeIdentifierOrFallback(type, fallback: "T_\(defId.id)")
         return "\(dest) = __koral_\(qualifiedName)_copy(&\(source));"
     }
     
@@ -283,7 +283,7 @@ public class StructHandler: TypeHandler {
         guard case .structure(let defId) = type else {
             return ""
         }
-        let qualifiedName = cIdentifierOrFallback(defId: defId, fallback: "T_\(defId.id)")
+        let qualifiedName = cTypeIdentifierOrFallback(type, fallback: "T_\(defId.id)")
         return "__koral_\(qualifiedName)_drop(&\(value));"
     }
     
@@ -291,7 +291,7 @@ public class StructHandler: TypeHandler {
         guard case .structure(let defId) = type else {
             return ""
         }
-        return cIdentifierOrFallback(defId: defId, fallback: "T_\(defId.id)")
+        return cTypeIdentifierOrFallback(type, fallback: "T_\(defId.id)")
     }
     
     public func containsGenericParameter(_ type: Type) -> Bool {

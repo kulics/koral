@@ -131,9 +131,11 @@ public indirect enum TypedProgram {
   case program(globalNodes: [TypedGlobalNode])
 }
 public indirect enum TypedGlobalNode {
-  case foreignUsing(headerName: String)
+  case foreignUsing(libraryName: String)
   case foreignFunction(identifier: Symbol, parameters: [Symbol])
   case foreignType(identifier: Symbol)
+  case foreignStruct(identifier: Symbol, fields: [(name: String, type: Type)])
+  case foreignGlobalVariable(identifier: Symbol, mutable: Bool)
   case globalVariable(identifier: Symbol, value: TypedExpressionNode, kind: VariableKind)
   case globalFunction(
     identifier: Symbol,

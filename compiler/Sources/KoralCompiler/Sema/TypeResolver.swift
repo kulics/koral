@@ -225,15 +225,26 @@ public class TypeResolver: CompilerPass {
                 span: span,
                 defIdMap: defIdMap
             )
-        case .foreignTypeDeclaration(let name, let access, let span):
-            try resolveOpaqueTypeSignature(
-                name: name,
-                access: access,
-                span: span,
-                defIdMap: defIdMap
-            )
+        case .foreignTypeDeclaration(let name, let fields, let access, let span):
+            if fields == nil {
+                try resolveOpaqueTypeSignature(
+                    name: name,
+                    access: access,
+                    span: span,
+                    defIdMap: defIdMap
+                )
+            } else {
+                try resolveStructSignature(
+                    name: name,
+                    typeParameters: [],
+                    parameters: [],
+                    access: access,
+                    span: span,
+                    defIdMap: defIdMap
+                )
+            }
             
-        case .traitDeclaration, .globalVariableDeclaration, .intrinsicTypeDeclaration:
+        case .traitDeclaration, .globalVariableDeclaration, .intrinsicTypeDeclaration, .foreignLetDeclaration:
             // 这些在 Pass 1 中已处理，或在 Pass 3 中处理
             break
         }
@@ -632,10 +643,18 @@ public class TypeResolver: CompilerPass {
                 modulePath: sourceInfo.modulePath,
                 sourceFile: sourceInfo.sourceFile
             )
-        case .foreignTypeDeclaration(let name, let access, _):
+        case .foreignTypeDeclaration(let name, _, let access, _):
             return ResolvedModuleSymbol(
                 name: name,
                 kind: .type,
+                access: access,
+                modulePath: sourceInfo.modulePath,
+                sourceFile: sourceInfo.sourceFile
+            )
+        case .foreignLetDeclaration(let name, _, _, let access, _):
+            return ResolvedModuleSymbol(
+                name: name,
+                kind: .variable,
                 access: access,
                 modulePath: sourceInfo.modulePath,
                 sourceFile: sourceInfo.sourceFile

@@ -238,10 +238,11 @@ public class AccessChecker {
         case .foreignUsingDeclaration:
             return .default
             
-        case .globalFunctionDeclaration, .globalVariableDeclaration,
-             .globalStructDeclaration, .globalUnionDeclaration,
-             .intrinsicFunctionDeclaration, .intrinsicTypeDeclaration,
-             .foreignFunctionDeclaration, .foreignTypeDeclaration:
+           case .globalFunctionDeclaration, .globalVariableDeclaration,
+               .globalStructDeclaration, .globalUnionDeclaration,
+               .intrinsicFunctionDeclaration, .intrinsicTypeDeclaration,
+               .foreignFunctionDeclaration, .foreignTypeDeclaration,
+               .foreignLetDeclaration:
             return .protected
             
         case .traitDeclaration:

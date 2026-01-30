@@ -138,9 +138,9 @@ public indirect enum GlobalNode {
   // Using declaration (must appear at the beginning of a file)
   case usingDeclaration(UsingDeclaration)
 
-  /// Foreign Using 声明（C 头文件导入）
+  /// Foreign Using 声明（外部库链接）
   case foreignUsingDeclaration(
-    headerName: String,
+    libraryName: String,
     span: SourceSpan
   )
   
@@ -193,6 +193,15 @@ public indirect enum GlobalNode {
   )
   case foreignTypeDeclaration(
     name: String,
+    fields: [(name: String, type: TypeNode)]?,
+    access: AccessModifier,
+    span: SourceSpan
+  )
+
+  case foreignLetDeclaration(
+    name: String,
+    type: TypeNode,
+    mutable: Bool,
     access: AccessModifier,
     span: SourceSpan
   )
@@ -237,7 +246,9 @@ extension GlobalNode {
       return span
     case .intrinsicTypeDeclaration(_, _, _, let span):
       return span
-    case .foreignTypeDeclaration(_, _, let span):
+    case .foreignTypeDeclaration(_, _, _, let span):
+      return span
+    case .foreignLetDeclaration(_, _, _, _, let span):
       return span
     case .traitDeclaration(_, _, _, _, _, let span):
       return span

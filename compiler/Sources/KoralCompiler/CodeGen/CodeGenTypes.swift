@@ -187,6 +187,28 @@ extension CodeGen {
     appendToBuffer("}\n\n")
   }
 
+  /// Generate foreign struct declaration without copy/drop
+  func generateForeignStructDeclaration(
+    _ identifier: Symbol,
+    _ fields: [(name: String, type: Type)]
+  ) {
+    let name: String
+    if case .structure(let defId) = identifier.type {
+      name = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
+    } else {
+      name = cIdentifier(for: identifier)
+    }
+
+    appendToBuffer("struct \(name) {\n")
+    withIndent {
+      for field in fields {
+        addIndent()
+        appendToBuffer("\(cTypeName(field.type)) \(sanitizeCIdentifier(field.name));\n")
+      }
+    }
+    appendToBuffer("};\n\n")
+  }
+
   /// Generate union constructor code
   func generateUnionConstructor(type: Type, caseName: String, args: [TypedExpressionNode]) -> String {
       guard case .union(let defId) = type else { fatalError() }

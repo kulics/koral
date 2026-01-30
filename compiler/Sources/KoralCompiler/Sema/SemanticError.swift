@@ -20,6 +20,11 @@ public struct SemanticError: Error, CustomStringConvertible, Sendable {
         case generic(String)
         case ffiIncompatibleType(type: String, reason: String)
         case opaqueTypeConstruction(type: String)
+        case opaqueTypeCannotBeInstantiated(typeName: String)
+        case pointerMemberAccessOnNonStruct(field: String, type: String)
+        case unknownForeignField(type: String, field: String)
+        case foreignGlobalNotFound(name: String)
+        case foreignGlobalImmutable(name: String)
         
         // Exhaustiveness checking errors
         case nonExhaustiveMatch(type: String, missing: [String])
@@ -142,6 +147,16 @@ public struct SemanticError: Error, CustomStringConvertible, Sendable {
             return "FFI incompatible type '\(type)': \(reason)"
         case .opaqueTypeConstruction(let type):
             return "Opaque type '\(type)' cannot be constructed directly"
+        case .opaqueTypeCannotBeInstantiated(let typeName):
+            return "opaque type '\(typeName)' cannot be instantiated directly, use '\(typeName) ptr' instead"
+        case .pointerMemberAccessOnNonStruct(let field, let type):
+            return "cannot access member '\(field)' on pointer to non-struct type '\(type)'"
+        case .unknownForeignField(let type, let field):
+            return "foreign struct '\(type)' has no field '\(field)'"
+        case .foreignGlobalNotFound(let name):
+            return "foreign global variable '\(name)' not declared"
+        case .foreignGlobalImmutable(let name):
+            return "cannot assign to immutable foreign global '\(name)'"
         case .nonExhaustiveMatch(let type, let missing):
             let casesStr = missing.joined(separator: ", ")
             return "Non-exhaustive match on type '\(type)': missing cases \(casesStr)"

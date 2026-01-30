@@ -373,6 +373,9 @@ public class DefIdMap {
     /// DefId 到联合类型信息的映射
     private var unionInfoMap: [UInt64: UnionTypeInfo] = [:]
 
+    /// DefId 到 FFI 结构体字段的映射
+    private var foreignStructFields: [UInt64: [(name: String, type: Type)]] = [:]
+
     /// DefId 到符号信息的映射
     private var symbolInfoMap: [UInt64: SymbolInfo] = [:]
 
@@ -400,6 +403,7 @@ public class DefIdMap {
         signatureMap.removeAll()
         structInfoMap.removeAll()
         unionInfoMap.removeAll()
+        foreignStructFields.removeAll()
     }
     
     // MARK: - 公共方法
@@ -754,6 +758,18 @@ public class DefIdMap {
 
     public func getUnionCases(_ defId: DefId) -> [UnionCase]? {
         return unionInfoMap[defId.id]?.cases
+    }
+
+    public func setForeignStructFields(_ defId: DefId, _ fields: [(name: String, type: Type)]) {
+        foreignStructFields[defId.id] = fields
+    }
+
+    public func getForeignStructFields(_ defId: DefId) -> [(name: String, type: Type)]? {
+        return foreignStructFields[defId.id]
+    }
+
+    public func isForeignStruct(_ defId: DefId) -> Bool {
+        return foreignStructFields[defId.id] != nil
     }
 
     public func isGenericInstantiation(_ defId: DefId) -> Bool? {

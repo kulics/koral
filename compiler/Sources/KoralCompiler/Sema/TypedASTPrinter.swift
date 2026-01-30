@@ -7,8 +7,8 @@ public func printTypedAST(_ node: TypedProgram) {
 
   func printTypedGlobalNode(_ node: TypedGlobalNode) {
     switch node {
-    case .foreignUsing(let headerName):
-      print("\(indent)ForeignUsing: \(headerName)")
+    case .foreignUsing(let libraryName):
+      print("\(indent)ForeignUsing: \(libraryName)")
 
     case .foreignFunction(let identifier, let parameters):
       print("\(indent)ForeignFunction:")
@@ -23,6 +23,21 @@ public func printTypedAST(_ node: TypedProgram) {
     case .foreignType(let identifier):
       print("\(indent)ForeignType:")
       print("\(indent)  Identifier: \(symbolLabel(identifier)): \(identifier.type)")
+
+    case .foreignStruct(let identifier, let fields):
+      print("\(indent)ForeignStruct:")
+      print("\(indent)  Identifier: \(symbolLabel(identifier)): \(identifier.type)")
+      print("\(indent)  Fields:")
+      withIndent {
+        for field in fields {
+          print("\(indent)\(field.name): \(field.type)")
+        }
+      }
+
+    case .foreignGlobalVariable(let identifier, let mutable):
+      print("\(indent)ForeignGlobalVariable:")
+      print("\(indent)  Identifier: \(symbolLabel(identifier)): \(identifier.type)")
+      print("\(indent)  Mutable: \(mutable)")
 
     case .globalVariable(let identifier, let value, let mutable):
       print("\(indent)GlobalVariable:")

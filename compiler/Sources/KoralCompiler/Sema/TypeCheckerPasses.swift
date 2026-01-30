@@ -343,7 +343,7 @@ extension TypeChecker {
       }
       return nil
 
-    case .foreignTypeDeclaration(let name, let access, _):
+    case .foreignTypeDeclaration(let name, _, let access, _):
       let type = access == .private
         ? currentScope.lookupType(name, sourceFile: sourceInfo.sourceFile)
         : currentScope.lookupType(name)
@@ -366,6 +366,18 @@ extension TypeChecker {
       return nil
       
     case .globalVariableDeclaration(let name, _, _, _, _, _):
+      if let defId = currentScope.lookup(name, sourceFile: sourceInfo.sourceFile),
+         let varType = defIdMap.getSymbolType(defId) {
+        let symbol = Symbol(
+          defId: defId,
+          type: varType,
+          kind: .variable(.Value),
+          methodKind: defIdMap.getSymbolMethodKind(defId) ?? .normal
+        )
+        return (name, symbol, nil)
+      }
+      return nil
+    case .foreignLetDeclaration(let name, _, _, _, _):
       if let defId = currentScope.lookup(name, sourceFile: sourceInfo.sourceFile),
          let varType = defIdMap.getSymbolType(defId) {
         let symbol = Symbol(
@@ -556,20 +568,23 @@ extension TypeChecker {
         stdLibTypes.insert(name)
       }
       
-    case .foreignTypeDeclaration(let name, let access, let span):
+    case .foreignTypeDeclaration(let name, let fields, let access, let span):
       self.currentSpan = span
       let isPrivate = (access == .private)
       if !isPrivate && currentScope.hasTypeDefinition(name) {
         throw SemanticError.duplicateDefinition(name, line: span.line)
       }
+      let kind: TypeDefKind = fields == nil ? .opaque : .structure
       let defId = getOrAllocateTypeDefId(
         name: name,
-        kind: .opaque,
+        kind: kind,
         access: access,
         modulePath: currentModulePath,
         sourceFile: currentSourceFile
       )
-      let placeholder = Type.opaque(defId: defId)
+      let placeholder: Type = fields == nil
+        ? .opaque(defId: defId)
+        : .structure(defId: defId)
       if isPrivate {
         try currentScope.definePrivateType(name, sourceFile: currentSourceFile, type: placeholder)
       } else {
@@ -596,6 +611,9 @@ extension TypeChecker {
       
     case .globalVariableDeclaration:
       // Variables are handled in pass 2
+      break
+    case .foreignLetDeclaration:
+      // Foreign global variables are handled in pass 3
       break
       
     case .givenDeclaration(let typeParams, let typeNode, _, let span):
@@ -1015,6 +1033,46 @@ extension TypeChecker {
         }
       }
       // Generic structs are handled in pass 3
+
+    case .foreignTypeDeclaration(let name, let fields, let access, let span):
+      self.currentSpan = span
+      guard let fields else {
+        break
+      }
+      let isPrivate = (access == .private)
+      let placeholder = isPrivate
+        ? currentScope.lookupType(name, sourceFile: currentSourceFile)!
+        : currentScope.lookupType(name)!
+
+      var resolvedFields: [(name: String, type: Type)] = []
+      for field in fields {
+        let fieldType = try resolveTypeNode(field.type)
+        if fieldType == placeholder {
+          throw SemanticError.invalidOperation(
+            op: "Direct recursion in foreign struct \(name) not allowed (use ptr)",
+            type1: field.name,
+            type2: ""
+          )
+        }
+        resolvedFields.append((name: field.name, type: fieldType))
+      }
+
+      if case .structure(let defId) = placeholder {
+        let members = resolvedFields.map { (name: $0.name, type: $0.type, mutable: true) }
+        context.updateStructInfo(
+          defId: defId,
+          members: members,
+          isGenericInstantiation: false,
+          typeArguments: nil
+        )
+        context.updateForeignStructFields(defId: defId, fields: resolvedFields)
+        let resolvedType = Type.structure(defId: defId)
+        if isPrivate {
+          currentScope.overwritePrivateType(name, sourceFile: currentSourceFile, type: resolvedType)
+        } else {
+          currentScope.overwriteType(name, type: resolvedType)
+        }
+      }
       
     case .globalUnionDeclaration(let name, let typeParameters, let cases, let access, let span):
       self.currentSpan = span
@@ -1065,8 +1123,10 @@ extension TypeChecker {
       if typeParameters.isEmpty {
         // Non-generic function: register signature now
         let returnType = try resolveTypeNode(returnTypeNode)
+        try assertNotOpaqueType(returnType, span: span)
         let params = try parameters.map { param -> Parameter in
           let paramType = try resolveTypeNode(param.type)
+          try assertNotOpaqueType(paramType, span: span)
           // In Koral, 'mutable' in parameter means it's a mutable reference (ref)
           let passKind: PassKind = param.mutable ? .byMutRef : .byVal
           return Parameter(type: paramType, kind: passKind)
@@ -1086,8 +1146,10 @@ extension TypeChecker {
     case .foreignFunctionDeclaration(let name, let parameters, let returnTypeNode, let access, let span):
       self.currentSpan = span
       let returnType = try resolveTypeNode(returnTypeNode)
+      try assertNotOpaqueType(returnType, span: span)
       let params = try parameters.map { param -> Parameter in
         let paramType = try resolveTypeNode(param.type)
+        try assertNotOpaqueType(paramType, span: span)
         let passKind: PassKind = param.mutable ? .byMutRef : .byVal
         return Parameter(type: paramType, kind: passKind)
       }
@@ -1125,8 +1187,8 @@ extension TypeChecker {
     case .usingDeclaration:
       // Using declarations are handled separately, skip here
       return nil
-    case .foreignUsingDeclaration(let headerName, _):
-      return .foreignUsing(headerName: headerName)
+    case .foreignUsingDeclaration(let libraryName, _):
+      return .foreignUsing(libraryName: libraryName)
       
     case .traitDeclaration(_, _, let superTraits, _, _, let span):
       self.currentSpan = span
@@ -1190,6 +1252,7 @@ extension TypeChecker {
         }
       }
       let type = try resolveTypeNode(typeNode)
+      try assertNotOpaqueType(type, span: span)
       
       // For Lambda expressions, pass the expected type for type inference
       var typedValue: TypedExpressionNode
@@ -1222,7 +1285,7 @@ extension TypeChecker {
         kind: isMut ? .MutableValue : .Value
       )
 
-    case .foreignTypeDeclaration(let name, let access, let span):
+    case .foreignTypeDeclaration(let name, let fields, let access, let span):
       self.currentSpan = span
       let isPrivate = (access == .private)
       let type: Type
@@ -1231,21 +1294,65 @@ extension TypeChecker {
         : currentScope.lookupType(name) {
         type = existing
       } else {
+        let kind: TypeDefKind = fields == nil ? .opaque : .structure
         let defId = getOrAllocateTypeDefId(
           name: name,
-          kind: .opaque,
+          kind: kind,
           access: access,
           modulePath: currentModulePath,
           sourceFile: currentSourceFile
         )
-        type = .opaque(defId: defId)
+        type = fields == nil ? .opaque(defId: defId) : .structure(defId: defId)
         if isPrivate {
           try currentScope.definePrivateType(name, sourceFile: currentSourceFile, type: type)
         } else {
           try currentScope.defineType(name, type: type)
         }
       }
+      if fields != nil, case .structure(let defId) = type {
+        let resolvedFields = context.getForeignStructFields(defId) ?? []
+        return .foreignStruct(
+          identifier: makeGlobalSymbol(name: name, type: type, kind: .type, access: access),
+          fields: resolvedFields
+        )
+      }
       return .foreignType(identifier: makeGlobalSymbol(name: name, type: type, kind: .type, access: access))
+
+    case .foreignLetDeclaration(let name, let typeNode, let mutable, let access, let span):
+      self.currentSpan = span
+      let type = try resolveTypeNode(typeNode)
+      try assertNotOpaqueType(type, span: span)
+
+      let isPrivate = (access == .private)
+      if isPrivate {
+        if currentScope.lookup(name, sourceFile: currentSourceFile) != nil {
+          throw SemanticError.duplicateDefinition(name, line: span.line)
+        }
+      } else {
+        guard case nil = currentScope.lookup(name) else {
+          throw SemanticError.duplicateDefinition(name, line: span.line)
+        }
+      }
+
+      if isPrivate {
+        currentScope.definePrivateSymbol(
+          name,
+          sourceFile: currentSourceFile,
+          type: type,
+          mutable: mutable,
+          modulePath: currentModulePath
+        )
+      } else {
+        currentScope.defineWithModulePath(name, type, mutable: mutable, modulePath: currentModulePath)
+      }
+
+      let symbol = makeGlobalSymbol(
+        name: name,
+        type: type,
+        kind: .variable(mutable ? .MutableValue : .Value),
+        access: access
+      )
+      return .foreignGlobalVariable(identifier: symbol, mutable: mutable)
 
     case .globalFunctionDeclaration(
       let name, let typeParameters, let parameters, let returnTypeNode, let body, let access,

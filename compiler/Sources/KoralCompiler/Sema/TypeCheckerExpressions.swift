@@ -1165,7 +1165,7 @@ extension TypeChecker {
 
       if let type = currentScope.lookupType(name, sourceFile: currentSourceFile) {
         if case .opaque = type {
-          throw SemanticError(.opaqueTypeConstruction(type: type.description), span: currentSpan)
+          throw SemanticError(.opaqueTypeCannotBeInstantiated(typeName: type.description), span: currentSpan)
         }
         guard case .structure(let defId) = type else {
           throw SemanticError.invalidOperation(
@@ -2370,24 +2370,32 @@ extension TypeChecker {
       typedBase = inferredBase
     }
 
-    var currentType: Type = {
-      if case .reference(let inner) = typedBase.type { return inner }
-      return typedBase.type
-    }()
+    var currentType: Type = typedBase.type
     var typedPath: [Symbol] = []
 
     for (index, memberName) in path.enumerated() {
       let isLast = index == path.count - 1
 
-      let typeToLookup = {
-        if case .reference(let inner) = currentType { return inner }
-        return currentType
+      let (typeToLookup, isPointerAccess) = {
+        if case .reference(let inner) = currentType { return (inner, false) }
+        if case .pointer(let inner) = currentType { return (inner, true) }
+        return (currentType, false)
       }()
 
       // Check if it is a structure to access members
       var foundMember = false
+      var isForeignStruct = false
       if case .structure(let defId) = typeToLookup {
-        if let mem = context.getStructMembers(defId)?.first(where: { $0.name == memberName }) {
+        isForeignStruct = context.isForeignStruct(defId)
+        if isForeignStruct {
+          if let field = context.getForeignStructFields(defId)?.first(where: { $0.name == memberName }) {
+            let sym = makeLocalSymbol(
+              name: field.name, type: field.type, kind: .variable(.MutableValue))
+            typedPath.append(sym)
+            currentType = field.type
+            foundMember = true
+          }
+        } else if let mem = context.getStructMembers(defId)?.first(where: { $0.name == memberName }) {
           let sym = makeLocalSymbol(
             name: mem.name, type: mem.type, kind: .variable(mem.mutable ? .MutableValue : .Value))
           typedPath.append(sym)
@@ -2427,13 +2435,27 @@ extension TypeChecker {
       if !foundMember {
         if isLast {
           // Try to find method on the type
+          if isPointerAccess {
+            if let methodResult = try inferMethodOnType(typeToLookup: currentType, memberName: memberName, typedBase: typedBase, typedPath: typedPath) {
+              return methodResult
+            }
+          }
           if let methodResult = try inferMethodOnType(typeToLookup: typeToLookup, memberName: memberName, typedBase: typedBase, typedPath: typedPath) {
             return methodResult
           }
         }
 
+        if isPointerAccess {
+          throw SemanticError(
+            .pointerMemberAccessOnNonStruct(field: memberName, type: typeToLookup.description),
+            span: currentSpan
+          )
+        }
         if case .structure(let defId) = typeToLookup {
           let name = context.getName(defId) ?? ""
+          if isForeignStruct {
+            throw SemanticError(.unknownForeignField(type: name, field: memberName), span: currentSpan)
+          }
           throw SemanticError.undefinedMember(memberName, name)
         } else {
           throw SemanticError.invalidOperation(
@@ -3278,13 +3300,28 @@ extension TypeChecker {
       var resolvedPath: [Symbol] = []
 
       for memberName in path {
-        // Unwrap reference if needed
-        if case .reference(let inner) = currentType { currentType = inner }
+        let (typeToLookup, isPointerAccess) = {
+          if case .reference(let inner) = currentType { return (inner, false) }
+          if case .pointer(let inner) = currentType { return (inner, true) }
+          return (currentType, false)
+        }()
 
         // Handle concrete structure types
-        if case .structure(let defId) = currentType {
+        if case .structure(let defId) = typeToLookup {
+          if context.isForeignStruct(defId) {
+            guard let field = context.getForeignStructFields(defId)?.first(where: { $0.name == memberName }) else {
+              let typeName = context.getName(defId) ?? typeToLookup.description
+              throw SemanticError(.unknownForeignField(type: typeName, field: memberName), span: currentSpan)
+            }
+
+            resolvedPath.append(
+              makeLocalSymbol(name: field.name, type: field.type, kind: .variable(.MutableValue)))
+            currentType = field.type
+            continue
+          }
+
           guard let member = context.getStructMembers(defId)?.first(where: { $0.name == memberName }) else {
-            throw SemanticError.undefinedMember(memberName, currentType.description)
+            throw SemanticError.undefinedMember(memberName, typeToLookup.description)
           }
 
           if !member.mutable {
@@ -3298,7 +3335,7 @@ extension TypeChecker {
         }
         
         // Handle genericStruct types - look up member from template
-        if case .genericStruct(let templateName, let typeArgs) = currentType {
+        if case .genericStruct(let templateName, let typeArgs) = typeToLookup {
           guard let template = currentScope.lookupGenericStructTemplate(templateName) else {
             throw SemanticError.undefinedType(templateName)
           }
@@ -3313,7 +3350,7 @@ extension TypeChecker {
           
           // Look up member in template
           guard let param = template.parameters.first(where: { $0.name == memberName }) else {
-            throw SemanticError.undefinedMember(memberName, currentType.description)
+            throw SemanticError.undefinedMember(memberName, typeToLookup.description)
           }
           
           if !param.mutable {
@@ -3334,8 +3371,14 @@ extension TypeChecker {
           continue
         }
 
+        if isPointerAccess {
+          throw SemanticError(
+            .pointerMemberAccessOnNonStruct(field: memberName, type: typeToLookup.description),
+            span: currentSpan
+          )
+        }
         throw SemanticError.invalidOperation(
-          op: "member access on non-struct", type1: currentType.description, type2: "")
+          op: "member access on non-struct", type1: typeToLookup.description, type2: "")
       }
       return .memberPath(source: typedBase, path: resolvedPath)
 
