@@ -128,7 +128,7 @@ extension TypeChecker {
     captures: inout [CapturedVariable]
   ) throws {
     switch expr {
-    case .integerLiteral, .floatLiteral, .durationLiteral, .stringLiteral, .booleanLiteral:
+    case .integerLiteral, .floatLiteral, .durationLiteral, .stringLiteral, .booleanLiteral, .genericInstantiation:
       return
     case .identifier(let name):
       // Skip if it's a parameter
@@ -260,9 +260,6 @@ extension TypeChecker {
         try collectCapturedVariables(expr: arg, paramNames: paramNames, captures: &captures)
       }
       
-    case .integerLiteral, .floatLiteral, .stringLiteral, .booleanLiteral, .genericInstantiation:
-      // Literals and type instantiations don't capture variables
-      break
     }
   }
   
