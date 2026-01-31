@@ -584,27 +584,6 @@ public class EscapeContext {
             preAnalyzeExpression(offset)
         case .nullPtr:
             break  // No expressions to analyze
-        case .exit(let code):
-            preAnalyzeExpression(code)
-        case .abort:
-            break
-        case .float32Bits(let value):
-            preAnalyzeExpression(value)
-        case .float64Bits(let value):
-            preAnalyzeExpression(value)
-        case .float32FromBits(let bits):
-            preAnalyzeExpression(bits)
-        case .float64FromBits(let bits):
-            preAnalyzeExpression(bits)
-        // Low-level IO intrinsics (minimal set using file descriptors)
-        case .fwrite(let ptr, let len, let fd):
-            preAnalyzeExpression(ptr)
-            preAnalyzeExpression(len)
-            preAnalyzeExpression(fd)
-        case .fgetc(let fd):
-            preAnalyzeExpression(fd)
-        case .fflush(let fd):
-            preAnalyzeExpression(fd)
         }
     }
     

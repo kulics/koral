@@ -16,6 +16,7 @@ public class CodeGen {
   var userDefinedDrops: [String: String] = [:] // TypeName -> Mangled Drop Function Name
   private(set) var cIdentifierByDefId: [UInt64: String] = [:]
   private var foreignFunctionDefIds: Set<UInt64> = []
+  private var foreignGlobalVarDefIds: Set<UInt64> = []
   
   /// 用户定义的 main 函数的限定名（如 "hello_main"）
   /// 如果用户没有定义 main 函数，则为 nil
@@ -72,6 +73,12 @@ public class CodeGen {
     self.escapeContext = EscapeContext(reportingEnabled: escapeAnalysisReportEnabled, context: context)
     self.foreignFunctionDefIds = Set(ast.globalNodes.compactMap { node in
       if case .foreignFunction(let identifier, _) = node {
+        return identifier.defId.id
+      }
+      return nil
+    })
+    self.foreignGlobalVarDefIds = Set(ast.globalNodes.compactMap { node in
+      if case .foreignGlobalVariable(let identifier, _) = node {
         return identifier.defId.id
       }
       return nil
@@ -233,6 +240,18 @@ public class CodeGen {
       isGlobalSymbol = !modulePath.isEmpty || !sourceFile.isEmpty || access == .private
     }
 
+    if case .variable = symbol.kind {
+      if foreignGlobalVarDefIds.contains(defIdKey(symbol.defId)) {
+        if let cName = cIdentifierByDefId[defIdKey(symbol.defId)] {
+          return cName
+        }
+        let name = context.getName(symbol.defId) ?? "<unknown>"
+        return context.getCname(symbol.defId) ?? sanitizeCIdentifier(name)
+      }
+      let base = sanitizeCIdentifier(context.getName(symbol.defId) ?? "<unknown>")
+      return "\(base)_\(symbol.defId.id)"
+    }
+
     if isGlobalSymbol {
       if let cName = cIdentifierByDefId[defIdKey(symbol.defId)] {
         return cName
@@ -324,12 +343,15 @@ public class CodeGen {
 
   public func generate() -> String {
     buffer = """
-      #include <stdio.h>
-      #include <stdlib.h>
       #include <stdatomic.h>
-      #include <string.h>
       #include <stdint.h>
-      #include <math.h>
+
+      void koral_panic_float_cast_overflow(void);
+
+      """
+
+    buffer += """
+      void koral_set_args(int32_t argc, uint8_t** argv);
 
       """
 
@@ -766,8 +788,11 @@ public class CodeGen {
   /// 生成 C 的 main 函数入口
   /// 负责初始化全局变量并调用用户定义的 main 函数
   private func generateCMainFunction() {
-    buffer += "\nint main() {\n"
+    buffer += "\nint main(int argc, char** argv) {\n"
     withIndent {
+      addIndent()
+      buffer += "koral_set_args((int32_t)argc, (uint8_t**)argv);\n"
+
       // 生成全局变量初始化
       if !globalInitializations.isEmpty {
         pushScope()
@@ -944,6 +969,9 @@ public class CodeGen {
       return value ? "1" : "0"
 
     case .variable(let identifier):
+      if identifier.type == .void {
+        return "0"
+      }
       return cIdentifier(for: identifier)
 
     case .castExpression(let inner, let type):
@@ -1006,9 +1034,7 @@ public class CodeGen {
         buffer += "if (!(\(fVar) >= (double)\(minMacro) && \(fVar) <= (double)\(maxMacro))) {\n"
         withIndent {
           addIndent()
-          buffer += "fprintf(stderr, \"Panic: float-to-int cast overflow\\n\");\n"
-          addIndent()
-          buffer += "abort();\n"
+          buffer += "koral_panic_float_cast_overflow();\n"
         }
         addIndent()
         buffer += "}\n"
@@ -1080,11 +1106,14 @@ public class CodeGen {
       buffer += "{\n"
       withIndent {
         addIndent()
-        let cType = cTypeName(identifier.type)
-        buffer += "\(cType) \(cIdentifier(for: identifier)) = \(valueVar);\n"
-
-        pushScope()
-        registerVariable(cIdentifier(for: identifier), identifier.type)
+        if identifier.type != .void {
+          let cType = cTypeName(identifier.type)
+          buffer += "\(cType) \(cIdentifier(for: identifier)) = \(valueVar);\n"
+          pushScope()
+          registerVariable(cIdentifier(for: identifier), identifier.type)
+        } else {
+          pushScope()
+        }
 
         let bodyResultVar = generateExpressionSSA(body)
 
@@ -1866,87 +1895,6 @@ public class CodeGen {
       buffer += "\(cTypeName(resultType)) \(result) = NULL;\n"
       return result
 
-    case .exit(let code):
-      let c = generateExpressionSSA(code)
-      addIndent()
-      buffer += "exit(\(c));\n"
-      return ""
-
-    case .abort:
-      addIndent()
-      buffer += "abort();\n"
-      return ""
-
-    case .float32Bits(let value):
-      let v = generateExpressionSSA(value)
-      let result = nextTemp()
-      addIndent()
-      buffer += "uint32_t \(result) = 0;\n"
-      addIndent()
-      buffer += "memcpy(&\(result), &\(v), sizeof(uint32_t));\n"
-      return result
-
-    case .float64Bits(let value):
-      let v = generateExpressionSSA(value)
-      let result = nextTemp()
-      addIndent()
-      buffer += "uint64_t \(result) = 0;\n"
-      addIndent()
-      buffer += "memcpy(&\(result), &\(v), sizeof(uint64_t));\n"
-      return result
-
-    case .float32FromBits(let bits):
-      let b = generateExpressionSSA(bits)
-      let bitsTemp = nextTemp()
-      let result = nextTemp()
-      addIndent()
-      buffer += "uint32_t \(bitsTemp) = \(b);\n"
-      addIndent()
-      buffer += "float \(result) = 0;\n"
-      addIndent()
-      buffer += "memcpy(&\(result), &\(bitsTemp), sizeof(float));\n"
-      return result
-
-    case .float64FromBits(let bits):
-      let b = generateExpressionSSA(bits)
-      let bitsTemp = nextTemp()
-      let result = nextTemp()
-      addIndent()
-      buffer += "uint64_t \(bitsTemp) = \(b);\n"
-      addIndent()
-      buffer += "double \(result) = 0;\n"
-      addIndent()
-      buffer += "memcpy(&\(result), &\(bitsTemp), sizeof(double));\n"
-      return result
-
-    // Low-level IO intrinsics (minimal set using file descriptors)
-    case .fwrite(let ptr, let len, let fd):
-      let p = generateExpressionSSA(ptr)
-      let l = generateExpressionSSA(len)
-      let f = generateExpressionSSA(fd)
-      let result = nextTemp()
-      addIndent()
-      buffer += "FILE* _fwrite_stream_\(result) = (\(f) == 1) ? stdout : ((\(f) == 2) ? stderr : stdin);\n"
-      addIndent()
-      buffer += "int64_t \(result) = fwrite((const char*)\(p), 1, \(l), _fwrite_stream_\(result));\n"
-      return result
-
-    case .fgetc(let fd):
-      let f = generateExpressionSSA(fd)
-      let result = nextTemp()
-      addIndent()
-      buffer += "FILE* _fgetc_stream_\(result) = (\(f) == 0) ? stdin : ((\(f) == 1) ? stdout : stderr);\n"
-      addIndent()
-      buffer += "int64_t \(result) = fgetc(_fgetc_stream_\(result));\n"
-      return result
-
-    case .fflush(let fd):
-      let f = generateExpressionSSA(fd)
-      addIndent()
-      buffer += "FILE* _fflush_stream = (\(f) == 1) ? stdout : ((\(f) == 2) ? stderr : stdin);\n"
-      addIndent()
-      buffer += "fflush(_fflush_stream);\n"
-      return ""
     }
   }
 
@@ -2426,6 +2374,9 @@ public class CodeGen {
       case .variable(let symbol):
         let name = cIdentifier(for: symbol)
         let varType = symbol.type
+        if varType == .void {
+          return ([], [], "1", [], [])
+        }
         var bindCode = ""
         let cType = cTypeName(varType)
         bindCode += "\(cType) \(name);\n"

@@ -283,20 +283,7 @@ public indirect enum TypedIntrinsic {
   case takeMemory(ptr: TypedExpressionNode)
   case nullPtr(resultType: Type)
 
-  // Bit utilities
-  case float32Bits(value: TypedExpressionNode)
-  case float64Bits(value: TypedExpressionNode)
-  case float32FromBits(bits: TypedExpressionNode)
-  case float64FromBits(bits: TypedExpressionNode)
 
-  // Control flow
-  case exit(code: TypedExpressionNode)
-  case abort
-
-  // Low-level IO intrinsics (minimal set using file descriptors)
-  case fwrite(ptr: TypedExpressionNode, len: TypedExpressionNode, fd: TypedExpressionNode)  // returns bytes written
-  case fgetc(fd: TypedExpressionNode)  // returns char (0-255) or -1 for EOF
-  case fflush(fd: TypedExpressionNode)
 
   public var type: Type {
     switch self {
@@ -313,18 +300,7 @@ public indirect enum TypedIntrinsic {
       fatalError("takeMemory on non-pointer")
     case .nullPtr(let resultType): return resultType
 
-    case .float32Bits: return .uint32
-    case .float64Bits: return .uint64
-    case .float32FromBits: return .float32
-    case .float64FromBits: return .float64
 
-    case .exit: return .never
-    case .abort: return .never
-
-    // Low-level IO intrinsics
-    case .fwrite: return .int  // returns bytes written
-    case .fgetc: return .int   // returns char or -1 for EOF
-    case .fflush: return .void
     }
   }
 }

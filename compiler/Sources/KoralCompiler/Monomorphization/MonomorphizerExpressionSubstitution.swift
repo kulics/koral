@@ -223,17 +223,6 @@ extension Monomorphizer {
             // Apply lowering for primitive type methods (__equals, __compare)
             // This mirrors the lowering done in TypeChecker for direct calls
             if case .methodReference(let base, let method, _, _, _) = newCallee {
-                // Intercept Float32/Float64 to_bits intrinsic method
-                let rawMethodName = context.getName(method.defId) ?? ""
-                let methodName = extractMethodName(rawMethodName)
-                if methodName == "to_bits" {
-                    if base.type == .float32 && newArguments.isEmpty {
-                        return .intrinsicCall(.float32Bits(value: base))
-                    } else if base.type == .float64 && newArguments.isEmpty {
-                        return .intrinsicCall(.float64Bits(value: base))
-                    }
-                }
-                
                 // Lower primitive `__equals(self, other) Bool` to scalar equality
                 if method.methodKind == .equals,
                    newType == .bool,
@@ -777,33 +766,6 @@ extension Monomorphizer {
         case .nullPtr(let resultType):
             return .nullPtr(resultType: substituteType(resultType, substitution: substitution))
             
-        case .float32Bits(let value):
-            return .float32Bits(value: substituteTypesInExpression(value, substitution: substitution))
-        case .float64Bits(let value):
-            return .float64Bits(value: substituteTypesInExpression(value, substitution: substitution))
-        case .float32FromBits(let bits):
-            return .float32FromBits(bits: substituteTypesInExpression(bits, substitution: substitution))
-        case .float64FromBits(let bits):
-            return .float64FromBits(bits: substituteTypesInExpression(bits, substitution: substitution))
-        case .exit(let code):
-            return .exit(code: substituteTypesInExpression(code, substitution: substitution))
-        case .abort:
-            return .abort
-
-
-        // Low-level IO intrinsics (minimal set using file descriptors)
-        case .fwrite(let ptr, let len, let fd):
-            return .fwrite(
-                ptr: substituteTypesInExpression(ptr, substitution: substitution),
-                len: substituteTypesInExpression(len, substitution: substitution),
-                fd: substituteTypesInExpression(fd, substitution: substitution)
-            )
-            
-        case .fgetc(let fd):
-            return .fgetc(fd: substituteTypesInExpression(fd, substitution: substitution))
-            
-        case .fflush(let fd):
-            return .fflush(fd: substituteTypesInExpression(fd, substitution: substitution))
         }
     }
 }

@@ -402,35 +402,6 @@ extension CodeGen {
     case .nullPtr:
       break  // No expressions to validate
       
-    case .exit(let code):
-      validateExpression(code, context: "\(context) -> exit code")
-      
-    case .abort:
-      break
-      
-    case .float32Bits(let value):
-      validateExpression(value, context: "\(context) -> float32Bits value")
-      
-    case .float64Bits(let value):
-      validateExpression(value, context: "\(context) -> float64Bits value")
-
-    case .float32FromBits(let bits):
-      validateExpression(bits, context: "\(context) -> float32FromBits bits")
-      
-    case .float64FromBits(let bits):
-      validateExpression(bits, context: "\(context) -> float64FromBits bits")
-
-    // Low-level IO intrinsics (minimal set using file descriptors)
-    case .fwrite(let ptr, let len, let fd):
-      validateExpression(ptr, context: "\(context) -> fwrite ptr")
-      validateExpression(len, context: "\(context) -> fwrite len")
-      validateExpression(fd, context: "\(context) -> fwrite fd")
-      
-    case .fgetc(let fd):
-      validateExpression(fd, context: "\(context) -> fgetc fd")
-      
-    case .fflush(let fd):
-      validateExpression(fd, context: "\(context) -> fflush fd")
     }
   }
 }

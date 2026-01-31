@@ -616,17 +616,38 @@ public class TypeChecker {
       isMutable = false
     }
 
-    return context.createSymbol(
-      name: name,
+    let defKind: DefKind
+    switch kind {
+    case .function:
+      defKind = .function
+    case .variable:
+      defKind = .variable
+    case .type:
+      if case .opaque = type {
+        defKind = .type(.opaque)
+      } else {
+        defKind = .type(.structure)
+      }
+    case .module:
+      defKind = .module
+    }
+
+    let defId = defIdMap.allocate(
       modulePath: [],
+      name: name,
+      kind: defKind,
       sourceFile: "",
+      access: .default,
+      span: .unknown
+    )
+    defIdMap.addSymbolInfo(
+      defId: defId,
       type: type,
       kind: kind,
       methodKind: .normal,
-      access: .default,
-      span: .unknown,
       isMutable: isMutable
     )
+    return Symbol(defId: defId, type: type, kind: kind, methodKind: .normal)
   }
 
   func assertNotOpaqueType(_ type: Type, span: SourceSpan) throws {
