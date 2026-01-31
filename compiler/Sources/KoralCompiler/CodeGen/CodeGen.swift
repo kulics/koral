@@ -698,9 +698,6 @@ public class CodeGen {
         buffer += "\n"
       }
 
-      // Emit nanosleep shim for Windows if needed
-      emitNanosleepShimIfNeeded(foreignFunctions)
-
       // 然后生成所有函数声明
       for node in nodes {
         if case .globalFunction(let identifier, let params, _) = node {
@@ -815,35 +812,6 @@ public class CodeGen {
     buffer += "extern \(returnType) \(cName)(\(paramList));\n"
   }
 
-  private func emitNanosleepShimIfNeeded(_ foreignFunctions: [(Symbol, [Symbol])]) {
-    guard let nanosleepFunc = foreignFunctions.first(where: { (identifier, _) in
-      (context.getName(identifier.defId) ?? "") == "nanosleep"
-    }) else { return }
-
-    // Get return type and parameter types from the foreign function declaration
-    let returnType = getFunctionReturnType(nanosleepFunc.0.type)
-    let params = nanosleepFunc.1
-    let paramList = params.map { getParamCDecl($0) }.joined(separator: ", ")
-    
-    // Get first parameter name for the implementation
-    let reqParam = params.count > 0 ? cIdentifier(for: params[0]) : "req"
-    let remParam = params.count > 1 ? cIdentifier(for: params[1]) : "rem"
-
-    buffer += """
-      // nanosleep shim for Windows
-      #ifdef _WIN32
-      #include <windows.h>
-      \(returnType) nanosleep(\(paramList)) {
-        (void)\(remParam);
-        if (!\(reqParam)) return -1;
-        DWORD ms = (DWORD)(\(reqParam)->tv_sec * 1000 + \(reqParam)->tv_nsec / 1000000);
-        Sleep(ms);
-        return 0;
-      }
-      #endif
-
-      """
-  }
 
   private func generateFunctionDeclaration(_ identifier: Symbol, _ params: [Symbol]) {
     let cName = cIdentifier(for: identifier)
