@@ -209,18 +209,30 @@ given Duration {
 }
 
 // ============================================================================
-// Sleep API (POSIX nanosleep)
+// Sleep API (koral_nanosleep runtime)
 // ============================================================================
 
 // FFI 结构体：与 C timespec 布局对齐
-foreign type Timespec(tv_sec Int64, tv_nsec Int64)
+foreign type KoralTimespec(tv_sec Int64, tv_nsec Int64)
 
 // FFI 函数声明
-// Windows 下由编译器自动生成 nanosleep shim
-foreign let nanosleep(req Timespec ptr, rem Timespec ptr) Int32
+// Runtime 提供 koral_nanosleep，避免与系统 nanosleep 冲突
+foreign let koral_nanosleep(req KoralTimespec ptr, rem KoralTimespec ptr) Int32
 
 /// 休眠指定时间
 public let sleep(d Duration) Void = {
-    let ts = Timespec(d.secs, d.nanos)
-    let _ = nanosleep(ptr ts, [Timespec]null_ptr())
+    if d.secs < 0i64 or d.nanos < 0i64 then {
+        panic("sleep: negative duration")
+    }
+
+    let mut secs = d.secs
+    let mut nanos = d.nanos
+    if nanos >= 1_000_000_000i64 then {
+        let extra = nanos / 1_000_000_000i64
+        secs = secs + extra
+        nanos = nanos % 1_000_000_000i64
+    }
+
+    let ts = KoralTimespec(secs, nanos)
+    let _ = koral_nanosleep(ptr ts, [KoralTimespec]null_ptr())
 }

@@ -342,7 +342,19 @@ public class Driver {
     #endif
     
     // Suppress warnings to keep output clean
-    var clangArgs = [cFileURL.path, "-o", exeURL.path, "-Wno-everything"]
+    var clangArgs = [cFileURL.path]
+
+    // If a koral runtime C file exists in the std directory, include it
+    if let stdPath = getStdLibPath() {
+      let runtimeURL = URL(fileURLWithPath: stdPath).appendingPathComponent("koral_runtime.c")
+      if FileManager.default.fileExists(atPath: runtimeURL.path) {
+        clangArgs.append(runtimeURL.path)
+      }
+    }
+
+    clangArgs.append("-o")
+    clangArgs.append(exeURL.path)
+    clangArgs.append("-Wno-everything")
 
     // Collect linked libraries from foreign using declarations (in order)
     let linkedLibraries: [String] = monomorphizedProgram.globalNodes.compactMap { node in
