@@ -86,8 +86,13 @@ extension Monomorphizer {
             let substitutedBody = substituteTypesInExpression(checkedBody, substitution: typeSubstitution)
             typedBody = resolveTypesInExpression(substitutedBody)
         } else {
-            // Fallback: use abort (this shouldn't happen in normal operation)
-            typedBody = .intrinsicCall(.abort)
+            // Fallback: call abort (this shouldn't happen in normal operation)
+            let abortSymbol = makeSymbol(
+                name: "abort",
+                type: .function(parameters: [], returns: .never),
+                kind: .function
+            )
+            typedBody = .call(callee: TypedExpressionNode.variable(identifier: abortSymbol), arguments: [], type: .never)
         }
         
         // Skip intrinsic functions
@@ -286,7 +291,12 @@ extension Monomorphizer {
             return .booleanLiteral(value: false, type: .bool)
         default:
             // Use abort as fallback (this shouldn't happen in normal operation)
-            return .intrinsicCall(.abort)
+            let abortSymbol = makeSymbol(
+                name: "abort",
+                type: .function(parameters: [], returns: .never),
+                kind: .function
+            )
+            return .call(callee: TypedExpressionNode.variable(identifier: abortSymbol), arguments: [], type: .never)
         }
     }
     

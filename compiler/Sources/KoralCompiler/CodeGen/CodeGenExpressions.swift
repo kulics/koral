@@ -63,7 +63,7 @@ extension CodeGen {
   func buildRefComponents(_ expr: TypedExpressionNode) -> (path: String, control: String) {
     switch expr {
     case .variable(let identifier):
-      let path = qualifiedName(for: identifier)
+      let path = cIdentifier(for: identifier)
       if case .reference(_) = identifier.type {
         return (path, "\(path).control")
       } else {

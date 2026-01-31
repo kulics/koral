@@ -819,41 +819,6 @@ extension TypeChecker {
       // So `callee` will be a `TypedExpressionNode`? No, `callee` in `checkIntrinsicCall` is `ExpressionNode` (identifier).
       return nil  // handled in generic inst for now or handled after resolution?
 
-    // Non-generic intrinsics
-    case "exit":
-      guard arguments.count == 1 else {
-        throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
-      }
-      let code = try inferTypedExpression(arguments[0])
-      if code.type != .int {
-        throw SemanticError.typeMismatch(expected: "Int", got: code.type.description)
-      }
-      return .intrinsicCall(.exit(code: code))
-    case "abort":
-      guard arguments.count == 0 else {
-        throw SemanticError.invalidArgumentCount(function: name, expected: 0, got: arguments.count)
-      }
-      return .intrinsicCall(.abort)
-
-    // Low-level IO intrinsics (minimal set using file descriptors)
-    case "fwrite":
-      guard arguments.count == 3 else {
-        throw SemanticError.invalidArgumentCount(function: name, expected: 3, got: arguments.count)
-      }
-      let ptr = try inferTypedExpression(arguments[0])
-      let len = try inferTypedExpression(arguments[1])
-      let fd = try inferTypedExpression(arguments[2])
-      guard case .pointer(let elem) = ptr.type, elem == .uint8 else {
-        throw SemanticError.typeMismatch(expected: "UInt8 ptr", got: ptr.type.description)
-      }
-      if len.type != .int {
-        throw SemanticError.typeMismatch(expected: "Int", got: len.type.description)
-      }
-      if fd.type != .int {
-        throw SemanticError.typeMismatch(expected: "Int", got: fd.type.description)
-      }
-      return .intrinsicCall(.fwrite(ptr: ptr, len: len, fd: fd))
-
     case "init_memory":
       guard arguments.count == 2 else {
         throw SemanticError.invalidArgumentCount(function: name, expected: 2, got: arguments.count)
@@ -904,66 +869,8 @@ extension TypeChecker {
       }
       return .intrinsicCall(.offsetPtr(ptr: ptr, offset: offset))
 
-    case "fgetc":
-      guard arguments.count == 1 else {
-        throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
-      }
-      let fd = try inferTypedExpression(arguments[0])
-      if fd.type != .int {
-        throw SemanticError.typeMismatch(expected: "Int", got: fd.type.description)
-      }
-      return .intrinsicCall(.fgetc(fd: fd))
-
-    case "fflush":
-      guard arguments.count == 1 else {
-        throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
-      }
-      let fd = try inferTypedExpression(arguments[0])
-      if fd.type != .int {
-        throw SemanticError.typeMismatch(expected: "Int", got: fd.type.description)
-      }
-      return .intrinsicCall(.fflush(fd: fd))
-
     default: return nil
     }
   }
 
-  func checkIntrinsicFloatMethod(
-    base: TypedExpressionNode, method: Symbol, args: [ExpressionNode]
-  ) throws -> TypedExpressionNode? {
-    // Extract the method name from mangled name (e.g., "Float32_to_bits" -> "to_bits")
-    var name = context.getName(method.defId) ?? ""
-    if name.hasPrefix("Float32_") {
-      name = String(name.dropFirst("Float32_".count))
-    } else if name.hasPrefix("Float64_") {
-      name = String(name.dropFirst("Float64_".count))
-    } else if let idx = name.lastIndex(of: "_") {
-      name = String(name[name.index(after: idx)...])
-    }
-
-    switch base.type {
-    case .float32:
-      switch name {
-      case "to_bits":
-        guard args.count == 0 else {
-          throw SemanticError.invalidArgumentCount(function: "to_bits", expected: 0, got: args.count)
-        }
-        return .intrinsicCall(.float32Bits(value: base))
-      default:
-        return nil
-      }
-    case .float64:
-      switch name {
-      case "to_bits":
-        guard args.count == 0 else {
-          throw SemanticError.invalidArgumentCount(function: "to_bits", expected: 0, got: args.count)
-        }
-        return .intrinsicCall(.float64Bits(value: base))
-      default:
-        return nil
-      }
-    default:
-      return nil
-    }
-  }
 }

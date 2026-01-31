@@ -204,7 +204,7 @@ extension TypeChecker {
         throw SemanticError.undefinedVariable(name)
       }
 
-      _ = currentScope.lookupWithInfoLocal(name, sourceFile: currentSourceFile) != nil
+      let hasLocal = currentScope.lookupWithInfoLocal(name, sourceFile: currentSourceFile) != nil
       
       // 判断是否是全局符号（需要模块路径前缀）
       // 局部变量和参数：modulePath 为空且 sourceFile 为空
@@ -225,27 +225,23 @@ extension TypeChecker {
         }
       }
       
-      // Determine symbol kind:
-      // - Functions are tracked in the scope's functionSymbols set
-      // - Variables with function types (closures) are not in that set
-      let symbolKind: SymbolKind
-      if currentScope.isFunction(name, sourceFile: currentSourceFile) {
-        // This is a function symbol (not a closure variable)
-        symbolKind = .function
-      } else {
-        // This is a variable (possibly with function type for closures)
-        symbolKind = .variable(info.mutable ? .MutableValue : .Value)
-      }
-      
-      let defKind: DefKind = currentScope.isFunction(name, sourceFile: currentSourceFile) ? .function : .variable
+      let fallbackDefKind: DefKind = (!hasLocal && currentScope.isFunction(name, sourceFile: currentSourceFile)) ? .function : .variable
       let defId = currentScope.lookup(name, sourceFile: currentSourceFile) ?? defIdMap.allocate(
         modulePath: symbolModulePath,
         name: name,
-        kind: defKind,
+        kind: fallbackDefKind,
         sourceFile: symbolSourceFile,
         access: info.isPrivate ? .private : .default,
         span: currentSpan
       )
+
+      let resolvedDefKind = defIdMap.getKind(defId) ?? fallbackDefKind
+      let symbolKind: SymbolKind
+      if resolvedDefKind == .function {
+        symbolKind = .function
+      } else {
+        symbolKind = .variable(info.mutable ? .MutableValue : .Value)
+      }
 
       if defIdMap.getSymbolType(defId) == nil {
         defIdMap.addSymbolInfo(
@@ -1917,13 +1913,6 @@ extension TypeChecker {
   /// Infers the type of a method call expression
   func inferMethodCall(base: TypedExpressionNode, method: Symbol, methodType: Type, arguments: [ExpressionNode]) throws -> TypedExpressionNode {
     let methodName = context.getName(method.defId) ?? "<unknown>"
-    // Intercept Float32/Float64 intrinsic methods
-    if base.type == .float32 || base.type == .float64,
-      let node = try checkIntrinsicFloatMethod(base: base, method: method, args: arguments)
-    {
-      return node
-    }
-
     if case .function(let params, let returns) = method.type {
       if arguments.count != params.count - 1 {
         throw SemanticError.invalidArgumentCount(
@@ -2872,31 +2861,6 @@ extension TypeChecker {
     methodName: String,
     arguments: [ExpressionNode]
   ) throws -> TypedExpressionNode {
-    // Intercept Float32.from_bits and Float64.from_bits intrinsic static methods
-    if typeArgs.isEmpty && methodName == "from_bits" {
-      if typeName == "Float32" {
-        guard arguments.count == 1 else {
-          throw SemanticError.invalidArgumentCount(function: "from_bits", expected: 1, got: arguments.count)
-        }
-        var bits = try inferTypedExpression(arguments[0])
-        bits = try coerceLiteral(bits, to: .uint32)
-        if bits.type != .uint32 {
-          throw SemanticError.typeMismatch(expected: "UInt32", got: bits.type.description)
-        }
-        return .intrinsicCall(.float32FromBits(bits: bits))
-      } else if typeName == "Float64" {
-        guard arguments.count == 1 else {
-          throw SemanticError.invalidArgumentCount(function: "from_bits", expected: 1, got: arguments.count)
-        }
-        var bits = try inferTypedExpression(arguments[0])
-        bits = try coerceLiteral(bits, to: .uint64)
-        if bits.type != .uint64 {
-          throw SemanticError.typeMismatch(expected: "UInt64", got: bits.type.description)
-        }
-        return .intrinsicCall(.float64FromBits(bits: bits))
-      }
-    }
-    
     let resolvedTypeArgs = try typeArgs.map { try resolveTypeNode($0) }
     
     // Check if it's a generic struct

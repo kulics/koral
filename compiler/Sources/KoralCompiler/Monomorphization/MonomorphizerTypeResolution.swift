@@ -632,19 +632,6 @@ extension Monomorphizer {
             let newArguments = arguments.map { resolveTypesInExpression($0) }
             let newType = resolveParameterizedType(type)
             
-            // Intercept Float32/Float64 to_bits intrinsic method
-            if case .methodReference(let base, let method, _, _, _) = newCallee {
-                let rawMethodName = context.getName(method.defId) ?? ""
-                let methodName = extractMethodName(rawMethodName)
-                if methodName == "to_bits" {
-                    if base.type == .float32 && newArguments.isEmpty {
-                        return .intrinsicCall(.float32Bits(value: base))
-                    } else if base.type == .float64 && newArguments.isEmpty {
-                        return .intrinsicCall(.float64Bits(value: base))
-                    }
-                }
-            }
-
             return .call(
                 callee: newCallee,
                 arguments: newArguments,
@@ -1201,32 +1188,6 @@ extension Monomorphizer {
         case .nullPtr(let resultType):
             return .nullPtr(resultType: resultType)
             
-        case .float32Bits(let value):
-            return .float32Bits(value: resolveTypesInExpression(value))
-        case .float64Bits(let value):
-            return .float64Bits(value: resolveTypesInExpression(value))
-        case .float32FromBits(let bits):
-            return .float32FromBits(bits: resolveTypesInExpression(bits))
-        case .float64FromBits(let bits):
-            return .float64FromBits(bits: resolveTypesInExpression(bits))
-        case .exit(let code):
-            return .exit(code: resolveTypesInExpression(code))
-        case .abort:
-            return .abort
-
-        // Low-level IO intrinsics (minimal set using file descriptors)
-        case .fwrite(let ptr, let len, let fd):
-            return .fwrite(
-                ptr: resolveTypesInExpression(ptr),
-                len: resolveTypesInExpression(len),
-                fd: resolveTypesInExpression(fd)
-            )
-            
-        case .fgetc(let fd):
-            return .fgetc(fd: resolveTypesInExpression(fd))
-            
-        case .fflush(let fd):
-            return .fflush(fd: resolveTypesInExpression(fd))
         }
     }
 }

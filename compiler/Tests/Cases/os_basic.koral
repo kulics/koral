@@ -1,0 +1,70 @@
+// EXPECT: All tests passed!
+
+let main() Void = {
+    let base = "os_test_dir"
+
+    // Cleanup if exists
+    when remove_dir_all(base) is {
+        .Ok(_) then {},
+        .Error(_) then {},
+    }
+
+    // Directory operations
+    create_dir_all(base).unwrap()
+    assert(is_dir(base), "create_dir_all failed")
+
+    // File operations
+    let file_path = join_path(base, "test.txt")
+    write_file(file_path, "Hello, World!").unwrap()
+    let content = read_file(file_path).unwrap()
+    assert(content == "Hello, World!", "read_file failed")
+
+    append_file(file_path, "\nAppended").unwrap()
+    let content2 = read_file(file_path).unwrap()
+    assert(content2 == "Hello, World!\nAppended", "append_file failed")
+
+    let copy_path = join_path(base, "test_copy.txt")
+    copy_file(file_path, copy_path).unwrap()
+    assert(read_file(copy_path).unwrap() == content2, "copy_file failed")
+
+    remove_file(file_path).unwrap()
+    remove_file(copy_path).unwrap()
+    assert(not path_exists(file_path), "remove_file failed")
+
+    // read_dir
+    write_file(join_path(base, "file.txt"), "x").unwrap()
+    let entries = read_dir(base).unwrap()
+    let mut found = false
+    for name = entries then {
+        if name == "file.txt" then { found = true }
+    }
+    assert(found, "read_dir failed")
+
+    // Path operations
+    assert(join_path("a", "b") == "a/b", "join_path failed")
+    assert(base_name("/path/to/file.txt").unwrap() == "file.txt", "base_name failed")
+    assert(dir_name("/path/to/file.txt").unwrap() == "/path/to", "dir_name failed")
+    assert(ext_name("file.txt").unwrap() == "txt", "ext_name failed")
+
+    // Environment
+    set_env("KORAL_TEST", "value")
+    assert(get_env("KORAL_TEST").unwrap() == "value", "set_env/get_env failed")
+
+    // Command line args
+    let arg_list = args()
+    assert(arg_list.count() >= 1, "args failed")
+
+    // Command execution (best effort)
+    let mut cmd_args = [String]List.new()
+    cmd_args.push("hello")
+    when run_command("echo", cmd_args) is {
+        .Ok(result) then {
+            assert(result.stdout.contains("hello"), "run_command failed")
+        },
+        .Error(_) then {},
+    }
+
+    remove_dir_all(base).unwrap()
+
+    print_line("All tests passed!")
+}

@@ -113,6 +113,7 @@ class IntegrationTests: XCTestCase {
     func test_newline_semicolon_continuation_ok() throws { try runCase(named: "newline_semicolon_continuation_ok.koral") }
     func test_non_exhaustive_bool() throws { try runCase(named: "non_exhaustive_bool.koral") }
     func test_non_exhaustive_union() throws { try runCase(named: "non_exhaustive_union.koral") }
+    func test_os_basic() throws { try runCase(named: "os_basic.koral") }
     func test_option_map_test() throws { try runCase(named: "option_map_test.koral") }
     func test_pattern_combinators() throws { try runCase(named: "pattern_combinators.koral") }
     func test_duplicate_local_scope() throws { try runCase(named: "duplicate_local_scope.koral") }
