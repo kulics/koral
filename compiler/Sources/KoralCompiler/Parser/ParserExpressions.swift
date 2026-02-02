@@ -252,11 +252,8 @@ extension Parser {
         try match(.duration(value: value, unit: unit))
         return .durationLiteral(value: "-\(value)", unit: unit, span: span)
       default:
-        throw ParserError.unexpectedToken(
-          span: startSpan,
-          got: currentToken.description,
-          expected: "numeric literal"
-        )
+        let expr = try parsePrefixExpression()
+        return .unaryMinusExpression(expr)
       }
     }
     if currentToken === .refKeyword {

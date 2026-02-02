@@ -79,6 +79,18 @@ extension TypeChecker {
         }
         return (.integerLiteral(value: String(byte)), [])
       }
+      if isRuneType(subjectType) {
+        if let cp = singleRuneCodePoint(from: value) {
+          return (.integerLiteral(value: String(cp)), [])
+        }
+        let codePointCount = value.unicodeScalars.count
+        if codePointCount > 1 {
+          throw SemanticError(.generic("Rune literal must contain exactly one Unicode code point, but '\(value)' contains \(codePointCount)"), span: span)
+        }
+        if codePointCount == 0 {
+          throw SemanticError(.generic("Rune literal cannot be empty"), span: span)
+        }
+      }
       throw SemanticError.typeMismatch(expected: "String or UInt8", got: subjectType.description)
 
     case .wildcard(_):

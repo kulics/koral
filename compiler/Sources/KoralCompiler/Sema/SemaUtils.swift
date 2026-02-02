@@ -32,16 +32,12 @@ public enum SemaUtils {
     // MARK: - Compiler Method Kind Resolution
     
     /// Returns the compiler method kind for a method name.
-    /// Used to identify special compiler-recognized methods like __drop, __at, etc.
+    /// Used to identify special compiler-recognized methods like __drop, at, etc.
     /// - Parameter name: The method name to check
     /// - Returns: The corresponding CompilerMethodKind
     public static func getCompilerMethodKind(_ name: String) -> CompilerMethodKind {
         switch name {
         case "__drop": return .drop
-        case "__at": return .at
-        case "__update_at": return .updateAt
-        case "__equals": return .equals
-        case "__compare": return .compare
         default: return .normal
         }
     }
@@ -195,7 +191,7 @@ public enum SemaUtils {
         
         var methods: [String: TraitMethodSignature] = [:]
         for parent in decl.superTraits {
-            let parentMethods = try flattenedTraitMethodsHelper(parent, traits: traits, visited: &visited, currentLine: currentLine)
+            let parentMethods = try flattenedTraitMethodsHelper(parent.baseName, traits: traits, visited: &visited, currentLine: currentLine)
             for (name, sig) in parentMethods {
                 methods[name] = sig
             }

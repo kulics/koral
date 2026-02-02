@@ -181,11 +181,12 @@ extension TypeChecker {
       try collectCapturedVariables(expr: right, paramNames: paramNames, captures: &captures)
       
     case .notExpression(let inner),
-         .bitwiseNotExpression(let inner),
-         .derefExpression(let inner),
-          .refExpression(let inner),
-          .ptrExpression(let inner),
-          .deptrExpression(let inner):
+       .bitwiseNotExpression(let inner),
+       .unaryMinusExpression(let inner),
+       .derefExpression(let inner),
+        .refExpression(let inner),
+        .ptrExpression(let inner),
+        .deptrExpression(let inner):
       try collectCapturedVariables(expr: inner, paramNames: paramNames, captures: &captures)
       
     case .ifExpression(let condition, let thenBranch, let elseBranch):

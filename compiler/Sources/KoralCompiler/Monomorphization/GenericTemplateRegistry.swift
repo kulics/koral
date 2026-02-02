@@ -10,8 +10,8 @@ public struct TraitDeclInfo {
     /// Type parameters for generic traits (e.g., [T Any] for Iterator)
     public let typeParameters: [TypeParameterDecl]
     
-    /// Names of traits that this trait inherits from
-    public let superTraits: [String]
+    /// Trait constraints that this trait inherits from
+    public let superTraits: [TraitConstraint]
     
     /// Method signatures required by this trait
     public let methods: [TraitMethodSignature]
@@ -23,7 +23,7 @@ public struct TraitDeclInfo {
     public init(
         name: String,
         typeParameters: [TypeParameterDecl] = [],
-        superTraits: [String],
+        superTraits: [TraitConstraint],
         methods: [TraitMethodSignature],
         access: AccessModifier
     ) {

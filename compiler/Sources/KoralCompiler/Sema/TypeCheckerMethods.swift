@@ -617,7 +617,7 @@ extension TypeChecker {
     base: TypedExpressionNode,
     args: [TypedExpressionNode]
   ) throws -> (method: Symbol, finalBase: TypedExpressionNode, valueType: Type) {
-    let methodName = "__update_at"
+    let methodName = "update_at"
     let type = base.type
 
     // Unwrap reference for method lookup
@@ -716,7 +716,7 @@ extension TypeChecker {
   func resolveSubscript(base: TypedExpressionNode, args: [TypedExpressionNode]) throws
     -> TypedExpressionNode
   {
-    let methodName = "__at"
+    let methodName = "at"
     let type = base.type
 
     // Unwrap reference

@@ -157,7 +157,8 @@ public func printAST(_ node: ASTNode) {
         print("\(indent)  TypeParameters: \(typeParameters)")
       }
       if !superTraits.isEmpty {
-        print("\(indent)  SuperTraits: \(superTraits)")
+        let superTraitsDesc = superTraits.map { $0.description }
+        print("\(indent)  SuperTraits: \(superTraitsDesc)")
       }
       if methods.isEmpty {
         print("\(indent)  Methods: (none)")
@@ -436,6 +437,12 @@ public func printAST(_ node: ASTNode) {
 
     case .notExpression(let expr):
       print("\(indent)NotExpression:")
+      withIndent {
+        printExpression(expr)
+      }
+
+    case .unaryMinusExpression(let expr):
+      print("\(indent)UnaryMinusExpression:")
       withIndent {
         printExpression(expr)
       }

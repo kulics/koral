@@ -211,7 +211,7 @@ public indirect enum GlobalNode {
   case traitDeclaration(
     name: String,
     typeParameters: [TypeParameterDecl],
-    superTraits: [String],
+    superTraits: [TypeNode],
     methods: [TraitMethodSignature],
     access: AccessModifier,
     span: SourceSpan
@@ -408,6 +408,7 @@ public indirect enum ExpressionNode {
     left: ExpressionNode, operator: BitwiseOperator, right: ExpressionNode)
   case andExpression(left: ExpressionNode, right: ExpressionNode)
   case orExpression(left: ExpressionNode, right: ExpressionNode)
+  case unaryMinusExpression(ExpressionNode)
   case notExpression(ExpressionNode)
   case bitwiseNotExpression(ExpressionNode)
   case derefExpression(ExpressionNode)

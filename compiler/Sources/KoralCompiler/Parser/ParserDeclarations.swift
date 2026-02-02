@@ -149,30 +149,17 @@ extension Parser {
     try match(.identifier(name))
 
     // Optional inheritance list: trait Child ParentA and ParentB { ... }
-    var superTraits: [String] = []
+    var superTraits: [TypeNode] = []
     
     // Parse first parent constraint if present
     if currentToken !== .leftBrace {
-      guard case .identifier(let parentName) = currentToken else {
-        throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
-      }
-      if !isValidTypeName(parentName) {
-        throw ParserError.invalidTypeName(span: currentSpan, name: parentName)
-      }
-      try match(.identifier(parentName))
-      superTraits.append(parentName)
+      let firstParent = try parseType()
+      superTraits.append(firstParent)
       
       // Parse subsequent constraints separated by 'and'
       while currentToken === .andKeyword {
         try match(.andKeyword)
-        
-        guard case .identifier(let nextParent) = currentToken else {
-           throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
-        }
-        if !isValidTypeName(nextParent) {
-            throw ParserError.invalidTypeName(span: currentSpan, name: nextParent)
-        }
-        try match(.identifier(nextParent))
+        let nextParent = try parseType()
         superTraits.append(nextParent)
       }
     }

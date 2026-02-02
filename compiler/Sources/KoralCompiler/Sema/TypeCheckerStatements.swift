@@ -68,7 +68,7 @@ extension TypeChecker {
     case .assignment(let target, let op, let value, let span):
       self.currentSpan = span
       if let op {
-        // Lower `x[i] op= v` into a call to `x.__update_at(i, deref x[i] op v)`.
+        // Lower `x[i] op= v` into a call to `x.update_at(i, deref x[i] op v)`.
         if case .subscriptExpression(let baseExpr, let argExprs) = target {
           let typedBase = try inferTypedExpression(baseExpr)
           let typedArgs = try argExprs.map { try inferTypedExpression($0) }
@@ -121,13 +121,15 @@ extension TypeChecker {
 
           let newValueExpr: TypedExpressionNode
           if let arithmeticOp = compoundOpToArithmeticOp(op) {
-            let _ = try checkArithmeticOp(arithmeticOp, elementType, typedRhs.type)
-            newValueExpr = .arithmeticExpression(
-              left: .variable(identifier: oldSym),
+            newValueExpr = try buildArithmeticExpression(
               op: arithmeticOp,
-              right: .variable(identifier: rhsSym),
-              type: elementType
+              lhs: .variable(identifier: oldSym),
+              rhs: .variable(identifier: rhsSym)
             )
+            if newValueExpr.type != elementType {
+              throw SemanticError.typeMismatch(
+                expected: elementType.description, got: newValueExpr.type.description)
+            }
           } else if let bitwiseOp = compoundOpToBitwiseOp(op) {
             if !isIntegerScalarType(elementType) || elementType != typedRhs.type {
               throw SemanticError.typeMismatch(
@@ -171,7 +173,16 @@ extension TypeChecker {
         }
 
         if let arithmeticOp = compoundOpToArithmeticOp(op) {
-          let _ = try checkArithmeticOp(arithmeticOp, typedTarget.type, typedValue.type)
+          let newValueExpr = try buildArithmeticExpression(
+            op: arithmeticOp,
+            lhs: typedTarget,
+            rhs: typedValue
+          )
+          if newValueExpr.type != typedTarget.type {
+            throw SemanticError.typeMismatch(
+              expected: typedTarget.type.description, got: newValueExpr.type.description)
+          }
+          return .assignment(target: typedTarget, operator: nil, value: newValueExpr)
         } else if let _ = compoundOpToBitwiseOp(op) {
           if !isIntegerScalarType(typedTarget.type) || typedTarget.type != typedValue.type {
             throw SemanticError.typeMismatch(
@@ -185,12 +196,12 @@ extension TypeChecker {
       }
 
       // Simple assignment
-      // Lower `x[i] = v` into a call to `x.__update_at(i, v)`.
+      // Lower `x[i] = v` into a call to `x.update_at(i, v)`.
       if case .subscriptExpression(let baseExpr, let argExprs) = target {
         let typedBase = try inferTypedExpression(baseExpr)
         let typedArgs = try argExprs.map { try inferTypedExpression($0) }
 
-        // Resolve expected value type from `__update_at`.
+        // Resolve expected value type from `update_at`.
         let (_, _, expectedValueType) = try resolveSubscriptUpdateMethod(
           base: typedBase, args: typedArgs)
 
