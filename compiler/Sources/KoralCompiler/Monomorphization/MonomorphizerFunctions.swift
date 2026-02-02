@@ -190,16 +190,17 @@ extension Monomorphizer {
         let argLayoutKeys = genericArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
         let methodArgLayoutKeys = methodTypeArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
         let mangledName: String
+        let methodBaseName = method.name
         if methodTypeArgs.isEmpty {
-            mangledName = "\(structureName)_\(argLayoutKeys)_\(method.name)"
+            mangledName = "\(structureName)_\(argLayoutKeys)_\(methodBaseName)"
         } else {
-            mangledName = "\(structureName)_\(argLayoutKeys)_\(method.name)_\(methodArgLayoutKeys)"
+            mangledName = "\(structureName)_\(argLayoutKeys)_\(methodBaseName)_\(methodArgLayoutKeys)"
         }
         let key = "ext:\(mangledName)"
         
         // Check cache
         if let (cachedName, cachedType) = instantiatedFunctions[key] {
-            let kind = getCompilerMethodKind(method.name)
+            let kind = getCompilerMethodKind(methodBaseName)
             return makeSymbol(name: cachedName, type: cachedType, kind: .function, methodKind: kind)
         }
         
@@ -244,7 +245,7 @@ extension Monomorphizer {
         
         // Skip code generation if function type still contains generic parameters
         if context.containsGenericParameter(functionType) {
-            let kind = getCompilerMethodKind(method.name)
+            let kind = getCompilerMethodKind(methodBaseName)
             return makeSymbol(name: mangledName, type: functionType, kind: .function, methodKind: kind)
         }
         
@@ -266,7 +267,7 @@ extension Monomorphizer {
         // Generate global function if not already generated
         if !generatedLayouts.contains(mangledName) {
             generatedLayouts.insert(mangledName)
-            let kind = getCompilerMethodKind(method.name)
+            let kind = getCompilerMethodKind(methodBaseName)
             let functionNode = TypedGlobalNode.globalFunction(
                 identifier: makeSymbol(
                     name: mangledName, type: functionType, kind: .function, methodKind: kind),
@@ -275,8 +276,8 @@ extension Monomorphizer {
             )
             generatedNodes.append(functionNode)
         }
-        
-        let kind = getCompilerMethodKind(method.name)
+
+        let kind = getCompilerMethodKind(methodBaseName)
         return makeSymbol(name: mangledName, type: functionType, kind: .function, methodKind: kind)
     }
     
@@ -317,11 +318,12 @@ extension Monomorphizer {
         }
         
         let argLayoutKeys = genericArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
-        let mangledName = "\(structureName)_\(argLayoutKeys)_\(method.name)"
+        let methodBaseName = method.name
+        let mangledName = "\(structureName)_\(argLayoutKeys)_\(methodBaseName)"
         let key = "ext:\(mangledName)"
         
         if let (cachedName, cachedType) = instantiatedFunctions[key] {
-            let kind = getCompilerMethodKind(method.name)
+            let kind = getCompilerMethodKind(methodBaseName)
             return makeSymbol(name: cachedName, type: cachedType, kind: .function, methodKind: kind)
         }
         
@@ -350,7 +352,7 @@ extension Monomorphizer {
         )
         
         instantiatedFunctions[key] = (mangledName, funcType)
-        let kind = getCompilerMethodKind(method.name)
+        let kind = getCompilerMethodKind(methodBaseName)
         return makeSymbol(name: mangledName, type: funcType, kind: .function, methodKind: kind)
     }
     
@@ -368,8 +370,8 @@ extension Monomorphizer {
             if resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
                 return nil
             }
-            if let extensions = input.genericTemplates.extensionMethods[template],
-               let ext = extensions.first(where: { $0.method.name == name })
+                if let extensions = input.genericTemplates.extensionMethods[template],
+                    let ext = extensions.first(where: { $0.method.name == name })
             {
                 let resolvedBase = resolveParameterizedType(selfType)
                 return try instantiateExtensionMethodFromEntry(
@@ -391,8 +393,8 @@ extension Monomorphizer {
             if resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
                 return nil
             }
-            if let extensions = input.genericTemplates.extensionMethods[template],
-               let ext = extensions.first(where: { $0.method.name == name })
+                if let extensions = input.genericTemplates.extensionMethods[template],
+                    let ext = extensions.first(where: { $0.method.name == name })
             {
                 let resolvedBase = resolveParameterizedType(selfType)
                 return try instantiateExtensionMethodFromEntry(
@@ -422,8 +424,8 @@ extension Monomorphizer {
             }
             // Try generic extension methods - use stored templateName if available
             let baseName = context.getTemplateName(defId) ?? typeName
-            if let extensions = input.genericTemplates.extensionMethods[baseName],
-               let ext = extensions.first(where: { $0.method.name == name })
+                if let extensions = input.genericTemplates.extensionMethods[baseName],
+                    let ext = extensions.first(where: { $0.method.name == name })
             {
                 if let info = layoutToTemplateInfo[typeName] {
                     let normalizedArgs = info.args.map { normalizeTypeArgument($0) }
@@ -470,8 +472,8 @@ extension Monomorphizer {
             }
             // Use stored templateName if available
             let baseName = context.getTemplateName(defId) ?? typeName
-            if let extensions = input.genericTemplates.extensionMethods[baseName],
-               let ext = extensions.first(where: { $0.method.name == name })
+                if let extensions = input.genericTemplates.extensionMethods[baseName],
+                    let ext = extensions.first(where: { $0.method.name == name })
             {
                 if let info = layoutToTemplateInfo[typeName] {
                     let normalizedArgs = info.args.map { normalizeTypeArgument($0) }
@@ -507,8 +509,8 @@ extension Monomorphizer {
             
         case .pointer(let element):
             // Check intrinsic extension methods first
-            if let extensions = input.genericTemplates.intrinsicExtensionMethods["Ptr"],
-               let ext = extensions.first(where: { $0.method.name == name })
+                if let extensions = input.genericTemplates.intrinsicExtensionMethods["Ptr"],
+                    let ext = extensions.first(where: { $0.method.name == name })
             {
                 return try instantiateIntrinsicExtensionMethod(
                     baseType: selfType,
@@ -519,8 +521,8 @@ extension Monomorphizer {
             }
             
             // Then check regular extension methods
-            if let extensions = input.genericTemplates.extensionMethods["Ptr"],
-               let ext = extensions.first(where: { $0.method.name == name })
+                if let extensions = input.genericTemplates.extensionMethods["Ptr"],
+                    let ext = extensions.first(where: { $0.method.name == name })
             {
                 return try instantiateExtensionMethodFromEntry(
                     baseType: selfType,

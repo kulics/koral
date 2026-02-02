@@ -312,21 +312,17 @@ extension TypeChecker {
       var typedLeft = try inferTypedExpression(left)
       var typedRight = try inferTypedExpression(right)
 
-      // Allow numeric literals to coerce to the other operand type.
-      if typedLeft.type != typedRight.type {
-        if isIntegerType(typedLeft.type) || isFloatType(typedLeft.type) {
-          typedRight = try coerceLiteral(typedRight, to: typedLeft.type)
-        }
-        if typedLeft.type != typedRight.type,
-          isIntegerType(typedRight.type) || isFloatType(typedRight.type)
-        {
+      // Allow numeric literals to coerce to the other operand type only for numeric ops.
+      let leftIsNumeric = isIntegerType(typedLeft.type) || isFloatType(typedLeft.type)
+      let rightIsNumeric = isIntegerType(typedRight.type) || isFloatType(typedRight.type)
+      if leftIsNumeric && rightIsNumeric, typedLeft.type != typedRight.type {
+        typedRight = try coerceLiteral(typedRight, to: typedLeft.type)
+        if typedLeft.type != typedRight.type {
           typedLeft = try coerceLiteral(typedLeft, to: typedRight.type)
         }
       }
 
-      let resultType = try checkArithmeticOp(op, typedLeft.type, typedRight.type)
-      return .arithmeticExpression(
-        left: typedLeft, op: op, right: typedRight, type: resultType)
+      return try buildArithmeticExpression(op: op, lhs: typedLeft, rhs: typedRight)
 
     case .comparisonExpression(let left, let op, let right):
       var typedLeft = try inferTypedExpression(left)
@@ -375,7 +371,7 @@ extension TypeChecker {
         }
       }
 
-      // Operator sugar for Equatable: lower `==`/`<>` to `__equals(self ref, other ref)`
+      // Operator sugar for Equality: lower `==`/`<>` to `equals(self, other)`
       // for non-builtin scalar types (struct/union/String/generic parameters).
       if (op == .equal || op == .notEqual), typedLeft.type == typedRight.type,
         !isBuiltinEqualityComparable(typedLeft.type)
@@ -387,8 +383,8 @@ extension TypeChecker {
         return eq
       }
 
-      // Operator sugar for Comparable: lower `<`/`<=`/`>`/`>=` to
-      // `__compare(self ref, other ref) Int` for non-builtin scalar types
+      // Operator sugar for Ordering: lower `<`/`<=`/`>`/`>=` to
+      // `compare(self, other) Int` for non-builtin scalar types
       // (struct/union/String/generic parameters).
       if (op == .greater || op == .less || op == .greaterEqual || op == .lessEqual),
         typedLeft.type == typedRight.type,
@@ -577,6 +573,27 @@ extension TypeChecker {
       }
       return .orExpression(left: typedLeft, right: typedRight, type: .bool)
 
+    case .unaryMinusExpression(let expr):
+      let typedExpr = try inferTypedExpression(expr)
+      if isIntegerType(typedExpr.type) {
+        let zero: TypedExpressionNode = .integerLiteral(value: "0", type: typedExpr.type)
+        return .arithmeticExpression(left: zero, op: .minus, right: typedExpr, type: typedExpr.type)
+      }
+      if isFloatType(typedExpr.type) {
+        let zero: TypedExpressionNode = .floatLiteral(value: "0", type: typedExpr.type)
+        return .arithmeticExpression(left: zero, op: .minus, right: typedExpr, type: typedExpr.type)
+      }
+      if let call = try buildOperatorMethodCall(
+        base: typedExpr,
+        methodName: "neg",
+        traitName: "AdditiveGroup",
+        requiredTraitArgs: nil,
+        arguments: []
+      ) {
+        return call
+      }
+      throw SemanticError.undefinedMember("neg", typedExpr.type.description)
+
     case .notExpression(let expr):
       let typedExpr = try inferTypedExpression(expr)
       if typedExpr.type != .bool {
@@ -697,6 +714,19 @@ extension TypeChecker {
   
   /// Infers the type of a call expression
   func inferCallExpression(callee: ExpressionNode, arguments: [ExpressionNode]) throws -> TypedExpressionNode {
+    if case .memberPath(_, let path) = callee, let memberName = path.last {
+      if getCompilerMethodKind(memberName) == .drop {
+        throw SemanticError(
+          .generic("compiler protocol method \(memberName) cannot be called explicitly"),
+          line: currentLine)
+      }
+    } else if case .identifier(let name) = callee {
+      if getCompilerMethodKind(name) == .drop {
+        throw SemanticError(
+          .generic("compiler protocol method \(name) cannot be called explicitly"),
+          line: currentLine)
+      }
+    }
     // Check if callee is a module-qualified static method call (e.g., module.Type.method())
     if case .memberPath(let baseExpr, let path) = callee,
        case .identifier(let moduleName) = baseExpr,
@@ -724,7 +754,7 @@ extension TypeChecker {
               }
               
               if isStatic {
-                if methodSym.methodKind != CompilerMethodKind.normal {
+                if methodSym.methodKind == CompilerMethodKind.drop {
                   throw SemanticError(
                     .generic("compiler protocol method \(methodName) cannot be called explicitly"),
                     line: currentLine)
@@ -806,7 +836,7 @@ extension TypeChecker {
               }
               
               if isStatic {
-                if methodSym.methodKind != CompilerMethodKind.normal {
+                if methodSym.methodKind == CompilerMethodKind.drop {
                   throw SemanticError(
                     .generic("compiler protocol method \(methodName) cannot be called explicitly"),
                     line: currentLine)
@@ -862,7 +892,7 @@ extension TypeChecker {
               }
               
               if isStatic {
-                if methodSym.methodKind != CompilerMethodKind.normal {
+                if methodSym.methodKind == CompilerMethodKind.drop {
                   throw SemanticError(
                     .generic("compiler protocol method \(methodName) cannot be called explicitly"),
                     line: currentLine)
@@ -1299,10 +1329,11 @@ extension TypeChecker {
     let typedCallee = try inferTypedExpression(callee)
 
     // Secondary guard: if the resolved callee is a special compiler method, block explicit calls
-    if case .variable(let sym) = typedCallee, sym.methodKind != CompilerMethodKind.normal {
+    if case .variable(let sym) = typedCallee, sym.methodKind == CompilerMethodKind.drop {
       let symName = context.getName(sym.defId) ?? "<unknown>"
-      throw SemanticError.invalidOperation(
-        op: "Explicit call to \(symName) is not allowed", type1: "", type2: "")
+      throw SemanticError(
+        .generic("compiler protocol method \(symName) cannot be called explicitly"),
+        line: currentLine)
     }
 
     // Method call
@@ -2088,8 +2119,9 @@ extension TypeChecker {
       let finalCallee: TypedExpressionNode = .methodReference(
         base: finalBase, method: method, typeArgs: nil, methodTypeArgs: inferredMethodTypeArgs, type: methodType)
 
-      // Lower primitive `__equals(self, other)` to direct scalar comparison.
-      if method.methodKind == .equals,
+      // Lower primitive `equals(self, other)` to direct scalar comparison.
+      let methodName = context.getName(method.defId) ?? ""
+      if methodName == "equals",
         returns == .bool,
         params.count == 2,
         params[0].type == params[1].type,
@@ -2098,8 +2130,8 @@ extension TypeChecker {
         return .comparisonExpression(left: finalBase, op: .equal, right: typedArguments[0], type: .bool)
       }
 
-      // Lower primitive `__compare(self, other) Int` to scalar comparisons.
-      if method.methodKind == .compare,
+      // Lower primitive `compare(self, other) Int` to scalar comparisons.
+      if methodName == "compare",
         returns == .int,
         params.count == 2,
         params[0].type == params[1].type,
@@ -2689,7 +2721,7 @@ extension TypeChecker {
               typeArgs: [element],
               methodInfo: ext
             )
-            if methodSym.methodKind != .normal {
+            if methodSym.methodKind == .drop {
               throw SemanticError(
                 .generic("compiler protocol method \(memberName) cannot be called explicitly"),
                 line: currentLine)
@@ -2714,7 +2746,7 @@ extension TypeChecker {
               typeArgs: [element],
               methodInfo: ext
             )
-            if methodSym.methodKind != .normal {
+            if methodSym.methodKind == .drop {
               throw SemanticError(
                 .generic("compiler protocol method \(memberName) cannot be called explicitly"),
                 line: currentLine)
@@ -2742,7 +2774,7 @@ extension TypeChecker {
               typeArgs: typeArgs,
               methodInfo: ext
             )
-            if methodSym.methodKind != .normal {
+            if methodSym.methodKind == .drop {
               throw SemanticError(
                 .generic("compiler protocol method \(memberName) cannot be called explicitly"),
                 line: currentLine)
@@ -2817,7 +2849,7 @@ extension TypeChecker {
           
           // Check if this is a compiler protocol method that cannot be called explicitly
           let methodKind = getCompilerMethodKind(memberName)
-          if methodKind != .normal {
+          if methodKind == .drop {
             throw SemanticError(
               .generic("compiler protocol method \(memberName) cannot be called explicitly"),
               line: currentLine)
@@ -3195,23 +3227,23 @@ extension TypeChecker {
 
 extension TypeChecker {
   
-  /// Builds an equality comparison call for types implementing Equatable
+  /// Builds an equality comparison call for types implementing Equality
   func buildEqualsCall(lhs: TypedExpressionNode, rhs: TypedExpressionNode) throws -> TypedExpressionNode {
     guard lhs.type == rhs.type else {
       throw SemanticError.typeMismatch(expected: lhs.type.description, got: rhs.type.description)
     }
 
-    let methodName = "__equals"
+    let methodName = "equals"
     let receiverType = lhs.type
 
     // Handle generic parameter case - create trait method placeholder
     if case .genericParameter(let paramName) = receiverType {
-      guard hasTraitBound(paramName, "Equatable") else {
-        throw SemanticError(.generic("Type \(receiverType) is not constrained by trait Equatable"), line: currentLine)
+      guard hasTraitBound(paramName, "Equality") else {
+        throw SemanticError(.generic("Type \(receiverType) is not constrained by trait Equality"), line: currentLine)
       }
-      let methods = try flattenedTraitMethods("Equatable")
+      let methods = try flattenedTraitMethods("Equality")
       guard let sig = methods[methodName] else {
-        throw SemanticError(.generic("Trait Equatable is missing required method \(methodName)"), line: currentLine)
+        throw SemanticError(.generic("Trait Equality is missing required method \(methodName)"), line: currentLine)
       }
       let expectedType = try expectedFunctionTypeForTraitMethod(sig, selfType: receiverType)
       
@@ -3223,7 +3255,7 @@ extension TypeChecker {
       
       // Create trait method placeholder instead of methodReference with __trait_ prefix
       let callee: TypedExpressionNode = .traitMethodPlaceholder(
-        traitName: "Equatable",
+        traitName: "Equality",
         methodName: methodName,
         base: lhs,
         methodTypeArgs: [],
@@ -3252,23 +3284,23 @@ extension TypeChecker {
     return .call(callee: callee, arguments: [rhs], type: .bool)
   }
 
-  /// Builds a comparison call for types implementing Comparable
+  /// Builds a comparison call for types implementing Ordering
   func buildCompareCall(lhs: TypedExpressionNode, rhs: TypedExpressionNode) throws -> TypedExpressionNode {
     guard lhs.type == rhs.type else {
       throw SemanticError.typeMismatch(expected: lhs.type.description, got: rhs.type.description)
     }
 
-    let methodName = "__compare"
+    let methodName = "compare"
     let receiverType = lhs.type
 
     // Handle generic parameter case - create trait method placeholder
     if case .genericParameter(let paramName) = receiverType {
-      guard hasTraitBound(paramName, "Comparable") else {
-        throw SemanticError(.generic("Type \(receiverType) is not constrained by trait Comparable"), line: currentLine)
+      guard hasTraitBound(paramName, "Ordering") else {
+        throw SemanticError(.generic("Type \(receiverType) is not constrained by trait Ordering"), line: currentLine)
       }
-      let methods = try flattenedTraitMethods("Comparable")
+      let methods = try flattenedTraitMethods("Ordering")
       guard let sig = methods[methodName] else {
-        throw SemanticError(.generic("Trait Comparable is missing required method \(methodName)"), line: currentLine)
+        throw SemanticError(.generic("Trait Ordering is missing required method \(methodName)"), line: currentLine)
       }
       let expectedType = try expectedFunctionTypeForTraitMethod(sig, selfType: receiverType)
       
@@ -3280,7 +3312,7 @@ extension TypeChecker {
       
       // Create trait method placeholder instead of methodReference with __trait_ prefix
       let callee: TypedExpressionNode = .traitMethodPlaceholder(
-        traitName: "Comparable",
+        traitName: "Ordering",
         methodName: methodName,
         base: lhs,
         methodTypeArgs: [],
@@ -3307,6 +3339,458 @@ extension TypeChecker {
     // Value-passing semantics: pass lhs and rhs directly
     let callee: TypedExpressionNode = .methodReference(base: lhs, method: methodSym, typeArgs: nil, methodTypeArgs: nil, type: methodSym.type)
     return .call(callee: callee, arguments: [rhs], type: .int)
+  }
+
+  // MARK: - Arithmetic Operator Lowering
+
+  func buildArithmeticExpression(
+    op: ArithmeticOperator,
+    lhs: TypedExpressionNode,
+    rhs: TypedExpressionNode
+  ) throws -> TypedExpressionNode {
+    var left = lhs
+    var right = rhs
+
+    var leftIsNumeric = isIntegerType(left.type) || isFloatType(left.type)
+    var rightIsNumeric = isIntegerType(right.type) || isFloatType(right.type)
+
+    if leftIsNumeric && !rightIsNumeric {
+      if case .stringLiteral = right {
+        right = try coerceLiteral(right, to: left.type)
+        rightIsNumeric = isIntegerType(right.type) || isFloatType(right.type)
+      }
+    } else if rightIsNumeric && !leftIsNumeric {
+      if case .stringLiteral = left {
+        left = try coerceLiteral(left, to: right.type)
+        leftIsNumeric = isIntegerType(left.type) || isFloatType(left.type)
+      }
+    }
+
+    if leftIsNumeric && rightIsNumeric {
+      if left.type != right.type {
+        right = try coerceLiteral(right, to: left.type)
+        if left.type != right.type {
+          left = try coerceLiteral(left, to: right.type)
+        }
+      }
+
+      if left.type == right.type {
+        return .arithmeticExpression(left: left, op: op, right: right, type: left.type)
+      }
+
+      let opName: String
+      switch op {
+      case .plus: opName = "plus"
+      case .minus: opName = "minus"
+      case .multiply: opName = "multiply"
+      case .divide: opName = "divide"
+      case .modulo: opName = "modulo"
+      }
+      throw SemanticError.invalidOperation(op: opName, type1: left.type.description, type2: right.type.description)
+    }
+
+    return try buildNonNumericArithmeticExpression(op: op, lhs: left, rhs: right)
+  }
+
+  private func buildNonNumericArithmeticExpression(
+    op: ArithmeticOperator,
+    lhs: TypedExpressionNode,
+    rhs: TypedExpressionNode
+  ) throws -> TypedExpressionNode {
+    let sameType = lhs.type == rhs.type
+
+    switch op {
+    case .plus:
+      if sameType {
+        if let call = try buildOperatorMethodCall(
+          base: lhs,
+          methodName: "add",
+          traitName: "AdditiveSemigroup",
+          requiredTraitArgs: nil,
+          arguments: [rhs]
+        ) {
+          return call
+        }
+        throw SemanticError.undefinedMember("add", lhs.type.description)
+      }
+      if let call = try buildOperatorMethodCall(
+        base: lhs,
+        methodName: "add_vector",
+        traitName: "AffineSpace",
+        requiredTraitArgs: [rhs.type],
+        arguments: [rhs]
+      ) {
+        return call
+      }
+      throw SemanticError.undefinedMember("add_vector", lhs.type.description)
+
+    case .minus:
+      if sameType {
+        if let call = try buildOperatorMethodCall(
+          base: lhs,
+          methodName: "sub_point",
+          traitName: "AffineSpace",
+          requiredTraitArgs: nil,
+          arguments: [rhs],
+          allowMissingTrait: true
+        ) {
+          return call
+        }
+
+        if let call = try buildOperatorMethodCall(
+          base: lhs,
+          methodName: "sub",
+          traitName: "AdditiveGroup",
+          requiredTraitArgs: nil,
+          arguments: [rhs]
+        ) {
+          return call
+        }
+
+        // Fallback: a - b => a.add(b.neg())
+        if let neg = try buildOperatorMethodCall(
+          base: rhs,
+          methodName: "neg",
+          traitName: "AdditiveGroup",
+          requiredTraitArgs: nil,
+          arguments: []
+        ),
+          let add = try buildOperatorMethodCall(
+            base: lhs,
+            methodName: "add",
+            traitName: "AdditiveSemigroup",
+            requiredTraitArgs: nil,
+            arguments: [neg]
+          )
+        {
+          return add
+        }
+
+        throw SemanticError.undefinedMember("sub", lhs.type.description)
+      }
+
+      if let call = try buildOperatorMethodCall(
+        base: lhs,
+        methodName: "sub_vector",
+        traitName: "AffineSpace",
+        requiredTraitArgs: [rhs.type],
+        arguments: [rhs]
+      ) {
+        return call
+      }
+      throw SemanticError.undefinedMember("sub_vector", lhs.type.description)
+
+    case .multiply:
+      if sameType {
+        if let call = try buildOperatorMethodCall(
+          base: lhs,
+          methodName: "mul",
+          traitName: "MultiplicativeSemigroup",
+          requiredTraitArgs: nil,
+          arguments: [rhs]
+        ) {
+          return call
+        }
+        throw SemanticError.undefinedMember("mul", lhs.type.description)
+      }
+
+      if let call = try buildOperatorMethodCall(
+        base: lhs,
+        methodName: "scale",
+        traitName: "VectorSpace",
+        requiredTraitArgs: [rhs.type],
+        arguments: [rhs]
+      ) {
+        return call
+      }
+      throw SemanticError.undefinedMember("scale", lhs.type.description)
+
+    case .divide:
+      if sameType {
+        if let call = try buildOperatorMethodCall(
+          base: lhs,
+          methodName: "div",
+          traitName: "Divisible",
+          requiredTraitArgs: nil,
+          arguments: [rhs]
+        ) {
+          return call
+        }
+        throw SemanticError.undefinedMember("div", lhs.type.description)
+      }
+
+      if let call = try buildOperatorMethodCall(
+        base: lhs,
+        methodName: "unscale",
+        traitName: "Scalable",
+        requiredTraitArgs: [rhs.type],
+        arguments: [rhs]
+      ) {
+        return call
+      }
+      throw SemanticError.undefinedMember("unscale", lhs.type.description)
+
+    case .modulo:
+      if sameType {
+        if let call = try buildOperatorMethodCall(
+          base: lhs,
+          methodName: "rem",
+          traitName: "Remainder",
+          requiredTraitArgs: nil,
+          arguments: [rhs]
+        ) {
+          return call
+        }
+        throw SemanticError.undefinedMember("rem", lhs.type.description)
+      }
+      throw SemanticError.invalidOperation(op: "%", type1: lhs.type.description, type2: rhs.type.description)
+    }
+  }
+
+  private func buildOperatorMethodCall(
+    base: TypedExpressionNode,
+    methodName: String,
+    traitName: String,
+    requiredTraitArgs: [Type]?,
+    arguments: [TypedExpressionNode],
+    allowMissingTrait: Bool = false
+  ) throws -> TypedExpressionNode? {
+    if case .genericParameter(let paramName) = base.type {
+      return try buildTraitMethodCall(
+        paramName: paramName,
+        base: base,
+        traitName: traitName,
+        requiredTraitArgs: requiredTraitArgs,
+        methodName: methodName,
+        arguments: arguments,
+        allowMissingTrait: allowMissingTrait
+      )
+    }
+
+    if let methodSym = try lookupConcreteMethodSymbol(on: base.type, name: methodName) {
+      return try buildConcreteMethodCall(base: base, method: methodSym, arguments: arguments)
+    }
+
+    return nil
+  }
+
+  private func buildTraitMethodCall(
+    paramName: String,
+    base: TypedExpressionNode,
+    traitName: String,
+    requiredTraitArgs: [Type]?,
+    methodName: String,
+    arguments: [TypedExpressionNode],
+    allowMissingTrait: Bool
+  ) throws -> TypedExpressionNode? {
+    guard let constraint = findTraitConstraint(paramName, traitName) else {
+      if allowMissingTrait { return nil }
+      let opName: String
+      switch methodName {
+      case "add": opName = "plus"
+      case "sub": opName = "minus"
+      case "mul": opName = "multiply"
+      case "div": opName = "divide"
+      case "rem": opName = "modulo"
+      default: opName = "operation"
+      }
+      throw SemanticError(
+        .generic("Invalid operation \(opName) between types \(base.type) and \(base.type)"),
+        line: currentLine)
+    }
+
+    let traitInfo = traits[traitName]
+    var traitTypeArgs: [Type] = []
+    if case .generic(_, let argNodes) = constraint {
+      for argNode in argNodes {
+        let argType = try resolveTypeNode(argNode)
+        traitTypeArgs.append(argType)
+      }
+    }
+
+    if let required = requiredTraitArgs {
+      if traitTypeArgs.count != required.count || !zip(traitTypeArgs, required).allSatisfy({ $0 == $1 }) {
+        if allowMissingTrait { return nil }
+        throw SemanticError.typeMismatch(
+          expected: "[\(required.map { $0.description }.joined(separator: ", "))]\(traitName)",
+          got: "[\(traitTypeArgs.map { $0.description }.joined(separator: ", "))]\(traitName)"
+        )
+      }
+    }
+
+    let methods = try flattenedTraitMethods(traitName)
+    guard let sig = methods[methodName] else {
+      throw SemanticError(.generic("Trait \(traitName) is missing required method \(methodName)"), line: currentLine)
+    }
+
+    let expectedType = try expectedFunctionTypeForTraitMethod(
+      sig,
+      selfType: base.type,
+      traitInfo: traitInfo,
+      traitTypeArgs: traitTypeArgs
+    )
+
+    recordTraitPlaceholderInstantiation(
+      baseType: base.type,
+      methodName: methodName,
+      methodTypeArgs: []
+    )
+
+    let callee: TypedExpressionNode = .traitMethodPlaceholder(
+      traitName: traitName,
+      methodName: methodName,
+      base: base,
+      methodTypeArgs: [],
+      type: expectedType
+    )
+
+    guard case .function(let params, let returns) = expectedType else {
+      throw SemanticError.invalidOperation(op: "call", type1: expectedType.description, type2: "")
+    }
+
+    if arguments.count != params.count - 1 {
+      throw SemanticError.invalidArgumentCount(
+        function: methodName,
+        expected: params.count - 1,
+        got: arguments.count
+      )
+    }
+
+    var typedArguments: [TypedExpressionNode] = []
+    for (arg, param) in zip(arguments, params.dropFirst()) {
+      var typedArg = arg
+      typedArg = try coerceLiteral(typedArg, to: param.type)
+      if typedArg.type != param.type {
+        if case .reference(let inner) = param.type, inner == typedArg.type {
+          if typedArg.valueCategory == .lvalue {
+            typedArg = .referenceExpression(expression: typedArg, type: param.type)
+          } else {
+            throw SemanticError.invalidOperation(
+              op: "implicit ref", type1: typedArg.type.description, type2: "rvalue")
+          }
+        } else if case .reference(let inner) = typedArg.type, inner == param.type {
+          typedArg = .derefExpression(expression: typedArg, type: inner)
+        } else {
+          throw SemanticError.typeMismatch(
+            expected: param.type.description,
+            got: typedArg.type.description
+          )
+        }
+      }
+      typedArguments.append(typedArg)
+    }
+
+    return .call(callee: callee, arguments: typedArguments, type: returns)
+  }
+
+  private func buildConcreteMethodCall(
+    base: TypedExpressionNode,
+    method: Symbol,
+    arguments: [TypedExpressionNode]
+  ) throws -> TypedExpressionNode {
+    guard case .function(let params, let returns) = method.type else {
+      throw SemanticError.invalidOperation(op: "call", type1: method.type.description, type2: "")
+    }
+
+    if arguments.count != params.count - 1 {
+      let name = context.getName(method.defId) ?? "<unknown>"
+      throw SemanticError.invalidArgumentCount(
+        function: name,
+        expected: params.count - 1,
+        got: arguments.count
+      )
+    }
+
+    // Handle self parameter
+    var finalBase = base
+    if let firstParam = params.first {
+      if case .reference(let inner) = firstParam.type,
+         inner == base.type,
+         base.valueCategory == .rvalue {
+        // Materialize temporary for rvalue receiver
+        let tempSymbol = nextSynthSymbol(prefix: "temp_recv", type: base.type)
+        let tempVar: TypedExpressionNode = .variable(identifier: tempSymbol)
+        let refType: Type = .reference(inner: base.type)
+        let refExpr: TypedExpressionNode = .referenceExpression(expression: tempVar, type: refType)
+        let callee: TypedExpressionNode = .methodReference(
+          base: refExpr, method: method, typeArgs: nil, methodTypeArgs: nil, type: method.type
+        )
+
+        var typedArguments: [TypedExpressionNode] = []
+        for (arg, param) in zip(arguments, params.dropFirst()) {
+          var typedArg = arg
+          typedArg = try coerceLiteral(typedArg, to: param.type)
+          if typedArg.type != param.type {
+            if case .reference(let innerArg) = param.type, innerArg == typedArg.type {
+              if typedArg.valueCategory == .lvalue {
+                typedArg = .referenceExpression(expression: typedArg, type: param.type)
+              } else {
+                throw SemanticError.invalidOperation(
+                  op: "implicit ref", type1: typedArg.type.description, type2: "rvalue")
+              }
+            } else if case .reference(let innerArg) = typedArg.type, innerArg == param.type {
+              typedArg = .derefExpression(expression: typedArg, type: innerArg)
+            } else {
+              throw SemanticError.typeMismatch(
+                expected: param.type.description,
+                got: typedArg.type.description
+              )
+            }
+          }
+          typedArguments.append(typedArg)
+        }
+
+        let callExpr: TypedExpressionNode = .call(callee: callee, arguments: typedArguments, type: returns)
+        return .letExpression(identifier: tempSymbol, value: base, body: callExpr, type: returns)
+      }
+
+      if base.type != firstParam.type {
+        if case .reference(let inner) = firstParam.type, inner == base.type {
+          if base.valueCategory == .lvalue {
+            finalBase = .referenceExpression(expression: base, type: firstParam.type)
+          } else {
+            throw SemanticError.invalidOperation(
+              op: "implicit ref", type1: base.type.description, type2: "rvalue")
+          }
+        } else if case .reference(let inner) = base.type, inner == firstParam.type {
+          finalBase = .derefExpression(expression: base, type: inner)
+        } else {
+          throw SemanticError.typeMismatch(
+            expected: firstParam.type.description,
+            got: base.type.description
+          )
+        }
+      }
+    }
+
+    var typedArguments: [TypedExpressionNode] = []
+    for (arg, param) in zip(arguments, params.dropFirst()) {
+      var typedArg = arg
+      typedArg = try coerceLiteral(typedArg, to: param.type)
+      if typedArg.type != param.type {
+        if case .reference(let inner) = param.type, inner == typedArg.type {
+          if typedArg.valueCategory == .lvalue {
+            typedArg = .referenceExpression(expression: typedArg, type: param.type)
+          } else {
+            throw SemanticError.invalidOperation(
+              op: "implicit ref", type1: typedArg.type.description, type2: "rvalue")
+          }
+        } else if case .reference(let inner) = typedArg.type, inner == param.type {
+          typedArg = .derefExpression(expression: typedArg, type: inner)
+        } else {
+          throw SemanticError.typeMismatch(
+            expected: param.type.description,
+            got: typedArg.type.description
+          )
+        }
+      }
+      typedArguments.append(typedArg)
+    }
+
+    let callee: TypedExpressionNode = .methodReference(
+      base: finalBase, method: method, typeArgs: nil, methodTypeArgs: nil, type: method.type
+    )
+    return .call(callee: callee, arguments: typedArguments, type: returns)
   }
   
   /// Resolves an lvalue expression for assignment
@@ -3424,13 +3908,13 @@ extension TypeChecker {
       return .memberPath(source: typedBase, path: resolvedPath)
 
     case .subscriptExpression(_, _):
-      // Direct assignment to `x[i]` is lowered to `__update_at` in statement checking.
+      // Direct assignment to `x[i]` is lowered to `update_at` in statement checking.
       // Treat subscript as an invalid assignment target here.
       throw SemanticError.invalidOperation(op: "assignment target", type1: "subscript", type2: "")
 
     case .derefExpression(_):
       // `deref r = ...` is intentionally disallowed.
-      // Writes must go through explicit setters like `__update_at` (for subscripts).
+      // Writes must go through explicit setters like `update_at` (for subscripts).
       throw SemanticError.invalidOperation(op: "assignment target", type1: "deref", type2: "")
 
     default:
@@ -3497,8 +3981,8 @@ extension TypeChecker {
       }
     }
     
-    // 3. Verify T implements Comparable
-    try enforceTraitConformance(elementType, traitName: "Comparable")
+    // 3. Verify T implements Ordering
+    try enforceTraitConformance(elementType, traitName: "Ordering")
     
     // 4. Construct Range type
     let rangeType = Type.genericUnion(template: "Range", args: [elementType])

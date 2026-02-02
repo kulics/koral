@@ -220,11 +220,13 @@ extension Monomorphizer {
             let newType = substituteType(type, substitution: substitution)
 
             
-            // Apply lowering for primitive type methods (__equals, __compare)
+            // Apply lowering for primitive type methods (equals, compare)
             // This mirrors the lowering done in TypeChecker for direct calls
             if case .methodReference(let base, let method, _, _, _) = newCallee {
-                // Lower primitive `__equals(self, other) Bool` to scalar equality
-                if method.methodKind == .equals,
+                let rawMethodName = context.getName(method.defId) ?? ""
+                let methodName = extractMethodName(rawMethodName)
+                // Lower primitive `equals(self, other) Bool` to scalar equality
+                if methodName == "equals",
                    newType == .bool,
                    newArguments.count == 1,
                    base.type == newArguments[0].type,
@@ -232,9 +234,9 @@ extension Monomorphizer {
                 {
                     return .comparisonExpression(left: base, op: .equal, right: newArguments[0], type: .bool)
                 }
-                
-                // Lower primitive `__compare(self, other) Int` to scalar comparisons
-                if method.methodKind == .compare,
+
+                // Lower primitive `compare(self, other) Int` to scalar comparisons
+                if methodName == "compare",
                    newType == .int,
                    newArguments.count == 1,
                    base.type == newArguments[0].type,
@@ -242,13 +244,13 @@ extension Monomorphizer {
                 {
                     let lhsVal = base
                     let rhsVal = newArguments[0]
-                    
+
                     let less: TypedExpressionNode = .comparisonExpression(left: lhsVal, op: .less, right: rhsVal, type: .bool)
                     let greater: TypedExpressionNode = .comparisonExpression(left: lhsVal, op: .greater, right: rhsVal, type: .bool)
                     let minusOne: TypedExpressionNode = .integerLiteral(value: "-1", type: .int)
                     let plusOne: TypedExpressionNode = .integerLiteral(value: "1", type: .int)
                     let zero: TypedExpressionNode = .integerLiteral(value: "0", type: .int)
-                    
+
                     let gtBranch: TypedExpressionNode = .ifExpression(condition: greater, thenBranch: plusOne, elseBranch: zero, type: .int)
                     return .ifExpression(condition: less, thenBranch: minusOne, elseBranch: gtBranch, type: .int)
                 }

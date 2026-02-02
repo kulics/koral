@@ -470,10 +470,14 @@ extension TypeChecker {
       
       // Note: We don't validate superTraits here because they might be forward references
       // They will be validated in pass 2
+      var resolvedSuperTraits: [TraitConstraint] = []
+      for parent in superTraits {
+        resolvedSuperTraits.append(try SemaUtils.resolveTraitConstraint(from: parent))
+      }
       traits[name] = TraitDeclInfo(
         name: name,
         typeParameters: typeParameters,
-        superTraits: superTraits,
+        superTraits: resolvedSuperTraits,
         methods: methods,
         access: access
       )
@@ -1194,11 +1198,34 @@ extension TypeChecker {
     case .foreignUsingDeclaration(let libraryName, _):
       return .foreignUsing(libraryName: libraryName)
       
-    case .traitDeclaration(_, _, let superTraits, _, _, let span):
+    case .traitDeclaration(_, let typeParameters, let superTraits, _, _, let span):
       self.currentSpan = span
       // Trait was registered in pass 1, now validate superTraits
-      for parent in superTraits {
-        try validateTraitName(parent)
+      try withNewScope {
+        for param in typeParameters {
+          currentScope.defineGenericParameter(
+            param.name, type: .genericParameter(name: param.name))
+        }
+        try recordGenericTraitBounds(typeParameters)
+
+        for parent in superTraits {
+          let constraint = try SemaUtils.resolveTraitConstraint(from: parent)
+          try validateTraitName(constraint.baseName)
+          if case .generic(let base, let args) = constraint {
+            let traitInfo = traits[base]
+            let expectedCount = traitInfo?.typeParameters.count ?? 0
+            if expectedCount != args.count {
+              throw SemanticError.typeMismatch(
+                expected: "\(expectedCount) generic arguments",
+                got: "\(args.count)"
+              )
+            }
+            // Validate each trait type argument resolves
+            for arg in args {
+              _ = try resolveTypeNode(arg)
+            }
+          }
+        }
       }
       return nil
 

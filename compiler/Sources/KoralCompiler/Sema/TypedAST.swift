@@ -90,10 +90,6 @@ public struct CapturedVariable {
 public enum CompilerMethodKind {
   case normal
   case drop
-  case at
-  case updateAt
-  case equals
-  case compare
 }
 public struct Symbol {
   public let defId: DefId
@@ -254,7 +250,7 @@ public indirect enum TypedExpressionNode {
   )
   /// Trait method placeholder for generic parameter method calls
   /// - traitName: The name of the trait (e.g., "Iterator", "Equatable")
-  /// - methodName: The name of the method (e.g., "next", "__equals")
+  /// - methodName: The name of the method (e.g., "next", "equals")
   /// - base: The base expression (generic parameter reference)
   /// - methodTypeArgs: Method-level type arguments (for generic methods)
   /// - type: The expected function type of the method

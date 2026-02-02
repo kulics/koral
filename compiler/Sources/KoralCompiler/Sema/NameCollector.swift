@@ -267,7 +267,7 @@ public class NameCollector: CompilerPass {
     private func collectTraitDefinition(
         name: String,
         typeParameters: [TypeParameterDecl],
-        superTraits: [String],
+        superTraits: [TypeNode],
         methods: [TraitMethodSignature],
         access: AccessModifier,
         span: SourceSpan,
@@ -794,7 +794,7 @@ public struct CollectedTraitInfo {
     public let defId: DefId
     public let name: String
     public let typeParameters: [TypeParameterDecl]
-    public let superTraits: [String]
+    public let superTraits: [TypeNode]
     public let methods: [TraitMethodSignature]
     public let access: AccessModifier
 }

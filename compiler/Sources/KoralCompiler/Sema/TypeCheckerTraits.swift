@@ -36,12 +36,12 @@ extension TypeChecker {
       let boundName = bound.baseName
       if let traitInfo = traits[boundName] {
         // Check if this trait inherits from the target trait
-        if traitInfo.superTraits.contains(traitName) {
+        if traitInfo.superTraits.contains(where: { $0.baseName == traitName }) {
           return true
         }
         // Recursively check super traits
         for superTrait in traitInfo.superTraits {
-          if hasTraitInheritance(superTrait, traitName) {
+          if hasTraitInheritance(superTrait.baseName, traitName) {
             return true
           }
         }
@@ -53,7 +53,7 @@ extension TypeChecker {
   
   /// Finds the trait constraint for a given type parameter and trait name.
   /// Returns the full TraitConstraint including type arguments.
-  private func findTraitConstraint(_ paramName: String, _ traitName: String) -> TraitConstraint? {
+  func findTraitConstraint(_ paramName: String, _ traitName: String) -> TraitConstraint? {
     guard let bounds = genericTraitBounds[paramName] else {
       return nil
     }
@@ -70,12 +70,12 @@ extension TypeChecker {
       return false
     }
     
-    if traitInfo.superTraits.contains(targetTrait) {
+    if traitInfo.superTraits.contains(where: { $0.baseName == targetTrait }) {
       return true
     }
     
     for superTrait in traitInfo.superTraits {
-      if hasTraitInheritance(superTrait, targetTrait) {
+      if hasTraitInheritance(superTrait.baseName, targetTrait) {
         return true
       }
     }

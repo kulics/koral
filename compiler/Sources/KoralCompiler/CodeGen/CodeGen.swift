@@ -2361,14 +2361,14 @@ public class CodeGen {
         // Use qualified name for String.from_bytes_unchecked via lookup
         let fromBytesMethod = lookupStaticMethod(typeName: "String", methodName: "from_bytes_unchecked")
         prelude += "\(cTypeName(type)) \(literalVar) = \(fromBytesMethod)((uint8_t*)\(bytesVar), \(utf8Bytes.count));\n"
-        // Compare via compiler-protocol `String.__equals(self, other String) Bool`.
-        // Value-passing semantics: String___equals consumes its arguments, so we must copy
-        // the subject before comparison to allow multiple pattern matches on the same variable.
+        // Compare via `String.equals(self, other String) Bool`.
+        // Value-passing semantics: String_equals consumes its arguments, so we must copy
+        // both the subject and the literal before comparison to avoid double-free.
         guard case .structure(let defId) = type else { fatalError("String literal pattern requires String type") }
-        // Use qualified name for String.__equals via lookup
-        let equalsMethod = lookupStaticMethod(typeName: "String", methodName: "__equals")
+        // Use qualified name for String.equals via lookup
+        let equalsMethod = lookupStaticMethod(typeName: "String", methodName: "equals")
         let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-        return ([prelude], [(literalVar, type)], "\(equalsMethod)(__koral_\(typeName)_copy(&\(path)), \(literalVar))", [], [])
+        return ([prelude], [(literalVar, type)], "\(equalsMethod)(__koral_\(typeName)_copy(&\(path)), __koral_\(typeName)_copy(&\(literalVar)))", [], [])
       case .wildcard:
         return ([], [], "1", [], [])
       case .variable(let symbol):
