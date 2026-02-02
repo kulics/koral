@@ -68,7 +68,7 @@ extension TypeChecker {
     case .assignment(let target, let op, let value, let span):
       self.currentSpan = span
       if let op {
-        // Lower `x[i] op= v` into a call to `x.update_at(i, deref x[i] op v)`.
+        // Lower `x[i] op= v` into a call to `x.set_at(i, deref x[i] op v)`.
         if case .subscriptExpression(let baseExpr, let argExprs) = target {
           let typedBase = try inferTypedExpression(baseExpr)
           let typedArgs = try argExprs.map { try inferTypedExpression($0) }
@@ -196,12 +196,12 @@ extension TypeChecker {
       }
 
       // Simple assignment
-      // Lower `x[i] = v` into a call to `x.update_at(i, v)`.
+      // Lower `x[i] = v` into a call to `x.set_at(i, v)`.
       if case .subscriptExpression(let baseExpr, let argExprs) = target {
         let typedBase = try inferTypedExpression(baseExpr)
         let typedArgs = try argExprs.map { try inferTypedExpression($0) }
 
-        // Resolve expected value type from `update_at`.
+        // Resolve expected value type from `set_at`.
         let (_, _, expectedValueType) = try resolveSubscriptUpdateMethod(
           base: typedBase, args: typedArgs)
 

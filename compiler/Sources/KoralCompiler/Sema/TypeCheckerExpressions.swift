@@ -371,7 +371,7 @@ extension TypeChecker {
         }
       }
 
-      // Operator sugar for Equality: lower `==`/`<>` to `equals(self, other)`
+      // Operator sugar for Eq: lower `==`/`<>` to `equals(self, other)`
       // for non-builtin scalar types (struct/union/String/generic parameters).
       if (op == .equal || op == .notEqual), typedLeft.type == typedRight.type,
         !isBuiltinEqualityComparable(typedLeft.type)
@@ -383,7 +383,7 @@ extension TypeChecker {
         return eq
       }
 
-      // Operator sugar for Ordering: lower `<`/`<=`/`>`/`>=` to
+      // Operator sugar for Ord: lower `<`/`<=`/`>`/`>=` to
       // `compare(self, other) Int` for non-builtin scalar types
       // (struct/union/String/generic parameters).
       if (op == .greater || op == .less || op == .greaterEqual || op == .lessEqual),
@@ -586,7 +586,7 @@ extension TypeChecker {
       if let call = try buildOperatorMethodCall(
         base: typedExpr,
         methodName: "neg",
-        traitName: "AdditiveGroup",
+        traitName: "Sub",
         requiredTraitArgs: nil,
         arguments: []
       ) {
@@ -3227,7 +3227,7 @@ extension TypeChecker {
 
 extension TypeChecker {
   
-  /// Builds an equality comparison call for types implementing Equality
+  /// Builds an equality comparison call for types implementing Eq
   func buildEqualsCall(lhs: TypedExpressionNode, rhs: TypedExpressionNode) throws -> TypedExpressionNode {
     guard lhs.type == rhs.type else {
       throw SemanticError.typeMismatch(expected: lhs.type.description, got: rhs.type.description)
@@ -3238,12 +3238,12 @@ extension TypeChecker {
 
     // Handle generic parameter case - create trait method placeholder
     if case .genericParameter(let paramName) = receiverType {
-      guard hasTraitBound(paramName, "Equality") else {
-        throw SemanticError(.generic("Type \(receiverType) is not constrained by trait Equality"), line: currentLine)
+      guard hasTraitBound(paramName, "Eq") else {
+        throw SemanticError(.generic("Type \(receiverType) is not constrained by trait Eq"), line: currentLine)
       }
-      let methods = try flattenedTraitMethods("Equality")
+      let methods = try flattenedTraitMethods("Eq")
       guard let sig = methods[methodName] else {
-        throw SemanticError(.generic("Trait Equality is missing required method \(methodName)"), line: currentLine)
+        throw SemanticError(.generic("Trait Eq is missing required method \(methodName)"), line: currentLine)
       }
       let expectedType = try expectedFunctionTypeForTraitMethod(sig, selfType: receiverType)
       
@@ -3255,7 +3255,7 @@ extension TypeChecker {
       
       // Create trait method placeholder instead of methodReference with __trait_ prefix
       let callee: TypedExpressionNode = .traitMethodPlaceholder(
-        traitName: "Equality",
+        traitName: "Eq",
         methodName: methodName,
         base: lhs,
         methodTypeArgs: [],
@@ -3284,7 +3284,7 @@ extension TypeChecker {
     return .call(callee: callee, arguments: [rhs], type: .bool)
   }
 
-  /// Builds a comparison call for types implementing Ordering
+  /// Builds a comparison call for types implementing Ord
   func buildCompareCall(lhs: TypedExpressionNode, rhs: TypedExpressionNode) throws -> TypedExpressionNode {
     guard lhs.type == rhs.type else {
       throw SemanticError.typeMismatch(expected: lhs.type.description, got: rhs.type.description)
@@ -3295,12 +3295,12 @@ extension TypeChecker {
 
     // Handle generic parameter case - create trait method placeholder
     if case .genericParameter(let paramName) = receiverType {
-      guard hasTraitBound(paramName, "Ordering") else {
-        throw SemanticError(.generic("Type \(receiverType) is not constrained by trait Ordering"), line: currentLine)
+      guard hasTraitBound(paramName, "Ord") else {
+        throw SemanticError(.generic("Type \(receiverType) is not constrained by trait Ord"), line: currentLine)
       }
-      let methods = try flattenedTraitMethods("Ordering")
+      let methods = try flattenedTraitMethods("Ord")
       guard let sig = methods[methodName] else {
-        throw SemanticError(.generic("Trait Ordering is missing required method \(methodName)"), line: currentLine)
+        throw SemanticError(.generic("Trait Ord is missing required method \(methodName)"), line: currentLine)
       }
       let expectedType = try expectedFunctionTypeForTraitMethod(sig, selfType: receiverType)
       
@@ -3312,7 +3312,7 @@ extension TypeChecker {
       
       // Create trait method placeholder instead of methodReference with __trait_ prefix
       let callee: TypedExpressionNode = .traitMethodPlaceholder(
-        traitName: "Ordering",
+        traitName: "Ord",
         methodName: methodName,
         base: lhs,
         methodTypeArgs: [],
@@ -3405,7 +3405,7 @@ extension TypeChecker {
         if let call = try buildOperatorMethodCall(
           base: lhs,
           methodName: "add",
-          traitName: "AdditiveSemigroup",
+          traitName: "Add",
           requiredTraitArgs: nil,
           arguments: [rhs]
         ) {
@@ -3416,7 +3416,7 @@ extension TypeChecker {
       if let call = try buildOperatorMethodCall(
         base: lhs,
         methodName: "add_vector",
-        traitName: "AffineSpace",
+        traitName: "Affine",
         requiredTraitArgs: [rhs.type],
         arguments: [rhs]
       ) {
@@ -3429,7 +3429,7 @@ extension TypeChecker {
         if let call = try buildOperatorMethodCall(
           base: lhs,
           methodName: "sub_point",
-          traitName: "AffineSpace",
+          traitName: "Affine",
           requiredTraitArgs: nil,
           arguments: [rhs],
           allowMissingTrait: true
@@ -3440,30 +3440,11 @@ extension TypeChecker {
         if let call = try buildOperatorMethodCall(
           base: lhs,
           methodName: "sub",
-          traitName: "AdditiveGroup",
+          traitName: "Sub",
           requiredTraitArgs: nil,
           arguments: [rhs]
         ) {
           return call
-        }
-
-        // Fallback: a - b => a.add(b.neg())
-        if let neg = try buildOperatorMethodCall(
-          base: rhs,
-          methodName: "neg",
-          traitName: "AdditiveGroup",
-          requiredTraitArgs: nil,
-          arguments: []
-        ),
-          let add = try buildOperatorMethodCall(
-            base: lhs,
-            methodName: "add",
-            traitName: "AdditiveSemigroup",
-            requiredTraitArgs: nil,
-            arguments: [neg]
-          )
-        {
-          return add
         }
 
         throw SemanticError.undefinedMember("sub", lhs.type.description)
@@ -3472,7 +3453,7 @@ extension TypeChecker {
       if let call = try buildOperatorMethodCall(
         base: lhs,
         methodName: "sub_vector",
-        traitName: "AffineSpace",
+        traitName: "Affine",
         requiredTraitArgs: [rhs.type],
         arguments: [rhs]
       ) {
@@ -3485,7 +3466,7 @@ extension TypeChecker {
         if let call = try buildOperatorMethodCall(
           base: lhs,
           methodName: "mul",
-          traitName: "MultiplicativeSemigroup",
+          traitName: "Mul",
           requiredTraitArgs: nil,
           arguments: [rhs]
         ) {
@@ -3497,7 +3478,7 @@ extension TypeChecker {
       if let call = try buildOperatorMethodCall(
         base: lhs,
         methodName: "scale",
-        traitName: "VectorSpace",
+        traitName: "Scale",
         requiredTraitArgs: [rhs.type],
         arguments: [rhs]
       ) {
@@ -3510,7 +3491,7 @@ extension TypeChecker {
         if let call = try buildOperatorMethodCall(
           base: lhs,
           methodName: "div",
-          traitName: "Divisible",
+          traitName: "Div",
           requiredTraitArgs: nil,
           arguments: [rhs]
         ) {
@@ -3522,7 +3503,7 @@ extension TypeChecker {
       if let call = try buildOperatorMethodCall(
         base: lhs,
         methodName: "unscale",
-        traitName: "Scalable",
+        traitName: "InvScale",
         requiredTraitArgs: [rhs.type],
         arguments: [rhs]
       ) {
@@ -3535,7 +3516,7 @@ extension TypeChecker {
         if let call = try buildOperatorMethodCall(
           base: lhs,
           methodName: "rem",
-          traitName: "Remainder",
+          traitName: "Rem",
           requiredTraitArgs: nil,
           arguments: [rhs]
         ) {
@@ -3908,13 +3889,13 @@ extension TypeChecker {
       return .memberPath(source: typedBase, path: resolvedPath)
 
     case .subscriptExpression(_, _):
-      // Direct assignment to `x[i]` is lowered to `update_at` in statement checking.
+      // Direct assignment to `x[i]` is lowered to `set_at` in statement checking.
       // Treat subscript as an invalid assignment target here.
       throw SemanticError.invalidOperation(op: "assignment target", type1: "subscript", type2: "")
 
     case .derefExpression(_):
       // `deref r = ...` is intentionally disallowed.
-      // Writes must go through explicit setters like `update_at` (for subscripts).
+      // Writes must go through explicit setters like `set_at` (for subscripts).
       throw SemanticError.invalidOperation(op: "assignment target", type1: "deref", type2: "")
 
     default:
@@ -3981,8 +3962,8 @@ extension TypeChecker {
       }
     }
     
-    // 3. Verify T implements Ordering
-    try enforceTraitConformance(elementType, traitName: "Ordering")
+    // 3. Verify T implements Ord
+    try enforceTraitConformance(elementType, traitName: "Ord")
     
     // 4. Construct Range type
     let rangeType = Type.genericUnion(template: "Range", args: [elementType])

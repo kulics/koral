@@ -123,43 +123,43 @@ char koral_path_separator(void) {
 #endif
 }
 
-bool koral_path_exists(const char* path) {
+int koral_path_exists(const char* path) {
     char normalized[4096];
     normalize_path_internal(path, normalized, sizeof(normalized));
 #ifdef _WIN32
     struct _stat st;
-    return _stat(normalized, &st) == 0;
+    return _stat(normalized, &st) == 0 ? 1 : 0;
 #else
     struct stat st;
-    return stat(normalized, &st) == 0;
+    return stat(normalized, &st) == 0 ? 1 : 0;
 #endif
 }
 
-bool koral_is_file(const char* path) {
+int koral_is_file(const char* path) {
     char normalized[4096];
     normalize_path_internal(path, normalized, sizeof(normalized));
 #ifdef _WIN32
     struct _stat st;
-    if (_stat(normalized, &st) != 0) return false;
-    return (st.st_mode & _S_IFREG) != 0;
+    if (_stat(normalized, &st) != 0) return 0;
+    return (st.st_mode & _S_IFREG) != 0 ? 1 : 0;
 #else
     struct stat st;
-    if (stat(normalized, &st) != 0) return false;
-    return S_ISREG(st.st_mode);
+    if (stat(normalized, &st) != 0) return 0;
+    return S_ISREG(st.st_mode) ? 1 : 0;
 #endif
 }
 
-bool koral_is_dir(const char* path) {
+int koral_is_dir(const char* path) {
     char normalized[4096];
     normalize_path_internal(path, normalized, sizeof(normalized));
 #ifdef _WIN32
     struct _stat st;
-    if (_stat(normalized, &st) != 0) return false;
-    return (st.st_mode & _S_IFDIR) != 0;
+    if (_stat(normalized, &st) != 0) return 0;
+    return (st.st_mode & _S_IFDIR) != 0 ? 1 : 0;
 #else
     struct stat st;
-    if (stat(normalized, &st) != 0) return false;
-    return S_ISDIR(st.st_mode);
+    if (stat(normalized, &st) != 0) return 0;
+    return S_ISDIR(st.st_mode) ? 1 : 0;
 #endif
 }
 

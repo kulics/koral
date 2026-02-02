@@ -12,9 +12,9 @@ foreign type CDirHandle
 foreign type CDirEntry
 
 // Runtime C helpers (std/koral_runtime.c)
-foreign let koral_path_exists(path UInt8 ptr) Bool
-foreign let koral_is_file(path UInt8 ptr) Bool
-foreign let koral_is_dir(path UInt8 ptr) Bool
+foreign let koral_path_exists(path UInt8 ptr) Int32
+foreign let koral_is_file(path UInt8 ptr) Int32
+foreign let koral_is_dir(path UInt8 ptr) Int32
 
 foreign let koral_normalize_path(path UInt8 ptr, buf UInt8 ptr, size Int) Int
 foreign let koral_path_separator() UInt8
@@ -88,7 +88,8 @@ given CommandResult {
 
 /// Read file content as string
 public let read_file(path String) [String, String]Result = {
-    let file = fopen(path.storage.data, "rb".storage.data)
+    let normalized = normalize_path(path)
+    let file = fopen(normalized.storage.data, "rb".storage.data)
     if file == [CFile]null_ptr() then {
         return [String, String]Result.Error(get_last_error())
     }
@@ -110,7 +111,8 @@ public let read_file(path String) [String, String]Result = {
 
 /// Write string to file (overwrite)
 public let write_file(path String, content String) [Void, String]Result = {
-    let file = fopen(path.storage.data, "wb".storage.data)
+    let normalized = normalize_path(path)
+    let file = fopen(normalized.storage.data, "wb".storage.data)
     if file == [CFile]null_ptr() then {
         return [Void, String]Result.Error(get_last_error())
     }
@@ -122,7 +124,8 @@ public let write_file(path String, content String) [Void, String]Result = {
 
 /// Append string to file
 public let append_file(path String, content String) [Void, String]Result = {
-    let file = fopen(path.storage.data, "ab".storage.data)
+    let normalized = normalize_path(path)
+    let file = fopen(normalized.storage.data, "ab".storage.data)
     if file == [CFile]null_ptr() then {
         return [Void, String]Result.Error(get_last_error())
     }
@@ -179,6 +182,12 @@ public let create_dir_all(path String) [Void, String]Result = {
 
     for part = parts then {
         if part.is_empty() then { continue }
+        // Windows drive prefix (e.g., "C:") - treat as seeded root.
+        if not seeded and part.count() == 2 and part[1] == ':' then {
+            current.push_string(part)
+            seeded = true
+            continue
+        }
         if not seeded and current.is_empty() then {
             current.push_string(part)
         } else {
@@ -272,13 +281,13 @@ public let current_dir() [String, String]Result = {
 // ============================================================================
 
 /// Check if path exists
-public let path_exists(path String) Bool = koral_path_exists(path.storage.data)
+public let path_exists(path String) Bool = koral_path_exists(path.storage.data) <> 0i32
 
 /// Check if path is file
-public let is_file(path String) Bool = koral_is_file(path.storage.data)
+public let is_file(path String) Bool = koral_is_file(path.storage.data) <> 0i32
 
 /// Check if path is directory
-public let is_dir(path String) Bool = koral_is_dir(path.storage.data)
+public let is_dir(path String) Bool = koral_is_dir(path.storage.data) <> 0i32
 
 /// Move or rename path
 public let move_path(src String, dst String) [Void, String]Result = {
@@ -297,8 +306,9 @@ public let join_path(base String, name String) String = {
 
     let mut result = String.new()
     result.push_string(base)
+    let sep = path_separator()
     if not base.ends_with("/") and not base.ends_with("\\") then {
-        result.push('/')
+        result.push_string(sep)
     }
     result.push_string(name)
     result
