@@ -766,15 +766,24 @@ extension TypeChecker {
 
     guard case .function(let params, let returns) = method.type else { fatalError() }
 
-    var finalBase = base
+    let baseIsRvalue = base.valueCategory == .rvalue
+    let tempSym = baseIsRvalue ? nextSynthSymbol(prefix: "temp_sub", type: base.type) : nil
+    let resolvedBase: TypedExpressionNode = {
+      if let tempSym {
+        return .variable(identifier: tempSym)
+      }
+      return base
+    }()
+
+    var finalBase = resolvedBase
     if let firstParam = params.first {
-      if firstParam.type != base.type {
-        if case .reference(let inner) = firstParam.type, inner == base.type {
+      if firstParam.type != resolvedBase.type {
+        if case .reference(let inner) = firstParam.type, inner == resolvedBase.type {
           // Implicit Ref for self: method expects `self ref` but base is value type
-          finalBase = .referenceExpression(expression: base, type: firstParam.type)
-        } else if case .reference(let inner) = base.type, inner == firstParam.type {
+          finalBase = .referenceExpression(expression: resolvedBase, type: firstParam.type)
+        } else if case .reference(let inner) = resolvedBase.type, inner == firstParam.type {
           // Implicit Deref for self: method expects `self` but base is ref type
-          finalBase = .derefExpression(expression: base, type: firstParam.type)
+          finalBase = .derefExpression(expression: resolvedBase, type: firstParam.type)
         }
       }
     }
@@ -791,7 +800,23 @@ extension TypeChecker {
       }
     }
 
-    return .subscriptExpression(base: finalBase, arguments: args, method: method, type: returns)
+    let subscriptExpr: TypedExpressionNode = .subscriptExpression(
+      base: finalBase,
+      arguments: args,
+      method: method,
+      type: returns
+    )
+
+    if let tempSym {
+      return .letExpression(
+        identifier: tempSym,
+        value: base,
+        body: subscriptExpr,
+        type: returns
+      )
+    }
+
+    return subscriptExpr
   }
 
   func checkIntrinsicCall(name: String, arguments: [ExpressionNode]) throws
