@@ -2561,7 +2561,23 @@ extension TypeChecker {
         }
       }
     }
-    return .memberPath(source: typedBase, path: typedPath)
+    let memberAccess: TypedExpressionNode = .memberPath(source: typedBase, path: typedPath)
+
+    // Materialize rvalue base to ensure proper drop after member access.
+    // This mirrors temporary materialization for rvalue method calls.
+    if typedBase.valueCategory == .rvalue {
+      let tempSymbol = nextSynthSymbol(prefix: "temp_base", type: typedBase.type)
+      let tempVar: TypedExpressionNode = .variable(identifier: tempSymbol)
+      let tempMemberAccess: TypedExpressionNode = .memberPath(source: tempVar, path: typedPath)
+      return .letExpression(
+        identifier: tempSymbol,
+        value: typedBase,
+        body: tempMemberAccess,
+        type: tempMemberAccess.type
+      )
+    }
+
+    return memberAccess
   }
   
   /// Helper to infer generic instantiation member path
