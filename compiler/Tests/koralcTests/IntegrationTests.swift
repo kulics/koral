@@ -138,6 +138,7 @@ class IntegrationTests: XCTestCase {
     func test_stream_basic() throws { try runCase(named: "stream_basic.koral") }
     func test_stream_inference_test() throws { try runCase(named: "stream_inference_test.koral") }
     func test_stream_simple() throws { try runCase(named: "stream_simple.koral") }
+    func test_stream_sum_product_average() throws { try runCase(named: "stream_sum_product_average.koral") }
     func test_string() throws { try runCase(named: "string.koral") }
     func test_string_methods() throws { try runCase(named: "string_methods.koral") }
     func test_struct_with_ref() throws { try runCase(named: "struct_with_ref.koral") }
