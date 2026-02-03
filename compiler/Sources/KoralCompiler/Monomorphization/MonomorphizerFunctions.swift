@@ -600,4 +600,29 @@ extension Monomorphizer {
     internal func isBuiltinOrderingComparable(_ type: Type) -> Bool {
         return SemaUtils.isBuiltinOrderingComparable(type)
     }
+
+    /// Checks if a type supports builtin arithmetic operations.
+    internal func isBuiltinArithmeticType(_ type: Type) -> Bool {
+        switch type {
+        case .int, .int8, .int16, .int32, .int64,
+             .uint, .uint8, .uint16, .uint32, .uint64,
+             .float32, .float64:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Creates a zero literal for a builtin numeric type.
+    internal func makeZeroLiteral(for type: Type) -> TypedExpressionNode {
+        switch type {
+        case .float32, .float64:
+            return .floatLiteral(value: "0.0", type: type)
+        case .int, .int8, .int16, .int32, .int64,
+             .uint, .uint8, .uint16, .uint32, .uint64:
+            return .integerLiteral(value: "0", type: type)
+        default:
+            return .integerLiteral(value: "0", type: .int)
+        }
+    }
 }

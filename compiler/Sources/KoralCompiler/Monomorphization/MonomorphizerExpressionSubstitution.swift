@@ -254,6 +254,35 @@ extension Monomorphizer {
                     let gtBranch: TypedExpressionNode = .ifExpression(condition: greater, thenBranch: plusOne, elseBranch: zero, type: .int)
                     return .ifExpression(condition: less, thenBranch: minusOne, elseBranch: gtBranch, type: .int)
                 }
+
+                // Lower primitive arithmetic intrinsic methods to scalar ops
+                if isBuiltinArithmeticType(base.type) {
+                    if newArguments.count == 1, base.type == newArguments[0].type {
+                        switch methodName {
+                        case "add":
+                            return .arithmeticExpression(left: base, op: .plus, right: newArguments[0], type: newType)
+                        case "sub":
+                            return .arithmeticExpression(left: base, op: .minus, right: newArguments[0], type: newType)
+                        case "mul":
+                            return .arithmeticExpression(left: base, op: .multiply, right: newArguments[0], type: newType)
+                        case "div":
+                            return .arithmeticExpression(left: base, op: .divide, right: newArguments[0], type: newType)
+                        case "rem":
+                            switch base.type {
+                            case .float32, .float64:
+                                break
+                            default:
+                                return .arithmeticExpression(left: base, op: .modulo, right: newArguments[0], type: newType)
+                            }
+                        default:
+                            break
+                        }
+                    }
+                    if methodName == "neg", newArguments.isEmpty {
+                        let zero = makeZeroLiteral(for: base.type)
+                        return .arithmeticExpression(left: zero, op: .minus, right: base, type: newType)
+                    }
+                }
             }
             
             return .call(callee: newCallee, arguments: newArguments, type: newType)
