@@ -494,6 +494,17 @@ extension Monomorphizer {
             
         case .stringLiteral(let value, let type):
             return .stringLiteral(value: value, type: resolveParameterizedType(type))
+
+        case .interpolatedString(let parts, let type):
+            let newParts = parts.map { part -> TypedInterpolatedPart in
+                switch part {
+                case .literal(let value):
+                    return .literal(value)
+                case .expression(let expr):
+                    return .expression(resolveTypesInExpression(expr))
+                }
+            }
+            return .interpolatedString(parts: newParts, type: resolveParameterizedType(type))
             
         case .booleanLiteral(let value, let type):
             return .booleanLiteral(value: value, type: resolveParameterizedType(type))

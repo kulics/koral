@@ -318,6 +318,13 @@ public class EscapeContext {
         switch expr {
         case .integerLiteral, .floatLiteral, .durationLiteral, .stringLiteral, .booleanLiteral:
             break
+
+        case .interpolatedString(let parts, _):
+            for part in parts {
+                if case .expression(let expr) = part {
+                    preAnalyzeExpression(expr)
+                }
+            }
             
         case .variable:
             break

@@ -186,6 +186,21 @@ public func printTypedAST(_ node: TypedProgram) {
 
     case .stringLiteral(let value, let type):
       print("\(indent)StringLiteral: \"\(value)\" : \(type)")
+    case .interpolatedString(let parts, let type):
+      print("\(indent)InterpolatedString: : \(type)")
+      withIndent {
+        for part in parts {
+          switch part {
+          case .literal(let value):
+            print("\(indent)Literal: \"\(value)\"")
+          case .expression(let expr):
+            print("\(indent)Expression:")
+            withIndent {
+              printTypedExpression(expr)
+            }
+          }
+        }
+      }
 
     case .booleanLiteral(let value, let type):
       print("\(indent)BoolLiteral: \(value) : \(type)")

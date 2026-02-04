@@ -10,6 +10,24 @@ public enum DurationUnit: String, CustomStringConvertible {
   public var description: String { rawValue }
 }
 
+/// Interpolated string token parts
+public enum InterpolatedStringPart: CustomStringConvertible {
+  case stringPart(String)
+  case interpolationStart
+  case interpolationEnd
+
+  public var description: String {
+    switch self {
+    case .stringPart(let value):
+      return "StringPart(\(value))"
+    case .interpolationStart:
+      return "InterpolationStart"
+    case .interpolationEnd:
+      return "InterpolationEnd"
+    }
+  }
+}
+
 // Define token types for lexical analysis
 public enum Token: CustomStringConvertible {
   case bof  // Beginning of file marker
@@ -18,6 +36,7 @@ public enum Token: CustomStringConvertible {
   case float(String)  // Float literal as string, e.g.: "3.14"
   case duration(value: String, unit: DurationUnit)  // Duration literal, e.g.: "100ms"
   case string(String)  // String literal, e.g.: "hello"
+  case interpolatedString(parts: [InterpolatedStringPart])  // Interpolated string literal
   case plus  // Plus operator '+'
   case minus  // Minus operator '-'
   case multiply  // Multiply operator '*'
@@ -140,6 +159,8 @@ public enum Token: CustomStringConvertible {
       return true
     case (.string(_), .string(_)):
       return true
+    case (.interpolatedString(_), .interpolatedString(_)):
+      return true
     case (.bool(_), .bool(_)):
       return true
     case (.identifier(_), .identifier(_)):
@@ -217,6 +238,8 @@ public enum Token: CustomStringConvertible {
       return "Duration(\(value)\(unit))"
     case .string(let value):
       return "String(\(value))"
+    case .interpolatedString(let parts):
+      return "InterpolatedString(\(parts))"
     case .plus:
       return "+"
     case .minus:
@@ -740,9 +763,12 @@ public class Lexer {
     }
   }
 
-  // Read a string literal
-  private func readString() throws -> String {
-    var str = ""
+  // Read a string literal or interpolated string
+  private func readStringToken() throws -> Token {
+    var literalBuffer = ""
+    var parts: [InterpolatedStringPart] = []
+    var sawInterpolation = false
+
     guard let startChar = getNextChar(), (startChar == "\"" || startChar == "'") else {
       throw LexerError.invalidString(span: tokenSpan, "expected string start with \" or '")
     }
@@ -750,33 +776,103 @@ public class Lexer {
 
     while let char = getNextChar() {
       if char == quote {
-        return str
+        if sawInterpolation {
+          if !literalBuffer.isEmpty {
+            parts.append(.stringPart(literalBuffer))
+          }
+          return .interpolatedString(parts: parts)
+        }
+        return .string(literalBuffer)
       }
 
       if char == "\\" {
         guard let escaped = getNextChar() else {
           throw LexerError.invalidString(span: tokenSpan, "unterminated escape sequence")
         }
+
+        if escaped == "(" {
+          sawInterpolation = true
+          if !literalBuffer.isEmpty {
+            parts.append(.stringPart(literalBuffer))
+            literalBuffer = ""
+          }
+          parts.append(.interpolationStart)
+          let expr = try readInterpolationExpression()
+          parts.append(.stringPart(expr))
+          parts.append(.interpolationEnd)
+          continue
+        }
+
         switch escaped {
-        case "n": str.append("\n")
-        case "t": str.append("\t")
-        case "r": str.append("\r")
-        case "v": str.append("\u{000B}")
-        case "f": str.append("\u{000C}")
-        case "0": str.append("\0")
-        case "\\": str.append("\\")
-        case "\"": str.append("\"")
-        case "'": str.append("'")
+        case "n": literalBuffer.append("\n")
+        case "t": literalBuffer.append("\t")
+        case "r": literalBuffer.append("\r")
+        case "v": literalBuffer.append("\u{000B}")
+        case "f": literalBuffer.append("\u{000C}")
+        case "0": literalBuffer.append("\0")
+        case "\\": literalBuffer.append("\\")
+        case "\"": literalBuffer.append("\"")
+        case "'": literalBuffer.append("'")
         default:
           throw LexerError.invalidString(span: tokenSpan, "unknown escape: \\\(escaped)")
         }
         continue
       }
 
-      str.append(char)
+      literalBuffer.append(char)
     }
 
     throw LexerError.invalidString(span: tokenSpan, "unterminated string literal")
+  }
+
+  private func readInterpolationExpression() throws -> String {
+    var expr = ""
+    var depth = 1
+
+    while let char = getNextChar() {
+      if char == "\\" {
+        throw LexerError.invalidString(span: tokenSpan, "escape sequences are not allowed in string interpolation")
+      }
+
+      if char == "\"" || char == "'" {
+        expr.append(char)
+        try readInterpolationStringLiteral(quote: char, into: &expr)
+        continue
+      }
+
+      if char == "(" {
+        depth += 1
+        expr.append(char)
+        continue
+      }
+
+      if char == ")" {
+        depth -= 1
+        if depth == 0 {
+          return expr
+        }
+        expr.append(char)
+        continue
+      }
+
+      expr.append(char)
+    }
+
+    throw LexerError.invalidString(span: tokenSpan, "unterminated string interpolation")
+  }
+
+  private func readInterpolationStringLiteral(quote: Character, into expr: inout String) throws {
+    while let char = getNextChar() {
+      expr.append(char)
+      if char == "\\" {
+        throw LexerError.invalidString(span: tokenSpan, "escape sequences are not allowed in string interpolation")
+      }
+      if char == quote {
+        return
+      }
+    }
+
+    throw LexerError.invalidString(span: tokenSpan, "unterminated string interpolation")
   }
 
   // Read an identifier
@@ -980,8 +1076,7 @@ public class Lexer {
       return .dot
     case "\"", "'":
       unreadChar(char)
-      let str = try readString()
-      return .string(str)
+      return try readStringToken()
     case let c where c.isNumber:
       unreadChar(c)
       let numberLiteral = try readNumber()
