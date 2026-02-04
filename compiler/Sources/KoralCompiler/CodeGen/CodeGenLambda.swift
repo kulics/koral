@@ -36,7 +36,7 @@ extension CodeGen {
       // Create closure struct with env = NULL
       let result = nextTemp()
       addIndent()
-      appendToBuffer("struct __koral_Closure \(result) = { .fn = (void*)\(lambdaName), .env = NULL };\n")
+      appendToBuffer("struct __koral_Closure \(result) = { .fn = (void*)\(lambdaName), .env = NULL, .drop = NULL };\n")
       return result
     } else {
       // With-capture Lambda: generate env struct and wrapper function
@@ -77,7 +77,7 @@ extension CodeGen {
       // Create closure struct
       let result = nextTemp()
       addIndent()
-      appendToBuffer("struct __koral_Closure \(result) = { .fn = (void*)\(lambdaName), .env = \(envVar) };\n")
+      appendToBuffer("struct __koral_Closure \(result) = { .fn = (void*)\(lambdaName), .env = \(envVar), .drop = __koral_\(envStructName)_drop };\n")
       return result
     }
   }
@@ -221,6 +221,32 @@ extension CodeGen {
     }
     
     structBuffer += "};\n"
+
+    structBuffer += "\nstatic void __koral_\(name)_drop(void* raw_env) {\n"
+    structBuffer += "  struct \(name)* env = (struct \(name)*)raw_env;\n"
+    for capture in captures {
+      let capturedName = qualifiedName(for: capture.symbol)
+      let valuePath = "env->\(capturedName)"
+      switch capture.symbol.type {
+      case .function:
+        structBuffer += "  __koral_closure_release(\(valuePath));\n"
+      case .structure(let defId):
+        if !context.isForeignStruct(defId) {
+          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
+          structBuffer += "  __koral_\(typeName)_drop(&\(valuePath));\n"
+        }
+      case .union(let defId):
+        let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
+        structBuffer += "  __koral_\(typeName)_drop(&\(valuePath));\n"
+      default:
+        let dropCode = TypeHandlerRegistry.shared.generateDropCode(capture.symbol.type, value: valuePath)
+        if !dropCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+          structBuffer += "  \(dropCode)\n"
+        }
+      }
+    }
+    structBuffer += "  free(env);\n"
+    structBuffer += "}\n"
     
     // Add to Lambda env structs buffer
     lambdaEnvStructs += structBuffer

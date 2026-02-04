@@ -50,6 +50,7 @@ class IntegrationTests: XCTestCase {
     func test_control_flow() throws { try runCase(named: "control_flow.koral") }
     func test_deref_assignment() throws { try runCase(named: "deref_assignment.koral") }
     func test_drop_test() throws { try runCase(named: "drop_test.koral") }
+    func test_expression_statement_drop() throws { try runCase(named: "expression_statement_drop.koral") }
     func test_duration_basic() throws { try runCase(named: "duration_basic.koral") }
     func test_duration_sleep() throws { try runCase(named: "duration_sleep.koral") }
     func test_duration_ffi_test() throws { try runCase(named: "duration_ffi_test.koral") }
@@ -94,6 +95,7 @@ class IntegrationTests: XCTestCase {
     func test_lambda_error_inference_fail() throws { try runCase(named: "lambda_error_inference_fail.koral") }
     func test_lambda_error_type_mismatch() throws { try runCase(named: "lambda_error_type_mismatch.koral") }
     func test_lambda_higher_order() throws { try runCase(named: "lambda_higher_order.koral") }
+    func test_lambda_env_drop() throws { try runCase(named: "lambda_env_drop.koral") }
     func test_lambda_parsing_test() throws { try runCase(named: "lambda_parsing_test.koral") }
     func test_lambda_type_inference() throws { try runCase(named: "lambda_type_inference.koral") }
     func test_lambda_with_generics() throws { try runCase(named: "lambda_with_generics.koral") }
@@ -147,6 +149,7 @@ class IntegrationTests: XCTestCase {
     func test_struct_with_ref() throws { try runCase(named: "struct_with_ref.koral") }
     func test_structs() throws { try runCase(named: "structs.koral") }
     func test_subscript_test() throws { try runCase(named: "subscript_test.koral") }
+    func test_closure_variable_drop() throws { try runCase(named: "closure_variable_drop.koral") }
     func test_trait_cannot_as_type() throws { try runCase(named: "trait_cannot_as_type.koral") }
     func test_trait_constraint_validation() throws { try runCase(named: "trait_constraint_validation.koral") }
     func test_trait_equatable() throws { try runCase(named: "trait_equatable.koral") }
