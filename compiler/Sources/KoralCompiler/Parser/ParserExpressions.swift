@@ -241,12 +241,12 @@ extension Parser {
       let startSpan = currentSpan
       try match(.minus)
       switch currentToken {
-      case .integer(let num, let suffix):
-        try match(.integer(num, suffix))
-        return .integerLiteral("-\(num)", suffix)
-      case .float(let num, let suffix):
-        try match(.float(num, suffix))
-        return .floatLiteral("-\(num)", suffix)
+      case .integer(let num):
+        try match(.integer(num))
+        return .integerLiteral("-\(num)")
+      case .float(let num):
+        try match(.float(num))
+        return .floatLiteral("-\(num)")
       case .duration(let value, let unit):
         let span = currentSpan
         try match(.duration(value: value, unit: unit))
@@ -489,12 +489,12 @@ extension Parser {
     case .selfKeyword:
       try match(.selfKeyword)
       return .identifier("self")
-    case .integer(let num, let suffix):
-      try match(.integer(num, suffix))
-      return .integerLiteral(num, suffix)
-    case .float(let num, let suffix):
-      try match(.float(num, suffix))
-      return .floatLiteral(num, suffix)
+    case .integer(let num):
+      try match(.integer(num))
+      return .integerLiteral(num)
+    case .float(let num):
+      try match(.float(num))
+      return .floatLiteral(num)
     case .duration(let value, let unit):
       let span = currentSpan
       try match(.duration(value: value, unit: unit))

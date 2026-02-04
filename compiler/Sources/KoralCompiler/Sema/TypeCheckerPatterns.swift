@@ -11,52 +11,22 @@ extension TypeChecker {
     var bindings: [(String, Bool, Type)] = []
 
     switch pattern {
-    case .integerLiteral(let val, let suffix, _):
-      // Determine expected type from suffix or default to Int
-      let expectedType: Type
-      if let suffix = suffix {
-        switch suffix {
-        case .i: expectedType = .int
-        case .i8: expectedType = .int8
-        case .i16: expectedType = .int16
-        case .i32: expectedType = .int32
-        case .i64: expectedType = .int64
-        case .u: expectedType = .uint
-        case .u8: expectedType = .uint8
-        case .u16: expectedType = .uint16
-        case .u32: expectedType = .uint32
-        case .u64: expectedType = .uint64
-        case .f32, .f64:
-          throw SemanticError.typeMismatch(expected: "integer type", got: suffix.rawValue)
-        }
-      } else {
-        expectedType = .int
-      }
-      if subjectType != expectedType {
-        throw SemanticError.typeMismatch(expected: expectedType.description, got: subjectType.description)
+    case .integerLiteral(let val, _):
+      if !subjectType.isIntegerType {
+        throw SemanticError.typeMismatch(expected: "integer type", got: subjectType.description)
       }
       return (.integerLiteral(value: val), [])
       
-    case .negativeIntegerLiteral(let val, let suffix, let span):
+    case .negativeIntegerLiteral(let val, let span):
       // Negative integer literal pattern - verify subject is integer type
-      let expectedType: Type
-      if let suffix = suffix {
-        switch suffix {
-        case .i: expectedType = .int
-        case .i8: expectedType = .int8
-        case .i16: expectedType = .int16
-        case .i32: expectedType = .int32
-        case .i64: expectedType = .int64
-        case .u, .u8, .u16, .u32, .u64:
-          throw SemanticError(.generic("Negative integer literal cannot have unsigned suffix"), span: span)
-        case .f32, .f64:
-          throw SemanticError.typeMismatch(expected: "integer type", got: suffix.rawValue)
-        }
-      } else {
-        expectedType = .int
+      if !subjectType.isIntegerType {
+        throw SemanticError.typeMismatch(expected: "integer type", got: subjectType.description)
       }
-      if subjectType != expectedType {
-        throw SemanticError.typeMismatch(expected: expectedType.description, got: subjectType.description)
+      switch subjectType {
+      case .uint, .uint8, .uint16, .uint32, .uint64:
+        throw SemanticError(.generic("Negative integer literal cannot match unsigned type"), span: span)
+      default:
+        break
       }
       // Store as negative value string
       return (.integerLiteral(value: "-\(val)"), [])
@@ -169,7 +139,7 @@ extension TypeChecker {
         .unionCase(caseName: caseName, tagIndex: caseIndex, elements: typedSubPatterns), bindings
       )
       
-    case .comparisonPattern(let op, let value, let suffix, let span):
+    case .comparisonPattern(let op, let value, let span):
       // Comparison patterns only support integer types
       if !subjectType.isIntegerType {
         throw SemanticError(.generic(
@@ -190,28 +160,6 @@ extension TypeChecker {
           throw SemanticError(.generic("Invalid integer literal in comparison pattern: \(value)"), span: span)
         }
         intValue = parsed
-      }
-      
-      // Verify suffix matches subject type if provided
-      if let suffix = suffix {
-        let expectedType: Type
-        switch suffix {
-        case .i: expectedType = .int
-        case .i8: expectedType = .int8
-        case .i16: expectedType = .int16
-        case .i32: expectedType = .int32
-        case .i64: expectedType = .int64
-        case .u: expectedType = .uint
-        case .u8: expectedType = .uint8
-        case .u16: expectedType = .uint16
-        case .u32: expectedType = .uint32
-        case .u64: expectedType = .uint64
-        case .f32, .f64:
-          throw SemanticError(.generic("Comparison patterns do not support float types"), span: span)
-        }
-        if subjectType != expectedType {
-          throw SemanticError.typeMismatch(expected: expectedType.description, got: subjectType.description)
-        }
       }
       
       return (.comparisonPattern(operator: op, value: intValue), [])

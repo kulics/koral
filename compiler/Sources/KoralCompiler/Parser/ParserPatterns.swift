@@ -84,23 +84,23 @@ extension Parser {
         isNegative = true
       }
       
-      guard case .integer(let v, let suffix) = currentToken else {
+      guard case .integer(let v) = currentToken else {
         throw ParserError.unexpectedToken(span: currentSpan, got: "Comparison pattern requires integer literal")
       }
-      try match(.integer(v, suffix))
+      try match(.integer(v))
       
       let value = isNegative ? "-\(v)" : v
-      return .comparisonPattern(operator: op, value: value, suffix: suffix, span: startSpan)
+      return .comparisonPattern(operator: op, value: value, span: startSpan)
     }
     
     // Negative integer literal pattern: -n
     if currentToken === .minus {
       try match(.minus)
-      guard case .integer(let v, let suffix) = currentToken else {
+      guard case .integer(let v) = currentToken else {
         throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
       }
-      try match(.integer(v, suffix))
-      return .negativeIntegerLiteral(value: v, suffix: suffix, span: startSpan)
+      try match(.integer(v))
+      return .negativeIntegerLiteral(value: v, span: startSpan)
     }
     
     // Range pattern error - no longer supported
@@ -113,8 +113,8 @@ extension Parser {
     }
     
     // Integer literal pattern
-    if case .integer(let v, let suffix) = currentToken {
-      try match(.integer(v, suffix))
+    if case .integer(let v) = currentToken {
+      try match(.integer(v))
       
       // Check for range operator - error if found
       if currentToken === .range || currentToken === .rangeLess ||
@@ -126,7 +126,7 @@ extension Parser {
         )
       }
       
-      return .integerLiteral(value: v, suffix: suffix, span: startSpan)
+      return .integerLiteral(value: v, span: startSpan)
     }
     
     // Boolean literal pattern

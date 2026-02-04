@@ -51,9 +51,41 @@ extension TypeChecker {
     case .hours:
       let secs = try checkedMultiply(numValue, 3_600, span: span)
       return (secs, 0)
-    case .days:
-      let secs = try checkedMultiply(numValue, 86_400, span: span)
-      return (secs, 0)
+    }
+  }
+
+  private func isUnsignedIntegerType(_ type: Type) -> Bool {
+    switch type {
+    case .uint, .uint8, .uint16, .uint32, .uint64:
+      return true
+    default:
+      return false
+    }
+  }
+
+  private func tryOptimizeLiteralCast(
+    _ expr: ExpressionNode,
+    targetType: Type
+  ) throws -> TypedExpressionNode? {
+    switch expr {
+    case .integerLiteral(let value):
+      if isUnsignedIntegerType(targetType), value.hasPrefix("-") {
+        throw SemanticError(.generic("Cannot cast negative integer literal to unsigned type \(targetType.description)"), line: currentLine)
+      }
+      if isIntegerType(targetType) {
+        return .integerLiteral(value: value, type: targetType)
+      }
+      if isFloatType(targetType) {
+        return .floatLiteral(value: value, type: targetType)
+      }
+      return nil
+    case .floatLiteral(let value):
+      if isFloatType(targetType) {
+        return .floatLiteral(value: value, type: targetType)
+      }
+      return nil
+    default:
+      return nil
     }
   }
 
@@ -79,6 +111,11 @@ extension TypeChecker {
     switch expr {
     case .castExpression(let typeNode, let innerExpr):
       let targetType = try resolveTypeNode(typeNode)
+
+      if let optimized = try tryOptimizeLiteralCast(innerExpr, targetType: targetType) {
+        return optimized
+      }
+
       let typedInner = try inferTypedExpression(innerExpr)
 
       if !isValidExplicitCast(from: typedInner.type, to: targetType) {
@@ -92,49 +129,11 @@ extension TypeChecker {
       // Cast always produces an rvalue.
       return .castExpression(expression: typedInner, type: targetType)
 
-    case .integerLiteral(let value, let suffix):
-      let type: Type
-      if let suffix = suffix {
-        if value.hasPrefix("-") {
-          switch suffix {
-          case .u, .u8, .u16, .u32, .u64:
-            throw SemanticError(.generic("Negative integer literal cannot have unsigned suffix"), line: currentLine)
-          default:
-            break
-          }
-        }
-        switch suffix {
-        case .i: type = .int
-        case .i8: type = .int8
-        case .i16: type = .int16
-        case .i32: type = .int32
-        case .i64: type = .int64
-        case .u: type = .uint
-        case .u8: type = .uint8
-        case .u16: type = .uint16
-        case .u32: type = .uint32
-        case .u64: type = .uint64
-        case .f32, .f64:
-          throw SemanticError.typeMismatch(expected: "integer suffix", got: suffix.rawValue)
-        }
-      } else {
-        type = .int
-      }
-      return .integerLiteral(value: value, type: type)
+    case .integerLiteral(let value):
+      return .integerLiteral(value: value, type: .int)
 
-    case .floatLiteral(let value, let suffix):
-      let type: Type
-      if let suffix = suffix {
-        switch suffix {
-        case .f32: type = .float32
-        case .f64: type = .float64
-        case .i, .i8, .i16, .i32, .i64, .u, .u8, .u16, .u32, .u64:
-          throw SemanticError.typeMismatch(expected: "float suffix", got: suffix.rawValue)
-        }
-      } else {
-        type = .float64
-      }
-      return .floatLiteral(value: value, type: type)
+    case .floatLiteral(let value):
+      return .floatLiteral(value: value, type: .float64)
 
     case .durationLiteral(let value, let unit, let span):
       return try checkDurationLiteral(value: value, unit: unit, span: span)
@@ -4337,9 +4336,9 @@ extension TypeChecker {
       return .wildcard
     case .booleanLiteral(let value, _):
       return .booleanLiteral(value: value)
-    case .integerLiteral(let value, _, _):
+    case .integerLiteral(let value, _):
       return .integerLiteral(value: value)
-    case .negativeIntegerLiteral(let value, _, _):
+    case .negativeIntegerLiteral(let value, _):
       return .integerLiteral(value: "-\(value)")
     case .stringLiteral(let value, _):
       return .stringLiteral(value: value)
@@ -4348,7 +4347,7 @@ extension TypeChecker {
         try convertPatternToTypedPattern(elem, expectedType: .void)
       }
       return .unionCase(caseName: caseName, tagIndex: 0, elements: typedElements)
-    case .comparisonPattern(let op, let value, _, _):
+    case .comparisonPattern(let op, let value, _):
       let intValue: Int64
       if value.hasPrefix("-") {
         let positiveValue = String(value.dropFirst())
