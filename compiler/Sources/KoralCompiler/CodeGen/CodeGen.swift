@@ -340,6 +340,15 @@ public class CodeGen {
     escapeContext.registerVariable(name)
   }
 
+  func needsDrop(_ type: Type) -> Bool {
+    switch type {
+    case .structure, .union, .reference, .function:
+      return true
+    default:
+      return false
+    }
+  }
+
 
   public func generate() -> String {
     buffer = """
@@ -361,10 +370,11 @@ public class CodeGen {
       // Generic Ref type
       struct Ref { void* ptr; void* control; };
 
-      // Unified Closure type for all function types (16 bytes)
+      // Unified Closure type for all function types
       // fn: function pointer (with env as first param if env != NULL)
       // env: environment pointer (NULL for no-capture lambdas)
-      struct __koral_Closure { void* fn; void* env; };
+      // drop: environment destructor (NULL for no-capture lambdas)
+      struct __koral_Closure { void* fn; void* env; void (*drop)(void*); };
 
       typedef void (*Koral_Dtor)(void*);
 
@@ -393,22 +403,29 @@ public class CodeGen {
         }
       }
 
+      void __koral_closure_retain(struct __koral_Closure closure) {
+        if (!closure.env) return;
+        intptr_t* refcount = (intptr_t*)closure.env;
+        *refcount += 1;
+      }
+
+      void __koral_closure_release(struct __koral_Closure closure) {
+        if (!closure.env) return;
+        intptr_t* refcount = (intptr_t*)closure.env;
+        *refcount -= 1;
+        if (*refcount == 0) {
+          if (closure.drop) {
+            closure.drop(closure.env);
+          } else {
+            free(closure.env);
+          }
+        }
+      }
+
       """
 
     // 生成程序体
     generateProgram(ast)
-    
-    // Insert Lambda env structs after the runtime definitions
-    if !lambdaEnvStructs.isEmpty {
-      // Find the position after the runtime definitions (after __koral_release)
-      if let insertPos = buffer.range(of: "void __koral_release(void* raw_control)") {
-        // Find the end of __koral_release function
-        if let funcEnd = buffer.range(of: "}\n\n", range: insertPos.upperBound..<buffer.endIndex) {
-          let insertIndex = funcEnd.upperBound
-          buffer.insert(contentsOf: lambdaEnvStructs, at: insertIndex)
-        }
-      }
-    }
     
     return buffer
   }
@@ -867,6 +884,8 @@ public class CodeGen {
     // Save Lambda state before generating function body
     let savedLambdaFunctions = lambdaFunctions
     lambdaFunctions = ""
+    let savedLambdaEnvStructs = lambdaEnvStructs
+    lambdaEnvStructs = ""
     
     let returnType = getFunctionReturnType(identifier.type)
     let paramList = params.map { getParamCDecl($0) }.joined(separator: ", ")
@@ -884,7 +903,12 @@ public class CodeGen {
     let functionCode = buffer
     buffer = savedBuffer
     
+    let envStructs = lambdaEnvStructs
+
     // Insert Lambda functions before this function, then the function itself
+    if !envStructs.isEmpty {
+      buffer += envStructs
+    }
     if !lambdaFunctions.isEmpty {
       buffer += lambdaFunctions
     }
@@ -892,6 +916,7 @@ public class CodeGen {
     
     // Restore Lambda state
     lambdaFunctions = savedLambdaFunctions
+    lambdaEnvStructs = savedLambdaEnvStructs
   }
 
   // 生成参数的 C 声明：类型若为 reference(T) 则 getCType 返回 T*
@@ -1942,6 +1967,22 @@ public class CodeGen {
             buffer += "__koral_retain(\(cIdentifier(for: identifier)).control);\n"
           }
           registerVariable(cIdentifier(for: identifier), identifier.type)
+        } else if case .function = identifier.type {
+          addIndent()
+          buffer += "\(cTypeName(identifier.type)) \(cIdentifier(for: identifier));\n"
+          if value.valueCategory == .lvalue {
+            let copyResult = nextTemp()
+            addIndent()
+            buffer += "\(cTypeName(identifier.type)) \(copyResult) = \(valueResult);\n"
+            addIndent()
+            buffer += "__koral_closure_retain(\(copyResult));\n"
+            addIndent()
+            buffer += "\(cIdentifier(for: identifier)) = \(copyResult);\n"
+          } else {
+            addIndent()
+            buffer += "\(cIdentifier(for: identifier)) = \(valueResult);\n"
+          }
+          registerVariable(cIdentifier(for: identifier), identifier.type)
         } else {
           addIndent()
           buffer += "\(cTypeName(identifier.type)) \(cIdentifier(for: identifier)) = \(valueResult);\n"
@@ -2011,7 +2052,10 @@ public class CodeGen {
       }
       
     case .expression(let expr):
-      _ = generateExpressionSSA(expr)
+      let result = generateExpressionSSA(expr)
+      if expr.valueCategory == .rvalue && needsDrop(expr.type) && !result.isEmpty {
+        appendDropStatement(for: expr.type, value: result, indent: indent)
+      }
 
     case .return(let value):
       if let value = value {
@@ -2097,6 +2141,9 @@ public class CodeGen {
 
   func appendCopyAssignment(for type: Type, source: String, dest: String, indent: String = "    ") {
     switch type {
+    case .function:
+      appendToBuffer("\(indent)\(dest) = \(source);\n")
+      appendToBuffer("\(indent)__koral_closure_retain(\(dest));\n")
     case .structure(let defId):
       if context.isForeignStruct(defId) {
         appendToBuffer("\(indent)\(dest) = \(source);\n")
@@ -2119,6 +2166,8 @@ public class CodeGen {
 
   func appendDropStatement(for type: Type, value: String, indent: String = "    ") {
     switch type {
+    case .function:
+      appendToBuffer("\(indent)__koral_closure_release(\(value));\n")
     case .structure(let defId):
       if context.isForeignStruct(defId) {
         return
