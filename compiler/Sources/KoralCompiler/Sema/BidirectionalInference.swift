@@ -126,12 +126,12 @@ public class BidirectionalInference {
     public func synthesize(_ expr: ExpressionNode, span: SourceSpan) -> Type {
         switch expr {
         // 整数字面量
-        case .integerLiteral(_, let suffix):
-            return synthesizeIntegerLiteral(suffix: suffix, span: span)
+        case .integerLiteral:
+            return synthesizeIntegerLiteral(span: span)
             
         // 浮点字面量
-        case .floatLiteral(_, let suffix):
-            return synthesizeFloatLiteral(suffix: suffix, span: span)
+        case .floatLiteral:
+            return synthesizeFloatLiteral(span: span)
 
         // Duration 字面量
         case .durationLiteral:
@@ -218,12 +218,12 @@ public class BidirectionalInference {
     public func check(_ expr: ExpressionNode, expected: Type, span: SourceSpan) -> Type {
         switch expr {
         // 整数字面量可以检查为任何整数类型
-        case .integerLiteral(_, let suffix):
-            return checkIntegerLiteral(suffix: suffix, expected: expected, span: span)
+        case .integerLiteral:
+            return checkIntegerLiteral(expected: expected, span: span)
             
         // 浮点字面量可以检查为任何浮点类型
-        case .floatLiteral(_, let suffix):
-            return checkFloatLiteral(suffix: suffix, expected: expected, span: span)
+        case .floatLiteral:
+            return checkFloatLiteral(expected: expected, span: span)
             
         // Lambda 表达式检查为函数类型
         case .lambdaExpression(let params, let returnType, let body, let lambdaSpan):
@@ -240,25 +240,15 @@ public class BidirectionalInference {
     // MARK: - Synthesis Helpers
     
     /// 合成整数字面量类型
-    private func synthesizeIntegerLiteral(suffix: NumericSuffix?, span: SourceSpan) -> Type {
-        if let suffix = suffix {
-            return integerTypeFromSuffix(suffix)
-        }
-        // 无后缀时，创建类型变量并添加默认约束
-        let tv = freshTypeVariable(name: "int_lit", span: span)
-        addDefaultIntConstraint(tv, span: span)
-        return .typeVariable(tv)
+    private func synthesizeIntegerLiteral(span: SourceSpan) -> Type {
+        let _ = span
+        return .int
     }
     
     /// 合成浮点字面量类型
-    private func synthesizeFloatLiteral(suffix: NumericSuffix?, span: SourceSpan) -> Type {
-        if let suffix = suffix {
-            return floatTypeFromSuffix(suffix)
-        }
-        // 无后缀时，创建类型变量并添加默认约束
-        let tv = freshTypeVariable(name: "float_lit", span: span)
-        addDefaultFloatConstraint(tv, span: span)
-        return .typeVariable(tv)
+    private func synthesizeFloatLiteral(span: SourceSpan) -> Type {
+        let _ = span
+        return .float64
     }
     
     /// 合成 Lambda 表达式类型
@@ -361,57 +351,24 @@ public class BidirectionalInference {
     // MARK: - Check Helpers
     
     /// 检查整数字面量
-    private func checkIntegerLiteral(suffix: NumericSuffix?, expected: Type, span: SourceSpan) -> Type {
-        if let suffix = suffix {
-            let literalType = integerTypeFromSuffix(suffix)
-            addEqualConstraint(literalType, expected, span: span)
-            return expected
-        }
-        
-        // 检查期望类型是否为整数类型
+    private func checkIntegerLiteral(expected: Type, span: SourceSpan) -> Type {
+        let _ = span
         if expected.isIntegerType {
             return expected
         }
-        
-        // 期望类型是类型变量，添加约束
-        if case .typeVariable = expected {
-            let tv = freshTypeVariable(name: "int_lit", span: span)
-            addDefaultIntConstraint(tv, span: span)
-            addEqualConstraint(.typeVariable(tv), expected, span: span)
-            return expected
-        }
-        
-        // 其他情况，合成后添加约束
-        let synthesized = synthesizeIntegerLiteral(suffix: suffix, span: span)
-        addEqualConstraint(synthesized, expected, span: span)
-        return expected
-    }
-    
-    /// 检查浮点字面量
-    private func checkFloatLiteral(suffix: NumericSuffix?, expected: Type, span: SourceSpan) -> Type {
-        if let suffix = suffix {
-            let literalType = floatTypeFromSuffix(suffix)
-            addEqualConstraint(literalType, expected, span: span)
-            return expected
-        }
-        
-        // 检查期望类型是否为浮点类型
         if isFloatType(expected) {
             return expected
         }
-        
-        // 期望类型是类型变量，添加约束
-        if case .typeVariable = expected {
-            let tv = freshTypeVariable(name: "float_lit", span: span)
-            addDefaultFloatConstraint(tv, span: span)
-            addEqualConstraint(.typeVariable(tv), expected, span: span)
+        return .int
+    }
+    
+    /// 检查浮点字面量
+    private func checkFloatLiteral(expected: Type, span: SourceSpan) -> Type {
+        let _ = span
+        if isFloatType(expected) {
             return expected
         }
-        
-        // 其他情况，合成后添加约束
-        let synthesized = synthesizeFloatLiteral(suffix: suffix, span: span)
-        addEqualConstraint(synthesized, expected, span: span)
-        return expected
+        return .float64
     }
     
     /// 检查 Lambda 表达式
@@ -550,32 +507,6 @@ public class BidirectionalInference {
     
     // MARK: - Helper Functions
     
-    /// 从后缀获取整数类型
-    private func integerTypeFromSuffix(_ suffix: NumericSuffix) -> Type {
-        switch suffix {
-        case .i: return .int
-        case .i8: return .int8
-        case .i16: return .int16
-        case .i32: return .int32
-        case .i64: return .int64
-        case .u: return .uint
-        case .u8: return .uint8
-        case .u16: return .uint16
-        case .u32: return .uint32
-        case .u64: return .uint64
-        case .f32: return .float32
-        case .f64: return .float64
-        }
-    }
-    
-    /// 从后缀获取浮点类型
-    private func floatTypeFromSuffix(_ suffix: NumericSuffix) -> Type {
-        switch suffix {
-        case .f32: return .float32
-        case .f64: return .float64
-        default: return .float64
-        }
-    }
     
     /// 检查是否为浮点类型
     private func isFloatType(_ type: Type) -> Bool {

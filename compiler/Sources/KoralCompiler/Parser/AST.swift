@@ -394,8 +394,8 @@ public enum ComparisonPatternOperator {
   case lessEqual     // <=
 }
 public indirect enum ExpressionNode {
-  case integerLiteral(String, NumericSuffix?)  // Store as string with optional suffix
-  case floatLiteral(String, NumericSuffix?)    // Store as string with optional suffix
+  case integerLiteral(String)  // Store as string
+  case floatLiteral(String)    // Store as string
   case durationLiteral(value: String, unit: DurationUnit, span: SourceSpan)
   case stringLiteral(String)
   case booleanLiteral(Bool)
@@ -476,9 +476,9 @@ public indirect enum ExpressionNode {
 }
 public indirect enum PatternNode: CustomStringConvertible {
   case booleanLiteral(value: Bool, span: SourceSpan)
-  case integerLiteral(value: String, suffix: NumericSuffix?, span: SourceSpan)  // Store as string with optional suffix
+  case integerLiteral(value: String, span: SourceSpan)  // Store as string
   /// Negative integer literal pattern for matching negative integers (e.g., -5)
-  case negativeIntegerLiteral(value: String, suffix: NumericSuffix?, span: SourceSpan)
+  case negativeIntegerLiteral(value: String, span: SourceSpan)
   case stringLiteral(value: String, span: SourceSpan)
   case wildcard(span: SourceSpan)
   case variable(name: String, mutable: Bool, span: SourceSpan)
@@ -486,8 +486,7 @@ public indirect enum PatternNode: CustomStringConvertible {
   /// Comparison pattern for matching values using comparison operators (e.g., > 5, <= 10)
   /// - operator: The comparison operator (>, <, >=, <=)
   /// - value: The integer literal value to compare against (stored as string)
-  /// - suffix: Optional numeric suffix for the integer literal
-  case comparisonPattern(operator: ComparisonPatternOperator, value: String, suffix: NumericSuffix?, span: SourceSpan)
+  case comparisonPattern(operator: ComparisonPatternOperator, value: String, span: SourceSpan)
   /// And pattern for combining two patterns with logical AND
   case andPattern(left: PatternNode, right: PatternNode, span: SourceSpan)
   /// Or pattern for combining two patterns with logical OR
@@ -498,15 +497,9 @@ public indirect enum PatternNode: CustomStringConvertible {
   public var description: String {
     switch self {
     case .booleanLiteral(let value, _): return "\(value)"
-    case .integerLiteral(let value, let suffix, _): 
-      if let suffix = suffix {
-        return "\(value)\(suffix)"
-      }
+    case .integerLiteral(let value, _):
       return "\(value)"
-    case .negativeIntegerLiteral(let value, let suffix, _):
-      if let suffix = suffix {
-        return "-\(value)\(suffix)"
-      }
+    case .negativeIntegerLiteral(let value, _):
       return "-\(value)"
     case .stringLiteral(let value, _): return "\"\(value)\""
     case .wildcard: return "_"
@@ -514,16 +507,13 @@ public indirect enum PatternNode: CustomStringConvertible {
     case .unionCase(let name, let elements, _):
       let args = elements.map { $0.description }.joined(separator: ", ")
       return ".\(name)(\(args))"
-    case .comparisonPattern(let op, let value, let suffix, _):
+    case .comparisonPattern(let op, let value, _):
       let opStr: String
       switch op {
       case .greater: opStr = ">"
       case .less: opStr = "<"
       case .greaterEqual: opStr = ">="
       case .lessEqual: opStr = "<="
-      }
-      if let suffix = suffix {
-        return "\(opStr) \(value)\(suffix)"
       }
       return "\(opStr) \(value)"
     case .andPattern(let left, let right, _):
@@ -539,13 +529,13 @@ public indirect enum PatternNode: CustomStringConvertible {
   public var span: SourceSpan {
     switch self {
     case .booleanLiteral(_, let span): return span
-    case .integerLiteral(_, _, let span): return span
-    case .negativeIntegerLiteral(_, _, let span): return span
+    case .integerLiteral(_, let span): return span
+    case .negativeIntegerLiteral(_, let span): return span
     case .stringLiteral(_, let span): return span
     case .wildcard(let span): return span
     case .variable(_, _, let span): return span
     case .unionCase(_, _, let span): return span
-    case .comparisonPattern(_, _, _, let span): return span
+    case .comparisonPattern(_, _, let span): return span
     case .andPattern(_, _, let span): return span
     case .orPattern(_, _, let span): return span
     case .notPattern(_, let span): return span
