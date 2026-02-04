@@ -502,6 +502,10 @@ extension Parser {
     case .string(let str):
       try match(.string(str))
       return .stringLiteral(str)
+    case .interpolatedString(let parts):
+      let span = currentSpan
+      try match(.interpolatedString(parts: parts))
+      return try parseInterpolatedString(parts, span: span)
     case .bool(let value):
       try match(.bool(value))
       return .booleanLiteral(value)
@@ -541,6 +545,80 @@ extension Parser {
         expected: "number, identifier, boolean literal, block expression, or generic instantiation"
       )
     }
+  }
+
+  private func parseInterpolatedString(
+    _ parts: [InterpolatedStringPart],
+    span: SourceSpan
+  ) throws -> ExpressionNode {
+    var resultParts: [InterpolatedPart] = []
+    var index = 0
+    var containsInterpolation = false
+
+    while index < parts.count {
+      switch parts[index] {
+      case .stringPart(let value):
+        resultParts.append(.literal(value))
+        index += 1
+
+      case .interpolationStart:
+        containsInterpolation = true
+        index += 1
+        var exprSource = ""
+        while index < parts.count {
+          switch parts[index] {
+          case .interpolationEnd:
+            break
+          case .stringPart(let value):
+            exprSource.append(value)
+            index += 1
+            continue
+          case .interpolationStart:
+            throw ParserError.unexpectedToken(span: span, got: "\\(", expected: "expression")
+          }
+          break
+        }
+
+        if index >= parts.count {
+          throw ParserError.unexpectedEndOfFile(span: span)
+        }
+
+        if exprSource.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+          throw ParserError.emptyInterpolationExpression(span: span)
+        }
+
+        let expr = try parseInterpolatedExpression(exprSource)
+        resultParts.append(.expression(expr))
+
+        if case .interpolationEnd = parts[index] {
+          index += 1
+        }
+
+      case .interpolationEnd:
+        throw ParserError.unexpectedToken(span: span, got: ")", expected: "expression")
+      }
+    }
+
+    if resultParts.count == 1, !containsInterpolation, case .literal(let str) = resultParts[0] {
+      return .stringLiteral(str)
+    }
+
+    return .interpolatedString(parts: resultParts, span: span)
+  }
+
+  private func parseInterpolatedExpression(_ source: String) throws -> ExpressionNode {
+    let lexer = Lexer(input: source)
+    let parser = Parser(lexer: lexer)
+    parser.currentToken = try parser.lexer.getNextToken()
+    let expr = try parser.expression()
+    if parser.currentToken !== .eof {
+      throw ParserError.unexpectedToken(
+        span: parser.currentSpan,
+        got: parser.currentToken.description,
+        expected: "end of interpolation"
+      )
+    }
+    return expr
   }
 
   

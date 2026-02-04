@@ -393,11 +393,18 @@ public enum ComparisonPatternOperator {
   case greaterEqual  // >=
   case lessEqual     // <=
 }
+
+/// Interpolated string parts
+public enum InterpolatedPart {
+  case literal(String)
+  case expression(ExpressionNode)
+}
 public indirect enum ExpressionNode {
   case integerLiteral(String)  // Store as string
   case floatLiteral(String)    // Store as string
   case durationLiteral(value: String, unit: DurationUnit, span: SourceSpan)
   case stringLiteral(String)
+  case interpolatedString(parts: [InterpolatedPart], span: SourceSpan)
   case booleanLiteral(Bool)
   case castExpression(type: TypeNode, expression: ExpressionNode)
   case arithmeticExpression(

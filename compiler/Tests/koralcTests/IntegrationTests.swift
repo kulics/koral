@@ -141,6 +141,9 @@ class IntegrationTests: XCTestCase {
     func test_stream_sum_product_average() throws { try runCase(named: "stream_sum_product_average.koral") }
     func test_string() throws { try runCase(named: "string.koral") }
     func test_string_methods() throws { try runCase(named: "string_methods.koral") }
+    func test_string_interpolation() throws { try runCase(named: "string_interpolation.koral") }
+    func test_string_interpolation_error_empty() throws { try runCase(named: "string_interpolation_error_empty.koral") }
+    func test_string_interpolation_error_unterminated() throws { try runCase(named: "string_interpolation_error_unterminated.koral") }
     func test_struct_with_ref() throws { try runCase(named: "struct_with_ref.koral") }
     func test_structs() throws { try runCase(named: "structs.koral") }
     func test_subscript_test() throws { try runCase(named: "subscript_test.koral") }

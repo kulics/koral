@@ -144,6 +144,9 @@ public class BidirectionalInference {
         // 字符串字面量
         case .stringLiteral:
             return lookupType(name: "String") ?? .genericStruct(template: "String", args: [])
+
+        case .interpolatedString:
+            return lookupType(name: "String") ?? .genericStruct(template: "String", args: [])
             
         // 变量引用
         case .identifier(let name):

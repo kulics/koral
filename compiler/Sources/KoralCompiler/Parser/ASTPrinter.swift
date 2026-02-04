@@ -257,6 +257,21 @@ public func printAST(_ node: ASTNode) {
       print("\(indent)DurationLiteral: \(value)\(unit)")
     case .stringLiteral(let str):
       print("\(indent)StringLiteral: \(str)")
+    case .interpolatedString(let parts, _):
+      print("\(indent)InterpolatedString:")
+      withIndent {
+        for part in parts {
+          switch part {
+          case .literal(let value):
+            print("\(indent)Literal: \(value)")
+          case .expression(let expr):
+            print("\(indent)Expression:")
+            withIndent {
+              printExpression(expr)
+            }
+          }
+        }
+      }
     case .booleanLiteral(let value):
       print("\(indent)BoolLiteral: \(value)")
     case .castExpression(let type, let expr):

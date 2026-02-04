@@ -129,6 +129,13 @@ extension CodeGen {
     switch expr {
     case .integerLiteral, .floatLiteral, .durationLiteral, .stringLiteral, .booleanLiteral:
       break
+
+    case .interpolatedString(let parts, _):
+      for part in parts {
+        if case .expression(let expr) = part {
+          validateExpression(expr, context: "\(context) -> interpolated part")
+        }
+      }
       
     case .variable(let identifier):
       let name = self.context.getName(identifier.defId) ?? "<unknown>"

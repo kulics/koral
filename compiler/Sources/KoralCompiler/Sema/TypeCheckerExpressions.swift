@@ -141,6 +141,10 @@ extension TypeChecker {
     case .stringLiteral(let value):
       return .stringLiteral(value: value, type: builtinStringType())
 
+    case .interpolatedString(let parts, let span):
+      let typedParts = try typeCheckInterpolatedParts(parts, span: span)
+      return try lowerInterpolatedString(parts: typedParts, span: span)
+
     case .booleanLiteral(let value):
       return .booleanLiteral(value: value, type: .bool)
 
@@ -3933,6 +3937,82 @@ extension TypeChecker {
       return true
     }
     return false
+  }
+
+  private func typeCheckInterpolatedParts(
+    _ parts: [InterpolatedPart],
+    span: SourceSpan
+  ) throws -> [TypedInterpolatedPart] {
+    var typedParts: [TypedInterpolatedPart] = []
+
+    for part in parts {
+      switch part {
+      case .literal(let value):
+        typedParts.append(.literal(value))
+      case .expression(let expr):
+        let typedExpr = try inferTypedExpression(expr)
+        if !isStringType(typedExpr.type) {
+          _ = try buildToStringExpression(typedExpr, span: span)
+        }
+        typedParts.append(.expression(typedExpr))
+      }
+    }
+
+    return typedParts
+  }
+
+  private func lowerInterpolatedString(
+    parts: [TypedInterpolatedPart],
+    span: SourceSpan
+  ) throws -> TypedExpressionNode {
+    guard !parts.isEmpty else {
+      return .stringLiteral(value: "", type: builtinStringType())
+    }
+
+    var result = try convertInterpolatedPartToString(parts[0], span: span)
+
+    for part in parts.dropFirst() {
+      let rhs = try convertInterpolatedPartToString(part, span: span)
+      result = try buildArithmeticExpression(op: .plus, lhs: result, rhs: rhs)
+    }
+
+    return result
+  }
+
+  private func convertInterpolatedPartToString(
+    _ part: TypedInterpolatedPart,
+    span: SourceSpan
+  ) throws -> TypedExpressionNode {
+    switch part {
+    case .literal(let value):
+      return .stringLiteral(value: value, type: builtinStringType())
+    case .expression(let expr):
+      return try buildToStringExpression(expr, span: span)
+    }
+  }
+
+  private func buildToStringExpression(
+    _ expr: TypedExpressionNode,
+    span: SourceSpan
+  ) throws -> TypedExpressionNode {
+    if isStringType(expr.type) {
+      return expr
+    }
+
+    if let call = try buildOperatorMethodCall(
+      base: expr,
+      methodName: "to_string",
+      traitName: "ToString",
+      requiredTraitArgs: nil,
+      arguments: []
+    ) {
+      return call
+    }
+
+    throw SemanticError(
+      .generic("Type '\(expr.type)' does not implement ToString trait"),
+      line: span.start.line
+    )
   }
 }
 

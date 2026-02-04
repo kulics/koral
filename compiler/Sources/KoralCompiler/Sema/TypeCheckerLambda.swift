@@ -130,6 +130,13 @@ extension TypeChecker {
     switch expr {
     case .integerLiteral, .floatLiteral, .durationLiteral, .stringLiteral, .booleanLiteral, .genericInstantiation:
       return
+    case .interpolatedString(let parts, _):
+      for part in parts {
+        if case .expression(let inner) = part {
+          try collectCapturedVariables(expr: inner, paramNames: paramNames, captures: &captures)
+        }
+      }
+      return
     case .identifier(let name):
       // Skip if it's a parameter
       if paramNames.contains(name) { return }

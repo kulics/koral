@@ -965,6 +965,9 @@ public class CodeGen {
       buffer += "\(cTypeName(type)) \(result) = \(fromBytesMethod)((uint8_t*)\(bytesVar), \(utf8Bytes.count));\n"
       return result
 
+    case .interpolatedString:
+      fatalError("Interpolated strings must be lowered before code generation")
+
     case .booleanLiteral(let value, _):
       return value ? "1" : "0"
 

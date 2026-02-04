@@ -68,6 +68,7 @@ public enum ParserError: Error {
   case foreignFunctionNoBody(span: SourceSpan)
   case foreignTypeNoBody(span: SourceSpan)
   case foreignFunctionNoGenerics(span: SourceSpan)
+  case emptyInterpolationExpression(span: SourceSpan)
   
   /// The source span where the error occurred
   public var span: SourceSpan {
@@ -89,6 +90,7 @@ public enum ParserError: Error {
     case .foreignFunctionNoBody(let span): return span
     case .foreignTypeNoBody(let span): return span
     case .foreignFunctionNoGenerics(let span): return span
+    case .emptyInterpolationExpression(let span): return span
     }
   }
   
@@ -137,6 +139,8 @@ public enum ParserError: Error {
       return "foreign type cannot have a body"
     case .foreignFunctionNoGenerics:
       return "foreign function does not support generics"
+    case .emptyInterpolationExpression:
+      return "empty interpolation expression"
     }
   }
 }
