@@ -268,6 +268,12 @@ extension TypeChecker {
         try collectCapturedVariables(expr: arg, paramNames: paramNames, captures: &captures)
       }
       
+    case .implicitMemberExpression(_, let arguments, _):
+      // Implicit member expression - collect from arguments
+      for arg in arguments {
+        try collectCapturedVariables(expr: arg, paramNames: paramNames, captures: &captures)
+      }
+      
     }
   }
   

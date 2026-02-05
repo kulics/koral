@@ -608,6 +608,19 @@ public func printAST(_ node: ASTNode) {
           printExpression(body)
         }
       }
+      
+    case .implicitMemberExpression(let memberName, let arguments, _):
+      print("\(indent)ImplicitMemberExpression: .\(memberName)")
+      if !arguments.isEmpty {
+        print("\(indent)  Arguments:")
+        withIndent {
+          withIndent {
+            for arg in arguments {
+              printExpression(arg)
+            }
+          }
+        }
+      }
     }
   }
 

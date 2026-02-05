@@ -107,7 +107,11 @@ extension TypeChecker {
   // MARK: - Main Expression Type Inference
   
   /// 新增用于返回带类型的表达式的类型推导函数
-  func inferTypedExpression(_ expr: ExpressionNode) throws -> TypedExpressionNode {
+  /// - Parameters:
+  ///   - expr: 要推导类型的表达式节点
+  ///   - expectedType: 可选的期望类型，用于隐式成员表达式等需要上下文类型的场景
+  /// - Returns: 带类型信息的表达式节点
+  func inferTypedExpression(_ expr: ExpressionNode, expectedType: Type? = nil) throws -> TypedExpressionNode {
     switch expr {
     case .castExpression(let typeNode, let innerExpr):
       let targetType = try resolveTypeNode(typeNode)
@@ -167,7 +171,8 @@ extension TypeChecker {
               try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
             }
           }
-          let typedBody = try inferTypedExpression(c.body)
+          // Pass expected type for implicit member expression support
+          let typedBody = try inferTypedExpression(c.body, expectedType: expectedType)
           if let rt = resultType {
             if typedBody.type != .never {
               if rt == .never {
@@ -431,10 +436,11 @@ extension TypeChecker {
         throw SemanticError.typeMismatch(
           expected: "Bool", got: typedCondition.type.description)
       }
-      let typedThen = try inferTypedExpression(thenBranch)
+      // Pass expected type to branches for implicit member expression support
+      let typedThen = try inferTypedExpression(thenBranch, expectedType: expectedType)
 
       if let elseExpr = elseBranch {
-        let typedElse = try inferTypedExpression(elseExpr)
+        let typedElse = try inferTypedExpression(elseExpr, expectedType: expectedType)
 
         let resultType: Type
         if typedThen.type == typedElse.type {
@@ -472,12 +478,14 @@ extension TypeChecker {
             try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
           }
         }
-        return try inferTypedExpression(thenBranch)
+        // Pass expected type for implicit member expression support
+        return try inferTypedExpression(thenBranch, expectedType: expectedType)
       }
       
       // Type check the else branch (without bindings)
       if let elseExpr = elseBranch {
-        let typedElse = try inferTypedExpression(elseExpr)
+        // Pass expected type for implicit member expression support
+        let typedElse = try inferTypedExpression(elseExpr, expectedType: expectedType)
         
         let resultType: Type
         if typedThen.type == typedElse.type {
@@ -705,7 +713,364 @@ extension TypeChecker {
       throw SemanticError.invalidOperation(op: "use type as value", type1: base, type2: "")
       
     case .lambdaExpression(let parameters, let returnType, let body, _):
-      return try inferLambdaExpression(parameters: parameters, returnType: returnType, body: body, expectedType: nil)
+      return try inferLambdaExpression(parameters: parameters, returnType: returnType, body: body, expectedType: expectedType)
+      
+    case .implicitMemberExpression(let memberName, let arguments, let span):
+      // Implicit member expression requires an expected type from context.
+      return try inferImplicitMemberExpression(
+        memberName: memberName,
+        arguments: arguments,
+        expectedType: expectedType,
+        span: span
+      )
+    }
+  }
+  
+  // MARK: - Implicit Member Expression Inference
+  
+  /// Infers the type of an implicit member expression (e.g., `.Some(42)`, `.new()`)
+  /// - Parameters:
+  ///   - memberName: The member name (union case or static method)
+  ///   - arguments: The arguments to the member
+  ///   - expectedType: The expected type from context (required)
+  ///   - span: Source location for error reporting
+  /// - Returns: A typed expression node (unionConstruction or staticMethodCall)
+  private func inferImplicitMemberExpression(
+    memberName: String,
+    arguments: [ExpressionNode],
+    expectedType: Type?,
+    span: SourceSpan
+  ) throws -> TypedExpressionNode {
+    // 1. Check if we have an expected type
+    guard let expected = expectedType else {
+      throw SemanticError(
+        .generic("Cannot use implicit member expression '.\(memberName)' without a known type context"),
+        line: span.start.line
+      )
+    }
+    
+    // 2. Try to resolve as union case first
+    if let result = try resolveImplicitUnionCase(
+      memberName: memberName,
+      arguments: arguments,
+      expectedType: expected,
+      span: span
+    ) {
+      return result
+    }
+    
+    // 3. Try to resolve as static method
+    if let result = try resolveImplicitStaticMethod(
+      memberName: memberName,
+      arguments: arguments,
+      expectedType: expected,
+      span: span
+    ) {
+      return result
+    }
+    
+    // 4. Neither worked - report error
+    throw SemanticError(
+      .generic("Member '\(memberName)' not found on type '\(expected.description)'"),
+      line: span.start.line
+    )
+  }
+  
+  /// Resolves an implicit member expression as a union case construction
+  private func resolveImplicitUnionCase(
+    memberName: String,
+    arguments: [ExpressionNode],
+    expectedType: Type,
+    span: SourceSpan
+  ) throws -> TypedExpressionNode? {
+    // Get union cases based on the expected type
+    let cases: [UnionCase]?
+    
+    switch expectedType {
+    case .union(let defId):
+      cases = context.getUnionCases(defId)
+      
+    case .genericUnion(let templateName, let typeArgs):
+      // Look up the union template and substitute type parameters
+      guard let template = currentScope.lookupGenericUnionTemplate(templateName) else {
+        return nil
+      }
+      
+      // Create substitution map
+      var substitution: [String: Type] = [:]
+      for (i, param) in template.typeParameters.enumerated() {
+        if i < typeArgs.count {
+          substitution[param.name] = typeArgs[i]
+        }
+      }
+      
+      // Resolve case parameter types with substitution
+      let resolvedCases: [UnionCase] = try template.cases.map { caseDef in
+        let resolvedParams: [(name: String, type: Type)] = try caseDef.parameters.map { param in
+          let resolvedType = try withNewScope {
+            for (paramName, paramType) in substitution {
+              try currentScope.defineType(paramName, type: paramType)
+            }
+            return try resolveTypeNode(param.type)
+          }
+          return (name: param.name, type: resolvedType)
+        }
+        return UnionCase(name: caseDef.name, parameters: resolvedParams)
+      }
+      cases = resolvedCases
+      
+    default:
+      return nil
+    }
+    
+    guard let unionCases = cases else {
+      return nil
+    }
+    
+    // Find the matching case
+    guard let caseInfo = unionCases.first(where: { $0.name == memberName }) else {
+      return nil
+    }
+    
+    // Check argument count
+    if arguments.count != caseInfo.parameters.count {
+      throw SemanticError(
+        .generic("Union case '\(memberName)' expects \(caseInfo.parameters.count) argument(s), got \(arguments.count)"),
+        line: span.start.line
+      )
+    }
+    
+    // Type check arguments
+    var typedArgs: [TypedExpressionNode] = []
+    for (arg, param) in zip(arguments, caseInfo.parameters) {
+      var typedArg = try inferTypedExpression(arg, expectedType: param.type)
+      typedArg = try coerceLiteral(typedArg, to: param.type)
+      if typedArg.type != param.type {
+        throw SemanticError.typeMismatch(
+          expected: param.type.description, got: typedArg.type.description)
+      }
+      typedArgs.append(typedArg)
+    }
+    
+    // Generate union construction
+    return .unionConstruction(type: expectedType, caseName: memberName, arguments: typedArgs)
+  }
+  
+  /// Resolves an implicit member expression as a static method call
+  private func resolveImplicitStaticMethod(
+    memberName: String,
+    arguments: [ExpressionNode],
+    expectedType: Type,
+    span: SourceSpan
+  ) throws -> TypedExpressionNode? {
+    // Look up static method based on the expected type
+    switch expectedType {
+    case .structure(let defId):
+      let typeName = context.getName(defId) ?? ""
+      guard let methods = extensionMethods[typeName],
+            let methodSym = methods[memberName] else {
+        return nil
+      }
+      
+      // Check if it's a static method
+      guard case .function(let params, let returnType) = methodSym.type else {
+        return nil
+      }
+      let isStatic = params.isEmpty || params[0].kind != .byRef
+      guard isStatic else { return nil }
+      
+      // Check if return type matches expected type
+      guard returnType == expectedType else {
+        return nil
+      }
+      
+      // Type check arguments
+      if arguments.count != params.count {
+        throw SemanticError.invalidArgumentCount(
+          function: memberName,
+          expected: params.count,
+          got: arguments.count
+        )
+      }
+      
+      var typedArgs: [TypedExpressionNode] = []
+      for (arg, param) in zip(arguments, params) {
+        var typedArg = try inferTypedExpression(arg, expectedType: param.type)
+        typedArg = try coerceLiteral(typedArg, to: param.type)
+        if typedArg.type != param.type {
+          throw SemanticError.typeMismatch(
+            expected: param.type.description, got: typedArg.type.description)
+        }
+        typedArgs.append(typedArg)
+      }
+      
+      return .staticMethodCall(
+        baseType: expectedType,
+        methodName: memberName,
+        typeArgs: [],
+        arguments: typedArgs,
+        type: returnType
+      )
+      
+    case .union(let defId):
+      let typeName = context.getName(defId) ?? ""
+      guard let methods = extensionMethods[typeName],
+            let methodSym = methods[memberName] else {
+        return nil
+      }
+      
+      // Check if it's a static method
+      guard case .function(let params, let returnType) = methodSym.type else {
+        return nil
+      }
+      let isStatic = params.isEmpty || params[0].kind != .byRef
+      guard isStatic else { return nil }
+      
+      // Check if return type matches expected type
+      guard returnType == expectedType else {
+        return nil
+      }
+      
+      // Type check arguments
+      if arguments.count != params.count {
+        throw SemanticError.invalidArgumentCount(
+          function: memberName,
+          expected: params.count,
+          got: arguments.count
+        )
+      }
+      
+      var typedArgs: [TypedExpressionNode] = []
+      for (arg, param) in zip(arguments, params) {
+        var typedArg = try inferTypedExpression(arg, expectedType: param.type)
+        typedArg = try coerceLiteral(typedArg, to: param.type)
+        if typedArg.type != param.type {
+          throw SemanticError.typeMismatch(
+            expected: param.type.description, got: typedArg.type.description)
+        }
+        typedArgs.append(typedArg)
+      }
+      
+      return .staticMethodCall(
+        baseType: expectedType,
+        methodName: memberName,
+        typeArgs: [],
+        arguments: typedArgs,
+        type: returnType
+      )
+      
+    case .genericStruct(let templateName, let typeArgs):
+      guard let extensions = genericExtensionMethods[templateName],
+            let ext = extensions.first(where: { $0.method.name == memberName }) else {
+        return nil
+      }
+      
+      // Check if it's a static method
+      let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
+      guard isStatic else { return nil }
+      
+      // Resolve the method with type arguments
+      let methodSym = try resolveGenericExtensionMethod(
+        baseType: expectedType,
+        templateName: templateName,
+        typeArgs: typeArgs,
+        methodInfo: ext
+      )
+      
+      guard case .function(let params, let returnType) = methodSym.type else {
+        return nil
+      }
+      
+      // Check if return type matches expected type (allowing Self substitution)
+      guard returnType == expectedType else {
+        return nil
+      }
+      
+      // Type check arguments
+      if arguments.count != params.count {
+        throw SemanticError.invalidArgumentCount(
+          function: memberName,
+          expected: params.count,
+          got: arguments.count
+        )
+      }
+      
+      var typedArgs: [TypedExpressionNode] = []
+      for (arg, param) in zip(arguments, params) {
+        var typedArg = try inferTypedExpression(arg, expectedType: param.type)
+        typedArg = try coerceLiteral(typedArg, to: param.type)
+        if typedArg.type != param.type {
+          throw SemanticError.typeMismatch(
+            expected: param.type.description, got: typedArg.type.description)
+        }
+        typedArgs.append(typedArg)
+      }
+      
+      return .staticMethodCall(
+        baseType: expectedType,
+        methodName: memberName,
+        typeArgs: typeArgs,
+        arguments: typedArgs,
+        type: returnType
+      )
+      
+    case .genericUnion(let templateName, let typeArgs):
+      guard let extensions = genericExtensionMethods[templateName],
+            let ext = extensions.first(where: { $0.method.name == memberName }) else {
+        return nil
+      }
+      
+      // Check if it's a static method
+      let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
+      guard isStatic else { return nil }
+      
+      // Resolve the method with type arguments
+      let methodSym = try resolveGenericExtensionMethod(
+        baseType: expectedType,
+        templateName: templateName,
+        typeArgs: typeArgs,
+        methodInfo: ext
+      )
+      
+      guard case .function(let params, let returnType) = methodSym.type else {
+        return nil
+      }
+      
+      // Check if return type matches expected type (allowing Self substitution)
+      guard returnType == expectedType else {
+        return nil
+      }
+      
+      // Type check arguments
+      if arguments.count != params.count {
+        throw SemanticError.invalidArgumentCount(
+          function: memberName,
+          expected: params.count,
+          got: arguments.count
+        )
+      }
+      
+      var typedArgs: [TypedExpressionNode] = []
+      for (arg, param) in zip(arguments, params) {
+        var typedArg = try inferTypedExpression(arg, expectedType: param.type)
+        typedArg = try coerceLiteral(typedArg, to: param.type)
+        if typedArg.type != param.type {
+          throw SemanticError.typeMismatch(
+            expected: param.type.description, got: typedArg.type.description)
+        }
+        typedArgs.append(typedArg)
+      }
+      
+      return .staticMethodCall(
+        baseType: expectedType,
+        methodName: memberName,
+        typeArgs: typeArgs,
+        arguments: typedArgs,
+        type: returnType
+      )
+      
+    default:
+      return nil
     }
   }
 }
@@ -1436,7 +1801,8 @@ extension TypeChecker {
             expectedType: param.type
           )
         } else {
-          typedArg = try inferTypedExpression(arg)
+          // Pass expected type for implicit member expression support
+          typedArg = try inferTypedExpression(arg, expectedType: param.type)
         }
         typedArg = try coerceLiteral(typedArg, to: param.type)
         if typedArg.type != param.type {

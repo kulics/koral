@@ -483,6 +483,16 @@ public indirect enum ExpressionNode {
     body: ExpressionNode,
     span: SourceSpan
   )
+  /// Implicit member expression: .memberName(args)
+  /// Used for union case construction or static method calls when the expected type is known.
+  /// - memberName: The member name (union case name or static method name)
+  /// - arguments: The arguments to pass
+  /// - span: Source location
+  case implicitMemberExpression(
+    memberName: String,
+    arguments: [ExpressionNode],
+    span: SourceSpan
+  )
 }
 public indirect enum PatternNode: CustomStringConvertible {
   case booleanLiteral(value: Bool, span: SourceSpan)

@@ -31,7 +31,8 @@ extension TypeChecker {
     // 5. 处理方法参数
     var typedArguments: [TypedExpressionNode] = []
     for (arg, param) in zip(arguments, params.dropFirst()) {
-      var typedArg = try inferTypedExpression(arg)
+      // Pass expected type for implicit member expression support
+      var typedArg = try inferTypedExpression(arg, expectedType: param.type)
       typedArg = try coerceLiteral(typedArg, to: param.type)
       if typedArg.type != param.type {
         // Try implicit ref/deref for arguments as well (mirrors self handling).
