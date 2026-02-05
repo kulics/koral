@@ -2158,6 +2158,18 @@ extension TypeChecker {
     let typeResolver = TypeResolver(coreGlobalCount: coreGlobalCount, checker: self, context: context)
     let output = try typeResolver.run(input: input)
     
+    // === Recursive Type Check ===
+    // After type resolution, check for indirect recursion in struct/union types
+    let recursiveChecker = RecursiveTypeChecker(context: context)
+    let cycles = try recursiveChecker.check()
+    
+    // Report any detected cycles as errors
+    for cycle in cycles {
+      let pathString = cycle.pathString()
+      let error = SemanticError(.indirectRecursion(path: pathString))
+      try handleError(error)
+    }
+    
     return output
   }
   

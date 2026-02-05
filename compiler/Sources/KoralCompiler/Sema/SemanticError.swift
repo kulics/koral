@@ -30,6 +30,9 @@ public struct SemanticError: Error, CustomStringConvertible, Sendable {
         case nonExhaustiveMatch(type: String, missing: [String])
         case unreachablePattern(pattern: String, reason: String)
         case missingCatchallPattern(type: String)
+        
+        // Recursive type errors
+        case indirectRecursion(path: String)
     }
     
     public let kind: Kind
@@ -164,6 +167,8 @@ public struct SemanticError: Error, CustomStringConvertible, Sendable {
             return "Unreachable pattern '\(pattern)': \(reason)"
         case .missingCatchallPattern(let type):
             return "Match on type '\(type)' requires a wildcard or variable binding pattern"
+        case .indirectRecursion(let path):
+            return "Indirect recursion detected: \(path). This creates an infinite-size type. Consider using 'ref' to break the cycle."
         }
     }
     
