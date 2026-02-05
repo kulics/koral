@@ -88,6 +88,7 @@ class IntegrationTests: XCTestCase {
     func test_hashable_primitives() throws { try runCase(named: "hashable_primitives.koral") }
     func test_heap_allocation() throws { try runCase(named: "heap_allocation.koral") }
     func test_hello() throws { try runCase(named: "hello.koral") }
+    func test_implicit_member_expression() throws { try runCase(named: "implicit_member_expression.koral") }
     func test_integer_types() throws { try runCase(named: "integer_types.koral") }
     func test_lambda_basic() throws { try runCase(named: "lambda_basic.koral") }
     func test_lambda_closure() throws { try runCase(named: "lambda_closure.koral") }

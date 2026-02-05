@@ -36,7 +36,8 @@ extension TypeChecker {
           expectedType: expectedType
         )
       } else {
-        typedValue = try inferTypedExpression(value)
+        // Pass expected type for implicit member expression support
+        typedValue = try inferTypedExpression(value, expectedType: expectedType)
       }
       
       let type: Type
@@ -164,7 +165,8 @@ extension TypeChecker {
         }
 
         let typedTarget = try resolveLValue(target)
-        var typedValue = try inferTypedExpression(value)
+        // Pass expected type for implicit member expression support
+        var typedValue = try inferTypedExpression(value, expectedType: typedTarget.type)
         typedValue = try coerceLiteral(typedValue, to: typedTarget.type)
 
         if typedValue.type != .never && typedTarget.type != typedValue.type {
@@ -257,7 +259,8 @@ extension TypeChecker {
       }
 
       let typedTarget = try resolveLValue(target)
-      var typedValue = try inferTypedExpression(value)
+      // Pass expected type for implicit member expression support
+      var typedValue = try inferTypedExpression(value, expectedType: typedTarget.type)
       typedValue = try coerceLiteral(typedValue, to: typedTarget.type)
 
       if typedValue.type != .never && typedTarget.type != typedValue.type {
@@ -309,7 +312,8 @@ extension TypeChecker {
           throw SemanticError.typeMismatch(expected: "Void", got: "non-Void")
         }
 
-        var typedValue = try inferTypedExpression(value)
+        // Pass expected type for implicit member expression support
+        var typedValue = try inferTypedExpression(value, expectedType: returnType)
         typedValue = try coerceLiteral(typedValue, to: returnType)
         if typedValue.type != .never && typedValue.type != returnType {
           throw SemanticError.typeMismatch(

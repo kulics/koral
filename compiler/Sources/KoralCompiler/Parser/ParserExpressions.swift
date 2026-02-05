@@ -538,6 +538,9 @@ extension Parser {
       }
 
       return .genericInstantiation(base: name, args: args)
+    case .dot:
+      // Implicit member expression: .memberName(args)
+      return try parseImplicitMemberExpression()
     default:
       throw ParserError.unexpectedToken(
         span: currentSpan,
@@ -545,6 +548,49 @@ extension Parser {
         expected: "number, identifier, boolean literal, block expression, or generic instantiation"
       )
     }
+  }
+
+  /// Parse implicit member expression: .memberName(args)
+  /// This is used for union case construction or static method calls when the expected type is known.
+  private func parseImplicitMemberExpression() throws -> ExpressionNode {
+    let startSpan = currentSpan
+    try match(.dot)
+    
+    // Expect an identifier (member name)
+    guard case .identifier(let memberName) = currentToken else {
+      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+    }
+    try match(.identifier(memberName))
+    
+    // Must have parentheses for implicit member expression
+    guard currentToken === .leftParen else {
+      throw ParserError.unexpectedToken(
+        span: currentSpan,
+        got: currentToken.description,
+        expected: "'(' after implicit member name"
+      )
+    }
+    
+    // Parse arguments
+    try match(.leftParen)
+    var arguments: [ExpressionNode] = []
+    if currentToken !== .rightParen {
+      repeat {
+        arguments.append(try expression())
+        if currentToken === .comma {
+          try match(.comma)
+        } else {
+          break
+        }
+      } while currentToken !== .rightParen
+    }
+    try match(.rightParen)
+    
+    return .implicitMemberExpression(
+      memberName: memberName,
+      arguments: arguments,
+      span: startSpan
+    )
   }
 
   private func parseInterpolatedString(
