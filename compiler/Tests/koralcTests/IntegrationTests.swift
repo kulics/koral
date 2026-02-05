@@ -70,6 +70,7 @@ class IntegrationTests: XCTestCase {
     func test_for_loop_basic() throws { try runCase(named: "for_loop_basic.koral") }
     func test_for_loop_control_flow() throws { try runCase(named: "for_loop_control_flow.koral") }
     func test_for_loop_direct_iterator() throws { try runCase(named: "for_loop_direct_iterator.koral") }
+    func test_for_loop_drop() throws { try runCase(named: "for_loop_drop.koral") }
     func test_for_loop_error_non_exhaustive() throws { try runCase(named: "for_loop_error_non_exhaustive.koral") }
     func test_for_loop_error_not_iterable() throws { try runCase(named: "for_loop_error_not_iterable.koral") }
     func test_for_loop_nested() throws { try runCase(named: "for_loop_nested.koral") }
@@ -144,12 +145,16 @@ class IntegrationTests: XCTestCase {
     func test_string() throws { try runCase(named: "string.koral") }
     func test_string_methods() throws { try runCase(named: "string_methods.koral") }
     func test_string_interpolation() throws { try runCase(named: "string_interpolation.koral") }
+    func test_string_interpolation_drop() throws { try runCase(named: "string_interpolation_drop.koral") }
     func test_string_interpolation_error_empty() throws { try runCase(named: "string_interpolation_error_empty.koral") }
     func test_string_interpolation_error_unterminated() throws { try runCase(named: "string_interpolation_error_unterminated.koral") }
     func test_struct_with_ref() throws { try runCase(named: "struct_with_ref.koral") }
     func test_structs() throws { try runCase(named: "structs.koral") }
     func test_subscript_test() throws { try runCase(named: "subscript_test.koral") }
     func test_closure_variable_drop() throws { try runCase(named: "closure_variable_drop.koral") }
+    func test_if_pattern_drop() throws { try runCase(named: "if_pattern_drop.koral") }
+    func test_while_pattern_drop() throws { try runCase(named: "while_pattern_drop.koral") }
+    func test_chain_call_drop() throws { try runCase(named: "chain_call_drop.koral") }
     func test_trait_cannot_as_type() throws { try runCase(named: "trait_cannot_as_type.koral") }
     func test_trait_constraint_validation() throws { try runCase(named: "trait_constraint_validation.koral") }
     func test_trait_equatable() throws { try runCase(named: "trait_equatable.koral") }

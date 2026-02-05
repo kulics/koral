@@ -1458,7 +1458,7 @@ public class CodeGen {
       
       // Generate pattern matching condition and bindings
       let (prelude, preludeVars, condition, bindingCode, vars) = 
-          generatePatternConditionAndBindings(pattern, subjectTemp, subject.type, isMove: false)
+          generatePatternConditionAndBindings(pattern, subjectTemp, subject.type)
       
       // Output prelude
       for p in prelude {
@@ -1497,6 +1497,11 @@ public class CodeGen {
         }
         addIndent()
         buffer += "}\n"
+        // Drop subject after if-pattern completes
+        if needsDrop(subject.type) {
+          addIndent()
+          appendDropStatement(for: subject.type, value: subjectTemp, indent: "")
+        }
         return ""
       } else {
         guard let elseBranch = elseBranch else {
@@ -1585,6 +1590,11 @@ public class CodeGen {
         }
         addIndent()
         buffer += "}\n"
+        // Drop subject after if-pattern completes
+        if needsDrop(subject.type) {
+          addIndent()
+          appendDropStatement(for: subject.type, value: subjectTemp, indent: "")
+        }
         return resultVar
       }
       
@@ -1604,7 +1614,7 @@ public class CodeGen {
         
         // Generate pattern matching condition and bindings
         let (prelude, preludeVars, condition, bindingCode, vars) = 
-            generatePatternConditionAndBindings(pattern, subjectTemp, subject.type, isMove: false)
+            generatePatternConditionAndBindings(pattern, subjectTemp, subject.type)
         
         // Output prelude
         for p in prelude {
@@ -1615,8 +1625,20 @@ public class CodeGen {
           registerVariable(name, varType)
         }
         
+        // When pattern doesn't match, drop subject and exit loop
         addIndent()
-        buffer += "if (!(\(condition))) { goto \(endLabel); }\n"
+        buffer += "if (!(\(condition))) {\n"
+        withIndent {
+          // Drop subject before exiting
+          if needsDrop(subject.type) {
+            addIndent()
+            appendDropStatement(for: subject.type, value: subjectTemp, indent: "")
+          }
+          addIndent()
+          buffer += "goto \(endLabel);\n"
+        }
+        addIndent()
+        buffer += "}\n"
         
         pushScope()
         // Generate bindings
@@ -1633,6 +1655,11 @@ public class CodeGen {
         _ = generateExpressionSSA(body)
         loopStack.removeLast()
         popScope()
+        // Drop subject at end of each iteration
+        if needsDrop(subject.type) {
+          addIndent()
+          appendDropStatement(for: subject.type, value: subjectTemp, indent: "")
+        }
         addIndent()
         buffer += "goto \(startLabel);\n"
       }
@@ -2323,8 +2350,7 @@ public class CodeGen {
          let caseScopeIndex = lifetimeScopeStack.count
          pushScope()
 
-         let isMove = false
-         let (prelude, preludeVars, condition, bindings, vars) = generatePatternConditionAndBindings(c.pattern, subjectVar, subjectType, isMove: isMove)
+         let (prelude, preludeVars, condition, bindings, vars) = generatePatternConditionAndBindings(c.pattern, subjectVar, subjectType)
 
          // Prelude runs regardless of match success (temps used in the condition)
          for p in prelude {
@@ -2392,11 +2418,11 @@ public class CodeGen {
     return (type == .void || type == .never) ? "" : resultVar
   }
 
+    /// 生成模式匹配的条件和绑定代码（使用拷贝语义）
     func generatePatternConditionAndBindings(
     _ pattern: TypedPattern,
     _ path: String,
-    _ type: Type,
-    isMove: Bool = false
+    _ type: Type
     ) -> (prelude: [String], preludeVars: [(String, Type)], condition: String, bindings: [String], vars: [(String, Type)]) {
       switch pattern {
       case .integerLiteral(let val):
@@ -2433,20 +2459,21 @@ public class CodeGen {
         let cType = cTypeName(varType)
         bindCode += "\(cType) \(name);\n"
           
-        if isMove {
-          // Move Semantics: Shallow Copy. Source cleanup is suppressed via consumeVariable.
+        // Copy Semantics: 绑定变量是源值的复制
+        if case .structure(let defId) = varType {
+          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
+          bindCode += "\(name) = __koral_\(typeName)_copy(&\(path));\n"
+        } else if case .union(let defId) = varType {
+          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
+          bindCode += "\(name) = __koral_\(typeName)_copy(&\(path));\n"
+        } else if case .reference(_) = varType {
           bindCode += "\(name) = \(path);\n"
+          bindCode += "__koral_retain(\(name).control);\n"
+        } else if case .function = varType {
+          bindCode += "\(name) = \(path);\n"
+          bindCode += "__koral_closure_retain(\(name));\n"
         } else {
-          // Copy Semantics
-           if case .structure(let defId) = varType {
-             let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-             bindCode += "\(name) = __koral_\(typeName)_copy(&\(path));\n"
-          } else if case .reference(_) = varType {
-             bindCode += "\(name) = \(path);\n"
-             bindCode += "__koral_retain(\(name).control);\n"
-          } else {
-             bindCode += "\(name) = \(path);\n"
-          }
+          bindCode += "\(name) = \(path);\n"
         }
         return ([], [], "1", [bindCode], [(name, varType)])
           
@@ -2468,7 +2495,7 @@ public class CodeGen {
            let paramType = caseDef.parameters[i].type
            let subPath = "\(path).data.\(escapedCaseName).\(paramName)"
                
-           let (subPre, subPreVars, subCond, subBind, subVars) = generatePatternConditionAndBindings(subInd, subPath, paramType, isMove: isMove)
+           let (subPre, subPreVars, subCond, subBind, subVars) = generatePatternConditionAndBindings(subInd, subPath, paramType)
                
            if subCond != "1" {
              condition += " && (\(subCond))"
@@ -2496,9 +2523,9 @@ public class CodeGen {
       case .andPattern(let left, let right):
         // And pattern: both sub-patterns must match
         let (leftPre, leftPreVars, leftCond, leftBind, leftVars) = 
-            generatePatternConditionAndBindings(left, path, type, isMove: isMove)
+            generatePatternConditionAndBindings(left, path, type)
         let (rightPre, rightPreVars, rightCond, rightBind, rightVars) = 
-            generatePatternConditionAndBindings(right, path, type, isMove: isMove)
+            generatePatternConditionAndBindings(right, path, type)
         
         let condition = "(\(leftCond)) && (\(rightCond))"
         return (
@@ -2513,9 +2540,9 @@ public class CodeGen {
         // Or pattern: either sub-pattern must match
         // For bindings, we need to handle them specially since both branches bind the same variables
         let (leftPre, leftPreVars, leftCond, leftBind, leftVars) = 
-            generatePatternConditionAndBindings(left, path, type, isMove: isMove)
+            generatePatternConditionAndBindings(left, path, type)
         let (rightPre, rightPreVars, rightCond, rightBind, rightVars) = 
-            generatePatternConditionAndBindings(right, path, type, isMove: isMove)
+            generatePatternConditionAndBindings(right, path, type)
         
         let condition = "(\(leftCond)) || (\(rightCond))"
         
@@ -2566,7 +2593,7 @@ public class CodeGen {
       case .notPattern(let pattern):
         // Not pattern: negate the sub-pattern condition
         let (pre, preVars, cond, _, _) = 
-            generatePatternConditionAndBindings(pattern, path, type, isMove: isMove)
+            generatePatternConditionAndBindings(pattern, path, type)
         
         let condition = "!(\(cond))"
         // Not patterns cannot have bindings (enforced by type checker)

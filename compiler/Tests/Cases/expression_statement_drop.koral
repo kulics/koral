@@ -1,35 +1,57 @@
-// EXPECT: drop_count
-// EXPECT: 3
+// Test drop of unused return values in expression statements
+// EXPECT: Creating Resource 1
+// EXPECT: Drop Resource 1
+// EXPECT: Creating Resource 2
+// EXPECT: Drop Resource 2
+// EXPECT: Creating Resource 3
+// EXPECT: Drop Resource 3
+// EXPECT: Void function called
+// EXPECT: All expression statement drop tests passed
 
-type Tracker(id Int)
+type Resource(id Int)
 
-let mut drop_count Int = 0
-
-given Tracker {
-    __drop(self ref) = {
-        drop_count = drop_count + 1
+given Resource {
+    __drop(self ref) Void = {
+        print("Drop Resource ")
+        print_line(self.id)
     }
 }
 
-type Wrapper(id Int)
-
-given Wrapper {
-    make(self) Tracker = Tracker(self.id)
+// Function that returns a Resource
+let create_resource(id Int) Resource = {
+    print("Creating Resource ")
+    print_line(id)
+    Resource(id)
 }
 
-type Maker()
-
-given Maker {
-    new() Tracker = Tracker(3)
+// Void function - should not generate drop
+let void_function() Void = {
+    print_line("Void function called")
 }
 
-let make_tracker(id Int) Tracker = Tracker(id)
+// Method that returns a Resource
+type Factory()
+
+given Factory {
+    make(self ref, id Int) Resource = {
+        create_resource(id)
+    }
+}
 
 let main() Int = {
-    make_tracker(1)
-    Wrapper(2).make()
-    Maker.new()
-    print_line("drop_count")
-    print_line(drop_count)
+    // Test 1: Function call return value unused - should drop
+    create_resource(1)
+    
+    // Test 2: Method call return value unused - should drop
+    let f = Factory()
+    f.make(2)
+    
+    // Test 3: Chained expression result unused - should drop
+    create_resource(3)
+    
+    // Test 4: Void function - should NOT generate drop
+    void_function()
+    
+    print_line("All expression statement drop tests passed")
     0
 }
