@@ -1,13 +1,19 @@
+// Test drop in match expressions (copy semantics)
+// With copy semantics, bindings are copies, and original variables are dropped at end of scope
 // EXPECT: Start Struct Move
 // EXPECT: Inside Match
 // EXPECT: Drop Resource
 // EXPECT: 1
 // EXPECT: End Struct Move
+// EXPECT: Drop Resource
+// EXPECT: 1
 // EXPECT: Start Enum Move
 // EXPECT: Inside Match
 // EXPECT: Drop Resource
 // EXPECT: 2
 // EXPECT: End Enum Move
+// EXPECT: Drop Resource
+// EXPECT: 2
 // EXPECT: Start Ref Copy
 // EXPECT: Inside Match
 // EXPECT: Drop Resource
@@ -25,40 +31,41 @@ given Resource {
   }
 }
 
-// 1. Struct Move Test
+// 1. Struct Copy Test
 type Wrapper(r Resource)
 
-let test_struct_move() Void = {
+let test_struct_copy() Void = {
     print_line("Start Struct Move")
     let w = Wrapper(Resource(1))
     when w is {
-        // Move w to w_moved. w is consumed. w_moved takes ownership.
+        // w_moved is a copy of w
         w_moved then {
             print_line("Inside Match")
-            // w_moved owns it.
         },
-        // w_moved drops here
+        // w_moved (copy) drops here at end of match branch
     }
     print_line("End Struct Move")
+    // w (original) drops here at end of function scope
 }
 
-// 2. Enum Move Test
+// 2. Enum Copy Test
 type Container {
     Item(r Resource),
     Empty(),
 }
 
-let test_enum_move() Void = {
+let test_enum_copy() Void = {
     print_line("Start Enum Move")
     let c = Container.Item(Resource(2))
     when c is {
         .Item(r_inner) then {
             print_line("Inside Match")
         },
-        // r_inner drops here
+        // r_inner (copy) drops here at end of match branch
         .Empty then {},
     }
     print_line("End Enum Move")
+    // c (original) drops here at end of function scope
 }
 
 // 3. Ref Copy Test
@@ -70,15 +77,15 @@ let test_ref_copy() Void = {
         x then {
              print_line("Inside Match")
         },
-        // x (Copy) drops here (refs count dec)
+        // x (copy, ref count dec) drops here
     }
     
     print_line("After Match")
-    // r drops here (refs count dec then 0)
+    // r drops here (ref count dec to 0, Resource destroyed)
 }
 
 let main() Void = {
-    test_struct_move()
-    test_enum_move()
+    test_struct_copy()
+    test_enum_copy()
     test_ref_copy()
 }

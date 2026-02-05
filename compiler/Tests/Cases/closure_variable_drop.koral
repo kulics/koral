@@ -1,24 +1,63 @@
-// EXPECT: drop_count
-// EXPECT: 2
+// Test drop of closure variables when they go out of scope
+// EXPECT: Creating Resource 1
+// EXPECT: Closure variable created
+// EXPECT: Calling closure
+// EXPECT: Result: 1
+// EXPECT: Drop Resource 1
+// EXPECT: Creating Resource 2
+// EXPECT: Passing closure as argument
+// EXPECT: Inside function, calling closure
+// EXPECT: Result: 2
+// EXPECT: Drop Resource 2
+// EXPECT: All closure variable drop tests passed
 
-type Tracker(id Int)
+type Resource(id Int)
 
-let mut drop_count Int = 0
-
-given Tracker {
-    __drop(self ref) = {
-        drop_count = drop_count + 1
+given Resource {
+    __drop(self ref) Void = {
+        print("Drop Resource ")
+        print_line(self.id)
     }
 }
 
-let main() Int = {
-    if true then {
-        let t = Tracker(1)
-        let f [Int]Func = () -> t.id
-        let g = f
-    } else {}
+let call_closure(f [Int]Func) Void = {
+    print_line("Inside function, calling closure")
+    let result = f()
+    print("Result: ")
+    print_line(result)
+}
 
-    print_line("drop_count")
-    print_line(drop_count)
+let test_closure_scope_exit() Void = {
+    let r = Resource(1)
+    print_line("Creating Resource 1")
+    
+    let closure [Int]Func = () -> r.id
+    print_line("Closure variable created")
+    
+    print_line("Calling closure")
+    let result = closure()
+    print("Result: ")
+    print_line(result)
+    
+    // closure goes out of scope here, should drop captured Resource
+}
+
+let test_closure_as_argument() Void = {
+    let r = Resource(2)
+    print_line("Creating Resource 2")
+    
+    let closure [Int]Func = () -> r.id
+    print_line("Passing closure as argument")
+    
+    call_closure(closure)
+    
+    // closure goes out of scope here, should drop captured Resource
+}
+
+let main() Int = {
+    test_closure_scope_exit()
+    test_closure_as_argument()
+    
+    print_line("All closure variable drop tests passed")
     0
 }

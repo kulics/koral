@@ -1,0 +1,70 @@
+// Test drop of subject in while-pattern expressions (copy semantics)
+// With copy semantics, both the binding (copy) and the subject (original) are dropped each iteration
+// EXPECT: Creating iterator
+// EXPECT: Iteration 0
+// EXPECT: Drop Resource 0
+// EXPECT: Drop Resource 0
+// EXPECT: Iteration 1
+// EXPECT: Drop Resource 1
+// EXPECT: Drop Resource 1
+// EXPECT: Iteration 2
+// EXPECT: Drop Resource 2
+// EXPECT: Drop Resource 2
+// EXPECT: Loop ended
+// EXPECT: Drop Iterator
+// EXPECT: All while-pattern drop tests passed
+
+type Resource(id Int)
+
+given Resource {
+    __drop(self ref) Void = {
+        print("Drop Resource ")
+        print_line(self.id)
+    }
+}
+
+type MaybeResource {
+    Some(r Resource),
+    None(),
+}
+
+type ResourceIterator(mut current Int, max Int)
+
+given ResourceIterator {
+    __drop(self ref) Void = {
+        print_line("Drop Iterator")
+    }
+    
+    next(self ref) MaybeResource = {
+        if self.current < self.max then {
+            let id = self.current
+            self.current = self.current + 1
+            MaybeResource.Some(Resource(id))
+        } else {
+            MaybeResource.None()
+        }
+    }
+}
+
+let test_while_pattern() Void = {
+    print_line("Creating iterator")
+    let mut iter = ResourceIterator(0, 3)
+    
+    // Each iteration with copy semantics:
+    // - r is a copy of the inner Resource, dropped at end of iteration
+    // - subject (MaybeResource) is dropped at end of iteration, which drops the original Resource
+    // When pattern doesn't match (None), only subject is dropped (no Resource inside)
+    while iter.next() is .Some(r) then {
+        print("Iteration ")
+        print_line(r.id)
+    }
+    
+    print_line("Loop ended")
+}
+
+let main() Int = {
+    test_while_pattern()
+    
+    print_line("All while-pattern drop tests passed")
+    0
+}
