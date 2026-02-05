@@ -477,6 +477,8 @@ public class BidirectionalInference {
             // 模块限定泛型类型
             let argTypes = args.map { resolveTypeNode($0) }
             return .genericStruct(template: base, args: argTypes)
+        case .weakReference(let inner):
+            return .weakReference(inner: resolveTypeNode(inner))
         }
     }
     

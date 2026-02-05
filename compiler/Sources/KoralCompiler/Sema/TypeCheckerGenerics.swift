@@ -373,6 +373,10 @@ extension TypeChecker {
           }
         }
       }
+    case .weakReference(let inner):
+      if case .weakReference(let innerType) = type {
+        try unify(node: inner, type: innerType, inferred: &inferred, typeParams: typeParams)
+      }
     }
   }
 

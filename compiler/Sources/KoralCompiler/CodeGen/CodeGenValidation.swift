@@ -392,6 +392,12 @@ extension CodeGen {
     case .refCount(let val):
       validateExpression(val, context: "\(context) -> refCount val")
       
+    case .downgradeRef(let val, _):
+      validateExpression(val, context: "\(context) -> downgradeRef val")
+      
+    case .upgradeRef(let val, _):
+      validateExpression(val, context: "\(context) -> upgradeRef val")
+      
     case .initMemory(let ptr, let val):
       validateExpression(ptr, context: "\(context) -> initMemory ptr")
       validateExpression(val, context: "\(context) -> initMemory val")

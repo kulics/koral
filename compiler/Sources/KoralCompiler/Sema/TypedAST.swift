@@ -278,6 +278,10 @@ public indirect enum TypedIntrinsic {
     dest: TypedExpressionNode, source: TypedExpressionNode, count: TypedExpressionNode)
   case refCount(val: TypedExpressionNode)
 
+  // Weak Reference Operations
+  case downgradeRef(val: TypedExpressionNode, resultType: Type)
+  case upgradeRef(val: TypedExpressionNode, resultType: Type)
+
   // Pointer Operations
   case initMemory(ptr: TypedExpressionNode, val: TypedExpressionNode)
   case deinitMemory(ptr: TypedExpressionNode)
@@ -294,6 +298,8 @@ public indirect enum TypedIntrinsic {
     case .copyMemory: return .void
     case .moveMemory: return .void
     case .refCount: return .int
+    case .downgradeRef(_, let resultType): return resultType
+    case .upgradeRef(_, let resultType): return resultType
     case .initMemory: return .void
     case .deinitMemory: return .void
     case .offsetPtr(let ptr, _): return ptr.type

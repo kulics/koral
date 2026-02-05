@@ -140,6 +140,10 @@ extension Monomorphizer {
             }
             
             throw SemanticError(.generic("Unknown generic type: \(base)"), line: currentLine)
+            
+        case .weakReference(let inner):
+            let innerType = try resolveTypeNode(inner, substitution: substitution)
+            return .weakReference(inner: innerType)
         }
     }
     
@@ -1181,6 +1185,19 @@ extension Monomorphizer {
             
         case .refCount(let val):
             return .refCount(val: resolveTypesInExpression(val))
+            
+        case .downgradeRef(let val, let resultType):
+            return .downgradeRef(
+                val: resolveTypesInExpression(val),
+                resultType: resultType
+            )
+            
+        case .upgradeRef(let val, let resultType):
+            let resolvedResultType = resolveParameterizedType(resultType)
+            return .upgradeRef(
+                val: resolveTypesInExpression(val),
+                resultType: resolvedResultType
+            )
             
         case .initMemory(let ptr, let val):
             return .initMemory(

@@ -88,6 +88,7 @@ public enum TypeHandlerKind: Hashable {
     case function       // 函数类型
     case reference      // 引用类型
     case pointer        // 指针类型
+    case weakReference  // 弱引用类型
     case genericParameter  // 泛型参数
     case genericStruct  // 泛型结构体
     case genericUnion   // 泛型联合
@@ -154,6 +155,8 @@ extension TypeHandlerKind {
             return .reference
         case .pointer:
             return .pointer
+        case .weakReference:
+            return .weakReference
         case .genericParameter:
             return .genericParameter
         case .genericStruct:
@@ -999,6 +1002,78 @@ public class FunctionHandler: TypeHandler {
     }
 }
 
+// MARK: - WeakReferenceHandler
+
+/// 弱引用类型处理器
+///
+/// 处理弱引用类型（weakReference）的所有操作
+public class WeakReferenceHandler: TypeHandler {
+    public var supportedKinds: Set<TypeHandlerKind> {
+        return [.weakReference]
+    }
+    
+    public init() {}
+    
+    public func canHandle(_ type: Type) -> Bool {
+        if case .weakReference = type {
+            return true
+        }
+        return false
+    }
+    
+    public func needsCopyFunction(_ type: Type) -> Bool {
+        // 弱引用需要增加弱引用计数
+        return true
+    }
+    
+    public func needsDropFunction(_ type: Type) -> Bool {
+        // 弱引用需要减少弱引用计数
+        return true
+    }
+    
+    public func generateCTypeName(_ type: Type) -> String {
+        return "struct WeakRef"
+    }
+    
+    public func generateCopyCode(_ type: Type, source: String, dest: String) -> String {
+        return """
+        \(dest) = \(source);
+        __koral_weak_retain(\(dest).control);
+        """
+    }
+    
+    public func generateDropCode(_ type: Type, value: String) -> String {
+        return "__koral_weak_release(\(value).control);"
+    }
+    
+    public func getQualifiedName(_ type: Type) -> String {
+        guard case .weakReference(let inner) = type else {
+            return ""
+        }
+        return "\(inner.description) weakref"
+    }
+    
+    public func containsGenericParameter(_ type: Type) -> Bool {
+        guard case .weakReference(let inner) = type else {
+            return false
+        }
+        guard let context = TypeHandlerRegistry.shared.currentContext else {
+            return false
+        }
+        return context.containsGenericParameter(inner)
+    }
+    
+    // MARK: - WeakReference-Specific Methods
+    
+    /// 获取弱引用的内部类型
+    public func getInnerType(_ type: Type) -> Type? {
+        guard case .weakReference(let inner) = type else {
+            return nil
+        }
+        return inner
+    }
+}
+
 // MARK: - PointerHandler
 
 /// 指针类型处理器
@@ -1107,6 +1182,7 @@ public final class TypeHandlerRegistry: @unchecked Sendable {
         handlers.append(UnionHandler())
         handlers.append(GenericHandler())
         handlers.append(ReferenceHandler())
+        handlers.append(WeakReferenceHandler())
         handlers.append(FunctionHandler())
         handlers.append(PointerHandler())
         handlers.append(OpaqueHandler())

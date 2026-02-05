@@ -266,6 +266,7 @@ public final class CompilerContext: @unchecked Sendable {
             return "(\(paramStr)) -> \(getDebugName(returns))"
         case .reference(let inner): return "\(getDebugName(inner)) ref"
         case .pointer(let element): return "\(getDebugName(element)) ptr"
+        case .weakReference(let inner): return "\(getDebugName(inner)) weakref"
         case .structure(let defId):
             var name = defIdMap.getName(defId) ?? "<unknown>"
             if let typeArgs = defIdMap.getTypeArguments(defId), !typeArgs.isEmpty {
@@ -332,6 +333,8 @@ public final class CompilerContext: @unchecked Sendable {
             return freeTypeVariables(in: inner)
         case .pointer(let element):
             return freeTypeVariables(in: element)
+        case .weakReference(let inner):
+            return freeTypeVariables(in: inner)
         case .genericParameter:
             return []
         case .genericStruct(_, let args):
@@ -369,6 +372,7 @@ public final class CompilerContext: @unchecked Sendable {
         case .function: return "Fn"
         case .reference(let inner): return "R_\(getLayoutKey(inner))"
         case .pointer(let element): return "P_\(getLayoutKey(element))"
+        case .weakReference(let inner): return "W_\(getLayoutKey(inner))"
         case .structure(let defId):
             return layoutKey(for: defId)
         case .union(let defId):
@@ -454,6 +458,8 @@ public final class CompilerContext: @unchecked Sendable {
             return containsGenericParameterInternal(inner, visited: &visited)
         case .pointer(let element):
             return containsGenericParameterInternal(element, visited: &visited)
+        case .weakReference(let inner):
+            return containsGenericParameterInternal(inner, visited: &visited)
         case .genericParameter:
             return true
         case .genericStruct(_, let args):

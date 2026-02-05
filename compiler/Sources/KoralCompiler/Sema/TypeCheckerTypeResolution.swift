@@ -198,6 +198,10 @@ extension TypeChecker {
       } else {
         throw SemanticError.undefinedType("\(moduleName).\(baseName)")
       }
+      
+    case .weakReference(let inner):
+      let base = try resolveTypeNode(inner)
+      return .weakReference(inner: base)
     }
   }
   
@@ -268,6 +272,9 @@ extension TypeChecker {
       }
       return try resolveTypeNode(node)
       
+    case .weakReference(let inner):
+      let base = try resolveTypeNodeWithSubstitution(inner, substitution: substitution)
+      return .weakReference(inner: base)
     }
   }
   

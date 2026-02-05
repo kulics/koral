@@ -246,6 +246,9 @@ public enum SemaUtils {
         case .pointer(let element):
             return .pointer(element: substituteType(element, substitution: substitution, context: context))
             
+        case .weakReference(let inner):
+            return .weakReference(inner: substituteType(inner, substitution: substitution, context: context))
+            
         case .function(let params, let returns):
             let newParams = params.map { param in
                 Parameter(

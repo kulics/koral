@@ -306,6 +306,8 @@ public class TypeChecker {
       return true
     case .pointer:
       return true
+    case .weakReference:
+      return false
     case .opaque:
       return true
     case .structure, .union, .reference, .function, .genericParameter:

@@ -342,7 +342,7 @@ public class CodeGen {
 
   func needsDrop(_ type: Type) -> Bool {
     switch type {
-    case .structure, .union, .reference, .function:
+    case .structure, .union, .reference, .function, .weakReference:
       return true
     default:
       return false
@@ -379,28 +379,91 @@ public class CodeGen {
       typedef void (*Koral_Dtor)(void*);
 
       struct Koral_Control {
-        _Atomic int count;
+        _Atomic int strong_count;
+        _Atomic int weak_count;
         Koral_Dtor dtor;
         void* ptr;
       };
 
+      // WeakRef structure for weak references
+      struct WeakRef { void* control; };
+
       void __koral_retain(void* raw_control) {
         if (!raw_control) return;
         struct Koral_Control* control = (struct Koral_Control*)raw_control;
-        atomic_fetch_add(&control->count, 1);
+        atomic_fetch_add(&control->strong_count, 1);
       }
 
       void __koral_release(void* raw_control) {
         if (!raw_control) return;
         struct Koral_Control* control = (struct Koral_Control*)raw_control;
-        int prev = atomic_fetch_sub(&control->count, 1);
+        int prev = atomic_fetch_sub(&control->strong_count, 1);
         if (prev == 1) {
+          // Strong count reached zero - destroy object
           if (control->dtor) {
             control->dtor(control->ptr);
           }
           free(control->ptr);
+          // Decrement implicit weak count (control block itself)
+          int weak_prev = atomic_fetch_sub(&control->weak_count, 1);
+          if (weak_prev == 1) {
+            // No more weak references, free control block
+            free(control);
+          }
+        }
+      }
+
+      void __koral_weak_retain(void* raw_control) {
+        if (!raw_control) return;
+        struct Koral_Control* control = (struct Koral_Control*)raw_control;
+        atomic_fetch_add(&control->weak_count, 1);
+      }
+
+      void __koral_weak_release(void* raw_control) {
+        if (!raw_control) return;
+        struct Koral_Control* control = (struct Koral_Control*)raw_control;
+        int prev = atomic_fetch_sub(&control->weak_count, 1);
+        if (prev == 1) {
+          // No more weak references and strong count is zero
+          // (otherwise weak_count would be at least 1 from implicit weak ref)
           free(control);
         }
+      }
+
+      struct WeakRef __koral_downgrade_ref(struct Ref r) {
+        struct WeakRef w;
+        w.control = r.control;
+        if (w.control) {
+          __koral_weak_retain(w.control);
+        }
+        return w;
+      }
+
+      struct Ref __koral_upgrade_ref(struct WeakRef w, int* success) {
+        struct Ref r;
+        r.ptr = NULL;
+        r.control = NULL;
+        *success = 0;
+        
+        if (!w.control) return r;
+        
+        struct Koral_Control* control = (struct Koral_Control*)w.control;
+        
+        // Try to atomically increment strong_count if it's > 0
+        int old_count = atomic_load(&control->strong_count);
+        while (old_count > 0) {
+          if (atomic_compare_exchange_weak(&control->strong_count, &old_count, old_count + 1)) {
+            // Successfully upgraded
+            r.ptr = control->ptr;
+            r.control = w.control;
+            *success = 1;
+            return r;
+          }
+          // old_count was updated by compare_exchange_weak, retry
+        }
+        
+        // Strong count is 0, cannot upgrade
+        return r;
       }
 
       void __koral_closure_retain(struct __koral_Closure closure) {
@@ -1399,7 +1462,9 @@ public class CodeGen {
         addIndent()
         buffer += "\(result).control = malloc(sizeof(struct Koral_Control));\n"
         addIndent()
-        buffer += "((struct Koral_Control*)\(result).control)->count = 1;\n"
+        buffer += "((struct Koral_Control*)\(result).control)->strong_count = 1;\n"
+        addIndent()
+        buffer += "((struct Koral_Control*)\(result).control)->weak_count = 1;\n"
         addIndent()
         buffer += "((struct Koral_Control*)\(result).control)->ptr = \(result).ptr;\n"
 
@@ -1883,7 +1948,45 @@ public class CodeGen {
       buffer += "if (\(valRes).control) {\n"
       withIndent {
         addIndent()
-        buffer += "\(result) = atomic_load(&((struct Koral_Control*)\(valRes).control)->count);\n"
+        buffer += "\(result) = atomic_load(&((struct Koral_Control*)\(valRes).control)->strong_count);\n"
+      }
+      addIndent()
+      buffer += "}\n"
+      return result
+
+    case .downgradeRef(let val, _):
+      let valRes = generateExpressionSSA(val)
+      let result = nextTemp()
+      addIndent()
+      buffer += "struct WeakRef \(result) = __koral_downgrade_ref(\(valRes));\n"
+      return result
+
+    case .upgradeRef(let val, let resultType):
+      let valRes = generateExpressionSSA(val)
+      let result = nextTemp()
+      let successVar = nextTemp()
+      let upgradedRefVar = nextTemp()
+      addIndent()
+      buffer += "int \(successVar);\n"
+      addIndent()
+      buffer += "struct Ref \(upgradedRefVar) = __koral_upgrade_ref(\(valRes), &\(successVar));\n"
+      // Generate Option type result
+      let cType = cTypeName(resultType)
+      addIndent()
+      buffer += "\(cType) \(result);\n"
+      addIndent()
+      buffer += "if (\(successVar)) {\n"
+      withIndent {
+        addIndent()
+        buffer += "\(result).tag = 1; // Some\n"
+        addIndent()
+        buffer += "\(result).data.Some.value = \(upgradedRefVar);\n"
+      }
+      addIndent()
+      buffer += "} else {\n"
+      withIndent {
+        addIndent()
+        buffer += "\(result).tag = 0; // None\n"
       }
       addIndent()
       buffer += "}\n"
@@ -2234,6 +2337,11 @@ public class CodeGen {
       buffer += "\(result) = *(\(cType)*)\(pointerExpr);\n"
       addIndent()
       buffer += "__koral_retain(\(result).control);\n"
+    } else if case .weakReference(_) = elementType {
+      addIndent()
+      buffer += "\(result) = *(\(cType)*)\(pointerExpr);\n"
+      addIndent()
+      buffer += "__koral_weak_retain(\(result).control);\n"
     } else {
       addIndent()
       buffer += "\(result) = *(\(cType)*)\(pointerExpr);\n"
