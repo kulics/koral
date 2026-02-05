@@ -1678,6 +1678,56 @@ extension TypeChecker {
         let val = try inferTypedExpression(arguments[0])
         return .intrinsicCall(.refCount(val: val))
       }
+      if base == "downgrade_ref" {
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        guard resolvedArgs.count == 1 else {
+          throw SemanticError.typeMismatch(
+            expected: "1 generic arg", got: "\(resolvedArgs.count)")
+        }
+        guard arguments.count == 1 else {
+          throw SemanticError.invalidArgumentCount(
+            function: base, expected: 1, got: arguments.count)
+        }
+        let val = try inferTypedExpression(arguments[0])
+        // Verify argument is a reference type
+        guard case .reference(let inner) = val.type else {
+          throw SemanticError.typeMismatch(
+            expected: "\(resolvedArgs[0]) ref", got: val.type.description)
+        }
+        let resultType = Type.weakReference(inner: inner)
+        return .intrinsicCall(.downgradeRef(val: val, resultType: resultType))
+      }
+      if base == "upgrade_ref" {
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        guard resolvedArgs.count == 1 else {
+          throw SemanticError.typeMismatch(
+            expected: "1 generic arg", got: "\(resolvedArgs.count)")
+        }
+        guard arguments.count == 1 else {
+          throw SemanticError.invalidArgumentCount(
+            function: base, expected: 1, got: arguments.count)
+        }
+        let val = try inferTypedExpression(arguments[0])
+        // Verify argument is a weak reference type
+        guard case .weakReference(let inner) = val.type else {
+          throw SemanticError.typeMismatch(
+            expected: "\(resolvedArgs[0]) weakref", got: val.type.description)
+        }
+        // Return type is Option[T ref]
+        let refType = Type.reference(inner: inner)
+        let optionType = Type.genericUnion(template: "Option", args: [refType])
+        
+        // Record instantiation request for Option type
+        if let optionTemplate = currentScope.lookupGenericUnionTemplate("Option") {
+          recordInstantiation(InstantiationRequest(
+            kind: .unionType(template: optionTemplate, args: [refType]),
+            sourceLine: currentLine,
+            sourceFileName: currentFileName
+          ))
+        }
+        
+        return .intrinsicCall(.upgradeRef(val: val, resultType: optionType))
+      }
       if base == "copy_memory" {
         _ = try args.map { try resolveTypeNode($0) }
         guard arguments.count == 3 else {
@@ -1906,6 +1956,38 @@ extension TypeChecker {
     }
     if templateName == "ref_count" {
       return .intrinsicCall(.refCount(val: typedArguments[0]))
+    }
+    if templateName == "downgrade_ref" {
+      let val = typedArguments[0]
+      // Verify argument is a reference type
+      guard case .reference(let inner) = val.type else {
+        throw SemanticError.typeMismatch(
+          expected: "T ref", got: val.type.description)
+      }
+      let resultType = Type.weakReference(inner: inner)
+      return .intrinsicCall(.downgradeRef(val: val, resultType: resultType))
+    }
+    if templateName == "upgrade_ref" {
+      let val = typedArguments[0]
+      // Verify argument is a weak reference type
+      guard case .weakReference(let inner) = val.type else {
+        throw SemanticError.typeMismatch(
+          expected: "T weakref", got: val.type.description)
+      }
+      // Return type is Option[T ref]
+      let refType = Type.reference(inner: inner)
+      let optionType = Type.genericUnion(template: "Option", args: [refType])
+      
+      // Record instantiation request for Option type
+      if let optionTemplate = currentScope.lookupGenericUnionTemplate("Option") {
+        recordInstantiation(InstantiationRequest(
+          kind: .unionType(template: optionTemplate, args: [refType]),
+          sourceLine: currentLine,
+          sourceFileName: currentFileName
+        ))
+      }
+      
+      return .intrinsicCall(.upgradeRef(val: val, resultType: optionType))
     }
 
     // Record instantiation request for deferred monomorphization

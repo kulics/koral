@@ -579,6 +579,10 @@ public class EscapeContext {
             preAnalyzeExpression(count)
         case .refCount(let val):
             preAnalyzeExpression(val)
+        case .downgradeRef(let val, _):
+            preAnalyzeExpression(val)
+        case .upgradeRef(let val, _):
+            preAnalyzeExpression(val)
         case .initMemory(let ptr, let val):
             preAnalyzeExpression(ptr)
             preAnalyzeExpression(val)

@@ -30,6 +30,11 @@ extension Parser {
           type = .pointer(type)
           continue
         }
+        if currentToken === .weakrefKeyword {
+          try match(.weakrefKeyword)
+          type = .weakReference(type)
+          continue
+        }
         break
       }
       return type
@@ -75,6 +80,11 @@ extension Parser {
             type = .pointer(type)
             continue
           }
+          if currentToken === .weakrefKeyword {
+            try match(.weakrefKeyword)
+            type = .weakReference(type)
+            continue
+          }
           break
         }
         return type
@@ -92,6 +102,11 @@ extension Parser {
         if currentToken === .ptrKeyword {
           try match(.ptrKeyword)
           type = .pointer(type)
+          continue
+        }
+        if currentToken === .weakrefKeyword {
+          try match(.weakrefKeyword)
+          type = .weakReference(type)
           continue
         }
         break
@@ -145,6 +160,11 @@ extension Parser {
             type = .pointer(type)
             continue
           }
+          if currentToken === .weakrefKeyword {
+            try match(.weakrefKeyword)
+            type = .weakReference(type)
+            continue
+          }
           break
         }
         return type
@@ -173,6 +193,11 @@ extension Parser {
           type = .pointer(type)
           continue
         }
+        if currentToken === .weakrefKeyword {
+          try match(.weakrefKeyword)
+          type = .weakReference(type)
+          continue
+        }
         break
       }
       return type
@@ -185,7 +210,7 @@ extension Parser {
 
     var type: TypeNode = .identifier(name)
 
-    // Handle reference/pointer type suffix
+    // Handle reference/pointer/weakref type suffix
     while true {
       if currentToken === .refKeyword {
         try match(.refKeyword)
@@ -195,6 +220,11 @@ extension Parser {
       if currentToken === .ptrKeyword {
         try match(.ptrKeyword)
         type = .pointer(type)
+        continue
+      }
+      if currentToken === .weakrefKeyword {
+        try match(.weakrefKeyword)
+        type = .weakReference(type)
         continue
       }
       break

@@ -791,6 +791,18 @@ extension Monomorphizer {
         case .refCount(let val):
             return .refCount(val: substituteTypesInExpression(val, substitution: substitution))
             
+        case .downgradeRef(let val, let resultType):
+            return .downgradeRef(
+                val: substituteTypesInExpression(val, substitution: substitution),
+                resultType: substituteType(resultType, substitution: substitution)
+            )
+            
+        case .upgradeRef(let val, let resultType):
+            return .upgradeRef(
+                val: substituteTypesInExpression(val, substitution: substitution),
+                resultType: substituteType(resultType, substitution: substitution)
+            )
+            
         case .initMemory(let ptr, let val):
             return .initMemory(
                 ptr: substituteTypesInExpression(ptr, substitution: substitution),

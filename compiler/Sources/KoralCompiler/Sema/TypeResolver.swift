@@ -748,6 +748,8 @@ public class TypeResolver: CompilerPass {
             return extractTypeName(from: inner)
         case .pointer(let inner):
             return extractTypeName(from: inner)
+        case .weakReference(let inner):
+            return extractTypeName(from: inner)
         case .functionType, .inferredSelf:
             return ""
         }

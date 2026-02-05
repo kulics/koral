@@ -72,6 +72,7 @@ public indirect enum TypeNode: CustomStringConvertible {
   case identifier(String)
   case reference(TypeNode)
   case pointer(TypeNode)
+  case weakReference(TypeNode)
   case generic(base: String, args: [TypeNode])
   case inferredSelf
   /// Function type: [ParamType1, ParamType2, ..., ReturnType]Func
@@ -90,6 +91,8 @@ public indirect enum TypeNode: CustomStringConvertible {
       return "\(inner) ref"
     case .pointer(let inner):
       return "\(inner) ptr"
+    case .weakReference(let inner):
+      return "\(inner) weakref"
     case .generic(let base, let args):
       let argsStr = args.map { $0.description }.joined(separator: ", ")
       return "[\(argsStr)]\(base)"
