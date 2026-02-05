@@ -127,6 +127,10 @@ class IntegrationTests: XCTestCase {
     func test_range_unbounded() throws { try runCase(named: "range_unbounded.koral") }
     func test_recursion_check() throws { try runCase(named: "recursion_check.koral") }
     func test_recursive_union_test() throws { try runCase(named: "recursive_union_test.koral") }
+    func test_indirect_recursion_error() throws { try runCase(named: "indirect_recursion_error.koral") }
+    func test_indirect_recursion_chain_error() throws { try runCase(named: "indirect_recursion_chain_error.koral") }
+    func test_indirect_recursion_ref_ok() throws { try runCase(named: "indirect_recursion_ref_ok.koral") }
+    func test_generic_recursion_error() throws { try runCase(named: "generic_recursion_error.koral") }
     func test_ref_method_call() throws { try runCase(named: "ref_method_call.koral") }
     func test_result_map_test() throws { try runCase(named: "result_map_test.koral") }
     func test_result_void_test() throws { try runCase(named: "result_void_test.koral") }
