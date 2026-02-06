@@ -181,9 +181,6 @@ public func printTypedAST(_ node: TypedProgram) {
     case .floatLiteral(let value, let type):
       print("\(indent)FloatLiteral: \(value) : \(type)")
 
-    case .durationLiteral(let secs, let nanos, let type):
-      print("\(indent)DurationLiteral: \(secs)s \(nanos)ns : \(type)")
-
     case .stringLiteral(let value, let type):
       print("\(indent)StringLiteral: \"\(value)\" : \(type)")
     case .interpolatedString(let parts, let type):

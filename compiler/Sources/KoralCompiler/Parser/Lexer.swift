@@ -1,15 +1,3 @@
-/// Duration literal units
-public enum DurationUnit: String, CustomStringConvertible {
-  case nanoseconds = "ns"
-  case microseconds = "us"
-  case milliseconds = "ms"
-  case seconds = "s"
-  case minutes = "min"
-  case hours = "h"
-
-  public var description: String { rawValue }
-}
-
 /// Interpolated string token parts
 public enum InterpolatedStringPart: CustomStringConvertible {
   case stringPart(String)
@@ -34,7 +22,6 @@ public enum Token: CustomStringConvertible {
   case eof  // End of file marker
   case integer(String)  // Integer literal as string, e.g.: "42"
   case float(String)  // Float literal as string, e.g.: "3.14"
-  case duration(value: String, unit: DurationUnit)  // Duration literal, e.g.: "100ms"
   case string(String)  // String literal, e.g.: "hello"
   case interpolatedString(parts: [InterpolatedStringPart])  // Interpolated string literal
   case plus  // Plus operator '+'
@@ -156,8 +143,6 @@ public enum Token: CustomStringConvertible {
       return true
     case (.float(_), .float(_)):
       return true
-    case (.duration(_, _), .duration(_, _)):
-      return true
     case (.string(_), .string(_)):
       return true
     case (.interpolatedString(_), .interpolatedString(_)):
@@ -237,8 +222,6 @@ public enum Token: CustomStringConvertible {
       return "Integer(\(value))"
     case .float(let value):
       return "Float(\(value))"
-    case .duration(let value, let unit):
-      return "Duration(\(value)\(unit))"
     case .string(let value):
       return "String(\(value))"
     case .interpolatedString(let parts):
@@ -713,61 +696,6 @@ public class Lexer {
     return .integer(numStr)
   }
 
-  /// Try to read a duration literal suffix after an integer literal.
-  private func tryReadDurationSuffix(numStr: String) -> Token? {
-    guard let firstChar = getNextChar() else { return nil }
-
-    switch firstChar {
-    case "n":
-      if let nextChar = getNextChar() {
-        if nextChar == "s" {
-          return .duration(value: numStr, unit: .nanoseconds)
-        }
-        unreadChar(nextChar)
-      }
-      unreadChar(firstChar)
-      return nil
-
-    case "u":
-      if let nextChar = getNextChar() {
-        if nextChar == "s" {
-          return .duration(value: numStr, unit: .microseconds)
-        }
-        unreadChar(nextChar)
-      }
-      unreadChar(firstChar)
-      return nil
-
-    case "m":
-      if let nextChar = getNextChar() {
-        if nextChar == "s" {
-          return .duration(value: numStr, unit: .milliseconds)
-        }
-        if nextChar == "i" {
-          if let nextNextChar = getNextChar() {
-            if nextNextChar == "n" {
-              return .duration(value: numStr, unit: .minutes)
-            }
-            unreadChar(nextNextChar)
-          }
-        }
-        unreadChar(nextChar)
-      }
-      unreadChar(firstChar)
-      return nil
-
-    case "s":
-      return .duration(value: numStr, unit: .seconds)
-
-    case "h":
-      return .duration(value: numStr, unit: .hours)
-
-    default:
-      unreadChar(firstChar)
-      return nil
-    }
-  }
-
   // Read a string literal or interpolated string
   private func readStringToken() throws -> Token {
     var literalBuffer = ""
@@ -1087,11 +1015,7 @@ public class Lexer {
       let numberLiteral = try readNumber()
       return switch numberLiteral {
       case .integer(let num):
-        if let durationToken = tryReadDurationSuffix(numStr: num) {
-          durationToken
-        } else {
-          .integer(num)
-        }
+        .integer(num)
       case .float(let num):
         .float(num)
       }

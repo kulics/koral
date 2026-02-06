@@ -127,7 +127,7 @@ extension CodeGen {
     assertTypeResolved(expr.type, contextInfo: context)
     
     switch expr {
-    case .integerLiteral, .floatLiteral, .durationLiteral, .stringLiteral, .booleanLiteral:
+    case .integerLiteral, .floatLiteral, .stringLiteral, .booleanLiteral:
       break
 
     case .interpolatedString(let parts, _):

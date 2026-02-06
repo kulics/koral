@@ -492,9 +492,6 @@ extension Monomorphizer {
             
         case .floatLiteral(let value, let type):
             return .floatLiteral(value: value, type: resolveParameterizedType(type))
-
-        case .durationLiteral(let secs, let nanos, let type):
-            return .durationLiteral(secs: secs, nanos: nanos, type: resolveParameterizedType(type))
             
         case .stringLiteral(let value, let type):
             return .stringLiteral(value: value, type: resolveParameterizedType(type))

@@ -1036,9 +1036,6 @@ public class CodeGen {
     case .floatLiteral(let value, _):
       return String(value)
 
-    case .durationLiteral(let secs, let nanos, let type):
-      return generateDurationLiteral(secs: secs, nanos: nanos, type: type)
-
     case .stringLiteral(let value, let type):
       let bytesVar = nextTemp() + "_bytes"
       let utf8Bytes = Array(value.utf8)
