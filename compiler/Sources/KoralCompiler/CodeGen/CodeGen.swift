@@ -468,15 +468,15 @@ public class CodeGen {
 
       void __koral_closure_retain(struct __koral_Closure closure) {
         if (!closure.env) return;
-        intptr_t* refcount = (intptr_t*)closure.env;
-        *refcount += 1;
+        _Atomic intptr_t* refcount = (_Atomic intptr_t*)closure.env;
+        atomic_fetch_add(refcount, 1);
       }
 
       void __koral_closure_release(struct __koral_Closure closure) {
         if (!closure.env) return;
-        intptr_t* refcount = (intptr_t*)closure.env;
-        *refcount -= 1;
-        if (*refcount == 0) {
+        _Atomic intptr_t* refcount = (_Atomic intptr_t*)closure.env;
+        intptr_t prev = atomic_fetch_sub(refcount, 1);
+        if (prev == 1) {
           if (closure.drop) {
             closure.drop(closure.env);
           } else {

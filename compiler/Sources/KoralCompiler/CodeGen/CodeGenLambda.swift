@@ -212,7 +212,7 @@ extension CodeGen {
   func generateLambdaEnvStruct(name: String, captures: [CapturedVariable]) {
     var structBuffer = "\n// Lambda environment struct\n"
     structBuffer += "struct \(name) {\n"
-    structBuffer += "  intptr_t __refcount;\n"
+    structBuffer += "  _Atomic intptr_t __refcount;\n"
     
     for capture in captures {
       let capturedName = qualifiedName(for: capture.symbol)
