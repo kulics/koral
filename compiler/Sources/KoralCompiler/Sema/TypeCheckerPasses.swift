@@ -78,6 +78,9 @@ extension TypeChecker {
       }
       
       guard let bodyCheckerOutput = self.bodyCheckerOutput else {
+        if hasCollectedErrors {
+          throw diagnosticCollector
+        }
         throw SemanticError(.generic("BodyChecker output missing"), line: 1)
       }
       
@@ -835,6 +838,13 @@ extension TypeChecker {
             return (params, returnType)
           }
           
+          // Check for duplicate method name on this type
+          let existsInGeneric = genericExtensionMethods[baseName]!.contains(where: { $0.method.name == method.name })
+          let existsInIntrinsic = (genericIntrinsicExtensionMethods[baseName] ?? []).contains(where: { $0.method.name == method.name })
+          if existsInGeneric || existsInIntrinsic {
+            throw SemanticError.duplicateDefinition(method.name, line: span.line)
+          }
+          
           // Register the method template (without checked body)
           genericExtensionMethods[baseName]!.append(GenericExtensionMethodTemplate(
             typeParams: typeParams,
@@ -917,6 +927,11 @@ extension TypeChecker {
             access: .default
           )
           
+          // Check for duplicate method name on this type
+          if extensionMethods[typeName]![method.name] != nil {
+            throw SemanticError.duplicateDefinition(method.name, line: span.line)
+          }
+          
           extensionMethods[typeName]![method.name] = methodSymbol
         }
       }
@@ -941,6 +956,13 @@ extension TypeChecker {
         }
 
         for m in methods {
+          // Check for duplicate method name on this type
+          let allExisting = (genericExtensionMethods[baseName] ?? []).map { $0.method.name }
+            + genericIntrinsicExtensionMethods[baseName]!.map { $0.method.name }
+          if allExisting.contains(m.name) {
+            throw SemanticError.duplicateDefinition(m.name, line: span.line)
+          }
+          
           genericIntrinsicExtensionMethods[baseName]!.append((typeParams: typeParams, method: m))
         }
       } else {
@@ -990,6 +1012,11 @@ extension TypeChecker {
             methodKind: methodKind,
             access: .default
           )
+          
+          // Check for duplicate method name on this type
+          if extensionMethods[typeName]![method.name] != nil {
+            throw SemanticError.duplicateDefinition(method.name, line: span.line)
+          }
           
           extensionMethods[typeName]![method.name] = methodSymbol
         }
