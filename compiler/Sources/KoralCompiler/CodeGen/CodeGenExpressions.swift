@@ -50,13 +50,6 @@ extension CodeGen {
     }
   }
 
-  // MARK: - Duration Literal Generation
-
-  func generateDurationLiteral(secs: Int64, nanos: Int64, type: Type) -> String {
-    let cType = cTypeName(type)
-    return "(\(cType)){ .secs = \(secs)LL, .nanos = \(nanos) }"
-  }
-  
   // MARK: - Reference Component Building
   
   /// Build reference components: returns (access path, control block pointer)

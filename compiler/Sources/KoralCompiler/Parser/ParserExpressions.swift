@@ -247,10 +247,6 @@ extension Parser {
       case .float(let num):
         try match(.float(num))
         return .floatLiteral("-\(num)")
-      case .duration(let value, let unit):
-        let span = currentSpan
-        try match(.duration(value: value, unit: unit))
-        return .durationLiteral(value: "-\(value)", unit: unit, span: span)
       default:
         let expr = try parsePrefixExpression()
         return .unaryMinusExpression(expr)
@@ -495,10 +491,6 @@ extension Parser {
     case .float(let num):
       try match(.float(num))
       return .floatLiteral(num)
-    case .duration(let value, let unit):
-      let span = currentSpan
-      try match(.duration(value: value, unit: unit))
-      return .durationLiteral(value: value, unit: unit, span: span)
     case .string(let str):
       try match(.string(str))
       return .stringLiteral(str)

@@ -405,7 +405,6 @@ public enum InterpolatedPart {
 public indirect enum ExpressionNode {
   case integerLiteral(String)  // Store as string
   case floatLiteral(String)    // Store as string
-  case durationLiteral(value: String, unit: DurationUnit, span: SourceSpan)
   case stringLiteral(String)
   case interpolatedString(parts: [InterpolatedPart], span: SourceSpan)
   case booleanLiteral(Bool)
