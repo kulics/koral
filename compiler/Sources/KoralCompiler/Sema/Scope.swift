@@ -86,6 +86,10 @@ public class UnifiedScope {
   }
 
   public func defineLocal(_ name: String, defId: DefId, line: Int? = nil) throws {
+    if name == "_" {
+      // Wildcard bindings are discarded; allow multiple `let _ = ...` in the same scope.
+      return
+    }
     if names[name] != nil {
       throw SemanticError.duplicateDefinition(name, line: line)
     }
