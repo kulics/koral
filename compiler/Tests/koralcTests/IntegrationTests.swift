@@ -177,6 +177,11 @@ class IntegrationTests: XCTestCase {
     func test_unreachable_pattern() throws { try runCase(named: "unreachable_pattern.koral") }
     func test_value_param_copy() throws { try runCase(named: "value_param_copy.koral") }
     func test_zip_test() throws { try runCase(named: "zip_test.koral") }
+    func test_or_else_early_exit() throws { try runCase(named: "or_else_early_exit.koral") }
+    func test_and_then_flatten() throws { try runCase(named: "and_then_flatten.koral") }
+    func test_or_else_and_then_error() throws { try runCase(named: "or_else_and_then_error.koral") }
+    func test_or_else_and_then_precedence() throws { try runCase(named: "or_else_and_then_precedence.koral") }
+    func test_or_else_and_then_drop() throws { try runCase(named: "or_else_and_then_drop.koral") }
     
     func runTestCase(file: URL, projectRoot: URL) throws {
         // 1. Parse expectations

@@ -273,6 +273,14 @@ extension TypeChecker {
       for arg in arguments {
         try collectCapturedVariables(expr: arg, paramNames: paramNames, captures: &captures)
       }
+
+    case .orElseExpression(let operand, let defaultExpr, _):
+      try collectCapturedVariables(expr: operand, paramNames: paramNames, captures: &captures)
+      try collectCapturedVariables(expr: defaultExpr, paramNames: paramNames, captures: &captures)
+
+    case .andThenExpression(let operand, let transformExpr, _):
+      try collectCapturedVariables(expr: operand, paramNames: paramNames, captures: &captures)
+      try collectCapturedVariables(expr: transformExpr, paramNames: paramNames, captures: &captures)
       
     }
   }

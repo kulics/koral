@@ -657,6 +657,12 @@ extension TypeChecker {
         expectedType: expectedType,
         span: span
       )
+
+    case .orElseExpression(let operand, let defaultExpr, let span):
+      return try lowerOrElseExpression(operand: operand, defaultExpr: defaultExpr, span: span)
+
+    case .andThenExpression(let operand, let transformExpr, let span):
+      return try lowerAndThenExpression(operand: operand, transformExpr: transformExpr, span: span)
     }
   }
   
@@ -4858,6 +4864,214 @@ extension TypeChecker {
       try bindPatternVariables(pattern: left, type: type)
     case .notPattern:
       break
+    }
+  }
+
+  // MARK: - or else / and then Lowering
+
+  /// Identifies whether a type is Option or Result and extracts inner types.
+  private enum OptionResultKind {
+    case option(innerType: Type)
+    case result(okType: Type, errType: Type)
+
+    var innerType: Type {
+      switch self {
+      case .option(let t): return t
+      case .result(let t, _): return t
+      }
+    }
+  }
+
+  /// Extracts Option/Result kind from a type, or throws a diagnostic.
+  private func extractOptionResultKind(
+    _ type: Type, span: SourceSpan, operation: String
+  ) throws -> OptionResultKind {
+    if case .genericUnion(let template, let args) = type {
+      if template == "Option", args.count == 1 {
+        return .option(innerType: args[0])
+      }
+      if template == "Result", args.count == 2 {
+        return .result(okType: args[0], errType: args[1])
+      }
+    }
+    throw SemanticError(
+      .generic("'\(operation)' can only be used with Option or Result types, got '\(type)'"),
+      span: span
+    )
+  }
+
+  /// Lowers `operand or else defaultExpr` into a matchExpression.
+  private func lowerOrElseExpression(
+    operand: ExpressionNode,
+    defaultExpr: ExpressionNode,
+    span: SourceSpan
+  ) throws -> TypedExpressionNode {
+    let typedOperand = try inferTypedExpression(operand)
+    let kind = try extractOptionResultKind(typedOperand.type, span: span, operation: "or else")
+    let innerType = kind.innerType
+
+    // Type-check defaultExpr, injecting `_` for Result's error value.
+    let typedDefault: TypedExpressionNode
+    let underscoreSymbol: Symbol?  // non-nil only for Result
+
+    switch kind {
+    case .result(_, let errType):
+      let sym = makeLocalSymbol(name: "_", type: errType, kind: .variable(.Value))
+      underscoreSymbol = sym
+      typedDefault = try withNewScope {
+        currentScope.define("_", defId: sym.defId)
+        return try inferTypedExpression(defaultExpr, expectedType: innerType)
+      }
+    case .option:
+      underscoreSymbol = nil
+      typedDefault = try inferTypedExpression(defaultExpr, expectedType: innerType)
+    }
+
+    // Verify type compatibility: defaultExpr must be T or Never.
+    if typedDefault.type != innerType && typedDefault.type != .never {
+      throw SemanticError(
+        .typeMismatch(expected: innerType.description, got: typedDefault.type.description),
+        span: span
+      )
+    }
+
+    // Build the lowered matchExpression.
+    switch kind {
+    case .option:
+      let valSym = makeLocalSymbol(name: "__val", type: innerType, kind: .variable(.Value))
+      let somePattern = TypedPattern.unionCase(caseName: "Some", tagIndex: 1,
+                                                elements: [.variable(symbol: valSym)])
+      let nonePattern = TypedPattern.unionCase(caseName: "None", tagIndex: 0, elements: [])
+      return .matchExpression(
+        subject: typedOperand,
+        cases: [
+          TypedMatchCase(pattern: somePattern, body: .variable(identifier: valSym)),
+          TypedMatchCase(pattern: nonePattern, body: typedDefault),
+        ],
+        type: innerType
+      )
+
+    case .result(let okType, _):
+      let valSym = makeLocalSymbol(name: "__val", type: okType, kind: .variable(.Value))
+      // Reuse the DefId from the `_` injection so references in defaultExpr resolve correctly.
+      let errSym = underscoreSymbol!
+      let okPattern = TypedPattern.unionCase(caseName: "Ok", tagIndex: 0,
+                                             elements: [.variable(symbol: valSym)])
+      let errPattern = TypedPattern.unionCase(caseName: "Error", tagIndex: 1,
+                                              elements: [.variable(symbol: errSym)])
+      return .matchExpression(
+        subject: typedOperand,
+        cases: [
+          TypedMatchCase(pattern: okPattern, body: .variable(identifier: valSym)),
+          TypedMatchCase(pattern: errPattern, body: typedDefault),
+        ],
+        type: innerType
+      )
+    }
+  }
+
+  // MARK: - and then Lowering
+
+  /// Computes the result type of `and then`, with smart flattening.
+  /// Returns (finalType, isFlattened).
+  private func computeAndThenResultType(
+    operandKind: OptionResultKind,
+    transformResultType: Type
+  ) -> (Type, Bool) {
+    switch operandKind {
+    case .option:
+      // If transform already returns Option, flatten
+      if case .genericUnion(let template, _) = transformResultType, template == "Option" {
+        return (transformResultType, true)
+      }
+      // Otherwise wrap in Option
+      return (.genericUnion(template: "Option", args: [transformResultType]), false)
+
+    case .result(_, let errType):
+      // If transform already returns Result with same error type, flatten
+      if case .genericUnion(let template, let args) = transformResultType,
+         template == "Result", args.count == 2, args[1] == errType {
+        return (transformResultType, true)
+      }
+      // Otherwise wrap in Result
+      return (.genericUnion(template: "Result", args: [transformResultType, errType]), false)
+    }
+  }
+
+  /// Lowers `operand and then transformExpr` into a matchExpression.
+  private func lowerAndThenExpression(
+    operand: ExpressionNode,
+    transformExpr: ExpressionNode,
+    span: SourceSpan
+  ) throws -> TypedExpressionNode {
+    let typedOperand = try inferTypedExpression(operand)
+    let kind = try extractOptionResultKind(typedOperand.type, span: span, operation: "and then")
+    let innerType = kind.innerType
+
+    // Create _ symbol, type-check transformExpr in child scope with _ injected.
+    let underscoreSymbol = makeLocalSymbol(name: "_", type: innerType, kind: .variable(.Value))
+    let typedTransform = try withNewScope {
+      currentScope.define("_", defId: underscoreSymbol.defId)
+      return try inferTypedExpression(transformExpr)
+    }
+
+    let (finalType, flattened) = computeAndThenResultType(
+      operandKind: kind, transformResultType: typedTransform.type)
+
+    // Build the lowered matchExpression.
+    switch kind {
+    case .option:
+      // Reuse underscoreSymbol as the Some pattern variable (DefId sharing).
+      let somePattern = TypedPattern.unionCase(caseName: "Some", tagIndex: 1,
+                                                elements: [.variable(symbol: underscoreSymbol)])
+      let nonePattern = TypedPattern.unionCase(caseName: "None", tagIndex: 0, elements: [])
+
+      let someBody: TypedExpressionNode
+      if flattened {
+        someBody = typedTransform
+      } else {
+        someBody = .unionConstruction(type: finalType, caseName: "Some",
+                                      arguments: [typedTransform])
+      }
+      let noneBody = TypedExpressionNode.unionConstruction(
+        type: finalType, caseName: "None", arguments: [])
+
+      return .matchExpression(
+        subject: typedOperand,
+        cases: [
+          TypedMatchCase(pattern: somePattern, body: someBody),
+          TypedMatchCase(pattern: nonePattern, body: noneBody),
+        ],
+        type: finalType
+      )
+
+    case .result(_, let errType):
+      // Reuse underscoreSymbol as the Ok pattern variable (DefId sharing).
+      let errSym = makeLocalSymbol(name: "__err", type: errType, kind: .variable(.Value))
+      let okPattern = TypedPattern.unionCase(caseName: "Ok", tagIndex: 0,
+                                             elements: [.variable(symbol: underscoreSymbol)])
+      let errPattern = TypedPattern.unionCase(caseName: "Error", tagIndex: 1,
+                                              elements: [.variable(symbol: errSym)])
+
+      let okBody: TypedExpressionNode
+      if flattened {
+        okBody = typedTransform
+      } else {
+        okBody = .unionConstruction(type: finalType, caseName: "Ok",
+                                    arguments: [typedTransform])
+      }
+      let errBody = TypedExpressionNode.unionConstruction(
+        type: finalType, caseName: "Error",
+        arguments: [.variable(identifier: errSym)])
+
+      return .matchExpression(
+        subject: typedOperand,
+        cases: [
+          TypedMatchCase(pattern: okPattern, body: okBody),
+          TypedMatchCase(pattern: errPattern, body: errBody),
+        ],
+        type: finalType
+      )
     }
   }
 }

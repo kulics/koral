@@ -50,12 +50,7 @@ public type [T Any, U Any, R [T]Iterator]MapStreamIterator(
 )
 
 given [T Any, U Any, R [T]Iterator] [T, U, R]MapStreamIterator {
-    public next(self ref) [U]Option = {
-        when self.iter.next() is {
-            .Some(v) then [U]Option.Some(self.mapper(v)),
-            .None then [U]Option.None(),
-        }
-    }
+    public next(self ref) [U]Option = self.iter.next() and then self.mapper(_)
 }
 
 // FilterMapStreamIterator - filters and transforms in one operation
@@ -99,10 +94,8 @@ public type [T Any, R [T]Iterator]SkipStreamIterator(
 given [T Any, R [T]Iterator] [T, R]SkipStreamIterator {
     public next(self ref) [T]Option = {
         while self.to_skip > 0 then {
-            when self.iter.next() is {
-                .Some(_) then { self.to_skip -= 1; },
-                .None then { return [T]Option.None(); },
-            }
+            self.iter.next() or else { return [T]Option.None() }
+            self.to_skip -= 1
         }
         self.iter.next()
     }
@@ -124,10 +117,8 @@ given [T Any, R [T]Iterator] [T, R]StepStreamIterator {
         // Skip step_size - 1 elements
         let mut i = 1
         while i < self.step_size then {
-            when self.iter.next() is {
-                .None then { return [T]Option.None(); },
-                .Some(_) then { i += 1; },
-            }
+            self.iter.next() or else { return [T]Option.None() }
+            i += 1
         }
         self.iter.next()
     }
@@ -141,13 +132,10 @@ public type [T Any, R [T]Iterator]EnumerateStreamIterator(
 
 given [T Any, R [T]Iterator] [T, R]EnumerateStreamIterator {
     public next(self ref) [[T]Indexed]Option = {
-        when self.iter.next() is {
-            .Some(v) then {
-                let idx = self.index
-                self.index += 1
-                [[T]Indexed]Option.Some([T]Indexed(idx, v))
-            },
-            .None then [[T]Indexed]Option.None(),
+        self.iter.next() and then {
+            let idx = self.index
+            self.index += 1
+            [T]Indexed(idx, _)
         }
     }
 }
@@ -160,12 +148,9 @@ public type [T Any, R [T]Iterator]PeekStreamIterator(
 
 given [T Any, R [T]Iterator] [T, R]PeekStreamIterator {
     public next(self ref) [T]Option = {
-        when self.iter.next() is {
-            .Some(v) then {
-                self.action(v);
-                [T]Option.Some(v)
-            },
-            .None then [T]Option.None(),
+        self.iter.next() and then {
+            self.action(_);
+            _
         }
     }
 }
@@ -298,14 +283,9 @@ public type [A Any, B Any, R1 [A]Iterator, R2 [B]Iterator]ZipStreamIterator(
 
 given [A Any, B Any, R1 [A]Iterator, R2 [B]Iterator] [A, B, R1, R2]ZipStreamIterator {
     public next(self ref) [[A, B]Pair]Option = {
-        when self.first.next() is {
-            .Some(a) then {
-                when self.second.next() is {
-                    .Some(b) then [[A, B]Pair]Option.Some([A, B]Pair(a, b)),
-                    .None then [[A, B]Pair]Option.None(),
-                }
-            },
-            .None then [[A, B]Pair]Option.None(),
+        self.first.next() and then {
+            let a = _
+            self.second.next() and then [A, B]Pair(a, _)
         }
     }
 }

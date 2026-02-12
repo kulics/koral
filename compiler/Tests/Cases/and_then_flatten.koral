@@ -1,0 +1,86 @@
+// Test and then smart flattening
+// EXPECT: Option flatten Some-Some: 10
+// EXPECT: Option flatten Some-None: None
+// EXPECT: Option flatten None: None
+// EXPECT: Option wrap Some: 20
+// EXPECT: Option wrap None: None
+// EXPECT: Result flatten Ok-Ok: 50
+// EXPECT: Result flatten Ok-Error: div by zero
+// EXPECT: Result flatten Error: err_outer
+// EXPECT: Result wrap Ok: 99
+// EXPECT: Result wrap Error: err_wrap
+
+let safe_div(x Int, y Int) [Int]Option = {
+    if y == 0 then {
+        [Int]Option.None()
+    } else {
+        [Int]Option.Some(x / y)
+    }
+}
+
+let safe_result_div(x Int, y Int) [Int, String]Result = {
+    if y == 0 then {
+        [Int, String]Result.Error("div by zero")
+    } else {
+        [Int, String]Result.Ok(x / y)
+    }
+}
+
+let print_option(label String, opt [Int]Option) Void = {
+    print(label)
+    when opt is {
+        .Some(v) then print_line(v.to_string()),
+        .None then print_line("None"),
+    }
+}
+
+let print_result(label String, res [Int, String]Result) Void = {
+    print(label)
+    when res is {
+        .Ok(v) then print_line(v.to_string()),
+        .Error(e) then print_line(e),
+    }
+}
+
+let main() Int = {
+    // Option: transform returns Option -> flatten
+    let opt_some = [Int]Option.Some(100)
+    let flat1 = opt_some and then safe_div(_, 10)
+    print_option("Option flatten Some-Some: ", flat1)
+
+    let flat2 = opt_some and then safe_div(_, 0)
+    print_option("Option flatten Some-None: ", flat2)
+
+    let opt_none = [Int]Option.None()
+    let flat3 = opt_none and then safe_div(_, 10)
+    print_option("Option flatten None: ", flat3)
+
+    // Option: transform returns non-Option -> wrap
+    let wrap1 = opt_some and then _ / 5
+    print_option("Option wrap Some: ", wrap1)
+
+    let wrap2 = opt_none and then _ / 5
+    print_option("Option wrap None: ", wrap2)
+
+    // Result: transform returns Result (same error type) -> flatten
+    let res_ok = [Int, String]Result.Ok(100)
+    let rflat1 = res_ok and then safe_result_div(_, 2)
+    print_result("Result flatten Ok-Ok: ", rflat1)
+
+    let rflat2 = res_ok and then safe_result_div(_, 0)
+    print_result("Result flatten Ok-Error: ", rflat2)
+
+    let res_err = [Int, String]Result.Error("err_outer")
+    let rflat3 = res_err and then safe_result_div(_, 2)
+    print_result("Result flatten Error: ", rflat3)
+
+    // Result: transform returns non-Result -> wrap
+    let rwrap1 = res_ok and then _ - 1
+    print_result("Result wrap Ok: ", rwrap1)
+
+    let res_err2 = [Int, String]Result.Error("err_wrap")
+    let rwrap2 = res_err2 and then _ - 1
+    print_result("Result wrap Error: ", rwrap2)
+
+    0
+}

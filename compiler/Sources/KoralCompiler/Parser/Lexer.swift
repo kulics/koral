@@ -486,6 +486,15 @@ public class Lexer {
     _hasBlankLineOrCommentBeforeCurrentToken = state.hasBlankLineOrCommentBeforeCurrentToken
     _previousLineColumn = state.previousLineColumn
   }
+
+  /// Peek at the next token without consuming it.
+  /// Saves and restores lexer state so the current position is unchanged.
+  public func peekNextToken() -> Token {
+    let saved = saveState()
+    let next = (try? getNextToken()) ?? .eof
+    restoreState(saved)
+    return next
+  }
   
   // Record the start position of a token
   private func markTokenStart() {
