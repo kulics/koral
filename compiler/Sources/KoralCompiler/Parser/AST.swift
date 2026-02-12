@@ -492,6 +492,24 @@ public indirect enum ExpressionNode {
     arguments: [ExpressionNode],
     span: SourceSpan
   )
+  /// or else <expr> — value coalescing / early exit (via block expression with return)
+  /// - operand: The Option/Result expression being operated on
+  /// - defaultExpr: The expression after `or else` (can be a block expression)
+  /// - span: Source location
+  case orElseExpression(
+    operand: ExpressionNode,
+    defaultExpr: ExpressionNode,
+    span: SourceSpan
+  )
+  /// and then <expr> — value transformation / optional chaining
+  /// - operand: The Option/Result expression being operated on
+  /// - transformExpr: The expression after `and then` (any expression, including block)
+  /// - span: Source location
+  case andThenExpression(
+    operand: ExpressionNode,
+    transformExpr: ExpressionNode,
+    span: SourceSpan
+  )
 }
 public indirect enum PatternNode: CustomStringConvertible {
   case booleanLiteral(value: Bool, span: SourceSpan)

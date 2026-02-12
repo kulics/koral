@@ -619,6 +619,36 @@ public func printAST(_ node: ASTNode) {
           }
         }
       }
+
+    case .orElseExpression(let operand, let defaultExpr, _):
+      print("\(indent)OrElseExpression:")
+      print("\(indent)  Operand:")
+      withIndent {
+        withIndent {
+          printExpression(operand)
+        }
+      }
+      print("\(indent)  Default:")
+      withIndent {
+        withIndent {
+          printExpression(defaultExpr)
+        }
+      }
+
+    case .andThenExpression(let operand, let transformExpr, _):
+      print("\(indent)AndThenExpression:")
+      print("\(indent)  Operand:")
+      withIndent {
+        withIndent {
+          printExpression(operand)
+        }
+      }
+      print("\(indent)  Transform:")
+      withIndent {
+        withIndent {
+          printExpression(transformExpr)
+        }
+      }
     }
   }
 

@@ -19,7 +19,7 @@ extension Parser {
     } else if currentToken === .forKeyword {
       return try forExpression()
     } else {
-      return try parseOrExpression()
+      return try parseOrElseExpression()
     }
   }
   
@@ -34,14 +34,58 @@ extension Parser {
   
   // MARK: - Logical Expressions
   
-  private func parseOrExpression() throws -> ExpressionNode {
-    var left = try parseAndExpression()
+  /// or else layer: lowest precedence among the new layers.
+  /// Parses `<expr> or else <expr>` as value coalescing / early exit.
+  private func parseOrElseExpression() throws -> ExpressionNode {
+    var left = try parseOrExpression()
 
     while currentToken === .orKeyword {
       if isLineContinuationBlocked() { break }
+      // Peek: if next token is `else`, this is `or else` syntax
+      if lexer.peekNextToken() === .elseKeyword {
+        let startSpan = currentSpan
+        try match(.orKeyword)
+        try match(.elseKeyword)
+        let defaultExpr = try parseOrExpression()
+        left = .orElseExpression(operand: left, defaultExpr: defaultExpr, span: startSpan)
+      } else {
+        break  // Not `or else`, let parseOrExpression handle logical `or`
+      }
+    }
+    return left
+  }
+
+  private func parseOrExpression() throws -> ExpressionNode {
+    var left = try parseAndThenExpression()
+
+    while currentToken === .orKeyword {
+      if isLineContinuationBlocked() { break }
+      // If next token is `else`, don't consume — let parseOrElseExpression handle it
+      if lexer.peekNextToken() === .elseKeyword { break }
       try match(.orKeyword)
-      let right = try parseAndExpression()
+      let right = try parseAndThenExpression()
       left = .orExpression(left: left, right: right)
+    }
+    return left
+  }
+
+  /// and then layer: between logical or and logical and.
+  /// Parses `<expr> and then <expr>` as value transformation / optional chaining.
+  private func parseAndThenExpression() throws -> ExpressionNode {
+    var left = try parseAndExpression()
+
+    while currentToken === .andKeyword {
+      if isLineContinuationBlocked() { break }
+      // Peek: if next token is `then`, this is `and then` syntax
+      if lexer.peekNextToken() === .thenKeyword {
+        let startSpan = currentSpan
+        try match(.andKeyword)
+        try match(.thenKeyword)
+        let transformExpr = try parseAndExpression()
+        left = .andThenExpression(operand: left, transformExpr: transformExpr, span: startSpan)
+      } else {
+        break  // Not `and then`, let parseAndExpression handle logical `and`
+      }
     }
     return left
   }
@@ -51,6 +95,8 @@ extension Parser {
 
     while currentToken === .andKeyword {
       if isLineContinuationBlocked() { break }
+      // If next token is `then`, don't consume — let parseAndThenExpression handle it
+      if lexer.peekNextToken() === .thenKeyword { break }
       try match(.andKeyword)
       let right = try parseLogicalNotExpression()
       left = .andExpression(left: left, right: right)
