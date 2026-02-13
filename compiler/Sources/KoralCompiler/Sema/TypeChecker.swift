@@ -42,6 +42,9 @@ public class TypeChecker {
   // Stack of generic types currently being resolved (for recursion detection)
   var resolvingGenericTypes: Set<String> = []
   
+  // Set of type aliases currently being resolved (for circular alias detection)
+  var resolvingTypeAliases: Set<String> = []
+  
   // Sets to track intrinsic generic types and functions for special handling during monomorphization
   var intrinsicGenericTypes: Set<String> = []
   var intrinsicGenericFunctions: Set<String> = []

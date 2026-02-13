@@ -259,6 +259,14 @@ public class NameCollector: CompilerPass {
             if !isStdLib {
                 throw SemanticError(.generic("'intrinsic' declarations are only allowed in the standard library"), line: span.line)
             }
+
+        case .typeAliasDeclaration(let name, _, let access, let span):
+            try collectTypeAliasDeclaration(
+                name: name,
+                access: access,
+                span: span,
+                isStdLib: isStdLib
+            )
         }
     }
     
@@ -647,6 +655,52 @@ public class NameCollector: CompilerPass {
         }
     }
     
+    // MARK: - Type Alias 声明收集
+
+    private func collectTypeAliasDeclaration(
+        name: String,
+        access: AccessModifier,
+        span: SourceSpan,
+        isStdLib: Bool
+    ) throws {
+        let isPrivate = (access == .private)
+
+        // 生成完整限定名用于重复检查
+        let qualifiedName = currentModulePath.isEmpty ? name : "\(currentModulePath.joined(separator: ".")).\(name)"
+
+        // 检查重复定义（非私有类型，在同一模块中）
+        if !isPrivate && (collectedTypes[qualifiedName] != nil || collectedGenericTemplates[qualifiedName] != nil) {
+            throw SemanticError.duplicateDefinition(name, line: span.line)
+        }
+
+        // 分配 DefId（别名最终解析为目标类型，使用 .type(.structure)）
+        let defId = defIdMap.allocate(
+            modulePath: currentModulePath,
+            name: name,
+            kind: .type(.structure),
+            sourceFile: currentSourceFile,
+            access: access,
+            span: span
+        )
+
+        // 注册到类型信息表
+        let key = isPrivate ? "\(name)@\(currentSourceFile)" : qualifiedName
+        collectedTypes[key] = CollectedTypeInfo(
+            defId: defId,
+            name: name,
+            kind: .structure,
+            access: access,
+            isPrivate: isPrivate,
+            sourceFile: currentSourceFile,
+            modulePath: currentModulePath
+        )
+
+        // 标记标准库类型
+        if isStdLib {
+            stdLibTypes.insert(name)
+        }
+    }
+
     // MARK: - Intrinsic 函数声明收集
     
     private func collectIntrinsicFunctionDeclaration(

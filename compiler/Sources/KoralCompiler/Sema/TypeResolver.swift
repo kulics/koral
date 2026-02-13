@@ -241,7 +241,8 @@ public class TypeResolver: CompilerPass {
                 )
             }
             
-        case .traitDeclaration, .globalVariableDeclaration, .intrinsicTypeDeclaration, .foreignLetDeclaration:
+        case .traitDeclaration, .globalVariableDeclaration, .intrinsicTypeDeclaration, .foreignLetDeclaration,
+             .typeAliasDeclaration:
             // 这些在 Pass 1 中已处理，或在 Pass 3 中处理
             break
         }

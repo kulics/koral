@@ -107,6 +107,28 @@ extension Parser {
       }
 
       try match(.identifier(name))
+
+      // Check for type alias: type Name = TargetType
+      if currentToken === .equal {
+        if isIntrinsic {
+          throw ParserError.unexpectedToken(span: currentSpan, got: "Intrinsic type alias is not supported")
+        }
+        if isForeign {
+          throw ParserError.unexpectedToken(span: currentSpan, got: "Foreign type alias is not supported")
+        }
+        if !typeParams.isEmpty {
+          throw ParserError.unexpectedToken(span: currentSpan, got: "Generic type aliases are not supported")
+        }
+        try match(.equal)
+        let targetType = try parseType()
+        return .typeAliasDeclaration(
+          name: name,
+          targetType: targetType,
+          access: access,
+          span: startSpan
+        )
+      }
+
       if isForeign {
         return try foreignTypeDeclaration(name: name, cname: cname, access: access, span: startSpan)
       }

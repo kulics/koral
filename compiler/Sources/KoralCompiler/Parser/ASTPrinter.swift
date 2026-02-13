@@ -170,6 +170,11 @@ public func printAST(_ node: ASTNode) {
           }
         }
       }
+
+    case .typeAliasDeclaration(let name, let targetType, let access, _):
+      print("\(indent)TypeAliasDeclaration: \(name)")
+      print("\(indent)  Access: \(access)")
+      print("\(indent)  TargetType: \(targetType)")
     }
   }
 
