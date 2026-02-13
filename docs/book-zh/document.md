@@ -272,6 +272,9 @@ s.find_index("World")        // Some(7)
 s.replace_all("World", "Koral") // "Hello, Koral!"
 s.split(",")                 // 按分隔符分割
 s.lines()                    // 按行分割
+
+// 拼接字符串列表
+join_strings(list, ", ")     // 用分隔符拼接 [String]List
 ```
 
 ### 布尔
@@ -1476,6 +1479,14 @@ r.byte_count()            // UTF-8 编码字节数
 for r = "Hello".runes() then {
     print_line(r.to_string())
 }
+```
+
+对于需要频繁按索引访问 Rune 的场景，使用 `to_runes()` 一次性转换为 `[Rune]List`：
+
+```koral
+let runes = "Hello".to_runes()
+let len = runes.count()    // O(1)
+let third = runes[2]       // O(1) 随机访问
 ```
 
 ### Stream API

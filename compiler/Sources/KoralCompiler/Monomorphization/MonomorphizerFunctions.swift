@@ -156,12 +156,30 @@ extension Monomorphizer {
             structureName = resolvedBaseType.description
         }
         
+        // Look up the latest template from the registry to get the checked body.
+        // InstantiationRequests capture a snapshot of the template at creation time,
+        // which may have checkedBody == nil if the request was recorded before
+        // the given block's body was checked in Pass 3. The registry always has
+        // the final version with checkedBody set.
+        let resolvedTemplate: GenericExtensionMethodTemplate
+        if template.checkedBody == nil,
+           let extensions = input.genericTemplates.extensionMethods[structureName],
+           let latest = extensions.first(where: {
+               $0.method.name == template.method.name &&
+               $0.typeParams.count == template.typeParams.count &&
+               $0.checkedBody != nil
+           }) {
+            resolvedTemplate = latest
+        } else {
+            resolvedTemplate = template
+        }
+        
         return try instantiateExtensionMethodFromEntry(
             baseType: resolvedBaseType,
             structureName: structureName,
             genericArgs: typeArgs,
             methodTypeArgs: methodTypeArgs,
-            methodInfo: template
+            methodInfo: resolvedTemplate
         )
     }
     

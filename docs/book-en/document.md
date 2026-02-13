@@ -248,6 +248,9 @@ s.find_index("World")        // Some(7)
 s.replace_all("World", "Koral") // "Hello, Koral!"
 s.split(",")                 // Split by separator
 s.lines()                    // Split by lines
+
+// Join a list of strings
+join_strings(list, ", ")     // Join [String]List with separator
 ```
 
 ### Booleans
@@ -1436,6 +1439,14 @@ Strings can iterate over Unicode code points via the `runes()` method:
 for r = "Hello".runes() then {
     print_line(r.to_string())
 }
+```
+
+For scenarios requiring frequent random access to Runes, use `to_runes()` to convert to a `[Rune]List` in one pass:
+
+```koral
+let runes = "Hello".to_runes()
+let len = runes.count()    // O(1)
+let third = runes[2]       // O(1) random access
 ```
 
 ### Stream API
