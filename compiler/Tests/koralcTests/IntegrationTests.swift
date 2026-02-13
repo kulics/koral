@@ -182,6 +182,11 @@ class IntegrationTests: XCTestCase {
     func test_or_else_and_then_error() throws { try runCase(named: "or_else_and_then_error.koral") }
     func test_or_else_and_then_precedence() throws { try runCase(named: "or_else_and_then_precedence.koral") }
     func test_or_else_and_then_drop() throws { try runCase(named: "or_else_and_then_drop.koral") }
+    func test_type_alias_basic() throws { try runCase(named: "type_alias_basic.koral") }
+    func test_type_alias_error_cycle() throws { try runCase(named: "type_alias_error_cycle.koral") }
+    func test_type_alias_error_undefined() throws { try runCase(named: "type_alias_error_undefined.koral") }
+    func test_type_alias_error_duplicate() throws { try runCase(named: "type_alias_error_duplicate.koral") }
+    func test_type_alias_error_lowercase() throws { try runCase(named: "type_alias_error_lowercase.koral") }
     
     func runTestCase(file: URL, projectRoot: URL) throws {
         // 1. Parse expectations

@@ -227,6 +227,12 @@ public indirect enum GlobalNode {
   case intrinsicGivenDeclaration(
     typeParams: [TypeParameterDecl] = [], type: TypeNode,
     methods: [IntrinsicMethodDeclaration], span: SourceSpan)
+  case typeAliasDeclaration(
+    name: String,
+    targetType: TypeNode,
+    access: AccessModifier,
+    span: SourceSpan
+  )
 }
 
 extension GlobalNode {
@@ -259,6 +265,8 @@ extension GlobalNode {
     case .givenDeclaration(_, _, _, let span):
       return span
     case .intrinsicGivenDeclaration(_, _, _, let span):
+      return span
+    case .typeAliasDeclaration(_, _, _, let span):
       return span
     }
   }

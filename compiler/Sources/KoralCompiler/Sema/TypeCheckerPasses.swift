@@ -722,6 +722,27 @@ extension TypeChecker {
       }
       // Handled in pass 2 (signature) and pass 3 (body)
       break
+
+    case .typeAliasDeclaration(let name, let targetType, let access, let span):
+      self.currentSpan = span
+      let isPrivate = (access == .private)
+      
+      // Circular type alias detection
+      if resolvingTypeAliases.contains(name) {
+        throw SemanticError(.generic("Circular type alias: \(name)"), line: span.line)
+      }
+      resolvingTypeAliases.insert(name)
+      defer { resolvingTypeAliases.remove(name) }
+      
+      // Resolve the target type
+      let resolvedType = try resolveTypeNode(targetType)
+      
+      // Register the resolved type in scope
+      if isPrivate {
+        try currentScope.definePrivateType(name, sourceFile: currentSourceFile, type: resolvedType)
+      } else {
+        try currentScope.defineType(name, type: resolvedType)
+      }
     }
   }
   
@@ -2058,6 +2079,11 @@ extension TypeChecker {
         // intrinsicGenericTypes was also already populated in Pass 1
         return .genericTypeTemplate(name: name)
       }
+
+    case .typeAliasDeclaration:
+      // Type aliases are fully resolved in pass 2 (collectTypeDefinition)
+      // No TypedGlobalNode is generated for them
+      return nil
     }
   }
   

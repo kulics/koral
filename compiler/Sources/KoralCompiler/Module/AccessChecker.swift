@@ -242,7 +242,8 @@ public class AccessChecker {
                .globalStructDeclaration, .globalUnionDeclaration,
                .intrinsicFunctionDeclaration, .intrinsicTypeDeclaration,
                .foreignFunctionDeclaration, .foreignTypeDeclaration,
-               .foreignLetDeclaration:
+               .foreignLetDeclaration,
+               .typeAliasDeclaration:
             return .protected
             
         case .traitDeclaration:
