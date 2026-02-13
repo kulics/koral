@@ -69,10 +69,10 @@ let main() = {}
 
 ### 显示信息
 
-现在让我们的程序输出一些内容看看，标准库提供了 `printLine` 函数，用于向标准输出打印一行文本。
+现在让我们的程序输出一些内容看看，标准库提供了 `print_line` 函数，用于向标准输出打印一行文本。
 
 ```koral
-let main() = printLine("Hello, world!");
+let main() = print_line("Hello, world!")
 ```
 
 现在尝试执行这个程序，我们可以看到控制台上显示了 `Hello, world!`。
@@ -95,19 +95,19 @@ let main() = printLine("Hello, world!");
 
 ### 变量
 
-Koral 的变量是一种绑定语义，相当于是把一个变量名和一个值绑定在一起，从而建立起了关联关系，类似于键值对。为了安全性的考虑，变量默认是不可以改变的，当然 我们也提供了另一种变量——可变变量。
+Koral 的变量是一种绑定语义，相当于是把一个变量名和一个值绑定在一起，从而建立起了关联关系，类似于键值对。为了安全性的考虑，变量默认是不可以改变的，当然我们也提供了另一种变量——可变变量。
 
 #### 只读变量
 
 在 Koral 中是通过 `let` 关键字来声明只读变量的，变量遵循先声明后使用的原则。
 
-Koral 通过静态类型确保类型安全，变量绑定可以在声明时显式通过 `type` 标注类型，在上下文中有足够的信息时，我们也可以省略类型，编译器回从上下文中推断出变量的类型。
+Koral 通过静态类型确保类型安全。变量绑定可以在声明时显式标注类型。在上下文中有足够的信息时，我们也可以省略类型，编译器会从上下文中推断出变量的类型。
 
 示例代码如下：
 
 ```koral
-let a Int = 5; // 显式标注类型
-let b = 123;   // 自动推断类型
+let a Int = 5   // 显式标注类型
+let b = 123     // 自动推断类型
 ```
 
 一旦只读变量被声明之后，它的值在当前作用域内就不会再被改变。
@@ -115,8 +115,8 @@ let b = 123;   // 自动推断类型
 如果我们尝试对只读变量赋值，编译器会报错。
 
 ```koral
-let a = 5;
-a = 6; // 错误
+let a = 5
+a = 6 // 错误
 ```
 
 #### 可变变量
@@ -128,8 +128,8 @@ a = 6; // 错误
 示例代码如下：
 
 ```koral
-let mut a Int = 5; // 显式标注类型
-let mut b = 123; // 自动推断类型
+let mut a Int = 5   // 显式标注类型
+let mut b = 123     // 自动推断类型
 ```
 
 ### 赋值
@@ -141,9 +141,9 @@ Koral 的赋值语句与大多数语言一样，都使用 `=` 声明，`=` 左�
 示例代码如下：
 
 ```koral
-let mut a = 0;
-a = 1;  // 合法
-a = 2;  // 合法
+let mut a = 0
+a = 1  // 合法
+a = 2  // 合法
 ```
 
 ### 块表达式
@@ -157,8 +157,8 @@ a = 2;  // 合法
 ```koral
 let a Void = {}
 let b Int = {
-    let c = 7;
-    let d = c + 14;
+    let c = 7
+    let d = c + 14
     (c + 3) * 5 + d / 3  // 块的返回值
 }
 ```
@@ -168,11 +168,11 @@ let b Int = {
 标识符就是给变量、函数、类型等指定的名字。构成标识符的字母均有一定的规范，这门语言中标识符的命名规则如下：
 
 1. 区分大小写。Myname 与 myname 是两个不同的标识符。
-1. **类型**（Type）和**构造器**（Constructor）必须以**大写字母**开头（如 `Int`, `String`, `Point`）。
-1. **变量**、**函数**、**成员**必须以**小写字母**或下划线开头（如 `main`, `printLine`, `x`）。
-1. 标识符中其他字符可以是下划线 `_` 、字母或数字。
-1. 在同一个 `{}` 内，不能重复定义相同名称的标识符。
-1. 在不同 `{}` 内，可以定义重名的标识符，语言会优先选择当前范围内定义的标识符。
+2. **类型**（Type）和**构造器**（Constructor）必须以**大写字母**开头（如 `Int`, `String`, `Point`）。
+3. **变量**、**函数**、**成员**必须以**小写字母**或下划线开头（如 `main`, `print_line`, `x`）。
+4. 标识符中其他字符可以是下划线 `_` 、字母或数字。
+5. 在同一个 `{}` 内，不能重复定义相同名称的标识符。
+6. 在不同 `{}` 内，可以定义重名的标识符，语言会优先选择当前范围内定义的标识符。
 
 ## 基础类型
 
@@ -184,42 +184,94 @@ let b Int = {
 
 Koral 提供了丰富的数值类型来满足不同的需求。
 在 Koral 中，默认的整数为 `Int` 类型，它可以表示有符号整数类型数据。
-在 Koral 中，默认的小数为 `Float` 类型，它可以表示浮点型数据。
+在 Koral 中，浮点数使用 `Float64` 类型（64 位）或 `Float32` 类型（32 位）。
 
 - `Int`: 平台相关的有符号整数（通常是 64 位）。
 - `UInt`: 平台相关的无符号整数（通常是 64 位）。
 - `Int8`, `Int16`, `Int32`, `Int64`: 固定宽度的有符号整数。
 - `UInt8`, `UInt16`, `UInt32`, `UInt64`: 固定宽度的无符号整数。
-- `Float`: 默认的浮点数类型（64 位，等同于 `Float64`）。
 - `Float32`: 32 位浮点数。
 - `Float64`: 64 位浮点数。
-- `Byte`: 等同于 `UInt8`。
 
 ```koral
-let i Int = 3987349;
-let f Float = 3.14;
-let b UInt8 = 255;
+let i Int = 3987349
+let f Float64 = 3.14
+let b UInt8 = 255
+```
+
+数值字面量支持使用下划线 `_` 分隔数字以提高可读性：
+
+```koral
+let million = 1_000_000
+let pi = 3.141_592_653
+```
+
+### 类型转换
+
+不同数值类型之间需要显式转换，使用 `(Type)expr` 语法：
+
+```koral
+let a Int = 42
+let b Float64 = (Float64)a    // Int -> Float64
+let c Int32 = (Int32)a        // Int -> Int32
+let d UInt8 = (UInt8)255      // Int -> UInt8
 ```
 
 ### 字符串
 
-我们在并不是生活在一个只有数字的世界，所以我们也非常需要使用文字来显示我们需要的信息。
+我们并不是生活在一个只有数字的世界，所以我们也非常需要使用文字来显示我们需要的信息。
 
-在本语言中，字符串用于表示文本数据。 `String` 类型，它是一个不限长度的字符序列数据。
+在本语言中，字符串用于表示文本数据。 `String` 类型，它是一个 UTF-8 编码的字符序列数据。
 
 你可以使用双引号 `""` 或单引号 `''` 包裹一段文字内容，它就会被识别为字符串值。
 
 ```koral
-let s1 String = "Hello, world!";
-let s2 String = 'Hello, world!'; // 和 s1 相同
+let s1 String = "Hello, world!"
+let s2 String = 'Hello, world!' // 和 s1 相同
 ```
 
-Koral 支持字符串插值，允许在字符串中嵌入表达式。
+Koral 支持字符串插值，允许在字符串中嵌入表达式，使用 `\(expr)` 语法：
 
 ```koral
-let name = "Koral";
-let s1 String = "Hello, \{name}!"; // 插值
-let s2 String = 'Hello, \{"world"}!'; // 插值
+let name = "Koral"
+let count = 3
+print_line("Hello, \(name)!")                    // Hello, Koral!
+print_line("Count: \(count)")                    // Count: 3
+print_line("Mixed \(name) has \(count) messages") // Mixed Koral has 3 messages
+print_line("Sum \(1 + (2 * 3))")                 // Sum 7
+```
+
+转义字符使用反斜杠 `\`：
+
+```koral
+"\n"   // 换行
+"\t"   // 制表符
+"\r"   // 回车
+"\v"   // 垂直制表符
+"\f"   // 换页
+"\0"   // 空字符
+"\\"   // 反斜杠
+"\""   // 双引号
+"\'"   // 单引号
+```
+
+常用的 String 方法：
+
+```koral
+let s = "Hello, World!"
+s.count()                    // 13 - 字节长度
+s.is_empty()                 // false
+s.contains("World")          // true
+s.starts_with("Hello")       // true
+s.ends_with("!")             // true
+s.to_ascii_lowercase()       // "hello, world!"
+s.to_ascii_uppercase()       // "HELLO, WORLD!"
+s.trim_ascii()               // 去除首尾空白
+s.slice(0..<5)               // "Hello" - 切片
+s.find_index("World")        // Some(7)
+s.replace_all("World", "Koral") // "Hello, Koral!"
+s.split(",")                 // 按分隔符分割
+s.lines()                    // 按行分割
 ```
 
 ### 布尔
@@ -229,134 +281,74 @@ let s2 String = 'Hello, \{"world"}!'; // 插值
 在本语言中，默认的布尔为 `Bool` 类型，它是一个只有两个可能的值 `true`（真）和 `false`（假）的类型。
 
 ```koral
-let b1 Bool = true;
-let b2 Bool = false;
-let isGreater = 5 > 3; // 结果为 true
+let b1 Bool = true
+let b2 Bool = false
+let isGreater = 5 > 3 // 结果为 true
 ```
-
-### 列表类型
-
-列表是一种泛型（后文介绍）的数据类型，它可以存储一组相同类型的数据元素，每个元素都有一个索引来表示它在列表中的位置。列表的长度不是固定的，它可以动态添加或删除元素，也可以通过索引快速访问元素。
-
-我们使用 `[T]List` 来表示列表类型，其中 `T` 可以是任意类型。
-
-列表类型可以使用列表字面量(`[elem1, elem2, …]`)的方式来初始化，其中 `elem1` 和 `elem2` 表示对应位置的元素，不同的元素之间使用 (`,`) 分割，我们可以传入任何表达式，但所有的元素必须是相同的类型。 
-
-```koral
-let x [Int]List = [1, 2, 3, 4, 5];
-```
-
-如上面的代码所示，我们使用数组字面量语法创建了一个 `[Int]List`，它的元素就像字面量表示的那样是 `1, 2, 3, 4, 5`。
-
-除了这种列举元素的字面量以外，我们也可以用另一种创建一个指定大小和默认值的列表字面量(`[default; size]`)来构造，`default` 是默认值，`size` 是元素的个数。
-
-```koral
-let y [Int]List = [0; 3];
-// y == [0, 0, 0]
-```
-
-我们可以使用数组的 `size` 成员函数（后文介绍）来获取它的元素个数。
-
-```koral
-printLine(x.size()); // 5
-```
-
-我们可以使用下标语法 `[index]` 的方式来访问指定索引的元素，`index` 只能是 `Int` 类型的值。下标的起始是 0，`[0]` 对应第一个元素，后续元素以此类推。
-
-```koral
-printLine(x[0]); // 1
-printLine(x[2]); // 3
-printLine(x[4]); // 5
-```
-
-对列表元素的修改和对成员变量（后文介绍）进行赋值是类似的，只不过需要使用下标语法。
-
-```koral
-let main() = {
-    let x = [1, 2, 3, 4, 5];
-    printLine(x[0]); // 1
-    x[0] = 5;
-    printLine(x[0]); // 5
-}
-```
-
-如上面的代码所示，我们将 x 声明为列表，然后就可以使用 `[index] = value` 的方式对指定下标的元素进行赋值。
 
 ### 引用类型 (Reference)
 
 引用类型用于引用另一个值，而不是持有它。这在需要共享数据或避免复制时非常有用。在类型名称后加上 `ref` 关键字即可声明引用类型。
 
-```koral
-// 声明一个接受 Int 引用作为参数的函数
-let printList(x [Int]List ref) = printLine(x);
-```
-
-引用类型有两种创建方式。
-
-#### ref 表达式
-
-如果我们需要获取一个现有变量的引用，可以使用 `ref` 关键字。这通常用于将栈上的变量以引用的方式传递给函数，避免发生值拷贝。
+使用 `ref` 表达式可以创建一个引用：
 
 ```koral
-let a [Int]List = [1,2,3];
-printList(ref a); // 传递引用
+let a = ref 42           // 创建一个 Int ref
+let b = deref a          // 解引用，得到 42
+print_line(ref_count(a)) // 引用计数
 ```
 
-#### new 函数
+引用使用引用计数自动管理内存。当引用计数降为零时，内存自动释放。
 
-如果我们需要直接创建一个引用类型的值，可以使用 `new` 函数。它会在堆上分配内存并返回一个指向该数据的引用。
+#### 弱引用
+
+弱引用不会增加引用计数，用于打破循环引用。使用 `weakref` 类型后缀声明：
 
 ```koral
-let a [Int]List ref = new([1,2,3]);
-printList(a); // 传递引用
+let strong = ref 42
+let weak = downgrade_ref(strong)   // 降级为弱引用
+let upgraded = upgrade_ref(weak)   // 尝试升级，返回 Option
 ```
 
-#### 内存管理
+### 内存管理
 
 Koral 旨在提供高效且安全的内存管理。它结合了自动内存管理和手动控制的优点。
 
-- **值语义（Value Semantics）**：默认情况下，Koral 中的类型（如 `Int`, 结构体）具有值语义。这意味着在赋值或传递参数时，数据会被复制（除非编译器优化掉）。这类似于 C 语言中的结构体。
-- **引用（Reference）**：使用 `ref` 关键字可以创建引用。引用存储的不是普通的值，而是另一个变量的索引。通过引用，我们可以间接访问和修改被指向的变量。Koral 使用引用计数和所有权分析来自动管理引用的生命周期，防止悬垂指针和内存泄漏。
-- **Copy 与 Drop Trait**：
-    - **Copy**：如果一个类型实现了 `Copy` trait，那么它的值在赋值和传参时可以被执行 `copy` 函数来复制。基本类型（如 `Int`, `Float`）默认实现了 `Copy`。
-    - **Drop**：如果一个类型实现了 `Drop` trait，那么当该类型的值超出作用域或不再被使用时，编译器会自动调用 `drop` 方法。这用于释放非内存资源（如文件句柄、网络连接）。
-- **所有权转移（Move Semantics）**：对于没有执行 `copy` 操作的变量，赋值和传参操作会导致所有权转移（Move）。一旦所有权被转移，原来的变量就不能再被使用了。
+- **值语义（Value Semantics）**：默认情况下，Koral 中的类型（如 `Int`, 结构体）具有值语义。这意味着在赋值或传递参数时，数据会被复制。
+- **引用（Reference）**：使用 `ref` 关键字可以创建引用。Koral 使用引用计数和所有权分析来自动管理引用的生命周期，防止悬垂指针和内存泄漏。
+- **所有权转移（Move Semantics）**：对于没有执行复制操作的变量，赋值和传参操作会导致所有权转移（Move）。一旦所有权被转移，原来的变量就不能再被使用了。
 
 ## 操作符
 
 操作符是一种告诉编译器执行特定的数学或逻辑操作的符号。
 
-我们可以简单地理解成数学中的计算符号，但是编程语言有它不同的地方。
-
 ### 算术操作符
 
 算数操作符主要被使用在数字类型的数据运算上，大部分声明符合数学中的预期。
 
-Koral 支持标准的算术运算，包括加减乘除和取余。
-
 ```koral
-let a = 4;
-let b = 2;
-printLine( a + b );    // + 加
-printLine( a - b );    // - 减
-printLine( a * b );    // * 乘
-printLine( a / b );    // / 除
-printLine( a % b );    // % 取余，意思是整除后剩下的余数
+let a = 4
+let b = 2
+print_line( a + b )    // + 加
+print_line( a - b )    // - 减
+print_line( a * b )    // * 乘
+print_line( a / b )    // / 除
+print_line( a % b )    // % 取余
 ```
 
 ### 比较操作符
 
-比较操作符用于比较两个值的大小关系，结果为 `Bool` 类型，结果符合预期的为 `true`，不符合的为 `false`。注意不等于使用 `<>` 表示。
+比较操作符用于比较两个值的大小关系，结果为 `Bool` 类型。注意不等于使用 `<>` 表示。
 
 ```koral
-let a = 4;
-let b = 2;
-printLine( a == b );     // == 等于
-printLine( a <> b );     // <> 不等于 
-printLine( a > b );      // > 大于
-printLine( a >= b );     // >= 大于或等于
-printLine( a < b );      // < 小于
-printLine( a <= b );     // <= 小于或等于
+let a = 4
+let b = 2
+print_line( a == b )     // == 等于
+print_line( a <> b )     // <> 不等于 
+print_line( a > b )      // > 大于
+print_line( a >= b )     // >= 大于或等于
+print_line( a < b )      // < 小于
+print_line( a <= b )     // <= 小于或等于
 ```
 
 ### 逻辑操作符
@@ -364,45 +356,38 @@ printLine( a <= b );     // <= 小于或等于
 逻辑操作符主要被用来对两个 Bool 类型的操作数进行逻辑运算（与、或、非）。
 
 ```koral
-let a = true;
-let b = false;
-printLine( a and b );       // 与，两者同时为真才为真
-printLine( a or b );        // 或，两者其中一者为真就为真
-printLine( not a );         // 非，布尔值取反
+let a = true
+let b = false
+print_line( a and b )       // 与，两者同时为真才为真
+print_line( a or b )        // 或，两者其中一者为真就为真
+print_line( not a )         // 非，布尔值取反
 ```
 
-其中，`and` 和 `or` 具有短路语义。短路逻辑运算的可以跳过部分不必要的计算，以节省计算资源或避免副作用。
-
-当 `and` 操作符左侧表达式的值为 `false` 时，`and` 操作符右侧的表达式计算将会被跳过。
+其中，`and` 和 `or` 具有短路语义。
 
 ```koral
-let a = false and f(); // 不会执行 f()
-```
-
-当 `or` 操作符左侧表达式的值为 `true` 时，`or` 操作符右侧的表达式计算将会被跳过。
-
-```koral
-let a = true or f(); // 不会执行 f()
+let a = false and f() // 不会执行 f()
+let b = true or f()   // 不会执行 f()
 ```
 
 ### 位操作符
 
-位操作符主要用于对两个整数类型的操作数进行位运算（与、或、异或、取反、左移、右移）。
+位操作符主要用于对两个整数类型的操作数进行位运算。
 
 ```koral
-let a = 4;
-let b = 2;
-printLine( a & b );    // 按位与
-printLine( a | b );    // 按位或
-printLine( a ^ b );    // 按位异或
-printLine( ~a );       // 按位取反
-printLine( a << b );   // 左移
-printLine( a >> b );   // 右移
+let a = 4
+let b = 2
+print_line( a & b )    // 按位与
+print_line( a | b )    // 按位或
+print_line( a ^ b )    // 按位异或
+print_line( ~a )       // 按位取反
+print_line( a << b )   // 左移
+print_line( a >> b )   // 右移
 ```
 
 ### 范围操作符
 
-范围操作符用于生成一个范围（Range），我们可以在范围操作符的两端分别填入需要的整数类型值来表示一个范围，常用于循环或模式匹配。
+范围操作符用于生成一个范围（Range），常用于循环或模式匹配。
 
 ```koral
 1..5     // 1 <= x <= 5 (闭区间)
@@ -421,26 +406,43 @@ printLine( a >> b );   // 右移
 Koral 支持常见的算术复合赋值，而且同时支持位运算复合赋值。
 
 ```koral
-let mut x = 10;
-x += 5;       // x = x + 5
-x -= 2;       // x = x - 2
-x *= 3;       // x = x * 3
-x /= 2;       // x = x / 2
-x %= 4;       // x = x % 4
+let mut x = 10
+x += 5       // x = x + 5
+x -= 2       // x = x - 2
+x *= 3       // x = x * 3
+x /= 2       // x = x / 2
+x %= 4       // x = x % 4
 
-let mut y = 0b1100;
-y &= 0b1010;  // y = y & 0b1010
-y |= 0b0001;  // y = y | 0b0001
-y ^= 0b1111;  // y = y ^ 0b1111
-y <<= 1;      // y = y << 1
-y >>= 2;      // y = y >> 2
+let mut y = 12
+y &= 10     // y = y & 10
+y |= 1      // y = y | 1
+y ^= 15     // y = y ^ 15
+y <<= 1     // y = y << 1
+y >>= 2     // y = y >> 2
+```
+
+### 值合并与可选链
+
+Koral 提供了两个特殊的操作符用于处理 `Option` 和 `Result` 类型：
+
+- `or else`：值合并，当左侧为 `None` 或 `Error` 时返回右侧的默认值。
+- `and then`：可选链/值变换，当左侧为 `Some` 或 `Ok` 时对内部值应用右侧的变换。
+
+```koral
+let opt = [Int]Option.Some(42)
+let val = opt or else 0           // 42（因为 opt 是 Some）
+
+let none = [Int]Option.None()
+let val2 = none or else 0         // 0（因为 none 是 None）
+
+let mapped = opt and then _ * 2   // Some(84)
 ```
 
 ### 运算符优先级
 
 操作符优先级从高到低如下：
 
-1. 前缀: `not`, `~`, `+`(一元), `-`(一元)
+1. 前缀: `not`, `~`, 类型转换 `(Type)expr`
 2. 乘除: `*`, `/`, `%`
 3. 加减: `+`, `-`
 4. 移位: `<<`, `>>`
@@ -449,20 +451,22 @@ y >>= 2;      // y = y >> 2
 7. 按位与: `&`
 8. 按位异或: `^`
 9. 按位或: `|`
-10. 模式检查: `is`
+10. 范围: `..`, `..<`, `<..`, `<..<`, `...`, `<...`, `...<`, `....`
 11. 逻辑与: `and`
-12. 逻辑或: `or`
+12. 可选链: `and then`
+13. 逻辑或: `or`
+14. 值合并: `or else`
 
 ## 选择结构
 
-选择结构用于判断给定的条件，根据判断的结果判断某些条件，根据判断的结果来控制程序的流程。
+选择结构用于判断给定的条件，根据判断的结果来控制程序的流程。
 
 在 Koral 中选择结构使用 `if` 语法表示，`if` 后面紧跟判断条件，在条件为 `true` 时执行条件后面的 `then` 分支，在条件为 `false` 时执行 `else` 关键字后面的 `else` 分支。
 
 例如：
 
 ```koral
-let main() = if 1 == 1 then printLine("yes") else printLine("no");
+let main() = if 1 == 1 then print_line("yes") else print_line("no")
 ```
 
 执行上面的程序会看到 `yes`。
@@ -472,172 +476,196 @@ let main() = if 1 == 1 then printLine("yes") else printLine("no");
 因此上面那段程序我们也可以这样写，两种写法结果等价。
 
 ```koral
-let main() = printLine(if 1 == 1 then "yes" else "no");
+let main() = print_line(if 1 == 1 then "yes" else "no")
 ```
 
 由于 `if` 本身也是表达式，因此 `else` 后面自然也可以接另外一个 `if` 表达式，这样我们就可以实现连续的条件判断。
 
 ```koral
-let x = 0;
-let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less";
+let x = 0
+let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less"
 ```
 
 当我们不需要处理 `else` 分支时，可以省略 `else` 分支，这时它的值是 `Void`。
 
 ```koral
-let main() = if 1 == 1 then printLine("yes");
+let main() = if 1 == 1 then print_line("yes")
+```
+
+### if is 模式匹配
+
+`if` 还支持 `is` 模式匹配语法，可以在条件判断的同时解构值：
+
+```koral
+let opt = [Int]Option.Some(42)
+if opt is .Some(v) then {
+    print_line(v)  // 42
+} else {
+    print_line("None")
+}
 ```
 
 ### let 表达式
 
-`let` 也可以作为表达式使用，它允许你在计算后面的表达式之前绑定一个变量。这个变量的作用域仅限于 `then` 后面的表达式。这常用于在 `if` 或 `while` 之前引入临时变量。
-
-在不使用 `let` 表达式的情况下我们可能会这样写，来达到缩小作用域的效果：
-
-```koral
-{
-    let val = getValue();
-    if val > 0 then {
-        // some codes if is true
-    } else {
-        // some codes if is false
-    }
-}
-```
-
-可以看出，val 属于一个单独的一个块表达式中，这样不会将 val 暴露在 `if` 之外的作用域中。
-
-使用 `let` 表达式的话我们可以这样写：
+`let` 也可以作为表达式使用，它允许你在计算后面的表达式之前绑定一个变量。这个变量的作用域仅限于 `then` 后面的表达式。
 
 ```koral
 // val 仅在 if 表达式中可见
-let val = getValue() then if val > 0 then {
-    // some codes if is true
+let val = get_value() then if val > 0 then {
+    // val > 0 时的代码
 } else {
-    // some codes if is false
+    // val <= 0 时的代码
 }
 ```
 
-如此一来，val 就只能在 `if` 和 `else` 中可见，不会泄露到其它作用域中去了。
-
 ## 循环结构
 
-循环结构是指在程序中需要反复执行某个功能而设置的一种程序结构。它由循环体中的条件，判断继续执行某个功能还是退出循环。
+循环结构是指在程序中需要反复执行某个功能而设置的一种程序结构。
 
 ### while 表达式
 
 在 Koral 中循环结构使用 `while` 语法表示，`while` 后面紧跟判断条件，在条件为 `true` 时执行后面表达式，然后重新回到判断条件处进行判断进入下一轮循环，在条件为 `false` 结束循环。`while` 也是一个表达式。
 
 ```koral
-let mut i = 0;
+let mut i = 0
 while i < 10 then {
-    printLine(i);
-    i += 1;
+    print_line(i)
+    i += 1
 }
 ```
 
-执行以上程序会打印 0 到 10。
+#### while is 模式匹配
+
+`while` 也支持 `is` 模式匹配，常用于迭代器循环：
+
+```koral
+let mut iter = list.iterator()
+while iter.next() is .Some(v) then {
+    print_line(v)
+}
+```
 
 ### break 和 continue
 
 - `break`: 退出循环。
 - `continue`: 跳过当前迭代。
 
-当我们需要在循环中主动退出循环时，可以使用 break 语句。程序会在执行到 break 时退出当前最近的一层循环。
-
 ```koral
-let main() = {
-    let mut i = 0;
-    while true then {
-        if i > 20 then break;
-        printLine(i);
-        i = i + 1;
-    }
+let mut i = 0
+while true then {
+    if i > 20 then break
+    if i % 2 == 0 then { i += 1; continue }
+    print_line(i)
+    i += 1
 }
 ```
-
-执行以上程序会打印 0 到 20。
-
-如果我们需要在循环中跳过某些轮，可以使用 continue 语句。程序会在执行到 continue 时跳过当前一轮循环，继续执行下一次循环。
-
-```koral
-let main() = {
-    let mut i = 0;
-    while i <= 10 then {
-        if i % 2 == 0 then continue;
-        printLine(i);
-        i = i + 1;
-    }
-}
-```
-
-执行以上程序会打印 0 到 10 之间的奇数。
 
 ### for 循环
 
-`for` 循环用于遍历任何实现了迭代器接口的对象（如列表、数组、范围等）。
+`for` 循环用于遍历任何实现了迭代器接口的对象（如列表、Map、Set、范围等）。
 
 每次迭代，迭代器产生的下一个值会尝试匹配 `pattern`，如果匹配成功，则执行 `then` 后面的表达式。
 
 ```koral
-// 遍历范围
-for i = 0..10 then {
-    printLine(i);
-}
-```
-
-执行以上程序会打印 0 到 10。
-
-```koral
-let list = [1,2,3,4,5];
-
 // 遍历列表
-for item = list then {
-    printLine(item);
+let mut list = [Int]List.new()
+list.push(10)
+list.push(20)
+list.push(30)
+
+for x = list then {
+    print_line(x)
 }
 
-// 配合解构使用
-for (index, value) = list.enumerate() then {
-    printLine("Index: \{index}, Value: \{value}");
+// 遍历 Map
+let mut map = [String, Int]Map.new()
+map.insert("a", 1)
+map.insert("b", 2)
+
+for entry = map then {
+    print(entry.key)
+    print(" -> ")
+    print_line(entry.value)
+}
+
+// 遍历 Set
+let mut set = [Int]Set.new()
+set.insert(100)
+set.insert(200)
+
+for v = set then {
+    print_line(v)
 }
 ```
-
-执行上面的程序会先输出 1 到 5，然后再输出带 index 的 1 到 5。
 
 ## 模式匹配
 
-Koral 拥有强大的模式匹配功能，主要通过 `match` 表达式和 `is` 操作符使用。
+Koral 拥有强大的模式匹配功能，主要通过 `when` 表达式和 `is` 操作符使用。
 
-### match 表达式
+### when 表达式
 
-`match` 表达式允许你将一个值与一系列模式进行比较，并根据匹配的模式执行相应的代码。它类似于其他语言中的 `switch` 语句，但功能更为强大。`match` 也是一个表达式，会返回匹配分支的值。
+`when` 表达式允许你将一个值与一系列模式进行比较，并根据匹配的模式执行相应的代码。它类似于其他语言中的 `switch` 语句，但功能更为强大。`when` 也是一个表达式，会返回匹配分支的值。
 
 ```koral
-when x is {
-    1 then "one";
-    2 then "two";
-    _ then "other";
+let x = 5
+let result = when x is {
+    1 then "one",
+    2 then "two",
+    _ then "other",
 }
 ```
 
 支持的模式包括：
 
+- 通配符模式：`_`（匹配任意值）
 - 字面量模式：`1`, `"abc"`, `true`
-- 范围模式：`0..9`
-- 变量绑定模式：`x` (匹配任意值并绑定到 x)
-- 解构模式：`Point(x, y)`
-- 枚举模式：`.Some(v)`
-- 类型检查模式：`x Int`
+- 变量绑定模式：`x`（匹配任意值并绑定到 x），`mut x`（可变绑定）
+- 比较模式：`> 5`, `< 0`, `>= 10`, `<= -1`
+- 联合类型模式：`.Some(v)`, `.None`
+- 逻辑模式：`pattern and pattern`, `pattern or pattern`, `not pattern`
+
+```koral
+// 联合类型匹配
+type Shape {
+    Circle(radius Float64),
+    Rectangle(width Float64, height Float64),
+}
+
+let area = when shape is {
+    .Circle(r) then 3.14 * r * r,
+    .Rectangle(w, h) then w * h,
+}
+
+// 比较模式
+let grade = when score is {
+    >= 90 then "A",
+    >= 80 then "B",
+    >= 70 then "C",
+    _ then "F",
+}
+
+// 逻辑模式
+when x is {
+    1 or 2 or 3 then print_line("small"),
+    _ then print_line("big"),
+}
+```
 
 ### is 操作符
 
 `is` 操作符用于检查一个值是否匹配某个模式，结果为 `Bool` 类型。
 
-当在 `if` 等条件表达式中使用时，如果匹配成功，它还可以将模式中的变量绑定到当前作用域，供后续代码使用。
+当在 `if` 或 `while` 等条件表达式中使用时，如果匹配成功，它还可以将模式中的变量绑定到当前作用域。
 
 ```koral
-if op is 0..9 then {
-    printLine(v);
+let opt = [Int]Option.Some(42)
+if opt is .Some(v) then {
+    print_line(v)  // 42
+}
+
+// 比较模式
+if score is >= 60 then {
+    print_line("passed")
 }
 ```
 
@@ -645,156 +673,129 @@ if op is 0..9 then {
 
 函数是用来完成特定任务的独立的代码块。
 
-通常我们会将一系列需要重复使用的任务处理封装成为函数，方便在其它地方重复使用。
-
 ### 定义
-
-之前我们已经见过了入口函数，它使用了固定名称 main 来定义。
-
-当我们需要定义其它函数时，我们可以使用同样的语法定义其它名称的函数。
 
 函数通过 `let` 关键字定义，函数的名字后面使用 `()` 表示这个函数接受的参数，括号后面是这个函数的返回类型。返回类型在上下文明确时可以省略，由编译器推断返回类型。
 
 函数的 `=` 右边必须声明一个表达式，这个表达式的值就是函数的返回值。
 
 ```koral
-let f1() Int = 1;
-let f2(a Int) Int = a + 1;
-let f3(a Int) = a + 1;
+let f1() Int = 1
+let f2(a Int) Int = a + 1
+let f3(a Int) = a + 1     // 返回类型推断
 ```
 
 ### 调用
 
-那么怎么使用这些定义好的函数呢？我们只需要在函数表达式后面使用 `()` 语法就可以调用函数，从而得到函数的返回值。
-
-`()` 必须按函数定义的参数要求传入对应类型的参数。
+使用 `()` 语法调用函数：
 
 ```koral
-let a = f1();
-let b = f2(1);
+let a = f1()
+let b = f2(1)
 ```
 
 ### 参数
 
-参数是函数执行时能够接收的数据，通过这些不同的参数我们就可以让函数输出不同的返回值。
-
-比如我们可以实现一个平方函数，每次调用可以返回参数的平方值。
-
-非常简单的，我们只需要使用 `参数名 类型` 就可以声明参数。
+参数是函数执行时能够接收的数据。使用 `参数名 类型` 声明参数。
 
 ```koral
-let sqrt(x Int) = x * x;
-let a = sqrt(x); // a == 4
+let add(x Int, y Int) = x + y
+let a = add(1, 2) // a == 3
 ```
 
-sqrt 接收一个 Int 类型的参数 x，然后返回它的平方值。调用 sqrt 的时候我们需要给出对应 Int 类型的表达式，就可以完成调用。
-
-如果我们需要多个参数，可以按顺序逐个声明它们，中间使用 `,` 分割。调用也需要按同样的顺序给出表达式。
+可变参数使用 `mut` 关键字标记：
 
 ```koral
-let add(x Int, y Int) = x + y;
-let a = add(1, 2); // a == 3
+let increment(mut x Int) = { x += 1; x }
 ```
 
 ### 函数类型
 
-在 Koral 中，函数与 Int、Float 等类型一样，也是一种类型，同理函数也可以作为表达式使用。
-
-函数的类型使用 `[T1, T2, T3,... R]Func` 语法声明，跟函数定义一样需要声明参数和返回类型。其中，`T1, T2, T3, ...` 部分是参数类型序列，当没有参数时为空，否则按顺序排列直到列举完所有参数类型。R 是返回类型。
-
-函数定义之后，这个函数名就可以作为表达式使用，可以赋值给其它变量或者作为参数和返回值。
-
-函数类型的变量跟函数一样使用 `()` 语法调用。
+在 Koral 中，函数也是一种类型。函数的类型使用 `[T1, T2, ..., R]Func` 语法声明，其中 `T1, T2, ...` 是参数类型，`R` 是返回类型。
 
 ```koral
-let sqrt(x Int) = x * x; // [Int, Int]Func
-let f [Int, Int]Func = sqrt;
-let a = f(2); // a == 4
+let sqrt(x Int) = x * x          // [Int, Int]Func
+let f [Int, Int]Func = sqrt
+let a = f(2)                      // a == 4
 ```
 
 利用这个特性，我们也可以定义函数类型的参数或者返回值。
 
 ```koral
-let hello() = printLine("Hello, world!");
-let run(f [Void]Func) = f();
-let toRun() = run;
+let hello() = print_line("Hello, world!")
+let run(f [Void]Func) = f()
+let toRun() = run
 
-let main() = toRun()(hello);
+let main() = toRun()(hello)
 ```
-
-执行上面的代码我们会看到 `Hello, world!`。
 
 ### Lambda 表达式
 
-如上面那种方式先定义一个函数再传入使用有时候显得比较啰嗦，因为我们仅仅只是希望执行一小段功能而已，未必想定义一个函数提供给其它地方使用。
-
-这时我们可以使用 Lambda 表达式 的语法来简化我们的代码。
-
 Lambda 表达式与函数定义很相似，只是 `=` 换成了 `->`，并且没有函数名和 let 关键字。
 
-如下面的代码所示，f2 的值是一个 lambda，它们的类型与 f1 一样，语法上也非常相似，lambda 的同样需要声明参数和返回类型，并且需要一个表达式作为返回值。
-
 ```koral
-let f1(x Int) Int = x + 1; // [Int, Int]Func
-let f2 = (x Int) Int -> x + 1; // [Int, Int]Func
-let a = f1(1) + f2(1); // a == 4
+let f1(x Int) Int = x + 1            // [Int, Int]Func
+let f2 = (x Int) Int -> x + 1        // [Int, Int]Func
+let a = f1(1) + f2(1)                // a == 4
 ```
 
-在我们的上下文中可以得知 lambda 的类型时，我们可以省略它的参数类型和返回类型。
+在上下文中可以得知 lambda 的类型时，可以省略参数类型和返回类型：
 
 ```koral
-let f [Int, Int]Func = (x) -> x + 1;
+let f [Int, Int]Func = (x) -> x + 1
+```
+
+Lambda 支持多种形式：
+
+```koral
+() -> 42                           // 无参数
+(x) -> x * 2                      // 单参数，类型推断
+(x Int) -> x * 2                  // 单参数，显式类型
+(x, y) -> x + y                   // 多参数，类型推断
+(x Int, y Int) Int -> x + y       // 完整类型标注
+(x) -> { let y = x * 2; y + 1 }  // 块体
 ```
 
 ### 闭包
 
-Lambda 表达式可以捕获其周围作用域中的变量，这被称为闭包。当 lambda 引用外部作用域的变量时，该变量会被捕获并存储在闭包中。
+Lambda 表达式可以捕获其周围作用域中的变量，这被称为闭包。
 
 ```koral
 let make_adder(base Int) [Int, Int]Func = {
-    // lambda 捕获了外部作用域的 'base'
     (x) -> base + x
 }
 
-let add10 = make_adder(10);
-let result = add10(32);  // result == 42
+let add10 = make_adder(10)
+let result = add10(32)  // result == 42
 ```
-
-在上面的例子中，lambda `(x) -> base + x` 捕获了 `make_adder` 函数的参数 `base`。即使 `make_adder` 返回后，闭包仍然保留对捕获值的访问。
 
 #### 捕获规则
 
 Koral 只允许捕获**不可变**变量。尝试捕获可变变量会导致编译错误。
 
 ```koral
-let x = 10;
-let f = () -> x + 1;  // OK: x 是不可变的
+let x = 10
+let f = () -> x + 1  // OK: x 是不可变的
 
-let mut y = 20;
-let g = () -> y + 1;  // 错误: 不能捕获可变变量 'y'
+let mut y = 20
+let g = () -> y + 1  // 错误: 不能捕获可变变量 'y'
 ```
-
-这个限制确保闭包具有可预测的行为，避免共享可变状态带来的问题。
 
 #### 柯里化
 
-闭包使柯里化成为可能——这是一种将具有多个参数的函数转换为一系列单参数函数的技术。
+闭包使柯里化成为可能：
 
 ```koral
-let add [Int, [Int, Int]Func]Func = (x) -> (y) -> x + y;
+let add [Int, [Int, Int]Func]Func = (x) -> (y) -> x + y
 
-let add10 = add(10);     // 返回一个加 10 的函数
-let result = add10(32);  // result == 42
-
-// 或者直接调用
-let sum = add(20)(22);   // sum == 42
+let add10 = add(10)
+let result = add10(32)  // result == 42
+let sum = add(20)(22)   // sum == 42
 ```
 
 ## 数据类型
 
 数据类型是由一系列具有相同类型或不同类型的数据构成的数据集合，它是一种复合数据类型。
-
-显而易见，数据类型适合用来将不同数据包装到一起，形成一个新类型，便于操作复杂的数据。
 
 Koral 提供了强大的类型系统，允许你定义自己的数据结构。使用 `type` 关键字来定义。
 
@@ -804,166 +805,102 @@ Koral 提供了强大的类型系统，允许你定义自己的数据结构。�
 
 #### 定义
 
-我们可以使用 `type` 关键字声明一个新数据类型，数据类型需要使用 `()` 声明它所拥有的成员变量，与函数的参数类似。
-
 ```koral
-type Empty();
+type Empty()
+type Point(x Int, y Int)
 ```
-
-上面我们声明了一个名叫 Empty 的新数据类型，这个数据类型什么数据都不包含。
-
-接下来让我们定义一些更有意义的数据类型试试。
-
-```koral
-type Point(x Int, y Int);
-```
-
-Point 是一个具有 x 和 y 两个成员变量的数据类型，它可以用来表示二维坐标系中的某一个点。这样我们就可以使用 Point 这个类型表示我们在坐标系中的数据，而不用总是使用两个独立的 Int 数据。
 
 #### 构造
 
-那么我们怎么构造一个新的 Point 数据呢？
-
-和函数类型类似，我们同样使用 `()` 语法来调用我们的构造器，就可以得到我们需要的数据。
+使用 `()` 语法调用构造器：
 
 ```koral
-let a Point = Point(0, 0);
+let a Point = Point(0, 0)
 ```
 
 #### 使用成员变量
 
-现在我们已经有了一个 Point 数据，我们要怎么使用里面的 x 和 y 呢？
-
-很简单，我们只需要使用 `.` 语法，就能访问它们了。
+使用 `.` 语法访问成员变量：
 
 ```koral
-type Point(x Int, y Int);
+type Point(x Int, y Int)
 
 let main() = {
-    let a = Point(64, 128);
-    printLine(a.x);
-    printLine(a.y);
+    let a = Point(64, 128)
+    print_line(a.x)  // 64
+    print_line(a.y)  // 128
 }
 ```
-
-执行上面的程序，我们可以看到 64 和 128。
 
 #### 可变成员变量
 
-成员变量与变量一样，默认都是只读的。所以我们不能对 Point 中的 x 和 y 再次赋值。如果我们尝试这么做，编译器会报错。
+成员变量默认是只读的。使用 `mut` 关键字标注可变成员变量：
 
 ```koral
-type Point(x Int, y Int);
+type Point(mut x Int, mut y Int)
 
 let main() = {
-    let a = Point(64, 28);
-    a.x = 2; // 错误
+    let a = Point(64, 128)
+    a.x = 2  // ok，因为 x 是 mut
+    a.y = 0  // ok，因为 y 是 mut
 }
 ```
 
-我们可以在类型定义的时候对成员变量标注 mut 关键字，这样它就会被定义为是一个可变成本变量。对于可变成员变量，我们可以对其进行赋值。
+成员变量的可变性跟随类型定义，与实例变量是否可变无关。
 
-成员变量的可变性是跟随类型的，与实例变量是否可变没有关系，所以我们即使声明了只读变量也可以修改可变成员变量。
+### 联合类型 (Sum Type)
 
-```koral
-type Point(mut x Int, mut y Int);
-
-let main() = {
-    let a Point = Point(64, 128); // `a` 不需要声明为 mut
-    a.x = 2; // ok
-    a.y = 0; // ok
-}
-```
-
-当我们将一个类型的变量赋值给另一个变量使用时，两个变量并不是同一个实例，所以我们对成员变量的修改不会影响其它变量。换句话说，`Point` 类型可以被认为是其它语言中的值类型。
-
-```koral
-type Point(mut x Int, mut y Int);
-
-let main() = {
-    let a Point = Point(64, 128); 
-    let b Point = a; // ok
-    printLine(a.x); // 64
-    printLine(b.x); // 64
-    a.x = 128;
-    printLine(a.x); // 128
-    printLine(b.x); // 64
-}
-```
-
-#### 成员函数
-
-除了成员变量以外，数据类型还可以定义成员函数。成员函数能让我们的类型直接提供丰富的功能，而不需要依赖外部函数。
-
-定义成员函数很简单，在类型定义的后面声明一个包含成员函数的块即可。
-
-```koral
-type Rectangle(length Int, width Int) {
-    area(self) Int = self.length * self.width;
-}
-```
-
-如上面的代码展示的，我们定义了一个成员函数 `area`，它用来计算 Rectangle 的面积。
-
-跟普通的函数定义有差别的是，成员函数不需要使用 `let` 开头，而且通常第一个参数是 `self`。它用来表示当前类型的实例参数。
-
-也许你已经注意到，在成员函数中我们访问成员变量跟在外部访问成员变量类似，只是我们需要使用 `self` 来表示实例的变量名。
-
-和成员变量的访问一样，我们只需要使用 `.` 语法，就能访问成员函数了。
-
-```koral
-let main() = {
-    let r = Rectangle(2, 4);
-    printLine(r.area());
-}
-```
-
-执行上面的程序，我们可以看到 8。
-
-除了包含 `self` 的成员函数以外，我们还可以定义不包含 `self` 的成员函数。
-
-这一类函数不能使用实例访问，只能使用类型名称访问。它可以让我们定义一些与类型关联性很高的函数但不需要实例作为参数的函数。
-
-```koral
-type Point(x Int, y Int) {
-    default() Point = Point(0, 0);
-}
-
-let main() = {
-    let a = Point.default();
-    printLine(a.x); // 0
-    printLine(a.y); // 0
-}
-```
-
-例如上面的例子，我们为 Point 定义一个构造默认值的成员函数。然后使用 `Point.default` 的方式调用了它。
-
-### 枚举 (Sum Type)
-
-枚举允许你定义一个类型，它可以是几个不同变体（Variant）中的一个。每个变体可以携带不同类型的数据。这在处理状态机或错误处理时非常有用。
+联合类型允许你定义一个类型，它可以是几个不同变体（Variant）中的一个。每个变体可以携带不同类型的数据。
 
 ```koral
 type Shape {
-    Circle(radius Float);
-    Rectangle(width Float, height Float);
+    Circle(radius Float64),
+    Rectangle(width Float64, height Float64),
 }
 
-// 实例化枚举变体
-let s = Shape.Circle(1.0);
+let s = Shape.Circle(1.0)
 ```
 
-#### 使用枚举值
+#### 使用联合类型值
 
-我们可以通过模式匹配（Pattern Matching）来提取枚举变体中携带的数据。这是处理枚举最常见也是最安全的方式。
+通过模式匹配来提取联合类型变体中携带的数据：
 
 ```koral
 let area = when s is {
-    .Circle(r) then 3.14 * r * r;
-    .Rectangle(w, h) then w * h;
+    .Circle(r) then 3.14 * r * r,
+    .Rectangle(w, h) then w * h,
 }
 ```
 
-在 `when` 表达式中，我们使用 `.VariantName` 的形式来匹配具体的变体，并解构其中的数据。
+#### 隐式成员表达式
+
+当期望类型已知时（例如变量声明有类型标注、函数参数有类型签名），可以省略类型名，直接使用 `.成员名` 语法构造联合类型值或调用静态方法：
+
+```koral
+// 联合类型构造 — 省略 [Int]Option 前缀
+let a [Int]Option = .Some(42)
+let b [Int]Option = .None()
+
+// 函数参数中使用
+let process(opt [Int]Option) Void = when opt is {
+    .Some(v) then print_line(v.to_string()),
+    .None then print_line("none"),
+}
+process(.Some(10))
+
+// 赋值中使用
+let mut x [Int]Option = .None()
+x = .Some(100)
+
+// 条件表达式分支中使用
+let c [Int]Option = if true then .Some(1) else .None()
+
+// 静态方法调用 — 省略 [Int]List 前缀
+let list [Int]List = .new()
+let list2 [Int]List = .with_capacity(10)
+```
+
+> 隐式成员表达式要求编译器能从上下文推断出期望类型。如果没有类型标注，编译器会报错。
 
 ## Trait 与 Given
 
@@ -974,31 +911,85 @@ Koral 采用 Trait（特征）来定义共享的行为。这类似于其他语�
 Trait 定义了一组方法签名，任何实现了该 Trait 的类型都必须提供这些方法的具体实现。
 
 ```koral
-trait Show {
-    toString(self ref) String;
+trait Printable {
+    to_string(self) String
+}
+```
+
+Trait 支持继承，使用父 Trait 名称声明：
+
+```koral
+trait Ord Eq {
+    compare(self, other Self) Int
+}
+```
+
+多个父 Trait 使用 `and` 连接：
+
+```koral
+trait MyTrait Eq and Hashable {
+    my_method(self) Int
 }
 ```
 
 ### 实现 Trait (Given)
 
-使用 `given` 关键字为特定类型实现 Trait。这种机制允许你为已有的类型添加新的行为，而无需修改类型的定义（扩展性）。
+使用 `given` 关键字为特定类型实现 Trait：
 
 ```koral
-given Point Show {
-    toString(self ref) String = "Point(\(self.x), \(self.y))";
+given Point {
+    equals(self, other Point) Bool = self.x == other.x and self.y == other.y
+    compare(self, other Point) Int = self.x - other.x
 }
 ```
 
 ### 扩展方法
 
-`given` 块不仅可以用于实现 Trait，还可以直接用于为类型添加方法。这些方法就像是类型自带的一样。
+`given` 块不仅可以用于实现 Trait，还可以直接用于为类型添加方法：
 
 ```koral
 given Point {
-    // 为 Point 类型添加 distance 方法
-    distance(self ref) Float = { ... }
+    public distance(self) Float64 = {
+        let dx = (Float64)self.x
+        let dy = (Float64)self.y
+        // ...
+    }
+    
+    // 不包含 self 的方法，通过类型名调用
+    public origin() Point = Point(0, 0)
 }
+
+let p = Point.origin()
 ```
+
+### 标准库核心 Trait
+
+Koral 标准库定义了以下核心 Trait：
+
+| Trait | 说明 | 方法 |
+|-------|------|------|
+| `Eq` | 相等比较 | `equals(self, other Self) Bool` |
+| `Ord` | 排序比较（继承 Eq） | `compare(self, other Self) Int` |
+| `Hashable` | 哈希（继承 Eq） | `hash(self) UInt` |
+| `ToString` | 字符串转换 | `to_string(self) String` |
+| `[T]Iterator` | 迭代器 | `next(self ref) [T]Option` |
+| `[T, R]Iterable` | 可迭代 | `iterator(self) R` |
+| `Add` | 加法 | `add(self, other Self) Self`, `zero() Self` |
+| `Sub` | 减法（继承 Add） | `sub(self, other Self) Self`, `neg(self) Self` |
+| `Mul` | 乘法 | `mul(self, other Self) Self`, `one() Self` |
+| `Div` | 除法（继承 Mul） | `div(self, other Self) Self` |
+| `Rem` | 取余（继承 Div） | `rem(self, other Self) Self` |
+| `[K, V]Index` | 下标读取 | `at(self, key K) V` |
+| `[K, V]MutIndex` | 下标写入（继承 Index） | `set_at(self ref, key K, value V) Void` |
+
+算术操作符会自动降级为对应的 Trait 方法调用：
+- `+` → `Add.add`
+- `-` → `Sub.sub`
+- `*` → `Mul.mul`
+- `/` → `Div.div`
+- `%` → `Rem.rem`
+- `a[k]` → `Index.at`
+- `a[k] = v` → `MutIndex.set_at`
 
 ## 泛型
 
@@ -1006,118 +997,208 @@ given Point {
 
 ### 泛型数据类型
 
-让我们来想想这样一个场景，当我们想在函数的返回类型上返回两个值该怎么做？
-
-对于简单的情况，我们可以定义出一个固定的类型来包装两个值。
+泛型数据类型在标识符的前面使用 `[T Constraint]` 语法定义泛型参数：
 
 ```koral
-type Pair(left Int, right Int);
-
-let f() Pair = Pair(1, 2);
+type [T1 Any, T2 Any]Pair(left T1, right T2)
 ```
 
-但如果我们有很多不同的类型需要包装，以上这种方式就显得不够通用了。
-
-我们需要一种能表示容纳任意类型的 Pair，我们可以借助泛型数据类型定义它。
-
-泛型数据类型与数据类型的区别在于它需要额外声明类型参数，这些类型参数表示将来会由实际传入的类型替换，从而让成员变量或成员函数的类型可以在后续实例化的时候替换为具体的类型。
+构造泛型数据类型时，在泛型参数的位置传入实际的类型：
 
 ```koral
-type [T1 Any, T2 Any]Pair(left T1, right T2);
+let a1 = [Int, Int]Pair(1, 2)
+let a2 = [Bool, String]Pair(true, "hello")
 ```
 
-如上代码所示，我们在 `Pair` 的左边用另一种参数的形式声明了 T1 和 T2 两个类型参数，它们右侧的 Any 表示 T1 和 T2 的特征，这里 Any 可以是任意类型。Any 也可以换成其它特征。
-
-如果我们需要多个类型参数，可以按顺序逐个声明它们，中间使用 `,` 分割。调用也需要按同样的顺序给出实际类型。
-
-和普通参数不一样的是，类型参数的标识符总是以大写字母开头，并且没有类型标注。
-
-接下来我们看看如何构造泛型数据类型。
+当上下文类型明确时，可以省略泛型类型参数：
 
 ```koral
-let main() = {
-    lef a1 [Int, Int]Pair = [Int, Int]Pair(1, 2);
-    // a1.left Int, a1.right Int
-    lef a2 [Bool, Bool]Pair = [Bool, Bool]Pair(true, false);
-    // a2.left Bool, a2.right Bool
-    lef a3 [Int, String]Pair = [Int, String]Pair(1, "a");
-    // a3.left Int, a3.right String
-}
-```
-
-如上代码所示，当我们使用泛型 Pair 的时候，需要在泛型参数的位置传入实际的类型。根据我们传入的类型不同，对应变量的 left 和 right 的类型也会有所不同。
-
-这样我们就实现了一个足够通用的 Pair 类型，对于任意类型的两个值，我们都可以使用它来作为我们的返回类型，大大简化了我们需要定义的类型数量。
-
-上面的代码写起来还是比较繁琐，实际上当上下文类型明确的时候，我们可以省略泛型类型构造时的类型参数。所以我们可以使用更简洁的方式来实现上面的功能。
-
-就像下面的代码这样，它和上面的代码是等价的。
-
-```koral
-let main() = {
-    lef a1 = Pair(1, 2);
-    // a1 [Int, Int]Pair
-    lef a2 = Pair(true, false);
-    // a2 [Bool, Bool]Pair
-    lef a3 = Pair(1, "a");
-    // a3 [Int, String]Pair
-}
+let a1 = Pair(1, 2)           // 推断为 [Int, Int]Pair
+let a2 = Pair(true, "hello")  // 推断为 [Bool, String]Pair
 ```
 
 ### 泛型函数
 
-现在我们已经拥有了强大的泛型数据类型，但我们还没有办法对一个任意类型的泛型类型实现功能，比如说合并任意两个相同类型的列表。
-
-是的，我们需要具备泛型的函数才能实现它。
-
-泛型函数和泛型类型很类似，都是在标识符的前面使用相同的语法定义泛型参数。
+泛型函数在函数名前面使用相同的语法定义泛型参数：
 
 ```koral
-let [T]mergeList(a [T]List, b [T]List) [T]List = {
-    let c [T]List = [];
-    for v = a then {
-        c.pushBack(v);
-    }
-    for v = b then {
-        c.pushBack(v);
-    }
-    c
+let [T Any]identity(x T) T = x
+
+print_line(identity(42))       // 42
+print_line(identity("hello"))  // hello
+```
+
+### 泛型约束
+
+泛型参数可以指定 Trait 约束，限制可接受的类型：
+
+```koral
+let [T Ord]max_val(a T, b T) T = if a > b then a else b
+let [T Eq]contains(list [T]List, value T) Bool = list.contains(value)
+```
+
+多个约束使用 `and` 连接：
+
+```koral
+let [T ToString and Hashable]describe(value T) String = value.to_string()
+```
+
+### 泛型方法
+
+`given` 块中也可以定义泛型方法：
+
+```koral
+given [T Any] [T]Option {
+    public [U Any]map(self, f [T, U]Func) [U]Option = self and then f(_)
 }
 ```
 
-如上代码所示，我们在 `mergeList` 的左边用同样的泛型语法声明了 T 这个类型参数。
+## 标准库集合类型
 
-接下来我们看看如何调用泛型函数。
+### List
 
-```koral
-let main() = {
-    let x = [1, 2, 3];
-    let y = [4, 5, 6];
-    let z = [Int]mergeList(x, y);
-    // z == [1, 2, 3, 4, 5, 6]
-}
-```
-
-如上代码所示，它跟普通的函数调用差不多，不同的只是在函数名的前面增加了类型参数，就像泛型数据类型的构造一样。
-
-同样的道理，在上下文明确的时候，我们也可以省略类型参数，下面的代码等价于上面的代码。
+`[T]List` 是动态数组类型，支持泛型。
 
 ```koral
-let main() = {
-    let x = [1, 2, 3];
-    let y = [4, 5, 6];
-    let z = mergeList(x, y);
-}
+// 创建
+let mut list = [Int]List.new()
+let mut list2 = [Int]List.with_capacity(100)
+
+// 添加和删除
+list.push(1)
+list.push(2)
+list.push(3)
+list.pop()              // 返回 Option.Some(3)
+list.insert(0, 0)       // 在索引 0 处插入
+list.remove(0)          // 移除索引 0 处的元素
+
+// 访问
+list[0]                  // 下标访问（越界会 panic）
+list.get(0)              // 安全访问，返回 Option
+list.front()             // 第一个元素，返回 Option
+list.back()              // 最后一个元素，返回 Option
+
+// 信息
+list.count()             // 元素个数
+list.is_empty()          // 是否为空
+list.contains(1)         // 是否包含（需要 Eq）
+
+// 变换
+list.slice(1..3)         // 切片
+list.filter((x) -> x > 1)   // 过滤
+list.map((x) -> x * 2)      // 映射
+list.sort()                  // 排序（需要 Ord）
+list.sort_by((x) -> x)      // 按键排序
+
+// 连接
+let combined = list + other_list  // 列表连接
 ```
 
+### Map
+
+`[K, V]Map` 是哈希映射类型，键类型需要实现 `Hashable`。
+
+```koral
+let mut map = [String, Int]Map.new()
+
+// 插入和删除
+map.insert("a", 1)      // 返回 Option（旧值）
+map.remove("a")         // 返回 Option（被删除的值）
+
+// 访问
+map["a"]                 // 下标访问（键不存在会 panic）
+map.get("a")             // 安全访问，返回 Option
+
+// 信息
+map.count()
+map.is_empty()
+map.contains_key("a")
+
+// 遍历
+for entry = map then {
+    print_line(entry.key)
+    print_line(entry.value)
+}
+
+// 键和值
+for k = map.keys() then { print_line(k) }
+for v = map.values() then { print_line(v) }
+```
+
+### Set
+
+`[T]Set` 是哈希集合类型，元素类型需要实现 `Hashable`。
+
+```koral
+let mut set = [Int]Set.new()
+
+// 添加和删除
+set.insert(1)            // 返回 Bool（是否为新元素）
+set.remove(1)            // 返回 Bool（是否存在）
+
+// 信息
+set.count()
+set.is_empty()
+set.contains(1)
+
+// 集合运算
+let union = set1.union(set2)
+let inter = set1.intersection(set2)
+let diff = set1.difference(set2)
+```
+
+### Option
+
+`[T]Option` 是可选类型，表示一个值可能存在也可能不存在。
+
+```koral
+type [T Any] Option {
+    None(),
+    Some(value T),
+}
+
+let opt = [Int]Option.Some(42)
+let none = [Int]Option.None()
+
+opt.is_some()            // true
+opt.is_none()            // false
+opt.unwrap()             // 42（None 时 panic）
+opt.unwrap_or(0)         // 42（None 时返回默认值）
+opt.map((x) -> x * 2)   // Some(84)
+
+// or else 和 and then
+let val = opt or else 0
+let mapped = opt and then _ * 2
+```
+
+### Result
+
+`[T, E]Result` 是结果类型，表示操作可能成功也可能失败。
+
+```koral
+type [T Any, E Any] Result {
+    Ok(value T),
+    Error(error E),
+}
+
+let ok = [Int, String]Result.Ok(42)
+let err = [Int, String]Result.Error("failed")
+
+ok.is_ok()               // true
+ok.is_error()            // false
+ok.unwrap()              // 42（Error 时 panic）
+ok.unwrap_or(0)          // 42（Error 时返回默认值）
+ok.map((x) -> x * 2)    // Ok(84)
+ok.map_error((e) -> "Error: " + e)
+```
 
 ## 模块系统
 
-Koral 提供了强大的模块系统，用于在多个文件和目录中组织代码。模块系统支持代码复用、封装和清晰的关注点分离。
+Koral 提供了强大的模块系统，用于在多个文件和目录中组织代码。
 
 ### 模块概念
 
-Koral 中的**模块**由入口文件及其通过 `using` 声明依赖的所有文件组成。模块边界由入口文件和依赖链决定。
+Koral 中的**模块**由入口文件及其通过 `using` 声明依赖的所有文件组成。
 
 - **根模块**：由编译入口文件及其依赖组成的模块
 - **子模块**：子目录中的模块，以 `index.koral` 作为入口文件
@@ -1136,7 +1217,7 @@ using "utils"      // 将 utils.koral 合并到当前模块
 using "helpers"    // 将 helpers.koral 合并到当前模块
 ```
 
-合并的文件共享同一作用域 - 它们的 `public` 和 `protected` 符号互相可见，无需额外导入。
+合并的文件共享同一作用域，它们的 `public` 和 `protected` 符号互相可见。
 
 #### 子模块导入
 
@@ -1159,7 +1240,7 @@ let user = models.User("Alice")
 
 ```koral
 using self.models.User         // 导入特定符号
-using self.models.*            // 批量导入所有 public 符号（变为 private）
+using self.models.*            // 批量导入所有 public 符号
 ```
 
 #### 父模块访问
@@ -1168,26 +1249,29 @@ using self.models.*            // 批量导入所有 public 符号（变为 priv
 
 ```koral
 using super.sibling            // 从父模块导入
-using super.super.uncle        // 从祖父模块导入（链式 super）
+using super.super.uncle        // 从祖父模块导入
 ```
 
 #### 外部模块导入
 
-导入外部模块（如标准库）不需要任何前缀：
+导入外部模块不需要任何前缀：
 
 ```koral
 using std                      // 导入 std 模块
 using std.collections          // 从 std 导入 collections
-using std.collections.List     // 导入特定符号
-using std.collections.*        // 批量导入所有 public 符号
+using txt = std.text           // 使用别名导入
 ```
 
-使用别名重命名导入：
+#### Foreign Using
+
+使用 `foreign using` 声明需要链接的外部共享库（`.so` / `.dylib` / `.dll`）。编译器会在链接阶段自动添加 `-l` 参数：
 
 ```koral
-using txt = std.text           // 使用别名导入
-let builder = txt.StringBuilder.new()
+foreign using "m"       // 链接 libm（数学库），等价于 -lm
+foreign using "pthread"  // 链接 libpthread
 ```
+
+> 注意：`foreign using` 不是导入头文件，而是告诉链接器需要链接哪个库。C 函数的声明通过 `foreign let` 完成。
 
 ### 访问修饰符
 
@@ -1201,53 +1285,16 @@ Koral 提供三种访问级别来控制符号可见性：
 
 #### 默认访问级别
 
-不同声明有不同的默认访问级别：
-
 | 声明类型 | 默认值 |
 |----------|--------|
 | 全局函数、变量、类型 | `protected` |
 | 结构体字段 | `protected` |
-| 枚举构造器字段 | `public` |
+| 联合类型构造器字段 | `public` |
 | 成员函数（`given` 块内） | `protected` |
 | Trait 方法 | `public` |
 | Using 声明 | `private` |
 
-#### 使用访问修饰符
-
-在声明前添加访问修饰符：
-
-```koral
-public type User(
-    public name String,           // 任何地方都可访问
-    protected email String,       // 模块及子模块内可访问
-    private passwordHash String,  // 仅本文件可访问
-)
-
-public let greet(user User) String = "Hello, " + user.name
-
-protected let validateEmail(email String) Bool = email.contains("@")
-
-private let hashPassword(password String) String = { /* ... */ }
-```
-
-#### 重导出规则
-
-可以重导出同一编译单元内的符号：
-
-```koral
-public using self.helpers      // 重导出子模块
-public using super.sibling     // 重导出父模块的符号
-```
-
-但是，不允许重导出外部模块的符号：
-
-```koral
-public using std.Option        // 错误：不能重导出外部符号
-```
-
 ### 项目结构示例
-
-典型的多文件项目结构：
 
 ```
 my_project/
@@ -1265,58 +1312,225 @@ my_project/
 ```koral
 // main.koral
 using std
-using "utils"                  // 合并 utils.koral
-using self.models              // 导入 models 子模块
-using self.services            // 导入 services 子模块
+using "utils"
+using self.models
+using self.services
 
 public let main() = {
     let user = models.User.new("Alice")
     if services.authenticate(user) then {
-        printLine("Welcome!")
+        print_line("Welcome!")
     }
 }
 ```
 
+## FFI (外部函数接口)
+
+Koral 支持通过 `foreign` 关键字与 C 语言互操作。
+
+### Foreign Using（链接外部库）
+
+使用 `foreign using` 声明需要链接的共享库：
+
 ```koral
-// models/index.koral
-using "user"                   // 合并 user.koral
-using "post"                   // 合并 post.koral
-// User 和 Post 类型现在是 models 模块的一部分
+foreign using "m"  // 链接 libm（数学库）
 ```
 
-```koral
-// models/user.koral
-public type User(
-    public name String,
-    public email String,
-)
+编译器在链接阶段会自动添加 `-lm` 参数。`libc` 默认隐式链接，无需声明。
 
-given User {
-    public new(name String) User = User(name, "")
+### Foreign 函数
+
+声明外部 C 函数：
+
+```koral
+foreign using "m"
+
+foreign let sin(x Float64) Float64
+foreign let exit(code Int) Never
+foreign let abort() Never
+```
+
+### Foreign 类型
+
+声明外部 C 类型：
+
+```koral
+// 不透明类型（无字段）
+foreign type CFile
+
+// 带字段的 FFI 结构体（与 C 布局对齐）
+foreign type KoralTimespec(tv_sec Int64, tv_nsec Int64)
+```
+
+### Intrinsic
+
+`intrinsic` 关键字用于声明由编译器内置实现的类型和函数：
+
+```koral
+public intrinsic type Int
+public intrinsic let [T Any]ref_count(r T ref) Int
+```
+
+## 标准库 API 参考
+
+### IO 函数
+
+```koral
+// 输出（自动刷新）
+print(value)              // 打印到 stdout（无换行）
+print_line(value)         // 打印到 stdout（带换行）
+print_error(value)        // 打印到 stderr（无换行）
+print_error_line(value)   // 打印到 stderr（带换行）
+
+// 输入
+read_line()               // 从 stdin 读取一行，返回 [String]Option
+
+// 断言和 panic
+panic(message)            // 终止程序并输出错误信息
+assert(condition, message) // 条件为 false 时 panic
+```
+
+以上打印函数接受任何实现了 `ToString` trait 的类型。
+
+### OS 模块
+
+```koral
+// 文件操作
+read_file(path)           // [String, String]Result
+write_file(path, content) // [Void, String]Result
+append_file(path, content) // [Void, String]Result
+copy_file(src, dst)       // [Void, String]Result
+remove_file(path)         // [Void, String]Result
+
+// 目录操作
+create_dir(path)          // [Void, String]Result
+create_dir_all(path)      // [Void, String]Result（递归创建）
+remove_dir(path)          // [Void, String]Result
+remove_dir_all(path)      // [Void, String]Result（递归删除）
+read_dir(path)            // [[String]List, String]Result
+
+// 路径操作
+path_exists(path)         // Bool
+is_file(path)             // Bool
+is_dir(path)              // Bool
+join_path(base, name)     // String
+base_name(path)           // [String]Option
+dir_name(path)            // [String]Option
+ext_name(path)            // [String]Option
+is_absolute(path)         // Bool
+normalize_path(path)      // String
+absolute_path(path)       // [String, String]Result
+current_dir()             // [String, String]Result
+
+// 环境变量
+get_env(name)             // [String]Option
+set_env(name, value)      // Void
+home_dir()                // [String]Option
+temp_dir()                // String
+
+// 进程
+run_command(program, args) // [CommandResult, String]Result
+args()                    // [String]List
+exit(code)                // Never
+abort()                   // Never
+```
+
+### Time 模块
+
+```koral
+// Duration 类型
+Duration.from_nanos(n)    // 从纳秒创建
+Duration.from_micros(n)   // 从微秒创建
+Duration.from_millis(n)   // 从毫秒创建
+Duration.from_secs(n)     // 从秒创建
+Duration.from_mins(n)     // 从分钟创建
+Duration.from_hours(n)    // 从小时创建
+
+d.as_nanos()              // 转换为纳秒
+d.as_millis()             // 转换为毫秒
+d.as_seconds()            // 转换为秒
+
+// 休眠
+sleep(duration)           // 休眠指定时间
+```
+
+### Rune 类型
+
+`Rune` 表示一个 Unicode 码点。
+
+```koral
+let r = Rune.from_uint32((UInt32)65)  // 'A'
+r.to_uint32()             // UInt32 值
+r.to_string()             // 转换为 UTF-8 字符串
+r.is_ascii()              // 是否 ASCII
+r.is_ascii_digit()        // 是否 ASCII 数字
+r.is_ascii_letter()       // 是否 ASCII 字母
+r.is_letter()             // 是否 Unicode 字母
+r.is_whitespace()         // 是否空白字符
+r.byte_count()            // UTF-8 编码字节数
+```
+
+字符串可以通过 `runes()` 方法迭代 Unicode 码点：
+
+```koral
+for r = "Hello".runes() then {
+    print_line(r.to_string())
 }
 ```
 
-### 同目录多程序
+### Stream API
 
-多个独立程序可以共享公共代码：
-
-```
-scripts/
-├── tool1.koral          # 独立程序 1
-├── tool2.koral          # 独立程序 2
-└── common.koral         # 共享工具
-```
+Stream 提供了惰性的、可链式调用的迭代器操作。
 
 ```koral
-// tool1.koral
-using "common"
-public let main() = helper()
+// 从任何可迭代对象创建 Stream
+let s = stream(list)
 
-// tool2.koral  
-using "common"
-public let main() = helper()
+// 中间操作（惰性）
+s.filter((x) -> x > 0)       // 过滤
+s.map((x) -> x * 2)          // 映射
+s.filter_map((x) -> ...)     // 过滤并映射
+s.take(5)                     // 取前 n 个
+s.skip(3)                     // 跳过前 n 个
+s.step_by(2)                  // 每隔 n 个取一个
+s.enumerate()                 // 附加索引
+s.peek((x) -> print_line(x)) // 窥视（副作用）
+s.take_while((x) -> x < 10)  // 条件取值
+s.skip_while((x) -> x < 5)   // 条件跳过
+s.chain(other_stream)         // 连接
+s.zip(other_stream)           // 配对
+s.flat_map((x) -> ...)       // 扁平映射
+s.intersperse(0)              // 插入分隔元素
+
+// 终端操作（触发计算）
+s.fold(0, (acc, x) -> acc + x) // 折叠
+s.reduce((a, b) -> a + b)      // 归约
+s.to_list()                     // 收集为列表
+s.for_each((x) -> print_line(x)) // 遍历
+s.count()                       // 计数
+s.first()                       // 第一个元素
+s.last()                        // 最后一个元素
+s.sum()                         // 求和（需要 Add）
+s.product()                     // 求积（需要 Mul）
+s.average()                     // 求平均（需要 Add）
+s.any((x) -> x > 0)            // 任一满足
+s.all((x) -> x > 0)            // 全部满足
+s.none((x) -> x > 0)           // 无一满足
+s.min()                         // 最小值（需要 Ord）
+s.max()                         // 最大值（需要 Ord）
 ```
 
-每个程序独立编译：
-- `koralc tool1.koral` → tool1 模块 = tool1.koral + common.koral
-- `koralc tool2.koral` → tool2 模块 = tool2.koral + common.koral
+### Pair 类型
+
+```koral
+let p = [Int, String]Pair(1, "hello")
+p.first   // 1
+p.second  // "hello"
+```
+
+### 工具函数
+
+```koral
+max(a, b)    // 返回较大值（需要 Ord）
+min(a, b)    // 返回较小值（需要 Ord）
+```
