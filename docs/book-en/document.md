@@ -865,6 +865,44 @@ let list2 [Int]List = .with_capacity(10)
 
 > Implicit member expressions require the compiler to infer the expected type from context. If there is no type annotation, the compiler will report an error.
 
+### Type Alias
+
+Type aliases allow you to define a new name for an existing type, improving code readability. Use the `type AliasName = TargetType` syntax.
+
+```koral
+type Meters = Int
+type Coord = Point
+type IntList = [Int]List
+```
+
+Type aliases are fully eliminated at compile time — an alias is completely equivalent to its target type:
+
+```koral
+type Meters = Int
+
+let distance Meters = 100
+let add_meters(a Meters, b Meters) Meters = a + b
+let result = add_meters(distance, 50)  // result == 150
+```
+
+Aliases can be chained:
+
+```koral
+type Meters = Int
+type Distance = Meters  // Distance ultimately resolves to Int
+```
+
+Type aliases support access modifiers:
+
+```koral
+public type Meters = Int       // Public
+private type InternalId = Int  // File-scoped only
+```
+
+Restrictions:
+- Type aliases do not support generic parameters (e.g., `type [T]Alias = [T]List` is invalid), but the target type can be a generic instantiation (e.g., `type IntList = [Int]List`).
+- Circular references are not allowed (e.g., `type A = A`).
+
 ## Trait and Given
 
 Koral uses Traits to define shared behavior. This is similar to interfaces or type classes in other languages.

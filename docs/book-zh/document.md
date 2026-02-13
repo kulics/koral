@@ -905,6 +905,44 @@ let list2 [Int]List = .with_capacity(10)
 
 > 隐式成员表达式要求编译器能从上下文推断出期望类型。如果没有类型标注，编译器会报错。
 
+### 类型别名 (Type Alias)
+
+类型别名允许你为已有类型定义一个新名称，提高代码可读性。使用 `type AliasName = TargetType` 语法声明。
+
+```koral
+type Meters = Int
+type Coord = Point
+type IntList = [Int]List
+```
+
+类型别名在编译时被完全消除，别名与目标类型完全等价：
+
+```koral
+type Meters = Int
+
+let distance Meters = 100
+let add_meters(a Meters, b Meters) Meters = a + b
+let result = add_meters(distance, 50)  // result == 150
+```
+
+别名可以链式定义：
+
+```koral
+type Meters = Int
+type Distance = Meters  // Distance 最终解析为 Int
+```
+
+类型别名支持访问修饰符：
+
+```koral
+public type Meters = Int       // 公开
+private type InternalId = Int  // 仅文件内可见
+```
+
+限制：
+- 类型别名不支持泛型参数（如 `type [T]Alias = [T]List` 不合法），但目标类型可以是泛型实例化类型（如 `type IntList = [Int]List`）。
+- 不允许循环引用（如 `type A = A`）。
+
 ## Trait 与 Given
 
 Koral 采用 Trait（特征）来定义共享的行为。这类似于其他语言中的接口（Interface）或类型类（Type Class）。
