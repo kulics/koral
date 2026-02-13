@@ -42,7 +42,7 @@ let a = 0;
 let b = 1;
 ```
 
-A statement usually ends with an explicit semicolon, but if the last expression of the statement is immediately followed by a newline, the semicolon can be omitted. This makes structures like `if`, `while`, etc. look cleaner.
+A statement usually ends with an explicit semicolon, but if the last expression of the statement is immediately followed by a newline, the semicolon can be omitted. This makes constructs like `if`, `while`, etc. look cleaner.
 
 ```koral
 // Ends with a newline, semicolon omitted
@@ -69,10 +69,10 @@ The `main` function can also accept parameters (command line arguments) and retu
 
 ### Display Information
 
-Now let's make our program output some content. The standard library provides the `printLine` function to print a line of text to the standard output.
+The standard library provides the `print_line` function to print a line of text to the standard output.
 
 ```koral
-let main() = printLine("Hello, world!");
+let main() = print_line("Hello, world!")
 ```
 
 Now try to execute this program, and we can see `Hello, world!` displayed on the console.
@@ -80,8 +80,6 @@ Now try to execute this program, and we can see `Hello, world!` displayed on the
 ### Comments
 
 Comments are parts of the code ignored by the compiler, used to provide explanations to people reading the code.
-
-For example:
 
 ```koral
 // This is a single-line comment, starting from double slashes to the end of the line
@@ -95,84 +93,68 @@ For example:
 
 ### Variables
 
-Koral's variables are a kind of binding semantics, equivalent to binding a variable name and a value together, thus establishing an association, similar to a key-value pair. For security reasons, variables are immutable by default, of course we also provide another kind of variable - mutable variables.
+Koral's variables use binding semantics, equivalent to binding a variable name and a value together. For safety reasons, variables are immutable by default, but we also provide mutable variables.
 
 #### Read-only Variables
 
 In Koral, read-only variables are declared using the `let` keyword, following the principle of declaration before use.
 
-Koral ensures type safety through static typing. Variable bindings can explicitly annotate types via `type` at declaration. When there is enough information in the context, we can also omit the type, and the compiler will infer the variable's type from the context.
-
-Example code:
+Koral ensures type safety through static typing. Variable bindings can explicitly annotate types at declaration. When there is enough information in the context, we can also omit the type, and the compiler will infer the variable's type.
 
 ```koral
-let a Int = 5; // Explicit type annotation
-let b = 123;   // Automatic type inference
+let a Int = 5   // Explicit type annotation
+let b = 123     // Automatic type inference
 ```
 
 Once a read-only variable is declared, its value cannot be changed within the current scope.
 
-If we try to assign to a read-only variable, the compiler will report an error.
-
 ```koral
-let a = 5;
-a = 6; // Error
+let a = 5
+a = 6 // Error
 ```
 
 #### Mutable Variables
 
-If we need a variable that can be reassigned, we can use a mutable variable declaration.
-
-In Koral, mutable variables are declared using the `let mut` keyword, also following the principle of declaration before use.
-
-Example code:
+If we need a variable that can be reassigned, we can use a mutable variable declaration with `let mut`.
 
 ```koral
-let mut a Int = 5; // Explicit type annotation
-let mut b = 123; // Automatic type inference
+let mut a Int = 5   // Explicit type annotation
+let mut b = 123     // Automatic type inference
 ```
 
 ### Assignment
 
 For mutable variables, we can change their value multiple times when needed.
 
-Koral's assignment statement uses `=` just like most languages. The left side of `=` must be an assignable variable, and the program will assign the value on the right side of `=` to the variable on the left.
-
-Example code:
-
 ```koral
-let mut a = 0;
-a = 1;  // Legal
-a = 2;  // Legal
+let mut a = 0
+a = 1  // Legal
+a = 2  // Legal
 ```
 
 ### Block Expressions
 
-In Koral, `{}` represents a block expression. A block expression can contain a series of statements and an optional final expression. The result of a block expression is also an expression.
-
-The **value of the last expression** in the block expression is the value of the entire block. If there is no last expression, the value of the block is Void.
-
-Block expressions can combine a series of operations, such as multi-step initialization of a complex value.
+In Koral, `{}` represents a block expression. A block expression can contain a series of statements and an optional final expression. The value of the last expression in the block is the value of the entire block. If there is no last expression, the value is Void.
 
 ```koral
 let a Void = {}
 let b Int = {
-    let c = 7;
-    let d = c + 14;
+    let c = 7
+    let d = c + 14
     (c + 3) * 5 + d / 3  // Return value of the block
 }
 ```
 
 ### Identifiers
 
-Identifiers are names given to variables, functions, types, etc. The letters constituting identifiers have certain specifications. The naming rules for identifiers in this language are as follows:
+Identifiers are names given to variables, functions, types, etc. The naming rules are:
 
-1. Case sensitive. Myname and myname are two different identifiers.
-1. **Types** (Type) and **Constructors** (Constructor) must start with an **uppercase letter** (e.g., `Int`, `String`, `Point`).
-1. **Variables**, **Functions**, **Members** must start with a **lowercase letter** or underscore (e.g., `main`, `printLine`, `x`).
-1. Other characters in identifiers can be underscores `_`, letters, or numbers.
-1. Within the same `{}`, identifiers with the same name cannot be defined repeatedly.
-1. In different `{}`, identifiers with the same name can be defined, and the language will prioritize the identifier defined in the current scope.
+1. Case sensitive. `Myname` and `myname` are two different identifiers.
+2. **Types** and **Constructors** must start with an **uppercase letter** (e.g., `Int`, `String`, `Point`).
+3. **Variables**, **Functions**, **Members** must start with a **lowercase letter** or underscore (e.g., `main`, `print_line`, `x`).
+4. Other characters in identifiers can be underscores `_`, letters, or numbers.
+5. Within the same `{}`, identifiers with the same name cannot be defined repeatedly.
+6. In different `{}`, identifiers with the same name can be defined, and the language will prioritize the identifier defined in the current scope.
 
 ## Basic Types
 
@@ -180,238 +162,202 @@ We only need a few simple basic types to carry out most of the work.
 
 ### Numeric Types
 
-Since our current computer architecture is good at calculating integers, an independent integer type helps improve program execution efficiency.
-
-Koral provides rich numeric types to meet different needs.
-In Koral, the default integer is `Int` type, which can represent signed integer data.
-In Koral, the default decimal is `Float` type, which can represent floating-point data.
+Koral provides rich numeric types to meet different needs. The default integer is `Int` type, and floating-point numbers use `Float64` (64-bit) or `Float32` (32-bit).
 
 - `Int`: Platform-dependent signed integer (usually 64-bit).
 - `UInt`: Platform-dependent unsigned integer (usually 64-bit).
 - `Int8`, `Int16`, `Int32`, `Int64`: Fixed-width signed integers.
 - `UInt8`, `UInt16`, `UInt32`, `UInt64`: Fixed-width unsigned integers.
-- `Float`: Default floating-point type (64-bit, equivalent to `Float64`).
 - `Float32`: 32-bit floating-point number.
 - `Float64`: 64-bit floating-point number.
-- `Byte`: Equivalent to `UInt8`.
 
 ```koral
-let i Int = 3987349;
-let f Float = 3.14;
-let b UInt8 = 255;
+let i Int = 3987349
+let f Float64 = 3.14
+let b UInt8 = 255
+```
+
+Numeric literals support underscores `_` as separators for readability:
+
+```koral
+let million = 1_000_000
+let pi = 3.141_592_653
+```
+
+### Type Casting
+
+Different numeric types require explicit conversion using `(Type)expr` syntax:
+
+```koral
+let a Int = 42
+let b Float64 = (Float64)a    // Int -> Float64
+let c Int32 = (Int32)a        // Int -> Int32
+let d UInt8 = (UInt8)255      // Int -> UInt8
 ```
 
 ### Strings
 
-We do not live in a world with only numbers, so we also very much need to use text to display the information we need.
+In Koral, strings are used to represent text data. `String` type is a UTF-8 encoded character sequence.
 
-In this language, strings are used to represent text data. `String` type is a character sequence data of unlimited length.
-
-You can use double quotes `""` or single quotes `''` to wrap a piece of text content, and it will be recognized as a string value.
+You can use double quotes `""` or single quotes `''` to wrap text content.
 
 ```koral
-let s1 String = "Hello, world!";
-let s2 String = 'Hello, world!'; // Same as s1
+let s1 String = "Hello, world!"
+let s2 String = 'Hello, world!' // Same as s1
 ```
 
-Koral supports string interpolation, allowing expressions to be embedded in strings.
+Koral supports string interpolation, allowing expressions to be embedded in strings using `\(expr)` syntax:
 
 ```koral
-let name = "Koral";
-let s1 String = "Hello, \{name}!"; // Interpolation
-let s2 String = 'Hello, \{"world"}!'; // Interpolation
+let name = "Koral"
+let count = 3
+print_line("Hello, \(name)!")                    // Hello, Koral!
+print_line("Count: \(count)")                    // Count: 3
+print_line("Mixed \(name) has \(count) messages") // Mixed Koral has 3 messages
+print_line("Sum \(1 + (2 * 3))")                 // Sum 7
+```
+
+Escape characters use backslash `\`:
+
+```koral
+"\n"   // Newline
+"\t"   // Tab
+"\r"   // Carriage return
+"\v"   // Vertical tab
+"\f"   // Form feed
+"\0"   // Null character
+"\\"   // Backslash
+"\""   // Double quote
+"\'"   // Single quote
+```
+
+Common String methods:
+
+```koral
+let s = "Hello, World!"
+s.count()                    // 13 - byte length
+s.is_empty()                 // false
+s.contains("World")          // true
+s.starts_with("Hello")       // true
+s.ends_with("!")             // true
+s.to_ascii_lowercase()       // "hello, world!"
+s.to_ascii_uppercase()       // "HELLO, WORLD!"
+s.trim_ascii()               // Trim leading/trailing whitespace
+s.slice(0..<5)               // "Hello" - slicing
+s.find_index("World")        // Some(7)
+s.replace_all("World", "Koral") // "Hello, Koral!"
+s.split(",")                 // Split by separator
+s.lines()                    // Split by lines
 ```
 
 ### Booleans
 
-Booleans refer to logical values, they can only be true or false. It is often used to assist in judgment logic.
-
-In this language, the default boolean is `Bool` type, which is a type with only two possible values `true` and `false`.
+Booleans refer to logical values, they can only be true or false. The default boolean is `Bool` type.
 
 ```koral
-let b1 Bool = true;
-let b2 Bool = false;
-let isGreater = 5 > 3; // Result is true
+let b1 Bool = true
+let b2 Bool = false
+let isGreater = 5 > 3 // Result is true
 ```
 
-### List Types
+### Reference Types
 
-A list is a generic (introduced later) data type that can store a group of data elements of the same type. Each element has an index to represent its position in the list. The length of the list is not fixed; it can dynamically add or remove elements, and can also quickly access elements via index.
+Reference types are used to refer to another value rather than holding it. This is useful when sharing data or avoiding copying. Add the `ref` keyword after the type name to declare a reference type.
 
-We use `[T]List` to represent a list type, where `T` can be any type.
-
-List types can be initialized using list literals (`[elem1, elem2, …]`), where `elem1` and `elem2` represent elements at corresponding positions, separated by (`,`). We can pass any expression, but all elements must be of the same type. 
+Use the `ref` expression to create a reference:
 
 ```koral
-let x [Int]List = [1, 2, 3, 4, 5];
+let a = ref 42           // Creates an Int ref
+let b = deref a          // Dereference, gets 42
+print_line(ref_count(a)) // Reference count
 ```
 
-As shown in the code above, we created an `[Int]List` using array literal syntax, and its elements are `1, 2, 3, 4, 5` as the literal indicates.
+References use reference counting for automatic memory management. When the reference count drops to zero, memory is automatically freed.
 
-In addition to this literal listing elements, we can also use another list literal (`[default; size]`) that creates a specified size and default value to construct. `default` is the default value, and `size` is the number of elements.
+#### Weak References
+
+Weak references don't increase the reference count, used to break reference cycles. Use the `weakref` type suffix:
 
 ```koral
-let y [Int]List = [0; 3];
-// y == [0, 0, 0]
+let strong = ref 42
+let weak = downgrade_ref(strong)   // Downgrade to weak reference
+let upgraded = upgrade_ref(weak)   // Try to upgrade, returns Option
 ```
 
-We can use the array's `size` member function (introduced later) to get its number of elements.
+### Memory Management
 
-```koral
-printLine(x.size()); // 5
-```
+Koral aims to provide efficient and safe memory management, combining automatic memory management with manual control.
 
-We can use subscript syntax `[index]` to access elements at a specified index. `index` can only be a value of `Int` type. The subscript starts at 0, `[0]` corresponds to the first element, and so on.
-
-```koral
-printLine(x[0]); // 1
-printLine(x[2]); // 3
-printLine(x[4]); // 5
-```
-
-Modifying list elements is similar to assigning to member variables (introduced later), except that subscript syntax is required.
-
-```koral
-let main() = {
-    let x = [1, 2, 3, 4, 5];
-    printLine(x[0]); // 1
-    x[0] = 5;
-    printLine(x[0]); // 5
-}
-```
-
-As shown in the code above, we declare x as a list, and then we can use `[index] = value` to assign a value to the element at the specified subscript.
-
-### Reference Types (Reference)
-
-Reference types are used to refer to another value rather than holding it. This is useful when sharing data or avoiding copying. Adding the `ref` keyword after the type name declares a reference type.
-
-```koral
-// Declare a function that accepts an Int reference as a parameter
-let printList(x [Int]List ref) = printLine(x);
-```
-
-There are two ways to create reference types.
-
-#### ref Expression
-
-If we need to get a reference to an existing variable, we can use the `ref` keyword. This is typically used to pass variables on the stack by reference to functions, avoiding value copying.
-
-```koral
-let a [Int]List = [1,2,3];
-printList(ref a); // Pass reference
-```
-
-#### new Function
-
-If we need to directly create a value of a reference type, we can use the `new` function. It allocates memory on the heap and returns a reference to that data.
-
-```koral
-let a [Int]List ref = new([1,2,3]);
-printList(a); // Pass reference
-```
-
-#### Memory Management
-
-Koral aims to provide efficient and safe memory management. It combines the advantages of automatic memory management and manual control.
-
-- **Value Semantics**: By default, types in Koral (such as `Int`, `struct`) have value semantics. This means that when assigning or passing parameters, data is copied (unless optimized away by the compiler). This is similar to structs in C.
-- **Reference**: Use the `ref` keyword to create references. References allow you to access data without owning it. Koral uses reference counting and ownership analysis to automatically manage the lifecycle of references, preventing dangling pointers and memory leaks.
-- **Copy and Drop Trait**:
-    - **Copy**: If a type implements the `Copy` trait, its value is always bitwise copied during assignment. Basic types (such as `Int`, `Float`) implement `Copy` by default.
-    - **Drop**: If a type implements the `Drop` trait, the compiler automatically calls the `drop` method when the value of that type goes out of scope or is no longer used. This is used to release non-memory resources (such as file handles, network connections).
-- **Move Semantics**: For types that do not implement `Copy`, assignment and parameter passing operations result in ownership transfer (Move). Once ownership is transferred, the original variable can no longer be used.
-
-```koral
-type File(fd Int) not Copy; // Explicitly marked as not Copy
-
-// Implement Drop trait to automatically close file
-given File Drop {
-    drop(self ref) = close(self.fd);
-}
-```
+- **Value Semantics**: By default, types in Koral (such as `Int`, structs) have value semantics. Data is copied during assignment or parameter passing.
+- **References**: Use the `ref` keyword to create references. Koral uses reference counting and ownership analysis to automatically manage reference lifecycles, preventing dangling pointers and memory leaks.
+- **Move Semantics**: For variables that haven't been copied, assignment and parameter passing result in ownership transfer (Move). Once ownership is transferred, the original variable can no longer be used.
 
 ## Operators
 
 Operators are symbols that tell the compiler to perform specific mathematical or logical operations.
 
-We can simply understand them as calculation symbols in mathematics, but programming languages have their differences.
-
 ### Arithmetic Operators
 
-Arithmetic operators are mainly used on numeric type data operations, and most declarations conform to mathematical expectations.
-
-Koral supports standard arithmetic operations, including addition, subtraction, multiplication, division, and modulus. 
-
 ```koral
-let a = 4;
-let b = 2;
-printLine( a + b );    // + Add
-printLine( a - b );    // - Subtract
-printLine( a * b );    // * Multiply
-printLine( a / b );    // / Divide
-printLine( a % b );    // % Modulus, meaning the remainder after division
+let a = 4
+let b = 2
+print_line( a + b )    // + Add
+print_line( a - b )    // - Subtract
+print_line( a * b )    // * Multiply
+print_line( a / b )    // / Divide
+print_line( a % b )    // % Modulus
 ```
 
 ### Comparison Operators
 
-Comparison operators are used to compare the size relationship between two values. The result is of `Bool` type, `true` if it meets expectations, `false` otherwise. Note that not equal is represented by `<>`.
+Comparison operators compare two values. The result is `Bool` type. Note that not equal is represented by `<>`.
 
 ```koral
-let a = 4;
-let b = 2;
-printLine( a == b );     // == Equal
-printLine( a <> b );     // <> Not equal 
-printLine( a > b );      // > Greater than
-printLine( a >= b );     // >= Greater than or equal to
-printLine( a < b );      // < Less than
-printLine( a <= b );     // <= Less than or equal to
+let a = 4
+let b = 2
+print_line( a == b )     // == Equal
+print_line( a <> b )     // <> Not equal 
+print_line( a > b )      // > Greater than
+print_line( a >= b )     // >= Greater than or equal to
+print_line( a < b )      // < Less than
+print_line( a <= b )     // <= Less than or equal to
 ```
 
 ### Logical Operators
 
-Logical operators are mainly used to perform logical operations (AND, OR, NOT) on two Bool type operands.
+Logical operators perform logical operations (AND, OR, NOT) on two Bool type operands.
 
 ```koral
-let a = true;
-let b = false;
-printLine( a and b );       // AND, true only if both are true
-printLine( a or b );        // OR, true if either one is true
-printLine( not a );         // NOT, boolean negation
+let a = true
+let b = false
+print_line( a and b )       // AND, true only if both are true
+print_line( a or b )        // OR, true if either one is true
+print_line( not a )         // NOT, boolean negation
 ```
 
-Among them, `and` and `or` have short-circuit semantics. Short-circuit logical operations can skip unnecessary calculations to save computing resources or avoid side effects.
-
-When the value of the expression on the left side of the `and` operator is `false`, the calculation of the expression on the right side of the `and` operator will be skipped.
+`and` and `or` have short-circuit semantics:
 
 ```koral
-let a = false and f(); // f() will not be executed
-```
-
-When the value of the expression on the left side of the `or` operator is `true`, the calculation of the expression on the right side of the `or` operator will be skipped.
-
-```koral
-let a = true or f(); // f() will not be executed
+let a = false and f() // f() will not be executed
+let b = true or f()   // f() will not be executed
 ```
 
 ### Bitwise Operators
 
-Bitwise operators are mainly used to perform bitwise operations (AND, OR, XOR, NOT, Left Shift, Right Shift) on two integer type operands.
-
 ```koral
-let a = 4;
-let b = 2;
-printLine( a & b );    // Bitwise AND
-printLine( a | b );    // Bitwise OR
-printLine( a ^ b );    // Bitwise XOR
-printLine( ~a );       // Bitwise NOT
-printLine( a << b );   // Left shift
-printLine( a >> b );   // Right shift
+let a = 4
+let b = 2
+print_line( a & b )    // Bitwise AND
+print_line( a | b )    // Bitwise OR
+print_line( a ^ b )    // Bitwise XOR
+print_line( ~a )       // Bitwise NOT
+print_line( a << b )   // Left shift
+print_line( a >> b )   // Right shift
 ```
 
 ### Range Operators
 
-Range operators are used to generate a range (Range). We can fill in the required integer type values at both ends of the range operator to represent a range, commonly used in loops or pattern matching.
+Range operators generate a range (Range), commonly used in loops or pattern matching.
 
 ```koral
 1..5     // 1 <= x <= 5 (Closed interval)
@@ -427,226 +373,259 @@ Range operators are used to generate a range (Range). We can fill in the require
 
 ### Compound Assignment
 
-Koral supports common arithmetic compound assignments, and also supports bitwise compound assignments.
+```koral
+let mut x = 10
+x += 5       // x = x + 5
+x -= 2       // x = x - 2
+x *= 3       // x = x * 3
+x /= 2       // x = x / 2
+x %= 4       // x = x % 4
+
+let mut y = 12
+y &= 10     // y = y & 10
+y |= 1      // y = y | 1
+y ^= 15     // y = y ^ 15
+y <<= 1     // y = y << 1
+y >>= 2     // y = y >> 2
+```
+
+### Value Coalescing and Optional Chaining
+
+Koral provides two special operators for working with `Option` and `Result` types:
+
+- `or else`: Value coalescing. Returns the right-hand default value when the left side is `None` or `Error`.
+- `and then`: Optional chaining / value transformation. Applies the right-hand transformation when the left side is `Some` or `Ok`.
 
 ```koral
-let mut x = 10;
-x += 5;       // x = x + 5
-x -= 2;       // x = x - 2
-x *= 3;       // x = x * 3
-x /= 2;       // x = x / 2
-x %= 4;       // x = x % 4
+let opt = [Int]Option.Some(42)
+let val = opt or else 0           // 42 (because opt is Some)
 
-let mut y = 0b1100;
-y &= 0b1010;  // y = y & 0b1010
-y |= 0b0001;  // y = y | 0b0001
-y ^= 0b1111;  // y = y ^ 0b1111
-y <<= 1;      // y = y << 1
-y >>= 2;      // y = y >> 2
+let none = [Int]Option.None()
+let val2 = none or else 0         // 0 (because none is None)
+
+let mapped = opt and then _ * 2   // Some(84)
 ```
 
 ### Operator Precedence
 
-Operator precedence from high to low is as follows:
+Operator precedence from high to low:
 
-1. Prefix: `not`, `~`, `+`(unary), `-`(unary)
+1. Prefix: `not`, `~`, type cast `(Type)expr`
 2. Multiplication/Division: `*`, `/`, `%`
 3. Addition/Subtraction: `+`, `-`
 4. Shift: `<<`, `>>`
 5. Relation: `<`, `>`, `<=`, `>=`
 6. Equality: `==`, `<>`
 7. Bitwise AND: `&`
-9. Bitwise XOR: `^`
-10. Bitwise OR: `|`
-11. Pattern Check: `is`
-12. Logical AND: `and`
+8. Bitwise XOR: `^`
+9. Bitwise OR: `|`
+10. Range: `..`, `..<`, `<..`, `<..<`, `...`, `<...`, `...<`, `....`
+11. Logical AND: `and`
+12. Optional chaining: `and then`
 13. Logical OR: `or`
+14. Value coalescing: `or else`
 
 ## Selection Structure
 
-Selection structures are used to judge given conditions, and control the flow of the program based on the results of the judgment.
+Selection structures are used to judge given conditions and control the flow of the program.
 
-In Koral, selection structures are represented using `if` syntax. `if` is followed by a judgment condition. When the condition is `true`, the `then` branch following the condition is executed. When the condition is `false`, the `else` branch following the `else` keyword is executed.
-
-For example:
+In Koral, selection structures use `if` syntax. `if` is followed by a judgment condition. When the condition is `true`, the `then` branch is executed. When the condition is `false`, the `else` branch is executed.
 
 ```koral
-let main() = if 1 == 1 then printLine("yes") else printLine("no");
+let main() = if 1 == 1 then print_line("yes") else print_line("no")
 ```
 
-Executing the above program will show `yes`.
-
-`if` is also an expression. The `then` and `else` branches must be followed by expressions. Depending on the `if` condition, the value of the `if` expression may be one of the `then` or `else` branches.
-
-Therefore, we can also write the above program like this, the two ways are equivalent.
+`if` is also an expression. The `then` and `else` branches must be followed by expressions.
 
 ```koral
-let main() = printLine(if 1 == 1 then "yes" else "no");
+let main() = print_line(if 1 == 1 then "yes" else "no")
 ```
 
-Since `if` itself is also an expression, `else` can naturally be followed by another `if` expression, so we can implement continuous condition judgment.
+Since `if` itself is also an expression, `else` can naturally be followed by another `if` expression for chained conditions.
 
 ```koral
-let x = 0;
-let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less";
+let x = 0
+let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less"
 ```
 
-When we don't need to handle the `else` branch, we can omit the `else` branch, in which case its value is `Void`.
+When we don't need to handle the `else` branch, we can omit it, in which case its value is `Void`.
 
 ```koral
-let main() = if 1 == 1 then printLine("yes");
+let main() = if 1 == 1 then print_line("yes")
+```
+
+### if is Pattern Matching
+
+`if` also supports `is` pattern matching syntax, allowing you to destructure values in conditions:
+
+```koral
+let opt = [Int]Option.Some(42)
+if opt is .Some(v) then {
+    print_line(v)  // 42
+} else {
+    print_line("None")
+}
 ```
 
 ### let Expression
 
-`let` can also be used as an expression, allowing you to bind a variable before calculating the subsequent expression. The scope of this variable is limited to the expression following `then`. This is often used to introduce temporary variables before `if` or `while`.
-
-Without using `let` expression, we might write like this to achieve the effect of narrowing the scope:
-
-```koral
-{
-    let val = getValue();
-    if val > 0 then {
-        // some codes if is true
-    } else {
-        // some codes if is false
-    }
-}
-```
-
-It can be seen that val belongs to a separate block expression, so val will not be exposed to the scope outside `if`.
-
-Using `let` expression, we can write like this:
+`let` can also be used as an expression, allowing you to bind a variable before calculating the subsequent expression. The scope of this variable is limited to the expression following `then`.
 
 ```koral
 // val is only visible in the if expression
-let val = getValue() then if val > 0 then {
-    // some codes if is true
+let val = get_value() then if val > 0 then {
+    // code when val > 0
 } else {
-    // some codes if is false
+    // code when val <= 0
 }
 ```
-
-In this way, val is only visible in `if` and `else`, and will not leak into other scopes.
 
 ## Loop Structure
 
-Loop structure refers to a program structure set up to repeatedly execute a certain function in the program. It judges whether to continue executing a certain function or exit the loop based on the conditions in the loop body.
-
 ### while Expression
 
-In Koral, loop structures are represented using `while` syntax. `while` is followed by a judgment condition. When the condition is `true`, the following expression is executed, and then it returns to the judgment condition to judge and enter the next round of loop. When the condition is `false`, the loop ends. `while` is also an expression.
+In Koral, loop structures use `while` syntax. `while` is followed by a judgment condition. When the condition is `true`, the following expression is executed, then it returns to the condition for the next iteration. `while` is also an expression.
 
 ```koral
-let mut i = 0;
+let mut i = 0
 while i < 10 then {
-    printLine(i);
-    i += 1;
+    print_line(i)
+    i += 1
 }
 ```
 
-Executing the above program will print 0 to 10.
+#### while is Pattern Matching
+
+`while` also supports `is` pattern matching, commonly used for iterator loops:
+
+```koral
+let mut iter = list.iterator()
+while iter.next() is .Some(v) then {
+    print_line(v)
+}
+```
 
 ### break and continue
 
 - `break`: Exit the loop.
 - `continue`: Skip the current iteration.
 
-When we need to actively exit the loop inside the loop, we can use the break statement. The program will exit the current nearest loop when it executes break.
-
 ```koral
-let main() = {
-    let mut i = 0;
-    while true then {
-        if i > 20 then break;
-        printLine(i);
-        i = i + 1;
-    }
+let mut i = 0
+while true then {
+    if i > 20 then break
+    if i % 2 == 0 then { i += 1; continue }
+    print_line(i)
+    i += 1
 }
 ```
-
-Executing the above program will print 0 to 20.
-
-If we need to skip certain rounds in the loop, we can use the continue statement. The program will skip the current round of loop when it executes continue, and continue to execute the next loop.
-
-```koral
-let main() = {
-    let mut i = 0;
-    while i <= 10 then {
-        if i % 2 == 0 then continue;
-        printLine(i);
-        i = i + 1;
-    }
-}
-```
-
-Executing the above program will print odd numbers between 0 and 10.
 
 ### for Loop
 
-The `for` loop is used to traverse any object that implements the iterator interface (such as lists, arrays, ranges, etc.).
+The `for` loop is used to traverse any object that implements the iterator interface (such as lists, maps, sets, ranges, etc.).
 
 In each iteration, the next value produced by the iterator will try to match `pattern`. If the match is successful, the expression following `then` is executed.
 
 ```koral
-// Traverse range
-for i = 0..10 then {
-    printLine(i);
+// Traverse a list
+let mut list = [Int]List.new()
+list.push(10)
+list.push(20)
+list.push(30)
+
+for x = list then {
+    print_line(x)
+}
+
+// Traverse a Map
+let mut map = [String, Int]Map.new()
+map.insert("a", 1)
+map.insert("b", 2)
+
+for entry = map then {
+    print(entry.key)
+    print(" -> ")
+    print_line(entry.value)
+}
+
+// Traverse a Set
+let mut set = [Int]Set.new()
+set.insert(100)
+set.insert(200)
+
+for v = set then {
+    print_line(v)
 }
 ```
-
-Executing the above program will print 0 to 10.
-
-```koral
-let list = [1,2,3,4,5];
-
-// Traverse list
-for item = list then {
-    printLine(item);
-}
-
-// Use with destructuring
-for (index, value) = list.enumerate() then {
-    printLine("Index: \{index}, Value: \{value}");
-}
-```
-
-Executing the above program will first output 1 to 5, and then output 1 to 5 with index.
 
 ## Pattern Matching
 
-Koral has powerful pattern matching capabilities, mainly used through `when` expressions and `is` operators.
+Koral has powerful pattern matching capabilities, mainly used through `when` expressions and the `is` operator.
 
-### when expression
+### when Expression
 
 The `when` expression allows you to compare a value against a series of patterns and execute corresponding code based on the matching pattern. It is similar to `switch` statements in other languages, but more powerful. `when` is also an expression and returns the value of the matching branch.
 
 ```koral
-when x is {
-    1 then "one";
-    2 then "two";
-    _ then "other";
+let x = 5
+let result = when x is {
+    1 then "one",
+    2 then "two",
+    _ then "other",
 }
 ```
 
 Supported patterns include:
 
+- Wildcard pattern: `_` (matches any value)
 - Literal patterns: `1`, `"abc"`, `true`
-- Range patterns: `0..9`
-- Variable binding patterns: `x` (matches any value and binds to x)
-- Destructuring patterns: `Point(x, y)`
-- Enum patterns: `.Some(v)`
-- Type check patterns: `x Int`
+- Variable binding patterns: `x` (matches any value and binds to x), `mut x` (mutable binding)
+- Comparison patterns: `> 5`, `< 0`, `>= 10`, `<= -1`
+- Union case patterns: `.Some(v)`, `.None`
+- Logical patterns: `pattern and pattern`, `pattern or pattern`, `not pattern`
+
+```koral
+// Union type matching
+type Shape {
+    Circle(radius Float64),
+    Rectangle(width Float64, height Float64),
+}
+
+let area = when shape is {
+    .Circle(r) then 3.14 * r * r,
+    .Rectangle(w, h) then w * h,
+}
+
+// Comparison patterns
+let grade = when score is {
+    >= 90 then "A",
+    >= 80 then "B",
+    >= 70 then "C",
+    _ then "F",
+}
+
+// Logical patterns
+when x is {
+    1 or 2 or 3 then print_line("small"),
+    _ then print_line("big"),
+}
+```
 
 ### is Operator
 
 The `is` operator is used to check if a value matches a pattern, and the result is of `Bool` type.
 
-When used in conditional expressions such as `if`, if the match is successful, it can also bind variables in the pattern to the current scope for subsequent code use.
+When used in conditional expressions such as `if` or `while`, if the match is successful, it can also bind variables in the pattern to the current scope.
 
 ```koral
-if op is 0..9 then {
-    printLine(v);
+let opt = [Int]Option.Some(42)
+if opt is .Some(v) then {
+    print_line(v)  // 42
+}
+
+// Comparison pattern
+if score is >= 60 then {
+    print_line("passed")
 }
 ```
 
@@ -654,156 +633,129 @@ if op is 0..9 then {
 
 Functions are independent blocks of code used to complete specific tasks.
 
-Usually we encapsulate a series of tasks that need to be reused into functions to facilitate reuse in other places.
-
 ### Definition
 
-We have seen the entry function before, which uses the fixed name main to define.
+Functions are defined using the `let` keyword. The function name is followed by `()` indicating the parameters, and the return type follows the parentheses. The return type can be omitted when the context is clear.
 
-When we need to define other functions, we can use the same syntax to define functions with other names.
-
-Functions are defined using the `let` keyword. The name of the function is followed by `()` indicating the parameters accepted by this function, and the return type follows the parentheses. The return type can be omitted when the context is clear, and the compiler infers the return type.
-
-The right side of `=` of the function must declare an expression, and the value of this expression is the return value of the function.
+The right side of `=` must declare an expression, and the value of this expression is the return value of the function.
 
 ```koral
-let f1() Int = 1;
-let f2(a Int) Int = a + 1;
-let f3(a Int) = a + 1;
+let f1() Int = 1
+let f2(a Int) Int = a + 1
+let f3(a Int) = a + 1     // Return type inferred
 ```
 
-### Call
+### Calling
 
-So how to use these defined functions? We only need to use `()` syntax after the function expression to call the function, thereby obtaining the return value of the function.
-
-`()` must pass parameters of corresponding types according to the requirements of the function definition.
+Use `()` syntax to call functions:
 
 ```koral
-let a = f1();
-let b = f2(1);
+let a = f1()
+let b = f2(1)
 ```
 
 ### Parameters
 
-Parameters are data that the function can receive during execution. Through these different parameters, we can let the function output different return values.
-
-For example, we can implement a square function that returns the square of the parameter each time it is called.
-
-Very simply, we only need to use `ParameterName Type` to declare parameters.
+Parameters are data that the function can receive during execution. Use `ParameterName Type` to declare parameters.
 
 ```koral
-let sqrt(x Int) = x * x;
-let a = sqrt(x); // a == 4
+let add(x Int, y Int) = x + y
+let a = add(1, 2) // a == 3
 ```
 
-sqrt receives an Int type parameter x, and then returns its square value. When calling sqrt, we need to give the corresponding Int type expression to complete the call.
-
-If we need multiple parameters, we can declare them one by one in order, separated by `,`. The call also needs to give expressions in the same order.
+Mutable parameters use the `mut` keyword:
 
 ```koral
-let add(x Int, y Int) = x + y;
-let a = add(1, 2); // a == 3
+let increment(mut x Int) = { x += 1; x }
 ```
 
 ### Function Types
 
-In Koral, functions, like Int, Float and other types, are also a type. Similarly, functions can also be used as expressions.
-
-Function types are declared using `[T1, T2, T3,... R]Func` syntax. Like function definitions, parameters and return types need to be declared. Among them, `T1, T2, T3, ...` part is the parameter type sequence. When there are no parameters, it is empty, otherwise it is arranged in order until all parameter types are listed. R is the return type.
-
-After the function is defined, the function name can be used as an expression, assigned to other variables, or used as parameters and return values.
-
-Variables of function types are called using `()` syntax just like functions.
+In Koral, functions are also a type. Function types are declared using `[T1, T2, ..., R]Func` syntax, where `T1, T2, ...` are parameter types and `R` is the return type.
 
 ```koral
-let sqrt(x Int) = x * x; // [Int, Int]Func
-let f [Int, Int]Func = sqrt;
-let a = f(2); // a == 4
+let sqrt(x Int) = x * x          // [Int, Int]Func
+let f [Int, Int]Func = sqrt
+let a = f(2)                      // a == 4
 ```
 
-Using this feature, we can also define parameters or return values of function types.
+We can also define function type parameters or return values:
 
 ```koral
-let hello() = printLine("Hello, world!");
-let run(f [Void]Func) = f();
-let toRun() = run;
+let hello() = print_line("Hello, world!")
+let run(f [Void]Func) = f()
+let toRun() = run
 
-let main() = toRun()(hello);
+let main() = toRun()(hello)
 ```
-
-Executing the above code, we will see `Hello, world!`.
 
 ### Lambda Expressions
 
-Defining a function first and then passing it in like the above way sometimes seems verbose, because we just want to execute a small piece of function, and may not want to define a function for other places to use.
-
-At this time, we can use the syntax of Lambda expressions to simplify our code.
-
-Lambda expressions are very similar to function definitions, except that `=` is replaced by `->`, and there is no function name and let keyword.
-
-As shown in the code below, the value of f2 is a lambda. Their type is the same as f1, and the syntax is also very similar. Lambda also needs to declare parameters and return types, and needs an expression as a return value.
+Lambda expressions are very similar to function definitions, except that `=` is replaced by `->`, and there is no function name or `let` keyword.
 
 ```koral
-let f1(x Int) Int = x + 1; // [Int, Int]Func
-let f2 = (x Int) Int -> x + 1; // [Int, Int]Func
-let a = f1(1) + f2(1); // a == 4
+let f1(x Int) Int = x + 1            // [Int, Int]Func
+let f2 = (x Int) Int -> x + 1        // [Int, Int]Func
+let a = f1(1) + f2(1)                // a == 4
 ```
 
-When the type of lambda can be known in our context, we can omit its parameter types and return type.
+When the type of lambda can be inferred from context, parameter types and return type can be omitted:
 
 ```koral
-let f [Int, Int]Func = (x) -> x + 1;
+let f [Int, Int]Func = (x) -> x + 1
+```
+
+Lambda supports multiple forms:
+
+```koral
+() -> 42                           // No parameters
+(x) -> x * 2                      // Single param, type inferred
+(x Int) -> x * 2                  // Single param with type
+(x, y) -> x + y                   // Multiple params, types inferred
+(x Int, y Int) Int -> x + y       // Full type annotations
+(x) -> { let y = x * 2; y + 1 }  // Block body
 ```
 
 ### Closures
 
-Lambda expressions can capture variables from their surrounding scope. This is called a closure. When a lambda references a variable from an outer scope, that variable is captured and stored within the closure.
+Lambda expressions can capture variables from their surrounding scope. This is called a closure.
 
 ```koral
 let make_adder(base Int) [Int, Int]Func = {
-    // The lambda captures 'base' from the outer scope
     (x) -> base + x
 }
 
-let add10 = make_adder(10);
-let result = add10(32);  // result == 42
+let add10 = make_adder(10)
+let result = add10(32)  // result == 42
 ```
-
-In the example above, the lambda `(x) -> base + x` captures the `base` parameter from the `make_adder` function. Even after `make_adder` returns, the closure retains access to the captured value.
 
 #### Capture Rules
 
 Koral only allows capturing **immutable** variables. Attempting to capture a mutable variable will result in a compile error.
 
 ```koral
-let x = 10;
-let f = () -> x + 1;  // OK: x is immutable
+let x = 10
+let f = () -> x + 1  // OK: x is immutable
 
-let mut y = 20;
-let g = () -> y + 1;  // Error: cannot capture mutable variable 'y'
+let mut y = 20
+let g = () -> y + 1  // Error: cannot capture mutable variable 'y'
 ```
-
-This restriction ensures that closures have predictable behavior and avoids issues with shared mutable state.
 
 #### Currying
 
-Closures enable currying - a technique where a function with multiple parameters is transformed into a sequence of functions, each taking a single parameter.
+Closures enable currying:
 
 ```koral
-let add [Int, [Int, Int]Func]Func = (x) -> (y) -> x + y;
+let add [Int, [Int, Int]Func]Func = (x) -> (y) -> x + y
 
-let add10 = add(10);     // Returns a function that adds 10
-let result = add10(32);  // result == 42
-
-// Or call directly
-let sum = add(20)(22);   // sum == 42
+let add10 = add(10)
+let result = add10(32)  // result == 42
+let sum = add(20)(22)   // sum == 42
 ```
 
 ## Data Types
 
 Data types are data collections composed of a series of data with the same type or different types. It is a composite data type.
-
-Obviously, data types are suitable for packaging different data together to form a new type, facilitating the operation of complex data.
 
 Koral provides a powerful type system that allows you to define your own data structures. Use the `type` keyword to define.
 
@@ -813,320 +765,400 @@ Structs are used to combine multiple related values together. Each field has a n
 
 #### Definition
 
-We can use the `type` keyword to declare a new data type. The data type needs to use `()` to declare the member variables it owns, similar to function parameters.
-
 ```koral
-type Empty();
+type Empty()
+type Point(x Int, y Int)
 ```
-
-Above we declared a new data type named Empty, which contains no data.
-
-Next, let's define some more meaningful data types.
-
-```koral
-type Point(x Int, y Int);
-```
-
-Point is a data type with two member variables x and y. It can be used to represent a point in a two-dimensional coordinate system. In this way, we can use the Point type to represent our data in the coordinate system, instead of always using two independent Int data.
 
 #### Construction
 
-So how do we construct a new Point data?
-
-Similar to function types, we also use `()` syntax to call our constructor to get the data we need.
+Use `()` syntax to call the constructor:
 
 ```koral
-let a Point = Point(0, 0);
+let a Point = Point(0, 0)
 ```
 
 #### Using Member Variables
 
-Now that we have a Point data, how do we use the x and y inside?
-
-Very simple, we only need to use `.` syntax to access them.
+Use `.` syntax to access member variables:
 
 ```koral
-type Point(x Int, y Int);
+type Point(x Int, y Int)
 
 let main() = {
-    let a = Point(64, 128);
-    printLine(a.x);
-    printLine(a.y);
+    let a = Point(64, 128)
+    print_line(a.x)  // 64
+    print_line(a.y)  // 128
 }
 ```
-
-Executing the above program, we can see 64 and 128.
 
 #### Mutable Member Variables
 
-Member variables, like variables, are read-only by default. So we cannot reassign x and y in Point. If we try to do this, the compiler will report an error.
+Member variables are read-only by default. Use the `mut` keyword to mark mutable member variables:
 
 ```koral
-type Point(x Int, y Int);
+type Point(mut x Int, mut y Int)
 
 let main() = {
-    let a = Point(64, 28);
-    a.x = 2; // Error
+    let a = Point(64, 128)
+    a.x = 2  // ok, because x is mut
+    a.y = 0  // ok, because y is mut
 }
 ```
 
-We can annotate the mut keyword on member variables when defining the type, so that it will be defined as a mutable member variable. For mutable member variables, we can assign values to them.
+The mutability of member variables follows the type definition, not the instance variable.
 
-The mutability of member variables follows the type and has nothing to do with whether the instance variable is mutable, so we can modify mutable member variables even if we declare read-only variables.
+### Union (Sum Type)
 
-```koral
-type Point(mut x Int, mut y Int);
-
-let main() = {
-    let a Point = Point(64, 128); // `a` does not need to be declared as mut
-    a.x = 2; // ok
-    a.y = 0; // ok
-}
-```
-
-When we assign a variable of a type to another variable for use, the two variables are not the same instance, so our modification of member variables will not affect other variables. In other words, `Point` type can be considered as a value type in other languages.
-
-```koral
-type Point(mut x Int, mut y Int);
-
-let main() = {
-    let a Point = Point(64, 128); 
-    let b Point = a; // ok
-    printLine(a.x); // 64
-    printLine(b.x); // 64
-    a.x = 128;
-    printLine(a.x); // 128
-    printLine(b.x); // 64
-}
-```
-
-#### Member Functions
-
-In addition to member variables, data types can also define member functions. Member functions allow our types to directly provide rich functions without relying on external functions.
-
-Defining a member function is simple, just declare a block containing member functions after the type definition.
-
-```koral
-type Rectangle(length Int, width Int) {
-    area(self) Int = self.length * self.width;
-}
-```
-
-As shown in the code above, we defined a member function `area`, which is used to calculate the area of the Rectangle.
-
-Different from ordinary function definitions, member functions do not need to start with `let`, and usually the first parameter is `self`. It is used to represent the instance parameter of the current type.
-
-You may have noticed that accessing member variables in member functions is similar to accessing member variables externally, except that we need to use `self` to represent the instance variable name.
-
-Like member variable access, we only need to use `.` syntax to access member functions.
-
-```koral
-let main() = {
-    let r = Rectangle(2, 4);
-    printLine(r.area());
-}
-```
-
-Executing the above program, we can see 8.
-
-In addition to member functions containing `self`, we can also define member functions that do not contain `self`.
-
-This type of function cannot be accessed using instances, but only using type names. It allows us to define some functions that are highly associated with the type but do not require an instance as a parameter.
-
-```koral
-type Point(x Int, y Int) {
-    default() Point = Point(0, 0);
-}
-
-let main() = {
-    let a = Point.default();
-    printLine(a.x); // 0
-    printLine(a.y); // 0
-}
-```
-
-For example, in the above example, we defined a member function for constructing default values for Point. Then we called it using `Point.default`.
-
-### Enum (Sum Type)
-
-Enums allow you to define a type that can be one of several different variants. Each variant can carry different types of data. This is very useful when dealing with state machines or error handling.
+Unions allow you to define a type that can be one of several different variants. Each variant can carry different types of data.
 
 ```koral
 type Shape {
-    Circle(radius Float);
-    Rectangle(width Float, height Float);
+    Circle(radius Float64),
+    Rectangle(width Float64, height Float64),
 }
 
-// Instantiate enum variant
-let s = Shape.Circle(1.0);
+let s = Shape.Circle(1.0)
 ```
 
-#### Using Enum Values
+#### Using Union Values
 
-We can extract data carried in enum variants through Pattern Matching. This is the most common and safest way to handle enums.
+Extract data from union variants through pattern matching:
 
 ```koral
 let area = when s is {
-    .Circle(r) then 3.14 * r * r;
-    .Rectangle(w, h) then w * h;
+    .Circle(r) then 3.14 * r * r,
+    .Rectangle(w, h) then w * h,
 }
 ```
 
-In the `when` expression, we use the form `.VariantName` to match specific variants and destructure the data within them.
+#### Implicit Member Expressions
+
+When the expected type is known from context (e.g., variable declaration with type annotation, function parameter with type signature), you can omit the type name and use `.memberName` syntax to construct union values or call static methods:
+
+```koral
+// Union construction — omit the [Int]Option prefix
+let a [Int]Option = .Some(42)
+let b [Int]Option = .None()
+
+// In function arguments
+let process(opt [Int]Option) Void = when opt is {
+    .Some(v) then print_line(v.to_string()),
+    .None then print_line("none"),
+}
+process(.Some(10))
+
+// In assignments
+let mut x [Int]Option = .None()
+x = .Some(100)
+
+// In conditional expression branches
+let c [Int]Option = if true then .Some(1) else .None()
+
+// Static method calls — omit the [Int]List prefix
+let list [Int]List = .new()
+let list2 [Int]List = .with_capacity(10)
+```
+
+> Implicit member expressions require the compiler to infer the expected type from context. If there is no type annotation, the compiler will report an error.
 
 ## Trait and Given
 
-Koral uses Traits to define shared behavior. This is similar to interfaces (Interface) or type classes (Type Class) in other languages.
+Koral uses Traits to define shared behavior. This is similar to interfaces or type classes in other languages.
 
 ### Defining Trait
 
-A Trait defines a set of method signatures, and any type that implements the Trait must provide concrete implementations of these methods.
+A Trait defines a set of method signatures that any implementing type must provide.
 
 ```koral
-trait Show {
-    toString(self ref) String;
+trait Printable {
+    to_string(self) String
+}
+```
+
+Traits support inheritance using parent Trait names:
+
+```koral
+trait Ord Eq {
+    compare(self, other Self) Int
+}
+```
+
+Multiple parent Traits are connected with `and`:
+
+```koral
+trait MyTrait Eq and Hashable {
+    my_method(self) Int
 }
 ```
 
 ### Implementing Trait (Given)
 
-Use the `given` keyword to implement a Trait for a specific type. This mechanism allows you to add new behaviors to existing types without modifying the type definition (extensibility).
+Use the `given` keyword to implement a Trait for a specific type:
 
 ```koral
-given Point Show {
-    toString(self ref) String = "Point(\(self.x), \(self.y))";
+given Point {
+    equals(self, other Point) Bool = self.x == other.x and self.y == other.y
+    compare(self, other Point) Int = self.x - other.x
 }
 ```
 
 ### Extension Methods
 
-The `given` block can be used not only to implement Traits, but also to directly add methods to types. These methods are like they come with the type itself.
+The `given` block can also be used to directly add methods to types:
 
 ```koral
 given Point {
-    // Add distance method to Point type
-    distance(self ref) Float = { ... }
+    public distance(self) Float64 = {
+        let dx = (Float64)self.x
+        let dy = (Float64)self.y
+        // ...
+    }
+    
+    // Methods without self are called via type name
+    public origin() Point = Point(0, 0)
 }
+
+let p = Point.origin()
 ```
+
+### Standard Library Core Traits
+
+Koral's standard library defines the following core Traits:
+
+| Trait | Description | Methods |
+|-------|-------------|---------|
+| `Eq` | Equality comparison | `equals(self, other Self) Bool` |
+| `Ord` | Ordering (extends Eq) | `compare(self, other Self) Int` |
+| `Hashable` | Hashing (extends Eq) | `hash(self) UInt` |
+| `ToString` | String conversion | `to_string(self) String` |
+| `[T]Iterator` | Iterator | `next(self ref) [T]Option` |
+| `[T, R]Iterable` | Iterable | `iterator(self) R` |
+| `Add` | Addition | `add(self, other Self) Self`, `zero() Self` |
+| `Sub` | Subtraction (extends Add) | `sub(self, other Self) Self`, `neg(self) Self` |
+| `Mul` | Multiplication | `mul(self, other Self) Self`, `one() Self` |
+| `Div` | Division (extends Mul) | `div(self, other Self) Self` |
+| `Rem` | Remainder (extends Div) | `rem(self, other Self) Self` |
+| `[K, V]Index` | Subscript read | `at(self, key K) V` |
+| `[K, V]MutIndex` | Subscript write (extends Index) | `set_at(self ref, key K, value V) Void` |
+
+Arithmetic operators are automatically lowered to corresponding Trait method calls:
+- `+` → `Add.add`
+- `-` → `Sub.sub`
+- `*` → `Mul.mul`
+- `/` → `Div.div`
+- `%` → `Rem.rem`
+- `a[k]` → `Index.at`
+- `a[k] = v` → `MutIndex.set_at`
 
 ## Generics
 
-Generics allow you to write code that applies to multiple types, thereby improving code reusability.
+Generics allow you to write code that applies to multiple types, improving code reusability.
 
 ### Generic Data Types
 
-Let's think about a scenario, what should we do when we want to return two values on the return type of a function?
-
-For simple cases, we can define a fixed type to wrap two values.
+Generic data types use `[T Constraint]` syntax before the identifier to define generic parameters:
 
 ```koral
-type Pair(left Int, right Int);
-
-let f() Pair = Pair(1, 2);
+type [T1 Any, T2 Any]Pair(left T1, right T2)
 ```
 
-But if we have many different types that need to be wrapped, the above method is not general enough.
-
-We need a Pair that can represent holding arbitrary types, and we can define it with the help of generic data types.
-
-The difference between generic data types and data types is that it needs to additionally declare type parameters. These type parameters indicate that they will be replaced by actual incoming types in the future, so that the types of member variables or member functions can be replaced with concrete types during subsequent instantiation.
+When constructing generic data types, pass actual types in the generic parameter position:
 
 ```koral
-type [T1 Any, T2 Any]Pair(left T1, right T2);
+let a1 = [Int, Int]Pair(1, 2)
+let a2 = [Bool, String]Pair(true, "hello")
 ```
 
-As shown in the code above, we declared T1 and T2 two type parameters in the form of another parameter on the left side of `Pair`. The Any on their right indicates the characteristics of T1 and T2, where Any can be any type. Any can also be replaced with other traits.
-
-If we need multiple type parameters, we can declare them one by one in order, separated by `,`. The call also needs to give actual types in the same order.
-
-Unlike ordinary parameters, identifiers of type parameters always start with an uppercase letter and have no type annotation.
-
-Next, let's see how to construct generic data types.
+When the context type is clear, generic type parameters can be omitted:
 
 ```koral
-let main() = {
-    lef a1 [Int, Int]Pair = [Int, Int]Pair(1, 2);
-    // a1.left Int, a1.right Int
-    lef a2 [Bool, Bool]Pair = [Bool, Bool]Pair(true, false);
-    // a2.left Bool, a2.right Bool
-    lef a3 [Int, String]Pair = [Int, String]Pair(1, "a");
-    // a3.left Int, a3.right String
-}
-```
-
-As shown in the code above, when we use generic Pair, we need to pass actual types in the position of generic parameters. Depending on the types we pass in, the types of left and right of the corresponding variables will also be different.
-
-In this way, we have implemented a sufficiently general Pair type. For two values of any type, we can use it as our return type, greatly simplifying the number of types we need to define.
-
-The above code is still quite verbose to write. In fact, when the context type is clear, we can omit the type parameters during generic type construction. So we can use a more concise way to achieve the above function.
-
-Just like the code below, it is equivalent to the code above.
-
-```koral
-let main() = {
-    lef a1 = Pair(1, 2);
-    // a1 [Int, Int]Pair
-    lef a2 = Pair(true, false);
-    // a2 [Bool, Bool]Pair
-    lef a3 = Pair(1, "a");
-    // a3 [Int, String]Pair
-}
+let a1 = Pair(1, 2)           // Inferred as [Int, Int]Pair
+let a2 = Pair(true, "hello")  // Inferred as [Bool, String]Pair
 ```
 
 ### Generic Functions
 
-Now we already have powerful generic data types, but we still have no way to implement functions for a generic type of arbitrary type, such as merging any two lists of the same type.
-
-Yes, we need to have generic functions to achieve it.
-
-Generic functions are very similar to generic types, both define generic parameters using the same syntax in front of the identifier.
+Generic functions use the same syntax before the function name:
 
 ```koral
-let [T]mergeList(a [T]List, b [T]List) [T]List = {
-    let c [T]List = [];
-    for v = a then {
-        c.pushBack(v);
-    }
-    for v = b then {
-        c.pushBack(v);
-    }
-    c
+let [T Any]identity(x T) T = x
+
+print_line(identity(42))       // 42
+print_line(identity("hello"))  // hello
+```
+
+### Generic Constraints
+
+Generic parameters can specify Trait constraints to limit acceptable types:
+
+```koral
+let [T Ord]max_val(a T, b T) T = if a > b then a else b
+let [T Eq]contains(list [T]List, value T) Bool = list.contains(value)
+```
+
+Multiple constraints are connected with `and`:
+
+```koral
+let [T ToString and Hashable]describe(value T) String = value.to_string()
+```
+
+### Generic Methods
+
+`given` blocks can also define generic methods:
+
+```koral
+given [T Any] [T]Option {
+    public [U Any]map(self, f [T, U]Func) [U]Option = self and then f(_)
 }
 ```
 
-As shown in the code above, we declared the type parameter T using the same generic syntax on the left side of `mergeList`.
+## Standard Library Collection Types
 
-Next, let's see how to call generic functions.
+### List
 
-```koral
-let main() = {
-    let x = [1, 2, 3];
-    let y = [4, 5, 6];
-    let z = [Int]mergeList(x, y);
-    // z == [1, 2, 3, 4, 5, 6]
-}
-```
-
-As shown in the code above, it is almost the same as ordinary function calls, except that type parameters are added in front of the function name, just like the construction of generic data types.
-
-By the same token, when the context is clear, we can also omit type parameters. The code below is equivalent to the code above.
+`[T]List` is a dynamic array type with generic support.
 
 ```koral
-let main() = {
-    let x = [1, 2, 3];
-    let y = [4, 5, 6];
-    let z = mergeList(x, y);
-}
+// Creation
+let mut list = [Int]List.new()
+let mut list2 = [Int]List.with_capacity(100)
+
+// Add and remove
+list.push(1)
+list.push(2)
+list.push(3)
+list.pop()              // Returns Option.Some(3)
+list.insert(0, 0)       // Insert at index 0
+list.remove(0)          // Remove element at index 0
+
+// Access
+list[0]                  // Subscript access (panics on out of bounds)
+list.get(0)              // Safe access, returns Option
+list.front()             // First element, returns Option
+list.back()              // Last element, returns Option
+
+// Info
+list.count()             // Number of elements
+list.is_empty()          // Whether empty
+list.contains(1)         // Whether contains (requires Eq)
+
+// Transform
+list.slice(1..3)         // Slice
+list.filter((x) -> x > 1)   // Filter
+list.map((x) -> x * 2)      // Map
+list.sort()                  // Sort (requires Ord)
+list.sort_by((x) -> x)      // Sort by key
+
+// Concatenation
+let combined = list + other_list  // List concatenation
 ```
 
+### Map
+
+`[K, V]Map` is a hash map type. Key type must implement `Hashable`.
+
+```koral
+let mut map = [String, Int]Map.new()
+
+// Insert and remove
+map.insert("a", 1)      // Returns Option (old value)
+map.remove("a")         // Returns Option (removed value)
+
+// Access
+map["a"]                 // Subscript access (panics if key not found)
+map.get("a")             // Safe access, returns Option
+
+// Info
+map.count()
+map.is_empty()
+map.contains_key("a")
+
+// Iteration
+for entry = map then {
+    print_line(entry.key)
+    print_line(entry.value)
+}
+
+// Keys and values
+for k = map.keys() then { print_line(k) }
+for v = map.values() then { print_line(v) }
+```
+
+### Set
+
+`[T]Set` is a hash set type. Element type must implement `Hashable`.
+
+```koral
+let mut set = [Int]Set.new()
+
+// Add and remove
+set.insert(1)            // Returns Bool (whether new)
+set.remove(1)            // Returns Bool (whether existed)
+
+// Info
+set.count()
+set.is_empty()
+set.contains(1)
+
+// Set operations
+let union = set1.union(set2)
+let inter = set1.intersection(set2)
+let diff = set1.difference(set2)
+```
+
+### Option
+
+`[T]Option` is an optional type representing a value that may or may not exist.
+
+```koral
+type [T Any] Option {
+    None(),
+    Some(value T),
+}
+
+let opt = [Int]Option.Some(42)
+let none = [Int]Option.None()
+
+opt.is_some()            // true
+opt.is_none()            // false
+opt.unwrap()             // 42 (panics on None)
+opt.unwrap_or(0)         // 42 (returns default on None)
+opt.map((x) -> x * 2)   // Some(84)
+
+// or else and and then
+let val = opt or else 0
+let mapped = opt and then _ * 2
+```
+
+### Result
+
+`[T, E]Result` is a result type representing an operation that may succeed or fail.
+
+```koral
+type [T Any, E Any] Result {
+    Ok(value T),
+    Error(error E),
+}
+
+let ok = [Int, String]Result.Ok(42)
+let err = [Int, String]Result.Error("failed")
+
+ok.is_ok()               // true
+ok.is_error()            // false
+ok.unwrap()              // 42 (panics on Error)
+ok.unwrap_or(0)          // 42 (returns default on Error)
+ok.map((x) -> x * 2)    // Ok(84)
+ok.map_error((e) -> "Error: " + e)
+```
 
 ## Module System
 
-Koral provides a powerful module system for organizing code across multiple files and directories. The module system enables code reuse, encapsulation, and clear separation of concerns.
+Koral provides a powerful module system for organizing code across multiple files and directories.
 
 ### Module Concepts
 
-A **module** in Koral consists of an entry file and all files it depends on through `using` declarations. The module boundary is determined by the entry file and its dependency chain.
+A **module** in Koral consists of an entry file and all files it depends on through `using` declarations.
 
 - **Root Module**: The module formed by the compilation entry file and its dependencies
 - **Submodule**: A module in a subdirectory, with `index.koral` as its entry file
@@ -1145,7 +1177,7 @@ using "utils"      // Merges utils.koral into current module
 using "helpers"    // Merges helpers.koral into current module
 ```
 
-Merged files share the same scope - their `public` and `protected` symbols are mutually visible without additional imports.
+Merged files share the same scope — their `public` and `protected` symbols are mutually visible.
 
 #### Submodule Import
 
@@ -1168,7 +1200,7 @@ You can also import specific symbols or batch import:
 
 ```koral
 using self.models.User         // Import specific symbol
-using self.models.*            // Batch import all public symbols (become private)
+using self.models.*            // Batch import all public symbols
 ```
 
 #### Parent Module Access
@@ -1177,26 +1209,29 @@ Use `super.` prefix to access parent modules within the same compilation unit:
 
 ```koral
 using super.sibling            // Import from parent module
-using super.super.uncle        // Import from grandparent module (chained super)
+using super.super.uncle        // Import from grandparent module
 ```
 
 #### External Module Import
 
-Import external modules (like standard library) without any prefix:
+Import external modules without any prefix:
 
 ```koral
 using std                      // Import std module
 using std.collections          // Import collections from std
-using std.collections.List     // Import specific symbol
-using std.collections.*        // Batch import all public symbols
+using txt = std.text           // Import with alias
 ```
 
-Use aliases to rename imports:
+#### Foreign Using
+
+Use `foreign using` to declare external shared libraries (`.so` / `.dylib` / `.dll`) to link against. The compiler automatically adds `-l` flags during the linking phase:
 
 ```koral
-using txt = std.text           // Import with alias
-let builder = txt.StringBuilder.new()
+foreign using "m"       // Link libm (math library), equivalent to -lm
+foreign using "pthread"  // Link libpthread
 ```
+
+> Note: `foreign using` does not import header files. It tells the linker which library to link. C function declarations are done via `foreign let`.
 
 ### Access Modifiers
 
@@ -1210,8 +1245,6 @@ Koral provides three access levels to control symbol visibility:
 
 #### Default Access Levels
 
-Different declarations have different default access levels:
-
 | Declaration | Default |
 |-------------|---------|
 | Global functions, variables, types | `protected` |
@@ -1221,42 +1254,7 @@ Different declarations have different default access levels:
 | Trait methods | `public` |
 | Using declarations | `private` |
 
-#### Using Access Modifiers
-
-Apply access modifiers before declarations:
-
-```koral
-public type User(
-    public name String,           // Accessible from anywhere
-    protected email String,       // Accessible within module and submodules
-    private passwordHash String,  // Accessible only in this file
-)
-
-public let greet(user User) String = "Hello, " + user.name
-
-protected let validateEmail(email String) Bool = email.contains("@")
-
-private let hashPassword(password String) String = { /* ... */ }
-```
-
-#### Re-export Rules
-
-You can re-export symbols from the same compilation unit:
-
-```koral
-public using self.helpers      // Re-export submodule
-public using super.sibling     // Re-export from parent module
-```
-
-However, re-exporting external module symbols is not allowed:
-
-```koral
-public using std.Option        // Error: cannot re-export external symbols
-```
-
 ### Project Structure Example
-
-A typical multi-file project structure:
 
 ```
 my_project/
@@ -1274,58 +1272,225 @@ my_project/
 ```koral
 // main.koral
 using std
-using "utils"                  // Merge utils.koral
-using self.models              // Import models submodule
-using self.services            // Import services submodule
+using "utils"
+using self.models
+using self.services
 
 public let main() = {
     let user = models.User.new("Alice")
     if services.authenticate(user) then {
-        printLine("Welcome!")
+        print_line("Welcome!")
     }
 }
 ```
 
+## FFI (Foreign Function Interface)
+
+Koral supports interoperability with C through the `foreign` keyword.
+
+### Foreign Using (Linking External Libraries)
+
+Use `foreign using` to declare shared libraries to link against:
+
 ```koral
-// models/index.koral
-using "user"                   // Merge user.koral
-using "post"                   // Merge post.koral
-// User and Post types are now part of models module
+foreign using "m"  // Link libm (math library)
 ```
 
-```koral
-// models/user.koral
-public type User(
-    public name String,
-    public email String,
-)
+The compiler automatically adds `-lm` during the linking phase. `libc` is implicitly linked by default and does not need to be declared.
 
-given User {
-    public new(name String) User = User(name, "")
+### Foreign Functions
+
+Declare external C functions:
+
+```koral
+foreign using "m"
+
+foreign let sin(x Float64) Float64
+foreign let exit(code Int) Never
+foreign let abort() Never
+```
+
+### Foreign Types
+
+Declare external C types:
+
+```koral
+// Opaque type (no fields)
+foreign type CFile
+
+// FFI struct with fields (aligned with C layout)
+foreign type KoralTimespec(tv_sec Int64, tv_nsec Int64)
+```
+
+### Intrinsic
+
+The `intrinsic` keyword declares types and functions built into the compiler:
+
+```koral
+public intrinsic type Int
+public intrinsic let [T Any]ref_count(r T ref) Int
+```
+
+## Standard Library API Reference
+
+### IO Functions
+
+```koral
+// Output (auto-flush)
+print(value)              // Print to stdout (no newline)
+print_line(value)         // Print to stdout (with newline)
+print_error(value)        // Print to stderr (no newline)
+print_error_line(value)   // Print to stderr (with newline)
+
+// Input
+read_line()               // Read a line from stdin, returns [String]Option
+
+// Assertion and panic
+panic(message)            // Terminate program with error message
+assert(condition, message) // Panic when condition is false
+```
+
+All print functions accept any type that implements the `ToString` trait.
+
+### OS Module
+
+```koral
+// File operations
+read_file(path)           // [String, String]Result
+write_file(path, content) // [Void, String]Result
+append_file(path, content) // [Void, String]Result
+copy_file(src, dst)       // [Void, String]Result
+remove_file(path)         // [Void, String]Result
+
+// Directory operations
+create_dir(path)          // [Void, String]Result
+create_dir_all(path)      // [Void, String]Result (recursive)
+remove_dir(path)          // [Void, String]Result
+remove_dir_all(path)      // [Void, String]Result (recursive)
+read_dir(path)            // [[String]List, String]Result
+
+// Path operations
+path_exists(path)         // Bool
+is_file(path)             // Bool
+is_dir(path)              // Bool
+join_path(base, name)     // String
+base_name(path)           // [String]Option
+dir_name(path)            // [String]Option
+ext_name(path)            // [String]Option
+is_absolute(path)         // Bool
+normalize_path(path)      // String
+absolute_path(path)       // [String, String]Result
+current_dir()             // [String, String]Result
+
+// Environment variables
+get_env(name)             // [String]Option
+set_env(name, value)      // Void
+home_dir()                // [String]Option
+temp_dir()                // String
+
+// Process
+run_command(program, args) // [CommandResult, String]Result
+args()                    // [String]List
+exit(code)                // Never
+abort()                   // Never
+```
+
+### Time Module
+
+```koral
+// Duration type
+Duration.from_nanos(n)    // Create from nanoseconds
+Duration.from_micros(n)   // Create from microseconds
+Duration.from_millis(n)   // Create from milliseconds
+Duration.from_secs(n)     // Create from seconds
+Duration.from_mins(n)     // Create from minutes
+Duration.from_hours(n)    // Create from hours
+
+d.as_nanos()              // Convert to nanoseconds
+d.as_millis()             // Convert to milliseconds
+d.as_seconds()            // Convert to seconds
+
+// Sleep
+sleep(duration)           // Sleep for specified duration
+```
+
+### Rune Type
+
+`Rune` represents a Unicode code point.
+
+```koral
+let r = Rune.from_uint32((UInt32)65)  // 'A'
+r.to_uint32()             // UInt32 value
+r.to_string()             // Convert to UTF-8 string
+r.is_ascii()              // Whether ASCII
+r.is_ascii_digit()        // Whether ASCII digit
+r.is_ascii_letter()       // Whether ASCII letter
+r.is_letter()             // Whether Unicode letter
+r.is_whitespace()         // Whether whitespace
+r.byte_count()            // UTF-8 encoding byte count
+```
+
+Strings can iterate over Unicode code points via the `runes()` method:
+
+```koral
+for r = "Hello".runes() then {
+    print_line(r.to_string())
 }
 ```
 
-### Multiple Programs in Same Directory
+### Stream API
 
-Multiple independent programs can share common code:
-
-```
-scripts/
-├── tool1.koral          # Independent program 1
-├── tool2.koral          # Independent program 2
-└── common.koral         # Shared utilities
-```
+Stream provides lazy, chainable iterator operations.
 
 ```koral
-// tool1.koral
-using "common"
-public let main() = helper()
+// Create a Stream from any iterable
+let s = stream(list)
 
-// tool2.koral  
-using "common"
-public let main() = helper()
+// Intermediate operations (lazy)
+s.filter((x) -> x > 0)       // Filter
+s.map((x) -> x * 2)          // Map
+s.filter_map((x) -> ...)     // Filter and map
+s.take(5)                     // Take first n
+s.skip(3)                     // Skip first n
+s.step_by(2)                  // Take every nth
+s.enumerate()                 // Attach index
+s.peek((x) -> print_line(x)) // Peek (side effect)
+s.take_while((x) -> x < 10)  // Take while condition
+s.skip_while((x) -> x < 5)   // Skip while condition
+s.chain(other_stream)         // Chain
+s.zip(other_stream)           // Zip
+s.flat_map((x) -> ...)       // Flat map
+s.intersperse(0)              // Intersperse separator
+
+// Terminal operations (trigger computation)
+s.fold(0, (acc, x) -> acc + x) // Fold
+s.reduce((a, b) -> a + b)      // Reduce
+s.to_list()                     // Collect to list
+s.for_each((x) -> print_line(x)) // For each
+s.count()                       // Count
+s.first()                       // First element
+s.last()                        // Last element
+s.sum()                         // Sum (requires Add)
+s.product()                     // Product (requires Mul)
+s.average()                     // Average (requires Add)
+s.any((x) -> x > 0)            // Any match
+s.all((x) -> x > 0)            // All match
+s.none((x) -> x > 0)           // None match
+s.min()                         // Minimum (requires Ord)
+s.max()                         // Maximum (requires Ord)
 ```
 
-Each program is compiled independently:
-- `koralc tool1.koral` → tool1 module = tool1.koral + common.koral
-- `koralc tool2.koral` → tool2 module = tool2.koral + common.koral
+### Pair Type
+
+```koral
+let p = [Int, String]Pair(1, "hello")
+p.first   // 1
+p.second  // "hello"
+```
+
+### Utility Functions
+
+```koral
+max(a, b)    // Returns the larger value (requires Ord)
+min(a, b)    // Returns the smaller value (requires Ord)
+```

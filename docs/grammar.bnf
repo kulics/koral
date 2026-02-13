@@ -7,6 +7,8 @@
 
 <using-decl> ::= <access-modifier>? "using" <using-path> ";"?
 <foreign-using-decl> ::= "foreign" "using" <string-literal> ";"?
+// 说明：foreign using 的 string-literal 是链接库名（如 "m"），
+// 编译器在链接阶段添加 -l<name> 参数。
 <using-path> ::= <file-merge-path>
                | <external-path>
                | <submodule-path>
@@ -72,8 +74,8 @@
 <type-body> ::= "(" <field-list>? ")"                 // struct
               | "{" <variant-list>? "}"                // union (sum type)
 
-<foreign-type-decl> ::= "type" <type-identifier> ";"?
-// 说明：foreign type 不允许类型体
+<foreign-type-decl> ::= "type" <type-identifier> ("(" <field-list>? ")")? ";"?
+// 说明：foreign type 可以有字段（用于 FFI 结构体布局对齐），也可以没有（opaque type）
 
 <field-list> ::= <field> ("," <field>)* ","?
 <field> ::= <access-modifier>? "mut"? <identifier> <type-annotation>
@@ -113,10 +115,12 @@
 // Types
 // ============================================================================
 
-<type> ::= <type-identifier> ("ref")?
-         | <generic-type> ("ref")?
-         | <function-type> ("ref")?
-         | "Self" ("ref")?
+<type> ::= <type-identifier> <type-suffix>*
+         | <generic-type> <type-suffix>*
+         | <function-type> <type-suffix>*
+         | "Self" <type-suffix>*
+
+<type-suffix> ::= "ref" | "ptr" | "weakref"
 
 <generic-type> ::= "[" <type-list> "]" <type-identifier>
 <function-type> ::= "[" <type-list> "]" "Func"
@@ -160,7 +164,7 @@
                | <while-expression>
                | <for-expression>
                | <when-expression>
-               | <or-expression>
+               | <or-else-expression>
 
 <let-expression> ::= "let" "mut"? <identifier> <type-annotation>? "=" <expression> "then" <expression>
 
@@ -180,7 +184,14 @@
 // Binary Expressions (by precedence, lowest to highest)
 // ============================================================================
 
-<or-expression> ::= <and-expression> ("or" <and-expression>)*
+<or-else-expression> ::= <or-expression> ("or" "else" <or-expression>)*
+// "or else" is value coalescing for Option/Result types
+
+<or-expression> ::= <and-then-expression> ("or" <and-then-expression>)*
+
+<and-then-expression> ::= <and-expression> ("and" "then" <and-expression>)*
+// "and then" is optional chaining / value transformation for Option/Result types
+
 <and-expression> ::= <not-expression> ("and" <not-expression>)*
 <not-expression> ::= "not" <bitwise-or-expression> | <bitwise-or-expression>
 
@@ -217,6 +228,8 @@
 
 <prefix-expression> ::= <cast-expression>
                       | "ref" <prefix-expression>
+                      | "ptr" <prefix-expression>
+                      | "deptr" <prefix-expression>
                       | "deref" <prefix-expression>
                       | "~" <prefix-expression>
                       | <postfix-expression>
@@ -246,12 +259,18 @@
 <primary-expression> ::= <literal>
                        | <identifier>
                        | "self"
+                       | <implicit-member-expression>
                        | <generic-instantiation>
                        | <block-expression>
                        | <lambda-expression>
                        | "(" <expression> ")"
 
 <generic-instantiation> ::= "[" <type-list> "]" <identifier>
+
+<implicit-member-expression> ::= "." <identifier> ("(" <argument-list>? ")")?
+// 隐式成员表达式：当期望类型已知时，可以省略类型名直接使用 .成员名
+// 用于 union case 构造和静态方法调用
+// 例如: .Some(42), .None(), .new(), .with_capacity(10)
 
 <block-expression> ::= "{" <statement>* <expression>? "}"
 
@@ -298,6 +317,7 @@
 <literal> ::= <integer-literal>
             | <float-literal>
             | <string-literal>
+            | <interpolated-string-literal>
             | <bool-literal>
 
 <integer-literal> ::= [0-9]+ ("_" [0-9]+)*
@@ -306,6 +326,10 @@
 
 <string-literal> ::= '"' <string-char>* '"'
                    | "'" <string-char>* "'"
+
+<interpolated-string-literal> ::= '"' (<string-char> | <interpolation>)* '"'
+                                | "'" (<string-char> | <interpolation>)* "'"
+<interpolation> ::= "\(" <expression> ")"
 
 <string-char> ::= <escape-sequence> | ~["\\\n]
 <escape-sequence> ::= "\\" ("n" | "t" | "r" | "v" | "f" | "0" | "\\" | '"' | "'")
@@ -320,11 +344,11 @@
 // ============================================================================
 
 // Reserved keywords:
-//   let, mut, type, trait, given, intrinsic
+//   let, mut, type, trait, given, intrinsic, foreign
 //   using, self, Self, super
 //   if, then, else, while, for, when, is
 //   and, or, not
-//   ref, deref
+//   ref, deref, ptr, deptr, weakref
 //   return, break, continue
 //   true, false
 //   public, private, protected
@@ -340,6 +364,8 @@
 // Assignment: = += -= *= /= %= &= |= ^= <<= >>=
 // Range: .. ..< <.. <..< ... <... ...< ....
 // Lambda: ->
+// Value coalescing: or else
+// Optional chaining: and then
 // Other: . , ; : ( ) [ ] { }
 
 // ============================================================================
