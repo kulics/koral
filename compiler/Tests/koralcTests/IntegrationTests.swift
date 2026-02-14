@@ -192,6 +192,11 @@ class IntegrationTests: XCTestCase {
     func test_struct_visibility_test() throws { try runCase(named: "struct_visibility_test/struct_visibility_test.koral") }
     func test_struct_visibility_member_test() throws { try runCase(named: "struct_visibility_member_test/struct_visibility_member_test.koral") }
     func test_struct_visibility_wildcard_test() throws { try runCase(named: "struct_visibility_wildcard_test/struct_visibility_wildcard_test.koral") }
+    func test_numeric_literal_bases() throws { try runCase(named: "numeric_literal_bases.koral") }
+    func test_numeric_literal_bases_error_binary_digit() throws { try runCase(named: "numeric_literal_bases_error_binary_digit.koral") }
+    func test_numeric_literal_bases_error_octal_digit() throws { try runCase(named: "numeric_literal_bases_error_octal_digit.koral") }
+    func test_numeric_literal_bases_error_empty_binary() throws { try runCase(named: "numeric_literal_bases_error_empty_binary.koral") }
+    func test_numeric_literal_bases_error_float() throws { try runCase(named: "numeric_literal_bases_error_float.koral") }
     
     func runTestCase(file: URL, projectRoot: URL) throws {
         // 1. Parse expectations

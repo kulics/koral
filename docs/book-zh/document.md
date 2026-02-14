@@ -206,6 +206,23 @@ let million = 1_000_000
 let pi = 3.141_592_653
 ```
 
+Koral 还支持二进制、八进制和十六进制整数字面量，分别使用 `0b`、`0o`、`0x` 前缀：
+
+```koral
+let bin = 0b1010          // 二进制，值为 10
+let oct = 0o755           // 八进制，值为 493
+let hex = 0xFF            // 十六进制，值为 255
+```
+
+非十进制字面量同样支持下划线分隔符：
+
+```koral
+let mask = 0xFF_FF        // 十六进制，值为 65535
+let flags = 0b1010_0101   // 二进制，值为 165
+```
+
+注意：非十进制字面量仅支持整数，不支持浮点数。十六进制字母大小写均可（`0xABcd` 等价于 `0xabCD`）。
+
 ### 类型转换
 
 不同数值类型之间需要显式转换，使用 `(Type)expr` 语法：
@@ -624,6 +641,7 @@ let result = when x is {
 - 字面量模式：`1`, `"abc"`, `true`
 - 变量绑定模式：`x`（匹配任意值并绑定到 x），`mut x`（可变绑定）
 - 比较模式：`> 5`, `< 0`, `>= 10`, `<= -1`
+- 结构体解构模式：`Point(x, y)`, `Rect(Point(a, b), w, h)`
 - 联合类型模式：`.Some(v)`, `.None`
 - 逻辑模式：`pattern and pattern`, `pattern or pattern`, `not pattern`
 
@@ -651,6 +669,39 @@ let grade = when score is {
 when x is {
     1 or 2 or 3 then print_line("small"),
     _ then print_line("big"),
+}
+
+// 结构体解构模式
+type Point(x Int, y Int)
+type Rect(origin Point, width Int, height Int)
+
+let p = Point(10, 20)
+when p is {
+    Point(x, y) then print_line(x + y),  // 30
+}
+
+// 嵌套结构体解构
+let r = Rect(Point(1, 2), 30, 40)
+when r is {
+    Rect(Point(a, b), w, h) then print_line(a + b + w + h),  // 73
+}
+
+// 在 if...is 中使用结构体解构
+if p is Point(x, y) then {
+    print_line(x * y)  // 200
+}
+
+// 通配符和字面量字段匹配
+when p is {
+    Point(0, y) then print_line(y),       // 第一个字段为 0 时匹配
+    Point(_, y) then print_line(y),       // 忽略第一个字段
+}
+
+// 泛型结构体解构
+type [T Any]Box(val T)
+let b = [Int]Box(42)
+when b is {
+    Box(v) then print_line(v),  // 42
 }
 ```
 

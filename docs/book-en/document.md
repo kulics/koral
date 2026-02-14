@@ -184,6 +184,23 @@ let million = 1_000_000
 let pi = 3.141_592_653
 ```
 
+Koral also supports binary, octal, and hexadecimal integer literals using the `0b`, `0o`, and `0x` prefixes respectively:
+
+```koral
+let bin = 0b1010          // Binary, value is 10
+let oct = 0o755           // Octal, value is 493
+let hex = 0xFF            // Hexadecimal, value is 255
+```
+
+Non-decimal literals also support underscore separators:
+
+```koral
+let mask = 0xFF_FF        // Hexadecimal, value is 65535
+let flags = 0b1010_0101   // Binary, value is 165
+```
+
+Note: Non-decimal literals only support integers, not floating-point numbers. Hexadecimal letters are case-insensitive (`0xABcd` is equivalent to `0xabCD`).
+
 ### Type Casting
 
 Different numeric types require explicit conversion using `(Type)expr` syntax:
@@ -584,6 +601,7 @@ Supported patterns include:
 - Literal patterns: `1`, `"abc"`, `true`
 - Variable binding patterns: `x` (matches any value and binds to x), `mut x` (mutable binding)
 - Comparison patterns: `> 5`, `< 0`, `>= 10`, `<= -1`
+- Struct destructuring patterns: `Point(x, y)`, `Rect(Point(a, b), w, h)`
 - Union case patterns: `.Some(v)`, `.None`
 - Logical patterns: `pattern and pattern`, `pattern or pattern`, `not pattern`
 
@@ -611,6 +629,39 @@ let grade = when score is {
 when x is {
     1 or 2 or 3 then print_line("small"),
     _ then print_line("big"),
+}
+
+// Struct destructuring patterns
+type Point(x Int, y Int)
+type Rect(origin Point, width Int, height Int)
+
+let p = Point(10, 20)
+when p is {
+    Point(x, y) then print_line(x + y),  // 30
+}
+
+// Nested struct destructuring
+let r = Rect(Point(1, 2), 30, 40)
+when r is {
+    Rect(Point(a, b), w, h) then print_line(a + b + w + h),  // 73
+}
+
+// Struct destructuring in if...is
+if p is Point(x, y) then {
+    print_line(x * y)  // 200
+}
+
+// Wildcard and literal field matching
+when p is {
+    Point(0, y) then print_line(y),       // Match when first field is 0
+    Point(_, y) then print_line(y),       // Ignore first field
+}
+
+// Generic struct destructuring
+type [T Any]Box(val T)
+let b = [Int]Box(42)
+when b is {
+    Box(v) then print_line(v),  // 42
 }
 ```
 
