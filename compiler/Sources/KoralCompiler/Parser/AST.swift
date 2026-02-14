@@ -538,6 +538,8 @@ public indirect enum PatternNode: CustomStringConvertible {
   case orPattern(left: PatternNode, right: PatternNode, span: SourceSpan)
   /// Not pattern for negating a pattern
   case notPattern(pattern: PatternNode, span: SourceSpan)
+  /// Struct destructuring pattern: TypeName(pattern1, pattern2, ...)
+  case structPattern(typeName: String, elements: [PatternNode], span: SourceSpan)
 
   public var description: String {
     switch self {
@@ -567,6 +569,9 @@ public indirect enum PatternNode: CustomStringConvertible {
       return "(\(left.description) or \(right.description))"
     case .notPattern(let pattern, _):
       return "not \(pattern.description)"
+    case .structPattern(let typeName, let elements, _):
+      let args = elements.map { $0.description }.joined(separator: ", ")
+      return "\(typeName)(\(args))"
     }
   }
   
@@ -584,6 +589,7 @@ public indirect enum PatternNode: CustomStringConvertible {
     case .andPattern(_, _, let span): return span
     case .orPattern(_, _, let span): return span
     case .notPattern(_, let span): return span
+    case .structPattern(_, _, let span): return span
     }
   }
 }

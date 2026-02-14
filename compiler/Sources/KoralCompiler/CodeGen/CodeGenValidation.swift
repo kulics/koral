@@ -337,6 +337,10 @@ extension CodeGen {
       validatePattern(right, context: "\(context) -> or pattern right")
     case .notPattern(let inner):
       validatePattern(inner, context: "\(context) -> not pattern inner")
+    case .structPattern(_, let elements):
+      for element in elements {
+        validatePattern(element, context: "\(context) -> struct pattern element")
+      }
     }
   }
   

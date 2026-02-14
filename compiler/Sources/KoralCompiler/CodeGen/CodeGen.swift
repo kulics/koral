@@ -1818,7 +1818,7 @@ public class CodeGen {
       var argResults: [String] = []
       
       // Get canonical members to check for casts
-       let canonicalMembers: [(name: String, type: Type, mutable: Bool)]
+      let canonicalMembers: [(name: String, type: Type, mutable: Bool, access: AccessModifier)]
       if case .structure(let defId) = identifier.type.canonical {
         canonicalMembers = context.getStructMembers(defId) ?? []
       } else {
@@ -2703,6 +2703,36 @@ public class CodeGen {
         let condition = "!(\(cond))"
         // Not patterns cannot have bindings (enforced by type checker)
         return (pre, preVars, condition, [], [])
+        
+      case .structPattern(_, let elements):
+        // Struct pattern: direct field access, no tag check needed
+        guard case .structure(let defId) = type else { fatalError("Struct pattern on non-struct type: \(type)") }
+        let structMembers = context.getStructMembers(defId) ?? []
+        
+        var prelude: [String] = []
+        var preludeVars: [(String, Type)] = []
+        var condition = "1"
+        var bindings: [String] = []
+        var vars: [(String, Type)] = []
+        
+        for (i, subPattern) in elements.enumerated() {
+          let fieldName = sanitizeCIdentifier(structMembers[i].name)
+          let fieldType = structMembers[i].type
+          let subPath = "\(path).\(fieldName)"
+          
+          let (subPre, subPreVars, subCond, subBind, subVars) =
+              generatePatternConditionAndBindings(subPattern, subPath, fieldType)
+          
+          if subCond != "1" {
+            condition += " && (\(subCond))"
+          }
+          prelude.append(contentsOf: subPre)
+          preludeVars.append(contentsOf: subPreVars)
+          bindings.append(contentsOf: subBind)
+          vars.append(contentsOf: subVars)
+        }
+        
+        return (prelude, preludeVars, condition, bindings, vars)
       }
     }
 

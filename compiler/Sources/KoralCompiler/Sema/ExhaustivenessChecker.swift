@@ -123,6 +123,9 @@ extension ExhaustivenessChecker {
         case .notPattern:
             // Not patterns are never catchall (they exclude values)
             return false
+        case .structPattern(_, let elements):
+            // Struct pattern is catchall if all sub-patterns are catchall
+            return elements.allSatisfy { isCatchallPattern($0) }
         default:
             return false
         }

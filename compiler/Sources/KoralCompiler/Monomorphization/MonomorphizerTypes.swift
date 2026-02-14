@@ -45,7 +45,7 @@ extension Monomorphizer {
         instantiatedTypes[key] = placeholder
 
         // Resolve members with concrete types
-        var resolvedMembers: [(name: String, type: Type, mutable: Bool)] = []
+        var resolvedMembers: [(name: String, type: Type, mutable: Bool, access: AccessModifier)] = []
         do {
             // Create type substitution map
             var typeSubstitution: [String: Type] = [:]
@@ -63,7 +63,7 @@ extension Monomorphizer {
                 // Resolve any nested genericStruct/genericUnion types
                 // This ensures types like List<T ref> get instantiated
                 fieldType = resolveParameterizedType(fieldType, visited: [])
-                resolvedMembers.append((name: param.name, type: fieldType, mutable: param.mutable))
+                resolvedMembers.append((name: param.name, type: fieldType, mutable: param.mutable, access: param.access))
             }
         } catch {
             instantiatedTypes.removeValue(forKey: key)
@@ -160,7 +160,7 @@ extension Monomorphizer {
             }
             
             for c in template.cases {
-                var params: [(name: String, type: Type)] = []
+                var params: [(name: String, type: Type, access: AccessModifier)] = []
                 for p in c.parameters {
                     var resolved = try resolveTypeNode(p.type, substitution: typeSubstitution)
                     if resolved == placeholder {
@@ -171,7 +171,7 @@ extension Monomorphizer {
                     // Resolve any nested genericStruct/genericUnion types
                     // This ensures types like List<Expr ref> get instantiated
                     resolved = resolveParameterizedType(resolved, visited: [])
-                    params.append((name: p.name, type: resolved))
+                    params.append((name: p.name, type: resolved, access: AccessModifier.public))
                 }
                 resolvedCases.append(UnionCase(name: c.name, parameters: params))
             }

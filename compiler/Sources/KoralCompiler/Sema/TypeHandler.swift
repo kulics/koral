@@ -30,7 +30,7 @@ public protocol TypeHandler {
     /// 获取类型的成员列表
     /// - Parameter type: 要查询的类型
     /// - Returns: 成员列表，每个成员包含名称、类型和是否可变
-    func getMembers(_ type: Type) -> [(name: String, type: Type, mutable: Bool)]
+    func getMembers(_ type: Type) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier)]
     
     /// 获取类型的方法列表
     /// - Parameter type: 要查询的类型
@@ -107,7 +107,7 @@ extension TypeHandler {
     }
     
     /// 默认实现：大多数类型没有成员
-    public func getMembers(_ type: Type) -> [(name: String, type: Type, mutable: Bool)] {
+    public func getMembers(_ type: Type) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier)] {
         return []
     }
     
@@ -236,7 +236,7 @@ public class StructHandler: TypeHandler {
         return false
     }
     
-    public func getMembers(_ type: Type) -> [(name: String, type: Type, mutable: Bool)] {
+    public func getMembers(_ type: Type) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier)] {
         guard case .structure(let defId) = type else {
             return []
         }
@@ -376,7 +376,7 @@ public class UnionHandler: TypeHandler {
         return false
     }
     
-    public func getMembers(_ type: Type) -> [(name: String, type: Type, mutable: Bool)] {
+    public func getMembers(_ type: Type) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier)] {
         // Union 没有传统意义上的成员，它有 cases
         // 返回空数组，使用 getCases 方法获取 cases
         return []
@@ -567,7 +567,7 @@ public class GenericHandler: TypeHandler {
         }
     }
     
-    public func getMembers(_ type: Type) -> [(name: String, type: Type, mutable: Bool)] {
+    public func getMembers(_ type: Type) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier)] {
         // 泛型类型在实例化之前没有具体的成员
         return []
     }
@@ -1293,7 +1293,7 @@ public final class TypeHandlerRegistry: @unchecked Sendable {
     }
     
     /// 获取类型的成员
-    public func getMembers(_ type: Type) -> [(name: String, type: Type, mutable: Bool)] {
+    public func getMembers(_ type: Type) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier)] {
         return handler(for: type).getMembers(type)
     }
     

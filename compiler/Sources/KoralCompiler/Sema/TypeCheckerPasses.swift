@@ -1067,8 +1067,9 @@ extension TypeChecker {
         
         // Update typed def info and overwrite the placeholder
         if case .structure(let defId) = placeholder {
-          let members = params.map {
-            (name: context.getName($0.defId) ?? "<unknown>", type: $0.type, mutable: $0.isMutable())
+          let members = zip(params, parameters).map { (sym, param) in
+            let fieldAccess = param.access == .default ? AccessChecker.defaultAccessForStructField() : param.access
+            return (name: context.getName(sym.defId) ?? "<unknown>", type: sym.type, mutable: sym.isMutable(), access: fieldAccess)
           }
           context.updateStructInfo(
             defId: defId,
@@ -1114,7 +1115,7 @@ extension TypeChecker {
         if let cname = cname {
           context.setCname(defId, cname)
         }
-        let members = resolvedFields.map { (name: $0.name, type: $0.type, mutable: true) }
+        let members = resolvedFields.map { (name: $0.name, type: $0.type, mutable: true, access: AccessModifier.public) }
         context.updateStructInfo(
           defId: defId,
           members: members,
@@ -1142,7 +1143,7 @@ extension TypeChecker {
         
         var unionCases: [UnionCase] = []
         for c in cases {
-          var params: [(name: String, type: Type)] = []
+          var params: [(name: String, type: Type, access: AccessModifier)] = []
           for p in c.parameters {
             let resolved = try resolveTypeNode(p.type)
             if resolved == placeholder {
@@ -1150,7 +1151,7 @@ extension TypeChecker {
                 op: "Direct recursion in union \(name) not allowed (use ref)", type1: p.name,
                 type2: "")
             }
-            params.append((name: p.name, type: resolved))
+            params.append((name: p.name, type: resolved, access: .public))
           }
           unionCases.append(UnionCase(name: c.name, parameters: params))
         }

@@ -559,6 +559,10 @@ public class EscapeContext {
             preAnalyzePattern(right)
         case .notPattern(let inner):
             preAnalyzePattern(inner)
+        case .structPattern(_, let elements):
+            for element in elements {
+                preAnalyzePattern(element)
+            }
         }
     }
     

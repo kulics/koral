@@ -70,7 +70,7 @@ public struct TypeSubstitution {
                 return type
             }
             if members.contains(where: { context.containsTypeVariable($0.type) }) {
-                let newMembers = members.map { (name: $0.name, type: apply($0.type, context: context), mutable: $0.mutable) }
+                let newMembers = members.map { (name: $0.name, type: apply($0.type, context: context), mutable: $0.mutable, access: $0.access) }
                 let isGeneric = context.isGenericInstantiation(defId) ?? false
                 let typeArgs = context.getTypeArguments(defId)
                 context.updateStructInfo(
@@ -90,7 +90,7 @@ public struct TypeSubstitution {
                 let newCases = cases.map { c in
                     UnionCase(
                         name: c.name,
-                        parameters: c.parameters.map { (name: $0.name, type: apply($0.type, context: context)) }
+                        parameters: c.parameters.map { (name: $0.name, type: apply($0.type, context: context), access: $0.access) }
                     )
                 }
                 let isGeneric = context.isGenericInstantiation(defId) ?? false

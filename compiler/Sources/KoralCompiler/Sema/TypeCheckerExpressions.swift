@@ -746,14 +746,14 @@ extension TypeChecker {
       
       // Resolve case parameter types with substitution
       let resolvedCases: [UnionCase] = try template.cases.map { caseDef in
-        let resolvedParams: [(name: String, type: Type)] = try caseDef.parameters.map { param in
+        let resolvedParams: [(name: String, type: Type, access: AccessModifier)] = try caseDef.parameters.map { param in
           let resolvedType = try withNewScope {
             for (paramName, paramType) in substitution {
               try currentScope.defineType(paramName, type: paramType)
             }
             return try resolveTypeNode(param.type)
           }
-          return (name: param.name, type: resolvedType)
+          return (name: param.name, type: resolvedType, access: AccessModifier.public)
         }
         return UnionCase(name: caseDef.name, parameters: resolvedParams)
       }
@@ -2885,6 +2885,14 @@ extension TypeChecker {
             foundMember = true
           }
         } else if let mem = context.getStructMembers(defId)?.first(where: { $0.name == memberName }) {
+          // Check field visibility
+          if !isFieldAccessibleForMemberAccess(fieldAccess: mem.access, defId: defId) {
+            let structName = context.getName(defId) ?? typeToLookup.description
+            let accessLabel = mem.access == .private ? "private" : "protected"
+            throw SemanticError(.generic(
+              "Cannot access \(accessLabel) field '\(memberName)' of type '\(structName)'"
+            ), span: currentSpan)
+          }
           let sym = makeLocalSymbol(
             name: mem.name, type: mem.type, kind: .variable(mem.mutable ? .MutableValue : .Value))
           typedPath.append(sym)
@@ -2906,6 +2914,14 @@ extension TypeChecker {
           
           // Look up member in template and substitute types
           if let param = template.parameters.first(where: { $0.name == memberName }) {
+            // Check field visibility (resolve default access for struct fields)
+            let fieldAccess = param.access == .default ? AccessChecker.defaultAccessForStructField() : param.access
+            if !isFieldAccessibleForMemberAccess(fieldAccess: fieldAccess, defId: template.defId) {
+              let accessLabel = fieldAccess == .private ? "private" : "protected"
+              throw SemanticError(.generic(
+                "Cannot access \(accessLabel) field '\(memberName)' of type '\(templateName)'"
+              ), span: currentSpan)
+            }
             let memberType = try withNewScope {
               for (paramName, paramType) in substitution {
                 try currentScope.defineType(paramName, type: paramType)
@@ -2969,6 +2985,37 @@ extension TypeChecker {
     }
 
     return memberAccess
+  }
+  
+  /// Check if a field is accessible from the current source file/module for member access.
+  /// - Parameters:
+  ///   - fieldAccess: The access modifier of the field
+  ///   - defId: The DefId of the type that defines the field
+  /// - Returns: true if the field is accessible
+  private func isFieldAccessibleForMemberAccess(fieldAccess: AccessModifier, defId: DefId) -> Bool {
+    switch fieldAccess {
+    case .public:
+      return true
+    case .private:
+      // Private: only accessible from the same file
+      let defSourceFile = context.getSourceFile(defId) ?? ""
+      return defSourceFile == currentSourceFile
+    case .protected, .default:
+      // Protected: accessible from the same module or submodule
+      let defModulePath = context.getModulePath(defId) ?? []
+      // Same module
+      if defModulePath == currentModulePath {
+        return true
+      }
+      // Current module is a submodule of the definition's module
+      if currentModulePath.count > defModulePath.count {
+        let prefix = Array(currentModulePath.prefix(defModulePath.count))
+        if prefix == defModulePath {
+          return true
+        }
+      }
+      return false
+    }
   }
   
   /// Helper to infer generic instantiation member path
@@ -4237,6 +4284,15 @@ extension TypeChecker {
             throw SemanticError.undefinedMember(memberName, typeToLookup.description)
           }
 
+          // Check field visibility
+          if !isFieldAccessibleForMemberAccess(fieldAccess: member.access, defId: defId) {
+            let structName = context.getName(defId) ?? typeToLookup.description
+            let accessLabel = member.access == .private ? "private" : "protected"
+            throw SemanticError(.generic(
+              "Cannot access \(accessLabel) field '\(memberName)' of type '\(structName)'"
+            ), span: currentSpan)
+          }
+
           if !member.mutable {
             throw SemanticError.assignToImmutable(memberName)
           }
@@ -4264,6 +4320,15 @@ extension TypeChecker {
           // Look up member in template
           guard let param = template.parameters.first(where: { $0.name == memberName }) else {
             throw SemanticError.undefinedMember(memberName, typeToLookup.description)
+          }
+          
+          // Check field visibility (resolve default access for struct fields)
+          let fieldAccess = param.access == .default ? AccessChecker.defaultAccessForStructField() : param.access
+          if !isFieldAccessibleForMemberAccess(fieldAccess: fieldAccess, defId: template.defId) {
+            let accessLabel = fieldAccess == .private ? "private" : "protected"
+            throw SemanticError(.generic(
+              "Cannot access \(accessLabel) field '\(memberName)' of type '\(templateName)'"
+            ), span: currentSpan)
           }
           
           if !param.mutable {
@@ -4610,6 +4675,10 @@ extension TypeChecker {
       throw SemanticError(.generic(
         "For loop pattern must be exhaustive. Pattern combinators are not exhaustive."
       ), line: currentLine)
+    case .structPattern:
+      throw SemanticError(.generic(
+        "For loop pattern must be exhaustive. Struct destructuring patterns are not exhaustive."
+      ), line: currentLine)
     }
   }
 
@@ -4836,6 +4905,11 @@ extension TypeChecker {
       )
     case .notPattern(let inner, _):
       return .notPattern(pattern: try convertPatternToTypedPattern(inner, expectedType: expectedType))
+    case .structPattern(let typeName, let elements, _):
+      let typedElements = try elements.map { elem -> TypedPattern in
+        try convertPatternToTypedPattern(elem, expectedType: .void)
+      }
+      return .structPattern(typeName: typeName, elements: typedElements)
     }
   }
 
@@ -4852,6 +4926,10 @@ extension TypeChecker {
     case .wildcard, .booleanLiteral, .integerLiteral, .stringLiteral, .negativeIntegerLiteral:
       break
     case .unionCase(_, let elements, _):
+      for elem in elements {
+        try bindPatternVariables(pattern: elem, type: .void)
+      }
+    case .structPattern(_, let elements, _):
       for elem in elements {
         try bindPatternVariables(pattern: elem, type: .void)
       }

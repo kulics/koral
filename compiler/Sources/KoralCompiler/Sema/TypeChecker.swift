@@ -817,14 +817,14 @@ public class TypeChecker {
       // Resolve case parameter types with substitution
       do {
         let resolvedCases: [UnionCase] = try template.cases.map { caseDef in
-          let resolvedParams: [(name: String, type: Type)] = try caseDef.parameters.map { param in
+          let resolvedParams: [(name: String, type: Type, access: AccessModifier)] = try caseDef.parameters.map { param in
             let resolvedType = try withNewScope {
               for (paramName, paramType) in substitution {
                 try currentScope.defineType(paramName, type: paramType)
               }
               return try resolveTypeNode(param.type)
             }
-            return (name: param.name, type: resolvedType)
+            return (name: param.name, type: resolvedType, access: AccessModifier.public)
           }
           return UnionCase(name: caseDef.name, parameters: resolvedParams)
         }
