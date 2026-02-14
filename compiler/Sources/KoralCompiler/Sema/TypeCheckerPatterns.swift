@@ -5,6 +5,37 @@ import Foundation
 
 extension TypeChecker {
 
+  /// Check if a field is accessible from the current source file/module.
+  /// - Parameters:
+  ///   - fieldAccess: The access modifier of the field
+  ///   - defId: The DefId of the type that defines the field
+  /// - Returns: true if the field is accessible
+  private func isFieldAccessible(fieldAccess: AccessModifier, defId: DefId) -> Bool {
+    switch fieldAccess {
+    case .public:
+      return true
+    case .private:
+      // Private: only accessible from the same file
+      let defSourceFile = context.getSourceFile(defId) ?? ""
+      return defSourceFile == currentSourceFile
+    case .protected, .default:
+      // Protected: accessible from the same module or submodule
+      let defModulePath = context.getModulePath(defId) ?? []
+      // Same module
+      if defModulePath == currentModulePath {
+        return true
+      }
+      // Current module is a submodule of the definition's module
+      if currentModulePath.count > defModulePath.count {
+        let prefix = Array(currentModulePath.prefix(defModulePath.count))
+        if prefix == defModulePath {
+          return true
+        }
+      }
+      return false
+    }
+  }
+
   func checkPattern(_ pattern: PatternNode, subjectType: Type) throws -> (
     TypedPattern, [(String, Bool, Type)]
   ) {
@@ -75,15 +106,17 @@ extension TypeChecker {
       )
       return (.variable(symbol: symbol), [(name, mutable, subjectType)])
 
-    case .unionCase(let caseName, let subPatterns, _):
+    case .unionCase(let caseName, let subPatterns, let span):
       // Handle both concrete union and genericUnion types
       let typeName: String
       let cases: [UnionCase]
+      let unionDefId: DefId?
       
       switch subjectType {
       case .union(let defId):
         typeName = context.getName(defId) ?? ""
         cases = context.getUnionCases(defId) ?? []
+        unionDefId = defId
         
       case .genericUnion(let templateName, let typeArgs):
         // Look up the union template and substitute type parameters
@@ -92,6 +125,7 @@ extension TypeChecker {
         }
         
         typeName = templateName
+        unionDefId = template.defId
         
         // Create substitution map
         var substitution: [String: Type] = [:]
@@ -101,14 +135,14 @@ extension TypeChecker {
         
         // Resolve case parameter types with substitution
         cases = try template.cases.map { caseDef in
-          let resolvedParams: [(name: String, type: Type)] = try caseDef.parameters.map { param in
+          let resolvedParams: [(name: String, type: Type, access: AccessModifier)] = try caseDef.parameters.map { param in
             let resolvedType = try withNewScope {
               for (paramName, paramType) in substitution {
                 try currentScope.defineType(paramName, type: paramType)
               }
               return try resolveTypeNode(param.type)
             }
-            return (name: param.name, type: resolvedType)
+            return (name: param.name, type: resolvedType, access: AccessModifier.public)
           }
           return UnionCase(name: caseDef.name, parameters: resolvedParams)
         }
@@ -129,6 +163,21 @@ extension TypeChecker {
 
       var typedSubPatterns: [TypedPattern] = []
       for (idx, subPat) in subPatterns.enumerated() {
+        let fieldAccess = caseDef.parameters[idx].access
+        
+        // Check field visibility - if not accessible, only wildcard is allowed
+        if let defId = unionDefId, !isFieldAccessible(fieldAccess: fieldAccess, defId: defId) {
+          if case .wildcard = subPat {
+            // Wildcard doesn't access the field value, allowed
+          } else {
+            let fieldName = caseDef.parameters[idx].name
+            let accessLabel = fieldAccess == .private ? "private" : "protected"
+            throw SemanticError(.generic(
+              "Cannot access \(accessLabel) field '\(fieldName)' of type '\(typeName)' in destructuring pattern"
+            ), span: span)
+          }
+        }
+        
         let paramType = caseDef.parameters[idx].type
         let (typedSub, subBindings) = try checkPattern(subPat, subjectType: paramType)
         typedSubPatterns.append(typedSub)
@@ -220,6 +269,86 @@ extension TypeChecker {
       }
       
       return (.notPattern(pattern: typedPattern), [])
+      
+    case .structPattern(let typeName, let subPatterns, let span):
+      // Get struct member info based on subject type
+      let members: [(name: String, type: Type, mutable: Bool, access: AccessModifier)]
+      let structDefId: DefId?
+      
+      switch subjectType {
+      case .structure(let defId):
+        guard let name = context.getName(defId), name == typeName else {
+          throw SemanticError(.typeMismatch(
+            expected: typeName, got: subjectType.description), span: span)
+        }
+        members = context.getStructMembers(defId) ?? []
+        structDefId = defId
+        
+      case .genericStruct(let templateName, let typeArgs):
+        guard templateName == typeName else {
+          throw SemanticError(.typeMismatch(
+            expected: typeName, got: subjectType.description), span: span)
+        }
+        // Look up the generic struct template and substitute type parameters
+        guard let template = currentScope.lookupGenericStructTemplate(templateName) else {
+          throw SemanticError.undefinedType(templateName)
+        }
+        
+        // Create substitution map
+        var substitution: [String: Type] = [:]
+        for (i, param) in template.typeParameters.enumerated() {
+          substitution[param.name] = typeArgs[i]
+        }
+        
+        // Resolve member types with substitution
+        members = try template.parameters.map { param in
+          let resolvedType = try withNewScope {
+            for (paramName, paramType) in substitution {
+              try currentScope.defineType(paramName, type: paramType)
+            }
+            return try resolveTypeNode(param.type)
+          }
+          let fieldAccess = param.access == .default ? AccessChecker.defaultAccessForStructField() : param.access
+          return (name: param.name, type: resolvedType, mutable: param.mutable, access: fieldAccess)
+        }
+        structDefId = template.defId
+        
+      default:
+        throw SemanticError(.typeMismatch(
+          expected: "Struct Type", got: subjectType.description), span: span)
+      }
+      
+      // Verify sub-pattern count matches field count
+      if subPatterns.count != members.count {
+        throw SemanticError.invalidArgumentCount(
+          function: typeName, expected: members.count, got: subPatterns.count)
+      }
+      
+      // Recursively check each sub-pattern with visibility check
+      var typedSubPatterns: [TypedPattern] = []
+      for (idx, subPat) in subPatterns.enumerated() {
+        let fieldAccess = members[idx].access
+        
+        // Check field visibility - if not accessible, only wildcard is allowed
+        if let defId = structDefId, !isFieldAccessible(fieldAccess: fieldAccess, defId: defId) {
+          if case .wildcard = subPat {
+            // Wildcard doesn't access the field value, allowed
+          } else {
+            let fieldName = members[idx].name
+            let accessLabel = fieldAccess == .private ? "private" : "protected"
+            throw SemanticError(.generic(
+              "Cannot access \(accessLabel) field '\(fieldName)' of type '\(typeName)' in destructuring pattern"
+            ), span: span)
+          }
+        }
+        
+        let fieldType = members[idx].type
+        let (typedSub, subBindings) = try checkPattern(subPat, subjectType: fieldType)
+        typedSubPatterns.append(typedSub)
+        bindings.append(contentsOf: subBindings)
+      }
+      
+      return (.structPattern(typeName: typeName, elements: typedSubPatterns), bindings)
     }
   }
 
@@ -234,6 +363,10 @@ extension TypeChecker {
     case .variable(let symbol):
       symbols.append(symbol)
     case .unionCase(_, _, let elements):
+      for element in elements {
+        collectPatternSymbols(element, into: &symbols)
+      }
+    case .structPattern(_, let elements):
       for element in elements {
         collectPatternSymbols(element, into: &symbols)
       }

@@ -311,13 +311,13 @@ public class DefIdMap {
     }
 
     public struct StructTypeInfo {
-        public let members: [(name: String, type: Type, mutable: Bool)]
+        public let members: [(name: String, type: Type, mutable: Bool, access: AccessModifier)]
         public let isGenericInstantiation: Bool
         public let typeArguments: [Type]?
         public let templateName: String?  // 泛型模板名称
 
         public init(
-            members: [(name: String, type: Type, mutable: Bool)],
+            members: [(name: String, type: Type, mutable: Bool, access: AccessModifier)],
             isGenericInstantiation: Bool,
             typeArguments: [Type]?,
             templateName: String? = nil
@@ -719,7 +719,7 @@ public class DefIdMap {
 
     public func addStructInfo(
         defId: DefId,
-        members: [(name: String, type: Type, mutable: Bool)],
+        members: [(name: String, type: Type, mutable: Bool, access: AccessModifier)],
         isGenericInstantiation: Bool = false,
         typeArguments: [Type]? = nil,
         templateName: String? = nil
@@ -755,7 +755,7 @@ public class DefIdMap {
         return typeMap[defId.id]
     }
 
-    public func getStructMembers(_ defId: DefId) -> [(name: String, type: Type, mutable: Bool)]? {
+    public func getStructMembers(_ defId: DefId) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier)]? {
         return structInfoMap[defId.id]?.members
     }
 

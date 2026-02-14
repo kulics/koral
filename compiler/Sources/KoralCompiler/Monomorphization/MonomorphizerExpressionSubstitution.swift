@@ -750,6 +750,12 @@ extension Monomorphizer {
             
         case .notPattern(let inner):
             return .notPattern(pattern: substituteTypesInPattern(inner, substitution: substitution))
+            
+        case .structPattern(let typeName, let elements):
+            return .structPattern(
+                typeName: typeName,
+                elements: elements.map { substituteTypesInPattern($0, substitution: substitution) }
+            )
         }
     }
     

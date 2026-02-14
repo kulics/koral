@@ -257,7 +257,7 @@ public class AccessChecker {
     
     /// 获取 struct 字段的默认访问修饰符
     public static func defaultAccessForStructField() -> AccessModifier {
-        return .protected
+        return .public
     }
     
     /// 获取 union 构造器字段的默认访问修饰符

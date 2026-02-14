@@ -187,6 +187,11 @@ class IntegrationTests: XCTestCase {
     func test_type_alias_error_undefined() throws { try runCase(named: "type_alias_error_undefined.koral") }
     func test_type_alias_error_duplicate() throws { try runCase(named: "type_alias_error_duplicate.koral") }
     func test_type_alias_error_lowercase() throws { try runCase(named: "type_alias_error_lowercase.koral") }
+    func test_struct_destructuring() throws { try runCase(named: "struct_destructuring.koral") }
+    func test_struct_destructuring_generic() throws { try runCase(named: "struct_destructuring_generic.koral") }
+    func test_struct_visibility_test() throws { try runCase(named: "struct_visibility_test/struct_visibility_test.koral") }
+    func test_struct_visibility_member_test() throws { try runCase(named: "struct_visibility_member_test/struct_visibility_member_test.koral") }
+    func test_struct_visibility_wildcard_test() throws { try runCase(named: "struct_visibility_wildcard_test/struct_visibility_wildcard_test.koral") }
     
     func runTestCase(file: URL, projectRoot: URL) throws {
         // 1. Parse expectations

@@ -135,13 +135,26 @@ extension Parser {
       return .booleanLiteral(value: v, span: startSpan)
     }
     
-    // Identifier pattern (wildcard or variable binding)
+    // Identifier pattern (wildcard, variable binding, or struct destructuring)
     if case .identifier(let name) = currentToken {
       if name == "_" {
         try match(.identifier(name))
         return .wildcard(span: startSpan)
       }
       try match(.identifier(name))
+      
+      // Struct destructuring pattern: TypeName(pattern1, pattern2, ...)
+      if currentToken === .leftParen {
+        var args: [PatternNode] = []
+        try match(.leftParen)
+        while currentToken !== .rightParen {
+          args.append(try parsePattern())
+          if currentToken === .comma { try match(.comma) }
+        }
+        try match(.rightParen)
+        return .structPattern(typeName: name, elements: args, span: startSpan)
+      }
+      
       return .variable(name: name, mutable: false, span: startSpan)
     }
     

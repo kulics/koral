@@ -94,6 +94,14 @@ extension PatternSpace {
             // Not patterns don't reduce the space meaningfully for exhaustiveness
             // (they exclude values rather than covering them)
             return self
+            
+        case .structPattern(_, let elements):
+            // Struct pattern: if all sub-patterns are wildcards/variables, covers everything
+            if elements.allSatisfy({ isWildcardOrVariable($0) }) {
+                return .empty
+            }
+            // Otherwise, doesn't reduce the space meaningfully
+            return self
         }
     }
     
@@ -290,6 +298,9 @@ extension PatternSpace {
         case .notPattern:
             // Not patterns don't cover the entire space
             return false
+        case .structPattern(_, let elements):
+            // Struct pattern covers if all sub-patterns are wildcards/variables
+            return elements.allSatisfy { isCoveredBy($0) }
         }
     }
 }

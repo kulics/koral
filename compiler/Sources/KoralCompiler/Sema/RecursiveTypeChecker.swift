@@ -139,7 +139,7 @@ public class RecursiveTypeChecker {
     
     /// 从 struct 成员类型中提取值类型依赖
     private func extractValueTypeDependencies(
-        from members: [(name: String, type: Type, mutable: Bool)],
+        from members: [(name: String, type: Type, mutable: Bool, access: AccessModifier)],
         sourceSpan: SourceSpan
     ) -> [TypeDependency] {
         var dependencies: [TypeDependency] = []

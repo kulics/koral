@@ -229,7 +229,7 @@ extension CodeGen {
       let escapedCaseName = sanitizeCIdentifier(caseName)
       
       // Filter out Void type parameters and their corresponding args
-      var nonVoidArgsAndParams: [(TypedExpressionNode, (name: String, type: Type))] = []
+      var nonVoidArgsAndParams: [(TypedExpressionNode, (name: String, type: Type, access: AccessModifier))] = []
       for (argExpr, param) in zip(args, caseInfo.parameters) {
           if case .void = param.type { continue }
           nonVoidArgsAndParams.append((argExpr, param))

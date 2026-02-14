@@ -268,7 +268,8 @@ public enum SemaUtils {
                 (
                     name: member.name,
                     type: substituteType(member.type, substitution: substitution, context: context),
-                    mutable: member.mutable
+                    mutable: member.mutable,
+                    access: member.access
                 )
             }
             let newTypeArguments = context.getTypeArguments(defId)?.map { substituteType($0, substitution: substitution, context: context) }
@@ -287,7 +288,7 @@ public enum SemaUtils {
                 UnionCase(
                     name: unionCase.name,
                     parameters: unionCase.parameters.map { param in
-                        (name: param.name, type: substituteType(param.type, substitution: substitution, context: context))
+                        (name: param.name, type: substituteType(param.type, substitution: substitution, context: context), access: param.access)
                     }
                 )
             }

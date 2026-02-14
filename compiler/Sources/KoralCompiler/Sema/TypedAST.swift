@@ -328,6 +328,10 @@ public indirect enum TypedPattern: CustomStringConvertible {
   case andPattern(left: TypedPattern, right: TypedPattern)
   case orPattern(left: TypedPattern, right: TypedPattern)
   case notPattern(pattern: TypedPattern)
+  /// Struct destructuring pattern (type-checked)
+  /// - typeName: struct type name
+  /// - elements: type-checked sub-patterns, ordered by field declaration order
+  case structPattern(typeName: String, elements: [TypedPattern])
 
   public var description: String {
     switch self {
@@ -354,6 +358,9 @@ public indirect enum TypedPattern: CustomStringConvertible {
       return "(\(left) or \(right))"
     case .notPattern(let pattern):
       return "not \(pattern)"
+    case .structPattern(let typeName, let elements):
+      let args = elements.map { $0.description }.joined(separator: ", ")
+      return "\(typeName)(\(args))"
     }
   }
 }
