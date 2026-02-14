@@ -632,6 +632,83 @@ public class Lexer {
     throw LexerError.unexpectedEndOfFile(span: SourceSpan(location: currentLocation))
   }
 
+  // Check for and reject numeric type suffixes (i32, u64, f32, etc.)
+  // These are no longer supported; users should use cast syntax instead.
+  private func checkAndRejectTypeSuffix(isFloat: Bool) throws {
+    if let firstChar = getNextChar() {
+      if firstChar == "i" || firstChar == "u" || firstChar == "f" {
+        var suffixStr = String(firstChar)
+        while let char = getNextChar() {
+          if char.isLetter || char.isNumber {
+            suffixStr.append(char)
+          } else {
+            unreadChar(char)
+            break
+          }
+        }
+        let message = "Numeric type suffixes are no longer supported. Use cast syntax instead. Example: Use '(Int32)42' instead of '42\(suffixStr)'"
+        if isFloat {
+          throw LexerError.invalidFloat(span: tokenSpan, message)
+        } else {
+          throw LexerError.invalidInteger(span: tokenSpan, message)
+        }
+      } else {
+        unreadChar(firstChar)
+      }
+    }
+  }
+
+  // Read an integer literal with a specific base (binary, octal, hexadecimal)
+  // The prefix (0b, 0o, 0x) has already been consumed before calling this method.
+  private func readIntegerWithBase(_ base: Int, prefix: String, validDigits: String) throws -> NumberLiteral {
+    let validSet = Set(validDigits)
+    var digits = ""
+    
+    while let char = getNextChar() {
+      if char == "_" {
+        continue  // Digit separator
+      }
+      if validSet.contains(char) {
+        digits.append(char)
+      } else if char.isNumber {
+        // Digit character but not valid for this base (e.g., '2' in binary)
+        throw LexerError.invalidInteger(span: tokenSpan,
+          "Invalid digit '\(char)' in \(prefix) literal")
+      } else if char == "." {
+        // Check if this is a float attempt
+        if let nextChar = getNextChar() {
+          if nextChar.isNumber || validSet.contains(nextChar) {
+            throw LexerError.invalidFloat(span: tokenSpan,
+              "\(prefix) literals do not support floating point")
+          }
+          unreadChar(nextChar)
+        }
+        unreadChar(char)
+        break
+      } else {
+        unreadChar(char)
+        break
+      }
+    }
+    
+    // Must have at least one valid digit after prefix
+    guard !digits.isEmpty else {
+      throw LexerError.invalidInteger(span: tokenSpan,
+        "\(prefix) literal must have at least one digit")
+    }
+    
+    // Check for type suffix (reuse extracted method)
+    try checkAndRejectTypeSuffix(isFloat: false)
+    
+    // Convert to decimal string
+    guard let value = Int(digits, radix: base) else {
+      throw LexerError.invalidInteger(span: tokenSpan,
+        "Invalid \(prefix) literal: \(prefix)\(digits)")
+    }
+    
+    return .integer(String(value))
+  }
+
   // Read a number, handling both integers and floats
   // Returns the number as a string to support arbitrary precision
   private func readNumber() throws -> NumberLiteral {
@@ -639,6 +716,21 @@ public class Lexer {
     var hasDot = false
     while let char = getNextChar() {
       if char.isNumber {
+        // Check for base prefix when first digit is '0'
+        if char == "0" && numStr.isEmpty {
+          if let prefixChar = getNextChar() {
+            switch prefixChar {
+            case "b":
+              return try readIntegerWithBase(2, prefix: "0b", validDigits: "01")
+            case "o":
+              return try readIntegerWithBase(8, prefix: "0o", validDigits: "01234567")
+            case "x":
+              return try readIntegerWithBase(16, prefix: "0x", validDigits: "0123456789abcdefABCDEF")
+            default:
+              unreadChar(prefixChar)
+            }
+          }
+        }
         numStr.append(char)
       } else if char == "_" {
         // Digit separator (e.g. 1_000_000)
@@ -677,27 +769,7 @@ public class Lexer {
       }
     }
 
-    if let firstChar = getNextChar() {
-      if firstChar == "i" || firstChar == "u" || firstChar == "f" {
-        var suffixStr = String(firstChar)
-        while let char = getNextChar() {
-          if char.isLetter || char.isNumber {
-            suffixStr.append(char)
-          } else {
-            unreadChar(char)
-            break
-          }
-        }
-        let message = "Numeric type suffixes are no longer supported. Use cast syntax instead. Example: Use '(Int32)42' instead of '42\(suffixStr)'"
-        if hasDot {
-          throw LexerError.invalidFloat(span: tokenSpan, message)
-        } else {
-          throw LexerError.invalidInteger(span: tokenSpan, message)
-        }
-      } else {
-        unreadChar(firstChar)
-      }
-    }
+    try checkAndRejectTypeSuffix(isFloat: hasDot)
 
     if hasDot {
       return .float(numStr)
