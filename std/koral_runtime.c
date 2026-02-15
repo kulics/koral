@@ -43,6 +43,41 @@ void koral_panic_float_cast_overflow(void) {
     abort();
 }
 
+void koral_panic_overflow_add(void) {
+    fprintf(stderr, "Panic: integer overflow in addition\n");
+    abort();
+}
+
+void koral_panic_overflow_sub(void) {
+    fprintf(stderr, "Panic: integer overflow in subtraction\n");
+    abort();
+}
+
+void koral_panic_overflow_mul(void) {
+    fprintf(stderr, "Panic: integer overflow in multiplication\n");
+    abort();
+}
+
+void koral_panic_overflow_div(void) {
+    fprintf(stderr, "Panic: integer overflow in division\n");
+    abort();
+}
+
+void koral_panic_overflow_mod(void) {
+    fprintf(stderr, "Panic: integer overflow in modulo\n");
+    abort();
+}
+
+void koral_panic_overflow_neg(void) {
+    fprintf(stderr, "Panic: integer overflow in negation\n");
+    abort();
+}
+
+void koral_panic_overflow_shift(void) {
+    fprintf(stderr, "Panic: integer overflow in shift\n");
+    abort();
+}
+
 // Define Koral-side timespec layout (must match generated struct in C output)
 struct KoralTimespec {
     int64_t tv_sec;

@@ -16,7 +16,7 @@ foreign let koral_path_exists(path UInt8 ptr) Int32
 foreign let koral_is_file(path UInt8 ptr) Int32
 foreign let koral_is_dir(path UInt8 ptr) Int32
 
-foreign let koral_normalize_path(path UInt8 ptr, buf UInt8 ptr, size Int) Int
+foreign let koral_normalize_path(path UInt8 ptr, buf UInt8 ptr, size UInt) Int
 foreign let koral_path_separator() UInt8
 
 foreign let koral_opendir(path UInt8 ptr) CDirHandle ptr
@@ -25,7 +25,7 @@ foreign let koral_closedir(dir CDirHandle ptr) Int32
 foreign let koral_dirent_name(entry CDirEntry ptr) UInt8 ptr
 foreign let koral_mkdir(path UInt8 ptr, mode UInt32) Int32
 foreign let koral_rmdir(path UInt8 ptr) Int32
-foreign let koral_getcwd(buf UInt8 ptr, size Int) UInt8 ptr
+foreign let koral_getcwd(buf UInt8 ptr, size UInt) UInt8 ptr
 
 foreign let koral_errno_ptr() Int32 ptr
 foreign let koral_strerror(errnum Int32) UInt8 ptr
@@ -33,8 +33,8 @@ foreign let koral_strerror(errnum Int32) UInt8 ptr
 // C stdlib file APIs
 foreign let fopen(path UInt8 ptr, mode UInt8 ptr) CFile ptr
 foreign let fclose(file CFile ptr) Int32
-foreign let fread(buf UInt8 ptr, size Int, count Int, file CFile ptr) Int
-foreign let fwrite(buf UInt8 ptr, size Int, count Int, file CFile ptr) Int
+foreign let fread(buf UInt8 ptr, size UInt, count UInt, file CFile ptr) UInt
+foreign let fwrite(buf UInt8 ptr, size UInt, count UInt, file CFile ptr) UInt
 foreign let fgetc(file CFile ptr) Int
 foreign let fflush(file CFile ptr) Void
 foreign let fseek(file CFile ptr, offset Int64, whence Int32) Int32
@@ -94,13 +94,13 @@ public let read_file(path String) [String, String]Result = {
         return [String, String]Result.Error(get_last_error())
     }
 
-    fseek(file, (Int64)0, (Int32)2)  // SEEK_END
-    let size = ftell(file)
-    fseek(file, (Int64)0, (Int32)0)  // SEEK_SET
+    fseek(file, 0, 2)  // SEEK_END
+    let size = (UInt)ftell(file)
+    fseek(file, 0, 0)  // SEEK_SET
 
-    let buf = [UInt8]alloc_memory((Int)size + 1)
-    let read_count = fread(buf, 1, (Int)size, file)
-    init_memory(offset_ptr(buf, read_count), 0)
+    let buf = [UInt8]alloc_memory(size + 1)
+    let read_count = fread(buf, 1, size, file)
+    init_memory(buf + read_count, 0)
 
     fclose(file)
 
@@ -145,7 +145,7 @@ public let copy_file(src String, dst String) [Void, String]Result = {
 
 /// Remove file
 public let remove_file(path String) [Void, String]Result = {
-    if koral_remove(path.storage.data) == (Int32)0 then {
+    if koral_remove(path.storage.data) == 0 then {
         [Void, String]Result.Ok({})
     } else {
         [Void, String]Result.Error(get_last_error())
@@ -158,7 +158,7 @@ public let remove_file(path String) [Void, String]Result = {
 
 /// Create single directory (parent must exist)
 public let create_dir(path String) [Void, String]Result = {
-    if koral_mkdir(path.storage.data, (UInt32)493) == (Int32)0 then {  // 0755
+    if koral_mkdir(path.storage.data, 493) == 0 then {  // 0755
         [Void, String]Result.Ok({})
     } else {
         [Void, String]Result.Error(get_last_error())
@@ -199,7 +199,7 @@ public let create_dir_all(path String) [Void, String]Result = {
         seeded = true
 
         if not path_exists(current) then {
-            if koral_mkdir(current.storage.data, (UInt32)493) <> (Int32)0 then {
+            if koral_mkdir(current.storage.data, 493) <> 0 then {
                 return [Void, String]Result.Error(get_last_error())
             }
         }
@@ -209,7 +209,7 @@ public let create_dir_all(path String) [Void, String]Result = {
 
 /// Remove empty directory
 public let remove_dir(path String) [Void, String]Result = {
-    if koral_rmdir(path.storage.data) == (Int32)0 then {
+    if koral_rmdir(path.storage.data) == 0 then {
         [Void, String]Result.Ok({})
     } else {
         [Void, String]Result.Error(get_last_error())
@@ -281,17 +281,17 @@ public let current_dir() [String, String]Result = {
 // ============================================================================
 
 /// Check if path exists
-public let path_exists(path String) Bool = koral_path_exists(path.storage.data) <> (Int32)0
+public let path_exists(path String) Bool = koral_path_exists(path.storage.data) <> 0
 
 /// Check if path is file
-public let is_file(path String) Bool = koral_is_file(path.storage.data) <> (Int32)0
+public let is_file(path String) Bool = koral_is_file(path.storage.data) <> 0
 
 /// Check if path is directory
-public let is_dir(path String) Bool = koral_is_dir(path.storage.data) <> (Int32)0
+public let is_dir(path String) Bool = koral_is_dir(path.storage.data) <> 0
 
 /// Move or rename path
 public let move_path(src String, dst String) [Void, String]Result = {
-    if koral_rename(src.storage.data, dst.storage.data) == (Int32)0 then {
+    if koral_rename(src.storage.data, dst.storage.data) == 0 then {
         [Void, String]Result.Ok({})
     } else {
         [Void, String]Result.Error(get_last_error())
@@ -393,9 +393,10 @@ public let path_separator() String = {
 
 /// Normalize path to current platform
 public let normalize_path(path String) String = {
-    let buf = [UInt8]alloc_memory(path.count() + 1)
-    let len = koral_normalize_path(path.storage.data, buf, path.count() + 1)
-    let result = String.from_bytes_unchecked(buf, len)
+    let buf_size = path.count() + 1
+    let buf = [UInt8]alloc_memory(buf_size)
+    let len = koral_normalize_path(path.storage.data, buf, buf_size)
+    let result = String.from_bytes_unchecked(buf, (UInt)len)
     dealloc_memory(buf)
     result
 }
@@ -458,10 +459,10 @@ public let run_command(program String, args [String]List) [CommandResult, String
 /// Get command line arguments
 public let args() [String]List = {
     let mut result = [String]List.new()
-    let count = (Int)koral_argc()
-    let mut i = 0
+    let count = (UInt)koral_argc()
+    let mut i UInt = 0
     while i < count then {
-        let arg_ptr = deptr offset_ptr(koral_argv(), i)
+        let arg_ptr = deptr (koral_argv() + i)
         result.push(String.from_cstring(arg_ptr))
         i += 1
     }

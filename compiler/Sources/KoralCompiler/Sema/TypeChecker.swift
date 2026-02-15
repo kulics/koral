@@ -724,7 +724,8 @@ public class TypeChecker {
         }
       }
 
-      let typedBody = try inferTypedExpression(body)
+      var typedBody = try inferTypedExpression(body, expectedType: returnType)
+      typedBody = try coerceLiteral(typedBody, to: returnType)
       if typedBody.type != .never && typedBody.type != returnType {
         throw SemanticError.typeMismatch(
           expected: returnType.description, got: typedBody.type.description)

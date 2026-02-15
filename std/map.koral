@@ -18,15 +18,15 @@ public type [K Hashable, V Any]MapBucket {
 
 public type [K Hashable, V Any]MapStorage(
     mut buckets [K, V]MapBucket ptr,
-    mut count Int,
-    mut capacity Int
+    mut count UInt,
+    mut capacity UInt
 )
 
 given[K Hashable, V Any] [K, V]MapStorage {
     __drop(self ref) = {
-        let mut i = 0
+        let mut i UInt = 0
         while i < self.capacity then {
-            deinit_memory(offset_ptr(self.buckets, i))
+            deinit_memory(self.buckets + i)
             i += 1
         }
         dealloc_memory(self.buckets)
@@ -35,7 +35,7 @@ given[K Hashable, V Any] [K, V]MapStorage {
 
 public type [K Hashable, V Any]Map(mut storage [K, V]MapStorage ref)
 
-public type [K Hashable, V Any]MapIterator(storage [K, V]MapStorage ref, mut index Int)
+public type [K Hashable, V Any]MapIterator(storage [K, V]MapStorage ref, mut index UInt)
 
 // ============================================================================
 // Map Methods
@@ -43,40 +43,40 @@ public type [K Hashable, V Any]MapIterator(storage [K, V]MapStorage ref, mut ind
 
 given[K Hashable, V Any] [K, V]Map {
     public new() Self = {
-        let capacity = 16
+        let capacity UInt = 16
         let buckets = [[K, V]MapBucket]alloc_memory(capacity)
-        let mut i = 0
+        let mut i UInt = 0
         while i < capacity then {
-            init_memory(offset_ptr(buckets, i), [K, V]MapBucket.Empty())
+            init_memory(buckets + i, [K, V]MapBucket.Empty())
             i += 1
         }
         let storage = ref [K, V]MapStorage(buckets, 0, capacity)
         [K, V]Map(storage)
     }
 
-    public with_capacity(capacity Int) Self = {
+    public with_capacity(capacity UInt) Self = {
         // Hash tables need extra space for efficiency (load factor ~0.5)
         let cap = if capacity < 4 then 4 else capacity * 2
         let buckets = [[K, V]MapBucket]alloc_memory(cap)
-        let mut i = 0
+        let mut i UInt = 0
         while i < cap then {
-            init_memory(offset_ptr(buckets, i), [K, V]MapBucket.Empty())
+            init_memory(buckets + i, [K, V]MapBucket.Empty())
             i += 1
         }
         let storage = ref [K, V]MapStorage(buckets, 0, cap)
         [K, V]Map(storage)
     }
 
-    public count(self) Int = self.storage.count
+    public count(self) UInt = self.storage.count
 
     private ensure_unique(self ref) Void = {
         if ref_count(self.storage) > 1 then {
             let old = self.storage
             let new_buckets = [[K, V]MapBucket]alloc_memory(old.capacity)
-            let mut i = 0
+            let mut i UInt = 0
             while i < old.capacity then {
-                let bucket = deptr offset_ptr(old.buckets, i)
-                init_memory(offset_ptr(new_buckets, i), bucket)
+                let bucket = deptr (old.buckets + i)
+                init_memory(new_buckets + i, bucket)
                 i += 1
             }
             let new_storage = ref [K, V]MapStorage(new_buckets, old.count, old.capacity)
@@ -85,29 +85,34 @@ given[K Hashable, V Any] [K, V]Map {
     }
 
     // Using when for bucket handling
-    private find_slot(self ref, key K ref) Int = {
+    private find_slot(self ref, key K ref) [UInt]Option = {
         let h = key.hash()
-        let mut idx = (Int){ h % (UInt)self.storage.capacity }
-        let mut first_deleted = 0 - 1
-        let mut probes = 0
+        let mut idx = h % self.storage.capacity
+        let mut first_deleted = [UInt]Option.None()
+        let mut probes UInt = 0
         while probes < self.storage.capacity then {
-            let bucket = deptr offset_ptr(self.storage.buckets, idx)
+            let bucket = deptr (self.storage.buckets + idx)
             when bucket is {
                 .Empty then {
-                    if first_deleted >= 0 then { return first_deleted; }
-                    return idx
+                    return when first_deleted is {
+                        .Some(_) then first_deleted,
+                        .None then [UInt]Option.Some(idx),
+                    }
                 },
                 .Deleted then {
-                    if first_deleted < 0 then { first_deleted = idx; }
+                    when first_deleted is {
+                        .None then { first_deleted = [UInt]Option.Some(idx); },
+                        _ then {},
+                    }
                 },
                 .Occupied(e) then {
-                    if e.key == deref key then { return idx; }
+                    if e.key == deref key then { return [UInt]Option.Some(idx); }
                 },
             }
             idx = { idx + 1 } % self.storage.capacity
             probes += 1
         }
-        if first_deleted >= 0 then first_deleted else 0 - 1
+        first_deleted
     }
 
     private rehash(self ref) Void = {
@@ -115,9 +120,9 @@ given[K Hashable, V Any] [K, V]Map {
         let old_buckets = self.storage.buckets
         let new_cap = old_cap * 2
         let new_buckets = [[K, V]MapBucket]alloc_memory(new_cap)
-        let mut i = 0
+        let mut i UInt = 0
         while i < new_cap then {
-            init_memory(offset_ptr(new_buckets, i), [K, V]MapBucket.Empty())
+            init_memory(new_buckets + i, [K, V]MapBucket.Empty())
             i += 1
         }
         self.storage.buckets = new_buckets
@@ -125,7 +130,7 @@ given[K Hashable, V Any] [K, V]Map {
         self.storage.count = 0
         i = 0
         while i < old_cap then {
-            let bucket = take_memory(offset_ptr(old_buckets, i))
+            let bucket = take_memory(old_buckets + i)
             when bucket is {
                 .Occupied(e) then { self.insert_internal(e.key, e.value); },
                 _ then {},
@@ -137,16 +142,19 @@ given[K Hashable, V Any] [K, V]Map {
 
     // Internal insert used by rehash - doesn't return old value
     private insert_internal(self ref, key K, value V) Void = {
-        let idx = self.find_slot(ref key)
-        if idx < 0 then { panic("Map insert failed"); }
-        let bucket = deptr offset_ptr(self.storage.buckets, idx)
-        when bucket is {
-            .Occupied(_) then {
-                deptr offset_ptr(self.storage.buckets, idx) = [K, V]MapBucket.Occupied([K, V]MapEntry(key, value));
-            },
-            .Empty or .Deleted then {
-                deptr offset_ptr(self.storage.buckets, idx) = [K, V]MapBucket.Occupied([K, V]MapEntry(key, value));
-                self.storage.count = self.storage.count + 1
+        when self.find_slot(ref key) is {
+            .None then { panic("Map insert failed"); },
+            .Some(idx) then {
+                let bucket = deptr (self.storage.buckets + idx)
+                when bucket is {
+                    .Occupied(_) then {
+                        deptr (self.storage.buckets + idx) = [K, V]MapBucket.Occupied([K, V]MapEntry(key, value));
+                    },
+                    .Empty or .Deleted then {
+                        deptr (self.storage.buckets + idx) = [K, V]MapBucket.Occupied([K, V]MapEntry(key, value));
+                        self.storage.count = self.storage.count + 1
+                    },
+                }
             },
         }
     }
@@ -155,39 +163,48 @@ given[K Hashable, V Any] [K, V]Map {
     public insert(self ref, key K, value V) [V]Option = {
         self.ensure_unique()
         if self.storage.count * 2 >= self.storage.capacity then { self.rehash(); }
-        let idx = self.find_slot(ref key)
-        if idx < 0 then { panic("Map insert failed"); }
-        let bucket = deptr offset_ptr(self.storage.buckets, idx)
-        when bucket is {
-            .Occupied(e) then {
-                deptr offset_ptr(self.storage.buckets, idx) = [K, V]MapBucket.Occupied([K, V]MapEntry(key, value));
-                [V]Option.Some(e.value)
-            },
-            .Empty or .Deleted then {
-                deptr offset_ptr(self.storage.buckets, idx) = [K, V]MapBucket.Occupied([K, V]MapEntry(key, value));
-                self.storage.count = self.storage.count + 1
-                [V]Option.None()
+        when self.find_slot(ref key) is {
+            .None then { panic("Map insert failed"); [V]Option.None() },
+            .Some(idx) then {
+                let bucket = deptr (self.storage.buckets + idx)
+                when bucket is {
+                    .Occupied(e) then {
+                        deptr (self.storage.buckets + idx) = [K, V]MapBucket.Occupied([K, V]MapEntry(key, value));
+                        [V]Option.Some(e.value)
+                    },
+                    .Empty or .Deleted then {
+                        deptr (self.storage.buckets + idx) = [K, V]MapBucket.Occupied([K, V]MapEntry(key, value));
+                        self.storage.count = self.storage.count + 1
+                        [V]Option.None()
+                    },
+                }
             },
         }
     }
 
     public get(self, key K) [V]Option = {
-        let idx = self.find_slot(ref key)
-        if idx < 0 then { return [V]Option.None(); }
-        let bucket = deptr offset_ptr(self.storage.buckets, idx)
-        when bucket is {
-            .Occupied(e) then [V]Option.Some(e.value),
-            _ then [V]Option.None(),
+        when self.find_slot(ref key) is {
+            .None then [V]Option.None(),
+            .Some(idx) then {
+                let bucket = deptr (self.storage.buckets + idx)
+                when bucket is {
+                    .Occupied(e) then [V]Option.Some(e.value),
+                    _ then [V]Option.None(),
+                }
+            },
         }
     }
 
     public at(self, key K) V = {
-        let idx = self.find_slot(ref key)
-        if idx < 0 then { panic("Map key not found"); }
-        let bucket = deptr offset_ptr(self.storage.buckets, idx)
-        when bucket is {
-            .Occupied(e) then e.value,
-            _ then panic("Map key not found"),
+        when self.find_slot(ref key) is {
+            .None then panic("Map key not found"),
+            .Some(idx) then {
+                let bucket = deptr (self.storage.buckets + idx)
+                when bucket is {
+                    .Occupied(e) then e.value,
+                    _ then panic("Map key not found"),
+                }
+            },
         }
     }
 
@@ -198,16 +215,19 @@ given[K Hashable, V Any] [K, V]Map {
 
     public remove(self ref, key K) [V]Option = {
         self.ensure_unique()
-        let idx = self.find_slot(ref key)
-        if idx < 0 then { return [V]Option.None(); }
-        let bucket = deptr offset_ptr(self.storage.buckets, idx)
-        when bucket is {
-            .Occupied(e) then {
-                deptr offset_ptr(self.storage.buckets, idx) = [K, V]MapBucket.Deleted();
-                self.storage.count = self.storage.count - 1
-                [V]Option.Some(e.value)
+        when self.find_slot(ref key) is {
+            .None then [V]Option.None(),
+            .Some(idx) then {
+                let bucket = deptr (self.storage.buckets + idx)
+                when bucket is {
+                    .Occupied(e) then {
+                        deptr (self.storage.buckets + idx) = [K, V]MapBucket.Deleted();
+                        self.storage.count = self.storage.count - 1
+                        [V]Option.Some(e.value)
+                    },
+                    _ then [V]Option.None(),
+                }
             },
-            _ then [V]Option.None(),
         }
     }
 
@@ -215,9 +235,9 @@ given[K Hashable, V Any] [K, V]Map {
 
     public clear(self ref) Void = {
         self.ensure_unique()
-        let mut i = 0
+        let mut i UInt = 0
         while i < self.storage.capacity then {
-            deptr offset_ptr(self.storage.buckets, i) = [K, V]MapBucket.Empty();
+            deptr (self.storage.buckets + i) = [K, V]MapBucket.Empty();
             i += 1
         }
         self.storage.count = 0
@@ -233,7 +253,7 @@ given[K Hashable, V Any] [K, V]Map {
 given[K Hashable, V Any] [K, V]MapIterator {
     public next(self ref) [[K, V]MapEntry]Option = {
         while self.index < self.storage.capacity then {
-            let bucket = deptr offset_ptr(self.storage.buckets, self.index)
+            let bucket = deptr (self.storage.buckets + self.index)
             self.index = self.index + 1
             when bucket is {
                 .Occupied(e) then { return [[K, V]MapEntry]Option.Some(e); },
@@ -253,9 +273,9 @@ given [K ToString and Hashable, V ToString] [K, V]Map {
         let mut result = String.zero()
         result.push_string("[")
         let mut first = true
-        let mut i = 0
+        let mut i UInt = 0
         while i < self.storage.capacity then {
-            let bucket = deptr offset_ptr(self.storage.buckets, i)
+            let bucket = deptr (self.storage.buckets + i)
             when bucket is {
                 .Occupied(entry) then {
                     if not first then { result.push_string(", "); }
@@ -282,7 +302,7 @@ given [K ToString and Hashable, V ToString] [K, V]Map {
 public type [K Hashable, V Any]MapKeys(storage [K, V]MapStorage ref)
 
 // MapKeysIterator - iterates over keys only
-public type [K Hashable, V Any]MapKeysIterator(storage [K, V]MapStorage ref, mut index Int)
+public type [K Hashable, V Any]MapKeysIterator(storage [K, V]MapStorage ref, mut index UInt)
 
 given[K Hashable, V Any] [K, V]MapKeys {
     public iterator(self) [K, V]MapKeysIterator = [K, V]MapKeysIterator(self.storage, 0)
@@ -291,7 +311,7 @@ given[K Hashable, V Any] [K, V]MapKeys {
 given[K Hashable, V Any] [K, V]MapKeysIterator {
     public next(self ref) [K]Option = {
         while self.index < self.storage.capacity then {
-            let bucket = deptr offset_ptr(self.storage.buckets, self.index)
+            let bucket = deptr (self.storage.buckets + self.index)
             self.index = self.index + 1
             when bucket is {
                 .Occupied(e) then { return [K]Option.Some(e.key); },
@@ -306,7 +326,7 @@ given[K Hashable, V Any] [K, V]MapKeysIterator {
 public type [K Hashable, V Any]MapValues(storage [K, V]MapStorage ref)
 
 // MapValuesIterator - iterates over values only
-public type [K Hashable, V Any]MapValuesIterator(storage [K, V]MapStorage ref, mut index Int)
+public type [K Hashable, V Any]MapValuesIterator(storage [K, V]MapStorage ref, mut index UInt)
 
 given[K Hashable, V Any] [K, V]MapValues {
     public iterator(self) [K, V]MapValuesIterator = [K, V]MapValuesIterator(self.storage, 0)
@@ -315,7 +335,7 @@ given[K Hashable, V Any] [K, V]MapValues {
 given[K Hashable, V Any] [K, V]MapValuesIterator {
     public next(self ref) [V]Option = {
         while self.index < self.storage.capacity then {
-            let bucket = deptr offset_ptr(self.storage.buckets, self.index)
+            let bucket = deptr (self.storage.buckets + self.index)
             self.index = self.index + 1
             when bucket is {
                 .Occupied(e) then { return [V]Option.Some(e.value); },
@@ -331,4 +351,3 @@ given[K Hashable, V Any] [K, V]Map {
     public keys(self) [K, V]MapKeys = [K, V]MapKeys(self.storage)
     public values(self) [K, V]MapValues = [K, V]MapValues(self.storage)
 }
-

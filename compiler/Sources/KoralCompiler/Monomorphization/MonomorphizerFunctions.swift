@@ -98,7 +98,7 @@ extension Monomorphizer {
         // Skip intrinsic functions
         let intrinsicNames = [
             "alloc_memory", "dealloc_memory", "copy_memory", "move_memory", "ref_count",
-            "init_memory", "deinit_memory", "take_memory", "offset_ptr", "null_ptr",
+            "init_memory", "deinit_memory", "take_memory", "null_ptr",
             "downgrade_ref", "upgrade_ref",
         ]
         
@@ -600,11 +600,20 @@ extension Monomorphizer {
     
     /// Extracts the method name from a mangled name (e.g., "Float32_to_bits" -> "to_bits")
     internal func extractMethodName(_ mangledName: String) -> String {
-        if mangledName.hasPrefix("Float32_") {
-            return String(mangledName.dropFirst("Float32_".count))
-        } else if mangledName.hasPrefix("Float64_") {
-            return String(mangledName.dropFirst("Float64_".count))
-        } else if let idx = mangledName.lastIndex(of: "_") {
+        // Check for known type prefixes (longest first to avoid partial matches)
+        let typePrefixes = [
+            "Float32_", "Float64_",
+            "Int8_", "Int16_", "Int32_", "Int64_",
+            "UInt8_", "UInt16_", "UInt32_", "UInt64_",
+            "Int_", "UInt_",
+            "Bool_",
+        ]
+        for prefix in typePrefixes {
+            if mangledName.hasPrefix(prefix) {
+                return String(mangledName.dropFirst(prefix.count))
+            }
+        }
+        if let idx = mangledName.lastIndex(of: "_") {
             return String(mangledName[mangledName.index(after: idx)...])
         }
         return mangledName

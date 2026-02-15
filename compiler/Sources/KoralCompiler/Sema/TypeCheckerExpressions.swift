@@ -229,7 +229,7 @@ extension TypeChecker {
         }
 
         if let finalExpr = finalExpression {
-          let typedFinalExpr = try inferTypedExpression(finalExpr)
+          let typedFinalExpr = try inferTypedExpression(finalExpr, expectedType: expectedType)
           // If we already found a Never statement, the block is Never regardless of final expr?
           // Actually, if a statement is Never, the final expression is unreachable.
           // For now, let's respect final expression type if reachable, or override if Never.
@@ -371,12 +371,12 @@ extension TypeChecker {
           expected: "Bool", got: typedCondition.type.description)
       }
       // Pass expected type to branches for implicit member expression support
-      let typedThen = try inferTypedExpression(thenBranch, expectedType: expectedType)
+      var typedThen = try inferTypedExpression(thenBranch, expectedType: expectedType)
 
       if let elseExpr = elseBranch {
-        let typedElse = try inferTypedExpression(elseExpr, expectedType: expectedType)
+        var typedElse = try inferTypedExpression(elseExpr, expectedType: expectedType)
 
-        let resultType: Type
+        var resultType: Type
         if typedThen.type == typedElse.type {
           resultType = typedThen.type
         } else if typedThen.type == .never {
@@ -384,10 +384,28 @@ extension TypeChecker {
         } else if typedElse.type == .never {
           resultType = typedThen.type
         } else {
-          throw SemanticError.typeMismatch(
-            expected: typedThen.type.description,
-            got: typedElse.type.description
-          )
+          // Try coercing literals to reconcile branch types
+          typedThen = try coerceLiteral(typedThen, to: typedElse.type)
+          typedElse = try coerceLiteral(typedElse, to: typedThen.type)
+          if typedThen.type == typedElse.type {
+            resultType = typedThen.type
+          } else {
+            throw SemanticError.typeMismatch(
+              expected: typedThen.type.description,
+              got: typedElse.type.description
+            )
+          }
+        }
+
+        // If expected type is available and branches are coercible, coerce to expected type
+        if let expected = expectedType, resultType != expected {
+          let coercedThen = try coerceLiteral(typedThen, to: expected)
+          let coercedElse = try coerceLiteral(typedElse, to: expected)
+          if coercedThen.type == expected && coercedElse.type == expected {
+            typedThen = coercedThen
+            typedElse = coercedElse
+            resultType = expected
+          }
         }
 
         return .ifExpression(
@@ -1858,9 +1876,10 @@ extension TypeChecker {
           throw SemanticError.invalidArgumentCount(
             function: base, expected: 1, got: arguments.count)
         }
-        let countExpr = try inferTypedExpression(arguments[0])
-        if countExpr.type != .int {
-          throw SemanticError.typeMismatch(expected: "Int", got: countExpr.type.description)
+        var countExpr = try inferTypedExpression(arguments[0])
+        countExpr = try coerceLiteral(countExpr, to: .uint)
+        if countExpr.type != .uint {
+          throw SemanticError.typeMismatch(expected: "UInt", got: countExpr.type.description)
         }
 
         return .intrinsicCall(
@@ -1941,26 +1960,6 @@ extension TypeChecker {
         return .intrinsicCall(.takeMemory(ptr: ptrExpr))
       }
 
-      if base == "offset_ptr" {
-        let resolvedArgs = try args.map { try resolveTypeNode($0) }
-        guard resolvedArgs.count == 1 else {
-          throw SemanticError.typeMismatch(
-            expected: "1 generic arg", got: "\(resolvedArgs.count)")
-        }
-        guard arguments.count == 2 else {
-          throw SemanticError.invalidArgumentCount(
-            function: base, expected: 2, got: arguments.count)
-        }
-        let ptrExpr = try inferTypedExpression(arguments[0])
-        guard case .pointer = ptrExpr.type else {
-          throw SemanticError(.generic("cannot dereference non-pointer type"))
-        }
-        let offsetExpr = try inferTypedExpression(arguments[1])
-        if offsetExpr.type != .int {
-          throw SemanticError.typeMismatch(expected: "Int", got: offsetExpr.type.description)
-        }
-        return .intrinsicCall(.offsetPtr(ptr: ptrExpr, offset: offsetExpr))
-      }
       if base == "null_ptr" {
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
         guard resolvedArgs.count == 1 else {
@@ -2229,15 +2228,6 @@ extension TypeChecker {
         throw SemanticError(.generic("cannot dereference non-pointer type"))
       }
       return .intrinsicCall(.takeMemory(ptr: typedArguments[0]))
-    }
-    if templateName == "offset_ptr" {
-      guard case .pointer = typedArguments[0].type else {
-        throw SemanticError(.generic("cannot dereference non-pointer type"))
-      }
-      if typedArguments[1].type != .int {
-        throw SemanticError.typeMismatch(expected: "Int", got: typedArguments[1].type.description)
-      }
-      return .intrinsicCall(.offsetPtr(ptr: typedArguments[0], offset: typedArguments[1]))
     }
     if templateName == "null_ptr" {
       guard typedArguments.isEmpty else {
@@ -3843,6 +3833,18 @@ extension TypeChecker {
       throw SemanticError.invalidOperation(op: opName, type1: left.type.description, type2: right.type.description)
     }
 
+    // Pointer arithmetic: ptr + UInt or ptr - UInt
+    if case .pointer = left.type, (op == .plus || op == .minus) {
+      var offset = right
+      offset = try coerceLiteral(offset, to: .uint)
+      if offset.type == .uint {
+        return .arithmeticExpression(left: left, op: op, right: offset, type: left.type)
+      }
+      throw SemanticError.invalidOperation(
+        op: op == .plus ? "plus" : "minus",
+        type1: left.type.description, type2: right.type.description)
+    }
+
     return try buildNonNumericArithmeticExpression(op: op, lhs: left, rhs: right)
   }
 
@@ -4482,9 +4484,32 @@ extension TypeChecker {
     right: ExpressionNode?,
     expectedType: Type? = nil
   ) throws -> TypedExpressionNode {
-    // 1. Type check operands
-    let typedLeft = left != nil ? try inferTypedExpression(left!) : nil
-    let typedRight = right != nil ? try inferTypedExpression(right!) : nil
+    // Extract expected element type from expectedType (e.g. [UInt]Range -> UInt)
+    let expectedElementType: Type?
+    if let expected = expectedType,
+       case .genericUnion(let template, let args) = expected,
+       template == "Range",
+       args.count == 1 {
+      expectedElementType = args[0]
+    } else {
+      expectedElementType = nil
+    }
+
+    // 1. Type check operands (with expected type for literal coercion)
+    var typedLeft: TypedExpressionNode? = nil
+    var typedRight: TypedExpressionNode? = nil
+    if let l = left {
+      typedLeft = try inferTypedExpression(l, expectedType: expectedElementType)
+      if let eet = expectedElementType {
+        typedLeft = try coerceLiteral(typedLeft!, to: eet)
+      }
+    }
+    if let r = right {
+      typedRight = try inferTypedExpression(r, expectedType: expectedElementType)
+      if let eet = expectedElementType {
+        typedRight = try coerceLiteral(typedRight!, to: eet)
+      }
+    }
     
     // 2. Determine element type T
     let elementType: Type
@@ -4500,11 +4525,8 @@ extension TypeChecker {
       elementType = r.type
     } else {
       // FullRange with no operands - try to infer from expected type
-      if let expected = expectedType,
-         case .genericUnion(let template, let args) = expected,
-         template == "Range",
-         args.count == 1 {
-        elementType = args[0]
+      if let eet = expectedElementType {
+        elementType = eet
       } else {
         throw SemanticError(.generic("FullRange requires type annotation or context type"), line: currentLine)
       }

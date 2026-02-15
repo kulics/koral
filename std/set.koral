@@ -16,15 +16,15 @@ public type [T Hashable]SetBucket {
 
 public type [T Hashable]SetStorage(
     mut buckets [T]SetBucket ptr,
-    mut count Int,
-    mut capacity Int
+    mut count UInt,
+    mut capacity UInt
 )
 
 given[T Hashable] [T]SetStorage {
     __drop(self ref) = {
-        let mut i = 0
+        let mut i UInt = 0
         while i < self.capacity then {
-            deinit_memory(offset_ptr(self.buckets, i))
+            deinit_memory(self.buckets + i)
             i += 1
         }
         dealloc_memory(self.buckets)
@@ -33,7 +33,7 @@ given[T Hashable] [T]SetStorage {
 
 public type [T Hashable]Set(mut storage [T]SetStorage ref)
 
-public type [T Hashable]SetIterator(storage [T]SetStorage ref, mut index Int)
+public type [T Hashable]SetIterator(storage [T]SetStorage ref, mut index UInt)
 
 
 // ============================================================================
@@ -42,40 +42,40 @@ public type [T Hashable]SetIterator(storage [T]SetStorage ref, mut index Int)
 
 given[T Hashable] [T]Set {
     public new() Self = {
-        let capacity = 16
+        let capacity UInt = 16
         let buckets = [[T]SetBucket]alloc_memory(capacity)
-        let mut i = 0
+        let mut i UInt = 0
         while i < capacity then {
-            init_memory(offset_ptr(buckets, i), [T]SetBucket.Empty())
+            init_memory(buckets + i, [T]SetBucket.Empty())
             i += 1
         }
         let storage = ref [T]SetStorage(buckets, 0, capacity)
         [T]Set(storage)
     }
 
-    public with_capacity(capacity Int) Self = {
+    public with_capacity(capacity UInt) Self = {
         // Hash tables need extra space for efficiency (load factor ~0.5)
         let cap = if capacity < 4 then 4 else capacity * 2
         let buckets = [[T]SetBucket]alloc_memory(cap)
-        let mut i = 0
+        let mut i UInt = 0
         while i < cap then {
-            init_memory(offset_ptr(buckets, i), [T]SetBucket.Empty())
+            init_memory(buckets + i, [T]SetBucket.Empty())
             i += 1
         }
         let storage = ref [T]SetStorage(buckets, 0, cap)
         [T]Set(storage)
     }
 
-    public count(self) Int = self.storage.count
+    public count(self) UInt = self.storage.count
 
     private ensure_unique(self ref) Void = {
         if ref_count(self.storage) > 1 then {
             let old = self.storage
             let new_buckets = [[T]SetBucket]alloc_memory(old.capacity)
-            let mut i = 0
+            let mut i UInt = 0
             while i < old.capacity then {
-                let bucket = deptr offset_ptr(old.buckets, i)
-                init_memory(offset_ptr(new_buckets, i), bucket)
+                let bucket = deptr (old.buckets + i)
+                init_memory(new_buckets + i, bucket)
                 i += 1
             }
             let new_storage = ref [T]SetStorage(new_buckets, old.count, old.capacity)
@@ -84,29 +84,34 @@ given[T Hashable] [T]Set {
     }
 
     // Using when for bucket handling
-    private find_slot(self ref, value T ref) Int = {
+    private find_slot(self ref, value T ref) [UInt]Option = {
         let h = value.hash()
-        let mut idx = (Int){ h % (UInt)self.storage.capacity }
-        let mut first_deleted = 0 - 1
-        let mut probes = 0
+        let mut idx = h % self.storage.capacity
+        let mut first_deleted = [UInt]Option.None()
+        let mut probes UInt = 0
         while probes < self.storage.capacity then {
-            let bucket = deptr offset_ptr(self.storage.buckets, idx)
+            let bucket = deptr (self.storage.buckets + idx)
             when bucket is {
                 .Empty then {
-                    if first_deleted >= 0 then { return first_deleted; }
-                    return idx
+                    return when first_deleted is {
+                        .Some(_) then first_deleted,
+                        .None then [UInt]Option.Some(idx),
+                    }
                 },
                 .Deleted then {
-                    if first_deleted < 0 then { first_deleted = idx; }
+                    when first_deleted is {
+                        .None then { first_deleted = [UInt]Option.Some(idx); },
+                        _ then {},
+                    }
                 },
                 .Occupied(v) then {
-                    if v == deref value then { return idx; }
+                    if v == deref value then { return [UInt]Option.Some(idx); }
                 },
             }
             idx = { idx + 1 } % self.storage.capacity
             probes += 1
         }
-        if first_deleted >= 0 then first_deleted else 0 - 1
+        first_deleted
     }
 
     private rehash(self ref) Void = {
@@ -114,9 +119,9 @@ given[T Hashable] [T]Set {
         let old_buckets = self.storage.buckets
         let new_cap = old_cap * 2
         let new_buckets = [[T]SetBucket]alloc_memory(new_cap)
-        let mut i = 0
+        let mut i UInt = 0
         while i < new_cap then {
-            init_memory(offset_ptr(new_buckets, i), [T]SetBucket.Empty())
+            init_memory(new_buckets + i, [T]SetBucket.Empty())
             i += 1
         }
         self.storage.buckets = new_buckets
@@ -124,7 +129,7 @@ given[T Hashable] [T]Set {
         self.storage.count = 0
         i = 0
         while i < old_cap then {
-            let bucket = take_memory(offset_ptr(old_buckets, i))
+            let bucket = take_memory(old_buckets + i)
             when bucket is {
                 .Occupied(v) then { self.insert(v); },
                 _ then {},
@@ -139,41 +144,50 @@ given[T Hashable] [T]Set {
     public insert(self ref, value T) Bool = {
         self.ensure_unique()
         if self.storage.count * 2 >= self.storage.capacity then { self.rehash(); }
-        let idx = self.find_slot(ref value)
-        if idx < 0 then { panic("Set insert failed"); }
-        let bucket = deptr offset_ptr(self.storage.buckets, idx)
-        when bucket is {
-            .Occupied(_) then false,
-            .Empty or .Deleted then {
-                deptr offset_ptr(self.storage.buckets, idx) = [T]SetBucket.Occupied(value);
-                self.storage.count = self.storage.count + 1
-                true
+        when self.find_slot(ref value) is {
+            .None then { panic("Set insert failed"); false },
+            .Some(idx) then {
+                let bucket = deptr (self.storage.buckets + idx)
+                when bucket is {
+                    .Occupied(_) then false,
+                    .Empty or .Deleted then {
+                        deptr (self.storage.buckets + idx) = [T]SetBucket.Occupied(value);
+                        self.storage.count = self.storage.count + 1
+                        true
+                    },
+                }
             },
         }
     }
 
     public contains(self, value T) Bool = {
-        let idx = self.find_slot(ref value)
-        if idx < 0 then { return false; }
-        let bucket = deptr offset_ptr(self.storage.buckets, idx)
-        when bucket is {
-            .Occupied(_) then true,
-            _ then false,
+        when self.find_slot(ref value) is {
+            .None then false,
+            .Some(idx) then {
+                let bucket = deptr (self.storage.buckets + idx)
+                when bucket is {
+                    .Occupied(_) then true,
+                    _ then false,
+                }
+            },
         }
     }
 
     public remove(self ref, value T) Bool = {
         self.ensure_unique()
-        let idx = self.find_slot(ref value)
-        if idx < 0 then { return false; }
-        let bucket = deptr offset_ptr(self.storage.buckets, idx)
-        when bucket is {
-            .Occupied(_) then {
-                deptr offset_ptr(self.storage.buckets, idx) = [T]SetBucket.Deleted();
-                self.storage.count = self.storage.count - 1
-                true
+        when self.find_slot(ref value) is {
+            .None then false,
+            .Some(idx) then {
+                let bucket = deptr (self.storage.buckets + idx)
+                when bucket is {
+                    .Occupied(_) then {
+                        deptr (self.storage.buckets + idx) = [T]SetBucket.Deleted();
+                        self.storage.count = self.storage.count - 1
+                        true
+                    },
+                    _ then false,
+                }
             },
-            _ then false,
         }
     }
 
@@ -181,9 +195,9 @@ given[T Hashable] [T]Set {
 
     public clear(self ref) Void = {
         self.ensure_unique()
-        let mut i = 0
+        let mut i UInt = 0
         while i < self.storage.capacity then {
-            deptr offset_ptr(self.storage.buckets, i) = [T]SetBucket.Empty();
+            deptr (self.storage.buckets + i) = [T]SetBucket.Empty();
             i += 1
         }
         self.storage.count = 0
@@ -228,7 +242,7 @@ given[T Hashable] [T]Set {
 given[T Hashable] [T]SetIterator {
     public next(self ref) [T]Option = {
         while self.index < self.storage.capacity then {
-            let bucket = deptr offset_ptr(self.storage.buckets, self.index)
+            let bucket = deptr (self.storage.buckets + self.index)
             self.index = self.index + 1
             when bucket is {
                 .Occupied(v) then { return [T]Option.Some(v); },
@@ -248,9 +262,9 @@ given [T ToString and Hashable] [T]Set {
         let mut result = String.zero()
         result.push_string("[")
         let mut first = true
-        let mut i = 0
+        let mut i UInt = 0
         while i < self.storage.capacity then {
-            let bucket = deptr offset_ptr(self.storage.buckets, i)
+            let bucket = deptr (self.storage.buckets + i)
             when bucket is {
                 .Occupied(v) then {
                     if not first then { result.push_string(", "); }

@@ -701,8 +701,11 @@ extension TypeChecker {
 
     // Check index argument types (exclude last param, which is value)
     if params.count >= 2 {
-      let indexParams = params.dropFirst().dropLast()
-      for (arg, param) in zip(args, indexParams) {
+      let indexParams = Array(params.dropFirst().dropLast())
+      for i in 0..<args.count {
+        var arg = args[i]
+        let param = indexParams[i]
+        arg = try coerceLiteral(arg, to: param.type)
         if arg.type != param.type {
           throw SemanticError.typeMismatch(
             expected: param.type.description, got: arg.type.description)
@@ -794,16 +797,19 @@ extension TypeChecker {
         function: methodName, expected: params.count - 1, got: args.count)
     }
 
-    for (arg, param) in zip(args, params.dropFirst()) {
-      if arg.type != param.type {
+    var coercedArgs = args
+    for i in 0..<coercedArgs.count {
+      let param = params[i + 1]  // skip self
+      coercedArgs[i] = try coerceLiteral(coercedArgs[i], to: param.type)
+      if coercedArgs[i].type != param.type {
         throw SemanticError.typeMismatch(
-          expected: param.type.description, got: arg.type.description)
+          expected: param.type.description, got: coercedArgs[i].type.description)
       }
     }
 
     let subscriptExpr: TypedExpressionNode = .subscriptExpression(
       base: finalBase,
-      arguments: args,
+      arguments: coercedArgs,
       method: method,
       type: returns
     )
@@ -880,20 +886,6 @@ extension TypeChecker {
         throw SemanticError(.generic("cannot dereference non-pointer type"))
       }
       return .intrinsicCall(.takeMemory(ptr: ptr))
-
-    case "offset_ptr":
-      guard arguments.count == 2 else {
-        throw SemanticError.invalidArgumentCount(function: name, expected: 2, got: arguments.count)
-      }
-      let ptr = try inferTypedExpression(arguments[0])
-      guard case .pointer = ptr.type else {
-        throw SemanticError(.generic("cannot dereference non-pointer type"))
-      }
-      let offset = try inferTypedExpression(arguments[1])
-      if offset.type != .int {
-        throw SemanticError.typeMismatch(expected: "Int", got: offset.type.description)
-      }
-      return .intrinsicCall(.offsetPtr(ptr: ptr, offset: offset))
 
     default: return nil
     }
