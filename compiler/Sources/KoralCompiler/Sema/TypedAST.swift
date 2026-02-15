@@ -173,6 +173,10 @@ public indirect enum TypedExpressionNode {
   case castExpression(expression: TypedExpressionNode, type: Type)
   case arithmeticExpression(
     left: TypedExpressionNode, op: ArithmeticOperator, right: TypedExpressionNode, type: Type)
+  case wrappingArithmeticExpression(
+    left: TypedExpressionNode, op: ArithmeticOperator, right: TypedExpressionNode, type: Type)
+  case wrappingShiftExpression(
+    left: TypedExpressionNode, op: BitwiseOperator, right: TypedExpressionNode, type: Type)
   case comparisonExpression(
     left: TypedExpressionNode, op: ComparisonOperator, right: TypedExpressionNode, type: Type)
   case letExpression(
@@ -284,7 +288,6 @@ public indirect enum TypedIntrinsic {
   // Pointer Operations
   case initMemory(ptr: TypedExpressionNode, val: TypedExpressionNode)
   case deinitMemory(ptr: TypedExpressionNode)
-  case offsetPtr(ptr: TypedExpressionNode, offset: TypedExpressionNode)
   case takeMemory(ptr: TypedExpressionNode)
   case nullPtr(resultType: Type)
 
@@ -301,7 +304,6 @@ public indirect enum TypedIntrinsic {
     case .upgradeRef(_, let resultType): return resultType
     case .initMemory: return .void
     case .deinitMemory: return .void
-    case .offsetPtr(let ptr, _): return ptr.type
     case .takeMemory(let ptr):
       if case .pointer(let element) = ptr.type { return element }
       fatalError("takeMemory on non-pointer")
@@ -378,6 +380,8 @@ extension TypedExpressionNode {
       .booleanLiteral(_, let type),
       .castExpression(_, let type),
       .arithmeticExpression(_, _, _, let type),
+      .wrappingArithmeticExpression(_, _, _, let type),
+      .wrappingShiftExpression(_, _, _, let type),
       .comparisonExpression(_, _, _, let type),
       .andExpression(_, _, let type),
       .orExpression(_, _, let type),

@@ -350,6 +350,8 @@ public class Driver {
       if FileManager.default.fileExists(atPath: runtimeURL.path) {
         clangArgs.append(runtimeURL.path)
       }
+      // Add std directory to include path for koral_checked_math.h and other headers
+      clangArgs.append(contentsOf: ["-I", stdPath])
     }
 
     clangArgs.append("-o")

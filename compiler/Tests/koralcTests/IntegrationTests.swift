@@ -197,6 +197,13 @@ class IntegrationTests: XCTestCase {
     func test_numeric_literal_bases_error_octal_digit() throws { try runCase(named: "numeric_literal_bases_error_octal_digit.koral") }
     func test_numeric_literal_bases_error_empty_binary() throws { try runCase(named: "numeric_literal_bases_error_empty_binary.koral") }
     func test_numeric_literal_bases_error_float() throws { try runCase(named: "numeric_literal_bases_error_float.koral") }
+    func test_checked_arithmetic() throws { try runCase(named: "checked_arithmetic.koral") }
+    func test_checked_overflow_add() throws { try runCase(named: "checked_overflow_add.koral") }
+    func test_checked_overflow_sub() throws { try runCase(named: "checked_overflow_sub.koral") }
+    func test_checked_overflow_mul() throws { try runCase(named: "checked_overflow_mul.koral") }
+    func test_checked_div_zero() throws { try runCase(named: "checked_div_zero.koral") }
+    func test_checked_div_min() throws { try runCase(named: "checked_div_min.koral") }
+    func test_checked_shift_invalid() throws { try runCase(named: "checked_shift_invalid.koral") }
     
     func runTestCase(file: URL, projectRoot: URL) throws {
         // 1. Parse expectations

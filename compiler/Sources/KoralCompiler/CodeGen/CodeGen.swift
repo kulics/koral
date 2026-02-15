@@ -354,6 +354,7 @@ public class CodeGen {
     buffer = """
       #include <stdatomic.h>
       #include <stdint.h>
+      #include "koral_checked_math.h"
 
       void koral_panic_float_cast_overflow(void);
 
@@ -1168,8 +1169,31 @@ public class CodeGen {
       let rightResult = generateExpressionSSA(right)
       let result = nextTemp()
       addIndent()
-      buffer +=
-        "\(cTypeName(type)) \(result) = \(leftResult) \(arithmeticOpToC(op)) \(rightResult);\n"
+      if type.isIntegerType {
+        let funcName = checkedArithmeticFuncName(op: op, type: type)
+        buffer += "\(cTypeName(type)) \(result) = \(funcName)(\(leftResult), \(rightResult));\n"
+      } else {
+        buffer +=
+          "\(cTypeName(type)) \(result) = \(leftResult) \(arithmeticOpToC(op)) \(rightResult);\n"
+      }
+      return result
+
+    case .wrappingArithmeticExpression(let left, let op, let right, let type):
+      let leftResult = generateExpressionSSA(left)
+      let rightResult = generateExpressionSSA(right)
+      let result = nextTemp()
+      addIndent()
+      let funcName = wrappingArithmeticFuncName(op: op, type: type)
+      buffer += "\(cTypeName(type)) \(result) = \(funcName)(\(leftResult), \(rightResult));\n"
+      return result
+
+    case .wrappingShiftExpression(let left, let op, let right, let type):
+      let leftResult = generateExpressionSSA(left)
+      let rightResult = generateExpressionSSA(right)
+      let result = nextTemp()
+      addIndent()
+      let funcName = wrappingShiftFuncName(op: op, type: type)
+      buffer += "\(cTypeName(type)) \(result) = \(funcName)(\(leftResult), \(rightResult));\n"
       return result
 
     case .comparisonExpression(let left, let op, let right, let type):
@@ -1803,7 +1827,12 @@ public class CodeGen {
       let rightResult = generateExpressionSSA(right)
       let result = nextTemp()
       addIndent()
-      buffer += "\(cTypeName(type)) \(result) = \(leftResult) \(bitwiseOpToC(op)) \(rightResult);\n"
+      if (op == .shiftLeft || op == .shiftRight) && type.isIntegerType {
+        let funcName = checkedShiftFuncName(op: op, type: type)
+        buffer += "\(cTypeName(type)) \(result) = \(funcName)(\(leftResult), \(rightResult));\n"
+      } else {
+        buffer += "\(cTypeName(type)) \(result) = \(leftResult) \(bitwiseOpToC(op)) \(rightResult);\n"
+      }
       return result
 
     case .bitwiseNotExpression(let expr, let type):
@@ -2032,17 +2061,6 @@ public class CodeGen {
       addIndent()
       buffer += "\(cType) \(result) = *(\(cType)*)\(p);\n"
       return result
-    case .offsetPtr(let ptr, let offset):
-      guard case .pointer(let element) = ptr.type else { fatalError() }
-      let p = generateExpressionSSA(ptr)
-      let o = generateExpressionSSA(offset)
-      let cType = cTypeName(element)
-      let result = nextTemp()
-      addIndent()
-      buffer += "\(cTypeName(ptr.type)) \(result);\n"
-      addIndent()
-      buffer += "\(result) = ((\(cType)*)\(p)) + \(o);\n"
-      return result
 
     case .nullPtr(let resultType):
       let result = nextTemp()
@@ -2119,10 +2137,18 @@ public class CodeGen {
       if let op {
         let (lhsPath, _) = buildRefComponents(target)
         let valueResult = generateExpressionSSA(value)
-        let opStr = compoundOpToC(op)
-        
-        addIndent()
-        buffer += "\(lhsPath) \(opStr) \(valueResult);\n"
+
+        // For shift compound assignments on integer types, use checked shift functions
+        if (op == .shiftLeft || op == .shiftRight) && target.type.isIntegerType {
+          let bitwiseOp: BitwiseOperator = op == .shiftLeft ? .shiftLeft : .shiftRight
+          let funcName = checkedShiftFuncName(op: bitwiseOp, type: target.type)
+          addIndent()
+          buffer += "\(lhsPath) = \(funcName)(\(lhsPath), \(valueResult));\n"
+        } else {
+          let opStr = compoundOpToC(op)
+          addIndent()
+          buffer += "\(lhsPath) \(opStr) \(valueResult);\n"
+        }
       } else {
         // 检测是否是结构体字段赋值（用于逃逸分析）
         let isFieldAssignment = isStructFieldAssignment(target)
@@ -2168,7 +2194,14 @@ public class CodeGen {
         let rhsValue = generateExpressionSSA(value)
         let newValue = nextTemp()
         addIndent()
-        buffer += "\(cTypeName(elementType)) \(newValue) = \(oldValue) \(compoundOpToC(op).dropLast()) \(rhsValue);\n"
+        // For shift compound assignments on integer types, use checked shift functions
+        if (op == .shiftLeft || op == .shiftRight) && elementType.isIntegerType {
+          let bitwiseOp: BitwiseOperator = op == .shiftLeft ? .shiftLeft : .shiftRight
+          let funcName = checkedShiftFuncName(op: bitwiseOp, type: elementType)
+          buffer += "\(cTypeName(elementType)) \(newValue) = \(funcName)(\(oldValue), \(rhsValue));\n"
+        } else {
+          buffer += "\(cTypeName(elementType)) \(newValue) = \(oldValue) \(compoundOpToC(op).dropLast()) \(rhsValue);\n"
+        }
 
         appendDropStatement(for: elementType, value: "(*\(ptrValue))")
         appendCopyAssignment(for: elementType, source: newValue, dest: "(*\(ptrValue))")

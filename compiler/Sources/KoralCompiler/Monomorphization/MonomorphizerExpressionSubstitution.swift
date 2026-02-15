@@ -57,6 +57,22 @@ extension Monomorphizer {
                 right: substituteTypesInExpression(right, substitution: substitution),
                 type: substituteType(type, substitution: substitution)
             )
+
+        case .wrappingArithmeticExpression(let left, let op, let right, let type):
+            return .wrappingArithmeticExpression(
+                left: substituteTypesInExpression(left, substitution: substitution),
+                op: op,
+                right: substituteTypesInExpression(right, substitution: substitution),
+                type: substituteType(type, substitution: substitution)
+            )
+
+        case .wrappingShiftExpression(let left, let op, let right, let type):
+            return .wrappingShiftExpression(
+                left: substituteTypesInExpression(left, substitution: substitution),
+                op: op,
+                right: substituteTypesInExpression(right, substitution: substitution),
+                type: substituteType(type, substitution: substitution)
+            )
             
         case .comparisonExpression(let left, let op, let right, let type):
             return .comparisonExpression(
@@ -282,6 +298,20 @@ extension Monomorphizer {
                             default:
                                 return .arithmeticExpression(left: base, op: .modulo, right: newArguments[0], type: newType)
                             }
+                        case "wrapping_add":
+                            return .wrappingArithmeticExpression(left: base, op: .plus, right: newArguments[0], type: newType)
+                        case "wrapping_sub":
+                            return .wrappingArithmeticExpression(left: base, op: .minus, right: newArguments[0], type: newType)
+                        case "wrapping_mul":
+                            return .wrappingArithmeticExpression(left: base, op: .multiply, right: newArguments[0], type: newType)
+                        case "wrapping_div":
+                            return .wrappingArithmeticExpression(left: base, op: .divide, right: newArguments[0], type: newType)
+                        case "wrapping_mod":
+                            return .wrappingArithmeticExpression(left: base, op: .modulo, right: newArguments[0], type: newType)
+                        case "wrapping_shl":
+                            return .wrappingShiftExpression(left: base, op: .shiftLeft, right: newArguments[0], type: newType)
+                        case "wrapping_shr":
+                            return .wrappingShiftExpression(left: base, op: .shiftRight, right: newArguments[0], type: newType)
                         default:
                             break
                         }
@@ -289,6 +319,10 @@ extension Monomorphizer {
                     if methodName == "neg", newArguments.isEmpty {
                         let zero = makeZeroLiteral(for: base.type)
                         return .arithmeticExpression(left: zero, op: .minus, right: base, type: newType)
+                    }
+                    if methodName == "wrapping_neg", newArguments.isEmpty {
+                        let zero = makeZeroLiteral(for: base.type)
+                        return .wrappingArithmeticExpression(left: zero, op: .minus, right: base, type: newType)
                     }
                 }
             }
@@ -813,11 +847,6 @@ extension Monomorphizer {
             )
         case .deinitMemory(let ptr):
             return .deinitMemory(ptr: substituteTypesInExpression(ptr, substitution: substitution))
-        case .offsetPtr(let ptr, let offset):
-            return .offsetPtr(
-                ptr: substituteTypesInExpression(ptr, substitution: substitution),
-                offset: substituteTypesInExpression(offset, substitution: substitution)
-            )
         case .takeMemory(let ptr):
             return .takeMemory(ptr: substituteTypesInExpression(ptr, substitution: substitution))
         case .nullPtr(let resultType):

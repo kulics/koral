@@ -145,7 +145,9 @@ extension CodeGen {
       assertTypeResolved(type, contextInfo: "\(context) -> cast target type")
       validateExpression(inner, context: "\(context) -> cast inner")
       
-    case .arithmeticExpression(let left, _, let right, _):
+    case .arithmeticExpression(let left, _, let right, _),
+         .wrappingArithmeticExpression(let left, _, let right, _),
+         .wrappingShiftExpression(let left, _, let right, _):
       validateExpression(left, context: "\(context) -> arithmetic left")
       validateExpression(right, context: "\(context) -> arithmetic right")
       
@@ -411,10 +413,6 @@ extension CodeGen {
       
     case .takeMemory(let ptr):
       validateExpression(ptr, context: "\(context) -> takeMemory ptr")
-      
-    case .offsetPtr(let ptr, let offset):
-      validateExpression(ptr, context: "\(context) -> offsetPtr ptr")
-      validateExpression(offset, context: "\(context) -> offsetPtr offset")
       
     case .nullPtr:
       break  // No expressions to validate

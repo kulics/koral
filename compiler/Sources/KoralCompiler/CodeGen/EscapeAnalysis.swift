@@ -332,7 +332,9 @@ public class EscapeContext {
         case .castExpression(let inner, _):
             preAnalyzeExpression(inner)
             
-        case .arithmeticExpression(let left, _, let right, _):
+        case .arithmeticExpression(let left, _, let right, _),
+             .wrappingArithmeticExpression(let left, _, let right, _),
+             .wrappingShiftExpression(let left, _, let right, _):
             preAnalyzeExpression(left)
             preAnalyzeExpression(right)
             
@@ -594,9 +596,6 @@ public class EscapeContext {
             preAnalyzeExpression(ptr)
         case .takeMemory(let ptr):
             preAnalyzeExpression(ptr)
-        case .offsetPtr(let ptr, let offset):
-            preAnalyzeExpression(ptr)
-            preAnalyzeExpression(offset)
         case .nullPtr:
             break  // No expressions to analyze
         }

@@ -241,6 +241,32 @@ public func printTypedAST(_ node: TypedProgram) {
         }
       }
 
+    case .wrappingArithmeticExpression(let left, let op, let right, let type):
+      print("\(indent)WrappingArithmeticExpression: \(op) : \(type)")
+      withIndent {
+        print("\(indent)Left:")
+        withIndent {
+          printTypedExpression(left)
+        }
+        print("\(indent)Right:")
+        withIndent {
+          printTypedExpression(right)
+        }
+      }
+
+    case .wrappingShiftExpression(let left, let op, let right, let type):
+      print("\(indent)WrappingShiftExpression: \(op) : \(type)")
+      withIndent {
+        print("\(indent)Left:")
+        withIndent {
+          printTypedExpression(left)
+        }
+        print("\(indent)Right:")
+        withIndent {
+          printTypedExpression(right)
+        }
+      }
+
     case .comparisonExpression(let left, let op, let right, let type):
       print("\(indent)ComparisonExpression: \(op) : \(type)")
       withIndent {

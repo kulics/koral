@@ -50,6 +50,68 @@ extension CodeGen {
     }
   }
 
+  // MARK: - Checked Arithmetic Helpers
+
+  func checkedArithmeticFuncName(op: ArithmeticOperator, type: Type) -> String {
+    let opName: String
+    switch op {
+    case .plus: opName = "add"
+    case .minus: opName = "sub"
+    case .multiply: opName = "mul"
+    case .divide: opName = "div"
+    case .modulo: opName = "mod"
+    }
+    return "koral_checked_\(opName)_\(typeSuffix(type))"
+  }
+
+  func checkedShiftFuncName(op: BitwiseOperator, type: Type) -> String {
+    let opName: String
+    switch op {
+    case .shiftLeft: opName = "shl"
+    case .shiftRight: opName = "shr"
+    default: fatalError("Not a shift operation: \(op)")
+    }
+    return "koral_checked_\(opName)_\(typeSuffix(type))"
+  }
+
+  func wrappingArithmeticFuncName(op: ArithmeticOperator, type: Type) -> String {
+    let opName: String
+    switch op {
+    case .plus: opName = "add"
+    case .minus: opName = "sub"
+    case .multiply: opName = "mul"
+    case .divide: opName = "div"
+    case .modulo: opName = "mod"
+    }
+    return "koral_wrapping_\(opName)_\(typeSuffix(type))"
+  }
+
+  func wrappingShiftFuncName(op: BitwiseOperator, type: Type) -> String {
+    let opName: String
+    switch op {
+    case .shiftLeft: opName = "shl"
+    case .shiftRight: opName = "shr"
+    default: fatalError("Not a shift operation: \(op)")
+    }
+    return "koral_wrapping_\(opName)_\(typeSuffix(type))"
+  }
+
+  func typeSuffix(_ type: Type) -> String {
+    switch type {
+    case .int: return "isize"
+    case .int8: return "i8"
+    case .int16: return "i16"
+    case .int32: return "i32"
+    case .int64: return "i64"
+    case .uint: return "usize"
+    case .uint8: return "u8"
+    case .uint16: return "u16"
+    case .uint32: return "u32"
+    case .uint64: return "u64"
+    default: fatalError("Not an integer type: \(type)")
+    }
+  }
+
   // MARK: - Reference Component Building
   
   /// Build reference components: returns (access path, control block pointer)

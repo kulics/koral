@@ -204,8 +204,17 @@ extension TypeChecker {
         let typedArgs = try argExprs.map { try inferTypedExpression($0) }
 
         // Resolve expected value type from `set_at`.
-        let (_, _, expectedValueType) = try resolveSubscriptUpdateMethod(
+        let (resolvedMethod, _, expectedValueType) = try resolveSubscriptUpdateMethod(
           base: typedBase, args: typedArgs)
+
+        // Coerce index arguments to match set_at parameter types
+        var coercedArgs = typedArgs
+        if case .function(let params, _) = resolvedMethod.type {
+          let indexParams = Array(params.dropFirst().dropLast())
+          for i in 0..<coercedArgs.count {
+            coercedArgs[i] = try coerceLiteral(coercedArgs[i], to: indexParams[i].type)
+          }
+        }
 
         // Evaluate base (by reference), args, rhs once.
         if typedBase.valueCategory != .lvalue {
@@ -221,7 +230,7 @@ extension TypeChecker {
         ]
 
         var argSyms: [Symbol] = []
-        for a in typedArgs {
+        for a in coercedArgs {
           let s = nextSynthSymbol(prefix: "sub_idx", type: a.type)
           argSyms.append(s)
           stmts.append(.variableDeclaration(identifier: s, value: a, mutable: false))

@@ -8,13 +8,13 @@
 // List Storage and Type Definition
 // ============================================================================
 
-public type [T Any]ListStorage(mut source T ptr, mut len Int, mut cap Int)
+public type [T Any]ListStorage(mut source T ptr, mut len UInt, mut cap UInt)
 
 given[T Any] [T]ListStorage {
     __drop(self ref) = {
-        let mut i = 0
+        let mut i UInt = 0
         while i < self.len then {
-            deinit_memory(offset_ptr(self.source, i))
+            deinit_memory(self.source + i)
             i += 1
         }
         dealloc_memory(self.source)
@@ -23,7 +23,7 @@ given[T Any] [T]ListStorage {
 
 public type [T Any]List(mut storage [T]ListStorage ref)
 
-public type [T Any]ListIterator(storage [T]ListStorage ref, mut index Int)
+public type [T Any]ListIterator(storage [T]ListStorage ref, mut index UInt)
 
 // ============================================================================
 // List Methods
@@ -31,30 +31,30 @@ public type [T Any]ListIterator(storage [T]ListStorage ref, mut index Int)
 
 given[T Any] [T]List {
     public new() Self = {
-        let cap = 10
+        let cap UInt = 10
         let source = [T]alloc_memory(cap)
         let storage = ref [T]ListStorage(source, 0, cap)
         [T]List(storage)
     }
 
-    public with_capacity(capacity Int) Self = {
+    public with_capacity(capacity UInt) Self = {
         let cap = if capacity < 1 then 1 else capacity
         let source = [T]alloc_memory(cap)
         let storage = ref [T]ListStorage(source, 0, cap)
         [T]List(storage)
     }
 
-    public count(self) Int = self.storage.len
+    public count(self) UInt = self.storage.len
 
     private ensure_unique(self ref) Void = {
         if ref_count(self.storage) > 1 then {
             let old = self.storage
             let new_cap = old.cap
             let new_source = [T]alloc_memory(new_cap)
-            let mut i = 0
+            let mut i UInt = 0
             while i < old.len then {
-                let v = deptr offset_ptr(old.source, i)
-                init_memory(offset_ptr(new_source, i), v)
+                let v = deptr (old.source + i)
+                init_memory(new_source + i, v)
                 i += 1
             }
             let new_storage = ref [T]ListStorage(new_source, old.len, new_cap)
@@ -62,7 +62,7 @@ given[T Any] [T]List {
         }
     }
 
-    private ensure_capacity(self ref, min_capacity Int) Void = {
+    private ensure_capacity(self ref, min_capacity UInt) Void = {
          if min_capacity > self.storage.cap then {
              let mut new_cap = self.storage.cap * 2
              if new_cap < min_capacity then { new_cap = min_capacity; }
@@ -75,10 +75,10 @@ given[T Any] [T]List {
                  self.storage.source = new_source
                  self.storage.cap = new_cap
              } else {
-                 let mut i = 0
+                 let mut i UInt = 0
                  while i < old_len then {
-                    let v = deptr offset_ptr(self.storage.source, i)
-                    init_memory(offset_ptr(new_source, i), v)
+                    let v = deptr (self.storage.source + i)
+                    init_memory(new_source + i, v)
                     i += 1
                  }
                  let new_storage = ref [T]ListStorage(new_source, old_len, new_cap)
@@ -91,7 +91,7 @@ given[T Any] [T]List {
 
     public push(self ref, value T) Void = {
         self.ensure_capacity(self.storage.len + 1)
-        init_memory(offset_ptr(self.storage.source, self.storage.len), value)
+        init_memory(self.storage.source + self.storage.len, value)
         self.storage.len = self.storage.len + 1
     }
 
@@ -100,34 +100,34 @@ given[T Any] [T]List {
         if self.storage.len == 0 then { return [T]Option.None(); }
         self.ensure_unique()
         self.storage.len = self.storage.len - 1
-        let value = take_memory(offset_ptr(self.storage.source, self.storage.len))
+        let value = take_memory(self.storage.source + self.storage.len)
         [T]Option.Some(value)
     }
 
-    public insert(self ref, index Int, value T) Void = {
-        if index < 0 or index > self.storage.len then { panic("List insert index out of bounds"); }
+    public insert(self ref, index UInt, value T) Void = {
+        if index > self.storage.len then { panic("List insert index out of bounds"); }
         self.ensure_capacity(self.storage.len + 1)
         // Shift elements to the right
         let mut i = self.storage.len
         while i > index then {
-            let src = offset_ptr(self.storage.source, i - 1)
-            let dst = offset_ptr(self.storage.source, i)
+            let src = self.storage.source + (i - 1)
+            let dst = self.storage.source + i
             init_memory(dst, take_memory(src))
             i = i - 1
         }
-        init_memory(offset_ptr(self.storage.source, index), value)
+        init_memory(self.storage.source + index, value)
         self.storage.len = self.storage.len + 1
     }
 
-    public remove(self ref, index Int) T = {
-        if index < 0 or index >= self.storage.len then { panic("List remove index out of bounds"); }
+    public remove(self ref, index UInt) T = {
+        if index >= self.storage.len then { panic("List remove index out of bounds"); }
         self.ensure_unique()
-        let value = take_memory(offset_ptr(self.storage.source, index))
+        let value = take_memory(self.storage.source + index)
         // Shift elements to the left
         let mut i = index
         while i < self.storage.len - 1 then {
-            let src = offset_ptr(self.storage.source, i + 1)
-            let dst = offset_ptr(self.storage.source, i)
+            let src = self.storage.source + (i + 1)
+            let dst = self.storage.source + i
             init_memory(dst, take_memory(src))
             i = i + 1
         }
@@ -135,15 +135,15 @@ given[T Any] [T]List {
         value
     }
 
-    public get(self, index Int) [T]Option = {
-        if index < 0 or index >= self.storage.len then { return [T]Option.None(); }
-        [T]Option.Some(deptr offset_ptr(self.storage.source, index))
+    public get(self, index UInt) [T]Option = {
+        if index >= self.storage.len then { return [T]Option.None(); }
+        [T]Option.Some(deptr (self.storage.source + index))
     }
 
-    public replace(self ref, index Int, value T) [T]Option = {
-        if index < 0 or index >= self.storage.len then { return [T]Option.None(); }
+    public replace(self ref, index UInt, value T) [T]Option = {
+        if index >= self.storage.len then { return [T]Option.None(); }
         self.ensure_unique()
-        let slot = offset_ptr(self.storage.source, index)
+        let slot = self.storage.source + index
         let old = deptr slot
         deptr slot = value
         [T]Option.Some(old)
@@ -160,9 +160,9 @@ given[T Any] [T]List {
 
     public clear(self ref) Void = {
         self.ensure_unique()
-        let mut i = 0
+        let mut i UInt = 0
         while i < self.storage.len then {
-            deinit_memory(offset_ptr(self.storage.source, i))
+            deinit_memory(self.storage.source + i)
             i += 1
         }
         self.storage.len = 0
@@ -170,31 +170,31 @@ given[T Any] [T]List {
 
     public iterator(self) [T]ListIterator = [T]ListIterator(self.storage, 0)
 
-    public at(self, index Int) T = {
-        if index < 0 or index >= self.storage.len then { panic("List index out of bounds"); }
-        deptr offset_ptr(self.storage.source, index)
+    public at(self, index UInt) T = {
+        if index >= self.storage.len then { panic("List index out of bounds"); }
+        deptr (self.storage.source + index)
     }
 
-    public set_at(self ref, index Int, value T) Void = {
-        if index < 0 or index >= self.storage.len then { panic("List index out of bounds"); }
+    public set_at(self ref, index UInt, value T) Void = {
+        if index >= self.storage.len then { panic("List index out of bounds"); }
         self.ensure_unique()
-        deptr offset_ptr(self.storage.source, index) = value;
+        deptr (self.storage.source + index) = value;
     }
 
-    private make_slice(self, start Int, len Int) [T]List = {
-        if start < 0 or len < 0 or start + len > self.storage.len then {
+    private make_slice(self, start UInt, len UInt) [T]List = {
+        if start + len > self.storage.len then {
             panic("List slice out of bounds")
         }
         let mut result = [T]List.with_capacity(len)
-        let mut i = 0
+        let mut i UInt = 0
         while i < len then {
-            result.push(deptr offset_ptr(self.storage.source, start + i))
+            result.push(deptr (self.storage.source + (start + i)))
             i += 1
         }
         result
     }
 
-    public slice(self, range [Int]Range) [T]List = when range is {
+    public slice(self, range [UInt]Range) [T]List = when range is {
         .ClosedRange(start, end) then self.make_slice(start, end - start + 1),
         .ClosedOpenRange(start, end) then self.make_slice(start, end - start),
         .OpenClosedRange(start, end) then self.make_slice(start + 1, end - start),
@@ -226,9 +226,9 @@ given[T Any] [T]List {
 
 given[T Eq] [T]List {
     public contains(self, value T) Bool = {
-        let mut i = 0
+        let mut i UInt = 0
         while i < self.storage.len then {
-            if deptr offset_ptr(self.storage.source, i) == value then {
+            if deptr (self.storage.source + i) == value then {
                 return true
             }
             i += 1
@@ -244,7 +244,7 @@ given[T Eq] [T]List {
 given[T Any] [T]ListIterator {
     public next(self ref) [T]Option = {
         if self.index >= self.storage.len then { return [T]Option.None(); }
-        let value = deptr offset_ptr(self.storage.source, self.index)
+        let value = deptr (self.storage.source + self.index)
         self.index = self.index + 1
         [T]Option.Some(value)
     }
@@ -258,7 +258,7 @@ given [T ToString] [T]List {
     public to_string(self) String = {
         let mut result = String.zero()
         result.push_string("[")
-        let mut i = 0
+        let mut i UInt = 0
         while i < self.count() then {
             if i > 0 then { result.push_string(", "); }
             result.push_string(self[i].to_string())
@@ -278,9 +278,9 @@ given[T Any] [T]List {
     // Filter - returns new list with elements matching predicate
     public filter(self, fn [T, Bool]Func) [T]List = {
         let mut result = [T]List.new()
-        let mut i = 0
+        let mut i UInt = 0
         while i < self.storage.len then {
-            let v = deptr offset_ptr(self.storage.source, i)
+            let v = deptr (self.storage.source + i)
             if fn(v) then { result.push(v); }
             i += 1
         }
@@ -290,9 +290,9 @@ given[T Any] [T]List {
     // Map - returns new list with transformed elements
     public [U Any]map(self, fn [T, U]Func) [U]List = {
         let mut result = [U]List.with_capacity(self.storage.len)
-        let mut i = 0
+        let mut i UInt = 0
         while i < self.storage.len then {
-            let v = deptr offset_ptr(self.storage.source, i)
+            let v = deptr (self.storage.source + i)
             result.push(fn(v))
             i += 1
         }
@@ -314,7 +314,7 @@ given[T Any] [T]List {
     }
 
     // Merge sort implementation with key function
-    private [K Ord]merge_sort_by_key(self ref, key [T, K]Func, start Int, end Int) Void = {
+    private [K Ord]merge_sort_by_key(self ref, key [T, K]Func, start UInt, end UInt) Void = {
         let len = end - start
         if len <= 1 then { return; }
         
@@ -325,32 +325,32 @@ given[T Any] [T]List {
     }
 
     // Merge two sorted subarrays using key function
-    private [K Ord]merge_by_key(self ref, key [T, K]Func, start Int, mid Int, end Int) Void = {
+    private [K Ord]merge_by_key(self ref, key [T, K]Func, start UInt, mid UInt, end UInt) Void = {
         let left_len = mid - start
         let mut temp = [T]List.with_capacity(left_len)
         
         // Copy left half to temp
-        let mut i = 0
+        let mut i UInt = 0
         while i < left_len then {
-            temp.push(deptr offset_ptr(self.storage.source, start + i))
+            temp.push(deptr (self.storage.source + start + i))
             i += 1
         }
         
-        let mut left_idx = 0
+        let mut left_idx UInt = 0
         let mut right_idx = mid
         let mut dest_idx = start
         
         // Merge back
         while left_idx < left_len and right_idx < end then {
-            let left_val = deptr offset_ptr(temp.storage.source, left_idx)
-            let right_val = deptr offset_ptr(self.storage.source, right_idx)
+            let left_val = deptr (temp.storage.source + left_idx)
+            let right_val = deptr (self.storage.source + right_idx)
             
             // Use <= to ensure stability (prefer left on equal)
             if key(left_val) <= key(right_val) then {
-                deptr offset_ptr(self.storage.source, dest_idx) = left_val;
+                deptr (self.storage.source + dest_idx) = left_val;
                 left_idx += 1
             } else {
-                deptr offset_ptr(self.storage.source, dest_idx) = right_val;
+                deptr (self.storage.source + dest_idx) = right_val;
                 right_idx += 1
             }
             dest_idx += 1
@@ -358,8 +358,8 @@ given[T Any] [T]List {
         
         // Copy remaining left elements
         while left_idx < left_len then {
-            let val = deptr offset_ptr(temp.storage.source, left_idx)
-            deptr offset_ptr(self.storage.source, dest_idx) = val;
+            let val = deptr (temp.storage.source + left_idx)
+            deptr (self.storage.source + dest_idx) = val;
             left_idx += 1
             dest_idx += 1
         }
@@ -380,7 +380,7 @@ given[T Ord] [T]List {
     }
     
     // Merge sort implementation using Ord
-    private merge_sort_comparable(self ref, start Int, end Int) Void = {
+    private merge_sort_comparable(self ref, start UInt, end UInt) Void = {
         let len = end - start
         if len <= 1 then { return; }
         
@@ -391,32 +391,32 @@ given[T Ord] [T]List {
     }
     
     // Merge two sorted subarrays using Ord
-    private merge_comparable(self ref, start Int, mid Int, end Int) Void = {
+    private merge_comparable(self ref, start UInt, mid UInt, end UInt) Void = {
         let left_len = mid - start
         let mut temp = [T]List.with_capacity(left_len)
         
         // Copy left half to temp
-        let mut i = 0
+        let mut i UInt = 0
         while i < left_len then {
-            temp.push(deptr offset_ptr(self.storage.source, start + i))
+            temp.push(deptr (self.storage.source + start + i))
             i += 1
         }
         
-        let mut left_idx = 0
+        let mut left_idx UInt = 0
         let mut right_idx = mid
         let mut dest_idx = start
         
         // Merge back
         while left_idx < left_len and right_idx < end then {
-            let left_val = deptr offset_ptr(temp.storage.source, left_idx)
-            let right_val = deptr offset_ptr(self.storage.source, right_idx)
+            let left_val = deptr (temp.storage.source + left_idx)
+            let right_val = deptr (self.storage.source + right_idx)
             
             // Use <= to ensure stability (prefer left on equal)
             if left_val <= right_val then {
-                deptr offset_ptr(self.storage.source, dest_idx) = left_val;
+                deptr (self.storage.source + dest_idx) = left_val;
                 left_idx += 1
             } else {
-                deptr offset_ptr(self.storage.source, dest_idx) = right_val;
+                deptr (self.storage.source + dest_idx) = right_val;
                 right_idx += 1
             }
             dest_idx += 1
@@ -424,8 +424,8 @@ given[T Ord] [T]List {
         
         // Copy remaining left elements
         while left_idx < left_len then {
-            let val = deptr offset_ptr(temp.storage.source, left_idx)
-            deptr offset_ptr(self.storage.source, dest_idx) = val;
+            let val = deptr (temp.storage.source + left_idx)
+            deptr (self.storage.source + dest_idx) = val;
             left_idx += 1
             dest_idx += 1
         }
