@@ -100,6 +100,12 @@ public class EscapeContext {
     
     /// 已标记为逃逸的变量及其逃逸原因
     public var escapedVariables: [String: EscapeResult] = [:]
+
+    /// 引用变量来源追踪：ref 变量名 -> 原始被引用变量名
+    ///
+    /// 例如：`let r = ref x` 记录为 r -> x；
+    /// 再例如：`let r2 = r` 记录为 r2 -> x。
+    private var referenceOrigins: [String: String] = [:]
     
     /// 作用域栈，用于追踪每个作用域中声明的变量
     private var scopeStack: [[String]] = []
@@ -142,6 +148,7 @@ public class EscapeContext {
         if let currentScopeVars = scopeStack.popLast() {
             for varName in currentScopeVars {
                 variableScopes.removeValue(forKey: varName)
+                referenceOrigins.removeValue(forKey: varName)
             }
         }
         currentScopeLevel = max(0, currentScopeLevel - 1)
@@ -149,9 +156,20 @@ public class EscapeContext {
     
     /// 注册变量到当前作用域
     public func registerVariable(_ name: String) {
+        registerVariable(name, withInitialValue: nil)
+    }
+
+    /// 注册变量到当前作用域，并在可能时追踪 ref 来源
+    private func registerVariable(_ name: String, withInitialValue value: TypedExpressionNode?) {
         variableScopes[name] = currentScopeLevel
         if !scopeStack.isEmpty {
             scopeStack[scopeStack.count - 1].append(name)
+        }
+
+        if let value = value, let origin = extractReferenceOrigin(from: value) {
+            referenceOrigins[name] = origin
+        } else {
+            referenceOrigins.removeValue(forKey: name)
         }
     }
     
@@ -191,6 +209,7 @@ public class EscapeContext {
         self.variableScopes = [:]
         self.currentScopeLevel = 0
         self.escapedVariables = [:]
+        self.referenceOrigins = [:]
         self.scopeStack = []
         self.inReturnContext = false
         self.inFieldAssignmentContext = false
@@ -279,6 +298,91 @@ public class EscapeContext {
             return extractVariableName(from: inner)
         default:
             return nil
+        }
+    }
+
+    /// 解析引用变量的最终来源（处理 r2 -> r1 -> x 链）
+    private func resolveReferenceOrigin(for name: String) -> String {
+        var current = name
+        var visited: Set<String> = []
+
+        while let next = referenceOrigins[current], !visited.contains(current) {
+            visited.insert(current)
+            current = next
+        }
+
+        return current
+    }
+
+    /// 从表达式中提取引用的原始来源变量名
+    private func extractReferenceOrigin(from expr: TypedExpressionNode) -> String? {
+        switch expr {
+        case .referenceExpression(let inner, _):
+            guard let sourceName = extractVariableName(from: inner) else { return nil }
+            return resolveReferenceOrigin(for: sourceName)
+
+        case .variable(let identifier):
+            guard case .reference = identifier.type else { return nil }
+            let name = context?.getName(identifier.defId) ?? "<unknown>"
+            return resolveReferenceOrigin(for: name)
+
+        case .castExpression(let inner, _):
+            return extractReferenceOrigin(from: inner)
+
+        case .traitObjectConversion(let inner, _, _, _, _):
+            return extractReferenceOrigin(from: inner)
+
+        default:
+            return nil
+        }
+    }
+
+    /// 按作用域规则标记变量（或其引用来源）为逃逸
+    private func markEscapedVariableIfTracked(_ variableName: String, reason: EscapeResult, includeParameters: Bool) {
+        let originName = resolveReferenceOrigin(for: variableName)
+
+        if let scopeLevel = variableScopes[originName], scopeLevel > 0 || (includeParameters && scopeLevel == 0) {
+            markEscaped(originName, reason: reason)
+            return
+        }
+
+        if includeParameters, let scopeLevel = variableScopes[variableName], scopeLevel == 0 {
+            markEscaped(variableName, reason: reason)
+        }
+    }
+
+    /// 递归扫描表达式中的引用，并按需要标记为逃逸
+    private func markEscapedReferences(in expr: TypedExpressionNode, reason: EscapeResult, includeParameters: Bool) {
+        switch expr {
+        case .referenceExpression(let inner, _):
+            if let varName = extractVariableName(from: inner) {
+                markEscapedVariableIfTracked(varName, reason: reason, includeParameters: includeParameters)
+            }
+
+        case .variable(let identifier):
+            if case .reference = identifier.type {
+                let name = context?.getName(identifier.defId) ?? "<unknown>"
+                markEscapedVariableIfTracked(name, reason: reason, includeParameters: includeParameters)
+            }
+
+        case .typeConstruction(_, _, let arguments, _):
+            for arg in arguments {
+                markEscapedReferences(in: arg, reason: reason, includeParameters: includeParameters)
+            }
+
+        case .unionConstruction(_, _, let arguments):
+            for arg in arguments {
+                markEscapedReferences(in: arg, reason: reason, includeParameters: includeParameters)
+            }
+
+        case .castExpression(let inner, _):
+            markEscapedReferences(in: inner, reason: reason, includeParameters: includeParameters)
+
+        case .traitObjectConversion(let inner, _, _, _, _):
+            markEscapedReferences(in: inner, reason: reason, includeParameters: includeParameters)
+
+        default:
+            break
         }
     }
     
@@ -376,10 +480,7 @@ public class EscapeContext {
             preAnalyzeExpression(value)
             // 注册变量到当前作用域
             let name = context?.getName(identifier.defId) ?? "<unknown>"
-            variableScopes[name] = currentScopeLevel
-            if !scopeStack.isEmpty {
-                scopeStack[scopeStack.count - 1].append(name)
-            }
+            registerVariable(name, withInitialValue: value)
             preAnalyzeExpression(body)
             
         case .andExpression(let left, let right, _):
@@ -450,7 +551,7 @@ public class EscapeContext {
                 preAnalyzeExpression(arg)
             }
             // Inter-procedural escape propagation: consult callee's summary
-            if let summaries = globalSummaries {
+            do {
                 var calleeDefId: UInt64? = nil
                 var selfArg: TypedExpressionNode? = nil
                 switch callee {
@@ -464,9 +565,9 @@ public class EscapeContext {
                 default:
                     break
                 }
-                if let cDefId = calleeDefId, let summary = summaries[cDefId] {
-                    // For method calls: index 0 = self, index 1+ = arguments
-                    // For regular calls: index i = arguments[i]
+                let summary = calleeDefId.flatMap { globalSummaries?[$0] }
+                if let summary = summary {
+                    // Have summary: use precise escape info
                     if let selfArg = selfArg {
                         // Method call
                         if summary.parameterStates.count > 0 && summary.parameterStates[0] == .escapes {
@@ -486,12 +587,25 @@ public class EscapeContext {
                             }
                         }
                     }
+                } else {
+                    // No summary available (builtin/generic/unknown function):
+                    // conservatively mark all ref arguments as escaping
+                    if let selfArg = selfArg {
+                        markRefArgumentAsEscaping(selfArg)
+                    }
+                    for arg in arguments {
+                        markRefArgumentAsEscaping(arg)
+                    }
                 }
             }
             
         case .genericCall(_, _, let arguments, _):
             for arg in arguments {
                 preAnalyzeExpression(arg)
+            }
+            // Generic calls have no summary: conservatively mark all ref args as escaping
+            for arg in arguments {
+                markRefArgumentAsEscaping(arg)
             }
             
         case .methodReference(let base, _, _, _, _):
@@ -510,11 +624,9 @@ public class EscapeContext {
             }
             // Conservative: trait method calls can't be statically resolved,
             // so mark all ref arguments as escaping
-            if globalSummaries != nil {
-                markRefArgumentAsEscaping(receiver)
-                for arg in arguments {
-                    markRefArgumentAsEscaping(arg)
-                }
+            markRefArgumentAsEscaping(receiver)
+            for arg in arguments {
+                markRefArgumentAsEscaping(arg)
             }
             
         case .staticMethodCall(let baseType, let methodName, _, let arguments, _):
@@ -522,15 +634,25 @@ public class EscapeContext {
                 preAnalyzeExpression(arg)
             }
             // Inter-procedural: look up static method summary
-            if let summaries = globalSummaries, let prog = program {
-                let typeName = context?.getTypeName(baseType) ?? ""
-                if let defId = prog.lookupStaticMethod(typeName: typeName, methodName: methodName) {
-                    if let summary = summaries[defId.id] {
-                        for (i, arg) in arguments.enumerated() {
-                            if i < summary.parameterStates.count && summary.parameterStates[i] == .escapes {
-                                markRefArgumentAsEscaping(arg)
+            do {
+                var foundSummary = false
+                if let summaries = globalSummaries, let prog = program {
+                    let typeName = context?.getTypeName(baseType) ?? ""
+                    if let defId = prog.lookupStaticMethod(typeName: typeName, methodName: methodName) {
+                        if let summary = summaries[defId.id] {
+                            foundSummary = true
+                            for (i, arg) in arguments.enumerated() {
+                                if i < summary.parameterStates.count && summary.parameterStates[i] == .escapes {
+                                    markRefArgumentAsEscaping(arg)
+                                }
                             }
                         }
+                    }
+                }
+                if !foundSummary {
+                    // No summary: conservatively mark all ref args as escaping
+                    for arg in arguments {
+                        markRefArgumentAsEscaping(arg)
                     }
                 }
             }
@@ -568,6 +690,9 @@ public class EscapeContext {
         case .unionConstruction(_, _, let arguments):
             for arg in arguments {
                 preAnalyzeExpression(arg)
+                // 检查是否将引用传递给 union 构造函数
+                // 如果 union 被返回或存储，引用可能逃逸
+                checkTypeConstructionEscape(arg: arg, constructedType: .void)
             }
             
         case .intrinsicCall(let intrinsic):
@@ -602,10 +727,7 @@ public class EscapeContext {
             preAnalyzeExpression(value)
             // 注册变量到当前作用域
             let name = context?.getName(identifier.defId) ?? "<unknown>"
-            variableScopes[name] = currentScopeLevel
-            if !scopeStack.isEmpty {
-                scopeStack[scopeStack.count - 1].append(name)
-            }
+            registerVariable(name, withInitialValue: value)
             
         case .assignment(let target, _, let value):
             preAnalyzeExpression(target)
@@ -644,10 +766,7 @@ public class EscapeContext {
             break
         case .variable(let symbol):
             let name = context?.getName(symbol.defId) ?? "<unknown>"
-            variableScopes[name] = currentScopeLevel
-            if !scopeStack.isEmpty {
-                scopeStack[scopeStack.count - 1].append(name)
-            }
+            registerVariable(name, withInitialValue: nil)
         case .unionCase(_, _, let elements):
             for element in elements {
                 preAnalyzePattern(element)
@@ -716,24 +835,28 @@ public class EscapeContext {
         switch expr {
         case .referenceExpression(let inner, _):
             // 直接返回引用表达式
-            if let varName = extractVariableName(from: inner) {
-                if let scopeLevel = variableScopes[varName], scopeLevel > 0 {
-                    markEscaped(varName, reason: .escapeToReturn)
-                }
-            }
+            _ = inner
+            markEscapedReferences(in: expr, reason: .escapeToReturn, includeParameters: false)
             
         case .variable(let identifier):
-            // 返回一个引用类型的变量
-            if case .reference(let innerType) = identifier.type {
-                // 这个变量本身是引用类型，检查它是否指向局部变量
-                // 这种情况比较复杂，需要追踪引用的来源
-                // 目前采用保守策略：如果变量是局部的且类型是引用，标记为逃逸
-                let name = context?.getName(identifier.defId) ?? "<unknown>"
-                if let scopeLevel = variableScopes[name], scopeLevel > 0 {
-                    // 检查这个引用变量的值是否来自局部变量
-                    // 由于我们在预分析阶段，无法完全追踪，采用保守策略
-                    _ = innerType // 使用变量避免警告
-                }
+            // 返回一个引用类型变量时，标记其来源局部变量逃逸
+            _ = identifier
+            markEscapedReferences(in: expr, reason: .escapeToReturn, includeParameters: false)
+
+        case .castExpression(let inner, _):
+            checkReturnEscape(inner)
+
+        case .traitObjectConversion(let inner, _, _, _, _):
+            checkReturnEscape(inner)
+
+        case .typeConstruction(_, _, let arguments, _):
+            for arg in arguments {
+                checkReturnEscape(arg)
+            }
+
+        case .unionConstruction(_, _, let arguments):
+            for arg in arguments {
+                checkReturnEscape(arg)
             }
             
         case .blockExpression(_, let finalExpr, _):
@@ -773,35 +896,8 @@ public class EscapeContext {
     private func checkFieldAssignmentEscape(target: TypedExpressionNode, value: TypedExpressionNode) {
         // 检查目标是否是结构体字段
         guard isStructFieldTarget(target) else { return }
-        
-        // 检查值是否是引用类型
-        guard case .reference(_) = value.type else { return }
-        
-        // 检查值是否是引用表达式或引用类型变量
-        switch value {
-        case .referenceExpression(let inner, _):
-            if let varName = extractVariableName(from: inner) {
-                if let scopeLevel = variableScopes[varName], scopeLevel > 0 {
-                    markEscaped(varName, reason: .escapeToField)
-                }
-            }
-            
-        case .variable(let identifier):
-            // 如果是引用类型的变量，可能需要追踪其来源
-            // 目前采用保守策略
-            if case .reference(_) = identifier.type {
-                // 变量本身是引用类型，检查它是否是局部变量
-                let name = context?.getName(identifier.defId) ?? "<unknown>"
-                if let scopeLevel = variableScopes[name], scopeLevel > 0 {
-                    // 这个引用变量被存储到字段，可能导致逃逸
-                    // 但我们需要追踪这个引用指向的原始变量
-                    // 目前采用保守策略，不标记（因为引用本身可能来自参数）
-                }
-            }
-            
-        default:
-            break
-        }
+
+        markEscapedReferences(in: value, reason: .escapeToField, includeParameters: false)
     }
     
     /// 检查表达式是否是结构体字段目标
@@ -827,30 +923,8 @@ public class EscapeContext {
     /// 当引用被传递给结构体构造函数时，如果结构体可能被返回或存储，
     /// 引用指向的变量可能逃逸。
     private func checkTypeConstructionEscape(arg: TypedExpressionNode, constructedType: Type) {
-        // 只检查引用类型的参数
-        guard case .reference(_) = arg.type else { return }
-        
-        switch arg {
-        case .referenceExpression(let inner, _):
-            // 直接传递引用表达式给构造函数
-            if let varName = extractVariableName(from: inner) {
-                if let scopeLevel = variableScopes[varName], scopeLevel > 0 {
-                    // 引用被传递给结构体构造函数，可能逃逸
-                    // 采用保守策略：标记为逃逸
-                    markEscaped(varName, reason: .escapeToField)
-                }
-            }
-            
-        case .variable(let identifier):
-            // 传递引用类型的变量给构造函数
-            // 这种情况需要追踪引用的来源
-            // 目前采用保守策略
-            _ = identifier
-            _ = constructedType
-            
-        default:
-            break
-        }
+        _ = constructedType
+        markEscapedReferences(in: arg, reason: .escapeToField, includeParameters: false)
     }
 
     /// 检查写入指针目标的值是否导致引用逃逸
@@ -864,35 +938,7 @@ public class EscapeContext {
     /// - `init_memory(ptr, SomeType(ref local_var))` — 引用包在构造函数里
     /// - `deptr ptr = SomeType.Variant(value)` — value 是参数变量（用于 summary）
     private func checkPointerStoreEscape(_ val: TypedExpressionNode) {
-        switch val {
-        case .referenceExpression(let inner, _):
-            if let varName = extractVariableName(from: inner) {
-                if variableScopes[varName] != nil {
-                    // scopeLevel > 0: 局部变量，标记逃逸
-                    // scopeLevel == 0: 参数变量，标记逃逸（用于 summary 构建）
-                    markEscaped(varName, reason: .escapeToParameter)
-                }
-            }
-        case .variable(let identifier):
-            // 参数变量直接传入（不包在 ref 里），用于 summary 构建
-            if case .reference = identifier.type {
-                let varName = context?.getName(identifier.defId) ?? "<unknown>"
-                if let scopeLevel = variableScopes[varName], scopeLevel == 0 {
-                    markEscaped(varName, reason: .escapeToParameter)
-                }
-            }
-        case .typeConstruction(_, _, let arguments, _):
-            // 递归检查构造函数参数，如 SetBucket.Occupied(value)
-            for arg in arguments {
-                checkPointerStoreEscape(arg)
-            }
-        case .unionConstruction(_, _, let arguments):
-            for arg in arguments {
-                checkPointerStoreEscape(arg)
-            }
-        default:
-            break
-        }
+        markEscapedReferences(in: val, reason: .escapeToParameter, includeParameters: true)
     }
 
     /// 标记参数表达式中的 ref local_var 为逃逸
@@ -900,16 +946,7 @@ public class EscapeContext {
     /// 当调用一个函数且该函数的某个参数被标记为逃逸时，
     /// 检查对应的实参是否包含 `ref local_var`，如果是则标记该局部变量为逃逸。
     private func markRefArgumentAsEscaping(_ arg: TypedExpressionNode) {
-        switch arg {
-        case .referenceExpression(let inner, _):
-            if let varName = extractVariableName(from: inner) {
-                if let scopeLevel = variableScopes[varName], scopeLevel > 0 {
-                    markEscaped(varName, reason: .escapeToParameter)
-                }
-            }
-        default:
-            break
-        }
+        markEscapedReferences(in: arg, reason: .escapeToParameter, includeParameters: false)
     }
 }
 

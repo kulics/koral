@@ -133,6 +133,13 @@ let test_chained_direct() Void = {
 // Test 10: Existing struct_with_ref pattern (from existing test)
 type Box(val Int ref)
 
+type NestedRefBox(data Int ref)
+type NestedOuter(inner NestedRefBox)
+type NestedUnion {
+    None(),
+    Some(val NestedOuter),
+}
+
 let getBox() Box = {
     let r Int ref = ref 100  // 100 is rvalue, so heap allocated
     Box(r)
@@ -142,6 +149,21 @@ let test_existing_pattern() Void = {
     let b = getBox()
     let val = deref b.val
     assert(val == 100, "existing pattern value")
+}
+
+// Test 11: ref alias nested in multi-level type + union construction
+let build_nested_union_alias() NestedUnion = {
+    let x Int = 314
+    let r Int ref = ref x
+    NestedUnion.Some(NestedOuter(NestedRefBox(r)))
+}
+
+let test_nested_union_alias_escape() Void = {
+    let v = build_nested_union_alias()
+    when v is {
+        .Some(outer) then assert(deref outer.inner.data == 314, "nested union alias value"),
+        _ then assert(false, "nested union alias should be Some"),
+    }
 }
 
 let main() Void = {
@@ -155,5 +177,6 @@ let main() Void = {
     test_rvalue_ref()
     test_chained_direct()
     test_existing_pattern()
+    test_nested_union_alias_escape()
     print_line("Escape analysis tests passed")
 }
