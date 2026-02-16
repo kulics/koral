@@ -1034,6 +1034,14 @@ public class CodeGen {
       } else {
         buffer += "\(cTypeName(body.type)) \(result) = \(resultVar);\n"
       }
+    } else if case .union(let defId) = body.type {
+      let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
+      addIndent()
+      if body.valueCategory == .lvalue {
+        buffer += "\(cTypeName(body.type)) \(result) = __koral_\(typeName)_copy(&\(resultVar));\n"
+      } else {
+        buffer += "\(cTypeName(body.type)) \(result) = \(resultVar);\n"
+      }
     } else if case .reference(_) = body.type {
       addIndent()
       buffer += "\(cTypeName(body.type)) \(result) = \(resultVar);\n"
@@ -1232,47 +1240,69 @@ public class CodeGen {
     case .letExpression(let identifier, let value, let body, let type):
       let valueVar = generateExpressionSSA(value)
 
-      let resultVar = nextTemp()
-      if type != .void {
+      if type == .void {
         addIndent()
-        buffer += "\(cTypeName(type)) \(resultVar);\n"
+        buffer += "{\n"
+        withIndent {
+          pushScope()
+          if identifier.type != .void {
+            let cType = cTypeName(identifier.type)
+            let cIdent = cIdentifier(for: identifier)
+            addIndent()
+            buffer += "\(cType) \(cIdent) = \(valueVar);\n"
+            registerVariable(cIdent, identifier.type)
+          }
+          _ = generateExpressionSSA(body)
+          popScope()
+        }
+        addIndent()
+        buffer += "}\n"
+        return ""
       }
 
+      let resultVar = nextTemp()
+      addIndent()
+      buffer += "\(cTypeName(type)) \(resultVar);\n"
       addIndent()
       buffer += "{\n"
       withIndent {
-        addIndent()
+        pushScope()
         if identifier.type != .void {
           let cType = cTypeName(identifier.type)
-          buffer += "\(cType) \(cIdentifier(for: identifier)) = \(valueVar);\n"
-          pushScope()
-          registerVariable(cIdentifier(for: identifier), identifier.type)
-        } else {
-          pushScope()
+          let cIdent = cIdentifier(for: identifier)
+          addIndent()
+          buffer += "\(cType) \(cIdent) = \(valueVar);\n"
+          registerVariable(cIdent, identifier.type)
         }
 
         let bodyResultVar = generateExpressionSSA(body)
 
-        if type != .void {
-          if case .structure(let defId) = type {
-            let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-            addIndent()
-            if body.valueCategory == .lvalue {
-              buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(bodyResultVar));\n"
-            } else {
-              buffer += "\(resultVar) = \(bodyResultVar);\n"
-            }
-          } else if case .reference(_) = type {
-            addIndent()
-            buffer += "\(resultVar) = \(bodyResultVar);\n"
-            if body.valueCategory == .lvalue {
-              addIndent()
-              buffer += "__koral_retain(\(resultVar).control);\n"
-            }
+        if case .structure(let defId) = type {
+          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
+          addIndent()
+          if body.valueCategory == .lvalue {
+            buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(bodyResultVar));\n"
           } else {
-            addIndent()
             buffer += "\(resultVar) = \(bodyResultVar);\n"
           }
+        } else if case .union(let defId) = type {
+          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
+          addIndent()
+          if body.valueCategory == .lvalue {
+            buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(bodyResultVar));\n"
+          } else {
+            buffer += "\(resultVar) = \(bodyResultVar);\n"
+          }
+        } else if case .reference(_) = type {
+          addIndent()
+          buffer += "\(resultVar) = \(bodyResultVar);\n"
+          if body.valueCategory == .lvalue {
+            addIndent()
+            buffer += "__koral_retain(\(resultVar).control);\n"
+          }
+        } else {
+          addIndent()
+          buffer += "\(resultVar) = \(bodyResultVar);\n"
         }
 
         popScope()
@@ -1280,7 +1310,7 @@ public class CodeGen {
       addIndent()
       buffer += "}\n"
 
-      return type == .void ? "" : resultVar
+      return resultVar
 
     case .ifExpression(let condition, let thenBranch, let elseBranch, let type):
       let conditionVar = generateExpressionSSA(condition)
@@ -1905,6 +1935,16 @@ public class CodeGen {
             buffer += "\(cTypeName(arg.type)) \(argCopy) = \(argResult);\n"
           }
           finalArg = argCopy
+        } else if case .union(let defId) = arg.type {
+          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
+          addIndent()
+          let argCopy = nextTemp()
+          if arg.valueCategory == .lvalue {
+            buffer += "\(cTypeName(arg.type)) \(argCopy) = __koral_\(typeName)_copy(&\(argResult));\n"
+          } else {
+            buffer += "\(cTypeName(arg.type)) \(argCopy) = \(argResult);\n"
+          }
+          finalArg = argCopy
         } else if case .reference(_) = arg.type {
           addIndent()
           buffer += "__koral_retain(\(argResult).control);\n"
@@ -2141,6 +2181,10 @@ public class CodeGen {
         let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
         addIndent()
         buffer += "__koral_\(typeName)_drop(\(p));\n"
+      } else if case .union(let defId) = element {
+        let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
+        addIndent()
+        buffer += "__koral_\(typeName)_drop(\(p));\n"
       }
       // int/float/bool/void -> noop
       return ""
@@ -2258,6 +2302,14 @@ public class CodeGen {
 
         if case .structure(let defId) = target.type {
           let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
+          addIndent()
+          if value.valueCategory == .lvalue {
+            buffer += "\(lhsPath) = __koral_\(typeName)_copy(&\(valueResult));\n"
+          } else {
+             buffer += "\(lhsPath) = \(valueResult);\n"
+          }
+        } else if case .union(let defId) = target.type {
+          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
           addIndent()
           if value.valueCategory == .lvalue {
             buffer += "\(lhsPath) = __koral_\(typeName)_copy(&\(valueResult));\n"
