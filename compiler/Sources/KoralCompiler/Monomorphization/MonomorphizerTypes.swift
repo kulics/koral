@@ -5,6 +5,34 @@
 
 import Foundation
 
+// MARK: - VtableRequest
+
+/// Represents a request to generate a vtable for a specific (concrete type, trait) combination.
+/// Used by the Monomorphizer to collect all vtable generation needs during instantiation,
+/// which are then passed to CodeGen for vtable struct, wrapper function, and vtable instance generation.
+public struct VtableRequest: Hashable {
+    /// The concrete type that implements the trait (e.g., .structure(defId))
+    public let concreteType: Type
+    /// The trait name (e.g., "Error")
+    public let traitName: String
+    /// The trait's type arguments (e.g., [] for non-generic traits)
+    public let traitTypeArgs: [Type]
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(concreteType.stableKey)
+        hasher.combine(traitName)
+        for arg in traitTypeArgs {
+            hasher.combine(arg.stableKey)
+        }
+    }
+
+    public static func == (lhs: VtableRequest, rhs: VtableRequest) -> Bool {
+        return lhs.concreteType == rhs.concreteType
+            && lhs.traitName == rhs.traitName
+            && lhs.traitTypeArgs == rhs.traitTypeArgs
+    }
+}
+
 // MARK: - Type Instantiation Extension
 
 extension Monomorphizer {

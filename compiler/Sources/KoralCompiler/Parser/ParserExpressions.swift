@@ -284,7 +284,7 @@ extension Parser {
       return cast
     }
     if currentToken === .minus {
-      let startSpan = currentSpan
+      let _ = currentSpan
       try match(.minus)
       switch currentToken {
       case .integer(let num):

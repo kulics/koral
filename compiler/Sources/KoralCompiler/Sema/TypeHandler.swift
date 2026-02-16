@@ -169,6 +169,8 @@ extension TypeHandlerKind {
             return .typeVariable
         case .opaque:
             return .opaque
+        case .traitObject:
+            return .reference  // trait object 在 C 层面是 struct Ref，与 reference 相同
         }
     }
 }
@@ -880,6 +882,9 @@ public class ReferenceHandler: TypeHandler {
     }
     
     public func generateCTypeName(_ type: Type) -> String {
+        if case .reference(let inner) = type, case .traitObject = inner {
+            return "struct TraitRef"
+        }
         return "struct Ref"
     }
     
@@ -1032,6 +1037,9 @@ public class WeakReferenceHandler: TypeHandler {
     }
     
     public func generateCTypeName(_ type: Type) -> String {
+        if case .weakReference(let inner) = type, case .traitObject = inner {
+            return "struct TraitWeakRef"
+        }
         return "struct WeakRef"
     }
     
@@ -1262,6 +1270,8 @@ public final class TypeHandlerRegistry: @unchecked Sendable {
             fatalError("Module type should not appear in CodeGen")
         case .typeVariable(let tv):
             fatalError("Type variable \(tv) should be resolved before CodeGen")
+        case .traitObject:
+            fatalError("traitObject should always be wrapped in reference")
         default:
             return generateCTypeName(type)
         }

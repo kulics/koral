@@ -5,7 +5,7 @@ using super.types
 
 public type Parser(
     tokens [types.Token]List,
-    mut pos Int,
+    mut pos UInt,
 )
 
 given Parser {
@@ -38,7 +38,7 @@ given Parser {
     private check_comma(self) Bool = when self.peek() is { .Comma then true, _ then false }
     private check_eof(self) Bool = when self.peek() is { .EOF then true, _ then false }
 
-    private expect_right_paren(self ref) [Void, String]Result = {
+    private expect_right_paren(self ref) [Void]Result = {
         if self.check_right_paren() then {
             self.advance()
             Result.Ok({})
@@ -46,29 +46,29 @@ given Parser {
             let msg = String.zero()
             msg.push_string("Parse error: expected ')', found ")
             msg.push_string(self.peek().to_string())
-            Result.Error(msg)
+            Result.Error(ref msg)
         }
     }
 
-    public parse(self ref) [Expr ref, String]Result = {
+    public parse(self ref) [Expr ref]Result = {
         when self.parse_expression() is {
             .Ok(expr) then {
                 if not self.check_eof() then {
                     let msg = String.zero()
                     msg.push_string("Parse error: unexpected token ")
                     msg.push_string(self.peek().to_string())
-                    Result.Error(msg)
+                    Result.Error(ref msg)
                 } else {
                     Result.Ok(expr)
                 }
             },
-            .Error(msg) then Result.Error(msg),
+            .Error(e) then Result.Error(e),
         }
     }
 
-    private parse_expression(self ref) [Expr ref, String]Result = self.parse_assignment()
+    private parse_expression(self ref) [Expr ref]Result = self.parse_assignment()
 
-    private parse_assignment(self ref) [Expr ref, String]Result = {
+    private parse_assignment(self ref) [Expr ref]Result = {
         when self.peek() is {
             .Identifier(name) then {
                 when self.peek_next() is {
@@ -77,7 +77,7 @@ given Parser {
                         self.advance()
                         when self.parse_assignment() is {
                             .Ok(value) then Result.Ok(ref Expr.Assignment(name, value)),
-                            .Error(msg) then Result.Error(msg),
+                            .Error(e) then Result.Error(e),
                         }
                     },
                     _ then self.parse_additive(),
@@ -87,7 +87,7 @@ given Parser {
         }
     }
 
-    private parse_additive(self ref) [Expr ref, String]Result = {
+    private parse_additive(self ref) [Expr ref]Result = {
         when self.parse_multiplicative() is {
             .Ok(mut left) then {
                 while self.check_plus() or self.check_minus() then {
@@ -95,16 +95,16 @@ given Parser {
                     self.advance()
                     when self.parse_multiplicative() is {
                         .Ok(right) then { left = ref Expr.BinaryOp(op, left, right) },
-                        .Error(msg) then { return Result.Error(msg) },
+                        .Error(e) then { return Result.Error(e) },
                     }
                 }
                 Result.Ok(left)
             },
-            .Error(msg) then Result.Error(msg),
+            .Error(e) then Result.Error(e),
         }
     }
 
-    private parse_multiplicative(self ref) [Expr ref, String]Result = {
+    private parse_multiplicative(self ref) [Expr ref]Result = {
         when self.parse_power() is {
             .Ok(mut left) then {
                 while self.check_star() or self.check_slash() or self.check_percent() then {
@@ -114,45 +114,45 @@ given Parser {
                     self.advance()
                     when self.parse_power() is {
                         .Ok(right) then { left = ref Expr.BinaryOp(op, left, right) },
-                        .Error(msg) then { return Result.Error(msg) },
+                        .Error(e) then { return Result.Error(e) },
                     }
                 }
                 Result.Ok(left)
             },
-            .Error(msg) then Result.Error(msg),
+            .Error(e) then Result.Error(e),
         }
     }
 
-    private parse_power(self ref) [Expr ref, String]Result = {
+    private parse_power(self ref) [Expr ref]Result = {
         when self.parse_unary() is {
             .Ok(left) then {
                 if self.check_power() then {
                     self.advance()
                     when self.parse_power() is {
                         .Ok(right) then Result.Ok(ref Expr.BinaryOp(BinaryOperator.Pow(), left, right)),
-                        .Error(msg) then Result.Error(msg),
+                        .Error(e) then Result.Error(e),
                     }
                 } else {
                     Result.Ok(left)
                 }
             },
-            .Error(msg) then Result.Error(msg),
+            .Error(e) then Result.Error(e),
         }
     }
 
-    private parse_unary(self ref) [Expr ref, String]Result = {
+    private parse_unary(self ref) [Expr ref]Result = {
         if self.check_minus() then {
             self.advance()
             when self.parse_unary() is {
                 .Ok(operand) then Result.Ok(ref Expr.UnaryOp(UnaryOperator.Neg(), operand)),
-                .Error(msg) then Result.Error(msg),
+                .Error(e) then Result.Error(e),
             }
         } else {
             self.parse_call()
         }
     }
 
-    private parse_call(self ref) [Expr ref, String]Result = {
+    private parse_call(self ref) [Expr ref]Result = {
         when self.parse_primary() is {
             .Ok(primary) then {
                 when primary is {
@@ -163,10 +163,10 @@ given Parser {
                                 .Ok(args) then {
                                     when self.expect_right_paren() is {
                                         .Ok(_) then Result.Ok(ref Expr.FunctionCall(name, args)),
-                                        .Error(msg) then Result.Error(msg),
+                                        .Error(e) then Result.Error(e),
                                     }
                                 },
-                                .Error(msg) then Result.Error(msg),
+                                .Error(e) then Result.Error(e),
                             }
                         } else {
                             Result.Ok(primary)
@@ -175,11 +175,11 @@ given Parser {
                     _ then Result.Ok(primary),
                 }
             },
-            .Error(msg) then Result.Error(msg),
+            .Error(e) then Result.Error(e),
         }
     }
 
-    private parse_arguments(self ref) [[Expr ref]List, String]Result = {
+    private parse_arguments(self ref) [[Expr ref]List]Result = {
         let args = [Expr ref]List.new()
         
         if self.check_right_paren() then {
@@ -193,16 +193,16 @@ given Parser {
                     self.advance()
                     when self.parse_expression() is {
                         .Ok(arg) then args.push(arg),
-                        .Error(msg) then { return Result.Error(msg) },
+                        .Error(e) then { return Result.Error(e) },
                     }
                 }
                 Result.Ok(args)
             },
-            .Error(msg) then Result.Error(msg),
+            .Error(e) then Result.Error(e),
         }
     }
 
-    private parse_primary(self ref) [Expr ref, String]Result = {
+    private parse_primary(self ref) [Expr ref]Result = {
         when self.peek() is {
             .IntLiteral(v) then {
                 self.advance()
@@ -222,17 +222,17 @@ given Parser {
                     .Ok(expr) then {
                         when self.expect_right_paren() is {
                             .Ok(_) then Result.Ok(expr),
-                            .Error(msg) then Result.Error(msg),
+                            .Error(e) then Result.Error(e),
                         }
                     },
-                    .Error(msg) then Result.Error(msg),
+                    .Error(e) then Result.Error(e),
                 }
             },
             _ then {
                 let msg = String.zero()
                 msg.push_string("Parse error: unexpected token ")
                 msg.push_string(self.peek().to_string())
-                Result.Error(msg)
+                Result.Error(ref msg)
             },
         }
     }

@@ -431,6 +431,15 @@ public class EscapeContext {
         case .traitMethodPlaceholder(_, _, let base, _, _):
             preAnalyzeExpression(base)
             
+        case .traitObjectConversion(let inner, _, _, _, _):
+            preAnalyzeExpression(inner)
+
+        case .traitMethodCall(let receiver, _, _, _, let arguments, _):
+            preAnalyzeExpression(receiver)
+            for arg in arguments {
+                preAnalyzeExpression(arg)
+            }
+            
         case .staticMethodCall(_, _, _, let arguments, _):
             for arg in arguments {
                 preAnalyzeExpression(arg)

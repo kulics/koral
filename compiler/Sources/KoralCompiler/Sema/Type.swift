@@ -154,6 +154,7 @@ public indirect enum Type: CustomStringConvertible {
   case opaque(defId: DefId)
   case module(info: ModuleSymbolInfo)
   case typeVariable(TypeVariable)
+  case traitObject(traitName: String, typeArgs: [Type])
   
   // MARK: - Context-Aware Accessors
 
@@ -305,6 +306,12 @@ public indirect enum Type: CustomStringConvertible {
       return "module(\(info.modulePath.joined(separator: ".")))"
     case .typeVariable(let tv):
       return tv.description
+    case .traitObject(let traitName, let typeArgs):
+      if typeArgs.isEmpty {
+        return traitName
+      }
+      let argsStr = typeArgs.map { $0.description }.joined(separator: ", ")
+      return "[\(argsStr)]\(traitName)"
     }
   }
 
@@ -373,6 +380,12 @@ public indirect enum Type: CustomStringConvertible {
       return "M(\(info.modulePath.joined(separator: ".")))"
     case .typeVariable(let tv):
       return "TV#\(tv.id)"
+    case .traitObject(let traitName, let typeArgs):
+      if typeArgs.isEmpty {
+        return "TO(\(traitName))"
+      }
+      let argsKey = typeArgs.map { $0.stableKey }.joined(separator: ",")
+      return "TO(\(traitName))[\(argsKey)]"
     }
   }
   
@@ -416,6 +429,8 @@ public indirect enum Type: CustomStringConvertible {
       return self
     case .typeVariable:
       return self  // 类型变量保持不变
+    case .traitObject:
+      return self
     }
   }
 }
@@ -495,6 +510,8 @@ extension Type: Equatable {
     
     case (.typeVariable(let lTV), .typeVariable(let rTV)):
       return lTV == rTV
+    case (.traitObject(let lName, let lArgs), .traitObject(let rName, let rArgs)):
+      return lName == rName && lArgs == rArgs
 
     default:
       return false

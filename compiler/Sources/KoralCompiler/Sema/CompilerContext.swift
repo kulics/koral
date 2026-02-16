@@ -295,6 +295,10 @@ public final class CompilerContext: @unchecked Sendable {
             return "module \(info.modulePath.joined(separator: "."))"
         case .typeVariable(let tv):
             return "?\(tv.id)"
+        case .traitObject(let traitName, let typeArgs):
+            if typeArgs.isEmpty { return traitName }
+            let argsStr = typeArgs.map { getDebugName($0) }.joined(separator: ", ")
+            return "[\(argsStr)]\(traitName)"
         }
     }
 
@@ -345,6 +349,8 @@ public final class CompilerContext: @unchecked Sendable {
             return []
         case .opaque:
             return []
+        case .traitObject(_, let typeArgs):
+            return typeArgs.flatMap { freeTypeVariables(in: $0) }
         }
     }
 
@@ -391,6 +397,10 @@ public final class CompilerContext: @unchecked Sendable {
             return "M_\(info.modulePath.joined(separator: "_"))"
         case .typeVariable(let tv):
             return "TV_\(tv.id)"
+        case .traitObject(let traitName, let typeArgs):
+            if typeArgs.isEmpty { return "TO_\(traitName)" }
+            let argsKeys = typeArgs.map { getLayoutKey($0) }.joined(separator: "_")
+            return "TO_\(traitName)_\(argsKeys)"
         }
     }
 
@@ -470,6 +480,8 @@ public final class CompilerContext: @unchecked Sendable {
             return false
         case .typeVariable:
             return true
+        case .traitObject(_, let typeArgs):
+            return typeArgs.contains { containsGenericParameterInternal($0, visited: &visited) }
         }
     }
 }

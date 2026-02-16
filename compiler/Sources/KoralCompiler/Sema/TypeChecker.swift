@@ -25,6 +25,9 @@ public class TypeChecker {
   var extensionMethods: [String: [String: Symbol]] = [:]
 
   var traits: [String: TraitDeclInfo] = [:]
+  
+  // Cache for object safety check results to avoid redundant computation
+  var objectSafetyCache: [String: (Bool, [String])] = [:]
 
   // Generic parameter name -> list of trait constraints currently in scope
   // Stores full TraitConstraint to preserve type arguments for generic traits
@@ -316,6 +319,8 @@ public class TypeChecker {
     case .structure, .union, .reference, .function, .genericParameter:
       return false
     case .genericStruct, .genericUnion, .module, .typeVariable:
+      return false
+    case .traitObject:
       return false
     }
   }

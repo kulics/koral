@@ -27,6 +27,27 @@ extension TypeChecker {
       }
       return t
     case .reference(let inner):
+      // Check if inner is a trait name → trait object reference
+      if case .identifier(let name) = inner, traits[name] != nil {
+        let (safe, reasons) = try checkObjectSafety(name)
+        if !safe {
+          throw SemanticError(.generic(
+            "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
+          ), span: currentSpan)
+        }
+        return .reference(inner: .traitObject(traitName: name, typeArgs: []))
+      }
+      // Check if inner is a generic trait → [Args]TraitName ref
+      if case .generic(let base, let args) = inner, traits[base] != nil {
+        let (safe, reasons) = try checkObjectSafety(base)
+        if !safe {
+          throw SemanticError(.generic(
+            "Trait '\(base)' is not object-safe: \(reasons.joined(separator: "; "))"
+          ), span: currentSpan)
+        }
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        return .reference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
+      }
       let base = try resolveTypeNode(inner)
       return .reference(inner: base)
     case .pointer(let inner):
@@ -200,6 +221,26 @@ extension TypeChecker {
       }
       
     case .weakReference(let inner):
+      // Check if inner is a trait name → trait object weakref
+      if case .identifier(let name) = inner, traits[name] != nil {
+        let (safe, reasons) = try checkObjectSafety(name)
+        if !safe {
+          throw SemanticError(.generic(
+            "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
+          ), span: currentSpan)
+        }
+        return .weakReference(inner: .traitObject(traitName: name, typeArgs: []))
+      }
+      if case .generic(let base, let args) = inner, traits[base] != nil {
+        let (safe, reasons) = try checkObjectSafety(base)
+        if !safe {
+          throw SemanticError(.generic(
+            "Trait '\(base)' is not object-safe: \(reasons.joined(separator: "; "))"
+          ), span: currentSpan)
+        }
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        return .weakReference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
+      }
       let base = try resolveTypeNode(inner)
       return .weakReference(inner: base)
     }
@@ -217,6 +258,26 @@ extension TypeChecker {
       return try resolveTypeNode(node)
       
     case .reference(let inner):
+      // Check if inner is a trait name → trait object reference
+      if case .identifier(let name) = inner, traits[name] != nil {
+        let (safe, reasons) = try checkObjectSafety(name)
+        if !safe {
+          throw SemanticError(.generic(
+            "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
+          ), span: currentSpan)
+        }
+        return .reference(inner: .traitObject(traitName: name, typeArgs: []))
+      }
+      if case .generic(let base, let args) = inner, traits[base] != nil {
+        let (safe, reasons) = try checkObjectSafety(base)
+        if !safe {
+          throw SemanticError(.generic(
+            "Trait '\(base)' is not object-safe: \(reasons.joined(separator: "; "))"
+          ), span: currentSpan)
+        }
+        let resolvedArgs = try args.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
+        return .reference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
+      }
       let base = try resolveTypeNodeWithSubstitution(inner, substitution: substitution)
       return .reference(inner: base)
 
@@ -273,6 +334,25 @@ extension TypeChecker {
       return try resolveTypeNode(node)
       
     case .weakReference(let inner):
+      if case .identifier(let name) = inner, traits[name] != nil {
+        let (safe, reasons) = try checkObjectSafety(name)
+        if !safe {
+          throw SemanticError(.generic(
+            "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
+          ), span: currentSpan)
+        }
+        return .weakReference(inner: .traitObject(traitName: name, typeArgs: []))
+      }
+      if case .generic(let base, let args) = inner, traits[base] != nil {
+        let (safe, reasons) = try checkObjectSafety(base)
+        if !safe {
+          throw SemanticError(.generic(
+            "Trait '\(base)' is not object-safe: \(reasons.joined(separator: "; "))"
+          ), span: currentSpan)
+        }
+        let resolvedArgs = try args.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
+        return .weakReference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
+      }
       let base = try resolveTypeNodeWithSubstitution(inner, substitution: substitution)
       return .weakReference(inner: base)
     }
@@ -354,6 +434,34 @@ extension TypeChecker {
   ) throws {
     if traitName == "Any" {
       return
+    }
+
+    if traitName == "Deref" {
+      // trait object does not satisfy Deref
+      if case .traitObject = selfType {
+        throw SemanticError(.generic(
+          "Trait object type '\(selfType)' does not satisfy 'Deref' constraint"
+        ), line: currentLine)
+      }
+      // opaque type does not satisfy Deref
+      if case .opaque = selfType {
+        throw SemanticError(.generic(
+          "Opaque type '\(selfType)' does not satisfy 'Deref' constraint"
+        ), line: currentLine)
+      }
+      return  // All other types automatically satisfy Deref
+    }
+
+    // trait object self-conformance: traitObject("X") satisfies X bound
+    if case .traitObject(let toTraitName, _) = selfType {
+      if toTraitName == traitName {
+        // traitObject("ToString") satisfies ToString bound
+        return
+      }
+      // Different traits don't satisfy each other (no upcasting in initial version)
+      throw SemanticError(.generic(
+        "Trait object type '\(selfType)' does not satisfy '\(traitName)' constraint"
+      ), line: currentLine)
     }
 
     try validateTraitName(traitName)
@@ -754,6 +862,69 @@ extension TypeChecker {
       }
     }
     
+    // Try trait object conversion if types still don't match
+    if expr.type != expected {
+      return try tryTraitObjectConversion(expr, to: expected)
+    }
+    
     return expr
+  }
+
+  /// Attempts to wrap an expression in a traitObjectConversion if the target type is a trait object reference
+  /// and the source type is a compatible concrete type.
+  /// Returns the original expression unchanged if no conversion is needed.
+  func tryTraitObjectConversion(_ expr: TypedExpressionNode, to expected: Type) throws -> TypedExpressionNode {
+    // Extract trait object info from expected type
+    let traitName: String
+    let traitTypeArgs: [Type]
+    switch expected {
+    case .reference(let inner):
+      if case .traitObject(let name, let args) = inner {
+        traitName = name
+        traitTypeArgs = args
+      } else {
+        return expr
+      }
+    case .weakReference(let inner):
+      if case .traitObject(let name, let args) = inner {
+        traitName = name
+        traitTypeArgs = args
+      } else {
+        return expr
+      }
+    default:
+      return expr
+    }
+
+    // Already a matching trait object — no conversion needed
+    if expr.type == expected {
+      return expr
+    }
+
+    // Get the concrete type from the source — only T ref can convert to trait object
+    let concreteType: Type
+    switch expr.type {
+    case .reference(let inner):
+      if case .traitObject = inner { return expr } // trait object → trait object: not supported
+      concreteType = inner
+    default:
+      // Value types cannot be directly converted to trait object — must use T ref
+      return expr
+    }
+
+    // Check trait conformance (with type args if generic trait)
+    if traitTypeArgs.isEmpty {
+      try enforceTraitConformance(concreteType, traitName: traitName)
+    } else {
+      try enforceGenericTraitConformance(concreteType, traitName: traitName, traitTypeArgs: traitTypeArgs, context: nil)
+    }
+
+    return .traitObjectConversion(
+      inner: expr,
+      traitName: traitName,
+      traitTypeArgs: traitTypeArgs,
+      concreteType: concreteType,
+      type: expected
+    )
   }
 }

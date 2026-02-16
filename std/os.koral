@@ -87,11 +87,11 @@ given CommandResult {
 // ============================================================================
 
 /// Read file content as string
-public let read_file(path String) [String, String]Result = {
+public let read_file(path String) [String]Result = {
     let normalized = normalize_path(path)
     let file = fopen(normalized.storage.data, "rb".storage.data)
     if file == [CFile]null_ptr() then {
-        return [String, String]Result.Error(get_last_error())
+        return [String]Result.Error(ref get_last_error())
     }
 
     fseek(file, 0, 2)  // SEEK_END
@@ -106,49 +106,49 @@ public let read_file(path String) [String, String]Result = {
 
     let content = String.from_bytes_unchecked(buf, read_count)
     dealloc_memory(buf)
-    [String, String]Result.Ok(content)
+    [String]Result.Ok(content)
 }
 
 /// Write string to file (overwrite)
-public let write_file(path String, content String) [Void, String]Result = {
+public let write_file(path String, content String) [Void]Result = {
     let normalized = normalize_path(path)
     let file = fopen(normalized.storage.data, "wb".storage.data)
     if file == [CFile]null_ptr() then {
-        return [Void, String]Result.Error(get_last_error())
+        return [Void]Result.Error(ref get_last_error())
     }
 
     fwrite(content.storage.data, 1, content.count(), file)
     fclose(file)
-    [Void, String]Result.Ok({})
+    [Void]Result.Ok({})
 }
 
 /// Append string to file
-public let append_file(path String, content String) [Void, String]Result = {
+public let append_file(path String, content String) [Void]Result = {
     let normalized = normalize_path(path)
     let file = fopen(normalized.storage.data, "ab".storage.data)
     if file == [CFile]null_ptr() then {
-        return [Void, String]Result.Error(get_last_error())
+        return [Void]Result.Error(ref get_last_error())
     }
 
     fwrite(content.storage.data, 1, content.count(), file)
     fclose(file)
-    [Void, String]Result.Ok({})
+    [Void]Result.Ok({})
 }
 
 /// Copy file
-public let copy_file(src String, dst String) [Void, String]Result = {
+public let copy_file(src String, dst String) [Void]Result = {
     when read_file(src) is {
         .Ok(content) then write_file(dst, content),
-        .Error(e) then [Void, String]Result.Error(e),
+        .Error(e) then [Void]Result.Error(e),
     }
 }
 
 /// Remove file
-public let remove_file(path String) [Void, String]Result = {
+public let remove_file(path String) [Void]Result = {
     if koral_remove(path.storage.data) == 0 then {
-        [Void, String]Result.Ok({})
+        [Void]Result.Ok({})
     } else {
-        [Void, String]Result.Error(get_last_error())
+        [Void]Result.Error(ref get_last_error())
     }
 }
 
@@ -157,16 +157,16 @@ public let remove_file(path String) [Void, String]Result = {
 // ============================================================================
 
 /// Create single directory (parent must exist)
-public let create_dir(path String) [Void, String]Result = {
+public let create_dir(path String) [Void]Result = {
     if koral_mkdir(path.storage.data, 493) == 0 then {  // 0755
-        [Void, String]Result.Ok({})
+        [Void]Result.Ok({})
     } else {
-        [Void, String]Result.Error(get_last_error())
+        [Void]Result.Error(ref get_last_error())
     }
 }
 
 /// Create directory recursively
-public let create_dir_all(path String) [Void, String]Result = {
+public let create_dir_all(path String) [Void]Result = {
     let normalized = path.replace_all("\\", "/")
     let parts = normalized.split("/")
     let mut current = String.new()
@@ -200,51 +200,51 @@ public let create_dir_all(path String) [Void, String]Result = {
 
         if not path_exists(current) then {
             if koral_mkdir(current.storage.data, 493) <> 0 then {
-                return [Void, String]Result.Error(get_last_error())
+                return [Void]Result.Error(ref get_last_error())
             }
         }
     }
-    [Void, String]Result.Ok({})
+    [Void]Result.Ok({})
 }
 
 /// Remove empty directory
-public let remove_dir(path String) [Void, String]Result = {
+public let remove_dir(path String) [Void]Result = {
     if koral_rmdir(path.storage.data) == 0 then {
-        [Void, String]Result.Ok({})
+        [Void]Result.Ok({})
     } else {
-        [Void, String]Result.Error(get_last_error())
+        [Void]Result.Error(ref get_last_error())
     }
 }
 
 /// Remove directory recursively
-public let remove_dir_all(path String) [Void, String]Result = {
+public let remove_dir_all(path String) [Void]Result = {
     when read_dir(path) is {
         .Ok(entries) then {
             for entry = entries then {
                 let full_path = join_path(path, entry)
                 if is_dir(full_path) then {
                     when remove_dir_all(full_path) is {
-                        .Error(e) then { return [Void, String]Result.Error(e) },
+                        .Error(e) then { return [Void]Result.Error(e) },
                         .Ok(_) then {},
                     }
                 } else {
                     when remove_file(full_path) is {
-                        .Error(e) then { return [Void, String]Result.Error(e) },
+                        .Error(e) then { return [Void]Result.Error(e) },
                         .Ok(_) then {},
                     }
                 }
             }
             remove_dir(path)
         },
-        .Error(e) then [Void, String]Result.Error(e),
+        .Error(e) then [Void]Result.Error(e),
     }
 }
 
 /// Read directory entries
-public let read_dir(path String) [[String]List, String]Result = {
+public let read_dir(path String) [[String]List]Result = {
     let dir = koral_opendir(path.storage.data)
     if dir == [CDirHandle]null_ptr() then {
-        return [[String]List, String]Result.Error(get_last_error())
+        return [[String]List]Result.Error(ref get_last_error())
     }
 
     let mut entries = [String]List.new()
@@ -259,21 +259,21 @@ public let read_dir(path String) [[String]List, String]Result = {
     }
 
     koral_closedir(dir)
-    [[String]List, String]Result.Ok(entries)
+    [[String]List]Result.Ok(entries)
 }
 
 /// Get current working directory
-public let current_dir() [String, String]Result = {
+public let current_dir() [String]Result = {
     let buf = [UInt8]alloc_memory(4096)
     let result = koral_getcwd(buf, 4096)
     if result == [UInt8]null_ptr() then {
         dealloc_memory(buf)
-        return [String, String]Result.Error(get_last_error())
+        return [String]Result.Error(ref get_last_error())
     }
 
     let path = String.from_cstring(buf)
     dealloc_memory(buf)
-    [String, String]Result.Ok(path)
+    [String]Result.Ok(path)
 }
 
 // ============================================================================
@@ -290,11 +290,11 @@ public let is_file(path String) Bool = koral_is_file(path.storage.data) <> 0
 public let is_dir(path String) Bool = koral_is_dir(path.storage.data) <> 0
 
 /// Move or rename path
-public let move_path(src String, dst String) [Void, String]Result = {
+public let move_path(src String, dst String) [Void]Result = {
     if koral_rename(src.storage.data, dst.storage.data) == 0 then {
-        [Void, String]Result.Ok({})
+        [Void]Result.Ok({})
     } else {
-        [Void, String]Result.Error(get_last_error())
+        [Void]Result.Error(ref get_last_error())
     }
 }
 
@@ -402,14 +402,14 @@ public let normalize_path(path String) String = {
 }
 
 /// Convert to absolute path
-public let absolute_path(path String) [String, String]Result = {
+public let absolute_path(path String) [String]Result = {
     if is_absolute(path) then {
-        return [String, String]Result.Ok(path)
+        return [String]Result.Ok(path)
     }
 
     when current_dir() is {
-        .Ok(cwd) then [String, String]Result.Ok(join_path(cwd, path)),
-        .Error(e) then [String, String]Result.Error(e),
+        .Ok(cwd) then [String]Result.Ok(join_path(cwd, path)),
+        .Error(e) then [String]Result.Error(e),
     }
 }
 
@@ -418,7 +418,7 @@ public let absolute_path(path String) [String, String]Result = {
 // ============================================================================
 
 /// Run external command
-public let run_command(program String, args [String]List) [CommandResult, String]Result = {
+public let run_command(program String, args [String]List) [CommandResult]Result = {
     let mut cmd = String.new()
     cmd.push_string(program)
     for arg = args then {
@@ -453,7 +453,7 @@ public let run_command(program String, args [String]List) [CommandResult, String
     koral_remove(stdout_file.storage.data)
     koral_remove(stderr_file.storage.data)
 
-    [CommandResult, String]Result.Ok(CommandResult((Int)code, stdout_content, stderr_content))
+    [CommandResult]Result.Ok(CommandResult((Int)code, stdout_content, stderr_content))
 }
 
 /// Get command line arguments

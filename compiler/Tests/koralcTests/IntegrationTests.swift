@@ -204,6 +204,12 @@ class IntegrationTests: XCTestCase {
     func test_checked_div_zero() throws { try runCase(named: "checked_div_zero.koral") }
     func test_checked_div_min() throws { try runCase(named: "checked_div_min.koral") }
     func test_checked_shift_invalid() throws { try runCase(named: "checked_shift_invalid.koral") }
+    func test_trait_object_basic() throws { try runCase(named: "trait_object_basic.koral") }
+    func test_trait_object_error() throws { try runCase(named: "trait_object_error.koral") }
+    func test_trait_object_safety_error() throws { try runCase(named: "trait_object_safety_error.koral") }
+    func test_trait_object_deref_error() throws { try runCase(named: "trait_object_deref_error.koral") }
+    func test_trait_object_self_conformance() throws { try runCase(named: "trait_object_self_conformance.koral") }
+    func test_trait_object_weakref() throws { try runCase(named: "trait_object_weakref.koral") }
     
     func runTestCase(file: URL, projectRoot: URL) throws {
         // 1. Parse expectations

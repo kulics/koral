@@ -1073,6 +1073,8 @@ Koral 标准库定义了以下核心 Trait：
 | `Rem` | 取余（继承 Div） | `rem(self, other Self) Self` |
 | `[K, V]Index` | 下标读取 | `at(self, key K) V` |
 | `[K, V]MutIndex` | 下标写入（继承 Index） | `set_at(self ref, key K, value V) Void` |
+| `Error` | 错误接口 | `message(self) String` |
+| `Deref` | 解引用控制（内置） | *（阻止对 trait object 解引用）* |
 
 算术操作符会自动降级为对应的 Trait 方法调用：
 - `+` → `Add.add`
@@ -1082,6 +1084,91 @@ Koral 标准库定义了以下核心 Trait：
 - `%` → `Rem.rem`
 - `a[k]` → `Index.at`
 - `a[k] = v` → `MutIndex.set_at`
+
+### Trait Object
+
+Trait Object 是 Koral 中实现运行时多态（动态派发）的机制。通过 `TraitName ref` 语法，可以将实现了某个 Trait 的任意类型擦除为统一的引用类型。
+
+#### 基本语法
+
+使用 `ref` 关键字将具体类型转换为 trait object：
+
+```koral
+trait Drawable {
+    draw(self) String
+}
+
+type Circle(radius Int)
+type Square(side Int)
+
+given Circle { public draw(self) String = "Drawing circle" }
+given Square { public draw(self) String = "Drawing square" }
+
+// 创建 trait object
+let shape Drawable ref = ref Circle(10)
+
+// 通过 trait object 调用方法（动态派发）
+shape.draw()  // "Drawing circle"
+```
+
+#### 对象安全性
+
+只有满足以下条件的 Trait 才能用作 trait object：
+
+- 方法不能有泛型参数
+- 方法的参数和返回值中不能出现 `Self` 类型（接收者 `self` 除外）
+
+```koral
+// 对象安全 — 可以用作 trait object
+trait Error {
+    message(self) String
+}
+
+// 不是对象安全 — 不能用作 trait object
+trait Eq {
+    equals(self, other Self) Bool  // Self 出现在参数中
+}
+```
+
+#### Error Trait 与 Result
+
+标准库定义了 `Error` trait，任何实现了 `message(self) String` 方法的类型都可以作为错误类型使用：
+
+```koral
+trait Error {
+    message(self) String
+}
+
+// String 默认实现了 Error trait
+given String {
+    public message(self) String = self
+}
+```
+
+`Result` 类型使用 `Error ref`（trait object）作为错误端，只需要一个泛型参数：
+
+```koral
+type [T Any] Result {
+    Ok(value T),
+    Error(error Error ref),
+}
+
+// 使用字符串作为错误
+let result = [Int]Result.Error(ref "something went wrong")
+
+// 读取错误信息
+when result is {
+    .Ok(v) then print_line(v.to_string()),
+    .Error(e) then print_line(e.message()),
+}
+
+// 便捷方法
+result.error_message()  // "something went wrong"
+```
+
+#### Deref Trait
+
+`Deref` 是内置 trait，用于控制解引用行为。Trait object（`TraitName ref`）不实现 `Deref`，因此不能被解引用，这保证了 trait object 始终通过引用使用。
 
 ## 泛型
 
@@ -1265,23 +1352,23 @@ let mapped = opt and then _ * 2
 
 ### Result
 
-`[T, E]Result` 是结果类型，表示操作可能成功也可能失败。
+`[T]Result` 是结果类型，表示操作可能成功也可能失败。错误端固定为 `Error ref`（trait object）。
 
 ```koral
-type [T Any, E Any] Result {
+type [T Any] Result {
     Ok(value T),
-    Error(error E),
+    Error(error Error ref),
 }
 
-let ok = [Int, String]Result.Ok(42)
-let err = [Int, String]Result.Error("failed")
+let ok = [Int]Result.Ok(42)
+let err = [Int]Result.Error(ref "failed")
 
 ok.is_ok()               // true
 ok.is_error()            // false
 ok.unwrap()              // 42（Error 时 panic）
 ok.unwrap_or(0)          // 42（Error 时返回默认值）
 ok.map((x) -> x * 2)    // Ok(84)
-ok.map_error((e) -> "Error: " + e)
+err.error_message()      // "failed"
 ```
 
 ## 模块系统
@@ -1488,18 +1575,18 @@ assert(condition, message) // 条件为 false 时 panic
 
 ```koral
 // 文件操作
-read_file(path)           // [String, String]Result
-write_file(path, content) // [Void, String]Result
-append_file(path, content) // [Void, String]Result
-copy_file(src, dst)       // [Void, String]Result
-remove_file(path)         // [Void, String]Result
+read_file(path)           // [String]Result
+write_file(path, content) // [Void]Result
+append_file(path, content) // [Void]Result
+copy_file(src, dst)       // [Void]Result
+remove_file(path)         // [Void]Result
 
 // 目录操作
-create_dir(path)          // [Void, String]Result
-create_dir_all(path)      // [Void, String]Result（递归创建）
-remove_dir(path)          // [Void, String]Result
-remove_dir_all(path)      // [Void, String]Result（递归删除）
-read_dir(path)            // [[String]List, String]Result
+create_dir(path)          // [Void]Result
+create_dir_all(path)      // [Void]Result（递归创建）
+remove_dir(path)          // [Void]Result
+remove_dir_all(path)      // [Void]Result（递归删除）
+read_dir(path)            // [[String]List]Result
 
 // 路径操作
 path_exists(path)         // Bool
@@ -1511,8 +1598,8 @@ dir_name(path)            // [String]Option
 ext_name(path)            // [String]Option
 is_absolute(path)         // Bool
 normalize_path(path)      // String
-absolute_path(path)       // [String, String]Result
-current_dir()             // [String, String]Result
+absolute_path(path)       // [String]Result
+current_dir()             // [String]Result
 
 // 环境变量
 get_env(name)             // [String]Option
@@ -1521,7 +1608,7 @@ home_dir()                // [String]Option
 temp_dir()                // String
 
 // 进程
-run_command(program, args) // [CommandResult, String]Result
+run_command(program, args) // [CommandResult]Result
 args()                    // [String]List
 exit(code)                // Never
 abort()                   // Never
