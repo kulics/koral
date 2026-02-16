@@ -67,6 +67,12 @@ extension Monomorphizer {
                     return .union(defId: defId)
                 }
             }
+            // Check if it's a trait name → resolve to traitObject type
+            // This handles cases like `Error ref` inside union definitions where
+            // the type checker already resolved it but the monomorphizer re-resolves from TypeNodes
+            if input.genericTemplates.traits[name] != nil {
+                return .traitObject(traitName: name, typeArgs: [])
+            }
             // Otherwise treat as generic parameter
             return .genericParameter(name: name)
             
@@ -124,6 +130,10 @@ extension Monomorphizer {
             }
             if let concreteType = input.genericTemplates.concreteUnionTypes[name] {
                 return concreteType
+            }
+            // Check if it's a trait name → resolve to traitObject type
+            if input.genericTemplates.traits[name] != nil {
+                return .traitObject(traitName: name, typeArgs: [])
             }
             return .genericParameter(name: name)
             
@@ -736,6 +746,36 @@ extension Monomorphizer {
                 }
             }
 
+            // Convert traitMethodPlaceholder with trait object base to traitMethodCall
+            // This handles the case where a generic function like [T ToString]f(a T ref)
+            // is instantiated with T = traitObject("ToString") — method calls on the
+            // trait object parameter must use vtable dynamic dispatch.
+            if case .traitMethodPlaceholder(_, let methodName, let base, _, _) = newCallee {
+                if let traitObjInfo = extractTraitObjectType(base.type) {
+                    if let methodIndex = vtableMethodIndex(traitName: traitObjInfo.traitName, methodName: methodName) {
+                        // If the base is a deref of a trait object reference, use the
+                        // un-dereferenced reference as the receiver. traitMethodCall expects
+                        // a TraitRef (reference type), not a bare traitObject value.
+                        let receiver: TypedExpressionNode
+                        if case .derefExpression(let inner, _) = base,
+                           case .reference(let refInner) = inner.type,
+                           case .traitObject = refInner {
+                            receiver = inner
+                        } else {
+                            receiver = base
+                        }
+                        return .traitMethodCall(
+                            receiver: receiver,
+                            traitName: traitObjInfo.traitName,
+                            methodName: methodName,
+                            methodIndex: methodIndex,
+                            arguments: newArguments,
+                            type: newType
+                        )
+                    }
+                }
+            }
+
             return .call(
                 callee: newCallee,
                 arguments: newArguments,
@@ -849,6 +889,18 @@ extension Monomorphizer {
             
             // Try to resolve to concrete method if base type is now concrete
             if !context.containsGenericParameter(newBase.type) {
+                // Check if the base type is a trait object — if so, keep as placeholder
+                // (the .call case will convert it to traitMethodCall with proper arguments)
+                if extractTraitObjectType(newBase.type) != nil {
+                    return .traitMethodPlaceholder(
+                        traitName: traitName,
+                        methodName: methodName,
+                        base: newBase,
+                        methodTypeArgs: resolvedMethodTypeArgs,
+                        type: resolvedType
+                    )
+                }
+
                 // Look up the concrete method on the resolved base type
                 if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: methodName, methodTypeArgs: resolvedMethodTypeArgs) {
                     let resolvedMethodType = resolveParameterizedType(concreteMethod.type)
@@ -910,6 +962,35 @@ extension Monomorphizer {
                 base: newBase,
                 methodTypeArgs: resolvedMethodTypeArgs,
                 type: resolvedType
+            )
+
+        case .traitObjectConversion(let inner, let traitName, let traitTypeArgs, let concreteType, let type):
+            let resolvedConcreteType = resolveParameterizedType(concreteType)
+            let resolvedTraitTypeArgs = traitTypeArgs.map { resolveParameterizedType($0) }
+            // Collect vtable request for non-generic code paths
+            if !context.containsGenericParameter(resolvedConcreteType) {
+                vtableRequests.insert(VtableRequest(
+                    concreteType: resolvedConcreteType,
+                    traitName: traitName,
+                    traitTypeArgs: resolvedTraitTypeArgs
+                ))
+            }
+            return .traitObjectConversion(
+                inner: resolveTypesInExpression(inner),
+                traitName: traitName,
+                traitTypeArgs: resolvedTraitTypeArgs,
+                concreteType: resolvedConcreteType,
+                type: resolveParameterizedType(type)
+            )
+
+        case .traitMethodCall(let receiver, let traitName, let methodName, let methodIndex, let arguments, let type):
+            return .traitMethodCall(
+                receiver: resolveTypesInExpression(receiver),
+                traitName: traitName,
+                methodName: methodName,
+                methodIndex: methodIndex,
+                arguments: arguments.map { resolveTypesInExpression($0) },
+                type: resolveParameterizedType(type)
             )
             
         case .whileExpression(let condition, let body, let type):

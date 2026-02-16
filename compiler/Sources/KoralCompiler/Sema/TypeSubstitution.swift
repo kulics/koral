@@ -65,6 +65,13 @@ public struct TypeSubstitution {
         case .pointer(let elem):
             return .pointer(element: apply(elem, context: context))
             
+        case .weakReference(let inner):
+            return .weakReference(inner: apply(inner, context: context))
+            
+        case .traitObject(let traitName, let typeArgs):
+            if typeArgs.isEmpty { return type }
+            return .traitObject(traitName: traitName, typeArgs: typeArgs.map { apply($0, context: context) })
+            
         case .structure(let defId):
             guard let members = context.getStructMembers(defId) else {
                 return type

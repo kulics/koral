@@ -156,4 +156,154 @@ extension TypeChecker {
       return "\(method.name)(\(paramsDesc)) \(ret)"
     }
   }
+
+  // MARK: - Object Safety Check
+
+  /// Checks whether a trait is object-safe (can be used as a trait object).
+  /// Returns (isObjectSafe, reasons) where reasons lists why it's not safe.
+  /// Uses objectSafetyCache for memoization and visited set for cycle detection.
+  func checkObjectSafety(_ traitName: String) throws -> (Bool, [String]) {
+    if let cached = objectSafetyCache[traitName] {
+      return cached
+    }
+    var visited: Set<String> = []
+    let result = try checkObjectSafetyHelper(traitName, visited: &visited)
+    objectSafetyCache[traitName] = result
+    return result
+  }
+
+  private func checkObjectSafetyHelper(
+    _ traitName: String,
+    visited: inout Set<String>
+  ) throws -> (Bool, [String]) {
+    // Cycle detection: if already in the check chain, treat as safe to avoid infinite recursion
+    if visited.contains(traitName) {
+      return (true, [])
+    }
+    visited.insert(traitName)
+
+    // Cache hit
+    if let cached = objectSafetyCache[traitName] {
+      return cached
+    }
+
+    guard let traitInfo = traits[traitName] else {
+      throw SemanticError(.generic("Undefined trait: \(traitName)"), span: currentSpan)
+    }
+
+    var reasons: [String] = []
+
+    // Check all methods (including inherited)
+    let allMethods = try flattenedTraitMethods(traitName)
+
+    for (name, method) in allMethods {
+      // Rule 1: method must not have generic type parameters
+      if !method.typeParameters.isEmpty {
+        reasons.append("method '\(name)' has generic type parameters")
+      }
+
+      // Rule 2: Self must not appear in parameter types (except receiver) or return type
+      for (i, param) in method.parameters.enumerated() {
+        if i == 0 && param.name == "self" { continue }
+        if containsSelfType(param.type) {
+          reasons.append("method '\(name)' uses Self in parameter '\(param.name)'")
+        }
+      }
+      if containsSelfType(method.returnType) {
+        reasons.append("method '\(name)' uses Self in return type")
+      }
+    }
+
+    // Check parent traits' object safety (using visited to prevent cycles)
+    for superTrait in traitInfo.superTraits {
+      let (parentSafe, parentReasons) = try checkObjectSafetyHelper(superTrait.baseName, visited: &visited)
+      if !parentSafe {
+        reasons.append(contentsOf: parentReasons.map { "inherited from \(superTrait.baseName): \($0)" })
+      }
+    }
+
+    let result = (reasons.isEmpty, reasons)
+    objectSafetyCache[traitName] = result
+    return result
+  }
+
+  /// Recursively checks if a TypeNode contains Self type (excluding receiver position).
+  private func containsSelfType(_ node: TypeNode) -> Bool {
+    switch node {
+    case .inferredSelf:
+      return true
+    case .identifier(let name):
+      return name == "Self"
+    case .reference(let inner):
+      return containsSelfType(inner)
+    case .pointer(let inner):
+      return containsSelfType(inner)
+    case .weakReference(let inner):
+      return containsSelfType(inner)
+    case .generic(_, let args):
+      return args.contains { containsSelfType($0) }
+    case .functionType(let paramTypes, let returnType):
+      return paramTypes.contains { containsSelfType($0) } || containsSelfType(returnType)
+    case .moduleQualified:
+      return false
+    case .moduleQualifiedGeneric(_, _, let args):
+      return args.contains { containsSelfType($0) }
+    }
+  }
+
+  // MARK: - Vtable Method Index
+
+  /// Returns an ordered list of trait methods for vtable layout.
+  /// Parent trait methods come first (in declaration order), then the trait's own methods.
+  func orderedTraitMethods(_ traitName: String) throws -> [(name: String, signature: TraitMethodSignature)] {
+    var visited: Set<String> = []
+    return try orderedTraitMethodsHelper(traitName, visited: &visited)
+  }
+
+  private func orderedTraitMethodsHelper(
+    _ traitName: String,
+    visited: inout Set<String>
+  ) throws -> [(name: String, signature: TraitMethodSignature)] {
+    if visited.contains(traitName) { return [] }
+    visited.insert(traitName)
+
+    if SemaUtils.isBuiltinTrait(traitName) { return [] }
+
+    guard let decl = traits[traitName] else {
+      throw SemanticError(.generic("Undefined trait: \(traitName)"), line: currentLine)
+    }
+
+    var result: [(name: String, signature: TraitMethodSignature)] = []
+    var seen: Set<String> = []
+
+    // Parent trait methods first
+    for parent in decl.superTraits {
+      let parentMethods = try orderedTraitMethodsHelper(parent.baseName, visited: &visited)
+      for entry in parentMethods where !seen.contains(entry.name) {
+        result.append(entry)
+        seen.insert(entry.name)
+      }
+    }
+
+    // Then this trait's own methods
+    for m in decl.methods where !seen.contains(m.name) {
+      result.append((name: m.name, signature: m))
+      seen.insert(m.name)
+    }
+
+    return result
+  }
+
+  /// Computes the vtable index for a method in a trait.
+  /// Methods are ordered by declaration order, with parent trait methods first.
+  func vtableMethodIndex(traitName: String, methodName: String) throws -> Int {
+    let ordered = try orderedTraitMethods(traitName)
+    guard let index = ordered.firstIndex(where: { $0.name == methodName }) else {
+      throw SemanticError(
+        .generic("Method '\(methodName)' not found in trait '\(traitName)'"),
+        line: currentLine
+      )
+    }
+    return index
+  }
 }

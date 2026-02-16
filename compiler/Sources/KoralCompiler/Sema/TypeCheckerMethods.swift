@@ -826,6 +826,54 @@ extension TypeChecker {
     return subscriptExpr
   }
 
+  /// Infers a trait object method call (dynamic dispatch through vtable).
+  /// The receiver is always the trait object reference; the vtable wrapper handles
+  /// self by-value vs self-ref distinction at the C level.
+  func inferTraitObjectMethodCall(
+    base: TypedExpressionNode,
+    traitName: String,
+    methodName: String,
+    params: [Parameter],
+    returns: Type,
+    arguments: [ExpressionNode]
+  ) throws -> TypedExpressionNode {
+    let methodIndex = try vtableMethodIndex(traitName: traitName, methodName: methodName)
+
+    // Type-check arguments (skip self parameter)
+    var typedArguments: [TypedExpressionNode] = []
+    for (arg, param) in zip(arguments, params.dropFirst()) {
+      var typedArg = try inferTypedExpression(arg, expectedType: param.type)
+      typedArg = try coerceLiteral(typedArg, to: param.type)
+      if typedArg.type != param.type {
+        if case .reference(let inner) = param.type, inner == typedArg.type {
+          if typedArg.valueCategory == .lvalue {
+            typedArg = .referenceExpression(expression: typedArg, type: param.type)
+          } else {
+            throw SemanticError.invalidOperation(
+              op: "implicit ref", type1: typedArg.type.description, type2: "rvalue")
+          }
+        } else if case .reference(let inner) = typedArg.type, inner == param.type {
+          typedArg = .derefExpression(expression: typedArg, type: inner)
+        } else {
+          throw SemanticError.typeMismatch(
+            expected: param.type.description,
+            got: typedArg.type.description
+          )
+        }
+      }
+      typedArguments.append(typedArg)
+    }
+
+    return .traitMethodCall(
+      receiver: base,
+      traitName: traitName,
+      methodName: methodName,
+      methodIndex: methodIndex,
+      arguments: typedArguments,
+      type: returns
+    )
+  }
+
   func checkIntrinsicCall(name: String, arguments: [ExpressionNode]) throws
     -> TypedExpressionNode?
   {

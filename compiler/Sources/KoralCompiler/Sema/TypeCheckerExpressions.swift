@@ -594,6 +594,27 @@ extension TypeChecker {
     case .derefExpression(let inner):
       let typedInner = try inferTypedExpression(inner)
       if case .reference(let innerType) = typedInner.type {
+        // Disallow deref of trait object references
+        if case .traitObject = innerType {
+          throw SemanticError(.generic(
+            "Cannot dereference a trait object reference: concrete type is unknown at compile time"
+          ), line: currentLine)
+        }
+        // Disallow deref of opaque type references
+        if case .opaque = innerType {
+          throw SemanticError(.generic(
+            "Cannot dereference an opaque type reference: type layout is unknown at compile time"
+          ), line: currentLine)
+        }
+        // Generic parameters require Deref bound
+        if case .genericParameter(let paramName) = innerType {
+          guard hasTraitBound(paramName, "Deref") else {
+            throw SemanticError(.generic(
+              "Cannot dereference '\(paramName) ref': type parameter '\(paramName)' does not have 'Deref' bound. " +
+              "Add 'Deref' constraint: [\(paramName) Deref]"
+            ), line: currentLine)
+          }
+        }
         return .derefExpression(expression: typedInner, type: innerType)
       } else {
         throw SemanticError.typeMismatch(
@@ -2334,6 +2355,20 @@ extension TypeChecker {
         )
       }
 
+      // Check if this is a trait object method call (dynamic dispatch).
+      // The base type is a reference to a trait object — handle before auto-ref/deref.
+      if case .reference(let inner) = base.type,
+         case .traitObject(let traitName, _) = inner {
+        return try inferTraitObjectMethodCall(
+          base: base,
+          traitName: traitName,
+          methodName: methodName,
+          params: params,
+          returns: returns,
+          arguments: arguments
+        )
+      }
+
       // Check base type against first param
       // 如果 base 是 rvalue 且方法期望 self ref，使用临时物化
       if let firstParam = params.first,
@@ -3318,6 +3353,52 @@ extension TypeChecker {
             type: expectedType
           )
         }
+      }
+    }
+
+    // Trait object method lookup: when the type is a trait object, look up the method
+    // in the trait's method signatures and return a methodReference with Self replaced
+    if case .traitObject(let traitName, let traitTypeArgs) = typeToLookup {
+      let methods = try flattenedTraitMethods(traitName)
+      if let sig = methods[memberName] {
+        // Only instance methods (with self parameter)
+        if sig.parameters.first?.name != "self" {
+          return nil
+        }
+
+        let traitInfo = traits[traitName]
+        let traitObjType: Type = .traitObject(traitName: traitName, typeArgs: traitTypeArgs)
+
+        // Resolve the method type with Self replaced by the trait object type
+        let expectedType = try expectedFunctionTypeForTraitMethod(
+          sig,
+          selfType: traitObjType,
+          traitInfo: traitInfo,
+          traitTypeArgs: traitTypeArgs
+        )
+
+        let methodKind = getCompilerMethodKind(memberName)
+        if methodKind == .drop {
+          throw SemanticError(
+            .generic("compiler protocol method \(memberName) cannot be called explicitly"),
+            line: currentLine)
+        }
+
+        let methodSym = makeGlobalSymbol(
+          name: memberName,
+          type: expectedType,
+          kind: .function,
+          methodKind: methodKind,
+          access: .default
+        )
+
+        let base: TypedExpressionNode
+        if typedPath.isEmpty {
+          base = typedBase
+        } else {
+          base = .memberPath(source: typedBase, path: typedPath)
+        }
+        return .methodReference(base: base, method: methodSym, typeArgs: nil, methodTypeArgs: nil, type: expectedType)
       }
     }
     
@@ -4982,6 +5063,9 @@ extension TypeChecker {
     }
   }
 
+  /// The fixed error type for Result: `Error ref` (trait object)
+  private nonisolated(unsafe) static let resultErrorType: Type = .reference(inner: .traitObject(traitName: "Error", typeArgs: []))
+
   /// Extracts Option/Result kind from a type, or throws a diagnostic.
   private func extractOptionResultKind(
     _ type: Type, span: SourceSpan, operation: String
@@ -4990,8 +5074,8 @@ extension TypeChecker {
       if template == "Option", args.count == 1 {
         return .option(innerType: args[0])
       }
-      if template == "Result", args.count == 2 {
-        return .result(okType: args[0], errType: args[1])
+      if template == "Result", args.count == 1 {
+        return .result(okType: args[0], errType: Self.resultErrorType)
       }
     }
     throw SemanticError(
@@ -5087,14 +5171,14 @@ extension TypeChecker {
       // Otherwise wrap in Option
       return (.genericUnion(template: "Option", args: [transformResultType]), false)
 
-    case .result(_, let errType):
-      // If transform already returns Result with same error type, flatten
+    case .result:
+      // If transform already returns Result (1 type param), flatten
       if case .genericUnion(let template, let args) = transformResultType,
-         template == "Result", args.count == 2, args[1] == errType {
+         template == "Result", args.count == 1 {
         return (transformResultType, true)
       }
       // Otherwise wrap in Result
-      return (.genericUnion(template: "Result", args: [transformResultType, errType]), false)
+      return (.genericUnion(template: "Result", args: [transformResultType]), false)
     }
   }
 

@@ -6,7 +6,7 @@ import Foundation
 // 这确保了 CodeGen 和 DefId 系统使用一致的标识符生成逻辑。
 
 public class CodeGen {
-  private let ast: MonomorphizedProgram
+  let ast: MonomorphizedProgram
   internal let context: CompilerContext
   var indent: String = ""
   var buffer: String = ""
@@ -17,6 +17,11 @@ public class CodeGen {
   private(set) var cIdentifierByDefId: [UInt64: String] = [:]
   private var foreignFunctionDefIds: Set<UInt64> = []
   private var foreignGlobalVarDefIds: Set<UInt64> = []
+  
+  // MARK: - Vtable Instance Tracking
+  /// Tracks generated vtable instance names to avoid duplicate generation.
+  /// Key format: `__koral_vtable_{TraitName}_for_{ConcreteType}`
+  var generatedVtableInstances: Set<String> = []
   
   /// 用户定义的 main 函数的限定名（如 "hello_main"）
   /// 如果用户没有定义 main 函数，则为 nil
@@ -388,6 +393,12 @@ public class CodeGen {
 
       // WeakRef structure for weak references
       struct WeakRef { void* control; };
+
+      // TraitRef: fat pointer for trait object references (ptr + control + vtable)
+      struct TraitRef { void* ptr; void* control; const void* vtable; };
+
+      // TraitWeakRef: fat pointer for trait object weak references (control + vtable)
+      struct TraitWeakRef { void* control; const void* vtable; };
 
       void __koral_retain(void* raw_control) {
         if (!raw_control) return;
@@ -845,6 +856,9 @@ public class CodeGen {
         }
       }
       buffer += "\n"
+
+      // 生成 vtable 结构体、wrapper 函数和 vtable 实例
+      processVtableRequests()
 
       // 生成函数实现
       for node in nodes {
@@ -1382,6 +1396,10 @@ public class CodeGen {
       fatalError("Method reference not in call position is not supported yet")
     case .traitMethodPlaceholder(let traitName, let methodName, let base, _, _):
       fatalError("Unresolved trait method placeholder: \(traitName).\(methodName) on \(base.type)")
+    case .traitObjectConversion(let inner, let traitName, let traitTypeArgs, let concreteType, let type):
+      return generateTraitObjectConversion(inner: inner, traitName: traitName, traitTypeArgs: traitTypeArgs, concreteType: concreteType, type: type)
+    case .traitMethodCall(let receiver, let traitName, let methodName, let methodIndex, let arguments, let type):
+      return generateTraitMethodCall(receiver: receiver, traitName: traitName, methodName: methodName, methodIndex: methodIndex, arguments: arguments, type: type)
     case .staticMethodCall:
       fatalError("Static method call should have been resolved by monomorphizer before code generation")
       
@@ -1401,9 +1419,10 @@ public class CodeGen {
         addIndent()
         buffer += "\(result) = __koral_\(typeName)_copy((struct \(typeName)*)\(innerResult).ptr);\n"
       } else if case .reference(_) = type {
-        // Reference: copy struct Ref and retain
+        // Reference: copy struct Ref/TraitRef and retain
+        let cType = cTypeName(type)
         addIndent()
-        buffer += "\(result) = *(struct Ref*)\(innerResult).ptr;\n"
+        buffer += "\(result) = *(\(cType)*)\(innerResult).ptr;\n"
         addIndent()
         buffer += "__koral_retain(\(result).control);\n"
       } else {
@@ -1968,13 +1987,14 @@ public class CodeGen {
     case .refCount(let val):
       let valRes = generateExpressionSSA(val)
       let result = nextTemp()
+      let controlPath = "\(valRes).control"
       addIndent()
       buffer += "int \(result) = 0;\n"
       addIndent()
-      buffer += "if (\(valRes).control) {\n"
+      buffer += "if (\(controlPath)) {\n"
       withIndent {
         addIndent()
-        buffer += "\(result) = atomic_load(&((struct Koral_Control*)\(valRes).control)->strong_count);\n"
+        buffer += "\(result) = atomic_load(&((struct Koral_Control*)\(controlPath))->strong_count);\n"
       }
       addIndent()
       buffer += "}\n"
@@ -1983,8 +2003,21 @@ public class CodeGen {
     case .downgradeRef(let val, _):
       let valRes = generateExpressionSSA(val)
       let result = nextTemp()
-      addIndent()
-      buffer += "struct WeakRef \(result) = __koral_downgrade_ref(\(valRes));\n"
+      // Check if this is a trait object downgrade (TraitRef → TraitWeakRef)
+      if case .reference(let inner) = val.type, case .traitObject = inner {
+        addIndent()
+        buffer += "struct TraitWeakRef \(result);\n"
+        let tempWeak = nextTemp()
+        addIndent()
+        buffer += "struct WeakRef \(tempWeak) = __koral_downgrade_ref((struct Ref){\(valRes).ptr, \(valRes).control});\n"
+        addIndent()
+        buffer += "\(result).control = \(tempWeak).control;\n"
+        addIndent()
+        buffer += "\(result).vtable = \(valRes).vtable;\n"
+      } else {
+        addIndent()
+        buffer += "struct WeakRef \(result) = __koral_downgrade_ref(\(valRes));\n"
+      }
       return result
 
     case .upgradeRef(let val, let resultType):
@@ -1992,30 +2025,62 @@ public class CodeGen {
       let result = nextTemp()
       let successVar = nextTemp()
       let upgradedRefVar = nextTemp()
-      addIndent()
-      buffer += "int \(successVar);\n"
-      addIndent()
-      buffer += "struct Ref \(upgradedRefVar) = __koral_upgrade_ref(\(valRes), &\(successVar));\n"
-      // Generate Option type result
-      let cType = cTypeName(resultType)
-      addIndent()
-      buffer += "\(cType) \(result);\n"
-      addIndent()
-      buffer += "if (\(successVar)) {\n"
-      withIndent {
+      // Check if this is a trait object upgrade (TraitWeakRef → Option<TraitRef>)
+      if case .weakReference(let inner) = val.type, case .traitObject = inner {
         addIndent()
-        buffer += "\(result).tag = 1; // Some\n"
+        buffer += "int \(successVar);\n"
         addIndent()
-        buffer += "\(result).data.Some.value = \(upgradedRefVar);\n"
+        buffer += "struct Ref \(upgradedRefVar) = __koral_upgrade_ref((struct WeakRef){\(valRes).control}, &\(successVar));\n"
+        // Generate Option type result
+        let cType = cTypeName(resultType)
+        addIndent()
+        buffer += "\(cType) \(result);\n"
+        addIndent()
+        buffer += "if (\(successVar)) {\n"
+        withIndent {
+          addIndent()
+          buffer += "\(result).tag = 1; // Some\n"
+          addIndent()
+          buffer += "\(result).data.Some.value.ptr = \(upgradedRefVar).ptr;\n"
+          addIndent()
+          buffer += "\(result).data.Some.value.control = \(upgradedRefVar).control;\n"
+          addIndent()
+          buffer += "\(result).data.Some.value.vtable = \(valRes).vtable;\n"
+        }
+        addIndent()
+        buffer += "} else {\n"
+        withIndent {
+          addIndent()
+          buffer += "\(result).tag = 0; // None\n"
+        }
+        addIndent()
+        buffer += "}\n"
+      } else {
+        addIndent()
+        buffer += "int \(successVar);\n"
+        addIndent()
+        buffer += "struct Ref \(upgradedRefVar) = __koral_upgrade_ref(\(valRes), &\(successVar));\n"
+        // Generate Option type result
+        let cType = cTypeName(resultType)
+        addIndent()
+        buffer += "\(cType) \(result);\n"
+        addIndent()
+        buffer += "if (\(successVar)) {\n"
+        withIndent {
+          addIndent()
+          buffer += "\(result).tag = 1; // Some\n"
+          addIndent()
+          buffer += "\(result).data.Some.value = \(upgradedRefVar);\n"
+        }
+        addIndent()
+        buffer += "} else {\n"
+        withIndent {
+          addIndent()
+          buffer += "\(result).tag = 0; // None\n"
+        }
+        addIndent()
+        buffer += "}\n"
       }
-      addIndent()
-      buffer += "} else {\n"
-      withIndent {
-        addIndent()
-        buffer += "\(result).tag = 0; // None\n"
-      }
-      addIndent()
-      buffer += "}\n"
       return result
 
     case .initMemory(let ptr, let val):
@@ -2024,10 +2089,16 @@ public class CodeGen {
       let v = generateExpressionSSA(val)
       let cType = cTypeName(element)
       addIndent()
-      if case .reference(_) = element {
-        buffer += "*(struct Ref*)\(p) = \(v);\n"
-        addIndent()
-        buffer += "__koral_retain(((struct Ref*)\(p))->control);\n"
+      if case .reference(let inner) = element {
+        if case .traitObject = inner {
+          buffer += "*(\(cType)*)\(p) = \(v);\n"
+          addIndent()
+          buffer += "__koral_retain(((\(cType)*)\(p))->ref.control);\n"
+        } else {
+          buffer += "*(struct Ref*)\(p) = \(v);\n"
+          addIndent()
+          buffer += "__koral_retain(((struct Ref*)\(p))->control);\n"
+        }
       } else if case .structure(let defId) = element {
         let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
         buffer += "*(\(cType)*)\(p) = __koral_\(typeName)_copy(&\(v));\n"
@@ -2042,9 +2113,15 @@ public class CodeGen {
     case .deinitMemory(let ptr):
       guard case .pointer(let element) = ptr.type else { fatalError() }
       let p = generateExpressionSSA(ptr)
-      if case .reference(_) = element {
-        addIndent()
-        buffer += "__koral_release(((struct Ref*)\(p))->control);\n"
+      if case .reference(let inner) = element {
+        let cType = cTypeName(element)
+        if case .traitObject = inner {
+          addIndent()
+          buffer += "__koral_release(((\(cType)*)\(p))->ref.control);\n"
+        } else {
+          addIndent()
+          buffer += "__koral_release(((struct Ref*)\(p))->control);\n"
+        }
       } else if case .structure(let defId) = element {
         let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
         addIndent()

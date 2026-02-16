@@ -1033,6 +1033,8 @@ Koral's standard library defines the following core Traits:
 | `Rem` | Remainder (extends Div) | `rem(self, other Self) Self` |
 | `[K, V]Index` | Subscript read | `at(self, key K) V` |
 | `[K, V]MutIndex` | Subscript write (extends Index) | `set_at(self ref, key K, value V) Void` |
+| `Error` | Error interface | `message(self) String` |
+| `Deref` | Dereference control (built-in) | *(prevents deref of trait objects)* |
 
 Arithmetic operators are automatically lowered to corresponding Trait method calls:
 - `+` → `Add.add`
@@ -1042,6 +1044,91 @@ Arithmetic operators are automatically lowered to corresponding Trait method cal
 - `%` → `Rem.rem`
 - `a[k]` → `Index.at`
 - `a[k] = v` → `MutIndex.set_at`
+
+### Trait Objects
+
+Trait objects are Koral's mechanism for runtime polymorphism (dynamic dispatch). Using the `TraitName ref` syntax, you can erase any type that implements a Trait into a uniform reference type.
+
+#### Basic Syntax
+
+Use the `ref` keyword to convert a concrete type into a trait object:
+
+```koral
+trait Drawable {
+    draw(self) String
+}
+
+type Circle(radius Int)
+type Square(side Int)
+
+given Circle { public draw(self) String = "Drawing circle" }
+given Square { public draw(self) String = "Drawing square" }
+
+// Create a trait object
+let shape Drawable ref = ref Circle(10)
+
+// Call methods through the trait object (dynamic dispatch)
+shape.draw()  // "Drawing circle"
+```
+
+#### Object Safety
+
+Only Traits that satisfy the following conditions can be used as trait objects:
+
+- Methods must not have generic parameters
+- `Self` must not appear in method parameters or return types (except as the receiver `self`)
+
+```koral
+// Object-safe — can be used as a trait object
+trait Error {
+    message(self) String
+}
+
+// Not object-safe — cannot be used as a trait object
+trait Eq {
+    equals(self, other Self) Bool  // Self appears in parameters
+}
+```
+
+#### Error Trait and Result
+
+The standard library defines the `Error` trait. Any type that implements `message(self) String` can be used as an error type:
+
+```koral
+trait Error {
+    message(self) String
+}
+
+// String implements the Error trait by default
+given String {
+    public message(self) String = self
+}
+```
+
+`Result` uses `Error ref` (a trait object) as its error side, requiring only one generic parameter:
+
+```koral
+type [T Any] Result {
+    Ok(value T),
+    Error(error Error ref),
+}
+
+// Use a string as an error
+let result = [Int]Result.Error(ref "something went wrong")
+
+// Read the error message
+when result is {
+    .Ok(v) then print_line(v.to_string()),
+    .Error(e) then print_line(e.message()),
+}
+
+// Convenience method
+result.error_message()  // "something went wrong"
+```
+
+#### Deref Trait
+
+`Deref` is a built-in trait that controls dereference behavior. Trait objects (`TraitName ref`) do not implement `Deref`, so they cannot be dereferenced. This ensures trait objects are always used through references.
 
 ## Generics
 
@@ -1225,23 +1312,23 @@ let mapped = opt and then _ * 2
 
 ### Result
 
-`[T, E]Result` is a result type representing an operation that may succeed or fail.
+`[T]Result` is a result type representing an operation that may succeed or fail. The error side is fixed to `Error ref` (a trait object).
 
 ```koral
-type [T Any, E Any] Result {
+type [T Any] Result {
     Ok(value T),
-    Error(error E),
+    Error(error Error ref),
 }
 
-let ok = [Int, String]Result.Ok(42)
-let err = [Int, String]Result.Error("failed")
+let ok = [Int]Result.Ok(42)
+let err = [Int]Result.Error(ref "failed")
 
 ok.is_ok()               // true
 ok.is_error()            // false
 ok.unwrap()              // 42 (panics on Error)
 ok.unwrap_or(0)          // 42 (returns default on Error)
 ok.map((x) -> x * 2)    // Ok(84)
-ok.map_error((e) -> "Error: " + e)
+err.error_message()      // "failed"
 ```
 
 ## Module System
@@ -1448,18 +1535,18 @@ All print functions accept any type that implements the `ToString` trait.
 
 ```koral
 // File operations
-read_file(path)           // [String, String]Result
-write_file(path, content) // [Void, String]Result
-append_file(path, content) // [Void, String]Result
-copy_file(src, dst)       // [Void, String]Result
-remove_file(path)         // [Void, String]Result
+read_file(path)           // [String]Result
+write_file(path, content) // [Void]Result
+append_file(path, content) // [Void]Result
+copy_file(src, dst)       // [Void]Result
+remove_file(path)         // [Void]Result
 
 // Directory operations
-create_dir(path)          // [Void, String]Result
-create_dir_all(path)      // [Void, String]Result (recursive)
-remove_dir(path)          // [Void, String]Result
-remove_dir_all(path)      // [Void, String]Result (recursive)
-read_dir(path)            // [[String]List, String]Result
+create_dir(path)          // [Void]Result
+create_dir_all(path)      // [Void]Result (recursive)
+remove_dir(path)          // [Void]Result
+remove_dir_all(path)      // [Void]Result (recursive)
+read_dir(path)            // [[String]List]Result
 
 // Path operations
 path_exists(path)         // Bool
@@ -1471,8 +1558,8 @@ dir_name(path)            // [String]Option
 ext_name(path)            // [String]Option
 is_absolute(path)         // Bool
 normalize_path(path)      // String
-absolute_path(path)       // [String, String]Result
-current_dir()             // [String, String]Result
+absolute_path(path)       // [String]Result
+current_dir()             // [String]Result
 
 // Environment variables
 get_env(name)             // [String]Option
@@ -1481,7 +1568,7 @@ home_dir()                // [String]Option
 temp_dir()                // String
 
 // Process
-run_command(program, args) // [CommandResult, String]Result
+run_command(program, args) // [CommandResult]Result
 args()                    // [String]List
 exit(code)                // Never
 abort()                   // Never

@@ -233,6 +233,15 @@ extension CodeGen {
     case .traitMethodPlaceholder(let traitName, let methodName, let base, _, _):
       // Trait method placeholders should be resolved by Monomorphizer before reaching CodeGen
       fatalError("CodeGen error: Unresolved trait method placeholder '\(traitName).\(methodName)' on base type \(base.type). Context: \(context)")
+
+    case .traitObjectConversion(let inner, _, _, _, _):
+      validateExpression(inner, context: "\(context) → traitObjectConversion.inner")
+
+    case .traitMethodCall(let receiver, _, _, _, let arguments, _):
+      validateExpression(receiver, context: "\(context) → traitMethodCall.receiver")
+      for arg in arguments {
+        validateExpression(arg, context: "\(context) → traitMethodCall.argument")
+      }
       
     case .whileExpression(let condition, let body, _):
       validateExpression(condition, context: "\(context) -> while condition")

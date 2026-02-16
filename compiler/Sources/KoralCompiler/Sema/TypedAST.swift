@@ -265,6 +265,34 @@ public indirect enum TypedExpressionNode {
     methodTypeArgs: [Type],
     type: Type
   )
+  /// Trait object conversion: wraps a concrete type value/reference into a trait object reference
+  /// - inner: The original expression (concrete type value or reference)
+  /// - traitName: The target trait name
+  /// - traitTypeArgs: The trait's type arguments
+  /// - concreteType: The concrete type being converted
+  /// - type: The result type: reference(traitObject(...))
+  case traitObjectConversion(
+    inner: TypedExpressionNode,
+    traitName: String,
+    traitTypeArgs: [Type],
+    concreteType: Type,
+    type: Type
+  )
+  /// Trait object method call: dynamic dispatch through vtable
+  /// - receiver: The trait object reference expression
+  /// - traitName: The trait name
+  /// - methodName: The method name
+  /// - methodIndex: The method's index in the vtable
+  /// - arguments: Method arguments (excluding receiver)
+  /// - type: The return type
+  case traitMethodCall(
+    receiver: TypedExpressionNode,
+    traitName: String,
+    methodName: String,
+    methodIndex: Int,
+    arguments: [TypedExpressionNode],
+    type: Type
+  )
 }
 
 public enum TypedInterpolatedPart {
@@ -418,6 +446,10 @@ extension TypedExpressionNode {
     case .lambdaExpression(_, _, _, let type):
       return type
     case .traitMethodPlaceholder(_, _, _, _, let type):
+      return type
+    case .traitObjectConversion(_, _, _, _, let type):
+      return type
+    case .traitMethodCall(_, _, _, _, _, let type):
       return type
     }
   }

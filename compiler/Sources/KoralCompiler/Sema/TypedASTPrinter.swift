@@ -459,6 +459,34 @@ public func printTypedAST(_ node: TypedProgram) {
         }
       }
 
+    case .traitObjectConversion(let inner, let traitName, let traitTypeArgs, let concreteType, let type):
+      print("\(indent)TraitObjectConversion: \(concreteType) → \(traitName) ref : \(type)")
+      if !traitTypeArgs.isEmpty {
+        withIndent {
+          print("\(indent)TraitTypeArgs: \(traitTypeArgs.map { $0.description }.joined(separator: ", "))")
+        }
+      }
+      withIndent {
+        printTypedExpression(inner)
+      }
+
+    case .traitMethodCall(let receiver, let traitName, let methodName, let methodIndex, let arguments, let type):
+      print("\(indent)TraitMethodCall: \(traitName).\(methodName) [vtable:\(methodIndex)] : \(type)")
+      withIndent {
+        print("\(indent)Receiver:")
+        withIndent {
+          printTypedExpression(receiver)
+        }
+        if !arguments.isEmpty {
+          print("\(indent)Arguments:")
+          withIndent {
+            for arg in arguments {
+              printTypedExpression(arg)
+            }
+          }
+        }
+      }
+
     case .memberPath(let source, let path):
       print("\(indent)MemberPath: \(path.map { symbolLabel($0) }.joined(separator: "."))")
       withIndent {

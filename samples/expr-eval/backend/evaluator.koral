@@ -5,7 +5,7 @@ public type Evaluator(mut env Environment)
 given Evaluator {
     public new() Self = Evaluator(Environment.new())
 
-    public eval(self ref, expr frontend.Expr ref) [types.Value, String]Result = {
+    public eval(self ref, expr frontend.Expr ref) [types.Value]Result = {
         when deref expr is {
             .Number(v) then Result.Ok(v),
             .Variable(name) then self.eval_variable(name),
@@ -16,19 +16,19 @@ given Evaluator {
         }
     }
 
-    private eval_variable(self ref, name String) [types.Value, String]Result = {
+    private eval_variable(self ref, name String) [types.Value]Result = {
         when self.env.get(name) is {
             .Some(v) then Result.Ok(v),
             .None then {
                 let msg = String.zero()
                 msg.push_string("Undefined variable: ")
                 msg.push_string(name)
-                Result.Error(msg)
+                Result.Error(ref msg)
             },
         }
     }
 
-    private eval_binary(self ref, op frontend.BinaryOperator, left frontend.Expr ref, right frontend.Expr ref) [types.Value, String]Result = {
+    private eval_binary(self ref, op frontend.BinaryOperator, left frontend.Expr ref, right frontend.Expr ref) [types.Value]Result = {
         when self.eval(left) is {
             .Error(e) then Result.Error(e),
             .Ok(lv) then when self.eval(right) is {
@@ -38,7 +38,7 @@ given Evaluator {
         }
     }
 
-    private apply_binary_op(self ref, op frontend.BinaryOperator, left types.Value, right types.Value) [types.Value, String]Result = {
+    private apply_binary_op(self ref, op frontend.BinaryOperator, left types.Value, right types.Value) [types.Value]Result = {
         when op is {
             .Add then self.value_add(left, right),
             .Sub then self.value_sub(left, right),
@@ -50,14 +50,14 @@ given Evaluator {
     }
 
     // 加法
-    private value_add(self ref, left types.Value, right types.Value) [types.Value, String]Result = {
+    private value_add(self ref, left types.Value, right types.Value) [types.Value]Result = {
         if left.is_int() and right.is_int() then {
             when left is {
                 .IntVal(lv) then when right is {
                     .IntVal(rv) then Result.Ok(types.Value.IntVal(lv + rv)),
-                    _ then Result.Error("unreachable"),
+                    _ then Result.Error(ref "unreachable"),
                 },
-                _ then Result.Error("unreachable"),
+                _ then Result.Error(ref "unreachable"),
             }
         } else {
             Result.Ok(types.Value.FloatVal(left.to_float() + right.to_float()))
@@ -65,14 +65,14 @@ given Evaluator {
     }
 
     // 减法
-    private value_sub(self ref, left types.Value, right types.Value) [types.Value, String]Result = {
+    private value_sub(self ref, left types.Value, right types.Value) [types.Value]Result = {
         if left.is_int() and right.is_int() then {
             when left is {
                 .IntVal(lv) then when right is {
                     .IntVal(rv) then Result.Ok(types.Value.IntVal(lv - rv)),
-                    _ then Result.Error("unreachable"),
+                    _ then Result.Error(ref "unreachable"),
                 },
-                _ then Result.Error("unreachable"),
+                _ then Result.Error(ref "unreachable"),
             }
         } else {
             Result.Ok(types.Value.FloatVal(left.to_float() - right.to_float()))
@@ -80,14 +80,14 @@ given Evaluator {
     }
 
     // 乘法
-    private value_mul(self ref, left types.Value, right types.Value) [types.Value, String]Result = {
+    private value_mul(self ref, left types.Value, right types.Value) [types.Value]Result = {
         if left.is_int() and right.is_int() then {
             when left is {
                 .IntVal(lv) then when right is {
                     .IntVal(rv) then Result.Ok(types.Value.IntVal(lv * rv)),
-                    _ then Result.Error("unreachable"),
+                    _ then Result.Error(ref "unreachable"),
                 },
-                _ then Result.Error("unreachable"),
+                _ then Result.Error(ref "unreachable"),
             }
         } else {
             Result.Ok(types.Value.FloatVal(left.to_float() * right.to_float()))
@@ -95,9 +95,9 @@ given Evaluator {
     }
 
     // 除法
-    private value_div(self ref, left types.Value, right types.Value) [types.Value, String]Result = {
+    private value_div(self ref, left types.Value, right types.Value) [types.Value]Result = {
         if right.to_float() == 0.0 then {
-            return Result.Error("Division by zero");
+            return Result.Error(ref "Division by zero");
         }
         if left.is_int() and right.is_int() then {
             when left is {
@@ -106,9 +106,9 @@ given Evaluator {
                         if lv % rv == 0 then Result.Ok(types.Value.IntVal(lv / rv))
                         else Result.Ok(types.Value.FloatVal((Float64)lv / (Float64)rv))
                     },
-                    _ then Result.Error("unreachable"),
+                    _ then Result.Error(ref "unreachable"),
                 },
-                _ then Result.Error("unreachable"),
+                _ then Result.Error(ref "unreachable"),
             }
         } else {
             Result.Ok(types.Value.FloatVal(left.to_float() / right.to_float()))
@@ -116,17 +116,17 @@ given Evaluator {
     }
 
     // 取模
-    private value_mod(self ref, left types.Value, right types.Value) [types.Value, String]Result = {
+    private value_mod(self ref, left types.Value, right types.Value) [types.Value]Result = {
         if right.to_float() == 0.0 then {
-            return Result.Error("Modulo by zero");
+            return Result.Error(ref "Modulo by zero");
         }
         if left.is_int() and right.is_int() then {
             when left is {
                 .IntVal(lv) then when right is {
                     .IntVal(rv) then Result.Ok(types.Value.IntVal(lv % rv)),
-                    _ then Result.Error("unreachable"),
+                    _ then Result.Error(ref "unreachable"),
                 },
-                _ then Result.Error("unreachable"),
+                _ then Result.Error(ref "unreachable"),
             }
         } else {
             let lf = left.to_float()
@@ -136,7 +136,7 @@ given Evaluator {
     }
 
     // 幂运算
-    private value_pow(self ref, left types.Value, right types.Value) [types.Value, String]Result = {
+    private value_pow(self ref, left types.Value, right types.Value) [types.Value]Result = {
         let result = math_pow(left.to_float(), right.to_float())
         if left.is_int() and right.is_int() then {
             when right is {
@@ -155,7 +155,7 @@ given Evaluator {
     }
 
     // 一元运算
-    private eval_unary(self ref, op frontend.UnaryOperator, operand frontend.Expr ref) [types.Value, String]Result = {
+    private eval_unary(self ref, op frontend.UnaryOperator, operand frontend.Expr ref) [types.Value]Result = {
         when self.eval(operand) is {
             .Error(e) then Result.Error(e),
             .Ok(v) then when op is {
@@ -168,7 +168,7 @@ given Evaluator {
     }
 
     // 函数调用
-    private eval_call(self ref, name String, args [frontend.Expr ref]List) [types.Value, String]Result = {
+    private eval_call(self ref, name String, args [frontend.Expr ref]List) [types.Value]Result = {
         let evaluated_args = [types.Value]List.new()
         for arg = args then {
             when self.eval(arg) is {
@@ -180,7 +180,7 @@ given Evaluator {
     }
 
     // 赋值
-    private eval_assignment(self ref, name String, value frontend.Expr ref) [types.Value, String]Result = {
+    private eval_assignment(self ref, name String, value frontend.Expr ref) [types.Value]Result = {
         when self.eval(value) is {
             .Error(e) then Result.Error(e),
             .Ok(v) then {

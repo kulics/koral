@@ -327,6 +327,36 @@ extension Monomorphizer {
                 }
             }
             
+            // Convert traitMethodPlaceholder with trait object base to traitMethodCall
+            // This handles the case where a generic function like [T ToString]f(a T ref)
+            // is instantiated with T = traitObject("ToString") — method calls on the
+            // trait object parameter must use vtable dynamic dispatch.
+            if case .traitMethodPlaceholder(_, let methodName, let base, _, _) = newCallee {
+                if let traitObjInfo = extractTraitObjectType(base.type) {
+                    if let methodIndex = vtableMethodIndex(traitName: traitObjInfo.traitName, methodName: methodName) {
+                        // If the base is a deref of a trait object reference, use the
+                        // un-dereferenced reference as the receiver. traitMethodCall expects
+                        // a TraitRef (reference type), not a bare traitObject value.
+                        let receiver: TypedExpressionNode
+                        if case .derefExpression(let inner, _) = base,
+                           case .reference(let refInner) = inner.type,
+                           case .traitObject = refInner {
+                            receiver = inner
+                        } else {
+                            receiver = base
+                        }
+                        return .traitMethodCall(
+                            receiver: receiver,
+                            traitName: traitObjInfo.traitName,
+                            methodName: methodName,
+                            methodIndex: methodIndex,
+                            arguments: newArguments,
+                            type: newType
+                        )
+                    }
+                }
+            }
+
             return .call(callee: newCallee, arguments: newArguments, type: newType)
 
         
@@ -439,6 +469,18 @@ extension Monomorphizer {
             
             // Try to resolve to concrete method if base type is now concrete
             if !context.containsGenericParameter(newBase.type) {
+                // Check if the base type is a trait object — if so, keep as placeholder
+                // (the .call case will convert it to traitMethodCall with proper arguments)
+                if extractTraitObjectType(newBase.type) != nil {
+                    return .traitMethodPlaceholder(
+                        traitName: traitName,
+                        methodName: methodName,
+                        base: newBase,
+                        methodTypeArgs: substitutedMethodTypeArgs,
+                        type: substitutedType
+                    )
+                }
+
                 // Look up the concrete method on the substituted base type
                 if let concreteMethod = try? lookupConcreteMethodSymbol(on: newBase.type, name: methodName, methodTypeArgs: substitutedMethodTypeArgs) {
                     // Extract the return type from the concrete method's function type
@@ -499,6 +541,39 @@ extension Monomorphizer {
                 base: newBase,
                 methodTypeArgs: substitutedMethodTypeArgs,
                 type: substitutedType
+            )
+
+        case .traitObjectConversion(let inner, let traitName, let traitTypeArgs, let concreteType, let type):
+            let substitutedInner = substituteTypesInExpression(inner, substitution: substitution)
+            let substitutedTraitTypeArgs = traitTypeArgs.map { substituteType($0, substitution: substitution) }
+            let substitutedConcreteType = substituteType(concreteType, substitution: substitution)
+            let substitutedType = substituteType(type, substitution: substitution)
+
+            // Collect vtable request when concrete type is fully resolved
+            if !context.containsGenericParameter(substitutedConcreteType) {
+                vtableRequests.insert(VtableRequest(
+                    concreteType: substitutedConcreteType,
+                    traitName: traitName,
+                    traitTypeArgs: substitutedTraitTypeArgs
+                ))
+            }
+
+            return .traitObjectConversion(
+                inner: substitutedInner,
+                traitName: traitName,
+                traitTypeArgs: substitutedTraitTypeArgs,
+                concreteType: substitutedConcreteType,
+                type: substitutedType
+            )
+
+        case .traitMethodCall(let receiver, let traitName, let methodName, let methodIndex, let arguments, let type):
+            return .traitMethodCall(
+                receiver: substituteTypesInExpression(receiver, substitution: substitution),
+                traitName: traitName,
+                methodName: methodName,
+                methodIndex: methodIndex,
+                arguments: arguments.map { substituteTypesInExpression($0, substitution: substitution) },
+                type: substituteType(type, substitution: substitution)
             )
             
         case .whileExpression(let condition, let body, let type):

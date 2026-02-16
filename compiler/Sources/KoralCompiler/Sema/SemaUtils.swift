@@ -145,9 +145,9 @@ public enum SemaUtils {
     
     /// Checks if a trait name is a built-in trait that doesn't require explicit method implementations.
     /// - Parameter name: The trait name to check
-    /// - Returns: true if the trait is a built-in trait (Any or Copy)
+    /// - Returns: true if the trait is a built-in trait (Any, Copy, or Deref)
     public static func isBuiltinTrait(_ name: String) -> Bool {
-        return name == "Any" || name == "Copy"
+        return name == "Any" || name == "Copy" || name == "Deref"
     }
     
     // MARK: - Trait Method Flattening
@@ -203,6 +203,62 @@ public enum SemaUtils {
     }
     
     // MARK: - Trait Validation
+    
+    /// Returns an ordered list of trait methods for vtable layout.
+    /// Parent trait methods come first (in declaration order), then the trait's own methods.
+    /// This is a pure function that takes the traits dictionary as a parameter.
+    /// - Parameters:
+    ///   - traitName: The name of the trait
+    ///   - traits: Dictionary of trait declarations
+    ///   - currentLine: Current source line for error reporting
+    /// - Returns: Ordered array of (name, signature) pairs
+    /// - Throws: SemanticError if the trait is undefined
+    public static func orderedTraitMethods(
+        _ traitName: String,
+        traits: [String: TraitDeclInfo],
+        currentLine: Int?
+    ) throws -> [(name: String, signature: TraitMethodSignature)] {
+        var visited: Set<String> = []
+        return try orderedTraitMethodsHelper(traitName, traits: traits, visited: &visited, currentLine: currentLine)
+    }
+    
+    private static func orderedTraitMethodsHelper(
+        _ traitName: String,
+        traits: [String: TraitDeclInfo],
+        visited: inout Set<String>,
+        currentLine: Int?
+    ) throws -> [(name: String, signature: TraitMethodSignature)] {
+        if visited.contains(traitName) { return [] }
+        visited.insert(traitName)
+        
+        if isBuiltinTrait(traitName) { return [] }
+        
+        guard let decl = traits[traitName] else {
+            throw SemanticError(.generic("Undefined trait: \(traitName)"), line: currentLine)
+        }
+        
+        var result: [(name: String, signature: TraitMethodSignature)] = []
+        var seen: Set<String> = []
+        
+        // Parent trait methods first
+        for parent in decl.superTraits {
+            let parentMethods = try orderedTraitMethodsHelper(parent.baseName, traits: traits, visited: &visited, currentLine: currentLine)
+            for entry in parentMethods where !seen.contains(entry.name) {
+                result.append(entry)
+                seen.insert(entry.name)
+            }
+        }
+        
+        // Then this trait's own methods
+        for m in decl.methods where !seen.contains(m.name) {
+            result.append((name: m.name, signature: m))
+            seen.insert(m.name)
+        }
+        
+        return result
+    }
+    
+    // MARK: - Trait Validation (original)
     
     /// Validates that a trait name is defined.
     /// - Parameters:
@@ -320,6 +376,11 @@ public enum SemaUtils {
             // Type variables should not be substituted by generic parameter substitution
             // They are handled by the constraint solver
             return type
+            
+        case .traitObject(let traitName, let typeArgs):
+            if typeArgs.isEmpty { return type }
+            let newArgs = typeArgs.map { substituteType($0, substitution: substitution, context: context) }
+            return .traitObject(traitName: traitName, typeArgs: newArgs)
         }
     }
     

@@ -296,6 +296,23 @@ extension Monomorphizer {
             generatedNodes.append(functionNode)
         }
 
+        // Register structured lookup: baseType name + method name -> DefId
+        // This avoids reverse-parsing mangled names in buildStaticMethodLookup.
+        let baseTypeName: String?
+        switch baseType {
+        case .structure(let defId): baseTypeName = context.getName(defId)
+        case .union(let defId):     baseTypeName = context.getName(defId)
+        default:                    baseTypeName = nil
+        }
+        if let typeName = baseTypeName {
+            let lookupKey = "\(typeName).\(methodBaseName)"
+            if extensionMethodDefIds[lookupKey] == nil {
+                // Use the DefId from the generated symbol
+                let sym = makeSymbol(name: mangledName, type: functionType, kind: .function, methodKind: getCompilerMethodKind(methodBaseName))
+                extensionMethodDefIds[lookupKey] = sym.defId
+            }
+        }
+
         let kind = getCompilerMethodKind(methodBaseName)
         return makeSymbol(name: mangledName, type: functionType, kind: .function, methodKind: kind)
     }
@@ -638,6 +655,73 @@ extension Monomorphizer {
             return true
         default:
             return false
+        }
+    }
+
+    // MARK: - Trait Object Method Resolution
+
+    /// Returns an ordered list of trait methods for vtable layout.
+    /// Parent trait methods come first (in declaration order), then the trait's own methods.
+    /// This mirrors the logic in TypeCheckerTraits.swift's orderedTraitMethods.
+    internal func orderedTraitMethods(_ traitName: String) -> [(name: String, signature: TraitMethodSignature)] {
+        var visited: Set<String> = []
+        return orderedTraitMethodsHelper(traitName, visited: &visited)
+    }
+
+    private func orderedTraitMethodsHelper(
+        _ traitName: String,
+        visited: inout Set<String>
+    ) -> [(name: String, signature: TraitMethodSignature)] {
+        if visited.contains(traitName) { return [] }
+        visited.insert(traitName)
+
+        if SemaUtils.isBuiltinTrait(traitName) { return [] }
+
+        guard let decl = input.genericTemplates.traits[traitName] else {
+            return []
+        }
+
+        var result: [(name: String, signature: TraitMethodSignature)] = []
+        var seen: Set<String> = []
+
+        // Parent trait methods first
+        for parent in decl.superTraits {
+            let parentMethods = orderedTraitMethodsHelper(parent.baseName, visited: &visited)
+            for entry in parentMethods where !seen.contains(entry.name) {
+                result.append(entry)
+                seen.insert(entry.name)
+            }
+        }
+
+        // Then this trait's own methods
+        for m in decl.methods where !seen.contains(m.name) {
+            result.append((name: m.name, signature: m))
+            seen.insert(m.name)
+        }
+
+        return result
+    }
+
+    /// Computes the vtable index for a method in a trait.
+    /// Methods are ordered by declaration order, with parent trait methods first.
+    internal func vtableMethodIndex(traitName: String, methodName: String) -> Int? {
+        let ordered = orderedTraitMethods(traitName)
+        return ordered.firstIndex(where: { $0.name == methodName })
+    }
+
+    /// Extracts the inner trait object type from a type, unwrapping reference if needed.
+    /// Returns (traitName, typeArgs) if the type is a trait object or reference to trait object.
+    internal func extractTraitObjectType(_ type: Type) -> (traitName: String, typeArgs: [Type])? {
+        switch type {
+        case .traitObject(let traitName, let typeArgs):
+            return (traitName, typeArgs)
+        case .reference(let inner):
+            if case .traitObject(let traitName, let typeArgs) = inner {
+                return (traitName, typeArgs)
+            }
+            return nil
+        default:
+            return nil
         }
     }
 
