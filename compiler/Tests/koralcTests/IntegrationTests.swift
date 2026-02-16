@@ -133,6 +133,7 @@ class IntegrationTests: XCTestCase {
     func test_indirect_recursion_error() throws { try runCase(named: "indirect_recursion_error.koral") }
     func test_indirect_recursion_chain_error() throws { try runCase(named: "indirect_recursion_chain_error.koral") }
     func test_indirect_recursion_ref_ok() throws { try runCase(named: "indirect_recursion_ref_ok.koral") }
+    func test_inter_procedural_escape() throws { try runCase(named: "inter_procedural_escape.koral") }
     func test_generic_recursion_error() throws { try runCase(named: "generic_recursion_error.koral") }
     func test_ref_method_call() throws { try runCase(named: "ref_method_call.koral") }
     func test_result_map_test() throws { try runCase(named: "result_map_test.koral") }
