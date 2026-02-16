@@ -41,6 +41,9 @@ public class CodeGen {
   
   /// 是否启用逃逸分析报告
   private let escapeAnalysisReportEnabled: Bool
+  
+  /// 全局逃逸分析结果
+  private var globalEscapeResult: GlobalEscapeResult?
 
   // Lightweight type declaration wrapper used for dependency ordering before emission
   private enum TypeDeclaration {
@@ -860,6 +863,10 @@ public class CodeGen {
       // 生成 vtable 结构体、wrapper 函数和 vtable 实例
       processVtableRequests()
 
+      // 全局逃逸分析：在生成函数实现之前，按调用图逆拓扑序分析所有函数
+      let globalAnalyzer = GlobalEscapeAnalyzer(context: context, program: program)
+      globalEscapeResult = globalAnalyzer.analyze()
+
       // 生成函数实现
       for node in nodes {
         if case .globalFunction(let identifier, let params, let body) = node {
@@ -951,13 +958,16 @@ public class CodeGen {
     let funcReturnType = getFunctionReturnTypeAsType(identifier.type)
     escapeContext.reset(returnType: funcReturnType, functionName: cName)
     
-    // 预分析函数体，识别所有可能逃逸的变量
-    escapeContext.preAnalyze(body: body, params: params)
-    
-    // 重置作用域状态（预分析会修改作用域状态）
-    escapeContext.variableScopes = [:]
-    escapeContext.currentScopeLevel = 0
-    // 注意：escapedVariables 保留，因为这是预分析的结果
+    // 使用全局逃逸分析结果（如果可用），否则回退到 per-function 分析
+    if let result = globalEscapeResult,
+       let escaped = result.escapedVariablesPerFunction[identifier.defId.id] {
+        escapeContext.escapedVariables = escaped
+    } else {
+        // Fallback: 使用原有的 per-function 分析
+        escapeContext.preAnalyze(body: body, params: params)
+        escapeContext.variableScopes = [:]
+        escapeContext.currentScopeLevel = 0
+    }
     
     // Save Lambda state before generating function body
     let savedLambdaFunctions = lambdaFunctions

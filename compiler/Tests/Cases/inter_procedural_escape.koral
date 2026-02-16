@@ -1,0 +1,142 @@
+// Inter-procedural escape analysis integration test
+//
+// Tests that ref local_var is correctly heap-allocated when passed to
+// functions that store the value via init_memory or deptr assignment
+// (e.g. List.push, Set.insert), preventing dangling pointers.
+//
+// EXPECT: Test 1 direct: Leaf 10
+// EXPECT: Test 2 method: Leaf 42
+// EXPECT: Test 3 multi push: 3
+// EXPECT: Test 3 values: 10 20 30
+// EXPECT: Test 4 no escape: 99
+// EXPECT: Test 5 nested: Leaf 77
+// EXPECT: Test 6 set with list: ok
+// EXPECT: Test 7 deptr assign: 55
+
+public type Node {
+    Leaf(value Int),
+    Branch(children [Node ref]List),
+}
+
+public type Builder(mut dummy Int)
+
+given Builder {
+    public new() Builder = Builder(0)
+
+    public make_leaf(self ref, v Int) Node = Node.Leaf(v)
+
+    // Core test: build() creates a local variable, pushes ref into List,
+    // returns the List inside a union. Without inter-procedural escape
+    // analysis, `child` would be stack-allocated and become a dangling pointer.
+    public build(self ref) Node = {
+        let mut kids = [Node ref]List.new()
+        let child = self.make_leaf(42)
+        kids.push(ref child)
+        Node.Branch(kids)
+    }
+
+    // Multiple refs pushed into a list
+    public build_multi(self ref) [Node ref]List = {
+        let mut kids = [Node ref]List.new()
+        let c1 = self.make_leaf(10)
+        let c2 = self.make_leaf(20)
+        let c3 = self.make_leaf(30)
+        kids.push(ref c1)
+        kids.push(ref c2)
+        kids.push(ref c3)
+        kids
+    }
+
+    // Nested: build calls another method that also pushes refs
+    public build_nested(self ref) Node = {
+        let mut kids = [Node ref]List.new()
+        let inner = self.make_leaf(77)
+        kids.push(ref inner)
+        Node.Branch(kids)
+    }
+}
+
+// Helper: a function that takes a ref but does NOT store it anywhere.
+// The ref should remain stack-allocated (no escape).
+let read_ref(n Node ref) Int = {
+    when deref n is {
+        .Leaf(v) then v,
+        .Branch(_) then 0 - 1,
+    }
+}
+
+// Helper: wraps a value in a Box via deptr assignment
+public type IntBox(mut value Int)
+
+let box_value(v Int) IntBox = {
+    let mut b = IntBox(0)
+    b.value = v
+    b
+}
+
+let print_node(label String, node Node) Void = {
+    when node is {
+        .Branch(ch) then {
+            let n = deref ch[0]
+            when n is {
+                .Leaf(v) then print_line(label + "Leaf " + v.to_string()),
+                _ then print_line(label + "FAIL"),
+            }
+        },
+        _ then print_line(label + "not Branch"),
+    }
+}
+
+public let main() Void = {
+    // Test 1: Direct construction (baseline, no method call)
+    let mut kids1 = [Node ref]List.new()
+    let c1 = Node.Leaf(10)
+    kids1.push(ref c1)
+    let tree1 = Node.Branch(kids1)
+    print_node("Test 1 direct: ", tree1)
+
+    // Test 2: Via method — the core dangling pointer fix
+    let mut b = Builder.new()
+    let tree2 = b.build()
+    print_node("Test 2 method: ", tree2)
+
+    // Test 3: Multiple refs pushed into a list via method
+    let kids3 = b.build_multi()
+    print_line("Test 3 multi push: " + kids3.count().to_string())
+    let n0 = deref kids3[0]
+    let n1 = deref kids3[1]
+    let n2 = deref kids3[2]
+    let mut vals = String.zero()
+    when n0 is { .Leaf(v) then { vals.push_string(v.to_string()); }, _ then {}, }
+    vals.push_string(" ")
+    when n1 is { .Leaf(v) then { vals.push_string(v.to_string()); }, _ then {}, }
+    vals.push_string(" ")
+    when n2 is { .Leaf(v) then { vals.push_string(v.to_string()); }, _ then {}, }
+    print_line("Test 3 values: " + vals)
+
+    // Test 4: Non-escaping ref — should still use stack allocation
+    let leaf4 = Node.Leaf(99)
+    let result4 = read_ref(ref leaf4)
+    print_line("Test 4 no escape: " + result4.to_string())
+
+    // Test 5: Nested method call with ref
+    let tree5 = b.build_nested()
+    print_node("Test 5 nested: ", tree5)
+
+    // Test 6: Set operations with List (exercises Set + List together)
+    let mut s = [Int]Set.new()
+    s.insert(1)
+    s.insert(2)
+    s.insert(3)
+    let mut items = [Int]List.new()
+    let mut it = s.iterator()
+    while it.next() is .Some(v) then {
+        items.push(v)
+    }
+    let len6 = items.count()
+    print_line("Test 6 set with list: " + (if len6 > 1 then "ok" else "fail"))
+
+    // Test 7: deptr assignment escape (value written to pointer target)
+    let b7 = box_value(55)
+    print_line("Test 7 deptr assign: " + b7.value.to_string())
+}

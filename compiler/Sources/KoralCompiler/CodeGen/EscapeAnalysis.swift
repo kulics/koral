@@ -60,6 +60,28 @@ public struct EscapeDiagnostic {
     }
 }
 
+/// 单个参数的逃逸状态
+public enum ParameterEscapeState {
+    case noEscape       // 参数不会逃逸
+    case escapes        // 参数会逃逸（通过 init_memory、返回值、字段赋值等）
+}
+
+/// 一个函数的参数逃逸摘要
+public struct FunctionEscapeSummary {
+    /// 每个参数的逃逸状态，索引对应参数位置
+    /// 对于方法：index 0 = self, index 1+ = 其他参数
+    public let parameterStates: [ParameterEscapeState]
+}
+
+/// 全局逃逸分析的完整结果
+public struct GlobalEscapeResult {
+    /// 函数 DefId -> 参数逃逸摘要
+    public let summaries: [UInt64: FunctionEscapeSummary]
+
+    /// 函数 DefId -> 该函数中已标记为逃逸的变量名集合
+    public let escapedVariablesPerFunction: [UInt64: [String: EscapeResult]]
+}
+
 /// 代码生成时的逃逸分析上下文
 /// 
 /// 追踪变量作用域层级和已标记为逃逸的变量，
@@ -96,6 +118,12 @@ public class EscapeContext {
     
     /// 收集的诊断信息
     public private(set) var diagnostics: [EscapeDiagnostic] = []
+    
+    /// 全局摘要表引用（在全局分析阶段设置）
+    public var globalSummaries: [UInt64: FunctionEscapeSummary]?
+    
+    /// MonomorphizedProgram 引用，用于静态方法查找
+    public var program: MonomorphizedProgram?
     
     public init(reportingEnabled: Bool = false, context: CompilerContext? = nil) {
         self.reportingEnabled = reportingEnabled
@@ -167,6 +195,8 @@ public class EscapeContext {
         self.inReturnContext = false
         self.inFieldAssignmentContext = false
         self.currentFunctionName = functionName
+        self.globalSummaries = nil
+        self.program = nil
     }
     
     /// 获取所有诊断信息的格式化输出
@@ -419,6 +449,45 @@ public class EscapeContext {
             for arg in arguments {
                 preAnalyzeExpression(arg)
             }
+            // Inter-procedural escape propagation: consult callee's summary
+            if let summaries = globalSummaries {
+                var calleeDefId: UInt64? = nil
+                var selfArg: TypedExpressionNode? = nil
+                switch callee {
+                case .methodReference(let base, let method, _, _, _):
+                    calleeDefId = method.defId.id
+                    selfArg = base
+                case .variable(let identifier):
+                    if case .function = identifier.kind {
+                        calleeDefId = identifier.defId.id
+                    }
+                default:
+                    break
+                }
+                if let cDefId = calleeDefId, let summary = summaries[cDefId] {
+                    // For method calls: index 0 = self, index 1+ = arguments
+                    // For regular calls: index i = arguments[i]
+                    if let selfArg = selfArg {
+                        // Method call
+                        if summary.parameterStates.count > 0 && summary.parameterStates[0] == .escapes {
+                            markRefArgumentAsEscaping(selfArg)
+                        }
+                        for (i, arg) in arguments.enumerated() {
+                            let paramIdx = i + 1
+                            if paramIdx < summary.parameterStates.count && summary.parameterStates[paramIdx] == .escapes {
+                                markRefArgumentAsEscaping(arg)
+                            }
+                        }
+                    } else {
+                        // Regular function call
+                        for (i, arg) in arguments.enumerated() {
+                            if i < summary.parameterStates.count && summary.parameterStates[i] == .escapes {
+                                markRefArgumentAsEscaping(arg)
+                            }
+                        }
+                    }
+                }
+            }
             
         case .genericCall(_, _, let arguments, _):
             for arg in arguments {
@@ -439,10 +508,31 @@ public class EscapeContext {
             for arg in arguments {
                 preAnalyzeExpression(arg)
             }
+            // Conservative: trait method calls can't be statically resolved,
+            // so mark all ref arguments as escaping
+            if globalSummaries != nil {
+                markRefArgumentAsEscaping(receiver)
+                for arg in arguments {
+                    markRefArgumentAsEscaping(arg)
+                }
+            }
             
-        case .staticMethodCall(_, _, _, let arguments, _):
+        case .staticMethodCall(let baseType, let methodName, _, let arguments, _):
             for arg in arguments {
                 preAnalyzeExpression(arg)
+            }
+            // Inter-procedural: look up static method summary
+            if let summaries = globalSummaries, let prog = program {
+                let typeName = context?.getTypeName(baseType) ?? ""
+                if let defId = prog.lookupStaticMethod(typeName: typeName, methodName: methodName) {
+                    if let summary = summaries[defId.id] {
+                        for (i, arg) in arguments.enumerated() {
+                            if i < summary.parameterStates.count && summary.parameterStates[i] == .escapes {
+                                markRefArgumentAsEscaping(arg)
+                            }
+                        }
+                    }
+                }
             }
             
         case .whileExpression(let condition, let body, _):
@@ -526,6 +616,9 @@ public class EscapeContext {
         case .deptrAssignment(let pointer, _, let value):
             preAnalyzeExpression(pointer)
             preAnalyzeExpression(value)
+            // deptr assignment 和 init_memory 本质相同：把值写入指针目标，
+            // 值脱离当前栈帧的生命周期管理。递归检查 value 中的引用逃逸。
+            checkPointerStoreEscape(value)
             
         case .expression(let expr):
             preAnalyzeExpression(expr)
@@ -601,6 +694,11 @@ public class EscapeContext {
         case .initMemory(let ptr, let val):
             preAnalyzeExpression(ptr)
             preAnalyzeExpression(val)
+            // When a value is stored to a pointer via init_memory, any ref
+            // inside that value escapes — the pointer target (e.g. List storage)
+            // may outlive the current scope. This covers List.push, Set.insert,
+            // Map.set, etc. which all store elements through init_memory.
+            checkPointerStoreEscape(val)
         case .deinitMemory(let ptr):
             preAnalyzeExpression(ptr)
         case .takeMemory(let ptr):
@@ -752,6 +850,496 @@ public class EscapeContext {
             
         default:
             break
+        }
+    }
+
+    /// 检查写入指针目标的值是否导致引用逃逸
+    ///
+    /// 当值被写入指针目标时（init_memory 或 deptr assignment），该值脱离了
+    /// 当前栈帧的生命周期管理。递归检查值及其构造函数参数中是否包含
+    /// `ref local_var` 或参数变量，如果是则标记为逃逸。
+    ///
+    /// 覆盖场景：
+    /// - `init_memory(ptr, ref local_var)` — 直接存储引用
+    /// - `init_memory(ptr, SomeType(ref local_var))` — 引用包在构造函数里
+    /// - `deptr ptr = SomeType.Variant(value)` — value 是参数变量（用于 summary）
+    private func checkPointerStoreEscape(_ val: TypedExpressionNode) {
+        switch val {
+        case .referenceExpression(let inner, _):
+            if let varName = extractVariableName(from: inner) {
+                if variableScopes[varName] != nil {
+                    // scopeLevel > 0: 局部变量，标记逃逸
+                    // scopeLevel == 0: 参数变量，标记逃逸（用于 summary 构建）
+                    markEscaped(varName, reason: .escapeToParameter)
+                }
+            }
+        case .variable(let identifier):
+            // 参数变量直接传入（不包在 ref 里），用于 summary 构建
+            if case .reference = identifier.type {
+                let varName = context?.getName(identifier.defId) ?? "<unknown>"
+                if let scopeLevel = variableScopes[varName], scopeLevel == 0 {
+                    markEscaped(varName, reason: .escapeToParameter)
+                }
+            }
+        case .typeConstruction(_, _, let arguments, _):
+            // 递归检查构造函数参数，如 SetBucket.Occupied(value)
+            for arg in arguments {
+                checkPointerStoreEscape(arg)
+            }
+        case .unionConstruction(_, _, let arguments):
+            for arg in arguments {
+                checkPointerStoreEscape(arg)
+            }
+        default:
+            break
+        }
+    }
+
+    /// 标记参数表达式中的 ref local_var 为逃逸
+    ///
+    /// 当调用一个函数且该函数的某个参数被标记为逃逸时，
+    /// 检查对应的实参是否包含 `ref local_var`，如果是则标记该局部变量为逃逸。
+    private func markRefArgumentAsEscaping(_ arg: TypedExpressionNode) {
+        switch arg {
+        case .referenceExpression(let inner, _):
+            if let varName = extractVariableName(from: inner) {
+                if let scopeLevel = variableScopes[varName], scopeLevel > 0 {
+                    markEscaped(varName, reason: .escapeToParameter)
+                }
+            }
+        default:
+            break
+        }
+    }
+}
+
+
+// MARK: - Global Escape Analyzer
+
+/// 全局逃逸分析器
+/// 
+/// 在代码生成之前对所有函数进行一次全局逃逸分析 pass，
+/// 按调用图逆拓扑序分析所有函数，为每个函数的参数生成逃逸摘要。
+public class GlobalEscapeAnalyzer {
+    private let context: CompilerContext
+    private let program: MonomorphizedProgram
+    private var summaries: [UInt64: FunctionEscapeSummary] = [:]
+    private var escapedVariablesPerFunction: [UInt64: [String: EscapeResult]] = [:]
+    private var callGraph: [UInt64: Set<UInt64>] = [:]
+    private var functionInfo: [UInt64: (identifier: Symbol, params: [Symbol], body: TypedExpressionNode)] = [:]
+
+    public init(context: CompilerContext, program: MonomorphizedProgram) {
+        self.context = context
+        self.program = program
+    }
+
+    // MARK: - Entry Point
+
+    /// 运行全局逃逸分析，返回完整结果
+    public func analyze() -> GlobalEscapeResult {
+        // Step 1: Collect all functions
+        collectFunctions()
+
+        // Step 2: Build call graph
+        buildCallGraph()
+
+        // Step 3: Compute reverse topological order (with SCC handling)
+        let order = computeReverseTopologicalOrder()
+
+        // Step 4: Analyze functions in order (callees before callers)
+        for defId in order {
+            guard let info = functionInfo[defId] else { continue }
+            analyzeFunction(defId: defId, identifier: info.identifier, params: info.params, body: info.body)
+        }
+
+        // Step 5: Return the complete result
+        return GlobalEscapeResult(
+            summaries: summaries,
+            escapedVariablesPerFunction: escapedVariablesPerFunction
+        )
+    }
+
+    // MARK: - Function Collection
+
+    /// 收集所有函数信息
+    private func collectFunctions() {
+        for node in program.globalNodes {
+            switch node {
+            case .globalFunction(let identifier, let params, let body):
+                functionInfo[identifier.defId.id] = (identifier: identifier, params: params, body: body)
+
+            case .givenDeclaration(let type, let methods):
+                if context.containsGenericParameter(type) { continue }
+                for method in methods {
+                    functionInfo[method.identifier.defId.id] = (
+                        identifier: method.identifier,
+                        params: method.parameters,
+                        body: method.body
+                    )
+                }
+
+            default:
+                break
+            }
+        }
+    }
+
+    // MARK: - Call Graph Building
+
+    /// 构建调用图
+    private func buildCallGraph() {
+        for (defId, info) in functionInfo {
+            callGraph[defId] = []
+            extractCallsFromExpression(info.body, callerDefId: defId)
+        }
+    }
+
+    /// 从 callee 表达式中提取被调用函数的 DefId
+    private func extractCalleeDefId(from callee: TypedExpressionNode) -> UInt64? {
+        switch callee {
+        case .methodReference(_, let method, _, _, _):
+            return method.defId.id
+        case .variable(let identifier):
+            if case .function = identifier.kind {
+                return identifier.defId.id
+            }
+            return nil
+        default:
+            return nil
+        }
+    }
+
+    /// 递归遍历表达式，提取所有调用边加入调用图
+    private func extractCallsFromExpression(_ expr: TypedExpressionNode, callerDefId: UInt64) {
+        switch expr {
+        case .integerLiteral, .floatLiteral, .stringLiteral, .booleanLiteral:
+            break
+
+        case .interpolatedString(let parts, _):
+            for part in parts {
+                if case .expression(let expr) = part {
+                    extractCallsFromExpression(expr, callerDefId: callerDefId)
+                }
+            }
+
+        case .variable:
+            break
+
+        case .castExpression(let inner, _):
+            extractCallsFromExpression(inner, callerDefId: callerDefId)
+
+        case .arithmeticExpression(let left, _, let right, _),
+             .wrappingArithmeticExpression(let left, _, let right, _),
+             .wrappingShiftExpression(let left, _, let right, _):
+            extractCallsFromExpression(left, callerDefId: callerDefId)
+            extractCallsFromExpression(right, callerDefId: callerDefId)
+
+        case .comparisonExpression(let left, _, let right, _):
+            extractCallsFromExpression(left, callerDefId: callerDefId)
+            extractCallsFromExpression(right, callerDefId: callerDefId)
+
+        case .letExpression(_, let value, let body, _):
+            extractCallsFromExpression(value, callerDefId: callerDefId)
+            extractCallsFromExpression(body, callerDefId: callerDefId)
+
+        case .andExpression(let left, let right, _),
+             .orExpression(let left, let right, _):
+            extractCallsFromExpression(left, callerDefId: callerDefId)
+            extractCallsFromExpression(right, callerDefId: callerDefId)
+
+        case .notExpression(let inner, _),
+             .bitwiseNotExpression(let inner, _):
+            extractCallsFromExpression(inner, callerDefId: callerDefId)
+
+        case .bitwiseExpression(let left, _, let right, _):
+            extractCallsFromExpression(left, callerDefId: callerDefId)
+            extractCallsFromExpression(right, callerDefId: callerDefId)
+
+        case .derefExpression(let inner, _),
+             .ptrExpression(let inner, _),
+             .deptrExpression(let inner, _),
+             .referenceExpression(let inner, _):
+            extractCallsFromExpression(inner, callerDefId: callerDefId)
+
+        case .blockExpression(let statements, let finalExpr, _):
+            for stmt in statements {
+                extractCallsFromStatement(stmt, callerDefId: callerDefId)
+            }
+            if let finalExpr = finalExpr {
+                extractCallsFromExpression(finalExpr, callerDefId: callerDefId)
+            }
+
+        case .ifExpression(let condition, let thenBranch, let elseBranch, _):
+            extractCallsFromExpression(condition, callerDefId: callerDefId)
+            extractCallsFromExpression(thenBranch, callerDefId: callerDefId)
+            if let elseBranch = elseBranch {
+                extractCallsFromExpression(elseBranch, callerDefId: callerDefId)
+            }
+
+        case .ifPatternExpression(let subject, _, _, let thenBranch, let elseBranch, _):
+            extractCallsFromExpression(subject, callerDefId: callerDefId)
+            extractCallsFromExpression(thenBranch, callerDefId: callerDefId)
+            if let elseBranch = elseBranch {
+                extractCallsFromExpression(elseBranch, callerDefId: callerDefId)
+            }
+
+        case .call(let callee, let arguments, _):
+            // Extract callee DefId and add edge
+            if let calleeDefId = extractCalleeDefId(from: callee) {
+                callGraph[callerDefId]?.insert(calleeDefId)
+            }
+            // Recurse into callee and arguments
+            extractCallsFromExpression(callee, callerDefId: callerDefId)
+            for arg in arguments {
+                extractCallsFromExpression(arg, callerDefId: callerDefId)
+            }
+
+        case .genericCall(_, _, let arguments, _):
+            for arg in arguments {
+                extractCallsFromExpression(arg, callerDefId: callerDefId)
+            }
+
+        case .methodReference(let base, _, _, _, _):
+            extractCallsFromExpression(base, callerDefId: callerDefId)
+
+        case .traitMethodPlaceholder(_, _, let base, _, _):
+            extractCallsFromExpression(base, callerDefId: callerDefId)
+
+        case .traitObjectConversion(let inner, _, _, _, _):
+            extractCallsFromExpression(inner, callerDefId: callerDefId)
+
+        case .traitMethodCall(let receiver, _, _, _, let arguments, _):
+            // Do NOT add edge for trait method calls (can't statically resolve)
+            extractCallsFromExpression(receiver, callerDefId: callerDefId)
+            for arg in arguments {
+                extractCallsFromExpression(arg, callerDefId: callerDefId)
+            }
+
+        case .staticMethodCall(let baseType, let methodName, _, let arguments, _):
+            // Try to look up the static method DefId
+            let typeName = context.getTypeName(baseType)
+            if let defId = program.lookupStaticMethod(typeName: typeName, methodName: methodName) {
+                callGraph[callerDefId]?.insert(defId.id)
+            }
+            // Recurse into arguments
+            for arg in arguments {
+                extractCallsFromExpression(arg, callerDefId: callerDefId)
+            }
+
+        case .whileExpression(let condition, let body, _):
+            extractCallsFromExpression(condition, callerDefId: callerDefId)
+            extractCallsFromExpression(body, callerDefId: callerDefId)
+
+        case .whilePatternExpression(let subject, _, _, let body, _):
+            extractCallsFromExpression(subject, callerDefId: callerDefId)
+            extractCallsFromExpression(body, callerDefId: callerDefId)
+
+        case .typeConstruction(_, _, let arguments, _):
+            for arg in arguments {
+                extractCallsFromExpression(arg, callerDefId: callerDefId)
+            }
+
+        case .memberPath(let source, _):
+            extractCallsFromExpression(source, callerDefId: callerDefId)
+
+        case .subscriptExpression(let base, let arguments, _, _):
+            extractCallsFromExpression(base, callerDefId: callerDefId)
+            for arg in arguments {
+                extractCallsFromExpression(arg, callerDefId: callerDefId)
+            }
+
+        case .unionConstruction(_, _, let arguments):
+            for arg in arguments {
+                extractCallsFromExpression(arg, callerDefId: callerDefId)
+            }
+
+        case .intrinsicCall(let intrinsic):
+            extractCallsFromIntrinsic(intrinsic, callerDefId: callerDefId)
+
+        case .matchExpression(let subject, let cases, _):
+            extractCallsFromExpression(subject, callerDefId: callerDefId)
+            for matchCase in cases {
+                extractCallsFromExpression(matchCase.body, callerDefId: callerDefId)
+            }
+
+        case .lambdaExpression(_, _, let body, _):
+            // Do NOT add lambda calls to call graph, but recurse into body
+            extractCallsFromExpression(body, callerDefId: callerDefId)
+        }
+    }
+
+    /// 递归遍历语句，提取调用边
+    private func extractCallsFromStatement(_ stmt: TypedStatementNode, callerDefId: UInt64) {
+        switch stmt {
+        case .variableDeclaration(_, let value, _):
+            extractCallsFromExpression(value, callerDefId: callerDefId)
+
+        case .assignment(let target, _, let value):
+            extractCallsFromExpression(target, callerDefId: callerDefId)
+            extractCallsFromExpression(value, callerDefId: callerDefId)
+
+        case .deptrAssignment(let pointer, _, let value):
+            extractCallsFromExpression(pointer, callerDefId: callerDefId)
+            extractCallsFromExpression(value, callerDefId: callerDefId)
+
+        case .expression(let expr):
+            extractCallsFromExpression(expr, callerDefId: callerDefId)
+
+        case .return(let value):
+            if let value = value {
+                extractCallsFromExpression(value, callerDefId: callerDefId)
+            }
+
+        case .break, .continue:
+            break
+        }
+    }
+
+    /// 递归遍历内置函数调用，提取调用边
+    private func extractCallsFromIntrinsic(_ intrinsic: TypedIntrinsic, callerDefId: UInt64) {
+        switch intrinsic {
+        case .allocMemory(let count, _):
+            extractCallsFromExpression(count, callerDefId: callerDefId)
+        case .deallocMemory(let ptr):
+            extractCallsFromExpression(ptr, callerDefId: callerDefId)
+        case .copyMemory(let dest, let src, let count):
+            extractCallsFromExpression(dest, callerDefId: callerDefId)
+            extractCallsFromExpression(src, callerDefId: callerDefId)
+            extractCallsFromExpression(count, callerDefId: callerDefId)
+        case .moveMemory(let dest, let src, let count):
+            extractCallsFromExpression(dest, callerDefId: callerDefId)
+            extractCallsFromExpression(src, callerDefId: callerDefId)
+            extractCallsFromExpression(count, callerDefId: callerDefId)
+        case .refCount(let val):
+            extractCallsFromExpression(val, callerDefId: callerDefId)
+        case .downgradeRef(let val, _):
+            extractCallsFromExpression(val, callerDefId: callerDefId)
+        case .upgradeRef(let val, _):
+            extractCallsFromExpression(val, callerDefId: callerDefId)
+        case .initMemory(let ptr, let val):
+            extractCallsFromExpression(ptr, callerDefId: callerDefId)
+            extractCallsFromExpression(val, callerDefId: callerDefId)
+        case .deinitMemory(let ptr):
+            extractCallsFromExpression(ptr, callerDefId: callerDefId)
+        case .takeMemory(let ptr):
+            extractCallsFromExpression(ptr, callerDefId: callerDefId)
+        case .nullPtr:
+            break
+        }
+    }
+
+    // MARK: - Topological Order (Tarjan's SCC)
+
+    /// 计算逆拓扑序（被调用函数先于调用者）using Tarjan's SCC algorithm.
+    /// SCCs with more than one node (cycles/mutual recursion) have all their
+    /// parameters conservatively marked as `.escapes`.
+    /// Tarjan's algorithm naturally emits SCCs in reverse topological order.
+    private func computeReverseTopologicalOrder() -> [UInt64] {
+        var index = 0
+        var stack: [UInt64] = []
+        var onStack: Set<UInt64> = []
+        var indices: [UInt64: Int] = [:]
+        var lowlinks: [UInt64: Int] = [:]
+        var result: [UInt64] = []
+
+        func strongConnect(_ v: UInt64) {
+            indices[v] = index
+            lowlinks[v] = index
+            index += 1
+            stack.append(v)
+            onStack.insert(v)
+
+            for w in callGraph[v] ?? [] {
+                // Only consider edges to functions we know about
+                guard functionInfo[w] != nil else { continue }
+                if indices[w] == nil {
+                    strongConnect(w)
+                    lowlinks[v] = min(lowlinks[v]!, lowlinks[w]!)
+                } else if onStack.contains(w) {
+                    lowlinks[v] = min(lowlinks[v]!, indices[w]!)
+                }
+            }
+
+            if lowlinks[v] == indices[v] {
+                // Found an SCC - pop all nodes in this SCC
+                var scc: [UInt64] = []
+                while true {
+                    let w = stack.removeLast()
+                    onStack.remove(w)
+                    scc.append(w)
+                    if w == v { break }
+                }
+
+                // If SCC has more than one node (cycle), we still analyze each
+                // function normally. Summaries for SCC peers may be incomplete,
+                // but missing summaries are safely skipped (no propagation = safe).
+                // This avoids over-conservative marking that breaks correct code.
+
+                // Add SCC nodes to result (they form a group at the same level)
+                result.append(contentsOf: scc)
+            }
+        }
+
+        // Visit all functions
+        for defId in functionInfo.keys {
+            if indices[defId] == nil {
+                strongConnect(defId)
+            }
+        }
+
+        return result
+    }
+
+    // MARK: - Per-Function Analysis
+
+    /// 分析单个函数，生成参数摘要
+    private func analyzeFunction(defId: UInt64, identifier: Symbol, params: [Symbol], body: TypedExpressionNode) {
+        // Create a temporary EscapeContext for this function
+        let escCtx = EscapeContext(reportingEnabled: false, context: context)
+
+        // Extract the function's return type
+        let funcReturnType: Type?
+        if case .function(_, let returns) = identifier.type {
+            funcReturnType = returns
+        } else {
+            funcReturnType = nil
+        }
+
+        escCtx.reset(returnType: funcReturnType, functionName: context.getName(identifier.defId) ?? "<unknown>")
+
+        // Set the global summaries so call-site propagation works
+        escCtx.globalSummaries = self.summaries
+        escCtx.program = self.program
+
+        // Run the existing preAnalyze
+        escCtx.preAnalyze(body: body, params: params)
+
+        // Store the per-function escaped variables, but filter out parameter-level
+        // escapes. Parameter escape info is only used for building summaries — the
+        // actual memory allocation decision for parameters belongs to the caller,
+        // not the callee.
+        let paramNames = Set(params.compactMap { context.getName($0.defId) })
+        var localEscaped: [String: EscapeResult] = [:]
+        for (name, reason) in escCtx.escapedVariables {
+            if paramNames.contains(name) {
+                continue  // Skip parameter variables
+            }
+            localEscaped[name] = reason
+        }
+        escapedVariablesPerFunction[defId] = localEscaped
+
+        // Build the parameter summary if not already set (SCC case already has one)
+        if summaries[defId] == nil {
+            var paramStates: [ParameterEscapeState] = []
+            for param in params {
+                let paramName = context.getName(param.defId) ?? "<unknown>"
+                if escCtx.escapedVariables[paramName] != nil {
+                    paramStates.append(.escapes)
+                } else {
+                    paramStates.append(.noEscape)
+                }
+            }
+            summaries[defId] = FunctionEscapeSummary(parameterStates: paramStates)
         }
     }
 }
