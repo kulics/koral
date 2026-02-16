@@ -95,6 +95,19 @@ given[T Any] [T]List {
         self.storage.len = self.storage.len + 1
     }
 
+    public push_all(self ref, other [T]List) Void = {
+        let other_len = other.storage.len
+        if other_len == 0 then { return; }
+        self.ensure_capacity(self.storage.len + other_len)
+        let mut i UInt = 0
+        while i < other_len then {
+            let v = deptr (other.storage.source + i)
+            init_memory(self.storage.source + self.storage.len, v)
+            self.storage.len = self.storage.len + 1
+            i += 1
+        }
+    }
+
     // Using if is pattern matching
     public pop(self ref) [T]Option = {
         if self.storage.len == 0 then { return [T]Option.None(); }
@@ -102,6 +115,29 @@ given[T Any] [T]List {
         self.storage.len = self.storage.len - 1
         let value = take_memory(self.storage.source + self.storage.len)
         [T]Option.Some(value)
+    }
+
+    public insert_all(self ref, index UInt, other [T]List) Void = {
+        let other_len = other.storage.len
+        if index > self.storage.len then { panic("List insert_all index out of bounds"); }
+        if other_len == 0 then { return; }
+        self.ensure_capacity(self.storage.len + other_len)
+        // Shift elements to the right by other_len
+        let mut i = self.storage.len
+        while i > index then {
+            let src = self.storage.source + (i - 1)
+            let dst = self.storage.source + (i - 1 + other_len)
+            init_memory(dst, take_memory(src))
+            i = i - 1
+        }
+        // Copy other's elements into the gap
+        let mut j UInt = 0
+        while j < other_len then {
+            let v = deptr (other.storage.source + j)
+            init_memory(self.storage.source + (index + j), v)
+            j += 1
+        }
+        self.storage.len = self.storage.len + other_len
     }
 
     public insert(self ref, index UInt, value T) Void = {
