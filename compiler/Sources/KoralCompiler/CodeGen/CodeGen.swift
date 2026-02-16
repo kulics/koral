@@ -1428,6 +1428,11 @@ public class CodeGen {
         // Struct: call copy constructor
         addIndent()
         buffer += "\(result) = __koral_\(typeName)_copy((struct \(typeName)*)\(innerResult).ptr);\n"
+      } else if case .union(let defId) = type {
+        let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
+        // Union: call copy constructor (same as struct, unions have internal refs that need retain)
+        addIndent()
+        buffer += "\(result) = __koral_\(typeName)_copy((\(cTypeName(type))*)\(innerResult).ptr);\n"
       } else if case .reference(_) = type {
         // Reference: copy struct Ref/TraitRef and retain
         let cType = cTypeName(type)
