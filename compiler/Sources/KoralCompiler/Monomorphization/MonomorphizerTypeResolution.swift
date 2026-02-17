@@ -278,6 +278,10 @@ extension Monomorphizer {
             )
             
         case .structure(let defId):
+            // Skip if already resolved (optimization to avoid exponential traversal)
+            if resolvedStructUnionDefIds.contains(defId.id) {
+                return type
+            }
             if visited.contains(defId.id) {
                 return type
             }
@@ -296,14 +300,20 @@ extension Monomorphizer {
                 old.type != new.type
             }
             if !membersChanged {
+                resolvedStructUnionDefIds.insert(defId.id)
                 return type
             }
             let isGeneric = context.isGenericInstantiation(defId) ?? false
             let typeArgs = context.getTypeArguments(defId)
             context.updateStructInfo(defId: defId, members: newMembers, isGenericInstantiation: isGeneric, typeArguments: typeArgs)
+            resolvedStructUnionDefIds.insert(defId.id)
             return .structure(defId: defId)
             
         case .union(let defId):
+            // Skip if already resolved (optimization to avoid exponential traversal)
+            if resolvedStructUnionDefIds.contains(defId.id) {
+                return type
+            }
             if visited.contains(defId.id) {
                 return type
             }
@@ -324,11 +334,13 @@ extension Monomorphizer {
                 }
             }
             if !casesChanged {
+                resolvedStructUnionDefIds.insert(defId.id)
                 return type
             }
             let isGeneric = context.isGenericInstantiation(defId) ?? false
             let typeArgs = context.getTypeArguments(defId)
             context.updateUnionInfo(defId: defId, cases: newCases, isGenericInstantiation: isGeneric, typeArguments: typeArgs)
+            resolvedStructUnionDefIds.insert(defId.id)
             return .union(defId: defId)
             
         default:

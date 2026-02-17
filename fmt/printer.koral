@@ -1,0 +1,1085 @@
+// ============================================================================
+// Koral Formatter - Structural CST Printer
+// ============================================================================
+// Every spacing decision is determined by the CST node structure.
+// No token-level spacing inference needed.
+// ============================================================================
+
+public type Printer(
+    mut output String,
+    mut indent UInt,
+    mut at_line_start Bool,
+)
+
+given Printer {
+    public new() Printer = Printer(String.new(), 0, true)
+    public result(self) String = self.output
+
+    // ========================================================================
+    // Low-level output
+    // ========================================================================
+
+    private write_indent(self ref) Void = {
+        let mut i UInt = 0
+        while i < self.indent then {
+            self.output.push_string("    ")
+            i += 1
+        }
+    }
+
+    private write_newline(self ref) Void = {
+        self.output.push('\n')
+        self.at_line_start = true
+    }
+
+    private write_space(self ref) Void = { self.output.push(' ') }
+
+    private write(self ref, s String) Void = {
+        if self.at_line_start then {
+            self.write_indent()
+            self.at_line_start = false
+        }
+        self.output.push_string(s)
+    }
+
+    private write_token(self ref, t Token) Void = {
+        self.write(t.to_string())
+    }
+
+    // ========================================================================
+    // Type printing
+    // ========================================================================
+
+    private print_type(self ref, t CstType) Void = when t is {
+        .Named(name) then self.write_token(name),
+        .SelfType(kw) then self.write_token(kw),
+        .Generic(lb, args, rb, base) then {
+            self.write_token(lb)
+            let mut i UInt = 0
+            while i < args.count() then {
+                let arg = args[i]
+                self.print_type(deref arg.inner)
+                if arg.comma is .Some(c) then { self.write_token(c); self.write_space() }
+                i += 1
+            }
+            self.write_token(rb)
+            self.write_token(base)
+        },
+        .Ref(inner, kw) then {
+            self.print_type(deref inner)
+            self.write_space()
+            self.write_token(kw)
+        },
+        .Ptr(inner, kw) then {
+            self.print_type(deref inner)
+            self.write_space()
+            self.write_token(kw)
+        },
+        .Weakref(inner, kw) then {
+            self.print_type(deref inner)
+            self.write_space()
+            self.write_token(kw)
+        },
+    }
+
+    // ========================================================================
+    // Generic params printing: [T Any, U Eq]
+    // ========================================================================
+
+    private print_generic_params(self ref, gp CstGenericParams) Void = {
+        self.write_token(gp.lbracket)
+        let mut i UInt = 0
+        while i < gp.params.count() then {
+            let p = gp.params[i]
+            self.write_token(p.name)
+            let mut j UInt = 0
+            while j < p.constraints.count() then {
+                self.write_space()
+                self.print_type(deref p.constraints[j])
+                j += 1
+            }
+            if p.comma is .Some(c) then { self.write_token(c); self.write_space() }
+            i += 1
+        }
+        self.write_token(gp.rbracket)
+    }
+
+    // ========================================================================
+    // Pattern printing
+    // ========================================================================
+
+    private print_pattern(self ref, p CstPattern) Void = when p is {
+        .Wildcard(t) then self.write_token(t),
+        .Variable(name) then self.write_token(name),
+        .MutVariable(mut_kw, name) then {
+            self.write_token(mut_kw)
+            self.write_space()
+            self.write_token(name)
+        },
+        .PatIntLit(t) then self.write_token(t),
+        .NegIntLit(minus, t) then {
+            self.write_token(minus)
+            self.write_token(t)
+        },
+        .PatStrLit(t) then self.write_token(t),
+        .PatBoolLit(t) then self.write_token(t),
+        .UnionCase(dot, name, lp, args, rp) then {
+            self.write_token(dot)
+            self.write_token(name)
+            if lp is .Some(l) then {
+                self.write_token(l)
+                let mut i UInt = 0
+                while i < args.count() then {
+                    let a = args[i]
+                    self.print_pattern(deref a.pattern)
+                    if a.comma is .Some(c) then { self.write_token(c); self.write_space() }
+                    i += 1
+                }
+                if rp is .Some(r) then { self.write_token(r) }
+            }
+        },
+        .StructPattern(name, lp, args, rp) then {
+            self.write_token(name)
+            self.write_token(lp)
+            let mut i UInt = 0
+            while i < args.count() then {
+                let a = args[i]
+                self.print_pattern(deref a.pattern)
+                if a.comma is .Some(c) then { self.write_token(c); self.write_space() }
+                i += 1
+            }
+            self.write_token(rp)
+        },
+        .Comparison(op, val) then {
+            self.write_token(op)
+            self.write_space()
+            self.write_token(val)
+        },
+        .AndPattern(left, and_kw, right) then {
+            self.print_pattern(deref left)
+            self.write_space()
+            self.write_token(and_kw)
+            self.write_space()
+            self.print_pattern(deref right)
+        },
+        .OrPattern(left, or_kw, right) then {
+            self.print_pattern(deref left)
+            self.write_space()
+            self.write_token(or_kw)
+            self.write_space()
+            self.print_pattern(deref right)
+        },
+        .NotPattern(not_kw, inner) then {
+            self.write_token(not_kw)
+            self.write_space()
+            self.print_pattern(deref inner)
+        },
+        .ParenPattern(lp, inner, rp) then {
+            self.write_token(lp)
+            self.print_pattern(deref inner)
+            self.write_token(rp)
+        },
+    }
+
+    // ========================================================================
+    // Expression printing
+    // ========================================================================
+
+    public print_expr(self ref, e CstExpr) Void = when e is {
+        .IntLit(t) then self.write_token(t),
+        .FloatLit(t) then self.write_token(t),
+        .StrLit(t) then self.write_token(t),
+        .InterpStr(t) then self.write_token(t),
+        .BoolLit(t) then self.write_token(t),
+        .Ident(t) then self.write_token(t),
+        .SelfExpr(t) then self.write_token(t),
+        .UnderscoreExpr(t) then self.write_token(t),
+
+        .BinaryOp(left, op, right) then {
+            self.print_expr(deref left)
+            self.write_space()
+            self.write_token(op)
+            self.write_space()
+            self.print_expr(deref right)
+        },
+        .UnaryMinus(op, operand) then {
+            self.write_token(op)
+            self.print_expr(deref operand)
+        },
+        .NotExpr(op, operand) then {
+            self.write_token(op)
+            self.write_space()
+            self.print_expr(deref operand)
+        },
+        .BitwiseNot(op, operand) then {
+            self.write_token(op)
+            self.print_expr(deref operand)
+        },
+        .PrefixKw(kw, operand) then {
+            self.write_token(kw)
+            self.write_space()
+            self.print_expr(deref operand)
+        },
+        .TypeCast(lp, cast_type, rp, operand) then {
+            self.write_token(lp)
+            self.print_type(deref cast_type)
+            self.write_token(rp)
+            self.print_expr(deref operand)
+        },
+
+        .FieldAccess(base, dot, field) then {
+            self.print_expr(deref base)
+            self.write_token(dot)
+            self.write_token(field)
+        },
+        .Call(callee, lp, args, rp) then {
+            self.print_expr(deref callee)
+            self.write_token(lp)
+            self.print_call_args(args)
+            self.write_token(rp)
+        },
+        .SubscriptExpr(base, lb, args, rb) then {
+            self.print_expr(deref base)
+            self.write_token(lb)
+            self.print_call_args(args)
+            self.write_token(rb)
+        },
+        .GenericInst(lb, type_args, rb, name) then {
+            self.write_token(lb)
+            let mut i UInt = 0
+            while i < type_args.count() then {
+                let a = type_args[i]
+                self.print_type(deref a.inner)
+                if a.comma is .Some(c) then { self.write_token(c); self.write_space() }
+                i += 1
+            }
+            self.write_token(rb)
+            self.write_token(name)
+        },
+        .ImplicitMember(dot, name, lp, args, rp) then {
+            self.write_token(dot)
+            self.write_token(name)
+            if lp is .Some(l) then {
+                self.write_token(l)
+                self.print_call_args(args)
+                if rp is .Some(r) then { self.write_token(r) }
+            }
+        },
+
+        .Block(lb, items, rb) then self.print_block(lb, items, rb),
+
+        .If(kw, cond, then_kw, then_body, else_kw, else_body) then
+            self.print_if(kw, deref cond, then_kw, deref then_body, else_kw, else_body),
+        .IfPattern(kw, subject, is_kw, pattern, then_kw, then_body, else_kw, else_body) then {
+            self.write_token(kw)
+            self.write_space()
+            self.print_expr(deref subject)
+            self.write_space()
+            self.write_token(is_kw)
+            self.write_space()
+            self.print_pattern(deref pattern)
+            self.write_space()
+            self.write_token(then_kw)
+            self.write_space()
+            self.print_expr(deref then_body)
+            if else_kw is .Some(ek) then {
+                self.write_space()
+                self.write_token(ek)
+                if else_body is .Some(eb) then {
+                    self.write_space()
+                    self.print_expr(deref eb)
+                }
+            }
+        },
+
+        .While(kw, cond, then_kw, body) then {
+            self.write_token(kw)
+            self.write_space()
+            self.print_expr(deref cond)
+            self.write_space()
+            self.write_token(then_kw)
+            self.write_space()
+            self.print_expr(deref body)
+        },
+        .WhilePattern(kw, subject, is_kw, pattern, then_kw, body) then {
+            self.write_token(kw)
+            self.write_space()
+            self.print_expr(deref subject)
+            self.write_space()
+            self.write_token(is_kw)
+            self.write_space()
+            self.print_pattern(deref pattern)
+            self.write_space()
+            self.write_token(then_kw)
+            self.write_space()
+            self.print_expr(deref body)
+        },
+        .For(kw, binding, eq, iterable, then_kw, body) then {
+            self.write_token(kw)
+            self.write_space()
+            self.print_pattern(deref binding)
+            self.write_space()
+            self.write_token(eq)
+            self.write_space()
+            self.print_expr(deref iterable)
+            self.write_space()
+            self.write_token(then_kw)
+            self.write_space()
+            self.print_expr(deref body)
+        },
+        .When(kw, subject, is_kw, lb, arms, rb) then
+            self.print_when(kw, deref subject, is_kw, lb, arms, rb),
+
+        .AndThen(left, and_kw, then_kw, right) then {
+            self.print_expr(deref left)
+            self.write_space()
+            self.write_token(and_kw)
+            self.write_space()
+            self.write_token(then_kw)
+            self.write_space()
+            self.print_expr(deref right)
+        },
+        .OrElse(left, or_kw, else_kw, right) then {
+            self.print_expr(deref left)
+            self.write_space()
+            self.write_token(or_kw)
+            self.write_space()
+            self.write_token(else_kw)
+            self.write_space()
+            self.print_expr(deref right)
+        },
+
+        .RangeExpr(left, op, right) then {
+            if left is .Some(l) then { self.print_expr(deref l) }
+            self.write_token(op)
+            if right is .Some(r) then { self.print_expr(deref r) }
+        },
+
+        .Lambda(lp, params, rp, ret, arrow, body) then {
+            self.write_token(lp)
+            let mut i UInt = 0
+            while i < params.count() then {
+                let p = params[i]
+                self.write_token(p.name)
+                if p.param_type is .Some(pt) then {
+                    self.write_space()
+                    self.print_type(deref pt)
+                }
+                if p.comma is .Some(c) then { self.write_token(c); self.write_space() }
+                i += 1
+            }
+            self.write_token(rp)
+            if ret is .Some(rt) then {
+                self.write_space()
+                self.print_type(deref rt)
+            }
+            self.write_space()
+            self.write_token(arrow)
+            self.write_space()
+            self.print_expr(deref body)
+        },
+    }
+
+    private print_call_args(self ref, args [CstCallArg]List) Void = {
+        let mut i UInt = 0
+        while i < args.count() then {
+            let a = args[i]
+            self.print_expr(deref a.value)
+            if a.comma is .Some(c) then { self.write_token(c); self.write_space() }
+            i += 1
+        }
+    }
+
+    // ========================================================================
+    // Block printing: { items }
+    // ========================================================================
+
+    private print_block(self ref, lb Token, items [CstItem ref]List, rb Token) Void = {
+        self.write_token(lb)
+        if items.count() == 0 then {
+            self.write_token(rb)
+            return
+        }
+        self.write_newline()
+        self.indent += 1
+        let mut i UInt = 0
+        while i < items.count() then {
+            let item = deref items[i]
+            if item is .BlankLine then {
+                self.write_newline()
+                i += 1
+                continue
+            }
+            self.print_item(item)
+            if not self.at_line_start then { self.write_newline() }
+            i += 1
+        }
+        self.indent -= 1
+        self.write_token(rb)
+    }
+
+    // ========================================================================
+    // If expression printing
+    // ========================================================================
+
+    private print_if(self ref, kw Token, cond CstExpr, then_kw Token,
+        then_body CstExpr, else_kw [Token]Option, else_body [CstExpr ref]Option
+    ) Void = {
+        self.write_token(kw)
+        self.write_space()
+        self.print_expr(cond)
+        self.write_space()
+        self.write_token(then_kw)
+
+        let then_is_block = when then_body is { .Block(_, _, _) then true, _ then false }
+
+        if then_is_block then {
+            self.write_space()
+            self.print_expr(then_body)
+            if else_kw is .Some(ek) then {
+                self.write_space()
+                self.write_token(ek)
+                if else_body is .Some(eb) then {
+                    self.write_space()
+                    self.print_expr(deref eb)
+                }
+            }
+        } else {
+            // Non-block then body: inline, else on new line
+            self.write_space()
+            self.print_expr(then_body)
+            if else_kw is .Some(ek) then {
+                self.write_newline()
+                self.write_token(ek)
+                if else_body is .Some(eb) then {
+                    self.write_space()
+                    self.print_expr(deref eb)
+                }
+            }
+        }
+    }
+
+    // ========================================================================
+    // When expression printing
+    // ========================================================================
+
+    private print_when(self ref, kw Token, subject CstExpr, is_kw Token,
+        lb Token, arms [CstWhenArm ref]List, rb Token
+    ) Void = {
+        self.write_token(kw)
+        self.write_space()
+        self.print_expr(subject)
+        self.write_space()
+        self.write_token(is_kw)
+        self.write_space()
+        self.write_token(lb)
+        if arms.count() == 0 then {
+            self.write_token(rb)
+            return
+        }
+        self.write_newline()
+        self.indent += 1
+        let mut i UInt = 0
+        while i < arms.count() then {
+            let arm = deref arms[i]
+            self.print_pattern(deref arm.pattern)
+            self.write_space()
+            self.write_token(arm.then_kw)
+            self.write_space()
+            self.print_expr(deref arm.body)
+            self.write(",")
+            self.write_newline()
+            i += 1
+        }
+        self.indent -= 1
+        self.write_token(rb)
+    }
+
+    // ========================================================================
+    // Statement printing
+    // ========================================================================
+
+    private print_stmt(self ref, s CstStmt) Void = when s is {
+        .VarDecl(let_kw, mut_kw, name, var_type, eq, value) then {
+            self.write_token(let_kw)
+            self.write_space()
+            if mut_kw is .Some(mk) then { self.write_token(mk); self.write_space() }
+            self.write_token(name)
+            if var_type is .Some(vt) then {
+                self.write_space()
+                self.print_type(deref vt)
+            }
+            self.write_space()
+            self.write_token(eq)
+            self.write_space()
+            self.print_expr(deref value)
+        },
+        .Assignment(target, op, value) then {
+            self.print_expr(deref target)
+            self.write_space()
+            self.write_token(op)
+            self.write_space()
+            self.print_expr(deref value)
+        },
+        .ExprStmt(expr) then self.print_expr(deref expr),
+        .Return(kw, value) then {
+            self.write_token(kw)
+            if value is .Some(v) then {
+                self.write_space()
+                self.print_expr(deref v)
+            }
+        },
+        .Break(kw) then self.write_token(kw),
+        .Continue(kw) then self.write_token(kw),
+    }
+
+    // ========================================================================
+    // Item printing
+    // ========================================================================
+
+    public print_item(self ref, item CstItem) Void = when item is {
+        .Decl(d) then self.print_decl(deref d),
+        .Stmt(s) then self.print_stmt(deref s),
+        .Comment(t) then self.write_token(t),
+        .BlankLine then {},
+    }
+
+    // ========================================================================
+    // Declaration printing
+    // ========================================================================
+
+    private print_decl(self ref, d CstDecl) Void = when d is {
+        .Using(tokens) then {
+            let mut i UInt = 0
+            while i < tokens.count() then {
+                if i > 0 then { self.write_space() }
+                self.write_token(tokens[i])
+                i += 1
+            }
+        },
+        .ForeignUsing(foreign_kw, tokens) then {
+            self.write_token(foreign_kw)
+            self.write_space()
+            let mut i UInt = 0
+            while i < tokens.count() then {
+                if i > 0 then { self.write_space() }
+                self.write_token(tokens[i])
+                i += 1
+            }
+        },
+        .Func(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret, eq, body) then
+            self.print_func_decl(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret, eq, deref body),
+        .ForeignDecl(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret) then
+            self.print_foreign_decl(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret),
+        .Type(vis, mods, kw, gp, name, body) then
+            self.print_type_decl(vis, mods, kw, gp, name, deref body),
+        .Trait(vis, kw, gp, name, supers, lb, members, rb) then
+            self.print_trait_decl(vis, kw, gp, name, supers, lb, members, rb),
+        .Given(vis, mods, kw, gp, target, lb, members, rb) then
+            self.print_given_decl(vis, mods, kw, gp, deref target, lb, members, rb),
+        .Var(vis, let_kw, mut_kw, name, var_type) then {
+            if vis is .Some(v) then { self.write_token(v); self.write_space() }
+            self.write_token(let_kw)
+            self.write_space()
+            if mut_kw is .Some(mk) then { self.write_token(mk); self.write_space() }
+            self.write_token(name)
+            if var_type is .Some(vt) then {
+                self.write_space()
+                self.print_type(deref vt)
+            }
+        },
+    }
+
+    // ========================================================================
+    // Func declaration
+    // ========================================================================
+
+    private print_func_decl(self ref,
+        vis [Token]Option, mods [Token]List,
+        let_kw [Token]Option, mut_kw [Token]Option,
+        gp [CstGenericParams ref]Option, name [Token]Option,
+        lp [Token]Option, params [CstParam]List, rp [Token]Option,
+        ret [CstType ref]Option, eq Token, body CstExpr
+    ) Void = {
+        if vis is .Some(v) then { self.write_token(v); self.write_space() }
+        let mut mi UInt = 0
+        while mi < mods.count() then { self.write_token(mods[mi]); self.write_space(); mi += 1 }
+        if let_kw is .Some(k) then { self.write_token(k); self.write_space() }
+        if mut_kw is .Some(k) then { self.write_token(k); self.write_space() }
+        if gp is .Some(g) then { self.print_generic_params(deref g) }
+        if name is .Some(n) then { self.write_token(n) }
+        if lp is .Some(l) then {
+            self.write_token(l)
+            self.print_params(params)
+            if rp is .Some(r) then { self.write_token(r) }
+        }
+        if ret is .Some(rt) then {
+            self.write_space()
+            self.print_type(deref rt)
+        }
+        self.write_space()
+        self.write_token(eq)
+
+        // Block/when/if body: same line
+        if body is .Block(_, _, _) or .When(_, _, _, _, _, _) or .If(_, _, _, _, _, _) then {
+            self.write_space()
+            self.print_expr(body)
+            return
+        }
+
+        // Simple body: check line length for wrapping
+        let head_len = self.estimate_head_length(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret)
+        let body_len = self.estimate_expr_length(body)
+        let total = (self.indent * 4) + head_len + 3 + body_len // " = " + body
+
+        if total > 90 then {
+            self.write_newline()
+            self.indent += 1
+            self.print_expr(body)
+            self.indent -= 1
+        } else {
+            self.write_space()
+            self.print_expr(body)
+        }
+    }
+
+    // ========================================================================
+    // Foreign declaration (no body)
+    // ========================================================================
+
+    private print_foreign_decl(self ref,
+        vis [Token]Option, mods [Token]List,
+        let_kw [Token]Option, mut_kw [Token]Option,
+        gp [CstGenericParams ref]Option, name [Token]Option,
+        lp [Token]Option, params [CstParam]List, rp [Token]Option,
+        ret [CstType ref]Option
+    ) Void = {
+        if vis is .Some(v) then { self.write_token(v); self.write_space() }
+        let mut mi UInt = 0
+        while mi < mods.count() then { self.write_token(mods[mi]); self.write_space(); mi += 1 }
+        if let_kw is .Some(k) then { self.write_token(k); self.write_space() }
+        if mut_kw is .Some(k) then { self.write_token(k); self.write_space() }
+        if gp is .Some(g) then { self.print_generic_params(deref g) }
+        if name is .Some(n) then { self.write_token(n) }
+        if lp is .Some(l) then {
+            self.write_token(l)
+            self.print_params(params)
+            if rp is .Some(r) then { self.write_token(r) }
+        }
+        if ret is .Some(rt) then {
+            self.write_space()
+            self.print_type(deref rt)
+        }
+    }
+
+    // ========================================================================
+    // Params printing
+    // ========================================================================
+
+    private print_params(self ref, params [CstParam]List) Void = {
+        let mut i UInt = 0
+        while i < params.count() then {
+            let p = params[i]
+            if p.mut_kw is .Some(mk) then { self.write_token(mk); self.write_space() }
+            self.write_token(p.name)
+            self.write_space()
+            self.print_type(deref p.param_type)
+            if p.comma is .Some(c) then { self.write_token(c); self.write_space() }
+            i += 1
+        }
+    }
+
+    // ========================================================================
+    // Type declaration
+    // ========================================================================
+
+    private print_type_decl(self ref,
+        vis [Token]Option, mods [Token]List, kw Token,
+        gp [CstGenericParams ref]Option, name Token, body CstTypeBody
+    ) Void = {
+        if vis is .Some(v) then { self.write_token(v); self.write_space() }
+        let mut mi UInt = 0
+        while mi < mods.count() then { self.write_token(mods[mi]); self.write_space(); mi += 1 }
+        self.write_token(kw)
+        self.write_space()
+        if gp is .Some(g) then { self.print_generic_params(deref g) }
+        self.write_token(name)
+        when body is {
+            .Struct(lp, fields, rp) then {
+                self.write_token(lp)
+                let mut i UInt = 0
+                while i < fields.count() then {
+                    let f = fields[i]
+                    if f.access is .Some(a) then { self.write_token(a); self.write_space() }
+                    if f.mut_kw is .Some(mk) then { self.write_token(mk); self.write_space() }
+                    self.write_token(f.name)
+                    self.write_space()
+                    self.print_type(deref f.field_type)
+                    if f.comma is .Some(c) then { self.write_token(c); self.write_space() }
+                    i += 1
+                }
+                self.write_token(rp)
+            },
+            .Union(lb, cases, rb) then {
+                self.write_space()
+                self.print_block(lb, cases, rb)
+            },
+            .Alias(eq, target) then {
+                self.write_space()
+                self.write_token(eq)
+                self.write_space()
+                self.print_type(deref target)
+            },
+            .Empty then {},
+        }
+    }
+
+    // ========================================================================
+    // Trait declaration
+    // ========================================================================
+
+    private print_trait_decl(self ref,
+        vis [Token]Option, kw Token, gp [CstGenericParams ref]Option,
+        name Token, supers [CstType ref]List,
+        lb Token, members [CstItem ref]List, rb Token
+    ) Void = {
+        if vis is .Some(v) then { self.write_token(v); self.write_space() }
+        self.write_token(kw)
+        self.write_space()
+        if gp is .Some(g) then { self.print_generic_params(deref g) }
+        self.write_token(name)
+        let mut si UInt = 0
+        while si < supers.count() then {
+            self.write_space()
+            self.print_type(deref supers[si])
+            si += 1
+        }
+        self.write_space()
+        self.print_member_block(lb, members, rb)
+    }
+
+    // ========================================================================
+    // Given declaration
+    // ========================================================================
+
+    private print_given_decl(self ref,
+        vis [Token]Option, mods [Token]List, kw Token,
+        gp [CstGenericParams ref]Option, target CstType,
+        lb Token, members [CstItem ref]List, rb Token
+    ) Void = {
+        if vis is .Some(v) then { self.write_token(v); self.write_space() }
+        let mut mi UInt = 0
+        while mi < mods.count() then { self.write_token(mods[mi]); self.write_space(); mi += 1 }
+        self.write_token(kw)
+        self.write_space()
+        if gp is .Some(g) then {
+            self.print_generic_params(deref g)
+            self.write_space()
+        }
+        self.print_type(target)
+        self.write_space()
+        self.print_member_block(lb, members, rb)
+    }
+
+    // ========================================================================
+    // Member block (shared by trait/given)
+    // ========================================================================
+
+    private print_member_block(self ref, lb Token, members [CstItem ref]List, rb Token) Void = {
+        self.write_token(lb)
+        if members.count() == 0 then {
+            self.write_token(rb)
+            return
+        }
+        self.write_newline()
+        self.indent += 1
+        let mut i UInt = 0
+        while i < members.count() then {
+            let item = deref members[i]
+            if item is .BlankLine then {
+                self.write_newline()
+                i += 1
+                continue
+            }
+            self.print_item(item)
+            if not self.at_line_start then { self.write_newline() }
+
+            // Blank line logic between members
+            if i + 1 < members.count() then {
+                let next = deref members[i + 1]
+                let next_is_blank = when next is { .BlankLine then true, _ then false }
+                let curr_is_comment = when item is { .Comment(_) then true, _ then false }
+                let next_is_comment = when next is { .Comment(_) then true, _ then false }
+                if not next_is_blank then {
+                    if curr_is_comment and next_is_comment then {
+                    } else if not curr_is_comment and next_is_comment then {
+                        self.write_newline()
+                    } else if curr_is_comment and not next_is_comment then {
+                    } else {
+                        let curr_simple = Printer.is_simple_item(item)
+                        let next_simple = Printer.is_simple_item(next)
+                        if not (curr_simple and next_simple) then {
+                            self.write_newline()
+                        }
+                    }
+                }
+            }
+            i += 1
+        }
+        self.indent -= 1
+        self.write_token(rb)
+    }
+
+    // ========================================================================
+    // File printing (top-level)
+    // ========================================================================
+
+    public print_file(self ref, items [CstItem ref]List) Void = {
+        let mut i UInt = 0
+        while i < items.count() then {
+            let item = deref items[i]
+            if item is .BlankLine then {
+                self.write_newline()
+                i += 1
+                continue
+            }
+            self.print_item(item)
+            if not self.at_line_start then { self.write_newline() }
+
+            if i + 1 < items.count() then {
+                let next = deref items[i + 1]
+                let curr_is_comment = when item is { .Comment(_) then true, _ then false }
+                let next_is_comment = when next is { .Comment(_) then true, _ then false }
+                let next_is_blank = when next is { .BlankLine then true, _ then false }
+                let curr_is_simple = Printer.is_simple_item(item)
+                let next_is_simple = Printer.is_simple_item(next)
+
+                if not next_is_blank then {
+                    if curr_is_comment and next_is_comment then {
+                    } else if not curr_is_comment and next_is_comment then {
+                        self.write_newline()
+                    } else if curr_is_comment and not next_is_comment then {
+                    } else if curr_is_simple and next_is_simple then {
+                    } else {
+                        self.write_newline()
+                    }
+                }
+            }
+            i += 1
+        }
+    }
+
+    // ========================================================================
+    // Item classification helpers
+    // ========================================================================
+
+    private is_simple_item(item CstItem) Bool = when item is {
+        .Decl(d) then {
+            let decl = deref d
+            when decl is {
+                .Type(_, _, _, _, _, body) then {
+                    let b = deref body
+                    when b is { .Empty then true, _ then false }
+                },
+                .Var(_, _, _, _, _) then true,
+                .ForeignDecl(_, _, _, _, _, _, _, _, _, _) then true,
+                .Using(_) then true,
+                .ForeignUsing(_, _) then true,
+                _ then false,
+            }
+        },
+        _ then false,
+    }
+
+    // ========================================================================
+    // Length estimation (for line wrapping)
+    // ========================================================================
+
+    private estimate_expr_length(self, e CstExpr) UInt = when e is {
+        .IntLit(tok) then tok.to_string().count(),
+        .FloatLit(tok) then tok.to_string().count(),
+        .StrLit(tok) then tok.to_string().count(),
+        .InterpStr(tok) then tok.to_string().count(),
+        .BoolLit(tok) then tok.to_string().count(),
+        .Ident(tok) then tok.to_string().count(),
+        .SelfExpr(tok) then tok.to_string().count(),
+        .UnderscoreExpr(tok) then tok.to_string().count(),
+        .BinaryOp(left, op, right) then
+            self.estimate_expr_length(deref left) + 1 + op.to_string().count() + 1 + self.estimate_expr_length(deref right),
+        .UnaryMinus(_, operand) then 1 + self.estimate_expr_length(deref operand),
+        .NotExpr(_, operand) then 4 + self.estimate_expr_length(deref operand),
+        .FieldAccess(base, _, field) then
+            self.estimate_expr_length(deref base) + 1 + field.to_string().count(),
+        .Call(callee, _, args, _) then {
+            let mut len = self.estimate_expr_length(deref callee) + 2
+            let mut i UInt = 0
+            while i < args.count() then {
+                if i > 0 then { len += 2 }
+                len += self.estimate_expr_length(deref args[i].value)
+                i += 1
+            }
+            len
+        },
+        .GenericInst(_, type_args, _, name) then {
+            let mut len = 2 + name.to_string().count()
+            let mut i UInt = 0
+            while i < type_args.count() then {
+                if i > 0 then { len += 2 }
+                len += self.estimate_type_length(deref type_args[i].inner)
+                i += 1
+            }
+            len
+        },
+        _ then 10,
+    }
+
+    private estimate_type_length(self, t CstType) UInt = when t is {
+        .Named(name) then name.to_string().count(),
+        .SelfType(_) then 4,
+        .Generic(_, args, _, base) then {
+            let mut len = 2 + base.to_string().count()
+            let mut i UInt = 0
+            while i < args.count() then {
+                if i > 0 then { len += 2 }
+                len += self.estimate_type_length(deref args[i].inner)
+                i += 1
+            }
+            len
+        },
+        .Ref(inner, _) then self.estimate_type_length(deref inner) + 4,
+        .Ptr(inner, _) then self.estimate_type_length(deref inner) + 4,
+        .Weakref(inner, _) then self.estimate_type_length(deref inner) + 8,
+    }
+
+    private estimate_head_length(self,
+        vis [Token]Option, mods [Token]List,
+        let_kw [Token]Option, mut_kw [Token]Option,
+        gp [CstGenericParams ref]Option, name [Token]Option,
+        lp [Token]Option, params [CstParam]List, rp [Token]Option,
+        ret [CstType ref]Option
+    ) UInt = {
+        let mut len UInt = 0
+        if vis is .Some(v) then { len += v.to_string().count() + 1 }
+        let mut mi UInt = 0
+        while mi < mods.count() then { len += mods[mi].to_string().count() + 1; mi += 1 }
+        if let_kw is .Some(k) then { len += k.to_string().count() + 1 }
+        if mut_kw is .Some(k) then { len += k.to_string().count() + 1 }
+        if gp is .Some(g) then {
+            let gv = deref g
+            len += 2 // [ ]
+            let mut gi UInt = 0
+            while gi < gv.params.count() then {
+                let p = gv.params[gi]
+                len += p.name.to_string().count()
+                let mut ci UInt = 0
+                while ci < p.constraints.count() then {
+                    len += 1 + self.estimate_type_length(deref p.constraints[ci])
+                    ci += 1
+                }
+                if p.comma is .Some(_) then { len += 2 }
+                gi += 1
+            }
+        }
+        if name is .Some(n) then { len += n.to_string().count() }
+        if lp is .Some(_) then {
+            len += 2 // ( )
+            let mut pi UInt = 0
+            while pi < params.count() then {
+                let p = params[pi]
+                len += p.name.to_string().count() + 1 + self.estimate_type_length(deref p.param_type)
+                if p.comma is .Some(_) then { len += 2 }
+                pi += 1
+            }
+        }
+        if ret is .Some(rt) then { len += 1 + self.estimate_type_length(deref rt) }
+        len
+    }
+
+    // ========================================================================
+    // Finalize output
+    // ========================================================================
+
+    public finalize(self ref) Void = {
+        let runes = self.output.to_runes()
+        let mut result = String.new()
+        let mut consecutive_newlines UInt = 0
+        let mut line_buf = String.new()
+
+        let mut i UInt = 0
+        while i < runes.count() then {
+            let r = runes[i]
+            if r.to_uint32() == 10 then {
+                // Strip trailing whitespace from line
+                let line_runes = line_buf.to_runes()
+                let mut end UInt = line_runes.count()
+                while end > 0 then {
+                    let ch = line_runes[end - 1].to_uint32()
+                    if ch == 32 or ch == 9 then { end -= 1 }
+                    else { break }
+                }
+                let mut j UInt = 0
+                while j < end then {
+                    result.push_string(line_runes[j].to_string())
+                    j += 1
+                }
+                line_buf = String.new()
+
+                consecutive_newlines += 1
+                if consecutive_newlines <= 2 then {
+                    result.push('\n')
+                }
+            } else {
+                consecutive_newlines = 0
+                line_buf.push_string(r.to_string())
+            }
+            i += 1
+        }
+        // Flush remaining line_buf
+        if line_buf.count() > 0 then {
+            let line_runes = line_buf.to_runes()
+            let mut end UInt = line_runes.count()
+            while end > 0 then {
+                let ch = line_runes[end - 1].to_uint32()
+                if ch == 32 or ch == 9 then { end -= 1 }
+                else { break }
+            }
+            let mut j UInt = 0
+            while j < end then {
+                result.push_string(line_runes[j].to_string())
+                j += 1
+            }
+        }
+        // Ensure trailing newline
+        let result_runes = result.to_runes()
+        if result_runes.count() > 0 then {
+            if result_runes[result_runes.count() - 1].to_uint32() <> 10 then {
+                result.push('\n')
+            }
+        }
+        self.output = result
+    }
+}
+
+// ============================================================================
+// Top-level format_source function
+// ============================================================================
+
+public let format_source(source String) [String]Result = {
+    let mut tokenizer = Tokenizer.new(source)
+    when tokenizer.tokenize() is {
+        .Ok(tokens) then {
+            let mut parser = CstParser.new(tokens)
+            when parser.parse() is {
+                .Ok(file) then {
+                    let mut printer = Printer.new()
+                    printer.print_file(file.items)
+                    printer.finalize()
+                    let result = printer.result()
+                    [String]Result.Ok(result)
+                },
+                .Error(e) then .Error(e),
+            }
+        },
+        .Error(e) then .Error(e),
+    }
+}

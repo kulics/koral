@@ -1,0 +1,116 @@
+// ============================================================================
+// Koral Formatter - CLI Entry Point
+// ============================================================================
+// Usage: koral-fmt [--check] <file1.koral> [file2.koral ...]
+// ============================================================================
+
+using "tokenizer"
+using "parser"
+using "printer"
+
+// ============================================================================
+// CLI Entry Point
+// ============================================================================
+
+let main() Void = {
+    let arguments = args()
+
+    if arguments.count() <= 1 then {
+        print_usage()
+        exit(1)
+    }
+
+    let mut check_mode = false
+    let mut files = [String]List.new()
+    let mut i UInt = 1
+
+    while i < arguments.count() then {
+        let arg = arguments[i]
+        if arg == "--check" then {
+            check_mode = true
+        } else if arg == "--help" or arg == "-h" then {
+            print_usage()
+            exit(0)
+        } else {
+            files.push(arg)
+        }
+        i += 1
+    }
+
+    if files.count() == 0 then {
+        print_error_line("Error: no input files specified")
+        print_usage()
+        exit(1)
+    }
+
+    let mut had_error = false
+    let mut j UInt = 0
+
+    while j < files.count() then {
+        let path = files[j]
+        if check_mode then {
+            when check_file(path) is {
+                .Ok(is_formatted) then {
+                    if not is_formatted then {
+                        print_error_line("\(path): not formatted")
+                        had_error = true
+                    }
+                },
+                .Error(e) then {
+                    print_error_line("Error: \(path): \(e.message())")
+                    had_error = true
+                },
+            }
+        } else {
+            when format_file(path) is {
+                .Ok(_) then {},
+                .Error(e) then {
+                    print_error_line("Error: \(path): \(e.message())")
+                    had_error = true
+                },
+            }
+        }
+        j += 1
+    }
+
+    if had_error then { exit(1) }
+}
+
+// ============================================================================
+// File Operations
+// ============================================================================
+
+let format_file(path String) [Void]Result =
+    when read_file(path) is {
+        .Ok(source) then {
+            when format_source(source) is {
+                .Ok(formatted) then write_file(path, formatted),
+                .Error(e) then .Error(e),
+            }
+        },
+        .Error(e) then .Error(e),
+    }
+
+let check_file(path String) [Bool]Result =
+    when read_file(path) is {
+        .Ok(source) then {
+            let normalized = source.replace_all("\r\n", "\n")
+            when format_source(normalized) is {
+                .Ok(formatted) then .Ok(formatted == normalized),
+                .Error(e) then .Error(e),
+            }
+        },
+        .Error(e) then .Error(e),
+    }
+
+// ============================================================================
+// Usage
+// ============================================================================
+
+let print_usage() Void = {
+    print_error_line("Usage: koral-fmt [--check] <file1.koral> [file2.koral ...]")
+    print_error_line("")
+    print_error_line("Options:")
+    print_error_line("  --check    Check if files are formatted (exit 1 if not)")
+    print_error_line("  --help     Show this help message")
+}

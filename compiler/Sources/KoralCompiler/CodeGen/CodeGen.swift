@@ -2667,6 +2667,13 @@ public class CodeGen {
               } else {
                  buffer += "\(resultVar) = \(bodyResult);\n"
               }
+             } else if case .union(let defId) = type {
+              let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
+              if c.body.valueCategory == .lvalue {
+                buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(bodyResult));\n"
+              } else {
+                 buffer += "\(resultVar) = \(bodyResult);\n"
+              }
              } else if case .reference(_) = type {
               buffer += "\(resultVar) = \(bodyResult);\n"
               if c.body.valueCategory == .lvalue {
