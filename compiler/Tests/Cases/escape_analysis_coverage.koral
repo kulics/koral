@@ -1,0 +1,281 @@
+// Comprehensive escape analysis coverage tests
+//
+// EXPECT: T1 direct struct: 42
+// EXPECT: T2 union construction: 99
+// EXPECT: T3 nested if: 10
+// EXPECT: T4 nested match: 77
+// EXPECT: T5 nested let: 55
+// EXPECT: T6 nested block: 33
+// EXPECT: T7 field assign via ref: 88
+// EXPECT: T8 param ref in struct: 123
+// EXPECT: T9 param ref in union: 456
+// EXPECT: T10 param ref via call chain: 789
+// EXPECT: T11 lambda capture: 66
+// EXPECT: T12 multi-level nesting: 44
+// EXPECT: T13 ref in if branch of constructor: 22
+// EXPECT: T14 ref in match branch of constructor: 33
+// EXPECT: T15 deptr assignment: 111
+// EXPECT: T16 non-escape local: 200
+// EXPECT: T17 conditional non-escape: 30
+// EXPECT: All escape analysis coverage tests passed
+
+// Helper types
+type IntBox(val Int ref)
+type EscPair(a Int ref, b Int ref)
+type Wrapper(inner IntBox)
+type MaybeRef {
+    None(),
+    Some(val Int ref),
+}
+type NestedWrapper(data MaybeRef)
+type MutBox(mut val Int ref)
+type SimpleBox(mut value Int)
+
+// T1: Direct ref in struct constructor
+let t1_make() IntBox = {
+    let x = 42
+    IntBox(ref x)
+}
+
+let test_direct_struct() Void = {
+    let box = t1_make()
+    print_line("T1 direct struct: " + (deref box.val).to_string())
+}
+
+// T2: Direct ref in union constructor
+let t2_make() MaybeRef = {
+    let x = 99
+    MaybeRef.Some(ref x)
+}
+
+let test_union_construction() Void = {
+    let result = t2_make()
+    when result is {
+        .Some(v) then print_line("T2 union construction: " + (deref v).to_string()),
+        _ then print_line("T2 FAIL"),
+    }
+}
+
+// T3: Ref inside if-expression passed to struct constructor
+let t3_make(flag Bool) IntBox = {
+    let a = 10
+    let b = 20
+    IntBox(if flag then ref a else ref b)
+}
+
+let test_nested_if() Void = {
+    let box = t3_make(true)
+    print_line("T3 nested if: " + (deref box.val).to_string())
+}
+
+// T4: Ref inside match-expression passed to struct constructor
+let t4_make(choice Int) IntBox = {
+    let a = 77
+    let b = 88
+    let r = when choice is {
+        1 then ref a,
+        _ then ref b,
+    }
+    IntBox(r)
+}
+
+let test_nested_match() Void = {
+    let box = t4_make(1)
+    print_line("T4 nested match: " + (deref box.val).to_string())
+}
+
+// T5: Ref inside let-expression passed to struct constructor
+let t5_make() IntBox = {
+    let x = 55
+    let r = {
+        let tmp = ref x
+        tmp
+    }
+    IntBox(r)
+}
+
+let test_nested_let() Void = {
+    let box = t5_make()
+    print_line("T5 nested let: " + (deref box.val).to_string())
+}
+
+// T6: Ref inside block-expression passed to struct constructor
+let t6_make() IntBox = {
+    let x = 33
+    IntBox({
+        ref x
+    })
+}
+
+let test_nested_block() Void = {
+    let box = t6_make()
+    print_line("T6 nested block: " + (deref box.val).to_string())
+}
+
+// T7: Field assignment through a reference to a struct
+let t7_make() MutBox = {
+    let x = 88
+    let dummy = 0
+    let mut box = MutBox(ref dummy)
+    box.val = ref x
+    box
+}
+
+let test_field_assign_via_ref() Void = {
+    let box = t7_make()
+    print_line("T7 field assign via ref: " + (deref box.val).to_string())
+}
+
+// T8: Parameter ref stored in struct constructor (inter-procedural)
+let wrap_ref(r Int ref) IntBox = {
+    IntBox(r)
+}
+
+let test_param_ref_in_struct() Void = {
+    let x = 123
+    let box = wrap_ref(ref x)
+    print_line("T8 param ref in struct: " + (deref box.val).to_string())
+}
+
+// T9: Parameter ref stored in union constructor (inter-procedural)
+let wrap_ref_union(r Int ref) MaybeRef = {
+    MaybeRef.Some(r)
+}
+
+let test_param_ref_in_union() Void = {
+    let x = 456
+    let result = wrap_ref_union(ref x)
+    when result is {
+        .Some(v) then print_line("T9 param ref in union: " + (deref v).to_string()),
+        _ then print_line("T9 FAIL"),
+    }
+}
+
+// T10: Parameter ref escapes through a chain of function calls
+let make_box_from(val Int) IntBox = {
+    let x = val
+    wrap_ref(ref x)
+}
+
+let test_param_ref_via_call_chain() Void = {
+    let box = make_box_from(789)
+    print_line("T10 param ref via call chain: " + (deref box.val).to_string())
+}
+
+// T11: Lambda captures cause escape
+let t11_make_getter() [Int]Func = {
+    let x = 66
+    let r = ref x
+    () -> deref r
+}
+
+let test_lambda_capture() Void = {
+    let getter = t11_make_getter()
+    print_line("T11 lambda capture: " + getter().to_string())
+}
+
+// T12: Multi-level nesting: ref in if inside union inside struct
+let t12_make(flag Bool) NestedWrapper = {
+    let x = 44
+    let y = 55
+    NestedWrapper(
+        if flag then MaybeRef.Some(ref x) else MaybeRef.Some(ref y)
+    )
+}
+
+let test_multi_level_nesting() Void = {
+    let w = t12_make(true)
+    when w.data is {
+        .Some(v) then print_line("T12 multi-level nesting: " + (deref v).to_string()),
+        _ then print_line("T12 FAIL"),
+    }
+}
+
+// T13: Ref in if-branch as argument to struct constructor
+let t13_make() EscPair = {
+    let a = 22
+    let b = 33
+    EscPair(ref a, if true then ref b else ref a)
+}
+
+let test_ref_in_if_branch_constructor() Void = {
+    let p = t13_make()
+    print_line("T13 ref in if branch of constructor: " + (deref p.a).to_string())
+}
+
+// T14: Ref in match-branch as argument to struct constructor
+let t14_make(choice Int) IntBox = {
+    let a = 33
+    let b = 44
+    IntBox(when choice is {
+        0 then ref a,
+        _ then ref b,
+    })
+}
+
+let test_ref_in_match_branch_constructor() Void = {
+    let box = t14_make(0)
+    print_line("T14 ref in match branch of constructor: " + (deref box.val).to_string())
+}
+
+// T15: Simple value assignment
+let t15_make() SimpleBox = {
+    let mut b = SimpleBox(0)
+    b.value = 111
+    b
+}
+
+let test_deptr_assignment() Void = {
+    let b = t15_make()
+    print_line("T15 deptr assignment: " + b.value.to_string())
+}
+
+// T16: Non-escaping ref (negative test)
+let t16_compute() Int = {
+    let x = 100
+    let r = ref x
+    let val = deref r
+    val + 100
+}
+
+let test_non_escape_local() Void = {
+    let result = t16_compute()
+    print_line("T16 non-escape local: " + result.to_string())
+}
+
+// T17: Conditional ref that doesn't escape
+let t17_compute(flag Bool) Int = {
+    let a = 10
+    let b = 20
+    let r = if flag then ref a else ref b
+    deref r + 10
+}
+
+let test_conditional_non_escape() Void = {
+    let v1 = t17_compute(true)
+    let v2 = t17_compute(false)
+    assert(v1 == 20, "conditional non-escape true")
+    assert(v2 == 30, "conditional non-escape false")
+    print_line("T17 conditional non-escape: " + v2.to_string())
+}
+
+let main() Void = {
+    test_direct_struct()
+    test_union_construction()
+    test_nested_if()
+    test_nested_match()
+    test_nested_let()
+    test_nested_block()
+    test_field_assign_via_ref()
+    test_param_ref_in_struct()
+    test_param_ref_in_union()
+    test_param_ref_via_call_chain()
+    test_lambda_capture()
+    test_multi_level_nesting()
+    test_ref_in_if_branch_constructor()
+    test_ref_in_match_branch_constructor()
+    test_deptr_assignment()
+    test_non_escape_local()
+    test_conditional_non_escape()
+    print_line("All escape analysis coverage tests passed")
+}

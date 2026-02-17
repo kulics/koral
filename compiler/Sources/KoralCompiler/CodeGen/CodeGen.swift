@@ -1049,6 +1049,20 @@ public class CodeGen {
         addIndent()
         buffer += "__koral_retain(\(result).control);\n"
       }
+    } else if case .function = body.type {
+      addIndent()
+      buffer += "\(cTypeName(body.type)) \(result) = \(resultVar);\n"
+      if body.valueCategory == .lvalue {
+        addIndent()
+        buffer += "__koral_closure_retain(\(result));\n"
+      }
+    } else if case .weakReference(_) = body.type {
+      addIndent()
+      buffer += "\(cTypeName(body.type)) \(result) = \(resultVar);\n"
+      if body.valueCategory == .lvalue {
+        addIndent()
+        buffer += "__koral_weak_retain(\(result).control);\n"
+      }
     } else if body.type != .void {
       addIndent()
       buffer += "\(cTypeName(body.type)) \(result) = \(resultVar);\n"
@@ -1300,6 +1314,20 @@ public class CodeGen {
             addIndent()
             buffer += "__koral_retain(\(resultVar).control);\n"
           }
+        } else if case .function = type {
+          addIndent()
+          buffer += "\(resultVar) = \(bodyResultVar);\n"
+          if body.valueCategory == .lvalue {
+            addIndent()
+            buffer += "__koral_closure_retain(\(resultVar));\n"
+          }
+        } else if case .weakReference(_) = type {
+          addIndent()
+          buffer += "\(resultVar) = \(bodyResultVar);\n"
+          if body.valueCategory == .lvalue {
+            addIndent()
+            buffer += "__koral_weak_retain(\(resultVar).control);\n"
+          }
         } else {
           addIndent()
           buffer += "\(resultVar) = \(bodyResultVar);\n"
@@ -1378,6 +1406,18 @@ public class CodeGen {
                   addIndent()
                   buffer += "__koral_retain(\(resultVar).control);\n"
                 }
+              } else if case .function = type {
+                buffer += "\(resultVar) = \(thenResult);\n"
+                if thenBranch.valueCategory == .lvalue {
+                  addIndent()
+                  buffer += "__koral_closure_retain(\(resultVar));\n"
+                }
+              } else if case .weakReference(_) = type {
+                buffer += "\(resultVar) = \(thenResult);\n"
+                if thenBranch.valueCategory == .lvalue {
+                  addIndent()
+                  buffer += "__koral_weak_retain(\(resultVar).control);\n"
+                }
               } else {
                 buffer += "\(resultVar) = \(thenResult);\n"
               }
@@ -1416,6 +1456,18 @@ public class CodeGen {
                 if elseBranch.valueCategory == .lvalue {
                   addIndent()
                   buffer += "__koral_retain(\(resultVar).control);\n"
+                }
+              } else if case .function = type {
+                buffer += "\(resultVar) = \(elseResult);\n"
+                if elseBranch.valueCategory == .lvalue {
+                  addIndent()
+                  buffer += "__koral_closure_retain(\(resultVar));\n"
+                }
+              } else if case .weakReference(_) = type {
+                buffer += "\(resultVar) = \(elseResult);\n"
+                if elseBranch.valueCategory == .lvalue {
+                  addIndent()
+                  buffer += "__koral_weak_retain(\(resultVar).control);\n"
                 }
               } else {
                 buffer += "\(resultVar) = \(elseResult);\n"
@@ -1470,6 +1522,20 @@ public class CodeGen {
         buffer += "\(result) = *(\(cType)*)\(innerResult).ptr;\n"
         addIndent()
         buffer += "__koral_retain(\(result).control);\n"
+      } else if case .function = type {
+        // Closure: copy and retain
+        let cType = cTypeName(type)
+        addIndent()
+        buffer += "\(result) = *(\(cType)*)\(innerResult).ptr;\n"
+        addIndent()
+        buffer += "__koral_closure_retain(\(result));\n"
+      } else if case .weakReference(_) = type {
+        // WeakReference: copy and retain
+        let cType = cTypeName(type)
+        addIndent()
+        buffer += "\(result) = *(\(cType)*)\(innerResult).ptr;\n"
+        addIndent()
+        buffer += "__koral_weak_retain(\(result).control);\n"
       } else {
         // Primitive: direct dereference
         let cType = cTypeName(type)
@@ -1699,6 +1765,18 @@ public class CodeGen {
                 addIndent()
                 buffer += "__koral_retain(\(resultVar).control);\n"
               }
+            } else if case .function = type {
+              buffer += "\(resultVar) = \(thenResult);\n"
+              if thenBranch.valueCategory == .lvalue {
+                addIndent()
+                buffer += "__koral_closure_retain(\(resultVar));\n"
+              }
+            } else if case .weakReference(_) = type {
+              buffer += "\(resultVar) = \(thenResult);\n"
+              if thenBranch.valueCategory == .lvalue {
+                addIndent()
+                buffer += "__koral_weak_retain(\(resultVar).control);\n"
+              }
             } else {
               buffer += "\(resultVar) = \(thenResult);\n"
             }
@@ -1731,6 +1809,18 @@ public class CodeGen {
               if elseBranch.valueCategory == .lvalue {
                 addIndent()
                 buffer += "__koral_retain(\(resultVar).control);\n"
+              }
+            } else if case .function = type {
+              buffer += "\(resultVar) = \(elseResult);\n"
+              if elseBranch.valueCategory == .lvalue {
+                addIndent()
+                buffer += "__koral_closure_retain(\(resultVar));\n"
+              }
+            } else if case .weakReference(_) = type {
+              buffer += "\(resultVar) = \(elseResult);\n"
+              if elseBranch.valueCategory == .lvalue {
+                addIndent()
+                buffer += "__koral_weak_retain(\(resultVar).control);\n"
               }
             } else {
               buffer += "\(resultVar) = \(elseResult);\n"
@@ -1949,6 +2039,21 @@ public class CodeGen {
           addIndent()
           buffer += "__koral_retain(\(argResult).control);\n"
           finalArg = argResult
+        } else if case .function = arg.type {
+          if arg.valueCategory == .lvalue {
+            let argCopy = nextTemp()
+            addIndent()
+            buffer += "\(cTypeName(arg.type)) \(argCopy) = \(argResult);\n"
+            addIndent()
+            buffer += "__koral_closure_retain(\(argCopy));\n"
+            finalArg = argCopy
+          }
+        } else if case .weakReference(_) = arg.type {
+          if arg.valueCategory == .lvalue {
+            addIndent()
+            buffer += "__koral_weak_retain(\(argResult).control);\n"
+          }
+          finalArg = argResult
         }
         
         // Check for cast
@@ -2160,6 +2265,14 @@ public class CodeGen {
       } else if case .union(let defId) = element {
         let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
         buffer += "*(\(cType)*)\(p) = __koral_\(typeName)_copy(&\(v));\n"
+      } else if case .function = element {
+        buffer += "*(struct __koral_Closure*)\(p) = \(v);\n"
+        addIndent()
+        buffer += "__koral_closure_retain(*(struct __koral_Closure*)\(p));\n"
+      } else if case .weakReference(_) = element {
+        buffer += "*(\(cType)*)\(p) = \(v);\n"
+        addIndent()
+        buffer += "__koral_weak_retain(((\(cType)*)\(p))->control);\n"
       } else {
         buffer += "*(\(cType)*)\(p) = \(v);\n"
       }
@@ -2185,6 +2298,13 @@ public class CodeGen {
         let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
         addIndent()
         buffer += "__koral_\(typeName)_drop(\(p));\n"
+      } else if case .function = element {
+        addIndent()
+        buffer += "__koral_closure_release(*(struct __koral_Closure*)\(p));\n"
+      } else if case .weakReference(_) = element {
+        let cType = cTypeName(element)
+        addIndent()
+        buffer += "__koral_weak_release(((\(cType)*)\(p))->control);\n"
       }
       // int/float/bool/void -> noop
       return ""
@@ -2264,6 +2384,14 @@ public class CodeGen {
             buffer += "\(cIdentifier(for: identifier)) = \(valueResult);\n"
           }
           registerVariable(cIdentifier(for: identifier), identifier.type)
+        } else if case .weakReference(_) = identifier.type {
+          addIndent()
+          buffer += "\(cTypeName(identifier.type)) \(cIdentifier(for: identifier)) = \(valueResult);\n"
+          if value.valueCategory == .lvalue {
+            addIndent()
+            buffer += "__koral_weak_retain(\(cIdentifier(for: identifier)).control);\n"
+          }
+          registerVariable(cIdentifier(for: identifier), identifier.type)
         } else {
           addIndent()
           buffer += "\(cTypeName(identifier.type)) \(cIdentifier(for: identifier)) = \(valueResult);\n"
@@ -2322,6 +2450,20 @@ public class CodeGen {
            if value.valueCategory == .lvalue {
                addIndent()
                buffer += "__koral_retain(\(lhsPath).control);\n"
+           }
+        } else if case .function = target.type {
+           addIndent()
+           buffer += "\(lhsPath) = \(valueResult);\n"
+           if value.valueCategory == .lvalue {
+               addIndent()
+               buffer += "__koral_closure_retain(\(lhsPath));\n"
+           }
+        } else if case .weakReference(_) = target.type {
+           addIndent()
+           buffer += "\(lhsPath) = \(valueResult);\n"
+           if value.valueCategory == .lvalue {
+               addIndent()
+               buffer += "__koral_weak_retain(\(lhsPath).control);\n"
            }
         } else {
            addIndent()
@@ -2397,6 +2539,20 @@ public class CodeGen {
           if value.valueCategory == .lvalue {
             addIndent()
             buffer += "__koral_retain(\(retVar).control);\n"
+          }
+        } else if case .function = value.type {
+          addIndent()
+          buffer += "\(cTypeName(value.type)) \(retVar) = \(valueResult);\n"
+          if value.valueCategory == .lvalue {
+            addIndent()
+            buffer += "__koral_closure_retain(\(retVar));\n"
+          }
+        } else if case .weakReference(_) = value.type {
+          addIndent()
+          buffer += "\(cTypeName(value.type)) \(retVar) = \(valueResult);\n"
+          if value.valueCategory == .lvalue {
+            addIndent()
+            buffer += "__koral_weak_retain(\(retVar).control);\n"
           }
         } else {
           addIndent()
@@ -2511,6 +2667,11 @@ public class CodeGen {
       buffer += "\(result) = *(\(cType)*)\(pointerExpr);\n"
       addIndent()
       buffer += "__koral_retain(\(result).control);\n"
+    } else if case .function = elementType {
+      addIndent()
+      buffer += "\(result) = *(\(cType)*)\(pointerExpr);\n"
+      addIndent()
+      buffer += "__koral_closure_retain(\(result));\n"
     } else if case .weakReference(_) = elementType {
       addIndent()
       buffer += "\(result) = *(\(cType)*)\(pointerExpr);\n"
@@ -2558,12 +2719,18 @@ public class CodeGen {
     case .memberPath(let source, let path):
       // 如果路径长度 > 0，说明是字段访问
       if !path.isEmpty {
-        // 检查源是否是结构体类型
-        if case .structure(_) = source.type {
-          return true
+        let typeToCheck: Type
+        switch source.type {
+        case .reference(let inner), .pointer(let inner):
+          typeToCheck = inner
+        default:
+          typeToCheck = source.type
         }
-        if case .union(_) = source.type {
+        switch typeToCheck {
+        case .structure(_), .union(_):
           return true
+        default:
+          return false
         }
       }
       return false
@@ -2680,6 +2847,18 @@ public class CodeGen {
                  addIndent()
                  buffer += "__koral_retain(\(resultVar).control);\n"
               }
+             } else if case .function = type {
+              buffer += "\(resultVar) = \(bodyResult);\n"
+              if c.body.valueCategory == .lvalue {
+                 addIndent()
+                 buffer += "__koral_closure_retain(\(resultVar));\n"
+              }
+             } else if case .weakReference(_) = type {
+              buffer += "\(resultVar) = \(bodyResult);\n"
+              if c.body.valueCategory == .lvalue {
+                 addIndent()
+                 buffer += "__koral_weak_retain(\(resultVar).control);\n"
+              }
              } else {
               buffer += "\(resultVar) = \(bodyResult);\n"
              }
@@ -2761,6 +2940,9 @@ public class CodeGen {
         } else if case .function = varType {
           bindCode += "\(name) = \(path);\n"
           bindCode += "__koral_closure_retain(\(name));\n"
+        } else if case .weakReference(_) = varType {
+          bindCode += "\(name) = \(path);\n"
+          bindCode += "__koral_weak_retain(\(name).control);\n"
         } else {
           bindCode += "\(name) = \(path);\n"
         }

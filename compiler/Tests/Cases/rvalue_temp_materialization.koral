@@ -1,17 +1,14 @@
 // EXPECT: Rvalue temporary materialization tests passed
 
 // ============================================================================
-// Rvalue Temporary Materialization Tests
+// Rvalue Self-Ref Method Call Tests
 // ============================================================================
 // 
-// 临时值物化是指：当 rvalue（右值，如函数返回值、构造函数结果）需要传给
-// 接受 ref 参数的方法时，编译器自动创建一个临时变量来持有该值。
+// 对 rvalue 调用 self ref 方法现在是编译错误。
+// 用户需要先将 rvalue 存入 let mut 变量，再调用 ref 方法。
+// 普通的对 rvalue 使用 ref 操作（堆分配）仍然保留。
 //
-// 在 Swift 风格的值语义下：
-// - 只读方法使用 self（值传递），不需要临时值物化
-// - 修改方法使用 self ref，需要临时值物化
-//
-// 这些测试验证编译器正确处理 rvalue 调用 ref 方法的场景。
+// 这些测试验证通过 let mut 变量调用 ref 方法的正确场景。
 // ============================================================================
 
 // Helper type for testing - uses ref for mutation
@@ -23,7 +20,7 @@ given Counter {
     // 只读方法 - 值传递
     public get(self) Int = self.value
     
-    // 修改方法 - ref 传递，需要临时值物化
+    // 修改方法 - ref 传递
     public increment(self ref) Void = {
         self.value = self.value + 1
     }
@@ -33,15 +30,11 @@ given Counter {
     }
 }
 
-// Test 1: Rvalue calling ref method - basic case
-// Counter.new() 返回 rvalue，increment 需要 self ref
-// 编译器需要物化临时变量
+// Test 1: Rvalue calling ref method is now an error
+// Counter.new().increment() 不再允许，必须先存入变量
+// (此测试已移除，因为它现在是编译错误)
 let test_rvalue_ref_method() Void = {
-    // 这里 Counter.new() 是 rvalue，但 increment 需要 ref
-    // 编译器应该创建临时变量来持有 Counter.new() 的结果
-    Counter.new().increment()
-    
-    // 验证：创建一个可观察的 counter
+    // 正确用法：先存入 let mut 变量
     let mut c = Counter.new()
     c.increment()
     assert(c.get() == 1, "counter incremented")

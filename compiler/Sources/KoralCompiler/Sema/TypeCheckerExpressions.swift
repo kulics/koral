@@ -2381,20 +2381,13 @@ extension TypeChecker {
       }
 
       // Check base type against first param
-      // 如果 base 是 rvalue 且方法期望 self ref，使用临时物化
+      // 禁止对 rvalue 调用 self ref 方法
       if let firstParam = params.first,
          case .reference(let inner) = firstParam.type,
          inner == base.type,
          base.valueCategory == .rvalue {
-        // 右值临时物化：将方法调用包装在 letExpression 中
-        return try materializeTemporaryForMethodCall(
-          base: base,
-          method: method,
-          methodType: methodType,
-          params: params,
-          returns: returns,
-          arguments: arguments
-        )
+        let methodName = context.getName(method.defId) ?? "<unknown>"
+        throw SemanticError(.generic("Cannot call 'self ref' method '\(methodName)' on an rvalue; store the value in a 'let mut' variable first"), span: currentSpan)
       }
       
       var finalBase = base
@@ -2633,18 +2626,9 @@ extension TypeChecker {
           if typedBase.valueCategory == .lvalue {
             finalBase = .referenceExpression(expression: typedBase, type: firstParam.type)
           } else {
-            // Rvalue temporary materialization
-            return try materializeTemporaryForGenericMethodCall(
-              base: typedBase,
-              method: methodResult.methodSymbol,
-              methodType: methodResult.methodType,
-              methodTypeArgs: resolvedMethodTypeArgs,
-              typeArgs: methodResult.typeArgs,
-              params: params,
-              returns: returns,
-              arguments: arguments,
-              traitName: methodResult.traitName
-            )
+            // 禁止对 rvalue 调用 self ref 方法
+            let methodName = context.getName(methodResult.methodSymbol.defId) ?? "<unknown>"
+            throw SemanticError(.generic("Cannot call 'self ref' method '\(methodName)' on an rvalue; store the value in a 'let mut' variable first"), span: currentSpan)
           }
         } else if case .reference(let inner) = typedBase.type, inner == firstParam.type {
           finalBase = .derefExpression(expression: typedBase, type: inner)
@@ -4236,41 +4220,9 @@ extension TypeChecker {
       if case .reference(let inner) = firstParam.type,
          inner == base.type,
          base.valueCategory == .rvalue {
-        // Materialize temporary for rvalue receiver
-        let tempSymbol = nextSynthSymbol(prefix: "temp_recv", type: base.type)
-        let tempVar: TypedExpressionNode = .variable(identifier: tempSymbol)
-        let refType: Type = .reference(inner: base.type)
-        let refExpr: TypedExpressionNode = .referenceExpression(expression: tempVar, type: refType)
-        let callee: TypedExpressionNode = .methodReference(
-          base: refExpr, method: method, typeArgs: nil, methodTypeArgs: nil, type: method.type
-        )
-
-        var typedArguments: [TypedExpressionNode] = []
-        for (arg, param) in zip(arguments, params.dropFirst()) {
-          var typedArg = arg
-          typedArg = try coerceLiteral(typedArg, to: param.type)
-          if typedArg.type != param.type {
-            if case .reference(let innerArg) = param.type, innerArg == typedArg.type {
-              if typedArg.valueCategory == .lvalue {
-                typedArg = .referenceExpression(expression: typedArg, type: param.type)
-              } else {
-                throw SemanticError.invalidOperation(
-                  op: "implicit ref", type1: typedArg.type.description, type2: "rvalue")
-              }
-            } else if case .reference(let innerArg) = typedArg.type, innerArg == param.type {
-              typedArg = .derefExpression(expression: typedArg, type: innerArg)
-            } else {
-              throw SemanticError.typeMismatch(
-                expected: param.type.description,
-                got: typedArg.type.description
-              )
-            }
-          }
-          typedArguments.append(typedArg)
-        }
-
-        let callExpr: TypedExpressionNode = .call(callee: callee, arguments: typedArguments, type: returns)
-        return .letExpression(identifier: tempSymbol, value: base, body: callExpr, type: returns)
+        // 禁止对 rvalue 调用 self ref 方法
+        let methodName = context.getName(method.defId) ?? "<unknown>"
+        throw SemanticError(.generic("Cannot call 'self ref' method '\(methodName)' on an rvalue; store the value in a 'let mut' variable first"), span: currentSpan)
       }
 
       if base.type != firstParam.type {

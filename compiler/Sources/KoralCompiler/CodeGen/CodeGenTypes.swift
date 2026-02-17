@@ -241,22 +241,14 @@ extension CodeGen {
               let argResult = generateExpressionSSA(argExpr)
               let fieldName = sanitizeCIdentifier(param.name)
               
-              addIndent()
-              if case .structure(let structDefId) = param.type {
-                   if argExpr.valueCategory == .lvalue {
-                     let structTypeName = cIdentifierByDefId[defIdKey(structDefId)] ?? context.getCIdentifier(structDefId) ?? "T_\(structDefId.id)"
-                     appendToBuffer("\(unionMemberPath).\(fieldName) = __koral_\(structTypeName)_copy(&\(argResult));\n")
-                   } else {
-                       appendToBuffer("\(unionMemberPath).\(fieldName) = \(argResult);\n")
-                   }
-              } else if case .reference(_) = param.type {
-                   appendToBuffer("\(unionMemberPath).\(fieldName) = \(argResult);\n")
-                   if argExpr.valueCategory == .lvalue {
-                       addIndent()
-                       appendToBuffer("__koral_retain(\(unionMemberPath).\(fieldName).control);\n")
-                   }
+              if argExpr.valueCategory == .lvalue {
+                  // Use appendCopyAssignment which handles all types correctly:
+                  // struct (deep copy), union (deep copy), reference (retain),
+                  // function/closure (closure_retain), weakReference (weak_retain), etc.
+                  appendCopyAssignment(for: param.type, source: argResult, dest: "\(unionMemberPath).\(fieldName)")
               } else {
-                   appendToBuffer("\(unionMemberPath).\(fieldName) = \(argResult);\n")
+                  addIndent()
+                  appendToBuffer("\(unionMemberPath).\(fieldName) = \(argResult);\n")
               }
           }
       }
