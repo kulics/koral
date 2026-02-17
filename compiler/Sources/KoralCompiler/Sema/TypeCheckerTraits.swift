@@ -15,7 +15,12 @@ extension TypeChecker {
   }
 
   func flattenedTraitMethods(_ traitName: String) throws -> [String: TraitMethodSignature] {
-    return try SemaUtils.flattenedTraitMethods(traitName, traits: traits, currentLine: currentLine)
+    if let cached = flattenedTraitMethodsCache[traitName] {
+      return cached
+    }
+    let result = try SemaUtils.flattenedTraitMethods(traitName, traits: traits, currentLine: currentLine)
+    flattenedTraitMethodsCache[traitName] = result
+    return result
   }
 
   /// Checks if a type parameter has a trait bound, including inherited traits.
