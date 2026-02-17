@@ -242,6 +242,25 @@ public type CstDecl {
         name Token,
         var_type [CstType ref]Option
     ),
+    TraitMethod(
+        vis [Token]Option,
+        generic_params [CstGenericParams ref]Option,
+        name Token,
+        lparen Token,
+        params [CstTraitMethodParam]List,
+        rparen Token,
+        return_type [CstType ref]Option
+    ),
+}
+
+// Trait method parameter
+public type CstTraitMethodParam {
+    // self
+    SelfParam(kw Token, comma [Token]Option),
+    // self ref
+    SelfRefParam(kw Token, ref_kw Token, comma [Token]Option),
+    // name Type
+    NamedParam(name Token, param_type CstType ref, comma [Token]Option),
 }
 
 // ============================================================================
@@ -1679,11 +1698,74 @@ given CstParser {
 
         if self.check(.LBrace()) then {
             let lb = self.eat()
-            let members = self.parse_member_items()
+            let members = self.parse_trait_members()
             let rb = if self.check(.RBrace()) then { self.eat() } else { Token.RBrace() }
             return .Trait(vis, kw, gp, name, supers, lb, members, rb)
         }
         return .Trait(vis, kw, gp, name, supers, .LBrace(), [CstItem ref]List.new(), .RBrace())
+    }
+
+    // ========================================================================
+    // Trait members
+    // ========================================================================
+
+    private parse_trait_members(self ref) [CstItem ref]List = {
+        let mut members = [CstItem ref]List.new()
+        while not self.check(.RBrace()) and not self.is_eof() then {
+            let nl_count = self.count_newlines()
+            if nl_count >= 2 then {
+                self.skip_newlines()
+                members.push(ref .BlankLine())
+                continue
+            }
+            self.skip_newlines()
+            if self.check(.RBrace()) or self.is_eof() then { break }
+            if self.peek() is .LineComment(_) or .BlockComment(_) then {
+                members.push(ref .Comment(self.eat()))
+                continue
+            }
+            let d = self.parse_trait_method_sig()
+            members.push(ref .Decl(ref d))
+        }
+        members
+    }
+
+    private parse_trait_method_sig(self ref) CstDecl = {
+        let vis = self.eat_vis()
+        let gp = self.parse_generic_params()
+        let name = self.eat() // method name
+        let lp = self.eat() // (
+        let mut params = [CstTraitMethodParam]List.new()
+        while not self.check(.RParen()) and not self.is_eof() then {
+            // self or self ref
+            if self.peek() is .KwSelf then {
+                let kw = self.eat()
+                if self.peek() is .KwRef then {
+                    let ref_kw = self.eat()
+                    let comma = self.eat_comma()
+                    params.push(.SelfRefParam(kw, ref_kw, comma))
+                } else {
+                    let comma = self.eat_comma()
+                    params.push(.SelfParam(kw, comma))
+                }
+                continue
+            }
+            // name Type
+            let pname = self.eat()
+            let pt = self.parse_type()
+            let comma = self.eat_comma()
+            params.push(.NamedParam(pname, ref pt, comma))
+        }
+        let rp = self.eat() // )
+        // Return type (optional)
+        let mut ret = [CstType ref]Option.None()
+        if not self.check(.RBrace()) and not self.is_eof() then {
+            if self.peek_raw() is not .Newline then {
+                let t = self.parse_type()
+                ret = .Some(ref t)
+            }
+        }
+        return .TraitMethod(vis, gp, name, lp, params, rp, ret)
     }
 
     // ========================================================================
