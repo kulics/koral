@@ -22,6 +22,8 @@ extension CodeGen {
       assertTypeResolved(returns, contextInfo: "\(contextInfo) -> function return type", visited: visited)
     case .reference(let inner):
       assertTypeResolved(inner, contextInfo: "\(contextInfo) -> reference inner type", visited: visited)
+    case .weakReference(let inner):
+      assertTypeResolved(inner, contextInfo: "\(contextInfo) -> weakReference inner type", visited: visited)
     case .pointer(let element):
       assertTypeResolved(element, contextInfo: "\(contextInfo) -> pointer element type", visited: visited)
     case .structure(let defId):

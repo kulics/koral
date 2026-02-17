@@ -101,11 +101,12 @@ public class EscapeContext {
     /// 已标记为逃逸的变量及其逃逸原因
     public var escapedVariables: [String: EscapeResult] = [:]
 
-    /// 引用变量来源追踪：ref 变量名 -> 原始被引用变量名
+    /// 引用变量来源追踪：ref 变量名 -> 所有可能的原始被引用变量名
     ///
-    /// 例如：`let r = ref x` 记录为 r -> x；
-    /// 再例如：`let r2 = r` 记录为 r2 -> x。
-    private var referenceOrigins: [String: String] = [:]
+    /// 例如：`let r = ref x` 记录为 r -> {x}；
+    /// 条件分支：`let r = if flag then ref a else ref b` 记录为 r -> {a, b}；
+    /// 链式传递：`let r2 = r` 记录为 r2 -> {x}（继承 r 的所有来源）。
+    private var referenceOrigins: [String: Set<String>] = [:]
     
     /// 作用域栈，用于追踪每个作用域中声明的变量
     private var scopeStack: [[String]] = []
@@ -144,11 +145,10 @@ public class EscapeContext {
     
     /// 离开作用域
     public func leaveScope() {
-        // 清理当前作用域中的变量
+        // 清理当前作用域中的变量（但保留 referenceOrigins 以支持跨作用域追踪）
         if let currentScopeVars = scopeStack.popLast() {
             for varName in currentScopeVars {
                 variableScopes.removeValue(forKey: varName)
-                referenceOrigins.removeValue(forKey: varName)
             }
         }
         currentScopeLevel = max(0, currentScopeLevel - 1)
@@ -166,8 +166,13 @@ public class EscapeContext {
             scopeStack[scopeStack.count - 1].append(name)
         }
 
-        if let value = value, let origin = extractReferenceOrigin(from: value) {
-            referenceOrigins[name] = origin
+        if let value = value {
+            let origins = extractReferenceOrigins(from: value)
+            if !origins.isEmpty {
+                referenceOrigins[name] = origins
+            } else {
+                referenceOrigins.removeValue(forKey: name)
+            }
         } else {
             referenceOrigins.removeValue(forKey: name)
         }
@@ -301,85 +306,159 @@ public class EscapeContext {
         }
     }
 
-    /// 解析引用变量的最终来源（处理 r2 -> r1 -> x 链）
-    private func resolveReferenceOrigin(for name: String) -> String {
-        var current = name
-        var visited: Set<String> = []
-
-        while let next = referenceOrigins[current], !visited.contains(current) {
-            visited.insert(current)
-            current = next
+    /// 解析引用变量的所有最终来源（处理 r2 -> r1 -> x 链，支持多来源）
+    private func resolveReferenceOrigins(for name: String) -> Set<String> {
+        guard let directOrigins = referenceOrigins[name] else {
+            return [name]
         }
 
-        return current
+        var result: Set<String> = []
+        var visited: Set<String> = [name]
+
+        var worklist = Array(directOrigins)
+        while let current = worklist.popLast() {
+            guard !visited.contains(current) else { continue }
+            visited.insert(current)
+
+            if let nextOrigins = referenceOrigins[current] {
+                // This variable also has origins — keep resolving
+                worklist.append(contentsOf: nextOrigins)
+            } else {
+                // Terminal — this is a real source variable
+                result.insert(current)
+            }
+        }
+
+        return result.isEmpty ? [name] : result
     }
 
-    /// 从表达式中提取引用的原始来源变量名
-    private func extractReferenceOrigin(from expr: TypedExpressionNode) -> String? {
+    /// 从表达式中提取引用的所有可能来源变量名（支持条件分支、match、block 等）
+    private func extractReferenceOrigins(from expr: TypedExpressionNode) -> Set<String> {
         switch expr {
         case .referenceExpression(let inner, _):
-            guard let sourceName = extractVariableName(from: inner) else { return nil }
-            return resolveReferenceOrigin(for: sourceName)
+            guard let sourceName = extractVariableName(from: inner) else { return [] }
+            return resolveReferenceOrigins(for: sourceName)
 
         case .variable(let identifier):
-            guard case .reference = identifier.type else { return nil }
+            guard case .reference = identifier.type else { return [] }
             let name = context?.getName(identifier.defId) ?? "<unknown>"
-            return resolveReferenceOrigin(for: name)
+            return resolveReferenceOrigins(for: name)
 
         case .castExpression(let inner, _):
-            return extractReferenceOrigin(from: inner)
+            return extractReferenceOrigins(from: inner)
 
         case .traitObjectConversion(let inner, _, _, _, _):
-            return extractReferenceOrigin(from: inner)
+            return extractReferenceOrigins(from: inner)
+
+        case .ifExpression(_, let thenBranch, let elseBranch, _):
+            var origins = extractReferenceOrigins(from: thenBranch)
+            if let elseBranch = elseBranch {
+                origins.formUnion(extractReferenceOrigins(from: elseBranch))
+            }
+            return origins
+
+        case .ifPatternExpression(_, _, _, let thenBranch, let elseBranch, _):
+            var origins = extractReferenceOrigins(from: thenBranch)
+            if let elseBranch = elseBranch {
+                origins.formUnion(extractReferenceOrigins(from: elseBranch))
+            }
+            return origins
+
+        case .matchExpression(_, let cases, _):
+            var origins: Set<String> = []
+            for matchCase in cases {
+                origins.formUnion(extractReferenceOrigins(from: matchCase.body))
+            }
+            return origins
+
+        case .blockExpression(_, let finalExpr, _):
+            if let finalExpr = finalExpr {
+                return extractReferenceOrigins(from: finalExpr)
+            }
+            return []
+
+        case .letExpression(_, _, let body, _):
+            return extractReferenceOrigins(from: body)
 
         default:
-            return nil
+            return []
         }
     }
 
-    /// 按作用域规则标记变量（或其引用来源）为逃逸
-    private func markEscapedVariableIfTracked(_ variableName: String, reason: EscapeResult, includeParameters: Bool) {
-        let originName = resolveReferenceOrigin(for: variableName)
+    /// 按作用域规则标记变量（或其所有引用来源）为逃逸
+    private func markEscapedVariableIfTracked(_ variableName: String, reason: EscapeResult) {
+        let origins = resolveReferenceOrigins(for: variableName)
 
-        if let scopeLevel = variableScopes[originName], scopeLevel > 0 || (includeParameters && scopeLevel == 0) {
-            markEscaped(originName, reason: reason)
-            return
+        var marked = false
+        for origin in origins {
+            if variableScopes[origin] != nil {
+                markEscaped(origin, reason: reason)
+                marked = true
+            }
         }
 
-        if includeParameters, let scopeLevel = variableScopes[variableName], scopeLevel == 0 {
-            markEscaped(variableName, reason: reason)
+        if !marked {
+            // Fallback: mark the variable itself if it's tracked
+            if variableScopes[variableName] != nil {
+                markEscaped(variableName, reason: reason)
+            }
         }
     }
 
     /// 递归扫描表达式中的引用，并按需要标记为逃逸
-    private func markEscapedReferences(in expr: TypedExpressionNode, reason: EscapeResult, includeParameters: Bool) {
+    private func markEscapedReferences(in expr: TypedExpressionNode, reason: EscapeResult) {
         switch expr {
         case .referenceExpression(let inner, _):
             if let varName = extractVariableName(from: inner) {
-                markEscapedVariableIfTracked(varName, reason: reason, includeParameters: includeParameters)
+                markEscapedVariableIfTracked(varName, reason: reason)
             }
 
         case .variable(let identifier):
             if case .reference = identifier.type {
                 let name = context?.getName(identifier.defId) ?? "<unknown>"
-                markEscapedVariableIfTracked(name, reason: reason, includeParameters: includeParameters)
+                markEscapedVariableIfTracked(name, reason: reason)
             }
 
         case .typeConstruction(_, _, let arguments, _):
             for arg in arguments {
-                markEscapedReferences(in: arg, reason: reason, includeParameters: includeParameters)
+                markEscapedReferences(in: arg, reason: reason)
             }
 
         case .unionConstruction(_, _, let arguments):
             for arg in arguments {
-                markEscapedReferences(in: arg, reason: reason, includeParameters: includeParameters)
+                markEscapedReferences(in: arg, reason: reason)
             }
 
         case .castExpression(let inner, _):
-            markEscapedReferences(in: inner, reason: reason, includeParameters: includeParameters)
+            markEscapedReferences(in: inner, reason: reason)
 
         case .traitObjectConversion(let inner, _, _, _, _):
-            markEscapedReferences(in: inner, reason: reason, includeParameters: includeParameters)
+            markEscapedReferences(in: inner, reason: reason)
+
+        case .ifExpression(_, let thenBranch, let elseBranch, _):
+            markEscapedReferences(in: thenBranch, reason: reason)
+            if let elseBranch = elseBranch {
+                markEscapedReferences(in: elseBranch, reason: reason)
+            }
+
+        case .ifPatternExpression(_, _, _, let thenBranch, let elseBranch, _):
+            markEscapedReferences(in: thenBranch, reason: reason)
+            if let elseBranch = elseBranch {
+                markEscapedReferences(in: elseBranch, reason: reason)
+            }
+
+        case .matchExpression(_, let cases, _):
+            for matchCase in cases {
+                markEscapedReferences(in: matchCase.body, reason: reason)
+            }
+
+        case .blockExpression(_, let finalExpr, _):
+            if let finalExpr = finalExpr {
+                markEscapedReferences(in: finalExpr, reason: reason)
+            }
+
+        case .letExpression(_, _, let body, _):
+            markEscapedReferences(in: body, reason: reason)
 
         default:
             break
@@ -711,7 +790,8 @@ public class EscapeContext {
             // Lambda 表达式：被捕获的变量应该标记为逃逸
             for capture in captures {
                 let name = context?.getName(capture.symbol.defId) ?? "<unknown>"
-                markEscaped(name, reason: .escapeToField)
+                // Mark the captured variable itself as escaped
+                markEscapedVariableIfTracked(name, reason: .escapeToField)
             }
             // 分析 Lambda 体
             enterScope()
@@ -836,12 +916,12 @@ public class EscapeContext {
         case .referenceExpression(let inner, _):
             // 直接返回引用表达式
             _ = inner
-            markEscapedReferences(in: expr, reason: .escapeToReturn, includeParameters: false)
+            markEscapedReferences(in: expr, reason: .escapeToReturn)
             
         case .variable(let identifier):
             // 返回一个引用类型变量时，标记其来源局部变量逃逸
             _ = identifier
-            markEscapedReferences(in: expr, reason: .escapeToReturn, includeParameters: false)
+            markEscapedReferences(in: expr, reason: .escapeToReturn)
 
         case .castExpression(let inner, _):
             checkReturnEscape(inner)
@@ -897,7 +977,7 @@ public class EscapeContext {
         // 检查目标是否是结构体字段
         guard isStructFieldTarget(target) else { return }
 
-        markEscapedReferences(in: value, reason: .escapeToField, includeParameters: false)
+        markEscapedReferences(in: value, reason: .escapeToField)
     }
     
     /// 检查表达式是否是结构体字段目标
@@ -924,7 +1004,7 @@ public class EscapeContext {
     /// 引用指向的变量可能逃逸。
     private func checkTypeConstructionEscape(arg: TypedExpressionNode, constructedType: Type) {
         _ = constructedType
-        markEscapedReferences(in: arg, reason: .escapeToField, includeParameters: false)
+        markEscapedReferences(in: arg, reason: .escapeToField)
     }
 
     /// 检查写入指针目标的值是否导致引用逃逸
@@ -938,7 +1018,7 @@ public class EscapeContext {
     /// - `init_memory(ptr, SomeType(ref local_var))` — 引用包在构造函数里
     /// - `deptr ptr = SomeType.Variant(value)` — value 是参数变量（用于 summary）
     private func checkPointerStoreEscape(_ val: TypedExpressionNode) {
-        markEscapedReferences(in: val, reason: .escapeToParameter, includeParameters: true)
+        markEscapedReferences(in: val, reason: .escapeToParameter)
     }
 
     /// 标记参数表达式中的 ref local_var 为逃逸
@@ -946,7 +1026,7 @@ public class EscapeContext {
     /// 当调用一个函数且该函数的某个参数被标记为逃逸时，
     /// 检查对应的实参是否包含 `ref local_var`，如果是则标记该局部变量为逃逸。
     private func markRefArgumentAsEscaping(_ arg: TypedExpressionNode) {
-        markEscapedReferences(in: arg, reason: .escapeToParameter, includeParameters: false)
+        markEscapedReferences(in: arg, reason: .escapeToParameter)
     }
 }
 
@@ -980,13 +1060,50 @@ public class GlobalEscapeAnalyzer {
         // Step 2: Build call graph
         buildCallGraph()
 
-        // Step 3: Compute reverse topological order (with SCC handling)
-        let order = computeReverseTopologicalOrder()
+        // Step 3: Compute reverse topological order as SCC groups
+        let sccGroups = computeSCCGroups()
 
-        // Step 4: Analyze functions in order (callees before callers)
-        for defId in order {
-            guard let info = functionInfo[defId] else { continue }
-            analyzeFunction(defId: defId, identifier: info.identifier, params: info.params, body: info.body)
+        // Step 4: Analyze SCC groups in order (callees before callers)
+        for scc in sccGroups {
+            // Check if this SCC has any cycles (including self-loops)
+            let hasCycle: Bool
+            if scc.count == 1 {
+                let defId = scc[0]
+                hasCycle = callGraph[defId]?.contains(defId) ?? false
+            } else {
+                hasCycle = true
+            }
+
+            if !hasCycle {
+                // Single function with no self-loop — analyze once
+                let defId = scc[0]
+                guard let info = functionInfo[defId] else { continue }
+                analyzeFunction(defId: defId, identifier: info.identifier, params: info.params, body: info.body)
+            } else {
+                // SCC with cycle (including self-recursive) — iterate to fixed point
+                // Initialize all summaries in this SCC to noEscape
+                for defId in scc {
+                    guard let info = functionInfo[defId] else { continue }
+                    let paramCount = info.params.count
+                    summaries[defId] = FunctionEscapeSummary(
+                        parameterStates: Array(repeating: .noEscape, count: paramCount)
+                    )
+                }
+
+                let maxIterations = 10
+                for _ in 0..<maxIterations {
+                    var changed = false
+                    for defId in scc {
+                        guard let info = functionInfo[defId] else { continue }
+                        let oldSummary = summaries[defId]
+                        analyzeFunction(defId: defId, identifier: info.identifier, params: info.params, body: info.body)
+                        if summaries[defId]?.parameterStates != oldSummary?.parameterStates {
+                            changed = true
+                        }
+                    }
+                    if !changed { break }
+                }
+            }
         }
 
         // Step 5: Return the complete result
@@ -1267,17 +1384,16 @@ public class GlobalEscapeAnalyzer {
 
     // MARK: - Topological Order (Tarjan's SCC)
 
-    /// 计算逆拓扑序（被调用函数先于调用者）using Tarjan's SCC algorithm.
-    /// SCCs with more than one node (cycles/mutual recursion) have all their
-    /// parameters conservatively marked as `.escapes`.
+    /// 计算 SCC 分组，按逆拓扑序排列（被调用函数先于调用者）。
+    /// 每个 SCC 是一组互相递归的函数。单函数无循环时 SCC 大小为 1。
     /// Tarjan's algorithm naturally emits SCCs in reverse topological order.
-    private func computeReverseTopologicalOrder() -> [UInt64] {
+    private func computeSCCGroups() -> [[UInt64]] {
         var index = 0
         var stack: [UInt64] = []
         var onStack: Set<UInt64> = []
         var indices: [UInt64: Int] = [:]
         var lowlinks: [UInt64: Int] = [:]
-        var result: [UInt64] = []
+        var result: [[UInt64]] = []
 
         func strongConnect(_ v: UInt64) {
             indices[v] = index
@@ -1298,7 +1414,6 @@ public class GlobalEscapeAnalyzer {
             }
 
             if lowlinks[v] == indices[v] {
-                // Found an SCC - pop all nodes in this SCC
                 var scc: [UInt64] = []
                 while true {
                     let w = stack.removeLast()
@@ -1306,14 +1421,7 @@ public class GlobalEscapeAnalyzer {
                     scc.append(w)
                     if w == v { break }
                 }
-
-                // If SCC has more than one node (cycle), we still analyze each
-                // function normally. Summaries for SCC peers may be incomplete,
-                // but missing summaries are safely skipped (no propagation = safe).
-                // This avoids over-conservative marking that breaks correct code.
-
-                // Add SCC nodes to result (they form a group at the same level)
-                result.append(contentsOf: scc)
+                result.append(scc)
             }
         }
 
@@ -1365,18 +1473,16 @@ public class GlobalEscapeAnalyzer {
         }
         escapedVariablesPerFunction[defId] = localEscaped
 
-        // Build the parameter summary if not already set (SCC case already has one)
-        if summaries[defId] == nil {
-            var paramStates: [ParameterEscapeState] = []
-            for param in params {
-                let paramName = context.getName(param.defId) ?? "<unknown>"
-                if escCtx.escapedVariables[paramName] != nil {
-                    paramStates.append(.escapes)
-                } else {
-                    paramStates.append(.noEscape)
-                }
+        // Build the parameter summary (always overwrite — needed for SCC iteration)
+        var paramStates: [ParameterEscapeState] = []
+        for param in params {
+            let paramName = context.getName(param.defId) ?? "<unknown>"
+            if escCtx.escapedVariables[paramName] != nil {
+                paramStates.append(.escapes)
+            } else {
+                paramStates.append(.noEscape)
             }
-            summaries[defId] = FunctionEscapeSummary(parameterStates: paramStates)
         }
+        summaries[defId] = FunctionEscapeSummary(parameterStates: paramStates)
     }
 }

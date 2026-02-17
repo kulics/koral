@@ -606,8 +606,18 @@ extension Monomorphizer {
             return .genericUnion(template: template, args: args.map { normalizeTypeArgument($0) })
         case .reference(let inner):
             return .reference(inner: normalizeTypeArgument(inner))
+        case .weakReference(let inner):
+            return .weakReference(inner: normalizeTypeArgument(inner))
         case .pointer(let element):
             return .pointer(element: normalizeTypeArgument(element))
+        case .function(let params, let returns):
+            let newParams = params.map { param in
+                Parameter(
+                    type: normalizeTypeArgument(param.type),
+                    kind: param.kind
+                )
+            }
+            return .function(parameters: newParams, returns: normalizeTypeArgument(returns))
         default:
             return type
         }

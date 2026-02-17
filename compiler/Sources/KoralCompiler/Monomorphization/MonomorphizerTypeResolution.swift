@@ -262,6 +262,9 @@ extension Monomorphizer {
         case .reference(let inner):
             return .reference(inner: resolveParameterizedType(inner, visited: visited))
             
+        case .weakReference(let inner):
+            return .weakReference(inner: resolveParameterizedType(inner, visited: visited))
+            
         case .pointer(let element):
             return .pointer(element: resolveParameterizedType(element, visited: visited))
             
