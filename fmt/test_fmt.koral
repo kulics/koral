@@ -1,0 +1,98 @@
+// ============================================================================
+// Koral Formatter - Test Suite
+// ============================================================================
+
+using "tokenizer"
+using "parser"
+using "printer"
+
+type TestRunner(mut pass_count UInt, mut fail_count UInt)
+
+given TestRunner {
+    new() TestRunner = TestRunner(0, 0)
+
+    test(self ref, name String, input String, expected String) Void = {
+        when format_source(input) is {
+            .Ok(result) then {
+                if result == expected then {
+                    self.pass_count += 1
+                } else {
+                    self.fail_count += 1
+                    print_line("FAIL: " + name)
+                    print_line("  expected:")
+                    print_line(expected)
+                    print_line("  got:")
+                    print_line(result)
+                }
+            },
+            .Error(e) then {
+                self.fail_count += 1
+                print_line("ERROR: " + name + " - " + e.message())
+            },
+        }
+    }
+
+    summary(self) Void = {
+        let total = self.pass_count + self.fail_count
+        print_line(self.pass_count.to_string() + "/" + total.to_string() + " tests passed")
+        if self.fail_count > 0 then { exit(1) }
+    }
+}
+
+let main() Void = {
+    let mut t = TestRunner.new()
+
+    // === Basic let bindings ===
+    t.test("simple let spacing", "let x=1+2\n", "let x = 1 + 2\n")
+    t.test("let with type", "let x Int=42\n", "let x Int = 42\n")
+    t.test("let mut", "let mut x=0\n", "let mut x = 0\n")
+    t.test("public let", "public let x Int=42\n", "public let x Int = 42\n")
+
+    // === Function declarations ===
+    t.test("func decl", "let add(a Int,b Int) Int=a+b\n", "let add(a Int, b Int) Int = a + b\n")
+    t.test("func with block", "let f() Void={\nlet x=1\nlet y=2\n}\n",
+        "let f() Void = {\n    let x = 1\n    let y = 2\n}\n")
+    t.test("return stmt", "let f() Int={\nreturn 42\n}\n", "let f() Int = {\n    return 42\n}\n")
+
+    // === Using declarations ===
+    t.test("using", "using \"foo\"\n", "using \"foo\"\n")
+    t.test("foreign using", "foreign using \"math\"\n", "foreign using \"math\"\n")
+
+    // === Type declarations ===
+    t.test("public type tuple", "public type Point(x Int,y Int)\n", "public type Point(x Int, y Int)\n")
+
+    // === Trait and Given ===
+    t.test("trait decl", "trait Printable {\nlet to_string(self) String\n}\n",
+        "trait Printable {\n    let to_string(self) String\n}\n")
+    t.test("given block", "given Point {\npublic new(x Int,y Int) Point=Point(x,y)\n}\n",
+        "given Point {\n    public new(x Int, y Int) Point = Point(x, y)\n}\n")
+
+    // === When/is expressions ===
+    t.test("when/is block", "when x is {\n1 then true,\n_ then false,\n}\n",
+        "when x is {\n    1 then true,\n    _ then false,\n}\n")
+
+    // === Operators ===
+    t.test("unary minus", "let x=-1\n", "let x = -1\n")
+    t.test("range op", "let r=0..<10\n", "let r = 0..<10\n")
+    t.test("compound assign", "let f() Void={\nx+=1\n}\n",
+        "let f() Void = {\n    x += 1\n}\n")
+
+    // === Strings ===
+    t.test("string interp", "let s=\"hello \\(name)\"\n", "let s = \"hello \\(name)\"\n")
+
+    // === Comments ===
+    t.test("line comment", "// hello world\n", "// hello world\n")
+
+    // === Method calls ===
+    t.test("method call", "let r=a.add(b)\n", "let r = a.add(b)\n")
+
+    // === Multiple declarations ===
+    t.test("multi decl", "let x=1\nlet y=2\n", "let x = 1\n\nlet y = 2\n")
+
+    // === Idempotency ===
+    t.test("idempotent simple", "let x = 1 + 2\n", "let x = 1 + 2\n")
+    t.test("idempotent trait", "trait Foo {\n    let bar(self) Int\n}\n",
+        "trait Foo {\n    let bar(self) Int\n}\n")
+
+    t.summary()
+}

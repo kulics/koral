@@ -106,15 +106,21 @@ extension TypeChecker {
             }
           }
           // Pass expected type for implicit member expression support
-          let typedBody = try inferTypedExpression(c.body, expectedType: expectedType)
+          // Use already-determined resultType as expectedType for subsequent arms
+          let armExpectedType = expectedType ?? (resultType.flatMap { $0 == .never ? nil : $0 })
+          var typedBody = try inferTypedExpression(c.body, expectedType: armExpectedType)
           if let rt = resultType {
             if typedBody.type != .never {
               if rt == .never {
                 // Previous cases were all Never, this is the first concrete type
                 resultType = typedBody.type
               } else if typedBody.type != rt {
-                throw SemanticError.typeMismatch(
-                  expected: rt.description, got: typedBody.type.description)
+                // Try literal coercion before reporting mismatch
+                typedBody = try coerceLiteral(typedBody, to: rt)
+                if typedBody.type != rt {
+                  throw SemanticError.typeMismatch(
+                    expected: rt.description, got: typedBody.type.description)
+                }
               }
             }
           } else {
@@ -624,7 +630,12 @@ extension TypeChecker {
       }
 
     case .refExpression(let inner):
-      let typedInner = try inferTypedExpression(inner)
+      // Unwrap expected reference type for inner expression
+      var innerExpected: Type? = nil
+      if let expected = expectedType, case .reference(let innerType) = expected {
+        innerExpected = innerType
+      }
+      let typedInner = try inferTypedExpression(inner, expectedType: innerExpected)
       // 禁止对引用再次取引用（仅单层）
       if case .reference(_) = typedInner.type {
         throw SemanticError.invalidOperation(
@@ -1591,7 +1602,7 @@ extension TypeChecker {
 
             var typedArgs: [TypedExpressionNode] = []
             for (arg, param) in zip(arguments, params) {
-              var typedArg = try inferTypedExpression(arg)
+              var typedArg = try inferTypedExpression(arg, expectedType: param.type)
               typedArg = try coerceLiteral(typedArg, to: param.type)
               if typedArg.type != param.type {
                 throw SemanticError.typeMismatch(
@@ -1633,7 +1644,7 @@ extension TypeChecker {
 
         var typedArguments: [TypedExpressionNode] = []
         for (arg, expectedMember) in zip(arguments, parameters) {
-          var typedArg = try inferTypedExpression(arg)
+          var typedArg = try inferTypedExpression(arg, expectedType: expectedMember.type)
           typedArg = try coerceLiteral(typedArg, to: expectedMember.type)
           if typedArg.type != expectedMember.type {
             throw SemanticError.typeMismatch(
@@ -2471,7 +2482,7 @@ extension TypeChecker {
             _ = unifyTypes(param.type, typedArg.type, bindings: &methodTypeParamBindings)
           }
         } else {
-          typedArg = try inferTypedExpression(arg)
+          typedArg = try inferTypedExpression(arg, expectedType: param.type)
           typedArg = try coerceLiteral(typedArg, to: param.type)
           
           // If param type contains generic parameters, unify to infer them

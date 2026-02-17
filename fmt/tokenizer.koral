@@ -1,0 +1,845 @@
+// ============================================================================
+// Koral Formatter - Tokenizer
+// ============================================================================
+
+// ============================================================================
+// Token Type Definition
+// ============================================================================
+
+public type Token {
+    // Keywords
+    KwLet(), KwMut(), KwIf(), KwThen(), KwElse(), KwWhile(), KwFor(),
+    KwWhen(), KwIs(), KwAnd(), KwOr(), KwNot(),
+    KwType(), KwTrait(), KwGiven(), KwUsing(), KwForeign(), KwIntrinsic(),
+    KwSelf(), KwSelfType(),
+    KwReturn(), KwBreak(), KwContinue(),
+    KwRef(), KwPtr(), KwDeptr(), KwDeref(), KwWeakref(),
+    KwPublic(), KwPrivate(), KwProtected(), KwSuper(),
+
+    // Literals
+    BoolTrue(), BoolFalse(),
+    IntLit(text String), FloatLit(text String),
+    StrLit(text String), InterpStr(text String),
+
+    // Identifier
+    Ident(name String),
+
+    // Arithmetic operators
+    Plus(), Minus(), Star(), Slash(), Percent(),
+
+    // Comparison operators
+    EqEq(), NotEq(), Gt(), Lt(), GtEq(), LtEq(),
+
+    // Assignment
+    Eq(),
+
+    // Compound assignment operators
+    PlusEq(), MinusEq(), StarEq(), SlashEq(), PercentEq(),
+    AmpEq(), PipeEq(), CaretEq(), LShiftEq(), RShiftEq(),
+
+    // Bitwise operators
+    Amp(), Pipe(), Caret(), Tilde(), LShift(), RShift(),
+
+    // Arrow
+    Arrow(),
+
+    // Range operators
+    Range(), RangeLt(), LtRange(), LtRangeLt(),
+    Unbounded(), LtUnbounded(), UnboundedLt(), FullRange(),
+
+    // Delimiters
+    LParen(), RParen(), LBrace(), RBrace(), LBracket(), RBracket(),
+
+    // Punctuation
+    Semi(), Comma(), Colon(), Dot(),
+
+    // Comments
+    LineComment(text String),
+    BlockComment(text String),
+
+    // Whitespace
+    Newline(),
+
+    // Special
+    Underscore(),
+    EOF(),
+}
+
+// ============================================================================
+// Token Methods
+// ============================================================================
+
+given Token {
+    public to_string(self) String = when self is {
+        .KwLet then "let", .KwMut then "mut", .KwIf then "if",
+        .KwThen then "then", .KwElse then "else", .KwWhile then "while",
+        .KwFor then "for", .KwWhen then "when", .KwIs then "is",
+        .KwAnd then "and", .KwOr then "or", .KwNot then "not",
+        .KwType then "type", .KwTrait then "trait", .KwGiven then "given",
+        .KwUsing then "using", .KwForeign then "foreign", .KwIntrinsic then "intrinsic",
+        .KwSelf then "self", .KwSelfType then "Self",
+        .KwReturn then "return", .KwBreak then "break", .KwContinue then "continue",
+        .KwRef then "ref", .KwPtr then "ptr", .KwDeptr then "deptr",
+        .KwDeref then "deref", .KwWeakref then "weakref",
+        .KwPublic then "public", .KwPrivate then "private", .KwProtected then "protected",
+        .KwSuper then "super",
+        .BoolTrue then "true", .BoolFalse then "false",
+        .IntLit(t) then t, .FloatLit(t) then t,
+        .StrLit(t) then t, .InterpStr(t) then t,
+        .Ident(n) then n,
+        .Plus then "+", .Minus then "-", .Star then "*", .Slash then "/", .Percent then "%",
+        .EqEq then "==", .NotEq then "<>",
+        .Gt then ">", .Lt then "<", .GtEq then ">=", .LtEq then "<=",
+        .Eq then "=",
+        .PlusEq then "+=", .MinusEq then "-=", .StarEq then "*=",
+        .SlashEq then "/=", .PercentEq then "%=",
+        .AmpEq then "&=", .PipeEq then "|=", .CaretEq then "^=",
+        .LShiftEq then "<<=", .RShiftEq then ">>=",
+        .Amp then "&", .Pipe then "|", .Caret then "^", .Tilde then "~",
+        .LShift then "<<", .RShift then ">>",
+        .Arrow then "->",
+        .Range then "..", .RangeLt then "..<", .LtRange then "<..",
+        .LtRangeLt then "<..<", .Unbounded then "...",
+        .LtUnbounded then "<...", .UnboundedLt then "...<", .FullRange then "....",
+        .LParen then "(", .RParen then ")", .LBrace then "{", .RBrace then "}",
+        .LBracket then "[", .RBracket then "]",
+        .Semi then ";", .Comma then ",", .Colon then ":", .Dot then ".",
+        .LineComment(t) then t, .BlockComment(t) then t,
+        .Newline then "\n",
+        .Underscore then "_",
+        .EOF then "",
+    }
+
+    public is_keyword(self) Bool = when self is {
+        .KwLet or .KwMut or .KwIf or .KwThen or .KwElse or .KwWhile or .KwFor
+        or .KwWhen or .KwIs or .KwAnd or .KwOr or .KwNot
+        or .KwType or .KwTrait or .KwGiven or .KwUsing or .KwForeign or .KwIntrinsic
+        or .KwSelf or .KwSelfType
+        or .KwReturn or .KwBreak or .KwContinue
+        or .KwRef or .KwPtr or .KwDeptr or .KwDeref or .KwWeakref
+        or .KwPublic or .KwPrivate or .KwProtected or .KwSuper then true,
+        _ then false,
+    }
+
+    public is_binary_op(self) Bool = when self is {
+        .Plus or .Minus or .Star or .Slash or .Percent
+        or .EqEq or .NotEq or .Gt or .Lt or .GtEq or .LtEq
+        or .Eq
+        or .PlusEq or .MinusEq or .StarEq or .SlashEq or .PercentEq
+        or .AmpEq or .PipeEq or .CaretEq or .LShiftEq or .RShiftEq
+        or .Amp or .Pipe or .Caret or .LShift or .RShift
+        or .KwAnd or .KwOr then true,
+        _ then false,
+    }
+
+    public is_range_op(self) Bool = when self is {
+        .Range or .RangeLt or .LtRange or .LtRangeLt
+        or .Unbounded or .LtUnbounded or .UnboundedLt or .FullRange then true,
+        _ then false,
+    }
+
+    public is_prefix_op(self) Bool = when self is {
+        .KwNot or .Tilde then true,
+        _ then false,
+    }
+
+    public is_open_delim(self) Bool = when self is {
+        .LParen or .LBrace or .LBracket then true,
+        _ then false,
+    }
+
+    public is_close_delim(self) Bool = when self is {
+        .RParen or .RBrace or .RBracket then true,
+        _ then false,
+    }
+
+    public tag(t Token) Int = when t is {
+        .KwLet then 1, .KwMut then 2, .KwIf then 3, .KwThen then 4,
+        .KwElse then 5, .KwWhile then 6, .KwFor then 7, .KwWhen then 8,
+        .KwIs then 9, .KwAnd then 10, .KwOr then 11, .KwNot then 12,
+        .KwType then 13, .KwTrait then 14, .KwGiven then 15, .KwUsing then 16,
+        .KwForeign then 17, .KwIntrinsic then 18, .KwSelf then 19, .KwSelfType then 20,
+        .KwReturn then 21, .KwBreak then 22, .KwContinue then 23,
+        .KwRef then 24, .KwPtr then 25, .KwDeptr then 26, .KwDeref then 27,
+        .KwWeakref then 28, .KwPublic then 29, .KwPrivate then 30,
+        .KwProtected then 31, .KwSuper then 32,
+        .BoolTrue then 33, .BoolFalse then 34,
+        .IntLit(_) then 35, .FloatLit(_) then 36,
+        .StrLit(_) then 37, .InterpStr(_) then 38,
+        .Ident(_) then 39,
+        .Plus then 40, .Minus then 41, .Star then 42, .Slash then 43, .Percent then 44,
+        .EqEq then 45, .NotEq then 46, .Gt then 47, .Lt then 48, .GtEq then 49, .LtEq then 50,
+        .Eq then 51,
+        .PlusEq then 52, .MinusEq then 53, .StarEq then 54, .SlashEq then 55, .PercentEq then 56,
+        .AmpEq then 57, .PipeEq then 58, .CaretEq then 59, .LShiftEq then 60, .RShiftEq then 61,
+        .Amp then 62, .Pipe then 63, .Caret then 64, .Tilde then 65, .LShift then 66, .RShift then 67,
+        .Arrow then 68,
+        .Range then 69, .RangeLt then 70, .LtRange then 71, .LtRangeLt then 72,
+        .Unbounded then 73, .LtUnbounded then 74, .UnboundedLt then 75, .FullRange then 76,
+        .LParen then 77, .RParen then 78, .LBrace then 79, .RBrace then 80,
+        .LBracket then 81, .RBracket then 82,
+        .Semi then 83, .Comma then 84, .Colon then 85, .Dot then 86,
+        .LineComment(_) then 87, .BlockComment(_) then 88,
+        .Newline then 89, .Underscore then 90, .EOF then 91,
+    }
+}
+
+// ============================================================================
+// Tokenizer
+// ============================================================================
+
+public type Tokenizer(
+    runes [Rune]List,
+    mut pos UInt,
+)
+
+given Tokenizer {
+    public new(source String) Tokenizer = Tokenizer(source.to_runes(), 0)
+
+    // Peek at current rune without consuming
+    private peek(self) [Rune]Option = {
+        if self.pos >= self.runes.count() then {
+            return .None()
+        }
+        [Rune]Option.Some(self.runes[self.pos])
+    }
+
+    // Peek at rune at offset from current position
+    private peek_at(self, offset UInt) [Rune]Option = {
+        let idx = self.pos + offset
+        if idx >= self.runes.count() then {
+            return .None()
+        }
+        [Rune]Option.Some(self.runes[idx])
+    }
+
+    // Advance and return current rune
+    private advance(self ref) Rune = {
+        let r = self.runes[self.pos]
+        self.pos += 1
+        r
+    }
+
+    // Check if at end
+    private is_eof(self) Bool = self.pos >= self.runes.count()
+
+    // Check if rune equals a specific character
+    private rune_eq(r Rune, ch Rune) Bool = r == ch
+
+    // ========================================================================
+    // Main tokenize entry point
+    // ========================================================================
+
+    public tokenize(self ref) [[Token]List]Result = {
+        let mut tokens = [Token]List.new()
+
+        while not self.is_eof() then {
+            let r = self.runes[self.pos]
+            let cp = r.to_uint32()
+
+            // Skip carriage return (Windows line endings)
+            if Tokenizer.rune_eq(r, '\r') then {
+                self.pos += 1
+                continue
+            }
+
+            // Emit newline tokens, skip other whitespace
+            if Tokenizer.rune_eq(r, '\n') then {
+                self.pos += 1
+                tokens.push(Token.Newline())
+                continue
+            }
+            if r.is_whitespace() then {
+                self.pos += 1
+                continue
+            }
+
+            // Line comment: //
+            if Tokenizer.rune_eq(r, '/') then {
+                if self.peek_at(1) is .Some(r2) then {
+                    if Tokenizer.rune_eq(r2, '/') then {
+                        tokens.push(self.scan_line_comment())
+                        continue
+                    }
+                    if Tokenizer.rune_eq(r2, '*') then {
+                        tokens.push(self.scan_block_comment())
+                        continue
+                    }
+                }
+            }
+
+            // String literal
+            if Tokenizer.rune_eq(r, '"') then {
+                when self.scan_string() is {
+                    .Ok(tok) then {
+                        tokens.push(tok)
+                        continue
+                    },
+                    .Error(e) then { return .Error(e) },
+                }
+            }
+
+            // Number literal
+            if r.is_ascii_digit() then {
+                tokens.push(self.scan_number())
+                continue
+            }
+
+            // Identifier or keyword
+            if r.is_identifier_start() then {
+                tokens.push(self.scan_identifier())
+                continue
+            }
+
+            // Operators and punctuation
+            if self.scan_operator() is .Some(tok) then {
+                tokens.push(tok)
+                continue
+            }
+
+            // Unknown character - skip
+            self.pos += 1
+        }
+
+        tokens.push(.EOF())
+        return .Ok(tokens)
+    }
+
+    // ========================================================================
+    // Line comment: // ...
+    // ========================================================================
+
+    private scan_line_comment(self ref) Token = {
+        let mut text = String.new()
+        // Consume // and rest of line, but don't consume the newline
+        while not self.is_eof() then {
+            let r = self.runes[self.pos]
+            if Tokenizer.rune_eq(r, '\n') or Tokenizer.rune_eq(r, '\r') then { break }
+            text.push_string(r.to_string())
+            self.pos += 1
+        }
+        Token.LineComment(text)
+    }
+
+    // ========================================================================
+    // Block comment: /* ... */
+    // ========================================================================
+
+    private scan_block_comment(self ref) Token = {
+        let mut text = String.new()
+        let mut depth UInt = 0
+        while not self.is_eof() then {
+            let r = self.advance()
+            // Check for nested /*
+            if Tokenizer.rune_eq(r, '/') then {
+                if self.peek() is .Some(r2) then {
+                    if Tokenizer.rune_eq(r2, '*') then {
+                        text.push_string(r.to_string())
+                        text.push_string(self.advance().to_string())
+                        depth += 1
+                        continue
+                    }
+                }
+            }
+            // Check for */
+            if Tokenizer.rune_eq(r, '*') then {
+                if self.peek() is .Some(r2) then {
+                    if Tokenizer.rune_eq(r2, '/') then {
+                        if depth == 0 then {
+                            text.push_string(r.to_string())
+                            text.push_string(self.advance().to_string())
+                            return .BlockComment(text)
+                        }
+                        text.push_string(r.to_string())
+                        text.push_string(self.advance().to_string())
+                        depth -= 1
+                        continue
+                    }
+                }
+            }
+            text.push_string(r.to_string())
+        }
+        Token.BlockComment(text)
+    }
+
+    // ========================================================================
+    // String literal: "..." or "\(...)" interpolation
+    // ========================================================================
+
+    private scan_string(self ref) [Token]Result = {
+        let mut text = String.new()
+        text.push('"')
+        self.pos += 1 // skip opening "
+        let mut is_interp = false
+
+        while not self.is_eof() then {
+            let r = self.runes[self.pos]
+
+            // End of string
+            if Tokenizer.rune_eq(r, '"') then {
+                text.push('"')
+                self.pos += 1
+                if is_interp then {
+                    return .Ok(.InterpStr(text))
+                }
+                return .Ok(.StrLit(text))
+            }
+
+            // Escape sequence
+            if Tokenizer.rune_eq(r, '\\') then {
+                text.push_string(r.to_string())
+                self.pos += 1
+                if not self.is_eof() then {
+                    let next = self.runes[self.pos]
+                    // Interpolation: \(...)
+                    if Tokenizer.rune_eq(next, '(') then {
+                        is_interp = true
+                        text.push_string(next.to_string())
+                        self.pos += 1
+                        // Consume until matching )
+                        let mut depth UInt = 1
+                        while not self.is_eof() and depth > 0 then {
+                            let ir = self.runes[self.pos]
+                            if Tokenizer.rune_eq(ir, '(') then { depth += 1 }
+                            if Tokenizer.rune_eq(ir, ')') then { depth -= 1 }
+                            text.push_string(ir.to_string())
+                            self.pos += 1
+                        }
+                    } else {
+                        text.push_string(next.to_string())
+                        self.pos += 1
+                    }
+                }
+                continue
+            }
+
+            // Newline inside string - error
+            if Tokenizer.rune_eq(r, '\n') then {
+                return .Error(ref "unterminated string literal")
+            }
+
+            text.push_string(r.to_string())
+            self.pos += 1
+        }
+
+        [Token]Result.Error(ref "unterminated string literal")
+    }
+
+    // ========================================================================
+    // Number literal
+    // ========================================================================
+
+    private scan_number(self ref) Token = {
+        let mut text = String.new()
+        let mut is_float = false
+
+        // Consume digits
+        while not self.is_eof() then {
+            let r = self.runes[self.pos]
+            if r.is_ascii_digit() then {
+                text.push_string(r.to_string())
+                self.pos += 1
+            } else if Tokenizer.rune_eq(r, '_') then {
+                text.push_string(r.to_string())
+                self.pos += 1
+            } else if Tokenizer.rune_eq(r, '.') and not is_float then {
+                // Check next char is digit (not range operator)
+                if self.peek_at(1) is .Some(next) then {
+                    if next.is_ascii_digit() then {
+                        is_float = true
+                        text.push_string(r.to_string())
+                        self.pos += 1
+                    } else { break }
+                } else { break }
+            } else if Tokenizer.rune_eq(r, 'x')
+                   or Tokenizer.rune_eq(r, 'b')
+                   or Tokenizer.rune_eq(r, 'o') then {
+                // Hex/binary/octal prefix
+                text.push_string(r.to_string())
+                self.pos += 1
+            } else if Tokenizer.rune_eq(r, 'a') or Tokenizer.rune_eq(r, 'A')
+                   or Tokenizer.rune_eq(r, 'b') or Tokenizer.rune_eq(r, 'B')
+                   or Tokenizer.rune_eq(r, 'c') or Tokenizer.rune_eq(r, 'C')
+                   or Tokenizer.rune_eq(r, 'd') or Tokenizer.rune_eq(r, 'D')
+                   or Tokenizer.rune_eq(r, 'e') or Tokenizer.rune_eq(r, 'E')
+                   or Tokenizer.rune_eq(r, 'f') or Tokenizer.rune_eq(r, 'F') then {
+                // Hex digits or exponent
+                text.push_string(r.to_string())
+                self.pos += 1
+            } else { break }
+        }
+
+        if is_float then { .FloatLit(text) }
+        else { .IntLit(text) }
+    }
+
+    // ========================================================================
+    // Identifier or keyword
+    // ========================================================================
+
+    private scan_identifier(self ref) Token = {
+        let mut text = String.new()
+        while not self.is_eof() then {
+            let r = self.runes[self.pos]
+            if r.is_identifier_continue() then {
+                text.push_string(r.to_string())
+                self.pos += 1
+            } else { break }
+        }
+
+        // Match keywords using when expression
+        when text is {
+            "let" then .KwLet(),
+            "mut" then .KwMut(),
+            "if" then .KwIf(),
+            "then" then .KwThen(),
+            "else" then .KwElse(),
+            "while" then .KwWhile(),
+            "for" then .KwFor(),
+            "when" then .KwWhen(),
+            "is" then .KwIs(),
+            "and" then .KwAnd(),
+            "or" then .KwOr(),
+            "not" then .KwNot(),
+            "type" then .KwType(),
+            "trait" then .KwTrait(),
+            "given" then .KwGiven(),
+            "using" then .KwUsing(),
+            "foreign" then .KwForeign(),
+            "intrinsic" then .KwIntrinsic(),
+            "self" then .KwSelf(),
+            "Self" then .KwSelfType(),
+            "return" then .KwReturn(),
+            "break" then .KwBreak(),
+            "continue" then .KwContinue(),
+            "ref" then .KwRef(),
+            "ptr" then .KwPtr(),
+            "deptr" then .KwDeptr(),
+            "deref" then .KwDeref(),
+            "weakref" then .KwWeakref(),
+            "public" then .KwPublic(),
+            "private" then .KwPrivate(),
+            "protected" then .KwProtected(),
+            "super" then .KwSuper(),
+            "true" then .BoolTrue(),
+            "false" then .BoolFalse(),
+            _ then .Ident(text),
+        }
+    }
+
+    // ========================================================================
+    // Operators and punctuation
+    // ========================================================================
+
+    private scan_operator(self ref) [Token]Option = {
+        let r = self.runes[self.pos]
+        let cp = r.to_uint32()
+
+        // Single-char tokens
+        // '(' ')' '{' '}' '[' ']' ';' ',' ':' '~'
+        if cp == 40 then {
+            self.pos += 1
+            return .Some(.LParen())
+        }
+        if cp == 41 then {
+            self.pos += 1
+            return .Some(.RParen())
+        }
+        if cp == 123 then {
+            self.pos += 1
+            return .Some(.LBrace())
+        }
+        if cp == 125 then {
+            self.pos += 1
+            return .Some(.RBrace())
+        }
+        if cp == 91 then {
+            self.pos += 1
+            return .Some(.LBracket())
+        }
+        if cp == 93 then {
+            self.pos += 1
+            return .Some(.RBracket())
+        }
+        if cp == 59 then {
+            self.pos += 1
+            return .Some(.Semi())
+        }
+        if cp == 44 then {
+            self.pos += 1
+            return .Some(.Comma())
+        }
+        if cp == 58 then {
+            self.pos += 1
+            return .Some(.Colon())
+        }
+        if cp == 126 then {
+            self.pos += 1
+            return .Some(.Tilde())
+        }
+
+        // + +=
+        if cp == 43 then {
+            self.pos += 1
+            if self.peek() is .Some(n) then {
+                if Tokenizer.rune_eq(n, '=') then {
+                    self.pos += 1
+                    return .Some(.PlusEq())
+                }
+            }
+            return .Some(.Plus())
+        }
+
+        // - -= ->
+        if cp == 45 then {
+            self.pos += 1
+            if self.peek() is .Some(n) then {
+                if Tokenizer.rune_eq(n, '=') then {
+                    self.pos += 1
+                    return .Some(.MinusEq())
+                }
+                if Tokenizer.rune_eq(n, '>') then {
+                    self.pos += 1
+                    return .Some(.Arrow())
+                }
+            }
+            return .Some(.Minus())
+        }
+
+        // * *=
+        if cp == 42 then {
+            self.pos += 1
+            if self.peek() is .Some(n) then {
+                if Tokenizer.rune_eq(n, '=') then {
+                    self.pos += 1
+                    return .Some(.StarEq())
+                }
+            }
+            return .Some(.Star())
+        }
+
+        // / /= (// and /* handled earlier)
+        if cp == 47 then {
+            self.pos += 1
+            if self.peek() is .Some(n) then {
+                if Tokenizer.rune_eq(n, '=') then {
+                    self.pos += 1
+                    return .Some(.SlashEq())
+                }
+            }
+            return .Some(.Slash())
+        }
+
+        // % %=
+        if cp == 37 then {
+            self.pos += 1
+            if self.peek() is .Some(n) then {
+                if Tokenizer.rune_eq(n, '=') then {
+                    self.pos += 1
+                    return .Some(.PercentEq())
+                }
+            }
+            return .Some(.Percent())
+        }
+
+        // = ==
+        if cp == 61 then {
+            self.pos += 1
+            if self.peek() is .Some(n) then {
+                if Tokenizer.rune_eq(n, '=') then {
+                    self.pos += 1
+                    return .Some(.EqEq())
+                }
+            }
+            return .Some(.Eq())
+        }
+
+        // < <= << <<= <> <.. <..< <...
+        if cp == 60 then {
+            self.pos += 1
+            if self.peek() is .Some(n) then {
+                if Tokenizer.rune_eq(n, '=') then {
+                    self.pos += 1
+                    return .Some(.LtEq())
+                }
+                if Tokenizer.rune_eq(n, '>') then {
+                    self.pos += 1
+                    return .Some(.NotEq())
+                }
+                if Tokenizer.rune_eq(n, '<') then {
+                    self.pos += 1
+                    if self.peek() is .Some(n2) then {
+                        if Tokenizer.rune_eq(n2, '=') then {
+                            self.pos += 1
+                            return .Some(.LShiftEq())
+                        }
+                    }
+                    return .Some(.LShift())
+                }
+                if Tokenizer.rune_eq(n, '.') then {
+                    self.pos += 1
+                    if self.peek() is .Some(n2) then {
+                        if Tokenizer.rune_eq(n2, '.') then {
+                            self.pos += 1
+                            if self.peek() is .Some(n3) then {
+                                if Tokenizer.rune_eq(n3, '<') then {
+                                    self.pos += 1
+                                    return .Some(.LtRangeLt())
+                                }
+                                if Tokenizer.rune_eq(n3, '.') then {
+                                    self.pos += 1
+                                    return .Some(.LtUnbounded())
+                                }
+                            }
+                            return .Some(.LtRange())
+                        }
+                    }
+                    // Just `<.` - put back and return Lt
+                    self.pos -= 1
+                }
+            }
+            return .Some(.Lt())
+        }
+
+        // > >= >> >>=
+        if cp == 62 then {
+            self.pos += 1
+            if self.peek() is .Some(n) then {
+                if Tokenizer.rune_eq(n, '=') then {
+                    self.pos += 1
+                    return .Some(.GtEq())
+                }
+                if Tokenizer.rune_eq(n, '>') then {
+                    self.pos += 1
+                    if self.peek() is .Some(n2) then {
+                        if Tokenizer.rune_eq(n2, '=') then {
+                            self.pos += 1
+                            return .Some(.RShiftEq())
+                        }
+                    }
+                    return .Some(.RShift())
+                }
+            }
+            return .Some(.Gt())
+        }
+
+        // . .. ..< ... ...< ....
+        if cp == 46 then {
+            self.pos += 1
+            if self.peek() is .Some(n) then {
+                if Tokenizer.rune_eq(n, '.') then {
+                    self.pos += 1
+                    if self.peek() is .Some(n2) then {
+                        if Tokenizer.rune_eq(n2, '<') then {
+                            self.pos += 1
+                            return .Some(.RangeLt())
+                        }
+                        if Tokenizer.rune_eq(n2, '.') then {
+                            self.pos += 1
+                            if self.peek() is .Some(n3) then {
+                                if Tokenizer.rune_eq(n3, '<') then {
+                                    self.pos += 1
+                                    return .Some(.UnboundedLt())
+                                }
+                                if Tokenizer.rune_eq(n3, '.') then {
+                                    self.pos += 1
+                                    return .Some(.FullRange())
+                                }
+                            }
+                            return .Some(.Unbounded())
+                        }
+                    }
+                    return .Some(.Range())
+                }
+            }
+            return .Some(.Dot())
+        }
+
+        // & &=
+        if cp == 38 then {
+            self.pos += 1
+            if self.peek() is .Some(n) then {
+                if Tokenizer.rune_eq(n, '=') then {
+                    self.pos += 1
+                    return .Some(.AmpEq())
+                }
+            }
+            return .Some(.Amp())
+        }
+
+        // | |=
+        if cp == 124 then {
+            self.pos += 1
+            if self.peek() is .Some(n) then {
+                if Tokenizer.rune_eq(n, '=') then {
+                    self.pos += 1
+                    return .Some(.PipeEq())
+                }
+            }
+            return .Some(.Pipe())
+        }
+
+        // ^ ^=
+        if cp == 94 then {
+            self.pos += 1
+            if self.peek() is .Some(n) then {
+                if Tokenizer.rune_eq(n, '=') then {
+                    self.pos += 1
+                    return .Some(.CaretEq())
+                }
+            }
+            return .Some(.Caret())
+        }
+
+        // _ (underscore as standalone token - only if not part of identifier)
+        if cp == 95 then {
+            // Check if next char continues an identifier
+            if self.peek_at(1) is .Some(next) then {
+                if next.is_identifier_continue() then {
+                    // This is actually an identifier starting with _
+                    return .Some(self.scan_identifier())
+                }
+            }
+            self.pos += 1
+            return .Some(.Underscore())
+        }
+
+        // Character literal (single-quoted)
+        if cp == 39 then {
+            return .Some(self.scan_char_literal())
+        }
+
+        [Token]Option.None()
+    }
+
+    // ========================================================================
+    // Character literal: '...'
+    // ========================================================================
+
+    private scan_char_literal(self ref) Token = {
+        let mut text = String.new()
+        text.push('\'')
+        self.pos += 1 // skip opening '
+
+        while not self.is_eof() then {
+            let r = self.runes[self.pos]
+            if Tokenizer.rune_eq(r, '\'') then {
+                text.push('\'')
+                self.pos += 1
+                return .IntLit(text)
+            }
+            if Tokenizer.rune_eq(r, '\\') then {
+                text.push_string(r.to_string())
+                self.pos += 1
+                if not self.is_eof() then {
+                    text.push_string(self.runes[self.pos].to_string())
+                    self.pos += 1
+                }
+                continue
+            }
+            text.push_string(r.to_string())
+            self.pos += 1
+        }
+        Token.IntLit(text)
+    }
+}

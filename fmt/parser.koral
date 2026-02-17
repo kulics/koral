@@ -1,0 +1,1758 @@
+// ============================================================================
+// Koral Formatter - Fully Structured CST Parser
+// ============================================================================
+// CST preserves all tokens (keywords, delimiters) for exact reproduction,
+// but parses full structure like an AST so the printer needs zero spacing inference.
+// ============================================================================
+
+// ============================================================================
+// CST Type Nodes
+// ============================================================================
+
+public type CstType {
+    Named(name Token),
+    SelfType(kw Token),
+    Generic(lbracket Token, args [CstTypeArg]List, rbracket Token, base Token),
+    Ref(inner CstType ref, kw Token),
+    Ptr(inner CstType ref, kw Token),
+    Weakref(inner CstType ref, kw Token),
+}
+
+// A type argument with optional trailing comma
+public type CstTypeArg(inner CstType ref, comma [Token]Option)
+
+// ============================================================================
+// CST Expression Nodes
+// ============================================================================
+
+public type CstExpr {
+    // Literals
+    IntLit(token Token),
+    FloatLit(token Token),
+    StrLit(token Token),
+    InterpStr(token Token),
+    BoolLit(token Token),
+    Ident(token Token),
+    SelfExpr(token Token),
+    UnderscoreExpr(token Token),
+
+    // Operators
+    BinaryOp(left CstExpr ref, op Token, right CstExpr ref),
+    UnaryMinus(op Token, operand CstExpr ref),
+    NotExpr(op Token, operand CstExpr ref),
+    BitwiseNot(op Token, operand CstExpr ref),
+    PrefixKw(kw Token, operand CstExpr ref),
+    TypeCast(lparen Token, cast_type CstType ref, rparen Token, operand CstExpr ref),
+
+    // Access and calls
+    FieldAccess(base CstExpr ref, dot Token, field Token),
+    Call(callee CstExpr ref, lparen Token, args [CstCallArg]List, rparen Token),
+    SubscriptExpr(base CstExpr ref, lbracket Token, args [CstCallArg]List, rbracket Token),
+    GenericInst(lbracket Token, type_args [CstTypeArg]List, rbracket Token, name Token),
+    ImplicitMember(dot Token, name Token, lparen [Token]Option, args [CstCallArg]List, rparen [Token]Option),
+
+    // Control flow
+    Block(lbrace Token, items [CstItem ref]List, rbrace Token),
+    If(kw Token, cond CstExpr ref, then_kw Token, then_body CstExpr ref,
+       else_kw [Token]Option, else_body [CstExpr ref]Option),
+    IfPattern(kw Token, subject CstExpr ref, is_kw Token, pattern CstPattern ref,
+              then_kw Token, then_body CstExpr ref,
+              else_kw [Token]Option, else_body [CstExpr ref]Option),
+    While(kw Token, cond CstExpr ref, then_kw Token, body CstExpr ref),
+    WhilePattern(kw Token, subject CstExpr ref, is_kw Token, pattern CstPattern ref,
+                 then_kw Token, body CstExpr ref),
+    For(kw Token, binding CstPattern ref, eq Token, iterable CstExpr ref,
+        then_kw Token, body CstExpr ref),
+    When(kw Token, subject CstExpr ref, is_kw Token,
+         lbrace Token, arms [CstWhenArm ref]List, rbrace Token),
+
+    // Chaining
+    AndThen(left CstExpr ref, and_kw Token, then_kw Token, right CstExpr ref),
+    OrElse(left CstExpr ref, or_kw Token, else_kw Token, right CstExpr ref),
+
+    // Range
+    RangeExpr(left [CstExpr ref]Option, op Token, right [CstExpr ref]Option),
+
+    // Lambda
+    Lambda(lparen Token, params [CstLambdaParam]List, rparen Token,
+           ret_type [CstType ref]Option, arrow Token, body CstExpr ref),
+}
+
+// Call argument with optional trailing comma
+public type CstCallArg(value CstExpr ref, comma [Token]Option)
+
+// Lambda parameter
+public type CstLambdaParam(name Token, param_type [CstType ref]Option, comma [Token]Option)
+
+// ============================================================================
+// CST Pattern Nodes
+// ============================================================================
+
+public type CstPattern {
+    Wildcard(token Token),
+    Variable(name Token),
+    MutVariable(mut_kw Token, name Token),
+    PatIntLit(token Token),
+    NegIntLit(minus Token, token Token),
+    PatStrLit(token Token),
+    PatBoolLit(token Token),
+    UnionCase(dot Token, name Token, lparen [Token]Option, args [CstPatternArg]List, rparen [Token]Option),
+    StructPattern(name Token, lparen Token, args [CstPatternArg]List, rparen Token),
+    Comparison(op Token, value Token),
+    AndPattern(left CstPattern ref, and_kw Token, right CstPattern ref),
+    OrPattern(left CstPattern ref, or_kw Token, right CstPattern ref),
+    NotPattern(not_kw Token, inner CstPattern ref),
+    ParenPattern(lparen Token, inner CstPattern ref, rparen Token),
+}
+
+public type CstPatternArg(pattern CstPattern ref, comma [Token]Option)
+
+// ============================================================================
+// CST When Arm
+// ============================================================================
+
+public type CstWhenArm(
+    pattern CstPattern ref,
+    then_kw Token,
+    body CstExpr ref,
+    comma [Token]Option,
+)
+
+// ============================================================================
+// CST Parameter and Generic Parameter
+// ============================================================================
+
+public type CstParam(
+    name Token,
+    mut_kw [Token]Option,
+    param_type CstType ref,
+    comma [Token]Option,
+)
+
+public type CstGenericParam(
+    name Token,
+    constraints [CstType ref]List,
+    comma [Token]Option,
+)
+
+public type CstGenericParams(
+    lbracket Token,
+    params [CstGenericParam]List,
+    rbracket Token,
+)
+
+// ============================================================================
+// CST Statements
+// ============================================================================
+
+public type CstStmt {
+    VarDecl(let_kw Token, mut_kw [Token]Option, name Token,
+            var_type [CstType ref]Option, eq Token, value CstExpr ref),
+    Assignment(target CstExpr ref, op Token, value CstExpr ref),
+    ExprStmt(expr CstExpr ref),
+    Return(kw Token, value [CstExpr ref]Option),
+    Break(kw Token),
+    Continue(kw Token),
+}
+
+// ============================================================================
+// CST Type Body (for type declarations)
+// ============================================================================
+
+public type CstTypeBody {
+    Struct(lparen Token, fields [CstStructField]List, rparen Token),
+    Union(lbrace Token, cases [CstItem ref]List, rbrace Token),
+    Alias(eq Token, target CstType ref),
+    Empty(),
+}
+
+public type CstStructField(
+    mut_kw [Token]Option,
+    access [Token]Option,
+    name Token,
+    field_type CstType ref,
+    comma [Token]Option,
+)
+
+// ============================================================================
+// CST Declarations
+// ============================================================================
+
+public type CstDecl {
+    Using(tokens [Token]List),
+    ForeignUsing(foreign_kw Token, tokens [Token]List),
+    Func(
+        vis [Token]Option,
+        modifiers [Token]List,
+        let_kw [Token]Option,
+        mut_kw [Token]Option,
+        generic_params [CstGenericParams ref]Option,
+        name [Token]Option,
+        lparen [Token]Option,
+        params [CstParam]List,
+        rparen [Token]Option,
+        return_type [CstType ref]Option,
+        eq Token,
+        body CstExpr ref
+    ),
+    ForeignDecl(
+        vis [Token]Option,
+        modifiers [Token]List,
+        let_kw [Token]Option,
+        mut_kw [Token]Option,
+        generic_params [CstGenericParams ref]Option,
+        name [Token]Option,
+        lparen [Token]Option,
+        params [CstParam]List,
+        rparen [Token]Option,
+        return_type [CstType ref]Option
+    ),
+    Type(
+        vis [Token]Option,
+        modifiers [Token]List,
+        kw Token,
+        generic_params [CstGenericParams ref]Option,
+        name Token,
+        body CstTypeBody ref
+    ),
+    Trait(
+        vis [Token]Option,
+        kw Token,
+        generic_params [CstGenericParams ref]Option,
+        name Token,
+        super_traits [CstType ref]List,
+        lbrace Token,
+        members [CstItem ref]List,
+        rbrace Token
+    ),
+    Given(
+        vis [Token]Option,
+        modifiers [Token]List,
+        kw Token,
+        generic_params [CstGenericParams ref]Option,
+        target CstType ref,
+        lbrace Token,
+        members [CstItem ref]List,
+        rbrace Token
+    ),
+    Var(
+        vis [Token]Option,
+        let_kw Token,
+        mut_kw [Token]Option,
+        name Token,
+        var_type [CstType ref]Option
+    ),
+}
+
+// ============================================================================
+// CST Item and File
+// ============================================================================
+
+public type CstItem {
+    Decl(decl CstDecl ref),
+    Stmt(stmt CstStmt ref),
+    Comment(token Token),
+    BlankLine(),
+}
+
+public type CstFile(items [CstItem ref]List)
+
+
+// ============================================================================
+// CstParser
+// ============================================================================
+
+public type CstParser(
+    tokens [Token]List,
+    mut pos UInt,
+)
+
+given CstParser {
+    public new(tokens [Token]List) CstParser = CstParser(tokens, 0)
+
+    // ========================================================================
+    // Token helpers
+    // ========================================================================
+
+    private peek(self) Token = {
+        let mut i = self.pos
+        while i < self.tokens.count() then {
+            when self.tokens[i] is {
+                .Newline then { i += 1; continue },
+                _ then { return self.tokens[i] },
+            }
+        }
+        Token.EOF()
+    }
+
+    private peek_raw(self) Token = {
+        if self.pos >= self.tokens.count() then { return .EOF() }
+        self.tokens[self.pos]
+    }
+
+    private advance(self ref) Token = {
+        if self.pos >= self.tokens.count() then { return .EOF() }
+        let tok = self.tokens[self.pos]
+        self.pos += 1
+        tok
+    }
+
+    private skip_newlines(self ref) Void = {
+        while self.pos < self.tokens.count() then {
+            when self.tokens[self.pos] is {
+                .Newline then { self.pos += 1 },
+                _ then { return },
+            }
+        }
+    }
+
+    private is_eof(self) Bool = when self.peek() is { .EOF then true, _ then false }
+
+    private check(self, expected Token) Bool =
+        Token.tag(self.peek()) == Token.tag(expected)
+
+    private eat(self ref) Token = {
+        self.skip_newlines()
+        self.advance()
+    }
+
+    private eat_comma(self ref) [Token]Option = {
+        if self.check(Token.Comma()) then { .Some(self.eat()) }
+        else { .None() }
+    }
+
+    private count_newlines(self) UInt = {
+        let mut count UInt = 0
+        let mut i = self.pos
+        while i < self.tokens.count() then {
+            when self.tokens[i] is {
+                .Newline then { count += 1; i += 1 },
+                _ then { return count },
+            }
+        }
+        count
+    }
+
+    private peek_at_skip_nl(self, offset UInt) Token = {
+        let mut count UInt = 0
+        let mut i = self.pos
+        while i < self.tokens.count() then {
+            when self.tokens[i] is {
+                .Newline then { i += 1; continue },
+                _ then {
+                    if count == offset then { return self.tokens[i] }
+                    count += 1
+                    i += 1
+                },
+            }
+        }
+        Token.EOF()
+    }
+
+    private is_access_mod(self) Bool = when self.peek() is {
+        .KwPublic or .KwPrivate or .KwProtected then true, _ then false,
+    }
+
+    private eat_vis(self ref) [Token]Option = {
+        if self.is_access_mod() then { .Some(self.eat()) }
+        else { .None() }
+    }
+
+    private eat_modifiers(self ref) [Token]List = {
+        let mut mods = [Token]List.new()
+        while true then {
+            when self.peek() is {
+                .KwForeign or .KwIntrinsic then { mods.push(self.eat()) },
+                _ then { return mods },
+            }
+        }
+        mods
+    }
+
+    // Check if we crossed a newline boundary (for statement termination)
+    private at_newline_boundary(self) Bool = {
+        if self.pos == 0 then { return false }
+        // Check if there's a newline between current pos-1 and the next non-newline
+        let mut i = self.pos
+        if i > 0 then {
+            i -= 1
+            while i > 0 then {
+                when self.tokens[i] is {
+                    .Newline then { return true },
+                    _ then { return false },
+                }
+            }
+        }
+        false
+    }
+
+    // Check if there's a newline before the current peek position
+    private newline_before_current(self) Bool = {
+        let mut i = self.pos
+        while i > 0 then {
+            i -= 1
+            when self.tokens[i] is {
+                .Newline then { return true },
+                _ then { return false },
+            }
+        }
+        false
+    }
+
+    // ========================================================================
+    // Type parsing
+    // ========================================================================
+
+    public parse_type(self ref) CstType = {
+        // Self type
+        if self.check(.KwSelfType()) then {
+            let kw = self.eat()
+            let mut t = CstType.SelfType(kw)
+            t = self.parse_type_suffix(t)
+            return t
+        }
+
+        // Generic type: [T, U]Name
+        if self.check(.LBracket()) then {
+            let lb = self.eat()
+            let mut args = [CstTypeArg]List.new()
+            while not self.check(.RBracket()) and not self.is_eof() then {
+                let inner = self.parse_type()
+                let comma = self.eat_comma()
+                args.push(CstTypeArg(ref inner, comma))
+            }
+            let rb = self.eat() // ]
+            let base = self.eat() // Name
+            let mut t = CstType.Generic(lb, args, rb, base)
+            t = self.parse_type_suffix(t)
+            return t
+        }
+
+        // Simple named type
+        let name = self.eat()
+        let mut t = CstType.Named(name)
+        t = self.parse_type_suffix(t)
+        t
+    }
+
+    private parse_type_suffix(self ref, base CstType) CstType = {
+        let mut t = base
+        while true then {
+            if self.check(.KwRef()) then {
+                let kw = self.eat()
+                t = .Ref(ref t, kw)
+                continue
+            }
+            if self.check(.KwPtr()) then {
+                let kw = self.eat()
+                t = .Ptr(ref t, kw)
+                continue
+            }
+            if self.peek() is .KwWeakref then {
+                let kw = self.eat()
+                t = .Weakref(ref t, kw)
+                continue
+            }
+            break
+        }
+        t
+    }
+
+    // ========================================================================
+    // Generic parameters: [T Any, U Eq]
+    // ========================================================================
+
+    private parse_generic_params(self ref) [CstGenericParams ref]Option = {
+        if not self.check(.LBracket()) then {
+            return .None()
+        }
+        let lb = self.eat() // [
+        let mut params = [CstGenericParam]List.new()
+        while not self.check(.RBracket()) and not self.is_eof() then {
+            let name = self.eat() // T
+            let mut constraints = [CstType ref]List.new()
+            // Collect constraint types until comma or ]
+            while not self.check(.Comma()) and not self.check(.RBracket()) and not self.is_eof() then {
+                let ct = self.parse_type()
+                constraints.push(ref ct)
+            }
+            let comma = self.eat_comma()
+            params.push(CstGenericParam(name, constraints, comma))
+        }
+        let rb = self.eat() // ]
+        return .Some(ref CstGenericParams(lb, params, rb))
+    }
+
+    // ========================================================================
+    // Parameters: (name Type, name2 Type2)
+    // ========================================================================
+
+    private parse_params(self ref) [CstParam]List = {
+        let mut params = [CstParam]List.new()
+        while not self.check(.RParen()) and not self.is_eof() then {
+            let mut mut_kw = [Token]Option.None()
+            if self.peek() is .KwMut then {
+                mut_kw = .Some(self.eat())
+            }
+            let name = self.eat()
+            let pt = self.parse_type()
+            let comma = self.eat_comma()
+            params.push(CstParam(name, mut_kw, ref pt, comma))
+        }
+        params
+    }
+
+    // ========================================================================
+    // Expression parsing — recursive descent with precedence
+    // ========================================================================
+    // Precedence (low to high):
+    //   or else
+    //   or
+    //   and then
+    //   and
+    //   not
+    //   | (bitwise or)
+    //   ^ (bitwise xor)
+    //   & (bitwise and)
+    //   range (.., ..<, etc.)
+    //   == <> > < >= <=
+    //   << >>
+    //   + -
+    //   * / %
+    //   prefix (-, ~, ref, deref, ptr, deptr, cast)
+    //   postfix (., call, subscript)
+    //   primary
+    // ========================================================================
+
+    public parse_expr(self ref) CstExpr = {
+        // Top-level: if/while/for/when/let or or-else chain
+        when self.peek() is {
+            .KwIf then { return self.parse_if_expr() },
+            .KwWhile then { return self.parse_while_expr() },
+            .KwFor then { return self.parse_for_expr() },
+            .KwWhen then { return self.parse_when_expr() },
+            _ then {},
+        }
+        self.parse_or_else()
+    }
+
+    private parse_or_else(self ref) CstExpr = {
+        let mut left = self.parse_or()
+        while self.check(.KwOr()) then {
+            let next = self.peek_at_skip_nl(1)
+            when next is {
+                .KwElse then {
+                    let or_kw = self.eat()
+                    let else_kw = self.eat()
+                    let right = self.parse_or()
+                    left = .OrElse(ref left, or_kw, else_kw, ref right)
+                },
+                _ then { break },
+            }
+        }
+        left
+    }
+
+    private parse_or(self ref) CstExpr = {
+        let mut left = self.parse_and_then()
+        while self.check(.KwOr()) then {
+            let next = self.peek_at_skip_nl(1)
+            if next is .KwElse then { break }
+            let op = self.eat()
+            let right = self.parse_and_then()
+            left = .BinaryOp(ref left, op, ref right)
+        }
+        left
+    }
+
+    private parse_and_then(self ref) CstExpr = {
+        let mut left = self.parse_and()
+        while self.check(.KwAnd()) then {
+            let next = self.peek_at_skip_nl(1)
+            when next is {
+                .KwThen then {
+                    let and_kw = self.eat()
+                    let then_kw = self.eat()
+                    let right = self.parse_and()
+                    left = .AndThen(ref left, and_kw, then_kw, ref right)
+                },
+                _ then { break },
+            }
+        }
+        left
+    }
+
+    private parse_and(self ref) CstExpr = {
+        let mut left = self.parse_not()
+        while self.check(.KwAnd()) then {
+            let next = self.peek_at_skip_nl(1)
+            if next is .KwThen then { break }
+            let op = self.eat()
+            let right = self.parse_not()
+            left = .BinaryOp(ref left, op, ref right)
+        }
+        left
+    }
+
+    private parse_not(self ref) CstExpr = {
+        if self.check(.KwNot()) then {
+            let op = self.eat()
+            let operand = self.parse_bitwise_or()
+            return .NotExpr(op, ref operand)
+        }
+        self.parse_bitwise_or()
+    }
+
+    private parse_bitwise_or(self ref) CstExpr = {
+        let mut left = self.parse_bitwise_xor()
+        while self.check(.Pipe()) then {
+            if self.newline_before_current() then { break }
+            let op = self.eat()
+            let right = self.parse_bitwise_xor()
+            left = .BinaryOp(ref left, op, ref right)
+        }
+        left
+    }
+
+    private parse_bitwise_xor(self ref) CstExpr = {
+        let mut left = self.parse_bitwise_and()
+        while self.check(.Caret()) then {
+            if self.newline_before_current() then { break }
+            let op = self.eat()
+            let right = self.parse_bitwise_and()
+            left = .BinaryOp(ref left, op, ref right)
+        }
+        left
+    }
+
+    private parse_bitwise_and(self ref) CstExpr = {
+        let mut left = self.parse_range()
+        while self.check(.Amp()) then {
+            if self.newline_before_current() then { break }
+            let op = self.eat()
+            let right = self.parse_range()
+            left = .BinaryOp(ref left, op, ref right)
+        }
+        left
+    }
+
+    private parse_range(self ref) CstExpr = {
+        // Prefix range: ...b, ...<b, ....
+        when self.peek() is {
+            .FullRange then {
+                let op = self.eat()
+                return .RangeExpr(.None(), op, .None())
+            },
+            .Unbounded then {
+                let op = self.eat()
+                let right = self.parse_comparison()
+                return .RangeExpr(.None(), op, .Some(ref right))
+            },
+            .UnboundedLt then {
+                let op = self.eat()
+                let right = self.parse_comparison()
+                return .RangeExpr(.None(), op, .Some(ref right))
+            },
+            _ then {},
+        }
+
+        let left = self.parse_comparison()
+
+        when self.peek() is {
+            .Range or .RangeLt or .LtRange or .LtRangeLt then {
+                let op = self.eat()
+                let right = self.parse_comparison()
+                return .RangeExpr(.Some(ref left), op, .Some(ref right))
+            },
+            .Unbounded or .LtUnbounded then {
+                let op = self.eat()
+                return .RangeExpr(.Some(ref left), op, .None())
+            },
+            _ then left,
+        }
+    }
+
+    private parse_comparison(self ref) CstExpr = {
+        let mut left = self.parse_shift()
+        while true then {
+            when self.peek() is {
+                .EqEq or .NotEq or .Gt or .Lt or .GtEq or .LtEq then {
+                    if self.newline_before_current() then { break }
+                    let op = self.eat()
+                    let right = self.parse_shift()
+                    left = .BinaryOp(ref left, op, ref right)
+                },
+                _ then { break },
+            }
+        }
+        left
+    }
+
+    private parse_shift(self ref) CstExpr = {
+        let mut left = self.parse_additive()
+        while true then {
+            when self.peek() is {
+                .LShift or .RShift then {
+                    if self.newline_before_current() then { break }
+                    let op = self.eat()
+                    let right = self.parse_additive()
+                    left = .BinaryOp(ref left, op, ref right)
+                },
+                _ then { break },
+            }
+        }
+        left
+    }
+
+    private parse_additive(self ref) CstExpr = {
+        let mut left = self.parse_multiplicative()
+        while true then {
+            when self.peek() is {
+                .Plus then {
+                    if self.newline_before_current() then { break }
+                    let op = self.eat()
+                    let right = self.parse_multiplicative()
+                    left = .BinaryOp(ref left, op, ref right)
+                },
+                .Minus then {
+                    if self.newline_before_current() then { break }
+                    let op = self.eat()
+                    let right = self.parse_multiplicative()
+                    left = .BinaryOp(ref left, op, ref right)
+                },
+                _ then { break },
+            }
+        }
+        left
+    }
+
+    private parse_multiplicative(self ref) CstExpr = {
+        let mut left = self.parse_prefix()
+        while true then {
+            when self.peek() is {
+                .Star or .Slash or .Percent then {
+                    if self.newline_before_current() then { break }
+                    let op = self.eat()
+                    let right = self.parse_prefix()
+                    left = .BinaryOp(ref left, op, ref right)
+                },
+                _ then { break },
+            }
+        }
+        left
+    }
+
+    // ========================================================================
+    // Prefix expressions
+    // ========================================================================
+
+    private parse_prefix(self ref) CstExpr = {
+        // Type cast: (Type)expr — try with backtracking
+        if self.check(.LParen()) then {
+            let saved = self.pos
+            let cast_result = self.try_parse_cast()
+            when cast_result is {
+                .Some(e) then { return e },
+                .None then { self.pos = saved },
+            }
+        }
+
+        // Unary minus
+        if self.check(.Minus()) then {
+            let op = self.eat()
+            // Check for negative literal
+            when self.peek() is {
+                .IntLit(_) then {
+                    let lit = self.eat()
+                    return .UnaryMinus(op, ref .IntLit(lit))
+                },
+                .FloatLit(_) then {
+                    let lit = self.eat()
+                    return .UnaryMinus(op, ref .FloatLit(lit))
+                },
+                _ then {
+                    let operand = self.parse_prefix()
+                    return .UnaryMinus(op, ref operand)
+                },
+            }
+        }
+
+        // Bitwise not
+        if self.check(.Tilde()) then {
+            let op = self.eat()
+            let operand = self.parse_prefix()
+            return .BitwiseNot(op, ref operand)
+        }
+
+        // Keyword prefixes: ref, deref, ptr, deptr
+        if self.peek() is .KwRef or .KwDeref or .KwPtr or .KwDeptr then {
+            let kw = self.eat()
+            let operand = self.parse_prefix()
+            return .PrefixKw(kw, ref operand)
+        }
+
+        self.parse_postfix()
+    }
+
+    private try_parse_cast(self ref) [CstExpr]Option = {
+        // Try: (Type)expr
+        let lp = self.eat() // (
+        // Must be a type — starts with uppercase ident, [, or Self
+        when self.peek() is {
+            .Ident(_) then {
+                let name = self.peek()
+                when name is {
+                    .Ident(n) then {
+                        let runes = n.to_runes()
+                        if runes.count() == 0 then { return .None() }
+                        let first = runes[0].to_uint32()
+                        if first < 65 or first > 90 then { return .None() }
+                    },
+                    _ then { return .None() },
+                }
+            },
+            .LBracket or .KwSelfType then {},
+            _ then { return .None() },
+        }
+        let ct = self.parse_type()
+        if not self.check(.RParen()) then { return .None() }
+        let rp = self.eat() // )
+        let operand = self.parse_prefix()
+        return .Some(.TypeCast(lp, ref ct, rp, ref operand))
+    }
+
+    // ========================================================================
+    // Postfix expressions
+    // ========================================================================
+
+    private parse_postfix(self ref) CstExpr = {
+        let mut expr = self.parse_primary()
+        while true then {
+            // Stop at newline for non-continuation tokens
+            if self.newline_before_current() then {
+                if self.peek() is not .Dot then { break }
+            }
+
+            // Field access: expr.field
+            if self.check(.Dot()) then {
+                let dot = self.eat()
+                let field = self.eat()
+                // Check for method call: expr.field(args)
+                if self.check(.LParen()) then {
+                    let field_expr = CstExpr.FieldAccess(ref expr, dot, field)
+                    let lp = self.eat()
+                    let args = self.parse_call_args()
+                    let rp = self.eat() // )
+                    expr = .Call(ref field_expr, lp, args, rp)
+                    continue
+                }
+                expr = .FieldAccess(ref expr, dot, field)
+                continue
+            }
+
+            // Call: expr(args)
+            if self.check(.LParen()) then {
+                let lp = self.eat()
+                let args = self.parse_call_args()
+                let rp = self.eat() // )
+                expr = .Call(ref expr, lp, args, rp)
+                continue
+            }
+
+            // Subscript: expr[args]
+            if self.check(.LBracket()) then {
+                let lb = self.eat()
+                let mut args = [CstCallArg]List.new()
+                while not self.check(.RBracket()) and not self.is_eof() then {
+                    let val = self.parse_expr()
+                    let comma = self.eat_comma()
+                    args.push(CstCallArg(ref val, comma))
+                }
+                let rb = self.eat() // ]
+                expr = .SubscriptExpr(ref expr, lb, args, rb)
+                continue
+            }
+
+            break
+        }
+        expr
+    }
+
+    private parse_call_args(self ref) [CstCallArg]List = {
+        let mut args = [CstCallArg]List.new()
+        while not self.check(.RParen()) and not self.is_eof() then {
+            let val = self.parse_expr()
+            let comma = self.eat_comma()
+            args.push(CstCallArg(ref val, comma))
+        }
+        args
+    }
+
+    // ========================================================================
+    // Primary expressions
+    // ========================================================================
+
+    private parse_primary(self ref) CstExpr = {
+        when self.peek() is {
+            .IntLit(_) then { return .IntLit(self.eat()) },
+            .FloatLit(_) then { return .FloatLit(self.eat()) },
+            .StrLit(_) then { return .StrLit(self.eat()) },
+            .InterpStr(_) then { return .InterpStr(self.eat()) },
+            .BoolTrue or .BoolFalse then { return .BoolLit(self.eat()) },
+            .KwSelf then { return .SelfExpr(self.eat()) },
+            .Underscore then { return .UnderscoreExpr(self.eat()) },
+            _ then {},
+        }
+
+        // Identifier
+        if self.peek() is .Ident(_) then { return .Ident(self.eat()) }
+
+        // Block: { ... }
+        if self.check(.LBrace()) then {
+            return self.parse_block_expr()
+        }
+
+        // Parenthesized expression or lambda
+        if self.check(.LParen()) then {
+            return self.parse_paren_or_lambda()
+        }
+
+        // Generic instantiation: [T]Name or [T]Name(args)
+        if self.check(.LBracket()) then {
+            let lb = self.eat()
+            let mut type_args = [CstTypeArg]List.new()
+            while not self.check(.RBracket()) and not self.is_eof() then {
+                let t = self.parse_type()
+                let comma = self.eat_comma()
+                type_args.push(CstTypeArg(ref t, comma))
+            }
+            let rb = self.eat() // ]
+            let name = self.eat() // Name
+            let inst = CstExpr.GenericInst(lb, type_args, rb, name)
+            // Check for call: [T]Name(args)
+            if self.check(.LParen()) then {
+                let lp = self.eat()
+                let args = self.parse_call_args()
+                let rp = self.eat() // )
+                return .Call(ref inst, lp, args, rp)
+            }
+            return inst
+        }
+
+        // Implicit member: .Name or .Name(args)
+        if self.check(.Dot()) then {
+            let dot = self.eat()
+            let name = self.eat()
+            if self.check(.LParen()) then {
+                let lp = self.eat()
+                let args = self.parse_call_args()
+                let rp = self.eat() // )
+                return .ImplicitMember(dot, name, .Some(lp), args, .Some(rp))
+            }
+            return .ImplicitMember(dot, name, .None(), [CstCallArg]List.new(), .None())
+        }
+
+        // Self type used as expression
+        if self.check(.KwSelfType()) then {
+            return .Ident(self.eat())
+        }
+
+        // Fallback: consume one token as identifier
+        return .Ident(self.eat())
+    }
+
+    // ========================================================================
+    // Block expression: { stmts; final_expr? }
+    // ========================================================================
+
+    private parse_block_expr(self ref) CstExpr = {
+        let lb = self.eat() // {
+        let mut items = [CstItem ref]List.new()
+        while not self.check(.RBrace()) and not self.is_eof() then {
+            let nl_count = self.count_newlines()
+            if nl_count >= 2 then {
+                self.skip_newlines()
+                items.push(ref .BlankLine())
+                continue
+            }
+            self.skip_newlines()
+            if self.check(.RBrace()) or self.is_eof() then { break }
+            if self.peek() is .LineComment(_) or .BlockComment(_) then {
+                items.push(ref .Comment(self.eat()))
+                continue
+            }
+            let item = self.parse_block_item()
+            items.push(ref item)
+        }
+        let rb = if self.check(.RBrace()) then { self.eat() } else { Token.RBrace() }
+        return .Block(lb, items, rb)
+    }
+
+    private parse_block_item(self ref) CstItem = {
+        // Variable declaration: let [mut] name [Type] = expr
+        if self.peek() is .KwLet then {
+            let s = self.parse_var_decl_stmt()
+            return .Stmt(ref s)
+        }
+        // Statement
+        let s = self.parse_stmt()
+        return .Stmt(ref s)
+    }
+
+    // ========================================================================
+    // Parenthesized expression or lambda
+    // ========================================================================
+
+    private parse_paren_or_lambda(self ref) CstExpr = {
+        // Try lambda: (params) [RetType] -> body
+        let saved = self.pos
+        let lambda_result = self.try_parse_lambda()
+        when lambda_result is {
+            .Some(e) then { return e },
+            .None then { self.pos = saved },
+        }
+        // Parenthesized expression
+        self.eat() // (
+        let inner = self.parse_expr()
+        self.eat() // )
+        inner
+    }
+
+    private try_parse_lambda(self ref) [CstExpr]Option = {
+        let lp = self.eat() // (
+        let mut params = [CstLambdaParam]List.new()
+        while not self.check(.RParen()) and not self.is_eof() then {
+            if self.peek() is not .Ident(_) then { return .None() }
+            let name = self.eat()
+            // Optional type annotation
+            let mut pt = [CstType ref]Option.None()
+            if self.peek() is .Ident(_) or .LBracket or .KwSelfType then {
+                // Check if this looks like a type (uppercase start or [)
+                let is_type = when self.peek() is {
+                    .LBracket or .KwSelfType then true,
+                    .Ident(n) then {
+                        let runes = n.to_runes()
+                        if runes.count() > 0 then {
+                            let first = runes[0].to_uint32()
+                            first >= 65 and first <= 90
+                        } else { false }
+                    },
+                    _ then false,
+                }
+                if is_type then {
+                    let t = self.parse_type()
+                    pt = .Some(ref t)
+                }
+            }
+            let comma = self.eat_comma()
+            params.push(CstLambdaParam(name, pt, comma))
+        }
+        if not self.check(.RParen()) then { return .None() }
+        let rp = self.eat() // )
+
+        // Optional return type
+        let mut ret = [CstType ref]Option.None()
+        if self.peek() is .Ident(_) or .LBracket or .KwSelfType then {
+            let is_type = when self.peek() is {
+                .LBracket or .KwSelfType then true,
+                .Ident(n) then {
+                    let runes = n.to_runes()
+                    if runes.count() > 0 then {
+                        let first = runes[0].to_uint32()
+                        first >= 65 and first <= 90
+                    } else { false }
+                },
+                _ then false,
+            }
+            if is_type then {
+                let t = self.parse_type()
+                ret = .Some(ref t)
+            }
+        }
+
+        if not self.check(.Arrow()) then { return .None() }
+        let arrow = self.eat()
+        let body = self.parse_expr()
+        return .Some(.Lambda(lp, params, rp, ret, arrow, ref body))
+    }
+
+    // ========================================================================
+    // Control flow expressions
+    // ========================================================================
+
+    private parse_if_expr(self ref) CstExpr = {
+        let kw = self.eat() // if
+
+        // Check for if-pattern: if expr is pattern then ...
+        let cond = self.parse_or_else()
+
+        if self.check(.KwIs()) then {
+            let is_kw = self.eat()
+            let pattern = self.parse_pattern()
+            let then_kw = self.eat() // then
+            let then_body = self.parse_expr()
+            if self.check(.KwElse()) then {
+                let else_kw = self.eat()
+                let else_body = self.parse_expr()
+                return .IfPattern(kw, ref cond, is_kw, ref pattern,
+                    then_kw, ref then_body, .Some(else_kw), .Some(ref else_body))
+            }
+            return .IfPattern(kw, ref cond, is_kw, ref pattern,
+                then_kw, ref then_body, .None(), .None())
+        }
+
+        let then_kw = self.eat() // then
+        let then_body = self.parse_expr()
+        if self.check(.KwElse()) then {
+            let else_kw = self.eat()
+            let else_body = self.parse_expr()
+            return .If(kw, ref cond, then_kw, ref then_body,
+                .Some(else_kw), .Some(ref else_body))
+        }
+        return .If(kw, ref cond, then_kw, ref then_body, .None(), .None())
+    }
+
+    private parse_while_expr(self ref) CstExpr = {
+        let kw = self.eat() // while
+        let cond = self.parse_or_else()
+
+        // Check for while-pattern: while expr is pattern then ...
+        if self.check(.KwIs()) then {
+            let is_kw = self.eat()
+            let pattern = self.parse_pattern()
+            let then_kw = self.eat() // then
+            let body = self.parse_expr()
+            return .WhilePattern(kw, ref cond, is_kw, ref pattern, then_kw, ref body)
+        }
+
+        let then_kw = self.eat() // then
+        let body = self.parse_expr()
+        return .While(kw, ref cond, then_kw, ref body)
+    }
+
+    private parse_for_expr(self ref) CstExpr = {
+        let kw = self.eat() // for
+        let binding = self.parse_pattern()
+        let eq = self.eat() // =
+        let iterable = self.parse_or_else()
+        let then_kw = self.eat() // then
+        let body = self.parse_expr()
+        return .For(kw, ref binding, eq, ref iterable, then_kw, ref body)
+    }
+
+    private parse_when_expr(self ref) CstExpr = {
+        let kw = self.eat() // when
+        let subject = self.parse_or_else()
+        let is_kw = if self.check(.KwIs()) then { self.eat() } else { Token.KwIs() }
+
+        if not self.check(.LBrace()) then {
+            let pattern = self.parse_pattern()
+            let then_kw = self.eat() // then
+            let body = self.parse_expr()
+            let arm = CstWhenArm(ref pattern, then_kw, ref body, .None())
+            return .When(kw, ref subject, is_kw,
+                .LBrace(), [CstWhenArm ref]List.new(), .RBrace())
+        }
+
+        let lb = self.eat() // {
+        let mut arms = [CstWhenArm ref]List.new()
+        while not self.check(.RBrace()) and not self.is_eof() then {
+            self.skip_newlines()
+            if self.check(.RBrace()) or self.is_eof() then { break }
+            if self.peek() is .LineComment(_) or .BlockComment(_) then {
+                self.eat() // skip comments in when blocks for now
+                continue
+            }
+            let arm = self.parse_when_arm()
+            arms.push(ref arm)
+        }
+        let rb = if self.check(.RBrace()) then { self.eat() } else { Token.RBrace() }
+        return .When(kw, ref subject, is_kw, lb, arms, rb)
+    }
+
+    private parse_when_arm(self ref) CstWhenArm = {
+        let pattern = self.parse_pattern()
+        let then_kw = self.eat() // then
+        let body = self.parse_expr()
+        let comma = self.eat_comma()
+        // Skip semicolons too
+        if self.peek() is .Semi then { self.eat() }
+        CstWhenArm(ref pattern, then_kw, ref body, comma)
+    }
+
+    // ========================================================================
+    // Pattern parsing
+    // ========================================================================
+
+    public parse_pattern(self ref) CstPattern = {
+        self.parse_or_pattern()
+    }
+
+    private parse_or_pattern(self ref) CstPattern = {
+        let mut left = self.parse_and_pattern()
+        while self.check(.KwOr()) then {
+            let next = self.peek_at_skip_nl(1)
+            if next is .KwElse then { break }
+            let op = self.eat()
+            let right = self.parse_and_pattern()
+            left = .OrPattern(ref left, op, ref right)
+        }
+        left
+    }
+
+    private parse_and_pattern(self ref) CstPattern = {
+        let mut left = self.parse_not_pattern()
+        while self.check(.KwAnd()) then {
+            let next = self.peek_at_skip_nl(1)
+            if next is .KwThen then { break }
+            let op = self.eat()
+            let right = self.parse_not_pattern()
+            left = .AndPattern(ref left, op, ref right)
+        }
+        left
+    }
+
+    private parse_not_pattern(self ref) CstPattern = {
+        if self.check(.KwNot()) then {
+            let op = self.eat()
+            let inner = self.parse_not_pattern()
+            return .NotPattern(op, ref inner)
+        }
+        self.parse_primary_pattern()
+    }
+
+    private parse_primary_pattern(self ref) CstPattern = {
+        // Comparison patterns: > n, < n, >= n, <= n
+        when self.peek() is {
+            .Gt or .Lt or .GtEq or .LtEq then {
+                let op = self.eat()
+                // Handle negative: > -5
+                if self.check(.Minus()) then {
+                    let minus = self.eat()
+                    let val = self.eat()
+                    return .Comparison(op, val) // simplified
+                }
+                let val = self.eat()
+                return .Comparison(op, val)
+            },
+            _ then {},
+        }
+
+        // Negative integer: -5
+        if self.check(.Minus()) then {
+            let minus = self.eat()
+            let val = self.eat()
+            return .NegIntLit(minus, val)
+        }
+
+        // Integer literal
+        when self.peek() is {
+            .IntLit(_) then { return .PatIntLit(self.eat()) },
+            .FloatLit(_) then { return .PatIntLit(self.eat()) },
+            .StrLit(_) then { return .PatStrLit(self.eat()) },
+            .BoolTrue or .BoolFalse then { return .PatBoolLit(self.eat()) },
+            _ then {},
+        }
+
+        // Wildcard
+        if self.peek() is .Underscore then { return .Wildcard(self.eat()) }
+
+        // Mutable variable: mut name
+        if self.check(.KwMut()) then {
+            let mut_kw = self.eat()
+            let name = self.eat()
+            return .MutVariable(mut_kw, name)
+        }
+
+        // Union case: .Name or .Name(args)
+        if self.check(.Dot()) then {
+            let dot = self.eat()
+            let name = self.eat()
+            if self.check(.LParen()) then {
+                let lp = self.eat()
+                let mut args = [CstPatternArg]List.new()
+                while not self.check(.RParen()) and not self.is_eof() then {
+                    let p = self.parse_pattern()
+                    let comma = self.eat_comma()
+                    args.push(CstPatternArg(ref p, comma))
+                }
+                let rp = self.eat() // )
+                return .UnionCase(dot, name, .Some(lp), args, .Some(rp))
+            }
+            return .UnionCase(dot, name, .None(), [CstPatternArg]List.new(), .None())
+        }
+
+        // Parenthesized pattern
+        if self.check(.LParen()) then {
+            let lp = self.eat()
+            let inner = self.parse_pattern()
+            let rp = self.eat() // )
+            return .ParenPattern(lp, ref inner, rp)
+        }
+
+        // Variable or struct pattern: name or Name(args)
+        if self.peek() is .Ident(_) then {
+            let name = self.eat()
+            if self.check(.LParen()) then {
+                let lp = self.eat()
+                let mut args = [CstPatternArg]List.new()
+                while not self.check(.RParen()) and not self.is_eof() then {
+                    let p = self.parse_pattern()
+                    let comma = self.eat_comma()
+                    args.push(CstPatternArg(ref p, comma))
+                }
+                let rp = self.eat() // )
+                return .StructPattern(name, lp, args, rp)
+            }
+            return .Variable(name)
+        }
+
+        // Fallback
+        return .Wildcard(self.eat())
+    }
+
+    // ========================================================================
+    // Statement parsing
+    // ========================================================================
+
+    private parse_stmt(self ref) CstStmt = {
+        when self.peek() is {
+            .KwReturn then {
+                let kw = self.eat()
+                // Check if there's a value on the same line
+                if self.peek_raw() is .Newline or .EOF then {
+                    return .Return(kw, .None())
+                }
+                if self.check(.RBrace()) then {
+                    return .Return(kw, .None())
+                }
+                if self.check(.Semi()) then {
+                    self.eat()
+                    return .Return(kw, .None())
+                }
+                let val = self.parse_expr()
+                // Eat optional semicolon
+                if self.peek() is .Semi then { self.eat() }
+                return .Return(kw, .Some(ref val))
+            },
+            .KwBreak then {
+                let kw = self.eat()
+                return .Break(kw)
+            },
+            .KwContinue then {
+                let kw = self.eat()
+                return .Continue(kw)
+            },
+            _ then {},
+        }
+
+        // Expression statement — may be followed by assignment operator
+        let expr = self.parse_expr()
+        when self.peek() is {
+            .Eq or .PlusEq or .MinusEq or .StarEq or .SlashEq or .PercentEq
+            or .AmpEq or .PipeEq or .CaretEq or .LShiftEq or .RShiftEq then {
+                let op = self.eat()
+                let val = self.parse_expr()
+                if self.peek() is .Semi then { self.eat() }
+                return .Assignment(ref expr, op, ref val)
+            },
+            _ then {},
+        }
+        // Eat optional semicolon
+        if self.peek() is .Semi then { self.eat() }
+        return .ExprStmt(ref expr)
+    }
+
+    private parse_var_decl_stmt(self ref) CstStmt = {
+        let let_kw = self.eat() // let
+        let mut mut_kw = [Token]Option.None()
+        if self.check(.KwMut()) then {
+            mut_kw = .Some(self.eat())
+        }
+        let name = self.eat() // variable name
+
+        // Optional type annotation
+        let mut var_type = [CstType ref]Option.None()
+        if self.peek() is .Ident(_) or .LBracket or .KwSelfType then {
+            let is_type = when self.peek() is {
+                .LBracket or .KwSelfType then true,
+                .Ident(n) then {
+                    let runes = n.to_runes()
+                    if runes.count() > 0 then {
+                        let first = runes[0].to_uint32()
+                        first >= 65 and first <= 90
+                    } else { false }
+                },
+                _ then false,
+            }
+            if is_type then {
+                let t = self.parse_type()
+                var_type = .Some(ref t)
+            }
+        }
+
+        let eq = self.eat() // =
+        let val = self.parse_expr()
+        // Eat optional semicolon
+        if self.peek() is .Semi then { self.eat() }
+        return .VarDecl(let_kw, mut_kw, name, var_type, eq, ref val)
+    }
+
+    // ========================================================================
+    // Declaration parsing
+    // ========================================================================
+
+    // Main entry point
+    public parse(self ref) [CstFile]Result = {
+        let mut items = [CstItem ref]List.new()
+        while not self.is_eof() then {
+            let nl_count = self.count_newlines()
+            if nl_count >= 2 then {
+                self.skip_newlines()
+                items.push(ref .BlankLine())
+                continue
+            }
+            self.skip_newlines()
+            if self.is_eof() then { break }
+            if self.peek() is .LineComment(_) or .BlockComment(_) then {
+                items.push(ref .Comment(self.eat()))
+                continue
+            }
+            let item = self.parse_top_item()
+            items.push(ref item)
+        }
+        return .Ok(CstFile(items))
+    }
+
+    private parse_top_item(self ref) CstItem = {
+        // Using declaration
+        if self.check(.KwUsing()) then {
+            let d = self.parse_using_decl()
+            return .Decl(ref d)
+        }
+        // Foreign using
+        if self.check(.KwForeign()) then {
+            let next = self.peek_at_skip_nl(1)
+            when next is {
+                .KwUsing then {
+                    let d = self.parse_foreign_using_decl()
+                    return .Decl(ref d)
+                },
+                _ then {},
+            }
+        }
+
+        // Determine declaration kind by peeking past access modifiers and modifiers
+        let mut offset UInt = 0
+        if self.is_access_mod() then { offset = 1 }
+        let after_access = self.peek_at_skip_nl(offset)
+        if after_access is .KwForeign or .KwIntrinsic then { offset += 1 }
+        let decl_kw = self.peek_at_skip_nl(offset)
+        when decl_kw is {
+            .KwLet then {
+                let d = self.parse_let_decl()
+                return .Decl(ref d)
+            },
+            .KwType then {
+                let d = self.parse_type_decl()
+                return .Decl(ref d)
+            },
+            .KwTrait then {
+                let d = self.parse_trait_decl()
+                return .Decl(ref d)
+            },
+            .KwGiven then {
+                let d = self.parse_given_decl()
+                return .Decl(ref d)
+            },
+            _ then {},
+        }
+        // Statement
+        let s = self.parse_stmt()
+        return .Stmt(ref s)
+    }
+
+    // ========================================================================
+    // Using declarations
+    // ========================================================================
+
+    private parse_using_decl(self ref) CstDecl = {
+        let mut tokens = [Token]List.new()
+        while not self.is_eof() then {
+            when self.peek_raw() is {
+                .Newline or .EOF then { break },
+                _ then { tokens.push(self.advance()) },
+            }
+        }
+        return .Using(tokens)
+    }
+
+    private parse_foreign_using_decl(self ref) CstDecl = {
+        let foreign_kw = self.eat() // foreign
+        let mut tokens = [Token]List.new()
+        while not self.is_eof() then {
+            when self.peek_raw() is {
+                .Newline or .EOF then { break },
+                _ then { tokens.push(self.advance()) },
+            }
+        }
+        return .ForeignUsing(foreign_kw, tokens)
+    }
+
+    // ========================================================================
+    // Let declaration (function or variable)
+    // ========================================================================
+
+    private parse_let_decl(self ref) CstDecl = {
+        let vis = self.eat_vis()
+        let mods = self.eat_modifiers()
+        let let_kw = self.eat() // let
+        let mut mut_kw = [Token]Option.None()
+        if self.check(.KwMut()) then {
+            mut_kw = .Some(self.eat())
+        }
+        self.finish_func_or_var(vis, mods, .Some(let_kw), mut_kw)
+    }
+
+    private finish_func_or_var(self ref,
+        vis [Token]Option, mods [Token]List,
+        let_kw [Token]Option, mut_kw [Token]Option
+    ) CstDecl = {
+        let gp = self.parse_generic_params()
+        let name [Token]Option = when self.peek() is {
+            .Ident(_) then .Some(self.eat()),
+            _ then .None(),
+        }
+
+        // Parameters
+        let mut lp = [Token]Option.None()
+        let mut params = [CstParam]List.new()
+        let mut rp = [Token]Option.None()
+        if self.check(.LParen()) then {
+            lp = .Some(self.eat())
+            params = self.parse_params()
+            rp = .Some(self.eat()) // )
+        }
+
+        // Return type
+        let mut ret = [CstType ref]Option.None()
+        if self.peek() is .Ident(_) or .LBracket or .KwSelfType then {
+            if not self.check(.Eq()) then {
+                let is_type = when self.peek() is {
+                    .LBracket or .KwSelfType then true,
+                    .Ident(n) then {
+                        let runes = n.to_runes()
+                        if runes.count() > 0 then {
+                            let first = runes[0].to_uint32()
+                            first >= 65 and first <= 90
+                        } else { false }
+                    },
+                    _ then false,
+                }
+                if is_type then {
+                    let t = self.parse_type()
+                    ret = .Some(ref t)
+                }
+            }
+        }
+
+        // = body → function
+        if self.check(.Eq()) then {
+            let eq = self.eat()
+            let body = self.parse_expr()
+            return .Func(vis, mods, let_kw, mut_kw, gp, name,
+                lp, params, rp, ret, eq, ref body)
+        }
+
+        // No = → foreign declaration or variable
+        if mods.count() > 0 then {
+            return .ForeignDecl(vis, mods, let_kw, mut_kw, gp, name,
+                lp, params, rp, ret)
+        }
+
+        // Variable declaration (top-level)
+        let var_name = when name is {
+            .Some(n) then n,
+            .None then .EOF(),
+        }
+        let lk = when let_kw is {
+            .Some(k) then k,
+            .None then .KwLet(),
+        }
+        return .Var(vis, lk, mut_kw, var_name, ret)
+    }
+
+    // ========================================================================
+    // Type declaration
+    // ========================================================================
+
+    private parse_type_decl(self ref) CstDecl = {
+        let vis = self.eat_vis()
+        let mods = self.eat_modifiers()
+        let kw = self.eat() // type
+        let gp = self.parse_generic_params()
+        let name = self.eat() // Name
+
+        // Struct body: (fields)
+        if self.check(.LParen()) then {
+            let lp = self.eat()
+            let mut fields = [CstStructField]List.new()
+            while not self.check(.RParen()) and not self.is_eof() then {
+                let mut field_mut = [Token]Option.None()
+                let mut field_access = [Token]Option.None()
+                if self.peek() is .KwPublic or .KwPrivate or .KwProtected then {
+                    field_access = .Some(self.eat())
+                }
+                if self.check(.KwMut()) then {
+                    field_mut = .Some(self.eat())
+                }
+                let field_name = self.eat()
+                let field_type = self.parse_type()
+                let comma = self.eat_comma()
+                fields.push(CstStructField(field_mut, field_access, field_name, ref field_type, comma))
+            }
+            let rp = self.eat() // )
+            return .Type(vis, mods, kw, gp, name,
+                ref .Struct(lp, fields, rp))
+        }
+
+        // Union body: { .Variant1, .Variant2(T) }
+        if self.check(.LBrace()) then {
+            let lb = self.eat()
+            let mut cases = [CstItem ref]List.new()
+            while not self.check(.RBrace()) and not self.is_eof() then {
+                let nl_count = self.count_newlines()
+                if nl_count >= 2 then {
+                    self.skip_newlines()
+                    cases.push(ref .BlankLine())
+                    continue
+                }
+                self.skip_newlines()
+                if self.check(.RBrace()) or self.is_eof() then { break }
+                if self.peek() is .LineComment(_) or .BlockComment(_) then {
+                    cases.push(ref .Comment(self.eat()))
+                    continue
+                }
+                let expr = self.parse_expr()
+                let comma = self.eat_comma()
+                when comma is {
+                    .Some(_) then {},
+                    .None then {},
+                }
+                let s = CstStmt.ExprStmt(ref expr)
+                cases.push(ref .Stmt(ref s))
+            }
+            let rb = if self.check(.RBrace()) then { self.eat() } else { Token.RBrace() }
+            return .Type(vis, mods, kw, gp, name,
+                ref .Union(lb, cases, rb))
+        }
+
+        // Alias: = OtherType
+        if self.check(.Eq()) then {
+            let eq = self.eat()
+            let target = self.parse_type()
+            return .Type(vis, mods, kw, gp, name,
+                ref .Alias(eq, ref target))
+        }
+
+        // Empty (foreign type)
+        return .Type(vis, mods, kw, gp, name, ref .Empty())
+    }
+
+    // ========================================================================
+    // Trait declaration
+    // ========================================================================
+
+    private parse_trait_decl(self ref) CstDecl = {
+        let vis = self.eat_vis()
+        let kw = self.eat() // trait
+        let gp = self.parse_generic_params()
+        let name = self.eat() // Name
+
+        // Super traits (before {)
+        let mut supers = [CstType ref]List.new()
+        while not self.check(.LBrace()) and not self.is_eof() then {
+            if self.peek_raw() is .Newline or .EOF then { break }
+            let t = self.parse_type()
+            supers.push(ref t)
+        }
+
+        if self.check(.LBrace()) then {
+            let lb = self.eat()
+            let members = self.parse_member_items()
+            let rb = if self.check(.RBrace()) then { self.eat() } else { Token.RBrace() }
+            return .Trait(vis, kw, gp, name, supers, lb, members, rb)
+        }
+        return .Trait(vis, kw, gp, name, supers, .LBrace(), [CstItem ref]List.new(), .RBrace())
+    }
+
+    // ========================================================================
+    // Given declaration
+    // ========================================================================
+
+    private parse_given_decl(self ref) CstDecl = {
+        let vis = self.eat_vis()
+        let mods = self.eat_modifiers()
+        let kw = self.eat() // given
+        let gp = self.parse_generic_params()
+
+        // Target type (may be complex like [T, R]EnumerateStreamIterator)
+        let target = self.parse_type()
+
+        if self.check(.LBrace()) then {
+            let lb = self.eat()
+            let members = self.parse_member_items()
+            let rb = if self.check(.RBrace()) then { self.eat() } else { Token.RBrace() }
+            return .Given(vis, mods, kw, gp, ref target, lb, members, rb)
+        }
+        return .Given(vis, mods, kw, gp, ref target,
+            .LBrace(), [CstItem ref]List.new(), .RBrace())
+    }
+
+    // ========================================================================
+    // Member items (shared by trait/given)
+    // ========================================================================
+
+    private parse_member_items(self ref) [CstItem ref]List = {
+        let mut members = [CstItem ref]List.new()
+        while not self.check(.RBrace()) and not self.is_eof() then {
+            let nl_count = self.count_newlines()
+            if nl_count >= 2 then {
+                self.skip_newlines()
+                members.push(ref .BlankLine())
+                continue
+            }
+            self.skip_newlines()
+            if self.check(.RBrace()) or self.is_eof() then { break }
+            if self.peek() is .LineComment(_) or .BlockComment(_) then {
+                members.push(ref .Comment(self.eat()))
+                continue
+            }
+            // Determine if this is a let-decl or a method without let
+            let mut offset UInt = 0
+            if self.is_access_mod() then { offset = 1 }
+            let after_access = self.peek_at_skip_nl(offset)
+            if after_access is .KwForeign or .KwIntrinsic then { offset += 1 }
+            let kw = self.peek_at_skip_nl(offset)
+            when kw is {
+                .KwLet then {
+                    let d = self.parse_let_decl()
+                    members.push(ref .Decl(ref d))
+                },
+                _ then {
+                    // Method without let keyword
+                    let d = self.parse_member_no_let()
+                    members.push(ref .Decl(ref d))
+                },
+            }
+        }
+        members
+    }
+
+    private parse_member_no_let(self ref) CstDecl = {
+        let vis = self.eat_vis()
+        let mods = self.eat_modifiers()
+        // Generic params and name are handled by finish_func_or_var
+        self.finish_func_or_var(vis, mods, .None(), .None())
+    }
+}

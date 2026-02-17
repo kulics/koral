@@ -66,6 +66,9 @@ public class Monomorphizer {
     /// Generated global nodes for instantiated types and functions
     internal var generatedNodes: [TypedGlobalNode] = []
     
+    /// Cache of defIds whose members have already been resolved
+    internal var resolvedStructUnionDefIds: Set<UInt64> = []
+    
     // MARK: - State
     
     /// Mapping from Layout Name to Template Info (Base Name + Args)
@@ -332,6 +335,8 @@ public class Monomorphizer {
             }
 
             var reResolved: [TypedGlobalNode] = []
+            // Clear resolution cache so types updated by new instantiations get re-resolved
+            resolvedStructUnionDefIds.removeAll()
             for node in allNodes {
                 let resolvedNode = try resolveTypesInGlobalNode(node)
                 reResolved.append(resolvedNode)
