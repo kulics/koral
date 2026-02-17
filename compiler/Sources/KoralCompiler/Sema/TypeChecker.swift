@@ -28,6 +28,16 @@ public class TypeChecker {
   
   // Cache for object safety check results to avoid redundant computation
   var objectSafetyCache: [String: (Bool, [String])] = [:]
+  
+  // Cache for flattened trait methods to avoid redundant traversal of trait hierarchies
+  var flattenedTraitMethodsCache: [String: [String: TraitMethodSignature]] = [:]
+  
+  // Cache for trait conformance checks: (typeDescription, traitName) -> passed
+  // Avoids redundant method lookups for the same type/trait pair
+  var traitConformanceCache: [String: Bool] = [:]
+  
+  // Cache for validated generic constraint checks: "Template<Arg1,Arg2>" -> passed
+  var genericConstraintCache: Set<String> = []
 
   // Generic parameter name -> list of trait constraints currently in scope
   // Stores full TraitConstraint to preserve type arguments for generic traits

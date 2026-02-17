@@ -360,8 +360,19 @@ extension TypeChecker {
   
   // MARK: - Generic Constraint Enforcement
   
+  // Cache for validated generic constraint checks: "Template<Arg1,Arg2>" -> passed
+  // (Stored in TypeChecker class, accessed from extension)
+  
   func enforceGenericConstraints(typeParameters: [TypeParameterDecl], args: [Type]) throws {
     guard typeParameters.count == args.count else { return }
+    
+    // Skip if all args are generic parameters (constraints checked at instantiation site)
+    let allGeneric = args.allSatisfy { if case .genericParameter = $0 { return true }; return false }
+    if allGeneric { return }
+    
+    // Cache check: build a key from type parameter constraints + args
+    let cacheKey = typeParameters.map { $0.name }.joined(separator: ",") + "<" + args.map { $0.description }.joined(separator: ",") + ">"
+    if genericConstraintCache.contains(cacheKey) { return }
     
     // Build a substitution map from type parameter names to actual types
     var substitution: [String: Type] = [:]
@@ -423,6 +434,9 @@ extension TypeChecker {
         }
       }
     }
+    
+    // Cache successful constraint check
+    genericConstraintCache.insert(cacheKey)
   }
   
   // MARK: - Trait Conformance
@@ -464,6 +478,13 @@ extension TypeChecker {
       ), line: currentLine)
     }
 
+    // Check cache: skip redundant conformance checks for the same type/trait pair
+    let cacheKey = "\(selfType):\(traitName)"
+    if let passed = traitConformanceCache[cacheKey] {
+      if passed { return }
+      // If previously failed, fall through to generate proper error message
+    }
+
     try validateTraitName(traitName)
     let required = try flattenedTraitMethods(traitName)
 
@@ -501,6 +522,7 @@ extension TypeChecker {
     }
 
     if !missing.isEmpty || !mismatched.isEmpty {
+      traitConformanceCache[cacheKey] = false
       var msg = "Type \(selfType) does not conform to trait \(traitName)"
       if let context {
         msg += " (\(context))"
@@ -513,6 +535,9 @@ extension TypeChecker {
       }
       throw SemanticError(.generic(msg), line: currentLine)
     }
+    
+    // Cache successful conformance check
+    traitConformanceCache[cacheKey] = true
   }
   
   /// Checks if a method exists on a type (without resolving its full type signature).
@@ -595,6 +620,13 @@ extension TypeChecker {
       return
     }
 
+    // Check cache for generic trait conformance
+    let argsKey = traitTypeArgs.map { $0.description }.joined(separator: ",")
+    let cacheKey = "\(selfType):[\(argsKey)]\(traitName)"
+    if let passed = traitConformanceCache[cacheKey] {
+      if passed { return }
+    }
+
     try validateTraitName(traitName)
     
     guard let traitInfo = traits[traitName] else {
@@ -652,6 +684,9 @@ extension TypeChecker {
       }
       throw SemanticError(.generic(msg), line: currentLine)
     }
+    
+    // Cache successful conformance check
+    traitConformanceCache[cacheKey] = true
   }
 
   /// Computes the expected function type for a generic trait method with type substitution.

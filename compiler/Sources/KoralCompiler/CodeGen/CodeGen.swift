@@ -716,13 +716,6 @@ public class CodeGen {
   private func generateProgram(_ program: MonomorphizedProgram) {
     let nodes = program.globalNodes
     
-      // Pass -1: Validate all types are resolved (no generic parameters or parameterized types)
-      #if DEBUG
-      for node in nodes {
-        validateGlobalNode(node)
-      }
-      #endif
-    
       // Pass 0: Scan for user-defined drops and main function
       for node in nodes {
         if case .givenDeclaration(let type, let methods) = node {
@@ -793,7 +786,7 @@ public class CodeGen {
         }
         buffer += "\n"
       }
-
+      
       // 先生成所有类型声明，按依赖顺序排序以确保字段类型已定义
       let typeDeclarations = collectTypeDeclarations(nodes)
       
