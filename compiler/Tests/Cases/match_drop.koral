@@ -1,23 +1,18 @@
-// Test drop in match expressions (copy semantics)
-// With copy semantics, bindings are copies, and original variables are dropped at end of scope
+// Test drop in match expressions (borrow semantics)
+// With borrow semantics, bindings are aliases — no copy, single drop for rvalue subjects
+// Lvalue subjects are dropped by their own scope
 // EXPECT: Start Struct Move
 // EXPECT: Inside Match
-// EXPECT: Drop Resource
-// EXPECT: 1
 // EXPECT: End Struct Move
 // EXPECT: Drop Resource
 // EXPECT: 1
 // EXPECT: Start Enum Move
 // EXPECT: Inside Match
-// EXPECT: Drop Resource
-// EXPECT: 2
 // EXPECT: End Enum Move
 // EXPECT: Drop Resource
 // EXPECT: 2
 // EXPECT: Start Ref Copy
 // EXPECT: Inside Match
-// EXPECT: Drop Resource
-// EXPECT: 3
 // EXPECT: After Match
 // EXPECT: Drop Resource
 // EXPECT: 3
@@ -31,45 +26,44 @@ given Resource {
   }
 }
 
-// 1. Struct Copy Test
+// 1. Struct Borrow Test
 type Wrapper(r Resource)
 
-let test_struct_copy() Void = {
+let test_struct_borrow() Void = {
     print_line("Start Struct Move")
     let w = Wrapper(Resource(1))
     when w is {
-        // w_moved is a copy of w
+        // w_moved is an alias into w (no copy)
         w_moved then {
             print_line("Inside Match")
         },
-        // w_moved (copy) drops here at end of match branch
     }
     print_line("End Struct Move")
     // w (original) drops here at end of function scope
 }
 
-// 2. Enum Copy Test
+// 2. Enum Borrow Test
 type Container {
     Item(r Resource),
     Empty(),
 }
 
-let test_enum_copy() Void = {
+let test_enum_borrow() Void = {
     print_line("Start Enum Move")
     let c = Container.Item(Resource(2))
     when c is {
         .Item(r_inner) then {
+            // r_inner is an alias into c's inner Resource (no copy)
             print_line("Inside Match")
         },
-        // r_inner (copy) drops here at end of match branch
         .Empty then {},
     }
     print_line("End Enum Move")
     // c (original) drops here at end of function scope
 }
 
-// 3. Ref Copy Test
-let test_ref_copy() Void = {
+// 3. Ref Borrow Test
+let test_ref_borrow() Void = {
     print_line("Start Ref Copy")
     let r = ref Resource(3)
     
@@ -77,7 +71,6 @@ let test_ref_copy() Void = {
         x then {
              print_line("Inside Match")
         },
-        // x (copy, ref count dec) drops here
     }
     
     print_line("After Match")
@@ -85,7 +78,7 @@ let test_ref_copy() Void = {
 }
 
 let main() Void = {
-    test_struct_copy()
-    test_enum_copy()
-    test_ref_copy()
+    test_struct_borrow()
+    test_enum_borrow()
+    test_ref_borrow()
 }
