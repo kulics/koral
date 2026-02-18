@@ -218,9 +218,8 @@ extension CodeGen {
       // Calculate tag index
       let tagIndex = cases.firstIndex(where: { $0.name == caseName })!
       
-      let result = nextTemp()
-      addIndent()
-      appendToBuffer("struct \(typeName) \(result);\n")
+      let cType = "struct \(typeName)"
+      let result = nextTempWithDecl(cType: cType)
       addIndent()
       appendToBuffer("\(result).tag = \(tagIndex);\n")
       

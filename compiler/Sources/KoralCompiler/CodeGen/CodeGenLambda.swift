@@ -34,9 +34,7 @@ extension CodeGen {
       )
       
       // Create closure struct with env = NULL
-      let result = nextTemp()
-      addIndent()
-      appendToBuffer("struct __koral_Closure \(result) = { .fn = (void*)\(lambdaName), .env = NULL, .drop = NULL };\n")
+      let result = nextTempWithInit(cType: "struct __koral_Closure", initExpr: "{ .fn = (void*)\(lambdaName), .env = NULL, .drop = NULL }")
       return result
     } else {
       // With-capture Lambda: generate env struct and wrapper function
@@ -57,9 +55,7 @@ extension CodeGen {
       )
       
       // Allocate and initialize environment
-      let envVar = nextTemp()
-      addIndent()
-      appendToBuffer("struct \(envStructName)* \(envVar) = (struct \(envStructName)*)malloc(sizeof(struct \(envStructName)));\n")
+      let envVar = nextTempWithInit(cType: "struct \(envStructName)*", initExpr: "(struct \(envStructName)*)malloc(sizeof(struct \(envStructName)))")
       addIndent()
       appendToBuffer("\(envVar)->__refcount = 1;\n")
       
@@ -75,9 +71,7 @@ extension CodeGen {
       }
       
       // Create closure struct
-      let result = nextTemp()
-      addIndent()
-      appendToBuffer("struct __koral_Closure \(result) = { .fn = (void*)\(lambdaName), .env = \(envVar), .drop = __koral_\(envStructName)_drop };\n")
+      let result = nextTempWithInit(cType: "struct __koral_Closure", initExpr: "{ .fn = (void*)\(lambdaName), .env = \(envVar), .drop = __koral_\(envStructName)_drop }")
       return result
     }
   }

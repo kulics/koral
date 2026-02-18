@@ -45,6 +45,16 @@ public class CodeGen {
   /// into the subject rather than copies, analogous to Rust/Swift match semantics.
   var patternBindingAliases: [String: String] = [:]
   
+  // MARK: - Temp Pool for Stack Slot Reuse
+  /// Stack of active temp pools. When non-empty, nextTemp() allocates from the top pool.
+  /// Each match/if-else expression pushes its own pool; nested expressions get their own.
+  var tempPoolStack: [TempPool] = []
+  /// Counter for generating unique pool prefixes (monotonically increasing).
+  var tempPoolPrefixCounter: Int = 0
+  /// Tracks variables acquired from the current pool within the current branch,
+  /// so they can be released at branch end.
+  var currentBranchPoolVars: [(name: String, cType: String)] = []
+  
   /// 是否启用逃逸分析报告
   private let escapeAnalysisReportEnabled: Bool
   
@@ -1051,11 +1061,10 @@ public class CodeGen {
       addIndent()
       buffer += "static const uint8_t \(bytesVar)[] = { \(byteLiterals) };\n"
 
-      let result = nextTemp()
-      addIndent()
+      let cType = cTypeName(type)
       // Use qualified name for String.from_bytes_unchecked via lookup
       let fromBytesMethod = lookupStaticMethod(typeName: "String", methodName: "from_bytes_unchecked")
-      buffer += "\(cTypeName(type)) \(result) = \(fromBytesMethod)((uint8_t*)\(bytesVar), \(utf8Bytes.count));\n"
+      let result = nextTempWithInit(cType: cType, initExpr: "\(fromBytesMethod)((uint8_t*)\(bytesVar), \(utf8Bytes.count))")
       return result
 
     case .interpolatedString:
@@ -1127,9 +1136,7 @@ public class CodeGen {
           fatalError("Unsupported float->int cast target: \(type)")
         }
 
-        let fVar = nextTemp()
-        addIndent()
-        buffer += "double \(fVar) = (double)\(innerResult);\n"
+        let fVar = nextTempWithInit(cType: "double", initExpr: "(double)\(innerResult)")
 
         addIndent()
         buffer += "if (!(\(fVar) >= (double)\(minMacro) && \(fVar) <= (double)\(maxMacro))) {\n"
@@ -1140,37 +1147,31 @@ public class CodeGen {
         addIndent()
         buffer += "}\n"
 
-        let result = nextTemp()
-        addIndent()
-        buffer += "\(targetCType) \(result) = (\(targetCType))\(fVar);\n"
+        let result = nextTempWithInit(cType: targetCType, initExpr: "(\(targetCType))\(fVar)")
         return result
       }
 
       // Pointer <-> Int/UInt casts: prefer uintptr_t/intptr_t intermediates.
       if case .pointer = type {
-        let result = nextTemp()
-        addIndent()
         if inner.type == .uint {
-          buffer += "\(targetCType) \(result) = (\(targetCType))(uintptr_t)\(innerResult);\n"
+          let result = nextTempWithInit(cType: targetCType, initExpr: "(\(targetCType))(uintptr_t)\(innerResult)")
+          return result
         } else if inner.type == .int {
-          buffer += "\(targetCType) \(result) = (\(targetCType))(intptr_t)\(innerResult);\n"
+          let result = nextTempWithInit(cType: targetCType, initExpr: "(\(targetCType))(intptr_t)\(innerResult)")
+          return result
         } else {
-          buffer += "\(targetCType) \(result) = (\(targetCType))\(innerResult);\n"
+          let result = nextTempWithInit(cType: targetCType, initExpr: "(\(targetCType))\(innerResult)")
+          return result
         }
-        return result
       }
 
       if case .pointer = inner.type {
-        let result = nextTemp()
-        addIndent()
-        buffer += "\(targetCType) \(result) = (\(targetCType))\(innerResult);\n"
+        let result = nextTempWithInit(cType: targetCType, initExpr: "(\(targetCType))\(innerResult)")
         return result
       }
 
       // Default scalar cast.
-      let result = nextTemp()
-      addIndent()
-      buffer += "\(targetCType) \(result) = (\(targetCType))\(innerResult);\n"
+      let result = nextTempWithInit(cType: targetCType, initExpr: "(\(targetCType))\(innerResult)")
       return result
 
     case .blockExpression(let statements, let finalExpr, _):
@@ -1179,42 +1180,37 @@ public class CodeGen {
     case .arithmeticExpression(let left, let op, let right, let type):
       let leftResult = generateExpressionSSA(left)
       let rightResult = generateExpressionSSA(right)
-      let result = nextTemp()
-      addIndent()
+      let cType = cTypeName(type)
       if type.isIntegerType {
         let funcName = checkedArithmeticFuncName(op: op, type: type)
-        buffer += "\(cTypeName(type)) \(result) = \(funcName)(\(leftResult), \(rightResult));\n"
+        let result = nextTempWithInit(cType: cType, initExpr: "\(funcName)(\(leftResult), \(rightResult))")
+        return result
       } else {
-        buffer +=
-          "\(cTypeName(type)) \(result) = \(leftResult) \(arithmeticOpToC(op)) \(rightResult);\n"
+        let result = nextTempWithInit(cType: cType, initExpr: "\(leftResult) \(arithmeticOpToC(op)) \(rightResult)")
+        return result
       }
-      return result
 
     case .wrappingArithmeticExpression(let left, let op, let right, let type):
       let leftResult = generateExpressionSSA(left)
       let rightResult = generateExpressionSSA(right)
-      let result = nextTemp()
-      addIndent()
+      let cType = cTypeName(type)
       let funcName = wrappingArithmeticFuncName(op: op, type: type)
-      buffer += "\(cTypeName(type)) \(result) = \(funcName)(\(leftResult), \(rightResult));\n"
+      let result = nextTempWithInit(cType: cType, initExpr: "\(funcName)(\(leftResult), \(rightResult))")
       return result
 
     case .wrappingShiftExpression(let left, let op, let right, let type):
       let leftResult = generateExpressionSSA(left)
       let rightResult = generateExpressionSSA(right)
-      let result = nextTemp()
-      addIndent()
+      let cType = cTypeName(type)
       let funcName = wrappingShiftFuncName(op: op, type: type)
-      buffer += "\(cTypeName(type)) \(result) = \(funcName)(\(leftResult), \(rightResult));\n"
+      let result = nextTempWithInit(cType: cType, initExpr: "\(funcName)(\(leftResult), \(rightResult))")
       return result
 
     case .comparisonExpression(let left, let op, let right, let type):
       let leftResult = generateExpressionSSA(left)
       let rightResult = generateExpressionSSA(right)
-      let result = nextTemp()
-      addIndent()
-      buffer +=
-        "\(cTypeName(type)) \(result) = \(leftResult) \(comparisonOpToC(op)) \(rightResult);\n"
+      let cType = cTypeName(type)
+      let result = nextTempWithInit(cType: cType, initExpr: "\(leftResult) \(comparisonOpToC(op)) \(rightResult)")
       return result
 
     case .letExpression(let identifier, let value, let body, let type):
@@ -1240,9 +1236,7 @@ public class CodeGen {
         return ""
       }
 
-      let resultVar = nextTemp()
-      addIndent()
-      buffer += "\(cTypeName(type)) \(resultVar);\n"
+      let resultVar = nextTempWithDecl(cType: cTypeName(type))
       addIndent()
       buffer += "{\n"
       withIndent {
@@ -1270,6 +1264,11 @@ public class CodeGen {
       let conditionVar = generateExpressionSSA(condition)
 
       if type == .void || type == .never {
+        // Push pool for void if/else — branches are mutually exclusive
+        let savedBranchPoolVars = currentBranchPoolVars
+        currentBranchPoolVars = []
+        let poolInsertPos = pushTempPool()
+
         addIndent()
         buffer += "if (\(conditionVar)) {\n"
         withIndent {
@@ -1278,6 +1277,8 @@ public class CodeGen {
           popScope()
         }
         if let elseBranch = elseBranch {
+          // Release then-branch pool vars before else branch
+          releaseBranchPoolVars()
           addIndent()
           buffer += "} else {\n"
           withIndent {
@@ -1286,6 +1287,10 @@ public class CodeGen {
             popScope()
           }
         }
+        releaseBranchPoolVars()
+        popTempPool(insertAt: poolInsertPos)
+        currentBranchPoolVars = savedBranchPoolVars
+
         addIndent()
         buffer += "}\n"
         return ""
@@ -1299,6 +1304,11 @@ public class CodeGen {
             buffer += "\(cTypeName(type)) \(resultVar);\n"
         }
         
+        // Push pool for non-void if/else — branches are mutually exclusive
+        let savedBranchPoolVars = currentBranchPoolVars
+        currentBranchPoolVars = []
+        let poolInsertPos = pushTempPool()
+
         addIndent()
         buffer += "if (\(conditionVar)) {\n"
         withIndent {
@@ -1309,6 +1319,8 @@ public class CodeGen {
           }
           popScope()
         }
+        // Release then-branch pool vars before else branch
+        releaseBranchPoolVars()
         addIndent()
         buffer += "} else {\n"
         withIndent {
@@ -1319,6 +1331,10 @@ public class CodeGen {
           }
           popScope()
         }
+        releaseBranchPoolVars()
+        popTempPool(insertAt: poolInsertPos)
+        currentBranchPoolVars = savedBranchPoolVars
+
         addIndent()
         buffer += "}\n"
         return resultVar
@@ -1344,20 +1360,16 @@ public class CodeGen {
 
     case .derefExpression(let inner, let type):
       let innerResult = generateExpressionSSA(inner)
-      let result = nextTemp()
       let cType = cTypeName(type)
-      
-      addIndent()
-      buffer += "\(cType) \(result);\n"
+      let result = nextTempWithDecl(cType: cType)
       // Always deep copy from the reference's pointee
       appendCopyAssignment(for: type, source: "*(\(cType)*)\(innerResult).ptr", dest: result, indent: indent)
       return result
 
     case .ptrExpression(let inner, let type):
       let (lvaluePath, _) = buildRefComponents(inner)
-      let result = nextTemp()
-      addIndent()
-      buffer += "\(cTypeName(type)) \(result) = &\(lvaluePath);\n"
+      let cType = cTypeName(type)
+      let result = nextTempWithInit(cType: cType, initExpr: "&\(lvaluePath)")
       return result
 
     case .deptrExpression(let inner, let type):
@@ -1365,15 +1377,24 @@ public class CodeGen {
       return emitPointerReadCopy(pointerExpr: ptrValue, elementType: type)
 
     case .referenceExpression(let inner, let type):
-      // 使用逃逸分析决定分配策略
-      let shouldHeapAllocate = escapeContext.shouldUseHeapAllocation(inner)
+      // 使用逃逸分析决定分配策略。
+      // Pattern 绑定别名（match/if-is/while-is）没有独立可寻址栈槽；
+      // 对它们走栈借用路径会构造出错误的 lvalue/control 组件。
+      // 因此别名变量的 ref 一律堆分配并按值复制，避免悬垂/非法地址。
+      let isPatternAliasRef: Bool = {
+        if case .variable(let identifier) = inner {
+          let cName = cIdentifier(for: identifier)
+          return patternBindingAliases[cName] != nil
+        }
+        return false
+      }()
+      let shouldHeapAllocate = isPatternAliasRef || escapeContext.shouldUseHeapAllocation(inner)
       
       if inner.valueCategory == .lvalue && !shouldHeapAllocate {
         // 不逃逸的 lvalue：栈分配（取地址）
         let (lvaluePath, controlPath) = buildRefComponents(inner)
-        let result = nextTemp()
-        addIndent()
-        buffer += "\(cTypeName(type)) \(result);\n"
+        let cType = cTypeName(type)
+        let result = nextTempWithDecl(cType: cType)
         addIndent()
         buffer += "\(result).ptr = &\(lvaluePath);\n"
         addIndent()
@@ -1384,12 +1405,10 @@ public class CodeGen {
       } else {
         // 逃逸的 lvalue 或 rvalue：堆分配
         let innerResult = generateExpressionSSA(inner)
-        let result = nextTemp()
         let innerType = inner.type
         let innerCType = cTypeName(innerType)
-
-        addIndent()
-        buffer += "\(cTypeName(type)) \(result);\n"
+        let refCType = cTypeName(type)
+        let result = nextTempWithDecl(cType: refCType)
 
         // 1. 分配数据内存
         addIndent()
@@ -1455,9 +1474,14 @@ public class CodeGen {
       return ""
       
     case .ifPatternExpression(let subject, let pattern, _, let thenBranch, let elseBranch, let type):
-      // Borrow semantics: the subject is not copied. Pattern bindings are aliases
-      // into the subject's fields. The subject must remain valid for the entire if-is.
+      // Push a dedicated scope for the subject so its lifetime is self-contained.
+      // return/break/continue will clean it up via emitCleanup since it's on the stack.
+      pushScope()
+      
       let subjectVarSSA = generateExpressionSSA(subject)
+      if needsDrop(subject.type) && subject.valueCategory == .rvalue {
+        registerVariable(subjectVarSSA, subject.type)
+      }
       var subjectVar = subjectVarSSA
       var subjectType = subject.type
       if case .reference(let inner) = subject.type {
@@ -1485,16 +1509,19 @@ public class CodeGen {
       }
       
       if type == .void || type == .never {
+        // Push pool for if-pattern branches
+        let savedBranchPoolVars = currentBranchPoolVars
+        currentBranchPoolVars = []
+        let poolInsertPos = pushTempPool()
+
         addIndent()
         buffer += "if (\(condition)) {\n"
         withIndent {
           pushScope()
-          // Generate bindings
           for b in bindingCode {
             addIndent()
             buffer += b
           }
-          // Register bound variables in scope
           for (name, varType) in vars {
             registerVariable(name, varType)
           }
@@ -1502,6 +1529,7 @@ public class CodeGen {
           popScope()
         }
         if let elseBranch = elseBranch {
+          releaseBranchPoolVars()
           addIndent()
           buffer += "} else {\n"
           withIndent {
@@ -1510,14 +1538,15 @@ public class CodeGen {
             popScope()
           }
         }
+        releaseBranchPoolVars()
+        popTempPool(insertAt: poolInsertPos)
+        currentBranchPoolVars = savedBranchPoolVars
+
         addIndent()
         buffer += "}\n"
         patternBindingAliases = savedAliases
-        // Borrow semantics: drop the rvalue subject after if-is completes
-        if needsDrop(subject.type) && subject.valueCategory == .rvalue {
-          addIndent()
-          appendDropStatement(for: subject.type, value: subjectVarSSA, indent: "")
-        }
+        // Pop the subject scope — drops the subject right after the if-pattern.
+        popScope()
         return ""
       } else {
         guard let elseBranch = elseBranch else {
@@ -1529,16 +1558,19 @@ public class CodeGen {
           buffer += "\(cTypeName(type)) \(resultVar);\n"
         }
         
+        // Push pool for if-pattern branches
+        let savedBranchPoolVars = currentBranchPoolVars
+        currentBranchPoolVars = []
+        let poolInsertPos = pushTempPool()
+
         addIndent()
         buffer += "if (\(condition)) {\n"
         withIndent {
           pushScope()
-          // Generate bindings
           for b in bindingCode {
             addIndent()
             buffer += b
           }
-          // Register bound variables in scope
           for (name, varType) in vars {
             registerVariable(name, varType)
           }
@@ -1548,6 +1580,7 @@ public class CodeGen {
           }
           popScope()
         }
+        releaseBranchPoolVars()
         addIndent()
         buffer += "} else {\n"
         withIndent {
@@ -1558,14 +1591,15 @@ public class CodeGen {
           }
           popScope()
         }
+        releaseBranchPoolVars()
+        popTempPool(insertAt: poolInsertPos)
+        currentBranchPoolVars = savedBranchPoolVars
+
         addIndent()
         buffer += "}\n"
         patternBindingAliases = savedAliases
-        // Borrow semantics: drop the rvalue subject after if-is completes
-        if needsDrop(subject.type) && subject.valueCategory == .rvalue {
-          addIndent()
-          appendDropStatement(for: subject.type, value: subjectVarSSA, indent: "")
-        }
+        // Pop the subject scope — drops the subject right after the if-pattern.
+        popScope()
         return resultVar
       }
       
@@ -1579,7 +1613,17 @@ public class CodeGen {
       withIndent {
         // Borrow semantics: subject is evaluated each iteration but not deep-copied.
         // Pattern bindings are aliases into the subject's fields.
+        
+        // Push a scope for the subject so break/continue/return will drop it.
+        let subjectScopeIndex = lifetimeScopeStack.count
+        pushScope()
+        
         let subjectVarSSA = generateExpressionSSA(subject)
+        
+        if needsDrop(subject.type) && subject.valueCategory == .rvalue {
+          registerVariable(subjectVarSSA, subject.type)
+        }
+        
         var subjectVar = subjectVarSSA
         var subjectType = subject.type
         if case .reference(let inner) = subject.type {
@@ -1610,11 +1654,7 @@ public class CodeGen {
         addIndent()
         buffer += "if (!(\(condition))) {\n"
         withIndent {
-          // Drop rvalue subject before exiting
-          if needsDrop(subject.type) && subject.valueCategory == .rvalue {
-            addIndent()
-            appendDropStatement(for: subject.type, value: subjectVarSSA, indent: "")
-          }
+          emitCleanupForScope(at: subjectScopeIndex)
           addIndent()
           buffer += "goto \(endLabel);\n"
         }
@@ -1632,15 +1672,13 @@ public class CodeGen {
           registerVariable(name, varType)
         }
         
-        loopStack.append(LoopContext(startLabel: startLabel, endLabel: endLabel, scopeIndex: lifetimeScopeStack.count - 1))
+        loopStack.append(LoopContext(startLabel: startLabel, endLabel: endLabel, scopeIndex: subjectScopeIndex))
         _ = generateExpressionSSA(body)
         loopStack.removeLast()
         popScope()
-        // Drop rvalue subject at end of each iteration
-        if needsDrop(subject.type) && subject.valueCategory == .rvalue {
-          addIndent()
-          appendDropStatement(for: subject.type, value: subjectVarSSA, indent: "")
-        }
+        // Drop subject at end of each iteration
+        emitCleanupForScope(at: subjectScopeIndex)
+        popScopeWithoutCleanup()
         patternBindingAliases = savedAliases
         addIndent()
         buffer += "goto \(startLabel);\n"
@@ -1654,12 +1692,9 @@ public class CodeGen {
       return ""
 
     case .andExpression(let left, let right, _):
-      let result = nextTemp()
+      let result = nextTempWithDecl(cType: "_Bool")
       let leftResult = generateExpressionSSA(left)
       let endLabel = nextTemp()
-
-      addIndent()
-      buffer += "_Bool \(result);\n"
       addIndent()
       buffer += "if (!\(leftResult)) {\n"
       withIndent {
@@ -1683,12 +1718,9 @@ public class CodeGen {
       return result
 
     case .orExpression(let left, let right, _):
-      let result = nextTemp()
+      let result = nextTempWithDecl(cType: "_Bool")
       let leftResult = generateExpressionSSA(left)
       let endLabel = nextTemp()
-
-      addIndent()
-      buffer += "_Bool \(result);\n"
       addIndent()
       buffer += "if (\(leftResult)) {\n"
       withIndent {
@@ -1713,33 +1745,29 @@ public class CodeGen {
 
     case .notExpression(let expr, _):
       let exprResult = generateExpressionSSA(expr)
-      let result = nextTemp()
-      addIndent()
-      buffer += "_Bool \(result) = !\(exprResult);\n"
+      let result = nextTempWithInit(cType: "_Bool", initExpr: "!\(exprResult)")
       return result
 
     case .bitwiseExpression(let left, let op, let right, let type):
       let leftResult = generateExpressionSSA(left)
       let rightResult = generateExpressionSSA(right)
-      let result = nextTemp()
-      addIndent()
+      let cType = cTypeName(type)
       if (op == .shiftLeft || op == .shiftRight) && type.isIntegerType {
         let funcName = checkedShiftFuncName(op: op, type: type)
-        buffer += "\(cTypeName(type)) \(result) = \(funcName)(\(leftResult), \(rightResult));\n"
+        let result = nextTempWithInit(cType: cType, initExpr: "\(funcName)(\(leftResult), \(rightResult))")
+        return result
       } else {
-        buffer += "\(cTypeName(type)) \(result) = \(leftResult) \(bitwiseOpToC(op)) \(rightResult);\n"
+        let result = nextTempWithInit(cType: cType, initExpr: "\(leftResult) \(bitwiseOpToC(op)) \(rightResult)")
+        return result
       }
-      return result
 
     case .bitwiseNotExpression(let expr, let type):
       let exprResult = generateExpressionSSA(expr)
-      let result = nextTemp()
-      addIndent()
-      buffer += "\(cTypeName(type)) \(result) = ~\(exprResult);\n"
+      let cType = cTypeName(type)
+      let result = nextTempWithInit(cType: cType, initExpr: "~\(exprResult)")
       return result
 
     case .typeConstruction(let identifier, _, let arguments, _):
-      let result = nextTemp()
       var argResults: [String] = []
       
       // Get canonical members to check for casts
@@ -1775,15 +1803,6 @@ public class CodeGen {
             let canonicalType = canonicalMembers[index].type
             if canonicalType != arg.type {
                 let targetCType = cTypeName(canonicalType)
-                // Cast the value to the canonical type
-                // For structs (like Ref_Int -> Ref_Void), we need to cast the value.
-                // Since we are initializing a struct member, we can cast the expression.
-                // `(struct Ref_Void) { ... }`? No, C doesn't support casting structs easily unless they are pointers.
-                // But here we are initializing `struct Box_R { struct Ref_Void val; }`.
-                // We are providing `{ arg }`.
-                // If `arg` is `struct Ref_Int`, we can't just cast it to `struct Ref_Void`.
-                // We need to reinterpret cast? `*(struct Ref_Void*)&arg`.
-                
                 finalArg = "*(\(targetCType)*)&(\(finalArg))"
             }
         }
@@ -1791,10 +1810,8 @@ public class CodeGen {
         argResults.append(finalArg)
       }
 
-      addIndent()
-      buffer += "\(cTypeName(identifier.type)) \(result) = {"
-      buffer += argResults.joined(separator: ", ")
-      buffer += "};\n"
+      let cType = cTypeName(identifier.type)
+      let result = nextTempWithInit(cType: cType, initExpr: "{\(argResults.joined(separator: ", "))}")
       return result
     case .memberPath(let source, let path):
       return generateMemberPath(source, path)
@@ -1823,9 +1840,8 @@ public class CodeGen {
       guard case .pointer(let element) = type else { fatalError("alloc_memory expects Pointer result") }
       let countVal = generateExpressionSSA(count)
       let elemSize = "sizeof(\(cTypeName(element)))"
-      let result = nextTemp()
-      addIndent()
-      buffer += "\(cTypeName(type)) \(result);\n"
+      let cType = cTypeName(type)
+      let result = nextTempWithDecl(cType: cType)
       addIndent()
       buffer += "\(result) = malloc(\(countVal) * \(elemSize));\n"
       return result
@@ -1860,10 +1876,10 @@ public class CodeGen {
 
     case .refCount(let val):
       let valRes = generateExpressionSSA(val)
-      let result = nextTemp()
+      let result = nextTempWithDecl(cType: "int")
       let controlPath = "\(valRes).control"
       addIndent()
-      buffer += "int \(result) = 0;\n"
+      buffer += "\(result) = 0;\n"
       addIndent()
       buffer += "if (\(controlPath)) {\n"
       withIndent {
@@ -1876,39 +1892,31 @@ public class CodeGen {
 
     case .downgradeRef(let val, _):
       let valRes = generateExpressionSSA(val)
-      let result = nextTemp()
       // Check if this is a trait object downgrade (TraitRef → TraitWeakRef)
       if case .reference(let inner) = val.type, case .traitObject = inner {
+        let result = nextTempWithDecl(cType: "struct TraitWeakRef")
+        let tempWeak = nextTempWithDecl(cType: "struct WeakRef")
         addIndent()
-        buffer += "struct TraitWeakRef \(result);\n"
-        let tempWeak = nextTemp()
-        addIndent()
-        buffer += "struct WeakRef \(tempWeak) = __koral_downgrade_ref((struct Ref){\(valRes).ptr, \(valRes).control});\n"
+        buffer += "\(tempWeak) = __koral_downgrade_ref((struct Ref){\(valRes).ptr, \(valRes).control});\n"
         addIndent()
         buffer += "\(result).control = \(tempWeak).control;\n"
         addIndent()
         buffer += "\(result).vtable = \(valRes).vtable;\n"
+        return result
       } else {
-        addIndent()
-        buffer += "struct WeakRef \(result) = __koral_downgrade_ref(\(valRes));\n"
+        let result = nextTempWithInit(cType: "struct WeakRef", initExpr: "__koral_downgrade_ref(\(valRes))")
+        return result
       }
-      return result
 
     case .upgradeRef(let val, let resultType):
       let valRes = generateExpressionSSA(val)
-      let result = nextTemp()
-      let successVar = nextTemp()
-      let upgradedRefVar = nextTemp()
+      let successVar = nextTempWithDecl(cType: "int")
       // Check if this is a trait object upgrade (TraitWeakRef → Option<TraitRef>)
       if case .weakReference(let inner) = val.type, case .traitObject = inner {
-        addIndent()
-        buffer += "int \(successVar);\n"
-        addIndent()
-        buffer += "struct Ref \(upgradedRefVar) = __koral_upgrade_ref((struct WeakRef){\(valRes).control}, &\(successVar));\n"
+        let upgradedRefVar = nextTempWithInit(cType: "struct Ref", initExpr: "__koral_upgrade_ref((struct WeakRef){\(valRes).control}, &\(successVar))")
         // Generate Option type result
         let cType = cTypeName(resultType)
-        addIndent()
-        buffer += "\(cType) \(result);\n"
+        let result = nextTempWithDecl(cType: cType)
         addIndent()
         buffer += "if (\(successVar)) {\n"
         withIndent {
@@ -1929,15 +1937,12 @@ public class CodeGen {
         }
         addIndent()
         buffer += "}\n"
+        return result
       } else {
-        addIndent()
-        buffer += "int \(successVar);\n"
-        addIndent()
-        buffer += "struct Ref \(upgradedRefVar) = __koral_upgrade_ref(\(valRes), &\(successVar));\n"
+        let upgradedRefVar = nextTempWithInit(cType: "struct Ref", initExpr: "__koral_upgrade_ref(\(valRes), &\(successVar))")
         // Generate Option type result
         let cType = cTypeName(resultType)
-        addIndent()
-        buffer += "\(cType) \(result);\n"
+        let result = nextTempWithDecl(cType: cType)
         addIndent()
         buffer += "if (\(successVar)) {\n"
         withIndent {
@@ -1954,8 +1959,8 @@ public class CodeGen {
         }
         addIndent()
         buffer += "}\n"
+        return result
       }
-      return result
 
     case .initMemory(let ptr, let val):
       guard case .pointer(let element) = ptr.type else { fatalError() }
@@ -2016,15 +2021,11 @@ public class CodeGen {
       guard case .pointer(let element) = ptr.type else { fatalError() }
       let p = generateExpressionSSA(ptr)
       let cType = cTypeName(element)
-      let result = nextTemp()
-      addIndent()
-      buffer += "\(cType) \(result) = *(\(cType)*)\(p);\n"
+      let result = nextTempWithInit(cType: cType, initExpr: "*(\(cType)*)\(p)")
       return result
 
     case .nullPtr(let resultType):
-      let result = nextTemp()
-      addIndent()
-      buffer += "\(cTypeName(resultType)) \(result) = NULL;\n"
+      let result = nextTempWithInit(cType: cTypeName(resultType), initExpr: "NULL")
       return result
 
     }
@@ -2034,6 +2035,86 @@ public class CodeGen {
   func nextTemp() -> String {
     tempVarCounter += 1
     return "_t\(tempVarCounter)"
+  }
+
+  // MARK: - Pool-Aware Temp Allocation
+
+  /// Allocate a temporary variable from the active pool (if any) for the given C type.
+  /// If no pool is active, falls back to the standard nextTemp().
+  /// Pool-allocated variables are tracked in currentBranchPoolVars for branch-end release.
+  func nextPoolTemp(cType: String) -> String {
+    guard !tempPoolStack.isEmpty else {
+      return nextTemp()
+    }
+    let name = tempPoolStack[tempPoolStack.count - 1].acquire(cType: cType)
+    currentBranchPoolVars.append((name: name, cType: cType))
+    return name
+  }
+
+  /// Allocate a temp variable and emit its declaration.
+  /// When a pool is active, allocates from the pool (declaration is deferred to pool scope).
+  /// When no pool is active, allocates a fresh temp and emits `cType name;` inline.
+  /// Returns the variable name.
+  func nextTempWithDecl(cType: String) -> String {
+    if !tempPoolStack.isEmpty {
+      return nextPoolTemp(cType: cType)
+    }
+    let name = nextTemp()
+    addIndent()
+    buffer += "\(cType) \(name);\n"
+    return name
+  }
+
+  /// Allocate a temp and emit `cType name = initExpr;` (or just `name = initExpr;` if pooled).
+  /// Returns the variable name.
+  func nextTempWithInit(cType: String, initExpr: String) -> String {
+    if !tempPoolStack.isEmpty {
+      let name = nextPoolTemp(cType: cType)
+      addIndent()
+      // Brace-enclosed initializer lists are only valid in declarations in C.
+      // For assignment to a pre-declared pool variable, wrap as a compound literal.
+      if initExpr.hasPrefix("{") {
+        buffer += "\(name) = (\(cType))\(initExpr);\n"
+      } else {
+        buffer += "\(name) = \(initExpr);\n"
+      }
+      return name
+    }
+    let name = nextTemp()
+    addIndent()
+    buffer += "\(cType) \(name) = \(initExpr);\n"
+    return name
+  }
+
+  /// Push a new temp pool for a match/if-else expression.
+  /// Returns a placeholder position in the buffer where declarations will be inserted.
+  func pushTempPool() -> Int {
+    tempPoolPrefixCounter += 1
+    let pool = TempPool(prefix: "\(tempPoolPrefixCounter)")
+    tempPoolStack.append(pool)
+    // Return current buffer length as the insertion point for declarations
+    return buffer.count
+  }
+
+  /// Release all pool variables acquired in the current branch back to the pool.
+  func releaseBranchPoolVars() {
+    guard !tempPoolStack.isEmpty else { return }
+    tempPoolStack[tempPoolStack.count - 1].releaseAll(currentBranchPoolVars)
+    currentBranchPoolVars = []
+  }
+
+  /// Pop the current temp pool and insert declarations at the given buffer position.
+  func popTempPool(insertAt position: Int) {
+    guard let pool = tempPoolStack.popLast() else { return }
+    guard !pool.declared.isEmpty else { return }
+    // Build declaration block
+    var decls = ""
+    for (cType, name) in pool.declared {
+      decls += "\(indent)\(cType) \(name);\n"
+    }
+    // Insert at the saved position
+    let insertIndex = buffer.index(buffer.startIndex, offsetBy: position)
+    buffer.insert(contentsOf: decls, at: insertIndex)
   }
 
   func generateStatement(_ stmt: TypedStatementNode) {
@@ -2087,15 +2168,15 @@ public class CodeGen {
       if let op {
         let oldValue = emitPointerReadCopy(pointerExpr: ptrValue, elementType: elementType)
         let rhsValue = generateExpressionSSA(value)
-        let newValue = nextTemp()
-        addIndent()
+        let cType = cTypeName(elementType)
         // For shift compound assignments on integer types, use checked shift functions
+        let newValue: String
         if (op == .shiftLeft || op == .shiftRight) && elementType.isIntegerType {
           let bitwiseOp: BitwiseOperator = op == .shiftLeft ? .shiftLeft : .shiftRight
           let funcName = checkedShiftFuncName(op: bitwiseOp, type: elementType)
-          buffer += "\(cTypeName(elementType)) \(newValue) = \(funcName)(\(oldValue), \(rhsValue));\n"
+          newValue = nextTempWithInit(cType: cType, initExpr: "\(funcName)(\(oldValue), \(rhsValue))")
         } else {
-          buffer += "\(cTypeName(elementType)) \(newValue) = \(oldValue) \(compoundOpToC(op).dropLast()) \(rhsValue);\n"
+          newValue = nextTempWithInit(cType: cType, initExpr: "\(oldValue) \(compoundOpToC(op).dropLast()) \(rhsValue)")
         }
 
         appendDropStatement(for: elementType, value: "(*\(ptrValue))")
@@ -2223,8 +2304,15 @@ public class CodeGen {
   }
 
   /// Declare a new temp variable and assign with proper copy/move semantics.
+  /// Pool-aware: when a pool is active, allocates from the pool (declaration deferred).
   /// Returns the temp variable name.
   func emitTempCopyOrMove(type: Type, source: String, isLvalue: Bool) -> String {
+    if !tempPoolStack.isEmpty {
+      let cType = cTypeName(type)
+      let temp = nextPoolTemp(cType: cType)
+      emitCopyOrMove(type: type, source: source, dest: temp, isLvalue: isLvalue)
+      return temp
+    }
     let temp = nextTemp()
     return emitDeclareAndCopyOrMove(type: type, source: source, dest: temp, isLvalue: isLvalue)
   }
@@ -2273,10 +2361,8 @@ public class CodeGen {
   }
 
   func emitPointerReadCopy(pointerExpr: String, elementType: Type) -> String {
-    let result = nextTemp()
     let cType = cTypeName(elementType)
-    addIndent()
-    buffer += "\(cType) \(result);\n"
+    let result = nextTempWithDecl(cType: cType)
     // Always deep copy from pointer (reading from memory always produces an owned value)
     appendCopyAssignment(for: elementType, source: "*(\(cType)*)\(pointerExpr)", dest: result, indent: indent)
     return result
@@ -2366,7 +2452,16 @@ public class CodeGen {
   }
 
   func generateMatchExpression(_ subject: TypedExpressionNode, _ cases: [TypedMatchCase], _ type: Type) -> String {
+    // Push a dedicated scope for the subject so its lifetime is self-contained.
+    // return/break/continue will clean it up via emitCleanup since it's on the stack.
+    pushScope()
+    
     let subjectVarSSA = generateExpressionSSA(subject)
+    
+    if needsDrop(subject.type) && subject.valueCategory == .rvalue {
+      registerVariable(subjectVarSSA, subject.type)
+    }
+    
     let resultVar = nextTemp()
     
     if type != .void && type != .never {
@@ -2390,9 +2485,18 @@ public class CodeGen {
     
     let endLabel = "match_end_\(nextTemp())"
     let savedAliases = patternBindingAliases
+
+    // Push a temp pool for stack slot reuse across mutually exclusive branches.
+    // Save and clear branch pool vars so nested pools don't interfere.
+    let savedBranchPoolVars = currentBranchPoolVars
+    currentBranchPoolVars = []
+    let poolInsertPos = pushTempPool()
     
     for c in cases {
          patternBindingAliases = savedAliases
+         // Reset branch pool vars: release all temps from previous branch back to pool
+         releaseBranchPoolVars()
+
          addIndent()
          buffer += "{\n"
          withIndent {
@@ -2446,17 +2550,18 @@ public class CodeGen {
          buffer += "}\n"
     }
     
+    // Release any remaining branch pool vars and pop the pool,
+    // inserting declarations at the saved position.
+    releaseBranchPoolVars()
+    popTempPool(insertAt: poolInsertPos)
+    currentBranchPoolVars = savedBranchPoolVars
+
     patternBindingAliases = savedAliases
 
     addIndent()
     buffer += "\(endLabel):;\n"
-    // Borrow semantics: drop the subject after the match completes.
-    // Bindings were aliases into the subject, so the subject outlives all branches.
-    // For lvalue subjects, the variable's own scope handles the drop.
-    if needsDrop(subject.type) && subject.valueCategory == .rvalue {
-      addIndent()
-      appendDropStatement(for: subject.type, value: subjectVarSSA, indent: "")
-    }
+    // Pop the subject scope — drops the subject right after the match expression.
+    popScope()
     return (type == .void || type == .never) ? "" : resultVar
   }
 

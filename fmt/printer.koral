@@ -726,12 +726,20 @@ given Printer {
     private print_params(self ref, params [CstParam]List) Void = {
         let mut i UInt = 0
         while i < params.count() then {
-            let p = params[i]
-            if p.mut_kw is .Some(mk) then { self.write_token(mk); self.write_space() }
-            self.write_token(p.name)
-            self.write_space()
-            self.print_type(deref p.param_type)
-            if p.comma is .Some(c) then { self.write_token(c); self.write_space() }
+            when params[i] is {
+                .SelfParam(kw, ref_kw, comma) then {
+                    self.write_token(kw)
+                    if ref_kw is .Some(rk) then { self.write_space(); self.write_token(rk) }
+                    if comma is .Some(c) then { self.write_token(c); self.write_space() }
+                },
+                .NamedParam(name, mut_kw, param_type, comma) then {
+                    if mut_kw is .Some(mk) then { self.write_token(mk); self.write_space() }
+                    self.write_token(name)
+                    self.write_space()
+                    self.print_type(deref param_type)
+                    if comma is .Some(c) then { self.write_token(c); self.write_space() }
+                },
+            }
             i += 1
         }
     }
@@ -1033,9 +1041,18 @@ given Printer {
             len += 2 // ( )
             let mut pi UInt = 0
             while pi < params.count() then {
-                let p = params[pi]
-                len += p.name.to_string().count() + 1 + self.estimate_type_length(deref p.param_type)
-                if p.comma is .Some(_) then { len += 2 }
+                when params[pi] is {
+                    .SelfParam(_, ref_kw, comma) then {
+                        len += 4
+                        if ref_kw is .Some(_) then { len += 4 }
+                        if comma is .Some(_) then { len += 2 }
+                    },
+                    .NamedParam(name, mut_kw, param_type, comma) then {
+                        if mut_kw is .Some(_) then { len += 4 }
+                        len += name.to_string().count() + 1 + self.estimate_type_length(deref param_type)
+                        if comma is .Some(_) then { len += 2 }
+                    },
+                }
                 pi += 1
             }
         }
