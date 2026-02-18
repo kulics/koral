@@ -217,9 +217,8 @@ extension CodeGen {
       access = memberAccess
       curType = member.type
     }
-    let result = nextTemp()
-    addIndent()
-    appendToBuffer("\(cTypeName(path.last?.type ?? .void)) \(result) = \(access);\n")
+    let cType = cTypeName(path.last?.type ?? .void)
+    let result = nextTempWithInit(cType: cType, initExpr: access)
     return result
   }
   
@@ -239,16 +238,15 @@ extension CodeGen {
     if let finalExpr = finalExpr {
       let temp = generateExpressionSSA(finalExpr)
       if finalExpr.type != .void && finalExpr.type != .never {
-        let resultVar = nextTemp()
+        let cType = cTypeName(finalExpr.type)
+        let resultVar = nextTempWithDecl(cType: cType)
         if finalExpr.valueCategory == .lvalue {
           // Returning an lvalue from a block:
           // - Copy types must be copied, because scope cleanup will drop the original.
-          addIndent()
-          appendToBuffer("\(cTypeName(finalExpr.type)) \(resultVar);\n")
           appendCopyAssignment(for: finalExpr.type, source: temp, dest: resultVar, indent: indent)
         } else {
           addIndent()
-          appendToBuffer("\(cTypeName(finalExpr.type)) \(resultVar) = \(temp);\n")
+          appendToBuffer("\(resultVar) = \(temp);\n")
         }
         result = resultVar
       }
@@ -316,9 +314,8 @@ extension CodeGen {
     for arg in arguments {
       let result = generateExpressionSSA(arg)
       if arg.valueCategory == .lvalue {
-        let copyResult = nextTemp()
-        addIndent()
-        appendToBuffer("\(cTypeName(arg.type)) \(copyResult);\n")
+        let cType = cTypeName(arg.type)
+        let copyResult = nextTempWithDecl(cType: cType)
         appendCopyAssignment(for: arg.type, source: result, dest: copyResult, indent: indent)
         argResults.append(copyResult)
       } else {
@@ -366,9 +363,7 @@ extension CodeGen {
       appendToBuffer("}\n")
       return ""
     } else {
-      let result = nextTemp()
-      addIndent()
-      appendToBuffer("\(returnCType) \(result);\n")
+      let result = nextTempWithDecl(cType: returnCType)
       addIndent()
       appendToBuffer("if (\(closureVar).env == NULL) {\n")
       indent += "  "
@@ -395,9 +390,8 @@ extension CodeGen {
     for arg in arguments {
       let result = generateExpressionSSA(arg)
       if arg.valueCategory == .lvalue {
-        let copyResult = nextTemp()
-        addIndent()
-        appendToBuffer("\(cTypeName(arg.type)) \(copyResult);\n")
+        let cType = cTypeName(arg.type)
+        let copyResult = nextTempWithDecl(cType: cType)
         appendCopyAssignment(for: arg.type, source: result, dest: copyResult, indent: indent)
         paramResults.append(copyResult)
       } else {
@@ -412,10 +406,8 @@ extension CodeGen {
       appendToBuffer(");\n")
       return ""
     } else {
-      let result = nextTemp()
-      appendToBuffer("\(cTypeName(type)) \(result) = \(qualifiedName(for: identifier))(")
-      appendToBuffer(paramResults.joined(separator: ", "))
-      appendToBuffer(");\n")
+      let cType = cTypeName(type)
+      let result = nextTempWithInit(cType: cType, initExpr: "\(qualifiedName(for: identifier))(\(paramResults.joined(separator: ", ")))")
       return result
     }
   }
@@ -429,9 +421,7 @@ extension CodeGen {
     }
     let valueResult = generateExpressionSSA(value)
     if value.valueCategory == .lvalue {
-      let copyResult = nextTemp()
-      addIndent()
-      appendToBuffer("\(cTypeName(value.type)) \(copyResult);\n")
+      let copyResult = nextTempWithDecl(cType: cTypeName(value.type))
       appendCopyAssignment(for: value.type, source: valueResult, dest: copyResult, indent: indent)
       addIndent()
       appendDropStatement(for: identifier.type, value: qualifiedName(for: identifier), indent: "")
@@ -492,9 +482,7 @@ extension CodeGen {
       
       if isLast {
         if value.valueCategory == .lvalue {
-          let copyResult = nextTemp()
-          addIndent()
-          appendToBuffer("\(cTypeName(value.type)) \(copyResult);\n")
+          let copyResult = nextTempWithDecl(cType: cTypeName(value.type))
           appendCopyAssignment(for: value.type, source: valueResult, dest: copyResult, indent: indent)
           addIndent()
           appendDropStatement(for: memberType, value: accessPath, indent: "")

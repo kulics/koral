@@ -137,6 +137,7 @@ class IntegrationTests: XCTestCase {
     func test_inter_procedural_escape() throws { try runCase(named: "inter_procedural_escape.koral") }
     func test_generic_recursion_error() throws { try runCase(named: "generic_recursion_error.koral") }
     func test_ref_method_call() throws { try runCase(named: "ref_method_call.koral") }
+    func test_ref_escape_pattern_alias() throws { try runCase(named: "ref_escape_pattern_alias.koral") }
     func test_result_map_test() throws { try runCase(named: "result_map_test.koral") }
     func test_result_void_test() throws { try runCase(named: "result_void_test.koral") }
     func test_return_break_continue() throws { try runCase(named: "return_break_continue.koral") }

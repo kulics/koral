@@ -650,7 +650,7 @@ extension CodeGen {
     type: Type
   ) -> String {
     let innerResult = generateExpressionSSA(inner)
-    let result = nextTemp()
+    let result = nextTempWithDecl(cType: "struct TraitRef")
 
     // Get the C identifier for the concrete type (needed for vtable instance name)
     let concreteTypeCName = concreteTypeCIdentifier(concreteType) ?? cTypeName(concreteType)
@@ -668,8 +668,6 @@ extension CodeGen {
 
     // From T ref → trait object ref (zero allocation)
     // Copy fields from Ref, set vtable, retain
-    addIndent()
-    appendToBuffer("struct TraitRef \(result);\n")
     addIndent()
     appendToBuffer("\(result).ptr = \(innerResult).ptr;\n")
     addIndent()
@@ -710,9 +708,7 @@ extension CodeGen {
     for arg in arguments {
       let result = generateExpressionSSA(arg)
       if arg.valueCategory == .lvalue {
-        let copyResult = nextTemp()
-        addIndent()
-        appendToBuffer("\(cTypeName(arg.type)) \(copyResult);\n")
+        let copyResult = nextTempWithDecl(cType: cTypeName(arg.type))
         appendCopyAssignment(for: arg.type, source: result, dest: copyResult, indent: indent)
         argResults.append(copyResult)
       } else {
@@ -729,9 +725,7 @@ extension CodeGen {
     
     // 4. Cast vtable pointer to the correct vtable struct type
     let vtableStructName = vtableStructCIdentifier(traitName: traitName, traitTypeArgs: traitTypeArgs)
-    let vtVar = nextTemp()
-    addIndent()
-    appendToBuffer("const struct \(vtableStructName)* \(vtVar) = (const struct \(vtableStructName)*)\(receiverResult).vtable;\n")
+    let vtVar = nextTempWithInit(cType: "const struct \(vtableStructName)*", initExpr: "(const struct \(vtableStructName)*)\(receiverResult).vtable")
 
     // 5. Build argument list: construct struct Ref from TraitRef fields as first arg, then the rest
     let sanitizedMethodName = sanitizeCIdentifier(methodName)
@@ -745,9 +739,7 @@ extension CodeGen {
       appendToBuffer("\(vtVar)->\(sanitizedMethodName)(\(argsStr));\n")
       return ""
     } else {
-      let result = nextTemp()
-      addIndent()
-      appendToBuffer("\(cTypeName(type)) \(result) = \(vtVar)->\(sanitizedMethodName)(\(argsStr));\n")
+      let result = nextTempWithInit(cType: cTypeName(type), initExpr: "\(vtVar)->\(sanitizedMethodName)(\(argsStr))")
       return result
     }
   }
