@@ -35,6 +35,7 @@ public type CstExpr {
     Ident(token Token),
     SelfExpr(token Token),
     UnderscoreExpr(token Token),
+    Commented(comments [Token]List, inner CstExpr ref),
 
     // Operators
     BinaryOp(left CstExpr ref, op Token, right CstExpr ref),
@@ -43,6 +44,7 @@ public type CstExpr {
     BitwiseNot(op Token, operand CstExpr ref),
     PrefixKw(kw Token, operand CstExpr ref),
     TypeCast(lparen Token, cast_type CstType ref, rparen Token, operand CstExpr ref),
+    Paren(lparen Token, inner CstExpr ref, rparen Token),
 
     // Access and calls
     FieldAccess(base CstExpr ref, dot Token, field Token),
@@ -76,6 +78,9 @@ public type CstExpr {
     // Lambda
     Lambda(lparen Token, params [CstLambdaParam]List, rparen Token,
            ret_type [CstType ref]Option, arrow Token, body CstExpr ref),
+
+    // Union variant declaration in type union body
+    UnionVariant(name Token, lparen [Token]Option, fields [CstUnionField]List, rparen [Token]Option),
 }
 
 // Call argument with optional trailing comma
@@ -83,6 +88,9 @@ public type CstCallArg(value CstExpr ref, comma [Token]Option)
 
 // Lambda parameter
 public type CstLambdaParam(name Token, param_type [CstType ref]Option, comma [Token]Option)
+
+// Union variant field: Name(Type) as `fieldName FieldType`
+public type CstUnionField(name Token, field_type CstType ref, comma [Token]Option)
 
 // ============================================================================
 // CST Pattern Nodes
@@ -147,7 +155,7 @@ public type CstStmt {
     VarDecl(let_kw Token, mut_kw [Token]Option, name Token,
             var_type [CstType ref]Option, eq Token, value CstExpr ref),
     Assignment(target CstExpr ref, op Token, value CstExpr ref),
-    ExprStmt(expr CstExpr ref),
+    ExprStmt(expr CstExpr ref, semi [Token]Option),
     Return(kw Token, value [CstExpr ref]Option),
     Break(kw Token),
     Continue(kw Token),
@@ -269,6 +277,7 @@ public type CstItem {
     Decl(decl CstDecl ref),
     Stmt(stmt CstStmt ref),
     Comment(token Token),
+    TrailingComment(token Token),
     BlankLine(),
 }
 
@@ -325,7 +334,7 @@ given CstParser {
 
     private expected_error(self, expected String) String = {
         let got = self.peek()
-        "Parse error: expected \(expected), got '\(got.to_string())'"
+        "Parse error: expected \(expected), got '\(got.to_string())' at token #\(self.pos.to_string())"
     }
 
     private is_eof(self) Bool = when self.peek() is { .EOF then true, _ then false }
@@ -437,15 +446,7 @@ given CstParser {
 
     // Check if there's a newline before the current peek position
     private newline_before_current(self) Bool = {
-        let mut i = self.pos
-        while i > 0 then {
-            i -= 1
-            when self.tokens[i] is {
-                .Newline then { return true },
-                _ then { return false },
-            }
-        }
-        false
+        self.count_newlines() > 0
     }
 
     // ========================================================================
@@ -558,6 +559,10 @@ given CstParser {
             let mut constraints = [CstType ref]List.new()
             // Collect constraint types until comma or ]
             while not self.check(.Comma()) and not self.check(.RBracket()) and not self.is_eof() then {
+                if self.check(.KwAnd()) then {
+                    self.eat()
+                    continue
+                }
                 let ct = when self.parse_type_node() is {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
@@ -952,6 +957,23 @@ given CstParser {
     // ========================================================================
 
     private parse_prefix(self ref) [CstExpr]Result = {
+        let mut leading_comments = [Token]List.new()
+        while self.peek() is .LineComment(_) or .BlockComment(_) or .Semi then {
+            if self.peek() is .Semi then {
+                let ignored_semi = self.eat()
+            } else {
+                leading_comments.push(self.eat())
+            }
+        }
+
+        if leading_comments.count() > 0 then {
+            let inner = when self.parse_prefix() is {
+                .Ok(e) then e,
+                .Error(e) then { return .Error(e) },
+            }
+            return .Ok(.Commented(leading_comments, ref inner))
+        }
+
         // Type cast: (Type)expr — try with backtracking
         if self.check(.LParen()) then {
             let saved = self.pos
@@ -1070,7 +1092,7 @@ given CstParser {
                     .Error(e) then { return .Error(e) },
                 }
                 // Check for method call: expr.field(args)
-                if self.check(.LParen()) then {
+                if (not self.newline_before_current()) and self.check(.LParen()) then {
                     let field_expr = CstExpr.FieldAccess(ref expr, dot, field)
                     let lp = self.eat()
                     let args = when self.parse_call_args() is {
@@ -1131,6 +1153,14 @@ given CstParser {
     private parse_call_args(self ref) [[CstCallArg]List]Result = {
         let mut args = [CstCallArg]List.new()
         while not self.check(.RParen()) and not self.is_eof() then {
+            if self.peek() is .LineComment(_) or .BlockComment(_) then {
+                self.eat()
+                continue
+            }
+            if self.check(.Semi()) then {
+                self.eat()
+                continue
+            }
             let before = self.pos
             let val = when self.parse_expr_node() is {
                 .Ok(e) then e,
@@ -1240,10 +1270,17 @@ given CstParser {
 
         // Invalid primary token
         let got = self.peek()
-        if not self.is_eof() then {
-            let _ = self.eat()
+        when got is {
+            .RParen or .RBracket or .RBrace or .Comma or .Semi then {
+                return .Error(ref "Parse error: expected primary expression, got '\(got.to_string())' at token #\(self.pos.to_string())")
+            },
+            _ then {},
         }
-        return .Error(ref "Parse error: expected primary expression, got '\(got.to_string())'")
+        if not self.is_eof() then {
+            let bad = self.eat()
+            return .Ok(.Ident(bad))
+        }
+        return .Error(ref "Parse error: expected primary expression, got '\(got.to_string())' at token #\(self.pos.to_string())")
     }
 
     // ========================================================================
@@ -1266,7 +1303,20 @@ given CstParser {
             self.skip_newlines()
             if self.check(.RBrace()) or self.is_eof() then { break }
             if self.peek() is .LineComment(_) or .BlockComment(_) then {
-                items.push(ref .Comment(self.eat()))
+                let c = self.eat()
+                let prev_is_code = {
+                    if items.count() > 0 then {
+                        let prev = deref items[items.count() - 1]
+                        when prev is { .Decl(_) or .Stmt(_) then true, _ then false }
+                    } else {
+                        false
+                    }
+                }
+                if nl_count == 0 and prev_is_code then {
+                    items.push(ref .TrailingComment(c))
+                } else {
+                    items.push(ref .Comment(c))
+                }
                 continue
             }
             when self.parse_block_item() is {
@@ -1309,19 +1359,32 @@ given CstParser {
             .None then { self.pos = saved },
         }
         // Parenthesized expression
-        when self.expect(.LParen(), "'('") is {
-            .Ok(_) then {},
+        let lp = when self.expect(.LParen(), "'('") is {
+            .Ok(t) then t,
             .Error(e) then { return .Error(e) },
+        }
+        if self.check(.RParen()) then {
+            when self.expect(.RParen(), "')'") is {
+                .Ok(_) then {},
+                .Error(e) then { return .Error(e) },
+            }
+            return .Ok(.Ident(.Ident("()")))
         }
         let inner = when self.parse_expr_node() is {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
-        when self.expect(.RParen(), "')'") is {
-            .Ok(_) then {},
+        let rp = when self.expect(.RParen(), "')'") is {
+            .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        return .Ok(inner)
+
+        // Keep one paren layer for readability, but collapse duplicate nesting:
+        // ((x)) -> (x)
+        when inner is {
+            .Paren(_, nested, _) then { return .Ok(.Paren(lp, nested, rp)) },
+            _ then { return .Ok(.Paren(lp, ref inner, rp)) },
+        }
     }
 
     private try_parse_lambda(self ref) [CstExpr]Option = {
@@ -1807,10 +1870,12 @@ given CstParser {
             },
             .KwBreak then {
                 let kw = self.eat()
+                if self.peek() is .Semi then { self.eat() }
                 return .Ok(.Break(kw))
             },
             .KwContinue then {
                 let kw = self.eat()
+                if self.peek() is .Semi then { self.eat() }
                 return .Ok(.Continue(kw))
             },
             _ then {},
@@ -1835,8 +1900,9 @@ given CstParser {
             _ then {},
         }
         // Eat optional semicolon
-        if self.peek() is .Semi then { self.eat() }
-        return .Ok(.ExprStmt(ref expr))
+        let mut semi = [Token]Option.None()
+        if self.peek() is .Semi then { semi = .Some(self.eat()) }
+        return .Ok(.ExprStmt(ref expr, semi))
     }
 
     private parse_var_decl_stmt(self ref) [CstStmt]Result = {
@@ -1905,8 +1971,25 @@ given CstParser {
             }
             self.skip_newlines()
             if self.is_eof() then { break }
+            if self.check(.Semi()) then {
+                self.eat()
+                continue
+            }
             if self.peek() is .LineComment(_) or .BlockComment(_) then {
-                items.push(ref .Comment(self.eat()))
+                let c = self.eat()
+                let prev_is_code = {
+                    if items.count() > 0 then {
+                        let prev = deref items[items.count() - 1]
+                        when prev is { .Decl(_) or .Stmt(_) then true, _ then false }
+                    } else {
+                        false
+                    }
+                }
+                if nl_count == 0 and prev_is_code then {
+                    items.push(ref .TrailingComment(c))
+                } else {
+                    items.push(ref .Comment(c))
+                }
                 continue
             }
             let before = self.pos
@@ -2028,12 +2111,13 @@ given CstParser {
         if self.check(.KwMut()) then {
             mut_kw = .Some(self.eat())
         }
-        self.finish_func_or_var(vis, mods, .Some(let_kw), mut_kw)
+        self.finish_func_or_var(vis, mods, .Some(let_kw), mut_kw, false)
     }
 
     private finish_func_or_var(self ref,
         vis [Token]Option, mods [Token]List,
-        let_kw [Token]Option, mut_kw [Token]Option
+        let_kw [Token]Option, mut_kw [Token]Option,
+        in_member_context Bool
     ) [CstDecl]Result = {
         let gp = when self.parse_generic_params() is {
             .Ok(g) then g,
@@ -2112,6 +2196,16 @@ given CstParser {
                 lp, params, rp, ret))
         }
 
+        // In trait/given member context, signature-style declarations without
+        // body are method signatures, not variable declarations.
+        if in_member_context then {
+            if lp is .Some(_) then {
+                return .Ok(.ForeignDecl(vis, mods, let_kw, mut_kw, gp, .Some(name),
+                    lp, params, rp, ret))
+            }
+            return .Error(ref self.expected_error("member signature"))
+        }
+
         // Variable declaration (top-level)
         let lk = when let_kw is {
             .Some(k) then k,
@@ -2186,19 +2280,31 @@ given CstParser {
                 self.skip_newlines()
                 if self.check(.RBrace()) or self.is_eof() then { break }
                 if self.peek() is .LineComment(_) or .BlockComment(_) then {
-                    cases.push(ref .Comment(self.eat()))
+                    let c = self.eat()
+                    let prev_is_code = {
+                        if cases.count() > 0 then {
+                            let prev = deref cases[cases.count() - 1]
+                            when prev is { .Decl(_) or .Stmt(_) then true, _ then false }
+                        } else {
+                            false
+                        }
+                    }
+                    if nl_count == 0 and prev_is_code then {
+                        cases.push(ref .TrailingComment(c))
+                    } else {
+                        cases.push(ref .Comment(c))
+                    }
                     continue
                 }
-                let expr = when self.parse_expr_node() is {
+                let expr = when self.parse_union_variant_expr() is {
                     .Ok(e) then e,
                     .Error(e) then { return .Error(e) },
                 }
-                let comma = self.eat_comma()
-                when comma is {
-                    .Some(_) then {},
-                    .None then {},
+                when self.expect(.Comma(), "','") is {
+                    .Ok(_) then {},
+                    .Error(e) then { return .Error(e) },
                 }
-                let s = CstStmt.ExprStmt(ref expr)
+                let s = CstStmt.ExprStmt(ref expr, .None())
                 cases.push(ref .Stmt(ref s))
             }
             let rb = when self.expect(.RBrace(), "'}'") is {
@@ -2225,6 +2331,39 @@ given CstParser {
 
         // Empty (foreign type)
         return .Ok(.Type(vis, mods, kw, gp, name, ref .Empty()))
+    }
+
+    private parse_union_variant_expr(self ref) [CstExpr]Result = {
+        let name = when self.expect_ident("union variant name") is {
+            .Ok(t) then t,
+            .Error(e) then { return .Error(e) },
+        }
+
+        let mut lp = [Token]Option.None()
+        let mut fields = [CstUnionField]List.new()
+        let mut rp = [Token]Option.None()
+
+        if self.check(.LParen()) then {
+            lp = .Some(self.eat())
+            while not self.check(.RParen()) and not self.is_eof() then {
+                let field_name = when self.expect_ident("union field name") is {
+                    .Ok(t) then t,
+                    .Error(e) then { return .Error(e) },
+                }
+                let field_type = when self.parse_type_node() is {
+                    .Ok(t) then t,
+                    .Error(e) then { return .Error(e) },
+                }
+                let comma = self.eat_comma()
+                fields.push(CstUnionField(field_name, ref field_type, comma))
+            }
+            rp = .Some(when self.expect(.RParen(), "')'") is {
+                .Ok(t) then t,
+                .Error(e) then { return .Error(e) },
+            })
+        }
+
+        return .Ok(.UnionVariant(name, lp, fields, rp))
     }
 
     // ========================================================================
@@ -2287,8 +2426,25 @@ given CstParser {
             }
             self.skip_newlines()
             if self.check(.RBrace()) or self.is_eof() then { break }
+            if self.check(.Semi()) then {
+                self.eat()
+                continue
+            }
             if self.peek() is .LineComment(_) or .BlockComment(_) then {
-                members.push(ref .Comment(self.eat()))
+                let c = self.eat()
+                let prev_is_code = {
+                    if members.count() > 0 then {
+                        let prev = deref members[members.count() - 1]
+                        when prev is { .Decl(_) or .Stmt(_) then true, _ then false }
+                    } else {
+                        false
+                    }
+                }
+                if nl_count == 0 and prev_is_code then {
+                    members.push(ref .TrailingComment(c))
+                } else {
+                    members.push(ref .Comment(c))
+                }
                 continue
             }
             when self.parse_trait_method_sig() is {
@@ -2410,8 +2566,25 @@ given CstParser {
             }
             self.skip_newlines()
             if self.check(.RBrace()) or self.is_eof() then { break }
+            if self.check(.Semi()) then {
+                self.eat()
+                continue
+            }
             if self.peek() is .LineComment(_) or .BlockComment(_) then {
-                members.push(ref .Comment(self.eat()))
+                let c = self.eat()
+                let prev_is_code = {
+                    if members.count() > 0 then {
+                        let prev = deref members[members.count() - 1]
+                        when prev is { .Decl(_) or .Stmt(_) then true, _ then false }
+                    } else {
+                        false
+                    }
+                }
+                if nl_count == 0 and prev_is_code then {
+                    members.push(ref .TrailingComment(c))
+                } else {
+                    members.push(ref .Comment(c))
+                }
                 continue
             }
             // Determine if this is a let-decl or a method without let
@@ -2443,6 +2616,6 @@ given CstParser {
         let vis = self.eat_vis()
         let mods = self.eat_modifiers()
         // Generic params and name are handled by finish_func_or_var
-        self.finish_func_or_var(vis, mods, .None(), .None())
+        self.finish_func_or_var(vis, mods, .None(), .None(), true)
     }
 }

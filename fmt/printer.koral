@@ -95,6 +95,10 @@ given Printer {
             let mut j UInt = 0
             while j < p.constraints.count() then {
                 self.write_space()
+                if j > 0 then {
+                    self.write("and")
+                    self.write_space()
+                }
                 self.print_type(deref p.constraints[j])
                 j += 1
             }
@@ -194,6 +198,15 @@ given Printer {
         .Ident(t) then self.write_token(t),
         .SelfExpr(t) then self.write_token(t),
         .UnderscoreExpr(t) then self.write_token(t),
+        .Commented(comments, inner) then {
+            let mut i UInt = 0
+            while i < comments.count() then {
+                self.write_token(comments[i])
+                self.write_newline()
+                i += 1
+            }
+            self.print_expr(deref inner)
+        },
 
         .BinaryOp(left, op, right) then {
             self.print_expr(deref left)
@@ -225,6 +238,15 @@ given Printer {
             self.print_type(deref cast_type)
             self.write_token(rp)
             self.print_expr(deref operand)
+        },
+        .Paren(lp, inner, rp) then {
+            let mut core = deref inner
+            while core is .Paren(_, nested, _) then {
+                core = deref nested
+            }
+            self.write_token(lp)
+            self.print_expr(core)
+            self.write_token(rp)
         },
 
         .FieldAccess(base, dot, field) then {
@@ -378,6 +400,22 @@ given Printer {
             self.write_space()
             self.print_expr(deref body)
         },
+        .UnionVariant(name, lp, fields, rp) then {
+            self.write_token(name)
+            if lp is .Some(l) then {
+                self.write_token(l)
+                let mut i UInt = 0
+                while i < fields.count() then {
+                    let f = fields[i]
+                    self.write_token(f.name)
+                    self.write_space()
+                    self.print_type(deref f.field_type)
+                    if f.comma is .Some(c) then { self.write_token(c); self.write_space() }
+                    i += 1
+                }
+                if rp is .Some(r) then { self.write_token(r) }
+            }
+        },
     }
 
     private print_call_args(self ref, args [CstCallArg]List) Void = {
@@ -400,18 +438,72 @@ given Printer {
             self.write_token(rb)
             return
         }
+        self.print_block_items_multiline(items, rb)
+    }
+
+    private print_block_multiline(self ref, lb Token, items [CstItem ref]List, rb Token) Void = {
+        self.write_token(lb)
+        if items.count() == 0 then {
+            self.write_token(rb)
+            return
+        }
+        self.print_block_items_multiline(items, rb)
+    }
+
+    private print_block_items_multiline(self ref, items [CstItem ref]List, rb Token) Void = {
         self.write_newline()
         self.indent += 1
         let mut i UInt = 0
         while i < items.count() then {
             let item = deref items[i]
             if item is .BlankLine then {
+                let mut prev_is_comment = false
+                if i > 0 then {
+                    let mut p UInt = i
+                    while p > 0 then {
+                        p -= 1
+                        let prev = deref items[p]
+                        when prev is {
+                            .BlankLine then { continue },
+                            .Comment(_) or .TrailingComment(_) then { prev_is_comment = true },
+                            _ then {},
+                        }
+                        break
+                    }
+                }
+
+                let mut next_is_code = false
+                let mut j UInt = i + 1
+                while j < items.count() then {
+                    let next = deref items[j]
+                    when next is {
+                        .BlankLine then { j += 1; continue },
+                        .Decl(_) or .Stmt(_) then { next_is_code = true },
+                        _ then {},
+                    }
+                    break
+                }
+
+                if prev_is_comment and next_is_code then {
+                    i += 1
+                    continue
+                }
                 self.write_newline()
                 i += 1
                 continue
             }
             self.print_item(item)
-            if not self.at_line_start then { self.write_newline() }
+            let next_is_trailing = {
+                if i + 1 < items.count() then {
+                    let next = deref items[i + 1]
+                    when next is { .TrailingComment(_) then true, _ then false }
+                } else {
+                    false
+                }
+            }
+            if not next_is_trailing then {
+                if not self.at_line_start then { self.write_newline() }
+            }
             i += 1
         }
         self.indent -= 1
@@ -445,15 +537,45 @@ given Printer {
                 }
             }
         } else {
-            // Non-block then body: inline, else on new line
+            // Non-block then body: prefer inline for short forms
             self.write_space()
             self.print_expr(then_body)
             if else_kw is .Some(ek) then {
-                self.write_newline()
-                self.write_token(ek)
                 if else_body is .Some(eb) then {
-                    self.write_space()
-                    self.print_expr(deref eb)
+                    let eb_expr = deref eb
+                    let else_is_block_like = when eb_expr is {
+                        .Block(_, _, _) or .When(_, _, _, _, _, _) then true,
+                        _ then false,
+                    }
+                    if else_is_block_like then {
+                        self.write_newline()
+                        self.write_token(ek)
+                        self.write_space()
+                        self.print_expr(eb_expr)
+                    } else {
+                        let total_len =
+                            (self.indent * 4) +
+                            kw.to_string().count() + 1 +
+                            self.estimate_expr_length(cond) + 1 +
+                            then_kw.to_string().count() + 1 +
+                            self.estimate_expr_length(then_body) + 1 +
+                            ek.to_string().count() + 1 +
+                            self.estimate_expr_length(eb_expr)
+                        if total_len <= 90 then {
+                            self.write_space()
+                            self.write_token(ek)
+                            self.write_space()
+                            self.print_expr(eb_expr)
+                        } else {
+                            self.write_newline()
+                            self.write_token(ek)
+                            self.write_space()
+                            self.print_expr(eb_expr)
+                        }
+                    }
+                } else {
+                    self.write_newline()
+                    self.write_token(ek)
                 }
             }
         }
@@ -521,7 +643,10 @@ given Printer {
             self.write_space()
             self.print_expr(deref value)
         },
-        .ExprStmt(expr) then self.print_expr(deref expr),
+        .ExprStmt(expr, semi) then {
+            self.print_expr(deref expr)
+            if semi is .Some(s) then { self.write_token(s) }
+        },
         .Return(kw, value) then {
             self.write_token(kw)
             if value is .Some(v) then {
@@ -541,6 +666,10 @@ given Printer {
         .Decl(d) then self.print_decl(deref d),
         .Stmt(s) then self.print_stmt(deref s),
         .Comment(t) then self.write_token(t),
+        .TrailingComment(t) then {
+            if not self.at_line_start then { self.write_space() }
+            self.write_token(t)
+        },
         .BlankLine then {},
     }
 
@@ -648,6 +777,14 @@ given Printer {
         lp [Token]Option, params [CstParam]List, rp [Token]Option,
         ret [CstType ref]Option, eq Token, body CstExpr
     ) Void = {
+        let mut wrap_params = false
+        if lp is .Some(_) then {
+            if params.count() > 0 then {
+                let head_len = self.estimate_head_length(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret)
+                if (self.indent * 4) + head_len > 90 then { wrap_params = true }
+            }
+        }
+
         if vis is .Some(v) then { self.write_token(v); self.write_space() }
         let mut mi UInt = 0
         while mi < mods.count() then { self.write_token(mods[mi]); self.write_space(); mi += 1 }
@@ -657,7 +794,8 @@ given Printer {
         if name is .Some(n) then { self.write_token(n) }
         if lp is .Some(l) then {
             self.write_token(l)
-            self.print_params(params)
+            if wrap_params then { self.print_params_multiline(params) }
+            else { self.print_params(params) }
             if rp is .Some(r) then { self.write_token(r) }
         }
         if ret is .Some(rt) then {
@@ -668,10 +806,18 @@ given Printer {
         self.write_token(eq)
 
         // Block/when/if body: same line
-        if body is .Block(_, _, _) or .When(_, _, _, _, _, _) or .If(_, _, _, _, _, _) then {
-            self.write_space()
-            self.print_expr(body)
-            return
+        when body is {
+            .Block(lb, items, rb) then {
+                self.write_space()
+                self.print_block_multiline(lb, items, rb)
+                return
+            },
+            .When(_, _, _, _, _, _) or .If(_, _, _, _, _, _) then {
+                self.write_space()
+                self.print_expr(body)
+                return
+            },
+            _ then {},
         }
 
         // Simple body: check line length for wrapping
@@ -701,6 +847,14 @@ given Printer {
         lp [Token]Option, params [CstParam]List, rp [Token]Option,
         ret [CstType ref]Option
     ) Void = {
+        let mut wrap_params = false
+        if lp is .Some(_) then {
+            if params.count() > 0 then {
+                let head_len = self.estimate_head_length(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret)
+                if (self.indent * 4) + head_len > 90 then { wrap_params = true }
+            }
+        }
+
         if vis is .Some(v) then { self.write_token(v); self.write_space() }
         let mut mi UInt = 0
         while mi < mods.count() then { self.write_token(mods[mi]); self.write_space(); mi += 1 }
@@ -710,7 +864,8 @@ given Printer {
         if name is .Some(n) then { self.write_token(n) }
         if lp is .Some(l) then {
             self.write_token(l)
-            self.print_params(params)
+            if wrap_params then { self.print_params_multiline(params) }
+            else { self.print_params(params) }
             if rp is .Some(r) then { self.write_token(r) }
         }
         if ret is .Some(rt) then {
@@ -726,21 +881,54 @@ given Printer {
     private print_params(self ref, params [CstParam]List) Void = {
         let mut i UInt = 0
         while i < params.count() then {
-            when params[i] is {
-                .SelfParam(kw, ref_kw, comma) then {
-                    self.write_token(kw)
-                    if ref_kw is .Some(rk) then { self.write_space(); self.write_token(rk) }
-                    if comma is .Some(c) then { self.write_token(c); self.write_space() }
-                },
-                .NamedParam(name, mut_kw, param_type, comma) then {
-                    if mut_kw is .Some(mk) then { self.write_token(mk); self.write_space() }
-                    self.write_token(name)
-                    self.write_space()
-                    self.print_type(deref param_type)
-                    if comma is .Some(c) then { self.write_token(c); self.write_space() }
-                },
-            }
+            self.print_param(params[i])
             i += 1
+        }
+    }
+
+    private print_params_multiline(self ref, params [CstParam]List) Void = {
+        self.write_newline()
+        self.indent += 1
+        let mut i UInt = 0
+        while i < params.count() then {
+            self.print_param_multiline(params[i])
+            if not self.at_line_start then { self.write_newline() }
+            i += 1
+        }
+        self.indent -= 1
+    }
+
+    private print_param_multiline(self ref, param CstParam) Void = {
+        when param is {
+            .SelfParam(kw, ref_kw, _) then {
+                self.write_token(kw)
+                if ref_kw is .Some(rk) then { self.write_space(); self.write_token(rk) }
+                self.write(",")
+            },
+            .NamedParam(name, mut_kw, param_type, _) then {
+                if mut_kw is .Some(mk) then { self.write_token(mk); self.write_space() }
+                self.write_token(name)
+                self.write_space()
+                self.print_type(deref param_type)
+                self.write(",")
+            },
+        }
+    }
+
+    private print_param(self ref, param CstParam) Void = {
+        when param is {
+            .SelfParam(kw, ref_kw, comma) then {
+                self.write_token(kw)
+                if ref_kw is .Some(rk) then { self.write_space(); self.write_token(rk) }
+                if comma is .Some(c) then { self.write_token(c); self.write_space() }
+            },
+            .NamedParam(name, mut_kw, param_type, comma) then {
+                if mut_kw is .Some(mk) then { self.write_token(mk); self.write_space() }
+                self.write_token(name)
+                self.write_space()
+                self.print_type(deref param_type)
+                if comma is .Some(c) then { self.write_token(c); self.write_space() }
+            },
         }
     }
 
@@ -761,23 +949,35 @@ given Printer {
         self.write_token(name)
         when body is {
             .Struct(lp, fields, rp) then {
+                let mut wrap_fields = false
+                if fields.count() > 0 then {
+                    let decl_len = self.estimate_struct_decl_length(vis, mods, kw, gp, name, fields)
+                    if (self.indent * 4) + decl_len > 90 then { wrap_fields = true }
+                }
+
                 self.write_token(lp)
-                let mut i UInt = 0
-                while i < fields.count() then {
-                    let f = fields[i]
-                    if f.access is .Some(a) then { self.write_token(a); self.write_space() }
-                    if f.mut_kw is .Some(mk) then { self.write_token(mk); self.write_space() }
-                    self.write_token(f.name)
-                    self.write_space()
-                    self.print_type(deref f.field_type)
-                    if f.comma is .Some(c) then { self.write_token(c); self.write_space() }
-                    i += 1
+                if wrap_fields then {
+                    self.write_newline()
+                    self.indent += 1
+                    let mut i UInt = 0
+                    while i < fields.count() then {
+                        self.print_struct_field_multiline(fields[i])
+                        if not self.at_line_start then { self.write_newline() }
+                        i += 1
+                    }
+                    self.indent -= 1
+                } else {
+                    let mut i UInt = 0
+                    while i < fields.count() then {
+                        self.print_struct_field(fields[i])
+                        i += 1
+                    }
                 }
                 self.write_token(rp)
             },
             .Union(lb, cases, rb) then {
                 self.write_space()
-                self.print_block(lb, cases, rb)
+                self.print_union_body(lb, cases, rb)
             },
             .Alias(eq, target) then {
                 self.write_space()
@@ -787,6 +987,126 @@ given Printer {
             },
             .Empty then {},
         }
+    }
+
+    private print_struct_field(self ref, f CstStructField) Void = {
+        if f.access is .Some(a) then { self.write_token(a); self.write_space() }
+        if f.mut_kw is .Some(mk) then { self.write_token(mk); self.write_space() }
+        self.write_token(f.name)
+        self.write_space()
+        self.print_type(deref f.field_type)
+        if f.comma is .Some(c) then { self.write_token(c); self.write_space() }
+    }
+
+    private print_struct_field_multiline(self ref, f CstStructField) Void = {
+        if f.access is .Some(a) then { self.write_token(a); self.write_space() }
+        if f.mut_kw is .Some(mk) then { self.write_token(mk); self.write_space() }
+        self.write_token(f.name)
+        self.write_space()
+        self.print_type(deref f.field_type)
+        self.write(",")
+    }
+
+    private print_union_body(self ref, lb Token, cases [CstItem ref]List, rb Token) Void = {
+        self.write_token(lb)
+        if cases.count() == 0 then {
+            self.write_token(rb)
+            return
+        }
+        self.write_newline()
+        self.indent += 1
+        let mut i UInt = 0
+        while i < cases.count() then {
+            let item = deref cases[i]
+            when item is {
+                .BlankLine then {
+                    let prev_is_comment = {
+                        if i > 0 then {
+                            let prev = deref cases[i - 1]
+                            when prev is { .Comment(_) then true, _ then false }
+                        } else {
+                            false
+                        }
+                    }
+                    let next_is_code = {
+                        if i + 1 < cases.count() then {
+                            let next = deref cases[i + 1]
+                            when next is { .Decl(_) or .Stmt(_) then true, _ then false }
+                        } else {
+                            false
+                        }
+                    }
+                    if prev_is_comment and next_is_code then {
+                        i += 1
+                        continue
+                    }
+                    self.write_newline()
+                },
+                .Comment(t) then {
+                    self.write_token(t)
+                    if not self.at_line_start then { self.write_newline() }
+                },
+                .TrailingComment(t) then {
+                    if not self.at_line_start then { self.write_space() }
+                    self.write_token(t)
+                    if not self.at_line_start then { self.write_newline() }
+                },
+                .Stmt(s) then {
+                    let st = deref s
+                    when st is {
+                        .ExprStmt(expr, _) then {
+                            self.print_expr(deref expr)
+                            self.write(",")
+                        },
+                        _ then {
+                            self.print_stmt(st)
+                            self.write(",")
+                        },
+                    }
+                    if i + 1 < cases.count() then {
+                        let next = deref cases[i + 1]
+                        when next is {
+                            .Comment(t) then {
+                                self.write_space()
+                                self.write_token(t)
+                                i += 1
+                            },
+                            .TrailingComment(t) then {
+                                self.write_space()
+                                self.write_token(t)
+                                i += 1
+                            },
+                            _ then {},
+                        }
+                    }
+                    if not self.at_line_start then { self.write_newline() }
+                },
+                .Decl(d) then {
+                    self.print_decl(deref d)
+                    self.write(",")
+                    if i + 1 < cases.count() then {
+                        let next = deref cases[i + 1]
+                        when next is {
+                            .Comment(t) then {
+                                self.write_space()
+                                self.write_token(t)
+                                i += 1
+                            },
+                            .TrailingComment(t) then {
+                                self.write_space()
+                                self.write_token(t)
+                                i += 1
+                            },
+                            _ then {},
+                        }
+                    }
+                    if not self.at_line_start then { self.write_newline() }
+                },
+            }
+            i += 1
+        }
+        self.indent -= 1
+        self.write_token(rb)
     }
 
     // ========================================================================
@@ -826,9 +1146,10 @@ given Printer {
         let mut mi UInt = 0
         while mi < mods.count() then { self.write_token(mods[mi]); self.write_space(); mi += 1 }
         self.write_token(kw)
-        self.write_space()
         if gp is .Some(g) then {
             self.print_generic_params(deref g)
+            self.write_space()
+        } else {
             self.write_space()
         }
         self.print_type(target)
@@ -852,12 +1173,62 @@ given Printer {
         while i < members.count() then {
             let item = deref members[i]
             if item is .BlankLine then {
+                let mut prev_is_comment = false
+                let mut prev_is_simple = false
+                if i > 0 then {
+                    let mut p UInt = i
+                    while p > 0 then {
+                        p -= 1
+                        let prev = deref members[p]
+                        when prev is {
+                            .BlankLine then { continue },
+                            .Comment(_) or .TrailingComment(_) then { prev_is_comment = true },
+                            _ then { prev_is_simple = Printer.is_simple_item(prev) },
+                        }
+                        break
+                    }
+                }
+
+                let mut next_is_code = false
+                let mut next_is_simple = false
+                let mut j UInt = i + 1
+                while j < members.count() then {
+                    let next = deref members[j]
+                    when next is {
+                        .BlankLine then { j += 1; continue },
+                        .Decl(_) or .Stmt(_) then {
+                            next_is_code = true
+                            next_is_simple = Printer.is_simple_item(next)
+                        },
+                        _ then {},
+                    }
+                    break
+                }
+
+                if prev_is_comment and next_is_code then {
+                    i += 1
+                    continue
+                }
+                if prev_is_simple and next_is_simple then {
+                    i += 1
+                    continue
+                }
                 self.write_newline()
                 i += 1
                 continue
             }
             self.print_item(item)
-            if not self.at_line_start then { self.write_newline() }
+            let next_is_trailing = {
+                if i + 1 < members.count() then {
+                    let next = deref members[i + 1]
+                    when next is { .TrailingComment(_) then true, _ then false }
+                } else {
+                    false
+                }
+            }
+            if not next_is_trailing then {
+                if not self.at_line_start then { self.write_newline() }
+            }
 
             // Blank line logic between members
             if i + 1 < members.count() then {
@@ -894,12 +1265,62 @@ given Printer {
         while i < items.count() then {
             let item = deref items[i]
             if item is .BlankLine then {
+                let mut prev_is_comment = false
+                let mut prev_is_simple = false
+                if i > 0 then {
+                    let mut p UInt = i
+                    while p > 0 then {
+                        p -= 1
+                        let prev = deref items[p]
+                        when prev is {
+                            .BlankLine then { continue },
+                            .Comment(_) or .TrailingComment(_) then { prev_is_comment = true },
+                            _ then { prev_is_simple = Printer.is_simple_item(prev) },
+                        }
+                        break
+                    }
+                }
+
+                let mut next_is_code = false
+                let mut next_is_simple = false
+                let mut j UInt = i + 1
+                while j < items.count() then {
+                    let next = deref items[j]
+                    when next is {
+                        .BlankLine then { j += 1; continue },
+                        .Decl(_) or .Stmt(_) then {
+                            next_is_code = true
+                            next_is_simple = Printer.is_simple_item(next)
+                        },
+                        _ then {},
+                    }
+                    break
+                }
+
+                if prev_is_comment and next_is_code then {
+                    i += 1
+                    continue
+                }
+                if prev_is_simple and next_is_simple then {
+                    i += 1
+                    continue
+                }
                 self.write_newline()
                 i += 1
                 continue
             }
             self.print_item(item)
-            if not self.at_line_start then { self.write_newline() }
+            let next_is_trailing = {
+                if i + 1 < items.count() then {
+                    let next = deref items[i + 1]
+                    when next is { .TrailingComment(_) then true, _ then false }
+                } else {
+                    false
+                }
+            }
+            if not next_is_trailing then {
+                if not self.at_line_start then { self.write_newline() }
+            }
 
             if i + 1 < items.count() then {
                 let next = deref items[i + 1]
@@ -932,6 +1353,13 @@ given Printer {
         .Decl(d) then {
             let decl = deref d
             when decl is {
+                .Func(_, _, _, _, _, _, _, _, _, _, _, body) then {
+                    let b = deref body
+                    when b is {
+                        .Block(_, _, _) then false,
+                        _ then true,
+                    }
+                },
                 .Type(_, _, _, _, _, body) then {
                     let b = deref body
                     when b is { .Empty then true, _ then false }
@@ -944,6 +1372,7 @@ given Printer {
                 _ then false,
             }
         },
+        .TrailingComment(_) then false,
         _ then false,
     }
 
@@ -960,10 +1389,21 @@ given Printer {
         .Ident(tok) then tok.to_string().count(),
         .SelfExpr(tok) then tok.to_string().count(),
         .UnderscoreExpr(tok) then tok.to_string().count(),
+        .Commented(comments, inner) then {
+            let mut sum = self.estimate_expr_length(deref inner)
+            let mut i UInt = 0
+            while i < comments.count() then {
+                sum += comments[i].to_string().count() + 1
+                i += 1
+            }
+            sum
+        },
         .BinaryOp(left, op, right) then
             self.estimate_expr_length(deref left) + 1 + op.to_string().count() + 1 + self.estimate_expr_length(deref right),
         .UnaryMinus(_, operand) then 1 + self.estimate_expr_length(deref operand),
         .NotExpr(_, operand) then 4 + self.estimate_expr_length(deref operand),
+        .Paren(_, inner, _) then 2 + self.estimate_expr_length(deref inner),
+        .Block(_, _, _) then 10,
         .FieldAccess(base, _, field) then
             self.estimate_expr_length(deref base) + 1 + field.to_string().count(),
         .Call(callee, _, args, _) then {
@@ -983,6 +1423,19 @@ given Printer {
                 if i > 0 then { len += 2 }
                 len += self.estimate_type_length(deref type_args[i].inner)
                 i += 1
+            }
+            len
+        },
+        .UnionVariant(name, lp, fields, _) then {
+            let mut len = name.to_string().count()
+            if lp is .Some(_) then {
+                len += 2
+                let mut i UInt = 0
+                while i < fields.count() then {
+                    if i > 0 then { len += 2 }
+                    len += fields[i].name.to_string().count() + 1 + self.estimate_type_length(deref fields[i].field_type)
+                    i += 1
+                }
             }
             len
         },
@@ -1029,6 +1482,7 @@ given Printer {
                 len += p.name.to_string().count()
                 let mut ci UInt = 0
                 while ci < p.constraints.count() then {
+                    if ci > 0 then { len += 5 } // " and "
                     len += 1 + self.estimate_type_length(deref p.constraints[ci])
                     ci += 1
                 }
@@ -1057,6 +1511,47 @@ given Printer {
             }
         }
         if ret is .Some(rt) then { len += 1 + self.estimate_type_length(deref rt) }
+        len
+    }
+
+    private estimate_struct_decl_length(self,
+        vis [Token]Option, mods [Token]List, kw Token,
+        gp [CstGenericParams ref]Option, name Token,
+        fields [CstStructField]List
+    ) UInt = {
+        let mut len UInt = 0
+        if vis is .Some(v) then { len += v.to_string().count() + 1 }
+        let mut mi UInt = 0
+        while mi < mods.count() then { len += mods[mi].to_string().count() + 1; mi += 1 }
+        len += kw.to_string().count() + 1
+        if gp is .Some(g) then {
+            let gv = deref g
+            len += 2
+            let mut gi UInt = 0
+            while gi < gv.params.count() then {
+                let p = gv.params[gi]
+                len += p.name.to_string().count()
+                let mut ci UInt = 0
+                while ci < p.constraints.count() then {
+                    if ci > 0 then { len += 5 } // " and "
+                    len += 1 + self.estimate_type_length(deref p.constraints[ci])
+                    ci += 1
+                }
+                if p.comma is .Some(_) then { len += 2 }
+                gi += 1
+            }
+        }
+        len += name.to_string().count()
+        len += 2
+        let mut i UInt = 0
+        while i < fields.count() then {
+            let f = fields[i]
+            if f.access is .Some(a) then { len += a.to_string().count() + 1 }
+            if f.mut_kw is .Some(mk) then { len += mk.to_string().count() + 1 }
+            len += f.name.to_string().count() + 1 + self.estimate_type_length(deref f.field_type)
+            if f.comma is .Some(_) then { len += 2 }
+            i += 1
+        }
         len
     }
 

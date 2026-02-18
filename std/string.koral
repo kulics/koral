@@ -12,7 +12,9 @@
 public type StringStorage(mut data UInt8 ptr, mut len UInt, mut cap UInt)
 
 given StringStorage {
-    __drop(self ref) = { dealloc_memory(self.data) }
+    __drop(self ref) = {
+        dealloc_memory(self.data)
+    }
 }
 
 // String type with COW semantics
@@ -21,18 +23,21 @@ public type String(mut storage StringStorage ref)
 // Forward declarations for String iterators
 // Wrapper types (provide iterator() method)
 public type StringSplitAsciiWhitespace(source String)
+
 public type StringSplit(source String, sep String)
+
 public type StringLines(source String)
 
 // Iterator types (provide next() method)
 public type StringSplitAsciiWhitespaceIterator(source String, mut index UInt)
+
 public type StringSplitIterator(source String, sep String, mut index UInt)
+
 public type StringLinesIterator(source String, mut index UInt)
 
 // ============================================================================
 // String Methods
 // ============================================================================
-
 given String {
     // Unsafe constructor: does not validate UTF-8
     public from_bytes_unchecked(bytes UInt8 ptr, len UInt) String = {
@@ -55,38 +60,60 @@ given String {
                 continue
             }
             // Continuation byte as leading byte
-            if b0 < 192 then { return false; }
+            if b0 < 192 then {
+                return false
+            }
             // 2-byte sequence
             if b0 < 224 then {
-                if i + 1 >= len then { return false; }
+                if i + 1 >= len then {
+                    return false
+                }
                 let b1 = deptr (bytes + (i + 1))
-                if { b1 & 192 } <> 128 then { return false; }
-                let cp = { { (UInt32)b0 & 31 } << 6 } | { (UInt32)b1 & 63 }
-                if cp < 128 then { return false; }
+                if (b1 & 192) <> 128 then {
+                    return false
+                }
+                let cp = ((UInt32)b0 & 31) << 6 | (UInt32)b1 & 63
+                if cp < 128 then {
+                    return false
+                }
                 i += 2
                 continue
             }
             // 3-byte sequence
             if b0 < 240 then {
-                if i + 2 >= len then { return false; }
+                if i + 2 >= len then {
+                    return false
+                }
                 let b1 = deptr (bytes + (i + 1))
                 let b2 = deptr (bytes + (i + 2))
-                if { b1 & 192 } <> 128 or { b2 & 192 } <> 128 then { return false; }
-                let cp = { { (UInt32)b0 & 15 } << 12 } | { { (UInt32)b1 & 63 } << 6 } | { (UInt32)b2 & 63 }
-                if cp < 2048 then { return false; }
-                if cp >= 55296 and cp <= 57343 then { return false; }
+                if (b1 & 192) <> 128 or (b2 & 192) <> 128 then {
+                    return false
+                }
+                let cp = ((UInt32)b0 & 15) << 12 | ((UInt32)b1 & 63) << 6 | (UInt32)b2 & 63
+                if cp < 2048 then {
+                    return false
+                }
+                if cp >= 55296 and cp <= 57343 then {
+                    return false
+                }
                 i += 3
                 continue
             }
             // 4-byte sequence
             if b0 < 248 then {
-                if i + 3 >= len then { return false; }
+                if i + 3 >= len then {
+                    return false
+                }
                 let b1 = deptr (bytes + (i + 1))
                 let b2 = deptr (bytes + (i + 2))
                 let b3 = deptr (bytes + (i + 3))
-                if { b1 & 192 } <> 128 or { b2 & 192 } <> 128 or { b3 & 192 } <> 128 then { return false; }
-                let cp = { { (UInt32)b0 & 7 } << 18 } | { { (UInt32)b1 & 63 } << 12 } | { { (UInt32)b2 & 63 } << 6 } | { (UInt32)b3 & 63 }
-                if cp < 65536 or cp > 1114111 then { return false; }
+                if (b1 & 192) <> 128 or (b2 & 192) <> 128 or (b3 & 192) <> 128 then {
+                    return false
+                }
+                let cp = ((UInt32)b0 & 7) << 18 | ((UInt32)b1 & 63) << 12 | ((UInt32)b2 & 63) << 6 | (UInt32)b3 & 63
+                if cp < 65536 or cp > 1114111 then {
+                    return false
+                }
                 i += 4
                 continue
             }
@@ -122,7 +149,7 @@ given String {
     }
 
     public new() String = {
-        let cap UInt = 16  // 默认容量
+        let cap UInt = 16 // 默认容量
         let data = [UInt8]alloc_memory(cap)
         init_memory(data, 0)
         let storage = ref StringStorage(data, 0, cap)
@@ -156,9 +183,13 @@ given String {
     }
 
     private ensure_capacity(self ref, min_cap UInt) Void = {
-        if self.storage.cap >= min_cap then { return; }
+        if self.storage.cap >= min_cap then {
+            return
+        }
         let mut new_cap = self.storage.cap * 2
-        if new_cap < min_cap then { new_cap = min_cap; }
+        if new_cap < min_cap then {
+            new_cap = min_cap
+        }
         let new_data = [UInt8]alloc_memory(new_cap)
         copy_memory(new_data, self.storage.data, self.storage.len + 1)
         let new_storage = ref StringStorage(new_data, self.storage.len, new_cap)
@@ -188,7 +219,7 @@ given String {
         self.ensure_capacity(self.storage.len + 2)
         init_memory(self.storage.data + self.storage.len, value)
         self.storage.len = self.storage.len + 1
-        deptr (self.storage.data + self.storage.len) = 0;
+        deptr (self.storage.data + self.storage.len) = 0
     }
 
     public push_string(self ref, other String) Void = {
@@ -198,7 +229,7 @@ given String {
         let dest = self.storage.data + self.storage.len
         copy_memory(dest, other.storage.data, other_len)
         self.storage.len = self.storage.len + other_len
-        deptr (self.storage.data + self.storage.len) = 0;
+        deptr (self.storage.data + self.storage.len) = 0
     }
 
     // Push an Int value directly to the string
@@ -207,30 +238,32 @@ given String {
             self.push('0')
             return
         }
-        
+
         let mut n = value
         let is_negative = n < 0
-        if is_negative then { n = 0 - n; }
-        
+        if is_negative then {
+            n = 0 - n
+        }
+
         let buf = [UInt8]alloc_memory(21)
         let mut pos UInt = 20
         while n > 0 then {
             pos -= 1
-            init_memory(buf + pos, (UInt8){ n % 10 } + '0')
+            init_memory(buf + pos, (UInt8)(n % 10) + '0')
             n = n / 10
         }
-        
+
         if is_negative then {
             pos -= 1
             init_memory(buf + pos, '-')
         }
-        
+
         let mut i = pos
         while i < 20 then {
             self.push(deptr (buf + i))
             i += 1
         }
-        
+
         let mut j = pos
         while j < 20 then {
             deinit_memory(buf + j)
@@ -245,22 +278,22 @@ given String {
             self.push('0')
             return
         }
-        
+
         let mut n = value
         let buf = [UInt8]alloc_memory(21)
         let mut pos UInt = 20
         while n > 0 then {
             pos -= 1
-            init_memory(buf + pos, (UInt8){ n % 10 } + '0')
+            init_memory(buf + pos, (UInt8)(n % 10) + '0')
             n = n / 10
         }
-        
+
         let mut i = pos
         while i < 20 then {
             self.push(deptr (buf + i))
             i += 1
         }
-        
+
         let mut j = pos
         while j < 20 then {
             deinit_memory(buf + j)
@@ -275,21 +308,29 @@ given String {
     }
 
     public starts_with(self, prefix String) Bool = {
-        if prefix.storage.len > self.storage.len then { return false; }
+        if prefix.storage.len > self.storage.len then {
+            return false
+        }
         let mut i UInt = 0
         while i < prefix.storage.len then {
-            if deptr (self.storage.data + i) <> deptr (prefix.storage.data + i) then { return false; }
+            if deptr (self.storage.data + i) <> deptr (prefix.storage.data + i) then {
+                return false
+            }
             i += 1
         }
         true
     }
 
     public ends_with(self, suffix String) Bool = {
-        if suffix.storage.len > self.storage.len then { return false; }
+        if suffix.storage.len > self.storage.len then {
+            return false
+        }
         let offset = self.storage.len - suffix.storage.len
         let mut i UInt = 0
         while i < suffix.storage.len then {
-            if deptr (self.storage.data + (offset + i)) <> deptr (suffix.storage.data + i) then { return false; }
+            if deptr (self.storage.data + (offset + i)) <> deptr (suffix.storage.data + i) then {
+                return false
+            }
             i += 1
         }
         true
@@ -337,13 +378,17 @@ given String {
 
     public trim_ascii_start(self) String = {
         let mut i UInt = 0
-        while i < self.storage.len and String.is_ascii_space(deptr (self.storage.data + i)) then { i += 1; }
+        while i < self.storage.len and String.is_ascii_space(deptr (self.storage.data + i)) then {
+            i += 1
+        }
         self.make_substring(i, self.storage.len - i)
     }
 
     public trim_ascii_end(self) String = {
         let mut end = self.storage.len
-        while end > 0 and String.is_ascii_space(deptr (self.storage.data + (end - 1))) then { end -= 1; }
+        while end > 0 and String.is_ascii_space(deptr (self.storage.data + (end - 1))) then {
+            end -= 1
+        }
         self.make_substring(0, end)
     }
 
@@ -353,11 +398,8 @@ given String {
     }
 
     // Using comparison patterns for case conversion
-    private to_lower_byte(b UInt8) UInt8 =
-        if b is >= 65 and <= 90 then b + 32 else b
-
-    private to_upper_byte(b UInt8) UInt8 =
-        if b is >= 97 and <= 122 then b - 32 else b
+    private to_lower_byte(b UInt8) UInt8 = if b is >= 65 and <= 90 then b + 32 else b
+    private to_upper_byte(b UInt8) UInt8 = if b is >= 97 and <= 122 then b - 32 else b
 
     public to_ascii_lowercase(self) String = {
         let cap = self.storage.len + 1
@@ -388,7 +430,9 @@ given String {
     public is_ascii(self) Bool = {
         let mut i UInt = 0
         while i < self.storage.len then {
-            if deptr (self.storage.data + i) >= 128 then { return false; }
+            if deptr (self.storage.data + i) >= 128 then {
+                return false
+            }
             i += 1
         }
         true
@@ -397,35 +441,44 @@ given String {
     public is_ascii_whitespace(self) Bool = {
         let mut i UInt = 0
         while i < self.storage.len then {
-            if not String.is_ascii_space(deptr (self.storage.data + i)) then { return false; }
+            if not String.is_ascii_space(deptr (self.storage.data + i)) then {
+                return false
+            }
             i += 1
         }
         true
     }
 
     public equals(self, other String) Bool = {
-        if self.storage.len <> other.storage.len then { return false; }
+        if self.storage.len <> other.storage.len then {
+            return false
+        }
         let mut i UInt = 0
         while i < self.storage.len then {
-            if deptr (self.storage.data + i) <> deptr (other.storage.data + i) then { return false; }
+            if deptr (self.storage.data + i) <> deptr (other.storage.data + i) then {
+                return false
+            }
             i += 1
         }
         true
     }
 
     public compare(self, other String) Int = {
-        let min = if self.storage.len < other.storage.len then self.storage.len else other.storage.len
+        let min = if self.storage.len < other.storage.len then self.storage.len
+        else other.storage.len
         let mut i UInt = 0
         while i < min then {
             let a = deptr (self.storage.data + i)
             let b = deptr (other.storage.data + i)
-            if a < b then { return 0 - 1; }
-            if a > b then { return 1; }
+            if a < b then {
+                return 0 - 1
+            }
+            if a > b then {
+                return 1
+            }
             i += 1
         }
-        if self.storage.len < other.storage.len then 0 - 1
-        else if self.storage.len > other.storage.len then 1
-        else 0
+        if self.storage.len < other.storage.len then 0 - 1 else if self.storage.len > other.storage.len then 1 else 0
     }
 
     public hash(self) UInt = {
@@ -449,8 +502,12 @@ given String {
 
     // Concatenation. Uses `push_string` so it can reuse capacity when possible.
     public add(self, other String) String = {
-        if self.is_empty() then { return other; }
-        if other.is_empty() then { return self; }
+        if self.is_empty() then {
+            return other
+        }
+        if other.is_empty() then {
+            return self
+        }
         self.push_string(other)
         self
     }
@@ -462,17 +519,24 @@ given String {
         if start > self.storage.len then {
             panic("find start out of bounds")
         }
-        if pat.storage.len > self.storage.len then { return [UInt]Option.None(); }
+        if pat.storage.len > self.storage.len then {
+            return [UInt]Option.None()
+        }
         let mut i = start
         let max = self.storage.len - pat.storage.len
         while i <= max then {
             let mut j UInt = 0
             let mut ok = true
             while j < pat.storage.len then {
-                if deptr (self.storage.data + (i + j)) <> deptr (pat.storage.data + j) then { ok = false; break; }
+                if deptr (self.storage.data + (i + j)) <> deptr (pat.storage.data + j) then {
+                    ok = false
+                    break
+                }
                 j += 1
             }
-            if ok then { return [UInt]Option.Some(i); }
+            if ok then {
+                return [UInt]Option.Some(i)
+            }
             i += 1
         }
         [UInt]Option.None()
@@ -481,7 +545,9 @@ given String {
     public contains(self, pat String) Bool = self.find_index_from(pat, 0).is_some()
 
     public repeat(self, times UInt) String = {
-        if times == 0 then { return String.zero(); }
+        if times == 0 then {
+            return String.zero()
+        }
         let total = self.storage.len * times
         let cap = total + 1
         let data = [UInt8]alloc_memory(cap)
@@ -531,15 +597,19 @@ given String {
     }
 
     public lines(self) StringLines = StringLines(self)
-
-    public remove_prefix(self, prefix String) String =
-        if self.starts_with(prefix) then { self.make_substring(prefix.storage.len, self.storage.len - prefix.storage.len) } else { self }
+    public remove_prefix(self, prefix String) String = if self.starts_with(prefix) then {
+        self.make_substring(prefix.storage.len, self.storage.len - prefix.storage.len)
+    } else {
+        self
+    }
 
     public remove_suffix(self, suffix String) String = {
         if self.ends_with(suffix) then {
             let remain = self.storage.len - suffix.storage.len
             self.make_substring(0, remain)
-        } else { self }
+        } else {
+            self
+        }
     }
 }
 
@@ -559,8 +629,7 @@ given StringSplit {
 }
 
 given StringLines {
-    public iterator(self) StringLinesIterator =
-        StringLinesIterator(self.source, 0)
+    public iterator(self) StringLinesIterator = StringLinesIterator(self.source, 0)
 }
 
 // Iterator types provide next() method
@@ -568,10 +637,16 @@ given StringSplitAsciiWhitespaceIterator {
     public next(self ref) [String]Option = {
         let len = self.source.count()
         let mut i = self.index
-        while i < len and String.is_ascii_space(self.source[i]) then { i += 1; }
-        if i >= len then { return [String]Option.None(); }
+        while i < len and String.is_ascii_space(self.source[i]) then {
+            i += 1
+        }
+        if i >= len then {
+            return [String]Option.None()
+        }
         let start = i
-        while i < len and not String.is_ascii_space(self.source[i]) then { i += 1; }
+        while i < len and not String.is_ascii_space(self.source[i]) then {
+            i += 1
+        }
         let part = self.source.make_substring(start, i - start)
         self.index = i
         [String]Option.Some(part)
@@ -581,7 +656,9 @@ given StringSplitAsciiWhitespaceIterator {
 given StringSplitIterator {
     public next(self ref) [String]Option = {
         let len = self.source.count()
-        if self.index > len then { return [String]Option.None() }
+        if self.index > len then {
+            return [String]Option.None()
+        }
         when self.source.find_index_from(self.sep, self.index) is {
             .Some(i) then {
                 let part = self.source.make_substring(self.index, i - self.index)
@@ -600,7 +677,9 @@ given StringSplitIterator {
 given StringLinesIterator {
     public next(self ref) [String]Option = {
         let len = self.source.count()
-        if self.index > len then { return [String]Option.None() }
+        if self.index > len then {
+            return [String]Option.None()
+        }
         if self.index == len then {
             self.index = len + 1
             return [String]Option.None()
@@ -623,37 +702,38 @@ given StringLinesIterator {
 // ============================================================================
 // Additional String Methods
 // ============================================================================
-
 given String {
     // Push a Float64 value directly to the string
     public push_float64(self ref, value Float64) Void = {
         // Handle special cases
         let bits = value.to_bits()
-        let exp = { bits >> 52 } & (UInt64)2047
+        let exp = (bits >> 52) & (UInt64)2047
         let mantissa = bits & (UInt64)4503599627370495
         if exp == (UInt64)2047 then {
             if mantissa <> (UInt64)0 then {
                 self.push_string("NaN")
                 return
             }
-            if { bits >> 63 } == (UInt64)1 then {
+            if (bits >> 63) == (UInt64)1 then {
                 self.push_string("-Inf")
                 return
             }
             self.push_string("Inf")
             return
         }
-        
-        let is_negative = { bits >> 63 } == (UInt64)1
+
+        let is_negative = (bits >> 63) == (UInt64)1
         let mut f = if is_negative then 0.0 - value else value
-        
+
         let int_part = (Int)f
         let frac_part = f - (Float64)int_part
-        
-        if is_negative then { self.push('-'); }
+
+        if is_negative then {
+            self.push('-');
+        }
         self.push_int(int_part)
         self.push('.')
-        
+
         let mut frac = frac_part
         let mut digits = 0
         while digits < 6 then {
@@ -700,38 +780,40 @@ given String {
     }
 }
 
-
 // ============================================================================
 // Primitive ToString Implementations
 // ============================================================================
-
 given Bool {
     public to_string(self) String = if self then "true" else "false"
 }
 
 given Int {
     public to_string(self) String = {
-        if self == 0 then { return "0"; }
-    
+        if self == 0 then {
+            return "0"
+        }
+
         let mut n = self
         let is_negative = n < 0
-        if is_negative then { n = 0 - n; }
-    
+        if is_negative then {
+            n = 0 - n
+        }
+
         // Extract digits in reverse order into buffer
         let buf = [UInt8]alloc_memory(21)
         let mut pos UInt = 20
         init_memory(buf + pos, 0)
         while n > 0 then {
             pos -= 1
-            init_memory(buf + pos, (UInt8){ n % 10 } + '0')
+            init_memory(buf + pos, (UInt8)(n % 10) + '0')
             n = n / 10
         }
-    
+
         if is_negative then {
             pos -= 1
             init_memory(buf + pos, '-')
         }
-        
+
         let len = 20 - pos
         if pos > 0 then {
             move_memory(buf, buf + pos, len + 1)
@@ -757,21 +839,22 @@ given Int64 {
     public to_string(self) String = ((Int)self).to_string()
 }
 
-
 given UInt {
     public to_string(self) String = {
-        if self == 0 then { return "0"; }
-        
+        if self == 0 then {
+            return "0"
+        }
+
         let mut n = self
         let buf = [UInt8]alloc_memory(21)
         let mut pos UInt = 20
         init_memory(buf + pos, 0)
         while n > 0 then {
             pos -= 1
-            init_memory(buf + pos, (UInt8){ n % 10 } + '0')
+            init_memory(buf + pos, (UInt8)(n % 10) + '0')
             n = n / 10
         }
-    
+
         let len = 20 - pos
         if pos > 0 then {
             move_memory(buf, buf + pos, len + 1)
@@ -797,30 +880,35 @@ given UInt64 {
     public to_string(self) String = ((UInt)self).to_string()
 }
 
-
 given Float32 {
     public to_string(self) String = {
         let bits = self.to_bits()
-        let exp = { bits >> 23 } & 255
+        let exp = (bits >> 23) & 255
         let mantissa = bits & 8388607
         if exp == 255 then {
-            if mantissa <> 0 then { return "NaN"; }
-            if { bits >> 31 } == 1 then { return "-Inf"; }
+            if mantissa <> 0 then {
+                return "NaN"
+            }
+            if (bits >> 31) == 1 then {
+                return "-Inf"
+            }
             return "Inf"
         }
-        
-        let is_negative = { bits >> 31 } == 1
+
+        let is_negative = (bits >> 31) == 1
         let mut f = if is_negative then 0.0 - (Float64)self else (Float64)self
-        
+
         let int_part = (Int)f
         let frac_part = f - (Float64)int_part
-        
+
         let mut result = String.zero()
-        if is_negative then { result.push('-'); }
-        
+        if is_negative then {
+            result.push('-');
+        }
+
         result.push_string(int_part.to_string())
         result.push('.')
-        
+
         let mut frac = frac_part
         let mut digits = 0
         while digits < 6 then {
@@ -830,35 +918,40 @@ given Float32 {
             frac = frac - (Float64)d
             digits += 1
         }
-        
+
         result
     }
 }
-
 
 given Float64 {
     public to_string(self) String = {
         let bits = self.to_bits()
-        let exp = { bits >> 52 } & 2047
+        let exp = (bits >> 52) & 2047
         let mantissa = bits & 4503599627370495
         if exp == 2047 then {
-            if mantissa <> 0 then { return "NaN"; }
-            if { bits >> 63 } == 1 then { return "-Inf"; }
+            if mantissa <> 0 then {
+                return "NaN"
+            }
+            if (bits >> 63) == 1 then {
+                return "-Inf"
+            }
             return "Inf"
         }
-        
-        let is_negative = { bits >> 63 } == 1
+
+        let is_negative = (bits >> 63) == 1
         let mut f = if is_negative then 0.0 - self else self
-        
+
         let int_part = (Int)f
         let frac_part = f - (Float64)int_part
-        
+
         let mut result = String.zero()
-        if is_negative then { result.push('-'); }
+        if is_negative then {
+            result.push('-');
+        }
 
         result.push_string(int_part.to_string())
         result.push('.')
-        
+
         let mut frac = frac_part
         let mut digits = 0
         while digits < 6 then {
@@ -868,17 +961,15 @@ given Float64 {
             frac = frac - (Float64)d
             digits += 1
         }
-        
+
         result
     }
 }
 
-
 // ============================================================================
 // Option ToString Implementation
 // ============================================================================
-
-given [T ToString] [T]Option {
+given[T ToString] [T]Option {
     public to_string(self) String = when self is {
         .Some(v) then {
             let mut result = String.zero()
@@ -890,7 +981,6 @@ given [T ToString] [T]Option {
         .None then "None",
     }
 }
-
 
 // ============================================================================
 // Rune Iterator Types
@@ -906,7 +996,6 @@ given Runes {
     public iterator(self) RunesIterator = RunesIterator(self.source, 0)
 }
 
-
 given RunesIterator {
     // Decode next UTF-8 sequence and return Rune
     public next(self ref) [Rune]Option = {
@@ -914,21 +1003,21 @@ given RunesIterator {
         if self.byte_index >= len then {
             return [Rune]Option.None()
         }
-        
+
         let b0 = self.source[self.byte_index]
-        
+
         // 1-byte sequence (ASCII): 0xxxxxxx
         if b0 < 128 then {
             self.byte_index = self.byte_index + 1
             return [Rune]Option.Some(Rune((UInt32)b0))
         }
-        
+
         // Invalid: continuation byte as first byte
         if b0 < 192 then {
             self.byte_index = self.byte_index + 1
             return [Rune]Option.Some(Rune.replacement_char())
         }
-        
+
         // 2-byte sequence: 110xxxxx 10xxxxxx
         if b0 < 224 then {
             if self.byte_index + 1 >= len then {
@@ -936,11 +1025,11 @@ given RunesIterator {
                 return [Rune]Option.Some(Rune.replacement_char())
             }
             let b1 = self.source[self.byte_index + 1]
-            if { b1 & 192 } <> 128 then {
+            if (b1 & 192) <> 128 then {
                 self.byte_index = self.byte_index + 1
                 return [Rune]Option.Some(Rune.replacement_char())
             }
-            let cp = { { (UInt32)b0 & 31 } << 6 } | { (UInt32)b1 & 63 }
+            let cp = ((UInt32)b0 & 31) << 6 | (UInt32)b1 & 63
             // Check for overlong encoding
             if cp < 128 then {
                 self.byte_index = self.byte_index + 2
@@ -949,7 +1038,7 @@ given RunesIterator {
             self.byte_index = self.byte_index + 2
             return [Rune]Option.Some(Rune(cp))
         }
-        
+
         // 3-byte sequence: 1110xxxx 10xxxxxx 10xxxxxx
         if b0 < 240 then {
             if self.byte_index + 2 >= len then {
@@ -958,11 +1047,11 @@ given RunesIterator {
             }
             let b1 = self.source[self.byte_index + 1]
             let b2 = self.source[self.byte_index + 2]
-            if { b1 & 192 } <> 128 or { b2 & 192 } <> 128 then {
+            if (b1 & 192) <> 128 or (b2 & 192) <> 128 then {
                 self.byte_index = self.byte_index + 1
                 return [Rune]Option.Some(Rune.replacement_char())
             }
-            let cp = { { (UInt32)b0 & 15 } << 12 } | { { (UInt32)b1 & 63 } << 6 } | { (UInt32)b2 & 63 }
+            let cp = ((UInt32)b0 & 15) << 12 | ((UInt32)b1 & 63) << 6 | (UInt32)b2 & 63
             // Check for overlong encoding or surrogate
             if cp < 2048 or (cp >= 55296 and cp <= 57343) then {
                 self.byte_index = self.byte_index + 3
@@ -971,7 +1060,7 @@ given RunesIterator {
             self.byte_index = self.byte_index + 3
             return [Rune]Option.Some(Rune(cp))
         }
-        
+
         // 4-byte sequence: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
         if b0 < 248 then {
             if self.byte_index + 3 >= len then {
@@ -981,11 +1070,11 @@ given RunesIterator {
             let b1 = self.source[self.byte_index + 1]
             let b2 = self.source[self.byte_index + 2]
             let b3 = self.source[self.byte_index + 3]
-            if { b1 & 192 } <> 128 or { b2 & 192 } <> 128 or { b3 & 192 } <> 128 then {
+            if (b1 & 192) <> 128 or (b2 & 192) <> 128 or (b3 & 192) <> 128 then {
                 self.byte_index = self.byte_index + 1
                 return [Rune]Option.Some(Rune.replacement_char())
             }
-            let cp = { { (UInt32)b0 & 7 } << 18 } | { { (UInt32)b1 & 63 } << 12 } | { { (UInt32)b2 & 63 } << 6 } | { (UInt32)b3 & 63 }
+            let cp = ((UInt32)b0 & 7) << 18 | ((UInt32)b1 & 63) << 12 | ((UInt32)b2 & 63) << 6 | (UInt32)b3 & 63
             // Check for overlong encoding or out of range
             if cp < 65536 or cp > 1114111 then {
                 self.byte_index = self.byte_index + 4
@@ -994,18 +1083,16 @@ given RunesIterator {
             self.byte_index = self.byte_index + 4
             return [Rune]Option.Some(Rune(cp))
         }
-        
+
         // Invalid first byte
         self.byte_index = self.byte_index + 1
         [Rune]Option.Some(Rune.replacement_char())
     }
 }
 
-
 // ============================================================================
 // String Rune Methods
 // ============================================================================
-
 given String {
     // Return Runes wrapper for iterating over Unicode code points
     public runes(self) Runes = Runes(self)
@@ -1023,41 +1110,41 @@ given String {
     // Append a rune to the string (encodes as UTF-8)
     public push_rune(self ref, rune Rune) Void = {
         let cp = rune.value
-        
+
         // Handle invalid code points - append replacement character
         if not rune.is_valid() then {
-            self.push((UInt8)239)   // 0xEF
-            self.push((UInt8)191)   // 0xBF
-            self.push((UInt8)189)   // 0xBD
+            self.push((UInt8)239) // 0xEF
+            self.push((UInt8)191) // 0xBF
+            self.push((UInt8)189) // 0xBD
             return
         }
-        
+
         // 1-byte sequence (ASCII)
         if cp < (UInt32)128 then {
             self.push((UInt8)cp)
             return
         }
-        
+
         // 2-byte sequence
         if cp < (UInt32)2048 then {
-            self.push((UInt8){ cp >> 6 } | (UInt8)192)
-            self.push((UInt8){ cp & (UInt32)63 } | (UInt8)128)
+            self.push((UInt8)(cp >> 6) | (UInt8)192)
+            self.push((UInt8)(cp & (UInt32)63) | (UInt8)128)
             return
         }
-        
+
         // 3-byte sequence
         if cp < (UInt32)65536 then {
-            self.push((UInt8){ cp >> 12 } | (UInt8)224)
-            self.push((UInt8){ { cp >> 6 } & (UInt32)63 } | (UInt8)128)
-            self.push((UInt8){ cp & (UInt32)63 } | (UInt8)128)
+            self.push((UInt8)(cp >> 12) | (UInt8)224)
+            self.push((UInt8)((cp >> 6) & (UInt32)63) | (UInt8)128)
+            self.push((UInt8)(cp & (UInt32)63) | (UInt8)128)
             return
         }
-        
+
         // 4-byte sequence
-        self.push((UInt8){ cp >> 18 } | (UInt8)240)
-        self.push((UInt8){ { cp >> 12 } & (UInt32)63 } | (UInt8)128)
-        self.push((UInt8){ { cp >> 6 } & (UInt32)63 } | (UInt8)128)
-        self.push((UInt8){ cp & (UInt32)63 } | (UInt8)128)
+        self.push((UInt8)(cp >> 18) | (UInt8)240)
+        self.push((UInt8)((cp >> 12) & (UInt32)63) | (UInt8)128)
+        self.push((UInt8)((cp >> 6) & (UInt32)63) | (UInt8)128)
+        self.push((UInt8)(cp & (UInt32)63) | (UInt8)128)
     }
 }
 
@@ -1066,7 +1153,9 @@ public let join_strings(parts [String]List, separator String) String = {
     let mut result = String.new()
     let mut first = true
     for part = parts then {
-        if not first then { result.push_string(separator) }
+        if not first then {
+            result.push_string(separator)
+        }
         result.push_string(part)
         first = false
     }

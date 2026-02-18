@@ -80,28 +80,92 @@ let main() Void = {
 // File Operations
 // ============================================================================
 
-let format_file(path String) [Void]Result =
-    when read_file(path) is {
-        .Ok(source) then {
-            when format_source(source) is {
-                .Ok(formatted) then write_file(path, formatted),
-                .Error(e) then .Error(e),
-            }
-        },
-        .Error(e) then .Error(e),
+let format_file(path String) [Void]Result = {
+    let source = read_file(path) or else { return [Void]Result.Error(_) }
+    let normalized = normalize_newlines(source)
+    let formatted = safe_format_source(normalized) or else { return [Void]Result.Error(_) }
+
+    if formatted == source then {
+        [Void]Result.Ok({})
+    } else {
+        write_file(path, formatted)
+    }
+}
+
+let check_file(path String) [Bool]Result = {
+    let source = read_file(path) or else { return [Bool]Result.Error(_) }
+    let normalized = normalize_newlines(source)
+    let formatted = safe_format_source(normalized) or else { return [Bool]Result.Error(_) }
+    return [Bool]Result.Ok(formatted == normalized)
+}
+
+let safe_format_source(source String) [String]Result = {
+    let first_pass = format_source(source) or else { return [String]Result.Error(_) }
+    let before_sig = comment_signature(source) or else { return [String]Result.Error(_) }
+    let after_sig = comment_signature(first_pass) or else { return [String]Result.Error(_) }
+
+    if before_sig <> after_sig then {
+        return .Error(ref "Formatter internal error: comment signature changed after formatting")
     }
 
-let check_file(path String) [Bool]Result =
-    when read_file(path) is {
-        .Ok(source) then {
-            let normalized = source.replace_all("\r\n", "\n")
-            when format_source(normalized) is {
-                .Ok(formatted) then .Ok(formatted == normalized),
-                .Error(e) then .Error(e),
+    let second_pass = format_source(first_pass) or else { return [String]Result.Error(_) }
+    if first_pass == second_pass then { .Ok(first_pass) }
+    else { .Error(ref "Formatter internal error: formatting is not idempotent") }
+}
+
+let normalize_newlines(source String) String = {
+    if not source.contains("\r") then {
+        return source
+    }
+
+    let runes = source.to_runes()
+    let mut out = String.new()
+    let mut i UInt = 0
+
+    while i < runes.count() then {
+        let r = runes[i]
+        if r == '\r' then {
+            out.push('\n')
+            if i + 1 < runes.count() and runes[i + 1] == '\n' then {
+                i += 2
+            } else {
+                i += 1
             }
+            continue
+        }
+
+        out.push_string(r.to_string())
+        i += 1
+    }
+
+    out
+}
+
+let comment_signature(source String) [String]Result = {
+    let mut tokenizer = Tokenizer.new(source)
+    when tokenizer.tokenize() is {
+        .Ok(tokens) then {
+            let mut out = String.new()
+            let mut i UInt = 0
+            while i < tokens.count() then {
+                when tokens[i] is {
+                    .LineComment(text) then {
+                        out.push_string(text)
+                        out.push_string("\n@@\n")
+                    },
+                    .BlockComment(text) then {
+                        out.push_string(text)
+                        out.push_string("\n@@\n")
+                    },
+                    _ then {},
+                }
+                i += 1
+            }
+            return .Ok(out)
         },
         .Error(e) then .Error(e),
     }
+}
 
 // ============================================================================
 // Usage

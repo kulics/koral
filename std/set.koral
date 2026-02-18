@@ -7,7 +7,6 @@
 // ============================================================================
 // Set Storage and Type Definition
 // ============================================================================
-
 public type [T Hashable]SetBucket {
     Empty(),
     Occupied(value T),
@@ -17,7 +16,7 @@ public type [T Hashable]SetBucket {
 public type [T Hashable]SetStorage(
     mut buckets [T]SetBucket ptr,
     mut count UInt,
-    mut capacity UInt
+    mut capacity UInt,
 )
 
 given[T Hashable] [T]SetStorage {
@@ -35,11 +34,9 @@ public type [T Hashable]Set(mut storage [T]SetStorage ref)
 
 public type [T Hashable]SetIterator(storage [T]SetStorage ref, mut index UInt)
 
-
 // ============================================================================
 // Set Methods
 // ============================================================================
-
 given[T Hashable] [T]Set {
     public new() Self = {
         let capacity UInt = 16
@@ -100,15 +97,19 @@ given[T Hashable] [T]Set {
                 },
                 .Deleted then {
                     when first_deleted is {
-                        .None then { first_deleted = [UInt]Option.Some(idx); },
+                        .None then {
+                            first_deleted = [UInt]Option.Some(idx)
+                        },
                         _ then {},
                     }
                 },
                 .Occupied(v) then {
-                    if v == value then { return [UInt]Option.Some(idx); }
+                    if v == value then {
+                        return [UInt]Option.Some(idx)
+                    }
                 },
             }
-            idx = { idx + 1 } % self.storage.capacity
+            idx = (idx + 1) % self.storage.capacity
             probes += 1
         }
         first_deleted
@@ -131,7 +132,9 @@ given[T Hashable] [T]Set {
         while i < old_cap then {
             let bucket = take_memory(old_buckets + i)
             when bucket is {
-                .Occupied(v) then { self.insert(v); },
+                .Occupied(v) then {
+                    self.insert(v);
+                },
                 _ then {},
             }
             i += 1
@@ -139,19 +142,23 @@ given[T Hashable] [T]Set {
         dealloc_memory(old_buckets)
     }
 
-
     // Returns true if value was new, false if already present
     public insert(self ref, value T) Bool = {
         self.ensure_unique()
-        if self.storage.count * 2 >= self.storage.capacity then { self.rehash(); }
+        if self.storage.count * 2 >= self.storage.capacity then {
+            self.rehash();
+        }
         when self.find_slot(value) is {
-            .None then { panic("Set insert failed"); false },
+            .None then {
+                panic("Set insert failed");
+                false
+            },
             .Some(idx) then {
                 let bucket = deptr (self.storage.buckets + idx)
                 when bucket is {
                     .Occupied(_) then false,
                     .Empty or .Deleted then {
-                        deptr (self.storage.buckets + idx) = [T]SetBucket.Occupied(value);
+                        deptr (self.storage.buckets + idx) = [T]SetBucket.Occupied(value)
                         self.storage.count = self.storage.count + 1
                         true
                     },
@@ -162,7 +169,9 @@ given[T Hashable] [T]Set {
 
     public insert_all(self ref, other [T]Set) Void = {
         let mut it = other.iterator()
-        while it.next() is .Some(v) then { self.insert(v); }
+        while it.next() is .Some(v) then {
+            self.insert(v);
+        }
     }
 
     public contains(self, value T) Bool = {
@@ -186,7 +195,7 @@ given[T Hashable] [T]Set {
                 let bucket = deptr (self.storage.buckets + idx)
                 when bucket is {
                     .Occupied(_) then {
-                        deptr (self.storage.buckets + idx) = [T]SetBucket.Deleted();
+                        deptr (self.storage.buckets + idx) = [T]SetBucket.Deleted()
                         self.storage.count = self.storage.count - 1
                         true
                     },
@@ -202,7 +211,7 @@ given[T Hashable] [T]Set {
         self.ensure_unique()
         let mut i UInt = 0
         while i < self.storage.capacity then {
-            deptr (self.storage.buckets + i) = [T]SetBucket.Empty();
+            deptr (self.storage.buckets + i) = [T]SetBucket.Empty()
             i += 1
         }
         self.storage.count = 0
@@ -212,9 +221,13 @@ given[T Hashable] [T]Set {
     public union(self, other [T]Set) [T]Set = {
         let mut result = [T]Set.new()
         let mut it = self.iterator()
-        while it.next() is .Some(v) then { result.insert(v); }
+        while it.next() is .Some(v) then {
+            result.insert(v);
+        }
         let mut it2 = other.iterator()
-        while it2.next() is .Some(v) then { result.insert(v); }
+        while it2.next() is .Some(v) then {
+            result.insert(v);
+        }
         result
     }
 
@@ -222,7 +235,9 @@ given[T Hashable] [T]Set {
         let mut result = [T]Set.new()
         let mut it = self.iterator()
         while it.next() is .Some(v) then {
-            if other.contains(v) then { result.insert(v); }
+            if other.contains(v) then {
+                result.insert(v);
+            }
         }
         result
     }
@@ -231,7 +246,9 @@ given[T Hashable] [T]Set {
         let mut result = [T]Set.new()
         let mut it = self.iterator()
         while it.next() is .Some(v) then {
-            if not other.contains(v) then { result.insert(v); }
+            if not other.contains(v) then {
+                result.insert(v);
+            }
         }
         result
     }
@@ -239,18 +256,18 @@ given[T Hashable] [T]Set {
     public iterator(self) [T]SetIterator = [T]SetIterator(self.storage, 0)
 }
 
-
 // ============================================================================
 // Set Iterator
 // ============================================================================
-
 given[T Hashable] [T]SetIterator {
     public next(self ref) [T]Option = {
         while self.index < self.storage.capacity then {
             let bucket = deptr (self.storage.buckets + self.index)
             self.index = self.index + 1
             when bucket is {
-                .Occupied(v) then { return [T]Option.Some(v); },
+                .Occupied(v) then {
+                    return [T]Option.Some(v)
+                },
                 _ then {},
             }
         }
@@ -261,8 +278,7 @@ given[T Hashable] [T]SetIterator {
 // ============================================================================
 // Set ToString Implementation
 // ============================================================================
-
-given [T ToString and Hashable] [T]Set {
+given[T ToString and Hashable] [T]Set {
     public to_string(self) String = {
         let mut result = String.zero()
         result.push_string("[")
@@ -272,7 +288,9 @@ given [T ToString and Hashable] [T]Set {
             let bucket = deptr (self.storage.buckets + i)
             when bucket is {
                 .Occupied(v) then {
-                    if not first then { result.push_string(", "); }
+                    if not first then {
+                        result.push_string(", ");
+                    }
                     first = false
                     result.push_string(v.to_string())
                 },
@@ -285,22 +303,22 @@ given [T ToString and Hashable] [T]Set {
     }
 }
 
-
 // ============================================================================
 // Set Eager Operations
 // ============================================================================
-
 given[T Hashable] [T]Set {
     // Filter - returns new set with elements matching predicate
     public filter(self, fn [T, Bool]Func) [T]Set = {
         let mut result = [T]Set.new()
         let mut it = self.iterator()
         while it.next() is .Some(v) then {
-            if fn(v) then { result.insert(v); }
+            if fn(v) then {
+                result.insert(v);
+            }
         }
         result
     }
-    
+
     // Map - returns new set with transformed elements (U must be Hashable)
     public [U Hashable]map(self, fn [T, U]Func) [U]Set = {
         let mut result = [U]Set.new()
