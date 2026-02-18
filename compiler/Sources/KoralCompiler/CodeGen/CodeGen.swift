@@ -1019,46 +1019,8 @@ public class CodeGen {
     }
 
     let result = nextTemp()
-    if case .structure(let defId) = body.type {
-      let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-      addIndent()
-      if body.valueCategory == .lvalue {
-        buffer += "\(cTypeName(body.type)) \(result) = __koral_\(typeName)_copy(&\(resultVar));\n"
-      } else {
-        buffer += "\(cTypeName(body.type)) \(result) = \(resultVar);\n"
-      }
-    } else if case .union(let defId) = body.type {
-      let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-      addIndent()
-      if body.valueCategory == .lvalue {
-        buffer += "\(cTypeName(body.type)) \(result) = __koral_\(typeName)_copy(&\(resultVar));\n"
-      } else {
-        buffer += "\(cTypeName(body.type)) \(result) = \(resultVar);\n"
-      }
-    } else if case .reference(_) = body.type {
-      addIndent()
-      buffer += "\(cTypeName(body.type)) \(result) = \(resultVar);\n"
-      if body.valueCategory == .lvalue {
-        addIndent()
-        buffer += "__koral_retain(\(result).control);\n"
-      }
-    } else if case .function = body.type {
-      addIndent()
-      buffer += "\(cTypeName(body.type)) \(result) = \(resultVar);\n"
-      if body.valueCategory == .lvalue {
-        addIndent()
-        buffer += "__koral_closure_retain(\(result));\n"
-      }
-    } else if case .weakReference(_) = body.type {
-      addIndent()
-      buffer += "\(cTypeName(body.type)) \(result) = \(resultVar);\n"
-      if body.valueCategory == .lvalue {
-        addIndent()
-        buffer += "__koral_weak_retain(\(result).control);\n"
-      }
-    } else if body.type != .void {
-      addIndent()
-      buffer += "\(cTypeName(body.type)) \(result) = \(resultVar);\n"
+    if body.type != .void {
+      emitDeclareAndCopyOrMove(type: body.type, source: resultVar, dest: result, isLvalue: body.valueCategory == .lvalue)
     }
     popScope()
 
@@ -1284,47 +1246,7 @@ public class CodeGen {
 
         let bodyResultVar = generateExpressionSSA(body)
 
-        if case .structure(let defId) = type {
-          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-          addIndent()
-          if body.valueCategory == .lvalue {
-            buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(bodyResultVar));\n"
-          } else {
-            buffer += "\(resultVar) = \(bodyResultVar);\n"
-          }
-        } else if case .union(let defId) = type {
-          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-          addIndent()
-          if body.valueCategory == .lvalue {
-            buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(bodyResultVar));\n"
-          } else {
-            buffer += "\(resultVar) = \(bodyResultVar);\n"
-          }
-        } else if case .reference(_) = type {
-          addIndent()
-          buffer += "\(resultVar) = \(bodyResultVar);\n"
-          if body.valueCategory == .lvalue {
-            addIndent()
-            buffer += "__koral_retain(\(resultVar).control);\n"
-          }
-        } else if case .function = type {
-          addIndent()
-          buffer += "\(resultVar) = \(bodyResultVar);\n"
-          if body.valueCategory == .lvalue {
-            addIndent()
-            buffer += "__koral_closure_retain(\(resultVar));\n"
-          }
-        } else if case .weakReference(_) = type {
-          addIndent()
-          buffer += "\(resultVar) = \(bodyResultVar);\n"
-          if body.valueCategory == .lvalue {
-            addIndent()
-            buffer += "__koral_weak_retain(\(resultVar).control);\n"
-          }
-        } else {
-          addIndent()
-          buffer += "\(resultVar) = \(bodyResultVar);\n"
-        }
+        emitCopyOrMove(type: type, source: bodyResultVar, dest: resultVar, isLvalue: body.valueCategory == .lvalue)
 
         popScope()
       }
@@ -1372,48 +1294,7 @@ public class CodeGen {
           pushScope()
           let thenResult = generateExpressionSSA(thenBranch)
           if type != .never && thenBranch.type != .never {
-              addIndent()
-              if case .structure(let defId) = type {
-                let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-                if thenBranch.valueCategory == .lvalue {
-                  switch thenBranch {
-                  default:
-                    buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(thenResult));\n"
-                  }
-                } else {
-                  buffer += "\(resultVar) = \(thenResult);\n"
-                }
-              } else if case .union(let defId) = type {
-                let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-                if thenBranch.valueCategory == .lvalue {
-                  switch thenBranch {
-                  default:
-                    buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(thenResult));\n"
-                  }
-                } else {
-                  buffer += "\(resultVar) = \(thenResult);\n"
-                }
-              } else if case .reference(_) = type {
-                buffer += "\(resultVar) = \(thenResult);\n"
-                if thenBranch.valueCategory == .lvalue {
-                  addIndent()
-                  buffer += "__koral_retain(\(resultVar).control);\n"
-                }
-              } else if case .function = type {
-                buffer += "\(resultVar) = \(thenResult);\n"
-                if thenBranch.valueCategory == .lvalue {
-                  addIndent()
-                  buffer += "__koral_closure_retain(\(resultVar));\n"
-                }
-              } else if case .weakReference(_) = type {
-                buffer += "\(resultVar) = \(thenResult);\n"
-                if thenBranch.valueCategory == .lvalue {
-                  addIndent()
-                  buffer += "__koral_weak_retain(\(resultVar).control);\n"
-                }
-              } else {
-                buffer += "\(resultVar) = \(thenResult);\n"
-              }
+              emitCopyOrMove(type: type, source: thenResult, dest: resultVar, isLvalue: thenBranch.valueCategory == .lvalue)
           }
           popScope()
         }
@@ -1423,48 +1304,7 @@ public class CodeGen {
           pushScope()
           let elseResult = generateExpressionSSA(elseBranch)
           if type != .never && elseBranch.type != .never {
-              addIndent()
-              if case .structure(let defId) = type {
-                let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-                if elseBranch.valueCategory == .lvalue {
-                  switch elseBranch {
-                  default:
-                    buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(elseResult));\n"
-                  }
-                } else {
-                  buffer += "\(resultVar) = \(elseResult);\n"
-                }
-              } else if case .union(let defId) = type {
-                let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-                if elseBranch.valueCategory == .lvalue {
-                  switch elseBranch {
-                  default:
-                    buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(elseResult));\n"
-                  }
-                } else {
-                  buffer += "\(resultVar) = \(elseResult);\n"
-                }
-              } else if case .reference(_) = type {
-                buffer += "\(resultVar) = \(elseResult);\n"
-                if elseBranch.valueCategory == .lvalue {
-                  addIndent()
-                  buffer += "__koral_retain(\(resultVar).control);\n"
-                }
-              } else if case .function = type {
-                buffer += "\(resultVar) = \(elseResult);\n"
-                if elseBranch.valueCategory == .lvalue {
-                  addIndent()
-                  buffer += "__koral_closure_retain(\(resultVar));\n"
-                }
-              } else if case .weakReference(_) = type {
-                buffer += "\(resultVar) = \(elseResult);\n"
-                if elseBranch.valueCategory == .lvalue {
-                  addIndent()
-                  buffer += "__koral_weak_retain(\(resultVar).control);\n"
-                }
-              } else {
-                buffer += "\(resultVar) = \(elseResult);\n"
-              }
+              emitCopyOrMove(type: type, source: elseResult, dest: resultVar, isLvalue: elseBranch.valueCategory == .lvalue)
           }
           popScope()
         }
@@ -1494,47 +1334,12 @@ public class CodeGen {
     case .derefExpression(let inner, let type):
       let innerResult = generateExpressionSSA(inner)
       let result = nextTemp()
+      let cType = cTypeName(type)
       
       addIndent()
-      buffer += "\(cTypeName(type)) \(result);\n"
-      
-      if case .structure(let defId) = type {
-        let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-        // Struct: call copy constructor
-        addIndent()
-        buffer += "\(result) = __koral_\(typeName)_copy((struct \(typeName)*)\(innerResult).ptr);\n"
-      } else if case .union(let defId) = type {
-        let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-        // Union: call copy constructor (same as struct, unions have internal refs that need retain)
-        addIndent()
-        buffer += "\(result) = __koral_\(typeName)_copy((\(cTypeName(type))*)\(innerResult).ptr);\n"
-      } else if case .reference(_) = type {
-        // Reference: copy struct Ref/TraitRef and retain
-        let cType = cTypeName(type)
-        addIndent()
-        buffer += "\(result) = *(\(cType)*)\(innerResult).ptr;\n"
-        addIndent()
-        buffer += "__koral_retain(\(result).control);\n"
-      } else if case .function = type {
-        // Closure: copy and retain
-        let cType = cTypeName(type)
-        addIndent()
-        buffer += "\(result) = *(\(cType)*)\(innerResult).ptr;\n"
-        addIndent()
-        buffer += "__koral_closure_retain(\(result));\n"
-      } else if case .weakReference(_) = type {
-        // WeakReference: copy and retain
-        let cType = cTypeName(type)
-        addIndent()
-        buffer += "\(result) = *(\(cType)*)\(innerResult).ptr;\n"
-        addIndent()
-        buffer += "__koral_weak_retain(\(result).control);\n"
-      } else {
-        // Primitive: direct dereference
-        let cType = cTypeName(type)
-        addIndent()
-        buffer += "\(result) = *(\(cType)*)\(innerResult).ptr;\n"
-      }
+      buffer += "\(cType) \(result);\n"
+      // Always deep copy from the reference's pointee
+      appendCopyAssignment(for: type, source: "*(\(cType)*)\(innerResult).ptr", dest: result, indent: indent)
       return result
 
     case .ptrExpression(let inner, let type):
@@ -1579,28 +1384,8 @@ public class CodeGen {
         addIndent()
         buffer += "\(result).ptr = malloc(sizeof(\(innerCType)));\n"
 
-        // 2. 初始化数据
-        if case .structure(let defId) = innerType {
-          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-          addIndent()
-          if inner.valueCategory == .lvalue {
-            // 对于逃逸的 lvalue，需要复制数据
-            buffer += "*(\(innerCType)*)\(result).ptr = __koral_\(typeName)_copy(&\(innerResult));\n"
-          } else {
-            buffer += "*(\(innerCType)*)\(result).ptr = __koral_\(typeName)_copy(&\(innerResult));\n"
-          }
-        } else if case .union(let defId) = innerType {
-          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-          addIndent()
-          if inner.valueCategory == .lvalue {
-            buffer += "*(\(innerCType)*)\(result).ptr = __koral_\(typeName)_copy(&\(innerResult));\n"
-          } else {
-            buffer += "*(\(innerCType)*)\(result).ptr = __koral_\(typeName)_copy(&\(innerResult));\n"
-          }
-        } else {
-          addIndent()
-          buffer += "*(\(innerCType)*)\(result).ptr = \(innerResult);\n"
-        }
+        // 2. 初始化数据 — always copy into heap (heap allocation takes ownership)
+        appendCopyAssignment(for: innerType, source: innerResult, dest: "*(\(innerCType)*)\(result).ptr", indent: indent)
 
         // 3. 分配控制块
         addIndent()
@@ -1662,8 +1447,8 @@ public class CodeGen {
       // Generate subject expression
       let subjectVar = generateExpressionSSA(subject)
       let subjectTemp = nextTemp() + "_subject"
-      addIndent()
-      buffer += "\(cTypeName(subject.type)) \(subjectTemp) = \(subjectVar);\n"
+      // Deep copy for lvalue subjects with droppable types to avoid use-after-free
+      emitDeclareAndCopyOrMove(type: subject.type, source: subjectVar, dest: subjectTemp, isLvalue: subject.valueCategory == .lvalue)
       
       // Generate pattern matching condition and bindings
       let (prelude, preludeVars, condition, bindingCode, vars) = 
@@ -1737,42 +1522,7 @@ public class CodeGen {
           }
           let thenResult = generateExpressionSSA(thenBranch)
           if type != .never && thenBranch.type != .never {
-            addIndent()
-            if case .structure(let defId) = type {
-              let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-              if thenBranch.valueCategory == .lvalue {
-                buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(thenResult));\n"
-              } else {
-                buffer += "\(resultVar) = \(thenResult);\n"
-              }
-            } else if case .union(let defId) = type {
-              let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-              if thenBranch.valueCategory == .lvalue {
-                buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(thenResult));\n"
-              } else {
-                buffer += "\(resultVar) = \(thenResult);\n"
-              }
-            } else if case .reference(_) = type {
-              buffer += "\(resultVar) = \(thenResult);\n"
-              if thenBranch.valueCategory == .lvalue {
-                addIndent()
-                buffer += "__koral_retain(\(resultVar).control);\n"
-              }
-            } else if case .function = type {
-              buffer += "\(resultVar) = \(thenResult);\n"
-              if thenBranch.valueCategory == .lvalue {
-                addIndent()
-                buffer += "__koral_closure_retain(\(resultVar));\n"
-              }
-            } else if case .weakReference(_) = type {
-              buffer += "\(resultVar) = \(thenResult);\n"
-              if thenBranch.valueCategory == .lvalue {
-                addIndent()
-                buffer += "__koral_weak_retain(\(resultVar).control);\n"
-              }
-            } else {
-              buffer += "\(resultVar) = \(thenResult);\n"
-            }
+            emitCopyOrMove(type: type, source: thenResult, dest: resultVar, isLvalue: thenBranch.valueCategory == .lvalue)
           }
           popScope()
         }
@@ -1782,42 +1532,7 @@ public class CodeGen {
           pushScope()
           let elseResult = generateExpressionSSA(elseBranch)
           if type != .never && elseBranch.type != .never {
-            addIndent()
-            if case .structure(let defId) = type {
-              let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-              if elseBranch.valueCategory == .lvalue {
-                buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(elseResult));\n"
-              } else {
-                buffer += "\(resultVar) = \(elseResult);\n"
-              }
-            } else if case .union(let defId) = type {
-              let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-              if elseBranch.valueCategory == .lvalue {
-                buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(elseResult));\n"
-              } else {
-                buffer += "\(resultVar) = \(elseResult);\n"
-              }
-            } else if case .reference(_) = type {
-              buffer += "\(resultVar) = \(elseResult);\n"
-              if elseBranch.valueCategory == .lvalue {
-                addIndent()
-                buffer += "__koral_retain(\(resultVar).control);\n"
-              }
-            } else if case .function = type {
-              buffer += "\(resultVar) = \(elseResult);\n"
-              if elseBranch.valueCategory == .lvalue {
-                addIndent()
-                buffer += "__koral_closure_retain(\(resultVar));\n"
-              }
-            } else if case .weakReference(_) = type {
-              buffer += "\(resultVar) = \(elseResult);\n"
-              if elseBranch.valueCategory == .lvalue {
-                addIndent()
-                buffer += "__koral_weak_retain(\(resultVar).control);\n"
-              }
-            } else {
-              buffer += "\(resultVar) = \(elseResult);\n"
-            }
+            emitCopyOrMove(type: type, source: elseResult, dest: resultVar, isLvalue: elseBranch.valueCategory == .lvalue)
           }
           popScope()
         }
@@ -1842,8 +1557,8 @@ public class CodeGen {
         // Generate subject expression (evaluated each iteration)
         let subjectVar = generateExpressionSSA(subject)
         let subjectTemp = nextTemp() + "_subject"
-        addIndent()
-        buffer += "\(cTypeName(subject.type)) \(subjectTemp) = \(subjectVar);\n"
+        // Deep copy for lvalue subjects with droppable types to avoid use-after-free
+        emitDeclareAndCopyOrMove(type: subject.type, source: subjectVar, dest: subjectTemp, isLvalue: subject.valueCategory == .lvalue)
         
         // Generate pattern matching condition and bindings
         let (prelude, preludeVars, condition, bindingCode, vars) = 
@@ -2005,48 +1720,20 @@ public class CodeGen {
         let argResult = generateExpressionSSA(arg)
         var finalArg = argResult
 
-        if case .structure(let defId) = arg.type {
-          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-          addIndent()
-          let argCopy = nextTemp()
-          if arg.valueCategory == .lvalue {
-            switch arg {
-            default:
-              buffer += "\(cTypeName(arg.type)) \(argCopy) = __koral_\(typeName)_copy(&\(argResult));\n"
-            }
-          } else {
-            buffer += "\(cTypeName(arg.type)) \(argCopy) = \(argResult);\n"
-          }
-          finalArg = argCopy
-        } else if case .union(let defId) = arg.type {
-          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-          addIndent()
-          let argCopy = nextTemp()
-          if arg.valueCategory == .lvalue {
-            buffer += "\(cTypeName(arg.type)) \(argCopy) = __koral_\(typeName)_copy(&\(argResult));\n"
-          } else {
-            buffer += "\(cTypeName(arg.type)) \(argCopy) = \(argResult);\n"
-          }
-          finalArg = argCopy
-        } else if case .reference(_) = arg.type {
-          addIndent()
-          buffer += "__koral_retain(\(argResult).control);\n"
-          finalArg = argResult
-        } else if case .function = arg.type {
-          if arg.valueCategory == .lvalue {
-            let argCopy = nextTemp()
+        if needsDrop(arg.type) {
+          // Struct construction takes ownership of all droppable args.
+          // For struct/union: create a temp with copy-or-move semantics.
+          // For reference: always retain (struct takes ownership).
+          // For function/weakReference: retain only if lvalue.
+          if case .reference(_) = arg.type {
+            // Reference args: always retain for struct ownership
             addIndent()
-            buffer += "\(cTypeName(arg.type)) \(argCopy) = \(argResult);\n"
-            addIndent()
-            buffer += "__koral_closure_retain(\(argCopy));\n"
+            buffer += "__koral_retain(\(argResult).control);\n"
+            finalArg = argResult
+          } else {
+            let argCopy = emitTempCopyOrMove(type: arg.type, source: argResult, isLvalue: arg.valueCategory == .lvalue)
             finalArg = argCopy
           }
-        } else if case .weakReference(_) = arg.type {
-          if arg.valueCategory == .lvalue {
-            addIndent()
-            buffer += "__koral_weak_retain(\(argResult).control);\n"
-          }
-          finalArg = argResult
         }
         
         // Check for cast
@@ -2241,8 +1928,9 @@ public class CodeGen {
       let p = generateExpressionSSA(ptr)
       let v = generateExpressionSSA(val)
       let cType = cTypeName(element)
-      addIndent()
       if case .reference(let inner) = element {
+        // Reference types need special handling for TraitObject vs regular Ref
+        addIndent()
         if case .traitObject = inner {
           buffer += "*(\(cType)*)\(p) = \(v);\n"
           addIndent()
@@ -2252,22 +1940,10 @@ public class CodeGen {
           addIndent()
           buffer += "__koral_retain(((struct Ref*)\(p))->control);\n"
         }
-      } else if case .structure(let defId) = element {
-        let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-        buffer += "*(\(cType)*)\(p) = __koral_\(typeName)_copy(&\(v));\n"
-      } else if case .union(let defId) = element {
-        let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-        buffer += "*(\(cType)*)\(p) = __koral_\(typeName)_copy(&\(v));\n"
-      } else if case .function = element {
-        buffer += "*(struct __koral_Closure*)\(p) = \(v);\n"
-        addIndent()
-        buffer += "__koral_closure_retain(*(struct __koral_Closure*)\(p));\n"
-      } else if case .weakReference(_) = element {
-        buffer += "*(\(cType)*)\(p) = \(v);\n"
-        addIndent()
-        buffer += "__koral_weak_retain(((\(cType)*)\(p))->control);\n"
       } else {
-        buffer += "*(\(cType)*)\(p) = \(v);\n"
+        // For all other types, use appendCopyAssignment which handles
+        // struct (_copy), union (_copy), function (closure_retain), weakReference (weak_retain), primitives (plain =)
+        appendCopyAssignment(for: element, source: v, dest: "*(\(cType)*)\(p)", indent: indent)
       }
       return ""
 
@@ -2332,63 +2008,9 @@ public class CodeGen {
       let valueResult = generateExpressionSSA(value)
       // void/never 类型的值不能赋给变量
       if value.type != .void && value.type != .never {
-        // 如果是可变类型，增加引用计数
-        if case .structure(let defId) = identifier.type {
-          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-          addIndent()
-          buffer += "\(cTypeName(identifier.type)) \(cIdentifier(for: identifier)) = "
-          if value.valueCategory == .lvalue {
-            buffer += "__koral_\(typeName)_copy(&\(valueResult));\n"
-          } else {
-            buffer += "\(valueResult);\n"
-          }
-          registerVariable(cIdentifier(for: identifier), identifier.type)
-        } else if case .union(let defId) = identifier.type {
-          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-          addIndent()
-          buffer += "\(cTypeName(identifier.type)) \(cIdentifier(for: identifier)) = "
-          if value.valueCategory == .lvalue {
-            buffer += "__koral_\(typeName)_copy(&\(valueResult));\n"
-          } else {
-            buffer += "\(valueResult);\n"
-          }
-          registerVariable(cIdentifier(for: identifier), identifier.type)
-        } else if case .reference(_) = identifier.type {
-          addIndent()
-          buffer += "\(cTypeName(identifier.type)) \(cIdentifier(for: identifier)) = \(valueResult);\n"
-          if value.valueCategory == .lvalue {
-            addIndent()
-            buffer += "__koral_retain(\(cIdentifier(for: identifier)).control);\n"
-          }
-          registerVariable(cIdentifier(for: identifier), identifier.type)
-        } else if case .function = identifier.type {
-          addIndent()
-          buffer += "\(cTypeName(identifier.type)) \(cIdentifier(for: identifier));\n"
-          if value.valueCategory == .lvalue {
-            let copyResult = nextTemp()
-            addIndent()
-            buffer += "\(cTypeName(identifier.type)) \(copyResult) = \(valueResult);\n"
-            addIndent()
-            buffer += "__koral_closure_retain(\(copyResult));\n"
-            addIndent()
-            buffer += "\(cIdentifier(for: identifier)) = \(copyResult);\n"
-          } else {
-            addIndent()
-            buffer += "\(cIdentifier(for: identifier)) = \(valueResult);\n"
-          }
-          registerVariable(cIdentifier(for: identifier), identifier.type)
-        } else if case .weakReference(_) = identifier.type {
-          addIndent()
-          buffer += "\(cTypeName(identifier.type)) \(cIdentifier(for: identifier)) = \(valueResult);\n"
-          if value.valueCategory == .lvalue {
-            addIndent()
-            buffer += "__koral_weak_retain(\(cIdentifier(for: identifier)).control);\n"
-          }
-          registerVariable(cIdentifier(for: identifier), identifier.type)
-        } else {
-          addIndent()
-          buffer += "\(cTypeName(identifier.type)) \(cIdentifier(for: identifier)) = \(valueResult);\n"
-        }
+        let cIdent = cIdentifier(for: identifier)
+        emitDeclareAndCopyOrMove(type: identifier.type, source: valueResult, dest: cIdent, isLvalue: value.valueCategory == .lvalue)
+        registerVariable(cIdent, identifier.type)
       }
     case .assignment(let target, let op, let value):
       if let op {
@@ -2421,47 +2043,7 @@ public class CodeGen {
         
         if value.type == .void || value.type == .never { return }
 
-        if case .structure(let defId) = target.type {
-          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-          addIndent()
-          if value.valueCategory == .lvalue {
-            buffer += "\(lhsPath) = __koral_\(typeName)_copy(&\(valueResult));\n"
-          } else {
-             buffer += "\(lhsPath) = \(valueResult);\n"
-          }
-        } else if case .union(let defId) = target.type {
-          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-          addIndent()
-          if value.valueCategory == .lvalue {
-            buffer += "\(lhsPath) = __koral_\(typeName)_copy(&\(valueResult));\n"
-          } else {
-             buffer += "\(lhsPath) = \(valueResult);\n"
-          }
-        } else if case .reference(_) = target.type {
-           addIndent()
-           buffer += "\(lhsPath) = \(valueResult);\n"
-           if value.valueCategory == .lvalue {
-               addIndent()
-               buffer += "__koral_retain(\(lhsPath).control);\n"
-           }
-        } else if case .function = target.type {
-           addIndent()
-           buffer += "\(lhsPath) = \(valueResult);\n"
-           if value.valueCategory == .lvalue {
-               addIndent()
-               buffer += "__koral_closure_retain(\(lhsPath));\n"
-           }
-        } else if case .weakReference(_) = target.type {
-           addIndent()
-           buffer += "\(lhsPath) = \(valueResult);\n"
-           if value.valueCategory == .lvalue {
-               addIndent()
-               buffer += "__koral_weak_retain(\(lhsPath).control);\n"
-           }
-        } else {
-           addIndent()
-           buffer += "\(lhsPath) = \(valueResult);\n"
-        }
+        emitCopyOrMove(type: target.type, source: valueResult, dest: lhsPath, isLvalue: value.valueCategory == .lvalue)
       }
 
     case .deptrAssignment(let pointer, let op, let value):
@@ -2510,47 +2092,7 @@ public class CodeGen {
         
         let retVar = nextTemp()
 
-        if case .structure(let defId) = value.type {
-          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-          addIndent()
-          if value.valueCategory == .lvalue {
-            buffer += "\(cTypeName(value.type)) \(retVar) = __koral_\(typeName)_copy(&\(valueResult));\n"
-          } else {
-            buffer += "\(cTypeName(value.type)) \(retVar) = \(valueResult);\n"
-          }
-        } else if case .union(let defId) = value.type {
-          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-          addIndent()
-          if value.valueCategory == .lvalue {
-            buffer += "\(cTypeName(value.type)) \(retVar) = __koral_\(typeName)_copy(&\(valueResult));\n"
-          } else {
-            buffer += "\(cTypeName(value.type)) \(retVar) = \(valueResult);\n"
-          }
-        } else if case .reference(_) = value.type {
-          addIndent()
-          buffer += "\(cTypeName(value.type)) \(retVar) = \(valueResult);\n"
-          if value.valueCategory == .lvalue {
-            addIndent()
-            buffer += "__koral_retain(\(retVar).control);\n"
-          }
-        } else if case .function = value.type {
-          addIndent()
-          buffer += "\(cTypeName(value.type)) \(retVar) = \(valueResult);\n"
-          if value.valueCategory == .lvalue {
-            addIndent()
-            buffer += "__koral_closure_retain(\(retVar));\n"
-          }
-        } else if case .weakReference(_) = value.type {
-          addIndent()
-          buffer += "\(cTypeName(value.type)) \(retVar) = \(valueResult);\n"
-          if value.valueCategory == .lvalue {
-            addIndent()
-            buffer += "__koral_weak_retain(\(retVar).control);\n"
-          }
-        } else {
-          addIndent()
-          buffer += "\(cTypeName(value.type)) \(retVar) = \(valueResult);\n"
-        }
+        emitDeclareAndCopyOrMove(type: value.type, source: valueResult, dest: retVar, isLvalue: value.valueCategory == .lvalue)
 
         emitCleanup(fromScopeIndex: 0)
         addIndent()
@@ -2617,6 +2159,66 @@ public class CodeGen {
     }
   }
 
+  // MARK: - Unified Copy/Move Helpers
+  //
+  // These helpers eliminate duplicated inline copy logic across CodeGen.
+  // Use these instead of manually switching on type for copy/retain patterns.
+
+  /// Emit `dest = source` with proper copy semantics.
+  /// If `isLvalue` is true, generates a deep copy (struct/union _copy, ref retain, closure retain, weak retain).
+  /// If `isLvalue` is false, generates a plain move (`dest = source`).
+  func emitCopyOrMove(type: Type, source: String, dest: String, isLvalue: Bool) {
+    if isLvalue && needsDrop(type) {
+      addIndent()
+      appendCopyAssignment(for: type, source: source, dest: dest, indent: "")
+    } else {
+      addIndent()
+      buffer += "\(dest) = \(source);\n"
+    }
+  }
+
+  /// Declare a new variable and assign with proper copy/move semantics.
+  /// Emits: `Type dest;` then `dest = source` (with copy if lvalue).
+  /// Returns the dest variable name.
+  @discardableResult
+  func emitDeclareAndCopyOrMove(type: Type, source: String, dest: String, isLvalue: Bool) -> String {
+    addIndent()
+    buffer += "\(cTypeName(type)) \(dest);\n"
+    emitCopyOrMove(type: type, source: source, dest: dest, isLvalue: isLvalue)
+    return dest
+  }
+
+  /// Declare a new temp variable and assign with proper copy/move semantics.
+  /// Returns the temp variable name.
+  func emitTempCopyOrMove(type: Type, source: String, isLvalue: Bool) -> String {
+    let temp = nextTemp()
+    return emitDeclareAndCopyOrMove(type: type, source: source, dest: temp, isLvalue: isLvalue)
+  }
+
+  /// Generate copy assignment code as a string (for use in string-based code generation like pattern bindings).
+  /// Always copies (equivalent to appendCopyAssignment but returns a string).
+  func generateCopyAssignmentCode(for type: Type, source: String, dest: String) -> String {
+    switch type {
+    case .function:
+      return "\(dest) = \(source);\n__koral_closure_retain(\(dest));\n"
+    case .structure(let defId):
+      if context.isForeignStruct(defId) {
+        return "\(dest) = \(source);\n"
+      }
+      let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
+      return "\(dest) = __koral_\(typeName)_copy(&\(source));\n"
+    case .union(let defId):
+      let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
+      return "\(dest) = __koral_\(typeName)_copy(&\(source));\n"
+    case .reference:
+      return "\(dest) = \(source);\n__koral_retain(\(dest).control);\n"
+    case .weakReference:
+      return "\(dest) = \(source);\n__koral_weak_retain(\(dest).control);\n"
+    default:
+      return "\(dest) = \(source);\n"
+    }
+  }
+
   func appendDropStatement(for type: Type, value: String, indent: String = "    ") {
     switch type {
     case .function:
@@ -2641,40 +2243,8 @@ public class CodeGen {
     let cType = cTypeName(elementType)
     addIndent()
     buffer += "\(cType) \(result);\n"
-
-    if case .structure(let defId) = elementType {
-      if context.isForeignStruct(defId) {
-        addIndent()
-        buffer += "\(result) = *(\(cType)*)\(pointerExpr);\n"
-      } else {
-        let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-        addIndent()
-        buffer += "\(result) = __koral_\(typeName)_copy((\(cType)*)\(pointerExpr));\n"
-      }
-    } else if case .union(let defId) = elementType {
-      let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-      addIndent()
-      buffer += "\(result) = __koral_\(typeName)_copy((\(cType)*)\(pointerExpr));\n"
-    } else if case .reference(_) = elementType {
-      addIndent()
-      buffer += "\(result) = *(\(cType)*)\(pointerExpr);\n"
-      addIndent()
-      buffer += "__koral_retain(\(result).control);\n"
-    } else if case .function = elementType {
-      addIndent()
-      buffer += "\(result) = *(\(cType)*)\(pointerExpr);\n"
-      addIndent()
-      buffer += "__koral_closure_retain(\(result));\n"
-    } else if case .weakReference(_) = elementType {
-      addIndent()
-      buffer += "\(result) = *(\(cType)*)\(pointerExpr);\n"
-      addIndent()
-      buffer += "__koral_weak_retain(\(result).control);\n"
-    } else {
-      addIndent()
-      buffer += "\(result) = *(\(cType)*)\(pointerExpr);\n"
-    }
-
+    // Always deep copy from pointer (reading from memory always produces an owned value)
+    appendCopyAssignment(for: elementType, source: "*(\(cType)*)\(pointerExpr)", dest: result, indent: indent)
     return result
   }
 
@@ -2773,13 +2343,21 @@ public class CodeGen {
     // Dereference subject if it acts as a reference but pattern matches against value
     var subjectVar = subjectVarSSA
     var subjectType = subject.type
+    var subjectNeedsDrop = false
     if case .reference(let inner) = subject.type {
         let innerCType = cTypeName(inner)
         let derefVar = nextTemp()
-        addIndent()
-        buffer += "\(innerCType) \(derefVar) = *(\(innerCType)*)\(subjectVarSSA).ptr;\n"
+        // Deep copy the dereferenced value to avoid use-after-free
+        emitDeclareAndCopyOrMove(type: inner, source: "*(\(innerCType)*)\(subjectVarSSA).ptr", dest: derefVar, isLvalue: true)
+        subjectNeedsDrop = needsDrop(inner)
         subjectVar = derefVar
         subjectType = inner
+    } else if subject.valueCategory == .lvalue && needsDrop(subject.type) {
+        // Deep copy lvalue subjects with droppable types to avoid use-after-free
+        let copyVar = nextTemp() + "_subject"
+        emitDeclareAndCopyOrMove(type: subject.type, source: subjectVarSSA, dest: copyVar, isLvalue: true)
+        subjectVar = copyVar
+        subjectNeedsDrop = true
     }
     
 
@@ -2819,42 +2397,7 @@ public class CodeGen {
                  
            let bodyResult = generateExpressionSSA(c.body)
            if type != .void && type != .never && c.body.type != .never {
-             addIndent()
-             if case .structure(let defId) = type {
-              let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-              if c.body.valueCategory == .lvalue {
-                buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(bodyResult));\n"
-              } else {
-                 buffer += "\(resultVar) = \(bodyResult);\n"
-              }
-             } else if case .union(let defId) = type {
-              let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-              if c.body.valueCategory == .lvalue {
-                buffer += "\(resultVar) = __koral_\(typeName)_copy(&\(bodyResult));\n"
-              } else {
-                 buffer += "\(resultVar) = \(bodyResult);\n"
-              }
-             } else if case .reference(_) = type {
-              buffer += "\(resultVar) = \(bodyResult);\n"
-              if c.body.valueCategory == .lvalue {
-                 addIndent()
-                 buffer += "__koral_retain(\(resultVar).control);\n"
-              }
-             } else if case .function = type {
-              buffer += "\(resultVar) = \(bodyResult);\n"
-              if c.body.valueCategory == .lvalue {
-                 addIndent()
-                 buffer += "__koral_closure_retain(\(resultVar));\n"
-              }
-             } else if case .weakReference(_) = type {
-              buffer += "\(resultVar) = \(bodyResult);\n"
-              if c.body.valueCategory == .lvalue {
-                 addIndent()
-                 buffer += "__koral_weak_retain(\(resultVar).control);\n"
-              }
-             } else {
-              buffer += "\(resultVar) = \(bodyResult);\n"
-             }
+             emitCopyOrMove(type: type, source: bodyResult, dest: resultVar, isLvalue: c.body.valueCategory == .lvalue)
            }
 
            // Cleanup bindings, then cleanup prelude temps (outer case scope), then jump out.
@@ -2876,6 +2419,11 @@ public class CodeGen {
     
     addIndent()
     buffer += "\(endLabel):;\n"
+    // Drop the subject copy if we made a deep copy
+    if subjectNeedsDrop {
+      addIndent()
+      appendDropStatement(for: subjectType, value: subjectVar, indent: "")
+    }
     return (type == .void || type == .never) ? "" : resultVar
   }
 
@@ -2921,24 +2469,7 @@ public class CodeGen {
         bindCode += "\(cType) \(name);\n"
           
         // Copy Semantics: 绑定变量是源值的复制
-        if case .structure(let defId) = varType {
-          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-          bindCode += "\(name) = __koral_\(typeName)_copy(&\(path));\n"
-        } else if case .union(let defId) = varType {
-          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-          bindCode += "\(name) = __koral_\(typeName)_copy(&\(path));\n"
-        } else if case .reference(_) = varType {
-          bindCode += "\(name) = \(path);\n"
-          bindCode += "__koral_retain(\(name).control);\n"
-        } else if case .function = varType {
-          bindCode += "\(name) = \(path);\n"
-          bindCode += "__koral_closure_retain(\(name));\n"
-        } else if case .weakReference(_) = varType {
-          bindCode += "\(name) = \(path);\n"
-          bindCode += "__koral_weak_retain(\(name).control);\n"
-        } else {
-          bindCode += "\(name) = \(path);\n"
-        }
+        bindCode += generateCopyAssignmentCode(for: varType, source: path, dest: name)
         return ([], [], "1", [bindCode], [(name, varType)])
           
       case .unionCase(let caseName, let expectedTagIndex, let args):
