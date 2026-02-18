@@ -357,7 +357,6 @@ public class Driver {
     clangArgs.append("-o")
     clangArgs.append(exeURL.path)
     clangArgs.append("-Wno-everything")
-    clangArgs.append("-O1")
 
     // Collect linked libraries from foreign using declarations (in order)
     let linkedLibraries: [String] = monomorphizedProgram.globalNodes.compactMap { node in

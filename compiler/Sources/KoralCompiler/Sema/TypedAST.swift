@@ -461,9 +461,10 @@ extension TypedExpressionNode {
     case .memberPath(let source, _):
       // member access is lvalue if the source is lvalue
       return source.valueCategory
-    case .subscriptExpression(let base, _, _, _):
-      // Subscript result acts as LValue (can be assigned to if mutable)
-      return base.valueCategory
+    case .subscriptExpression:
+      // Subscript calls an accessor method (e.g. List.at) that returns
+      // a new value — always an rvalue, regardless of the base.
+      return .rvalue
     case .referenceExpression:
 
       // &expr 是一个临时值（指针）
