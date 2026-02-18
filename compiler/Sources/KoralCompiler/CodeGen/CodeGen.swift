@@ -39,6 +39,12 @@ public class CodeGen {
   /// 逃逸分析上下文，用于追踪变量作用域和逃逸状态
   var escapeContext: EscapeContext
   
+  /// Pattern binding aliases: maps a pattern-bound variable's C identifier
+  /// to the subject's field path expression. Used for borrow semantics in
+  /// match/when, if-is, and while-is pattern matching — bindings are aliases
+  /// into the subject rather than copies, analogous to Rust/Swift match semantics.
+  var patternBindingAliases: [String: String] = [:]
+  
   /// 是否启用逃逸分析报告
   private let escapeAnalysisReportEnabled: Bool
   
@@ -1062,7 +1068,12 @@ public class CodeGen {
       if identifier.type == .void {
         return "0"
       }
-      return cIdentifier(for: identifier)
+      let cName = cIdentifier(for: identifier)
+      // Pattern-bound variables are aliases into the subject — return the path directly
+      if let alias = patternBindingAliases[cName] {
+        return alias
+      }
+      return cName
 
     case .castExpression(let inner, let type):
       // Cast is only used for scalar and pointer conversions (Sema enforces legality).
@@ -1444,15 +1455,25 @@ public class CodeGen {
       return ""
       
     case .ifPatternExpression(let subject, let pattern, _, let thenBranch, let elseBranch, let type):
-      // Generate subject expression
-      let subjectVar = generateExpressionSSA(subject)
-      let subjectTemp = nextTemp() + "_subject"
-      // Deep copy for lvalue subjects with droppable types to avoid use-after-free
-      emitDeclareAndCopyOrMove(type: subject.type, source: subjectVar, dest: subjectTemp, isLvalue: subject.valueCategory == .lvalue)
+      // Borrow semantics: the subject is not copied. Pattern bindings are aliases
+      // into the subject's fields. The subject must remain valid for the entire if-is.
+      let subjectVarSSA = generateExpressionSSA(subject)
+      var subjectVar = subjectVarSSA
+      var subjectType = subject.type
+      if case .reference(let inner) = subject.type {
+        let innerCType = cTypeName(inner)
+        let derefPtr = nextTemp() + "_deref"
+        addIndent()
+        buffer += "const \(innerCType)* \(derefPtr) = (const \(innerCType)*)\(subjectVarSSA).ptr;\n"
+        subjectVar = "(*\(derefPtr))"
+        subjectType = inner
+      }
+      
+      let savedAliases = patternBindingAliases
       
       // Generate pattern matching condition and bindings
       let (prelude, preludeVars, condition, bindingCode, vars) = 
-          generatePatternConditionAndBindings(pattern, subjectTemp, subject.type)
+          generatePatternConditionAndBindings(pattern, subjectVar, subjectType)
       
       // Output prelude
       for p in prelude {
@@ -1491,10 +1512,11 @@ public class CodeGen {
         }
         addIndent()
         buffer += "}\n"
-        // Drop subject after if-pattern completes
-        if needsDrop(subject.type) {
+        patternBindingAliases = savedAliases
+        // Borrow semantics: drop the rvalue subject after if-is completes
+        if needsDrop(subject.type) && subject.valueCategory == .rvalue {
           addIndent()
-          appendDropStatement(for: subject.type, value: subjectTemp, indent: "")
+          appendDropStatement(for: subject.type, value: subjectVarSSA, indent: "")
         }
         return ""
       } else {
@@ -1538,10 +1560,11 @@ public class CodeGen {
         }
         addIndent()
         buffer += "}\n"
-        // Drop subject after if-pattern completes
-        if needsDrop(subject.type) {
+        patternBindingAliases = savedAliases
+        // Borrow semantics: drop the rvalue subject after if-is completes
+        if needsDrop(subject.type) && subject.valueCategory == .rvalue {
           addIndent()
-          appendDropStatement(for: subject.type, value: subjectTemp, indent: "")
+          appendDropStatement(for: subject.type, value: subjectVarSSA, indent: "")
         }
         return resultVar
       }
@@ -1554,15 +1577,25 @@ public class CodeGen {
       addIndent()
       buffer += "\(startLabel): {\n"
       withIndent {
-        // Generate subject expression (evaluated each iteration)
-        let subjectVar = generateExpressionSSA(subject)
-        let subjectTemp = nextTemp() + "_subject"
-        // Deep copy for lvalue subjects with droppable types to avoid use-after-free
-        emitDeclareAndCopyOrMove(type: subject.type, source: subjectVar, dest: subjectTemp, isLvalue: subject.valueCategory == .lvalue)
+        // Borrow semantics: subject is evaluated each iteration but not deep-copied.
+        // Pattern bindings are aliases into the subject's fields.
+        let subjectVarSSA = generateExpressionSSA(subject)
+        var subjectVar = subjectVarSSA
+        var subjectType = subject.type
+        if case .reference(let inner) = subject.type {
+          let innerCType = cTypeName(inner)
+          let derefPtr = nextTemp() + "_deref"
+          addIndent()
+          buffer += "const \(innerCType)* \(derefPtr) = (const \(innerCType)*)\(subjectVarSSA).ptr;\n"
+          subjectVar = "(*\(derefPtr))"
+          subjectType = inner
+        }
+        
+        let savedAliases = patternBindingAliases
         
         // Generate pattern matching condition and bindings
         let (prelude, preludeVars, condition, bindingCode, vars) = 
-            generatePatternConditionAndBindings(pattern, subjectTemp, subject.type)
+            generatePatternConditionAndBindings(pattern, subjectVar, subjectType)
         
         // Output prelude
         for p in prelude {
@@ -1577,10 +1610,10 @@ public class CodeGen {
         addIndent()
         buffer += "if (!(\(condition))) {\n"
         withIndent {
-          // Drop subject before exiting
-          if needsDrop(subject.type) {
+          // Drop rvalue subject before exiting
+          if needsDrop(subject.type) && subject.valueCategory == .rvalue {
             addIndent()
-            appendDropStatement(for: subject.type, value: subjectTemp, indent: "")
+            appendDropStatement(for: subject.type, value: subjectVarSSA, indent: "")
           }
           addIndent()
           buffer += "goto \(endLabel);\n"
@@ -1603,11 +1636,12 @@ public class CodeGen {
         _ = generateExpressionSSA(body)
         loopStack.removeLast()
         popScope()
-        // Drop subject at end of each iteration
-        if needsDrop(subject.type) {
+        // Drop rvalue subject at end of each iteration
+        if needsDrop(subject.type) && subject.valueCategory == .rvalue {
           addIndent()
-          appendDropStatement(for: subject.type, value: subjectTemp, indent: "")
+          appendDropStatement(for: subject.type, value: subjectVarSSA, indent: "")
         }
+        patternBindingAliases = savedAliases
         addIndent()
         buffer += "goto \(startLabel);\n"
       }
@@ -2340,30 +2374,25 @@ public class CodeGen {
         buffer += "\(cTypeName(type)) \(resultVar);\n"
     }
     
-    // Dereference subject if it acts as a reference but pattern matches against value
+    // Borrow semantics: the subject is not copied. Pattern bindings are aliases
+    // into the subject's fields. The subject must remain valid for the entire match.
     var subjectVar = subjectVarSSA
     var subjectType = subject.type
-    var subjectNeedsDrop = false
     if case .reference(let inner) = subject.type {
+        // Dereference: create a pointer to the inner value (no deep copy)
         let innerCType = cTypeName(inner)
-        let derefVar = nextTemp()
-        // Deep copy the dereferenced value to avoid use-after-free
-        emitDeclareAndCopyOrMove(type: inner, source: "*(\(innerCType)*)\(subjectVarSSA).ptr", dest: derefVar, isLvalue: true)
-        subjectNeedsDrop = needsDrop(inner)
-        subjectVar = derefVar
+        let derefPtr = nextTemp() + "_deref"
+        addIndent()
+        buffer += "const \(innerCType)* \(derefPtr) = (const \(innerCType)*)\(subjectVarSSA).ptr;\n"
+        subjectVar = "(*\(derefPtr))"
         subjectType = inner
-    } else if subject.valueCategory == .lvalue && needsDrop(subject.type) {
-        // Deep copy lvalue subjects with droppable types to avoid use-after-free
-        let copyVar = nextTemp() + "_subject"
-        emitDeclareAndCopyOrMove(type: subject.type, source: subjectVarSSA, dest: copyVar, isLvalue: true)
-        subjectVar = copyVar
-        subjectNeedsDrop = true
     }
     
-
     let endLabel = "match_end_\(nextTemp())"
+    let savedAliases = patternBindingAliases
     
     for c in cases {
+         patternBindingAliases = savedAliases
          addIndent()
          buffer += "{\n"
          withIndent {
@@ -2417,12 +2446,16 @@ public class CodeGen {
          buffer += "}\n"
     }
     
+    patternBindingAliases = savedAliases
+
     addIndent()
     buffer += "\(endLabel):;\n"
-    // Drop the subject copy if we made a deep copy
-    if subjectNeedsDrop {
+    // Borrow semantics: drop the subject after the match completes.
+    // Bindings were aliases into the subject, so the subject outlives all branches.
+    // For lvalue subjects, the variable's own scope handles the drop.
+    if needsDrop(subject.type) && subject.valueCategory == .rvalue {
       addIndent()
-      appendDropStatement(for: subjectType, value: subjectVar, indent: "")
+      appendDropStatement(for: subject.type, value: subjectVarSSA, indent: "")
     }
     return (type == .void || type == .never) ? "" : resultVar
   }
@@ -2464,13 +2497,11 @@ public class CodeGen {
         if varType == .void {
           return ([], [], "1", [], [])
         }
-        var bindCode = ""
-        let cType = cTypeName(varType)
-        bindCode += "\(cType) \(name);\n"
-          
-        // Copy Semantics: 绑定变量是源值的复制
-        bindCode += generateCopyAssignmentCode(for: varType, source: path, dest: name)
-        return ([], [], "1", [bindCode], [(name, varType)])
+        // Borrow semantics: register an alias from the bound variable name
+        // to the subject's field path. No copy, no local variable declaration.
+        // The alias is resolved in generateExpressionSSA(.variable).
+        patternBindingAliases[name] = path
+        return ([], [], "1", [], [])
           
       case .unionCase(let caseName, let expectedTagIndex, let args):
         guard case .union(let defId) = type else { fatalError("Union pattern on non-union type") }
