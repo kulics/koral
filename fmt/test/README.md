@@ -12,14 +12,21 @@
 
 ```bash
 cd fmt/test
+go run ./cmd/preparefmt
 go test ./...
 ```
 
 单用例调试：
 
 ```bash
-go test ./... -run 'TestFmtCases/valid_given_when'
+go test ./... -run TestFmtCaseValidGivenWhen
 ```
 
-说明：测试会调用仓库根目录下的 `bin/koralc(.exe)` 自动构建 `bin/koralfmt(.exe)`，再逐个执行 `cases`。
+说明：测试不会自动构建 `koralfmt`，执行前需要先运行 `go run ./cmd/preparefmt`。
+
+`preparefmt` 默认检测到 `bin/koralfmt(.exe)` 已存在时会直接跳过；如需强制重建，使用：
+
+```bash
+go run ./cmd/preparefmt --force
+```
 
