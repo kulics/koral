@@ -58,6 +58,7 @@ public enum ParserError: Error {
   // Module system errors
   case usingAfterDeclaration(span: SourceSpan)
   case fileMergeNoAccessModifier(span: SourceSpan)
+  case fileMergePathNotAllowed(span: SourceSpan, path: String)
   case expectedDot(span: SourceSpan)
   // Function type errors
   case invalidFunctionType(span: SourceSpan, message: String)
@@ -83,6 +84,7 @@ public enum ParserError: Error {
     case .invalidTypeName(let span, _): return span
     case .usingAfterDeclaration(let span): return span
     case .fileMergeNoAccessModifier(let span): return span
+    case .fileMergePathNotAllowed(let span, _): return span
     case .expectedDot(let span): return span
     case .invalidFunctionType(let span, _): return span
     case .expectedArrow(let span): return span
@@ -125,6 +127,8 @@ public enum ParserError: Error {
       return "Using declarations must appear before other declarations"
     case .fileMergeNoAccessModifier:
       return "File merge (using \"...\") does not support access modifiers"
+    case .fileMergePathNotAllowed(_, let path):
+      return "File merge path '\(path)' is invalid: using \"name\" only supports same-level file names"
     case .expectedDot:
       return "Expected '.' after 'self' in using declaration"
     case .invalidFunctionType(_, let message):

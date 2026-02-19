@@ -1897,6 +1897,7 @@ extension TypeChecker {
             currentScope.defineGenericParameter(
               typeParam.name, type: .genericParameter(name: typeParam.name))
           }
+          try recordGenericTraitBounds(info.method.typeParameters)
 
           try currentScope.defineType("Self", type: type)
           currentScope.define("self", type, mutable: false)

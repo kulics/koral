@@ -196,6 +196,7 @@ class IntegrationTests: XCTestCase {
     func test_struct_visibility_member_test() throws { try runCase(named: "struct_visibility_member_test/struct_visibility_member_test.koral") }
     func test_struct_visibility_wildcard_test() throws { try runCase(named: "struct_visibility_wildcard_test/struct_visibility_wildcard_test.koral") }
     func test_private_using_file_scope_test() throws { try runCase(named: "private_using_file_scope_test/private_using_file_scope_test.koral") }
+    func test_using_file_merge_path_error() throws { try runCase(named: "using_file_merge_path_error.koral") }
     func test_numeric_literal_bases() throws { try runCase(named: "numeric_literal_bases.koral") }
     func test_numeric_literal_bases_error_binary_digit() throws { try runCase(named: "numeric_literal_bases_error_binary_digit.koral") }
     func test_numeric_literal_bases_error_octal_digit() throws { try runCase(named: "numeric_literal_bases_error_octal_digit.koral") }
