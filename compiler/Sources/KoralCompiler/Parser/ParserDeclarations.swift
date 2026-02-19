@@ -877,13 +877,14 @@ extension Parser {
         span: span
       )
     } else if currentToken === .selfKeyword {
+      let selfSpan = currentSpan
       try match(.selfKeyword)
       
       if currentToken === .dot {
         // using self.submod - 子模块
         return try parseSubmodulePath(access: access, startSpan: startSpan)
       } else {
-        throw ParserError.expectedDot(span: currentSpan)
+        throw ParserError.usingRequiresConcreteItem(span: selfSpan, base: "self")
       }
     } else if currentToken === .superKeyword {
       // using super.sibling - 父模块
@@ -921,6 +922,10 @@ extension Parser {
       // Actually alias comes before the path, so we need to handle this differently
       // For now, skip alias support in this direction
     }
+
+    if segments.isEmpty {
+      throw ParserError.usingRequiresConcreteItem(span: startSpan, base: "self")
+    }
     
     let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
     return UsingDeclaration(
@@ -936,6 +941,7 @@ extension Parser {
   /// Parse parent path: super.sibling or super.super.uncle
   private func parseParentPath(access: AccessModifier, startSpan: SourceSpan) throws -> UsingDeclaration {
     var segments: [String] = ["super"]
+    var hasConcreteItem = false
     try match(.superKeyword)
     
     while currentToken === .dot {
@@ -945,20 +951,12 @@ extension Parser {
         segments.append("super")
         try match(.superKeyword)
       } else if currentToken === .multiply {
-        try match(.multiply)
-        let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
-        return UsingDeclaration(
-          pathKind: .parent,
-          pathSegments: segments,
-          alias: nil,
-          isBatchImport: true,
-          access: access,
-          span: span
-        )
+        throw ParserError.usingRequiresConcreteItem(span: startSpan, base: "super")
       } else {
         guard case .identifier(let name) = currentToken else {
           throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
         }
+        hasConcreteItem = true
         segments.append(name)
         try match(currentToken)
         
@@ -980,11 +978,16 @@ extension Parser {
           guard case .identifier(let nextName) = currentToken else {
             throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
           }
+          hasConcreteItem = true
           segments.append(nextName)
           try match(currentToken)
         }
         break
       }
+    }
+
+    if !hasConcreteItem {
+      throw ParserError.usingRequiresConcreteItem(span: startSpan, base: "super")
     }
     
     let span = SourceSpan(start: startSpan.start, end: currentSpan.end)

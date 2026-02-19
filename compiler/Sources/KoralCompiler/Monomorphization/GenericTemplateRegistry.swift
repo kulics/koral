@@ -18,6 +18,9 @@ public struct TraitDeclInfo {
     
     /// Access modifier for the trait
     public let access: AccessModifier
+
+    /// Module path where this trait is defined.
+    public let modulePath: [String]
     
     /// Creates a new trait declaration info.
     public init(
@@ -25,13 +28,15 @@ public struct TraitDeclInfo {
         typeParameters: [TypeParameterDecl] = [],
         superTraits: [TraitConstraint],
         methods: [TraitMethodSignature],
-        access: AccessModifier
+        access: AccessModifier,
+        modulePath: [String] = []
     ) {
         self.name = name
         self.typeParameters = typeParameters
         self.superTraits = superTraits
         self.methods = methods
         self.access = access
+        self.modulePath = modulePath
     }
 }
 

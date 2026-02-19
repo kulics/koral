@@ -52,7 +52,7 @@ public class VisibilityChecker {
     /// 可以直接访问的情况：
     /// 1. 符号是泛型参数
     /// 2. 符号来自同一模块
-    /// 3. 符号来自父模块
+    /// 3. 符号来自显式导入（包括父模块导入）
     /// 4. 符号来自标准库
     /// 5. 符号通过批量导入 (using module.*) 引入
     /// 6. 符号通过成员导入 (using module.Symbol) 引入
@@ -95,16 +95,6 @@ public class VisibilityChecker {
         // 仅标准库根模块符号可直接访问；子模块符号需要显式导入
         if symbolModulePath.count == 1 && symbolModulePath[0] == "std" {
             return true
-        }
-        
-        // 检查符号是否来自父模块（符号的 modulePath 是当前 modulePath 的前缀）
-        // 例如：当前在 ["expr_eval", "frontend"]，符号在 ["expr_eval"]
-        // 父模块的符号可以直接访问
-        if symbolModulePath.count < currentModulePath.count {
-            let prefix = Array(currentModulePath.prefix(symbolModulePath.count))
-            if prefix == symbolModulePath {
-                return true
-            }
         }
         
         // 检查符号是否来自导入的模块
@@ -343,6 +333,7 @@ public class VisibilityChecker {
         symbolModulePath: [String],
         symbolName: String,
         currentModulePath: [String],
+        currentSourceFile: String? = nil,
         importGraph: ImportGraph? = nil
     ) throws {
         // 空模块路径表示局部符号，总是可访问
@@ -359,6 +350,7 @@ public class VisibilityChecker {
         try checkVisibility(
             symbolModulePath: symbolModulePath,
             currentModulePath: currentModulePath,
+            currentSourceFile: currentSourceFile,
             symbolName: symbolName,
             importGraph: importGraph,
             isGenericParameter: false

@@ -60,6 +60,7 @@ public enum ParserError: Error {
   case fileMergeNoAccessModifier(span: SourceSpan)
   case fileMergePathNotAllowed(span: SourceSpan, path: String)
   case expectedDot(span: SourceSpan)
+  case usingRequiresConcreteItem(span: SourceSpan, base: String)
   // Function type errors
   case invalidFunctionType(span: SourceSpan, message: String)
   // Lambda expression errors
@@ -86,6 +87,7 @@ public enum ParserError: Error {
     case .fileMergeNoAccessModifier(let span): return span
     case .fileMergePathNotAllowed(let span, _): return span
     case .expectedDot(let span): return span
+    case .usingRequiresConcreteItem(let span, _): return span
     case .invalidFunctionType(let span, _): return span
     case .expectedArrow(let span): return span
     case .foreignAndIntrinsicConflict(let span): return span
@@ -131,6 +133,8 @@ public enum ParserError: Error {
       return "File merge path '\(path)' is invalid: using \"name\" only supports same-level file names"
     case .expectedDot:
       return "Expected '.' after 'self' in using declaration"
+    case .usingRequiresConcreteItem(_, let base):
+      return "Using path '\(base)' must specify a concrete item"
     case .invalidFunctionType(_, let message):
       return "Invalid function type: \(message)"
     case .expectedArrow:
