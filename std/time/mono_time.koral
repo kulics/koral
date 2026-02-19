@@ -1,0 +1,110 @@
+// ============================================================================
+// MonoTime — Monotonic clock timestamp
+// ============================================================================
+
+using super.Duration
+
+// FFI Declaration
+foreign let koral_monotonic_now(out_secs Int64 ptr, out_nanos Int64 ptr) Void
+
+/// MonoTime represents a point in time from a monotonic clock.
+/// It is only useful for measuring elapsed time and is not affected
+/// by system clock adjustments (e.g. NTP).
+public type MonoTime(private secs Int64, private nanos Int64)
+
+given MonoTime {
+    /// Get the current monotonic time.
+    public now() MonoTime = {
+        let mut s Int64 = 0
+        let mut n Int64 = 0
+        koral_monotonic_now(ptr s, ptr n)
+        MonoTime(s, n)
+    }
+
+    /// Return the Duration elapsed since this MonoTime was captured.
+    /// If the clock appears to have gone backwards (should not happen
+    /// with a monotonic clock), returns Duration.zero().
+    public elapsed(self) Duration = {
+        let current = MonoTime.now()
+        let mut diff_secs = current.secs - self.secs
+        let mut diff_nanos = current.nanos - self.nanos
+        if diff_nanos < 0 then {
+            diff_secs = diff_secs - 1
+            diff_nanos = diff_nanos + 1_000_000_000
+        }
+        if diff_secs < 0 then {
+            Duration.zero()
+        } else {
+            Duration(diff_secs, diff_nanos)
+        }
+    }
+}
+
+// Trait Implementations: Affine, Eq, Ord
+
+given MonoTime {
+    /// [Duration]Affine: add_vector — MonoTime + Duration
+    public add_vector(self, v Duration) MonoTime = {
+        let mut new_nanos = self.nanos + v.nanos
+        let mut new_secs = self.secs + v.secs
+        if new_nanos >= 1_000_000_000 then {
+            new_secs = new_secs + new_nanos / 1_000_000_000
+            new_nanos = new_nanos % 1_000_000_000
+        } else if new_nanos < 0 then {
+            let borrow = (0 - new_nanos + 999_999_999) / 1_000_000_000
+            new_secs = new_secs - borrow
+            new_nanos = new_nanos + borrow * 1_000_000_000
+        }
+        MonoTime(new_secs, new_nanos)
+    }
+
+    /// [Duration]Affine: sub_vector — MonoTime - Duration
+    public sub_vector(self, v Duration) MonoTime = {
+        let mut new_nanos = self.nanos - v.nanos
+        let mut new_secs = self.secs - v.secs
+        if new_nanos < 0 then {
+            let borrow = (0 - new_nanos + 999_999_999) / 1_000_000_000
+            new_secs = new_secs - borrow
+            new_nanos = new_nanos + borrow * 1_000_000_000
+        } else if new_nanos >= 1_000_000_000 then {
+            new_secs = new_secs + new_nanos / 1_000_000_000
+            new_nanos = new_nanos % 1_000_000_000
+        }
+        MonoTime(new_secs, new_nanos)
+    }
+
+    /// [Duration]Affine: sub_point — computes self - other as Duration
+    public sub_point(self, other MonoTime) Duration = {
+        let mut diff_secs = self.secs - other.secs
+        let mut diff_nanos = self.nanos - other.nanos
+        if diff_nanos < 0 then {
+            diff_secs = diff_secs - 1
+            diff_nanos = diff_nanos + 1_000_000_000
+        }
+        if diff_secs < 0 then {
+            Duration.zero()
+        } else {
+            Duration(diff_secs, diff_nanos)
+        }
+    }
+
+    /// Eq: equals
+    public equals(self, other MonoTime) Bool = {
+        self.secs == other.secs and self.nanos == other.nanos
+    }
+
+    /// Ord: compare — returns -1, 0, or 1
+    public compare(self, other MonoTime) Int = {
+        if self.secs < other.secs then {
+            -1
+        } else if self.secs > other.secs then {
+            1
+        } else if self.nanos < other.nanos then {
+            -1
+        } else if self.nanos > other.nanos then {
+            1
+        } else {
+            0
+        }
+    }
+}

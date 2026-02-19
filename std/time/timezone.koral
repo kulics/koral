@@ -1,0 +1,68 @@
+// ============================================================================
+// TimeZone — Timezone representation and offset queries
+// ============================================================================
+
+using super.alloc_memory
+using super.dealloc_memory
+using super.null_ptr
+using super.Duration
+using super.String
+using super.Result
+using super.Option
+
+// FFI Declarations
+foreign let koral_local_timezone_offset(out_offset_secs Int32 ptr) Void
+foreign let koral_local_timezone_name(buf UInt8 ptr, buf_size Int32) Int32
+foreign let koral_timezone_name_exists(name UInt8 ptr) Int32
+foreign let koral_timezone_offset_at(name UInt8 ptr, unix_secs Int64, out_offset_secs Int32 ptr) Void
+
+/// Internal union representing the kind of timezone.
+type TimeZoneKind {
+    Utc(),
+    Local(name String),
+    Fixed(offset_secs Int32),
+    Named(name String),
+}
+
+/// TimeZone represents a timezone for converting between UTC and local time.
+public type TimeZone(protected kind TimeZoneKind)
+
+given TimeZone {
+    /// Returns the UTC timezone (offset zero).
+    public utc() TimeZone = TimeZone(TimeZoneKind.Utc())
+
+    /// Returns the local system timezone.
+    public local() TimeZone = {
+        let buf_size = 256
+        let buf = [UInt8]alloc_memory((UInt)buf_size)
+        let len = koral_local_timezone_name(buf, (Int32)buf_size)
+        let tz_name = if len > 0 then {
+            String.from_cstring(buf)
+        } else {
+            "Local"
+        }
+        dealloc_memory(buf)
+        TimeZone(TimeZoneKind.Local(tz_name))
+    }
+
+    /// Creates a fixed-offset timezone from a Duration.
+    /// Returns Error if the absolute offset is >= 86400 seconds.
+    public from_offset(offset Duration) [TimeZone]Result = {
+        if offset.secs >= 86400 or offset.secs <= -86400 then {
+            [TimeZone]Result.Error(ref "TimeZone offset must be less than 86400 seconds (24 hours)")
+        } else {
+            [TimeZone]Result.Ok(TimeZone(TimeZoneKind.Fixed((Int32)offset.secs)))
+        }
+    }
+
+    /// Creates a named timezone from an IANA timezone name.
+    /// Returns None if the timezone name is not found.
+    public from_name(name String) [TimeZone]Option = {
+        let exists = koral_timezone_name_exists(name.storage.data)
+        if exists == 0 then {
+            [TimeZone]Option.None()
+        } else {
+            [TimeZone]Option.Some(TimeZone(TimeZoneKind.Named(name)))
+        }
+    }
+}

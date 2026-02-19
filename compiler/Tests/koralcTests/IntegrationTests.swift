@@ -213,6 +213,12 @@ class IntegrationTests: XCTestCase {
     func test_trait_object_deref_error() throws { try runCase(named: "trait_object_deref_error.koral") }
     func test_trait_object_self_conformance() throws { try runCase(named: "trait_object_self_conformance.koral") }
     func test_trait_object_weakref() throws { try runCase(named: "trait_object_weakref.koral") }
+    func test_mono_time_test() throws { try runCase(named: "mono_time_test.koral") }
+    func test_timezone_test() throws { try runCase(named: "timezone_test.koral") }
+    func test_datetime_basic() throws { try runCase(named: "datetime_basic.koral") }
+    func test_datetime_ops() throws { try runCase(named: "datetime_ops.koral") }
+    func test_datetime_iso8601() throws { try runCase(named: "datetime_iso8601.koral") }
+    func test_datetime_requires_import() throws { try runCase(named: "datetime_requires_import.koral") }
     
     func runTestCase(file: URL, projectRoot: URL) throws {
         // 1. Parse expectations

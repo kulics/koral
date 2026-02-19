@@ -401,3 +401,363 @@ uint8_t* koral_getenv(const uint8_t* name) {
 int32_t koral_system(const uint8_t* command) {
     return (int32_t)system((const char*)command);
 }
+
+// ============================================================================
+// Time helpers
+// ============================================================================
+
+void koral_monotonic_now(int64_t* out_secs, int64_t* out_nanos) {
+#if defined(_WIN32) || defined(_WIN64)
+    LARGE_INTEGER freq, counter;
+    if (QueryPerformanceFrequency(&freq) && QueryPerformanceCounter(&counter) && freq.QuadPart > 0) {
+        *out_secs = counter.QuadPart / freq.QuadPart;
+        *out_nanos = (int64_t)((counter.QuadPart % freq.QuadPart) * 1000000000LL / freq.QuadPart);
+    } else {
+        *out_secs = 0;
+        *out_nanos = 0;
+    }
+#else
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+        *out_secs = (int64_t)ts.tv_sec;
+        *out_nanos = (int64_t)ts.tv_nsec;
+    } else {
+        *out_secs = 0;
+        *out_nanos = 0;
+    }
+#endif
+}
+
+void koral_wallclock_now(int64_t* out_secs, int64_t* out_nanos) {
+#if defined(_WIN32) || defined(_WIN64)
+    // Windows FILETIME epoch: 1601-01-01, Unix epoch: 1970-01-01
+    // Difference: 11644473600 seconds = 116444736000000000 * 100ns
+    static const int64_t EPOCH_DIFF = 116444736000000000LL;
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    int64_t ticks = ((int64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+    ticks -= EPOCH_DIFF;
+    *out_secs = ticks / 10000000LL;
+    *out_nanos = (ticks % 10000000LL) * 100LL;
+#else
+    struct timespec ts;
+    if (clock_gettime(CLOCK_REALTIME, &ts) == 0) {
+        *out_secs = (int64_t)ts.tv_sec;
+        *out_nanos = (int64_t)ts.tv_nsec;
+    } else {
+        *out_secs = 0;
+        *out_nanos = 0;
+    }
+#endif
+}
+
+void koral_local_timezone_offset(int32_t* out_offset_secs) {
+#if defined(_WIN32) || defined(_WIN64)
+    TIME_ZONE_INFORMATION tzi;
+    DWORD result = GetTimeZoneInformation(&tzi);
+    if (result == TIME_ZONE_ID_INVALID) {
+        *out_offset_secs = 0;
+    } else {
+        // Bias is in minutes, west-positive. We want east-positive seconds.
+        int32_t bias = (int32_t)tzi.Bias;
+        if (result == TIME_ZONE_ID_DAYLIGHT) {
+            bias += (int32_t)tzi.DaylightBias;
+        } else if (result == TIME_ZONE_ID_STANDARD) {
+            bias += (int32_t)tzi.StandardBias;
+        }
+        *out_offset_secs = -bias * 60;
+    }
+#else
+    time_t now = time(NULL);
+    struct tm local;
+    if (localtime_r(&now, &local) != NULL) {
+        *out_offset_secs = (int32_t)local.tm_gmtoff;
+    } else {
+        *out_offset_secs = 0;
+    }
+#endif
+}
+
+int32_t koral_local_timezone_name(char* buf, int32_t buf_size) {
+    if (buf_size <= 0) return 0;
+    buf[0] = '\0';
+
+#if defined(_WIN32) || defined(_WIN64)
+    TIME_ZONE_INFORMATION tzi;
+    DWORD result = GetTimeZoneInformation(&tzi);
+    if (result != TIME_ZONE_ID_INVALID) {
+        // Convert wide string to narrow (ASCII subset)
+        const WCHAR* src = (result == TIME_ZONE_ID_DAYLIGHT) ? tzi.DaylightName : tzi.StandardName;
+        int i = 0;
+        while (src[i] && i < buf_size - 1) {
+            buf[i] = (char)(src[i] & 0x7F);
+            i++;
+        }
+        buf[i] = '\0';
+        return i;
+    }
+    return 0;
+#else
+    // Priority 1: $TZ environment variable
+    const char* tz_env = getenv("TZ");
+    if (tz_env && tz_env[0] != '\0') {
+        // Skip leading ':' if present (POSIX convention)
+        const char* name = tz_env;
+        if (name[0] == ':') name++;
+        // Check if it looks like an IANA name (contains '/')
+        if (strchr(name, '/') != NULL) {
+            int len = (int)strlen(name);
+            if (len >= buf_size) len = buf_size - 1;
+            memcpy(buf, name, len);
+            buf[len] = '\0';
+            return len;
+        }
+    }
+
+    // Priority 2: readlink("/etc/localtime")
+    char link_buf[256];
+    ssize_t link_len = readlink("/etc/localtime", link_buf, sizeof(link_buf) - 1);
+    if (link_len > 0) {
+        link_buf[link_len] = '\0';
+        // Look for "zoneinfo/" in the path
+        const char* marker = strstr(link_buf, "zoneinfo/");
+        if (marker) {
+            const char* iana_name = marker + 9; // strlen("zoneinfo/") == 9
+            int len = (int)strlen(iana_name);
+            if (len >= buf_size) len = buf_size - 1;
+            memcpy(buf, iana_name, len);
+            buf[len] = '\0';
+            return len;
+        }
+    }
+
+    return 0;
+#endif
+}
+
+// ============================================================================
+// TZif parser (thread-safe, no global state modification)
+// ============================================================================
+
+#if !defined(_WIN32) && !defined(_WIN64)
+
+// Zoneinfo search paths (same order as Go stdlib)
+static const char* koral_zoneinfo_dirs[] = {
+    "/usr/share/zoneinfo/",
+    "/usr/share/lib/zoneinfo/",
+    "/usr/lib/locale/TZ/",
+    "/etc/zoneinfo/",
+    NULL
+};
+
+// Read a big-endian int32 from buffer
+static int32_t tzif_read_be32(const uint8_t* p) {
+    return (int32_t)(((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
+                     ((uint32_t)p[2] << 8) | (uint32_t)p[3]);
+}
+
+// Read a big-endian int64 from buffer
+static int64_t tzif_read_be64(const uint8_t* p) {
+    return (int64_t)(((uint64_t)p[0] << 56) | ((uint64_t)p[1] << 48) |
+                     ((uint64_t)p[2] << 40) | ((uint64_t)p[3] << 32) |
+                     ((uint64_t)p[4] << 24) | ((uint64_t)p[5] << 16) |
+                     ((uint64_t)p[6] << 8) | (uint64_t)p[7]);
+}
+
+// Query UTC offset at a given unix_secs from a TZif file.
+// Returns 1 on success, 0 on failure.
+static int tzif_query_offset(const char* filepath, int64_t unix_secs, int32_t* out_offset) {
+    FILE* f = fopen(filepath, "rb");
+    if (!f) return 0;
+
+    // Read entire file (TZif files are typically < 4KB)
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    if (file_size <= 0 || file_size > 128 * 1024) { fclose(f); return 0; }
+    fseek(f, 0, SEEK_SET);
+
+    uint8_t* data = (uint8_t*)malloc((size_t)file_size);
+    if (!data) { fclose(f); return 0; }
+    if ((long)fread(data, 1, (size_t)file_size, f) != file_size) {
+        free(data); fclose(f); return 0;
+    }
+    fclose(f);
+
+    // Validate TZif magic "TZif"
+    if (file_size < 44 || memcmp(data, "TZif", 4) != 0) {
+        free(data); return 0;
+    }
+
+    // Read v1 header to skip v1 data block
+    char version = (char)data[4]; // '2', '3', or '\0'
+    int32_t v1_isutcnt  = tzif_read_be32(data + 20);
+    int32_t v1_isstdcnt = tzif_read_be32(data + 24);
+    int32_t v1_leapcnt  = tzif_read_be32(data + 28);
+    int32_t v1_timecnt  = tzif_read_be32(data + 32);
+    int32_t v1_typecnt  = tzif_read_be32(data + 36);
+    int32_t v1_charcnt  = tzif_read_be32(data + 40);
+
+    // v1 data block size: timecnt*4 + timecnt*1 + typecnt*6 + charcnt + leapcnt*8 + isstdcnt + isutcnt
+    long v1_datasize = (long)v1_timecnt * 4 + (long)v1_timecnt +
+                       (long)v1_typecnt * 6 + (long)v1_charcnt +
+                       (long)v1_leapcnt * 8 + (long)v1_isstdcnt + (long)v1_isutcnt;
+
+    // If v2 or v3, skip v1 and parse v2/v3 header
+    if (version == '2' || version == '3') {
+        long v2_header_offset = 44 + v1_datasize;
+        if (v2_header_offset + 44 > file_size) { free(data); return 0; }
+
+        // Validate v2 magic
+        if (memcmp(data + v2_header_offset, "TZif", 4) != 0) { free(data); return 0; }
+
+        int32_t v2_leapcnt  = tzif_read_be32(data + v2_header_offset + 28);
+        int32_t v2_timecnt  = tzif_read_be32(data + v2_header_offset + 32);
+        int32_t v2_typecnt  = tzif_read_be32(data + v2_header_offset + 36);
+        int32_t v2_charcnt  = tzif_read_be32(data + v2_header_offset + 40);
+
+        long v2_data_start = v2_header_offset + 44;
+
+        // transition times: v2_timecnt * 8 bytes (int64)
+        const uint8_t* trans_times = data + v2_data_start;
+        // transition type indices: v2_timecnt * 1 byte
+        const uint8_t* trans_types = trans_times + v2_timecnt * 8;
+        // ttinfo structs: v2_typecnt * 6 bytes each (int32 utoff, uint8 dst, uint8 idx)
+        const uint8_t* ttinfos = trans_types + v2_timecnt;
+
+        // Bounds check
+        long needed = v2_data_start + (long)v2_timecnt * 8 + (long)v2_timecnt +
+                      (long)v2_typecnt * 6 + (long)v2_charcnt +
+                      (long)v2_leapcnt * 12;
+        if (needed > file_size) { free(data); return 0; }
+
+        // Binary search for the transition
+        int32_t lo = 0, hi = v2_timecnt;
+        while (lo < hi) {
+            int32_t mid = lo + (hi - lo) / 2;
+            int64_t t = tzif_read_be64(trans_times + mid * 8);
+            if (t <= unix_secs) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+
+        uint8_t type_idx;
+        if (lo == 0) {
+            // Before all transitions: use first non-DST type, or type 0
+            type_idx = 0;
+            for (int32_t i = 0; i < v2_typecnt; i++) {
+                if (ttinfos[i * 6 + 4] == 0) { // is_dst == 0
+                    type_idx = (uint8_t)i;
+                    break;
+                }
+            }
+        } else {
+            type_idx = trans_types[lo - 1];
+        }
+
+        if (type_idx >= (uint8_t)v2_typecnt) { free(data); return 0; }
+        *out_offset = tzif_read_be32(ttinfos + type_idx * 6);
+        free(data);
+        return 1;
+    }
+
+    // v1 fallback: use 32-bit transition times
+    {
+        long v1_data_start = 44;
+        const uint8_t* trans_times = data + v1_data_start;
+        const uint8_t* trans_types = trans_times + v1_timecnt * 4;
+        const uint8_t* ttinfos = trans_types + v1_timecnt;
+
+        long needed = v1_data_start + (long)v1_timecnt * 4 + (long)v1_timecnt +
+                      (long)v1_typecnt * 6 + (long)v1_charcnt;
+        if (needed > file_size) { free(data); return 0; }
+
+        int32_t lo = 0, hi = v1_timecnt;
+        while (lo < hi) {
+            int32_t mid = lo + (hi - lo) / 2;
+            int64_t t = (int64_t)tzif_read_be32(trans_times + mid * 4);
+            if (t <= unix_secs) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+
+        uint8_t type_idx;
+        if (lo == 0) {
+            type_idx = 0;
+            for (int32_t i = 0; i < v1_typecnt; i++) {
+                if (ttinfos[i * 6 + 4] == 0) {
+                    type_idx = (uint8_t)i;
+                    break;
+                }
+            }
+        } else {
+            type_idx = trans_types[lo - 1];
+        }
+
+        if (type_idx >= (uint8_t)v1_typecnt) { free(data); return 0; }
+        *out_offset = tzif_read_be32(ttinfos + type_idx * 6);
+        free(data);
+        return 1;
+    }
+}
+
+// Build full path to zoneinfo file. Returns 1 if found, 0 if not.
+static int tzif_find_file(const char* name, char* path_buf, size_t path_buf_size) {
+    for (int i = 0; koral_zoneinfo_dirs[i] != NULL; i++) {
+        int n = snprintf(path_buf, path_buf_size, "%s%s", koral_zoneinfo_dirs[i], name);
+        if (n > 0 && (size_t)n < path_buf_size) {
+            struct stat st;
+            if (stat(path_buf, &st) == 0 && S_ISREG(st.st_mode)) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+#endif // !_WIN32
+
+int32_t koral_timezone_name_exists(const char* name) {
+#if defined(_WIN32) || defined(_WIN64)
+    (void)name;
+    return 0;
+#else
+    if (!name || name[0] == '\0') return 0;
+    char path[512];
+    return tzif_find_file(name, path, sizeof(path)) ? 1 : 0;
+#endif
+}
+
+void koral_timezone_offset_at(const char* name, int64_t unix_secs, int32_t* out_offset_secs) {
+#if defined(_WIN32) || defined(_WIN64)
+    (void)name;
+    (void)unix_secs;
+    // Windows: only support local timezone via GetTimeZoneInformation
+    koral_local_timezone_offset(out_offset_secs);
+#else
+    *out_offset_secs = 0;
+
+    if (!name || name[0] == '\0') {
+        // Empty name means local timezone — use /etc/localtime
+        if (tzif_query_offset("/etc/localtime", unix_secs, out_offset_secs)) {
+            return;
+        }
+        // Fallback to localtime_r for local timezone
+        time_t t = (time_t)unix_secs;
+        struct tm local;
+        if (localtime_r(&t, &local) != NULL) {
+            *out_offset_secs = (int32_t)local.tm_gmtoff;
+        }
+        return;
+    }
+
+    // Named timezone: find and parse TZif file
+    char path[512];
+    if (tzif_find_file(name, path, sizeof(path))) {
+        tzif_query_offset(path, unix_secs, out_offset_secs);
+    }
+#endif
+}

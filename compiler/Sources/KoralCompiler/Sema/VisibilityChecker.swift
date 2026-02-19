@@ -91,8 +91,8 @@ public class VisibilityChecker {
             return true
         }
         
-        // 标准库符号总是可以直接访问
-        if !symbolModulePath.isEmpty && symbolModulePath[0] == "std" {
+        // 仅标准库根模块符号可直接访问；子模块符号需要显式导入
+        if symbolModulePath.count == 1 && symbolModulePath[0] == "std" {
             return true
         }
         
@@ -306,8 +306,8 @@ public class VisibilityChecker {
             return
         }
         
-        // 标准库类型总是可访问
-        if !typeModulePath.isEmpty && typeModulePath[0] == "std" {
+        // 仅标准库根模块类型可默认访问；子模块类型需显式导入
+        if typeModulePath.count == 1 && typeModulePath[0] == "std" {
             return
         }
         
@@ -342,8 +342,8 @@ public class VisibilityChecker {
             return
         }
         
-        // 标准库符号总是可访问
-        if !symbolModulePath.isEmpty && symbolModulePath[0] == "std" {
+        // 仅标准库根模块符号可默认访问；子模块符号需显式导入
+        if symbolModulePath.count == 1 && symbolModulePath[0] == "std" {
             return
         }
         

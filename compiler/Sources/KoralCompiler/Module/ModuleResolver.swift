@@ -664,6 +664,12 @@ public class ModuleResolver {
         guard !using.pathSegments.isEmpty else {
             throw ModuleError.invalidModulePath("empty external path")
         }
+
+        // 标准库由 Driver 预加载到同一编译流程中；
+        // `using std...` 仅用于可见性/导入图，不走外部模块文件系统解析。
+        if using.pathSegments[0] == "std" {
+            return
+        }
         
         let moduleName = using.pathSegments[0]
         
