@@ -195,6 +195,7 @@ class IntegrationTests: XCTestCase {
     func test_struct_visibility_test() throws { try runCase(named: "struct_visibility_test/struct_visibility_test.koral") }
     func test_struct_visibility_member_test() throws { try runCase(named: "struct_visibility_member_test/struct_visibility_member_test.koral") }
     func test_struct_visibility_wildcard_test() throws { try runCase(named: "struct_visibility_wildcard_test/struct_visibility_wildcard_test.koral") }
+    func test_private_using_file_scope_test() throws { try runCase(named: "private_using_file_scope_test/private_using_file_scope_test.koral") }
     func test_numeric_literal_bases() throws { try runCase(named: "numeric_literal_bases.koral") }
     func test_numeric_literal_bases_error_binary_digit() throws { try runCase(named: "numeric_literal_bases_error_binary_digit.koral") }
     func test_numeric_literal_bases_error_octal_digit() throws { try runCase(named: "numeric_literal_bases_error_octal_digit.koral") }
@@ -219,6 +220,8 @@ class IntegrationTests: XCTestCase {
     func test_datetime_ops() throws { try runCase(named: "datetime_ops.koral") }
     func test_datetime_iso8601() throws { try runCase(named: "datetime_iso8601.koral") }
     func test_datetime_requires_import() throws { try runCase(named: "datetime_requires_import.koral") }
+    func test_std_math_float_test() throws { try runCase(named: "std_math_float_test.koral") }
+    func test_std_math_int_test() throws { try runCase(named: "std_math_int_test.koral") }
     
     func runTestCase(file: URL, projectRoot: URL) throws {
         // 1. Parse expectations

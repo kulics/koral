@@ -7,6 +7,7 @@
 #include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 typedef struct CFile CFile;
 
@@ -761,3 +762,83 @@ void koral_timezone_offset_at(const char* name, int64_t unix_secs, int32_t* out_
     }
 #endif
 }
+
+// ============================================================================
+// Math wrapper functions (Float64 / double)
+// ============================================================================
+double koral_f64_sqrt(double x) { return sqrt(x); }
+double koral_f64_cbrt(double x) { return cbrt(x); }
+double koral_f64_pow(double x, double y) { return pow(x, y); }
+double koral_f64_hypot(double x, double y) { return hypot(x, y); }
+double koral_f64_exp(double x) { return exp(x); }
+double koral_f64_exp2(double x) { return exp2(x); }
+double koral_f64_expm1(double x) { return expm1(x); }
+double koral_f64_log(double x) { return log(x); }
+double koral_f64_log2(double x) { return log2(x); }
+double koral_f64_log10(double x) { return log10(x); }
+double koral_f64_log1p(double x) { return log1p(x); }
+double koral_f64_sin(double x) { return sin(x); }
+double koral_f64_cos(double x) { return cos(x); }
+double koral_f64_tan(double x) { return tan(x); }
+double koral_f64_asin(double x) { return asin(x); }
+double koral_f64_acos(double x) { return acos(x); }
+double koral_f64_atan(double x) { return atan(x); }
+double koral_f64_atan2(double y, double x) { return atan2(y, x); }
+double koral_f64_sinh(double x) { return sinh(x); }
+double koral_f64_cosh(double x) { return cosh(x); }
+double koral_f64_tanh(double x) { return tanh(x); }
+double koral_f64_asinh(double x) { return asinh(x); }
+double koral_f64_acosh(double x) { return acosh(x); }
+double koral_f64_atanh(double x) { return atanh(x); }
+double koral_f64_floor(double x) { return floor(x); }
+double koral_f64_ceil(double x) { return ceil(x); }
+double koral_f64_round(double x) { return round(x); }
+double koral_f64_trunc(double x) { return trunc(x); }
+double koral_f64_fabs(double x) { return fabs(x); }
+double koral_f64_copysign(double x, double y) { return copysign(x, y); }
+double koral_f64_fmod(double x, double y) { return fmod(x, y); }
+double koral_f64_fma(double x, double y, double z) { return fma(x, y, z); }
+double koral_f64_erf(double x) { return erf(x); }
+double koral_f64_erfc(double x) { return erfc(x); }
+double koral_f64_tgamma(double x) { return tgamma(x); }
+double koral_f64_lgamma(double x) { return lgamma(x); }
+
+// ============================================================================
+// Math wrapper functions (Float32 / float)
+// ============================================================================
+float koral_f32_sqrt(float x) { return sqrtf(x); }
+float koral_f32_cbrt(float x) { return cbrtf(x); }
+float koral_f32_pow(float x, float y) { return powf(x, y); }
+float koral_f32_hypot(float x, float y) { return hypotf(x, y); }
+float koral_f32_exp(float x) { return expf(x); }
+float koral_f32_exp2(float x) { return exp2f(x); }
+float koral_f32_expm1(float x) { return expm1f(x); }
+float koral_f32_log(float x) { return logf(x); }
+float koral_f32_log2(float x) { return log2f(x); }
+float koral_f32_log10(float x) { return log10f(x); }
+float koral_f32_log1p(float x) { return log1pf(x); }
+float koral_f32_sin(float x) { return sinf(x); }
+float koral_f32_cos(float x) { return cosf(x); }
+float koral_f32_tan(float x) { return tanf(x); }
+float koral_f32_asin(float x) { return asinf(x); }
+float koral_f32_acos(float x) { return acosf(x); }
+float koral_f32_atan(float x) { return atanf(x); }
+float koral_f32_atan2(float y, float x) { return atan2f(y, x); }
+float koral_f32_sinh(float x) { return sinhf(x); }
+float koral_f32_cosh(float x) { return coshf(x); }
+float koral_f32_tanh(float x) { return tanhf(x); }
+float koral_f32_asinh(float x) { return asinhf(x); }
+float koral_f32_acosh(float x) { return acoshf(x); }
+float koral_f32_atanh(float x) { return atanhf(x); }
+float koral_f32_floor(float x) { return floorf(x); }
+float koral_f32_ceil(float x) { return ceilf(x); }
+float koral_f32_round(float x) { return roundf(x); }
+float koral_f32_trunc(float x) { return truncf(x); }
+float koral_f32_fabs(float x) { return fabsf(x); }
+float koral_f32_copysign(float x, float y) { return copysignf(x, y); }
+float koral_f32_fmod(float x, float y) { return fmodf(x, y); }
+float koral_f32_fma(float x, float y, float z) { return fmaf(x, y, z); }
+float koral_f32_erf(float x) { return erff(x); }
+float koral_f32_erfc(float x) { return erfcf(x); }
+float koral_f32_tgamma(float x) { return tgammaf(x); }
+float koral_f32_lgamma(float x) { return lgammaf(x); }

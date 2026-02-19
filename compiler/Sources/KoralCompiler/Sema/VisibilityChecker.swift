@@ -72,6 +72,7 @@ public class VisibilityChecker {
     public func canAccessDirectly(
         symbolModulePath: [String],
         currentModulePath: [String],
+        currentSourceFile: String? = nil,
         symbolName: String? = nil,
         importGraph: ImportGraph? = nil,
         isGenericParameter: Bool = false
@@ -111,6 +112,7 @@ public class VisibilityChecker {
             symbolModulePath: symbolModulePath,
             symbolName: symbolName,
             currentModulePath: currentModulePath,
+            currentSourceFile: currentSourceFile,
             importGraph: importGraph
         )
         
@@ -130,12 +132,14 @@ public class VisibilityChecker {
         symbolModulePath: [String],
         symbolName: String?,
         currentModulePath: [String],
+        currentSourceFile: String? = nil,
         importGraph: ImportGraph? = nil
     ) -> ImportKind {
         return importGraph?.getImportKind(
             symbolModulePath: symbolModulePath,
             symbolName: symbolName,
-            inModule: currentModulePath
+            inModule: currentModulePath,
+            inSourceFile: currentSourceFile
         ) ?? .moduleImport
     }
     
@@ -220,6 +224,7 @@ public class VisibilityChecker {
     public func checkVisibility(
         symbolModulePath: [String],
         currentModulePath: [String],
+        currentSourceFile: String? = nil,
         symbolName: String,
         importGraph: ImportGraph? = nil,
         isGenericParameter: Bool = false
@@ -227,6 +232,7 @@ public class VisibilityChecker {
         if !canAccessDirectly(
             symbolModulePath: symbolModulePath,
             currentModulePath: currentModulePath,
+            currentSourceFile: currentSourceFile,
             symbolName: symbolName,
             importGraph: importGraph,
             isGenericParameter: isGenericParameter
@@ -264,6 +270,7 @@ public class VisibilityChecker {
         type: Type,
         typeName: String,
         currentModulePath: [String],
+        currentSourceFile: String? = nil,
         importGraph: ImportGraph? = nil,
         isLocalBinding: Bool = false,
         isGenericParameter: Bool = false
@@ -315,6 +322,7 @@ public class VisibilityChecker {
         try checkVisibility(
             symbolModulePath: typeModulePath,
             currentModulePath: currentModulePath,
+            currentSourceFile: currentSourceFile,
             symbolName: typeName,
             importGraph: importGraph,
             isGenericParameter: false

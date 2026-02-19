@@ -377,6 +377,7 @@ public class TypeChecker {
     return visibilityChecker.canAccessDirectly(
       symbolModulePath: symbolModulePath,
       currentModulePath: currentModulePath,
+      currentSourceFile: currentSourceFile,
       symbolName: symbolName,
       importGraph: importGraph,
       isGenericParameter: false
@@ -413,6 +414,7 @@ public class TypeChecker {
         type: type,
         typeName: typeName,
         currentModulePath: currentModulePath,
+        currentSourceFile: currentSourceFile,
         importGraph: importGraph,
         isLocalBinding: isLocalBinding,
         isGenericParameter: isGenericParameter
