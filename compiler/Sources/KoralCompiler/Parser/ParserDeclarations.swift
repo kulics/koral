@@ -855,7 +855,12 @@ extension Parser {
     // Determine path type based on first token
     if case .string(let filename) = currentToken {
       // using "filename" - 文件合并
+      let fileMergeSpan = currentSpan
       try match(currentToken)
+
+      if filename.contains("/") || filename.contains("\\") {
+        throw ParserError.fileMergePathNotAllowed(span: fileMergeSpan, path: filename)
+      }
       
       // 文件合并不允许访问修饰符
       if access != .default {
