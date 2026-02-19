@@ -118,12 +118,12 @@ extension CodeGen {
   func buildRefComponents(_ expr: TypedExpressionNode) -> (path: String, control: String) {
     switch expr {
     case .variable(let identifier):
-      let path = cIdentifier(for: identifier)
+      let cName = cIdentifier(for: identifier)
+      let path = patternBindingAliases[cName] ?? cName
       if case .reference(_) = identifier.type {
-        return (path, "\(path).control")
-      } else {
-        return (path, "NULL")
+        return (path, "(\(path)).control")
       }
+      return (path, "NULL")
     case .memberPath(let source, let path):
       var (basePath, baseControl) = buildRefComponents(source)
       var curType = source.type
