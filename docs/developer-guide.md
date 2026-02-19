@@ -44,6 +44,25 @@ swift run koralc hello.koral --no-std
 swift run koralc hello.koral --escape-analysis-report
 ```
 
+### 标准库定位（KORAL_HOME）
+
+`Driver.getCoreLibPath()` / `Driver.getStdLibPath()` 的查找顺序是：
+
+1. `KORAL_HOME`（期望 `$KORAL_HOME/std/std.koral`）
+2. 当前工作目录下的 `std/std.koral`
+3. 当前工作目录父目录下的 `std/std.koral`
+4. 当前工作目录上两级目录下的 `std/std.koral`
+
+如果你在非仓库根目录运行 `koralc`，建议显式设置 `KORAL_HOME` 为仓库根目录。
+
+```bash
+# macOS / Linux
+export KORAL_HOME=/path/to/koral
+
+# Windows PowerShell
+$env:KORAL_HOME = "D:\workspace\koral"
+```
+
 ## 添加新类型
 
 ### 1. 在 Type.swift 中添加类型 case
@@ -303,7 +322,8 @@ if escapeContext.shouldUseHeapAllocation(innerExpr) {
 ```koral
 // my_feature.koral
 // 测试用例使用 print_line 输出结果
-// 编译器会编译并运行，检查退出码
+// 通过 EXPECT 注释做输出断言（按顺序子串匹配）
+// EXPECT: test passed
 
 using std.*
 
@@ -318,7 +338,7 @@ let main() = {
 func test_my_feature() throws { try runCase(named: "my_feature.koral") }
 ```
 
-对于期望编译失败的测试（错误检测），测试文件名通常包含 `error`，测试框架会检查编译器是否正确报错。
+对于期望失败的测试，请在用例里添加 `// EXPECT-ERROR: ...` 注释；测试框架会要求非零退出码并匹配错误输出子串。
 
 ### 添加多文件/模块测试
 
