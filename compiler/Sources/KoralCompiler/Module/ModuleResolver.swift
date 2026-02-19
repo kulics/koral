@@ -357,6 +357,9 @@ public class ModuleResolver {
         unit: CompilationUnit,
         currentFile: String
     ) {
+        let effectiveAccess: AccessModifier = using.access == .default ? .private : using.access
+        let importSourceFile: String? = effectiveAccess == .private ? currentFile : nil
+
         switch using.pathKind {
         case .fileMerge:
             // 文件合并：using "file"
@@ -377,7 +380,8 @@ public class ModuleResolver {
                 unit.importGraph.addModuleImport(
                     from: module.path,
                     to: targetPath,
-                    kind: .batchImport
+                    kind: .batchImport,
+                    sourceFile: importSourceFile
                 )
             } else if segments.count >= 2,
                       let lastSegment = segments.last,
@@ -390,7 +394,8 @@ public class ModuleResolver {
                     module: module.path,
                     target: targetPath,
                     symbol: lastSegment,
-                    kind: .memberImport
+                    kind: .memberImport,
+                    sourceFile: importSourceFile
                 )
             } else {
                 // 普通模块导入：using self.child
@@ -398,7 +403,8 @@ public class ModuleResolver {
                 unit.importGraph.addModuleImport(
                     from: module.path,
                     to: targetPath,
-                    kind: .moduleImport
+                    kind: .moduleImport,
+                    sourceFile: importSourceFile
                 )
             }
             
@@ -428,7 +434,8 @@ public class ModuleResolver {
                 unit.importGraph.addModuleImport(
                     from: module.path,
                     to: targetPath,
-                    kind: .batchImport
+                    kind: .batchImport,
+                    sourceFile: importSourceFile
                 )
             } else if remainingSegments.count >= 2,
                       let lastSegment = remainingSegments.last,
@@ -441,7 +448,8 @@ public class ModuleResolver {
                     module: module.path,
                     target: targetPath,
                     symbol: lastSegment,
-                    kind: .memberImport
+                    kind: .memberImport,
+                    sourceFile: importSourceFile
                 )
             } else {
                 // 普通模块导入
@@ -449,7 +457,8 @@ public class ModuleResolver {
                 unit.importGraph.addModuleImport(
                     from: module.path,
                     to: targetPath,
-                    kind: .moduleImport
+                    kind: .moduleImport,
+                    sourceFile: importSourceFile
                 )
             }
             
@@ -461,7 +470,8 @@ public class ModuleResolver {
                 unit.importGraph.addModuleImport(
                     from: module.path,
                     to: using.pathSegments,
-                    kind: .batchImport
+                    kind: .batchImport,
+                    sourceFile: importSourceFile
                 )
             } else if using.pathSegments.count >= 2,
                       let lastSegment = using.pathSegments.last,
@@ -473,13 +483,15 @@ public class ModuleResolver {
                     module: module.path,
                     target: modulePart,
                     symbol: lastSegment,
-                    kind: .memberImport
+                    kind: .memberImport,
+                    sourceFile: importSourceFile
                 )
             } else {
                 unit.importGraph.addModuleImport(
                     from: module.path,
                     to: using.pathSegments,
-                    kind: .moduleImport
+                    kind: .moduleImport,
+                    sourceFile: importSourceFile
                 )
             }
         }

@@ -308,3 +308,909 @@ given Float64 {
         exp > 0 and exp < 2047
     }
 }
+
+
+// ============================================================================
+// SECTION 9: Float Classification Functions (is_finite, is_sign_positive, is_sign_negative)
+// ============================================================================
+given Float64 {
+    public is_finite(self) Bool = {
+        let bits = self.to_bits()
+        let exp = (bits >> 52) & 2047
+        exp <> 2047
+    }
+
+    public is_sign_positive(self) Bool = {
+        let bits = self.to_bits()
+        (bits >> 63) == 0
+    }
+
+    public is_sign_negative(self) Bool = {
+        let bits = self.to_bits()
+        (bits >> 63) <> 0
+    }
+}
+
+given Float32 {
+    public is_finite(self) Bool = {
+        let bits = self.to_bits()
+        let exp = (bits >> 23) & 255
+        exp <> 255
+    }
+
+    public is_sign_positive(self) Bool = {
+        let bits = self.to_bits()
+        (bits >> 31) == 0
+    }
+
+    public is_sign_negative(self) Bool = {
+        let bits = self.to_bits()
+        (bits >> 31) <> 0
+    }
+}
+
+
+// ============================================================================
+// SECTION 10: Integer Bit Manipulation Functions
+// ============================================================================
+
+// --- UInt (64-bit) ---
+given UInt {
+    public count_ones(self) UInt = {
+        let mut n = self
+        let mut count UInt = 0
+        while n <> 0 then {
+            count = count + (n & 1)
+            n = n >> 1
+        }
+        count
+    }
+
+    public count_zeros(self) UInt = 64 - self.count_ones()
+
+    public leading_zeros(self) UInt = {
+        if self == 0 then 64
+        else {
+            let mut n = self
+            let mut count UInt = 0
+            let mut mask UInt = (UInt)1 << 63
+            while (n & mask) == 0 then {
+                count = count + 1
+                mask = mask >> 1
+            }
+            count
+        }
+    }
+
+    public trailing_zeros(self) UInt = {
+        if self == 0 then 64
+        else {
+            let mut n = self
+            let mut count UInt = 0
+            while (n & 1) == 0 then {
+                count = count + 1
+                n = n >> 1
+            }
+            count
+        }
+    }
+
+    public leading_ones(self) UInt = (~self).leading_zeros()
+    public trailing_ones(self) UInt = (~self).trailing_zeros()
+
+    public rotate_left(self, n UInt) Self = {
+        let bits UInt = 64
+        let shift = n % bits
+        (self << shift) | (self >> (bits - shift))
+    }
+
+    public rotate_right(self, n UInt) Self = {
+        let bits UInt = 64
+        let shift = n % bits
+        (self >> shift) | (self << (bits - shift))
+    }
+
+    public reverse_bits(self) Self = {
+        let mut n = self
+        let mut result UInt = 0
+        let mut i UInt = 0
+        while i < 64 then {
+            result = (result << 1) | (n & 1)
+            n = n >> 1
+            i = i + 1
+        }
+        result
+    }
+
+    public swap_bytes(self) Self = {
+        let b0 = (self & 255) << 56
+        let b1 = ((self >> 8) & 255) << 48
+        let b2 = ((self >> 16) & 255) << 40
+        let b3 = ((self >> 24) & 255) << 32
+        let b4 = ((self >> 32) & 255) << 24
+        let b5 = ((self >> 40) & 255) << 16
+        let b6 = ((self >> 48) & 255) << 8
+        let b7 = (self >> 56) & 255
+        b0 | b1 | b2 | b3 | b4 | b5 | b6 | b7
+    }
+
+    public is_power_of_two(self) Bool = self <> 0 and (self & (self - 1)) == 0
+
+    public next_power_of_two(self) Self = {
+        if self == 0 then 1
+        else if self.is_power_of_two() then self
+        else {
+            let mut n = self - 1
+            n = n | (n >> 1)
+            n = n | (n >> 2)
+            n = n | (n >> 4)
+            n = n | (n >> 8)
+            n = n | (n >> 16)
+            n = n | (n >> 32)
+            n + 1
+        }
+    }
+}
+
+
+// --- UInt64 (64-bit) ---
+given UInt64 {
+    public count_ones(self) UInt = {
+        let mut n = self
+        let mut count UInt = 0
+        while n <> 0 then {
+            count = count + (UInt)(n & 1)
+            n = n >> 1
+        }
+        count
+    }
+
+    public count_zeros(self) UInt = 64 - self.count_ones()
+
+    public leading_zeros(self) UInt = {
+        if self == 0 then 64
+        else {
+            let mut n = self
+            let mut count UInt = 0
+            let mut mask UInt64 = (UInt64)1 << 63
+            while (n & mask) == 0 then {
+                count = count + 1
+                mask = mask >> 1
+            }
+            count
+        }
+    }
+
+    public trailing_zeros(self) UInt = {
+        if self == 0 then 64
+        else {
+            let mut n = self
+            let mut count UInt = 0
+            while (n & 1) == 0 then {
+                count = count + 1
+                n = n >> 1
+            }
+            count
+        }
+    }
+
+    public leading_ones(self) UInt = (~self).leading_zeros()
+    public trailing_ones(self) UInt = (~self).trailing_zeros()
+
+    public rotate_left(self, n UInt) Self = {
+        let shift UInt64 = (UInt64)(n % 64)
+        (self << shift) | (self >> (64 - shift))
+    }
+
+    public rotate_right(self, n UInt) Self = {
+        let shift UInt64 = (UInt64)(n % 64)
+        (self >> shift) | (self << (64 - shift))
+    }
+
+    public reverse_bits(self) Self = {
+        let mut n = self
+        let mut result UInt64 = 0
+        let mut i UInt = 0
+        while i < 64 then {
+            result = (result << 1) | (n & 1)
+            n = n >> 1
+            i = i + 1
+        }
+        result
+    }
+
+    public swap_bytes(self) Self = {
+        let b0 = (self & 255) << 56
+        let b1 = ((self >> 8) & 255) << 48
+        let b2 = ((self >> 16) & 255) << 40
+        let b3 = ((self >> 24) & 255) << 32
+        let b4 = ((self >> 32) & 255) << 24
+        let b5 = ((self >> 40) & 255) << 16
+        let b6 = ((self >> 48) & 255) << 8
+        let b7 = (self >> 56) & 255
+        b0 | b1 | b2 | b3 | b4 | b5 | b6 | b7
+    }
+
+    public is_power_of_two(self) Bool = self <> 0 and (self & (self - 1)) == 0
+
+    public next_power_of_two(self) Self = {
+        if self == 0 then 1
+        else if self.is_power_of_two() then self
+        else {
+            let mut n = self - 1
+            n = n | (n >> 1)
+            n = n | (n >> 2)
+            n = n | (n >> 4)
+            n = n | (n >> 8)
+            n = n | (n >> 16)
+            n = n | (n >> 32)
+            n + 1
+        }
+    }
+}
+
+// --- UInt32 (32-bit) ---
+given UInt32 {
+    public count_ones(self) UInt = {
+        let mut n = self
+        let mut count UInt = 0
+        while n <> 0 then {
+            count = count + (UInt)(n & 1)
+            n = n >> 1
+        }
+        count
+    }
+
+    public count_zeros(self) UInt = 32 - self.count_ones()
+
+    public leading_zeros(self) UInt = {
+        if self == 0 then 32
+        else {
+            let mut n = self
+            let mut count UInt = 0
+            let mut mask UInt32 = (UInt32)1 << 31
+            while (n & mask) == 0 then {
+                count = count + 1
+                mask = mask >> 1
+            }
+            count
+        }
+    }
+
+    public trailing_zeros(self) UInt = {
+        if self == 0 then 32
+        else {
+            let mut n = self
+            let mut count UInt = 0
+            while (n & 1) == 0 then {
+                count = count + 1
+                n = n >> 1
+            }
+            count
+        }
+    }
+
+    public leading_ones(self) UInt = (~self).leading_zeros()
+    public trailing_ones(self) UInt = (~self).trailing_zeros()
+
+    public rotate_left(self, n UInt) Self = {
+        let shift UInt32 = (UInt32)(n % 32)
+        (self << shift) | (self >> (32 - shift))
+    }
+
+    public rotate_right(self, n UInt) Self = {
+        let shift UInt32 = (UInt32)(n % 32)
+        (self >> shift) | (self << (32 - shift))
+    }
+
+    public reverse_bits(self) Self = {
+        let mut n = self
+        let mut result UInt32 = 0
+        let mut i UInt = 0
+        while i < 32 then {
+            result = (result << 1) | (n & 1)
+            n = n >> 1
+            i = i + 1
+        }
+        result
+    }
+
+    public swap_bytes(self) Self = {
+        let b0 = (self & 255) << 24
+        let b1 = ((self >> 8) & 255) << 16
+        let b2 = ((self >> 16) & 255) << 8
+        let b3 = (self >> 24) & 255
+        b0 | b1 | b2 | b3
+    }
+
+    public is_power_of_two(self) Bool = self <> 0 and (self & (self - 1)) == 0
+
+    public next_power_of_two(self) Self = {
+        if self == 0 then 1
+        else if self.is_power_of_two() then self
+        else {
+            let mut n = self - 1
+            n = n | (n >> 1)
+            n = n | (n >> 2)
+            n = n | (n >> 4)
+            n = n | (n >> 8)
+            n = n | (n >> 16)
+            n + 1
+        }
+    }
+}
+
+
+// --- UInt16 (16-bit) ---
+given UInt16 {
+    public count_ones(self) UInt = {
+        let mut n = self
+        let mut count UInt = 0
+        while n <> 0 then {
+            count = count + (UInt)(n & 1)
+            n = n >> 1
+        }
+        count
+    }
+
+    public count_zeros(self) UInt = 16 - self.count_ones()
+
+    public leading_zeros(self) UInt = {
+        if self == 0 then 16
+        else {
+            let mut n = self
+            let mut count UInt = 0
+            let mut mask UInt16 = (UInt16)1 << 15
+            while (n & mask) == 0 then {
+                count = count + 1
+                mask = mask >> 1
+            }
+            count
+        }
+    }
+
+    public trailing_zeros(self) UInt = {
+        if self == 0 then 16
+        else {
+            let mut n = self
+            let mut count UInt = 0
+            while (n & 1) == 0 then {
+                count = count + 1
+                n = n >> 1
+            }
+            count
+        }
+    }
+
+    public leading_ones(self) UInt = (~self).leading_zeros()
+    public trailing_ones(self) UInt = (~self).trailing_zeros()
+
+    public rotate_left(self, n UInt) Self = {
+        let shift UInt16 = (UInt16)(n % 16)
+        (self << shift) | (self >> (16 - shift))
+    }
+
+    public rotate_right(self, n UInt) Self = {
+        let shift UInt16 = (UInt16)(n % 16)
+        (self >> shift) | (self << (16 - shift))
+    }
+
+    public reverse_bits(self) Self = {
+        let mut n = self
+        let mut result UInt16 = 0
+        let mut i UInt = 0
+        while i < 16 then {
+            result = (result << 1) | (n & 1)
+            n = n >> 1
+            i = i + 1
+        }
+        result
+    }
+
+    public swap_bytes(self) Self = {
+        let b0 = (self & 255) << 8
+        let b1 = (self >> 8) & 255
+        b0 | b1
+    }
+
+    public is_power_of_two(self) Bool = self <> 0 and (self & (self - 1)) == 0
+
+    public next_power_of_two(self) Self = {
+        if self == 0 then 1
+        else if self.is_power_of_two() then self
+        else {
+            let mut n = self - 1
+            n = n | (n >> 1)
+            n = n | (n >> 2)
+            n = n | (n >> 4)
+            n = n | (n >> 8)
+            n + 1
+        }
+    }
+}
+
+// --- UInt8 (8-bit) ---
+given UInt8 {
+    public count_ones(self) UInt = {
+        let mut n = self
+        let mut count UInt = 0
+        while n <> 0 then {
+            count = count + (UInt)(n & 1)
+            n = n >> 1
+        }
+        count
+    }
+
+    public count_zeros(self) UInt = 8 - self.count_ones()
+
+    public leading_zeros(self) UInt = {
+        if self == 0 then 8
+        else {
+            let mut n = self
+            let mut count UInt = 0
+            let mut mask UInt8 = (UInt8)1 << 7
+            while (n & mask) == 0 then {
+                count = count + 1
+                mask = mask >> 1
+            }
+            count
+        }
+    }
+
+    public trailing_zeros(self) UInt = {
+        if self == 0 then 8
+        else {
+            let mut n = self
+            let mut count UInt = 0
+            while (n & 1) == 0 then {
+                count = count + 1
+                n = n >> 1
+            }
+            count
+        }
+    }
+
+    public leading_ones(self) UInt = (~self).leading_zeros()
+    public trailing_ones(self) UInt = (~self).trailing_zeros()
+
+    public rotate_left(self, n UInt) Self = {
+        let shift UInt8 = (UInt8)(n % 8)
+        (self << shift) | (self >> (8 - shift))
+    }
+
+    public rotate_right(self, n UInt) Self = {
+        let shift UInt8 = (UInt8)(n % 8)
+        (self >> shift) | (self << (8 - shift))
+    }
+
+    public reverse_bits(self) Self = {
+        let mut n = self
+        let mut result UInt8 = 0
+        let mut i UInt = 0
+        while i < 8 then {
+            result = (result << 1) | (n & 1)
+            n = n >> 1
+            i = i + 1
+        }
+        result
+    }
+
+    public swap_bytes(self) Self = self
+
+    public is_power_of_two(self) Bool = self <> 0 and (self & (self - 1)) == 0
+
+    public next_power_of_two(self) Self = {
+        if self == 0 then 1
+        else if self.is_power_of_two() then self
+        else {
+            let mut n = self - 1
+            n = n | (n >> 1)
+            n = n | (n >> 2)
+            n = n | (n >> 4)
+            n + 1
+        }
+    }
+}
+
+
+// --- Int (64-bit, signed) ---
+given Int {
+    public count_ones(self) UInt = {
+        let mut n = self
+        let mut count UInt = 0
+        let mut i UInt = 0
+        while i < 64 then {
+            count = count + (UInt)(n & 1)
+            n = n >> 1
+            i = i + 1
+        }
+        count
+    }
+
+    public count_zeros(self) UInt = 64 - self.count_ones()
+
+    public leading_zeros(self) UInt = {
+        if self == 0 then 64
+        else {
+            let mut n = self
+            let mut count UInt = 0
+            let mut mask Int = (Int)((UInt)1 << 63)
+            while (n & mask) == 0 then {
+                count = count + 1
+                mask = (Int)((UInt)mask >> 1)
+            }
+            count
+        }
+    }
+
+    public trailing_zeros(self) UInt = {
+        if self == 0 then 64
+        else {
+            let mut n = self
+            let mut count UInt = 0
+            while (n & 1) == 0 then {
+                count = count + 1
+                n = n >> 1
+            }
+            count
+        }
+    }
+
+    public leading_ones(self) UInt = (~self).leading_zeros()
+    public trailing_ones(self) UInt = (~self).trailing_zeros()
+
+    public rotate_left(self, n UInt) Self = {
+        let bits UInt = 64
+        let shift = n % bits
+        let u = (UInt)self
+        (Int)((u << shift) | (u >> (bits - shift)))
+    }
+
+    public rotate_right(self, n UInt) Self = {
+        let bits UInt = 64
+        let shift = n % bits
+        let u = (UInt)self
+        (Int)((u >> shift) | (u << (bits - shift)))
+    }
+
+    public reverse_bits(self) Self = {
+        let mut n = (UInt)self
+        let mut result UInt = 0
+        let mut i UInt = 0
+        while i < 64 then {
+            result = (result << 1) | (n & 1)
+            n = n >> 1
+            i = i + 1
+        }
+        (Int)result
+    }
+
+    public swap_bytes(self) Self = {
+        let u = (UInt)self
+        let b0 = (u & 255) << 56
+        let b1 = ((u >> 8) & 255) << 48
+        let b2 = ((u >> 16) & 255) << 40
+        let b3 = ((u >> 24) & 255) << 32
+        let b4 = ((u >> 32) & 255) << 24
+        let b5 = ((u >> 40) & 255) << 16
+        let b6 = ((u >> 48) & 255) << 8
+        let b7 = (u >> 56) & 255
+        (Int)(b0 | b1 | b2 | b3 | b4 | b5 | b6 | b7)
+    }
+}
+
+// --- Int64 (64-bit, signed) ---
+given Int64 {
+    public count_ones(self) UInt = {
+        let mut n = self
+        let mut count UInt = 0
+        let mut i UInt = 0
+        while i < 64 then {
+            count = count + (UInt)(n & 1)
+            n = n >> 1
+            i = i + 1
+        }
+        count
+    }
+
+    public count_zeros(self) UInt = 64 - self.count_ones()
+
+    public leading_zeros(self) UInt = {
+        if self == 0 then 64
+        else {
+            let mut n = self
+            let mut count UInt = 0
+            let mut mask Int64 = (Int64)((UInt64)1 << 63)
+            while (n & mask) == 0 then {
+                count = count + 1
+                mask = (Int64)((UInt64)mask >> 1)
+            }
+            count
+        }
+    }
+
+    public trailing_zeros(self) UInt = {
+        if self == 0 then 64
+        else {
+            let mut n = self
+            let mut count UInt = 0
+            while (n & 1) == 0 then {
+                count = count + 1
+                n = n >> 1
+            }
+            count
+        }
+    }
+
+    public leading_ones(self) UInt = (~self).leading_zeros()
+    public trailing_ones(self) UInt = (~self).trailing_zeros()
+
+    public rotate_left(self, n UInt) Self = {
+        let shift UInt64 = (UInt64)(n % 64)
+        let u = (UInt64)self
+        (Int64)((u << shift) | (u >> (64 - shift)))
+    }
+
+    public rotate_right(self, n UInt) Self = {
+        let shift UInt64 = (UInt64)(n % 64)
+        let u = (UInt64)self
+        (Int64)((u >> shift) | (u << (64 - shift)))
+    }
+
+    public reverse_bits(self) Self = {
+        let mut n = (UInt64)self
+        let mut result UInt64 = 0
+        let mut i UInt = 0
+        while i < 64 then {
+            result = (result << 1) | (n & 1)
+            n = n >> 1
+            i = i + 1
+        }
+        (Int64)result
+    }
+
+    public swap_bytes(self) Self = {
+        let u = (UInt64)self
+        let b0 = (u & 255) << 56
+        let b1 = ((u >> 8) & 255) << 48
+        let b2 = ((u >> 16) & 255) << 40
+        let b3 = ((u >> 24) & 255) << 32
+        let b4 = ((u >> 32) & 255) << 24
+        let b5 = ((u >> 40) & 255) << 16
+        let b6 = ((u >> 48) & 255) << 8
+        let b7 = (u >> 56) & 255
+        (Int64)(b0 | b1 | b2 | b3 | b4 | b5 | b6 | b7)
+    }
+}
+
+
+// --- Int32 (32-bit, signed) ---
+given Int32 {
+    public count_ones(self) UInt = {
+        let mut n = self
+        let mut count UInt = 0
+        let mut i UInt = 0
+        while i < 32 then {
+            count = count + (UInt)(n & 1)
+            n = n >> 1
+            i = i + 1
+        }
+        count
+    }
+
+    public count_zeros(self) UInt = 32 - self.count_ones()
+
+    public leading_zeros(self) UInt = {
+        if self == 0 then 32
+        else {
+            let mut n = self
+            let mut count UInt = 0
+            let mut mask Int32 = (Int32)((UInt32)1 << 31)
+            while (n & mask) == 0 then {
+                count = count + 1
+                mask = (Int32)((UInt32)mask >> 1)
+            }
+            count
+        }
+    }
+
+    public trailing_zeros(self) UInt = {
+        if self == 0 then 32
+        else {
+            let mut n = self
+            let mut count UInt = 0
+            while (n & 1) == 0 then {
+                count = count + 1
+                n = n >> 1
+            }
+            count
+        }
+    }
+
+    public leading_ones(self) UInt = (~self).leading_zeros()
+    public trailing_ones(self) UInt = (~self).trailing_zeros()
+
+    public rotate_left(self, n UInt) Self = {
+        let shift UInt32 = (UInt32)(n % 32)
+        let u = (UInt32)self
+        (Int32)((u << shift) | (u >> (32 - shift)))
+    }
+
+    public rotate_right(self, n UInt) Self = {
+        let shift UInt32 = (UInt32)(n % 32)
+        let u = (UInt32)self
+        (Int32)((u >> shift) | (u << (32 - shift)))
+    }
+
+    public reverse_bits(self) Self = {
+        let mut n = (UInt32)self
+        let mut result UInt32 = 0
+        let mut i UInt = 0
+        while i < 32 then {
+            result = (result << 1) | (n & 1)
+            n = n >> 1
+            i = i + 1
+        }
+        (Int32)result
+    }
+
+    public swap_bytes(self) Self = {
+        let u = (UInt32)self
+        let b0 = (u & 255) << 24
+        let b1 = ((u >> 8) & 255) << 16
+        let b2 = ((u >> 16) & 255) << 8
+        let b3 = (u >> 24) & 255
+        (Int32)(b0 | b1 | b2 | b3)
+    }
+}
+
+// --- Int16 (16-bit, signed) ---
+given Int16 {
+    public count_ones(self) UInt = {
+        let mut n = self
+        let mut count UInt = 0
+        let mut i UInt = 0
+        while i < 16 then {
+            count = count + (UInt)(n & 1)
+            n = n >> 1
+            i = i + 1
+        }
+        count
+    }
+
+    public count_zeros(self) UInt = 16 - self.count_ones()
+
+    public leading_zeros(self) UInt = {
+        if self == 0 then 16
+        else {
+            let mut n = self
+            let mut count UInt = 0
+            let mut mask Int16 = (Int16)((UInt16)1 << 15)
+            while (n & mask) == 0 then {
+                count = count + 1
+                mask = (Int16)((UInt16)mask >> 1)
+            }
+            count
+        }
+    }
+
+    public trailing_zeros(self) UInt = {
+        if self == 0 then 16
+        else {
+            let mut n = self
+            let mut count UInt = 0
+            while (n & 1) == 0 then {
+                count = count + 1
+                n = n >> 1
+            }
+            count
+        }
+    }
+
+    public leading_ones(self) UInt = (~self).leading_zeros()
+    public trailing_ones(self) UInt = (~self).trailing_zeros()
+
+    public rotate_left(self, n UInt) Self = {
+        let shift UInt16 = (UInt16)(n % 16)
+        let u = (UInt16)self
+        (Int16)((u << shift) | (u >> (16 - shift)))
+    }
+
+    public rotate_right(self, n UInt) Self = {
+        let shift UInt16 = (UInt16)(n % 16)
+        let u = (UInt16)self
+        (Int16)((u >> shift) | (u << (16 - shift)))
+    }
+
+    public reverse_bits(self) Self = {
+        let mut n = (UInt16)self
+        let mut result UInt16 = 0
+        let mut i UInt = 0
+        while i < 16 then {
+            result = (result << 1) | (n & 1)
+            n = n >> 1
+            i = i + 1
+        }
+        (Int16)result
+    }
+
+    public swap_bytes(self) Self = {
+        let u = (UInt16)self
+        let b0 = (u & 255) << 8
+        let b1 = (u >> 8) & 255
+        (Int16)(b0 | b1)
+    }
+}
+
+// --- Int8 (8-bit, signed) ---
+given Int8 {
+    public count_ones(self) UInt = {
+        let mut n = self
+        let mut count UInt = 0
+        let mut i UInt = 0
+        while i < 8 then {
+            count = count + (UInt)(n & 1)
+            n = n >> 1
+            i = i + 1
+        }
+        count
+    }
+
+    public count_zeros(self) UInt = 8 - self.count_ones()
+
+    public leading_zeros(self) UInt = {
+        if self == 0 then 8
+        else {
+            let mut n = self
+            let mut count UInt = 0
+            let mut mask Int8 = (Int8)((UInt8)1 << 7)
+            while (n & mask) == 0 then {
+                count = count + 1
+                mask = (Int8)((UInt8)mask >> 1)
+            }
+            count
+        }
+    }
+
+    public trailing_zeros(self) UInt = {
+        if self == 0 then 8
+        else {
+            let mut n = self
+            let mut count UInt = 0
+            while (n & 1) == 0 then {
+                count = count + 1
+                n = n >> 1
+            }
+            count
+        }
+    }
+
+    public leading_ones(self) UInt = (~self).leading_zeros()
+    public trailing_ones(self) UInt = (~self).trailing_zeros()
+
+    public rotate_left(self, n UInt) Self = {
+        let shift UInt8 = (UInt8)(n % 8)
+        let u = (UInt8)self
+        (Int8)((u << shift) | (u >> (8 - shift)))
+    }
+
+    public rotate_right(self, n UInt) Self = {
+        let shift UInt8 = (UInt8)(n % 8)
+        let u = (UInt8)self
+        (Int8)((u >> shift) | (u << (8 - shift)))
+    }
+
+    public reverse_bits(self) Self = {
+        let mut n = (UInt8)self
+        let mut result UInt8 = 0
+        let mut i UInt = 0
+        while i < 8 then {
+            result = (result << 1) | (n & 1)
+            n = n >> 1
+            i = i + 1
+        }
+        (Int8)result
+    }
+
+    public swap_bytes(self) Self = self
+}
