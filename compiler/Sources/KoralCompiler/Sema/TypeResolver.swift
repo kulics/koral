@@ -109,6 +109,8 @@ public class TypeResolver: CompilerPass {
 
         // Pass 2: 注册 given 方法签名到 TypeChecker（用于后续体检查）
         if let checker {
+            checker.deferGenericConstraintValidation = true
+            defer { checker.deferGenericConstraintValidation = false }
             for (index, node) in astNodes.enumerated() {
                 if case .usingDeclaration = node { continue }
                 if case .foreignUsingDeclaration = node { continue }

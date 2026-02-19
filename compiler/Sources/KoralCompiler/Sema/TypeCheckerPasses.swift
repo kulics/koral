@@ -482,7 +482,8 @@ extension TypeChecker {
         typeParameters: typeParameters,
         superTraits: resolvedSuperTraits,
         methods: methods,
-        access: access
+        access: access,
+        modulePath: currentModulePath
       )
       // Track std library traits
       if isStdLib {

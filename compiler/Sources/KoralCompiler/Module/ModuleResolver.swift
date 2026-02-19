@@ -207,7 +207,7 @@ public class CompilationUnit {
         for (_, submodule) in module.submodules.sorted(by: { $0.key < $1.key }) {
             collectGlobalNodesWithSourceInfo(from: submodule, into: &result)
         }
-        
+
         // 收集当前模块的节点（包含来源信息）
         for (node, sourceFile) in module.globalNodes {
             result.append((node: node, sourceFile: sourceFile, modulePath: module.path))
@@ -435,6 +435,18 @@ public class ModuleResolver {
                     from: module.path,
                     to: targetPath,
                     kind: .batchImport,
+                    sourceFile: importSourceFile
+                )
+            } else if remainingSegments.count == 1,
+                      let onlySegment = remainingSegments.first,
+                      let firstChar = onlySegment.first,
+                      firstChar.isUppercase {
+                // 成员导入：using super.Symbol
+                unit.importGraph.addSymbolImport(
+                    module: module.path,
+                    target: targetPath,
+                    symbol: onlySegment,
+                    kind: .memberImport,
                     sourceFile: importSourceFile
                 )
             } else if remainingSegments.count >= 2,

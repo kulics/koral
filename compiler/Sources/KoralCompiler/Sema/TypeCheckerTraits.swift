@@ -12,6 +12,23 @@ extension TypeChecker {
 
   func validateTraitName(_ name: String) throws {
     try SemaUtils.validateTraitName(name, traits: traits, currentLine: currentLine)
+
+    let traitModulePath = traits[name]?.modulePath ?? []
+    if traitModulePath.isEmpty || traitModulePath == currentModulePath {
+      return
+    }
+
+    do {
+      try visibilityChecker.checkSymbolVisibility(
+        symbolModulePath: traitModulePath,
+        symbolName: name,
+        currentModulePath: currentModulePath,
+        currentSourceFile: currentSourceFile,
+        importGraph: importGraph
+      )
+    } catch let error as VisibilityError {
+      throw SemanticError(.generic(error.description), line: currentLine)
+    }
   }
 
   func flattenedTraitMethods(_ traitName: String) throws -> [String: TraitMethodSignature] {

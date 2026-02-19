@@ -827,11 +827,13 @@ public class CodeGen {
       // 然后生成所有函数声明
       for node in nodes {
         if case .globalFunction(let identifier, let params, _) = node {
+          if context.containsGenericParameter(identifier.type) { continue }
           generateFunctionDeclaration(identifier, params)
         }
         if case .givenDeclaration(let type, let methods) = node {
           if context.containsGenericParameter(type) { continue }
           for method in methods {
+            if context.containsGenericParameter(method.identifier.type) { continue }
             generateFunctionDeclaration(method.identifier, method.parameters)
           }
         }
@@ -879,11 +881,13 @@ public class CodeGen {
       // 生成函数实现
       for node in nodes {
         if case .globalFunction(let identifier, let params, let body) = node {
+          if context.containsGenericParameter(identifier.type) { continue }
           generateGlobalFunction(identifier, params, body)
         }
         if case .givenDeclaration(let type, let methods) = node {
           if context.containsGenericParameter(type) { continue }
           for method in methods {
+            if context.containsGenericParameter(method.identifier.type) { continue }
             generateGlobalFunction(method.identifier, method.parameters, method.body)
           }
         }

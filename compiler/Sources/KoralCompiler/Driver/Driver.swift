@@ -371,6 +371,14 @@ public class Driver {
       clangArgs.append("-l\(lib)")
     }
 
+    #if os(Windows)
+    // koral_runtime.c uses BCryptGenRandom on Windows.
+    // Ensure bcrypt is linked even when not requested by foreign using.
+    if !linkedLibraries.contains("bcrypt") {
+      clangArgs.append("-lbcrypt")
+    }
+    #endif
+
     #if os(macOS)
     if let sdkPath = getSDKPath() {
         clangArgs.append(contentsOf: ["-isysroot", sdkPath])

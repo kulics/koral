@@ -66,7 +66,9 @@ extension TypeChecker {
         }
         
         // Validate generic constraints
-        try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
+        if !deferGenericConstraintValidation {
+          try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
+        }
         
         // Build recursion detection key
         let recursionKey = "\(base)<\(resolvedArgs.map { $0.description }.joined(separator: ","))>"
@@ -101,7 +103,9 @@ extension TypeChecker {
         }
         
         // Validate generic constraints
-        try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
+        if !deferGenericConstraintValidation {
+          try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
+        }
         
         // Build recursion detection key
         let recursionKey = "\(base)<\(resolvedArgs.map { $0.description }.joined(separator: ","))>"
@@ -180,7 +184,9 @@ extension TypeChecker {
         }
         
         // Validate generic constraints
-        try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
+        if !deferGenericConstraintValidation {
+          try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
+        }
         
         // Record instantiation request for deferred monomorphization
         if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
@@ -204,7 +210,9 @@ extension TypeChecker {
         }
         
         // Validate generic constraints
-        try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
+        if !deferGenericConstraintValidation {
+          try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
+        }
         
         // Record instantiation request for deferred monomorphization
         if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {

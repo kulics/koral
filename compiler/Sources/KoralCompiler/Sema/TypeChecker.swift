@@ -39,6 +39,10 @@ public class TypeChecker {
   // Cache for validated generic constraint checks: "Template<Arg1,Arg2>" -> passed
   var genericConstraintCache: Set<String> = []
 
+  // When true, generic constraints on type nodes are not enforced during signature collection.
+  // This avoids order-dependent false negatives across modules/submodules.
+  var deferGenericConstraintValidation: Bool = false
+
   // Generic parameter name -> list of trait constraints currently in scope
   // Stores full TraitConstraint to preserve type arguments for generic traits
   var genericTraitBounds: [String: [TraitConstraint]] = [:]
@@ -268,9 +272,7 @@ public class TypeChecker {
   /// 检查符号的模块是否可以从当前模块直接访问
   /// 允许访问的情况：
   /// 1. 符号与当前代码在同一模块（modulePath 相同）
-  /// 2. 符号来自父模块（符号的 modulePath 是当前 modulePath 的前缀）
-  /// 3. 符号来自标准库根模块（modulePath 为 ["std"]）
-  /// 4. 符号来自同一编译单元的根模块
+  /// 2. 符号来自标准库根模块（modulePath 为 ["std"]）
   func isModuleAccessible(symbolModulePath: [String], currentModulePath: [String]) -> Bool {
     // 空路径总是可访问（局部变量/参数）
     if symbolModulePath.isEmpty {
@@ -285,28 +287,6 @@ public class TypeChecker {
     // 标准库根模块的符号总是可访问
     if symbolModulePath.count == 1 && symbolModulePath[0] == "std" {
       return true
-    }
-    
-    // 检查符号是否来自父模块（符号的 modulePath 是当前 modulePath 的前缀）
-    // 例如：当前在 ["expr_eval", "frontend"]，符号在 ["expr_eval"]
-    if symbolModulePath.count < currentModulePath.count {
-      let prefix = Array(currentModulePath.prefix(symbolModulePath.count))
-      if prefix == symbolModulePath {
-        return true
-      }
-    }
-    
-    // 检查符号是否来自同一编译单元的根模块
-    // 例如：当前在 ["expr_eval"]，符号也在 ["expr_eval"] 的某个文件
-    if !currentModulePath.isEmpty && !symbolModulePath.isEmpty {
-      // 同一编译单元：根模块名相同
-      if currentModulePath[0] == symbolModulePath[0] {
-        // 如果符号来自子模块，不允许直接访问
-        // 例如：当前在 ["expr_eval"]，符号在 ["expr_eval", "frontend"]
-        if symbolModulePath.count > currentModulePath.count {
-          return false
-        }
-      }
     }
     
     return false
