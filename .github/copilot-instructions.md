@@ -5,10 +5,10 @@
   - 可执行文件 `koralc`（入口：`compiler/Sources/koralc/main.swift`）
   - 库 `KoralCompiler`（核心实现）
 - 编译流水线由 `compiler/Sources/KoralCompiler/Driver/Driver.swift` 的 `Driver` 串起：
-  1) 读取 stdlib：`compiler/Sources/std/std.koral`（入口文件，内部用 `using` 合并标准库，走 `ModuleResolver`）
-  2) 模块解析：`ModuleResolver` 统一处理单文件/多文件与 `using` 依赖，收集节点与来源信息
+  1) 读取 stdlib：`std/std.koral`（由 `Driver` 预加载，再经 `ModuleResolver` 解析）
+  2) 模块解析：`ModuleResolver` 统一处理单文件/多文件与 `using`，收集节点与来源信息
   3) 语义分析：`TypeChecker`（合并 std/user 的 `ImportGraph`）→ `Monomorphizer`（泛型专门化）
-  4) 代码生成：`CodeGen.generate()` 生成 C，并根据 `foreign using` 的库名追加 `-l<name>`，调用 `clang` 编译
+  4) 代码生成：`CodeGen.generate()` 生成 C；根据 `foreign using` 追加 `-l<name>`；如存在 `std/koral_runtime.c` 会一并传给 `clang`
   5) 诊断输出：`SourceManager` 负责错误片段渲染（std 源文件会以 `std/<file>` 的展示名注册）
 
 ## 主要改动入口（按模块改，不要堆在 Driver）
@@ -18,11 +18,12 @@
 - 泛型单态化：`compiler/Sources/KoralCompiler/Monomorphization/Monomorphizer.swift`
 - 诊断与错误渲染：`compiler/Sources/KoralCompiler/Diagnostics/`
 - C 后端：`compiler/Sources/KoralCompiler/CodeGen/CodeGen.swift`
-- 标准库：`compiler/Sources/std/std.koral`（入口文件，默认每次编译都会被加载并拼接到用户 AST 前面）
+- 标准库：`std/std.koral`（入口文件，默认每次编译都会被加载并拼接到用户 AST 前面）
 
 ## 模块系统注意事项（实现约束）
 - 模块入口文件名必须是合法模块名：小写字母开头，只能包含小写字母/数字/下划线；否则会报 `invalidEntryFileName`。
 - 外部模块解析顺序：先标准库路径，再 `externalPaths`；找不到会抛 `externalModuleNotFound`。
+- `using std...` 不会触发外部模块文件系统加载（标准库已由 `Driver` 预加载），主要用于可见性/导入图。
 
 ## CLI 用法（当前实现）
 - `koralc <file.koral> [options]`：默认 `build`
@@ -43,18 +44,19 @@
 
 ## 外部依赖（很关键）
 - `koralc` 会直接调用 `clang`（见 `Driver.process(...)`）。必须确保 `clang` 在 `PATH` 上能被找到。
-- Windows：`Driver` 会在 `PATH/Path/path` 里找 `clang.exe`（也会尝试 `.cmd/.bat`）。安装 LLVM 或其他提供 `clang.exe` 的工具链后，确认终端里运行 `clang --version` 可用。
+- Windows：`Driver` 会在 `PATH/Path/path` 里找 `clang`，并尝试扩展名 `.exe/.cmd/.bat`。安装 LLVM 或其他提供 `clang.exe` 的工具链后，确认终端里运行 `clang --version` 可用。
 
 ## stdlib 定位与环境变量（容易踩坑）
 - `Driver.getCoreLibPath()` 的查找顺序：
-  1) `KORAL_HOME`：期望 `$KORAL_HOME/compiler/Sources/std/std.koral`
-  2) 当前工作目录下的 `Sources/std/std.koral`（SwiftPM 构建目录）
-  3) 当前工作目录下的 `compiler/Sources/std/std.koral`（仓库根目录运行测试）
+  1) `KORAL_HOME`：期望 `$KORAL_HOME/std/std.koral`
+  2) 当前工作目录下的 `std/std.koral`
+  3) 当前工作目录父目录下的 `std/std.koral`
+  4) 当前工作目录上两级目录下的 `std/std.koral`
 - `Driver.getStdLibPath()` 也用于模块解析的标准库根目录定位（同样的查找顺序，但目录为 `.../std/`）。
 - 如果你在非预期目录运行 `koralc` 导致找不到 stdlib，直接把 `KORAL_HOME` 设为仓库根目录最稳。
 
 ## 测试（本仓库的真实运行方式）
-- 集成测试在 `compiler/Tests/koralcTests/IntegrationTests.swift`：遍历 `compiler/Tests/Cases/*.koral`。
+- 集成测试在 `compiler/Tests/koralcTests/IntegrationTests.swift`：通过显式 `test_xxx` 方法调用 `runCase(...)` 覆盖 `compiler/Tests/Cases/` 下用例（含部分子目录入口文件）。
 - 用例通过注释断言输出（子串匹配、按顺序向前扫描）：
   - `// EXPECT: <substring>`：期望标准输出包含该子串
   - `// EXPECT-ERROR: <substring>`：期望非零退出码 + 输出包含该子串
