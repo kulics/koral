@@ -1239,6 +1239,7 @@ extension TypeChecker {
         
         // Also try looking up the type from global scope (for types not yet in module's publicTypes)
         if let type = currentScope.lookupType(typeName) {
+          try checkTypeVisibility(type: type, typeName: typeName)
           if case .structure(let defId) = type {
             let name = context.getName(defId) ?? ""
             if let methods = extensionMethods[name], let methodSym = methods[methodName] {
@@ -2159,7 +2160,7 @@ extension TypeChecker {
         type: returnType
       )
     } else {
-      throw SemanticError.undefinedType(base)
+      throw SemanticError.functionNotFound(base)
     }
   }
   

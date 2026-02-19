@@ -1,0 +1,86 @@
+// EXPECT: utc_name_ok
+// EXPECT: utc_offset_ok
+// EXPECT: fixed_positive_ok
+// EXPECT: fixed_negative_ok
+// EXPECT: fixed_overflow_ok
+// EXPECT: fixed_underflow_ok
+// EXPECT: fixed_zero_ok
+// EXPECT: invalid_name_ok
+// EXPECT: equals_ok
+
+using std.time.*
+
+let main() Int = {
+    // UTC name
+    let utc = TimeZone.utc()
+    assert(utc.name() == "UTC", "utc name")
+    print_line("utc_name_ok")
+
+    // UTC offset is zero
+    let epoch = DateTime.epoch()
+    let off = utc.offset_at(epoch)
+    assert(off.secs == (Int64)0, "utc offset secs")
+    assert(off.nanos == (Int64)0, "utc offset nanos")
+    print_line("utc_offset_ok")
+
+    // from_offset positive
+    let r1 = TimeZone.from_offset(Duration.from_secs(3600))
+    if r1 is .Ok(tz) then {
+        assert(tz.name() == "+01:00", "fixed +1h name")
+        let o = tz.offset_at(epoch)
+        assert(o.secs == (Int64)3600, "fixed +1h offset")
+    } else {
+        assert(false, "should be Ok")
+    }
+    print_line("fixed_positive_ok")
+
+    // from_offset negative
+    let r2 = TimeZone.from_offset(Duration.from_secs(-18000))
+    if r2 is .Ok(tz) then {
+        assert(tz.name() == "-05:00", "fixed -5h name")
+    } else {
+        assert(false, "should be Ok")
+    }
+    print_line("fixed_negative_ok")
+
+    // from_offset overflow (>= 86400)
+    let r3 = TimeZone.from_offset(Duration.from_secs(86400))
+    if r3 is .Ok(_) then { assert(false, "should be Error") }
+    print_line("fixed_overflow_ok")
+
+    // from_offset underflow (<= -86400)
+    let r4 = TimeZone.from_offset(Duration.from_secs(-86400))
+    if r4 is .Ok(_) then { assert(false, "should be Error") }
+    print_line("fixed_underflow_ok")
+
+    // from_offset zero
+    let r5 = TimeZone.from_offset(Duration.from_secs(0))
+    if r5 is .Ok(tz) then {
+        let o = tz.offset_at(epoch)
+        assert(o.secs == (Int64)0, "zero offset")
+    } else {
+        assert(false, "should be Ok")
+    }
+    print_line("fixed_zero_ok")
+
+    // from_name invalid
+    let r6 = TimeZone.from_name("Invalid/Zone")
+    if r6 is .Some(_) then { assert(false, "should be None") }
+    print_line("invalid_name_ok")
+
+    // equals: same fixed offset
+    let r7 = TimeZone.from_offset(Duration.from_secs(7200))
+    let r8 = TimeZone.from_offset(Duration.from_secs(7200))
+    if r7 is .Ok(a) then {
+        if r8 is .Ok(b) then {
+            assert(a.equals(b), "fixed equals")
+        } else {
+            assert(false, "r8 err")
+        }
+    } else {
+        assert(false, "r7 err")
+    }
+    print_line("equals_ok")
+
+    0
+}

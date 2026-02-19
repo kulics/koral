@@ -1218,7 +1218,7 @@ extension TypeChecker {
         currentScope.defineFunctionWithModulePath(name, functionType, modulePath: currentModulePath)
       }
       
-    case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, _, let span):
+    case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, let access, let span):
       self.currentSpan = span
       // Register intrinsic function signature so it can be called from methods defined earlier
       if typeParameters.isEmpty {
@@ -1230,8 +1230,29 @@ extension TypeChecker {
         }
         let functionType = Type.function(parameters: params, returns: returnType)
         currentScope.defineFunctionWithModulePath(name, functionType, modulePath: currentModulePath)
+      } else {
+        // Register generic intrinsic function template in pass 2 so that
+        // submodule code processed in pass 3 can find it (submodule nodes
+        // are collected before parent module nodes).
+        let defId = defIdMap.lookupGenericFunctionTemplateDefId(name)
+          ?? defIdMap.allocate(
+            modulePath: currentModulePath,
+            name: name,
+            kind: .genericTemplate(.function),
+            sourceFile: currentSourceFile,
+            access: access,
+            span: span
+          )
+        let dummyBody = ExpressionNode.booleanLiteral(false)
+        let template = GenericFunctionTemplate(
+          defId: defId,
+          typeParameters: typeParameters,
+          parameters: parameters,
+          returnType: returnTypeNode,
+          body: dummyBody
+        )
+        currentScope.defineGenericFunctionTemplate(name, template: template)
       }
-      // Generic intrinsic functions are handled in pass 3
       
     default:
       // Other declarations are handled in pass 3
