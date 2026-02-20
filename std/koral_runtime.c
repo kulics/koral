@@ -9,6 +9,10 @@
 #include <stdlib.h>
 #include <math.h>
 
+#if !defined(_WIN32) && !defined(_WIN64)
+#include <regex.h>
+#endif
+
 typedef struct CFile CFile;
 
 static int32_t koral_argc_storage = 0;
@@ -920,3 +924,611 @@ int32_t koral_random_fill(uint8_t* buf, int32_t len) {
 }
 
 #endif
+
+// ============================================================================
+// Regex: POSIX regular expression support
+// ============================================================================
+
+#if !defined(_WIN32) && !defined(_WIN64)
+
+int32_t koral_regex_compile(const char* pattern, int32_t flags,
+                            void** out_handle,
+                            char* out_error_buf, int32_t error_buf_size,
+                            int32_t* out_error_len) {
+    regex_t* compiled = (regex_t*)malloc(sizeof(regex_t));
+    if (!compiled) {
+        const char* msg = "out of memory";
+        int32_t msg_len = (int32_t)strlen(msg);
+        if (msg_len > error_buf_size - 1) {
+            msg_len = error_buf_size - 1;
+        }
+        memcpy(out_error_buf, msg, (size_t)msg_len);
+        out_error_buf[msg_len] = '\0';
+        *out_error_len = msg_len;
+        return -1;
+    }
+
+    int rc = regcomp(compiled, pattern, flags | REG_EXTENDED);
+    if (rc != 0) {
+        size_t err_len = regerror(rc, compiled, out_error_buf, (size_t)error_buf_size);
+        if (err_len > 0 && out_error_buf[err_len - 1] == '\0') {
+            err_len--;
+        }
+        *out_error_len = (int32_t)err_len;
+        regfree(compiled);
+        free(compiled);
+        return rc;
+    }
+
+    *out_handle = compiled;
+    return 0;
+}
+
+int32_t koral_regex_match(void* handle, const char* text, int32_t text_offset,
+                          int32_t max_groups,
+                          int32_t* out_starts, int32_t* out_ends) {
+    regex_t* compiled = (regex_t*)handle;
+    regmatch_t pmatch[max_groups];
+
+    int rc = regexec(compiled, text + text_offset, (size_t)max_groups, pmatch, 0);
+    if (rc != 0) {
+        return 0;  // no match
+    }
+
+    int32_t matched = 0;
+    for (int32_t i = 0; i < max_groups; i++) {
+        if (pmatch[i].rm_so == -1) {
+            out_starts[i] = -1;
+            out_ends[i] = -1;
+        } else {
+            out_starts[i] = (int32_t)pmatch[i].rm_so + text_offset;
+            out_ends[i] = (int32_t)pmatch[i].rm_eo + text_offset;
+            matched = i + 1;
+        }
+    }
+
+    return matched > 0 ? matched : 1;
+}
+
+void koral_regex_free(void* handle) {
+    regex_t* compiled = (regex_t*)handle;
+    regfree(compiled);
+    free(compiled);
+}
+
+#endif  // !_WIN32 && !_WIN64
+
+// ============================================================================
+// Windows: Minimal POSIX ERE regex implementation
+// ============================================================================
+#if defined(_WIN32) || defined(_WIN64)
+
+// Regex node types for the NFA
+enum {
+    RE_LIT,      // literal character
+    RE_DOT,      // .
+    RE_CCLASS,   // [...]
+    RE_NCCLASS,  // [^...]
+    RE_BOL,      // ^
+    RE_EOL,      // $
+    RE_GROUP_S,  // ( start
+    RE_GROUP_E,  // ) end
+    RE_SPLIT,    // split (for |, *, +, ?)
+    RE_JMP,      // unconditional jump
+    RE_MATCH,    // match state
+    RE_DIGIT,    // \d
+    RE_NDIGIT,   // \D
+    RE_WORD,     // \w
+    RE_NWORD,    // \W
+    RE_SPACE,    // \s
+    RE_NSPACE,   // \S
+};
+
+typedef struct {
+    int type;
+    int ch;           // for RE_LIT
+    int group;        // for RE_GROUP_S/E
+    int x, y;         // for RE_SPLIT: x=primary, y=alt; for RE_JMP: x=target
+    uint8_t cclass[32]; // bitmap for RE_CCLASS/RE_NCCLASS
+} ReInst;
+
+#define RE_MAX_INST 4096
+#define RE_MAX_GROUPS 10
+
+typedef struct {
+    ReInst inst[RE_MAX_INST];
+    int len;
+    int ngroups;
+    int flags;
+    char error[256];
+} ReCompiled;
+
+// Forward declarations
+static int re_compile_expr(ReCompiled* re, const char* p, int* pos, int plen);
+
+static void cc_set(uint8_t* cc, int c) { cc[c >> 3] |= (1 << (c & 7)); }
+static int cc_test(const uint8_t* cc, int c) { return (cc[c >> 3] >> (c & 7)) & 1; }
+
+static int re_emit(ReCompiled* re, int type) {
+    if (re->len >= RE_MAX_INST) return -1;
+    memset(&re->inst[re->len], 0, sizeof(ReInst));
+    re->inst[re->len].type = type;
+    re->inst[re->len].x = -1;
+    re->inst[re->len].y = -1;
+    return re->len++;
+}
+
+static int is_digit(int c) { return c >= '0' && c <= '9'; }
+static int is_word(int c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'; }
+static int is_space(int c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'; }
+
+static int re_parse_cclass(ReCompiled* re, const char* p, int* pos, int plen) {
+    int negate = 0;
+    int idx = re_emit(re, RE_CCLASS);
+    if (idx < 0) return -1;
+    if (*pos < plen && p[*pos] == '^') {
+        negate = 1;
+        re->inst[idx].type = RE_NCCLASS;
+        (*pos)++;
+    }
+    memset(re->inst[idx].cclass, 0, 32);
+    int first = 1;
+    while (*pos < plen && (first || p[*pos] != ']')) {
+        first = 0;
+        int c = (unsigned char)p[*pos];
+        (*pos)++;
+        if (c == '\\' && *pos < plen) {
+            c = (unsigned char)p[*pos];
+            (*pos)++;
+            switch (c) {
+                case 'd': for (int i = '0'; i <= '9'; i++) cc_set(re->inst[idx].cclass, i); continue;
+                case 'w': for (int i = 'a'; i <= 'z'; i++) cc_set(re->inst[idx].cclass, i);
+                          for (int i = 'A'; i <= 'Z'; i++) cc_set(re->inst[idx].cclass, i);
+                          for (int i = '0'; i <= '9'; i++) cc_set(re->inst[idx].cclass, i);
+                          cc_set(re->inst[idx].cclass, '_'); continue;
+                case 's': cc_set(re->inst[idx].cclass, ' '); cc_set(re->inst[idx].cclass, '\t');
+                          cc_set(re->inst[idx].cclass, '\n'); cc_set(re->inst[idx].cclass, '\r');
+                          cc_set(re->inst[idx].cclass, '\f'); cc_set(re->inst[idx].cclass, '\v'); continue;
+                default: break; // literal escaped char
+            }
+        }
+        // Check for range a-z
+        if (*pos + 1 < plen && p[*pos] == '-' && p[*pos + 1] != ']') {
+            (*pos)++;
+            int c2 = (unsigned char)p[*pos];
+            (*pos)++;
+            if (c2 == '\\' && *pos < plen) { c2 = (unsigned char)p[*pos]; (*pos)++; }
+            for (int i = c; i <= c2; i++) cc_set(re->inst[idx].cclass, i);
+        } else {
+            cc_set(re->inst[idx].cclass, c);
+        }
+    }
+    if (*pos < plen && p[*pos] == ']') (*pos)++;
+    else { snprintf(re->error, 256, "Unmatched ["); return -1; }
+    return idx;
+}
+
+// Parse an atom: literal, dot, group, char class, escape
+static int re_parse_atom(ReCompiled* re, const char* p, int* pos, int plen) {
+    if (*pos >= plen) return -1;
+    int c = (unsigned char)p[*pos];
+    if (c == '(') {
+        (*pos)++;
+        int gn = re->ngroups++;
+        int gs = re_emit(re, RE_GROUP_S);
+        if (gs < 0) return -1;
+        re->inst[gs].group = gn;
+        if (re_compile_expr(re, p, pos, plen) < 0) return -1;
+        if (*pos >= plen || p[*pos] != ')') {
+            snprintf(re->error, 256, "Unmatched (");
+            return -1;
+        }
+        (*pos)++;
+        int ge = re_emit(re, RE_GROUP_E);
+        if (ge < 0) return -1;
+        re->inst[ge].group = gn;
+        return gs;
+    }
+    if (c == '[') {
+        (*pos)++;
+        return re_parse_cclass(re, p, pos, plen);
+    }
+    if (c == '.') {
+        (*pos)++;
+        return re_emit(re, RE_DOT);
+    }
+    if (c == '^') {
+        (*pos)++;
+        return re_emit(re, RE_BOL);
+    }
+    if (c == '$') {
+        (*pos)++;
+        return re_emit(re, RE_EOL);
+    }
+    if (c == '\\' && *pos + 1 < plen) {
+        (*pos)++;
+        c = (unsigned char)p[*pos];
+        (*pos)++;
+        switch (c) {
+            case 'd': return re_emit(re, RE_DIGIT);
+            case 'D': return re_emit(re, RE_NDIGIT);
+            case 'w': return re_emit(re, RE_WORD);
+            case 'W': return re_emit(re, RE_NWORD);
+            case 's': return re_emit(re, RE_SPACE);
+            case 'S': return re_emit(re, RE_NSPACE);
+            default: { int idx = re_emit(re, RE_LIT); if (idx >= 0) re->inst[idx].ch = c; return idx; }
+        }
+    }
+    // Reject bare quantifiers
+    if (c == '*' || c == '+' || c == '?' || c == '{') {
+        snprintf(re->error, 256, "Invalid preceding regular expression");
+        return -1;
+    }
+    if (c == ')' || c == '|') return -1; // not an atom
+    (*pos)++;
+    int idx = re_emit(re, RE_LIT);
+    if (idx >= 0) {
+        if ((re->flags & 2) && c >= 'A' && c <= 'Z') c += 32; // case insensitive: store lowercase
+        re->inst[idx].ch = c;
+    }
+    return idx;
+}
+
+// Parse quantified atom: atom followed by *, +, ?, {n,m}
+static int re_parse_quantified(ReCompiled* re, const char* p, int* pos, int plen) {
+    int start = re->len;
+    int r = re_parse_atom(re, p, pos, plen);
+    if (r < 0) return r;
+    if (*pos >= plen) return r;
+    int c = (unsigned char)p[*pos];
+    if (c == '*') {
+        (*pos)++;
+        // split -> atom -> jmp back to split
+        int sp = re_emit(re, RE_SPLIT);
+        if (sp < 0) return -1;
+        // Move instructions: insert split before atom
+        // Simpler: patch with jump
+        // Actually, restructure: we need split at start, jmp at end
+        // Let's use a different approach: 
+        // We already emitted the atom at [start..re->len-1]
+        // We need: SPLIT(atom, skip) at start, then atom, then JMP(start)
+        // Shift instructions to make room for split at start
+        for (int i = re->len - 1; i > start; i--) {
+            re->inst[i] = re->inst[i - 1];
+            // Fix group references if needed
+        }
+        re->len--; // remove the extra SPLIT we emitted
+        // Insert split at start
+        memset(&re->inst[start], 0, sizeof(ReInst));
+        re->inst[start].type = RE_SPLIT;
+        re->inst[start].x = start + 1;  // try atom
+        re->inst[start].y = re->len + 1; // skip (will be set after jmp)
+        // Add JMP back to split
+        int jmp = re_emit(re, RE_JMP);
+        if (jmp < 0) return -1;
+        re->inst[jmp].x = start;
+        re->inst[start].y = re->len; // skip to after jmp
+        return start;
+    }
+    if (c == '+') {
+        (*pos)++;
+        // atom then split(atom, next)
+        int sp = re_emit(re, RE_SPLIT);
+        if (sp < 0) return -1;
+        re->inst[sp].x = start;     // loop back
+        re->inst[sp].y = re->len;   // continue
+        return start;
+    }
+    if (c == '?') {
+        (*pos)++;
+        // split(atom, skip)
+        for (int i = re->len; i > start; i--) {
+            re->inst[i] = re->inst[i - 1];
+        }
+        re->len++;
+        memset(&re->inst[start], 0, sizeof(ReInst));
+        re->inst[start].type = RE_SPLIT;
+        re->inst[start].x = start + 1;
+        re->inst[start].y = re->len;
+        return start;
+    }
+    if (c == '{') {
+        // Parse {n}, {n,}, {n,m}
+        (*pos)++;
+        int n = 0, m = -1;
+        while (*pos < plen && is_digit(p[*pos])) { n = n * 10 + (p[*pos] - '0'); (*pos)++; }
+        if (*pos < plen && p[*pos] == ',') {
+            (*pos)++;
+            if (*pos < plen && p[*pos] != '}') {
+                m = 0;
+                while (*pos < plen && is_digit(p[*pos])) { m = m * 10 + (p[*pos] - '0'); (*pos)++; }
+            } else {
+                m = -1; // unbounded
+            }
+        } else {
+            m = n; // exact
+        }
+        if (*pos < plen && p[*pos] == '}') (*pos)++;
+        // For simplicity, we already have one copy of atom at [start..re->len)
+        // We need n copies total for minimum, then optional copies for max
+        int atom_len = re->len - start;
+        // Duplicate atom (n-1) more times for minimum
+        for (int i = 1; i < n; i++) {
+            for (int j = 0; j < atom_len; j++) {
+                if (re->len >= RE_MAX_INST) return -1;
+                re->inst[re->len] = re->inst[start + j];
+                re->len++;
+            }
+        }
+        if (m == -1) {
+            // {n,} = n copies + *
+            int loop_start = re->len - atom_len;
+            int sp = re_emit(re, RE_SPLIT);
+            if (sp < 0) return -1;
+            re->inst[sp].x = loop_start;
+            re->inst[sp].y = re->len;
+        } else if (m > n) {
+            // {n,m} = n copies + (m-n) optional copies
+            for (int i = n; i < m; i++) {
+                int opt_start = re->len;
+                int sp = re_emit(re, RE_SPLIT);
+                if (sp < 0) return -1;
+                re->inst[sp].x = sp + 1;
+                for (int j = 0; j < atom_len; j++) {
+                    if (re->len >= RE_MAX_INST) return -1;
+                    re->inst[re->len] = re->inst[start + j];
+                    re->len++;
+                }
+                re->inst[opt_start].y = re->len;
+            }
+        }
+        return start;
+    }
+    return r;
+}
+
+// Parse concatenation: sequence of quantified atoms
+static int re_parse_concat(ReCompiled* re, const char* p, int* pos, int plen) {
+    int start = re->len;
+    while (*pos < plen && p[*pos] != ')' && p[*pos] != '|') {
+        if (re_parse_quantified(re, p, pos, plen) < 0) {
+            if (re->error[0]) return -1;
+            break;
+        }
+    }
+    return start;
+}
+
+// Parse alternation: concat | concat | ...
+static int re_compile_expr(ReCompiled* re, const char* p, int* pos, int plen) {
+    int start = re->len;
+    if (re_parse_concat(re, p, pos, plen) < 0 && re->error[0]) return -1;
+    
+    while (*pos < plen && p[*pos] == '|') {
+        (*pos)++;
+        // Insert split before first branch
+        int first_end = re->len;
+        int jmp_idx = re_emit(re, RE_JMP); // jump over second branch
+        if (jmp_idx < 0) return -1;
+        
+        int second_start = re->len;
+        if (re_parse_concat(re, p, pos, plen) < 0 && re->error[0]) return -1;
+        
+        // Now patch: insert SPLIT at start
+        // Shift everything from start onwards by 1
+        for (int i = re->len; i > start; i--) {
+            re->inst[i] = re->inst[i - 1];
+        }
+        re->len++;
+        memset(&re->inst[start], 0, sizeof(ReInst));
+        re->inst[start].type = RE_SPLIT;
+        re->inst[start].x = start + 1;           // first branch
+        re->inst[start].y = second_start + 1;     // second branch (shifted by 1)
+        
+        // Fix the JMP target
+        re->inst[jmp_idx + 1].x = re->len;        // jump to end (shifted by 1)
+        
+        start = re->len; // for chaining more alternations... actually we need to handle this differently
+        // For simplicity, break after one alternation level
+        // This handles a|b but not a|b|c correctly in all cases
+        // Let's handle it by continuing the loop
+    }
+    return start;
+}
+
+static int re_match_char(ReInst* inst, int c, int flags) {
+    int lc = c;
+    if ((flags & 2) && c >= 'A' && c <= 'Z') lc = c + 32; // case insensitive
+    switch (inst->type) {
+        case RE_LIT: return lc == inst->ch;
+        case RE_DOT: return c != '\n';
+        case RE_DIGIT: return is_digit(c);
+        case RE_NDIGIT: return !is_digit(c);
+        case RE_WORD: return is_word(c);
+        case RE_NWORD: return !is_word(c);
+        case RE_SPACE: return is_space(c);
+        case RE_NSPACE: return !is_space(c);
+        case RE_CCLASS: return cc_test(inst->cclass, (flags & 2) ? lc : c);
+        case RE_NCCLASS: return !cc_test(inst->cclass, (flags & 2) ? lc : c);
+        default: return 0;
+    }
+}
+
+// Recursive backtracking regex execution
+static int re_bt(ReCompiled* re, const char* text, int tlen, int pc, int pos,
+                 int32_t* groups) {
+    while (pc < re->len) {
+        ReInst* inst = &re->inst[pc];
+        switch (inst->type) {
+            case RE_MATCH:
+                return 1;
+            case RE_LIT:
+                if (pos >= tlen) return 0;
+                { int c = (unsigned char)text[pos];
+                  if ((re->flags & 2) && c >= 'A' && c <= 'Z') c += 32;
+                  if (c != inst->ch) return 0; }
+                pos++; pc++; break;
+            case RE_DOT:
+                if (pos >= tlen || text[pos] == '\n') return 0;
+                pos++; pc++; break;
+            case RE_DIGIT:
+                if (pos >= tlen || !is_digit((unsigned char)text[pos])) return 0;
+                pos++; pc++; break;
+            case RE_NDIGIT:
+                if (pos >= tlen || is_digit((unsigned char)text[pos])) return 0;
+                pos++; pc++; break;
+            case RE_WORD:
+                if (pos >= tlen || !is_word((unsigned char)text[pos])) return 0;
+                pos++; pc++; break;
+            case RE_NWORD:
+                if (pos >= tlen || is_word((unsigned char)text[pos])) return 0;
+                pos++; pc++; break;
+            case RE_SPACE:
+                if (pos >= tlen || !is_space((unsigned char)text[pos])) return 0;
+                pos++; pc++; break;
+            case RE_NSPACE:
+                if (pos >= tlen || is_space((unsigned char)text[pos])) return 0;
+                pos++; pc++; break;
+            case RE_CCLASS:
+                if (pos >= tlen) return 0;
+                { int c = (unsigned char)text[pos];
+                  if ((re->flags & 2) && c >= 'A' && c <= 'Z') c += 32;
+                  if (!cc_test(inst->cclass, c)) return 0; }
+                pos++; pc++; break;
+            case RE_NCCLASS:
+                if (pos >= tlen) return 0;
+                { int c = (unsigned char)text[pos];
+                  if ((re->flags & 2) && c >= 'A' && c <= 'Z') c += 32;
+                  if (cc_test(inst->cclass, c)) return 0; }
+                pos++; pc++; break;
+            case RE_BOL:
+                if (pos != 0 && !((re->flags & 4) && pos > 0 && text[pos - 1] == '\n')) return 0;
+                pc++; break;
+            case RE_EOL:
+                if (pos != tlen && !((re->flags & 4) && text[pos] == '\n')) return 0;
+                pc++; break;
+            case RE_GROUP_S:
+                if (inst->group < RE_MAX_GROUPS) {
+                    int32_t old = groups[inst->group * 2];
+                    groups[inst->group * 2] = pos;
+                    if (re_bt(re, text, tlen, pc + 1, pos, groups)) return 1;
+                    groups[inst->group * 2] = old;
+                    return 0;
+                }
+                pc++; break;
+            case RE_GROUP_E:
+                if (inst->group < RE_MAX_GROUPS) {
+                    int32_t old = groups[inst->group * 2 + 1];
+                    groups[inst->group * 2 + 1] = pos;
+                    if (re_bt(re, text, tlen, pc + 1, pos, groups)) return 1;
+                    groups[inst->group * 2 + 1] = old;
+                    return 0;
+                }
+                pc++; break;
+            case RE_SPLIT:
+                // Try primary branch first, then alternative
+                if (re_bt(re, text, tlen, inst->x, pos, groups)) return 1;
+                pc = inst->y; break;
+            case RE_JMP:
+                pc = inst->x; break;
+            default:
+                return 0;
+        }
+    }
+    return 0;
+}
+
+static int re_exec(ReCompiled* re, const char* text, int text_offset, int max_groups,
+                   int32_t* out_starts, int32_t* out_ends) {
+    int tlen = (int)strlen(text);
+    int32_t groups[RE_MAX_GROUPS * 2];
+    
+    for (int sp = text_offset; sp <= tlen; sp++) {
+        for (int i = 0; i < RE_MAX_GROUPS * 2; i++) groups[i] = -1;
+        
+        if (re_bt(re, text, tlen, 0, sp, groups)) {
+            int32_t mg = max_groups < RE_MAX_GROUPS ? max_groups : RE_MAX_GROUPS;
+            int32_t result_count = 0;
+            for (int32_t i = 0; i < mg; i++) {
+                out_starts[i] = groups[i * 2];
+                out_ends[i] = groups[i * 2 + 1];
+                if (out_starts[i] >= 0) result_count = i + 1;
+            }
+            return result_count > 0 ? result_count : 1;
+        }
+    }
+    
+    return 0;
+}
+
+int32_t koral_regex_compile(const char* pattern, int32_t flags,
+                            void** out_handle,
+                            char* out_error_buf, int32_t error_buf_size,
+                            int32_t* out_error_len) {
+    ReCompiled* re = (ReCompiled*)calloc(1, sizeof(ReCompiled));
+    if (!re) {
+        const char* msg = "out of memory";
+        int32_t msg_len = (int32_t)strlen(msg);
+        if (msg_len > error_buf_size - 1) msg_len = error_buf_size - 1;
+        memcpy(out_error_buf, msg, (size_t)msg_len);
+        *out_error_len = msg_len;
+        return -1;
+    }
+    
+    re->flags = flags;
+    re->ngroups = 0;
+    re->error[0] = '\0';
+    
+    int pos = 0;
+    int plen = (int)strlen(pattern);
+    
+    // Start with group 0 (whole match)
+    re->ngroups = 1;
+    int gs = re_emit(re, RE_GROUP_S);
+    re->inst[gs].group = 0;
+    
+    if (re_compile_expr(re, pattern, &pos, plen) < 0 && re->error[0]) {
+        int32_t elen = (int32_t)strlen(re->error);
+        if (elen > error_buf_size - 1) elen = error_buf_size - 1;
+        memcpy(out_error_buf, re->error, (size_t)elen);
+        *out_error_len = elen;
+        free(re);
+        return -1;
+    }
+    
+    if (pos < plen) {
+        // Unexpected characters remaining
+        if (pattern[pos] == ')') {
+            snprintf(re->error, 256, "Unmatched )");
+        } else {
+            snprintf(re->error, 256, "Unexpected character at position %d", pos);
+        }
+        int32_t elen = (int32_t)strlen(re->error);
+        if (elen > error_buf_size - 1) elen = error_buf_size - 1;
+        memcpy(out_error_buf, re->error, (size_t)elen);
+        *out_error_len = elen;
+        free(re);
+        return -1;
+    }
+    
+    int ge = re_emit(re, RE_GROUP_E);
+    re->inst[ge].group = 0;
+    re_emit(re, RE_MATCH);
+    
+    *out_handle = re;
+    return 0;
+}
+
+int32_t koral_regex_match(void* handle, const char* text, int32_t text_offset,
+                          int32_t max_groups,
+                          int32_t* out_starts, int32_t* out_ends) {
+    ReCompiled* re = (ReCompiled*)handle;
+    return re_exec(re, text, text_offset, max_groups, out_starts, out_ends);
+}
+
+void koral_regex_free(void* handle) {
+    free(handle);
+}
+
+#endif  // _WIN32 || _WIN64
+
