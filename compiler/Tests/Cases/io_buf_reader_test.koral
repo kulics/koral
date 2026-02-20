@@ -1,0 +1,246 @@
+// EXPECT: All BufReader tests passed
+
+using std.io.*
+
+let main() Void = {
+    // === read: transparent forwarding ===
+    let src1 = Buffer.from_string("hello world")
+    let r1 = [Buffer]BufReader.new(src1)
+    let out1 = Buffer.empty()
+    let rr1 = r1.read(out1)
+    when rr1 is {
+        .Ok(n) then assert(n == 11, "read count"),
+        .Error(_) then assert(false, "read error"),
+    }
+    out1.reset()
+    let s1 = out1.take_string()
+    when s1 is {
+        .Ok(v) then assert(v == "hello world", "read content"),
+        .Error(_) then assert(false, "read string error"),
+    }
+
+    // === read_byte: byte-by-byte ===
+    let src2 = Buffer.from_string("ABC")
+    let r2 = [Buffer]BufReader.new(src2)
+    let b1 = r2.read_byte()
+    when b1 is {
+        .Ok(opt) then {
+            when opt is {
+                .Some(b) then assert(b == 65, "read_byte A"),
+                .None then assert(false, "read_byte A none"),
+            }
+        },
+        .Error(_) then assert(false, "read_byte A error"),
+    }
+    let b2 = r2.read_byte()
+    when b2 is {
+        .Ok(opt) then {
+            when opt is {
+                .Some(b) then assert(b == 66, "read_byte B"),
+                .None then assert(false, "read_byte B none"),
+            }
+        },
+        .Error(_) then assert(false, "read_byte B error"),
+    }
+    let b3 = r2.read_byte()
+    when b3 is {
+        .Ok(opt) then {
+            when opt is {
+                .Some(b) then assert(b == 67, "read_byte C"),
+                .None then assert(false, "read_byte C none"),
+            }
+        },
+        .Error(_) then assert(false, "read_byte C error"),
+    }
+    // EOF
+    let b4 = r2.read_byte()
+    when b4 is {
+        .Ok(opt) then assert(opt.is_none(), "read_byte EOF"),
+        .Error(_) then assert(false, "read_byte EOF error"),
+    }
+
+    // === read_line ===
+    let src3 = Buffer.from_string("line1\nline2\nline3")
+    let r3 = [Buffer]BufReader.new(src3)
+    let l1 = r3.read_line()
+    when l1 is {
+        .Ok(opt) then {
+            when opt is {
+                .Some(s) then assert(s == "line1\n", "read_line 1"),
+                .None then assert(false, "read_line 1 none"),
+            }
+        },
+        .Error(_) then assert(false, "read_line 1 error"),
+    }
+    let l2 = r3.read_line()
+    when l2 is {
+        .Ok(opt) then {
+            when opt is {
+                .Some(s) then assert(s == "line2\n", "read_line 2"),
+                .None then assert(false, "read_line 2 none"),
+            }
+        },
+        .Error(_) then assert(false, "read_line 2 error"),
+    }
+    let l3 = r3.read_line()
+    when l3 is {
+        .Ok(opt) then {
+            when opt is {
+                .Some(s) then assert(s == "line3", "read_line 3 no newline"),
+                .None then assert(false, "read_line 3 none"),
+            }
+        },
+        .Error(_) then assert(false, "read_line 3 error"),
+    }
+    // EOF
+    let l4 = r3.read_line()
+    when l4 is {
+        .Ok(opt) then assert(opt.is_none(), "read_line EOF"),
+        .Error(_) then assert(false, "read_line EOF error"),
+    }
+
+    // === read_until ===
+    let src4 = Buffer.from_string("abc|def|ghi")
+    let r4 = [Buffer]BufReader.new(src4)
+    let u_buf1 = Buffer.empty()
+    let u1 = r4.read_until(124, u_buf1)
+    when u1 is {
+        .Ok(n) then {
+            assert(n == 4, "read_until 1 count")
+            u_buf1.reset()
+            let us1 = u_buf1.take_string()
+            when us1 is {
+                .Ok(v) then assert(v == "abc|", "read_until 1 content"),
+                .Error(_) then assert(false, "read_until 1 string error"),
+            }
+        },
+        .Error(_) then assert(false, "read_until 1 error"),
+    }
+    let u_buf2 = Buffer.empty()
+    let u2 = r4.read_until(124, u_buf2)
+    when u2 is {
+        .Ok(n) then {
+            assert(n == 4, "read_until 2 count")
+            u_buf2.reset()
+            let us2 = u_buf2.take_string()
+            when us2 is {
+                .Ok(v) then assert(v == "def|", "read_until 2 content"),
+                .Error(_) then assert(false, "read_until 2 string error"),
+            }
+        },
+        .Error(_) then assert(false, "read_until 2 error"),
+    }
+    // Last segment (no delimiter, reads to EOF)
+    let u_buf3 = Buffer.empty()
+    let u3 = r4.read_until(124, u_buf3)
+    when u3 is {
+        .Ok(n) then {
+            assert(n == 3, "read_until 3 count")
+            u_buf3.reset()
+            let us3 = u_buf3.take_string()
+            when us3 is {
+                .Ok(v) then assert(v == "ghi", "read_until 3 content"),
+                .Error(_) then assert(false, "read_until 3 string error"),
+            }
+        },
+        .Error(_) then assert(false, "read_until 3 error"),
+    }
+    // EOF
+    let u_buf4 = Buffer.empty()
+    let u4 = r4.read_until(124, u_buf4)
+    when u4 is {
+        .Ok(n) then assert(n == 0, "read_until EOF"),
+        .Error(_) then assert(false, "read_until EOF error"),
+    }
+
+    // === read_rune (ASCII) ===
+    let src5 = Buffer.from_string("Hi")
+    let r5 = [Buffer]BufReader.new(src5)
+    let rn1 = r5.read_rune()
+    when rn1 is {
+        .Ok(opt) then {
+            when opt is {
+                .Some(rune) then assert(rune.to_uint32() == 72, "read_rune H"),
+                .None then assert(false, "read_rune H none"),
+            }
+        },
+        .Error(_) then assert(false, "read_rune H error"),
+    }
+    let rn2 = r5.read_rune()
+    when rn2 is {
+        .Ok(opt) then {
+            when opt is {
+                .Some(rune) then assert(rune.to_uint32() == 105, "read_rune i"),
+                .None then assert(false, "read_rune i none"),
+            }
+        },
+        .Error(_) then assert(false, "read_rune i error"),
+    }
+    // EOF
+    let rn3 = r5.read_rune()
+    when rn3 is {
+        .Ok(opt) then assert(opt.is_none(), "read_rune EOF"),
+        .Error(_) then assert(false, "read_rune EOF error"),
+    }
+
+    // === read_rune (multi-byte: é = U+00E9 = 0xC3 0xA9) ===
+    let src6 = Buffer.empty()
+    src6.push_byte(195)
+    src6.push_byte(169)
+    let r6 = [Buffer]BufReader.new(src6)
+    let rn4 = r6.read_rune()
+    when rn4 is {
+        .Ok(opt) then {
+            when opt is {
+                .Some(rune) then assert(rune.to_uint32() == 233, "read_rune é"),
+                .None then assert(false, "read_rune é none"),
+            }
+        },
+        .Error(_) then assert(false, "read_rune é error"),
+    }
+
+    // === read_rune (invalid first byte → replacement) ===
+    let src7 = Buffer.empty()
+    src7.push_byte(255)
+    let r7 = [Buffer]BufReader.new(src7)
+    let rn5 = r7.read_rune()
+    when rn5 is {
+        .Ok(opt) then {
+            when opt is {
+                .Some(rune) then assert(rune.to_uint32() == 65533, "read_rune invalid → FFFD"),
+                .None then assert(false, "read_rune invalid none"),
+            }
+        },
+        .Error(_) then assert(false, "read_rune invalid error"),
+    }
+
+    // === skip ===
+    let src8 = Buffer.from_string("abcdefgh")
+    let r8 = [Buffer]BufReader.new(src8)
+    let sk = r8.skip(3)
+    when sk is {
+        .Ok(n) then assert(n == 3, "skip count"),
+        .Error(_) then assert(false, "skip error"),
+    }
+    let sb = r8.read_byte()
+    when sb is {
+        .Ok(opt) then {
+            when opt is {
+                .Some(b) then assert(b == 100, "skip then read d"),
+                .None then assert(false, "skip then read none"),
+            }
+        },
+        .Error(_) then assert(false, "skip then read error"),
+    }
+
+    // === skip past EOF ===
+    let src9 = Buffer.from_string("ab")
+    let r9 = [Buffer]BufReader.new(src9)
+    let sk2 = r9.skip(10)
+    when sk2 is {
+        .Ok(n) then assert(n == 2, "skip past EOF count"),
+        .Error(_) then assert(false, "skip past EOF error"),
+    }
+
+    print_line("All BufReader tests passed")
+}

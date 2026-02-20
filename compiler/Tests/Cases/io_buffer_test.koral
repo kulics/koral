@@ -1,0 +1,156 @@
+// EXPECT: All Buffer tests passed
+
+using std.io.*
+
+let main() Void = {
+    // === Static constructors ===
+    let e = Buffer.empty()
+    assert(e.length() == 0, "empty length")
+    assert(e.capacity() == 0, "empty capacity")
+
+    let c = Buffer.with_capacity(16)
+    assert(c.length() == 0, "with_capacity length")
+    assert(c.capacity() == 16, "with_capacity capacity")
+
+    let s = Buffer.from_string("hello")
+    assert(s.length() == 5, "from_string length")
+
+    let mut bytes = [UInt8]List.new()
+    bytes.push(1)
+    bytes.push(2)
+    bytes.push(3)
+    let fb = Buffer.from_bytes(bytes)
+    assert(fb.length() == 3, "from_bytes length")
+
+    // === push_byte / take_byte roundtrip ===
+    let buf = Buffer.empty()
+    buf.push_byte(65)
+    buf.push_byte(66)
+    buf.push_byte(67)
+    assert(buf.length() == 3, "push length")
+    assert(buf.take_byte().unwrap() == 65, "take 1")
+    assert(buf.take_byte().unwrap() == 66, "take 2")
+    assert(buf.take_byte().unwrap() == 67, "take 3")
+    assert(buf.take_byte().is_none(), "take EOF")
+
+    // === push_bytes / take_bytes ===
+    let pb = Buffer.empty()
+    let mut bs = [UInt8]List.new()
+    bs.push(10)
+    bs.push(20)
+    bs.push(30)
+    pb.push_bytes(bs)
+    assert(pb.length() == 3, "push_bytes length")
+    let taken = pb.take_bytes()
+    assert(taken.count() == 3, "take_bytes count")
+    assert(taken[0] == 10, "take_bytes[0]")
+    assert(taken[1] == 20, "take_bytes[1]")
+    assert(taken[2] == 30, "take_bytes[2]")
+
+    // === push_n_bytes / take_n_bytes ===
+    let pn = Buffer.empty()
+    let mut pnb = [UInt8]List.new()
+    pnb.push(1)
+    pnb.push(2)
+    pnb.push(3)
+    pnb.push(4)
+    pn.push_n_bytes(2, pnb)
+    assert(pn.length() == 2, "push_n length")
+    let tn = Buffer.from_string("abcde")
+    let tnr = tn.take_n_bytes(3)
+    assert(tnr.count() == 3, "take_n count")
+    assert(tnr[0] == 97, "take_n[0]")
+
+    // === take_string (valid UTF-8) ===
+    let ts = Buffer.from_string("world")
+    let tsr = ts.take_string()
+    when tsr is {
+        .Ok(v) then assert(v == "world", "take_string value"),
+        .Error(_) then assert(false, "take_string error"),
+    }
+
+    // === take_string (invalid UTF-8) ===
+    let inv = Buffer.empty()
+    inv.push_byte(255)
+    inv.push_byte(254)
+    let inv_r = inv.take_string()
+    when inv_r is {
+        .Ok(_) then assert(false, "invalid utf8 should error"),
+        .Error(_) then {},
+    }
+
+    // === clear ===
+    let cl = Buffer.from_string("test")
+    cl.clear()
+    assert(cl.length() == 0, "clear length")
+    cl.clear()
+    assert(cl.length() == 0, "clear idempotent")
+
+    // === reset ===
+    let rs = Buffer.from_string("abc")
+    let _ = rs.take_byte()
+    rs.reset()
+    assert(rs.take_byte().unwrap() == 97, "reset re-read")
+
+    // === length / capacity queries ===
+    let lc = Buffer.with_capacity(8)
+    assert(lc.length() == 0, "lc length")
+    assert(lc.capacity() == 8, "lc capacity")
+    lc.push_byte(1)
+    assert(lc.length() == 1, "lc length after push")
+    assert(lc.capacity() >= 1, "lc capacity after push")
+
+    // === Shared mutable semantics ===
+    let a = Buffer.from_string("hi")
+    let b = a
+    a.push_byte(33)
+    assert(b.length() == 3, "shared mutable length")
+    b.reset()
+    let shared_s = b.take_string()
+    when shared_s is {
+        .Ok(v) then assert(v == "hi!", "shared mutable content"),
+        .Error(_) then assert(false, "shared mutable error"),
+    }
+
+    // === Buffer as Reader/Writer roundtrip ===
+    let src = Buffer.from_string("data")
+    let dst = Buffer.empty()
+    let rr = src.read(dst)
+    when rr is {
+        .Ok(n) then assert(n == 4, "reader count"),
+        .Error(_) then assert(false, "reader error"),
+    }
+    dst.reset()
+    let dr = dst.take_string()
+    when dr is {
+        .Ok(v) then assert(v == "data", "reader content"),
+        .Error(_) then assert(false, "reader string error"),
+    }
+
+    // Writer roundtrip
+    let w_dst = Buffer.empty()
+    let w_src = Buffer.from_string("write")
+    let wr = w_dst.write(w_src)
+    when wr is {
+        .Ok(n) then assert(n == 5, "writer count"),
+        .Error(_) then assert(false, "writer error"),
+    }
+    w_dst.reset()
+    let ws = w_dst.take_string()
+    when ws is {
+        .Ok(v) then assert(v == "write", "writer content"),
+        .Error(_) then assert(false, "writer string error"),
+    }
+
+    // === Grow (trigger expansion) ===
+    let g = Buffer.with_capacity(2)
+    let mut i Int = 0
+    while i < 100 then {
+        g.push_byte((UInt8)(i % 256))
+        i += 1
+    }
+    assert(g.length() == 100, "grow length")
+    assert(g.capacity() >= 100, "grow capacity")
+
+    print_line("All Buffer tests passed")
+}
