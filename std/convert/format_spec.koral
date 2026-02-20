@@ -1,0 +1,98 @@
+// ============================================================================
+// std.convert - Format Spec Parser
+// ============================================================================
+// Parses Python-style format specification mini-language:
+//   [[fill]align][sign][#][0][width][grouping_option][.precision][type]
+//
+// FormatSpec and parse_format_spec are private to the convert module.
+// ============================================================================
+
+// Internal format spec parsed result (module-internal type).
+type FormatSpec(
+    mut fill UInt8,
+    mut align UInt8,
+    mut sign UInt8,
+    mut alt_form Bool,
+    mut zero_pad Bool,
+    mut width UInt,
+    mut grouping UInt8,
+    mut precision Int,
+    mut type_char UInt8,
+)
+
+// Parse a format spec string into a FormatSpec.
+// Invalid format strings (extra characters after type) will panic.
+let parse_format_spec(spec String) FormatSpec = {
+    let mut result = FormatSpec(' ', '>', '-', false, false, 0, 0, -1, 0)
+    let len = spec.count()
+    if len == 0 then {
+        return result
+    }
+
+    let mut i UInt = 0
+
+    // Parse [[fill]align]
+    if len >= 2 and is_align_char(spec.at(i + 1)) then {
+        result.fill = spec.at(i)
+        result.align = spec.at(i + 1)
+        i += 2
+    } else if len >= 1 and is_align_char(spec.at(i)) then {
+        result.align = spec.at(i)
+        i += 1
+    }
+
+    // Parse [sign]
+    if i < len and (spec.at(i) == '+' or spec.at(i) == '-') then {
+        result.sign = spec.at(i)
+        i += 1
+    }
+
+    // Parse [#]
+    if i < len and spec.at(i) == '#' then {
+        result.alt_form = true
+        i += 1
+    }
+
+    // Parse [0]
+    if i < len and spec.at(i) == '0' then {
+        result.zero_pad = true
+        i += 1
+    }
+
+    // Parse [width]
+    while i < len and spec.at(i) >= '0' and spec.at(i) <= '9' then {
+        result.width = result.width * 10 + (UInt)(spec.at(i) - '0')
+        i += 1
+    }
+
+    // Parse [grouping_option]
+    if i < len and (spec.at(i) == ',' or spec.at(i) == '_') then {
+        result.grouping = spec.at(i)
+        i += 1
+    }
+
+    // Parse [.precision]
+    if i < len and spec.at(i) == '.' then {
+        i += 1
+        result.precision = 0
+        while i < len and spec.at(i) >= '0' and spec.at(i) <= '9' then {
+            result.precision = result.precision * 10 + (Int)(spec.at(i) - '0')
+            i += 1
+        }
+    }
+
+    // Parse [type]
+    if i < len then {
+        result.type_char = spec.at(i)
+        i += 1
+    }
+
+    // Remaining characters = invalid
+    if i < len then {
+        panic("invalid format spec: unexpected characters after type")
+    }
+
+    result
+}
+
+let is_align_char(ch UInt8) Bool = ch == '<' or ch == '>' or ch == '^'

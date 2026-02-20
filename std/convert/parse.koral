@@ -1,0 +1,477 @@
+// ============================================================================
+// std.convert - Parse Implementation
+// ============================================================================
+// Provides string-to-number parsing for all numeric types.
+// Signed integers: Int, Int8, Int16, Int32, Int64
+// Unsigned integers: UInt, UInt8, UInt16, UInt32, UInt64 (task 4.2)
+// Floating point: Float32, Float64 (task 5.1)
+//
+// All parse functions return Result — never panic on any input.
+// ============================================================================
+
+// ---------------------------------------------------------------------------
+// Helper functions
+// ---------------------------------------------------------------------------
+
+// Check whether a character is a valid digit for the given radix (2..36).
+private let is_digit_for_radix(ch UInt8, radix UInt) Bool = {
+    if radix <= 10 then {
+        ch >= '0' and ch < '0' + (UInt8)radix
+    } else {
+        (ch >= '0' and ch <= '9') or
+        (ch >= 'a' and ch < 'a' + (UInt8)(radix - 10)) or
+        (ch >= 'A' and ch < 'A' + (UInt8)(radix - 10))
+    }
+}
+
+// Convert a digit character to its numeric value.
+private let digit_value(ch UInt8, radix UInt) UInt = {
+    if ch >= '0' and ch <= '9' then (UInt)(ch - '0')
+    else if ch >= 'a' and ch <= 'z' then (UInt)(ch - 'a') + 10
+    else if ch >= 'A' and ch <= 'Z' then (UInt)(ch - 'A') + 10
+    else panic("invalid digit")
+}
+
+// ---------------------------------------------------------------------------
+// given Int { parse, parse_radix }
+// ---------------------------------------------------------------------------
+
+given Int {
+    public parse(s String) [Self]Result = Int.parse_radix(s, 10)
+
+    public parse_radix(s String, radix UInt) [Self]Result = {
+        if radix < 2 or radix > 36 then {
+            return [Int]Result.Error(ref "radix must be in range 2..36")
+        }
+
+        let trimmed = s.trim_ascii()
+        if trimmed.is_empty() then {
+            return [Int]Result.Error(ref "empty string")
+        }
+
+        let mut i UInt = 0
+        let len = trimmed.count()
+
+        // Check sign
+        let is_negative = trimmed.at(0) == '-'
+        let has_sign = is_negative or trimmed.at(0) == '+'
+        if has_sign then {
+            i += 1
+        }
+
+        // Skip optional radix prefix
+        if i + 1 < len then {
+            let c0 = trimmed.at(i)
+            let c1 = trimmed.at(i + 1)
+            if c0 == '0' then {
+                if radix == 2 and (c1 == 'b' or c1 == 'B') then { i += 2 }
+                else if radix == 8 and (c1 == 'o' or c1 == 'O') then { i += 2 }
+                else if radix == 16 and (c1 == 'x' or c1 == 'X') then { i += 2 }
+            }
+        }
+
+        if i >= len then {
+            return [Int]Result.Error(ref "no digits found")
+        }
+
+        // Parse digits with overflow check
+        let base = (Int)radix
+        let mut result Int = 0
+        let mut has_digit = false
+
+        while i < len then {
+            let ch = trimmed.at(i)
+
+            if ch == '_' then {
+                if not has_digit then {
+                    return [Int]Result.Error(ref "unexpected underscore")
+                }
+                i += 1
+                continue
+            }
+
+            if not is_digit_for_radix(ch, radix) then {
+                return [Int]Result.Error(ref "invalid character")
+            }
+
+            let d = (Int)digit_value(ch, radix)
+
+            if result > (Int.max() - d) / base then {
+                return [Int]Result.Error(ref "overflow")
+            }
+
+            result = result * base + d
+            has_digit = true
+            i += 1
+        }
+
+        if not has_digit then {
+            return [Int]Result.Error(ref "no digits found")
+        }
+
+        if is_negative then {
+            result = 0 - result
+        }
+
+        [Int]Result.Ok(result)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// given Int8 { parse, parse_radix }
+// ---------------------------------------------------------------------------
+
+given Int8 {
+    public parse(s String) [Self]Result = Int8.parse_radix(s, 10)
+
+    public parse_radix(s String, radix UInt) [Self]Result = {
+        when Int.parse_radix(s, radix) is {
+            .Ok(n) then {
+                if n < (Int)Int8.min() or n > (Int)Int8.max() then {
+                    [Int8]Result.Error(ref "overflow")
+                } else {
+                    [Int8]Result.Ok((Int8)n)
+                }
+            },
+            .Error(e) then [Int8]Result.Error(e),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// given Int16 { parse, parse_radix }
+// ---------------------------------------------------------------------------
+
+given Int16 {
+    public parse(s String) [Self]Result = Int16.parse_radix(s, 10)
+
+    public parse_radix(s String, radix UInt) [Self]Result = {
+        when Int.parse_radix(s, radix) is {
+            .Ok(n) then {
+                if n < (Int)Int16.min() or n > (Int)Int16.max() then {
+                    [Int16]Result.Error(ref "overflow")
+                } else {
+                    [Int16]Result.Ok((Int16)n)
+                }
+            },
+            .Error(e) then [Int16]Result.Error(e),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// given Int32 { parse, parse_radix }
+// ---------------------------------------------------------------------------
+
+given Int32 {
+    public parse(s String) [Self]Result = Int32.parse_radix(s, 10)
+
+    public parse_radix(s String, radix UInt) [Self]Result = {
+        when Int.parse_radix(s, radix) is {
+            .Ok(n) then {
+                if n < (Int)Int32.min() or n > (Int)Int32.max() then {
+                    [Int32]Result.Error(ref "overflow")
+                } else {
+                    [Int32]Result.Ok((Int32)n)
+                }
+            },
+            .Error(e) then [Int32]Result.Error(e),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// given Int64 { parse, parse_radix }
+// ---------------------------------------------------------------------------
+
+given Int64 {
+    public parse(s String) [Self]Result = Int64.parse_radix(s, 10)
+
+    public parse_radix(s String, radix UInt) [Self]Result = {
+        when Int.parse_radix(s, radix) is {
+            .Ok(n) then {
+                if n < (Int)Int64.min() or n > (Int)Int64.max() then {
+                    [Int64]Result.Error(ref "overflow")
+                } else {
+                    [Int64]Result.Ok((Int64)n)
+                }
+            },
+            .Error(e) then [Int64]Result.Error(e),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// given UInt { parse, parse_radix }
+// ---------------------------------------------------------------------------
+
+given UInt {
+    public parse(s String) [Self]Result = UInt.parse_radix(s, 10)
+
+    public parse_radix(s String, radix UInt) [Self]Result = {
+        if radix < 2 or radix > 36 then {
+            return [UInt]Result.Error(ref "radix must be in range 2..36")
+        }
+
+        let trimmed = s.trim_ascii()
+        if trimmed.is_empty() then {
+            return [UInt]Result.Error(ref "empty string")
+        }
+
+        let mut i UInt = 0
+        let len = trimmed.count()
+
+        // Unsigned types reject negative sign
+        if trimmed.at(0) == '-' then {
+            return [UInt]Result.Error(ref "negative value for unsigned type")
+        }
+        if trimmed.at(0) == '+' then {
+            i += 1
+        }
+
+        // Skip optional radix prefix
+        if i + 1 < len then {
+            let c0 = trimmed.at(i)
+            let c1 = trimmed.at(i + 1)
+            if c0 == '0' then {
+                if radix == 2 and (c1 == 'b' or c1 == 'B') then { i += 2 }
+                else if radix == 8 and (c1 == 'o' or c1 == 'O') then { i += 2 }
+                else if radix == 16 and (c1 == 'x' or c1 == 'X') then { i += 2 }
+            }
+        }
+
+        if i >= len then {
+            return [UInt]Result.Error(ref "no digits found")
+        }
+
+        let base = radix
+        let mut result UInt = 0
+        let mut has_digit = false
+
+        while i < len then {
+            let ch = trimmed.at(i)
+            if ch == '_' then {
+                if not has_digit then {
+                    return [UInt]Result.Error(ref "unexpected underscore")
+                }
+                i += 1
+                continue
+            }
+            if not is_digit_for_radix(ch, radix) then {
+                return [UInt]Result.Error(ref "invalid character")
+            }
+            let d = digit_value(ch, radix)
+            if result > (UInt.max() - d) / base then {
+                return [UInt]Result.Error(ref "overflow")
+            }
+            result = result * base + d
+            has_digit = true
+            i += 1
+        }
+
+        if not has_digit then {
+            return [UInt]Result.Error(ref "no digits found")
+        }
+
+        [UInt]Result.Ok(result)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// given UInt8 { parse, parse_radix }
+// ---------------------------------------------------------------------------
+
+given UInt8 {
+    public parse(s String) [Self]Result = UInt8.parse_radix(s, 10)
+
+    public parse_radix(s String, radix UInt) [Self]Result = {
+        when UInt.parse_radix(s, radix) is {
+            .Ok(n) then {
+                if n > (UInt)UInt8.max() then {
+                    [UInt8]Result.Error(ref "overflow")
+                } else {
+                    [UInt8]Result.Ok((UInt8)n)
+                }
+            },
+            .Error(e) then [UInt8]Result.Error(e),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// given UInt16 { parse, parse_radix }
+// ---------------------------------------------------------------------------
+
+given UInt16 {
+    public parse(s String) [Self]Result = UInt16.parse_radix(s, 10)
+
+    public parse_radix(s String, radix UInt) [Self]Result = {
+        when UInt.parse_radix(s, radix) is {
+            .Ok(n) then {
+                if n > (UInt)UInt16.max() then {
+                    [UInt16]Result.Error(ref "overflow")
+                } else {
+                    [UInt16]Result.Ok((UInt16)n)
+                }
+            },
+            .Error(e) then [UInt16]Result.Error(e),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// given UInt32 { parse, parse_radix }
+// ---------------------------------------------------------------------------
+
+given UInt32 {
+    public parse(s String) [Self]Result = UInt32.parse_radix(s, 10)
+
+    public parse_radix(s String, radix UInt) [Self]Result = {
+        when UInt.parse_radix(s, radix) is {
+            .Ok(n) then {
+                if n > (UInt)UInt32.max() then {
+                    [UInt32]Result.Error(ref "overflow")
+                } else {
+                    [UInt32]Result.Ok((UInt32)n)
+                }
+            },
+            .Error(e) then [UInt32]Result.Error(e),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// given UInt64 { parse, parse_radix }
+// ---------------------------------------------------------------------------
+
+given UInt64 {
+    public parse(s String) [Self]Result = UInt64.parse_radix(s, 10)
+
+    public parse_radix(s String, radix UInt) [Self]Result = {
+        when UInt.parse_radix(s, radix) is {
+            .Ok(n) then {
+                if n > (UInt)UInt64.max() then {
+                    [UInt64]Result.Error(ref "overflow")
+                } else {
+                    [UInt64]Result.Ok((UInt64)n)
+                }
+            },
+            .Error(e) then [UInt64]Result.Error(e),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// given Float64 { parse }
+// ---------------------------------------------------------------------------
+
+given Float64 {
+    public parse(s String) [Self]Result = {
+        let trimmed = s.trim_ascii()
+        if trimmed.is_empty() then {
+            return [Float64]Result.Error(ref "empty string")
+        }
+
+        // Special values
+        if trimmed.equals("NaN") or trimmed.equals("nan") then {
+            return [Float64]Result.Ok(Float64.nan())
+        }
+        if trimmed.equals("Inf") or trimmed.equals("inf") or trimmed.equals("+Inf") then {
+            return [Float64]Result.Ok(Float64.inf())
+        }
+        if trimmed.equals("-Inf") or trimmed.equals("-inf") then {
+            return [Float64]Result.Ok(0.0 - Float64.inf())
+        }
+
+        let mut i UInt = 0
+        let len = trimmed.count()
+
+        // Sign
+        let is_negative = trimmed.at(0) == '-'
+        if is_negative or trimmed.at(0) == '+' then {
+            i += 1
+        }
+
+        // Integer part
+        let mut int_part Float64 = 0.0
+        let mut has_int = false
+        while i < len and trimmed.at(i) >= '0' and trimmed.at(i) <= '9' then {
+            int_part = int_part * 10.0 + (Float64)(trimmed.at(i) - '0')
+            has_int = true
+            i += 1
+        }
+
+        // Fractional part
+        let mut frac_part Float64 = 0.0
+        let mut has_frac = false
+        if i < len and trimmed.at(i) == '.' then {
+            i += 1
+            let mut scale Float64 = 0.1
+            while i < len and trimmed.at(i) >= '0' and trimmed.at(i) <= '9' then {
+                frac_part = frac_part + (Float64)(trimmed.at(i) - '0') * scale
+                scale = scale * 0.1
+                has_frac = true
+                i += 1
+            }
+        }
+
+        if not has_int and not has_frac then {
+            return [Float64]Result.Error(ref "no digits found")
+        }
+
+        let mut result = int_part + frac_part
+
+        // Exponent part
+        if i < len and (trimmed.at(i) == 'e' or trimmed.at(i) == 'E') then {
+            i += 1
+            let exp_negative = i < len and trimmed.at(i) == '-'
+            if i < len and (trimmed.at(i) == '+' or trimmed.at(i) == '-') then {
+                i += 1
+            }
+            let mut exp Int = 0
+            let mut has_exp = false
+            while i < len and trimmed.at(i) >= '0' and trimmed.at(i) <= '9' then {
+                exp = exp * 10 + (Int)(trimmed.at(i) - '0')
+                has_exp = true
+                i += 1
+            }
+            if not has_exp then {
+                return [Float64]Result.Error(ref "invalid exponent")
+            }
+            let mut power Float64 = 1.0
+            let mut e = exp
+            while e > 0 then {
+                power = power * 10.0
+                e -= 1
+            }
+            if exp_negative then {
+                result = result / power
+            } else {
+                result = result * power
+            }
+        }
+
+        if i < len then {
+            return [Float64]Result.Error(ref "trailing characters")
+        }
+
+        if is_negative then {
+            result = 0.0 - result
+        }
+
+        [Float64]Result.Ok(result)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// given Float32 { parse }
+// ---------------------------------------------------------------------------
+
+given Float32 {
+    public parse(s String) [Self]Result = {
+        when Float64.parse(s) is {
+            .Ok(f) then [Float32]Result.Ok((Float32)f),
+            .Error(e) then [Float32]Result.Error(e),
+        }
+    }
+}

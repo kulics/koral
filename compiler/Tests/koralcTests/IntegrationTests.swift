@@ -230,6 +230,10 @@ class IntegrationTests: XCTestCase {
     func test_random_zero_seed_panic() throws { try runCase(named: "random_zero_seed_panic.koral") }
     func test_random_empty_range_panic() throws { try runCase(named: "random_empty_range_panic.koral") }
     func test_random_api_test() throws { try runCase(named: "random_api_test.koral") }
+    func test_convert_parse_int_test() throws { try runCase(named: "convert_parse_int_test.koral") }
+    func test_convert_parse_float_test() throws { try runCase(named: "convert_parse_float_test.koral") }
+    func test_convert_format_int_test() throws { try runCase(named: "convert_format_int_test.koral") }
+    func test_convert_format_float_test() throws { try runCase(named: "convert_format_float_test.koral") }
     
     func runTestCase(file: URL, projectRoot: URL) throws {
         // 1. Parse expectations
