@@ -708,7 +708,7 @@ public class EscapeContext {
                 markRefArgumentAsEscaping(arg)
             }
             
-        case .staticMethodCall(let baseType, let methodName, _, let arguments, _):
+        case .staticMethodCall(let baseType, let methodName, _, _, let arguments, _):
             for arg in arguments {
                 preAnalyzeExpression(arg)
             }
@@ -1269,7 +1269,7 @@ public class GlobalEscapeAnalyzer {
                 extractCallsFromExpression(arg, callerDefId: callerDefId)
             }
 
-        case .staticMethodCall(let baseType, let methodName, _, let arguments, _):
+        case .staticMethodCall(let baseType, let methodName, _, _, let arguments, _):
             // Try to look up the static method DefId
             let typeName = context.getTypeName(baseType)
             if let defId = program.lookupStaticMethod(typeName: typeName, methodName: methodName) {

@@ -564,11 +564,16 @@ public func printTypedAST(_ node: TypedProgram) {
     case .intrinsicCall(let node):
       print("\(indent)IntrinsicCall: \(node)")
       
-    case .staticMethodCall(let baseType, let methodName, let typeArgs, let arguments, let type):
+    case .staticMethodCall(let baseType, let methodName, let typeArgs, let methodTypeArgs, let arguments, let type):
       print("\(indent)StaticMethodCall: \(baseType).\(methodName) : \(type)")
       if !typeArgs.isEmpty {
         withIndent {
           print("\(indent)TypeArgs: \(typeArgs.map { $0.description }.joined(separator: ", "))")
+        }
+      }
+      if !methodTypeArgs.isEmpty {
+        withIndent {
+          print("\(indent)MethodTypeArgs: \(methodTypeArgs.map { $0.description }.joined(separator: ", "))")
         }
       }
       withIndent {

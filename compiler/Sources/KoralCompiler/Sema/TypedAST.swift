@@ -218,9 +218,10 @@ public indirect enum TypedExpressionNode {
   /// - baseType: The type on which the static method is called
   /// - methodName: The original method name (not mangled)
   /// - typeArgs: Type arguments for generic types (e.g., [Int] for [Int]List)
+  /// - methodTypeArgs: Method-level generic type arguments (e.g., [R] in Bool.[R]random)
   /// - arguments: Method arguments
   /// - type: Return type
-  case staticMethodCall(baseType: Type, methodName: String, typeArgs: [Type], arguments: [TypedExpressionNode], type: Type)
+  case staticMethodCall(baseType: Type, methodName: String, typeArgs: [Type], methodTypeArgs: [Type], arguments: [TypedExpressionNode], type: Type)
   case whileExpression(condition: TypedExpressionNode, body: TypedExpressionNode, type: Type)
   /// Loop pattern matching expression (while expr is pattern then body)
   /// - subject: The expression being matched against in each iteration
@@ -426,7 +427,7 @@ extension TypedExpressionNode {
       .call(_, _, let type),
       .genericCall(_, _, _, let type),
       .methodReference(_, _, _, _, let type),
-      .staticMethodCall(_, _, _, _, let type),
+      .staticMethodCall(_, _, _, _, _, let type),
       .whileExpression(_, _, let type),
       .whilePatternExpression(_, _, _, _, let type),
       .typeConstruction(_, _, _, let type),

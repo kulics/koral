@@ -842,3 +842,81 @@ float koral_f32_erf(float x) { return erff(x); }
 float koral_f32_erfc(float x) { return erfcf(x); }
 float koral_f32_tgamma(float x) { return tgammaf(x); }
 float koral_f32_lgamma(float x) { return lgammaf(x); }
+
+// ============================================================================
+// Random: system entropy source
+// ============================================================================
+
+#if defined(_WIN32) || defined(_WIN64)
+
+#include <bcrypt.h>
+// Link with bcrypt.lib (MSVC) or -lbcrypt (MinGW)
+
+int32_t koral_random_fill(uint8_t* buf, int32_t len) {
+    if (!buf || len <= 0) return -1;
+    NTSTATUS status = BCryptGenRandom(NULL, buf, (ULONG)len,
+                                      BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+    return (status >= 0) ? 0 : -1;
+}
+
+#elif defined(__APPLE__)
+
+#include <stdlib.h>
+
+int32_t koral_random_fill(uint8_t* buf, int32_t len) {
+    if (!buf || len <= 0) return -1;
+    arc4random_buf(buf, (size_t)len);
+    return 0;
+}
+
+#else
+// Linux / other POSIX
+
+#include <sys/types.h>
+#include <fcntl.h>
+
+// Try getrandom() first (Linux 3.17+), fall back to /dev/urandom
+#if defined(__linux__)
+#include <sys/syscall.h>
+#endif
+
+static int koral_random_fill_urandom(uint8_t* buf, int32_t len) {
+    int fd = open("/dev/urandom", O_RDONLY);
+    if (fd < 0) return -1;
+    int32_t remaining = len;
+    while (remaining > 0) {
+        ssize_t n = read(fd, buf + (len - remaining), (size_t)remaining);
+        if (n <= 0) {
+            close(fd);
+            return -1;
+        }
+        remaining -= (int32_t)n;
+    }
+    close(fd);
+    return 0;
+}
+
+int32_t koral_random_fill(uint8_t* buf, int32_t len) {
+    if (!buf || len <= 0) return -1;
+#if defined(__linux__) && defined(SYS_getrandom)
+    int32_t remaining = len;
+    while (remaining > 0) {
+        long ret = syscall(SYS_getrandom, buf + (len - remaining),
+                           (size_t)remaining, 0);
+        if (ret < 0) {
+            if (errno == EINTR) continue;
+            if (errno == ENOSYS) {
+                // getrandom not available, fall back to /dev/urandom
+                return koral_random_fill_urandom(buf, len);
+            }
+            return -1;
+        }
+        remaining -= (int32_t)ret;
+    }
+    return 0;
+#else
+    return koral_random_fill_urandom(buf, len);
+#endif
+}
+
+#endif

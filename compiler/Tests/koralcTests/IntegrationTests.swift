@@ -226,6 +226,10 @@ class IntegrationTests: XCTestCase {
     func test_datetime_requires_import() throws { try runCase(named: "datetime_requires_import.koral") }
     func test_std_math_float_test() throws { try runCase(named: "std_math_float_test.koral") }
     func test_std_math_int_test() throws { try runCase(named: "std_math_int_test.koral") }
+    func test_random_xoshiro_test() throws { try runCase(named: "random_xoshiro_test.koral") }
+    func test_random_zero_seed_panic() throws { try runCase(named: "random_zero_seed_panic.koral") }
+    func test_random_empty_range_panic() throws { try runCase(named: "random_empty_range_panic.koral") }
+    func test_random_api_test() throws { try runCase(named: "random_api_test.koral") }
     
     func runTestCase(file: URL, projectRoot: URL) throws {
         // 1. Parse expectations
