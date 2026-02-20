@@ -245,20 +245,14 @@ extension TypeChecker {
     }
     substitution["Self"] = baseType
     
-    // Resolve function type with substitution
-    let functionType = try withNewScope {
-      for (paramName, paramType) in substitution {
-        try currentScope.defineType(paramName, type: paramType)
-      }
-      
-      let returnType = try resolveTypeNode(method.returnType)
-      let params = try method.parameters.map { param -> Parameter in
-        let paramType = try resolveTypeNode(param.type)
-        return Parameter(type: paramType, kind: param.mutable ? .byMutRef : .byVal)
-      }
-      
-      return Type.function(parameters: params, returns: returnType)
+    // Resolve function type with explicit substitution to avoid scope shadowing
+    // by genericParameters with the same name (e.g., method-level T).
+    let returnType = try resolveTypeNodeWithSubstitution(method.returnType, substitution: substitution)
+    let params = try method.parameters.map { param -> Parameter in
+      let paramType = try resolveTypeNodeWithSubstitution(param.type, substitution: substitution)
+      return Parameter(type: paramType, kind: param.mutable ? .byMutRef : .byVal)
     }
+    let functionType = Type.function(parameters: params, returns: returnType)
     
     let kind = getCompilerMethodKind(method.name)
     return makeGlobalSymbol(
@@ -329,10 +323,49 @@ extension TypeChecker {
     case .pointer(let element):
       templateName = "Ptr"
       typeArgs = [element]
+    case .int:
+      templateName = "Int"
+      typeArgs = []
+    case .int8:
+      templateName = "Int8"
+      typeArgs = []
+    case .int16:
+      templateName = "Int16"
+      typeArgs = []
+    case .int32:
+      templateName = "Int32"
+      typeArgs = []
+    case .int64:
+      templateName = "Int64"
+      typeArgs = []
+    case .uint:
+      templateName = "UInt"
+      typeArgs = []
+    case .uint8:
+      templateName = "UInt8"
+      typeArgs = []
+    case .uint16:
+      templateName = "UInt16"
+      typeArgs = []
+    case .uint32:
+      templateName = "UInt32"
+      typeArgs = []
+    case .uint64:
+      templateName = "UInt64"
+      typeArgs = []
+    case .float32:
+      templateName = "Float32"
+      typeArgs = []
+    case .float64:
+      templateName = "Float64"
+      typeArgs = []
+    case .bool:
+      templateName = "Bool"
+      typeArgs = []
     default:
       throw SemanticError(.generic("Cannot call generic method on type \(baseType)"), line: currentLine)
     }
-    
+
     // Look up the method in generic extension methods
     guard let extensions = genericExtensionMethods[templateName] else {
       throw SemanticError(.generic("No extension methods found for type \(templateName)"), line: currentLine)

@@ -1913,8 +1913,33 @@ extension TypeChecker {
             parameters: info.params,
             body: typedBody,
             returnType: info.returnType
-          )
-        )
+          ))
+
+        if !info.method.typeParameters.isEmpty {
+          if genericExtensionMethods[typeName] == nil {
+            genericExtensionMethods[typeName] = []
+          }
+
+          if let existingIndex = genericExtensionMethods[typeName]!.firstIndex(where: {
+            $0.method.name == info.method.name && $0.typeParams.isEmpty
+          }) {
+            genericExtensionMethods[typeName]![existingIndex] = GenericExtensionMethodTemplate(
+              typeParams: [],
+              method: info.method,
+              checkedBody: typedBody,
+              checkedParameters: info.params,
+              checkedReturnType: info.returnType
+            )
+          } else {
+            genericExtensionMethods[typeName]!.append(GenericExtensionMethodTemplate(
+              typeParams: [],
+              method: info.method,
+              checkedBody: typedBody,
+              checkedParameters: info.params,
+              checkedReturnType: info.returnType
+            ))
+          }
+        }
       }
 
       return .givenDeclaration(type: type, methods: typedMethods)

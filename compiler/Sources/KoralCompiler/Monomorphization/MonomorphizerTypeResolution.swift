@@ -1109,10 +1109,11 @@ extension Monomorphizer {
                 type: resolveParameterizedType(type)
             )
             
-        case .staticMethodCall(let baseType, let methodName, let typeArgs, let arguments, let type):
+        case .staticMethodCall(let baseType, let methodName, let typeArgs, let methodTypeArgs, let arguments, let type):
             // Resolve the base type and type arguments
             let resolvedBaseType = resolveParameterizedType(baseType)
             let resolvedTypeArgs = typeArgs.map { resolveParameterizedType($0) }
+            let resolvedMethodTypeArgs = methodTypeArgs.map { resolveParameterizedType($0) }
             let resolvedArguments = arguments.map { resolveTypesInExpression($0) }
             let resolvedReturnType = resolveParameterizedType(type)
             
@@ -1122,6 +1123,7 @@ extension Monomorphizer {
                     baseType: resolvedBaseType,
                     methodName: methodName,
                     typeArgs: resolvedTypeArgs,
+                    methodTypeArgs: resolvedMethodTypeArgs,
                     arguments: resolvedArguments,
                     type: resolvedReturnType
                 )
@@ -1164,24 +1166,52 @@ extension Monomorphizer {
             let mangledMethodName: String
             if isGenericInstantiation || resolvedTypeArgs.isEmpty {
                 // qualifiedTypeName already includes type args for generic instantiations
-                mangledMethodName = "\(qualifiedTypeName)_\(methodName)"
+                if resolvedMethodTypeArgs.isEmpty {
+                    mangledMethodName = "\(qualifiedTypeName)_\(methodName)"
+                } else {
+                    let methodArgLayoutKeys = resolvedMethodTypeArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
+                    mangledMethodName = "\(qualifiedTypeName)_\(methodName)_\(methodArgLayoutKeys)"
+                }
             } else {
                 // For uninstantiated generic types, add type args
                 let argLayoutKeys = resolvedTypeArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
-                mangledMethodName = "\(qualifiedTypeName)_\(argLayoutKeys)_\(methodName)"
+                if resolvedMethodTypeArgs.isEmpty {
+                    mangledMethodName = "\(qualifiedTypeName)_\(argLayoutKeys)_\(methodName)"
+                } else {
+                    let methodArgLayoutKeys = resolvedMethodTypeArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
+                    mangledMethodName = "\(qualifiedTypeName)_\(argLayoutKeys)_\(methodName)_\(methodArgLayoutKeys)"
+                }
             }
             
             // Check for concrete extension methods first (for primitive types like Int, UInt, etc.)
-            if let methods = extensionMethods[templateName], let _ = methods[methodName] {
-                // Method exists in concrete extension methods, just generate the call
-                let functionType = Type.function(
-                    parameters: resolvedArguments.map { Parameter(type: $0.type, kind: .byVal) },
-                    returns: resolvedReturnType
-                )
-                let callee: TypedExpressionNode = .variable(
-                    identifier: makeSymbol(name: mangledMethodName, type: functionType, kind: .function)
-                )
-                return .call(callee: callee, arguments: resolvedArguments, type: resolvedReturnType)
+            if let methods = extensionMethods[templateName], let methodSym = methods[methodName] {
+                // For static generic methods on concrete types, resolve through lookupConcreteMethodSymbol
+                // so monomorphization can instantiate method-level type arguments.
+                if !resolvedMethodTypeArgs.isEmpty || context.containsGenericParameter(methodSym.type) {
+                    if let concreteMethod = try? lookupConcreteMethodSymbol(
+                        on: resolvedBaseType,
+                        name: methodName,
+                        methodTypeArgs: resolvedMethodTypeArgs
+                    ) {
+                        let functionType = Type.function(
+                            parameters: resolvedArguments.map { Parameter(type: $0.type, kind: .byVal) },
+                            returns: resolvedReturnType
+                        )
+                        let callee: TypedExpressionNode = .variable(
+                            identifier: makeSymbol(name: context.getName(concreteMethod.defId) ?? mangledMethodName, type: functionType, kind: .function)
+                        )
+                        return .call(callee: callee, arguments: resolvedArguments, type: resolvedReturnType)
+                    }
+                } else {
+                    let functionType = Type.function(
+                        parameters: resolvedArguments.map { Parameter(type: $0.type, kind: .byVal) },
+                        returns: resolvedReturnType
+                    )
+                    let callee: TypedExpressionNode = .variable(
+                        identifier: makeSymbol(name: mangledMethodName, type: functionType, kind: .function)
+                    )
+                    return .call(callee: callee, arguments: resolvedArguments, type: resolvedReturnType)
+                }
             }
             
             // Ensure the extension method is instantiated (for generic types)
@@ -1191,11 +1221,11 @@ extension Monomorphizer {
                         templateName: templateName,
                         methodName: methodName,
                         typeArgs: resolvedTypeArgs,
-                        methodTypeArgs: []  // TODO: Support method-level type args in method calls
+                        methodTypeArgs: resolvedMethodTypeArgs
                     )
                     if !processedRequestKeys.contains(key) {
                         pendingRequests.append(InstantiationRequest(
-                            kind: .extensionMethod(templateName: templateName, baseType: resolvedBaseType, template: ext, typeArgs: resolvedTypeArgs, methodTypeArgs: []),
+                            kind: .extensionMethod(templateName: templateName, baseType: resolvedBaseType, template: ext, typeArgs: resolvedTypeArgs, methodTypeArgs: resolvedMethodTypeArgs),
                             sourceLine: currentLine,
                             sourceFileName: currentFileName
                         ))

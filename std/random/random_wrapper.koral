@@ -1,0 +1,179 @@
+// ============================================================================
+// std.random - Random Wrapper Type and Convenience Functions
+// ============================================================================
+// [R RandomSource]Random: generic wrapper holding any RandomSource
+// next_int_in / next_uint_in: bounded integer random (Lemire algorithm)
+// shuffle / choose: collection utilities
+// simple_random(): convenience free function
+// ============================================================================
+
+using super.Range
+using super.Pair
+using super.List
+using super.Option
+
+// ============================================================================
+// 128-bit multiplication helper
+// ============================================================================
+
+let mul128(a UInt64, b UInt64) [UInt64, UInt64]Pair = {
+    let a_lo = a & (UInt64)4294967295
+    let a_hi = a >> 32
+    let b_lo = b & (UInt64)4294967295
+    let b_hi = b >> 32
+
+    let lo_lo = a_lo.wrapping_mul(b_lo)
+    let hi_lo = a_hi.wrapping_mul(b_lo)
+    let lo_hi = a_lo.wrapping_mul(b_hi)
+    let hi_hi = a_hi.wrapping_mul(b_hi)
+
+    let cross = (lo_lo >> 32).wrapping_add(hi_lo & (UInt64)4294967295).wrapping_add(lo_hi)
+    let high = hi_hi.wrapping_add(hi_lo >> 32).wrapping_add(cross >> 32)
+    let low = (cross << 32) | (lo_lo & (UInt64)4294967295)
+    [UInt64, UInt64]Pair(high, low)
+}
+
+// Lemire bounded random: maps a uniform UInt64 to [0, range) without bias.
+let [R RandomSource]lemire_bounded(source R, range UInt64) UInt64 = {
+    let x = source.generate()
+    let m = mul128(x, range)
+    let mut hi = m.first
+    let mut lo = m.second
+    if lo < range then {
+        let threshold = ((UInt64)0).wrapping_sub(range) % range
+        while lo < threshold then {
+            let x2 = source.generate()
+            let m2 = mul128(x2, range)
+            hi = m2.first
+            lo = m2.second
+        }
+    }
+    hi
+}
+
+// ============================================================================
+// Random wrapper type
+// ============================================================================
+
+public type [R RandomSource]Random(private rng R)
+
+given[R RandomSource] [R]Random {
+    // Construct from a RandomSource instance.
+    public new(rng R) [R]Random = [R]Random(rng)
+
+    // Generate a random value of any Randomable type.
+    public [T Randomable]next(self) T = T.random(self.rng)
+
+    // Generate a random Int within the given range (Lemire algorithm).
+    public next_int_in(self, range [Int]Range) Int = {
+        let mut low Int = 0
+        let mut high Int = 0
+        when range is {
+            .ClosedRange(a, b) then { low = a; high = b },
+            .ClosedOpenRange(a, b) then {
+                if a >= b then { panic("next_int_in: empty range") }
+                low = a; high = b - 1
+            },
+            .OpenClosedRange(a, b) then {
+                if a >= b then { panic("next_int_in: empty range") }
+                low = a + 1; high = b
+            },
+            .OpenRange(a, b) then {
+                if a + 1 >= b then { panic("next_int_in: empty range") }
+                low = a + 1; high = b - 1
+            },
+            .FromRange(a) then { low = a; high = Int.max() },
+            .FromOpenRange(a) then {
+                if a == Int.max() then { panic("next_int_in: empty range") }
+                low = a + 1; high = Int.max()
+            },
+            .ToRange(b) then { low = Int.min(); high = b },
+            .ToOpenRange(b) then {
+                if b == Int.min() then { panic("next_int_in: empty range") }
+                low = Int.min(); high = b - 1
+            },
+            .FullRange then { low = Int.min(); high = Int.max() },
+        }
+        if low > high then { panic("next_int_in: empty range") }
+        if low == high then { return low }
+        if low == Int.min() and high == Int.max() then {
+            return (Int)self.rng.generate()
+        }
+        // Map signed [low, high] to unsigned [0, range_size) via XOR with min
+        let u_low = (UInt64)low ^ (UInt64)Int.min()
+        let u_high = (UInt64)high ^ (UInt64)Int.min()
+        let range_size = u_high - u_low + 1
+        let u_result = u_low + lemire_bounded(self.rng, range_size)
+        (Int)(u_result ^ (UInt64)Int.min())
+    }
+
+    // Generate a random UInt within the given range (Lemire algorithm).
+    public next_uint_in(self, range [UInt]Range) UInt = {
+        let mut low UInt = 0
+        let mut high UInt = 0
+        when range is {
+            .ClosedRange(a, b) then { low = a; high = b },
+            .ClosedOpenRange(a, b) then {
+                if a >= b then { panic("next_uint_in: empty range") }
+                low = a; high = b - 1
+            },
+            .OpenClosedRange(a, b) then {
+                if a >= b then { panic("next_uint_in: empty range") }
+                low = a + 1; high = b
+            },
+            .OpenRange(a, b) then {
+                if a + 1 >= b then { panic("next_uint_in: empty range") }
+                low = a + 1; high = b - 1
+            },
+            .FromRange(a) then { low = a; high = UInt.max() },
+            .FromOpenRange(a) then {
+                if a == UInt.max() then { panic("next_uint_in: empty range") }
+                low = a + 1; high = UInt.max()
+            },
+            .ToRange(b) then { low = 0; high = b },
+            .ToOpenRange(b) then {
+                if b == 0 then { panic("next_uint_in: empty range") }
+                low = 0; high = b - 1
+            },
+            .FullRange then { low = 0; high = UInt.max() },
+        }
+        if low > high then { panic("next_uint_in: empty range") }
+        if low == high then { return low }
+        if low == 0 and high == UInt.max() then {
+            return (UInt)self.rng.generate()
+        }
+        let range_size = (UInt64)(high - low + 1)
+        (UInt)(low + (UInt)lemire_bounded(self.rng, range_size))
+    }
+
+    // Randomly shuffle a list in-place using Fisher-Yates algorithm.
+    public [T Any]shuffle(self, list [T]List ref) Void = {
+        let len = list.count()
+        if len <= 1 then { return }
+        let mut i = len - 1
+        while i > 0 then {
+            // Pick a random index in [0, i]
+            let j = (UInt)lemire_bounded(self.rng, (UInt64)(i + 1))
+            if i <> j then {
+                let tmp = list.at(i)
+                list.set_at(i, list.at(j))
+                list.set_at(j, tmp)
+            }
+            i = i - 1
+        }
+    }
+
+    // Pick a random element from a list. Returns None if the list is empty.
+    public [T Any]choose(self, list [T]List) [T]Option = {
+        let len = list.count()
+        if len == 0 then { return [T]Option.None() }
+        let idx = (UInt)lemire_bounded(self.rng, (UInt64)len)
+        [T]Option.Some(list.at(idx))
+    }
+}
+
+// Create a Random instance backed by a system-entropy-seeded SimpleRandomSource.
+public let simple_random() [SimpleRandomSource]Random = {
+    let rng = SimpleRandomSource.new()
+    [SimpleRandomSource]Random.new(rng)
+}

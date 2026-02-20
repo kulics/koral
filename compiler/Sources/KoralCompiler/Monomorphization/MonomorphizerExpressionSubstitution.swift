@@ -724,10 +724,11 @@ extension Monomorphizer {
                 type: substituteType(type, substitution: substitution)
             )
             
-        case .staticMethodCall(let baseType, let methodName, let typeArgs, let arguments, let type):
+        case .staticMethodCall(let baseType, let methodName, let typeArgs, let methodTypeArgs, let arguments, let type):
             // Substitute types in the static method call
             let substitutedBaseType = substituteType(baseType, substitution: substitution)
             let substitutedTypeArgs = typeArgs.map { substituteType($0, substitution: substitution) }
+            let substitutedMethodTypeArgs = methodTypeArgs.map { substituteType($0, substitution: substitution) }
             let substitutedArguments = arguments.map { substituteTypesInExpression($0, substitution: substitution) }
             let substitutedReturnType = substituteType(type, substitution: substitution)
             
@@ -735,6 +736,7 @@ extension Monomorphizer {
                 baseType: substitutedBaseType,
                 methodName: methodName,
                 typeArgs: substitutedTypeArgs,
+                methodTypeArgs: substitutedMethodTypeArgs,
                 arguments: substitutedArguments,
                 type: substitutedReturnType
             )

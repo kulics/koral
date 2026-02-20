@@ -522,7 +522,7 @@ extension TypeChecker {
       )
 
     case .call(let callee, let arguments):
-      return try inferCallExpression(callee: callee, arguments: arguments)
+      return try inferCallExpression(callee: callee, arguments: arguments, expectedType: expectedType)
 
     case .andExpression(let left, let right):
       let typedLeft = try inferTypedExpression(left)
@@ -898,6 +898,7 @@ extension TypeChecker {
         baseType: expectedType,
         methodName: memberName,
         typeArgs: [],
+        methodTypeArgs: [],
         arguments: typedArgs,
         type: returnType
       )
@@ -945,6 +946,7 @@ extension TypeChecker {
         baseType: expectedType,
         methodName: memberName,
         typeArgs: [],
+        methodTypeArgs: [],
         arguments: typedArgs,
         type: returnType
       )
@@ -1000,6 +1002,7 @@ extension TypeChecker {
         baseType: expectedType,
         methodName: memberName,
         typeArgs: typeArgs,
+        methodTypeArgs: [],
         arguments: typedArgs,
         type: returnType
       )
@@ -1055,6 +1058,7 @@ extension TypeChecker {
         baseType: expectedType,
         methodName: memberName,
         typeArgs: typeArgs,
+        methodTypeArgs: [],
         arguments: typedArgs,
         type: returnType
       )
@@ -1071,7 +1075,7 @@ extension TypeChecker {
 extension TypeChecker {
   
   /// Infers the type of a call expression
-  func inferCallExpression(callee: ExpressionNode, arguments: [ExpressionNode]) throws -> TypedExpressionNode {
+  func inferCallExpression(callee: ExpressionNode, arguments: [ExpressionNode], expectedType: Type? = nil) throws -> TypedExpressionNode {
     if case .memberPath(_, let path) = callee, let memberName = path.last {
       if getCompilerMethodKind(memberName) == .drop {
         throw SemanticError(
@@ -1147,6 +1151,7 @@ extension TypeChecker {
                   baseType: type,
                   methodName: methodName,
                   typeArgs: [],
+                  methodTypeArgs: [],
                   arguments: typedArguments,
                   type: returnType
                 )
@@ -1229,6 +1234,7 @@ extension TypeChecker {
                   baseType: type,
                   methodName: methodName,
                   typeArgs: [],
+                  methodTypeArgs: [],
                   arguments: typedArguments,
                   type: returnType
                 )
@@ -1286,6 +1292,7 @@ extension TypeChecker {
                   baseType: type,
                   methodName: methodName,
                   typeArgs: [],
+                  methodTypeArgs: [],
                   arguments: typedArguments,
                   type: returnType
                 )
@@ -1354,6 +1361,7 @@ extension TypeChecker {
               baseType: baseType,
               methodName: methodName,
               typeArgs: [],
+              methodTypeArgs: [],
               arguments: typedArguments,
               type: returnType
             )
@@ -1441,6 +1449,7 @@ extension TypeChecker {
                 baseType: baseType,
                 methodName: memberName,
                 typeArgs: resolvedArgs,
+                methodTypeArgs: [],
                 arguments: typedArguments,
                 type: returnType
               )
@@ -1556,6 +1565,7 @@ extension TypeChecker {
                 baseType: baseType,
                 methodName: memberName,
                 typeArgs: resolvedArgs,
+                methodTypeArgs: [],
                 arguments: typedArguments,
                 type: returnType
               )
@@ -1697,7 +1707,13 @@ extension TypeChecker {
 
     // Method call
     if case .methodReference(let base, let method, _, _, let methodType) = typedCallee {
-      return try inferMethodCall(base: base, method: method, methodType: methodType, arguments: arguments)
+      return try inferMethodCall(
+        base: base,
+        method: method,
+        methodType: methodType,
+        arguments: arguments,
+        expectedReturnType: expectedType
+      )
     }
 
     // Trait method placeholder call (for trait methods on generic parameters)
@@ -2356,7 +2372,13 @@ extension TypeChecker {
 extension TypeChecker {
   
   /// Infers the type of a method call expression
-  func inferMethodCall(base: TypedExpressionNode, method: Symbol, methodType: Type, arguments: [ExpressionNode]) throws -> TypedExpressionNode {
+  func inferMethodCall(
+    base: TypedExpressionNode,
+    method: Symbol,
+    methodType: Type,
+    arguments: [ExpressionNode],
+    expectedReturnType: Type? = nil
+  ) throws -> TypedExpressionNode {
     let methodName = context.getName(method.defId) ?? "<unknown>"
     if case .function(let params, let returns) = method.type {
       if arguments.count != params.count - 1 {
@@ -2512,6 +2534,17 @@ extension TypeChecker {
         if !methodTypeParamBindings.isEmpty {
           finalReturns = SemaUtils.substituteType(returns, substitution: methodTypeParamBindings, context: context)
         }
+
+        if methodTypeParamBindings.isEmpty,
+           let expectedReturnType,
+           context.containsGenericParameter(returns)
+        {
+          _ = unifyTypes(returns, expectedReturnType, bindings: &methodTypeParamBindings)
+          if !methodTypeParamBindings.isEmpty {
+            finalReturns = SemaUtils.substituteType(returns, substitution: methodTypeParamBindings, context: context)
+          }
+        }
+
         // Extract method type args in order from the function type
         // The order is determined by the order of first appearance in the function type
         let paramNames = extractGenericParameterNames(from: method.type)
@@ -2591,6 +2624,22 @@ extension TypeChecker {
     methodName: String,
     arguments: [ExpressionNode]
   ) throws -> TypedExpressionNode {
+    if case .identifier(let typeName) = baseExpr,
+       currentScope.lookup(typeName, sourceFile: currentSourceFile) == nil,
+       let baseType = currentScope.lookupType(typeName) {
+      if case .genericParameter = baseType {
+        // Keep existing generic-parameter method path below.
+      } else {
+        let resolvedMethodTypeArgs = try methodTypeArgs.map { try resolveTypeNode($0) }
+        return try inferStaticGenericMethodCallOnConcreteType(
+          baseType: baseType,
+          methodName: methodName,
+          arguments: arguments,
+          explicitMethodTypeArgs: resolvedMethodTypeArgs
+        )
+      }
+    }
+
     // Handle explicit generic method call: obj.[Type]method(args)
     let typedBase = try inferTypedExpression(baseExpr)
     let resolvedMethodTypeArgs = try methodTypeArgs.map { try resolveTypeNode($0) }
@@ -2604,8 +2653,26 @@ extension TypeChecker {
       methodName: methodName,
       methodTypeArgs: resolvedMethodTypeArgs
     )
-    
-    guard case .function(let params, let returns) = methodResult.methodType else {
+
+    var resolvedMethodType = methodResult.methodType
+    if !methodResult.methodTypeArgs.isEmpty {
+      let allParamNames = extractGenericParameterNames(from: methodResult.methodType)
+      let baseTypeParamNames = extractGenericParameterNames(from: typedBase.type)
+      let methodParamNames = allParamNames.filter { !baseTypeParamNames.contains($0) }
+      if methodParamNames.count == methodResult.methodTypeArgs.count {
+        var explicitSubstitution: [String: Type] = [:]
+        for (name, argType) in zip(methodParamNames, methodResult.methodTypeArgs) {
+          explicitSubstitution[name] = argType
+        }
+        resolvedMethodType = SemaUtils.substituteType(
+          methodResult.methodType,
+          substitution: explicitSubstitution,
+          context: context
+        )
+      }
+    }
+
+    guard case .function(let params, let returns) = resolvedMethodType else {
       throw SemanticError(.generic("Expected function type for method \(methodName)"), line: currentLine)
     }
     
@@ -2687,7 +2754,7 @@ extension TypeChecker {
         methodName: methodName,
         base: finalBase,
         methodTypeArgs: resolvedMethodTypeArgs,
-        type: methodResult.methodType
+        type: resolvedMethodType
       )
     } else {
       finalCallee = .methodReference(
@@ -2695,7 +2762,7 @@ extension TypeChecker {
         method: methodResult.methodSymbol,
         typeArgs: methodResult.typeArgs,
         methodTypeArgs: resolvedMethodTypeArgs,
-        type: methodResult.methodType
+        type: resolvedMethodType
       )
     }
     
@@ -3464,31 +3531,42 @@ extension TypeChecker {
     methodName: String,
     arguments: [ExpressionNode]
   ) throws -> TypedExpressionNode {
-    guard template.typeParameters.count == resolvedTypeArgs.count else {
+    var effectiveTypeArgs = resolvedTypeArgs
+    if effectiveTypeArgs.isEmpty, !template.typeParameters.isEmpty,
+       let inferred = try inferGenericTypeArgsForStaticMethodCall(
+        templateName: typeName,
+        typeParameters: template.typeParameters,
+        methodName: methodName,
+        arguments: arguments
+       ) {
+      effectiveTypeArgs = inferred
+    }
+
+    guard template.typeParameters.count == effectiveTypeArgs.count else {
       throw SemanticError.typeMismatch(
         expected: "\(template.typeParameters.count) generic arguments",
-        got: "\(resolvedTypeArgs.count)"
+        got: "\(effectiveTypeArgs.count)"
       )
     }
     
-    try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedTypeArgs)
+    try enforceGenericConstraints(typeParameters: template.typeParameters, args: effectiveTypeArgs)
     
-    if !resolvedTypeArgs.contains(where: { context.containsGenericParameter($0) }) {
+    if !effectiveTypeArgs.contains(where: { context.containsGenericParameter($0) }) {
       recordInstantiation(InstantiationRequest(
-        kind: .structType(template: template, args: resolvedTypeArgs),
+        kind: .structType(template: template, args: effectiveTypeArgs),
         sourceLine: currentLine,
         sourceFileName: currentFileName
       ))
     }
     
-    let baseType = Type.genericStruct(template: typeName, args: resolvedTypeArgs)
+    let baseType = Type.genericStruct(template: typeName, args: effectiveTypeArgs)
     
     if let extensions = genericExtensionMethods[typeName] {
       if let ext = extensions.first(where: { $0.method.name == methodName }) {
         let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
         if isStatic {
           let methodSym = try resolveGenericExtensionMethod(
-            baseType: baseType, templateName: typeName, typeArgs: resolvedTypeArgs,
+            baseType: baseType, templateName: typeName, typeArgs: effectiveTypeArgs,
             methodInfo: ext)
           if methodSym.methodKind != .normal {
             throw SemanticError(
@@ -3524,7 +3602,8 @@ extension TypeChecker {
           return .staticMethodCall(
             baseType: baseType,
             methodName: methodName,
-            typeArgs: resolvedTypeArgs,
+            typeArgs: effectiveTypeArgs,
+            methodTypeArgs: [],
             arguments: typedArguments,
             type: returnType
           )
@@ -3603,6 +3682,7 @@ extension TypeChecker {
             baseType: baseType,
             methodName: methodName,
             typeArgs: resolvedTypeArgs,
+            methodTypeArgs: [],
             arguments: typedArguments,
             type: returnType
           )
@@ -3611,6 +3691,54 @@ extension TypeChecker {
     }
     
     throw SemanticError.undefinedMember(methodName, typeName)
+  }
+
+  private func inferGenericTypeArgsForStaticMethodCall(
+    templateName: String,
+    typeParameters: [TypeParameterDecl],
+    methodName: String,
+    arguments: [ExpressionNode]
+  ) throws -> [Type]? {
+    guard let extensions = genericExtensionMethods[templateName],
+          let ext = extensions.first(where: { $0.method.name == methodName }) else {
+      return nil
+    }
+
+    let unresolvedParamTypes: [Type] = try withNewScope {
+      for typeParam in ext.typeParams {
+        currentScope.defineGenericParameter(typeParam.name, type: .genericParameter(name: typeParam.name))
+      }
+      for methodTypeParam in ext.method.typeParameters {
+        currentScope.defineGenericParameter(methodTypeParam.name, type: .genericParameter(name: methodTypeParam.name))
+      }
+
+      let selfArgs = ext.typeParams.map { Type.genericParameter(name: $0.name) }
+      try currentScope.defineType("Self", type: .genericStruct(template: templateName, args: selfArgs))
+
+      return try ext.method.parameters.map { param in
+        try resolveTypeNode(param.type)
+      }
+    }
+
+    if unresolvedParamTypes.count != arguments.count {
+      return nil
+    }
+
+    var bindings: [String: Type] = [:]
+    for (argExpr, expectedType) in zip(arguments, unresolvedParamTypes) {
+      let typedArg = try inferTypedExpression(argExpr)
+      _ = unifyTypes(expectedType, typedArg.type, bindings: &bindings)
+    }
+
+    var inferredArgs: [Type] = []
+    for typeParam in typeParameters {
+      guard let boundType = bindings[typeParam.name] else {
+        return nil
+      }
+      inferredArgs.append(boundType)
+    }
+
+    return inferredArgs
   }
   
   private func inferConcreteTypeStaticMethodCall(
@@ -3635,6 +3763,15 @@ extension TypeChecker {
     }
     
     if let methods = extensionMethods[lookupTypeName], let methodSym = methods[methodName] {
+      if context.containsGenericParameter(methodSym.type) {
+        return try inferStaticGenericMethodCallOnConcreteType(
+          baseType: type,
+          methodName: methodName,
+          arguments: arguments,
+          explicitMethodTypeArgs: nil
+        )
+      }
+
       if methodSym.methodKind != .normal {
         throw SemanticError(
           .generic("compiler protocol method \(methodName) cannot be called explicitly"),
@@ -3670,8 +3807,19 @@ extension TypeChecker {
         baseType: type,
         methodName: methodName,
         typeArgs: [],
+        methodTypeArgs: [],
         arguments: typedArguments,
         type: returnType
+      )
+    }
+
+    if let genericMethods = genericExtensionMethods[lookupTypeName],
+       genericMethods.contains(where: { $0.method.name == methodName }) {
+      return try inferStaticGenericMethodCallOnConcreteType(
+        baseType: type,
+        methodName: methodName,
+        arguments: arguments,
+        explicitMethodTypeArgs: nil
       )
     }
     
@@ -3715,9 +3863,13 @@ extension TypeChecker {
             }
             
             var typedArguments: [TypedExpressionNode] = []
+            var methodTypeParamBindings: [String: Type] = [:]
             for (arg, param) in zip(arguments, params) {
               var typedArg = try inferTypedExpression(arg)
               typedArg = try coerceLiteral(typedArg, to: param.type)
+              if context.containsGenericParameter(param.type) {
+                _ = unifyTypes(param.type, typedArg.type, bindings: &methodTypeParamBindings)
+              }
               if typedArg.type != param.type {
                 throw SemanticError.typeMismatch(
                   expected: param.type.description,
@@ -3726,11 +3878,24 @@ extension TypeChecker {
               }
               typedArguments.append(typedArg)
             }
+
+            let inferredMethodTypeArgs: [Type] = sig.typeParameters.compactMap { typeParam in
+              if let bound = methodTypeParamBindings[typeParam.name] {
+                return bound
+              }
+              if let existingType = currentScope.lookupType(typeParam.name),
+                 case .genericParameter(let existingName) = existingType,
+                 existingName == typeParam.name {
+                return existingType
+              }
+              return nil
+            }
             
             return .staticMethodCall(
               baseType: type,
               methodName: methodName,
               typeArgs: [],
+              methodTypeArgs: inferredMethodTypeArgs,
               arguments: typedArguments,
               type: returnType
             )
@@ -3740,6 +3905,173 @@ extension TypeChecker {
     }
     
     throw SemanticError.undefinedMember(methodName, typeName)
+  }
+
+  private func inferStaticGenericMethodCallOnConcreteType(
+    baseType: Type,
+    methodName: String,
+    arguments: [ExpressionNode],
+    explicitMethodTypeArgs: [Type]?
+  ) throws -> TypedExpressionNode {
+    let methodTypeArgs: [Type]
+    if let explicitMethodTypeArgs {
+      methodTypeArgs = explicitMethodTypeArgs
+    } else {
+      methodTypeArgs = try inferStaticGenericMethodTypeArguments(
+        baseType: baseType,
+        methodName: methodName,
+        arguments: arguments
+      )
+    }
+
+    let methodResult = try resolveGenericMethodWithExplicitTypeArgs(
+      baseType: baseType,
+      methodName: methodName,
+      methodTypeArgs: methodTypeArgs
+    )
+
+    guard case .function(let params, let returnType) = methodResult.methodType else {
+      throw SemanticError(.generic("Expected function type for static method"), line: currentLine)
+    }
+
+    if arguments.count != params.count {
+      throw SemanticError.invalidArgumentCount(
+        function: methodName,
+        expected: params.count,
+        got: arguments.count
+      )
+    }
+
+    var typedArguments: [TypedExpressionNode] = []
+    for (arg, param) in zip(arguments, params) {
+      var typedArg: TypedExpressionNode
+      if case .lambdaExpression(let lambdaParams, let returnType, let body, _) = arg {
+        typedArg = try inferLambdaExpression(
+          parameters: lambdaParams,
+          returnType: returnType,
+          body: body,
+          expectedType: param.type
+        )
+      } else {
+        typedArg = try inferTypedExpression(arg, expectedType: param.type)
+      }
+
+      typedArg = try coerceLiteral(typedArg, to: param.type)
+      if typedArg.type != param.type {
+        if case .reference(let inner) = param.type, inner == typedArg.type {
+          if typedArg.valueCategory == .lvalue {
+            typedArg = .referenceExpression(expression: typedArg, type: param.type)
+          } else {
+            throw SemanticError.invalidOperation(
+              op: "implicit ref", type1: typedArg.type.description, type2: "rvalue")
+          }
+        } else if case .reference(let inner) = typedArg.type, inner == param.type {
+          typedArg = .derefExpression(expression: typedArg, type: inner)
+        } else {
+          throw SemanticError.typeMismatch(
+            expected: param.type.description,
+            got: typedArg.type.description
+          )
+        }
+      }
+      typedArguments.append(typedArg)
+    }
+
+    return .staticMethodCall(
+      baseType: baseType,
+      methodName: methodName,
+      typeArgs: [],
+      methodTypeArgs: methodTypeArgs,
+      arguments: typedArguments,
+      type: returnType
+    )
+  }
+
+  private func inferStaticGenericMethodTypeArguments(
+    baseType: Type,
+    methodName: String,
+    arguments: [ExpressionNode]
+  ) throws -> [Type] {
+    let templateName: String
+    switch baseType {
+    case .genericStruct(let name, _):
+      templateName = name
+    case .genericUnion(let name, _):
+      templateName = name
+    case .structure(let defId):
+      templateName = context.getName(defId) ?? ""
+    case .union(let defId):
+      templateName = context.getName(defId) ?? ""
+    default:
+      templateName = baseType.description
+    }
+
+    let methodTypeParamNames: [String]
+    let unresolvedFunctionType: Type
+
+    if let extensions = genericExtensionMethods[templateName],
+       let methodInfo = extensions.first(where: { $0.method.name == methodName }) {
+      let methodTypeParams = methodInfo.method.typeParameters
+      if methodTypeParams.isEmpty {
+        return []
+      }
+
+      methodTypeParamNames = methodTypeParams.map { $0.name }
+      unresolvedFunctionType = try withNewScope {
+        try currentScope.defineType("Self", type: baseType)
+        for typeParam in methodTypeParams {
+          currentScope.defineGenericParameter(typeParam.name, type: .genericParameter(name: typeParam.name))
+        }
+
+        let params = try methodInfo.method.parameters.map { param -> Parameter in
+          let paramType = try resolveTypeNode(param.type)
+          return Parameter(type: paramType, kind: param.mutable ? .byMutRef : .byVal)
+        }
+        let returns = try resolveTypeNode(methodInfo.method.returnType)
+        return Type.function(parameters: params, returns: returns)
+      }
+    } else if let methods = extensionMethods[templateName],
+              let methodSym = methods[methodName] {
+      methodTypeParamNames = extractGenericParameterNames(from: methodSym.type)
+      if methodTypeParamNames.isEmpty {
+        return []
+      }
+      unresolvedFunctionType = methodSym.type
+    } else {
+      throw SemanticError.undefinedMember(methodName, templateName)
+    }
+
+    guard case .function(let params, _) = unresolvedFunctionType else {
+      throw SemanticError(.generic("Expected function type for generic static method"), line: currentLine)
+    }
+
+    if arguments.count != params.count {
+      throw SemanticError.invalidArgumentCount(
+        function: methodName,
+        expected: params.count,
+        got: arguments.count
+      )
+    }
+
+    var methodTypeParamBindings: [String: Type] = [:]
+    for (arg, param) in zip(arguments, params) {
+      var typedArg = try inferTypedExpression(arg)
+      typedArg = try coerceLiteral(typedArg, to: param.type)
+      _ = unifyTypes(param.type, typedArg.type, bindings: &methodTypeParamBindings)
+    }
+
+    var resolvedMethodTypeArgs: [Type] = []
+    for paramName in methodTypeParamNames {
+      guard let boundType = methodTypeParamBindings[paramName] else {
+        throw SemanticError(
+          .generic("Cannot infer generic argument '\(paramName)' for static method '\(methodName)'"),
+          line: currentLine
+        )
+      }
+      resolvedMethodTypeArgs.append(boundType)
+    }
+
+    return resolvedMethodTypeArgs
   }
 }
 
