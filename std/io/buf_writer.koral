@@ -1,0 +1,229 @@
+// ============================================================================
+// std.io - BufWriter Type
+// ============================================================================
+// Generic buffered writer that wraps any Writer with an internal buffer.
+// Uses compile-time static dispatch (generics, not trait objects).
+// Write strategy: data goes into internal buf; auto-flush when buf is full;
+// flush calls write_bytes(inner, buf) then buf.clear().
+// Invariant: buf.read_pos == 0 outside of flush.
+// ============================================================================
+
+public type [W Writer]BufWriter(private inner W, private buf Buffer)
+
+given[W Writer] [W]BufWriter {
+    // --- Static constructors ---
+
+    public new(w W) [W]BufWriter = {
+        [W]BufWriter(w, Buffer.with_capacity(4096))
+    }
+
+    public with_capacity(w W, cap Int) [W]BufWriter = {
+        if cap < 0 then {
+            panic("BufWriter.with_capacity: negative capacity")
+        }
+        [W]BufWriter(w, Buffer.with_capacity(cap))
+    }
+
+    // --- Writer trait: write ---
+    // Writes data from buf into internal buffer. Auto-flushes when full.
+
+    public write(self, buf Buffer) [UInt]Result = {
+        let ib = self.buf
+        let available = buf.storage.length - buf.storage.read_pos
+        if available == 0 then {
+            return [UInt]Result.Ok(0)
+        }
+        // If incoming data fits in remaining capacity, just copy
+        let remaining_cap = ib.storage.capacity - ib.storage.length
+        if available <= remaining_cap then {
+            copy_memory(ib.storage.data + ib.storage.length, buf.storage.data + buf.storage.read_pos, available)
+            ib.storage.length = ib.storage.length + available
+            buf.storage.read_pos = buf.storage.read_pos + available
+            return [UInt]Result.Ok(available)
+        }
+        // Need to flush first, then write
+        if ib.storage.length > 0 then {
+            let flush_result = self.flush()
+            when flush_result is {
+                .Ok(_) then {},
+                .Error(e) then {
+                    return [UInt]Result.Error(e)
+                },
+            }
+        }
+        // After flush, try to fit in buffer again
+        let new_remaining = ib.storage.capacity - ib.storage.length
+        if available <= new_remaining then {
+            copy_memory(ib.storage.data + ib.storage.length, buf.storage.data + buf.storage.read_pos, available)
+            ib.storage.length = ib.storage.length + available
+            buf.storage.read_pos = buf.storage.read_pos + available
+            return [UInt]Result.Ok(available)
+        }
+        // Data larger than buffer capacity — write directly to inner
+        let direct_result = write_bytes(self.inner, buf)
+        when direct_result is {
+            .Ok(_) then {
+                [UInt]Result.Ok(available)
+            },
+            .Error(e) then {
+                [UInt]Result.Error(e)
+            },
+        }
+    }
+
+    // --- Writer trait: flush ---
+    // Flushes internal buffer to inner writer.
+    // On partial write failure, preserves remaining data.
+
+    public flush(self) [Void]Result = {
+        let ib = self.buf
+        if ib.storage.length == 0 then {
+            return [Void]Result.Ok({})
+        }
+        // write_bytes will advance ib.read_pos as it writes
+        let result = write_bytes(self.inner, ib)
+        when result is {
+            .Ok(_) then {
+                ib.clear()
+                [Void]Result.Ok({})
+            },
+            .Error(e) then {
+                // Partial write recovery: ib.read_pos == M (bytes written),
+                // ib.length == N (total). Move [M, N) to [0, N-M).
+                let m = ib.storage.read_pos
+                let n = ib.storage.length
+                let remaining = n - m
+                if remaining > 0 and m > 0 then {
+                    move_memory(ib.storage.data, ib.storage.data + m, remaining)
+                }
+                ib.storage.length = remaining
+                ib.storage.read_pos = 0
+                [Void]Result.Error(e)
+            },
+        }
+    }
+
+    // --- Instance methods ---
+
+    public write_byte(self, b UInt8) [Void]Result = {
+        let ib = self.buf
+        if ib.storage.length >= ib.storage.capacity then {
+            let flush_result = self.flush()
+            when flush_result is {
+                .Ok(_) then {},
+                .Error(e) then {
+                    return [Void]Result.Error(e)
+                },
+            }
+        }
+        // After flush, buffer should have space (capacity >= 1 from constructor)
+        init_memory(ib.storage.data + ib.storage.length, b)
+        ib.storage.length = ib.storage.length + 1
+        [Void]Result.Ok({})
+    }
+
+    public write_string(self, s String) [Void]Result = {
+        let tmp = Buffer.from_string(s)
+        let result = self.write(tmp)
+        when result is {
+            .Ok(_) then [Void]Result.Ok({}),
+            .Error(e) then [Void]Result.Error(e),
+        }
+    }
+
+    public write_line(self, s String) [Void]Result = {
+        let result = self.write_string(s)
+        when result is {
+            .Ok(_) then self.write_byte(10),
+            .Error(e) then [Void]Result.Error(e),
+        }
+    }
+
+    public write_rune(self, r Rune) [UInt]Result = {
+        let cp = r.to_uint32()
+        // 1-byte ASCII
+        if cp < 128 then {
+            let wr = self.write_byte((UInt8)cp)
+            when wr is {
+                .Ok(_) then {
+                    return [UInt]Result.Ok(1)
+                },
+                .Error(e) then {
+                    return [UInt]Result.Error(e)
+                },
+            }
+        }
+        // 2-byte
+        if cp < 2048 then {
+            let r1 = self.write_byte((UInt8)(cp >> 6) | 192)
+            when r1 is {
+                .Ok(_) then {},
+                .Error(e) then {
+                    return [UInt]Result.Error(e)
+                },
+            }
+            let r2 = self.write_byte((UInt8)(cp & 63) | 128)
+            when r2 is {
+                .Ok(_) then {
+                    return [UInt]Result.Ok(2)
+                },
+                .Error(e) then {
+                    return [UInt]Result.Error(e)
+                },
+            }
+        }
+        // 3-byte
+        if cp < 65536 then {
+            let r1 = self.write_byte((UInt8)(cp >> 12) | 224)
+            when r1 is {
+                .Ok(_) then {},
+                .Error(e) then {
+                    return [UInt]Result.Error(e)
+                },
+            }
+            let r2 = self.write_byte((UInt8)((cp >> 6) & 63) | 128)
+            when r2 is {
+                .Ok(_) then {},
+                .Error(e) then {
+                    return [UInt]Result.Error(e)
+                },
+            }
+            let r3 = self.write_byte((UInt8)(cp & 63) | 128)
+            when r3 is {
+                .Ok(_) then {
+                    return [UInt]Result.Ok(3)
+                },
+                .Error(e) then {
+                    return [UInt]Result.Error(e)
+                },
+            }
+        }
+        // 4-byte
+        let r1 = self.write_byte((UInt8)(cp >> 18) | 240)
+        when r1 is {
+            .Ok(_) then {},
+            .Error(e) then {
+                return [UInt]Result.Error(e)
+            },
+        }
+        let r2 = self.write_byte((UInt8)((cp >> 12) & 63) | 128)
+        when r2 is {
+            .Ok(_) then {},
+            .Error(e) then {
+                return [UInt]Result.Error(e)
+            },
+        }
+        let r3 = self.write_byte((UInt8)((cp >> 6) & 63) | 128)
+        when r3 is {
+            .Ok(_) then {},
+            .Error(e) then {
+                return [UInt]Result.Error(e)
+            },
+        }
+        let r4 = self.write_byte((UInt8)(cp & 63) | 128)
+        when r4 is {
+            .Ok(_) then [UInt]Result.Ok(4),
+            .Error(e) then [UInt]Result.Error(e),
+        }
+    }
+}

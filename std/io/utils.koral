@@ -1,0 +1,95 @@
+// ============================================================================
+// std.io - Utility Functions
+// ============================================================================
+// Convenience IO functions: copy_bytes, read_bytes, write_bytes.
+// These handle common IO patterns like reading all content, copying between
+// Reader/Writer, and ensuring complete writes (handling short writes).
+// ============================================================================
+
+// write_bytes — Ensure all readable bytes in buf are written to w.
+// Handles short writes by looping. Returns WriteZero if write returns Ok(0)
+// with data still pending. Empty buf returns Ok immediately.
+public let [W Writer]write_bytes(w W, buf Buffer) [Void]Result = {
+    // If buf has no readable bytes, return Ok immediately
+    if buf.storage.read_pos >= buf.storage.length then {
+        return [Void]Result.Ok({})
+    }
+    // Loop until all bytes are written
+    while buf.storage.read_pos < buf.storage.length then {
+        let result = w.write(buf)
+        when result is {
+            .Ok(n) then {
+                if n == 0 then {
+                    // Write returned zero bytes but still have data — error
+                    return [Void]Result.Error(ref IoError.WriteZero())
+                }
+                // n > 0: short write or full write, buf.read_pos already advanced by w.write
+                // Continue loop to write remaining bytes
+            },
+            .Error(e) then {
+                return [Void]Result.Error(e)
+            },
+        }
+    }
+    [Void]Result.Ok({})
+}
+
+// read_bytes — Read all content from r into a new Buffer.
+// Loops calling r.read until EOF (Ok(0)).
+public let [R Reader]read_bytes(r R) [Buffer]Result = {
+    let buf = Buffer.empty()
+    while true then {
+        let result = r.read(buf)
+        when result is {
+            .Ok(n) then {
+                if n == 0 then {
+                    // EOF reached
+                    return [Buffer]Result.Ok(buf)
+                }
+                // Continue reading
+            },
+            .Error(e) then {
+                return [Buffer]Result.Error(e)
+            },
+        }
+    }
+    // Unreachable, but needed for type checker
+    [Buffer]Result.Ok(buf)
+}
+
+// copy_bytes — Copy all content from src (Reader) to dst (Writer).
+// Uses a temporary Buffer for transferring data. Returns total bytes copied.
+// Uses write_bytes to ensure complete writes for each chunk.
+public let [R Reader, W Writer]copy_bytes(src R, dst W) [UInt]Result = {
+    let tmp = Buffer.with_capacity(4096)
+    let mut total UInt = 0
+    while true then {
+        // Clear the temp buffer for reuse
+        tmp.clear()
+        let read_result = src.read(tmp)
+        when read_result is {
+            .Ok(n) then {
+                if n == 0 then {
+                    // EOF reached
+                    return [UInt]Result.Ok(total)
+                }
+                // Reset read_pos to 0 so write_bytes can read from the beginning
+                tmp.reset()
+                let write_result = write_bytes(dst, tmp)
+                when write_result is {
+                    .Ok(_) then {
+                        total = total + n
+                    },
+                    .Error(e) then {
+                        return [UInt]Result.Error(e)
+                    },
+                }
+            },
+            .Error(e) then {
+                return [UInt]Result.Error(e)
+            },
+        }
+    }
+    // Unreachable, but needed for type checker
+    [UInt]Result.Ok(total)
+}

@@ -235,6 +235,12 @@ class IntegrationTests: XCTestCase {
     func test_convert_format_int_test() throws { try runCase(named: "convert_format_int_test.koral") }
     func test_convert_format_float_test() throws { try runCase(named: "convert_format_float_test.koral") }
     func test_regex_basic_test() throws { try runCase(named: "regex_basic_test.koral") }
+    func test_io_buffer_test() throws { try runCase(named: "io_buffer_test.koral") }
+    func test_io_error_test() throws { try runCase(named: "io_error_test.koral") }
+    func test_io_buf_reader_test() throws { try runCase(named: "io_buf_reader_test.koral") }
+    func test_io_buf_writer_test() throws { try runCase(named: "io_buf_writer_test.koral") }
+    func test_io_utils_test() throws { try runCase(named: "io_utils_test.koral") }
+    func test_io_utils_checkpoint() throws { try runCase(named: "io_utils_checkpoint.koral") }
     
     func runTestCase(file: URL, projectRoot: URL) throws {
         // 1. Parse expectations
