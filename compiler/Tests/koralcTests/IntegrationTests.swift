@@ -234,6 +234,7 @@ class IntegrationTests: XCTestCase {
     func test_convert_parse_float_test() throws { try runCase(named: "convert_parse_float_test.koral") }
     func test_convert_format_int_test() throws { try runCase(named: "convert_format_int_test.koral") }
     func test_convert_format_float_test() throws { try runCase(named: "convert_format_float_test.koral") }
+    func test_regex_basic_test() throws { try runCase(named: "regex_basic_test.koral") }
     
     func runTestCase(file: URL, projectRoot: URL) throws {
         // 1. Parse expectations

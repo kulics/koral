@@ -1,0 +1,319 @@
+// ============================================================================
+// std.regex - Core Operations
+// ============================================================================
+
+// FFI declarations for C runtime regex functions
+foreign let koral_regex_compile(
+    pattern UInt8 ptr, flags Int32,
+    out_handle UInt8 ptr ptr,
+    out_error_buf UInt8 ptr, error_buf_size Int32,
+    out_error_len Int32 ptr
+) Int32
+
+foreign let koral_regex_match(
+    handle UInt8 ptr, text UInt8 ptr, text_offset Int32,
+    max_groups Int32,
+    out_starts Int32 ptr, out_ends Int32 ptr
+) Int32
+
+foreign let koral_regex_free(handle UInt8 ptr) Void
+
+// ============================================================================
+// Regex — Compilation
+// ============================================================================
+
+given Regex {
+    public new(pattern String) [Regex]Result =
+        Regex.with_flags(pattern, RegexFlag.none())
+
+    public with_flags(pattern String, flags RegexFlag) [Regex]Result = {
+        let c_flags = flags.to_c_flags()
+
+        // 分配输出缓冲区
+        let handle_out = [UInt8 ptr]alloc_memory(1)
+        let error_buf = [UInt8]alloc_memory(256)
+        let error_len_out = [Int32]alloc_memory(1)
+
+        let rc = koral_regex_compile(
+            pattern.storage.data, c_flags,
+            handle_out,
+            error_buf, 256,
+            error_len_out
+        )
+
+        if rc <> 0 then {
+            let err_len = deptr error_len_out
+            let msg = String.from_bytes(error_buf, (UInt)err_len)
+            dealloc_memory(handle_out)
+            dealloc_memory(error_buf)
+            dealloc_memory(error_len_out)
+            return [Regex]Result.Error(ref msg)
+        }
+
+        let handle = deptr handle_out
+        dealloc_memory(handle_out)
+        dealloc_memory(error_buf)
+        dealloc_memory(error_len_out)
+
+        // 计算捕获组数量：扫描 pattern 中未转义的 '('
+        let groups = Regex.count_groups(pattern)
+
+        let storage = ref RegexStorage(handle, pattern, groups)
+        [Regex]Result.Ok(Regex(storage))
+    }
+
+    // 计算正则表达式中的捕获组数量
+    count_groups(pattern String) UInt = {
+        let mut count UInt = 0
+        let mut i UInt = 0
+        let len = pattern.count()
+        while i < len then {
+            let ch = pattern.at(i)
+            if ch == '\\' then {
+                i += 2  // 跳过转义字符
+                continue
+            }
+            if ch == '(' then {
+                count += 1
+            }
+            i += 1
+        }
+        count
+    }
+}
+
+// ============================================================================
+// Regex — Matching & Searching
+// ============================================================================
+
+given Regex {
+    // 最快路径：不捕获任何 group，只测试是否匹配
+    public is_match(self, text String) Bool = {
+        let starts = [Int32]alloc_memory(1)
+        let ends = [Int32]alloc_memory(1)
+
+        let matched = koral_regex_match(
+            self.storage.handle, text.storage.data, 0,
+            1, starts, ends
+        )
+
+        dealloc_memory(starts)
+        dealloc_memory(ends)
+        matched > 0
+    }
+
+    // 轻量路径：只捕获 $0（整体匹配位置），不捕获子 group
+    public find(self, text String) [Match]Option = {
+        Regex.find_at(self, text, 0)
+    }
+
+    // 从指定偏移开始查找（内部方法，仅 $0）
+    find_at(self, text String, offset UInt) [Match]Option = {
+        let starts = [Int32]alloc_memory(1)
+        let ends = [Int32]alloc_memory(1)
+
+        let matched = koral_regex_match(
+            self.storage.handle, text.storage.data, (Int32)offset,
+            1, starts, ends
+        )
+
+        if matched == 0 then {
+            dealloc_memory(starts)
+            dealloc_memory(ends)
+            return [Match]Option.None()
+        }
+
+        let s = (UInt)(deptr starts)
+        let e = (UInt)(deptr ends)
+        dealloc_memory(starts)
+        dealloc_memory(ends)
+
+        [Match]Option.Some(Match(text, s, e))
+    }
+}
+
+// ============================================================================
+// Regex — Captures & Collection Methods
+// ============================================================================
+
+given Regex {
+    public find_all(self, text String) MatchList = {
+        MatchList(self, text)
+    }
+
+    // 完整路径：捕获所有 group
+    public captures(self, text String) [Captures]Option = {
+        Regex.captures_at(self, text, 0)
+    }
+
+    // 从指定偏移开始查找并捕获所有 group（内部方法）
+    captures_at(self, text String, offset UInt) [Captures]Option = {
+        let max_groups = (Int32)(self.storage.groups + 1)  // +1 for $0
+        let starts = [Int32]alloc_memory((UInt)max_groups)
+        let ends = [Int32]alloc_memory((UInt)max_groups)
+
+        let matched = koral_regex_match(
+            self.storage.handle, text.storage.data, (Int32)offset,
+            max_groups, starts, ends
+        )
+
+        if matched == 0 then {
+            dealloc_memory(starts)
+            dealloc_memory(ends)
+            return [Captures]Option.None()
+        }
+
+        let mut start_list = [Int32]List.new()
+        let mut end_list = [Int32]List.new()
+        let mut i Int32 = 0
+        while i < max_groups then {
+            start_list.push(deptr (starts + (UInt)i))
+            end_list.push(deptr (ends + (UInt)i))
+            i += 1
+        }
+
+        dealloc_memory(starts)
+        dealloc_memory(ends)
+
+        [Captures]Option.Some(Captures(text, start_list, end_list))
+    }
+
+    public captures_all(self, text String) CapturesList = {
+        CapturesList(self, text)
+    }
+}
+
+// ============================================================================
+// Regex — Replace
+// ============================================================================
+
+given Regex {
+    public replace(self, text String, replacement String) String = {
+        when self.captures(text) is {
+            .None then text,
+            .Some(c) then {
+                let mut result = String.new()
+                if c.start() > 0 then {
+                    result.push_string(text.slice(0..<c.start()))
+                }
+                result.push_string(Regex.expand_replacement(replacement, c))
+                if c.end() < text.count() then {
+                    result.push_string(text.slice(c.end()...))
+                }
+                result
+            },
+        }
+    }
+
+    public replace_all(self, text String, replacement String) String = {
+        let mut result = String.new()
+        let mut offset UInt = 0
+        let text_len = text.count()
+        let mut had_match = false
+
+        while offset <= text_len then {
+            when Regex.captures_at(self, text, offset) is {
+                .Some(c) then {
+                    had_match = true
+                    if c.start() > offset then {
+                        result.push_string(text.slice(offset..<c.start()))
+                    }
+                    result.push_string(Regex.expand_replacement(replacement, c))
+                    if c.end() == offset then {
+                        if offset < text_len then {
+                            result.push(text.at(offset))
+                        }
+                        offset += 1
+                    } else {
+                        offset = c.end()
+                    }
+                },
+                .None then {
+                    if offset < text_len then {
+                        result.push_string(text.slice(offset...))
+                    }
+                    break
+                },
+            }
+        }
+
+        if not had_match then {
+            text
+        } else {
+            result
+        }
+    }
+
+    // 展开替换字符串中的 $0..$9 反向引用
+    expand_replacement(replacement String, c Captures) String = {
+        let mut result = String.new()
+        let mut i UInt = 0
+        let len = replacement.count()
+
+        while i < len then {
+            let ch = replacement.at(i)
+            if ch == '$' and i + 1 < len then {
+                let next = replacement.at(i + 1)
+                if next >= '0' and next <= '9' then {
+                    let group_idx = (UInt)(next - '0')
+                    when c.group(group_idx) is {
+                        .Some(g) then result.push_string(g),
+                        .None then {},  // 未匹配的组替换为空
+                    }
+                    i += 2
+                    continue
+                }
+                if next == '$' then {
+                    result.push('$')  // $$ 转义为字面 $
+                    i += 2
+                    continue
+                }
+            }
+            result.push(ch)
+            i += 1
+        }
+
+        result
+    }
+}
+
+// ============================================================================
+// Regex — Split
+// ============================================================================
+
+given Regex {
+    public split(self, text String) [String]List = {
+        let mut parts = [String]List.new()
+        let mut offset UInt = 0
+        let text_len = text.count()
+
+        while offset <= text_len then {
+            when Regex.find_at(self, text, offset) is {
+                .Some(m) then {
+                    // 添加匹配前的部分
+                    parts.push(text.slice(offset..<m.start()))
+                    // 避免零长度匹配导致无限循环
+                    if m.end() == offset then {
+                        if offset < text_len then {
+                            // 将当前字符加入上一个部分
+                            let last_idx = parts.count() - 1
+                            let mut last = parts.at(last_idx)
+                            last.push(text.at(offset))
+                            parts.set_at(last_idx, last)
+                        }
+                        offset += 1
+                    } else {
+                        offset = m.end()
+                    }
+                },
+                .None then {
+                    // 追加剩余文本
+                    parts.push(text.slice(offset...))
+                    break
+                },
+            }
+        }
+
+        parts
+    }
+}

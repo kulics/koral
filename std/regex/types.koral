@@ -1,0 +1,204 @@
+// ============================================================================
+// std.regex - Type Definitions
+// ============================================================================
+
+// 编译选项（位标志）
+public type RegexFlag(value UInt)
+
+given RegexFlag {
+    // 无特殊选项（默认）
+    public none() RegexFlag = RegexFlag(0)
+
+    // 大小写不敏感
+    public ignore_case() RegexFlag = RegexFlag(1)
+
+    // 多行模式（^/$ 匹配行首/行尾而非字符串首/尾）
+    public multiline() RegexFlag = RegexFlag(2)
+
+    // 组合标志：a | b
+    public bitor(self, other RegexFlag) RegexFlag =
+        RegexFlag(self.value | other.value)
+
+    // 测试是否包含某标志
+    public has(self, flag RegexFlag) Bool =
+        (self.value & flag.value) == flag.value
+
+    // 转换为 C 层 flags（内部使用）
+    // REG_EXTENDED = 1, REG_ICASE = 2, REG_NEWLINE = 4
+    to_c_flags(self) Int32 = {
+        let mut flags Int32 = 1  // REG_EXTENDED 始终启用
+        if self.has(RegexFlag.ignore_case()) then {
+            flags = flags | 2
+        }
+        if self.has(RegexFlag.multiline()) then {
+            flags = flags | 4
+        }
+        flags
+    }
+}
+
+// 编译后的正则表达式内部存储（持有 C 层资源）
+type RegexStorage(
+    handle   UInt8 ptr,  // C 层 regex_t 句柄（堆分配）
+    pat      String,     // 原始正则表达式字符串
+    groups   UInt        // 捕获组数量（不含 $0）
+)
+
+given RegexStorage {
+    __drop(self ref) = {
+        koral_regex_free(self.handle)
+    }
+}
+
+// 编译后的正则表达式（通过 ref 引用计数管理 C 层资源）
+public type Regex(storage RegexStorage ref)
+
+given Regex {
+    public pattern(self) String = self.storage.pat
+
+    public group_count(self) UInt = self.storage.groups
+}
+
+// 轻量匹配结果（仅位置，不含捕获组）
+public type Match(
+    private source     String,   // 原始文本
+    private match_start UInt,    // 匹配起始位置（字节偏移）
+    private match_end   UInt     // 匹配结束位置（字节偏移，不含）
+)
+
+given Match {
+    public text(self) String = self.source.slice(self.match_start..<self.match_end)
+
+    public start(self) UInt = self.match_start
+
+    public end(self) UInt = self.match_end
+}
+
+// 带捕获组的匹配结果
+public type Captures(
+    private source     String,       // 原始文本
+    private starts     [Int32]List,  // 各捕获组起始位置（-1 = 未匹配）
+    private ends       [Int32]List   // 各捕获组结束位置（-1 = 未匹配）
+)
+
+given Captures {
+    public text(self) String = {
+        let s = (UInt)self.starts.at(0)
+        let e = (UInt)self.ends.at(0)
+        self.source.slice(s..<e)
+    }
+
+    public start(self) UInt = (UInt)self.starts.at(0)
+
+    public end(self) UInt = (UInt)self.ends.at(0)
+
+    public group_count(self) UInt = self.starts.count()
+
+    public group(self, index UInt) [String]Option = {
+        if index >= self.starts.count() then {
+            return [String]Option.None()
+        }
+        let s = self.starts.at(index)
+        let e = self.ends.at(index)
+        if s < 0 or e < 0 then {
+            return [String]Option.None()
+        }
+        [String]Option.Some(self.source.slice((UInt)s..<(UInt)e))
+    }
+
+    public group_start(self, index UInt) [UInt]Option = {
+        if index >= self.starts.count() then {
+            return [UInt]Option.None()
+        }
+        let s = self.starts.at(index)
+        if s < 0 then {
+            return [UInt]Option.None()
+        }
+        [UInt]Option.Some((UInt)s)
+    }
+
+    public group_end(self, index UInt) [UInt]Option = {
+        if index >= self.ends.count() then {
+            return [UInt]Option.None()
+        }
+        let e = self.ends.at(index)
+        if e < 0 then {
+            return [UInt]Option.None()
+        }
+        [UInt]Option.Some((UInt)e)
+    }
+}
+
+// 匹配结果集合（Iterable wrapper，惰性）
+public type MatchList(regex Regex, text String)
+
+// 匹配结果迭代器
+public type MatchListIterator(regex Regex, text String, mut offset UInt)
+
+// 捕获组结果集合（Iterable wrapper，惰性）
+public type CapturesList(regex Regex, text String)
+
+// 捕获组结果迭代器
+public type CapturesListIterator(regex Regex, text String, mut offset UInt)
+
+// ============================================================================
+// MatchList / MatchListIterator — Iterable implementation
+// ============================================================================
+
+given MatchList {
+    public iterator(self) MatchListIterator =
+        MatchListIterator(self.regex, self.text, 0)
+}
+
+given MatchListIterator {
+    public next(self ref) [Match]Option = {
+        if self.offset > self.text.count() then {
+            return [Match]Option.None()
+        }
+        when Regex.find_at(self.regex, self.text, self.offset) is {
+            .Some(m) then {
+                if m.end() == self.offset then {
+                    self.offset += 1
+                } else {
+                    self.offset = m.end()
+                }
+                [Match]Option.Some(m)
+            },
+            .None then {
+                self.offset = self.text.count() + 1
+                [Match]Option.None()
+            },
+        }
+    }
+}
+
+// ============================================================================
+// CapturesList / CapturesListIterator — Iterable implementation
+// ============================================================================
+
+given CapturesList {
+    public iterator(self) CapturesListIterator =
+        CapturesListIterator(self.regex, self.text, 0)
+}
+
+given CapturesListIterator {
+    public next(self ref) [Captures]Option = {
+        if self.offset > self.text.count() then {
+            return [Captures]Option.None()
+        }
+        when Regex.captures_at(self.regex, self.text, self.offset) is {
+            .Some(c) then {
+                if c.end() == self.offset then {
+                    self.offset += 1
+                } else {
+                    self.offset = c.end()
+                }
+                [Captures]Option.Some(c)
+            },
+            .None then {
+                self.offset = self.text.count() + 1
+                [Captures]Option.None()
+            },
+        }
+    }
+}

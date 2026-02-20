@@ -1,0 +1,206 @@
+// Comprehensive test for std.regex module
+// EXPECT: All regex tests passed
+
+using std.regex.*
+
+let main() Void = {
+    // =========================================================================
+    // 1. Regex.new — compilation success and failure
+    // =========================================================================
+
+    // Successful compilation
+    when Regex.new("\\d+") is {
+        .Ok(r) then assert(true, "compile ok"),
+        .Error(_) then assert(false, "should compile"),
+    }
+
+    // Failed compilation — invalid syntax
+    when Regex.new("(") is {
+        .Ok(_) then assert(false, "should fail"),
+        .Error(_) then assert(true, "invalid syntax detected"),
+    }
+    when Regex.new("[") is {
+        .Ok(_) then assert(false, "should fail"),
+        .Error(_) then assert(true, "invalid bracket"),
+    }
+    when Regex.new("*") is {
+        .Ok(_) then assert(false, "should fail"),
+        .Error(_) then assert(true, "invalid quantifier"),
+    }
+
+    // =========================================================================
+    // 2. pattern() and group_count()
+    // =========================================================================
+
+    let r2 = Regex.new("(\\w+)@(\\w+)").unwrap()
+    assert(r2.pattern() == "(\\w+)@(\\w+)", "pattern preserved")
+    assert(r2.group_count() == 2, "group count")
+
+    // =========================================================================
+    // 3. is_match
+    // =========================================================================
+
+    let r3 = Regex.new("\\d+").unwrap()
+    assert(r3.is_match("abc123") == true, "is_match true")
+    assert(r3.is_match("abcdef") == false, "is_match false")
+
+    // =========================================================================
+    // 4. find
+    // =========================================================================
+
+    let r4 = Regex.new("\\d+").unwrap()
+    when r4.find("abc123def") is {
+        .Some(m) then {
+            assert(m.start() == 3, "find start")
+            assert(m.end() == 6, "find end")
+            assert(m.text() == "123", "find text")
+        },
+        .None then assert(false, "should find"),
+    }
+
+    // =========================================================================
+    // 5. find_all — count matches
+    // =========================================================================
+
+    let r5 = Regex.new("a").unwrap()
+    let mut count5 UInt = 0
+    for m5 = r5.find_all("aaa") then {
+        count5 += 1
+    }
+    assert(count5 == 3, "find_all count")
+
+    // =========================================================================
+    // 6. captures and group()
+    // =========================================================================
+
+    let r6 = Regex.new("(\\w+)@(\\w+)").unwrap()
+    when r6.captures("user@host") is {
+        .Some(c) then {
+            assert(c.text() == "user@host", "captures text")
+            when c.group(1) is {
+                .Some(g) then assert(g == "user", "group 1"),
+                .None then assert(false, "group 1 missing"),
+            }
+            when c.group(2) is {
+                .Some(g) then assert(g == "host", "group 2"),
+                .None then assert(false, "group 2 missing"),
+            }
+        },
+        .None then assert(false, "should capture"),
+    }
+
+    // =========================================================================
+    // 7. replace and replace_all
+    // =========================================================================
+
+    let r7 = Regex.new("\\d+").unwrap()
+    assert(r7.replace("a1b2c3", "X") == "aXb2c3", "replace first")
+    assert(r7.replace_all("a1b2c3", "X") == "aXbXcX", "replace all")
+
+    // =========================================================================
+    // 8. replace with $N back-references
+    // =========================================================================
+
+    let r8 = Regex.new("(\\w+) (\\w+)").unwrap()
+    assert(r8.replace("hello world", "$2 $1") == "world hello", "replace backrefs")
+
+    // =========================================================================
+    // 9. replace with $$ escape
+    // =========================================================================
+
+    let r9 = Regex.new("x").unwrap()
+    assert(r9.replace("x", "$$100") == "$100", "dollar escape")
+
+    // =========================================================================
+    // 10. split
+    // =========================================================================
+
+    let r10 = Regex.new(",").unwrap()
+    let parts = r10.split("a,b,,c")
+    assert(parts.count() == 4, "split count")
+    assert(parts.at(0) == "a", "split 0")
+    assert(parts.at(1) == "b", "split 1")
+    assert(parts.at(2) == "", "split 2 empty")
+    assert(parts.at(3) == "c", "split 3")
+
+    // =========================================================================
+    // 11. RegexFlag.ignore_case()
+    // =========================================================================
+
+    let r11 = Regex.with_flags("hello", RegexFlag.ignore_case()).unwrap()
+    assert(r11.is_match("HELLO") == true, "ignore case")
+
+    // =========================================================================
+    // 12. RegexFlag.multiline()
+    // =========================================================================
+
+    let r12 = Regex.with_flags("^line", RegexFlag.multiline()).unwrap()
+    assert(r12.is_match("first\nline two") == true, "multiline")
+
+    // =========================================================================
+    // 13. Combined flags
+    // =========================================================================
+
+    let flags13 = RegexFlag.ignore_case().bitor(RegexFlag.multiline())
+    let r13 = Regex.with_flags("^hello", flags13).unwrap()
+    assert(r13.is_match("first\nHELLO world") == true, "combined flags")
+
+    // =========================================================================
+    // 14. Empty pattern
+    // =========================================================================
+
+    let r14 = Regex.new("").unwrap()
+    assert(r14.is_match("anything") == true, "empty pattern matches")
+    assert(r14.is_match("") == true, "empty pattern matches empty")
+
+    // =========================================================================
+    // 15. Zero-length match doesn't infinite loop
+    // =========================================================================
+
+    let r15 = Regex.new("").unwrap()
+    let mut count15 UInt = 0
+    for m15 = r15.find_all("ab") then {
+        count15 += 1
+        if count15 > 10 then { break }
+    }
+    assert(count15 <= 10, "zero-length no infinite loop")
+
+    // =========================================================================
+    // 16. No match cases
+    // =========================================================================
+
+    let r16 = Regex.new("xyz").unwrap()
+    assert(r16.replace("hello", "X") == "hello", "replace no match")
+    let parts16 = r16.split("hello")
+    assert(parts16.count() == 1, "split no match count")
+    assert(parts16.at(0) == "hello", "split no match value")
+
+    // =========================================================================
+    // 17. group_count consistency
+    // =========================================================================
+
+    let r17 = Regex.new("(a)(b)(c)").unwrap()
+    when r17.captures("abc") is {
+        .Some(c) then {
+            assert(c.group_count() == r17.group_count() + 1, "group count consistency")
+        },
+        .None then assert(false, "should capture"),
+    }
+
+    // =========================================================================
+    // 18. group(0) equals text()
+    // =========================================================================
+
+    let r18 = Regex.new("\\d+").unwrap()
+    when r18.captures("abc123def") is {
+        .Some(c) then {
+            when c.group(0) is {
+                .Some(g) then assert(g == c.text(), "group 0 == text"),
+                .None then assert(false, "group 0 missing"),
+            }
+        },
+        .None then assert(false, "should capture"),
+    }
+
+    print_line("All regex tests passed")
+}
