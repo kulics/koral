@@ -14,27 +14,62 @@ public enum ModuleError: Error, CustomStringConvertible {
     case duplicateUsing(String, span: SourceSpan)
     case parseError(file: String, underlying: Error)
     case invalidEntryFileName(filename: String, reason: String)
-    
-    public var description: String {
+
+    /// Preferred file for diagnostics location when available.
+    public var locationFile: String? {
+        switch self {
+        case .parseError(let file, _):
+            return file
+        default:
+            return nil
+        }
+    }
+
+    /// Source span for diagnostics rendering when available.
+    public var span: SourceSpan {
+        switch self {
+        case .submoduleNotFound(_, _, let span):
+            return span
+        case .missingEntryFile(_, _, let span):
+            return span
+        case .superOutOfBounds(let span):
+            return span
+        case .duplicateUsing(_, let span):
+            return span
+        case .parseError(_, let underlying as ParserError):
+            return underlying.span
+        case .parseError(_, let underlying as LexerError):
+            return underlying.span
+        default:
+            return .unknown
+        }
+    }
+
+    /// Error message without location prefix.
+    public var messageWithoutLocation: String {
         switch self {
         case .fileNotFound(let file, let searchPath):
             return "File '\(file).koral' not found in '\(searchPath)'"
-        case .submoduleNotFound(let name, let parentPath, let span):
-            return "\(span): error: Submodule '\(name)' not found (expected directory '\(parentPath)/\(name)/')"
-        case .missingEntryFile(let submodName, let expectedPath, let span):
-            return "\(span): error: Submodule '\(submodName)' is missing entry file '\(expectedPath)'"
-        case .superOutOfBounds(let span):
-            return "\(span): error: 'super' goes beyond the root module of the compilation unit"
+        case .submoduleNotFound(let name, let parentPath, _):
+            return "Submodule '\(name)' not found (expected directory '\(parentPath)/\(name)/')"
+        case .missingEntryFile(let submodName, let expectedPath, _):
+            return "Submodule '\(submodName)' is missing entry file '\(expectedPath)'"
+        case .superOutOfBounds:
+            return "'super' goes beyond the root module of the compilation unit"
         case .externalModuleNotFound(let name, let paths):
             return "External module '\(name)' not found. Searched in: \(paths.joined(separator: ", "))"
         case .circularDependency(let path):
             return "Circular dependency detected: \(path.joined(separator: " -> "))"
         case .invalidModulePath(let path):
             return "Invalid module path: '\(path)'"
-        case .duplicateUsing(let name, let span):
-            return "\(span): error: Duplicate using declaration for '\(name)'"
-        case .parseError(let file, let underlying):
-            return "\(file): \(underlying)"
+        case .duplicateUsing(let name, _):
+            return "Duplicate using declaration for '\(name)'"
+        case .parseError(_, let underlying as ParserError):
+            return underlying.messageWithoutLocation
+        case .parseError(_, let underlying as LexerError):
+            return underlying.messageWithoutLocation
+        case .parseError(_, let underlying):
+            return "\(underlying)"
         case .invalidEntryFileName(let filename, let reason):
             return """
                 Invalid entry file name '\(filename)': \(reason)
@@ -42,6 +77,34 @@ public enum ModuleError: Error, CustomStringConvertible {
                 contain only lowercase letters, digits, and underscores.
                 Examples: main, my_app, tool1
                 """
+        }
+    }
+    
+    public var description: String {
+        switch self {
+        case .fileNotFound:
+            return messageWithoutLocation
+        case .submoduleNotFound(_, _, let span):
+            return "\(span): error: \(messageWithoutLocation)"
+        case .missingEntryFile(_, _, let span):
+            return "\(span): error: \(messageWithoutLocation)"
+        case .superOutOfBounds(let span):
+            return "\(span): error: \(messageWithoutLocation)"
+        case .externalModuleNotFound:
+            return messageWithoutLocation
+        case .circularDependency:
+            return messageWithoutLocation
+        case .invalidModulePath:
+            return messageWithoutLocation
+        case .duplicateUsing(_, let span):
+            return "\(span): error: \(messageWithoutLocation)"
+        case .parseError(let file, _):
+            if span.isKnown {
+                return "\(file):\(span.start.line):\(span.start.column): \(messageWithoutLocation)"
+            }
+            return "\(file): \(messageWithoutLocation)"
+        case .invalidEntryFileName:
+            return messageWithoutLocation
         }
     }
 }
