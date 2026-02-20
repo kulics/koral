@@ -37,6 +37,14 @@ public struct DiagnosticRenderer {
     
     /// Formats the location part of the error message.
     private func formatLocation(_ error: DiagnosticError) -> String {
+        if let moduleError = error.underlying as? ModuleError {
+            let fileName = moduleError.locationFile ?? error.fileName
+            if moduleError.span.isKnown {
+                return "\(fileName):\(moduleError.span.start.line):\(moduleError.span.start.column)"
+            }
+            return fileName
+        }
+
         let span = extractSpan(from: error.underlying)
         if span.isKnown {
             return "\(error.fileName):\(span.start.line):\(span.start.column)"
@@ -56,6 +64,9 @@ public struct DiagnosticRenderer {
     
     /// Formats the error message without location information.
     private func formatMessage(_ error: Error) -> String {
+        if let moduleError = error as? ModuleError {
+            return moduleError.messageWithoutLocation
+        }
         if let semantic = error as? SemanticError {
             return semantic.messageWithoutLocation
         }
@@ -67,6 +78,9 @@ public struct DiagnosticRenderer {
     
     /// Extracts the source span from an error.
     private func extractSpan(from error: Error) -> SourceSpan {
+        if let moduleError = error as? ModuleError {
+            return moduleError.span
+        }
         if let semantic = error as? SemanticError {
             return semantic.span
         }
