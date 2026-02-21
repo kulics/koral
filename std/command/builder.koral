@@ -1,0 +1,270 @@
+// ============================================================================
+// std.command - Command Builder
+// ============================================================================
+// Provides: EnvAction (internal), CommandStorage (internal), Command (builder)
+// Access via: using std.command
+// ============================================================================
+
+// ============================================================================
+// FFI Declarations
+// ============================================================================
+
+/// Create a child process via posix_spawn (Unix) / CreateProcess (Windows).
+foreign let koral_spawn(
+    program UInt8 ptr,
+    argv UInt8 ptr ptr, argc Int32,
+    envp UInt8 ptr ptr, envc Int32,
+    cwd UInt8 ptr,
+    stdin_mode Int32, stdout_mode Int32, stderr_mode Int32,
+    out KoralProcess ptr
+) Int32
+
+/// Get pointer to errno value.
+/// Reuse errno helpers from std.os to avoid cross-module symbol ambiguity.
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/// Get the last OS error as a String.
+private let get_last_error() String = {
+    os.last_error_message()
+}
+
+/// IoRedirect enum to integer (FFI encoding): 0=inherit, 1=piped, 2=null.
+private let stdio_to_int(s IoRedirect) Int32 = when s is {
+    .Inherit then (Int32)0,
+    .Piped then (Int32)1,
+    .Null then (Int32)2,
+}
+
+/// Convert a list of strings to an array of UInt8 pointers for FFI.
+private let argv_to_ptrs(argv [String]List) UInt8 ptr ptr = {
+    let count = argv.count()
+    let ptrs = [UInt8 ptr]alloc_memory(count)
+    let mut i UInt = 0
+    while i < count then {
+        init_memory(ptrs + i, argv.at(i).storage.data)
+        i += 1
+    }
+    ptrs
+}
+
+/// Build environment variable strings from env actions.
+/// Set => "KEY=VALUE", Remove => "KEY" (no =), Clear => "" (empty string).
+private let build_env_strings(actions [EnvAction]List) [String]List = {
+    let mut result = [String]List.new()
+    for action = actions then {
+        when action is {
+            .Set(name, value) then {
+                let mut s = String.new()
+                s.push_string(name)
+                s.push('=')
+                s.push_string(value)
+                result.push(s)
+            },
+            .Remove(name) then {
+                result.push(name)
+            },
+            .Clear then {
+                result.push("")
+            },
+        }
+    }
+    result
+}
+
+/// Convert env strings list to pointer array for FFI.
+private let env_strs_to_ptrs(strs [String]List) UInt8 ptr ptr = {
+    let count = strs.count()
+    if count == 0 then {
+        return [UInt8 ptr]null_ptr()
+    }
+    let ptrs = [UInt8 ptr]alloc_memory(count)
+    let mut i UInt = 0
+    while i < count then {
+        init_memory(ptrs + i, strs.at(i).storage.data)
+        i += 1
+    }
+    ptrs
+}
+
+// ============================================================================
+// EnvAction (internal)
+// ============================================================================
+
+/// Environment variable action for deferred application during spawn.
+type EnvAction {
+    /// Set or override an environment variable.
+    Set(name String, value String),
+    /// Remove a specific environment variable.
+    Remove(name String),
+    /// Clear all inherited environment variables.
+    Clear(),
+}
+
+// ============================================================================
+// CommandStorage (internal)
+// ============================================================================
+
+/// Internal storage for the Command builder.
+private type CommandStorage(
+    program String,
+    arguments [String]List,
+    env_actions [EnvAction]List,
+    mut work_dir [String]Option,
+    mut stdin_cfg IoRedirect,
+    mut stdout_cfg IoRedirect,
+    mut stderr_cfg IoRedirect,
+)
+
+// ============================================================================
+// Command — Builder type
+// ============================================================================
+
+/// Command builder for configuring and launching child processes.
+/// Provides a fluent API for setting program, arguments, environment variables,
+/// working directory, and I/O redirection before spawning.
+public type Command(private mut storage CommandStorage ref)
+
+given Command {
+    /// Create a new command builder for the specified program.
+    public new(program String) Command = Command(ref CommandStorage(
+        program,
+        [String]List.new(),
+        [EnvAction]List.new(),
+        [String]Option.None(),
+        IoRedirect.Inherit(),
+        IoRedirect.Inherit(),
+        IoRedirect.Inherit()
+    ))
+
+    /// Add a single argument (chainable).
+    public with_arg(self, value String) Command = {
+        self.storage.arguments.push(value)
+        self
+    }
+
+    /// Add multiple arguments at once (chainable).
+    public with_args(self, values [String]List) Command = {
+        for v = values then {
+            self.storage.arguments.push(v)
+        }
+        self
+    }
+
+    /// Set an environment variable (chainable).
+    public set_env(self, name String, value String) Command = {
+        self.storage.env_actions.push(EnvAction.Set(name, value))
+        self
+    }
+
+    /// Clear all inherited environment variables (chainable).
+    public clear_env(self) Command = {
+        self.storage.env_actions.push(EnvAction.Clear())
+        self
+    }
+
+    /// Remove a specific environment variable (chainable).
+    public remove_env(self, name String) Command = {
+        self.storage.env_actions.push(EnvAction.Remove(name))
+        self
+    }
+
+    /// Set the child process working directory (chainable).
+    public set_current_dir(self, path String) Command = {
+        self.storage.work_dir = [String]Option.Some(path)
+        self
+    }
+
+    /// Configure stdin redirection (chainable).
+    public set_stdin(self, cfg IoRedirect) Command = {
+        self.storage.stdin_cfg = cfg
+        self
+    }
+
+    /// Configure stdout redirection (chainable).
+    public set_stdout(self, cfg IoRedirect) Command = {
+        self.storage.stdout_cfg = cfg
+        self
+    }
+
+    /// Configure stderr redirection (chainable).
+    public set_stderr(self, cfg IoRedirect) Command = {
+        self.storage.stderr_cfg = cfg
+        self
+    }
+
+    /// Asynchronously spawn a child process, returning a Process handle.
+    public spawn(self) [Process]Result = {
+        // Build argv array (program + arguments)
+        let mut argv = [String]List.new()
+        argv.push(self.storage.program)
+        for a = self.storage.arguments then {
+            argv.push(a)
+        }
+
+        // Encode stdio config: 0=inherit, 1=piped, 2=null
+        let stdin_mode = stdio_to_int(self.storage.stdin_cfg)
+        let stdout_mode = stdio_to_int(self.storage.stdout_cfg)
+        let stderr_mode = stdio_to_int(self.storage.stderr_cfg)
+
+        // Build environment variable string list ("KEY=VALUE" format)
+        let env_strs = build_env_strings(self.storage.env_actions)
+
+        // Working directory (empty string means inherit)
+        let cwd = when self.storage.work_dir is {
+            .Some(d) then d,
+            .None then String.new(),
+        }
+
+        // Call FFI to create child process
+        let mut proc = KoralProcess(0, -1, -1, -1)
+        let result = koral_spawn(
+            self.storage.program.storage.data,
+            argv_to_ptrs(argv),
+            (Int32)argv.count(),
+            env_strs_to_ptrs(env_strs),
+            (Int32)env_strs.count(),
+            cwd.storage.data,
+            stdin_mode,
+            stdout_mode,
+            stderr_mode,
+            ptr proc
+        )
+
+        if result <> 0 then {
+            return [Process]Result.Error(ref get_last_error())
+        }
+
+        [Process]Result.Ok(Process(ref ProcessStorage(
+            proc.pid,
+            proc.stdin_fd,
+            proc.stdout_fd,
+            proc.stderr_fd,
+            false
+        )))
+    }
+
+    /// Synchronously execute the command and wait for completion.
+    /// Returns only the exit status (does not capture output).
+    public run(self) [ExitStatus]Result = {
+        when self.spawn() is {
+            .Ok(proc) then proc.wait(),
+            .Error(e) then [ExitStatus]Result.Error(e),
+        }
+    }
+
+    /// Synchronously execute the command, capture stdout/stderr, and wait for completion.
+    /// Forces stdout/stderr to Piped mode to capture output.
+    public run_output(self) [CommandOutput]Result = {
+        // Force stdout/stderr to Piped to capture output
+        self.storage.stdout_cfg = IoRedirect.Piped()
+        self.storage.stderr_cfg = IoRedirect.Piped()
+
+        when self.spawn() is {
+            .Ok(proc) then proc.wait_output(),
+            .Error(e) then [CommandOutput]Result.Error(e),
+        }
+    }
+}

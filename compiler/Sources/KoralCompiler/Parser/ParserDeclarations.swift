@@ -9,7 +9,8 @@ extension Parser {
   /// Parse global declaration
   func parseGlobalDeclaration() throws -> GlobalNode {
     let startSpan = currentSpan
-    let access = try parseAccessModifier()
+    let explicitAccess = try parseExplicitAccessModifier()
+    let access = explicitAccess ?? .protected
 
     var isIntrinsic = false
     var isForeign = false
@@ -135,7 +136,7 @@ extension Parser {
       return try parseStructDeclaration(
         name, typeParams: typeParams, access: access, isIntrinsic: isIntrinsic, span: startSpan)
     } else if currentToken === .givenKeyword {
-      if access != .default {
+      if explicitAccess != nil {
         throw ParserError.unexpectedToken(
           span: currentSpan, got: "Access modifier on given declaration")
       }
@@ -190,7 +191,7 @@ extension Parser {
 
     var methods: [TraitMethodSignature] = []
     while currentToken !== .rightBrace {
-      let methodAccess = try parseAccessModifier()
+      let methodAccess = try parseAccessModifier(default: .public)
       let methodTypeParams = try parseTypeParameters()
 
       guard case .identifier(let methodName) = currentToken else {
@@ -278,7 +279,7 @@ extension Parser {
     var methods: [IntrinsicMethodDeclaration] = []
 
     while currentToken !== .rightBrace {
-      let methodAccess = try parseAccessModifier()
+      let methodAccess = try parseAccessModifier(default: .protected)
 
       // Intrinsic methods inside intrinsic given are implicitly intrinsic, so no need for keyword check?
       // Or do we disallow nested modifiers?
@@ -363,7 +364,7 @@ extension Parser {
     try match(.leftBrace)
     var methods: [MethodDeclaration] = []
     while currentToken !== .rightBrace {
-      let methodAccess = try parseAccessModifier()
+      let methodAccess = try parseAccessModifier(default: .protected)
 
       let typeParams = try parseTypeParameters()
 
@@ -432,7 +433,11 @@ extension Parser {
 
   // MARK: - Access Modifier
   
-  func parseAccessModifier() throws -> AccessModifier {
+  func parseAccessModifier(default defaultAccess: AccessModifier) throws -> AccessModifier {
+    return try parseExplicitAccessModifier() ?? defaultAccess
+  }
+
+  func parseExplicitAccessModifier() throws -> AccessModifier? {
     if currentToken === .privateKeyword {
       try match(.privateKeyword)
       return .private
@@ -443,7 +448,7 @@ extension Parser {
       try match(.publicKeyword)
       return .public
     }
-    return .default
+    return nil
   }
 
   // MARK: - Variable Declaration
@@ -685,7 +690,7 @@ extension Parser {
     var parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier)] = []
 
     while currentToken !== .rightParen {
-      let fieldAccess = try parseAccessModifier()
+      let fieldAccess = try parseAccessModifier(default: .public)
 
       // Check for mut keyword for the field
       var fieldMutable = false
@@ -836,19 +841,8 @@ extension Parser {
   /// Parse using declaration
   func parseUsingDeclaration() throws -> UsingDeclaration {
     let startSpan = currentSpan
-    
-    // Parse optional access modifier
-    var access: AccessModifier = .default
-    if currentToken === .publicKeyword {
-      try match(.publicKeyword)
-      access = .public
-    } else if currentToken === .protectedKeyword {
-      try match(.protectedKeyword)
-      access = .protected
-    } else if currentToken === .privateKeyword {
-      try match(.privateKeyword)
-      access = .private
-    }
+    let explicitAccess = try parseExplicitAccessModifier()
+    let access = explicitAccess ?? .private
     
     try match(.usingKeyword)
     
@@ -863,7 +857,7 @@ extension Parser {
       }
       
       // 文件合并不允许访问修饰符
-      if access != .default {
+      if explicitAccess != nil {
         throw ParserError.fileMergeNoAccessModifier(span: startSpan)
       }
       
@@ -873,7 +867,7 @@ extension Parser {
         pathSegments: [filename],
         alias: nil,
         isBatchImport: false,
-        access: .default,
+        access: .private,
         span: span
       )
     } else if currentToken === .selfKeyword {

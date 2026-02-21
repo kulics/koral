@@ -519,7 +519,7 @@ public class TypeResolver: CompilerPass {
                 )
             },
             returnTypeNode: returnType,
-            access: .default,
+            access: .protected,
             sourceFile: currentSourceFile,
             modulePath: currentModulePath,
             isIntrinsic: true

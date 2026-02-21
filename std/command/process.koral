@@ -1,0 +1,220 @@
+// ============================================================================
+// std.command - Process Handle
+// ============================================================================
+// Provides: ProcessStorage (internal), Process (child process handle)
+// Access via: using std.command
+// ============================================================================
+
+// ============================================================================
+// FFI Declarations
+// ============================================================================
+
+/// Foreign type representing the raw spawn result from C runtime.
+foreign type KoralProcess(pid UInt32, stdin_fd Int32, stdout_fd Int32, stderr_fd Int32)
+
+/// Wait for child process to exit (simplified, used in drop to prevent zombies).
+foreign let koral_waitpid(pid UInt32) Int32
+
+/// Wait for child process with full exit information.
+/// Returns 0 on success, non-zero on failure.
+foreign let koral_waitpid_full(pid UInt32, exit_code Int32 ptr, signal_num Int32 ptr) Int32
+
+/// Non-blocking check if child process has exited.
+/// Returns >0 if exited, 0 if still running, <0 on error.
+foreign let koral_try_waitpid(pid UInt32, exit_code Int32 ptr, signal_num Int32 ptr) Int32
+
+/// Concurrently read all data from stdout and stderr pipes (uses poll/select internally).
+/// Allocates memory for output buffers (caller must free with dealloc_memory).
+foreign let koral_read_all_pipes(stdout_fd Int32, stderr_fd Int32,
+    out_stdout UInt8 ptr ptr, out_stdout_len UInt64 ptr,
+    out_stderr UInt8 ptr ptr, out_stderr_len UInt64 ptr) Int32
+
+/// Get pointer to errno value.
+/// Reuse errno helpers from std.os to avoid cross-module symbol ambiguity.
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/// Get the last OS error as a String.
+private let get_last_error() String = {
+    os.last_error_message()
+}
+
+// ============================================================================
+// ProcessStorage (internal)
+// ============================================================================
+
+/// Internal storage for child process state.
+/// Holds the PID, pipe file descriptors (-1 means no pipe), and wait status.
+type ProcessStorage(
+    pid UInt32,
+    mut stdin_fd Int32,
+    mut stdout_fd Int32,
+    mut stderr_fd Int32,
+    mut waited Bool,
+)
+
+given ProcessStorage {
+    /// On drop: close any un-taken pipe fds, then auto-wait to prevent zombie processes.
+    __drop(self ref) Void = {
+        if self.stdin_fd >= 0 then {
+            koral_pipe_close(self.stdin_fd)
+        }
+        if self.stdout_fd >= 0 then {
+            koral_pipe_close(self.stdout_fd)
+        }
+        if self.stderr_fd >= 0 then {
+            koral_pipe_close(self.stderr_fd)
+        }
+        if not self.waited then {
+            koral_waitpid(self.pid)
+        }
+    }
+}
+
+// ============================================================================
+// Process — Child process handle
+// ============================================================================
+
+/// Child process handle providing wait, pipe access, and lifecycle management.
+public type Process(private mut storage ProcessStorage ref)
+
+given Process {
+    /// Get the child process PID.
+    public pid(self) UInt32 = self.storage.pid
+
+    /// Block until the child process exits, returning its exit status.
+    public wait(self ref) [ExitStatus]Result = {
+        if self.storage.waited then {
+            return [ExitStatus]Result.Error(ref "process already waited")
+        }
+        let mut exit_code Int32 = 0
+        let mut signal_num Int32 = 0
+        let result = koral_waitpid_full(self.storage.pid, ptr exit_code, ptr signal_num)
+        if result <> 0 then {
+            return [ExitStatus]Result.Error(ref get_last_error())
+        }
+        self.storage.waited = true
+        if signal_num > 0 then {
+            [ExitStatus]Result.Ok(ExitStatus.from_signal((Int)signal_num))
+        } else {
+            [ExitStatus]Result.Ok(ExitStatus.from_code((Int)exit_code))
+        }
+    }
+
+    /// Wait for the child process to exit and capture all stdout/stderr output.
+    /// Uses koral_read_all_pipes for concurrent reading to avoid pipe deadlock.
+    public wait_output(self ref) [CommandOutput]Result = {
+        // Close un-taken stdin_fd to send EOF to child
+        if self.storage.stdin_fd >= 0 then {
+            koral_pipe_close(self.storage.stdin_fd)
+            self.storage.stdin_fd = -1
+        }
+
+        let stdout_fd = self.storage.stdout_fd
+        let stderr_fd = self.storage.stderr_fd
+        // Mark fds as consumed to prevent double-close in drop
+        self.storage.stdout_fd = -1
+        self.storage.stderr_fd = -1
+
+        // Read both pipes concurrently via C runtime (uses poll/select internally)
+        let mut out_stdout = [UInt8]null_ptr()
+        let mut out_stdout_len UInt64 = 0
+        let mut out_stderr = [UInt8]null_ptr()
+        let mut out_stderr_len UInt64 = 0
+        let read_result = koral_read_all_pipes(
+            stdout_fd, stderr_fd,
+            ptr out_stdout, ptr out_stdout_len,
+            ptr out_stderr, ptr out_stderr_len
+        )
+
+        // Close pipe fds after reading
+        if stdout_fd >= 0 then { koral_pipe_close(stdout_fd) }
+        if stderr_fd >= 0 then { koral_pipe_close(stderr_fd) }
+
+        if read_result <> 0 then {
+            if out_stdout <> [UInt8]null_ptr() then { dealloc_memory(out_stdout) }
+            if out_stderr <> [UInt8]null_ptr() then { dealloc_memory(out_stderr) }
+            return [CommandOutput]Result.Error(ref get_last_error())
+        }
+
+        let stdout_content = if out_stdout_len > 0 then {
+            let s = String.from_bytes_unchecked(out_stdout, (UInt)out_stdout_len)
+            dealloc_memory(out_stdout)
+            s
+        } else {
+            if out_stdout <> [UInt8]null_ptr() then { dealloc_memory(out_stdout) }
+            String.new()
+        }
+        let stderr_content = if out_stderr_len > 0 then {
+            let s = String.from_bytes_unchecked(out_stderr, (UInt)out_stderr_len)
+            dealloc_memory(out_stderr)
+            s
+        } else {
+            if out_stderr <> [UInt8]null_ptr() then { dealloc_memory(out_stderr) }
+            String.new()
+        }
+
+        when self.wait() is {
+            .Ok(status) then [CommandOutput]Result.Ok(
+                CommandOutput(status, stdout_content, stderr_content)
+            ),
+            .Error(e) then [CommandOutput]Result.Error(e),
+        }
+    }
+
+    /// Non-blocking check if the child process has exited.
+    /// Returns Ok(Some(status)) if exited, Ok(None) if still running, Error on system error.
+    public try_wait(self ref) [[ExitStatus]Option]Result = {
+        let mut exit_code Int32 = 0
+        let mut signal_num Int32 = 0
+        let result = koral_try_waitpid(self.storage.pid, ptr exit_code, ptr signal_num)
+        if result < 0 then {
+            return [[ExitStatus]Option]Result.Error(ref get_last_error())
+        }
+        if result == 0 then {
+            return [[ExitStatus]Option]Result.Ok([ExitStatus]Option.None())
+        }
+        self.storage.waited = true
+        let status = if signal_num > 0 then {
+            ExitStatus.from_signal((Int)signal_num)
+        } else {
+            ExitStatus.from_code((Int)exit_code)
+        }
+        [[ExitStatus]Option]Result.Ok([ExitStatus]Option.Some(status))
+    }
+
+    /// Take ownership of the stdin pipe (only Some when configured as Piped).
+    /// Subsequent calls return None (ownership already transferred).
+    public take_stdin_pipe(self ref) [StdinPipe]Option = {
+        if self.storage.stdin_fd < 0 then {
+            return [StdinPipe]Option.None()
+        }
+        let fd = self.storage.stdin_fd
+        self.storage.stdin_fd = -1
+        [StdinPipe]Option.Some(StdinPipe(ref PipeStorage(fd)))
+    }
+
+    /// Take ownership of the stdout pipe (only Some when configured as Piped).
+    /// Subsequent calls return None (ownership already transferred).
+    public take_stdout_pipe(self ref) [StdoutPipe]Option = {
+        if self.storage.stdout_fd < 0 then {
+            return [StdoutPipe]Option.None()
+        }
+        let fd = self.storage.stdout_fd
+        self.storage.stdout_fd = -1
+        [StdoutPipe]Option.Some(StdoutPipe(ref PipeStorage(fd)))
+    }
+
+    /// Take ownership of the stderr pipe (only Some when configured as Piped).
+    /// Subsequent calls return None (ownership already transferred).
+    public take_stderr_pipe(self ref) [StderrPipe]Option = {
+        if self.storage.stderr_fd < 0 then {
+            return [StderrPipe]Option.None()
+        }
+        let fd = self.storage.stderr_fd
+        self.storage.stderr_fd = -1
+        [StderrPipe]Option.Some(StderrPipe(ref PipeStorage(fd)))
+    }
+}

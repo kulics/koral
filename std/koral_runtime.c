@@ -1994,3 +1994,645 @@ uint8_t* koral_mkdtemp(uint8_t* tmpl) {
 }
 
 #endif
+
+
+// ============================================================================
+// Subprocess management (std.command)
+// ============================================================================
+
+#if !defined(_WIN32) && !defined(_WIN64)
+#include <spawn.h>
+#include <sys/wait.h>
+#include <signal.h>
+#include <poll.h>
+#endif
+
+typedef struct {
+    uint32_t pid;
+    int32_t  stdin_fd;
+    int32_t  stdout_fd;
+    int32_t  stderr_fd;
+} KoralProcess;
+
+// --- koral_getpid ---
+
+uint32_t koral_getpid(void) {
+#if defined(_WIN32) || defined(_WIN64)
+    return (uint32_t)GetCurrentProcessId();
+#else
+    return (uint32_t)getpid();
+#endif
+}
+
+// --- Pipe operations ---
+
+int64_t koral_pipe_read(int32_t fd, uint8_t* buf, uint64_t count) {
+#if defined(_WIN32) || defined(_WIN64)
+    return (int64_t)_read(fd, buf, (unsigned int)count);
+#else
+    return (int64_t)read(fd, buf, (size_t)count);
+#endif
+}
+
+int64_t koral_pipe_write(int32_t fd, const uint8_t* buf, uint64_t count) {
+#if defined(_WIN32) || defined(_WIN64)
+    return (int64_t)_write(fd, buf, (unsigned int)count);
+#else
+    return (int64_t)write(fd, buf, (size_t)count);
+#endif
+}
+
+int32_t koral_pipe_close(int32_t fd) {
+#if defined(_WIN32) || defined(_WIN64)
+    return _close(fd);
+#else
+    return close(fd);
+#endif
+}
+
+// --- Signal / process queries ---
+
+int32_t koral_send_signal(uint32_t pid, int32_t signal) {
+#if defined(_WIN32) || defined(_WIN64)
+    // Windows: only support SIGTERM(15) and SIGKILL(9) via TerminateProcess
+    if (signal == 9 || signal == 15) {
+        HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, (DWORD)pid);
+        if (h == NULL) return -1;
+        BOOL ok = TerminateProcess(h, 1);
+        CloseHandle(h);
+        return ok ? 0 : -1;
+    }
+    errno = EINVAL;
+    return -1;
+#else
+    return kill((pid_t)pid, signal) == 0 ? 0 : -1;
+#endif
+}
+
+int32_t koral_is_alive(uint32_t pid) {
+#if defined(_WIN32) || defined(_WIN64)
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
+    if (h == NULL) return 0;
+    DWORD exit_code;
+    BOOL ok = GetExitCodeProcess(h, &exit_code);
+    CloseHandle(h);
+    if (!ok) return 0;
+    return (exit_code == STILL_ACTIVE) ? 1 : 0;
+#else
+    return (kill((pid_t)pid, 0) == 0) ? 1 : 0;
+#endif
+}
+
+
+// --- Wait operations ---
+
+int32_t koral_waitpid(uint32_t pid) {
+#if defined(_WIN32) || defined(_WIN64)
+    HANDLE h = OpenProcess(SYNCHRONIZE, FALSE, (DWORD)pid);
+    if (h == NULL) return -1;
+    WaitForSingleObject(h, INFINITE);
+    CloseHandle(h);
+    return 0;
+#else
+    int status;
+    while (waitpid((pid_t)pid, &status, 0) < 0) {
+        if (errno != EINTR) return -1;
+    }
+    return 0;
+#endif
+}
+
+int32_t koral_waitpid_full(uint32_t pid, int32_t* exit_code, int32_t* signal_num) {
+#if defined(_WIN32) || defined(_WIN64)
+    HANDLE h = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_INFORMATION, FALSE, (DWORD)pid);
+    if (h == NULL) return -1;
+    WaitForSingleObject(h, INFINITE);
+    DWORD code;
+    if (!GetExitCodeProcess(h, &code)) {
+        CloseHandle(h);
+        return -1;
+    }
+    CloseHandle(h);
+    *exit_code = (int32_t)code;
+    *signal_num = 0;
+    return 0;
+#else
+    int status;
+    while (waitpid((pid_t)pid, &status, 0) < 0) {
+        if (errno != EINTR) return -1;
+    }
+    if (WIFEXITED(status)) {
+        *exit_code = (int32_t)WEXITSTATUS(status);
+        *signal_num = 0;
+    } else if (WIFSIGNALED(status)) {
+        *exit_code = -1;
+        *signal_num = (int32_t)WTERMSIG(status);
+    } else {
+        *exit_code = -1;
+        *signal_num = 0;
+    }
+    return 0;
+#endif
+}
+
+int32_t koral_try_waitpid(uint32_t pid, int32_t* exit_code, int32_t* signal_num) {
+#if defined(_WIN32) || defined(_WIN64)
+    HANDLE h = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_INFORMATION, FALSE, (DWORD)pid);
+    if (h == NULL) return -1;
+    DWORD wait_result = WaitForSingleObject(h, 0);
+    if (wait_result == WAIT_TIMEOUT) {
+        CloseHandle(h);
+        return 0;  // still running
+    }
+    if (wait_result != WAIT_OBJECT_0) {
+        CloseHandle(h);
+        return -1;
+    }
+    DWORD code;
+    if (!GetExitCodeProcess(h, &code)) {
+        CloseHandle(h);
+        return -1;
+    }
+    CloseHandle(h);
+    *exit_code = (int32_t)code;
+    *signal_num = 0;
+    return 1;  // exited
+#else
+    int status;
+    pid_t result = waitpid((pid_t)pid, &status, WNOHANG);
+    if (result < 0) return -1;
+    if (result == 0) return 0;  // still running
+    if (WIFEXITED(status)) {
+        *exit_code = (int32_t)WEXITSTATUS(status);
+        *signal_num = 0;
+    } else if (WIFSIGNALED(status)) {
+        *exit_code = -1;
+        *signal_num = (int32_t)WTERMSIG(status);
+    } else {
+        *exit_code = -1;
+        *signal_num = 0;
+    }
+    return 1;  // exited
+#endif
+}
+
+
+// --- koral_spawn ---
+
+#if defined(_WIN32) || defined(_WIN64)
+
+int32_t koral_spawn(
+    const uint8_t* program,
+    const uint8_t** argv, int32_t argc,
+    const uint8_t** envp, int32_t envc,
+    const uint8_t* cwd,
+    int32_t stdin_mode, int32_t stdout_mode, int32_t stderr_mode,
+    KoralProcess* out
+) {
+    HANDLE stdin_read = INVALID_HANDLE_VALUE, stdin_write = INVALID_HANDLE_VALUE;
+    HANDLE stdout_read = INVALID_HANDLE_VALUE, stdout_write = INVALID_HANDLE_VALUE;
+    HANDLE stderr_read = INVALID_HANDLE_VALUE, stderr_write = INVALID_HANDLE_VALUE;
+    SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
+
+    // Create pipes as needed
+    if (stdin_mode == 1) {
+        if (!CreatePipe(&stdin_read, &stdin_write, &sa, 0)) return -1;
+        SetHandleInformation(stdin_write, HANDLE_FLAG_INHERIT, 0);
+    }
+    if (stdout_mode == 1) {
+        if (!CreatePipe(&stdout_read, &stdout_write, &sa, 0)) goto fail;
+        SetHandleInformation(stdout_read, HANDLE_FLAG_INHERIT, 0);
+    }
+    if (stderr_mode == 1) {
+        if (!CreatePipe(&stderr_read, &stderr_write, &sa, 0)) goto fail;
+        SetHandleInformation(stderr_read, HANDLE_FLAG_INHERIT, 0);
+    }
+
+    // Build command line string
+    char cmdline[32768];
+    int pos = 0;
+    for (int i = 0; i < argc && pos < 32700; i++) {
+        if (i > 0) cmdline[pos++] = ' ';
+        cmdline[pos++] = '"';
+        const char* arg = (const char*)argv[i];
+        while (*arg && pos < 32700) {
+            if (*arg == '"') cmdline[pos++] = '\\';
+            cmdline[pos++] = *arg++;
+        }
+        cmdline[pos++] = '"';
+    }
+    cmdline[pos] = '\0';
+
+    // Build environment block if needed
+    char* env_block = NULL;
+    if (envc > 0) {
+        size_t total = 0;
+        for (int i = 0; i < envc; i++) {
+            total += strlen((const char*)envp[i]) + 1;
+        }
+        total += 1;  // double null terminator
+        env_block = (char*)malloc(total);
+        if (!env_block) goto fail;
+        char* p = env_block;
+        for (int i = 0; i < envc; i++) {
+            size_t len = strlen((const char*)envp[i]);
+            memcpy(p, envp[i], len);
+            p[len] = '\0';
+            p += len + 1;
+        }
+        *p = '\0';
+    }
+
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+
+    // stdin
+    if (stdin_mode == 1) si.hStdInput = stdin_read;
+    else if (stdin_mode == 2) si.hStdInput = INVALID_HANDLE_VALUE;
+    else si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+
+    // stdout
+    if (stdout_mode == 1) si.hStdOutput = stdout_write;
+    else if (stdout_mode == 2) si.hStdOutput = INVALID_HANDLE_VALUE;
+    else si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+
+    // stderr
+    if (stderr_mode == 1) si.hStdError = stderr_write;
+    else if (stderr_mode == 2) si.hStdError = INVALID_HANDLE_VALUE;
+    else si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+
+    const char* work_dir = (cwd && cwd[0]) ? (const char*)cwd : NULL;
+
+    memset(&pi, 0, sizeof(pi));
+    BOOL ok = CreateProcessA(
+        NULL, cmdline, NULL, NULL, TRUE,
+        env_block ? CREATE_UNICODE_ENVIRONMENT : 0,
+        env_block, work_dir, &si, &pi
+    );
+
+    if (env_block) free(env_block);
+
+    if (!ok) goto fail;
+
+    // Close child-side handles
+    if (stdin_read != INVALID_HANDLE_VALUE) CloseHandle(stdin_read);
+    if (stdout_write != INVALID_HANDLE_VALUE) CloseHandle(stdout_write);
+    if (stderr_write != INVALID_HANDLE_VALUE) CloseHandle(stderr_write);
+    CloseHandle(pi.hThread);
+
+    out->pid = (uint32_t)pi.dwProcessId;
+    out->stdin_fd = (stdin_mode == 1) ? _open_osfhandle((intptr_t)stdin_write, 0) : -1;
+    out->stdout_fd = (stdout_mode == 1) ? _open_osfhandle((intptr_t)stdout_read, _O_RDONLY) : -1;
+    out->stderr_fd = (stderr_mode == 1) ? _open_osfhandle((intptr_t)stderr_read, _O_RDONLY) : -1;
+
+    // We need to keep the process handle for waitpid; store it... actually
+    // Windows waitpid uses OpenProcess, so we can close this handle.
+    CloseHandle(pi.hProcess);
+
+    return 0;
+
+fail:
+    if (stdin_read != INVALID_HANDLE_VALUE) CloseHandle(stdin_read);
+    if (stdin_write != INVALID_HANDLE_VALUE) CloseHandle(stdin_write);
+    if (stdout_read != INVALID_HANDLE_VALUE) CloseHandle(stdout_read);
+    if (stdout_write != INVALID_HANDLE_VALUE) CloseHandle(stdout_write);
+    if (stderr_read != INVALID_HANDLE_VALUE) CloseHandle(stderr_read);
+    if (stderr_write != INVALID_HANDLE_VALUE) CloseHandle(stderr_write);
+    return -1;
+}
+
+#else  // POSIX
+
+int32_t koral_spawn(
+    const uint8_t* program,
+    const uint8_t** argv, int32_t argc,
+    const uint8_t** envp, int32_t envc,
+    const uint8_t* cwd,
+    int32_t stdin_mode, int32_t stdout_mode, int32_t stderr_mode,
+    KoralProcess* out
+) {
+    int stdin_pipe[2] = {-1, -1};
+    int stdout_pipe[2] = {-1, -1};
+    int stderr_pipe[2] = {-1, -1};
+    int null_fd = -1;
+
+    // Create pipes as needed
+    if (stdin_mode == 1) {
+        if (pipe(stdin_pipe) < 0) return -1;
+    }
+    if (stdout_mode == 1) {
+        if (pipe(stdout_pipe) < 0) goto fail;
+    }
+    if (stderr_mode == 1) {
+        if (pipe(stderr_pipe) < 0) goto fail;
+    }
+
+    // Open /dev/null if any mode is Null(2)
+    if (stdin_mode == 2 || stdout_mode == 2 || stderr_mode == 2) {
+        null_fd = open("/dev/null", O_RDWR);
+        if (null_fd < 0) goto fail;
+    }
+
+    // Build null-terminated argv array
+    char** child_argv = (char**)malloc((argc + 1) * sizeof(char*));
+    if (!child_argv) goto fail;
+    for (int i = 0; i < argc; i++) {
+        child_argv[i] = (char*)argv[i];
+    }
+    child_argv[argc] = NULL;
+
+    // Build null-terminated envp array
+    char** child_envp = NULL;
+    if (envc > 0) {
+        child_envp = (char**)malloc((envc + 1) * sizeof(char*));
+        if (!child_envp) { free(child_argv); goto fail; }
+        for (int i = 0; i < envc; i++) {
+            child_envp[i] = (char*)envp[i];
+        }
+        child_envp[envc] = NULL;
+    }
+
+    // Check if cwd is set
+    int use_cwd = (cwd && cwd[0]);
+
+    // Use fork+exec if cwd is set (posix_spawn_file_actions_addchdir_np
+    // is not portable), otherwise use posix_spawn
+    pid_t child_pid;
+    int spawn_err = 0;
+
+    if (use_cwd) {
+        // fork+exec approach for cwd support
+        child_pid = fork();
+        if (child_pid < 0) {
+            spawn_err = errno;
+            free(child_argv);
+            if (child_envp) free(child_envp);
+            goto fail;
+        }
+        if (child_pid == 0) {
+            // Child process
+            if (chdir((const char*)cwd) < 0) _exit(127);
+
+            // Set up stdin
+            if (stdin_mode == 1) {
+                dup2(stdin_pipe[0], STDIN_FILENO);
+                close(stdin_pipe[0]);
+                close(stdin_pipe[1]);
+            } else if (stdin_mode == 2) {
+                dup2(null_fd, STDIN_FILENO);
+            }
+
+            // Set up stdout
+            if (stdout_mode == 1) {
+                dup2(stdout_pipe[1], STDOUT_FILENO);
+                close(stdout_pipe[0]);
+                close(stdout_pipe[1]);
+            } else if (stdout_mode == 2) {
+                dup2(null_fd, STDOUT_FILENO);
+            }
+
+            // Set up stderr
+            if (stderr_mode == 1) {
+                dup2(stderr_pipe[1], STDERR_FILENO);
+                close(stderr_pipe[0]);
+                close(stderr_pipe[1]);
+            } else if (stderr_mode == 2) {
+                dup2(null_fd, STDERR_FILENO);
+            }
+
+            if (null_fd >= 0) close(null_fd);
+
+            if (child_envp) {
+                execve((const char*)program, child_argv, child_envp);
+            } else {
+                execvp((const char*)program, child_argv);
+            }
+            _exit(127);
+        }
+    } else {
+        // posix_spawn approach (more efficient, no fork overhead)
+        posix_spawn_file_actions_t actions;
+        posix_spawn_file_actions_init(&actions);
+
+        // stdin
+        if (stdin_mode == 1) {
+            posix_spawn_file_actions_adddup2(&actions, stdin_pipe[0], STDIN_FILENO);
+            posix_spawn_file_actions_addclose(&actions, stdin_pipe[0]);
+            posix_spawn_file_actions_addclose(&actions, stdin_pipe[1]);
+        } else if (stdin_mode == 2) {
+            posix_spawn_file_actions_adddup2(&actions, null_fd, STDIN_FILENO);
+        }
+
+        // stdout
+        if (stdout_mode == 1) {
+            posix_spawn_file_actions_adddup2(&actions, stdout_pipe[1], STDOUT_FILENO);
+            posix_spawn_file_actions_addclose(&actions, stdout_pipe[0]);
+            posix_spawn_file_actions_addclose(&actions, stdout_pipe[1]);
+        } else if (stdout_mode == 2) {
+            posix_spawn_file_actions_adddup2(&actions, null_fd, STDOUT_FILENO);
+        }
+
+        // stderr
+        if (stderr_mode == 1) {
+            posix_spawn_file_actions_adddup2(&actions, stderr_pipe[1], STDERR_FILENO);
+            posix_spawn_file_actions_addclose(&actions, stderr_pipe[0]);
+            posix_spawn_file_actions_addclose(&actions, stderr_pipe[1]);
+        } else if (stderr_mode == 2) {
+            posix_spawn_file_actions_adddup2(&actions, null_fd, STDERR_FILENO);
+        }
+
+        if (null_fd >= 0) {
+            posix_spawn_file_actions_addclose(&actions, null_fd);
+        }
+
+        if (child_envp) {
+            spawn_err = posix_spawn(&child_pid, (const char*)program, &actions, NULL,
+                                    child_argv, child_envp);
+        } else {
+            extern char** environ;
+            spawn_err = posix_spawnp(&child_pid, (const char*)program, &actions, NULL,
+                                     child_argv, environ);
+        }
+
+        posix_spawn_file_actions_destroy(&actions);
+    }
+
+    free(child_argv);
+    if (child_envp) free(child_envp);
+
+    if (spawn_err != 0) {
+        errno = spawn_err;
+        goto fail;
+    }
+
+    // Close child-side pipe ends in parent
+    if (stdin_pipe[0] >= 0) close(stdin_pipe[0]);
+    if (stdout_pipe[1] >= 0) close(stdout_pipe[1]);
+    if (stderr_pipe[1] >= 0) close(stderr_pipe[1]);
+    if (null_fd >= 0) close(null_fd);
+
+    out->pid = (uint32_t)child_pid;
+    out->stdin_fd = stdin_pipe[1];   // parent writes to stdin_pipe[1]
+    out->stdout_fd = stdout_pipe[0]; // parent reads from stdout_pipe[0]
+    out->stderr_fd = stderr_pipe[0]; // parent reads from stderr_pipe[0]
+
+    return 0;
+
+fail:
+    if (stdin_pipe[0] >= 0) close(stdin_pipe[0]);
+    if (stdin_pipe[1] >= 0) close(stdin_pipe[1]);
+    if (stdout_pipe[0] >= 0) close(stdout_pipe[0]);
+    if (stdout_pipe[1] >= 0) close(stdout_pipe[1]);
+    if (stderr_pipe[0] >= 0) close(stderr_pipe[0]);
+    if (stderr_pipe[1] >= 0) close(stderr_pipe[1]);
+    if (null_fd >= 0) close(null_fd);
+    return -1;
+}
+
+#endif  // _WIN32 / POSIX koral_spawn
+
+
+// --- koral_read_all_pipes ---
+// Reads all data from stdout_fd and stderr_fd concurrently.
+// Allocates memory for output buffers (caller must free with free()).
+// Returns 0 on success, -1 on error.
+
+// Dynamic buffer helper for koral_read_all_pipes
+typedef struct {
+    uint8_t* data;
+    uint64_t len;
+    uint64_t cap;
+} DynBuf;
+
+static void dynbuf_init(DynBuf* b) {
+    b->data = NULL;
+    b->len = 0;
+    b->cap = 0;
+}
+
+static int dynbuf_append(DynBuf* b, const uint8_t* src, uint64_t n) {
+    if (n == 0) return 0;
+    if (b->len + n > b->cap) {
+        uint64_t new_cap = b->cap == 0 ? 4096 : b->cap;
+        while (new_cap < b->len + n) new_cap *= 2;
+        uint8_t* new_data = (uint8_t*)realloc(b->data, (size_t)new_cap);
+        if (!new_data) return -1;
+        b->data = new_data;
+        b->cap = new_cap;
+    }
+    memcpy(b->data + b->len, src, (size_t)n);
+    b->len += n;
+    return 0;
+}
+
+int32_t koral_read_all_pipes(int32_t stdout_fd, int32_t stderr_fd,
+                              uint8_t** out_stdout, uint64_t* out_stdout_len,
+                              uint8_t** out_stderr, uint64_t* out_stderr_len) {
+    DynBuf stdout_buf, stderr_buf;
+    dynbuf_init(&stdout_buf);
+    dynbuf_init(&stderr_buf);
+
+    *out_stdout = NULL;
+    *out_stdout_len = 0;
+    *out_stderr = NULL;
+    *out_stderr_len = 0;
+
+    uint8_t tmp[4096];
+
+    // If both fds are invalid, nothing to do
+    if (stdout_fd < 0 && stderr_fd < 0) return 0;
+
+    // If only one fd is valid, just read it sequentially
+    if (stdout_fd < 0) {
+        while (1) {
+            int64_t n = koral_pipe_read(stderr_fd, tmp, sizeof(tmp));
+            if (n < 0) goto fail;
+            if (n == 0) break;
+            if (dynbuf_append(&stderr_buf, tmp, (uint64_t)n) < 0) goto fail;
+        }
+        goto done;
+    }
+    if (stderr_fd < 0) {
+        while (1) {
+            int64_t n = koral_pipe_read(stdout_fd, tmp, sizeof(tmp));
+            if (n < 0) goto fail;
+            if (n == 0) break;
+            if (dynbuf_append(&stdout_buf, tmp, (uint64_t)n) < 0) goto fail;
+        }
+        goto done;
+    }
+
+    // Both fds valid: use poll (POSIX) or sequential read (Windows)
+#if defined(_WIN32) || defined(_WIN64)
+    // Windows: read stdout first, then stderr (simple approach)
+    while (1) {
+        int64_t n = koral_pipe_read(stdout_fd, tmp, sizeof(tmp));
+        if (n < 0) goto fail;
+        if (n == 0) break;
+        if (dynbuf_append(&stdout_buf, tmp, (uint64_t)n) < 0) goto fail;
+    }
+    while (1) {
+        int64_t n = koral_pipe_read(stderr_fd, tmp, sizeof(tmp));
+        if (n < 0) goto fail;
+        if (n == 0) break;
+        if (dynbuf_append(&stderr_buf, tmp, (uint64_t)n) < 0) goto fail;
+    }
+#else
+    {
+        struct pollfd fds[2];
+        int nfds = 2;
+        int stdout_open = 1, stderr_open = 1;
+
+        fds[0].fd = stdout_fd;
+        fds[0].events = POLLIN;
+        fds[1].fd = stderr_fd;
+        fds[1].events = POLLIN;
+
+        while (stdout_open || stderr_open) {
+            if (!stdout_open) fds[0].fd = -1;
+            if (!stderr_open) fds[1].fd = -1;
+
+            int ret = poll(fds, nfds, -1);
+            if (ret < 0) {
+                if (errno == EINTR) continue;
+                goto fail;
+            }
+
+            if (fds[0].revents & (POLLIN | POLLHUP)) {
+                int64_t n = read(stdout_fd, tmp, sizeof(tmp));
+                if (n < 0 && errno != EINTR) goto fail;
+                if (n <= 0) {
+                    stdout_open = 0;
+                } else {
+                    if (dynbuf_append(&stdout_buf, tmp, (uint64_t)n) < 0) goto fail;
+                }
+            }
+
+            if (fds[1].revents & (POLLIN | POLLHUP)) {
+                int64_t n = read(stderr_fd, tmp, sizeof(tmp));
+                if (n < 0 && errno != EINTR) goto fail;
+                if (n <= 0) {
+                    stderr_open = 0;
+                } else {
+                    if (dynbuf_append(&stderr_buf, tmp, (uint64_t)n) < 0) goto fail;
+                }
+            }
+        }
+    }
+#endif
+
+done:
+    *out_stdout = stdout_buf.data;
+    *out_stdout_len = stdout_buf.len;
+    *out_stderr = stderr_buf.data;
+    *out_stderr_len = stderr_buf.len;
+    return 0;
+
+fail:
+    if (stdout_buf.data) free(stdout_buf.data);
+    if (stderr_buf.data) free(stderr_buf.data);
+    return -1;
+}

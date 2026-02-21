@@ -102,7 +102,7 @@ public class UnifiedScope {
     mutable: Bool,
     modulePath: [String] = [],
     sourceFile: String = "",
-    access: AccessModifier = .default
+    access: AccessModifier = .protected
   ) {
     guard let map = defIdMap else {
       return
@@ -143,7 +143,7 @@ public class UnifiedScope {
       name: name,
       kind: .variable,
       sourceFile: "",
-      access: .default,
+      access: .protected,
       span: .unknown
     )
     map.addSymbolInfo(
@@ -172,7 +172,7 @@ public class UnifiedScope {
     }
   }
 
-  public func defineFunctionWithModulePath(_ name: String, _ type: Type, modulePath: [String]) {
+  public func defineFunctionWithModulePath(_ name: String, _ type: Type, modulePath: [String], access: AccessModifier = .protected) {
     guard let map = defIdMap else {
       return
     }
@@ -181,7 +181,7 @@ public class UnifiedScope {
       name: name,
       kind: .function,
       sourceFile: "",
-      access: .default,
+      access: access,
       span: .unknown
     )
     map.addSymbolInfo(
@@ -220,8 +220,8 @@ public class UnifiedScope {
     functionSymbols.insert(name)
   }
 
-  public func defineWithModulePath(_ name: String, _ type: Type, mutable: Bool, modulePath: [String]) {
-    define(name, type, mutable: mutable, modulePath: modulePath, sourceFile: "", access: .default)
+  public func defineWithModulePath(_ name: String, _ type: Type, mutable: Bool, modulePath: [String], access: AccessModifier = .protected) {
+    define(name, type, mutable: mutable, modulePath: modulePath, sourceFile: "", access: access)
   }
 
   public func definePrivateSymbol(_ name: String, sourceFile: String, type: Type, mutable: Bool, modulePath: [String] = []) {
@@ -398,7 +398,7 @@ public class UnifiedScope {
         name: name,
         kind: .type(.structure),
         sourceFile: "",
-        access: .default,
+        access: .protected,
         span: .unknown
       )
     }
@@ -420,7 +420,7 @@ public class UnifiedScope {
         name: name,
         kind: .type(.structure),
         sourceFile: "",
-        access: .default,
+        access: .protected,
         span: .unknown
       )
     }

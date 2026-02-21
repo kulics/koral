@@ -1,8 +1,9 @@
 // ============================================================================
-// Koral Standard Library - OS Module (Process Operations + IO Support)
+// Koral Standard Library - OS Module (Process Lifecycle + IO Support)
 // ============================================================================
-// This file provides process-related operations and IO support FFI declarations.
-// It is self-contained and does NOT depend on the std/os/ submodule.
+// This file provides process lifecycle operations (exit, abort, args) and
+// IO support FFI declarations used by std/io.koral (print, read_line, etc.).
+// Command execution and subprocess management live in std/command/ submodule.
 // File, directory, path, and environment operations live in std/os/ submodule.
 // ============================================================================
 
@@ -21,31 +22,9 @@ foreign let koral_stdin() CFile ptr
 foreign let koral_stdout() CFile ptr
 foreign let koral_stderr() CFile ptr
 
-// Buffered file I/O (for internal read_text / remove_file helpers)
-foreign let fopen(path UInt8 ptr, mode UInt8 ptr) CFile ptr
-foreign let fclose(file CFile ptr) Int32
-foreign let fread(buf UInt8 ptr, size UInt, count UInt, file CFile ptr) UInt
-foreign let fseek(file CFile ptr, offset Int64, whence Int32) Int32
-foreign let ftell(file CFile ptr) Int64
-
-// File system operations
-foreign let koral_remove(path UInt8 ptr) Int32
-
-// Path operations
-foreign let koral_normalize_path(path UInt8 ptr, buf UInt8 ptr, size UInt) Int
-foreign let koral_path_separator() UInt8
-
-// Environment variable operations
-foreign let koral_getenv(name UInt8 ptr) UInt8 ptr
-
 // Process operations
-foreign let koral_system(command UInt8 ptr) Int32
 public foreign let exit(code Int) Never
 public foreign let abort() Never
-
-// Error handling
-foreign let koral_errno_ptr() Int32 ptr
-foreign let koral_strerror(errnum Int32) UInt8 ptr
 
 // Command line args (runtime-managed)
 private foreign let koral_set_args(argc Int32, argv UInt8 ptr ptr) Void
@@ -53,153 +32,8 @@ private foreign let koral_argc() Int32
 private foreign let koral_argv() UInt8 ptr ptr
 
 // ============================================================================
-// Internal Helpers (self-contained, no submodule dependency)
-// ============================================================================
-
-/// Get the last OS error as a String
-private let _get_last_error() String = {
-    let err = deptr koral_errno_ptr()
-    let msg = koral_strerror(err)
-    String.from_cstring(msg)
-}
-
-/// Normalize path (internal copy)
-private let _normalize_path(path String) String = {
-    let buf_size = path.count() + 1
-    let buf = [UInt8]alloc_memory(buf_size)
-    let len = koral_normalize_path(path.storage.data, buf, buf_size)
-    let result = String.from_bytes_unchecked(buf, (UInt)len)
-    dealloc_memory(buf)
-    result
-}
-
-/// Get platform path separator (internal copy)
-private let _path_separator() String = {
-    let sep = koral_path_separator()
-    let mut s = String.new()
-    s.push(sep)
-    s
-}
-
-/// Join two paths (internal copy)
-private let _join_path(base String, name String) String = {
-    if base.is_empty() then { return name }
-    if name.is_empty() then { return base }
-    let mut result = String.new()
-    result.push_string(base)
-    let sep = _path_separator()
-    if not base.ends_with("/") and not base.ends_with("\\") then {
-        result.push_string(sep)
-    }
-    result.push_string(name)
-    result
-}
-
-/// Get temp directory (internal copy)
-private let _temp_dir() String = {
-    let try_tmpdir = koral_getenv("TMPDIR".storage.data)
-    if try_tmpdir <> [UInt8]null_ptr() then { return String.from_cstring(try_tmpdir) }
-    let try_temp = koral_getenv("TEMP".storage.data)
-    if try_temp <> [UInt8]null_ptr() then { return String.from_cstring(try_temp) }
-    let try_tmp = koral_getenv("TMP".storage.data)
-    if try_tmp <> [UInt8]null_ptr() then { return String.from_cstring(try_tmp) }
-    "/tmp"
-}
-
-/// Read file as text (internal copy)
-private let _read_text(path String) [String]Result = {
-    let normalized = _normalize_path(path)
-    let mode = "rb"
-    let file = fopen(normalized.storage.data, mode.storage.data)
-    if file == [CFile]null_ptr() then {
-        return [String]Result.Error(ref _get_last_error())
-    }
-    fseek(file, 0, 2)
-    let size = (UInt)ftell(file)
-    fseek(file, 0, 0)
-    let buf = [UInt8]alloc_memory(size + 1)
-    let read_count = fread(buf, 1, size, file)
-    init_memory(buf + read_count, 0)
-    fclose(file)
-    let content = String.from_bytes_unchecked(buf, read_count)
-    dealloc_memory(buf)
-    [String]Result.Ok(content)
-}
-
-/// Remove file (internal copy)
-private let _remove_file(path String) [Void]Result = {
-    if koral_remove(path.storage.data) == 0 then {
-        [Void]Result.Ok({})
-    } else {
-        [Void]Result.Error(ref _get_last_error())
-    }
-}
-
-// ============================================================================
-// Types
-// ============================================================================
-
-/// Command execution result
-public type CommandResult(public code Int, public stdout String, public stderr String)
-
-given CommandResult {
-    public is_success(self) Bool = self.code == 0
-
-    public to_string(self) String = {
-        let mut s = String.new()
-        s.push_string("CommandResult(code=")
-        s.push_int(self.code)
-        s.push_string(", stdout=\"")
-        s.push_string(self.stdout)
-        s.push_string("\", stderr=\"")
-        s.push_string(self.stderr)
-        s.push_string("\")")
-        s
-    }
-}
-
-// ============================================================================
 // Process Operations
 // ============================================================================
-
-/// Run external command
-public let run_command(program String, args [String]List) [CommandResult]Result = {
-    let mut cmd = String.new()
-    cmd.push_string(program)
-    for arg = args then {
-        cmd.push(' ')
-        cmd.push('"')
-        cmd.push_string(arg)
-        cmd.push('"')
-    }
-
-    let tmp = _temp_dir()
-    let stdout_file = _join_path(tmp, "koral_cmd_out")
-    let stderr_file = _join_path(tmp, "koral_cmd_err")
-
-    let mut full_cmd = String.new()
-    full_cmd.push_string(cmd)
-    full_cmd.push_string(" > ")
-    full_cmd.push_string(stdout_file)
-    full_cmd.push_string(" 2> ")
-    full_cmd.push_string(stderr_file)
-
-    let code = koral_system(full_cmd.storage.data)
-
-    let stdout_content = when _read_text(stdout_file) is {
-        .Ok(s) then s,
-        .Error(_) then String.zero(),
-    }
-    let stderr_content = when _read_text(stderr_file) is {
-        .Ok(s) then s,
-        .Error(_) then String.zero(),
-    }
-
-    _remove_file(stdout_file)
-    _remove_file(stderr_file)
-
-    [CommandResult]Result.Ok(CommandResult((Int)code, stdout_content, stderr_content))
-}
 
 /// Get command line arguments
 public let args() [String]List = {

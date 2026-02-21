@@ -1,0 +1,72 @@
+// EXPECT: builder_run_output_ok
+// EXPECT: builder_env_ok
+// EXPECT: builder_cwd_ok
+// EXPECT: builder_run_ok
+
+using std.os.*
+using std.command.*
+
+let main() Void = {
+    // ========================================================================
+    // Command.new + with_arg + run_output
+    // ========================================================================
+    let result = Command.new("echo")
+        .with_arg("builder_test")
+        .run_output()
+    when result is {
+        .Ok(output) then {
+            assert(output.is_success(), "builder run_output success")
+            assert(output.stdout.contains("builder_test"), "builder run_output stdout")
+        },
+        .Error(_) then {},
+    }
+    print_line("builder_run_output_ok")
+
+    // ========================================================================
+    // Command with environment variable
+    // ========================================================================
+    // Use "sh -c 'echo $VAR'" to check env var
+    let env_result = Command.new("sh")
+        .with_arg("-c")
+        .with_arg("echo $KORAL_TEST_VAR")
+        .set_env("KORAL_TEST_VAR", "hello_env")
+        .run_output()
+    when env_result is {
+        .Ok(output) then {
+            assert(output.is_success(), "builder env success")
+            assert(output.stdout.contains("hello_env"), "builder env stdout")
+        },
+        .Error(_) then {},
+    }
+    print_line("builder_env_ok")
+
+    // ========================================================================
+    // Command with working directory
+    // ========================================================================
+    let cwd_result = Command.new("pwd")
+        .set_current_dir("/tmp")
+        .run_output()
+    when cwd_result is {
+        .Ok(output) then {
+            assert(output.is_success(), "builder cwd success")
+            // /tmp might resolve to /private/tmp on macOS
+            assert(output.stdout.contains("tmp"), "builder cwd stdout")
+        },
+        .Error(_) then {},
+    }
+    print_line("builder_cwd_ok")
+
+    // ========================================================================
+    // Command.run — returns only ExitStatus
+    // ========================================================================
+    let run_result = Command.new("echo")
+        .with_arg("run_only")
+        .run()
+    when run_result is {
+        .Ok(status) then {
+            assert(status.is_success(), "builder run success")
+        },
+        .Error(_) then {},
+    }
+    print_line("builder_run_ok")
+}

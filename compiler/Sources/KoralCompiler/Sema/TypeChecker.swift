@@ -464,7 +464,7 @@ public class TypeChecker {
     let defId = getOrAllocateTypeDefId(
       name: "String",
       kind: .structure,
-      access: .default,
+      access: .protected,
       modulePath: [],
       sourceFile: ""
     )
@@ -639,7 +639,7 @@ public class TypeChecker {
       name: name,
       kind: defKind,
       sourceFile: "",
-      access: .default,
+      access: .protected,
       span: .unknown
     )
     defIdMap.addSymbolInfo(

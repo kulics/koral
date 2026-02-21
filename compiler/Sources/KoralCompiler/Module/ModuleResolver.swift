@@ -420,7 +420,7 @@ public class ModuleResolver {
         unit: CompilationUnit,
         currentFile: String
     ) {
-        let effectiveAccess: AccessModifier = using.access == .default ? .private : using.access
+        let effectiveAccess: AccessModifier = using.access
         let importSourceFile: String? = effectiveAccess == .private ? currentFile : nil
 
         switch using.pathKind {
@@ -655,7 +655,7 @@ public class ModuleResolver {
         }
         
         // 记录子模块访问控制信息
-        let access = using.access == .default ? .private : using.access
+        let access = using.access
         if module.submoduleAccesses[firstSegment] != nil {
             throw ModuleError.duplicateUsing(firstSegment, span: using.span)
         }
