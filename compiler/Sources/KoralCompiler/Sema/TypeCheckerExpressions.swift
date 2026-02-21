@@ -179,7 +179,7 @@ extension TypeChecker {
         name: name,
         kind: fallbackDefKind,
         sourceFile: symbolSourceFile,
-        access: info.isPrivate ? .private : .default,
+        access: info.isPrivate ? .private : .protected,
         span: currentSpan
       )
 
@@ -1102,6 +1102,15 @@ extension TypeChecker {
         
         // Look up the type in the module's public types
         if let type = moduleInfo.publicTypes[typeName] {
+          if case .structure(let defId) = type {
+            let access = context.getAccess(defId) ?? .protected
+            if !isSymbolAccessibleForModuleAccess(symbolAccess: access, defId: defId) {
+              let accessLabel = access == .private ? "private" : "protected"
+              throw SemanticError(.generic(
+                "Cannot access \(accessLabel) symbol '\(typeName)' of module '\(moduleName)'"
+              ), line: currentLine)
+            }
+          }
           // Handle concrete struct types
           if case .structure(let defId) = type {
             let typeName = context.getName(defId) ?? ""
@@ -2790,10 +2799,20 @@ extension TypeChecker {
       if let moduleDefId = currentScope.lookup(name, sourceFile: currentSourceFile),
         let moduleType = defIdMap.getSymbolType(moduleDefId),
         case .module(let moduleInfo) = moduleType {
+        if !isModuleSymbolImported(moduleInfo.modulePath) {
+          throw SemanticError(.generic("Module '\(name)' is not imported"), span: currentSpan)
+        }
         if path.count == 1 {
           let memberName = path[0]
           // Look up the member in the module's public symbols
           if let memberSymbol = moduleInfo.publicSymbols[memberName] {
+            let access = context.getAccess(memberSymbol.defId) ?? .protected
+            if !isSymbolAccessibleForModuleAccess(symbolAccess: access, defId: memberSymbol.defId) {
+              let accessLabel = access == .private ? "private" : "protected"
+              throw SemanticError(.generic(
+                "Cannot access \(accessLabel) symbol '\(memberName)' of module '\(name)'"
+              ), span: currentSpan)
+            }
             return .variable(identifier: memberSymbol)
           }
           // Look up the member in the module's public types
@@ -2824,6 +2843,13 @@ extension TypeChecker {
               kind: .type,
               methodKind: .normal
             )
+            let access = context.getAccess(typeSymbol.defId) ?? .protected
+            if !isSymbolAccessibleForModuleAccess(symbolAccess: access, defId: typeSymbol.defId) {
+              let accessLabel = access == .private ? "private" : "protected"
+              throw SemanticError(.generic(
+                "Cannot access \(accessLabel) symbol '\(memberName)' of module '\(name)'"
+              ), span: currentSpan)
+            }
             return .variable(identifier: typeSymbol)
           }
           throw SemanticError.undefinedMember(memberName, name)
@@ -2834,6 +2860,15 @@ extension TypeChecker {
           
           // First, try to find the type in the module's public types
           if let memberType = moduleInfo.publicTypes[typeName] {
+            if case .structure(let defId) = memberType {
+              let access = context.getAccess(defId) ?? .protected
+              if !isSymbolAccessibleForModuleAccess(symbolAccess: access, defId: defId) {
+                let accessLabel = access == .private ? "private" : "protected"
+                throw SemanticError(.generic(
+                  "Cannot access \(accessLabel) symbol '\(typeName)' of module '\(name)'"
+                ), span: currentSpan)
+              }
+            }
             // Now handle the remaining path as a type member access
             if let result = try inferTypeMemberPath(type: memberType, typeName: typeName, path: remainingPath) {
               return result
@@ -3002,9 +3037,9 @@ extension TypeChecker {
           
           // Look up member in template and substitute types
           if let param = template.parameters.first(where: { $0.name == memberName }) {
-            // Check field visibility (resolve default access for struct fields)
-            let fieldAccess = param.access == .default ? AccessChecker.defaultAccessForStructField() : param.access
-            if !isFieldAccessibleForMemberAccess(fieldAccess: fieldAccess, defId: template.defId) {
+            // Check field visibility
+            if !isFieldAccessibleForMemberAccess(fieldAccess: param.access, defId: template.defId) {
+              let fieldAccess = param.access
               let accessLabel = fieldAccess == .private ? "private" : "protected"
               throw SemanticError(.generic(
                 "Cannot access \(accessLabel) field '\(memberName)' of type '\(templateName)'"
@@ -3088,7 +3123,7 @@ extension TypeChecker {
       // Private: only accessible from the same file
       let defSourceFile = context.getSourceFile(defId) ?? ""
       return defSourceFile == currentSourceFile
-    case .protected, .default:
+    case .protected:
       // Protected: accessible from the same module or submodule
       let defModulePath = context.getModulePath(defId) ?? []
       // Same module
@@ -3104,6 +3139,47 @@ extension TypeChecker {
       }
       return false
     }
+  }
+
+  private func isSymbolAccessibleForModuleAccess(symbolAccess: AccessModifier, defId: DefId) -> Bool {
+    switch symbolAccess {
+    case .public:
+      return true
+    case .private:
+      let defSourceFile = context.getSourceFile(defId) ?? ""
+      return defSourceFile == currentSourceFile
+    case .protected:
+      let defModulePath = context.getModulePath(defId) ?? []
+      if defModulePath == currentModulePath {
+        return true
+      }
+      if currentModulePath.count > defModulePath.count {
+        let prefix = Array(currentModulePath.prefix(defModulePath.count))
+        if prefix == defModulePath {
+          return true
+        }
+      }
+      return false
+    }
+  }
+
+  private func isModuleSymbolImported(_ modulePath: [String]) -> Bool {
+    if modulePath == currentModulePath {
+      return true
+    }
+    if modulePath.count == 1 && modulePath[0] == "std" {
+      return true
+    }
+    guard let importGraph else {
+      return false
+    }
+    let importKind = importGraph.getImportKind(
+      symbolModulePath: modulePath,
+      symbolName: nil,
+      inModule: currentModulePath,
+      inSourceFile: currentSourceFile
+    )
+    return importKind == .moduleImport
   }
   
   /// Helper to infer generic instantiation member path
@@ -3452,7 +3528,7 @@ extension TypeChecker {
           type: expectedType,
           kind: .function,
           methodKind: methodKind,
-          access: .default
+          access: .protected
         )
 
         let base: TypedExpressionNode
@@ -4701,8 +4777,8 @@ extension TypeChecker {
             throw SemanticError.undefinedMember(memberName, typeToLookup.description)
           }
           
-          // Check field visibility (resolve default access for struct fields)
-          let fieldAccess = param.access == .default ? AccessChecker.defaultAccessForStructField() : param.access
+          // Check field visibility
+          let fieldAccess = param.access
           if !isFieldAccessibleForMemberAccess(fieldAccess: fieldAccess, defId: template.defId) {
             let accessLabel = fieldAccess == .private ? "private" : "protected"
             throw SemanticError(.generic(

@@ -226,7 +226,7 @@ extension TypeChecker {
       if let symbols = symbolsByModule[moduleKey] {
         for (name, symbol, type) in symbols {
           // Only include public symbols (for now, include all non-private)
-          let access = defIdMap.getAccess(symbol.defId) ?? .default
+          let access = defIdMap.getAccess(symbol.defId) ?? .protected
           if access != .private {
             publicSymbols[name] = symbol
             if let t = type {
@@ -660,7 +660,7 @@ extension TypeChecker {
           name: name,
           kind: .genericTemplate(.structure),
           sourceFile: currentSourceFile,
-          access: .default,
+          access: .protected,
           span: currentSpan
         )
         let template = GenericStructTemplate(
@@ -689,7 +689,7 @@ extension TypeChecker {
           let defId = getOrAllocateTypeDefId(
             name: name,
             kind: .structure,
-            access: .default,
+            access: .protected,
             modulePath: currentModulePath,
             sourceFile: currentSourceFile
           )
@@ -946,7 +946,7 @@ extension TypeChecker {
             type: methodType,
             kind: .function,
             methodKind: methodKind,
-            access: .default
+            access: .protected
           )
           
           // Check for duplicate method name on this type
@@ -1032,7 +1032,7 @@ extension TypeChecker {
             type: methodType,
             kind: .function,
             methodKind: methodKind,
-            access: .default
+            access: .protected
           )
           
           // Check for duplicate method name on this type
@@ -1069,7 +1069,7 @@ extension TypeChecker {
         // Update typed def info and overwrite the placeholder
         if case .structure(let defId) = placeholder {
           let members = zip(params, parameters).map { (sym, param) in
-            let fieldAccess = param.access == .default ? AccessChecker.defaultAccessForStructField() : param.access
+            let fieldAccess = param.access
             return (name: context.getName(sym.defId) ?? "<unknown>", type: sym.type, mutable: sym.isMutable(), access: fieldAccess)
           }
           context.updateStructInfo(
@@ -1196,13 +1196,24 @@ extension TypeChecker {
         if isPrivate {
           currentScope.definePrivateFunction(name, sourceFile: currentSourceFile, type: functionType, modulePath: currentModulePath)
         } else {
-          currentScope.defineFunctionWithModulePath(name, functionType, modulePath: currentModulePath)
+          currentScope.defineFunctionWithModulePath(name, functionType, modulePath: currentModulePath, access: access)
         }
       }
       // Generic functions are handled in pass 3
 
     case .foreignFunctionDeclaration(let name, let parameters, let returnTypeNode, let access, let span):
       self.currentSpan = span
+      let isPrivate = (access == .private)
+      if isPrivate {
+        if currentScope.lookup(name, sourceFile: currentSourceFile) != nil {
+          throw SemanticError.duplicateDefinition(name, line: span.line)
+        }
+      } else {
+        guard case nil = currentScope.lookup(name) else {
+          throw SemanticError.duplicateDefinition(name, line: span.line)
+        }
+      }
+
       let returnType = try resolveTypeNode(returnTypeNode)
       try assertNotOpaqueType(returnType, span: span)
       let params = try parameters.map { param -> Parameter in
@@ -1212,11 +1223,10 @@ extension TypeChecker {
         return Parameter(type: paramType, kind: passKind)
       }
       let functionType = Type.function(parameters: params, returns: returnType)
-      let isPrivate = (access == .private)
       if isPrivate {
         currentScope.definePrivateFunction(name, sourceFile: currentSourceFile, type: functionType, modulePath: currentModulePath)
       } else {
-        currentScope.defineFunctionWithModulePath(name, functionType, modulePath: currentModulePath)
+        currentScope.defineFunctionWithModulePath(name, functionType, modulePath: currentModulePath, access: access)
       }
       
     case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, let access, let span):
@@ -1230,7 +1240,7 @@ extension TypeChecker {
           return Parameter(type: paramType, kind: passKind)
         }
         let functionType = Type.function(parameters: params, returns: returnType)
-        currentScope.defineFunctionWithModulePath(name, functionType, modulePath: currentModulePath)
+        currentScope.defineFunctionWithModulePath(name, functionType, modulePath: currentModulePath, access: access)
       } else {
         // Register generic intrinsic function template in pass 2 so that
         // submodule code processed in pass 3 can find it (submodule nodes
@@ -1376,7 +1386,7 @@ extension TypeChecker {
       if isPrivate {
         currentScope.definePrivateSymbol(name, sourceFile: currentSourceFile, type: type, mutable: isMut, modulePath: currentModulePath)
       } else {
-        currentScope.defineWithModulePath(name, type, mutable: isMut, modulePath: currentModulePath)
+        currentScope.defineWithModulePath(name, type, mutable: isMut, modulePath: currentModulePath, access: access)
       }
       
       let symbol = makeGlobalSymbol(name: name, type: type, kind: .variable(isMut ? .MutableValue : .Value), access: access)
@@ -1445,7 +1455,7 @@ extension TypeChecker {
           modulePath: currentModulePath
         )
       } else {
-        currentScope.defineWithModulePath(name, type, mutable: mutable, modulePath: currentModulePath)
+        currentScope.defineWithModulePath(name, type, mutable: mutable, modulePath: currentModulePath, access: access)
       }
 
       let symbol = makeGlobalSymbol(
@@ -1554,7 +1564,7 @@ extension TypeChecker {
         if isPrivate {
           currentScope.definePrivateFunction(name, sourceFile: currentSourceFile, type: functionType, modulePath: currentModulePath)
         } else {
-          currentScope.defineFunctionWithModulePath(name, functionType, modulePath: currentModulePath)
+          currentScope.defineFunctionWithModulePath(name, functionType, modulePath: currentModulePath, access: access)
         }
       }
 
@@ -1671,7 +1681,7 @@ extension TypeChecker {
         let typedBody = TypedExpressionNode.integerLiteral(value: "0", type: .int)
         return (funcType, typedBody, params)
       }
-      currentScope.defineFunctionWithModulePath(name, functionType, modulePath: currentModulePath)
+      currentScope.defineFunctionWithModulePath(name, functionType, modulePath: currentModulePath, access: access)
       return nil
 
     case .givenDeclaration(let typeParams, let typeNode, let methods, let span):
@@ -1881,7 +1891,7 @@ extension TypeChecker {
           type: methodType,
           kind: .function,
           methodKind: methodKind,
-          access: .default
+          access: .protected
         )
 
         extensionMethods[typeName]![method.name] = methodSymbol
@@ -2035,7 +2045,7 @@ extension TypeChecker {
           type: methodType,
           kind: .function,
           methodKind: methodKind,
-          access: .default
+          access: .protected
         )
 
         if shouldEmitGiven {

@@ -1,0 +1,94 @@
+// EXPECT: run_command_ok
+// EXPECT: run_command_output_ok
+// EXPECT: args_ok
+// EXPECT: current_pid_ok
+// EXPECT: exit_status_ok
+
+using std.os.*
+using std.command.*
+
+let main() Void = {
+    // ========================================================================
+    // run_command — returns ExitStatus
+    // ========================================================================
+    let mut cmd_args = [String]List.new()
+    cmd_args.push("hello_koral")
+    when run_command("echo", cmd_args) is {
+        .Ok(status) then {
+            assert(status.is_success(), "run_command success")
+            when status.code() is {
+                .Some(c) then assert(c == 0, "run_command code 0"),
+                .None then assert(false, "run_command should have code"),
+            }
+        },
+        .Error(_) then {},
+    }
+    print_line("run_command_ok")
+
+    // ========================================================================
+    // run_command_output — captures stdout
+    // ========================================================================
+    let mut cmd_args2 = [String]List.new()
+    cmd_args2.push("hello_from_command")
+    when run_command_output("echo", cmd_args2) is {
+        .Ok(result) then {
+            assert(result.is_success(), "run_command_output success")
+            assert(result.stdout.contains("hello_from_command"), "run_command_output stdout")
+        },
+        .Error(_) then {},
+    }
+    print_line("run_command_output_ok")
+
+    // ========================================================================
+    // args() — should return at least the executable path
+    // ========================================================================
+    let arg_list = args()
+    assert(arg_list.count() >= 1, "args count")
+    print_line("args_ok")
+
+    // ========================================================================
+    // current_pid() — should return a positive value
+    // ========================================================================
+    let pid = current_pid()
+    assert(pid > 0, "current_pid positive")
+    print_line("current_pid_ok")
+
+    // ========================================================================
+    // ExitStatus — code/signal/is_success via run_command
+    // (from_code/from_signal are module-internal, so we test through commands)
+    // ========================================================================
+
+    // Successful command: "true" exits with code 0
+    let mut true_args = [String]List.new()
+    when run_command("true", true_args) is {
+        .Ok(status) then {
+            assert(status.is_success(), "true is_success")
+            when status.code() is {
+                .Some(c) then assert(c == 0, "true code 0"),
+                .None then {},
+            }
+            when status.signal() is {
+                .Some(_) then assert(false, "true should not have signal"),
+                .None then {},
+            }
+            let es_str = status.to_string()
+            assert(es_str.contains("ExitStatus"), "ExitStatus to_string")
+        },
+        .Error(_) then {},
+    }
+
+    // Failing command: "false" exits with non-zero code
+    let mut false_args = [String]List.new()
+    when run_command("false", false_args) is {
+        .Ok(status) then {
+            assert(not status.is_success(), "false not success")
+            when status.code() is {
+                .Some(c) then assert(c <> 0, "false code nonzero"),
+                .None then {},
+            }
+        },
+        .Error(_) then {},
+    }
+
+    print_line("exit_status_ok")
+}

@@ -476,7 +476,7 @@ extension Monomorphizer {
                         methodKind: method.identifier.methodKind,
                         modulePath: [],  // 空的 modulePath，因为 mangledName 已经包含了模块路径
                         sourceFile: context.getSourceFile(method.identifier.defId) ?? "",
-                        access: context.getAccess(method.identifier.defId) ?? .default
+                        access: context.getAccess(method.identifier.defId) ?? .protected
                     ),
                     parameters: method.parameters.map { param in
                         copySymbolPreservingDefId(

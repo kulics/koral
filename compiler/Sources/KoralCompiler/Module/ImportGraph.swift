@@ -78,10 +78,20 @@ public struct ImportGraph {
         
         // 模块/批量导入
         for edge in edges {
-            if edge.source == inModule &&
-                symbolModulePath.starts(with: edge.target) &&
-                (edge.sourceFile == nil || edge.sourceFile == inSourceFile) {
-                return edge.kind
+            guard edge.source == inModule,
+                  (edge.sourceFile == nil || edge.sourceFile == inSourceFile) else {
+                continue
+            }
+
+            switch edge.kind {
+            case .batchImport, .moduleImport:
+                // `using a.*` 和 `using a` 只匹配模块 a 本身，
+                // 不应通过前缀匹配自动扩散到 a 的子模块。
+                if symbolModulePath == edge.target {
+                    return edge.kind
+                }
+            default:
+                break
             }
         }
         

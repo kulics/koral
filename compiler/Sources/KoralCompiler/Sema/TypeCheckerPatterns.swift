@@ -18,7 +18,7 @@ extension TypeChecker {
       // Private: only accessible from the same file
       let defSourceFile = context.getSourceFile(defId) ?? ""
       return defSourceFile == currentSourceFile
-    case .protected, .default:
+    case .protected:
       // Protected: accessible from the same module or submodule
       let defModulePath = context.getModulePath(defId) ?? []
       // Same module
@@ -308,7 +308,7 @@ extension TypeChecker {
             }
             return try resolveTypeNode(param.type)
           }
-          let fieldAccess = param.access == .default ? AccessChecker.defaultAccessForStructField() : param.access
+          let fieldAccess = param.access
           return (name: param.name, type: resolvedType, mutable: param.mutable, access: fieldAccess)
         }
         structDefId = template.defId

@@ -6,7 +6,6 @@ public enum AccessModifier: String, Sendable {
   case `public`
   case `private`
   case `protected`
-  case `default`
 }
 
 // MARK: - Module System Types
@@ -48,7 +47,7 @@ public struct UsingDeclaration {
     pathSegments: [String],
     alias: String? = nil,
     isBatchImport: Bool = false,
-    access: AccessModifier = .default,
+    access: AccessModifier = .private,
     span: SourceSpan
   ) {
     self.pathKind = pathKind

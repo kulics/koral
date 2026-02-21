@@ -82,7 +82,7 @@ public final class CompilerContext: @unchecked Sendable {
         name: String,
         kind: DefKind,
         sourceFile: String,
-        access: AccessModifier = .default,
+        access: AccessModifier = .protected,
         span: SourceSpan = .unknown
     ) -> DefId {
         defIdMap.allocate(
@@ -102,7 +102,7 @@ public final class CompilerContext: @unchecked Sendable {
         type: Type,
         kind: SymbolKind,
         methodKind: CompilerMethodKind = .normal,
-        access: AccessModifier = .default,
+        access: AccessModifier = .protected,
         span: SourceSpan = .unknown,
         isMutable: Bool = false
     ) -> Symbol {

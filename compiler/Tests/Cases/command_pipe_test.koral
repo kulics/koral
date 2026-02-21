@@ -1,0 +1,83 @@
+// EXPECT: stdin_stdout_pipe_ok
+// EXPECT: pipe_eof_ok
+
+using std.os.*
+using std.command.*
+using std.io.*
+
+let main() Void = {
+    // ========================================================================
+    // spawn + stdin pipe write + wait_output to capture stdout
+    // ========================================================================
+    // Use "cat" which reads stdin and writes to stdout
+    let spawn_result = Command.new("cat")
+        .set_stdin(IoRedirect.Piped())
+        .set_stdout(IoRedirect.Piped())
+        .spawn()
+    when spawn_result is {
+        .Ok(mut proc) then {
+            // Write to stdin pipe
+            when proc.take_stdin_pipe() is {
+                .Some(stdin_pipe) then {
+                    let buf = Buffer.from_string("hello_pipe")
+                    let _ = stdin_pipe.write(buf)
+                    // stdin_pipe drops here, closing the pipe and sending EOF to cat
+                },
+                .None then assert(false, "should have stdin pipe"),
+            }
+
+            // Wait and capture output
+            when proc.wait_output() is {
+                .Ok(output) then {
+                    assert(output.is_success(), "cat pipe success")
+                    assert(output.stdout.contains("hello_pipe"), "cat pipe stdout")
+                },
+                .Error(e) then assert(false, "cat pipe error"),
+            }
+        },
+        .Error(_) then {},
+    }
+    print_line("stdin_stdout_pipe_ok")
+
+    // ========================================================================
+    // Pipe EOF behavior — reading from closed pipe returns 0 bytes
+    // ========================================================================
+    // Use "echo" which writes and exits immediately
+    let echo_result = Command.new("echo")
+        .with_arg("eof_test")
+        .set_stdout(IoRedirect.Piped())
+        .spawn()
+    when echo_result is {
+        .Ok(mut proc) then {
+            when proc.take_stdout_pipe() is {
+                .Some(stdout_pipe) then {
+                    // Read all data
+                    let buf = Buffer.with_capacity(1024)
+                    let mut total UInt = 0
+                    let mut got_eof = false
+                    while not got_eof then {
+                        buf.clear()
+                        when stdout_pipe.read(buf) is {
+                            .Ok(n) then {
+                                if n == 0 then {
+                                    got_eof = true
+                                } else {
+                                    total = total + n
+                                }
+                            },
+                            .Error(_) then {
+                                got_eof = true
+                            },
+                        }
+                    }
+                    assert(got_eof, "pipe reached EOF")
+                    assert(total > 0, "pipe read some data")
+                },
+                .None then assert(false, "should have stdout pipe"),
+            }
+            let _ = proc.wait()
+        },
+        .Error(_) then {},
+    }
+    print_line("pipe_eof_ok")
+}

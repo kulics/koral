@@ -583,7 +583,7 @@ public class NameCollector: CompilerPass {
             name: name,
             kind: defKind,
             sourceFile: currentSourceFile,
-            access: .default,
+            access: .protected,
             span: span
         )
 
@@ -594,14 +594,14 @@ public class NameCollector: CompilerPass {
                 name: name,
                 kind: .structure,
                 typeParameters: typeParameters,
-                access: .default
+                access: .protected
             )
         } else {
             collectedTypes[name] = CollectedTypeInfo(
                 defId: defId,
                 name: name,
                 kind: .structure,
-                access: .default,
+                access: .protected,
                 isPrivate: false,
                 sourceFile: currentSourceFile,
                 modulePath: currentModulePath
@@ -728,7 +728,7 @@ public class NameCollector: CompilerPass {
             name: name,
             kind: defKind,
             sourceFile: currentSourceFile,
-            access: .default,
+            access: .protected,
             span: span
         )
 
@@ -737,7 +737,7 @@ public class NameCollector: CompilerPass {
             defId: defId,
             name: name,
             isGeneric: !typeParameters.isEmpty,
-            access: .default,
+            access: .protected,
             isPrivate: false,
             sourceFile: currentSourceFile,
             modulePath: currentModulePath
@@ -774,7 +774,7 @@ public class NameCollector: CompilerPass {
                 name: parts.last ?? "",
                 kind: .module,
                 sourceFile: "",
-                access: .default,
+                access: .protected,
                 span: .unknown
             )
             

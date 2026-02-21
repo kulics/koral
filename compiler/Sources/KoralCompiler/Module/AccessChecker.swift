@@ -71,7 +71,7 @@ public class AccessChecker {
             // public 符号总是可访问
             return
             
-        case .protected, .default:
+        case .protected:
             // protected 符号只能从定义模块及其子模块访问
             if !isSubmoduleOf(from, definedIn) {
                 throw AccessError.protectedAccess(
@@ -157,7 +157,6 @@ public class AccessChecker {
     private func isAtLeast(_ actual: AccessModifier, _ required: AccessModifier) -> Bool {
         let order: [AccessModifier: Int] = [
             .private: 0,
-            .default: 1,
             .protected: 1,
             .public: 2
         ]
@@ -233,10 +232,9 @@ public class AccessChecker {
     public static func defaultAccess(for node: GlobalNode) -> AccessModifier {
         switch node {
         case .usingDeclaration(let decl):
-            // using 声明使用其自身的访问修饰符，默认为 private
-            return decl.access == .default ? .private : decl.access
+            return decl.access
         case .foreignUsingDeclaration:
-            return .default
+            return .private
             
            case .globalFunctionDeclaration, .globalVariableDeclaration,
                .globalStructDeclaration, .globalUnionDeclaration,
@@ -251,7 +249,7 @@ public class AccessChecker {
             
         case .givenDeclaration, .intrinsicGivenDeclaration:
             // given 声明本身没有访问修饰符，其方法有各自的访问修饰符
-            return .default
+            return .private
         }
     }
     

@@ -437,7 +437,7 @@ public class DefIdMap {
         name: String,
         kind: DefKind,
         sourceFile: String,
-        access: AccessModifier = .default,
+        access: AccessModifier = .protected,
         span: SourceSpan = .unknown
     ) -> DefId {
         let isLocalSymbol = modulePath.isEmpty && sourceFile.isEmpty && kind == .variable

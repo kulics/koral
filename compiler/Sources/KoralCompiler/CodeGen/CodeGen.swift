@@ -156,7 +156,7 @@ public class CodeGen {
     case .variable:
       let modulePath = context.getModulePath(symbol.defId) ?? []
       let sourceFile = context.getSourceFile(symbol.defId) ?? ""
-      let access = context.getAccess(symbol.defId) ?? .default
+      let access = context.getAccess(symbol.defId) ?? .protected
       isGlobalSymbol = !modulePath.isEmpty || !sourceFile.isEmpty || access == .private
     }
 
@@ -185,56 +185,56 @@ public class CodeGen {
     for node in ast.globalNodes {
       switch node {
       case .foreignType(let identifier):
-        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .default)
+        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
         foreignDefIds.insert(defIdKey(identifier.defId))
         if case .opaque(let defId) = identifier.type {
-          register(defId: defId, access: context.getAccess(defId) ?? .default)
+          register(defId: defId, access: context.getAccess(defId) ?? .protected)
           foreignDefIds.insert(defIdKey(defId))
         }
       case .foreignStruct(let identifier, _):
-        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .default)
+        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
         foreignDefIds.insert(defIdKey(identifier.defId))
         if case .structure(let defId) = identifier.type {
-          register(defId: defId, access: context.getAccess(defId) ?? .default)
+          register(defId: defId, access: context.getAccess(defId) ?? .protected)
           foreignDefIds.insert(defIdKey(defId))
         }
       case .foreignFunction(let identifier, _):
-        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .default)
+        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
         foreignDefIds.insert(defIdKey(identifier.defId))
       case .foreignGlobalVariable(let identifier, _):
-        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .default)
+        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
         foreignDefIds.insert(defIdKey(identifier.defId))
       case .foreignUsing:
         break
       case .globalStructDeclaration(let identifier, _):
-        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .default)
+        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
         if case .structure(let defId) = identifier.type {
-          let access = context.getAccess(defId) ?? .default
+          let access = context.getAccess(defId) ?? .protected
           register(defId: defId, access: access)
         }
       case .globalUnionDeclaration(let identifier, _):
-        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .default)
+        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
         if case .union(let defId) = identifier.type {
-          let access = context.getAccess(defId) ?? .default
+          let access = context.getAccess(defId) ?? .protected
           register(defId: defId, access: access)
         }
       case .globalFunction(let identifier, _, _):
-        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .default)
+        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
       case .globalVariable(let identifier, _, _):
-        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .default)
+        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
       case .givenDeclaration(let type, let methods):
         switch type {
         case .structure(let defId):
-          let access = context.getAccess(defId) ?? .default
+          let access = context.getAccess(defId) ?? .protected
           register(defId: defId, access: access)
         case .union(let defId):
-          let access = context.getAccess(defId) ?? .default
+          let access = context.getAccess(defId) ?? .protected
           register(defId: defId, access: access)
         default:
           break
         }
         for method in methods {
-          register(defId: method.identifier.defId, access: context.getAccess(method.identifier.defId) ?? .default)
+          register(defId: method.identifier.defId, access: context.getAccess(method.identifier.defId) ?? .protected)
         }
       case .genericTypeTemplate, .genericFunctionTemplate:
         break
@@ -271,7 +271,7 @@ public class CodeGen {
     case .variable:
       let modulePath = context.getModulePath(symbol.defId) ?? []
       let sourceFile = context.getSourceFile(symbol.defId) ?? ""
-      let access = context.getAccess(symbol.defId) ?? .default
+      let access = context.getAccess(symbol.defId) ?? .protected
       isGlobalSymbol = !modulePath.isEmpty || !sourceFile.isEmpty || access == .private
     }
 
@@ -771,7 +771,7 @@ public class CodeGen {
             let parts = baseName.split(separator: ".").map(String.init)
             let typeName = parts.last ?? baseName
             let modulePath = parts.dropLast().map { $0 }
-            let access = context.getAccess(identifier.defId) ?? .default
+            let access = context.getAccess(identifier.defId) ?? .protected
             let sourceFile = context.getSourceFile(identifier.defId)
             let typeDefId = context.lookupDefId(
               modulePath: modulePath,

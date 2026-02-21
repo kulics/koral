@@ -218,7 +218,7 @@ extension TypeChecker {
       type: functionType,
       kind: .function,
       methodKind: kind,
-      access: .default
+      access: .protected
     )
   }
   
@@ -260,7 +260,7 @@ extension TypeChecker {
       type: functionType,
       kind: .function,
       methodKind: kind,
-      access: .default
+      access: .protected
     )
   }
 
@@ -436,7 +436,7 @@ extension TypeChecker {
       type: functionType,
       kind: .function,
       methodKind: kind,
-      access: .default
+      access: .protected
     )
     
     return GenericMethodResolutionResult(
@@ -532,7 +532,7 @@ extension TypeChecker {
           type: functionType,
           kind: .function,
           methodKind: kind,
-          access: .default
+          access: .protected
         )
         recordTraitPlaceholderInstantiation(
           baseType: baseType,

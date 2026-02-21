@@ -133,7 +133,7 @@ public class Monomorphizer {
     ///   - methodKind: Compiler method kind (default: .normal)
     ///   - modulePath: Module path (default: empty for generated symbols)
     ///   - sourceFile: Source file (default: empty)
-    ///   - access: Access modifier (default: .default)
+    ///   - access: Access modifier (default: .protected)
     /// - Returns: A new Symbol with allocated DefId
     internal func makeSymbol(
         name: String,
@@ -142,7 +142,7 @@ public class Monomorphizer {
         methodKind: CompilerMethodKind = .normal,
         modulePath: [String] = [],
         sourceFile: String = "",
-        access: AccessModifier = .default
+        access: AccessModifier = .protected
     ) -> Symbol {
         let isMutable: Bool
         switch kind {
@@ -176,7 +176,7 @@ public class Monomorphizer {
         let name = newName ?? context.getName(symbol.defId) ?? "<unknown>"
         let modulePath = newModulePath ?? context.getModulePath(symbol.defId) ?? []
         let sourceFile = newSourceFile ?? context.getSourceFile(symbol.defId) ?? ""
-        let access = context.getAccess(symbol.defId) ?? .default
+        let access = context.getAccess(symbol.defId) ?? .protected
         return makeSymbol(
             name: name,
             type: newType ?? symbol.type,
@@ -579,7 +579,7 @@ public class Monomorphizer {
         kind: TypeDefKind,
         modulePath: [String] = [],
         sourceFile: String = "",
-        access: AccessModifier = .default
+        access: AccessModifier = .protected
     ) -> DefId {
         if let existing = context.lookupDefId(modulePath: modulePath, name: name, sourceFile: sourceFile.isEmpty ? nil : sourceFile) {
             return existing

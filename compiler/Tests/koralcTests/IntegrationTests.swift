@@ -65,6 +65,7 @@ class IntegrationTests: XCTestCase {
     func test_ffi_foreign_type_body_error() throws { try runCase(named: "ffi_foreign_type_body_error.koral") }
     func test_ffi_incompatible_type() throws { try runCase(named: "ffi_incompatible_type.koral") }
     func test_ffi_foreign_global_decl() throws { try runCase(named: "ffi_foreign_global_decl.koral") }
+    func test_foreign_function_duplicate_default_protected() throws { try runCase(named: "foreign_function_duplicate_default_protected.koral") }
     func test_ffi_foreign_struct_access() throws { try runCase(named: "ffi_foreign_struct_access.koral") }
     func test_ffi_opaque_ptr_required() throws { try runCase(named: "ffi_opaque_ptr_required.koral") }
     func test_ffi_pointer_member_error() throws { try runCase(named: "ffi_pointer_member_error.koral") }
@@ -119,6 +120,9 @@ class IntegrationTests: XCTestCase {
     func test_newline_semicolon_continuation_ok() throws { try runCase(named: "newline_semicolon_continuation_ok.koral") }
     func test_non_exhaustive_bool() throws { try runCase(named: "non_exhaustive_bool.koral") }
     func test_non_exhaustive_union() throws { try runCase(named: "non_exhaustive_union.koral") }
+    func test_command_basic_test() throws { try runCase(named: "command_basic_test.koral") }
+    func test_command_builder_test() throws { try runCase(named: "command_builder_test.koral") }
+    func test_command_pipe_test() throws { try runCase(named: "command_pipe_test.koral") }
     func test_os_basic() throws { try runCase(named: "os_basic.koral") }
     func test_os_file_info_test() throws { try runCase(named: "os_file_info_test.koral") }
     func test_os_file_test() throws { try runCase(named: "os_file_test.koral") }
@@ -132,6 +136,7 @@ class IntegrationTests: XCTestCase {
     func test_duplicate_local_scope() throws { try runCase(named: "duplicate_local_scope.koral") }
     func test_duplicate_wildcard_let() throws { try runCase(named: "duplicate_wildcard_let.koral") }
     func test_pointer_test() throws { try runCase(named: "pointer_test.koral") }
+    func test_protected_module_symbol_access_error() throws { try runCase(named: "protected_module_symbol_access_error.koral") }
     func test_range_basic() throws { try runCase(named: "range_basic.koral") }
     func test_range_iterator() throws { try runCase(named: "range_iterator.koral") }
     func test_range_unbounded() throws { try runCase(named: "range_unbounded.koral") }
@@ -206,6 +211,8 @@ class IntegrationTests: XCTestCase {
     func test_parent_trait_requires_using() throws { try runCase(named: "module_error_tests/parent_trait_requires_using_test/parent_trait_requires_using_test.koral") }
     func test_using_self_requires_item() throws { try runCase(named: "using_self_requires_item.koral") }
     func test_using_super_requires_item() throws { try runCase(named: "using_super_requires_item.koral") }
+    func test_module_symbol_requires_explicit_import() throws { try runCase(named: "module_import_rules_test/module_import_rules_test.koral") }
+    func test_using_batch_does_not_import_submodules() throws { try runCase(named: "using_batch_no_submodule_import_test/using_batch_no_submodule_import_test.koral") }
     func test_numeric_literal_bases() throws { try runCase(named: "numeric_literal_bases.koral") }
     func test_numeric_literal_bases_error_binary_digit() throws { try runCase(named: "numeric_literal_bases_error_binary_digit.koral") }
     func test_numeric_literal_bases_error_octal_digit() throws { try runCase(named: "numeric_literal_bases_error_octal_digit.koral") }

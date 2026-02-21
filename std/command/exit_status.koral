@@ -1,0 +1,59 @@
+// ============================================================================
+// std.command - Exit Status
+// ============================================================================
+// Provides: ExitStatus type (exit code / signal information)
+// Access via: using std.command
+// ============================================================================
+
+/// Child process exit status.
+/// raw_status encoding: normal exit = exit code (0-255), signal termination = -(signal_number)
+public type ExitStatus(private raw_status Int)
+
+given ExitStatus {
+    /// Create from raw exit code (normal exit).
+    from_code(code Int) ExitStatus = ExitStatus(code)
+
+    /// Create from signal number (signal termination).
+    from_signal(sig Int) ExitStatus = ExitStatus(0 - sig)
+
+    /// Get exit code (Some for normal exit, None for signal termination).
+    public code(self) [Int]Option = {
+        if self.raw_status >= 0 then {
+            [Int]Option.Some(self.raw_status)
+        } else {
+            [Int]Option.None()
+        }
+    }
+
+    /// Whether the process exited successfully (exit code is 0).
+    public is_success(self) Bool = self.raw_status == 0
+
+    /// Get termination signal number (Some on Unix when killed by signal, None otherwise).
+    public signal(self) [Int]Option = {
+        if self.raw_status < 0 then {
+            [Int]Option.Some(0 - self.raw_status)
+        } else {
+            [Int]Option.None()
+        }
+    }
+
+    public to_string(self) String = {
+        let mut s = String.new()
+        s.push_string("ExitStatus(")
+        when self.code() is {
+            .Some(c) then {
+                s.push_string("code=")
+                s.push_int(c)
+            },
+            .None then {
+                s.push_string("signal=")
+                when self.signal() is {
+                    .Some(sig) then s.push_int(sig),
+                    .None then s.push_string("unknown"),
+                }
+            },
+        }
+        s.push_string(")")
+        s
+    }
+}
