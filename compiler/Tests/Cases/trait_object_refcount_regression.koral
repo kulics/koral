@@ -1,0 +1,43 @@
+// Regression: trait object RC balance for lvalue/rvalue paths
+// EXPECT: before call count: 2
+// EXPECT: after call count: 2
+// EXPECT: rvalue convert released
+
+trait Ping {
+    ping(self) Int
+}
+
+type Box(value Int)
+
+given Box {
+    public ping(self) Int = self.value
+}
+
+let main() Int = {
+    // Lvalue conversion should retain once.
+    let concrete = ref Box(7)
+    let obj Ping ref = concrete
+
+    print("before call count: ")
+    print_line(ref_count(concrete))
+
+    // Dynamic dispatch with lvalue receiver should copy self (retain+release), net zero.
+    let _ = obj.ping()
+
+    print("after call count: ")
+    print_line(ref_count(concrete))
+
+    // Rvalue conversion should transfer ownership (no extra retain), so object is released at scope end.
+    let weakObj Ping weakref = {
+        let tmp Ping ref = ref Box(1)
+        downgrade_ref(tmp)
+    }
+
+    let upgraded = upgrade_ref(weakObj)
+    when upgraded is {
+        .Some(_) then print_line("rvalue convert leaked"),
+        .None then print_line("rvalue convert released"),
+    }
+
+    0
+}

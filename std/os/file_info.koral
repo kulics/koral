@@ -1,0 +1,168 @@
+// ============================================================================
+// std.os - FileType, Permission, FileInfo Types
+// ============================================================================
+// Provides: FileType enum, Permission type, FileInfo metadata type
+// Access via: using std.os
+// ============================================================================
+
+// ============================================================================
+// FileType Enum
+// ============================================================================
+
+/// File type enumeration for distinguishing file system entity types
+public type FileType {
+    RegularFile(),
+    Directory(),
+    Symlink(),
+    Other(),
+}
+
+given FileType {
+    /// Returns true only when the file type is RegularFile
+    public is_file(self) Bool = when self is {
+        .RegularFile then true,
+        _ then false,
+    }
+
+    /// Returns true only when the file type is Directory
+    public is_dir(self) Bool = when self is {
+        .Directory then true,
+        _ then false,
+    }
+
+    /// Returns true only when the file type is Symlink
+    public is_symlink(self) Bool = when self is {
+        .Symlink then true,
+        _ then false,
+    }
+
+    /// Returns the string representation of the file type
+    public to_string(self) String = when self is {
+        .RegularFile then "file",
+        .Directory then "directory",
+        .Symlink then "symlink",
+        .Other then "other",
+    }
+}
+
+
+// ============================================================================
+// Permission Type
+// ============================================================================
+
+/// File permission type wrapping Unix-style 9-bit permission bits
+public type Permission(private bits UInt32)
+
+given Permission {
+    /// Create from numeric mode value (e.g. 0o755 = 493), keeping only low 9 bits
+    public from_mode(mode UInt32) Permission = Permission(mode & 511)
+
+    /// Get the raw permission bits
+    public mode(self) UInt32 = self.bits
+
+    /// Owner read permission
+    public owner_read(self) Bool = (self.bits & 256) <> 0
+
+    /// Owner write permission
+    public owner_write(self) Bool = (self.bits & 128) <> 0
+
+    /// Owner execute permission
+    public owner_exec(self) Bool = (self.bits & 64) <> 0
+
+    /// Group read permission
+    public group_read(self) Bool = (self.bits & 32) <> 0
+
+    /// Group write permission
+    public group_write(self) Bool = (self.bits & 16) <> 0
+
+    /// Group execute permission
+    public group_exec(self) Bool = (self.bits & 8) <> 0
+
+    /// Other read permission
+    public other_read(self) Bool = (self.bits & 4) <> 0
+
+    /// Other write permission
+    public other_write(self) Bool = (self.bits & 2) <> 0
+
+    /// Other execute permission
+    public other_exec(self) Bool = (self.bits & 1) <> 0
+
+    /// Factory method: read-only for all (0o444 = 292)
+    public readonly() Permission = Permission(292)
+
+    /// Factory method: owner read-write, group/other read (0o644 = 420)
+    public read_write() Permission = Permission(420)
+
+    /// Factory method: owner all, group/other read+exec (0o755 = 493)
+    public executable() Permission = Permission(493)
+
+    /// Equality comparison
+    public equals(self, other Permission) Bool = self.bits == other.bits
+
+    /// Returns "rwxrwxrwx" format permission string
+    public to_string(self) String = {
+        let mut s = String.new()
+        s.push(if self.owner_read() then 'r' else '-')
+        s.push(if self.owner_write() then 'w' else '-')
+        s.push(if self.owner_exec() then 'x' else '-')
+        s.push(if self.group_read() then 'r' else '-')
+        s.push(if self.group_write() then 'w' else '-')
+        s.push(if self.group_exec() then 'x' else '-')
+        s.push(if self.other_read() then 'r' else '-')
+        s.push(if self.other_write() then 'w' else '-')
+        s.push(if self.other_exec() then 'x' else '-')
+        s
+    }
+}
+
+
+// ============================================================================
+// FileInfo Type
+// ============================================================================
+
+/// File metadata information (all fields private, accessed via methods)
+/// Timestamps use Duration (secs + nanos, aligned with C timespec), preserving nanosecond precision
+public type FileInfo(
+    private _size UInt64,
+    private _file_type FileType,
+    private _permissions Permission,
+    private _modified_ts Duration,
+    private _accessed_ts Duration,
+    private _created_ts Duration,
+)
+
+given FileInfo {
+    /// File size in bytes
+    public size(self) UInt64 = self._size
+
+    /// File type
+    public file_type(self) FileType = self._file_type
+
+    /// File permissions
+    public permissions(self) Permission = self._permissions
+
+    /// Modification time
+    public modified_time(self) time.DateTime = time.DateTime.from_unix_timestamp(self._modified_ts)
+
+    /// Access time
+    public accessed_time(self) time.DateTime = time.DateTime.from_unix_timestamp(self._accessed_ts)
+
+    /// Creation time (platforms that don't support this return epoch)
+    public created_time(self) time.DateTime = time.DateTime.from_unix_timestamp(self._created_ts)
+
+    public is_file(self) Bool = self._file_type.is_file()
+    public is_dir(self) Bool = self._file_type.is_dir()
+    public is_symlink(self) Bool = self._file_type.is_symlink()
+
+    public to_string(self) String = {
+        let mut s = String.new()
+        s.push_string("FileInfo(size=")
+        s.push_string(self._size.to_string())
+        s.push_string(", type=")
+        s.push_string(self._file_type.to_string())
+        s.push_string(", perm=")
+        s.push_string(self._permissions.to_string())
+        s.push_string(")")
+        s
+    }
+}

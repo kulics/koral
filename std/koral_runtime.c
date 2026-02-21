@@ -93,6 +93,8 @@ struct KoralTimespec {
 #include <windows.h>
 #include <direct.h>
 #include <io.h>
+#include <fcntl.h>
+#include <share.h>
 #include <sys/stat.h>
 
 int koral_nanosleep(struct KoralTimespec *req, struct KoralTimespec *rem) {
@@ -163,6 +165,14 @@ char koral_path_separator(void) {
 #endif
 }
 
+char koral_path_list_separator(void) {
+#ifdef _WIN32
+    return ';';
+#else
+    return ':';
+#endif
+}
+
 int koral_path_exists(const char* path) {
     char normalized[4096];
     normalize_path_internal(path, normalized, sizeof(normalized));
@@ -216,6 +226,7 @@ struct CDirHandle {
 
 struct CDirEntry {
     char name[MAX_PATH];
+    DWORD attributes;
 };
 #else
 struct CDirHandle {
@@ -266,10 +277,12 @@ CDirEntry* koral_readdir(CDirHandle* dir) {
     if (dir->first) {
         dir->first = false;
         strcpy(entry.name, dir->data.cFileName);
+        entry.attributes = dir->data.dwFileAttributes;
         return &entry;
     }
     if (FindNextFileA(dir->handle, &dir->data)) {
         strcpy(entry.name, dir->data.cFileName);
+        entry.attributes = dir->data.dwFileAttributes;
         return &entry;
     }
     return NULL;
@@ -1532,3 +1545,452 @@ void koral_regex_free(void* handle) {
 
 #endif  // _WIN32 || _WIN64
 
+
+// ============================================================================
+// OS module: File metadata, permissions, links, locking, glob
+// ============================================================================
+
+// KoralStatResult must match the foreign type declared in Koral
+typedef struct {
+    int64_t  size;
+    int32_t  file_type;         // 0=regular, 1=directory, 2=symlink, 3=other
+    uint32_t permissions;       // Unix permission bits (low 9 bits)
+    int64_t  modified_secs;
+    int64_t  modified_nanos;
+    int64_t  accessed_secs;
+    int64_t  accessed_nanos;
+    int64_t  created_secs;
+    int64_t  created_nanos;
+} KoralStatResult;
+
+#if defined(_WIN32) || defined(_WIN64)
+
+// --- Windows implementations ---
+
+static void koral_fill_stat_result(struct _stat64* st, KoralStatResult* out) {
+    out->size = (int64_t)st->st_size;
+    if (st->st_mode & _S_IFREG)      out->file_type = 0;
+    else if (st->st_mode & _S_IFDIR)  out->file_type = 1;
+    else                               out->file_type = 3;
+    out->permissions = (uint32_t)(st->st_mode & 0777);
+    out->modified_secs = (int64_t)st->st_mtime;
+    out->modified_nanos = 0;
+    out->accessed_secs = (int64_t)st->st_atime;
+    out->accessed_nanos = 0;
+    out->created_secs = (int64_t)st->st_ctime;
+    out->created_nanos = 0;
+}
+
+int32_t koral_stat(const uint8_t* path, KoralStatResult* out) {
+    struct _stat64 st;
+    if (_stat64((const char*)path, &st) != 0) return -1;
+    koral_fill_stat_result(&st, out);
+    return 0;
+}
+
+int32_t koral_lstat(const uint8_t* path, KoralStatResult* out) {
+    // Windows has no symlink-aware lstat; fall back to stat
+    return koral_stat(path, out);
+}
+
+int32_t koral_fstat(int32_t fd, KoralStatResult* out) {
+    struct _stat64 st;
+    if (_fstat64(fd, &st) != 0) return -1;
+    koral_fill_stat_result(&st, out);
+    return 0;
+}
+
+int32_t koral_chmod(const uint8_t* path, uint32_t mode) {
+    return _chmod((const char*)path, (int)(mode & 0777)) == 0 ? 0 : -1;
+}
+
+int32_t koral_link(const uint8_t* src, const uint8_t* dst) {
+    return CreateHardLinkA((const char*)dst, (const char*)src, NULL) ? 0 : -1;
+}
+
+int32_t koral_symlink(const uint8_t* src, const uint8_t* dst) {
+    DWORD flags = 0;
+    DWORD attrs = GetFileAttributesA((const char*)src);
+    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY))
+        flags = SYMBOLIC_LINK_FLAG_DIRECTORY;
+    return CreateSymbolicLinkA((const char*)dst, (const char*)src, flags) ? 0 : -1;
+}
+
+int32_t koral_readlink(const uint8_t* path, uint8_t* buf, uint64_t buf_size) {
+    (void)path; (void)buf; (void)buf_size;
+    errno = ENOSYS;
+    return -1;
+}
+
+int32_t koral_truncate(const uint8_t* path, int64_t size) {
+    HANDLE h = CreateFileA((const char*)path, GENERIC_WRITE, 0, NULL,
+                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return -1;
+    LARGE_INTEGER li;
+    li.QuadPart = size;
+    if (!SetFilePointerEx(h, li, NULL, FILE_BEGIN) || !SetEndOfFile(h)) {
+        CloseHandle(h);
+        return -1;
+    }
+    CloseHandle(h);
+    return 0;
+}
+
+int32_t koral_fsync(int32_t fd) {
+    HANDLE h = (HANDLE)_get_osfhandle(fd);
+    if (h == INVALID_HANDLE_VALUE) return -1;
+    return FlushFileBuffers(h) ? 0 : -1;
+}
+
+int32_t koral_flock(int32_t fd, int32_t operation) {
+    HANDLE h = (HANDLE)_get_osfhandle(fd);
+    if (h == INVALID_HANDLE_VALUE) return -1;
+    OVERLAPPED ov = {0};
+    if (operation & 8) { // LOCK_UN
+        return UnlockFileEx(h, 0, MAXDWORD, MAXDWORD, &ov) ? 0 : -1;
+    }
+    DWORD flags = 0;
+    if (operation & 2) flags |= LOCKFILE_EXCLUSIVE_LOCK;   // LOCK_EX
+    if (operation & 4) flags |= LOCKFILE_FAIL_IMMEDIATELY;  // LOCK_NB
+    return LockFileEx(h, flags, 0, MAXDWORD, MAXDWORD, &ov) ? 0 : -1;
+}
+
+int32_t koral_errno_is_wouldblock(void) {
+    return (errno == EWOULDBLOCK || errno == EAGAIN) ? 1 : 0;
+}
+
+int32_t koral_glob(const uint8_t* pattern, int32_t (*callback)(const uint8_t* path)) {
+    // Windows: no POSIX glob; use FindFirstFile/FindNextFile for simple patterns
+    WIN32_FIND_DATAA data;
+    HANDLE h = FindFirstFileA((const char*)pattern, &data);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    int32_t count = 0;
+    do {
+        if (strcmp(data.cFileName, ".") == 0 || strcmp(data.cFileName, "..") == 0)
+            continue;
+        if (callback((const uint8_t*)data.cFileName) != 0) break;
+        count++;
+    } while (FindNextFileA(h, &data));
+    FindClose(h);
+    return count;
+}
+
+int32_t koral_is_symlink(const uint8_t* path) {
+    DWORD attrs = GetFileAttributesA((const char*)path);
+    if (attrs == INVALID_FILE_ATTRIBUTES) return 0;
+    return (attrs & FILE_ATTRIBUTE_REPARSE_POINT) ? 1 : 0;
+}
+
+int32_t koral_realpath(const uint8_t* path, uint8_t* buf, uint64_t size) {
+    DWORD len = GetFullPathNameA((const char*)path, (DWORD)size, (char*)buf, NULL);
+    if (len == 0 || len >= (DWORD)size) return -1;
+    return 0;
+}
+
+int32_t koral_mkstemp(uint8_t* tmpl) {
+    // Windows: use _mktemp_s + _open
+    if (_mktemp_s((char*)tmpl, strlen((char*)tmpl) + 1) != 0) return -1;
+    int fd;
+    if (_sopen_s(&fd, (const char*)tmpl, _O_CREAT | _O_EXCL | _O_RDWR, _SH_DENYNO, _S_IREAD | _S_IWRITE) != 0)
+        return -1;
+    return (int32_t)fd;
+}
+
+int32_t koral_dirent_type(void* entry) {
+    CDirEntry* e = (CDirEntry*)entry;
+    if (e->attributes & FILE_ATTRIBUTE_REPARSE_POINT) return 2; // symlink
+    if (e->attributes & FILE_ATTRIBUTE_DIRECTORY) return 1;     // directory
+    return 0; // regular file
+}
+
+int32_t koral_unsetenv(const uint8_t* name) {
+    return _putenv_s((const char*)name, "") == 0 ? 0 : -1;
+}
+
+uint8_t** koral_environ(void) {
+    return (uint8_t**)_environ;
+}
+
+uint64_t koral_environ_count(void) {
+    uint64_t count = 0;
+    if (_environ) {
+        while (_environ[count]) count++;
+    }
+    return count;
+}
+
+int32_t koral_hostname(uint8_t* buf, uint64_t size) {
+    DWORD sz = (DWORD)size;
+    return GetComputerNameA((char*)buf, &sz) ? 0 : -1;
+}
+
+int32_t koral_current_exe(uint8_t* buf, uint64_t size) {
+    DWORD len = GetModuleFileNameA(NULL, (char*)buf, (DWORD)size);
+    if (len == 0 || len >= (DWORD)size) return -1;
+    return 0;
+}
+
+int32_t koral_open(const uint8_t* path, int32_t open_mode, uint32_t perm) {
+    int flags;
+    int mode = _S_IREAD | _S_IWRITE;  // Windows only supports _S_IREAD/_S_IWRITE
+    switch (open_mode) {
+        case 0: flags = _O_RDONLY | _O_BINARY; break;                                              // Read
+        case 1: flags = _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY; break;                        // Write
+        case 2: flags = _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY; break;                         // Create
+        case 3: flags = _O_WRONLY | _O_CREAT | _O_APPEND | _O_BINARY; break;                       // Append
+        case 4: flags = _O_RDWR | _O_BINARY; break;                                                // ReadWrite
+        default: return -1;
+    }
+    int fd;
+    if (_sopen_s(&fd, (const char*)path, flags, _SH_DENYNO, mode) != 0)
+        return -1;
+    return (int32_t)fd;
+}
+
+int64_t koral_read(int32_t fd, uint8_t* buf, uint64_t count) {
+    return (int64_t)_read(fd, buf, (unsigned int)count);
+}
+
+int64_t koral_write(int32_t fd, const uint8_t* buf, uint64_t count) {
+    return (int64_t)_write(fd, buf, (unsigned int)count);
+}
+
+int64_t koral_lseek(int32_t fd, int64_t offset, int32_t whence) {
+    return (int64_t)_lseeki64(fd, offset, whence);
+}
+
+int32_t koral_close(int32_t fd) {
+    return _close(fd);
+}
+
+int32_t koral_chdir(const uint8_t* path) {
+    return _chdir((const char*)path);
+}
+
+uint8_t* koral_mkdtemp(uint8_t* tmpl) {
+    // Windows: use _mktemp_s to generate unique name, then _mkdir
+    if (_mktemp_s((char*)tmpl, strlen((char*)tmpl) + 1) != 0) return NULL;
+    if (_mkdir((const char*)tmpl) != 0) return NULL;
+    return tmpl;
+}
+
+#else
+
+// --- POSIX implementations ---
+
+#include <sys/file.h>
+#include <fcntl.h>
+#include <glob.h>
+
+static void koral_fill_stat_result(struct stat* st, KoralStatResult* out) {
+    out->size = (int64_t)st->st_size;
+    if (S_ISREG(st->st_mode))       out->file_type = 0;
+    else if (S_ISDIR(st->st_mode))   out->file_type = 1;
+    else if (S_ISLNK(st->st_mode))   out->file_type = 2;
+    else                              out->file_type = 3;
+    out->permissions = (uint32_t)(st->st_mode & 0777);
+#if defined(__APPLE__)
+    out->modified_secs = (int64_t)st->st_mtimespec.tv_sec;
+    out->modified_nanos = (int64_t)st->st_mtimespec.tv_nsec;
+    out->accessed_secs = (int64_t)st->st_atimespec.tv_sec;
+    out->accessed_nanos = (int64_t)st->st_atimespec.tv_nsec;
+    out->created_secs = (int64_t)st->st_birthtimespec.tv_sec;
+    out->created_nanos = (int64_t)st->st_birthtimespec.tv_nsec;
+#else
+    out->modified_secs = (int64_t)st->st_mtim.tv_sec;
+    out->modified_nanos = (int64_t)st->st_mtim.tv_nsec;
+    out->accessed_secs = (int64_t)st->st_atim.tv_sec;
+    out->accessed_nanos = (int64_t)st->st_atim.tv_nsec;
+    out->created_secs = 0;  // Linux doesn't reliably expose birth time
+    out->created_nanos = 0;
+#endif
+}
+
+int32_t koral_stat(const uint8_t* path, KoralStatResult* out) {
+    struct stat st;
+    if (stat((const char*)path, &st) != 0) return -1;
+    koral_fill_stat_result(&st, out);
+    return 0;
+}
+
+int32_t koral_lstat(const uint8_t* path, KoralStatResult* out) {
+    struct stat st;
+    if (lstat((const char*)path, &st) != 0) return -1;
+    koral_fill_stat_result(&st, out);
+    return 0;
+}
+
+int32_t koral_fstat(int32_t fd, KoralStatResult* out) {
+    struct stat st;
+    if (fstat(fd, &st) != 0) return -1;
+    koral_fill_stat_result(&st, out);
+    return 0;
+}
+
+int32_t koral_chmod(const uint8_t* path, uint32_t mode) {
+    return chmod((const char*)path, (mode_t)(mode & 0777)) == 0 ? 0 : -1;
+}
+
+int32_t koral_link(const uint8_t* src, const uint8_t* dst) {
+    return link((const char*)src, (const char*)dst) == 0 ? 0 : -1;
+}
+
+int32_t koral_symlink(const uint8_t* src, const uint8_t* dst) {
+    return symlink((const char*)src, (const char*)dst) == 0 ? 0 : -1;
+}
+
+int32_t koral_readlink(const uint8_t* path, uint8_t* buf, uint64_t buf_size) {
+    ssize_t len = readlink((const char*)path, (char*)buf, (size_t)buf_size - 1);
+    if (len < 0) return -1;
+    buf[len] = '\0';
+    return (int32_t)len;
+}
+
+int32_t koral_truncate(const uint8_t* path, int64_t size) {
+    return truncate((const char*)path, (off_t)size) == 0 ? 0 : -1;
+}
+
+int32_t koral_fsync(int32_t fd) {
+    return fsync(fd) == 0 ? 0 : -1;
+}
+
+int32_t koral_flock(int32_t fd, int32_t operation) {
+    int op = 0;
+    if (operation & 1) op |= LOCK_SH;
+    if (operation & 2) op |= LOCK_EX;
+    if (operation & 4) op |= LOCK_NB;
+    if (operation & 8) op |= LOCK_UN;
+    return flock(fd, op) == 0 ? 0 : -1;
+}
+
+int32_t koral_errno_is_wouldblock(void) {
+    return (errno == EWOULDBLOCK || errno == EAGAIN) ? 1 : 0;
+}
+
+int32_t koral_glob(const uint8_t* pattern, int32_t (*callback)(const uint8_t* path)) {
+    glob_t g;
+    int ret = glob((const char*)pattern, 0, NULL, &g);
+    if (ret != 0) {
+        if (ret == GLOB_NOMATCH) return 0;
+        return -1;
+    }
+    int32_t count = (int32_t)g.gl_pathc;
+    for (size_t i = 0; i < g.gl_pathc; i++) {
+        if (callback((const uint8_t*)g.gl_pathv[i]) != 0) {
+            count = (int32_t)(i + 1);
+            break;
+        }
+    }
+    globfree(&g);
+    return count;
+}
+
+int32_t koral_is_symlink(const uint8_t* path) {
+    struct stat st;
+    if (lstat((const char*)path, &st) != 0) return 0;
+    return S_ISLNK(st.st_mode) ? 1 : 0;
+}
+
+int32_t koral_realpath(const uint8_t* path, uint8_t* buf, uint64_t size) {
+    char resolved[4096];
+    if (realpath((const char*)path, resolved) == NULL) return -1;
+    size_t len = strlen(resolved);
+    if (len >= size) return -1;
+    memcpy(buf, resolved, len + 1);
+    return 0;
+}
+
+int32_t koral_mkstemp(uint8_t* tmpl) {
+    return mkstemp((char*)tmpl);
+}
+
+int32_t koral_dirent_type(void* entry) {
+    CDirEntry* e = (CDirEntry*)entry;
+    switch (e->entry.d_type) {
+        case DT_REG:  return 0;
+        case DT_DIR:  return 1;
+        case DT_LNK:  return 2;
+        default:      return 3;
+    }
+}
+
+int32_t koral_unsetenv(const uint8_t* name) {
+    return unsetenv((const char*)name);
+}
+
+extern char** environ;
+
+uint8_t** koral_environ(void) {
+    return (uint8_t**)environ;
+}
+
+uint64_t koral_environ_count(void) {
+    uint64_t count = 0;
+    if (environ) {
+        while (environ[count]) count++;
+    }
+    return count;
+}
+
+int32_t koral_hostname(uint8_t* buf, uint64_t size) {
+    return gethostname((char*)buf, (size_t)size) == 0 ? 0 : -1;
+}
+
+int32_t koral_current_exe(uint8_t* buf, uint64_t size) {
+#if defined(__linux__)
+    ssize_t len = readlink("/proc/self/exe", (char*)buf, (size_t)size - 1);
+    if (len < 0) return -1;
+    buf[len] = '\0';
+    return 0;
+#elif defined(__APPLE__)
+    // _NSGetExecutablePath requires <mach-o/dyld.h>
+    extern int _NSGetExecutablePath(char* buf, uint32_t* bufsize);
+    uint32_t sz = (uint32_t)size;
+    if (_NSGetExecutablePath((char*)buf, &sz) != 0) return -1;
+    return 0;
+#else
+    (void)buf; (void)size;
+    errno = ENOSYS;
+    return -1;
+#endif
+}
+
+int32_t koral_open(const uint8_t* path, int32_t open_mode, uint32_t perm) {
+    int flags;
+    mode_t mode = (mode_t)perm;
+    switch (open_mode) {
+        case 0: flags = O_RDONLY; mode = 0; break;                              // Read
+        case 1: flags = O_WRONLY | O_CREAT | O_TRUNC; break;                    // Write
+        case 2: flags = O_WRONLY | O_CREAT | O_EXCL; break;                     // Create
+        case 3: flags = O_WRONLY | O_CREAT | O_APPEND; break;                   // Append
+        case 4: flags = O_RDWR; mode = 0; break;                                // ReadWrite
+        default: return -1;
+    }
+    return open((const char*)path, flags, mode);
+}
+
+int64_t koral_read(int32_t fd, uint8_t* buf, uint64_t count) {
+    return (int64_t)read(fd, buf, (size_t)count);
+}
+
+int64_t koral_write(int32_t fd, const uint8_t* buf, uint64_t count) {
+    return (int64_t)write(fd, buf, (size_t)count);
+}
+
+int64_t koral_lseek(int32_t fd, int64_t offset, int32_t whence) {
+    return (int64_t)lseek(fd, (off_t)offset, whence);
+}
+
+int32_t koral_close(int32_t fd) {
+    return close(fd);
+}
+
+int32_t koral_chdir(const uint8_t* path) {
+    return chdir((const char*)path);
+}
+
+uint8_t* koral_mkdtemp(uint8_t* tmpl) {
+    return (uint8_t*)mkdtemp((char*)tmpl);
+}
+
+#endif

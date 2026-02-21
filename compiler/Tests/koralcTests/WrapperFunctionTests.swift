@@ -87,8 +87,10 @@ private func method(
   #expect(code.contains("self_ref.ptr"))
   // Check it calls the actual method with the extracted value
   #expect(code.contains("std_String_Error_code(self_val)"))
-  // Check it returns the result (non-void)
-  #expect(code.contains("return std_String_Error_code(self_val)"))
+  // Non-void wrapper stores return value, releases copied self_ref, then returns
+  #expect(code.contains("__koral_ret = std_String_Error_code(self_val)"))
+  #expect(code.contains("__koral_release(self_ref.control);"))
+  #expect(code.contains("return __koral_ret;"))
 }
 
 // MARK: - generateWrapperFunction: self ref (no wrapper needed)

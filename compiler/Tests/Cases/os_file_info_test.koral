@@ -1,0 +1,198 @@
+// EXPECT: filetype_ok
+// EXPECT: permission_roundtrip_ok
+// EXPECT: permission_checks_ok
+// EXPECT: permission_factory_ok
+// EXPECT: permission_equals_ok
+// EXPECT: permission_tostring_ok
+// EXPECT: fileinfo_ok
+
+using std.os.*
+
+let main() Void = {
+    // ========================================================================
+    // FileType tests
+    // ========================================================================
+    let ft_file = FileType.RegularFile()
+    let ft_dir = FileType.Directory()
+    let ft_sym = FileType.Symlink()
+    let ft_other = FileType.Other()
+
+    // is_file
+    assert(ft_file.is_file(), "RegularFile.is_file")
+    assert(not ft_dir.is_file(), "Directory.is_file")
+    assert(not ft_sym.is_file(), "Symlink.is_file")
+    assert(not ft_other.is_file(), "Other.is_file")
+
+    // is_dir
+    assert(not ft_file.is_dir(), "RegularFile.is_dir")
+    assert(ft_dir.is_dir(), "Directory.is_dir")
+    assert(not ft_sym.is_dir(), "Symlink.is_dir")
+    assert(not ft_other.is_dir(), "Other.is_dir")
+
+    // is_symlink
+    assert(not ft_file.is_symlink(), "RegularFile.is_symlink")
+    assert(not ft_dir.is_symlink(), "Directory.is_symlink")
+    assert(ft_sym.is_symlink(), "Symlink.is_symlink")
+    assert(not ft_other.is_symlink(), "Other.is_symlink")
+
+    // to_string
+    assert(ft_file.to_string() == "file", "RegularFile.to_string")
+    assert(ft_dir.to_string() == "directory", "Directory.to_string")
+    assert(ft_sym.to_string() == "symlink", "Symlink.to_string")
+    assert(ft_other.to_string() == "other", "Other.to_string")
+
+    print_line("filetype_ok")
+
+    // ========================================================================
+    // Permission tests — from_mode roundtrip
+    // ========================================================================
+    // Test roundtrip for several representative mode values
+    let p0 = Permission.from_mode((UInt32)0)
+    assert(p0.mode() == (UInt32)0, "from_mode(0) roundtrip")
+
+    let p755 = Permission.from_mode((UInt32)493)
+    assert(p755.mode() == (UInt32)493, "from_mode(493/0o755) roundtrip")
+
+    let p644 = Permission.from_mode((UInt32)420)
+    assert(p644.mode() == (UInt32)420, "from_mode(420/0o644) roundtrip")
+
+    let p777 = Permission.from_mode((UInt32)511)
+    assert(p777.mode() == (UInt32)511, "from_mode(511/0o777) roundtrip")
+
+    let p444 = Permission.from_mode((UInt32)292)
+    assert(p444.mode() == (UInt32)292, "from_mode(292/0o444) roundtrip")
+
+    // Verify masking: values > 511 should be masked to low 9 bits
+    let p_masked = Permission.from_mode((UInt32)1023)
+    assert(p_masked.mode() == (UInt32)511, "from_mode masks to 9 bits")
+
+    print_line("permission_roundtrip_ok")
+
+    // ========================================================================
+    // Permission tests — permission check methods
+    // ========================================================================
+    // 0o755 = 111 101 101 in binary
+    assert(p755.owner_read(), "0o755 owner_read")
+    assert(p755.owner_write(), "0o755 owner_write")
+    assert(p755.owner_exec(), "0o755 owner_exec")
+    assert(p755.group_read(), "0o755 group_read")
+    assert(not p755.group_write(), "0o755 group_write")
+    assert(p755.group_exec(), "0o755 group_exec")
+    assert(p755.other_read(), "0o755 other_read")
+    assert(not p755.other_write(), "0o755 other_write")
+    assert(p755.other_exec(), "0o755 other_exec")
+
+    // 0o644 = 110 100 100 in binary
+    assert(p644.owner_read(), "0o644 owner_read")
+    assert(p644.owner_write(), "0o644 owner_write")
+    assert(not p644.owner_exec(), "0o644 owner_exec")
+    assert(p644.group_read(), "0o644 group_read")
+    assert(not p644.group_write(), "0o644 group_write")
+    assert(not p644.group_exec(), "0o644 group_exec")
+    assert(p644.other_read(), "0o644 other_read")
+    assert(not p644.other_write(), "0o644 other_write")
+    assert(not p644.other_exec(), "0o644 other_exec")
+
+    // 0o000 = all false
+    assert(not p0.owner_read(), "0o000 owner_read")
+    assert(not p0.owner_write(), "0o000 owner_write")
+    assert(not p0.owner_exec(), "0o000 owner_exec")
+    assert(not p0.group_read(), "0o000 group_read")
+    assert(not p0.group_write(), "0o000 group_write")
+    assert(not p0.group_exec(), "0o000 group_exec")
+    assert(not p0.other_read(), "0o000 other_read")
+    assert(not p0.other_write(), "0o000 other_write")
+    assert(not p0.other_exec(), "0o000 other_exec")
+
+    print_line("permission_checks_ok")
+
+    // ========================================================================
+    // Permission tests — factory methods
+    // ========================================================================
+    let p_ro = Permission.readonly()
+    assert(p_ro.mode() == (UInt32)292, "readonly mode == 0o444")
+    assert(p_ro.owner_read(), "readonly owner_read")
+    assert(not p_ro.owner_write(), "readonly owner_write")
+
+    let p_rw = Permission.read_write()
+    assert(p_rw.mode() == (UInt32)420, "read_write mode == 0o644")
+    assert(p_rw.owner_read(), "read_write owner_read")
+    assert(p_rw.owner_write(), "read_write owner_write")
+
+    let p_ex = Permission.executable()
+    assert(p_ex.mode() == (UInt32)493, "executable mode == 0o755")
+    assert(p_ex.owner_exec(), "executable owner_exec")
+    assert(p_ex.group_exec(), "executable group_exec")
+    assert(p_ex.other_exec(), "executable other_exec")
+
+    print_line("permission_factory_ok")
+
+    // ========================================================================
+    // Permission tests — equals
+    // ========================================================================
+    assert(p755.equals(Permission.executable()), "755 equals executable")
+    assert(p644.equals(Permission.read_write()), "644 equals read_write")
+    assert(p444.equals(Permission.readonly()), "444 equals readonly")
+    assert(not p755.equals(p644), "755 not equals 644")
+
+    print_line("permission_equals_ok")
+
+    // ========================================================================
+    // Permission tests — to_string
+    // ========================================================================
+    assert(Permission.executable().to_string() == "rwxr-xr-x", "executable to_string")
+    assert(Permission.read_write().to_string() == "rw-r--r--", "read_write to_string")
+    assert(Permission.readonly().to_string() == "r--r--r--", "readonly to_string")
+    assert(Permission.from_mode((UInt32)0).to_string() == "---------", "0o000 to_string")
+    assert(Permission.from_mode((UInt32)511).to_string() == "rwxrwxrwx", "0o777 to_string")
+
+    print_line("permission_tostring_ok")
+
+    // ========================================================================
+    // FileInfo tests — use read_file_info on a real file
+    // ========================================================================
+    let test_dir = join_path(temp_dir(), "os_file_info_test")
+    when remove_dir_all(test_dir) is {
+        .Ok(_) then {},
+        .Error(_) then {},
+    }
+    create_dir_all(test_dir).unwrap()
+
+    let test_file = join_path(test_dir, "info_test.txt")
+    write_text(test_file, "hello").unwrap()
+
+    let info = read_file_info(test_file).unwrap()
+
+    // size should be 5 bytes ("hello")
+    assert(info.size() == (UInt64)5, "FileInfo size")
+
+    // file_type should be RegularFile
+    assert(info.file_type().is_file(), "FileInfo file_type is_file")
+    assert(not info.file_type().is_dir(), "FileInfo file_type not is_dir")
+    assert(info.file_type().to_string() == "file", "FileInfo file_type to_string")
+
+    // convenience methods
+    assert(info.is_file(), "FileInfo is_file")
+    assert(not info.is_dir(), "FileInfo is_dir")
+    assert(not info.is_symlink(), "FileInfo is_symlink")
+
+    // permissions should have owner_read at minimum
+    assert(info.permissions().owner_read(), "FileInfo permissions owner_read")
+
+    // to_string should contain expected parts
+    assert(info.to_string().contains("FileInfo"), "FileInfo to_string contains FileInfo")
+    assert(info.to_string().contains("size=5"), "FileInfo to_string contains size=5")
+    assert(info.to_string().contains("type=file"), "FileInfo to_string contains type=file")
+
+    // Test FileInfo on a directory
+    let dir_info = read_file_info(test_dir).unwrap()
+    assert(dir_info.file_type().is_dir(), "dir FileInfo is_dir")
+    assert(dir_info.is_dir(), "dir FileInfo convenience is_dir")
+    assert(not dir_info.is_file(), "dir FileInfo not is_file")
+    assert(dir_info.file_type().to_string() == "directory", "dir FileInfo type to_string")
+
+    // Cleanup
+    remove_dir_all(test_dir).unwrap()
+
+    print_line("fileinfo_ok")
+}

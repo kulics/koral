@@ -1,77 +1,46 @@
-// EXPECT: All tests passed!
+// EXPECT: args_ok
+// EXPECT: command_result_ok
+// EXPECT: run_command_ok
+
+using std.os.*
 
 let main() Void = {
-    let base = join_path(temp_dir(), "os_test_dir")
-
-    // Cleanup if exists
-    when remove_dir_all(base) is {
-        .Ok(_) then {},
-        .Error(_) then {},
-    }
-
-    // Directory operations
-    create_dir_all(base).unwrap()
-    assert(is_dir(base), "create_dir_all failed")
-
-    // File operations
-    let file_path = join_path(base, "test.txt")
-    write_file(file_path, "Hello, World!").unwrap()
-    let content = read_file(file_path).unwrap()
-    assert(content == "Hello, World!", "read_file failed")
-
-    append_file(file_path, "\nAppended").unwrap()
-    let content2 = read_file(file_path).unwrap()
-    assert(content2 == "Hello, World!\nAppended", "append_file failed")
-
-    let copy_path = join_path(base, "test_copy.txt")
-    copy_file(file_path, copy_path).unwrap()
-    assert(read_file(copy_path).unwrap() == content2, "copy_file failed")
-
-    remove_file(file_path).unwrap()
-    remove_file(copy_path).unwrap()
-    assert(not path_exists(file_path), "remove_file failed")
-
-    // read_dir
-    write_file(join_path(base, "file.txt"), "x").unwrap()
-    let entries = read_dir(base).unwrap()
-    let mut found = false
-    for name = entries then {
-        if name == "file.txt" then { found = true }
-    }
-    assert(found, "read_dir failed")
-
-    // Path operations
-    let expected_join = {
-        let mut s = String.new()
-        s.push_string("a")
-        s.push_string(path_separator())
-        s.push_string("b")
-        s
-    }
-    assert(join_path("a", "b") == expected_join, "join_path failed")
-    assert(base_name("/path/to/file.txt").unwrap() == "file.txt", "base_name failed")
-    assert(dir_name("/path/to/file.txt").unwrap() == "/path/to", "dir_name failed")
-    assert(ext_name("file.txt").unwrap() == "txt", "ext_name failed")
-
-    // Environment
-    set_env("KORAL_TEST", "value")
-    assert(get_env("KORAL_TEST").unwrap() == "value", "set_env/get_env failed")
-
-    // Command line args
+    // ========================================================================
+    // args() — should return at least the executable path
+    // ========================================================================
     let arg_list = args()
-    assert(arg_list.count() >= 1, "args failed")
+    assert(arg_list.count() >= 1, "args count")
 
-    // Command execution (best effort)
+    print_line("args_ok")
+
+    // ========================================================================
+    // CommandResult type
+    // ========================================================================
+    let cr = CommandResult(0, "out", "err")
+    assert(cr.is_success(), "CommandResult is_success")
+    assert(cr.code == 0, "CommandResult code")
+    assert(cr.stdout == "out", "CommandResult stdout")
+    assert(cr.stderr == "err", "CommandResult stderr")
+    let s = cr.to_string()
+    assert(s.contains("CommandResult"), "CommandResult to_string")
+    assert(s.contains("code=0"), "CommandResult to_string code")
+
+    let cr_fail = CommandResult(1, "", "")
+    assert(not cr_fail.is_success(), "CommandResult not success")
+
+    print_line("command_result_ok")
+
+    // ========================================================================
+    // run_command — best effort (echo should work on all platforms)
+    // ========================================================================
     let mut cmd_args = [String]List.new()
-    cmd_args.push("hello")
+    cmd_args.push("hello_koral")
     when run_command("echo", cmd_args) is {
         .Ok(result) then {
-            assert(result.stdout.contains("hello"), "run_command failed")
+            assert(result.stdout.contains("hello_koral"), "run_command stdout")
         },
         .Error(_) then {},
     }
 
-    remove_dir_all(base).unwrap()
-
-    print_line("All tests passed!")
+    print_line("run_command_ok")
 }

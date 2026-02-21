@@ -1,0 +1,99 @@
+// EXPECT: open_write_read_ok
+// EXPECT: seek_ok
+// EXPECT: append_mode_ok
+// EXPECT: file_info_ok
+// EXPECT: file_path_ok
+
+using std.os.*
+using std.io.*
+
+let main() Void = {
+    let test_dir = join_path(temp_dir(), "os_file_test")
+    when remove_dir_all(test_dir) is {
+        .Ok(_) then {},
+        .Error(_) then {},
+    }
+    create_dir_all(test_dir).unwrap()
+
+    // ========================================================================
+    // Test 1: Open file for writing, then read back
+    // ========================================================================
+    let write_path = join_path(test_dir, "write_test.txt")
+    let wf = open_file(write_path, OpenMode.Write()).unwrap()
+    let wbuf = Buffer.from_string("hello file")
+    wf.write(wbuf).unwrap()
+    // wf goes out of scope, fd closed via drop
+
+    let rf = open_file(write_path, OpenMode.Read()).unwrap()
+    let rbuf = Buffer.with_capacity(64)
+    let n = rf.read(rbuf).unwrap()
+    assert(n == 10, "read count")
+    rbuf.reset()
+    let content = rbuf.take_string().unwrap()
+    assert(content == "hello file", "read content")
+
+    print_line("open_write_read_ok")
+
+    // ========================================================================
+    // Test 2: Seek operations
+    // ========================================================================
+    let sf = open_file(write_path, OpenMode.Read()).unwrap()
+    // Seek to offset 6 from start
+    let pos = sf.seek(SeekPos.Start(6)).unwrap()
+    assert(pos == (UInt64)6, "seek start pos")
+
+    let sbuf = Buffer.with_capacity(64)
+    sf.read(sbuf).unwrap()
+    sbuf.reset()
+    let tail = sbuf.take_string().unwrap()
+    assert(tail == "file", "seek read tail")
+
+    // Seek back to beginning
+    sf.seek(SeekPos.Start(0)).unwrap()
+    let sbuf2 = Buffer.with_capacity(64)
+    sf.read(sbuf2).unwrap()
+    sbuf2.reset()
+    assert(sbuf2.take_string().unwrap() == "hello file", "seek rewind")
+
+    print_line("seek_ok")
+
+    // ========================================================================
+    // Test 3: Append mode
+    // ========================================================================
+    let append_path = join_path(test_dir, "append_test.txt")
+    write_text(append_path, "first").unwrap()
+
+    let af = open_file(append_path, OpenMode.Append()).unwrap()
+    let abuf = Buffer.from_string("_second")
+    af.write(abuf).unwrap()
+
+    let appended = read_text(append_path).unwrap()
+    assert(appended == "first_second", "append content")
+
+    print_line("append_mode_ok")
+
+    // ========================================================================
+    // Test 4: File.info() via fd
+    // ========================================================================
+    let info_path = join_path(test_dir, "info_test.txt")
+    write_text(info_path, "12345").unwrap()
+    let inf = open_file(info_path, OpenMode.Read()).unwrap()
+    let fi = inf.info().unwrap()
+    assert(fi.size() == (UInt64)5, "file info size")
+    assert(fi.is_file(), "file info is_file")
+    assert(not fi.is_dir(), "file info not is_dir")
+
+    print_line("file_info_ok")
+
+    // ========================================================================
+    // Test 5: File.path() returns the path used to open
+    // ========================================================================
+    let pf = open_file(info_path, OpenMode.Read()).unwrap()
+    let fp = pf.path()
+    assert(fp.contains("info_test.txt"), "file path contains name")
+
+    print_line("file_path_ok")
+
+    // Cleanup
+    remove_dir_all(test_dir).unwrap()
+}

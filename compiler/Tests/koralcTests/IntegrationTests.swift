@@ -120,6 +120,12 @@ class IntegrationTests: XCTestCase {
     func test_non_exhaustive_bool() throws { try runCase(named: "non_exhaustive_bool.koral") }
     func test_non_exhaustive_union() throws { try runCase(named: "non_exhaustive_union.koral") }
     func test_os_basic() throws { try runCase(named: "os_basic.koral") }
+    func test_os_file_info_test() throws { try runCase(named: "os_file_info_test.koral") }
+    func test_os_file_test() throws { try runCase(named: "os_file_test.koral") }
+    func test_os_path_test() throws { try runCase(named: "os_path_test.koral") }
+    func test_os_dir_test() throws { try runCase(named: "os_dir_test.koral") }
+    func test_os_fs_test() throws { try runCase(named: "os_fs_test.koral") }
+    func test_os_env_test() throws { try runCase(named: "os_env_test.koral") }
     func test_option_map_test() throws { try runCase(named: "option_map_test.koral") }
     func test_pattern_combinators() throws { try runCase(named: "pattern_combinators.koral") }
     func test_duplicate_given_method() throws { try runCase(named: "duplicate_given_method.koral") }
@@ -218,6 +224,7 @@ class IntegrationTests: XCTestCase {
     func test_trait_object_deref_error() throws { try runCase(named: "trait_object_deref_error.koral") }
     func test_trait_object_self_conformance() throws { try runCase(named: "trait_object_self_conformance.koral") }
     func test_trait_object_weakref() throws { try runCase(named: "trait_object_weakref.koral") }
+    func test_trait_object_refcount_regression() throws { try runCase(named: "trait_object_refcount_regression.koral") }
     func test_mono_time_test() throws { try runCase(named: "mono_time_test.koral") }
     func test_timezone_test() throws { try runCase(named: "timezone_test.koral") }
     func test_datetime_basic() throws { try runCase(named: "datetime_basic.koral") }
