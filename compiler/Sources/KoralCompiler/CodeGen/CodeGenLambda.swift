@@ -9,6 +9,17 @@ extension CodeGen {
     return name
   }
   
+  /// Returns the raw C identifier for a symbol, bypassing capture aliases.
+  /// Used for env struct field names and env initialization.
+  func rawQualifiedName(for symbol: Symbol) -> String {
+    // Temporarily clear aliases to get the base name
+    let saved = capturedVarAliases[symbol.defId.id]
+    capturedVarAliases[symbol.defId.id] = nil
+    let name = qualifiedName(for: symbol)
+    capturedVarAliases[symbol.defId.id] = saved
+    return name
+  }
+  
   /// Generates code for a Lambda expression
   /// Returns the name of a temporary variable holding the Closure struct
   func generateLambdaExpression(
@@ -59,15 +70,13 @@ extension CodeGen {
       addIndent()
       appendToBuffer("\(envVar)->__refcount = 1;\n")
       
-      // Initialize captured variables
+      // Initialize captured variables according to semantic capture kind.
+      // byValue: copy value; byReference: copy reference value (retain).
       for capture in captures {
-        let capturedName = qualifiedName(for: capture.symbol)
-        appendCopyAssignment(
-          for: capture.symbol.type,
-          source: capturedName,
-          dest: "\(envVar)->\(capturedName)",
-          indent: indent
-        )
+        let capturedName = rawQualifiedName(for: capture.symbol)
+        let currentExpr = qualifiedName(for: capture.symbol)
+        addIndent()
+        appendCopyAssignment(for: capture.symbol.type, source: currentExpr, dest: "\(envVar)->\(capturedName)", indent: "")
       }
       
       // Create closure struct
@@ -161,21 +170,25 @@ extension CodeGen {
     funcBuffer += "static \(returnCType) \(name)(\(paramsStr)) {\n"
     funcBuffer += "  struct \(envStructName)* __captured = (struct \(envStructName)*)__env;\n"
     
-    // Generate local aliases for captured variables
-    for capture in captures {
-      let capturedName = qualifiedName(for: capture.symbol)
-      let capturedType = cTypeName(capture.symbol.type)
-      funcBuffer += "  \(capturedType) \(capturedName) = __captured->\(capturedName);\n"
-    }
+    // No local aliases — captured variables are accessed via __captured-> pointers
+    // through the capturedVarAliases mechanism in qualifiedName().
     
     // Save current state
     let savedBuffer = buffer
     let savedIndent = indent
     let savedLambdaCounter = lambdaCounter
     let savedLambdaFunctions = lambdaFunctions
+    let savedCapturedVarAliases = capturedVarAliases
     buffer = ""
     indent = "  "
     lambdaFunctions = ""
+    
+    // Set up capture aliases so qualifiedName() resolves captured vars
+    // through env fields.
+    for capture in captures {
+      let fieldName = rawQualifiedName(for: capture.symbol)
+      capturedVarAliases[capture.symbol.defId.id] = "__captured->\(fieldName)"
+    }
     
     // Generate body
     let bodyResult = generateExpressionSSA(body)
@@ -197,49 +210,61 @@ extension CodeGen {
     buffer = savedBuffer
     indent = savedIndent
     lambdaCounter = savedLambdaCounter + (lambdaCounter - savedLambdaCounter)
+    capturedVarAliases = savedCapturedVarAliases
     
     // Add to Lambda functions buffer
     lambdaFunctions = savedLambdaFunctions + funcBuffer
   }
-  
-  /// Generates the environment struct for a Lambda with captures
+  /// Generates the environment struct for a Lambda with captures.
+  /// Captures are stored as owned values in the env and dropped in env dtor.
   func generateLambdaEnvStruct(name: String, captures: [CapturedVariable]) {
+    func appendIndented(_ code: String, to buffer: inout String, indent: String) {
+      let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !trimmed.isEmpty else { return }
+      let lines = trimmed.split(separator: "\n", omittingEmptySubsequences: true)
+      for line in lines {
+        buffer += "\(indent)\(line)\n"
+      }
+    }
+
+    func dropCodeForCapturedField(_ type: Type, fieldExpr: String) -> String {
+      switch type {
+      case .function:
+        return "__koral_closure_release(\(fieldExpr));\n"
+      case .structure(let defId):
+        if context.isForeignStruct(defId) { return "" }
+        let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
+        return "__koral_\(typeName)_drop(&\(fieldExpr));\n"
+      case .union(let defId):
+        let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
+        return "__koral_\(typeName)_drop(&\(fieldExpr));\n"
+      default:
+        return TypeHandlerRegistry.shared.generateDropCode(type, value: fieldExpr)
+      }
+    }
+
     var structBuffer = "\n// Lambda environment struct\n"
     structBuffer += "struct \(name) {\n"
     structBuffer += "  _Atomic intptr_t __refcount;\n"
     
     for capture in captures {
-      let capturedName = qualifiedName(for: capture.symbol)
+      let capturedName = rawQualifiedName(for: capture.symbol)
       let capturedType = cTypeName(capture.symbol.type)
       structBuffer += "  \(capturedType) \(capturedName);\n"
     }
     
     structBuffer += "};\n"
 
+    // Drop function: release/drop all captured fields, then free env struct.
     structBuffer += "\nstatic void __koral_\(name)_drop(void* raw_env) {\n"
     structBuffer += "  struct \(name)* env = (struct \(name)*)raw_env;\n"
     for capture in captures {
-      let capturedName = qualifiedName(for: capture.symbol)
-      let valuePath = "env->\(capturedName)"
-      switch capture.symbol.type {
-      case .function:
-        structBuffer += "  __koral_closure_release(\(valuePath));\n"
-      case .structure(let defId):
-        if !context.isForeignStruct(defId) {
-          let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-          structBuffer += "  __koral_\(typeName)_drop(&\(valuePath));\n"
-        }
-      case .union(let defId):
-        let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-        structBuffer += "  __koral_\(typeName)_drop(&\(valuePath));\n"
-      default:
-        let dropCode = TypeHandlerRegistry.shared.generateDropCode(capture.symbol.type, value: valuePath)
-        if !dropCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-          structBuffer += "  \(dropCode)\n"
-        }
-      }
+      let capturedName = rawQualifiedName(for: capture.symbol)
+      let fieldExpr = "env->\(capturedName)"
+      let dropCode = dropCodeForCapturedField(capture.symbol.type, fieldExpr: fieldExpr)
+      appendIndented(dropCode, to: &structBuffer, indent: "  ")
     }
-    structBuffer += "  free(env);\n"
+    structBuffer += "  free(raw_env);\n"
     structBuffer += "}\n"
     
     // Add to Lambda env structs buffer

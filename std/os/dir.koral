@@ -1,0 +1,318 @@
+// ============================================================================
+// std.os - Directory Operations
+// ============================================================================
+// Provides: DirEntry type, WalkAction enum, directory manipulation functions
+// Access via: using std.os
+// ============================================================================
+
+// ============================================================================
+// FFI Declarations
+// ============================================================================
+
+// Opaque types for directory operations
+foreign type CDirHandle
+foreign type CDirEntry
+
+// Directory I/O
+foreign let koral_opendir(path UInt8 ptr) CDirHandle ptr
+foreign let koral_readdir(dir CDirHandle ptr) CDirEntry ptr
+foreign let koral_closedir(dir CDirHandle ptr) Int32
+foreign let koral_dirent_name(entry CDirEntry ptr) UInt8 ptr
+foreign let koral_dirent_type(entry CDirEntry ptr) Int32
+
+// Directory manipulation
+foreign let koral_mkdir(path UInt8 ptr, mode UInt32) Int32
+foreign let koral_rmdir(path UInt8 ptr) Int32
+foreign let koral_mkdtemp(template UInt8 ptr) UInt8 ptr
+
+// File removal (needed for remove_dir_all)
+foreign let koral_remove(path UInt8 ptr) Int32
+
+// Error handling
+foreign let koral_errno_ptr() Int32 ptr
+foreign let koral_strerror(errnum Int32) UInt8 ptr
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/// Get the last OS error as a String
+private let get_last_error() String = {
+    let err = deptr koral_errno_ptr()
+    let msg = koral_strerror(err)
+    String.from_cstring(msg)
+}
+
+/// Convert a dirent type code to FileType
+private let dir_entry_type(entry CDirEntry ptr) FileType = {
+    let t = koral_dirent_type(entry)
+    when t is {
+        0 then FileType.RegularFile(),
+        1 then FileType.Directory(),
+        2 then FileType.Symlink(),
+        _ then FileType.Other(),
+    }
+}
+
+
+// ============================================================================
+// DirEntry Type
+// ============================================================================
+
+/// Directory entry with type information
+public type DirEntry(
+    private _name String,
+    private _path String,
+    private _file_type FileType,
+)
+
+given DirEntry {
+    /// File/directory name
+    public name(self) String = self._name
+
+    /// Full path
+    public path(self) String = self._path
+
+    /// File type
+    public file_type(self) FileType = self._file_type
+
+    public is_file(self) Bool = self._file_type.is_file()
+    public is_dir(self) Bool = self._file_type.is_dir()
+    public is_symlink(self) Bool = self._file_type.is_symlink()
+
+    /// Get full file metadata (triggers stat system call)
+    public info(self) [FileInfo]Result = read_file_info(self._path)
+
+    public to_string(self) String = {
+        let mut s = String.new()
+        s.push_string("DirEntry(")
+        s.push_string(self._name)
+        s.push_string(", ")
+        s.push_string(self._file_type.to_string())
+        s.push_string(")")
+        s
+    }
+}
+
+
+// ============================================================================
+// WalkAction Enum
+// ============================================================================
+
+/// Walk control enum for directory traversal
+public type WalkAction {
+    Continue(),        // Continue traversal
+    SkipDir(),         // Skip children of current directory entry
+    Stop(),            // Stop traversal normally
+    Error(msg String),     // Propagate business error, stop traversal
+}
+
+
+// ============================================================================
+// Directory Operations
+// ============================================================================
+
+/// Create single directory (parent must exist)
+public let create_dir(path String) [Void]Result = {
+    if koral_mkdir(path.storage.data, 493) == 0 then {
+        // 0755
+        [Void]Result.Ok({})
+    } else {
+        [Void]Result.Error(ref get_last_error())
+    }
+}
+
+/// Create directory recursively (creates all missing parent directories)
+public let create_dir_all(path String) [Void]Result = {
+    let normalized = path.replace_all("\\", "/")
+    let parts = normalized.split("/")
+    let mut current = String.new()
+    let mut seeded = false
+
+    if normalized.starts_with("//") then {
+        current.push_string("//")
+        seeded = true
+    } else if normalized.starts_with("/") then {
+        current.push('/')
+        seeded = true
+    }
+
+    for part = parts then {
+        if part.is_empty() then {
+            continue
+        }
+        // Windows drive prefix (e.g., "C:") - treat as seeded root.
+        if not seeded and part.count() == 2 and part[1] == ':' then {
+            current.push_string(part)
+            seeded = true
+            continue
+        }
+        if not seeded and current.is_empty() then {
+            current.push_string(part)
+        } else {
+            if not current.ends_with("/") then {
+                current.push('/')
+            }
+            current.push_string(part)
+        }
+        seeded = true
+
+        if not path_exists(current) then {
+            if koral_mkdir(current.storage.data, 493) <> 0 then {
+                return [Void]Result.Error(ref get_last_error())
+            }
+        }
+    }
+    [Void]Result.Ok({})
+}
+
+/// Remove empty directory
+public let remove_dir(path String) [Void]Result = {
+    if koral_rmdir(path.storage.data) == 0 then {
+        [Void]Result.Ok({})
+    } else {
+        [Void]Result.Error(ref get_last_error())
+    }
+}
+
+/// Remove directory recursively (removes all contents first)
+public let remove_dir_all(path String) [Void]Result = {
+    when read_dir(path) is {
+        .Ok(entries) then {
+            for entry = entries then {
+                let full_path = entry.path()
+                if entry.is_dir() then {
+                    when remove_dir_all(full_path) is {
+                        .Error(e) then {
+                            return [Void]Result.Error(e)
+                        },
+                        .Ok(_) then {},
+                    }
+                } else {
+                    if koral_remove(full_path.storage.data) <> 0 then {
+                        return [Void]Result.Error(ref get_last_error())
+                    }
+                }
+            }
+            remove_dir(path)
+        },
+        .Error(e) then [Void]Result.Error(e),
+    }
+}
+
+
+/// Read directory entries (returns DirEntry list with name, path, and file type)
+public let read_dir(path String) [[DirEntry]List]Result = {
+    let dir = koral_opendir(path.storage.data)
+    if dir == [CDirHandle]null_ptr() then {
+        return [[DirEntry]List]Result.Error(ref get_last_error())
+    }
+
+    let mut entries = [DirEntry]List.new()
+
+    while true then {
+        let entry = koral_readdir(dir)
+        if entry == [CDirEntry]null_ptr() then {
+            break
+        }
+
+        let name = String.from_cstring(koral_dirent_name(entry))
+        if name == "." or name == ".." then {
+            continue
+        }
+        let full_path = join_path(path, name)
+        let ft = dir_entry_type(entry)
+        entries.push(DirEntry(name, full_path, ft))
+    }
+
+    koral_closedir(dir)
+    [[DirEntry]List]Result.Ok(entries)
+}
+
+
+// ============================================================================
+// walk_dir — Depth-first recursive directory traversal
+// ============================================================================
+
+/// Traverse a directory tree depth-first, calling visitor for each entry.
+/// The visitor receives a DirEntry and returns a WalkAction to control traversal.
+public let walk_dir(path String, visitor [DirEntry, WalkAction]Func) [Void]Result = {
+    let handle = koral_opendir(path.storage.data)
+    if handle == [CDirHandle]null_ptr() then {
+        return [Void]Result.Error(ref get_last_error())
+    }
+    let result = walk_dir_handle(path, handle, visitor)
+    koral_closedir(handle)
+    result
+}
+
+/// Internal recursive helper for walk_dir.
+/// Iterates entries in the given directory handle, calling visitor for each.
+/// Recurses into subdirectories when visitor returns Continue.
+private let walk_dir_handle(
+    dir_path String,
+    handle CDirHandle ptr,
+    visitor [DirEntry, WalkAction]Func,
+) [Void]Result = {
+    while true then {
+        let entry = koral_readdir(handle)
+        if entry == [CDirEntry]null_ptr() then { break }
+        let name = String.from_cstring(koral_dirent_name(entry))
+        if name == "." or name == ".." then { continue }
+        let full_path = join_path(dir_path, name)
+        let ft = dir_entry_type(entry)
+        let dir_entry = DirEntry(name, full_path, ft)
+        let action = visitor(dir_entry)
+        when action is {
+            .Stop then {
+                return [Void]Result.Ok({})
+            },
+            .Error(msg) then {
+                return [Void]Result.Error(ref msg)
+            },
+            .SkipDir then {
+                // Skip children of current directory entry, continue with siblings
+            },
+            .Continue then {
+                if ft.is_dir() then {
+                    let sub_handle = koral_opendir(full_path.storage.data)
+                    if sub_handle <> [CDirHandle]null_ptr() then {
+                        when walk_dir_handle(full_path, sub_handle, visitor) is {
+                            .Error(e) then {
+                                koral_closedir(sub_handle)
+                                return [Void]Result.Error(e)
+                            },
+                            .Ok(_) then koral_closedir(sub_handle),
+                        }
+                    }
+                }
+            },
+        }
+    }
+    [Void]Result.Ok({})
+}
+
+
+// ============================================================================
+// create_temp_dir — Create a temporary directory
+// ============================================================================
+
+/// Create a temporary directory.
+/// When dir is empty string "", uses the system temp directory.
+/// Returns the full path of the created temporary directory.
+public let create_temp_dir(dir String, prefix String) [String]Result = {
+    let base = if dir.is_empty() then { temp_dir() } else { dir }
+    let mut template = String.new()
+    template.push_string(base)
+    if not base.ends_with("/") and not base.ends_with("\\") then {
+        template.push('/')
+    }
+    template.push_string(prefix)
+    template.push_string("XXXXXX")
+    // koral_mkdtemp modifies the template in-place, replacing XXXXXX with random chars
+    let result = koral_mkdtemp(template.storage.data)
+    if result == [UInt8]null_ptr() then {
+        return [String]Result.Error(ref get_last_error())
+    }
+    [String]Result.Ok(String.from_cstring(result))
+}

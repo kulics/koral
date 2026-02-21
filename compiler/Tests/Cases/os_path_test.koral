@@ -1,0 +1,138 @@
+// EXPECT: is_absolute_ok
+// EXPECT: join_path_ok
+// EXPECT: base_name_ok
+// EXPECT: dir_name_ok
+// EXPECT: ext_name_ok
+// EXPECT: normalize_idempotent_ok
+// EXPECT: relative_path_ok
+// EXPECT: glob_match_ok
+
+using std.os.*
+
+let main() Void = {
+    // ========================================================================
+    // is_absolute
+    // ========================================================================
+    assert(is_absolute("/usr/bin"), "abs /usr/bin")
+    assert(not is_absolute("relative/path"), "rel relative/path")
+    assert(not is_absolute(""), "abs empty")
+    assert(is_absolute("\\windows"), "abs backslash")
+
+    print_line("is_absolute_ok")
+
+    // ========================================================================
+    // join_path
+    // ========================================================================
+    // join with empty
+    assert(join_path("", "b") == "b", "join empty base")
+    assert(join_path("a", "") == "a", "join empty name")
+
+    // join with absolute name returns name
+    assert(join_path("a", "/b") == "/b", "join absolute name")
+
+    // basic join
+    let joined = join_path("a", "b")
+    assert(joined.contains("a"), "join contains a")
+    assert(joined.contains("b"), "join contains b")
+
+    print_line("join_path_ok")
+
+    // ========================================================================
+    // base_name
+    // ========================================================================
+    assert(base_name("/path/to/file.txt").unwrap() == "file.txt", "base_name file")
+    assert(base_name("file.txt").unwrap() == "file.txt", "base_name no dir")
+    assert(base_name("/single").unwrap() == "single", "base_name single")
+    assert(base_name("").is_none(), "base_name empty")
+
+    print_line("base_name_ok")
+
+    // ========================================================================
+    // dir_name
+    // ========================================================================
+    assert(dir_name("/path/to/file.txt").unwrap() == "/path/to", "dir_name nested")
+    assert(dir_name("/file").unwrap() == "/", "dir_name root")
+    assert(dir_name("file.txt").is_none(), "dir_name no dir")
+    assert(dir_name("").is_none(), "dir_name empty")
+
+    print_line("dir_name_ok")
+
+    // ========================================================================
+    // ext_name
+    // ========================================================================
+    assert(ext_name("file.txt").unwrap() == "txt", "ext_name txt")
+    assert(ext_name("archive.tar.gz").unwrap() == "gz", "ext_name double")
+    assert(ext_name("noext").is_none(), "ext_name none")
+    assert(ext_name(".hidden").is_none(), "ext_name dotfile")
+
+    print_line("ext_name_ok")
+
+    // ========================================================================
+    // normalize_path idempotency
+    // ========================================================================
+    let p1 = normalize_path("/a/b/c")
+    let p2 = normalize_path(p1)
+    assert(p1 == p2, "normalize idempotent")
+
+    print_line("normalize_idempotent_ok")
+
+    // ========================================================================
+    // relative_path
+    // ========================================================================
+    // Same path
+    let rp_same = relative_path("/a/b", "/a/b").unwrap()
+    assert(rp_same == ".", "relative same")
+
+    // Child path
+    let rp_child = relative_path("/a", "/a/b/c").unwrap()
+    assert(rp_child == "b/c", "relative child")
+
+    // Parent path
+    let rp_parent = relative_path("/a/b/c", "/a").unwrap()
+    assert(rp_parent == "../..", "relative parent")
+
+    // Sibling path
+    let rp_sibling = relative_path("/a/b", "/a/c").unwrap()
+    assert(rp_sibling == "../c", "relative sibling")
+
+    // Error on empty
+    assert(relative_path("", "/a").is_error(), "relative empty from")
+    assert(relative_path("/a", "").is_error(), "relative empty to")
+
+    print_line("relative_path_ok")
+
+    // ========================================================================
+    // glob_match
+    // ========================================================================
+    // Star wildcard
+    assert(glob_match("*.txt", "file.txt"), "glob star.txt")
+    assert(not glob_match("*.txt", "file.rs"), "glob star.txt neg")
+    assert(glob_match("*", "anything"), "glob star all")
+    assert(glob_match("hello*", "hello world"), "glob star suffix")
+
+    // Question mark
+    assert(glob_match("?.txt", "a.txt"), "glob ? match")
+    assert(not glob_match("?.txt", "ab.txt"), "glob ? no match")
+
+    // Character class
+    assert(glob_match("[abc].txt", "a.txt"), "glob [abc] match")
+    assert(not glob_match("[abc].txt", "d.txt"), "glob [abc] no match")
+
+    // Range in character class
+    assert(glob_match("[a-z].txt", "m.txt"), "glob [a-z] match")
+    assert(not glob_match("[a-z].txt", "5.txt"), "glob [a-z] no match")
+
+    // Negated character class
+    assert(glob_match("[!a].txt", "b.txt"), "glob [!a] match")
+    assert(not glob_match("[!a].txt", "a.txt"), "glob [!a] no match")
+
+    // Literal match
+    assert(glob_match("exact", "exact"), "glob exact")
+    assert(not glob_match("exact", "other"), "glob exact neg")
+
+    // Empty
+    assert(glob_match("", ""), "glob empty both")
+    assert(not glob_match("", "x"), "glob empty pattern")
+
+    print_line("glob_match_ok")
+}

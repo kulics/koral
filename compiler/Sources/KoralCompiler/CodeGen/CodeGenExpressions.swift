@@ -118,6 +118,13 @@ extension CodeGen {
   func buildRefComponents(_ expr: TypedExpressionNode) -> (path: String, control: String) {
     switch expr {
     case .variable(let identifier):
+      // Lambda capture aliases — captured variables accessed through env pointer
+      if let alias = capturedVarAliases[identifier.defId.id] {
+        if case .reference(_) = identifier.type {
+          return (alias, "(\(alias)).control")
+        }
+        return (alias, "NULL")
+      }
       let cName = cIdentifier(for: identifier)
       let path = patternBindingAliases[cName] ?? cName
       if case .reference(_) = identifier.type {

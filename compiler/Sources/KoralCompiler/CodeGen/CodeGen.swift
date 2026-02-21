@@ -45,6 +45,12 @@ public class CodeGen {
   /// into the subject rather than copies, analogous to Rust/Swift match semantics.
   var patternBindingAliases: [String: String] = [:]
   
+  /// Lambda capture aliases: maps a captured variable's DefId to the expression
+  /// used to access it inside the lambda body (e.g., `(*__captured->names_42)`).
+  /// This enables by-reference capture semantics — the lambda accesses the
+  /// caller's original variable through a pointer stored in the env struct.
+  var capturedVarAliases: [UInt64: String] = [:]
+  
   // MARK: - Temp Pool for Stack Slot Reuse
   /// Stack of active temp pools. When non-empty, nextTemp() allocates from the top pool.
   /// Each match/if-else expression pushes its own pool; nested expressions get their own.
@@ -134,6 +140,11 @@ public class CodeGen {
   }
 
   func qualifiedName(for symbol: Symbol) -> String {
+    // Check lambda capture aliases first — captured variables are accessed
+    // through pointers in the env struct for by-reference capture semantics.
+    if let alias = capturedVarAliases[symbol.defId.id] {
+      return alias
+    }
     if foreignFunctionDefIds.contains(symbol.defId.id) {
       let name = context.getName(symbol.defId) ?? "<unknown>"
       return sanitizeCIdentifier(name)
@@ -1081,6 +1092,10 @@ public class CodeGen {
       if identifier.type == .void {
         return "0"
       }
+      // Lambda capture aliases — captured variables accessed through env pointer
+      if let alias = capturedVarAliases[identifier.defId.id] {
+        return alias
+      }
       let cName = cIdentifier(for: identifier)
       // Pattern-bound variables are aliases into the subject — return the path directly
       if let alias = patternBindingAliases[cName] {
@@ -1392,7 +1407,15 @@ public class CodeGen {
         }
         return false
       }()
-      let shouldHeapAllocate = isPatternAliasRef || escapeContext.shouldUseHeapAllocation(inner)
+      // Lambda-captured variables are accessed through stable pointers in the env struct,
+      // so they are always addressable and should use stack allocation (take address).
+      let isCapturedVar: Bool = {
+        if case .variable(let identifier) = inner {
+          return capturedVarAliases[identifier.defId.id] != nil
+        }
+        return false
+      }()
+      let shouldHeapAllocate = isPatternAliasRef || (!isCapturedVar && escapeContext.shouldUseHeapAllocation(inner))
       
       if inner.valueCategory == .lvalue && !shouldHeapAllocate {
         // 不逃逸的 lvalue：栈分配（取地址）
@@ -1792,9 +1815,12 @@ public class CodeGen {
           // For reference: always retain (struct takes ownership).
           // For function/weakReference: retain only if lvalue.
           if case .reference(_) = arg.type {
-            // Reference args: always retain for struct ownership
-            addIndent()
-            buffer += "__koral_retain(\(argResult).control);\n"
+            // Reference args: retain only if lvalue (lvalue still holds original ref).
+            // For rvalue, ownership transfers directly — no retain needed.
+            if arg.valueCategory == .lvalue {
+              addIndent()
+              buffer += "__koral_retain(\(argResult).control);\n"
+            }
             finalArg = argResult
           } else {
             let argCopy = emitTempCopyOrMove(type: arg.type, source: argResult, isLvalue: arg.valueCategory == .lvalue)

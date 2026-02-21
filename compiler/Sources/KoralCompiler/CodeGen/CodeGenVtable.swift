@@ -497,8 +497,11 @@ extension CodeGen {
     let isVoidReturn = (returnCType == "void")
     if isVoidReturn {
       code += "    \(actualMethodCName)(\(callArgsStr));\n"
+      code += "    __koral_release(self_ref.control);\n"
     } else {
-      code += "    return \(actualMethodCName)(\(callArgsStr));\n"
+      code += "    \(returnCType) __koral_ret = \(actualMethodCName)(\(callArgsStr));\n"
+      code += "    __koral_release(self_ref.control);\n"
+      code += "    return __koral_ret;\n"
     }
     
     code += "}\n"
@@ -667,15 +670,18 @@ extension CodeGen {
     }
 
     // From T ref → trait object ref (zero allocation)
-    // Copy fields from Ref, set vtable, retain
+    // Copy fields from Ref, set vtable.
+    // Retain only for lvalue source (copy semantics); rvalue transfers ownership.
     addIndent()
     appendToBuffer("\(result).ptr = \(innerResult).ptr;\n")
     addIndent()
     appendToBuffer("\(result).control = \(innerResult).control;\n")
     addIndent()
     appendToBuffer("\(result).vtable = &\(vtableName);\n")
-    addIndent()
-    appendToBuffer("__koral_retain(\(result).control);\n")
+    if inner.valueCategory == .lvalue {
+      addIndent()
+      appendToBuffer("__koral_retain(\(result).control);\n")
+    }
 
     return result
   }
@@ -727,9 +733,17 @@ extension CodeGen {
     let vtableStructName = vtableStructCIdentifier(traitName: traitName, traitTypeArgs: traitTypeArgs)
     let vtVar = nextTempWithInit(cType: "const struct \(vtableStructName)*", initExpr: "(const struct \(vtableStructName)*)\(receiverResult).vtable")
 
-    // 5. Build argument list: construct struct Ref from TraitRef fields as first arg, then the rest
+    // 5. Build argument list: construct struct Ref from TraitRef fields as first arg, then the rest.
+    // Receiver follows the same copy/move rule as normal calls:
+    // - lvalue receiver: retain copied self
+    // - rvalue receiver: move ownership directly
     let sanitizedMethodName = sanitizeCIdentifier(methodName)
-    var allArgs = ["(struct Ref){\(receiverResult).ptr, \(receiverResult).control}"]
+    let selfArg = nextTempWithInit(cType: "struct Ref", initExpr: "(struct Ref){\(receiverResult).ptr, \(receiverResult).control}")
+    if receiver.valueCategory == .lvalue {
+      addIndent()
+      appendToBuffer("__koral_retain(\(selfArg).control);\n")
+    }
+    var allArgs = [selfArg]
     allArgs.append(contentsOf: argResults)
     let argsStr = allArgs.joined(separator: ", ")
 

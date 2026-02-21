@@ -1,60 +1,139 @@
 // ============================================================================
-// Koral Standard Library - OS Module
+// Koral Standard Library - OS Module (Process Operations + IO Support)
+// ============================================================================
+// This file provides process-related operations and IO support FFI declarations.
+// It is self-contained and does NOT depend on the std/os/ submodule.
+// File, directory, path, and environment operations live in std/os/ submodule.
 // ============================================================================
 
 // ============================================================================
 // FFI Declarations
 // ============================================================================
 
-// Opaque types
+// Opaque C FILE type (used by io.koral for print/read_line)
 foreign type CFile
-foreign type CDirHandle
-foreign type CDirEntry
 
-// Runtime C helpers (std/koral_runtime.c)
-foreign let koral_path_exists(path UInt8 ptr) Int32
-foreign let koral_is_file(path UInt8 ptr) Int32
-foreign let koral_is_dir(path UInt8 ptr) Int32
-foreign let koral_normalize_path(path UInt8 ptr, buf UInt8 ptr, size UInt) Int
-foreign let koral_path_separator() UInt8
-foreign let koral_opendir(path UInt8 ptr) CDirHandle ptr
-foreign let koral_readdir(dir CDirHandle ptr) CDirEntry ptr
-foreign let koral_closedir(dir CDirHandle ptr) Int32
-foreign let koral_dirent_name(entry CDirEntry ptr) UInt8 ptr
-foreign let koral_mkdir(path UInt8 ptr, mode UInt32) Int32
-foreign let koral_rmdir(path UInt8 ptr) Int32
-foreign let koral_getcwd(buf UInt8 ptr, size UInt) UInt8 ptr
-foreign let koral_errno_ptr() Int32 ptr
-foreign let koral_strerror(errnum Int32) UInt8 ptr
-
-// C stdlib file APIs
-foreign let fopen(path UInt8 ptr, mode UInt8 ptr) CFile ptr
-foreign let fclose(file CFile ptr) Int32
-foreign let fread(buf UInt8 ptr, size UInt, count UInt, file CFile ptr) UInt
+// Standard streams and IO (used by std/io.koral)
 foreign let fwrite(buf UInt8 ptr, size UInt, count UInt, file CFile ptr) UInt
-foreign let fgetc(file CFile ptr) Int
 foreign let fflush(file CFile ptr) Void
-foreign let fseek(file CFile ptr, offset Int64, whence Int32) Int32
-foreign let ftell(file CFile ptr) Int64
-foreign let koral_remove(path UInt8 ptr) Int32
-foreign let koral_rename(old UInt8 ptr, new UInt8 ptr) Int32
-
-// Standard streams
+foreign let fgetc(file CFile ptr) Int
 foreign let koral_stdin() CFile ptr
 foreign let koral_stdout() CFile ptr
 foreign let koral_stderr() CFile ptr
 
-// Environment + process
+// Buffered file I/O (for internal read_text / remove_file helpers)
+foreign let fopen(path UInt8 ptr, mode UInt8 ptr) CFile ptr
+foreign let fclose(file CFile ptr) Int32
+foreign let fread(buf UInt8 ptr, size UInt, count UInt, file CFile ptr) UInt
+foreign let fseek(file CFile ptr, offset Int64, whence Int32) Int32
+foreign let ftell(file CFile ptr) Int64
+
+// File system operations
+foreign let koral_remove(path UInt8 ptr) Int32
+
+// Path operations
+foreign let koral_normalize_path(path UInt8 ptr, buf UInt8 ptr, size UInt) Int
+foreign let koral_path_separator() UInt8
+
+// Environment variable operations
 foreign let koral_getenv(name UInt8 ptr) UInt8 ptr
-foreign let koral_setenv(name UInt8 ptr, value UInt8 ptr) Int32
+
+// Process operations
 foreign let koral_system(command UInt8 ptr) Int32
 public foreign let exit(code Int) Never
 public foreign let abort() Never
+
+// Error handling
+foreign let koral_errno_ptr() Int32 ptr
+foreign let koral_strerror(errnum Int32) UInt8 ptr
 
 // Command line args (runtime-managed)
 private foreign let koral_set_args(argc Int32, argv UInt8 ptr ptr) Void
 private foreign let koral_argc() Int32
 private foreign let koral_argv() UInt8 ptr ptr
+
+// ============================================================================
+// Internal Helpers (self-contained, no submodule dependency)
+// ============================================================================
+
+/// Get the last OS error as a String
+private let _get_last_error() String = {
+    let err = deptr koral_errno_ptr()
+    let msg = koral_strerror(err)
+    String.from_cstring(msg)
+}
+
+/// Normalize path (internal copy)
+private let _normalize_path(path String) String = {
+    let buf_size = path.count() + 1
+    let buf = [UInt8]alloc_memory(buf_size)
+    let len = koral_normalize_path(path.storage.data, buf, buf_size)
+    let result = String.from_bytes_unchecked(buf, (UInt)len)
+    dealloc_memory(buf)
+    result
+}
+
+/// Get platform path separator (internal copy)
+private let _path_separator() String = {
+    let sep = koral_path_separator()
+    let mut s = String.new()
+    s.push(sep)
+    s
+}
+
+/// Join two paths (internal copy)
+private let _join_path(base String, name String) String = {
+    if base.is_empty() then { return name }
+    if name.is_empty() then { return base }
+    let mut result = String.new()
+    result.push_string(base)
+    let sep = _path_separator()
+    if not base.ends_with("/") and not base.ends_with("\\") then {
+        result.push_string(sep)
+    }
+    result.push_string(name)
+    result
+}
+
+/// Get temp directory (internal copy)
+private let _temp_dir() String = {
+    let try_tmpdir = koral_getenv("TMPDIR".storage.data)
+    if try_tmpdir <> [UInt8]null_ptr() then { return String.from_cstring(try_tmpdir) }
+    let try_temp = koral_getenv("TEMP".storage.data)
+    if try_temp <> [UInt8]null_ptr() then { return String.from_cstring(try_temp) }
+    let try_tmp = koral_getenv("TMP".storage.data)
+    if try_tmp <> [UInt8]null_ptr() then { return String.from_cstring(try_tmp) }
+    "/tmp"
+}
+
+/// Read file as text (internal copy)
+private let _read_text(path String) [String]Result = {
+    let normalized = _normalize_path(path)
+    let mode = "rb"
+    let file = fopen(normalized.storage.data, mode.storage.data)
+    if file == [CFile]null_ptr() then {
+        return [String]Result.Error(ref _get_last_error())
+    }
+    fseek(file, 0, 2)
+    let size = (UInt)ftell(file)
+    fseek(file, 0, 0)
+    let buf = [UInt8]alloc_memory(size + 1)
+    let read_count = fread(buf, 1, size, file)
+    init_memory(buf + read_count, 0)
+    fclose(file)
+    let content = String.from_bytes_unchecked(buf, read_count)
+    dealloc_memory(buf)
+    [String]Result.Ok(content)
+}
+
+/// Remove file (internal copy)
+private let _remove_file(path String) [Void]Result = {
+    if koral_remove(path.storage.data) == 0 then {
+        [Void]Result.Ok({})
+    } else {
+        [Void]Result.Error(ref _get_last_error())
+    }
+}
 
 // ============================================================================
 // Types
@@ -80,364 +159,6 @@ given CommandResult {
 }
 
 // ============================================================================
-// File Operations
-// ============================================================================
-
-/// Read file content as string
-public let read_file(path String) [String]Result = {
-    let normalized = normalize_path(path)
-    let mode = "rb"
-    let file = fopen(normalized.storage.data, mode.storage.data)
-    if file == [CFile]null_ptr() then {
-        return [String]Result.Error(ref get_last_error())
-    }
-
-    fseek(file, 0, 2) // SEEK_END
-    let size = (UInt)ftell(file)
-    fseek(file, 0, 0) // SEEK_SET
-    let buf = [UInt8]alloc_memory(size + 1)
-    let read_count = fread(buf, 1, size, file)
-    init_memory(buf + read_count, 0)
-
-    fclose(file)
-
-    let content = String.from_bytes_unchecked(buf, read_count)
-    dealloc_memory(buf)
-    [String]Result.Ok(content)
-}
-
-/// Write string to file (overwrite)
-public let write_file(path String, content String) [Void]Result = {
-    let normalized = normalize_path(path)
-    let mode = "wb"
-    let file = fopen(normalized.storage.data, mode.storage.data)
-    if file == [CFile]null_ptr() then {
-        return [Void]Result.Error(ref get_last_error())
-    }
-
-    fwrite(content.storage.data, 1, content.count(), file)
-    fclose(file)
-    [Void]Result.Ok({})
-}
-
-/// Append string to file
-public let append_file(path String, content String) [Void]Result = {
-    let normalized = normalize_path(path)
-    let mode = "ab"
-    let file = fopen(normalized.storage.data, mode.storage.data)
-    if file == [CFile]null_ptr() then {
-        return [Void]Result.Error(ref get_last_error())
-    }
-
-    fwrite(content.storage.data, 1, content.count(), file)
-    fclose(file)
-    [Void]Result.Ok({})
-}
-
-/// Copy file
-public let copy_file(src String, dst String) [Void]Result = {
-    when read_file(src) is {
-        .Ok(content) then write_file(dst, content),
-        .Error(e) then [Void]Result.Error(e),
-    }
-}
-
-/// Remove file
-public let remove_file(path String) [Void]Result = {
-    if koral_remove(path.storage.data) == 0 then {
-        [Void]Result.Ok({})
-    } else {
-        [Void]Result.Error(ref get_last_error())
-    }
-}
-
-// ============================================================================
-// Directory Operations
-// ============================================================================
-
-/// Create single directory (parent must exist)
-public let create_dir(path String) [Void]Result = {
-    if koral_mkdir(path.storage.data, 493) == 0 then {
-        // 0755
-        [Void]Result.Ok({})
-    } else {
-        [Void]Result.Error(ref get_last_error())
-    }
-}
-
-/// Create directory recursively
-public let create_dir_all(path String) [Void]Result = {
-    let normalized = path.replace_all("\\", "/")
-    let parts = normalized.split("/")
-    let mut current = String.new()
-    let mut seeded = false
-
-    if normalized.starts_with("//") then {
-        current.push_string("//")
-        seeded = true
-    } else if normalized.starts_with("/") then {
-        current.push('/')
-        seeded = true
-    }
-
-    for part = parts then {
-        if part.is_empty() then {
-            continue
-        }
-        // Windows drive prefix (e.g., "C:") - treat as seeded root.
-        if not seeded and part.count() == 2 and part[1] == ':' then {
-            current.push_string(part)
-            seeded = true
-            continue
-        }
-        if not seeded and current.is_empty() then {
-            current.push_string(part)
-        } else {
-            if not current.ends_with("/") then {
-                current.push('/')
-            }
-            current.push_string(part)
-        }
-        seeded = true
-
-        if not path_exists(current) then {
-            if koral_mkdir(current.storage.data, 493) <> 0 then {
-                return [Void]Result.Error(ref get_last_error())
-            }
-        }
-    }
-    [Void]Result.Ok({})
-}
-
-/// Remove empty directory
-public let remove_dir(path String) [Void]Result = {
-    if koral_rmdir(path.storage.data) == 0 then {
-        [Void]Result.Ok({})
-    } else {
-        [Void]Result.Error(ref get_last_error())
-    }
-}
-
-/// Remove directory recursively
-public let remove_dir_all(path String) [Void]Result = {
-    when read_dir(path) is {
-        .Ok(entries) then {
-            for entry = entries then {
-                let full_path = join_path(path, entry)
-                if is_dir(full_path) then {
-                    when remove_dir_all(full_path) is {
-                        .Error(e) then {
-                            return [Void]Result.Error(e)
-                        },
-                        .Ok(_) then {},
-                    }
-                } else {
-                    when remove_file(full_path) is {
-                        .Error(e) then {
-                            return [Void]Result.Error(e)
-                        },
-                        .Ok(_) then {},
-                    }
-                }
-            }
-            remove_dir(path)
-        },
-        .Error(e) then [Void]Result.Error(e),
-    }
-}
-
-/// Read directory entries
-public let read_dir(path String) [[String]List]Result = {
-    let dir = koral_opendir(path.storage.data)
-    if dir == [CDirHandle]null_ptr() then {
-        return [[String]List]Result.Error(ref get_last_error())
-    }
-
-    let mut entries = [String]List.new()
-
-    while true then {
-        let entry = koral_readdir(dir)
-        if entry == [CDirEntry]null_ptr() then {
-            break
-        }
-
-        let name = String.from_cstring(koral_dirent_name(entry))
-        if name == "." or name == ".." then {
-            continue
-        }
-        entries.push(name)
-    }
-
-    koral_closedir(dir)
-    [[String]List]Result.Ok(entries)
-}
-
-/// Get current working directory
-public let current_dir() [String]Result = {
-    let buf = [UInt8]alloc_memory(4096)
-    let result = koral_getcwd(buf, 4096)
-    if result == [UInt8]null_ptr() then {
-        dealloc_memory(buf)
-        return [String]Result.Error(ref get_last_error())
-    }
-
-    let path = String.from_cstring(buf)
-    dealloc_memory(buf)
-    [String]Result.Ok(path)
-}
-
-// ============================================================================
-// Path Operations
-// ============================================================================
-
-/// Check if path exists
-public let path_exists(path String) Bool = koral_path_exists(path.storage.data) <> 0
-
-/// Check if path is file
-public let is_file(path String) Bool = koral_is_file(path.storage.data) <> 0
-
-/// Check if path is directory
-public let is_dir(path String) Bool = koral_is_dir(path.storage.data) <> 0
-
-/// Move or rename path
-public let move_path(src String, dst String) [Void]Result = {
-    if koral_rename(src.storage.data, dst.storage.data) == 0 then {
-        [Void]Result.Ok({})
-    } else {
-        [Void]Result.Error(ref get_last_error())
-    }
-}
-
-/// Join two paths
-public let join_path(base String, name String) String = {
-    if base.is_empty() then {
-        return name
-    }
-    if name.is_empty() then {
-        return base
-    }
-    if is_absolute(name) then {
-        return name
-    }
-
-    let mut result = String.new()
-    result.push_string(base)
-    let sep = path_separator()
-    if not base.ends_with("/") and not base.ends_with("\\") then {
-        result.push_string(sep)
-    }
-    result.push_string(name)
-    result
-}
-
-/// Get base name
-public let base_name(path String) [String]Option = {
-    if path.is_empty() then {
-        return [String]Option.None()
-    }
-    let normalized = path.replace_all("\\", "/")
-
-    let mut p = normalized
-    while p.ends_with("/") and p.count() > 1 then {
-        p = p.slice(0..<(p.count() - 1))
-    }
-
-    when p.find_last_index("/") is {
-        .Some(idx) then [String]Option.Some(p.slice((idx + 1)...)),
-        .None then [String]Option.Some(p),
-    }
-}
-
-/// Get directory name
-public let dir_name(path String) [String]Option = {
-    if path.is_empty() then {
-        return [String]Option.None()
-    }
-    let normalized = path.replace_all("\\", "/")
-
-    when normalized.find_last_index("/") is {
-        .Some(idx) then {
-            if idx == 0 then {
-                [String]Option.Some("/")
-            } else {
-                [String]Option.Some(normalized.slice(0..<idx))
-            }
-        },
-        .None then [String]Option.None(),
-    }
-}
-
-/// Get extension name
-public let ext_name(path String) [String]Option = {
-    when base_name(path) is {
-        .Some(name) then {
-            when name.find_last_index(".") is {
-                .Some(idx) then {
-                    if idx == 0 then {
-                        [String]Option.None()
-                    } else {
-                        [String]Option.Some(name.slice((idx + 1)...))
-                    }
-                },
-                .None then [String]Option.None(),
-            }
-        },
-        .None then [String]Option.None(),
-    }
-}
-
-/// Check if path is absolute
-public let is_absolute(path String) Bool = {
-    if path.is_empty() then {
-        return false
-    }
-    if path.starts_with("/") or path.starts_with("\\") then {
-        return true
-    }
-
-    if path.count() >= 3 then {
-        let c0 = path[0]
-        let c1 = path[1]
-        let c2 = path[2]
-        let is_letter = (c0 >= 65 and c0 <= 90) or (c0 >= 97 and c0 <= 122)
-        if is_letter and c1 == ':' and (c2 == '/' or c2 == '\\') then {
-            return true
-        }
-    }
-    false
-}
-
-/// Get platform path separator
-public let path_separator() String = {
-    let sep = koral_path_separator()
-    let mut s = String.new()
-    s.push(sep)
-    s
-}
-
-/// Normalize path to current platform
-public let normalize_path(path String) String = {
-    let buf_size = path.count() + 1
-    let buf = [UInt8]alloc_memory(buf_size)
-    let len = koral_normalize_path(path.storage.data, buf, buf_size)
-    let result = String.from_bytes_unchecked(buf, (UInt)len)
-    dealloc_memory(buf)
-    result
-}
-
-/// Convert to absolute path
-public let absolute_path(path String) [String]Result = {
-    if is_absolute(path) then {
-        return [String]Result.Ok(path)
-    }
-
-    when current_dir() is {
-        .Ok(cwd) then [String]Result.Ok(join_path(cwd, path)),
-        .Error(e) then [String]Result.Error(e),
-    }
-}
-
-// ============================================================================
 // Process Operations
 // ============================================================================
 
@@ -452,9 +173,9 @@ public let run_command(program String, args [String]List) [CommandResult]Result 
         cmd.push('"')
     }
 
-    let tmp = temp_dir()
-    let stdout_file = join_path(tmp, "koral_cmd_out")
-    let stderr_file = join_path(tmp, "koral_cmd_err")
+    let tmp = _temp_dir()
+    let stdout_file = _join_path(tmp, "koral_cmd_out")
+    let stderr_file = _join_path(tmp, "koral_cmd_err")
 
     let mut full_cmd = String.new()
     full_cmd.push_string(cmd)
@@ -465,17 +186,17 @@ public let run_command(program String, args [String]List) [CommandResult]Result 
 
     let code = koral_system(full_cmd.storage.data)
 
-    let stdout_content = when read_file(stdout_file) is {
+    let stdout_content = when _read_text(stdout_file) is {
         .Ok(s) then s,
         .Error(_) then String.zero(),
     }
-    let stderr_content = when read_file(stderr_file) is {
+    let stderr_content = when _read_text(stderr_file) is {
         .Ok(s) then s,
         .Error(_) then String.zero(),
     }
 
-    koral_remove(stdout_file.storage.data)
-    koral_remove(stderr_file.storage.data)
+    _remove_file(stdout_file)
+    _remove_file(stderr_file)
 
     [CommandResult]Result.Ok(CommandResult((Int)code, stdout_content, stderr_content))
 }
@@ -491,78 +212,4 @@ public let args() [String]List = {
         i += 1
     }
     result
-}
-
-// ============================================================================
-// Environment Operations
-// ============================================================================
-
-/// Get environment variable
-public let get_env(name String) [String]Option = {
-    let value = koral_getenv(name.storage.data)
-    if value == [UInt8]null_ptr() then {
-        [String]Option.None()
-    } else {
-        [String]Option.Some(String.from_cstring(value))
-    }
-}
-
-/// Set environment variable
-public let set_env(name String, value String) Void = {
-    koral_setenv(name.storage.data, value.storage.data);
-}
-
-/// Get home directory
-public let home_dir() [String]Option = {
-    when get_env("HOME") is {
-        .Some(v) then [String]Option.Some(v),
-        .None then {
-            when get_env("USERPROFILE") is {
-                .Some(v) then [String]Option.Some(v),
-                .None then {
-                    when get_env("HOMEDRIVE") is {
-                        .Some(drive) then {
-                            when get_env("HOMEPATH") is {
-                                .Some(path) then {
-                                    let mut s = String.new()
-                                    s.push_string(drive)
-                                    s.push_string(path)
-                                    [String]Option.Some(s)
-                                },
-                                .None then [String]Option.None(),
-                            }
-                        },
-                        .None then [String]Option.None(),
-                    }
-                },
-            }
-        },
-    }
-}
-
-/// Get temp directory
-public let temp_dir() String = {
-    when get_env("TMPDIR") is {
-        .Some(dir) then dir,
-        .None then {
-            when get_env("TEMP") is {
-                .Some(dir) then dir,
-                .None then {
-                    when get_env("TMP") is {
-                        .Some(dir) then dir,
-                        .None then "/tmp",
-                    }
-                },
-            }
-        },
-    }
-}
-
-// ============================================================================
-// Helpers
-// ============================================================================
-private let get_last_error() String = {
-    let err = deptr koral_errno_ptr()
-    let msg = koral_strerror(err)
-    String.from_cstring(msg)
 }

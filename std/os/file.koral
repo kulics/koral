@@ -1,0 +1,247 @@
+// ============================================================================
+// std.os - OpenMode, FileStorage, File Types
+// ============================================================================
+// Provides: OpenMode enum, FileStorage internal type, File type
+// Access via: using std.os
+// ============================================================================
+
+// ============================================================================
+// FFI Declarations (forward declaration for drop semantics)
+// ============================================================================
+
+/// Close a file descriptor (POSIX close wrapper)
+foreign let koral_close(fd Int32) Int32
+
+/// Read from a file descriptor (POSIX read wrapper, unbuffered)
+foreign let koral_read(fd Int32, buf UInt8 ptr, count UInt) Int64
+
+/// Write to a file descriptor (POSIX write wrapper, unbuffered)
+foreign let koral_write(fd Int32, buf UInt8 ptr, count UInt) Int64
+
+/// Sync file data to disk (POSIX fsync wrapper)
+foreign let koral_fsync(fd Int32) Int32
+
+/// Seek within a file (POSIX lseek wrapper)
+foreign let koral_lseek(fd Int32, offset Int64, whence Int32) Int64
+
+/// File locking (cross-platform flock/LockFileEx wrapper)
+/// operation: 1=LOCK_SH, 2=LOCK_EX, 4=LOCK_NB (combinable), 8=LOCK_UN
+foreign let koral_flock(fd Int32, operation Int32) Int32
+
+/// Check if current errno is EWOULDBLOCK (cross-platform)
+/// Returns non-zero if errno is EWOULDBLOCK
+foreign let koral_errno_is_wouldblock() Int32
+
+// ============================================================================
+// OpenMode Enum
+// ============================================================================
+
+/// File open mode enumeration
+public type OpenMode {
+    Read(),          // O_RDONLY — read-only
+    Write(),         // O_WRONLY | O_CREAT | O_TRUNC — write-only (overwrite/create)
+    Create(),        // O_WRONLY | O_CREAT | O_EXCL — create new file (fails if exists)
+    Append(),        // O_WRONLY | O_CREAT | O_APPEND — append
+    ReadWrite(),     // O_RDWR — read-write (file must exist)
+}
+
+// ============================================================================
+// FileStorage Type (internal)
+// ============================================================================
+
+/// Internal file storage holding the file descriptor and path.
+/// Responsible for closing the fd via drop when the last reference is released.
+type FileStorage(fd Int32, path String)
+
+given FileStorage {
+    /// Automatically close the file descriptor when FileStorage is dropped.
+    /// Only closes when fd >= 0 (valid file descriptor).
+    __drop(self ref) Void = {
+        if self.fd >= 0 then {
+            koral_close(self.fd)
+        }
+    }
+}
+
+
+// ============================================================================
+// FFI Declarations for File metadata queries
+// ============================================================================
+
+/// Query file metadata via file descriptor (fstat wrapper)
+foreign let koral_fstat(fd Int32, out KoralStatResult ptr) Int32
+
+/// Get pointer to errno value
+foreign let koral_errno_ptr() Int32 ptr
+
+/// Get error message string from errno
+foreign let koral_strerror(errnum Int32) UInt8 ptr
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/// Get the last OS error as a String
+private let get_last_error() String = {
+    let err = deptr koral_errno_ptr()
+    let msg = koral_strerror(err)
+    String.from_cstring(msg)
+}
+
+// ============================================================================
+// File Type
+// ============================================================================
+
+/// File handle type.
+/// Internally holds a FileStorage ref, shared via reference counting.
+/// The file descriptor is automatically closed when the last reference is released.
+/// Unbuffered design: directly wraps the file descriptor (fd).
+/// For buffered I/O, wrap with std.io BufReader/BufWriter.
+public type File(private storage FileStorage ref)
+
+given File {
+    /// Get the file path (returns the normalized path from when the file was opened).
+    /// Does not resolve symlinks or relative paths; use canonicalize_path for that.
+    public path(self) String = self.storage.path
+
+    /// Get file metadata by querying via the file descriptor (no path needed).
+    public info(self) [FileInfo]Result = {
+        let mut stat_buf = KoralStatResult(0, 0, 0, 0, 0, 0, 0, 0, 0)
+        let result = koral_fstat(self.storage.fd, ptr stat_buf)
+        if result <> 0 then {
+            return [FileInfo]Result.Error(ref get_last_error())
+        }
+        let ft = when stat_buf.file_type is {
+            0 then FileType.RegularFile(),
+            1 then FileType.Directory(),
+            2 then FileType.Symlink(),
+            _ then FileType.Other(),
+        }
+        [FileInfo]Result.Ok(FileInfo(
+            (UInt64)stat_buf.size,
+            ft,
+            Permission.from_mode(stat_buf.permissions),
+            Duration(stat_buf.modified_secs, stat_buf.modified_nanos),
+            Duration(stat_buf.accessed_secs, stat_buf.accessed_nanos),
+            Duration(stat_buf.created_secs, stat_buf.created_nanos)
+        ))
+    }
+
+    // ---- Reader trait implementation ----
+    // Unbuffered: directly calls POSIX read, errors returned immediately
+
+    public read(self, buf io.Buffer) [UInt]Result = {
+        let available = buf.writable()
+        if available == 0 then {
+            return [UInt]Result.Ok(0)
+        }
+        let n = koral_read(self.storage.fd, buf.write_ptr(), available)
+        if n < 0 then {
+            return [UInt]Result.Error(ref get_last_error())
+        }
+        buf.advance_write((UInt)n)
+        [UInt]Result.Ok((UInt)n)
+    }
+
+    // ---- Writer trait implementation ----
+    // Unbuffered: directly calls POSIX write, errors returned immediately
+
+    public write(self, buf io.Buffer) [UInt]Result = {
+        let to_write = buf.readable()
+        if to_write == 0 then {
+            return [UInt]Result.Ok(0)
+        }
+        let n = koral_write(self.storage.fd, buf.read_ptr(), to_write)
+        if n < 0 then {
+            return [UInt]Result.Error(ref get_last_error())
+        }
+        buf.advance_read((UInt)n)
+        [UInt]Result.Ok((UInt)n)
+    }
+
+    /// flush is a no-op on unbuffered File (data is already in kernel buffer).
+    /// Exists to satisfy the Writer trait interface.
+    public flush(self) [Void]Result = [Void]Result.Ok({})
+
+    /// Sync file data to disk (fsync, ensures physical persistence).
+    public sync(self) [Void]Result = {
+        let result = koral_fsync(self.storage.fd)
+        if result <> 0 then {
+            return [Void]Result.Error(ref get_last_error())
+        }
+        [Void]Result.Ok({})
+    }
+
+    // ---- Seeker trait implementation ----
+
+    public seek(self, pos io.SeekPos) [UInt64]Result = {
+        let mut offset Int64 = 0
+        let mut whence Int32 = 0
+        when pos is {
+            .Start(o) then { offset = (Int64)o; whence = 0 },
+            .Current(o) then { offset = o; whence = 1 },
+            .End(o) then { offset = o; whence = 2 },
+        }
+        let new_pos = koral_lseek(self.storage.fd, offset, whence)
+        if new_pos < 0 then {
+            return [UInt64]Result.Error(ref get_last_error())
+        }
+        [UInt64]Result.Ok((UInt64)new_pos)
+    }
+
+    // ---- File locking operations ----
+    // Based on flock(2) (Unix) / LockFileEx (Windows), whole-file advisory lock
+
+    /// Acquire an exclusive lock (blocking, waits until acquired)
+    public lock_exclusive(self) [Void]Result = {
+        let result = koral_flock(self.storage.fd, 2) // LOCK_EX
+        if result <> 0 then {
+            return [Void]Result.Error(ref get_last_error())
+        }
+        [Void]Result.Ok({})
+    }
+
+    /// Acquire a shared lock (blocking, waits until acquired)
+    public lock_shared(self) [Void]Result = {
+        let result = koral_flock(self.storage.fd, 1) // LOCK_SH
+        if result <> 0 then {
+            return [Void]Result.Error(ref get_last_error())
+        }
+        [Void]Result.Ok({})
+    }
+
+    /// Try to acquire an exclusive lock (non-blocking)
+    /// Returns Ok(true) if acquired, Ok(false) if lock is held (EWOULDBLOCK), Error for system errors
+    public try_lock_exclusive(self) [Bool]Result = {
+        let result = koral_flock(self.storage.fd, 6) // LOCK_EX | LOCK_NB
+        if result == 0 then {
+            return [Bool]Result.Ok(true)
+        }
+        if koral_errno_is_wouldblock() <> 0 then {
+            return [Bool]Result.Ok(false)
+        }
+        [Bool]Result.Error(ref get_last_error())
+    }
+
+    /// Try to acquire a shared lock (non-blocking)
+    /// Returns Ok(true) if acquired, Ok(false) if lock is held (EWOULDBLOCK), Error for system errors
+    public try_lock_shared(self) [Bool]Result = {
+        let result = koral_flock(self.storage.fd, 5) // LOCK_SH | LOCK_NB
+        if result == 0 then {
+            return [Bool]Result.Ok(true)
+        }
+        if koral_errno_is_wouldblock() <> 0 then {
+            return [Bool]Result.Ok(false)
+        }
+        [Bool]Result.Error(ref get_last_error())
+    }
+
+    /// Release the lock
+    public unlock(self) [Void]Result = {
+        let result = koral_flock(self.storage.fd, 8) // LOCK_UN
+        if result <> 0 then {
+            return [Void]Result.Error(ref get_last_error())
+        }
+        [Void]Result.Ok({})
+    }
+}

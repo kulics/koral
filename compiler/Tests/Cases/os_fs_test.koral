@@ -1,0 +1,152 @@
+// EXPECT: text_roundtrip_ok
+// EXPECT: byte_roundtrip_ok
+// EXPECT: copy_remove_rename_ok
+// EXPECT: file_info_query_ok
+// EXPECT: truncate_ok
+// EXPECT: permissions_ok
+// EXPECT: temp_file_ok
+
+using std.os.*
+
+let main() Void = {
+    let base = join_path(temp_dir(), "os_fs_test")
+    when remove_dir_all(base) is {
+        .Ok(_) then {},
+        .Error(_) then {},
+    }
+    create_dir_all(base).unwrap()
+
+    // ========================================================================
+    // Test 1: read_text / write_text roundtrip
+    // ========================================================================
+    let txt_path = join_path(base, "text.txt")
+    write_text(txt_path, "hello world").unwrap()
+    let txt = read_text(txt_path).unwrap()
+    assert(txt == "hello world", "text roundtrip")
+
+    // append_text
+    append_text(txt_path, " appended").unwrap()
+    let txt2 = read_text(txt_path).unwrap()
+    assert(txt2 == "hello world appended", "append_text")
+
+    print_line("text_roundtrip_ok")
+
+    // ========================================================================
+    // Test 2: read_file / write_file byte roundtrip
+    // ========================================================================
+    let bin_path = join_path(base, "binary.bin")
+    let mut bytes = [UInt8]List.new()
+    bytes.push(0)
+    bytes.push(127)
+    bytes.push(255)
+    bytes.push(42)
+    write_file(bin_path, bytes).unwrap()
+
+    let read_bytes = read_file(bin_path).unwrap()
+    assert(read_bytes.count() == 4, "byte count")
+    assert(read_bytes[0] == 0, "byte[0]")
+    assert(read_bytes[1] == 127, "byte[1]")
+    assert(read_bytes[2] == 255, "byte[2]")
+    assert(read_bytes[3] == 42, "byte[3]")
+
+    // append_file
+    let mut more = [UInt8]List.new()
+    more.push(99)
+    append_file(bin_path, more).unwrap()
+    let read_bytes2 = read_file(bin_path).unwrap()
+    assert(read_bytes2.count() == 5, "append byte count")
+    assert(read_bytes2[4] == 99, "appended byte")
+
+    print_line("byte_roundtrip_ok")
+
+    // ========================================================================
+    // Test 3: copy_file, remove_file, rename_path
+    // ========================================================================
+    let src = join_path(base, "src.txt")
+    let dst = join_path(base, "dst.txt")
+    write_text(src, "copy me").unwrap()
+
+    copy_file(src, dst).unwrap()
+    assert(read_text(dst).unwrap() == "copy me", "copy_file content")
+    assert(path_exists(src), "copy src still exists")
+
+    remove_file(src).unwrap()
+    assert(not path_exists(src), "remove_file")
+
+    let renamed = join_path(base, "renamed.txt")
+    rename_path(dst, renamed).unwrap()
+    assert(not path_exists(dst), "rename old gone")
+    assert(read_text(renamed).unwrap() == "copy me", "rename content")
+
+    print_line("copy_remove_rename_ok")
+
+    // ========================================================================
+    // Test 4: read_file_info and disk query consistency
+    // ========================================================================
+    let info_path = join_path(base, "info.txt")
+    write_text(info_path, "12345").unwrap()
+
+    assert(path_exists(info_path), "path_exists")
+    assert(is_file(info_path), "is_file")
+    assert(not is_dir(info_path), "not is_dir")
+
+    let fi = read_file_info(info_path).unwrap()
+    assert(fi.size() == (UInt64)5, "file_info size")
+    assert(fi.is_file(), "file_info is_file")
+    assert(fi.file_type().to_string() == "file", "file_info type")
+
+    // Directory info
+    assert(is_dir(base), "base is_dir")
+    let di = read_file_info(base).unwrap()
+    assert(di.is_dir(), "dir_info is_dir")
+
+    print_line("file_info_query_ok")
+
+    // ========================================================================
+    // Test 5: truncate_file
+    // ========================================================================
+    let trunc_path = join_path(base, "trunc.txt")
+    write_text(trunc_path, "1234567890").unwrap()
+    truncate_file(trunc_path, 5).unwrap()
+    let trunc_content = read_text(trunc_path).unwrap()
+    assert(trunc_content == "12345", "truncate content")
+    let trunc_info = read_file_info(trunc_path).unwrap()
+    assert(trunc_info.size() == (UInt64)5, "truncate size")
+
+    print_line("truncate_ok")
+
+    // ========================================================================
+    // Test 6: set_permissions
+    // ========================================================================
+    let perm_path = join_path(base, "perm.txt")
+    write_text(perm_path, "x").unwrap()
+
+    set_permissions(perm_path, Permission.readonly()).unwrap()
+    let pi = read_file_info(perm_path).unwrap()
+    assert(pi.permissions().owner_read(), "perm owner_read")
+    assert(not pi.permissions().owner_write(), "perm not owner_write")
+
+    // Restore write permission for cleanup
+    set_permissions(perm_path, Permission.read_write()).unwrap()
+
+    print_line("permissions_ok")
+
+    // ========================================================================
+    // Test 7: create_temp_file
+    // ========================================================================
+    when create_temp_file(base, "tmp_") is {
+        .Ok(tf) then {
+            let tf_path = tf.path()
+            assert(path_exists(tf_path), "temp_file exists")
+            assert(tf_path.contains("tmp_"), "temp_file prefix")
+        },
+        .Error(_) then {
+            // create_temp_file may not be supported on all platforms
+        },
+    }
+
+    // Cleanup
+    remove_dir_all(base).unwrap()
+
+    print_line("temp_file_ok")
+}

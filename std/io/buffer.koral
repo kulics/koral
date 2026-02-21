@@ -172,6 +172,39 @@ given Buffer {
         self.storage.read_pos = 0
     }
 
+    // --- Low-level IO support ---
+    // These methods expose the internal read/write positions and raw pointers
+    // so that cross-module Reader/Writer implementations (e.g. std.os.File)
+    // can perform IO directly into/from the buffer without accessing
+    // protected storage fields.
+
+    /// Number of unread bytes (length - read_pos)
+    public readable(self) UInt = self.storage.length - self.storage.read_pos
+
+    /// Remaining writable space before reallocation (capacity - length)
+    public writable(self) UInt = self.storage.capacity - self.storage.length
+
+    /// Ensure at least `n` bytes of writable space, growing if needed
+    public reserve(self, n UInt) Void = self.ensure_space(n)
+
+    /// Raw pointer to the next unread byte (data + read_pos)
+    public read_ptr(self) UInt8 ptr = self.storage.data + self.storage.read_pos
+
+    /// Raw pointer to the next writable position (data + length)
+    public write_ptr(self) UInt8 ptr = self.storage.data + self.storage.length
+
+    /// Advance the read cursor by `n` bytes (read_pos += n)
+    /// Caller must ensure n <= readable()
+    public advance_read(self, n UInt) Void = {
+        self.storage.read_pos = self.storage.read_pos + n
+    }
+
+    /// Advance the write cursor by `n` bytes (length += n)
+    /// Caller must ensure n <= writable() (call reserve first)
+    public advance_write(self, n UInt) Void = {
+        self.storage.length = self.storage.length + n
+    }
+
     // --- Private helpers ---
 
     protected grow(self, additional UInt) Void = {
