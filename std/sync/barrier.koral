@@ -1,0 +1,72 @@
+// ============================================================================
+// std.sync - Barrier (Reusable Countdown Synchronization)
+// ============================================================================
+// Provides: Barrier (reusable countdown synchronization primitive)
+// Access via: using std.sync
+// ============================================================================
+// Design: Pure Koral implementation using Mutex + MutexCondvar.
+// Barrier is reusable: after wait() returns, depart() + wait() can be called
+// again. API naming follows C++ barrier/latch and Java Phaser conventions:
+// depart/arrive are natural antonym pairs (depart = register, arrive = done).
+// ============================================================================
+
+private type BarrierStorage(
+    mutex Mutex,
+    condvar MutexCondvar,
+    mut counter UInt,
+)
+
+public type Barrier(private storage BarrierStorage ref)
+
+given Barrier {
+    public new() Barrier = {
+        let mu = Mutex.new()
+        let cv = mu.condvar()
+        Barrier(ref BarrierStorage(mu, cv, 0))
+    }
+
+    public depart(self, count UInt) Void = {
+        self.storage.mutex.lock()
+        self.storage.counter = self.storage.counter + count
+        self.storage.mutex.unlock()
+    }
+
+    public arrive(self) Void = {
+        self.storage.mutex.lock()
+        if self.storage.counter == 0 then {
+            self.storage.mutex.unlock()
+            panic("Barrier.arrive: counter already zero")
+        }
+        self.storage.counter = self.storage.counter - 1
+        if self.storage.counter == 0 then {
+            self.storage.condvar.notify_all()
+        }
+        self.storage.mutex.unlock()
+    }
+
+    public arrive_and_wait(self) Void = {
+        self.storage.mutex.lock()
+        if self.storage.counter == 0 then {
+            self.storage.mutex.unlock()
+            panic("Barrier.arrive_and_wait: counter already zero")
+        }
+        self.storage.counter = self.storage.counter - 1
+        if self.storage.counter == 0 then {
+            self.storage.condvar.notify_all()
+            self.storage.mutex.unlock()
+            return
+        }
+        while self.storage.counter > 0 then {
+            self.storage.condvar.wait()
+        }
+        self.storage.mutex.unlock()
+    }
+
+    public wait(self) Void = {
+        self.storage.mutex.lock()
+        while self.storage.counter > 0 then {
+            self.storage.condvar.wait()
+        }
+        self.storage.mutex.unlock()
+    }
+}

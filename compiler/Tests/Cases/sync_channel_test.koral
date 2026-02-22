@@ -1,0 +1,194 @@
+// EXPECT: channel_send_recv_ok
+// EXPECT: channel_close_ok
+// EXPECT: channel_try_send_recv_ok
+// EXPECT: channel_mpmc_ok
+
+using std.sync.*
+using std.task.*
+using std.time.*
+
+let main() Void = {
+    // ========================================================================
+    // 1. send + recv basic flow — messages delivered correctly
+    // ========================================================================
+
+    let pair1 = [Int]make_channel(10)
+    let sender1 = pair1.first
+    let receiver1 = pair1.second
+
+    sender1.send(42)
+    sender1.send(100)
+
+    when receiver1.recv() is {
+        .Ok(v) then assert(v == 42, "first recv should be 42"),
+        .Error(_) then assert(false, "recv should not fail"),
+    }
+    when receiver1.recv() is {
+        .Ok(v) then assert(v == 100, "second recv should be 100"),
+        .Error(_) then assert(false, "recv should not fail"),
+    }
+    print_line("channel_send_recv_ok")
+
+    // ========================================================================
+    // 2. Channel close — Sender drop causes recv to return Error
+    // ========================================================================
+
+    let receiver2 = {
+        let pair2 = [Int]make_channel(10)
+        let receiver2 = pair2.second
+
+        let producer = [Void]run_task(() -> {
+            let s = pair2.first
+            s.send(1).unwrap()
+            s.send(2).unwrap()
+        })
+
+        producer.wait()
+        receiver2
+    }
+
+    when receiver2.try_recv() is {
+        .Ok(opt) then {
+            when opt is {
+                .Some(v) then assert(v == 1, "should get 1"),
+                .None then assert(false, "should get message 1"),
+            }
+        },
+        .Error(_) then assert(false, "try_recv should not error before draining"),
+    }
+    when receiver2.try_recv() is {
+        .Ok(opt) then {
+            when opt is {
+                .Some(v) then assert(v == 2, "should get 2"),
+                .None then assert(false, "should get message 2"),
+            }
+        },
+        .Error(_) then assert(false, "try_recv should not error before draining"),
+    }
+    print_line("channel_close_ok")
+
+    // ========================================================================
+    // 3. try_send / try_recv — non-blocking operations
+    // ========================================================================
+
+    let pair3 = [Int]make_channel(2)
+    let sender3 = pair3.first
+    let receiver3 = pair3.second
+
+    // try_recv on empty channel returns Ok(None)
+    when receiver3.try_recv() is {
+        .Ok(opt) then {
+            when opt is {
+                .Some(_) then assert(false, "try_recv on empty should be None"),
+                .None then {},
+            }
+        },
+        .Error(_) then assert(false, "try_recv should not error on open channel"),
+    }
+
+    // try_send should succeed when there's space
+    when sender3.try_send(10) is {
+        .Ok(sent) then assert(sent, "try_send should succeed with space"),
+        .Error(_) then assert(false, "try_send should not error"),
+    }
+    when sender3.try_send(20) is {
+        .Ok(sent) then assert(sent, "try_send should succeed with space"),
+        .Error(_) then assert(false, "try_send should not error"),
+    }
+
+    // try_send on full channel returns Ok(false)
+    when sender3.try_send(30) is {
+        .Ok(sent) then assert(not sent, "try_send on full should return false"),
+        .Error(_) then assert(false, "try_send should not error on open channel"),
+    }
+
+    // try_recv should get the messages in order
+    when receiver3.try_recv() is {
+        .Ok(opt) then {
+            when opt is {
+                .Some(v) then assert(v == 10, "try_recv should get 10"),
+                .None then assert(false, "try_recv should have message"),
+            }
+        },
+        .Error(_) then assert(false, "try_recv should not error"),
+    }
+    when receiver3.try_recv() is {
+        .Ok(opt) then {
+            when opt is {
+                .Some(v) then assert(v == 20, "try_recv should get 20"),
+                .None then assert(false, "try_recv should have message"),
+            }
+        },
+        .Error(_) then assert(false, "try_recv should not error"),
+    }
+    print_line("channel_try_send_recv_ok")
+
+    // ========================================================================
+    // 4. Multi-producer multi-consumer — no message loss
+    // ========================================================================
+    // 3 producers each send 10 values (0..9), total 30 messages, sum = 135.
+    // 2 consumers read using a shared counter to know when all 30 are consumed.
+
+    let pair4 = [Int]make_channel(100)
+    let sender4 = pair4.first
+    let receiver4 = pair4.second
+    let total_sum = AtomicInt.new(0)
+    let msg_count = AtomicInt.new(0)
+
+    let mut producers = [[Void]Thread]List.new()
+    let mut pi = 0
+    while pi < 3 then {
+        let s = sender4
+        producers.push([Void]run_task(() -> {
+            let mut v = 0
+            while v < 10 then {
+                s.send(v)
+                v = v + 1
+            }
+        }))
+        pi = pi + 1
+    }
+
+    let mut consumers = [[Void]Thread]List.new()
+    let mut ci = 0
+    while ci < 2 then {
+        let r = receiver4
+        consumers.push([Void]run_task(() -> {
+            while true then {
+                if msg_count.load() >= 30 then {
+                    break
+                }
+                when r.try_recv() is {
+                    .Ok(opt) then {
+                        when opt is {
+                            .Some(v) then {
+                                let _ = total_sum.fetch_add(v)
+                                let _ = msg_count.fetch_add(1)
+                            },
+                            .None then {
+                                thread_yield_now()
+                            },
+                        }
+                    },
+                    .Error(_) then { break },
+                }
+            }
+        }))
+        ci = ci + 1
+    }
+
+    let mut pk UInt = 0
+    while pk < producers.count() then {
+        producers.at(pk).wait()
+        pk = pk + 1
+    }
+
+    let mut ck UInt = 0
+    while ck < consumers.count() then {
+        consumers.at(ck).wait()
+        ck = ck + 1
+    }
+
+    assert(total_sum.load() == 135, "MPMC sum should be 135")
+    print_line("channel_mpmc_ok")
+}

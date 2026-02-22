@@ -1,0 +1,138 @@
+// EXPECT: mutex_lock_unlock_ok
+// EXPECT: mutex_try_lock_ok
+// EXPECT: mutex_multi_thread_counter_ok
+// EXPECT: mutex_condvar_notify_ok
+// EXPECT: mutex_condvar_notify_all_ok
+
+using std.sync.*
+using std.task.*
+using std.time.*
+
+let main() Void = {
+    // ========================================================================
+    // 1. Mutex basic lock/unlock — single thread lock + unlock without deadlock
+    // ========================================================================
+
+    let mu = Mutex.new()
+    mu.lock()
+    mu.unlock()
+    mu.lock()
+    mu.unlock()
+    print_line("mutex_lock_unlock_ok")
+
+    // ========================================================================
+    // 2. Mutex.try_lock — returns false when lock is held
+    // ========================================================================
+
+    let mu2 = Mutex.new()
+    assert(mu2.try_lock(), "try_lock on free mutex should return true")
+    let held_result = AtomicBool.new(false)
+    let t = [Void]run_task(() -> {
+        let got = mu2.try_lock()
+        if got then {
+            mu2.unlock()
+        }
+        held_result.store(got)
+    })
+    sleep(Duration.from_millis(20))
+    mu2.unlock()
+    t.wait()
+    assert(not held_result.load(), "try_lock should return false when lock is held")
+    print_line("mutex_try_lock_ok")
+
+    // ========================================================================
+    // 3. Multi-thread shared counter — 10 threads each add 1000, final = 10000
+    // ========================================================================
+
+    let counter_mu = Mutex.new()
+    let counter = AtomicInt.new(0)
+    let mut threads = [[Void]Thread]List.new()
+    let mut i = 0
+    while i < 10 then {
+        let m = counter_mu
+        let c = counter
+        threads.push([Void]run_task(() -> {
+            let mut j = 0
+            while j < 1000 then {
+                m.lock()
+                c.store(c.load() + 1)
+                m.unlock()
+                j = j + 1
+            }
+        }))
+        i = i + 1
+    }
+
+    let mut k UInt = 0
+    while k < threads.count() then {
+        threads.at(k).wait()
+        k = k + 1
+    }
+    assert(counter.load() == 10000, "counter should be 10000")
+    print_line("mutex_multi_thread_counter_ok")
+
+    // ========================================================================
+    // 4. MutexCondvar wait/notify — condvar correctly wakes waiting thread
+    // ========================================================================
+
+    let cv_mu = Mutex.new()
+    let cv = cv_mu.condvar()
+    let ready = AtomicBool.new(false)
+    let done = AtomicBool.new(false)
+
+    let waiter = [Void]run_task(() -> {
+        cv_mu.lock()
+        while not ready.load() then {
+            cv.wait()
+        }
+        done.store(true)
+        cv_mu.unlock()
+    })
+
+    sleep(Duration.from_millis(30))
+    cv_mu.lock()
+    ready.store(true)
+    cv.notify()
+    cv_mu.unlock()
+
+    waiter.wait()
+    assert(done.load(), "condvar notify should wake the waiting thread")
+    print_line("mutex_condvar_notify_ok")
+
+    // ========================================================================
+    // 5. MutexCondvar notify_all — wakes multiple waiting threads
+    // ========================================================================
+
+    let na_mu = Mutex.new()
+    let na_cv = na_mu.condvar()
+    let na_ready = AtomicBool.new(false)
+    let na_count = AtomicInt.new(0)
+
+    let mut na_threads = [[Void]Thread]List.new()
+    let mut ni = 0
+    while ni < 3 then {
+        na_threads.push([Void]run_task(() -> {
+            na_mu.lock()
+            while not na_ready.load() then {
+                na_cv.wait()
+            }
+            let _ = na_count.fetch_add(1)
+            na_mu.unlock()
+        }))
+        ni = ni + 1
+    }
+
+    sleep(Duration.from_millis(50))
+    na_mu.lock()
+    na_ready.store(true)
+    na_cv.notify_all()
+    na_mu.unlock()
+
+    let mut nk UInt = 0
+    while nk < na_threads.count() then {
+        na_threads.at(nk).wait()
+        nk = nk + 1
+    }
+    assert(na_count.load() == 3, "notify_all should wake all 3 threads")
+    print_line("mutex_condvar_notify_all_ok")
+}

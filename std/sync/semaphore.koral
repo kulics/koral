@@ -1,0 +1,54 @@
+// ============================================================================
+// std.sync - Semaphore (Counting Semaphore)
+// ============================================================================
+// Provides: Semaphore (counting semaphore for resource access control)
+// Access via: using std.sync
+// ============================================================================
+// Design: Pure Koral implementation using Mutex + MutexCondvar.
+// Controls the number of threads that can simultaneously access a shared
+// resource. acquire() blocks until a permit is available, release() returns
+// a permit and wakes one waiting thread.
+// ============================================================================
+
+private type SemaphoreStorage(
+    mutex Mutex,
+    condvar MutexCondvar,
+    mut permits UInt,
+)
+
+public type Semaphore(private storage SemaphoreStorage ref)
+
+given Semaphore {
+    public new(permits UInt) Semaphore = {
+        let mu = Mutex.new()
+        let cv = mu.condvar()
+        Semaphore(ref SemaphoreStorage(mu, cv, permits))
+    }
+
+    public acquire(self) Void = {
+        self.storage.mutex.lock()
+        while self.storage.permits == 0 then {
+            self.storage.condvar.wait()
+        }
+        self.storage.permits = self.storage.permits - 1
+        self.storage.mutex.unlock()
+    }
+
+    public try_acquire(self) Bool = {
+        self.storage.mutex.lock()
+        if self.storage.permits > 0 then {
+            self.storage.permits = self.storage.permits - 1
+            self.storage.mutex.unlock()
+            return true
+        }
+        self.storage.mutex.unlock()
+        false
+    }
+
+    public release(self) Void = {
+        self.storage.mutex.lock()
+        self.storage.permits = self.storage.permits + 1
+        self.storage.condvar.notify()
+        self.storage.mutex.unlock()
+    }
+}

@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <stdatomic.h>
 
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <regex.h>
@@ -2636,3 +2637,823 @@ fail:
     if (stderr_buf.data) free(stderr_buf.data);
     return -1;
 }
+
+// ============================================================================
+// Thread management (std.task)
+// ============================================================================
+
+#if !defined(_WIN32) && !defined(_WIN64)
+#include <pthread.h>
+#include <sched.h>
+#include <unistd.h>
+#endif
+
+// Koral closure ABI: the compiler generates closures as this struct, passed by value.
+struct __koral_Closure {
+    void* fn;
+    void* env;
+    void (*drop)(void*);
+};
+
+// Invoke a Koral closure: if env is NULL, call as void(*)(void); otherwise call as void(*)(void*).
+static void koral_closure_invoke(struct __koral_Closure* c) {
+    if (c->env == NULL) {
+        ((void(*)(void))(c->fn))();
+    } else {
+        ((void(*)(void*))(c->fn))(c->env);
+    }
+}
+
+// Retain a Koral closure environment.
+// Lambda env layout starts with `_Atomic intptr_t __refcount` in generated C.
+static void koral_closure_retain(struct __koral_Closure* c) {
+    if (!c->env) return;
+    _Atomic intptr_t* refcount = (_Atomic intptr_t*)c->env;
+    atomic_fetch_add(refcount, 1);
+}
+
+// Release a Koral closure environment with refcount semantics,
+// matching generated C's __koral_closure_release.
+static void koral_closure_release(struct __koral_Closure* c) {
+    if (!c->env) return;
+    _Atomic intptr_t* refcount = (_Atomic intptr_t*)c->env;
+    intptr_t prev = atomic_fetch_sub(refcount, 1);
+    if (prev == 1) {
+        if (c->drop) {
+            c->drop(c->env);
+        } else {
+            free(c->env);
+        }
+    }
+}
+
+// --- Thread trampoline context ---
+
+typedef struct {
+    struct __koral_Closure closure;
+    uint64_t* tid_ptr;       // pointer to out_tid (POSIX: written by new thread)
+#if !defined(_WIN32) && !defined(_WIN64)
+    volatile int tid_ready;  // atomic flag for POSIX synchronization
+#endif
+} KoralThreadArgs;
+
+#if defined(_WIN32) || defined(_WIN64)
+
+// --- Windows thread trampoline ---
+static DWORD WINAPI koral_thread_trampoline_win(LPVOID arg) {
+    KoralThreadArgs* args = (KoralThreadArgs*)arg;
+    koral_closure_invoke(&args->closure);
+    koral_closure_release(&args->closure);
+    free(args);
+    return 0;
+}
+
+int32_t koral_spawn_thread(void** out_handle, uint64_t* out_tid,
+                            struct __koral_Closure closure, uint64_t stack_size) {
+    KoralThreadArgs* args = (KoralThreadArgs*)malloc(sizeof(KoralThreadArgs));
+    if (!args) return -1;
+    args->closure = closure;
+    koral_closure_retain(&args->closure);
+    args->tid_ptr = out_tid;
+
+    SIZE_T win_stack_size = (stack_size > 0) ? (SIZE_T)stack_size : 0;
+    HANDLE h = CreateThread(NULL, win_stack_size, koral_thread_trampoline_win, args, 0, NULL);
+    if (h == NULL) {
+        koral_closure_release(&args->closure);
+        free(args);
+        return -1;
+    }
+    *out_handle = (void*)h;
+    *out_tid = (uint64_t)GetThreadId(h);
+    return 0;
+}
+
+int32_t koral_thread_join(void* handle) {
+    DWORD result = WaitForSingleObject((HANDLE)handle, INFINITE);
+    CloseHandle((HANDLE)handle);
+    return (result == WAIT_OBJECT_0) ? 0 : -1;
+}
+
+void koral_thread_detach(void* handle) {
+    CloseHandle((HANDLE)handle);
+}
+
+uint64_t koral_thread_current_id(void) {
+    return (uint64_t)GetCurrentThreadId();
+}
+
+void koral_thread_yield(void) {
+    SwitchToThread();
+}
+
+uint32_t koral_hardware_concurrency(void) {
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    return (uint32_t)si.dwNumberOfProcessors;
+}
+
+#else
+
+// --- POSIX thread trampoline ---
+static void* koral_thread_trampoline_posix(void* arg) {
+    KoralThreadArgs* args = (KoralThreadArgs*)arg;
+    // Write thread ID before calling the closure so the parent can read it.
+    *(args->tid_ptr) = (uint64_t)pthread_self();
+    __atomic_store_n(&args->tid_ready, 1, __ATOMIC_RELEASE);
+    koral_closure_invoke(&args->closure);
+    koral_closure_release(&args->closure);
+    free(args);
+    return NULL;
+}
+
+int32_t koral_spawn_thread(void** out_handle, uint64_t* out_tid,
+                            struct __koral_Closure closure, uint64_t stack_size) {
+    KoralThreadArgs* args = (KoralThreadArgs*)malloc(sizeof(KoralThreadArgs));
+    if (!args) return -1;
+    args->closure = closure;
+    koral_closure_retain(&args->closure);
+    args->tid_ptr = out_tid;
+    args->tid_ready = 0;
+
+    pthread_attr_t attr;
+    pthread_attr_t* attr_ptr = NULL;
+    if (stack_size > 0) {
+        pthread_attr_init(&attr);
+        pthread_attr_setstacksize(&attr, (size_t)stack_size);
+        attr_ptr = &attr;
+    }
+
+    pthread_t thread;
+    int err = pthread_create(&thread, attr_ptr, koral_thread_trampoline_posix, args);
+    if (attr_ptr) {
+        pthread_attr_destroy(&attr);
+    }
+    if (err != 0) {
+        koral_closure_release(&args->closure);
+        free(args);
+        return -1;
+    }
+    // Wait until the new thread has written its tid.
+    while (!__atomic_load_n(&args->tid_ready, __ATOMIC_ACQUIRE)) {
+        sched_yield();
+    }
+    *out_handle = (void*)thread;
+    return 0;
+}
+
+int32_t koral_thread_join(void* handle) {
+    return pthread_join((pthread_t)handle, NULL) == 0 ? 0 : -1;
+}
+
+void koral_thread_detach(void* handle) {
+    pthread_detach((pthread_t)handle);
+}
+
+uint64_t koral_thread_current_id(void) {
+    return (uint64_t)pthread_self();
+}
+
+void koral_thread_yield(void) {
+    sched_yield();
+}
+
+uint32_t koral_hardware_concurrency(void) {
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    return (n > 0) ? (uint32_t)n : 1;
+}
+
+#endif
+
+// ============================================================================
+// Timer context management (std.task)
+// ============================================================================
+
+typedef struct {
+    volatile int cancelled;
+#if defined(_WIN32) || defined(_WIN64)
+    HANDLE event;
+#else
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+#endif
+} KoralTimerContext;
+
+#if defined(_WIN32) || defined(_WIN64)
+
+void* koral_timer_context_create(void) {
+    KoralTimerContext* ctx = (KoralTimerContext*)malloc(sizeof(KoralTimerContext));
+    if (!ctx) return NULL;
+    ctx->cancelled = 0;
+    ctx->event = CreateEventA(NULL, TRUE, FALSE, NULL);  // manual-reset, initially non-signaled
+    if (ctx->event == NULL) {
+        free(ctx);
+        return NULL;
+    }
+    return (void*)ctx;
+}
+
+void koral_timer_context_cancel(void* raw) {
+    KoralTimerContext* ctx = (KoralTimerContext*)raw;
+    InterlockedExchange((volatile LONG*)&ctx->cancelled, 1);
+    SetEvent(ctx->event);
+}
+
+int32_t koral_timer_context_is_cancelled(void* raw) {
+    KoralTimerContext* ctx = (KoralTimerContext*)raw;
+    return (int32_t)(*(volatile int*)&ctx->cancelled);
+}
+
+void koral_timer_context_destroy(void* raw) {
+    KoralTimerContext* ctx = (KoralTimerContext*)raw;
+    CloseHandle(ctx->event);
+    free(ctx);
+}
+
+int32_t koral_timer_sleep(void* raw, int64_t secs, int64_t nanos) {
+    KoralTimerContext* ctx = (KoralTimerContext*)raw;
+    // Check if already cancelled before sleeping
+    if (*(volatile int*)&ctx->cancelled) return 1;
+    // Convert to milliseconds
+    DWORD timeout_ms = (DWORD)(secs * 1000 + nanos / 1000000);
+    DWORD result = WaitForSingleObject(ctx->event, timeout_ms);
+    if (result == WAIT_OBJECT_0) {
+        // Event was signaled (cancelled)
+        return 1;
+    }
+    // WAIT_TIMEOUT or other: check cancelled flag in case of spurious wake
+    if (*(volatile int*)&ctx->cancelled) return 1;
+    return 0;
+}
+
+#else
+
+void* koral_timer_context_create(void) {
+    KoralTimerContext* ctx = (KoralTimerContext*)malloc(sizeof(KoralTimerContext));
+    if (!ctx) return NULL;
+    ctx->cancelled = 0;
+    if (pthread_mutex_init(&ctx->mutex, NULL) != 0) {
+        free(ctx);
+        return NULL;
+    }
+    if (pthread_cond_init(&ctx->cond, NULL) != 0) {
+        pthread_mutex_destroy(&ctx->mutex);
+        free(ctx);
+        return NULL;
+    }
+    return (void*)ctx;
+}
+
+void koral_timer_context_cancel(void* raw) {
+    KoralTimerContext* ctx = (KoralTimerContext*)raw;
+    __atomic_store_n(&ctx->cancelled, 1, __ATOMIC_RELEASE);
+    pthread_mutex_lock(&ctx->mutex);
+    pthread_cond_signal(&ctx->cond);
+    pthread_mutex_unlock(&ctx->mutex);
+}
+
+int32_t koral_timer_context_is_cancelled(void* raw) {
+    KoralTimerContext* ctx = (KoralTimerContext*)raw;
+    return (int32_t)__atomic_load_n(&ctx->cancelled, __ATOMIC_ACQUIRE);
+}
+
+void koral_timer_context_destroy(void* raw) {
+    KoralTimerContext* ctx = (KoralTimerContext*)raw;
+    pthread_cond_destroy(&ctx->cond);
+    pthread_mutex_destroy(&ctx->mutex);
+    free(ctx);
+}
+
+int32_t koral_timer_sleep(void* raw, int64_t secs, int64_t nanos) {
+    KoralTimerContext* ctx = (KoralTimerContext*)raw;
+    // Check if already cancelled before sleeping
+    if (__atomic_load_n(&ctx->cancelled, __ATOMIC_ACQUIRE)) return 1;
+
+    // Compute absolute timeout using CLOCK_REALTIME
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += (time_t)secs;
+    ts.tv_nsec += (long)nanos;
+    // Normalize: carry over nanoseconds to seconds
+    if (ts.tv_nsec >= 1000000000L) {
+        ts.tv_sec += ts.tv_nsec / 1000000000L;
+        ts.tv_nsec = ts.tv_nsec % 1000000000L;
+    }
+
+    pthread_mutex_lock(&ctx->mutex);
+    while (!__atomic_load_n(&ctx->cancelled, __ATOMIC_ACQUIRE)) {
+        int rc = pthread_cond_timedwait(&ctx->cond, &ctx->mutex, &ts);
+        if (rc == ETIMEDOUT) {
+            // Timeout expired — slept the full duration
+            pthread_mutex_unlock(&ctx->mutex);
+            // Final check: might have been cancelled just before timeout
+            if (__atomic_load_n(&ctx->cancelled, __ATOMIC_ACQUIRE)) return 1;
+            return 0;
+        }
+        // Spurious wakeup or signal: loop back and re-check cancelled flag
+    }
+    pthread_mutex_unlock(&ctx->mutex);
+    return 1;  // cancelled
+}
+
+#endif
+
+// ============================================================================
+// Sync primitives: Mutex, RWLock, Condvar, Atomics
+// ============================================================================
+
+// --- Condvar struct for POSIX (needs internal mutex + generation for rwlock wait) ---
+#if !defined(_WIN32) && !defined(_WIN64)
+
+typedef struct {
+    pthread_cond_t cond;
+    pthread_mutex_t internal_mutex;  // for rwlock wait
+    volatile int generation;         // for rwlock wait
+} KoralCondvar;
+
+#else
+
+typedef struct {
+    CONDITION_VARIABLE cv;
+} KoralCondvar;
+
+#endif
+
+// ============================================================================
+// Mutex
+// ============================================================================
+
+#if defined(_WIN32) || defined(_WIN64)
+
+void* koral_mutex_create(void) {
+    CRITICAL_SECTION* cs = (CRITICAL_SECTION*)malloc(sizeof(CRITICAL_SECTION));
+    if (!cs) return NULL;
+    InitializeCriticalSection(cs);
+    return (void*)cs;
+}
+
+void koral_mutex_destroy(void* mutex) {
+    if (!mutex) return;
+    DeleteCriticalSection((CRITICAL_SECTION*)mutex);
+    free(mutex);
+}
+
+void koral_mutex_lock(void* mutex) {
+    EnterCriticalSection((CRITICAL_SECTION*)mutex);
+}
+
+int32_t koral_mutex_try_lock(void* mutex) {
+    return TryEnterCriticalSection((CRITICAL_SECTION*)mutex) ? 1 : 0;
+}
+
+void koral_mutex_unlock(void* mutex) {
+    LeaveCriticalSection((CRITICAL_SECTION*)mutex);
+}
+
+#else
+
+void* koral_mutex_create(void) {
+    pthread_mutex_t* m = (pthread_mutex_t*)malloc(sizeof(pthread_mutex_t));
+    if (!m) return NULL;
+    if (pthread_mutex_init(m, NULL) != 0) {
+        free(m);
+        return NULL;
+    }
+    return (void*)m;
+}
+
+void koral_mutex_destroy(void* mutex) {
+    if (!mutex) return;
+    pthread_mutex_destroy((pthread_mutex_t*)mutex);
+    free(mutex);
+}
+
+void koral_mutex_lock(void* mutex) {
+    pthread_mutex_lock((pthread_mutex_t*)mutex);
+}
+
+int32_t koral_mutex_try_lock(void* mutex) {
+    return pthread_mutex_trylock((pthread_mutex_t*)mutex) == 0 ? 1 : 0;
+}
+
+void koral_mutex_unlock(void* mutex) {
+    pthread_mutex_unlock((pthread_mutex_t*)mutex);
+}
+
+#endif
+
+
+// ============================================================================
+// RWLock
+// ============================================================================
+
+#if defined(_WIN32) || defined(_WIN64)
+
+void* koral_rwlock_create(void) {
+    SRWLOCK* lock = (SRWLOCK*)malloc(sizeof(SRWLOCK));
+    if (!lock) return NULL;
+    InitializeSRWLock(lock);
+    return (void*)lock;
+}
+
+void koral_rwlock_destroy(void* rwlock) {
+    if (!rwlock) return;
+    // SRWLOCK needs no destroy
+    free(rwlock);
+}
+
+void koral_rwlock_read_lock(void* rwlock) {
+    AcquireSRWLockShared((SRWLOCK*)rwlock);
+}
+
+void koral_rwlock_read_unlock(void* rwlock) {
+    ReleaseSRWLockShared((SRWLOCK*)rwlock);
+}
+
+void koral_rwlock_write_lock(void* rwlock) {
+    AcquireSRWLockExclusive((SRWLOCK*)rwlock);
+}
+
+void koral_rwlock_write_unlock(void* rwlock) {
+    ReleaseSRWLockExclusive((SRWLOCK*)rwlock);
+}
+
+int32_t koral_rwlock_try_read_lock(void* rwlock) {
+    return TryAcquireSRWLockShared((SRWLOCK*)rwlock) ? 1 : 0;
+}
+
+int32_t koral_rwlock_try_write_lock(void* rwlock) {
+    return TryAcquireSRWLockExclusive((SRWLOCK*)rwlock) ? 1 : 0;
+}
+
+#else
+
+void* koral_rwlock_create(void) {
+    pthread_rwlock_t* rw = (pthread_rwlock_t*)malloc(sizeof(pthread_rwlock_t));
+    if (!rw) return NULL;
+    pthread_rwlockattr_t attr;
+    pthread_rwlockattr_init(&attr);
+#ifdef PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP
+    pthread_rwlockattr_setkind_np(&attr, PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP);
+#endif
+    if (pthread_rwlock_init(rw, &attr) != 0) {
+        pthread_rwlockattr_destroy(&attr);
+        free(rw);
+        return NULL;
+    }
+    pthread_rwlockattr_destroy(&attr);
+    return (void*)rw;
+}
+
+void koral_rwlock_destroy(void* rwlock) {
+    if (!rwlock) return;
+    pthread_rwlock_destroy((pthread_rwlock_t*)rwlock);
+    free(rwlock);
+}
+
+void koral_rwlock_read_lock(void* rwlock) {
+    pthread_rwlock_rdlock((pthread_rwlock_t*)rwlock);
+}
+
+void koral_rwlock_read_unlock(void* rwlock) {
+    pthread_rwlock_unlock((pthread_rwlock_t*)rwlock);
+}
+
+void koral_rwlock_write_lock(void* rwlock) {
+    pthread_rwlock_wrlock((pthread_rwlock_t*)rwlock);
+}
+
+void koral_rwlock_write_unlock(void* rwlock) {
+    pthread_rwlock_unlock((pthread_rwlock_t*)rwlock);
+}
+
+int32_t koral_rwlock_try_read_lock(void* rwlock) {
+    return pthread_rwlock_tryrdlock((pthread_rwlock_t*)rwlock) == 0 ? 1 : 0;
+}
+
+int32_t koral_rwlock_try_write_lock(void* rwlock) {
+    return pthread_rwlock_trywrlock((pthread_rwlock_t*)rwlock) == 0 ? 1 : 0;
+}
+
+#endif
+
+
+// ============================================================================
+// Condvar
+// ============================================================================
+
+#if defined(_WIN32) || defined(_WIN64)
+
+void* koral_condvar_create(void) {
+    KoralCondvar* cv = (KoralCondvar*)malloc(sizeof(KoralCondvar));
+    if (!cv) return NULL;
+    InitializeConditionVariable(&cv->cv);
+    return (void*)cv;
+}
+
+void koral_condvar_destroy(void* raw) {
+    if (!raw) return;
+    // CONDITION_VARIABLE needs no destroy
+    free(raw);
+}
+
+void koral_condvar_wait(void* raw, void* mutex) {
+    KoralCondvar* cv = (KoralCondvar*)raw;
+    SleepConditionVariableCS(&cv->cv, (CRITICAL_SECTION*)mutex, INFINITE);
+}
+
+void koral_condvar_signal(void* raw) {
+    KoralCondvar* cv = (KoralCondvar*)raw;
+    WakeConditionVariable(&cv->cv);
+}
+
+void koral_condvar_broadcast(void* raw) {
+    KoralCondvar* cv = (KoralCondvar*)raw;
+    WakeAllConditionVariable(&cv->cv);
+}
+
+void koral_condvar_wait_rwlock(void* raw, void* rwlock) {
+    KoralCondvar* cv = (KoralCondvar*)raw;
+    // Last parameter 0 = exclusive mode (CONDITION_VARIABLE_LOCKMODE_SHARED not set)
+    SleepConditionVariableSRW(&cv->cv, (SRWLOCK*)rwlock, INFINITE, 0);
+}
+
+#else
+
+void* koral_condvar_create(void) {
+    KoralCondvar* cv = (KoralCondvar*)malloc(sizeof(KoralCondvar));
+    if (!cv) return NULL;
+    if (pthread_cond_init(&cv->cond, NULL) != 0) {
+        free(cv);
+        return NULL;
+    }
+    if (pthread_mutex_init(&cv->internal_mutex, NULL) != 0) {
+        pthread_cond_destroy(&cv->cond);
+        free(cv);
+        return NULL;
+    }
+    cv->generation = 0;
+    return (void*)cv;
+}
+
+void koral_condvar_destroy(void* raw) {
+    if (!raw) return;
+    KoralCondvar* cv = (KoralCondvar*)raw;
+    pthread_cond_destroy(&cv->cond);
+    pthread_mutex_destroy(&cv->internal_mutex);
+    free(cv);
+}
+
+void koral_condvar_wait(void* raw, void* mutex) {
+    KoralCondvar* cv = (KoralCondvar*)raw;
+    // Standard condvar wait with external mutex (pthread_mutex_t)
+    pthread_cond_wait(&cv->cond, (pthread_mutex_t*)mutex);
+}
+
+void koral_condvar_signal(void* raw) {
+    KoralCondvar* cv = (KoralCondvar*)raw;
+    pthread_mutex_lock(&cv->internal_mutex);
+    cv->generation++;
+    pthread_cond_signal(&cv->cond);
+    pthread_mutex_unlock(&cv->internal_mutex);
+}
+
+void koral_condvar_broadcast(void* raw) {
+    KoralCondvar* cv = (KoralCondvar*)raw;
+    pthread_mutex_lock(&cv->internal_mutex);
+    cv->generation++;
+    pthread_cond_broadcast(&cv->cond);
+    pthread_mutex_unlock(&cv->internal_mutex);
+}
+
+void koral_condvar_wait_rwlock(void* raw, void* rwlock) {
+    KoralCondvar* cv = (KoralCondvar*)raw;
+    // POSIX: pthread_cond_wait only works with pthread_mutex_t, not pthread_rwlock_t.
+    // Use internal mutex + generation counter to avoid lost wakeups.
+    pthread_mutex_lock(&cv->internal_mutex);
+    int my_gen = cv->generation;
+    // Release the write lock before waiting
+    pthread_rwlock_unlock((pthread_rwlock_t*)rwlock);
+    // Wait on internal cond+mutex until generation changes
+    while (my_gen == cv->generation) {
+        pthread_cond_wait(&cv->cond, &cv->internal_mutex);
+    }
+    pthread_mutex_unlock(&cv->internal_mutex);
+    // Re-acquire the write lock
+    pthread_rwlock_wrlock((pthread_rwlock_t*)rwlock);
+}
+
+#endif
+
+
+// ============================================================================
+// Atomic Operations
+// ============================================================================
+
+// --- i32 atomics (used by AtomicBool) ---
+
+#if defined(_WIN32) || defined(_WIN64)
+
+int32_t koral_atomic_load_i32(int32_t* ptr) {
+    // Read via InterlockedCompareExchange to get a seq_cst load
+    return InterlockedCompareExchange((volatile LONG*)ptr, 0, 0);
+}
+
+void koral_atomic_store_i32(int32_t* ptr, int32_t value) {
+    InterlockedExchange((volatile LONG*)ptr, (LONG)value);
+}
+
+int32_t koral_atomic_swap_i32(int32_t* ptr, int32_t value) {
+    return (int32_t)InterlockedExchange((volatile LONG*)ptr, (LONG)value);
+}
+
+int32_t koral_atomic_cas_i32(int32_t* ptr, int32_t expected, int32_t desired) {
+    LONG old = InterlockedCompareExchange((volatile LONG*)ptr, (LONG)desired, (LONG)expected);
+    return old == (LONG)expected ? 1 : 0;
+}
+
+#else
+
+int32_t koral_atomic_load_i32(int32_t* ptr) {
+    return __atomic_load_n(ptr, __ATOMIC_SEQ_CST);
+}
+
+void koral_atomic_store_i32(int32_t* ptr, int32_t value) {
+    __atomic_store_n(ptr, value, __ATOMIC_SEQ_CST);
+}
+
+int32_t koral_atomic_swap_i32(int32_t* ptr, int32_t value) {
+    return __atomic_exchange_n(ptr, value, __ATOMIC_SEQ_CST);
+}
+
+int32_t koral_atomic_cas_i32(int32_t* ptr, int32_t expected, int32_t desired) {
+    return __atomic_compare_exchange_n(ptr, &expected, desired, 0,
+                                       __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST) ? 1 : 0;
+}
+
+#endif
+
+// --- intptr_t atomics (used by AtomicInt) ---
+
+#if defined(_WIN32) || defined(_WIN64)
+
+intptr_t koral_atomic_load_iptr(intptr_t* ptr) {
+#ifdef _WIN64
+    return (intptr_t)InterlockedCompareExchange64((volatile LONG64*)ptr, 0, 0);
+#else
+    return (intptr_t)InterlockedCompareExchange((volatile LONG*)ptr, 0, 0);
+#endif
+}
+
+void koral_atomic_store_iptr(intptr_t* ptr, intptr_t value) {
+#ifdef _WIN64
+    InterlockedExchange64((volatile LONG64*)ptr, (LONG64)value);
+#else
+    InterlockedExchange((volatile LONG*)ptr, (LONG)value);
+#endif
+}
+
+intptr_t koral_atomic_swap_iptr(intptr_t* ptr, intptr_t value) {
+#ifdef _WIN64
+    return (intptr_t)InterlockedExchange64((volatile LONG64*)ptr, (LONG64)value);
+#else
+    return (intptr_t)InterlockedExchange((volatile LONG*)ptr, (LONG)value);
+#endif
+}
+
+int32_t koral_atomic_cas_iptr(intptr_t* ptr, intptr_t expected, intptr_t desired) {
+#ifdef _WIN64
+    LONG64 old = InterlockedCompareExchange64((volatile LONG64*)ptr, (LONG64)desired, (LONG64)expected);
+    return old == (LONG64)expected ? 1 : 0;
+#else
+    LONG old = InterlockedCompareExchange((volatile LONG*)ptr, (LONG)desired, (LONG)expected);
+    return old == (LONG)expected ? 1 : 0;
+#endif
+}
+
+intptr_t koral_atomic_fetch_add_iptr(intptr_t* ptr, intptr_t delta) {
+#ifdef _WIN64
+    return (intptr_t)InterlockedExchangeAdd64((volatile LONG64*)ptr, (LONG64)delta);
+#else
+    return (intptr_t)InterlockedExchangeAdd((volatile LONG*)ptr, (LONG)delta);
+#endif
+}
+
+intptr_t koral_atomic_fetch_sub_iptr(intptr_t* ptr, intptr_t delta) {
+#ifdef _WIN64
+    return (intptr_t)InterlockedExchangeAdd64((volatile LONG64*)ptr, -(LONG64)delta);
+#else
+    return (intptr_t)InterlockedExchangeAdd((volatile LONG*)ptr, -(LONG)delta);
+#endif
+}
+
+#else
+
+intptr_t koral_atomic_load_iptr(intptr_t* ptr) {
+    return __atomic_load_n(ptr, __ATOMIC_SEQ_CST);
+}
+
+void koral_atomic_store_iptr(intptr_t* ptr, intptr_t value) {
+    __atomic_store_n(ptr, value, __ATOMIC_SEQ_CST);
+}
+
+intptr_t koral_atomic_swap_iptr(intptr_t* ptr, intptr_t value) {
+    return __atomic_exchange_n(ptr, value, __ATOMIC_SEQ_CST);
+}
+
+int32_t koral_atomic_cas_iptr(intptr_t* ptr, intptr_t expected, intptr_t desired) {
+    return __atomic_compare_exchange_n(ptr, &expected, desired, 0,
+                                       __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST) ? 1 : 0;
+}
+
+intptr_t koral_atomic_fetch_add_iptr(intptr_t* ptr, intptr_t delta) {
+    return __atomic_fetch_add(ptr, delta, __ATOMIC_SEQ_CST);
+}
+
+intptr_t koral_atomic_fetch_sub_iptr(intptr_t* ptr, intptr_t delta) {
+    return __atomic_fetch_sub(ptr, delta, __ATOMIC_SEQ_CST);
+}
+
+#endif
+
+// --- uintptr_t atomics (used by AtomicUInt) ---
+
+#if defined(_WIN32) || defined(_WIN64)
+
+uintptr_t koral_atomic_load_uptr(uintptr_t* ptr) {
+#ifdef _WIN64
+    return (uintptr_t)InterlockedCompareExchange64((volatile LONG64*)ptr, 0, 0);
+#else
+    return (uintptr_t)InterlockedCompareExchange((volatile LONG*)ptr, 0, 0);
+#endif
+}
+
+void koral_atomic_store_uptr(uintptr_t* ptr, uintptr_t value) {
+#ifdef _WIN64
+    InterlockedExchange64((volatile LONG64*)ptr, (LONG64)value);
+#else
+    InterlockedExchange((volatile LONG*)ptr, (LONG)value);
+#endif
+}
+
+uintptr_t koral_atomic_swap_uptr(uintptr_t* ptr, uintptr_t value) {
+#ifdef _WIN64
+    return (uintptr_t)InterlockedExchange64((volatile LONG64*)ptr, (LONG64)value);
+#else
+    return (uintptr_t)InterlockedExchange((volatile LONG*)ptr, (LONG)value);
+#endif
+}
+
+int32_t koral_atomic_cas_uptr(uintptr_t* ptr, uintptr_t expected, uintptr_t desired) {
+#ifdef _WIN64
+    LONG64 old = InterlockedCompareExchange64((volatile LONG64*)ptr, (LONG64)desired, (LONG64)expected);
+    return old == (LONG64)expected ? 1 : 0;
+#else
+    LONG old = InterlockedCompareExchange((volatile LONG*)ptr, (LONG)desired, (LONG)expected);
+    return old == (LONG)expected ? 1 : 0;
+#endif
+}
+
+uintptr_t koral_atomic_fetch_add_uptr(uintptr_t* ptr, uintptr_t delta) {
+#ifdef _WIN64
+    return (uintptr_t)InterlockedExchangeAdd64((volatile LONG64*)ptr, (LONG64)delta);
+#else
+    return (uintptr_t)InterlockedExchangeAdd((volatile LONG*)ptr, (LONG)delta);
+#endif
+}
+
+uintptr_t koral_atomic_fetch_sub_uptr(uintptr_t* ptr, uintptr_t delta) {
+#ifdef _WIN64
+    return (uintptr_t)InterlockedExchangeAdd64((volatile LONG64*)ptr, -(LONG64)delta);
+#else
+    return (uintptr_t)InterlockedExchangeAdd((volatile LONG*)ptr, -(LONG)delta);
+#endif
+}
+
+#else
+
+uintptr_t koral_atomic_load_uptr(uintptr_t* ptr) {
+    return __atomic_load_n(ptr, __ATOMIC_SEQ_CST);
+}
+
+void koral_atomic_store_uptr(uintptr_t* ptr, uintptr_t value) {
+    __atomic_store_n(ptr, value, __ATOMIC_SEQ_CST);
+}
+
+uintptr_t koral_atomic_swap_uptr(uintptr_t* ptr, uintptr_t value) {
+    return __atomic_exchange_n(ptr, value, __ATOMIC_SEQ_CST);
+}
+
+int32_t koral_atomic_cas_uptr(uintptr_t* ptr, uintptr_t expected, uintptr_t desired) {
+    return __atomic_compare_exchange_n(ptr, &expected, desired, 0,
+                                       __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST) ? 1 : 0;
+}
+
+uintptr_t koral_atomic_fetch_add_uptr(uintptr_t* ptr, uintptr_t delta) {
+    return __atomic_fetch_add(ptr, delta, __ATOMIC_SEQ_CST);
+}
+
+uintptr_t koral_atomic_fetch_sub_uptr(uintptr_t* ptr, uintptr_t delta) {
+    return __atomic_fetch_sub(ptr, delta, __ATOMIC_SEQ_CST);
+}
+
+#endif

@@ -1,0 +1,86 @@
+// ============================================================================
+// std.task - Thread Handle
+// ============================================================================
+// Provides: ThreadContext (internal), ThreadStorage (internal), Thread (handle)
+// Access via: using std.task
+// ============================================================================
+
+// ============================================================================
+// FFI Declarations
+// ============================================================================
+foreign let koral_thread_join(handle UInt8 ptr) Int32
+foreign let koral_thread_detach(handle UInt8 ptr) Void
+
+// ============================================================================
+// Thread Context (shared between handle and child thread via ref)
+// ============================================================================
+private type [T Any]ThreadContext(
+    mut result [T]Option,       // child thread writes, wait reads
+)
+
+// ============================================================================
+// ThreadStorage (internal)
+// ============================================================================
+private type [T Any]ThreadStorage(
+    handle UInt8 ptr,
+    thread_id UInt64,
+    thread_name [String]Option,
+    context [T]ThreadContext ref,  // shared with child thread
+    mut waited Bool,
+    mut detached Bool,
+)
+
+given[T Any] [T]ThreadStorage {
+    __drop(self ref) Void = {
+        if not self.waited and not self.detached then {
+            koral_thread_detach(self.handle)
+        }
+        // context ref lifetime managed by reference counting:
+        // handle drop -1, child thread end -1, freed when count reaches zero
+    }
+}
+
+// ============================================================================
+// Thread — Generic thread handle
+// ============================================================================
+
+/// Generic thread handle managing a created OS thread.
+/// T is the closure return type, wait() returns [T]Result.
+/// Created by Task.spawn() or run_task(), not constructed directly.
+/// Auto-detaches on drop if not waited/detached.
+public type [T Any]Thread(private storage [T]ThreadStorage ref)
+
+given[T Any] [T]Thread {
+    /// Block until the thread finishes, returning the closure return value.
+    /// Returns Error if already waited or detached.
+    public wait(self) [T]Result = {
+        if self.storage.waited then {
+            return [T]Result.Error(ref "thread already waited")
+        }
+        if self.storage.detached then {
+            return [T]Result.Error(ref "thread already detached")
+        }
+        let result = koral_thread_join(self.storage.handle)
+        self.storage.waited = true
+        if result <> 0 then {
+            return [T]Result.Error(ref "failed to wait thread")
+        }
+        // After join returns, child thread has ended and result is written safely
+        [T]Result.Ok(self.storage.context.result.unwrap())
+    }
+
+    /// Detach the thread (thread continues running, resources reclaimed by OS on exit).
+    public detach(self) Void = {
+        if self.storage.waited or self.storage.detached then {
+            return
+        }
+        koral_thread_detach(self.storage.handle)
+        self.storage.detached = true
+    }
+
+    /// Get the thread ID.
+    public id(self) UInt64 = self.storage.thread_id
+
+    /// Get the thread name.
+    public name(self) [String]Option = self.storage.thread_name
+}
