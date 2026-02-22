@@ -147,7 +147,7 @@ public class CodeGen {
     }
     if foreignFunctionDefIds.contains(symbol.defId.id) {
       let name = context.getName(symbol.defId) ?? "<unknown>"
-      return sanitizeCIdentifier(name)
+      return context.getCname(symbol.defId) ?? name
     }
     let isGlobalSymbol: Bool
     switch symbol.kind {
@@ -389,147 +389,11 @@ public class CodeGen {
     buffer = """
       #include <stdatomic.h>
       #include <stdint.h>
-      #include "koral_checked_math.h"
-
-      void koral_panic_float_cast_overflow(void);
-
-      """
-
-    buffer += """
-      void koral_set_args(int32_t argc, uint8_t** argv);
+      #include "koral_runtime.h"
 
       """
 
     emitForeignUsingDeclarations(from: ast.globalNodes)
-
-    buffer += """
-      // Generic Ref type
-      struct Ref { void* ptr; void* control; };
-
-      // Unified Closure type for all function types
-      // fn: function pointer (with env as first param if env != NULL)
-      // env: environment pointer (NULL for no-capture lambdas)
-      // drop: environment destructor (NULL for no-capture lambdas)
-      struct __koral_Closure { void* fn; void* env; void (*drop)(void*); };
-
-      int32_t koral_spawn_thread(uint8_t** out_handle, uint64_t* out_tid, struct __koral_Closure f, uint64_t stack_size);
-
-      typedef void (*Koral_Dtor)(void*);
-
-      struct Koral_Control {
-        _Atomic int strong_count;
-        _Atomic int weak_count;
-        Koral_Dtor dtor;
-        void* ptr;
-      };
-
-      // WeakRef structure for weak references
-      struct WeakRef { void* control; };
-
-      // TraitRef: fat pointer for trait object references (ptr + control + vtable)
-      struct TraitRef { void* ptr; void* control; const void* vtable; };
-
-      // TraitWeakRef: fat pointer for trait object weak references (control + vtable)
-      struct TraitWeakRef { void* control; const void* vtable; };
-
-      void __koral_retain(void* raw_control) {
-        if (!raw_control) return;
-        struct Koral_Control* control = (struct Koral_Control*)raw_control;
-        atomic_fetch_add(&control->strong_count, 1);
-      }
-
-      void __koral_release(void* raw_control) {
-        if (!raw_control) return;
-        struct Koral_Control* control = (struct Koral_Control*)raw_control;
-        int prev = atomic_fetch_sub(&control->strong_count, 1);
-        if (prev == 1) {
-          // Strong count reached zero - destroy object
-          if (control->dtor) {
-            control->dtor(control->ptr);
-          }
-          free(control->ptr);
-          // Decrement implicit weak count (control block itself)
-          int weak_prev = atomic_fetch_sub(&control->weak_count, 1);
-          if (weak_prev == 1) {
-            // No more weak references, free control block
-            free(control);
-          }
-        }
-      }
-
-      void __koral_weak_retain(void* raw_control) {
-        if (!raw_control) return;
-        struct Koral_Control* control = (struct Koral_Control*)raw_control;
-        atomic_fetch_add(&control->weak_count, 1);
-      }
-
-      void __koral_weak_release(void* raw_control) {
-        if (!raw_control) return;
-        struct Koral_Control* control = (struct Koral_Control*)raw_control;
-        int prev = atomic_fetch_sub(&control->weak_count, 1);
-        if (prev == 1) {
-          // No more weak references and strong count is zero
-          // (otherwise weak_count would be at least 1 from implicit weak ref)
-          free(control);
-        }
-      }
-
-      struct WeakRef __koral_downgrade_ref(struct Ref r) {
-        struct WeakRef w;
-        w.control = r.control;
-        if (w.control) {
-          __koral_weak_retain(w.control);
-        }
-        return w;
-      }
-
-      struct Ref __koral_upgrade_ref(struct WeakRef w, int* success) {
-        struct Ref r;
-        r.ptr = NULL;
-        r.control = NULL;
-        *success = 0;
-        
-        if (!w.control) return r;
-        
-        struct Koral_Control* control = (struct Koral_Control*)w.control;
-        
-        // Try to atomically increment strong_count if it's > 0
-        int old_count = atomic_load(&control->strong_count);
-        while (old_count > 0) {
-          if (atomic_compare_exchange_weak(&control->strong_count, &old_count, old_count + 1)) {
-            // Successfully upgraded
-            r.ptr = control->ptr;
-            r.control = w.control;
-            *success = 1;
-            return r;
-          }
-          // old_count was updated by compare_exchange_weak, retry
-        }
-        
-        // Strong count is 0, cannot upgrade
-        return r;
-      }
-
-      void __koral_closure_retain(struct __koral_Closure closure) {
-        if (!closure.env) return;
-        _Atomic intptr_t* refcount = (_Atomic intptr_t*)closure.env;
-        atomic_fetch_add(refcount, 1);
-      }
-
-      void __koral_closure_release(struct __koral_Closure closure) {
-        if (!closure.env) return;
-        _Atomic intptr_t* refcount = (_Atomic intptr_t*)closure.env;
-        intptr_t prev = atomic_fetch_sub(refcount, 1);
-        if (prev == 1) {
-          if (closure.drop) {
-            closure.drop(closure.env);
-          } else {
-            free(closure.env);
-          }
-        }
-      }
-
-      """
 
     // 生成程序体
     generateProgram(ast)
@@ -919,7 +783,7 @@ public class CodeGen {
     buffer += "\nint main(int argc, char** argv) {\n"
     withIndent {
       addIndent()
-      buffer += "koral_set_args((int32_t)argc, (uint8_t**)argv);\n"
+      buffer += "__koral_set_args((int32_t)argc, (uint8_t**)argv);\n"
 
       // 生成全局变量初始化
       if !globalInitializations.isEmpty {
@@ -1163,7 +1027,7 @@ public class CodeGen {
         buffer += "if (!(\(fVar) >= (double)\(minMacro) && \(fVar) <= (double)\(maxMacro))) {\n"
         withIndent {
           addIndent()
-          buffer += "koral_panic_float_cast_overflow();\n"
+          buffer += "__koral_panic_float_cast_overflow();\n"
         }
         addIndent()
         buffer += "}\n"
@@ -1448,26 +1312,26 @@ public class CodeGen {
 
         // 3. 分配控制块
         addIndent()
-        buffer += "\(result).control = malloc(sizeof(struct Koral_Control));\n"
+        buffer += "\(result).control = malloc(sizeof(struct __koral_Control));\n"
         addIndent()
-        buffer += "((struct Koral_Control*)\(result).control)->strong_count = 1;\n"
+        buffer += "((struct __koral_Control*)\(result).control)->strong_count = 1;\n"
         addIndent()
-        buffer += "((struct Koral_Control*)\(result).control)->weak_count = 1;\n"
+        buffer += "((struct __koral_Control*)\(result).control)->weak_count = 1;\n"
         addIndent()
-        buffer += "((struct Koral_Control*)\(result).control)->ptr = \(result).ptr;\n"
+        buffer += "((struct __koral_Control*)\(result).control)->ptr = \(result).ptr;\n"
 
         // 4. 设置析构函数
         if case .structure(let defId) = innerType {
           let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
           addIndent()
-          buffer += "((struct Koral_Control*)\(result).control)->dtor = (Koral_Dtor)__koral_\(typeName)_drop;\n"
+          buffer += "((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_\(typeName)_drop;\n"
         } else if case .union(let defId) = innerType {
           let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
           addIndent()
-          buffer += "((struct Koral_Control*)\(result).control)->dtor = (Koral_Dtor)__koral_\(typeName)_drop;\n"
+          buffer += "((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_\(typeName)_drop;\n"
         } else {
           addIndent()
-          buffer += "((struct Koral_Control*)\(result).control)->dtor = NULL;\n"
+          buffer += "((struct __koral_Control*)\(result).control)->dtor = NULL;\n"
         }
 
         return result
@@ -1916,7 +1780,7 @@ public class CodeGen {
       buffer += "if (\(controlPath)) {\n"
       withIndent {
         addIndent()
-        buffer += "\(result) = atomic_load(&((struct Koral_Control*)\(controlPath))->strong_count);\n"
+        buffer += "\(result) = atomic_load(&((struct __koral_Control*)\(controlPath))->strong_count);\n"
       }
       addIndent()
       buffer += "}\n"
@@ -1926,17 +1790,17 @@ public class CodeGen {
       let valRes = generateExpressionSSA(val)
       // Check if this is a trait object downgrade (TraitRef → TraitWeakRef)
       if case .reference(let inner) = val.type, case .traitObject = inner {
-        let result = nextTempWithDecl(cType: "struct TraitWeakRef")
-        let tempWeak = nextTempWithDecl(cType: "struct WeakRef")
+        let result = nextTempWithDecl(cType: "struct __koral_TraitWeakRef")
+        let tempWeak = nextTempWithDecl(cType: "struct __koral_WeakRef")
         addIndent()
-        buffer += "\(tempWeak) = __koral_downgrade_ref((struct Ref){\(valRes).ptr, \(valRes).control});\n"
+        buffer += "\(tempWeak) = __koral_downgrade_ref((struct __koral_Ref){\(valRes).ptr, \(valRes).control});\n"
         addIndent()
         buffer += "\(result).control = \(tempWeak).control;\n"
         addIndent()
         buffer += "\(result).vtable = \(valRes).vtable;\n"
         return result
       } else {
-        let result = nextTempWithInit(cType: "struct WeakRef", initExpr: "__koral_downgrade_ref(\(valRes))")
+        let result = nextTempWithInit(cType: "struct __koral_WeakRef", initExpr: "__koral_downgrade_ref(\(valRes))")
         return result
       }
 
@@ -1945,7 +1809,7 @@ public class CodeGen {
       let successVar = nextTempWithDecl(cType: "int")
       // Check if this is a trait object upgrade (TraitWeakRef → Option<TraitRef>)
       if case .weakReference(let inner) = val.type, case .traitObject = inner {
-        let upgradedRefVar = nextTempWithInit(cType: "struct Ref", initExpr: "__koral_upgrade_ref((struct WeakRef){\(valRes).control}, &\(successVar))")
+        let upgradedRefVar = nextTempWithInit(cType: "struct __koral_Ref", initExpr: "__koral_upgrade_ref((struct __koral_WeakRef){\(valRes).control}, &\(successVar))")
         // Generate Option type result
         let cType = cTypeName(resultType)
         let result = nextTempWithDecl(cType: cType)
@@ -1971,7 +1835,7 @@ public class CodeGen {
         buffer += "}\n"
         return result
       } else {
-        let upgradedRefVar = nextTempWithInit(cType: "struct Ref", initExpr: "__koral_upgrade_ref(\(valRes), &\(successVar))")
+        let upgradedRefVar = nextTempWithInit(cType: "struct __koral_Ref", initExpr: "__koral_upgrade_ref(\(valRes), &\(successVar))")
         // Generate Option type result
         let cType = cTypeName(resultType)
         let result = nextTempWithDecl(cType: cType)
@@ -2007,9 +1871,9 @@ public class CodeGen {
           addIndent()
           buffer += "__koral_retain(((\(cType)*)\(p))->ref.control);\n"
         } else {
-          buffer += "*(struct Ref*)\(p) = \(v);\n"
+          buffer += "*(struct __koral_Ref*)\(p) = \(v);\n"
           addIndent()
-          buffer += "__koral_retain(((struct Ref*)\(p))->control);\n"
+          buffer += "__koral_retain(((struct __koral_Ref*)\(p))->control);\n"
         }
       } else {
         // For all other types, use appendCopyAssignment which handles
@@ -2028,7 +1892,7 @@ public class CodeGen {
           buffer += "__koral_release(((\(cType)*)\(p))->ref.control);\n"
         } else {
           addIndent()
-          buffer += "__koral_release(((struct Ref*)\(p))->control);\n"
+          buffer += "__koral_release(((struct __koral_Ref*)\(p))->control);\n"
         }
       } else if case .structure(let defId) = element {
         let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
@@ -2065,7 +1929,7 @@ public class CodeGen {
       let tidVal = generateExpressionSSA(outTid)
       let closureVal = generateExpressionSSA(closure)
       let stackSizeVal = generateExpressionSSA(stackSize)
-      let result = nextTempWithInit(cType: "int32_t", initExpr: "koral_spawn_thread(\(handleVal), \(tidVal), \(closureVal), \(stackSizeVal))")
+      let result = nextTempWithInit(cType: "int32_t", initExpr: "__koral_spawn_thread(\(handleVal), \(tidVal), \(closureVal), \(stackSizeVal))")
       return result
 
     }

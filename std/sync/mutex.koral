@@ -12,16 +12,16 @@
 // ============================================================================
 // FFI Declarations
 // ============================================================================
-foreign let koral_mutex_create() UInt8 ptr
-foreign let koral_mutex_destroy(mutex UInt8 ptr) Void
-foreign let koral_mutex_lock(mutex UInt8 ptr) Void
-foreign let koral_mutex_try_lock(mutex UInt8 ptr) Int32
-foreign let koral_mutex_unlock(mutex UInt8 ptr) Void
-foreign let koral_condvar_create() UInt8 ptr
-foreign let koral_condvar_destroy(cv UInt8 ptr) Void
-foreign let koral_condvar_wait(cv UInt8 ptr, mutex UInt8 ptr) Void
-foreign let koral_condvar_signal(cv UInt8 ptr) Void
-foreign let koral_condvar_broadcast(cv UInt8 ptr) Void
+foreign let __koral_mutex_create() UInt8 ptr
+foreign let __koral_mutex_destroy(mutex UInt8 ptr) Void
+foreign let __koral_mutex_lock(mutex UInt8 ptr) Void
+foreign let __koral_mutex_try_lock(mutex UInt8 ptr) Int32
+foreign let __koral_mutex_unlock(mutex UInt8 ptr) Void
+foreign let __koral_condvar_create() UInt8 ptr
+foreign let __koral_condvar_destroy(cv UInt8 ptr) Void
+foreign let __koral_condvar_wait(cv UInt8 ptr, mutex UInt8 ptr) Void
+foreign let __koral_condvar_signal(cv UInt8 ptr) Void
+foreign let __koral_condvar_broadcast(cv UInt8 ptr) Void
 
 // ============================================================================
 // Mutex Internal Storage
@@ -30,7 +30,7 @@ private type MutexStorage(handle UInt8 ptr)
 
 given MutexStorage {
     __drop(self ref) Void = {
-        koral_mutex_destroy(self.handle)
+        __koral_mutex_destroy(self.handle)
     }
 }
 
@@ -45,28 +45,28 @@ public type Mutex(private storage MutexStorage ref)
 given Mutex {
     /// 创建互斥锁
     public new() Mutex = {
-        Mutex(ref MutexStorage(koral_mutex_create()))
+        Mutex(ref MutexStorage(__koral_mutex_create()))
     }
 
     /// 获取锁（阻塞直到成功）
     public lock(self) Void = {
-        koral_mutex_lock(self.storage.handle)
+        __koral_mutex_lock(self.storage.handle)
     }
 
     /// 尝试获取锁（非阻塞），成功返回 true，锁被占用返回 false
     public try_lock(self) Bool = {
-        koral_mutex_try_lock(self.storage.handle) == 1
+        __koral_mutex_try_lock(self.storage.handle) == 1
     }
 
     /// 释放锁
     public unlock(self) Void = {
-        koral_mutex_unlock(self.storage.handle)
+        __koral_mutex_unlock(self.storage.handle)
     }
 
     /// 创建绑定到此互斥锁的条件变量
     public condvar(self) MutexCondvar = {
         MutexCondvar(ref MutexCondvarStorage(
-            koral_condvar_create(),
+            __koral_condvar_create(),
             self
         ))
     }
@@ -84,7 +84,7 @@ private type MutexCondvarStorage(
 
 given MutexCondvarStorage {
     __drop(self ref) Void = {
-        koral_condvar_destroy(self.handle)
+        __koral_condvar_destroy(self.handle)
     }
 }
 
@@ -97,16 +97,16 @@ given MutexCondvar {
     /// 调用前必须持有绑定的 Mutex，否则行为未定义
     /// 注意：必须在 while 循环中检查条件谓词（防止虚假唤醒）
     public wait(self) Void = {
-        koral_condvar_wait(self.storage.handle, self.storage.mutex.storage.handle)
+        __koral_condvar_wait(self.storage.handle, self.storage.mutex.storage.handle)
     }
 
     /// 唤醒一个等待中的线程
     public notify(self) Void = {
-        koral_condvar_signal(self.storage.handle)
+        __koral_condvar_signal(self.storage.handle)
     }
 
     /// 唤醒所有等待中的线程
     public notify_all(self) Void = {
-        koral_condvar_broadcast(self.storage.handle)
+        __koral_condvar_broadcast(self.storage.handle)
     }
 }

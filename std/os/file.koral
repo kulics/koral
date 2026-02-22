@@ -10,27 +10,27 @@
 // ============================================================================
 
 /// Close a file descriptor (POSIX close wrapper)
-foreign let koral_close(fd Int32) Int32
+foreign let __koral_close(fd Int32) Int32
 
 /// Read from a file descriptor (POSIX read wrapper, unbuffered)
-foreign let koral_read(fd Int32, buf UInt8 ptr, count UInt) Int64
+foreign let __koral_read(fd Int32, buf UInt8 ptr, count UInt) Int64
 
 /// Write to a file descriptor (POSIX write wrapper, unbuffered)
-foreign let koral_write(fd Int32, buf UInt8 ptr, count UInt) Int64
+foreign let __koral_write(fd Int32, buf UInt8 ptr, count UInt) Int64
 
 /// Sync file data to disk (POSIX fsync wrapper)
-foreign let koral_fsync(fd Int32) Int32
+foreign let __koral_fsync(fd Int32) Int32
 
 /// Seek within a file (POSIX lseek wrapper)
-foreign let koral_lseek(fd Int32, offset Int64, whence Int32) Int64
+foreign let __koral_lseek(fd Int32, offset Int64, whence Int32) Int64
 
 /// File locking (cross-platform flock/LockFileEx wrapper)
 /// operation: 1=LOCK_SH, 2=LOCK_EX, 4=LOCK_NB (combinable), 8=LOCK_UN
-foreign let koral_flock(fd Int32, operation Int32) Int32
+foreign let __koral_flock(fd Int32, operation Int32) Int32
 
 /// Check if current errno is EWOULDBLOCK (cross-platform)
 /// Returns non-zero if errno is EWOULDBLOCK
-foreign let koral_errno_is_wouldblock() Int32
+foreign let __koral_errno_is_wouldblock() Int32
 
 // ============================================================================
 // OpenMode Enum
@@ -58,7 +58,7 @@ given FileStorage {
     /// Only closes when fd >= 0 (valid file descriptor).
     __drop(self ref) Void = {
         if self.fd >= 0 then {
-            koral_close(self.fd)
+            __koral_close(self.fd)
         }
     }
 }
@@ -69,7 +69,7 @@ given FileStorage {
 // ============================================================================
 
 /// Query file metadata via file descriptor (fstat wrapper)
-foreign let koral_fstat(fd Int32, out KoralStatResult ptr) Int32
+foreign let __koral_fstat(fd Int32, out KoralStatResult ptr) Int32
 
 // ============================================================================
 // Helpers
@@ -77,8 +77,8 @@ foreign let koral_fstat(fd Int32, out KoralStatResult ptr) Int32
 
 /// Get the last OS error as a String
 private let get_last_error() String = {
-    let err = deptr koral_errno_ptr()
-    let msg = koral_strerror(err)
+    let err = deptr __koral_errno_ptr()
+    let msg = __koral_strerror(err)
     String.from_cstring(msg)
 }
 
@@ -101,7 +101,7 @@ given File {
     /// Get file metadata by querying via the file descriptor (no path needed).
     public info(self) [FileInfo]Result = {
         let mut stat_buf = KoralStatResult(0, 0, 0, 0, 0, 0, 0, 0, 0)
-        let result = koral_fstat(self.storage.fd, ptr stat_buf)
+        let result = __koral_fstat(self.storage.fd, ptr stat_buf)
         if result <> 0 then {
             return [FileInfo]Result.Error(ref get_last_error())
         }
@@ -129,7 +129,7 @@ given File {
         if available == 0 then {
             return [UInt]Result.Ok(0)
         }
-        let n = koral_read(self.storage.fd, buf.write_ptr(), available)
+        let n = __koral_read(self.storage.fd, buf.write_ptr(), available)
         if n < 0 then {
             return [UInt]Result.Error(ref get_last_error())
         }
@@ -145,7 +145,7 @@ given File {
         if to_write == 0 then {
             return [UInt]Result.Ok(0)
         }
-        let n = koral_write(self.storage.fd, buf.read_ptr(), to_write)
+        let n = __koral_write(self.storage.fd, buf.read_ptr(), to_write)
         if n < 0 then {
             return [UInt]Result.Error(ref get_last_error())
         }
@@ -159,7 +159,7 @@ given File {
 
     /// Sync file data to disk (fsync, ensures physical persistence).
     public sync(self) [Void]Result = {
-        let result = koral_fsync(self.storage.fd)
+        let result = __koral_fsync(self.storage.fd)
         if result <> 0 then {
             return [Void]Result.Error(ref get_last_error())
         }
@@ -176,7 +176,7 @@ given File {
             .Current(o) then { offset = o; whence = 1 },
             .End(o) then { offset = o; whence = 2 },
         }
-        let new_pos = koral_lseek(self.storage.fd, offset, whence)
+        let new_pos = __koral_lseek(self.storage.fd, offset, whence)
         if new_pos < 0 then {
             return [UInt64]Result.Error(ref get_last_error())
         }
@@ -188,7 +188,7 @@ given File {
 
     /// Acquire an exclusive lock (blocking, waits until acquired)
     public lock_exclusive(self) [Void]Result = {
-        let result = koral_flock(self.storage.fd, 2) // LOCK_EX
+        let result = __koral_flock(self.storage.fd, 2) // LOCK_EX
         if result <> 0 then {
             return [Void]Result.Error(ref get_last_error())
         }
@@ -197,7 +197,7 @@ given File {
 
     /// Acquire a shared lock (blocking, waits until acquired)
     public lock_shared(self) [Void]Result = {
-        let result = koral_flock(self.storage.fd, 1) // LOCK_SH
+        let result = __koral_flock(self.storage.fd, 1) // LOCK_SH
         if result <> 0 then {
             return [Void]Result.Error(ref get_last_error())
         }
@@ -207,11 +207,11 @@ given File {
     /// Try to acquire an exclusive lock (non-blocking)
     /// Returns Ok(true) if acquired, Ok(false) if lock is held (EWOULDBLOCK), Error for system errors
     public try_lock_exclusive(self) [Bool]Result = {
-        let result = koral_flock(self.storage.fd, 6) // LOCK_EX | LOCK_NB
+        let result = __koral_flock(self.storage.fd, 6) // LOCK_EX | LOCK_NB
         if result == 0 then {
             return [Bool]Result.Ok(true)
         }
-        if koral_errno_is_wouldblock() <> 0 then {
+        if __koral_errno_is_wouldblock() <> 0 then {
             return [Bool]Result.Ok(false)
         }
         [Bool]Result.Error(ref get_last_error())
@@ -220,11 +220,11 @@ given File {
     /// Try to acquire a shared lock (non-blocking)
     /// Returns Ok(true) if acquired, Ok(false) if lock is held (EWOULDBLOCK), Error for system errors
     public try_lock_shared(self) [Bool]Result = {
-        let result = koral_flock(self.storage.fd, 5) // LOCK_SH | LOCK_NB
+        let result = __koral_flock(self.storage.fd, 5) // LOCK_SH | LOCK_NB
         if result == 0 then {
             return [Bool]Result.Ok(true)
         }
-        if koral_errno_is_wouldblock() <> 0 then {
+        if __koral_errno_is_wouldblock() <> 0 then {
             return [Bool]Result.Ok(false)
         }
         [Bool]Result.Error(ref get_last_error())
@@ -232,7 +232,7 @@ given File {
 
     /// Release the lock
     public unlock(self) [Void]Result = {
-        let result = koral_flock(self.storage.fd, 8) // LOCK_UN
+        let result = __koral_flock(self.storage.fd, 8) // LOCK_UN
         if result <> 0 then {
             return [Void]Result.Error(ref get_last_error())
         }

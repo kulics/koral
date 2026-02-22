@@ -280,40 +280,15 @@ class IntegrationTests: XCTestCase {
         }
         
         // 2. Prepare output and cleanup
-        // Check environment variable to decide whether to keep generated C files.
-        // Set KORAL_TEST_KEEP_C=1 to keep generated artifacts under Tests/CasesOutput.
-        let keepCFiles = ProcessInfo.processInfo.environment["KORAL_TEST_KEEP_C"] != nil
-
+        // Use an isolated directory under CasesOutput, then clean it up after each run.
         let baseName = file.deletingPathExtension().lastPathComponent
         let casesOutputRoot = projectRoot.appendingPathComponent("Tests/CasesOutput")
-        let outputDir: URL
-        let cleanup: () -> Void
-
-        if keepCFiles {
-            // Stable per-test directory for easier inspection.
-            outputDir = casesOutputRoot.appendingPathComponent(baseName)
-            try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true, attributes: nil)
-
-            // Only remove the executable, keep the .c file and other artifacts.
-            let exePath = outputDir.appendingPathComponent(baseName)
-            let exePathWindows = outputDir.appendingPathComponent(baseName + ".exe")
-            cleanup = {
-                try? FileManager.default.removeItem(at: exePath)
-                try? FileManager.default.removeItem(at: exePathWindows)
-            }
-        } else {
-            // Use an isolated directory under CasesOutput, but clean it up after.
-            let runDir = casesOutputRoot.appendingPathComponent(baseName).appendingPathComponent(UUID().uuidString)
-            try FileManager.default.createDirectory(at: runDir, withIntermediateDirectories: true, attributes: nil)
-            outputDir = runDir
-
-            cleanup = {
-                try? FileManager.default.removeItem(at: runDir)
-            }
-        }
+        let runDir = casesOutputRoot.appendingPathComponent(baseName).appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: runDir, withIntermediateDirectories: true, attributes: nil)
+        let outputDir = runDir
         
         defer {
-            cleanup()
+            try? FileManager.default.removeItem(at: runDir)
         }
 
         // 3. Run compiler

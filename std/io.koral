@@ -5,6 +5,41 @@
 // ============================================================================
 
 // ============================================================================
+// Runtime / Process FFI (migrated from std/os.koral)
+// ============================================================================
+
+foreign type CFile
+
+foreign let fwrite(buf UInt8 ptr, size UInt, count UInt, file CFile ptr) UInt
+foreign let fflush(file CFile ptr) Void
+foreign let fgetc(file CFile ptr) Int
+foreign let __koral_stdin() CFile ptr
+foreign let __koral_stdout() CFile ptr
+foreign let __koral_stderr() CFile ptr
+
+public foreign let exit(code Int) Never
+public foreign let abort() Never
+
+private foreign let __koral_set_args(argc Int32, argv UInt8 ptr ptr) Void
+private foreign let __koral_argc() Int32
+private foreign let __koral_argv() UInt8 ptr ptr
+
+foreign let __koral_errno_ptr() Int32 ptr
+foreign let __koral_strerror(errnum Int32) UInt8 ptr
+
+public let args() [String]List = {
+    let mut result = [String]List.new()
+    let count = (UInt)__koral_argc()
+    let mut i UInt = 0
+    while i < count then {
+        let arg_ptr = deptr (__koral_argv() + i)
+        result.push(String.from_cstring(arg_ptr))
+        i += 1
+    }
+    result
+}
+
+// ============================================================================
 // Panic and Assertion
 // ============================================================================
 
@@ -12,14 +47,14 @@
 public let panic(message String) Never = {
     // Write "Panic: " prefix
     let prefix = "Panic: "
-    fwrite(prefix.storage.data, 1, prefix.storage.len, koral_stderr());
+    fwrite(prefix.storage.data, 1, prefix.storage.len, __koral_stderr());
     // Write message
-    fwrite(message.storage.data, 1, message.storage.len, koral_stderr());
+    fwrite(message.storage.data, 1, message.storage.len, __koral_stderr());
     // Write newline
     let newline = "\n"
-    fwrite(newline.storage.data, 1, newline.storage.len, koral_stderr());
+    fwrite(newline.storage.data, 1, newline.storage.len, __koral_stderr());
     // Flush stderr
-    fflush(koral_stderr());
+    fflush(__koral_stderr());
     // Abort the program (generates SIGABRT, allows core dump for debugging)
     abort()
 }
@@ -37,33 +72,33 @@ public let assert(condition Bool, message String) Void = {
 // Print value to stdout (no newline, auto flush)
 public let [T ToString]print(value T) Void = {
     let s = value.to_string()
-    fwrite(s.storage.data, 1, s.storage.len, koral_stdout());
-    fflush(koral_stdout())
+    fwrite(s.storage.data, 1, s.storage.len, __koral_stdout());
+    fflush(__koral_stdout())
 }
 
 // Print value to stdout (with newline, auto flush)
 public let [T ToString]print_line(value T) Void = {
     let s = value.to_string()
-    fwrite(s.storage.data, 1, s.storage.len, koral_stdout());
+    fwrite(s.storage.data, 1, s.storage.len, __koral_stdout());
     let newline = "\n"
-    fwrite(newline.storage.data, 1, newline.storage.len, koral_stdout());
-    fflush(koral_stdout())
+    fwrite(newline.storage.data, 1, newline.storage.len, __koral_stdout());
+    fflush(__koral_stdout())
 }
 
 // Print value to stderr (no newline, auto flush)
 public let [T ToString]print_error(value T) Void = {
     let s = value.to_string()
-    fwrite(s.storage.data, 1, s.storage.len, koral_stderr());
-    fflush(koral_stderr())
+    fwrite(s.storage.data, 1, s.storage.len, __koral_stderr());
+    fflush(__koral_stderr())
 }
 
 // Print value to stderr (with newline, auto flush)
 public let [T ToString]print_error_line(value T) Void = {
     let s = value.to_string()
-    fwrite(s.storage.data, 1, s.storage.len, koral_stderr());
+    fwrite(s.storage.data, 1, s.storage.len, __koral_stderr());
     let newline = "\n"
-    fwrite(newline.storage.data, 1, newline.storage.len, koral_stderr());
-    fflush(koral_stderr())
+    fwrite(newline.storage.data, 1, newline.storage.len, __koral_stderr());
+    fflush(__koral_stderr())
 }
 
 // Read a line from stdin - Using new pattern matching
@@ -71,7 +106,7 @@ public let read_line() [String]Option = {
     let mut result = String.zero()
 
     while true then {
-        let ch = fgetc(koral_stdin())
+        let ch = fgetc(__koral_stdin())
 
         // EOF - Using comparison pattern
         if ch is < 0 then {

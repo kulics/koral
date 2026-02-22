@@ -326,9 +326,24 @@ public class Driver {
     if !fileManager.fileExists(atPath: outputDirectory.path) {
       try fileManager.createDirectory(at: outputDirectory, withIntermediateDirectories: true, attributes: nil)
     }
-    let cFileURL = outputDirectory.appendingPathComponent("\(baseName).c")
+
+    let cFileURL: URL
+    var temporaryCFileURL: URL?
+    if mode == .emitC {
+      cFileURL = outputDirectory.appendingPathComponent("\(baseName).c")
+    } else {
+      let tempFileName = "koralc_\(baseName)_\(UUID().uuidString).c"
+      let tempFileURL = fileManager.temporaryDirectory.appendingPathComponent(tempFileName)
+      cFileURL = tempFileURL
+      temporaryCFileURL = tempFileURL
+    }
     try cSource.write(to: cFileURL, atomically: true, encoding: .utf8)
 
+    defer {
+      if let temporaryCFileURL {
+        try? fileManager.removeItem(at: temporaryCFileURL)
+      }
+    }
 
     if mode == .emitC {
       return
@@ -350,7 +365,7 @@ public class Driver {
       if FileManager.default.fileExists(atPath: runtimeURL.path) {
         clangArgs.append(runtimeURL.path)
       }
-      // Add std directory to include path for koral_checked_math.h and other headers
+      // Add std directory to include path for koral_runtime.h and related headers
       clangArgs.append(contentsOf: ["-I", stdPath])
     }
 
