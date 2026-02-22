@@ -234,9 +234,12 @@ public let walk_dir(path String, visitor [DirEntry, WalkAction]Func) [Void]Resul
     if handle == [CDirHandle]null_ptr() then {
         return [Void]Result.Error(ref get_last_error())
     }
-    let result = walk_dir_handle(path, handle, visitor)
+    let action = walk_dir_handle(path, handle, visitor)
     __koral_closedir(handle)
-    result
+    when action is {
+        .Error(msg) then [Void]Result.Error(ref msg),
+        _ then [Void]Result.Ok({}),
+    }
 }
 
 /// Internal recursive helper for walk_dir.
@@ -246,7 +249,7 @@ private let walk_dir_handle(
     dir_path String,
     handle CDirHandle ptr,
     visitor [DirEntry, WalkAction]Func,
-) [Void]Result = {
+) WalkAction = {
     while true then {
         let entry = __koral_readdir(handle)
         if entry == [CDirEntry]null_ptr() then { break }
@@ -258,10 +261,10 @@ private let walk_dir_handle(
         let action = visitor(dir_entry)
         when action is {
             .Stop then {
-                return [Void]Result.Ok({})
+                return WalkAction.Stop()
             },
             .Error(msg) then {
-                return [Void]Result.Error(ref msg)
+                return WalkAction.Error(msg)
             },
             .SkipDir then {
                 // Skip children of current directory entry, continue with siblings
@@ -270,19 +273,24 @@ private let walk_dir_handle(
                 if ft.is_dir() then {
                     let sub_handle = __koral_opendir(full_path.storage.data)
                     if sub_handle <> [CDirHandle]null_ptr() then {
-                        when walk_dir_handle(full_path, sub_handle, visitor) is {
-                            .Error(e) then {
-                                __koral_closedir(sub_handle)
-                                return [Void]Result.Error(e)
+                        let sub_action = walk_dir_handle(full_path, sub_handle, visitor)
+                        __koral_closedir(sub_handle)
+                        when sub_action is {
+                            .Continue then {},
+                            .Stop then {
+                                return WalkAction.Stop()
                             },
-                            .Ok(_) then __koral_closedir(sub_handle),
+                            .Error(msg) then {
+                                return WalkAction.Error(msg)
+                            },
+                            .SkipDir then {},
                         }
                     }
                 }
             },
         }
     }
-    [Void]Result.Ok({})
+    WalkAction.Continue()
 }
 
 
