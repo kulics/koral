@@ -263,6 +263,10 @@ class IntegrationTests: XCTestCase {
     func test_sync_shared_mutex_test() throws { try runCase(named: "sync_shared_mutex_test.koral") }
     func test_sync_channel_test() throws { try runCase(named: "sync_channel_test.koral") }
     func test_sync_misc_test() throws { try runCase(named: "sync_misc_test.koral") }
+    func test_defer_basic() throws { try runCase(named: "defer_basic.koral") }
+    func test_defer_control_flow() throws { try runCase(named: "defer_control_flow.koral") }
+    func test_defer_scope() throws { try runCase(named: "defer_scope.koral") }
+    func test_defer_error() throws { try runCase(named: "defer_error.koral") }
     
     func runTestCase(file: URL, projectRoot: URL) throws {
         // 1. Parse expectations

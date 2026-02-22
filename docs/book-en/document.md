@@ -578,6 +578,59 @@ for v = set then {
 }
 ```
 
+### defer Statement
+
+The `defer` statement declares a cleanup expression to be executed when the current block scope exits. The deferred expression runs regardless of whether the scope exits normally or early via `return`, `break`, or `continue`.
+
+`defer` is followed by an expression whose return value is discarded.
+
+```koral
+let main() = {
+    print_line("start")
+    defer print_line("cleanup")
+    print_line("work")
+    // Output: start, work, cleanup
+}
+```
+
+Multiple `defer` statements in the same scope execute in reverse declaration order (LIFO):
+
+```koral
+let main() = {
+    defer print_line("first")
+    defer print_line("second")
+    defer print_line("third")
+    // Output: third, second, first
+}
+```
+
+`defer` binds to the block scope where it is declared, not the function scope. In loops, `defer` executes at the end of each iteration:
+
+```koral
+let mut i = 0
+while i < 3 then {
+    i += 1
+    defer print_line("cleanup")
+    print_line(i)
+    // Each iteration outputs: value of i, cleanup
+}
+```
+
+The deferred expression can also be a block expression:
+
+```koral
+defer {
+    print_line("cleaning up")
+    close(handle)
+}
+```
+
+#### Restrictions
+
+- `return`, `break`, and `continue` are not allowed inside a `defer` expression.
+- Nested `defer` is not allowed inside a `defer` expression.
+- These restrictions do not cross Lambda boundaries — Lambdas have their own independent scope.
+
 ## Pattern Matching
 
 Koral has powerful pattern matching capabilities, mainly used through `when` expressions and the `is` operator.

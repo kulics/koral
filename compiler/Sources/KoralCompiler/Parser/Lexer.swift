@@ -105,6 +105,7 @@ public enum Token: CustomStringConvertible {
   case superKeyword // 'super' keyword
   case usingKeyword // 'using' keyword
   case weakrefKeyword // 'weakref' keyword
+  case deferKeyword // 'defer' keyword
 
   /// Whether this token is a continuation token (triggers line continuation when at start of line)
   /// Continuation tokens include: infix operators, dot, and arrow
@@ -204,6 +205,8 @@ public enum Token: CustomStringConvertible {
     case (.usingKeyword, .usingKeyword):
       return true
     case (.weakrefKeyword, .weakrefKeyword):
+      return true
+    case (.deferKeyword, .deferKeyword):
       return true
     case (.bof, .bof), (.eof, .eof):
       return true
@@ -384,6 +387,8 @@ public enum Token: CustomStringConvertible {
       return "...."
     case .weakrefKeyword:
       return "weakref"
+    case .deferKeyword:
+      return "defer"
     }
   }
 }
@@ -1138,6 +1143,7 @@ public class Lexer {
       case "continue": .continueKeyword
       case "for": .forKeyword
       case "weakref": .weakrefKeyword
+      case "defer": .deferKeyword
       default: .identifier(id)
       }
     default:

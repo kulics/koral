@@ -618,6 +618,59 @@ for v = set then {
 }
 ```
 
+### defer 语句
+
+`defer` 语句用于声明在当前块作用域退出时执行的清理表达式。无论作用域是正常退出还是通过 `return`、`break`、`continue` 提前退出，`defer` 表达式都会被执行。
+
+`defer` 后面跟一个表达式，该表达式的返回值会被丢弃。
+
+```koral
+let main() = {
+    print_line("start")
+    defer print_line("cleanup")
+    print_line("work")
+    // 输出: start, work, cleanup
+}
+```
+
+同一作用域内的多个 `defer` 按声明的逆序（LIFO）执行：
+
+```koral
+let main() = {
+    defer print_line("first")
+    defer print_line("second")
+    defer print_line("third")
+    // 输出: third, second, first
+}
+```
+
+`defer` 绑定到声明它的块作用域，而非函数作用域。在循环中，`defer` 会在每次迭代结束时执行：
+
+```koral
+let mut i = 0
+while i < 3 then {
+    i += 1
+    defer print_line("cleanup")
+    print_line(i)
+    // 每次迭代输出: i 的值, cleanup
+}
+```
+
+`defer` 表达式也可以是块表达式：
+
+```koral
+defer {
+    print_line("cleaning up")
+    close(handle)
+}
+```
+
+#### 限制
+
+- `defer` 表达式内部不允许使用 `return`、`break`、`continue`。
+- `defer` 表达式内部不允许嵌套 `defer`。
+- 以上限制不穿透 Lambda 边界——Lambda 内部拥有独立的作用域。
+
 ## 模式匹配
 
 Koral 拥有强大的模式匹配功能，主要通过 `when` 表达式和 `is` 操作符使用。

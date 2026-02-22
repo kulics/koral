@@ -13,6 +13,7 @@ public class CodeGen {
   var tempVarCounter = 0
   private var globalInitializations: [(String, TypedExpressionNode)] = []
   var lifetimeScopeStack: [[(name: String, type: Type)]] = []
+  var deferScopeStack: [[TypedExpressionNode]] = []
   var userDefinedDrops: [String: String] = [:] // TypeName -> Mangled Drop Function Name
   private(set) var cIdentifierByDefId: [UInt64: String] = [:]
   private var foreignFunctionDefIds: Set<UInt64> = []
@@ -331,15 +332,27 @@ public class CodeGen {
   
   func pushScope() {
     lifetimeScopeStack.append([])
+    deferScopeStack.append([])
     escapeContext.enterScope()
   }
 
   func popScopeWithoutCleanup() {
     _ = lifetimeScopeStack.popLast()
+    _ = deferScopeStack.popLast()
     escapeContext.leaveScope()
   }
 
   func popScope() {
+    // 1. Execute defer expressions in LIFO order (last declared runs first)
+    let defers = deferScopeStack.removeLast()
+    for deferExpr in defers.reversed() {
+      let result = generateExpressionSSA(deferExpr)
+      // Discard the return value, but if it's an rvalue that needs drop, clean it up
+      if deferExpr.valueCategory == .rvalue && needsDrop(deferExpr.type) && !result.isEmpty {
+        appendDropStatement(for: deferExpr.type, value: result, indent: indent)
+      }
+    }
+    // 2. Then execute variable __drop cleanup (reverse declaration order)
     let vars = lifetimeScopeStack.removeLast()
     for (name, type) in vars.reversed() {
       addIndent()
@@ -353,6 +366,15 @@ public class CodeGen {
     let clampedStart = max(0, min(startIndex, lifetimeScopeStack.count - 1))
 
     for scopeIndex in stride(from: lifetimeScopeStack.count - 1, through: clampedStart, by: -1) {
+      // First execute defer expressions for this scope (LIFO order)
+      let defers = deferScopeStack[scopeIndex]
+      for deferExpr in defers.reversed() {
+        let result = generateExpressionSSA(deferExpr)
+        if deferExpr.valueCategory == .rvalue && needsDrop(deferExpr.type) && !result.isEmpty {
+          appendDropStatement(for: deferExpr.type, value: result, indent: indent)
+        }
+      }
+      // Then execute variable __drop cleanup
       let vars = lifetimeScopeStack[scopeIndex]
       for (name, type) in vars.reversed() {
         addIndent()
@@ -363,6 +385,15 @@ public class CodeGen {
 
   func emitCleanupForScope(at scopeIndex: Int) {
     guard scopeIndex >= 0 && scopeIndex < lifetimeScopeStack.count else { return }
+    // First execute defer expressions for this scope (LIFO order)
+    let defers = deferScopeStack[scopeIndex]
+    for deferExpr in defers.reversed() {
+      let result = generateExpressionSSA(deferExpr)
+      if deferExpr.valueCategory == .rvalue && needsDrop(deferExpr.type) && !result.isEmpty {
+        appendDropStatement(for: deferExpr.type, value: result, indent: indent)
+      }
+    }
+    // Then execute variable __drop cleanup
     let vars = lifetimeScopeStack[scopeIndex]
     for (name, type) in vars.reversed() {
       addIndent()
@@ -2137,6 +2168,11 @@ public class CodeGen {
       emitCleanup(fromScopeIndex: ctx.scopeIndex)
       addIndent()
       buffer += "goto \(ctx.startLabel);\n"
+
+    case .defer(let expression):
+      // Don't generate code immediately; push the expression onto the current scope's defer list.
+      // Code generation is deferred to scope exit points (popScope, emitCleanup, etc.).
+      deferScopeStack[deferScopeStack.count - 1].append(expression)
     }
   }
 

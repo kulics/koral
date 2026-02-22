@@ -836,6 +836,9 @@ public class EscapeContext {
             
         case .break, .continue:
             break
+
+        case .defer(let expression):
+            preAnalyzeExpression(expression)
         }
     }
     
@@ -1353,6 +1356,9 @@ public class GlobalEscapeAnalyzer {
 
         case .break, .continue:
             break
+
+        case .defer(let expression):
+            extractCallsFromExpression(expression, callerDefId: callerDefId)
         }
     }
 

@@ -327,6 +327,7 @@ public indirect enum StatementNode {
   case `return`(value: ExpressionNode?, span: SourceSpan)
   case `break`(span: SourceSpan)
   case `continue`(span: SourceSpan)
+  case `defer`(expression: ExpressionNode, span: SourceSpan)
 }
 
 extension StatementNode {
@@ -340,6 +341,7 @@ extension StatementNode {
     case .return(_, let span): return span
     case .break(let span): return span
     case .continue(let span): return span
+    case .`defer`(_, let span): return span
     }
   }
 }
