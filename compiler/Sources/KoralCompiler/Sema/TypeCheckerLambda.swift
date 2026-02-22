@@ -39,7 +39,7 @@ extension TypeChecker {
         // Infer from expected type
         paramType = expected[i]
       } else {
-        throw SemanticError(.generic("Cannot infer type for parameter '\(param.name)'"), line: currentLine)
+        throw SemanticError(.generic("Cannot infer type for parameter '\(param.name)'"), span: currentSpan)
       }
       
       typedParams.append((name: param.name, type: paramType))
@@ -83,7 +83,7 @@ extension TypeChecker {
         actualReturnType = explicitReturnType
         // Verify body type matches declared return type
         if typedBody.type != actualReturnType && typedBody.type != .never {
-          throw SemanticError(.typeMismatch(expected: actualReturnType.description, got: typedBody.type.description), line: currentLine)
+          throw SemanticError(.typeMismatch(expected: actualReturnType.description, got: typedBody.type.description), span: currentSpan)
         }
       } else if let expected = expectedReturnType {
         // If expected return type is a generic parameter, infer from body instead
@@ -94,7 +94,7 @@ extension TypeChecker {
           actualReturnType = expected
           // Verify body type matches expected return type
           if typedBody.type != actualReturnType && typedBody.type != .never {
-            throw SemanticError(.typeMismatch(expected: actualReturnType.description, got: typedBody.type.description), line: currentLine)
+            throw SemanticError(.typeMismatch(expected: actualReturnType.description, got: typedBody.type.description), span: currentSpan)
           }
         }
       } else {
@@ -162,7 +162,7 @@ extension TypeChecker {
 
         // Check if it's mutable - only immutable variables can be captured
         if info.mutable {
-          throw SemanticError(.generic("Cannot capture mutable variable '\(name)'"), line: currentLine)
+          throw SemanticError(.generic("Cannot capture mutable variable '\(name)'"), span: currentSpan)
         }
         
         // Avoid duplicates

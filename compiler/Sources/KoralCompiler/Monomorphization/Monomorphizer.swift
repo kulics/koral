@@ -81,7 +81,7 @@ public class Monomorphizer {
     /// Current source line for error reporting
     internal var currentLine: Int = 1 {
         didSet {
-            SemanticErrorContext.currentLine = currentLine
+            SemanticErrorContext.currentSpan = SourceSpan(location: SourceLocation(line: currentLine, column: 1))
         }
     }
 
@@ -476,7 +476,7 @@ public class Monomorphizer {
                 if resolvedTypeArgs == nil || resolvedTypeArgs?.count != ext.typeParams.count {
                     throw SemanticError(
                         .generic("Missing type arguments for generic instantiation '\(typeName)' while resolving method '\(name)'."),
-                        line: currentLine
+                        span: SourceSpan(location: SourceLocation(line: currentLine, column: 1))
                     )
                 }
                 if let typeArgs = resolvedTypeArgs,
@@ -524,11 +524,13 @@ public class Monomorphizer {
     private func processRequest(_ request: InstantiationRequest) throws {
         currentLine = request.sourceLine
         currentFileName = request.sourceFileName
-        SemanticErrorContext.currentLine = currentLine
         SemanticErrorContext.currentFileName = currentFileName
 
         guard currentRecursionDepth < maxRecursionDepth else {
-            throw SemanticError(.generic("Maximum instantiation depth exceeded (possible infinite recursion)"), line: currentLine)
+            throw SemanticError(
+                .generic("Maximum instantiation depth exceeded (possible infinite recursion)"),
+                span: SourceSpan(location: SourceLocation(line: currentLine, column: 1))
+            )
         }
         
         let key = request.deduplicationKey

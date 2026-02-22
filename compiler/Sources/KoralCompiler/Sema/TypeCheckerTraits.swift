@@ -27,7 +27,7 @@ extension TypeChecker {
         importGraph: importGraph
       )
     } catch let error as VisibilityError {
-      throw SemanticError(.generic(error.description), line: currentLine)
+      throw SemanticError(.generic(error.description), span: currentSpan)
     }
   }
 
@@ -292,7 +292,7 @@ extension TypeChecker {
     if SemaUtils.isBuiltinTrait(traitName) { return [] }
 
     guard let decl = traits[traitName] else {
-      throw SemanticError(.generic("Undefined trait: \(traitName)"), line: currentLine)
+      throw SemanticError(.generic("Undefined trait: \(traitName)"), span: currentSpan)
     }
 
     var result: [(name: String, signature: TraitMethodSignature)] = []
@@ -323,7 +323,7 @@ extension TypeChecker {
     guard let index = ordered.firstIndex(where: { $0.name == methodName }) else {
       throw SemanticError(
         .generic("Method '\(methodName)' not found in trait '\(traitName)'"),
-        line: currentLine
+        span: currentSpan
       )
     }
     return index

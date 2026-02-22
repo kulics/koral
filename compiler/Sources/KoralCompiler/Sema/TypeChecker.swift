@@ -69,6 +69,15 @@ public class TypeChecker {
   // Set to track types defined in the standard library (for given declaration module rules)
   var stdLibTypes: Set<String> = []
 
+  // Cache normalized source lines for diagnostic span heuristics.
+  // Key: absolute source file path.
+  var sourceLinesCache: [String: [String]] = [:]
+
+  // When true, attempt one-time call-site recovery for the next inferred call.
+  // This is enabled only in high-risk contexts (e.g. block final expressions)
+  // to avoid paying scanning cost on all calls.
+  var shouldRecoverCallSiteOnce: Bool = false
+
   var currentSpan: SourceSpan = .unknown {
     didSet {
       SemanticErrorContext.updateSpan(currentSpan)
@@ -401,7 +410,7 @@ public class TypeChecker {
       )
     } catch let error as VisibilityError {
       // 转换 VisibilityError 为 SemanticError
-      throw SemanticError(.generic(error.description), line: currentLine)
+      throw SemanticError(.generic(error.description), span: currentSpan)
     }
   }
 
@@ -419,7 +428,7 @@ public class TypeChecker {
     self.currentFileName = userFileName
     self.importGraph = importGraph
     SemanticErrorContext.currentFileName = userFileName
-    SemanticErrorContext.currentLine = 1
+    
     SemanticErrorContext.currentCompilerContext = context
     self.currentScope = UnifiedScope(defIdMap: context.defIdMap)
   }
@@ -446,7 +455,7 @@ public class TypeChecker {
     self.currentFileName = userFileName
     self.importGraph = importGraph
     SemanticErrorContext.currentFileName = userFileName
-    SemanticErrorContext.currentLine = 1
+    
     SemanticErrorContext.currentCompilerContext = context
     self.currentScope = UnifiedScope(defIdMap: context.defIdMap)
     

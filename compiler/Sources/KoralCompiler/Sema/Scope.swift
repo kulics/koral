@@ -91,7 +91,8 @@ public class UnifiedScope {
       return
     }
     if names[name] != nil {
-      throw SemanticError.duplicateDefinition(name, line: line)
+      let span = line.map { SourceSpan(location: SourceLocation(line: $0, column: 1)) } ?? .unknown
+      throw SemanticError.duplicateDefinition(name, span: span)
     }
     names[name] = defId
   }
@@ -383,7 +384,8 @@ public class UnifiedScope {
 
   public func defineType(_ name: String, type: Type, line: Int? = nil) throws {
     if typeNames[name] != nil {
-      throw SemanticError.duplicateDefinition(name, line: line)
+      let span = line.map { SourceSpan(location: SourceLocation(line: $0, column: 1)) } ?? .unknown
+      throw SemanticError.duplicateDefinition(name, span: span)
     }
     guard let map = defIdMap else {
       return
@@ -431,7 +433,7 @@ public class UnifiedScope {
   public func definePrivateType(_ name: String, sourceFile: String, type: Type) throws {
     let key = "\(name)@\(sourceFile)"
     if privateTypeNames[key] != nil {
-      throw SemanticError.duplicateDefinition(name)
+      throw SemanticError.duplicateDefinition(name, span: .unknown)
     }
     guard let map = defIdMap else {
       return

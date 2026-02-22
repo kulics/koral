@@ -257,7 +257,7 @@ public class NameCollector: CompilerPass {
         case .intrinsicGivenDeclaration(_, _, _, let span):
             // Intrinsic given 在 Pass 2 中处理
             if !isStdLib {
-                throw SemanticError(.generic("'intrinsic' declarations are only allowed in the standard library"), line: span.line)
+                throw SemanticError(.generic("'intrinsic' declarations are only allowed in the standard library"), span: span)
             }
 
         case .typeAliasDeclaration(let name, _, let access, let span):
@@ -286,7 +286,7 @@ public class NameCollector: CompilerPass {
         
         // 检查重复定义
         if collectedTraits[qualifiedName] != nil {
-            throw SemanticError.duplicateDefinition(name, line: span.line)
+            throw SemanticError.duplicateDefinition(name, span: span)
         }
         
         // 检查方法级类型参数冲突
@@ -339,12 +339,12 @@ public class NameCollector: CompilerPass {
         
         // 检查重复定义（非私有类型，在同一模块中）
         if !isPrivate && collectedTypes[qualifiedName] != nil {
-            throw SemanticError.duplicateDefinition(name, line: span.line)
+            throw SemanticError.duplicateDefinition(name, span: span)
         }
         
         // 检查泛型模板重复
         if !isPrivate && collectedGenericTemplates[qualifiedName] != nil {
-            throw SemanticError.duplicateDefinition(name, line: span.line)
+            throw SemanticError.duplicateDefinition(name, span: span)
         }
         
         // 确定定义类型
@@ -412,12 +412,12 @@ public class NameCollector: CompilerPass {
         
         // 检查重复定义（非私有类型，在同一模块中）
         if !isPrivate && collectedTypes[qualifiedName] != nil {
-            throw SemanticError.duplicateDefinition(name, line: span.line)
+            throw SemanticError.duplicateDefinition(name, span: span)
         }
         
         // 检查泛型模板重复
         if !isPrivate && collectedGenericTemplates[qualifiedName] != nil {
-            throw SemanticError.duplicateDefinition(name, line: span.line)
+            throw SemanticError.duplicateDefinition(name, span: span)
         }
         
         // 确定定义类型
@@ -561,12 +561,12 @@ public class NameCollector: CompilerPass {
     ) throws {
         // 检查是否在标准库中
         if !isStdLib {
-            throw SemanticError(.generic("'intrinsic' declarations are only allowed in the standard library"), line: span.line)
+            throw SemanticError(.generic("'intrinsic' declarations are only allowed in the standard library"), span: span)
         }
         
         // 检查重复定义
         if collectedTypes[name] != nil || collectedGenericTemplates[name] != nil {
-            throw SemanticError.duplicateDefinition(name, line: span.line)
+            throw SemanticError.duplicateDefinition(name, span: span)
         }
         
         // 确定定义类型
@@ -625,7 +625,7 @@ public class NameCollector: CompilerPass {
         let qualifiedName = currentModulePath.isEmpty ? name : "\(currentModulePath.joined(separator: ".")).\(name)"
 
         if !isPrivate && collectedTypes[qualifiedName] != nil {
-            throw SemanticError.duplicateDefinition(name, line: span.line)
+            throw SemanticError.duplicateDefinition(name, span: span)
         }
 
         let kind: TypeDefKind = fields == nil ? .opaque : .structure
@@ -670,7 +670,7 @@ public class NameCollector: CompilerPass {
 
         // 检查重复定义（非私有类型，在同一模块中）
         if !isPrivate && (collectedTypes[qualifiedName] != nil || collectedGenericTemplates[qualifiedName] != nil) {
-            throw SemanticError.duplicateDefinition(name, line: span.line)
+            throw SemanticError.duplicateDefinition(name, span: span)
         }
 
         // 分配 DefId（别名最终解析为目标类型，使用 .type(.structure)）
@@ -711,7 +711,7 @@ public class NameCollector: CompilerPass {
     ) throws {
         // 检查是否在标准库中
         if !isStdLib {
-            throw SemanticError(.generic("'intrinsic' declarations are only allowed in the standard library"), line: span.line)
+            throw SemanticError(.generic("'intrinsic' declarations are only allowed in the standard library"), span: span)
         }
         
         // 确定定义类型
@@ -802,7 +802,7 @@ public class NameCollector: CompilerPass {
                 if outerNames.contains(param.name) {
                     throw SemanticError(.generic(
                         "Method '\(method.name)' type parameter '\(param.name)' conflicts with \(contextName) type parameter"
-                    ), line: 0)
+                    ), span: .unknown)
                 }
             }
         }

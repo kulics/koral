@@ -55,6 +55,9 @@ class IntegrationTests: XCTestCase {
     func test_duration_sleep() throws { try runCase(named: "duration_sleep.koral") }
     func test_duration_ffi_test() throws { try runCase(named: "duration_ffi_test.koral") }
     func test_duration_factory_methods() throws { try runCase(named: "duration_factory_methods.koral") }
+    func test_diagnostic_type_mismatch_line_1() throws { try runCase(named: "diagnostic_type_mismatch_line_1.koral") }
+    func test_diagnostic_type_mismatch_line_2() throws { try runCase(named: "diagnostic_type_mismatch_line_2.koral") }
+    func test_diagnostic_type_mismatch_line_3() throws { try runCase(named: "diagnostic_type_mismatch_line_3.koral") }
     func test_escape_analysis() throws { try runCase(named: "escape_analysis.koral") }
     func test_escape_analysis_coverage() throws { try runCase(named: "escape_analysis_coverage.koral") }
     func test_exhaustiveness_check() throws { try runCase(named: "exhaustiveness_check.koral") }

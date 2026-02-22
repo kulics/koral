@@ -101,13 +101,19 @@ extension Monomorphizer {
                 return try instantiateUnion(template: template, args: resolvedArgs)
             }
             
-            throw SemanticError(.generic("Unknown generic type: \(base)"), line: currentLine)
+            throw SemanticError(
+                .generic("Unknown generic type: \(base)"),
+                span: SourceSpan(location: SourceLocation(line: currentLine, column: 1))
+            )
             
         case .inferredSelf:
             if let selfType = substitution["Self"] {
                 return selfType
             }
-            throw SemanticError(.generic("Self type not available in this context"), line: currentLine)
+            throw SemanticError(
+                .generic("Self type not available in this context"),
+                span: SourceSpan(location: SourceLocation(line: currentLine, column: 1))
+            )
             
         case .functionType(let paramTypes, let returnType):
             // Resolve function type: [ParamType1, ParamType2, ..., ReturnType]Func
@@ -149,7 +155,10 @@ extension Monomorphizer {
                 return try instantiateUnion(template: template, args: resolvedArgs)
             }
             
-            throw SemanticError(.generic("Unknown generic type: \(base)"), line: currentLine)
+            throw SemanticError(
+                .generic("Unknown generic type: \(base)"),
+                span: SourceSpan(location: SourceLocation(line: currentLine, column: 1))
+            )
             
         case .weakReference(let inner):
             let innerType = try resolveTypeNode(inner, substitution: substitution)

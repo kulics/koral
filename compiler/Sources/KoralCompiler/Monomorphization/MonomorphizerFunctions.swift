@@ -507,7 +507,7 @@ extension Monomorphizer {
                 if isGen && context.getTypeArguments(defId) == nil && layoutToTemplateInfo[typeName]?.args == nil {
                     throw SemanticError(
                         .generic("Missing type arguments for generic instantiation '\(typeName)' while resolving method '\(name)'."),
-                        line: currentLine
+                        span: SourceSpan(location: SourceLocation(line: currentLine, column: 1))
                     )
                 }
             }
@@ -567,7 +567,7 @@ extension Monomorphizer {
                 if isGen && context.getTypeArguments(defId) == nil && layoutToTemplateInfo[typeName]?.args == nil {
                     throw SemanticError(
                         .generic("Missing type arguments for generic instantiation '\(typeName)' while resolving method '\(name)'."),
-                        line: currentLine
+                        span: SourceSpan(location: SourceLocation(line: currentLine, column: 1))
                     )
                 }
             }

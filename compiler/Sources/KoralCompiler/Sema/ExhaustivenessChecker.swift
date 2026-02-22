@@ -5,6 +5,9 @@ public struct ExhaustivenessChecker {
     private let patterns: [TypedPattern]
     private let currentLine: Int
     private let context: CompilerContext
+    private var currentSpan: SourceSpan {
+        SourceSpan(location: SourceLocation(line: currentLine, column: 1))
+    }
     
     /// Resolved union cases for generic union types
     private let resolvedUnionCases: [UnionCase]?
@@ -53,7 +56,7 @@ extension ExhaustivenessChecker {
                         pattern: pattern.description,
                         reason: "already covered by '\(catchallPattern ?? "_")' at position \(catchallIdx + 1)"
                     ),
-                    line: currentLine
+                    span: currentSpan
                 )
             }
             
@@ -77,7 +80,7 @@ extension ExhaustivenessChecker {
                             pattern: pattern.description,
                             reason: "case '\(alreadyCovered.first!)' is already covered"
                         ),
-                        line: currentLine
+                        span: currentSpan
                     )
                 }
                 
@@ -88,7 +91,7 @@ extension ExhaustivenessChecker {
                             pattern: pattern.description,
                             reason: "all union cases are already covered"
                         ),
-                        line: currentLine
+                        span: currentSpan
                     )
                 }
                 
@@ -185,7 +188,7 @@ extension ExhaustivenessChecker {
                 // Can't check without resolved cases, require catchall
                 throw SemanticError(
                     .missingCatchallPattern(type: subjectType.description),
-                    line: currentLine
+                    span: currentSpan
                 )
             }
             
@@ -199,7 +202,7 @@ extension ExhaustivenessChecker {
             if !hasCatchall {
                 throw SemanticError(
                     .missingCatchallPattern(type: subjectType.description),
-                    line: currentLine
+                    span: currentSpan
                 )
             }
             
@@ -209,7 +212,7 @@ extension ExhaustivenessChecker {
                 let name = context.getName(defId) ?? subjectType.description
                 throw SemanticError(
                     .missingCatchallPattern(type: name),
-                    line: currentLine
+                    span: currentSpan
                 )
             }
             
@@ -218,12 +221,12 @@ extension ExhaustivenessChecker {
             if !hasCatchall && !isStringType(subjectType) {
                 throw SemanticError(
                     .missingCatchallPattern(type: subjectType.description),
-                    line: currentLine
+                    span: currentSpan
                 )
             } else if isStringType(subjectType) && !hasCatchall {
                 throw SemanticError(
                     .missingCatchallPattern(type: "String"),
-                    line: currentLine
+                    span: currentSpan
                 )
             }
         }
@@ -248,7 +251,7 @@ extension ExhaustivenessChecker {
             let sortedMissing = missingCases.sorted().map { ".\($0)" }
             throw SemanticError(
                 .nonExhaustiveMatch(type: typeName, missing: sortedMissing),
-                line: currentLine
+                span: currentSpan
             )
         }
     }
@@ -287,7 +290,7 @@ extension ExhaustivenessChecker {
             let sortedMissing = missingValues.map { String($0) }.sorted()
             throw SemanticError(
                 .nonExhaustiveMatch(type: "Bool", missing: sortedMissing),
-                line: currentLine
+                span: currentSpan
             )
         }
     }

@@ -186,7 +186,8 @@ public enum SemaUtils {
         }
         
         guard let decl = traits[traitName] else {
-            throw SemanticError(.generic("Undefined trait: \(traitName)"), line: currentLine)
+            let span = currentLine.map { SourceSpan(location: SourceLocation(line: $0, column: 1)) } ?? .unknown
+            throw SemanticError(.generic("Undefined trait: \(traitName)"), span: span)
         }
         
         var methods: [String: TraitMethodSignature] = [:]
@@ -234,7 +235,8 @@ public enum SemaUtils {
         if isBuiltinTrait(traitName) { return [] }
         
         guard let decl = traits[traitName] else {
-            throw SemanticError(.generic("Undefined trait: \(traitName)"), line: currentLine)
+            let span = currentLine.map { SourceSpan(location: SourceLocation(line: $0, column: 1)) } ?? .unknown
+            throw SemanticError(.generic("Undefined trait: \(traitName)"), span: span)
         }
         
         var result: [(name: String, signature: TraitMethodSignature)] = []
@@ -275,7 +277,8 @@ public enum SemaUtils {
             return
         }
         if traits[name] == nil {
-            throw SemanticError(.generic("Undefined trait: \(name)"), line: currentLine)
+            let span = currentLine.map { SourceSpan(location: SourceLocation(line: $0, column: 1)) } ?? .unknown
+            throw SemanticError(.generic("Undefined trait: \(name)"), span: span)
         }
     }
     
