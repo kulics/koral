@@ -163,6 +163,7 @@ public indirect enum TypedStatementNode {
   case `return`(value: TypedExpressionNode?)
   case `break`
   case `continue`
+  case `defer`(expression: TypedExpressionNode)
 }
 public indirect enum TypedExpressionNode {
   case integerLiteral(value: String, type: Type)  // Store as string to support arbitrary precision

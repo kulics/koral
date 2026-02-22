@@ -115,6 +115,7 @@ extension CodeGen {
     let savedLambdaCounter = lambdaCounter
     let savedLambdaFunctions = lambdaFunctions
     let savedLifetimeScopeStack = lifetimeScopeStack
+    let savedDeferScopeStack = deferScopeStack
     let savedLoopStack = loopStack
     let savedTempPoolStack = tempPoolStack
     let savedCurrentBranchPoolVars = currentBranchPoolVars
@@ -122,6 +123,7 @@ extension CodeGen {
     indent = "  "
     lambdaFunctions = ""
     lifetimeScopeStack = []
+    deferScopeStack = []
     loopStack = []
     tempPoolStack = []
     currentBranchPoolVars = []
@@ -142,6 +144,7 @@ extension CodeGen {
     indent = savedIndent
     lambdaCounter = savedLambdaCounter + (lambdaCounter - savedLambdaCounter)
     lifetimeScopeStack = savedLifetimeScopeStack
+    deferScopeStack = savedDeferScopeStack
     loopStack = savedLoopStack
     tempPoolStack = savedTempPoolStack
     currentBranchPoolVars = savedCurrentBranchPoolVars
@@ -187,6 +190,7 @@ extension CodeGen {
     let savedLambdaFunctions = lambdaFunctions
     let savedCapturedVarAliases = capturedVarAliases
     let savedLifetimeScopeStack = lifetimeScopeStack
+    let savedDeferScopeStack = deferScopeStack
     let savedLoopStack = loopStack
     let savedTempPoolStack = tempPoolStack
     let savedCurrentBranchPoolVars = currentBranchPoolVars
@@ -194,6 +198,7 @@ extension CodeGen {
     indent = "  "
     lambdaFunctions = ""
     lifetimeScopeStack = []
+    deferScopeStack = []
     loopStack = []
     tempPoolStack = []
     currentBranchPoolVars = []
@@ -222,6 +227,7 @@ extension CodeGen {
     lambdaCounter = savedLambdaCounter + (lambdaCounter - savedLambdaCounter)
     capturedVarAliases = savedCapturedVarAliases
     lifetimeScopeStack = savedLifetimeScopeStack
+    deferScopeStack = savedDeferScopeStack
     loopStack = savedLoopStack
     tempPoolStack = savedTempPoolStack
     currentBranchPoolVars = savedCurrentBranchPoolVars

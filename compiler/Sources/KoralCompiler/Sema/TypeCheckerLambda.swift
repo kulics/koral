@@ -71,6 +71,13 @@ extension TypeChecker {
       let savedFunctionReturnType = currentFunctionReturnType
       defer { currentFunctionReturnType = savedFunctionReturnType }
 
+      // Lambda has its own scope, so reset insideDefer flag.
+      // This allows return/break/continue/defer inside a lambda that
+      // appears within a defer expression.
+      let savedInsideDefer = insideDefer
+      insideDefer = false
+      defer { insideDefer = savedInsideDefer }
+
       let resolvedExplicitReturnType = try returnType.map { try resolveTypeNode($0) }
       let lambdaReturnTypeForBodyCheck: Type = resolvedExplicitReturnType ?? expectedReturnType ?? .void
       currentFunctionReturnType = lambdaReturnTypeForBodyCheck
@@ -323,6 +330,8 @@ extension TypeChecker {
       }
     case .break, .continue:
       break
+    case .`defer`(let expression, _):
+      try collectCapturedVariables(expr: expression, paramNames: paramNames, captures: &captures)
     }
   }
 }

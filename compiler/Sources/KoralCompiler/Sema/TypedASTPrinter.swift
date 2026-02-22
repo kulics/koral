@@ -170,6 +170,12 @@ public func printTypedAST(_ node: TypedProgram) {
 
     case .continue:
       print("\(indent)Continue")
+
+    case .defer(let expression):
+      print("\(indent)Defer")
+      withIndent {
+        printTypedExpression(expression)
+      }
     }
   }
 

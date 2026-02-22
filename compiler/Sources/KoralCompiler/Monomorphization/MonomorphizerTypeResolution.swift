@@ -1327,6 +1327,9 @@ extension Monomorphizer {
             
         case .continue:
             return .continue
+
+        case .defer(let expression):
+            return .defer(expression: resolveTypesInExpression(expression))
         }
     }
 }

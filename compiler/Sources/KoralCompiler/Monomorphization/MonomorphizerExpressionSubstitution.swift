@@ -814,6 +814,9 @@ extension Monomorphizer {
             
         case .continue:
             return .continue
+
+        case .defer(let expression):
+            return .defer(expression: substituteTypesInExpression(expression, substitution: substitution))
         }
     }
     

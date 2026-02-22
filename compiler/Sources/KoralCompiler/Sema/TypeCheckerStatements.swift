@@ -312,6 +312,10 @@ extension TypeChecker {
 
     case .return(let value, let span):
       self.currentSpan = span
+      if insideDefer {
+        throw SemanticError(.generic(
+          "control flow statement 'return' is not allowed in defer expression"))
+      }
       guard let returnType = currentFunctionReturnType else {
         throw SemanticError.invalidOperation(op: "return outside of function", type1: "", type2: "")
       }
@@ -338,6 +342,10 @@ extension TypeChecker {
 
     case .break(let span):
       self.currentSpan = span
+      if insideDefer {
+        throw SemanticError(.generic(
+          "control flow statement 'break' is not allowed in defer expression"))
+      }
       if loopDepth <= 0 {
         throw SemanticError.invalidOperation(op: "break outside of while", type1: "", type2: "")
       }
@@ -345,10 +353,26 @@ extension TypeChecker {
 
     case .continue(let span):
       self.currentSpan = span
+      if insideDefer {
+        throw SemanticError(.generic(
+          "control flow statement 'continue' is not allowed in defer expression"))
+      }
       if loopDepth <= 0 {
         throw SemanticError.invalidOperation(op: "continue outside of while", type1: "", type2: "")
       }
       return .continue
+
+    case .`defer`(let expression, let span):
+      self.currentSpan = span
+      if insideDefer {
+        throw SemanticError(.generic(
+          "defer statement is not allowed inside defer expression"))
+      }
+      let previousInsideDefer = insideDefer
+      insideDefer = true
+      let typedExpr = try inferTypedExpression(expression)
+      insideDefer = previousInsideDefer
+      return .`defer`(expression: typedExpr)
     }
   }
 }
