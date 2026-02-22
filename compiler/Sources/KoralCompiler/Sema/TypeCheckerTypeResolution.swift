@@ -403,7 +403,7 @@ extension TypeChecker {
               if traitName != "Any" && !bounds.contains(where: { $0.baseName == traitName }) {
                 throw SemanticError(.generic(
                   "Generic parameter \(argName) does not have required constraint \(traitName)"
-                ), line: currentLine)
+                ), span: currentSpan)
               }
             }
             // If bounds exist and contain the trait (or trait is Any), constraint is satisfied
@@ -430,7 +430,7 @@ extension TypeChecker {
               if !bounds.contains(where: { $0.baseName == baseTrait }) {
                 throw SemanticError(.generic(
                   "Generic parameter \(argName) does not have required constraint \(constraint)"
-                ), line: currentLine)
+                ), span: currentSpan)
               }
             }
             continue
@@ -463,13 +463,13 @@ extension TypeChecker {
       if case .traitObject = selfType {
         throw SemanticError(.generic(
           "Trait object type '\(selfType)' does not satisfy 'Deref' constraint"
-        ), line: currentLine)
+        ), span: currentSpan)
       }
       // opaque type does not satisfy Deref
       if case .opaque = selfType {
         throw SemanticError(.generic(
           "Opaque type '\(selfType)' does not satisfy 'Deref' constraint"
-        ), line: currentLine)
+        ), span: currentSpan)
       }
       return  // All other types automatically satisfy Deref
     }
@@ -483,7 +483,7 @@ extension TypeChecker {
       // Different traits don't satisfy each other (no upcasting in initial version)
       throw SemanticError(.generic(
         "Trait object type '\(selfType)' does not satisfy '\(traitName)' constraint"
-      ), line: currentLine)
+      ), span: currentSpan)
     }
 
     // Check cache: skip redundant conformance checks for the same type/trait pair
@@ -541,7 +541,7 @@ extension TypeChecker {
       if !mismatched.isEmpty {
         msg += "\n" + mismatched.joined(separator: "\n")
       }
-      throw SemanticError(.generic(msg), line: currentLine)
+      throw SemanticError(.generic(msg), span: currentSpan)
     }
     
     // Cache successful conformance check
@@ -638,14 +638,14 @@ extension TypeChecker {
     try validateTraitName(traitName)
     
     guard let traitInfo = traits[traitName] else {
-      throw SemanticError(.generic("Undefined trait: \(traitName)"), line: currentLine)
+      throw SemanticError(.generic("Undefined trait: \(traitName)"), span: currentSpan)
     }
     
     // Validate type argument count
     guard traitInfo.typeParameters.count == traitTypeArgs.count else {
       throw SemanticError(.generic(
         "Trait \(traitName) expects \(traitInfo.typeParameters.count) type arguments, got \(traitTypeArgs.count)"
-      ), line: currentLine)
+      ), span: currentSpan)
     }
     
     // Create type substitution map from trait type parameters to concrete types
@@ -690,7 +690,7 @@ extension TypeChecker {
       if !mismatched.isEmpty {
         msg += "\n" + mismatched.joined(separator: "\n")
       }
-      throw SemanticError(.generic(msg), line: currentLine)
+      throw SemanticError(.generic(msg), span: currentSpan)
     }
     
     // Cache successful conformance check
@@ -792,7 +792,7 @@ extension TypeChecker {
       if !methodFound {
         throw SemanticError(.generic(
           "Type \(type) does not implement method '\(methodName)' required by trait \(traitName)"
-        ), line: currentLine)
+        ), span: currentSpan)
       }
     }
   }

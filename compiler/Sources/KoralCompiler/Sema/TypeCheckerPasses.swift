@@ -81,7 +81,7 @@ extension TypeChecker {
         if hasCollectedErrors {
           throw diagnosticCollector
         }
-        throw SemanticError(.generic("BodyChecker output missing"), line: 1)
+        throw SemanticError(.generic("BodyChecker output missing"), span: currentSpan)
       }
       
       // Build the typed program
@@ -416,7 +416,7 @@ extension TypeChecker {
         if outerNames.contains(param.name) {
           throw SemanticError(.generic(
             "Method '\(method.name)' type parameter '\(param.name)' conflicts with \(contextName) type parameter"
-          ), line: currentLine)
+          ), span: currentSpan)
         }
       }
     }
@@ -438,7 +438,7 @@ extension TypeChecker {
         if outerNames.contains(param.name) {
           throw SemanticError(.generic(
             "Method '\(method.name)' type parameter '\(param.name)' conflicts with \(contextName) type parameter"
-          ), line: currentLine)
+          ), span: currentSpan)
         }
       }
     }
@@ -461,7 +461,7 @@ extension TypeChecker {
     case .traitDeclaration(let name, let typeParameters, let superTraits, let methods, let access, let span):
       self.currentSpan = span
       if traits[name] != nil {
-        throw SemanticError.duplicateDefinition(name, line: span.line)
+        throw SemanticError.duplicateDefinition(name, span: span)
       }
       
       // Check for method-level type parameter conflicts with trait-level type parameters
@@ -495,7 +495,7 @@ extension TypeChecker {
       // For private types, allow same name in different files
       let isPrivate = (access == .private)
       if !isPrivate && currentScope.hasTypeDefinition(name) {
-        throw SemanticError.duplicateDefinition(name, line: span.line)
+        throw SemanticError.duplicateDefinition(name, span: span)
       }
       
       if !typeParameters.isEmpty {
@@ -538,7 +538,7 @@ extension TypeChecker {
       // For private types, allow same name in different files
       let isPrivate = (access == .private)
       if !isPrivate && currentScope.hasTypeDefinition(name) {
-        throw SemanticError.duplicateDefinition(name, line: span.line)
+        throw SemanticError.duplicateDefinition(name, span: span)
       }
       
       if !typeParameters.isEmpty {
@@ -580,7 +580,7 @@ extension TypeChecker {
       self.currentSpan = span
       let isPrivate = (access == .private)
       if !isPrivate && currentScope.hasTypeDefinition(name) {
-        throw SemanticError.duplicateDefinition(name, line: span.line)
+        throw SemanticError.duplicateDefinition(name, span: span)
       }
       let kind: TypeDefKind = fields == nil ? .opaque : .structure
       let defId = getOrAllocateTypeDefId(
@@ -645,11 +645,11 @@ extension TypeChecker {
       
       // Module rule check: intrinsic declarations are only allowed in standard library
       if !isStdLib {
-        throw SemanticError(.generic("'intrinsic' declarations are only allowed in the standard library"), line: span.line)
+        throw SemanticError(.generic("'intrinsic' declarations are only allowed in the standard library"), span: span)
       }
       
       if currentScope.hasTypeDefinition(name) {
-        throw SemanticError.duplicateDefinition(name, line: span.line)
+        throw SemanticError.duplicateDefinition(name, span: span)
       }
       
       if !typeParameters.isEmpty {
@@ -707,7 +707,7 @@ extension TypeChecker {
       
       // Module rule check: intrinsic declarations are only allowed in standard library
       if !isStdLib {
-        throw SemanticError(.generic("'intrinsic' declarations are only allowed in the standard library"), line: span.line)
+        throw SemanticError(.generic("'intrinsic' declarations are only allowed in the standard library"), span: span)
       }
       
       if !typeParameters.isEmpty {
@@ -719,7 +719,7 @@ extension TypeChecker {
       // Module rule check: intrinsic declarations are only allowed in standard library
       if !isStdLib {
         self.currentSpan = span
-        throw SemanticError(.generic("'intrinsic' declarations are only allowed in the standard library"), line: span.line)
+        throw SemanticError(.generic("'intrinsic' declarations are only allowed in the standard library"), span: span)
       }
       // Handled in pass 2 (signature) and pass 3 (body)
       break
@@ -730,7 +730,7 @@ extension TypeChecker {
       
       // Circular type alias detection
       if resolvingTypeAliases.contains(name) {
-        throw SemanticError(.generic("Circular type alias: \(name)"), line: span.line)
+        throw SemanticError(.generic("Circular type alias: \(name)"), span: span)
       }
       resolvingTypeAliases.insert(name)
       defer { resolvingTypeAliases.remove(name) }
@@ -864,7 +864,7 @@ extension TypeChecker {
           let existsInGeneric = genericExtensionMethods[baseName]!.contains(where: { $0.method.name == method.name })
           let existsInIntrinsic = (genericIntrinsicExtensionMethods[baseName] ?? []).contains(where: { $0.method.name == method.name })
           if existsInGeneric || existsInIntrinsic {
-            throw SemanticError.duplicateDefinition(method.name, line: span.line)
+            throw SemanticError.duplicateDefinition(method.name, span: span)
           }
           
           // Register the method template (without checked body)
@@ -951,7 +951,7 @@ extension TypeChecker {
           
           // Check for duplicate method name on this type
           if extensionMethods[typeName]![method.name] != nil {
-            throw SemanticError.duplicateDefinition(method.name, line: span.line)
+            throw SemanticError.duplicateDefinition(method.name, span: span)
           }
           
           extensionMethods[typeName]![method.name] = methodSymbol
@@ -982,7 +982,7 @@ extension TypeChecker {
           let allExisting = (genericExtensionMethods[baseName] ?? []).map { $0.method.name }
             + genericIntrinsicExtensionMethods[baseName]!.map { $0.method.name }
           if allExisting.contains(m.name) {
-            throw SemanticError.duplicateDefinition(m.name, line: span.line)
+            throw SemanticError.duplicateDefinition(m.name, span: span)
           }
           
           genericIntrinsicExtensionMethods[baseName]!.append((typeParams: typeParams, method: m))
@@ -1037,7 +1037,7 @@ extension TypeChecker {
           
           // Check for duplicate method name on this type
           if extensionMethods[typeName]![method.name] != nil {
-            throw SemanticError.duplicateDefinition(method.name, line: span.line)
+            throw SemanticError.duplicateDefinition(method.name, span: span)
           }
           
           extensionMethods[typeName]![method.name] = methodSymbol
@@ -1206,11 +1206,11 @@ extension TypeChecker {
       let isPrivate = (access == .private)
       if isPrivate {
         if currentScope.lookup(name, sourceFile: currentSourceFile) != nil {
-          throw SemanticError.duplicateDefinition(name, line: span.line)
+          throw SemanticError.duplicateDefinition(name, span: span)
         }
       } else {
         guard case nil = currentScope.lookup(name) else {
-          throw SemanticError.duplicateDefinition(name, line: span.line)
+          throw SemanticError.duplicateDefinition(name, span: span)
         }
       }
 
@@ -1356,11 +1356,11 @@ extension TypeChecker {
       if isPrivate {
         // Check only in private symbols for this file
         if currentScope.lookup(name, sourceFile: currentSourceFile) != nil {
-          throw SemanticError.duplicateDefinition(name, line: span.line)
+          throw SemanticError.duplicateDefinition(name, span: span)
         }
       } else {
         guard case nil = currentScope.lookup(name) else {
-          throw SemanticError.duplicateDefinition(name, line: span.line)
+          throw SemanticError.duplicateDefinition(name, span: span)
         }
       }
       let type = try resolveTypeNode(typeNode)
@@ -1438,11 +1438,11 @@ extension TypeChecker {
       let isPrivate = (access == .private)
       if isPrivate {
         if currentScope.lookup(name, sourceFile: currentSourceFile) != nil {
-          throw SemanticError.duplicateDefinition(name, line: span.line)
+          throw SemanticError.duplicateDefinition(name, span: span)
         }
       } else {
         guard case nil = currentScope.lookup(name) else {
-          throw SemanticError.duplicateDefinition(name, line: span.line)
+          throw SemanticError.duplicateDefinition(name, span: span)
         }
       }
 
@@ -1480,7 +1480,7 @@ extension TypeChecker {
       if typeParameters.isEmpty && existingLookup != nil {
         // Already defined in Pass 2, continue with body checking
       } else if currentScope.hasFunctionDefinition(name) {
-        throw SemanticError.duplicateDefinition(name, line: span.line)
+        throw SemanticError.duplicateDefinition(name, span: span)
       }
 
       if !typeParameters.isEmpty {
@@ -1622,7 +1622,7 @@ extension TypeChecker {
       }
       
       guard case nil = currentScope.lookup(name) else {
-        throw SemanticError.duplicateDefinition(name, line: span.line)
+        throw SemanticError.duplicateDefinition(name, span: span)
       }
 
       // Create a dummy body for intrinsic representation
@@ -1702,7 +1702,7 @@ extension TypeChecker {
         
         // Module rule check: Cannot add given declaration for types defined in external modules (std library)
         if stdLibTypes.contains(baseName) && !isCurrentDeclStdLib {
-          throw SemanticError(.generic("Cannot add 'given' declaration for type '\(baseName)' defined in standard library"), line: span.line)
+          throw SemanticError(.generic("Cannot add 'given' declaration for type '\(baseName)' defined in standard library"), span: span)
         }
         
         // Create a generic Self type for body checking
@@ -1817,7 +1817,7 @@ extension TypeChecker {
       // Module rule check: Cannot add given declaration for types defined in external modules (std library)
       // This check ensures that users cannot extend types from the standard library
       if stdLibTypes.contains(typeName) && !isCurrentDeclStdLib {
-        throw SemanticError(.generic("Cannot add 'given' declaration for type '\(typeName)' defined in standard library"), line: span.line)
+        throw SemanticError(.generic("Cannot add 'given' declaration for type '\(typeName)' defined in standard library"), span: span)
       }
 
       var typedMethods: [TypedMethodDeclaration] = []

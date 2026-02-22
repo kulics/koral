@@ -363,16 +363,16 @@ extension TypeChecker {
       templateName = "Bool"
       typeArgs = []
     default:
-      throw SemanticError(.generic("Cannot call generic method on type \(baseType)"), line: currentLine)
+      throw SemanticError(.generic("Cannot call generic method on type \(baseType)"), span: currentSpan)
     }
 
     // Look up the method in generic extension methods
     guard let extensions = genericExtensionMethods[templateName] else {
-      throw SemanticError(.generic("No extension methods found for type \(templateName)"), line: currentLine)
+      throw SemanticError(.generic("No extension methods found for type \(templateName)"), span: currentSpan)
     }
     
     guard let methodInfo = extensions.first(where: { $0.method.name == methodName }) else {
-      throw SemanticError(.generic("Method '\(methodName)' not found on type \(templateName)"), line: currentLine)
+      throw SemanticError(.generic("Method '\(methodName)' not found on type \(templateName)"), span: currentSpan)
     }
     
     let method = methodInfo.method
@@ -458,7 +458,7 @@ extension TypeChecker {
   ) throws -> GenericMethodResolutionResult {
     // Look up trait bounds for this generic parameter
     guard let bounds = genericTraitBounds[paramName] else {
-      throw SemanticError(.generic("Type parameter \(paramName) has no trait bounds"), line: currentLine)
+      throw SemanticError(.generic("Type parameter \(paramName) has no trait bounds"), span: currentSpan)
     }
     
     // Search for the method in all trait bounds
@@ -550,7 +550,7 @@ extension TypeChecker {
       }
     }
     
-    throw SemanticError(.generic("Method '\(methodName)' not found in trait bounds of \(paramName)"), line: currentLine)
+    throw SemanticError(.generic("Method '\(methodName)' not found in trait bounds of \(paramName)"), span: currentSpan)
   }
 
   /// Materializes a temporary for a generic method call on an rvalue.

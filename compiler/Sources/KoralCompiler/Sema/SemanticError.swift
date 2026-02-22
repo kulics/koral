@@ -38,26 +38,16 @@ public struct SemanticError: Error, CustomStringConvertible, Sendable {
     public let kind: Kind
     public let fileName: String
     public let span: SourceSpan
+
+    /// Convenience initializer that uses the current semantic context span.
+    public init(_ kind: Kind) {
+        self.init(kind, fileName: SemanticErrorContext.currentFileName, span: SemanticErrorContext.currentSpan)
+    }
     
     public init(_ kind: Kind, fileName: String, span: SourceSpan) {
         self.kind = kind
         self.fileName = fileName
         self.span = span
-    }
-    
-    /// Convenience initializer that uses line number
-    public init(_ kind: Kind, fileName: String, line: Int) {
-        self.init(kind, fileName: fileName, span: SourceSpan(location: SourceLocation(line: line, column: 1)))
-    }
-
-    /// Convenience initializer that uses the current semantic context.
-    /// This keeps call sites lightweight while still guaranteeing non-optional file/line.
-    public init(_ kind: Kind, line: Int? = nil) {
-        self.init(
-            kind,
-            fileName: SemanticErrorContext.currentFileName,
-            span: SourceSpan(location: SourceLocation(line: line ?? SemanticErrorContext.currentLine, column: 1))
-        )
     }
     
     /// Convenience initializer with span from context
@@ -78,8 +68,8 @@ public struct SemanticError: Error, CustomStringConvertible, Sendable {
     public static func invalidOperation(op: String, type1: String, type2: String) -> SemanticError {
         return SemanticError(.invalidOperation(op: op, type1: type1, type2: type2))
     }
-    public static func duplicateDefinition(_ name: String, line: Int? = nil) -> SemanticError {
-        return SemanticError(.duplicateDefinition(name), line: line)
+    public static func duplicateDefinition(_ name: String, span: SourceSpan) -> SemanticError {
+        return SemanticError(.duplicateDefinition(name), span: span)
     }
     public static func undefinedType(_ name: String) -> SemanticError {
         return SemanticError(.undefinedType(name))

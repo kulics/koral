@@ -6,6 +6,100 @@ import Foundation
 
 extension TypeChecker {
 
+  private func cachedSourceLinesForCurrentFile() -> [String]? {
+    guard !currentSourceFile.isEmpty else { return nil }
+    if let cached = sourceLinesCache[currentSourceFile] {
+      return cached
+    }
+    guard let source = try? String(contentsOfFile: currentSourceFile, encoding: .utf8) else {
+      return nil
+    }
+    let normalizedSource = source
+      .replacingOccurrences(of: "\r\n", with: "\n")
+      .replacingOccurrences(of: "\r", with: "\n")
+    let lines = normalizedSource.components(separatedBy: "\n")
+    sourceLinesCache[currentSourceFile] = lines
+    return lines
+  }
+
+  private func bestEffortFinalExpressionSpan(_ expr: ExpressionNode, anchorLine: Int) -> SourceSpan {
+    switch expr {
+    case .interpolatedString(_, let span),
+      .ifPatternExpression(_, _, _, _, let span),
+      .whilePatternExpression(_, _, _, let span),
+      .matchExpression(_, _, let span),
+      .lambdaExpression(_, _, _, let span),
+      .implicitMemberExpression(_, _, let span),
+      .orElseExpression(_, _, let span),
+      .andThenExpression(_, _, let span):
+      return span
+    default:
+      break
+    }
+
+    guard let lines = cachedSourceLinesForCurrentFile() else {
+      return SourceSpan(location: SourceLocation(line: anchorLine, column: currentSpan.start.column))
+    }
+
+    var lineIndex = max(0, anchorLine)
+
+    while lineIndex < lines.count {
+      let line = lines[lineIndex]
+      let trimmed = line.trimmingCharacters(in: .whitespaces)
+      if !trimmed.isEmpty,
+        !trimmed.hasPrefix("//"),
+        trimmed != "{",
+        trimmed != "}",
+        trimmed != "},"
+      {
+        let column = (line.firstIndex { !$0.isWhitespace }.map { line.distance(from: line.startIndex, to: $0) + 1 }) ?? 1
+        return SourceSpan(location: SourceLocation(line: lineIndex + 1, column: column))
+      }
+      lineIndex += 1
+    }
+
+    return SourceSpan(location: SourceLocation(line: anchorLine, column: currentSpan.start.column))
+  }
+
+  private func bestEffortIdentifierCallSpan(_ name: String, startLine: Int) -> SourceSpan? {
+    guard let lines = cachedSourceLinesForCurrentFile() else {
+      return nil
+    }
+
+    let center = max(0, startLine - 1)
+    let from = max(0, center - 80)
+    let to = min(lines.count - 1, center + 80)
+    let needle = "\(name)("
+
+    guard from <= to else { return nil }
+
+    var bestMatch: (lineIndex: Int, column: Int, distance: Int)? = nil
+
+    for lineIndex in from...to {
+      let line = lines[lineIndex]
+      let trimmed = line.trimmingCharacters(in: .whitespaces)
+      if trimmed.hasPrefix("//") { continue }
+
+      if let range = line.range(of: needle) {
+        let column = line.distance(from: line.startIndex, to: range.lowerBound) + 1
+        let distance = abs(lineIndex - center)
+        if let currentBest = bestMatch {
+          if distance < currentBest.distance {
+            bestMatch = (lineIndex: lineIndex, column: column, distance: distance)
+          }
+        } else {
+          bestMatch = (lineIndex: lineIndex, column: column, distance: distance)
+        }
+      }
+    }
+
+    if let bestMatch {
+      return SourceSpan(location: SourceLocation(line: bestMatch.lineIndex + 1, column: bestMatch.column))
+    }
+
+    return nil
+  }
+
   private func isUnsignedIntegerType(_ type: Type) -> Bool {
     switch type {
     case .uint, .uint8, .uint16, .uint32, .uint64:
@@ -22,7 +116,7 @@ extension TypeChecker {
     switch expr {
     case .integerLiteral(let value):
       if isUnsignedIntegerType(targetType), value.hasPrefix("-") {
-        throw SemanticError(.generic("Cannot cast negative integer literal to unsigned type \(targetType.description)"), line: currentLine)
+        throw SemanticError(.generic("Cannot cast negative integer literal to unsigned type \(targetType.description)"), span: currentSpan)
       }
       if isIntegerType(targetType) {
         return .integerLiteral(value: value, type: targetType)
@@ -169,7 +263,7 @@ extension TypeChecker {
         if !canAccessSymbolDirectly(symbolModulePath: symbolModulePath, currentModulePath: currentModulePath, symbolName: name) {
           // 找到需要使用的模块前缀
           let modulePrefix = getRequiredModulePrefix(symbolModulePath: symbolModulePath, currentModulePath: currentModulePath)
-          throw SemanticError(.generic("'\(name)' is defined in module '\(modulePrefix)'. Use '\(modulePrefix).\(name)' to access it."), line: currentLine)
+          throw SemanticError(.generic("'\(name)' is defined in module '\(modulePrefix)'. Use '\(modulePrefix).\(name)' to access it."), span: currentSpan)
         }
       }
       
@@ -235,6 +329,11 @@ extension TypeChecker {
         }
 
         if let finalExpr = finalExpression {
+          let anchorLine = statements.last?.span.start.line ?? currentSpan.start.line
+          currentSpan = bestEffortFinalExpressionSpan(finalExpr, anchorLine: anchorLine)
+          let previousRecoverFlag = shouldRecoverCallSiteOnce
+          shouldRecoverCallSiteOnce = true
+          defer { shouldRecoverCallSiteOnce = previousRecoverFlag }
           let typedFinalExpr = try inferTypedExpression(finalExpr, expectedType: expectedType)
           // If we already found a Never statement, the block is Never regardless of final expr?
           // Actually, if a statement is Never, the final expression is unreachable.
@@ -604,13 +703,13 @@ extension TypeChecker {
         if case .traitObject = innerType {
           throw SemanticError(.generic(
             "Cannot dereference a trait object reference: concrete type is unknown at compile time"
-          ), line: currentLine)
+          ), span: currentSpan)
         }
         // Disallow deref of opaque type references
         if case .opaque = innerType {
           throw SemanticError(.generic(
             "Cannot dereference an opaque type reference: type layout is unknown at compile time"
-          ), line: currentLine)
+          ), span: currentSpan)
         }
         // Generic parameters require Deref bound
         if case .genericParameter(let paramName) = innerType {
@@ -618,7 +717,7 @@ extension TypeChecker {
             throw SemanticError(.generic(
               "Cannot dereference '\(paramName) ref': type parameter '\(paramName)' does not have 'Deref' bound. " +
               "Add 'Deref' constraint: [\(paramName) Deref]"
-            ), line: currentLine)
+            ), span: currentSpan)
           }
         }
         return .derefExpression(expression: typedInner, type: innerType)
@@ -735,7 +834,7 @@ extension TypeChecker {
     guard let expected = expectedType else {
       throw SemanticError(
         .generic("Cannot use implicit member expression '.\(memberName)' without a known type context"),
-        line: span.start.line
+        span: span
       )
     }
     
@@ -762,7 +861,7 @@ extension TypeChecker {
     // 4. Neither worked - report error
     throw SemanticError(
       .generic("Member '\(memberName)' not found on type '\(expected.description)'"),
-      line: span.start.line
+      span: span
     )
   }
   
@@ -826,7 +925,7 @@ extension TypeChecker {
     if arguments.count != caseInfo.parameters.count {
       throw SemanticError(
         .generic("Union case '\(memberName)' expects \(caseInfo.parameters.count) argument(s), got \(arguments.count)"),
-        line: span.start.line
+        span: span
       )
     }
     
@@ -1076,17 +1175,26 @@ extension TypeChecker {
   
   /// Infers the type of a call expression
   func inferCallExpression(callee: ExpressionNode, arguments: [ExpressionNode], expectedType: Type? = nil) throws -> TypedExpressionNode {
+    if shouldRecoverCallSiteOnce {
+      shouldRecoverCallSiteOnce = false
+      if case .identifier(let name) = callee,
+        let callSpan = bestEffortIdentifierCallSpan(name, startLine: currentSpan.start.line)
+      {
+        currentSpan = callSpan
+      }
+    }
+
     if case .memberPath(_, let path) = callee, let memberName = path.last {
       if getCompilerMethodKind(memberName) == .drop {
         throw SemanticError(
           .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-          line: currentLine)
+          span: currentSpan)
       }
     } else if case .identifier(let name) = callee {
       if getCompilerMethodKind(name) == .drop {
         throw SemanticError(
           .generic("compiler protocol method \(name) cannot be called explicitly"),
-          line: currentLine)
+          span: currentSpan)
       }
     }
     // Check if callee is a module-qualified static method call (e.g., module.Type.method())
@@ -1108,7 +1216,7 @@ extension TypeChecker {
               let accessLabel = access == .private ? "private" : "protected"
               throw SemanticError(.generic(
                 "Cannot access \(accessLabel) symbol '\(typeName)' of module '\(moduleName)'"
-              ), line: currentLine)
+              ), span: currentSpan)
             }
           }
           // Handle concrete struct types
@@ -1128,11 +1236,11 @@ extension TypeChecker {
                 if methodSym.methodKind == CompilerMethodKind.drop {
                   throw SemanticError(
                     .generic("compiler protocol method \(methodName) cannot be called explicitly"),
-                    line: currentLine)
+                    span: currentSpan)
                 }
                 
                 guard case .function(let params, let returnType) = methodSym.type else {
-                  throw SemanticError(.generic("Expected function type for static method"), line: currentLine)
+                  throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
                 }
                 
                 if arguments.count != params.count {
@@ -1211,11 +1319,11 @@ extension TypeChecker {
                 if methodSym.methodKind == CompilerMethodKind.drop {
                   throw SemanticError(
                     .generic("compiler protocol method \(methodName) cannot be called explicitly"),
-                    line: currentLine)
+                    span: currentSpan)
                 }
                 
                 guard case .function(let params, let returnType) = methodSym.type else {
-                  throw SemanticError(.generic("Expected function type for static method"), line: currentLine)
+                  throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
                 }
                 
                 if arguments.count != params.count {
@@ -1269,11 +1377,11 @@ extension TypeChecker {
                 if methodSym.methodKind == CompilerMethodKind.drop {
                   throw SemanticError(
                     .generic("compiler protocol method \(methodName) cannot be called explicitly"),
-                    line: currentLine)
+                    span: currentSpan)
                 }
                 
                 guard case .function(let params, let returnType) = methodSym.type else {
-                  throw SemanticError(.generic("Expected function type for static method"), line: currentLine)
+                  throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
                 }
                 
                 if arguments.count != params.count {
@@ -1342,7 +1450,7 @@ extension TypeChecker {
             )
 
             guard case .function(let params, let returnType) = expectedType else {
-              throw SemanticError(.generic("Expected function type for static trait method"), line: currentLine)
+              throw SemanticError(.generic("Expected function type for static trait method"), span: currentSpan)
             }
 
             if arguments.count != params.count {
@@ -1422,12 +1530,12 @@ extension TypeChecker {
               if methodSym.methodKind != .normal {
                 throw SemanticError(
                   .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-                  line: currentLine)
+                  span: currentSpan)
               }
               
               // Get function parameters and return type
               guard case .function(let params, let returnType) = methodSym.type else {
-                throw SemanticError(.generic("Expected function type for static method"), line: currentLine)
+                throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
               }
               
               // Check argument count
@@ -1542,11 +1650,11 @@ extension TypeChecker {
               if methodSym.methodKind != .normal {
                 throw SemanticError(
                   .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-                  line: currentLine)
+                  span: currentSpan)
               }
               
               guard case .function(let params, let returnType) = methodSym.type else {
-                throw SemanticError(.generic("Expected function type for static method"), line: currentLine)
+                throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
               }
               
               if arguments.count != params.count {
@@ -1711,7 +1819,7 @@ extension TypeChecker {
       let symName = context.getName(sym.defId) ?? "<unknown>"
       throw SemanticError(
         .generic("compiler protocol method \(symName) cannot be called explicitly"),
-        line: currentLine)
+        span: currentSpan)
     }
 
     // Method call
@@ -2682,7 +2790,7 @@ extension TypeChecker {
     }
 
     guard case .function(let params, let returns) = resolvedMethodType else {
-      throw SemanticError(.generic("Expected function type for method \(methodName)"), line: currentLine)
+      throw SemanticError(.generic("Expected function type for method \(methodName)"), span: currentSpan)
     }
     
     // Check argument count (excluding self)
@@ -3218,7 +3326,7 @@ extension TypeChecker {
               if methodSym.methodKind != .normal {
                 throw SemanticError(
                   .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-                  line: currentLine)
+                  span: currentSpan)
               }
               return .variable(identifier: methodSym)
             }
@@ -3295,7 +3403,7 @@ extension TypeChecker {
         if method.methodKind != .normal {
           throw SemanticError(
             .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-            line: currentLine)
+            span: currentSpan)
         }
         return .variable(identifier: method)
       }
@@ -3318,7 +3426,7 @@ extension TypeChecker {
       if methodSym.methodKind != .normal {
         throw SemanticError(
           .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-          line: currentLine)
+          span: currentSpan)
       }
       let base: TypedExpressionNode
       if typedPath.isEmpty {
@@ -3342,7 +3450,7 @@ extension TypeChecker {
             if methodSym.methodKind == .drop {
               throw SemanticError(
                 .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-                line: currentLine)
+                span: currentSpan)
             }
             let base: TypedExpressionNode
             if typedPath.isEmpty {
@@ -3367,7 +3475,7 @@ extension TypeChecker {
             if methodSym.methodKind == .drop {
               throw SemanticError(
                 .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-                line: currentLine)
+                span: currentSpan)
             }
             let base: TypedExpressionNode
             if typedPath.isEmpty {
@@ -3395,7 +3503,7 @@ extension TypeChecker {
             if methodSym.methodKind == .drop {
               throw SemanticError(
                 .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-                line: currentLine)
+                span: currentSpan)
             }
             let base: TypedExpressionNode
             if typedPath.isEmpty {
@@ -3423,7 +3531,7 @@ extension TypeChecker {
             if methodSym.methodKind != .normal {
               throw SemanticError(
                 .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-                line: currentLine)
+                span: currentSpan)
             }
             let base: TypedExpressionNode
             if typedPath.isEmpty {
@@ -3470,7 +3578,7 @@ extension TypeChecker {
           if methodKind == .drop {
             throw SemanticError(
               .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-              line: currentLine)
+              span: currentSpan)
           }
 
           let base: TypedExpressionNode
@@ -3520,7 +3628,7 @@ extension TypeChecker {
         if methodKind == .drop {
           throw SemanticError(
             .generic("compiler protocol method \(memberName) cannot be called explicitly"),
-            line: currentLine)
+            span: currentSpan)
         }
 
         let methodSym = makeGlobalSymbol(
@@ -3647,11 +3755,11 @@ extension TypeChecker {
           if methodSym.methodKind != .normal {
             throw SemanticError(
               .generic("compiler protocol method \(methodName) cannot be called explicitly"),
-              line: currentLine)
+              span: currentSpan)
           }
           
           guard case .function(let params, let returnType) = methodSym.type else {
-            throw SemanticError(.generic("Expected function type for static method"), line: currentLine)
+            throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
           }
           
           if arguments.count != params.count {
@@ -3726,11 +3834,11 @@ extension TypeChecker {
           if methodSym.methodKind != .normal {
             throw SemanticError(
               .generic("compiler protocol method \(methodName) cannot be called explicitly"),
-              line: currentLine)
+              span: currentSpan)
           }
           
           guard case .function(let params, let returnType) = methodSym.type else {
-            throw SemanticError(.generic("Expected function type for static method"), line: currentLine)
+            throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
           }
           
           if arguments.count != params.count {
@@ -3825,7 +3933,7 @@ extension TypeChecker {
     arguments: [ExpressionNode]
   ) throws -> TypedExpressionNode {
     if !resolvedTypeArgs.isEmpty {
-      throw SemanticError(.generic("Type \(typeName) is not generic"), line: currentLine)
+      throw SemanticError(.generic("Type \(typeName) is not generic"), span: currentSpan)
     }
     
     let lookupTypeName: String
@@ -3851,11 +3959,11 @@ extension TypeChecker {
       if methodSym.methodKind != .normal {
         throw SemanticError(
           .generic("compiler protocol method \(methodName) cannot be called explicitly"),
-          line: currentLine)
+          span: currentSpan)
       }
       
       guard case .function(let params, let returnType) = methodSym.type else {
-        throw SemanticError(.generic("Expected function type for static method"), line: currentLine)
+        throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
       }
       
       if arguments.count != params.count {
@@ -3927,7 +4035,7 @@ extension TypeChecker {
             )
             
             guard case .function(let params, let returnType) = expectedType else {
-              throw SemanticError(.generic("Expected function type for static method"), line: currentLine)
+              throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
             }
             
             if arguments.count != params.count {
@@ -4007,7 +4115,7 @@ extension TypeChecker {
     )
 
     guard case .function(let params, let returnType) = methodResult.methodType else {
-      throw SemanticError(.generic("Expected function type for static method"), line: currentLine)
+      throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
     }
 
     if arguments.count != params.count {
@@ -4118,7 +4226,7 @@ extension TypeChecker {
     }
 
     guard case .function(let params, _) = unresolvedFunctionType else {
-      throw SemanticError(.generic("Expected function type for generic static method"), line: currentLine)
+      throw SemanticError(.generic("Expected function type for generic static method"), span: currentSpan)
     }
 
     if arguments.count != params.count {
@@ -4141,7 +4249,7 @@ extension TypeChecker {
       guard let boundType = methodTypeParamBindings[paramName] else {
         throw SemanticError(
           .generic("Cannot infer generic argument '\(paramName)' for static method '\(methodName)'"),
-          line: currentLine
+          span: currentSpan
         )
       }
       resolvedMethodTypeArgs.append(boundType)
@@ -4168,11 +4276,11 @@ extension TypeChecker {
     // Handle generic parameter case - create trait method placeholder
     if case .genericParameter(let paramName) = receiverType {
       guard hasTraitBound(paramName, "Eq") else {
-        throw SemanticError(.generic("Type \(receiverType) is not constrained by trait Eq"), line: currentLine)
+        throw SemanticError(.generic("Type \(receiverType) is not constrained by trait Eq"), span: currentSpan)
       }
       let methods = try flattenedTraitMethods("Eq")
       guard let sig = methods[methodName] else {
-        throw SemanticError(.generic("Trait Eq is missing required method \(methodName)"), line: currentLine)
+        throw SemanticError(.generic("Trait Eq is missing required method \(methodName)"), span: currentSpan)
       }
       let expectedType = try expectedFunctionTypeForTraitMethod(sig, selfType: receiverType)
       
@@ -4225,11 +4333,11 @@ extension TypeChecker {
     // Handle generic parameter case - create trait method placeholder
     if case .genericParameter(let paramName) = receiverType {
       guard hasTraitBound(paramName, "Ord") else {
-        throw SemanticError(.generic("Type \(receiverType) is not constrained by trait Ord"), line: currentLine)
+        throw SemanticError(.generic("Type \(receiverType) is not constrained by trait Ord"), span: currentSpan)
       }
       let methods = try flattenedTraitMethods("Ord")
       guard let sig = methods[methodName] else {
-        throw SemanticError(.generic("Trait Ord is missing required method \(methodName)"), line: currentLine)
+        throw SemanticError(.generic("Trait Ord is missing required method \(methodName)"), span: currentSpan)
       }
       let expectedType = try expectedFunctionTypeForTraitMethod(sig, selfType: receiverType)
       
@@ -4518,7 +4626,7 @@ extension TypeChecker {
       }
       throw SemanticError(
         .generic("Invalid operation \(opName) between types \(base.type) and \(base.type)"),
-        line: currentLine)
+        span: currentSpan)
     }
 
     let traitInfo = traits[traitName]
@@ -4542,7 +4650,7 @@ extension TypeChecker {
 
     let methods = try flattenedTraitMethods(traitName)
     guard let sig = methods[methodName] else {
-      throw SemanticError(.generic("Trait \(traitName) is missing required method \(methodName)"), line: currentLine)
+      throw SemanticError(.generic("Trait \(traitName) is missing required method \(methodName)"), span: currentSpan)
     }
 
     let expectedType = try expectedFunctionTypeForTraitMethod(
@@ -4930,7 +5038,7 @@ extension TypeChecker {
 
     throw SemanticError(
       .generic("Type '\(expr.type)' does not implement ToString trait"),
-      line: span.start.line
+      span: span
     )
   }
 }
@@ -4982,7 +5090,7 @@ extension TypeChecker {
       // If both operands exist, verify they have the same type
       if let r = typedRight {
         if l.type != r.type {
-          throw SemanticError(.typeMismatch(expected: l.type.description, got: r.type.description), line: currentLine)
+          throw SemanticError(.typeMismatch(expected: l.type.description, got: r.type.description), span: currentSpan)
         }
       }
     } else if let r = typedRight {
@@ -4992,7 +5100,7 @@ extension TypeChecker {
       if let eet = expectedElementType {
         elementType = eet
       } else {
-        throw SemanticError(.generic("FullRange requires type annotation or context type"), line: currentLine)
+        throw SemanticError(.generic("FullRange requires type annotation or context type"), span: currentSpan)
       }
     }
     
@@ -5088,12 +5196,12 @@ extension TypeChecker {
     guard let iteratorMethod = try lookupConcreteMethodSymbol(on: iterableType, name: "iterator") else {
       throw SemanticError(.generic(
         "Type \(iterableType) is not iterable: missing iterator() method and does not implement Iterator"
-      ), line: currentLine)
+      ), span: currentSpan)
     }
     
     // 4. Get the iterator type from the method's return type
     guard case .function(_, let iteratorType) = iteratorMethod.type else {
-      throw SemanticError(.generic("iterator() must be a function"), line: currentLine)
+      throw SemanticError(.generic("iterator() must be a function"), span: currentSpan)
     }
     
     // 5. Extract the element type from the iterator
@@ -5120,12 +5228,12 @@ extension TypeChecker {
     guard let nextMethod = try lookupConcreteMethodSymbol(on: iteratorType, name: "next") else {
       throw SemanticError(.generic(
         "Iterator type \(iteratorType) missing next() method"
-      ), line: currentLine)
+      ), span: currentSpan)
     }
     
     // Verify the return type is [T]Option
     guard case .function(_, let returnType) = nextMethod.type else {
-      throw SemanticError(.generic("Iterator.next() must be a function"), line: currentLine)
+      throw SemanticError(.generic("Iterator.next() must be a function"), span: currentSpan)
     }
     
     // Check if return type is Option<T>
@@ -5135,7 +5243,7 @@ extension TypeChecker {
     default:
       throw SemanticError(.generic(
         "Iterator.next() must return [T]Option, got \(returnType)"
-      ), line: currentLine)
+      ), span: currentSpan)
     }
   }
 
@@ -5148,23 +5256,23 @@ extension TypeChecker {
     case .unionCase:
       throw SemanticError(.generic(
         "For loop pattern must be exhaustive for element type \(elementType). Use a simple variable binding."
-      ), line: currentLine)
+      ), span: currentSpan)
     case .booleanLiteral, .integerLiteral, .stringLiteral, .negativeIntegerLiteral:
       throw SemanticError(.generic(
         "For loop pattern must be exhaustive. Literal patterns are not exhaustive."
-      ), line: currentLine)
+      ), span: currentSpan)
     case .comparisonPattern:
       throw SemanticError(.generic(
         "For loop pattern must be exhaustive. Comparison patterns are not exhaustive."
-      ), line: currentLine)
+      ), span: currentSpan)
     case .andPattern, .orPattern, .notPattern:
       throw SemanticError(.generic(
         "For loop pattern must be exhaustive. Pattern combinators are not exhaustive."
-      ), line: currentLine)
+      ), span: currentSpan)
     case .structPattern:
       throw SemanticError(.generic(
         "For loop pattern must be exhaustive. Struct destructuring patterns are not exhaustive."
-      ), line: currentLine)
+      ), span: currentSpan)
     }
   }
 
@@ -5249,7 +5357,7 @@ extension TypeChecker {
     
     // Look up the iterator method
     guard let iteratorMethod = try lookupConcreteMethodSymbol(on: actualIterableType, name: "iterator") else {
-      throw SemanticError(.generic("iterator() method not found"), line: currentLine)
+      throw SemanticError(.generic("iterator() method not found"), span: currentSpan)
     }
     
     // Build method reference
@@ -5272,12 +5380,12 @@ extension TypeChecker {
   ) throws -> TypedExpressionNode {
     // Get the iterator type from the reference
     guard case .reference(let iteratorType) = iterRef.type else {
-      throw SemanticError(.generic("Expected reference to iterator"), line: currentLine)
+      throw SemanticError(.generic("Expected reference to iterator"), span: currentSpan)
     }
     
     // Look up the next method
     guard let nextMethod = try lookupConcreteMethodSymbol(on: iteratorType, name: "next") else {
-      throw SemanticError(.generic("next() method not found"), line: currentLine)
+      throw SemanticError(.generic("next() method not found"), span: currentSpan)
     }
     
     // Build method reference
